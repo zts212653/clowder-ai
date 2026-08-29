@@ -2,7 +2,6 @@ import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it, vi } from 'vitest';
 import { anchoredApprovalNavigation } from '@/test-support/approval-navigation';
-import { AuthorizationCard } from '../AuthorizationCard';
 import { SettledHistoryCard } from '../SettledHistoryCard';
 
 const TEST_CATS = [{ id: 'cat-sol', displayName: '缅因猫', variantLabel: 'sol' }];
@@ -15,26 +14,7 @@ vi.mock('@/hooks/useCatData', () => ({
 }));
 
 describe('Console member identity labels', () => {
-  it('renders the runtime member name in permission cards', () => {
-    const html = renderToStaticMarkup(
-      <AuthorizationCard
-        request={{
-          requestId: 'auth-1',
-          catId: 'cat-sol',
-          threadId: 'thread-1',
-          action: 'write',
-          reason: '需要更新文件',
-          createdAt: Date.now(),
-        }}
-        onRespond={vi.fn()}
-      />,
-    );
-
-    expect(html).toContain('缅因猫（sol） 请求权限');
-    expect(html).not.toContain('cat-sol 请求权限');
-  });
-
-  it('uses the same projection in settled approval history', () => {
+  it('renders the runtime member name in settled approval history', () => {
     const html = renderToStaticMarkup(
       <SettledHistoryCard
         item={{
@@ -55,23 +35,5 @@ describe('Console member identity labels', () => {
 
     expect(html).toContain('来自 缅因猫（sol）');
     expect(html).not.toContain('来自 cat-sol');
-  });
-
-  it('falls back to catId when the member is absent from the runtime roster', () => {
-    const html = renderToStaticMarkup(
-      <AuthorizationCard
-        request={{
-          requestId: 'auth-2',
-          catId: 'cat-retired',
-          threadId: 'thread-1',
-          action: 'read',
-          reason: '读取历史记录',
-          createdAt: Date.now(),
-        }}
-        onRespond={vi.fn()}
-      />,
-    );
-
-    expect(html).toContain('cat-retired 请求权限');
   });
 });

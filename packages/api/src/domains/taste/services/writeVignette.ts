@@ -1,24 +1,28 @@
 /**
  * F221 Phase B: Vignette writer.
  *
- * On approve: write the taste vignette file + append to index + git commit.
+ * On approve: write the taste vignette file + append to index + publish.
  * Public vignettes → docs/taste/vignettes/{slug}.md
  * Sensitive vignettes → private/taste/{slug}.md (gitignored, no git add/commit)
  *
- * Public path: git commit is the atomicity boundary — both vignette + index are
- * committed together. On failure, the newly created vignette is deleted and the
- * index is restored to its pre-append state (not deleted!). The caller rollbacks
- * the CAS claim.
+ * Public path: a disposable named branch starts from fresh origin/main. Both
+ * vignette + index are committed and pushed together; no primary-main worktree
+ * is mutated. The caller only checkpoints/finalizes after the push terminal.
  *
  * Sensitive path: file write only, no git (private/ is gitignored). Failure
  * cleans up the newly created file.
  */
 
-import { execFileSync } from 'node:child_process';
-import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join, relative } from 'node:path';
 import type { TasteProposal } from '@cat-cafe/shared';
-import { FileTasteRepository, type TasteRepository } from './TasteRepository.js';
+import {
+  type GitTastePublicationOptions,
+  isTastePublicationIndeterminateError,
+  publishTasteProjection,
+  TastePublicationIndeterminateError,
+} from './GitTastePublisher.js';
+import { FileTasteRepository, type PublishableTasteRepository } from './TasteRepository.js';
 
 export interface WriteVignetteResult {
   slug: string;
@@ -152,112 +156,62 @@ export function insertIntoIndex(indexPath: string, slug: string, proposal: Taste
   return originalContent;
 }
 
-function runGit(projectRoot: string, args: string[]): string {
-  return execFileSync('git', args, { cwd: projectRoot, stdio: 'pipe' }).toString().trim();
-}
-
 function readExistingFile(path: string): string | null {
   return existsSync(path) ? readFileSync(path, 'utf8') : null;
 }
 
-function restoreFile(path: string, previousContent: string | null): void {
-  try {
-    if (previousContent === null) unlinkSync(path);
-    else writeFileSync(path, previousContent, 'utf8');
-  } catch {
-    // best-effort rollback
-  }
-}
-
-function assertCanonicalBranch(persistentRoot: string): void {
-  const currentBranch = runGit(persistentRoot, ['branch', '--show-current']);
-  if (currentBranch !== 'main') {
-    throw new Error(
-      `Vignette writer refuses to commit on branch "${currentBranch}" — only "main" is allowed. ` +
-        `projectRoot="${persistentRoot}" resolved to a non-canonical checkout.`,
-    );
-  }
-}
-
-function isDurablyCommitted(
-  persistentRoot: string,
-  filesToCommit: string[],
-  savedVignetteContent: string | null,
-  savedIndexContent: string | null,
-  content: string,
-  slug: string,
-): boolean {
-  if (savedVignetteContent !== content || !savedIndexContent?.includes(`vignettes/${slug}.md`)) return false;
-  return runGit(persistentRoot, ['status', '--porcelain', '--', ...filesToCommit]) === '';
-}
-
-function assertOutputPathsClean(persistentRoot: string, filesToCommit: string[]): void {
-  const status = runGit(persistentRoot, ['status', '--porcelain', '--', ...filesToCommit]);
-  if (status) {
-    throw new Error(`Vignette writer refuses to write over dirty output path(s):\n${status}`);
-  }
-}
-
-function rollbackPublicWrite(
-  persistentRoot: string,
-  filesToCommit: string[],
-  vignettePath: string,
-  savedVignetteContent: string | null,
-  indexPath: string,
-  savedIndexContent: string | null,
-): void {
-  try {
-    runGit(persistentRoot, ['reset', 'HEAD', '--', ...filesToCommit]);
-  } catch {
-    // best-effort: git reset may fail if HEAD does not exist
-  }
-  restoreFile(vignettePath, savedVignetteContent);
-  restoreFile(indexPath, savedIndexContent);
-}
-
-function writePublicVignette(
-  persistentRoot: string,
+function materializePublicProjection(
+  checkoutRoot: string,
   proposal: TasteProposal,
   slug: string,
-  vignettePath: string,
   relPath: string,
   content: string,
-): void {
-  assertCanonicalBranch(persistentRoot);
-  const indexPath = join(persistentRoot, 'docs/taste/index.md');
-  const savedVignetteContent = readExistingFile(vignettePath);
-  const savedIndexContent = readExistingFile(indexPath);
-  const filesToCommit = [relPath, relative(persistentRoot, indexPath)];
+): 'changed' | 'already-published' {
+  const vignettePath = join(checkoutRoot, relPath);
+  const indexPath = join(checkoutRoot, 'docs/taste/index.md');
+  const existingVignette = readExistingFile(vignettePath);
+  const existingIndex = readExistingFile(indexPath);
+  let indexed = false;
+  if (existingIndex !== null) indexed = existingIndex.includes(`vignettes/${slug}.md`);
 
-  // A prior attempt may have committed both files and then failed while
-  // finalizing the proposal store. A clean, exact match is durable success.
-  if (isDurablyCommitted(persistentRoot, filesToCommit, savedVignetteContent, savedIndexContent, content, slug)) {
-    return;
-  }
+  if (existingVignette === content && indexed) return 'already-published';
+  const conflictMessage = `Taste publication conflict for proposal ${proposal.id}; refusing partial or mismatched projection`;
+  if (existingVignette !== null) throw new Error(conflictMessage);
+  if (indexed) throw new Error(conflictMessage);
 
-  // These paths are the writer's atomic output set. Refuse before any
-  // filesystem mutation rather than absorbing or resetting another actor's
-  // staged/unstaged edits in either path.
-  assertOutputPathsClean(persistentRoot, filesToCommit);
+  mkdirSync(dirname(indexPath), { recursive: true });
+  mkdirSync(dirname(vignettePath), { recursive: true });
+  writeFileSync(vignettePath, content, 'utf8');
+  insertIntoIndex(indexPath, slug, proposal);
+  return 'changed';
+}
 
+async function writePublicVignette(
+  repository: PublishableTasteRepository,
+  proposal: TasteProposal,
+  slug: string,
+  relPath: string,
+  content: string,
+  options: GitTastePublicationOptions,
+): Promise<void> {
+  const filesToCommit = [relPath, 'docs/taste/index.md'];
+  const commitMessage = `taste(F221): add vignette ${slug} [${proposal.dimension}]`;
   try {
-    mkdirSync(dirname(indexPath), { recursive: true });
-    mkdirSync(dirname(vignettePath), { recursive: true });
-    writeFileSync(vignettePath, content, 'utf8');
-    insertIntoIndex(indexPath, slug, proposal);
-    runGit(persistentRoot, ['add', '--', ...filesToCommit]);
-    const commitMsg = `taste(F221): add vignette ${slug} [${proposal.dimension}]`;
-    runGit(persistentRoot, ['commit', '--only', '-m', commitMsg, '--', ...filesToCommit]);
-  } catch (err) {
-    rollbackPublicWrite(
-      persistentRoot,
-      filesToCommit,
-      vignettePath,
-      savedVignetteContent,
-      indexPath,
-      savedIndexContent,
+    await publishTasteProjection(
+      {
+        sourceRoot: repository.gitCheckoutRoot(),
+        branchSuffix: proposal.id,
+        commitMessage,
+        filesToCommit,
+        materialize: (checkoutRoot) => materializePublicProjection(checkoutRoot, proposal, slug, relPath, content),
+      },
+      options,
     );
-    throw new Error(`Vignette write failed: ${err instanceof Error ? err.message : String(err)}`);
+  } catch (error) {
+    if (isTastePublicationIndeterminateError(error)) {
+      throw new TastePublicationIndeterminateError(`Vignette write failed: ${error.message}`);
+    }
+    throw new Error(`Vignette write failed: ${error instanceof Error ? error.message : String(error)}`);
   }
 }
 
@@ -268,32 +222,30 @@ function writePublicVignette(
  * The `path` is relative to projectRoot for storage in the proposal record.
  */
 export function createVignetteWriter(
-  repositoryOrProjectRoot: TasteRepository | string,
+  repositoryOrProjectRoot: PublishableTasteRepository | string,
+  options: GitTastePublicationOptions = {},
 ): (proposal: TasteProposal) => Promise<WriteVignetteResult> {
   const repository =
     typeof repositoryOrProjectRoot === 'string'
       ? new FileTasteRepository(repositoryOrProjectRoot)
       : repositoryOrProjectRoot;
   return async (proposal: TasteProposal): Promise<WriteVignetteResult> => {
-    const persistentRoot = repository.canonicalRoot();
     const slug = deriveSlug(proposal);
-    const outDir = resolveOutputDir(persistentRoot, proposal.privacy);
-    const vignettePath = join(outDir, `${slug}.md`);
-    const relPath = relative(persistentRoot, vignettePath);
-
-    // Write vignette file
     const content = formatVignette(proposal);
 
     // Sensitive vignettes: private/ is gitignored — file write only, no git
     if (proposal.privacy === 'sensitive') {
+      const persistentRoot = repository.canonicalRoot();
+      const outDir = resolveOutputDir(persistentRoot, proposal.privacy);
+      const vignettePath = join(outDir, `${slug}.md`);
+      const relPath = relative(persistentRoot, vignettePath);
       mkdirSync(outDir, { recursive: true });
       writeFileSync(vignettePath, content, 'utf8');
       return { slug, path: relPath };
     }
 
-    // Public writes keep the main-only branch guard on the resolved persistent
-    // target. The disposable runtime checkout is never a persistence surface.
-    writePublicVignette(persistentRoot, proposal, slug, vignettePath, relPath, content);
+    const relPath = `docs/taste/vignettes/${slug}.md`;
+    await writePublicVignette(repository, proposal, slug, relPath, content, options);
 
     return { slug, path: relPath };
   };

@@ -253,7 +253,13 @@ describe('ActionSuccessorAdmissionService', () => {
       holderCatIds: ['codex-terra'],
       terminalPredicate: oldPredicate,
     };
-    const continuedLease = { ...completedLease, generation: 2, status: 'active', terminalPredicate: newPredicate };
+    const continuedLease = {
+      ...completedLease,
+      leaseId: 'lease-fresh-head',
+      generation: 1,
+      status: 'active',
+      terminalPredicate: newPredicate,
+    };
     const { service, calls } = harness({
       claimResult: { outcome: 'safe_wait', lease: completedLease },
       freshnessResolution: {
@@ -283,7 +289,7 @@ describe('ActionSuccessorAdmissionService', () => {
 
     assert.equal(result.admit, true);
     assert.equal(result.outcome, 'continued');
-    assert.equal(result.fence.generation, 2);
+    assert.equal(result.fence.generation, 1);
     assert.equal(result.fence.terminalPredicateDigest, newPredicate.digest);
     assert.equal(calls.continueFreshRevision.length, 1);
     assert.equal(calls.continueFreshRevision[0].input.expectedGeneration, 1);
@@ -316,7 +322,13 @@ describe('ActionSuccessorAdmissionService', () => {
         holderCatIds: ['codex-terra'],
         terminalPredicate: oldPredicate,
       };
-      const continuedLease = { ...completedLease, generation: 2, status: 'active', terminalPredicate: newPredicate };
+      const continuedLease = {
+        ...completedLease,
+        leaseId: `lease-fresh-head-${reason}`,
+        generation: 1,
+        status: 'active',
+        terminalPredicate: newPredicate,
+      };
       const { service, calls } = harness({
         claimResult: { outcome: 'safe_wait', lease: completedLease },
         continueResult: { outcome: 'continued', lease: continuedLease },
@@ -358,7 +370,8 @@ describe('ActionSuccessorAdmissionService', () => {
     };
     const continuedLease = {
       ...completedLease,
-      generation: 2,
+      leaseId: 'lease-fresh-head-legacy',
+      generation: 1,
       status: 'active',
       terminalPredicate: newPredicate,
     };
@@ -391,7 +404,7 @@ describe('ActionSuccessorAdmissionService', () => {
 
     assert.equal(result.admit, true);
     assert.equal(result.outcome, 'continued');
-    assert.equal(result.fence.generation, 2);
+    assert.equal(result.fence.generation, 1);
     assert.equal(calls.continueFreshRevision.length, 1);
   });
 

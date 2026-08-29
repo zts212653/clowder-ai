@@ -121,18 +121,6 @@ export {
   validateApprovalOriginRef,
   validateApprovalPublication,
 } from './approval-hub.js';
-// Authorization types (猫猫授权系统)
-export type {
-  AuthorizationAuditEntry,
-  AuthorizationRequestEvent,
-  AuthorizationRespondEvent,
-  AuthorizationRule,
-  PendingRequestRecord,
-  PermissionRequest,
-  PermissionResponse,
-  PermissionStatusResponse,
-  RespondScope,
-} from './authorization.js';
 // Backlog types (F049 Mission Control)
 export type {
   AcquireBacklogLeaseInput,
@@ -834,6 +822,7 @@ export type {
 } from './meeting-context-block.js';
 export { createMeetingContextBlock } from './meeting-context-block.js';
 export {
+  type MeetingArtifactDescriptor,
   type MeetingIntake,
   type MeetingIntakeChoices,
   type MeetingIntakeExecutionState,
@@ -1353,6 +1342,23 @@ export {
   type SopDefinition,
   type SopDefinitionId,
 } from './sop-definition.generated.js';
+// Lane-neutral Standing Reflex episode/replay contract and content-free health projection.
+export {
+  compareStandingReflexReplays,
+  projectStandingReflexShadowHealth,
+  STANDING_REFLEX_BEATS,
+  STANDING_REFLEX_EXPLICIT_ABSENCES,
+  STANDING_REFLEX_SHADOW_CATEGORIES,
+  type StandingReflexEpisodeV1,
+  type StandingReflexReplayComparison,
+  type StandingReflexReplayContractV1,
+  type StandingReflexShadowCategory,
+  type StandingReflexShadowEventV1,
+  type StandingReflexShadowHealthProjection,
+  standingReflexEpisodeV1Schema,
+  standingReflexReplayContractV1Schema,
+  standingReflexShadowEventV1Schema,
+} from './standing-reflex-episode.js';
 // F252: Story Annotation types (Phase D — annotations at arbitrary timeline points)
 export type { AnnotationSet, StoryAnnotation } from './story-annotation.js';
 // F252: Story Rendering types (Phase C BFF → Frontend)
@@ -1401,9 +1407,6 @@ export type {
 export { extractFeatureIds, isTrackingKind } from './task.js';
 // F193 Phase E: SuggestedCrossPostAction + DispatchGateState re-exported via task.ts
 // (canonical source: cross-thread-affordance.ts; E2/E4 consumers can also import directly)
-export type { CancelReasonValue, PermissionCancelEvent } from './task-outcome.js';
-// Task Outcome types (F192 Phase G)
-export { CANCEL_REASON_OPTIONS } from './task-outcome.js';
 // Taste Proposal types (F221 品味信号捕获)
 export type {
   TasteDimension,

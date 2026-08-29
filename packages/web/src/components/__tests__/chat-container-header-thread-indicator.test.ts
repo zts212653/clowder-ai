@@ -53,7 +53,6 @@ vi.mock('@/stores/chatStore', () => {
 const defaultProps = {
   sidebarOpen: false,
   onToggleSidebar: vi.fn(),
-  authPendingCount: 0,
   viewMode: 'single' as const,
   onToggleViewMode: vi.fn(),
   statusPanelOpen: false,

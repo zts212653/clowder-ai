@@ -1799,6 +1799,8 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
                   ? 'canceled_by_user'
                   : 'canceled'
                 : 'succeeded';
+          const primaryTerminalError = terminalDispositions.getPrimaryTerminalError();
+          const successfulCatIds = terminalDispositions.getSuccessfulCatIds() as CatId[];
           if (aggFinalStatus === 'failed') {
             await markStartupTimeoutFailed();
           } else if (aggFinalStatus !== 'succeeded') {
@@ -1830,6 +1832,17 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
               await router.ackCollectedCursors(userId, resolvedThreadId, cursorBoundaries);
             }
             // P1 fix: finalize streaming session on abort so external placeholders are cleaned up
+            await cleanupStreamingOnFailure(resolvedThreadId, createResult.invocationId, streamStartPromise, opts, log);
+          } else if (primaryTerminalError && successfulCatIds.length === 0) {
+            finalStatus = 'failed';
+            routeChainTracker.fail(createResult.invocationId);
+            if (cursorBoundaries.size > 0) {
+              await router.ackCollectedCursors(userId, resolvedThreadId, cursorBoundaries);
+            }
+            await opts.invocationRecordStore?.update(createResult.invocationId, {
+              status: 'failed',
+              error: primaryTerminalError,
+            });
             await cleanupStreamingOnFailure(resolvedThreadId, createResult.invocationId, streamStartPromise, opts, log);
           } else if (persistenceContext.failed) {
             const errorDetail = persistenceContext.errors.map((e) => `${e.catId}: ${e.error}`).join('; ');
@@ -1879,7 +1892,7 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
               invocationId: createResult.invocationId,
               update: {
                 status: 'succeeded',
-                successfulCatIds: terminalDispositions.getSuccessfulCatIds() as CatId[],
+                successfulCatIds,
                 ...(collectedUsage.size > 0
                   ? {
                       usageByCat: Object.fromEntries(collectedUsage),

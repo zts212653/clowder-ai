@@ -11,9 +11,9 @@ export interface MeetingRepairView {
 
 interface MeetingIntakeRepairActionsProps {
   readonly repair: MeetingRepairView;
-  readonly manualTranscript: string;
+  readonly manualReference: string;
   readonly busy: boolean;
-  readonly onManualTranscriptChange: (value: string) => void;
+  readonly onManualReferenceChange: (value: string) => void;
   readonly onAction: (name: string, payload: Record<string, unknown>) => void;
   readonly revision: number;
   readonly routeCatRepair?: { readonly threadId: string };
@@ -22,9 +22,9 @@ interface MeetingIntakeRepairActionsProps {
 
 export function MeetingIntakeRepairActions({
   repair,
-  manualTranscript,
+  manualReference,
   busy,
-  onManualTranscriptChange,
+  onManualReferenceChange,
   onAction,
   revision,
   routeCatRepair,
@@ -97,18 +97,17 @@ export function MeetingIntakeRepairActions({
 
       {repair.action === 'manual_import' && (
         <div className="space-y-2">
-          <textarea
-            value={manualTranscript}
-            onChange={(event) => onManualTranscriptChange(event.target.value)}
-            rows={5}
-            placeholder="粘贴会议文字稿"
+          <input
+            value={manualReference}
+            onChange={(event) => onManualReferenceChange(event.target.value)}
+            placeholder="粘贴飞书妙记链接或 token"
             className="w-full rounded-md border border-cafe bg-cafe-surface p-2 text-sm"
-            data-testid="meeting-manual-transcript"
+            data-testid="meeting-manual-reference"
           />
           <button
             type="button"
-            onClick={() => onAction('manual-import', { expectedRevision: revision, transcript: manualTranscript })}
-            disabled={busy || !manualTranscript.trim()}
+            onClick={() => onAction('manual-import', { expectedRevision: revision, reference: manualReference })}
+            disabled={busy || !manualReference.trim()}
             className="rounded-md bg-[var(--semantic-warning)] px-3 py-1.5 font-medium text-[var(--cafe-accent-foreground)] disabled:opacity-50"
             data-testid="meeting-manual-import"
           >

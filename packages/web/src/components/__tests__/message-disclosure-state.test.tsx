@@ -32,6 +32,19 @@ describe('message disclosure state', () => {
   afterEach(() => {
     act(() => root.unmount());
     container.remove();
+    window.history.replaceState(null, '', '/');
+  });
+
+  it('renders the complete long message without disclosure chrome in export mode', () => {
+    window.history.replaceState(null, '', '/thread/thread-A?export=true&messageId=message-A');
+
+    act(() => {
+      root.render(<CollapsibleMarkdown content={LONG_MESSAGE} disclosureKey="thread-A:message-A:body" />);
+    });
+
+    expect(container.querySelector('button')).toBeNull();
+    expect(container.textContent).toContain('line 29');
+    expect(container.querySelector<HTMLElement>('.overflow-hidden')?.style.maxHeight).toBeFalsy();
   });
 
   it('keeps an explicit expansion when the message subtree unmounts and remounts', () => {

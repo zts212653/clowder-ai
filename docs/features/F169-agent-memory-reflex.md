@@ -5,6 +5,7 @@ topics: [memory, externalized-working-memory, reflex-injection, salience-gating,
 doc_kind: vision
 created: 2026-04-19
 revised: 2026-05-11
+tips_exempt: "2026-08-27 link/reference hygiene only; no memory capability or user action changed."
 ---
 
 # F169: Agent Memory Reflex — 愿景文档（vision artifact）

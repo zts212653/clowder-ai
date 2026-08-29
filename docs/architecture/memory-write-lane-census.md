@@ -1,93 +1,142 @@
 ---
 doc_kind: architecture
-description: "W0-C 写入车道 census v0.2：Entity/Taste/Profile/Event/Person/Knowledge/Diary 七条 lane 按 trigger→validation→consumption 三问重核；Wave 1 深读补齐 Taste canonical write→index→read 与 Profile canonical root→logical read 坐标，把缺口纠正为 speaker provenance、standing trigger 与 organic consumption。"
+description: "W0-C 写入面 census v0.3：覆盖全部 durable memory-bearing surfaces，以感知→提案→裁决→消费四拍盘点，并拆分 LL/Decision/Method 与 F152 global distillation。"
 description_source: human
-description_author: fable-5
-description_updated_at: 2026-08-15T13:04:00Z
+description_author: codex-sol
+description_updated_at: 2026-08-26T06:00:00Z
 feature_ids: []
-related_features: [F260, F276, F282, F227, F231, F221, F255, F263]
+related_features: [F102, F152, F221, F227, F231, F255, F260, F263, F276, F282, F287]
 related_docs:
   - docs/architecture/memory-standing-reflex-contract.md
   - feature-specs/2026-08-15-memory-system-research-first-roadmap.md
   - docs/architecture/memory-write-side-autopsy-2026-07.md
   - docs/architecture/context-injection-reflex-source-map.md
   - docs/architecture/memory-outcome-attribution-source-map.md
+  - docs/decisions/015-knowledge-object-contract.md
   - feature-discussions/2026-08-10-memory-write-trigger-rethink.md
-topics: [memory, write-side, census, lane, trigger, validation, consumption]
+topics: [memory, write-side, census, lane, convention, lifecycle, lessons-learned]
 created: 2026-08-15
-status: v0.2
+status: v0.3
 ---
 
-# Memory Write Lane Census（W0-C）
+# Memory Write Surface Census（W0-C）
 
-> **取证纪律**：所有 counts 为 2026-08-15 runtime store 只读实测（evidence.sqlite /
-> event-memory.sqlite / 文件系统）；"待深查"= 本轮未闭环，不装知道。基线对照 =
-> F260 尸检（2026-07-08）。三问 = trigger（何时启动写入）/ validation（谁校验）/
-> consumption（谁消费、闭环吗）。
+> **v0.3 范围更正**：v0.2 的七条产品 lane census 没有错，但 universe 太窄——它以 MCP/API
+> 写入工具为主要观察面，漏掉了 LL、ADR/Decision、Method/Skill、feedback、reflection、
+> provider-local memory 等最老、最常用的文件习俗。本文保留原七 lane 结论，同时把所有能改变未来
+> 猫的判断、行为或 owner-visible truth 的 durable surface 纳入同一四拍盘点。
 
-## 1. 七车道三问矩阵
+四拍 = ①感知（何时知道可以写）→ ②提案（从哪个入口、typed 成什么）→ ③裁决（谁签字、在哪签）
+→ ④消费（谁读、能否纠正/遗忘、是否可观测）。答案可以是 `none`、`exempt`、`unknown` 或
+`sunset`，但不能缺席。**统一协议，不统一 detector、store 或审批权。**
 
-| Lane | Trigger | Validation | Consumption | Verdict |
+## 1. 七条产品 lane：v0.2 结论保留
+
+下表 counts 是 2026-08-15 runtime/file snapshot；current topology 仍以各 feature truth 为准。
+
+| Lane | 感知 / trigger | 提案与裁决 | 消费 | v0.3 判读 |
 |---|---|---|---|---|
-| **Entity**（F260-A：doc-alias/feature/梗） | 输入流 nudge 运行中（`entity_nudge_events` **1568**）+ propose_entity（concept **0→5**，person 1→9） | doc-alias 自动分层；concept 管 Hub 审批 | 解引用亮牌 + `entity_mentions` 297k；`entity_revision_events` 14 | ✅ **活，三问齐**——F260 A1"词表死在出生那天"已翻案（registry 27→42，doc_aliases 0→**5148**） |
-| **Taste**（F221） | 猫 propose——强产品面，活跃**过度**（TERRY 案：他猫语录被投入） | Hub 审批卡在，但 speaker 无机械校验 + 批量审批可击穿（跨 owner 实证） | 当前 main 已有 approve checkpoint → canonical-main vignette/index 原子 commit → IndexBuilder v11/TasteMemoryReader → F287 passage 的结构链；organic consumption quality 仍无足够样本 | 🟡 **结构链闭、治理与效用未闭**：触发过强 / speaker 校验软 / 有机消费不明；TERRY fork 孤岛是部署侧野外样本，不再代证家内 current main 断链 |
-| **Profile / per-cat 画像**（F231） | 蒸发（operator 证词 2026-08-15"彻底蒸发"+"从认知路径蒸发"） | Hub 机制在 | 当前 main 已统一 canonical data root；L0 compiler 注入 `cat-cafe-profile://relationship/current`，authenticated `cat_cafe_read_profile` 回到同一 repository/persona。organic read 使用仍未量化 | 🔴 **触发死，结构链已修**：旧 F260-A2 双仓分裂是已修事故，不是 current topology；复活仍须 trigger 与真实消费同验，不能因 reader 存在宣称健康 |
-| **Event**（F227 mark_event） | 猫 mark_event——`event_memory` **2152 行** | 型别约束（轻） | timeline + magic-word meanings 读面在（events.ts） | ✅ **活**——F260 A4"使用率未知"翻案；consumption 健康度未量化（待深查） |
-| **Person**(F276) | 双路径：即时 propose + capture/defer（F282 receipt **1104**）——vertical slice 已通（2026-08-12） | 证据闸（两次实拦）+ owner 逐条审批——**全家最强校验** | `memory_cue_events` 仅 **3**——cue 读面刚通车 | 🟡 **最健全也最年轻**：消费端样本极少，Phase C dogfood 未开始 |
-| **Knowledge**（W7 / distillation） | `distillation_candidates` **0 行** | — | — | 🔴 **零触发实锤**——F260 A5"触发率未知"翻案为零；W7"涌现是系统能力"仍是口号。需 keep-or-sunset 机制选择（operator） |
-| **Diary**（F255） | present loop 定时唤醒 + 写盘义务——**41 篇**持续增长（3 猫） | 无需（第一人称；降权 +"未清洗"标签） | 已进索引（AC-A2）+ operator 阅读面（AC-A1.5）+ `reflection_outputs` 52；F231 organic proposal 通道零（AC-C2 未开工，**合法沉默**——MF-1 允许） | ✅ **活且健康**；唯一开放缺口 = organic proposal 通道 |
+| **Entity / F260** | input nudge 运行中；历史 snapshot `entity_nudge_events=1568` | doc alias 可机械分层；concept 走 Hub | 解引用、entity mention/revision reader | ✅ 健康；无需为协议整齐重做 |
+| **Taste / F221** | 猫主动提议，触发很活 | Hub 审批；speaker/quote author 仍缺机械校验 | canonical vignette→index→F287 已接通；organic use/harm 样本不足 | 🟡 结构闭，治理与效用未闭 |
+| **Profile / F231** | standing trigger 从认知路径蒸发 | Hub 合同存在 | canonical data root→logical URI→authenticated reader 已接通；organic read 未量化 | 🔴 触发死；不能再造第三仓补偿 |
+| **Event / F227** | `mark_event` 活跃；历史 snapshot 2152 行 | typed write、轻校验 | timeline/magic-word reader 存在，消费健康未量化 | ✅ 写入活；缺运行健康证据，不等于缺 detector |
+| **Person / F276** | immediate propose + capture/defer；ASR scene 可形成 WriteOpportunity | owner evidence gate + 逐条审批 | relationship recall、cue、correct/forget 已有；Standing Reflex real runtime episode 仍待验证 | 🟡 合同最完整；继续作首案法庭 |
+| **Global distillation / F152** | `distillation_candidates=0`（2026-08-15 snapshot） | 独立 SQLite nominate/approve | materialize 到 global distilled truths；无已证明 consumer | 🔴 keep/sunset；**只代表跨项目蒸馏，不代表全部 Knowledge** |
+| **Diary / F255** | present loop 定时唤醒 | 第一人称作者自治，合法免 operator 审批 | index + operator 阅读面 | ✅ 健康；不强塞 owner-approval 模型 |
 
-**对照 F260 基线的整体判读**：写侧不再"全裸"——Entity 复活、Person 新建、Event 证实
-活着、Diary 健康；病灶收敛到三处：**Taste 的 speaker 校验与 organic consumption**、**Profile 的 trigger 蒸发**、
-**Knowledge 的零触发**。"只有 taste 运转得好"（operator 2026-08-15 观察）需修正为：taste
-是**触发最活但治理仍病**的车道——结构链存在，活跃度仍会掩盖 speaker 与效用缺口。
+旧结论“Knowledge 零触发、无 consumer”在 v0.3 被**限缩**为 F152 global distillation。项目内
+Operational Knowledge（LL / Decision / Method）每天都在被 scanner、search、F287、Skill/ADR 链路
+消费；把两者揉成一个 lane，会把高权重行为真相误判为 sunset 对象。
 
-## 2. 每车道缺口与 owner（Wave 1 输入 · 回传件 1）
+## 2. 文件习俗写入面：四拍 current-state census
 
-| Lane | 缺口 | 归属 |
-|---|---|---|
-| Entity | 无 P0 缺口；concept 管量低属正常（轻治理设计） | F260 维护态 |
-| Taste | ① speaker 机械校验（quote 引 messageId 验 author）② canonical write/read 链的 organic consumption 与 harmful-use health | rethink §12-11；speaker guard 是确定契约，消费质量另按 consumer 决策 |
-| Profile | standing trigger 重建 + organic consumption 证据；复用现有 canonical root/logical read，禁止再造第三仓 | F231 复活案，走 Standing Reflex 合同后实施 |
-| Event | consumption 健康度量化（谁在读 timeline、频率） | F227 维护态，非紧急 |
-| Person | Phase C dogfood（真实卡→审批→recall 验证 + Write Opportunity 记账） | Maine Coon/F276；operator 已 signoff 记账 |
-| Knowledge | keep-or-sunset 决策（零触发两个月 = sunset 强候选，除非 Wave 1 给它触发合同） | operator 机制选择 |
-| Diary | AC-C2 organic proposal 通道（做梦真长出观察时管道走得通） | F255/Ragdoll，Phase C |
+| Durable surface | ① 感知 | ② 提案 | ③ 裁决 / canonical target | ④ 消费与失效 | Verdict / owner |
+|---|---|---|---|---|---|
+| **Normative Lessons Learned** | feature/PR 收尾、用户纠正、self-evolution、L0 提醒；无共享 mechanical opportunity | A. 直接改 `docs/public-lessons.md`；B. F102 marker；C. `docs/lessons-learned/*.md` | A/C 依赖 Git author/review；F102 显式 candidate 可 auto-approve、推断 candidate 另审；Approval Hub producer catalog 无 Lesson/F102 | monolith 被 scanner 拆成 authoritative passages；目录项进入 search/F287，但 exact lesson adoption/harm 无统一 receipt；correction 走 Git | 🔴 **同一规范 authority 有多套出生法**；memory/knowledge governance owner |
+| **Decision / ADR** | 方向分歧、operator 拍板、feature lifecycle | discussion/plan 后 direct ADR edit | operator、reviewer 与 Git history；canonical 在 `docs/decisions/` | doc links、search、L0/Skill 引用；单次消费回执不统一 | 🟡 authority 较清楚，四拍未机器化；architecture governance owner |
+| **Method / Skill** | 重复成功/失败、self-evolution、writing-skills | direct Method doc 或 Skill package/edit | 方法 owner + reviewer/发布门；canonical 依对象而异 | Skill manifest/load 是真实 consumer；Method doc 走 search；usage evidence 不同源 | 🟡 不应强行合库；需 closure adapter 与 authority map |
+| **Episode / Reflection / Diary** | 真实任务结束、present loop、自省 | typed store 或 direct file | 事实 episode 可先落 provenance；第一人称 reflection 由作者自治 | scanner/search/diary reader；promotion 成规范 LL 前必须另走裁决 | 🟡 证据与规范必须分层；F255/各 producer owner |
+| **Feedback / Verdict / harness evidence** | eval/harness 运行与用户反馈 | 各 producer 的 typed artifact/publication | Eval Hub/verdict-specific contract 已较强，不由 memory Hub 接管 | Eval consumer、sunset/iterate 决策；但 scanner 把 `harness-feedback` 等统一映射成 `lesson` | 🟡 保留原 authority；禁止“被检索为 lesson”自动升级成 LL |
+| **Provider-local MEMORY / primer** | provider/harness convention | runtime-local edit/compile | provider owner；repo 内无完整 current census | prompt injection/read；当前 source/失效坐标未闭环 | ⚪ `unknown`：在纳入统一只读 closure catalog 前不得声称健康 |
+| **Global distillation / F152** | 已索引 evidence 被标 generalizable；生产样本为零 | `distillation_candidates` nominate | 独立 approve + `~/.cat-cafe/distilled-truths/` | consumer 未证明 | 🔴 `sunset_candidate`，与项目 LL 分开裁决 |
 
-## 3. Shared invariants 候选（Wave 1 合同输入 · 回传件 2）
+这里的目标不是让 ADR、Skill、Diary 都经过同一张 Hub 卡，而是让每个 surface 明说：为什么现在可以
+写、候选是什么、谁有权签字、写完谁会用。`exempt` 只免某一种审批，不免 provenance、canonical
+owner、correction/forget 与 consumption 声明。
 
-1. **车道活性三因子**：触发存在 × 校验有效 × 消费闭环——缺一蒸发或污染（本 census
-   七车道全部可用此公式判读）；
-2. **speaker/provenance 机械校验**：owner 语录类车道的 quote 必须引 messageId 且
-   服务端验 author——prompt 层叮嘱与审批卡都已被实证击穿（TERRY 案）；
-3. **写入验收 = 端到端可搜**，不是落盘（taste fork 孤岛教训）；
-4. **receipt 类信号必须有消费率审计**——无人消费的 receipt 与没写无异（F282 1104 条
-   receipt vs cue 3 条消费的巨大剪刀差是第一个观测点）；
-5. **审批面优化 anomaly 可见性而非吞吐**（speaker 高亮；批量确认关闭 owner 检测器）；
-6. **typed disposition 三态**（propose/defer/abstain）——沉默留痕；
-7. **零条 = no-data 不是零发生**（F263 先例已合同化此语义）。
+## 3. Lessons Learned 深查：读取强、出生法分叉
 
-## 4. 不足以冻结合同的（回传件 4 之 W0-C 部分）
+### 3.1 当前三条出生/提升路径
 
-- Taste/Profile 的 current-main 结构坐标已在 Wave 1 深读闭环；尚未闭的是两者 organic
-  consumption、Taste speaker 误投是否被运行健康发现，以及 Profile trigger 的实际送达率；
-- Event 车道 consumption 只证实读面存在，未量化健康度；
-- `reflection_outputs` 52 条的生产者与消费闭环未查（F255 相关，待 Phase C 一并）；
-- `markers` 表 0 行用途未核（爪感差另有存储的假设未验证）。
+```text
+feature / correction / self-evolution
+  ├─ direct Edit → docs/public-lessons.md ───────────┐
+  ├─ F102 candidate → MarkerQueue YAML → docs/lessons/ ├─ scanner/search/F287
+  └─ indexed lesson → F152 SQLite → global distilled ─┘
+```
+
+三路不是同一个 authority：
+
+1. `docs/public-lessons.md` 是 scanner 特判的 authoritative LL passages，通常由猫直接编辑、commit；
+2. F102 从 summary 抽 `decision|lesson|method` candidate，当前会把 `method` 归入 `lesson`，显式
+   candidate 可 auto-approve，并由 `MaterializationService` 写到 `docs/lessons/`；
+3. F152 从已索引、被标 generalizable 的 lesson/decision 再提名，使用独立 SQLite，并物化到
+   `~/.cat-cafe/distilled-truths/`。
+
+Approval Hub 的 producer catalog 当前不含 F102、F152 或 Lesson。读侧又把 `docs/lessons/`、
+`project-reflections/`、`methods/`、`episodes/`、`postmortems/`、`stories/`、`harness-feedback/` 等多种对象
+折叠成 kind=`lesson`。因此最大 bug 不是“LL 没被索引”，而是：**读侧给予 lesson-like authority，
+写侧却没有唯一的规范性提升法；对象类型与裁决权被一个 scanner kind 压平。**
+
+### 3.2 2026-08-26 文件 snapshot（只用于定位，不是 current truth owner）
+
+| Surface | Snapshot |
+|---|---:|
+| `docs/public-lessons.md` 的 `### LL-*` | 100 |
+| `docs/lessons-learned/*.md` | 11 |
+| `docs/lessons/*.md` | 33 |
+| `docs/decisions/*.md` | 53 |
+| `docs/methods/*.md` | 2 |
+| `project-reflections/*.md` | 125 |
+| `docs/harness-feedback/**/*.{md,yaml,json}` | 1103 |
+
+数量只说明 surface 真实存在且规模不小，不能决定哪一条更真，也不能从“被命中很多”推出
+“应提升为全家规范”。
+
+### 3.3 目标不变量（不在 census 偷定实现）
+
+- failure/event 可先以 source-backed Episode 留证；提升成全家行为规则时，必须生成独立 normative
+  candidate，并由声明过的 authority 裁决；
+- LL、Decision、Method 可继续拥有不同 canonical store，但同一 claim family 不能有两个 active
+  normative owner；
+- direct edit 不是被禁止，而是必须由 closure declaration 说明 author/reviewer/guard 为何足够；
+- F102/F152 若保留，必须成为上述 authority 的 adapter，不能继续各自产生 lesson-like canonical；
+- scanner kind 只负责发现与读取，不授予 truth authority；来源对象、revision 与 promotion lineage
+  必须可 drill；
+- 先补确定性协议与 guard，再让 utility eval 比较污染、审批负担和采用；不以 eval 代替出生法。
+
+## 4. Shared invariants（Standing Reflex v1.1 输入）
+
+1. **四拍 completeness**：感知、提案、裁决、消费均须有明确答案；`none/exempt/sunset` 合法，
+   `missing` 不合法；
+2. **车道活性三因子**：触发存在 × 校验有效 × 消费闭环；reader 存在不等于被使用；
+3. **统一协议，不统一 authority/store**：每条 lane 保留自己的 canonical truth owner；
+4. **speaker/provenance 机械校验**：owner 语录类 proposal 必须服务端核 author/source；
+5. **规范性 promotion 与证据留存分层**：Episode 可以先留证，LL/Decision 提升需独立裁决；
+6. **写入验收 = canonical 可读 + 可纠正/遗忘**，不是文件存在或落库；
+7. **typed disposition**：主动 opportunity 必须 `propose|defer|abstain`；沉默不是合法第四态；
+8. **zero = no-data**：零条不代表零发生/零伤害；
+9. **scanner/index/view 不夺权**：发现、排名、被频繁消费都不能提升 truth authority。
+
+## 5. 下一步边界
+
+- 先为上述 surface 逐条生成 lane-owned `MemoryWriteSurfaceClosureV1` 声明；这不是中央可写 registry；
+- LL/Decision/Method 先做 claim-family/authority map，再决定 F102/F152 的 migrate/adapter/sunset；
+- Person 首案 replay 只验证已冻结的确定性合同；它不产出 utility verdict，也不替代真实 runtime
+  episode；
+- Taste/Profile 下一案先过四拍 E0：有 consumer、有可裁决失败路径、有足够 observation；不为七格整齐
+  自动施工；
+- Provider-local MEMORY/primer 仍是本 census 的 honest unknown，需 owner 坐标后再冻结。
 
 ---
-### 4.1 Wave 1 深读更正坐标（2026-08-15）
-
-- Taste write：`callback-propose-taste-routes.ts` → `taste-proposal-decision-routes.ts` →
-  `approveTasteProposal.ts` → `writeVignette.ts`；`TasteRepository.ts` 定位持有
-  `refs/heads/main` 的 canonical root，public approve 原子 commit vignette + `docs/taste/index.md`。
-- Taste read：`IndexBuilder.ts` v11 + `CatCafeScanner.ts` + `TasteMemoryReader.ts` 生成带
-  sha256 revision 的完整 decision passage，并进入 F287 source。
-- Profile read：`ProfileRepository.ts` 统一 `CAT_CAFE_DATA_DIR` / persona scope；
-  `l0-compiler.ts` 与 `compile-system-prompt-l0.mjs` 生成 logical URI，
-  `callback-read-profile-routes.ts` 以同一 repository 鉴权读取。
-- 因此旧 F260/F231 split-brain 与 F221 canonical-write bug 只保留为 failure history；本文已按
-  current main 纠正，不用历史事故冒充当前缺口。
-
----
-*W0-C census v0.2 · 原始 census Ragdoll/claude-fable-5；Wave 1 深读更正 小太阳·Maine Coon/gpt-5.6-sol · 2026-08-15 · 取证均为只读*
+*W0-C v0.3 · 原始七 lane census Ragdoll/claude-fable-5；Wave 1/v0.3 current-truth correction 与 universe expansion 小太阳·Maine Coon/gpt-5.6-sol · 2026-08-26*

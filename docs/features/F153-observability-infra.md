@@ -5,6 +5,7 @@ topics: [observability, telemetry, metrics, health-check, infrastructure]
 doc_kind: spec
 created: 2026-04-09
 community_issue: "zts212653/clowder-ai#388"
+tips_exempt: "2026-08-27 link/reference hygiene only; no observability capability or user action changed."
 ---
 
 # F153: Observability Infrastructure — 运行时可观测基础设施

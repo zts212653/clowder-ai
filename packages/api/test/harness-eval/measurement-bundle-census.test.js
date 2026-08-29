@@ -58,13 +58,13 @@ function assertInstanceLocalMigrationContract(census, validateMeasurementBundleC
 }
 
 describe('F267 real measurement bundle census', () => {
-  it('covers each real registry entry once and derives the exact 10/1/1 classification', async () => {
+  it('covers each real registry entry once and derives the exact 11/1/1 classification', async () => {
     const { validateMeasurementBundleCensus } = await moduleUnderTest();
     const { scanMeasurementVerdictCorpus } = await corpusModuleUnderTest();
     const census = validateMeasurementBundleCensus(loadCensus(), repoRoot);
     const corpus = scanMeasurementVerdictCorpus(repoRoot);
 
-    assert.equal(census.entries.length, 12);
+    assert.equal(census.entries.length, 13);
     assert.equal(census.schemaVersion, 2);
     assert.deepEqual(
       census.entries
@@ -82,6 +82,7 @@ describe('F267 real measurement bundle census', () => {
         'eval:qc',
         'eval:sop',
         'eval:task-outcome',
+        'eval:trajectory-inspector',
       ],
     );
     assert.equal(census.entries.find((entry) => entry.domainId === 'eval:capability-tips')?.classification, 'gated');
@@ -98,7 +99,7 @@ describe('F267 real measurement bundle census', () => {
     const active = census.entries.filter((entry) => entry.classification === 'active_decision_bearing');
     assert.deepEqual(
       active.map((entry) => entry.validityMigration.riskRank).sort((left, right) => left - right),
-      [1, 2, 3, 4, 5, 6, 7, 8, 9, 10],
+      [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11],
     );
     assertInstanceLocalMigrationContract(census, validateMeasurementBundleCensus);
   });

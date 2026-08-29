@@ -1,6 +1,6 @@
 ---
 feature_ids: [F290]
-related_features: [F044, F077, F128, F168, F195, F202, F232, F246, F254, F276, F277, F282, F287]
+related_features: [F044, F077, F128, F168, F195, F202, F232, F246, F254, F276, F277, F282, F283, F284, F287, F299, F305, F307]
 topics: [ai-native-collaboration, multi-human, multi-agent, collective, cafe, channel, topic, asset, annotation, rich-message, task, vote, team-memory]
 doc_kind: spec
 created: 2026-08-08
@@ -8,6 +8,8 @@ description: "让多个独立 Café 在同一个 Collective 中围绕对话、�
 description_source: human
 description_author: codex-sol
 description_updated_at: 2026-08-10T09:24:00Z
+design_gate_claim_contracts: []
+tips_exempt: "续租：本轮删除被 operator 否决的 F290 Workbench runtime 表面与入口，不新增用户能力；只在 operator KEEP 且稳定 live action 激活后添加 capability tip。"
 ---
 
 # F290: AI-native Collective — 多人·多 Agent 共同世界
@@ -83,6 +85,44 @@ PR、代码、数据、Demo、视频和作品保留各自的人类语言与动�
 因此本次状态迁移是：**方向 5 正式登记为 F290；Experience Design Gate 继续进行；未授权真实
 后端、联邦协议或生产 UI 实现。**
 
+## 2026-08-26 Scope Reset — 回到 Collective baseline
+
+F290 的 baseline 不是右侧 Workspace，也不是一个 Artifact 编辑页。它是
+跨世界旅程：用户从自己的 Café 出发，经 global rail 进入 Collective，看到该世界的目的地、
+Channel、Roadmap、共同资产与成员活动；各 Café 仍在自己的信任域里执行，值得公开的结果再回到
+Collective 的准确对象。
+
+2026-08-25 至 26 的连续纠偏证明，我们把两个不同问题绑在了一起：
+
+- **F290** 要回答“多个真人、多个 Café、多只猫怎样进入同一个共同世界并持续协作”；
+- **[F307 Composable Workbench](F307-composable-workbench.md)** 要回答“一个用户怎样让 Chat、File、
+  Browser、Artifact、Review 与 Agent Run 同时留在自己的工作集里”。
+
+因此 F290 不再拥有 tab、split、sidecar promotion、layout persistence 或全局 restore。F290 只向
+F307 提供 Channel、Topic、Roadmap、Artifact、Review 等领域 surface descriptor、权限投影、
+lineage 和 exact result target。PR [#3981](https://github.com/zts212653/clowder-ai/pull/3981) 的
+working-set、恢复与 Agent Run tab 代码保留为 F307 原型证据；它仍然 OPEN，不是 F290 交付，也不
+构成 F307 Gate 通过。
+
+“共同工作集”也不是 F290 要注册进 Workspace launcher 的产品对象。共同工作台就是现有
+application Workspace 的整体升级；F290 的对象以后进入这张共享工作台，但 F290 不在工作台里
+再造一个同名房间。
+
+### 当前真正没做好的 F290 能力
+
+1. **真实 Collective 入口 / world switch**：生产 Clowder AI 尚未把 5102 baseline 的 global rail、
+   Collective destination 与返回个人 Café 的完整旅程做实。
+2. **Roadmap operating model**：Roadmap 还没有成为从 Channel / Meeting / Decision 生长出 Work、
+   显示依赖与历史、再回流结果的团队运行面。
+3. **共同产物系统**：Asset / Artifact library、树与派生、版本、lineage、锚定批注、权限和结果
+   回写尚未形成可持续的 Collective truth。
+4. **真实多 Café 后端**：Membership、邀请/退出、身份与 trust boundary、离线、送达、幂等、撤权、
+   冲突和 public projection 仍未实现。
+5. **真实团队 dogfood**：还没有用 You + 吴浪 / 社区协作者完成从共同讨论到各 Café 执行再回流
+   的端到端工作。
+6. **Workbench 尚未对齐**：当前 shell 仍不是 Composable Workbench；这是 F307 的开放项，不作为
+   F290 完成标准，也不阻塞 F290 沿现有壳继续验证 Collective 核心旅程。
+
 ## Stable Product Coordinate System
 
 | 对象 | 稳定含义 | 不是什么 |
@@ -113,6 +153,9 @@ Collective / Channel / Thread / Living Projection 是稳定产品对象，“长
 - 团队记忆、集体注意力、Meeting → Roadmap → 各自猫执行 → Channel 回流的闭环。
 - 从受邀、观察、带 Café 入席到干净退出的成员旅程。
 - 组织代谢循环与社会环：既能推进工作，也保留意外发现、共同在场与关系温度。
+- Collective 对宿主提供的领域 surface 契约：Channel、Topic、Roadmap、Artifact 与 Review 保留
+  objectRef、权限、lineage 与 result target；宿主如何 tab/split/restore 由 F307 决定。
+- Asset / Artifact 的树、引用、派生、版本、lineage、协同锚点与 Agent patch 回写契约。
 
 ### F290 不包含
 
@@ -121,32 +164,29 @@ Collective / Channel / Thread / Living Projection 是稳定产品对象，“长
 - 把所有私人 Thread、记忆或猫的内部路由公开给 Collective。
 - 把每条普通聊天自动变成 Task、审批或唤醒所有猫。
 - 用预设“专家”标签替代具名猫的关系与 track record。
+- 在现有 Workspace 内注册“共同工作集”模式、入口或第二套 working-set persistence。
 - 把 reaction 当批准，把 informal poll 当组织承诺。
 - 在 Experience Design Gate 前启动真实联邦后端、生产 schema 或迁移。
 - 顺带重做单 Café 的所有上手体验；F290 只定义“带着 Café 入席”的跨域旅程。
+- 自研富文本、代码、图片、视频或白板编辑器内核；F290 只冻结共同产物的稳定锚点、版本、批注、
+  human edit、agent patch、accept / reject / undo 与 provenance 领域契约，renderer/editor 适配由
+  对应内容 owner 与 F307 host 集成。
+- 把 Action Space runtime、IM / 日历 / webhook connector、Skill 编辑器或安装运行时吞进 Collective；
+  F290 只消费执行主体、权限 / 能力摘要、触发来源与 exact result-return。
 
-## Four-column Spatial Grammar
+## Collective Entry and Host Contract
 
-F290 的桌面主壳是四栏语法，不是四栏永远同时等宽：
+F290 只冻结 Collective 世界本身所需的空间关系：
 
-1. **Global rail**：最左窄栏是**世界切换器**——`🏠 我的 Café` + N 个已加入的 Collective +
-   全局 `🔔 需要我`（不属于任何单一世界）；点谁左栏就显示谁的目的地；Collective 多时用
-   弹层浏览/加入（2026-08-09 收敛，Maine Coon由 Raft 社区切换推得，见 `0001786262324014`）；
-2. **Destination pane**：列出当前世界中的私人 Thread、Collective、Channel 与固定入口；
-3. **Primary scene**：当前私人 Thread 或 Channel 的完整富消息流，是人真正驻留的地方；
-4. **Context panel**：右栏跟随当前焦点显示 Topic、成员卡、Living Projection、Roadmap、Task、
-   判断或来源，也承载“我的 Café 窗 / 相关 Channel 窗”；可以调整宽度，空时不应变成工具仓库。
+1. **Global rail**：世界切换器，包含个人 Café、已加入的 Collective 与全局 `需要我`；
+2. **Collective destination**：当前 Collective 的 Channel、Roadmap、资产库、成员与固定入口；
+3. **Collective scene**：Channel、Roadmap、Artifact、Topic、Review 等领域对象及其权限/lineage；
+4. **Host adapter**：F290 把这些对象交给当前产品宿主；若宿主是 F307 Workbench，tab / split /
+   sidecar / restore 全由 F307 决定，F290 不写第二份 layout truth。
 
-Global rail 改变的是“我在哪个世界”，Destination pane 改变的是“我去哪个现场”。右栏不是
-第二个主导航，也不是只读预览；它是一块可交互的上下文工作面。
-
-### Topic placement
-
-Channel 根消息点击后，Topic 在右栏完整展开，支持长讨论、富消息与输入。中间仍保留 Channel，
-用于维持“这段讨论从哪里长出来”的空间关系；“查看原消息 / 回到频道”应滚动并高亮中间的根
-消息。**不设计“Topic 变长后提升为中间主视图”**：右栏已能承载完整内容，提升只会制造两种
-Topic 导航语义。大型 HTML / Artifact 可进入全画布聚焦，但那是 Artifact focus，不是 Topic
-升级。
+Topic 的领域关系保持稳定：它必须锚定 Channel 根消息、复用同一消息与 lineage，关闭或换宿主不
+创建第二种 Topic。Topic 默认呈现在哪里、能否晋升 tab/split，是 F307 的宿主策略，不再是 F290
+本体契约。
 
 ### 双向望窗：能望见另一个世界，但不把两个世界混成一个
 
@@ -157,8 +197,42 @@ Topic 导航语义。大型 HTML / Artifact 可进入全画布聚焦，但那是
 - 望窗限制的是“看”的密度，不限制“说”的长度；从窗内发言会正常进入另一边。正式认领、批准、
   授权变更等签字类动作必须进入对象所属的完整现场、读到足够证据后再确认。
 
-双向望窗及上述信任边界是已确认的空间关系；摘要密度、进入动作、back-stack 与窄屏形态继续由
-Experience Design Gate 验证。
+双向望窗及上述信任边界是 F290 已确认的跨域关系；摘要密度、进入动作、back-stack 与窄屏形态
+由宿主 Design Gate 验证。
+
+## What We Learned from Agent Workspaces — 结论路由到 F307
+
+2026-08-25，operator 把 Clowder AI 当前单槽 Workspace 与 Codex、Floatboat 等真实 Agent 产品并排
+观察。外部资料来自各产品的一手页面，只能证明其公开设计与能力，**不能证明它们天然优于我们**；
+以下结论来自多家独立产品的结构收敛、operator 实际使用截图与 F290 连续失败的交叉推断。
+
+| 观察 | 与 Clowder AI vision 的关系 | 正确 owner / disposition |
+|---|---|---|
+| Codex / Cursor / Devin 把 Chat、File、Browser、Terminal、Review 等异质 surface 放进可组合工作区 | 符合 W8：人猫共同面对工作对象，而非只交换回复 | **F307**：typed working set、split、restore；不照抄 IDE 皮肤 |
+| 多个 Agent run 可并行，离开当前 surface 后仍继续，结果回到任务 / diff / 文件 | 符合“猫是 Agent”与可追溯回流 | **F307 + runtime owner**：运行连续性与 exact result-return；F290 只定义 Collective target |
+| Floatboat 在同一 living document 中同时允许人直接改、精确批注与 Agent 改写 | 符合资产代谢：对话不是产物的替身 | **现在冻结 adapter 契约**：human edit + anchor + agent patch + confirm + version / provenance |
+| 工作区可开多个 tab、保留上下文并按需分屏 | 符合用户拥有注意力与工作集 | **F307**：application-level Workbench；F284/F290 都不重复造壳 |
+| Agent Action Space 聚合 IM / webhook、目录、技能与活动 | 能解释一次动作由谁、以什么权限执行 | **只消费最小投影**：actor、capability / permission summary、triggerRef、resultTarget；runtime / connector 仍由其 owner 负责 |
+| 一次成功工作可被整理成 Skill | 符合团队能力从实践中生长，但“成功一次”不等于通用 | **后置**：F290 可呈现 `episode / artifact lineage → candidate skill → human confirm`；Skill 编辑器、安装、权限与真实复用归 Skill / Action Space。首条 dogfood 不因它扩 scope |
+
+### 外部一手证据（2026-08-25 读取）
+
+- [OpenAI: Introducing the Codex app](https://openai.com/index/introducing-the-codex-app/)：项目内多线程、
+  并行 Agent、diff review 与 app / CLI / IDE 连续性；
+- [OpenAI Help: built-in browser](https://help.openai.com/en/articles/20001277-using-the-built-in-browser-in-the-chatgpt-desktop-app)：
+  一个任务中打开多个 browser tab，并对页面精确标注；
+- [Cursor 3.0](https://cursor.com/blog/cursor-3)：multi-agent sidebar 与 diff / file / browser 的统一工作区；
+- [GitHub Copilot agent sessions](https://docs.github.com/en/copilot/how-tos/github-copilot-app/agent-sessions)：
+  多个隔离 session 按 repository 组织并可并行存在；
+- [Devin session tools](https://docs.devin.ai/work-with-devin/devin-session-tools)：shell、IDE、browser
+  共存与 human takeover；
+- [Floatboat Flow Mode](https://floatboat.ai/zh/blog/introducing-flow-mode)：同一文档里的手动编辑、
+  Agent 改写、批注与会议产出。
+
+这些学习现在拆成两类：F290 保留 Asset/Artifact 的 human edit、SelectionAnchor、annotation、
+agent patch、版本与 provenance 领域契约；F307 与内容 owner 负责 CodeMirror、BlockNote、Lexical、
+ONLYOFFICE 等 editor/renderer 如何进入真实 Workbench。详见
+不再是 F290 当前 Phase A 的实现决定。
 
 ## Visual Weight Grammar（2026-08-09 Gate 1 v2 审美收敛）
 
@@ -219,6 +293,86 @@ Collective 升维）。UI 文案叫"协同记录 / 历程"，"轨迹层"是设�
 焦点、批注对话=对话密度）——Terrain Grammar 的页内应用，解"全是一样的线框、
 不知道自己在干什么"（operator `0001787547580643`）；② **UI 实现一律消费 F305
 UI Design Gate 的共享设计与组件**，不再自造视觉——"像家"从手调变为结构性继承。
+
+### Asset Collaboration true-frontend contract（2026-08-25 operator 纠偏）
+
+2026-08-25 第一版 `/dev/f290-asset-collaboration` Alpha 只能切换预写好的阅读、审阅与批注画面：
+批注占位是 `span`，发送、接受与保留分歧按钮没有行为，右侧记录也不会因用户动作生长。此前
+以截图和模式切换给出的视觉 KEEP 作废；根因不是间距，而是交付物类型做错了。
+
+随后 PR [#3945](https://github.com/zts212653/clowder-ai/pull/3945)（merge
+`11dc4c9d598eee127f878b709026bfca5fec1fd8`）把该切片改为**真实前端、模拟后端**：fixture
+只提供起点，用户编辑、批注、讨论、disposition 与历程由真实输入和事件处理产生，并保存在
+当前浏览器。这个 landing 证明 Artifact surface 的局部 true-frontend contract，**不证明
+Composable Workspace、Channel 汇聚、多人实时或 F290 umbrella 已完成**。
+
+#### 一眼看懂的工作面
+
+- 中央始终是**当前产物本身**；阅读是默认态，`编辑` 是对产物采取的动作，不再把
+  “阅读 / 审阅修改 / 批注”做成三个平级世界。
+- 右栏是跟随当前焦点的上下文工作面，只保留三个用户词：
+  - **批注**：绑定到一段原文或一次文本选择；回答“大家对这里说了什么”。
+  - **讨论**：绑定到整个产物；回答“还有哪些不属于某一段的协作对话”。
+  - **历程**：由真实动作自动形成；回答“这个版本怎样走到今天”。
+- 选中原文或点击段落旁的“批注”后，右栏直接打开该段批注；点击“讨论”打开全局对话；
+  点击历程中的记录返回对应原文、批注或版本。右栏不是成员档案，也不是静态信息仓库。
+- 当前状态必须用用户能行动的语言表达，例如“有 1 处修改等你确认”“这一段有 2 条批注”，
+  不显示 `canonical`、`projection`、`inspector`、`judgment gate` 等内部设计词。
+
+#### Alpha 必须真实完成的动作
+
+1. **编辑产物**：点击编辑后，正文进入真实可输入状态；保存会更新正文、版本与修改时间，
+   并追加一条可回看的历程记录。
+2. **逐段批注**：从具体段落或选中文本发起；输入、发送、取消都可用。发送后新批注立即出现，
+   数量更新，历程新增记录；空内容不能提交。
+3. **围绕产物讨论**：讨论输入框可聚焦、输入和发送；新消息立即出现在对话中，并保留
+   speaking-as 身份。讨论不伪装成逐段批注。
+4. **处理修改建议**：接受会把建议真正写入当前正文；保留分歧会保持正文不变。两种结果都要
+   关闭待处理态、记录决定与理由，并追加历程。
+5. **状态连续**：在批注、讨论、历程与正文之间来回切换不丢当前选择、草稿和滚动位置；刷新后
+   仍能恢复本次 Alpha 中产生的数据。开发层可以提供“重置演示数据”，但默认产品面不展示。
+6. **诚实边界**：Alpha 不接生产后端，不承诺跨浏览器或多人实时同步；界面只需低声说明
+   “本次体验数据保存在此浏览器”，不能因此把输入和状态变化做成假的。
+
+#### 行为守卫（截图不能替代）
+
+以下旅程必须由自动化测试和真实浏览器操作共同验证；只测按钮、文案或预设画面存在不算通过：
+
+- `输入并发送批注 → 批注正文、数量与历程同时增长`；
+- `输入并发送讨论 → 消息以当前身份出现，逐段批注数量不变`；
+- `编辑正文并保存 → 正文和版本变化，刷新后仍存在`；
+- `接受修改建议 → 建议落入正文、待处理态消失、历程记录决定`；
+- `保留分歧 → 正文不变、理由可回看、待处理态消失`；
+- `历程记录 → 能返回产生它的原文 / 批注 / 版本，而不是只切换一块说明文字`。
+
+产品体验 Gate 的灵魂测试改为：**不给讲解，只给一个可运行页面；第一次看到它的人能否亲手
+修改一段正文、发送一条批注和一条讨论，并从历程回到其中任一动作。** 任一步不可操作，整稿
+判 TUNE；截图好看、单元测试全绿或预设状态齐全都不能覆盖这个结论。
+
+这张 true-frontend Alpha 已证明一个 **Artifact surface** 的局部交互，不等于 F290 Product Shell。
+后续 Gate 必须从 Channel / Destination 的真实入口打开同一 Artifact，并保留它与来源 Channel、
+关联 Topic 或 Review 的领域关系；是否以 tab / split 共存由 F307 验收。不得再把单页截图称为
+“最新 F290”。
+
+### Pluggable renderer / editor 与 SelectionAnchor
+
+F290 的差异化在资产树、lineage 与协作契约，不在重造编辑器。文本首期优先集成成熟开源编辑器；
+图片、视频、代码、画布和数据各自由 renderer / editor adapter 提供选择与呈现。统一接口至少承载：
+
+```text
+artifactId + baseVersion + anchorType + locator
++ annotation / intent + actor + timestamp
+```
+
+`anchorType + locator` 按媒介实现：文本 range / block、图片与画布 bbox / element、视频 frame /
+timeline segment、代码 file + range + revision、流水线 node、数据 field / row-set。adapter 必须支持
+human edit、稳定 SelectionAnchor、annotation、agent patch / diff、accept / reject / undo 与 provenance
+回写。选择编辑器先验证“正文变化后锚点是否稳定”“猫的 patch 能否审阅后原位落回”，不按工具栏
+功能数量选型。
+
+一次 living artifact 动作可消费 Action Space 的最小执行投影：`actorRef`、`capability / permission
+summary`、`triggerRef`、`resultTarget(artifactId + baseVersion + anchor)`。IM、日历与 webhook 是入口，
+不是事实真相源；连接器、目录授权、Skill runtime 与安装生命周期不由 F290 实现。
 
 ## Channel Interaction Grammar
 
@@ -335,8 +489,8 @@ Markdown，而不伪造成当时就在资产页发生的批注 → 后续参与�
 |---|---|---|---|
 | R1 | 正式 F 号与唯一入口，未来猫可冷启动 | AC-A1 | [x] |
 | R2 | 原始 Thread、方向图、录音、竞品稿与原型证物可追溯 | AC-A1 | [x] |
-| R3 | Café / Collective 能在全局 rail 切换，四栏职责不混淆 | AC-A2 | [ ] |
-| R4 | Channel 是中间主现场，Topic 完整留在右栏 | AC-A2 | [ ] |
+| R3 | Café / Collective 能在全局 rail 切换，Collective destination、Channel 与个人 Café 边界不混淆 | AC-A2 | [ ] |
+| R4 | Topic 锚定 Channel 根消息并复用同一消息/lineage；换宿主不复制领域对象 | AC-A2 | [ ] |
 | R5 | 人猫共享富消息语言，Composer 渐进展开 | AC-A3 | [ ] |
 | R6 | 自然语言无弹窗长出 linked Task card | AC-A3 | [ ] |
 | R7 | Vote 一键参与，并区分 poll / binding judgment | AC-A3 | [ ] |
@@ -344,6 +498,11 @@ Markdown，而不伪造成当时就在资产页发生的批注 → 后续参与�
 | R9 | 多 Café 离线、送达、唤醒、执行和回流不混为一个状态 | AC-C1 | [ ] |
 | R10 | 用 You + 吴浪 / 社区真实工作完成首条终态 dogfood | AC-D1 | [ ] |
 | R11 | 同一真实 Markdown 同时支持 Channel 回复与版本/位置锚定批注，且保持一条 lineage | AC-A5 | [ ] |
+| R12 | Roadmap 从 Channel / Meeting / Decision 生长出 Work、依赖、历史与结果回流，而非静态任务栏 | AC-A6, AC-D1 | [ ] |
+| R13 | Collective Artifact 统一稳定 SelectionAnchor、human edit、agent patch、版本、权限与 provenance | AC-A5, AC-B1 | [ ] |
+| R14 | 私人 Café / Agent 执行的结果回到 exact Collective Channel / Work / Artifact，且不泄露私人过程 | AC-A7, AC-C1 | [ ] |
+| R15 | Feature surface、对象详情与 Product Shell 在交付物和验收声明中明确分层，单页不得冒充 F290 整体 | AC-A2 | [ ] |
+| R16 | F290 由个人 Café 的真实 world switch 进入 Collective；独立 `/dev` 壳只能作为 Design Gate 证物 | AC-A2 | [ ] |
 
 ### Coverage check
 
@@ -358,9 +517,11 @@ Markdown，而不伪造成当时就在资产页发生的批注 → 后续参与�
   形成唯一入口；Source Map 覆盖三个源 Thread、两份 ASR（含 SHA-256 / 缺录边界）、核心衍生稿、
   既有 Feature 边界与 exact prototype commits。一个没有本 Thread 上下文的猫只读这两份即可
   说清 Why、稳定对象、已确认决定、未决问题和下一验证动作。
-- [ ] **AC-A2**：operator 在 Clowder AI 原生视觉的确定性纯前端 Gate 中体验 Café / Collective、四栏
-  空间语法、Channel、右栏 Topic / 成员卡 / Artifact / Judgment 切换，并对默认焦点、信息层级与
-  空间连续性给出 keep / tune / sunset；第一稿被否决的页面不能冒充通过。
+- [ ] **AC-A2**：operator 从个人 Café 的真实 global rail / world switch 进入 Collective（不是直接落入
+  独立 `/dev` 复制壳），看到该 Collective 的 destination、Channel、Roadmap、成员与资产入口；
+  从 Channel 打开同一根消息的 Topic / Artifact 后能返回来源，权限与 lineage 不丢。验收证据必须
+  包含真实用户入口、世界切换、宿主 mount 关系与返回个人 Café 的路径；预设 tab、单个资产页、
+  右侧 Workspace 或自造 chrome 都不能冒充 F290 Product Shell。tab / split / restore 另由 F307 验收。
 - [ ] **AC-A3**：同一 Gate 可重放 Thread / Channel 共享富消息、渐进 Composer、reaction、头像卡、
   无弹窗 Task 与低摩擦 Vote；每个动作都展示原消息与派生对象的关联，poll / binding judgment
   不混淆。
@@ -369,6 +530,12 @@ Markdown，而不伪造成当时就在资产页发生的批注 → 后续参与�
 - [ ] **AC-A5**：用 2026-08-10 真实 Markdown 分享事件做确定性 fixture，第一段可重放“打开资产 →
   分享 → 批注 → Topic”，并保留“点评原本发生在外部聊天”的事实来源；第二段另行验证候选修改、
   authority、版本与回流，不用导览文本冒充已完成行为。
+- [ ] **AC-A6**：在真实 Channel / Meeting fixture 中形成或更新一项 Roadmap Work；Roadmap 展示来源、
+  accountable human / 执行 Café、依赖、状态历史、阻塞与结果回链。它必须从团队对话生长并反向更新
+  Collective，不得用静态卡片、预写任务或 shell tab 数量冒充 operating model。
+- [ ] **AC-A7**：一个 Café 在私有 Thread / Agent runtime 中执行 Collective Work；Collective 只看到
+  必要状态、判断请求、产物与证据，完成结果回到 exact Channel / Work / Artifact，并能追到 trigger、
+  actor、authority 与 source version。私人原文与猫的内部施工过程不得被宿主或共享层默认读取。
 
 ### Phase B — Stable object and trust contracts
 
@@ -395,8 +562,8 @@ Markdown，而不伪造成当时就在资产页发生的批注 → 后续参与�
 
 ## Terminal Phases
 
-1. **Phase A — Product truth + Experience Design Gate**：把已确认世界、四栏语法与互动语法做成
-   可体验、可纠偏的终态切片；当前阶段。
+1. **Phase A — Collective truth + Experience Design Gate**：把个人 Café → world switch → Collective
+   destination → Channel / Roadmap / Artifact 做成可体验、可纠偏的终态切片；当前阶段。
 2. **Phase B — Stable objects + responsibility**：冻结产品对象、持久真相、authority 与 ownership
    cell；不交付临时 schema。
 3. **Phase C — Multi-Café federation + memory**：实现跨信任域同步、注意力、离线、撤权、冲突与
@@ -414,8 +581,8 @@ Markdown，而不伪造成当时就在资产页发生的批注 → 后续参与�
 |---|---|---|
 | KD-1 | 面向终态；不做可丢弃 MVP | `0001785845227770-001545-725b7878` |
 | KD-2 | 一人多猫不变，Café 加入 Collective | vision §3.1 / §4.1 |
-| KD-3 | Global rail 切 Café / Collective；桌面采用四栏空间语法 | `0001786237916354-000401-4213d9ff`, `0001786238550068-000422-ef1afc12` |
-| KD-4 | Channel 是中间主现场；Topic 在右栏完整交互，不提升为中间 | `0001786241554272-000488-e68a5284` |
+| KD-3 | Global rail 切个人 Café / Collective；这是 F290 产品入口，不等于右侧 Workspace 或 F307 Workbench | `0001786237916354-000401-4213d9ff`, `0001786238550068-000422-ef1afc12`, `0001787725879344-000406-1920e263` |
+| KD-4 | Channel 是重要共同现场；Topic 必须锚定根消息、复用同一消息与 lineage，具体宿主形态由 F307 决定 | `0001786241554272-000488-e68a5284` |
 | KD-5 | Channel 与私人 Thread 共用富消息底座；人猫能力同权、Composer 渐进展开 | `0001786241554272-000488-e68a5284`, `0001786242747248-000502-77c148cd` |
 | KD-6 | Message → Task 由猫生成 linked card，不弹表单；无 authority 不静默造承诺 | `0001786242747248-000502-77c148cd` |
 | KD-7 | Vote 必须低摩擦；poll 与 binding judgment 分开 | `0001786242747248-000502-77c148cd` |
@@ -426,6 +593,11 @@ Markdown，而不伪造成当时就在资产页发生的批注 → 后续参与�
 | KD-12 | Café 与 Collective 通过双向望窗互相可见：说话自由、窗看摘要、签字类动作进入所属现场完成 | `0001786180420333-000365-bf6bdb75`, `0001786237918673-000404-85ef0313` |
 | KD-13 | Collective 的工作协同围绕资产代谢展开，同时保留不被资产化的社会环；资产是内部统一信封，不是强迫用户学习的 UI 总称 | `0001786346949390-000016-6d774788`, `0001786351158315-000093-88552f5b` |
 | KD-14 | Channel 回复与资产批注是两种协同入口、一条 lineage；外部反馈挂回资产时保留真实发生位置，不伪造历史 | `0001786351789923-000108-89bf3d37`, `0001786353602673-000148-fb73f15f` |
+| KD-15 | **Superseded by KD-19**：曾把可组合 working set 继续挂在 F284/F290；保留为错误演进记录，不再定义 F290 scope | `0001787656851950-000282-3a67e615`, `0001787657108819-000293-94960547` |
+| KD-16 | F290 自建资产树、lineage 与协作 adapter 契约，不自研编辑器 / Action Space runtime；一次成功只可形成 candidate skill，不能自动晋升通用能力 | `0001787640549164-000152-5d32cce8`, `0001787641251329-000002-7824bc80`, `0001787641731843-000019-279a4bae` |
+| KD-17 | PR #3966 的独立 `/dev` 页面只保留为组件实验；operator 否决其 Product Shell / F290 交付身份，后端闭环不得从该页继续 | `0001787673013284-000546-555d5b0c`, `0001787673135955-000549-b871dcef`, `0001787673288904-000550-e236be6f` |
+| KD-19 | F290 回到多人、多 Café、多 Agent Collective；全局 working set/tab/split/restore 独立为 F307，#3981 只作 F307 原型证据 | `0001787725213195-000402-837bd5c8`, `0001787725879344-000406-1920e263`, `0001787726647893-000424-abdf8a06` |
+| KD-20 | F290 不等待完整 F307；先补真实 world switch、Roadmap、共同产物系统、多 Café 后端与团队 dogfood | `0001787726647893-000424-abdf8a06` |
 
 ## Open Questions / Design Gate
 
@@ -433,8 +605,8 @@ Markdown，而不伪造成当时就在资产页发生的批注 → 后续参与�
 2. Needs Me / Judgment Inbox 是 rail 中的全局入口，还是 Approval Hub / Activity 的统一投影；哪些
    事项有资格进入，如何避免第二个无限收件箱？候选准入红线是：**只收等待人类判断的事项，
    FYI / 热闹永不进入。**
-3. 右栏多对象的 back-stack、pin、resize 与窄屏退化如何工作；双向望窗的摘要密度与“走进去”
-   动作如何表达；长 Topic 与 Artifact 同时出现时谁拥有焦点？
+3. 双向望窗的摘要密度与“走进去”动作如何表达，同时不泄露私人 Thread；sidecar/tab/split 的
+   通用宿主策略转交 F307。
 4. Task 建议卡在 public Channel 中由谁可见、谁可确认、哪个动作形成 Collective 承诺？
 5. Vote 的匿名性、eligible voters、法定人数、修改/撤回、截止、平票与 binding authority 怎样
    表达；何时升级为 Approval / Decision？
@@ -475,6 +647,13 @@ Markdown，而不伪造成当时就在资产页发生的批注 → 后续参与�
     机会 → 在公地发布署名 Idea → 猫爪与讨论 → 可能长成 Work；主动发起的合法区判据接
     甜甜圈 / AVI（F282/F287 个人尺度已验证）。本 thread 的设计过程即活样本：愿景稿与本
     spec 的多条 KD 作者是猫。
+16. Artifact 的内容 owner 与 F307 应如何选择成熟编辑器，满足稳定 SelectionAnchor、agent patch
+    原位 review、版本 / undo 与 IME？F290 只验证这些能力形成同一 Artifact lineage 与权限/确认契约，
+    不负责 editor kernel 选型或宿主集成。
+17. 首条 F290 Experience Gate 验证 `Channel → Artifact → direct edit / precise annotation → Agent patch
+    → human confirm → 新版本与 Channel / Work 同步` 的领域关系，以及 private execution 的结果回到
+    exact Collective target。若当前宿主采用 tab / split，其切换、恢复与运行连续性由 F307 另行验收；
+    多模态 renderer、完整 Action Space、candidate skill 与真实多人同步后置，禁止再次一稿吞全家。
 
 ## Human Disposition Feedback Contract
 
@@ -491,15 +670,18 @@ Vote 的“不同意某选项”是投票内容，不自动成为对猫的 dispo
 
 ## Tips Contribution（F244）
 
-`tips_exempt: F290 is a co-created product world and the active Design Gate teaches interactions in
-context; no stable user action exists yet for a proactive capability tip.`
+F290 目前仍是 Experience Design Gate candidate。operator KEEP 与 runtime activation 共同证明稳定 live
+action 后再贡献 capability tip；在此之前，不能让生产 tips inventory 宣传一条尚未上线的旅程。
 
 ## Dependencies and Explicit Exclusions
 
 - **Evolved from**: F044（只继承 Channel / Activity 原语，不继承其单 Thread / 游戏 scope）。
 - **Related**: F077（多用户身份与安全）、F128（确认式开 Thread）、F168（共享面）、F195（伴随
   会议）、F202（插件）、F232（多 Agent）、F246（判断/审批）、F254（freshness）、F276（关系）、
-  F277（注意力导航）、F282/F287（主动记忆与 cue）。
+  F277（注意力导航）、F282/F287（主动记忆与 cue）、F283（对象驱动 surface policy）、F284
+  （contextual Workspace v1）、F305（UI Design Gate）、F307（application-level Composable
+  Workbench）。F290 不拥有 tab / split / restore / layout persistence，只登记 Collective surface、
+  权限、lineage 与协作契约；F290 也不等待 F307 完成才继续自己的 Experience Gate。
 - **Excluded**: F076 旧 Mission Hub 已完成且被 F152 取代，不是 F290 的前身；F044 也不是 F290
   的总 feature。
 - **Prototype branch**: `feat/collective-experience-gate` 是 Experience Gate 证物；未合入 main 的
@@ -522,8 +704,21 @@ context; no stable user action exists yet for a proactive capability tip.`
 | `0001786241554272-000488-e68a5284` | Topic 留右栏；Channel 必须继承 Thread 富内容能力 |
 | `0001786242747248-000502-77c148cd` | 人猫富消息同权、无弹窗 Task、低摩擦 Vote 与正式立项要求 |
 | `0001786346182279-000000-fc6491e5` | 首个外部企业用户一手需求（You 同事对真 demo 的反馈）："对话是过程、信息资产是结果、两个不同的空间"；对齐=核心场景；结论性信息同步空间 + 批注留言 + 资料库；"Agent 时代的 Google Docs 怎么设计"之问——验证现场/对象空间两类目的地的分离，新增 OQ12–14 |
+| `0001787629463635-000225-08df1d25` | operator 指出预设状态、假输入与不可操作控件不是前端，要求真实输入产生新状态 |
+| `0001787640549164-000152-5d32cce8` | Floatboat 对 living artifact、精确 SelectionAnchor、Action Space 与 result-return 的产品输入 |
+| `0001787641251329-000002-7824bc80` | operator 收束：资产树 / lineage 是核心，正文编辑优先集成成熟编辑器，不自研内核 |
+| `0001787656851950-000282-3a67e615` | 资产页再次被误交付成“最新 F290”，暴露 feature surface 冒充 product shell |
+| `0001787657108819-000293-94960547` | operator 将 Codex / Floatboat 工作区与单槽 Workspace 对照，要求总结 Agent 产品的可组合工作区哲学 |
+| `0001787657572683-000305-0bbce35c` | operator 授权把学习沉淀进前端 Skill 与 F290 优化真相 |
+| `0001787710909760-000035-84ec26d9` | operator 追问个人 Café 与 Collective 是否共用 Workbench，暴露产品层级混淆 |
+| `0001787710989547-000037-10c84ac6` | operator 指出文件与代码/整个 Workspace 才应承载 tab 化，不应由 F290 单独造壳 |
+| `0001787725213195-000402-837bd5c8` | operator 明确 F290 是多人多 Agent Collective，右侧 Workspace 重构是单人多 Agent 的另一个问题 |
+| `0001787725879344-000406-1920e263` | operator 确认 5102 Collective Experience Gate 才是 F290 baseline，并要求独立立项 Workbench |
+| `0001787726647893-000424-abdf8a06` | operator 授权完成 F307 立项与 F290 scope reset，并要求记录 F290 当前未完成项 |
 
 ### Documents
+
+- [F307 Composable Workbench](F307-composable-workbench.md)
 
 ### Original ASR
 
@@ -538,3 +733,4 @@ context; no stable user action exists yet for a proactive capability tip.`
 |---|---|
 | `91b8c38ec` | 第一支 guided front-end experience gate；用于记录被纠偏的假设 |
 | `9fa225fadcac85301c971d77bcff5aa2d40476cf` | 四栏 spatial grammar 低保真与说明；仍需 operator 继续 Gate |
+| [PR #3981](https://github.com/zts212653/clowder-ai/pull/3981) exact `4224d006c1af599d095b506bd578c6847bfd3df1` | working-set / restore / Agent Run tab 的历史原型；方向已被 operator 否决，不算 F290 交付，也不得继续合入 |

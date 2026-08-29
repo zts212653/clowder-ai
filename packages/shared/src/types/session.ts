@@ -28,6 +28,18 @@ export interface SessionCapacityPin {
   actionable: boolean;
 }
 
+/**
+ * Provenance for the latest compression sequence minted by an authenticated
+ * managed-invocation hook. The sequence and invocation identity are committed
+ * atomically with the counter so an older non-zero count can never attest a
+ * later invocation's provider boundary.
+ */
+export interface AuthenticatedCompressionObservation {
+  invocationId: string;
+  sequence: number;
+  observedAt: number;
+}
+
 export interface SessionRecord {
   readonly id: string;
   /** CLI-reported session ID (from session_init event) */
@@ -59,6 +71,8 @@ export interface SessionRecord {
   catHandoffNote?: CatHandoffNote;
   /** Lifetime compression telemetry. `null` means the historical total is unknown. */
   compressionCount: number | null;
+  /** Latest authenticated hook observation; absent for legacy/unproven counts. */
+  compressionObservation?: AuthenticatedCompressionObservation;
   /** #1329 immutable strategy snapshot most recently applied at a managed invocation boundary. */
   appliedPolicy?: SessionPolicySnapshot;
   /** #1329 policy-local progress for the active hybrid revision. */

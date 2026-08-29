@@ -14,7 +14,10 @@ import { randomUUID } from 'node:crypto';
 import type { QueueAuthorIntent, QueueTargetAttemptTerminalReason, WaitContinuationCarrierV1 } from '@cat-cafe/shared';
 import { createModuleLogger } from '../../../../../infrastructure/logger.js';
 import type { CallerTraceContext } from '../../../../../infrastructure/telemetry/genai-semconv.js';
-import type { ActionSuccessorFence } from '../../../../ball-custody/ActionSuccessorAdmissionService.js';
+import {
+  type ActionSuccessorFence,
+  actionSuccessorFencesMatch,
+} from '../../../../ball-custody/ActionSuccessorAdmissionContract.js';
 import type { QueueBodyExposure, QueuePrestartRetirementIntent } from '../../stores/ports/queued-message-custody.js';
 import type { ToolExecutionPolicy } from '../../types.js';
 import type { OwnerAuthProvenance } from './owner-auth-provenance.js';
@@ -186,6 +189,13 @@ export interface QueuedHandledResult {
   entrySnapshot?: QueueEntry;
   queueIndex?: number;
   originalContent?: string;
+}
+
+export interface ActionSuccessorQueueRetirement {
+  entryId: string;
+  threadId: string;
+  userId: string;
+  messageIds: string[];
 }
 
 const MAX_QUEUE_DEPTH = 5;
@@ -519,6 +529,44 @@ export class InvocationQueue {
     this.originalContents.delete(entryId);
 
     return q.splice(idx, 1)[0] ?? null;
+  }
+
+  /** Retire every process-local carrier for one persisted action fence. */
+  retireActionSuccessorFence(fence: ActionSuccessorFence): ActionSuccessorQueueRetirement[] {
+    const retired: ActionSuccessorQueueRetirement[] = [];
+    for (const [scope, queue] of this.queues) {
+      for (let index = queue.length - 1; index >= 0; index -= 1) {
+        const entry = queue[index];
+        if (!entry || !actionSuccessorFencesMatch(entry.actionSuccessorFence, fence)) continue;
+        queue.splice(index, 1);
+        this.originalContents.delete(entry.id);
+        retired.push({
+          entryId: entry.id,
+          threadId: entry.threadId,
+          userId: entry.userId,
+          messageIds: exactA2ASourceMessageIds(entry),
+        });
+      }
+      if (queue.length === 0) this.queues.delete(scope);
+    }
+    return retired;
+  }
+
+  /** Read the exact process carriers before durable custody retirement. */
+  listActionSuccessorFence(fence: ActionSuccessorFence): ActionSuccessorQueueRetirement[] {
+    const matches: ActionSuccessorQueueRetirement[] = [];
+    for (const queue of this.queues.values()) {
+      for (const entry of queue) {
+        if (!actionSuccessorFencesMatch(entry.actionSuccessorFence, fence)) continue;
+        matches.push({
+          entryId: entry.id,
+          threadId: entry.threadId,
+          userId: entry.userId,
+          messageIds: exactA2ASourceMessageIds(entry),
+        });
+      }
+    }
+    return matches;
   }
 
   /** Shallow copy of all entries sorted by dequeue priority (comparator order). */

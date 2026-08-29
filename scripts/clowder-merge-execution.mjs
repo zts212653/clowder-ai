@@ -7,7 +7,9 @@ import { fileURLToPath } from 'node:url';
 import { classifyStatusChecks, observeMergePrTruth } from './lib/clowder-merge-check-evidence.mjs';
 
 export const CLOWDER_REPOSITORY = 'zts212653/clowder-ai';
+export const CAT_CAFE_REPOSITORY = 'zts212653/cat-cafe';
 const CAFE_MESSAGE_ID = /^\d{16,}-\d{6}-[0-9a-f]{8}$/i;
+const INTAKE_DECISIONS = new Set(['absorbed', 'public-only', 'rejected']);
 
 function blocked(reasonCode, nextAction, requiresNewAuthorization, detail) {
   return {
@@ -96,6 +98,80 @@ function validateAuthorization(authorization, expectedSubject, expectedHead) {
   );
 }
 
+function validateIntakePlan(intakePlan, prNumber) {
+  if (!intakePlan?.decision) {
+    return blocked(
+      'intake_plan_missing',
+      'declare_intake_plan',
+      false,
+      'Source merge requires the existing intake decision that will be recorded after merge.',
+    );
+  }
+  if (!INTAKE_DECISIONS.has(intakePlan.decision)) {
+    return blocked(
+      'intake_decision_invalid',
+      'declare_intake_plan',
+      false,
+      'Intake decision must be absorbed, public-only, or rejected.',
+    );
+  }
+  if (
+    intakePlan.decision === 'absorbed' &&
+    (!Number.isInteger(intakePlan.intentIssue) || intakePlan.intentIssue <= 0)
+  ) {
+    return blocked(
+      'intake_intent_issue_missing',
+      'create_intake_intent_issue',
+      false,
+      'An absorbed decision requires a positive Clowder AI Intake Intent Issue number before source merge.',
+    );
+  }
+  if (intakePlan.decision === 'absorbed') {
+    const truth = intakePlan.intentIssueTruth;
+    if (!truth) {
+      return blocked(
+        'intake_intent_issue_unavailable',
+        'refresh_intake_intent_issue',
+        false,
+        'The Intake Intent Issue could not be verified from GitHub truth.',
+      );
+    }
+    if (truth.state !== 'OPEN') {
+      return blocked(
+        'intake_intent_issue_not_open',
+        'fix_intake_intent_issue',
+        false,
+        'The Intake Intent Issue must be open when the source PR is merged.',
+      );
+    }
+    const labels = Array.isArray(truth.labels)
+      ? truth.labels.map((label) => String(label?.name ?? label).toLowerCase())
+      : [];
+    if (!labels.includes('intake')) {
+      return blocked(
+        'intake_intent_issue_label_missing',
+        'fix_intake_intent_issue',
+        false,
+        'The Intake Intent Issue must carry the existing intake label.',
+      );
+    }
+    const body = String(truth.body ?? '').toLowerCase();
+    const sourceRefs = [`clowder-ai#${prNumber}`, `/zts212653/clowder-ai/pull/${prNumber}`];
+    if (!sourceRefs.some((sourceRef) => body.includes(sourceRef))) {
+      return blocked(
+        'intake_intent_issue_source_mismatch',
+        'fix_intake_intent_issue',
+        false,
+        `The Intake Intent Issue must reference source PR clowder-ai#${prNumber}.`,
+      );
+    }
+  }
+  return {
+    decision: intakePlan.decision,
+    intentIssue: intakePlan.decision === 'absorbed' ? intakePlan.intentIssue : null,
+  };
+}
+
 function validatePrTruth(prTruth, expectedHead, statusCheckObservation) {
   if (prTruth?.state !== 'OPEN') {
     return blocked(
@@ -173,9 +249,13 @@ export function planClowderMergeExecution({
   prTruth,
   statusCheckObservation,
   authorization,
+  intakePlan,
 }) {
   const invocation = validateInvocation(repository, prNumber, expectedHead);
   if (invocation.outcome === 'blocked') return invocation;
+
+  const intakeResult = validateIntakePlan(intakePlan, prNumber);
+  if (intakeResult.outcome === 'blocked') return intakeResult;
 
   const expectedSubject = canonicalSubjectRef(invocation.normalizedRepository, prNumber);
   const authorizationResult = validateAuthorization(authorization, expectedSubject, expectedHead);
@@ -201,6 +281,11 @@ export function planClowderMergeExecution({
     authorizationContinuity: authorizationResult.authorizationContinuity,
     authorizationKey,
     subjectFreshnessKey,
+    intakePlan: intakeResult,
+    postMergeNextAction:
+      intakeResult.decision === 'absorbed'
+        ? 'complete_absorbed_intake_and_advance_ledger'
+        : 'record_intake_decision_and_advance_ledger',
     transport: {
       admin: true,
       reason: 'clowder_repository_policy',
@@ -263,11 +348,27 @@ function readPrTruth(prNumber) {
   return JSON.parse(raw);
 }
 
+function readIntakeIntentTruth(issueNumber) {
+  const fixturePath = process.env.CAT_CAFE_CLOWDER_MERGE_INTAKE_FIXTURE;
+  let raw;
+  if (fixturePath) {
+    raw = readFileSync(fixturePath, 'utf8');
+  } else {
+    raw = execFileSync(
+      'gh',
+      ['issue', 'view', String(issueNumber), '--repo', CAT_CAFE_REPOSITORY, '--json', 'state,labels,body,url'],
+      { encoding: 'utf8' },
+    );
+  }
+  return JSON.parse(raw);
+}
+
 function usage() {
   return (
     'usage: clowder-merge-execution.mjs --pr <N> --head <SHA> ' +
     '--authorization-ref <messageId> --authorization-subject <pr:repo#N> ' +
-    '--authorization-scope <pull_request|exact_head> [--authorized-head <SHA>] [--execute]'
+    '--authorization-scope <pull_request|exact_head> --intake-decision <absorbed|public-only|rejected> ' +
+    '[--intake-intent-issue <N>] [--authorized-head <SHA>] [--execute]'
   );
 }
 
@@ -304,6 +405,23 @@ async function main() {
     process.exit(1);
   }
 
+  let intentIssueTruth;
+  const intakeIntentIssue = Number(args['intake-intent-issue']);
+  if (args['intake-decision'] === 'absorbed' && Number.isInteger(intakeIntentIssue) && intakeIntentIssue > 0) {
+    try {
+      intentIssueTruth = readIntakeIntentTruth(intakeIntentIssue);
+    } catch (error) {
+      const result = blocked(
+        'intake_intent_issue_unavailable',
+        'refresh_intake_intent_issue',
+        false,
+        `Unable to read Clowder AI Intake Intent Issue truth: ${String(error.stderr ?? error.message ?? error).trim()}`,
+      );
+      console.log(JSON.stringify(result));
+      process.exit(1);
+    }
+  }
+
   const result = planClowderMergeExecution({
     repository: CLOWDER_REPOSITORY,
     prNumber,
@@ -316,6 +434,13 @@ async function main() {
       scope: args['authorization-scope'],
       authorizedHead: args['authorized-head'],
     },
+    intakePlan: args['intake-decision']
+      ? {
+          decision: args['intake-decision'],
+          intentIssue: args['intake-intent-issue'] ? Number(args['intake-intent-issue']) : undefined,
+          intentIssueTruth,
+        }
+      : undefined,
   });
 
   console.log(JSON.stringify(result));

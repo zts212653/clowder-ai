@@ -16,7 +16,8 @@ INPUT=$(cat)
 SESSION_ID=$(echo "$INPUT" | jq -r '.session_id')
 
 API_PORT="${API_SERVER_PORT:-3004}"
-HOOK_TOKEN="${CAT_CAFE_HOOK_TOKEN:-}"
+INVOCATION_ID="${CAT_CAFE_INVOCATION_ID:-}"
+CALLBACK_TOKEN="${CAT_CAFE_CALLBACK_TOKEN:-}"
 
 STATE_FILE="/tmp/cat-cafe-opus-compact-state-${SESSION_ID}.json"
 
@@ -48,7 +49,8 @@ fi
 
 # Fetch latest sealed session digest (best-effort)
 DIGEST=$(curl -sf --max-time 5 \
-  -H "X-Cat-Cafe-Hook-Token: ${HOOK_TOKEN}" \
+  -H "X-Invocation-Id: ${INVOCATION_ID}" \
+  -H "X-Callback-Token: ${CALLBACK_TOKEN}" \
   "http://localhost:${API_PORT}/api/sessions/latest-digest?cliSessionId=$SESSION_ID" 2>/dev/null)
 DIGEST_STATUS=$?
 
@@ -71,7 +73,8 @@ SOP_SKILL=""
 SOP_STAGE=""
 SOP_TIME=""
 SOP_BOOKMARK=$(curl -sf --max-time 3 \
-  -H "X-Cat-Cafe-Hook-Token: ${HOOK_TOKEN}" \
+  -H "X-Invocation-Id: ${INVOCATION_ID}" \
+  -H "X-Callback-Token: ${CALLBACK_TOKEN}" \
   "http://localhost:${API_PORT}/api/sessions/sop-bookmark?cliSessionId=$SESSION_ID" 2>/dev/null)
 if [ $? -eq 0 ] && [ -n "$SOP_BOOKMARK" ]; then
   SOP_SKILL=$(echo "$SOP_BOOKMARK" | jq -r '.skill // empty')

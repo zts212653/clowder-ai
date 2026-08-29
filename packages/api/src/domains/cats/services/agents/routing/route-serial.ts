@@ -4770,7 +4770,10 @@ export async function* routeSerial(
                 ...noTextBlocks,
               ];
             }
-            if (storedNoText) recordPersistedOutputMessageId(storedNoText.id);
+            if (storedNoText) {
+              turnStoredMessageId = storedNoText.id;
+              recordPersistedOutputMessageId(storedNoText.id);
+            }
             // #80/F254: retained means DraftStore is still the only recoverable copy.
             if (
               deps.draftStore &&
@@ -4849,7 +4852,7 @@ export async function* routeSerial(
             );
           } else {
             const executionProjections = await readTurnExecutionProjections(visibleTurnInvocationId);
-            await deps.messageStore.append({
+            const storedToolError = await deps.messageStore.append({
               userId,
               catId,
               content: '',
@@ -4882,6 +4885,8 @@ export async function* routeSerial(
                   }
                 : {}),
             });
+            turnStoredMessageId = storedToolError.id;
+            recordPersistedOutputMessageId(storedToolError.id);
           }
           // #80: Clean up draft only after successful append
           if (deps.draftStore && ownInvocationId) {
@@ -5085,37 +5090,7 @@ export async function* routeSerial(
             );
           }
 
-          // Signal 2: Cancel burst — query PendingRequestStore for recent denied
-          // permission requests. This is the precise "user actively cancelled" signal,
-          // distinct from generic tool execution errors. (R2 P1 fix: tool_result.status
-          // === 'error' was too broad — included MCP failures, stream interrupts, etc.)
-          if (deps.pendingRequestStore) {
-            const { CANCEL_WINDOW_MS } = await import('../../frustration/FrustrationDetector.js');
-            const recentDenied = await deps.pendingRequestStore.listRecentDenied(
-              threadId,
-              Date.now() - CANCEL_WINDOW_MS,
-            );
-            if (recentDenied.length >= 3) {
-              await evaluate(
-                {
-                  signal: {
-                    type: 'cancel_burst',
-                    recentDenials: recentDenied.map((r) => ({
-                      action: r.action,
-                      timestamp: r.respondedAt ?? r.createdAt,
-                    })),
-                  },
-                  threadId,
-                  userId,
-                  catId: catId as string,
-                  invocationId: ownInvocationId,
-                },
-                frustrationDeps,
-              );
-            }
-          }
-
-          // Signal 3: A2A timeout — cat invoked but produced no visible output AND
+          // Signal 2: A2A timeout — cat invoked but produced no visible output AND
           // elapsed > threshold. Spec AC-C1: "超过阈值（如 60s）未响应".
           // P1 fix: exclude instant crashes/parse errors — only genuine timeouts.
           const A2A_TIMEOUT_THRESHOLD_MS = 60_000;
@@ -5286,6 +5261,7 @@ export async function* routeSerial(
           ownInvocationId && !doneMsg.invocationId ? { ...doneMsg, invocationId: ownInvocationId } : doneMsg;
         yield projectLiveTurnExecution({
           ...ownStampedDone,
+          ...(turnStoredMessageId ? { messageId: turnStoredMessageId } : {}),
           ...(mentionsUser ? { mentionsUser } : {}),
           ...(turnCustodyTerminalWitnesses[0] ? { turnCustodyTerminalWitness: turnCustodyTerminalWitnesses[0] } : {}),
           ...(turnCustodyTerminalWitnesses.length > 0 ? { turnCustodyTerminalWitnesses } : {}),

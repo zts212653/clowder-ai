@@ -168,9 +168,10 @@ export function WorkspacePanel({
     worktreesLoading,
     worktreesError,
     searchLoading,
+    searchError,
     error,
     search,
-    setSearchResults,
+    resetSearch,
     fetchFile,
     fetchTree,
     fetchSubtree,
@@ -420,11 +421,11 @@ export function WorkspacePanel({
     (path: string) => {
       setOpenFile(path);
       setViewMode('files');
-      setSearchResults([]);
+      resetSearch();
       setDidSearch(false);
       setEditMode(false);
     },
-    [setEditMode, setOpenFile, setSearchResults, setViewMode],
+    [resetSearch, setEditMode, setOpenFile, setViewMode],
   );
 
   const handleSearchSubmit = useCallback(
@@ -433,13 +434,13 @@ export function WorkspacePanel({
       const trimmedQuery = searchQuery.trim();
       if (!trimmedQuery) {
         setDidSearch(false);
-        setSearchResults([]);
+        resetSearch();
         return;
       }
       setDidSearch(true);
       void search(trimmedQuery, searchMode);
     },
-    [searchQuery, searchMode, search, setSearchResults],
+    [resetSearch, searchQuery, searchMode, search],
   );
 
   const revealInTree = useCallback((filePath: string) => {
@@ -482,12 +483,28 @@ export function WorkspacePanel({
     (path: string, line: number) => {
       setOpenFile(path, line);
       setViewMode('files');
-      setSearchResults([]);
+      resetSearch();
       setDidSearch(false);
       setEditMode(false);
       revealInTree(path);
     },
-    [revealInTree, setEditMode, setOpenFile, setSearchResults, setViewMode],
+    [resetSearch, revealInTree, setEditMode, setOpenFile, setViewMode],
+  );
+
+  const handleLauncherSearch = useCallback(
+    async (query: string) => {
+      await search(query, 'all');
+    },
+    [search],
+  );
+
+  const handleLauncherViewAll = useCallback(
+    (query: string) => {
+      setSearchQuery(query);
+      setDidSearch(true);
+      setViewMode('files');
+    },
+    [setViewMode],
   );
 
   // Reset markdown rendered mode when file changes (covers all entry points).
@@ -886,6 +903,16 @@ export function WorkspacePanel({
                     onOpenStatus={onOpenStatus}
                     threadId={threadId}
                     defaultCatId={defaultCatId}
+                    workspaceSearch={{
+                      enabled: !!worktreeId,
+                      results: searchResults,
+                      loading: searchLoading,
+                      error: searchError,
+                      onSearch: handleLauncherSearch,
+                      onReset: resetSearch,
+                      onOpenResult: handleSearchResultClick,
+                      onViewAll: handleLauncherViewAll,
+                    }}
                     actions={
                       <PresentationLockButton
                         locked={!!presentationLock}
@@ -947,7 +974,7 @@ export function WorkspacePanel({
                         onChange={(event) => {
                           setSearchQuery(event.target.value);
                           setDidSearch(false);
-                          if (!event.target.value.trim()) setSearchResults([]);
+                          if (!event.target.value.trim()) resetSearch();
                         }}
                         onCompositionStart={searchIme.onCompositionStart}
                         onCompositionEnd={searchIme.onCompositionEnd}
@@ -991,10 +1018,15 @@ export function WorkspacePanel({
                       搜索中...
                     </div>
                   )}
+                  {searchError && !searchLoading && (
+                    <div className="border-b border-conn-red-ring bg-conn-red-bg/80 px-3 py-3 text-xs text-conn-red-text">
+                      暂时没能搜索当前工作区，请重试。
+                    </div>
+                  )}
                   {/* Search results — grouped when in 'all' mode */}
                   {(didSearch || searchResults.length > 0) &&
                     !searchLoading &&
-                    !error &&
+                    !searchError &&
                     (() => {
                       const fileHits = searchResults.filter((r) => r.matchType === 'filename');
                       const contentHits = searchResults.filter((r) => r.matchType === 'content');

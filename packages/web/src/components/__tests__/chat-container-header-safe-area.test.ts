@@ -35,7 +35,6 @@ describe('ChatContainerHeader safe-area', () => {
         sidebarOpen: false,
         onToggleSidebar: vi.fn(),
         threadId: 'default',
-        authPendingCount: 0,
         viewMode: 'single',
         onToggleViewMode: vi.fn(),
         statusPanelOpen: true,

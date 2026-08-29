@@ -207,7 +207,19 @@ if matched and redis.call('HGET', KEYS[1], 'appliedPolicyStrategy') == 'hybrid'
   and redis.call('HGET', KEYS[1], 'hybridPolicyRevision') == ARGV[1] then
   hybridCount = tostring(redis.call('HINCRBY', KEYS[1], 'hybridObservedCount', 1))
 end
-redis.call('HSET', KEYS[1], 'updatedAt', ARGV[2])
+local sequence = lifetime ~= '' and lifetime or hybridCount
+if sequence ~= '' then
+  redis.call('HSET', KEYS[1],
+    'compressionObservationInvocationId', ARGV[2],
+    'compressionObservationSequence', sequence,
+    'compressionObservationObservedAt', ARGV[3])
+else
+  redis.call('HDEL', KEYS[1],
+    'compressionObservationInvocationId',
+    'compressionObservationSequence',
+    'compressionObservationObservedAt')
+end
+redis.call('HSET', KEYS[1], 'updatedAt', ARGV[3])
 return {'recorded', lifetime, hybridCount, matched and '1' or '0'}
 `;
 
@@ -437,13 +449,19 @@ export class RedisSessionChainStore implements ISessionChainStore {
     return Number(result) === 1 ? this.get(id) : null;
   }
 
-  async recordCompressionEvent(id: string, policyRevision: string): Promise<CompressionEventResult | null> {
+  async recordCompressionEvent(
+    id: string,
+    policyRevision: string,
+    invocationId: string,
+  ): Promise<CompressionEventResult | null> {
+    const observedAt = Date.now();
     const result = (await this.redis.eval(
       RECORD_COMPRESSION_LUA,
       1,
       SessionChainKeys.detail(id),
       policyRevision,
-      String(Date.now()),
+      invocationId,
+      String(observedAt),
     )) as [string, string?, string?, string?];
     if (result[0] !== 'recorded') return null;
     const record = await this.get(id);
@@ -848,6 +866,16 @@ export class RedisSessionChainStore implements ISessionChainStore {
             startedAt: data.hybridStartedAt,
           }
         : undefined;
+    const compressionObservation =
+      data.compressionObservationInvocationId &&
+      data.compressionObservationSequence &&
+      data.compressionObservationObservedAt
+        ? {
+            invocationId: data.compressionObservationInvocationId,
+            sequence: parseInt(data.compressionObservationSequence, 10),
+            observedAt: parseInt(data.compressionObservationObservedAt, 10),
+          }
+        : undefined;
     const consecutiveRestoreFailures = data.consecutiveRestoreFailures
       ? parseInt(data.consecutiveRestoreFailures, 10)
       : undefined;
@@ -867,6 +895,7 @@ export class RedisSessionChainStore implements ISessionChainStore {
       ...(lastUsage ? { lastUsage } : {}),
       messageCount: parseInt(data.messageCount ?? '0', 10),
       compressionCount,
+      ...(compressionObservation ? { compressionObservation } : {}),
       ...(sealReason ? { sealReason } : {}),
       ...(sealedAt ? { sealedAt } : {}),
       ...(appliedPolicy ? { appliedPolicy } : {}),

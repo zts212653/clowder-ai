@@ -1,6 +1,4 @@
-import { execFileSync } from 'node:child_process';
-import fs from 'node:fs';
-import puppeteer, { type Browser } from 'puppeteer-core';
+import type { Page } from 'puppeteer-core';
 import sharp from 'sharp';
 import { createModuleLogger } from '../infrastructure/logger.js';
 import {
@@ -11,6 +9,7 @@ import {
   readImageExportCaptureHeight,
   refreshHtmlWidgetExportLayoutProof,
 } from './html-widget-export-readiness.js';
+import { ImageExportBrowserSession } from './image-export-browser-session.js';
 
 export { resolveExportCaptureHeight } from './html-widget-export-readiness.js';
 
@@ -63,83 +62,17 @@ export async function stitchImageExportChunks(
     .toBuffer();
 }
 
-function resolveConfiguredChromePath(): string | null {
-  const envPath = process.env.CHROME_EXECUTABLE_PATH;
-  if (!envPath) return null;
-  if (fs.existsSync(envPath)) {
-    log.info({ path: envPath }, 'Using CHROME_EXECUTABLE_PATH from env');
-    return envPath;
-  }
-  log.warn({ path: envPath }, 'CHROME_EXECUTABLE_PATH set but file not found, falling back to auto-detect');
-  return null;
-}
-
-function findLinuxBrowserCandidates(): string[] {
-  const candidates: string[] = [];
-  for (const name of ['google-chrome', 'google-chrome-stable', 'microsoft-edge', 'chromium', 'chromium-browser']) {
-    try {
-      const resolved = execFileSync('which', [name], { encoding: 'utf8' }).trim();
-      if (resolved) candidates.push(resolved);
-    } catch {
-      // not found, continue
-    }
-  }
-  return candidates;
-}
-
-function browserCandidatesForPlatform(): string[] {
-  if (process.platform === 'darwin') {
-    return [
-      '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
-      '/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge',
-      '/Applications/Chromium.app/Contents/MacOS/Chromium',
-    ];
-  }
-
-  if (process.platform === 'win32') {
-    return [
-      process.env.PROGRAMFILES ? `${process.env.PROGRAMFILES}\\Google\\Chrome\\Application\\chrome.exe` : null,
-      process.env['PROGRAMFILES(X86)']
-        ? `${process.env['PROGRAMFILES(X86)']}\\Google\\Chrome\\Application\\chrome.exe`
-        : null,
-      process.env.PROGRAMFILES ? `${process.env.PROGRAMFILES}\\Microsoft\\Edge\\Application\\msedge.exe` : null,
-    ].filter((candidate): candidate is string => Boolean(candidate));
-  }
-
-  if (process.platform === 'linux') return findLinuxBrowserCandidates();
-  return [];
-}
-
-/**
- * Detect a Chromium-based browser executable on the system.
- * Priority: CHROME_EXECUTABLE_PATH env > system Chrome > Edge > Chromium.
- * CDP (Chrome DevTools Protocol) requires a Chromium-based browser —
- * Firefox/Safari are not supported.
- */
-function detectChromePath(): string {
-  const configuredPath = resolveConfiguredChromePath();
-  if (configuredPath) return configuredPath;
-
-  const candidates = browserCandidatesForPlatform();
-  for (const candidate of candidates) {
-    if (fs.existsSync(candidate)) {
-      log.info({ path: candidate }, 'Detected Chromium-based browser');
-      return candidate;
-    }
-  }
-
-  throw new Error(
-    `No Chromium-based browser found. Set CHROME_EXECUTABLE_PATH or install Chrome/Edge/Chromium. Searched: ${candidates.join(', ')}`,
-  );
-}
-
 /**
  * ImageExporter service for capturing screenshots of web pages using Chrome headless.
  * Uses scroll-and-stitch with Sharp to handle pages of any height without
  * hitting Chrome's GPU texture limit (~16384px) which causes content duplication.
  */
 export class ImageExporter {
-  private browser: Browser | null = null;
+  private readonly browserSession = new ImageExportBrowserSession();
+
+  private get browser() {
+    return this.browserSession.browser;
+  }
 
   /**
    * Capture a screenshot of the given URL.
@@ -147,17 +80,9 @@ export class ImageExporter {
    * and stitches them together using Sharp.
    */
   async capture(url: string, userId: string, options?: ImageExportCaptureOptions): Promise<Buffer> {
-    let page: puppeteer.Page | null = null;
+    let page: Page | null = null;
     try {
-      if (!this.browser) {
-        this.browser = await puppeteer.launch({
-          executablePath: detectChromePath(),
-          headless: true,
-          args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage'],
-        });
-      }
-
-      page = await this.browser.newPage();
+      page = await this.browserSession.openPage();
       const capturePage = page;
 
       await page.setExtraHTTPHeaders({ 'X-Cat-Cafe-User': userId });
@@ -272,7 +197,7 @@ export class ImageExporter {
    * Wait until document.scrollHeight stabilizes (no change for multiple consecutive checks).
    * Handles React rendering large message lists that may take many frames to commit.
    */
-  private async waitForStableHeight(page: puppeteer.Page, maxWait = 8000, interval = 300): Promise<void> {
+  private async waitForStableHeight(page: Page, maxWait = 8000, interval = 300): Promise<void> {
     const requiredStableChecks = 3;
     let lastHeight = 0;
     let stableChecks = 0;
@@ -296,7 +221,7 @@ export class ImageExporter {
     throw new Error(`Page height did not stabilize within maxWait (${elapsed}ms, last height ${lastHeight}px)`);
   }
 
-  private async waitForHtmlWidgets(page: puppeteer.Page, maxWait = 10_000, interval = 100): Promise<void> {
+  private async waitForHtmlWidgets(page: Page, maxWait = 10_000, interval = 100): Promise<void> {
     const start = Date.now();
     let lastPending: string[] = [];
 
@@ -318,7 +243,7 @@ export class ImageExporter {
   }
 
   /** Wait for two animation frames (one paint cycle). */
-  private async waitForPaint(page: puppeteer.Page): Promise<void> {
+  private async waitForPaint(page: Page): Promise<void> {
     await page.evaluate(() => {
       const browserWindow = globalThis as unknown as BrowserWindowSnapshot;
       return new Promise<void>((resolve) =>
@@ -327,10 +252,7 @@ export class ImageExporter {
     });
   }
 
-  async close() {
-    if (this.browser) {
-      await this.browser.close();
-      this.browser = null;
-    }
+  async close(): Promise<void> {
+    await this.browserSession.close();
   }
 }

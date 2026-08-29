@@ -1387,5 +1387,55 @@
       "draftPrompt": "请检查当前项目是否需要可选治理；先只打开 Project Setup 并预览建议，不要写入文件。"
     },
     "owner": "codex-sol"
+  },
+  {
+    "id": "feature-f195-true-companion-audio",
+    "kind": "feature",
+    "sourceRef": {
+      "path": "docs/features/F195-meeting-copilot-live-advisory.md",
+      "anchor": "True companion journeys (Phase I)"
+    },
+    "structureSource": {
+      "path": "packages/web/src/components/workspace/AudioInputPicker.tsx",
+      "anchor": "AudioInputPicker"
+    },
+    "bodySource": {
+      "path": "cat-cafe-skills/refs/live-audio.md",
+      "anchor": "App + 本地麦克风"
+    },
+    "contexts": ["concierge_idle", "thinking"],
+    "audience": ["cvo"],
+    "body": "陪看视频或开线上会议时，可以在实时转写面板同时选择 App 声音和本地麦克风；采集会跨猫猫回合持续，并分别显示 ASR、说话人和每路输入的健康状态。",
+    "action": {
+      "type": "open_concierge_draft",
+      "label": "打开伴随音频",
+      "draftPrompt": "请打开当前 thread 的实时转写面板，带我同时选择会议或视频 App 与本地麦克风，并先检查 ASR、说话人和输入健康。"
+    },
+    "owner": "codex-sol"
+  },
+  {
+    "id": "feature-f063-workspace-home-search",
+    "kind": "feature",
+    "sourceRef": {
+      "path": "docs/features/F063-hub-workspace-explorer.md",
+      "anchor": "AC-3: 全文搜索可搜到文件内容并展示匹配上下文"
+    },
+    "structureSource": {
+      "path": "packages/web/src/components/workspace/WorkspaceLauncherSearch.tsx",
+      "anchor": "WorkspaceLauncherSearch"
+    },
+    "bodySource": {
+      "path": "docs/features/F063-hub-workspace-explorer.md",
+      "anchor": "全文搜索：输关键词 → 搜遍仓库 → 返回匹配文件+行号+上下文"
+    },
+    "contexts": ["thinking", "feature_dev", "concierge_open"],
+    "audience": ["cvo", "developer"],
+    "body": "不记得文件在哪？打开 Workspace 后，直接在首页搜文件名或正文；结果会带行号和片段，点一下就能打开原文件。",
+    "action": {
+      "type": "open_concierge_draft",
+      "label": "帮我找文件",
+      "draftPrompt": "请打开 Workspace，帮我按文件名或正文找到目标文件并定位到匹配行。"
+    },
+    "owner": "codex-sol"
   }
 ]

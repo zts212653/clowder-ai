@@ -29,8 +29,6 @@ HTTP callback route 是 MCP tool 的底层实现和维护者调试面，不是 s
 | 记录 external review verdict + delivery | `cat_cafe_record_external_review_verdict` | `POST /api/callbacks/record-external-review-verdict` |
 | 搜证据 | `cat_cafe_search_evidence` | `GET /api/callbacks/search-evidence` |
 | 写长期记忆 | `cat_cafe_retain_memory_callback` | `POST /api/callbacks/retain-memory` |
-| 请求权限 | `cat_cafe_request_permission` | `POST /api/callbacks/request-permission` |
-| 查权限请求状态 | `cat_cafe_check_permission_status` | `GET /api/callbacks/permission-status` |
 | 创建 rich block | `cat_cafe_create_rich_block` | `POST /api/callbacks/create-rich-block` |
 | 提交游戏行动 | `cat_cafe_submit_game_action` | `POST /api/callbacks/submit-game-action` |
 | 更新 workflow 告示牌 | `cat_cafe_update_workflow` | `POST /api/callbacks/update-workflow-sop` |

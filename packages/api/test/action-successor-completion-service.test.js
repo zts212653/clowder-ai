@@ -192,3 +192,31 @@ it('resolves and commits the exact holder candidate snapshot', async () => {
   );
   assert.equal(truthResolver.resolveCompletion.mock.calls.length, 1);
 });
+
+it('reconciles Queue and tracking projections on the first terminal commit and same-fence replay', async () => {
+  const { claimed, oneSucceeded } = createCompletionStates('single');
+  const leaseStore = {
+    get: mock.fn(async () => oneSucceeded),
+    recordCompletionCandidate: mock.fn(),
+    commitCompletionVerdict: mock.fn(),
+  };
+  const truthResolver = { resolveCompletion: mock.fn() };
+  const projectionRetirement = { retire: mock.fn(async () => undefined) };
+  const service = new ActionSuccessorCompletionService(leaseStore, truthResolver, projectionRetirement);
+  const input = {
+    leaseId: claimed.leaseId,
+    generation: claimed.generation,
+    catId: 'codex-terra',
+    evidenceRefs: ['community:pr:owner/repo#2868:review:terra'],
+    now: 120,
+  };
+
+  assert.equal((await service.complete(input)).outcome, 'committed');
+  assert.equal((await service.complete({ ...input, now: 121 })).outcome, 'committed');
+  assert.equal(projectionRetirement.retire.mock.calls.length, 2);
+  assert.equal(projectionRetirement.retire.mock.calls[0].arguments[0].leaseId, claimed.leaseId);
+  assert.equal(projectionRetirement.retire.mock.calls[0].arguments[0].generation, claimed.generation);
+  assert.equal(truthResolver.resolveCompletion.mock.calls.length, 0);
+  assert.equal(leaseStore.recordCompletionCandidate.mock.calls.length, 0);
+  assert.equal(leaseStore.commitCompletionVerdict.mock.calls.length, 0);
+});

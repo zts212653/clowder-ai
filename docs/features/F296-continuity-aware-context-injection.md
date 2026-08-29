@@ -8,7 +8,7 @@ description: "按真实 runtime continuity 区分冷启动与热续，并让上�
 description_source: human
 description_author: codex-sol
 description_updated_at: 2026-08-15T13:07:32Z
-tips_exempt: "内部 prompt/context transport 契约收敛；不新增用户可操作的独立能力入口。"
+tips_exempt: "续租：本轮只收敛 cold rollover、compaction support 与 context transport 的内部连续性契约；不新增用户可操作的独立能力入口。"
 ---
 
 # F296: Continuity-Aware Context Injection — 冷启动可信定向包 + 热续增量
@@ -676,9 +676,28 @@ final-generation card 与 mapper-only canonical subject 均有真实 route fixtu
   支持的 carrier 使用 authoritative event，不支持的 carrier 显式 `unsupported`。`observesCompression=true`
   但无 typed event 必须仍判 unsupported；token/message drop 与 ACP/OpenCode scratchpad 文本签名/auto-continue
   熔断均不得冒充 compaction detection 或推进 epoch。
-  <br/>*当前只有 Claude `print_sdk` 的 typed `compact_boundary` + authenticated project hook 获得支持；
+  <br/>*当前只有 Claude `print_sdk` 的 typed `compact_boundary` + **live-ready authenticated project hook**
+  获得支持；三个 managed Claude project hook 必须复用该 invocation 的 `X-Invocation-Id` +
+  `X-Callback-Token`，route 经完成 startup recovery 的 callback registry 验权，并绑定凭据的
+  user/cat/thread 与 exact `cliSessionId`。callback auth/readiness 未就绪时显式
+  `hook_authentication_unavailable`，不得继续读取并不存在的 compression sequence。*
+  这里的 live-ready 不是启动期布尔值，而是同一 invocation coordinate 上三段证据的合取：全局
+  callback registry 已完成 recovery、当前 Claude `workingProjectRoot` 存在可执行的 project-local
+  PreCompact carrier，且该 invocation 的 authenticated `/api/sessions/seal` 已把本次 compression
+  observation 原子写进 active `SessionRecord`。前两项只证明“能够尝试”；只有第三项证明这次 hook
+  实际成功。runtime `/ready` 只能证明第一项，旧 session sequence 也不能替当前 invocation 作证。
+  provider-loop 按下表 fail closed：
+
+  | callback registry | active workspace PreCompact carrier | current-invocation seal observation | typed `compact_boundary` | authority result |
+  |---|---|---|---|---|
+  | unavailable | any | any | present | `unsupported:hook_authentication_unavailable`；不读取 session sequence |
+  | ready | absent / invalid | any | present | `unsupported:hook_carrier_unavailable`；不读取 session sequence |
+  | ready | ready | absent / stale / already consumed | present | `unsupported:hook_invocation_attestation_unavailable`；旧计数不得冒充当前 hook |
+  | ready | ready | fresh and sequence-bound | present | `supported`；消费该 observation 的 exact sequence，同一 observation 不得铸第二个 boundary |
+  | any | any | any | absent | 维持既有无 typed event 的 unsupported 路由；不得推断 compaction |
+
   Claude bg/PTY 因 hook delivery parity 未证保持 unsupported，其余 production carrier 全部显式
-  `typed_event_unroutable`。provider-loop integration 证明 structural event 到达 owner；能力声明不能铸事件。*
+  `typed_event_unroutable`。provider-loop integration 证明 structural event 到达 owner；能力声明不能铸事件。
 - [x] AC-B9: route-serial、route-parallel、SessionBootstrap、Context Briefing 与 Claude post-compact hook 消费
   同一 mode/presentation projection；人类卡片显示 coordinate + mode/reason + 各 tier 呈现数量，不建立第二份
   判断真相。十个对抗 fixture 全绿：旧 artifact vs 当前 subject、删除文件 vs typed callback、closed

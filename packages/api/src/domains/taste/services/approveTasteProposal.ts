@@ -108,6 +108,9 @@ async function ensureWriteCheckpoint(
   try {
     writerResult = await deps.writeVignette(proposal);
   } catch (err) {
+    if (isIndeterminatePublicationError(err)) {
+      return exitStage({ ok: false, reason: 'write_failed', error: errMessage(err), proposal });
+    }
     await deps.store.rollbackClaim(proposalId);
     return exitStage({ ok: false, reason: 'write_failed', error: errMessage(err) });
   }
@@ -157,4 +160,8 @@ function exitStage(result: ApproveTasteProposalResult): StageExit {
 
 function errMessage(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
+}
+
+function isIndeterminatePublicationError(err: unknown): boolean {
+  return err instanceof Error && 'publicationOutcome' in err && err.publicationOutcome === 'indeterminate';
 }

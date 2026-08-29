@@ -157,6 +157,10 @@ describe('durable message extra carriers survive Redis round-trips', () => {
       meetingArtifact: {
         intakeId: 'intake-1',
         sourceHandle: 'meeting://source-1',
+        resourceRef: `meeting-artifact://intakes/intake-1?revision=sha256:${'b'.repeat(64)}`,
+        sourceRevision: `sha256:${'b'.repeat(64)}`,
+        byteLength: 4,
+        contentType: 'text/plain',
         trust: 'untrusted_external',
         instructionPolicy: 'data_only',
       },

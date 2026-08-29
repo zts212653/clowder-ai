@@ -4,9 +4,26 @@ import { JSDOM } from 'jsdom';
 
 import { createChatGptPageAdapter } from '../src/plugins/cloud-cat-personal-host/extension/chatgpt-page-adapter.mjs';
 
+function attachFixtureMessageId({ document, messageIdPlacement, turn, message, sendCount }) {
+  const isTurnDescendant = messageIdPlacement.startsWith('turn-descendant');
+  let idOwner = message;
+  if (messageIdPlacement === 'turn') idOwner = turn;
+  if (isTurnDescendant) idOwner = document.createElement('div');
+  idOwner.dataset.messageId = `host-message-${sendCount}`;
+  if (!isTurnDescendant) return;
+
+  turn.append(idOwner);
+  if (messageIdPlacement === 'turn-descendant-ambiguous') {
+    const otherIdOwner = document.createElement('div');
+    otherIdOwner.dataset.messageId = `other-host-message-${sendCount}`;
+    turn.append(otherIdOwner);
+  }
+}
+
 function createFixture({
   conversationId = 'conversation-7',
   addMessageId = true,
+  messageIdPlacement = 'message',
   initialComposerText = '',
   sendButton = 'present',
 } = {}) {
@@ -55,11 +72,13 @@ function createFixture({
       const composer = document.querySelector('#prompt-textarea');
       const sentText = composer.textContent;
       sentTexts.push(sentText);
-      const message = document.createElement('article');
+      const turn = document.createElement('article');
+      const message = messageIdPlacement === 'message' ? turn : document.createElement('div');
       message.dataset.messageAuthorRole = 'user';
-      if (addMessageId) message.dataset.messageId = `host-message-${sendCount}`;
+      if (addMessageId) attachFixtureMessageId({ document, messageIdPlacement, turn, message, sendCount });
       message.textContent = sentText;
-      document.querySelector('#messages').append(message);
+      if (message !== turn) turn.append(message);
+      document.querySelector('#messages').append(turn);
       composer.replaceChildren();
     });
   const initialButton = document.querySelector('[data-testid="send-button"]');
@@ -88,6 +107,68 @@ describe('ChatGPT page adapter', () => {
     assert.equal(result.hostMessageId, 'host-message-1');
     assert.equal(fixture.getSendCount(), 1);
     assert.deepEqual(progress, ['inserted', 'submitted', 'host_observed']);
+  });
+
+  it('accepts the real host ID from the enclosing ChatGPT turn', async () => {
+    const fixture = createFixture({ messageIdPlacement: 'turn' });
+    const adapter = createChatGptPageAdapter({
+      document: fixture.document,
+      location: fixture.dom.window.location,
+      MutationObserver: fixture.dom.window.MutationObserver,
+      observationTimeoutMs: 25,
+    });
+
+    const result = await adapter.appendMessage({
+      requestId: 'request-turn-id',
+      conversationId: 'conversation-7',
+      text: 'host id belongs to the enclosing turn',
+      idempotencyKey: 'source-message-turn-id',
+    });
+
+    assert.equal(result.hostMessageId, 'host-message-1');
+    assert.equal(fixture.getSendCount(), 1);
+  });
+
+  it('accepts the real host ID from a descendant of the enclosing ChatGPT turn', async () => {
+    const fixture = createFixture({ messageIdPlacement: 'turn-descendant' });
+    const adapter = createChatGptPageAdapter({
+      document: fixture.document,
+      location: fixture.dom.window.location,
+      MutationObserver: fixture.dom.window.MutationObserver,
+      observationTimeoutMs: 25,
+    });
+
+    const result = await adapter.appendMessage({
+      requestId: 'request-turn-descendant-id',
+      conversationId: 'conversation-7',
+      text: 'host id belongs to a descendant of the enclosing turn',
+      idempotencyKey: 'source-message-turn-descendant-id',
+    });
+
+    assert.equal(result.hostMessageId, 'host-message-1');
+    assert.equal(fixture.getSendCount(), 1);
+  });
+
+  it('fails closed when the enclosing ChatGPT turn exposes multiple possible host IDs', async () => {
+    const fixture = createFixture({ messageIdPlacement: 'turn-descendant-ambiguous' });
+    const adapter = createChatGptPageAdapter({
+      document: fixture.document,
+      location: fixture.dom.window.location,
+      MutationObserver: fixture.dom.window.MutationObserver,
+      observationTimeoutMs: 25,
+    });
+
+    await assert.rejects(
+      adapter.appendMessage({
+        requestId: 'request-ambiguous-turn-descendant-id',
+        conversationId: 'conversation-7',
+        text: 'ambiguous real host ids must not produce a receipt',
+        idempotencyKey: 'source-message-ambiguous-turn-descendant-id',
+      }),
+      (error) => error.code === 'HOST_MESSAGE_NOT_OBSERVED',
+    );
+
+    assert.equal(fixture.getSendCount(), 1);
   });
 
   it('inserts first, then waits for the send button that the input event renders', async () => {

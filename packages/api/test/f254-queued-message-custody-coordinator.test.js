@@ -397,6 +397,72 @@ describe('F254 queued message custody coordinator', () => {
     );
   });
 
+  test('retires only the durable Queue target bound to the exact completed action fence', async () => {
+    const queue = new InvocationQueue();
+    const store = new MessageStore();
+    const message = store.append({
+      threadId: 'thread-1',
+      userId: 'user-1',
+      catId: 'fable5',
+      content: 'review exact HEAD',
+      mentions: ['codex-sol'],
+      timestamp: 100,
+      deliveryStatus: 'queued',
+      extra: { crossPost: { sourceThreadId: 'thread-source' } },
+    });
+    const exactFence = {
+      leaseId: 'lease-head-a',
+      generation: 4,
+      dispatchId: 'dispatch-head-a',
+      terminalPredicateDigest: 'digest-head-a',
+      invocationLineageRef: 'dispatch:dispatch-head-a',
+    };
+    const entries = [['codex-sol', exactFence]].map(([catId, actionSuccessorFence]) => {
+      const result = queue.enqueue({
+        ownerAuthProvenance: 'unknown',
+        threadId: 'thread-1',
+        userId: 'user-1',
+        content: message.content,
+        source: 'agent',
+        sourceCategory: 'a2a',
+        targetCats: [catId],
+        intent: 'review',
+        autoExecute: true,
+        callerCatId: 'fable5',
+        a2aParentInvocationId: 'parent-1',
+        a2aTriggerMessageId: message.id,
+        idempotencyKey: `action:${actionSuccessorFence.leaseId}:${actionSuccessorFence.generation}:${catId}`,
+        actionSuccessorFence,
+      });
+      assert.equal(result.outcome, 'enqueued');
+      queue.backfillMessageId('thread-1', 'user-1', result.entry.id, message.id);
+      return queue.getEntrySnapshot('thread-1', 'user-1', result.entry.id);
+    });
+    assert.equal(
+      store.initializeQueueCustody(message.id, createInitialCrossThreadQueuedMessageCustody(message.id, entries)).kind,
+      'initialized',
+    );
+    const retiredAt = entries[0].createdAt + 100;
+    const coordinator = new QueuedMessageCustodyCoordinator({ messageStore: store, now: () => retiredAt });
+
+    const mismatch = await coordinator.retireActionSuccessorFence(message.id, {
+      ...exactFence,
+      leaseId: 'lease-head-b',
+    });
+    assert.equal(mismatch, null);
+    assert.deepEqual(store.getById(message.id).queueCustody.pendingTargetCats, ['codex-sol']);
+    const first = await coordinator.retireActionSuccessorFence(message.id, exactFence);
+    const replay = await coordinator.retireActionSuccessorFence(message.id, exactFence);
+    const custody = store.getById(message.id).queueCustody;
+
+    assert.equal(first.changed, true);
+    assert.equal(replay.changed, false);
+    assert.deepEqual(custody.pendingTargetCats, []);
+    assert.deepEqual(custody.withdrawnByCatIds, ['codex-sol']);
+    assert.equal(custody.carrierByTargetCatId['codex-sol'].actionSuccessorFence.leaseId, 'lease-head-a');
+    assert.deepEqual(custody.actionSuccessorTerminalFenceByTargetCatId['codex-sol'], exactFence);
+  });
+
   test('builds initial custody from the exact live Queue identity', () => {
     const queue = new InvocationQueue();
     const entry = enqueueUser(queue, ['opus', 'codex'], 'strict');

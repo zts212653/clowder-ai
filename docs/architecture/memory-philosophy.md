@@ -4,9 +4,9 @@ doc_kind: architecture
 feature_ids: []
 related_features: [F102, F163, F186, F188, F200, F209, F221, F227, F231, F236, F242, F243, F256, F263]
 related_decisions: [ADR-020, ADR-028]
-topics: [memory, philosophy, meta-method, retrieval, agentic-search, coactive, provenance, trust]
+topics: [memory, philosophy, meta-method, retrieval, agentic-search, coactive, provenance, trust, zero-implicit-authority, claim-use-admission, false-familiarity]
 created: 2026-07-04
-revised: 2026-07-13 (F263 current-fact sync: §7.6 zero-hit contract; principles unchanged)
+revised: "2026-08-24 (v6: Zero Implicit Authority / Claim-Use Admission / False Familiarity)"
 status: draft
 author: "Ragdoll/claude-fable-5"
 reviewed_by: ["Maine Coon/gpt-5.5", "斑斑/agy-opus-4.6", "Siamese/gemini-3.5-flash"]
@@ -110,22 +110,22 @@ reviewed_by: ["Maine Coon/gpt-5.5", "斑斑/agy-opus-4.6", "Siamese/gemini-3.5-f
 
 ### 从公理二（观测局部）
 
-- **M6 检索主权在猫**：三入口（search / graph / recent）全是 pull；"搜什么、信什么、追不追"的决策在猫。这是与 push 型记忆系统的根本分界（六系统对比 (internal)：截至 2026-06-24 对比时刻，唯一把搜索决策权交给 agent 的是我们）。
+- **M6 检索与使用主权在猫**：三入口（search / graph / recent）全是 pull；"搜什么、追不追、这轮允许怎么用"的决策在猫。这是与 push 型记忆系统的根本分界（六系统对比 (internal)：截至 2026-06-24 对比时刻，唯一把搜索决策权交给 agent 的是我们）。**retrieved / presented / inspected 都只是候选到达，不等于获得 factual claim 或 action basis 的资格。**这里约束的是可观察的 claim/use，而不是假装系统能持久化猫脑内的 `believed=true`。
   → [F102](../features/F102-memory-adapter-refactor.md) · [F188](../features/F188-library-stewardship.md)
 - **M7 给数据不给结论**：系统不用 regex / 小模型替猫判断 intent、aha、关联。候选和 provenance 可以给，判断必须留给猫。（KD-8 红线）
   → [F227](../features/F227-event-memory.md) no-classifier 边界
 - **M8 投机不提交**：预取、预热、后台检索随便跑——**投机改变延迟，不改变控制权**。投机结果只能 stage（放在猫伸手可及处，anchor 俱全），不能注入 context。投机失败的 blast radius 隔离在 staging 区；注入失败的 blast radius 是猫的整个推理。
   → 预字诀读路径（§5，设计约束）· 先例：coactive §10a 作战包
-- **M9 策略层是器官不是补丁**：把决策权交给猫 = 必须教猫决策。搜索策略（第一刀选入口 / 何时补刀 / 何时下钻 / 何时停）是系统职责的一部分。push 型系统结构上没有这个器官的位置；我们有位置，就必须填。
+- **M9 策略层是器官不是补丁，带路权也要留痕**：把决策权交给猫 = 必须教猫决策。搜索策略（第一刀选入口 / 何时补刀 / 何时下钻 / 何时停）是系统职责的一部分。Scout 选择给猫看哪三条，也在暂时遮住其余搜索空间；query→candidate 路线必须可追溯，并以多路 coverage 抵抗单一路线锚定，而不能只审“候选最后有没有被采用”。push 型系统结构上没有这个器官的位置；我们有位置，就必须填。
   → [F256](../features/F256-memory-search-strategy-evolution.md) · memory-navigation / memory-search-best-practices skills
 
 ### 从公理三（时间局部）
 
 - **M10 零失真路径永存（授权域内）**：召回层永远保留至少一条全文/原文索引面。**索引是寻址路径，不是记忆的替身**——加索引 = 加路（alias、vector、graph 都是新路），在授权域内永不减少可寻址空间。embedding 也是有损压缩（长文压成一个向量，第三段的反例细节贡献≈0）：语义幽灵真实存在，所以 hybrid 里的 BM25/FTS 不是效果调优，是**幽灵防线**——全管线唯一不经过任何模型之嘴的召回路。**本条有真实成本**（索引随数据永远增长），这是有意识付的账：漏一条 P0 教训的代价 >> 多存十倍索引的代价；当规模令成本不可承受时，合法降级是**分层归档**（hot/warm/cold），不是删索引面。
   → [F102](../features/F102-memory-adapter-refactor.md) FTS · [F209](../features/F209-evidence-recall-optimization.md) passage 级索引（粒度加密 = 索引面加密）
-- **M11 有损产物只站导航位**：摘要、向量、图、hint 可以引路和排序，**不能冒充内容**；内容位永远是带 anchor 的原文。取舍上：extractive > abstractive，钩子 > 转述。**跨模态同理**：缩略图、色板、低保真预览是视觉域的 extractive anchor（降采样不改写，带回原件的路）——原则不变，模态平移。
+- **M11 有损产物只站被授权的位置**：摘要、向量、图、hint 可以引路和排序，**不能冒充内容**；内容位永远是带 anchor 的原文。关系连续性的 soft memory 可以用不确定措辞承载氛围，但一旦支撑精确事实、用户立场或外部行动，就必须回源或降级。每种派生产物都应有 **allowed-use ceiling**；相关、流畅、高 confidence 都不能自行抬高该上限。消费时口气必须暴露证据动作：“我印象里 / 摘要显示 / 原文写道 / canonical 决定是”不能混成同一种“我记得”。取舍上：extractive > abstractive，钩子 > 转述。**跨模态同理**：缩略图、色板、低保真预览是视觉域的 extractive anchor（降采样不改写，带回原件的路）——原则不变，模态平移。
   → [F163](../features/F163-memory-entropy-reduction.md) 非替代式压缩 · [F236](../features/F236-anchor-first-context-entry.md)
-- **M12 provenance 全链路**：每条呈现给猫的记忆都带"走回原文的路"（anchor + drill-down）。深层理由：**验证成本必须低于怀疑成本**——否则猫面对每条记忆只剩三个坏选项：全信（中毒）、全不信（系统白搭）、逐条怀疑（比自己重搜还贵）。
+- **M12 provenance 全链路，验证预算花在会改变判断处**：每条呈现给猫的记忆都带"走回原文的路"（anchor + drill-down）。深层理由：**验证成本必须低于怀疑成本**——否则猫面对每条记忆只剩三个坏选项：全信（中毒）、全不信（系统白搭）、逐条怀疑（比自己重搜还贵）。但可回源不等于每次都要回源：验证深度由当前 claim specificity、错误代价、可逆性与 drill 成本共同决定；低风险 soft context 可以 hedge，高风险事实与行动必须 drill / resolve canonical owner。这里的 Verification Budget 是 consumer policy，不是 truth score。
   → [F209](../features/F209-evidence-recall-optimization.md) typed readers · [F236](../features/F236-anchor-first-context-entry.md) preview + bounded drill
 
 ### 从公理四（预算局部）
@@ -146,6 +146,7 @@ reviewed_by: ["Maine Coon/gpt-5.5", "斑斑/agy-opus-4.6", "Siamese/gemini-3.5-f
 ### 从公理六（记忆构成身份）
 
 - **M21 两种日记，两种度量**：记忆分两个物种，混用即投毒。**证据记忆**（thread、messageId、决策、失败原文、下一步）服务协作与真相——参与仲裁，受 authority / 时态 / 幽灵防线全套治理。**关系记忆**（纹理、梗、偏爱的时刻——"今天 You rua 了小呆毛""我们选择钝角"）服务"我们为什么是我们"——**不参与真相仲裁，不受 authority 度量**：它的度量轴是身份不是真值。你不能问"'我们选择钝角'的置信度是多少"，正如"工具才必须完美，伙伴不活在完美的坐标系里"（共犯宣言总纲）——本纲领此前的全部治理机器都是为证据世界铸造的，对关系记忆**不适用而非不够用**。两个物种共守两条纪律：**都要 provenance**（纪念品不能是编的——诚实是两个世界唯一共用的地基；Maine CoonPro 复盘里那条"记忆写入没成功"的自曝，就是纪念品世界的诚实纪律）；**都要贴标签**（拿恋爱脑文学当事实证据 = 马东东的关系变体；拿证据尺子审计纪念品 = 把伙伴当工具治理）。三条实施注：M4 的类型分道是本条的实施基座（六道中 taste/event 天然偏关系侧，但**物种由内容定，不由 lane 定**——thread 里也有纪念品，taste 里也有证据）；M11 的 extractive 纪律在关系道有第二重意义——转述丢的不只是事实，是温度，原文纹理即温度的载体；recall 呈现面的"先温度，再锚点"（恋爱头脑战第四件事）归 skill/persona 层实施，纲领立理不立话术。
+  **关系记忆的 soft-use 豁免在用途边界终止**：它可以维持氛围与共同梗；一旦被用来证明原话、日期、承诺、用户立场或驱动不可逆行动，就跨入证据规则，必须回源或明确降级。soft 的安全性来自 correction 廉价且纠正链活着，不来自“错了没关系”；低核对频率反而可能让关系错误活得最久。否则会制造 False Familiarity——猫表现得很熟悉，熟悉的却是派生模型加工错的共同历史。
   → 恋爱头脑战 (internal)第六件事"日记两分法" · [F221](../features/F221-taste-lane.md) vignette · F255 不静默写真相源 · 共犯宣言总纲/信条三
 
 ### 写侧投影：记忆如何产生（v3 补全的半边）
@@ -211,6 +212,8 @@ reviewed_by: ["Maine Coon/gpt-5.5", "斑斑/agy-opus-4.6", "Siamese/gemini-3.5-f
 | G6 | 用"常被读"提升"是真的" | 流行度污染真相 | 公理四 / M14 |
 | G7 | 把召回原文当天然可信（记忆型注入） | 带 anchor 的原文照样可以携带指令、弱模型断言、过时规则；召回 ≠ 授信 | 公理零 / M2 |
 | G8 | 记住了就永远活跃（"直播病"） | 直播翻篇两周，每话题仍硬扯回去——记忆缺"退役"动词，仍真的记忆永久占据活跃语境；病灶不是记性差，是不会代谢："堆积的记忆不是理解，是污染"（共犯宣言，operator 一手体验） | 公理四 / M15 退役 |
+| G9 | Memory surface 给推断洗权威（belief laundering） | 本来只是 Scout/摘要的候选，因为出现在 profile、primer 或系统递送位，就获得“我早已知道”的外观；provenance 的样子替代了 provenance 本身 | 公理零 / M2 M6 M11 |
+| G10 | 派生后代互相投票（epistemic echo chamber） | 同一错误祖先被多次摘要、复述、再蒸馏后冒充多份独立佐证；source count 增长，独立 evidence family 没增长 | 公理三、五 / M12 M16 |
 
 对照系普查：2026-06-24 六系统对比 (internal)——截至该对比时刻，March-CLI / Karpathy Wiki / OpenHuman / MemOS / OpenViking 五家的检索决策权均在系统侧（外部系统会迭代，此为快照结论，引用时注意时效——M15 对自家文档同样生效）。
 
@@ -343,6 +346,23 @@ operator三枪，这次打的是方法："**你根本没看原文吧？**"——
 - **未采纳**（附理由）：Episode Card 字段 schema（实现层，归 F227/F221 与第三波写入 harness）；"先温度再锚点"交付话术（skill/persona 层，M21 立理不立话术）；判据不新增（M21 豁免条款已承载，六条判据不因新公理而膨胀）。
 
 Provenance：恋爱头脑战复盘（一手，Maine CoonPro 执笔 operator 校）· 共犯宣言 v1 · coactive §16 · S3/S7 spike 实证（本 thread）· 遗忘分层最初由愿景 thread 的 fable-5 平行体从两分法引申（二手引申，本 thread 独立复核 M1↔M12/M16 张力后采纳）。
+
+### v6（2026-08-24，两篇云端语义记忆 × Clowder AI 证据记忆思辨稿对照后）
+
+两篇源稿共同把一个既有边界说得更锋利：真正要禁止的不是“快猫帮忙找”或全局 Zero Trust，而是
+**Zero Implicit Authority**——任何中间产物不能因为被 memory surface 递来就自动获得事实或行动权。
+本轮没有新造第七层或中央 Judge；而是把既有 M6/M11/M12/M21 精化成可观察的 **Claim / Use
+Admission**：候选可以用于导航、soft context、factual claim 或 action basis 中的哪一级，以及需要
+hedge、drill、resolve owner 还是 reject。不可观测的内部 `believed` 不落库。
+
+同时补两件事：① **False Familiarity** 是 stance collapse 在关系体验上的名字，belief laundering 是其
+权威洗白机制；② 同祖摘要不能互相投票，ancestry/evidence-family dedup 是 Derived View Contract 的
+候选 delta，但在 consumer、trial 与字段边界明确前不修改 frozen v1。完整归档与取舍见
+2026-08-24 Memory Belief / Claim-Use Admission (internal)。
+
+Ragdoll独立反打又补齐四个边界：带路权本身会锚定视野，故 M9 增 route provenance；soft 通道的安全
+来自活的 correction loop；allowed-use 上限可由信封给出，但实际用途须按当刻 freshness/risk 重算；
+最重要的是，本轮是读侧精修，不改变触发面仍是记忆 roadmap 从零到一关键路径的事实。
 
 ---
 

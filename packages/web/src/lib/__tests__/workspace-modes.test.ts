@@ -8,6 +8,7 @@ describe('workspace mode contract', () => {
 
   it('guards unknown preferred workspace modes', () => {
     expect(isWorkspaceMode('eval')).toBe(true);
+    expect(isWorkspaceMode('collective')).toBe(false);
     expect(isWorkspaceMode('settings')).toBe(false);
     expect(isWorkspaceMode(null)).toBe(false);
   });

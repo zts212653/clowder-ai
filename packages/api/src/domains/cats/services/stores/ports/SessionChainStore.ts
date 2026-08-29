@@ -114,6 +114,7 @@ export interface ISessionChainStore {
   recordCompressionEvent(
     id: string,
     policyRevision: string,
+    invocationId: string,
   ): CompressionEventResult | null | Promise<CompressionEventResult | null>;
   /** Atomically transition active -> sealing, optionally guarded by the applied policy revision. */
   transitionToSealing(
@@ -307,7 +308,7 @@ export class SessionChainStore implements ISessionChainStore {
     return record;
   }
 
-  recordCompressionEvent(id: string, policyRevision: string): CompressionEventResult | null {
+  recordCompressionEvent(id: string, policyRevision: string, invocationId: string): CompressionEventResult | null {
     const record = this.records.get(id);
     if (!record || record.status !== 'active') return null;
     if (record.compressionCount !== null) record.compressionCount += 1;
@@ -320,7 +321,14 @@ export class SessionChainStore implements ISessionChainStore {
     ) {
       record.hybridProgress.observedCount += 1;
     }
-    record.updatedAt = Date.now();
+    const observedAt = Date.now();
+    const sequence = record.compressionCount ?? record.hybridProgress?.observedCount;
+    if (typeof sequence === 'number' && Number.isSafeInteger(sequence) && sequence >= 1) {
+      record.compressionObservation = { invocationId, sequence, observedAt };
+    } else {
+      record.compressionObservation = undefined;
+    }
+    record.updatedAt = observedAt;
     return {
       compressionCount: record.compressionCount,
       hybridProgress: record.hybridProgress ?? null,

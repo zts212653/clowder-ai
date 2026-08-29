@@ -7,6 +7,10 @@ export interface TasteRepository {
   approvalLockKey(): string;
 }
 
+export interface PublishableTasteRepository extends TasteRepository {
+  gitCheckoutRoot(): string;
+}
+
 interface GitWorktree {
   path: string;
   branch?: string;
@@ -40,7 +44,7 @@ function parseWorktrees(raw: string): GitWorktree[] {
  * environment roots are intentionally not consulted: production may point both
  * at runtime/main-sync, and neither variable is a canonical-main locator.
  */
-export class FileTasteRepository implements TasteRepository {
+export class FileTasteRepository implements PublishableTasteRepository {
   private readonly projectRoot: string;
 
   constructor(projectRoot: string) {
@@ -62,7 +66,13 @@ export class FileTasteRepository implements TasteRepository {
     return resolve(mainWorktree.path);
   }
 
+  gitCheckoutRoot(): string {
+    return resolve(runGit(this.projectRoot, ['rev-parse', '--show-toplevel']));
+  }
+
   approvalLockKey(): string {
-    return join(this.canonicalRoot(), 'docs/taste/index.md');
+    const checkoutRoot = this.gitCheckoutRoot();
+    const commonDir = resolve(checkoutRoot, runGit(checkoutRoot, ['rev-parse', '--git-common-dir']));
+    return join(commonDir, 'cat-cafe-taste-publication');
   }
 }

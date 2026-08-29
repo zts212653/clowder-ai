@@ -13,6 +13,7 @@ const PR_NUMBER = 1185;
 const OLD_HEAD = '1111111111111111111111111111111111111111';
 const CURRENT_HEAD = '2222222222222222222222222222222222222222';
 const AUTHORIZATION_REF = '0000000000000000-000000-deadbeef';
+const INTAKE_INTENT_ISSUE = 3958;
 const SCRIPT_PATH = fileURLToPath(new URL('./clowder-merge-execution.mjs', import.meta.url));
 const INBOUND_RUNBOOK_URL = new URL('../cat-cafe-skills/refs/opensource-ops-inbound-pr.md', import.meta.url);
 
@@ -34,14 +35,37 @@ function baseInput(overrides = {}) {
       scope: 'pull_request',
       authorizedHead: OLD_HEAD,
     },
+    intakePlan: {
+      decision: 'absorbed',
+      intentIssue: INTAKE_INTENT_ISSUE,
+      intentIssueTruth: {
+        state: 'OPEN',
+        labels: [{ name: 'intake' }],
+        body: `Source PR: clowder-ai#${PR_NUMBER}`,
+      },
+    },
     ...overrides,
   };
 }
 
-function runCli(prTruth, extraArgs = []) {
+function runCli(
+  prTruth,
+  extraArgs = [],
+  intakeArgs = ['--intake-decision', 'absorbed', '--intake-intent-issue', String(INTAKE_INTENT_ISSUE)],
+) {
   const tempDir = mkdtempSync(path.join(os.tmpdir(), 'clowder-merge-execution-'));
   const fixturePath = path.join(tempDir, 'pr.json');
+  const intakeFixturePath = path.join(tempDir, 'intake-issue.json');
   writeFileSync(fixturePath, JSON.stringify(prTruth), 'utf8');
+  writeFileSync(
+    intakeFixturePath,
+    JSON.stringify({
+      state: 'OPEN',
+      labels: [{ name: 'intake' }],
+      body: `Source PR: clowder-ai#${PR_NUMBER}`,
+    }),
+    'utf8',
+  );
   try {
     const result = spawnSync(
       process.execPath,
@@ -57,11 +81,16 @@ function runCli(prTruth, extraArgs = []) {
         `pr:${REPOSITORY}#${PR_NUMBER}`,
         '--authorization-scope',
         'pull_request',
+        ...intakeArgs,
         ...extraArgs,
       ],
       {
         encoding: 'utf8',
-        env: { ...process.env, CAT_CAFE_CLOWDER_MERGE_PR_FIXTURE: fixturePath },
+        env: {
+          ...process.env,
+          CAT_CAFE_CLOWDER_MERGE_PR_FIXTURE: fixturePath,
+          CAT_CAFE_CLOWDER_MERGE_INTAKE_FIXTURE: intakeFixturePath,
+        },
       },
     );
     const lines = result.stdout.trim().split('\n');
@@ -72,12 +101,100 @@ function runCli(prTruth, extraArgs = []) {
 }
 
 describe('planClowderMergeExecution', () => {
+  it('blocks source merge when no durable intake plan is declared', () => {
+    const result = planClowderMergeExecution(baseInput({ intakePlan: undefined }));
+
+    assert.equal(result.outcome, 'blocked');
+    assert.equal(result.reasonCode, 'intake_plan_missing');
+    assert.equal(result.nextAction, 'declare_intake_plan');
+    assert.equal(result.command, null);
+  });
+
+  it('requires an Intake Intent Issue for an absorbed decision', () => {
+    const result = planClowderMergeExecution(
+      baseInput({ intakePlan: { decision: 'absorbed', intentIssue: undefined } }),
+    );
+
+    assert.equal(result.outcome, 'blocked');
+    assert.equal(result.reasonCode, 'intake_intent_issue_missing');
+    assert.equal(result.nextAction, 'create_intake_intent_issue');
+    assert.equal(result.command, null);
+  });
+
+  it('rejects an absorbed issue that is not an open intake issue for the same source PR', () => {
+    const result = planClowderMergeExecution(
+      baseInput({
+        intakePlan: {
+          decision: 'absorbed',
+          intentIssue: INTAKE_INTENT_ISSUE,
+          intentIssueTruth: {
+            state: 'CLOSED',
+            labels: [{ name: 'intake' }],
+            body: 'Source PR: clowder-ai#9999',
+          },
+        },
+      }),
+    );
+
+    assert.equal(result.outcome, 'blocked');
+    assert.equal(result.reasonCode, 'intake_intent_issue_not_open');
+    assert.equal(result.nextAction, 'fix_intake_intent_issue');
+  });
+
+  it('rejects an absorbed issue without the intake label or exact source PR reference', () => {
+    const missingLabel = planClowderMergeExecution(
+      baseInput({
+        intakePlan: {
+          decision: 'absorbed',
+          intentIssue: INTAKE_INTENT_ISSUE,
+          intentIssueTruth: {
+            state: 'OPEN',
+            labels: [],
+            body: `Source PR: clowder-ai#${PR_NUMBER}`,
+          },
+        },
+      }),
+    );
+    const wrongSource = planClowderMergeExecution(
+      baseInput({
+        intakePlan: {
+          decision: 'absorbed',
+          intentIssue: INTAKE_INTENT_ISSUE,
+          intentIssueTruth: {
+            state: 'OPEN',
+            labels: [{ name: 'intake' }],
+            body: 'Source PR: clowder-ai#9999',
+          },
+        },
+      }),
+    );
+
+    assert.equal(missingLabel.reasonCode, 'intake_intent_issue_label_missing');
+    assert.equal(wrongSource.reasonCode, 'intake_intent_issue_source_mismatch');
+  });
+
+  it('accepts public-only and rejected decisions without inventing an intent issue', () => {
+    for (const decision of ['public-only', 'rejected']) {
+      const result = planClowderMergeExecution(baseInput({ intakePlan: { decision } }));
+
+      assert.equal(result.outcome, 'admitted');
+      assert.equal(result.intakePlan.decision, decision);
+      assert.equal(result.intakePlan.intentIssue, null);
+      assert.equal(result.postMergeNextAction, 'record_intake_decision_and_advance_ledger');
+    }
+  });
+
   it('preserves PR-scoped authorization across a new HEAD and selects required admin transport', () => {
     const result = planClowderMergeExecution(baseInput());
 
     assert.equal(result.outcome, 'admitted');
     assert.equal(result.requiresNewAuthorization, false);
     assert.equal(result.authorizationContinuity, 'valid_across_head');
+    assert.deepEqual(result.intakePlan, {
+      decision: 'absorbed',
+      intentIssue: INTAKE_INTENT_ISSUE,
+    });
+    assert.equal(result.postMergeNextAction, 'complete_absorbed_intake_and_advance_ledger');
     assert.deepEqual(result.command, [
       'gh',
       'pr',
@@ -284,6 +401,8 @@ describe('clowder merge execution contract surfaces', () => {
 
       assert.match(runbook, /pnpm merge:clowder/);
       assert.match(runbook, /--authorization-scope (pull_request|exact_head)/);
+      assert.match(runbook, /--intake-decision (absorbed|public-only|rejected)/);
+      assert.match(runbook, /--intake-intent-issue/);
       assert.match(runbook, /authorization key/i);
       assert.match(runbook, /subject freshness key/i);
       assert.doesNotMatch(runbook, /gh pr merge \{N\} --repo zts212653\/clowder-ai --squash --admin/);
@@ -305,6 +424,14 @@ describe('clowder merge execution contract surfaces', () => {
 });
 
 describe('clowder-merge-execution CLI', () => {
+  it('fails closed before source merge when the CLI omits its intake plan', () => {
+    const result = runCli(baseInput().prTruth, [], []);
+
+    assert.equal(result.status, 1);
+    assert.equal(result.json.reasonCode, 'intake_plan_missing');
+    assert.equal(result.json.nextAction, 'declare_intake_plan');
+  });
+
   it('plans an admitted admin command without executing unless --execute is present', () => {
     const result = runCli(baseInput().prTruth);
 

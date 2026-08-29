@@ -5,6 +5,8 @@ import {
   resolveContextContinuity,
   resolveInvocationOrigin,
   supportsPreProviderContinuityCapability,
+  supportsWriteOpportunityPresentationCapability,
+  supportsWriteOpportunityPresentationHandshake,
 } from '../dist/domains/cats/services/agents/invocation/context-continuity.js';
 
 const CODEX_EXEC = {
@@ -18,6 +20,8 @@ const CODEX_EXEC = {
   observesCompression: true,
   reason: 'fixture',
 };
+
+const CODEX_APP_SERVER = { ...CODEX_EXEC, carrier: 'app_server' };
 
 describe('F296 B0 context continuity handshake', () => {
   it('keeps provider carrier, invocation origin and route topology independent', () => {
@@ -83,11 +87,39 @@ describe('F296 B0 context continuity handshake', () => {
     assert.equal(resolveInvocationOrigin('system'), 'unknown');
   });
 
-  it('exposes the same exact carrier support predicate used by presentation retry admission', () => {
+  it('keeps the pre-provider-only carrier predicate exact', () => {
     assert.equal(supportsPreProviderContinuityCapability(CODEX_EXEC), true);
     assert.equal(supportsPreProviderContinuityCapability({ ...CODEX_EXEC, carrier: 'app_server' }), false);
     assert.equal(
       supportsPreProviderContinuityCapability({ ...CODEX_EXEC, provider: 'anthropic', carrier: 'print_sdk' }),
+      false,
+    );
+  });
+
+  it('separates settled write-opportunity presentation from pre-provider-only support', () => {
+    const unsettled = resolveContextContinuity({
+      capability: CODEX_APP_SERVER,
+      invocationId: 'invocation-app-server-unsettled',
+      invocationOrigin: 'interactive',
+      routeTopology: 'independent',
+      providerPreflightAvailable: true,
+    });
+    const settled = {
+      ...unsettled,
+      disposition: {
+        state: 'fresh',
+        reason: 'no_prior_session',
+        evidenceRef: 'context-continuity:invocation-app-server-settled:codex:app_server:fresh:no_prior_session',
+        runtimeSessionId: 'runtime-app-server-1',
+      },
+    };
+
+    assert.equal(supportsWriteOpportunityPresentationHandshake(unsettled), false);
+    assert.equal(supportsWriteOpportunityPresentationHandshake(settled), true);
+    assert.equal(supportsWriteOpportunityPresentationCapability(CODEX_EXEC), true);
+    assert.equal(supportsWriteOpportunityPresentationCapability(CODEX_APP_SERVER), true);
+    assert.equal(
+      supportsWriteOpportunityPresentationCapability({ ...CODEX_EXEC, provider: 'anthropic', carrier: 'print_sdk' }),
       false,
     );
   });

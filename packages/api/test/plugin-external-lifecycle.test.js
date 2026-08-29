@@ -241,3 +241,187 @@ test('repair accepts the legacy enabled plus crashed projection and returns dorm
   assert.equal(repaired.activationState, 'disabled');
   assert.equal(repaired.runtimeState, 'stopped');
 });
+
+test('maintenance preserves enabled intent while serializing stop, mutation, and resume', async () => {
+  const { store, lifecycle, calls } = await harness();
+  await lifecycle.prepare('pi_official', 1);
+  await lifecycle.enable('pi_official', 2);
+  await store.transaction((transaction) => {
+    const current = transaction.instances.get('pi_official');
+    transaction.instances.put({ ...current, runtimeState: 'healthy' });
+  });
+
+  const result = await lifecycle.runWithRuntimeSuspended({
+    instanceId: 'pi_official',
+    expectedRevision: 4,
+    stopReason: 'package_update',
+    resumeFailureCode: 'UPDATE_RESUME_FAILED',
+    operation: async (stopped) => {
+      assert.equal(stopped.activationState, 'enabled');
+      assert.equal(stopped.runtimeState, 'stopped');
+      return 'swapped';
+    },
+  });
+
+  assert.equal(result.result, 'swapped');
+  assert.equal(result.instance.activationState, 'enabled');
+  assert.deepEqual(calls, ['start:pi_official', 'stop:pi_official:enabled', 'start:pi_official']);
+});
+
+test('maintenance leaves disabled intent dormant and reports a failed enabled restore as actionable error', async () => {
+  let starts = 0;
+  const { store, lifecycle, calls } = await harness({
+    start: async (instanceId) => {
+      starts += 1;
+      calls.push(`start:${instanceId}`);
+      if (starts === 2) throw new Error('new package failed');
+    },
+  });
+  await lifecycle.prepare('pi_official', 1);
+  const dormant = await lifecycle.runWithRuntimeSuspended({
+    instanceId: 'pi_official',
+    expectedRevision: 2,
+    stopReason: 'package_update',
+    resumeFailureCode: 'UPDATE_RESUME_FAILED',
+    operation: async () => 'updated dormant',
+  });
+  assert.equal(dormant.instance.activationState, 'disabled');
+  assert.deepEqual(calls, []);
+
+  await lifecycle.enable('pi_official', dormant.instance.lifecycleRevision);
+  await store.transaction((transaction) => {
+    const current = transaction.instances.get('pi_official');
+    transaction.instances.put({ ...current, runtimeState: 'healthy' });
+  });
+  await assert.rejects(
+    lifecycle.runWithRuntimeSuspended({
+      instanceId: 'pi_official',
+      expectedRevision: dormant.instance.lifecycleRevision + 2,
+      stopReason: 'package_update',
+      resumeFailureCode: 'UPDATE_RESUME_FAILED',
+      operation: async () => 'updated enabled',
+    }),
+    lifecycleError('UPDATE_RESUME_FAILED'),
+  );
+  const failed = (await store.snapshot()).instances[0];
+  assert.equal(failed.activationState, 'error');
+  assert.equal(failed.runtimeState, 'stopped');
+  assert.equal(failed.lastRuntimeError.code, 'UPDATE_RESUME_FAILED');
+});
+
+test('maintenance never mutates the package when the runtime cannot stop', async () => {
+  let mutated = false;
+  const { store, lifecycle } = await harness({
+    stop: async () => {
+      throw new Error('process refused to stop');
+    },
+  });
+  await lifecycle.prepare('pi_official', 1);
+  await lifecycle.enable('pi_official', 2);
+  await store.transaction((transaction) => {
+    const current = transaction.instances.get('pi_official');
+    transaction.instances.put({ ...current, runtimeState: 'healthy' });
+  });
+
+  await assert.rejects(
+    lifecycle.runWithRuntimeSuspended({
+      instanceId: 'pi_official',
+      expectedRevision: 4,
+      stopReason: 'package_update',
+      resumeFailureCode: 'UPDATE_RESUME_FAILED',
+      operation: async () => {
+        mutated = true;
+      },
+    }),
+    lifecycleError('STOP_FAILED'),
+  );
+  assert.equal(mutated, false);
+  assert.equal((await store.snapshot()).instances[0].activationState, 'error');
+});
+
+test('failed package mutation restores the previous enabled runtime before returning the failure', async () => {
+  const { store, lifecycle, calls } = await harness();
+  await lifecycle.prepare('pi_official', 1);
+  await lifecycle.enable('pi_official', 2);
+  await store.transaction((transaction) => {
+    const current = transaction.instances.get('pi_official');
+    transaction.instances.put({ ...current, runtimeState: 'healthy' });
+  });
+
+  await assert.rejects(
+    lifecycle.runWithRuntimeSuspended({
+      instanceId: 'pi_official',
+      expectedRevision: 4,
+      stopReason: 'package_update',
+      resumeFailureCode: 'UPDATE_RESUME_FAILED',
+      operation: async () => {
+        throw new Error('verified swap rejected');
+      },
+    }),
+    /verified swap rejected/,
+  );
+  assert.equal((await store.snapshot()).instances[0].activationState, 'enabled');
+  assert.deepEqual(calls, ['start:pi_official', 'stop:pi_official:enabled', 'start:pi_official']);
+});
+
+test('failed catch-up maintenance projects its own resume error instead of an update error', async () => {
+  let starts = 0;
+  const { store, lifecycle } = await harness({
+    start: async () => {
+      starts += 1;
+      if (starts === 2) throw new Error('catch-up runtime could not resume');
+    },
+  });
+  await lifecycle.prepare('pi_official', 1);
+  await lifecycle.enable('pi_official', 2);
+  await store.transaction((transaction) => {
+    const current = transaction.instances.get('pi_official');
+    transaction.instances.put({ ...current, runtimeState: 'healthy' });
+  });
+
+  await assert.rejects(
+    lifecycle.runWithRuntimeSuspended({
+      instanceId: 'pi_official',
+      expectedRevision: 4,
+      stopReason: 'meeting_catch_up',
+      resumeFailureCode: 'CATCH_UP_RESUME_FAILED',
+      operation: async () => {
+        throw new Error('catch-up scan failed');
+      },
+    }),
+    lifecycleError('CATCH_UP_RESUME_FAILED'),
+  );
+  const failed = (await store.snapshot()).instances[0];
+  assert.equal(failed.activationState, 'error');
+  assert.equal(failed.lastRuntimeError.code, 'CATCH_UP_RESUME_FAILED');
+});
+
+test('maintenance shares the lifecycle queue so a concurrent owner action loses its stale fence', async () => {
+  const entered = deferred();
+  const release = deferred();
+  const { store, lifecycle } = await harness();
+  await lifecycle.prepare('pi_official', 1);
+  await lifecycle.enable('pi_official', 2);
+  await store.transaction((transaction) => {
+    const current = transaction.instances.get('pi_official');
+    transaction.instances.put({ ...current, runtimeState: 'healthy' });
+  });
+
+  const maintenance = lifecycle.runWithRuntimeSuspended({
+    instanceId: 'pi_official',
+    expectedRevision: 4,
+    stopReason: 'package_update',
+    resumeFailureCode: 'UPDATE_RESUME_FAILED',
+    operation: async () => {
+      entered.resolve();
+      await release.promise;
+    },
+  });
+  await entered.promise;
+  const disable = lifecycle.disable('pi_official', 4);
+  release.resolve();
+
+  await maintenance;
+  await assert.rejects(disable, lifecycleError('STALE_REVISION'));
+  assert.equal((await store.snapshot()).instances[0].activationState, 'enabled');
+});

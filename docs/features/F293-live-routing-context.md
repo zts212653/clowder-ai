@@ -2,7 +2,7 @@
 feature_ids: [F293]
 related_features: [F051, F083, F127, F153, F154, F167, F190, F192, F203, F208, F216, F220, F233, F246, F248, F254, F264, F280, F284, F298, F299, F300]
 topics: [routing, availability, quota, provider-health, capability-profile, custody, cancellation, approval, workspace, settings, l0, freshness]
-tips_exempt: "Phase A 仅交付 Architecture + Experience Design Gate，尚无可使用的产品 surface；AC-E4 要求实现验收时移除本豁免并贡献真实 Workspace 操作 tip。"
+tips_exempt: "Renewed 2026-08-27 for link/reference hygiene only; Phase A still has no usable product surface, and AC-E4 still requires a real Workspace tip at implementation acceptance."
 doc_kind: spec
 created: 2026-08-08
 description: "把能力、偏好与新鲜供给接入发送边界，并贯通可验证接责、失败回弹、用户取消与精确多方确认，使传球不再停在消息已发。"

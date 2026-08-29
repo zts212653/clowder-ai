@@ -49,8 +49,171 @@ jobs:
       - run: pnpm --filter @cat-cafe/api build
       - run: pnpm --filter @cat-cafe/web build
 
-  test:
-    name: Test (Public)
+  public-test-prepare:
+    name: Public test plan
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    outputs:
+      mode: ${{ steps.contract.outputs.mode }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - id: contract
+        name: Detect exact public shard contract
+        shell: bash
+        run: |
+          set -euo pipefail
+          required=(
+            packages/api/scripts/plan-public-test-shards.mjs
+            packages/api/scripts/run-public-test-shard.mjs
+            packages/api/scripts/summarize-public-test-shards.mjs
+            packages/api/scripts/public-test-provenance.mjs
+            packages/api/scripts/resolve-public-test-files.mjs
+          )
+          for file_path in "${required[@]}"; do
+            if [[ ! -f "$file_path" ]]; then
+              echo "public shard contract absent: $file_path; retaining complete serial suite" >&2
+              echo "mode=serial" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+          done
+          if ! node -e "const {scripts = {}} = require('./packages/api/package.json'); process.exit(['test:public:plan', 'test:public:shard', 'test:public:summary'].every((name) => scripts[name]) ? 0 : 1)"; then
+            echo "public shard command contract absent; retaining complete serial suite" >&2
+            echo "mode=serial" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "mode=sharded" >> "$GITHUB_OUTPUT"
+      - run: pnpm install --frozen-lockfile
+        if: steps.contract.outputs.mode == 'sharded'
+      - name: Build exact public-test inputs
+        if: steps.contract.outputs.mode == 'sharded'
+        run: |
+          pnpm --filter @cat-cafe/shared build
+          pnpm --filter @cat-cafe/mcp-server build
+          pnpm --filter @cat-cafe/api build
+      - name: Plan deterministic public-test shards
+        if: steps.contract.outputs.mode == 'sharded'
+        run: |
+          mkdir -p "$RUNNER_TEMP/public-test"
+          pnpm --filter @cat-cafe/api run test:public:plan -- --output "$RUNNER_TEMP/public-test/plan.json"
+      - name: Upload exact public-test plan
+        if: steps.contract.outputs.mode == 'sharded'
+        uses: actions/upload-artifact@v4
+        with:
+          name: public-test-plan-${{ github.sha }}
+          path: ${{ runner.temp }}/public-test/plan.json
+          if-no-files-found: error
+
+  public-test-shards:
+    name: Public test (${{ matrix.lane }})
+    needs: public-test-prepare
+    if: needs.public-test-prepare.outputs.mode == 'sharded'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        lane: [serial, pure-1, pure-2, pure-3, pure-4]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter @cat-cafe/shared build
+      - run: pnpm --filter @cat-cafe/mcp-server build
+      - run: pnpm --filter @cat-cafe/api build
+      - name: Download exact public-test plan
+        uses: actions/download-artifact@v4
+        with:
+          name: public-test-plan-${{ github.sha }}
+          path: ${{ runner.temp }}/public-test
+      - name: Run public-test lane
+        run: >-
+          pnpm --filter @cat-cafe/api run test:public:shard --
+          --plan "${{ runner.temp }}/public-test/plan.json"
+          --lane "${{ matrix.lane }}"
+          --report "${{ runner.temp }}/public-test/reports/${{ matrix.lane }}.json"
+        env:
+          GIT_AUTHOR_NAME: CI Runner
+          GIT_AUTHOR_EMAIL: ci@clowder-ai.dev
+          GIT_COMMITTER_NAME: CI Runner
+          GIT_COMMITTER_EMAIL: ci@clowder-ai.dev
+      - name: Upload public-test lane report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: public-test-report-${{ github.sha }}-${{ matrix.lane }}
+          path: ${{ runner.temp }}/public-test/reports/${{ matrix.lane }}.json
+          if-no-files-found: warn
+
+  public-test-summary:
+    name: Public test evidence
+    needs: [public-test-prepare, public-test-shards]
+    if: >-
+      always() && needs.public-test-prepare.result == 'success' &&
+      needs.public-test-prepare.outputs.mode == 'sharded' &&
+      needs.public-test-shards.result == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Download exact plan and all lane reports
+        uses: actions/download-artifact@v4
+        with:
+          pattern: public-test-*
+          path: ${{ runner.temp }}/public-test/artifacts
+          merge-multiple: true
+      - name: Prove complete public-test coverage and summarize timing
+        run: |
+          mkdir -p "$RUNNER_TEMP/public-test/reports"
+          find "$RUNNER_TEMP/public-test/artifacts" -name '*.json' -exec cp {} "$RUNNER_TEMP/public-test/reports/" \;
+          plan_path=$(find "$RUNNER_TEMP/public-test/artifacts" -name 'plan.json' -print -quit)
+          test -n "$plan_path"
+          node packages/api/scripts/summarize-public-test-shards.mjs \
+            --plan "$plan_path" \
+            --reports-dir "$RUNNER_TEMP/public-test/reports" \
+            --output "$RUNNER_TEMP/public-test/summary.json"
+      - name: Upload public-test evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: public-test-summary-${{ github.sha }}
+          path: ${{ runner.temp }}/public-test/summary.json
+          if-no-files-found: error
+
+  public-test-serial:
+    name: Public test (serial bootstrap)
+    needs: public-test-prepare
+    if: needs.public-test-prepare.outputs.mode == 'serial'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Run complete serial public-test suite until the exact shard contract lands
+        run: pnpm --filter @cat-cafe/api run test:public
+        env:
+          GIT_AUTHOR_NAME: CI Runner
+          GIT_AUTHOR_EMAIL: ci@clowder-ai.dev
+          GIT_COMMITTER_NAME: CI Runner
+          GIT_COMMITTER_EMAIL: ci@clowder-ai.dev
+
+  public-test-contract:
+    name: Public contract surfaces
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -62,6 +225,7 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm --filter @cat-cafe/shared build
+      - run: pnpm --filter @cat-cafe/mcp-server build
       - run: pnpm --filter @cat-cafe/api build
       - name: Install OpenCode behavior baseline
         run: npm install --global opencode-ai@1.18.9
@@ -72,14 +236,44 @@ jobs:
           packages/api/test/opencode-model-id-request.test.js
         env:
           REQUIRE_OPENCODE_MODEL_ID_TEST: '1'
-      - run: pnpm --filter @cat-cafe/api run test:public
-        env:
-          GIT_AUTHOR_NAME: CI Runner
-          GIT_AUTHOR_EMAIL: ci@clowder-ai.dev
-          GIT_COMMITTER_NAME: CI Runner
-          GIT_COMMITTER_EMAIL: ci@clowder-ai.dev
       - name: Desktop tests
         run: node --test desktop/*.test.js
+
+  test:
+    name: Test (Public)
+    needs: [public-test-prepare, public-test-shards, public-test-summary, public-test-serial, public-test-contract]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require complete public-test evidence
+        shell: bash
+        env:
+          PREPARE_RESULT: ${{ needs.public-test-prepare.result }}
+          CONTRACT_RESULT: ${{ needs.public-test-contract.result }}
+          SHARDED_RESULT: ${{ needs.public-test-shards.result }}
+          SUMMARY_RESULT: ${{ needs.public-test-summary.result }}
+          SERIAL_RESULT: ${{ needs.public-test-serial.result }}
+          TEST_MODE: ${{ needs.public-test-prepare.outputs.mode }}
+        run: |
+          set -euo pipefail
+          [[ "$PREPARE_RESULT" == 'success' ]]
+          [[ "$CONTRACT_RESULT" == 'success' ]]
+          case "$TEST_MODE" in
+            sharded)
+              [[ "$SHARDED_RESULT" == 'success' ]]
+              [[ "$SUMMARY_RESULT" == 'success' ]]
+              [[ "$SERIAL_RESULT" == 'skipped' ]]
+              ;;
+            serial)
+              [[ "$SERIAL_RESULT" == 'success' ]]
+              [[ "$SHARDED_RESULT" == 'skipped' ]]
+              [[ "$SUMMARY_RESULT" == 'skipped' ]]
+              ;;
+            *)
+              echo "unknown public-test mode: $TEST_MODE" >&2
+              exit 1
+              ;;
+          esac
 
   dir-size:
     name: Directory Size Guard

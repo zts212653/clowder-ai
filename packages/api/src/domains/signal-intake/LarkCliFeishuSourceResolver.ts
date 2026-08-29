@@ -3,6 +3,7 @@ import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { isAbsolute, join, relative, resolve } from 'node:path';
 import { promisify } from 'node:util';
+import { parseFeishuMinutesReference } from '@clowder-ai/feishu-meeting-intake';
 import type { SourceArtifact, SourceResolver } from './SourceAccessLeaseService.js';
 
 const execFileAsync = promisify(execFile);
@@ -55,6 +56,20 @@ function parseSourceHandle(value: string): FeishuLocator {
   const canonical = `feishu://meeting-artifacts/${parts[0]}/${artifactId}?revision=${encodeURIComponent(revision)}`;
   if (value !== canonical) throw new TypeError('Feishu source handle must be canonical');
   return { kind: parts[0], artifactId, revision };
+}
+
+/** Normalize a human Feishu Minutes URL/token onto the existing versioned source-adapter contract. */
+export function normalizeFeishuMeetingSourceReference(reference: string): string {
+  const value = reference.trim();
+  try {
+    parseSourceHandle(value);
+    return value;
+  } catch {
+    // Human recovery accepts Feishu's URL/token form, then returns to the same adapter authority.
+  }
+  const locator = parseFeishuMinutesReference(value);
+  const revision = locator.revision ?? 'latest';
+  return `feishu://meeting-artifacts/${locator.kind}/${locator.artifactId}?revision=${encodeURIComponent(revision)}`;
 }
 
 function parseJson(stdout: string): Record<string, unknown> {

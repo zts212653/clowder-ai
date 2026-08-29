@@ -7,9 +7,7 @@
  * [宪宪/Opus-46🐾]
  */
 import type { ManagedWorkBinding } from '@cat-cafe/shared';
-import type { CancelBurstDetector } from './cancel-burst-detector.js';
-import { CANCEL_REASONS, type CancelReason } from './task-outcome-episode.js';
-import { buildA1WorldTruthSignal, buildPermissionCancelSignal } from './task-outcome-signal-builder.js';
+import { buildA1WorldTruthSignal } from './task-outcome-signal-builder.js';
 import type { EpisodeAttributionLookup, StoredEpisode, TaskOutcomeEpisodeStore } from './task-outcome-store.js';
 
 interface EpisodeSelectionInput {
@@ -61,61 +59,6 @@ function findOrCreateEpisode(store: TaskOutcomeEpisodeStore, input: EpisodeSelec
     ...(input.managedArtifactRef ? { artifacts: [input.managedArtifactRef] } : {}),
     attribution: input.managedWorkExpected ? 'managed_unattributed' : 'unmanaged_not_applicable',
   });
-}
-
-// ---- Permission cancel + reason normalization → episode a2 signal ----
-
-export interface PermissionCancelWiringInput {
-  toolName: string;
-  paramsSummary?: string;
-  /** Raw cancel reason from frontend; normalized to CancelReason enum (default: 'skip'). */
-  cancelReason?: string;
-  catId?: string;
-  threadId: string;
-  sessionId?: string;
-  /** Server-resolved invocation identity; callback/user payloads cannot supply this. */
-  managedWorkBinding?: ManagedWorkBinding;
-}
-
-/**
- * Normalize the cancel reason, get/create the active episode, and append
- * a `permission_cancel` a2 signal. This is the production path called by
- * index.ts onPermissionCancel (authorization callback).
- *
- * Reason normalization: if `cancelReason` is not a valid CancelReason enum
- * value, defaults to 'skip' (auth free-text is not a cancel category).
- */
-export function appendPermissionCancelToEpisode(
-  store: TaskOutcomeEpisodeStore,
-  input: PermissionCancelWiringInput,
-): SignalWiringResult {
-  const reason: CancelReason =
-    input.cancelReason && (CANCEL_REASONS as readonly string[]).includes(input.cancelReason)
-      ? (input.cancelReason as CancelReason)
-      : 'skip';
-
-  const catId = input.catId ?? 'unknown';
-  const ep = findOrCreateEpisode(store, {
-    threadId: input.threadId,
-    participants: [catId],
-    ...(input.managedWorkBinding ? { managedWorkBinding: input.managedWorkBinding } : {}),
-  });
-
-  const signal = buildPermissionCancelSignal({
-    toolName: input.toolName,
-    paramsSummary: input.paramsSummary,
-    reason,
-    catId,
-    threadId: input.threadId,
-    sessionId: input.sessionId,
-  });
-
-  store.appendSignal(ep.episodeId, {
-    category: 'a2',
-    record: signal as unknown as Record<string, unknown>,
-  });
-
-  return { episodeId: ep.episodeId, signalAppended: true };
 }
 
 // ---- Magic word ref → episode signal ----
@@ -173,15 +116,6 @@ export function appendMagicWordRefToEpisode(
   return { episodeId: ep.episodeId, signalAppended: result.appended };
 }
 
-// ---- Cancel burst check → proxy signal ----
-
-export interface CancelBurstCheckResult {
-  burst: boolean;
-  count: number;
-  episodeId?: string;
-  proxyAppended: boolean;
-}
-
 export interface PrLifecycleEvidenceInput {
   type: 'merge' | 'revert';
   ref: string;
@@ -220,48 +154,4 @@ export function appendPrLifecycleEvidenceToEpisode(
     idempotencyKey,
   });
   return { episodeId: episode.episodeId, signalAppended: result.appended };
-}
-
-/**
- * Record a cancel event in the burst detector and, if a burst is detected,
- * append a `cancel_burst` proxy signal to the active episode.
- *
- * Extracted from index.ts onPermissionCancel authorization handler.
- */
-export function checkAndAppendCancelBurst(
-  store: TaskOutcomeEpisodeStore,
-  burstDetector: CancelBurstDetector,
-  threadId: string,
-  timestamp: number,
-  managedWorkBinding?: ManagedWorkBinding,
-): CancelBurstCheckResult {
-  const partitionKey = managedWorkBinding
-    ? `managed:${JSON.stringify([managedWorkBinding.workId, managedWorkBinding.attemptId])}`
-    : `thread:${threadId}`;
-  const burstResult = burstDetector.record(partitionKey, timestamp);
-
-  if (!burstResult.burst) {
-    return { burst: false, count: burstResult.count, proxyAppended: false };
-  }
-
-  const ep = findActiveEpisode(store, {
-    threadId,
-    participants: [],
-    ...(managedWorkBinding ? { managedWorkBinding } : {}),
-  });
-  if (!ep) {
-    return { burst: true, count: burstResult.count, proxyAppended: false };
-  }
-
-  store.appendSignal(ep.episodeId, {
-    category: 'proxy',
-    record: {
-      type: 'cancel_burst',
-      value: burstResult.count,
-      timestamp: new Date(timestamp).toISOString(),
-      threadId,
-    },
-  });
-
-  return { burst: true, count: burstResult.count, episodeId: ep.episodeId, proxyAppended: true };
 }

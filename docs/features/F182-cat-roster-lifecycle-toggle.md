@@ -4,6 +4,7 @@ related_features: [F127, F032, F167, F086]
 topics: [cat-management, roster, lifecycle, toggle, mention-routing, mcp-tools, hub-ux]
 doc_kind: spec
 created: 2026-04-30
+tips_exempt: "2026-08-27 link/reference hygiene only; no roster capability or user action changed."
 ---
 
 # F182: Cat Roster Lifecycle Toggle — 成员启停的全链路降级反馈

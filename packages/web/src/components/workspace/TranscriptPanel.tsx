@@ -3,71 +3,24 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useChatStore } from '@/stores/chatStore';
 import { API_URL, apiFetch } from '@/utils/api-client';
+import { AudioHealthStrip } from './AudioHealthStrip';
+import { AudioInputPicker } from './AudioInputPicker';
+import type {
+  AudioInputRequest,
+  AudioSources,
+  AudioSseEvent,
+  AudioStatus,
+  TranscriptLine,
+} from './audio-transcript-contract';
+import { TranscriptLineRow } from './TranscriptLineRow';
 
-export interface TranscriptLine {
-  ts: number;
-  elapsed_s: number;
-  chunk_num: number;
-  asr_latency: number;
-  text: string;
-  speaker_label?: string;
-  speaker_confidence?: number;
-  speaker_id?: string | null;
-}
-
-interface AudioSources {
-  apps: string[];
-  mics: { index: number; name: string; default: boolean }[];
-}
-
-interface AudioStatus {
-  running: boolean;
-  paused?: boolean;
-  source?: string;
-  app_name?: string;
-  duration_s?: number;
-  chunk_count?: number;
-  avg_asr_latency?: number;
-}
-
-interface SseEvent {
-  type: string;
-  status?: string;
-  source?: string;
-  app_name?: string;
-  ts?: number;
-  elapsed_s?: number;
-  chunk_num?: number;
-  asr_latency?: number;
-  text?: string;
-  speaker_label?: string;
-  speaker_confidence?: number;
-  speaker_id?: string | null;
-  transcript_path?: string;
-  recording_path?: string;
-}
-
-function formatTime(ts: number): string {
-  return new Date(ts * 1000).toLocaleTimeString('zh-CN', { hour12: false });
-}
+export type { TranscriptLine } from './audio-transcript-contract';
+export { TranscriptLineRow } from './TranscriptLineRow';
 
 function formatDuration(sec: number): string {
   const m = Math.floor(sec / 60);
   const s = Math.floor(sec % 60);
   return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
-}
-
-/** Pure component for a single transcript line — exported for regression testing. */
-export function TranscriptLineRow({ line }: { line: TranscriptLine }) {
-  return (
-    <div className="mb-1 flex gap-2">
-      <span className="shrink-0 text-cafe-text-muted">[{formatTime(line.ts)}]</span>
-      {line.speaker_label && (
-        <span className="shrink-0 font-medium text-cafe-accent-primary">{line.speaker_label}:</span>
-      )}
-      <span className="text-cafe-text-primary">{line.text}</span>
-    </div>
-  );
 }
 
 export function TranscriptPanel() {
@@ -77,8 +30,10 @@ export function TranscriptPanel() {
   const [elapsed, setElapsed] = useState(0);
   const [savedPath, setSavedPath] = useState<string | null>(null);
   const [savedRecordingPath, setSavedRecordingPath] = useState<string | null>(null);
+  const [savedRecordingPaths, setSavedRecordingPaths] = useState<Record<string, string>>({});
   const [sources, setSources] = useState<AudioSources | null>(null);
-  const [selectedSource, setSelectedSource] = useState('');
+  const [sourceError, setSourceError] = useState<string | null>(null);
+  const [startError, setStartError] = useState<string | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const autoScroll = useRef(true);
   const setFloatingTranscriptVisible = useChatStore((s) => s.setFloatingTranscriptVisible);
@@ -115,8 +70,13 @@ export function TranscriptPanel() {
       if (resp.ok) {
         const data = (await resp.json()) as AudioSources;
         setSources(data);
+        setSourceError(null);
+      } else {
+        setSourceError('Audio sources are unavailable.');
       }
-    } catch {}
+    } catch {
+      setSourceError('Audio service is offline.');
+    }
   }, []);
 
   useEffect(() => {
@@ -131,44 +91,62 @@ export function TranscriptPanel() {
     es.onerror = () => setConnected(false);
     es.onmessage = (ev) => {
       try {
-        const data = JSON.parse(ev.data) as SseEvent;
-        if (data.type === 'transcript' && data.ts && data.text != null) {
+        const data = JSON.parse(ev.data) as AudioSseEvent;
+        if (data.type === 'transcript' && typeof data.ts === 'number' && typeof data.text === 'string') {
+          const timestamp = data.ts;
+          const text = data.text;
           setLines((prev) => [
             ...prev,
             {
-              ts: data.ts!,
+              ts: timestamp,
               elapsed_s: data.elapsed_s ?? 0,
               chunk_num: data.chunk_num ?? 0,
               asr_latency: data.asr_latency ?? 0,
-              text: data.text!,
+              text,
               speaker_label: data.speaker_label,
               speaker_confidence: data.speaker_confidence,
               speaker_id: data.speaker_id,
+              speaker_identity_source: data.speaker_identity_source,
+              speaker_cluster_id: data.speaker_cluster_id,
+              input_id: data.input_id,
+              input_source: data.input_source,
+              input_label: data.input_label,
             },
           ]);
         } else if (data.type === 'status') {
           if (data.status === 'started') {
-            setStatus({ running: true, source: data.source, app_name: data.app_name });
+            setStatus((previous) => ({
+              ...previous,
+              running: true,
+              source: data.source,
+              app_name: data.app_name,
+              inputs: data.inputs,
+              health: data.health ?? previous.health,
+            }));
             setLines([]);
             setElapsed(0);
             setSavedPath(null);
             setSavedRecordingPath(null);
+            setSavedRecordingPaths({});
           } else if (data.status === 'stopped') {
             setStatus((prev) => ({ ...prev, running: false, paused: false }));
             if (data.transcript_path) setSavedPath(data.transcript_path);
             if (data.recording_path) setSavedRecordingPath(data.recording_path);
+            setSavedRecordingPaths(data.recording_paths ?? {});
           } else if (data.status === 'paused') {
             setStatus((prev) => ({ ...prev, paused: true }));
           } else if (data.status === 'resumed') {
             setStatus((prev) => ({ ...prev, paused: false }));
           }
+        } else if (data.type === 'input_status') {
+          void fetchStatus();
         }
       } catch {
         /* parse error */
       }
     };
     return () => es.close();
-  }, []);
+  }, [fetchStatus]);
 
   useEffect(() => {
     if (!status.running || status.paused) return;
@@ -192,10 +170,17 @@ export function TranscriptPanel() {
     try {
       const resp = await apiFetch('/api/audio/stop', { method: 'POST' });
       if (resp.ok) {
-        const data = (await resp.json()) as { summary?: { transcript_path?: string; recording_path?: string } };
+        const data = (await resp.json()) as {
+          summary?: {
+            transcript_path?: string;
+            recording_path?: string;
+            recording_paths?: Record<string, string>;
+          };
+        };
         setStatus((prev) => ({ ...prev, running: false }));
         setSavedPath(data.summary?.transcript_path ?? null);
         setSavedRecordingPath(data.summary?.recording_path ?? null);
+        setSavedRecordingPaths(data.summary?.recording_paths ?? {});
       }
     } catch {
       /* offline */
@@ -217,31 +202,45 @@ export function TranscriptPanel() {
   }, []);
 
   const handleStart = useCallback(
-    async (source: string, appName?: string, deviceIndex?: number) => {
+    async (inputs: AudioInputRequest[]) => {
+      if (!currentThreadId) {
+        setStartError('Open a thread before starting companion audio.');
+        return;
+      }
       try {
-        const body: Record<string, unknown> = { source };
-        if (appName) body.app_name = appName;
-        if (deviceIndex != null) body.device = deviceIndex;
-        if (currentThreadId) body.thread_id = currentThreadId;
+        setStartError(null);
         const resp = await apiFetch('/api/audio/start', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(body),
+          body: JSON.stringify({ inputs, thread_id: currentThreadId }),
         });
         if (resp.ok) {
-          setStatus({ running: true, source, app_name: appName });
+          const data = (await resp.json()) as { status: AudioStatus };
+          setStatus(data.status);
           setLines([]);
           setElapsed(0);
           setSavedPath(null);
           setSavedRecordingPath(null);
+          setSavedRecordingPaths({});
+        } else {
+          const data = (await resp.json()) as { error?: string };
+          setStartError(data.error ?? 'Audio capture could not start.');
         }
-      } catch {}
+      } catch {
+        setStartError('Audio service is offline.');
+      }
     },
     [currentThreadId],
   );
 
   const avgLatency = lines.length ? (lines.reduce((s, l) => s + l.asr_latency, 0) / lines.length).toFixed(2) : '—';
-  const sourceLabel = status.app_name ? `${status.app_name}` : status.source === 'mic' ? 'Microphone' : '—';
+  const sourceLabel = status.inputs?.length
+    ? status.inputs.map((input) => input.label ?? input.id).join(' + ')
+    : status.app_name
+      ? status.app_name
+      : status.source === 'mic'
+        ? 'Microphone'
+        : '—';
 
   return (
     <div className="flex h-full flex-col bg-cafe-surface-primary">
@@ -294,42 +293,18 @@ export function TranscriptPanel() {
         </button>
       </div>
 
-      {/* Source selector — shown when not recording */}
-      {!status.running && sources && (
+      <AudioHealthStrip status={status} />
+
+      {!status.running && (
         <div className="border-b border-cafe-border bg-cafe-surface-secondary px-3 py-2 space-y-2">
-          <select
-            value={selectedSource}
-            onChange={(e) => setSelectedSource(e.target.value)}
-            className="w-full rounded border border-cafe-border bg-cafe-surface-primary px-2 py-1 text-xs text-cafe-text-primary"
-          >
-            <option value="">Select source...</option>
-            {sources.apps.map((app) => (
-              <option key={app} value={`app:${app}`}>
-                {app}
-              </option>
-            ))}
-            {sources.mics.map((mic) => (
-              <option key={`mic-${mic.index}`} value={`mic:${mic.index}`}>
-                {mic.name}
-                {mic.default ? ' (default)' : ''}
-              </option>
-            ))}
-          </select>
-          <button
-            type="button"
-            disabled={!selectedSource}
-            onClick={() => {
-              if (!selectedSource) return;
-              const colonIdx = selectedSource.indexOf(':');
-              const type = selectedSource.slice(0, colonIdx);
-              const value = selectedSource.slice(colonIdx + 1);
-              if (type === 'app') handleStart('app', value);
-              else handleStart('mic', undefined, Number(value));
-            }}
-            className="w-full rounded bg-[var(--semantic-success)] px-2 py-1 text-xs font-medium text-[var(--cafe-surface)] hover:bg-conn-green-text disabled:opacity-40 disabled:cursor-not-allowed"
-          >
-            Start
-          </button>
+          {sourceError ? (
+            <p className="text-xs text-conn-red-text">{sourceError}</p>
+          ) : sources ? (
+            <AudioInputPicker sources={sources} onStart={handleStart} />
+          ) : (
+            <p className="text-xs text-cafe-text-muted">Loading audio sources…</p>
+          )}
+          {startError && <p className="text-xs text-conn-red-text">{startError}</p>}
         </div>
       )}
 
@@ -348,10 +323,16 @@ export function TranscriptPanel() {
       </div>
 
       {/* Saved paths */}
-      {!status.running && (savedPath || savedRecordingPath) && (
+      {!status.running && (savedPath || savedRecordingPath || Object.keys(savedRecordingPaths).length > 0) && (
         <div className="border-t border-cafe-border px-3 py-1.5 text-xs text-cafe-text-secondary space-y-0.5">
           {savedPath && <div>Transcript: {savedPath}</div>}
           {savedRecordingPath && <div>Recording: {savedRecordingPath}</div>}
+          {!savedRecordingPath &&
+            Object.entries(savedRecordingPaths).map(([inputId, path]) => (
+              <div key={inputId}>
+                Recording ({inputId}): {path}
+              </div>
+            ))}
         </div>
       )}
 

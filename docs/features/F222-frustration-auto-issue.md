@@ -1,9 +1,11 @@
 ---
 feature_ids: [F222]
-related_features: [F192, F128, F245]
+related_features: [F192, F128, F245, F286]
 topics: [frustration, auto-issue, friction-detection, eval]
 doc_kind: spec
 created: 2026-06-03
+updated: 2026-08-24
+tips_exempt: "F286 removes the live permission-cancel producer while retaining historical read compatibility; it adds no new user-invokable capability."
 ---
 
 # F222: Frustration Auto-Issue — 把负体验变成结构化反馈
@@ -35,13 +37,12 @@ N/A（全新能力）。当前用户遇到问题只有两条路：自己解决�
 - 用户重复说"不对""错了""怎么回事"（文本情绪/关键词）
 - CLI 报错 / 工具调用连续失败（exit code / error log）
 - @ 了猫但超时没回复（A2A timeout）
-- 短时间内连续 cancel 多个工具调用（Permission Cancel 频率突增）
 - 用户反复 retry 同一操作
 
 **产出**：
 ```yaml
 kind: auto_issue
-trigger: frustration_detected / cli_error / a2a_timeout / cancel_burst
+trigger: frustration_detected / cli_error / a2a_timeout / retry_burst / user_report
 context:
   thread_id: xxx
   recent_messages: [最近 5 条对话]
@@ -67,7 +68,7 @@ status: draft  # 用户预览后才提交
 
 ### 3. Regression Fixture
 - CLI 报错 → 触发 auto-issue 采集日志 → 用户看到预览
-- 连续 3 次 cancel → 触发 → 用户看到预览
+- 用户在仍存续的反馈入口明确投诉 → `user_report` → 用户看到预览
 - 正常对话（无摩擦）→ 不触发
 
 ### 4. Sunset Signal
@@ -78,10 +79,10 @@ status: draft  # 用户预览后才提交
 ## Acceptance Criteria
 
 ### Phase A ✅
-- [x] AC-A1: 摩擦信号检测（至少支持 CLI 报错 + 连续 cancel 两种触发）
+- [x] AC-A1: 摩擦信号检测（历史交付含 CLI 报错 + 连续 cancel；连续 cancel writer 于 2026-08-24 随 F286 落日，其他信号仍有效）
 - [x] AC-A2: Auto-issue 卡片生成（rich block，含上下文采集 + 用户可编辑描述）
 - [x] AC-A3: 用户确认后 issue 持久化（可被 eval:task-outcome 消费）
-- [x] AC-A4: 用户跳过 → 不产生 issue，但 cancel/error 事件仍被 Permission Cancel 记录
+- [x] AC-A4: 用户跳过 → 不产生 issue（历史 cancel 记录链路已落日；error 与仍存续的明确反馈入口按各自真相源处理）
 
 ### Phase B ✅
 - [x] AC-B1: 文本情绪触发 — 用户消息含摩擦关键词（"不对""错了""怎么回事""又来了"等）时触发 auto-issue
@@ -109,10 +110,10 @@ status: draft  # 用户预览后才提交
 - **现象**：确认/跳过后卡片仍全尺寸展示，"狗皮膏药"影响阅读
 - **修复**：处理后自动折叠为一行摘要（标题+状态徽章），可点击展开/收起；hydrated resolved 也默认折叠
 
-### ~~UX-3: "取消并反馈"一键投诉~~ ✅ Fixed (PR #2107 + follow-up)
-- **现象**：用户否决权限请求后想投诉，需等 cancel_burst 阈值（≥3 次 60s 内）才能触发 auto-issue
+### ~~UX-3: "取消并反馈"一键投诉~~ ✅ Fixed (PR #2107 + follow-up；权限卡分支已落日)
+- **历史现象**：用户否决权限请求后想投诉，需等 cancel_burst 阈值（≥3 次 60s 内）才能触发 auto-issue
 - **operator experience**："我直接！反馈！我投诉！"
-- **修复**：AuthorizationCard + hold-ball connector card 新增"取消并反馈"按钮，走 `user_report` 信号（无阈值，每次点击都生成独立 issue），dedup 豁免
+- **历史修复**：AuthorizationCard + hold-ball connector card 新增"取消并反馈"按钮。F286 落日后只保留 hold-ball 等独立反馈入口；AuthorizationCard、permission cancel 与 cancel-burst writer 已移除，历史记录仍可读
 - **PR #2113 补强**：持球卡片 live 路径取消持球并反馈；历史/stale 持球卡片遇到 404 时 fallback 到 `POST /api/callbacks/hold-ball/feedback`，后端做 user auth + thread ownership 校验后仍生成 `user_report`，避免反馈静默丢失
 
 ## Dependencies

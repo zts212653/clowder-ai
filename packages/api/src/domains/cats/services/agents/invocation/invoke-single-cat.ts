@@ -105,6 +105,7 @@ import { createPromptDigest } from '../../context/prompt-digest.js';
 import { buildStagingPrepend } from '../../context/StagingContent.js';
 import { AuditEventTypes, getEventAuditLog } from '../../orchestration/EventAuditLog.js';
 import {
+  authenticatedCompactionSequenceForInvocation,
   authoritativeCompactionEventFromSession,
   resolveAuthoritativeCompactionSupport,
 } from '../../session/authoritative-compaction.js';
@@ -517,7 +518,10 @@ export function _resetOpenCodeKnownModels(override?: Set<string> | null): void {
   _openCodeKnownModels = override ?? null;
 }
 
-import { isCodexSessionReplacementProvenance } from '../../runtime-session/CodexSessionReplacementProvenance.js';
+import {
+  type CodexNativeResumeReplacementProvenance,
+  isCodexSessionReplacementProvenance,
+} from '../../runtime-session/CodexSessionReplacementProvenance.js';
 import type {
   RuntimeSessionMetadata,
   RuntimeSessionUnexpectedRuntimeSessionSwitch,
@@ -790,6 +794,46 @@ function matchingCodexSessionReplacement(
   return replacement.previousNativeThreadId === previousNativeThreadId ? replacement : undefined;
 }
 
+type SessionRolloverFailureStage = 'seal_request' | 'seal_finalize' | 'replacement_create' | 'replacement_bind';
+
+class SessionRolloverCommitError extends Error {
+  constructor(
+    message: string,
+    readonly lifecycleMessages: readonly AgentMessage[],
+  ) {
+    super(message);
+    this.name = 'SessionRolloverCommitError';
+  }
+}
+
+function nativeResumeRolloverReason(
+  replacement: CodexNativeResumeReplacementProvenance,
+): 'oversized_retire' | 'resume_rejected' {
+  return replacement.rejection === 'max_payload_size_exceeded' ? 'oversized_retire' : 'resume_rejected';
+}
+
+function buildSessionRolloverLifecycleMessage(input: {
+  catId: CatId;
+  rolloverId: string;
+  status: 'pending' | 'succeeded' | 'failed';
+  reason: 'oversized_retire' | 'resume_rejected';
+  failureStage?: SessionRolloverFailureStage;
+}): AgentMessage {
+  return {
+    type: 'system_info',
+    catId: input.catId,
+    content: JSON.stringify({
+      type: 'session_rollover_lifecycle',
+      v: 1,
+      rolloverId: input.rolloverId,
+      status: input.status,
+      reason: input.reason,
+      ...(input.failureStage ? { failureStage: input.failureStage } : {}),
+    }),
+    timestamp: Date.now(),
+  };
+}
+
 function buildUnexpectedRuntimeSessionSwitch(input: {
   lifecycle: NonNullable<AgentMessage['sessionLifecycle']>;
   previousSessionId: string;
@@ -1003,6 +1047,10 @@ async function syncAntigravityRuntimeMetadata(input: {
 export interface InvocationDeps {
   /** F296 B3b-1: single owner of context epoch and cold/hot mode for provider-bound invocations. */
   readonly contextEpochOwner?: Pick<ContextEpochOwner, 'resolve' | 'observeCompaction' | 'confirmColdConsumed'>;
+  /** Live project-hook auth readiness required before Claude can own a compaction sequence. */
+  readonly hookAuthenticationReady?: boolean | (() => boolean);
+  /** Active-workspace PreCompact carrier readiness; independent from callback registry recovery. */
+  readonly claudeProjectHookCarrierReady?: boolean | ((projectRoot: string) => boolean);
   /** F296 B3b-2: shared admission/delivery state machine for dynamic prompt projections. */
   readonly presentationLedger?: Pick<PresentationLedger, 'reserve' | 'commit' | 'release'>;
   /** F276 Wave 2 bridge: cross-invocation terminal truth consulted at opportunity admission. */
@@ -3953,12 +4001,94 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
                   });
                 } else {
                   // CLI session changed → old context is lost (resume failed / CLI restarted).
-                  // Use requestSeal + finalize to ensure transcript/digest are written,
-                  // not bare update(status:'sealed') which skips flush.
+                  // A provider-authenticated native resume rejection is stricter than
+                  // the legacy compatibility path: its replacement thread already
+                  // exists, but the async generator is paused on session_init, so we
+                  // must commit sealed-old + bound-new before allowing prompt.settle
+                  // and turn/start to continue.
                   let sealAccepted = false;
-                  const sealReason = antigravityReplacementSealReason(msg, existing.cliSessionId ?? existing.id);
+                  const declaredReplacement = isCodexSessionReplacementProvenance(msg.sessionReplacement)
+                    ? msg.sessionReplacement
+                    : undefined;
                   const runtimeReplacement = matchingCodexSessionReplacement(msg, existing.cliSessionId);
-                  if (deps.sessionSealer) {
+                  const nativeResumeReplacement =
+                    runtimeReplacement?.cause === 'native_resume_rejected' ? runtimeReplacement : undefined;
+                  const staleNativeResumeReplacement =
+                    declaredReplacement?.cause === 'native_resume_rejected' &&
+                    declaredReplacement.previousNativeThreadId !== existing.cliSessionId
+                      ? declaredReplacement
+                      : undefined;
+                  const rolloverId = `${invocationId}:codex-native-resume`;
+                  if (staleNativeResumeReplacement) {
+                    throw new SessionRolloverCommitError(
+                      'Native session rollover previous runtime is no longer active',
+                      [
+                        buildSessionRolloverLifecycleMessage({
+                          catId,
+                          rolloverId,
+                          status: 'failed',
+                          reason: nativeResumeRolloverReason(staleNativeResumeReplacement),
+                          failureStage: 'seal_request',
+                        }),
+                      ],
+                    );
+                  }
+                  const sealReason = nativeResumeReplacement
+                    ? nativeResumeRolloverReason(nativeResumeReplacement)
+                    : antigravityReplacementSealReason(msg, existing.cliSessionId ?? existing.id);
+                  const rolloverLifecycleMessages: AgentMessage[] = [];
+
+                  if (nativeResumeReplacement) {
+                    const nativeSealReason = nativeResumeRolloverReason(nativeResumeReplacement);
+                    const failed = (failureStage: SessionRolloverFailureStage, message: string): never => {
+                      throw new SessionRolloverCommitError(message, [
+                        ...rolloverLifecycleMessages,
+                        buildSessionRolloverLifecycleMessage({
+                          catId,
+                          rolloverId,
+                          status: 'failed',
+                          reason: nativeSealReason,
+                          failureStage,
+                        }),
+                      ]);
+                    };
+                    const sessionSealer =
+                      deps.sessionSealer ?? failed('seal_request', 'Native session rollover requires SessionSealer');
+                    const sealResult = await sessionSealer
+                      .requestSeal({
+                        sessionId: existing.id,
+                        reason: sealReason,
+                      })
+                      .catch((err: unknown) =>
+                        failed(
+                          'seal_request',
+                          `Native session rollover seal request failed: ${err instanceof Error ? err.message : String(err)}`,
+                        ),
+                      );
+                    if (!sealResult.accepted) {
+                      failed('seal_request', 'Native session rollover seal request was not accepted');
+                    }
+                    const pendingMessage = buildSessionRolloverLifecycleMessage({
+                      catId,
+                      rolloverId,
+                      status: 'pending',
+                      reason: nativeSealReason,
+                    });
+                    rolloverLifecycleMessages.push(pendingMessage);
+                    outputs.push(pendingMessage);
+                    const finalizeResult = await sessionSealer
+                      .finalize({ sessionId: existing.id })
+                      .catch((err: unknown) =>
+                        failed(
+                          'seal_finalize',
+                          `Native session rollover seal finalize failed: ${err instanceof Error ? err.message : String(err)}`,
+                        ),
+                      );
+                    if (!finalizeResult.sealed) {
+                      failed('seal_finalize', 'Native session rollover could not finalize the previous SessionRecord');
+                    }
+                    sealAccepted = true;
+                  } else if (deps.sessionSealer) {
                     try {
                       const result = await deps.sessionSealer.requestSeal({
                         sessionId: existing.id,
@@ -4014,93 +4144,156 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
                     });
                     sealAccepted = true;
                   }
+
                   // Only create new active record if old one was successfully sealed.
                   // Otherwise we'd have two active records — a dirty state.
                   if (sealAccepted || !deps.sessionSealer) {
-                    if (runtimeReplacement && params.continuityCapsule) {
-                      const sealTimestamp = Date.now();
-                      const continuityCapsule = completeCapsuleForRuntimeReplacement(params.continuityCapsule, {
-                        invocationId,
-                        createdAt: sealTimestamp,
-                        seal: {
-                          sessionId: existing.id,
-                          sessionSeq: existing.seq + 1,
-                          reason: sealReason,
-                        },
-                        replacement: runtimeReplacement,
-                      });
-                      await deps.sessionChainStore.update(existing.id, { continuityCapsule });
-                      const sealInfoMessage = {
-                        type: 'system_info' as const,
-                        catId,
-                        content: JSON.stringify({
-                          type: 'session_seal_requested',
-                          catId,
-                          sessionId: existing.id,
-                          sessionSeq: existing.seq + 1,
-                          reason: sealReason,
-                          continuityCapsule,
-                          continuityDiagnostics: {
-                            source: 'runtime_replacement',
-                            boundary: 'runtime_replacement',
-                            sealMechanism: sealReason,
-                            replacement: runtimeReplacement,
-                            generated: true,
-                            persistedVia: 'session_seal_requested',
-                            threadId,
-                            catId,
-                            invocationId,
-                            sessionId: existing.id,
-                          },
-                        }),
-                        timestamp: sealTimestamp,
-                      };
-                      outputs.push(sealInfoMessage);
-                      if (deps.transcriptWriter) {
-                        const sessInfo: TranscriptSessionInfo = {
-                          sessionId: existing.id,
-                          threadId,
-                          catId: existing.catId,
-                          ...(existing.cliSessionId ? { cliSessionId: existing.cliSessionId } : {}),
-                          seq: existing.seq,
-                        };
-                        deps.transcriptWriter.appendEvent(
-                          sessInfo,
-                          sealInfoMessage as unknown as Record<string, unknown>,
+                    let logicalRecId: string | undefined;
+                    try {
+                      if (runtimeReplacement && params.continuityCapsule) {
+                        const sealTimestamp = Date.now();
+                        const continuityCapsule = completeCapsuleForRuntimeReplacement(params.continuityCapsule, {
                           invocationId,
+                          createdAt: sealTimestamp,
+                          seal: {
+                            sessionId: existing.id,
+                            sessionSeq: existing.seq + 1,
+                            reason: sealReason,
+                          },
+                          replacement: runtimeReplacement,
+                        });
+                        await deps.sessionChainStore.update(existing.id, { continuityCapsule });
+                        const sealInfoMessage = {
+                          type: 'system_info' as const,
+                          catId,
+                          content: JSON.stringify({
+                            type: 'session_seal_requested',
+                            catId,
+                            sessionId: existing.id,
+                            sessionSeq: existing.seq + 1,
+                            reason: sealReason,
+                            continuityCapsule,
+                            continuityDiagnostics: {
+                              source: 'runtime_replacement',
+                              boundary: 'runtime_replacement',
+                              sealMechanism: sealReason,
+                              replacement: runtimeReplacement,
+                              generated: true,
+                              persistedVia: 'session_seal_requested',
+                              threadId,
+                              catId,
+                              invocationId,
+                              sessionId: existing.id,
+                            },
+                          }),
+                          timestamp: sealTimestamp,
+                        };
+                        outputs.push(sealInfoMessage);
+                        if (deps.transcriptWriter) {
+                          const sessInfo: TranscriptSessionInfo = {
+                            sessionId: existing.id,
+                            threadId,
+                            catId: existing.catId,
+                            ...(existing.cliSessionId ? { cliSessionId: existing.cliSessionId } : {}),
+                            seq: existing.seq,
+                          };
+                          deps.transcriptWriter.appendEvent(
+                            sessInfo,
+                            sealInfoMessage as unknown as Record<string, unknown>,
+                            invocationId,
+                          );
+                        }
+                      }
+                      if (!nativeResumeReplacement) {
+                        deps.sessionSealer?.finalize({ sessionId: existing.id }).catch(() => {});
+                      }
+                      // F118 D1: Inherit failure count from the replaced session.
+                      // create() doesn't accept consecutiveRestoreFailures, so use immediate update().
+                      const inheritedFailures = existing.consecutiveRestoreFailures ?? 0;
+                      const logicalRec = await deps.sessionChainStore.create({
+                        ...sessionWorkspaceBinding,
+                        threadId,
+                        catId,
+                        userId,
+                        compressionCount: invocationCapacitySnapshot?.capability.observesCompression ? 0 : null,
+                      });
+                      logicalRecId = logicalRec.id;
+                      let newRec;
+                      try {
+                        newRec = await requireManagedSessionRuntimeIdBinding(
+                          deps.sessionChainStore,
+                          logicalRec.id,
+                          msg.sessionId,
+                        );
+                      } catch (err) {
+                        if (nativeResumeReplacement) {
+                          const now = Date.now();
+                          await deps.sessionChainStore.update(logicalRec.id, {
+                            status: 'sealed',
+                            sealReason: 'replacement_bind_failed',
+                            sealedAt: now,
+                            updatedAt: now,
+                          });
+                        }
+                        throw err;
+                      }
+                      sessionRuntimeBindingAccepted = true;
+                      invocationPolicyRecordId = newRec.id;
+                      await refreshInvocationPolicyExecution();
+                      if (inheritedFailures > 0) {
+                        await deps.sessionChainStore.update(newRec.id, {
+                          consecutiveRestoreFailures: inheritedFailures,
+                          ...sessionWorkspaceBinding,
+                          ...(params.continuityCapsule ? { continuityCapsule: params.continuityCapsule } : {}),
+                        });
+                      } else if (params.continuityCapsule) {
+                        await deps.sessionChainStore.update(newRec.id, {
+                          ...sessionWorkspaceBinding,
+                          continuityCapsule: params.continuityCapsule,
+                        });
+                      }
+                      if (nativeResumeReplacement) {
+                        outputs.push(
+                          buildSessionRolloverLifecycleMessage({
+                            catId,
+                            rolloverId,
+                            status: 'succeeded',
+                            reason: nativeResumeRolloverReason(nativeResumeReplacement),
+                          }),
                         );
                       }
-                    }
-                    deps.sessionSealer?.finalize({ sessionId: existing.id }).catch(() => {});
-                    // F118 D1: Inherit failure count from the replaced session.
-                    // create() doesn't accept consecutiveRestoreFailures, so use immediate update().
-                    const inheritedFailures = existing.consecutiveRestoreFailures ?? 0;
-                    const logicalRec = await deps.sessionChainStore.create({
-                      ...sessionWorkspaceBinding,
-                      threadId,
-                      catId,
-                      userId,
-                      compressionCount: invocationCapacitySnapshot?.capability.observesCompression ? 0 : null,
-                    });
-                    const newRec = await requireManagedSessionRuntimeIdBinding(
-                      deps.sessionChainStore,
-                      logicalRec.id,
-                      msg.sessionId,
-                    );
-                    sessionRuntimeBindingAccepted = true;
-                    invocationPolicyRecordId = newRec.id;
-                    await refreshInvocationPolicyExecution();
-                    if (inheritedFailures > 0) {
-                      await deps.sessionChainStore.update(newRec.id, {
-                        consecutiveRestoreFailures: inheritedFailures,
-                        ...sessionWorkspaceBinding,
-                        ...(params.continuityCapsule ? { continuityCapsule: params.continuityCapsule } : {}),
-                      });
-                    } else if (params.continuityCapsule) {
-                      await deps.sessionChainStore.update(newRec.id, {
-                        ...sessionWorkspaceBinding,
-                        continuityCapsule: params.continuityCapsule,
-                      });
+                    } catch (err) {
+                      if (nativeResumeReplacement) {
+                        if (logicalRecId) {
+                          const logicalRec = await deps.sessionChainStore.get(logicalRecId);
+                          if (logicalRec?.status === 'active') {
+                            const now = Date.now();
+                            await deps.sessionChainStore.update(logicalRecId, {
+                              status: 'sealed',
+                              sealReason: 'replacement_bind_failed',
+                              sealedAt: now,
+                              updatedAt: now,
+                            });
+                          }
+                        }
+                        const failureStage: SessionRolloverFailureStage = logicalRecId
+                          ? 'replacement_bind'
+                          : 'replacement_create';
+                        throw new SessionRolloverCommitError(
+                          `Native session rollover ${failureStage} failed: ${err instanceof Error ? err.message : String(err)}`,
+                          [
+                            ...rolloverLifecycleMessages,
+                            buildSessionRolloverLifecycleMessage({
+                              catId,
+                              rolloverId,
+                              status: 'failed',
+                              reason: nativeResumeRolloverReason(nativeResumeReplacement),
+                              failureStage,
+                            }),
+                          ],
+                        );
+                      }
+                      throw err;
                     }
                   }
                 }
@@ -4136,7 +4329,9 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
               }
             }
           } catch (err) {
-            if (err instanceof SessionRuntimeIdBindingConflictError) throw err;
+            if (err instanceof SessionRuntimeIdBindingConflictError || err instanceof SessionRolloverCommitError) {
+              throw err;
+            }
             // Best-effort — don't break the invocation chain
           }
         }
@@ -4636,6 +4831,7 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
     let allowSessionRetry = Boolean(sessionId);
     let allowTransientRetry = true;
     let nextRequestGenerationReason: RequestGenerationRetryReason | undefined;
+    let consumedClaudeCompactionObservation: string | undefined;
     for (let attempt = 0; attempt < maxAttempts; attempt++) {
       const attemptStartedAt = Date.now();
       let launchCountThisAttempt = 0;
@@ -4779,12 +4975,49 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
         if (msg.type !== 'provider_signal' && msg.type !== 'liveness_signal' && msg.type !== 'status')
           resetInvocationTimeout();
         if (msg.contextCompaction) {
-          const support = contextCapability
+          const hookAuthenticationReady =
+            typeof deps.hookAuthenticationReady === 'function'
+              ? deps.hookAuthenticationReady()
+              : (deps.hookAuthenticationReady ?? false);
+          const hookCarrierReady =
+            typeof deps.claudeProjectHookCarrierReady === 'function'
+              ? deps.claudeProjectHookCarrierReady(workingProjectRoot ?? hostProjectRoot)
+              : (deps.claudeProjectHookCarrierReady ?? false);
+          // Ask the state machine with no attestation first. Only its specific
+          // "attestation unavailable" edge authorizes the session read below;
+          // auth/carrier/capability failures stop before sequence state.
+          let support = contextCapability
             ? resolveAuthoritativeCompactionSupport({
                 capability: contextCapability,
                 eventSource: msg.contextCompaction.eventSource,
+                hookAuthenticationReady,
+                hookCarrierReady,
+                hookInvocationAttested: false,
               })
             : { status: 'unsupported' as const, reason: 'typed_event_unroutable' as const };
+          let activeClaudeRecord: Awaited<ReturnType<ISessionChainStore['getActive']>> = null;
+          let claudeObservationKey: string | undefined;
+          if (
+            support.status === 'unsupported' &&
+            support.reason === 'hook_invocation_attestation_unavailable' &&
+            !('event' in msg.contextCompaction)
+          ) {
+            if (!deps.sessionChainStore) throw new Error('authoritative_compaction_owner_unavailable');
+            activeClaudeRecord = await deps.sessionChainStore.getActive(catId as CatId, threadId, userId);
+            const sequence = activeClaudeRecord
+              ? authenticatedCompactionSequenceForInvocation(activeClaudeRecord, invocationId)
+              : null;
+            claudeObservationKey =
+              activeClaudeRecord && sequence !== null ? `${activeClaudeRecord.id}:${sequence}` : undefined;
+            support = resolveAuthoritativeCompactionSupport({
+              capability: contextCapability!,
+              eventSource: msg.contextCompaction.eventSource,
+              hookAuthenticationReady,
+              hookCarrierReady,
+              hookInvocationAttested:
+                claudeObservationKey !== undefined && claudeObservationKey !== consumedClaudeCompactionObservation,
+            });
+          }
           if (support.status === 'unsupported') {
             throw new Error(`authoritative_compaction_unsupported:${support.reason}`);
           }
@@ -4796,10 +5029,14 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
           if ('event' in msg.contextCompaction) {
             compactionEvent = msg.contextCompaction.event;
           } else {
-            if (!deps.sessionChainStore) throw new Error('authoritative_compaction_owner_unavailable');
-            const activeRecord = await deps.sessionChainStore.getActive(catId as CatId, threadId, userId);
-            if (!activeRecord) throw new Error('authoritative_compaction_scope_unavailable');
-            compactionEvent = authoritativeCompactionEventFromSession(activeRecord, msg.contextCompaction.eventSource);
+            if (!activeClaudeRecord || !claudeObservationKey) {
+              throw new Error('authoritative_compaction_scope_unavailable');
+            }
+            compactionEvent = authoritativeCompactionEventFromSession(
+              activeClaudeRecord,
+              msg.contextCompaction.eventSource,
+            );
+            consumedClaudeCompactionObservation = claudeObservationKey;
           }
           await deps.contextEpochOwner.observeCompaction({
             userId,
@@ -5354,6 +5591,11 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
     hadError = true;
     turnExecutionFailureReason ??= 'invocation_exception';
     didWriteAudit = true; // F118 AC-C5: Catch block wrote audit, don't double-write in finally
+    if (err instanceof SessionRolloverCommitError) {
+      for (const lifecycleMessage of err.lifecycleMessages) {
+        yield lifecycleMessage;
+      }
+    }
     yield {
       type: 'error' as const,
       catId,

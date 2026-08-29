@@ -7,6 +7,7 @@ import type { Thread } from '@/stores/chat-types';
 import { useChatStore } from '@/stores/chatStore';
 import { apiFetch } from '@/utils/api-client';
 import { ApprovalDecisionCard } from './ApprovalDecisionCard';
+import { MeetingIntakeDismissAction } from './MeetingIntakeDismissAction';
 import { MEETING_OUTPUTS, MeetingIntakeForm } from './MeetingIntakeForm';
 import { MeetingIntakeRepairActions } from './MeetingIntakeRepairActions';
 import { MeetingIntakeSourceDetails, MeetingIntakeSummary } from './MeetingIntakeSummary';
@@ -52,7 +53,7 @@ export function MeetingIntakeCard({ item }: { item: ApprovalItem }) {
     () =>
       !(parseMeetingSpeakers(initialSpeakers) && initialContext.trim() && initialDestination && initialOutputs.length),
   );
-  const [manualTranscript, setManualTranscript] = useState('');
+  const [manualReference, setManualReference] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const parsedSpeakers = parseMeetingSpeakers(speakers);
@@ -120,12 +121,12 @@ export function MeetingIntakeCard({ item }: { item: ApprovalItem }) {
       {repair && (
         <MeetingIntakeRepairActions
           repair={repair}
-          manualTranscript={manualTranscript}
+          manualReference={manualReference}
           busy={busy}
           revision={revision}
           routeCatRepair={routeCatRepairThread ? { threadId: routeCatRepairThread } : undefined}
           onBindCatAndRetry={(threadId, catId) => void bindDestinationCatAndRetry(threadId, catId)}
-          onManualTranscriptChange={setManualTranscript}
+          onManualReferenceChange={setManualReference}
           onAction={(name, payload) => void action(name, payload)}
         />
       )}
@@ -171,15 +172,12 @@ export function MeetingIntakeCard({ item }: { item: ApprovalItem }) {
         </>
       )}
       <div className="flex items-center justify-between gap-2">
-        <button
-          type="button"
-          onClick={() => void action('dismiss', { expectedRevision: revision })}
-          disabled={busy}
-          className="rounded-md border border-cafe px-3 py-1.5 text-micro hover:bg-cafe-muted disabled:opacity-50"
-          data-testid="meeting-dismiss"
-        >
-          这次不用整理
-        </button>
+        <MeetingIntakeDismissAction
+          judgmentState={detail.judgmentState}
+          executionState={detail.executionState}
+          busy={busy}
+          onDismiss={() => void action('dismiss', { expectedRevision: revision })}
+        />
         {error && <p className="text-micro text-[var(--semantic-error)]">{error}</p>}
       </div>
     </div>

@@ -934,6 +934,36 @@ describe('Queue Management API', () => {
     );
   });
 
+  it('POST /queue/:entryId/steer selects a pending sibling instead of a failed target', async () => {
+    const queued = enqueueEntry(deps.invocationQueue, {
+      content: 'steer the pending sibling',
+      ownerAuthProvenance: 'strict',
+      targetCats: ['opus', 'codex'],
+    });
+    deps.invocationQueue.markQueuedFailedForCatAcrossUsers('t1', 'opus', 'inv-opus', new Set([queued.entry.id]));
+    deps.invocationTracker.has = mock.fn((_threadId, catId) => catId === 'codex');
+    deps.invocationTracker.getUserId = mock.fn(() => 'user-a');
+    deps.invocationTracker.cancel = mock.fn((_threadId, catId) => ({
+      cancelled: true,
+      catIds: [catId],
+      executionIds: ['inv-codex'],
+    }));
+    deps.queueProcessor.processNext = mock.fn(async () => ({ started: true, entry: queued.entry }));
+
+    const res = await app.inject({
+      method: 'POST',
+      url: `/api/threads/t1/queue/${queued.entry.id}/steer`,
+      headers: { 'x-cat-cafe-user': 'user-a', 'content-type': 'application/json' },
+      payload: {},
+    });
+
+    assert.equal(res.statusCode, 200);
+    assert.equal(deps.invocationTracker.cancel.mock.calls[0].arguments[1], 'codex');
+    assert.deepEqual(deps.invocationQueue.getEntrySnapshot('t1', 'user-a', queued.entry.id)?.steerRequestedByCatIds, [
+      'codex',
+    ]);
+  });
+
   it('POST /queue/:entryId/steer does not preempt when reservation persistence fails', async () => {
     // Reserving only in memory just moved the split transaction: a rejected
     // durable write would still have landed after the running turn was killed.

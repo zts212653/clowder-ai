@@ -6,7 +6,7 @@ import { recordDebugEvent } from '@/debug/invocationEventDebug';
 import { getCachedCats } from '@/hooks/useCatData';
 import { formatCatDisplayName } from '@/lib/cat-display-name';
 import { inferFileKind, inferRenderMode } from '@/lib/file-kind';
-import type { WorkspaceMode } from '@/lib/workspace-modes';
+import { isWorkspaceMode, type WorkspaceMode } from '@/lib/workspace-modes';
 import {
   resolveNavigateTargetWorktreeId,
   scopeWorktreeAliases,
@@ -403,7 +403,7 @@ function resolveWorkspaceMode(
   ts: Pick<ThreadState, 'workspaceMode' | 'workspaceSurface' | 'rightPanelMode' | 'rightPanelOpen'>,
   fallback: WorkspaceMode = 'dev',
 ): WorkspaceMode {
-  if (ts.workspaceMode) return ts.workspaceMode;
+  if (isWorkspaceMode(ts.workspaceMode)) return ts.workspaceMode;
   // Legacy v5 snapshots did not persist the top-level renderer. A visible
   // Browser request is unambiguous evidence that Dev owns the viewport.
   if (ts.workspaceSurface === 'browser' && ts.rightPanelMode === 'workspace' && ts.rightPanelOpen) return 'dev';
@@ -641,6 +641,17 @@ type ReplaceMessageIdResult = {
   retainedMessage?: ChatMessage;
 };
 
+function rekeyMessageIdentity(message: ChatMessage, fromId: string, toId: string): ChatMessage {
+  const sourceIds = message.projectionSourceMessageIds;
+  if (!sourceIds?.includes(fromId)) return { ...message, id: toId };
+
+  return {
+    ...message,
+    id: toId,
+    projectionSourceMessageIds: [...new Set(sourceIds.map((sourceId) => (sourceId === fromId ? toId : sourceId)))],
+  };
+}
+
 function replaceMessageIdInList(messages: ChatMessage[], fromId: string, toId: string): ReplaceMessageIdResult {
   if (fromId === toId) return { messages };
   const fromIndex = messages.findIndex((msg) => msg.id === fromId);
@@ -656,7 +667,7 @@ function replaceMessageIdInList(messages: ChatMessage[], fromId: string, toId: s
     };
   }
 
-  return { messages: messages.map((msg) => (msg.id === fromId ? { ...msg, id: toId } : msg)) };
+  return { messages: messages.map((msg) => (msg.id === fromId ? rekeyMessageIdentity(msg, fromId, toId) : msg)) };
 }
 
 function recordMessageIdDedupDrop(

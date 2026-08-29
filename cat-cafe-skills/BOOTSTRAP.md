@@ -37,7 +37,7 @@ co-creation docs → co-creation-docs → direct push | merge-gate(docs PR)
 | `cross-cat-handoff` | 跨猫交接/传话（五件套） | — |
 | `deep-research` | 多源深度调研 | — |
 | `source-audit` | 外部数字/benchmark/因果/趋势等高风险 claim 的信源审计与 provenance | — |
-| `eval-design` | E0 资格门 + 指标出生证契约 + 七公理设计自检 + 五病体检尺（划水/污染/归因停滞/干预失证/摸鱼） | — |
+| `eval-design` | E0 资格门 + 指标出生证契约 + 纵向运行拓扑 + 七公理设计自检 + 五病体检尺（划水/污染/归因停滞/干预失证/摸鱼） | — |
 | `ttfund-skills` | 天天基金官方 Skills 网关：基金搜索/净值/持仓/经理/指数/黄金/债市/活期宝事实数据 | — |
 | `convention-graph-discovery` | 进入陌生 repo / F242 约定图工作：定义 domain、extractor、gap/freshness/provenance 报告 | — |
 | `knowledge-engineering` | 外部项目文档重构/冷启动知识注入 | — |
@@ -63,6 +63,7 @@ co-creation docs → co-creation-docs → direct push | merge-gate(docs PR)
 | `workspace-navigator` | operator说"打开日志/看代码/打开设计图"等模糊指令 → 猫猫自己找路径 → API 导航 | — |
 | `ppt-forge` | 做 PPT/演示文稿/视觉审查（三猫流水线） | — |
 | `concept-demo-design` | 把抽象理念变成可录屏、可讲解、可验证的交互概念演示 | — |
+| `agent-product-promo-director` | Agent/AI 产品宣传片的主角、信念变化、格式、故事、镜头、运动、声音与 provenance creative brief | — |
 | `video-forge` | 做视频/showcase/教程视频/视频审查 | — |
 | `anime-forge` | 做动画短剧/角色 IP 短片/图生视频管线（素材是生成的不是录的） | — |
 | `sprite-forge` | 做桌宠皮肤/atlas 状态动画行/角色小循环动态素材（母图→首帧→视频→截帧；禁 imagegen 逐帧直出） | — |

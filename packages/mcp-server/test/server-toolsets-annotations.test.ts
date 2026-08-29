@@ -36,12 +36,13 @@ describe('F247 R8 P1-1: EXPLICIT_TOOL_ANNOTATIONS regression guard', () => {
     }
   });
 
-  describe('cloud-pro-phase0 11 whitelist (砚砚 ChatGPT 端实测 surface)', () => {
+  describe('cloud-pro-phase0 12 whitelist (砚砚 ChatGPT 端实测 surface)', () => {
     const cloudProPhase0Whitelist = [
-      // 5 collab
+      // 6 collab
       'cat_cafe_post_message',
       'cat_cafe_cross_post_message',
       'cat_cafe_get_thread_context',
+      'cat_cafe_get_workflow_sop',
       'cat_cafe_get_message',
       'cat_cafe_list_threads',
       // 5 memory
@@ -64,9 +65,10 @@ describe('F247 R8 P1-1: EXPLICIT_TOOL_ANNOTATIONS regression guard', () => {
       });
     }
 
-    it('read tools (9/11) all have readOnlyHint=true', () => {
+    it('read tools (10/12) all have readOnlyHint=true', () => {
       const reads = [
         'cat_cafe_get_thread_context',
+        'cat_cafe_get_workflow_sop',
         'cat_cafe_get_message',
         'cat_cafe_list_threads',
         'cat_cafe_search_evidence',
@@ -82,7 +84,7 @@ describe('F247 R8 P1-1: EXPLICIT_TOOL_ANNOTATIONS regression guard', () => {
       }
     });
 
-    it('write tools (2/11) are non-destructive', () => {
+    it('write tools (2/12) are non-destructive', () => {
       for (const w of ['cat_cafe_post_message', 'cat_cafe_cross_post_message']) {
         assert.equal(EXPLICIT_TOOL_ANNOTATIONS[w].readOnlyHint, false);
         assert.equal(EXPLICIT_TOOL_ANNOTATIONS[w].destructiveHint, false);

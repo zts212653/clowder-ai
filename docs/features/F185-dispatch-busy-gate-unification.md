@@ -4,6 +4,7 @@ related_features: [F108, F122, F175]
 topics: [dispatch, queue, busy-gate, connector, slot, thread, fairness]
 doc_kind: spec
 created: 2026-05-01
+tips_exempt: "2026-08-27 link/reference hygiene only; no dispatch capability or user action changed."
 ---
 
 # F185: 入口级判忙策略分层 — ADR-034 实施

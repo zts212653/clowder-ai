@@ -8,7 +8,7 @@ description: "per-user 品味信号的结构化提议、operator 审批、可靠
 description_source: human
 description_author: opus
 description_updated_at: 2026-07-12T12:45:00Z
-tips_exempt: agent-internal semantic routing correction; existing propose_taste and propose_profile_update surfaces are unchanged and documented in their MCP descriptions
+tips_exempt: internal durability correction; the existing Approval Hub action is unchanged and no new user-invokable capability is introduced
 ---
 
 # F221: Taste Lane — per-user 品味导航
@@ -53,6 +53,11 @@ Phase B 生产回归（2026-07-15 实测）：
 - 真实 runtime 拓扑允许且需要 `CAT_CAFE_RUNTIME_ROOT === CAT_CAFE_WORKSPACE_ROOT === cat-cafe-runtime`；在此拓扑下 remap 为 no-op，main-only guard 正确拒绝写入，Approval API 返回 500，proposal 回滚为 `pending`。
 - F231 不受该问题影响：`FileProfileRepository` 以 `CAT_CAFE_DATA_DIR` 为独立 canonical root，不依赖 cwd/worktree；approval service 另有 target lock、optimistic hash、atomic write、checkpoint 与 crash recovery。
 - 修复边界：保留 F221 的 Git-tracked `docs/taste/` 目标，但引入显式 `TasteRepository` / approval service；repository 独占 primary-main worktree 解析，writer 不再读取 `process.cwd()` 或借用 workspace env 猜 canonical root。
+
+Phase B publication durability（2026-08-25 实测）：
+- `writeVignette` 的 local commit terminal 又连续留下两笔 approved-but-unpublished commit；历史上同型至少发生五次。proposal 已完成但 `origin/main` 不含内容，startup preflight 只能把系统债变成人工 push 提醒。
+- public writer 改为隔离 single-writer publisher：每次从 fresh `origin/main` 建 disposable named branch，异步执行有界 Git 命令，commit vignette + index 后直接发布；只有 push 成功或远端已存在 exact projection 才允许 checkpoint/finalize。
+- primary `main` 的 dirty/ahead/behind/WIP 不再进入审批事务。远端竞争只在确认 `origin/main` 前进后重建重试；push/commit 失败保持 `pending`，push 后 checkpoint 中断则保留 `approving` + resume-only 恢复。
 
 ## What
 
@@ -125,8 +130,8 @@ taste 信号（"这不美"/"太客服了"/"aha"/"这就是我要的"）
 
 - Approved public -> `docs/taste/vignettes/{slug}.md`（标准 vignette 格式：when / quotes / scene / tags）
 - Approved sensitive -> `private/taste/{slug}.md`
-- **原子更新**：vignette 文件 + `docs/taste/index.md` 条目一致更新
-- 失败可恢复：写入失败不留半提交状态（写 vignette -> 更新 index -> commit，任一步失败回滚）
+- **原子发布**：在 fresh `origin/main` 的隔离 checkout 中一致更新 vignette + `docs/taste/index.md`，同 commit 推到远端；primary main 不作为写面
+- 失败可恢复：push 前失败不结算 approved；远端竞争基于新 base 重建；push 后 checkpoint/finalize 中断由 exact remote projection 幂等恢复
 - Slug 生成：从 scene/dimension 派生 kebab-case，避免冲突
 
 #### B5. Signal Routing Guard
@@ -164,9 +169,9 @@ taste 信号（"这不美"/"太客服了"/"aha"/"这就是我要的"）
   2. 猫调用 `cat_cafe_propose_taste(scene, quote, tags, dimension, privacy)` -> 系统返回 proposal ID + 确认消息
   3. Proposal 出现在 Approval Hub 的 taste 卡片列表中
   4. operator在 Hub 看到 taste 卡片：场景描述 + 原话 + 维度 + 隐私级别
-  5. operator approve -> 系统写 vignette 到 `docs/taste/vignettes/` + 更新 index -> 猫收到确认
+  5. operator approve -> 系统在隔离 checkout 写 vignette + 更新 index并发布到 `origin/main` -> 猫收到确认
   6. operator reject -> 系统记录 reason -> 无文件副作用
-- **Success evidence**: 新 vignette 出现在 `docs/taste/vignettes/`，`search_evidence` 可检索到
+- **Success evidence**: 新 vignette 与 index entry 同时出现在 `origin/main`；proposal 才进入 approved，后续索引投影可重建并被 `search_evidence` 检索
 - **Non-goals**: 猫不自动判断是否应该 propose（猫自主判断），operator 不自动 approve
 
 ### Supporting Journeys
@@ -222,13 +227,14 @@ taste 信号（"这不美"/"太客服了"/"aha"/"这就是我要的"）
 - [x] AC-B9: 信号路由 hard test：`propose_profile_update` with taste content -> routing warning
 - [x] AC-B10: 信号路由 soft layer：L0 或 skill 中明确三类信号区分指南
 - [x] AC-B11: Eval 可观测：propose->approve/reject->consume 链路有计数/日志可查
+- [ ] AC-B12: public approval 只在 exact vignette + index commit 已进入 `origin/main` 后 approved；dirty/diverged primary main 不被修改，push 失败/竞争/crash 可恢复（当前 blocker：实现尚未合入 main；合入后以 alpha/真实审批验证完成并同步 Feature Truth）
 
 ## 需求点 Checklist
 
 | ID | 需求点（operator/operator 原话或转述） | AC 编号 | 验证方式 | 状态 |
 |----|-------------------------------|---------|----------|------|
 | R1 | "猫可提议、operator 可判断"（operator signoff） | AC-B1, AC-B4 | MCP tool schema 验证 + Hub card 截图 | [x] |
-| R2 | "批准后可靠落盘"（operator signoff） | AC-B5, AC-B6, AC-B8 | 文件存在 + 原子性红测 | [x] |
+| R2 | "批准后可靠落盘"（operator signoff） | AC-B5, AC-B6, AC-B8, AC-B12 | remote publication + 原子性/竞争/恢复红测 | [x] |
 | R3 | 信号路由隔离：taste/relationship/work 不混 | AC-B9, AC-B10 | routing warning 红测 + L0 路由文档 | [x] |
 | R4 | "拒绝不产生文件副作用"（operator signoff） | AC-B7 | 红测：reject 后 `ls docs/taste/` 无新文件 | [x] |
 | R5 | 持久化 + 审计可追溯 | AC-B2, AC-B3 | 重启后 pending 仍在 + audit 查询命令 | [x] |
@@ -257,6 +263,7 @@ taste 信号（"这不美"/"太客服了"/"aha"/"这就是我要的"）
 | `propose_taste` 工具存在但猫不用（跟 Phase A 同根病） | ADR-031 三层：soft(L0 路由指南) + hard(`propose_profile_update` routing guard) + eval(30 天零调用 sunset signal) |
 | operator 审批疲劳（taste proposals 太多太杂） | 猫自主判断信号质量，不做 nudge 自动提议；Phase B 只建通道不催流量 |
 | Writer 写 docs/taste/ 后 outbound sync 泄露敏感内容 | Phase A 已验 AC-A5：`docs/taste/` 不在 outbound allowlist；sensitive -> `private/taste/` |
+| approval 期间 `origin/main` 并发前进或 push 暂时失败 | 隔离 publisher 只对可证 remote advance 做有界重建重试；其他失败回到 pending，不以 local commit 冒充成功 |
 | 信号路由 guard 误杀合法 primer 更新 | guard 只对 taste-classified content 返回 warning，不 hard block；猫可 override |
 | runtime 与 workspace 合法同根时 canonical remap 退化为 no-op | 参照 F231 注入独立 repository；以真实同根拓扑写回归测试，primary-main 解析只归 repository 所有 |
 
@@ -273,6 +280,7 @@ taste 信号（"这不美"/"太客服了"/"aha"/"这就是我要的"）
 | KD-7 | Phase B 不索引 `private/taste/` | 同 A7/A9 已知盲区，修复归 F186/F256，不在 F221 scope | 2026-07-12 |
 | KD-8 | AC-D7 gate alpha 实测，不预判 | F221 = adapter #6（>5 threshold），但 p95 大概率 <250ms；按 AC-D7 纪律必须实测 | 2026-07-12 |
 | KD-9 | F221 approval 参照 F231 的 canonical repository + checkpointed service pattern | 通用 workspace root 不是 canonical-main locator；路径解析、原子写与恢复语义必须从 HTTP/writer 中抽离，但 public Taste 仍以 Git-tracked `docs/taste/` 为终态 | 2026-07-15 |
+| KD-10 | public Taste 的完成 terminal 是 `origin/main` publication，不是 primary-main local commit | typed proposal 是 canonical approval truth，Git docs 是授权投影；isolated publisher 避免共享 main 污染，并复用 `approving` checkpoint 恢复而不再造状态机 | 2026-08-25 |
 
 ## Review Gate
 

@@ -6,6 +6,89 @@ import type { PersistenceContext } from './route-helpers.js';
 
 const log = createModuleLogger('route-system-info-persistence');
 
+const SESSION_ROLLOVER_STATUSES = new Set(['pending', 'succeeded', 'failed']);
+const SESSION_ROLLOVER_REASONS = new Set(['oversized_retire', 'resume_rejected']);
+const SESSION_ROLLOVER_FAILURE_STAGES = new Set([
+  'seal_request',
+  'seal_finalize',
+  'replacement_create',
+  'replacement_bind',
+]);
+
+interface SessionRolloverNoticeMetadata {
+  readonly rolloverId: string;
+  readonly status: 'pending' | 'succeeded' | 'failed';
+  readonly reason: 'oversized_retire' | 'resume_rejected';
+  readonly failureStage?: 'seal_request' | 'seal_finalize' | 'replacement_create' | 'replacement_bind';
+}
+
+function parseSessionRolloverNotice(parsed: {
+  type?: unknown;
+  v?: unknown;
+  rolloverId?: unknown;
+  status?: unknown;
+  reason?: unknown;
+  failureStage?: unknown;
+}):
+  | {
+      content: string;
+      connector: string;
+      label: string;
+      icon: string;
+      tone: 'info' | 'warning';
+      idempotencyKey: string;
+      sessionRollover: SessionRolloverNoticeMetadata;
+    }
+  | undefined {
+  if (parsed.type !== 'session_rollover_lifecycle' || parsed.v !== 1) return undefined;
+  if (
+    typeof parsed.rolloverId !== 'string' ||
+    parsed.rolloverId.length === 0 ||
+    parsed.rolloverId.length > 160 ||
+    !/^[A-Za-z0-9][A-Za-z0-9._:-]*$/.test(parsed.rolloverId)
+  ) {
+    return undefined;
+  }
+  if (typeof parsed.status !== 'string' || !SESSION_ROLLOVER_STATUSES.has(parsed.status)) return undefined;
+  if (typeof parsed.reason !== 'string' || !SESSION_ROLLOVER_REASONS.has(parsed.reason)) return undefined;
+  if (parsed.status === 'failed') {
+    if (typeof parsed.failureStage !== 'string' || !SESSION_ROLLOVER_FAILURE_STAGES.has(parsed.failureStage)) {
+      return undefined;
+    }
+  } else if (parsed.failureStage !== undefined) {
+    return undefined;
+  }
+
+  const status = parsed.status as SessionRolloverNoticeMetadata['status'];
+  const reason = parsed.reason as SessionRolloverNoticeMetadata['reason'];
+  const failureStage = parsed.failureStage as SessionRolloverNoticeMetadata['failureStage'];
+  const content =
+    status === 'pending'
+      ? reason === 'oversized_retire'
+        ? '正在封存上下文载荷过大的原生会话，并准备冷启动替代会话…'
+        : '正在封存无法恢复的原生会话，并准备冷启动替代会话…'
+      : status === 'succeeded'
+        ? reason === 'oversized_retire'
+          ? '原生会话因上下文载荷过大已自动封存；已切换到新的冷启动会话。'
+          : '无法恢复的原生会话已自动封存；已切换到新的冷启动会话。'
+        : '原生会话自动封存与冷切换失败；本轮已在发送新 prompt 前停止。';
+
+  return {
+    content,
+    connector: 'session-rollover-lifecycle',
+    label: '会话冷切换',
+    icon: status === 'failed' ? '⚠️' : '♻️',
+    tone: status === 'failed' ? 'warning' : 'info',
+    idempotencyKey: `session-rollover:${parsed.rolloverId}:${status}`,
+    sessionRollover: {
+      rolloverId: parsed.rolloverId,
+      status,
+      reason,
+      ...(failureStage ? { failureStage } : {}),
+    },
+  };
+}
+
 function projectOutboundReceipt(value: unknown): CloudBridgeOutboundReceiptV1 | undefined {
   if (!isCloudBridgeOutboundReceiptV1(value)) return undefined;
   return {
@@ -41,15 +124,24 @@ function parseVisibleNotice(
       tone: 'info' | 'warning';
       replyTo?: string;
       outboundReceipt?: CloudBridgeOutboundReceiptV1;
+      idempotencyKey?: string;
+      sessionRollover?: SessionRolloverNoticeMetadata;
     }
   | undefined {
   try {
     const parsed = JSON.parse(content) as {
       type?: unknown;
+      v?: unknown;
       status?: unknown;
+      reason?: unknown;
+      rolloverId?: unknown;
+      failureStage?: unknown;
       message?: unknown;
       outboundReceipt?: unknown;
     };
+    if (parsed.type === 'session_rollover_lifecycle') {
+      return parseSessionRolloverNotice(parsed);
+    }
     if (typeof parsed.message !== 'string') return undefined;
     if (parsed.type === 'warning') {
       return {
@@ -120,6 +212,7 @@ async function appendVisibleNotice(
     content: notice.content,
     mentions: [],
     timestamp: Date.now(),
+    ...(notice.idempotencyKey ? { idempotencyKey: notice.idempotencyKey } : {}),
     ...(outboundReceipt ? { replyTo: outboundReceipt.sourceMessageId } : {}),
     source: {
       connector: notice.connector,
@@ -128,6 +221,7 @@ async function appendVisibleNotice(
       meta: {
         presentation: 'system_notice',
         noticeTone: notice.tone,
+        ...(notice.sessionRollover ? { sessionRollover: notice.sessionRollover } : {}),
         ...(outboundReceipt ? { cloudBridgeOutboundReceipt: outboundReceipt } : {}),
       },
     },

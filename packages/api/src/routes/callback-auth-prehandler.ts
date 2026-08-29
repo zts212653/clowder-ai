@@ -60,6 +60,8 @@ export interface CallbackAuthHookOptions {
   notifier?: Pick<CallbackAuthSystemMessageNotifier, 'notify'>;
   /** F178 Phase C: agent-key registry for persistent agent auth. */
   agentKeyRegistry?: AgentKeyAuthRegistry;
+  /** Session hooks reuse invocation auth but own a distinct, scope-bound action policy. */
+  enforceToolExecutionPolicy?: boolean;
 }
 
 export function rejectCallbackAuthDuringStartupRecovery(registry: CallbackAuthRegistry, reply: FastifyReply): boolean {
@@ -99,7 +101,7 @@ export function registerCallbackAuthHook(
     // refresh-token does its own atomic verifyLatest in preValidation and
     // pre-populates callbackAuth. Preserve that atomic freshness decision.
     if (request.callbackAuth) {
-      allowToolExecution(request, reply, request.callbackAuth);
+      if (options.enforceToolExecutionPolicy !== false) allowToolExecution(request, reply, request.callbackAuth);
       return;
     }
 
@@ -180,7 +182,7 @@ export function registerCallbackAuthHook(
         '[#476 DEPRECATED] Callback credentials received via body/query — migrate to X-Invocation-Id / X-Callback-Token headers',
       );
     }
-    if (!allowToolExecution(request, reply, result.record)) return;
+    if (options.enforceToolExecutionPolicy !== false && !allowToolExecution(request, reply, result.record)) return;
     request.callbackAuth = result.record;
     request.callbackPrincipal = derivePrincipal(result.record);
   });

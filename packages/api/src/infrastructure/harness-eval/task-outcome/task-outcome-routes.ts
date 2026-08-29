@@ -7,16 +7,11 @@
  * Design principle: signals are appended to the active episode for a thread.
  * If no active episode exists, one is auto-created (trigger: cat_initiated).
  */
-import type { CancelReason } from './task-outcome-episode.js';
 import { type PublicStoredEpisode, projectPublicStoredEpisode } from './task-outcome-public-projection.js';
 
 export type { PublicStoredEpisode } from './task-outcome-public-projection.js';
 
-import {
-  buildA1WorldTruthSignal,
-  buildMagicWordSignal,
-  buildPermissionCancelSignal,
-} from './task-outcome-signal-builder.js';
+import { buildA1WorldTruthSignal, buildMagicWordSignal } from './task-outcome-signal-builder.js';
 import type { StoredEpisode, TaskOutcomeEpisodeStore } from './task-outcome-store.js';
 
 // ---- Result types ----
@@ -27,15 +22,6 @@ export interface SignalAppendResult {
 }
 
 // ---- Input types ----
-
-export interface PermissionCancelInput {
-  toolName: string;
-  paramsSummary?: string;
-  reason?: CancelReason;
-  catId: string;
-  threadId: string;
-  sessionId?: string;
-}
 
 export interface MagicWordInput {
   word: string;
@@ -76,19 +62,6 @@ function ensureActiveEpisode(store: TaskOutcomeEpisodeStore, threadId: string, c
 }
 
 // ---- Handlers ----
-
-export function handlePermissionCancel(
-  store: TaskOutcomeEpisodeStore,
-  input: PermissionCancelInput,
-): SignalAppendResult {
-  const episode = ensureActiveEpisode(store, input.threadId, input.catId);
-  const signal = buildPermissionCancelSignal(input);
-  store.appendSignal(episode.episodeId, {
-    category: 'a2',
-    record: signal as unknown as Record<string, unknown>,
-  });
-  return { episodeId: episode.episodeId, signalAppended: true };
-}
 
 // F227 归一 (superseded): magic words are captured by Event Memory
 // (onMagicWordDetected → Event store, the single source of truth). The POST

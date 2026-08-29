@@ -8,6 +8,7 @@ const AUTH_ENV_KEYS = [
   'CAT_CAFE_AGENT_KEY_SECRET',
   'CAT_CAFE_AGENT_KEY_FILE',
   'CAT_CAFE_AGENT_KEY_FILES',
+  'CAT_CAFE_AGENT_KEY_BOUND_CAT_ID',
   'CAT_CAFE_READONLY',
 ];
 
@@ -70,6 +71,12 @@ describe('post_message principal-specific public schema', () => {
 
     assert.ok(threadId, 'agent-key callers must be offered threadId');
     assert.equal(threadId.isOptional(), false, 'agent-key callers must see threadId as required');
+    assert.ok(tool.inputSchema.shape.replyTo, 'agent-key callers must receive the source reply coordinate');
+    assert.ok(
+      tool.inputSchema.shape.cloudReturnBinding,
+      'agent-key callers must receive the opaque source-bound return capability',
+    );
+    assert.ok(tool.inputSchema.shape.agentKeyCatId, 'shared agent-key servers must retain their identity selector');
     assert.equal(
       Object.hasOwn(tool.inputSchema.shape, 'localReviewVerdict'),
       false,

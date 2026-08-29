@@ -6,6 +6,7 @@ doc_kind: spec
 created: 2026-04-10
 reopened: 2026-04-16
 updated: 2026-08-19
+tips_exempt: "F286 only removes a retired authorization route from the Phase E threat ledger; no new user action or discoverable capability is introduced."
 ---
 
 # F156: Security Hardening — 实时通道 + 本机信任边界加固
@@ -27,6 +28,13 @@ updated: 2026-08-19
 **外部参考**：OpenClaw 2026 年初连续爆出两个同类漏洞（CVE-2026-25253 + ClawJacked），攻击链高度相似。
 
 **operator experience**："我们的 websockets 是不是有被钓鱼的风险？""先修自己家的，然后自己家验证没问题再帮他们 officeclaw 修复一下"
+
+## User Journey
+
+- **Scope unit**: 一次浏览器、CLI 或受控自动化客户端访问本机 Clowder AI 的敏感实时/API 能力。
+- **Primary flow**: 合法客户端按其入口完成身份建立后，只能订阅和操作自己获准的 thread/session；普通使用不新增重复确认。恶意网页或伪造 header/query/body 的调用在进入 terminal、配置写入或高权限动作前被拒绝，并留下可审计证据。
+- **Success evidence**: 合法 Hub/CLI 旅程继续通过；跨 Origin、跨身份与 fallback spoof 的负向回归均 fail closed。
+- **Non-goal**: 不复活 F286 已落日的 generic authorization 路由，也不把 F156 扩成全站认证重构。
 
 ## What
 
@@ -86,6 +94,8 @@ updated: 2026-08-19
 ### Phase E: 非浏览器身份入口收口（relay-claw 反向审计 follow-up） 🔲
 
 > **定位**：这不是把 F156 重新定义成“全站认证重构”。Phase E 只处理同一条本机信任边界里、会把浏览器/本地 API 安全面重新撕开的那批 **敏感身份入口**。
+>
+> **2026-08-24 scope correction:** generic `/api/authorization/*` 已由 F286 整体落日，不再是待加固入口，也不得为了完成本 Phase 而恢复。Phase E 继续覆盖 terminal、配置写入和其余真实存在的敏感路由。
 
 **E-1: 反向审计清单落盘**
 1. 基于 relay-claw `issue #20` 的发现，整理 Clowder AI 当前 sensitive route ledger
@@ -93,7 +103,7 @@ updated: 2026-08-19
 3. 不再允许“同一个 `resolveUserId()` 默认同时承担交互式浏览器身份 + 自动化 header 身份 + fallbackUserId”而没有证据区分
 
 **E-2: 敏感路由不再把 header/fallback 当充分身份**
-1. `/api/authorization/*` 这类高影响审批/规则写接口，补 session/显式受控入口约束
+1. generic `/api/authorization/*` 已由 F286 删除；新的审批能力必须以 typed Approval Hub producer / owner-authority contract 单独出生
 2. terminal 的非 WebSocket 敏感 REST 入口（create/list/delete/agent panes）重新检查是否仍可被 non-browser header 伪造穿透
 3. 任何能导向“执行、审批、配置写入、跨线程高权限动作”的路由，都不能只靠 `X-Cat-Cafe-User` 或 body fallback 认人
 
@@ -272,11 +282,11 @@ Pairing code lifecycle:
 
 ### Phase E（非浏览器身份入口收口 + 远端 owner 配对） 🔲
 
-_E-1~E-4 identity residual cleanup:_
+_E-1~E-4 identity residual cleanup（authorization 子项由 F286 sunset 处置）:_
 - [ ] AC-E1: relay-claw 反向审计清单落盘到本 spec，明确 sensitive route ledger（session-only / trusted browser fallback / non-browser automation）
-- [ ] AC-E2: `/api/authorization/*` 不再把 `X-Cat-Cafe-User` / fallback 作为充分身份来源；敏感审批与规则写入必须走更窄的身份语义
+- [x] AC-E2: generic `/api/authorization/*` 已由 F286 原子删除；未来审批只能通过 typed Approval Hub producer / owner-authority contract 新建，不复活通用路由
 - [ ] AC-E3: terminal 非 WS 敏感 REST 入口完成复核并收口，不再留下”先伪造身份拿 session 列表/创建，再走别的入口扩大影响”的残余链
-- [ ] AC-E4: 新增负向回归测试，证明 header/query/body spoof 不能在 Clowder AI 的 sensitive routes 上复现 relay-claw #20 同类问题
+- [ ] AC-E4: 新增负向回归测试，证明 header/query/body spoof 不能在仍存续的 sensitive routes 上复现 relay-claw #20 同类问题
 - [ ] AC-E5: 对仍保留 `X-Cat-Cafe-User` 的 automation-only route 建立显式 allowlist + 注释证据，不再靠隐式约定
 
 _E-5 remote owner pairing (2026-08-19):_

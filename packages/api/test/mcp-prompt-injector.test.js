@@ -58,7 +58,7 @@ describe('McpPromptInjector', () => {
     assert.ok(instructions.includes('search-evidence'), 'should list search-evidence');
     assert.ok(instructions.includes('reflect'), 'should list reflect');
     assert.ok(instructions.includes('retain-memory'), 'should list retain-memory');
-    assert.ok(instructions.includes('request-permission'), 'should list request-permission');
+    assert.ok(!instructions.includes('request-permission'), 'should not advertise the sunset permission callback');
   });
 
   it('buildMcpCallbackInstructions references API endpoints for docs', async () => {

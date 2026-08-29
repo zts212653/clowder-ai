@@ -16,10 +16,10 @@ operator正在开会（线上或线下），需要猫实时参与：
 
 | operator说的 | 采集模式 | app_name |
 |-----------|---------|----------|
-| "监听腾讯会议" | app | 腾讯会议 |
-| "监听华为云会议" | app | 华为云会议 |
-| "监听 Zoom" | app | zoom.us |
-| "监听 Chrome"（网页会议） | app | Google Chrome |
+| "监听腾讯会议" | app + mic | 腾讯会议 |
+| "监听华为云会议" | app + mic | 华为云会议 |
+| "监听 Zoom" | app + mic | zoom.us |
+| "监听 Chrome"（网页会议） | app + mic | Google Chrome |
 | "线下会议""用麦克风听" | mic | — |
 
 ## 完整流程
@@ -32,10 +32,22 @@ operator正在开会（线上或线下），需要猫实时参与：
    cat_cafe_audio_capture_start({
      source: "app",
      app_name: "腾讯会议",
-     thread_id: "<当前 thread ID>"
+     thread_id: "<当前 thread ID>",
+     additional_inputs: [
+       { id: "local-mic", source: "mic", label: "My microphone" }
+     ]
    })
    ```
-3. 告诉operator已开始，转写窗会自动打开
+3. 读一次 status，只有 ASR、speaker separation 与两个 input 状态都诚实时才告诉operator已开始；显式 degraded/error 要原样报告原因。
+4. API controller 会跨猫 turn 持续持租。不要因为本次 MCP invocation 结束而 stop；下一 turn 直接 status/read。
+
+### 说话人身份边界
+
+- provider 能给 participant/track identity：该 track 作为独立 input adapter，并附 `speaker_evidence.kind="provider_track"`，可直接归名。
+- provider 只有会议 App 混音：不要从 App 名或参会人列表猜人名；远端走 session-local Speaker N。
+- 明确只包含一个人的物理输入才可用 `exclusive_source`。开放麦克风不能默认视作独占。
+- enrolled voice 是声纹证据；只有 metadata 时不是。
+- 人工确认 Speaker N 后，人工映射优先并追溯更新既有 transcript。
 
 ### 会议进行中
 
@@ -92,7 +104,7 @@ operator说"停""不听了""会议结束了"：
 ## 转写持久化（Phase D）
 
 会议转写自动持久化到 MD 文件（`scripts/meeting-copilot/transcripts/{thread_id}/transcript-{meeting_id}.md`，同 meeting_id 去重加序号）。
-原始录音同步保存为 MP3（ffmpeg 转换；不可用时保留原始 PCM）。
+每个输入的原始录音分别保存为 MP3（ffmpeg 转换；不可用时保留原始 PCM），仍属于同一个 transcript artifact，不是第二套 store。
 
 **你不需要做任何事情——持久化全自动**：
 - 启动会议时自动创建 MD 文件（按 speaking turn 分段，不是每个 chunk 一行）

@@ -147,11 +147,17 @@ export class HostInventoryControlPlane {
       const grants = transaction.grants.get(current.pluginInstanceId);
       if (!grants) throw new PluginInventoryError('INVENTORY_INVARIANT', 'current instance has no grant record');
       assertGrantRevision(grants, input.expectedGrantRevision);
+      if (
+        !['stopped', 'crashed'].includes(current.runtimeState) ||
+        current.activationState === 'enabling' ||
+        current.activationState === 'disabling'
+      ) {
+        throw new PluginInventoryError('RUNTIME_NOT_STOPPED', 'package mutation requires a stable stopped runtime');
+      }
       putVerifiedPackage(transaction, verified);
       transaction.instances.put({
         ...current,
         packageDigest: input.computedPackageDigest,
-        activationState: 'disabled',
         runtimeState: 'stopped',
         lifecycleRevision: current.lifecycleRevision + 1,
         updatedAt: now,

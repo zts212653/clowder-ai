@@ -27,6 +27,8 @@ const CODEX_EXEC = {
   reason: 'fixture',
 };
 
+const CODEX_APP_SERVER = { ...CODEX_EXEC, carrier: 'app_server' };
+
 async function sceneAt(now) {
   const { buildAsrPersonMemoryDynamicScenes } = await import(
     '../../dist/domains/signal-intake/AsrPersonMemorySceneBuilder.js'
@@ -313,6 +315,67 @@ describe('ASR → F276 F296 adapter', () => {
         messages.findIndex((message) => message.type === 'text' && message.content === 'handled'),
     );
     assert.deepEqual(timeline, ['provider-start', 'provider-after-text']);
+  });
+
+  it('presents after an app-server provider preflight settles the final generation', async () => {
+    const now = Date.now();
+    const scene = await sceneAt(now);
+    let providerPrompt = '';
+    const service = {
+      contextCapability: () => CODEX_APP_SERVER,
+      async *invoke() {
+        yield* [];
+        assert.fail('app-server continuity must use the provider preflight seam');
+      },
+      async *invokeWithContinuityPreflight(preflight) {
+        const settled = await preflight.settle({
+          evidence: { kind: 'started', runtimeSessionId: 'runtime-app-server-1' },
+          compactions: [],
+        });
+        providerPrompt = settled.prompt;
+        yield { type: 'text', catId: 'codex', content: 'handled after preflight', timestamp: now + 1 };
+        yield { type: 'done', catId: 'codex', timestamp: now + 2 };
+      },
+    };
+    const deps = {
+      ...dispositionAuthority(),
+      registry: {
+        create: async () => ({ invocationId: 'inv-asr-app-server', callbackToken: 'token-asr-app-server' }),
+        verify: async () => ({ ok: false, reason: 'unknown_invocation' }),
+      },
+      sessionManager: {
+        get: async () => undefined,
+        store: async () => {},
+        delete: async () => {},
+        resolveWorkingDirectory: () => '/tmp/test',
+      },
+      threadStore: null,
+      apiUrl: 'http://127.0.0.1:3004',
+      contextEpochOwner: new ContextEpochOwner(new InMemoryContextEpochStore()),
+      presentationLedger: presentationLedger(),
+    };
+    const messages = [];
+    for await (const message of invokeSingleCat(deps, {
+      catId: 'codex',
+      service,
+      prompt: 'meeting prompt',
+      userId: 'owner-1',
+      ownerAuthProvenance: 'unknown',
+      threadId: 'thread-1',
+      invocationOrigin: 'interactive',
+      routeTopology: 'serial',
+      asrPersonMemoryScenes: [boundScene(scene)],
+      isLastCat: true,
+    })) {
+      messages.push(message);
+    }
+
+    assert.match(providerPrompt, /person-memory-write-opportunity/);
+    assert.match(providerPrompt, /writeOpportunityRef:/);
+    const receipts = parseSystemInfo(messages, 'write_opportunity_presentation_receipt');
+    assert.equal(receipts.length, 1);
+    assert.equal(receipts[0].outcome, 'delivered');
+    assert.match(receipts[0].continuityDispositionRef, /codex:app_server:fresh:no_prior_session$/);
   });
 
   it('records authoritative omission when the carrier cannot present the opportunity', async () => {

@@ -660,6 +660,24 @@ describe(
   'Sync transform rules match convention',
   { skip: !isHomeRepo && 'sync infrastructure not present (open-source repo)' },
   () => {
+    it('exports the Git attribute that keeps the deterministic F247 bundle LF-only on Windows', () => {
+      const attributesPath = resolve(ROOT, '.gitattributes');
+      assert.ok(existsSync(attributesPath), '.gitattributes must define the generated bundle checkout contract');
+
+      const attributes = readFileSync(attributesPath, 'utf8');
+      assert.match(
+        attributes,
+        /^packages\/api\/src\/plugins\/cloud-cat-personal-host\/extension\/content-script\.js text eol=lf$/mu,
+        'the checked-in bundle must retain LF on Windows so the deterministic build comparison is byte-stable',
+      );
+
+      const managedFiles = readYamlTopLevelList('sync-manifest.yaml', 'managed_files');
+      assert.ok(
+        managedFiles.includes('.gitattributes'),
+        'sync-manifest must export .gitattributes so the public Windows checkout keeps the same bundle contract',
+      );
+    });
+
     it('_sanitize-rules.pl transforms 3002→3004 (API)', () => {
       const content = readFileSync(resolve(ROOT, 'scripts/_sanitize-rules.pl'), 'utf-8');
       assert.ok(
@@ -1662,7 +1680,7 @@ excluded:
       );
       assert.match(
         content,
-        /if \[ "\$DRY_RUN" = false \] && \[ "\$VALIDATE" = false \]; then[\s\S]*After merge: \$PUBLISH_HANDOFF_CMD/,
+        /if \[ "\$PREFLIGHT" = false \] && \[ "\$DRY_RUN" = false \] && \[ "\$VALIDATE" = false \]; then[\s\S]*After merge: \$PUBLISH_HANDOFF_CMD/,
         'sync-to-opensource should only print the post-merge publish handoff for real sync runs',
       );
       assert.match(
@@ -2053,13 +2071,13 @@ describe(
       );
       assert.match(
         content,
-        /if \[ "\$DRY_RUN" = false \] && \[ "\$VALIDATE" = false \]; then[\s\S]*if \[ "\$SYNC_MODULE" = "all" \]; then[\s\S]*prepare_source_sync_tree/m,
+        /if \[ "\$PREFLIGHT" = false \] && \[ "\$DRY_RUN" = false \] && \[ "\$VALIDATE" = false \]; then[\s\S]*if \[ "\$SYNC_MODULE" = "all" \]; then[\s\S]*prepare_source_sync_tree/m,
         'real full sync should always switch the source baseline to a detached checkout',
       );
       assert.match(
         content,
-        /if \{ \[ "\$DRY_RUN" = true \] \|\| \[ "\$VALIDATE" = true \]; \} && \[ -n "\$REQUESTED_SOURCE_SHA" \]; then[\s\S]*prepare_source_sync_tree/m,
-        'dry-run and validate should use the same detached checkout when an immutable source pin is supplied',
+        /if \{ \[ "\$PREFLIGHT" = true \] \|\| \[ "\$DRY_RUN" = true \] \|\| \[ "\$VALIDATE" = true \]; \} && \[ -n "\$REQUESTED_SOURCE_SHA" \]; then[\s\S]*prepare_source_sync_tree/m,
+        'preflight, dry-run, and validate should use the same detached checkout when an immutable source pin is supplied',
       );
       assert.match(
         content,
@@ -2083,6 +2101,16 @@ describe(
       );
       assert.match(
         content,
+        /exec bash "\$pinned_wrapper" "\$\{ORIGINAL_SYNC_ARGS\[@\]\}"/,
+        'the first process must re-exec the wrapper committed in the detached source checkout',
+      );
+      assert.match(
+        content,
+        /actual_wrapper=\$\(resolve_physical_path "\$0"\)[\s\S]*expected_wrapper=\$\(resolve_physical_path "\$SOURCE_SYNC_DIR\/scripts\/sync-to-opensource\.sh"\)[\s\S]*"\$actual_wrapper" != "\$expected_wrapper"/,
+        'the child must fail closed unless the executing wrapper itself comes from SOURCE_SYNC_DIR',
+      );
+      assert.match(
+        content,
         /node "\$SOURCE_SYNC_DIR\/scripts\/export-public-feature-docs\.mjs"/,
         'feature-doc exporter must run from SOURCE_SYNC_DIR, not SOURCE_DIR (P1: no mixed provenance)',
       );
@@ -2090,6 +2118,16 @@ describe(
         content,
         /SANITIZER="\$SOURCE_SYNC_DIR\/scripts\/_sanitize-rules\.pl"/,
         'sanitizer rules must load from SOURCE_SYNC_DIR, not SOURCE_DIR (P1: no mixed provenance)',
+      );
+      assert.match(
+        content,
+        /node "\$SOURCE_SYNC_DIR\/scripts\/check-sync-public-delta-reconciliation-cli\.mjs"/,
+        'reconciliation decisions must run from the frozen source checkout',
+      );
+      assert.match(
+        content,
+        /"\$SOURCE_SYNC_DIR\/scripts\/append-sync-provenance-telemetry\.mjs"/,
+        'provenance telemetry must run from the frozen source checkout',
       );
     });
   },
@@ -2101,6 +2139,7 @@ describe(
   () => {
     it('resolves TARGET_DIR through a physical-path helper before safety checks', () => {
       const content = readSyncScript();
+      const membershipGuard = readFunctionBody(content, 'source_worktree_realpath_registered');
       assert.match(
         content,
         /resolve_physical_path\(\) \{[\s\S]*os\.path\.realpath\(sys\.argv\[1\]\)/,
@@ -2113,8 +2152,18 @@ describe(
       );
       assert.match(
         content,
-        /list_source_worktree_realpaths \| grep -qFx "\$RESOLVED_TARGET"/,
+        /source_worktree_realpath_registered "\$RESOLVED_TARGET"/,
         'sync script should compare TARGET_DIR against source worktrees using resolved realpaths',
+      );
+      assert.match(
+        membershipGuard,
+        /while IFS= read -r candidate_path; do[\s\S]*found=true[\s\S]*done < <\(list_source_worktree_realpaths\)[\s\S]*\[ "\$found" = true \]/m,
+        'worktree membership must consume the complete realpath stream before returning match status',
+      );
+      assert.doesNotMatch(
+        content,
+        /list_source_worktree_realpaths\s*\|\s*grep\s+-q/,
+        'grep -q closes the realpath pipeline early and becomes a false negative under pipefail',
       );
     });
 
@@ -2132,7 +2181,7 @@ describe(
       );
       assert.match(
         content,
-        /if \[ "\$DRY_RUN" = false \] && \[ "\$VALIDATE" = false \] && target_git_repo_exists "\$TARGET_DIR"; then/m,
+        /if \[ "\$PREFLIGHT" = false \] && \[ "\$DRY_RUN" = false \] && \[ "\$VALIDATE" = false \] && target_git_repo_exists "\$TARGET_DIR"; then/m,
         'real sync target gates should treat linked worktrees as valid repos',
       );
       assert.match(

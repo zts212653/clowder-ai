@@ -147,6 +147,24 @@ describe('F194 Phase Z9 — routeSerial stamps ownInvocationId on yielded events
     assert.notEqual(doneMsg.invocationId, 'parent-z9-yield-test', 'done invocationId is own, not parent');
   });
 
+  it('done event carries the canonical stored message ID for immediate client actions', async () => {
+    const { routeSerial } = await import('../dist/domains/cats/services/agents/routing/route-serial.js');
+    const deps = createMockDeps({ opus: createMockService('opus', 'cli-inner-id', 'persist me') });
+
+    const yielded = [];
+    for await (const msg of routeSerial(deps, ['opus'], 'hi', 'user1', 'thread1', {
+      parentInvocationId: 'parent-live-export-test',
+    })) {
+      yielded.push(msg);
+    }
+
+    const doneMsg = yielded.find((message) => message.type === 'done');
+    assert.ok(doneMsg, 'done event yielded');
+    assert.equal(doneMsg.messageId, 'msg-1', 'done must expose the ID assigned by MessageStore.append');
+    const stored = await deps.messageStore.getById(doneMsg.messageId);
+    assert.equal(stored?.content, 'persist me', 'the emitted ID must resolve to the durable message immediately');
+  });
+
   it('F233 PR3: records invocation.started + heartbeat with own turn invocationId', async () => {
     const { routeSerial } = await import('../dist/domains/cats/services/agents/routing/route-serial.js');
     const deps = createMockDeps({ opus: createMockService('opus', 'cli-inner-id', 'hello') });

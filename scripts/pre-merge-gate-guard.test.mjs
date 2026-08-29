@@ -113,13 +113,14 @@ describe('pre-merge gate guard', () => {
     }
   });
 
-  it('blocks elevated fseventsd RSS when the daemon is actively consuming CPU', () => {
+  it('blocks elevated fseventsd RSS when active CPU is paired with a material memory share', () => {
     const tempDir = mkdtempSync(path.join(os.tmpdir(), 'gate-guard-test-'));
     const lockDir = path.join(tempDir, 'pre-merge-check.lock');
     writeFileSync(path.join(tempDir, 'ps.txt'), '318 1 5000000 100.0 /System/Library/PrivateFrameworks/fseventsd\n');
     try {
       const result = runGuard(tempDir, ['acquire', '--lock-dir', lockDir, '--holder-pid', String(process.pid)], {
         CAT_CAFE_FSEVENTSD_RSS_MAX_KB: '1000',
+        CAT_CAFE_GATE_GUARD_TOTAL_MEMORY_KB_FIXTURE: '50000000',
       });
       assert.notEqual(result.status, 0);
       assert.match(result.stderr, /fseventsd RSS/);

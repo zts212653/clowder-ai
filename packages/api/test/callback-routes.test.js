@@ -4232,6 +4232,259 @@ describe('Callback Routes', () => {
     assert.ok(msg.speaker);
   });
 
+  for (const fixture of [
+    { label: '75K', charsPerMessage: 750 },
+    { label: '160K', charsPerMessage: 1_600 },
+    { label: '338K', charsPerMessage: 3_380 },
+  ]) {
+    test(`F236 regression: keyword + full + limit=100 stays inside aggregate envelope (${fixture.label})`, async () => {
+      const app = await createApp();
+      const { invocationId, callbackToken } = await registry.create('user-1', 'opus');
+      const expectedIds = [];
+      for (let index = 0; index < 100; index += 1) {
+        const message = messageStore.append({
+          userId: 'user-1',
+          catId: null,
+          content: `budgetneedle-${index}-` + 'x'.repeat(fixture.charsPerMessage),
+          mentions: [],
+          timestamp: index + 1,
+        });
+        expectedIds.push(message.id);
+      }
+
+      const returnedIds = [];
+      let cursor;
+      for (let page = 0; page < 100; page += 1) {
+        const params = new URLSearchParams({
+          limit: '100',
+          keyword: 'budgetneedle',
+          responseMode: 'full',
+        });
+        if (cursor) params.set('cursor', cursor);
+        const response = await app.inject({
+          method: 'GET',
+          url: `/api/callbacks/thread-context?${params}`,
+          headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
+        });
+
+        assert.equal(response.statusCode, 200, response.body);
+        assert.ok(
+          Buffer.byteLength(response.body, 'utf8') <= 24_000,
+          `serialized response exceeded envelope: ${Buffer.byteLength(response.body, 'utf8')}`,
+        );
+        const body = JSON.parse(response.body);
+        for (const message of body.messages) {
+          assert.equal(typeof message.content, 'string', 'ordinary full-page entries keep complete content');
+          returnedIds.push(message.id);
+        }
+        if (!body.hasMore) {
+          assert.equal(body.nextCursor, undefined);
+          break;
+        }
+        assert.equal(typeof body.nextCursor, 'string');
+        assert.ok(body.nextCursor.length > 0);
+        cursor = body.nextCursor;
+      }
+
+      assert.equal(returnedIds.length, expectedIds.length, 'continuation must return every selected message');
+      assert.equal(new Set(returnedIds).size, expectedIds.length, 'continuation must not duplicate messages');
+      assert.deepEqual(new Set(returnedIds), new Set(expectedIds), 'continuation must not skip selected messages');
+    });
+  }
+
+  test('F236 regression: a single message larger than the envelope falls back to an honest atomic anchor', async () => {
+    const app = await createApp();
+    const { invocationId, callbackToken } = await registry.create('user-1', 'opus');
+    const oversized = messageStore.append({
+      userId: 'user-1',
+      catId: null,
+      content: `oversizedneedle-${'z'.repeat(80_000)}`,
+      mentions: [],
+      timestamp: 1,
+    });
+
+    const response = await app.inject({
+      method: 'GET',
+      url: '/api/callbacks/thread-context?limit=100&keyword=oversizedneedle&responseMode=full',
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
+    });
+
+    assert.equal(response.statusCode, 200, response.body);
+    assert.ok(Buffer.byteLength(response.body, 'utf8') <= 24_000);
+    const body = JSON.parse(response.body);
+    assert.equal(body.messages.length, 1);
+    assert.equal(body.messages[0].id, oversized.id);
+    assert.equal(body.messages[0].oversized, true);
+    assert.equal(body.messages[0].truncated, true);
+    assert.equal('content' in body.messages[0], false, 'oversized fallback must not pretend partial content is full');
+    assert.equal(body.messages[0].drillDown.tool, 'cat_cafe_get_message');
+    assert.equal(body.hasMore, false);
+    assert.equal(body.nextCursor, undefined);
+  });
+
+  test('F236 regression: an oversized unpersisted queued body stays unseen and does not advertise a false drill', async () => {
+    const { InvocationQueue } = await import('../dist/domains/cats/services/agents/invocation/InvocationQueue.js');
+    invocationQueue = new InvocationQueue();
+    const threadId = 'thread-f236-oversized-queued';
+    const { invocationId, callbackToken } = await registry.create('user-1', 'opus', threadId);
+    const queued = invocationQueue.enqueue({
+      ownerAuthProvenance: 'strict',
+      threadId,
+      userId: 'user-1',
+      content: `queued-oversized-${'q'.repeat(80_000)}`,
+      source: 'user',
+      targetCats: ['opus'],
+      authorIntentByCatId: {
+        opus: { requested: 'continue_current', boundParentInvocationId: invocationId },
+      },
+      intent: 'execute',
+    });
+    const app = await createApp();
+
+    const response = await app.inject({
+      method: 'GET',
+      url: '/api/callbacks/thread-context?limit=100&responseMode=full',
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
+    });
+
+    assert.equal(response.statusCode, 200, response.body);
+    assert.ok(Buffer.byteLength(response.body, 'utf8') <= 24_000);
+    const body = JSON.parse(response.body);
+    assert.equal(body.messages.length, 1);
+    assert.equal(body.messages[0].id, `queued:${queued.entry.id}`);
+    assert.equal(body.messages[0].oversized, true);
+    assert.equal('content' in body.messages[0], false);
+    assert.equal('drillDown' in body.messages[0], false);
+    assert.match(body.messages[0].drillUnavailableReason, /no persisted message anchor/);
+    assert.deepEqual(
+      invocationQueue.getEntrySnapshot(threadId, 'user-1', queued.entry.id).queuedSeenByCatIds ?? [],
+      [],
+    );
+  });
+
+  test('F236 regression: continuation cursor is rejected when its read scope changes or it is malformed', async () => {
+    const app = await createApp();
+    const { invocationId, callbackToken } = await registry.create('user-1', 'opus');
+    for (let index = 0; index < 8; index += 1) {
+      messageStore.append({
+        userId: 'user-1',
+        catId: null,
+        content: `cursorneedle-${index}-${'c'.repeat(6_000)}`,
+        mentions: [],
+        timestamp: index + 1,
+      });
+    }
+
+    const first = await app.inject({
+      method: 'GET',
+      url: '/api/callbacks/thread-context?limit=100&keyword=cursorneedle&responseMode=full',
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
+    });
+    assert.equal(first.statusCode, 200, first.body);
+    const nextCursor = JSON.parse(first.body).nextCursor;
+    assert.equal(typeof nextCursor, 'string');
+
+    for (const params of [
+      new URLSearchParams({
+        limit: '100',
+        keyword: 'different-keyword',
+        responseMode: 'full',
+        cursor: nextCursor,
+      }),
+      new URLSearchParams({
+        limit: '100',
+        keyword: 'cursorneedle',
+        responseMode: 'full',
+        cursor: 'not-a-valid-cursor',
+      }),
+    ]) {
+      const response = await app.inject({
+        method: 'GET',
+        url: `/api/callbacks/thread-context?${params}`,
+        headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
+      });
+      assert.equal(response.statusCode, 400, response.body);
+      assert.equal(JSON.parse(response.body).code, 'INVALID_THREAD_CONTEXT_CURSOR');
+    }
+  });
+
+  test('F236 regression: full freshness catch-up returns only unread delta and confirms only the bounded page', async () => {
+    const { DeliveryCursorStore } = await import('../dist/domains/cats/services/stores/ports/DeliveryCursorStore.js');
+    const { cursorFor } = await import('../dist/domains/cats/services/stores/cursor.js');
+    const deliveryCursorStore = new DeliveryCursorStore();
+    const threadId = 'thread-f236-unread-envelope';
+    const oldMessages = [];
+    for (let index = 0; index < 100; index += 1) {
+      oldMessages.push(
+        messageStore.append({
+          userId: 'user-1',
+          catId: null,
+          content: `old-history-${index}-${'h'.repeat(4_000)}`,
+          mentions: [],
+          timestamp: index + 1,
+          threadId,
+        }),
+      );
+    }
+    await deliveryCursorStore.ackSeenCursor('user-1', 'opus', threadId, cursorFor(oldMessages.at(-1)));
+    const unread = [];
+    for (let index = 0; index < 6; index += 1) {
+      unread.push(
+        messageStore.append({
+          userId: 'user-1',
+          catId: null,
+          content: `fresh-unread-${index}-${'u'.repeat(6_000)}`,
+          mentions: [],
+          timestamp: 101 + index,
+          threadId,
+        }),
+      );
+    }
+    const app = await createApp({ deliveryCursorStore });
+    const { invocationId, callbackToken } = await registry.create('user-1', 'opus', threadId);
+
+    const first = await app.inject({
+      method: 'GET',
+      url: '/api/callbacks/thread-context?limit=100&responseMode=full',
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
+    });
+    assert.equal(first.statusCode, 200, first.body);
+    assert.ok(Buffer.byteLength(first.body, 'utf8') <= 24_000);
+    const firstBody = JSON.parse(first.body);
+    assert.ok(firstBody.messages.length > 0 && firstBody.messages.length < unread.length);
+    assert.ok(firstBody.messages.every((message) => message.content.startsWith('fresh-unread-')));
+    assert.equal(firstBody.hasMore, true);
+    const firstSeenCursor = await deliveryCursorStore.getSeenCursor('user-1', 'opus', threadId);
+    assert.ok(
+      firstSeenCursor.includes(firstBody.messages.at(-1).id),
+      JSON.stringify({ firstSeenCursor, returnedIds: firstBody.messages.map((message) => message.id) }),
+    );
+    assert.equal(firstSeenCursor.includes(unread.at(-1).id), false, 'unreturned unread tail must remain unseen');
+
+    const returnedIds = [...firstBody.messages.map((message) => message.id)];
+    let cursor = firstBody.nextCursor;
+    while (cursor) {
+      const params = new URLSearchParams({ limit: '100', responseMode: 'full', cursor });
+      const response = await app.inject({
+        method: 'GET',
+        url: `/api/callbacks/thread-context?${params}`,
+        headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
+      });
+      assert.equal(response.statusCode, 200, response.body);
+      assert.ok(Buffer.byteLength(response.body, 'utf8') <= 24_000);
+      const body = JSON.parse(response.body);
+      returnedIds.push(...body.messages.map((message) => message.id));
+      cursor = body.nextCursor;
+    }
+
+    assert.deepEqual(
+      returnedIds,
+      unread.map((message) => message.id),
+    );
+    const finalSeenCursor = await deliveryCursorStore.getSeenCursor('user-1', 'opus', threadId);
+    assert.ok(finalSeenCursor.includes(unread.at(-1).id));
+  });
+
   test('full thread-context projects published queued cat speech only once while recording queue read evidence', async () => {
     const { InvocationQueue } = await import('../dist/domains/cats/services/agents/invocation/InvocationQueue.js');
     invocationQueue = new InvocationQueue();

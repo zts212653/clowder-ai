@@ -1,6 +1,6 @@
 ---
 name: worktree
-tips_exempt: Developer isolation workflow with no end-user capability or useful Hub discovery moment.
+tips_exempt: "Renewed 2026-08-27 for link/reference hygiene only; the developer isolation workflow adds no end-user capability or useful Hub discovery moment."
 description: 为代码、脚本、API 与第一方执行面创建隔离 Git worktree，并配置 Redis 6398；classifier 放行的 co-creation docs direct push 不进入本流程。
 triggers:
   - "开始开发"

@@ -4,23 +4,19 @@
  * Each builder takes raw context from the harness layer and produces
  * a validated signal record that can be appended to an episode.
  *
- * - Permission Cancel: built when user denies a tool call
  * - Proposal Reject: built when user rejects a cat's proposal (F128 thread / F225 handoff)
  * - Magic Word: built when operator uses a magic word
  * - A1 World Truth: built when merge/revert/test/build events occur
  */
 import {
   type A1WorldTruthRecord,
-  type CancelReason,
   type MagicWordRecord,
   type MagicWordRefRecord,
-  type PermissionCancelRecord,
   type ProposalRejectRecord,
   type ProposalRejectType,
   parseA1WorldTruthRecord,
   parseMagicWordRecord,
   parseMagicWordRefRecord,
-  parsePermissionCancelRecord,
   parseProposalRejectRecord,
 } from './task-outcome-episode.js';
 
@@ -33,30 +29,6 @@ function truncate(s: string | undefined, max: number): string | undefined {
 
 function isoNow(): string {
   return new Date().toISOString();
-}
-
-// ---- Permission Cancel ----
-
-export interface BuildPermissionCancelInput {
-  toolName: string;
-  paramsSummary?: string;
-  reason?: CancelReason;
-  catId: string;
-  threadId: string;
-  sessionId?: string;
-}
-
-export function buildPermissionCancelSignal(input: BuildPermissionCancelInput): PermissionCancelRecord {
-  return parsePermissionCancelRecord({
-    type: 'permission_cancel',
-    toolName: input.toolName,
-    paramsSummary: truncate(input.paramsSummary, MAX_SUMMARY_LEN),
-    reason: input.reason ?? 'skip',
-    timestamp: isoNow(),
-    catId: input.catId,
-    threadId: input.threadId,
-    sessionId: input.sessionId,
-  });
 }
 
 // ---- Proposal Reject ----

@@ -121,14 +121,6 @@ vi.mock('@/hooks/useChatHistory', () => ({
 vi.mock('@/hooks/useSendMessage', () => ({
   useSendMessage: () => ({ handleSend: vi.fn(), uploadStatus: null, uploadError: null }),
 }));
-vi.mock('@/hooks/useAuthorization', () => ({
-  useAuthorization: () => ({
-    pending: [],
-    respond: vi.fn(),
-    handleAuthRequest: vi.fn(),
-    handleAuthResponse: vi.fn(),
-  }),
-}));
 vi.mock('@/hooks/useSplitPaneKeys', () => ({ useSplitPaneKeys: vi.fn() }));
 vi.mock('@/hooks/useCatData', () => ({
   useCatData: () => ({
@@ -174,7 +166,6 @@ vi.mock('../components/MessageActions', () => ({
 vi.mock('../components/SplitPaneView', () => ({ SplitPaneView: () => null }));
 vi.mock('../components/QueuePanel', () => ({ QueuePanel: () => null }));
 vi.mock('../components/ScrollToBottomButton', () => ({ ScrollToBottomButton: () => null }));
-vi.mock('../components/AuthorizationCard', () => ({ AuthorizationCard: () => null }));
 vi.mock('@/components/WorkspacePanel', () => ({ WorkspacePanel: () => null }));
 vi.mock('@/components/VoteActiveBar', () => ({ VoteActiveBar: () => null }));
 vi.mock('@/components/VoteConfigModal', () => ({ VoteConfigModal: () => null }));

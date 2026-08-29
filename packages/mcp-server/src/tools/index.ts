@@ -37,14 +37,13 @@ export {
 export {
   ackMentionsInputSchema,
   callbackTools,
-  checkPermissionStatusInputSchema,
   crossPostMessageInputSchema,
   featIndexInputSchema,
   getPendingMentionsInputSchema,
   getThreadCatsInputSchema,
   getThreadContextInputSchema,
+  getWorkflowSopInputSchema,
   handleAckMentions,
-  handleCheckPermissionStatus,
   handleCompleteA2ADispatch,
   handleCompleteManagedHold,
   handleCrossPostMessage,
@@ -53,18 +52,17 @@ export {
   handleGetPendingMentions,
   handleGetThreadCats,
   handleGetThreadContext,
+  handleGetWorkflowSop,
   handleListTasks,
   handleListThreads,
   handlePostMessage,
   handleRecordMemoryCueOutcome,
   handleRegisterPrTracking,
-  handleRequestPermission,
   handleUpdateTask,
   listTasksInputSchema,
   listThreadsInputSchema,
   postMessageInputSchema,
   registerPrTrackingInputSchema,
-  requestPermissionInputSchema,
   updateTaskInputSchema,
 } from './callback-tools.js';
 export {
@@ -175,6 +173,11 @@ export {
   localReviewVerdictInputSchema,
   localReviewVerdictTools,
 } from './local-review-verdict-tool.js';
+export {
+  handleReadMeetingArtifact,
+  meetingArtifactTools,
+  readMeetingArtifactInputSchema,
+} from './meeting-artifact-tools.js';
 export {
   createMemoryCueTools,
   drillMemoryCueInputSchema,

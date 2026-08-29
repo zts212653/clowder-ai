@@ -4,8 +4,17 @@ related_features: [F148, F209, F192]
 topics: [context-engineering, token-budget, mcp, harness]
 doc_kind: spec
 created: 2026-06-15
-tips_exempt: harness-internal anchor telemetry + eval domain — no user-visible capability change
+updated: 2026-08-25
+tips_exempt: Bounded full-thread pagination and workflow-SOP drills preserve the existing responseMode contract while adding no new user-operable capability
 user_journey_exempt: "Harness/internal tool-return contract for cats and eval telemetry — no end-user journey surface"
+mcp_admission_status: accepted
+mcp_admission_ref: "file:docs/features/F236-anchor-first-context-entry.md"
+mcp_admission_claims:
+  - ref: "file:docs/features/F236-anchor-first-context-entry.md"
+    toolName: cat_cafe_get_workflow_sop
+    resourceFamily: task-workflow
+    boundaryKind: progressive-disclosure
+    decision: accepted
 ---
 
 # F236: Anchor-First Context 入口 — 返回侧 token 减负
@@ -17,7 +26,7 @@ user_journey_exempt: "Harness/internal tool-return contract for cats and eval te
 ## Completion Boundary (2026-06-29)
 
 F236 core close means: **Clowder AI-owned return-side token reduction is live, cat-controlled, drillable, and eval-visible**. That scope is complete:
-- MCP collaboration readers: preview/default anchor + bounded full drill (`get_thread_context`, `get_pending_mentions`, `list_tasks`, `get_message`) — PR #2381 / #2546 / #2641.
+- MCP collaboration readers: preview/default anchor + bounded full drill (`get_thread_context`, `get_pending_mentions`, `list_tasks`, `get_message`) — PR #2381 / #2546 / #2641. The 2026-08-25 post-close repair additionally makes `get_thread_context` full collection reads aggregate-bounded and cursor-continuable without changing canonical message storage, and adds the owner-scoped `get_workflow_sop` progressive drill for oversized SOP anchors.
 - cc-native Read/Grep/Glob: `cat_cafe_set_read_mode()` controls session mode; PostToolUse hook handles Read/Grep/Glob; bounded Read is the escape hatch — PR #2552 / #2559 / #2565.
 - Eval loop: chars/volume, open-rate, adoption lens, stale flag, cc preview+drill bridge, live verdict rendering — PR #2411 / #2490 / #2507 / #2559 / #2565 / #2585 / #2641.
 - Safety boundaries: locator-not-synopsis, fail-open full mode, stale warning, Bash/WebFetch no-anchor decision — PR #2552 / #2585 + KD-7.
@@ -33,6 +42,13 @@ Close result: F236 core is done. Do not keep reopening F236 for future runtime f
 Architecture cell: harness-eval
 Map delta: none
 Why: F236 extends the existing anchor-first eval telemetry contract and callback emit sites; it does not introduce a new Store/Queue/Router/Adapter/Dispatcher/Binding.
+
+### 2026-08-25 post-close regression ownership
+
+Architecture cell: mcp-surface-governance
+Related existing cell: `dispatch`（queued/freshness custody semantics）
+Map delta: none
+Why: the repair promotes the existing tool's changed schema/description through the canonical MCP surface and preserves Dispatch's existing Queue/seen ownership; it introduces no new Store/Queue/Router/Adapter/Dispatcher/Binding.
 
 ## Why
 

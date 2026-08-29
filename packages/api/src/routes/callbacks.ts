@@ -173,6 +173,10 @@ import { type HoldBallRouteDeps, registerCallbackHoldBallRoutes } from './callba
 import { registerCallbackLarkActionRoutes } from './callback-lark-action-routes.js';
 import { registerCallbackLimbRoutes } from './callback-limb-routes.js';
 import { registerCallbackLocalReviewVerdictRoute } from './callback-local-review-verdict-route.js';
+import {
+  type MeetingArtifactReaderHolder,
+  registerCallbackMeetingArtifactRoutes,
+} from './callback-meeting-artifact-routes.js';
 import { type CallbackMemoryCueDeps, registerCallbackMemoryCueRoutes } from './callback-memory-cue-routes.js';
 import { registerCallbackMemoryRoutes } from './callback-memory-routes.js';
 import { getMultiMentionOrchestrator, registerMultiMentionRoutes } from './callback-multi-mention-routes.js';
@@ -208,6 +212,14 @@ import { type FeatIndexEntry, readFeatIndexEntries } from './feat-index-doc-impo
 import { buildThreadIdsByFeatId, normalizeFeatId } from './feature-thread-resolver.js';
 import { verifyKeeperOwnership } from './gate-keeping-cross-store.js';
 import { checkGateKeepingGuard } from './gate-keeping-guard.js';
+import {
+  decodeThreadContextCursor,
+  hashThreadContextCursorScope,
+  InvalidThreadContextCursorError,
+  pageThreadContextEnvelope,
+  type ThreadContextEnvelopeCandidate,
+  type ThreadContextSelection,
+} from './thread-context-envelope.js';
 import { type KeywordScanTiming, scanRankedThreadContext } from './thread-context-keyword-scan.js';
 import { detectUserMention } from './user-mention.js';
 import { clearVoteTimer, closeVoteInternal, voteTimers } from './votes.js';
@@ -778,6 +790,8 @@ export interface CallbackRoutesOptions {
   proactiveCandidateRegistryResolver?: import('../domains/memory/ProactiveCandidateRegistryResolver.js').ProactiveCandidateRegistryResolver;
   /** F276 KD-12: read-only workspace person identity root resolver. */
   workspacePersonResolver?: import('../domains/memory/people/WorkspacePersonResolver.js').WorkspacePersonResolver;
+  /** F292: late-bound, source-authoritative, version-fenced meeting artifact reader. */
+  meetingArtifactReaderHolder?: MeetingArtifactReaderHolder;
   /** F287 Phase C: owner-scoped opaque cue drill and content-free outcome callbacks. */
   memoryCueDeps?: CallbackMemoryCueDeps;
   /** F246 Phase I: canonical runtime ingress for all approval producers. */
@@ -949,6 +963,7 @@ const postMessageSchema = z.object({
 
 const threadContextQuerySchema = z.object({
   limit: z.coerce.number().int().min(1).max(200).optional(),
+  cursor: z.string().min(1).max(4096).optional(),
   threadId: z.string().min(1).optional(), // F-Swarm-6: optional cross-thread read
   messageId: z.string().min(1).optional(),
   before: z.coerce.number().int().min(0).max(50).optional(),
@@ -1209,6 +1224,12 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
     ...(callbackAuthNotifier ? { notifier: callbackAuthNotifier } : {}),
     ...(agentKeyRegistry ? { agentKeyRegistry } : {}),
   });
+  if (opts.meetingArtifactReaderHolder) {
+    registerCallbackMeetingArtifactRoutes(app, {
+      readerHolder: opts.meetingArtifactReaderHolder,
+      ...(threadStore ? { threadStore } : {}),
+    });
+  }
   if (threadStore && opts.sessionChainStore && opts.runtimeSessionStore) {
     registerCallbackRuntimeSessionRoutes(app, {
       threadStore,
@@ -1294,7 +1315,14 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
         return deletedThreadGuard.body;
       }
       const { content, replyTo, cloudReturnBinding, clientMessageId, targetCats: explicitTargetCats } = parsed.data;
-      const requiresCloudReturnBinding = principal.catId === createCatId('gpt-pro');
+      // F247 source-bound returns must prove their exact dispatch provenance, but
+      // an independent proactive message has no source message to bind. The
+      // agent-key guards above already reject replace-final, review, coordination,
+      // and action semantics, so the no-provenance lane can only append a new
+      // standalone message. Supplying either return field selects the strict lane
+      // and therefore requires the complete, verifiable pair.
+      const requiresCloudReturnBinding =
+        principal.catId === createCatId('gpt-pro') && Boolean(replyTo || cloudReturnBinding);
       if (requiresCloudReturnBinding) {
         if (!replyTo || !cloudReturnBinding) {
           reply.status(400);
@@ -3693,6 +3721,7 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
 
     const {
       limit,
+      cursor,
       threadId: overrideThreadId,
       messageId,
       before: beforeWindow,
@@ -3728,13 +3757,35 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
     const keywordTerms = keyword ? tokenizeKeyword(keyword) : [];
 
     const requestedLimit = limit ?? 20;
+    const isFullMode = responseMode === 'full';
+    const isContiguousRead = !keyword && !messageId && !filterCatId;
+    const cursorScopeHash = hashThreadContextCursorScope({
+      threadId: effectiveThreadId,
+      userId: principalUserId,
+      catId: principalCatId,
+      limit: requestedLimit,
+      ...(messageId ? { messageId } : {}),
+      ...(beforeWindow === undefined ? {} : { before: beforeWindow }),
+      ...(afterWindow === undefined ? {} : { after: afterWindow }),
+      ...(filterCatId ? { filterCatId } : {}),
+      ...(keyword ? { keyword } : {}),
+      responseMode: isFullMode ? 'full' : 'anchor',
+    });
+    let decodedCursor: ReturnType<typeof decodeThreadContextCursor>;
+    try {
+      decodedCursor = decodeThreadContextCursor(cursor, cursorScopeHash);
+    } catch (error) {
+      if (!(error instanceof InvalidThreadContextCursorError)) throw error;
+      reply.status(400);
+      return { error: error.message, code: 'INVALID_THREAD_CONTEXT_CURSOR' };
+    }
     let needsPlayFilter = false;
     if (effectiveThreadId && threadStore) {
       const thread = await threadStore.get(effectiveThreadId);
       needsPlayFilter = !!thread && (thread.thinkingMode ?? 'debug') === 'play';
     }
 
-    let filtered: Awaited<ReturnType<typeof messageStore.getByThread>>;
+    let filtered: Awaited<ReturnType<typeof messageStore.getByThread>> = [];
 
     // F35: Viewer for whisper filtering.
     // Debug mode: cats see everything (like co-creator) — full transparency for debugging.
@@ -3783,6 +3834,34 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
       if (keywordTerms.length === 0) return true;
       return getKeywordScore(item) > 0;
     };
+
+    // Must mirror the freshness gate: unread-delta selection and seen-cursor
+    // advancement are two views of the same visibility contract.
+    const isFreshnessRelevant = (item: Awaited<ReturnType<typeof messageStore.getByThread>>[number]): boolean => {
+      if (item.deletedAt) return false;
+      if (!isDelivered(item)) return false;
+      if (item.userId === 'system') return false;
+      if (item.origin === 'briefing') return false;
+      if (!item.extra?.crossPost && item.catId !== null && item.catId === principalCatId) return false;
+      if (needsPlayFilter && !canViewMessage(item, viewer)) return false;
+      return true;
+    };
+
+    const expectedParentInvocationId =
+      principal.kind === 'invocation' ? (principal.parentInvocationId ?? principal.invocationId) : undefined;
+    // Queued bodies are execution-owned, unlike already-published history. A cross-thread
+    // history read must not expose or acknowledge another thread's queued receipt custody.
+    const canExposeQueuedBodies = principal.kind === 'invocation' && effectiveThreadId === principal.threadId;
+    const queuedFullEntries =
+      isFullMode && isContiguousRead && canExposeQueuedBodies && opts.invocationQueue
+        ? opts.invocationQueue.getQueuedBodyMessagesForCat(
+            effectiveThreadId,
+            principalUserId,
+            principalCatId,
+            expectedParentInvocationId,
+          )
+        : [];
+    let contextSelection: ThreadContextSelection = decodedCursor?.selection ?? { kind: 'history' };
 
     let keywordScanTiming: KeywordScanTiming | undefined;
 
@@ -3852,40 +3931,87 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
       filtered = scan.matches.map(({ item }) => item);
       keywordScanTiming = scan.timing;
     } else {
-      // Paginate backwards until the requested number of visible, persisted
-      // messages is collected. Play/debug differ only in the whisper viewer;
-      // transport origin never changes message visibility.
-      const visible: Awaited<ReturnType<typeof messageStore.getByThread>> = [];
-      const pageSize = Math.max(requestedLimit * 2, 50);
-      let cursorTimestamp = Number.MAX_SAFE_INTEGER;
-      let cursorId: string | undefined;
-
-      while (visible.length < requestedLimit) {
-        const batch = effectiveThreadId
-          ? await messageStore.getByThreadBefore(
-              effectiveThreadId,
-              cursorTimestamp,
-              pageSize,
-              cursorId,
-              principalUserId,
-              exposureAwareThreadRead,
-            )
-          : await messageStore.getBefore(cursorTimestamp, pageSize, principalUserId, cursorId);
-
-        if (batch.length === 0) break;
-
-        for (const item of batch) {
-          if (!canIncludeContextItemWithoutKeyword(item)) continue;
-          visible.push(item);
+      const readUnreadDelta = async (
+        afterCursor: string,
+      ): Promise<Awaited<ReturnType<typeof messageStore.getByThread>>> => {
+        const unread: Awaited<ReturnType<typeof messageStore.getByThread>> = [];
+        const pageSize = Math.max(requestedLimit * 2, 50);
+        let scanAfter = afterCursor;
+        while (unread.length < requestedLimit) {
+          const batch = await messageStore.getByThreadAfter(effectiveThreadId, scanAfter, pageSize, principalUserId);
+          if (batch.length === 0) break;
+          for (const item of batch) {
+            if (!canIncludeContextItemWithoutKeyword(item) || !isFreshnessRelevant(item)) continue;
+            unread.push(item);
+            if (unread.length >= requestedLimit) break;
+          }
+          const last = batch.at(-1);
+          if (!last) break;
+          const next = cursorFor(last);
+          if (next === scanAfter) break;
+          scanAfter = next;
+          if (batch.length < pageSize) break;
         }
+        return unread.slice(0, requestedLimit);
+      };
 
-        const oldest = batch[0]!;
-        cursorTimestamp = getTimelineOrderTime(oldest);
-        cursorId = oldest.id;
+      let usedUnreadSelection = false;
+      if (decodedCursor?.selection.kind === 'unread') {
+        contextSelection = decodedCursor.selection;
+        filtered = await readUnreadDelta(decodedCursor.selection.afterCursor);
+        usedUnreadSelection = true;
+      } else if (!decodedCursor && isFullMode && canExposeQueuedBodies && deliveryCursorStore) {
+        const currentSeen = await deliveryCursorStore.getSeenCursor(
+          principalUserId,
+          createCatId(principalCatId),
+          effectiveThreadId,
+        );
+        if (currentSeen) {
+          const unread = await readUnreadDelta(currentSeen);
+          if (unread.length > 0 || queuedFullEntries.length > 0) {
+            contextSelection = { kind: 'unread', afterCursor: currentSeen };
+            filtered = unread;
+            usedUnreadSelection = true;
+          }
+        }
       }
 
-      visible.sort(compareChronological);
-      filtered = visible.slice(-requestedLimit); // take TAIL (most recent)
+      if (!usedUnreadSelection) {
+        // Paginate backwards until the requested number of visible, persisted
+        // messages is collected. Play/debug differ only in the whisper viewer;
+        // transport origin never changes message visibility.
+        const visible: Awaited<ReturnType<typeof messageStore.getByThread>> = [];
+        const pageSize = Math.max(requestedLimit * 2, 50);
+        let cursorTimestamp = Number.MAX_SAFE_INTEGER;
+        let cursorId: string | undefined;
+
+        while (visible.length < requestedLimit) {
+          const batch = effectiveThreadId
+            ? await messageStore.getByThreadBefore(
+                effectiveThreadId,
+                cursorTimestamp,
+                pageSize,
+                cursorId,
+                principalUserId,
+                exposureAwareThreadRead,
+              )
+            : await messageStore.getBefore(cursorTimestamp, pageSize, principalUserId, cursorId);
+
+          if (batch.length === 0) break;
+
+          for (const item of batch) {
+            if (!canIncludeContextItemWithoutKeyword(item)) continue;
+            visible.push(item);
+          }
+
+          const oldest = batch[0]!;
+          cursorTimestamp = getTimelineOrderTime(oldest);
+          cursorId = oldest.id;
+        }
+
+        visible.sort(compareChronological);
+        filtered = visible.slice(-requestedLimit); // take TAIL (most recent)
+      }
     }
 
     if (keywordScanTiming) {
@@ -3895,6 +4021,7 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
     // F073 P1: Look up workflow SOP for resume capsule if thread has linked backlog item
     // P1-3: Only expose workflowSop when the thread belongs to this user
     let workflowSop: Record<string, unknown> | undefined;
+    let boundedWorkflowSop: Record<string, unknown> | undefined;
     if (effectiveThreadId && threadStore && opts.workflowSopStore) {
       const thread = await threadStore.get(effectiveThreadId);
       const isOwnThread = thread && (thread.createdBy === principalUserId || !overrideThreadId);
@@ -3914,6 +4041,19 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
               resumeCapsule: sop.resumeCapsule,
               checks: sop.checks,
             };
+            boundedWorkflowSop = {
+              oversized: true,
+              truncated: true,
+              serializedBytes: Buffer.byteLength(JSON.stringify(workflowSop), 'utf8'),
+              drillDown: {
+                kind: 'workflow_sop',
+                tool: 'cat_cafe_get_workflow_sop',
+                args: {
+                  threadId: effectiveThreadId,
+                  ...(principal.kind === 'agent_key' ? { agentKeyCatId: principal.catId } : {}),
+                },
+              },
+            };
           } catch (err) {
             log.warn(
               { err, backlogItemId: thread.backlogItemId, sopDefinitionId: sop.sopDefinitionId, stage: sop.stage },
@@ -3929,26 +4069,179 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
     const uploadDir = getDefaultUploadDir(process.env.UPLOAD_DIR);
 
     // F236 Track-1: cat-controlled response mode. anchor (default) = token-lean previews + drillDown;
-    // full = bypass anchor, return complete message bodies (for when the cat knows it needs all content).
-    const isFullMode = responseMode === 'full';
+    // full = complete bodies per ordinary item inside a bounded, cursor-continuable aggregate page.
     // F254 Phase A (AC-A2): only contiguous reads can safely advance seen state.
     // Sparse reads (keyword/window/cat filter) may skip messages, so they must not ack queued bodies either.
-    const isContiguousRead = !keyword && !messageId && !filterCatId;
-    const expectedParentInvocationId =
-      principal.kind === 'invocation' ? (principal.parentInvocationId ?? principal.invocationId) : undefined;
-    // Queued bodies are execution-owned, unlike already-published history. A cross-thread
-    // history read must not expose or acknowledge another thread's queued receipt custody.
-    const canExposeQueuedBodies = principal.kind === 'invocation' && effectiveThreadId === principal.threadId;
-    const queuedFullEntries =
-      isFullMode && isContiguousRead && canExposeQueuedBodies && opts.invocationQueue
-        ? opts.invocationQueue.getQueuedBodyMessagesForCat(
-            effectiveThreadId,
-            principalUserId,
-            principalCatId,
-            expectedParentInvocationId,
-          )
-        : [];
-    if (queuedFullEntries.length > 0 && principal.kind === 'invocation' && opts.turnExecutionStore) {
+    // Queued-body ledger checks run after envelope selection below; no omitted body may be confirmed as read.
+    const publishedMessageIds = new Set(filtered.map((message) => message.id));
+    const queuedFullMessages = queuedFullEntries
+      .filter(
+        (entry) =>
+          ![entry.messageId, ...(entry.mergedMessageIds ?? [])].some(
+            (candidateMessageId) => candidateMessageId && publishedMessageIds.has(candidateMessageId),
+          ),
+      )
+      .map((entry) => {
+        const id = entry.messageId ?? `queued:${entry.entryId}`;
+        const speaker =
+          entry.source === 'user'
+            ? getSenderName(null)
+            : entry.callerCatId
+              ? getSenderName(entry.callerCatId)
+              : entry.source;
+        return {
+          id,
+          threadId: effectiveThreadId,
+          timestamp: Date.now(),
+          speaker,
+          content: entry.content,
+          contentLength: entry.content.length,
+          truncated: false,
+          deliveryStatus: 'queued' as const,
+          queueEntryId: entry.entryId,
+        };
+      });
+    const publishedCandidates: ThreadContextEnvelopeCandidate<Record<string, unknown>>[] = filtered.map((item) => {
+      const imagePaths = extractImagePaths(item.contentBlocks, uploadDir);
+      const imageUrls = extractImageUrls(item.contentBlocks);
+      const queuedProjection =
+        item.deliveryStatus === 'queued' && item.queueCustody
+          ? { deliveryStatus: 'queued' as const, queueEntryId: item.queueCustody.entryId }
+          : {};
+      const anchored = anchorThreadMessage(item, {
+        effectiveThreadId,
+        speaker: getSenderName(item.catId),
+        keywordTerms,
+        agentKeyCatId: principal.kind === 'agent_key' ? principal.catId : undefined,
+        imagePaths,
+        imageUrls,
+      });
+      const anchorProjection: Record<string, unknown> = {
+        ...anchored,
+        ...queuedProjection,
+        ...(keywordTerms.length > 0 ? { relevanceScore: getKeywordScore(item) } : {}),
+      };
+      const fullProjection: Record<string, unknown> = {
+        id: item.id,
+        threadId: effectiveThreadId,
+        timestamp: item.timestamp,
+        speaker: getSenderName(item.catId),
+        content: item.content,
+        contentLength: item.content.length,
+        truncated: false,
+        ...queuedProjection,
+        ...(imagePaths.length > 0 ? { imagePaths } : {}),
+        ...(imageUrls.length > 0 ? { imageUrls } : {}),
+        ...(keywordTerms.length > 0 ? { relevanceScore: getKeywordScore(item) } : {}),
+      };
+      const oversizedProjection: Record<string, unknown> = {
+        id: item.id,
+        threadId: effectiveThreadId,
+        timestamp: item.timestamp,
+        speaker: getSenderName(item.catId),
+        contentLength: item.content.length,
+        truncated: true,
+        oversized: true,
+        drillDown: anchored.drillDown,
+        ...queuedProjection,
+        ...(keywordTerms.length > 0 ? { relevanceScore: getKeywordScore(item) } : {}),
+      };
+      return {
+        id: item.id,
+        projection: isFullMode ? fullProjection : anchorProjection,
+        oversizedProjection: isFullMode ? oversizedProjection : anchorProjection,
+        originalChars: item.content.length,
+        source: 'published',
+      };
+    });
+    const queuedCandidates: ThreadContextEnvelopeCandidate<Record<string, unknown>>[] = queuedFullMessages.map(
+      (message) => {
+        const anchored = anchorThreadMessage(
+          {
+            id: message.id,
+            userId: principalUserId,
+            catId: null,
+            content: message.content,
+            timestamp: message.timestamp,
+          },
+          { effectiveThreadId, speaker: message.speaker },
+        );
+        return {
+          id: message.id,
+          projection: message,
+          oversizedProjection: {
+            id: message.id,
+            threadId: effectiveThreadId,
+            timestamp: message.timestamp,
+            speaker: message.speaker,
+            contentLength: message.content.length,
+            oversized: true,
+            truncated: true,
+            deliveryStatus: message.deliveryStatus,
+            queueEntryId: message.queueEntryId,
+            ...(message.id.startsWith('queued:')
+              ? { drillUnavailableReason: 'queued body has no persisted message anchor yet; retry after persistence' }
+              : { drillDown: anchored.drillDown }),
+          },
+          originalChars: message.content.length,
+          source: 'queued',
+        };
+      },
+    );
+    let envelopePage: ReturnType<typeof pageThreadContextEnvelope<Record<string, unknown>>>;
+    try {
+      envelopePage = pageThreadContextEnvelope({
+        base: {
+          threadId: effectiveThreadId,
+          ...(keywordScanTiming ? { scanCapped: keywordScanTiming.scanCapped } : {}),
+          ...(workflowSop ? { workflowSop } : {}),
+        },
+        ...(boundedWorkflowSop
+          ? {
+              boundedBase: {
+                threadId: effectiveThreadId,
+                ...(keywordScanTiming ? { scanCapped: keywordScanTiming.scanCapped } : {}),
+                workflowSop: boundedWorkflowSop,
+              },
+            }
+          : {}),
+        allCandidates: [...publishedCandidates, ...queuedCandidates],
+        cursor: decodedCursor,
+        scopeHash: cursorScopeHash,
+        selection: contextSelection,
+      });
+    } catch (error) {
+      if (!(error instanceof InvalidThreadContextCursorError)) throw error;
+      reply.status(400);
+      return { error: error.message, code: 'INVALID_THREAD_CONTEXT_CURSOR' };
+    }
+    const payload = envelopePage.payload;
+    const returnedPublishedIds = new Set(
+      envelopePage.candidates.filter((candidate) => candidate.source === 'published').map((candidate) => candidate.id),
+    );
+    const fullPublishedIds = new Set(
+      envelopePage.candidates
+        .filter((candidate) => candidate.source === 'published' && typeof candidate.projection.content === 'string')
+        .map((candidate) => candidate.id),
+    );
+    const returnedFiltered = filtered.filter((message) => returnedPublishedIds.has(message.id));
+    const fullyReturnedFiltered = filtered.filter((message) => fullPublishedIds.has(message.id));
+    const returnedQueuedEntryIds = new Set(
+      envelopePage.candidates
+        .filter(
+          (candidate) =>
+            typeof candidate.projection.queueEntryId === 'string' && typeof candidate.projection.content === 'string',
+        )
+        .map((candidate) => String(candidate.projection.queueEntryId)),
+    );
+    const fullyReturnedQueuedEntries = queuedFullEntries.filter(
+      (entry) =>
+        returnedQueuedEntryIds.has(entry.entryId) ||
+        [entry.messageId, ...(entry.mergedMessageIds ?? [])].some(
+          (messageId) => typeof messageId === 'string' && fullPublishedIds.has(messageId),
+        ),
+    );
+    if (fullyReturnedQueuedEntries.length > 0 && principal.kind === 'invocation' && opts.turnExecutionStore) {
       let exposureExecution: TurnExecutionRecord | null;
       try {
         exposureExecution = await opts.turnExecutionStore.get(principal.invocationId);
@@ -3986,103 +4279,24 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
         return { error: 'Turn execution scope mismatch', code: 'TURN_EXECUTION_SCOPE_MISMATCH' };
       }
     }
-    const publishedMessageIds = new Set(filtered.map((message) => message.id));
-    const queuedFullMessages = queuedFullEntries
-      .filter(
-        (entry) =>
-          ![entry.messageId, ...(entry.mergedMessageIds ?? [])].some(
-            (candidateMessageId) => candidateMessageId && publishedMessageIds.has(candidateMessageId),
-          ),
-      )
-      .map((entry) => {
-        const id = entry.messageId ?? `queued:${entry.entryId}`;
-        const speaker =
-          entry.source === 'user'
-            ? getSenderName(null)
-            : entry.callerCatId
-              ? getSenderName(entry.callerCatId)
-              : entry.source;
-        return {
-          id,
-          threadId: effectiveThreadId,
-          timestamp: Date.now(),
-          speaker,
-          content: entry.content,
-          contentLength: entry.content.length,
-          truncated: false,
-          deliveryStatus: 'queued' as const,
-          queueEntryId: entry.entryId,
-        };
-      });
-
-    const payload = {
-      // TD091: echo threadId so cats know which thread they're in
-      threadId: effectiveThreadId,
-      messages: [
-        ...filtered.map((item) => {
-          const imagePaths = extractImagePaths(item.contentBlocks, uploadDir);
-          const imageUrls = extractImageUrls(item.contentBlocks);
-          const queuedProjection =
-            item.deliveryStatus === 'queued' && item.queueCustody
-              ? { deliveryStatus: 'queued' as const, queueEntryId: item.queueCustody.entryId }
-              : {};
-
-          if (isFullMode) {
-            // F236 Track-1 full mode: return complete content, no truncation, no drillDown.
-            // Uses `content` field (not `preview`) to signal full body is present.
-            const base: Record<string, unknown> = {
-              id: item.id,
-              threadId: effectiveThreadId,
-              timestamp: item.timestamp,
-              speaker: getSenderName(item.catId),
-              content: item.content,
-              contentLength: item.content.length,
-              truncated: false,
-              ...queuedProjection,
-              ...(imagePaths.length > 0 ? { imagePaths } : {}),
-              ...(imageUrls.length > 0 ? { imageUrls } : {}),
-            };
-            if (keywordTerms.length > 0) {
-              base.relevanceScore = getKeywordScore(item);
-            }
-            return base;
-          }
-
-          // F236 AC-A1/A2: anchor-first — preview + speaker + injected threadId + drillDown,
-          // contentBlocks omitted (image hints kept), full body one hop away via get_message.
-          const anchored = anchorThreadMessage(item, {
-            effectiveThreadId,
-            speaker: getSenderName(item.catId),
-            keywordTerms,
-            // F236 R1 云端 P2: agent-key caller needs agentKeyCatId in the drill pointer for one-hop verbatim
-            agentKeyCatId: principal.kind === 'agent_key' ? principal.catId : undefined,
-            imagePaths,
-            imageUrls,
-          });
-          // F148 Phase B (AC-B2): include relevance score (computed on full content) when keyword search is active
-          return keywordTerms.length > 0
-            ? { ...anchored, ...queuedProjection, relevanceScore: getKeywordScore(item) }
-            : { ...anchored, ...queuedProjection };
-        }),
-        ...queuedFullMessages,
-      ],
-      ...(keywordScanTiming ? { scanCapped: keywordScanTiming.scanCapped } : {}),
-      ...(workflowSop ? { workflowSop } : {}),
-    };
     // F236 AC-A1 (R1/砚砚 P1): emit returnedChars so the eval layer can compute payload shrink (省).
-    const threadContextReturnedChars = JSON.stringify(payload).length;
+    const serializedPayload = JSON.stringify(payload);
+    const threadContextReturnedChars = serializedPayload.length;
+    const threadContextReturnedBytes = Buffer.byteLength(serializedPayload, 'utf8');
     app.log.info(
       {
         tool: 'thread-context',
         returnedChars: threadContextReturnedChars,
+        returnedBytes: threadContextReturnedBytes,
         count: payload.messages.length,
+        hasMore: payload.hasMore,
         responseMode: responseMode ?? 'anchor',
       },
       '[F236] anchor returned',
     );
     // F236 Track-1: OTel aggregate savings metrics — ONLY for anchor mode.
-    // Full-mode returns complete bodies (returnedChars ≈ originalChars), recording it
-    // would pollute the anchor savings signal (gpt52 R1 P1 fix).
+    // Full-mode is paged and may substitute an oversized anchor. It still must not
+    // pollute the anchor savings signal (gpt52 R1 P1 fix).
     if (!isFullMode) {
       recordAnchorReturned({ tool: 'thread-context', returnedChars: threadContextReturnedChars });
     }
@@ -4090,19 +4304,21 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
     // Both sides use content-only measurement (cloud R4 P1: JSON metadata skew fix).
     // In full mode, returnedChars = originalChars (no truncation).
     // Adoption eval fields (gpt52 R1 P2): modeResolved/modeSource/catId for bucketing.
-    const contentField = isFullMode ? 'content' : 'preview';
     const modeResolved = isFullMode ? 'full' : 'anchor';
     const modeSource = responseMode ? 'explicit' : 'default';
     recordAnchorPreviewEvent({
       tool: 'thread-context',
       itemIds: payload.messages.map((m) => String((m as Record<string, unknown>).id)),
-      returnedChars: payload.messages.reduce(
-        (sum, m) => sum + ((m as Record<string, unknown>)[contentField] as string).length,
-        0,
-      ),
-      originalChars:
-        filtered.reduce((sum, m) => sum + m.content.length, 0) +
-        queuedFullMessages.reduce((sum, m) => sum + m.content.length, 0),
+      returnedChars: payload.messages.reduce((sum, message) => {
+        const projectedText =
+          typeof message.content === 'string'
+            ? message.content
+            : typeof message.preview === 'string'
+              ? message.preview
+              : '';
+        return sum + projectedText.length;
+      }, 0),
+      originalChars: envelopePage.candidates.reduce((sum, candidate) => sum + candidate.originalChars, 0),
       modeResolved,
       modeSource,
       catId: principal.catId,
@@ -4136,38 +4352,17 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
           effectiveThreadId,
         );
 
-        // Build set of message IDs the cat actually saw in this time-domain page
-        const seenIds = new Set(filtered.map((m) => m.id));
+        // Full mode may substitute an oversized anchor; only complete bodies are
+        // freshness evidence. Anchor mode preserves its existing preview-read semantics.
+        const freshnessVisibleMessages = isFullMode ? fullyReturnedFiltered : returnedFiltered;
+        const seenIds = new Set(freshnessVisibleMessages.map((message) => message.id));
 
         // #1200 P1-2: Pass full cursor token to getByThreadAfter, not extracted ID.
         // getByThreadAfter natively handles v2 tokens (extracts seq from token),
         // so v2 cursors work even when the anchor message hash is pruned.
         // Passing only parseCursor(currentSeen)?.id loses the seq and forces
         // a message hash lookup that fails on pruned anchors → scan from origin.
-        const chunkSize = Math.max(filtered.length, 50);
-
-        // Freshness relevance filter — mirrors the freshness gate's messageFilter
-        // (route-helpers.ts:743-757). Must match EXACTLY to avoid false-hold.
-        // Messages that don't pass this filter are NOT counted as "unseen" by the
-        // freshness gate, so advancing the seenCursor past them is safe.
-        const isFreshnessRelevant = (msg: Awaited<ReturnType<typeof messageStore.getByThread>>[number]): boolean => {
-          if (msg.deletedAt) return false;
-          if (!isDelivered(msg)) return false;
-          // #1200 codex R10 P1: system-generated messages (persisted error badges)
-          // are display-only — route-helpers.ts:744-745 excludes them from freshness.
-          // Without this, system badges between cursor and real messages stall the scan.
-          if (msg.userId === 'system') return false;
-          if (msg.origin === 'briefing') return false;
-          // #1200 P1-2: Exclude self messages — freshness gate excludes self
-          // (route-helpers.ts:750-752). Without this, a self message not in the
-          // current page causes STOP, permanently stalling the cursor.
-          // F052: exempt cross-posted messages (same catId from another thread).
-          if (!msg.extra?.crossPost && msg.catId !== null && msg.catId === principalCatId) return false;
-          if (needsPlayFilter) {
-            if (!canViewMessage(msg, viewer)) return false;
-          }
-          return true;
-        };
+        const chunkSize = Math.max(freshnessVisibleMessages.length, 50);
 
         // #1200 Sol R6 P1-2: Target-bounded visibility scan.
         // Scan until we pass the cat's maximum read position (maxSeenPosition),
@@ -4176,7 +4371,7 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
         // (501 self messages + 1 external → cap at 500 = permanent false hold).
         // Safety cap only applies when no target position (pre-migration data
         // where all visibilitySeq are null → maxSeenPosition = 0).
-        const maxSeenPosition = filtered.reduce((max, m) => {
+        const maxSeenPosition = freshnessVisibleMessages.reduce((max, m) => {
           const seq = m.visibilitySeq;
           return seq != null && seq > max ? seq : max;
         }, 0);
@@ -4246,12 +4441,18 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
         );
       }
     }
-    if (opts.redis && principal.kind === 'invocation' && isFullMode && isContiguousRead && filtered.length > 0) {
+    if (
+      opts.redis &&
+      principal.kind === 'invocation' &&
+      isFullMode &&
+      isContiguousRead &&
+      fullyReturnedFiltered.length > 0
+    ) {
       try {
         await new FreshnessAttentionEventLog(opts.redis).markProviderNoticesSeen({
           invocationId: principal.parentInvocationId ?? principal.invocationId,
           catId: principalCatId as CatId,
-          exactMessageIds: filtered.map((message) => message.id),
+          exactMessageIds: fullyReturnedFiltered.map((message) => message.id),
           evidenceKind: 'full_contiguous_thread_context',
         });
       } catch (err) {
@@ -4261,11 +4462,11 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
         );
       }
     }
-    if (queuedFullEntries.length > 0 && opts.invocationQueue && principal.kind === 'invocation') {
+    if (fullyReturnedQueuedEntries.length > 0 && opts.invocationQueue && principal.kind === 'invocation') {
       const queuedSeenInvocationId = principal.invocationId;
       const seenAt = Date.now();
       let receiptChanged = false;
-      for (const entry of queuedFullEntries) {
+      for (const entry of fullyReturnedQueuedEntries) {
         const before = opts.invocationQueue.getEntrySnapshot(effectiveThreadId, principalUserId, entry.entryId);
         const newlySeen = opts.invocationQueue.markQueuedSeen(
           effectiveThreadId,
@@ -4309,7 +4510,7 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
         );
       }
       if (opts.redis) {
-        const exactQueuedMessageIds = queuedFullEntries.flatMap((entry) => [
+        const exactQueuedMessageIds = fullyReturnedQueuedEntries.flatMap((entry) => [
           ...(entry.messageId ? [entry.messageId] : []),
           ...(entry.mergedMessageIds ?? []),
         ]);
@@ -4327,7 +4528,7 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
           );
         }
       }
-      const exactQueuedMessageIds = queuedFullEntries.flatMap((entry) => [
+      const exactQueuedMessageIds = fullyReturnedQueuedEntries.flatMap((entry) => [
         ...(entry.messageId ? [entry.messageId] : []),
         ...(entry.mergedMessageIds ?? []),
       ]);

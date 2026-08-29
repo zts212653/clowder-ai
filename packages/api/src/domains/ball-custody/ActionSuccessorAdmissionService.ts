@@ -318,6 +318,7 @@ export class ActionSuccessorAdmissionService {
     const freshness = await this.resolveGenerationFreshness(terminalPredicate);
     if (freshness.status !== 'verified') return null;
     const continued = await this.leaseStore.continueFreshRevision(lease.leaseId, {
+      successorLeaseId: randomUUID(),
       expectedGeneration: lease.generation,
       terminalPredicate,
       holderCatIds: input.holderCatIds,

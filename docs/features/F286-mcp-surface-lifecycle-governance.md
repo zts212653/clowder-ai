@@ -1,6 +1,6 @@
 ---
 feature_ids: [F286]
-related_features: [F043, F128, F150, F223, F242, F249]
+related_features: [F043, F128, F150, F192, F207, F222, F223, F242, F246, F249]
 topics: [mcp, tool-surface, resource-lifecycle, governance, prompt-footprint]
 doc_kind: spec
 created: 2026-08-01
@@ -8,12 +8,12 @@ description: "Govern the Clowder AI MCP surface as typed resource lifecycles wit
 description_source: human
 description_author: codex-sol
 description_updated_at: 2026-08-01T10:03:45Z
-tips_exempt: "Phase B adds an internal MCP admission and atomic-cutover guard with zero user-visible behavior or new invokable surface; future resource-family pilots must contribute tips only when they introduce a teachable user-facing workflow."
+tips_exempt: "Renewed after Phase C atomically sunset the internal generic permission MCP family: the deletion adds no user-invokable workflow, while Approval Hub and ACP-native permission remain unchanged; future resource-family pilots must add a tip when they introduce a teachable user-facing workflow."
 ---
 
 # F286: MCP Surface Lifecycle Governance
 
-> **Status**: in-progress（Phase A–B complete；Phase C pilot not started） | **Owner**: 小太阳·Maine Coon (@codex-sol, GPT-5.6 Sol) | **Priority**: P1
+> **Status**: in-progress（Phase A–C complete；Phase D 未启动；live=dormant） | **Owner**: 小太阳·Maine Coon (@codex-sol, GPT-5.6 Sol) | **Priority**: P1
 >
 > **Gate**: Architecture Design Gate accepted by operator (`0001785600399637-001062-9b03f289`). Phase B planning and one separately tested/reviewed reversible pilot are authorized; no candidate migration is authorized without its own plan and gates.
 
@@ -37,6 +37,10 @@ At `origin/main` `0883b4001f9ebfc07adfedd680a4d1b3ce357733`:
 
 Phase B protects `origin/main@265f7b998f7b8cae81d26d88db58351cf02b030d`, after the F168/F256 shared-file releases and F167 stale-review recovery landed. The live semantic registry at that target contains 130 tools: collab 82, memory 21, signals 12, limb 6, audio 8, finance 1; risk is 47 read, 73 write, and 10 destructive. The six additions since the historical 124-row census are `cat_cafe_drill_memory_cue`, `cat_cafe_record_eval_lifecycle`, `cat_cafe_record_memory_cue_outcome`, `cat_cafe_validate_community_route`, `cat_cafe_recover_local_review_verdict`, and `limb_bind_embodiment`; no census identity was removed. The full current descriptions total 73,506 characters / 15,519 `cl100k_base` comparison tokens. The committed generated witness reports zero schema, exact-description, annotation, runtime-profile, handler-binding, identity, resource-action, description-character, and comparison-token delta against that protected target.
 
+On 2026-08-24 the operator directly selected the complete `permission` resource family for sunset, after a live incident produced four real pending requests from one invocation and the fresh census found no static product consumer. Source message `[thread-id]#0001787632982035-000007-ecf7a681` authorizes direct deletion and explicitly says there is no current need to migrate this family into Approval Hub. The atomic unit is both generic MCP identities plus their prompt/Skill, callback/API, store composition, Web projection, and live F192/F222 writers. Historical Redis/audit/episode rows remain untouched and readable; Approval Hub typed producers, callback authentication, ACP `session/request_permission`, browser notification permission, and domain-specific authorization remain outside the cutover.
+
+That pilot landed atomically in PR #3947: final HEAD `e9184caf4065ba3de3883e820f2019adc684fc4d`, squash merge `341361a9c38372074c881810c4dff464aebb0ac2`. The seven-layer manifest retires exactly the two generic permission identities with `canonicalNames: []`; the final registry contains 133 tools and reports only those two semantic removals. Independent review found no open P1/P2, the complete merge gate passed with review continuity across mechanical latest-main rebases, and focused final-tree checks kept Approval Hub and ACP-native permission intact. Runtime activation was not authorized, so repository truth is `main=landed` while `live=dormant`.
+
 ## 需求点 Checklist
 
 | ID | 需求点（operator experience/转述） | AC 编号 | 验证方式 | 状态 |
@@ -45,7 +49,7 @@ Phase B protects `origin/main@265f7b998f7b8cae81d26d88db58351cf02b030d`, after t
 | R2 | 新需求默认进入已有资源生命周期，不再一动作一工具 | AC-A2, AC-B1 | ADR clauses + manifest/guard RED→GREEN | [x] |
 | R3 | 分类真实语义、runtime alias、drill-down chain 与安全边界 | AC-A1, AC-A3 | census + reviewer spot-check | [x] |
 | R4 | 给出 keep / consolidate / lazy-discover / sunset 候选 | AC-A2 | candidate roll-up + usage provenance | [x] |
-| R5 | 一个完整 resource family 原子切换，禁止 legacy/canonical MCP 双暴露 | AC-B3, AC-C1, AC-C3 | cutover manifest + no-overlap/stale-reference guard + exact rollback | [ ] |
+| R5 | 一个完整 resource family 原子切换，禁止 legacy/canonical MCP 双暴露 | AC-B3, AC-C1, AC-C3 | permission-family cutover manifest + no-overlap/stale-reference guard + exact rollback | [x] |
 | R6 | 架构级 Design Gate 先于代码 | AC-A4, AC-A5 | operator source message + signed gate | [x] |
 | R7 | External GitHub MCP 从家里 sunset，canonical GitHub 路径为 `gh` | AC-A6 | direct operator source + scoped census/ADR exception | [x] |
 
@@ -74,6 +78,7 @@ Phase B protects `origin/main@265f7b998f7b8cae81d26d88db58351cf02b030d`, after t
 
 ### Phase C: Atomic Resource-Family Pilot
 
+- Selected outcome: direct sunset of the complete generic `permission` family with no replacement (`canonicalNames: []`), because the operator confirmed there is no current product need. Typed-response affordances are therefore inapplicable to this pilot; absence, boundary preservation, and exact rollback are its acceptance surface.
 - Pilot one complete resource family or tightly coupled group selected after fresh consumer analysis proves it can cut over atomically.
 - Introduce typed resource actions without `any` payloads or a global catch-all manager.
 - Require canonical responses to expose server-derived current state/version and allowed next actions where relevant; name-count reduction without this affordance does not pass the pilot.
@@ -164,10 +169,10 @@ Why: existing cells own capability execution (`hub-action-surface`), plugin reso
 
 ### Phase C（Pilot Migration）
 
-- [ ] AC-C1: One approved complete resource family or tightly coupled group cuts over atomically with schema/auth/output/error parity; no runtime/profile exposes both old and canonical MCP surfaces.
-- [ ] AC-C2: Destructive, authority, wait/custody, cross-thread, and progressive-disclosure fixtures remain explicit and pass.
-- [ ] AC-C3: Pre-cutover F150/consumer evidence and post-cutover task-outcome/stale-name evidence produce a keep/revert verdict; rollback restores the previous exact release rather than a concurrent legacy surface.
-- [ ] AC-C4: Canonical pilot responses expose server-derived current state/version and allowed next actions where relevant; reducing top-level names without that affordance fails the pilot.
+- [x] AC-C1: PR #3947 atomically retires the complete generic `permission` family across the seven-layer manifest; `canonicalNames: []` and the final 133-tool registry prove there is no legacy/canonical dual exposure (`e9184caf4065ba3de3883e820f2019adc684fc4d`).
+- [x] AC-C2: Independent review and final-tree focused checks preserve Approval Hub, callback principals, ACP `session/request_permission`, browser/connector permission boundaries, and historical read compatibility; no open P1/P2 remained.
+- [x] AC-C3: The live duplicate-card incident, direct operator removal verdict, root consumer census, stale-reference guard, and exact rollback revision `b4e00ae628def97e2dc4344e152df117fa305c34` jointly support sunset rather than keep; no compatibility surface or persistence mutation was introduced.
+- [x] AC-C4: Not applicable by selected pilot shape: the operator chose deletion without a canonical replacement. The manifest enforces `canonicalNames: []`; therefore no replacement response can omit or counterfeit server-derived state/allowed-actions affordances.
 
 ### Phase D（Exposure + Sunset）
 
@@ -209,12 +214,14 @@ Why: existing cells own capability execution (`hub-action-surface`), plugin reso
 | KD-5 | External GitHub MCP is a directed sunset outside the 124-row census; `gh` is canonical | Later direct operator removal decision overrides generic retention for that surface | 2026-08-01 |
 | KD-6 | The 57 consolidation candidates are hypotheses, not a migration queue | Admission control has definite forward value; each existing-family migration must prove utility, and admission-only is a valid terminal state | 2026-08-01 |
 | KD-7 | Migration unit is one complete resource family or tightly coupled group, with no dual exposed surface | F043/F195 full-versus-split drift proved that parallel topologies duplicate schema/prompt cost and allow registry coverage to diverge | 2026-08-01 |
+| KD-8 | The first atomic pilot is a direct sunset of the generic `permission` family, with no canonical replacement | Fresh root census found no product consumer; operator says current need is absent. Approval Hub remains the pattern for future feature-specific typed gates, not a migration target for dead generic state | 2026-08-24 |
 
 ## Review Gate
 
 - Phase A: census/reviews complete and operator Architecture Design Gate accepted.
 - Phase B: complete. The canonical 130-tool registry, protected-base parity witness, admission/cutover guards, non-author review, full merge gate, and PR #3424 merge evidence are landed on `main`.
-- Later phases: risk is MCP contract + auth/destructive boundary; implementation review depth is selected from the actual pilot diff.
+- Phase C: complete. The generic `permission` family sunset is landed through PR #3947 with an exact seven-layer manifest, independent review, full gate plus mechanical rebase continuity, and no replacement/dual surface. Live runtime remains dormant.
+- Phase D: not started; exposure/lazy-discovery work remains separately gated and is not implied by the Phase C sunset.
 
 ## Tips Contribution（F244）
 
