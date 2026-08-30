@@ -252,6 +252,8 @@ export interface PublishVerdictInput {
   ownerUserId?: string;
   /** 砚砚 R1 P1 #2: explicit evidence refs (sanitized YAML basenames OR replayable selector). Tool NEVER fabricates. */
   sourceRefs: VerdictSourceRefs;
+  /** F192 provenance: thread that produced this verdict — MCP layer derives from callback context. */
+  sourceThreadId?: string;
 }
 
 export interface PublishVerdictSuccess {

@@ -318,7 +318,7 @@ export const ENV_VARS: EnvDefinition[] = [
   },
   {
     name: 'CAT_CAFE_REPO_FULL_NAME',
-    defaultValue: 'zts212653/cat-cafe',
+    defaultValue: 'zts212653/clowder-ai',
     description: 'F233 Phase C feat trajectory collector 调 gh CLI 用的 owner/repo（GitHub PR 元数据查询）',
     category: 'server',
     sensitive: false,
@@ -326,7 +326,7 @@ export const ENV_VARS: EnvDefinition[] = [
   },
   {
     name: 'CAT_CAFE_VERDICT_REPO_FULL_NAME',
-    defaultValue: 'CAT_CAFE_REPO_FULL_NAME or zts212653/cat-cafe',
+    defaultValue: 'CAT_CAFE_REPO_FULL_NAME or zts212653/clowder-ai',
     description:
       'F248 verdict publisher canonical owner/repo; automatic, pre-push, and managed agent-shell publication fail closed on target mismatch',
     category: 'server',

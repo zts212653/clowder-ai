@@ -288,6 +288,18 @@ export const evalHubRoutes: FastifyPluginAsync<EvalHubRoutesOptions> = async (ap
     if (principal.kind !== 'invocation' && principal.kind !== 'agent_key') {
       return reply.status(403).send({ error: 'invocation_or_agent_key_principal_required' });
     }
+    // F192 provenance: verdict creation requires source thread for traceability.
+    // Agent-key principals do not carry threadId (by design — persistent, threadless).
+    // Restrict agent-key to refresh operations (registerPublishVerdictRefreshRoute
+    // allows both principal kinds). New verdict creation must use invocation principal.
+    if (principal.kind === 'agent_key') {
+      return reply.status(403).send({
+        error: 'verdict_creation_requires_invocation_principal',
+        detail:
+          'Verdict creation requires an invocation principal with thread provenance (sourceThreadId). ' +
+          'Agent-key principals may use the verdict refresh endpoint for exact-HEAD PR updates.',
+      });
+    }
 
     const { domainId } = request.params as { domainId: string };
     const body = (request.body ?? {}) as Record<string, unknown>;
@@ -320,6 +332,8 @@ export const evalHubRoutes: FastifyPluginAsync<EvalHubRoutesOptions> = async (ap
         // adapter discriminates by `kind` field. Cast through unknown — handler/adapter validate shape.
         sourceRefs: (body.sourceRefs ??
           {}) as unknown as import('../infrastructure/harness-eval/publish-verdict/types.js').VerdictSourceRefs,
+        // F192 provenance: invocation principals always carry threadId.
+        sourceThreadId: principal.threadId,
       },
     );
 

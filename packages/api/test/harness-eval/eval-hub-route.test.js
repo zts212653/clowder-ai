@@ -169,18 +169,12 @@ describe('Eval Hub API route', () => {
       counterarguments: ['none'],
     };
 
-    it('agent-key header → handler receives server-trusted catId (R9 wiring locked)', async () => {
-      const calls = [];
-      // 砚砚 R17 P1: seed LIVE evidence in tmp root (real repo's snapshots/ gitignored)
-      const liveHarnessRoot = makeLiveHarnessFeedbackWithEvidence('snap.yaml', 'attr.yaml');
-      const app = buildAgentKeyPublishApp({
-        generatorSpy: (packet) => calls.push({ packetId: packet.id }),
-        liveHarnessRoot,
-      });
+    // F192 provenance: agent-key principals do not carry threadId, so verdict
+    // creation (which requires sourceThreadId for provenance traceability) is
+    // restricted to invocation principals. Agent-key can still refresh.
+    it('agent-key publish-verdict creation returns 403 (requires invocation principal)', async () => {
+      const app = buildAgentKeyPublishApp();
 
-      // 砚砚 R10: this body has NO catId field; if route accidentally trusts body
-      // catId in the future, this test still passes because we assert via handler
-      // call (server-derived catId comes from agent-key principal record).
       const response = await app.inject({
         method: 'POST',
         url: '/api/eval-domains/eval:a2a/publish-verdict',
@@ -191,13 +185,9 @@ describe('Eval Hub API route', () => {
         }),
       });
 
-      // Generator not invoked (stage skipped in mock), so we just verify route
-      // got past auth + cat allowlist (registry codex == derivedPrincipal.catId).
-      // Mock publisher returns success → 200.
-      assert.equal(response.statusCode, 200, `expected 200, got ${response.statusCode}: ${response.body}`);
+      assert.equal(response.statusCode, 403, `expected 403, got ${response.statusCode}: ${response.body}`);
       const body = response.json();
-      assert.equal(body.commitSha, 'mock-sha');
-      assert.equal(body.prUrl, 'https://example.com/pr/1');
+      assert.equal(body.error, 'verdict_creation_requires_invocation_principal');
       await app.close();
     });
 
@@ -247,7 +237,11 @@ describe('Eval Hub API route', () => {
     // 砚砚 R11 P1: submittedPacket path must enforce evidencePacket completeness
     // (snapshot/attribution/metric/trace all non-empty). schema only checks "array",
     // assertCanCrossThreadHandoff checks "non-empty".
-    it('rejects submittedPacket with empty metricRefs/sampleTraceRefs (handoff_incomplete 400)', async () => {
+    // F192: agent-key is now restricted from verdict creation (requires invocation
+    // principal for sourceThreadId provenance). Packet validation tests for
+    // incomplete metricRefs/sampleTraceRefs (AC-H1) live in publish-verdict.test.js
+    // under invocation auth. Here we verify agent-key is consistently rejected.
+    it('agent-key with incomplete packet still returns 403 (rejected before validation)', async () => {
       const app = buildAgentKeyPublishApp();
       const incompletePacket = {
         ...validPacket,
@@ -255,7 +249,7 @@ describe('Eval Hub API route', () => {
         evidencePacket: {
           snapshotRefs: ['placeholder:overridden'],
           attributionRefs: ['placeholder:overridden'],
-          metricRefs: [], // ← incomplete: AC-H1 violation
+          metricRefs: [],
           sampleTraceRefs: [],
         },
       };
@@ -270,18 +264,18 @@ describe('Eval Hub API route', () => {
         }),
       });
 
-      assert.equal(response.statusCode, 400, `expected 400, got ${response.statusCode}: ${response.body}`);
+      assert.equal(response.statusCode, 403, `expected 403, got ${response.statusCode}: ${response.body}`);
       const body = response.json();
-      assert.equal(body.error, 'handoff_incomplete');
-      assert.match(body.detail, /metric|trace/);
+      assert.equal(body.error, 'verdict_creation_requires_invocation_principal');
       await app.close();
     });
 
     // 砚砚 R18/R19 P2 newline-injection lock extracted to eval-hub-route-newline.test.js
     // per AGENTS.md 350-line limit (砚砚 R20 P1)
 
-    it('rejects wrong cat under agent-key (registry codex vs principal opus-47 → 403)', async () => {
-      // Override mock to return a different catId
+    // F192: wrong-cat scenario is now subsumed by agent-key restriction —
+    // agent-key is rejected at the principal-kind gate before cat allowlist runs.
+    it('wrong cat under agent-key still returns 403 (rejected at principal-kind gate)', async () => {
       const app = Fastify({ logger: false });
       const agentKeyRegistry = {
         async verify() {
@@ -329,8 +323,7 @@ describe('Eval Hub API route', () => {
 
       assert.equal(response.statusCode, 403, `expected 403, got ${response.statusCode}: ${response.body}`);
       const body = response.json();
-      assert.equal(body.error, 'not_allowed');
-      assert.match(body.detail, /opus-47/);
+      assert.equal(body.error, 'verdict_creation_requires_invocation_principal');
       await app.close();
     });
   });

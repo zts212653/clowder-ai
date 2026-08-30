@@ -1,4 +1,4 @@
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { parse as parseYaml } from 'yaml';
 import { getEvalCatOverride } from '../domain/eval-domain-override.js';
@@ -266,6 +266,28 @@ export async function handlePublishVerdict(
           eventMemoryDbPath: deps.eventMemoryDbPath,
         });
         writeLifecycleRootArtifact(generatedArtifact.bundleDir, packet);
+        // F192: inject sourceThreadId into provenance.json — fail-closed.
+        // Generator adapters write provenance.json first; we overlay sourceThreadId here
+        // so every domain gets traceability without per-adapter changes.
+        // When sourceThreadId is provided, provenance.json MUST exist, parse as an
+        // object, receive the trusted thread id, and be written successfully.
+        // Swallowing errors here would allow a PR to ship without its promised trace anchor.
+        if (input.sourceThreadId) {
+          const provenancePath = resolve(generatedArtifact.bundleDir, 'provenance.json');
+          if (!existsSync(provenancePath)) {
+            throw new Error(
+              `provenance_missing: generator for '${packet.domainId}' did not produce provenance.json in bundleDir. ` +
+                `sourceThreadId overlay requires provenance.json to exist.`,
+            );
+          }
+          const raw = readFileSync(provenancePath, 'utf8');
+          const provenance = JSON.parse(raw);
+          if (typeof provenance !== 'object' || provenance === null || Array.isArray(provenance)) {
+            throw new Error(`provenance_invalid: provenance.json must be a JSON object, got ${typeof provenance}.`);
+          }
+          provenance.sourceThreadId = input.sourceThreadId;
+          writeFileSync(provenancePath, JSON.stringify(provenance, null, 2));
+        }
         const refreshedCensusPath = refreshMeasurementBundleCensusFile(
           worktreeRoot,
           packet.createdAt,
@@ -297,7 +319,7 @@ export async function handlePublishVerdict(
           paths: [artifact.verdictPath, artifact.bundleDir, refreshedCensusPath, ...(artifact.extraStagedPaths ?? [])],
           commitMessage: `verdict(${packet.domainId}): ${packet.id} — ${packet.verdict}\n\n${packet.phenomenon}\n\n[published via cat_cafe_publish_verdict MCP]`,
           prTitle: `verdict(${packet.domainId}): ${packet.id}`,
-          prBody: `Verdict published via cat_cafe_publish_verdict MCP tool.\n\nVerdict: ${packet.verdict}\nDomain: ${packet.domainId}\nPhenomenon: ${packet.phenomenon}\n\nReviewed by: ${packet.ownerAsk.targetOwnerCatId}\nAction: ${packet.ownerAsk.requestedAction}${policyFooter}`,
+          prBody: `Verdict published via cat_cafe_publish_verdict MCP tool.\n\nVerdict: ${packet.verdict}\nDomain: ${packet.domainId}\nPhenomenon: ${packet.phenomenon}\n\nReviewed by: ${packet.ownerAsk.targetOwnerCatId}\nAction: ${packet.ownerAsk.requestedAction}${input.sourceThreadId ? `\nSource thread: ${input.sourceThreadId}` : ''}${policyFooter}`,
           labels: policy.labels,
           afterPublish: artifact.afterPublish,
         };
