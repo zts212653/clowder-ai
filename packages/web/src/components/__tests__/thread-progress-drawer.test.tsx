@@ -82,7 +82,7 @@ describe('ThreadProgressDrawer', () => {
     const onClose = vi.fn();
     await act(async () => {
       root.render(
-        <ThreadProgressDrawer open docked threadId="thread-1" onClose={onClose} runDetails={<p>运行控制</p>} />,
+        <ThreadProgressDrawer open docked={false} threadId="thread-1" onClose={onClose} runDetails={<p>运行控制</p>} />,
       );
     });
     const runTab = [...container.querySelectorAll('button')].find((button) => button.textContent === '运行详情');
@@ -90,6 +90,21 @@ describe('ThreadProgressDrawer', () => {
     expect(container.textContent).toContain('运行控制');
     await act(async () => window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' })));
     expect(onClose).toHaveBeenCalledOnce();
+  });
+
+  it('does not steal or trap focus while docked', async () => {
+    const trigger = document.createElement('button');
+    document.body.appendChild(trigger);
+    trigger.focus();
+    const onClose = vi.fn();
+    await act(async () => {
+      root.render(<ThreadProgressDrawer open docked threadId="thread-1" onClose={onClose} />);
+    });
+
+    expect(document.activeElement).toBe(trigger);
+    await act(async () => window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' })));
+    expect(onClose).not.toHaveBeenCalled();
+    trigger.remove();
   });
 
   it('keeps the newest invalidation page when an older request resolves last', async () => {
@@ -183,7 +198,12 @@ describe('ThreadProgressDrawer', () => {
         <ThreadProgressDrawer open docked={false} threadId="thread-1" onClose={vi.fn()} returnFocusTo={trigger} />,
       );
     });
-    expect(document.activeElement).not.toBe(trigger);
+    const drawer = container.querySelector('[data-testid="thread-progress-drawer"]');
+    expect(drawer?.contains(document.activeElement)).toBe(true);
+    await act(async () => {
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab', shiftKey: true }));
+    });
+    expect(drawer?.contains(document.activeElement)).toBe(true);
 
     await act(async () => {
       root.render(

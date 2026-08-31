@@ -120,13 +120,13 @@ export function ThreadProgressDrawer({
   }, [open, returnFocusTo]);
 
   useEffect(() => {
-    if (!open) return;
+    if (!open || docked) return;
     const panel = panelRef.current;
-    panel?.focus();
+    focusFirstDrawerControl(panel);
     const onKeyDown = (event: KeyboardEvent) => handleDrawerKeyDown(event, panel, onClose);
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [onClose, open]);
+  }, [docked, onClose, open]);
 
   if (!open) return null;
 
@@ -223,6 +223,12 @@ function handleDrawerKeyDown(event: KeyboardEvent, panel: HTMLDivElement | null,
     event.preventDefault();
     first.focus();
   }
+}
+
+function focusFirstDrawerControl(panel: HTMLDivElement | null): void {
+  if (!panel) return;
+  const first = panel.querySelector<HTMLElement>('button:not([disabled]), a[href], [tabindex]:not([tabindex="-1"])');
+  (first ?? panel).focus();
 }
 
 function TabButton({ active, onClick, children }: { active: boolean; onClick: () => void; children: ReactNode }) {

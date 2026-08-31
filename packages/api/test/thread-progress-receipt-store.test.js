@@ -72,4 +72,36 @@ describe('ThreadProgressReceiptStore', () => {
     );
     assert.equal(second.nextCursor, null);
   });
+
+  test('a replayed source binds the current terminal turn before another source can write', async () => {
+    const { ThreadProgressReceiptStore } = await import(
+      '../dist/domains/thread-progress/ThreadProgressReceiptStore.js'
+    );
+    const store = new ThreadProgressReceiptStore();
+    const original = {
+      v: 1,
+      id: 'receipt-original',
+      ownerUserId: 'user-1',
+      threadId: 'thread-1',
+      kind: 'completed',
+      impactAxes: ['verified_outcome'],
+      actor: { kind: 'cat', catId: 'opus' },
+      headline: '完成任务',
+      provenance: [{ kind: 'task', taskId: 'task-1' }],
+      sourceKey: 'task-terminal-source',
+      occurredAt: 100,
+      createdAt: 100,
+    };
+    await store.appendIfAbsent(original, { terminalTurnKey: 'turn-1' });
+    const replay = await store.appendIfAbsent({ ...original, id: 'receipt-replay' }, { terminalTurnKey: 'turn-2' });
+    const secondSource = await store.appendIfAbsent(
+      { ...original, id: 'receipt-decision', kind: 'decision', sourceKey: 'decision-source' },
+      { terminalTurnKey: 'turn-2' },
+    );
+
+    assert.equal(replay.receipt.id, original.id);
+    assert.equal(secondSource.inserted, false);
+    assert.equal(secondSource.receipt.id, original.id);
+    assert.equal((await store.listByThread('user-1', 'thread-1')).length, 1);
+  });
 });

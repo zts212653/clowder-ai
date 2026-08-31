@@ -34,10 +34,13 @@ export class ThreadProgressReceiptStore implements IThreadProgressReceiptStore {
     receipt: ThreadProgressReceiptV1,
     options: { readonly terminalTurnKey?: string } = {},
   ): Promise<AppendThreadProgressReceiptResult> {
-    const existingId =
-      this.sourceIndex.get(receipt.sourceKey) ||
-      (options.terminalTurnKey ? this.terminalTurnIndex.get(options.terminalTurnKey) : undefined);
+    const sourceExistingId = this.sourceIndex.get(receipt.sourceKey);
+    const turnExistingId = options.terminalTurnKey ? this.terminalTurnIndex.get(options.terminalTurnKey) : undefined;
+    const existingId = turnExistingId ?? sourceExistingId;
     if (existingId) {
+      if (options.terminalTurnKey && !turnExistingId && sourceExistingId) {
+        this.terminalTurnIndex.set(options.terminalTurnKey, sourceExistingId);
+      }
       const existing = this.receipts.get(existingId);
       if (!existing) throw new Error(`Thread progress source index points to missing receipt: ${existingId}`);
       return { receipt: existing, inserted: false };

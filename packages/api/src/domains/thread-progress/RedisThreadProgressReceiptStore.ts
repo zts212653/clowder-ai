@@ -3,13 +3,14 @@ import type { RedisClient } from '@cat-cafe/shared/utils';
 import type { AppendThreadProgressReceiptResult, IThreadProgressReceiptStore } from './ThreadProgressReceiptStore.js';
 
 const APPEND_IF_ABSENT_LUA = `
-local existing = redis.call('GET', KEYS[1])
-if existing then
-  return {existing, 0}
-end
+local sourceExisting = redis.call('GET', KEYS[1])
 local turnExisting = redis.call('GET', KEYS[2])
 if turnExisting then
   return {turnExisting, 0}
+end
+if sourceExisting then
+  redis.call('SET', KEYS[2], sourceExisting)
+  return {sourceExisting, 0}
 end
 redis.call('SET', KEYS[1], ARGV[1])
 redis.call('SET', KEYS[2], ARGV[1])
