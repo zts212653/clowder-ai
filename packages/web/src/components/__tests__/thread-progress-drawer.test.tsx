@@ -1,0 +1,92 @@
+import { act } from 'react';
+import { createRoot, type Root } from 'react-dom/client';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { ThreadProgressDrawer } from '../ThreadProgressDrawer';
+
+const apiFetch = vi.fn();
+vi.mock('@/utils/api-client', () => ({ apiFetch: (...args: unknown[]) => apiFetch(...args) }));
+vi.mock('@/stores/chatStore', () => ({
+  useChatStore: {
+    getState: () => ({ setWorkspaceMode: vi.fn(), setRightPanelMode: vi.fn(), setRightPanelOpen: vi.fn() }),
+  },
+}));
+
+describe('ThreadProgressDrawer', () => {
+  let container: HTMLDivElement;
+  let root: Root;
+
+  beforeAll(() => {
+    (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+  });
+
+  beforeEach(() => {
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+    apiFetch.mockReset();
+    apiFetch.mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        items: [
+          {
+            v: 1,
+            id: 'internal-receipt-id',
+            ownerUserId: 'owner-id',
+            threadId: 'thread-1',
+            kind: 'milestone',
+            impactAxes: ['verified_outcome'],
+            actor: { kind: 'cat', catId: 'internal-cat-id' },
+            headline: '完成 Receipt 基础链路',
+            detail: '共享契约、callback 与幂等存储已通过。',
+            nextStep: '进入单会话验收',
+            provenance: [{ kind: 'invocation', invocationId: 'internal-invocation-id' }],
+            sourceKey: 'internal-source-key',
+            occurredAt: Date.now(),
+            createdAt: Date.now(),
+          },
+        ],
+        nextCursor: null,
+      }),
+    });
+  });
+
+  afterEach(() => {
+    act(() => root.unmount());
+    container.remove();
+  });
+
+  afterAll(() => {
+    delete (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT;
+  });
+
+  it('renders an overlay with human-readable history and no internal identifiers', async () => {
+    await act(async () => {
+      root.render(
+        <ThreadProgressDrawer open docked={false} threadId="thread-1" onClose={vi.fn()} runDetails={<p>运行控制</p>} />,
+      );
+    });
+    await act(async () => Promise.resolve());
+
+    const drawer = container.querySelector('[data-testid="thread-progress-drawer"]');
+    expect(drawer?.getAttribute('data-presentation')).toBe('overlay');
+    expect(container.textContent).toContain('完成 Receipt 基础链路');
+    expect(container.textContent).toContain('进入单会话验收');
+    expect(container.textContent).not.toContain('internal-receipt-id');
+    expect(container.textContent).not.toContain('internal-invocation-id');
+    expect(container.querySelector('[aria-label="关闭完整进展"]')).not.toBeNull();
+  });
+
+  it('closes on Escape and exposes existing run details on the second tab', async () => {
+    const onClose = vi.fn();
+    await act(async () => {
+      root.render(
+        <ThreadProgressDrawer open docked threadId="thread-1" onClose={onClose} runDetails={<p>运行控制</p>} />,
+      );
+    });
+    const runTab = [...container.querySelectorAll('button')].find((button) => button.textContent === '运行详情');
+    await act(async () => runTab?.dispatchEvent(new MouseEvent('click', { bubbles: true })));
+    expect(container.textContent).toContain('运行控制');
+    await act(async () => window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' })));
+    expect(onClose).toHaveBeenCalledOnce();
+  });
+});

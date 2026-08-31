@@ -1,0 +1,157 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1440" height="900" viewBox="0 0 1440 900" role="img" aria-label="桌面会话页 · 收起态">
+<defs>
+<filter id="shadow" x="-20%" y="-20%" width="140%" height="160%"><feDropShadow dx="0" dy="2" stdDeviation="4" flood-color="#3b2d24" flood-opacity=".09"/></filter>
+<filter id="shadow2" x="-20%" y="-20%" width="140%" height="160%"><feDropShadow dx="0" dy="6" stdDeviation="12" flood-color="#3b2d24" flood-opacity=".12"/></filter>
+</defs>
+<rect x="0" y="0" width="52" height="900" rx="0" fill="#eee7dd" stroke="none" stroke-width="1" opacity="1"/>
+<circle cx="26.0" cy="28" r="17" fill="#fbefe7" stroke="#b8754d" stroke-width="1.5" opacity="1"/>
+<polygon points="18,27 21,17 26,23 31,17 34,27" fill="#b8754d" stroke="none" stroke-width="1"/>
+<circle cx="26" cy="30" r="9" fill="#b8754d" stroke="none" stroke-width="1" opacity="1"/>
+<rect x="6" y="56" width="40" height="40" rx="10" fill="#fffefa" stroke="none" stroke-width="1" opacity="1" filter="url(#shadow)"/>
+<rect x="18" y="68" width="16" height="13" rx="3" fill="none" stroke="#b8754d" stroke-width="1.5" opacity="1"/>
+<path d="M21 81 L19 86 L25 81" stroke="#b8754d" stroke-width="1.5" fill="none" stroke-linecap="round" stroke-linejoin="round" opacity="1"/>
+<circle cx="26" cy="124" r="9" fill="none" stroke="#665d57" stroke-width="1.5" opacity="1"/>
+<path d="M26 119 L26 124 L31 126" stroke="#665d57" stroke-width="1.5" fill="none" stroke-linecap="round" stroke-linejoin="round" opacity="1"/>
+<path d="M18 165 Q26 160 34 165 L34 179 Q26 174 18 179 Z" stroke="#665d57" stroke-width="1.5" fill="none" stroke-linecap="round" stroke-linejoin="round" opacity="1"/>
+<rect x="19" y="211" width="14" height="18" rx="2" fill="none" stroke="#665d57" stroke-width="1.5" opacity="1"/>
+<line x1="22" y1="217" x2="30" y2="217" stroke="#665d57" stroke-width="1.3" opacity="1"/>
+<line x1="22" y1="222" x2="29" y2="222" stroke="#665d57" stroke-width="1.3" opacity="1"/>
+<path d="M19 276 L19 260 Q25 264 33 260 L33 271 Q25 275 19 271" stroke="#665d57" stroke-width="1.5" fill="none" stroke-linecap="round" stroke-linejoin="round" opacity="1"/>
+<circle cx="26" cy="736" r="8" fill="none" stroke="#8b8179" stroke-width="1.3" opacity="1"/>
+<circle cx="26" cy="784" r="8" fill="none" stroke="#8b8179" stroke-width="1.3" opacity="1"/>
+<circle cx="26" cy="832" r="8" fill="none" stroke="#8b8179" stroke-width="1.3" opacity="1"/>
+<circle cx="26" cy="872" r="10" fill="#ebe3d9" stroke="none" stroke-width="1" opacity="1"/>
+<circle cx="26" cy="872" r="3" fill="#8b8179" stroke="none" stroke-width="1" opacity="1"/>
+<rect x="52" y="0" width="240" height="900" rx="0" fill="#f7f1e9" stroke="none" stroke-width="1" opacity="1"/>
+<line x1="292" y1="0" x2="292" y2="900" stroke="#e3dbd1" stroke-width="1" opacity="1"/>
+<text x="70" y="34" font-family="Inter, PingFang SC, Microsoft YaHei, Arial, sans-serif" font-size="15" font-weight="700" fill="#342d29" text-anchor="start" opacity="1">对话</text>
+<rect x="212" y="16" width="64" height="28" rx="14" fill="#b8754d" stroke="none" stroke-width="1" opacity="1"/>
+<text x="244" y="35" font-family="Inter, PingFang SC, Microsoft YaHei, Arial, sans-serif" font-size="11" font-weight="700" fill="#ffffff" text-anchor="middle" opacity="1">+ 新对话</text>
+<rect x="66" y="58" width="212" height="34" rx="10" fill="#f3ede5" stroke="#e3dbd1" stroke-width="1" opacity="1"/>
+<circle cx="81" cy="75" r="6" fill="none" stroke="#8b8179" stroke-width="1.2" opacity="1"/>
+<line x1="85" y1="79" x2="89" y2="83" stroke="#8b8179" stroke-width="1.2" opacity="1"/>
+<text x="96" y="80" font-family="Inter, PingFang SC, Microsoft YaHei, Arial, sans-serif" font-size="11" font-weight="400" fill="#8b8179" text-anchor="start" opacity="1">搜索对话…</text>
+<text x="76" y="116" font-family="Inter, PingFang SC, Microsoft YaHei, Arial, sans-serif" font-size="11" font-weight="700" fill="#b8754d" text-anchor="middle" opacity="1">最近</text>
+<text x="130" y="116" font-family="Inter, PingFang SC, Microsoft YaHei, Arial, sans-serif" font-size="11" font-weight="500" fill="#8b8179" text-anchor="middle" opacity="1">置顶</text>
+<text x="184" y="116" font-family="Inter, PingFang SC, Microsoft YaHei, Arial, sans-serif" font-size="11" font-weight="500" fill="#8b8179" text-anchor="middle" opacity="1">项目</text>
+<text x="238" y="116" font-family="Inter, PingFang SC, Microsoft YaHei, Arial, sans-serif" font-size="11" font-weight="500" fill="#8b8179" text-anchor="middle" opacity="1">收藏</text>
+<line x1="64" y1="126" x2="280" y2="126" stroke="#e3dbd1" stroke-width="1" opacity="1"/>
+<line x1="64" y1="126" x2="118" y2="126" stroke="#b8754d" stroke-width="2.5" opacity="1"/>
+<rect x="62" y="140" width="220" height="66" rx="12" fill="#fffefa" stroke="none" stroke-width="1" opacity="1" filter="url(#shadow)"/>
+<polygon points="75.08,164.04 78.44,158.28 82.04,164.04" fill="#7a66a4" stroke="none" stroke-width="1"/>
+<polygon points="83.96,164.04 87.56,158.28 90.92,164.04" fill="#7a66a4" stroke="none" stroke-width="1"/>
+<circle cx="83" cy="171" r="12" fill="#7a66a4" stroke="#ffffff" stroke-width="2" opacity="1"/>
+<circle cx="79.4" cy="170.04" r="1.3" fill="#ffffff" stroke="none" stroke-width="1" opacity="1"/>
+<circle cx="86.6" cy="170.04" r="1.3" fill="#ffffff" stroke="none" stroke-width="1" opacity="1"/>
+<text x="83" y="177.6" font-family="Inter, PingFang SC, Microsoft YaHei, Arial, sans-serif" font-size="8" font-weight="700" fill="#ffffff" text-anchor="middle" opacity="1">会</text>
+<text x="104" y="167" font-family="Inter, PingFang SC, Microsoft YaHei, Arial, sans-serif" font-size="12" font-weight="650" fill="#342d29" text-anchor="start" opacity="1">会话进度视图设计</text>
+<text x="104" y="187" font-family="Inter, PingFang SC, Microsoft YaHei, Arial, sans-serif" font-size="10" font-weight="400" fill="#8b8179" text-anchor="start" opacity="1">烁烁 · 正在推进</text>
+<circle cx="265" cy="171" r="4" fill="#5d885f" stroke="none" stroke-width="1" opacity="1"/>
+<polygon points="75.08,236.04 78.44,230.28 82.04,236.04" fill="#d08b72" stroke="none" stroke-width="1"/>
+<polygon points="83.96,236.04 87.56,230.28 90.92,236.04" fill="#d08b72" stroke="none" stroke-width="1"/>
+<circle cx="83" cy="243" r="12" fill="#d08b72" stroke="#ffffff" stroke-width="2" opacity="1"/>
+<circle cx="79.4" cy="242.04" r="1.3" fill="#ffffff" stroke="none" stroke-width="1" opacity="1"/>
+<circle cx="86.6" cy="242.04" r="1.3" fill="#ffffff" stroke="none" stroke-width="1" opacity="1"/>
+<text x="83" y="249.6" font-family="Inter, PingFang SC, Microsoft YaHei, Arial, sans-serif" font-size="8" font-weight="700" fill="#ffffff" text-anchor="middle" opacity="1">R</text>
+<text x="104" y="239" font-family="Inter, PingFang SC, Microsoft YaHei, Arial, sans-serif" font-size="12" font-weight="650" fill="#342d29" text-anchor="start" opacity="1">Runtime Harness 深入学习</text>
+<text x="104" y="259" font-family="Inter, PingFang SC, Microsoft YaHei, Arial, sans-serif" font-size="10" font-weight="400" fill="#8b8179" text-anchor="start" opacity="1">宪宪 · 12 分钟前</text>
+<polygon points="75.08,308.04 78.44,302.28 82.04,308.04" fill="#4e8399" stroke="none" stroke-width="1"/>
+<polygon points="83.96,308.04 87.56,302.28 90.92,308.04" fill="#4e8399" stroke="none" stroke-width="1"/>
+<circle cx="83" cy="315" r="12" fill="#4e8399" stroke="#ffffff" stroke-width="2" opacity="1"/>
+<circle cx="79.4" cy="314.04" r="1.3" fill="#ffffff" stroke="none" stroke-width="1" opacity="1"/>
+<circle cx="86.6" cy="314.04" r="1.3" fill="#ffffff" stroke="none" stroke-width="1" opacity="1"/>
+<text x="83" y="321.6" font-family="Inter, PingFang SC, Microsoft YaHei, Arial, sans-serif" font-size="8" font-weight="700" fill="#ffffff" text-anchor="middle" opacity="1">P</text>
+<text x="104" y="311" font-family="Inter, PingFang SC, Microsoft YaHei, Arial, sans-serif" font-size="12" font-weight="650" fill="#342d29" text-anchor="start" opacity="1">Pi session 接续机制</text>
+<text x="104" y="331" font-family="Inter, PingFang SC, Microsoft YaHei, Arial, sans-serif" font-size="10" font-weight="400" fill="#8b8179" text-anchor="start" opacity="1">等待外部结果</text>
+<polygon points="75.08,380.04 78.44,374.28 82.04,380.04" fill="#5b7891" stroke="none" stroke-width="1"/>
+<polygon points="83.96,380.04 87.56,374.28 90.92,380.04" fill="#5b7891" stroke="none" stroke-width="1"/>
+<circle cx="83" cy="387" r="12" fill="#5b7891" stroke="#ffffff" stroke-width="2" opacity="1"/>
+<circle cx="79.4" cy="386.04" r="1.3" fill="#ffffff" stroke="none" stroke-width="1" opacity="1"/>
+<circle cx="86.6" cy="386.04" r="1.3" fill="#ffffff" stroke="none" stroke-width="1" opacity="1"/>
+<text x="83" y="393.6" font-family="Inter, PingFang SC, Microsoft YaHei, Arial, sans-serif" font-size="8" font-weight="700" fill="#ffffff" text-anchor="middle" opacity="1">C</text>
+<text x="104" y="383" font-family="Inter, PingFang SC, Microsoft YaHei, Arial, sans-serif" font-size="12" font-weight="650" fill="#342d29" text-anchor="start" opacity="1">Codex 开源范围调研</text>
+<text x="104" y="403" font-family="Inter, PingFang SC, Microsoft YaHei, Arial, sans-serif" font-size="10" font-weight="400" fill="#8b8179" text-anchor="start" opacity="1">最近有新结论</text>
+<polygon points="75.08,452.04 78.44,446.28 82.04,452.04" fill="#5d885f" stroke="none" stroke-width="1"/>
+<polygon points="83.96,452.04 87.56,446.28 90.92,452.04" fill="#5d885f" stroke="none" stroke-width="1"/>
+<circle cx="83" cy="459" r="12" fill="#5d885f" stroke="#ffffff" stroke-width="2" opacity="1"/>
+<circle cx="79.4" cy="458.04" r="1.3" fill="#ffffff" stroke="none" stroke-width="1" opacity="1"/>
+<circle cx="86.6" cy="458.04" r="1.3" fill="#ffffff" stroke="none" stroke-width="1" opacity="1"/>
+<text x="83" y="465.6" font-family="Inter, PingFang SC, Microsoft YaHei, Arial, sans-serif" font-size="8" font-weight="700" fill="#ffffff" text-anchor="middle" opacity="1">A</text>
+<text x="104" y="455" font-family="Inter, PingFang SC, Microsoft YaHei, Arial, sans-serif" font-size="12" font-weight="650" fill="#342d29" text-anchor="start" opacity="1">Agent eval 方法论</text>
+<text x="104" y="475" font-family="Inter, PingFang SC, Microsoft YaHei, Arial, sans-serif" font-size="10" font-weight="400" fill="#8b8179" text-anchor="start" opacity="1">3 天前</text>
+<text x="70" y="878" font-family="Inter, PingFang SC, Microsoft YaHei, Arial, sans-serif" font-size="10" font-weight="400" fill="#8b8179" text-anchor="start" opacity="1">5 个对话 · 演示列表</text>
+<rect x="292" y="0" width="1148" height="68" rx="0" fill="#fdfbf8" stroke="none" stroke-width="1" opacity="1"/>
+<line x1="292" y1="68" x2="1440" y2="68" stroke="#e3dbd1" stroke-width="1" opacity="1"/>
+<polygon points="310,34 316,19 324,28 332,19 338,34" fill="#b8754d" stroke="none" stroke-width="1"/>
+<circle cx="324" cy="38" r="14" fill="#b8754d" stroke="none" stroke-width="1" opacity="1"/>
+<text x="350" y="30" font-family="Inter, PingFang SC, Microsoft YaHei, Arial, sans-serif" font-size="16" font-weight="750" fill="#342d29" text-anchor="start" opacity="1">Clowder AI</text>
+<text x="350" y="50" font-family="Inter, PingFang SC, Microsoft YaHei, Arial, sans-serif" font-size="11" font-weight="400" fill="#8b8179" text-anchor="start" opacity="1">会话进度视图设计</text>
+<polygon points="534.08,28.04 537.44,22.28 541.04,28.04" fill="#d08b72" stroke="none" stroke-width="1"/>
+<polygon points="542.96,28.04 546.56,22.28 549.92,28.04" fill="#d08b72" stroke="none" stroke-width="1"/>
+<circle cx="542" cy="35" r="12" fill="#d08b72" stroke="#ffffff" stroke-width="2" opacity="1"/>
+<circle cx="538.4" cy="34.04" r="1.3" fill="#ffffff" stroke="none" stroke-width="1" opacity="1"/>
+<circle cx="545.6" cy="34.04" r="1.3" fill="#ffffff" stroke="none" stroke-width="1" opacity="1"/>
+<text x="542" y="41.6" font-family="Inter, PingFang SC, Microsoft YaHei, Arial, sans-serif" font-size="8" font-weight="700" fill="#ffffff" text-anchor="middle" opacity="1">宪</text>
+<polygon points="554.08,28.04 557.44,22.28 561.04,28.04" fill="#7a66a4" stroke="none" stroke-width="1"/>
+<polygon points="562.96,28.04 566.56,22.28 569.92,28.04" fill="#7a66a4" stroke="none" stroke-width="1"/>
+<circle cx="562" cy="35" r="12" fill="#7a66a4" stroke="#ffffff" stroke-width="2" opacity="1"/>
+<circle cx="558.4" cy="34.04" r="1.3" fill="#ffffff" stroke="none" stroke-width="1" opacity="1"/>
+<circle cx="565.6" cy="34.04" r="1.3" fill="#ffffff" stroke="none" stroke-width="1" opacity="1"/>
+<text x="562" y="41.6" font-family="Inter, PingFang SC, Microsoft YaHei, Arial, sans-serif" font-size="8" font-weight="700" fill="#ffffff" text-anchor="middle" opacity="1">烁</text>
+<rect x="1392" y="17" width="32" height="32" rx="16" fill="#f3ede5" stroke="none" stroke-width="1" opacity="1"/>
+<rect x="1401" y="24" width="14" height="16" rx="3" fill="none" stroke="#665d57" stroke-width="1.3" opacity="1"/>
+<line x1="1409" y1="24" x2="1409" y2="40" stroke="#665d57" stroke-width="1.2" opacity="1"/>
+<rect x="292" y="68" width="1148" height="40" rx="0" fill="#fffefa" stroke="#e3dbd1" stroke-width="1" opacity="1"/>
+<circle cx="310" cy="88" r="4" fill="#5d885f" stroke="none" stroke-width="1" opacity="1"/>
+<text x="323" y="93" font-family="Inter, PingFang SC, Microsoft YaHei, Arial, sans-serif" font-size="13" font-weight="650" fill="#342d29" text-anchor="start" opacity="1">烁烁正在完成 UI 视觉稿</text>
+<text x="511" y="93" font-family="Inter, PingFang SC, Microsoft YaHei, Arial, sans-serif" font-size="11" font-weight="400" fill="#8b8179" text-anchor="start" opacity="1">· 8 分钟</text>
+<rect x="1324" y="76" width="78" height="24" rx="12.0" fill="#f3ede5" stroke="none" stroke-width="1" opacity="1"/>
+<text x="1363.0" y="92.0" font-family="Inter, PingFang SC, Microsoft YaHei, Arial, sans-serif" font-size="11" font-weight="600" fill="#665d57" text-anchor="middle" opacity="1">暂不需要你</text>
+<path d="M1418 86 L1422 90 L1426 86" stroke="#8b8179" stroke-width="1.5" fill="none" stroke-linecap="round" stroke-linejoin="round" opacity="1"/>
+<rect x="292" y="108" width="1148" height="698" rx="0" fill="#fdfbf8" stroke="none" stroke-width="1" opacity="1"/>
+<rect x="884" y="130" width="520" height="46" rx="16" fill="#f3ede5" stroke="#e3dbd1" stroke-width="1" opacity="1"/>
+<text x="902" y="150" font-family="Inter, PingFang SC, Microsoft YaHei, Arial, sans-serif" font-size="11" font-weight="600" fill="#8b8179" text-anchor="start" opacity="1">你 · 20:47</text>
+<text x="902" y="169" font-family="Inter, PingFang SC, Microsoft YaHei, Arial, sans-serif" font-size="12" font-weight="450" fill="#342d29" text-anchor="start" opacity="1">这样会不会把聊天消息折得太小，或者支持打开收起？</text>
+<polygon points="323.76,225.88 327.68,219.16 331.88,225.88" fill="#d08b72" stroke="none" stroke-width="1"/>
+<polygon points="334.12,225.88 338.32,219.16 342.24,225.88" fill="#d08b72" stroke="none" stroke-width="1"/>
+<circle cx="333" cy="234" r="14" fill="#d08b72" stroke="#ffffff" stroke-width="2" opacity="1"/>
+<circle cx="328.8" cy="232.88" r="1.3" fill="#ffffff" stroke="none" stroke-width="1" opacity="1"/>
+<circle cx="337.2" cy="232.88" r="1.3" fill="#ffffff" stroke="none" stroke-width="1" opacity="1"/>
+<text x="333" y="241.7" font-family="Inter, PingFang SC, Microsoft YaHei, Arial, sans-serif" font-size="8" font-weight="700" fill="#ffffff" text-anchor="middle" opacity="1">宪</text>
+<text x="356" y="229" font-family="Inter, PingFang SC, Microsoft YaHei, Arial, sans-serif" font-size="11" font-weight="700" fill="#d08b72" text-anchor="start" opacity="1">布偶猫 / 宪宪 · 20:48</text>
+<rect x="356" y="237" width="660" height="76" rx="15" fill="#fffefa" stroke="#e3dbd1" stroke-width="1" opacity="1" filter="url(#shadow)"/>
+<rect x="356" y="237" width="3" height="76" rx="1.5" fill="#d08b72" stroke="none" stroke-width="1" opacity="1"/>
+<text x="374" y="261" font-family="Inter, PingFang SC, Microsoft YaHei, Arial, sans-serif" font-size="12" font-weight="600" fill="#342d29" text-anchor="start" opacity="1">会。最稳的是聊天优先、三级开合：</text>
+<text x="374" y="281" font-family="Inter, PingFang SC, Microsoft YaHei, Arial, sans-serif" font-size="12" font-weight="500" fill="#665d57" text-anchor="start" opacity="1">收起 40px，摘要最多 84px，完整历史只在右侧 Workspace。</text>
+<polygon points="323.76,342.88 327.68,336.16 331.88,342.88" fill="#7a66a4" stroke="none" stroke-width="1"/>
+<polygon points="334.12,342.88 338.32,336.16 342.24,342.88" fill="#7a66a4" stroke="none" stroke-width="1"/>
+<circle cx="333" cy="351" r="14" fill="#7a66a4" stroke="#ffffff" stroke-width="2" opacity="1"/>
+<circle cx="328.8" cy="349.88" r="1.3" fill="#ffffff" stroke="none" stroke-width="1" opacity="1"/>
+<circle cx="337.2" cy="349.88" r="1.3" fill="#ffffff" stroke="none" stroke-width="1" opacity="1"/>
+<text x="333" y="358.7" font-family="Inter, PingFang SC, Microsoft YaHei, Arial, sans-serif" font-size="8" font-weight="700" fill="#ffffff" text-anchor="middle" opacity="1">烁</text>
+<text x="356" y="346" font-family="Inter, PingFang SC, Microsoft YaHei, Arial, sans-serif" font-size="11" font-weight="700" fill="#7a66a4" text-anchor="start" opacity="1">暹罗猫 / 烁烁 · 20:49</text>
+<rect x="356" y="354" width="660" height="76" rx="15" fill="#fffefa" stroke="#e3dbd1" stroke-width="1" opacity="1" filter="url(#shadow)"/>
+<rect x="356" y="354" width="3" height="76" rx="1.5" fill="#7a66a4" stroke="none" stroke-width="1" opacity="1"/>
+<text x="374" y="378" font-family="Inter, PingFang SC, Microsoft YaHei, Arial, sans-serif" font-size="12" font-weight="600" fill="#342d29" text-anchor="start" opacity="1">我会让“需要你”只高亮，不强制展开。</text>
+<text x="374" y="398" font-family="Inter, PingFang SC, Microsoft YaHei, Arial, sans-serif" font-size="12" font-weight="500" fill="#665d57" text-anchor="start" opacity="1">关闭完整进展后，聊天宽度立即恢复。</text>
+<polygon points="323.76,459.88 327.68,453.16 331.88,459.88" fill="#5b7891" stroke="none" stroke-width="1"/>
+<polygon points="334.12,459.88 338.32,453.16 342.24,459.88" fill="#5b7891" stroke="none" stroke-width="1"/>
+<circle cx="333" cy="468" r="14" fill="#5b7891" stroke="#ffffff" stroke-width="2" opacity="1"/>
+<circle cx="328.8" cy="466.88" r="1.3" fill="#ffffff" stroke="none" stroke-width="1" opacity="1"/>
+<circle cx="337.2" cy="466.88" r="1.3" fill="#ffffff" stroke="none" stroke-width="1" opacity="1"/>
+<text x="333" y="475.7" font-family="Inter, PingFang SC, Microsoft YaHei, Arial, sans-serif" font-size="8" font-weight="700" fill="#ffffff" text-anchor="middle" opacity="1">砚</text>
+<text x="356" y="463" font-family="Inter, PingFang SC, Microsoft YaHei, Arial, sans-serif" font-size="11" font-weight="700" fill="#5b7891" text-anchor="start" opacity="1">缅因猫 / 砚砚 · 20:50</text>
+<rect x="356" y="471" width="660" height="56" rx="15" fill="#fffefa" stroke="#e3dbd1" stroke-width="1" opacity="1" filter="url(#shadow)"/>
+<rect x="356" y="471" width="3" height="56" rx="1.5" fill="#5b7891" stroke="none" stroke-width="1" opacity="1"/>
+<text x="374" y="495" font-family="Inter, PingFang SC, Microsoft YaHei, Arial, sans-serif" font-size="12" font-weight="600" fill="#342d29" text-anchor="start" opacity="1">信息不足时只显示“暂时无法确认”，不会拿陈旧任务冒充执行。</text>
+<rect x="292" y="806" width="1148" height="94" rx="0" fill="#fdfbf8" stroke="none" stroke-width="1" opacity="1"/>
+<line x1="292" y1="806" x2="1440" y2="806" stroke="#e3dbd1" stroke-width="1" opacity="1"/>
+<rect x="314" y="818" width="1104" height="70" rx="16" fill="#fffefa" stroke="#d5c9bc" stroke-width="1" opacity="1" filter="url(#shadow)"/>
+<text x="332" y="846" font-family="Inter, PingFang SC, Microsoft YaHei, Arial, sans-serif" font-size="12" font-weight="400" fill="#8b8179" text-anchor="start" opacity="1">输入消息，或 @召唤某只猫…</text>
+<circle cx="332" cy="874" r="8" fill="none" stroke="#8b8179" stroke-width="1.2" opacity="1"/>
+<line x1="329" y1="874" x2="335" y2="874" stroke="#8b8179" stroke-width="1.2" opacity="1"/>
+<rect x="1360" y="858" width="44" height="28" rx="14" fill="#b8754d" stroke="none" stroke-width="1" opacity="1"/>
+<text x="1382" y="877" font-family="Inter, PingFang SC, Microsoft YaHei, Arial, sans-serif" font-size="11" font-weight="700" fill="#ffffff" text-anchor="middle" opacity="1">发送</text>
+<rect x="1282" y="870" width="142" height="20" rx="10" fill="#3f3732" stroke="none" stroke-width="1" opacity="0.82"/>
+<text x="1353.0" y="884" font-family="Inter, PingFang SC, Microsoft YaHei, Arial, sans-serif" font-size="10" font-weight="600" fill="#ffffff" text-anchor="middle" opacity="1">功能原型 · 演示数据</text>
+</svg>

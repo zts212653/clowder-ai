@@ -1,0 +1,116 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1440" height="900" viewBox="0 0 1440 900" role="img" aria-label="全局近况页">
+<defs>
+<filter id="shadow" x="-20%" y="-20%" width="140%" height="160%"><feDropShadow dx="0" dy="2" stdDeviation="4" flood-color="#3b2d24" flood-opacity=".09"/></filter>
+<filter id="shadow2" x="-20%" y="-20%" width="140%" height="160%"><feDropShadow dx="0" dy="6" stdDeviation="12" flood-color="#3b2d24" flood-opacity=".12"/></filter>
+</defs>
+<rect x="0" y="0" width="52" height="900" rx="0" fill="#eee7dd" stroke="none" stroke-width="1" opacity="1"/>
+<circle cx="26.0" cy="28" r="17" fill="#fbefe7" stroke="#b8754d" stroke-width="1.5" opacity="1"/>
+<polygon points="18,27 21,17 26,23 31,17 34,27" fill="#b8754d" stroke="none" stroke-width="1"/>
+<circle cx="26" cy="30" r="9" fill="#b8754d" stroke="none" stroke-width="1" opacity="1"/>
+<rect x="18" y="68" width="16" height="13" rx="3" fill="none" stroke="#665d57" stroke-width="1.5" opacity="1"/>
+<path d="M21 81 L19 86 L25 81" stroke="#665d57" stroke-width="1.5" fill="none" stroke-linecap="round" stroke-linejoin="round" opacity="1"/>
+<rect x="6" y="104" width="40" height="40" rx="10" fill="#fffefa" stroke="none" stroke-width="1" opacity="1" filter="url(#shadow)"/>
+<circle cx="26" cy="124" r="9" fill="none" stroke="#b8754d" stroke-width="1.5" opacity="1"/>
+<path d="M26 119 L26 124 L31 126" stroke="#b8754d" stroke-width="1.5" fill="none" stroke-linecap="round" stroke-linejoin="round" opacity="1"/>
+<path d="M18 165 Q26 160 34 165 L34 179 Q26 174 18 179 Z" stroke="#665d57" stroke-width="1.5" fill="none" stroke-linecap="round" stroke-linejoin="round" opacity="1"/>
+<rect x="19" y="211" width="14" height="18" rx="2" fill="none" stroke="#665d57" stroke-width="1.5" opacity="1"/>
+<line x1="22" y1="217" x2="30" y2="217" stroke="#665d57" stroke-width="1.3" opacity="1"/>
+<line x1="22" y1="222" x2="29" y2="222" stroke="#665d57" stroke-width="1.3" opacity="1"/>
+<path d="M19 276 L19 260 Q25 264 33 260 L33 271 Q25 275 19 271" stroke="#665d57" stroke-width="1.5" fill="none" stroke-linecap="round" stroke-linejoin="round" opacity="1"/>
+<circle cx="26" cy="736" r="8" fill="none" stroke="#8b8179" stroke-width="1.3" opacity="1"/>
+<circle cx="26" cy="784" r="8" fill="none" stroke="#8b8179" stroke-width="1.3" opacity="1"/>
+<circle cx="26" cy="832" r="8" fill="none" stroke="#8b8179" stroke-width="1.3" opacity="1"/>
+<circle cx="26" cy="872" r="10" fill="#ebe3d9" stroke="none" stroke-width="1" opacity="1"/>
+<circle cx="26" cy="872" r="3" fill="#8b8179" stroke="none" stroke-width="1" opacity="1"/>
+<rect x="52" y="0" width="1388" height="900" rx="0" fill="#fdfbf8" stroke="none" stroke-width="1" opacity="1"/>
+<rect x="52" y="0" width="1388" height="72" rx="0" fill="#fdfbf8" stroke="none" stroke-width="1" opacity="1"/>
+<line x1="52" y1="72" x2="1440" y2="72" stroke="#e3dbd1" stroke-width="1" opacity="1"/>
+<text x="92" y="33" font-family="Inter, PingFang SC, Microsoft YaHei, Arial, sans-serif" font-size="22" font-weight="800" fill="#342d29" text-anchor="start" opacity="1">近况</text>
+<text x="92" y="55" font-family="Inter, PingFang SC, Microsoft YaHei, Arial, sans-serif" font-size="11" font-weight="400" fill="#8b8179" text-anchor="start" opacity="1">你近期推进的会话 · 与会话内信息保持一致</text>
+<rect x="1270" y="22" width="108" height="28" rx="14.0" fill="#f3ede5" stroke="none" stroke-width="1" opacity="1"/>
+<text x="1324.0" y="40.0" font-family="Inter, PingFang SC, Microsoft YaHei, Arial, sans-serif" font-size="11" font-weight="600" fill="#665d57" text-anchor="middle" opacity="1">最近更新</text>
+<text x="126" y="112" font-family="Inter, PingFang SC, Microsoft YaHei, Arial, sans-serif" font-size="13" font-weight="750" fill="#ad713d" text-anchor="start" opacity="1">需要你</text>
+<rect x="188" y="95" width="28" height="22" rx="11.0" fill="#fff4e3" stroke="none" stroke-width="1" opacity="1"/>
+<text x="202.0" y="110.0" font-family="Inter, PingFang SC, Microsoft YaHei, Arial, sans-serif" font-size="11" font-weight="600" fill="#ad713d" text-anchor="middle" opacity="1">1</text>
+<rect x="126" y="130" width="608.0" height="112" rx="14" fill="#fff4e3" stroke="#ad713d" stroke-width="1" opacity="1" filter="url(#shadow)"/>
+<text x="144" y="155" font-family="Inter, PingFang SC, Microsoft YaHei, Arial, sans-serif" font-size="13" font-weight="750" fill="#342d29" text-anchor="start" opacity="1">会话进度视图设计</text>
+<rect x="630.0" y="142" width="86" height="24" rx="12.0" fill="#fff4e3" stroke="#ad713d" stroke-width="1" opacity="1"/>
+<text x="673.0" y="158.0" font-family="Inter, PingFang SC, Microsoft YaHei, Arial, sans-serif" font-size="11" font-weight="600" fill="#ad713d" text-anchor="middle" opacity="1">需要你</text>
+<circle cx="146" cy="181" r="4" fill="#ad713d" stroke="none" stroke-width="1" opacity="1"/>
+<text x="158" y="185" font-family="Inter, PingFang SC, Microsoft YaHei, Arial, sans-serif" font-size="11" font-weight="650" fill="#665d57" text-anchor="start" opacity="1">烁烁已完成视觉稿</text>
+<text x="144" y="209" font-family="Inter, PingFang SC, Microsoft YaHei, Arial, sans-serif" font-size="11" font-weight="400" fill="#665d57" text-anchor="start" opacity="1">需要确认三级开合是否保留</text>
+<text x="144" y="231" font-family="Inter, PingFang SC, Microsoft YaHei, Arial, sans-serif" font-size="10" font-weight="400" fill="#8b8179" text-anchor="start" opacity="1">下一步：确认视觉方案</text>
+<text x="716.0" y="231" font-family="Inter, PingFang SC, Microsoft YaHei, Arial, sans-serif" font-size="10" font-weight="700" fill="#b8754d" text-anchor="end" opacity="1">进入会话 ›</text>
+<text x="126" y="278" font-family="Inter, PingFang SC, Microsoft YaHei, Arial, sans-serif" font-size="13" font-weight="750" fill="#5d885f" text-anchor="start" opacity="1">正在推进</text>
+<rect x="202" y="261" width="28" height="22" rx="11.0" fill="#eef6ec" stroke="none" stroke-width="1" opacity="1"/>
+<text x="216.0" y="276.0" font-family="Inter, PingFang SC, Microsoft YaHei, Arial, sans-serif" font-size="11" font-weight="600" fill="#5d885f" text-anchor="middle" opacity="1">1</text>
+<rect x="126" y="296" width="608.0" height="112" rx="14" fill="#fffefa" stroke="#e3dbd1" stroke-width="1" opacity="1" filter="url(#shadow)"/>
+<text x="144" y="321" font-family="Inter, PingFang SC, Microsoft YaHei, Arial, sans-serif" font-size="13" font-weight="750" fill="#342d29" text-anchor="start" opacity="1">Runtime Harness 深入学习</text>
+<rect x="630.0" y="308" width="86" height="24" rx="12.0" fill="#f3ede5" stroke="none" stroke-width="1" opacity="1"/>
+<text x="673.0" y="324.0" font-family="Inter, PingFang SC, Microsoft YaHei, Arial, sans-serif" font-size="11" font-weight="600" fill="#5d885f" text-anchor="middle" opacity="1">推进中</text>
+<circle cx="146" cy="347" r="4" fill="#5d885f" stroke="none" stroke-width="1" opacity="1"/>
+<text x="158" y="351" font-family="Inter, PingFang SC, Microsoft YaHei, Arial, sans-serif" font-size="11" font-weight="650" fill="#665d57" text-anchor="start" opacity="1">宪宪正在对比 Codex 与 Pi</text>
+<text x="144" y="375" font-family="Inter, PingFang SC, Microsoft YaHei, Arial, sans-serif" font-size="11" font-weight="400" fill="#665d57" text-anchor="start" opacity="1">已明确 session 接续的共同维度</text>
+<text x="144" y="397" font-family="Inter, PingFang SC, Microsoft YaHei, Arial, sans-serif" font-size="10" font-weight="400" fill="#8b8179" text-anchor="start" opacity="1">下一步：补齐 Pi runtime 证据</text>
+<text x="716.0" y="397" font-family="Inter, PingFang SC, Microsoft YaHei, Arial, sans-serif" font-size="10" font-weight="700" fill="#b8754d" text-anchor="end" opacity="1">进入会话 ›</text>
+<text x="126" y="438" font-family="Inter, PingFang SC, Microsoft YaHei, Arial, sans-serif" font-size="13" font-weight="750" fill="#4e8399" text-anchor="start" opacity="1">状态待确认</text>
+<rect x="216" y="421" width="28" height="22" rx="11.0" fill="#edf6f8" stroke="none" stroke-width="1" opacity="1"/>
+<text x="230.0" y="436.0" font-family="Inter, PingFang SC, Microsoft YaHei, Arial, sans-serif" font-size="11" font-weight="600" fill="#4e8399" text-anchor="middle" opacity="1">2</text>
+<rect x="126" y="456" width="608.0" height="112" rx="14" fill="#fffefa" stroke="#e3dbd1" stroke-width="1" opacity="1" filter="url(#shadow)"/>
+<text x="144" y="481" font-family="Inter, PingFang SC, Microsoft YaHei, Arial, sans-serif" font-size="13" font-weight="750" fill="#342d29" text-anchor="start" opacity="1">Agent eval 方法论</text>
+<rect x="630.0" y="468" width="86" height="24" rx="12.0" fill="#f3ede5" stroke="none" stroke-width="1" opacity="1"/>
+<text x="673.0" y="484.0" font-family="Inter, PingFang SC, Microsoft YaHei, Arial, sans-serif" font-size="11" font-weight="600" fill="#4e8399" text-anchor="middle" opacity="1">状态确认中</text>
+<circle cx="146" cy="507" r="4" fill="#4e8399" stroke="none" stroke-width="1" opacity="1"/>
+<text x="158" y="511" font-family="Inter, PingFang SC, Microsoft YaHei, Arial, sans-serif" font-size="11" font-weight="650" fill="#665d57" text-anchor="start" opacity="1">运行信号不完整</text>
+<text x="144" y="535" font-family="Inter, PingFang SC, Microsoft YaHei, Arial, sans-serif" font-size="11" font-weight="400" fill="#665d57" text-anchor="start" opacity="1">暂不能确认是否仍在执行</text>
+<text x="144" y="557" font-family="Inter, PingFang SC, Microsoft YaHei, Arial, sans-serif" font-size="10" font-weight="400" fill="#8b8179" text-anchor="start" opacity="1">下一步：等待状态恢复</text>
+<text x="716.0" y="557" font-family="Inter, PingFang SC, Microsoft YaHei, Arial, sans-serif" font-size="10" font-weight="700" fill="#b8754d" text-anchor="end" opacity="1">进入会话 ›</text>
+<rect x="126" y="580" width="608.0" height="112" rx="14" fill="#fffefa" stroke="#e3dbd1" stroke-width="1" opacity="1" filter="url(#shadow)"/>
+<text x="144" y="605" font-family="Inter, PingFang SC, Microsoft YaHei, Arial, sans-serif" font-size="13" font-weight="750" fill="#342d29" text-anchor="start" opacity="1">Prompt 注入校验</text>
+<rect x="630.0" y="592" width="86" height="24" rx="12.0" fill="#f3ede5" stroke="none" stroke-width="1" opacity="1"/>
+<text x="673.0" y="608.0" font-family="Inter, PingFang SC, Microsoft YaHei, Arial, sans-serif" font-size="11" font-weight="600" fill="#8b8179" text-anchor="middle" opacity="1">暂时无法确认</text>
+<circle cx="146" cy="631" r="4" fill="#8b8179" stroke="none" stroke-width="1" opacity="1"/>
+<text x="158" y="635" font-family="Inter, PingFang SC, Microsoft YaHei, Arial, sans-serif" font-size="11" font-weight="650" fill="#665d57" text-anchor="start" opacity="1">当前状态读取失败</text>
+<text x="144" y="659" font-family="Inter, PingFang SC, Microsoft YaHei, Arial, sans-serif" font-size="11" font-weight="400" fill="#665d57" text-anchor="start" opacity="1">没有使用陈旧任务推断运行状态</text>
+<text x="144" y="681" font-family="Inter, PingFang SC, Microsoft YaHei, Arial, sans-serif" font-size="10" font-weight="400" fill="#8b8179" text-anchor="start" opacity="1">下一步：稍后重新读取</text>
+<text x="716.0" y="681" font-family="Inter, PingFang SC, Microsoft YaHei, Arial, sans-serif" font-size="10" font-weight="700" fill="#b8754d" text-anchor="end" opacity="1">进入会话 ›</text>
+<text x="758.0" y="112" font-family="Inter, PingFang SC, Microsoft YaHei, Arial, sans-serif" font-size="13" font-weight="750" fill="#4e8399" text-anchor="start" opacity="1">等待外部</text>
+<rect x="834.0" y="95" width="28" height="22" rx="11.0" fill="#edf6f8" stroke="none" stroke-width="1" opacity="1"/>
+<text x="848.0" y="110.0" font-family="Inter, PingFang SC, Microsoft YaHei, Arial, sans-serif" font-size="11" font-weight="600" fill="#4e8399" text-anchor="middle" opacity="1">1</text>
+<rect x="758.0" y="130" width="608.0" height="112" rx="14" fill="#fffefa" stroke="#e3dbd1" stroke-width="1" opacity="1" filter="url(#shadow)"/>
+<text x="776.0" y="155" font-family="Inter, PingFang SC, Microsoft YaHei, Arial, sans-serif" font-size="13" font-weight="750" fill="#342d29" text-anchor="start" opacity="1">Pi session 接续机制</text>
+<rect x="1262.0" y="142" width="86" height="24" rx="12.0" fill="#f3ede5" stroke="none" stroke-width="1" opacity="1"/>
+<text x="1305.0" y="158.0" font-family="Inter, PingFang SC, Microsoft YaHei, Arial, sans-serif" font-size="11" font-weight="600" fill="#4e8399" text-anchor="middle" opacity="1">等待外部</text>
+<circle cx="778.0" cy="181" r="4" fill="#4e8399" stroke="none" stroke-width="1" opacity="1"/>
+<text x="790.0" y="185" font-family="Inter, PingFang SC, Microsoft YaHei, Arial, sans-serif" font-size="11" font-weight="650" fill="#665d57" text-anchor="start" opacity="1">等待 runtime 行为样本</text>
+<text x="776.0" y="209" font-family="Inter, PingFang SC, Microsoft YaHei, Arial, sans-serif" font-size="11" font-weight="400" fill="#665d57" text-anchor="start" opacity="1">已提交可复现采样请求</text>
+<text x="776.0" y="231" font-family="Inter, PingFang SC, Microsoft YaHei, Arial, sans-serif" font-size="10" font-weight="400" fill="#8b8179" text-anchor="start" opacity="1">下一步：收到样本后继续对比</text>
+<text x="1348.0" y="231" font-family="Inter, PingFang SC, Microsoft YaHei, Arial, sans-serif" font-size="10" font-weight="700" fill="#b8754d" text-anchor="end" opacity="1">进入会话 ›</text>
+<text x="758.0" y="278" font-family="Inter, PingFang SC, Microsoft YaHei, Arial, sans-serif" font-size="13" font-weight="750" fill="#665d57" text-anchor="start" opacity="1">最近有进展</text>
+<rect x="848.0" y="261" width="28" height="22" rx="11.0" fill="#f3ede5" stroke="none" stroke-width="1" opacity="1"/>
+<text x="862.0" y="276.0" font-family="Inter, PingFang SC, Microsoft YaHei, Arial, sans-serif" font-size="11" font-weight="600" fill="#665d57" text-anchor="middle" opacity="1">2</text>
+<rect x="758.0" y="296" width="608.0" height="112" rx="14" fill="#fffefa" stroke="#e3dbd1" stroke-width="1" opacity="1" filter="url(#shadow)"/>
+<text x="776.0" y="321" font-family="Inter, PingFang SC, Microsoft YaHei, Arial, sans-serif" font-size="13" font-weight="750" fill="#342d29" text-anchor="start" opacity="1">Codex 开源范围调研</text>
+<rect x="1262.0" y="308" width="86" height="24" rx="12.0" fill="#f3ede5" stroke="none" stroke-width="1" opacity="1"/>
+<text x="1305.0" y="324.0" font-family="Inter, PingFang SC, Microsoft YaHei, Arial, sans-serif" font-size="11" font-weight="600" fill="#665d57" text-anchor="middle" opacity="1">最近更新</text>
+<circle cx="778.0" cy="347" r="4" fill="#665d57" stroke="none" stroke-width="1" opacity="1"/>
+<text x="790.0" y="351" font-family="Inter, PingFang SC, Microsoft YaHei, Arial, sans-serif" font-size="11" font-weight="650" fill="#665d57" text-anchor="start" opacity="1">当前无人执行 · 12 分钟前</text>
+<text x="776.0" y="375" font-family="Inter, PingFang SC, Microsoft YaHei, Arial, sans-serif" font-size="11" font-weight="400" fill="#665d57" text-anchor="start" opacity="1">已厘清不同运行方式的边界</text>
+<text x="776.0" y="397" font-family="Inter, PingFang SC, Microsoft YaHei, Arial, sans-serif" font-size="10" font-weight="400" fill="#8b8179" text-anchor="start" opacity="1">下一步：尚未明确</text>
+<text x="1348.0" y="397" font-family="Inter, PingFang SC, Microsoft YaHei, Arial, sans-serif" font-size="10" font-weight="700" fill="#b8754d" text-anchor="end" opacity="1">进入会话 ›</text>
+<rect x="758.0" y="420" width="608.0" height="112" rx="14" fill="#fffefa" stroke="#e3dbd1" stroke-width="1" opacity="1" filter="url(#shadow)"/>
+<text x="776.0" y="445" font-family="Inter, PingFang SC, Microsoft YaHei, Arial, sans-serif" font-size="13" font-weight="750" fill="#342d29" text-anchor="start" opacity="1">Session Continuity 笔记</text>
+<rect x="1262.0" y="432" width="86" height="24" rx="12.0" fill="#f3ede5" stroke="none" stroke-width="1" opacity="1"/>
+<text x="1305.0" y="448.0" font-family="Inter, PingFang SC, Microsoft YaHei, Arial, sans-serif" font-size="11" font-weight="600" fill="#665d57" text-anchor="middle" opacity="1">最近更新</text>
+<circle cx="778.0" cy="471" r="4" fill="#665d57" stroke="none" stroke-width="1" opacity="1"/>
+<text x="790.0" y="475" font-family="Inter, PingFang SC, Microsoft YaHei, Arial, sans-serif" font-size="11" font-weight="650" fill="#665d57" text-anchor="start" opacity="1">当前无人执行 · 昨天</text>
+<text x="776.0" y="499" font-family="Inter, PingFang SC, Microsoft YaHei, Arial, sans-serif" font-size="11" font-weight="400" fill="#665d57" text-anchor="start" opacity="1">沉淀了三种 session 恢复路径</text>
+<text x="776.0" y="521" font-family="Inter, PingFang SC, Microsoft YaHei, Arial, sans-serif" font-size="10" font-weight="400" fill="#8b8179" text-anchor="start" opacity="1">下一步：复核跨 runtime 适用性</text>
+<text x="1348.0" y="521" font-family="Inter, PingFang SC, Microsoft YaHei, Arial, sans-serif" font-size="10" font-weight="700" fill="#b8754d" text-anchor="end" opacity="1">进入会话 ›</text>
+<rect x="758.0" y="578" width="608.0" height="92" rx="14" fill="#f3ede5" stroke="#e3dbd1" stroke-width="1" opacity="1"/>
+<text x="778.0" y="608" font-family="Inter, PingFang SC, Microsoft YaHei, Arial, sans-serif" font-size="12" font-weight="700" fill="#342d29" text-anchor="start" opacity="1">近况为空时</text>
+<text x="778.0" y="633" font-family="Inter, PingFang SC, Microsoft YaHei, Arial, sans-serif" font-size="11" font-weight="400" fill="#8b8179" text-anchor="start" opacity="1">只有当前事实或进展回执的会话才会出现。</text>
+<text x="778.0" y="656" font-family="Inter, PingFang SC, Microsoft YaHei, Arial, sans-serif" font-size="10" font-weight="400" fill="#8b8179" text-anchor="start" opacity="1">不会因为刚有消息或陈旧待办自动入选。</text>
+<rect x="1282" y="870" width="142" height="20" rx="10" fill="#3f3732" stroke="none" stroke-width="1" opacity="0.82"/>
+<text x="1353.0" y="884" font-family="Inter, PingFang SC, Microsoft YaHei, Arial, sans-serif" font-size="10" font-weight="600" fill="#ffffff" text-anchor="middle" opacity="1">功能原型 · 演示数据</text>
+</svg>

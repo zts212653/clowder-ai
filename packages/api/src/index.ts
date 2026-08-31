@@ -70,6 +70,7 @@ import type { CollaborationContinuityCapsuleV1 } from './domains/cats/services/a
 import { createTaskProgressStore } from './domains/cats/services/agents/invocation/createTaskProgressStore.js';
 import { InvocationOwnerReaper } from './domains/cats/services/agents/invocation/InvocationOwnerReaper.js';
 import { startSerializedInvocationOwnerReaperInterval } from './domains/cats/services/agents/invocation/InvocationOwnerReaperInterval.js';
+import { getThreadLiveInvocations } from './domains/cats/services/agents/invocation/getThreadLiveInvocations.js';
 import {
   actionSuccessorInvocationIdempotencyKey,
   InvocationQueue,
@@ -772,6 +773,13 @@ async function main(): Promise<void> {
   const { InMemoryGuideDismissTracker } = await import('./domains/guides/GuideDismissTracker.js');
   const dismissTracker = new InMemoryGuideDismissTracker();
   let taskStore = createTaskStore(redis);
+  const [{ ThreadProgressReceiptStore }, { RedisThreadProgressReceiptStore }] = await Promise.all([
+    import('./domains/thread-progress/ThreadProgressReceiptStore.js'),
+    import('./domains/thread-progress/RedisThreadProgressReceiptStore.js'),
+  ]);
+  const threadProgressReceiptStore = redis
+    ? new RedisThreadProgressReceiptStore(redis)
+    : new ThreadProgressReceiptStore();
   const labelStore = createLabelStore(redis);
   const communityIssueStore = createCommunityIssueStore(redis);
   // F168 Phase F: per-repo routing config (guard thread + guard cat)
@@ -4041,6 +4049,7 @@ async function main(): Promise<void> {
     socketManager,
     callbackAuthNotifier,
     taskStore,
+    threadProgressReceiptStore,
     backlogStore,
     threadStore,
     sessionChainStore,
@@ -4411,6 +4420,96 @@ async function main(): Promise<void> {
 
   await app.register(approvalHubRoutes, {
     registry: approvalProducerRegistry,
+  });
+  const [{ ThreadBriefAssembler }, { threadProgressRoutes }, holdProjection] = await Promise.all([
+    import('./domains/thread-progress/ThreadBriefAssembler.js'),
+    import('./routes/thread-progress-routes.js'),
+    import('./routes/hold-ball-cancel.js'),
+  ]);
+  const threadBriefAssembler = new ThreadBriefAssembler({
+    receiptStore: threadProgressReceiptStore,
+    taskStore,
+    taskProgressStore,
+    workflowSopStore,
+    readLiveExecutions: async (threadId, ownerUserId) => {
+      const liveness = await getThreadLiveInvocations(threadId, ownerUserId, {
+        listRunningRecords: (tid, uid) => invocationRecordStore.listRunningByThread(tid, uid),
+        getActiveSlots: (tid) => invocationTracker.getActiveSlots(tid),
+        getTrackerUserId: (tid, catId) => invocationTracker.getUserId(tid, catId),
+        getDrafts: (uid, tid) => draftStore.getByThread(uid, tid),
+        listTurnExecutionsByParent: (parentId) => turnExecutionStore.listByParent(parentId),
+        getTurnInvocation: async (invocationId) => {
+          const record = await registry.getRecord(invocationId);
+          if (!record) return null;
+          return {
+            parentInvocationId: record.parentInvocationId,
+            threadId: record.threadId,
+            userId: record.userId,
+            catId: record.catId,
+            createdAt: record.createdAt,
+          };
+        },
+        getLatestTurnInvocationId: (tid, catId) => registry.getLatestId(tid, catId),
+        onLog: (event) => app.log.info({ ...event, feature: 'F308' }, 'F308 liveness event'),
+      });
+      return liveness.active.flatMap((execution) =>
+        execution.catId
+          ? [
+              {
+                catId: execution.catId,
+                startedAt: execution.startedAt,
+                turnInvocationId: execution.invocationId,
+                degraded: execution.degraded,
+              },
+            ]
+          : [],
+      );
+    },
+    readAttention: async (ownerUserId, threadId) => {
+      const groups = await Promise.all(
+        approvalProducerRegistry.listAdapters().map((adapter) => adapter.listPending(ownerUserId)),
+      );
+      return groups
+        .flat()
+        .filter((item) => {
+          if (item.ownerUserId !== ownerUserId || item.status !== 'pending' || item.navigation.state !== 'anchored') {
+            return false;
+          }
+          return (
+            item.navigation.originRef.threadId === threadId || item.navigation.approvalCardRef.threadId === threadId
+          );
+        })
+        .map((item) => ({ kind: 'approval' as const, label: item.summary, createdAt: item.createdAt }));
+    },
+    readWaits: async (ownerUserId, threadId) =>
+      dynamicTaskStore.getAll().flatMap((task) => {
+        if (!task.enabled || task.deliveryThreadId !== threadId || task.params.triggerUserId !== ownerUserId) {
+          return [];
+        }
+          if (!holdProjection.isHoldBallTask(task)) return [];
+          const lifecycle = holdProjection.readHoldLifecycle(task);
+          if (lifecycle?.status !== 'active') return [];
+          const waitSource = lifecycle.waitSourceRef;
+        const label =
+          (typeof waitSource?.value === 'string' && waitSource.value.trim()) ||
+          task.display.description ||
+          task.display.label;
+        return [
+          {
+            kind: 'external' as const,
+            label,
+            createdAt: Date.parse(task.createdAt),
+            ...(typeof lifecycle.wakeAt === 'number' ? { wakeAt: lifecycle.wakeAt } : {}),
+          },
+        ];
+      }),
+  });
+  await app.register(threadProgressRoutes, {
+    threadStore,
+    receiptStore: threadProgressReceiptStore,
+    assembler: threadBriefAssembler,
+    messageStore,
+    taskStore,
   });
   if (personMemoryStore) {
     registerPersonMemoryDecisionRoutes(app, { store: personMemoryStore, socketManager });

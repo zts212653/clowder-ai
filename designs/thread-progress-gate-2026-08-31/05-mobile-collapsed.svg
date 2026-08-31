@@ -1,0 +1,80 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="390" height="844" viewBox="0 0 390 844" role="img" aria-label="移动端会话页 · 收起态">
+<defs>
+<filter id="shadow" x="-20%" y="-20%" width="140%" height="160%"><feDropShadow dx="0" dy="2" stdDeviation="4" flood-color="#3b2d24" flood-opacity=".09"/></filter>
+<filter id="shadow2" x="-20%" y="-20%" width="140%" height="160%"><feDropShadow dx="0" dy="6" stdDeviation="12" flood-color="#3b2d24" flood-opacity=".12"/></filter>
+</defs>
+<rect x="0" y="0" width="48" height="844" rx="0" fill="#eee7dd" stroke="none" stroke-width="1" opacity="1"/>
+<circle cx="24.0" cy="28" r="17" fill="#fbefe7" stroke="#b8754d" stroke-width="1.5" opacity="1"/>
+<polygon points="18,27 21,17 26,23 31,17 34,27" fill="#b8754d" stroke="none" stroke-width="1"/>
+<circle cx="26" cy="30" r="9" fill="#b8754d" stroke="none" stroke-width="1" opacity="1"/>
+<rect x="6" y="56" width="36" height="40" rx="10" fill="#fffefa" stroke="none" stroke-width="1" opacity="1" filter="url(#shadow)"/>
+<rect x="18" y="68" width="16" height="13" rx="3" fill="none" stroke="#b8754d" stroke-width="1.5" opacity="1"/>
+<path d="M21 81 L19 86 L25 81" stroke="#b8754d" stroke-width="1.5" fill="none" stroke-linecap="round" stroke-linejoin="round" opacity="1"/>
+<circle cx="26" cy="124" r="9" fill="none" stroke="#665d57" stroke-width="1.5" opacity="1"/>
+<path d="M26 119 L26 124 L31 126" stroke="#665d57" stroke-width="1.5" fill="none" stroke-linecap="round" stroke-linejoin="round" opacity="1"/>
+<path d="M18 165 Q26 160 34 165 L34 179 Q26 174 18 179 Z" stroke="#665d57" stroke-width="1.5" fill="none" stroke-linecap="round" stroke-linejoin="round" opacity="1"/>
+<rect x="19" y="211" width="14" height="18" rx="2" fill="none" stroke="#665d57" stroke-width="1.5" opacity="1"/>
+<line x1="22" y1="217" x2="30" y2="217" stroke="#665d57" stroke-width="1.3" opacity="1"/>
+<line x1="22" y1="222" x2="29" y2="222" stroke="#665d57" stroke-width="1.3" opacity="1"/>
+<path d="M19 276 L19 260 Q25 264 33 260 L33 271 Q25 275 19 271" stroke="#665d57" stroke-width="1.5" fill="none" stroke-linecap="round" stroke-linejoin="round" opacity="1"/>
+<circle cx="26" cy="680" r="8" fill="none" stroke="#8b8179" stroke-width="1.3" opacity="1"/>
+<circle cx="26" cy="728" r="8" fill="none" stroke="#8b8179" stroke-width="1.3" opacity="1"/>
+<circle cx="26" cy="776" r="8" fill="none" stroke="#8b8179" stroke-width="1.3" opacity="1"/>
+<circle cx="26" cy="816" r="10" fill="#ebe3d9" stroke="none" stroke-width="1" opacity="1"/>
+<circle cx="26" cy="816" r="3" fill="#8b8179" stroke="none" stroke-width="1" opacity="1"/>
+<rect x="48" y="0" width="342" height="58" rx="0" fill="#fdfbf8" stroke="none" stroke-width="1" opacity="1"/>
+<line x1="48" y1="58" x2="390" y2="58" stroke="#e3dbd1" stroke-width="1" opacity="1"/>
+<path d="M63 25 L79 25 M63 31 L79 31 M63 37 L79 37" stroke="#665d57" stroke-width="1.8" fill="none" stroke-linecap="round" stroke-linejoin="round" opacity="1"/>
+<text x="94" y="29" font-family="Inter, PingFang SC, Microsoft YaHei, Arial, sans-serif" font-size="14" font-weight="750" fill="#342d29" text-anchor="start" opacity="1">Clowder AI</text>
+<text x="94" y="46" font-family="Inter, PingFang SC, Microsoft YaHei, Arial, sans-serif" font-size="10" font-weight="400" fill="#8b8179" text-anchor="start" opacity="1">会话进度视图设计</text>
+<polygon points="355.08,22.04 358.44,16.28 362.04,22.04" fill="#7a66a4" stroke="none" stroke-width="1"/>
+<polygon points="363.96,22.04 367.56,16.28 370.92,22.04" fill="#7a66a4" stroke="none" stroke-width="1"/>
+<circle cx="363" cy="29" r="12" fill="#7a66a4" stroke="#ffffff" stroke-width="2" opacity="1"/>
+<circle cx="359.4" cy="28.04" r="1.3" fill="#ffffff" stroke="none" stroke-width="1" opacity="1"/>
+<circle cx="366.6" cy="28.04" r="1.3" fill="#ffffff" stroke="none" stroke-width="1" opacity="1"/>
+<text x="363" y="35.6" font-family="Inter, PingFang SC, Microsoft YaHei, Arial, sans-serif" font-size="8" font-weight="700" fill="#ffffff" text-anchor="middle" opacity="1">烁</text>
+<rect x="48" y="58" width="342" height="40" rx="0" fill="#fff4e3" stroke="#ad713d" stroke-width="1" opacity="1"/>
+<circle cx="66" cy="78" r="4" fill="#5d885f" stroke="none" stroke-width="1" opacity="1"/>
+<text x="79" y="83" font-family="Inter, PingFang SC, Microsoft YaHei, Arial, sans-serif" font-size="12" font-weight="650" fill="#342d29" text-anchor="start" opacity="1">烁烁正在做视觉稿</text>
+<rect x="270" y="66" width="82" height="24" rx="12.0" fill="#fff4e3" stroke="#ad713d" stroke-width="1" opacity="1"/>
+<text x="311.0" y="82.0" font-family="Inter, PingFang SC, Microsoft YaHei, Arial, sans-serif" font-size="11" font-weight="600" fill="#ad713d" text-anchor="middle" opacity="1">需要你确认</text>
+<path d="M368 76 L372 80 L376 76" stroke="#8b8179" stroke-width="1.5" fill="none" stroke-linecap="round" stroke-linejoin="round" opacity="1"/>
+<rect x="48" y="98" width="342" height="664" rx="0" fill="#fdfbf8" stroke="none" stroke-width="1" opacity="1"/>
+<rect x="153.88" y="120" width="202.12" height="64" rx="16" fill="#f3ede5" stroke="#e3dbd1" stroke-width="1" opacity="1"/>
+<text x="171.88" y="140" font-family="Inter, PingFang SC, Microsoft YaHei, Arial, sans-serif" font-size="11" font-weight="600" fill="#8b8179" text-anchor="start" opacity="1">你 · 20:47</text>
+<text x="171.88" y="159" font-family="Inter, PingFang SC, Microsoft YaHei, Arial, sans-serif" font-size="12" font-weight="450" fill="#342d29" text-anchor="start" opacity="1">会不会把聊天区折得太小？</text>
+<text x="171.88" y="177" font-family="Inter, PingFang SC, Microsoft YaHei, Arial, sans-serif" font-size="12" font-weight="450" fill="#342d29" text-anchor="start" opacity="1">能否支持打开和收起？</text>
+<polygon points="71.76,233.88 75.68,227.16 79.88,233.88" fill="#d08b72" stroke="none" stroke-width="1"/>
+<polygon points="82.12,233.88 86.32,227.16 90.24,233.88" fill="#d08b72" stroke="none" stroke-width="1"/>
+<circle cx="81" cy="242" r="14" fill="#d08b72" stroke="#ffffff" stroke-width="2" opacity="1"/>
+<circle cx="76.8" cy="240.88" r="1.3" fill="#ffffff" stroke="none" stroke-width="1" opacity="1"/>
+<circle cx="85.2" cy="240.88" r="1.3" fill="#ffffff" stroke="none" stroke-width="1" opacity="1"/>
+<text x="81" y="249.7" font-family="Inter, PingFang SC, Microsoft YaHei, Arial, sans-serif" font-size="8" font-weight="700" fill="#ffffff" text-anchor="middle" opacity="1">宪</text>
+<text x="104" y="237" font-family="Inter, PingFang SC, Microsoft YaHei, Arial, sans-serif" font-size="11" font-weight="700" fill="#d08b72" text-anchor="start" opacity="1">宪宪 · 20:48</text>
+<rect x="104" y="245" width="254.28" height="96" rx="15" fill="#fffefa" stroke="#e3dbd1" stroke-width="1" opacity="1" filter="url(#shadow)"/>
+<rect x="104" y="245" width="3" height="96" rx="1.5" fill="#d08b72" stroke="none" stroke-width="1" opacity="1"/>
+<text x="122" y="269" font-family="Inter, PingFang SC, Microsoft YaHei, Arial, sans-serif" font-size="12" font-weight="600" fill="#342d29" text-anchor="start" opacity="1">最稳的是聊天优先、三级开合：</text>
+<text x="122" y="289" font-family="Inter, PingFang SC, Microsoft YaHei, Arial, sans-serif" font-size="12" font-weight="500" fill="#665d57" text-anchor="start" opacity="1">收起 40px，摘要不超过 84px。</text>
+<text x="122" y="309" font-family="Inter, PingFang SC, Microsoft YaHei, Arial, sans-serif" font-size="12" font-weight="500" fill="#665d57" text-anchor="start" opacity="1">完整历史只在右侧打开。</text>
+<polygon points="71.76,368.88 75.68,362.16 79.88,368.88" fill="#7a66a4" stroke="none" stroke-width="1"/>
+<polygon points="82.12,368.88 86.32,362.16 90.24,368.88" fill="#7a66a4" stroke="none" stroke-width="1"/>
+<circle cx="81" cy="377" r="14" fill="#7a66a4" stroke="#ffffff" stroke-width="2" opacity="1"/>
+<circle cx="76.8" cy="375.88" r="1.3" fill="#ffffff" stroke="none" stroke-width="1" opacity="1"/>
+<circle cx="85.2" cy="375.88" r="1.3" fill="#ffffff" stroke="none" stroke-width="1" opacity="1"/>
+<text x="81" y="384.7" font-family="Inter, PingFang SC, Microsoft YaHei, Arial, sans-serif" font-size="8" font-weight="700" fill="#ffffff" text-anchor="middle" opacity="1">烁</text>
+<text x="104" y="372" font-family="Inter, PingFang SC, Microsoft YaHei, Arial, sans-serif" font-size="11" font-weight="700" fill="#7a66a4" text-anchor="start" opacity="1">烁烁 · 20:49</text>
+<rect x="104" y="380" width="254.28" height="76" rx="15" fill="#fffefa" stroke="#e3dbd1" stroke-width="1" opacity="1" filter="url(#shadow)"/>
+<rect x="104" y="380" width="3" height="76" rx="1.5" fill="#7a66a4" stroke="none" stroke-width="1" opacity="1"/>
+<text x="122" y="404" font-family="Inter, PingFang SC, Microsoft YaHei, Arial, sans-serif" font-size="12" font-weight="600" fill="#342d29" text-anchor="start" opacity="1">“需要你”只高亮，不强制展开。</text>
+<text x="122" y="424" font-family="Inter, PingFang SC, Microsoft YaHei, Arial, sans-serif" font-size="12" font-weight="500" fill="#665d57" text-anchor="start" opacity="1">关闭后聊天宽度立即恢复。</text>
+<rect x="48" y="762" width="342" height="82" rx="0" fill="#fdfbf8" stroke="none" stroke-width="1" opacity="1"/>
+<line x1="48" y1="762" x2="390" y2="762" stroke="#e3dbd1" stroke-width="1" opacity="1"/>
+<rect x="62" y="774" width="314" height="58" rx="16" fill="#fffefa" stroke="#d5c9bc" stroke-width="1" opacity="1" filter="url(#shadow)"/>
+<text x="80" y="802" font-family="Inter, PingFang SC, Microsoft YaHei, Arial, sans-serif" font-size="12" font-weight="400" fill="#8b8179" text-anchor="start" opacity="1">输入消息，或 @召唤某只猫…</text>
+<circle cx="80" cy="818" r="8" fill="none" stroke="#8b8179" stroke-width="1.2" opacity="1"/>
+<line x1="77" y1="818" x2="83" y2="818" stroke="#8b8179" stroke-width="1.2" opacity="1"/>
+<rect x="318" y="802" width="44" height="28" rx="14" fill="#b8754d" stroke="none" stroke-width="1" opacity="1"/>
+<text x="340" y="821" font-family="Inter, PingFang SC, Microsoft YaHei, Arial, sans-serif" font-size="11" font-weight="700" fill="#ffffff" text-anchor="middle" opacity="1">发送</text>
+<rect x="246" y="814" width="132" height="20" rx="10" fill="#3f3732" stroke="none" stroke-width="1" opacity="0.82"/>
+<text x="312.0" y="828" font-family="Inter, PingFang SC, Microsoft YaHei, Arial, sans-serif" font-size="10" font-weight="600" fill="#ffffff" text-anchor="middle" opacity="1">功能原型 · 演示数据</text>
+</svg>

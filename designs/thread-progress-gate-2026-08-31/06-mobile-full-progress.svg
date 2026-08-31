@@ -1,0 +1,63 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="390" height="844" viewBox="0 0 390 844" role="img" aria-label="移动端会话进展 · 全屏抽屉">
+<defs>
+<filter id="shadow" x="-20%" y="-20%" width="140%" height="160%"><feDropShadow dx="0" dy="2" stdDeviation="4" flood-color="#3b2d24" flood-opacity=".09"/></filter>
+<filter id="shadow2" x="-20%" y="-20%" width="140%" height="160%"><feDropShadow dx="0" dy="6" stdDeviation="12" flood-color="#3b2d24" flood-opacity=".12"/></filter>
+</defs>
+<rect x="0" y="0" width="390" height="844" rx="0" fill="#f7f1e9" stroke="none" stroke-width="1" opacity="1"/>
+<rect x="0" y="0" width="390" height="58" rx="0" fill="#fffefa" stroke="none" stroke-width="1" opacity="1"/>
+<line x1="0" y1="58" x2="390" y2="58" stroke="#e3dbd1" stroke-width="1" opacity="1"/>
+<text x="18" y="36" font-family="Inter, PingFang SC, Microsoft YaHei, Arial, sans-serif" font-size="17" font-weight="800" fill="#342d29" text-anchor="start" opacity="1">会话进展</text>
+<text x="370" y="36" font-family="Inter, PingFang SC, Microsoft YaHei, Arial, sans-serif" font-size="12" font-weight="700" fill="#b8754d" text-anchor="end" opacity="1">关闭</text>
+<text x="18" y="83" font-family="Inter, PingFang SC, Microsoft YaHei, Arial, sans-serif" font-size="11" font-weight="600" fill="#8b8179" text-anchor="start" opacity="1">会话：会话进度视图设计</text>
+<rect x="14" y="98" width="362" height="98" rx="14" fill="#fff4e3" stroke="#ad713d" stroke-width="1" opacity="1"/>
+<text x="28" y="124" font-family="Inter, PingFang SC, Microsoft YaHei, Arial, sans-serif" font-size="11" font-weight="750" fill="#ad713d" text-anchor="start" opacity="1">需要你确认</text>
+<text x="28" y="150" font-family="Inter, PingFang SC, Microsoft YaHei, Arial, sans-serif" font-size="13" font-weight="750" fill="#342d29" text-anchor="start" opacity="1">烁烁已完成三级开合视觉稿</text>
+<text x="28" y="175" font-family="Inter, PingFang SC, Microsoft YaHei, Arial, sans-serif" font-size="11" font-weight="400" fill="#665d57" text-anchor="start" opacity="1">去处理：确认这套布局是否进入实现</text>
+<rect x="282" y="112" width="76" height="28" rx="14.0" fill="#ad713d" stroke="none" stroke-width="1" opacity="1"/>
+<text x="320.0" y="130.0" font-family="Inter, PingFang SC, Microsoft YaHei, Arial, sans-serif" font-size="11" font-weight="600" fill="#ffffff" text-anchor="middle" opacity="1">去处理</text>
+<text x="18" y="226" font-family="Inter, PingFang SC, Microsoft YaHei, Arial, sans-serif" font-size="11" font-weight="700" fill="#8b8179" text-anchor="start" opacity="1">今天</text>
+<polygon points="26.74,253.62 29.82,248.34 33.12,253.62" fill="#7a66a4" stroke="none" stroke-width="1"/>
+<polygon points="34.88,253.62 38.18,248.34 41.26,253.62" fill="#7a66a4" stroke="none" stroke-width="1"/>
+<circle cx="34" cy="260" r="11" fill="#7a66a4" stroke="#ffffff" stroke-width="2" opacity="1"/>
+<circle cx="30.7" cy="259.12" r="1.3" fill="#ffffff" stroke="none" stroke-width="1" opacity="1"/>
+<circle cx="37.3" cy="259.12" r="1.3" fill="#ffffff" stroke="none" stroke-width="1" opacity="1"/>
+<text x="34" y="266.05" font-family="Inter, PingFang SC, Microsoft YaHei, Arial, sans-serif" font-size="8" font-weight="700" fill="#ffffff" text-anchor="middle" opacity="1">烁</text>
+<line x1="34" y1="273" x2="34" y2="342" stroke="#d5c9bc" stroke-width="1.4" opacity="1"/>
+<text x="56" y="256" font-family="Inter, PingFang SC, Microsoft YaHei, Arial, sans-serif" font-size="11" font-weight="700" fill="#7a66a4" text-anchor="start" opacity="1">烁烁</text>
+<text x="368" y="256" font-family="Inter, PingFang SC, Microsoft YaHei, Arial, sans-serif" font-size="10" font-weight="500" fill="#8b8179" text-anchor="end" opacity="1">20:49</text>
+<text x="56" y="278" font-family="Inter, PingFang SC, Microsoft YaHei, Arial, sans-serif" font-size="12" font-weight="700" fill="#342d29" text-anchor="start" opacity="1">完成三级开合视觉方案</text>
+<text x="56" y="299" font-family="Inter, PingFang SC, Microsoft YaHei, Arial, sans-serif" font-size="11" font-weight="400" fill="#665d57" text-anchor="start" opacity="1">桌面与移动端画布已生成</text>
+<rect x="56" y="310" width="312" height="27" rx="8" fill="#f3ede5" stroke="none" stroke-width="1" opacity="1"/>
+<text x="66" y="328" font-family="Inter, PingFang SC, Microsoft YaHei, Arial, sans-serif" font-size="10" font-weight="550" fill="#665d57" text-anchor="start" opacity="1">下一步：确认视觉取舍</text>
+<text x="56" y="353" font-family="Inter, PingFang SC, Microsoft YaHei, Arial, sans-serif" font-size="10" font-weight="700" fill="#b8754d" text-anchor="start" opacity="1">查看依据 ›</text>
+<polygon points="26.74,385.62 29.82,380.34 33.12,385.62" fill="#d08b72" stroke="none" stroke-width="1"/>
+<polygon points="34.88,385.62 38.18,380.34 41.26,385.62" fill="#d08b72" stroke="none" stroke-width="1"/>
+<circle cx="34" cy="392" r="11" fill="#d08b72" stroke="#ffffff" stroke-width="2" opacity="1"/>
+<circle cx="30.7" cy="391.12" r="1.3" fill="#ffffff" stroke="none" stroke-width="1" opacity="1"/>
+<circle cx="37.3" cy="391.12" r="1.3" fill="#ffffff" stroke="none" stroke-width="1" opacity="1"/>
+<text x="34" y="398.05" font-family="Inter, PingFang SC, Microsoft YaHei, Arial, sans-serif" font-size="8" font-weight="700" fill="#ffffff" text-anchor="middle" opacity="1">宪</text>
+<line x1="34" y1="405" x2="34" y2="474" stroke="#d5c9bc" stroke-width="1.4" opacity="1"/>
+<text x="56" y="388" font-family="Inter, PingFang SC, Microsoft YaHei, Arial, sans-serif" font-size="11" font-weight="700" fill="#d08b72" text-anchor="start" opacity="1">宪宪</text>
+<text x="368" y="388" font-family="Inter, PingFang SC, Microsoft YaHei, Arial, sans-serif" font-size="10" font-weight="500" fill="#8b8179" text-anchor="end" opacity="1">20:32</text>
+<text x="56" y="410" font-family="Inter, PingFang SC, Microsoft YaHei, Arial, sans-serif" font-size="12" font-weight="700" fill="#342d29" text-anchor="start" opacity="1">确认聊天优先规则</text>
+<text x="56" y="431" font-family="Inter, PingFang SC, Microsoft YaHei, Arial, sans-serif" font-size="11" font-weight="400" fill="#665d57" text-anchor="start" opacity="1">收起 40px，摘要不超过 88px</text>
+<text x="56" y="485" font-family="Inter, PingFang SC, Microsoft YaHei, Arial, sans-serif" font-size="10" font-weight="700" fill="#b8754d" text-anchor="start" opacity="1">查看依据 ›</text>
+<text x="18" y="516" font-family="Inter, PingFang SC, Microsoft YaHei, Arial, sans-serif" font-size="11" font-weight="700" fill="#8b8179" text-anchor="start" opacity="1">更早</text>
+<polygon points="26.74,543.62 29.82,538.34 33.12,543.62" fill="#5b7891" stroke="none" stroke-width="1"/>
+<polygon points="34.88,543.62 38.18,538.34 41.26,543.62" fill="#5b7891" stroke="none" stroke-width="1"/>
+<circle cx="34" cy="550" r="11" fill="#5b7891" stroke="#ffffff" stroke-width="2" opacity="1"/>
+<circle cx="30.7" cy="549.12" r="1.3" fill="#ffffff" stroke="none" stroke-width="1" opacity="1"/>
+<circle cx="37.3" cy="549.12" r="1.3" fill="#ffffff" stroke="none" stroke-width="1" opacity="1"/>
+<text x="34" y="556.05" font-family="Inter, PingFang SC, Microsoft YaHei, Arial, sans-serif" font-size="8" font-weight="700" fill="#ffffff" text-anchor="middle" opacity="1">砚</text>
+<text x="56" y="546" font-family="Inter, PingFang SC, Microsoft YaHei, Arial, sans-serif" font-size="11" font-weight="700" fill="#5b7891" text-anchor="start" opacity="1">砚砚</text>
+<text x="368" y="546" font-family="Inter, PingFang SC, Microsoft YaHei, Arial, sans-serif" font-size="10" font-weight="500" fill="#8b8179" text-anchor="end" opacity="1">19:52</text>
+<text x="56" y="568" font-family="Inter, PingFang SC, Microsoft YaHei, Arial, sans-serif" font-size="12" font-weight="700" fill="#342d29" text-anchor="start" opacity="1">确认状态不确定时的展示规则</text>
+<text x="56" y="589" font-family="Inter, PingFang SC, Microsoft YaHei, Arial, sans-serif" font-size="11" font-weight="400" fill="#665d57" text-anchor="start" opacity="1">无法证明执行状态时只显示暂时无法确认</text>
+<text x="56" y="643" font-family="Inter, PingFang SC, Microsoft YaHei, Arial, sans-serif" font-size="10" font-weight="700" fill="#b8754d" text-anchor="start" opacity="1">查看依据 ›</text>
+<rect x="14" y="750" width="362" height="62" rx="12" fill="#f3ede5" stroke="none" stroke-width="1" opacity="1"/>
+<text x="28" y="776" font-family="Inter, PingFang SC, Microsoft YaHei, Arial, sans-serif" font-size="11" font-weight="700" fill="#665d57" text-anchor="start" opacity="1">有 3 项待办</text>
+<text x="362" y="776" font-family="Inter, PingFang SC, Microsoft YaHei, Arial, sans-serif" font-size="10" font-weight="700" fill="#b8754d" text-anchor="end" opacity="1">查看毛线球 ›</text>
+<text x="28" y="798" font-family="Inter, PingFang SC, Microsoft YaHei, Arial, sans-serif" font-size="10" font-weight="400" fill="#8b8179" text-anchor="start" opacity="1">关闭后回到原聊天滚动位置</text>
+<rect x="246" y="814" width="132" height="20" rx="10" fill="#3f3732" stroke="none" stroke-width="1" opacity="0.82"/>
+<text x="312.0" y="828" font-family="Inter, PingFang SC, Microsoft YaHei, Arial, sans-serif" font-size="10" font-weight="600" fill="#ffffff" text-anchor="middle" opacity="1">功能原型 · 演示数据</text>
+</svg>

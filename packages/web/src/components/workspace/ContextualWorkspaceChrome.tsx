@@ -2,7 +2,7 @@
 
 import type { ReactNode } from 'react';
 
-export type WorkspaceHostMode = 'workspace' | 'status' | 'transcript';
+export type WorkspaceHostMode = 'workspace' | 'status' | 'transcript' | 'progress';
 
 interface ContextualWorkspaceChromeProps {
   mode: WorkspaceHostMode;
@@ -15,6 +15,7 @@ const HOST_LABELS: Record<WorkspaceHostMode, { label: string; dot: string }> = {
   workspace: { label: 'Workspace', dot: 'bg-cafe-accent' },
   status: { label: '状态与会话', dot: 'bg-[var(--semantic-info)]' },
   transcript: { label: '会议伴随', dot: 'bg-[var(--semantic-success)]' },
+  progress: { label: '会话进展', dot: 'bg-[var(--semantic-info)]' },
 };
 
 export function ContextualWorkspaceChrome({ mode, onFold, onNavigateHome, children }: ContextualWorkspaceChromeProps) {

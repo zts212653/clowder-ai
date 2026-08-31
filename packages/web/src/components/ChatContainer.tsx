@@ -81,6 +81,8 @@ import { ScrollToBottomButton } from './ScrollToBottomButton';
 import { SplitPaneView } from './SplitPaneView';
 import { ThinkingIndicator } from './ThinkingIndicator';
 import { ThreadExecutionBar } from './ThreadExecutionBar';
+import { ThreadProgressCard } from './ThreadProgressCard';
+import { ThreadProgressDrawer } from './ThreadProgressDrawer';
 import { ThreadSidebar } from './ThreadSidebar';
 import { assignDocumentRoute, pushThreadRouteWithHistory } from './ThreadSidebar/thread-navigation';
 import { TransferTargetPicker } from './TransferTargetPicker';
@@ -279,6 +281,7 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
   const setRightPanelOpen = useChatStore((s) => s.setRightPanelOpen);
   const [workspacePanelMounted, setWorkspacePanelMounted] = useState(rightPanelMode === 'workspace');
   const [activityPanelMounted, setActivityPanelMounted] = useState(false);
+  const [progressOpen, setProgressOpen] = useState(false);
   const [showBootcampList, setShowBootcampList] = useState(false);
   const [editingCatId, setEditingCatId] = useState<string | null>(null);
   const editingCat = editingCatId ? (getCatById(editingCatId) ?? null) : null;
@@ -319,6 +322,7 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
     STATUS_PANEL_DEFAULT,
   );
   const containerRef = useRef<HTMLDivElement>(null);
+  const [containerWidth, setContainerWidth] = useState(0);
   const handleHorizontalResize = useCallback(
     (delta: number) => {
       if (!containerRef.current) return;
@@ -368,6 +372,20 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
   }, [setRightPanelMode, setWorkspaceMode, setWorkspaceSurface, setRightPanelOpen]);
 
   const isDesktop = useIsDesktop();
+  const progressDocked = progressOpen && isDesktop && containerWidth - 420 >= 640;
+
+  useLayoutEffect(() => {
+    const node = containerRef.current;
+    if (!node) return;
+    const update = () => setContainerWidth(node.getBoundingClientRect().width);
+    update();
+    window.addEventListener('resize', update);
+    return () => window.removeEventListener('resize', update);
+  }, []);
+
+  useEffect(() => {
+    if (statusPanelOpen) setProgressOpen(false);
+  }, [statusPanelOpen]);
 
   useEffect(() => {
     if (isDesktop || !statusPanelOpen) return;
@@ -1077,9 +1095,11 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
       <div
         className="flex flex-col min-w-0"
         style={
-          statusPanelOpen && isDesktop && (rightPanelMode === 'workspace' || rightPanelMode === 'transcript')
-            ? { flexBasis: `${chatBasis}%`, flexGrow: 0, flexShrink: 0 }
-            : { flex: '1 1 0%' }
+          progressDocked
+            ? { flex: '1 1 0%', minWidth: 640 }
+            : statusPanelOpen && isDesktop && (rightPanelMode === 'workspace' || rightPanelMode === 'transcript')
+              ? { flexBasis: `${chatBasis}%`, flexGrow: 0, flexShrink: 0 }
+              : { flex: '1 1 0%' }
         }
       >
         <ChatContainerHeader
@@ -1098,6 +1118,14 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
               setRightPanelMode('workspace');
               setRightPanelOpen(true);
             }
+          }}
+        />
+
+        <ThreadProgressCard
+          threadId={threadId}
+          onOpenProgress={() => {
+            closeStatusPanel();
+            setProgressOpen(true);
           }}
         />
 
@@ -1247,7 +1275,6 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
         </div>
 
         <div ref={attachBottomChromeRef}>
-          <ThreadExecutionBar threadId={threadId} />
           <QueuePanel threadId={threadId} />
           <VoteActiveBar threadId={threadId} onEnd={() => {}} />
 
@@ -1398,6 +1425,14 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
           }}
         />
       </div>
+
+      <ThreadProgressDrawer
+        open={progressOpen}
+        docked={progressDocked}
+        threadId={threadId}
+        onClose={() => setProgressOpen(false)}
+        runDetails={<ThreadExecutionBar threadId={threadId} />}
+      />
 
       {/* F284: visited Workspace/Activity panels stay mounted across fold and sibling-host switches.
           At 768px+ they use the split host; below 768px the same host becomes a full-screen overlay. */}

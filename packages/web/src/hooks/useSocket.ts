@@ -899,6 +899,9 @@ export function useSocket(callbacks: SocketCallbacks, threadId?: string, foregro
     socket.on('message_receipt_updated', (data: { messageId: string; threadId: string }) => {
       callbacksRef.current.onMessageReceiptUpdated?.(data);
     });
+    socket.on('thread_brief_invalidated', (data: { threadId: string }) => {
+      window.dispatchEvent(new CustomEvent('catcafe:thread-brief-invalidated', { detail: data }));
+    });
     socket.on('thread_branched', (data: { sourceThreadId: string; newThreadId: string; fromMessageId: string }) => {
       callbacksRef.current.onThreadBranched?.(data);
     });

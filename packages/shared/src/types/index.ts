@@ -1426,6 +1426,25 @@ export type {
   ThreadMemberEffortPatch,
   ThreadMemberEffortRow,
 } from './thread-effort.js';
+// F308: durable semantic receipts and their owner-free callback input.
+export {
+  type RecordThreadProgressInput,
+  recordThreadProgressInputSchema,
+  THREAD_PROGRESS_IMPACT_AXES,
+  THREAD_PROGRESS_KINDS,
+  type ThreadBriefAttentionItem,
+  type ThreadBriefAvailability,
+  type ThreadBriefCurrentExecution,
+  type ThreadBriefPresentationState,
+  type ThreadBriefV1,
+  type ThreadBriefWaitItem,
+  type ThreadProgressImpactAxis,
+  type ThreadProgressKind,
+  type ThreadProgressReceiptSummary,
+  type ThreadProgressReceiptV1,
+  type ThreadProgressSourceRef,
+  threadProgressSourceRefSchema,
+} from './thread-progress.js';
 // F291: thread-scoped Codex requested speed read/write contract
 export type {
   ThreadMemberSpeedListResponse,
