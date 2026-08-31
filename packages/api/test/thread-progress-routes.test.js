@@ -11,6 +11,7 @@ describe('thread progress read routes', () => {
       { TaskStore },
       { ThreadProgressReceiptStore },
       { ThreadBriefAssembler },
+      { ThreadBriefCollectionAssembler },
       { threadProgressRoutes },
     ] = await Promise.all([
       import('../dist/domains/cats/services/stores/ports/ThreadStore.js'),
@@ -18,6 +19,7 @@ describe('thread progress read routes', () => {
       import('../dist/domains/cats/services/stores/ports/TaskStore.js'),
       import('../dist/domains/thread-progress/ThreadProgressReceiptStore.js'),
       import('../dist/domains/thread-progress/ThreadBriefAssembler.js'),
+      import('../dist/domains/thread-progress/ThreadBriefCollectionAssembler.js'),
       import('../dist/routes/thread-progress-routes.js'),
     ]);
     const threadStore = new ThreadStore();
@@ -31,9 +33,23 @@ describe('thread progress read routes', () => {
       readAttention: async () => [],
       readWaits: async () => [],
     });
+    const currentFacts = new Map();
+    const collectionAssembler = new ThreadBriefCollectionAssembler({
+      threadStore,
+      receiptStore,
+      briefAssembler: assembler,
+      discoverCurrentFacts: async () => currentFacts,
+    });
     const app = Fastify();
-    await app.register(threadProgressRoutes, { threadStore, receiptStore, assembler, taskStore, messageStore });
-    return { app, threadStore, messageStore, taskStore, receiptStore };
+    await app.register(threadProgressRoutes, {
+      threadStore,
+      receiptStore,
+      assembler,
+      collectionAssembler,
+      taskStore,
+      messageStore,
+    });
+    return { app, threadStore, messageStore, taskStore, receiptStore, currentFacts };
   }
 
   test('returns a Brief only for an owner-created ordinary thread', async () => {
@@ -158,6 +174,61 @@ describe('thread progress read routes', () => {
     assert.equal(source.statusCode, 200);
     assert.deepEqual(source.json(), { kind: 'message', threadId: own.id, messageId: message.id });
     assert.equal(denied.statusCode, 403);
+    await fx.app.close();
+  });
+
+  test('returns complete current briefs plus independently paginated recent briefs', async () => {
+    const fx = await fixture();
+    const running = fx.threadStore.create('user-1', 'Running');
+    const recent = fx.threadStore.create('user-1', 'Recent');
+    fx.currentFacts.set(running.id, {
+      live: [{ catId: 'opus', startedAt: 100, turnInvocationId: 'turn-1', degraded: false }],
+      attention: [],
+      waits: [],
+    });
+    for (const [thread, occurredAt] of [
+      [running, 200],
+      [recent, 100],
+    ]) {
+      await fx.receiptStore.appendIfAbsent({
+        v: 1,
+        id: `receipt-${thread.id}`,
+        ownerUserId: 'user-1',
+        threadId: thread.id,
+        kind: 'milestone',
+        impactAxes: ['verified_outcome'],
+        actor: { kind: 'cat', catId: 'opus' },
+        headline: thread.title,
+        provenance: [{ kind: 'invocation', invocationId: `inv-${thread.id}` }],
+        sourceKey: `source-${thread.id}`,
+        occurredAt,
+        createdAt: occurredAt,
+      });
+    }
+
+    const response = await fx.app.inject({
+      method: 'GET',
+      url: '/api/threads/briefs?scope=recent&limit=1',
+      headers: { 'x-cat-cafe-user': 'user-1' },
+    });
+
+    assert.equal(response.statusCode, 200);
+    assert.deepEqual(
+      response.json().current.map((brief) => brief.thread.id),
+      [running.id],
+    );
+    assert.deepEqual(
+      response.json().recent.map((brief) => brief.thread.id),
+      [recent.id],
+    );
+    assert.equal(response.json().nextCursor, null);
+
+    const invalidCursor = await fx.app.inject({
+      method: 'GET',
+      url: '/api/threads/briefs?scope=recent&cursor=not-a-cursor',
+      headers: { 'x-cat-cafe-user': 'user-1' },
+    });
+    assert.equal(invalidCursor.statusCode, 400);
     await fx.app.close();
   });
 });

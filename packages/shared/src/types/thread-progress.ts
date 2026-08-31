@@ -91,3 +91,12 @@ export interface ThreadBriefV1 {
   readonly hasHistory: boolean;
   readonly generatedAt: number;
 }
+
+/** Phase B owner-scoped collection. `current` is complete; only `recent` is paginated. */
+export interface ThreadBriefCollectionV1 {
+  readonly v: 1;
+  readonly current: readonly ThreadBriefV1[];
+  readonly recent: readonly ThreadBriefV1[];
+  readonly nextCursor: string | null;
+  readonly generatedAt: number;
+}

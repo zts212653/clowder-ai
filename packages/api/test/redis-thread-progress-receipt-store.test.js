@@ -117,4 +117,48 @@ describe('RedisThreadProgressReceiptStore', { skip: SKIP }, () => {
     assert.equal(secondSource.receipt.id, original.id);
     assert.equal((await store.listByThread('user-1', 'thread-1')).length, 1);
   });
+
+  test('owner recent index has stable tie pagination, exclusion and legacy backfill', async () => {
+    for (const [threadId, occurredAt] of [
+      ['thread-b', 300],
+      ['thread-a', 300],
+      ['thread-c', 200],
+    ]) {
+      const receipt = recentReceipt(threadId, occurredAt);
+      await redis.set(`thread-progress:receipt:${receipt.id}`, JSON.stringify(receipt));
+      await redis.zadd(`thread-progress:thread:user-1:${threadId}`, String(occurredAt), receipt.id);
+    }
+    const store = new RedisThreadProgressReceiptStore(redis);
+    const first = await store.listRecentThreads('user-1', {
+      limit: 1,
+      excludeThreadIds: new Set(['thread-b']),
+    });
+    const second = await store.listRecentThreads('user-1', {
+      limit: 1,
+      cursor: first.nextCursor,
+      excludeThreadIds: new Set(['thread-b']),
+    });
+
+    assert.deepEqual(first.items, [{ threadId: 'thread-a', lastProgressAt: 300 }]);
+    assert.ok(first.nextCursor);
+    assert.deepEqual(second.items, [{ threadId: 'thread-c', lastProgressAt: 200 }]);
+    assert.equal(second.nextCursor, null);
+  });
 });
+
+function recentReceipt(threadId, occurredAt) {
+  return {
+    v: 1,
+    id: `receipt-${threadId}-${occurredAt}`,
+    ownerUserId: 'user-1',
+    threadId,
+    kind: 'milestone',
+    impactAxes: ['verified_outcome'],
+    actor: { kind: 'cat', catId: 'opus' },
+    headline: threadId,
+    provenance: [{ kind: 'invocation', invocationId: `inv-${threadId}-${occurredAt}` }],
+    sourceKey: `source-${threadId}-${occurredAt}`,
+    occurredAt,
+    createdAt: occurredAt,
+  };
+}

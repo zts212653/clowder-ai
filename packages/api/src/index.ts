@@ -4421,90 +4421,130 @@ async function main(): Promise<void> {
   await app.register(approvalHubRoutes, {
     registry: approvalProducerRegistry,
   });
-  const [{ ThreadBriefAssembler }, { threadProgressRoutes }, holdProjection] = await Promise.all([
+  const [
+    { ThreadBriefAssembler },
+    { ThreadBriefCollectionAssembler },
+    { ThreadBriefCurrentDiscovery },
+    { threadProgressRoutes },
+    holdProjection,
+  ] = await Promise.all([
     import('./domains/thread-progress/ThreadBriefAssembler.js'),
+    import('./domains/thread-progress/ThreadBriefCollectionAssembler.js'),
+    import('./domains/thread-progress/ThreadBriefCurrentDiscovery.js'),
     import('./routes/thread-progress-routes.js'),
     import('./routes/hold-ball-cancel.js'),
   ]);
+  const readThreadBriefLiveExecutions = async (threadId: string, ownerUserId: string) => {
+    const liveness = await getThreadLiveInvocations(threadId, ownerUserId, {
+      listRunningRecords: (tid, uid) => invocationRecordStore.listRunningByThread(tid, uid),
+      getActiveSlots: (tid) => invocationTracker.getActiveSlots(tid),
+      getTrackerUserId: (tid, catId) => invocationTracker.getUserId(tid, catId),
+      getDrafts: (uid, tid) => draftStore.getByThread(uid, tid),
+      listTurnExecutionsByParent: (parentId) => turnExecutionStore.listByParent(parentId),
+      getTurnInvocation: async (invocationId) => {
+        const record = await registry.getRecord(invocationId);
+        if (!record) return null;
+        return {
+          parentInvocationId: record.parentInvocationId,
+          threadId: record.threadId,
+          userId: record.userId,
+          catId: record.catId,
+          createdAt: record.createdAt,
+        };
+      },
+      getLatestTurnInvocationId: (tid, catId) => registry.getLatestId(tid, catId),
+      onLog: (event) => app.log.info({ ...event, feature: 'F308' }, 'F308 liveness event'),
+    });
+    return liveness.active.flatMap((execution) =>
+      execution.catId
+        ? [
+            {
+              catId: execution.catId,
+              startedAt: execution.startedAt,
+              turnInvocationId: execution.invocationId,
+              degraded: execution.degraded,
+            },
+          ]
+        : [],
+    );
+  };
+  const readOwnerThreadBriefAttention = async (ownerUserId: string) => {
+    const groups = await Promise.all(
+      approvalProducerRegistry.listAdapters().map((adapter) => adapter.listPending(ownerUserId)),
+    );
+    return groups.flat().flatMap((item) => {
+      if (item.ownerUserId !== ownerUserId || item.status !== 'pending' || item.navigation.state !== 'anchored') {
+        return [];
+      }
+      const threadIds = new Set(
+        [item.navigation.originRef.threadId, item.navigation.approvalCardRef.threadId].filter(
+          (threadId): threadId is string => typeof threadId === 'string' && threadId.length > 0,
+        ),
+      );
+      return [...threadIds].map((threadId) => ({
+        threadId,
+        item: { kind: 'approval' as const, label: item.summary, createdAt: item.createdAt },
+      }));
+    });
+  };
+  const toThreadBriefWait = (task: ReturnType<typeof dynamicTaskStore.listEnabledByTriggerUser>[number]) => {
+    if (!task.deliveryThreadId || !holdProjection.isHoldBallTask(task)) return null;
+    const lifecycle = holdProjection.readHoldLifecycle(task);
+    if (lifecycle?.status !== 'active') return null;
+    const waitSource = lifecycle.waitSourceRef;
+    const label =
+      (typeof waitSource?.value === 'string' && waitSource.value.trim()) ||
+      task.display.description ||
+      task.display.label;
+    return {
+      threadId: task.deliveryThreadId,
+      item: {
+        kind: 'external' as const,
+        label,
+        createdAt: Date.parse(task.createdAt),
+        ...(typeof lifecycle.wakeAt === 'number' ? { wakeAt: lifecycle.wakeAt } : {}),
+      },
+    };
+  };
+  type ThreadBriefWaitEntry = NonNullable<ReturnType<typeof toThreadBriefWait>>;
+  const readOwnerThreadBriefWaits = async (ownerUserId: string) =>
+    dynamicTaskStore
+      .listEnabledByTriggerUser(ownerUserId)
+      .map(toThreadBriefWait)
+      .filter((entry): entry is ThreadBriefWaitEntry => entry !== null);
   const threadBriefAssembler = new ThreadBriefAssembler({
     receiptStore: threadProgressReceiptStore,
     taskStore,
     taskProgressStore,
     workflowSopStore,
-    readLiveExecutions: async (threadId, ownerUserId) => {
-      const liveness = await getThreadLiveInvocations(threadId, ownerUserId, {
-        listRunningRecords: (tid, uid) => invocationRecordStore.listRunningByThread(tid, uid),
-        getActiveSlots: (tid) => invocationTracker.getActiveSlots(tid),
-        getTrackerUserId: (tid, catId) => invocationTracker.getUserId(tid, catId),
-        getDrafts: (uid, tid) => draftStore.getByThread(uid, tid),
-        listTurnExecutionsByParent: (parentId) => turnExecutionStore.listByParent(parentId),
-        getTurnInvocation: async (invocationId) => {
-          const record = await registry.getRecord(invocationId);
-          if (!record) return null;
-          return {
-            parentInvocationId: record.parentInvocationId,
-            threadId: record.threadId,
-            userId: record.userId,
-            catId: record.catId,
-            createdAt: record.createdAt,
-          };
-        },
-        getLatestTurnInvocationId: (tid, catId) => registry.getLatestId(tid, catId),
-        onLog: (event) => app.log.info({ ...event, feature: 'F308' }, 'F308 liveness event'),
-      });
-      return liveness.active.flatMap((execution) =>
-        execution.catId
-          ? [
-              {
-                catId: execution.catId,
-                startedAt: execution.startedAt,
-                turnInvocationId: execution.invocationId,
-                degraded: execution.degraded,
-              },
-            ]
-          : [],
-      );
-    },
+    readLiveExecutions: readThreadBriefLiveExecutions,
     readAttention: async (ownerUserId, threadId) => {
-      const groups = await Promise.all(
-        approvalProducerRegistry.listAdapters().map((adapter) => adapter.listPending(ownerUserId)),
-      );
-      return groups
-        .flat()
-        .filter((item) => {
-          if (item.ownerUserId !== ownerUserId || item.status !== 'pending' || item.navigation.state !== 'anchored') {
-            return false;
-          }
-          return (
-            item.navigation.originRef.threadId === threadId || item.navigation.approvalCardRef.threadId === threadId
-          );
-        })
-        .map((item) => ({ kind: 'approval' as const, label: item.summary, createdAt: item.createdAt }));
+      const entries = await readOwnerThreadBriefAttention(ownerUserId);
+      return entries.filter((entry) => entry.threadId === threadId).map((entry) => entry.item);
     },
-    readWaits: async (ownerUserId, threadId) =>
-      dynamicTaskStore.listEnabledByDeliveryThreadAndUser(threadId, ownerUserId).flatMap((task) => {
-        if (!holdProjection.isHoldBallTask(task)) return [];
-        const lifecycle = holdProjection.readHoldLifecycle(task);
-        if (lifecycle?.status !== 'active') return [];
-        const waitSource = lifecycle.waitSourceRef;
-        const label =
-          (typeof waitSource?.value === 'string' && waitSource.value.trim()) ||
-          task.display.description ||
-          task.display.label;
-        return [
-          {
-            kind: 'external' as const,
-            label,
-            createdAt: Date.parse(task.createdAt),
-            ...(typeof lifecycle.wakeAt === 'number' ? { wakeAt: lifecycle.wakeAt } : {}),
-          },
-        ];
-      }),
+    readWaits: async (ownerUserId, threadId) => {
+      const entries = await readOwnerThreadBriefWaits(ownerUserId);
+      return entries.filter((entry) => entry.threadId === threadId).map((entry) => entry.item);
+    },
+  });
+  const threadBriefCurrentDiscovery = new ThreadBriefCurrentDiscovery({
+    listRunningThreadIds: async (ownerUserId) =>
+      Promise.resolve(invocationRecordStore.listRunningThreadIds(ownerUserId)),
+    listAttention: readOwnerThreadBriefAttention,
+    listWaits: readOwnerThreadBriefWaits,
+    readLiveExecutions: readThreadBriefLiveExecutions,
+  });
+  const threadBriefCollectionAssembler = new ThreadBriefCollectionAssembler({
+    threadStore,
+    receiptStore: threadProgressReceiptStore,
+    briefAssembler: threadBriefAssembler,
+    discoverCurrentFacts: (ownerUserId) => threadBriefCurrentDiscovery.discover(ownerUserId),
   });
   await app.register(threadProgressRoutes, {
     threadStore,
     receiptStore: threadProgressReceiptStore,
     assembler: threadBriefAssembler,
+    collectionAssembler: threadBriefCollectionAssembler,
     messageStore,
     taskStore,
   });

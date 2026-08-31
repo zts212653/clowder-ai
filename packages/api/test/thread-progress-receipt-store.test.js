@@ -104,4 +104,51 @@ describe('ThreadProgressReceiptStore', () => {
     assert.equal(secondSource.receipt.id, original.id);
     assert.equal((await store.listByThread('user-1', 'thread-1')).length, 1);
   });
+
+  test('recent threads paginate by progress time and thread id while excluding current threads', async () => {
+    const { ThreadProgressReceiptStore } = await import(
+      '../dist/domains/thread-progress/ThreadProgressReceiptStore.js'
+    );
+    const store = new ThreadProgressReceiptStore();
+    for (const [threadId, occurredAt] of [
+      ['thread-b', 300],
+      ['thread-a', 300],
+      ['thread-c', 200],
+    ]) {
+      await store.appendIfAbsent(recentReceipt(threadId, occurredAt));
+    }
+
+    const first = await store.listRecentThreads('user-1', {
+      limit: 1,
+      excludeThreadIds: new Set(['thread-b']),
+    });
+    const second = await store.listRecentThreads('user-1', {
+      limit: 1,
+      cursor: first.nextCursor ?? undefined,
+      excludeThreadIds: new Set(['thread-b']),
+    });
+
+    assert.deepEqual(first.items, [{ threadId: 'thread-a', lastProgressAt: 300 }]);
+    assert.ok(first.nextCursor);
+    assert.deepEqual(second.items, [{ threadId: 'thread-c', lastProgressAt: 200 }]);
+    assert.equal(second.nextCursor, null);
+    assert.deepEqual((await store.listRecentThreads('other-user')).items, []);
+  });
 });
+
+function recentReceipt(threadId, occurredAt) {
+  return {
+    v: 1,
+    id: `receipt-${threadId}-${occurredAt}`,
+    ownerUserId: 'user-1',
+    threadId,
+    kind: 'milestone',
+    impactAxes: ['verified_outcome'],
+    actor: { kind: 'cat', catId: 'opus' },
+    headline: threadId,
+    provenance: [{ kind: 'invocation', invocationId: `inv-${threadId}-${occurredAt}` }],
+    sourceKey: `source-${threadId}-${occurredAt}`,
+    occurredAt,
+    createdAt: occurredAt,
+  };
+}

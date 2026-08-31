@@ -5,13 +5,18 @@ import type { IMessageStore } from '../domains/cats/services/stores/ports/Messag
 import type { ITaskStore } from '../domains/cats/services/stores/ports/TaskStore.js';
 import type { IThreadStore, Thread } from '../domains/cats/services/stores/ports/ThreadStore.js';
 import type { ThreadBriefAssembler } from '../domains/thread-progress/ThreadBriefAssembler.js';
-import type { IThreadProgressReceiptStore } from '../domains/thread-progress/ThreadProgressReceiptStore.js';
+import type { ThreadBriefCollectionAssembler } from '../domains/thread-progress/ThreadBriefCollectionAssembler.js';
+import {
+  InvalidThreadProgressCursorError,
+  type IThreadProgressReceiptStore,
+} from '../domains/thread-progress/ThreadProgressReceiptStore.js';
 import { resolveUserId } from '../utils/request-identity.js';
 
 export interface ThreadProgressRoutesOptions {
   readonly threadStore: Pick<IThreadStore, 'get'>;
   readonly receiptStore: IThreadProgressReceiptStore;
   readonly assembler: ThreadBriefAssembler;
+  readonly collectionAssembler: ThreadBriefCollectionAssembler;
   readonly messageStore: Pick<IMessageStore, 'getById'>;
   readonly taskStore: Pick<ITaskStore, 'get'>;
 }
@@ -19,6 +24,12 @@ export interface ThreadProgressRoutesOptions {
 const progressQuerySchema = z.object({
   cursor: z.string().min(1).optional(),
   limit: z.coerce.number().int().min(1).max(100).default(20),
+});
+
+const recentBriefsQuerySchema = z.object({
+  scope: z.literal('recent'),
+  cursor: z.string().min(1).optional(),
+  limit: z.coerce.number().int().min(1).max(100).default(50),
 });
 
 async function requireOwnedConversation(
@@ -45,6 +56,30 @@ async function requireOwnedConversation(
 }
 
 export const threadProgressRoutes: FastifyPluginAsync<ThreadProgressRoutesOptions> = async (app, opts) => {
+  app.get('/api/threads/briefs', async (request, reply) => {
+    const userId = resolveUserId(request);
+    if (!userId) {
+      reply.status(401);
+      return { error: 'Thread progress unavailable' };
+    }
+    const parsed = recentBriefsQuerySchema.safeParse(request.query);
+    if (!parsed.success) {
+      reply.status(400);
+      return { error: 'Invalid recent threads query' };
+    }
+    try {
+      return await opts.collectionAssembler.assemble(userId, parsed.data);
+    } catch (error) {
+      if (error instanceof InvalidThreadProgressCursorError) {
+        reply.status(400);
+        return { error: 'Invalid recent thread cursor' };
+      }
+      request.log.warn({ err: error, feature: 'F308' }, 'F308 recent thread briefs unavailable');
+      reply.status(503);
+      return { error: 'Thread progress unavailable' };
+    }
+  });
+
   app.get<{ Params: { threadId: string } }>('/api/threads/:threadId/brief', async (request, reply) => {
     const access = await requireOwnedConversation(request, reply, opts.threadStore, request.params.threadId);
     if (!access) return { error: 'Thread progress unavailable' };

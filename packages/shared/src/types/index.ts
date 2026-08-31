@@ -1434,6 +1434,7 @@ export {
   THREAD_PROGRESS_KINDS,
   type ThreadBriefAttentionItem,
   type ThreadBriefAvailability,
+  type ThreadBriefCollectionV1,
   type ThreadBriefCurrentExecution,
   type ThreadBriefPresentationState,
   type ThreadBriefV1,

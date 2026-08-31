@@ -8,7 +8,7 @@ created: 2026-08-31
 
 # F308: Thread Progress — 可读进展回执与会话近况
 
-> **Status**: Phase A implementation complete / acceptance started | **Owner**: Ragdoll / 宪宪 | **Priority**: P1
+> **Status**: Phase A accepted / Phase B implementation complete, deployment acceptance pending | **Owner**: Ragdoll / 宪宪 | **Priority**: P1
 
 ## Why
 
@@ -213,7 +213,7 @@ Receipt 创建后只广播 `thread_brief_invalidated { threadId }`，客户端�
 
 ### Phase B: Global Recent（Phase A 验收后）
 
-Phase B 不在当前开发授权内，仅冻结边界：
+Phase B 已在 Phase A 真实验收后由 operator 授权推进，保持冻结边界：
 
 ```text
 GET /api/threads/briefs?scope=recent&limit=50&cursor=...
@@ -223,6 +223,24 @@ GET /api/threads/briefs?scope=recent&limit=50&cursor=...
 - `recent[]`：排除 current，仅 `lastProgressAt != null`，按 `lastProgressAt DESC, threadId ASC` 游标分页；
 - stale Task、参与猫、lastActiveAt、ThreadMemory、Session digest 不能使 thread 入选；
 - bulk route 禁止 `list all threads → N 次 liveness`。Phase B 开始前必须确定 owner-scoped current discovery seam；若缺索引，只新增查询索引/port，不新增业务状态。
+
+### Phase C Candidate: Runtime Details Information Architecture（仅规划）
+
+“运行详情”不再以 active invocation 为空时整页消失。它是当前运行与诊断的按需视图，不写入 Receipt，也不成为第二套状态机。
+
+| 区域 | 默认展示 | 唯一真相源 |
+|---|---|---|
+| 当前回合 | 执行猫、阶段、已运行时间、最近活动、停止/强制重置 | canonical LiveInvocation + app-server lifecycle |
+| 本轮计划 | 仅精确关联当前 child invocation 的 PlanBoard；无关联时明确“本轮没有可用计划” | PlanBoard / TaskProgress exact invocation match |
+| 上一次运行 | 终态、耗时、结束时间、结果入口；当前空闲时作为主空态 | InvocationRecord + Session chain |
+| 使用量 | 按猫 token/费用（存在才显示），不猜缺失值 | InvocationRecord.usageByCat |
+| 运行环境 | runtime/provider/model、Session、worktree/工作目录 | Runtime profile + Session record + authorized workspace metadata |
+| 产物与证据 | 本轮文件、artifact、相关消息入口 | transcript/session artifact typed resolver |
+| 技术诊断 | Invocation/Session ID、原始生命周期与日志入口，默认折叠 | owner-scoped diagnostic APIs |
+
+运行详情空态：显示“当前没有猫在执行”，并保留上一次运行摘要、最新关键进展、明确下一步及“查看毛线球”入口；不能只返回空白。内部 ID、原始日志和 token 明细只在用户主动展开“技术诊断”后进入 DOM。
+
+Phase C 不混入 Phase B：本轮只确保“近况”能进入对应会话；运行详情复用/迁移 PlanBoard、Session 与诊断面板需单独做 source audit、信息架构 Gate 和 owner-scope 测试。
 
 ## User Journey
 
@@ -262,11 +280,22 @@ GET /api/threads/briefs?scope=recent&limit=50&cursor=...
 - [x] AC-A13: attention/wait 只消费同用户域当前开放 typed truth；历史 Receipt 与 blocked Task 不推断当前注意力。
 - [x] AC-A14: Receipt 有/无时 Brief 均可读；最新 Receipt 未明确 nextStep 时显示“下一步尚未明确”。
 - [x] AC-A15: 会话卡、时间线与 API 使用同一 Brief/Receipt 真相；刷新与新 Session 后仍一致。
-- [ ] AC-A16: 40px/84px、宽屏 dock、窄屏 overlay、移动全屏及关闭恢复行为通过浏览器测试。
+- [x] AC-A16: 40px/84px、宽屏 dock、窄屏 overlay、移动全屏及关闭恢复行为通过浏览器测试。
 - [x] AC-A17: degraded/unknown 有独立可见组件状态，不归入“正在推进”。
 - [x] AC-A18: 默认 DOM 与演示画布通过人话/内部术语守卫。
 - [x] AC-A19: no-Task 真实研究 turn 能写一条关键 Receipt；普通知识问答不写。
-- [ ] AC-A20: 使用隔离数据完成 Phase A acceptance；不接触 runtime/production data。
+- [x] AC-A20: 使用隔离数据完成 Phase A acceptance；不接触 runtime/production data。
+
+### Phase B（Global Recent）
+
+- [x] AC-B1: `current[]` 只由 owner-scoped attention / canonical live candidate / active typed hold 发现，且不受 recent limit 截断。
+- [x] AC-B2: `recent[]` 排除 current，只含 `lastProgressAt != null`，按时间倒序、同时间 threadId 正序稳定分页。
+- [x] AC-B3: bulk route 不执行 `list all threads → N 次 liveness`；recent-only thread 使用已证明为空的 current snapshot。
+- [x] AC-B4: 普通 owner thread 才可进入集合；跨用户、system/shared/deleted/special thread 均排除。
+- [x] AC-B5: 全局卡与会话卡消费同一个 `ThreadBriefV1`，不新增持久 Brief 或第二套状态字段。
+- [x] AC-B6: Activity Bar “近况”入口与五个分区（需要你/正在推进/状态确认中/等待外部/最近有进展）可读可导航。
+- [x] AC-B7: invalidation 与轮询重读 canonical collection；读取失败清除陈旧 current，不用 task/lastActiveAt 猜状态。
+- [ ] AC-B8: 使用隔离数据验证分页、owner 隔离、索引迁移和 UI；部署后再用当前用户真实 Receipt 做只读验收。
 
 ## Tips Contribution（F244）
 
@@ -279,8 +308,18 @@ GET /api/threads/briefs?scope=recent&limit=50&cursor=...
 - ✅ 永久垂直验收用例通过：MCP tool → 真实 HTTP callback 鉴权 → 隔离 Redis → Brief/read API → store 重建后读取；无 Task 研究回执与 invocation-start abstain 同时得到证明。
 - ✅ 隔离 Redis 验证并发 first-writer-wins、TTL=0 与 terminal-turn 单回执 fence；未连接 runtime/production data。
 - ✅ 七张 1440/1024/390 视觉画布重新渲染，40px/84px、640px dock/overlay、人话守卫校验通过。
-- ⏳ AC-A16 / AC-A20 的真实浏览器点击与截图已启动，但宿主浏览器 runtime 返回 available browsers `[]`；按 browser skill 约束未换用旁路自动化冒充验收。
+- ✅ operator 已在本地部署完成 Phase A 手工体验验收；隔离数据 AC-A20 完成。宿主自动化 browser runtime 仍返回 available browsers `[]`，因此没有伪造自动点击截图证据。
 - ⚠️ 仓库级非 F308 既有门禁：F286 bootstrap attestation 指向已不在远端历史的 SHA；full MCP/shared/Web suites 另有 1/1/5 个与 F308 无关的基线失败。F308 定向集与受影响 ChatContainer 回归集均通过。
+
+## Phase B Acceptance Log
+
+- ✅ Shared/API/Web production build 通过，`/recent` 已进入 Next route manifest。
+- ✅ current discovery 覆盖 owner running index、owner approval 与 owner typed hold；55 个 current 在 `limit=1` 时仍完整返回。
+- ✅ recent Receipt index 支持旧数据 owner-scoped lazy backfill、同时间 threadId 正序、游标分页、current 去重和跨用户隔离。
+- ✅ recent-only thread 不触发 liveness read；stale task、lastActiveAt、参与猫不会使会话入选。
+- ✅ 隔离 Redis E2E：两个真实 Receipt 分别进入 current/recent，同一 collection route 返回，recent 没有额外 liveness 调用。
+- ✅ Web 五分区、进入会话、翻页、invalidation 重读和读取失败清除陈旧数据测试通过。
+- ⏳ AC-B8 最后一项为部署后当前用户真实 Receipt 的只读验收；宿主 browser runtime 仍无可用实例，不以原型代替截图。
 
 ## Dependencies
 
@@ -312,6 +351,7 @@ GET /api/threads/briefs?scope=recent&limit=50&cursor=...
 | OQ-2 | Phase B 是否与 Phase A 同时开发？ | ✅ 否；Phase A 真实验收后再开始 |
 | OQ-3 | 是否自动把 Task done 变成 Receipt？ | ✅ 否；Task 仅作为 provenance |
 | OQ-4 | 是否跨猫 Review？ | ✅ operator 明确豁免；作者完成 targeted self-check 后进入 Phase A 验收 |
+| OQ-5 | 运行详情空白是否随 Phase B 一起重构？ | ✅ 否；先冻结 Phase C 信息架构，避免扩大 Phase B 影响面 |
 
 ## Key Decisions
 
@@ -327,6 +367,8 @@ GET /api/threads/briefs?scope=recent&limit=50&cursor=...
 | KD-8 | 视觉采用三级开合 | 聊天优先，同时保持进度可召回 |
 | KD-9 | 不做历史回填 | 避免非确定总结、迁移和证据污染 |
 | KD-10 | Phase A 完成后再验收，不做跨猫 Review | operator 2026-08-31 直接授权 |
+| KD-11 | Phase B 以 owner-scoped current/recent 查询索引实现 | 禁止全量 thread × liveness 扫描，不新增业务状态 |
+| KD-12 | 运行详情独立作为 Phase C | 空态和诊断信息源较多，不能搭 Phase B 顺手重构 |
 
 ## Timeline
 
@@ -335,11 +377,12 @@ GET /api/threads/briefs?scope=recent&limit=50&cursor=...
 | 2026-08-31 | operator 提出全局近期事项、会话执行与历史进展不可见痛点 |
 | 2026-08-31 | 开源调研、领域/安全审计、三级开合视觉 Demo 与 1024px 响应式补充完成 |
 | 2026-08-31 | operator 授权按建议落盘并推进至 Phase A 完成，跳过跨猫 Review |
+| 2026-08-31 | Phase A 真实 Receipt/Brief 验收完成；operator 授权推进 Phase B，并冻结运行详情 Phase C 信息架构 |
 
 ## Review Gate
 
 - Phase A: operator 明确豁免跨猫 Review；作者必须完成 TDD、targeted gates、prompt parity、隔离数据测试和代码坏味道自审后，才进入 acceptance。
-- Phase B: 不在当前授权范围；Phase A acceptance 后重新决定实施节奏。
+- Phase B: operator 已在 Phase A acceptance 后授权；保持 current discovery 索引、recent 分页和全局页面边界。
 
 ## Links
 
@@ -358,5 +401,5 @@ GET /api/threads/briefs?scope=recent&limit=50&cursor=...
 - Receipt 手工编辑；
 - system/shared/eval/connector thread 的全局近况；
 - legacy pending authorization 迁移；
-- Phase B 全局页面实现；
+- Phase C 运行详情重构；
 - 修改生产配置或生产数据。

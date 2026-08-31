@@ -22,6 +22,13 @@ export interface ThreadBriefLiveExecution {
   readonly degraded: boolean;
 }
 
+/** `null` means the canonical source failed; an empty array is a confirmed empty source. */
+export interface ThreadBriefCurrentFacts {
+  readonly live: readonly ThreadBriefLiveExecution[] | null;
+  readonly attention: readonly ThreadBriefAttentionItem[] | null;
+  readonly waits: readonly ThreadBriefWaitItem[] | null;
+}
+
 export interface ThreadBriefAssemblerDeps {
   readonly receiptStore: IThreadProgressReceiptStore;
   readonly taskStore: Pick<ITaskStore, 'listByThread'>;
@@ -46,11 +53,17 @@ async function settle<T>(read: () => Promise<T>): Promise<Settled<T>> {
 export class ThreadBriefAssembler {
   constructor(private readonly deps: ThreadBriefAssemblerDeps) {}
 
-  async assemble(thread: Thread, ownerUserId: string): Promise<ThreadBriefV1> {
+  async assemble(thread: Thread, ownerUserId: string, currentFacts?: ThreadBriefCurrentFacts): Promise<ThreadBriefV1> {
     const [live, attention, waits, receipts, tasks, progress, workflow] = await Promise.all([
-      settle(() => this.deps.readLiveExecutions(thread.id, ownerUserId)),
-      settle(() => this.deps.readAttention(ownerUserId, thread.id)),
-      settle(() => this.deps.readWaits(ownerUserId, thread.id)),
+      currentFacts
+        ? Promise.resolve(fromCurrentFact(currentFacts.live))
+        : settle(() => this.deps.readLiveExecutions(thread.id, ownerUserId)),
+      currentFacts
+        ? Promise.resolve(fromCurrentFact(currentFacts.attention))
+        : settle(() => this.deps.readAttention(ownerUserId, thread.id)),
+      currentFacts
+        ? Promise.resolve(fromCurrentFact(currentFacts.waits))
+        : settle(() => this.deps.readWaits(ownerUserId, thread.id)),
       settle(() => this.deps.receiptStore.listByThread(ownerUserId, thread.id, { limit: 3 })),
       settle(() => Promise.resolve(this.deps.taskStore.listByThread(thread.id))),
       settle<Record<string, TaskProgressSnapshot>>(
@@ -84,6 +97,10 @@ export class ThreadBriefAssembler {
       generatedAt: this.deps.now?.() ?? Date.now(),
     };
   }
+}
+
+function fromCurrentFact<T>(value: readonly T[] | null): Settled<readonly T[]> {
+  return value === null ? { ok: false } : { ok: true, value };
 }
 
 function readWorkflow(deps: ThreadBriefAssemblerDeps, thread: Thread): Promise<WorkflowSop | null> {
