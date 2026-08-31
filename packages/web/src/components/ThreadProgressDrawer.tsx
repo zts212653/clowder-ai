@@ -16,10 +16,18 @@ interface ThreadProgressDrawerProps {
   readonly docked: boolean;
   readonly threadId: string;
   readonly onClose: () => void;
+  readonly returnFocusTo?: HTMLElement | null;
   readonly runDetails?: ReactNode;
 }
 
-export function ThreadProgressDrawer({ open, docked, threadId, onClose, runDetails }: ThreadProgressDrawerProps) {
+export function ThreadProgressDrawer({
+  open,
+  docked,
+  threadId,
+  onClose,
+  returnFocusTo,
+  runDetails,
+}: ThreadProgressDrawerProps) {
   const [tab, setTab] = useState<'progress' | 'runtime'>('progress');
   const [items, setItems] = useState<readonly ThreadProgressReceiptV1[]>([]);
   const [visibleCount, setVisibleCount] = useState(3);
@@ -27,17 +35,21 @@ export function ThreadProgressDrawer({ open, docked, threadId, onClose, runDetai
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(false);
   const panelRef = useRef<HTMLDivElement>(null);
-  const firstPageAbortRef = useRef<AbortController | null>(null);
+  const pageAbortRef = useRef<AbortController | null>(null);
+  const pageGenerationRef = useRef(0);
+  const wasOpenRef = useRef(false);
 
   const loadFirstPage = useCallback(() => {
-    firstPageAbortRef.current?.abort();
+    pageAbortRef.current?.abort();
+    const generation = pageGenerationRef.current + 1;
+    pageGenerationRef.current = generation;
     const controller = new AbortController();
-    firstPageAbortRef.current = controller;
+    pageAbortRef.current = controller;
     setLoading(true);
     setError(false);
     void fetchThreadProgressPage(threadId, undefined, controller.signal)
       .then((page) => {
-        if (firstPageAbortRef.current !== controller) return;
+        if (pageAbortRef.current !== controller || pageGenerationRef.current !== generation) return;
         setItems(page.items);
         setVisibleCount(3);
         setNextCursor(page.nextCursor);
@@ -47,28 +59,65 @@ export function ThreadProgressDrawer({ open, docked, threadId, onClose, runDetai
         setError(true);
       })
       .finally(() => {
-        if (!controller.signal.aborted && firstPageAbortRef.current === controller) setLoading(false);
+        if (
+          !controller.signal.aborted &&
+          pageAbortRef.current === controller &&
+          pageGenerationRef.current === generation
+        ) {
+          setLoading(false);
+        }
       });
-    return () => {
-      if (firstPageAbortRef.current === controller) firstPageAbortRef.current = null;
-      controller.abort();
-    };
   }, [threadId]);
+
+  const loadOlderPage = useCallback(
+    async (cursor: string) => {
+      pageAbortRef.current?.abort();
+      const generation = pageGenerationRef.current;
+      const controller = new AbortController();
+      pageAbortRef.current = controller;
+      setLoading(true);
+      try {
+        const page = await fetchThreadProgressPage(threadId, cursor, controller.signal);
+        if (pageAbortRef.current !== controller || pageGenerationRef.current !== generation) return;
+        setItems((current) => [...current, ...page.items]);
+        setVisibleCount((current) => current + page.items.length);
+        setNextCursor(page.nextCursor);
+      } catch (cause: unknown) {
+        if (controller.signal.aborted || (cause instanceof DOMException && cause.name === 'AbortError')) return;
+        setError(true);
+      } finally {
+        if (pageAbortRef.current === controller && pageGenerationRef.current === generation) setLoading(false);
+      }
+    },
+    [threadId],
+  );
 
   useEffect(() => {
     if (!open) return;
     setTab('progress');
-    const abort = loadFirstPage();
+    loadFirstPage();
     const onInvalidated = (event: Event) => {
       const detail = (event as CustomEvent<{ threadId?: string }>).detail;
       if (detail?.threadId === threadId) loadFirstPage();
     };
     window.addEventListener(THREAD_BRIEF_INVALIDATED_EVENT, onInvalidated);
     return () => {
-      abort();
+      pageGenerationRef.current += 1;
+      pageAbortRef.current?.abort();
+      pageAbortRef.current = null;
       window.removeEventListener(THREAD_BRIEF_INVALIDATED_EVENT, onInvalidated);
     };
   }, [loadFirstPage, open, threadId]);
+
+  useEffect(() => {
+    if (open) {
+      wasOpenRef.current = true;
+      return;
+    }
+    if (!wasOpenRef.current) return;
+    wasOpenRef.current = false;
+    queueMicrotask(() => returnFocusTo?.focus());
+  }, [open, returnFocusTo]);
 
   useEffect(() => {
     if (!open) return;
@@ -81,23 +130,12 @@ export function ThreadProgressDrawer({ open, docked, threadId, onClose, runDetai
 
   if (!open) return null;
 
-  const loadMore = async () => {
+  const loadMore = () => {
     if (visibleCount < items.length) {
       setVisibleCount(items.length);
       return;
     }
-    if (!nextCursor || loading) return;
-    setLoading(true);
-    try {
-      const page = await fetchThreadProgressPage(threadId, nextCursor);
-      setItems((current) => [...current, ...page.items]);
-      setVisibleCount((current) => current + page.items.length);
-      setNextCursor(page.nextCursor);
-    } catch {
-      setError(true);
-    } finally {
-      setLoading(false);
-    }
+    if (nextCursor && !loading) void loadOlderPage(nextCursor);
   };
 
   return (

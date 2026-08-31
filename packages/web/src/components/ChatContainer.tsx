@@ -282,6 +282,7 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
   const [workspacePanelMounted, setWorkspacePanelMounted] = useState(rightPanelMode === 'workspace');
   const [activityPanelMounted, setActivityPanelMounted] = useState(false);
   const [progressOpen, setProgressOpen] = useState(false);
+  const progressReturnFocusRef = useRef<HTMLElement | null>(null);
   const [showBootcampList, setShowBootcampList] = useState(false);
   const [editingCatId, setEditingCatId] = useState<string | null>(null);
   const editingCat = editingCatId ? (getCatById(editingCatId) ?? null) : null;
@@ -374,14 +375,22 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
   const isDesktop = useIsDesktop();
   const progressDocked = progressOpen && isDesktop && containerWidth - 420 >= 640;
 
+  // biome-ignore lint/correctness/useExhaustiveDependencies: viewMode replaces the observed root node.
   useLayoutEffect(() => {
     const node = containerRef.current;
-    if (!node) return;
-    const update = () => setContainerWidth(node.getBoundingClientRect().width);
-    update();
-    window.addEventListener('resize', update);
-    return () => window.removeEventListener('resize', update);
-  }, []);
+    if (!node) {
+      setContainerWidth(0);
+      return;
+    }
+    const update = (width: number) => setContainerWidth(width);
+    update(node.getBoundingClientRect().width);
+    if (typeof ResizeObserver !== 'function') return;
+    const observer = new ResizeObserver(([entry]) => {
+      update(entry?.contentRect.width ?? node.getBoundingClientRect().width);
+    });
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, [viewMode]);
 
   useEffect(() => {
     if (statusPanelOpen) setProgressOpen(false);
@@ -1076,7 +1085,7 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
   }
 
   return (
-    <div ref={containerRef} className="flex h-screen h-dvh">
+    <div ref={containerRef} className="flex h-screen h-dvh" data-testid="chat-container-root">
       {connectionStatus.updateRequired && <RuntimeUpdateRequiredDialog onReload={() => window.location.reload()} />}
       {/* Mobile-only sidebar overlay — desktop sidebar is in AppShell */}
       {sidebarOpen && !isDesktop && (
@@ -1123,7 +1132,8 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
 
         <ThreadProgressCard
           threadId={threadId}
-          onOpenProgress={() => {
+          onOpenProgress={(trigger) => {
+            progressReturnFocusRef.current = trigger;
             closeStatusPanel();
             setProgressOpen(true);
           }}
@@ -1431,6 +1441,7 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
         docked={progressDocked}
         threadId={threadId}
         onClose={() => setProgressOpen(false)}
+        returnFocusTo={progressReturnFocusRef.current}
         runDetails={<ThreadExecutionBar threadId={threadId} />}
       />
 

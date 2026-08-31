@@ -128,6 +128,78 @@ describe('ThreadProgressDrawer', () => {
     expect(container.textContent).toContain('最新进展');
     expect(container.textContent).not.toContain('旧进展');
   });
+
+  it('drops an older pagination response when invalidation replaces the head', async () => {
+    let resolveOlderPage: (value: unknown) => void = () => {};
+    let resolveFreshHead: (value: unknown) => void = () => {};
+    const olderPage = new Promise((resolve) => {
+      resolveOlderPage = resolve;
+    });
+    const freshHead = new Promise((resolve) => {
+      resolveFreshHead = resolve;
+    });
+    apiFetch.mockReset();
+    apiFetch
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ items: [{ ...defaultReceipt(), headline: '初始进展' }], nextCursor: 'cursor-1' }),
+      })
+      .mockReturnValueOnce(olderPage)
+      .mockReturnValueOnce(freshHead);
+
+    await act(async () => {
+      root.render(<ThreadProgressDrawer open docked threadId="thread-1" onClose={vi.fn()} />);
+    });
+    const loadOlder = [...container.querySelectorAll('button')].find((button) => button.textContent === '加载更早进展');
+    await act(async () => loadOlder?.dispatchEvent(new MouseEvent('click', { bubbles: true })));
+    await act(async () => {
+      window.dispatchEvent(new CustomEvent('catcafe:thread-brief-invalidated', { detail: { threadId: 'thread-1' } }));
+    });
+    await act(async () => {
+      resolveFreshHead({
+        ok: true,
+        json: async () => ({ items: [{ ...defaultReceipt(), headline: '失效后最新进展' }], nextCursor: null }),
+      });
+      await Promise.resolve();
+    });
+    await act(async () => {
+      resolveOlderPage({
+        ok: true,
+        json: async () => ({ items: [{ ...defaultReceipt(), headline: '过期分页结果' }], nextCursor: null }),
+      });
+      await Promise.resolve();
+    });
+
+    expect(container.textContent).toContain('失效后最新进展');
+    expect(container.textContent).not.toContain('过期分页结果');
+  });
+
+  it('restores focus to the trigger after the drawer closes', async () => {
+    const trigger = document.createElement('button');
+    document.body.appendChild(trigger);
+    trigger.focus();
+    await act(async () => {
+      root.render(
+        <ThreadProgressDrawer open docked={false} threadId="thread-1" onClose={vi.fn()} returnFocusTo={trigger} />,
+      );
+    });
+    expect(document.activeElement).not.toBe(trigger);
+
+    await act(async () => {
+      root.render(
+        <ThreadProgressDrawer
+          open={false}
+          docked={false}
+          threadId="thread-1"
+          onClose={vi.fn()}
+          returnFocusTo={trigger}
+        />,
+      );
+      await Promise.resolve();
+    });
+    expect(document.activeElement).toBe(trigger);
+    trigger.remove();
+  });
 });
 
 function defaultReceipt() {

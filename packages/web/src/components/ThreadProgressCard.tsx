@@ -8,7 +8,7 @@ import { useThreadBrief } from '@/hooks/useThreadBrief';
 
 interface ThreadProgressCardProps {
   readonly threadId: string;
-  readonly onOpenProgress: () => void;
+  readonly onOpenProgress: (trigger: HTMLButtonElement) => void;
 }
 
 export function ThreadProgressCard({ threadId, onOpenProgress }: ThreadProgressCardProps) {
@@ -42,7 +42,7 @@ export interface ThreadProgressCardViewProps {
   readonly collapsed: boolean;
   readonly resolveCatName: (catId: string) => string;
   readonly onToggle: () => void;
-  readonly onOpenProgress: () => void;
+  readonly onOpenProgress: (trigger: HTMLButtonElement) => void;
 }
 
 export function ThreadProgressCardView({
@@ -76,7 +76,7 @@ export function ThreadProgressCardView({
         <button
           type="button"
           className="rounded-md px-2 py-1 text-cafe-secondary transition-colors hover:bg-cafe-surface-sunken hover:text-cafe-black"
-          onClick={onOpenProgress}
+          onClick={(event) => onOpenProgress(event.currentTarget)}
         >
           查看完整进展
         </button>
