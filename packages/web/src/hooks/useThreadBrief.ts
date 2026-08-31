@@ -40,6 +40,8 @@ export function useThreadBrief(threadId: string): UseThreadBriefResult {
       })
       .catch((cause: unknown) => {
         if (controller.signal.aborted || (cause instanceof DOMException && cause.name === 'AbortError')) return;
+        hasBriefRef.current = false;
+        setBrief(null);
         setError(true);
       })
       .finally(() => {

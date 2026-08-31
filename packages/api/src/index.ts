@@ -4482,14 +4482,11 @@ async function main(): Promise<void> {
         .map((item) => ({ kind: 'approval' as const, label: item.summary, createdAt: item.createdAt }));
     },
     readWaits: async (ownerUserId, threadId) =>
-      dynamicTaskStore.getAll().flatMap((task) => {
-        if (!task.enabled || task.deliveryThreadId !== threadId || task.params.triggerUserId !== ownerUserId) {
-          return [];
-        }
-          if (!holdProjection.isHoldBallTask(task)) return [];
-          const lifecycle = holdProjection.readHoldLifecycle(task);
-          if (lifecycle?.status !== 'active') return [];
-          const waitSource = lifecycle.waitSourceRef;
+      dynamicTaskStore.listEnabledByDeliveryThreadAndUser(threadId, ownerUserId).flatMap((task) => {
+        if (!holdProjection.isHoldBallTask(task)) return [];
+        const lifecycle = holdProjection.readHoldLifecycle(task);
+        if (lifecycle?.status !== 'active') return [];
+        const waitSource = lifecycle.waitSourceRef;
         const label =
           (typeof waitSource?.value === 'string' && waitSource.value.trim()) ||
           task.display.description ||

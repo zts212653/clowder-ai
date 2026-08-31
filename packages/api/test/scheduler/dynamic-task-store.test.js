@@ -93,6 +93,23 @@ describe('DynamicTaskStore', () => {
     assert.equal(def.id, 'dyn-001');
   });
 
+  test('lists only enabled tasks for one delivery thread and owner', () => {
+    const scoped = {
+      ...SAMPLE_DEF,
+      id: 'dyn-scoped',
+      params: { ...SAMPLE_DEF.params, triggerUserId: 'user-1' },
+    };
+    store.insert(scoped);
+    store.insert({ ...scoped, id: 'dyn-other-user', params: { ...scoped.params, triggerUserId: 'user-2' } });
+    store.insert({ ...scoped, id: 'dyn-other-thread', deliveryThreadId: 'thread-other' });
+    store.insert({ ...scoped, id: 'dyn-disabled', enabled: false });
+
+    assert.deepEqual(
+      store.listEnabledByDeliveryThreadAndUser('thread-abc', 'user-1').map((task) => task.id),
+      ['dyn-scoped'],
+    );
+  });
+
   test('getById returns null for missing', () => {
     const def = store.getById('nonexistent');
     assert.equal(def, null);

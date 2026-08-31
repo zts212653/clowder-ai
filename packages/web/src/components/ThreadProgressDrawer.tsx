@@ -27,13 +27,17 @@ export function ThreadProgressDrawer({ open, docked, threadId, onClose, runDetai
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(false);
   const panelRef = useRef<HTMLDivElement>(null);
+  const firstPageAbortRef = useRef<AbortController | null>(null);
 
   const loadFirstPage = useCallback(() => {
+    firstPageAbortRef.current?.abort();
     const controller = new AbortController();
+    firstPageAbortRef.current = controller;
     setLoading(true);
     setError(false);
     void fetchThreadProgressPage(threadId, undefined, controller.signal)
       .then((page) => {
+        if (firstPageAbortRef.current !== controller) return;
         setItems(page.items);
         setVisibleCount(3);
         setNextCursor(page.nextCursor);
@@ -43,9 +47,12 @@ export function ThreadProgressDrawer({ open, docked, threadId, onClose, runDetai
         setError(true);
       })
       .finally(() => {
-        if (!controller.signal.aborted) setLoading(false);
+        if (!controller.signal.aborted && firstPageAbortRef.current === controller) setLoading(false);
       });
-    return () => controller.abort();
+    return () => {
+      if (firstPageAbortRef.current === controller) firstPageAbortRef.current = null;
+      controller.abort();
+    };
   }, [threadId]);
 
   useEffect(() => {
@@ -98,8 +105,10 @@ export function ThreadProgressDrawer({ open, docked, threadId, onClose, runDetai
       {!docked && (
         <button
           type="button"
+          tabIndex={-1}
           className="fixed inset-0 z-40 bg-[var(--console-overlay-backdrop)]"
           aria-label="关闭完整进展"
+          onMouseDown={(event) => event.preventDefault()}
           onClick={onClose}
         />
       )}

@@ -101,9 +101,10 @@ function cardStatusText(
   loading: boolean,
   resolveCatName: (catId: string) => string,
 ): string {
+  if (error) return '暂时无法确认';
   if (loading && !brief) return '正在读取会话进度';
   if (brief) return statusText(brief, resolveCatName);
-  return error ? '暂时无法确认' : '正在读取会话进度';
+  return '正在读取会话进度';
 }
 
 function ProgressStateDot({ needsUser }: { needsUser: boolean }) {

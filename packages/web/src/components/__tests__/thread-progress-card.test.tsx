@@ -74,6 +74,22 @@ describe('ThreadProgressCard', () => {
     expect(degraded).not.toContain('正在推进');
   });
 
+  it('renders unknown instead of a stale running claim after refresh failure', () => {
+    const html = renderToStaticMarkup(
+      <ThreadProgressCardView
+        brief={brief()}
+        loading={false}
+        error
+        collapsed
+        resolveCatName={() => '宪宪'}
+        onToggle={vi.fn()}
+        onOpenProgress={vi.fn()}
+      />,
+    );
+    expect(html).toContain('暂时无法确认');
+    expect(html).not.toContain('宪宪正在推进');
+  });
+
   it('shows needs-user without forcing expansion and hides internal identifiers', () => {
     const html = render(
       brief({

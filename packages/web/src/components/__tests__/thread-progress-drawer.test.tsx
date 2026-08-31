@@ -73,7 +73,9 @@ describe('ThreadProgressDrawer', () => {
     expect(container.textContent).toContain('进入单会话验收');
     expect(container.textContent).not.toContain('internal-receipt-id');
     expect(container.textContent).not.toContain('internal-invocation-id');
-    expect(container.querySelector('[aria-label="关闭完整进展"]')).not.toBeNull();
+    const backdrop = container.querySelector('[aria-label="关闭完整进展"]');
+    expect(backdrop).not.toBeNull();
+    expect(backdrop?.getAttribute('tabindex')).toBe('-1');
   });
 
   it('closes on Escape and exposes existing run details on the second tab', async () => {
@@ -89,4 +91,57 @@ describe('ThreadProgressDrawer', () => {
     await act(async () => window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' })));
     expect(onClose).toHaveBeenCalledOnce();
   });
+
+  it('keeps the newest invalidation page when an older request resolves last', async () => {
+    let resolveOlder: (value: unknown) => void = () => {};
+    let resolveNewer: (value: unknown) => void = () => {};
+    const older = new Promise((resolve) => {
+      resolveOlder = resolve;
+    });
+    const newer = new Promise((resolve) => {
+      resolveNewer = resolve;
+    });
+    apiFetch.mockReset();
+    apiFetch.mockReturnValueOnce(older).mockReturnValueOnce(newer);
+
+    await act(async () => {
+      root.render(<ThreadProgressDrawer open docked threadId="thread-1" onClose={vi.fn()} />);
+    });
+    await act(async () => {
+      window.dispatchEvent(new CustomEvent('catcafe:thread-brief-invalidated', { detail: { threadId: 'thread-1' } }));
+    });
+    await act(async () => {
+      resolveNewer({
+        ok: true,
+        json: async () => ({ items: [{ ...defaultReceipt(), headline: '最新进展' }], nextCursor: null }),
+      });
+      await Promise.resolve();
+    });
+    await act(async () => {
+      resolveOlder({
+        ok: true,
+        json: async () => ({ items: [{ ...defaultReceipt(), headline: '旧进展' }], nextCursor: null }),
+      });
+      await Promise.resolve();
+    });
+
+    expect(container.textContent).toContain('最新进展');
+    expect(container.textContent).not.toContain('旧进展');
+  });
 });
+
+function defaultReceipt() {
+  return {
+    v: 1,
+    id: 'race-receipt',
+    ownerUserId: 'owner-id',
+    threadId: 'thread-1',
+    kind: 'milestone',
+    impactAxes: ['verified_outcome'],
+    actor: { kind: 'cat', catId: 'internal-cat-id' },
+    provenance: [{ kind: 'invocation', invocationId: 'internal-invocation-id' }],
+    sourceKey: 'race-source-key',
+    occurredAt: Date.now(),
+    createdAt: Date.now(),
+  };
+}
