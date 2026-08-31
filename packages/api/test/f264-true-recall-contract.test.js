@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
 import { MessageStore } from '../dist/domains/cats/services/stores/ports/MessageStore.js';
+import { canonicalTestMessageInput } from './helpers/message-from-fixtures.js';
 
 function custody(overrides = {}) {
   return {
@@ -25,21 +26,24 @@ function custody(overrides = {}) {
 }
 
 function appendQueued(store, queueCustody = custody()) {
-  return store.append({
-    threadId: 'thread-f264-gap-f',
-    userId: 'owner-1',
-    catId: null,
-    content: '修正后的正文',
-    contentBlocks: [
-      { type: 'text', text: '修正后的正文' },
-      { type: 'image', url: '/uploads/proof.png' },
-    ],
-    mentions: ['codex', 'fable5'],
-    timestamp: 1_000,
-    deliveryStatus: 'queued',
-    queueCustody,
-    replyTo: 'parent-message',
-  });
+  return store.append(
+    canonicalTestMessageInput({
+      provenance: { author: 'user', routed: false, observation: 'original' },
+      threadId: 'thread-f264-gap-f',
+      userId: 'owner-1',
+      catId: null,
+      content: '修正后的正文',
+      contentBlocks: [
+        { type: 'text', text: '修正后的正文' },
+        { type: 'image', url: '/uploads/proof.png' },
+      ],
+      mentions: ['codex', 'fable5'],
+      timestamp: 1_000,
+      deliveryStatus: 'queued',
+      queueCustody,
+      replyTo: 'parent-message',
+    }),
+  );
 }
 
 describe('F264 Gap F true recall contract (memory store)', () => {
@@ -71,15 +75,18 @@ describe('F264 Gap F true recall contract (memory store)', () => {
 
   it('refuses a queued body without durable Queue custody', () => {
     const store = new MessageStore();
-    const message = store.append({
-      threadId: 'thread-f264-gap-f',
-      userId: 'owner-1',
-      catId: null,
-      content: '没有 custody',
-      mentions: [],
-      timestamp: 1_000,
-      deliveryStatus: 'queued',
-    });
+    const message = store.append(
+      canonicalTestMessageInput({
+        provenance: { author: 'user', routed: false, observation: 'original' },
+        threadId: 'thread-f264-gap-f',
+        userId: 'owner-1',
+        catId: null,
+        content: '没有 custody',
+        mentions: [],
+        timestamp: 1_000,
+        deliveryStatus: 'queued',
+      }),
+    );
     assert.deepEqual(
       store.recallMessageToComposerDraft(message.id, {
         ownerUserId: 'owner-1',

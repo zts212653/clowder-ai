@@ -141,7 +141,7 @@ describe('reconcileThreadWithServer — F173 PR-C Task 10 mirror invariant', () 
         content: 'reconnect must retain exact child liveness',
         messageId: 'm-reconnect-receipt',
         mergedMessageIds: [],
-        source: 'user',
+        from: { kind: 'user', userId: 'test-user' },
         targetCats: ['codex-sol'],
         targetStates: { 'codex-sol': 'seen' },
         queueReceipt: {

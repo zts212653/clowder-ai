@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, it } from 'node:test';
 import Fastify from 'fastify';
+import { canonicalTestMessageInput } from './helpers/message-from-fixtures.js';
 
 // F231 Phase C Task3: cat-side propose-profile-update callback route.
 // Pins the current primer as beforeContent + baseContentHash (P1-2 optimistic-lock base),
@@ -29,14 +30,16 @@ describe('callback propose-profile-update route', () => {
     const key = body.clientRequestId ? `${userId}:${catId}:${threadId}:${body.clientRequestId}` : undefined;
     let origin = key ? originByRequest.get(key) : undefined;
     if (!origin) {
-      origin = messageStore.append({
-        userId,
-        catId: null,
-        content: 'Please update the profile',
-        mentions: [],
-        timestamp: Date.now(),
-        threadId,
-      });
+      origin = messageStore.append(
+        canonicalTestMessageInput({
+          userId,
+          catId: null,
+          content: 'Please update the profile',
+          mentions: [],
+          timestamp: Date.now(),
+          threadId,
+        }),
+      );
       if (key) originByRequest.set(key, origin);
     }
     const { invocationId, callbackToken } = await registry.create(userId, catId, threadId, undefined, origin.id);
@@ -222,29 +225,33 @@ describe('callback propose-profile-update route', () => {
       signalProvenance: { kind: 'cat-declared', sourceThreadId: 'thread_1' },
       createdBy: 'alice',
     });
-    const cardMessage = await messageStore.append({
-      userId: 'alice',
-      catId: 'opus',
-      content: 'visible profile update card',
-      mentions: [],
-      timestamp: Date.now(),
-      threadId: 'thread_1',
-      extra: {
-        rich: {
-          v: 1,
-          blocks: [{ id: `profile-update-${existingProposalId}`, kind: 'card', v: 1, title: 'Profile update' }],
-        },
-      },
-    });
-    for (let i = 0; i < 600; i += 1) {
-      await messageStore.append({
+    const cardMessage = await messageStore.append(
+      canonicalTestMessageInput({
         userId: 'alice',
-        catId: null,
-        content: `newer ${i}`,
+        catId: 'opus',
+        content: 'visible profile update card',
         mentions: [],
-        timestamp: Date.now() + i + 1,
+        timestamp: Date.now(),
         threadId: 'thread_1',
-      });
+        extra: {
+          rich: {
+            v: 1,
+            blocks: [{ id: `profile-update-${existingProposalId}`, kind: 'card', v: 1, title: 'Profile update' }],
+          },
+        },
+      }),
+    );
+    for (let i = 0; i < 600; i += 1) {
+      await messageStore.append(
+        canonicalTestMessageInput({
+          userId: 'alice',
+          catId: null,
+          content: `newer ${i}`,
+          mentions: [],
+          timestamp: Date.now() + i + 1,
+          threadId: 'thread_1',
+        }),
+      );
     }
 
     const res = await propose({

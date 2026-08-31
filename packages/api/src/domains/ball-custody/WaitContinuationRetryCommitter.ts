@@ -1,5 +1,6 @@
 import type { RedisClient } from '@cat-cafe/shared/utils';
 import type { IMessageStore, QueuedMessageCustody, StoredMessage } from '../cats/services/stores/ports/MessageStore.js';
+import type { QueueCustodyRetryReplacementProof } from '../cats/services/stores/ports/queued-message-custody.js';
 import { assertQueueCustodyTransition } from '../cats/services/stores/ports/queued-message-custody.js';
 import type { ITaskStore } from '../cats/services/stores/ports/TaskStoreContract.js';
 import { hydrateTask } from '../cats/services/stores/redis/RedisTaskCodec.js';
@@ -22,6 +23,7 @@ export interface RetryCustodyTransition {
   readonly messageId: string;
   readonly current: QueuedMessageCustody;
   readonly next: QueuedMessageCustody;
+  readonly replacement: QueueCustodyRetryReplacementProof;
 }
 
 export type RetryAuthorityCommitResult =
@@ -86,6 +88,7 @@ function assertRetryCustodyTransitions(transitions: readonly RetryCustodyTransit
     assertQueueCustodyTransition(transition.current, {
       expectedRevision: transition.current.revision,
       next: transition.next,
+      replacement: transition.replacement,
     });
     if (
       JSON.stringify(transition.current.bodyExposures ?? []) !== JSON.stringify(transition.next.bodyExposures ?? [])
@@ -137,7 +140,8 @@ for index = 1, transitionCount do
   local custody = redis.call('HGET', messageKey, 'queueCustody')
   local currentRevision = tonumber(redis.call('HGET', messageKey, 'queueCustodyRevision') or '0')
   if not messageId or not custody or currentRevision ~= expectedRevision then return 'custody_conflict' end
-  if redis.call('HGET', messageKey, 'deliveryStatus') ~= 'queued' then return 'custody_conflict' end
+  local deliveryStatus = redis.call('HGET', messageKey, 'deliveryStatus')
+  if deliveryStatus ~= 'queued' and deliveryStatus ~= 'delivered' then return 'custody_conflict' end
   local okNext, nextCustody = pcall(cjson.decode, nextRaw)
   if not okNext or type(nextCustody) ~= 'table' then return redis.error_reply('INVALID_RETRY_QUEUE_CUSTODY') end
   if tonumber(nextCustody.revision) ~= expectedRevision + 1 then return redis.error_reply('INVALID_RETRY_REVISION') end
@@ -204,7 +208,7 @@ export class WaitContinuationRetryCommitter {
       if (isPromiseLike(currentResult)) return { outcome: 'unavailable' };
       if (
         !currentResult?.queueCustody ||
-        currentResult.deliveryStatus !== 'queued' ||
+        (currentResult.deliveryStatus !== 'queued' && currentResult.deliveryStatus !== 'delivered') ||
         currentResult.queueCustody.revision !== transition.current.revision
       ) {
         return { outcome: 'custody_conflict' };
@@ -214,6 +218,7 @@ export class WaitContinuationRetryCommitter {
       const result = this.deps.messageStore.transitionQueueCustody(transition.messageId, {
         expectedRevision: transition.current.revision,
         next: transition.next,
+        replacement: transition.replacement,
       });
       if (isPromiseLike(result)) return { outcome: 'unavailable' };
       if (result.kind !== 'updated') return { outcome: 'custody_conflict' };

@@ -483,7 +483,7 @@ describe('F215 AC-D1: final failure has explicit error message', () => {
   });
 });
 
-// ── AC-C3: route-serial layer — malformed relay pushes opus-4.6 to worklist ──
+// ── AC-C3: route-serial layer — malformed relay publishes one durable wake ──
 
 // Minimal routeSerial deps (mirrors f046-b5-runtime-regression-seed.test.js pattern)
 function createMalformedRelayDeps(services) {
@@ -534,7 +534,13 @@ function createMalformedOpusService(catId) {
         content: JSON.stringify({ type: 'invocation_created', invocationId: 'inv-malformed-48' }),
         timestamp: Date.now(),
       };
-      // The relay card (AC-C3)
+      yield {
+        type: 'text',
+        catId,
+        content: '🙀 Opus 4.8 炸毛了；Ragdoll Opus 4.6 已经来接班。',
+        timestamp: Date.now(),
+      };
+      // Server-owned relay signal (AC-C3)
       yield {
         type: 'system_info',
         catId,
@@ -557,41 +563,65 @@ function createMalformedOpusService(catId) {
   };
 }
 
-// Service for opus-4.6 that produces normal output
-function createRelay46Service(catId = 'opus') {
-  const calls = [];
-  const service = {
-    calls,
-    async *invoke(prompt, _opts) {
-      calls.push(prompt);
-      yield { type: 'text', catId, content: '我是 opus-4.6，接力完成任务。', timestamp: Date.now() };
-      yield { type: 'done', catId, timestamp: Date.now() };
+function createLifecycleRelayOptions(commits) {
+  return {
+    ownerAuthProvenance: 'unknown',
+    parentInvocationId: 'parent-malformed-48',
+    onLifecycleInvocationStarted: async (input) => ({
+      responseMessageId: 'response-malformed-48',
+      priorFrontierMessageId: null,
+      activeRun: {
+        threadId: input.threadId,
+        targetId: input.catId,
+        invocationId: input.invocationId,
+        responseMessageId: 'response-malformed-48',
+        inputEntryIds: [],
+        inputMessageIds: [],
+        privateInputEntryIds: [],
+        startedAt: input.startedAt,
+      },
+    }),
+    commitCompletedA2AWake: async (input) => {
+      commits.push(input);
+      return {
+        ...input.message,
+        id: input.responseMessageId,
+        threadId: input.threadId,
+        lifecycle: {
+          kind: 'response',
+          orderKey: `${input.terminal.completedAt}:${input.responseMessageId}`,
+          from: { kind: 'agent', catId: input.callerCatId },
+          invocationId: input.invocationId,
+          targetId: input.callerCatId,
+          inputEntryIds: [],
+          inputMessageIds: [],
+          status: 'completed',
+          startedAt: input.message.timestamp,
+          completedAt: input.terminal.completedAt,
+          dispatchRefs: input.targetCats.map((targetId) => ({ targetId, phase: 'assigned' })),
+        },
+      };
     },
   };
-  return service;
 }
 
-function withClaimedA2ASlot(options = {}) {
-  return {
-    invocationController: new AbortController(),
-    trackA2ASlot: () => true,
-    completeA2ASlots: () => {},
-    ...options,
-  };
-}
-
-describe('F215 AC-C3: route-serial malformed relay pushes opus-4.6 to worklist', () => {
-  test('when opus48 炸毛, opus-4.6 is invoked as relay and user sees no malformed error', async () => {
+describe('F215 AC-C3: route-serial malformed relay uses the completed-response wake', () => {
+  test('publishes opus-4.6 as durable follow-up and never invokes it inline', async () => {
     const { routeSerial } = await import('../dist/domains/cats/services/agents/routing/route-serial.js');
 
-    // opus48 = the cat that炸毛; opus = the 46 relay
     const opus48CatId = 'opus48';
-    const relay46Service = createRelay46Service('opus');
+    const relay46Calls = [];
     const deps = createMalformedRelayDeps({
       [opus48CatId]: createMalformedOpusService(opus48CatId),
-      opus: relay46Service,
+      opus: {
+        async *invoke() {
+          relay46Calls.push(true);
+          yield { type: 'done', catId: 'opus', timestamp: Date.now() };
+        },
+      },
     });
 
+    const commits = [];
     const allMsgs = [];
     for await (const msg of routeSerial(
       deps,
@@ -599,26 +629,20 @@ describe('F215 AC-C3: route-serial malformed relay pushes opus-4.6 to worklist',
       'complete my task',
       'user-test',
       'thread-relay-test',
-      withClaimedA2ASlot(),
+      createLifecycleRelayOptions(commits),
     )) {
       allMsgs.push(msg);
     }
 
-    // 1. opus-4.6 must have been invoked (relay happened)
-    assert.equal(relay46Service.calls.length, 1, 'opus-4.6 should be invoked as relay');
-
-    // 2. User must see text output from opus-4.6
-    const relayText = allMsgs.find((m) => m.type === 'text' && m.catId === 'opus');
-    assert.ok(relayText, 'relay46 text output must reach user');
-    assert.ok(relayText.content.includes('opus-4.6'), 'relay text should identify 4.6');
-
-    // 3. malformed error must NOT be surfaced to user
+    assert.equal(relay46Calls.length, 0, 'the current route must never execute the relay inline');
+    assert.equal(commits.length, 1, 'the completed recovery card must publish one durable wake');
+    assert.deepEqual(commits[0].targetCats, ['opus']);
+    assert.deepEqual(commits[0].message.mentions, ['opus']);
+    assert.match(commits[0].message.content, /Opus 4\.6 已经来接班/);
     const malformedErrors = allMsgs.filter(
       (m) => m.type === 'error' && typeof m.error === 'string' && m.error.startsWith('malformed_toolcall:'),
     );
     assert.equal(malformedErrors.length, 0, 'malformed_toolcall error must be suppressed by relay');
-
-    // 4. routing signal must NOT leak to frontend (砚砚 re-review: route-serial must consume+drop it)
     const leakedRouteSignals = allMsgs.filter((m) => {
       try {
         return m.type === 'system_info' && JSON.parse(m.content ?? '{}').type === 'malformed_toolcall_relay_46';
@@ -629,81 +653,12 @@ describe('F215 AC-C3: route-serial malformed relay pushes opus-4.6 to worklist',
     assert.equal(leakedRouteSignals.length, 0, 'malformed_toolcall_relay_46 routing signal must not leak to user');
   });
 
-  test('does NOT push duplicate relay cat when opus is already pending in worklist', async () => {
-    // P2 fix: if worklist already contains opus (e.g. user routed to [opus48, opus]),
-    // the relay push must be skipped — opus must be invoked exactly ONCE.
-    const { routeSerial } = await import('../dist/domains/cats/services/agents/routing/route-serial.js');
-    const opus48CatId = 'opus48';
-    const relay46Service = createRelay46Service('opus');
-    const deps = createMalformedRelayDeps({
-      [opus48CatId]: createMalformedOpusService(opus48CatId),
-      opus: relay46Service,
-    });
-
-    const allMsgs = [];
-    for await (const msg of routeSerial(
-      deps,
-      [opus48CatId, 'opus'], // opus already in worklist — must NOT be pushed again
-      'complete my task',
-      'user-test',
-      'thread-dup-relay',
-      withClaimedA2ASlot(),
-    )) {
-      allMsgs.push(msg);
-    }
-
-    // opus must be called exactly ONCE — either from original slot or relay, never both
-    assert.equal(
-      relay46Service.calls.length,
-      1,
-      'opus must be invoked exactly once, not twice (P2: no duplicate relay push)',
-    );
-  });
-
-  test('DOES relay when opus already ran earlier in the route (executed vs pending check)', async () => {
-    // P1 #1 fix: duplicate guard must check PENDING entries only, not the full worklist.
-    // Scenario: [opus, opus-48] — opus runs first (executed), then opus-48 炸毛.
-    // relay SHOULD push opus again (executed ≠ pending duplicate).
-    // Old bug: worklist.includes(opus) = true even for executed opus → relay silently skipped.
+  test('keeps the honest partial-output notice when opus-4.6 is unavailable', async () => {
     const { routeSerial } = await import('../dist/domains/cats/services/agents/routing/route-serial.js');
 
-    // First slot: normal opus service (runs first, index=0)
-    const normalOpusService = createRelay46Service('opus'); // produces normal relay output
-    const opus48CatId = 'opus48';
-    const deps = createMalformedRelayDeps({
-      opus: normalOpusService, // opus runs FIRST as worklist[0]
-      [opus48CatId]: createMalformedOpusService(opus48CatId), // opus-48 炸毛 as worklist[1]
-    });
-
-    const allMsgs = [];
-    for await (const msg of routeSerial(
-      deps,
-      ['opus', opus48CatId], // opus executes first, then opus-48 炸毛
-      'complete my task',
-      'user-test',
-      'thread-executed-relay',
-      withClaimedA2ASlot(),
-    )) {
-      allMsgs.push(msg);
-    }
-
-    // opus must be invoked TWICE: once from the original worklist slot, once from relay
-    // (executed opus ≠ pending duplicate — relay push is correct here)
-    assert.equal(
-      normalOpusService.calls.length,
-      2,
-      'opus must be invoked twice: once from worklist and once as malformed relay (P1: executed ≠ pending)',
-    );
-  });
-
-  test('does NOT relay when opus-4.6 service is not available', async () => {
-    const { routeSerial } = await import('../dist/domains/cats/services/agents/routing/route-serial.js');
-
-    // Only opus48 service, no opus service
     const opus48CatId = 'opus48';
     const deps = createMalformedRelayDeps({
       [opus48CatId]: createMalformedOpusService(opus48CatId),
-      // intentionally no 'opus' service
     });
 
     const allMsgs = [];
@@ -711,11 +666,14 @@ describe('F215 AC-C3: route-serial malformed relay pushes opus-4.6 to worklist',
       allMsgs.push(msg);
     }
 
-    // The error should be surfaced since no relay is possible
+    const notices = allMsgs.filter(
+      (m) => m.type === 'text' && typeof m.content === 'string' && m.content.includes('最后一步没完成'),
+    );
+    assert.equal(notices.length, 1, 'partial output must end with one honest user-visible recovery notice');
     const malformedErrors = allMsgs.filter(
       (m) => m.type === 'error' && typeof m.error === 'string' && m.error.startsWith('malformed_toolcall:'),
     );
-    assert.equal(malformedErrors.length, 1, 'malformed error must reach user when no relay service is available');
+    assert.equal(malformedErrors.length, 0, 'the raw malformed error must not contradict the partial-output notice');
   });
 });
 

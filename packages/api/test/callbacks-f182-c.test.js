@@ -379,9 +379,12 @@ describe("F182 C2 - A' class: multi_mention disabled target → 400", () => {
   let mockRouter;
   let app;
   let creds;
+  let invocationQueue;
 
   beforeEach(async () => {
     const { resetMultiMentionOrchestrator } = await import('../dist/routes/callback-multi-mention-routes.js');
+    const { InvocationQueue } = await import('../dist/domains/cats/services/agents/invocation/InvocationQueue.js');
+    const { MessageStore } = await import('../dist/domains/cats/services/stores/ports/MessageStore.js');
     resetMultiMentionOrchestrator();
 
     // Simple mock registry (follows multi-mention-routes.test.js pattern)
@@ -390,7 +393,14 @@ describe("F182 C2 - A' class: multi_mention disabled target → 400", () => {
       register(catId, threadId, userId) {
         const id = `inv-${records.size}`;
         const token = `tok-${records.size}`;
-        records.set(id, { catId, threadId, userId, invocationId: id, callbackToken: token });
+        records.set(id, {
+          catId,
+          threadId,
+          userId,
+          invocationId: id,
+          callbackToken: token,
+          ownerAuthProvenance: 'unknown',
+        });
         return { invocationId: id, callbackToken: token };
       },
       async verify(invocationId, callbackToken) {
@@ -408,7 +418,8 @@ describe("F182 C2 - A' class: multi_mention disabled target → 400", () => {
     };
 
     mockSocket = createMockSocketManager();
-    mockMessageStore = { append: async (m) => ({ id: 'msg-0', ...m }), getById: async () => null };
+    mockMessageStore = new MessageStore();
+    invocationQueue = new InvocationQueue();
     mockInvocationRecordStore = {
       create: async () => null,
       get: async () => null,
@@ -433,6 +444,8 @@ describe("F182 C2 - A' class: multi_mention disabled target → 400", () => {
       socketManager: mockSocket,
       router: mockRouter,
       invocationRecordStore: mockInvocationRecordStore,
+      invocationQueue,
+      queueProcessor: { async requestDrain() {} },
     });
     await app.ready();
   });

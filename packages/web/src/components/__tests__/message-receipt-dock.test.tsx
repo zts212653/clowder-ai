@@ -576,13 +576,17 @@ describe('MessageReceiptDock', () => {
             targets: [
               {
                 catId: 'codex',
-                state: 'failed',
+                state: 'cancelled',
+                invocationId: 'invocation-stopped',
+                seenAt: 150,
                 attempts: [
                   {
                     id: 'entry-stopped:codex:1',
                     targetCatId: 'codex',
                     sequence: 1,
                     state: 'cancelled',
+                    invocationId: 'invocation-stopped',
+                    seenAt: 150,
                     createdAt: 100,
                     updatedAt: 200,
                     terminalReason: 'invocation_cancelled',
@@ -599,6 +603,11 @@ describe('MessageReceiptDock', () => {
     });
 
     expect(container.querySelector('[data-retry-target="codex"]')).not.toBeNull();
+    expect(container.textContent).toContain('砚砚 · 执行已停止 · 可重试');
+    expect(container.querySelector('[data-receipt-failure="codex"]')?.textContent).toContain(
+      '砚砚：对应回复已停止，消息正文没有完成处理',
+    );
+    expect(container.querySelector('[data-receipt-failure="codex"]')?.textContent).not.toContain('系统：');
   });
 
   it('retries only the exact message target and current failed attempt', async () => {

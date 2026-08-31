@@ -114,6 +114,15 @@ export class TaskOutcomeEpisodeStore {
 
       CREATE INDEX IF NOT EXISTS idx_signals_episodeId
         ON task_outcome_signals(episodeId);
+
+      CREATE TABLE IF NOT EXISTS task_outcome_deleted_magic_events (
+        eventId TEXT PRIMARY KEY,
+        deletedAt INTEGER NOT NULL
+      );
+      CREATE TABLE IF NOT EXISTS task_outcome_deleted_magic_threads (
+        threadId TEXT PRIMARY KEY,
+        deletedAt INTEGER NOT NULL
+      );
     `);
     migrateTaskOutcomeStore(this.db);
   }
@@ -166,6 +175,21 @@ export class TaskOutcomeEpisodeStore {
   }
 
   appendSignal(episodeId: string, input: AppendSignalInput): AppendSignalResult {
+    const coordinate = this.readMagicWordRefCoordinate(input);
+    if (coordinate) {
+      return this.db.transaction(() => {
+        if (!this.magicWordRefWritable(coordinate.threadId, coordinate.eventId)) {
+          throw new Error(
+            `TaskOutcomeEpisodeStore: deleted magic_word_ref write rejected (${coordinate.threadId}/${coordinate.eventId})`,
+          );
+        }
+        return this.insertSignal(episodeId, input);
+      })();
+    }
+    return this.insertSignal(episodeId, input);
+  }
+
+  private insertSignal(episodeId: string, input: AppendSignalInput): AppendSignalResult {
     const now = new Date().toISOString();
     if (input.idempotencyKey) {
       const result = this.db
@@ -198,6 +222,90 @@ export class TaskOutcomeEpisodeStore {
 
   hasSignalByIdempotencyKey(key: string): boolean {
     return this.getSignalEpisodeIdByIdempotencyKey(key) !== null;
+  }
+
+  canAppendMagicWordRef(threadId: string, eventId: string): boolean {
+    return this.magicWordRefWritable(threadId, eventId);
+  }
+
+  appendMagicWordRefSignal(episodeId: string, input: AppendSignalInput): boolean {
+    const coordinate = this.readMagicWordRefCoordinate(input);
+    if (!coordinate) throw new Error('TaskOutcomeEpisodeStore: expected magic_word_ref signal');
+    return this.db.transaction(() => {
+      if (!this.magicWordRefWritable(coordinate.threadId, coordinate.eventId)) return false;
+      return this.insertSignal(episodeId, input).appended;
+    })();
+  }
+
+  deleteMagicWordRefsByEventIds(eventIds: readonly string[]): number {
+    const deletedEventIds = [...new Set(eventIds.filter((eventId) => eventId.length > 0))];
+    if (deletedEventIds.length === 0) return 0;
+    return this.db.transaction(() => {
+      const fence = this.db.prepare(
+        `INSERT INTO task_outcome_deleted_magic_events (eventId, deletedAt)
+         VALUES (?, ?)
+         ON CONFLICT(eventId) DO NOTHING`,
+      );
+      const now = Date.now();
+      for (const eventId of deletedEventIds) fence.run(eventId, now);
+      const deletedSet = new Set(deletedEventIds);
+      return this.deleteMagicWordRefSignals(
+        (record) => typeof record.eventId === 'string' && deletedSet.has(record.eventId),
+      );
+    })();
+  }
+
+  deleteMagicWordRefsByThread(threadId: string): number {
+    return this.db.transaction(() => {
+      this.db
+        .prepare(
+          `INSERT INTO task_outcome_deleted_magic_threads (threadId, deletedAt)
+           VALUES (?, ?)
+           ON CONFLICT(threadId) DO NOTHING`,
+        )
+        .run(threadId, Date.now());
+      return this.deleteMagicWordRefSignals((record) => record.threadId === threadId);
+    })();
+  }
+
+  private magicWordRefWritable(threadId: string, eventId: string): boolean {
+    const deletedThread = this.db
+      .prepare('SELECT 1 FROM task_outcome_deleted_magic_threads WHERE threadId = ? LIMIT 1')
+      .get(threadId);
+    if (deletedThread) return false;
+    const deletedEvent = this.db
+      .prepare('SELECT 1 FROM task_outcome_deleted_magic_events WHERE eventId = ? LIMIT 1')
+      .get(eventId);
+    return !deletedEvent;
+  }
+
+  private readMagicWordRefCoordinate(input: AppendSignalInput): { threadId: string; eventId: string } | null {
+    if (input.record.type !== 'magic_word_ref') return null;
+    const threadId = input.record.threadId;
+    const eventId = input.record.eventId;
+    if (typeof threadId !== 'string' || threadId.length === 0 || typeof eventId !== 'string' || eventId.length === 0) {
+      throw new Error('TaskOutcomeEpisodeStore: malformed magic_word_ref write rejected');
+    }
+    return { threadId, eventId };
+  }
+
+  private deleteMagicWordRefSignals(matches: (record: Record<string, unknown>) => boolean): number {
+    const rows = this.db.prepare("SELECT id, record FROM task_outcome_signals WHERE category = 'a2'").all() as Array<{
+      id: number;
+      record: string;
+    }>;
+    const ids: number[] = [];
+    for (const row of rows) {
+      try {
+        const record = JSON.parse(row.record) as Record<string, unknown>;
+        if (record.type === 'magic_word_ref' && matches(record)) ids.push(row.id);
+      } catch {
+        // Malformed unrelated legacy signal is not evidence that this deletion failed.
+      }
+    }
+    if (ids.length === 0) return 0;
+    const placeholders = ids.map(() => '?').join(', ');
+    return this.db.prepare(`DELETE FROM task_outcome_signals WHERE id IN (${placeholders})`).run(...ids).changes;
   }
 
   getSignals(episodeId: string): StoredSignal[] {

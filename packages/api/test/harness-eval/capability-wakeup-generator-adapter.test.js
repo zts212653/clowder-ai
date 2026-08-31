@@ -156,7 +156,8 @@ describe('createCapabilityWakeupGeneratorAdapter', () => {
   it('writes a no-finding bundle for zero-trial keep_observe without fabricating trials', async () => {
     const repoRoot = mkdtempSync(join(tmpdir(), 'cw-adapter-zero-repo-'));
     const harnessFeedbackRoot = join(repoRoot, 'docs', 'harness-feedback');
-    seedDomainRegistry(harnessFeedbackRoot);
+    const liveHarnessFeedbackRoot = join(repoRoot, 'live-harness-feedback');
+    seedDomainRegistry(liveHarnessFeedbackRoot);
     const provider = { resolve: async () => [] };
     const adapter = createCapabilityWakeupGeneratorAdapter(provider);
 
@@ -173,7 +174,7 @@ describe('createCapabilityWakeupGeneratorAdapter', () => {
         windowEndMs: 7300000,
         sessionIds: ['session-1'],
       },
-      { harnessFeedbackRoot, liveHarnessFeedbackRoot: '/tmp/live-unused-for-cw', ownerUserId: 'default-user' },
+      { harnessFeedbackRoot, liveHarnessFeedbackRoot, ownerUserId: 'default-user' },
     );
 
     const snapshot = JSON.parse(readFileSync(join(result.bundleDir, 'snapshot.json'), 'utf8'));
@@ -242,7 +243,8 @@ describe('createCapabilityWakeupGeneratorAdapter', () => {
   it('happy path: passes packet+trials+domain to generator and returns artifact paths', async () => {
     const repoRoot = mkdtempSync(join(tmpdir(), 'cw-adapter-happy-repo-'));
     const harnessFeedbackRoot = join(repoRoot, 'docs', 'harness-feedback');
-    seedDomainRegistry(harnessFeedbackRoot);
+    const liveHarnessFeedbackRoot = join(repoRoot, 'live-harness-feedback');
+    seedDomainRegistry(liveHarnessFeedbackRoot);
     let resolveCalledWith = null;
     let resolveScope = null;
     const provider = {
@@ -265,7 +267,7 @@ describe('createCapabilityWakeupGeneratorAdapter', () => {
 
     const result = await adapter(packet, selector, {
       harnessFeedbackRoot,
-      liveHarnessFeedbackRoot: '/tmp/live-unused-for-cw',
+      liveHarnessFeedbackRoot,
       ownerUserId: 'default-user',
     });
 
@@ -275,7 +277,7 @@ describe('createCapabilityWakeupGeneratorAdapter', () => {
     assert.match(result.bundleDir, /bundles\/vhp-cw-adapter-test$/);
     // cloud R3 P1: cw generator writes raw inputs (trials.json + summary.json) at
     // `<repoRoot>/generated/capability-wakeup/<verdictId>/` referenced in provenance.json.
-    // Adapter MUST forward rawInputDir via extraStagedPaths or auto-PR omits raw inputs
+    // Adapter reports the replay-input directory retained under the artifact staging root.
     // and reviewers/main can't audit/replay.
     assert.ok(Array.isArray(result.extraStagedPaths), 'extraStagedPaths must be array');
     assert.equal(result.extraStagedPaths.length, 1, 'expected exactly one extra staged path (rawInputDir)');

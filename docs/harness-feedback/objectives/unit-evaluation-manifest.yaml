@@ -1,0 +1,111 @@
+---
+# Segment/clause → Objective membership. Metrics are intentionally absent:
+# they are owned once by each Objective's Evaluation Model in registry.yaml.
+manifestVersion: 1
+registryVersion: 2
+units:
+  - unitId: B1
+    hookId: b1-session-briefing
+    unitState: not-ready
+    notReadyReason: 模板内容仍为 session bootstrap 占位文本，等待实际数据接线
+    objectives: [{ objectiveId: continuation-memory-recovery }]
+  - unitId: C1
+    hookId: c1-mcp-callback
+    unitState: evaluable
+    objectives:
+      - { objectiveId: routing-target-delivery, clauseId: mention-format }
+      - { objectiveId: tool-access-correct-use, clauseId: callback-tool-catalog }
+  - { unitId: D1, hookId: d1-identity-anchor, unitState: evaluable, objectives: [{ objectiveId: identity-truth }] }
+  - { unitId: D2, hookId: d2-direct-message-source, unitState: evaluable, objectives: [{ objectiveId: message-thread-continuity }] }
+  - { unitId: D3, hookId: d3-same-family-warning, unitState: evaluable, objectives: [{ objectiveId: agent-instance-disambiguation }] }
+  - { unitId: D4, hookId: d4-cross-thread-reply, unitState: evaluable, objectives: [{ objectiveId: message-thread-continuity }] }
+  - { unitId: D5, hookId: d5-ping-pong-warning, unitState: evaluable, objectives: [{ objectiveId: collaboration-loop-boundedness }] }
+  - { unitId: D6, hookId: d6-teammate-context, unitState: evaluable, objectives: [{ objectiveId: teammate-awareness }] }
+  - { unitId: D7, hookId: d7-mode-declaration, unitState: evaluable, objectives: [{ objectiveId: interaction-mode-adherence }] }
+  - { unitId: D8, hookId: d8-ball-custody-check, unitState: evaluable, objectives: [{ objectiveId: turn-custody-closure }] }
+  - { unitId: D9, hookId: d9-routing-feedback, unitState: evaluable, objectives: [{ objectiveId: routing-target-delivery }] }
+  - { unitId: D10, hookId: d10-critique-tag, unitState: evaluable, objectives: [{ objectiveId: critical-analysis-quality }] }
+  - { unitId: D11, hookId: d11-skill-trigger, unitState: evaluable, objectives: [{ objectiveId: capability-guide-wakeup }] }
+  - { unitId: D12, hookId: d12-active-participants, unitState: evaluable, objectives: [{ objectiveId: teammate-awareness }] }
+  - { unitId: D13, hookId: d13-routing-policy, unitState: evaluable, objectives: [{ objectiveId: routing-target-delivery }] }
+  - { unitId: D14, hookId: d14-sop-stage, unitState: evaluable, objectives: [{ objectiveId: workflow-context-supply }] }
+  - { unitId: D15, hookId: d15-voice-mode, unitState: evaluable, objectives: [{ objectiveId: interaction-mode-adherence }] }
+  - unitId: D16
+    hookId: d16-bootcamp-mode
+    unitState: evaluable
+    objectives:
+      - { objectiveId: interaction-mode-adherence, clauseId: bootcamp-mode }
+      - { objectiveId: workflow-context-supply, clauseId: workflow-instructions }
+  - { unitId: D17, hookId: d17-guide-candidates, unitState: evaluable, objectives: [{ objectiveId: capability-guide-wakeup }] }
+  - { unitId: D18, hookId: d18-world-context, unitState: evaluable, objectives: [{ objectiveId: world-state-fidelity }] }
+  - { unitId: D19, hookId: d19-constitutional-knowledge, unitState: evaluable, objectives: [{ objectiveId: governance-authority-freshness }] }
+  - { unitId: D20, hookId: d20-signal-article, unitState: evaluable, objectives: [{ objectiveId: knowledge-evidence-quality }] }
+  - unitId: D21
+    hookId: d21-decision-tree
+    unitState: evaluable
+    objectives:
+      - { objectiveId: turn-custody-closure, clauseId: exit-decision }
+      - { objectiveId: wait-wakeup-liveness, clauseId: wait-decision }
+  - unitId: L1
+    hookId: l1-parallel-self-awareness
+    unitState: evaluable
+    objectives:
+      - { objectiveId: agent-instance-disambiguation, clauseId: parallel-instance }
+      - { objectiveId: message-thread-continuity, clauseId: cross-thread-coordinate }
+      - { objectiveId: partnership-autonomy, clauseId: collaboration-membership }
+  - unitId: L2
+    hookId: l2-objectivity-carry-over
+    unitState: evaluable
+    objectives:
+      - { objectiveId: continuation-memory-recovery, clauseId: compression-recovery }
+      - { objectiveId: knowledge-evidence-quality, clauseId: source-audit }
+  - unitId: L3
+    hookId: l3-routing-exit-rules
+    unitState: evaluable
+    objectives:
+      - { objectiveId: routing-target-delivery, clauseId: mention-routing }
+      - { objectiveId: turn-custody-closure, clauseId: custody-exit }
+      - { objectiveId: wait-wakeup-liveness, clauseId: wait-contract }
+      - { objectiveId: partnership-autonomy, clauseId: operator-escalation }
+  - unitId: L4
+    hookId: l4-iron-laws
+    unitState: evaluable
+    objectives:
+      - { objectiveId: identity-truth, clauseId: identity }
+      - { objectiveId: safety-data-boundary, clauseId: data-storage }
+      - { objectiveId: safety-data-boundary, clauseId: persistence }
+      - { objectiveId: review-independence, clauseId: independent-review }
+      - { objectiveId: engineering-quality-discipline, clauseId: release-acceptance }
+  - { unitId: L5, hookId: l5-mcp-tool-index, unitState: evaluable, objectives: [{ objectiveId: tool-access-correct-use }] }
+  - { unitId: L6, hookId: l6-capability-wakeup, unitState: evaluable, objectives: [{ objectiveId: capability-guide-wakeup }] }
+  - unitId: L7
+    hookId: l7-collaboration-philosophy
+    unitState: evaluable
+    objectives:
+      - { objectiveId: continuation-memory-recovery, clauseId: memory-continuity }
+      - { objectiveId: partnership-autonomy, clauseId: partnership }
+      - { objectiveId: engineering-quality-discipline, clauseId: quality-discipline }
+  - { unitId: N1, hookId: n1-navigation-context, unitState: evaluable, objectives: [{ objectiveId: workflow-context-supply }] }
+  - unitId: R1
+    hookId: r1-serial-routing-assembly
+    unitState: not-ready
+    notReadyReason: 运行时组装占位段，等待 assembly fact producer
+    objectives: [{ objectiveId: routing-target-delivery }]
+  - unitId: R2
+    hookId: r2-parallel-routing-assembly
+    unitState: not-ready
+    notReadyReason: 运行时组装占位段，等待 assembly fact producer
+    objectives: [{ objectiveId: routing-target-delivery }]
+  - { unitId: S1, hookId: s1-identity-declaration, unitState: evaluable, objectives: [{ objectiveId: identity-truth }] }
+  - { unitId: S2, hookId: s2-limit-declaration, unitState: evaluable, objectives: [{ objectiveId: capability-boundary }] }
+  - { unitId: S3, hookId: s3-pack-capability-mask, unitState: evaluable, objectives: [{ objectiveId: capability-boundary }] }
+  - { unitId: S4, hookId: s4-collaboration-format, unitState: evaluable, objectives: [{ objectiveId: routing-target-delivery }] }
+  - { unitId: S5, hookId: s5-teammate-roster, unitState: evaluable, objectives: [{ objectiveId: teammate-awareness }] }
+  - { unitId: S6, hookId: s6-workflow-triggers, unitState: evaluable, objectives: [{ objectiveId: workflow-context-supply }] }
+  - { unitId: S7, hookId: s7-pack-workflow, unitState: evaluable, objectives: [{ objectiveId: workflow-context-supply }] }
+  - { unitId: S8, hookId: s8-operator-reference, unitState: evaluable, objectives: [{ objectiveId: operator-preference-alignment }] }
+  - { unitId: S9, hookId: s9-governance-summary, unitState: evaluable, objectives: [{ objectiveId: governance-authority-freshness }] }
+  - { unitId: S10, hookId: s10-guardrails, unitState: evaluable, objectives: [{ objectiveId: safety-data-boundary }] }
+  - { unitId: S11, hookId: s11-default-behavior, unitState: evaluable, objectives: [{ objectiveId: operator-preference-alignment }] }
+  - { unitId: S12, hookId: s12-world-driver, unitState: evaluable, objectives: [{ objectiveId: world-state-fidelity }] }
+  - { unitId: S13, hookId: s13-mcp-tool-documentation, unitState: evaluable, objectives: [{ objectiveId: tool-access-correct-use }] }

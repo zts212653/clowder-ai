@@ -80,7 +80,7 @@ describe('F280 wait state machine', () => {
 
     assert.equal(result.applied, true);
     assert.equal(result.state.waitOutcome?.reason, 'expired');
-    assert.equal(result.state.waitOutcome?.delivery, 'not_applicable');
+    assert.equal(result.state.waitOutcome?.delivery, 'pending');
   });
 
   it('owner change terminalizes the old generation silently', async () => {

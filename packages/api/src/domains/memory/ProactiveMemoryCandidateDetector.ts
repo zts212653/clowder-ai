@@ -96,8 +96,7 @@ export class ProactiveMemoryCandidateDetector {
   private isEligibleMessageShape(message: StoredMessage, ownerUserId: string): boolean {
     return (
       message.userId === ownerUserId &&
-      message.catId === null &&
-      message.source === undefined &&
+      (message.from ? message.from.kind === 'user' : message.catId === null && message.source === undefined) &&
       isDelivered(message) &&
       !message.deletedAt &&
       !message._tombstone &&

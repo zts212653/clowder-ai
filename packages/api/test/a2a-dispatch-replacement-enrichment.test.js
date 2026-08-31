@@ -7,6 +7,7 @@ import {
   createA2ADispositionAuth as auth,
   createA2ADispositionHarness as harness,
 } from './helpers/a2a-dispatch-disposition-harness.js';
+import { canonicalTestMessageInput } from './helpers/message-from-fixtures.js';
 
 function throwForSuccessor(messageStore, successorId, failure) {
   const getById = messageStore.getById.bind(messageStore);
@@ -19,14 +20,16 @@ function throwForSuccessor(messageStore, successorId, failure) {
 describe('F167 A2A replacement metadata enrichment', () => {
   test('handed replacement verdict survives optional successor metadata lookup failure', async () => {
     const h = await harness();
-    const successor = h.messageStore.append({
-      userId: 'user-1',
-      catId: createCatId('opus'),
-      content: '@codex-sol continue despite unavailable enrichment',
-      mentions: [createCatId('codex-sol')],
-      timestamp: 1_500,
-      threadId: 'thread-1',
-    });
+    const successor = h.messageStore.append(
+      canonicalTestMessageInput({
+        userId: 'user-1',
+        catId: createCatId('opus'),
+        content: '@codex-sol continue despite unavailable enrichment',
+        mentions: [createCatId('codex-sol')],
+        timestamp: 1_500,
+        threadId: 'thread-1',
+      }),
+    );
     await h.ingest.record(
       buildHandedEvent({
         threadId: 'thread-1',
@@ -55,14 +58,16 @@ describe('F167 A2A replacement metadata enrichment', () => {
 
   test('handed-to-operator replacement verdict survives optional successor metadata lookup failure', async () => {
     const h = await harness();
-    const successor = h.messageStore.append({
-      userId: 'user-1',
-      catId: createCatId('codex-sol'),
-      content: '@co-creator successor coordination',
-      mentions: [],
-      timestamp: 1_500,
-      threadId: 'thread-1',
-    });
+    const successor = h.messageStore.append(
+      canonicalTestMessageInput({
+        userId: 'user-1',
+        catId: createCatId('codex-sol'),
+        content: '@co-creator successor coordination',
+        mentions: [],
+        timestamp: 1_500,
+        threadId: 'thread-1',
+      }),
+    );
     await h.ingest.record(
       buildHandedCvoEvent({
         threadId: 'thread-1',

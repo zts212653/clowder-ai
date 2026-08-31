@@ -40,6 +40,7 @@ import { formatSuggestedCrossPostActionLines } from './cross-post-suggestion-for
 import { withDegradation } from './degradation.js';
 import type { ToolResult } from './file-tools.js';
 import { errorResult, successResult } from './file-tools.js';
+import { reportGuardRejection } from './guard-rejection-report.js';
 import { getInvocationAuthSignal, resolveInvocationCredentials } from './invocation-auth.js';
 import { createMemoryCueTools } from './memory-cue-tools.js';
 import { createPersonMemoryLifecycleTools } from './person-memory-lifecycle-tools.js';
@@ -236,6 +237,12 @@ export async function callbackPost(
   options?: CallbackTransportOptions & {
     agentKeyCatId?: string;
     forceAgentKey?: boolean;
+    // 砚砚 2026-06-17 P1: per-call overrides for long, side-effectful routes
+    // (cat_cafe_publish_verdict). fetchTimeoutMs widens the per-attempt abort
+    // bound; retryDelaysMs=[] disables auto-retry so the route is not POSTed
+    // concurrently (overlapping publishes race on the same branch).
+    fetchTimeoutMs?: number;
+    retryDelaysMs?: number[];
   },
 ): Promise<ToolResult> {
   const config = getCallbackConfig({
@@ -253,8 +260,8 @@ export async function callbackPost(
     },
     {
       enableOutbox: options?.enableOutbox === true,
-      retryDelaysMs: options?.retryDelaysMs,
-      fetchTimeoutMs: options?.fetchTimeoutMs,
+      ...(options?.fetchTimeoutMs !== undefined ? { fetchTimeoutMs: options.fetchTimeoutMs } : {}),
+      ...(options?.retryDelaysMs !== undefined ? { retryDelaysMs: options.retryDelaysMs } : {}),
     },
   );
   if (result.ok) return successResult(JSON.stringify(result.data));
@@ -1404,10 +1411,33 @@ export async function handleCrossPostMessage(input: {
   // ergonomics + closing the agent-key API-layer gap.
   const hasLineStartMention = hasPlausibleLineStartMention(input.content);
   if (!hasTargetCats && !hasLineStartMention) {
+    // F257 V2 (AC-B1 dual entry): this rejection happens client-locally and
+    // never reaches an API route — report it to the harness ledger so the
+    // pot's firing is visible. Fire-and-forget, fail-open: reporting never
+    // affects the error the cat sees. Callers without a resolvable config
+    // are skipped (config null → nothing to report against).
+    const guardTransportConfig = getCallbackConfig(
+      input.agentKeyCatId ? { agentKeyCatId: input.agentKeyCatId } : undefined,
+    );
+    if (guardTransportConfig) {
+      reportGuardRejection(
+        { apiUrl: guardTransportConfig.apiUrl, headers: buildAuthHeaders(guardTransportConfig) },
+        {
+          kind: 'http_policy_reject',
+          guardId: 'cross_post_routing_credentials',
+          sourceTool: 'cross_post_message',
+          normalizedReason: 'no_routing_credentials',
+          // Agent-key callers have no principal thread binding — pass the
+          // target-thread coordinate for server-side scoped verification.
+          threadId: input.threadId,
+        },
+      );
+    }
     return errorResult(
       'cross_post_message requires routing credentials (F193 AC-A4). ' +
         'Pass targetCats: ["catHandle"] OR add a line-start @catHandle in content. ' +
-        'Without routing, the cross-thread message would land in the target thread but trigger no cat session.',
+        'Without routing, the cross-thread message would land in the target thread but trigger no cat session. ' +
+        '[ledger: mcp/cross-post-routing-credentials]',
     );
   }
   if (input.action) {
@@ -1700,6 +1730,29 @@ const githubWaitPredicateInputSchema = z.discriminatedUnion('kind', [
       reviewThreadIds: z.array(z.string().min(1)).min(1).max(20),
     })
     .strict(),
+  z
+    .object({
+      kind: z.literal('pr_conversation_comment_added'),
+      authorLogins: z
+        .array(z.string().trim().min(1).max(100))
+        .min(1)
+        .max(20)
+        .superRefine((authorLogins, ctx) => {
+          const normalized = new Set<string>();
+          for (const [index, authorLogin] of authorLogins.entries()) {
+            const key = authorLogin.toLowerCase();
+            if (normalized.has(key)) {
+              ctx.addIssue({
+                code: z.ZodIssueCode.custom,
+                path: [index],
+                message: 'authorLogins must be unique case-insensitively; example: ["maintainer-login"]',
+              });
+            }
+            normalized.add(key);
+          }
+        }),
+    })
+    .strict(),
   z.object({ kind: z.literal('pr_ci_terminal') }).strict(),
   z.object({ kind: z.literal('pr_became_conflicting') }).strict(),
 ]);
@@ -1722,7 +1775,14 @@ export const registerPrTrackingInputSchema = {
     .number()
     .int()
     .positive()
-    .describe('Unix timestamp in milliseconds when responsibility expires without deleting history.'),
+    .optional()
+    .describe('Unix timestamp in milliseconds when responsibility expires. Omit for no time-based termination.'),
+  autoRenew: z
+    .boolean()
+    .optional()
+    .describe(
+      'When true (default), the lifecycle auto-renews with a fresh baseline after each delivery. Set to false for single-fire semantics.',
+    ),
 };
 
 export async function handleRegisterPrTracking(input: {
@@ -1733,11 +1793,13 @@ export async function handleRegisterPrTracking(input: {
     | { kind: 'pr_review_result_available'; triggerCommentId?: number }
     | { kind: 'pr_review_decision_changed' }
     | { kind: 'pr_review_thread_changed'; reviewThreadIds: string[] }
+    | { kind: 'pr_conversation_comment_added'; authorLogins: string[] }
     | { kind: 'pr_ci_terminal' }
     | { kind: 'pr_became_conflicting' }
   >;
   nextStep: string;
-  expiresAt: number;
+  expiresAt?: number;
+  autoRenew?: boolean;
   agentKeyCatId?: string | undefined;
 }): Promise<ToolResult> {
   // F174 Phase E (AC-E2/E5): explicit kind:'none'. PR tracking is one-shot
@@ -1752,7 +1814,8 @@ export async function handleRegisterPrTracking(input: {
           prNumber: input.prNumber,
           when: input.when,
           nextStep: input.nextStep,
-          expiresAt: input.expiresAt,
+          ...(input.expiresAt !== undefined ? { expiresAt: input.expiresAt } : {}),
+          ...(input.autoRenew !== undefined ? { autoRenew: input.autoRenew } : {}),
         },
         agentKeyOptions(input),
       ),
@@ -1767,7 +1830,12 @@ export const registerIssueTrackingInputSchema = {
   when: z
     .array(
       z.discriminatedUnion('kind', [
-        z.object({ kind: z.literal('issue_comment_added') }).strict(),
+        z
+          .object({
+            kind: z.literal('issue_comment_added'),
+            authorLogins: z.array(z.string().trim().min(1).max(100)).min(1).max(20).optional(),
+          })
+          .strict(),
         z.object({ kind: z.literal('issue_author_commented') }).strict(),
       ]),
     )
@@ -1779,15 +1847,27 @@ export const registerIssueTrackingInputSchema = {
     .min(1)
     .max(500)
     .describe('What to do after a match. Display-only text; never parsed as wake policy.'),
-  expiresAt: z.number().int().positive().describe('Unix timestamp in milliseconds when responsibility expires.'),
+  expiresAt: z
+    .number()
+    .int()
+    .positive()
+    .optional()
+    .describe('Unix timestamp in milliseconds when responsibility expires. Omit for no time-based termination.'),
+  autoRenew: z
+    .boolean()
+    .optional()
+    .describe(
+      'When true (default), the lifecycle auto-renews with a fresh baseline after each delivery. Set to false for single-fire semantics.',
+    ),
 };
 
 export async function handleRegisterIssueTracking(input: {
   repoFullName: string;
   issueNumber: number;
-  when: Array<{ kind: 'issue_comment_added' } | { kind: 'issue_author_commented' }>;
+  when: Array<{ kind: 'issue_comment_added'; authorLogins?: string[] } | { kind: 'issue_author_commented' }>;
   nextStep: string;
-  expiresAt: number;
+  expiresAt?: number;
+  autoRenew?: boolean;
   agentKeyCatId?: string | undefined;
 }): Promise<ToolResult> {
   return withDegradation({
@@ -1800,7 +1880,8 @@ export async function handleRegisterIssueTracking(input: {
           issueNumber: input.issueNumber,
           when: input.when,
           nextStep: input.nextStep,
-          expiresAt: input.expiresAt,
+          ...(input.expiresAt !== undefined ? { expiresAt: input.expiresAt } : {}),
+          ...(input.autoRenew !== undefined ? { autoRenew: input.autoRenew } : {}),
         },
         agentKeyOptions(input),
       ),
@@ -2865,7 +2946,7 @@ export async function handleHoldBall(input: {
       ...(hasWakeWhen ? { wakeWhen: input.wakeWhen } : {}),
       ...(input.waitSourceRef ? { waitSourceRef: input.waitSourceRef } : {}),
     },
-    agentKeyOptions(input),
+    { ...agentKeyOptions(input), retryDelaysMs: [] },
   );
 
   // F254 B2: Check for unresolved freshness notices after successful hold_ball.
@@ -3378,7 +3459,7 @@ export const callbackTools = [
       'NOT for: generic PR activity, bare @codex review chatter, arbitrary comments, another cat’s responsibility, or a different PR subject. ' +
       'Output: validates subject/owner, freezes a live GitHub baseline, and atomically installs the next generation. Registration history is baseline, never a wake. ' +
       'GOTCHA: For exact-HEAD external PR review, run the Review Entry Mode Classifier before registration: formal instructions containing a no-comment / do-not-comment-on-GitHub directive fail closed; only explicit advisory_read_only may stay private, and advisory must never claim review-complete. ' +
-      'GOTCHA: `when` is 1–4 flat any-of typed predicates. `nextStep` is display-only and never parsed. `expiresAt` is required and does not delete task history.',
+      'GOTCHA: `when` is 1–4 flat any-of typed predicates. `nextStep` is display-only and never parsed. `expiresAt` is optional; omit for indefinite tracking. Does not delete task history.',
     inputSchema: registerPrTrackingInputSchema,
     handler: handleRegisterPrTracking,
     governance: {
@@ -3397,7 +3478,7 @@ export const callbackTools = [
       'Use when: you can name the exact typed issue condition that changes your next action: any new comment, or a comment by the exact issue author. ' +
       'NOT for: generic issue activity, actor-type guessing, source prose, another cat’s responsibility, or a different issue subject. ' +
       'Output: validates subject/owner, freezes a live issue baseline, and atomically installs the next generation. Registration history is baseline, never a wake. ' +
-      'GOTCHA: `when` is a bounded typed predicate set. `nextStep` is display-only and never parsed. `expiresAt` is required and does not delete task history.',
+      'GOTCHA: `when` is a bounded typed predicate set. `nextStep` is display-only and never parsed. `expiresAt` is optional; omit for indefinite tracking. Does not delete task history.',
     inputSchema: registerIssueTrackingInputSchema,
     handler: handleRegisterIssueTracking,
     governance: {

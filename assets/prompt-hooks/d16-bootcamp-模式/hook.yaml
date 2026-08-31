@@ -13,6 +13,23 @@ resolver: D16BootcampResolver
 inputs:
   - bootcampMode
 
+# Variable metadata (canonical source for Console editor)
+variables:
+  - name: THREAD_PART
+    description: thread 信息片段
+    placeholder: ""
+  - name: PHASE
+    description: 当前阶段
+    placeholder: ""
+  - name: LEAD_CAT_PART
+    description: 主导猫信息片段
+    placeholder: ""
+  - name: TASK_PART
+    description: 任务信息片段
+    placeholder: ""
+  - name: MEMBERS_PART
+    description: 成员信息片段
+    placeholder: ""
 # Override constraints
 disableable: true
 

@@ -18,13 +18,12 @@
  * 虽然参数可选（兼容测试），但生产代码必须显式传入。
  */
 
-import type { CatId, CatRoutingError, MessageContent } from '@cat-cafe/shared';
+import type { CatId, CatRoutingError, MessageContent, MessageFrom } from '@cat-cafe/shared';
 import { catRegistry, escapeRegExp } from '@cat-cafe/shared';
 import type { SessionStore } from '@cat-cafe/shared/utils';
 import { context as ctxApi, SpanStatusCode, trace } from '@opentelemetry/api';
 import { getDefaultCatId, isCatAvailable } from '../../../../../config/cat-config-loader.js';
 import { createModuleLogger } from '../../../../../infrastructure/logger.js';
-import type { CallerTraceContext } from '../../../../../infrastructure/telemetry/genai-semconv.js';
 import {
   ROUTING_INTENT,
   ROUTING_STRATEGY,
@@ -41,7 +40,7 @@ import type { TranscriptReader } from '../../session/TranscriptReader.js';
 import type { TranscriptWriter } from '../../session/TranscriptWriter.js';
 import { DeliveryCursorStore } from '../../stores/ports/DeliveryCursorStore.js';
 import type { IDraftStore } from '../../stores/ports/DraftStore.js';
-import type { IMessageStore, StoredMessage } from '../../stores/ports/MessageStore.js';
+import { type IMessageStore, routedProvenance, type StoredMessage } from '../../stores/ports/MessageStore.js';
 import type { ISessionChainStore } from '../../stores/ports/SessionChainStore.js';
 import type { ITaskStore } from '../../stores/ports/TaskStore.js';
 import type { IThreadStore, ThreadRoutingPolicyV1, ThreadRoutingScope } from '../../stores/ports/ThreadStore.js';
@@ -56,17 +55,13 @@ import {
 } from '../invocation/invocation-capacity-snapshot.js';
 import type { TaskProgressStore } from '../invocation/TaskProgressStore.js';
 import type { AgentRegistry } from '../registry/AgentRegistry.js';
-import type {
-  A2ASlotTrackingOptions,
-  PersistenceContext,
-  RouteOptions,
-  RouteStrategyDeps,
-} from '../routing/route-helpers.js';
+import type { RouteExecutionOptions, RouteOptions, RouteStrategyDeps } from '../routing/route-helpers.js';
 import { routeParallel } from '../routing/route-parallel.js';
 import { routeSerial } from '../routing/route-serial.js';
-import { resolveCatTarget } from './cat-target-resolver.js';
+import { buildAmbiguousCandidates, groupRoutingTokenHolders, resolveCatTarget } from './cat-target-resolver.js';
 import { appendContextAttachmentsToPrompt } from './context-attachment-prompt.js';
-import type { HumanDispositionInvocationOrigin } from './human-disposition-invocation-origin.js';
+import { type RoutingAttemptBatch, RoutingAttemptCollector, type RoutingTokenSpan } from './routing-attempt.js';
+import { normalizeSpeechMentionsWithMap } from './speech-mention-map.js';
 
 const log = createModuleLogger('agent-router');
 const routeTracer = trace.getTracer('cat-cafe-api', '0.1.0');
@@ -122,6 +117,7 @@ interface ParsedMention {
 interface MentionPattern {
   pattern: string;
   catId: CatId;
+  contenders?: readonly CatId[];
 }
 
 type MarkdownMentionMarker = '*' | '_';
@@ -396,12 +392,45 @@ function hasDomainSuffixedMentionPatternAt(message: string, pos: number, pattern
   });
 }
 
+interface UserMentionDraftContext {
+  readonly collector: RoutingAttemptCollector;
+  readonly mapSpan?: (span: RoutingTokenSpan) => RoutingTokenSpan;
+}
+
+interface UserMentionDraftRef {
+  readonly collector: RoutingAttemptCollector;
+  readonly span: RoutingTokenSpan;
+  readonly token: string;
+}
+
+function buildUserMentionDraft(
+  message: string,
+  position: number,
+  entry: MentionPattern,
+  ctx: UserMentionDraftContext | undefined,
+): UserMentionDraftRef | undefined {
+  if (!ctx) return undefined;
+  const end = matchMentionPatternEnd(message, position, entry.pattern) ?? position + entry.pattern.length;
+  const scanSpan = { start: position, end };
+  const span = ctx.mapSpan ? ctx.mapSpan(scanSpan) : scanSpan;
+  return { collector: ctx.collector, span, token: message.slice(position, end) };
+}
+
+const USER_HANDLE_CONTINUATION_RE = /^[\p{L}\p{N}_.-]+/u;
+
+function takeHandleToken(message: string, position: number): { handle: string; span: RoutingTokenSpan } | null {
+  const handle = message.slice(position + 1).match(USER_HANDLE_CONTINUATION_RE)?.[0];
+  if (!handle) return null;
+  return { handle, span: { start: position, end: position + 1 + handle.length } };
+}
+
 function recordRouteLineMentions(
   message: string,
   patterns: readonly MentionPattern[],
   seenCats: Set<string>,
   mentions: ParsedMention[],
   routingWarnings: CatRoutingError[],
+  draftCtx?: UserMentionDraftContext,
 ): void {
   const excluded = buildMentionExclusionSpans(message);
   forEachRouteLineMentionCandidate(message, (_line, lineOffset, candidate) => {
@@ -411,8 +440,32 @@ function recordRouteLineMentions(
     const matched = findMentionPatternAt(message, position, patterns, (end) =>
       skipClosingRouteMarkdownMarkers(message, end, openingMarkers),
     );
-    if (matched) recordResolvedMention(matched.catId, position, seenCats, mentions, routingWarnings);
+    if (!matched) return;
+    if (matched.contenders && matched.contenders.length > 1) {
+      recordAmbiguousMention(matched, position, message, routingWarnings, draftCtx);
+      return;
+    }
+    const draft = buildUserMentionDraft(message, position, matched, draftCtx);
+    recordResolvedMention(matched.catId, position, seenCats, mentions, routingWarnings, draft);
   });
+}
+
+function recordAmbiguousMention(
+  matched: MentionPattern,
+  position: number,
+  message: string,
+  routingWarnings: CatRoutingError[],
+  draftCtx?: UserMentionDraftContext,
+): void {
+  const draft = buildUserMentionDraft(message, position, matched, draftCtx);
+  draft?.collector.add(draft.span, draft.token, 'ambiguous');
+  if (!routingWarnings.some((warning) => warning.kind === 'mention_ambiguous' && warning.mention === matched.pattern)) {
+    routingWarnings.push({
+      kind: 'mention_ambiguous',
+      mention: matched.pattern,
+      candidates: buildAmbiguousCandidates(matched.contenders ?? []),
+    });
+  }
 }
 
 function recordResolvedMention(
@@ -421,10 +474,12 @@ function recordResolvedMention(
   seenCats: Set<string>,
   mentions: ParsedMention[],
   routingWarnings: CatRoutingError[],
+  draft?: UserMentionDraftRef,
 ): void {
   const key = catId as string;
   const resolved = resolveCatTarget(key);
   if ('error' in resolved) {
+    draft?.collector.add(draft.span, draft.token, 'disabled_cat', catId);
     if (!seenCats.has(key)) {
       seenCats.add(key);
       routingWarnings.push(resolved.error);
@@ -433,11 +488,13 @@ function recordResolvedMention(
   }
 
   if (!seenCats.has(key)) {
+    draft?.collector.add(draft.span, draft.token, 'resolved', catId);
     seenCats.add(key);
     mentions.push({ catId, position });
     return;
   }
 
+  draft?.collector.add(draft.span, draft.token, 'duplicate', catId);
   const existing = mentions.find((mention) => String(mention.catId) === key);
   if (existing && position < existing.position) {
     existing.position = position;
@@ -449,12 +506,17 @@ function recordUnknownMentionWarning(
   position: number,
   seenCats: Set<string>,
   routingWarnings: CatRoutingError[],
+  draftCtx?: UserMentionDraftContext,
 ): void {
-  const handle = message.slice(position + 1).match(/^([a-z0-9_.-]+)/)?.[1];
-  if (!handle) return;
-  if (DOMAIN_LIKE_UNKNOWN_HANDLE_RE.test(handle)) return;
-  const key = `@unknown:${handle}`;
-  const resolved = resolveCatTarget(handle);
+  const token = takeHandleToken(message, position);
+  if (!token) return;
+  if (DOMAIN_LIKE_UNKNOWN_HANDLE_RE.test(token.handle)) {
+    draftCtx?.collector.add(token.span, message.slice(token.span.start, token.span.end), 'domain_suffixed_skip');
+    return;
+  }
+  draftCtx?.collector.add(token.span, message.slice(token.span.start, token.span.end), 'unknown_token');
+  const key = `@unknown:${token.handle}`;
+  const resolved = resolveCatTarget(token.handle);
   if ('error' in resolved && !seenCats.has(key)) {
     seenCats.add(key);
     routingWarnings.push(resolved.error);
@@ -752,12 +814,14 @@ export class AgentRouter {
     const MAX_PAGES = 10;
     const userMsgs: string[] = [];
     type MsgLike = {
+      from?: MessageFrom;
       catId?: string | null;
       userId?: string;
       content?: string;
       id?: string;
       timestamp?: number;
       deliveredAt?: number;
+      timelineOrderAt?: number;
     };
     let cursorScore = Infinity;
     let cursorId: string | undefined;
@@ -769,9 +833,7 @@ export class AgentRouter {
       isFirstPage = false;
       if (batch.length === 0) break;
       const first = batch[0]!;
-      const dAt = typeof first.deliveredAt === 'number' ? first.deliveredAt : 0;
-      const ts = typeof first.timestamp === 'number' ? first.timestamp : 0;
-      const firstScore = dAt > 0 ? dAt : ts;
+      const firstScore = getTimelineOrderTime(first as StoredMessage);
       if (firstScore > 0 && firstScore < cursorScore) {
         cursorScore = firstScore;
         cursorId = first.id;
@@ -779,7 +841,7 @@ export class AgentRouter {
       for (let i = batch.length - 1; i >= 0 && userMsgs.length < TEXT_FRUSTRATION_WINDOW; i--) {
         const m = batch[i]!;
         // Cloud P2 fix: exclude all system users (scheduler, system, etc.), not just 'system'
-        if (!m.catId && !SYSTEM_USER_IDS.has(m.userId ?? '')) {
+        if (m.from ? m.from.kind === 'user' : !m.catId && !SYSTEM_USER_IDS.has(m.userId ?? '')) {
           userMsgs.push(typeof m.content === 'string' ? m.content : '');
         }
       }
@@ -938,16 +1000,45 @@ export class AgentRouter {
   }
 
   /**
+   * RFC #1356 head-time resolution for public conversation work.
+   *
+   * Queue ingress records target intent, but admission owns the final target
+   * set. Still-routable explicit members are preserved in their original
+   * order. If none remain (including a genuinely targetless input), the most
+   * recent completed lifecycle response is the only history-derived fallback;
+   * non-terminal and non-completed bubbles are deliberately ignored. The
+   * configured default is consulted only after that history lookup.
+   */
+  async resolveConversationTargetsAtAdmission(requestedCatIds: readonly string[], threadId: string): Promise<CatId[]> {
+    const explicit = this.filterRoutableCats(requestedCatIds);
+    if (explicit.length > 0) return explicit;
+
+    if (this.messageStore) {
+      const recent = await Promise.resolve(this.messageStore.getByThread(threadId, 100));
+      for (let index = recent.length - 1; index >= 0; index -= 1) {
+        const lifecycle = recent[index]?.lifecycle;
+        if (lifecycle?.kind !== 'response' || lifecycle.status !== 'completed') continue;
+        const target = this.filterRoutableCats([lifecycle.targetId]);
+        if (target.length > 0) return target;
+        break;
+      }
+    }
+
+    const fallback = this.pickFallbackCat(new Set());
+    return fallback ? [fallback] : [];
+  }
+
+  /**
    * F194 Phase Z5 AC-Z16: 无 @ fallback 优先用上一条 user message 的 mentions，
    * 不让 thread 里其他猫的发言（如 vision guard cross-post）抢路由 fallback。
    *
    * 用户心智模型："no @ = 继续刚才 @ 的猫里的一只"，不是"thread 里最近发言的猫"，
    * 也不是把上一轮 parallel mentions 全量延续成新一轮并发。
    *
-   * user message 严格定义：`userId !== null && catId === null`。
+   * user message 严格定义：`from.kind === 'user'`。
    *   - cat-to-cat handoff (A2A) 有 catId → NOT a user message
    *   - vision guard cross-post 有 catId → NOT a user message
-   *   - 系统消息 (userId === null && catId === null) → NOT a user message
+   *   - system/external/plugin sender → NOT a user message
    *
    * 时间窗口：回看最近 N=5 条 user messages，防止远古 mentions 主导 fallback。
    * 在 N 条窗口内找到的最近一条 user message 后，取第一个 routable mention
@@ -990,7 +1081,9 @@ export class AgentRouter {
         // — 与 message store 的 isSystemUserMessage 同口径，scheduler 触发的通知一并排除。
         // 否则一串 system/scheduler notice 会塞满 USER count limit，把真正的 user @ 挤出窗口外。
         const userIdStr = typeof m?.userId === 'string' ? m.userId : null;
-        const isUserMessage = userIdStr != null && !SYSTEM_USER_IDS.has(userIdStr) && m?.catId == null;
+        const isUserMessage = m.from
+          ? m.from.kind === 'user'
+          : userIdStr != null && !SYSTEM_USER_IDS.has(userIdStr) && m?.catId == null;
         if (!isUserMessage) continue;
         // F194 Phase Z5 R8 (cloud Codex round-4 P1) + R9 (砚砚 R8 P1): 1h cutoff 在 isUserMessage 之后
         // 判断，且用 effectiveOrderTime（与 cursor 同口径）。Redis markDelivered 把 thread zset score
@@ -1098,7 +1191,7 @@ export class AgentRouter {
 
   /** Normalize speech patterns like "at 布偶" → "@布偶" */
   private normalizeSpeechMentions(message: string): string {
-    return message.replace(this.speechMentionRe, (_match, prefix: string, mention: string) => `${prefix}@${mention}`);
+    return normalizeSpeechMentionsWithMap(message, this.speechMentionRe).text;
   }
 
   /**
@@ -1106,17 +1199,27 @@ export class AgentRouter {
    * F182 KD-10: match-time resolver check (different patch from a2a-mentions pattern-build stage).
    * Raw variant returns ParsedMention[] with position info for order-aware merging.
    */
-  private parseMentionsRaw(message: string): { mentions: ParsedMention[]; routing_warnings: CatRoutingError[] } {
+  private parseMentionsRaw(message: string): {
+    mentions: ParsedMention[];
+    routing_warnings: CatRoutingError[];
+    attemptBatch: RoutingAttemptBatch;
+  } {
     const lowerMessage = message.toLowerCase();
-    const speechRouteMessage = this.normalizeSpeechMentions(message).toLowerCase();
+    const speech = normalizeSpeechMentionsWithMap(message, this.speechMentionRe);
+    const speechRouteMessage = speech.text.toLowerCase();
 
-    // 1. Collect all mentionPatterns → catId, sorted by length descending
+    // 1. Collect the shared routing-token holder view, sorted by length descending.
+    // A multi-holder token stays ambiguous instead of silently selecting whichever
+    // cat happened to register first.
     const allPatterns: MentionPattern[] = [];
-    const allConfigs = catRegistry.getAllConfigs();
-    for (const config of Object.values(allConfigs)) {
-      for (const pattern of config.mentionPatterns) {
-        allPatterns.push({ pattern: pattern.toLowerCase(), catId: config.id });
-      }
+    for (const [pattern, holders] of groupRoutingTokenHolders()) {
+      const [first] = holders;
+      if (!first) continue;
+      allPatterns.push({
+        pattern,
+        catId: first,
+        ...(holders.length > 1 ? { contenders: holders } : {}),
+      });
     }
     allPatterns.sort((a, b) => b.pattern.length - a.pattern.length); // longest first
 
@@ -1125,37 +1228,110 @@ export class AgentRouter {
     const mentions: ParsedMention[] = [];
     const seenCats = new Set<string>();
     const routing_warnings: CatRoutingError[] = [];
+    const collector = new RoutingAttemptCollector();
+    const draftCtx: UserMentionDraftContext = { collector };
+    const groupKeywords = this.buildGroupMentionKeywordPatterns();
 
     // Route-line grammar handles markdown/list wrappers before the broader inline scan.
-    recordRouteLineMentions(lowerMessage, allPatterns, seenCats, mentions, routing_warnings);
+    recordRouteLineMentions(lowerMessage, allPatterns, seenCats, mentions, routing_warnings, draftCtx);
 
     // Explicit @mentions are user-authored route tokens and may appear anywhere in prose.
     forEachUserMentionCandidate(lowerMessage, (pos) => {
       const matched = findMentionPatternAt(lowerMessage, pos, allPatterns);
       if (matched) {
-        recordResolvedMention(matched.catId, pos, seenCats, mentions, routing_warnings);
+        if (matched.contenders && matched.contenders.length > 1) {
+          recordAmbiguousMention(matched, pos, lowerMessage, routing_warnings, draftCtx);
+          return;
+        }
+        const draft = buildUserMentionDraft(lowerMessage, pos, matched, draftCtx);
+        recordResolvedMention(matched.catId, pos, seenCats, mentions, routing_warnings, draft);
         return;
       }
+      const groupDrafted = this.draftGroupKeywordAt(lowerMessage, pos, groupKeywords, collector);
       // P2 (codex review 6949db49): an explicit @handle that matched NO registered cat is an
       // unknown handle (e.g. @kimi). Without this, parseAllMentions returns empty mentions + empty
       // warnings, so the caller silently falls back to the default cat with zero user feedback.
-      if (hasDomainSuffixedMentionPatternAt(lowerMessage, pos, allPatterns)) return;
-      recordUnknownMentionWarning(lowerMessage, pos, seenCats, routing_warnings);
+      if (hasDomainSuffixedMentionPatternAt(lowerMessage, pos, allPatterns)) {
+        if (!groupDrafted) {
+          const token = takeHandleToken(lowerMessage, pos);
+          if (token) {
+            collector.add(token.span, lowerMessage.slice(token.span.start, token.span.end), 'domain_suffixed_skip');
+          }
+        }
+        return;
+      }
+      recordUnknownMentionWarning(lowerMessage, pos, seenCats, routing_warnings, groupDrafted ? undefined : draftCtx);
     });
 
     // Speech aliases like "at 砚砚" stay limited to route-line syntax; otherwise ordinary
     // prose such as "look at codex docs" would become an implicit route.
     if (speechRouteMessage !== lowerMessage) {
-      recordRouteLineMentions(speechRouteMessage, allPatterns, seenCats, mentions, routing_warnings);
+      recordRouteLineMentions(speechRouteMessage, allPatterns, seenCats, mentions, routing_warnings, {
+        collector,
+        mapSpan: speech.mapSpanToRaw,
+      });
     }
 
     mentions.sort((a, b) => a.position - b.position);
-    return { mentions, routing_warnings };
+    return { mentions, routing_warnings, attemptBatch: collector.finalize('user', 'lowercased_message') };
   }
 
-  private parseMentions(message: string): { mentions: CatId[]; routing_warnings: CatRoutingError[] } {
+  private draftGroupKeywordAt(
+    message: string,
+    position: number,
+    groupKeywords: readonly string[],
+    collector: RoutingAttemptCollector,
+  ): boolean {
+    for (const keyword of groupKeywords) {
+      if (!message.startsWith(keyword, position)) continue;
+      const charAfter = message[position + keyword.length];
+      if (charAfter && !MENTION_TOKEN_BOUNDARY_RE.test(charAfter)) continue;
+      collector.add(
+        { start: position, end: position + keyword.length },
+        message.slice(position, position + keyword.length),
+        'group_keyword_skip',
+      );
+      return true;
+    }
+    return false;
+  }
+
+  private buildGroupMentionKeywordPatterns(): string[] {
+    const keywords = ['@全体参与者', '@thread', '@本帖', '@全体', '@all'];
+    for (const [breedId, info] of this.collectBreedGroups()) {
+      keywords.push(`@全体${info.displayName}`, `@all-${breedId}`);
+    }
+    return keywords.map((keyword) => keyword.toLowerCase()).sort((a, b) => b.length - a.length);
+  }
+
+  private parseMentions(message: string): {
+    mentions: CatId[];
+    routing_warnings: CatRoutingError[];
+    attemptBatch: RoutingAttemptBatch;
+  } {
     const raw = this.parseMentionsRaw(message);
-    return { mentions: raw.mentions.map((m) => m.catId), routing_warnings: raw.routing_warnings };
+    return {
+      mentions: raw.mentions.map((mention) => mention.catId),
+      routing_warnings: raw.routing_warnings,
+      attemptBatch: raw.attemptBatch,
+    };
+  }
+
+  private collectBreedGroups(): Map<string, { displayName: string; catIds: CatId[] }> {
+    const breedMap = new Map<string, { displayName: string; catIds: CatId[] }>();
+    for (const [catId, config] of Object.entries(catRegistry.getAllConfigs())) {
+      if (!config.breedId || !Object.hasOwn(this.services, catId)) continue;
+      const existing = breedMap.get(config.breedId);
+      if (existing) {
+        existing.catIds.push(catId as CatId);
+      } else {
+        breedMap.set(config.breedId, {
+          displayName: config.breedDisplayName ?? config.displayName,
+          catIds: [catId as CatId],
+        });
+      }
+    }
+    return breedMap;
   }
 
   /**
@@ -1169,6 +1345,7 @@ export class AgentRouter {
   private async parseGroupMentions(
     message: string,
     threadId: string,
+    options?: { allowFallback?: boolean },
   ): Promise<{ cats: CatId[]; matchPosition: number } | null> {
     const lowerMessage = this.normalizeSpeechMentions(message).toLowerCase();
     const excluded = buildMentionExclusionSpans(lowerMessage);
@@ -1208,6 +1385,7 @@ export class AgentRouter {
             const valid = this.filterRoutableCats(participants);
             if (valid.length > 0) return valid as CatId[];
           }
+          if (options?.allowFallback === false) return [];
           const fallback = this.pickFallbackCat(new Set());
           return fallback ? [fallback] : [];
         },
@@ -1215,22 +1393,7 @@ export class AgentRouter {
     }
 
     // Breed-scoped patterns: @全体{displayName} and @all-{breedId}
-    const allConfigs = catRegistry.getAllConfigs();
-    const breedMap = new Map<string, { displayName: string; catIds: CatId[] }>();
-    for (const [catId, config] of Object.entries(allConfigs)) {
-      if (!config.breedId) continue;
-      if (!Object.hasOwn(this.services, catId)) continue;
-      const existing = breedMap.get(config.breedId);
-      if (existing) {
-        existing.catIds.push(catId as CatId);
-      } else {
-        breedMap.set(config.breedId, {
-          displayName: config.breedDisplayName ?? config.displayName,
-          catIds: [catId as CatId],
-        });
-      }
-    }
-    for (const [breedId, info] of breedMap) {
+    for (const [breedId, info] of this.collectBreedGroups()) {
       const catIds = info.catIds;
       patterns.push({ pattern: `@全体${info.displayName}`, resolve: async () => this.filterRoutableCats(catIds) });
       patterns.push({ pattern: `@all-${breedId}`, resolve: async () => this.filterRoutableCats(catIds) });
@@ -1242,6 +1405,7 @@ export class AgentRouter {
       resolve: async () => {
         const allCats = this.filterRoutableCats(Object.keys(this.services));
         if (allCats.length > 0) return allCats;
+        if (options?.allowFallback === false) return [];
         const fallback = this.pickFallbackCat(new Set());
         return fallback ? [fallback] : [];
       },
@@ -1251,6 +1415,7 @@ export class AgentRouter {
       resolve: async () => {
         const allCats = this.filterRoutableCats(Object.keys(this.services));
         if (allCats.length > 0) return allCats;
+        if (options?.allowFallback === false) return [];
         const fallback = this.pickFallbackCat(new Set());
         return fallback ? [fallback] : [];
       },
@@ -1286,8 +1451,11 @@ export class AgentRouter {
   private async parseAllMentions(
     message: string,
     threadId: string,
-  ): Promise<{ mentions: CatId[]; routing_warnings: CatRoutingError[] }> {
-    const groupResult = await this.parseGroupMentions(message, threadId);
+    options?: { allowGroupFallback?: boolean },
+  ): Promise<{ mentions: CatId[]; routing_warnings: CatRoutingError[]; attemptBatch: RoutingAttemptBatch }> {
+    const groupResult = await this.parseGroupMentions(message, threadId, {
+      allowFallback: options?.allowGroupFallback,
+    });
     if (groupResult !== null) {
       // Position-aware union: merge individual mentions around group based on message position
       const individual = this.parseMentionsRaw(message);
@@ -1323,6 +1491,7 @@ export class AgentRouter {
       return {
         mentions: [...before, ...groupResult.cats, ...after],
         routing_warnings: filteredWarnings,
+        attemptBatch: individual.attemptBatch,
       };
     }
     return this.parseMentions(message);
@@ -1334,8 +1503,10 @@ export class AgentRouter {
    * Does NOT mutate thread participants.
    */
   private async peekTargets(message: string, threadId: string): Promise<CatId[]> {
-    const { mentions: mentionedCats } = await this.parseAllMentions(message, threadId);
+    const parsed = await this.parseAllMentions(message, threadId);
+    const mentionedCats = parsed.mentions;
     if (mentionedCats.length > 0) return mentionedCats;
+    if (parsed.routing_warnings.some((warning) => warning.kind === 'mention_ambiguous')) return [];
 
     if (this.threadStore) {
       const thread = await this.threadStore.get(threadId);
@@ -1403,7 +1574,8 @@ export class AgentRouter {
 
   /** Resolve target cats and persist new mentions as thread participants */
   private async resolveTargets(message: string, threadId: string): Promise<CatId[]> {
-    const { mentions: mentionedCats } = await this.parseAllMentions(message, threadId);
+    const parsed = await this.parseAllMentions(message, threadId);
+    const mentionedCats = parsed.mentions;
 
     if (mentionedCats.length > 0) {
       if (this.threadStore) {
@@ -1411,6 +1583,7 @@ export class AgentRouter {
       }
       return mentionedCats;
     }
+    if (parsed.routing_warnings.some((warning) => warning.kind === 'mention_ambiguous')) return [];
 
     if (this.threadStore) {
       const thread = await this.threadStore.get(threadId);
@@ -1552,20 +1725,36 @@ export class AgentRouter {
   async resolveTargetsAndIntent(
     message: string,
     threadId?: string,
-    options?: { persist?: boolean },
-  ): Promise<{ targetCats: CatId[]; intent: IntentResult; hasMentions: boolean; routing_warnings: CatRoutingError[] }> {
+    options?: { persist?: boolean; allowFallback?: boolean },
+  ): Promise<{
+    targetCats: CatId[];
+    intent: IntentResult;
+    hasMentions: boolean;
+    routing_warnings: CatRoutingError[];
+    attemptBatch: RoutingAttemptBatch;
+  }> {
     const resolvedThreadId = threadId ?? DEFAULT_THREAD_ID;
     // Capture both valid mentions AND routing_warnings (for disabled/not-found cats).
     // routing_warnings lets callers (e.g. messages.ts) surface explicit feedback when
     // a user's @mention silently fell back to a different cat (Thread 1 bug: @kimi→opus).
-    const allMentions = await this.parseAllMentions(message, resolvedThreadId);
+    const allMentions = await this.parseAllMentions(message, resolvedThreadId, {
+      allowGroupFallback: options?.allowFallback !== false,
+    });
     const hasMentions = allMentions.mentions.length > 0;
     const routing_warnings = allMentions.routing_warnings;
-    const targetCats = options?.persist
-      ? await this.resolveTargets(message, resolvedThreadId)
-      : await this.peekTargets(message, resolvedThreadId);
+    let targetCats: CatId[];
+    if (options?.allowFallback === false) {
+      targetCats = allMentions.mentions;
+      if (options.persist && targetCats.length > 0 && this.threadStore) {
+        await this.threadStore.addParticipants(resolvedThreadId, targetCats);
+      }
+    } else {
+      targetCats = options?.persist
+        ? await this.resolveTargets(message, resolvedThreadId)
+        : await this.peekTargets(message, resolvedThreadId);
+    }
     const intent = parseIntent(message, targetCats.length);
-    return { targetCats, intent, hasMentions, routing_warnings };
+    return { targetCats, intent, hasMentions, routing_warnings, attemptBatch: allMentions.attemptBatch };
   }
 
   /**
@@ -1580,11 +1769,12 @@ export class AgentRouter {
     contentBlocks?: readonly MessageContent[],
     uploadDir?: string,
     signal?: AbortSignal,
-    a2aOptions?: A2ASlotTrackingOptions & Pick<RouteOptions, 'deferA2AEnqueue' | 'ownerAuthProvenance'>,
+    a2aOptions?: Pick<RouteOptions, 'ownerAuthProvenance'>,
   ): AsyncIterable<AgentMessage> {
     const resolvedThreadId = threadId ?? DEFAULT_THREAD_ID;
-    const targetCats = await this.resolveTargets(message, resolvedThreadId);
-    const intent = parseIntent(message, targetCats.length);
+    const { targetCats, intent, attemptBatch } = await this.resolveTargetsAndIntent(message, resolvedThreadId, {
+      persist: true,
+    });
     const strategy = intent.intent === 'ideate' && targetCats.length > 1 ? 'parallel' : 'serial';
     const cleanMessage = appendContextAttachmentsToPrompt(stripIntentTags(message), contentBlocks);
 
@@ -1607,12 +1797,13 @@ export class AgentRouter {
     }
 
     const storedUserMessage = await this.messageStore.append({
+      from: { kind: 'user', userId },
       userId,
-      catId: null,
       content: message, // Store original (with tags) for audit
       mentions: targetCats,
       timestamp: Date.now(),
       threadId: resolvedThreadId,
+      ...routedProvenance(attemptBatch),
       ...(contentBlocks ? { contentBlocks } : {}),
     });
 
@@ -1710,59 +1901,7 @@ export class AgentRouter {
     userMessageId: string,
     targetCats: CatId[],
     intent: IntentResult,
-    options: A2ASlotTrackingOptions & {
-      /** Authentication-grade owner provenance; legacy/system producers pass unknown. */
-      ownerAuthProvenance: NonNullable<RouteOptions['ownerAuthProvenance']>;
-      /** F167 Phase T: turn-scoped protocol carrier for the structured stop gate. */
-      turnCustodyWake?: RouteOptions['turnCustodyWake'];
-      turnCustodyWakeForCat?: RouteOptions['turnCustodyWakeForCat'];
-      contentBlocks?: readonly MessageContent[];
-      uploadDir?: string;
-      signal?: AbortSignal;
-      /** F-parallel-cancel: per-cat signal resolver — route-parallel gives each concurrent
-       *  cat its own slot signal so canceling one cat does not abort its siblings. */
-      signalForCat?: (catId: CatId) => AbortSignal | undefined;
-      queueHasQueuedMessages?: (threadId: string) => boolean;
-      getQueuedFreshnessMessagesForCat?: RouteOptions['getQueuedFreshnessMessagesForCat'];
-      hasQueuedOrActiveAgentForCat?: (threadId: string, catId: string) => boolean;
-      hasPendingForCat?: (threadId: string, userId: string, catId: string) => boolean;
-      /** F185 Phase B: deferred A2A enqueue when fairness gate blocks text-scan expansion */
-      deferA2AEnqueue?: RouteOptions['deferA2AEnqueue'];
-      /** ADR-008 S3: pass a Map to collect cursor boundaries; caller acks after succeeded */
-      cursorBoundaries?: Map<string, string>;
-      /** P1-2: pass to track persistence failures across generator boundary */
-      persistenceContext?: PersistenceContext;
-      /** F167 Phase S: generation/terminal fence immediately before route output commit. */
-      beforeOutputCommit?: RouteOptions['beforeOutputCommit'];
-      /** F108: parentInvocationId for WorklistRegistry concurrent isolation */
-      parentInvocationId?: string;
-      /** Required for every direct invocation path so prompt exposure cannot silently bypass Queue custody. */
-      onPromptMessagesExposed: NonNullable<RouteOptions['onPromptMessagesExposed']>;
-      /** Exact persisted bodies already folded into `message` by the queue caller. */
-      persistedPromptMessageIds?: RouteOptions['persistedPromptMessageIds'];
-      /** Per-message ownership for partial incremental Queue windows. */
-      persistedPromptMessages?: RouteOptions['persistedPromptMessages'];
-      /** F281: required on typed first-party ingress; only direct_owner is injectable. */
-      humanDispositionInvocationOrigin: HumanDispositionInvocationOrigin;
-      /** F153: caller trace context for cross-route A2A propagation */
-      callerTraceContext?: CallerTraceContext;
-      /** Explicit A2A trigger message ID for queue-dispatched stream reply threading */
-      a2aTriggerMessageId?: string;
-      /** Server-owned caller identity paired with the exact A2A trigger. */
-      a2aCallerCatId?: string;
-      /** F222 P1: Whether this route is eligible for frustration auto-issue detection.
-       *  true/undefined = user-origin (eligible, default for backward compat).
-       *  false = agent/connector-origin (A2A handoff) — suppress detection. */
-      frustrationAutoIssueEligible?: boolean;
-      /** #949 P2: Whether verdict-without-pass warning fires at route end.
-       *  true/undefined = warn (default). false = suppress for connector-sourced flows only. */
-      verdictPassWarningEnabled?: boolean;
-      /** F254 B3: Freshness re-invoke enqueue for routing layer consumption */
-      freshnessReinvokeEnqueue?: RouteOptions['freshnessReinvokeEnqueue'];
-      freshnessSupplementId?: RouteOptions['freshnessSupplementId'];
-      freshnessSupplementRequiredMessageIds?: RouteOptions['freshnessSupplementRequiredMessageIds'];
-      toolExecutionPolicy?: RouteOptions['toolExecutionPolicy'];
-    },
+    options: RouteExecutionOptions,
   ): AsyncIterable<AgentMessage> {
     const cleanMessage = appendContextAttachmentsToPrompt(stripIntentTags(message), options.contentBlocks);
     const strategy = intent.intent === 'ideate' && targetCats.length > 1 ? 'parallel' : 'serial';
@@ -1853,51 +1992,17 @@ export class AgentRouter {
     }
 
     const strategyDeps = this.getStrategyDeps();
-    const routeOptions = {
-      ownerAuthProvenance: options.ownerAuthProvenance,
-      ...(options?.turnCustodyWake ? { turnCustodyWake: options.turnCustodyWake } : {}),
-      ...(options?.turnCustodyWakeForCat ? { turnCustodyWakeForCat: options.turnCustodyWakeForCat } : {}),
-      contentBlocks: options?.contentBlocks,
-      uploadDir: options?.uploadDir,
-      signal: options?.signal,
-      signalForCat: options?.signalForCat,
-      queueHasQueuedMessages: options?.queueHasQueuedMessages,
-      getQueuedFreshnessMessagesForCat: options?.getQueuedFreshnessMessagesForCat,
-      hasQueuedOrActiveAgentForCat: options?.hasQueuedOrActiveAgentForCat,
-      hasPendingForCat: options?.hasPendingForCat,
-      deferA2AEnqueue: options?.deferA2AEnqueue,
-      freshnessReinvokeEnqueue: options?.freshnessReinvokeEnqueue,
-      freshnessSupplementId: options?.freshnessSupplementId,
-      freshnessSupplementRequiredMessageIds: options?.freshnessSupplementRequiredMessageIds,
-      toolExecutionPolicy: options?.toolExecutionPolicy,
-      invocationController: options?.invocationController,
-      trackA2ASlot: options?.trackA2ASlot,
-      completeA2ASlots: options?.completeA2ASlots,
+    const { callerTraceContext: _callerTraceContext, ...strategyInputOptions } = options;
+    const routeOptions: RouteOptions = {
+      ...strategyInputOptions,
       promptTags: intent.promptTags,
       currentUserMessageId: userMessageId,
-      persistedPromptMessageIds: options?.persistedPromptMessageIds,
       persistedPromptMessages: options?.persistedPromptMessages?.map((persisted) => ({
         ...persisted,
         content: stripIntentTags(persisted.content),
       })),
-      a2aTriggerMessageId: options?.a2aTriggerMessageId,
-      a2aCallerCatId: options?.a2aCallerCatId,
-      humanDispositionInvocationOrigin: options.humanDispositionInvocationOrigin,
       thinkingMode,
-      ...(options?.cursorBoundaries ? { cursorBoundaries: options.cursorBoundaries } : {}),
-      ...(options?.persistenceContext ? { persistenceContext: options.persistenceContext } : {}),
-      ...(options?.beforeOutputCommit ? { beforeOutputCommit: options.beforeOutputCommit } : {}),
-      ...(options?.parentInvocationId ? { parentInvocationId: options.parentInvocationId } : {}),
-      ...(options?.onPromptMessagesExposed ? { onPromptMessagesExposed: options.onPromptMessagesExposed } : {}),
       routeSpan,
-      // F222 P1: thread provenance flag so route-serial/route-parallel can gate detection
-      ...(options?.frustrationAutoIssueEligible !== undefined
-        ? { frustrationAutoIssueEligible: options.frustrationAutoIssueEligible }
-        : {}),
-      // #949 P2: connector-sourced verdict-pass warning suppression
-      ...(options?.verdictPassWarningEnabled !== undefined
-        ? { verdictPassWarningEnabled: options.verdictPassWarningEnabled }
-        : {}),
     };
 
     try {

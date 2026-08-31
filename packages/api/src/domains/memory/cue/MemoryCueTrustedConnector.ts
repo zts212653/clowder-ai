@@ -16,7 +16,8 @@ export async function readTrustedConnectorMemoryCueSeeds(input: {
     stored.id !== input.messageId ||
     stored.threadId !== input.expectedThreadId ||
     stored.userId !== input.expectedUserId ||
-    stored.catId !== null ||
+    (stored.from ? stored.from.kind !== 'external' : stored.catId !== null) ||
+    (stored.from?.kind === 'external' && stored.from.connectorId !== 'github-ci') ||
     stored.source?.connector !== 'github-ci' ||
     stored.deletedAt !== undefined ||
     stored._tombstone

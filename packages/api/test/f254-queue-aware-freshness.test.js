@@ -15,6 +15,7 @@
 
 import assert from 'node:assert/strict';
 import { describe, it, mock } from 'node:test';
+import { canonicalTestMessageInput, canonicalTestQueueInput } from './helpers/message-from-fixtures.js';
 
 /** @type {typeof import('../dist/domains/cats/services/freshness/checkFreshnessForPostMessage.js')} */
 let wireModule;
@@ -47,17 +48,23 @@ describe('F254 Queue-Aware Freshness Gate', async () => {
 
   /** Message store that returns empty (simulating isDelivered filtering out queued msgs) */
   function makeMockMessageStore(messages = []) {
+    const canonicalMessages = messages.map((message) =>
+      canonicalTestMessageInput({ userId, threadId, content: '', mentions: [], timestamp: 0, ...message }),
+    );
     return {
-      getById: mock.fn(async (id) => messages.find((m) => m.id === id) ?? null),
-      getByThreadAfter: mock.fn(async () => messages),
-      getByThread: mock.fn(async () => messages),
+      getById: mock.fn(async (id) => canonicalMessages.find((m) => m.id === id) ?? null),
+      getByThreadAfter: mock.fn(async () => canonicalMessages),
+      getByThread: mock.fn(async () => canonicalMessages),
     };
   }
 
   /** Queue checker that reports pending queued messages */
   function makeMockQueueChecker(entries = []) {
+    const canonicalEntries = entries.map((entry) =>
+      canonicalTestQueueInput({ threadId, userId, targetCats: [catId], ...entry }),
+    );
     return {
-      getQueuedForThread: mock.fn(() => entries),
+      getQueuedForThread: mock.fn(() => canonicalEntries),
     };
   }
 
@@ -68,18 +75,21 @@ describe('F254 Queue-Aware Freshness Gate', async () => {
   describe('checkFreshnessForPostMessage with queueChecker', () => {
     it('preserves the exact parent fence through the provider-native Queue adapter', async () => {
       const queue = new queueModule.InvocationQueue();
-      queue.enqueue({
-        ownerAuthProvenance: 'strict',
-        threadId,
-        userId,
-        content: 'read this in the current parent',
-        source: 'user',
-        targetCats: [catId],
-        authorIntentByCatId: {
-          [catId]: { requested: 'continue_current', boundParentInvocationId: invocationId },
-        },
-        intent: 'execute',
-      });
+      queue.enqueue(
+        canonicalTestQueueInput({
+          kind: 'conversation_input',
+          ownerAuthProvenance: 'strict',
+          threadId,
+          userId,
+          content: 'read this in the current parent',
+          source: 'user',
+          targetCats: [catId],
+          authorIntentByCatId: {
+            [catId]: { requested: 'continue_current', boundParentInvocationId: invocationId },
+          },
+          intent: 'execute',
+        }),
+      );
 
       const result = await wireModule.checkFreshnessForPostMessage({
         userId,
@@ -540,15 +550,18 @@ describe('F254 Queue-Aware Freshness Gate', async () => {
 
     it('forwards after same cat has marked the queued entry seen', async () => {
       const queue = new queueModule.InvocationQueue();
-      const enqueued = queue.enqueue({
-        ownerAuthProvenance: 'unknown',
-        threadId,
-        userId,
-        content: 'queued body already read',
-        source: 'user',
-        targetCats: [catId],
-        intent: 'execute',
-      });
+      const enqueued = queue.enqueue(
+        canonicalTestQueueInput({
+          kind: 'conversation_input',
+          ownerAuthProvenance: 'unknown',
+          threadId,
+          userId,
+          content: 'queued body already read',
+          source: 'user',
+          targetCats: [catId],
+          intent: 'execute',
+        }),
+      );
       assert.equal(queue.markQueuedSeen(threadId, userId, enqueued.entry.id, catId), true);
 
       const cursorStore = makeMockCursorStore(msg1);
@@ -930,15 +943,18 @@ describe('F254 Queue-Aware Freshness Gate', async () => {
 
     it('returns null after same cat has marked the queued entry seen', async () => {
       const queue = new queueModule.InvocationQueue();
-      const enqueued = queue.enqueue({
-        ownerAuthProvenance: 'unknown',
-        threadId,
-        userId,
-        content: 'queued body already read',
-        source: 'user',
-        targetCats: [catId],
-        intent: 'execute',
-      });
+      const enqueued = queue.enqueue(
+        canonicalTestQueueInput({
+          kind: 'conversation_input',
+          ownerAuthProvenance: 'unknown',
+          threadId,
+          userId,
+          content: 'queued body already read',
+          source: 'user',
+          targetCats: [catId],
+          intent: 'execute',
+        }),
+      );
       assert.equal(queue.markQueuedSeen(threadId, userId, enqueued.entry.id, catId), true);
 
       const checker = new unseenCheckerModule.ThreadUnseenChecker({

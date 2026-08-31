@@ -13,6 +13,11 @@ resolver: S7PackWorkflowsResolver
 inputs:
   - packWorkflows
 
+# Variable metadata (canonical source for Console editor)
+variables:
+  - name: PACK_WORKFLOWS_BLOCK
+    description: pack 工作流块
+    placeholder: ""
 # Override constraints
 disableable: true
 

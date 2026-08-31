@@ -71,6 +71,30 @@ export function buildVoidPassEvent(input: VoidPassEventInput): BallCustodyEvent 
   };
 }
 
+export interface VoidAckEventInput {
+  threadId: string;
+  /** 触发虚空接球检测的消息 id（A2A 接球但无持久触发器绑定） */
+  messageId: string;
+  /** A2A trigger message ID, retained as sender-side provenance when available. */
+  a2aTriggerMessageId?: string;
+  /** Unix ms */
+  at: number;
+}
+
+/** LI-005: A2A receiver ended without a durable trigger or routing exit. */
+export function buildVoidAckEvent(input: VoidAckEventInput): BallCustodyEvent {
+  return {
+    sourceEventId: `route:${input.messageId}:void_ack`,
+    subjectKey: `ball:thread:${input.threadId}`,
+    kind: 'ball.void_ack',
+    classification: 'state-changing',
+    payload: {
+      ...(input.a2aTriggerMessageId ? { a2aTriggerMessageId: input.a2aTriggerMessageId } : {}),
+    },
+    at: input.at,
+  };
+}
+
 export interface HandedCvoEventInput {
   fromCatId?: string;
   threadId: string;

@@ -3,9 +3,9 @@
  *
  * GET    /api/threads/:threadId/queue               → 列出队列条目
  * DELETE /api/threads/:threadId/queue/:entryId       → 撤回条目
- * POST   /api/threads/:threadId/queue/next          → 手动触发处理下一条
  * POST   /api/threads/:threadId/queue/steer-batch   → #1291 exact ordinary-user Batch Steer
  * POST   /api/threads/:threadId/queue/:entryId/steer → Steer queued entry（取消当前轮并以同一消息立即启动）
+ * POST   /api/threads/:threadId/queue/:entryId/append → Append queued entry into exact existing Active Run(s)
  * PATCH  /api/threads/:threadId/queue/:entryId/move → 重排序（上移/下移）
  * PATCH  /api/threads/:threadId/queue/reorder       → F175: 批量设置 position（拖拽重排）
  * DELETE /api/threads/:threadId/queue               → 清空队列
@@ -32,6 +32,7 @@ import {
   isSystemPinnedQueueEntry,
   type QueueEntry,
 } from '../domains/cats/services/agents/invocation/InvocationQueue.js';
+import { projectLifecycleAppendAction } from '../domains/cats/services/agents/invocation/lifecycle-append-projection.js';
 import type { QueuedMessageCustodyCoordinator } from '../domains/cats/services/agents/invocation/QueuedMessageCustodyCoordinator.js';
 import type { QueueProcessor } from '../domains/cats/services/agents/invocation/QueueProcessor.js';
 import type { IDraftStore } from '../domains/cats/services/stores/ports/DraftStore.js';
@@ -42,7 +43,12 @@ import type { ITurnExecutionStore } from '../domains/cats/services/stores/ports/
 import type { DynamicTaskStore } from '../infrastructure/scheduler/DynamicTaskStore.js';
 import { buildCancelMessages, type SocketManager } from '../infrastructure/websocket/index.js';
 import type { CliExecutionOwnerService, LiveCliExecutionOwner } from '../utils/cli-process-ownership.js';
-import { emitQueueUpdated, enrichQueueEntries, projectPublicQueueEntry } from '../utils/queue-enrichment.js';
+import {
+  emitQueueUpdated,
+  enrichQueueEntries,
+  isPublicQueueEntry,
+  projectPublicQueueEntry,
+} from '../utils/queue-enrichment.js';
 import { resolveUserId } from '../utils/request-identity.js';
 import { type LiveExecutionCandidate, registerActiveExecutionRoutes } from './active-execution-routes.js';
 import { getMultiMentionOrchestrator } from './callback-multi-mention-routes.js';
@@ -238,6 +244,23 @@ const steerBodySchema = z
   })
   .strict();
 
+const appendBodySchema = z
+  .object({
+    expectedQueueRevision: z.string().min(1),
+    expectedRuns: z
+      .array(
+        z
+          .object({
+            targetId: z.string().min(1),
+            invocationId: z.string().min(1),
+            responseMessageId: z.string().min(1),
+          })
+          .strict(),
+      )
+      .min(1),
+  })
+  .strict();
+
 const steerBatchBodySchema = z
   .object({
     entryIds: z.array(z.string().min(1)).min(2).max(5),
@@ -265,7 +288,9 @@ type ReminderRequestResolution =
   | { ok: false; status: 404 | 409 | 503; error: string; code: string };
 
 function projectQueueStartResult(result: { started: boolean; entry?: QueueEntry }) {
-  return result.entry ? { ...result, entry: projectPublicQueueEntry(result.entry) } : result;
+  return result.entry && isPublicQueueEntry(result.entry)
+    ? { ...result, entry: projectPublicQueueEntry(result.entry) }
+    : { started: result.started };
 }
 
 function resolveReminderRequest(input: {
@@ -401,7 +426,6 @@ export const queueRoutes: FastifyPluginAsync<QueueRoutesOptions> = async (app, o
       if (!cancelResult.cancelled && invocationTracker.has(threadId, steerCatId)) {
         return { ok: false, status: 409, error: '当前调用无法取消，无法立即执行', code: 'INVOCATION_CANCEL_FAILED' };
       }
-      queueProcessor.clearPause(threadId, steerCatId);
       queueProcessor.releaseSlot(threadId, steerCatId);
       return { ok: true, deferred: false };
     }
@@ -412,7 +436,6 @@ export const queueRoutes: FastifyPluginAsync<QueueRoutesOptions> = async (app, o
       return { ok: false, status: 409, error: '当前有其他用户的调用在执行，无法立即执行', code: 'INVOCATION_ACTIVE' };
     }
     if (!inflight) {
-      queueProcessor.clearPause(threadId, steerCatId);
       return { ok: true, deferred: false };
     }
 
@@ -420,7 +443,6 @@ export const queueRoutes: FastifyPluginAsync<QueueRoutesOptions> = async (app, o
     // a retirement barrier before awaiting durable terminalization; the old
     // coroutine loses its reservation immediately, while the complete group
     // remains visible and recoverable until every durable projection closes.
-    queueProcessor.clearPause(threadId, steerCatId);
     const retirement = await queueProcessor.retirePrestartProcessingGroup(threadId, steerCatId, userId);
     if (retirement === 'state_changed') {
       return { ok: false, status: 409, error: '启动中的队列状态已变化，请重试', code: 'PRESTART_STATE_CHANGED' };
@@ -479,7 +501,6 @@ export const queueRoutes: FastifyPluginAsync<QueueRoutesOptions> = async (app, o
     })) {
       socketManager.broadcastAgentMessage(message, input.threadId);
     }
-    queueProcessor.clearPause(input.threadId, input.catId);
     return { cancelled: true };
   };
 
@@ -500,7 +521,6 @@ export const queueRoutes: FastifyPluginAsync<QueueRoutesOptions> = async (app, o
       for (const message of buildCancelMessages({ ...cancelResult, catIds: [input.catId] })) {
         socketManager.broadcastAgentMessage(message, input.threadId);
       }
-      queueProcessor.clearPause(input.threadId, input.catId);
       queueProcessor.releaseSlot(input.threadId, input.catId);
     }
     return { cancelled: cancelResult.cancelled };
@@ -569,14 +589,61 @@ export const queueRoutes: FastifyPluginAsync<QueueRoutesOptions> = async (app, o
         deliverySemantics: 'undeclared' as const,
       },
     }));
-    const enrichedQueue = await enrichQueueEntries(invocationQueue.list(threadId, guard.userId), messageStore);
+    const queueEntries = invocationQueue.list(threadId, guard.userId);
+    const queueRevision = invocationQueue.snapshotRevision(threadId, guard.userId);
+    const enrichedQueue = await enrichQueueEntries(queueEntries, messageStore);
     return {
-      queue: enrichedQueue,
-      paused: queueProcessor.isPaused(threadId),
-      pauseReason: queueProcessor.getPauseReason(threadId),
+      queue: enrichedQueue.map((entry) => {
+        const internal = queueEntries.find((candidate) => candidate.id === entry.id);
+        if (!internal) return entry;
+        const projection = projectLifecycleAppendAction({
+          threadId,
+          userId: guard.userId,
+          queueRevision,
+          entry: internal,
+          invocationTracker,
+        });
+        return projection.available ? { ...entry, lifecycleActions: { append: projection.action } } : entry;
+      }),
+      queueRevision,
       activeInvocations,
     };
   });
+
+  app.post<{ Params: { threadId: string; entryId: string } }>(
+    '/api/threads/:threadId/queue/:entryId/append',
+    async (request, reply) => {
+      const { threadId, entryId } = request.params;
+      const guard = await guardThreadOwnership(request, reply, threadStore, threadId);
+      if (!guard) return;
+      const parsed = appendBodySchema.safeParse(request.body);
+      if (!parsed.success) {
+        reply.status(400);
+        return { error: 'Append 请求格式无效', code: 'INVALID_APPEND_REQUEST' };
+      }
+      const result = await queueProcessor.appendExactEntry({
+        threadId,
+        userId: guard.userId,
+        entryId,
+        ...parsed.data,
+      });
+      if (result.outcome === 'appended') return result;
+      const status = result.reason === 'custody_unavailable' ? 503 : result.reason === 'provider_rejected' ? 502 : 409;
+      reply.status(status);
+      return {
+        error:
+          result.reason === 'append_unavailable'
+            ? '当前 Agent Client 已不再接受 Append'
+            : result.reason === 'state_changed'
+              ? 'Queue 或 Active Run 已变化，请刷新后重试'
+              : result.reason === 'provider_rejected'
+                ? '部分或全部 Agent Client 拒绝了 Append；失败回执已保留'
+                : 'Append 持久化暂不可用',
+        code: result.reason.toUpperCase(),
+        ...(result.rejectedTargetIds ? { rejectedTargetIds: result.rejectedTargetIds } : {}),
+      };
+    },
+  );
 
   // DELETE /api/threads/:threadId/queue/:entryId
   app.delete<{ Params: { threadId: string; entryId: string }; Querystring: { deleteMessage?: string } }>(
@@ -589,7 +656,7 @@ export const queueRoutes: FastifyPluginAsync<QueueRoutesOptions> = async (app, o
       // Check if entry exists and is not processing
       const entries = invocationQueue.list(threadId, guard.userId);
       const entry = entries.find((e) => e.id === entryId);
-      if (!entry) {
+      if (!entry || !isPublicQueueEntry(entry)) {
         reply.status(404);
         return { error: '队列条目不存在', code: 'ENTRY_NOT_FOUND' };
       }
@@ -654,16 +721,6 @@ export const queueRoutes: FastifyPluginAsync<QueueRoutesOptions> = async (app, o
     },
   );
 
-  // POST /api/threads/:threadId/queue/next
-  app.post<{ Params: { threadId: string } }>('/api/threads/:threadId/queue/next', async (request, reply) => {
-    const { threadId } = request.params;
-    const guard = await guardThreadOwnership(request, reply, threadStore, threadId);
-    if (!guard) return;
-
-    const result = await queueProcessor.processNext(threadId, guard.userId);
-    return projectQueueStartResult(result);
-  });
-
   // POST /api/threads/:threadId/queue/:entryId/remind
   // Non-interrupting: records one exact attempt for the current invocation and waits
   // for the existing safe-boundary freshness notice path to deliver it.
@@ -681,7 +738,9 @@ export const queueRoutes: FastifyPluginAsync<QueueRoutesOptions> = async (app, o
 
       const { targetCatId } = parsed.data;
       const resolution = resolveReminderRequest({
-        entry: invocationQueue.list(threadId, guard.userId).find((candidate) => candidate.id === entryId),
+        entry: invocationQueue
+          .list(threadId, guard.userId)
+          .find((candidate) => candidate.id === entryId && isPublicQueueEntry(candidate)),
         targetCatId,
         threadId,
         userId: guard.userId,
@@ -900,7 +959,7 @@ export const queueRoutes: FastifyPluginAsync<QueueRoutesOptions> = async (app, o
 
       const entries = invocationQueue.list(threadId, guard.userId);
       const entry = entries.find((e) => e.id === entryId);
-      if (!entry) {
+      if (!entry || !isPublicQueueEntry(entry)) {
         reply.status(404);
         return { error: '队列条目不存在', code: 'ENTRY_NOT_FOUND' };
       }
@@ -1044,7 +1103,7 @@ export const queueRoutes: FastifyPluginAsync<QueueRoutesOptions> = async (app, o
       // Check if entry is processing
       const entries = invocationQueue.list(threadId, guard.userId);
       const entry = entries.find((e) => e.id === entryId);
-      if (!entry) {
+      if (!entry || !isPublicQueueEntry(entry)) {
         reply.status(404);
         return { error: '队列条目不存在', code: 'ENTRY_NOT_FOUND' };
       }
@@ -1108,7 +1167,7 @@ export const queueRoutes: FastifyPluginAsync<QueueRoutesOptions> = async (app, o
     const entries = invocationQueue.list(threadId, guard.userId);
     for (const { entryId } of parseResult.data.positions) {
       const entry = entries.find((e) => e.id === entryId);
-      if (!entry) {
+      if (!entry || !isPublicQueueEntry(entry)) {
         reply.status(400);
         return { error: `Cannot reorder entry ${entryId} (not found)` };
       }
@@ -1166,6 +1225,7 @@ export const queueRoutes: FastifyPluginAsync<QueueRoutesOptions> = async (app, o
     const cleared: QueueEntry[] = [];
     const candidates = invocationQueue.list(threadId, guard.userId);
     for (const [candidateIndex, candidate] of candidates.entries()) {
+      if (!isPublicQueueEntry(candidate)) continue;
       const current = invocationQueue.getEntrySnapshot(threadId, guard.userId, candidate.id);
       if (!current || current.status === 'processing') continue;
       if (!invocationQueue.removeEntrySnapshotIfUnchanged(current)) continue;
@@ -1251,7 +1311,7 @@ export const queueRoutes: FastifyPluginAsync<QueueRoutesOptions> = async (app, o
 
             await opts.invocationRecordStore.update(orphanRecord.id, { status: 'canceled' });
             // P2-1 + P2 (codex 第4轮 a5e8eea2): the WHOLE record is being canceled, so broadcast
-            // done + clear pause + release slot for EVERY targetCat — not just the requested one.
+            // done + release slot for EVERY targetCat — not just the requested one.
             // Otherwise sibling cats in a multi-cat orphan record stay stuck in the client's active
             // state and their processingSlots leak; and since the record is no longer running,
             // force-reset can't rediscover those siblings via listRunningByThread.
@@ -1268,7 +1328,6 @@ export const queueRoutes: FastifyPluginAsync<QueueRoutesOptions> = async (app, o
               }
             }
             for (const c of terminalOrphanCats) {
-              queueProcessor.clearPause(threadId, c);
               queueProcessor.releaseSlot(threadId, c);
             }
             return { ok: true, cancelled: true };
@@ -1282,7 +1341,6 @@ export const queueRoutes: FastifyPluginAsync<QueueRoutesOptions> = async (app, o
           for (const m of buildCancelMessages({ cancelled: true, catIds: [catId] })) {
             socketManager.broadcastAgentMessage(m, threadId);
           }
-          queueProcessor.clearPause(threadId, catId);
           queueProcessor.releaseSlot(threadId, catId);
           return { ok: true, cancelled: true };
         }
@@ -1305,7 +1363,6 @@ export const queueRoutes: FastifyPluginAsync<QueueRoutesOptions> = async (app, o
         for (const m of buildCancelMessages(scopedResult)) {
           socketManager.broadcastAgentMessage(m, threadId);
         }
-        queueProcessor.clearPause(threadId, catId);
         queueProcessor.releaseSlot(threadId, catId);
       }
 
@@ -1318,7 +1375,7 @@ export const queueRoutes: FastifyPluginAsync<QueueRoutesOptions> = async (app, o
   // could leave the thread in a permanently stuck state that users could not recover from.
   // This endpoint provides a last-resort manual reset:
   //   1. invocationTracker.cancelAll — aborts all active controllers + clears tracker slots
-  //   2. queueProcessor.releaseThread — clears all in-memory processingSlots
+  //   2. queueProcessor.releaseSlot — clears only the canceled cats' in-memory slots
   //   3. listRunningByThread + update canceled — marks all persistent running records done
   // Returns { ok: true, canceledRecords: N }
   app.post<{ Params: { threadId: string } }>('/api/threads/:threadId/force-reset', async (request, reply) => {
@@ -1443,7 +1500,7 @@ export const queueRoutes: FastifyPluginAsync<QueueRoutesOptions> = async (app, o
       queueProcessor.canReleaseSlotForUser(threadId, catId, guard.userId),
     );
 
-    // Broadcast cancel + clear pause + release processingSlot for EVERY still-owned cat in
+    // Broadcast cancel + release processingSlot for EVERY still-owned cat in
     // terminalCatIds. P2 (opus-4.6 cross-cat
     // review): broadcasting only cancelledCatIds left stale records' cats without a done broadcast,
     // so the frontend "正在回复中" never cleared after force-reset (user had to F5). Doing all three
@@ -1459,7 +1516,6 @@ export const queueRoutes: FastifyPluginAsync<QueueRoutesOptions> = async (app, o
       // cleanup and a late connector wake before releasing the slot. Terminal
       // consumption is restricted to executions this reset actually canceled.
       queueProcessor.suppressAutoResume(threadId, cid, [...(canceledExecutionIdsByCatId.get(cid) ?? [])]);
-      queueProcessor.clearPause(threadId, cid);
       queueProcessor.releaseSlot(threadId, cid);
     }
 

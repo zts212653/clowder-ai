@@ -7,15 +7,29 @@ import {
 } from '../dist/domains/ball-custody/turn-custody-wake-provenance.js';
 
 function entry(overrides = {}) {
+  const {
+    source = 'connector',
+    callerCatId: overriddenCallerCatId,
+    sourceCategory = 'review',
+    ...canonicalOverrides
+  } = overrides;
+  const callerCatId = Object.hasOwn(overrides, 'callerCatId') ? overriddenCallerCatId : 'codex-terra';
+  const from =
+    source === 'user'
+      ? { kind: 'user', userId: 'user-1' }
+      : sourceCategory === 'scheduled'
+        ? { kind: 'system', service: 'test-scheduler' }
+        : callerCatId
+          ? { kind: 'agent', catId: callerCatId }
+          : { kind: 'external', connectorId: 'test-connector' };
   return {
     threadId: 'thread-1',
     messageId: 'message-1',
-    source: 'connector',
-    sourceCategory: 'review',
+    from,
+    sourceCategory,
     targetCats: ['codex-sol'],
-    callerCatId: 'codex-terra',
     a2aTriggerMessageId: 'message-1',
-    ...overrides,
+    ...canonicalOverrides,
   };
 }
 
@@ -160,16 +174,15 @@ describe('F167 Phase T queue wake provenance', () => {
           callerCatId: undefined,
           a2aTriggerMessageId: undefined,
         }),
-        { getById: async () => ({ catId: 'opus' }) },
-      ),
-      {
-        ...expectedDispatch,
-        handoff: {
-          sourceEventId: 'route:message-1:codex-sol',
-          messageId: 'message-1',
-          fromCatId: 'opus',
+        {
+          getById: async () => ({
+            threadId: 'thread-1',
+            from: { kind: 'agent', catId: 'opus' },
+            extra: { crossPost: { sourceThreadId: 'thread-source' } },
+          }),
         },
-      },
+      ),
+      { kind: 'legacy', reason: 'carrier_missing', sourceCategory: 'a2a' },
     );
     assert.deepEqual(
       await resolveQueueTurnCustodyWake(
@@ -234,7 +247,7 @@ describe('F167 Phase T queue wake provenance', () => {
           getById: async () => ({
             id: 'message-1',
             threadId: 'thread-1',
-            catId: 'codex-terra',
+            from: { kind: 'agent', catId: 'codex-terra' },
             extra,
           }),
         }),
@@ -249,7 +262,7 @@ describe('F167 Phase T queue wake provenance', () => {
         getById: async () => ({
           id: 'message-1',
           threadId: 'thread-1',
-          catId: 'codex-terra',
+          from: { kind: 'agent', catId: 'codex-terra' },
           extra: {
             crossPost: {
               sourceThreadId: 'thread-source',

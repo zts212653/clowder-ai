@@ -64,7 +64,7 @@ test('hook consumer: Stop event without last_assistant_message field → skipped
 // hookEntriesToAgentMessages — PostToolUse event
 // ---------------------------------------------------------------------------
 
-test('hook consumer: PostToolUse event → tool_use AgentMessage', () => {
+test('hook consumer: PostToolUse event → tool_use + tool_result AgentMessages', () => {
   const entries = [
     {
       hook_event_name: 'PostToolUse',
@@ -77,12 +77,17 @@ test('hook consumer: PostToolUse event → tool_use AgentMessage', () => {
     },
   ];
   const msgs = hookEntriesToAgentMessages(entries, { catId: 'opus' });
-  assert.equal(msgs.length, 1);
+  assert.equal(msgs.length, 2, 'PostToolUse emits tool_use + tool_result');
   assert.equal(msgs[0].type, 'tool_use');
   assert.equal(msgs[0].toolName, 'Read');
   assert.deepEqual(msgs[0].toolInput, { file_path: '/foo/bar.ts' });
   assert.equal(msgs[0].toolUseId, 'tu_001');
   assert.equal(msgs[0].catId, 'opus');
+  // LI-005: tool_result companion — PostToolUse = success event
+  assert.equal(msgs[1].type, 'tool_result');
+  assert.equal(msgs[1].content, 'file contents here');
+  assert.equal(msgs[1].toolUseId, 'tu_001');
+  assert.equal(msgs[1].toolResultStatus, 'ok', 'PostToolUse = success → ok');
 });
 
 test('hook consumer: PostToolUse with missing tool_name → skipped', () => {
@@ -105,7 +110,7 @@ test('hook consumer: PostToolUse with missing tool_name → skipped', () => {
 // hookEntriesToAgentMessages — mixed events
 // ---------------------------------------------------------------------------
 
-test('hook consumer: mixed PostToolUse + Stop → correct order', () => {
+test('hook consumer: mixed PostToolUse + Stop → correct order (use/result pairs)', () => {
   const entries = [
     {
       hook_event_name: 'PostToolUse',
@@ -132,13 +137,20 @@ test('hook consumer: mixed PostToolUse + Stop → correct order', () => {
     },
   ];
   const msgs = hookEntriesToAgentMessages(entries, { catId: 'opus' });
-  assert.equal(msgs.length, 3);
+  // 2 PostToolUse × (tool_use + tool_result) + 1 Stop(text) = 5
+  assert.equal(msgs.length, 5);
   assert.equal(msgs[0].type, 'tool_use');
   assert.equal(msgs[0].toolName, 'Bash');
-  assert.equal(msgs[1].type, 'tool_use');
-  assert.equal(msgs[1].toolName, 'Read');
-  assert.equal(msgs[2].type, 'text');
-  assert.equal(msgs[2].content, 'Done!');
+  assert.equal(msgs[1].type, 'tool_result');
+  assert.equal(msgs[1].content, 'file1\nfile2');
+  assert.equal(msgs[1].toolResultStatus, 'ok');
+  assert.equal(msgs[2].type, 'tool_use');
+  assert.equal(msgs[2].toolName, 'Read');
+  assert.equal(msgs[3].type, 'tool_result');
+  assert.equal(msgs[3].content, 'contents');
+  assert.equal(msgs[3].toolResultStatus, 'ok');
+  assert.equal(msgs[4].type, 'text');
+  assert.equal(msgs[4].content, 'Done!');
 });
 
 test('hook consumer: unknown event type → skipped', () => {
@@ -232,4 +244,112 @@ test('hook consumer: extractEntrypointFromHookEntries — no _cc_entrypoint → 
 test('hook consumer: extractEntrypointFromHookEntries — non-string → undefined', () => {
   const entries = [{ hook_event_name: 'Stop', session_id: 'abc', _cc_entrypoint: 42 }];
   assert.equal(extractEntrypointFromHookEntries(entries), undefined);
+});
+
+// ---------------------------------------------------------------------------
+// LI-005: PostToolUse → tool_result bridge (durable trigger classification)
+// ---------------------------------------------------------------------------
+
+test('LI-005: PostToolUse with string tool_response → content string, status ok', () => {
+  const entries = [
+    {
+      hook_event_name: 'PostToolUse',
+      tool_name: 'cat_cafe_hold_ball',
+      tool_response: '{"status":"ok","held":true}',
+      tool_use_id: 'tu_hold',
+    },
+  ];
+  const msgs = hookEntriesToAgentMessages(entries, { catId: 'opus' });
+  const result = msgs.find((m) => m.type === 'tool_result');
+  assert.ok(result, 'tool_result must be emitted');
+  assert.equal(result.toolResultStatus, 'ok', 'PostToolUse = success event');
+  assert.equal(result.content, '{"status":"ok","held":true}');
+});
+
+test('LI-005: PostToolUse with structured object tool_response → JSON.stringify', () => {
+  const entries = [
+    {
+      hook_event_name: 'PostToolUse',
+      tool_name: 'Read',
+      tool_response: { type: 'text', file: { content: 'code', totalLines: 50 } },
+      tool_use_id: 'tu_read',
+    },
+  ];
+  const msgs = hookEntriesToAgentMessages(entries, { catId: 'opus' });
+  const result = msgs.find((m) => m.type === 'tool_result');
+  assert.ok(result);
+  assert.equal(result.toolResultStatus, 'ok');
+  // Structured response normalized to JSON string
+  const parsed = JSON.parse(result.content);
+  assert.equal(parsed.type, 'text');
+  assert.equal(parsed.file.totalLines, 50);
+});
+
+test('LI-005: PostToolUse with object MCP response → classifiable via Level 2', () => {
+  // Simulates MCP hold_ball returning structured object (not pre-serialized string)
+  const entries = [
+    {
+      hook_event_name: 'PostToolUse',
+      tool_name: 'cat_cafe_hold_ball',
+      tool_response: { status: 'ok', held: true, taskId: 'hold-42' },
+      tool_use_id: 'tu_mcp',
+    },
+  ];
+  const msgs = hookEntriesToAgentMessages(entries, { catId: 'opus' });
+  const result = msgs.find((m) => m.type === 'tool_result');
+  assert.ok(result);
+  // Normalized content is parseable JSON with status:'ok'
+  const parsed = JSON.parse(result.content);
+  assert.equal(parsed.status, 'ok');
+});
+
+test('LI-005: PostToolUse without tool_response → content undefined', () => {
+  const entries = [
+    {
+      hook_event_name: 'PostToolUse',
+      tool_name: 'Read',
+      tool_use_id: 'tu_noresponse',
+    },
+  ];
+  const msgs = hookEntriesToAgentMessages(entries, { catId: 'opus' });
+  const result = msgs.find((m) => m.type === 'tool_result');
+  assert.ok(result);
+  assert.equal(result.content, undefined);
+  assert.equal(result.toolResultStatus, 'ok', 'PostToolUse still success even without response');
+});
+
+// ---------------------------------------------------------------------------
+// LI-005: PostToolUseFailure → tool_result(error) bridge
+// ---------------------------------------------------------------------------
+
+test('LI-005: PostToolUseFailure → tool_result with error status', () => {
+  const entries = [
+    {
+      hook_event_name: 'PostToolUseFailure',
+      tool_name: 'cat_cafe_hold_ball',
+      tool_response: 'Rate limit exceeded',
+      tool_use_id: 'tu_fail',
+    },
+  ];
+  const msgs = hookEntriesToAgentMessages(entries, { catId: 'opus' });
+  assert.equal(msgs.length, 1, 'PostToolUseFailure emits tool_result only (no tool_use)');
+  assert.equal(msgs[0].type, 'tool_result');
+  assert.equal(msgs[0].toolResultStatus, 'error');
+  assert.equal(msgs[0].content, 'Rate limit exceeded');
+  assert.equal(msgs[0].toolUseId, 'tu_fail');
+});
+
+test('LI-005: PostToolUseFailure with structured response → normalized', () => {
+  const entries = [
+    {
+      hook_event_name: 'PostToolUseFailure',
+      tool_response: { error: 'connection_refused', code: 429 },
+      tool_use_id: 'tu_fail2',
+    },
+  ];
+  const msgs = hookEntriesToAgentMessages(entries, { catId: 'opus' });
+  assert.equal(msgs.length, 1);
+  assert.equal(msgs[0].toolResultStatus, 'error');
+  const parsed = JSON.parse(msgs[0].content);
+  assert.equal(parsed.error, 'connection_refused');
 });

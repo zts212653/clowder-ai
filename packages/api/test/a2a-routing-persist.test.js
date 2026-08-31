@@ -7,22 +7,11 @@
  */
 
 import assert from 'node:assert/strict';
-import { afterEach, beforeEach, describe, it, mock } from 'node:test';
-import Fastify from 'fastify';
+import { describe, it, mock } from 'node:test';
 import { MessageStore } from '../dist/domains/cats/services/stores/ports/MessageStore.js';
 import { safeParseExtra } from '../dist/domains/cats/services/stores/redis/redis-message-parsers.js';
-
-const { InvocationQueue } = await import('../dist/domains/cats/services/agents/invocation/InvocationQueue.js');
-const { InvocationRegistry } = await import('../dist/domains/cats/services/agents/invocation/InvocationRegistry.js');
-
-async function waitFor(predicate, timeoutMs = 1000, intervalMs = 10) {
-  const deadline = Date.now() + timeoutMs;
-  while (Date.now() < deadline) {
-    if (predicate()) return true;
-    await new Promise((resolve) => setTimeout(resolve, intervalMs));
-  }
-  return predicate();
-}
+import { emitParallelRoutingPills, persistA2ARoutingMessage } from '../dist/routes/a2a-routing-projection.js';
+import { canonicalTestMessageInput } from './helpers/message-from-fixtures.js';
 
 describe('A2A routing message persistence (#648)', () => {
   describe('safeParseExtra preserves systemKind through round-trip', () => {
@@ -65,18 +54,21 @@ describe('A2A routing message persistence (#648)', () => {
   describe('A2A handoff message storage contract', () => {
     it('persists a2a_handoff as system message with correct shape', () => {
       const store = new MessageStore();
-      const result = store.append({
-        userId: 'system',
-        catId: null,
-        content: '布偶猫 → 缅因猫',
-        mentions: [],
-        timestamp: Date.now(),
-        threadId: 'thread-1',
-        extra: {
-          systemKind: 'a2a_routing',
-          a2aRouting: { fromCatId: 'codex', targetCatId: 'opus-47', invocationId: 'inv-123' },
-        },
-      });
+      const result = store.append(
+        canonicalTestMessageInput({
+          provenance: { author: 'system', routed: false, observation: 'original' },
+          userId: 'system',
+          catId: null,
+          content: '布偶猫 → 缅因猫',
+          mentions: [],
+          timestamp: Date.now(),
+          threadId: 'thread-1',
+          extra: {
+            systemKind: 'a2a_routing',
+            a2aRouting: { fromCatId: 'codex', targetCatId: 'opus-47', invocationId: 'inv-123' },
+          },
+        }),
+      );
 
       assert.ok(result.id, 'stored message should have an id');
 
@@ -94,15 +86,18 @@ describe('A2A routing message persistence (#648)', () => {
 
     it('stored messageId can be attached to broadcast payload', () => {
       const store = new MessageStore();
-      const result = store.append({
-        userId: 'system',
-        catId: null,
-        content: '布偶猫 → 缅因猫',
-        mentions: [],
-        timestamp: Date.now(),
-        threadId: 'thread-1',
-        extra: { systemKind: 'a2a_routing' },
-      });
+      const result = store.append(
+        canonicalTestMessageInput({
+          provenance: { author: 'system', routed: false, observation: 'original' },
+          userId: 'system',
+          catId: null,
+          content: '布偶猫 → 缅因猫',
+          mentions: [],
+          timestamp: Date.now(),
+          threadId: 'thread-1',
+          extra: { systemKind: 'a2a_routing' },
+        }),
+      );
 
       const broadcastPayload = {
         type: 'a2a_handoff',
@@ -116,172 +111,46 @@ describe('A2A routing message persistence (#648)', () => {
   });
 });
 
-/**
- * Integration tests: drive the real streaming route with a2a_handoff events
- * and verify both persistence and broadcast carry the stored messageId.
- *
- * Pattern mirrors messages-delivery-mode.test.js (buildDeps + Fastify inject).
- */
+describe('Parallel A2A routing projection persistence (#648)', () => {
+  it('persists the routing pill before broadcasting its stable messageId', async () => {
+    const messageStore = new MessageStore();
+    const broadcastAgentMessage = mock.fn();
 
-function buildDeps(overrides = {}) {
-  const invocationQueue = new InvocationQueue();
-  let nextStoredId = 0;
-  return {
-    registry: new InvocationRegistry(),
-    messageStore: {
-      append: mock.fn(async (msg) => ({
-        id: msg.extra?.systemKind === 'a2a_routing' ? 'msg-a2a-routing' : `msg-${++nextStoredId}`,
-        ...msg,
-      })),
-      getByThread: mock.fn(async () => []),
-      getByThreadBefore: mock.fn(async () => []),
-    },
-    socketManager: {
-      broadcastAgentMessage: mock.fn(),
-      broadcastToRoom: mock.fn(),
-      emitToUser: mock.fn(),
-    },
-    router: {
-      resolveTargetsAndIntent: mock.fn(async () => ({
-        targetCats: ['opus'],
-        intent: { intent: 'execute' },
-      })),
-      routeExecution: mock.fn(async function* () {
-        yield {
-          type: 'a2a_handoff',
-          catId: 'codex',
-          targetCatId: 'opus-47',
-          content: '缅因猫(codex) → 布偶猫(Opus 4.7)',
-          timestamp: Date.now(),
-        };
-        yield { type: 'done', catId: 'opus', timestamp: Date.now() };
-      }),
-      ackCollectedCursors: mock.fn(async () => {}),
-      route: mock.fn(async function* () {
-        yield { type: 'done' };
-      }),
-    },
-    invocationTracker: {
-      start: mock.fn(() => new AbortController()),
-      startAll: mock.fn(() => new AbortController()),
-      tryStartThread: mock.fn(() => new AbortController()),
-      tryStartThreadAll: mock.fn(() => new AbortController()),
-      complete: mock.fn(),
-      completeAll: mock.fn(),
-      has: mock.fn(() => false),
-      cancel: mock.fn(() => ({ cancelled: true, catIds: ['opus'] })),
-      isDeleting: mock.fn(() => false),
-    },
-    invocationRecordStore: {
-      create: mock.fn(async () => ({
-        outcome: 'created',
-        invocationId: 'inv-a2a-test',
-      })),
-      update: mock.fn(async () => {}),
-    },
-    invocationQueue,
-    queueProcessor: {
-      clearPause: mock.fn(),
-      onInvocationComplete: mock.fn(async () => {}),
-      enqueueContinuation: mock.fn(() => ({ outcome: 'enqueued' })),
-    },
-    threadStore: {
-      get: mock.fn(async () => ({
-        id: 'thread-1',
-        title: 'Test Thread',
-        createdBy: 'test-user',
-      })),
-      updateTitle: mock.fn(async () => {}),
-    },
-    ...overrides,
-  };
-}
-
-describe('Integration: a2a_handoff persistence through streaming route (#648)', () => {
-  let app;
-  let deps;
-
-  beforeEach(async () => {
-    deps = buildDeps();
-    const { messagesRoutes } = await import('../dist/routes/messages.js');
-    app = Fastify();
-    await app.register(messagesRoutes, deps);
-    await app.ready();
-  });
-
-  afterEach(async () => {
-    if (app) await app.close();
-  });
-
-  it('persists a2a_handoff as system message and attaches messageId to broadcast', async () => {
-    const res = await app.inject({
-      method: 'POST',
-      url: '/api/messages',
-      headers: { 'x-cat-cafe-user': 'user-1', 'content-type': 'application/json' },
-      payload: { content: 'test routing', threadId: 'thread-1' },
-    });
-
-    assert.equal(res.statusCode, 200);
-
-    const processed = await waitFor(() =>
-      deps.socketManager.broadcastAgentMessage.mock.calls.some((c) => c.arguments[0]?.type === 'a2a_handoff'),
-    );
-    assert.equal(processed, true, 'background route should broadcast a2a_handoff');
-
-    // 1. messageStore.append stores system message with extra.systemKind = 'a2a_routing'
-    const appendCalls = deps.messageStore.append.mock.calls;
-    const a2aAppend = appendCalls.find(
-      (c) => c.arguments[0]?.userId === 'system' && c.arguments[0]?.extra?.systemKind === 'a2a_routing',
-    );
-    assert.ok(a2aAppend, 'messageStore.append should be called with systemKind: a2a_routing');
-    assert.equal(a2aAppend.arguments[0].catId, null);
-    assert.equal(a2aAppend.arguments[0].content, '缅因猫(codex) → 布偶猫(Opus 4.7)');
-    assert.equal(a2aAppend.arguments[0].threadId, 'thread-1');
-    assert.deepEqual(a2aAppend.arguments[0].extra.a2aRouting, {
+    await emitParallelRoutingPills({
+      messageStore,
+      socketManager: { broadcastAgentMessage },
+      threadId: 'thread-1',
       fromCatId: 'codex',
-      targetCatId: 'opus-47',
-      invocationId: 'inv-a2a-test',
+      targetCatIds: ['opus'],
+      log: { warn() {} },
     });
 
-    // 2. broadcastAgentMessage receives the a2a_handoff event with stored messageId
-    const broadcastCalls = deps.socketManager.broadcastAgentMessage.mock.calls;
-    const a2aBroadcast = broadcastCalls.find((c) => c.arguments[0]?.type === 'a2a_handoff');
-    assert.ok(a2aBroadcast, 'should broadcast a2a_handoff event');
-    assert.equal(a2aBroadcast.arguments[0].messageId, 'msg-a2a-routing');
-    assert.equal(a2aBroadcast.arguments[0].invocationId, 'inv-a2a-test');
-    assert.equal(a2aBroadcast.arguments[0].targetCatId, 'opus-47');
+    const stored = messageStore.getByThread('thread-1').find((message) => message.extra?.systemKind === 'a2a_routing');
+    assert.ok(stored, 'parallel routing pill should be durable');
+    assert.deepEqual(stored.extra.a2aRouting, {
+      fromCatId: 'codex',
+      targetCatId: 'opus',
+      invocationId: undefined,
+      routing: { mode: 'parallel', index: 1, total: 1 },
+    });
+
+    const broadcast = broadcastAgentMessage.mock.calls[0]?.arguments[0];
+    assert.equal(broadcast?.type, 'a2a_handoff');
+    assert.equal(broadcast?.messageId, stored.id);
+    assert.equal(broadcast?.content, stored.content);
+    assert.deepEqual(broadcast?.routing, { mode: 'parallel', index: 1, total: 1 });
   });
 
-  it('skips persistence when a2a_handoff has no content', async () => {
-    deps.router.routeExecution.mock.mockImplementation(async function* () {
-      yield { type: 'a2a_handoff', catId: 'opus', timestamp: Date.now() };
-      yield { type: 'done', catId: 'opus', timestamp: Date.now() };
-    });
-
-    const res = await app.inject({
-      method: 'POST',
-      url: '/api/messages',
-      headers: { 'x-cat-cafe-user': 'user-1', 'content-type': 'application/json' },
-      payload: { content: 'test no content', threadId: 'thread-1' },
-    });
-
-    assert.equal(res.statusCode, 200);
-    const processed = await waitFor(() =>
-      deps.socketManager.broadcastAgentMessage.mock.calls.some((c) => c.arguments[0]?.type === 'a2a_handoff'),
+  it('does not persist an empty routing projection', async () => {
+    const append = mock.fn();
+    const messageId = await persistA2ARoutingMessage(
+      { append },
+      { catId: 'codex', targetCatId: 'opus', timestamp: Date.now() },
+      'thread-1',
+      { warn() {} },
     );
-    assert.equal(processed, true, 'background route should broadcast a2a_handoff');
 
-    // No system message should be appended (only user message)
-    const appendCalls = deps.messageStore.append.mock.calls;
-    const a2aAppend = appendCalls.find(
-      (c) => c.arguments[0]?.userId === 'system' && c.arguments[0]?.extra?.systemKind === 'a2a_routing',
-    );
-    assert.equal(a2aAppend, undefined, 'should not persist a2a_handoff without content');
-
-    // Broadcast still happens, but without messageId
-    const broadcastCalls = deps.socketManager.broadcastAgentMessage.mock.calls;
-    const a2aBroadcast = broadcastCalls.find((c) => c.arguments[0]?.type === 'a2a_handoff');
-    assert.ok(a2aBroadcast, 'should still broadcast a2a_handoff event');
-    assert.equal(a2aBroadcast.arguments[0].messageId, undefined, 'no messageId when content is empty');
+    assert.equal(messageId, undefined);
+    assert.equal(append.mock.calls.length, 0);
   });
 });

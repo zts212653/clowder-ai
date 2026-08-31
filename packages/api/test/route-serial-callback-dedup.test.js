@@ -432,8 +432,8 @@ describe('#573/#1332: explicit callback/final persistence semantics', () => {
       }
       assert.equal(
         duplicateTargetInvocations,
-        1,
-        'failed callback admission must leave the line-start target eligible for the serial carrier',
+        0,
+        'failed callback admission must not resurrect the removed recursive serial carrier',
       );
     } finally {
       catRegistry.reset();

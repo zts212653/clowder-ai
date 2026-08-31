@@ -9,8 +9,6 @@
  * Parameterised by ENTRY POINT, because entry points are exactly what kept getting missed:
  *   - completion hook   (a queued target finishes)
  *   - queue all-rejected (nothing could be admitted)
- *   - legacy all-failed  (every admission threw)
- *   - legacy dispatch error (an admitted target crashes while executing)
  * ADDING A SETTLE TRIGGER MEANS ADDING A ROW HERE.
  */
 
@@ -21,6 +19,7 @@ import Fastify from 'fastify';
 import { InvocationQueue } from '../dist/domains/cats/services/agents/invocation/InvocationQueue.js';
 import { registerCallbackAuthHook } from '../dist/routes/callback-auth-prehandler.js';
 import { resetMultiMentionOrchestrator } from '../dist/routes/callback-multi-mention-routes.js';
+import { canonicalTestQueueInput } from './helpers/message-from-fixtures.js';
 
 function createMockRegistry() {
   const records = new Map();
@@ -67,7 +66,7 @@ async function withRejectionWatch(fn) {
 
 describe('INV-2: the single settle exit swallows no group and leaks no rejection', () => {
   let app;
-  let mockRegistry, creds, invocationQueue, appendImpl, queueProcessor, legacyCreateImpl, legacyRouteError, useQueue;
+  let mockRegistry, creds, invocationQueue, appendImpl, queueProcessor;
 
   const buildApp = async () => {
     app = Fastify({ logger: false });
@@ -80,13 +79,6 @@ describe('INV-2: the single settle exit swallows no group and leaks no rejection
         getById: () => null,
       },
       socketManager: { broadcastAgentMessage() {}, broadcastToRoom() {} },
-      router: {
-        // biome-ignore lint/correctness/useYield: only an async iterable is required here
-        async *routeExecution() {
-          if (legacyRouteError) throw legacyRouteError;
-        },
-      },
-      invocationRecordStore: { create: (input) => legacyCreateImpl(input), update() {} },
       invocationTracker: {
         start: () => new AbortController(),
         startAll: () => new AbortController(),
@@ -94,7 +86,8 @@ describe('INV-2: the single settle exit swallows no group and leaks no rejection
         complete() {},
         completeAll() {},
       },
-      ...(useQueue ? { invocationQueue, queueProcessor } : {}),
+      invocationQueue,
+      queueProcessor,
     });
     await app.ready();
   };
@@ -104,14 +97,11 @@ describe('INV-2: the single settle exit swallows no group and leaks no rejection
     mockRegistry = createMockRegistry();
     invocationQueue = new InvocationQueue();
     appendImpl = (msg) => ({ id: 'm', ...msg });
-    legacyCreateImpl = () => ({ outcome: 'created', invocationId: `inv-${Math.random()}` });
-    legacyRouteError = undefined;
-    useQueue = true;
     const hooks = new Map();
     queueProcessor = {
       registerEntryCompleteHook: (id, hook) => hooks.set(id, hook),
       unregisterEntryCompleteHook: (id) => hooks.delete(id),
-      tryAutoExecute: () => Promise.resolve(),
+      requestDrain: () => Promise.resolve(),
       getHooks: () => hooks,
       simulateComplete: (id, status, text) => {
         const hook = hooks.get(id);
@@ -160,60 +150,26 @@ describe('INV-2: the single settle exit swallows no group and leaks no rejection
     await buildApp();
     // Saturate the agent-entry depth budget so nothing can be admitted.
     for (let i = 0; i < 10; i++) {
-      invocationQueue.enqueue({
-        threadId: 'thread-settle',
-        userId: 'user-1',
-        ownerAuthProvenance: 'strict',
-        content: `filler-${i}`,
-        source: 'agent',
-        targetCats: ['opus'],
-        intent: 'execute',
-        autoExecute: true,
-        callerCatId: 'opus',
-      });
+      invocationQueue.enqueue(
+        canonicalTestQueueInput({
+          kind: 'private_input',
+          threadId: 'thread-settle',
+          userId: 'user-1',
+          ownerAuthProvenance: 'strict',
+          content: `filler-${i}`,
+          source: 'agent',
+          targetCats: ['opus'],
+          intent: 'execute',
+          autoExecute: true,
+          callerCatId: 'opus',
+        }),
+      );
     }
     const rejections = await withRejectionWatch(async () => {
       failTheSummaryWrite();
       const res = await dispatch(['codex', 'gemini']);
       assert.equal(res.statusCode, 200);
     });
-    assert.deepEqual(rejections, [], `settle must own its failure policy, got: ${rejections.join(' | ')}`);
-  });
-
-  test('ENTRY: legacy all-failed admission — a failing summary write does not leak a rejection', async () => {
-    useQueue = false;
-    legacyCreateImpl = () => {
-      throw new Error('record store down');
-    };
-    await buildApp();
-    const rejections = await withRejectionWatch(async () => {
-      failTheSummaryWrite();
-      const res = await dispatch(['codex', 'gemini']);
-      assert.equal(res.statusCode, 200);
-    });
-    assert.deepEqual(rejections, [], `settle must own its failure policy, got: ${rejections.join(' | ')}`);
-  });
-
-  test('ENTRY: legacy dispatch error — the terminal group persists its summary immediately', async () => {
-    useQueue = false;
-    legacyRouteError = new Error('runtime dispatch failed');
-    const summaries = [];
-    appendImpl = (msg) => {
-      if (typeof msg.content === 'string' && msg.content.includes('Multi-Mention 结果汇总')) {
-        summaries.push(msg);
-      }
-      return { id: 'm', ...msg };
-    };
-    await buildApp();
-
-    let response;
-    const rejections = await withRejectionWatch(async () => {
-      response = await dispatch(['codex']);
-    });
-
-    assert.equal(response.statusCode, 200);
-    assert.equal(summaries.length, 1, 'a terminal dispatch error must flush without waiting for timeout');
-    assert.match(summaries[0].content, /dispatch error: runtime dispatch failed/);
     assert.deepEqual(rejections, [], `settle must own its failure policy, got: ${rejections.join(' | ')}`);
   });
 });

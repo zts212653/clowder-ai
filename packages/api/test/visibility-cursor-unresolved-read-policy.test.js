@@ -11,6 +11,7 @@
 import assert from 'node:assert/strict';
 import { after, before, beforeEach, describe, it } from 'node:test';
 import Fastify from 'fastify';
+import { canonicalTestMessageInput } from './helpers/message-from-fixtures.js';
 import {
   assertRedisIsolationOrThrow,
   cleanupClientKeyspace,
@@ -71,15 +72,18 @@ describe('#3444 unresolved visibility read-anchor policy', { skip: redisIsolatio
   });
 
   async function appendMessage({ threadId, catId, content, timestamp, mentionsUser = false }) {
-    return messageStore.append({
-      userId: USER_ID,
-      catId,
-      content,
-      mentions: [],
-      mentionsUser,
-      timestamp,
-      threadId,
-    });
+    return messageStore.append(
+      canonicalTestMessageInput({
+        provenance: { author: catId === null ? 'user' : 'cat', routed: false, observation: 'original' },
+        userId: USER_ID,
+        catId,
+        content,
+        mentions: [],
+        mentionsUser,
+        timestamp,
+        threadId,
+      }),
+    );
   }
 
   const durableCursorNamespaces = [

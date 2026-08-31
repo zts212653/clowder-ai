@@ -1,5 +1,5 @@
 import type { WaitContinuationCarrierV1 } from '@cat-cafe/shared';
-import type { QueueEntry } from '../cats/services/agents/invocation/InvocationQueue.js';
+import { type QueueEntry, queueEntryCallerCatId } from '../cats/services/agents/invocation/InvocationQueue.js';
 import { hydrateCrossThreadReplyHint, type IMessageStore } from '../cats/services/stores/ports/MessageStore.js';
 import { handedEventSourceId } from './ball-custody-events.js';
 import type { TurnCustodyWakeProvenance } from './TurnCustodyProjectionService.js';
@@ -12,9 +12,8 @@ type WakeQueueEntry = Pick<
   QueueEntry,
   | 'actionSuccessorFence'
   | 'a2aTriggerMessageId'
-  | 'callerCatId'
+  | 'from'
   | 'messageId'
-  | 'source'
   | 'sourceCategory'
   | 'targetCats'
   | 'threadId'
@@ -126,23 +125,15 @@ async function resolveScheduledWake(
 
 async function resolveA2AWake(entry: WakeQueueEntry, messageStore: IMessageStore): Promise<TurnCustodyWakeProvenance> {
   const messageId = entry.a2aTriggerMessageId ?? entry.messageId;
-  let fromCatId = entry.callerCatId;
+  const fromCatId = queueEntryCallerCatId(entry);
   if (messageId) {
     try {
       const replyHint = await hydrateCrossThreadReplyHint(messageStore, messageId);
       const noObligationWake = buildCrossThreadNoObligationWake(replyHint);
       if (noObligationWake) return noObligationWake;
-      fromCatId ??= replyHint?.senderCatId;
     } catch {
       // Optional lifecycle classification failed. The exact dispatch carrier
       // below remains fail-closed and must not be weakened by that lookup.
-    }
-  }
-  if (!fromCatId && messageId) {
-    try {
-      fromCatId = (await messageStore.getById(messageId))?.catId ?? undefined;
-    } catch {
-      return { kind: 'legacy', reason: 'query_failed', sourceCategory: 'a2a' };
     }
   }
   return buildA2ADispatchTurnCustodyWake({
@@ -167,7 +158,7 @@ async function resolveWaitContinuationWake(
 ): Promise<TurnCustodyWakeProvenance | null> {
   const queueCarrier = entry.waitContinuationCarrier;
   if (!queueCarrier) return null;
-  if (entry.source !== 'connector' || !entry.messageId || entry.actionSuccessorFence) {
+  if (!entry.messageId || entry.actionSuccessorFence) {
     return missingQueueCarrier(entry);
   }
 
@@ -203,7 +194,7 @@ export async function resolveQueueTurnCustodyWake(
       holderCatId: entry.targetCats[0] ?? 'unknown',
     };
   }
-  if (entry.source === 'user') return { kind: 'unstructured', source: 'user_chat' };
+  if (entry.from.kind === 'user') return { kind: 'unstructured', source: 'user_chat' };
   if (entry.sourceCategory === 'scheduled') return resolveScheduledWake(entry, messageStore);
   if (entry.sourceCategory === 'freshness') return { kind: 'unstructured', source: 'protocol_decline' };
   if (entry.sourceCategory === 'a2a') return resolveA2AWake(entry, messageStore);

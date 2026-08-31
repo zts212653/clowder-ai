@@ -6,15 +6,14 @@
 import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
 import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { PassThrough } from 'node:stream';
 import { describe, mock, test } from 'node:test';
 import { catRegistry } from '@cat-cafe/shared';
 import { fakeL0Compiler } from './helpers/fake-l0-compiler.js';
 
-const { CodexAgentService, buildCodexReasoningArgs, isGitRepositoryPath } = await import(
-  '../dist/domains/cats/services/agents/providers/CodexAgentService.js'
-);
+const { CodexAgentService, buildCodexReasoningArgs, isGitRepositoryPath, resolveCodexApiKeyIsolationRoot } =
+  await import('../dist/domains/cats/services/agents/providers/CodexAgentService.js');
 const { _resetCachedConfig } = await import('../dist/config/cat-config-loader.js');
 
 /** Helper: collect all items from async iterable */
@@ -2569,6 +2568,23 @@ describe('CodexAgentService Tests (CLI mode)', { concurrency: false }, () => {
     assert.ok(args.includes('model="qwen-plus"'), 'model must be passed as-is via --config');
     assert.ok(args.includes('model_provider="custom"'), 'must set model_provider=custom');
     assert.ok(!args.includes('model_provider="openai_https"'), 'custom provider must not force OpenAI OAuth provider');
+    const spawnOptions = spawnFn.mock.calls[0].arguments[2];
+    assert.equal(
+      dirname(spawnOptions.env.HOME),
+      resolveCodexApiKeyIsolationRoot(),
+      'API-key invocation must launch from an owner cache home that Codex accepts',
+    );
+  });
+
+  test('API-key isolation lives under user cache rather than the OS temporary directory', () => {
+    assert.equal(
+      resolveCodexApiKeyIsolationRoot({ HOME: '/Users/example', XDG_CACHE_HOME: '/Users/example/.cache' }, 'darwin'),
+      '/Users/example/Library/Caches/clowder-ai/codex-api-key-homes',
+    );
+    assert.equal(
+      resolveCodexApiKeyIsolationRoot({ HOME: '/home/example', XDG_CACHE_HOME: '/var/cache/example' }, 'linux'),
+      '/var/cache/example/clowder-ai/codex-api-key-homes',
+    );
   });
 
   test('custom provider: multi-segment model slug preserved as-is', async () => {

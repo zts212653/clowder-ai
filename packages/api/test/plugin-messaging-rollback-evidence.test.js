@@ -7,6 +7,7 @@
  */
 import assert from 'node:assert/strict';
 import { before, beforeEach, describe, test } from 'node:test';
+import { canonicalTestMessageInput } from './helpers/message-from-fixtures.js';
 
 let MessageStore;
 let envelope;
@@ -39,36 +40,42 @@ describe('Rollback evidence — additive plugin fields are inert under old-binar
    * through host-only paths (old binary without K-1 awareness).
    */
   function seedPluginMessage(overrides = {}) {
-    return messageStore.append({
-      userId: 'user-1',
-      catId: null,
-      content: 'host-visible text content',
-      mentions: ['opus'],
-      timestamp: Date.now(),
-      threadId: 'thread-1',
-      extra: {
-        pluginMessage: {
-          instanceId: 'inst-a',
-          revision: 1,
-          provenance: { origin: { kind: 'plugin', instanceId: 'inst-a' }, epistemicStatus: 'inference' },
-          elements: [{ elementId: 'el-1', kind: 'text', payload: { text: 'plugin text' } }],
-          appendOps: [],
+    return messageStore.append(
+      canonicalTestMessageInput({
+        provenance: { author: 'user', routed: false, observation: 'original' },
+        userId: 'user-1',
+        catId: null,
+        content: 'host-visible text content',
+        mentions: ['opus'],
+        timestamp: Date.now(),
+        threadId: 'thread-1',
+        extra: {
+          pluginMessage: {
+            instanceId: 'inst-a',
+            revision: 1,
+            provenance: { origin: { kind: 'plugin', instanceId: 'inst-a' }, epistemicStatus: 'inference' },
+            elements: [{ elementId: 'el-1', kind: 'text', payload: { text: 'plugin text' } }],
+            appendOps: [],
+          },
         },
-      },
-      ...overrides,
-    });
+        ...overrides,
+      }),
+    );
   }
 
   test('host pagination (getByThreadAfter) returns messages with additive plugin fields', () => {
     seedPluginMessage();
-    messageStore.append({
-      userId: 'user-1',
-      catId: null,
-      content: 'normal host message',
-      mentions: [],
-      timestamp: Date.now() + 1,
-      threadId: 'thread-1',
-    });
+    messageStore.append(
+      canonicalTestMessageInput({
+        provenance: { author: 'user', routed: false, observation: 'original' },
+        userId: 'user-1',
+        catId: null,
+        content: 'normal host message',
+        mentions: [],
+        timestamp: Date.now() + 1,
+        threadId: 'thread-1',
+      }),
+    );
     const all = messageStore.getByThreadAfter('thread-1');
     assert.equal(all.length, 2, 'both plugin-bearing and host messages returned');
     assert.ok(all[0].extra?.pluginMessage, 'plugin field preserved in store');
@@ -77,14 +84,17 @@ describe('Rollback evidence — additive plugin fields are inert under old-binar
 
   test('getBefore pagination works with plugin-bearing messages', () => {
     seedPluginMessage({ timestamp: 1_800_000_000_000 });
-    messageStore.append({
-      userId: 'user-1',
-      catId: null,
-      content: 'later message',
-      mentions: [],
-      timestamp: 1_800_000_000_001,
-      threadId: 'thread-1',
-    });
+    messageStore.append(
+      canonicalTestMessageInput({
+        provenance: { author: 'user', routed: false, observation: 'original' },
+        userId: 'user-1',
+        catId: null,
+        content: 'later message',
+        mentions: [],
+        timestamp: 1_800_000_000_001,
+        threadId: 'thread-1',
+      }),
+    );
     const page = messageStore.getBefore(1_800_000_000_002, 10);
     assert.equal(page.length, 2);
   });
@@ -124,7 +134,7 @@ describe('Rollback evidence — additive plugin fields are inert under old-binar
     assert.equal(env.payload.elements[0].payload.text, 'plugin text');
   });
 
-  test('rollback scenario: stripping pluginMessage awareness falls back to host content', () => {
+  test('rollback scenario: stripping pluginMessage awareness keeps canonical sender and falls back to host content', () => {
     const msg = seedPluginMessage();
     // Simulate old-binary: delete the pluginMessage from extra before projection.
     // This is what happens when old code reads the Redis extra JSON and doesn't
@@ -133,7 +143,7 @@ describe('Rollback evidence — additive plugin fields are inert under old-binar
     delete rollbackMsg.extra.pluginMessage;
     const env = envelope.projectEnvelope(rollbackMsg);
     assert.ok(env, 'still projects via host-message fallback');
-    assert.deepEqual(env.actor, { kind: 'user', id: 'user-1' });
+    assert.deepEqual(env.actor, { kind: 'plugin', id: 'inst-a' });
     assert.equal(env.payload.elements[0].payload.text, 'host-visible text content');
     assert.deepEqual(env.payload.provenance.origin, { kind: 'host' });
   });
@@ -170,14 +180,17 @@ describe('No-plugin dormancy — K-1 services with zero plugin handles retain ho
     assert.ok(sendService);
     assert.ok(stream);
     // Host message operations remain unaffected.
-    messageStore.append({
-      userId: 'user-1',
-      catId: null,
-      content: 'host message',
-      mentions: [],
-      timestamp: Date.now(),
-      threadId: 'thread-1',
-    });
+    messageStore.append(
+      canonicalTestMessageInput({
+        provenance: { author: 'user', routed: false, observation: 'original' },
+        userId: 'user-1',
+        catId: null,
+        content: 'host message',
+        mentions: [],
+        timestamp: Date.now(),
+        threadId: 'thread-1',
+      }),
+    );
     const messages = messageStore.getByThreadAfter('thread-1');
     assert.equal(messages.length, 1);
     assert.equal(messages[0].content, 'host message');
@@ -187,14 +200,17 @@ describe('No-plugin dormancy — K-1 services with zero plugin handles retain ho
   test('host message pagination is independent of plugin event log state', async () => {
     const events = new memory.MemoryEventLogStore();
     // Even with events in the plugin log, host pagination is unaffected.
-    messageStore.append({
-      userId: 'user-1',
-      catId: 'opus',
-      content: 'cat reply',
-      mentions: [],
-      timestamp: Date.now(),
-      threadId: 'thread-1',
-    });
+    messageStore.append(
+      canonicalTestMessageInput({
+        provenance: { author: 'cat', routed: false, observation: 'original' },
+        userId: 'user-1',
+        catId: 'opus',
+        content: 'cat reply',
+        mentions: [],
+        timestamp: Date.now(),
+        threadId: 'thread-1',
+      }),
+    );
     const [msg] = messageStore.getByThreadAfter('thread-1');
     assert.equal(msg.content, 'cat reply');
     // Plugin event head is 0 — no interaction with host message.
@@ -203,22 +219,28 @@ describe('No-plugin dormancy — K-1 services with zero plugin handles retain ho
   });
 
   test('host projectEnvelope for user/cat messages is unaffected by K-1 code presence', () => {
-    messageStore.append({
-      userId: 'user-1',
-      catId: null,
-      content: 'user says hi',
-      mentions: [],
-      timestamp: 1_800_000_000_000,
-      threadId: 'thread-1',
-    });
-    messageStore.append({
-      userId: 'user-1',
-      catId: 'opus',
-      content: 'cat replies',
-      mentions: [],
-      timestamp: 1_800_000_000_001,
-      threadId: 'thread-1',
-    });
+    messageStore.append(
+      canonicalTestMessageInput({
+        provenance: { author: 'user', routed: false, observation: 'original' },
+        userId: 'user-1',
+        catId: null,
+        content: 'user says hi',
+        mentions: [],
+        timestamp: 1_800_000_000_000,
+        threadId: 'thread-1',
+      }),
+    );
+    messageStore.append(
+      canonicalTestMessageInput({
+        provenance: { author: 'cat', routed: false, observation: 'original' },
+        userId: 'user-1',
+        catId: 'opus',
+        content: 'cat replies',
+        mentions: [],
+        timestamp: 1_800_000_000_001,
+        threadId: 'thread-1',
+      }),
+    );
     const msgs = messageStore.getByThreadAfter('thread-1');
     const envs = msgs.map((m) => envelope.projectEnvelope(m)).filter(Boolean);
     assert.equal(envs.length, 2);

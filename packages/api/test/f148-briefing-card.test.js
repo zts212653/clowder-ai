@@ -288,7 +288,7 @@ describe('F148 briefing card — navigation-first collapsed view', () => {
       const result = buildBriefingMessage(makeCoverage(), 'thread-1', {});
       assert.equal(result.origin, 'briefing');
       assert.equal(result.userId, 'system');
-      assert.equal(result.catId, null);
+      assert.deepEqual(result.from, { kind: 'system', service: 'context-briefing' });
       assert.ok(result.extra.rich.v === 1);
       assert.ok(Array.isArray(result.extra.rich.blocks));
     });

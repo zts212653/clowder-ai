@@ -3,8 +3,6 @@
 import type { ChatMessage } from '@/stores/chat-types';
 import { revealFoldedSourceAnchor } from '@/utils/folded-source-navigation';
 import { resolveMessageElements } from '@/utils/scrollToMessage';
-import { CollapsibleMarkdown } from './CollapsibleMarkdown';
-import { ContentBlocks } from './ContentBlocks';
 import { focusInvocationLineage } from './MessageReceiptDock';
 import type { TurnAbsorptionItem, TurnAbsorptionProjection } from './turn-absorption-summary';
 
@@ -76,7 +74,7 @@ export function TurnAbsorptionDock({ projection, messages, getCatLabel, sourceAu
       className="mt-3 border-t border-cafe pt-2 text-xs text-cafe-secondary"
     >
       <summary className="cursor-pointer select-none font-medium text-cafe-muted">
-        {`本轮处理了 ${counts.handled}/${counts.total} 条补充`}
+        {`运行中追加已接收 ${counts.total} 条消息 · 已处理 ${counts.handled}/${counts.total}`}
       </summary>
       <div className="mt-1.5 ml-1 border-l-2 border-cafe pl-3">
         <div className="mb-2 flex flex-wrap gap-x-3 gap-y-1 text-micro text-cafe-muted">
@@ -96,20 +94,11 @@ export function TurnAbsorptionDock({ projection, messages, getCatLabel, sourceAu
               className="rounded-md bg-cafe-surface/55 px-2 py-1.5"
             >
               <div className="flex flex-wrap items-center gap-x-1 text-cafe-secondary" data-source-author>
-                <span className="font-semibold">{sourceAuthorLabel}</span>
+                <span className="font-semibold">
+                  {item.sourceAuthorCatId ? getCatLabel(item.sourceAuthorCatId) : sourceAuthorLabel}
+                </span>
                 <span className="text-cafe-muted">· {formatClock(item.sourceTimestamp)}</span>
               </div>
-              {item.bodyProjectedHere && item.contentBlocks?.length ? (
-                <div className="mt-1.5">
-                  <ContentBlocks blocks={item.contentBlocks} />
-                </div>
-              ) : item.bodyProjectedHere && item.content.trim() ? (
-                <CollapsibleMarkdown
-                  content={item.content}
-                  className="mt-1.5"
-                  disclosureKey={`turn-absorption:${projection.invocationId}:${item.sourceMessageId}`}
-                />
-              ) : null}
               <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-micro text-cafe-muted">
                 <span className="font-medium" data-turn-absorption-status>
                   {outcomeStatus(item)}

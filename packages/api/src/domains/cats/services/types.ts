@@ -307,6 +307,12 @@ export interface AgentMessage {
   /** Exact durable child start time carried only by the typed invocation-created
    *  lifecycle event. Consumers must not recover it by parsing `content`. */
   turnExecutionStartedAt?: number;
+  /** Durable processing response created before provider startup for this exact child. */
+  lifecycleResponseMessageId?: string;
+  /** Raw message frontier observed before the processing response was published. */
+  lifecyclePriorFrontierMessageId?: string | null;
+  /** Exact server-owned working identity; dynamic clients must fail closed without it. */
+  activeRun?: import('@cat-cafe/shared').LifecycleActiveRun;
   /** Typed F167 Phase T proof that this exact child consumed a terminal
    *  coordination wake and correctly produced no reply. */
   turnCustodyTerminalWitness?: QueueTerminalConsumptionWitness;
@@ -557,6 +563,49 @@ export interface AgentContextBinding {
   readonly source: 'service_spawn' | 'invocation_config';
 }
 
+/** Provider-native identity for one exact, still-open Agent Client run. */
+export interface AgentClientActiveRunHandle {
+  readonly provider: 'openai_codex' | 'anthropic_acp' | 'other';
+  readonly carrier: 'codex_app_server' | 'acp' | 'other';
+  readonly threadId: string;
+  readonly turnId: string;
+}
+
+/** Exact input that the lifecycle coordinator has already admitted durably. */
+export interface AgentClientDispatchInput {
+  readonly text: string;
+  readonly imagePaths?: readonly string[];
+  readonly messageIds: readonly string[];
+}
+
+export interface AgentClientDispatchOptions {
+  /** Normal dispatch / Append = false; Steer = true. */
+  readonly force: boolean;
+  /** Server-owned lifecycle invocation fence, never a provider session id. */
+  readonly expectedInvocationId: string;
+}
+
+export type AgentClientDispatchResult =
+  | { readonly accepted: true; readonly handle: AgentClientActiveRunHandle }
+  | {
+      readonly accepted: false;
+      readonly reason: 'active_run_mismatch' | 'active_run_closed' | 'invalid_input' | 'provider_rejected';
+    };
+
+/** Live-only adapter. Durable Queue/History state must never be stored here. */
+export interface AgentClientActiveRunDispatcher {
+  readonly invocationId: string;
+  readonly capabilities: { readonly append: boolean; readonly steer: boolean };
+  readonly handle: AgentClientActiveRunHandle;
+  dispatch(input: AgentClientDispatchInput, options: AgentClientDispatchOptions): Promise<AgentClientDispatchResult>;
+}
+
+export interface AgentClientActiveRunDispatchRegistration {
+  readonly invocationId: string;
+  /** Return a release hook that removes this exact live handle from its registry. */
+  register(dispatcher: AgentClientActiveRunDispatcher): (() => void) | void;
+}
+
 /** ADR-042 automatic supplement execution: provider + callback layers must enforce this, not prompt prose. */
 export interface ToolExecutionPolicy {
   readonly mode: 'read_only';
@@ -614,6 +663,8 @@ export interface AgentServiceOptions {
   agentCarrierSessionFactory?: AgentCarrierSessionFactory;
   /** F254 D2: per-invocation two-phase provider-native freshness controller. */
   activeInvocationFreshness?: import('./freshness/FreshnessNoticeBroker.js').ActiveInvocationFreshnessController;
+  /** #1354: expose an exact provider-native active-turn dispatcher after turn acceptance. */
+  activeRunDispatch?: AgentClientActiveRunDispatchRegistration;
   /** F210-H1b: Override AGY --log-file path (test seam for the trajectory progress observer). */
   agyLogPathOverride?: string;
   /** F118: Invocation ID for diagnostic enrichment of __cliTimeout */

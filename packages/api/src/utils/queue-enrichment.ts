@@ -36,6 +36,11 @@ type QueueUpdateEmitter = Pick<SocketManager, 'emitToUser'>;
 
 const QUEUE_ENRICHMENT_TIMEOUT_MS = 2_000;
 
+/** RFC #1356 private inputs are execution custody, never user-visible Queue rows. */
+export function isPublicQueueEntry(entry: Pick<QueueEntry, 'kind'>): boolean {
+  return entry.kind !== 'private_input';
+}
+
 /**
  * Queue updates are full-state replacements in the browser. Keep one ordered
  * publication tail for each runtime/thread/user scope so a slow older preview
@@ -97,7 +102,7 @@ function latestQueueEntryExposure(
 
 function hasAgentLiveReceiptEvidence(entry: QueueEntry): boolean {
   return (
-    entry.source === 'agent' &&
+    entry.from.kind === 'agent' &&
     Boolean(entry.queuedSeenByCatIds?.length || Object.keys(entry.queuedAwakenedInvocationIdByCatId ?? {}).length)
   );
 }
@@ -257,7 +262,7 @@ export async function enrichQueueEntries(
   entries: QueueEntry[],
   messageStore: IMessageStore | null | undefined,
 ): Promise<EnrichedQueueEntry[]> {
-  const projected = entries.map(projectPublicQueueEntry);
+  const projected = entries.filter(isPublicQueueEntry).map(projectPublicQueueEntry);
   return enrichProjectedQueueEntries(projected, messageStore);
 }
 
@@ -311,7 +316,7 @@ async function buildQueueUpdateProjectionWithinDeadline(
   messageStore: IMessageStore | null | undefined,
   receiptMessageIds: readonly string[],
 ): Promise<{ queue: EnrichedQueueEntry[]; messageReceipts?: QueueMessageReceiptProjection[] }> {
-  const projected = entries.map(projectPublicQueueEntry);
+  const projected = entries.filter(isPublicQueueEntry).map(projectPublicQueueEntry);
   if (!messageStore) return { queue: projected };
   if (projected.length === 0 && receiptMessageIds.length === 0) return { queue: projected };
 

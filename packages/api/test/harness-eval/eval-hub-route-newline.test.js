@@ -5,6 +5,7 @@ import { describe, it } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import Fastify from 'fastify';
 import { evalHubRoutes } from '../../dist/routes/eval-hub.js';
+import { createMockArtifactPublisher } from './publish-verdict-fixtures.js';
 
 /**
  * F192 Phase H — newline-injection lock for publish-verdict route.
@@ -42,20 +43,17 @@ function buildAgentKeyPublishApp() {
       return { ok: false, reason: 'unknown_invocation' };
     },
   };
-  const mockGitPublisher = {
-    async publishOnIsolatedWorktree(opts) {
-      const wt = mkdtempSync(`${tmpdir()}/phase-h-newline-route-`);
-      await opts.stage(wt);
-      return { commitSha: 'mock-sha', prUrl: 'https://example.com/pr/1' };
-    },
-  };
+  const artifactPublisher = createMockArtifactPublisher({
+    artifactId: 'mock-sha',
+    artifactUrl: 'artifact://eval-a2a/mock-artifact',
+  });
   const mockGenerator = async (packet, _sources, deps) => ({
     verdictPath: `${deps.harnessFeedbackRoot}/verdicts/${packet.id}.md`,
     bundleDir: `${deps.harnessFeedbackRoot}/bundles/${packet.id}`,
   });
   app.register(evalHubRoutes, {
     harnessFeedbackRoot: repoHarnessFeedbackRoot,
-    gitPublisher: mockGitPublisher,
+    artifactPublisher,
     verdictGenerators: { 'eval:a2a': mockGenerator },
     callbackRegistry,
     agentKeyRegistry,

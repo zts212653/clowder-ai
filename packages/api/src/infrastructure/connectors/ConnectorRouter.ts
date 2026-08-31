@@ -15,7 +15,7 @@
  * F088 Multi-Platform Chat Gateway
  */
 
-import type { CatId, ConnectorDefinition, ConnectorSource, MessageContent } from '@cat-cafe/shared';
+import type { CatId, ConnectorDefinition, ConnectorSource, MessageContent, MessageFrom } from '@cat-cafe/shared';
 import { catRegistry, getConnectorDefinition } from '@cat-cafe/shared';
 import type { FastifyBaseLogger } from 'fastify';
 import { findMonorepoRoot } from '../../utils/monorepo-root.js';
@@ -62,13 +62,15 @@ export interface ConnectorRouterOptions {
   readonly dedup: InboundMessageDedup;
   readonly messageStore: {
     append(input: {
+      from: MessageFrom;
       threadId: string;
       userId: string;
-      catId: null;
       content: string;
       source: ConnectorSource;
       mentions: CatId[];
       timestamp: number;
+      deliveryStatus?: 'queued';
+      contentBlocks?: readonly MessageContent[];
     }): Promise<{ id: string }>;
   };
   readonly threadStore: {
@@ -120,7 +122,7 @@ export interface ConnectorRouterOptions {
       contentBlocks?: readonly MessageContent[],
       policy?: unknown,
       sender?: { id: string; name?: string },
-    ): Promise<'dispatched' | 'enqueued' | 'full'>;
+    ): Promise<'enqueued' | 'full'>;
   };
   readonly socketManager?:
     | {
@@ -307,19 +309,18 @@ export class ConnectorRouter {
           const { targetCatId } = parseMentions(fwdText, mentionPatterns, this.getDefaultCatId());
           const fwdTimestamp = Date.now();
           const fwdStored = await messageStore.append({
+            from: {
+              kind: 'external',
+              connectorId,
+              ...(sender ? { sender } : {}),
+            },
             threadId: fwdThreadId,
             userId: this.opts.defaultUserId,
-            catId: null,
             content: fwdText,
             source: fwdSource,
             mentions: [targetCatId],
             timestamp: fwdTimestamp,
-          });
-          emitConnectorMessage(socketManager, fwdThreadId, {
-            id: fwdStored.id,
-            content: fwdText,
-            source: fwdSource,
-            timestamp: fwdTimestamp,
+            deliveryStatus: 'queued',
           });
           const triggerOutcome = await invokeTrigger.trigger(
             fwdThreadId,
@@ -360,19 +361,18 @@ export class ConnectorRouter {
             const askCatId = cmdResult.targetCatId as CatId;
             const askTimestamp = Date.now();
             const askStored = await messageStore.append({
+              from: {
+                kind: 'external',
+                connectorId,
+                ...(sender ? { sender } : {}),
+              },
               threadId: askThreadId,
               userId: this.opts.defaultUserId,
-              catId: null,
               content: askText,
               source: askSource,
               mentions: [askCatId],
               timestamp: askTimestamp,
-            });
-            emitConnectorMessage(socketManager, askThreadId, {
-              id: askStored.id,
-              content: askText,
-              source: askSource,
-              timestamp: askTimestamp,
+              deliveryStatus: 'queued',
             });
             const triggerOutcome = await invokeTrigger.trigger(
               askThreadId,
@@ -464,25 +464,23 @@ export class ConnectorRouter {
 
     const storedTimestamp = Date.now();
     const stored = await messageStore.append({
+      from: {
+        kind: 'external',
+        connectorId,
+        ...(sender ? { sender } : {}),
+      },
       threadId: binding.threadId,
       userId: this.opts.defaultUserId,
-      catId: null,
       content: resolvedText,
       source,
       mentions: [targetCatId],
       timestamp: storedTimestamp,
+      deliveryStatus: 'queued',
       ...(contentBlocks ? { contentBlocks } : {}),
     });
 
-    // 4. Broadcast to WebSocket
-    emitConnectorMessage(socketManager, binding.threadId, {
-      id: stored.id,
-      content: resolvedText,
-      source,
-      timestamp: storedTimestamp,
-    });
-
-    // 5. Trigger cat invocation (use parsed targetCatId)
+    // 4. Bind the hidden source to Queue. QueueProcessor publishes it to
+    // History only after exact provider admission.
     await invokeTrigger.trigger(
       binding.threadId,
       targetCatId,
@@ -620,9 +618,9 @@ export class ConnectorRouter {
 
     // Store inbound command
     const cmdMsg = await messageStore.append({
+      from: { kind: 'external', connectorId },
       threadId,
       userId: this.opts.defaultUserId,
-      catId: null,
       content: commandText,
       source: { connector: connectorId, label: def?.displayName ?? connectorId, icon: connectorSourceIcon(def) },
       mentions: [],
@@ -631,9 +629,9 @@ export class ConnectorRouter {
 
     // Store outbound system response
     const resMsg = await messageStore.append({
+      from: { kind: 'system', service: 'connector-command' },
       threadId,
       userId: this.opts.defaultUserId,
-      catId: null,
       content: responseText,
       source: { connector: 'system-command', label: 'Clowder AI', icon: 'settings' },
       mentions: [],

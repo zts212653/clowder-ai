@@ -116,21 +116,24 @@ import { MessageStore } from '../dist/domains/cats/services/stores/ports/Message
 describe('F096: MessageStore.updateExtra', () => {
   it('T11: updates extra.rich block state', () => {
     const store = new MessageStore();
-    const msg = store.append({
-      userId: 'u1',
-      catId: 'opus',
-      content: 'hello',
-      mentions: [],
-      timestamp: Date.now(),
-      extra: {
-        rich: {
-          v: 1,
-          blocks: [
-            { id: 'i1', kind: 'interactive', v: 1, interactiveType: 'select', options: [{ id: 'o1', label: 'A' }] },
-          ],
+    const msg = store.append(
+      canonicalTestMessageInput({
+        provenance: { author: 'cat', routed: false, observation: 'original' },
+        userId: 'u1',
+        catId: 'opus',
+        content: 'hello',
+        mentions: [],
+        timestamp: Date.now(),
+        extra: {
+          rich: {
+            v: 1,
+            blocks: [
+              { id: 'i1', kind: 'interactive', v: 1, interactiveType: 'select', options: [{ id: 'o1', label: 'A' }] },
+            ],
+          },
         },
-      },
-    });
+      }),
+    );
 
     const updated = store.updateExtra(msg.id, {
       rich: {
@@ -162,17 +165,20 @@ describe('F096: MessageStore.updateExtra', () => {
 
   it('T13: preserves other extra fields (regression)', () => {
     const store = new MessageStore();
-    const msg = store.append({
-      userId: 'u1',
-      catId: 'opus',
-      content: 'hi',
-      mentions: [],
-      timestamp: Date.now(),
-      extra: {
-        rich: { v: 1, blocks: [] },
-        stream: { invocationId: 'inv-1' },
-      },
-    });
+    const msg = store.append(
+      canonicalTestMessageInput({
+        provenance: { author: 'cat', routed: false, observation: 'original' },
+        userId: 'u1',
+        catId: 'opus',
+        content: 'hi',
+        mentions: [],
+        timestamp: Date.now(),
+        extra: {
+          rich: { v: 1, blocks: [] },
+          stream: { invocationId: 'inv-1' },
+        },
+      }),
+    );
 
     const updated = store.updateExtra(msg.id, {
       rich: { v: 1, blocks: [{ id: 'b1', kind: 'card', v: 1, title: 'Test' }] },
@@ -235,21 +241,24 @@ describe('F096: PATCH /block-state route guards (P1-1, P2-2)', () => {
 
   it('T19: returns 403 for wrong userId', async () => {
     const store = new MessageStore();
-    const msg = store.append({
-      userId: 'owner',
-      catId: 'opus',
-      content: 'pick',
-      mentions: [],
-      timestamp: Date.now(),
-      extra: {
-        rich: {
-          v: 1,
-          blocks: [
-            { id: 'i1', kind: 'interactive', v: 1, interactiveType: 'select', options: [{ id: 'o1', label: 'A' }] },
-          ],
+    const msg = store.append(
+      canonicalTestMessageInput({
+        provenance: { author: 'cat', routed: false, observation: 'original' },
+        userId: 'owner',
+        catId: 'opus',
+        content: 'pick',
+        mentions: [],
+        timestamp: Date.now(),
+        extra: {
+          rich: {
+            v: 1,
+            blocks: [
+              { id: 'i1', kind: 'interactive', v: 1, interactiveType: 'select', options: [{ id: 'o1', label: 'A' }] },
+            ],
+          },
         },
-      },
-    });
+      }),
+    );
     const app = await createApp(store);
     const res = await app.inject({
       method: 'PATCH',
@@ -261,14 +270,17 @@ describe('F096: PATCH /block-state route guards (P1-1, P2-2)', () => {
 
   it('T20: returns 400 for non-interactive block', async () => {
     const store = new MessageStore();
-    const msg = store.append({
-      userId: 'owner',
-      catId: 'opus',
-      content: 'card msg',
-      mentions: [],
-      timestamp: Date.now(),
-      extra: { rich: { v: 1, blocks: [{ id: 'c1', kind: 'card', v: 1, title: 'Card' }] } },
-    });
+    const msg = store.append(
+      canonicalTestMessageInput({
+        provenance: { author: 'cat', routed: false, observation: 'original' },
+        userId: 'owner',
+        catId: 'opus',
+        content: 'card msg',
+        mentions: [],
+        timestamp: Date.now(),
+        extra: { rich: { v: 1, blocks: [{ id: 'c1', kind: 'card', v: 1, title: 'Card' }] } },
+      }),
+    );
     const app = await createApp(store);
     const res = await app.inject({
       method: 'PATCH',
@@ -280,21 +292,24 @@ describe('F096: PATCH /block-state route guards (P1-1, P2-2)', () => {
 
   it('T21: returns 200 and calls updateExtra for valid owner + interactive block', async () => {
     const store = new MessageStore();
-    const msg = store.append({
-      userId: 'owner',
-      catId: 'opus',
-      content: 'pick',
-      mentions: [],
-      timestamp: Date.now(),
-      extra: {
-        rich: {
-          v: 1,
-          blocks: [
-            { id: 'i1', kind: 'interactive', v: 1, interactiveType: 'select', options: [{ id: 'o1', label: 'A' }] },
-          ],
+    const msg = store.append(
+      canonicalTestMessageInput({
+        provenance: { author: 'cat', routed: false, observation: 'original' },
+        userId: 'owner',
+        catId: 'opus',
+        content: 'pick',
+        mentions: [],
+        timestamp: Date.now(),
+        extra: {
+          rich: {
+            v: 1,
+            blocks: [
+              { id: 'i1', kind: 'interactive', v: 1, interactiveType: 'select', options: [{ id: 'o1', label: 'A' }] },
+            ],
+          },
         },
-      },
-    });
+      }),
+    );
     // Spy on updateExtra to verify persistence path is exercised
     let updateExtraCalled = false;
     const origUpdateExtra = store.updateExtra.bind(store);
@@ -315,6 +330,7 @@ describe('F096: PATCH /block-state route guards (P1-1, P2-2)', () => {
 });
 
 import { extractRichFromText } from '../dist/domains/cats/services/agents/routing/rich-block-extract.js';
+import { canonicalTestMessageInput } from './helpers/message-from-fixtures.js';
 
 describe('F096: extractRichFromText — interactive', () => {
   it('T14: extracts interactive block from cc_rich fence', () => {

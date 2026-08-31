@@ -14,6 +14,7 @@ import { DeliveryCursorStore } from '../dist/domains/cats/services/stores/ports/
 import { InvocationRecordStore } from '../dist/domains/cats/services/stores/ports/InvocationRecordStore.js';
 import { MessageStore } from '../dist/domains/cats/services/stores/ports/MessageStore.js';
 import { ThreadStore } from '../dist/domains/cats/services/stores/ports/ThreadStore.js';
+import { canonicalTestMessageInput } from './helpers/message-from-fixtures.js';
 import {
   assertRedisIsolationOrThrow,
   cleanupPrefixedRedisKeys,
@@ -78,25 +79,31 @@ describe('Concurrent fault drills - in-memory stores', () => {
     const threadId = 'thread-race-cursor';
     const baseTs = Date.now();
 
-    const base = messageStore.append({
-      userId,
-      catId: null,
-      content: 'base',
-      mentions: [],
-      timestamp: baseTs,
-      threadId,
-    });
+    const base = messageStore.append(
+      canonicalTestMessageInput({
+        provenance: { author: 'user', routed: false, observation: 'original' },
+        userId,
+        catId: null,
+        content: 'base',
+        mentions: [],
+        timestamp: baseTs,
+        threadId,
+      }),
+    );
 
     const appendPromise = Promise.resolve().then(async () => {
       await new Promise((resolve) => setTimeout(resolve, 0));
-      return messageStore.append({
-        userId,
-        catId: null,
-        content: 'new-after-ack',
-        mentions: [],
-        timestamp: baseTs + 1,
-        threadId,
-      });
+      return messageStore.append(
+        canonicalTestMessageInput({
+          provenance: { author: 'user', routed: false, observation: 'original' },
+          userId,
+          catId: null,
+          content: 'new-after-ack',
+          mentions: [],
+          timestamp: baseTs + 1,
+          threadId,
+        }),
+      );
     });
     const ackPromise = Promise.resolve().then(() => deliveryCursorStore.ackCursor(userId, catId, threadId, base.id));
 
@@ -248,25 +255,31 @@ describe('Concurrent fault drills - Redis stores', { skip: redisIsolationSkipRea
     const threadId = 'thread-race-cursor';
     const baseTs = Date.now();
 
-    const base = await messageStore.append({
-      userId,
-      catId: null,
-      content: 'base',
-      mentions: [],
-      timestamp: baseTs,
-      threadId,
-    });
+    const base = await messageStore.append(
+      canonicalTestMessageInput({
+        provenance: { author: 'user', routed: false, observation: 'original' },
+        userId,
+        catId: null,
+        content: 'base',
+        mentions: [],
+        timestamp: baseTs,
+        threadId,
+      }),
+    );
 
     const appendPromise = Promise.resolve().then(async () => {
       await new Promise((resolve) => setTimeout(resolve, 0));
-      return messageStore.append({
-        userId,
-        catId: null,
-        content: 'new-after-ack',
-        mentions: [],
-        timestamp: baseTs + 1,
-        threadId,
-      });
+      return messageStore.append(
+        canonicalTestMessageInput({
+          provenance: { author: 'user', routed: false, observation: 'original' },
+          userId,
+          catId: null,
+          content: 'new-after-ack',
+          mentions: [],
+          timestamp: baseTs + 1,
+          threadId,
+        }),
+      );
     });
     const ackPromise = Promise.resolve().then(() => deliveryCursorStore.ackCursor(userId, catId, threadId, base.id));
 

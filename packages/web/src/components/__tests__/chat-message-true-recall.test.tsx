@@ -89,13 +89,13 @@ describe('ChatMessage true recall tombstone', () => {
     expect(container.textContent).not.toContain('零曝光正文不能闪现');
   });
 
-  it('folds an exactly handled source body only when its terminal invocation surface exists', () => {
+  it('keeps an exactly handled source independently visible beside its terminal invocation surface', () => {
     const authoredAt = new Date(2026, 7, 11, 8, 4).getTime();
     const handledAt = new Date(2026, 7, 11, 8, 16).getTime();
     const source: ChatMessageType = {
       id: 'message-folded-source',
       type: 'user',
-      content: '这段补充只应出现在本轮摘要',
+      content: '这段原消息必须留在作者位置',
       timestamp: authoredAt,
       extra: {
         queueReceipt: {
@@ -144,31 +144,22 @@ describe('ChatMessage true recall tombstone', () => {
       );
     });
 
-    const foldedAnchor = container.querySelector<HTMLElement>('[data-folded-source-anchor="child-folded"]');
-    expect(foldedAnchor).not.toBeNull();
-    expect(foldedAnchor?.getAttribute('aria-hidden')).toBe('true');
-    expect(container.querySelector('[data-testid="message-receipt-dock"]')).toBeNull();
+    const sourceBubble = container.querySelector<HTMLElement>('[data-message-id="message-folded-source"]');
+    expect(sourceBubble).not.toBeNull();
+    expect(container.querySelector('[data-folded-source-anchor="child-folded"]')).toBeNull();
+    expect(container.querySelector('[data-testid="message-receipt-dock"]')).not.toBeNull();
     expect(container.querySelector('[data-folded-source="child-folded"]')).toBeNull();
-    expect(container.textContent?.match(/这段补充只应出现在本轮摘要/g)).toHaveLength(1);
+    expect(container.textContent?.match(/这段原消息必须留在作者位置/g)).toHaveLength(1);
     expect(container.textContent).toContain('You');
     expect(container.textContent).toContain('08:04');
-    expect(container.textContent).toContain('随本轮完成 · 08:16');
+    expect(container.textContent).toContain('已随本轮完成');
+    expect(container.textContent).toContain('处理完成 08/11 08:16');
 
-    const absorptionDock = container.querySelector<HTMLDetailsElement>(
-      'details[data-turn-absorption-invocation="child-folded"]',
-    );
-    expect(absorptionDock).not.toBeNull();
-    if (!absorptionDock) throw new Error('fixture must render the canonical absorption dock');
-    absorptionDock.scrollIntoView = vi.fn();
-    if (foldedAnchor) foldedAnchor.scrollIntoView = vi.fn();
+    expect(container.querySelector('details[data-turn-absorption-invocation="child-folded"]')).toBeNull();
+    if (!sourceBubble) throw new Error('fixture must render the canonical source bubble');
+    sourceBubble.scrollIntoView = vi.fn();
     expect(scrollToMessage('message-folded-source')).toBe(true);
-    expect(foldedAnchor?.getAttribute('aria-hidden')).toBe('false');
-    expect(container.textContent).toContain('该补充已归入上方回复');
-    act(() => {
-      (container.querySelector('[data-folded-source-return="child-folded"]') as HTMLButtonElement).click();
-    });
-    expect(absorptionDock.open).toBe(true);
-    expect(absorptionDock.scrollIntoView).toHaveBeenCalledWith({ behavior: 'smooth', block: 'center' });
+    expect(sourceBubble.scrollIntoView).toHaveBeenCalledWith({ behavior: 'smooth', block: 'center' });
   });
 
   it('keeps an actionable supplement in the primary timeline with its real receipt', () => {

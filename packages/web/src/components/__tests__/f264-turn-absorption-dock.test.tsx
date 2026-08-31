@@ -20,14 +20,14 @@ function projection(defaultExpanded: boolean): TurnAbsorptionProjection {
       {
         sourceMessageId: 'm-handled',
         sourceTimestamp: new Date(2026, 7, 11, 8, 4).getTime(),
-        content: '只在 terminal footer 显示的正文',
+        content: '始终留在 source 的正文',
         kind: 'completed_with_turn',
         handlerCatId: 'codex-sol',
         invocationId: 'child-1',
         seenAt: 10,
         outcomeAt: new Date(2026, 7, 11, 8, 16).getTime(),
         recalled: false,
-        bodyProjectedHere: true,
+        bodyProjectedHere: false,
       },
       {
         sourceMessageId: 'm-actionable',
@@ -70,7 +70,7 @@ describe('F264 AC-42/43 terminal absorption dock', () => {
     container.remove();
   });
 
-  it('renders exact counts and projects only the body moved from its source anchor', () => {
+  it('renders exact active-append counts without moving either source body', () => {
     act(() => {
       root.render(
         <TurnAbsorptionDock
@@ -84,14 +84,14 @@ describe('F264 AC-42/43 terminal absorption dock', () => {
 
     const details = container.querySelector('details');
     expect(details?.open).toBe(true);
-    expect(container.textContent).toContain('本轮处理了 1/2 条补充');
+    expect(container.textContent).toContain('运行中追加已接收 2 条消息 · 已处理 1/2');
     expect(container.textContent).toContain('1 条随本轮完成');
     expect(container.textContent).toContain('1 条仍待处理');
     expect(container.textContent).toContain('You');
     expect(container.textContent).toContain('08:04');
     expect(container.textContent).toContain('随本轮完成 · 08:16');
     expect(container.textContent).toContain('由 小太阳·砚砚处理');
-    expect(container.textContent).toContain('只在 terminal footer 显示的正文');
+    expect(container.textContent).not.toContain('始终留在 source 的正文');
     expect(container.textContent).not.toContain('仍在原时间线显示的正文');
     expect(container.querySelector('[data-turn-absorption-kind="completed_with_turn"]')).not.toBeNull();
     expect(container.querySelector('[data-turn-absorption-kind="actionable"]')).not.toBeNull();
@@ -153,7 +153,7 @@ describe('F264 AC-42/43 terminal absorption dock', () => {
     ).toBe('仍待处理');
   });
 
-  it('moves an image-only handled supplement into the terminal dock before folding its source', () => {
+  it('keeps image-only source content out of the receipt summary', () => {
     const imageOnly = projection(true);
     imageOnly.items[0] = {
       ...imageOnly.items[0],
@@ -171,9 +171,7 @@ describe('F264 AC-42/43 terminal absorption dock', () => {
       );
     });
 
-    expect(container.querySelector('img[alt="attached image"]')?.getAttribute('src')).toContain(
-      '/uploads/absorbed-proof.png',
-    );
+    expect(container.querySelector('img[alt="attached image"]')).toBeNull();
     expect(container.textContent).toContain('定位原消息 ↑');
   });
 

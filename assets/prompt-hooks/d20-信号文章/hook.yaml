@@ -13,6 +13,11 @@ resolver: D20SignalArticlesResolver
 inputs:
   - signalArticles
 
+# Variable metadata (canonical source for Console editor)
+variables:
+  - name: SIGNAL_ARTICLES_BLOCK
+    description: 信号文章块
+    placeholder: ""
 # Override constraints
 disableable: true
 

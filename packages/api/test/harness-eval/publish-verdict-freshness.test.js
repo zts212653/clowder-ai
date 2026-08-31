@@ -9,7 +9,7 @@ import { FreshnessReplayProviderImpl } from '../../dist/infrastructure/harness-e
 import { loadEvalHubSummary } from '../../dist/infrastructure/harness-eval/hub/eval-hub-read-model.js';
 import { createFreshnessGeneratorAdapter } from '../../dist/infrastructure/harness-eval/publish-verdict/freshness-generator-adapter.js';
 import { handlePublishVerdict } from '../../dist/infrastructure/harness-eval/publish-verdict/publish-verdict.js';
-import { buildPacket, seedCanonicalMeasurementCensusState } from './publish-verdict-fixtures.js';
+import { buildPacket } from './publish-verdict-fixtures.js';
 
 const root = mkdtempSync(join(tmpdir(), 'publish-verdict-freshness-'));
 const harnessFeedbackRoot = join(root, 'docs', 'harness-feedback');
@@ -111,25 +111,26 @@ describe('publish_verdict eval:freshness', () => {
     });
     const generator = createFreshnessGeneratorAdapter(provider);
     let isolatedRoot;
-    const gitPublisher = {
-      async publishOnIsolatedWorktree(opts) {
+    const artifactPublisher = {
+      async publishArtifact({ packet, generate }) {
         isolatedRoot = join(root, 'isolated');
         rmSync(isolatedRoot, { recursive: true, force: true });
-        mkdirSync(join(isolatedRoot, 'docs', 'harness-feedback', 'eval-domains'), { recursive: true });
-        writeFileSync(
-          join(isolatedRoot, 'docs', 'harness-feedback', 'eval-domains', 'eval-freshness.yaml'),
-          domainYaml,
-        );
-        seedCanonicalMeasurementCensusState(isolatedRoot);
-        rmSync(join(isolatedRoot, 'docs', 'harness-feedback', 'verdicts'), { recursive: true, force: true });
-        mkdirSync(join(isolatedRoot, 'docs', 'harness-feedback', 'verdicts'), { recursive: true });
-        await opts.stage(isolatedRoot);
-        return { commitSha: 'freshness-sha', prUrl: 'https://example.test/pr/1' };
+        const outputRoot = join(isolatedRoot, 'docs', 'harness-feedback');
+        mkdirSync(outputRoot, { recursive: true });
+        const generated = await generate(outputRoot);
+        await generated.afterPublish?.();
+        return {
+          artifactId: packet.id,
+          domainSlug: 'eval-freshness',
+          verdictPath: generated.verdictPath,
+          bundleDir: generated.bundleDir,
+          artifactUrl: `artifact://eval-freshness/${packet.id}`,
+        };
       },
     };
 
     const result = await handlePublishVerdict(
-      { harnessFeedbackRoot, generator, gitPublisher },
+      { harnessFeedbackRoot, generator, artifactPublisher },
       { packet: freshnessPacket(), domain: 'eval:freshness', catId: 'gpt52', sourceRefs },
     );
 
@@ -208,21 +209,24 @@ describe('publish_verdict eval:freshness', () => {
       new FreshnessReplayProviderImpl({ store: new InMemoryFreshnessClosureStore(), fixtureRoot }),
     );
     const isolatedRoot = join(root, 'isolated-no-data');
-    const gitPublisher = {
-      async publishOnIsolatedWorktree(opts) {
+    const artifactPublisher = {
+      async publishArtifact({ packet, generate }) {
         rmSync(isolatedRoot, { recursive: true, force: true });
-        mkdirSync(join(isolatedRoot, 'docs', 'harness-feedback', 'eval-domains'), { recursive: true });
-        writeFileSync(
-          join(isolatedRoot, 'docs', 'harness-feedback', 'eval-domains', 'eval-freshness.yaml'),
-          domainYaml,
-        );
-        seedCanonicalMeasurementCensusState(isolatedRoot);
-        await opts.stage(isolatedRoot);
-        return { commitSha: 'freshness-no-data-sha', prUrl: 'https://example.test/pr/2' };
+        const outputRoot = join(isolatedRoot, 'docs', 'harness-feedback');
+        mkdirSync(outputRoot, { recursive: true });
+        const generated = await generate(outputRoot);
+        await generated.afterPublish?.();
+        return {
+          artifactId: packet.id,
+          domainSlug: 'eval-freshness',
+          verdictPath: generated.verdictPath,
+          bundleDir: generated.bundleDir,
+          artifactUrl: `artifact://eval-freshness/${packet.id}`,
+        };
       },
     };
     const result = await handlePublishVerdict(
-      { harnessFeedbackRoot, generator, gitPublisher },
+      { harnessFeedbackRoot, generator, artifactPublisher },
       {
         packet: freshnessPacket({ id: 'vhp-freshness-no-data' }),
         domain: 'eval:freshness',

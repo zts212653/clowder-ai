@@ -15,6 +15,7 @@
 
 import assert from 'node:assert/strict';
 import { after, before, beforeEach, describe, it } from 'node:test';
+import { canonicalTestMessageInput } from './helpers/message-from-fixtures.js';
 import { makeQueuedMessageCustody as makeCustody } from './helpers/queued-message-custody.js';
 import {
   assertRedisIsolationOrThrow,
@@ -71,15 +72,18 @@ describe('Redis delivery transition contracts (PR #1193)', { skip: redisIsolatio
 
   // ── Helper: create a queued message for testing ──
   const createQueued = (userId, threadId, ts) =>
-    store.append({
-      userId,
-      catId: null,
-      content: `queued-msg-${ts}`,
-      mentions: [],
-      timestamp: ts,
-      threadId,
-      deliveryStatus: 'queued',
-    });
+    store.append(
+      canonicalTestMessageInput({
+        provenance: { author: 'user', routed: false, observation: 'original' },
+        userId,
+        catId: null,
+        content: `queued-msg-${ts}`,
+        mentions: [],
+        timestamp: ts,
+        threadId,
+        deliveryStatus: 'queued',
+      }),
+    );
 
   // ── Helper: assert hash/zset consistency invariant ──
   const assertConsistency = async (msgId, label) => {
@@ -106,14 +110,17 @@ describe('Redis delivery transition contracts (PR #1193)', { skip: redisIsolatio
     const base = Date.now();
     const threadId = 'thread-dlv-imm-9';
     // Create a message WITHOUT deliveryStatus (= immediate/legacy)
-    const msg = await store.append({
-      userId: 'userA',
-      catId: null,
-      content: 'immediate msg',
-      mentions: [],
-      timestamp: base,
-      threadId,
-    });
+    const msg = await store.append(
+      canonicalTestMessageInput({
+        provenance: { author: 'user', routed: false, observation: 'original' },
+        userId: 'userA',
+        catId: null,
+        content: 'immediate msg',
+        mentions: [],
+        timestamp: base,
+        threadId,
+      }),
+    );
 
     const result = await store.markCanceled(msg.id);
     assert.equal(result?.deliveryTransitioned, false, 'CAS no-op must report applied=false');
@@ -200,15 +207,18 @@ describe('Redis delivery transition contracts (PR #1193)', { skip: redisIsolatio
 
     // Create a store WITH ttlSeconds to exercise the EXPIRE branch
     const ttlStore = new RedisMessageStore(redis, { ttlSeconds: 60 });
-    const msg = await ttlStore.append({
-      userId: 'userA',
-      catId: null,
-      content: 'ttl-test-msg',
-      mentions: [],
-      timestamp: base,
-      threadId,
-      deliveryStatus: 'queued',
-    });
+    const msg = await ttlStore.append(
+      canonicalTestMessageInput({
+        provenance: { author: 'user', routed: false, observation: 'original' },
+        userId: 'userA',
+        catId: null,
+        content: 'ttl-test-msg',
+        mentions: [],
+        timestamp: base,
+        threadId,
+        deliveryStatus: 'queued',
+      }),
+    );
     await ttlStore.markDelivered(msg.id, base + 100);
 
     // Reassign to userF — EXPIRE should fire inside Lua
@@ -234,16 +244,19 @@ describe('Redis delivery transition contracts (PR #1193)', { skip: redisIsolatio
       failedByCatIds: ['opus', 'codex'],
       updatedAt: base,
     });
-    const msg = await store.append({
-      userId: 'userA',
-      catId: null,
-      content: 'terminal custody is publishable',
-      mentions: ['opus', 'codex'],
-      timestamp: base,
-      threadId: 'thread-dlv-terminal-custody-14',
-      deliveryStatus: 'queued',
-      queueCustody: terminalCustody,
-    });
+    const msg = await store.append(
+      canonicalTestMessageInput({
+        provenance: { author: 'user', routed: false, observation: 'original' },
+        userId: 'userA',
+        catId: null,
+        content: 'terminal custody is publishable',
+        mentions: ['opus', 'codex'],
+        timestamp: base,
+        threadId: 'thread-dlv-terminal-custody-14',
+        deliveryStatus: 'queued',
+        queueCustody: terminalCustody,
+      }),
+    );
 
     const result = await store.markDelivered(msg.id, base + 100);
 

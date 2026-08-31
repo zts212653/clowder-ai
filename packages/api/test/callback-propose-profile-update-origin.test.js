@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, it } from 'node:test';
 import Fastify from 'fastify';
+import { canonicalTestMessageInput } from './helpers/message-from-fixtures.js';
 
 describe('F231 approval origin authentication', () => {
   let app;
@@ -48,14 +49,17 @@ describe('F231 approval origin authentication', () => {
   });
 
   async function appendUserMessage(content) {
-    return messageStore.append({
-      userId: 'alice',
-      catId: null,
-      content,
-      mentions: [],
-      timestamp: Date.now(),
-      threadId: 'thread_1',
-    });
+    return messageStore.append(
+      canonicalTestMessageInput({
+        provenance: { author: 'user', routed: false, observation: 'original' },
+        userId: 'alice',
+        catId: null,
+        content,
+        mentions: [],
+        timestamp: Date.now(),
+        threadId: 'thread_1',
+      }),
+    );
   }
 
   async function propose(sourceMessageId, originTriggerMessageId, payload = {}) {

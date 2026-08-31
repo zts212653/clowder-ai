@@ -27,6 +27,7 @@ import {
   QueuedMessageCustodyCoordinator,
 } from '../dist/domains/cats/services/agents/invocation/QueuedMessageCustodyCoordinator.js';
 import { MessageStore } from '../dist/domains/cats/services/stores/ports/MessageStore.js';
+import { canonicalTestMessageInput, canonicalTestQueueInput } from './helpers/message-from-fixtures.js';
 
 class MemoryEventLog {
   events = [];
@@ -148,33 +149,39 @@ async function harness({
 
   const messageStore = new MessageStore();
   const queue = new InvocationQueue();
-  const enqueue = queue.enqueue({
-    threadId: 'thread-1',
-    userId: 'user-1',
-    ownerAuthProvenance: 'unknown',
-    content: '[定时任务] tests passed',
-    source: 'connector',
-    sourceCategory: 'scheduled',
-    targetCats: ['codex-sol'],
-    intent: 'execute',
-    priority: 'normal',
-  });
+  const enqueue = queue.enqueue(
+    canonicalTestQueueInput({
+      kind: 'conversation_input',
+      threadId: 'thread-1',
+      userId: 'user-1',
+      ownerAuthProvenance: 'unknown',
+      content: '[定时任务] tests passed',
+      from: { kind: 'system', service: 'hold-ball' },
+      source: 'connector',
+      sourceCategory: 'scheduled',
+      targetCats: ['codex-sol'],
+      intent: 'execute',
+      priority: 'normal',
+    }),
+  );
   assert.ok(enqueue.entry);
-  const stored = messageStore.append({
-    id: 'ignored-by-store',
-    userId: 'scheduler',
-    catId: null,
-    content: '[定时任务] tests passed',
-    mentions: [],
-    timestamp: 2_100,
-    threadId: 'thread-1',
-    deliveryStatus: 'queued',
-    source: {
-      connector: 'hold-ball',
-      label: '持球通知',
-      meta: { taskId: 'task-1', threadId: 'thread-1', catId: 'codex-sol', wakeWhen: true },
-    },
-  });
+  const stored = messageStore.append(
+    canonicalTestMessageInput({
+      id: 'ignored-by-store',
+      userId: 'scheduler',
+      catId: null,
+      content: '[定时任务] tests passed',
+      mentions: [],
+      timestamp: 2_100,
+      threadId: 'thread-1',
+      deliveryStatus: 'queued',
+      source: {
+        connector: 'hold-ball',
+        label: '持球通知',
+        meta: { taskId: 'task-1', threadId: 'thread-1', catId: 'codex-sol', wakeWhen: true },
+      },
+    }),
+  );
   // route-serial persists this exact receiver-boundary handoff before the
   // managed wake invocation can call the disposition producer.
   await ingest.record(
@@ -241,33 +248,38 @@ async function harness({
 
 async function enqueueManagedWake(h, { taskId, invocationId, fireAt, at }) {
   const command = `pnpm test:${taskId}`;
-  const enqueue = h.queue.enqueue({
-    threadId: 'thread-1',
-    userId: 'user-1',
-    ownerAuthProvenance: 'unknown',
-    content: `[定时任务] ${taskId} passed`,
-    source: 'connector',
-    sourceCategory: 'scheduled',
-    targetCats: ['codex-sol'],
-    intent: 'execute',
-    priority: 'normal',
-  });
+  const enqueue = h.queue.enqueue(
+    canonicalTestQueueInput({
+      kind: 'conversation_input',
+      threadId: 'thread-1',
+      userId: 'user-1',
+      ownerAuthProvenance: 'unknown',
+      content: `[定时任务] ${taskId} passed`,
+      from: { kind: 'system', service: 'hold-ball' },
+      sourceCategory: 'scheduled',
+      targetCats: ['codex-sol'],
+      intent: 'execute',
+      priority: 'normal',
+    }),
+  );
   assert.ok(enqueue.entry);
-  const stored = h.messageStore.append({
-    id: 'ignored-by-store',
-    userId: 'scheduler',
-    catId: null,
-    content: `[定时任务] ${taskId} passed`,
-    mentions: [],
-    timestamp: at + 100,
-    threadId: 'thread-1',
-    deliveryStatus: 'queued',
-    source: {
-      connector: 'hold-ball',
-      label: '持球通知',
-      meta: { taskId, threadId: 'thread-1', catId: 'codex-sol', wakeWhen: true },
-    },
-  });
+  const stored = h.messageStore.append(
+    canonicalTestMessageInput({
+      id: 'ignored-by-store',
+      userId: 'scheduler',
+      catId: null,
+      content: `[定时任务] ${taskId} passed`,
+      mentions: [],
+      timestamp: at + 100,
+      threadId: 'thread-1',
+      deliveryStatus: 'queued',
+      source: {
+        connector: 'hold-ball',
+        label: '持球通知',
+        meta: { taskId, threadId: 'thread-1', catId: 'codex-sol', wakeWhen: true },
+      },
+    }),
+  );
   const task = managedTask({ id: taskId, trigger: { type: 'once', fireAt } });
   task.params.holdLifecycle.wakeAt = fireAt;
   task.params.holdLifecycle.managedCommand = {
@@ -540,22 +552,47 @@ describe('F167 × F254 managed hold disposition', () => {
     }
   });
 
-  test('F264 failure restoration preserves one original carrier for a successor', async () => {
+  test('F264 failure restoration creates one fresh carrier for a successor', async () => {
     const h = await harness();
     const entry = h.queue.list('thread-1', 'user-1')[0];
 
     assert.equal(h.queue.rollbackProcessing('thread-1', entry.id), true);
-    const failed = h.queue.markQueuedFailedForCatAcrossUsers('thread-1', 'codex-sol', 'inv-1', new Set([entry.id]));
-    assert.deepEqual(failed, [{ entryId: entry.id, userId: 'user-1' }]);
     await h.coordinator.persistEntry(h.queue.getEntrySnapshot('thread-1', 'user-1', entry.id));
+    const [failed] = h.queue.takeQueuedFailedTargetForCatAcrossUsers(
+      'thread-1',
+      'codex-sol',
+      'inv-1',
+      new Set([entry.id]),
+    );
+    assert.ok(failed?.entrySnapshot);
+    await h.coordinator.commitFailedTargets(failed.entrySnapshot, ['codex-sol'], Date.now(), 'invocation_failed', {
+      'codex-sol': 'inv-1',
+    });
 
-    const failedEntry = h.queue.getEntrySnapshot('thread-1', 'user-1', entry.id);
     const failedAttempt = h.messageStore
       .getById(h.stored.id)
       .queueCustody.targetAttempts.find((attempt) => attempt.targetCatId === 'codex-sol' && attempt.state === 'failed');
     assert.ok(failedAttempt);
+    const admissionId = `retry-test:${h.stored.id}:${failedAttempt.id}`;
+    const replacement = h.queue.enqueue(
+      canonicalTestQueueInput({
+        kind: 'conversation_input',
+        threadId: 'thread-1',
+        userId: 'user-1',
+        ownerAuthProvenance: h.stored.queueCustody.ownerAuthProvenance,
+        content: h.stored.content,
+        messageId: h.stored.id,
+        from: { kind: 'external', connectorId: 'hold-ball' },
+        sourceCategory: 'scheduled',
+        targetCats: ['codex-sol'],
+        intent: h.stored.queueCustody.intent,
+        autoExecute: true,
+        priority: 'urgent',
+        queueCustodyAdmissionId: admissionId,
+      }),
+    ).entry;
     const retried = await h.coordinator.retryFailedTarget(
-      failedEntry,
+      replacement,
       'codex-sol',
       failedAttempt.id,
       async (transitions) => {
@@ -563,6 +600,7 @@ describe('F167 × F254 managed hold disposition', () => {
           const result = h.messageStore.transitionQueueCustody(transition.messageId, {
             expectedRevision: transition.current.revision,
             next: transition.next,
+            replacement: transition.replacement,
           });
           assert.equal(result.kind, 'updated');
         }
@@ -570,10 +608,12 @@ describe('F167 × F254 managed hold disposition', () => {
       },
     );
     assert.equal(retried.outcome, 'retried');
-    assert.ok(h.queue.retryFailedTarget('thread-1', 'user-1', entry.id, 'codex-sol'));
+    assert.equal(h.queue.commitQueueCustodyAdmission('thread-1', 'user-1', admissionId, [replacement.id]), true);
+    assert.ok(h.queue.bindRetryAttemptId('thread-1', 'user-1', replacement.id, 'codex-sol', retried.attempt.id));
 
     const successor = h.queue.markProcessing('thread-1', 'user-1');
-    assert.equal(successor.id, entry.id);
+    assert.equal(successor.id, replacement.id);
+    assert.notEqual(successor.id, entry.id);
     assert.equal(successor.messageId, h.stored.id);
     assert.equal(h.queue.list('thread-1', 'user-1').length, 1);
     const receipt = h.messageStore.getById(h.stored.id).queueCustody;
@@ -584,7 +624,7 @@ describe('F167 × F254 managed hold disposition', () => {
       receipt.targetAttempts.map((attempt) => ({ id: attempt.id, state: attempt.state })),
       [
         { id: `${entry.id}:codex-sol:1`, state: 'failed' },
-        { id: `${entry.id}:codex-sol:2`, state: 'queued' },
+        { id: `${replacement.id}:codex-sol:2`, state: 'queued' },
       ],
     );
     assert.equal(

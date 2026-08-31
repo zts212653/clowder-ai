@@ -53,15 +53,15 @@ describe('QueueProcessor mixed-target exact Steer', () => {
       threadId: 't1',
       userId: 'user-a',
       content: 'steer only the pending sibling',
-      source: 'user',
+      from: { kind: 'user', userId: 'user-a' },
+      kind: 'conversation_input',
       ownerAuthProvenance: 'strict',
       targetCats: ['opus', 'codex'],
       intent: 'execute',
-      messageId: 'message-1',
     });
     assert.equal(queued.outcome, 'enqueued');
     assert.ok(queued.entry);
-    queue.markQueuedFailedForCatAcrossUsers('t1', 'opus', 'inv-opus', new Set([queued.entry.id]));
+    queue.takeQueuedFailedTargetForCatAcrossUsers('t1', 'opus', 'inv-opus', new Set([queued.entry.id]));
 
     const reservation = queue.reserveExactUserEntry('t1', 'user-a', queued.entry.id, 'codex');
     assert.equal(reservation.outcome, 'reserved');

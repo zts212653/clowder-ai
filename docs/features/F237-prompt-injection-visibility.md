@@ -22,7 +22,7 @@ Thread `[thread-id]`: opus47 was dragged off-task by a startup hook's hygiene wa
 
 ### Problem
 
-Clowder AI's 52 prompt injection segments are invisible infrastructure — scattered across 7 source files (`SystemPromptBuilder.ts`, `route-serial.ts`, `route-helpers.ts`, shell hooks, etc.) with no unified inventory or Console visibility. Operators can't:
+Cat Cafe's 52 prompt injection segments are invisible infrastructure — scattered across 7 source files (`SystemPromptBuilder.ts`, `route-serial.ts`, `route-helpers.ts`, shell hooks, etc.) with no unified inventory or Console visibility. Operators can't:
 1. See what's being injected into agent prompts
 2. Audit why a cat behaved a certain way
 3. Customize the segments designed for customization
@@ -143,9 +143,9 @@ Phase 1 delivered visibility — operators can see what's injected. Phase 2 make
 - **M1-M2** (transport-layer): deliberately outside content pipeline to preserve the produced-vs-delivered boundary
 
 **Out of Phase 2/3 scope:**
-- **H1-H3** (Claude Code hooks): completely different injection system (`.claude/hooks/` shell scripts triggered by Claude Code lifecycle events — SessionStart, PostCompact, SessionStop). Injection via event stdout → tool_result, not content pipeline. H3 explicitly "不进 model prompt". These are managed by Claude Code's hook infrastructure, not Clowder AI's content pipeline — tracked separately as **F237-H** (to be filed as issue; dependency: Phase 2 delivers trace infrastructure that H1-H3 observability can reuse)
+- **H1-H3** (Claude Code hooks): completely different injection system (`.claude/hooks/` shell scripts triggered by Claude Code lifecycle events — SessionStart, PostCompact, SessionStop). Injection via event stdout → tool_result, not content pipeline. H3 explicitly "不进 model prompt". These are managed by Claude Code's hook infrastructure, not Cat Cafe's content pipeline — tracked separately as **F237-H** (to be filed as issue; dependency: Phase 2 delivers trace infrastructure that H1-H3 observability can reuse)
 
-> **Scope note:** The original motivating incident (opus47 dragged off-task by startup hook) may involve H1 (SessionStart hook). Phase 2 addresses Clowder AI content pipeline visibility (49/52 segments). If the incident trigger was an H1-H3 hook, full closure requires F237-H delivery. Phase 2's trace schema and persistence layer are designed to be reusable by F237-H
+> **Scope note:** The original motivating incident (opus47 dragged off-task by startup hook) may involve H1 (SessionStart hook). Phase 2 addresses Cat Cafe content pipeline visibility (49/52 segments). If the incident trigger was an H1-H3 hook, full closure requires F237-H delivery. Phase 2's trace schema and persistence layer are designed to be reusable by F237-H
 
 ### Why Hook Pipeline
 
@@ -173,7 +173,7 @@ This pattern has served well for 52 segments, but makes several operations hard:
 
 **Why this makes Build-to-Delete easier, not harder**: The maintainer's concern was that metadata turns deletion into deprecation. The opposite is true — currently, deleting a segment requires finding all code paths (condition, variable setup, render call, push), verifying no side effects, removing the template, updating the manifest display entry, and testing. With hooks: set `enabled: false`, the segment stops firing immediately. The code and template can be deleted at leisure in a cleanup pass, or left dormant with zero runtime cost. Build-to-Delete becomes a config toggle followed by optional cleanup.
 
-**Why this is the foundation for "injections grow from trajectories"**: The maintainer wants injections to grow organically from per-user taste, cross-thread repetition signal, and operator correction. For that, the system needs to:
+**Why this is the foundation for "injections grow from trajectories"**: The maintainer wants injections to grow organically from per-user taste, cross-thread repetition signal, and CVO correction. For that, the system needs to:
 1. **Trace** which segments fired per turn and what content they produced
 2. **Correlate** segment combinations with turn outcomes
 3. **Iterate** — try new versions, compare, promote or demote
@@ -239,7 +239,7 @@ These segments follow the condition → content → inject pattern and benefit f
 
 Why these segments unify:
 - **S1-S13, D1-D21** (34): original `if/push` patterns in `SystemPromptBuilder.ts` — the core use case
-- **L1-L7** (7): dynamically compiled from `assets/prompt-templates/l*.md` template files at runtime by `compileL0()`. Same template → render → inject pattern as S-segments. Delivery channel = `native-l0` for native providers. The L0 compiler's content source is refactored: instead of independently loading template files, it consumes pipeline-produced output for L1-L7. The delivery mechanism (`--system-prompt-file`, native L0 channel) is preserved unchanged
+- **L1-L7** (7): dynamically compiled from `assets/prompt-templates/l*.md` template files at runtime by `compileL0()`. Same template → render → inject pattern as S-segments. Delivery channel = `native-l0` for native providers. **Target architecture (NOT yet wired — AC-P2-14a open)**: the L0 compiler's content source would switch to pipeline-produced output for L1-L7. As of PR 3 (mindfn#22) `compile-system-prompt-l0.mjs` still loads templates directly, so runtime overrides do NOT affect native S/L output; the content-source switch + cache invalidation is the native S/L runway item per F257 KD-15. The delivery mechanism (`--system-prompt-file`, native L0 channel) stays unchanged either way
 - **B1** (1): session bootstrap — condition (new session?) → content. Joins `session-init`
 - **C1** (1): MCP callback — condition (MCP available?) → content. Joins `session-init` _(`.local` overlay migration to override store deferred to PR 3)_
 - **R1-R2** (2): route assembly — condition → content at route layer. Joins `per-turn`
@@ -292,7 +292,7 @@ safetyTier: limited-edit                   # readonly | limited-edit | editable 
 transparencyTier: visible-by-default
 governanceTier: human-gated                # immutable | human-gated | auto-evolve — gates version override
 
-# operator-facing
+# CVO-facing
 userExplanation: "当两只猫连续互传 ≥2 轮时警告，避免死循环"
 ```
 
@@ -306,7 +306,7 @@ userExplanation: "当两只猫连续互传 ≥2 轮时警告，避免死循环"
 - `resolver` — optional TypeScript class that evaluates condition and prepares template variables. Hooks without a resolver are unconditional (always fire when stage fires)
 - `inputs` — declares which `AssemblerInput` fields the resolver reads. Enables dependency analysis and makes each hook's data requirements explicit
 
-**Migration from Phase 1:** Each of the 46 pipelined segments becomes a `hook.yaml` + its existing template file. For S/D segments, the resolver code is extracted from the inline `if/push` pattern. For L1-L7, the existing template files (`l1-parallel-world.md` etc.) become hook templates; the L0 compiler's content source switches from direct template loading to pipeline-produced output (delivery channel unchanged). For B1/C1/R1-R2/N1, resolvers wrap existing execution logic. Zero content change, zero behavior change — same transformation principle as Phase 1's template extraction. The 3 observe-only segments (N2, M1-M2) are not migrated into the hook directory. (H1-H3 are out of Phase 2 scope.)
+**Migration from Phase 1:** Each of the 46 pipelined segments becomes a `hook.yaml` + its existing template file. For S/D segments, the resolver code is extracted from the inline `if/push` pattern. For L1-L7, the existing template files (`l1-parallel-world.md` etc.) become hook templates; the L0 compiler's content-source switch from direct template loading to pipeline-produced output is planned but NOT landed (AC-P2-14a open; native S/L runway per F257 KD-15) — L0 compilation still reads templates directly (delivery channel unchanged). For B1/C1/R1-R2/N1, resolvers wrap existing execution logic. Zero content change, zero behavior change — same transformation principle as Phase 1's template extraction. The 3 observe-only segments (N2, M1-M2) are not migrated into the hook directory. (H1-H3 are out of Phase 2 scope.)
 
 ### HookRegistry — Scan, Register, Resolve
 
@@ -696,11 +696,11 @@ The resolver receives the active version and renders the corresponding template.
 
 ### What Phase 2 Does NOT Include
 
-- **H1-H3 Claude Code hooks** — completely different injection system (`.claude/hooks/` shell scripts, triggered by Claude Code lifecycle events, injected via event stdout → tool_result). Not part of Clowder AI's content pipeline. Tracked as **F237-H** (separate issue to be filed). Dependency: F237-H can reuse Phase 2's trace schema and persistence layer
+- **H1-H3 Claude Code hooks** — completely different injection system (`.claude/hooks/` shell scripts, triggered by Claude Code lifecycle events, injected via event stdout → tool_result). Not part of Cat Cafe's content pipeline. Tracked as **F237-H** (separate issue to be filed). Dependency: F237-H can reuse Phase 2's trace schema and persistence layer
 - **Eval feedback loop** — automated analysis of trace data to score/iterate segments. This is Phase 3, consuming Phase 2's trace + override infrastructure
 - **Context mutation** — hooks producing side effects beyond PromptPatch (e.g., modifying session state). Future capability tier
 - **Custom user hooks** — operators can't register their own hooks yet. This requires security model design beyond Phase 2's scope
-- **L0 delivery channel modification** — the native L0 delivery mechanism (`--system-prompt-file`, provider-specific channel) is unchanged. The pipeline replaces the L0 compiler's *content source* (templates → pipeline-produced output) but preserves its *delivery path*. See L1-L7 architecture notes above
+- **L0 delivery channel modification** — the native L0 delivery mechanism (`--system-prompt-file`, provider-specific channel) is unchanged. The planned pipeline takeover of the L0 compiler's *content source* (templates → pipeline-produced output) has NOT landed — L0 still reads templates directly; that switch + cache invalidation is the native S/L runway item (F257 KD-15). The *delivery path* stays unchanged in any case. See L1-L7 architecture notes above
 
 ### Landing Order
 
@@ -709,7 +709,7 @@ Phase 2 implementation in 5 sub-phases, each independently shippable:
 | Sub-phase | Deliverable | Tests |
 |-----------|------------|-------|
 | **P2-A: HookManifest + Registry** | Hook YAML schema for all 46 pipelined segments, directory scan, manifest parsing. Registry lists S1-S13, B1, C1, L1-L7, D1-D21, R1-R2, N1 | Schema validation tests, scan tests (following PluginRegistry test pattern) |
-| **P2-B: ContextAssembler + Resolvers** | Extract resolver logic: S/D from `if/push` patterns, L1-L7 from L0 compiler templates, B1/C1/R/N1 wrapping existing execution points. ContextAssembler gathers inputs. Dual-path: old code path + new pipeline produce identical output. L0 compiler content source switched from direct template loading to pipeline-produced output (delivery channel unchanged) | Snapshot tests: old output === new output for all 46 hooks. L0 compiled output equivalence test |
+| **P2-B: ContextAssembler + Resolvers** | Extract resolver logic: S/D from `if/push` patterns, L1-L7 from L0 compiler templates, B1/C1/R/N1 wrapping existing execution points. ContextAssembler gathers inputs. Dual-path: old code path + new pipeline produce identical output. L0 compiler content-source switch NOT landed in P2-B — deferred to native S/L runway (F257 KD-15); L0 still loads templates directly (delivery channel unchanged) | Snapshot tests: old output === new output for all 46 hooks. L0 compiled output equivalence test (open, AC-P2-14a) |
 | **P2-C: Pipeline Execution + Trace Adapters** | Wire HookPipeline into session-init and per-turn stages. Remove old patterns. Add Tier 2 trace adapter API for N2 + M1-M2 (3 observe-only; adapter code + unit tests delivered, production call-site wiring deferred — execution order constraint) | Integration tests: compiled output identical. Regression: all existing tests pass. Trace adapter unit tests |
 | **P2-D: Runtime Override Store** _(deferred to PR 3)_ | Redis-backed override layer (`HookOverrideStore`). Console UI: enable/disable hooks, switch versions, edit templates (safetyTier-gated). Overrides persist across restart (TTL=0). Same write API for operator and future auto-eval | Override resolution tests (override ?? baseline). Safety tier gate tests. Persistence tests |
 | **P2-E: InjectionTrace Persistence** | Dual-layer persistence (summary persistent + detail short TTL). Console trace viewer. Trace records fired/skipped/disabled status per hook | Trace record completeness tests. Console: can view which hooks fired per turn _(override source tracking deferred to PR 3)_ |
@@ -732,10 +732,10 @@ Phase 2 implementation in 5 sub-phases, each independently shippable:
 - [ ] AC-P2-13: Tier 2 trace adapter API (`observeN2`/`observeM1`/`observeM2` in `trace-adapters.ts`) emits `TraceEventObserved` for N2 + M1-M2 — adapter code + unit tests delivered; production call-site wiring deferred (N2 assembled after trace collection; M1-M2 in invocation layer after route-level trace)
 - [ ] AC-P2-14: Zero behavior change — compiled prompt output identical pre/post migration (with no overrides active)
 - [ ] AC-P2-14a: L0 compiled output equivalence — `compile-system-prompt-l0.mjs` output identical when consuming pipeline-produced L1-L7 content vs direct template loading
-- [ ] AC-P2-15: _(deferred to PR 3)_ Runtime override store (Redis, TTL=0) with two-layer resolution: override ?? manifest baseline
-- [ ] AC-P2-16: _(deferred to PR 3)_ Template override gated by safetyTier — readonly hooks reject template writes, limited-edit/editable hooks accept
-- [ ] AC-P2-17: _(deferred to PR 3)_ Override audit trail: each override records source (operator/auto-eval), timestamp, reason
-- [ ] AC-P2-18: _(deferred to PR 3)_ Override constraint enforcement — `setOverride` rejects: disable on `disableable: false` hooks, template edit on `safetyTier: readonly` hooks, version switch on `governanceTier: immutable` hooks. Returns `OverrideConstraintError` with violated constraint
+- [x] AC-P2-15: _(delivered in PR 3, mindfn#22)_ Runtime override store (Redis, TTL=0) with two-layer resolution: override ?? manifest baseline
+- [x] AC-P2-16: _(delivered in PR 3, mindfn#22)_ Template override gated by safetyTier — readonly hooks reject template writes, limited-edit/editable hooks accept
+- [x] AC-P2-17: _(delivered in PR 3, mindfn#22)_ Override audit trail: field-level provenance (`enabledSource`/`contentSource`) + OverrideChangeEvent stream records source, timestamp, reason (TTL=0)
+- [x] AC-P2-18: _(partial in PR 3, mindfn#22)_ Override constraint enforcement — delivered: disable rejected on `disableable: false`, template edit rejected per `safetyTier` readonly/limited-edit rules (`OverrideGateError` + manifest-tightening reconciliation). Deferred: version-switch gating on `governanceTier: immutable` — v1 ships no arbitrary version-write path (rollback only); gating defers with the version-write feature itself per F257 KD-15
 
 ## Upstream Strategy (Issue #839)
 
@@ -751,7 +751,7 @@ Maintainer accepted our path analysis. Agreed sequencing:
 |----|---------|-----------|
 | **PR 1: InjectionTrace v0** | Trace schema + lightweight instrumentation on current `if/push` + persistence + Console viewer. Zero behavior change. | None |
 | **PR 2: Pipeline migration** | Hook manifests + resolvers + pipeline switchover. Informed by PR 1 trace data + fork prototype. Equivalence proof: ordering, conditions, native L0, transport boundaries. | PR 1 merged + trace data |
-| **PR 3: Override store** | Runtime override layer, auth model, auto-eval writeback. Separate design review. | PR 2 merged |
+| **PR 3: Override store** | Runtime override layer — fork-internal delivery 2026-07-10 (mindfn#22, 59/59 tests; dogfood 2-3 rounds before upstream PR). Scope per F257 KD-15: auth model deferred (store layer has no HTTP surface; lands with approval-executor/console routes), auto-eval writeback deferred (F257 AC-B2 Phase B), version-switch write path + `governanceTier` gating deferred (multi-version runway). Native S/L override = separate runway (L0 compile chain + cache invalidation). | PR 2 merged |
 
 **Rationale:** Maintainer wants upstream to stay low-risk — first PR should not commit the main repo to the hook abstraction before trace data and a reviewed migration argument exist. Fork development avoids throwaway work internally.
 
@@ -794,3 +794,19 @@ Separately accepted upstream. Not blocked by Phase 2 — can land independently 
 - **Related**: F153 (tracing — future observability integration)
 - **Related**: F180 (hook health/sync)
 - **Related**: F190/F199/F206 (Console settings infrastructure)
+
+## Timeline
+
+| Date | Event |
+|------|-------|
+| 2026-06-02 | Kickoff: motivating incident analysis + CVO direction |
+| 2026-06-02 | Issue #839 created, maintainer triage |
+| 2026-06-03 | CVO approved Phase 1, worktree created |
+| 2026-06-04-10 | Implementation: 6 rounds of codex local review |
+| 2026-06-11 | Gate passed (build + tsc + test + lint), PR #859 opened |
+| 2026-06-11-12 | Cloud review: 34 findings processed (1 fixed, 33 pushback) |
+| 2026-06-15 | Scope discussion with maintainer on #839 |
+| 2026-06-16 | PR #859 merged, Phase 1 complete |
+| 2026-06-24 | Phase 2 design: hook pipeline + injection trace spec |
+| 2026-06-25 | Phase 2 design review passed (codex R1: 3 P1 + 1 P2 fixed) |
+| 2026-07-10 | PR3 (HookOverrideStore runtime override layer) merged fork-internal — mindfn#22 squash `a9e591f8b`; scope per F257 KD-15 (auth/writeback/version-switch deferred to runway) |

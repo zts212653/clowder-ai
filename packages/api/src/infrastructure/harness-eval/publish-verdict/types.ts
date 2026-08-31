@@ -9,61 +9,29 @@ import type { TaskOutcomeVerdict } from '../task-outcome/task-outcome-episode.js
 import type { TrajectoryInspectorWindowSelector } from '../trajectory-inspector/trajectory-inspector-types.js';
 import type { VerdictHandoffPacket } from '../verdict-handoff.js';
 
-/**
- * F192 Phase H — Verdict Publishing Pipeline types.
- * Extracted from publish-verdict.ts per AGENTS.md 350-line hard limit.
- */
+/** F257 / F192 sunset: durable artifact publication outside the product Git repository. */
 
-export interface StageResult {
-  /** Absolute paths under the isolated worktree to `git add`. */
-  paths: string[];
-  commitMessage: string;
-  prTitle: string;
-  prBody: string;
-  /**
-   * F192 Phase H 收尾 PR-3 (砚砚 R2): per-PR labels driven by `computePublishPolicy`.
-   * GitPublisher passes each as `--label X` to `gh pr create`. Omit/empty → no labels.
-   * Standard labels:
-   *   - `evidence-only`: artifact-only PR; merge gate is artifact-only-pr-merge-gate (SOP),
-   *     not full pnpm gate. NOT a regular code review request.
-   *   - `no-action-needed`: keep_observe verdict with noFindingRecord — interim per-run PR;
-   *     rollup mechanism deferred to future Phase.
-   */
-  labels?: string[];
-  /**
-   * Optional live side effect that runs after commit/push/PR creation succeeds
-   * but before the publisher returns success. If it fails, the publisher must
-   * clean up the newly exposed PR/branch before surfacing the error.
-   */
-  afterPublish?: () => void | Promise<void>;
+export interface ArtifactRef {
+  artifactId: string;
+  domainSlug: string;
+  verdictPath: string;
+  bundleDir: string;
+  artifactUrl: string;
 }
 
-export interface PublishOnIsolatedWorktreeOpts {
-  branchName: string;
-  sourceBase: string; // e.g. 'origin/main'
-  /** Generator + artifact production happens inside the isolated worktree. */
-  stage: (worktreeRoot: string) => Promise<StageResult>;
+export interface PublishArtifactOpts {
+  packet: VerdictHandoffPacket;
+  sourceRefs: VerdictSourceRefs;
+  generate: (outputRoot: string) => Promise<{
+    verdictPath: string;
+    bundleDir: string;
+    extraStagedPaths?: string[];
+    afterPublish?: () => void | Promise<void>;
+  }>;
 }
 
-export interface RefreshPublishedVerdictPrOpts {
-  branchName: string;
-  verdictId: string;
-  expectedHeadSha: string;
-  generatedAt: string;
-  refreshDerivedCensus: (worktreeRoot: string, generatedAt: string, cleanSource: string) => string;
-}
-
-export interface RefreshPublishedVerdictPrResult {
-  outcome: 'updated' | 'already_current';
-  previousHeadSha: string;
-  commitSha: string;
-  baseSha: string;
-  prUrl: string;
-}
-
-export interface GitPublisher {
-  publishOnIsolatedWorktree(opts: PublishOnIsolatedWorktreeOpts): Promise<{ commitSha: string; prUrl: string }>;
-  refreshPublishedVerdictPr?(opts: RefreshPublishedVerdictPrOpts): Promise<RefreshPublishedVerdictPrResult>;
+export interface ArtifactPublisher {
+  publishArtifact(opts: PublishArtifactOpts): Promise<ArtifactRef>;
 }
 
 /**
@@ -173,7 +141,17 @@ export type VerdictSourceRefs =
   | QcMetricsSelector
   | FreshnessReplaySelector
   | DesignGateEpisodeSourceSelector
+  | PromptSegmentsSourceSelector
   | TrajectoryInspectorWindowSelector;
+
+/** F257 Harness Ledger snapshot selector. */
+export interface PromptSegmentsSourceSelector {
+  kind: 'prompt-segments';
+  windowStartMs: number;
+  windowEndMs: number;
+  evalRunId: string;
+  guardId?: string;
+}
 
 /**
  * Resolved evidence source paths (a2a only — for backward-compat helpers in validation.ts).
@@ -204,22 +182,17 @@ export type VerdictGenerator = (
 ) => Promise<{
   verdictPath: string;
   bundleDir: string;
-  /**
-   * F192 Phase H 收尾 PR-2 R3 P1 (cloud): extra paths the generator wrote that the
-   * publisher MUST also `git add` (e.g. cw's `generated/capability-wakeup/<verdictId>/`
-   * raw input dir, referenced by provenance.json). Omit/empty when generator writes
-   * everything under `bundleDir`.
-   */
+  /** Additional replay-input paths written under the artifact staging root. */
   extraStagedPaths?: string[];
-  /** Optional live side effect that may run only after commit/push/PR creation succeeds. */
+  /** Optional live side effect that may run only after durable artifact publication succeeds. */
   afterPublish?: () => void | Promise<void>;
 }>;
 
 export interface GeneratorDeps {
-  /** ISOLATED worktree's docs/harness-feedback — where generator writes verdict.md + bundle. */
+  /** Isolated artifact staging root's docs/harness-feedback — generator output location. */
   harnessFeedbackRoot: string;
-  /** LIVE checkout's docs/harness-feedback — a2a needs this to read raw snapshot/attribution YAML
-   *  that are gitignored from origin/main (砚砚 R17 P1 cloud). cw doesn't use it. */
+  /** LIVE checkout's docs/harness-feedback — source evidence and the runtime domain registry
+   *  live here; the isolated publish base can legitimately lag both. */
   liveHarnessFeedbackRoot: string;
   /** Server-trusted callback principal userId for owner-scoped evidence reads. */
   ownerUserId?: string;
@@ -231,8 +204,8 @@ export interface GeneratorDeps {
 
 export interface PublishVerdictDeps {
   harnessFeedbackRoot: string;
-  /** AC-H2 + 砚砚 R1 P1 #1: isolated publish worktree (default throws). */
-  gitPublisher?: GitPublisher;
+  /** F257 / F192 sunset: durable publisher outside the product Git repository. */
+  artifactPublisher?: ArtifactPublisher;
   /** AC-H2: domain-specific generator (default throws — route-layer must inject per-domain). */
   generator?: VerdictGenerator;
   /** 砚砚 R6 P1: Redis client for OQ-20 eval-cat overrides (symmetric with trigger-now). */
@@ -258,8 +231,8 @@ export interface PublishVerdictSuccess {
   ok: true;
   verdictPath: string;
   bundleDir: string;
-  commitSha: string;
-  prUrl: string;
+  artifactId: string;
+  artifactUrl: string;
 }
 
 export interface HandlerError {

@@ -23,6 +23,7 @@ import {
 } from '../domains/cats/services/context/SystemPromptBuilder.js';
 import { getActivePackBlocks } from '../domains/packs/getActivePackBlocks.js';
 import { PackStore } from '../domains/packs/PackStore.js';
+import { refreshOverrideSnapshot } from '../domains/prompt-hooks/PipelinePromptBuilder.js';
 import { findMonorepoRoot } from '../utils/monorepo-root.js';
 import { resolveUserId } from '../utils/request-identity.js';
 
@@ -63,6 +64,8 @@ export const promptInjectionPreviewRoutes: FastifyPluginAsync = async (app) => {
       const mcpAvailable = (catConfig?.mcpSupport ?? false) && !!mcpServerPath;
       const packBlocks = await getActivePackBlocks(packStore);
 
+      // F237 PR3: ensure overrides are loaded so preview reflects active overrides
+      await refreshOverrideSnapshot();
       const compiled = buildStaticIdentity(catId as CatId, { mcpAvailable, packBlocks, annotateSegments: true });
       if (!compiled) {
         reply.status(404);

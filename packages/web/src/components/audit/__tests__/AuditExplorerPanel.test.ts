@@ -34,8 +34,14 @@ vi.mock('../../runtime-sessions/ExternalRuntimeSessionsPanel', () => ({
 describe('AuditExplorerPanel', () => {
   let container: HTMLDivElement;
   let root: Root;
+  let scrollIntoView: ReturnType<typeof vi.fn>;
 
   beforeEach(() => {
+    scrollIntoView = vi.fn();
+    Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', {
+      configurable: true,
+      value: scrollIntoView,
+    });
     mocks.apiFetch.mockReset();
     // Default: return empty responses for any audit/session fetches
     mocks.apiFetch.mockResolvedValue({
@@ -50,6 +56,7 @@ describe('AuditExplorerPanel', () => {
   afterEach(() => {
     act(() => root.unmount());
     container.remove();
+    delete (HTMLElement.prototype as { scrollIntoView?: unknown }).scrollIntoView;
   });
 
   async function renderPanel(props = {}) {
@@ -167,6 +174,13 @@ describe('AuditExplorerPanel', () => {
 
     // Parent callback should have been called to clear external state
     expect(onCloseSession).toHaveBeenCalled();
+  });
+
+  it('brings an externally opened session viewer into view', async () => {
+    await renderPanel({ externalSessionId: 's1', externalSessionCatId: 'opus' });
+
+    expect(scrollIntoView).toHaveBeenCalledWith({ behavior: 'smooth', block: 'start' });
+    expect(container.querySelector('[data-testid="session-viewer-close"]')).toBeTruthy();
   });
 
   it('clears session viewer when externalSessionId changes to null (thread switch)', async () => {

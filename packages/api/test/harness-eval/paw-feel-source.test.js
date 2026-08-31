@@ -7,6 +7,7 @@ import {
   inspectDeclaredPawFeelMessage,
   inspectPawFeelMessage,
 } from '../../dist/infrastructure/harness-eval/friction/paw-feel-source.js';
+import { canonicalTestMessageInput } from '../helpers/message-from-fixtures.js';
 
 const T0 = 1_700_000_000_000;
 
@@ -132,14 +133,17 @@ describe('F278 canonical paw-feel source', () => {
   it('paginates the complete timeline window without duplicate messages', async () => {
     const store = new MessageStore();
     for (let index = 0; index < 5; index += 1) {
-      store.append({
-        userId: 'u1',
-        catId: 'codex-sol',
-        content: `[爪感差: tool${index}+现象${index}]`,
-        mentions: [],
-        timestamp: T0 + index,
-        threadId: 'thread-source',
-      });
+      store.append(
+        canonicalTestMessageInput({
+          provenance: { author: 'cat', routed: false, observation: 'original' },
+          userId: 'u1',
+          catId: 'codex-sol',
+          content: `[爪感差: tool${index}+现象${index}]`,
+          mentions: [],
+          timestamp: T0 + index,
+          threadId: 'thread-source',
+        }),
+      );
     }
 
     const messages = await collectPawFeelMessages(store, T0, T0 + 100, { pageSize: 2 });

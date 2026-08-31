@@ -205,7 +205,7 @@ describe('Phase H P1 Fixes — definition-level regression guards', () => {
     if (rt.currentPhase === 'night_resolve') await forceTick();
     await new Promise((r) => setTimeout(r, 50));
 
-    const announceMessages = msgStore.messages.filter((msg) => msg.catId === 'system');
+    const announceMessages = msgStore.messages.filter((msg) => msg.from?.kind === 'system');
     assert.ok(announceMessages.length > 0, 'Should have at least one canonical system announce message');
     for (const msg of announceMessages) {
       assert.equal(msg.userId, 'system', 'game announce must use canonical system userId');
@@ -289,7 +289,17 @@ describe('Phase H P1 Fixes — definition-level regression guards', () => {
       socketManager: { broadcastToRoom() {}, emitToUser() {}, broadcastAgentMessage() {} },
       router: {
         async resolveTargetsAndIntent() {
-          return { targetCats: ['opus'], intent: { intent: 'execute', explicit: false, promptTags: [] } };
+          return {
+            attemptBatch: {
+              parserMode: 'user',
+              spanBasis: 'lowercased_message',
+              attempts: [],
+              truncated: false,
+              metricEligible: true,
+            },
+            targetCats: ['opus'],
+            intent: { intent: 'execute', explicit: false, promptTags: [] },
+          };
         },
         async *routeExecution() {
           yield { type: 'done', catId: 'opus', timestamp: Date.now() };
@@ -479,13 +489,13 @@ describe('Phase H P1 Fixes', () => {
       assert.ok(lw.payload.text.length > 0, 'last_words should have text content');
 
       // Verify messageStore got the speech
-      const speechMessages = msgStore.messages.filter((m) => m.catId === 'kimi');
+      const speechMessages = msgStore.messages.filter((m) => m.from?.kind === 'agent' && m.from.catId === 'kimi');
       assert.ok(speechMessages.length > 0, 'messageStore should have speech message from exiled player (kimi)');
     });
   });
 
   describe('P1-2: messageStore uses canonical system identity for game announces', () => {
-    it('player mode: announce messages use userId=system + catId=system', async () => {
+    it('player mode: announce messages use the canonical system identity', async () => {
       const game = await orchestrator.startGame({
         threadId: 'thread-p1-2',
         definition: makeWerewolfDefinition(),
@@ -544,12 +554,15 @@ describe('Phase H P1 Fixes', () => {
       // Wait for fire-and-forget promises
       await new Promise((r) => setTimeout(r, 50));
 
-      const announceMessages = msgStore.messages.filter((m) => m.catId === 'system');
+      const announceMessages = msgStore.messages.filter((m) => m.from?.kind === 'system');
       assert.ok(announceMessages.length > 0, 'Should have canonical system announce messages in messageStore');
 
       for (const msg of announceMessages) {
         assert.equal(msg.userId, 'system', 'announce userId should be canonical system');
-        assert.equal(msg.catId, 'system', 'announce catId should be canonical system');
+        assert.deepEqual(msg.from, {
+          kind: 'system',
+          service: 'game-orchestrator',
+        });
       }
     });
   });

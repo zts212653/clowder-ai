@@ -195,13 +195,19 @@ export function createIssueCommentTaskSpec(opts: IssueCommentTaskSpecOptions): T
     opts.log.info(`[issue-comment] Issue ${issueKey} routed message wake accepted; tracking remains active`);
   }
 
+  /** F280 expiry tick: detect active waits past their expiresAt deadline. */
+  function isExpiredIssueWait(task: TaskItem): boolean {
+    const activeWait = task.automationState?.await;
+    return !!(activeWait && activeWait.expiresAt !== undefined && Date.now() >= activeWait.expiresAt);
+  }
+
   return {
     id: opts.id ?? 'issue-comment',
     profile: 'poller',
     trigger: { type: 'interval', ms: opts.pollIntervalMs ?? 60_000 },
     admission: {
       async gate() {
-        const tasks = (await opts.taskStore.listByKind('issue_tracking')).filter((t) => t.status !== 'done');
+        const tasks = await opts.taskStore.listByKind('issue_tracking');
         if (tasks.length === 0) {
           return { run: false, reason: 'no tracked issues' };
         }
@@ -218,6 +224,8 @@ export function createIssueCommentTaskSpec(opts: IssueCommentTaskSpecOptions): T
             // Recovery takes precedence over collecting more GitHub activity. The
             // connector message is already persisted, so retry its original idempotency
             // key instead of routing the same comments into a duplicate thread message.
+            // IMPORTANT: check pendingWake BEFORE filtering done tasks — a non-renewing
+            // match or loud expiry marks the task 'done' but the wake still needs delivery.
             const pendingWake = task.automationState?.issue?.pendingWake;
             if (pendingWake) {
               workItems.push({
@@ -233,6 +241,9 @@ export function createIssueCommentTaskSpec(opts: IssueCommentTaskSpecOptions): T
               });
               continue;
             }
+
+            // Skip done tasks that have no pending wake — they've been fully delivered.
+            if (task.status === 'done') continue;
 
             // AC-D4: Check issue state (fetch before comment processing so
             // pending comments are delivered before auto-close — P2-cloud fix)
@@ -437,6 +448,22 @@ export function createIssueCommentTaskSpec(opts: IssueCommentTaskSpecOptions): T
                   const maxEchoId = Math.max(...processedComments.map((c) => c.id));
                   await advanceDeliveryCursor(task.id, issueKey, maxEchoId);
                 }
+                // F280 expiry tick: expired issue waits must still reach observe() even
+                // without new comments, so the lifecycle can transition them to expired.
+                if (isExpiredIssueWait(task) && opts.waitLifecycle) {
+                  workItems.push({
+                    signal: {
+                      task,
+                      repoFullName,
+                      issueNumber,
+                      newComments: [],
+                      issueState,
+                      deliveredCursor: deliveryCursor,
+                      commitWakeAccepted: () => acknowledgeWake(task.id, issueKey),
+                    },
+                    subjectKey: task.subjectKey!,
+                  });
+                }
                 continue;
               }
 
@@ -518,7 +545,26 @@ export function createIssueCommentTaskSpec(opts: IssueCommentTaskSpecOptions): T
                 continue;
               }
 
-              if (newComments.length === 0) continue;
+              if (newComments.length === 0) {
+                // F280 expiry tick: expired issue waits must still reach observe()
+                // even without new comments (legacy single-cursor path).
+                if (isExpiredIssueWait(task) && opts.waitLifecycle) {
+                  const legacyCursor = task.automationState?.issue?.lastCommentCursor ?? 0;
+                  workItems.push({
+                    signal: {
+                      task,
+                      repoFullName,
+                      issueNumber,
+                      newComments: [],
+                      issueState,
+                      deliveredCursor: legacyCursor,
+                      commitWakeAccepted: () => acknowledgeWake(task.id, issueKey),
+                    },
+                    subjectKey: task.subjectKey!,
+                  });
+                }
+                continue;
+              }
 
               workItems.push({
                 signal: {
@@ -567,13 +613,15 @@ export function createIssueCommentTaskSpec(opts: IssueCommentTaskSpecOptions): T
           return;
         }
 
-        if (opts.waitLifecycle) {
+        let wake = signal.retryWake;
+
+        if (!wake && opts.waitLifecycle) {
           const deliveredCursor =
             signal.deliveredCursor ??
             (signal.newComments.length > 0
               ? Math.max(...signal.newComments.map((comment) => comment.id))
               : (task.automationState?.issue?.lastCommentCursor ?? 0));
-          await opts.waitLifecycle.observe({
+          const observeResult = await opts.waitLifecycle.observe({
             taskId: task.id,
             facts: {
               issue: {
@@ -595,10 +643,25 @@ export function createIssueCommentTaskSpec(opts: IssueCommentTaskSpecOptions): T
             ...(signal.issueState === 'closed' ? { subjectState: 'closed' as const } : {}),
           });
           ctx?.signal?.throwIfAborted();
-          return;
+          if (observeResult.kind === 'notified') {
+            // observe already delivered the compact connector message.
+            // Skip the router (prevents double delivery) but still fire invokeTrigger.
+            wake = {
+              threadId: task.threadId,
+              catId: task.ownerCatId,
+              content: observeResult.content,
+              messageId: observeResult.messageId,
+              deliveredCursor,
+            };
+            // Persist pendingWake so failed invokeTrigger can be retried on restart.
+            // Without this, a crash between observe delivery and trigger acknowledgement
+            // leaves no durable record to retry from.
+            await signal.commitRoutedWake?.(wake);
+          } else {
+            return;
+          }
         }
 
-        let wake = signal.retryWake;
         if (!wake) {
           const routeResult = await opts.issueCommentRouter.route(
             {
@@ -661,7 +724,7 @@ export function createIssueCommentTaskSpec(opts: IssueCommentTaskSpecOptions): T
               undefined,
               policy,
             );
-            wakeAccepted = outcome === 'dispatched' || outcome === 'enqueued';
+            wakeAccepted = outcome === 'enqueued';
             if (!wakeAccepted) {
               opts.log.error(
                 { taskId: task.id, subjectKey, threadId: wake.threadId, catId: wake.catId, outcome },

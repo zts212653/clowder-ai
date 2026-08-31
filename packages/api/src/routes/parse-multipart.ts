@@ -19,7 +19,6 @@ export type ParsedMultipart =
       contentBlocks: MessageContent[];
       visibility?: string;
       whisperTo?: string[];
-      deliveryMode?: 'immediate' | 'queue' | 'force';
       messageDisposition?: 'continue_current' | 'next_work';
       /** #699: ID of message being replied to (quote). */
       replyTo?: string;
@@ -109,7 +108,6 @@ export async function parseMultipart(
     ...(idempotencyKey ? { idempotencyKey } : {}),
     ...(parseResult.data.visibility ? { visibility: parseResult.data.visibility } : {}),
     ...(parseResult.data.whisperTo ? { whisperTo: parseResult.data.whisperTo as string[] } : {}),
-    ...(parseResult.data.deliveryMode ? { deliveryMode: parseResult.data.deliveryMode } : {}),
     ...(parseResult.data.messageDisposition ? { messageDisposition: parseResult.data.messageDisposition } : {}),
     ...(parseResult.data.replyTo ? { replyTo: parseResult.data.replyTo } : {}),
     contentBlocks: buildMessageContentBlocks(content, contextAttachments, uploadedContent),

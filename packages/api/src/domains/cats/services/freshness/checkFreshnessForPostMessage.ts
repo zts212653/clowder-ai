@@ -12,7 +12,7 @@
  * all decision logic to FreshnessGateService.
  */
 
-import type { CatId, PublishedFreshnessAnnotation } from '@cat-cafe/shared';
+import type { CatId, MessageFrom, PublishedFreshnessAnnotation } from '@cat-cafe/shared';
 import { freshnessGateForward, freshnessGateHeld } from '../../../../infrastructure/telemetry/instruments.js';
 import { getSourceDisplayName } from '../context/ContextAssembler.js';
 import { cursorFor } from '../stores/cursor.js';
@@ -29,6 +29,7 @@ export interface FreshnessReadableMessage {
   id: string;
   threadId?: string;
   catId: string | null;
+  from?: MessageFrom;
   content: string;
   /** #1200: visibility-domain sequence number (injected by store). */
   visibilitySeq?: number;
@@ -88,9 +89,8 @@ export interface QueuedMessageChecker {
     catId: string,
   ): Array<{
     entryId?: string;
-    source: string;
+    from: MessageFrom;
     content: string;
-    callerCatId?: string;
     messageId?: string | null;
     mergedMessageIds?: string[];
     sourceCategory?: string;
@@ -117,9 +117,8 @@ export function createQueueChecker(
       opts?: { parentInvocationId?: string },
     ): Array<{
       entryId?: string;
-      source: string;
+      from: MessageFrom;
       content: string;
-      callerCatId?: string;
       messageId?: string | null;
       mergedMessageIds?: string[];
       sourceCategory?: string;
@@ -138,9 +137,8 @@ export function createQueueChecker(
         })
         .map((e) => ({
           ...(e.entryId ? { entryId: e.entryId } : {}),
-          source: e.source,
+          from: structuredClone(e.from),
           content: e.content,
-          callerCatId: e.callerCatId,
           ...(e.messageId !== undefined ? { messageId: e.messageId } : {}),
           ...(e.mergedMessageIds ? { mergedMessageIds: e.mergedMessageIds } : {}),
           sourceCategory: e.sourceCategory,
@@ -217,23 +215,25 @@ const PREVIEW_CONTENT_LIMIT = 200;
 const UNSEEN_FETCH_LIMIT = 20; // Per-batch fetch limit
 const MAX_PAGINATION_ROUNDS = 5; // 5 × 20 = 100 max raw messages before fail-open
 
-export function getFreshnessSenderLabel(msg: Pick<FreshnessReadableMessage, 'catId' | 'source'>): string {
-  return msg.source ? getSourceDisplayName(msg.source) : (msg.catId ?? 'user');
+export function getFreshnessSenderLabel(msg: Pick<FreshnessReadableMessage, 'from' | 'catId' | 'source'>): string {
+  if (msg.source) return getSourceDisplayName(msg.source);
+  if (msg.from?.kind === 'agent') return msg.from.catId;
+  if (msg.from?.kind === 'external') return msg.from.sender?.name ?? msg.from.sender?.id ?? msg.from.connectorId;
+  if (msg.from?.kind === 'plugin') return msg.from.instanceId;
+  if (msg.from?.kind === 'system') return msg.from.service;
+  return msg.catId ?? 'user';
 }
 
-export function getQueuedFreshnessSenderLabel(entry: {
-  source: string;
-  callerCatId?: string;
-  sourceCategory?: string;
-}): string {
-  if (entry.source === 'user') return 'user';
-  if (entry.source === 'connector') {
+export function getQueuedFreshnessSenderLabel(entry: { from: MessageFrom; sourceCategory?: string }): string {
+  if (entry.from.kind === 'user') return 'user';
+  if (entry.from.kind === 'external' || entry.from.kind === 'plugin') {
     if (entry.sourceCategory === 'review') return 'Review';
     if (entry.sourceCategory === 'issue') return 'Issue';
     if (entry.sourceCategory === 'ci') return 'CI';
     return 'Connector';
   }
-  return entry.callerCatId ?? 'unknown';
+  if (entry.from.kind === 'agent') return entry.from.catId;
+  return entry.from.service;
 }
 
 const INTERNAL_FRESHNESS_USER_IDS = new Set(['system']);
@@ -270,17 +270,19 @@ export function isFreshnessRoutableMessage(msg: FreshnessReadableMessage): boole
  * actually mentioned the replying cat.
  */
 export async function isExpectedA2AReplyForCat(
-  msg: Pick<FreshnessReadableMessage, 'catId' | 'replyTo'>,
+  msg: Pick<FreshnessReadableMessage, 'from' | 'catId' | 'replyTo'>,
   catId: string,
   messageStore: Pick<FreshnessMessageReader, 'getById'>,
 ): Promise<boolean> {
-  if (!msg.replyTo || !msg.catId || msg.catId === catId) return false;
+  const replyCatId = msg.from?.kind === 'agent' ? msg.from.catId : msg.catId;
+  if (!msg.replyTo || !replyCatId || replyCatId === catId) return false;
   if (typeof messageStore.getById !== 'function') return false;
 
   const parent = await messageStore.getById(msg.replyTo);
   if (!parent) return false;
-  if (parent.catId !== catId) return false;
-  return Array.isArray(parent.mentions) && parent.mentions.includes(msg.catId);
+  const parentCatId = parent.from?.kind === 'agent' ? parent.from.catId : parent.catId;
+  if (parentCatId !== catId) return false;
+  return Array.isArray(parent.mentions) && parent.mentions.includes(replyCatId);
 }
 
 /**

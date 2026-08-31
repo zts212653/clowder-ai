@@ -6,7 +6,7 @@ import type {
   OutputCommitDecision,
   PublishedFreshnessAnnotation,
 } from '@cat-cafe/shared';
-import type { AppendMessageInput } from '../../stores/ports/MessageStore.js';
+import type { AppendMessageInput, StoredMessage } from '../../stores/ports/MessageStore.js';
 import type { StreamFreshnessResult } from '../checkStreamOutputFreshness.js';
 import type { FreshnessClosureScope } from '../FreshnessClosureStore.js';
 
@@ -33,6 +33,16 @@ export interface FreshnessOutputCommitInput extends FreshnessClosureScope {
   /** Exact ADR-042 supplement carrier. Never aliases a legacy closure identity. */
   freshnessSupplementId?: string;
   message: AppendMessageInput;
+  /** Existing processing response that must be terminalized instead of appending a second bubble. */
+  lifecycleResponse?: {
+    messageId: string;
+    priorFrontierMessageId: string | null;
+    status: 'completed' | 'failed' | 'canceled' | 'interrupted';
+    completedAt: number;
+    reason?: string;
+  };
+  /** Storage-linearized terminal override for completed-final message wake admission. */
+  commitLifecycleResponse?: (message: AppendMessageInput) => Promise<StoredMessage>;
   evaluateFreshness: (priorFrontierMessageId: string | null) => Promise<FreshnessEvaluation>;
   replayUnsafeToolNames?: string[];
   /** @deprecated ADR-042 does not recheck an append frontier. */

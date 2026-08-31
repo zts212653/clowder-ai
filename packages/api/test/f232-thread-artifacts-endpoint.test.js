@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, it } from 'node:test';
 import Fastify from 'fastify';
+import { canonicalTestMessageInput } from './helpers/message-from-fixtures.js';
 
 const { threadsRoutes } = await import('../dist/routes/threads.js');
 const { SessionChainStore } = await import('../dist/domains/cats/services/stores/ports/SessionChainStore.js');
@@ -147,26 +148,32 @@ describe('GET /api/threads/:threadId/artifacts (F232)', () => {
     const messageStore = new MessageStore();
     const base = Date.now();
     // earliest message carries the file artifact, then push 59 newer plain messages past the default-50 window
-    messageStore.append({
-      userId: 'alice',
-      catId: 'opus-48',
-      content: '',
-      mentions: [],
-      timestamp: base,
-      threadId: 'T1',
-      extra: {
-        rich: { v: 1, blocks: [{ id: 'b', kind: 'file', v: 1, url: '/uploads/early.pdf', fileName: 'early.pdf' }] },
-      },
-    });
-    for (let i = 1; i <= 59; i++) {
-      messageStore.append({
+    messageStore.append(
+      canonicalTestMessageInput({
+        provenance: { author: 'cat', routed: false, observation: 'original' },
         userId: 'alice',
         catId: 'opus-48',
-        content: `m${i}`,
+        content: '',
         mentions: [],
-        timestamp: base + i,
+        timestamp: base,
         threadId: 'T1',
-      });
+        extra: {
+          rich: { v: 1, blocks: [{ id: 'b', kind: 'file', v: 1, url: '/uploads/early.pdf', fileName: 'early.pdf' }] },
+        },
+      }),
+    );
+    for (let i = 1; i <= 59; i++) {
+      messageStore.append(
+        canonicalTestMessageInput({
+          provenance: { author: 'cat', routed: false, observation: 'original' },
+          userId: 'alice',
+          catId: 'opus-48',
+          content: `m${i}`,
+          mentions: [],
+          timestamp: base + i,
+          threadId: 'T1',
+        }),
+      );
     }
     app = Fastify();
     await app.register(threadsRoutes, {

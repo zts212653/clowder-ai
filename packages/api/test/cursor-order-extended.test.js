@@ -13,6 +13,7 @@
 
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
+import { canonicalTestMessageInput } from './helpers/message-from-fixtures.js';
 
 const { parseCursor, cursorFor } = await import('../dist/domains/cats/services/stores/cursor.js');
 
@@ -26,30 +27,39 @@ describe('Cursor Order — Extended RED tests (§8.8)', () => {
     const threadId = `red10-${Date.now()}`;
 
     // Append 3 messages — timestamps don't matter, seq must be strictly monotonic
-    const m1 = store.append({
-      userId: 'u1',
-      catId: null,
-      content: 'a',
-      mentions: [],
-      timestamp: Date.now(),
-      threadId,
-    });
-    const m2 = store.append({
-      userId: 'u1',
-      catId: null,
-      content: 'b',
-      mentions: [],
-      timestamp: Date.now(),
-      threadId,
-    });
-    const m3 = store.append({
-      userId: 'u1',
-      catId: null,
-      content: 'c',
-      mentions: [],
-      timestamp: Date.now(),
-      threadId,
-    });
+    const m1 = store.append(
+      canonicalTestMessageInput({
+        provenance: { author: 'user', routed: false, observation: 'original' },
+        userId: 'u1',
+        catId: null,
+        content: 'a',
+        mentions: [],
+        timestamp: Date.now(),
+        threadId,
+      }),
+    );
+    const m2 = store.append(
+      canonicalTestMessageInput({
+        provenance: { author: 'user', routed: false, observation: 'original' },
+        userId: 'u1',
+        catId: null,
+        content: 'b',
+        mentions: [],
+        timestamp: Date.now(),
+        threadId,
+      }),
+    );
+    const m3 = store.append(
+      canonicalTestMessageInput({
+        provenance: { author: 'user', routed: false, observation: 'original' },
+        userId: 'u1',
+        catId: null,
+        content: 'c',
+        mentions: [],
+        timestamp: Date.now(),
+        threadId,
+      }),
+    );
 
     const page = store.getByThreadAfter(threadId);
     assert.equal(page.length, 3);
@@ -70,14 +80,17 @@ describe('Cursor Order — Extended RED tests (§8.8)', () => {
     const store = new MessageStore();
     const threadId = `red12-${Date.now()}`;
 
-    store.append({
-      userId: 'u1',
-      catId: null,
-      content: 'stable',
-      mentions: [],
-      timestamp: Date.now(),
-      threadId,
-    });
+    store.append(
+      canonicalTestMessageInput({
+        provenance: { author: 'user', routed: false, observation: 'original' },
+        userId: 'u1',
+        catId: null,
+        content: 'stable',
+        mentions: [],
+        timestamp: Date.now(),
+        threadId,
+      }),
+    );
 
     const page1 = store.getByThreadAfter(threadId);
     const token1 = cursorFor(page1[0]);
@@ -99,25 +112,31 @@ describe('Cursor Order — Extended RED tests (§8.8)', () => {
     const store = new MessageStore();
     const threadId = `red15-${Date.now()}`;
 
-    const direct = store.append({
-      userId: 'u1',
-      catId: null,
-      content: 'direct',
-      mentions: [],
-      timestamp: Date.now(),
-      threadId,
-    });
+    const direct = store.append(
+      canonicalTestMessageInput({
+        provenance: { author: 'user', routed: false, observation: 'original' },
+        userId: 'u1',
+        catId: null,
+        content: 'direct',
+        mentions: [],
+        timestamp: Date.now(),
+        threadId,
+      }),
+    );
 
     // Hidden queued work (system/scheduler) — NOT timeline-published
-    const queued = store.append({
-      userId: 'scheduler',
-      catId: 'system',
-      content: 'hidden-queued',
-      mentions: [],
-      timestamp: Date.now(),
-      threadId,
-      deliveryStatus: 'queued',
-    });
+    const queued = store.append(
+      canonicalTestMessageInput({
+        provenance: { author: 'system', routed: false, observation: 'original' },
+        userId: 'scheduler',
+        catId: 'system',
+        content: 'hidden-queued',
+        mentions: [],
+        timestamp: Date.now(),
+        threadId,
+        deliveryStatus: 'queued',
+      }),
+    );
 
     // Verify via getByThreadAfter (which injects visibilitySeq)
     const page = store.getByThreadAfter(threadId);
@@ -157,23 +176,29 @@ describe('Cursor Order — Extended RED tests (§8.8)', () => {
     const threadId = `red23a-${Date.now()}`;
     const baseTs = Date.now() - 10000;
 
-    const c = store.append({
-      userId: 'u1',
-      catId: null,
-      content: 'C-direct',
-      mentions: [],
-      timestamp: baseTs + 100,
-      threadId,
-    });
-    const q = store.append({
-      userId: 'u1',
-      catId: 'opus',
-      content: 'Q-queued',
-      mentions: [],
-      timestamp: baseTs + 50,
-      threadId,
-      deliveryStatus: 'queued',
-    });
+    const c = store.append(
+      canonicalTestMessageInput({
+        provenance: { author: 'user', routed: false, observation: 'original' },
+        userId: 'u1',
+        catId: null,
+        content: 'C-direct',
+        mentions: [],
+        timestamp: baseTs + 100,
+        threadId,
+      }),
+    );
+    const q = store.append(
+      canonicalTestMessageInput({
+        provenance: { author: 'cat', routed: false, observation: 'original' },
+        userId: 'u1',
+        catId: 'opus',
+        content: 'Q-queued',
+        mentions: [],
+        timestamp: baseTs + 50,
+        threadId,
+        deliveryStatus: 'queued',
+      }),
+    );
     store.markDelivered(q.id, baseTs + 200);
 
     const latest = store.getLatestVisibleCursor(threadId);
@@ -195,14 +220,17 @@ describe('Cursor Order — Extended RED tests (§8.8)', () => {
     const store = new MessageStore();
     const threadId = `red23b-${Date.now()}`;
 
-    store.append({
-      userId: 'u1',
-      catId: null,
-      content: 'msg',
-      mentions: [],
-      timestamp: Date.now(),
-      threadId,
-    });
+    store.append(
+      canonicalTestMessageInput({
+        provenance: { author: 'user', routed: false, observation: 'original' },
+        userId: 'u1',
+        catId: null,
+        content: 'msg',
+        mentions: [],
+        timestamp: Date.now(),
+        threadId,
+      }),
+    );
 
     const latest = store.getLatestVisibleCursor(threadId);
     assert.ok(latest);
@@ -217,23 +245,29 @@ describe('Cursor Order — Extended RED tests (§8.8)', () => {
     const store = new MessageStore();
     const threadId = `red23c-${Date.now()}`;
 
-    const c = store.append({
-      userId: 'u1',
-      catId: null,
-      content: 'C',
-      mentions: [],
-      timestamp: Date.now() - 1000,
-      threadId,
-    });
-    const q = store.append({
-      userId: 'u1',
-      catId: 'opus',
-      content: 'Q',
-      mentions: [],
-      timestamp: Date.now() - 2000,
-      threadId,
-      deliveryStatus: 'queued',
-    });
+    const c = store.append(
+      canonicalTestMessageInput({
+        provenance: { author: 'user', routed: false, observation: 'original' },
+        userId: 'u1',
+        catId: null,
+        content: 'C',
+        mentions: [],
+        timestamp: Date.now() - 1000,
+        threadId,
+      }),
+    );
+    const q = store.append(
+      canonicalTestMessageInput({
+        provenance: { author: 'cat', routed: false, observation: 'original' },
+        userId: 'u1',
+        catId: 'opus',
+        content: 'Q',
+        mentions: [],
+        timestamp: Date.now() - 2000,
+        threadId,
+        deliveryStatus: 'queued',
+      }),
+    );
     store.markDelivered(q.id, Date.now());
 
     // Q.id < C.id (lex order) but Q's visibilitySeq > C's visibilitySeq
@@ -255,23 +289,29 @@ describe('Cursor Order — Extended RED tests (§8.8)', () => {
     const store = new MessageStore();
     const threadId = `red13-${Date.now()}`;
 
-    const direct = store.append({
-      userId: 'u1',
-      catId: null,
-      content: 'visible',
-      mentions: [],
-      timestamp: Date.now() - 1000,
-      threadId,
-    });
-    const q = store.append({
-      userId: 'u1',
-      catId: 'opus',
-      content: 'will-cancel',
-      mentions: [],
-      timestamp: Date.now(),
-      threadId,
-      deliveryStatus: 'queued',
-    });
+    const direct = store.append(
+      canonicalTestMessageInput({
+        provenance: { author: 'user', routed: false, observation: 'original' },
+        userId: 'u1',
+        catId: null,
+        content: 'visible',
+        mentions: [],
+        timestamp: Date.now() - 1000,
+        threadId,
+      }),
+    );
+    const q = store.append(
+      canonicalTestMessageInput({
+        provenance: { author: 'cat', routed: false, observation: 'original' },
+        userId: 'u1',
+        catId: 'opus',
+        content: 'will-cancel',
+        mentions: [],
+        timestamp: Date.now(),
+        threadId,
+        deliveryStatus: 'queued',
+      }),
+    );
     store.markCanceled(q.id);
 
     const page = store.getByThreadAfter(threadId);
@@ -287,15 +327,18 @@ describe('Cursor Order — Extended RED tests (§8.8)', () => {
     const store = new MessageStore();
     const threadId = `red19-${Date.now()}`;
 
-    const q = store.append({
-      userId: 'u1',
-      catId: 'opus',
-      content: 'queued-msg',
-      mentions: [],
-      timestamp: Date.now(),
-      threadId,
-      deliveryStatus: 'queued',
-    });
+    const q = store.append(
+      canonicalTestMessageInput({
+        provenance: { author: 'cat', routed: false, observation: 'original' },
+        userId: 'u1',
+        catId: 'opus',
+        content: 'queued-msg',
+        mentions: [],
+        timestamp: Date.now(),
+        threadId,
+        deliveryStatus: 'queued',
+      }),
+    );
 
     // Before delivery: not visible
     const before = store.getByThreadAfter(threadId);
@@ -324,15 +367,18 @@ describe('Cursor Order — Extended RED tests (§8.8)', () => {
     const store = new MessageStore();
     const threadId = `deliver-preserve-${Date.now()}`;
 
-    const q = store.append({
-      userId: 'u1',
-      catId: 'codex-sol',
-      content: 'timeline-published cat speech',
-      mentions: ['opus'],
-      timestamp: Date.now() - 1000,
-      threadId,
-      deliveryStatus: 'queued',
-    });
+    const q = store.append(
+      canonicalTestMessageInput({
+        provenance: { author: 'cat', routed: false, observation: 'original' },
+        userId: 'u1',
+        catId: 'codex-sol',
+        content: 'timeline-published cat speech',
+        mentions: ['opus'],
+        timestamp: Date.now() - 1000,
+        threadId,
+        deliveryStatus: 'queued',
+      }),
+    );
 
     // Q gets visibilitySeq at append (timeline-published)
     const qCursorBefore = cursorFor(q);
@@ -340,14 +386,17 @@ describe('Cursor Order — Extended RED tests (§8.8)', () => {
     const qSeqBefore = parseCursor(qCursorBefore).seq;
 
     // Append later ordinary B — gets a higher seq
-    const b = store.append({
-      userId: 'u1',
-      catId: null,
-      content: 'ordinary B',
-      mentions: [],
-      timestamp: Date.now(),
-      threadId,
-    });
+    const b = store.append(
+      canonicalTestMessageInput({
+        provenance: { author: 'user', routed: false, observation: 'original' },
+        userId: 'u1',
+        catId: null,
+        content: 'ordinary B',
+        mentions: [],
+        timestamp: Date.now(),
+        threadId,
+      }),
+    );
     const bSeq = parseCursor(cursorFor(b)).seq;
     assert.ok(bSeq > qSeqBefore, 'B seq must be > Q seq (B appended later)');
 
@@ -375,15 +424,18 @@ describe('Cursor Order — Extended RED tests (§8.8)', () => {
     const store = new MessageStore();
     const threadId = `hidden-queued-${Date.now()}`;
 
-    const hidden = store.append({
-      userId: 'scheduler',
-      catId: 'system',
-      content: 'hidden system queued work',
-      mentions: [],
-      timestamp: Date.now(),
-      threadId,
-      deliveryStatus: 'queued',
-    });
+    const hidden = store.append(
+      canonicalTestMessageInput({
+        provenance: { author: 'system', routed: false, observation: 'original' },
+        userId: 'scheduler',
+        catId: 'system',
+        content: 'hidden system queued work',
+        mentions: [],
+        timestamp: Date.now(),
+        threadId,
+        deliveryStatus: 'queued',
+      }),
+    );
 
     // Hidden queued: NO visibilitySeq at append
     assert.equal(hidden.visibilitySeq, undefined, 'Hidden queued must not get visibilitySeq');
@@ -407,9 +459,39 @@ describe('Cursor Order — Extended RED tests (§8.8)', () => {
     const threadId = `pruned-v1-${Date.now()}`;
 
     // Create 3 messages
-    store.append({ userId: 'u1', catId: null, content: 'M1', mentions: [], timestamp: Date.now() - 2000, threadId });
-    store.append({ userId: 'u1', catId: null, content: 'M2', mentions: [], timestamp: Date.now() - 1000, threadId });
-    store.append({ userId: 'u1', catId: null, content: 'M3', mentions: [], timestamp: Date.now(), threadId });
+    store.append(
+      canonicalTestMessageInput({
+        provenance: { author: 'user', routed: false, observation: 'original' },
+        userId: 'u1',
+        catId: null,
+        content: 'M1',
+        mentions: [],
+        timestamp: Date.now() - 2000,
+        threadId,
+      }),
+    );
+    store.append(
+      canonicalTestMessageInput({
+        provenance: { author: 'user', routed: false, observation: 'original' },
+        userId: 'u1',
+        catId: null,
+        content: 'M2',
+        mentions: [],
+        timestamp: Date.now() - 1000,
+        threadId,
+      }),
+    );
+    store.append(
+      canonicalTestMessageInput({
+        provenance: { author: 'user', routed: false, observation: 'original' },
+        userId: 'u1',
+        catId: null,
+        content: 'M3',
+        mentions: [],
+        timestamp: Date.now(),
+        threadId,
+      }),
+    );
 
     // Use a fake cursor ID that doesn't exist (simulates pruned message)
     const fakeCursor = 'zzz-pruned-cursor-id';

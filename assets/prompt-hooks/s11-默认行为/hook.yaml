@@ -13,6 +13,11 @@ resolver: S11DefaultsResolver
 inputs:
   - defaults
 
+# Variable metadata (canonical source for Console editor)
+variables:
+  - name: PACK_DEFAULTS_BLOCK
+    description: pack 默认行为块
+    placeholder: ""
 # Override constraints
 disableable: true
 

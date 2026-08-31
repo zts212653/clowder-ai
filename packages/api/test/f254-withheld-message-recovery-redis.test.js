@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { after, before, beforeEach, describe, test } from 'node:test';
+import { canonicalTestMessageInput } from './helpers/message-from-fixtures.js';
 import {
   assertRedisIsolationOrThrow,
   cleanupPrefixedRedisKeys,
@@ -50,22 +51,28 @@ describe('F254 withheld-message recovery Redis safety', { skip: redisIsolationSk
     const threadId = 'thread_recovery';
     const userId = 'user-1';
     const catId = 'fable-5';
-    const question = await store.append({
-      userId,
-      threadId,
-      catId: null,
-      content: '汉堡买到了吗？',
-      mentions: [catId],
-      timestamp: 100,
-    });
-    const later = await store.append({
-      userId,
-      threadId,
-      catId: null,
-      content: '谢谢宪宪',
-      mentions: [catId],
-      timestamp: 300,
-    });
+    const question = await store.append(
+      canonicalTestMessageInput({
+        provenance: { author: 'user', routed: false, observation: 'original' },
+        userId,
+        threadId,
+        catId: null,
+        content: '汉堡买到了吗？',
+        mentions: [catId],
+        timestamp: 100,
+      }),
+    );
+    const later = await store.append(
+      canonicalTestMessageInput({
+        provenance: { author: 'user', routed: false, observation: 'original' },
+        userId,
+        threadId,
+        catId: null,
+        content: '谢谢宪宪',
+        mentions: [catId],
+        timestamp: 300,
+      }),
+    );
     const cursorKeys = [
       `delivery-cursor:${userId}:${catId}:${threadId}`,
       `seen-cursor:${userId}:${catId}:${threadId}`,

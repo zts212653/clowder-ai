@@ -10,6 +10,7 @@
 
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
+import { canonicalTestMessageInput } from './helpers/message-from-fixtures.js';
 
 const { parseCursor } = await import('../dist/domains/cats/services/stores/cursor.js');
 
@@ -20,14 +21,17 @@ describe('#1200 P1-A: allocator uses server time, not payload timestamp', () => 
     const threadId = `p1a-future-${Date.now()}`;
 
     const farFuture = Date.now() + 365 * 24 * 60 * 60 * 1000; // +1 year
-    store.append({
-      userId: 'u1',
-      catId: null,
-      content: 'far-future',
-      mentions: [],
-      timestamp: farFuture,
-      threadId,
-    });
+    store.append(
+      canonicalTestMessageInput({
+        provenance: { author: 'user', routed: false, observation: 'original' },
+        userId: 'u1',
+        catId: null,
+        content: 'far-future',
+        mentions: [],
+        timestamp: farFuture,
+        threadId,
+      }),
+    );
 
     const page = store.getByThreadAfter(threadId);
     assert.equal(page.length, 1);
@@ -44,16 +48,39 @@ describe('#1200 P1-A: allocator uses server time, not payload timestamp', () => 
     const threadId = `p1a-mono-${Date.now()}`;
 
     // Append with past, normal, and far-future timestamps
-    store.append({ userId: 'u1', catId: null, content: 'past', mentions: [], timestamp: 1000, threadId });
-    store.append({ userId: 'u1', catId: null, content: 'normal', mentions: [], timestamp: Date.now(), threadId });
-    store.append({
-      userId: 'u1',
-      catId: null,
-      content: 'future',
-      mentions: [],
-      timestamp: Date.now() + 1_000_000_000,
-      threadId,
-    });
+    store.append(
+      canonicalTestMessageInput({
+        provenance: { author: 'user', routed: false, observation: 'original' },
+        userId: 'u1',
+        catId: null,
+        content: 'past',
+        mentions: [],
+        timestamp: 1000,
+        threadId,
+      }),
+    );
+    store.append(
+      canonicalTestMessageInput({
+        provenance: { author: 'user', routed: false, observation: 'original' },
+        userId: 'u1',
+        catId: null,
+        content: 'normal',
+        mentions: [],
+        timestamp: Date.now(),
+        threadId,
+      }),
+    );
+    store.append(
+      canonicalTestMessageInput({
+        provenance: { author: 'user', routed: false, observation: 'original' },
+        userId: 'u1',
+        catId: null,
+        content: 'future',
+        mentions: [],
+        timestamp: Date.now() + 1_000_000_000,
+        threadId,
+      }),
+    );
 
     const page = store.getByThreadAfter(threadId);
     assert.equal(page.length, 3);
@@ -80,15 +107,18 @@ describe('#1200 P1-A: allocator uses server time, not payload timestamp', () => 
     const store = new MessageStore();
     const threadId = `p1a-deliver-${Date.now()}`;
 
-    const q = store.append({
-      userId: 'u1',
-      catId: 'opus',
-      content: 'queued',
-      mentions: [],
-      timestamp: Date.now(),
-      threadId,
-      deliveryStatus: 'queued',
-    });
+    const q = store.append(
+      canonicalTestMessageInput({
+        provenance: { author: 'cat', routed: false, observation: 'original' },
+        userId: 'u1',
+        catId: 'opus',
+        content: 'queued',
+        mentions: [],
+        timestamp: Date.now(),
+        threadId,
+        deliveryStatus: 'queued',
+      }),
+    );
 
     // Deliver with a far-future timestamp — seq must NOT use it
     const farFutureDeliveredAt = Date.now() + 365 * 24 * 60 * 60 * 1000;

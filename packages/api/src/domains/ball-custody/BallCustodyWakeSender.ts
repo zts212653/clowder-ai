@@ -34,7 +34,7 @@ export class SchedulerBallCustodyWakeSender implements BallCustodyWakeSender {
     const messageId = await this.opts.deliver({
       threadId: input.task.threadId,
       content,
-      userId: 'scheduler',
+      userId,
       idempotencyKey: `ball-custody-wake:${input.task.id}:${
         input.projection.blockedSinceAt ?? input.projection.lastStateChangeAt
       }`,

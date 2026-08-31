@@ -78,7 +78,7 @@ describe('F254 Phase E production wiring guard', () => {
     assert.ok(queueResume > callbackAdmission, 'restored Queue work must resume only after callback admission opens');
     assert.match(
       index.slice(queueResume),
-      /queueProcessor\.processNext\(scope\.threadId, scope\.userId\)/,
+      /queueProcessor\.requestDrain\(scope\.threadId\)/,
       'restored Queue scopes must re-enter the canonical QueueProcessor',
     );
   });

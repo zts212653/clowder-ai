@@ -1,35 +1,19 @@
 /**
  * A2A invocation trigger for MCP callback post_message (F27 rewrite).
  *
- * BEFORE F27: callback detected @mentions → spawned independent routeExecution
- *   → dual-path bug (double-fire + uncontrollable children + infinite recursion)
- *
- * AFTER F27: callback detected @mentions → pushes targets to parent worklist
- *   → single path, shared AbortController, shared depth limit
- *
- * Fallback: if no parent worklist exists (shouldn't happen in practice,
- * since callbacks only fire during cat execution), creates a standalone
- * invocation as before.
+ * Callback mentions enter the same InvocationQueue lifecycle as every other
+ * message. There is no direct routeExecution fallback.
  */
 
 import type { CatId } from '@cat-cafe/shared';
-import type { FastifyBaseLogger } from 'fastify';
-import { getDefaultCatId } from '../config/cat-config-loader.js';
 import type { ActionSuccessorFence } from '../domains/ball-custody/ActionSuccessorAdmissionService.js';
 import type { IBallCustodyIngest } from '../domains/ball-custody/BallCustodyIngest.js';
 import { buildHandedEvent } from '../domains/ball-custody/ball-custody-events.js';
-import type { TurnCustodyWakeProvenance } from '../domains/ball-custody/TurnCustodyProjectionService.js';
-import { buildA2ADispatchTurnCustodyWake } from '../domains/ball-custody/turn-custody-wake-provenance.js';
 import type { InvocationQueue, QueueEntry } from '../domains/cats/services/agents/invocation/InvocationQueue.js';
-import type { InvocationTracker } from '../domains/cats/services/agents/invocation/InvocationTracker.js';
 import {
   normalizeOwnerAuthProvenance,
   type OwnerAuthProvenance,
 } from '../domains/cats/services/agents/invocation/owner-auth-provenance.js';
-import {
-  isTerminalDispositionEvent,
-  PerCatTerminalDispositionCollector,
-} from '../domains/cats/services/agents/invocation/PerCatTerminalDispositionCollector.js';
 import {
   createCrossThreadQueueEntryFromCustody,
   createFanoutQueueCustodyAdmission,
@@ -41,60 +25,56 @@ import {
   rebindCrossThreadQueueCarrierActionFence,
   sameFanoutCustodyIdentity,
 } from '../domains/cats/services/agents/invocation/QueuedMessageCustodyCoordinator.js';
-import { requireInvocationRecordUpdate } from '../domains/cats/services/agents/invocation/require-invocation-record-update.js';
-import { stampVisibleTurn } from '../domains/cats/services/agents/invocation/visible-turn.js';
-import { createA2ASlotTrackingBridge } from '../domains/cats/services/agents/routing/route-helpers.js';
+import {
+  callerActivityFromMessage,
+  type DurableA2ALineage,
+  readDurableA2ALineage,
+} from '../domains/cats/services/agents/routing/durable-a2a-lineage.js';
+import type { CallerActivity } from '../domains/cats/services/agents/routing/WorklistRegistry.js';
 import {
   getWorklist,
-  hasWorklist,
   peekStreakOnPush,
-  pushToWorklist,
   updateStreakOnPush,
 } from '../domains/cats/services/agents/routing/WorklistRegistry.js';
-import { parseIntent } from '../domains/cats/services/context/IntentParser.js';
-import type { AgentRouter } from '../domains/cats/services/index.js';
-import type { DeliveryCursorStore } from '../domains/cats/services/stores/ports/DeliveryCursorStore.js';
-import type { IInvocationRecordStore } from '../domains/cats/services/stores/ports/InvocationRecordStore.js';
 import type {
+  AppendMessageInput,
   IMessageStore,
+  LifecycleResponseTerminalPatch,
   QueuedMessageCustody,
   StoredMessage,
 } from '../domains/cats/services/stores/ports/MessageStore.js';
-import { projectQueueReceipt } from '../domains/cats/services/stores/ports/queued-message-receipt.js';
+import {
+  commitLifecycleResponseFromAppendInput,
+  initializeQueueCustodyWithLifecycleRetry,
+} from '../domains/cats/services/stores/ports/MessageStore.js';
 import { wrapWithDispatchSpan } from '../infrastructure/telemetry/dispatch-span.js';
 import type { CallerTraceContext } from '../infrastructure/telemetry/genai-semconv.js';
-import type { SocketManager } from '../infrastructure/websocket/index.js';
 import { emitQueueUpdated } from '../utils/queue-enrichment.js';
 
+interface A2ATriggerSocketManager {
+  emitToUser(userId: string, event: string, data: unknown): void;
+  broadcastAgentMessage(message: unknown, threadId: string): void;
+}
+
+interface A2ATriggerLogger {
+  info(obj: unknown, msg?: string): void;
+  warn(obj: unknown, msg?: string): void;
+  error(obj: unknown, msg?: string): void;
+}
+
 export interface QueueProcessorLike {
-  onInvocationComplete(
-    threadId: string,
-    catId: string,
-    status: 'succeeded' | 'failed' | 'canceled',
-    invocationId: string | undefined,
-    completedCatIds: readonly string[],
-  ): Promise<void>;
-  tryAutoExecute?(threadId: string): Promise<void>;
-  markPromptMessagesSeen?(input: {
-    threadId: string;
-    userId: string;
-    catId: string;
-    invocationId: string;
-    messageIds: readonly string[];
-  }): Promise<readonly TurnCustodyWakeProvenance[]>;
-  /** F216 c3 supersede: reuse the force-send abort-resume coordinate system.
-   *  clearPause prevents the aborted invocation's async cleanup from poisoning QueueProcessor state (F39).
-   *  releaseSlot force-frees the per-slot processingSlots mutex so tryAutoExecute sees a free slot. */
-  clearPause?(threadId: string, catId?: string): void;
+  requestDrain?(threadId: string): Promise<void>;
+  /** F216 c3 supersede: releaseSlot force-frees the per-slot processingSlots
+   * mutex so the next drain sees a free slot. */
   releaseSlot?(threadId: string, catId: string): void;
 }
 
 export interface A2ATriggerDeps {
-  router: AgentRouter;
-  invocationRecordStore: IInvocationRecordStore;
-  socketManager: SocketManager;
-  invocationTracker?: InvocationTracker;
-  deliveryCursorStore?: DeliveryCursorStore;
+  socketManager: A2ATriggerSocketManager;
+  invocationTracker?: {
+    has(threadId: string, catId: string): boolean;
+    cancelInvocation(threadId: string, catIds: string[], userId?: string, reason?: string): unknown;
+  };
   queueProcessor?: QueueProcessorLike;
   /** #706: MessageStore for queue enrichment (messagePreview in queue_updated SSE). */
   messageStore?: IMessageStore;
@@ -120,55 +100,239 @@ export interface A2ATriggerDeps {
     // F216 c3: removeProcessed clears the superseded processing entry so it cannot re-run.
     | 'removeProcessed'
   >;
-  log: FastifyBaseLogger;
+  log: A2ATriggerLogger;
 }
 
-function isRecoverableApprovedCarrierSource(
-  persisted: StoredMessage,
-  opts: {
-    targetCats: readonly CatId[];
-    content: string;
-    userId: string;
-    threadId: string;
-    triggerMessage: StoredMessage;
-    callerCatId?: CatId;
-    actionSuccessorFence?: ActionSuccessorFence;
-  },
-): boolean {
-  if (
-    !opts.actionSuccessorFence ||
-    !opts.callerCatId ||
-    persisted.deliveryStatus !== undefined ||
-    persisted.queueCustody
-  ) {
-    return false;
-  }
-  const expectedCrossPost = opts.triggerMessage.extra?.crossPost;
-  return (
-    persisted.id === opts.triggerMessage.id &&
-    persisted.threadId === opts.threadId &&
-    persisted.userId === opts.userId &&
-    persisted.catId === opts.callerCatId &&
-    persisted.content === opts.content &&
-    persisted.replyTo === opts.triggerMessage.replyTo &&
-    persisted.origin === 'callback' &&
-    persisted.extra?.isExplicitPost === true &&
-    persisted.extra.crossPost?.effectClass === 'assign_work' &&
-    persisted.extra.crossPost.effectClass === expectedCrossPost?.effectClass &&
-    typeof persisted.extra.crossPost.sourceThreadId === 'string' &&
-    persisted.extra.crossPost.sourceThreadId.length > 0 &&
-    persisted.extra.crossPost.sourceThreadId === expectedCrossPost?.sourceThreadId &&
-    persisted.extra.crossPost.sourceThreadId !== persisted.threadId &&
-    JSON.stringify(persisted.mentions) === JSON.stringify(opts.targetCats) &&
-    JSON.stringify(persisted.extra.targetCats) === JSON.stringify(opts.targetCats)
-  );
+function emitLifecycleMessageUpdated(
+  socketManager: A2ATriggerSocketManager,
+  userId: string,
+  message: StoredMessage,
+): void {
+  if (!message.lifecycle) return;
+  socketManager.emitToUser(userId, 'message_lifecycle_updated', {
+    threadId: message.threadId,
+    message: {
+      id: message.id,
+      ...(message.from ? { from: message.from } : {}),
+      catId: message.catId,
+      content: message.content,
+      lifecycle: message.lifecycle,
+      timestamp: message.timestamp,
+      ...(message.timelineOrderAt !== undefined ? { timelineOrderAt: message.timelineOrderAt } : {}),
+      ...(message.contentBlocks ? { contentBlocks: message.contentBlocks } : {}),
+      ...(message.extra ? { extra: message.extra } : {}),
+      ...(message.origin ? { origin: message.origin } : {}),
+    },
+  });
+}
+
+export interface A2AFanoutAdmissionPlan {
+  requestedTargetCats: readonly CatId[];
+  acceptedTargetCats: readonly CatId[];
+  streakTargetCats: readonly CatId[];
+  stop?:
+    | { reason: 'depth'; catId: CatId; currentDepth: number }
+    | { reason: 'pingpong'; catId: CatId; pairCount: number };
+}
+
+interface A2AFanoutAdmissionOptions {
+  targetCats: readonly CatId[];
+  content: string;
+  userId: string;
+  ownerAuthProvenance: OwnerAuthProvenance;
+  threadId: string;
+  createdAt: number;
+  callerCatId?: CatId;
+  parentInvocationId?: string;
+  isCrossThread?: boolean;
+  actionSuccessorFence?: ActionSuccessorFence;
+  durableLineage?: DurableA2ALineage;
+  callerActivity?: CallerActivity;
 }
 
 /**
- * Enqueue @mentioned cats into the parent's worklist (F27 unified path).
- *
- * Returns the cats that were actually enqueued. If no parent worklist exists,
- * falls back to standalone invocation (legacy path, should be rare).
+ * Decide the complete A2A fan-out before the source message is published.
+ * This is deliberately read-only: streak mutation and Queue staging happen
+ * only after the durable message + admission record has committed.
+ */
+export function planA2AFanoutAdmission(
+  deps: Pick<A2ATriggerDeps, 'invocationQueue'>,
+  opts: A2AFanoutAdmissionOptions,
+): A2AFanoutAdmissionPlan {
+  const invocationQueue = deps.invocationQueue;
+  if (!invocationQueue) throw new Error('A2A dispatch requires InvocationQueue');
+  const ownerAuthProvenance = normalizeOwnerAuthProvenance(opts.ownerAuthProvenance);
+  const streakCallerCatId = opts.targetCats.length === 1 ? opts.callerCatId : undefined;
+  const streakEntry = streakCallerCatId ? getWorklist(opts.threadId, opts.parentInvocationId) : null;
+  const maxA2ADepth = streakEntry?.maxDepth ?? 10;
+  const streakActivity =
+    opts.callerActivity ??
+    ({
+      hadSubstantiveToolCall: false,
+      outputLength: opts.content.length,
+    } as const);
+  const acceptedTargetCats: CatId[] = [];
+  const streakTargetCats: CatId[] = [];
+  let stop: A2AFanoutAdmissionPlan['stop'];
+  let predictedDepth =
+    opts.durableLineage?.depth ?? streakEntry?.a2aCount ?? invocationQueue.countAgentEntriesForThread(opts.threadId);
+  const streakState = opts.durableLineage ?? streakEntry;
+
+  for (const catId of opts.targetCats) {
+    if (predictedDepth >= maxA2ADepth) {
+      stop = { reason: 'depth', catId, currentDepth: predictedDepth };
+      break;
+    }
+    const inFlight = opts.actionSuccessorFence
+      ? null
+      : (invocationQueue.findInFlightAgentEntry?.(
+          opts.threadId,
+          catId,
+          opts.callerCatId,
+          opts.parentInvocationId,
+          ownerAuthProvenance,
+        ) ?? null);
+    const willCoalesce = inFlight?.status === 'queued';
+    if (streakCallerCatId && streakState && !willCoalesce) {
+      const streak = peekStreakOnPush(streakState, streakCallerCatId, catId, streakActivity);
+      if (streak.wouldBlock) {
+        stop = { reason: 'pingpong', catId, pairCount: streak.count };
+        break;
+      }
+      streakTargetCats.push(catId);
+    }
+    acceptedTargetCats.push(catId);
+    if (!inFlight) predictedDepth += 1;
+  }
+
+  return {
+    requestedTargetCats: [...opts.targetCats],
+    acceptedTargetCats,
+    streakTargetCats,
+    ...(stop ? { stop } : {}),
+  };
+}
+
+export function createA2AFanoutAdmissionFromPlan(
+  messageId: string,
+  plan: A2AFanoutAdmissionPlan,
+  opts: A2AFanoutAdmissionOptions,
+) {
+  return createFanoutQueueCustodyAdmission(messageId, {
+    ownerUserId: opts.userId,
+    ownerAuthProvenance: normalizeOwnerAuthProvenance(opts.ownerAuthProvenance),
+    targetCats: plan.acceptedTargetCats,
+    requestedTargetCats: plan.requestedTargetCats,
+    intent: 'execute',
+    ...(opts.parentInvocationId ? { a2aParentInvocationId: opts.parentInvocationId } : {}),
+    ...(opts.isCrossThread ? { receiptScope: 'cross_thread_delivery' as const } : {}),
+    ...(opts.actionSuccessorFence ? { actionSuccessorFence: opts.actionSuccessorFence } : {}),
+    createdAt: opts.createdAt,
+  });
+}
+
+export async function commitCompletedResponseAndEnqueueA2ATargets(
+  deps: A2ATriggerDeps,
+  opts: {
+    responseMessageId: string;
+    invocationId: string;
+    terminal: Pick<LifecycleResponseTerminalPatch, 'status' | 'completedAt' | 'reason'>;
+    message: AppendMessageInput;
+    targetCats: CatId[];
+    userId: string;
+    ownerAuthProvenance: OwnerAuthProvenance;
+    threadId: string;
+    callerCatId: CatId;
+    parentInvocationId?: string;
+    callerTraceContext?: CallerTraceContext;
+  },
+): Promise<StoredMessage> {
+  if (opts.terminal.status !== 'completed') {
+    throw new Error('completed response A2A wake requires a completed terminal');
+  }
+  if (!deps.messageStore) throw new Error('completed response A2A wake requires MessageStore');
+  const causalTriggerMessageId = opts.message.extra?.causal?.triggerMessageId;
+  const durableLineage = causalTriggerMessageId
+    ? await readDurableA2ALineage(deps.messageStore, causalTriggerMessageId, opts.callerCatId)
+    : undefined;
+  const admissionOptions: A2AFanoutAdmissionOptions = {
+    targetCats: opts.targetCats,
+    content: opts.message.content,
+    userId: opts.userId,
+    ownerAuthProvenance: normalizeOwnerAuthProvenance(opts.ownerAuthProvenance),
+    threadId: opts.threadId,
+    createdAt: opts.terminal.completedAt,
+    callerCatId: opts.callerCatId,
+    ...(durableLineage ? { durableLineage } : {}),
+    callerActivity: callerActivityFromMessage(opts.message),
+    ...(opts.parentInvocationId ? { parentInvocationId: opts.parentInvocationId } : {}),
+  };
+  const plan = planA2AFanoutAdmission(deps, admissionOptions);
+  const stored = await commitLifecycleResponseFromAppendInput(
+    deps.messageStore,
+    opts.responseMessageId,
+    opts.invocationId,
+    opts.terminal,
+    opts.message,
+    plan.acceptedTargetCats.length > 0
+      ? (messageId) => createA2AFanoutAdmissionFromPlan(messageId, plan, admissionOptions)
+      : undefined,
+  );
+
+  if (plan.acceptedTargetCats.length === 0) {
+    if (plan.stop?.reason === 'depth') {
+      deps.log.warn(
+        {
+          threadId: opts.threadId,
+          triggerMessageId: stored.id,
+          catId: plan.stop.catId,
+          currentDepth: plan.stop.currentDepth,
+        },
+        '[F122B] completed response A2A: depth limit reached',
+      );
+    } else if (plan.stop?.reason === 'pingpong') {
+      const worklist = getWorklist(opts.threadId, opts.parentInvocationId);
+      if (worklist) {
+        updateStreakOnPush(worklist, opts.callerCatId, plan.stop.catId, {
+          hadSubstantiveToolCall: false,
+          outputLength: opts.message.content.length,
+        });
+      }
+      deps.socketManager.broadcastAgentMessage(
+        {
+          type: 'system_info',
+          catId: opts.callerCatId,
+          content: JSON.stringify({
+            type: 'a2a_pingpong_terminated',
+            fromCatId: opts.callerCatId,
+            targetCatId: plan.stop.catId,
+            pairCount: plan.stop.pairCount,
+          }),
+          timestamp: Date.now(),
+        },
+        opts.threadId,
+      );
+    }
+    return stored;
+  }
+
+  await enqueueA2ATargets(deps, {
+    targetCats: opts.targetCats,
+    content: opts.message.content,
+    userId: opts.userId,
+    ownerAuthProvenance: opts.ownerAuthProvenance,
+    threadId: opts.threadId,
+    triggerMessage: stored,
+    callerCatId: opts.callerCatId,
+    ...(opts.parentInvocationId ? { parentInvocationId: opts.parentInvocationId } : {}),
+    ...(opts.callerTraceContext ? { callerTraceContext: opts.callerTraceContext } : {}),
+    preplannedAdmission: plan,
+  });
+  return (await deps.messageStore.getById(stored.id)) ?? stored;
+}
+
+/**
+ * Enqueue @mentioned cats into the canonical InvocationQueue lifecycle.
  */
 export async function enqueueA2ATargets(
   deps: A2ATriggerDeps,
@@ -188,52 +352,48 @@ export async function enqueueA2ATargets(
     callerTraceContext?: CallerTraceContext;
     /** F167 Phase S: persistent subject/action/slot generation fence. */
     actionSuccessorFence?: ActionSuccessorFence;
+    /** Exact policy plan already persisted with a newly appended source message. */
+    preplannedAdmission?: A2AFanoutAdmissionPlan;
   },
-): Promise<{ enqueued: CatId[]; coalesced?: CatId[]; fallback: boolean }> {
+): Promise<{ enqueued: CatId[]; coalesced?: CatId[] }> {
+  if (!deps.invocationQueue || !deps.queueProcessor?.requestDrain) {
+    throw new Error('A2A dispatch requires InvocationQueue and QueueProcessor');
+  }
   const { log } = deps;
   const { threadId, callerCatId } = opts;
   const ownerAuthProvenance = normalizeOwnerAuthProvenance(opts.ownerAuthProvenance);
   const triggerMessageId = opts.triggerMessage.id;
-  const { deliveryCursorStore } = deps;
   const isCrossThread =
     !!opts.triggerMessage.extra?.crossPost?.sourceThreadId &&
     opts.triggerMessage.extra.crossPost.sourceThreadId !== opts.triggerMessage.threadId;
-  const requiresDurableQueueCustody = isCrossThread || opts.triggerMessage.deliveryStatus === 'queued';
-  let persistedQueueTrigger: StoredMessage | undefined;
-  if (requiresDurableQueueCustody && deps.invocationQueue) {
-    if (!deps.messageStore) {
-      throw new Error('A2A Queue dispatch requires durable message custody');
-    }
-    let persistedTrigger = await deps.messageStore.getById(triggerMessageId);
-    if (isCrossThread && persistedTrigger && isRecoverableApprovedCarrierSource(persistedTrigger, opts)) {
-      const prepared = await deps.messageStore.prepareQueueAdmission(triggerMessageId);
-      if (prepared.kind === 'prepared' || prepared.kind === 'existing') {
-        persistedTrigger = prepared.message;
-      }
-    }
-    if (!persistedTrigger || persistedTrigger.deliveryStatus !== 'queued') {
-      throw new Error('A2A Queue dispatch requires one persisted queued source message');
-    }
-    persistedQueueTrigger = persistedTrigger;
+  if (!deps.messageStore) {
+    throw new Error('A2A Queue dispatch requires durable message custody');
   }
-  // #1200 §8.7: mention-ack cursors must be v2 (visibility-domain). getMentionsFor
-  // now uses visibility ordering — ack cursors written as raw IDs would mismatch.
-  // Canonicalize once; reuse in both InvocationQueue and worklist ack paths.
-  const ackCursor =
-    deliveryCursorStore && deps.messageStore?.canonicalizeCursor
-      ? await deps.messageStore.canonicalizeCursor(triggerMessageId, threadId)
-      : triggerMessageId;
-
+  let persistedQueueTrigger = await deps.messageStore.getById(triggerMessageId);
+  if (
+    !persistedQueueTrigger ||
+    persistedQueueTrigger.from?.kind !== 'agent' ||
+    persistedQueueTrigger.deliveryStatus === 'queued' ||
+    persistedQueueTrigger.deliveryStatus === 'canceled' ||
+    persistedQueueTrigger.visibility === 'whisper' ||
+    persistedQueueTrigger.recall ||
+    persistedQueueTrigger._tombstone
+  ) {
+    throw new Error('A2A Queue dispatch requires one persisted public agent source message');
+  }
   // F167 Phase E (KD-20): L3 role-gate retired. Role-based handoff permission is
   // no longer harness-enforced — cat-config.restrictions flows into sender & target
   // prompts (buildTeammateRoster / buildStaticIdentity); cats self-regulate.
-  const fromCatId = callerCatId ?? opts.triggerMessage.catId ?? getDefaultCatId();
+  const fromCatId = persistedQueueTrigger.from.catId as CatId;
+  if (callerCatId && callerCatId !== fromCatId) {
+    throw new Error('A2A Queue dispatch caller does not match persisted MessageFrom');
+  }
   const targetCats = opts.targetCats;
 
   // F153 Phase I (Maine Coon P1): Lazy-create mention_dispatch span + a2a.dispatch.count counter
   // ONLY when a target is about to actually dispatch (passes all guards and reaches a real enqueue
-  // or fallback invocation). Pre-creating would mint span/counter even when ALL cats are blocked
-  // by depth limit / dedup / ping-pong streak / empty-conflict fallback — polluting Step Summary
+  // invocation). Pre-creating would mint span/counter even when ALL cats are blocked
+  // by depth limit / dedup / ping-pong streak — polluting Step Summary
   // a2a_dispatch_count with phantom dispatches.
   let dispatchTraceContext: CallerTraceContext | undefined;
   const ensureDispatchTraceContext = (): CallerTraceContext | undefined => {
@@ -243,10 +403,9 @@ export async function enqueueA2ATargets(
     return dispatchTraceContext;
   };
 
-  // F122B: If InvocationQueue is available, enqueue as agent entry (unified dispatch).
-  // This replaces both the worklist path and the fallback standalone invocation.
-  // Guards mirror worklist protections: depth limit, duplicate detection.
-  if (deps.invocationQueue) {
+  // Every A2A child uses the same queue admission path. Guards retain the
+  // depth, duplicate, and ping-pong policies at that single boundary.
+  {
     const MAX_A2A_DEPTH = 10;
 
     // F167 L1 AC-A4 + Phase D (cloud Codex P1): streak check must cover modern path
@@ -281,47 +440,46 @@ export async function enqueueA2ATargets(
       | { reason: 'depth'; catId: CatId; currentDepth: number }
       | { reason: 'pingpong'; catId: CatId; pairCount: number }
       | undefined;
-    if (persistedQueueTrigger && !persistedQueueTrigger.queueCustody) {
+    const admissionOptions: A2AFanoutAdmissionOptions = {
+      targetCats,
+      content: opts.content,
+      userId: opts.userId,
+      ownerAuthProvenance,
+      threadId,
+      createdAt: opts.triggerMessage.timestamp,
+      ...(callerCatId ? { callerCatId } : {}),
+      ...(opts.parentInvocationId ? { parentInvocationId: opts.parentInvocationId } : {}),
+      ...(isCrossThread ? { isCrossThread: true } : {}),
+      ...(opts.actionSuccessorFence ? { actionSuccessorFence: opts.actionSuccessorFence } : {}),
+    };
+    const validatePlan = (plan: A2AFanoutAdmissionPlan): void => {
+      if (JSON.stringify(plan.requestedTargetCats) !== JSON.stringify(targetCats)) {
+        throw new Error('A2A fan-out admission plan requested-target mismatch');
+      }
+      if (plan.acceptedTargetCats.some((catId) => !targetCats.includes(catId))) {
+        throw new Error('A2A fan-out admission plan contains an unrequested target');
+      }
+    };
+    let activePlan = opts.preplannedAdmission;
+    if (activePlan) validatePlan(activePlan);
+    if (!persistedQueueTrigger.queueCustody) {
       const existingAdmission = persistedQueueTrigger.queueCustodyAdmission;
       if (existingAdmission) {
         const requestedTargetCats = existingAdmission.requestedTargetCats ?? existingAdmission.targetCats;
         if (JSON.stringify(requestedTargetCats) !== JSON.stringify(targetCats)) {
           throw new Error('A2A fan-out Queue custody admission requested-target mismatch');
         }
+        if (
+          activePlan &&
+          JSON.stringify(activePlan.acceptedTargetCats) !== JSON.stringify(existingAdmission.targetCats)
+        ) {
+          throw new Error('A2A fan-out Queue custody admission policy-plan mismatch');
+        }
         admittedTargetCats = new Set(existingAdmission.targetCats);
       } else {
-        const acceptedTargetCats: CatId[] = [];
-        let predictedDepth = deps.invocationQueue.countAgentEntriesForThread(threadId);
-        for (const catId of targetCats) {
-          if (predictedDepth >= MAX_A2A_DEPTH) {
-            plannedStop = { reason: 'depth', catId, currentDepth: predictedDepth };
-            break;
-          }
-          const inFlight = findInFlightForTarget(catId);
-          const willCoalesce = inFlight?.status === 'queued';
-          if (streakCallerCatId && streakEntry && !willCoalesce) {
-            const streak = peekStreakOnPush(streakEntry, streakCallerCatId, catId, streakActivity);
-            if (streak.wouldBlock) {
-              plannedStop = { reason: 'pingpong', catId, pairCount: streak.count };
-              break;
-            }
-            plannedStreakTargets.add(catId);
-          }
-          acceptedTargetCats.push(catId);
-          if (!inFlight) predictedDepth += 1;
-        }
-        const admission = createFanoutQueueCustodyAdmission(triggerMessageId, {
-          ownerUserId: opts.userId,
-          ownerAuthProvenance,
-          targetCats: acceptedTargetCats,
-          requestedTargetCats: targetCats,
-          intent: 'execute',
-          ...(callerCatId ? { callerCatId } : {}),
-          ...(opts.parentInvocationId ? { a2aParentInvocationId: opts.parentInvocationId } : {}),
-          ...(isCrossThread ? { receiptScope: 'cross_thread_delivery' as const } : {}),
-          ...(opts.actionSuccessorFence ? { actionSuccessorFence: opts.actionSuccessorFence } : {}),
-          createdAt: opts.triggerMessage.timestamp,
-        });
+        activePlan ??= planA2AFanoutAdmission(deps, admissionOptions);
+        validatePlan(activePlan);
+        const admission = createA2AFanoutAdmissionFromPlan(triggerMessageId, activePlan, admissionOptions);
         const messageStore = deps.messageStore;
         if (!messageStore) throw new Error('A2A Queue dispatch requires durable message custody');
         const admissionResult = await messageStore.initializeQueueCustodyAdmission(triggerMessageId, admission);
@@ -330,43 +488,47 @@ export async function enqueueA2ATargets(
         }
         persistedQueueTrigger = admissionResult.message;
         admittedTargetCats = new Set(admissionResult.message.queueCustodyAdmission?.targetCats ?? []);
-        if (plannedStop?.reason === 'depth') {
-          log.warn(
-            {
-              threadId,
-              triggerMessageId,
-              currentDepth: plannedStop.currentDepth,
-              catId: plannedStop.catId,
-            },
-            '[F122B] A2A callback: depth limit reached, skipping remaining targets',
-          );
-        } else if (plannedStop?.reason === 'pingpong' && streakEntry && streakCallerCatId) {
-          updateStreakOnPush(streakEntry, streakCallerCatId, plannedStop.catId, streakActivity);
-          log.info(
-            {
-              threadId,
-              triggerMessageId,
-              fromCatId,
-              catId: plannedStop.catId,
-              pairCount: plannedStop.pairCount,
-            },
-            'F167 L1: callback A2A (invocationQueue) ping-pong terminated (streak >= 4)',
-          );
-          deps.socketManager.broadcastAgentMessage(
-            {
-              type: 'system_info',
-              catId: fromCatId,
-              content: JSON.stringify({
-                type: 'a2a_pingpong_terminated',
-                fromCatId,
-                targetCatId: plannedStop.catId,
-                pairCount: plannedStop.pairCount,
-              }),
-              timestamp: Date.now(),
-            },
+      }
+      if (activePlan) {
+        for (const catId of activePlan.streakTargetCats) plannedStreakTargets.add(catId);
+        plannedStop = activePlan.stop;
+      }
+      if (plannedStop?.reason === 'depth') {
+        log.warn(
+          {
             threadId,
-          );
-        }
+            triggerMessageId,
+            currentDepth: plannedStop.currentDepth,
+            catId: plannedStop.catId,
+          },
+          '[F122B] A2A callback: depth limit reached, skipping remaining targets',
+        );
+      } else if (plannedStop?.reason === 'pingpong' && streakEntry && streakCallerCatId) {
+        updateStreakOnPush(streakEntry, streakCallerCatId, plannedStop.catId, streakActivity);
+        log.info(
+          {
+            threadId,
+            triggerMessageId,
+            fromCatId,
+            catId: plannedStop.catId,
+            pairCount: plannedStop.pairCount,
+          },
+          'F167 L1: callback A2A (invocationQueue) ping-pong terminated (streak >= 4)',
+        );
+        deps.socketManager.broadcastAgentMessage(
+          {
+            type: 'system_info',
+            catId: fromCatId,
+            content: JSON.stringify({
+              type: 'a2a_pingpong_terminated',
+              fromCatId,
+              targetCatId: plannedStop.catId,
+              pairCount: plannedStop.pairCount,
+            }),
+            timestamp: Date.now(),
+          },
+          threadId,
+        );
       }
     }
 
@@ -380,7 +542,7 @@ export async function enqueueA2ATargets(
     // One persisted source message owns one canonical fan-out admission. Recovery
     // races for that same message must join the same process-local fence instead
     // of minting competing tokens for the idempotently deduped Queue carriers.
-    const queueCustodyAdmissionId = persistedQueueTrigger ? fanoutQueueCustodyAdmissionId(triggerMessageId) : undefined;
+    const queueCustodyAdmissionId = fanoutQueueCustodyAdmissionId(triggerMessageId);
     const stagedCustodyEntryIds = new Set<string>();
     const acceptedEntryByCatId = new Map<CatId, QueueEntry>();
     const restoredEntryByCatId = new Map<CatId, QueueEntry>();
@@ -494,7 +656,7 @@ export async function enqueueA2ATargets(
             ? deps.invocationQueue.getEntrySnapshot(threadId, inFlight.userId, inFlight.id)
             : null;
           // Not yet dispatched → merge content in place. The target sees both handoffs as one
-          // coherent message (parity with user-message collectUserBatch). No duplicate entry.
+          // coherent message. No duplicate entry.
           const merged =
             deps.invocationQueue.coalesceContentIntoQueuedAgent?.(
               threadId,
@@ -540,20 +702,18 @@ export async function enqueueA2ATargets(
           //
           // Solution: only do the full abort-resume sequence when tracker confirms registration.
           // Pre-start window → graceful degradation to sequential (follow-up runs after the
-          // current execution completes via onInvocationComplete → tryAutoExecute).
+          // current execution completes via onInvocationComplete → requestDrain).
           const trackerRegistered = deps.invocationTracker?.has(threadId, catId) ?? false;
           if (trackerRegistered) {
             // Safe to abort: tracker has the slot, controller exists.
             deps.invocationTracker!.cancelInvocation(threadId, [catId], inFlight.userId, 'preempted');
-            // Drop stale pause the aborted invocation's async cleanup will set (F39).
-            deps.queueProcessor?.clearPause?.(threadId, catId);
             // Force-free the per-slot mutex — the async .catch hasn't deleted it yet.
             deps.queueProcessor?.releaseSlot?.(threadId, catId);
             // Remove the superseded processing entry so it cannot re-run.
             deps.invocationQueue?.removeProcessed?.(threadId, inFlight.userId, inFlight.id);
             log.info(
               { threadId, triggerMessageId, catId, supersededEntry: inFlight.id },
-              '[F216-c3] supersede: aborted running handoff, follow-up will restart via tryAutoExecute',
+              '[F216-c3] supersede: aborted running handoff, follow-up will restart via requestDrain',
             );
           } else {
             // Pre-start window: tracker not yet registered (markProcessing → startAll gap).
@@ -567,7 +727,7 @@ export async function enqueueA2ATargets(
               '[F216-c3] supersede tombstone: entry removed for executeEntry guard (pre-start window)',
             );
           }
-          // Fall through to enqueue the follow-up as a queued entry; tryAutoExecute (called after
+          // Fall through to enqueue the follow-up as a queued entry; requestDrain (called after
           // enqueue at line ~284) sees the freed slot and auto-starts it.
         }
       }
@@ -606,17 +766,18 @@ export async function enqueueA2ATargets(
           ? fanoutQueueCarrierIdempotencyKey(triggerMessageId, catId)
           : undefined;
       const result = deps.invocationQueue.enqueue({
+        from: { kind: 'agent', catId: fromCatId },
         threadId,
         userId: opts.userId,
+        kind: 'message_wake',
         ownerAuthProvenance,
         content: opts.content,
-        source: 'agent',
+        messageId: triggerMessageId,
         sourceCategory: 'a2a',
         targetCats: [catId],
         intent: 'execute',
         autoExecute: true,
         queueCustodyAdmissionId,
-        callerCatId: fromCatId,
         a2aParentInvocationId: opts.parentInvocationId,
         callerTraceContext: ensureDispatchTraceContext(),
         a2aTriggerMessageId: triggerMessageId,
@@ -635,14 +796,9 @@ export async function enqueueA2ATargets(
           acceptedEntryByCatId.set(catId, result.entry);
           if (!result.deduped) newlyEnqueuedEntryIds.push(result.entry.id);
           if (queueCustodyAdmissionId) stagedCustodyEntryIds.add(result.entry.id);
-          deps.invocationQueue.backfillMessageId(threadId, opts.userId, result.entry.id, triggerMessageId);
         }
       }
     }
-    // Best-effort auto-ack mentions (same as worklist path).
-    // F-coalesce: ack covers BOTH enqueued AND coalesced targets — a coalesced mention WAS handled
-    // (merged into an existing queued entry), so its cursor must advance too, otherwise the
-    // merged-away mention lingers as a phantom pending backlog.
     const handled = [...enqueued, ...coalesced];
     if (persistedQueueTrigger && targetCats.length > 0) {
       const messageStore = deps.messageStore;
@@ -664,22 +820,55 @@ export async function enqueueA2ATargets(
         expectedCustody = isCrossThread
           ? createInitialCrossThreadQueuedMessageCustody(triggerMessageId, acceptedEntries, custodyOptions)
           : createInitialFanoutQueuedMessageCustody(triggerMessageId, acceptedEntries, custodyOptions);
-        initialized = await messageStore.initializeQueueCustody(triggerMessageId, expectedCustody);
+        initialized = await initializeQueueCustodyWithLifecycleRetry(messageStore, triggerMessageId, expectedCustody);
       } catch (error) {
         rollbackDurableAdmissions();
         throw error;
       }
-      if (initialized.kind === 'not_found' || initialized.kind === 'not_queued') {
+      if (
+        initialized.kind === 'not_found' ||
+        initialized.kind === 'not_queued' ||
+        initialized.kind === 'lifecycle_conflict'
+      ) {
         rollbackDurableAdmissions();
         throw new Error(`A2A fan-out Queue custody initialization failed: ${initialized.kind}`);
       }
+      const dispatchRefs = initialized.message.lifecycle?.dispatchRefs ?? [];
       if (
-        initialized.message.deliveryStatus !== 'queued' ||
         (initialized.message.queueCustody?.status === 'terminal' && expectedCustody.status !== 'terminal') ||
+        expectedCustody.allTargetCats.some((targetId) => !dispatchRefs.some((ref) => ref.targetId === targetId)) ||
         !sameFanoutCustodyIdentity(initialized.message.queueCustody, expectedCustody)
       ) {
         rollbackDurableAdmissions();
         throw new Error('A2A fan-out Queue custody identity mismatch');
+      }
+      if (expectedCustody.failedByCatIds.length > 0) {
+        const liveCustody = initialized.message.queueCustody;
+        if (!liveCustody) {
+          rollbackDurableAdmissions();
+          throw new Error('A2A rejected-target lifecycle settlement lost Queue custody');
+        }
+        const failedAt = Math.max(Date.now(), persistedQueueTrigger.timestamp);
+        const failure = await messageStore.commitLifecyclePreAdmissionFailure({
+          sourceMessageId: triggerMessageId,
+          expectedEntryId: expectedCustody.entryId,
+          expectedQueueCustodyRevision: liveCustody.revision,
+          requestedTargets: [...expectedCustody.allTargetCats],
+          failedTargets: [...expectedCustody.failedByCatIds],
+          reason: 'invalid_explicit_target',
+          content:
+            expectedCustody.failedByCatIds.length === expectedCustody.allTargetCats.length
+              ? '消息未能送达：指定的接收对象当前无效。'
+              : '消息未能送达：部分指定接收对象当前无效。',
+          failedAt,
+        });
+        if (failure.kind !== 'applied' && failure.kind !== 'replayed') {
+          rollbackDurableAdmissions();
+          const failureReason = 'reason' in failure ? failure.reason : 'missing';
+          throw new Error(`A2A rejected-target lifecycle settlement failed: ${failure.kind}:${failureReason}`);
+        }
+        emitLifecycleMessageUpdated(deps.socketManager, opts.userId, failure.inputMessage);
+        emitLifecycleMessageUpdated(deps.socketManager, opts.userId, failure.failureMessage);
       }
       if (
         queueCustodyAdmissionId &&
@@ -690,32 +879,6 @@ export async function enqueueA2ATargets(
       ) {
         rollbackDurableAdmissions();
         throw new Error('A2A fan-out Queue custody admission changed before commit');
-      }
-      if (isCrossThread) {
-        const queuedMessage = initialized.message;
-        const queueReceipt = queuedMessage.queueCustody ? projectQueueReceipt(queuedMessage.queueCustody) : undefined;
-        deps.socketManager.emitToUser(opts.userId, 'messages_queued', {
-          threadId,
-          messageIds: [queuedMessage.id],
-          messages: [
-            {
-              id: queuedMessage.id,
-              content: queuedMessage.content,
-              catId: queuedMessage.catId,
-              timestamp: queuedMessage.timestamp,
-              mentions: queuedMessage.mentions,
-              userId: queuedMessage.userId,
-              ...(queuedMessage.contentBlocks ? { contentBlocks: queuedMessage.contentBlocks } : {}),
-              extra: {
-                ...(queuedMessage.extra ?? {}),
-                ...(queueReceipt ? { queueReceipt } : {}),
-              },
-              ...(queuedMessage.origin ? { origin: queuedMessage.origin } : {}),
-              ...(queuedMessage.replyTo ? { replyTo: queuedMessage.replyTo } : {}),
-              ...(queuedMessage.mentionsUser ? { mentionsUser: true } : {}),
-            },
-          ],
-        });
       }
     }
     // Phase T: single-recipient queue acceptance is the machine-confirmed handoff boundary.
@@ -748,12 +911,6 @@ export async function enqueueA2ATargets(
         }
       }
     }
-    if (deliveryCursorStore && handled.length > 0) {
-      const ackTargets = handled.filter((catId) => opts.triggerMessage.mentions.includes(catId));
-      await Promise.allSettled(
-        ackTargets.map((catId) => deliveryCursorStore.ackMentionCursor(opts.userId, catId, threadId, ackCursor)),
-      );
-    }
     // queue_updated emits on BOTH a new entry (enqueued) AND a coalesce (云端 codex R4 P2).
     // A coalesce mutates entry.content in place — and the web client's QueueEntryRow renders
     // entry.content, replacing QueuePanel state from each queue_updated event. Without emitting on
@@ -785,404 +942,13 @@ export async function enqueueA2ATargets(
       },
       '[DIAG/a2a] enqueueA2ATargets queue scan',
     );
-    // Trigger auto-execute for entries whose target slot is free
-    await deps.queueProcessor?.tryAutoExecute?.(threadId);
+    await deps.queueProcessor.requestDrain(threadId);
     log.info(
       { threadId, triggerMessageId, enqueued, coalesced, targetCats },
       enqueued.length > 0
         ? '[F122B] A2A callback: enqueued to InvocationQueue'
         : '[F122B] A2A callback: no new InvocationQueue entries enqueued',
     );
-    return { enqueued, coalesced, fallback: false };
+    return { enqueued, coalesced };
   }
-
-  // Legacy path: F27 worklist + standalone fallback (when invocationQueue dep not wired)
-  // F27: Try to push to parent worklist first
-  if (hasWorklist(threadId)) {
-    // F167 Phase D: fail-closed callerActivity — callback has no tool_use stream,
-    // outputLength from content exempts long-form discussion.
-    const pushResult = pushToWorklist(threadId, targetCats, callerCatId, opts.parentInvocationId, triggerMessageId, {
-      hadSubstantiveToolCall: false,
-      outputLength: opts.content.length,
-    });
-    const enqueued = pushResult.added;
-    if (enqueued.length > 0) {
-      // F153 Phase I (Maine Coon round-2 P2): legacy worklist callback dispatch must also
-      // mint the mention_dispatch span + a2a.dispatch.count counter. Use the lazy helper for
-      // its side-effects; the returned trace context is unused here because route-serial
-      // (which consumes the worklist) doesn't accept a callerTraceContext at worklist-push
-      // time. Empty added / blocked branches still skip this (lazy = idempotent on first call).
-      ensureDispatchTraceContext();
-      if (deliveryCursorStore) {
-        // F27 + #77: Best-effort auto-ack to prevent surprise backlog when cats later
-        // call pending-mentions. This intentionally advances the mention-ack cursor
-        // using the current trigger message ID (cursor semantics, not a per-message receipt).
-        //
-        // Best-effort: ack failure should NOT fail /post-message, since the message has
-        // already been stored/broadcast; failing would cause retries/duplicates and amplify noise.
-        const ackTargets = enqueued.filter((catId) => opts.triggerMessage.mentions.includes(catId));
-        const results = await Promise.allSettled(
-          ackTargets.map((catId) => deliveryCursorStore.ackMentionCursor(opts.userId, catId, opts.threadId, ackCursor)),
-        );
-        const failed = results
-          .map((r, i) => ({ r, catId: ackTargets[i] }))
-          .filter((x): x is { r: PromiseRejectedResult; catId: CatId } => x.r.status === 'rejected');
-        if (failed.length > 0) {
-          log.warn(
-            {
-              threadId,
-              triggerMessageId,
-              failedAckCats: failed.map((f) => f.catId),
-            },
-            '[F27] A2A callback: mention auto-ack failed (best-effort)',
-          );
-        }
-      }
-      log.info(
-        {
-          threadId,
-          triggerMessageId,
-          enqueued,
-          targetCats,
-        },
-        '[F27] A2A callback: enqueued targets to parent worklist',
-      );
-      return { enqueued, fallback: false };
-    } else if (pushResult.reason === 'not_found') {
-      // F122 AC-A3: Race condition — worklist vanished between hasWorklist() and pushToWorklist().
-      // Fall through to standalone invocation path below.
-      log.warn(
-        { threadId, triggerMessageId, targetCats },
-        '[F27] A2A callback: worklist vanished between has/push, falling back to standalone',
-      );
-    } else {
-      if (pushResult.blockPingPong) {
-        // F167 L1 AC-A4: streak=4 — callback path must broadcast termination,
-        // parity with route-serial's inline block emit.
-        log.info(
-          { threadId, triggerMessageId, fromCatId, targetCats, pairCount: pushResult.pairCount },
-          'F167 L1: callback A2A ping-pong terminated (streak >= 4)',
-        );
-        deps.socketManager.broadcastAgentMessage(
-          {
-            type: 'system_info',
-            catId: fromCatId,
-            content: JSON.stringify({
-              type: 'a2a_pingpong_terminated',
-              fromCatId,
-              targetCatId: targetCats[0],
-              pairCount: pushResult.pairCount ?? 0,
-            }),
-            timestamp: Date.now(),
-          },
-          threadId,
-        );
-      } else {
-        log.info(
-          {
-            threadId,
-            triggerMessageId,
-            targetCats,
-            reason: pushResult.reason,
-          },
-          `[F27] A2A callback: targets not enqueued (${pushResult.reason})`,
-        );
-      }
-      return { enqueued, fallback: false };
-    }
-  }
-
-  // Fallback: no parent worklist — start standalone invocation.
-  // F108 slot-aware: tracker.start() only aborts same (threadId, catId) slot,
-  // so starting codex won't abort opus. Only skip targets already running.
-  const { invocationTracker } = deps;
-  if (invocationTracker?.has(threadId)) {
-    // Guard: shims may not implement getActiveSlots — fall back to empty (allow all)
-    const activeSlotIds = (invocationTracker.getActiveSlots?.(threadId) ?? []).map((s) =>
-      typeof s === 'string' ? s : s.catId,
-    );
-    const nonConflicting = targetCats.filter((catId) => !activeSlotIds.includes(catId));
-    if (nonConflicting.length === 0) {
-      log.info(
-        { threadId, targetCats, activeSlotIds },
-        '[F27] A2A fallback skipped: all targets already active in thread slots',
-      );
-      return { enqueued: [], fallback: true };
-    }
-    if (nonConflicting.length < targetCats.length) {
-      log.info(
-        { threadId, targetCats, activeSlotIds, nonConflicting },
-        '[F27] A2A fallback: filtered already-active targets, proceeding with remaining',
-      );
-    }
-    // Proceed with non-conflicting targets only
-    await triggerA2AInvocation(deps, {
-      ...opts,
-      targetCats: nonConflicting,
-      callerTraceContext: ensureDispatchTraceContext(),
-    });
-    return { enqueued: nonConflicting, fallback: true };
-  }
-
-  // Create standalone invocation like the old triggerA2AInvocation
-  log.warn(
-    {
-      threadId,
-      targetCats,
-    },
-    '[F27] A2A callback: no parent worklist found, falling back to standalone invocation',
-  );
-
-  // F167 PR1 history note: originally this path filtered role-gated targets before
-  // fallback; Phase E retires L3, so targetCats == opts.targetCats now. Kept the
-  // explicit spread for intent clarity and future filter hooks.
-  await triggerA2AInvocation(deps, { ...opts, targetCats, callerTraceContext: ensureDispatchTraceContext() });
-  return { enqueued: targetCats, fallback: true };
-}
-
-/**
- * Legacy standalone invocation (fallback + backward compat).
- * Kept for edge cases where callback fires outside a routeSerial context.
- */
-export async function triggerA2AInvocation(
-  deps: A2ATriggerDeps,
-  opts: {
-    targetCats: CatId[];
-    content: string;
-    userId: string;
-    ownerAuthProvenance: OwnerAuthProvenance;
-    threadId: string;
-    triggerMessage: StoredMessage;
-    callerCatId?: CatId;
-    /** F153: caller trace context for cross-route A2A propagation */
-    callerTraceContext?: CallerTraceContext;
-  },
-): Promise<void> {
-  const { router, invocationRecordStore, socketManager, invocationTracker, log } = deps;
-  const { targetCats, content, userId, threadId, triggerMessage } = opts;
-  const ownerAuthProvenance = normalizeOwnerAuthProvenance(opts.ownerAuthProvenance);
-  const fromCatId = opts.callerCatId ?? triggerMessage.catId ?? getDefaultCatId();
-  const statusCatId = targetCats[0] ?? getDefaultCatId();
-  const intent = parseIntent(content, targetCats.length);
-
-  // F108 slot-aware: tracker.start(threadId, catId) only aborts the SAME slot,
-  // so starting a different cat won't abort the parent. Only skip if all targets
-  // are already covered by active slots (redundancy short-circuit).
-  const parentActive = invocationTracker?.has(threadId) ?? false;
-  if (parentActive) {
-    const activeCats = (invocationTracker?.getActiveSlots?.(threadId) ?? []).map((s) =>
-      typeof s === 'string' ? s : s.catId,
-    );
-    // Redundant A2A short-circuit (砚砚 4ee660b defense-in-depth):
-    // if parent already includes all targets, skip entirely.
-    if (targetCats.length > 0 && targetCats.every((catId) => activeCats.includes(catId))) {
-      log.info(
-        {
-          threadId,
-          targetCats,
-          activeCats,
-          triggerMessageId: triggerMessage.id,
-        },
-        '[callbacks] A2A skipped: target already covered by active parent invocation',
-      );
-      return;
-    }
-    // Targets differ from active slots — safe to proceed because
-    // tracker.start() is slot-aware and won't abort other cats' slots.
-    log.info(
-      {
-        threadId,
-        targetCats,
-        activeCats,
-        triggerMessageId: triggerMessage.id,
-      },
-      '[F27] A2A standalone: parent active in different slots, safe to start new targets',
-    );
-  }
-
-  const createResult = await invocationRecordStore.create({
-    threadId,
-    userId,
-    targetCats,
-    intent: intent.intent,
-    idempotencyKey: triggerMessage.id,
-    actionLeaseCarrier: { kind: 'none' },
-  });
-
-  if (createResult.outcome === 'duplicate') return;
-
-  // Safe: no active parent invocation, so tracker.start() won't abort anything unexpected.
-  const controller = invocationTracker?.start(threadId, statusCatId, userId, targetCats, createResult.invocationId);
-  if (controller?.signal.aborted) {
-    invocationTracker?.complete(threadId, statusCatId, controller);
-    await invocationRecordStore.update(createResult.invocationId, {
-      status: 'canceled',
-    });
-    return;
-  }
-
-  await invocationRecordStore.update(createResult.invocationId, {
-    userMessageId: triggerMessage.id,
-  });
-
-  const { queueProcessor } = deps;
-
-  // Background execution — fire and forget
-  void (async () => {
-    let finalStatus: 'succeeded' | 'failed' | 'canceled' = 'failed';
-    const terminalDispositions = new PerCatTerminalDispositionCollector({
-      targetCatIds: targetCats,
-      isCanceled: (catId) => invocationTracker?.getSlotState?.(threadId, catId) === 'canceled',
-    });
-    try {
-      await invocationRecordStore.update(createResult.invocationId, {
-        status: 'running',
-      });
-
-      // #768: Defer intent_mode broadcast until CLI produces first event.
-      let intentModeBroadcast = false;
-
-      // F070: track governance block errorCode for recoverable failure marking
-      let governanceErrorCode: string | undefined;
-
-      for await (const msg of router.routeExecution(userId, content, threadId, triggerMessage.id, targetCats, intent, {
-        ownerAuthProvenance,
-        humanDispositionInvocationOrigin: 'a2a',
-        turnCustodyWakeForCat: (catId) =>
-          buildA2ADispatchTurnCustodyWake({
-            threadId,
-            targetCatId: catId,
-            messageId: triggerMessage.id,
-            fromCatId,
-          }),
-        ...(controller?.signal ? { signal: controller.signal } : {}),
-        ...createA2ASlotTrackingBridge(
-          invocationTracker,
-          controller ?? new AbortController(),
-          createResult.invocationId,
-        ),
-        ...(deps.invocationQueue
-          ? {
-              deferA2AEnqueue: (entry: Parameters<InvocationQueue['enqueue']>[0]) =>
-                deps.invocationQueue?.enqueue({ ...entry, ownerAuthProvenance }),
-            }
-          : {}),
-        parentInvocationId: createResult.invocationId,
-        onPromptMessagesExposed: (input) => queueProcessor?.markPromptMessagesSeen?.(input) ?? Promise.resolve(),
-        callerTraceContext: opts.callerTraceContext,
-        a2aTriggerMessageId: triggerMessage.id,
-        // F222 P1: A2A direct execution is not user-origin — suppress frustration detection
-        frustrationAutoIssueEligible: false,
-      })) {
-        // #768: Broadcast intent_mode on first CLI event — proves CLI is alive.
-        if (!intentModeBroadcast) {
-          socketManager.broadcastToRoom(`thread:${threadId}`, 'intent_mode', {
-            threadId,
-            mode: intent.intent,
-            targetCats,
-            invocationId: createResult.invocationId,
-          });
-          intentModeBroadcast = true;
-        }
-        if (controller?.signal.aborted) break;
-        terminalDispositions.observe(msg);
-        if (isTerminalDispositionEvent(msg) && msg.catId) {
-          invocationTracker?.completeSlot?.(threadId, msg.catId, controller);
-        }
-        if (msg.type === 'done' && msg.errorCode) {
-          governanceErrorCode = msg.errorCode;
-        }
-        // F194 Phase Z9 (砚砚 R1 P1-2): unified visible turn stamp via helper.
-        socketManager.broadcastAgentMessage(
-          { ...msg, ...stampVisibleTurn(createResult.invocationId, msg.invocationId) },
-          threadId,
-        );
-      }
-
-      if (controller?.signal.aborted) {
-        finalStatus = 'canceled';
-        await invocationRecordStore.update(createResult.invocationId, {
-          status: 'canceled',
-        });
-      } else if (governanceErrorCode) {
-        // F070: Governance gate blocked — mark as failed with errorCode for retry
-        finalStatus = 'failed';
-        await invocationRecordStore.update(createResult.invocationId, {
-          status: 'failed',
-          error: governanceErrorCode,
-        });
-      } else {
-        const successfulCatIds = terminalDispositions.getSuccessfulCatIds() as CatId[];
-        if (successfulCatIds.length === 0) {
-          finalStatus = 'failed';
-          await invocationRecordStore.update(createResult.invocationId, {
-            status: 'failed',
-            error:
-              terminalDispositions.getPrimaryTerminalError() ?? 'all targeted cats completed without a success witness',
-          });
-        } else {
-          await requireInvocationRecordUpdate({
-            store: invocationRecordStore,
-            invocationId: createResult.invocationId,
-            update: {
-              status: 'succeeded',
-              successfulCatIds,
-            },
-            writer: 'standalone A2A callback',
-          });
-          finalStatus = 'succeeded';
-        }
-      }
-    } catch (err) {
-      if (controller?.signal.aborted) {
-        finalStatus = 'canceled';
-        await invocationRecordStore.update(createResult.invocationId, {
-          status: 'canceled',
-        });
-      } else {
-        log.error(`[callbacks] Standalone A2A invocation failed: ${String(err)}`);
-        try {
-          await invocationRecordStore.update(createResult.invocationId, {
-            status: 'failed',
-            ...(err instanceof Error ? { error: err.message } : {}),
-          });
-        } catch {
-          /* best-effort */
-        }
-        socketManager.broadcastAgentMessage(
-          {
-            type: 'error',
-            catId: statusCatId,
-            error: err instanceof Error ? err.message : String(err),
-            timestamp: Date.now(),
-          },
-          threadId,
-        );
-        socketManager.broadcastAgentMessage(
-          {
-            type: 'done',
-            catId: statusCatId,
-            isFinal: true,
-            timestamp: Date.now(),
-          },
-          threadId,
-        );
-      }
-    } finally {
-      if (controller) {
-        invocationTracker?.complete(threadId, statusCatId, controller);
-      }
-      queueProcessor
-        ?.onInvocationComplete(
-          threadId,
-          statusCatId,
-          finalStatus,
-          createResult.invocationId,
-          finalStatus === 'succeeded' ? terminalDispositions.getSuccessfulCatIds() : [],
-        )
-        .catch(() => {
-          /* best-effort */
-        });
-    }
-  })();
 }

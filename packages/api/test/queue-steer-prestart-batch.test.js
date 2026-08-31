@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { afterEach, describe, it, mock } from 'node:test';
 import Fastify from 'fastify';
+import { canonicalTestQueueInput } from './helpers/message-from-fixtures.js';
 
 const { InvocationQueue } = await import('../dist/domains/cats/services/agents/invocation/InvocationQueue.js');
 const { InvocationTracker } = await import('../dist/domains/cats/services/agents/invocation/InvocationTracker.js');
@@ -20,16 +21,19 @@ function asyncGate() {
 }
 
 function enqueue(queue, content, messageId) {
-  const result = queue.enqueue({
-    threadId: 't1',
-    userId: 'user-a',
-    content,
-    source: 'user',
-    ownerAuthProvenance: 'strict',
-    targetCats: ['opus'],
-    intent: 'execute',
-    messageId,
-  });
+  const result = queue.enqueue(
+    canonicalTestQueueInput({
+      kind: 'conversation_input',
+      threadId: 't1',
+      userId: 'user-a',
+      content,
+      source: 'user',
+      ownerAuthProvenance: 'strict',
+      targetCats: ['opus'],
+      intent: 'execute',
+      messageId,
+    }),
+  );
   assert.equal(result.outcome, 'enqueued');
   return result.entry;
 }
@@ -342,15 +346,18 @@ describe('Steer trackerless exact-batch preemption', () => {
       },
       log: { info: mock.fn(), warn: mock.fn(), error: mock.fn() },
     });
-    const enqueued = queue.enqueue({
-      threadId: 't1',
-      userId: 'user-a',
-      content: 'multi-target',
-      source: 'user',
-      ownerAuthProvenance: 'strict',
-      targetCats: ['codex', 'opus'],
-      intent: 'execute',
-    });
+    const enqueued = queue.enqueue(
+      canonicalTestQueueInput({
+        kind: 'conversation_input',
+        threadId: 't1',
+        userId: 'user-a',
+        content: 'multi-target',
+        source: 'user',
+        ownerAuthProvenance: 'strict',
+        targetCats: ['codex', 'opus'],
+        intent: 'execute',
+      }),
+    );
     assert.equal(enqueued.outcome, 'enqueued');
     assert.equal(queue.markProcessingById('t1', enqueued.entry.id), true);
     processor.reserveProcessingSlot(JSON.stringify(['t1', 'opus']), enqueued.entry.id, 'user-a');

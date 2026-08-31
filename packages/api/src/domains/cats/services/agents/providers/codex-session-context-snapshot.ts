@@ -43,7 +43,15 @@ export interface CodexSessionContextSnapshot {
   totalOutputTokens?: number;
 }
 
-export type CodexSessionContextSnapshotResolver = (sessionId: string) => Promise<CodexSessionContextSnapshot | null>;
+export interface CodexSessionContextSnapshotRequestOptions {
+  /** Invocation-owned Codex sessions directory (for example an API-key isolated HOME). */
+  sessionsRoot?: string;
+}
+
+export type CodexSessionContextSnapshotResolver = (
+  sessionId: string,
+  options?: CodexSessionContextSnapshotRequestOptions,
+) => Promise<CodexSessionContextSnapshot | null>;
 
 interface CandidateSnapshot {
   snapshot: CodexSessionContextSnapshot;
@@ -128,16 +136,21 @@ interface ResolverOptions {
 export function createCodexSessionContextSnapshotResolver(
   options?: ResolverOptions,
 ): CodexSessionContextSnapshotResolver {
-  const sessionsRoot = options?.sessionsRoot ?? join(process.env.CODEX_HOME ?? join(homedir(), '.codex'), 'sessions');
+  const defaultSessionsRoot =
+    options?.sessionsRoot ?? join(process.env.CODEX_HOME ?? join(homedir(), '.codex'), 'sessions');
   const tailBytes = options?.tailBytes ?? DEFAULT_TAIL_BYTES;
   const maxCacheEntries = Math.max(1, options?.maxCacheEntries ?? DEFAULT_FILE_CACHE_MAX);
   const fileCache = options?.fileCache ?? new Map<string, string>();
 
-  function upsertCache(sessionId: string, filePath: string): void {
-    if (fileCache.has(sessionId)) {
-      fileCache.delete(sessionId);
+  function cacheKey(sessionId: string, sessionsRoot: string): string {
+    return sessionsRoot === defaultSessionsRoot ? sessionId : `${sessionsRoot}\u0000${sessionId}`;
+  }
+
+  function upsertCache(key: string, filePath: string): void {
+    if (fileCache.has(key)) {
+      fileCache.delete(key);
     }
-    fileCache.set(sessionId, filePath);
+    fileCache.set(key, filePath);
     while (fileCache.size > maxCacheEntries) {
       const oldestKey = fileCache.keys().next().value;
       if (!oldestKey) break;
@@ -145,15 +158,16 @@ export function createCodexSessionContextSnapshotResolver(
     }
   }
 
-  async function findSessionFile(sessionId: string): Promise<string | null> {
-    const cached = fileCache.get(sessionId);
+  async function findSessionFile(sessionId: string, sessionsRoot: string): Promise<string | null> {
+    const key = cacheKey(sessionId, sessionsRoot);
+    const cached = fileCache.get(key);
     if (cached) {
       try {
         await fs.access(cached);
-        upsertCache(sessionId, cached);
+        upsertCache(key, cached);
         return cached;
       } catch {
-        fileCache.delete(sessionId);
+        fileCache.delete(key);
       }
     }
 
@@ -176,7 +190,7 @@ export function createCodexSessionContextSnapshotResolver(
           continue;
         }
         if (entry.isFile() && entry.name.endsWith('.jsonl') && entry.name.includes(sessionId)) {
-          upsertCache(sessionId, abs);
+          upsertCache(key, abs);
           return abs;
         }
       }
@@ -185,10 +199,14 @@ export function createCodexSessionContextSnapshotResolver(
     return null;
   }
 
-  return async (sessionId: string): Promise<CodexSessionContextSnapshot | null> => {
+  return async (
+    sessionId: string,
+    requestOptions?: CodexSessionContextSnapshotRequestOptions,
+  ): Promise<CodexSessionContextSnapshot | null> => {
     if (!sessionId) return null;
 
-    const file = await findSessionFile(sessionId);
+    const sessionsRoot = requestOptions?.sessionsRoot ?? defaultSessionsRoot;
+    const file = await findSessionFile(sessionId, sessionsRoot);
     if (!file) return null;
 
     const tail = await readTailUtf8(file, tailBytes);

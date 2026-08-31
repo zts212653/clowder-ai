@@ -167,7 +167,7 @@ describe(
         dispatchProposalStore: proposalStore,
         invocationRecordStore,
         router: createRouter(),
-        queueProcessor: { async tryAutoExecute() {} },
+        queueProcessor: { async requestDrain() {} },
         socketManager: {
           broadcastAgentMessage(...args) {
             broadcasts.push(args);

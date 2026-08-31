@@ -39,7 +39,25 @@ function sourceMessage(
   };
 }
 
-const seen = { catId: 'codex', state: 'seen' as const, invocationId: 'child-1', seenAt: 100 };
+const seen = {
+  catId: 'codex',
+  state: 'seen' as const,
+  invocationId: 'child-1',
+  seenAt: 100,
+  attempts: [
+    {
+      id: 'entry-1:codex:1',
+      targetCatId: 'codex',
+      sequence: 1,
+      state: 'appended' as const,
+      createdAt: 90,
+      updatedAt: 110,
+      invocationId: 'child-1',
+      seenAt: 100,
+      activeAppendAcceptedAt: 110,
+    },
+  ],
+};
 
 describe('F264 AC-42/43 exact-child turn absorption projection', () => {
   it('keeps the four truths distinct and satisfies the exact denominator equation', () => {
@@ -163,6 +181,35 @@ describe('F264 AC-42/43 exact-child turn absorption projection', () => {
     expect(projectTurnAbsorptionSummary(messages, 'child-1')).toBeNull();
   });
 
+  it('does not call same-invocation batch exposure an active append', () => {
+    const batchOnly = sourceMessage('m-batch', {
+      catId: 'opus',
+      state: 'handled',
+      invocationId: 'child-1',
+      seenAt: 100,
+      attempts: [
+        {
+          id: 'entry-batch:opus:1',
+          targetCatId: 'opus',
+          sequence: 1,
+          state: 'handled',
+          createdAt: 90,
+          updatedAt: 120,
+          invocationId: 'child-1',
+          seenAt: 100,
+        },
+      ],
+      outcome: {
+        invocationId: 'child-1',
+        disposition: 'completed_with_turn',
+        evidenceRef: { kind: 'invocation_lineage', invocationId: 'child-1' },
+        handledAt: 120,
+      },
+    });
+
+    expect(projectTurnAbsorptionSummary([batchOnly], 'child-1')).toBeNull();
+  });
+
   it('dedupes by source message, stays target-local, and expands at N <= 3', () => {
     const message = sourceMessage('m1', {
       ...seen,
@@ -193,8 +240,8 @@ describe('F264 AC-42/43 exact-child turn absorption projection', () => {
     expect(projection?.counts.total).toBe(1);
     expect(projection?.counts.responded).toBe(1);
     expect(projection?.defaultExpanded).toBe(true);
-    expect(projection?.items[0]?.bodyProjectedHere).toBe(true);
-    expect(shouldFoldSourceIntoTurnSummary(message, 'child-1')).toBe(true);
+    expect(projection?.items[0]?.bodyProjectedHere).toBe(false);
+    expect(shouldFoldSourceIntoTurnSummary(message, 'child-1')).toBe(false);
     expect(shouldFoldSourceIntoTurnSummary(message, 'child-2')).toBe(false);
     expect(shouldFoldSourceIntoTurnSummary(message, 'unknown-child')).toBe(false);
   });
@@ -209,7 +256,7 @@ describe('F264 AC-42/43 exact-child turn absorption projection', () => {
     ).toBe(false);
   });
 
-  it('moves a source body only after every target is terminal and chooses one canonical footer', () => {
+  it('never moves an authored source body even after every target is terminal', () => {
     const message = sourceMessage('m1', {
       ...seen,
       state: 'handled',
@@ -234,7 +281,7 @@ describe('F264 AC-42/43 exact-child turn absorption projection', () => {
     if (!secondTarget) throw new Error('fixture requires the second target');
     secondTarget.state = 'withdrawn';
     secondTarget.withdrawnAt = 240;
-    expect(shouldFoldSourceBody(message)).toBe(true);
-    expect(foldedSourceInvocationId(message)).toBe('child-1');
+    expect(shouldFoldSourceBody(message)).toBe(false);
+    expect(foldedSourceInvocationId(message)).toBeUndefined();
   });
 });

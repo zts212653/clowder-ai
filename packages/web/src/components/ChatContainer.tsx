@@ -1304,13 +1304,21 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
               <ChatInput
                 key={threadId}
                 threadId={threadId}
-                onSend={(content, images, whisper, deliveryMode, replyToId, messageDisposition, contextAttachments) =>
+                onSend={(
+                  content,
+                  images,
+                  whisper,
+                  postAdmissionAction,
+                  replyToId,
+                  messageDisposition,
+                  contextAttachments,
+                ) =>
                   handleSend(
                     content,
                     images,
                     undefined,
                     whisper,
-                    deliveryMode,
+                    postAdmissionAction,
                     replyToId,
                     messageDisposition,
                     contextAttachments,

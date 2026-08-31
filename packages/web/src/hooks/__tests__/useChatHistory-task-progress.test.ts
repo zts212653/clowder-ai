@@ -55,7 +55,6 @@ describe('useChatHistory task-progress hydration', () => {
       threads: [],
       isLoadingThreads: false,
       queue: [],
-      queuePaused: false,
     });
   });
 

@@ -1,6 +1,7 @@
 import type { Redis } from 'ioredis';
 import type { IMessageStore } from '../../../domains/cats/services/stores/ports/MessageStore.js';
 import type { IThreadStore } from '../../../domains/cats/services/stores/ports/ThreadStore.js';
+import type { GuardRejectionEventLog } from '../GuardRejectionEventLog.js';
 
 /**
  * F192 OQ-21 — Shared types for manual eval trigger handlers.
@@ -12,11 +13,10 @@ import type { IThreadStore } from '../../../domains/cats/services/stores/ports/T
 
 /**
  * Matches the `TriggerOutcome` return type of `ConnectorInvokeTrigger.trigger()`:
- *  - `'dispatched'` — durable execution-start receipt exists; remaining work continues in background
- *  - `'enqueued'`  — thread busy, queued; processor will pick up when slot frees
+ *  - `'enqueued'`  — durable Queue custody exists; QueueProcessor owns execution
  *  - `'full'`      — thread queue at capacity, **invocation dropped, not retried**
  */
-export type InvokeTriggerOutcome = 'dispatched' | 'enqueued' | 'full';
+export type InvokeTriggerOutcome = 'enqueued' | 'full';
 
 export interface InvokeTriggerLike {
   trigger(
@@ -50,6 +50,9 @@ export interface ManualTriggerDeps {
    * legacy default (all known-wireable domains get publish instructions).
    */
   wiredPublishDomains?: ReadonlySet<string>;
+  guardRejectionLog?: GuardRejectionEventLog;
+  semanticSweepCoordinator?: import('../trace-annotation/SemanticSweepCoordinator.js').SemanticSweepCoordinator;
+  unitSemanticEvaluationCoordinator?: import('../evaluation/UnitSemanticEvaluationCoordinator.js').UnitSemanticEvaluationCoordinator;
 }
 
 export interface HandlerError {

@@ -41,7 +41,18 @@ describe('F128 parallel reporter handle resolution', () => {
     const invocationQueue = new InvocationQueue();
     const router = {
       async resolveTargetsAndIntent() {
-        return { targetCats: ['kimi', 'gemini', 'codex'], intent: { intent: 'ideate' }, hasMentions: true };
+        return {
+          attemptBatch: {
+            parserMode: 'user',
+            spanBasis: 'lowercased_message',
+            attempts: [],
+            truncated: false,
+            metricEligible: true,
+          },
+          targetCats: ['kimi', 'gemini', 'codex'],
+          intent: { intent: 'ideate' },
+          hasMentions: true,
+        };
       },
     };
     const queueProcessor = {
@@ -97,7 +108,18 @@ describe('F128 parallel reporter handle resolution', () => {
     const router = {
       async resolveTargetsAndIntent() {
         // Router resolves Chinese alias `@砚砚` → catId `codex` per cat-template.json.
-        return { targetCats: ['codex', 'opus'], intent: { intent: 'ideate' }, hasMentions: true };
+        return {
+          attemptBatch: {
+            parserMode: 'user',
+            spanBasis: 'lowercased_message',
+            attempts: [],
+            truncated: false,
+            metricEligible: true,
+          },
+          targetCats: ['codex', 'opus'],
+          intent: { intent: 'ideate' },
+          hasMentions: true,
+        };
       },
     };
     const queueProcessor = {
@@ -146,7 +168,18 @@ describe('F128 parallel reporter handle resolution', () => {
     const invocationQueue = new InvocationQueue();
     const router = {
       async resolveTargetsAndIntent() {
-        return { targetCats: ['gpt-5.2', 'gpt-5.4'], intent: { intent: 'ideate' }, hasMentions: true };
+        return {
+          attemptBatch: {
+            parserMode: 'user',
+            spanBasis: 'lowercased_message',
+            attempts: [],
+            truncated: false,
+            metricEligible: true,
+          },
+          targetCats: ['gpt-5.2', 'gpt-5.4'],
+          intent: { intent: 'ideate' },
+          hasMentions: true,
+        };
       },
     };
     const queueProcessor = {

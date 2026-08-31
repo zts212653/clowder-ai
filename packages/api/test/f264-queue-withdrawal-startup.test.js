@@ -5,19 +5,23 @@ import { InvocationQueue } from '../dist/domains/cats/services/agents/invocation
 import { createInitialQueuedMessageCustody } from '../dist/domains/cats/services/agents/invocation/QueuedMessageCustodyCoordinator.js';
 import { QueuedMessageCustodyStartupReconciler } from '../dist/domains/cats/services/agents/invocation/QueuedMessageCustodyStartupReconciler.js';
 import { MessageStore } from '../dist/domains/cats/services/stores/ports/MessageStore.js';
+import { canonicalTestMessageInput, canonicalTestQueueInput } from './helpers/message-from-fixtures.js';
 
 describe('F264 withdrawn Queue custody startup recovery', () => {
   test('keeps terminal withdrawn author history queued without restoring actionable work', async () => {
     const queue = new InvocationQueue();
-    const admitted = queue.enqueue({
-      threadId: 'thread-1',
-      userId: 'user-1',
-      content: 'keep this in my timeline',
-      source: 'user',
-      targetCats: ['opus'],
-      intent: 'execute',
-      ownerAuthProvenance: 'strict',
-    });
+    const admitted = queue.enqueue(
+      canonicalTestQueueInput({
+        kind: 'conversation_input',
+        threadId: 'thread-1',
+        userId: 'user-1',
+        content: 'keep this in my timeline',
+        source: 'user',
+        targetCats: ['opus'],
+        intent: 'execute',
+        ownerAuthProvenance: 'strict',
+      }),
+    );
     assert.equal(admitted.outcome, 'enqueued');
     const custody = {
       ...createInitialQueuedMessageCustody(admitted.entry),
@@ -29,16 +33,19 @@ describe('F264 withdrawn Queue custody startup recovery', () => {
       updatedAt: admitted.entry.createdAt + 100,
     };
     const store = new MessageStore();
-    const message = store.append({
-      threadId: admitted.entry.threadId,
-      userId: admitted.entry.userId,
-      catId: null,
-      content: admitted.entry.content,
-      mentions: admitted.entry.targetCats,
-      timestamp: admitted.entry.createdAt,
-      deliveryStatus: 'queued',
-      queueCustody: custody,
-    });
+    const message = store.append(
+      canonicalTestMessageInput({
+        provenance: { author: 'user', routed: false, observation: 'original' },
+        threadId: admitted.entry.threadId,
+        userId: admitted.entry.userId,
+        catId: null,
+        content: admitted.entry.content,
+        mentions: admitted.entry.targetCats,
+        timestamp: admitted.entry.createdAt,
+        deliveryStatus: 'queued',
+        queueCustody: custody,
+      }),
+    );
     store.scanByDeliveryStatus = async (status) => (status === 'queued' ? [message.id] : []);
     const recoveredQueue = new InvocationQueue();
     const reconciler = new QueuedMessageCustodyStartupReconciler({

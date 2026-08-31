@@ -275,10 +275,12 @@ export function isAccessibleSourceRecord(
 ): message is StoredMessage {
   const ownerAuthored =
     message?.userId === auth.userId &&
-    message.userId !== 'system' &&
-    message.userId !== 'scheduler' &&
-    message.catId !== 'system' &&
-    message.source === undefined &&
+    (message.from
+      ? message.from.kind !== 'system' && message.from.kind !== 'external'
+      : message.userId !== 'system' &&
+        message.userId !== 'scheduler' &&
+        message.catId !== 'system' &&
+        message.source === undefined) &&
     message.origin !== 'briefing';
   const managedHoldConnector = message ? isOwnerVisibleManagedHoldConnector(message, auth.userId) : false;
   return Boolean(

@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { after, before, beforeEach, describe, test } from 'node:test';
+import { canonicalTestMessageInput } from './helpers/message-from-fixtures.js';
 import { makeQueuedMessageCustody as makeCustody } from './helpers/queued-message-custody.js';
 import {
   assertRedisIsolationOrThrow,
@@ -8,6 +9,17 @@ import {
 } from './helpers/redis-test-helpers.js';
 
 const REDIS_URL = process.env.REDIS_URL;
+
+function withProvenance(input) {
+  return {
+    provenance: {
+      author: input.catId ? 'cat' : input.source ? 'external_user' : 'user',
+      routed: false,
+      observation: 'original',
+    },
+    ...input,
+  };
+}
 
 describe('F254 queued message custody Redis CAS', { skip: redisIsolationSkipReason(REDIS_URL) }, () => {
   let redis;
@@ -43,6 +55,8 @@ describe('F254 queued message custody Redis CAS', { skip: redisIsolationSkipReas
       await redis.ping();
       connected = true;
       store = new RedisMessageStore(redis);
+      const appendWithoutFixture = store.append.bind(store);
+      store.append = (input) => appendWithoutFixture(withProvenance(input));
       invocationStore = new RedisInvocationRecordStore(redis);
     } catch {
       await redis.quit().catch(() => {});
@@ -61,16 +75,18 @@ describe('F254 queued message custody Redis CAS', { skip: redisIsolationSkipReas
   });
 
   test('round-trips TTL-0 custody and lets only one concurrent revision win', async () => {
-    const message = await store.append({
-      userId: 'user-1',
-      catId: null,
-      content: 'redis queued work',
-      mentions: ['opus', 'codex'],
-      timestamp: 1_000,
-      threadId: 'thread-redis',
-      deliveryStatus: 'queued',
-      queueCustody: makeCustody(),
-    });
+    const message = await store.append(
+      canonicalTestMessageInput({
+        userId: 'user-1',
+        catId: null,
+        content: 'redis queued work',
+        mentions: ['opus', 'codex'],
+        timestamp: 1_000,
+        threadId: 'thread-redis',
+        deliveryStatus: 'queued',
+        queueCustody: makeCustody(),
+      }),
+    );
 
     assert.deepEqual((await store.getById(message.id)).queueCustody, makeCustody());
     assert.equal(await redis.ttl(`msg:${message.id}`), -1);
@@ -88,15 +104,17 @@ describe('F254 queued message custody Redis CAS', { skip: redisIsolationSkipReas
   });
 
   test('durably fences fan-out admission before custody and replaces the intent atomically', async () => {
-    const message = await store.append({
-      userId: 'user-1',
-      catId: 'opus',
-      content: 'redis pre-CAS fan-out',
-      mentions: ['codex', 'codex-terra'],
-      timestamp: 1_000,
-      threadId: 'thread-fanout-admission',
-      deliveryStatus: 'queued',
-    });
+    const message = await store.append(
+      canonicalTestMessageInput({
+        userId: 'user-1',
+        catId: 'opus',
+        content: 'redis pre-CAS fan-out',
+        mentions: ['codex', 'codex-terra'],
+        timestamp: 1_000,
+        threadId: 'thread-fanout-admission',
+        deliveryStatus: 'queued',
+      }),
+    );
     const admission = {
       version: 1,
       admissionId: `queue-custody:${message.id}`,
@@ -149,15 +167,17 @@ describe('F254 queued message custody Redis CAS', { skip: redisIsolationSkipReas
     assert.deepEqual(stored.queueCustody.allTargetCats, ['codex', 'codex-terra']);
     assert.equal(await redis.hget(`msg:${message.id}`, 'queueCustodyAdmission'), null);
 
-    const canceled = await store.append({
-      userId: 'user-1',
-      catId: 'opus',
-      content: 'cancel redis pre-CAS fan-out',
-      mentions: ['codex'],
-      timestamp: 1_002,
-      threadId: 'thread-fanout-admission',
-      deliveryStatus: 'queued',
-    });
+    const canceled = await store.append(
+      canonicalTestMessageInput({
+        userId: 'user-1',
+        catId: 'opus',
+        content: 'cancel redis pre-CAS fan-out',
+        mentions: ['codex'],
+        timestamp: 1_002,
+        threadId: 'thread-fanout-admission',
+        deliveryStatus: 'queued',
+      }),
+    );
     assert.equal(
       (
         await store.initializeQueueCustodyAdmission(canceled.id, {
@@ -174,34 +194,36 @@ describe('F254 queued message custody Redis CAS', { skip: redisIsolationSkipReas
   });
 
   test('round-trips an action-successor carrier rebind and refuses generation rewind', async () => {
-    const message = await store.append({
-      userId: 'user-1',
-      catId: 'opus',
-      content: 'redis action carrier',
-      mentions: ['codex'],
-      timestamp: 1_000,
-      threadId: 'thread-action-carrier-redis',
-      deliveryStatus: 'queued',
-      queueCustody: makeCustody({
-        entryId: 'cross-thread:action-redis',
-        ownerUserId: 'user-1',
-        receiptScope: 'cross_thread_delivery',
-        allTargetCats: ['codex'],
-        pendingTargetCats: ['codex'],
-        carrierByTargetCatId: {
-          codex: {
-            entryId: 'carrier-action-codex',
-            source: 'agent',
-            sourceCategory: 'a2a',
-            callerCatId: 'opus',
-            a2aTriggerMessageId: 'source-action-redis',
-            autoExecute: true,
-            createdAt: 1_000,
+    const message = await store.append(
+      canonicalTestMessageInput({
+        userId: 'user-1',
+        catId: 'opus',
+        content: 'redis action carrier',
+        mentions: ['codex'],
+        timestamp: 1_000,
+        threadId: 'thread-action-carrier-redis',
+        deliveryStatus: 'queued',
+        queueCustody: makeCustody({
+          entryId: 'cross-thread:action-redis',
+          ownerUserId: 'user-1',
+          receiptScope: 'cross_thread_delivery',
+          allTargetCats: ['codex'],
+          pendingTargetCats: ['codex'],
+          carrierByTargetCatId: {
+            codex: {
+              entryId: 'carrier-action-codex',
+              source: 'agent',
+              sourceCategory: 'a2a',
+              callerCatId: 'opus',
+              a2aTriggerMessageId: 'source-action-redis',
+              autoExecute: true,
+              createdAt: 1_000,
+            },
           },
-        },
-        carrierStateByTargetCatId: { codex: { status: 'queued' } },
+          carrierStateByTargetCatId: { codex: { status: 'queued' } },
+        }),
       }),
-    });
+    );
     const fence = {
       leaseId: 'lease-action-redis',
       generation: 7,
@@ -245,14 +267,16 @@ describe('F254 queued message custody Redis CAS', { skip: redisIsolationSkipReas
   });
 
   test('atomically adopts one legacy-visible carrier before Queue custody admission', async () => {
-    const legacy = await store.append({
-      userId: 'user-1',
-      catId: 'codex-sol',
-      content: 'approved carrier persisted before Queue admission',
-      mentions: ['codex-terra'],
-      timestamp: 1_000,
-      threadId: 'thread-approved-carrier',
-    });
+    const legacy = await store.append(
+      canonicalTestMessageInput({
+        userId: 'user-1',
+        catId: 'codex-sol',
+        content: 'approved carrier persisted before Queue admission',
+        mentions: ['codex-terra'],
+        timestamp: 1_000,
+        threadId: 'thread-approved-carrier',
+      }),
+    );
 
     const results = await Promise.all([store.prepareQueueAdmission(legacy.id), store.prepareQueueAdmission(legacy.id)]);
     assert.deepEqual(results.map((result) => result.kind).sort(), ['existing', 'prepared']);
@@ -283,53 +307,61 @@ describe('F254 queued message custody Redis CAS', { skip: redisIsolationSkipReas
     assert.equal((await store.initializeQueueCustody(legacy.id, custody)).kind, 'initialized');
     assert.equal((await store.prepareQueueAdmission(legacy.id)).kind, 'existing');
 
-    const delivered = await store.append({
-      userId: 'user-1',
-      catId: 'codex-sol',
-      content: 'terminal carrier',
-      mentions: ['codex-terra'],
-      timestamp: 1_001,
-      threadId: 'thread-approved-carrier',
-      deliveryStatus: 'queued',
-    });
+    const delivered = await store.append(
+      canonicalTestMessageInput({
+        userId: 'user-1',
+        catId: 'codex-sol',
+        content: 'terminal carrier',
+        mentions: ['codex-terra'],
+        timestamp: 1_001,
+        threadId: 'thread-approved-carrier',
+        deliveryStatus: 'queued',
+      }),
+    );
     await store.markDelivered(delivered.id, 1_002);
     assert.deepEqual(await store.prepareQueueAdmission(delivered.id), { kind: 'conflict' });
   });
 
   test('forward queued-inclusive reads preserve raw thread order across an exposed queued cursor', async () => {
     const threadId = 'thread-queued-inclusive-forward-redis';
-    const before = await store.append({
-      userId: 'user-1',
-      catId: null,
-      content: 'before',
-      mentions: [],
-      timestamp: 1_000,
-      threadId,
-    });
-    const exposed = await store.append({
-      userId: 'user-1',
-      catId: null,
-      content: 'exposed queued body',
-      mentions: ['opus'],
-      timestamp: 2_000,
-      threadId,
-      deliveryStatus: 'queued',
-      queueCustody: makeCustody({
-        allTargetCats: ['opus'],
-        pendingTargetCats: ['opus'],
-        seenByCatIds: ['opus'],
-        seenInvocationIdByCatId: { opus: 'sealed-child' },
-        bodyExposures: [{ targetCatId: 'opus', invocationId: 'sealed-child', seenAt: 2_100 }],
+    const before = await store.append(
+      canonicalTestMessageInput({
+        userId: 'user-1',
+        catId: null,
+        content: 'before',
+        mentions: [],
+        timestamp: 1_000,
+        threadId,
       }),
-    });
-    const after = await store.append({
-      userId: 'user-1',
-      catId: 'codex',
-      content: 'after',
-      mentions: [],
-      timestamp: 2_000,
-      threadId,
-    });
+    );
+    const exposed = await store.append(
+      canonicalTestMessageInput({
+        userId: 'user-1',
+        catId: null,
+        content: 'exposed queued body',
+        mentions: ['opus'],
+        timestamp: 2_000,
+        threadId,
+        deliveryStatus: 'queued',
+        queueCustody: makeCustody({
+          allTargetCats: ['opus'],
+          pendingTargetCats: ['opus'],
+          seenByCatIds: ['opus'],
+          seenInvocationIdByCatId: { opus: 'sealed-child' },
+          bodyExposures: [{ targetCatId: 'opus', invocationId: 'sealed-child', seenAt: 2_100 }],
+        }),
+      }),
+    );
+    const after = await store.append(
+      canonicalTestMessageInput({
+        userId: 'user-1',
+        catId: 'codex',
+        content: 'after',
+        mentions: [],
+        timestamp: 2_000,
+        threadId,
+      }),
+    );
     const options = {
       includeQueuedCatMessages: true,
       includeExposedQueuedUserMessagesForCatId: 'opus',
@@ -360,16 +392,18 @@ describe('F254 queued message custody Redis CAS', { skip: redisIsolationSkipReas
       allTargetCats: ['opus'],
       pendingTargetCats: ['opus'],
     });
-    const message = await store.append({
-      userId: 'user-1',
-      catId: null,
-      content: 'recover this exact queued source',
-      mentions: ['opus'],
-      timestamp: 1_000,
-      threadId: 'thread-replacement',
-      deliveryStatus: 'queued',
-      queueCustody: initial,
-    });
+    const message = await store.append(
+      canonicalTestMessageInput({
+        userId: 'user-1',
+        catId: null,
+        content: 'recover this exact queued source',
+        mentions: ['opus'],
+        timestamp: 1_000,
+        threadId: 'thread-replacement',
+        deliveryStatus: 'queued',
+        queueCustody: initial,
+      }),
+    );
     const next = { ...initial, entryId: 'entry-replacement', revision: 2, updatedAt: 1_100 };
 
     const result = await store.transitionQueueCustody(message.id, {
@@ -417,16 +451,18 @@ describe('F254 queued message custody Redis CAS', { skip: redisIsolationSkipReas
       processingStartedAt: 1_050,
       updatedAt: 1_075,
     });
-    const message = await store.append({
-      userId: 'user-1',
-      catId: 'codex',
-      content: 'terminal coordination release',
-      mentions: ['opus'],
-      timestamp: 1_000,
-      threadId: 'thread-cross-awakened',
-      deliveryStatus: 'queued',
-      queueCustody: custody,
-    });
+    const message = await store.append(
+      canonicalTestMessageInput({
+        userId: 'user-1',
+        catId: 'codex',
+        content: 'terminal coordination release',
+        mentions: ['opus'],
+        timestamp: 1_000,
+        threadId: 'thread-cross-awakened',
+        deliveryStatus: 'queued',
+        queueCustody: custody,
+      }),
+    );
 
     const stored = await store.getById(message.id);
 
@@ -436,44 +472,48 @@ describe('F254 queued message custody Redis CAS', { skip: redisIsolationSkipReas
 
   test('startup replacement preflight reads the durable queued A2A source group before restoring it', async () => {
     const threadId = 'thread-startup-replaced-a2a';
-    const source = await store.append({
-      userId: 'user-1',
-      catId: 'codex',
-      content: '@opus original handoff',
-      mentions: ['opus'],
-      timestamp: 1_000,
-      threadId,
-    });
-    const message = await store.append({
-      userId: 'user-1',
-      catId: 'codex',
-      content: '@opus old queued prompt',
-      mentions: ['opus'],
-      timestamp: 1_001,
-      threadId,
-      deliveryStatus: 'queued',
-      queueCustody: makeCustody({
-        entryId: 'cross-thread:startup-replaced-a2a',
-        receiptScope: 'cross_thread_delivery',
-        allTargetCats: ['opus'],
-        pendingTargetCats: ['opus'],
-        carrierByTargetCatId: {
-          opus: {
-            entryId: 'carrier-startup-replaced-a2a',
-            source: 'agent',
-            sourceCategory: 'a2a',
-            callerCatId: 'codex',
-            a2aParentInvocationId: 'parent-startup-replaced-a2a',
-            a2aTriggerMessageId: source.id,
-            autoExecute: true,
-            createdAt: 1_001,
-          },
-        },
-        carrierStateByTargetCatId: { opus: { status: 'queued' } },
-        createdAt: 1_001,
-        updatedAt: 1_001,
+    const source = await store.append(
+      canonicalTestMessageInput({
+        userId: 'user-1',
+        catId: 'codex',
+        content: '@opus original handoff',
+        mentions: ['opus'],
+        timestamp: 1_000,
+        threadId,
       }),
-    });
+    );
+    const message = await store.append(
+      canonicalTestMessageInput({
+        userId: 'user-1',
+        catId: 'codex',
+        content: '@opus old queued prompt',
+        mentions: ['opus'],
+        timestamp: 1_001,
+        threadId,
+        deliveryStatus: 'queued',
+        queueCustody: makeCustody({
+          entryId: 'cross-thread:startup-replaced-a2a',
+          receiptScope: 'cross_thread_delivery',
+          allTargetCats: ['opus'],
+          pendingTargetCats: ['opus'],
+          carrierByTargetCatId: {
+            opus: {
+              entryId: 'carrier-startup-replaced-a2a',
+              source: 'agent',
+              sourceCategory: 'a2a',
+              callerCatId: 'codex',
+              a2aParentInvocationId: 'parent-startup-replaced-a2a',
+              a2aTriggerMessageId: source.id,
+              autoExecute: true,
+              createdAt: 1_001,
+            },
+          },
+          carrierStateByTargetCatId: { opus: { status: 'queued' } },
+          createdAt: 1_001,
+          updatedAt: 1_001,
+        }),
+      }),
+    );
     const inspected = [];
     const reconciler = new QueuedMessageCustodyStartupReconciler({
       messageStore: store,
@@ -517,64 +557,72 @@ describe('F254 queued message custody Redis CAS', { skip: redisIsolationSkipReas
   });
 
   test('browser timeline includes durable queued user work without exposing it to default reads', async () => {
-    const ordinary = await store.append({
-      userId: 'user-1',
-      catId: null,
-      content: 'ordinary queued user work',
-      mentions: ['opus'],
-      timestamp: 1_000,
-      threadId: 'thread-browser-timeline',
-      deliveryStatus: 'queued',
-      queueCustody: makeCustody({
-        entryId: 'entry-ordinary-user-work',
-        allTargetCats: ['opus'],
-        pendingTargetCats: ['opus'],
-        createdAt: 1_000,
-        updatedAt: 1_000,
+    const ordinary = await store.append(
+      canonicalTestMessageInput({
+        userId: 'user-1',
+        catId: null,
+        content: 'ordinary queued user work',
+        mentions: ['opus'],
+        timestamp: 1_000,
+        threadId: 'thread-browser-timeline',
+        deliveryStatus: 'queued',
+        queueCustody: makeCustody({
+          entryId: 'entry-ordinary-user-work',
+          allTargetCats: ['opus'],
+          pendingTargetCats: ['opus'],
+          createdAt: 1_000,
+          updatedAt: 1_000,
+        }),
       }),
-    });
-    const steered = await store.append({
-      userId: 'user-1',
-      catId: null,
-      content: 'steered user work is already published',
-      mentions: ['opus'],
-      timestamp: 1_075,
-      threadId: 'thread-browser-timeline',
-      deliveryStatus: 'queued',
-      queueCustody: makeCustody({
-        entryId: 'entry-steered-user-work',
-        allTargetCats: ['opus'],
-        pendingTargetCats: ['opus'],
-        steerRequestedByCatIds: ['opus'],
-        createdAt: 1_075,
-        updatedAt: 1_075,
+    );
+    const steered = await store.append(
+      canonicalTestMessageInput({
+        userId: 'user-1',
+        catId: null,
+        content: 'steered user work is already published',
+        mentions: ['opus'],
+        timestamp: 1_075,
+        threadId: 'thread-browser-timeline',
+        deliveryStatus: 'queued',
+        queueCustody: makeCustody({
+          entryId: 'entry-steered-user-work',
+          allTargetCats: ['opus'],
+          pendingTargetCats: ['opus'],
+          steerRequestedByCatIds: ['opus'],
+          createdAt: 1_075,
+          updatedAt: 1_075,
+        }),
       }),
-    });
-    await store.append({
-      userId: 'system',
-      catId: 'system',
-      content: 'queued internal system work',
-      mentions: [],
-      timestamp: 1_050,
-      threadId: 'thread-browser-timeline',
-      deliveryStatus: 'queued',
-    });
-    const seed = await store.append({
-      userId: 'user-1',
-      catId: 'codex-sol',
-      content: 'source-cat thread seed',
-      mentions: ['opus'],
-      timestamp: 1_100,
-      threadId: 'thread-browser-timeline',
-      deliveryStatus: 'queued',
-      queueCustody: makeCustody({
-        entryId: 'entry-browser-timeline',
-        allTargetCats: ['opus'],
-        pendingTargetCats: ['opus'],
-        createdAt: 1_100,
-        updatedAt: 1_100,
+    );
+    await store.append(
+      canonicalTestMessageInput({
+        userId: 'system',
+        catId: 'system',
+        content: 'queued internal system work',
+        mentions: [],
+        timestamp: 1_050,
+        threadId: 'thread-browser-timeline',
+        deliveryStatus: 'queued',
       }),
-    });
+    );
+    const seed = await store.append(
+      canonicalTestMessageInput({
+        userId: 'user-1',
+        catId: 'codex-sol',
+        content: 'source-cat thread seed',
+        mentions: ['opus'],
+        timestamp: 1_100,
+        threadId: 'thread-browser-timeline',
+        deliveryStatus: 'queued',
+        queueCustody: makeCustody({
+          entryId: 'entry-browser-timeline',
+          allTargetCats: ['opus'],
+          pendingTargetCats: ['opus'],
+          createdAt: 1_100,
+          updatedAt: 1_100,
+        }),
+      }),
+    );
 
     assert.deepEqual(await store.getByThread('thread-browser-timeline', 20, 'user-1'), []);
     assert.deepEqual(
@@ -616,54 +664,62 @@ describe('F254 queued message custody Redis CAS', { skip: redisIsolationSkipReas
 
   test('managed-hold history binds scheduler publication to the durable owner across terminal delivery', async () => {
     const threadId = 'thread-managed-hold-owner-visibility';
-    const anchor = await store.append({
-      userId: 'user-owner',
-      catId: null,
-      content: 'read anchor',
-      mentions: [],
-      timestamp: 900,
-      threadId,
-    });
+    const anchor = await store.append(
+      canonicalTestMessageInput({
+        userId: 'user-owner',
+        catId: null,
+        content: 'read anchor',
+        mentions: [],
+        timestamp: 900,
+        threadId,
+      }),
+    );
     const source = {
       connector: 'hold-ball',
       label: '持球结果',
       icon: '🏓',
       meta: { taskId: 'task-managed-hold-owner', threadId, catId: 'opus', wakeWhen: true },
     };
-    const ownerVisible = await store.append({
-      userId: 'scheduler',
-      catId: null,
-      content: 'owner-visible command result',
-      mentions: [],
-      timestamp: 1_000,
-      threadId,
-      deliveryStatus: 'queued',
-      queueCustody: makeCustody({ ownerUserId: 'user-owner' }),
-      source,
-    });
-    const hidden = await store.append({
-      userId: 'scheduler',
-      catId: null,
-      content: 'hidden command trigger',
-      mentions: [],
-      timestamp: 1_001,
-      threadId,
-      deliveryStatus: 'queued',
-      queueCustody: makeCustody({ entryId: 'entry-hidden', ownerUserId: 'user-owner' }),
-      extra: { scheduler: { hiddenTrigger: true } },
-      source,
-    });
-    const ownerless = await store.append({
-      userId: 'scheduler',
-      catId: null,
-      content: 'legacy ownerless result',
-      mentions: [],
-      timestamp: 1_002,
-      threadId,
-      deliveryStatus: 'queued',
-      queueCustody: makeCustody({ entryId: 'entry-ownerless' }),
-      source,
-    });
+    const ownerVisible = await store.append(
+      canonicalTestMessageInput({
+        userId: 'scheduler',
+        catId: null,
+        content: 'owner-visible command result',
+        mentions: [],
+        timestamp: 1_000,
+        threadId,
+        deliveryStatus: 'queued',
+        queueCustody: makeCustody({ ownerUserId: 'user-owner' }),
+        source,
+      }),
+    );
+    const hidden = await store.append(
+      canonicalTestMessageInput({
+        userId: 'scheduler',
+        catId: null,
+        content: 'hidden command trigger',
+        mentions: [],
+        timestamp: 1_001,
+        threadId,
+        deliveryStatus: 'queued',
+        queueCustody: makeCustody({ entryId: 'entry-hidden', ownerUserId: 'user-owner' }),
+        extra: { scheduler: { hiddenTrigger: true } },
+        source,
+      }),
+    );
+    const ownerless = await store.append(
+      canonicalTestMessageInput({
+        userId: 'scheduler',
+        catId: null,
+        content: 'legacy ownerless result',
+        mentions: [],
+        timestamp: 1_002,
+        threadId,
+        deliveryStatus: 'queued',
+        queueCustody: makeCustody({ entryId: 'entry-ownerless' }),
+        source,
+      }),
+    );
 
     const options = { includeQueuedUserMessages: true };
     assert.deepEqual(
@@ -733,32 +789,38 @@ describe('F254 queued message custody Redis CAS', { skip: redisIsolationSkipReas
 
   test('forward cursor applies its limit after filtering unpublished queued work', async () => {
     const threadId = 'thread-forward-published';
-    const anchor = await store.append({
-      userId: 'user-1',
-      catId: null,
-      content: 'delivered anchor',
-      mentions: [],
-      timestamp: 1_000,
-      threadId,
-    });
-    await store.append({
-      userId: 'user-1',
-      catId: null,
-      content: 'queued user work before speech',
-      mentions: ['opus'],
-      timestamp: 1_100,
-      threadId,
-      deliveryStatus: 'queued',
-    });
-    const published = await store.append({
-      userId: 'user-1',
-      catId: 'codex-sol',
-      content: 'published source-cat speech',
-      mentions: ['opus'],
-      timestamp: 1_200,
-      threadId,
-      deliveryStatus: 'queued',
-    });
+    const anchor = await store.append(
+      canonicalTestMessageInput({
+        userId: 'user-1',
+        catId: null,
+        content: 'delivered anchor',
+        mentions: [],
+        timestamp: 1_000,
+        threadId,
+      }),
+    );
+    await store.append(
+      canonicalTestMessageInput({
+        userId: 'user-1',
+        catId: null,
+        content: 'queued user work before speech',
+        mentions: ['opus'],
+        timestamp: 1_100,
+        threadId,
+        deliveryStatus: 'queued',
+      }),
+    );
+    const published = await store.append(
+      canonicalTestMessageInput({
+        userId: 'user-1',
+        catId: 'codex-sol',
+        content: 'published source-cat speech',
+        mentions: ['opus'],
+        timestamp: 1_200,
+        threadId,
+        deliveryStatus: 'queued',
+      }),
+    );
 
     const messages = await store.getByThreadAfter(threadId, anchor.id, 1, 'user-1', {
       includeQueuedCatMessages: true,
@@ -771,19 +833,21 @@ describe('F254 queued message custody Redis CAS', { skip: redisIsolationSkipReas
   });
 
   test('updates custody, delivery status, and timeline score in one terminal transition', async () => {
-    const message = await store.append({
-      userId: 'user-1',
-      catId: null,
-      content: 'finish me',
-      mentions: ['opus'],
-      timestamp: 1_000,
-      threadId: 'thread-terminal',
-      deliveryStatus: 'queued',
-      queueCustody: makeCustody({
-        allTargetCats: ['opus'],
-        pendingTargetCats: ['opus'],
+    const message = await store.append(
+      canonicalTestMessageInput({
+        userId: 'user-1',
+        catId: null,
+        content: 'finish me',
+        mentions: ['opus'],
+        timestamp: 1_000,
+        threadId: 'thread-terminal',
+        deliveryStatus: 'queued',
+        queueCustody: makeCustody({
+          allTargetCats: ['opus'],
+          pendingTargetCats: ['opus'],
+        }),
       }),
-    });
+    );
     const terminal = makeCustody({
       revision: 2,
       status: 'terminal',
@@ -841,16 +905,18 @@ describe('F254 queued message custody Redis CAS', { skip: redisIsolationSkipReas
   });
 
   test('rejects an unsafe custody deliveredAt before changing custody, status, or index scores', async () => {
-    const message = await store.append({
-      userId: 'user-1',
-      catId: null,
-      content: 'reject unsafe custody delivery time',
-      mentions: ['opus'],
-      timestamp: 1_000,
-      threadId: 'thread-invalid-delivery-time',
-      deliveryStatus: 'queued',
-      queueCustody: makeCustody({ allTargetCats: ['opus'], pendingTargetCats: ['opus'] }),
-    });
+    const message = await store.append(
+      canonicalTestMessageInput({
+        userId: 'user-1',
+        catId: null,
+        content: 'reject unsafe custody delivery time',
+        mentions: ['opus'],
+        timestamp: 1_000,
+        threadId: 'thread-invalid-delivery-time',
+        deliveryStatus: 'queued',
+        queueCustody: makeCustody({ allTargetCats: ['opus'], pendingTargetCats: ['opus'] }),
+      }),
+    );
     const terminal = makeCustody({
       revision: 2,
       status: 'terminal',
@@ -881,16 +947,18 @@ describe('F254 queued message custody Redis CAS', { skip: redisIsolationSkipReas
   });
 
   test('refuses the legacy markDelivered escape hatch while custody is active', async () => {
-    const message = await store.append({
-      userId: 'user-1',
-      catId: null,
-      content: 'do not expose before success',
-      mentions: ['opus'],
-      timestamp: 1_000,
-      threadId: 'thread-fenced',
-      deliveryStatus: 'queued',
-      queueCustody: makeCustody({ allTargetCats: ['opus'], pendingTargetCats: ['opus'] }),
-    });
+    const message = await store.append(
+      canonicalTestMessageInput({
+        userId: 'user-1',
+        catId: null,
+        content: 'do not expose before success',
+        mentions: ['opus'],
+        timestamp: 1_000,
+        threadId: 'thread-fenced',
+        deliveryStatus: 'queued',
+        queueCustody: makeCustody({ allTargetCats: ['opus'], pendingTargetCats: ['opus'] }),
+      }),
+    );
 
     const result = await store.markDelivered(message.id, 1_200);
 
@@ -902,16 +970,18 @@ describe('F254 queued message custody Redis CAS', { skip: redisIsolationSkipReas
   });
 
   test('cancel atomically removes active custody fields from the canceled message', async () => {
-    const message = await store.append({
-      userId: 'user-1',
-      catId: null,
-      content: 'cancel me',
-      mentions: ['opus'],
-      timestamp: 1_000,
-      threadId: 'thread-cancel',
-      deliveryStatus: 'queued',
-      queueCustody: makeCustody({ allTargetCats: ['opus'], pendingTargetCats: ['opus'] }),
-    });
+    const message = await store.append(
+      canonicalTestMessageInput({
+        userId: 'user-1',
+        catId: null,
+        content: 'cancel me',
+        mentions: ['opus'],
+        timestamp: 1_000,
+        threadId: 'thread-cancel',
+        deliveryStatus: 'queued',
+        queueCustody: makeCustody({ allTargetCats: ['opus'], pendingTargetCats: ['opus'] }),
+      }),
+    );
 
     const canceled = await store.markCanceled(message.id);
 
@@ -935,24 +1005,26 @@ describe('F254 queued message custody Redis CAS', { skip: redisIsolationSkipReas
       status: 'succeeded',
       successfulCatIds: ['opus'],
     });
-    const message = await store.append({
-      userId: 'user-1',
-      catId: null,
-      content: 'only one target finished before the crash',
-      mentions: ['opus', 'codex'],
-      timestamp: 1_000,
-      threadId: 'thread-shared-parent',
-      deliveryStatus: 'queued',
-      queueCustody: makeCustody({
-        ownerAuthProvenance: 'strict',
-        revision: 2,
-        status: 'processing',
-        seenByCatIds: ['opus', 'codex'],
-        seenInvocationIdByCatId: { opus: invocationId, codex: invocationId },
-        processingStartedAt: 1_100,
-        updatedAt: 1_100,
+    const message = await store.append(
+      canonicalTestMessageInput({
+        userId: 'user-1',
+        catId: null,
+        content: 'only one target finished before the crash',
+        mentions: ['opus', 'codex'],
+        timestamp: 1_000,
+        threadId: 'thread-shared-parent',
+        deliveryStatus: 'queued',
+        queueCustody: makeCustody({
+          ownerAuthProvenance: 'strict',
+          revision: 2,
+          status: 'processing',
+          seenByCatIds: ['opus', 'codex'],
+          seenInvocationIdByCatId: { opus: invocationId, codex: invocationId },
+          processingStartedAt: 1_100,
+          updatedAt: 1_100,
+        }),
       }),
-    });
+    );
 
     const freshQueue = new InvocationQueue();
     const reconciler = new QueuedMessageCustodyStartupReconciler({
@@ -983,46 +1055,50 @@ describe('F254 queued message custody Redis CAS', { skip: redisIsolationSkipReas
   test('restart terminalizes a failed historical exposure with an exact durable source response', async () => {
     const threadId = 'thread-managed-command-historical-response';
     const invocationId = 'inv-managed-command-historical-response';
-    const message = await store.append({
-      userId: 'scheduler',
-      catId: null,
-      content: 'managed command completed',
-      mentions: ['opus'],
-      timestamp: 1_000,
-      threadId,
-      deliveryStatus: 'queued',
-      source: {
-        connector: 'hold-ball',
-        label: '持球通知',
-        meta: { taskId: 'task-managed-command', threadId, catId: 'opus', wakeWhen: true },
-      },
-      queueCustody: makeCustody({
-        allTargetCats: ['opus'],
-        pendingTargetCats: ['opus'],
-        revision: 3,
-        status: 'queued',
-        seenByCatIds: ['opus'],
-        seenInvocationIdByCatId: {},
-        bodyExposures: [{ targetCatId: 'opus', invocationId, seenAt: 1_075 }],
-        failedByCatIds: ['opus'],
-        updatedAt: 1_600,
-      }),
-    });
-    const response = await store.append({
-      userId: 'default-user',
-      catId: 'opus',
-      content: 'the command result was consumed before the stop gate failed',
-      mentions: [],
-      timestamp: 1_500,
-      threadId,
-      extra: {
-        stream: {
-          invocationId: 'parent-managed-command-historical-response',
-          turnInvocationId: invocationId,
+    const message = await store.append(
+      canonicalTestMessageInput({
+        userId: 'scheduler',
+        catId: null,
+        content: 'managed command completed',
+        mentions: ['opus'],
+        timestamp: 1_000,
+        threadId,
+        deliveryStatus: 'queued',
+        source: {
+          connector: 'hold-ball',
+          label: '持球通知',
+          meta: { taskId: 'task-managed-command', threadId, catId: 'opus', wakeWhen: true },
         },
-        causal: { kind: 'invocation_reply', triggerMessageId: message.id },
-      },
-    });
+        queueCustody: makeCustody({
+          allTargetCats: ['opus'],
+          pendingTargetCats: ['opus'],
+          revision: 3,
+          status: 'queued',
+          seenByCatIds: ['opus'],
+          seenInvocationIdByCatId: {},
+          bodyExposures: [{ targetCatId: 'opus', invocationId, seenAt: 1_075 }],
+          failedByCatIds: ['opus'],
+          updatedAt: 1_600,
+        }),
+      }),
+    );
+    const response = await store.append(
+      canonicalTestMessageInput({
+        userId: 'default-user',
+        catId: 'opus',
+        content: 'the command result was consumed before the stop gate failed',
+        mentions: [],
+        timestamp: 1_500,
+        threadId,
+        extra: {
+          stream: {
+            invocationId: 'parent-managed-command-historical-response',
+            turnInvocationId: invocationId,
+          },
+          causal: { kind: 'invocation_reply', triggerMessageId: message.id },
+        },
+      }),
+    );
     const freshQueue = new InvocationQueue();
     const reconciler = new QueuedMessageCustodyStartupReconciler({
       messageStore: store,

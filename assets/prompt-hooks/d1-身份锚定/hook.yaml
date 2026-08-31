@@ -13,6 +13,20 @@ resolver: D1IdentityAnchorResolver
 inputs:
   - identity
 
+# Variable metadata (canonical source for Console editor)
+variables:
+  - name: DISPLAY_NAME
+    description: 当前猫的显示名
+    placeholder: ""
+  - name: NICKNAME_PART
+    description: 当前猫昵称后缀（如 /小狸）
+    placeholder: ""
+  - name: CAT_ID
+    description: 当前猫的稳定 ID
+    placeholder: ""
+  - name: RUNTIME_MODEL
+    description: 当前运行模型
+    placeholder: ""
 # Override constraints
 disableable: false
 

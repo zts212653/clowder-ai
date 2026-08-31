@@ -13,6 +13,11 @@ resolver: N1NavigationResolver
 inputs:
   - navigationContext
 
+# Variable metadata (canonical source for Console editor)
+variables:
+  - name: INNER_CONTENT
+    description: 导航内部内容
+    placeholder: ""
 # Override constraints
 disableable: true
 

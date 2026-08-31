@@ -5,6 +5,7 @@
 
 import assert from 'node:assert/strict';
 import { after, before, beforeEach, describe, it } from 'node:test';
+import { canonicalTestMessageInput } from './helpers/message-from-fixtures.js';
 import {
   assertRedisIsolationOrThrow,
   cleanupPrefixedRedisKeys,
@@ -12,6 +13,14 @@ import {
 } from './helpers/redis-test-helpers.js';
 
 const REDIS_URL = process.env.REDIS_URL;
+
+function withFixtureProvenance(input) {
+  return canonicalTestMessageInput(input);
+}
+
+function appendFixture(store, input) {
+  return store.append(withFixtureProvenance(input));
+}
 
 function luaHash(fields) {
   return Object.entries(fields).flat();
@@ -42,6 +51,7 @@ describe('RedisMessageStore message JSON Unicode boundary', () => {
     };
     const store = new RedisMessageStore(redis);
     const input = {
+      provenance: { author: 'cat', routed: false, observation: 'original' },
       userId: 'unicode-user',
       catId: 'codex',
       content: `redis${loneHighSurrogate}message 😀`,
@@ -50,12 +60,47 @@ describe('RedisMessageStore message JSON Unicode boundary', () => {
       extra: { targetCats: [`codex${loneLowSurrogate}`] },
     };
 
-    const stored = await store.append(input);
+    const stored = await appendFixture(store, input);
 
     assert.equal(persistedFields.content, 'redis�message 😀');
     assert.deepEqual(JSON.parse(persistedFields.extra).targetCats, ['codex�']);
     assert.equal(stored.content, 'redis�message 😀');
     assert.equal(input.content, `redis${loneHighSurrogate}message 😀`, 'normalization must not mutate caller input');
+  });
+});
+
+describe('RedisMessageStore batch hydration sender identity', () => {
+  it('preserves MessageFrom through getByThread batch hydration', async () => {
+    const { RedisMessageStore } = await import('../dist/domains/cats/services/stores/redis/RedisMessageStore.js');
+    const hash = {
+      id: 'message-from-batch',
+      threadId: 'thread-from-batch',
+      userId: 'owner-1',
+      from: JSON.stringify({ kind: 'agent', catId: 'opus' }),
+      catId: 'opus',
+      content: 'sender survives batch hydration',
+      mentions: '[]',
+      timestamp: '1000',
+      deliveryStatus: 'delivered',
+      deliveredAt: '1001',
+      timelineOrderAt: '1001',
+    };
+    const redis = {
+      options: {},
+      zrevrange: async () => ['message-from-batch'],
+      multi: () => ({
+        hgetall() {
+          return this;
+        },
+        exec: async () => [[null, hash]],
+      }),
+    };
+    const store = new RedisMessageStore(redis);
+
+    const messages = await store.getByThread('thread-from-batch', 10, 'owner-1');
+
+    assert.equal(messages.length, 1);
+    assert.deepEqual(messages[0].from, { kind: 'agent', catId: 'opus' });
   });
 });
 
@@ -431,7 +476,7 @@ describe('RedisMessageStore', { skip: redisIsolationSkipReason(REDIS_URL) }, () 
   });
 
   it('append() stores message and returns with id', async () => {
-    const msg = await store.append({
+    const msg = await appendFixture(store, {
       userId: 'user1',
       catId: null,
       content: 'hello',
@@ -450,7 +495,7 @@ describe('RedisMessageStore', { skip: redisIsolationSkipReason(REDIS_URL) }, () 
       reviewedHeadSha: 'a'.repeat(40),
       carrierlessLeaseFence: { leaseId: 'lease-review-redis-1', generation: 7 },
     };
-    const stored = await store.append({
+    const stored = await appendFixture(store, {
       userId: 'user-f167-reviewer',
       catId: 'opus5',
       content: 'REQUEST_CHANGES — typed verdict presentation',
@@ -479,7 +524,7 @@ describe('RedisMessageStore', { skip: redisIsolationSkipReason(REDIS_URL) }, () 
       candidateAction: 'merge',
       occurredAt: 1_785_600_000_000,
     };
-    const stored = await store.append({
+    const stored = await appendFixture(store, {
       userId: 'user-f287-billing',
       catId: null,
       content: 'GitHub CI failed before any source step ran.',
@@ -498,7 +543,7 @@ describe('RedisMessageStore', { skip: redisIsolationSkipReason(REDIS_URL) }, () 
   it('listOwnerMessagesInWindow returns the exact delivered owner timeline with inclusive boundaries and no page cap', async () => {
     const base = Date.now() - 10_000;
     const append = (overrides) =>
-      store.append({
+      appendFixture(store, {
         userId: 'owner-window',
         catId: null,
         content: 'candidate',
@@ -541,9 +586,15 @@ describe('RedisMessageStore', { skip: redisIsolationSkipReason(REDIS_URL) }, () 
 
   it('all Redis append entrypoints reject unsafe timestamps and transition-owned metadata before side effects', async () => {
     const appenders = [
-      ['append', (target, message) => target.append(message)],
-      ['appendIfThreadFrontier', (target, message) => target.appendIfThreadFrontier(message, null)],
-      ['appendAndObservePriorFrontier', (target, message) => target.appendAndObservePriorFrontier(message)],
+      ['append', (target, message) => appendFixture(target, message)],
+      [
+        'appendIfThreadFrontier',
+        (target, message) => target.appendIfThreadFrontier(withFixtureProvenance(message), null),
+      ],
+      [
+        'appendAndObservePriorFrontier',
+        (target, message) => target.appendAndObservePriorFrontier(withFixtureProvenance(message)),
+      ],
     ];
     let listenerCalls = 0;
     const admissionStore = new RedisMessageStore(redis, { ttlSeconds: 0, onAppend: () => listenerCalls++ });
@@ -594,7 +645,7 @@ describe('RedisMessageStore', { skip: redisIsolationSkipReason(REDIS_URL) }, () 
   it('append admits and rehydrates the sortable-ID-safe Date boundaries', async () => {
     const roundTripStore = new RedisMessageStore(redis, { ttlSeconds: 0 });
     for (const timestamp of [0, 1, 8_640_000_000_000_000]) {
-      const stored = await roundTripStore.append({
+      const stored = await appendFixture(roundTripStore, {
         userId: 'user1',
         catId: null,
         content: 'valid Date input',
@@ -617,7 +668,7 @@ describe('RedisMessageStore', { skip: redisIsolationSkipReason(REDIS_URL) }, () 
     for (const [index, deliveredAt] of invalidTimestamps.entries()) {
       const userId = `user-delivery-admission-${index}`;
       const threadId = `thread-delivery-admission-${index}`;
-      const queued = await admissionStore.append({
+      const queued = await appendFixture(admissionStore, {
         userId,
         catId: null,
         content: `queued ${index}`,
@@ -673,7 +724,7 @@ describe('RedisMessageStore', { skip: redisIsolationSkipReason(REDIS_URL) }, () 
     for (const { suffix, deliveredAt, removeSourceScore } of cases) {
       const sourceUserId = `user-delivery-source-${suffix}`;
       const targetUserId = `user-delivery-target-${suffix}`;
-      const queued = await admissionStore.append({
+      const queued = await appendFixture(admissionStore, {
         userId: sourceUserId,
         catId: null,
         content: suffix,
@@ -699,14 +750,14 @@ describe('RedisMessageStore', { skip: redisIsolationSkipReason(REDIS_URL) }, () 
     const userId = 'user-cancel-owner';
     const threadId = 'thread-cancel-owner';
     const base = { userId, catId: null, mentions: [], threadId };
-    const queued = await admissionStore.append({
+    const queued = await appendFixture(admissionStore, {
       ...base,
       content: 'queued',
       timestamp: 100,
       deliveryStatus: 'queued',
     });
-    const legacy = await admissionStore.append({ ...base, content: 'legacy', timestamp: 110 });
-    const delivered = await admissionStore.append({
+    const legacy = await appendFixture(admissionStore, { ...base, content: 'legacy', timestamp: 110 });
+    const delivered = await appendFixture(admissionStore, {
       ...base,
       content: 'delivered',
       timestamp: 120,
@@ -786,7 +837,7 @@ describe('RedisMessageStore', { skip: redisIsolationSkipReason(REDIS_URL) }, () 
       const earlier =
         fixture.earlierTimestamp === null
           ? null
-          : await store.append({
+          : await appendFixture(store, {
               userId,
               catId: null,
               content: `earlier than ${fixture.label}`,
@@ -878,9 +929,9 @@ describe('RedisMessageStore', { skip: redisIsolationSkipReason(REDIS_URL) }, () 
 
   it('getRecent() returns messages in chronological order', async () => {
     const now = Date.now();
-    await store.append({ userId: 'u', catId: null, content: 'first', mentions: [], timestamp: now });
-    await store.append({ userId: 'u', catId: 'opus', content: 'second', mentions: [], timestamp: now + 1 });
-    await store.append({ userId: 'u', catId: null, content: 'third', mentions: [], timestamp: now + 2 });
+    await appendFixture(store, { userId: 'u', catId: null, content: 'first', mentions: [], timestamp: now });
+    await appendFixture(store, { userId: 'u', catId: 'opus', content: 'second', mentions: [], timestamp: now + 1 });
+    await appendFixture(store, { userId: 'u', catId: null, content: 'third', mentions: [], timestamp: now + 2 });
 
     const recent = await store.getRecent(10);
     assert.equal(recent.length, 3);
@@ -890,8 +941,8 @@ describe('RedisMessageStore', { skip: redisIsolationSkipReason(REDIS_URL) }, () 
 
   it('getRecent() filters by userId', async () => {
     const now = Date.now();
-    await store.append({ userId: 'alice', catId: null, content: 'alice msg', mentions: [], timestamp: now });
-    await store.append({ userId: 'bob', catId: null, content: 'bob msg', mentions: [], timestamp: now + 1 });
+    await appendFixture(store, { userId: 'alice', catId: null, content: 'alice msg', mentions: [], timestamp: now });
+    await appendFixture(store, { userId: 'bob', catId: null, content: 'bob msg', mentions: [], timestamp: now + 1 });
 
     const aliceOnly = await store.getRecent(10, 'alice');
     assert.equal(aliceOnly.length, 1);
@@ -900,9 +951,15 @@ describe('RedisMessageStore', { skip: redisIsolationSkipReason(REDIS_URL) }, () 
 
   it('getMentionsFor() returns messages mentioning a specific cat', async () => {
     const now = Date.now();
-    await store.append({ userId: 'u', catId: null, content: 'hi opus', mentions: ['opus'], timestamp: now });
-    await store.append({ userId: 'u', catId: null, content: 'hi codex', mentions: ['codex'], timestamp: now + 1 });
-    await store.append({
+    await appendFixture(store, { userId: 'u', catId: null, content: 'hi opus', mentions: ['opus'], timestamp: now });
+    await appendFixture(store, {
+      userId: 'u',
+      catId: null,
+      content: 'hi codex',
+      mentions: ['codex'],
+      timestamp: now + 1,
+    });
+    await appendFixture(store, {
       userId: 'u',
       catId: null,
       content: 'hi both',
@@ -918,7 +975,7 @@ describe('RedisMessageStore', { skip: redisIsolationSkipReason(REDIS_URL) }, () 
 
   it('getMentionsFor() filters by threadId (#75)', async () => {
     const now = Date.now();
-    await store.append({
+    await appendFixture(store, {
       userId: 'u',
       catId: null,
       content: '@opus in tA',
@@ -926,7 +983,7 @@ describe('RedisMessageStore', { skip: redisIsolationSkipReason(REDIS_URL) }, () 
       timestamp: now,
       threadId: 'thread-A',
     });
-    await store.append({
+    await appendFixture(store, {
       userId: 'u',
       catId: null,
       content: '@opus in tB',
@@ -934,7 +991,7 @@ describe('RedisMessageStore', { skip: redisIsolationSkipReason(REDIS_URL) }, () 
       timestamp: now + 1,
       threadId: 'thread-B',
     });
-    await store.append({
+    await appendFixture(store, {
       userId: 'u',
       catId: null,
       content: '@opus in tA again',
@@ -955,9 +1012,9 @@ describe('RedisMessageStore', { skip: redisIsolationSkipReason(REDIS_URL) }, () 
 
   it('getBefore() returns messages before timestamp', async () => {
     const base = Date.now();
-    await store.append({ userId: 'u', catId: null, content: 'old', mentions: [], timestamp: base });
-    await store.append({ userId: 'u', catId: null, content: 'mid', mentions: [], timestamp: base + 100 });
-    await store.append({ userId: 'u', catId: null, content: 'new', mentions: [], timestamp: base + 200 });
+    await appendFixture(store, { userId: 'u', catId: null, content: 'old', mentions: [], timestamp: base });
+    await appendFixture(store, { userId: 'u', catId: null, content: 'mid', mentions: [], timestamp: base + 100 });
+    await appendFixture(store, { userId: 'u', catId: null, content: 'new', mentions: [], timestamp: base + 200 });
 
     const before = await store.getBefore(base + 200, 10);
     assert.equal(before.length, 2);
@@ -968,7 +1025,7 @@ describe('RedisMessageStore', { skip: redisIsolationSkipReason(REDIS_URL) }, () 
   it('getBefore() respects limit', async () => {
     const base = Date.now();
     for (let i = 0; i < 5; i++) {
-      await store.append({ userId: 'u', catId: null, content: `msg${i}`, mentions: [], timestamp: base + i });
+      await appendFixture(store, { userId: 'u', catId: null, content: `msg${i}`, mentions: [], timestamp: base + i });
     }
 
     const before = await store.getBefore(base + 5, 2);
@@ -981,7 +1038,7 @@ describe('RedisMessageStore', { skip: redisIsolationSkipReason(REDIS_URL) }, () 
   it('getByThreadBeforeBounded resumes from a real Redis rank cursor and proves exhaustion', async () => {
     const base = Date.now();
     for (let index = 0; index < 510; index += 1) {
-      await store.append({
+      await appendFixture(store, {
         userId: 'user-1',
         catId: null,
         content: `bounded ${index}`,
@@ -1020,7 +1077,7 @@ describe('RedisMessageStore', { skip: redisIsolationSkipReason(REDIS_URL) }, () 
   });
 
   it('augmentStreamMetadata() persists stream-only metadata onto callback messages', async () => {
-    const msg = await store.append({
+    const msg = await appendFixture(store, {
       userId: 'u',
       catId: 'opus',
       content: 'callback canonical',
@@ -1058,7 +1115,7 @@ describe('RedisMessageStore', { skip: redisIsolationSkipReason(REDIS_URL) }, () 
   });
 
   it('hardDelete clears toolEvents from returned object and Redis', async () => {
-    const msg = await store.append({
+    const msg = await appendFixture(store, {
       userId: 'u',
       catId: 'opus',
       content: 'tool msg',
@@ -1085,7 +1142,7 @@ describe('RedisMessageStore', { skip: redisIsolationSkipReason(REDIS_URL) }, () 
   });
 
   it('hardDelete clears thinking from returned object and Redis (F045 security)', async () => {
-    const msg = await store.append({
+    const msg = await appendFixture(store, {
       userId: 'u',
       catId: 'opus',
       content: 'response with thinking',
@@ -1109,7 +1166,7 @@ describe('RedisMessageStore', { skip: redisIsolationSkipReason(REDIS_URL) }, () 
   });
 
   it('message TTL is set', async () => {
-    const msg = await store.append({
+    const msg = await appendFixture(store, {
       userId: 'u',
       catId: null,
       content: 'ttl test',
@@ -1122,7 +1179,7 @@ describe('RedisMessageStore', { skip: redisIsolationSkipReason(REDIS_URL) }, () 
   });
 
   it('append() with same idempotencyKey returns existing message', async () => {
-    const first = await store.append({
+    const first = await appendFixture(store, {
       userId: 'u1',
       catId: null,
       content: 'kickoff',
@@ -1132,7 +1189,7 @@ describe('RedisMessageStore', { skip: redisIsolationSkipReason(REDIS_URL) }, () 
       idempotencyKey: 'backlog:b1:attempt:a1',
     });
 
-    const second = await store.append({
+    const second = await appendFixture(store, {
       userId: 'u1',
       catId: null,
       content: 'kickoff retried',
@@ -1155,7 +1212,7 @@ describe('RedisMessageStore', { skip: redisIsolationSkipReason(REDIS_URL) }, () 
     const timestamp = Date.now();
 
     const [first, second] = await Promise.all([
-      store.append({
+      appendFixture(store, {
         userId: 'u1',
         catId: null,
         content: 'concurrent',
@@ -1164,7 +1221,7 @@ describe('RedisMessageStore', { skip: redisIsolationSkipReason(REDIS_URL) }, () 
         threadId,
         idempotencyKey: 'concurrent-idem',
       }),
-      store.append({
+      appendFixture(store, {
         userId: 'u1',
         catId: null,
         content: 'concurrent',
@@ -1198,8 +1255,8 @@ describe('RedisMessageStore', { skip: redisIsolationSkipReason(REDIS_URL) }, () 
       idempotencyKey: 'redis-onappend',
     };
 
-    const first = await watchedStore.append(input);
-    const replay = await watchedStore.append({ ...input, content: 'retry', timestamp: timestamp + 1 });
+    const first = await appendFixture(watchedStore, input);
+    const replay = await appendFixture(watchedStore, { ...input, content: 'retry', timestamp: timestamp + 1 });
 
     assert.equal(replay.id, first.id);
     assert.equal(calls, 1, 'only the committed winner may fire onAppend');
@@ -1219,8 +1276,8 @@ describe('RedisMessageStore', { skip: redisIsolationSkipReason(REDIS_URL) }, () 
       idempotencyKey: 'empty-arrays',
     };
 
-    const first = await store.append(input);
-    const replay = await store.append(input);
+    const first = await appendFixture(store, input);
+    const replay = await appendFixture(store, input);
     const hydrated = await store.getById(first.id);
 
     for (const message of [first, replay, hydrated]) {
@@ -1236,7 +1293,7 @@ describe('RedisMessageStore', { skip: redisIsolationSkipReason(REDIS_URL) }, () 
     const idempotencyKey = 'stale-idem';
     const redisKey = MessageKeys.idempotency(userId, threadId, idempotencyKey);
     const missingId = generateSortableId(Date.now() - 1);
-    const liveWinner = await store.append({
+    const liveWinner = await appendFixture(store, {
       userId,
       catId: null,
       content: 'concurrent live winner',
@@ -1266,7 +1323,7 @@ describe('RedisMessageStore', { skip: redisIsolationSkipReason(REDIS_URL) }, () 
 
     let replay;
     try {
-      replay = await store.append({
+      replay = await appendFixture(store, {
         userId,
         catId: null,
         content: 'must observe concurrent winner',
@@ -1289,7 +1346,7 @@ describe('RedisMessageStore', { skip: redisIsolationSkipReason(REDIS_URL) }, () 
     const userId = 'u1';
     const threadId = 'thread-vanished-winner';
     const idempotencyKey = 'vanished-winner';
-    const winner = await store.append({
+    const winner = await appendFixture(store, {
       userId,
       catId: null,
       content: 'winner',
@@ -1331,7 +1388,7 @@ describe('RedisMessageStore', { skip: redisIsolationSkipReason(REDIS_URL) }, () 
 
     try {
       await assert.rejects(
-        watchedStore.append({
+        appendFixture(watchedStore, {
           userId,
           catId: null,
           content: 'loser',
@@ -1358,7 +1415,7 @@ describe('RedisMessageStore', { skip: redisIsolationSkipReason(REDIS_URL) }, () 
     await redis.zadd(threadKey, Date.now() - 120_000, staleId);
 
     const ttlStore = new RedisMessageStore(redis, { ttlSeconds: 60 });
-    const current = await ttlStore.append({
+    const current = await appendFixture(ttlStore, {
       userId: 'u1',
       catId: null,
       content: 'keeps thread active',
@@ -1372,7 +1429,7 @@ describe('RedisMessageStore', { skip: redisIsolationSkipReason(REDIS_URL) }, () 
   });
 
   it('F057-C2: mentionsUser round-trips through append/getById', async () => {
-    const msg = await store.append({
+    const msg = await appendFixture(store, {
       userId: 'u',
       catId: 'opus',
       content: '@co-creator 看看这个',
@@ -1389,7 +1446,7 @@ describe('RedisMessageStore', { skip: redisIsolationSkipReason(REDIS_URL) }, () 
 
   it('F057-C2: mentionsUser round-trips through hydrateMessages (getByThread)', async () => {
     const now = Date.now();
-    await store.append({
+    await appendFixture(store, {
       userId: 'u',
       catId: 'opus',
       content: '@user please check',
@@ -1398,7 +1455,7 @@ describe('RedisMessageStore', { skip: redisIsolationSkipReason(REDIS_URL) }, () 
       threadId: 'thread-mention-hydrate',
       mentionsUser: true,
     });
-    await store.append({
+    await appendFixture(store, {
       userId: 'u',
       catId: null,
       content: 'normal message',
@@ -1418,7 +1475,7 @@ describe('RedisMessageStore', { skip: redisIsolationSkipReason(REDIS_URL) }, () 
     const threadId = 'thread-score-deliver-557';
 
     // msgA sent first (base), msgB sent second (base+100) — both queued
-    const msgA = await store.append({
+    const msgA = await appendFixture(store, {
       userId: 'u',
       catId: null,
       content: 'msgA-sent-first',
@@ -1427,7 +1484,7 @@ describe('RedisMessageStore', { skip: redisIsolationSkipReason(REDIS_URL) }, () 
       threadId,
       deliveryStatus: 'queued',
     });
-    const msgB = await store.append({
+    const msgB = await appendFixture(store, {
       userId: 'u',
       catId: null,
       content: 'msgB-sent-second',
@@ -1458,7 +1515,7 @@ describe('RedisMessageStore', { skip: redisIsolationSkipReason(REDIS_URL) }, () 
   it('markDelivered records actual delivery time without moving already-published cat speech', async () => {
     const base = Date.now();
     const threadId = 'thread-published-cat-score';
-    const speech = await store.append({
+    const speech = await appendFixture(store, {
       userId: 'u',
       catId: 'codex-sol',
       content: 'already-published cat speech',
@@ -1502,7 +1559,7 @@ describe('RedisMessageStore', { skip: redisIsolationSkipReason(REDIS_URL) }, () 
     const threadId = 'thread-cursor-deliver-557';
 
     // agentReply at base (simulates invocation start time) — already delivered (no deliveryStatus)
-    const agentReply = await store.append({
+    const agentReply = await appendFixture(store, {
       userId: 'u',
       catId: 'opus',
       content: 'agent-reply',
@@ -1513,7 +1570,7 @@ describe('RedisMessageStore', { skip: redisIsolationSkipReason(REDIS_URL) }, () 
     // queuedMsg sent BEFORE agent reply (base-10), queued — delivered AFTER (base+500).
     // Without zadd re-scoring, original timestamp (base-10) < cursor (base), so it would NOT
     // appear; only deliveredAt re-scoring (base+500 > base) makes it visible after cursor.
-    const queuedMsg = await store.append({
+    const queuedMsg = await appendFixture(store, {
       userId: 'u',
       catId: null,
       content: 'queued-user-msg',
@@ -1534,7 +1591,7 @@ describe('RedisMessageStore', { skip: redisIsolationSkipReason(REDIS_URL) }, () 
   });
 
   it('F148: origin=briefing survives append → getById round-trip', async () => {
-    const msg = await store.append({
+    const msg = await appendFixture(store, {
       userId: 'system',
       catId: null,
       content: 'briefing summary',
@@ -1553,7 +1610,7 @@ describe('RedisMessageStore', { skip: redisIsolationSkipReason(REDIS_URL) }, () 
 
   it('F148: origin=briefing survives hydrateMessages (getByThread)', async () => {
     const now = Date.now();
-    await store.append({
+    await appendFixture(store, {
       userId: 'system',
       catId: null,
       content: 'briefing card',
@@ -1562,7 +1619,7 @@ describe('RedisMessageStore', { skip: redisIsolationSkipReason(REDIS_URL) }, () 
       threadId: 'thread-briefing-hydrate',
       origin: 'briefing',
     });
-    await store.append({
+    await appendFixture(store, {
       userId: 'u',
       catId: null,
       content: 'normal',
@@ -1582,7 +1639,7 @@ describe('RedisMessageStore', { skip: redisIsolationSkipReason(REDIS_URL) }, () 
   it('scanByDeliveryStatus returns IDs matching target status', async () => {
     const now = Date.now();
     // Create messages with different delivery statuses
-    const m1 = await store.append({
+    const m1 = await appendFixture(store, {
       userId: 'u1',
       catId: null,
       content: 'queued msg 1',
@@ -1591,7 +1648,7 @@ describe('RedisMessageStore', { skip: redisIsolationSkipReason(REDIS_URL) }, () 
       threadId: 'thread-scan-1',
       deliveryStatus: 'queued',
     });
-    const m2 = await store.append({
+    const m2 = await appendFixture(store, {
       userId: 'u1',
       catId: null,
       content: 'delivered msg',
@@ -1599,7 +1656,7 @@ describe('RedisMessageStore', { skip: redisIsolationSkipReason(REDIS_URL) }, () 
       timestamp: now + 1,
       threadId: 'thread-scan-1',
     });
-    const m3 = await store.append({
+    const m3 = await appendFixture(store, {
       userId: 'u1',
       catId: null,
       content: 'queued msg 2',
@@ -1621,7 +1678,7 @@ describe('RedisMessageStore', { skip: redisIsolationSkipReason(REDIS_URL) }, () 
 
   it('scanByDeliveryStatus returns empty array when no matches', async () => {
     const now = Date.now();
-    await store.append({
+    await appendFixture(store, {
       userId: 'u1',
       catId: null,
       content: 'normal msg',
@@ -1638,7 +1695,7 @@ describe('RedisMessageStore', { skip: redisIsolationSkipReason(REDIS_URL) }, () 
     const now = Date.now();
     const created = [];
     for (let i = 0; i < 5; i++) {
-      const msg = await store.append({
+      const msg = await appendFixture(store, {
         userId: 'u1',
         catId: null,
         content: `queued ${i}`,
@@ -1661,7 +1718,7 @@ describe('RedisMessageStore', { skip: redisIsolationSkipReason(REDIS_URL) }, () 
 
   it('scanByDeliveryStatus finds canceled messages', async () => {
     const now = Date.now();
-    const m1 = await store.append({
+    const m1 = await appendFixture(store, {
       userId: 'u1',
       catId: null,
       content: 'will be canceled',

@@ -13,6 +13,8 @@ export interface TurnAbsorptionItem {
   receiptScope?: QueueMessageReceipt['scope'];
   /** The cat that consumed this source; never the source author identity. */
   handlerCatId: string;
+  /** Agent-authored sources retain their own identity instead of borrowing the co-creator label. */
+  sourceAuthorCatId?: string;
   invocationId: string;
   seenAt: number;
   outcomeAt?: number;
@@ -57,7 +59,14 @@ export function terminalSurfaceMessageId(messages: readonly ChatMessage[], invoc
 function exactExposedTarget(message: ChatMessage, invocationId: string): ReceiptTarget | undefined {
   const receipt = message.extra?.queueReceipt;
   if (!receipt || receipt.scope === 'primary_trigger' || message.extra?.recall?.exposure === 'none') return undefined;
-  return receipt.targets.find((target) => target.invocationId === invocationId && typeof target.seenAt === 'number');
+  return receipt.targets.find(
+    (target) =>
+      target.invocationId === invocationId &&
+      typeof target.seenAt === 'number' &&
+      target.attempts?.some(
+        (attempt) => attempt.invocationId === invocationId && typeof attempt.activeAppendAcceptedAt === 'number',
+      ) === true,
+  );
 }
 
 function classifyTarget(target: ReceiptTarget): TurnAbsorptionKind {
@@ -73,29 +82,15 @@ function classifyTarget(target: ReceiptTarget): TurnAbsorptionKind {
   return 'actionable';
 }
 
-function hasExactHandledOutcome(target: ReceiptTarget): boolean {
-  const outcome = target.outcome;
-  if (target.state !== 'handled' || !outcome || outcome.invocationId !== target.invocationId) return false;
-  return outcome.disposition === 'responded' || outcome.disposition === 'completed_with_turn';
-}
-
-/**
- * A source body moves visually only after every target has reached a terminal
- * state. A handled target must never hide text that another target still needs
- * to act on. Recalled messages are already content-free by store contract.
- */
+/** Authored sources are canonical timeline records and never move into a response bubble. */
 export function shouldFoldSourceBody(message: ChatMessage): boolean {
-  const receipt = message.extra?.queueReceipt;
-  if (!receipt || receipt.scope === 'primary_trigger' || message.extra?.recall) return false;
-  const hasHandledTarget = receipt.targets.some(hasExactHandledOutcome);
-  return (
-    hasHandledTarget && receipt.targets.every((target) => target.state === 'handled' || target.state === 'withdrawn')
-  );
+  void message;
+  return false;
 }
 
 export function foldedSourceInvocationId(message: ChatMessage): string | undefined {
-  if (!shouldFoldSourceBody(message)) return undefined;
-  return message.extra?.queueReceipt?.targets.find(hasExactHandledOutcome)?.invocationId;
+  void message;
+  return undefined;
 }
 
 export function foldedSourceInvocationIdInTimeline(
@@ -125,11 +120,12 @@ export function projectTurnAbsorptionSummary(
 ): TurnAbsorptionProjection | null {
   const bySourceMessage = new Map<string, TurnAbsorptionItem>();
   for (const message of messages) {
-    if (message.type !== 'user' || bySourceMessage.has(message.id)) continue;
+    if ((message.type !== 'user' && message.type !== 'assistant') || bySourceMessage.has(message.id)) continue;
     const target = exactExposedTarget(message, invocationId);
     if (!target || !target.invocationId || target.seenAt === undefined) continue;
     const recalled = message.extra?.recall?.exposure === 'seen';
-    const bodyProjectedHere = foldedSourceInvocationId(message) === invocationId;
+    const sourceAuthorCatId =
+      message.from?.kind === 'agent' ? message.from.catId : message.type === 'assistant' ? message.catId : undefined;
     bySourceMessage.set(message.id, {
       sourceMessageId: message.id,
       sourceTimestamp: message.timestamp,
@@ -138,11 +134,12 @@ export function projectTurnAbsorptionSummary(
       kind: classifyTarget(target),
       receiptScope: message.extra?.queueReceipt?.scope,
       handlerCatId: target.catId,
+      ...(sourceAuthorCatId ? { sourceAuthorCatId } : {}),
       invocationId: target.invocationId,
       seenAt: target.seenAt,
       outcomeAt: targetOutcomeAt(target),
       recalled,
-      bodyProjectedHere,
+      bodyProjectedHere: false,
     });
   }
 
@@ -177,5 +174,7 @@ export function projectTurnAbsorptionSummary(
  * body projection.
  */
 export function shouldFoldSourceIntoTurnSummary(message: ChatMessage, invocationId: string): boolean {
-  return foldedSourceInvocationId(message) === invocationId;
+  void message;
+  void invocationId;
+  return false;
 }

@@ -8,6 +8,7 @@
 
 import assert from 'node:assert/strict';
 import { describe, it, mock } from 'node:test';
+import { canonicalTestQueueInput } from './helpers/message-from-fixtures.js';
 
 const { InvocationQueue } = await import('../dist/domains/cats/services/agents/invocation/InvocationQueue.js');
 const { QueueProcessor } = await import('../dist/domains/cats/services/agents/invocation/QueueProcessor.js');
@@ -30,6 +31,8 @@ function stubDeps(overrides = {}) {
       update: mock.fn(async () => {}),
     },
     router: {
+      resolveExplicitTargets: mock.fn(async (requestedCatIds) => [...requestedCatIds]),
+      resolveConversationTargetsAtAdmission: mock.fn(async (requestedCatIds) => [...requestedCatIds]),
       routeExecution: mock.fn(async function* () {
         yield { type: 'done', catId: 'opus', timestamp: Date.now() };
       }),
@@ -54,16 +57,19 @@ function stubDeps(overrides = {}) {
 }
 
 function enqueueEntry(queue, overrides = {}) {
-  const result = queue.enqueue({
-    ownerAuthProvenance: 'unknown',
-    threadId: 't1',
-    userId: 'u1',
-    content: '@gemini @opus hello',
-    source: 'user',
-    targetCats: ['gemini', 'opus'],
-    intent: 'execute',
-    ...overrides,
-  });
+  const result = queue.enqueue(
+    canonicalTestQueueInput({
+      kind: 'private_input',
+      ownerAuthProvenance: 'unknown',
+      threadId: 't1',
+      userId: 'u1',
+      content: '@gemini @opus hello',
+      source: 'agent',
+      targetCats: ['gemini', 'opus'],
+      intent: 'execute',
+      ...overrides,
+    }),
+  );
   return result.entry;
 }
 
@@ -80,6 +86,8 @@ describe('F148 fix: cursor ack on abort (multi-cat)', () => {
         has: mock.fn(() => false),
       },
       router: {
+        resolveExplicitTargets: mock.fn(async (requestedCatIds) => [...requestedCatIds]),
+        resolveConversationTargetsAtAdmission: mock.fn(async (requestedCatIds) => [...requestedCatIds]),
         routeExecution: mock.fn(async function* (_u, _m, _t, _mid, _cats, _intent, opts) {
           // Gemini completes — cursor boundary collected
           opts.cursorBoundaries.set('gemini', 'boundary-gemini-001');
@@ -94,8 +102,7 @@ describe('F148 fix: cursor ack on abort (multi-cat)', () => {
       },
     });
 
-    const entry = enqueueEntry(deps.queue);
-    deps.queue.backfillMessageId('t1', 'u1', entry.id, 'msg-1');
+    enqueueEntry(deps.queue);
 
     const processor = new QueueProcessor(deps);
     await processor.onInvocationComplete('t1', 'gemini', 'succeeded');
@@ -120,6 +127,8 @@ describe('F148 fix: cursor ack on abort (multi-cat)', () => {
   it('acks collected cursors when routeExecution throws after partial completion', async () => {
     const deps = stubDeps({
       router: {
+        resolveExplicitTargets: mock.fn(async (requestedCatIds) => [...requestedCatIds]),
+        resolveConversationTargetsAtAdmission: mock.fn(async (requestedCatIds) => [...requestedCatIds]),
         routeExecution: mock.fn(async function* (_u, _m, _t, _mid, _cats, _intent, opts) {
           // Gemini completes — cursor boundary collected
           opts.cursorBoundaries.set('gemini', 'boundary-gemini-002');
@@ -132,8 +141,7 @@ describe('F148 fix: cursor ack on abort (multi-cat)', () => {
       },
     });
 
-    const entry = enqueueEntry(deps.queue);
-    deps.queue.backfillMessageId('t1', 'u1', entry.id, 'msg-2');
+    enqueueEntry(deps.queue);
 
     const processor = new QueueProcessor(deps);
     await processor.onInvocationComplete('t1', 'gemini', 'succeeded');
@@ -164,6 +172,8 @@ describe('F148 fix: cursor ack on abort (multi-cat)', () => {
         has: mock.fn(() => false),
       },
       router: {
+        resolveExplicitTargets: mock.fn(async (requestedCatIds) => [...requestedCatIds]),
+        resolveConversationTargetsAtAdmission: mock.fn(async (requestedCatIds) => [...requestedCatIds]),
         routeExecution: mock.fn(async function* () {
           // Abort fires immediately — no cursor boundaries collected
           abortController.abort('preempted');
@@ -173,8 +183,7 @@ describe('F148 fix: cursor ack on abort (multi-cat)', () => {
       },
     });
 
-    const entry = enqueueEntry(deps.queue, { targetCats: ['opus'] });
-    deps.queue.backfillMessageId('t1', 'u1', entry.id, 'msg-3');
+    enqueueEntry(deps.queue, { targetCats: ['opus'] });
 
     const processor = new QueueProcessor(deps);
     await processor.onInvocationComplete('t1', 'opus', 'succeeded');

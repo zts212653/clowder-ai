@@ -125,7 +125,7 @@ describe('eval-domain-daily task spec', () => {
     assert.equal(deliverMock.mock.callCount(), 1);
     const deliverCall = deliverMock.mock.calls[0].arguments[0];
     assert.equal(deliverCall.threadId, 'thread_eval_a2a');
-    assert.equal(deliverCall.userId, 'scheduler');
+    assert.equal(deliverCall.userId, 'default-user');
     assert.ok(deliverCall.content.includes('eval:a2a'), 'content should mention domain');
     assert.match(deliverCall.content, /Trigger channel: time/);
     assert.match(deliverCall.content, /Invocation is only a wake attempt/);
@@ -334,7 +334,7 @@ describe('eval-domain-weekly task spec (AC-E19, AC-E20)', () => {
     assert.equal(deliverMock.mock.callCount(), 1);
     const deliverCall = deliverMock.mock.calls[0].arguments[0];
     assert.equal(deliverCall.threadId, 'thread_eval_capability_wakeup');
-    assert.equal(deliverCall.userId, 'scheduler');
+    assert.equal(deliverCall.userId, 'default-user');
     assert.ok(deliverCall.content.includes('eval:capability-wakeup'), 'content should mention domain');
 
     assert.equal(triggerMock.mock.callCount(), 1);

@@ -61,6 +61,7 @@ function createMockDeps(services) {
         get: async () => null,
         getParticipantsWithActivity: async () => [],
         updateParticipantActivity: async () => {},
+        consumeMentionRoutingFeedback: async () => null,
       },
       apiUrl: 'http://127.0.0.1:3004',
     },
@@ -381,7 +382,7 @@ describe('cloud-#4: route-parallel suppresses abort-induced error (cancel AFTER 
       'codex (not cancelled) streamed normally',
     );
     assert.ok(
-      deps.storedMessages.some((m) => m.catId === 'opus' && m.content === 'partial'),
+      deps.storedMessages.some((m) => m.from?.kind === 'agent' && m.from.catId === 'opus' && m.content === 'partial'),
       'partial pre-abort output must pass through the normal done finalizer and persist',
     );
   });
@@ -410,7 +411,11 @@ describe('cloud-#4: route-parallel suppresses abort-induced error (cancel AFTER 
       Symbol.asyncIterator
     ]();
 
-    while (!deps.storedMessages.some((m) => m.catId === 'opus' && m.content === 'partial-before-cancel')) {
+    while (
+      !deps.storedMessages.some(
+        (m) => m.from?.kind === 'agent' && m.from.catId === 'opus' && m.content === 'partial-before-cancel',
+      )
+    ) {
       const result = await Promise.race([
         iterator.next(),
         new Promise((resolve) => setTimeout(() => resolve('timeout'), 100)),

@@ -435,3 +435,56 @@ test('final real assistant without usage clears an older last-turn context measu
   assert.equal(usage.inputTokens, 100, 'aggregate telemetry from observed turns remains available');
   assert.equal(usage.lastTurnInputTokens, undefined, 'missing final-turn usage must not reuse the prior turn');
 });
+
+// ─── LI-005: user entry → tool_result bridge ───────────────────────────
+
+test('LI-005: user entries with tool_result blocks emit tool_result AgentMessages', () => {
+  const entries = [
+    {
+      type: 'user',
+      message: {
+        content: [
+          {
+            type: 'tool_result',
+            tool_use_id: 'toolu_hold',
+            content: '{"status":"ok","held":true}',
+            is_error: false,
+          },
+        ],
+      },
+    },
+  ];
+  const out = transcriptEntriesToAgentMessages(entries, { catId: CAT_ID });
+  assert.equal(out.length, 1, 'should emit one tool_result');
+  assert.equal(out[0].type, 'tool_result');
+  assert.equal(out[0].toolResultStatus, 'ok');
+  assert.equal(out[0].content, '{"status":"ok","held":true}');
+  assert.equal(out[0].toolUseId, 'toolu_hold');
+});
+
+test('LI-005: user entries with is_error:true emit error toolResultStatus', () => {
+  const entries = [
+    {
+      type: 'user',
+      message: {
+        content: [
+          {
+            type: 'tool_result',
+            tool_use_id: 'toolu_fail',
+            content: 'Rate limit exceeded',
+            is_error: true,
+          },
+        ],
+      },
+    },
+  ];
+  const out = transcriptEntriesToAgentMessages(entries, { catId: CAT_ID });
+  assert.equal(out.length, 1);
+  assert.equal(out[0].toolResultStatus, 'error');
+});
+
+test('LI-005: user entries without tool_result blocks are skipped', () => {
+  const entries = [{ type: 'user', message: { content: [{ type: 'text', text: 'hello' }] } }];
+  const out = transcriptEntriesToAgentMessages(entries, { catId: CAT_ID });
+  assert.equal(out.length, 0, 'non-tool_result user content → no output');
+});

@@ -278,15 +278,6 @@ function createMockDeps(services, appendCalls, threadStore = null, guideSessionS
   };
 }
 
-function withClaimedA2ASlot(options = {}) {
-  return {
-    invocationController: new AbortController(),
-    trackA2ASlot: () => true,
-    completeA2ASlots: () => {},
-    ...options,
-  };
-}
-
 function degradationSystemInfos(messages) {
   return messages.filter((m) => {
     if (m.type !== 'system_info') return false;
@@ -1368,7 +1359,7 @@ describe('incremental current-message fallback integration', () => {
     assert.match(prompt, /R1: 《Target Thread》/);
     assert.ok(prompt.includes(`[跳过去 ${targetBinding}]`));
 
-    const storedReply = appendCalls.find((msg) => msg.catId === 'opus');
+    const storedReply = appendCalls.find((msg) => msg.from?.kind === 'agent' && msg.from.catId === 'opus');
     const action = storedReply?.extra?.rich?.blocks
       ?.flatMap((block) => block.actions ?? [])
       .find((candidate) => candidate.payload?.threadId === 'thread_target');
@@ -1392,7 +1383,7 @@ describe('incremental current-message fallback integration', () => {
     assert.match(parallelPrompt, /R1: 《Target Thread》/);
     assert.ok(parallelPrompt.includes(`[跳过去 ${targetBinding}]`));
     const parallelAction = appendCalls
-      .find((msg) => msg.catId === 'opus')
+      .find((msg) => msg.from?.kind === 'agent' && msg.from.catId === 'opus')
       ?.extra?.rich?.blocks?.flatMap((block) => block.actions ?? [])
       .find((candidate) => candidate.payload?.threadId === 'thread_target');
     assert.ok(parallelAction, 'parallel action resolution should use the same injected R1 table');
@@ -1404,8 +1395,9 @@ describe('incremental current-message fallback integration', () => {
     })) {
     }
     const mismatchedActions =
-      appendCalls.find((msg) => msg.catId === 'opus')?.extra?.rich?.blocks?.flatMap((block) => block.actions ?? []) ??
-      [];
+      appendCalls
+        .find((msg) => msg.from?.kind === 'agent' && msg.from.catId === 'opus')
+        ?.extra?.rich?.blocks?.flatMap((block) => block.actions ?? []) ?? [];
     assert.deepStrictEqual(
       mismatchedActions,
       [],
@@ -1419,8 +1411,9 @@ describe('incremental current-message fallback integration', () => {
     })) {
     }
     const mixedBareActions =
-      appendCalls.find((msg) => msg.catId === 'opus')?.extra?.rich?.blocks?.flatMap((block) => block.actions ?? []) ??
-      [];
+      appendCalls
+        .find((msg) => msg.from?.kind === 'agent' && msg.from.catId === 'opus')
+        ?.extra?.rich?.blocks?.flatMap((block) => block.actions ?? []) ?? [];
     assert.deepStrictEqual(
       mixedBareActions,
       [],
@@ -1451,7 +1444,7 @@ describe('incremental current-message fallback integration', () => {
       currentUserMessageId,
     })) {
     }
-    const serialStoredReply = appendCalls.find((msg) => msg.catId === 'opus');
+    const serialStoredReply = appendCalls.find((msg) => msg.from?.kind === 'agent' && msg.from.catId === 'opus');
     assertDanglingTriageStoredAsVisibleText(serialStoredReply, 'serial');
     assert.deepStrictEqual(serialStoredReply.mentions, [], 'serial should ignore hidden triage A2A mentions');
     assert.equal(
@@ -1459,7 +1452,10 @@ describe('incremental current-message fallback integration', () => {
       0,
       'serial should not invoke a cat mentioned only in hidden triage',
     );
-    assert.ok(!appendCalls.some((msg) => msg.catId === 'codex'), 'serial should not persist a hidden A2A follow-up');
+    assert.ok(
+      !appendCalls.some((msg) => msg.from?.kind === 'agent' && msg.from.catId === 'codex'),
+      'serial should not persist a hidden A2A follow-up',
+    );
 
     captureService.calls.length = 0;
     hiddenMentionService.calls.length = 0;
@@ -1469,7 +1465,7 @@ describe('incremental current-message fallback integration', () => {
     })) {
     }
     assertDanglingTriageStoredAsVisibleText(
-      appendCalls.find((msg) => msg.catId === 'opus'),
+      appendCalls.find((msg) => msg.from?.kind === 'agent' && msg.from.catId === 'opus'),
       'parallel',
     );
     assert.equal(hiddenMentionService.calls.length, 0, 'parallel should not invoke hidden triage mentions');
@@ -1556,8 +1552,9 @@ describe('incremental current-message fallback integration', () => {
 
     const assertVerifiedAction = (mode) => {
       const actions =
-        appendCalls.find((msg) => msg.catId === 'opus')?.extra?.rich?.blocks?.flatMap((block) => block.actions ?? []) ??
-        [];
+        appendCalls
+          .find((msg) => msg.from?.kind === 'agent' && msg.from.catId === 'opus')
+          ?.extra?.rich?.blocks?.flatMap((block) => block.actions ?? []) ?? [];
       assert.equal(actions.length, 1, `${mode} should persist one verified teleport action`);
       assert.equal(actions[0].action, 'concierge_teleport');
       assert.equal(actions[0].label, `跳过去：${targetTitle}`);
@@ -1875,355 +1872,55 @@ describe('agent message timestamp uses invocation start time (#557)', () => {
   });
 });
 
-describe('routeSerial A2A worklist', () => {
-  it('extends worklist when cat response contains line-start @mention', async () => {
+describe('routeSerial message wake and incremental context', () => {
+  it('publishes a line-start mention through the completed response wake without inline execution', async () => {
     const { routeSerial } = await import('../dist/domains/cats/services/agents/routing/route-serial.js');
-    // opus responds with a line-start mention of codex
-    const deps = createMockDeps({
-      opus: createMockService('opus', '我写好了代码\n@缅因猫 请 review 一下'),
-      codex: createMockService('codex', 'LGTM, 代码没问题'),
-    });
-
-    const messages = [];
-    for await (const msg of routeSerial(
-      deps,
-      ['opus'],
-      'write hello world',
-      'user1',
-      'thread1',
-      withClaimedA2ASlot(),
-    )) {
-      messages.push(msg);
-    }
-
-    // Should have text from both cats (opus + codex via A2A)
-    const opusText = messages.filter((m) => m.type === 'text' && m.catId === 'opus');
-    const codexText = messages.filter((m) => m.type === 'text' && m.catId === 'codex');
-    assert.ok(opusText.length > 0, 'opus should produce text');
-    assert.ok(codexText.length > 0, 'codex should be invoked via A2A');
-  });
-
-  it('yields a2a_handoff event when A2A chain triggers', async () => {
-    const { routeSerial } = await import('../dist/domains/cats/services/agents/routing/route-serial.js');
-    const deps = createMockDeps({
-      opus: createMockService('opus', '请看一下\n@缅因猫 帮忙检查'),
-      codex: createMockService('codex', '已检查完毕'),
-    });
-
-    const messages = [];
-    for await (const msg of routeSerial(deps, ['opus'], 'check code', 'user1', 'thread1', withClaimedA2ASlot())) {
-      messages.push(msg);
-    }
-
-    const handoffs = messages.filter((m) => m.type === 'a2a_handoff');
-    assert.equal(handoffs.length, 1, 'should yield exactly one a2a_handoff');
-    assert.equal(handoffs[0].catId, 'opus', 'handoff should be from opus');
-    assert.equal(handoffs[0].targetCatId, 'codex', 'handoff must carry machine-readable target cat');
-    assert.ok(handoffs[0].invocationId, 'handoff must carry current turn invocation id for live slot migration');
-    assert.ok(handoffs[0].content.includes('→'), 'handoff content should show arrow');
-  });
-
-  it('A2A cat receives previousResponses in prompt (debug mode)', async () => {
-    const { routeSerial } = await import('../dist/domains/cats/services/agents/routing/route-serial.js');
-    const codexService = createCapturingService('codex', '已审查');
-    const deps = createMockDeps({
-      opus: createMockService('opus', '代码完成\n@缅因猫 请review'),
-      codex: codexService,
-    });
-
-    for await (const _ of routeSerial(
-      deps,
-      ['opus'],
-      'write code',
-      'user1',
-      'thread1',
-      withClaimedA2ASlot({ thinkingMode: 'debug' }),
-    )) {
-    }
-
-    assert.equal(codexService.calls.length, 1, 'codex should be called once');
-    assert.ok(
-      codexService.calls[0].includes('代码完成'),
-      'codex prompt should include opus response content in debug mode',
-    );
-  });
-
-  it('A2A cat does NOT receive previousResponses in play mode (thinking isolation)', async () => {
-    const { routeSerial } = await import('../dist/domains/cats/services/agents/routing/route-serial.js');
-    const codexService = createCapturingService('codex', '已审查');
-    const deps = createMockDeps({
-      opus: createMockService('opus', '代码完成\n@缅因猫 请review'),
-      codex: codexService,
-    });
-
-    // Explicitly set play mode — cats should not see each other's thinking (default is now debug)
-    for await (const _ of routeSerial(
-      deps,
-      ['opus'],
-      'write code',
-      'user1',
-      'thread1',
-      withClaimedA2ASlot({ thinkingMode: 'play' }),
-    )) {
-    }
-
-    assert.equal(codexService.calls.length, 1, 'codex should be called once');
-    assert.ok(
-      !codexService.calls[0].includes('代码完成'),
-      'codex prompt should NOT include opus response content in play mode',
-    );
-  });
-
-  it('isFinal is true only on the last done in the chain', async () => {
-    const { routeSerial } = await import('../dist/domains/cats/services/agents/routing/route-serial.js');
-    const deps = createMockDeps({
-      opus: createMockService('opus', '好的\n@缅因猫 帮忙'),
-      codex: createMockService('codex', '搞定了'),
-    });
-
-    const messages = [];
-    for await (const msg of routeSerial(deps, ['opus'], 'help', 'user1', 'thread1', withClaimedA2ASlot())) {
-      messages.push(msg);
-    }
-
-    const doneMsgs = messages.filter((m) => m.type === 'done');
-    assert.ok(doneMsgs.length >= 2, 'should have done from both cats');
-    // First done (opus) should NOT be isFinal
-    const opusDone = doneMsgs.find((m) => m.catId === 'opus');
-    assert.ok(!opusDone.isFinal, 'opus done should not be isFinal');
-    // Last done (codex) should be isFinal
-    const codexDone = doneMsgs.find((m) => m.catId === 'codex');
-    assert.ok(codexDone.isFinal, 'codex done (chain end) should be isFinal');
-  });
-
-  it('does not extend worklist beyond maxA2ADepth', async () => {
-    const { routeSerial } = await import('../dist/domains/cats/services/agents/routing/route-serial.js');
-    // opus mentions codex, codex mentions gemini, gemini mentions opus
-    // With maxA2ADepth=1, only first A2A hop should trigger
-    const deps = createMockDeps({
-      opus: createMockService('opus', '看看吧\n@缅因猫 帮忙'),
-      codex: createMockService('codex', '需要设计\n@暹罗猫 帮忙设计'),
-      gemini: createMockService('gemini', '设计好了'),
-    });
-
-    const messages = [];
-    for await (const msg of routeSerial(
-      deps,
-      ['opus'],
-      'test',
-      'user1',
-      'thread1',
-      withClaimedA2ASlot({ maxA2ADepth: 1 }),
-    )) {
-      messages.push(msg);
-    }
-
-    // Only opus + codex should produce text (depth=1 allows 1 hop)
-    const catIds = [...new Set(messages.filter((m) => m.type === 'text').map((m) => m.catId))];
-    assert.ok(catIds.includes('opus'), 'opus should have text');
-    assert.ok(catIds.includes('codex'), 'codex should be invoked (1st hop)');
-    assert.ok(!catIds.includes('gemini'), 'gemini should NOT be invoked (2nd hop blocked by depth=1)');
-  });
-
-  it('does not extend A2A worklist when queue has queued user messages', async () => {
-    const { routeSerial } = await import('../dist/domains/cats/services/agents/routing/route-serial.js');
-    const deps = createMockDeps({
-      opus: createMockService('opus', '我先回复\n@缅因猫 帮忙继续'),
-      codex: createMockService('codex', 'should not run when queue pending'),
-    });
-
-    const messages = [];
-    for await (const msg of routeSerial(deps, ['opus'], 'test', 'user1', 'thread1', {
-      queueHasQueuedMessages: () => true,
-    })) {
-      messages.push(msg);
-    }
-
-    const codexText = messages.filter((m) => m.type === 'text' && m.catId === 'codex');
-    assert.equal(codexText.length, 0, 'A2A should yield to queued user messages');
-
-    const handoffs = messages.filter((m) => m.type === 'a2a_handoff');
-    assert.equal(handoffs.length, 0, 'should not emit handoff when fairness guard blocks extension');
-  });
-
-  it('defers A2A handoff via callback when fairness gate blocks (F185-B AC-B3/B6)', async () => {
-    const { routeSerial } = await import('../dist/domains/cats/services/agents/routing/route-serial.js');
+    const inlineTargetCalls = [];
     const deps = createMockDeps({
       opus: createMockService('opus', '代码完成\n@缅因猫 请 review'),
-      codex: createMockService('codex', 'should not run inline'),
-    });
-
-    const deferredEntries = [];
-    const messages = [];
-    for await (const msg of routeSerial(deps, ['opus'], 'test', 'user1', 'thread1', {
-      queueHasQueuedMessages: () => true,
-      deferA2AEnqueue: (entry) => deferredEntries.push(entry),
-    })) {
-      messages.push(msg);
-    }
-
-    // Codex must NOT execute inline
-    const codexText = messages.filter((m) => m.type === 'text' && m.catId === 'codex');
-    assert.equal(codexText.length, 0, 'codex must not run inline when fairness gate blocks');
-
-    // But deferred enqueue callback must be called with correct metadata
-    assert.equal(deferredEntries.length, 1, 'exactly one deferred A2A entry expected');
-    const deferred = deferredEntries[0];
-    assert.deepEqual(deferred.targetCats, ['codex'], 'deferred target must be codex');
-    assert.equal(deferred.source, 'agent', 'deferred entry source must be agent');
-    assert.equal(deferred.sourceCategory, 'a2a', 'deferred entry sourceCategory must be a2a');
-    assert.equal(deferred.callerCatId, 'opus', 'deferred entry callerCatId must be opus');
-    assert.ok(deferred.content, 'deferred entry must carry caller content (storedContent)');
-    assert.equal(deferred.autoExecute, true, 'deferred entry must have autoExecute=true');
-    assert.equal(deferred.priority, 'normal', 'deferred entry priority must be normal');
-  });
-
-  it('defers A2A enqueue when signal is aborted without user reason (#813 seal recovery)', async () => {
-    const { routeSerial } = await import('../dist/domains/cats/services/agents/routing/route-serial.js');
-    const ac = new AbortController();
-    const deps = createMockDeps({
-      opus: {
+      codex: {
         async *invoke() {
-          yield { type: 'text', catId: 'opus', content: '完成\n@缅因猫 帮忙', timestamp: Date.now() };
-          ac.abort(); // no reason → seal/context-exhaustion case
-          yield { type: 'done', catId: 'opus', timestamp: Date.now() };
+          inlineTargetCalls.push(true);
+          yield { type: 'done', catId: 'codex', timestamp: Date.now() };
         },
       },
-      codex: createMockService('codex', 'should not run inline'),
     });
-
-    const deferredEntries = [];
+    const commits = [];
     const messages = [];
-    for await (const msg of routeSerial(deps, ['opus'], 'test', 'user1', 'thread1', {
-      queueHasQueuedMessages: () => true,
-      deferA2AEnqueue: (entry) => deferredEntries.push(entry),
-      signal: ac.signal,
-    })) {
-      messages.push(msg);
-    }
 
-    assert.equal(deferredEntries.length, 1, 'abort without user reason must defer @mention for seal recovery');
-  });
-
-  it('does not defer A2A enqueue when signal is aborted by user_cancel (P2 gate)', async () => {
-    const { routeSerial } = await import('../dist/domains/cats/services/agents/routing/route-serial.js');
-    const ac = new AbortController();
-    const deps = createMockDeps({
-      opus: {
-        async *invoke() {
-          yield { type: 'text', catId: 'opus', content: '完成\n@缅因猫 帮忙', timestamp: Date.now() };
-          ac.abort('user_cancel'); // user explicitly stopped the flow
-          yield { type: 'done', catId: 'opus', timestamp: Date.now() };
+    for await (const msg of routeSerial(deps, ['opus'], 'write code', 'user1', 'thread1', {
+      ownerAuthProvenance: 'unknown',
+      parentInvocationId: 'parent-route-serial',
+      onLifecycleInvocationStarted: async (input) => ({
+        responseMessageId: 'response-route-serial',
+        priorFrontierMessageId: null,
+        activeRun: {
+          threadId: input.threadId,
+          targetId: input.catId,
+          invocationId: input.invocationId,
+          responseMessageId: 'response-route-serial',
+          inputEntryIds: [],
+          inputMessageIds: [],
+          privateInputEntryIds: [],
+          startedAt: input.startedAt,
         },
+      }),
+      commitCompletedA2AWake: async (input) => {
+        commits.push(input);
+        return { ...input.message, id: input.responseMessageId };
       },
-      codex: createMockService('codex', 'should not run'),
-    });
-
-    const deferredEntries = [];
-    const messages = [];
-    for await (const msg of routeSerial(deps, ['opus'], 'test', 'user1', 'thread1', {
-      queueHasQueuedMessages: () => true,
-      deferA2AEnqueue: (entry) => deferredEntries.push(entry),
-      signal: ac.signal,
     })) {
       messages.push(msg);
     }
 
-    assert.equal(deferredEntries.length, 0, 'user_cancel abort must suppress A2A recovery');
-  });
-
-  it('does not defer A2A enqueue for cat already in pendingTail (cloud P1-2)', async () => {
-    const { routeSerial } = await import('../dist/domains/cats/services/agents/routing/route-serial.js');
-    const deps = createMockDeps({
-      opus: createMockService('opus', '完成\n@缅因猫 请review'),
-      codex: createMockService('codex', 'already in targets, should not be deferred'),
-    });
-
-    const deferredEntries = [];
-    const messages = [];
-    // codex is already in targetCats → it's in pendingTail when opus runs
-    for await (const msg of routeSerial(deps, ['opus', 'codex'], 'test', 'user1', 'thread1', {
-      queueHasQueuedMessages: () => true,
-      deferA2AEnqueue: (entry) => deferredEntries.push(entry),
-    })) {
-      messages.push(msg);
-    }
-
-    assert.equal(deferredEntries.length, 0, 'must not defer-enqueue cat already in pendingTail');
-    // codex should still run from worklist (inline execution)
-    const codexText = messages.filter((m) => m.type === 'text' && m.catId === 'codex');
-    assert.ok(codexText.length > 0, 'codex must still run from worklist even when fairness gate blocks deferred');
-  });
-
-  it('does not call deferA2AEnqueue when fairness gate is clear (F185-B AC-B8)', async () => {
-    const { routeSerial } = await import('../dist/domains/cats/services/agents/routing/route-serial.js');
-    const deps = createMockDeps({
-      opus: createMockService('opus', '看看吧\n@缅因猫 帮忙'),
-      codex: createMockService('codex', '收到'),
-    });
-
-    const deferredEntries = [];
-    const messages = [];
-    for await (const msg of routeSerial(
-      deps,
-      ['opus'],
-      'test',
-      'user1',
-      'thread1',
-      withClaimedA2ASlot({
-        queueHasQueuedMessages: () => false,
-        deferA2AEnqueue: (entry) => deferredEntries.push(entry),
-      }),
-    )) {
-      messages.push(msg);
-    }
-
-    // Codex SHOULD execute inline (gate is clear)
-    const codexText = messages.filter((m) => m.type === 'text' && m.catId === 'codex');
-    assert.ok(codexText.length > 0, 'codex must run inline when fairness gate is clear');
-
-    // No deferred entries
-    assert.equal(deferredEntries.length, 0, 'no deferred enqueue when gate is clear');
-  });
-
-  it('durably defers a second A2A when the target is already executing queued agent work', async () => {
-    const { routeSerial } = await import('../dist/domains/cats/services/agents/routing/route-serial.js');
-    const deps = createMockDeps({
-      opus: createMockService('opus', '代码完成\n@缅因猫 请 review'),
-      codex: createMockService('codex', 'should not be invoked via text-scan'),
-    });
-
-    const deferredEntries = [];
-    const messages = [];
-    for await (const msg of routeSerial(
-      deps,
-      ['opus'],
-      'test',
-      'user1',
-      'thread1',
-      withClaimedA2ASlot({
-        hasQueuedOrActiveAgentForCat: (_tid, catId) => catId === 'codex',
-        trackA2ASlot: () => false,
-        deferA2AEnqueue: (entry) => {
-          deferredEntries.push(entry);
-          return { outcome: 'enqueued', entry };
-        },
-      }),
-    )) {
-      messages.push(msg);
-    }
-
-    const codexText = messages.filter((m) => m.type === 'text' && m.catId === 'codex');
-    assert.equal(codexText.length, 0, 'the busy target must not start in the current route');
-    assert.equal(deferredEntries.length, 1, 'the second intent must gain one durable Queue responsibility');
-    assert.deepEqual(deferredEntries[0].targetCats, ['codex']);
-    assert.equal(deferredEntries[0].source, 'agent');
-    assert.equal(deferredEntries[0].sourceCategory, 'a2a');
-    assert.equal(deferredEntries[0].autoExecute, true);
-    assert.match(deferredEntries[0].content, /请 review/);
-
-    const handoffs = messages.filter((m) => m.type === 'a2a_handoff');
-    assert.equal(handoffs.length, 0, 'deferred responsibility must not masquerade as an inline start');
+    assert.equal(inlineTargetCalls.length, 0, 'the mentioned target must not execute inside the current route');
+    assert.equal(commits.length, 1, 'the completed response must publish exactly one durable wake');
+    assert.deepEqual(commits[0].targetCats, ['codex']);
+    assert.deepEqual(commits[0].message.mentions, ['codex']);
+    assert.equal(
+      messages.some((message) => message.type === 'a2a_handoff'),
+      false,
+    );
   });
 
   it('self-mention does not trigger A2A', async () => {
@@ -2285,154 +1982,6 @@ describe('routeSerial A2A worklist', () => {
     assert.equal(codexText.length, 0, 'codex should not be invoked after abort');
   });
 
-  it('stores mentions correctly in messageStore.append', async () => {
-    const { routeSerial } = await import('../dist/domains/cats/services/agents/routing/route-serial.js');
-    const appendCalls = [];
-    const deps = createMockDeps(
-      {
-        opus: createMockService('opus', '写完了\n@缅因猫 帮review'),
-        codex: createMockService('codex', '审查完毕'),
-      },
-      appendCalls,
-    );
-
-    for await (const _ of routeSerial(deps, ['opus'], 'code', 'user1', 'thread1', withClaimedA2ASlot())) {
-    }
-
-    // opus's stored message should have mentions: ['codex']
-    const opusAppend = appendCalls.find((c) => c.catId === 'opus');
-    assert.ok(opusAppend, 'opus response should be stored');
-    assert.deepEqual(opusAppend.mentions, ['codex'], 'opus mentions should include codex');
-
-    // codex's stored message (no mention in response) → mentions: []
-    const codexAppend = appendCalls.find((c) => c.catId === 'codex');
-    assert.ok(codexAppend, 'codex response should be stored');
-    assert.deepEqual(codexAppend.mentions, [], 'codex mentions should be empty');
-  });
-
-  it('supports 2-hop A2A chain: user→A→B→A', async () => {
-    const { routeSerial } = await import('../dist/domains/cats/services/agents/routing/route-serial.js');
-    let opusCallCount = 0;
-    const deps = createMockDeps({
-      opus: {
-        async *invoke() {
-          opusCallCount++;
-          if (opusCallCount === 1) {
-            yield { type: 'text', catId: 'opus', content: '写好了\n@缅因猫 review', timestamp: Date.now() };
-          } else {
-            yield { type: 'text', catId: 'opus', content: '已修复', timestamp: Date.now() };
-          }
-          yield { type: 'done', catId: 'opus', timestamp: Date.now() };
-        },
-      },
-      codex: createMockService('codex', '有bug\n@布偶猫 请修复'),
-    });
-
-    const messages = [];
-    for await (const msg of routeSerial(
-      deps,
-      ['opus'],
-      'implement feature',
-      'user1',
-      'thread1',
-      withClaimedA2ASlot({ maxA2ADepth: 2 }),
-    )) {
-      messages.push(msg);
-    }
-
-    // Chain: opus → codex → opus (2 hops)
-    const handoffs = messages.filter((m) => m.type === 'a2a_handoff');
-    assert.equal(handoffs.length, 2, 'should have 2 A2A handoffs');
-    assert.equal(opusCallCount, 2, 'opus should be called twice');
-  });
-
-  it('incremental play mode delivers the exact A2A trigger and overlays the deferred cursor on same-cat re-entry', async () => {
-    const { routeSerial } = await import('../dist/domains/cats/services/agents/routing/route-serial.js');
-    const initialMessages = [
-      {
-        id: '0000000000000001-000001-aaaaaaaa',
-        threadId: 'thread1',
-        userId: 'user1',
-        catId: null,
-        content: 'OLD USER MESSAGE ONE',
-        mentions: [],
-        timestamp: 1_000,
-        visibilitySeq: 1,
-      },
-      {
-        id: '0000000000000002-000001-bbbbbbbb',
-        threadId: 'thread1',
-        userId: 'user1',
-        catId: null,
-        content: 'OLD USER MESSAGE TWO',
-        mentions: ['opus'],
-        timestamp: 2_000,
-        visibilitySeq: 2,
-      },
-    ];
-    const storedMessages = [...initialMessages];
-    let nextVisibilitySeq = 3;
-    const opusService = createSequentialCapturingService('opus', [
-      'OPUS EXACT DIRECT BODY\n@\u7f05\u56e0\u732b review',
-      'fixed',
-    ]);
-    const codexService = createOptionsCapturingService('codex', 'CODEX EXACT DIRECT BODY\n@\u5e03\u5076\u732b fix');
-    const deps = createMockDeps({ opus: opusService, codex: codexService });
-    deps.deliveryCursorStore = {
-      getCursor: async () => undefined,
-      ackCursor: async () => {},
-      ackSeenCursor: async () => {},
-    };
-    deps.messageStore.append = async (input) => {
-      const visibilitySeq = nextVisibilitySeq++;
-      const stored = {
-        ...input,
-        id: `000000000000000${visibilitySeq}-000001-${String(visibilitySeq).padStart(8, '0')}`,
-        timestamp: visibilitySeq * 1_000,
-        visibilitySeq,
-      };
-      storedMessages.push(stored);
-      return stored;
-    };
-    deps.messageStore.getById = async (id) => storedMessages.find((candidate) => candidate.id === id);
-    deps.messageStore.getByThreadAfter = async (_threadId, afterCursor) => {
-      const afterSeq = afterCursor?.startsWith('v2:') ? Number(afterCursor.slice(3, 19)) : 0;
-      return storedMessages.filter((candidate) => candidate.visibilitySeq > afterSeq);
-    };
-
-    const cursorBoundaries = new Map();
-    for await (const _ of routeSerial(
-      deps,
-      ['opus'],
-      'OLD USER MESSAGE TWO',
-      'user1',
-      'thread1',
-      withClaimedA2ASlot({
-        currentUserMessageId: initialMessages[1].id,
-        cursorBoundaries,
-        maxA2ADepth: 2,
-        thinkingMode: 'play',
-      }),
-    )) {
-      /* drain */
-    }
-
-    assert.equal(codexService.calls.length, 1, 'codex should be invoked by opus exactly once');
-    assert.ok(
-      codexService.calls[0].prompt.includes('OPUS EXACT DIRECT BODY'),
-      'the exact persisted A2A trigger body must survive play-mode stream isolation',
-    );
-    assert.equal(opusService.calls.length, 2, 'opus should be re-entered after codex replies');
-    assert.ok(
-      opusService.calls[1].includes('CODEX EXACT DIRECT BODY'),
-      'same-cat re-entry must receive the new exact A2A trigger body',
-    );
-    assert.ok(
-      !opusService.calls[1].includes('OLD USER MESSAGE ONE') && !opusService.calls[1].includes('OLD USER MESSAGE TWO'),
-      'same-cat re-entry must read after the in-flight deferred cursor instead of replaying old user messages',
-    );
-  });
-
   it('incremental play mode does not expose or receipt an invisible A2A trigger', async () => {
     const { routeSerial } = await import('../dist/domains/cats/services/agents/routing/route-serial.js');
     const codexService = createOptionsCapturingService('codex', 'ack');
@@ -2475,6 +2024,7 @@ describe('routeSerial A2A worklist', () => {
     for await (const _ of routeSerial(deps, ['codex'], 'VISIBLE USER MESSAGE', 'user1', 'thread1', {
       currentUserMessageId: userMessageId,
       a2aTriggerMessageId: whisperTriggerId,
+      a2aCallerCatId: 'opus',
       thinkingMode: 'play',
     })) {
       /* drain */
@@ -2485,6 +2035,11 @@ describe('routeSerial A2A worklist', () => {
     assert.ok(
       !codexService.calls[0].options.recoveryAnchor?.promptMessageIds.includes(whisperTriggerId),
       'an invisible trigger must not earn an exact body-exposure receipt',
+    );
+    assert.match(
+      codexService.calls[0].prompt,
+      /Direct message from .*\(opus\)/,
+      'Queue caller provenance must reach the child prompt without exposing the trigger body',
     );
   });
 
@@ -2631,44 +2186,26 @@ describe('routeSerial A2A worklist', () => {
     assert.ok(!prompt.includes('SECRET'), 'whisper content must NOT leak via fallback injection');
   });
 
-  it('line-start @mention always routes without keyword gate (no suppression feedback)', async () => {
+  it('does not inject the removed one-shot routing feedback', async () => {
     const { routeSerial } = await import('../dist/domains/cats/services/agents/routing/route-serial.js');
     const { ThreadStore } = await import('../dist/domains/cats/services/stores/ports/ThreadStore.js');
     const threadStore = new ThreadStore();
     const thread = threadStore.create('user1', 'no suppression');
-    const opusService = createCapturingService('opus', '收到');
-    const codexService = createSequentialCapturingService('codex', ['@布偶猫', '第二次调用']);
-    const deps = createMockDeps({ codex: codexService, opus: opusService }, undefined, threadStore);
+    const codexService = createSequentialCapturingService('codex', ['第一次调用', '第二次调用']);
+    const deps = createMockDeps({ codex: codexService }, undefined, threadStore);
 
-    const messages = [];
-    for await (const msg of routeSerial(
-      deps,
-      ['codex'],
-      'first',
-      'user1',
-      thread.id,
-      withClaimedA2ASlot({ thinkingMode: 'debug' }),
-    )) {
-      messages.push(msg);
+    for await (const _ of routeSerial(deps, ['codex'], 'first', 'user1', thread.id, {
+      thinkingMode: 'debug',
+    })) {
+    }
+    for await (const _ of routeSerial(deps, ['codex'], 'second', 'user1', thread.id, {
+      thinkingMode: 'debug',
+    })) {
     }
 
-    // @布偶猫 alone should now trigger A2A handoff (no keyword required)
-    const handoffs = messages.filter((m) => m.type === 'a2a_handoff');
-    assert.equal(handoffs.length, 1, 'bare @布偶猫 should trigger A2A handoff without action keywords');
-
-    // Second invocation should NOT have any routing feedback (suppression system removed)
-    for await (const _ of routeSerial(
-      deps,
-      ['codex'],
-      'second',
-      'user1',
-      thread.id,
-      withClaimedA2ASlot({ thinkingMode: 'debug' }),
-    )) {
-    }
     assert.ok(
       !codexService.calls[1].includes('Routing feedback(one-shot):'),
-      'no routing feedback should be injected (suppression system removed)',
+      'removed routing feedback must not be injected',
     );
   });
 
@@ -2685,7 +2222,7 @@ describe('routeSerial A2A worklist', () => {
     for await (const _ of routeSerial(deps, ['opus'], 'markdown test', 'user1', 'thread1')) {
     }
 
-    const saved = appendCalls.find((c) => c.catId === 'opus');
+    const saved = appendCalls.find((c) => c.from?.kind === 'agent' && c.from.catId === 'opus');
     assert.ok(saved, 'stored message should exist');
     assert.equal(saved.content, '章节A\n---\n章节B', 'sanitizer must not remove normal markdown separator lines');
   });
@@ -3738,7 +3275,7 @@ describe('routeParallel tool events persistence', () => {
     }
 
     // opus message should have toolEvents
-    const opusAppend = appendCalls.find((c) => c.catId === 'opus');
+    const opusAppend = appendCalls.find((c) => c.from?.kind === 'agent' && c.from.catId === 'opus');
     assert.ok(opusAppend, 'opus message should be appended');
     assert.ok(opusAppend.toolEvents, 'opus should have toolEvents');
     assert.equal(opusAppend.toolEvents.length, 2);
@@ -3746,7 +3283,7 @@ describe('routeParallel tool events persistence', () => {
     assert.equal(opusAppend.toolEvents[1].type, 'tool_result');
 
     // codex message should NOT have toolEvents (no tool usage)
-    const codexAppend = appendCalls.find((c) => c.catId === 'codex');
+    const codexAppend = appendCalls.find((c) => c.from?.kind === 'agent' && c.from.catId === 'codex');
     assert.ok(codexAppend, 'codex message should be appended');
     assert.ok(!codexAppend.toolEvents, 'codex should not have toolEvents');
   });
@@ -3771,7 +3308,7 @@ describe('routeParallel tool events persistence', () => {
     }
 
     // Even though opus had no text, it should still be persisted with tool events
-    const opusAppend = appendCalls.find((c) => c.catId === 'opus');
+    const opusAppend = appendCalls.find((c) => c.from?.kind === 'agent' && c.from.catId === 'opus');
     assert.ok(opusAppend, 'tool-only cat should still be persisted');
     assert.equal(opusAppend.content, '', 'content should be empty');
     assert.ok(opusAppend.toolEvents, 'should have toolEvents');
@@ -4177,7 +3714,7 @@ describe('routeParallel A2A safety', () => {
     // F167 L2 AC-A5: mentions must be persisted as [] in parallel mode so that
     // MessageStore.getMentionsFor / pending-mentions flow does NOT surface parallel @ messages.
     // The raw @ tokens are still captured in the `suppressedMentions` log for observability.
-    const opusAppend = appendCalls.find((c) => c.catId === 'opus');
+    const opusAppend = appendCalls.find((c) => c.from?.kind === 'agent' && c.from.catId === 'opus');
     assert.ok(opusAppend, 'opus response should be stored');
     assert.deepEqual(opusAppend.mentions, [], 'AC-A5: parallel-mode mentions must be []');
   });
@@ -4242,9 +3779,9 @@ describe('routeSerial: CLI error without text should not persist empty message (
     assert.ok(errorMsgs.length > 0, 'error message should be yielded to frontend');
 
     // Error-only response: no cat message, error persisted as system message
-    const catAppends = appendCalls.filter((c) => c.catId === 'codex');
+    const catAppends = appendCalls.filter((c) => c.from?.kind === 'agent' && c.from.catId === 'codex');
     assert.equal(catAppends.length, 0, 'error-only should NOT persist as cat message');
-    const sysAppends = appendCalls.filter((c) => c.userId === 'system' && c.catId === null);
+    const sysAppends = appendCalls.filter((c) => c.from?.kind === 'system' && c.from.service === 'agent-error');
     assert.equal(sysAppends.length, 1, 'error should be persisted as system message');
     assert.ok(sysAppends[0].content.startsWith('Error:'), 'system error should start with Error: prefix');
 
@@ -4266,7 +3803,7 @@ describe('routeSerial: CLI error without text should not persist empty message (
     for await (const _ of routeSerial(deps, ['codex'], 'test', 'user1', 'thread1')) {
     }
 
-    const catAppends = appendCalls.filter((c) => c.catId === 'codex');
+    const catAppends = appendCalls.filter((c) => c.from?.kind === 'agent' && c.from.catId === 'codex');
     assert.equal(catAppends.length, 1, 'normal response should be persisted');
     assert.equal(catAppends[0].content, 'normal response');
   });
@@ -4291,7 +3828,7 @@ describe('routeSerial: CLI error without text should not persist empty message (
     }
 
     // Partial text persisted as cat message (clean, no [错误] contamination)
-    const catAppends = appendCalls.filter((c) => c.catId === 'codex');
+    const catAppends = appendCalls.filter((c) => c.from?.kind === 'agent' && c.from.catId === 'codex');
     assert.equal(catAppends.length, 1, 'partial response with text should still be persisted');
     assert.equal(
       catAppends[0].content,
@@ -4299,7 +3836,7 @@ describe('routeSerial: CLI error without text should not persist empty message (
       'cat content should be clean text without error suffix',
     );
     // Error persisted separately as system message
-    const sysAppends = appendCalls.filter((c) => c.userId === 'system' && c.catId === null);
+    const sysAppends = appendCalls.filter((c) => c.from?.kind === 'system' && c.from.service === 'agent-error');
     assert.equal(sysAppends.length, 1, 'error should be persisted as separate system message');
     assert.ok(sysAppends[0].content.includes('timeout'), 'system error should contain error text');
   });
@@ -4342,7 +3879,7 @@ describe('routeSerial: done-only (no text, no error)', () => {
     })) {
     }
 
-    const catAppends = appendCalls.filter((c) => c.catId === 'codex');
+    const catAppends = appendCalls.filter((c) => c.from?.kind === 'agent' && c.from.catId === 'codex');
     assert.equal(catAppends.length, 0, 'done-only cat should not persist a blank message');
   });
 
@@ -4437,7 +3974,7 @@ describe('routeSerial: done-only (no text, no error)', () => {
     const doneMsgs = messages.filter((m) => m.type === 'done');
     assert.equal(doneMsgs.length, 1, 'silent cat should still produce one done event');
     assert.equal(doneMsgs[0].isFinal, true, 'silent single-cat run should mark done as final');
-    const catAppends = appendCalls.filter((c) => c.catId === 'codex');
+    const catAppends = appendCalls.filter((c) => c.from?.kind === 'agent' && c.from.catId === 'codex');
     assert.equal(catAppends.length, 0, 'silent cat should not persist blank content');
   });
 });
@@ -4461,7 +3998,7 @@ describe('routeParallel: done-only (no text, no error)', () => {
     const doneMsgs = messages.filter((m) => m.type === 'done');
     assert.equal(doneMsgs.length, 1, 'silent parallel cat should still produce one done event');
     assert.equal(doneMsgs[0].isFinal, true, 'silent parallel single-cat run should mark done as final');
-    const catAppends = appendCalls.filter((c) => c.catId === 'codex');
+    const catAppends = appendCalls.filter((c) => c.from?.kind === 'agent' && c.from.catId === 'codex');
     assert.equal(catAppends.length, 0, 'silent parallel cat should not persist blank content');
   });
 

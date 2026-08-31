@@ -283,7 +283,14 @@ describe('TaskOutcomeEpisodeStore (F192 Phase G)', () => {
 
     store.appendSignal(ep.episodeId, {
       category: /** @type {const} */ ('a2'),
-      record: { type: 'magic_word_ref', eventId: 'evt_global' },
+      record: {
+        type: 'magic_word_ref',
+        eventId: 'evt_global',
+        word: '脚手架',
+        timestamp: new Date().toISOString(),
+        threadId: 'thread_a',
+        catId: 'opus',
+      },
       idempotencyKey: key,
     });
 
@@ -373,7 +380,14 @@ describe('TaskOutcomeEpisodeStore (F192 Phase G)', () => {
     // Same-episode replay should be deduped by the backfilled key
     const result = migratedStore.appendSignal('ep-old', {
       category: /** @type {const} */ ('a2'),
-      record: { type: 'magic_word_ref', eventId: 'evt_pre' },
+      record: {
+        type: 'magic_word_ref',
+        eventId: 'evt_pre',
+        word: '脚手架',
+        timestamp: new Date().toISOString(),
+        threadId: 'thread_old',
+        catId: 'opus',
+      },
       idempotencyKey: 'mwr:evt_pre',
     });
     assert.equal(result.appended, false, 'replay of backfilled eventId should be deduped');

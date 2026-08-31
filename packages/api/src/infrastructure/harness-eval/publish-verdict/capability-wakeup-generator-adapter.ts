@@ -18,8 +18,7 @@ import type { VerdictGenerator } from './types.js';
  *   2. validateCapabilityWakeupSelector (PR-1a's structural validator —
  *      capability non-empty, no newlines, window edges finite + ordered, etc.)
  *   3. provider.resolve(selector) → ClassifiedCapabilityWakeupTrial[]
- *   4. Load EvalDomainRegistryEntry from registry inside isolated harness root
- *      (registry is on origin/main, included in isolated worktree)
+ *   4. Load EvalDomainRegistryEntry from the live runtime registry
  *   5. generateCapabilityWakeupLiveVerdict with submittedPacket (砚砚 R8 P1: cat
  *      owns verdict; tool only overrides bundle refs)
  *
@@ -56,7 +55,7 @@ export function createCapabilityWakeupGeneratorAdapter(provider: CapabilityWakeu
       );
     }
 
-    const domains = loadDomains(deps.harnessFeedbackRoot);
+    const domains = loadDomains(deps.liveHarnessFeedbackRoot);
     const domain = domains.get(packet.domainId);
     if (!domain) {
       throw new Error(`unknown_domain: ${packet.domainId} not in registry`);
@@ -81,14 +80,8 @@ export function createCapabilityWakeupGeneratorAdapter(provider: CapabilityWakeu
 
     // PR-2 R3 P1 (cloud): cw generator writes `trials.json` + `summary.json` at
     // `<repoRoot>/generated/capability-wakeup/<verdictId>/` (referenced by
-    // provenance.json with sha256). Publisher MUST stage this dir or auto-PR
-    // omits raw inputs and reviewers/main can't audit/replay the verdict.
-    //
-    // NOTE: `generated/capability-wakeup/` is .gitignored (.gitignore:209). The
-    // FIX for that lives in `git-worktree-publisher.ts:71` (`git add -f --`) —
-    // cloud R4/R5 keep flagging this line as if the fix should be here, but the
-    // gitignore force-add is the publisher's responsibility. See R4 commit
-    // `51c49c847` and R4 P1 comment in git-worktree-publisher.ts:66-70.
+    // provenance.json with sha256). The ArtifactPublisher persists the whole
+    // staging root outside the product Git repository, including this directory.
     return {
       verdictPath: artifact.path,
       bundleDir: artifact.bundleDir,

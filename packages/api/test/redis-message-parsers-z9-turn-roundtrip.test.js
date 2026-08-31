@@ -399,3 +399,45 @@ describe('F194 Phase Z9 hotfix — safeParseExtra preserves turnInvocationId', (
     assert.equal(parsed?.memoryCue, undefined);
   });
 });
+
+describe('routing warning persistence', () => {
+  it('round-trips typed inline routing warnings', async () => {
+    const { serializeExtra, safeParseExtra } = await import(
+      '../dist/domains/cats/services/stores/redis/redis-message-parsers.js'
+    );
+    const input = {
+      routingWarnings: [
+        { kind: 'cat_not_found', mention: '@missing', alternatives: [] },
+        { kind: 'target_not_in_thread', catId: 'cat-away', threadId: 'thread-1' },
+        {
+          kind: 'mention_ambiguous',
+          mention: '@shared-name',
+          candidates: [
+            {
+              catId: 'cat-one',
+              mention: '@cat-one',
+              displayName: 'Cat One',
+              family: 'Maine Coon',
+            },
+          ],
+        },
+      ],
+    };
+
+    assert.deepEqual(safeParseExtra(serializeExtra(input))?.routingWarnings, input.routingWarnings);
+  });
+
+  it('drops the entire routing warning carrier when one entry is malformed', async () => {
+    const { safeParseExtra } = await import('../dist/domains/cats/services/stores/redis/redis-message-parsers.js');
+    const parsed = safeParseExtra(
+      JSON.stringify({
+        routingWarnings: [
+          { kind: 'cat_not_found', mention: '@missing', alternatives: [] },
+          { kind: 'target_not_in_thread', catId: '', threadId: 'thread-1' },
+        ],
+      }),
+    );
+
+    assert.equal(parsed?.routingWarnings, undefined);
+  });
+});

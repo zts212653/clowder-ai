@@ -17,6 +17,7 @@ import {
 } from './message-disposition-presentation';
 import { QueueEntryActions } from './QueueEntryActions';
 import { UNSETTLED_SEEN_LABEL } from './queue-receipt-projection';
+import { RoutingWarningNotice } from './RoutingWarningNotice';
 
 const SOURCE_CATEGORY_LABEL: Record<string, string> = {
   ci: 'CI',
@@ -100,9 +101,9 @@ function QueueTargetReceiptRow({
     (state === 'queued' || state === 'notified') &&
     !alreadyAttemptedInActiveTurn;
   const targetReceipt = entry.queueReceipt?.targets.find((target) => target.catId === catId);
-  const authorIntent = entry.source === 'user' ? targetReceipt?.authorIntent : undefined;
-  const chip = entry.source === 'user' ? intentChip(authorIntent) : undefined;
-  const truth = entry.source === 'user' ? secondaryTruth(authorIntent, support) : undefined;
+  const authorIntent = entry.from.kind === 'user' ? targetReceipt?.authorIntent : undefined;
+  const chip = entry.from.kind === 'user' ? intentChip(authorIntent) : undefined;
+  const truth = entry.from.kind === 'user' ? secondaryTruth(authorIntent, support) : undefined;
   const capability = targetReceipt?.authorIntent?.carrierCapability ?? activeCarrierCapability;
 
   return (
@@ -166,18 +167,19 @@ function QueueTargetReceiptRow({
 export interface QueueEntryRowProps {
   entry: QueueEntry;
   index: number;
-  isPaused: boolean;
   imageCount: number;
   ownerName: string;
   resolveCatName: (catId: string) => string;
   onRemove: (id: string) => void;
   onRecallEdit: (id: string) => void;
   onSteer: (id: string) => void;
+  onAppend: (entry: QueueEntry) => void;
   onRetry: (messageId: string, targetCatId: string, attemptId: string) => void;
   onRemind: (id: string, targetCatId: string) => void;
   activeInvocationIdByCatId: Readonly<Record<string, string>>;
   activeCarrierCapabilityByCatId: Readonly<Record<string, FreshnessCarrierCapability | undefined>>;
   remindingTargetKeys: ReadonlySet<string>;
+  appendingEntryIds: ReadonlySet<string>;
   retryingAttemptIds: ReadonlySet<string>;
 }
 
@@ -196,36 +198,39 @@ export function SortableQueueEntryRow(props: QueueEntryRowProps) {
 function QueueEntryRow({
   entry,
   index,
-  isPaused,
   imageCount,
   ownerName,
   resolveCatName,
   onRemove,
   onRecallEdit,
   onSteer,
+  onAppend,
   onRetry,
   onRemind,
   activeInvocationIdByCatId,
   activeCarrierCapabilityByCatId,
   remindingTargetKeys,
+  appendingEntryIds,
   retryingAttemptIds,
   dragHandleProps,
 }: QueueEntryRowProps & { dragHandleProps?: Record<string, unknown> }) {
-  const isAgent = entry.source === 'agent';
-  const canRecallEdit = entry.source === 'user' && Boolean(entry.messageId);
+  const isAgent = entry.from.kind === 'agent';
+  const canRecallEdit = entry.from.kind === 'user' && Boolean(entry.messageId);
   const isUrgent = entry.priority === 'urgent';
   const categoryLabel = entry.sourceCategory ? SOURCE_CATEGORY_LABEL[entry.sourceCategory] : null;
-  const rowToneClass = isPaused ? 'bg-conn-amber-bg/60' : isAgent ? 'bg-[var(--color-cocreator-surface)]' : '';
+  const rowToneClass = isAgent ? 'bg-[var(--color-cocreator-surface)]' : '';
 
   const targetLabel = entry.targetCats[0] ? resolveCatName(entry.targetCats[0]) : '猫猫';
   const sourceLabel =
     isAgent && entry.sourceCategory === 'freshness'
       ? `Freshness → ${targetLabel}`
-      : isAgent
-        ? `${entry.callerCatId ? resolveCatName(entry.callerCatId) : '猫猫'} → ${targetLabel}`
-        : entry.source === 'connector'
+      : entry.from.kind === 'agent'
+        ? `${resolveCatName(entry.from.catId)} → ${targetLabel}`
+        : entry.from.kind === 'external' || entry.from.kind === 'plugin'
           ? 'Connector'
-          : ownerName;
+          : entry.from.kind === 'system'
+            ? 'System'
+            : ownerName;
 
   return (
     <div className={`flex items-start gap-2 px-3 py-2 rounded-lg ${rowToneClass}`}>
@@ -253,6 +258,7 @@ function QueueEntryRow({
           format="markdown"
           density="compact"
         />
+        <RoutingWarningNotice warnings={entry.routingWarnings} />
         <div className="flex items-center gap-1 mt-0.5">
           {isAgent ? (
             <svg className="w-2.5 h-2.5 text-[var(--color-cocreator-primary)]" viewBox="0 0 24 24" fill="currentColor">
@@ -325,6 +331,18 @@ function QueueEntryRow({
       </div>
 
       <div className="flex items-center gap-1 shrink-0 mt-1">
+        {entry.lifecycleActions?.append && (
+          <button
+            type="button"
+            data-testid={`append-${entry.id}`}
+            onClick={() => onAppend(entry)}
+            disabled={appendingEntryIds.has(entry.id)}
+            className="text-xs px-2.5 py-1 rounded-full border border-cafe text-cafe-secondary hover:bg-cafe-surface transition-colors disabled:opacity-50"
+            aria-label="Append"
+          >
+            {appendingEntryIds.has(entry.id) ? '追加中…' : 'Append'}
+          </button>
+        )}
         <QueueEntryActions entry={entry} retryingAttemptIds={retryingAttemptIds} onRetry={onRetry} onSteer={onSteer} />
         {canRecallEdit && (
           <button

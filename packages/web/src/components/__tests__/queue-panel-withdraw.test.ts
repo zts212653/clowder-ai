@@ -23,7 +23,7 @@ const QUEUED_ENTRY: QueueEntry = {
   content: 'queued to withdraw',
   messageId: 'm1',
   mergedMessageIds: [],
-  source: 'user',
+  from: { kind: 'user', userId: 'test-user' },
   targetCats: ['opus'],
   intent: 'execute',
   status: 'queued',
@@ -92,7 +92,6 @@ describe('QueuePanel withdraw UX (F39)', () => {
     useChatStore.setState({
       messages: [],
       queue: [],
-      queuePaused: false,
       currentThreadId: 'thread-1',
     });
     useToastStore.setState({ toasts: [] });

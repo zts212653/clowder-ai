@@ -130,8 +130,8 @@ export async function appendApprovedInitialMessage({
       sourceCatHandle,
     );
     const stored = await messageStore.append({
+      from: sourceCatId ? { kind: 'agent', catId: sourceCatId } : { kind: 'user', userId },
       userId,
-      catId: sourceCatId ?? null, // AC-AA4: source cat is the message author
       content: enrichedFallback,
       mentions: [],
       timestamp: Date.now(),
@@ -224,8 +224,8 @@ export async function appendApprovedInitialMessage({
 
   if (targetCats.length === 0) {
     const stored = await messageStore.append({
+      from: sourceCatId ? { kind: 'agent', catId: sourceCatId } : { kind: 'user', userId },
       userId,
-      catId: sourceCatId ?? null, // AC-AA4
       content,
       mentions: [],
       timestamp: Date.now(),
@@ -239,20 +239,21 @@ export async function appendApprovedInitialMessage({
   }
 
   const enqueueResult = invocationQueue.enqueue({
+    from: sourceCatId ? { kind: 'agent', catId: sourceCatId } : { kind: 'user', userId },
     threadId,
     userId,
+    kind: 'conversation_input',
     ownerAuthProvenance,
     idempotencyKey: `proposal-initial:${proposalId}`,
     content,
-    source: 'user',
     targetCats: targetCats as CatId[],
     intent: intentName,
   });
 
   if (enqueueResult.outcome === 'full' || !enqueueResult.entry) {
     const stored = await messageStore.append({
+      from: sourceCatId ? { kind: 'agent', catId: sourceCatId } : { kind: 'user', userId },
       userId,
-      catId: sourceCatId ?? null, // AC-AA4
       content,
       mentions: [...targetCats],
       timestamp: Date.now(),
@@ -269,8 +270,8 @@ export async function appendApprovedInitialMessage({
   if (!enqueueResult.deduped || !storedMessageId) {
     try {
       const stored = await messageStore.append({
+        from: sourceCatId ? { kind: 'agent', catId: sourceCatId } : { kind: 'user', userId },
         userId,
-        catId: sourceCatId ?? null, // AC-AA4
         content,
         mentions: [...targetCats],
         timestamp: Date.now(),

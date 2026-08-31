@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import Fastify from 'fastify';
+import { canonicalTestMessageInput } from './helpers/message-from-fixtures.js';
 
 const { threadsRoutes } = await import('../dist/routes/threads.js');
 const { ThreadStore } = await import('../dist/domains/cats/services/stores/ports/ThreadStore.js');
@@ -43,15 +44,18 @@ describe('F254 Phase E — closure projection and retry routes', () => {
     const thread = await threadStore.create('user-1', 'F254 repaired route test', '/tmp/test');
     const messageStore = new MessageStore();
     const closureStore = new InMemoryFreshnessClosureStore();
-    const original = await messageStore.append({
-      userId: 'user-1',
-      catId: 'codex-sol',
-      threadId: thread.id,
-      content: 'published answer',
-      mentions: [],
-      timestamp: 100,
-      origin: 'stream',
-    });
+    const original = await messageStore.append(
+      canonicalTestMessageInput({
+        provenance: { author: 'cat', routed: false, observation: 'original' },
+        userId: 'user-1',
+        catId: 'codex-sol',
+        threadId: thread.id,
+        content: 'published answer',
+        mentions: [],
+        timestamp: 100,
+        origin: 'stream',
+      }),
+    );
     const offered = await closureStore.offerSupplement({
       lineageId: original.id,
       originalMessageId: original.id,
@@ -66,24 +70,27 @@ describe('F254 Phase E — closure projection and retry routes', () => {
       invocationId: 'supplement-inv',
       now: 120,
     });
-    const leaked = await messageStore.append({
-      userId: 'user-1',
-      catId: 'codex-sol',
-      threadId: thread.id,
-      content: '<!-- cat-cafe:supplement-decline -->',
-      mentions: [],
-      timestamp: 130,
-      origin: 'stream',
-      replyTo: original.id,
-      extra: {
-        supplement: {
-          lineageId: original.id,
-          supplementId: running.id,
-          seq: running.seq,
-          originalMessageId: original.id,
+    const leaked = await messageStore.append(
+      canonicalTestMessageInput({
+        provenance: { author: 'cat', routed: false, observation: 'original' },
+        userId: 'user-1',
+        catId: 'codex-sol',
+        threadId: thread.id,
+        content: '<!-- cat-cafe:supplement-decline -->',
+        mentions: [],
+        timestamp: 130,
+        origin: 'stream',
+        replyTo: original.id,
+        extra: {
+          supplement: {
+            lineageId: original.id,
+            supplementId: running.id,
+            seq: running.seq,
+            originalMessageId: original.id,
+          },
         },
-      },
-    });
+      }),
+    );
     await closureStore.commitSupplement(running.id, {
       invocationId: 'supplement-inv',
       messageId: leaked.id,
@@ -134,7 +141,7 @@ describe('F254 Phase E — closure projection and retry routes', () => {
         },
       },
       queueProcessor: {
-        async tryAutoExecute(threadId) {
+        async requestDrain(threadId) {
           autoExecuteThreadId = threadId;
         },
       },
@@ -172,7 +179,7 @@ describe('F254 Phase E — closure projection and retry routes', () => {
     assert.equal(retried.statusCode, 202);
     assert.equal(entries.length, 1);
     assert.equal(entries[0].freshnessClosureId, 'closure-1');
-    assert.equal(entries[0].autoExecute, true, 'explicit retry must be visible to tryAutoExecute');
+    assert.equal(entries[0].autoExecute, true, 'explicit retry remains visible to Queue projections');
     assert.equal((await closureStore.get('closure-1')).status, 'pending');
     await new Promise((resolve) => setImmediate(resolve));
     assert.equal(autoExecuteThreadId, thread.id);

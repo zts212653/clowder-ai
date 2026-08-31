@@ -21,8 +21,10 @@
  */
 
 import { spawn as nodeSpawn } from 'node:child_process';
-import { existsSync, readFileSync, writeFileSync } from 'node:fs';
-import { dirname, resolve } from 'node:path';
+import { randomUUID } from 'node:crypto';
+import { existsSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { CURRENT_RELATIONSHIP_PROFILE_URI, DEFAULT_PROFILE_USER_ID } from '@cat-cafe/shared/profile-contract';
 import { profilePointerEmitted } from '../../../../../infrastructure/telemetry/instruments.js';
@@ -32,7 +34,13 @@ import { type L0CacheGeneration, L0ProfileCache } from './l0-profile-cache.js';
 
 const SCRIPT_BASENAME = 'compile-system-prompt-l0.mjs';
 const l0Cache = new L0ProfileCache();
+const l0ManifestCache = new Map<string, L0SegmentContent[]>();
 const dependencySignatures = new L0DependencySignatureTracker();
+
+export interface L0SegmentContent {
+  segmentId: string;
+  content: string;
+}
 
 function recordProfilePointerEmission(compiledL0: string): void {
   if (compiledL0.includes(CURRENT_RELATIONSHIP_PROFILE_URI)) profilePointerEmitted.add(1);
@@ -45,6 +53,9 @@ function refreshL0DependencySignature(cwd: string, scriptPath: string): string |
 /** Clear cached L0 for one cat or all cats (call on hot-reload / re-sync). */
 export function clearL0Cache(catId?: string, userId?: string): void {
   l0Cache.clear(catId, userId);
+  // The profile cache can clear one key or a family of user-scoped keys; the
+  // manifest cache is tiny, so clear it wholesale to preserve lockstep truth.
+  l0ManifestCache.clear();
 }
 
 /** Number of cached entries (test/diagnostic). */
@@ -193,6 +204,39 @@ export async function compileL0ViaSubprocess(options: CompileL0Options): Promise
   }
 }
 
+export async function getL0ManifestViaSubprocess(options: CompileL0Options): Promise<L0SegmentContent[]> {
+  const userId = options.userId ?? process.env.CAT_CAFE_USER_ID ?? DEFAULT_PROFILE_USER_ID;
+  const key = l0Cache.key(userId, options.catId);
+  if (l0ManifestCache.has(key)) return l0ManifestCache.get(key) ?? [];
+  await compileL0ViaSubprocess(options);
+  return l0ManifestCache.get(key) ?? [];
+}
+
+function readL0Manifest(manifestPath: string): L0SegmentContent[] {
+  try {
+    if (!existsSync(manifestPath)) return [];
+    const parsed: unknown = JSON.parse(readFileSync(manifestPath, 'utf8'));
+    if (!Array.isArray(parsed)) return [];
+    return parsed
+      .filter(
+        (entry): entry is { id: string; content: string } =>
+          !!entry &&
+          typeof entry === 'object' &&
+          typeof (entry as { id?: unknown }).id === 'string' &&
+          typeof (entry as { content?: unknown }).content === 'string',
+      )
+      .map((entry) => ({ segmentId: entry.id, content: entry.content }));
+  } catch {
+    return [];
+  } finally {
+    try {
+      if (existsSync(manifestPath)) unlinkSync(manifestPath);
+    } catch {
+      // Best-effort cleanup; manifest absence is already represented by [].
+    }
+  }
+}
+
 /**
  * Internal compile path — separated from `compileL0ViaSubprocess` so the
  * in-flight dedup wrapper can install the Promise without recursing.
@@ -214,7 +258,17 @@ async function doCompileL0(
   }
 
   // F231 KD-19: private profile truth is user-scoped persistent data, never cwd/worktree state.
-  const args = [scriptPath, '--cat', catId, '--profile-dir', profileDir, ...(outPath ? ['--out', outPath] : [])];
+  const manifestPath = join(tmpdir(), `cat-cafe-l0-manifest-${catId}-${randomUUID()}.json`);
+  const args = [
+    scriptPath,
+    '--cat',
+    catId,
+    '--profile-dir',
+    profileDir,
+    '--manifest-out',
+    manifestPath,
+    ...(outPath ? ['--out', outPath] : []),
+  ];
 
   const stdout = await new Promise<string>((resolvePromise, rejectPromise) => {
     const child = spawnFn(process.execPath, args, { cwd, stdio: ['ignore', 'pipe', 'pipe'] });
@@ -257,6 +311,8 @@ async function doCompileL0(
     }
   }
 
+  const manifest = readL0Manifest(manifestPath);
+
   if (
     dependencySignature &&
     profileSignature !== null &&
@@ -265,6 +321,7 @@ async function doCompileL0(
     l0Cache.generationIsCurrent(cacheKey, compileGeneration)
   ) {
     l0Cache.set(cacheKey, result, profileSignature);
+    l0ManifestCache.set(cacheKey, manifest);
   }
   return result;
 }

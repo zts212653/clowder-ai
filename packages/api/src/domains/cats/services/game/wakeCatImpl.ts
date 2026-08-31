@@ -13,7 +13,7 @@ import type { IThreadStore } from '../stores/ports/ThreadStore.js';
 import type { WakeCatFn } from './GameNarratorDriver.js';
 
 export interface QueueProcessorLike {
-  tryAutoExecute(threadId: string): Promise<void>;
+  requestDrain(threadId: string): Promise<void>;
 }
 
 export interface WakeCatDeps {
@@ -33,11 +33,12 @@ export function createWakeCatFn(deps: WakeCatDeps): WakeCatFn {
     const userId = thread?.createdBy ?? 'default-user';
 
     const result = invocationQueue.enqueue({
+      from: { kind: 'system', service: 'game-orchestrator' },
       threadId,
       userId,
+      kind: 'private_input',
       ownerAuthProvenance: 'unknown',
       content: briefing,
-      source: 'agent',
       targetCats: [catId],
       intent: 'execute',
       autoExecute: true,
@@ -48,7 +49,7 @@ export function createWakeCatFn(deps: WakeCatDeps): WakeCatFn {
       return;
     }
 
-    await queueProcessor.tryAutoExecute(threadId);
+    await queueProcessor.requestDrain(threadId);
 
     log.info(
       {

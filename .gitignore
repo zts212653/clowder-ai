@@ -230,3 +230,6 @@ generated/capability-wakeup/
 packages/api/test/__b1_parent_a__/
 .claude/skills/organize-threads
 .claude/skills/thread-orchestration
+
+# F257 runtime eval snapshots (written by snapshot provider at runtime)
+docs/harness-feedback/run-snapshots/

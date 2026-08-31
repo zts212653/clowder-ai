@@ -1,12 +1,52 @@
-import type {
-  GitHubCiBaselineBucket,
-  GitHubIssueWaitPredicate,
-  GitHubReviewThreadBaseline,
-  GitHubWaitBaseline,
-  GitHubWaitMatchedDelta,
-  GitHubWaitPredicate,
+import {
+  GITHUB_WAIT_PREDICATE_KINDS,
+  type GitHubCiBaselineBucket,
+  type GitHubIssueWaitPredicate,
+  type GitHubReviewThreadBaseline,
+  type GitHubWaitBaseline,
+  type GitHubWaitMatchedDelta,
+  type GitHubWaitPredicate,
 } from '@cat-cafe/shared';
 import { z } from 'zod';
+
+/*
+ * Keep the shared closed catalog and both API admission schemas in lockstep.
+ * This runs when the module is loaded, before any wait can be registered.
+ */
+export function assertGitHubWaitPredicateCatalogReady(): void {
+  const admittedKinds = [
+    ...githubPrWaitPredicateSchema.options.map((option) => option.shape.kind.value),
+    ...githubIssueWaitPredicateSchema.options.map((option) => option.shape.kind.value),
+  ];
+  const uniqueKinds = new Set(admittedKinds);
+  if (uniqueKinds.size !== admittedKinds.length) {
+    throw new Error('GitHub wait predicate catalog contains duplicate API schema kinds');
+  }
+  const expected = [...GITHUB_WAIT_PREDICATE_KINDS].sort();
+  const actual = [...uniqueKinds].sort();
+  if (actual.length !== expected.length || actual.some((kind, index) => kind !== expected[index])) {
+    throw new Error(`GitHub wait predicate catalog drift: shared=${expected.join(',')} api=${actual.join(',')}`);
+  }
+}
+
+const githubAuthorLoginsSchema = z
+  .array(z.string().trim().min(1).max(100))
+  .min(1)
+  .max(20)
+  .superRefine((authorLogins, ctx) => {
+    const normalized = new Set<string>();
+    for (const [index, authorLogin] of authorLogins.entries()) {
+      const key = authorLogin.toLowerCase();
+      if (normalized.has(key)) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: [index],
+          message: 'authorLogins must be unique case-insensitively; example: ["maintainer-login"]',
+        });
+      }
+      normalized.add(key);
+    }
+  });
 
 export const githubPrWaitPredicateSchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('pr_head_changed') }).strict(),
@@ -23,14 +63,27 @@ export const githubPrWaitPredicateSchema = z.discriminatedUnion('kind', [
       reviewThreadIds: z.array(z.string().min(1)).min(1).max(20),
     })
     .strict(),
+  z
+    .object({
+      kind: z.literal('pr_conversation_comment_added'),
+      authorLogins: githubAuthorLoginsSchema,
+    })
+    .strict(),
   z.object({ kind: z.literal('pr_ci_terminal') }).strict(),
   z.object({ kind: z.literal('pr_became_conflicting') }).strict(),
 ]);
 
 export const githubIssueWaitPredicateSchema = z.discriminatedUnion('kind', [
-  z.object({ kind: z.literal('issue_comment_added') }).strict(),
+  z
+    .object({
+      kind: z.literal('issue_comment_added'),
+      authorLogins: githubAuthorLoginsSchema.optional(),
+    })
+    .strict(),
   z.object({ kind: z.literal('issue_author_commented') }).strict(),
 ]);
+
+assertGitHubWaitPredicateCatalogReady();
 
 export const githubWaitPredicateSchema = z.union([githubPrWaitPredicateSchema, githubIssueWaitPredicateSchema]);
 
@@ -84,6 +137,12 @@ export interface GitHubWaitFacts {
     readonly resultTriggerCommentId?: number;
     readonly resultSourceRef?: string;
     readonly resultConversationCommentCursor?: number;
+    readonly conversationComments?: readonly {
+      readonly id: number;
+      readonly author: string;
+      readonly createdAt: string;
+      readonly sourceRef?: string;
+    }[];
     readonly threads?: readonly GitHubReviewThreadBaseline[];
   };
   readonly ci?: {
@@ -99,6 +158,7 @@ export interface GitHubWaitFacts {
     readonly comments: readonly {
       readonly id: number;
       readonly author: string;
+      readonly body?: string;
       readonly sourceRef?: string;
     }[];
   };
@@ -195,6 +255,23 @@ export function matchGitHubWaitPredicates(
         }
         break;
       }
+      case 'pr_conversation_comment_added': {
+        if (!('headSha' in baseline) || !baseline.review) break;
+        const authors = new Set(predicate.authorLogins.map((login) => login.toLowerCase()));
+        for (const comment of current.review?.conversationComments ?? []) {
+          if (comment.id <= baseline.review.conversationCommentCursor || !authors.has(comment.author.toLowerCase())) {
+            continue;
+          }
+          matches.push({
+            kind: predicate.kind,
+            delta: `conversation comment #${comment.id} added by ${comment.author} at ${comment.createdAt}${
+              comment.sourceRef ? ` (${comment.sourceRef})` : ''
+            }`,
+            ...(comment.sourceRef ? { sourceRef: comment.sourceRef } : {}),
+          });
+        }
+        break;
+      }
       case 'pr_ci_terminal': {
         if (!('headSha' in baseline) || !current.headSha) break;
         const before = baseline.ci;
@@ -235,8 +312,12 @@ export function matchGitHubWaitPredicates(
       }
       case 'issue_comment_added': {
         if (!('issue' in baseline)) break;
+        const allowed = predicate.authorLogins
+          ? new Set(predicate.authorLogins.map((login) => login.toLowerCase()))
+          : null;
         for (const comment of current.issue?.comments ?? []) {
           if (comment.id <= baseline.issue.lastCommentCursor) continue;
+          if (allowed && !allowed.has(comment.author.toLowerCase())) continue;
           matches.push({
             kind: predicate.kind,
             delta: `issue comment #${comment.id} added by ${comment.author}`,

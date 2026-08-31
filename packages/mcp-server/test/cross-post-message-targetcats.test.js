@@ -109,10 +109,19 @@ describe('F193 AC-A4 P1 (codex review): cross_post_message fails closed at MCP l
     globalThis.fetch = originalFetch;
   });
 
-  test('reject when no targetCats AND no line-start @ — no HTTP dispatch', async () => {
-    let fetchCalled = false;
-    globalThis.fetch = async () => {
-      fetchCalled = true;
+  test('reject when no targetCats AND no line-start @ — no message dispatch, guard rejection reported', async () => {
+    // F257 V2 (AC-B1): the fail-closed rejection now emits a fire-and-forget
+    // guard-rejection REPORT (observability, not a message dispatch). The
+    // original intent of this test — the MESSAGE must never be dispatched —
+    // is preserved by distinguishing the two endpoints.
+    let dispatchCalled = false;
+    let guardReportCalls = 0;
+    globalThis.fetch = async (url) => {
+      if (String(url).includes('/api/callbacks/guard-rejections')) {
+        guardReportCalls++;
+        return { ok: true, json: async () => ({ accepted: true }) };
+      }
+      dispatchCalled = true;
       return { ok: true, json: async () => ({ status: 'ok' }) };
     };
     const { handleCrossPostMessage } = await import('../dist/tools/callback-tools.js');
@@ -123,11 +132,13 @@ describe('F193 AC-A4 P1 (codex review): cross_post_message fails closed at MCP l
     assert.equal(result.isError, true, 'must reject when no routing creds');
     const text = result.content[0].text;
     assert.ok(text.includes('routing'), `error must mention routing, got: ${text}`);
+    assert.ok(text.includes('mcp/cross-post-routing-credentials'), 'rejection carries the ledger pot coordinate');
     assert.equal(
-      fetchCalled,
+      dispatchCalled,
       false,
-      'MCP fail-closed must reject EARLY — no HTTP dispatch (closes API-layer gap for agent-key callers)',
+      'MCP fail-closed must reject EARLY — no message dispatch (closes API-layer gap for agent-key callers)',
     );
+    assert.equal(guardReportCalls, 1, 'AC-B1: MCP-local rejection reports one guard-rejection event');
   });
 
   test('reject when agent-key caller cross-posts without routing creds (closes API-layer gap)', async () => {
@@ -301,9 +312,14 @@ describe('F193 AC-A4 P1 (codex review): cross_post_message fails closed at MCP l
   });
 
   test('reject @ in fenced code block (server parser strips code fences too)', async () => {
-    let fetchCalled = false;
-    globalThis.fetch = async () => {
-      fetchCalled = true;
+    // F257 V2 (AC-B1): distinguish message dispatch from the fire-and-forget
+    // guard-rejection report — the message must never be dispatched.
+    let dispatchCalled = false;
+    globalThis.fetch = async (url) => {
+      if (String(url).includes('/api/callbacks/guard-rejections')) {
+        return { ok: true, json: async () => ({ accepted: true }) };
+      }
+      dispatchCalled = true;
       return { ok: true, json: async () => ({ status: 'ok' }) };
     };
     const { handleCrossPostMessage } = await import('../dist/tools/callback-tools.js');
@@ -312,6 +328,6 @@ describe('F193 AC-A4 P1 (codex review): cross_post_message fails closed at MCP l
       content: 'see code:\n```\n@codex this is in a code block\n```\nno real mention',
     });
     assert.equal(result.isError, true, '@ inside fenced code block must NOT pass routing gate');
-    assert.equal(fetchCalled, false, 'no HTTP dispatch when only routing creds are inside code fences');
+    assert.equal(dispatchCalled, false, 'no message dispatch when only routing creds are inside code fences');
   });
 });

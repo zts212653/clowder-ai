@@ -7,14 +7,20 @@ export type PawFeelHotIntakeResult =
   | { kind: 'cross_post_copy'; discoveredSignals: 0; markerCount: number }
   | { kind: 'canonical'; discoveredSignals: number };
 
+function agentCatId(message: StoredMessage): string | null {
+  if (message.from) return message.from.kind === 'agent' ? message.from.catId : null;
+  return message.catId || null;
+}
+
 export async function capturePawFeelSourceMessage(
   principal: { kind: 'cat'; id: string },
   message: StoredMessage,
   dispositionService: Pick<PawFeelDispositionService, 'discover'>,
 ): Promise<PawFeelHotIntakeResult> {
-  if (!message.catId) throw new Error('typed paw-feel capture requires a cat-authored source message');
-  if (message.catId !== principal.id) {
-    throw new Error(`typed paw-feel capture source cat mismatch: expected ${principal.id}, got ${message.catId}`);
+  const sourceCatId = agentCatId(message);
+  if (!sourceCatId) throw new Error('typed paw-feel capture requires a cat-authored source message');
+  if (sourceCatId !== principal.id) {
+    throw new Error(`typed paw-feel capture source cat mismatch: expected ${principal.id}, got ${sourceCatId}`);
   }
   const inspection = inspectDeclaredPawFeelMessage(message);
   if (inspection.kind === 'ignored') return { kind: 'ignored', discoveredSignals: 0 };
@@ -115,13 +121,14 @@ export class PawFeelCaptureIntentSidecar {
   async capturePersistedMessage(message: StoredMessage): Promise<PawFeelCaptureIntentResult> {
     this.pruneExpired();
     const invocationId = message.extra?.stream?.turnInvocationId;
-    if (!invocationId || message.origin !== 'stream' || !message.catId) return { kind: 'ignored' };
+    const sourceCatId = agentCatId(message);
+    if (!invocationId || message.origin !== 'stream' || !sourceCatId) return { kind: 'ignored' };
     const intent = this.intents.get(invocationId);
     if (
       !intent ||
       intent.threadId !== message.threadId ||
       intent.userId !== message.userId ||
-      intent.catId !== message.catId
+      intent.catId !== sourceCatId
     ) {
       return { kind: 'ignored' };
     }
@@ -171,7 +178,7 @@ export async function captureAppendedPawFeelMessage(
 ): Promise<PawFeelAppendIntakeResult> {
   const typed = await sidecar.capturePersistedMessage(message);
   if (typed.kind === 'captured') return typed;
-  if (!message.catId) return { kind: 'ignored' };
+  if (!agentCatId(message)) return { kind: 'ignored' };
 
   const inspection = inspectDeclaredPawFeelMessage(message);
   if (inspection.kind === 'ignored') return { kind: 'ignored' };

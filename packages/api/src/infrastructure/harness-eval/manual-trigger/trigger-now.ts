@@ -1,13 +1,32 @@
 import { getEvalCatOverride } from '../domain/eval-domain-override.js';
 import type { EvalDomainId } from '../domain/eval-domain-registry.js';
 import { buildEvalCatInvocation } from '../eval-cat-invocation.js';
+import { formatUnitSemanticEvaluationPackets } from '../evaluation/UnitSemanticEvaluationCoordinator.js';
+import { produceHarnessLedgerRunSnapshot } from '../harness-ledger-snapshot-provider.js';
 import { loadDomains } from '../hub/eval-hub-read-model.js';
 import { ensureEvalDomainThreads } from '../hub/eval-hub-thread-ensure.js';
+import { formatSemanticSweepPacket } from '../trace-annotation/SemanticSweepCoordinator.js';
 import type { HandlerError, ManualTriggerDeps } from './types.js';
 
 export interface TriggerNowInput {
   domainId: string;
   userId: string;
+  /**
+   * Sol R1 P2-1: server-injected source thread coordinate.
+   * Escalation: event.threadId (the thread where the guard rejection fired).
+   * Manual trigger: invocation thread. Scheduled: undefined.
+   * Fable ruling: must NOT be self-reported by eval cat — owner-scope discipline.
+   */
+  sourceThreadId?: string;
+  /**
+   * Sol R4 P1-1 / Fable ruling: escalation kind provenance.
+   * 'confirmed' = episodeCount ≥ threshold (real eligible harm).
+   * 'uncertainty_probe' = truncation-only conservative-true (incomplete scan).
+   * Propagated to snapshot + bundle so eval cat knows probe's byReason
+   * only covers the capped scan, not the full window.
+   * Manual/scheduled triggers: undefined (not escalation-driven).
+   */
+  escalationKind?: 'confirmed' | 'uncertainty_probe';
 }
 
 export interface TriggerNowSuccess {
@@ -18,10 +37,29 @@ export interface TriggerNowSuccess {
   evalCatId: string;
   invocationTriggered: true;
   /**
-   * Outcome of `ConnectorInvokeTrigger.trigger()`. Only `'dispatched'` or
-   * `'enqueued'` reach success — `'full'` is converted to 503 (cloud codex R2 P2).
+   * Outcome of `ConnectorInvokeTrigger.trigger()`. `'enqueued'` reaches success;
+   * `'full'` is converted to 503 (cloud codex R2 P2).
    */
-  triggerOutcome: 'dispatched' | 'enqueued';
+  triggerOutcome: 'enqueued';
+  /** F257: jobId from SemanticSweepCoordinator.prepare, for volume drain fencing. */
+  semanticSweepJobId?: string;
+  /** F257: frozen Unit semantic jobs included in this invocation. */
+  unitEvaluationJobIds?: string[];
+}
+
+/**
+ * F257 sub-item 1: Zero-event skip result.
+ * Snapshot produced successfully but contains zero guard rejection events
+ * in the observation window. Eval cat NOT invoked (LLM cost = 0).
+ * This is a valid state, not an error.
+ */
+export interface TriggerNowSkipped {
+  ok: true;
+  domainId: string;
+  skipped: true;
+  reason: 'zero_events_in_window';
+  evalRunId: string;
+  windowSummary: string;
 }
 
 /**
@@ -38,7 +76,7 @@ export interface TriggerNowSuccess {
 export async function handleTriggerNow(
   deps: ManualTriggerDeps,
   input: TriggerNowInput,
-): Promise<TriggerNowSuccess | HandlerError> {
+): Promise<TriggerNowSuccess | TriggerNowSkipped | HandlerError> {
   const domains = loadDomains(deps.harnessFeedbackRoot);
   const domain = domains.get(input.domainId as Parameters<typeof domains.get>[0]);
   if (!domain) {
@@ -93,12 +131,82 @@ export async function handleTriggerNow(
     }
   }
 
+  // KD-17 snapshot-first: for eval:harness-ledger, snapshot is REQUIRED.
+  // No snapshot → 503 (fail-closed for manual trigger).
+  let precomputedEvidence: string | undefined;
+  let semanticSweepJobId: string | undefined; // F257: for volume drain fencing
+  let unitEvaluationJobIds: string[] | undefined;
+  if (input.domainId === 'eval:harness-ledger') {
+    if (!deps.guardRejectionLog && !deps.semanticSweepCoordinator && !deps.unitSemanticEvaluationCoordinator) {
+      return {
+        status: 503,
+        error: 'harness_ledger_snapshot_unavailable',
+        detail:
+          'KD-17: eval:harness-ledger requires GuardRejectionEventLog provider for snapshot-first invocation. Provider not wired at runtime.',
+      };
+    }
+    try {
+      const evidenceParts: string[] = [];
+      const semantic = await deps.semanticSweepCoordinator?.prepare({
+        ownerUserId: input.userId,
+        evaluatorCatId: effectiveDomain.evalCat.catId,
+        startMs: Date.now() - 7 * 24 * 60 * 60 * 1000,
+        endMs: Date.now() + 1,
+      });
+      if (semantic) {
+        evidenceParts.push(formatSemanticSweepPacket(semantic.packet));
+        semanticSweepJobId = semantic.job.jobId;
+      }
+      const unitPackets = await deps.unitSemanticEvaluationCoordinator?.prepare({
+        ownerUserId: input.userId,
+        evaluatorCatId: effectiveDomain.evalCat.catId,
+        now: Date.now(),
+      });
+      if (unitPackets && unitPackets.length > 0) {
+        evidenceParts.push(formatUnitSemanticEvaluationPackets(unitPackets));
+        unitEvaluationJobIds = unitPackets.map((packet) => packet.jobId);
+      }
+
+      let snapshotResult: Awaited<ReturnType<typeof produceHarnessLedgerRunSnapshot>> | null = null;
+      if (deps.guardRejectionLog) {
+        snapshotResult = await produceHarnessLedgerRunSnapshot({
+          guardRejectionLog: deps.guardRejectionLog,
+          harnessFeedbackRoot: deps.harnessFeedbackRoot,
+          ownerUserId: input.userId,
+          sourceThreadId: input.sourceThreadId,
+          escalationKind: input.escalationKind,
+        });
+        evidenceParts.unshift(snapshotResult.summary);
+      }
+
+      if (snapshotResult?.snapshot.totalEvents === 0 && !semantic && !unitEvaluationJobIds?.length) {
+        return {
+          ok: true as const,
+          domainId: input.domainId,
+          skipped: true as const,
+          reason: 'zero_events_in_window' as const,
+          evalRunId: snapshotResult.evalRunId,
+          windowSummary: `${snapshotResult.snapshot.window.durationHours}h window, 0 events`,
+        };
+      }
+      precomputedEvidence = evidenceParts.join('\n\n');
+    } catch (err) {
+      const detail = err instanceof Error ? err.message : String(err);
+      return {
+        status: 503,
+        error: 'harness_ledger_snapshot_failed',
+        detail: `KD-17: snapshot production failed — ${detail}. Eval cat not invoked (no blind verdicts).`,
+      };
+    }
+  }
+
   const invocation = buildEvalCatInvocation(
     {
       domain: effectiveDomain,
       trendRefs: [],
       verdictRefs: [],
       legacyCleanup: { status: 'not_checked' },
+      precomputedEvidence,
     },
     // cloud R5 P2 (PR-2): gate publish instructions on actual runtime support so
     // cats don't waste a run producing a packet they can't publish (501 from
@@ -108,7 +216,7 @@ export async function handleTriggerNow(
     },
   );
 
-  const content = [
+  const contentParts = [
     `## Eval Domain: ${invocation.domainId} (manual trigger by ${input.userId})`,
     '',
     invocation.instructions,
@@ -116,11 +224,16 @@ export async function handleTriggerNow(
     '```json',
     JSON.stringify(invocation.context, null, 2),
     '```',
-  ].join('\n');
+  ];
+  // KD-17: inject pre-computed evidence after context JSON
+  if (invocation.precomputedEvidence) {
+    contentParts.push('', invocation.precomputedEvidence);
+  }
+  const content = contentParts.join('\n');
 
   const stored = await deps.messageStore.append({
-    userId: 'scheduler',
-    catId: null,
+    from: { kind: 'system', service: 'eval-manual-trigger' },
+    userId: input.userId,
     content,
     mentions: [],
     timestamp: Date.now(),
@@ -155,5 +268,7 @@ export async function handleTriggerNow(
     evalCatId: invocation.evalCat.catId,
     invocationTriggered: true,
     triggerOutcome: outcome,
+    semanticSweepJobId,
+    unitEvaluationJobIds,
   };
 }

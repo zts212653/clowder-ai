@@ -6,7 +6,6 @@ import { after, before, describe, it } from 'node:test';
 import { handlePublishVerdict } from '../../dist/infrastructure/harness-eval/publish-verdict/publish-verdict.js';
 import { createTaskOutcomeGeneratorAdapter } from '../../dist/infrastructure/harness-eval/publish-verdict/task-outcome-generator-adapter.js';
 import { TaskOutcomeEpisodeStore } from '../../dist/infrastructure/harness-eval/task-outcome/task-outcome-store.js';
-import { seedCanonicalMeasurementCensusState } from './publish-verdict-fixtures.js';
 import { runTwoConnectionSameValueRace } from './task-outcome-writeback-race-fixture.js';
 
 const root = mkdtempSync(join(tmpdir(), 'publish-verdict-taskoutcome-guard-'));
@@ -91,20 +90,26 @@ function buildPacket(id) {
   };
 }
 
-function buildMockGitPublisher() {
+function buildMockArtifactPublisher() {
   return {
-    async publishOnIsolatedWorktree(opts) {
+    async publishArtifact({ packet, generate }) {
       const iso = join(root, '..', `task-outcome-writeback-guard-iso-${Date.now()}`);
-      mkdirSync(join(iso, 'docs', 'harness-feedback', 'eval-domains'), { recursive: true });
+      const outputRoot = join(iso, 'docs', 'harness-feedback');
+      mkdirSync(join(outputRoot, 'eval-domains'), { recursive: true });
       writeFileSync(
-        join(iso, 'docs', 'harness-feedback', 'eval-domains', 'eval-task-outcome.yaml'),
+        join(outputRoot, 'eval-domains', 'eval-task-outcome.yaml'),
         readFileSync(join(harnessFeedbackRoot, 'eval-domains', 'eval-task-outcome.yaml'), 'utf8'),
       );
-      seedCanonicalMeasurementCensusState(iso);
       try {
-        const stageResult = await opts.stage(iso);
-        await stageResult.afterPublish?.();
-        return { commitSha: 'unreachable', prUrl: 'https://github.com/zts212653/clowder-ai/pull/9006' };
+        const generated = await generate(outputRoot);
+        await generated.afterPublish?.();
+        return {
+          artifactId: 'unreachable',
+          domainSlug: packet.domainId.replace(/:/g, '-'),
+          verdictPath: generated.verdictPath,
+          bundleDir: generated.bundleDir,
+          artifactUrl: 'artifact://eval-task-outcome/task-writeback-guard-9006',
+        };
       } finally {
         rmSync(iso, { recursive: true, force: true });
       }
@@ -125,7 +130,7 @@ describe('task-outcome episode verdict writeback guards', () => {
     const result = await handlePublishVerdict(
       {
         harnessFeedbackRoot,
-        gitPublisher: buildMockGitPublisher(),
+        artifactPublisher: buildMockArtifactPublisher(),
         generator: createTaskOutcomeGeneratorAdapter(),
         taskOutcomeDbPath,
       },
@@ -150,13 +155,13 @@ describe('task-outcome episode verdict writeback guards', () => {
     assert.equal(store.getEpisode(seeded.episodeId)?.verdict, 'success');
   });
 
-  it('accepts an exact same-value verdict when a replacement evidence PR is published', async () => {
+  it('accepts an exact same-value verdict when a replacement artifact is published', async () => {
     const taskOutcomeDbPath = join(tmpdir(), `publish-verdict-taskoutcome-replacement-${Date.now()}.sqlite`);
     const seeded = seedTerminalEpisode(taskOutcomeDbPath, 'success');
     const result = await handlePublishVerdict(
       {
         harnessFeedbackRoot,
-        gitPublisher: buildMockGitPublisher(),
+        artifactPublisher: buildMockArtifactPublisher(),
         generator: createTaskOutcomeGeneratorAdapter(),
         taskOutcomeDbPath,
       },
@@ -179,25 +184,31 @@ describe('task-outcome episode verdict writeback guards', () => {
     assert.equal(store.getEpisode(seeded.episodeId)?.verdict, 'success');
   });
 
-  it('does not expose a verdict PR when the final writeback claim fails', async () => {
+  it('does not expose a verdict artifact when the final writeback claim fails', async () => {
     const taskOutcomeDbPath = join(tmpdir(), `publish-verdict-taskoutcome-stale-pr-${Date.now()}.sqlite`);
     const seeded = seedTerminalEpisode(taskOutcomeDbPath);
-    let exposedPr = false;
-    const gitPublisher = {
-      async publishOnIsolatedWorktree(opts) {
+    let exposedArtifact = false;
+    const artifactPublisher = {
+      async publishArtifact({ generate }) {
         const iso = join(root, '..', `task-outcome-writeback-stale-pr-iso-${Date.now()}`);
-        mkdirSync(join(iso, 'docs', 'harness-feedback', 'eval-domains'), { recursive: true });
+        const outputRoot = join(iso, 'docs', 'harness-feedback');
+        mkdirSync(join(outputRoot, 'eval-domains'), { recursive: true });
         writeFileSync(
-          join(iso, 'docs', 'harness-feedback', 'eval-domains', 'eval-task-outcome.yaml'),
+          join(outputRoot, 'eval-domains', 'eval-task-outcome.yaml'),
           readFileSync(join(harnessFeedbackRoot, 'eval-domains', 'eval-task-outcome.yaml'), 'utf8'),
         );
-        seedCanonicalMeasurementCensusState(iso);
         try {
-          const stageResult = await opts.stage(iso);
+          const generated = await generate(outputRoot);
           new TaskOutcomeEpisodeStore(taskOutcomeDbPath).updateVerdict(seeded.episodeId, 'success');
-          await stageResult.afterPublish?.();
-          exposedPr = true;
-          return { commitSha: 'unreachable', prUrl: 'https://github.com/zts212653/clowder-ai/pull/9007' };
+          await generated.afterPublish?.();
+          exposedArtifact = true;
+          return {
+            artifactId: 'unreachable',
+            domainSlug: 'eval-task-outcome',
+            verdictPath: generated.verdictPath,
+            bundleDir: generated.bundleDir,
+            artifactUrl: 'artifact://eval-task-outcome/task-writeback-guard-9007',
+          };
         } finally {
           rmSync(iso, { recursive: true, force: true });
         }
@@ -206,7 +217,7 @@ describe('task-outcome episode verdict writeback guards', () => {
     const result = await handlePublishVerdict(
       {
         harnessFeedbackRoot,
-        gitPublisher,
+        artifactPublisher,
         generator: createTaskOutcomeGeneratorAdapter(),
         taskOutcomeDbPath,
       },
@@ -227,7 +238,7 @@ describe('task-outcome episode verdict writeback guards', () => {
     assert.equal(result.status, 400);
     assert.equal(result.error, 'invalid_episode_verdict_writeback');
     assert.match(result.detail, /already has verdict='success'/);
-    assert.equal(exposedPr, false);
+    assert.equal(exposedArtifact, false);
   });
 
   it('accepts stale concurrent writeback callbacks when they replay the same verdict', async () => {

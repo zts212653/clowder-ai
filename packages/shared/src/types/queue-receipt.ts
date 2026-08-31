@@ -5,6 +5,7 @@ export type QueueReceiptTargetState =
   | 'seen'
   | 'failed'
   | 'interrupted'
+  | 'cancelled'
   | 'steering'
   | 'withdrawn'
   | 'handled';
@@ -165,6 +166,12 @@ export interface QueueTargetAttempt {
   invocationId?: string;
   /** Exact prompt-body exposure time when this attempt reached a reply. */
   seenAt?: number;
+  /**
+   * Durable provider acknowledgement that this source entered an already-active
+   * invocation through the client's generic append capability. Mere exposure,
+   * batching, or matching invocation ids must never populate this field.
+   */
+  activeAppendAcceptedAt?: number;
   terminalReason?: QueueTargetAttemptTerminalReason;
 }
 

@@ -112,19 +112,20 @@ function projectQueueReceiptTarget(
     const exposure = latestExposure(custody, catId);
     const awakenedInvocationId = custody.awakenedInvocationIdByCatId?.[catId];
     const awakenedAt = custody.awakenedAtByCatId?.[catId];
-    const interruptedAttempt = latestTargetAttempt(custody, catId);
-    const interrupted = interruptedAttempt?.state === 'interrupted';
+    const terminalAttempt = latestTargetAttempt(custody, catId);
+    const interrupted = terminalAttempt?.state === 'interrupted';
+    const cancelled = terminalAttempt?.state === 'cancelled';
     const retryable = !custody.carrierByTargetCatId || custody.carrierByTargetCatId[catId] !== undefined;
     return {
       catId,
-      state: interrupted ? 'interrupted' : 'failed',
+      state: interrupted ? 'interrupted' : cancelled ? 'cancelled' : 'failed',
       ...authorIntentProjection,
       ...attemptsProjection,
       ...(interrupted || retryable ? {} : { retryable: false }),
       ...(exposure
         ? { invocationId: exposure.invocationId, seenAt: exposure.seenAt }
-        : interruptedAttempt?.invocationId
-          ? { invocationId: interruptedAttempt.invocationId }
+        : terminalAttempt?.invocationId
+          ? { invocationId: terminalAttempt.invocationId }
           : awakenedInvocationId
             ? { invocationId: awakenedInvocationId, ...(awakenedAt !== undefined ? { awakenedAt } : {}) }
             : {}),

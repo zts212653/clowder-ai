@@ -27,8 +27,7 @@ function sourceVisibilityFailure(
   if (
     message.userId !== ownerUserId ||
     message.threadId !== threadId ||
-    message.catId !== null ||
-    message.source !== undefined ||
+    (message.from ? message.from.kind !== 'user' : message.catId !== null || message.source !== undefined) ||
     message.visibility === 'whisper' ||
     !isDelivered(message)
   ) {

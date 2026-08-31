@@ -8,6 +8,7 @@
 import assert from 'node:assert/strict';
 import { beforeEach, describe, test } from 'node:test';
 import Fastify from 'fastify';
+import { adaptInvocationQueue, adaptMessageStore } from './helpers/message-from-fixtures.js';
 import { makeQueuedMessageCustody } from './helpers/queued-message-custody.js';
 import './helpers/setup-cat-registry.js';
 
@@ -85,7 +86,7 @@ describe('Callback Routes', () => {
     const { BacklogStore } = await import('../dist/domains/cats/services/stores/ports/BacklogStore.js');
 
     registry = new InvocationRegistry();
-    messageStore = new MessageStore();
+    messageStore = adaptMessageStore(new MessageStore());
     threadStore = new ThreadStore();
     taskStore = new TaskStore();
     backlogStore = new BacklogStore();
@@ -321,8 +322,9 @@ describe('Callback Routes', () => {
       threadId,
     });
     await deliveryCursorStore.ackSeenCursor('user-1', 'opus', threadId, baseline.id);
-    invocationQueue = new InvocationQueue();
+    invocationQueue = adaptInvocationQueue(new InvocationQueue());
     invocationQueue.enqueue({
+      kind: 'conversation_input',
       ownerAuthProvenance: 'strict',
       threadId,
       userId: 'user-1',
@@ -911,7 +913,7 @@ describe('Callback Routes', () => {
     );
   });
 
-  test('POST post-message single content @mention ignores extra explicit targetCats (A2A fail-closed)', async () => {
+  test('POST post-message content @mention outside declared targetCats → HELD (routing mismatch)', async () => {
     const app = await createApp();
     const { invocationId, callbackToken } = await registry.create('user-1', 'opus');
 
@@ -926,17 +928,14 @@ describe('Callback Routes', () => {
     });
 
     assert.equal(response.statusCode, 200);
-
-    const recent = messageStore.getRecent(10);
-    assert.equal(recent.length, 1);
-    // Single content mention should win; extras from explicit targetCats are pruned.
-    const mentions = recent[0].mentions;
-    assert.ok(mentions.includes('codex'), 'content @mention should be included');
-    assert.equal(mentions.includes('gpt52'), false, 'extra explicit targetCats should be pruned');
-    assert.deepEqual(recent[0].extra?.targetCats, ['gpt52']);
+    const body = JSON.parse(response.body);
+    assert.equal(body.status, 'held', 'declared/parsed mismatch must be HELD, not silently arbitrated');
+    assert.equal(body.reason, 'routing_mismatch');
+    assert.deepEqual(body.unexpectedTargets, ['codex']);
+    assert.equal(messageStore.getRecent(10).length, 0, 'held message must not be stored');
   });
 
-  test('POST post-message keeps merged targets when content has multiple @mentions', async () => {
+  test('POST post-message multi-mention content outside declared targetCats → HELD (routing mismatch)', async () => {
     const app = await createApp();
     const { invocationId, callbackToken } = await registry.create('user-1', 'opus');
 
@@ -951,12 +950,33 @@ describe('Callback Routes', () => {
     });
 
     assert.equal(response.statusCode, 200);
+    const body = JSON.parse(response.body);
+    assert.equal(body.status, 'held');
+    assert.equal(body.reason, 'routing_mismatch');
+    assert.deepEqual([...body.unexpectedTargets].sort(), ['codex', 'gpt52']);
+    assert.equal(messageStore.getRecent(10).length, 0);
+  });
+
+  test('POST post-message content @mention within declared targetCats narrows normally', async () => {
+    const app = await createApp();
+    const { invocationId, callbackToken } = await registry.create('user-1', 'opus');
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/callbacks/post-message',
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
+      payload: {
+        content: '同步一下\n@codex',
+        targetCats: ['codex', 'gpt52'],
+      },
+    });
+
+    assert.equal(response.statusCode, 200);
     const recent = messageStore.getRecent(10);
     assert.equal(recent.length, 1);
     const mentions = recent[0].mentions;
-    assert.ok(mentions.includes('codex'));
-    assert.ok(mentions.includes('gpt52'));
-    assert.ok(mentions.includes('gemini'), 'multi-mention content should still merge explicit targetCats');
+    assert.ok(mentions.includes('codex'), 'content @mention should be included');
+    assert.equal(mentions.includes('gpt52'), false, 'declared superset narrows to the single content mention');
   });
 
   test('POST post-message rejects cross-thread send to another user thread', async () => {
@@ -4005,7 +4025,7 @@ describe('Callback Routes', () => {
     const { InMemoryTurnExecutionStore } = await import(
       '../dist/domains/cats/services/stores/memory/InMemoryTurnExecutionStore.js'
     );
-    invocationQueue = new InvocationQueue();
+    invocationQueue = adaptInvocationQueue(new InvocationQueue());
     const callerThreadId = 'thread-cross-read-caller';
     const targetThreadId = 'thread-cross-read-target';
     const { invocationId, callbackToken } = await registry.create('user-1', 'opus', callerThreadId);
@@ -4037,6 +4057,7 @@ describe('Callback Routes', () => {
       deliveryStatus: 'queued',
     });
     const queued = invocationQueue.enqueue({
+      kind: 'conversation_input',
       ownerAuthProvenance: 'unknown',
       threadId: targetThreadId,
       userId: 'user-1',
@@ -4328,11 +4349,12 @@ describe('Callback Routes', () => {
     const threadId = 'thread-f236-oversized-queued';
     const { invocationId, callbackToken } = await registry.create('user-1', 'opus', threadId);
     const queued = invocationQueue.enqueue({
+      kind: 'conversation_input',
       ownerAuthProvenance: 'strict',
       threadId,
       userId: 'user-1',
       content: `queued-oversized-${'q'.repeat(80_000)}`,
-      source: 'user',
+      from: { kind: 'user', userId: 'user-1' },
       targetCats: ['opus'],
       authorIntentByCatId: {
         opus: { requested: 'continue_current', boundParentInvocationId: invocationId },
@@ -4487,7 +4509,7 @@ describe('Callback Routes', () => {
 
   test('full thread-context projects published queued cat speech only once while recording queue read evidence', async () => {
     const { InvocationQueue } = await import('../dist/domains/cats/services/agents/invocation/InvocationQueue.js');
-    invocationQueue = new InvocationQueue();
+    invocationQueue = adaptInvocationQueue(new InvocationQueue());
     const threadId = 'thread-queued-cat-dedup';
     const stored = messageStore.append({
       userId: 'user-1',
@@ -4499,6 +4521,7 @@ describe('Callback Routes', () => {
       deliveryStatus: 'queued',
     });
     const queued = invocationQueue.enqueue({
+      kind: 'message_wake',
       ownerAuthProvenance: 'unknown',
       threadId,
       userId: 'user-1',
@@ -4541,9 +4564,10 @@ describe('Callback Routes', () => {
     );
     const queuedTelemetry = await import('../dist/domains/cats/services/freshness/freshness-queue-telemetry.js');
     queuedTelemetry.resetFreshnessQueueTelemetryForTest();
-    invocationQueue = new InvocationQueue();
+    invocationQueue = adaptInvocationQueue(new InvocationQueue());
     const { invocationId, callbackToken } = await registry.create('user-1', 'opus', 'thread-queued-d12a');
     const queued = invocationQueue.enqueue({
+      kind: 'conversation_input',
       ownerAuthProvenance: 'unknown',
       threadId: 'thread-queued-d12a',
       userId: 'user-1',
@@ -4688,6 +4712,7 @@ describe('Callback Routes', () => {
     assert.equal(invocationQueue.peekNextQueued('thread-queued-d12a', 'user-1'), null);
 
     const unread = invocationQueue.enqueue({
+      kind: 'conversation_input',
       ownerAuthProvenance: 'strict',
       threadId: 'thread-queued-d12a',
       userId: 'user-1',
@@ -4723,10 +4748,11 @@ describe('Callback Routes', () => {
     );
     const { turnCustodyAdoptionRegistry } = await import('../dist/domains/ball-custody/TurnCustodyAdoptionRegistry.js');
     turnCustodyAdoptionRegistry.resetForTest();
-    invocationQueue = new InvocationQueue();
+    invocationQueue = adaptInvocationQueue(new InvocationQueue());
     const threadId = 'thread-adopt-managed-hold';
     const { invocationId, callbackToken } = await registry.create('user-1', 'opus', threadId);
     const queued = invocationQueue.enqueue({
+      kind: 'conversation_input',
       ownerAuthProvenance: 'unknown',
       threadId,
       userId: 'user-1',
@@ -4773,7 +4799,7 @@ describe('Callback Routes', () => {
     };
     const queueProcessor = {
       onInvocationComplete: async () => {},
-      tryAutoExecute: async () => {},
+      requestDrain: async () => {},
       registerEntryCompleteHook: () => {},
       unregisterEntryCompleteHook: () => {},
       resolvePromptMessageCustodyWakes: async () => [wake],
@@ -4819,7 +4845,7 @@ describe('Callback Routes', () => {
 
   test('F254/F264: queued body exposure and handled closure use the exact child invocation id', async () => {
     const { InvocationQueue } = await import('../dist/domains/cats/services/agents/invocation/InvocationQueue.js');
-    invocationQueue = new InvocationQueue();
+    invocationQueue = adaptInvocationQueue(new InvocationQueue());
     const app = await createApp();
     const outerParentInv = 'outer-parent-d12b-token';
     const { invocationId: innerInv, callbackToken } = await registry.create(
@@ -4839,6 +4865,7 @@ describe('Callback Routes', () => {
     });
 
     const queued = invocationQueue.enqueue({
+      kind: 'conversation_input',
       ownerAuthProvenance: 'unknown',
       threadId: 'thread-queued-d12b-token',
       userId: 'user-1',
@@ -4885,11 +4912,12 @@ describe('Callback Routes', () => {
     const { InvocationQueue } = await import('../dist/domains/cats/services/agents/invocation/InvocationQueue.js');
     const queuedTelemetry = await import('../dist/domains/cats/services/freshness/freshness-queue-telemetry.js');
     queuedTelemetry.resetFreshnessQueueTelemetryForTest();
-    invocationQueue = new InvocationQueue();
+    invocationQueue = adaptInvocationQueue(new InvocationQueue());
     const app = await createApp();
     const { invocationId, callbackToken } = await registry.create('user-1', 'opus', 'thread-queued-sparse');
 
     invocationQueue.enqueue({
+      kind: 'conversation_input',
       ownerAuthProvenance: 'unknown',
       threadId: 'thread-queued-sparse',
       userId: 'user-1',
@@ -5271,6 +5299,7 @@ describe('Callback Routes', () => {
         then: 'Re-lock the exact HEAD and continue.',
       },
       expiresAt: body.await.expiresAt,
+      autoRenew: true,
       createdAt: body.await.createdAt,
       provenance: 'explicit_registration',
     });

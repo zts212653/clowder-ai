@@ -403,11 +403,11 @@ class QwenCloneRuntimeTest(unittest.IsolatedAsyncioTestCase):
                     ),
                 )
                 iterator = response.body_iterator.__aiter__()
-                first = await anext(iterator)
+                first = await iterator.__anext__()
                 self.assertEqual(__import__("json").loads(first)["type"], "chunk")
                 request.disconnected = True
                 with self.assertRaises(StopAsyncIteration):
-                    await anext(iterator)
+                    await iterator.__anext__()
                 self.assertTrue(adapter._lock.acquire(blocking=False), "disconnect must release the model lock")
                 adapter._lock.release()
         finally:

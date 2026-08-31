@@ -260,31 +260,29 @@ Evidence:
 
     const memoryDomain = summary.domains.find((d) => d.domainId === 'eval:memory');
     assert.ok(memoryDomain, 'eval:memory must appear in domains');
-    // Updated 2026-06-10: PR #2187 merged the first eval:memory live verdict.
-    assert.equal(memoryDomain.hasVerdict, true);
-    assert.ok(memoryDomain.latestVerdictId, 'eval:memory should have latestVerdictId');
+    // eval:memory is registered but has no merged live verdict yet.
+    assert.equal(memoryDomain.hasVerdict, false);
     assert.equal(memoryDomain.evalCatHandle, '@opus47');
 
     const sopDomain = summary.domains.find((d) => d.domainId === 'eval:sop');
     assert.ok(sopDomain, 'eval:sop must appear in domains (weekly domain)');
-    // Updated 2026-07-14: PR #2890 merged the first eval:sop verdict.
-    assert.equal(sopDomain.hasVerdict, true);
-    assert.ok(sopDomain.latestVerdictId, 'eval:sop should have latestVerdictId');
+    // Registry truth currently has no committed or local-artifact SOP verdict.
+    assert.equal(sopDomain.hasVerdict, false);
+    assert.equal(sopDomain.latestVerdictId, undefined);
     assert.equal(sopDomain.evalCatHandle, '@opus47');
 
     const capabilityWakeupDomain = summary.domains.find((d) => d.domainId === 'eval:capability-wakeup');
     assert.ok(capabilityWakeupDomain, 'eval:capability-wakeup must appear in domains');
-    // Updated 2026-06-06: PR #2129 merged cap-wakeup-c1-baseline-probe verdict to main
-    assert.equal(capabilityWakeupDomain.hasVerdict, true);
-    assert.ok(capabilityWakeupDomain.latestVerdictId, 'eval:capability-wakeup should have latestVerdictId');
+    // eval:capability-wakeup is registered but has no merged live verdict yet.
+    assert.equal(capabilityWakeupDomain.hasVerdict, false);
     assert.equal(capabilityWakeupDomain.evalCatHandle, '@opus47');
 
     // F253 Phase C: eval:qc domain (zero-baseline, weekly, opus).
-    // Updated 2026-07-12: PR #2889 published the first eval:qc live verdict.
+    // Registry truth currently has no committed or local-artifact QC verdict.
     const qcDomain = summary.domains.find((d) => d.domainId === 'eval:qc');
     assert.ok(qcDomain, 'eval:qc must appear in domains (F253 Phase C)');
-    assert.equal(qcDomain.hasVerdict, true);
-    assert.ok(qcDomain.latestVerdictId, 'eval:qc should have latestVerdictId');
+    assert.equal(qcDomain.hasVerdict, false);
+    assert.equal(qcDomain.latestVerdictId, undefined);
     assert.equal(qcDomain.evalCatHandle, '@opus');
   });
 
@@ -335,6 +333,157 @@ Evidence:
     assert.match(a2aItem.operatorNarrative.summary, /本轮数据可用/);
     assert.match(a2aItem.operatorNarrative.action, /不用处理/);
     assert.doesNotMatch(a2aItem.operatorNarrative.summary, /No actionable|keep observing/);
+  });
+
+  it('artifact-store verdicts take precedence over legacy in-repo verdicts with the same id', () => {
+    const harnessFeedbackRoot = mkdtempSync(join(tmpdir(), 'f257-eval-hub-precedence-'));
+    const artifactStoreRoot = join(harnessFeedbackRoot, 'data', 'harness-feedback', 'artifacts');
+    const verdictsDir = join(harnessFeedbackRoot, 'verdicts');
+    const domainsDir = join(harnessFeedbackRoot, 'eval-domains');
+    mkdirSync(verdictsDir, { recursive: true });
+    mkdirSync(domainsDir, { recursive: true });
+
+    writeFileSync(
+      join(domainsDir, 'eval-a2a.yaml'),
+      readFileSync(join(repoHarnessFeedbackRoot, 'eval-domains', 'eval-a2a.yaml'), 'utf8'),
+    );
+
+    const sharedId = '2026-05-24-eval-a2a-shared-id';
+
+    // Legacy in-repo verdict with "legacy" ownerAsk.
+    const legacyVerdictPath = join(verdictsDir, `${sharedId}.md`);
+    writeFileSync(
+      legacyVerdictPath,
+      `---
+feature_ids: [F192]
+topics: [harness-eval]
+doc_kind: harness-feedback
+feedback_type: live-verdict
+domain_id: eval:a2a
+packet_id: vhp_legacy
+---
+
+# Live Verdict - ${sharedId}
+
+- Verdict: \`keep_observe\`
+- Phenomenon: legacy
+- Harness: F167/C1 (hold_ball (MCP tool))
+- Owner ask: legacy
+- Re-eval: 2099-01-01T00:00:00.000Z
+
+Evidence:
+- snapshot:bundle/${sharedId}/snapshot
+`,
+    );
+    const legacyBundleDir = join(harnessFeedbackRoot, 'bundles', sharedId);
+    mkdirSync(legacyBundleDir, { recursive: true });
+    writeJson(join(legacyBundleDir, 'snapshot.json'), {
+      verdictId: sharedId,
+      evalSnapshotId: 'eval-legacy',
+      featureId: 'F167',
+      generatedAt: '2099-01-01T00:00:00.000Z',
+      window: { startMs: 1, endMs: 2, durationHours: 0 },
+      components: [
+        {
+          componentId: 'C1',
+          componentName: 'test component',
+          confidence: 'medium',
+          activationCounts: { 'test.metric': 1 },
+          frictionCounts: {},
+        },
+      ],
+    });
+    writeJson(join(legacyBundleDir, 'attribution.json'), {
+      verdictId: sharedId,
+      featureId: 'F167',
+      evalSnapshotId: 'eval-legacy',
+      generatedAt: '2099-01-01T00:00:00.000Z',
+      findings: [],
+      noFindingRecord: { reason: 'legacy no finding', evidence: 'legacy-evidence' },
+    });
+    writeJson(join(legacyBundleDir, 'provenance.json'), {
+      verdictId: sharedId,
+      generatedAt: '2099-01-01T00:00:00.000Z',
+      rawInputs: [{ path: 'legacy-input', sha256: '0'.repeat(64) }],
+      generator: { name: 'test', version: '1.0.0' },
+      sanitizeRulesVersion: '1.0.0',
+    });
+
+    // Artifact-store verdict with the same id but "artifact" ownerAsk.
+    const artifactDomainDir = join(artifactStoreRoot, 'eval-a2a', sharedId);
+    const artifactVerdictDir = join(artifactDomainDir, 'docs', 'harness-feedback', 'verdicts');
+    const artifactBundleDir = join(artifactDomainDir, 'docs', 'harness-feedback', 'bundles', sharedId);
+    mkdirSync(artifactVerdictDir, { recursive: true });
+    mkdirSync(artifactBundleDir, { recursive: true });
+    writeFileSync(
+      join(artifactVerdictDir, `${sharedId}.md`),
+      `---
+feature_ids: [F192]
+topics: [harness-eval]
+doc_kind: harness-feedback
+feedback_type: live-verdict
+domain_id: eval:a2a
+packet_id: vhp_artifact
+---
+
+# Live Verdict - ${sharedId}
+
+- Verdict: \`keep_observe\`
+- Phenomenon: artifact
+- Harness: F167/C1 (hold_ball (MCP tool))
+- Owner ask: artifact
+- Re-eval: 2099-01-01T00:00:00.000Z
+
+Evidence:
+- snapshot:bundle/${sharedId}/snapshot
+`,
+    );
+    writeJson(join(artifactBundleDir, 'snapshot.json'), {
+      verdictId: sharedId,
+      evalSnapshotId: 'eval-artifact',
+      featureId: 'F167',
+      generatedAt: '2099-01-01T00:00:00.000Z',
+      window: { startMs: 1, endMs: 2, durationHours: 0 },
+      components: [
+        {
+          componentId: 'C1',
+          componentName: 'test component',
+          confidence: 'medium',
+          activationCounts: { 'test.metric': 1 },
+          frictionCounts: {},
+        },
+      ],
+    });
+    writeJson(join(artifactBundleDir, 'attribution.json'), {
+      verdictId: sharedId,
+      featureId: 'F167',
+      evalSnapshotId: 'eval-artifact',
+      generatedAt: '2099-01-01T00:00:00.000Z',
+      findings: [],
+      noFindingRecord: { reason: 'artifact no finding', evidence: 'artifact-evidence' },
+    });
+    writeJson(join(artifactBundleDir, 'provenance.json'), {
+      verdictId: sharedId,
+      generatedAt: '2099-01-01T00:00:00.000Z',
+      rawInputs: [{ path: 'artifact-input', sha256: '0'.repeat(64) }],
+      generator: { name: 'test', version: '1.0.0' },
+      sanitizeRulesVersion: '1.0.0',
+    });
+
+    const summary = loadEvalHubSummary({
+      harnessFeedbackRoot,
+      artifactStoreRoot,
+      now: new Date('2099-01-01T00:00:00.000Z'),
+    });
+
+    const item = summary.items.find((v) => v.id === sharedId);
+    assert.ok(item, 'shared-id verdict must appear exactly once');
+    assert.match(item.phenomenon, /artifact/, 'artifact-store verdict must take precedence over legacy');
+    assert.match(
+      item.source.verdictPath,
+      /data\/harness-feedback\/artifacts\/eval-a2a/,
+      'source path must point to artifact store, not legacy in-repo docs',
+    );
   });
 
   // PR-3 R1 (砚砚 P1): lifecycle.stale tests + writeA2aLiveVerdict / setupA2aOnlyHarnessFeedbackRoot

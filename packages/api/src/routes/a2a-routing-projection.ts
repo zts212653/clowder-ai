@@ -2,16 +2,8 @@
  * F086/F216: the single place that turns an A2A dispatch decision into the user-visible
  * routing pill ("A → B").
  *
- * Both dispatch families write through here so the projection can never disagree with the
- * scheduling mode that actually ran:
- *  - serial   — route-serial.ts yields `a2a_handoff` events for an ordered worklist; the
- *               SSE/message routes persist them via `persistA2ARoutingMessage`.
- *  - parallel — the multi-mention callback route fans out N independent Queue entries and
- *               calls `emitParallelRoutingPills` for the same projection surface.
- *
- * Before this module existed the parallel path emitted no pill at all and the serial path
- * emitted N identical "→" pills at the same millisecond — so a sequential worklist and a real
- * fan-out were indistinguishable to the reader (#1291).
+ * Only admitted parallel callback fan-out emits this projection. A serial A2A
+ * successor is a new durable wake and is visible through its own lifecycle.
  */
 
 import type { A2ARoutingProjection, CatId } from '@cat-cafe/shared';
@@ -44,8 +36,8 @@ export async function persistA2ARoutingMessage(
   if (!msg.content) return undefined;
   try {
     const stored = await messageStore.append({
+      from: { kind: 'system', service: 'a2a-routing-projection' },
       userId: 'system',
-      catId: null,
       content: msg.content,
       mentions: [],
       timestamp: msg.timestamp,
@@ -72,7 +64,7 @@ export async function persistA2ARoutingMessage(
  *
  * Fire-and-forget by contract, and the CALLER must honour that by not awaiting this before
  * starting work: persistence is awaited per target inside here, so any caller that awaits the
- * whole thing in front of `tryAutoExecute` converts a slow store into a scheduling stall
+ * whole thing in front of the queue drain converts a slow store into a scheduling stall
  * (砚砚 R2 P1). The pill is a projection, not custody — losing one costs a UI line, nothing more.
  *
  * `targetCatIds` MUST be the targets that actually obtained custody, never the requested list.

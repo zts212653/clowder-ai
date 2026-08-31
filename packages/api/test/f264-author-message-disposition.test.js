@@ -3,6 +3,7 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { beforeEach, describe, test } from 'node:test';
+import { adaptInvocationQueue } from './helpers/message-from-fixtures.js';
 
 const { InvocationQueue } = await import('../dist/domains/cats/services/agents/invocation/InvocationQueue.js');
 const { saveMessageDispositionPreference } = await import('../dist/config/user-preferences-store.js');
@@ -17,6 +18,7 @@ function entry(overrides = {}) {
   return {
     threadId: 'thread-1',
     userId: 'user-1',
+    kind: 'conversation_input',
     ownerAuthProvenance: 'strict',
     content: 'queued body',
     source: 'user',
@@ -30,7 +32,7 @@ describe('F264 author-declared message disposition', () => {
   let queue;
 
   beforeEach(() => {
-    queue = new InvocationQueue();
+    queue = adaptInvocationQueue(new InvocationQueue());
   });
 
   test('missing author intent is fail-closed next-work and never enters a live parent context', () => {
@@ -118,7 +120,7 @@ describe('F264 author-declared message disposition', () => {
     ];
 
     for (const row of cases) {
-      const isolated = new InvocationQueue();
+      const isolated = adaptInvocationQueue(new InvocationQueue());
       isolated.enqueue(row.entry);
       const body = isolated.getQueuedBodyMessagesForCat('thread-1', 'user-1', 'opus', 'parent-a');
       const freshness = isolated.getQueuedFreshnessMessagesForCat('thread-1', 'user-1', 'opus', {

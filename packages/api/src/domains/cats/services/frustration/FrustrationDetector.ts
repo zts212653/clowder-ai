@@ -304,8 +304,8 @@ export async function evaluate(
   // 7. Post as system message with rich blocks
   try {
     const stored = await deps.messageStore.append({
+      from: { kind: 'system', service: 'frustration-detector' },
       userId: 'system',
-      catId: null,
       threadId,
       content: `[${signalType === 'user_report' ? '用户反馈' : '自动检测'}] ${signalType === 'user_report' ? '你发起了问题反馈' : `检测到可能的问题（${signalType === 'cli_error' ? 'CLI 错误' : '操作中断'}）`}，已自动整理上下文。`,
       mentions: [],

@@ -859,6 +859,7 @@ describe('cat-catalog-store', () => {
     assert.equal(before.opus.nickname, '宪宪');
     assert.equal(before['opus-sonnet'].name, '布偶猫');
     assert.equal(before['opus-sonnet'].displayName, '布偶猫');
+    // Omitted variant nicknames keep the established breed fallback.
     assert.equal(before['opus-sonnet'].nickname, '宪宪');
 
     await updateRuntimeCat(projectRoot, 'opus', {
@@ -873,6 +874,8 @@ describe('cat-catalog-store', () => {
     assert.equal(after.opus.nickname, '默认布偶昵称');
     assert.equal(after['opus-sonnet'].name, '布偶猫');
     assert.equal(after['opus-sonnet'].displayName, '布偶猫');
+    // Scoped-update intent is unchanged: the default variant's new nickname must
+    // not leak onto the sibling, which keeps the breed-level fallback.
     assert.equal(after['opus-sonnet'].nickname, '宪宪');
 
     const catalog = readRuntimeCatCatalog(projectRoot);
@@ -1482,7 +1485,9 @@ describe('cat-catalog-store', () => {
         mcpSupport: false,
         cli: { command: 'codex', outputFormat: 'json' },
       });
-    }, /mention alias "@opus" is already used by cat "opus"/i);
+      // F257 #1: the cross-cat pattern check in toAllCatConfigs now fires first
+      // (fail-closed at the expansion choke point) and names BOTH holders.
+    }, /mention pattern "@opus" is shared by cats \[opus, spark-lite\]/i);
 
     const afterRaw = readFileSync(catalogPath, 'utf-8');
     assert.equal(afterRaw, beforeRaw, 'failed create must not mutate runtime catalog');

@@ -31,7 +31,7 @@ export async function bindAsrPersonMemoryReentryFromSchedulerMessage(input: {
   if (
     !carrier.success ||
     input.triggerMessage.userId !== 'scheduler' ||
-    input.triggerMessage.catId !== null ||
+    (input.triggerMessage.from ? input.triggerMessage.from.kind !== 'system' : input.triggerMessage.catId !== null) ||
     input.triggerMessage.threadId !== input.threadId ||
     input.triggerMessage.deletedAt !== undefined ||
     input.triggerMessage._tombstone ||
@@ -106,7 +106,7 @@ export async function bindAsrPersonMemoryPresentationRetryFromSchedulerMessage(i
   if (
     !carrier.success ||
     input.triggerMessage.userId !== 'scheduler' ||
-    input.triggerMessage.catId !== null ||
+    (input.triggerMessage.from ? input.triggerMessage.from.kind !== 'system' : input.triggerMessage.catId !== null) ||
     input.triggerMessage.threadId !== input.threadId ||
     input.triggerMessage.deletedAt !== undefined ||
     input.triggerMessage._tombstone ||

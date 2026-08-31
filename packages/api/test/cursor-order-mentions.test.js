@@ -11,6 +11,7 @@
 
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
+import { canonicalTestMessageInput } from './helpers/message-from-fixtures.js';
 
 const { cursorFor } = await import('../dist/domains/cats/services/stores/cursor.js');
 const { MessageStore } = await import('../dist/domains/cats/services/stores/ports/MessageStore.js');
@@ -23,28 +24,34 @@ describe('Cursor Order — RED #22: Late mention exactly-once', () => {
     const baseTs = Date.now() - 10000;
 
     // C: direct mention (visible immediately)
-    const c = store.append({
-      userId: 'u1',
-      catId: null,
-      content: '@opus direct mention',
-      mentions: ['opus'],
-      timestamp: baseTs + 200,
-      threadId,
-    });
+    const c = store.append(
+      canonicalTestMessageInput({
+        provenance: { author: 'user', routed: false, observation: 'original' },
+        userId: 'u1',
+        catId: null,
+        content: '@opus direct mention',
+        mentions: ['opus'],
+        timestamp: baseTs + 200,
+        threadId,
+      }),
+    );
 
     // Q: genuinely hidden queued work (catId: null, scheduler-originated) — NOT
     // timeline-published, so invisible before delivery.  Q.id < C.id because
     // of the earlier timestamp.  After markDelivered, Q becomes visible and
     // must appear exactly once in the next mention page.
-    const q = store.append({
-      userId: 'scheduler',
-      catId: null,
-      content: '@opus queued mention',
-      mentions: ['opus'],
-      timestamp: baseTs + 50,
-      threadId,
-      deliveryStatus: 'queued',
-    });
+    const q = store.append(
+      canonicalTestMessageInput({
+        provenance: { author: 'system', routed: false, observation: 'original' },
+        userId: 'scheduler',
+        catId: null,
+        content: '@opus queued mention',
+        mentions: ['opus'],
+        timestamp: baseTs + 50,
+        threadId,
+        deliveryStatus: 'queued',
+      }),
+    );
 
     // Before delivery: only C visible in mentions
     const mentions1 = store.getMentionsFor('opus', 20, undefined, threadId);
@@ -72,37 +79,46 @@ describe('Cursor Order — RED #22: Late mention exactly-once', () => {
     const baseTs = Date.now() - 50000;
 
     // First mention (will be acked)
-    const _anchor = store.append({
-      userId: 'u1',
-      catId: null,
-      content: '@opus anchor',
-      mentions: ['opus'],
-      timestamp: baseTs,
-      threadId,
-    });
+    const _anchor = store.append(
+      canonicalTestMessageInput({
+        provenance: { author: 'user', routed: false, observation: 'original' },
+        userId: 'u1',
+        catId: null,
+        content: '@opus anchor',
+        mentions: ['opus'],
+        timestamp: baseTs,
+        threadId,
+      }),
+    );
     const anchorCursor = cursorFor(store.getByThreadAfter(threadId)[0]);
 
     // 25 non-mention messages (would eat a page-then-filter window)
     for (let i = 0; i < 25; i++) {
-      store.append({
-        userId: 'u1',
-        catId: null,
-        content: `filler-${i}`,
-        mentions: [],
-        timestamp: baseTs + 100 + i * 10,
-        threadId,
-      });
+      store.append(
+        canonicalTestMessageInput({
+          provenance: { author: 'user', routed: false, observation: 'original' },
+          userId: 'u1',
+          catId: null,
+          content: `filler-${i}`,
+          mentions: [],
+          timestamp: baseTs + 100 + i * 10,
+          threadId,
+        }),
+      );
     }
 
     // 1 mention at the end
-    const lateMention = store.append({
-      userId: 'u1',
-      catId: null,
-      content: '@opus late mention',
-      mentions: ['opus'],
-      timestamp: baseTs + 500,
-      threadId,
-    });
+    const lateMention = store.append(
+      canonicalTestMessageInput({
+        provenance: { author: 'user', routed: false, observation: 'original' },
+        userId: 'u1',
+        catId: null,
+        content: '@opus late mention',
+        mentions: ['opus'],
+        timestamp: baseTs + 500,
+        threadId,
+      }),
+    );
 
     // getMentionsFor with limit=20, cursor after anchor
     const mentions = store.getMentionsFor('opus', 20, undefined, threadId, anchorCursor);

@@ -11,6 +11,7 @@
 import assert from 'node:assert/strict';
 import { beforeEach, describe, mock, test } from 'node:test';
 import { migrateRouterOpts } from '../helpers/agent-registry-helpers.js';
+import { canonicalTestMessageInput } from '../helpers/message-from-fixtures.js';
 
 const { AgentRouter } = await import('../../dist/domains/cats/services/agents/routing/AgentRouter.js');
 const { MessageStore } = await import('../../dist/domains/cats/services/stores/ports/MessageStore.js');
@@ -126,14 +127,17 @@ describe('Cross-Cat Context (暗号测试)', () => {
 
     // Seed 25 messages directly into messageStore
     for (let i = 0; i < 25; i++) {
-      await messageStore.append({
-        userId: 'user-1',
-        catId: i % 2 === 0 ? null : 'opus',
-        content: `history-msg-${i}`,
-        mentions: [],
-        timestamp: i * 1000,
-        threadId: 'thread-3',
-      });
+      await messageStore.append(
+        canonicalTestMessageInput({
+          provenance: { author: i % 2 === 0 ? 'user' : 'cat', routed: false, observation: 'original' },
+          userId: 'user-1',
+          catId: i % 2 === 0 ? null : 'opus',
+          content: `history-msg-${i}`,
+          mentions: [],
+          timestamp: i * 1000,
+          threadId: 'thread-3',
+        }),
+      );
     }
 
     await collect(router.route('user-1', '@opus summarize', 'thread-3'));

@@ -5,7 +5,7 @@
  * （TRANSITION_TABLE 而非 if-chain，降单函数 cognitive complexity）。
  * 调用方（projector）负责持久化 + 字段 effect（heldUntil/blockedSinceAt/lastWakeAt）。
  *
- * INV-10（完整性）：全 8 state × 18 event 的每格行为确定（转移 or 显式 reject），穷举测试钉死。
+ * INV-10（完整性）：全 8 state × 20 event 的每格行为确定（转移 or 显式 reject），穷举测试钉死。
  * 复杂守卫拆成独立 resolver：
  *   - ball.handed_cvo：payload.intent 三态（handoff→parked / done_notify→resolved / fyi→不变）
  *   - ball.hold_expired：需 payload.fireAt 匹配 snapshot.heldUntil，防旧 reminder 误杀新 hold
@@ -32,6 +32,7 @@ export const ALL_BALL_EVENT_KINDS: BallCustodyEvent['kind'][] = [
   'ball.handed',
   'ball.handed_cvo',
   'ball.void_pass',
+  'ball.void_ack',
   'ball.held',
   'ball.hold_expired',
   'invocation.started',
@@ -128,6 +129,7 @@ type DynamicRule = {
 const STATIC_TABLE: Partial<Record<BallCustodyEvent['kind'], StaticRule>> = {
   'ball.handed': { from: '*', to: 'active' }, // 任意（含 resolved=reopen）→ active
   'ball.void_pass': { from: set('new', 'active', 'blocked', 'parked'), to: 'void' },
+  'ball.void_ack': { from: set('new', 'active', 'blocked', 'parked'), to: 'void' },
   // A fresh structured hold is a new custody acquisition on the thread subject.
   // It must reopen a prior terminal disposition just as a new A2A handoff does.
   'ball.held': { from: set('new', 'active', 'resolved'), to: 'active' }, // heldUntil 由 projector 设

@@ -5,6 +5,7 @@ import {
   derivePawFeelCoverageHealth,
   PawFeelDispositionReconciler,
 } from '../../dist/infrastructure/harness-eval/paw-feel-disposition/reconciler.js';
+import { canonicalTestMessageInput } from '../helpers/message-from-fixtures.js';
 
 const DAY = 86_400_000;
 const MINUTE = 60_000;
@@ -76,15 +77,19 @@ class RecordingDiscoveryService {
 }
 
 function append(store, ageMs, content = '[爪感差: tool+phenomenon]', overrides = {}) {
-  return store.append({
-    userId: 'user-1',
-    catId: 'codex-sol',
-    threadId: 'thread-source',
-    content,
-    mentions: [],
-    timestamp: NOW_MS - ageMs,
-    ...overrides,
-  });
+  const catId = overrides.catId === undefined ? 'codex-sol' : overrides.catId;
+  return store.append(
+    canonicalTestMessageInput({
+      userId: 'user-1',
+      catId,
+      threadId: 'thread-source',
+      content,
+      mentions: [],
+      timestamp: NOW_MS - ageMs,
+      ...overrides,
+      provenance: { author: catId === null ? 'user' : 'cat', routed: false, observation: 'original' },
+    }),
+  );
 }
 
 function makeReconciler(overrides = {}) {

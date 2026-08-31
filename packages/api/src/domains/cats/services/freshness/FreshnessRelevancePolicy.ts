@@ -47,7 +47,7 @@ export function decideFreshnessRelevance(
     return { relevant: false, reason: 'same_user_wave_sibling_reply' };
   }
 
-  if (message.catId === null) {
+  if (message.from ? message.from.kind !== 'agent' : message.catId === null) {
     if (explicitTargets.size > 0 && !explicitTargets.has(context.catId)) {
       return { relevant: false, reason: 'directed_to_other_cat' };
     }

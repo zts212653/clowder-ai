@@ -7,6 +7,7 @@ import assert from 'node:assert/strict';
 import { beforeEach, describe, test } from 'node:test';
 import Fastify from 'fastify';
 import './helpers/setup-cat-registry.js';
+import { canonicalTestQueueInput } from './helpers/message-from-fixtures.js';
 
 describe('POST /api/callbacks/start-vote', () => {
   let registry;
@@ -307,7 +308,7 @@ describe('POST /api/callbacks/start-vote', () => {
       invocationQueue,
       queueProcessor: {
         onInvocationComplete: async () => {},
-        tryAutoExecute: async () => {},
+        requestDrain: async () => {},
         registerEntryCompleteHook: () => {},
         unregisterEntryCompleteHook: () => {},
       },
@@ -397,7 +398,7 @@ describe('POST /api/callbacks/start-vote', () => {
       invocationQueue,
       queueProcessor: {
         onInvocationComplete: async () => {},
-        tryAutoExecute: async () => {},
+        requestDrain: async () => {},
         registerEntryCompleteHook: () => {},
         unregisterEntryCompleteHook: () => {},
       },
@@ -462,7 +463,7 @@ describe('POST /api/callbacks/start-vote', () => {
       invocationQueue,
       queueProcessor: {
         onInvocationComplete: async () => {},
-        tryAutoExecute: async () => {},
+        requestDrain: async () => {},
         registerEntryCompleteHook: () => {},
         unregisterEntryCompleteHook: () => {},
       },
@@ -502,17 +503,21 @@ describe('POST /api/callbacks/start-vote', () => {
     const invocationQueue = new InvocationQueue();
 
     // Pre-enqueue an entry for 'codex' from caller 'opus' — second handoff will coalesce.
-    invocationQueue.enqueue({
-      ownerAuthProvenance: 'unknown',
-      threadId: '', // placeholder — will be set by the real thread below
-      userId: 'user-1',
-      content: 'pre-existing task for codex',
-      source: 'agent',
-      targetCats: ['codex'],
-      intent: 'execute',
-      autoExecute: true,
-      callerCatId: 'opus',
-    });
+    invocationQueue.enqueue(
+      canonicalTestQueueInput({
+        ownerAuthProvenance: 'unknown',
+        threadId: '', // placeholder — will be set by the real thread below
+        userId: 'user-1',
+        kind: 'message_wake',
+        content: 'pre-existing task for codex',
+        messageId: 'pre-existing-vote-message',
+        source: 'agent',
+        targetCats: ['codex'],
+        intent: 'execute',
+        autoExecute: true,
+        callerCatId: 'opus',
+      }),
+    );
 
     const app = Fastify();
     await app.register(callbacksRoutes, {
@@ -544,7 +549,7 @@ describe('POST /api/callbacks/start-vote', () => {
       invocationQueue,
       queueProcessor: {
         onInvocationComplete: async () => {},
-        tryAutoExecute: async () => {},
+        requestDrain: async () => {},
         registerEntryCompleteHook: () => {},
         unregisterEntryCompleteHook: () => {},
       },
@@ -553,17 +558,21 @@ describe('POST /api/callbacks/start-vote', () => {
     const thread = threadStore.create('user-1', 'Test');
 
     // Now enqueue with the real threadId so coalesce can find it
-    invocationQueue.enqueue({
-      ownerAuthProvenance: 'unknown',
-      threadId: thread.id,
-      userId: 'user-1',
-      content: 'pre-existing task for codex',
-      source: 'agent',
-      targetCats: ['codex'],
-      intent: 'execute',
-      autoExecute: true,
-      callerCatId: 'opus',
-    });
+    invocationQueue.enqueue(
+      canonicalTestQueueInput({
+        ownerAuthProvenance: 'unknown',
+        threadId: thread.id,
+        userId: 'user-1',
+        kind: 'message_wake',
+        content: 'pre-existing task for codex',
+        messageId: 'pre-existing-vote-message',
+        source: 'agent',
+        targetCats: ['codex'],
+        intent: 'execute',
+        autoExecute: true,
+        callerCatId: 'opus',
+      }),
+    );
 
     const { invocationId, callbackToken } = await registry.create('user-1', 'opus', thread.id);
 

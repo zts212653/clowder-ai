@@ -13,6 +13,11 @@ resolver: D11SkillTriggerResolver
 inputs:
   - skillTrigger
 
+# Variable metadata (canonical source for Console editor)
+variables:
+  - name: SKILL_NAME
+    description: 被触发 skill 的名称
+    placeholder: ""
 # Override constraints
 disableable: true
 

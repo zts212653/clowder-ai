@@ -11,11 +11,7 @@ import {
   resolvePromptInputCeilingTokens,
 } from '../../../../../config/context-capacity.js';
 import { createModuleLogger } from '../../../../../infrastructure/logger.js';
-import {
-  ROUTE_HAS_A2A_HANDOFF,
-  ROUTE_TOTAL_CATS_INVOKED,
-  ROUTE_TOTAL_TOKENS,
-} from '../../../../../infrastructure/telemetry/genai-semconv.js';
+import { ROUTE_TOTAL_CATS_INVOKED, ROUTE_TOTAL_TOKENS } from '../../../../../infrastructure/telemetry/genai-semconv.js';
 import {
   conciergeVerifiedToolActions,
   conciergeVerifiedToolTargetsPerReply,
@@ -45,8 +41,10 @@ import { sharedEventStore, sharedNudgeCooldown } from '../../../../memory/entity
 import type { PushRecallPresentation } from '../../../../memory/f200-types.js';
 import type { PreparedProactiveMemoryNudge } from '../../../../memory/ProactiveMemoryNudgeService.js';
 import { mergePushRecallPresentations, triggerRecallCorrelation } from '../../../../memory/recall-correlation-hook.js';
+import { persistNativeL0SessionTrace } from '../../../../prompt-hooks/native-l0-trace.js';
 import { drainCapturedTraces } from '../../../../prompt-hooks/PipelinePromptBuilder.js';
-import { getTraceStore } from '../../../../prompt-hooks/trace-bootstrap.js';
+import { finalizeTraceEpisode, getTraceStore } from '../../../../prompt-hooks/trace-bootstrap.js';
+import { buildFromPipeline } from '../../../../prompt-hooks/trace-bridge.js';
 // F237: Injection trace (v0 — fire-and-forget observability)
 import { buildTraceDetail, buildTraceSummary, collectTrace } from '../../../../prompt-hooks/trace-collector.js';
 import { assembleContext } from '../../context/ContextAssembler.js';
@@ -64,6 +62,7 @@ import { formatDegradationMessage } from '../../orchestration/DegradationPolicy.
 import { mergePresentationCounts, type PresentationCounts } from '../../session/context-surface-projection.js';
 import { buildSessionBootstrap, MAX_SESSION_BOOTSTRAP_TOKENS } from '../../session/SessionBootstrap.js';
 import type { AppendMessageInput, StoredToolEvent } from '../../stores/ports/MessageStore.js';
+import { commitLifecycleResponseFromAppendInput } from '../../stores/ports/MessageStore.js';
 import type { Thread, ThreadRoutingPolicyV1 } from '../../stores/ports/ThreadStore.js';
 import {
   projectTurnExecutionMessage,
@@ -91,6 +90,7 @@ import { mergeStreams } from '../invocation/stream-merge.js';
 import { resolveDefaultClaudeMcpServerPath } from '../providers/ClaudeAgentService.js';
 import { parseA2AMentions } from '../routing/a2a-mentions.js';
 import { accumulateTextAggregate } from '../text-aggregation.js';
+import { signatureLintExtra } from './cat-signature-lint.js';
 import { type ContextEvalInput, extractContextEvalSignals } from './context-eval.js';
 import { buildBriefingMessage } from './format-briefing.js';
 import { isDirectOwnerDispositionOrigin } from './human-disposition-invocation-origin.js';
@@ -252,10 +252,9 @@ export async function* routeParallel(
         userId,
         ownerAuthProvenance,
         content: `[Freshness Supplement ${supplement.id}]`,
-        source: 'agent',
+        from: { kind: 'agent', catId },
         sourceCategory: 'freshness',
         targetCats: [catId],
-        callerCatId: catId,
         autoExecute: true,
         priority: 'normal',
         intent: 'execute',
@@ -468,6 +467,12 @@ export async function* routeParallel(
   // F148 OQ-2: Collect tool names and coverage maps per cat for context eval
   const catToolNames = new Map<string, string[]>();
   const catCoverageMap = new Map<string, ContextEvalInput['coverageMap']>();
+  // F257: per-cat traceTurnId + outputMessageId for finalizeTraceEpisode at completion boundary.
+  const catTraceTurnId = new Map<string, string>();
+  const catOutputMessageId = new Map<string, string>();
+  // R1 P1-2: retained so finalizeTraceEpisode chains after persist (happens-before).
+  // R2 P1-1: carries success state — only finalize when durable summary exists.
+  const catTracePersistPromise = new Map<string, Promise<boolean>>();
 
   const streams = await Promise.all(
     targetCats.map(async (catId) => {
@@ -535,7 +540,8 @@ export async function* routeParallel(
         : buildStaticIdentity(catId, { mcpAvailable, packBlocks });
       // F237: drain session trace IMMEDIATELY — before any await that could let
       // another parallel cat overwrite the module-global capture buffer.
-      drainCapturedTraces();
+      // F257: save session pipeline trace for full 46-segment persistence (S+L+B+C).
+      const { session: pipelineSessionTrace } = drainCapturedTraces();
       // F041: inject HTTP callback only when MCP is NOT actually available (fallback)
       const mcpInstructions = needsMcpInjection(mcpAvailable, catConfig?.clientId)
         ? buildMcpCallbackInstructions({
@@ -615,7 +621,8 @@ export async function* routeParallel(
         .filter(Boolean)
         .join('\n\n');
       // F237: drain turn trace IMMEDIATELY — same race-safety as session drain above.
-      drainCapturedTraces();
+      // F257: save turn pipeline trace for full 46-segment persistence (D+R+N).
+      const { turn: pipelineTurnTrace } = drainCapturedTraces();
 
       // F237 Phase 2: Pipeline trace capture drained above (lines 250, 322) to prevent
       // stale module-global buffer in concurrent Promise.all execution. Persistence is
@@ -700,36 +707,82 @@ export async function* routeParallel(
         }
       }
 
-      // F237: fire-and-forget injection trace persist (v0 — observability only)
-      // Placed after bootstrapCtx so per-turn trace covers ALL route-level
-      // injected system/control content (invocation + mode prompt + bootstrap + MCP).
+      // F257: injection trace persist — pipeline path (all 46 segments).
+      // F237 v0 legacy path kept as fallback when pipeline traces are unavailable.
+      // R1 P1-2: retain persist promise so finalizeTraceEpisode chains after it.
       // Skip if cat is already cancelled (avoid phantom trace for turns that never happen).
       const preTraceSignal = signalForCat?.(catId) ?? signal;
+      // F257: generate traceTurnId before trace persist so finalizeTraceEpisode can reference it.
+      const traceTurnId = crypto.randomUUID();
+      catTraceTurnId.set(catId as string, traceTurnId);
       try {
         const traceStore = getTraceStore();
         if (traceStore && !preTraceSignal?.aborted) {
-          const traceTurnId = crypto.randomUUID();
-          const traceModePrompt = modeSystemPromptByCat?.[catId as string] ?? modeSystemPrompt ?? '';
-          const traceTurnContent = [invocationContext, traceModePrompt, bootstrapCtx, mcpInstructions]
-            .filter(Boolean)
-            .join('\n\n---\n\n');
-          const collected = collectTrace(catId as string, staticIdentity, traceTurnContent, hasNativeL0, {
-            mcpAvailable,
-            packBlocks,
-          });
           const traceMeta = { turnId: traceTurnId, threadId, catId: catId as string };
-          const summary = buildTraceSummary(collected, traceMeta);
-          const detail = buildTraceDetail(collected, traceMeta);
-          traceStore.persist(summary, detail).catch((err) => {
-            log.warn({ err, threadId, catId }, '[F237] injection trace persist failed (fire-and-forget)');
-          });
+
+          if (hasNativeL0) {
+            // R1 P1-1: invoke actual native L0 producer — fetches real manifest via
+            // getL0ManifestViaSubprocess, persists L1-L7 session trace from compiler artifact.
+            // R2 P1-1: propagate boolean — only finalize when durable summary exists.
+            const persistPromise = persistNativeL0SessionTrace({
+              traceStore,
+              catId: catId as string,
+              threadId,
+              turnId: traceTurnId,
+              turnResult: pipelineTurnTrace ?? null,
+              log,
+              ownerUserId: userId,
+              messageAnchorId: currentUserMessageId ?? options.a2aTriggerMessageId ?? null,
+              messageStore: deps.messageStore,
+            }).catch((err) => {
+              log.warn({ err, threadId, catId }, '[F257] native L0 trace persist failed (degraded)');
+              return false;
+            });
+            catTracePersistPromise.set(catId as string, persistPromise);
+          } else {
+            // F257: prefer pipeline traces — per-segment for ALL hooks (S+L+B+C session, D+R+N turn).
+            const pipelineResult = buildFromPipeline(pipelineSessionTrace ?? null, pipelineTurnTrace ?? null, {
+              ...traceMeta,
+              hasNativeL0: false,
+              sessionFromNativeCompiler: false,
+            });
+
+            if (pipelineResult) {
+              const persistPromise = traceStore
+                .persist(pipelineResult.summary, pipelineResult.detail)
+                .then(() => true as const)
+                .catch((err) => {
+                  log.warn({ err, threadId, catId }, '[F257] pipeline trace persist failed (degraded)');
+                  return false as const;
+                });
+              catTracePersistPromise.set(catId as string, persistPromise);
+            } else {
+              // Fallback: legacy collectTrace (S-prefix only for session, aggregate for turn)
+              const traceModePrompt = modeSystemPromptByCat?.[catId as string] ?? modeSystemPrompt ?? '';
+              const traceTurnContent = [invocationContext, traceModePrompt, bootstrapCtx, mcpInstructions]
+                .filter(Boolean)
+                .join('\n\n---\n\n');
+              const collected = collectTrace(catId as string, staticIdentity, traceTurnContent, hasNativeL0, {
+                mcpAvailable,
+                packBlocks,
+              });
+              const summary = buildTraceSummary(collected, traceMeta);
+              const detail = buildTraceDetail(collected, traceMeta);
+              const persistPromise = traceStore
+                .persist(summary, detail)
+                .then(() => true as const)
+                .catch((err) => {
+                  log.warn({ err, threadId, catId }, '[F237] injection trace persist failed (degraded)');
+                  return false as const;
+                });
+              catTracePersistPromise.set(catId as string, persistPromise);
+              // v0 collectTrace re-populates capturedSessionTrace. Clear stale buffer.
+              if (deps.injectionTraceStore) drainCapturedTraces();
+            }
+          }
         }
-        // v0 collectTrace → buildStaticIdentity(annotateSegments: true) re-populates
-        // the module-global capturedSessionTrace without draining. Clear it so the next
-        // invocation (especially native-L0 pack-only) doesn't persist stale session traces.
-        if (deps.injectionTraceStore) drainCapturedTraces();
       } catch {
-        /* F237: trace collection must never break invocation */
+        /* F237/F257: trace collection must never break invocation */
       }
 
       let prompt: string;
@@ -1066,6 +1119,12 @@ export async function* routeParallel(
         },
         promptMessageIds: exactPromptMessageIds,
         ...(options.onPromptMessagesExposed ? { onPromptMessagesExposed: options.onPromptMessagesExposed } : {}),
+        ...(options.onLifecycleInvocationStarted
+          ? { onLifecycleInvocationStarted: options.onLifecycleInvocationStarted }
+          : {}),
+        ...(options.onAgentClientActiveRunReady
+          ? { onAgentClientActiveRunReady: options.onAgentClientActiveRunReady }
+          : {}),
         isLastCat: false,
       });
       return (async function* withContextProjectionMessages(): AsyncGenerator<AgentMessage> {
@@ -1112,6 +1171,7 @@ export async function* routeParallel(
   const catActivityUpdated = new Set<string>();
   // F22 R2 P1-1: Capture own invocationId per cat from stream
   const catInvocationId = new Map<string, string>();
+  const catLifecycleResponse = new Map<string, { messageId: string; priorFrontierMessageId: string | null }>();
   const turnExecutionProjectionByInvocation = new Map<string, TurnExecutionMessageProjection>();
   const projectLiveTurnExecution = (event: AgentMessage, invocationId: string | undefined): AgentMessage => {
     if (!deps.invocationDeps.turnExecutionStore || !invocationId) return event;
@@ -1224,6 +1284,17 @@ export async function* routeParallel(
             parsed.invocationId.length > 0
           ) {
             catInvocationId.set(effectiveMsg.catId, parsed.invocationId);
+            if (
+              typeof effectiveMsg.lifecycleResponseMessageId === 'string' &&
+              effectiveMsg.lifecycleResponseMessageId.length > 0 &&
+              (effectiveMsg.lifecyclePriorFrontierMessageId === null ||
+                typeof effectiveMsg.lifecyclePriorFrontierMessageId === 'string')
+            ) {
+              catLifecycleResponse.set(effectiveMsg.catId, {
+                messageId: effectiveMsg.lifecycleResponseMessageId,
+                priorFrontierMessageId: effectiveMsg.lifecyclePriorFrontierMessageId,
+              });
+            }
             if (deps.invocationDeps.turnExecutionStore) {
               turnExecutionProjectionByInvocation.set(parsed.invocationId, {
                 invocationId: parsed.invocationId,
@@ -1633,11 +1704,61 @@ export async function* routeParallel(
       const actionOutputCommitAllowed = options.beforeOutputCommit
         ? await options.beforeOutputCommit(msg.catId as CatId)
         : true;
+      const lifecycleAdmission = catLifecycleResponse.get(msg.catId);
+      const completedSignal = signalForCat?.(msg.catId as CatId) ?? signal;
+      const abortReason = completedSignal?.reason;
+      const lifecycleTerminalStatus: 'completed' | 'failed' | 'canceled' | 'interrupted' = !actionOutputCommitAllowed
+        ? 'interrupted'
+        : completedSignal?.aborted
+          ? abortReason === 'user_cancel' || abortReason === 'cancel_all'
+            ? 'canceled'
+            : 'interrupted'
+          : catHadProviderError.has(msg.catId)
+            ? 'failed'
+            : 'completed';
+      const lifecycleTerminalReason =
+        lifecycleTerminalStatus === 'completed'
+          ? undefined
+          : !actionOutputCommitAllowed
+            ? 'output_commit_rejected'
+            : typeof msg.errorCode === 'string' && msg.errorCode.length > 0
+              ? msg.errorCode
+              : typeof abortReason === 'string' && abortReason.length > 0
+                ? abortReason
+                : lifecycleTerminalStatus === 'failed'
+                  ? 'provider_error'
+                  : lifecycleTerminalStatus;
+      const lifecycleResponse =
+        lifecycleAdmission && ownInvId
+          ? {
+              ...lifecycleAdmission,
+              status: lifecycleTerminalStatus,
+              completedAt: Math.max(Date.now(), invocationStartedAt),
+              ...(lifecycleTerminalReason ? { reason: lifecycleTerminalReason } : {}),
+            }
+          : undefined;
       if (!actionOutputCommitAllowed) {
         catProducedOutput = Boolean(
           text || bufferedBlocks.length > 0 || (catToolEvents.get(msg.catId)?.length ?? 0) > 0,
         );
         if (options.persistenceContext) options.persistenceContext.actionOutputCommitRejected = true;
+        if (lifecycleResponse && ownInvId) {
+          await commitLifecycleResponseFromAppendInput(
+            deps.messageStore,
+            lifecycleResponse.messageId,
+            ownInvId,
+            lifecycleResponse,
+            {
+              from: { kind: 'agent', catId: msg.catId as CatId },
+              userId,
+              content: '',
+              mentions: [],
+              origin: 'stream',
+              timestamp: invocationStartedAt,
+              threadId,
+            },
+          );
+        }
       } else if (text) {
         catProducedOutput = true;
         const meta = catMeta.get(msg.catId);
@@ -1721,8 +1842,8 @@ export async function* routeParallel(
                   // Gap 3: persist separate connector message for ConnectorBubble rendering
                   try {
                     const stored = await deps.messageStore.append({
+                      from: { kind: 'system', service: 'vote' },
                       userId,
-                      catId: null,
                       content: `投票结果: ${voteState.question}`,
                       mentions: [],
                       timestamp: Date.now(),
@@ -1820,9 +1941,12 @@ export async function* routeParallel(
         let outputCommitDecision: OutputCommitDecision | undefined;
         try {
           const streamMessageInput: AppendMessageInput = {
+            from: { kind: 'agent', catId: msg.catId as CatId },
             userId,
-            catId: msg.catId as CatId,
-            content: storedContent,
+            content:
+              lifecycleResponse && catErrorText.get(msg.catId)
+                ? `${storedContent}\n\nError: ${catErrorText.get(msg.catId)}`
+                : storedContent,
             mentions: [],
             origin: 'stream',
             timestamp: invocationStartedAt,
@@ -1853,6 +1977,7 @@ export async function* routeParallel(
                 : {}),
               ...(turnExecution ? { turnExecution } : {}),
               ...(msg.tracing ? { tracing: msg.tracing } : {}),
+              ...signatureLintExtra(storedContent),
             },
           };
           let storedMsg = null;
@@ -1867,6 +1992,7 @@ export async function* routeParallel(
               freshnessClosureId: options.freshnessClosureId,
               freshnessSupplementId: options.freshnessSupplementId,
               message: streamMessageInput,
+              ...(lifecycleResponse ? { lifecycleResponse } : {}),
               replayUnsafeToolNames: findReplayUnsafeToolNames(catToolNames.get(msg.catId) ?? []),
               commitRecheckLimit: 10 + targetCats.length,
               evaluateFreshness: (priorFrontierMessageId) =>
@@ -1885,6 +2011,14 @@ export async function* routeParallel(
             ) {
               storedMsg = await deps.messageStore.getById(outputCommitDecision.messageId);
             }
+          } else if (lifecycleResponse && ownInvId) {
+            storedMsg = await commitLifecycleResponseFromAppendInput(
+              deps.messageStore,
+              lifecycleResponse.messageId,
+              ownInvId,
+              lifecycleResponse,
+              streamMessageInput,
+            );
           } else {
             storedMsg = await deps.messageStore.append(streamMessageInput);
           }
@@ -1918,6 +2052,8 @@ export async function* routeParallel(
               storedMsg.id,
             ];
           }
+          // F257: track per-cat output message ID for finalizeTraceEpisode.
+          if (storedMsg) catOutputMessageId.set(msg.catId, storedMsg.id);
           // #80/F254: Delete only after MessageStore or closure truth proves custody.
           if (deps.draftStore && ownInvId && mayDeleteDraft(outputCommitDecision, Boolean(storedMsg))) {
             deps.draftStore.delete(userId, threadId, ownInvId)?.catch?.(noop);
@@ -1983,11 +2119,11 @@ export async function* routeParallel(
           catProducedOutput = true;
         }
 
-        if (shouldPersistNoTextMessage) {
+        if (shouldPersistNoTextMessage || lifecycleResponse) {
           try {
             const noTextMessageInput: AppendMessageInput = {
+              from: { kind: 'agent', catId: msg.catId as CatId },
               userId,
-              catId: msg.catId as CatId,
               content: '',
               mentions: [],
               origin: 'stream',
@@ -2045,6 +2181,7 @@ export async function* routeParallel(
                 freshnessClosureId: options.freshnessClosureId,
                 freshnessSupplementId: options.freshnessSupplementId,
                 message: noTextMessageInput,
+                ...(lifecycleResponse ? { lifecycleResponse } : {}),
                 replayUnsafeToolNames,
                 commitRecheckLimit: 10 + targetCats.length,
                 evaluateFreshness: (priorFrontierMessageId) =>
@@ -2067,6 +2204,14 @@ export async function* routeParallel(
                   await enqueueParallelSupplement(decision, msg.catId);
                 }
               }
+            } else if (lifecycleResponse && ownInvId) {
+              storedNoText = await commitLifecycleResponseFromAppendInput(
+                deps.messageStore,
+                lifecycleResponse.messageId,
+                ownInvId,
+                lifecycleResponse,
+                noTextMessageInput,
+              );
             } else {
               // Reviewed read-only tool-only audit remains non-routable and does not become
               // a normal answer. Unknown or mutating tools enter the freshness gate above.
@@ -2085,6 +2230,8 @@ export async function* routeParallel(
                 storedNoText.id,
               ];
             }
+            // F257: track per-cat output message ID for finalizeTraceEpisode.
+            if (storedNoText) catOutputMessageId.set(msg.catId, storedNoText.id);
             turnStoredMessageId = storedNoText?.id;
             // #80/F254: retained means DraftStore is still the only recoverable copy.
             if (deps.draftStore && ownInvId && mayDeleteDraft(noTextOutputCommitDecision, Boolean(storedNoText))) {
@@ -2138,21 +2285,21 @@ export async function* routeParallel(
       } else {
         // hadError but toolEvents exist — persist tool record so refresh shows what was attempted
         const catTools = catToolEvents.get(msg.catId);
-        if (catTools && catTools.length > 0) {
+        if ((catTools && catTools.length > 0) || lifecycleResponse) {
           const meta = catMeta.get(msg.catId);
           const thinking = catThinking.get(msg.catId);
           try {
-            const storedToolError = await deps.messageStore.append({
+            const errorMessageInput: AppendMessageInput = {
+              from: { kind: 'agent', catId: msg.catId as CatId },
               userId,
-              catId: msg.catId as CatId,
-              content: '',
+              content: lifecycleResponse && catErrorText.get(msg.catId) ? `Error: ${catErrorText.get(msg.catId)}` : '',
               mentions: [],
               origin: 'stream',
               timestamp: invocationStartedAt,
               threadId,
               ...(thinking && thinking.length > 0 ? { thinking: renderThinkingChunks(thinking) } : {}),
               ...(meta ? { metadata: meta } : {}),
-              toolEvents: catTools,
+              ...(catTools && catTools.length > 0 ? { toolEvents: catTools } : {}),
               ...(persistedInvocationId || turnExecution || msg.tracing
                 ? {
                     extra: {
@@ -2170,8 +2317,21 @@ export async function* routeParallel(
                     },
                   }
                 : {}),
-            });
-            turnStoredMessageId = storedToolError.id;
+            };
+            let storedErrorTools;
+            if (lifecycleResponse && ownInvId) {
+              storedErrorTools = await commitLifecycleResponseFromAppendInput(
+                deps.messageStore,
+                lifecycleResponse.messageId,
+                ownInvId,
+                lifecycleResponse,
+                errorMessageInput,
+              );
+            } else {
+              storedErrorTools = await deps.messageStore.append(errorMessageInput);
+            }
+            catOutputMessageId.set(msg.catId, storedErrorTools.id);
+            turnStoredMessageId = storedErrorTools.id;
             // #80: Clean up draft only after successful append
             if (deps.draftStore && ownInvId) {
               deps.draftStore.delete(userId, threadId, ownInvId)?.catch?.(noop);
@@ -2219,12 +2379,15 @@ export async function* routeParallel(
       // Previously errors were mixed into catText and persisted with userId=user,
       // which polluted the conversation history and caused "context poisoning".
       const errorText = catErrorText.get(msg.catId);
-      if (errorText) {
+      const lifecycleErrorOwnedByResponse =
+        catLifecycleResponse.has(msg.catId) &&
+        catLifecycleResponse.get(msg.catId)?.messageId === catOutputMessageId.get(msg.catId);
+      if (errorText && !lifecycleErrorOwnedByResponse) {
         const cliDiag = catCliDiagnostics.get(msg.catId);
         try {
           await deps.messageStore.append({
+            from: { kind: 'system', service: 'agent-error' },
             userId: 'system',
-            catId: null,
             content: `Error: ${errorText}`,
             mentions: [],
             origin: 'stream',
@@ -2331,6 +2494,48 @@ export async function* routeParallel(
       // Re-querying the map here returns undefined → done event yielded without
       // invocationId → downstream broadcaster falls back to parent → bubble
       // identity / liveness wrongly attached to parent (instead of own turn).
+      // F257: close trace episode + trigger annotation pipeline.
+      // R1 P1-2: chain after catTracePersistPromise — never index terminal without durable summary.
+      if (ownInvId) {
+        const perCatTraceTurnId = catTraceTurnId.get(msg.catId) ?? crypto.randomUUID();
+        const doFinalize = () => {
+          const catSignal = signalForCat?.(msg.catId as CatId) ?? signal;
+          const terminalKind = catHadProviderError.has(msg.catId)
+            ? 'failed'
+            : catSignal?.aborted
+              ? 'cancelled'
+              : 'completed';
+          return finalizeTraceEpisode({
+            traceTurnId: perCatTraceTurnId,
+            invocationId: ownInvId!,
+            ownerUserId: userId,
+            threadId,
+            catId: msg.catId,
+            inputMessageId: currentUserMessageId ?? options.a2aTriggerMessageId ?? null,
+            outputMessageId: catOutputMessageId.get(msg.catId) ?? null,
+            terminalKind,
+            toolEvents: catToolEvents.get(msg.catId) ?? [],
+          }).catch((err) => {
+            log.warn({ err, threadId, catId: msg.catId, invocationId: ownInvId }, '[F257] finalizeTraceEpisode failed');
+          });
+        };
+        // R2 P1-1: only finalize when durable summary exists — never create an
+        // evaluable terminal without its authority trace.
+        const persistPromise = catTracePersistPromise.get(msg.catId);
+        if (persistPromise) {
+          persistPromise.then((persisted) => {
+            if (persisted) {
+              doFinalize();
+            } else {
+              log.warn(
+                { threadId, catId: msg.catId, invocationId: ownInvId },
+                '[F257] trace persist failed — skipping episode closure (no evaluable terminal without durable summary)',
+              );
+            }
+          });
+        }
+      }
+
       const stampedDone = ownInvId && !msg.invocationId ? { ...msg, invocationId: ownInvId } : msg;
       yield projectLiveTurnExecution(
         {
@@ -2341,6 +2546,31 @@ export async function* routeParallel(
         ownInvId,
       );
       if (isFinal) yieldedFinalDone = true;
+    }
+  }
+
+  // mergeStreams may stop before a provider's buffered done event after cancellation.
+  // Close the still-owned invocation here so terminal observability is not lost.
+  for (const [catId, invocationId] of catInvocationId.entries()) {
+    const traceTurnId = catTraceTurnId.get(catId);
+    const persistence = catTracePersistPromise.get(catId);
+    if (!traceTurnId || !persistence) continue;
+    try {
+      if (await persistence) {
+        await finalizeTraceEpisode({
+          traceTurnId,
+          invocationId,
+          ownerUserId: userId,
+          threadId,
+          catId,
+          inputMessageId: currentUserMessageId ?? options.a2aTriggerMessageId ?? null,
+          outputMessageId: catOutputMessageId.get(catId) ?? null,
+          terminalKind: 'cancelled',
+          toolEvents: catToolEvents.get(catId) ?? [],
+        });
+      }
+    } catch (err) {
+      log.warn({ err, threadId, catId, invocationId }, '[F257] cancelled trace episode finalization failed');
     }
   }
 
@@ -2369,8 +2599,6 @@ export async function* routeParallel(
   if (options.routeSpan) {
     options.routeSpan.setAttribute(ROUTE_TOTAL_CATS_INVOKED, completedCount);
     options.routeSpan.setAttribute(ROUTE_TOTAL_TOKENS, routeTotalTokens);
-    // Parallel routes never produce A2A handoffs (MVP safety boundary)
-    options.routeSpan.setAttribute(ROUTE_HAS_A2A_HANDOFF, false);
   }
 
   // F200 AC-A1: fire-and-forget recall correlation after all cats complete.

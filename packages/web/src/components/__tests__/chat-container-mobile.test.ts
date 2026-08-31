@@ -433,7 +433,7 @@ describe('ChatContainer mobile interactions', () => {
         content: 'follow-up',
         messageId: 'queued-user',
         mergedMessageIds: [],
-        source: 'user',
+        from: { kind: 'user', userId: 'test-user' },
         targetCats: ['opus'],
         intent: 'execute',
         status: 'queued',

@@ -302,7 +302,7 @@ export function createDeferredPersonMemoryDailyTaskSpec(
           const messageId = await context.deliver({
             threadId: signal.originMessageRef.threadId,
             content,
-            userId: 'scheduler',
+            userId: deps.ownerUserId,
             extra: {
               scheduler: { hiddenTrigger: true },
               ...(signal.writeOpportunityReentry ? { writeOpportunityReentry: signal.writeOpportunityReentry } : {}),

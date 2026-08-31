@@ -4,6 +4,7 @@ import { createRedisClient } from '@cat-cafe/shared/utils';
 import { MessageStore } from '../../dist/domains/cats/services/stores/ports/MessageStore.js';
 import { RedisMessageStore } from '../../dist/domains/cats/services/stores/redis/RedisMessageStore.js';
 import { PawFeelAdapter } from '../../dist/infrastructure/harness-eval/friction/paw-feel-adapter.js';
+import { canonicalTestMessageInput } from '../helpers/message-from-fixtures.js';
 import {
   assertRedisIsolationOrThrow,
   cleanupPrefixedRedisKeys,
@@ -51,7 +52,17 @@ describe('PawFeelAdapter — Redis-backed pull', { skip: redisIsolationSkipReaso
   });
 
   function seed({ thread, cat, ts, content }) {
-    return store.append({ userId: 'u1', catId: cat, content, mentions: [], timestamp: ts, threadId: thread });
+    return store.append(
+      canonicalTestMessageInput({
+        provenance: { author: 'cat', routed: false, observation: 'original' },
+        userId: 'u1',
+        catId: cat,
+        content,
+        mentions: [],
+        timestamp: ts,
+        threadId: thread,
+      }),
+    );
   }
 
   it('采集时间窗内 marker → 结构化 signal（跨 thread/cat，字段正确）', async () => {
@@ -146,15 +157,18 @@ describe('PawFeelAdapter — Redis-backed pull', { skip: redisIsolationSkipReaso
   it('P1-1: queued cat speech stays in its authoring-time eval window after delivery', async () => {
     const created = T0 - 5000; // 窗口前（raw timestamp）
     const delivered = T0 + 1000; // 窗口内（effective time）
-    const m = await store.append({
-      userId: 'u1',
-      catId: 'opus-48',
-      content: '[爪感差: rg 噪音]',
-      mentions: [],
-      timestamp: created,
-      deliveryStatus: 'queued',
-      threadId: 'th-1',
-    });
+    const m = await store.append(
+      canonicalTestMessageInput({
+        provenance: { author: 'cat', routed: false, observation: 'original' },
+        userId: 'u1',
+        catId: 'opus-48',
+        content: '[爪感差: rg 噪音]',
+        mentions: [],
+        timestamp: created,
+        deliveryStatus: 'queued',
+        threadId: 'th-1',
+      }),
+    );
     await store.markDelivered(m.id, delivered);
 
     const adapter = new PawFeelAdapter(store);
@@ -166,22 +180,28 @@ describe('PawFeelAdapter — Redis-backed pull', { skip: redisIsolationSkipReaso
   // P1-2 (gpt52 review): 爪感差是猫的摩擦上报约定（L0 staging）。user-authored 消息引用 marker
   // 格式（讨论时）不算真信号——author guard 跳过 catId===null。
   it('P1-2: user-authored 引用 marker 格式不采集（author guard）', async () => {
-    await store.append({
-      userId: 'u1',
-      catId: null,
-      content: '讨论格式：比如猫会写 [爪感差: rg 噪音太多]',
-      mentions: [],
-      timestamp: T0 + 1000,
-      threadId: 'th-1',
-    });
-    const catMsg = await store.append({
-      userId: 'u1',
-      catId: 'opus-48',
-      content: '[爪感差: hold_ball 卡]',
-      mentions: [],
-      timestamp: T0 + 2000,
-      threadId: 'th-1',
-    });
+    await store.append(
+      canonicalTestMessageInput({
+        provenance: { author: 'user', routed: false, observation: 'original' },
+        userId: 'u1',
+        catId: null,
+        content: '讨论格式：比如猫会写 [爪感差: rg 噪音太多]',
+        mentions: [],
+        timestamp: T0 + 1000,
+        threadId: 'th-1',
+      }),
+    );
+    const catMsg = await store.append(
+      canonicalTestMessageInput({
+        provenance: { author: 'cat', routed: false, observation: 'original' },
+        userId: 'u1',
+        catId: 'opus-48',
+        content: '[爪感差: hold_ball 卡]',
+        mentions: [],
+        timestamp: T0 + 2000,
+        threadId: 'th-1',
+      }),
+    );
 
     const adapter = new PawFeelAdapter(store);
     const signals = await adapter.pull(T0, T0 + 10000);
@@ -199,23 +219,29 @@ describe('PawFeelAdapter — in-memory store path (cloud R3 P2)', () => {
 
   it('cross-post marker becomes one routing-misuse signal instead of duplicating the source symptom', async () => {
     const store = new MessageStore();
-    const source = store.append({
-      userId: 'u1',
-      catId: 'codex',
-      content: '[爪感差: rg 输出太吵]',
-      mentions: [],
-      timestamp: M0 + 1000,
-      threadId: 'thread-source',
-    });
-    const relay = store.append({
-      userId: 'u1',
-      catId: 'codex',
-      content: 'FYI [爪感差: rg 输出太吵] repeated [爪感差: rg 输出太吵]',
-      mentions: [],
-      timestamp: M0 + 2000,
-      threadId: 'thread-wrong-inbox',
-      extra: { crossPost: { sourceThreadId: 'thread-source', sourceInvocationId: 'inv-source' } },
-    });
+    const source = store.append(
+      canonicalTestMessageInput({
+        provenance: { author: 'cat', routed: false, observation: 'original' },
+        userId: 'u1',
+        catId: 'codex',
+        content: '[爪感差: rg 输出太吵]',
+        mentions: [],
+        timestamp: M0 + 1000,
+        threadId: 'thread-source',
+      }),
+    );
+    const relay = store.append(
+      canonicalTestMessageInput({
+        provenance: { author: 'cat', routed: false, observation: 'original' },
+        userId: 'u1',
+        catId: 'codex',
+        content: 'FYI [爪感差: rg 输出太吵] repeated [爪感差: rg 输出太吵]',
+        mentions: [],
+        timestamp: M0 + 2000,
+        threadId: 'thread-wrong-inbox',
+        extra: { crossPost: { sourceThreadId: 'thread-source', sourceInvocationId: 'inv-source' } },
+      }),
+    );
 
     const adapter = new PawFeelAdapter(store);
     const signals = await adapter.pull(M0, M0 + 10000);
@@ -234,15 +260,18 @@ describe('PawFeelAdapter — in-memory store path (cloud R3 P2)', () => {
 
   it('legacy self-referential crossPost metadata remains a local incident signal', async () => {
     const store = new MessageStore();
-    const local = store.append({
-      userId: 'u1',
-      catId: 'codex',
-      content: '[爪感差: same-thread route guard misfired]',
-      mentions: [],
-      timestamp: M0 + 1000,
-      threadId: 'thread-same',
-      extra: { crossPost: { sourceThreadId: 'thread-same' } },
-    });
+    const local = store.append(
+      canonicalTestMessageInput({
+        provenance: { author: 'cat', routed: false, observation: 'original' },
+        userId: 'u1',
+        catId: 'codex',
+        content: '[爪感差: same-thread route guard misfired]',
+        mentions: [],
+        timestamp: M0 + 1000,
+        threadId: 'thread-same',
+        extra: { crossPost: { sourceThreadId: 'thread-same' } },
+      }),
+    );
 
     const adapter = new PawFeelAdapter(store);
     const signals = await adapter.pull(M0, M0 + 10000);
@@ -254,25 +283,31 @@ describe('PawFeelAdapter — in-memory store path (cloud R3 P2)', () => {
 
   it('queued-delivered message 不重复不死循环（pageSize=1）', { timeout: 8000 }, async () => {
     const store = new MessageStore();
-    const m1 = store.append({
-      userId: 'u1',
-      catId: 'opus-48',
-      content: '[爪感差: rg 噪音]',
-      mentions: [],
-      timestamp: M0 - 5000,
-      deliveryStatus: 'queued',
-      threadId: 'th-1',
-    });
+    const m1 = store.append(
+      canonicalTestMessageInput({
+        provenance: { author: 'cat', routed: false, observation: 'original' },
+        userId: 'u1',
+        catId: 'opus-48',
+        content: '[爪感差: rg 噪音]',
+        mentions: [],
+        timestamp: M0 - 5000,
+        deliveryStatus: 'queued',
+        threadId: 'th-1',
+      }),
+    );
     store.markDelivered(m1.id, M0 + 1000);
-    const m2 = store.append({
-      userId: 'u1',
-      catId: 'codex',
-      content: '[爪感差: grep 慢]',
-      mentions: [],
-      timestamp: M0 - 4000,
-      deliveryStatus: 'queued',
-      threadId: 'th-1',
-    });
+    const m2 = store.append(
+      canonicalTestMessageInput({
+        provenance: { author: 'cat', routed: false, observation: 'original' },
+        userId: 'u1',
+        catId: 'codex',
+        content: '[爪感差: grep 慢]',
+        mentions: [],
+        timestamp: M0 - 4000,
+        deliveryStatus: 'queued',
+        threadId: 'th-1',
+      }),
+    );
     store.markDelivered(m2.id, M0 + 2000);
 
     const adapter = new PawFeelAdapter(store, { pageSize: 1 });

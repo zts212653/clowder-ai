@@ -26,6 +26,15 @@ F126 建成了 Limb 控制面四层骨架（Registry / Lease / Policy / Action L
 
 **对家里的战略意义**：BLE 是 Limb 控制面的第一个真正物理设备族，是"设备族 adapter 契约"（helper 协议 / typed command allowlist / 绑定生命周期）的试金石——F124 Apple 生态（F126 Phase D）和未来任何物理设备接入都会复用这套契约。
 
+## User Journey
+
+**范围单元：一次从扫描到读取特征值的 BLE 设备交互周期。**
+
+1. operator 在 Limb 面板选择"扫描附近 BLE 设备"，系统通过 macOS BLE Central 发现可连接设备并展示列表（设备名 / RSSI / 服务 UUID）。
+2. operator 选择目标设备并发起绑定，helper 进程建立 GATT 连接并校验设备族 adapter 契约（allowlist + capability）。
+3. 连接成功后，猫可通过 Limb typed command 读取特征值（如传感器数据、电量、固件版本），读取结果以结构化数据呈现在 thread 对话中。
+4. operator 或猫断开连接后，绑定记录保留供下次快速重连；设备族 adapter 经验沉淀为可复用契约，后续物理设备族接入复用同一流程。
+
 ## 归属与分层（Key Decisions）
 
 | # | 决策 | 理由 | 日期 |

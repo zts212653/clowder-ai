@@ -112,7 +112,7 @@ export interface ScheduleLifecycleNotice {
 
 export type ScheduleLifecycleNotifier = (notice: ScheduleLifecycleNotice) => void;
 
-export type ScheduleInvokeTriggerOutcome = 'dispatched' | 'enqueued' | 'full';
+export type ScheduleInvokeTriggerOutcome = 'enqueued' | 'full';
 
 /** Async cat invocation trigger — callers may detach it, but resolution means durable wake acceptance. */
 export interface ScheduleInvokeTrigger {
@@ -199,6 +199,12 @@ export interface TaskSpec_P1<Signal = unknown> {
   context?: ContextSpec;
   /** Phase 2.5: display metadata — label, category, description, subjectKind (AC-E1) */
   display?: TaskDisplayMeta;
+  /**
+   * F257: whether this task supports bounded RUN_FAILED retry for once-triggers.
+   * Only templates that provide a stable per-instance idempotency key for delivery
+   * may opt in; retrying a non-idempotent once-task can duplicate side-effects.
+   */
+  supportsOnceRetry?: boolean;
 }
 
 /** Run ledger stats summary */

@@ -58,6 +58,7 @@ export function createManagedCommandWakeQueueAdapter(
         threadId,
         userId,
         message.queueCustody.entryId,
+        messageId,
         catId,
         attemptId,
         async (transitions) => {
@@ -72,6 +73,7 @@ export function createManagedCommandWakeQueueAdapter(
           const committed = await deps.messageStore.transitionQueueCustody(transition.messageId, {
             expectedRevision: transition.current.revision,
             next: transition.next,
+            replacement: transition.replacement,
           });
           return committed.kind === 'updated' ? { outcome: 'committed' } : { outcome: 'custody_conflict' };
         },

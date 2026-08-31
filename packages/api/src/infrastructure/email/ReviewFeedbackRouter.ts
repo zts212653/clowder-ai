@@ -76,6 +76,14 @@ export class ReviewFeedbackRouter {
     const latestDecision = [...signal.newDecisions].sort((left, right) => left.id - right.id).at(-1);
     const resultDecision = signal.resultDecision ?? latestDecision?.state;
     const resultReviewer = signal.resultReviewer ?? latestDecision?.author;
+    const conversationComments = signal.newComments
+      .filter((c) => c.commentType === 'conversation')
+      .map((c) => ({
+        id: c.id,
+        author: c.author,
+        createdAt: c.createdAt,
+        sourceRef: `github:pr-conversation-comment:${c.id}`,
+      }));
     const result = await this.opts.waitLifecycle.observe({
       taskId: tracking.taskId,
       facts: {
@@ -90,6 +98,7 @@ export class ReviewFeedbackRouter {
           ...(signal.resultConversationCommentCursor
             ? { resultConversationCommentCursor: signal.resultConversationCommentCursor }
             : {}),
+          ...(conversationComments.length > 0 ? { conversationComments } : {}),
         },
       },
       collectorPatch: {

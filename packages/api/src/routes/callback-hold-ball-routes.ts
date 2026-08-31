@@ -39,6 +39,7 @@ import type { IThreadStore } from '../domains/cats/services/stores/ports/ThreadS
 import { extractHoldBallClaims } from '../infrastructure/grounding/claim-extractors.js';
 import { checkGrounding } from '../infrastructure/grounding/grounding-checker.js';
 import { groundingSampleStore } from '../infrastructure/grounding/grounding-sample-singleton.js';
+import { ledgerIdForGuard } from '../infrastructure/harness-eval/guard-ledger-registry.js';
 import { createModuleLogger } from '../infrastructure/logger.js';
 import { KILL_GRACE_MS, ManagedRunner, type WakeWhenResult } from '../infrastructure/managed-runner.js';
 import type { DynamicTaskStore } from '../infrastructure/scheduler/DynamicTaskStore.js';
@@ -58,38 +59,35 @@ import {
   normalizeHoldExpectedSignalKey,
   readHoldLifecycle,
 } from './hold-ball-cancel.js';
+import {
+  HOLD_WINDOW_MS as COUNTER_WINDOW_MS,
+  HOLD_MODE_COMMAND,
+  HOLD_MODE_TIMER,
+  releaseHoldReservation,
+  tryReserveHold,
+} from './hold-ball-counter.js';
 import { HOLD_BALL_SOURCE } from './hold-ball-source.js';
 import { resolveManagedHoldTriggerUserId } from './managed-hold-trigger-user.js';
 
 const log = createModuleLogger('routes/callback-hold-ball');
 
-export const MAX_HOLDS_PER_WINDOW = 3;
-export const HOLD_WINDOW_MS = 3_600_000;
-
-const holdCounts = new Map<string, { count: number; lastAt: number }>();
-
-export function getHoldCount(threadId: string, catId: string, now: number = Date.now()): number {
-  const key = `${threadId}:${catId}`;
-  const entry = holdCounts.get(key);
-  if (!entry) return 0;
-  if (now - entry.lastAt > HOLD_WINDOW_MS) {
-    holdCounts.delete(key);
-    return 0;
-  }
-  return entry.count;
-}
-
-export function incrementHoldCount(threadId: string, catId: string, now: number = Date.now()): number {
-  const key = `${threadId}:${catId}`;
-  const entry = holdCounts.get(key);
-  if (!entry || now - entry.lastAt > HOLD_WINDOW_MS) {
-    holdCounts.set(key, { count: 1, lastAt: now });
-    return 1;
-  }
-  entry.count++;
-  entry.lastAt = now;
-  return entry.count;
-}
+export type { HoldMode, ReservationResult } from './hold-ball-counter.js';
+export {
+  getCommandHoldCount,
+  getHoldCount,
+  getTimerHoldCount,
+  HOLD_MODE_COMMAND,
+  HOLD_MODE_TIMER,
+  HOLD_WINDOW_MS,
+  incrementCommandHoldCount,
+  incrementHoldCount,
+  incrementTimerHoldCount,
+  MAX_COMMAND_HOLDS_PER_WINDOW,
+  MAX_HOLDS_PER_WINDOW,
+  MAX_TIMER_HOLDS_PER_WINDOW,
+  releaseHoldReservation,
+  tryReserveHold,
+} from './hold-ball-counter.js';
 
 /**
  * F167 Phase P review P1-1 fix: active wakeWhen runner registry.
@@ -347,13 +345,15 @@ export interface HoldBallRouteDeps {
       message: string,
       messageId: string,
       contentBlocks?: undefined,
-      policy?: { sourceCategory?: string; forceQueue?: boolean },
-    ): Promise<'dispatched' | 'enqueued' | 'full'>;
+      policy?: { sourceCategory?: string },
+    ): Promise<'enqueued' | 'full'>;
   };
   /** F167×F254: exact current-wake terminal producer. */
   managedHoldDispositionService?: Pick<ManagedHoldDispositionService, 'complete'>;
   /** F167: exact ordinary A2A dispatch terminal producer. */
   a2aDispatchDispositionService?: Pick<A2ADispatchDispositionService, 'complete'>;
+  /** F257: fail-open observation ledger for callback guard rejections. */
+  guardRejectionLog?: import('../infrastructure/harness-eval/GuardRejectionEventLog.js').GuardRejectionEventLog;
 }
 
 export async function resolveHoldWaitOwnerFence(
@@ -566,8 +566,33 @@ export function registerCallbackHoldBallRoutes(app: FastifyInstance, deps: HoldB
 
     const parsed = holdBallSchema.safeParse(request.body);
     if (!parsed.success) {
+      const ungroundedTimer = rawBody?.wakeAfterMs != null && rawBody?.waitSourceRef == null;
+      if (ungroundedTimer && deps.guardRejectionLog) {
+        const { randomUUID } = await import('node:crypto');
+        deps.guardRejectionLog
+          .append({
+            eventId: randomUUID(),
+            ledgerId: ledgerIdForGuard('hold_ball_wait_source_ref'),
+            kind: 'http_schema_reject',
+            threadId: actor.threadId,
+            catId: actor.catId as string,
+            guardId: 'hold_ball_wait_source_ref',
+            ownerUserId: actor.userId,
+            invocationId: record.invocationId ?? 'unknown',
+            sourceTool: 'hold_ball',
+            normalizedReason: 'missing_wait_source_ref',
+            layer: 'api-route',
+            timestamp: Date.now(),
+            correlationConfidence: record.invocationId ? 'exact' : 'window',
+          })
+          .catch(() => {});
+      }
       reply.status(400);
-      return { error: 'Invalid request body', details: parsed.error.issues };
+      return {
+        error: 'Invalid request body',
+        details: parsed.error.issues,
+        ...(ungroundedTimer ? { ledgerId: ledgerIdForGuard('hold_ball_wait_source_ref') } : {}),
+      };
     }
 
     const { reason, nextStep, wakeWhen } = parsed.data;
@@ -614,29 +639,95 @@ export function registerCallbackHoldBallRoutes(app: FastifyInstance, deps: HoldB
       policyContext: { wakeAfterMs, hasEventCallback: false, hasWaitSourceRef: !!parsed.data.waitSourceRef },
     });
     if (guardResult.outcome === 'blocked' && guardResult.blockedResponse) {
+      if (deps.guardRejectionLog) {
+        const { randomUUID } = await import('node:crypto');
+        deps.guardRejectionLog
+          .append({
+            eventId: randomUUID(),
+            ledgerId: ledgerIdForGuard('gate_keeping_thread_default'),
+            kind: 'http_policy_reject',
+            threadId: actor.threadId,
+            catId: catIdStr,
+            guardId: 'gate_keeping_thread_default',
+            ownerUserId: userId,
+            invocationId: record.invocationId ?? 'unknown',
+            sourceTool: 'hold_ball',
+            normalizedReason: 'gate_keeping_thread_default_blocked',
+            layer: 'api-route',
+            timestamp: Date.now(),
+            correlationConfidence: record.invocationId ? 'exact' : 'window',
+          })
+          .catch(() => {});
+      }
       reply.status(400);
-      return guardResult.blockedResponse;
+      return { ...guardResult.blockedResponse, ledgerId: ledgerIdForGuard('gate_keeping_thread_default') };
     }
 
-    const currentCount = getHoldCount(threadId, catIdStr);
-    if (currentCount >= MAX_HOLDS_PER_WINDOW) {
+    // Read pending holds before reserving quota: a storage read failure must
+    // not consume a slot for a request that never reaches scheduling.
+    const pendingHoldCreatedBy = `hold-ball:${catIdStr}`;
+    const pendingHolds = dynamicTaskStore
+      .getAll()
+      .filter(
+        (task) =>
+          isPendingHoldBallTask(task) && task.createdBy === pendingHoldCreatedBy && task.deliveryThreadId === threadId,
+      );
+
+    const holdMode = wakeWhen ? HOLD_MODE_COMMAND : HOLD_MODE_TIMER;
+    const reservation = tryReserveHold(holdMode, threadId, catIdStr);
+    if (!reservation.admitted) {
       log.warn(
-        { threadId, catId: catIdStr, currentCount, windowMs: HOLD_WINDOW_MS },
+        {
+          threadId,
+          catId: catIdStr,
+          currentCount: reservation.count,
+          holdMode,
+          maxForMode: reservation.max,
+          windowMs: COUNTER_WINDOW_MS,
+        },
         'F167 C1: hold_ball rejected — maxHoldsPerWindow reached',
       );
       reply.status(429);
+      const rateLimitLedgerId = ledgerIdForGuard('hold_ball_rate_limit');
+      if (deps.guardRejectionLog) {
+        const { randomUUID } = await import('node:crypto');
+        deps.guardRejectionLog
+          .append({
+            eventId: randomUUID(),
+            ledgerId: rateLimitLedgerId,
+            kind: 'http_rate_limit',
+            threadId,
+            catId: catIdStr,
+            guardId: 'hold_ball_rate_limit',
+            ownerUserId: userId,
+            invocationId: record.invocationId ?? 'unknown',
+            sourceTool: 'hold_ball',
+            normalizedReason: 'rate_limited',
+            layer: 'api-route',
+            timestamp: Date.now(),
+            correlationConfidence: record.invocationId ? 'exact' : 'window',
+            holdMode,
+            currentCount: reservation.count,
+            maxAllowed: reservation.max,
+            windowMs: COUNTER_WINDOW_MS,
+          })
+          .catch(() => {});
+      }
       return {
         error:
-          `maxHoldsPerWindow (${MAX_HOLDS_PER_WINDOW} per ~1h window) reached. ` +
+          `maxHoldsPerWindow (${reservation.max} per ~1h window, mode=${holdMode}) reached. ` +
           'You MUST pass the ball now: @ another cat or @co-creator.',
-        holdsInWindow: currentCount,
-        maxHoldsPerWindow: MAX_HOLDS_PER_WINDOW,
-        windowMs: HOLD_WINDOW_MS,
+        ledgerId: rateLimitLedgerId,
+        holdMode,
+        holdsInWindow: reservation.count,
+        maxHoldsPerWindow: reservation.max,
+        windowMs: COUNTER_WINDOW_MS,
       };
     }
 
     const template = templateRegistry.get('reminder');
     if (!template) {
+      releaseHoldReservation(holdMode, threadId, catIdStr, reservation._prior);
       log.error('F167 C1: reminder template not found');
       reply.status(500);
       return { error: 'Internal error: reminder template not found' };
@@ -657,13 +748,6 @@ export function registerCallbackHoldBallRoutes(app: FastifyInstance, deps: HoldB
     // forgeable. Anchor on id prefix: `hold-ball-*` ids are only minted by this
     // route; `/api/schedule/tasks` mints `dyn-*`. Combine with templateId +
     // createdBy + deliveryThreadId for defense in depth.
-    const pendingHoldCreatedBy = `hold-ball:${catIdStr}`;
-    const pendingHolds = dynamicTaskStore
-      .getAll()
-      .filter(
-        (t) => isPendingHoldBallTask(t) && t.createdBy === pendingHoldCreatedBy && t.deliveryThreadId === threadId,
-      );
-
     const createdAt = Date.now();
     const taskId = `hold-ball-${createdAt}-${Math.random().toString(36).slice(2, 8)}`;
     // P2-2 cloud review fix: for wakeWhen, the fallback reminder must fire AFTER the
@@ -684,6 +768,7 @@ export function registerCallbackHoldBallRoutes(app: FastifyInstance, deps: HoldB
     try {
       ownerFence = await resolveHoldWaitOwnerFence(record, deps.invocationRecordStore);
     } catch (err) {
+      releaseHoldReservation(holdMode, threadId, catIdStr, reservation._prior);
       log.error(
         { err, invocationId: record.invocationId, parentInvocationId: record.parentInvocationId },
         'F280 Phase D: canonical hold owner fence is unavailable',
@@ -758,32 +843,36 @@ export function registerCallbackHoldBallRoutes(app: FastifyInstance, deps: HoldB
       deliveryThreadId: threadId as string | null,
     };
 
-    const spec = template.createSpec(taskId, taskParams);
-
-    dynamicTaskStore.insert({
-      id: taskId,
-      templateId: 'reminder',
-      trigger: { type: 'once', fireAt },
-      params: taskParams.params,
-      display: {
-        label: `持球唤醒 (${catIdStr})`,
-        category: 'system',
-        description: wakeMessage.slice(0, 100),
-      },
-      deliveryThreadId: threadId,
-      enabled: true,
-      createdBy: `hold-ball:${catIdStr}`,
-      createdAt: new Date().toISOString(),
-    });
-    // Atomic swap: try register; on failure, remove the just-inserted row so
-    // prior hold stays authoritative (caller gets 500; prior wake still fires).
+    // Keep every fallible scheduling step inside one rollback boundary so a
+    // failed request cannot consume quota without producing a wake.
     try {
+      const spec = template.createSpec(taskId, taskParams);
+      dynamicTaskStore.insert({
+        id: taskId,
+        templateId: 'reminder',
+        trigger: { type: 'once', fireAt },
+        params: taskParams.params,
+        display: {
+          label: `持球唤醒 (${catIdStr})`,
+          category: 'system',
+          description: wakeMessage.slice(0, 100),
+        },
+        deliveryThreadId: threadId,
+        enabled: true,
+        createdBy: `hold-ball:${catIdStr}`,
+        createdAt: new Date().toISOString(),
+      });
       taskRunner.registerDynamic(spec, taskId);
     } catch (err) {
-      dynamicTaskStore.remove(taskId);
+      try {
+        dynamicTaskStore.remove(taskId);
+      } catch {
+        /* best effort: insert may not have run, or the store may be unavailable */
+      }
+      releaseHoldReservation(holdMode, threadId, catIdStr, reservation._prior);
       log.error(
         { threadId, catId: catIdStr, taskId, err },
-        'F167 Phase G P1: taskRunner.registerDynamic failed — rolled back insert; prior hold (if any) retained',
+        'F167 Phase G P1: createSpec/insert/registerDynamic failed — rolled back insert + counter; prior hold retained',
       );
       reply.status(500);
       return { error: 'Failed to register hold wake with scheduler' };
@@ -851,7 +940,7 @@ export function registerCallbackHoldBallRoutes(app: FastifyInstance, deps: HoldB
       }
     }
 
-    const newCount = incrementHoldCount(threadId, catIdStr);
+    const newCount = reservation.count;
 
     const wakeAtStr = new Date(fireAt).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
     const holdMessage = wakeWhen
@@ -860,8 +949,8 @@ export function registerCallbackHoldBallRoutes(app: FastifyInstance, deps: HoldB
     const holdSource = { ...HOLD_BALL_SOURCE, meta: { taskId, threadId, catId: catIdStr } };
     try {
       const stored = await messageStore.append({
+        from: { kind: 'system', service: 'hold-ball' },
         userId: 'system',
-        catId: null,
         content: holdMessage,
         mentions: [],
         timestamp: Date.now(),
@@ -905,8 +994,9 @@ export function registerCallbackHoldBallRoutes(app: FastifyInstance, deps: HoldB
         wakeAfterMs,
         wakeWhen: wakeWhen ? { command: wakeWhen.command, timeoutMs: wakeWhen.timeoutMs } : undefined,
         taskId,
+        holdMode,
         holdsInWindow: newCount,
-        windowMs: HOLD_WINDOW_MS,
+        windowMs: COUNTER_WINDOW_MS,
       },
       'F167 C1: hold_ball registered — wake-up scheduled',
     );
@@ -915,9 +1005,10 @@ export function registerCallbackHoldBallRoutes(app: FastifyInstance, deps: HoldB
       status: 'ok',
       held: true,
       taskId,
+      holdMode,
       holdsInWindow: newCount,
-      maxHoldsPerWindow: MAX_HOLDS_PER_WINDOW,
-      windowMs: HOLD_WINDOW_MS,
+      maxHoldsPerWindow: reservation.max,
+      windowMs: COUNTER_WINDOW_MS,
       wakeAt: new Date(fireAt).toISOString(),
       ...(wakeWhen ? { wakeWhen: { command: wakeWhen.command, pid: null } } : {}),
     };

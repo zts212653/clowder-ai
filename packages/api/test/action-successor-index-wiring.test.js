@@ -84,12 +84,13 @@ describe('F167 successor runtime wiring', () => {
     assert.match(queueWiring, /setInterval\(runActionSuccessorRecovery, 30_000\)/);
   });
 
-  it('admits the exact approved carrier into durable Queue custody before reporting delivery', () => {
+  it('keeps approved speech published and proves durable Queue custody before reporting delivery', () => {
     const deliveryWiring = block(
       'const deliverApprovedActionCarrier = async (',
       'if (actionSuccessorLeaseStore && actionSubjectTruthResolver) {',
     );
-    assert.match(deliveryWiring, /deliveryStatus: 'queued'/);
+    assert.doesNotMatch(deliveryWiring, /deliveryStatus: 'queued'/);
+    assert.match(deliveryWiring, /enqueueA2ATargets\(/);
     assert.match(deliveryWiring, /classifyApprovedActionCarrier\(proposal, storedMsg\)/);
     assert.match(deliveryWiring, /classifyApprovedActionCarrier\(proposal, admittedMessage\)/);
     const custodyProof = deliveryWiring.indexOf("if (admittedState.outcome !== 'admitted')");

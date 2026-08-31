@@ -7,20 +7,24 @@
 
 import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
+import { canonicalTestMessageInput } from './helpers/message-from-fixtures.js';
 
 const { MessageStore, generateSortableId } = await import('../dist/domains/cats/services/stores/ports/MessageStore.js');
 
 describe('MessageStore.markDelivered', () => {
   test('sets deliveredAt on a queued message', () => {
     const store = new MessageStore();
-    const msg = store.append({
-      userId: 'u1',
-      catId: null,
-      content: 'queued message',
-      mentions: ['opus'],
-      timestamp: 1000,
-      deliveryStatus: 'queued',
-    });
+    const msg = store.append(
+      canonicalTestMessageInput({
+        provenance: { author: 'user', routed: false, observation: 'original' },
+        userId: 'u1',
+        catId: null,
+        content: 'queued message',
+        mentions: ['opus'],
+        timestamp: 1000,
+        deliveryStatus: 'queued',
+      }),
+    );
 
     const now = Date.now();
     const updated = store.markDelivered(msg.id, now);
@@ -39,14 +43,17 @@ describe('MessageStore.markDelivered', () => {
 
   test('deliveredAt is persisted and visible via getById', () => {
     const store = new MessageStore();
-    const msg = store.append({
-      userId: 'u1',
-      catId: null,
-      content: 'test',
-      mentions: [],
-      timestamp: 1000,
-      deliveryStatus: 'queued',
-    });
+    const msg = store.append(
+      canonicalTestMessageInput({
+        provenance: { author: 'user', routed: false, observation: 'original' },
+        userId: 'u1',
+        catId: null,
+        content: 'test',
+        mentions: [],
+        timestamp: 1000,
+        deliveryStatus: 'queued',
+      }),
+    );
 
     store.markDelivered(msg.id, 5000);
 
@@ -57,13 +64,16 @@ describe('MessageStore.markDelivered', () => {
 
   test('deliveredAt field exists on StoredMessage type (not set by default)', () => {
     const store = new MessageStore();
-    const msg = store.append({
-      userId: 'u1',
-      catId: null,
-      content: 'immediate message',
-      mentions: [],
-      timestamp: 1000,
-    });
+    const msg = store.append(
+      canonicalTestMessageInput({
+        provenance: { author: 'user', routed: false, observation: 'original' },
+        userId: 'u1',
+        catId: null,
+        content: 'immediate message',
+        mentions: [],
+        timestamp: 1000,
+      }),
+    );
 
     // Immediate messages should NOT have deliveredAt
     assert.equal(msg.deliveredAt, undefined);
@@ -77,30 +87,39 @@ describe('MessageStore.getByThreadAfter', () => {
     // where a far-future-timestamped message that later gets pruned would
     // permanently hide all normally-timestamped messages.
     const store = new MessageStore();
-    const beforeCursor = store.append({
-      threadId: 'thread-a',
-      userId: 'u1',
-      catId: null,
-      content: 'before cursor',
-      mentions: [],
-      timestamp: 1000,
-    });
-    const afterCursor = store.append({
-      threadId: 'thread-a',
-      userId: 'u1',
-      catId: null,
-      content: 'after missing cursor',
-      mentions: [],
-      timestamp: 2000,
-    });
-    store.append({
-      threadId: 'thread-b',
-      userId: 'u1',
-      catId: null,
-      content: 'other thread',
-      mentions: [],
-      timestamp: 3000,
-    });
+    const beforeCursor = store.append(
+      canonicalTestMessageInput({
+        provenance: { author: 'user', routed: false, observation: 'original' },
+        threadId: 'thread-a',
+        userId: 'u1',
+        catId: null,
+        content: 'before cursor',
+        mentions: [],
+        timestamp: 1000,
+      }),
+    );
+    const afterCursor = store.append(
+      canonicalTestMessageInput({
+        provenance: { author: 'user', routed: false, observation: 'original' },
+        threadId: 'thread-a',
+        userId: 'u1',
+        catId: null,
+        content: 'after missing cursor',
+        mentions: [],
+        timestamp: 2000,
+      }),
+    );
+    store.append(
+      canonicalTestMessageInput({
+        provenance: { author: 'user', routed: false, observation: 'original' },
+        threadId: 'thread-b',
+        userId: 'u1',
+        catId: null,
+        content: 'other thread',
+        mentions: [],
+        timestamp: 3000,
+      }),
+    );
 
     const missingCursor = generateSortableId(1500);
     const results = store.getByThreadAfter('thread-a', missingCursor, 5, 'u1');

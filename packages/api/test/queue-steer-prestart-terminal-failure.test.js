@@ -1,11 +1,12 @@
 import assert from 'node:assert/strict';
 import { afterEach, describe, it, mock } from 'node:test';
 import Fastify from 'fastify';
+import { canonicalTestQueueInput } from './helpers/message-from-fixtures.js';
 
 const { InvocationQueue } = await import('../dist/domains/cats/services/agents/invocation/InvocationQueue.js');
 const { InvocationTracker } = await import('../dist/domains/cats/services/agents/invocation/InvocationTracker.js');
 const { QueueProcessor } = await import('../dist/domains/cats/services/agents/invocation/QueueProcessor.js');
-const { createInitialQueuedMessageCustody } = await import(
+const { createInitialQueuedMessageCustody, QueuedMessageCustodyCoordinator } = await import(
   '../dist/domains/cats/services/agents/invocation/QueuedMessageCustodyCoordinator.js'
 );
 const { queueRoutes } = await import('../dist/routes/queue.js');
@@ -24,16 +25,19 @@ function asyncGate() {
 }
 
 function enqueue(queue, content, messageId) {
-  const result = queue.enqueue({
-    threadId: 't1',
-    userId: 'user-a',
-    content,
-    source: 'user',
-    ownerAuthProvenance: 'strict',
-    targetCats: ['opus'],
-    intent: 'execute',
-    messageId,
-  });
+  const result = queue.enqueue(
+    canonicalTestQueueInput({
+      kind: 'conversation_input',
+      threadId: 't1',
+      userId: 'user-a',
+      content,
+      source: 'user',
+      ownerAuthProvenance: 'strict',
+      targetCats: ['opus'],
+      intent: 'execute',
+      messageId,
+    }),
+  );
   assert.equal(result.outcome, 'enqueued');
   return result.entry;
 }
@@ -108,6 +112,7 @@ async function createHarness() {
       return next;
     }),
   };
+  const canonicalCustodyCoordinator = new QueuedMessageCustodyCoordinator({ messageStore });
   const queueCustodyCoordinator = {
     persistEntry: mock.fn(async (entry) => {
       durableEntries.set(entry.id, structuredClone(entry));
@@ -132,6 +137,11 @@ async function createHarness() {
     }),
     markPrimaryTrigger: mock.fn(async () => true),
     markReminderMissed: mock.fn(async () => true),
+    admitEntryToHistory: canonicalCustodyCoordinator.admitEntryToHistory.bind(canonicalCustodyCoordinator),
+    commitFailedTargets: canonicalCustodyCoordinator.commitFailedTargets.bind(canonicalCustodyCoordinator),
+    commitSuccessfulTargets: canonicalCustodyCoordinator.commitSuccessfulTargets.bind(canonicalCustodyCoordinator),
+    commitSuccessfulTargetsForMessages:
+      canonicalCustodyCoordinator.commitSuccessfulTargetsForMessages.bind(canonicalCustodyCoordinator),
   };
   const invocationRecordStore = {
     create: mock.fn(async () => {
@@ -158,6 +168,8 @@ async function createHarness() {
     messageStore,
     socketManager,
     router: {
+      resolveExplicitTargets: mock.fn(async (requestedCatIds) => [...requestedCatIds]),
+      resolveConversationTargetsAtAdmission: mock.fn(async (requestedCatIds) => [...requestedCatIds]),
       routeExecution: mock.fn(async function* (_userId, content, _threadId, _messageId, targetCats) {
         routedContents.push(content);
         yield { type: 'done', catId: targetCats[0], timestamp: Date.now() };
@@ -177,6 +189,7 @@ async function createHarness() {
       threadId: 't1',
       userId: 'user-a',
       catId: null,
+      from: { kind: 'user', userId: 'user-a' },
       content,
       mentions: ['opus'],
       timestamp: Date.now(),
@@ -360,7 +373,17 @@ describe('pre-start exact-batch durable retirement failure', () => {
       payload: {},
     });
     assert.equal(retry.statusCode, 200);
-    await waitFor(() => restarted.routedContents.includes('new-c'));
+    await waitFor(() => restarted.routedContents.includes('new-c')).catch((error) => {
+      assert.fail(
+        `${error.message}; queue=${JSON.stringify(restarted.queue.list('t1', 'user-a'))}; ` +
+          `errors=${JSON.stringify(
+            restarted.log.error.mock.calls.map(({ arguments: [context, label] }) => ({
+              label,
+              error: context.err?.message,
+            })),
+          )}`,
+      );
+    });
     h.createGate.release();
     await waitFor(() => h.invocationRecordStore.update.mock.calls.length > 0);
     assert.deepEqual(restarted.routedContents, ['new-c']);

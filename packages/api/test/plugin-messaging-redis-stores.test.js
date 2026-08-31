@@ -7,6 +7,7 @@
  */
 import assert from 'node:assert/strict';
 import { after, before, describe, it } from 'node:test';
+import { canonicalTestMessageInput } from './helpers/message-from-fixtures.js';
 import { assertRedisIsolationOrThrow, redisIsolationSkipReason } from './helpers/redis-test-helpers.js';
 
 const REDIS_URL = process.env.REDIS_URL;
@@ -353,24 +354,26 @@ describe('Plugin messaging Redis stores', { skip: redisIsolationSkipReason(REDIS
   describe('RedisMessageStore plugin payload isolation', () => {
     it('concurrent host and plugin updates preserve payload arrays and host metadata', async () => {
       const store = new RedisMessageStore(redis);
-      const message = await store.append({
-        userId: nextId('user'),
-        catId: null,
-        content: 'plugin message',
-        mentions: [],
-        timestamp: Date.now(),
-        threadId: nextId('thread'),
-        extra: {
-          rich: { v: 1, blocks: [] },
-          pluginMessage: {
-            instanceId: 'inst-a',
-            revision: 1,
-            provenance: { origin: { kind: 'plugin', instanceId: 'inst-a' }, epistemicStatus: 'inference' },
-            elements: [{ elementId: 'el-1', kind: 'text', payload: { text: 'x' } }],
-            appendOps: [],
+      const message = await store.append(
+        canonicalTestMessageInput({
+          userId: nextId('user'),
+          catId: null,
+          content: 'plugin message',
+          mentions: [],
+          timestamp: Date.now(),
+          threadId: nextId('thread'),
+          extra: {
+            rich: { v: 1, blocks: [] },
+            pluginMessage: {
+              instanceId: 'inst-a',
+              revision: 1,
+              provenance: { origin: { kind: 'plugin', instanceId: 'inst-a' }, epistemicStatus: 'inference' },
+              elements: [{ elementId: 'el-1', kind: 'text', payload: { text: 'x' } }],
+              appendOps: [],
+            },
           },
-        },
-      });
+        }),
+      );
       const pluginMessage = {
         ...message.extra.pluginMessage,
         revision: 2,
@@ -396,23 +399,25 @@ describe('Plugin messaging Redis stores', { skip: redisIsolationSkipReason(REDIS
 
     it('hard delete wipes the independent plugin payload', async () => {
       const store = new RedisMessageStore(redis);
-      const message = await store.append({
-        userId: nextId('user'),
-        catId: null,
-        content: 'sensitive plugin message',
-        mentions: [],
-        timestamp: Date.now(),
-        threadId: nextId('thread'),
-        extra: {
-          pluginMessage: {
-            instanceId: 'inst-a',
-            revision: 1,
-            provenance: { origin: { kind: 'plugin', instanceId: 'inst-a' }, epistemicStatus: 'inference' },
-            elements: [{ elementId: 'el-1', kind: 'text', payload: { text: 'secret' } }],
-            appendOps: [],
+      const message = await store.append(
+        canonicalTestMessageInput({
+          userId: nextId('user'),
+          catId: null,
+          content: 'sensitive plugin message',
+          mentions: [],
+          timestamp: Date.now(),
+          threadId: nextId('thread'),
+          extra: {
+            pluginMessage: {
+              instanceId: 'inst-a',
+              revision: 1,
+              provenance: { origin: { kind: 'plugin', instanceId: 'inst-a' }, epistemicStatus: 'inference' },
+              elements: [{ elementId: 'el-1', kind: 'text', payload: { text: 'secret' } }],
+              appendOps: [],
+            },
           },
-        },
-      });
+        }),
+      );
 
       const tombstone = await store.hardDelete(message.id, 'user-1');
       assert.equal(tombstone._tombstone, true);

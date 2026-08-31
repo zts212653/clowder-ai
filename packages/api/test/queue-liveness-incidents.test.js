@@ -10,6 +10,10 @@ import { describe, it, mock } from 'node:test';
 
 const { InvocationQueue } = await import('../dist/domains/cats/services/agents/invocation/InvocationQueue.js');
 const { QueueProcessor } = await import('../dist/domains/cats/services/agents/invocation/QueueProcessor.js');
+const { createInitialQueuedMessageCustody } = await import(
+  '../dist/domains/cats/services/agents/invocation/QueuedMessageCustodyCoordinator.js'
+);
+const { MessageStore } = await import('../dist/domains/cats/services/stores/ports/MessageStore.js');
 
 function stubDeps() {
   return {
@@ -27,6 +31,12 @@ function stubDeps() {
     },
     messageStore: { getById: mock.fn(() => null), append: mock.fn(() => ({ id: 'm' })) },
     socketManager: { emitToUser: mock.fn(), broadcastToRoom: mock.fn(), broadcastAgentMessage: mock.fn() },
+    router: {
+      resolveExplicitTargets: mock.fn(async (targetCats) => [...targetCats]),
+      resolveConversationTargetsAtAdmission: mock.fn(async (targetCats) => [...targetCats]),
+      routeExecution: mock.fn(async function* () {}),
+      ackCollectedCursors: mock.fn(async () => {}),
+    },
     log: { info: mock.fn(), warn: mock.fn(), error: mock.fn() },
     invokeSingleCat: mock.fn(async () => {}),
   };
@@ -36,6 +46,7 @@ function enqueueUserEntry(deps, content = 'queued user work') {
   const enqueued = deps.queue.enqueue({
     threadId: 't1',
     userId: 'u1',
+    kind: 'conversation_input',
     ownerAuthProvenance: 'unknown',
     content,
     source: 'user',
@@ -61,12 +72,13 @@ describe('user-cancel requeue stays visible', () => {
    * so the slot reported idle while the entry sat there. Queue looked empty,
    * the message never moved, and the only recovery was a manual steer.
    */
-  it('marks the slot paused instead of returning silently', async () => {
+  it('keeps an interrupted entry queued without resurrecting the deleted pause projection', async () => {
     const deps = stubDeps();
     const processor = new QueueProcessor(deps);
     deps.queue.enqueue({
       threadId: 't1',
       userId: 'u1',
+      kind: 'conversation_input',
       ownerAuthProvenance: 'unknown',
       content: 'work the user interrupted',
       source: 'user',
@@ -74,26 +86,23 @@ describe('user-cancel requeue stays visible', () => {
       intent: 'execute',
       priority: 'normal',
     });
-
     await processor.onInvocationComplete('t1', 'opus', 'canceled_by_user', 'inv-canceled', ['opus'], true);
 
-    assert.equal(
-      processor.isPaused('t1', 'opus'),
-      true,
-      'a requeued entry the user interrupted must be visibly parked, not silently idle',
-    );
     assert.equal(deps.queue.list('t1', 'u1').length, 1, 'the entry itself is still there');
+    assert.equal(
+      deps.socketManager.emitToUser.mock.calls.some((call) => call.arguments[1] === 'queue_paused'),
+      false,
+      'the removed retry/pause projection must not be rebuilt as compatibility state',
+    );
   });
 
-  it('explains a stalled continuation even once the queued user message is stale', async () => {
-    // `hasQueuedForThread` reports false for non-agent entries past the stale
-    // threshold — exactly the "sitting for minutes" case this log exists for.
-    // Kept alongside the outcome assertions, not instead of them.
+  it('explains a stalled continuation while old queued custody remains visible', async () => {
     const deps = stubDeps();
     const processor = new QueueProcessor(deps);
     const enqueued = deps.queue.enqueue({
       threadId: 't1',
       userId: 'u1',
+      kind: 'conversation_input',
       ownerAuthProvenance: 'unknown',
       content: 'user message that has been waiting a long time',
       source: 'user',
@@ -103,11 +112,11 @@ describe('user-cancel requeue stays visible', () => {
     });
     assert.ok(enqueued.entry);
     deps.queue.list('t1', 'u1')[0].createdAt = Date.now() - 600_000;
-    assert.equal(deps.queue.hasQueuedForThread('t1'), false, 'precondition: the old gate has already gone quiet');
+    assert.equal(deps.queue.hasQueuedForThread('t1'), true, 'old pending work remains lifecycle-visible');
     assert.equal(deps.queue.hasDispatchableQueuedForThread('t1'), true);
     deps.invocationTracker.has = mock.fn(() => true);
 
-    await processor.onInvocationComplete('t1', 'opus', 'succeeded', 'inv-done', ['opus']);
+    await processor.requestDrain('t1');
 
     const diagnostic = deps.log.info.mock.calls.find((call) =>
       String(call.arguments[1] ?? '').includes('continuation started nothing'),
@@ -122,6 +131,7 @@ describe('user-cancel requeue stays visible', () => {
     deps.queue.enqueue({
       threadId: 't1',
       userId: 'u1',
+      kind: 'conversation_input',
       ownerAuthProvenance: 'unknown',
       content: 'queued behind a busy target',
       source: 'user',
@@ -131,7 +141,7 @@ describe('user-cancel requeue stays visible', () => {
     });
     deps.invocationTracker.has = mock.fn(() => true);
 
-    await processor.onInvocationComplete('t1', 'opus', 'succeeded', 'inv-done', ['opus']);
+    await processor.requestDrain('t1');
 
     const diagnostic = deps.log.info.mock.calls.find((call) =>
       String(call.arguments[1] ?? '').includes('continuation started nothing'),
@@ -162,6 +172,7 @@ describe('user-cancel requeue stays visible', () => {
     deps.queue.enqueue({
       threadId: 't1',
       userId: 'u1',
+      kind: 'conversation_input',
       ownerAuthProvenance: 'unknown',
       content: 'work the user interrupted',
       source: 'user',
@@ -176,23 +187,48 @@ describe('user-cancel requeue stays visible', () => {
     assert.equal(entry.status, 'queued', 'an interrupt must not be quietly undone by a restart');
   });
 
-  it('names no_dispatchable_candidate when the scan finds nothing for this cat', async () => {
-    // The thread still holds dispatchable work, but none of it targets this cat,
-    // so the scan legitimately starts nothing and must say which of the three
-    // reasons applied.
+  it('terminalizes a strict Queue head when routing resolves no target', async () => {
     const deps = stubDeps();
+    deps.messageStore = new MessageStore();
     const processor = new QueueProcessor(deps);
-    enqueueUserEntry(deps, 'work for a different cat').targetCats = ['codex'];
-    deps.queue.list('t1', 'u1')[0].targetCats = ['codex'];
+    const enqueued = deps.queue.enqueue({
+      threadId: 't1',
+      userId: 'u1',
+      kind: 'conversation_input',
+      ownerAuthProvenance: 'unknown',
+      content: 'work whose admission has no deterministic target',
+      source: 'user',
+      targetCats: [],
+      intent: 'execute',
+      priority: 'normal',
+    });
+    assert.ok(enqueued.entry);
+    const message = deps.messageStore.append({
+      userId: 'u1',
+      catId: null,
+      content: enqueued.entry.content,
+      mentions: [],
+      timestamp: enqueued.entry.createdAt,
+      threadId: 't1',
+      deliveryStatus: 'queued',
+      queueCustody: createInitialQueuedMessageCustody(enqueued.entry),
+    });
+    deps.queue.backfillMessageId('t1', 'u1', enqueued.entry.id, message.id);
 
-    const result = await processor.tryExecuteNextAcrossUsers('t1', 'opus', { onlyTargetCat: true });
+    const result = await processor.tryExecuteNextAcrossUsers('t1');
 
     assert.equal(result.started, false);
-    const diagnostic = continuationDiagnostic(deps);
-    assert.ok(diagnostic, 'a scan that starts nothing while work is queued must explain itself');
-    assert.equal(diagnostic.arguments[0].outcome, 'no_dispatchable_candidate');
-    assert.equal(diagnostic.arguments[0].deferredForBusySlot, 0);
-    assert.equal(diagnostic.arguments[0].entryId, undefined);
+    assert.equal(result.progressed, true, 'terminal failure is forward progress even though no invocation starts');
+    assert.equal(deps.queue.hasQueuedForThread('t1'), false, 'an undeliverable strict head must not remain queued');
+    const timeline = deps.messageStore.getByThread('t1');
+    assert.equal(timeline.length, 2, 'the source must stay visible beside its durable failure result');
+    assert.equal(timeline[0].id, message.id);
+    assert.equal(timeline[0].queueCustody, undefined);
+    assert.equal(timeline[0].deliveryStatus, 'delivered');
+    assert.equal(timeline[0].lifecycle.kind, 'input');
+    assert.equal(timeline[1].lifecycle.kind, 'delivery_failure');
+    assert.equal(timeline[1].lifecycle.inputMessageId, message.id);
+    assert.equal(timeline[1].content, '消息未能送达：当前没有可用的接收对象。');
   });
 
   it('names start_rejected with the exact entry that would not start', async () => {

@@ -9,7 +9,7 @@ import {
 const REDIS_URL = process.env.REDIS_URL;
 
 function message(content, timestamp, overrides = {}) {
-  return {
+  const input = {
     userId: 'user-1',
     catId: null,
     content,
@@ -17,6 +17,14 @@ function message(content, timestamp, overrides = {}) {
     timestamp,
     threadId: 'thread-1',
     ...overrides,
+  };
+  return {
+    provenance: {
+      author: input.catId ? 'cat' : 'user',
+      routed: false,
+      observation: 'original',
+    },
+    ...input,
   };
 }
 

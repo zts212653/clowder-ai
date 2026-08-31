@@ -15,6 +15,23 @@ inputs:
   - roleDescription
   - identity
 
+# Variable metadata (canonical source for Console editor)
+variables:
+  - name: NAME_LABEL
+    description: 当前猫的完整名称
+    placeholder: ""
+  - name: PROVIDER_LABEL
+    description: 模型提供商标签
+    placeholder: ""
+  - name: NICKNAME_ORIGIN
+    description: 昵称由来说明
+    placeholder: ""
+  - name: ROLE_DESCRIPTION
+    description: 角色描述
+    placeholder: ""
+  - name: PERSONALITY
+    description: 性格描述
+    placeholder: ""
 # Override constraints
 disableable: false
 

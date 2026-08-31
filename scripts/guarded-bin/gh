@@ -114,50 +114,10 @@ function fail(code, detail) {
 }
 
 if (isVerdictPrCreate()) {
-  const expectedRepo =
-    process.env.CAT_CAFE_VERDICT_REPO_FULL_NAME ??
-    process.env.CAT_CAFE_REPO_FULL_NAME ??
-    'zts212653/cat-cafe';
-  const explicitRepos = optionValues('repository');
-  if (explicitRepos.length === 0) {
-    fail('verdict_publish_missing_repo_scope', `verdict PR creation requires --repo ${expectedRepo}`);
-  }
-  const wrongRepo = explicitRepos.find((repo) => repo.toLowerCase() !== expectedRepo.toLowerCase());
-  if (wrongRepo) {
-    fail(
-      'verdict_publish_wrong_repository',
-      `gh --repo resolves to ${wrongRepo}; expected ${expectedRepo}`,
-    );
-  }
-
-  const guardRoot = process.env.CAT_CAFE_VERDICT_GH_GUARD_ROOT;
-  if (!guardRoot) {
-    fail('verdict_publish_guard_unavailable', 'CAT_CAFE_VERDICT_GH_GUARD_ROOT is not configured');
-  }
-  const repoRoot = gitOutput(['rev-parse', '--show-toplevel']);
-  if (!repoRoot) fail('verdict_publish_guard_unavailable', 'current directory is not a git repository');
-  const baseBranch = optionValue('base') ?? 'main';
-  const guard = spawnSync(
-    process.execPath,
-    [
-      resolve(guardRoot, 'scripts/check-verdict-publish-contract.mjs'),
-      '--repo-root',
-      repoRoot,
-      '--expected-repo',
-      expectedRepo,
-      '--remote',
-      'origin',
-      '--fresh-base-branch',
-      baseBranch,
-      '--source-ref',
-      'HEAD',
-    ],
-    { encoding: 'utf8' },
+  fail(
+    'verdict_git_publication_retired',
+    'runtime verdict evidence is durable artifact-store data; publish through cat_cafe_publish_verdict',
   );
-  if (guard.status !== 0) {
-    process.stderr.write(guard.stderr || 'verdict_publish_guard_failed\n');
-    process.exit(guard.status ?? 1);
-  }
 }
 
 const delegatePath = (process.env.PATH ?? '')

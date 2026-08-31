@@ -16,6 +16,7 @@
 
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
+import { canonicalTestMessageInput } from './helpers/message-from-fixtures.js';
 
 const { MessageStore } = await import('../dist/domains/cats/services/stores/ports/MessageStore.js');
 
@@ -27,25 +28,31 @@ describe('#1269 R8 P1-1: isTimelinePublished in forward scans', () => {
     const threadId = `r8-p1-1-after-${Date.now()}`;
 
     // Direct message visible at append
-    store.append({
-      userId: 'u1',
-      catId: null,
-      content: 'C-direct',
-      mentions: [],
-      timestamp: Date.now() - 2000,
-      threadId,
-    });
+    store.append(
+      canonicalTestMessageInput({
+        provenance: { author: 'user', routed: false, observation: 'original' },
+        userId: 'u1',
+        catId: null,
+        content: 'C-direct',
+        mentions: [],
+        timestamp: Date.now() - 2000,
+        threadId,
+      }),
+    );
 
     // Timeline-published cat speech: queued but catId is real cat → visible at append
-    store.append({
-      userId: 'u1',
-      catId: 'opus',
-      content: 'Q-cat-speech',
-      mentions: [],
-      timestamp: Date.now() - 1000,
-      threadId,
-      deliveryStatus: 'queued',
-    });
+    store.append(
+      canonicalTestMessageInput({
+        provenance: { author: 'cat', routed: false, observation: 'original' },
+        userId: 'u1',
+        catId: 'opus',
+        content: 'Q-cat-speech',
+        mentions: [],
+        timestamp: Date.now() - 1000,
+        threadId,
+        deliveryStatus: 'queued',
+      }),
+    );
 
     // Full scan should include both messages
     const page = store.getByThreadAfter(threadId, undefined, undefined, 'u1', {
@@ -60,25 +67,31 @@ describe('#1269 R8 P1-1: isTimelinePublished in forward scans', () => {
     const store = new MessageStore();
     const threadId = `r8-p1-1-default-${Date.now()}`;
 
-    store.append({
-      userId: 'u1',
-      catId: null,
-      content: 'C-direct',
-      mentions: [],
-      timestamp: Date.now() - 2000,
-      threadId,
-    });
+    store.append(
+      canonicalTestMessageInput({
+        provenance: { author: 'user', routed: false, observation: 'original' },
+        userId: 'u1',
+        catId: null,
+        content: 'C-direct',
+        mentions: [],
+        timestamp: Date.now() - 2000,
+        threadId,
+      }),
+    );
 
     // Timeline-published cat speech — queued, real cat
-    store.append({
-      userId: 'u1',
-      catId: 'opus',
-      content: 'Q-cat-speech',
-      mentions: [],
-      timestamp: Date.now() - 1000,
-      threadId,
-      deliveryStatus: 'queued',
-    });
+    store.append(
+      canonicalTestMessageInput({
+        provenance: { author: 'cat', routed: false, observation: 'original' },
+        userId: 'u1',
+        catId: 'opus',
+        content: 'Q-cat-speech',
+        mentions: [],
+        timestamp: Date.now() - 1000,
+        threadId,
+        deliveryStatus: 'queued',
+      }),
+    );
 
     // Default read (no options) — should NOT include queued cat speech
     const page = store.getByThreadAfter(threadId);
@@ -91,25 +104,31 @@ describe('#1269 R8 P1-1: isTimelinePublished in forward scans', () => {
     const store = new MessageStore();
     const threadId = `r8-p1-1-hidden-${Date.now()}`;
 
-    store.append({
-      userId: 'u1',
-      catId: null,
-      content: 'C-direct',
-      mentions: [],
-      timestamp: Date.now() - 2000,
-      threadId,
-    });
+    store.append(
+      canonicalTestMessageInput({
+        provenance: { author: 'user', routed: false, observation: 'original' },
+        userId: 'u1',
+        catId: null,
+        content: 'C-direct',
+        mentions: [],
+        timestamp: Date.now() - 2000,
+        threadId,
+      }),
+    );
 
     // Hidden queued work: catId=null, not timeline-published
-    store.append({
-      userId: 'scheduler',
-      catId: null,
-      content: 'Q-hidden',
-      mentions: [],
-      timestamp: Date.now() - 1000,
-      threadId,
-      deliveryStatus: 'queued',
-    });
+    store.append(
+      canonicalTestMessageInput({
+        provenance: { author: 'system', routed: false, observation: 'original' },
+        userId: 'scheduler',
+        catId: null,
+        content: 'Q-hidden',
+        mentions: [],
+        timestamp: Date.now() - 1000,
+        threadId,
+        deliveryStatus: 'queued',
+      }),
+    );
 
     const page = store.getByThreadAfter(threadId);
     const contents = page.map((m) => m.content);
@@ -128,15 +147,18 @@ describe('#1269: isTimelinePublished in mention queries', () => {
     const threadId = `r8-mention-queued-${Date.now()}`;
 
     // Cat speech mentioning 'terra' — queued but timeline-published → visible
-    store.append({
-      userId: 'u1',
-      catId: 'opus',
-      content: 'Hey @terra check this',
-      mentions: ['terra'],
-      timestamp: Date.now() - 1000,
-      threadId,
-      deliveryStatus: 'queued',
-    });
+    store.append(
+      canonicalTestMessageInput({
+        provenance: { author: 'cat', routed: false, observation: 'original' },
+        userId: 'u1',
+        catId: 'opus',
+        content: 'Hey @terra check this',
+        mentions: ['terra'],
+        timestamp: Date.now() - 1000,
+        threadId,
+        deliveryStatus: 'queued',
+      }),
+    );
 
     const mentions = store.getMentionsFor('terra', 10, undefined, threadId);
     assert.equal(mentions.length, 1, 'Timeline-published cat speech mention should be found');
@@ -148,15 +170,18 @@ describe('#1269: isTimelinePublished in mention queries', () => {
     const threadId = `r8-mention-hidden-${Date.now()}`;
 
     // Hidden queued work mentioning 'terra' — not timeline-published
-    store.append({
-      userId: 'scheduler',
-      catId: null,
-      content: 'Hidden mention @terra',
-      mentions: ['terra'],
-      timestamp: Date.now() - 1000,
-      threadId,
-      deliveryStatus: 'queued',
-    });
+    store.append(
+      canonicalTestMessageInput({
+        provenance: { author: 'system', routed: false, observation: 'original' },
+        userId: 'scheduler',
+        catId: null,
+        content: 'Hidden mention @terra',
+        mentions: ['terra'],
+        timestamp: Date.now() - 1000,
+        threadId,
+        deliveryStatus: 'queued',
+      }),
+    );
 
     const mentions = store.getMentionsFor('terra', 10, undefined, threadId);
     assert.equal(mentions.length, 0, 'Hidden queued mention should NOT be found');
@@ -166,15 +191,18 @@ describe('#1269: isTimelinePublished in mention queries', () => {
     const store = new MessageStore();
     const threadId = `r8-recent-queued-${Date.now()}`;
 
-    store.append({
-      userId: 'u1',
-      catId: 'opus',
-      content: 'Recent @terra',
-      mentions: ['terra'],
-      timestamp: Date.now(),
-      threadId,
-      deliveryStatus: 'queued',
-    });
+    store.append(
+      canonicalTestMessageInput({
+        provenance: { author: 'cat', routed: false, observation: 'original' },
+        userId: 'u1',
+        catId: 'opus',
+        content: 'Recent @terra',
+        mentions: ['terra'],
+        timestamp: Date.now(),
+        threadId,
+        deliveryStatus: 'queued',
+      }),
+    );
 
     const recent = store.getRecentMentionsFor('terra', 10, undefined, threadId);
     assert.equal(recent.length, 1, 'Timeline-published recent mention should be found');
@@ -184,15 +212,18 @@ describe('#1269: isTimelinePublished in mention queries', () => {
     const store = new MessageStore();
     const threadId = `r8-recent-hidden-${Date.now()}`;
 
-    store.append({
-      userId: 'scheduler',
-      catId: null,
-      content: 'Hidden recent @terra',
-      mentions: ['terra'],
-      timestamp: Date.now(),
-      threadId,
-      deliveryStatus: 'queued',
-    });
+    store.append(
+      canonicalTestMessageInput({
+        provenance: { author: 'system', routed: false, observation: 'original' },
+        userId: 'scheduler',
+        catId: null,
+        content: 'Hidden recent @terra',
+        mentions: ['terra'],
+        timestamp: Date.now(),
+        threadId,
+        deliveryStatus: 'queued',
+      }),
+    );
 
     const recent = store.getRecentMentionsFor('terra', 10, undefined, threadId);
     assert.equal(recent.length, 0, 'Hidden queued recent mention should NOT be found');
@@ -207,15 +238,18 @@ describe('#1269 R8 P1-2: cancel clears queueCustody (Memory parity)', () => {
     const threadId = `r8-p1-2-cancel-${Date.now()}`;
 
     // Append with queueCustody already set (simulates initialized custody)
-    const q = store.append({
-      userId: 'u1',
-      catId: null,
-      content: 'work-to-cancel',
-      mentions: [],
-      timestamp: Date.now(),
-      threadId,
-      deliveryStatus: 'queued',
-    });
+    const q = store.append(
+      canonicalTestMessageInput({
+        provenance: { author: 'user', routed: false, observation: 'original' },
+        userId: 'u1',
+        catId: null,
+        content: 'work-to-cancel',
+        mentions: [],
+        timestamp: Date.now(),
+        threadId,
+        deliveryStatus: 'queued',
+      }),
+    );
 
     // Cancel
     const result = store.markCanceled(q.id);

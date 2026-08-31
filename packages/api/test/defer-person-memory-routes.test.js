@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { before, beforeEach, describe, it } from 'node:test';
 import Fastify from 'fastify';
+import { canonicalTestMessageInput } from './helpers/message-from-fixtures.js';
 
 describe('F276 defer-person-memory callback', () => {
   let app;
@@ -65,15 +66,18 @@ describe('F276 defer-person-memory callback', () => {
   });
 
   async function ownerMessage(threadId, content, extra = {}) {
-    return messageStore.append({
-      userId: 'owner-1',
-      catId: null,
-      content,
-      mentions: [],
-      timestamp: Date.now(),
-      threadId,
-      ...extra,
-    });
+    return messageStore.append(
+      canonicalTestMessageInput({
+        provenance: { author: 'user', routed: false, observation: 'original' },
+        userId: 'owner-1',
+        catId: null,
+        content,
+        mentions: [],
+        timestamp: Date.now(),
+        threadId,
+        ...extra,
+      }),
+    );
   }
 
   async function invoke(payload, origin) {
@@ -179,14 +183,17 @@ describe('F276 defer-person-memory callback', () => {
   });
 
   it('rejects caller-owned auth fields and cross-owner source laundering', async () => {
-    const source = await messageStore.append({
-      userId: 'owner-2',
-      catId: null,
-      content: '黄挺的私密事实',
-      mentions: [],
-      timestamp: Date.now(),
-      threadId: 'thread_other_owner',
-    });
+    const source = await messageStore.append(
+      canonicalTestMessageInput({
+        provenance: { author: 'user', routed: false, observation: 'original' },
+        userId: 'owner-2',
+        catId: null,
+        content: '黄挺的私密事实',
+        mentions: [],
+        timestamp: Date.now(),
+        threadId: 'thread_other_owner',
+      }),
+    );
     const origin = await ownerMessage('thread_current', '延后处理');
     const forbidden = await invoke(
       {

@@ -5,6 +5,7 @@
 import assert from 'node:assert/strict';
 import { afterEach, beforeEach, describe, it } from 'node:test';
 import Fastify from 'fastify';
+import { canonicalTestMessageInput } from './helpers/message-from-fixtures.js';
 import { makeQueuedMessageCustody } from './helpers/queued-message-custody.js';
 
 describe('GET /api/messages', () => {
@@ -46,20 +47,24 @@ describe('GET /api/messages', () => {
   });
 
   it('returns messages with correct format', async () => {
-    messageStore.append({
-      userId: 'default-user',
-      catId: null,
-      content: 'hello',
-      mentions: ['opus'],
-      timestamp: 1000,
-    });
-    messageStore.append({
-      userId: 'default-user',
-      catId: 'opus',
-      content: 'hi there',
-      mentions: [],
-      timestamp: 2000,
-    });
+    messageStore.append(
+      canonicalTestMessageInput({
+        userId: 'default-user',
+        catId: null,
+        content: 'hello',
+        mentions: ['opus'],
+        timestamp: 1000,
+      }),
+    );
+    messageStore.append(
+      canonicalTestMessageInput({
+        userId: 'default-user',
+        catId: 'opus',
+        content: 'hi there',
+        mentions: [],
+        timestamp: 2000,
+      }),
+    );
 
     const res = await app.inject({ method: 'GET', url: '/api/messages' });
     const body = JSON.parse(res.body);
@@ -76,44 +81,73 @@ describe('GET /api/messages', () => {
     assert.equal(body.messages[1].content, 'hi there');
   });
 
+  it('keeps structured routing warnings attached to the delivered input', async () => {
+    const routingWarnings = [
+      {
+        kind: 'cat_not_found',
+        mention: '@missing-cat',
+        alternatives: [],
+      },
+    ];
+    messageStore.append(
+      canonicalTestMessageInput({
+        userId: 'default-user',
+        catId: null,
+        content: '@missing-cat hello',
+        mentions: [],
+        timestamp: 1000,
+        extra: { routingWarnings },
+      }),
+    );
+
+    const res = await app.inject({ method: 'GET', url: '/api/messages' });
+    const body = JSON.parse(res.body);
+
+    assert.deepEqual(body.messages[0].extra.routingWarnings, routingWarnings);
+  });
+
   it('F247 F5 hydrates a durable cloud outbound receipt from its exact source without copying the body', async () => {
-    const source = messageStore.append({
-      userId: 'default-user',
-      catId: 'codex-sol',
-      content: 'Please inspect the source-bound transport behavior',
-      mentions: ['gpt-pro'],
-      timestamp: 1_000,
-      threadId: 'thread-cloud-audit',
-    });
-    messageStore.append({
-      userId: 'system',
-      catId: null,
-      content: '已发送给 @gpt-pro，等待它从 ChatGPT 云端会话回写。',
-      mentions: [],
-      timestamp: 1_100,
-      threadId: 'thread-cloud-audit',
-      replyTo: source.id,
-      source: {
-        connector: 'cloud-bridge-status',
-        label: '云端猫投递',
-        icon: '☁️',
-        meta: {
-          presentation: 'system_notice',
-          noticeTone: 'info',
-          cloudBridgeOutboundReceipt: {
-            v: 1,
-            sourceMessageId: source.id,
-            sourceSender: { kind: 'cat', id: 'codex-sol', invocationId: 'inv-source-1' },
-            dispatchInvocationId: 'inv-cloud-1',
-            targetCatId: 'gpt-pro',
-            status: 'sent',
-            transport: 'host',
-            hostMessageId: 'host-message-1',
-            idempotency: { keyKind: 'source_message_id', disposition: 'fresh' },
+    const source = messageStore.append(
+      canonicalTestMessageInput({
+        userId: 'default-user',
+        catId: 'codex-sol',
+        content: 'Please inspect the source-bound transport behavior',
+        mentions: ['gpt-pro'],
+        timestamp: 1_000,
+        threadId: 'thread-cloud-audit',
+      }),
+    );
+    messageStore.append(
+      canonicalTestMessageInput({
+        userId: 'system',
+        catId: null,
+        content: '已发送给 @gpt-pro，等待它从 ChatGPT 云端会话回写。',
+        mentions: [],
+        timestamp: 1_100,
+        threadId: 'thread-cloud-audit',
+        replyTo: source.id,
+        source: {
+          connector: 'cloud-bridge-status',
+          label: '云端猫投递',
+          icon: '☁️',
+          meta: {
+            presentation: 'system_notice',
+            noticeTone: 'info',
+            cloudBridgeOutboundReceipt: {
+              v: 1,
+              sourceMessageId: source.id,
+              sourceSender: { kind: 'cat', id: 'codex-sol', invocationId: 'inv-source-1' },
+              dispatchInvocationId: 'inv-cloud-1',
+              targetCatId: 'gpt-pro',
+              status: 'sent',
+              transport: 'host',
+              hostMessageId: 'host-message-1',
+              idempotency: { keyKind: 'source_message_id', disposition: 'fresh' },
+            },
           },
         },
-      },
-    });
+      }),
+    );
 
     const res = await app.inject({ method: 'GET', url: '/api/messages?threadId=thread-cloud-audit' });
     const body = JSON.parse(res.body);
@@ -127,29 +161,33 @@ describe('GET /api/messages', () => {
   });
 
   it('F247 F5 never hydrates a reply preview from another thread even if a legacy receipt is malformed', async () => {
-    const privateSource = messageStore.append({
-      userId: 'default-user',
-      catId: 'codex-sol',
-      content: 'private thread body must never cross the preview boundary',
-      mentions: [],
-      timestamp: 1_000,
-      threadId: 'thread-private-source',
-    });
-    messageStore.append({
-      userId: 'system',
-      catId: null,
-      content: 'legacy malformed cloud receipt',
-      mentions: [],
-      timestamp: 1_100,
-      threadId: 'thread-public-receipt',
-      replyTo: privateSource.id,
-      source: {
-        connector: 'cloud-bridge-status',
-        label: '云端猫投递',
-        icon: '☁️',
-        meta: { presentation: 'system_notice', noticeTone: 'info' },
-      },
-    });
+    const privateSource = messageStore.append(
+      canonicalTestMessageInput({
+        userId: 'default-user',
+        catId: 'codex-sol',
+        content: 'private thread body must never cross the preview boundary',
+        mentions: [],
+        timestamp: 1_000,
+        threadId: 'thread-private-source',
+      }),
+    );
+    messageStore.append(
+      canonicalTestMessageInput({
+        userId: 'system',
+        catId: null,
+        content: 'legacy malformed cloud receipt',
+        mentions: [],
+        timestamp: 1_100,
+        threadId: 'thread-public-receipt',
+        replyTo: privateSource.id,
+        source: {
+          connector: 'cloud-bridge-status',
+          label: '云端猫投递',
+          icon: '☁️',
+          meta: { presentation: 'system_notice', noticeTone: 'info' },
+        },
+      }),
+    );
 
     const res = await app.inject({ method: 'GET', url: '/api/messages?threadId=thread-public-receipt' });
     const receipt = res.json().messages.find((message) => message.source?.connector === 'cloud-bridge-status');
@@ -158,41 +196,47 @@ describe('GET /api/messages', () => {
   });
 
   it('renders an authored queued cat seed without exposing queued user or system work', async () => {
-    messageStore.append({
-      userId: 'default-user',
-      catId: null,
-      content: 'ordinary queued user work',
-      mentions: ['opus'],
-      timestamp: 1000,
-      threadId: 'thread-f128-seed',
-      deliveryStatus: 'queued',
-    });
-    messageStore.append({
-      userId: 'system',
-      catId: 'system',
-      content: 'queued internal system work',
-      mentions: [],
-      timestamp: 1050,
-      threadId: 'thread-f128-seed',
-      deliveryStatus: 'queued',
-    });
-    messageStore.append({
-      userId: 'default-user',
-      catId: 'codex-sol',
-      content: 'source-cat thread seed',
-      mentions: ['opus'],
-      timestamp: 1100,
-      threadId: 'thread-f128-seed',
-      deliveryStatus: 'queued',
-      queueCustody: makeQueuedMessageCustody({
-        entryId: 'entry-f128-seed',
-        intent: 'execute',
-        allTargetCats: ['opus'],
-        pendingTargetCats: ['opus'],
-        createdAt: 1100,
-        updatedAt: 1100,
+    messageStore.append(
+      canonicalTestMessageInput({
+        userId: 'default-user',
+        catId: null,
+        content: 'ordinary queued user work',
+        mentions: ['opus'],
+        timestamp: 1000,
+        threadId: 'thread-f128-seed',
+        deliveryStatus: 'queued',
       }),
-    });
+    );
+    messageStore.append(
+      canonicalTestMessageInput({
+        userId: 'system',
+        catId: 'system',
+        content: 'queued internal system work',
+        mentions: [],
+        timestamp: 1050,
+        threadId: 'thread-f128-seed',
+        deliveryStatus: 'queued',
+      }),
+    );
+    messageStore.append(
+      canonicalTestMessageInput({
+        userId: 'default-user',
+        catId: 'codex-sol',
+        content: 'source-cat thread seed',
+        mentions: ['opus'],
+        timestamp: 1100,
+        threadId: 'thread-f128-seed',
+        deliveryStatus: 'queued',
+        queueCustody: makeQueuedMessageCustody({
+          entryId: 'entry-f128-seed',
+          intent: 'execute',
+          allTargetCats: ['opus'],
+          pendingTargetCats: ['opus'],
+          createdAt: 1100,
+          updatedAt: 1100,
+        }),
+      }),
+    );
 
     const res = await app.inject({ method: 'GET', url: '/api/messages?threadId=thread-f128-seed' });
     const body = JSON.parse(res.body);
@@ -203,83 +247,82 @@ describe('GET /api/messages', () => {
     assert.equal(body.messages[0].content, 'source-cat thread seed');
   });
 
-  it('F264 publishes a steered user message in place without making it prompt-delivered', async () => {
-    const steered = messageStore.append({
-      userId: 'default-user',
-      catId: null,
-      content: 'steered follow-up stays visible while the replacement runs',
-      mentions: ['opus'],
-      timestamp: 1200,
-      threadId: 'thread-steer-publication',
-      deliveryStatus: 'queued',
-      queueCustody: makeQueuedMessageCustody({
-        entryId: 'entry-steer-publication',
-        status: 'queued',
-        allTargetCats: ['opus'],
-        pendingTargetCats: ['opus'],
-        steerRequestedByCatIds: ['opus'],
-        createdAt: 1200,
-        updatedAt: 1250,
+  it('keeps a pre-admission steered user message out of History', async () => {
+    const steered = messageStore.append(
+      canonicalTestMessageInput({
+        userId: 'default-user',
+        catId: null,
+        content: 'steered follow-up stays visible while the replacement runs',
+        mentions: ['opus'],
+        timestamp: 1200,
+        threadId: 'thread-steer-publication',
+        deliveryStatus: 'queued',
+        queueCustody: makeQueuedMessageCustody({
+          entryId: 'entry-steer-publication',
+          status: 'queued',
+          allTargetCats: ['opus'],
+          pendingTargetCats: ['opus'],
+          steerRequestedByCatIds: ['opus'],
+          createdAt: 1200,
+          updatedAt: 1250,
+        }),
       }),
-    });
+    );
 
     const res = await app.inject({ method: 'GET', url: '/api/messages?threadId=thread-steer-publication' });
     const body = JSON.parse(res.body);
 
-    assert.equal(body.messages.length, 1);
-    assert.equal(body.messages[0].id, steered.id);
-    assert.equal(body.messages[0].type, 'user');
-    assert.equal(body.messages[0].timestamp, 1200);
-    assert.equal(body.messages[0].deliveredAt, undefined);
-    assert.deepEqual(body.messages[0].extra.queueReceipt.targets, [{ catId: 'opus', state: 'steering' }]);
+    assert.equal(body.messages.length, 0);
     assert.equal(messageStore.getById(steered.id).deliveryStatus, 'queued');
   });
 
-  it('F264 publishes untouched durable queued user work with its unread receipt', async () => {
-    const queued = messageStore.append({
-      userId: 'default-user',
-      catId: null,
-      content: 'queued follow-up remains at its authored timeline position',
-      mentions: ['opus'],
-      timestamp: 1300,
-      threadId: 'thread-queued-publication',
-      deliveryStatus: 'queued',
-      queueCustody: makeQueuedMessageCustody({
-        entryId: 'entry-queued-publication',
-        status: 'queued',
-        allTargetCats: ['opus'],
-        pendingTargetCats: ['opus'],
-        createdAt: 1300,
-        updatedAt: 1300,
+  it('keeps untouched durable queued user work out of History until admission', async () => {
+    const queued = messageStore.append(
+      canonicalTestMessageInput({
+        userId: 'default-user',
+        catId: null,
+        content: 'queued follow-up remains at its authored timeline position',
+        mentions: ['opus'],
+        timestamp: 1300,
+        threadId: 'thread-queued-publication',
+        deliveryStatus: 'queued',
+        queueCustody: makeQueuedMessageCustody({
+          entryId: 'entry-queued-publication',
+          status: 'queued',
+          allTargetCats: ['opus'],
+          pendingTargetCats: ['opus'],
+          createdAt: 1300,
+          updatedAt: 1300,
+        }),
       }),
-    });
+    );
 
     const res = await app.inject({ method: 'GET', url: '/api/messages?threadId=thread-queued-publication' });
     const body = JSON.parse(res.body);
 
-    assert.equal(body.messages.length, 1);
-    assert.equal(body.messages[0].id, queued.id);
-    assert.equal(body.messages[0].deliveredAt, undefined);
-    assert.deepEqual(body.messages[0].extra.queueReceipt.targets, [{ catId: 'opus', state: 'queued' }]);
+    assert.equal(body.messages.length, 0);
+    assert.equal(messageStore.getById(queued.id).deliveryStatus, 'queued');
   });
 
   it('F264 keeps canceled queued user work out of browser history after F5', async () => {
-    const canceled = messageStore.append({
-      userId: 'default-user',
-      catId: null,
-      content: 'withdrawn follow-up must not reappear',
-      mentions: ['opus'],
-      timestamp: 1350,
-      threadId: 'thread-canceled-publication',
-      deliveryStatus: 'queued',
-      queueCustody: makeQueuedMessageCustody({
-        entryId: 'entry-canceled-publication',
-        allTargetCats: ['opus'],
-        pendingTargetCats: ['opus'],
-        createdAt: 1350,
-        updatedAt: 1350,
+    const canceled = messageStore.append(
+      canonicalTestMessageInput({
+        userId: 'default-user',
+        catId: null,
+        content: 'withdrawn follow-up must not reappear',
+        mentions: ['opus'],
+        timestamp: 1350,
+        threadId: 'thread-canceled-publication',
+        deliveryStatus: 'queued',
+        queueCustody: makeQueuedMessageCustody({
+          entryId: 'entry-canceled-publication',
+          allTargetCats: ['opus'],
+          pendingTargetCats: ['opus'],
+          createdAt: 1350,
+          updatedAt: 1350,
+        }),
       }),
-    });
+    );
     messageStore.markCanceled(canceled.id);
 
     const res = await app.inject({ method: 'GET', url: '/api/messages?threadId=thread-canceled-publication' });
@@ -289,15 +332,17 @@ describe('GET /api/messages', () => {
   });
 
   it('returns separate delivery and timeline-order timestamps for terminal published cat speech', async () => {
-    const speech = messageStore.append({
-      userId: 'default-user',
-      catId: 'codex-sol',
-      content: 'published before recipient execution finishes',
-      mentions: ['opus'],
-      timestamp: 1100,
-      threadId: 'thread-published-order',
-      deliveryStatus: 'queued',
-    });
+    const speech = messageStore.append(
+      canonicalTestMessageInput({
+        userId: 'default-user',
+        catId: 'codex-sol',
+        content: 'published before recipient execution finishes',
+        mentions: ['opus'],
+        timestamp: 1100,
+        threadId: 'thread-published-order',
+        deliveryStatus: 'queued',
+      }),
+    );
     messageStore.markDelivered(speech.id, 1500);
 
     const res = await app.inject({ method: 'GET', url: '/api/messages?threadId=thread-published-order' });
@@ -308,18 +353,20 @@ describe('GET /api/messages', () => {
   });
 
   it('preserves explicit post flag with stream identity in history response', async () => {
-    messageStore.append({
-      userId: 'default-user',
-      catId: 'opus',
-      content: 'standalone post',
-      mentions: [],
-      timestamp: 2000,
-      threadId: 'thread-explicit',
-      extra: {
-        isExplicitPost: true,
-        stream: { invocationId: 'inv-parent', turnInvocationId: 'turn-explicit' },
-      },
-    });
+    messageStore.append(
+      canonicalTestMessageInput({
+        userId: 'default-user',
+        catId: 'opus',
+        content: 'standalone post',
+        mentions: [],
+        timestamp: 2000,
+        threadId: 'thread-explicit',
+        extra: {
+          isExplicitPost: true,
+          stream: { invocationId: 'inv-parent', turnInvocationId: 'turn-explicit' },
+        },
+      }),
+    );
 
     const res = await app.inject({ method: 'GET', url: '/api/messages?threadId=thread-explicit' });
     const body = JSON.parse(res.body);
@@ -333,28 +380,30 @@ describe('GET /api/messages', () => {
   });
 
   it('F264 hydrates a terminal receipt at the original user-message position', async () => {
-    const queued = messageStore.append({
-      userId: 'default-user',
-      catId: null,
-      content: 'message sent during the turn',
-      mentions: ['opus'],
-      timestamp: 1500,
-      threadId: 'thread-receipt',
-      deliveryStatus: 'queued',
-      queueCustody: makeQueuedMessageCustody({
-        entryId: 'entry-receipt',
-        intent: 'execute',
-        status: 'processing',
-        allTargetCats: ['opus'],
-        pendingTargetCats: ['opus'],
-        seenByCatIds: ['opus'],
-        seenInvocationIdByCatId: { opus: 'inv-receipt' },
-        bodyExposures: [{ targetCatId: 'opus', invocationId: 'inv-receipt', seenAt: 1600 }],
-        processingStartedAt: 1550,
-        createdAt: 1500,
-        updatedAt: 1550,
+    const queued = messageStore.append(
+      canonicalTestMessageInput({
+        userId: 'default-user',
+        catId: null,
+        content: 'message sent during the turn',
+        mentions: ['opus'],
+        timestamp: 1500,
+        threadId: 'thread-receipt',
+        deliveryStatus: 'queued',
+        queueCustody: makeQueuedMessageCustody({
+          entryId: 'entry-receipt',
+          intent: 'execute',
+          status: 'processing',
+          allTargetCats: ['opus'],
+          pendingTargetCats: ['opus'],
+          seenByCatIds: ['opus'],
+          seenInvocationIdByCatId: { opus: 'inv-receipt' },
+          bodyExposures: [{ targetCatId: 'opus', invocationId: 'inv-receipt', seenAt: 1600 }],
+          processingStartedAt: 1550,
+          createdAt: 1500,
+          updatedAt: 1550,
+        }),
       }),
-    });
+    );
     await messageStore.transitionQueueCustody(queued.id, {
       expectedRevision: 1,
       deliveredAt: 1700,
@@ -404,34 +453,36 @@ describe('GET /api/messages', () => {
   });
 
   it('ADR-042 hydrates original freshness and supplement reply provenance', async () => {
-    const original = messageStore.append({
-      userId: 'default-user',
-      catId: 'opus',
-      content: 'published original',
-      mentions: [],
-      timestamp: 2000,
-      threadId: 'thread-supplement',
-      extra: {
-        turnExecution: {
-          invocationId: 'child-ordinary-1',
-          parentInvocationId: 'parent-supplement-1',
-          executionKind: 'ordinary',
-        },
-        auxiliaryTurnExecutions: [
-          {
-            invocationId: 'child-routing-guard-1',
+    const original = messageStore.append(
+      canonicalTestMessageInput({
+        userId: 'default-user',
+        catId: 'opus',
+        content: 'published original',
+        mentions: [],
+        timestamp: 2000,
+        threadId: 'thread-supplement',
+        extra: {
+          turnExecution: {
+            invocationId: 'child-ordinary-1',
             parentInvocationId: 'parent-supplement-1',
-            executionKind: 'routing_guard',
+            executionKind: 'ordinary',
           },
-        ],
-        freshness: {
-          kind: 'published_with_unseen',
-          priorFrontierMessageId: 'msg-late',
-          generatedWithUnseen: ['msg-late'],
-          lineageId: 'temporary',
+          auxiliaryTurnExecutions: [
+            {
+              invocationId: 'child-routing-guard-1',
+              parentInvocationId: 'parent-supplement-1',
+              executionKind: 'routing_guard',
+            },
+          ],
+          freshness: {
+            kind: 'published_with_unseen',
+            priorFrontierMessageId: 'msg-late',
+            generatedWithUnseen: ['msg-late'],
+            lineageId: 'temporary',
+          },
         },
-      },
-    });
+      }),
+    );
     messageStore.updateExtra(original.id, {
       freshness: {
         kind: 'published_with_unseen',
@@ -440,29 +491,31 @@ describe('GET /api/messages', () => {
         lineageId: original.id,
       },
     });
-    messageStore.append({
-      userId: 'default-user',
-      catId: 'opus',
-      content: 'additive supplement',
-      mentions: [],
-      timestamp: 3000,
-      threadId: 'thread-supplement',
-      replyTo: original.id,
-      extra: {
-        freshness: { kind: 'fresh', priorFrontierMessageId: original.id },
-        turnExecution: {
-          invocationId: 'child-supplement-1',
-          parentInvocationId: 'parent-supplement-1',
-          executionKind: 'freshness_supplement',
+    messageStore.append(
+      canonicalTestMessageInput({
+        userId: 'default-user',
+        catId: 'opus',
+        content: 'additive supplement',
+        mentions: [],
+        timestamp: 3000,
+        threadId: 'thread-supplement',
+        replyTo: original.id,
+        extra: {
+          freshness: { kind: 'fresh', priorFrontierMessageId: original.id },
+          turnExecution: {
+            invocationId: 'child-supplement-1',
+            parentInvocationId: 'parent-supplement-1',
+            executionKind: 'freshness_supplement',
+          },
+          supplement: {
+            lineageId: original.id,
+            supplementId: `f254-supplement:${original.id}:1`,
+            seq: 1,
+            originalMessageId: original.id,
+          },
         },
-        supplement: {
-          lineageId: original.id,
-          supplementId: `f254-supplement:${original.id}:1`,
-          seq: 1,
-          originalMessageId: original.id,
-        },
-      },
-    });
+      }),
+    );
     const offered = await freshnessClosureStore.offerSupplement({
       lineageId: original.id,
       originalMessageId: original.id,
@@ -529,14 +582,16 @@ describe('GET /api/messages', () => {
   });
 
   it('ADR-042 repairs a historically committed decline control output during hydration', async () => {
-    const original = messageStore.append({
-      userId: 'default-user',
-      catId: 'opus',
-      content: 'published original before protocol repair',
-      mentions: [],
-      timestamp: 2000,
-      threadId: 'thread-supplement-control-recovery',
-    });
+    const original = messageStore.append(
+      canonicalTestMessageInput({
+        userId: 'default-user',
+        catId: 'opus',
+        content: 'published original before protocol repair',
+        mentions: [],
+        timestamp: 2000,
+        threadId: 'thread-supplement-control-recovery',
+      }),
+    );
     const offered = await freshnessClosureStore.offerSupplement({
       lineageId: original.id,
       originalMessageId: original.id,
@@ -552,23 +607,25 @@ describe('GET /api/messages', () => {
       invocationId: 'inv-supplement-control-recovery',
       now: 2200,
     });
-    const leaked = messageStore.append({
-      userId: 'default-user',
-      catId: 'opus',
-      content: '<!-- cat-cafe:supplement-decline -->\n\nStop hook feedback must stay internal.',
-      mentions: [],
-      timestamp: 2300,
-      threadId: 'thread-supplement-control-recovery',
-      replyTo: original.id,
-      extra: {
-        supplement: {
-          lineageId: original.id,
-          supplementId: claimed.id,
-          seq: 1,
-          originalMessageId: original.id,
+    const leaked = messageStore.append(
+      canonicalTestMessageInput({
+        userId: 'default-user',
+        catId: 'opus',
+        content: '<!-- cat-cafe:supplement-decline -->\n\nStop hook feedback must stay internal.',
+        mentions: [],
+        timestamp: 2300,
+        threadId: 'thread-supplement-control-recovery',
+        replyTo: original.id,
+        extra: {
+          supplement: {
+            lineageId: original.id,
+            supplementId: claimed.id,
+            seq: 1,
+            originalMessageId: original.id,
+          },
         },
-      },
-    });
+      }),
+    );
     await freshnessClosureStore.commitSupplement(claimed.id, {
       invocationId: 'inv-supplement-control-recovery',
       messageId: leaked.id,
@@ -617,18 +674,20 @@ describe('GET /api/messages', () => {
         terminalKind: 'transcript_done',
       },
     };
-    messageStore.append({
-      userId: 'default-user',
-      catId: 'fable-5',
-      content: '买到了，正在回家。',
-      mentions: [],
-      timestamp: 2000,
-      threadId: 'thread-recovery',
-      extra: {
-        stream: { invocationId: 'inv-recovery-1', turnInvocationId: 'inv-recovery-1' },
-        recovery,
-      },
-    });
+    messageStore.append(
+      canonicalTestMessageInput({
+        userId: 'default-user',
+        catId: 'fable-5',
+        content: '买到了，正在回家。',
+        mentions: [],
+        timestamp: 2000,
+        threadId: 'thread-recovery',
+        extra: {
+          stream: { invocationId: 'inv-recovery-1', turnInvocationId: 'inv-recovery-1' },
+          recovery,
+        },
+      }),
+    );
 
     const res = await app.inject({ method: 'GET', url: '/api/messages?threadId=thread-recovery' });
     const body = JSON.parse(res.body);
@@ -646,39 +705,77 @@ describe('GET /api/messages', () => {
   });
 
   it('maps canonical system messages to type=system', async () => {
-    messageStore.append({
-      userId: 'system',
-      catId: 'system',
-      content: '🐺 狼人请睁眼',
-      mentions: [],
-      timestamp: 1000,
-    });
+    messageStore.append(
+      canonicalTestMessageInput({
+        userId: 'system',
+        catId: 'system',
+        content: '🐺 狼人请睁眼',
+        mentions: [],
+        timestamp: 1000,
+      }),
+    );
 
     const res = await app.inject({ method: 'GET', url: '/api/messages' });
     const body = JSON.parse(res.body);
 
     assert.equal(body.messages.length, 1);
     assert.equal(body.messages[0].type, 'system');
-    assert.equal(body.messages[0].catId, 'system');
+    assert.equal(body.messages[0].catId, null);
+    assert.deepEqual(body.messages[0].from, { kind: 'system', service: 'test-fixture' });
+  });
+
+  it('hydrates lifecycle delivery failures as error system messages', async () => {
+    messageStore.append(
+      canonicalTestMessageInput({
+        userId: 'system',
+        catId: 'system',
+        content: '没有可用成员可以处理这条消息。',
+        mentions: [],
+        timestamp: 100,
+        threadId: 'thread-delivery-failure',
+        lifecycle: {
+          kind: 'delivery_failure',
+          orderKey: '100:source-1:failure',
+          from: { kind: 'system', service: 'message_delivery' },
+          status: 'failed',
+          sourceEntryId: 'entry-1',
+          inputMessageId: 'source-1',
+          requestedTargets: [],
+          reason: 'no_available_target',
+          createdAt: 100,
+        },
+      }),
+    );
+
+    const res = await app.inject({ method: 'GET', url: '/api/messages?threadId=thread-delivery-failure' });
+    const body = JSON.parse(res.body);
+
+    assert.equal(body.messages.length, 1);
+    assert.equal(body.messages[0].type, 'system');
+    assert.equal(body.messages[0].variant, 'error');
   });
 
   it('returns persisted system error messages with catId=null as type=system', async () => {
-    messageStore.append({
-      userId: 'default-user',
-      catId: null,
-      content: 'ping gemini',
-      mentions: ['gemini'],
-      timestamp: 1000,
-      threadId: 'thread-1',
-    });
-    messageStore.append({
-      userId: 'system',
-      catId: null,
-      content: 'Error: stream_idle_stall: Gemini stopped responding',
-      mentions: [],
-      timestamp: 2000,
-      threadId: 'thread-1',
-    });
+    messageStore.append(
+      canonicalTestMessageInput({
+        userId: 'default-user',
+        catId: null,
+        content: 'ping gemini',
+        mentions: ['gemini'],
+        timestamp: 1000,
+        threadId: 'thread-1',
+      }),
+    );
+    messageStore.append(
+      canonicalTestMessageInput({
+        userId: 'system',
+        catId: null,
+        content: 'Error: stream_idle_stall: Gemini stopped responding',
+        mentions: [],
+        timestamp: 2000,
+        threadId: 'thread-1',
+      }),
+    );
 
     const res = await app.inject({ method: 'GET', url: '/api/messages?threadId=thread-1' });
     const body = JSON.parse(res.body);
@@ -690,20 +787,22 @@ describe('GET /api/messages', () => {
   });
 
   it('keeps persisted source-backed notices on the connector path even when userId=system', async () => {
-    messageStore.append({
-      userId: 'system',
-      catId: null,
-      content: '想交接给 @codex？把它单独放到新起一行开头，才能触发交接。',
-      mentions: [],
-      timestamp: 2500,
-      threadId: 'thread-connector-notice',
-      source: {
-        connector: 'inline-mention-hint',
-        label: '路由提示',
-        icon: '💡',
-        meta: { presentation: 'system_notice', noticeTone: 'info' },
-      },
-    });
+    messageStore.append(
+      canonicalTestMessageInput({
+        userId: 'system',
+        catId: null,
+        content: '想交接给 @codex？把它单独放到新起一行开头，才能触发交接。',
+        mentions: [],
+        timestamp: 2500,
+        threadId: 'thread-connector-notice',
+        source: {
+          connector: 'inline-mention-hint',
+          label: '路由提示',
+          icon: '💡',
+          meta: { presentation: 'system_notice', noticeTone: 'info' },
+        },
+      }),
+    );
 
     const res = await app.inject({
       method: 'GET',
@@ -719,18 +818,20 @@ describe('GET /api/messages', () => {
   });
 
   it('maps a2a_routing system messages to type=system with extra.systemKind', async () => {
-    messageStore.append({
-      userId: 'system',
-      catId: null,
-      content: '布偶猫 → 缅因猫',
-      mentions: [],
-      timestamp: 3000,
-      threadId: 'thread-routing',
-      extra: {
-        systemKind: 'a2a_routing',
-        a2aRouting: { fromCatId: 'codex', targetCatId: 'opus-47', invocationId: 'inv-routing' },
-      },
-    });
+    messageStore.append(
+      canonicalTestMessageInput({
+        userId: 'system',
+        catId: null,
+        content: '布偶猫 → 缅因猫',
+        mentions: [],
+        timestamp: 3000,
+        threadId: 'thread-routing',
+        extra: {
+          systemKind: 'a2a_routing',
+          a2aRouting: { fromCatId: 'codex', targetCatId: 'opus-47', invocationId: 'inv-routing' },
+        },
+      }),
+    );
 
     const res = await app.inject({
       method: 'GET',
@@ -752,13 +853,15 @@ describe('GET /api/messages', () => {
 
   it('respects limit parameter', async () => {
     for (let i = 0; i < 10; i++) {
-      messageStore.append({
-        userId: 'default-user',
-        catId: null,
-        content: `msg ${i}`,
-        mentions: [],
-        timestamp: 1000 + i,
-      });
+      messageStore.append(
+        canonicalTestMessageInput({
+          userId: 'default-user',
+          catId: null,
+          content: `msg ${i}`,
+          mentions: [],
+          timestamp: 1000 + i,
+        }),
+      );
     }
 
     const res = await app.inject({
@@ -772,13 +875,15 @@ describe('GET /api/messages', () => {
 
   it('supports cursor pagination with before', async () => {
     for (let i = 0; i < 5; i++) {
-      messageStore.append({
-        userId: 'default-user',
-        catId: null,
-        content: `msg ${i}`,
-        mentions: [],
-        timestamp: 1000 + i * 100,
-      });
+      messageStore.append(
+        canonicalTestMessageInput({
+          userId: 'default-user',
+          catId: null,
+          content: `msg ${i}`,
+          mentions: [],
+          timestamp: 1000 + i * 100,
+        }),
+      );
     }
 
     // Get messages before timestamp 1300 (should get msg 0, 1, 2)
@@ -796,13 +901,15 @@ describe('GET /api/messages', () => {
   it('pagination covers all messages without gaps (regression: slice direction)', async () => {
     // Insert 6 messages with distinct timestamps
     for (let i = 0; i < 6; i++) {
-      messageStore.append({
-        userId: 'default-user',
-        catId: null,
-        content: `msg ${i}`,
-        mentions: [],
-        timestamp: 1000 + i * 100,
-      });
+      messageStore.append(
+        canonicalTestMessageInput({
+          userId: 'default-user',
+          catId: null,
+          content: `msg ${i}`,
+          mentions: [],
+          timestamp: 1000 + i * 100,
+        }),
+      );
     }
 
     // Page 1: most recent 2
@@ -849,13 +956,15 @@ describe('GET /api/messages', () => {
   it('composite cursor handles same-timestamp messages without gaps', async () => {
     // All messages at the same timestamp (simulates burst writes)
     for (let i = 0; i < 4; i++) {
-      messageStore.append({
-        userId: 'default-user',
-        catId: null,
-        content: `burst ${i}`,
-        mentions: [],
-        timestamp: 5000, // all same timestamp
-      });
+      messageStore.append(
+        canonicalTestMessageInput({
+          userId: 'default-user',
+          catId: null,
+          content: `burst ${i}`,
+          mentions: [],
+          timestamp: 5000, // all same timestamp
+        }),
+      );
     }
 
     // First page: most recent 2
@@ -884,17 +993,19 @@ describe('GET /api/messages', () => {
   });
 
   it('returns toolEvents when message has them (缅因猫 R2 P1-2)', async () => {
-    messageStore.append({
-      userId: 'default-user',
-      catId: 'opus',
-      content: 'I read the file',
-      mentions: [],
-      timestamp: 3000,
-      toolEvents: [
-        { id: 'tool-1', type: 'tool_use', label: 'opus → Read', detail: '{"path":"/a.ts"}', timestamp: 3000 },
-        { id: 'toolr-1', type: 'tool_result', label: 'opus ← result', detail: 'file content...', timestamp: 3001 },
-      ],
-    });
+    messageStore.append(
+      canonicalTestMessageInput({
+        userId: 'default-user',
+        catId: 'opus',
+        content: 'I read the file',
+        mentions: [],
+        timestamp: 3000,
+        toolEvents: [
+          { id: 'tool-1', type: 'tool_use', label: 'opus → Read', detail: '{"path":"/a.ts"}', timestamp: 3000 },
+          { id: 'toolr-1', type: 'tool_result', label: 'opus ← result', detail: 'file content...', timestamp: 3001 },
+        ],
+      }),
+    );
 
     const res = await app.inject({ method: 'GET', url: '/api/messages' });
     const body = JSON.parse(res.body);
@@ -909,13 +1020,15 @@ describe('GET /api/messages', () => {
   });
 
   it('omits toolEvents when message has none', async () => {
-    messageStore.append({
-      userId: 'default-user',
-      catId: 'opus',
-      content: 'just text',
-      mentions: [],
-      timestamp: 4000,
-    });
+    messageStore.append(
+      canonicalTestMessageInput({
+        userId: 'default-user',
+        catId: 'opus',
+        content: 'just text',
+        mentions: [],
+        timestamp: 4000,
+      }),
+    );
 
     const res = await app.inject({ method: 'GET', url: '/api/messages' });
     const body = JSON.parse(res.body);
@@ -924,19 +1037,21 @@ describe('GET /api/messages', () => {
   });
 
   it('preserves stream invocation identity for persisted assistant messages', async () => {
-    messageStore.append({
-      userId: 'default-user',
-      catId: 'opus',
-      content: 'persisted stream bubble',
-      mentions: [],
-      timestamp: 4500,
-      origin: 'stream',
-      extra: {
-        stream: {
-          invocationId: 'inv-stream-1',
+    messageStore.append(
+      canonicalTestMessageInput({
+        userId: 'default-user',
+        catId: 'opus',
+        content: 'persisted stream bubble',
+        mentions: [],
+        timestamp: 4500,
+        origin: 'stream',
+        extra: {
+          stream: {
+            invocationId: 'inv-stream-1',
+          },
         },
-      },
-    });
+      }),
+    );
 
     const res = await app.inject({ method: 'GET', url: '/api/messages' });
     const body = JSON.parse(res.body);
@@ -945,20 +1060,24 @@ describe('GET /api/messages', () => {
   });
 
   it('filters by userId', async () => {
-    messageStore.append({
-      userId: 'alice',
-      catId: null,
-      content: 'alice msg',
-      mentions: [],
-      timestamp: 1000,
-    });
-    messageStore.append({
-      userId: 'bob',
-      catId: null,
-      content: 'bob msg',
-      mentions: [],
-      timestamp: 2000,
-    });
+    messageStore.append(
+      canonicalTestMessageInput({
+        userId: 'alice',
+        catId: null,
+        content: 'alice msg',
+        mentions: [],
+        timestamp: 1000,
+      }),
+    );
+    messageStore.append(
+      canonicalTestMessageInput({
+        userId: 'bob',
+        catId: null,
+        content: 'bob msg',
+        mentions: [],
+        timestamp: 2000,
+      }),
+    );
 
     const res = await app.inject({
       method: 'GET',
@@ -973,19 +1092,21 @@ describe('GET /api/messages', () => {
   // ── F97: Connector message type mapping ──────────────────────────
 
   it('maps message with source field to type=connector', async () => {
-    messageStore.append({
-      userId: 'default-user',
-      catId: null,
-      content: 'GitHub Review 通知',
-      mentions: ['opus'],
-      timestamp: 9000,
-      source: {
-        connector: 'github-review',
-        label: 'GitHub Review',
-        icon: '🔔',
-        url: 'https://github.com/org/repo/pull/42',
-      },
-    });
+    messageStore.append(
+      canonicalTestMessageInput({
+        userId: 'default-user',
+        catId: null,
+        content: 'GitHub Review 通知',
+        mentions: ['opus'],
+        timestamp: 9000,
+        source: {
+          connector: 'github-review',
+          label: 'GitHub Review',
+          icon: '🔔',
+          url: 'https://github.com/org/repo/pull/42',
+        },
+      }),
+    );
 
     const res = await app.inject({ method: 'GET', url: '/api/messages' });
     const body = JSON.parse(res.body);
@@ -1001,20 +1122,22 @@ describe('GET /api/messages', () => {
   });
 
   it('includes source.meta in API response (F098-C: needed for direction parsing)', async () => {
-    messageStore.append({
-      userId: 'default-user',
-      catId: null,
-      content: 'review notification',
-      mentions: ['opus'],
-      timestamp: 9002,
-      source: {
-        connector: 'github-review',
-        label: 'GitHub Review',
-        icon: '🔔',
-        url: 'https://github.com/org/repo/pull/42',
-        meta: { targets: ['codex', 'gpt52'], initiator: 'opus' },
-      },
-    });
+    messageStore.append(
+      canonicalTestMessageInput({
+        userId: 'default-user',
+        catId: null,
+        content: 'review notification',
+        mentions: ['opus'],
+        timestamp: 9002,
+        source: {
+          connector: 'github-review',
+          label: 'GitHub Review',
+          icon: '🔔',
+          url: 'https://github.com/org/repo/pull/42',
+          meta: { targets: ['codex', 'gpt52'], initiator: 'opus' },
+        },
+      }),
+    );
 
     const res = await app.inject({ method: 'GET', url: '/api/messages' });
     const body = JSON.parse(res.body);
@@ -1030,14 +1153,16 @@ describe('GET /api/messages', () => {
   });
 
   it('serializes deliveredAt when present (F098-D P3 regression)', async () => {
-    const stored = messageStore.append({
-      userId: 'default-user',
-      catId: null,
-      content: 'queued message',
-      mentions: [],
-      timestamp: 5000,
-      deliveryStatus: 'queued',
-    });
+    const stored = messageStore.append(
+      canonicalTestMessageInput({
+        userId: 'default-user',
+        catId: null,
+        content: 'queued message',
+        mentions: [],
+        timestamp: 5000,
+        deliveryStatus: 'queued',
+      }),
+    );
     messageStore.markDelivered(stored.id, 12000);
 
     const res = await app.inject({ method: 'GET', url: '/api/messages' });
@@ -1047,13 +1172,15 @@ describe('GET /api/messages', () => {
   });
 
   it('omits deliveredAt when not set (F098-D P3 regression)', async () => {
-    messageStore.append({
-      userId: 'default-user',
-      catId: null,
-      content: 'immediate message',
-      mentions: [],
-      timestamp: 6000,
-    });
+    messageStore.append(
+      canonicalTestMessageInput({
+        userId: 'default-user',
+        catId: null,
+        content: 'immediate message',
+        mentions: [],
+        timestamp: 6000,
+      }),
+    );
 
     const res = await app.inject({ method: 'GET', url: '/api/messages' });
     const body = JSON.parse(res.body);
@@ -1062,15 +1189,17 @@ describe('GET /api/messages', () => {
   });
 
   it('serializes extra.targetCats when present (F098-C1 regression)', async () => {
-    messageStore.append({
-      userId: 'default-user',
-      catId: 'opus',
-      content: 'review done',
-      mentions: ['codex'],
-      origin: 'callback',
-      timestamp: 7000,
-      extra: { targetCats: ['codex', 'gpt52'] },
-    });
+    messageStore.append(
+      canonicalTestMessageInput({
+        userId: 'default-user',
+        catId: 'opus',
+        content: 'review done',
+        mentions: ['codex'],
+        origin: 'callback',
+        timestamp: 7000,
+        extra: { targetCats: ['codex', 'gpt52'] },
+      }),
+    );
 
     const res = await app.inject({ method: 'GET', url: '/api/messages' });
     const body = JSON.parse(res.body);
@@ -1083,13 +1212,15 @@ describe('GET /api/messages', () => {
   });
 
   it('message without source and without catId is type=user', async () => {
-    messageStore.append({
-      userId: 'default-user',
-      catId: null,
-      content: 'normal user message',
-      mentions: [],
-      timestamp: 9001,
-    });
+    messageStore.append(
+      canonicalTestMessageInput({
+        userId: 'default-user',
+        catId: null,
+        content: 'normal user message',
+        mentions: [],
+        timestamp: 9001,
+      }),
+    );
 
     const res = await app.inject({ method: 'GET', url: '/api/messages' });
     const body = JSON.parse(res.body);
@@ -1140,12 +1271,12 @@ describe('POST /api/messages/:messageId/queue-targets/:targetCatId/retry', () =>
       queueProcessor: {
         retryFailedTarget: async (...args) => {
           retryCalls.push(args);
-          const commitAuthority = args[5];
+          const commitAuthority = args[6];
           if (typeof commitAuthority === 'function') {
             const committed = await commitAuthority([]);
             if (committed.outcome !== 'committed') return committed;
           }
-          return { outcome: 'retried', attemptId: 'entry-retry:opus:2' };
+          return { outcome: 'retried', entryId: 'entry-retry-fresh', attemptId: 'entry-retry-fresh:opus:2' };
         },
       },
       retryAuthorityPreflight: {
@@ -1170,32 +1301,34 @@ describe('POST /api/messages/:messageId/queue-targets/:targetCatId/retry', () =>
   });
 
   it('retries the immutable source message target through its failed attempt fence', async () => {
-    const queued = messageStore.append({
-      userId: 'default-user',
-      catId: null,
-      content: 'keep this exact authored text',
-      mentions: ['opus'],
-      timestamp: 1_000,
-      threadId: 'thread-f1308',
-      deliveryStatus: 'queued',
-      queueCustody: makeQueuedMessageCustody({
-        entryId: 'entry-retry',
-        allTargetCats: ['opus'],
-        pendingTargetCats: ['opus'],
-        failedByCatIds: ['opus'],
-        targetAttempts: [
-          {
-            id: 'entry-retry:opus:1',
-            targetCatId: 'opus',
-            sequence: 1,
-            state: 'failed',
-            createdAt: 1_000,
-            updatedAt: 1_100,
-            terminalReason: 'invocation_failed',
-          },
-        ],
+    const queued = messageStore.append(
+      canonicalTestMessageInput({
+        userId: 'default-user',
+        catId: null,
+        content: 'keep this exact authored text',
+        mentions: ['opus'],
+        timestamp: 1_000,
+        threadId: 'thread-f1308',
+        deliveryStatus: 'queued',
+        queueCustody: makeQueuedMessageCustody({
+          entryId: 'entry-retry',
+          allTargetCats: ['opus'],
+          pendingTargetCats: ['opus'],
+          failedByCatIds: ['opus'],
+          targetAttempts: [
+            {
+              id: 'entry-retry:opus:1',
+              targetCatId: 'opus',
+              sequence: 1,
+              state: 'failed',
+              createdAt: 1_000,
+              updatedAt: 1_100,
+              terminalReason: 'invocation_failed',
+            },
+          ],
+        }),
       }),
-    });
+    );
 
     const response = await app.inject({
       method: 'POST',
@@ -1207,18 +1340,19 @@ describe('POST /api/messages/:messageId/queue-targets/:targetCatId/retry', () =>
     assert.equal(response.statusCode, 202);
     assert.deepEqual(JSON.parse(response.body), {
       status: 'retry_queued',
-      entryId: 'entry-retry',
+      entryId: 'entry-retry-fresh',
       targetCatId: 'opus',
-      attemptId: 'entry-retry:opus:2',
+      attemptId: 'entry-retry-fresh:opus:2',
     });
-    assert.deepEqual(retryCalls[0].slice(0, 5), [
+    assert.deepEqual(retryCalls[0].slice(0, 6), [
       'thread-f1308',
       'default-user',
       'entry-retry',
+      queued.id,
       'opus',
       'entry-retry:opus:1',
     ]);
-    assert.equal(typeof retryCalls[0][5], 'function');
+    assert.equal(typeof retryCalls[0][6], 'function');
     assert.equal(authorityCalls.length, 1);
     assert.equal(commitCalls.length, 1);
     assert.equal(authorityCalls[0].message.id, queued.id);
@@ -1228,33 +1362,35 @@ describe('POST /api/messages/:messageId/queue-targets/:targetCatId/retry', () =>
   });
 
   it('rejects stale authority before Queue or custody retry mutation', async () => {
-    const queued = messageStore.append({
-      userId: 'default-user',
-      catId: 'system',
-      content: 'historical wait outcome',
-      mentions: ['opus'],
-      timestamp: 1_000,
-      threadId: 'thread-stale-wait',
-      deliveryStatus: 'queued',
-      source: { connector: 'github-wait', meta: { waitContinuationCarrier: { v: 1 } } },
-      queueCustody: makeQueuedMessageCustody({
-        entryId: 'entry-stale-wait',
-        allTargetCats: ['opus'],
-        pendingTargetCats: ['opus'],
-        failedByCatIds: ['opus'],
-        targetAttempts: [
-          {
-            id: 'entry-stale-wait:opus:1',
-            targetCatId: 'opus',
-            sequence: 1,
-            state: 'failed',
-            createdAt: 1_000,
-            updatedAt: 1_100,
-            terminalReason: 'invocation_failed',
-          },
-        ],
+    const queued = messageStore.append(
+      canonicalTestMessageInput({
+        userId: 'default-user',
+        catId: 'system',
+        content: 'historical wait outcome',
+        mentions: ['opus'],
+        timestamp: 1_000,
+        threadId: 'thread-stale-wait',
+        deliveryStatus: 'queued',
+        source: { connector: 'github-wait', meta: { waitContinuationCarrier: { v: 1 } } },
+        queueCustody: makeQueuedMessageCustody({
+          entryId: 'entry-stale-wait',
+          allTargetCats: ['opus'],
+          pendingTargetCats: ['opus'],
+          failedByCatIds: ['opus'],
+          targetAttempts: [
+            {
+              id: 'entry-stale-wait:opus:1',
+              targetCatId: 'opus',
+              sequence: 1,
+              state: 'failed',
+              createdAt: 1_000,
+              updatedAt: 1_100,
+              terminalReason: 'invocation_failed',
+            },
+          ],
+        }),
       }),
-    });
+    );
     authorityDecision = { ok: false, reason: 'stale_generation' };
 
     const response = await app.inject({
@@ -1275,32 +1411,34 @@ describe('POST /api/messages/:messageId/queue-targets/:targetCatId/retry', () =>
   });
 
   it('rejects a persisted source parse failure before Queue reopen or custody append', async () => {
-    const queued = messageStore.append({
-      userId: 'default-user',
-      catId: null,
-      content: 'legacy connector source must not be reclassified as user-authored work',
-      mentions: ['opus'],
-      timestamp: 1_000,
-      threadId: 'thread-invalid-source',
-      deliveryStatus: 'queued',
-      queueCustody: makeQueuedMessageCustody({
-        entryId: 'entry-invalid-source',
-        allTargetCats: ['opus'],
-        pendingTargetCats: ['opus'],
-        failedByCatIds: ['opus'],
-        targetAttempts: [
-          {
-            id: 'entry-invalid-source:opus:1',
-            targetCatId: 'opus',
-            sequence: 1,
-            state: 'failed',
-            createdAt: 1_000,
-            updatedAt: 1_100,
-            terminalReason: 'invocation_failed',
-          },
-        ],
+    const queued = messageStore.append(
+      canonicalTestMessageInput({
+        userId: 'default-user',
+        catId: null,
+        content: 'legacy connector source must not be reclassified as user-authored work',
+        mentions: ['opus'],
+        timestamp: 1_000,
+        threadId: 'thread-invalid-source',
+        deliveryStatus: 'queued',
+        queueCustody: makeQueuedMessageCustody({
+          entryId: 'entry-invalid-source',
+          allTargetCats: ['opus'],
+          pendingTargetCats: ['opus'],
+          failedByCatIds: ['opus'],
+          targetAttempts: [
+            {
+              id: 'entry-invalid-source:opus:1',
+              targetCatId: 'opus',
+              sequence: 1,
+              state: 'failed',
+              createdAt: 1_000,
+              updatedAt: 1_100,
+              terminalReason: 'invocation_failed',
+            },
+          ],
+        }),
       }),
-    });
+    );
     messageStore.getById(queued.id).sourceParseFailure = true;
     authorityImplementation = new WaitContinuationRetryPreflight({
       taskStore: {
@@ -1331,33 +1469,35 @@ describe('POST /api/messages/:messageId/queue-targets/:targetCatId/retry', () =>
   });
 
   it('rejects authority that changes after route preflight at the retry mutation boundary', async () => {
-    const queued = messageStore.append({
-      userId: 'default-user',
-      catId: 'system',
-      content: 'authority changes before retry mutation',
-      mentions: ['opus'],
-      timestamp: 1_000,
-      threadId: 'thread-racing-wait',
-      deliveryStatus: 'queued',
-      source: { connector: 'github-wait', meta: { waitContinuationCarrier: { v: 1 } } },
-      queueCustody: makeQueuedMessageCustody({
-        entryId: 'entry-racing-wait',
-        allTargetCats: ['opus'],
-        pendingTargetCats: ['opus'],
-        failedByCatIds: ['opus'],
-        targetAttempts: [
-          {
-            id: 'entry-racing-wait:opus:1',
-            targetCatId: 'opus',
-            sequence: 1,
-            state: 'failed',
-            createdAt: 1_000,
-            updatedAt: 1_100,
-            terminalReason: 'invocation_failed',
-          },
-        ],
+    const queued = messageStore.append(
+      canonicalTestMessageInput({
+        userId: 'default-user',
+        catId: 'system',
+        content: 'authority changes before retry mutation',
+        mentions: ['opus'],
+        timestamp: 1_000,
+        threadId: 'thread-racing-wait',
+        deliveryStatus: 'queued',
+        source: { connector: 'github-wait', meta: { waitContinuationCarrier: { v: 1 } } },
+        queueCustody: makeQueuedMessageCustody({
+          entryId: 'entry-racing-wait',
+          allTargetCats: ['opus'],
+          pendingTargetCats: ['opus'],
+          failedByCatIds: ['opus'],
+          targetAttempts: [
+            {
+              id: 'entry-racing-wait:opus:1',
+              targetCatId: 'opus',
+              sequence: 1,
+              state: 'failed',
+              createdAt: 1_000,
+              updatedAt: 1_100,
+              terminalReason: 'invocation_failed',
+            },
+          ],
+        }),
       }),
-    });
+    );
     authorityDecision = { ok: true, kind: 'wait_containing_task' };
     commitDecision = { outcome: 'authority_stale', reason: 'outcome_mismatch' };
 
@@ -1380,43 +1520,45 @@ describe('POST /api/messages/:messageId/queue-targets/:targetCatId/retry', () =>
   });
 
   it('resolves a cross-thread failed target to its target-thread carrier before retrying', async () => {
-    const queued = messageStore.append({
-      userId: 'default-user',
-      catId: 'opus',
-      content: 'retry the target-thread carrier',
-      mentions: ['codex'],
-      timestamp: 1_000,
-      threadId: 'thread-source',
-      deliveryStatus: 'queued',
-      queueCustody: makeQueuedMessageCustody({
-        entryId: 'cross-thread:source-message',
-        receiptScope: 'cross_thread_delivery',
-        allTargetCats: ['codex'],
-        pendingTargetCats: ['codex'],
-        failedByCatIds: ['codex'],
-        carrierByTargetCatId: {
-          codex: {
-            entryId: 'target-carrier-codex',
-            source: 'agent',
-            sourceCategory: 'a2a',
-            a2aTriggerMessageId: 'source-message',
-            autoExecute: true,
-            createdAt: 1_000,
+    const queued = messageStore.append(
+      canonicalTestMessageInput({
+        userId: 'default-user',
+        catId: 'opus',
+        content: 'retry the target-thread carrier',
+        mentions: ['codex'],
+        timestamp: 1_000,
+        threadId: 'thread-source',
+        deliveryStatus: 'queued',
+        queueCustody: makeQueuedMessageCustody({
+          entryId: 'cross-thread:source-message',
+          receiptScope: 'cross_thread_delivery',
+          allTargetCats: ['codex'],
+          pendingTargetCats: ['codex'],
+          failedByCatIds: ['codex'],
+          carrierByTargetCatId: {
+            codex: {
+              entryId: 'target-carrier-codex',
+              source: 'agent',
+              sourceCategory: 'a2a',
+              a2aTriggerMessageId: 'source-message',
+              autoExecute: true,
+              createdAt: 1_000,
+            },
           },
-        },
-        targetAttempts: [
-          {
-            id: 'cross-thread:source-message:codex:1',
-            targetCatId: 'codex',
-            sequence: 1,
-            state: 'failed',
-            createdAt: 1_000,
-            updatedAt: 1_100,
-            terminalReason: 'invocation_failed',
-          },
-        ],
+          targetAttempts: [
+            {
+              id: 'cross-thread:source-message:codex:1',
+              targetCatId: 'codex',
+              sequence: 1,
+              state: 'failed',
+              createdAt: 1_000,
+              updatedAt: 1_100,
+              terminalReason: 'invocation_failed',
+            },
+          ],
+        }),
       }),
-    });
+    );
     invocationQueue.getEntrySnapshotForUserById = (userId, entryId) =>
       userId === 'default-user' && entryId === 'target-carrier-codex'
         ? { id: entryId, threadId: 'thread-target', userId }
@@ -1430,14 +1572,15 @@ describe('POST /api/messages/:messageId/queue-targets/:targetCatId/retry', () =>
     });
 
     assert.equal(response.statusCode, 202);
-    assert.deepEqual(retryCalls[0].slice(0, 5), [
+    assert.deepEqual(retryCalls[0].slice(0, 6), [
       'thread-target',
       'default-user',
       'target-carrier-codex',
+      queued.id,
       'codex',
       'cross-thread:source-message:codex:1',
     ]);
-    assert.equal(typeof retryCalls[0][5], 'function');
+    assert.equal(typeof retryCalls[0][6], 'function');
   });
 });
 
@@ -1473,20 +1616,24 @@ describe('GET /api/messages — summary NOT in timeline (clowder-ai#343)', () =>
   });
 
   it('summaries exist in store but do NOT appear in timeline', async () => {
-    messageStore.append({
-      userId: 'default-user',
-      catId: null,
-      content: 'hello',
-      mentions: [],
-      timestamp: 1000,
-    });
-    messageStore.append({
-      userId: 'default-user',
-      catId: 'opus',
-      content: 'hi there',
-      mentions: [],
-      timestamp: 2000,
-    });
+    messageStore.append(
+      canonicalTestMessageInput({
+        userId: 'default-user',
+        catId: null,
+        content: 'hello',
+        mentions: [],
+        timestamp: 1000,
+      }),
+    );
+    messageStore.append(
+      canonicalTestMessageInput({
+        userId: 'default-user',
+        catId: 'opus',
+        content: 'hi there',
+        mentions: [],
+        timestamp: 2000,
+      }),
+    );
     summaryStore.create({
       threadId: 'default',
       topic: '测试纪要',
@@ -1538,13 +1685,15 @@ describe('GET /api/messages summary + pagination contract', () => {
   // Auto-summary disabled (clowder-ai#343): summaries no longer merged into timeline
   it('timeline does NOT inject summaries (clowder-ai#343)', async () => {
     for (let i = 0; i < 5; i++) {
-      messageStore.append({
-        userId: 'default-user',
-        catId: null,
-        content: `msg ${i}`,
-        mentions: [],
-        timestamp: 1000 + i * 100,
-      });
+      messageStore.append(
+        canonicalTestMessageInput({
+          userId: 'default-user',
+          catId: null,
+          content: `msg ${i}`,
+          mentions: [],
+          timestamp: 1000 + i * 100,
+        }),
+      );
     }
     summaryStore.create({
       threadId: 'default',
@@ -1737,30 +1886,78 @@ describe('GET /api/messages timeline visibility policy', () => {
     if (app) await app.close();
   });
 
+  it('does not publish a queued user source record before admission', async () => {
+    messageStore.append(
+      canonicalTestMessageInput({
+        userId: 'default-user',
+        catId: null,
+        content: 'still waiting in Queue',
+        mentions: ['opus'],
+        timestamp: 900,
+        threadId: 'thread-unadmitted-source',
+        deliveryStatus: 'queued',
+        queueCustody: makeQueuedMessageCustody({
+          ownerUserId: 'default-user',
+          entryId: 'entry-unadmitted-source',
+          allTargetCats: ['opus'],
+          pendingTargetCats: ['opus'],
+        }),
+      }),
+    );
+    messageStore.append(
+      canonicalTestMessageInput({
+        userId: 'default-user',
+        catId: null,
+        content: 'already admitted',
+        mentions: ['opus'],
+        timestamp: 1_000,
+        threadId: 'thread-unadmitted-source',
+      }),
+    );
+
+    const res = await app.inject({
+      method: 'GET',
+      url: '/api/messages?threadId=thread-unadmitted-source',
+      headers: { 'x-cat-cafe-user': 'default-user' },
+    });
+    const body = JSON.parse(res.body);
+
+    assert.deepEqual(
+      body.messages.map((message) => message.content),
+      ['already admitted'],
+    );
+  });
+
   it('preserves typed context_briefing messages in API response', async () => {
-    messageStore.append({
-      userId: 'default-user',
-      catId: null,
-      content: 'user msg',
-      mentions: [],
-      timestamp: 1000,
-    });
-    messageStore.append({
-      userId: 'system',
-      catId: null,
-      content: 'briefing nav',
-      mentions: [],
-      timestamp: 2000,
-      origin: 'briefing',
-      extra: { systemKind: 'context_briefing' },
-    });
-    messageStore.append({
-      userId: 'default-user',
-      catId: 'opus',
-      content: 'cat reply',
-      mentions: [],
-      timestamp: 3000,
-    });
+    messageStore.append(
+      canonicalTestMessageInput({
+        userId: 'default-user',
+        catId: null,
+        content: 'user msg',
+        mentions: [],
+        timestamp: 1000,
+      }),
+    );
+    messageStore.append(
+      canonicalTestMessageInput({
+        userId: 'system',
+        catId: null,
+        content: 'briefing nav',
+        mentions: [],
+        timestamp: 2000,
+        origin: 'briefing',
+        extra: { systemKind: 'context_briefing' },
+      }),
+    );
+    messageStore.append(
+      canonicalTestMessageInput({
+        userId: 'default-user',
+        catId: 'opus',
+        content: 'cat reply',
+        mentions: [],
+        timestamp: 3000,
+      }),
+    );
 
     const res = await app.inject({ method: 'GET', url: '/api/messages' });
     const body = JSON.parse(res.body);
@@ -1772,21 +1969,25 @@ describe('GET /api/messages timeline visibility policy', () => {
   });
 
   it('filters routing-guard-failure connector messages from API response', async () => {
-    messageStore.append({
-      userId: 'default-user',
-      catId: null,
-      content: 'user msg',
-      mentions: [],
-      timestamp: 1000,
-    });
-    messageStore.append({
-      userId: 'system',
-      catId: null,
-      content: 'route guard failed',
-      mentions: [],
-      timestamp: 2000,
-      source: { connector: 'routing-guard-failure', detail: 'test' },
-    });
+    messageStore.append(
+      canonicalTestMessageInput({
+        userId: 'default-user',
+        catId: null,
+        content: 'user msg',
+        mentions: [],
+        timestamp: 1000,
+      }),
+    );
+    messageStore.append(
+      canonicalTestMessageInput({
+        userId: 'system',
+        catId: null,
+        content: 'route guard failed',
+        mentions: [],
+        timestamp: 2000,
+        source: { connector: 'routing-guard-failure', detail: 'test' },
+      }),
+    );
 
     const res = await app.inject({ method: 'GET', url: '/api/messages' });
     const body = JSON.parse(res.body);
@@ -1795,15 +1996,17 @@ describe('GET /api/messages timeline visibility policy', () => {
   });
 
   it('preserves F233 duty briefing (origin=briefing without systemKind)', async () => {
-    messageStore.append({
-      userId: 'system',
-      catId: null,
-      content: 'duty briefing',
-      mentions: [],
-      timestamp: 1000,
-      origin: 'briefing',
-      extra: { rich: { v: 1, blocks: [{ id: 'duty-briefing', kind: 'card', v: 1, title: 'Duty' }] } },
-    });
+    messageStore.append(
+      canonicalTestMessageInput({
+        userId: 'system',
+        catId: null,
+        content: 'duty briefing',
+        mentions: [],
+        timestamp: 1000,
+        origin: 'briefing',
+        extra: { rich: { v: 1, blocks: [{ id: 'duty-briefing', kind: 'card', v: 1, title: 'Duty' }] } },
+      }),
+    );
 
     const res = await app.inject({ method: 'GET', url: '/api/messages' });
     const body = JSON.parse(res.body);
@@ -1817,37 +2020,43 @@ describe('GET /api/messages timeline visibility policy', () => {
     const threadId = 'thread-internal-cluster';
 
     // Oldest visible message
-    messageStore.append({
-      threadId,
-      userId: 'default-user',
-      catId: null,
-      content: 'oldest visible',
-      mentions: [],
-      timestamp: 100,
-    });
+    messageStore.append(
+      canonicalTestMessageInput({
+        threadId,
+        userId: 'default-user',
+        catId: null,
+        content: 'oldest visible',
+        mentions: [],
+        timestamp: 100,
+      }),
+    );
 
     // 25 consecutive internal route-guard diagnostics
     for (let i = 0; i < 25; i++) {
-      messageStore.append({
-        threadId,
-        userId: 'system',
-        catId: null,
-        content: `route-guard-${i}`,
-        mentions: [],
-        timestamp: 200 + i,
-        source: { connector: 'routing-guard-failure', detail: 'test' },
-      });
+      messageStore.append(
+        canonicalTestMessageInput({
+          threadId,
+          userId: 'system',
+          catId: null,
+          content: `route-guard-${i}`,
+          mentions: [],
+          timestamp: 200 + i,
+          source: { connector: 'routing-guard-failure', detail: 'test' },
+        }),
+      );
     }
 
     // Newest visible message
-    messageStore.append({
-      threadId,
-      userId: 'default-user',
-      catId: null,
-      content: 'newest visible',
-      mentions: [],
-      timestamp: 300,
-    });
+    messageStore.append(
+      canonicalTestMessageInput({
+        threadId,
+        userId: 'default-user',
+        catId: null,
+        content: 'newest visible',
+        mentions: [],
+        timestamp: 300,
+      }),
+    );
 
     // Request with limit=1, cursor before newest visible
     // This forces pagination to walk through the 25 internal messages
@@ -1874,26 +2083,30 @@ describe('GET /api/messages timeline visibility policy', () => {
     const CLUSTER_SIZE = 300;
 
     // Only visible message — buried at the bottom behind the cluster
-    messageStore.append({
-      threadId,
-      userId: 'default-user',
-      catId: null,
-      content: 'buried visible',
-      mentions: [],
-      timestamp: 100,
-    });
+    messageStore.append(
+      canonicalTestMessageInput({
+        threadId,
+        userId: 'default-user',
+        catId: null,
+        content: 'buried visible',
+        mentions: [],
+        timestamp: 100,
+      }),
+    );
 
     // 300 consecutive internal route-guard diagnostics on top
     for (let i = 0; i < CLUSTER_SIZE; i++) {
-      messageStore.append({
-        threadId,
-        userId: 'system',
-        catId: null,
-        content: `route-guard-${i}`,
-        mentions: [],
-        timestamp: 200 + i,
-        source: { connector: 'routing-guard-failure', detail: 'test' },
-      });
+      messageStore.append(
+        canonicalTestMessageInput({
+          threadId,
+          userId: 'system',
+          catId: null,
+          content: `route-guard-${i}`,
+          mentions: [],
+          timestamp: 200 + i,
+          source: { connector: 'routing-guard-failure', detail: 'test' },
+        }),
+      );
     }
 
     // Cursor after all messages — forces scan through the entire cluster
@@ -1913,26 +2126,30 @@ describe('GET /api/messages timeline visibility policy', () => {
   it('returns hasMore=false when store is exhausted after filtering', async () => {
     const threadId = 'thread-exhausted';
 
-    messageStore.append({
-      threadId,
-      userId: 'default-user',
-      catId: null,
-      content: 'only visible',
-      mentions: [],
-      timestamp: 100,
-    });
+    messageStore.append(
+      canonicalTestMessageInput({
+        threadId,
+        userId: 'default-user',
+        catId: null,
+        content: 'only visible',
+        mentions: [],
+        timestamp: 100,
+      }),
+    );
 
     // A few internal route-guard diagnostics after
     for (let i = 0; i < 3; i++) {
-      messageStore.append({
-        threadId,
-        userId: 'system',
-        catId: null,
-        content: `route-guard-${i}`,
-        mentions: [],
-        timestamp: 200 + i,
-        source: { connector: 'routing-guard-failure', detail: 'test' },
-      });
+      messageStore.append(
+        canonicalTestMessageInput({
+          threadId,
+          userId: 'system',
+          catId: null,
+          content: `route-guard-${i}`,
+          mentions: [],
+          timestamp: 200 + i,
+          source: { connector: 'routing-guard-failure', detail: 'test' },
+        }),
+      );
     }
 
     const res = await app.inject({

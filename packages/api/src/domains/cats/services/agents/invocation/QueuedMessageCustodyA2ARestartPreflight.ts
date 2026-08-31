@@ -60,7 +60,7 @@ export async function resolveReplacedA2ATargetCats(
       const groupSources = queuedThreadMessages.filter((candidate) => {
         const candidateCustody = candidate.queueCustody;
         return (
-          candidate.deliveryStatus === 'queued' &&
+          candidate.deliveryStatus !== 'canceled' &&
           candidateCustody?.pendingTargetCats.includes(catId as CatId) === true &&
           candidateCustody.carrierByTargetCatId?.[catId]?.entryId === carrier.entryId
         );

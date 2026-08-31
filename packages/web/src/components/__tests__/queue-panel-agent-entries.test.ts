@@ -42,7 +42,7 @@ const USER_ENTRY: QueueEntry = {
   content: '帮我看看这个 PR',
   messageId: 'm1',
   mergedMessageIds: [],
-  source: 'user',
+  from: { kind: 'user', userId: 'test-user' },
   targetCats: ['opus'],
   intent: 'execute',
   status: 'queued',
@@ -56,13 +56,12 @@ const AGENT_ENTRY: QueueEntry = {
   content: '[Multi-Mention from codex] 帮我确认 API 设计',
   messageId: 'm2',
   mergedMessageIds: [],
-  source: 'agent',
+  from: { kind: 'agent', catId: 'codex' },
   targetCats: ['opus'],
   intent: 'execute',
   status: 'queued',
   createdAt: NOW + 1,
   autoExecute: true,
-  callerCatId: 'codex',
 };
 
 const FRESHNESS_ENTRY: QueueEntry = {
@@ -72,14 +71,13 @@ const FRESHNESS_ENTRY: QueueEntry = {
   content: '你上一轮的回复生成时有来自 GitHub Review 的 1 条新消息尚未被你看到。',
   messageId: null,
   mergedMessageIds: [],
-  source: 'agent',
+  from: { kind: 'agent', catId: 'opus' },
   sourceCategory: 'freshness',
   targetCats: ['opus'],
   intent: 'execute',
   status: 'queued',
   createdAt: NOW + 2,
   autoExecute: true,
-  callerCatId: 'opus',
 };
 
 describe('QueuePanel agent entry rendering (F122B AC-B7)', () => {

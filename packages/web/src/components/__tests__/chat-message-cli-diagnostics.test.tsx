@@ -26,6 +26,8 @@ vi.mock('@/stores/chatStore', () => ({
       currentThreadId: null,
       isLoadingThreads: false,
       messages: chatStoreState.messages,
+      catInvocations: {},
+      threadStates: {},
       globalBubbleDefaults: { thinking: 'collapsed', cliOutput: 'collapsed' },
     }),
   resolveBubbleExpanded: (
@@ -155,6 +157,57 @@ describe('F212 Phase B — ChatMessage routes cliDiagnostics to folded panel', (
     expect(container.querySelector('[data-testid="cli-diagnostics-banner"]')?.textContent).toContain('API 认证失败');
   });
 
+  it('renders a failed lifecycle response inside the owning member bubble', () => {
+    render({
+      id: 'response-owned-failure',
+      from: { kind: 'agent', catId: 'opus' },
+      type: 'assistant',
+      catId: 'opus',
+      content: 'Error: init_failure: CLI crashed',
+      timestamp: 120,
+      lifecycle: {
+        kind: 'response',
+        orderKey: '100:child-owned-failure',
+        invocationId: 'child-owned-failure',
+        targetId: 'opus',
+        inputEntryIds: ['entry-1'],
+        inputMessageIds: ['source-1'],
+        status: 'failed',
+        startedAt: 100,
+        completedAt: 120,
+        reason: 'provider_error',
+      },
+    });
+
+    expect(container.querySelector('[data-lifecycle-terminal-status="failed"]')?.textContent).toContain('执行失败');
+    expect(container.textContent).toContain('init_failure: CLI crashed');
+    expect(container.textContent).toContain('布偶猫');
+  });
+
+  it('does not render a lifecycle delivery-failure carrier as a standalone system warning', () => {
+    render({
+      id: 'delivery-failure-carrier',
+      from: { kind: 'system', service: 'message-delivery' },
+      type: 'system',
+      variant: 'error',
+      content: 'opus 的当前 Agent Client 已关闭，消息未追加到该回合。',
+      timestamp: 120,
+      lifecycle: {
+        kind: 'delivery_failure',
+        orderKey: '120:delivery-failure-carrier',
+        status: 'failed',
+        sourceEntryId: 'entry-1',
+        inputMessageId: 'source-1',
+        requestedTargets: ['opus'],
+        reason: 'control_carrier_replaced',
+        createdAt: 120,
+      },
+    });
+
+    expect(container.textContent).not.toContain('Agent Client 已关闭');
+    expect(container.querySelector('[data-message-id="delivery-failure-carrier"]')).toBeNull();
+  });
+
   it('keeps an exact-child absorption footer below a classified terminal error receipt', () => {
     const invocationId = 'child-gap-f-error';
     const sourceMessage = {
@@ -172,6 +225,19 @@ describe('F212 Phase B — ChatMessage routes cliDiagnostics to folded panel', (
               state: 'seen',
               invocationId,
               seenAt: 120,
+              attempts: [
+                {
+                  id: 'entry-gap-f-error:opus:1',
+                  targetCatId: 'opus',
+                  sequence: 1,
+                  state: 'appended',
+                  createdAt: 100,
+                  updatedAt: 120,
+                  invocationId,
+                  seenAt: 120,
+                  activeAppendAcceptedAt: 115,
+                },
+              ],
             },
           ],
           reminderAttempts: [],
@@ -197,7 +263,7 @@ describe('F212 Phase B — ChatMessage routes cliDiagnostics to folded panel', (
 
     expect(container.querySelector('[data-testid="cli-diagnostics"]')).toBeTruthy();
     expect(container.querySelector(`[data-turn-absorption-invocation="${invocationId}"]`)?.textContent).toContain(
-      '本轮处理了 0/1 条补充',
+      '运行中追加已接收 1 条消息 · 已处理 0/1',
     );
   });
 

@@ -56,7 +56,6 @@ describe('useChatHistory author precedence (cross-thread)', () => {
       threads: [],
       isLoadingThreads: false,
       queue: [],
-      queuePaused: false,
     });
   });
 

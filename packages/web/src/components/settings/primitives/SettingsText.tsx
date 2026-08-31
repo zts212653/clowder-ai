@@ -28,6 +28,8 @@ interface SettingsTextProps {
   tone?: TextTone;
   className?: string;
   title?: string;
+  id?: string;
+  'data-testid'?: string;
   style?: CSSProperties;
   children: ReactNode;
 }
@@ -38,6 +40,8 @@ export function SettingsText({
   tone = 'muted',
   className,
   title,
+  id,
+  'data-testid': dataTestId,
   style,
   children,
 }: SettingsTextProps) {
@@ -45,6 +49,8 @@ export function SettingsText({
     <Tag
       className={`${variantMap[variant]} ${toneMap[tone]}${className ? ` ${className}` : ''}`}
       title={title}
+      id={id}
+      data-testid={dataTestId}
       style={style}
     >
       {children}

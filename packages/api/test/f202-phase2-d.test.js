@@ -223,7 +223,7 @@ describe('AC-D3: IssueCommentTaskSpec', () => {
       invokeTrigger: {
         trigger: async () => {
           events.push('triggered');
-          return 'dispatched';
+          return 'enqueued';
         },
       },
       log: { info() {}, error() {}, warn() {} },
@@ -434,9 +434,9 @@ describe('AC-D3: IssueCommentTaskSpec', () => {
     assert.strictEqual(errors[0][0].outcome, 'full');
   });
 
-  test('execute marks notification only after the wake is dispatched or enqueued', async () => {
+  test('execute marks notification only after the wake is enqueued', async () => {
     assert.ok(createIssueCommentTaskSpec, 'createIssueCommentTaskSpec should be importable');
-    for (const outcome of ['dispatched', 'enqueued']) {
+    for (const outcome of ['enqueued']) {
       const store = new TaskStore();
       const task = store.upsertBySubject({
         kind: 'issue_tracking',
@@ -548,7 +548,7 @@ describe('P2-cloud: process pending comments before closing', () => {
         { id: 100, author: 'maintainer', body: 'Closing: fixed in v2.0', createdAt: '2026-01-01T00:00:00Z' },
       ],
       fetchIssueState: async () => 'closed',
-      invokeTrigger: { trigger: async () => 'dispatched' },
+      invokeTrigger: { trigger: async () => 'enqueued' },
       log: mockLog,
     });
 
@@ -589,7 +589,7 @@ describe('P2-cloud: process pending comments before closing', () => {
         { id: 20, author: 'maintainer', body: 'Final note', createdAt: '2026-01-01T00:00:00Z' },
       ],
       fetchIssueState: async () => 'closed',
-      invokeTrigger: { trigger: async () => 'dispatched' },
+      invokeTrigger: { trigger: async () => 'enqueued' },
       log: mockLog,
     });
 
@@ -673,7 +673,7 @@ describe('P2-cloud: reseeded issue cursors', () => {
           : [];
       },
       fetchIssueState: async () => 'open',
-      invokeTrigger: { trigger: async () => 'dispatched' },
+      invokeTrigger: { trigger: async () => 'enqueued' },
       log: mockLog,
     });
 

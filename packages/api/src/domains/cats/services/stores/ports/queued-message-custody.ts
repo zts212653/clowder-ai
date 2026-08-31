@@ -1,5 +1,7 @@
 import type {
   CatId,
+  LifecycleStoredMessageMetadata,
+  MessageFrom,
   QueueAuthorIntent,
   QueueReminderAttempt,
   QueueTargetAttempt,
@@ -21,13 +23,14 @@ export interface QueueBodyExposure {
 
 export interface QueueTargetCarrierBinding {
   entryId: string;
+  /** Durable execution scope required to reconstruct a retry after the old row is gone. */
+  threadId?: string;
+  userId?: string;
   /** Immutable Queue admission identity, including action-successor generation. */
   idempotencyKey?: string;
   /** Durable action authority; passive restart must not downgrade this carrier. */
   actionSuccessorFence?: ActionSuccessorFence;
-  source: 'agent';
   sourceCategory: 'a2a';
-  callerCatId?: string;
   a2aParentInvocationId?: string;
   a2aTriggerMessageId: string;
   autoExecute: true;
@@ -59,7 +62,6 @@ export interface QueueCustodyAdmissionIntent {
   targetCats: CatId[];
   /** Complete requested fan-out; absent on v1 records written before accepted-subset persistence. */
   requestedTargetCats?: CatId[];
-  callerCatId?: CatId;
   a2aParentInvocationId?: string;
   receiptScope?: 'primary_trigger' | 'cross_thread_delivery';
   actionSuccessorFence?: ActionSuccessorFence;
@@ -152,7 +154,7 @@ export interface QueueCustodyTransitionInput {
    * absent carrier to its verified replacement. Ordinary transitions may not
    * change entryId.
    */
-  replacement?: QueueCustodyReplacementProof;
+  replacement?: QueueCustodyReplacementProof | QueueCustodyRetryReplacementProof;
 }
 
 export interface QueueCustodyActionSuccessorRebindProof {
@@ -167,6 +169,16 @@ export interface QueueCustodyReplacementProof {
   readonly previousEntryId: string;
   readonly replacementEntryId: string;
   readonly sourceMessageId: string;
+}
+
+export interface QueueCustodyRetryReplacementProof {
+  readonly kind: 'verified_retry';
+  readonly previousEntryId: string;
+  readonly replacementEntryId: string;
+  readonly sourceMessageId: string;
+  readonly targetCatId: CatId;
+  readonly expectedAttemptId: string;
+  readonly nextAttemptId: string;
 }
 
 function assertFiniteNonNegative(value: number, field: string): void {
@@ -291,7 +303,6 @@ function assertCustodyIdentity(custody: QueuedMessageCustody): void {
     for (const [catId, binding] of Object.entries(carriers)) {
       if (
         !binding.entryId ||
-        binding.source !== 'agent' ||
         binding.sourceCategory !== 'a2a' ||
         !binding.a2aTriggerMessageId ||
         binding.autoExecute !== true
@@ -311,6 +322,9 @@ function assertCustodyIdentity(custody: QueuedMessageCustody): void {
         }
       }
       assertFiniteNonNegative(binding.createdAt, 'carrier.createdAt');
+      if ((binding.threadId !== undefined || binding.userId !== undefined) && (!binding.threadId || !binding.userId)) {
+        throw new Error('cross-thread Queue carrier scope must include threadId and userId together');
+      }
     }
   }
   if (custody.carrierStateByTargetCatId) {
@@ -660,6 +674,17 @@ function assertTargetAttempts(custody: QueuedMessageCustody, allTargets: Readonl
     if (attempt.invocationId !== undefined && !attempt.invocationId)
       throw new Error('target attempt invocation id cannot be empty');
     if (attempt.seenAt !== undefined) assertFiniteNonNegative(attempt.seenAt, 'targetAttempt.seenAt');
+    if (attempt.activeAppendAcceptedAt !== undefined) {
+      assertFiniteNonNegative(attempt.activeAppendAcceptedAt, 'targetAttempt.activeAppendAcceptedAt');
+      if (
+        !attempt.invocationId ||
+        attempt.seenAt === undefined ||
+        attempt.activeAppendAcceptedAt < attempt.seenAt ||
+        attempt.activeAppendAcceptedAt > attempt.updatedAt
+      ) {
+        throw new Error('active append acceptance requires an exposed exact invocation');
+      }
+    }
     if (
       attempt.terminalReason !== undefined &&
       !['invocation_failed', 'runtime_restart', 'invocation_cancelled', 'source_withdrawn'].includes(
@@ -766,7 +791,6 @@ function assertAuthorIntents(custody: QueuedMessageCustody, allTargets: Readonly
 
 function assertCustodyTargets(custody: QueuedMessageCustody, allowLegacyMissingExposure = false): void {
   assertUniqueTargets(custody.allTargetCats, 'allTargetCats');
-  if (custody.allTargetCats.length === 0) throw new Error('queue custody requires at least one target');
   assertUniqueTargets(custody.pendingTargetCats, 'pendingTargetCats');
   assertUniqueTargets(custody.notifiedByCatIds, 'notifiedByCatIds');
   assertUniqueTargets(custody.seenByCatIds, 'seenByCatIds');
@@ -821,7 +845,9 @@ function assertCustodyLifecycle(custody: QueuedMessageCustody): void {
   if (custody.status === 'terminal' && custody.pendingTargetCats.length > 0) {
     throw new Error('terminal queue custody cannot retain pending targets');
   }
-  if (custody.status !== 'terminal' && custody.pendingTargetCats.length === 0) {
+  const isUnresolvedTargetlessCustody =
+    custody.status === 'queued' && custody.allTargetCats.length === 0 && custody.pendingTargetCats.length === 0;
+  if (custody.status !== 'terminal' && custody.pendingTargetCats.length === 0 && !isUnresolvedTargetlessCustody) {
     throw new Error('active queue custody requires a pending target');
   }
   const activeCarrierTargets = Object.keys(custody.carrierStateByTargetCatId ?? {});
@@ -970,6 +996,8 @@ function assertTargetAttemptMonotonicity(current: QueuedMessageCustody, next: Qu
       !TARGET_ATTEMPT_NEXT_STATES[attempt.state].has(successor.state) ||
       (attempt.invocationId !== undefined && successor.invocationId !== attempt.invocationId) ||
       (attempt.seenAt !== undefined && successor.seenAt !== attempt.seenAt) ||
+      (attempt.activeAppendAcceptedAt !== undefined &&
+        successor.activeAppendAcceptedAt !== attempt.activeAppendAcceptedAt) ||
       (attempt.terminalReason !== undefined && successor.terminalReason !== attempt.terminalReason) ||
       successor.updatedAt < attempt.updatedAt
     ) {
@@ -1011,35 +1039,123 @@ export function assertQueueCustodyMessageBinding(message: {
   queueCustody?: QueuedMessageCustody;
   queueCustodyAdmission?: QueueCustodyAdmissionIntent;
   deliveryStatus?: 'queued' | 'delivered' | 'canceled';
+  from?: MessageFrom;
+  catId?: CatId | null;
+  lifecycle?: LifecycleStoredMessageMetadata;
 }): void {
   if (message.queueCustodyAdmission) {
     assertQueueCustodyAdmissionIntent(message.queueCustodyAdmission);
-    if (message.deliveryStatus !== 'queued') {
-      throw new Error('queue custody admission can only be stored on a queued message');
+    const assignedTargets = new Set(
+      message.lifecycle?.kind === 'input' || message.lifecycle?.kind === 'response'
+        ? (message.lifecycle.dispatchRefs ?? []).map((ref) => ref.targetId)
+        : [],
+    );
+    const publicWakeAdmission =
+      message.deliveryStatus !== 'queued' &&
+      message.deliveryStatus !== 'canceled' &&
+      (message.from
+        ? message.from.kind === 'agent'
+        : message.catId !== null && message.catId !== undefined && message.catId !== 'system') &&
+      message.queueCustodyAdmission.targetCats.every((targetId) => assignedTargets.has(targetId));
+    if (message.deliveryStatus !== 'queued' && !publicWakeAdmission) {
+      throw new Error('queue custody admission requires queued work or assigned public agent speech');
     }
     if (message.queueCustody) throw new Error('queue custody admission and full custody are mutually exclusive');
   }
   if (!message.queueCustody) return;
   assertQueuedMessageCustody(message.queueCustody);
-  if (message.deliveryStatus !== 'queued') {
-    throw new Error('queue custody can only be stored on a queued message');
+  const deliveredRetry =
+    message.deliveryStatus === 'delivered' &&
+    message.queueCustody.status === 'queued' &&
+    message.queueCustody.pendingTargetCats.length > 0 &&
+    message.queueCustody.pendingTargetCats.every((catId) => {
+      const attempts = message.queueCustody?.targetAttempts?.filter((attempt) => attempt.targetCatId === catId) ?? [];
+      const latest = attempts.at(-1);
+      const carrierEntryId =
+        message.queueCustody?.carrierByTargetCatId?.[catId]?.entryId ?? message.queueCustody?.entryId;
+      return latest?.state === 'queued' && latest.id.startsWith(`${carrierEntryId}:${catId}:`);
+    });
+  const dispatchedTargets = new Set(
+    message.lifecycle?.kind === 'input' || message.lifecycle?.kind === 'response'
+      ? (message.lifecycle.dispatchRefs ?? []).map((ref) => ref.targetId)
+      : [],
+  );
+  const publicMessageWake =
+    message.deliveryStatus !== 'queued' &&
+    message.deliveryStatus !== 'canceled' &&
+    (message.from
+      ? message.from.kind === 'agent'
+      : message.catId !== null && message.catId !== undefined && message.catId !== 'system') &&
+    message.queueCustody.pendingTargetCats.every((targetId) => dispatchedTargets.has(targetId));
+  const validDeliveryBinding =
+    message.deliveryStatus === 'queued' ||
+    (message.deliveryStatus === 'delivered' &&
+      (message.queueCustody.status !== 'queued' || deliveredRetry || publicMessageWake)) ||
+    (message.deliveryStatus === undefined && publicMessageWake) ||
+    (message.deliveryStatus === 'canceled' && message.queueCustody.status === 'terminal');
+  if (!validDeliveryBinding) {
+    throw new Error('queue custody delivery state does not match its lifecycle owner');
   }
 }
 
-export function assertQueueCustodyTransition(current: QueuedMessageCustody, input: QueueCustodyTransitionInput): void {
+export function assertQueueCustodyTransition(
+  current: QueuedMessageCustody,
+  input: QueueCustodyTransitionInput,
+  context: { deliveryPhase?: 'admit' | 'admitted' } = {},
+): void {
   assertQueuedMessageCustody(current);
   assertQueuedMessageCustody(input.next);
-  if (input.next.entryId !== current.entryId) {
-    const replacement = input.replacement;
+  const retryReplacement = input.replacement?.kind === 'verified_retry' ? input.replacement : undefined;
+  if (retryReplacement) {
+    const replacement = retryReplacement;
+    const previousAttempt = current.targetAttempts?.find(
+      (attempt) => attempt.id === replacement.expectedAttemptId && attempt.targetCatId === replacement.targetCatId,
+    );
+    const nextAttempt = input.next.targetAttempts?.find(
+      (attempt) => attempt.id === replacement.nextAttemptId && attempt.targetCatId === replacement.targetCatId,
+    );
+    const retryablePrevious =
+      previousAttempt?.state === 'failed' ||
+      (previousAttempt?.state === 'cancelled' && previousAttempt.terminalReason === 'invocation_cancelled');
+    const expectedPending = current.allTargetCats.filter(
+      (catId) => current.pendingTargetCats.includes(catId) || catId === replacement.targetCatId,
+    );
+    const previousCarrier = current.carrierByTargetCatId?.[replacement.targetCatId];
+    const nextCarrier = input.next.carrierByTargetCatId?.[replacement.targetCatId];
+    const standardReplacement =
+      !current.carrierByTargetCatId &&
+      !input.next.carrierByTargetCatId &&
+      current.status === 'terminal' &&
+      current.pendingTargetCats.length === 0 &&
+      replacement.previousEntryId === current.entryId &&
+      replacement.replacementEntryId === input.next.entryId;
+    const perTargetReplacement =
+      input.next.entryId === current.entryId &&
+      previousCarrier?.entryId === replacement.previousEntryId &&
+      nextCarrier?.entryId === replacement.replacementEntryId;
     if (
-      replacement?.kind !== 'verified' ||
-      replacement.previousEntryId !== current.entryId ||
-      replacement.replacementEntryId !== input.next.entryId ||
-      replacement.previousEntryId === replacement.replacementEntryId
+      replacement.previousEntryId === replacement.replacementEntryId ||
+      (!standardReplacement && !perTargetReplacement) ||
+      JSON.stringify(input.next.pendingTargetCats) !== JSON.stringify(expectedPending) ||
+      !current.failedByCatIds.includes(replacement.targetCatId) ||
+      input.next.failedByCatIds.includes(replacement.targetCatId) ||
+      !retryablePrevious ||
+      nextAttempt?.state !== 'queued' ||
+      nextAttempt.sequence !== previousAttempt.sequence + 1 ||
+      !nextAttempt.id.startsWith(`${replacement.replacementEntryId}:${replacement.targetCatId}:`)
     ) {
+      throw new Error('queue custody retry replacement requires exact terminal-attempt succession');
+    }
+  } else if (input.next.entryId !== current.entryId) {
+    const replacement = input.replacement;
+    const exactIdentity =
+      replacement?.previousEntryId === current.entryId &&
+      replacement.replacementEntryId === input.next.entryId &&
+      replacement.previousEntryId !== replacement.replacementEntryId;
+    if (!exactIdentity) {
       throw new Error('queue custody entryId requires exact verified replacement proof');
     }
-    if (current.status === 'terminal' || input.next.status !== 'queued') {
+    if (replacement.kind !== 'verified' || current.status === 'terminal' || input.next.status !== 'queued') {
       throw new Error('queue custody replacement requires active custody and a queued successor');
     }
     if (current.carrierByTargetCatId || input.next.carrierByTargetCatId) {
@@ -1060,14 +1176,51 @@ export function assertQueueCustodyTransition(current: QueuedMessageCustody, inpu
   if (current.receiptScope !== undefined && input.next.receiptScope !== current.receiptScope) {
     throw new Error('queue custody receipt scope is immutable once assigned');
   }
-  if (JSON.stringify(input.next.allTargetCats) !== JSON.stringify(current.allTargetCats)) {
+  const bindsResolvedTargetlessAdmission =
+    current.status === 'queued' &&
+    current.allTargetCats.length === 0 &&
+    current.pendingTargetCats.length === 0 &&
+    input.next.status === 'processing' &&
+    input.next.allTargetCats.length > 0 &&
+    JSON.stringify(input.next.pendingTargetCats) === JSON.stringify(input.next.allTargetCats) &&
+    input.next.entryId === current.entryId &&
+    input.replacement === undefined;
+  if (
+    JSON.stringify(input.next.allTargetCats) !== JSON.stringify(current.allTargetCats) &&
+    !bindsResolvedTargetlessAdmission
+  ) {
     throw new Error('queue custody allTargetCats is immutable');
   }
   if (JSON.stringify(input.next.carrierByTargetCatId) !== JSON.stringify(current.carrierByTargetCatId)) {
-    if (!input.actionSuccessorRebind) {
+    if (retryReplacement) {
+      const catId = retryReplacement.targetCatId;
+      const before = current.carrierByTargetCatId?.[catId];
+      const after = input.next.carrierByTargetCatId?.[catId];
+      const stripGeneration = (binding: QueueTargetCarrierBinding | undefined) => {
+        if (!binding) return binding;
+        const { entryId: _entryId, createdAt: _createdAt, ...stable } = binding;
+        return stable;
+      };
+      if (
+        !before ||
+        !after ||
+        before.entryId !== retryReplacement.previousEntryId ||
+        after.entryId !== retryReplacement.replacementEntryId ||
+        JSON.stringify(stripGeneration(before)) !== JSON.stringify(stripGeneration(after)) ||
+        Object.keys(current.carrierByTargetCatId ?? {}).some(
+          (candidate) =>
+            candidate !== catId &&
+            JSON.stringify(current.carrierByTargetCatId?.[candidate]) !==
+              JSON.stringify(input.next.carrierByTargetCatId?.[candidate]),
+        )
+      ) {
+        throw new Error('queue custody retry may replace only its exact target carrier generation');
+      }
+    } else if (!input.actionSuccessorRebind) {
       throw new Error('queue custody per-target carrier bindings are immutable');
+    } else {
+      assertActionSuccessorCarrierRebind(current, input.next, input.actionSuccessorRebind);
     }
-    assertActionSuccessorCarrierRebind(current, input.next, input.actionSuccessorRebind);
   } else if (input.actionSuccessorRebind) {
     throw new Error('action-successor Queue carrier rebind must change durable carrier authority');
   }
@@ -1087,10 +1240,14 @@ export function assertQueueCustodyTransition(current: QueuedMessageCustody, inpu
   if (input.next.revision !== current.revision + 1) {
     throw new Error('queue custody next revision must increment by one');
   }
-  if (input.deliveredAt !== undefined && input.next.status !== 'terminal') {
+  if (
+    input.deliveredAt !== undefined &&
+    input.next.status !== 'terminal' &&
+    !(context.deliveryPhase === 'admit' && current.status === 'processing' && input.next.status === 'processing')
+  ) {
     throw new Error('delivery transition requires terminal custody');
   }
-  if (input.next.status === 'terminal' && input.deliveredAt === undefined) {
+  if (input.next.status === 'terminal' && input.deliveredAt === undefined && context.deliveryPhase !== 'admitted') {
     const withdrawn = new Set<string>(input.next.withdrawnByCatIds ?? []);
     const handled = new Set<string>(input.next.handledByCatIds);
     const allTargetsSettled = input.next.allTargetCats.every((catId) => withdrawn.has(catId) || handled.has(catId));

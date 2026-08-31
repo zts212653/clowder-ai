@@ -5,6 +5,7 @@
 
 import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
+import { canonicalTestMessageInput } from './helpers/message-from-fixtures.js';
 
 describe('F117: deliveryStatus + isDelivered', () => {
   test('isDelivered returns true for legacy messages (no deliveryStatus)', async () => {
@@ -31,14 +32,17 @@ describe('F117: deliveryStatus + isDelivered', () => {
   test('markCanceled sets deliveryStatus to canceled', async () => {
     const { MessageStore } = await import('../dist/domains/cats/services/stores/ports/MessageStore.js');
     const store = new MessageStore();
-    const msg = store.append({
-      userId: 'user-1',
-      catId: null,
-      content: 'queued msg',
-      mentions: [],
-      timestamp: Date.now(),
-      deliveryStatus: 'queued',
-    });
+    const msg = store.append(
+      canonicalTestMessageInput({
+        provenance: { author: 'user', routed: false, observation: 'original' },
+        userId: 'user-1',
+        catId: null,
+        content: 'queued msg',
+        mentions: [],
+        timestamp: Date.now(),
+        deliveryStatus: 'queued',
+      }),
+    );
     const result = store.markCanceled(msg.id);
     assert.equal(result?.deliveryStatus, 'canceled');
     assert.equal(result?.deliveryTransitioned, true);
@@ -47,14 +51,17 @@ describe('F117: deliveryStatus + isDelivered', () => {
   test('markCanceled is a no-op for an already-delivered message', async () => {
     const { MessageStore } = await import('../dist/domains/cats/services/stores/ports/MessageStore.js');
     const store = new MessageStore();
-    const msg = store.append({
-      userId: 'user-1',
-      catId: null,
-      content: 'already delivered',
-      mentions: [],
-      timestamp: Date.now(),
-      deliveryStatus: 'queued',
-    });
+    const msg = store.append(
+      canonicalTestMessageInput({
+        provenance: { author: 'user', routed: false, observation: 'original' },
+        userId: 'user-1',
+        catId: null,
+        content: 'already delivered',
+        mentions: [],
+        timestamp: Date.now(),
+        deliveryStatus: 'queued',
+      }),
+    );
     store.markDelivered(msg.id, msg.timestamp);
 
     const result = store.markCanceled(msg.id);
@@ -72,14 +79,17 @@ describe('F117: deliveryStatus + isDelivered', () => {
   test('markDelivered sets both deliveredAt and deliveryStatus', async () => {
     const { MessageStore } = await import('../dist/domains/cats/services/stores/ports/MessageStore.js');
     const store = new MessageStore();
-    const msg = store.append({
-      userId: 'user-1',
-      catId: null,
-      content: 'queued msg',
-      mentions: [],
-      timestamp: Date.now(),
-      deliveryStatus: 'queued',
-    });
+    const msg = store.append(
+      canonicalTestMessageInput({
+        provenance: { author: 'user', routed: false, observation: 'original' },
+        userId: 'user-1',
+        catId: null,
+        content: 'queued msg',
+        mentions: [],
+        timestamp: Date.now(),
+        deliveryStatus: 'queued',
+      }),
+    );
     const now = Date.now();
     const result = store.markDelivered(msg.id, now);
     assert.equal(result?.deliveredAt, now);
@@ -90,14 +100,17 @@ describe('F117: deliveryStatus + isDelivered', () => {
   test('markDelivered is no-op for legacy messages (deliveryStatus=undefined)', async () => {
     const { MessageStore } = await import('../dist/domains/cats/services/stores/ports/MessageStore.js');
     const store = new MessageStore();
-    const msg = store.append({
-      userId: 'user-1',
-      catId: null,
-      content: 'immediate msg',
-      mentions: [],
-      timestamp: Date.now() - 60_000,
-      // no deliveryStatus → undefined (legacy/immediate path)
-    });
+    const msg = store.append(
+      canonicalTestMessageInput({
+        provenance: { author: 'user', routed: false, observation: 'original' },
+        userId: 'user-1',
+        catId: null,
+        content: 'immediate msg',
+        mentions: [],
+        timestamp: Date.now() - 60_000,
+        // no deliveryStatus → undefined (legacy/immediate path)
+      }),
+    );
     assert.equal(msg.deliveryStatus, undefined, 'precondition: no deliveryStatus');
 
     const result = store.markDelivered(msg.id, Date.now());
@@ -113,14 +126,17 @@ describe('F117: deliveryStatus + isDelivered', () => {
   test('markDelivered is no-op for already-delivered messages', async () => {
     const { MessageStore } = await import('../dist/domains/cats/services/stores/ports/MessageStore.js');
     const store = new MessageStore();
-    const msg = store.append({
-      userId: 'user-1',
-      catId: null,
-      content: 'already delivered',
-      mentions: [],
-      timestamp: Date.now(),
-      deliveryStatus: 'queued',
-    });
+    const msg = store.append(
+      canonicalTestMessageInput({
+        provenance: { author: 'user', routed: false, observation: 'original' },
+        userId: 'user-1',
+        catId: null,
+        content: 'already delivered',
+        mentions: [],
+        timestamp: Date.now(),
+        deliveryStatus: 'queued',
+      }),
+    );
     const firstDeliveredAt = Date.now() - 1000;
     store.markDelivered(msg.id, firstDeliveredAt);
     assert.equal(msg.deliveryStatus, 'delivered');
@@ -143,35 +159,53 @@ describe('F117: getByThread filters undelivered messages', () => {
     const now = Date.now();
 
     // legacy message (no deliveryStatus) — should appear
-    store.append({ userId: 'u1', catId: null, content: 'legacy', mentions: [], timestamp: now });
+    store.append(
+      canonicalTestMessageInput({
+        provenance: { author: 'user', routed: false, observation: 'original' },
+        userId: 'u1',
+        catId: null,
+        content: 'legacy',
+        mentions: [],
+        timestamp: now,
+      }),
+    );
     // delivered message — should appear
-    const delivered = store.append({
-      userId: 'u1',
-      catId: null,
-      content: 'delivered',
-      mentions: [],
-      timestamp: now + 1,
-      deliveryStatus: 'queued',
-    });
+    const delivered = store.append(
+      canonicalTestMessageInput({
+        provenance: { author: 'user', routed: false, observation: 'original' },
+        userId: 'u1',
+        catId: null,
+        content: 'delivered',
+        mentions: [],
+        timestamp: now + 1,
+        deliveryStatus: 'queued',
+      }),
+    );
     store.markDelivered(delivered.id, now + 1);
     // queued message — should NOT appear
-    store.append({
-      userId: 'u1',
-      catId: null,
-      content: 'queued',
-      mentions: [],
-      timestamp: now + 2,
-      deliveryStatus: 'queued',
-    });
+    store.append(
+      canonicalTestMessageInput({
+        provenance: { author: 'user', routed: false, observation: 'original' },
+        userId: 'u1',
+        catId: null,
+        content: 'queued',
+        mentions: [],
+        timestamp: now + 2,
+        deliveryStatus: 'queued',
+      }),
+    );
     // canceled message — should NOT appear
-    const canceled = store.append({
-      userId: 'u1',
-      catId: null,
-      content: 'canceled',
-      mentions: [],
-      timestamp: now + 3,
-      deliveryStatus: 'queued',
-    });
+    const canceled = store.append(
+      canonicalTestMessageInput({
+        provenance: { author: 'user', routed: false, observation: 'original' },
+        userId: 'u1',
+        catId: null,
+        content: 'canceled',
+        mentions: [],
+        timestamp: now + 3,
+        deliveryStatus: 'queued',
+      }),
+    );
     store.markCanceled(canceled.id);
 
     const results = store.getByThread('default', 50, 'u1');
@@ -190,39 +224,51 @@ describe('F117: getByThreadAfter filters undelivered messages', () => {
     const store = new MessageStore();
     const now = Date.now();
 
-    const m1 = store.append({
-      userId: 'u1',
-      catId: null,
-      content: 'delivered',
-      mentions: [],
-      timestamp: now,
-      deliveryStatus: 'queued',
-    });
+    const m1 = store.append(
+      canonicalTestMessageInput({
+        provenance: { author: 'user', routed: false, observation: 'original' },
+        userId: 'u1',
+        catId: null,
+        content: 'delivered',
+        mentions: [],
+        timestamp: now,
+        deliveryStatus: 'queued',
+      }),
+    );
     store.markDelivered(m1.id, now);
-    store.append({
-      userId: 'u1',
-      catId: null,
-      content: 'queued',
-      mentions: [],
-      timestamp: now + 1,
-      deliveryStatus: 'queued',
-    });
-    const canceled = store.append({
-      userId: 'u1',
-      catId: null,
-      content: 'canceled',
-      mentions: [],
-      timestamp: now + 2,
-      deliveryStatus: 'queued',
-    });
+    store.append(
+      canonicalTestMessageInput({
+        provenance: { author: 'user', routed: false, observation: 'original' },
+        userId: 'u1',
+        catId: null,
+        content: 'queued',
+        mentions: [],
+        timestamp: now + 1,
+        deliveryStatus: 'queued',
+      }),
+    );
+    const canceled = store.append(
+      canonicalTestMessageInput({
+        provenance: { author: 'user', routed: false, observation: 'original' },
+        userId: 'u1',
+        catId: null,
+        content: 'canceled',
+        mentions: [],
+        timestamp: now + 2,
+        deliveryStatus: 'queued',
+      }),
+    );
     store.markCanceled(canceled.id);
-    store.append({
-      userId: 'u1',
-      catId: null,
-      content: 'legacy',
-      mentions: [],
-      timestamp: now + 3,
-    });
+    store.append(
+      canonicalTestMessageInput({
+        provenance: { author: 'user', routed: false, observation: 'original' },
+        userId: 'u1',
+        catId: null,
+        content: 'legacy',
+        mentions: [],
+        timestamp: now + 3,
+      }),
+    );
 
     // Fetch after first message — should only see legacy (delivered compat), not queued/canceled
     const results = store.getByThreadAfter('default', m1.id, undefined, 'u1');
@@ -298,36 +344,54 @@ describe('F117: getMentionsFor filters undelivered messages', () => {
     const now = Date.now();
 
     // delivered mention — should appear
-    const delivered = store.append({
-      userId: 'u1',
-      catId: null,
-      content: '@gpt52 delivered',
-      mentions: ['gpt52'],
-      timestamp: now,
-      deliveryStatus: 'queued',
-    });
+    const delivered = store.append(
+      canonicalTestMessageInput({
+        provenance: { author: 'user', routed: false, observation: 'original' },
+        userId: 'u1',
+        catId: null,
+        content: '@gpt52 delivered',
+        mentions: ['gpt52'],
+        timestamp: now,
+        deliveryStatus: 'queued',
+      }),
+    );
     store.markDelivered(delivered.id, now);
     // queued mention — should NOT appear
-    store.append({
-      userId: 'u1',
-      catId: null,
-      content: '@gpt52 queued',
-      mentions: ['gpt52'],
-      timestamp: now + 1,
-      deliveryStatus: 'queued',
-    });
+    store.append(
+      canonicalTestMessageInput({
+        provenance: { author: 'user', routed: false, observation: 'original' },
+        userId: 'u1',
+        catId: null,
+        content: '@gpt52 queued',
+        mentions: ['gpt52'],
+        timestamp: now + 1,
+        deliveryStatus: 'queued',
+      }),
+    );
     // canceled mention — should NOT appear
-    const canceled = store.append({
-      userId: 'u1',
-      catId: null,
-      content: '@gpt52 canceled',
-      mentions: ['gpt52'],
-      timestamp: now + 2,
-      deliveryStatus: 'queued',
-    });
+    const canceled = store.append(
+      canonicalTestMessageInput({
+        provenance: { author: 'user', routed: false, observation: 'original' },
+        userId: 'u1',
+        catId: null,
+        content: '@gpt52 canceled',
+        mentions: ['gpt52'],
+        timestamp: now + 2,
+        deliveryStatus: 'queued',
+      }),
+    );
     store.markCanceled(canceled.id);
     // legacy mention (no deliveryStatus) — should appear
-    store.append({ userId: 'u1', catId: null, content: '@gpt52 legacy', mentions: ['gpt52'], timestamp: now + 3 });
+    store.append(
+      canonicalTestMessageInput({
+        provenance: { author: 'user', routed: false, observation: 'original' },
+        userId: 'u1',
+        catId: null,
+        content: '@gpt52 legacy',
+        mentions: ['gpt52'],
+        timestamp: now + 3,
+      }),
+    );
 
     const mentions = store.getMentionsFor('gpt52', 50, 'u1');
     const contents = mentions.map((m) => m.content);
@@ -342,23 +406,29 @@ describe('F117: getMentionsFor filters undelivered messages', () => {
     const store = new MessageStore();
     const now = Date.now();
 
-    const delivered = store.append({
-      userId: 'u1',
-      catId: null,
-      content: '@gpt52 delivered',
-      mentions: ['gpt52'],
-      timestamp: now,
-      deliveryStatus: 'queued',
-    });
+    const delivered = store.append(
+      canonicalTestMessageInput({
+        provenance: { author: 'user', routed: false, observation: 'original' },
+        userId: 'u1',
+        catId: null,
+        content: '@gpt52 delivered',
+        mentions: ['gpt52'],
+        timestamp: now,
+        deliveryStatus: 'queued',
+      }),
+    );
     store.markDelivered(delivered.id, now);
-    store.append({
-      userId: 'u1',
-      catId: null,
-      content: '@gpt52 queued',
-      mentions: ['gpt52'],
-      timestamp: now + 1,
-      deliveryStatus: 'queued',
-    });
+    store.append(
+      canonicalTestMessageInput({
+        provenance: { author: 'user', routed: false, observation: 'original' },
+        userId: 'u1',
+        catId: null,
+        content: '@gpt52 queued',
+        mentions: ['gpt52'],
+        timestamp: now + 1,
+        deliveryStatus: 'queued',
+      }),
+    );
 
     const mentions = store.getRecentMentionsFor('gpt52', 50, 'u1');
     assert.equal(mentions.length, 1);
@@ -373,14 +443,17 @@ describe('F117: messages_delivered payload includes message data', () => {
     const store = new MessageStore();
     const now = Date.now();
 
-    const msg = store.append({
-      userId: 'u1',
-      catId: null,
-      content: 'hello cat',
-      mentions: ['gpt52'],
-      timestamp: now,
-      deliveryStatus: 'queued',
-    });
+    const msg = store.append(
+      canonicalTestMessageInput({
+        provenance: { author: 'user', routed: false, observation: 'original' },
+        userId: 'u1',
+        catId: null,
+        content: 'hello cat',
+        mentions: ['gpt52'],
+        timestamp: now,
+        deliveryStatus: 'queued',
+      }),
+    );
 
     const delivered = store.markDelivered(msg.id, now + 100);
 
@@ -406,14 +479,17 @@ describe('F117: integration regression', () => {
     const now = Date.now();
 
     // Simulate queue send
-    const queuedMsg = store.append({
-      userId: 'u1',
-      catId: null,
-      content: '@gpt52 嘿嘿大猫猫喵',
-      mentions: ['gpt52'],
-      timestamp: now,
-      deliveryStatus: 'queued',
-    });
+    const queuedMsg = store.append(
+      canonicalTestMessageInput({
+        provenance: { author: 'user', routed: false, observation: 'original' },
+        userId: 'u1',
+        catId: null,
+        content: '@gpt52 嘿嘿大猫猫喵',
+        mentions: ['gpt52'],
+        timestamp: now,
+        deliveryStatus: 'queued',
+      }),
+    );
 
     // Before cancel: message exists but should be invisible
     assert.equal(isDelivered(queuedMsg), false);

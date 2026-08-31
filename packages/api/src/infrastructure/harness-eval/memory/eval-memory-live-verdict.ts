@@ -17,8 +17,8 @@ import { assertMemorySubmittedPacket } from './memory-submitted-packet-guard.js'
  *   2. Build snapshot.json + attribution.json from cat-submitted packet + resolved metrics
  *   3. Write raw inputs (recall-metrics.json + library-health.json) outside bundle
  *      at `<repoRoot>/generated/memory/<verdictId>/` — referenced by provenance.json
- *      sha256; publisher MUST stage this dir via extraStagedPaths or auto-PR loses
- *      replayable evidence.
+ *      sha256; the publisher persists the entire artifact staging root so these
+ *      replay inputs remain auditable with the bundle.
  *   4. Resolve evidence bundle refs (snapshot + attribution names)
  *   5. Render verdict.md with packet + resolved refs
  *
@@ -50,8 +50,8 @@ export interface MemoryLiveVerdictArtifact {
   /**
    * Replayed raw inputs (`recall-metrics.json` + `library-health.json`) live OUTSIDE
    * `bundleDir` at `<repoRoot>/generated/memory/<verdictId>/`. `provenance.json` (inside
-   * bundleDir) references them by relative path + sha256. Publisher MUST stage this dir
-   * via extraStagedPaths or auto-PR omits replayable inputs.
+   * bundleDir) references them by relative path + sha256. The durable artifact
+   * includes this directory together with the verdict bundle.
    */
   rawInputDir: string;
   packet: VerdictHandoffPacket;

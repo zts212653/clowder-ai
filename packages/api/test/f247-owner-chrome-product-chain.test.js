@@ -14,6 +14,7 @@ import { ThreadStore } from '../dist/domains/cats/services/stores/ports/ThreadSt
 import { callbacksRoutes } from '../dist/routes/callbacks.js';
 import { safeAdapterDiagnostic } from '../src/plugins/cloud-cat-personal-host/native-host/native-results.mjs';
 import { createUnsupportedNodeHarness } from './helpers/f247-unsupported-node-harness.js';
+import { canonicalTestMessageInput } from './helpers/message-from-fixtures.js';
 
 function ensureGptProRegistered() {
   if (catRegistry.has('gpt-pro')) return;
@@ -39,15 +40,17 @@ describe('F247 normal owner-Chrome product chain', () => {
     const threadStore = new ThreadStore();
     const thread = await threadStore.create('alice', 'F247 product chain');
     await threadStore.updateCloudCatBinding(thread.id, 'gpt-pro', 'https://chatgpt.com/c/conversation-product-chain');
-    const source = messageStore.append({
-      userId: 'alice',
-      catId: 'codex-sol',
-      threadId: thread.id,
-      content: '@gpt-pro verify this exact source',
-      mentions: ['gpt-pro'],
-      timestamp: 1_000,
-      extra: { stream: { invocationId: 'inv-source', turnInvocationId: 'inv-source' } },
-    });
+    const source = messageStore.append(
+      canonicalTestMessageInput({
+        userId: 'alice',
+        catId: 'codex-sol',
+        threadId: thread.id,
+        content: '@gpt-pro verify this exact source',
+        mentions: ['gpt-pro'],
+        timestamp: 1_000,
+        extra: { stream: { invocationId: 'inv-source', turnInvocationId: 'inv-source' } },
+      }),
+    );
     const signer = new CloudReturnBindingSigner(Buffer.alloc(32, 17));
     const bridgeCalls = [];
     const dispositionCalls = [];
@@ -173,13 +176,15 @@ describe('F247 normal owner-Chrome product chain', () => {
     assert.equal(missingBinding.statusCode, 400);
     assert.equal(missingBinding.json().kind, 'cloud_return_binding_required');
 
-    const wrongSource = messageStore.append({
-      userId: 'alice',
-      catId: 'codex-sol',
-      threadId: thread.id,
-      content: 'a different source in the same thread',
-      timestamp: 2_000,
-    });
+    const wrongSource = messageStore.append(
+      canonicalTestMessageInput({
+        userId: 'alice',
+        catId: 'codex-sol',
+        threadId: thread.id,
+        content: 'a different source in the same thread',
+        timestamp: 2_000,
+      }),
+    );
     const substitutedSource = await app.inject({
       method: 'POST',
       url: '/api/callbacks/post-message',
@@ -216,15 +221,17 @@ describe('F247 normal owner-Chrome product chain', () => {
 
   it('persists only the bounded text-free fingerprint from a terminal Host failure', async () => {
     const messageStore = new MessageStore();
-    const source = messageStore.append({
-      userId: 'alice',
-      catId: 'codex-sol',
-      threadId: 'thread-failed-dispatch',
-      content: '@gpt-pro private source body',
-      mentions: ['gpt-pro'],
-      timestamp: 1_000,
-      extra: { stream: { invocationId: 'inv-source', turnInvocationId: 'inv-source' } },
-    });
+    const source = messageStore.append(
+      canonicalTestMessageInput({
+        userId: 'alice',
+        catId: 'codex-sol',
+        threadId: 'thread-failed-dispatch',
+        content: '@gpt-pro private source body',
+        mentions: ['gpt-pro'],
+        timestamp: 1_000,
+        extra: { stream: { invocationId: 'inv-source', turnInvocationId: 'inv-source' } },
+      }),
+    );
     const harness = createUnsupportedNodeHarness();
     let pageDiagnostic;
     await assert.rejects(

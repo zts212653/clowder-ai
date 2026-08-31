@@ -13,6 +13,35 @@ resolver: D18WorldContextResolver
 inputs:
   - worldContext
 
+# Variable metadata (canonical source for Console editor)
+variables:
+  - name: WORLD_NAME
+    description: 世界名称
+    placeholder: ""
+  - name: WORLD_STATUS
+    description: 世界状态
+    placeholder: ""
+  - name: CONSTITUTION_LINE
+    description: 宪法声明行
+    placeholder: ""
+  - name: SCENE_NAME
+    description: 场景名称
+    placeholder: ""
+  - name: SCENE_STATUS
+    description: 场景状态
+    placeholder: ""
+  - name: CHARACTERS_BLOCK
+    description: 角色信息块
+    placeholder: ""
+  - name: CANON_BLOCK
+    description: 正典信息块
+    placeholder: ""
+  - name: RECENT_EVENTS_BLOCK
+    description: 近期事件块
+    placeholder: ""
+  - name: CARE_HINT_LINE
+    description: 关怀提示行
+    placeholder: ""
 # Override constraints
 disableable: true
 

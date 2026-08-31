@@ -65,7 +65,6 @@ describe('useChatHistory queue hydration (F39 Bug 1)', () => {
       threads: [],
       isLoadingThreads: false,
       queue: [],
-      queuePaused: false,
     });
   });
 
@@ -86,7 +85,7 @@ describe('useChatHistory queue hydration (F39 Bug 1)', () => {
         content: 'queued msg',
         messageId: 'm1',
         mergedMessageIds: [],
-        source: 'user',
+        from: { kind: 'user', userId: 'test-user' },
         targetCats: ['opus'],
         intent: 'execute',
         status: 'queued',
@@ -119,45 +118,7 @@ describe('useChatHistory queue hydration (F39 Bug 1)', () => {
     expect(state.queue[0].id).toBe('q1');
   });
 
-  it('sets queuePaused when API reports paused=true', async () => {
-    const queueEntries = [
-      {
-        id: 'q2',
-        threadId: 'thread-q',
-        userId: 'u1',
-        content: 'paused msg',
-        messageId: null,
-        mergedMessageIds: [],
-        source: 'user',
-        targetCats: ['opus'],
-        intent: 'execute',
-        status: 'queued',
-        createdAt: Date.now(),
-      },
-    ];
-
-    apiFetchMock.mockImplementation((url: string) => {
-      if (typeof url === 'string' && url.includes('/queue')) {
-        return Promise.resolve(
-          new Response(JSON.stringify({ queue: queueEntries, paused: true, pauseReason: 'failed' }), { status: 200 }),
-        );
-      }
-      return Promise.resolve(
-        new Response(JSON.stringify({ messages: [], hasMore: false, tasks: [] }), { status: 200 }),
-      );
-    });
-
-    await act(async () => {
-      root.render(React.createElement(HookHost, { threadId: 'thread-q' }));
-    });
-
-    const state = useChatStore.getState();
-    expect(state.queue).toHaveLength(1);
-    expect(state.queuePaused).toBe(true);
-    expect(state.queuePauseReason).toBe('failed');
-  });
-
-  it('clears stale queue+paused when server returns empty (Cloud R1 P1)', async () => {
+  it('clears a stale queue when server returns empty (Cloud R1 P1)', async () => {
     // Pre-populate store with stale queue data (simulates previous session)
     useChatStore.setState({
       queue: [
@@ -168,20 +129,18 @@ describe('useChatHistory queue hydration (F39 Bug 1)', () => {
           content: 'stale entry',
           messageId: null,
           mergedMessageIds: [],
-          source: 'user' as const,
+          from: { kind: 'user' as const, userId: 'u1' },
           targetCats: ['opus'],
           intent: 'execute',
           status: 'queued' as const,
           createdAt: Date.now(),
         },
       ],
-      queuePaused: true,
-      queuePauseReason: 'failed',
     });
 
     apiFetchMock.mockImplementation((url: string) => {
       if (typeof url === 'string' && url.includes('/queue')) {
-        return Promise.resolve(new Response(JSON.stringify({ queue: [], paused: false }), { status: 200 }));
+        return Promise.resolve(new Response(JSON.stringify({ queue: [] }), { status: 200 }));
       }
       return Promise.resolve(
         new Response(JSON.stringify({ messages: [], hasMore: false, tasks: [] }), { status: 200 }),
@@ -195,7 +154,6 @@ describe('useChatHistory queue hydration (F39 Bug 1)', () => {
     const state = useChatStore.getState();
     // Stale data must be cleared
     expect(state.queue).toHaveLength(0);
-    expect(state.queuePaused).toBe(false);
   });
 
   it('F264: preserves a terminal per-target receipt from cold history after the active queue is gone', async () => {
@@ -606,7 +564,7 @@ describe('useChatHistory queue hydration (F39 Bug 1)', () => {
                   content: 'same parent must not certify an old child',
                   messageId: 'm-same-parent',
                   mergedMessageIds: [],
-                  source: 'user',
+                  from: { kind: 'user', userId: 'test-user' },
                   targetCats: ['opus'],
                   targetStates: { opus: 'seen' },
                   queueReceipt: {
@@ -658,7 +616,7 @@ describe('useChatHistory queue hydration (F39 Bug 1)', () => {
     });
     expect(container.textContent).toContain('已读，但关联回合已结束；尚未确认处理完成');
     expect(container.textContent).not.toContain('当前轮处理中');
-    expect(container.querySelector('[data-testid="queue-recover"]')).not.toBeNull();
+    expect(container.querySelector('[data-testid="queue-recover"]')).toBeNull();
   });
 
   it('F108B P1-2: replaces stale slots — no ghost cats in ThreadExecutionBar', async () => {

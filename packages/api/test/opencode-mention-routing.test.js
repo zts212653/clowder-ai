@@ -20,10 +20,11 @@ ensureFakeCliOnPath('opencode');
 
 // ── Shared fixtures ──────────────────────────────────────────────
 
+// P1-4: @宪宪/@砚砚 removed from breeds → patterns aligned with cat-template.json
 /** Full pattern map including opencode — mirrors production catRegistry */
 const allPatterns = new Map([
-  ['opus', ['@opus', '@布偶猫', '@布偶', '@宪宪']],
-  ['codex', ['@codex', '@缅因猫', '@缅因', '@砚砚']],
+  ['opus', ['@opus', '@布偶猫', '@布偶', '@ragdoll']],
+  ['codex', ['@codex', '@缅因猫', '@缅因', '@maine']],
   ['gemini', ['@gemini', '@暹罗猫', '@暹罗', '@烁烁']],
   ['opencode', ['@opencode', '@金渐层', '@golden', '@golden-chinchilla']],
 ]);

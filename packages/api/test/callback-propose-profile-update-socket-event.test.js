@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, it } from 'node:test';
 import Fastify from 'fastify';
+import { canonicalTestMessageInput } from './helpers/message-from-fixtures.js';
 
 // F246 v2: proposal_created socket event regression (cloud review P2).
 // Ensures F231 emits the generic proposal_created event that the Approval Hub
@@ -29,14 +30,17 @@ describe('F246 v2: proposal_created socket event for F231', () => {
     const key = body.clientRequestId ? `${userId}:${catId}:${threadId}:${body.clientRequestId}` : undefined;
     let origin = key ? originByRequest.get(key) : undefined;
     if (!origin) {
-      origin = messageStore.append({
-        userId,
-        catId: null,
-        content: 'Please update the profile',
-        mentions: [],
-        timestamp: Date.now(),
-        threadId,
-      });
+      origin = messageStore.append(
+        canonicalTestMessageInput({
+          provenance: { author: 'user', routed: false, observation: 'original' },
+          userId,
+          catId: null,
+          content: 'Please update the profile',
+          mentions: [],
+          timestamp: Date.now(),
+          threadId,
+        }),
+      );
       if (key) originByRequest.set(key, origin);
     }
     const { invocationId, callbackToken } = await registry.create(userId, catId, threadId, undefined, origin.id);

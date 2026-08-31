@@ -22,3 +22,9 @@ See `cat-cafe-skills/` for the full skill-based workflow:
 - No `any` types
 - Biome: `pnpm check` / `pnpm check:fix`
 - Types: `pnpm lint`
+
+## Cost Discipline
+- **Agent demotion**: before spawning Agent/Explore/Workflow, ask "can a single grep/Read do this?" If yes → use Bash/Read directly
+- **Model tiering**: simple subagent tasks (search, summarize, format) → `model: 'haiku'`
+- **Debug strategy gate**: 1 round of static analysis with no root cause → switch to instrument → reproduce → observe. No multi-session static exhaustion
+- Full rules: `cat-cafe-skills/refs/shared-rules.md` §20

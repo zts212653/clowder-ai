@@ -234,15 +234,15 @@ describe('Integration: dedup does not trigger tracker abort', () => {
   });
 });
 
-// --- R2: delete-guard race — route-level integration test ---
-// Simulates: isDeleting()=false → (race: guard acquired) → start() returns aborted
-// The route MUST detect aborted controller, mark InvocationRecord canceled, return 409
+// --- R2: delete-guard race — canonical Queue ingress regression ---
+// Tracker reservation now belongs to QueueProcessor, so route admission must not
+// consult an aborting tracker or mint a premature InvocationRecord.
 
 import Fastify from 'fastify';
 import { migrateRouterOpts } from './helpers/agent-registry-helpers.js';
 
 describe('R2: delete-guard race via POST /api/messages route', () => {
-  test('returns 409 and cancels InvocationRecord when start() returns aborted controller', async () => {
+  test('admits durable Queue custody without consulting an aborting tracker', async () => {
     const { MessageStore } = await import('../dist/domains/cats/services/stores/ports/MessageStore.js');
     const { InvocationRegistry } = await import(
       '../dist/domains/cats/services/agents/invocation/InvocationRegistry.js'
@@ -250,6 +250,7 @@ describe('R2: delete-guard race via POST /api/messages route', () => {
     const { InvocationRecordStore } = await import(
       '../dist/domains/cats/services/stores/ports/InvocationRecordStore.js'
     );
+    const { InvocationQueue } = await import('../dist/domains/cats/services/agents/invocation/InvocationQueue.js');
     const { messagesRoutes } = await import('../dist/routes/messages.js');
 
     const threadId = 'thread-race-r2';
@@ -309,6 +310,13 @@ describe('R2: delete-guard race via POST /api/messages route', () => {
     const mockRouter = {
       async resolveTargetsAndIntent(_msg) {
         return {
+          attemptBatch: {
+            parserMode: 'user',
+            spanBasis: 'lowercased_message',
+            attempts: [],
+            truncated: false,
+            metricEligible: true,
+          },
           targetCats: ['opus'],
           intent: { intent: 'execute', explicit: false, promptTags: [] },
         };
@@ -328,6 +336,8 @@ describe('R2: delete-guard race via POST /api/messages route', () => {
       threadStore,
       invocationTracker: raceTracker,
       invocationRecordStore,
+      invocationQueue: new InvocationQueue(),
+      queueProcessor: { requestDrain() {} },
     });
     await app.ready();
 
@@ -346,19 +356,19 @@ describe('R2: delete-guard race via POST /api/messages route', () => {
     // Wait briefly to ensure background path would have had time to append if bug existed
     await new Promise((resolve) => setTimeout(resolve, 50));
 
-    // Assert: 409 THREAD_DELETING
-    assert.equal(res.statusCode, 409);
+    // Queue ingress owns admission; tracker reservation happens only during drain.
+    assert.equal(res.statusCode, 202, res.body);
     const body = JSON.parse(res.body);
-    assert.equal(body.code, 'THREAD_DELETING');
+    assert.equal(body.status, 'queued');
 
-    // Assert: no user message was written to MessageStore
-    assert.equal(messageStore.getByThread(threadId).length, 0);
+    const messages = messageStore.getByThreadIncludingQueued(threadId);
+    assert.equal(messages.length, 1);
+    assert.equal(messages[0].deliveryStatus, 'queued');
+    assert.equal(messages[0].queueCustody.entryId, body.entryId);
 
-    // Assert: InvocationRecord was created then marked canceled by the route
+    // InvocationRecord is minted only after QueueProcessor reserves the entry.
     const record = invocationRecordStore.getByIdempotencyKey(threadId, 'alice', idempotencyKey);
-    assert.ok(record, 'InvocationRecord should exist (created before start())');
-    assert.equal(record.status, 'canceled');
-    assert.equal(record.userMessageId, null, 'No message should have been written');
+    assert.equal(record, null);
 
     await app.close();
   });

@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { after, before, beforeEach, describe, it } from 'node:test';
+import { canonicalTestMessageInput } from './helpers/message-from-fixtures.js';
 import {
   assertRedisIsolationOrThrow,
   cleanupPrefixedRedisKeys,
@@ -66,15 +67,18 @@ describe('scheduler reply userid backfill', { skip: redisIsolationSkipReason(RED
     const thread = await threadStore.create('real-user-123', 'scheduler backfill');
     const now = Date.now();
 
-    const triggerMessage = await messageStore.append({
-      userId: 'scheduler',
-      catId: 'system',
-      content: '[定时任务] 发今天的 AI 新闻',
-      mentions: [],
-      timestamp: now,
-      threadId: thread.id,
-      origin: 'callback',
-    });
+    const triggerMessage = await messageStore.append(
+      canonicalTestMessageInput({
+        provenance: { author: 'cat', routed: false, observation: 'original' },
+        userId: 'scheduler',
+        catId: 'system',
+        content: '[定时任务] 发今天的 AI 新闻',
+        mentions: [],
+        timestamp: now,
+        threadId: thread.id,
+        origin: 'callback',
+      }),
+    );
 
     const createResult = await invocationRecordStore.create({
       threadId: thread.id,
@@ -95,15 +99,18 @@ describe('scheduler reply userid backfill', { skip: redisIsolationSkipReason(RED
     });
     assert.ok(completed, 'invocation should persist trigger message id');
 
-    const hiddenReply = await messageStore.append({
-      userId: 'scheduler',
-      catId: 'opus',
-      content: '这是旧的猫回复',
-      mentions: [],
-      timestamp: now + 1,
-      threadId: thread.id,
-      origin: 'callback',
-    });
+    const hiddenReply = await messageStore.append(
+      canonicalTestMessageInput({
+        provenance: { author: 'cat', routed: false, observation: 'original' },
+        userId: 'scheduler',
+        catId: 'opus',
+        content: '这是旧的猫回复',
+        mentions: [],
+        timestamp: now + 1,
+        threadId: thread.id,
+        origin: 'callback',
+      }),
+    );
 
     const before = await messageStore.getByThread(thread.id, 50, 'real-user-123');
     assert.equal(before.length, 1, 'before backfill only system trigger message is visible');
@@ -132,25 +139,31 @@ describe('scheduler reply userid backfill', { skip: redisIsolationSkipReason(RED
     const thread = await threadStore.create('real-user-456', 'scheduler stream backfill');
     const now = Date.now();
 
-    const triggerMessage = await messageStore.append({
-      userId: 'scheduler',
-      catId: 'system',
-      content: '[定时任务] eval:a2a daily run',
-      mentions: [],
-      timestamp: now,
-      threadId: thread.id,
-      origin: 'callback',
-    });
+    const triggerMessage = await messageStore.append(
+      canonicalTestMessageInput({
+        provenance: { author: 'cat', routed: false, observation: 'original' },
+        userId: 'scheduler',
+        catId: 'system',
+        content: '[定时任务] eval:a2a daily run',
+        mentions: [],
+        timestamp: now,
+        threadId: thread.id,
+        origin: 'callback',
+      }),
+    );
 
-    const hiddenStreamReply = await messageStore.append({
-      userId: 'scheduler',
-      catId: 'codex',
-      content: 'eval:a2a daily eval result from route-serial stream',
-      mentions: [],
-      timestamp: now + 1,
-      threadId: thread.id,
-      origin: 'stream',
-    });
+    const hiddenStreamReply = await messageStore.append(
+      canonicalTestMessageInput({
+        provenance: { author: 'cat', routed: false, observation: 'original' },
+        userId: 'scheduler',
+        catId: 'codex',
+        content: 'eval:a2a daily eval result from route-serial stream',
+        mentions: [],
+        timestamp: now + 1,
+        threadId: thread.id,
+        origin: 'stream',
+      }),
+    );
 
     const before = await messageStore.getByThread(thread.id, 50, 'real-user-456');
     assert.deepEqual(
@@ -186,25 +199,31 @@ describe('scheduler reply userid backfill', { skip: redisIsolationSkipReason(RED
     await threadStore.indexForUser(threadId, ownerUserId);
 
     const now = Date.now();
-    const triggerMessage = await messageStore.append({
-      userId: 'scheduler',
-      catId: 'system',
-      content: '[定时任务] eval:a2a daily run',
-      mentions: [],
-      timestamp: now,
-      threadId,
-      origin: 'callback',
-    });
+    const triggerMessage = await messageStore.append(
+      canonicalTestMessageInput({
+        provenance: { author: 'cat', routed: false, observation: 'original' },
+        userId: 'scheduler',
+        catId: 'system',
+        content: '[定时任务] eval:a2a daily run',
+        mentions: [],
+        timestamp: now,
+        threadId,
+        origin: 'callback',
+      }),
+    );
 
-    const hiddenStreamReply = await messageStore.append({
-      userId: 'scheduler',
-      catId: 'codex',
-      content: 'eval:a2a result persisted under scheduler scope',
-      mentions: [],
-      timestamp: now + 1,
-      threadId,
-      origin: 'stream',
-    });
+    const hiddenStreamReply = await messageStore.append(
+      canonicalTestMessageInput({
+        provenance: { author: 'cat', routed: false, observation: 'original' },
+        userId: 'scheduler',
+        catId: 'codex',
+        content: 'eval:a2a result persisted under scheduler scope',
+        mentions: [],
+        timestamp: now + 1,
+        threadId,
+        origin: 'stream',
+      }),
+    );
 
     const before = await messageStore.getByThread(threadId, 50, ownerUserId);
     assert.deepEqual(

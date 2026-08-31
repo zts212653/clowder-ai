@@ -7,32 +7,357 @@
 import type {
   AsrPersonMemoryDynamicSceneEntryV1,
   CatId,
+  CatRoutingError,
   ConnectorSource,
   CrossThreadCoordination,
+  LifecycleStoredMessageMetadata,
   MessageContent,
+  MessageFrom,
   RichMessageExtra,
   WriteOpportunityPresentationRetryCarrierV1,
   WriteOpportunityReentryCarrierV1,
 } from '@cat-cafe/shared';
 import {
   asrPersonMemoryDynamicSceneEntryV1Schema,
+  CatRoutingErrorSchema,
   deliveryDecisionCueCarrierV1Schema,
+  isLifecycleStoredMessageMetadata,
+  isMessageFrom,
   MessageBundleCarrierV1Schema,
   MessageContentsSchema,
   writeOpportunityPresentationRetryCarrierV1Schema,
   writeOpportunityReentryCarrierV1Schema,
 } from '@cat-cafe/shared';
 import { parsePluginMessageExtra } from '../../../../messaging/envelope.js';
+import { isValidRoutingAttemptBatch, type RoutingAttemptBatch } from '../../agents/routing/routing-attempt.js';
 import type { MessageMetadata } from '../../types.js';
-import type {
-  MessageRecallMarker,
-  StoredMessage,
-  StoredPluginMessage,
-  StoredToolEvent,
+import {
+  type MessageProvenance,
+  type MessageRecallMarker,
+  PROVENANCE_OBSERVATIONS,
+  type StoredMessage,
+  type StoredPluginMessage,
+  type StoredToolEvent,
 } from '../ports/MessageStore.js';
 import { parseQueueCustodyAdmissionIntent, parseQueuedMessageCustody } from '../ports/queued-message-custody.js';
 import type { TurnExecutionMessageProjection } from '../ports/TurnExecutionStore.js';
 import { parseRecoveryMarker } from './redis-message-recovery-parser.js';
+
+export type ProvenanceFieldParse =
+  | { state: 'absent' }
+  | { state: 'malformed' }
+  | {
+      state: 'present';
+      provenance: MessageProvenance;
+      legacy?: {
+        author: 'user' | 'external_user' | 'cat' | 'system' | 'unknown';
+        routed: boolean;
+      };
+    };
+
+const LEGACY_PROVENANCE_AUTHORS = ['user', 'external_user', 'cat', 'system', 'unknown'] as const;
+
+export function parseProvenanceField(raw: string | undefined | null): ProvenanceFieldParse {
+  if (raw === undefined || raw === null) return { state: 'absent' };
+  try {
+    const parsed = JSON.parse(raw) as Record<string, unknown>;
+    if (!parsed || typeof parsed !== 'object') return { state: 'malformed' };
+    const hasLegacyAuthor = parsed.author !== undefined;
+    const hasLegacyRouted = parsed.routed !== undefined;
+    if (hasLegacyAuthor !== hasLegacyRouted) return { state: 'malformed' };
+    if (hasLegacyAuthor && !(LEGACY_PROVENANCE_AUTHORS as readonly unknown[]).includes(parsed.author)) {
+      return { state: 'malformed' };
+    }
+    if (hasLegacyRouted && typeof parsed.routed !== 'boolean') return { state: 'malformed' };
+    if (!(PROVENANCE_OBSERVATIONS as readonly unknown[]).includes(parsed.observation)) {
+      return { state: 'malformed' };
+    }
+    if (
+      parsed.observation === 'derived' &&
+      (typeof parsed.sourceRef !== 'string' || parsed.sourceRef.trim().length === 0)
+    ) {
+      return { state: 'malformed' };
+    }
+    if (parsed.observation === 'original' && parsed.sourceRef !== undefined) return { state: 'malformed' };
+    return {
+      state: 'present',
+      provenance: {
+        observation: parsed.observation as MessageProvenance['observation'],
+        ...(parsed.observation === 'derived' ? { sourceRef: parsed.sourceRef as string } : {}),
+      },
+      ...(hasLegacyAuthor
+        ? {
+            legacy: {
+              author: parsed.author as NonNullable<
+                Extract<ProvenanceFieldParse, { state: 'present' }>['legacy']
+              >['author'],
+              routed: parsed.routed as boolean,
+            },
+          }
+        : {}),
+    };
+  } catch {
+    return { state: 'malformed' };
+  }
+}
+
+export type PersistedMessageInvalidReason =
+  | 'required_field_missing'
+  | 'coordinate_mismatch'
+  | 'malformed_timestamp'
+  | 'malformed_delivered_at'
+  | 'malformed_deleted_at'
+  | 'malformed_tombstone'
+  | 'malformed_mentions'
+  | 'malformed_from'
+  | 'malformed_source'
+  | 'malformed_routing_fact'
+  | 'malformed_provenance'
+  | 'from_identity_conflict'
+  | 'tombstone_payload_present';
+
+export interface ParsedPersistedMessageRecord {
+  id: string;
+  threadId: string;
+  userId: string;
+  from?: MessageFrom;
+  catId: CatId | null;
+  content: string;
+  mentions: readonly CatId[];
+  timestamp: number;
+  deliveredAt?: number;
+  effectiveOrderAt: number;
+  source?: ConnectorSource;
+  routingFact?: RoutingAttemptBatch;
+  deletedAt?: number;
+}
+
+export type PersistedMessageRecordParse =
+  | { state: 'missing' }
+  | { state: 'legacy'; record: ParsedPersistedMessageRecord }
+  | { state: 'deleted'; deletion: 'soft' | 'hard'; record: ParsedPersistedMessageRecord }
+  | { state: 'invalid'; reason: PersistedMessageInvalidReason }
+  | { state: 'present'; record: ParsedPersistedMessageRecord; provenance: MessageProvenance };
+
+export function safeParseRoutingFact(raw: string | undefined): RoutingAttemptBatch | undefined {
+  if (!raw) return undefined;
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    return isValidRoutingAttemptBatch(parsed) ? parsed : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+export function safeParseMessageFrom(raw: string | undefined | null): MessageFrom | undefined {
+  if (raw === undefined || raw === null) return undefined;
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    return isMessageFrom(parsed) ? parsed : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+export function legacyMessageFrom(input: {
+  userId: string;
+  catId: CatId | null;
+  source?: ConnectorSource;
+  legacyAuthor?: NonNullable<Extract<ProvenanceFieldParse, { state: 'present' }>['legacy']>['author'];
+}): MessageFrom | undefined {
+  switch (input.legacyAuthor) {
+    case 'user':
+      return { kind: 'user', userId: input.userId };
+    case 'external_user':
+      return input.source ? { kind: 'external', connectorId: input.source.connector } : undefined;
+    case 'cat':
+      return input.catId ? { kind: 'agent', catId: input.catId } : undefined;
+    case 'system':
+      return { kind: 'system', service: input.source?.connector ?? 'legacy-system' };
+    case 'unknown':
+      return undefined;
+    default:
+      return undefined;
+  }
+}
+
+export function hydrateProvenance(raw: string | undefined | null): MessageProvenance | undefined {
+  const parsed = parseProvenanceField(raw);
+  return parsed.state === 'present' ? parsed.provenance : undefined;
+}
+
+export function parsePersistedMessageRecord(fields: {
+  expectedId: string;
+  expectedOwnerUserId: string;
+  expectedTimelineScore: string;
+  id: string | undefined | null;
+  threadId: string | undefined | null;
+  userId: string | undefined | null;
+  from: string | undefined | null;
+  catId: string | undefined | null;
+  content: string | undefined | null;
+  mentions: string | undefined | null;
+  timestamp: string | undefined | null;
+  deliveredAt: string | undefined | null;
+  deletedAt: string | undefined | null;
+  deletedBy: string | undefined | null;
+  tombstone: string | undefined | null;
+  source: string | undefined | null;
+  routingFact: string | undefined | null;
+  provenance: string | undefined | null;
+}): PersistedMessageRecordParse {
+  const rawValues = [
+    fields.id,
+    fields.threadId,
+    fields.userId,
+    fields.from,
+    fields.catId,
+    fields.content,
+    fields.mentions,
+    fields.timestamp,
+    fields.deliveredAt,
+    fields.deletedAt,
+    fields.deletedBy,
+    fields.tombstone,
+    fields.source,
+    fields.routingFact,
+    fields.provenance,
+  ];
+  if (rawValues.every((value) => value === undefined || value === null)) return { state: 'missing' };
+  if (
+    typeof fields.id !== 'string' ||
+    fields.id.length === 0 ||
+    typeof fields.threadId !== 'string' ||
+    fields.threadId.length === 0 ||
+    typeof fields.userId !== 'string' ||
+    fields.userId.length === 0 ||
+    typeof fields.catId !== 'string' ||
+    typeof fields.content !== 'string' ||
+    typeof fields.mentions !== 'string' ||
+    typeof fields.timestamp !== 'string'
+  ) {
+    return { state: 'invalid', reason: 'required_field_missing' };
+  }
+  if (fields.id !== fields.expectedId || fields.userId !== fields.expectedOwnerUserId) {
+    return { state: 'invalid', reason: 'coordinate_mismatch' };
+  }
+  if (!/^(0|[1-9]\d*)$/.test(fields.timestamp)) return { state: 'invalid', reason: 'malformed_timestamp' };
+  const timestamp = Number(fields.timestamp);
+  const timelineScore = Number(fields.expectedTimelineScore);
+  if (!Number.isSafeInteger(timestamp) || timestamp < 0 || !Number.isFinite(timelineScore)) {
+    return { state: 'invalid', reason: 'malformed_timestamp' };
+  }
+  const deliveredAtPresent = fields.deliveredAt !== undefined && fields.deliveredAt !== null;
+  if (deliveredAtPresent && !/^(0|[1-9]\d*)$/.test(fields.deliveredAt ?? '')) {
+    return { state: 'invalid', reason: 'malformed_delivered_at' };
+  }
+  const deliveredAt = deliveredAtPresent ? Number(fields.deliveredAt) : undefined;
+  if (deliveredAt !== undefined && (!Number.isSafeInteger(deliveredAt) || deliveredAt < 0)) {
+    return { state: 'invalid', reason: 'malformed_delivered_at' };
+  }
+  const effectiveOrderAt = deliveredAt ?? timestamp;
+  if (effectiveOrderAt !== timelineScore) return { state: 'invalid', reason: 'coordinate_mismatch' };
+
+  const deletedAtPresent = fields.deletedAt !== undefined && fields.deletedAt !== null;
+  if (deletedAtPresent && !/^(0|[1-9]\d*)$/.test(fields.deletedAt ?? '')) {
+    return { state: 'invalid', reason: 'malformed_deleted_at' };
+  }
+  const deletedAt = deletedAtPresent ? Number(fields.deletedAt) : undefined;
+  if (deletedAt !== undefined && (!Number.isSafeInteger(deletedAt) || deletedAt < 0)) {
+    return { state: 'invalid', reason: 'malformed_deleted_at' };
+  }
+  const tombstonePresent = fields.tombstone !== undefined && fields.tombstone !== null;
+  const deletedByPresent = fields.deletedBy !== undefined && fields.deletedBy !== null;
+  if (tombstonePresent && fields.tombstone !== '1') return { state: 'invalid', reason: 'malformed_tombstone' };
+  if (
+    (deletedAtPresent && (typeof fields.deletedBy !== 'string' || fields.deletedBy.length === 0)) ||
+    (!deletedAtPresent && (deletedByPresent || tombstonePresent))
+  ) {
+    return { state: 'invalid', reason: tombstonePresent ? 'malformed_tombstone' : 'malformed_deleted_at' };
+  }
+
+  let mentions: readonly CatId[];
+  try {
+    const parsedMentions: unknown = JSON.parse(fields.mentions);
+    if (!Array.isArray(parsedMentions) || !parsedMentions.every((mention) => typeof mention === 'string')) {
+      return { state: 'invalid', reason: 'malformed_mentions' };
+    }
+    mentions = parsedMentions as unknown as readonly CatId[];
+  } catch {
+    return { state: 'invalid', reason: 'malformed_mentions' };
+  }
+  const sourcePresent = fields.source !== undefined && fields.source !== null;
+  const source = sourcePresent ? safeParseConnectorSource(fields.source ?? undefined) : undefined;
+  if (sourcePresent && !source) return { state: 'invalid', reason: 'malformed_source' };
+  const fromPresent = fields.from !== undefined && fields.from !== null;
+  const parsedFrom = fromPresent ? safeParseMessageFrom(fields.from) : undefined;
+  if (fromPresent && !parsedFrom) return { state: 'invalid', reason: 'malformed_from' };
+  const factPresent = fields.routingFact !== undefined && fields.routingFact !== null;
+  const routingFact = factPresent ? safeParseRoutingFact(fields.routingFact ?? undefined) : undefined;
+  if (factPresent && !routingFact) return { state: 'invalid', reason: 'malformed_routing_fact' };
+
+  const record: ParsedPersistedMessageRecord = {
+    id: fields.id,
+    threadId: fields.threadId,
+    userId: fields.userId,
+    ...(parsedFrom ? { from: parsedFrom } : {}),
+    catId: fields.catId ? (fields.catId as CatId) : null,
+    content: fields.content,
+    mentions,
+    timestamp,
+    ...(deliveredAt !== undefined ? { deliveredAt } : {}),
+    effectiveOrderAt,
+    ...(source ? { source } : {}),
+    ...(routingFact ? { routingFact } : {}),
+    ...(deletedAt !== undefined ? { deletedAt } : {}),
+  };
+  if (deletedAt !== undefined) {
+    if (tombstonePresent) {
+      if (
+        fields.content !== '' ||
+        mentions.length !== 0 ||
+        (fields.routingFact !== undefined && fields.routingFact !== null) ||
+        (fields.provenance !== undefined && fields.provenance !== null)
+      ) {
+        return { state: 'invalid', reason: 'tombstone_payload_present' };
+      }
+      return { state: 'deleted', deletion: 'hard', record };
+    }
+    return { state: 'deleted', deletion: 'soft', record };
+  }
+  const parsed = parseProvenanceField(fields.provenance);
+  if (parsed.state === 'absent') {
+    return factPresent || fromPresent
+      ? { state: 'invalid', reason: 'malformed_provenance' }
+      : { state: 'legacy', record };
+  }
+  if (parsed.state === 'malformed') return { state: 'invalid', reason: 'malformed_provenance' };
+  if (parsed.legacy && parsed.legacy.routed !== factPresent) {
+    return { state: 'invalid', reason: 'from_identity_conflict' };
+  }
+  const from =
+    parsedFrom ??
+    legacyMessageFrom({
+      userId: fields.userId,
+      catId: fields.catId ? (fields.catId as CatId) : null,
+      ...(source ? { source } : {}),
+      ...(parsed.legacy ? { legacyAuthor: parsed.legacy.author } : {}),
+    });
+  if (!from) return { state: 'legacy', record };
+  const catId = fields.catId ? (fields.catId as CatId) : null;
+  const identityConsistent =
+    from.kind === 'user'
+      ? catId === null && !sourcePresent
+      : from.kind === 'agent'
+        ? from.catId === catId && !sourcePresent
+        : from.kind === 'external'
+          ? catId === null && (!source || source.connector === from.connectorId)
+          : from.kind === 'plugin'
+            ? catId === null && !sourcePresent
+            : catId === null;
+  if (!identityConsistent) return { state: 'invalid', reason: 'from_identity_conflict' };
+  return { state: 'present', record: { ...record, from }, provenance: parsed.provenance };
+}
 
 function parsePluginMessage(value: unknown): StoredPluginMessage | undefined {
   return (parsePluginMessageExtra(value) as StoredPluginMessage | null) ?? undefined;
@@ -73,6 +398,30 @@ export function safeParseContentBlocks(raw: string | undefined): readonly Messag
   try {
     const result = MessageContentsSchema.safeParse(JSON.parse(raw));
     return result.success ? (result.data as MessageContent[]) : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+export function safeParseLifecycleMetadata(raw: string | undefined): LifecycleStoredMessageMetadata | undefined {
+  if (!raw) return undefined;
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    if (!isLifecycleStoredMessageMetadata(parsed)) return undefined;
+    const { from: _legacyFrom, ...canonical } = parsed as LifecycleStoredMessageMetadata & { from?: unknown };
+    void _legacyFrom;
+    return canonical as LifecycleStoredMessageMetadata;
+  } catch {
+    return undefined;
+  }
+}
+
+/** Lift the pre-realignment lifecycle identity into StoredMessage.from once. */
+export function safeParseLegacyLifecycleMessageFrom(raw: string | undefined): MessageFrom | undefined {
+  if (!raw) return undefined;
+  try {
+    const parsed = JSON.parse(raw) as { from?: unknown };
+    return isMessageFrom(parsed.from) ? parsed.from : undefined;
   } catch {
     return undefined;
   }
@@ -200,6 +549,7 @@ type ExtraCarrierPersistence = ExtraCarrierPersistenceClassification<{
   a2aRouting: 'parsed';
   queueReceipt: 'derived';
   pluginMessage: 'parsed';
+  routingWarnings: 'parsed';
 }>;
 
 function isNonEmptyString(value: unknown): value is string {
@@ -339,6 +689,23 @@ export function safeParseExtra(raw: string | undefined): StoredMessage['extra'] 
     if (meetingArtifact) {
       result.meetingArtifact = meetingArtifact;
       hasField = true;
+    }
+
+    if (Array.isArray(parsed.routingWarnings) && parsed.routingWarnings.length > 0) {
+      const routingWarnings: CatRoutingError[] = [];
+      let valid = true;
+      for (const candidate of parsed.routingWarnings as unknown[]) {
+        const warning = CatRoutingErrorSchema.safeParse(candidate);
+        if (!warning.success) {
+          valid = false;
+          break;
+        }
+        routingWarnings.push(warning.data);
+      }
+      if (valid) {
+        result.routingWarnings = routingWarnings;
+        hasField = true;
+      }
     }
 
     if (Array.isArray(parsed.dynamicSceneEntries)) {

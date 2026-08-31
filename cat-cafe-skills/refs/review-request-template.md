@@ -35,10 +35,22 @@ Why: {一句话}
 - 是否新建了并行 `Store` / `Queue` / `Router` / `Adapter` / `Dispatcher` / `Binding`
 - 若修改 `docs/architecture/ownership/cells/*.md`，是否确实改变了 owner / boundary / extension point / canonical anchor
 
+## Invariant Matrix（涉及跨层状态同步/级联时必填）
+<!-- 格式同 writing-plans Truth-Source Model Gate。简单 CRUD 可写"不适用"。 -->
+| 不变量 | 断言描述 | 验证方式 |
+|--------|---------|---------|
+| INV-1  | {描述}  | {测试/手动验证} |
+
+## E2E User Path Evidence（涉及用户可感知功能时必填）
+<!-- 引用 quality-gate Step 4.5 Dogfood-Your-Slice 输出即可，不需要重跑。 -->
+<!-- 若 quality-gate 中该项为"可豁免"，此处写"可豁免（理由：xxx）"。 -->
+{端到端路径 + 命令/截图}
+
 ## Open Questions
 
 ### 技术 OQ（给 reviewer）
 {需要 reviewer 特别关注的实现正确性/安全性/性能问题}
+请 reviewer 逐条验证 Invariant Matrix 中的不变量是否被代码保持。
 
 ### 价值 OQ（给 operator，如有）
 {需要 operator 判断的价值取舍——必须附 Decision Packet（格式见 `refs/decision-matrix.md`）}
@@ -122,6 +134,8 @@ pnpm gate                              # ✓ pre-merge-check.sh 全套
 
 - **附原始需求摘录（≤5 行）**，否则 reviewer 不审
 - **附 Architecture Ownership 三字段**，否则 reviewer 不审
+- **涉及跨层状态同步/级联时附 Invariant Matrix**，reviewer 有权要求补上后再继续
+- **涉及用户可感知功能时附 E2E User Path Evidence**（引用 quality-gate Dogfood 输出）
 - 自检报告必须附上（从 quality-gate skill 输出）
 - 前端功能由 author 自跑 preview，附 URL / 关键交互 / 结果；截图、录屏或浏览器测试输出是可选证据载体，不得要求 operator 代采
 - 前端 review 需要起 dev 时，**必须附 review 沙盒 Path + Start Command + 实际端口**

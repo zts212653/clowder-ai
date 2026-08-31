@@ -12,6 +12,7 @@ import { existsSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import type { HookManifest, HookVariableDef } from '@cat-cafe/shared';
 import { HookRegistry } from '../domains/prompt-hooks/HookRegistry.js';
 
 function findProjectRoot(): string {
@@ -30,7 +31,9 @@ export interface HookContentResult {
   hasBackup: false;
   content: string;
   baseContent: string;
+  templateRef: string;
   vars: string[];
+  variableDefs: HookVariableDef[];
 }
 
 // Lazy-init registry singleton (same instance as manifest route)
@@ -53,7 +56,7 @@ export async function resolveHookContent(id: string): Promise<HookContentResult 
   const hook = reg.getHook(id);
   if (!hook) return null;
 
-  const { templatePath } = hook;
+  const { templatePath, manifest } = hook;
   if (!existsSync(templatePath)) return null;
 
   const content = await readFile(templatePath, 'utf-8');
@@ -69,6 +72,30 @@ export async function resolveHookContent(id: string): Promise<HookContentResult 
     hasBackup: false,
     content,
     baseContent: content,
+    templateRef: manifest.template,
     vars,
+    variableDefs: manifest.variables ?? [],
   };
+}
+
+/**
+ * Get canonical variable definitions for a hook-registered segment.
+ * Returns null if the segment is not in the hook registry.
+ */
+export function getHookVariableDefs(id: string): HookVariableDef[] | null {
+  const reg = getRegistry();
+  const hook = reg.getHook(id);
+  if (!hook) return null;
+  return hook.manifest.variables ?? [];
+}
+
+/**
+ * Get the canonical hook manifest for a hook-registered segment.
+ * Returns null if the segment is not in the hook registry.
+ */
+export function getHookManifest(id: string): HookManifest | null {
+  const reg = getRegistry();
+  const hook = reg.getHook(id);
+  if (!hook) return null;
+  return hook.manifest;
 }

@@ -24,7 +24,6 @@ const log = createModuleLogger('ws');
 
 interface QueueProcessorLike {
   canReleaseSlotForUser(threadId: string, catId: string, userId: string): boolean;
-  clearPause(threadId: string, catId?: string): void;
   releaseSlot(threadId: string, catId: string): void;
   suppressAutoResume(threadId: string, catId: string, executionIds?: readonly string[]): void;
 }
@@ -329,7 +328,6 @@ export class SocketManager {
               for (const msg of buildCancelMessages(scopedResult)) {
                 this.broadcastAgentMessage(msg, data.threadId);
               }
-              this.queueProcessor?.clearPause(data.threadId, data.catId);
               this.queueProcessor?.releaseSlot(data.threadId, data.catId);
             }
             // F108 + F086: Also abort multi-mention dispatches for this specific cat
@@ -364,7 +362,6 @@ export class SocketManager {
                 this.broadcastAgentMessage(msg, data.threadId);
               }
               for (const catId of terminalCatIds) {
-                this.queueProcessor?.clearPause(data.threadId, catId);
                 this.queueProcessor?.releaseSlot(data.threadId, catId);
                 // Suppress auto-resume for BOTH paths:
                 // - Queued invocations: executeEntry also sets suppress (belt-and-suspenders)

@@ -99,7 +99,7 @@ describe('F148 Phase E: buildBriefingMessage (AC-E1)', () => {
   test('returns AppendMessageInput with origin=briefing', () => {
     const msg = buildBriefingMessage(baseCoverageMap, 'thread-1');
     assert.equal(msg.origin, 'briefing', 'must have origin=briefing');
-    assert.equal(msg.catId, null, 'briefing is system-generated, catId=null');
+    assert.deepEqual(msg.from, { kind: 'system', service: 'context-briefing' });
     assert.equal(msg.userId, 'system', 'userId should be system');
     assert.equal(msg.threadId, 'thread-1');
     assert.ok(msg.content.includes('真相源'), 'content is the navigation summary');

@@ -6,6 +6,7 @@ doc_kind: spec
 created: 2026-03-11
 reopened: 2026-03-14
 updated: 2026-03-23
+tips_exempt: spec-only feature contract; no shipped operator capability surface to teach
 ---
 
 # F101: Mode v2 — 游戏系统引擎 + 狼人杀
@@ -26,6 +27,15 @@ operator experience（2026-03-11）：
 - seat/actor/role 三层分离（gpt52 提出）
 - 服务端 scoped event log 做信息隔离
 - 参考 AIWolf 协议边界，不抄 prompt
+
+## User Journey
+
+**范围单元：一条独立游戏 thread 中的一局完整狼人杀。**
+
+1. operator 从游戏入口创建或打开狼人杀 thread，选择板子、参赛猫、文字或语音模式，以及玩家或上帝视角。
+2. 开局后，operator 看到每只猫的真实就绪状态、当前阶段和倒计时；玩家只收到自己有权看到的信息和动作，上帝视角可查看全局但不能代替玩家行动。
+3. GameEngine 驱动夜晚、讨论、投票和结算；operator 可暂停、恢复或跳过卡住的阶段，断线重连后继续同一局。
+4. 达成胜负条件后，游戏展示胜负、玩家统计和 MVP；operator 可退出游戏回到常规聊天，已完成的对局仍留在该 thread 中可追溯。
 
 ## What
 

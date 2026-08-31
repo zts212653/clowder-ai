@@ -124,7 +124,7 @@ describe('F24: mid-invocation message injection', () => {
   });
 
   it('confirms that draft Steer stops the target reply before sending', () => {
-    const onForceSend = vi.fn();
+    const onSteerSend = vi.fn();
 
     act(() => {
       root.render(
@@ -132,7 +132,7 @@ describe('F24: mid-invocation message injection', () => {
           onTranscript: vi.fn(),
           onSend: vi.fn(),
           onQueueSend: vi.fn(),
-          onForceSend,
+          onSteerSend,
           onStop: vi.fn(),
           disabled: false,
           hasActiveInvocation: true,
@@ -146,7 +146,7 @@ describe('F24: mid-invocation message injection', () => {
     expect(steerBtn).toBeTruthy();
     act(() => steerBtn.click());
 
-    expect(onForceSend).not.toHaveBeenCalled();
+    expect(onSteerSend).not.toHaveBeenCalled();
     // Modal content assertions: use actual Unicode chars from SteerQueuedEntryModal
     expect(container.textContent).toContain('停止目标当前回复');
     expect(container.textContent).toContain('立即发送当前输入的消息');
@@ -155,11 +155,11 @@ describe('F24: mid-invocation message injection', () => {
     act(() => {
       (container.querySelector('[data-testid="steer-confirm"]') as HTMLButtonElement).click();
     });
-    expect(onForceSend).toHaveBeenCalledTimes(1);
+    expect(onSteerSend).toHaveBeenCalledTimes(1);
   });
 
   it('rejects stale steer confirmation when execution identity changes (A→B)', () => {
-    const onForceSendA = vi.fn();
+    const onSteerSendA = vi.fn();
 
     // Render with execution A
     act(() => {
@@ -168,7 +168,7 @@ describe('F24: mid-invocation message injection', () => {
           onTranscript: vi.fn(),
           onSend: vi.fn(),
           onQueueSend: vi.fn(),
-          onForceSend: onForceSendA,
+          onSteerSend: onSteerSendA,
           onStop: vi.fn(),
           disabled: false,
           hasActiveInvocation: true,
@@ -187,14 +187,14 @@ describe('F24: mid-invocation message injection', () => {
     expect(container.querySelector('[data-testid="steer-confirm"]')).toBeTruthy();
 
     // Same-render A→B: execution changes while modal is open
-    const onForceSendB = vi.fn();
+    const onSteerSendB = vi.fn();
     act(() => {
       root.render(
         React.createElement(ChatInputActionButton, {
           onTranscript: vi.fn(),
           onSend: vi.fn(),
           onQueueSend: vi.fn(),
-          onForceSend: onForceSendB,
+          onSteerSend: onSteerSendB,
           onStop: vi.fn(),
           disabled: false,
           hasActiveInvocation: true,
@@ -206,8 +206,8 @@ describe('F24: mid-invocation message injection', () => {
 
     // Modal should be dismissed — neither handler should have been called
     expect(container.querySelector('[data-testid="steer-confirm"]')).toBeNull();
-    expect(onForceSendA).not.toHaveBeenCalled();
-    expect(onForceSendB).not.toHaveBeenCalled();
+    expect(onSteerSendA).not.toHaveBeenCalled();
+    expect(onSteerSendB).not.toHaveBeenCalled();
   });
 
   it('does not offer Steer when execution identity is unverifiable', () => {
@@ -217,7 +217,7 @@ describe('F24: mid-invocation message injection', () => {
           onTranscript: vi.fn(),
           onSend: vi.fn(),
           onQueueSend: vi.fn(),
-          onForceSend: vi.fn(),
+          onSteerSend: vi.fn(),
           onStop: vi.fn(),
           disabled: false,
           hasActiveInvocation: true,

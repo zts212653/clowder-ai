@@ -12,6 +12,7 @@ describe('F220 intake: queue snapshot publication ordering', () => {
     id: 'queue-entry',
     threadId: 't1',
     userId: 'u1',
+    kind: 'conversation_input',
     content: 'queued work',
     messageId: 'msg-entry',
     mergedMessageIds: [],
@@ -23,6 +24,22 @@ describe('F220 intake: queue snapshot publication ordering', () => {
     autoExecute: false,
     priority: 'normal',
     ...overrides,
+  });
+
+  it('never publishes private system input content', async () => {
+    const emitted = [];
+    const socketManager = {
+      emitToUser: (_userId, _event, data) => emitted.push(data),
+    };
+    await emitQueueUpdated(
+      socketManager,
+      'u1',
+      't1',
+      [makeEntry({ kind: 'private_input', source: 'system', messageId: null, content: 'secret podcast prompt' })],
+      null,
+      'private',
+    );
+    assert.deepEqual(emitted[0].queue, []);
   });
 
   const makeWithdrawnCustody = (overrides = {}) => ({

@@ -15,6 +15,7 @@ import { clearBudgetCache } from './cat-budgets.js';
 import { bootstrapCatCatalog, readCatCatalog, resolveCatCatalogPath } from './cat-catalog-store.js';
 import type { AcpVariantConfig } from './cat-config-loader.js';
 import { _resetCachedConfig, loadCatConfig, toAllCatConfigs } from './cat-config-loader.js';
+import { normalizeNickname } from './cat-uniqueness.js';
 import { clearVoiceCache } from './cat-voices.js';
 import { resolveProjectTemplatePath } from './project-template-path.js';
 import { addTemplateVariantTombstone, type TemplateVariantTombstoneInput } from './template-variant-tombstones.js';
@@ -180,6 +181,29 @@ function validatePersistedCatalog(projectRoot: string): CatCafeConfig {
   return loadCatConfig(join(projectRoot, '.cat-cafe', 'cat-catalog.json'));
 }
 
+/**
+ * F257 #1: incremental nickname uniqueness at write time (dev-628ea4d1).
+ * Scope is deliberately per-write (only the cat being written), NOT whole-catalog:
+ * legacy catalogs carry pre-existing conflicts (宪宪×3 / 砚砚×5) and a whole-catalog
+ * assert would deadlock convergence — no single-step edit could ever pass while any
+ * other pair still conflicts. Clearing / renaming one cat at a time must succeed;
+ * load-time warnOnNicknameConflicts keeps the remaining legacy conflicts visible.
+ */
+function assertNicknameAvailable(catalog: CatCafeConfig, nickname: string | undefined, selfCatId: string): void {
+  if (!nickname) return;
+  const key = normalizeNickname(nickname);
+  if (!key) return;
+  for (const [catId, config] of Object.entries(toAllCatConfigs(catalog))) {
+    if (catId === selfCatId) continue;
+    if (config.nickname && normalizeNickname(config.nickname) === key) {
+      throw new Error(
+        `nickname "${nickname.trim()}" is already used by cat "${catId}" — nicknames are per-cat unique (F257 #1). ` +
+          `Release it from "${catId}" first or choose another nickname.`,
+      );
+    }
+  }
+}
+
 function assertUniqueMentionAliases(catalog: CatCafeConfig): void {
   const aliasHolders = new Map<string, string>();
   for (const [catId, config] of Object.entries(toAllCatConfigs(catalog))) {
@@ -320,6 +344,8 @@ export function createRuntimeCat(projectRoot: string, input: RuntimeCatInput): C
   if (findBreedVariant(catalog as unknown as CatCafeConfig, input.catId)) {
     throw new Error(`Cat "${input.catId}" already exists in runtime catalog`);
   }
+  // F257 #1: fail-closed on introducing a nickname another cat already holds
+  assertNicknameAvailable(catalog as unknown as CatCafeConfig, input.nickname, input.catId);
   const nextBreed = createBreedFromInput(input) as unknown as Record<string, any>;
   catalog.breeds = [...catalog.breeds, nextBreed];
   if (catalog.version === 2) {
@@ -357,6 +383,18 @@ export function updateRuntimeCat(projectRoot: string, catId: string, patch: Runt
   }
   if (patch.nickname !== undefined) {
     const nickname = patch.nickname.trim();
+    // F257 #1: reject taking a nickname held by ANOTHER cat. Clearing ('') and
+    // no-change writes always pass — a legacy catalog may hold pre-existing
+    // conflicts (砚砚×5), and an unchanged value introduces no NEW conflict, so
+    // blocking it would break unrelated edits on already-conflicted cats.
+    const currentNickname = toAllCatConfigs(catalog as unknown as CatCafeConfig)[catId]?.nickname;
+    const isUnchanged =
+      nickname.length > 0 &&
+      currentNickname != null &&
+      normalizeNickname(currentNickname) === normalizeNickname(nickname);
+    if (!isUnchanged) {
+      assertNicknameAvailable(catalog as unknown as CatCafeConfig, nickname, catId);
+    }
     if (shouldWriteBreedIdentity) {
       if (nickname.length > 0) {
         breed.nickname = nickname;

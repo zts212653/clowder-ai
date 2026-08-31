@@ -125,12 +125,13 @@ export class ThreadMeetingArtifactDispatcher implements MeetingArtifactDispatche
     });
     const idempotencyKey = meetingArtifactCarrierIdempotencyKey(input.intake.intakeId, input.artifact.sourceRevision);
     const enqueue = this.options.invocationQueue.enqueue({
+      from: { kind: 'user', userId: input.intake.ownerId },
       threadId,
       userId: input.intake.ownerId,
+      kind: 'conversation_input',
       ownerAuthProvenance: 'strict',
       idempotencyKey,
       content,
-      source: 'connector',
       targetCats: [catId],
       intent: 'execute',
     });
@@ -140,8 +141,8 @@ export class ThreadMeetingArtifactDispatcher implements MeetingArtifactDispatche
     if (!enqueue.deduped || !enqueue.entry.messageId) {
       try {
         const stored = await this.options.messageStore.append({
+          from: { kind: 'user', userId: input.intake.ownerId },
           userId: input.intake.ownerId,
-          catId: null,
           content,
           mentions: [catId],
           timestamp: queuedAt,
@@ -207,7 +208,7 @@ export class ThreadMeetingArtifactDispatcher implements MeetingArtifactDispatche
     if (
       !source ||
       source.userId !== input.intake.ownerId ||
-      source.catId !== null ||
+      (source.from ? source.from.kind !== 'user' : source.catId !== null) ||
       source.threadId !== threadId ||
       source.deletedAt !== undefined ||
       source._tombstone ||
@@ -253,15 +254,19 @@ export class ThreadMeetingArtifactDispatcher implements MeetingArtifactDispatche
     }
 
     const idempotencyKey = `meeting-opportunity-presentation-retry:${input.intake.intakeId}:${input.clientRequestId}`;
-    const existing = await this.options.messageStore.getByIdempotencyKey('scheduler', threadId, idempotencyKey);
+    const existing = await this.options.messageStore.getByIdempotencyKey(
+      input.intake.ownerId,
+      threadId,
+      idempotencyKey,
+    );
     if (existing) {
       const carrier = writeOpportunityPresentationRetryCarrierV1Schema.safeParse(
         existing.extra?.writeOpportunityPresentationRetry,
       );
       if (
         !carrier.success ||
-        existing.userId !== 'scheduler' ||
-        existing.catId !== null ||
+        existing.userId !== input.intake.ownerId ||
+        (existing.from ? existing.from.kind !== 'system' : existing.catId !== null) ||
         existing.threadId !== threadId ||
         existing.deletedAt !== undefined ||
         existing._tombstone ||
@@ -292,12 +297,13 @@ export class ThreadMeetingArtifactDispatcher implements MeetingArtifactDispatche
       });
     }
     const enqueue = this.options.invocationQueue.enqueue({
+      from: { kind: 'system', service: 'meeting-write-opportunity' },
       threadId,
       userId: input.intake.ownerId,
+      kind: 'conversation_input',
       ownerAuthProvenance: 'strict',
       idempotencyKey,
       content,
-      source: 'connector',
       targetCats: [catId],
       intent: 'execute',
       sourceCategory: 'scheduled',
@@ -310,8 +316,8 @@ export class ThreadMeetingArtifactDispatcher implements MeetingArtifactDispatche
     if (!enqueue.deduped || !triggerMessageId) {
       try {
         const stored = await this.options.messageStore.append({
-          userId: 'scheduler',
-          catId: null,
+          from: { kind: 'system', service: 'meeting-write-opportunity' },
+          userId: input.intake.ownerId,
           content,
           mentions: [catId],
           timestamp: queuedAt,

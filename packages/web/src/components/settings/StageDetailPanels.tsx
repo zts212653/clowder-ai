@@ -8,6 +8,7 @@
  * CarrierInfoPanel, and badge maps.
  */
 
+import type { SegmentEnablementMatrix } from '@cat-cafe/shared';
 import type React from 'react';
 import { useMemo, useState } from 'react';
 import {
@@ -19,6 +20,7 @@ import {
 } from './lifecycle-stages';
 import { SettingsBadge, SettingsText } from './primitives';
 import { SegmentEditorModal } from './SegmentEditorModal';
+import { SegmentLifelineModal } from './SegmentLifelineModal';
 
 // ── Types (shared with InjectionManifestContent) ─────────────
 
@@ -40,6 +42,7 @@ export interface ManifestSegment {
   disableable: boolean;
   consumer: string;
   relatedFeature: string | null;
+  enablementMatrix?: SegmentEnablementMatrix;
   _knownIssue?: string;
   _status?: string;
 }
@@ -58,25 +61,34 @@ const SOURCE_TYPE_LABELS: Record<string, string> = {
  * Tag-based editability + governance badges.
  * Primary tag: 只读 (readonly, red) or 可编辑 (editable, emerald).
  * Secondary tags for editable segments reflect governance tier:
- *   人工审批(开发中) = human-gated auto-evolve (amber)
- *   自动迭代(开发中) = fully automatic evolve (blue)
+ *   人工审批 = human-gated auto-evolve (amber)
+ *   自动迭代 = fully automatic evolve (blue)
  * No secondary tag = manual edit only, no auto harness.
+ *
+ * F257 Console 判据⑥: use the unified enablement matrix so the card badge,
+ * button label, and modal CTA all share the same contract.
  */
 type TagTone = 'red' | 'emerald' | 'amber' | 'blue';
 interface SegmentTag {
   label: string;
   tone: TagTone;
 }
-function resolveSegmentTags(safetyTier: string, governanceTier: string, allowLocalOverride: boolean): SegmentTag[] {
-  // Effective editability: both governance policy AND implementation must agree
-  if (safetyTier === 'readonly' || !allowLocalOverride) {
+function resolveSegmentTags(
+  safetyTier: string,
+  governanceTier: string,
+  matrix?: SegmentEnablementMatrix,
+): SegmentTag[] {
+  // Effective editability: matrix is required. If it is missing, fail-visible
+  // as readonly rather than falling back to manifest-level allowLocalOverride.
+  const canEdit = matrix ? matrix.localOverlay.actions.edit.allowed : false;
+  if (!canEdit) {
     return [{ label: '只读', tone: 'red' }];
   }
   const tags: SegmentTag[] = [{ label: '可编辑', tone: 'emerald' }];
   if (governanceTier === 'human-gated') {
-    tags.push({ label: '人工审批(开发中)', tone: 'amber' });
+    tags.push({ label: '人工审批', tone: 'amber' });
   } else if (governanceTier === 'auto-evolve') {
-    tags.push({ label: '自动迭代(开发中)', tone: 'blue' });
+    tags.push({ label: '自动迭代', tone: 'blue' });
   }
   return tags;
 }
@@ -224,9 +236,13 @@ function SubStageGroup({ subStage, segments }: { subStage: SubStage; segments: M
 function SegmentRow({ segment: s }: { segment: ManifestSegment }) {
   const [editorOpen, setEditorOpen] = useState(false);
   const [infoOpen, setInfoOpen] = useState(false);
-  const tags = resolveSegmentTags(s.safetyTier, s.governanceTier, s.allowLocalOverride);
+  const [lifelineOpen, setLifelineOpen] = useState(false);
+  const tags = resolveSegmentTags(s.safetyTier, s.governanceTier, s.enablementMatrix);
   // Hooks are viewable only when source points to a file (not a directory)
   const isViewable = s.sourceType === 'template' || (s.sourceType === 'hook' && !!s.source && !s.source.endsWith('/'));
+  // F257 Console 判据⑥: matrix is required; missing matrix must not fall back to
+  // a permissive default.
+  const canEdit = s.enablementMatrix ? s.enablementMatrix.localOverlay.actions.edit.allowed : false;
 
   const handleCardClick = () => {
     if (isViewable) setEditorOpen(true);
@@ -262,8 +278,20 @@ function SegmentRow({ segment: s }: { segment: ManifestSegment }) {
                 已知问题
               </SettingsBadge>
             )}
-            <span className="ml-auto text-xs opacity-50">
-              {isViewable ? (s.allowLocalOverride ? '编辑' : '查看') : infoOpen ? '收起' : '详情'}
+            <span className="ml-auto flex items-center gap-2 text-xs opacity-50">
+              <button
+                type="button"
+                className="cursor-pointer border-none bg-transparent p-0 hover:opacity-80"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setLifelineOpen(true);
+                }}
+                aria-label={`查看 ${s.id} 评估与回放`}
+                title="查看评估与回放"
+              >
+                📊
+              </button>
+              {isViewable ? (canEdit ? '编辑' : '查看') : infoOpen ? '收起' : '详情'}
             </span>
           </div>
           <SettingsText as="p" variant="xs" tone="secondary" className="mt-0.5">
@@ -300,6 +328,9 @@ function SegmentRow({ segment: s }: { segment: ManifestSegment }) {
           allowLocalOverride={s.allowLocalOverride}
           onClose={() => setEditorOpen(false)}
         />
+      )}
+      {lifelineOpen && (
+        <SegmentLifelineModal segmentId={s.id} segmentName={s.name} onClose={() => setLifelineOpen(false)} />
       )}
     </div>
   );

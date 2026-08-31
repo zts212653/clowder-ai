@@ -225,7 +225,7 @@ export class ManagedCommandWakeRecoverySweep {
         `[定时任务] ${wakeContent}`,
         messageId,
         undefined,
-        { sourceCategory: 'scheduled', forceQueue: true },
+        { sourceCategory: 'scheduled' },
       );
     } catch (err) {
       log.warn(

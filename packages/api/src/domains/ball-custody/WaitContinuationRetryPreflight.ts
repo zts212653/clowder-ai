@@ -40,7 +40,7 @@ export interface WaitContinuationRetryPreflightDeps {
 }
 
 export interface WaitContinuationRetryPreflightInput {
-  readonly message: Pick<StoredMessage, 'catId' | 'source' | 'sourceParseFailure' | 'threadId' | 'userId'>;
+  readonly message: Pick<StoredMessage, 'from' | 'catId' | 'source' | 'sourceParseFailure' | 'threadId' | 'userId'>;
   readonly requestingUserId: string;
   readonly targetCatId: string;
 }
@@ -54,8 +54,7 @@ export function resolveRetryAuthorityMessageSubject(
   input: WaitContinuationRetryPreflightInput,
 ): RetryAuthorityMessageSubject {
   if (
-    input.message.catId === null &&
-    !input.message.source &&
+    (input.message.from ? input.message.from.kind === 'user' : input.message.catId === null && !input.message.source) &&
     !input.message.sourceParseFailure &&
     !isSystemUserMessage(input.message) &&
     input.message.userId === input.requestingUserId

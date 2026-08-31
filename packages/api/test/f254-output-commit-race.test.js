@@ -1,10 +1,12 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
+import { canonicalTestMessageInput } from './helpers/message-from-fixtures.js';
 
 const { MessageStore } = await import('../dist/domains/cats/services/stores/ports/MessageStore.js');
 
 function userMessage(content, timestamp, extra = {}) {
-  return {
+  return canonicalTestMessageInput({
+    provenance: { author: 'user', routed: false, observation: 'original' },
     userId: 'user-1',
     catId: null,
     content,
@@ -12,11 +14,12 @@ function userMessage(content, timestamp, extra = {}) {
     timestamp,
     threadId: 'thread-1',
     ...extra,
-  };
+  });
 }
 
 function finalMessage(content, timestamp) {
-  return {
+  return canonicalTestMessageInput({
+    provenance: { author: 'cat', routed: false, observation: 'original' },
     userId: 'user-1',
     catId: 'codex-sol',
     content,
@@ -25,7 +28,7 @@ function finalMessage(content, timestamp) {
     threadId: 'thread-1',
     origin: 'stream',
     idempotencyKey: 'freshness-closure:closure-1:final',
-  };
+  });
 }
 
 describe('F254 Phase E — atomic output commit boundary', () => {

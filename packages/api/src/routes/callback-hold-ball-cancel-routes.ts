@@ -235,8 +235,8 @@ export function registerHoldBallCancelRoutes(app: FastifyInstance, deps: HoldBal
       try {
         const cancelMessage = `🏓 ${catId} 持球已取消`;
         const stored = await messageStore.append({
+          from: { kind: 'system', service: 'hold-ball' },
           userId: 'system',
-          catId: null,
           content: cancelMessage,
           mentions: [],
           timestamp: Date.now(),

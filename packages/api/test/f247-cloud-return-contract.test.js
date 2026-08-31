@@ -9,6 +9,7 @@ import {
   loadOrCreateCloudReturnBindingSigner,
 } from '../dist/domains/cats/services/cloud-bridge/cloud-return-binding.js';
 import { hydrateReplyPreview, MessageStore } from '../dist/domains/cats/services/stores/ports/MessageStore.js';
+import { canonicalTestMessageInput } from './helpers/message-from-fixtures.js';
 
 const apiRoot = join(dirname(fileURLToPath(import.meta.url)), '..');
 const repoRoot = join(apiRoot, '..', '..');
@@ -25,23 +26,27 @@ describe('F247 source-bound Remote MCP return contract', () => {
 
   it('projects a Remote MCP reply against the exact source message through the existing F264 replyTo seam', async () => {
     const store = new MessageStore();
-    const source = store.append({
-      userId: 'alice',
-      catId: 'codex-sol',
-      threadId: 'thread-f247-return',
-      content: '@gpt-pro inspect this exact source',
-      mentions: ['gpt-pro'],
-      timestamp: 1_000,
-    });
-    const remoteReply = store.append({
-      userId: 'alice',
-      catId: 'gpt-pro',
-      threadId: 'thread-f247-return',
-      content: 'Remote MCP source-bound response',
-      mentions: [],
-      timestamp: 1_100,
-      replyTo: source.id,
-    });
+    const source = store.append(
+      canonicalTestMessageInput({
+        userId: 'alice',
+        catId: 'codex-sol',
+        threadId: 'thread-f247-return',
+        content: '@gpt-pro inspect this exact source',
+        mentions: ['gpt-pro'],
+        timestamp: 1_000,
+      }),
+    );
+    const remoteReply = store.append(
+      canonicalTestMessageInput({
+        userId: 'alice',
+        catId: 'gpt-pro',
+        threadId: 'thread-f247-return',
+        content: 'Remote MCP source-bound response',
+        mentions: [],
+        timestamp: 1_100,
+        replyTo: source.id,
+      }),
+    );
 
     assert.equal(remoteReply.replyTo, source.id);
     assert.deepEqual(await hydrateReplyPreview(store, remoteReply.replyTo), {
@@ -64,23 +69,27 @@ describe('F247 source-bound Remote MCP return contract', () => {
     const threadStore = new ThreadStore();
     const thread = await threadStore.create('alice', 'F247 source-bound return');
     await threadStore.addParticipants(thread.id, ['codex']);
-    const source = store.append({
-      userId: 'alice',
-      catId: 'codex-sol',
-      threadId: thread.id,
-      content: '@gpt-pro bind this source',
-      mentions: ['gpt-pro'],
-      timestamp: 1_000,
-      extra: { stream: { invocationId: 'inv-source', turnInvocationId: 'inv-source' } },
-    });
-    const other = store.append({
-      userId: 'alice',
-      catId: 'codex-sol',
-      threadId: thread.id,
-      content: 'do not bind this source',
-      mentions: [],
-      timestamp: 1_001,
-    });
+    const source = store.append(
+      canonicalTestMessageInput({
+        userId: 'alice',
+        catId: 'codex-sol',
+        threadId: thread.id,
+        content: '@gpt-pro bind this source',
+        mentions: ['gpt-pro'],
+        timestamp: 1_000,
+        extra: { stream: { invocationId: 'inv-source', turnInvocationId: 'inv-source' } },
+      }),
+    );
+    const other = store.append(
+      canonicalTestMessageInput({
+        userId: 'alice',
+        catId: 'codex-sol',
+        threadId: thread.id,
+        content: 'do not bind this source',
+        mentions: [],
+        timestamp: 1_001,
+      }),
+    );
     const binding = signer.sign({
       threadId: thread.id,
       userId: 'alice',

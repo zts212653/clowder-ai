@@ -84,6 +84,18 @@ export function transcriptEntriesToAgentMessages(
       if (result == null) continue;
       if (Array.isArray(result)) out.push(...result);
       else out.push(result);
+      continue;
+    }
+
+    // LI-005: user entries contain tool_result content blocks (MCP execution
+    // results). Feed through transformClaudeEvent which bridges them to tool_result
+    // AgentMessages with toolResultStatus — needed for durable trigger classification.
+    // Same shape as -p NDJSON `user` events (content[].type === 'tool_result').
+    if (entry.type === 'user') {
+      const result = transformClaudeEvent(entry, catId, state);
+      if (result == null) continue;
+      if (Array.isArray(result)) out.push(...result);
+      else out.push(result);
     }
 
     // Skip everything else (produce no user-facing AgentMessage):
@@ -97,7 +109,7 @@ export function transcriptEntriesToAgentMessages(
     //     (transformClaudeEvent) emits nothing for turn_duration either, so skipping it here
     //     also restores the bg/PTY ⇄ -p parity this consumer is meant to guarantee.
     //   - system/stop_hook_summary: hook diagnostics — not user-facing.
-    //   - last-prompt / file-history-snapshot / agent-name / ai-title / user / attachment /
+    //   - last-prompt / file-history-snapshot / agent-name / ai-title / attachment /
     //     permission-mode / etc.: transcript bookkeeping, not content.
   }
 

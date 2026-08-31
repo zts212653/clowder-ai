@@ -31,7 +31,7 @@ export const messageBundleRoutes: FastifyPluginAsync<MessageBundleRoutesOptions>
       targetMessage.deletedAt !== undefined ||
       targetMessage._tombstone === true ||
       targetMessage.deliveryStatus === 'canceled' ||
-      targetMessage.catId !== null ||
+      (targetMessage.from ? targetMessage.from.kind !== 'user' : targetMessage.catId !== null) ||
       !targetMessage.extra?.messageBundle
     ) {
       reply.status(404);

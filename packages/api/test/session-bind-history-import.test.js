@@ -99,7 +99,7 @@ describe('Session bind history import', () => {
     try {
       const thread = await threadStore.create('user-1', 'Test');
 
-      await createSealedTranscript({
+      const sealedSession = await createSealedTranscript({
         sessionChainStore,
         transcriptWriter,
         threadId: thread.id,
@@ -135,6 +135,12 @@ describe('Session bind history import', () => {
       assert.equal(stored.length, 1);
       assert.equal(stored[0]?.catId, 'opus');
       assert.equal(stored[0]?.content, '历史里的布偶猫回答');
+      assert.equal(stored[0]?.provenance?.observation, 'derived');
+      assert.match(
+        stored[0]?.provenance?.sourceRef ?? '',
+        new RegExp(`^transcript:${sealedSession.id}:\\d+$`),
+        'history import declares its transcript lineage instead of posing as a fresh observation',
+      );
       // F194 Phase Z9 AC-Z25 (KD-28): history import now stamps turnInvocationId
       // explicitly (= invocationId for history records — they have only one identity).
       assert.deepEqual(stored[0]?.extra?.stream, { invocationId: 'inv-1', turnInvocationId: 'inv-1' });

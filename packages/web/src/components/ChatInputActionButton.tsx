@@ -14,8 +14,8 @@ interface ChatInputActionButtonProps {
   onSend: () => void;
   /** F39: Queue-mode send (content will be queued behind running invocation) */
   onQueueSend?: () => void;
-  /** F39: Force-mode send (cancel running + execute immediately) */
-  onForceSend?: () => void;
+  /** Admit the draft to Queue, then Steer that exact entry. */
+  onSteerSend?: () => void;
   onStop?: () => void;
   stopState?: 'available' | 'pending' | 'unavailable' | 'hidden';
   disabled?: boolean;
@@ -51,7 +51,7 @@ export function ChatInputActionButton({
   onTranscript,
   onSend,
   onQueueSend,
-  onForceSend,
+  onSteerSend,
   onStop,
   stopState,
   disabled,
@@ -209,7 +209,7 @@ export function ChatInputActionButton({
           >
             <QueueSendIcon className="w-5 h-5" />
           </button>
-          {onForceSend && activeExecutionKey !== undefined && (
+          {onSteerSend && activeExecutionKey !== undefined && (
             <button
               type="button"
               onClick={() => {
@@ -258,11 +258,11 @@ export function ChatInputActionButton({
           onCancel={() => setConfirmSteer(false)}
           onConfirm={() => {
             setConfirmSteer(false);
-            // Guard: only force-send if the execution identity that prompted
+            // Guard: only Steer if the execution identity that prompted
             // confirmation is still current. Catches same-render A→B where
             // hasActiveInvocation stays true but the execution set changed.
             const keyMatch = activeExecutionKey !== undefined && activeExecutionKey === steerBoundKeyRef.current;
-            if (hasActiveInvocation && keyMatch) onForceSend?.();
+            if (hasActiveInvocation && keyMatch) onSteerSend?.();
           }}
         />
       )}

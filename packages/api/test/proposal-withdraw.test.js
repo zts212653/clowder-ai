@@ -5,6 +5,7 @@
 import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
 import './helpers/setup-cat-registry.js';
+import { canonicalTestMessageInput } from './helpers/message-from-fixtures.js';
 import { createProposalTestContext } from './helpers/proposal-test-harness.js';
 
 async function proposed(ctx, { userId = 'alice', catId = 'opus' } = {}) {
@@ -86,14 +87,17 @@ describe('F128 requester withdraw', () => {
     const ctx = await createProposalTestContext({ proposalStoreOverride: proposalStore });
     const { source, proposalId } = await proposed(ctx);
     ctx.socketEvents.length = 0;
-    const origin = await ctx.messageStore.append({
-      userId: 'alice',
-      catId: null,
-      content: `Withdraw thread proposal ${proposalId}`,
-      mentions: [],
-      timestamp: Date.now(),
-      threadId: source.id,
-    });
+    const origin = await ctx.messageStore.append(
+      canonicalTestMessageInput({
+        provenance: { author: 'user', routed: false, observation: 'original' },
+        userId: 'alice',
+        catId: null,
+        content: `Withdraw thread proposal ${proposalId}`,
+        mentions: [],
+        timestamp: Date.now(),
+        threadId: source.id,
+      }),
+    );
     const { invocationId, callbackToken } = await ctx.registry.create('alice', 'opus', source.id, undefined, origin.id);
     const retry = () =>
       ctx.app.inject({

@@ -66,6 +66,28 @@ function makeInput(overrides = {}) {
   };
 }
 
+/**
+ * Wrap a minimal mock registry (getStageHooks only) with the override-aware
+ * methods HookPipeline now calls (PR3: isEnabled/getActiveVersion/
+ * getDisabledBySource/getContentOverride). Defaults to manifest baseline.
+ */
+function withOverrideMethods(mockRegistry) {
+  // Build a hooks map from the stageHooks the mock returns
+  const hooksMap = new Map();
+  for (const stage of ['session-init', 'per-turn']) {
+    for (const h of mockRegistry.getStageHooks(stage)) {
+      hooksMap.set(h.manifest.id, h);
+    }
+  }
+  return {
+    ...mockRegistry,
+    isEnabled: (hookId) => hooksMap.get(hookId)?.manifest.enabled ?? false,
+    getActiveVersion: (hookId) => hooksMap.get(hookId)?.manifest.version ?? 0,
+    getDisabledBySource: () => 'manifest',
+    getContentOverride: () => undefined,
+  };
+}
+
 describe('HookPipeline', () => {
   /** @type {typeof import('../dist/domains/prompt-hooks/HookPipeline.js')} */
   let pipelineMod;
@@ -116,7 +138,7 @@ describe('HookPipeline', () => {
     // Mock renderer
     const renderer = (id, vars) => `[${id}] name=${vars.NAME ?? ''}`;
 
-    const pipeline = new pipelineMod.HookPipeline(mockRegistry, resolvers, renderer);
+    const pipeline = new pipelineMod.HookPipeline(withOverrideMethods(mockRegistry), resolvers, renderer);
     const result = pipeline.executeStage('per-turn', makeInput());
 
     // D1 should fire, D2 should skip
@@ -144,7 +166,7 @@ describe('HookPipeline', () => {
         },
       ],
     };
-    const pipeline = new pipelineMod.HookPipeline(mockRegistry, new Map(), () => 'content');
+    const pipeline = new pipelineMod.HookPipeline(withOverrideMethods(mockRegistry), new Map(), () => 'content');
     const result = pipeline.executeStage('session-init', makeInput());
 
     assert.equal(result.patches.length, 0);
@@ -174,7 +196,7 @@ describe('HookPipeline', () => {
       return `mode=${id} idx=${vars.CHAIN_INDEX}`;
     };
 
-    const pipeline = new pipelineMod.HookPipeline(mockRegistry, resolvers, renderer);
+    const pipeline = new pipelineMod.HookPipeline(withOverrideMethods(mockRegistry), resolvers, renderer);
     const result = pipeline.executeStage('per-turn', makeInput());
 
     // Renderer should be called with 'D7_serial', not 'D7'
@@ -198,7 +220,7 @@ describe('HookPipeline', () => {
     // Renderer returns null = template missing
     const renderer = () => null;
 
-    const pipeline = new pipelineMod.HookPipeline(mockRegistry, resolvers, renderer);
+    const pipeline = new pipelineMod.HookPipeline(withOverrideMethods(mockRegistry), resolvers, renderer);
     const result = pipeline.executeStage('per-turn', makeInput());
 
     assert.equal(result.patches.length, 0);
@@ -219,7 +241,7 @@ describe('HookPipeline', () => {
     };
     // No resolver for L1
     const renderer = () => 'governance content';
-    const pipeline = new pipelineMod.HookPipeline(mockRegistry, new Map(), renderer);
+    const pipeline = new pipelineMod.HookPipeline(withOverrideMethods(mockRegistry), new Map(), renderer);
     const result = pipeline.executeStage('session-init', makeInput());
 
     assert.equal(result.patches.length, 1);
@@ -236,7 +258,7 @@ describe('HookPipeline', () => {
   });
 
   it('empty stage produces no patches or events', () => {
-    const mockRegistry = { getStageHooks: () => [] };
+    const mockRegistry = withOverrideMethods({ getStageHooks: () => [] });
     const pipeline = new pipelineMod.HookPipeline(mockRegistry, new Map(), () => 'x');
     const result = pipeline.executeStage('session-init', makeInput());
 

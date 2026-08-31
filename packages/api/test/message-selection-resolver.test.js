@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
+import { canonicalTestMessageInput } from './helpers/message-from-fixtures.js';
 
 await import('tsx/esm');
 const {
@@ -23,7 +24,7 @@ function makeThread(overrides = {}) {
 }
 
 function makeMessage(overrides = {}) {
-  return {
+  return canonicalTestMessageInput({
     id: 'message-1',
     threadId: 'thread-source',
     userId: 'user-1',
@@ -33,7 +34,7 @@ function makeMessage(overrides = {}) {
     timestamp: 100,
     deliveryStatus: 'delivered',
     ...overrides,
-  };
+  });
 }
 
 function makeQueueCustody(ownerUserId = 'user-1') {
@@ -113,8 +114,8 @@ describe('MessageSelectionResolver admission', () => {
     );
     assert.deepEqual(Object.keys(result.carrier.items[0]).sort(), ['kind', 'messageId']);
     assert.deepEqual(Object.keys(result.carrier.items[1]).sort(), ['kind', 'messageId']);
-    assert.deepEqual(result.items[0].author, { kind: 'user', userId: 'user-1' });
-    assert.deepEqual(result.items[1].author, { kind: 'cat', catId: 'codex-sol' });
+    assert.deepEqual(result.items[0].from, { kind: 'user', userId: 'user-1' });
+    assert.deepEqual(result.items[1].from, { kind: 'agent', catId: 'codex-sol' });
   });
 
   it('anchors an exact Quote and stores a domain-separated digest of the full bubble projection', async () => {

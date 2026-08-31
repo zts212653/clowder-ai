@@ -151,7 +151,7 @@ function reminderTitle(attempt: QueueReminderAttempt): string | undefined {
 function attemptStatus(
   target: QueueReceiptTarget,
 ): 'pending' | 'spawning' | 'streaming' | 'done' | 'error' | undefined {
-  if (target.state === 'failed' || target.state === 'interrupted') return 'error';
+  if (target.state === 'failed' || target.state === 'interrupted' || target.state === 'cancelled') return 'error';
   if (target.state === 'handled' || target.state === 'withdrawn') return 'done';
   if (target.state === 'seen') return 'streaming';
   if (target.state === 'awakened' || target.state === 'steering') return 'spawning';
@@ -288,14 +288,13 @@ export function MessageReceiptDock({
                   </button>
                 )}
               </div>
-              {(target.state === 'failed' || target.state === 'interrupted') && (
+              {(target.state === 'failed' || target.state === 'interrupted' || target.state === 'cancelled') && (
                 <output
                   className="mt-1 flex items-center gap-1.5 rounded-md border border-semantic-critical/30 bg-semantic-critical-surface/60 px-2 py-1 text-micro text-semantic-critical"
                   data-receipt-failure={target.catId}
                 >
-                  <CatAvatar catId={target.catId} size={16} status="error" />
                   <span>
-                    系统：{receiptFailureReason(target)}
+                    {getCatLabel(target.catId)}：{receiptFailureReason(target)}
                     {latestAttempt ? ` · 本条消息第 ${latestAttempt.sequence} 次尝试` : ''}
                   </span>
                 </output>

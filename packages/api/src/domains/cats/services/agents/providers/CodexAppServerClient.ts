@@ -5,6 +5,8 @@ import type {
 } from '../../freshness/FreshnessNoticeBroker.js';
 import type {
   AgentCarrierSession,
+  AgentClientActiveRunDispatchRegistration,
+  AgentClientActiveRunHandle,
   PreparedProviderRequestV1,
   ProviderCompactionObservation,
   ProviderContinuityEvidence,
@@ -115,6 +117,8 @@ export interface CodexAppServerRunInput {
   /** F299: recovery has no user message, but its application context is still model-visible input. */
   prepareRecoveryRequest?: (recoveryInstruction: string) => PreparedProviderRequestV1;
   beforeProviderLaunch?: (request: PreparedProviderRequestV1) => Promise<ProviderRequestGenerationCommitV1>;
+  /** #1354: lifecycle-owned registration for this exact accepted provider turn. */
+  activeRunDispatch?: AgentClientActiveRunDispatchRegistration;
 }
 
 export interface CodexAppServerClientDeps {
@@ -193,6 +197,8 @@ export class CodexAppServerClient {
     let latestUsage: JsonObject | null = null;
     let activeThreadId: string | null = null;
     let activeTurnId: string | null = null;
+    let activeRunDispatchOpen = false;
+    let releaseActiveRunDispatch: (() => void) | undefined;
     let transportDisposition: 'release' | 'evict' = 'release';
     const timeoutMs = Math.max(0, input.timeoutMs ?? 0);
     const interruptGraceMs = Math.max(0, input.interruptGraceMs ?? DEFAULT_INTERRUPT_GRACE_MS);
@@ -320,6 +326,50 @@ export class CodexAppServerClient {
         this.lifecycle.transition('turn_accepted', { threadId, turnId: activeTurnId, turnAccepted: true }),
       );
       this.lifecycle.armInactivityTimeout(timeoutMs, timeoutHandler);
+      if (input.activeRunDispatch) {
+        const invocationId = input.activeRunDispatch.invocationId;
+        const handle: AgentClientActiveRunHandle = {
+          provider: 'openai_codex',
+          carrier: 'codex_app_server',
+          threadId,
+          turnId: activeTurnId,
+        };
+        activeRunDispatchOpen = true;
+        const release = input.activeRunDispatch.register({
+          invocationId,
+          capabilities: { append: true, steer: true },
+          handle,
+          dispatch: async (dispatchInput, options) => {
+            if (options.expectedInvocationId !== invocationId) {
+              return { accepted: false, reason: 'active_run_mismatch' };
+            }
+            if (!activeRunDispatchOpen || activeThreadId !== threadId || activeTurnId !== handle.turnId) {
+              return { accepted: false, reason: 'active_run_closed' };
+            }
+            const text = dispatchInput.text.trim();
+            const imagePaths = dispatchInput.imagePaths?.filter((path) => path.length > 0) ?? [];
+            if (!text && imagePaths.length === 0) return { accepted: false, reason: 'invalid_input' };
+            try {
+              const result = asCodexAppServerRecord(
+                await this.request('turn/steer', {
+                  threadId,
+                  expectedTurnId: handle.turnId,
+                  input: [
+                    ...(text ? [{ type: 'text', text: dispatchInput.text }] : []),
+                    ...imagePaths.map((path) => ({ type: 'localImage', path })),
+                  ],
+                }),
+              );
+              return result?.turnId === handle.turnId
+                ? { accepted: true, handle }
+                : { accepted: false, reason: 'active_run_mismatch' };
+            } catch {
+              return { accepted: false, reason: 'provider_rejected' };
+            }
+          },
+        });
+        if (typeof release === 'function') releaseActiveRunDispatch = release;
+      }
       if (input.signal?.aborted) {
         void this.lifecycle.interrupt(threadId, activeTurnId, 'user_cancel', interruptGraceMs);
       }
@@ -395,6 +445,7 @@ export class CodexAppServerClient {
         if (mapped?.type === 'turn.completed' && latestUsage) mapped.usage = latestUsage;
         if (mapped) yield mapped;
         if (record?.method === 'turn/completed') {
+          activeRunDispatchOpen = false;
           try {
             await this.deps.freshnessController?.markTurnCompleted(activeTurnId);
           } catch {
@@ -438,6 +489,8 @@ export class CodexAppServerClient {
       if (failed) yield this.lifecycle.event(failed);
       throw failure;
     } finally {
+      activeRunDispatchOpen = false;
+      releaseActiveRunDispatch?.();
       const { closing, closed } = await closeCodexAppServerTransport(
         this.deps.wire,
         this.lifecycle,

@@ -8,6 +8,7 @@ import assert from 'node:assert/strict';
 import { afterEach, beforeEach, describe, mock, test } from 'node:test';
 import { catRegistry, createCatId } from '@cat-cafe/shared';
 import Fastify from 'fastify';
+import { canonicalTestMessageInput } from './helpers/message-from-fixtures.js';
 
 const { InvocationQueue } = await import('../dist/domains/cats/services/agents/invocation/InvocationQueue.js');
 const { InvocationRegistry } = await import('../dist/domains/cats/services/agents/invocation/InvocationRegistry.js');
@@ -57,6 +58,13 @@ describe('POST /api/messages — replyTo validation', () => {
       },
       router: {
         resolveTargetsAndIntent: mock.fn(async () => ({
+          attemptBatch: {
+            parserMode: 'user',
+            spanBasis: 'lowercased_message',
+            attempts: [],
+            truncated: false,
+            metricEligible: true,
+          },
           targetCats: ['opus'],
           intent: { intent: 'execute' },
         })),
@@ -94,6 +102,7 @@ describe('POST /api/messages — replyTo validation', () => {
         clearPause: mock.fn(),
         onInvocationComplete: mock.fn(async () => {}),
         enqueueContinuation: mock.fn(() => ({ outcome: 'enqueued' })),
+        requestDrain: mock.fn(),
       },
       threadStore,
     };
@@ -126,8 +135,8 @@ describe('POST /api/messages — replyTo validation', () => {
       },
     });
 
-    assert.equal(res.statusCode, 200);
-    const messages = messageStore.getByThread(thread.id);
+    assert.equal(res.statusCode, 202, res.body);
+    const messages = messageStore.getByThreadIncludingQueued(thread.id);
     const sent = messages.find((m) => m.content === 'reply to ghost');
     assert.ok(sent, 'message should be stored');
     assert.equal(sent.replyTo, undefined, 'invalid replyTo should be dropped');
@@ -138,43 +147,49 @@ describe('POST /api/messages — replyTo validation', () => {
   // POST /api/messages path must too, else hydrateReplyPreview leaks their raw content.
   test('silently drops replyTo referencing system message', async () => {
     const thread = await createThread();
-    const sysMsg = messageStore.append({
-      userId: 'system',
-      catId: null,
-      content: 'SYSTEM BADGE — internal',
-      mentions: [],
-      timestamp: 1000,
-      threadId: thread.id,
-    });
+    const sysMsg = messageStore.append(
+      canonicalTestMessageInput({
+        provenance: { author: 'system', routed: false, observation: 'original' },
+        userId: 'system',
+        catId: null,
+        content: 'SYSTEM BADGE — internal',
+        mentions: [],
+        timestamp: 1000,
+        threadId: thread.id,
+      }),
+    );
     const res = await app.inject({
       method: 'POST',
       url: '/api/messages',
       payload: { content: 'reply to system', threadId: thread.id, replyTo: sysMsg.id },
     });
-    assert.equal(res.statusCode, 200);
-    const sent = messageStore.getByThread(thread.id).find((m) => m.content === 'reply to system');
+    assert.equal(res.statusCode, 202);
+    const sent = messageStore.getByThreadIncludingQueued(thread.id).find((m) => m.content === 'reply to system');
     assert.ok(sent, 'message should be stored');
     assert.equal(sent.replyTo, undefined, 'system replyTo should be dropped (non-quotable)');
   });
 
   test('silently drops replyTo referencing briefing message', async () => {
     const thread = await createThread();
-    const briefingMsg = messageStore.append({
-      userId: 'default-user',
-      catId: null,
-      content: 'TOP SECRET BRIEFING',
-      mentions: [],
-      timestamp: 1000,
-      threadId: thread.id,
-      origin: 'briefing',
-    });
+    const briefingMsg = messageStore.append(
+      canonicalTestMessageInput({
+        provenance: { author: 'system', routed: false, observation: 'original' },
+        userId: 'default-user',
+        catId: null,
+        content: 'TOP SECRET BRIEFING',
+        mentions: [],
+        timestamp: 1000,
+        threadId: thread.id,
+        origin: 'briefing',
+      }),
+    );
     const res = await app.inject({
       method: 'POST',
       url: '/api/messages',
       payload: { content: 'reply to briefing', threadId: thread.id, replyTo: briefingMsg.id },
     });
-    assert.equal(res.statusCode, 200);
-    const sent = messageStore.getByThread(thread.id).find((m) => m.content === 'reply to briefing');
+    assert.equal(res.statusCode, 202);
+    const sent = messageStore.getByThreadIncludingQueued(thread.id).find((m) => m.content === 'reply to briefing');
     assert.ok(sent, 'message should be stored');
     assert.equal(sent.replyTo, undefined, 'briefing replyTo should be dropped (non-quotable)');
   });
@@ -183,14 +198,17 @@ describe('POST /api/messages — replyTo validation', () => {
     const thread1 = await createThread('Thread 1');
     const thread2 = await createThread('Thread 2');
 
-    const otherThreadMsg = messageStore.append({
-      userId: 'default-user',
-      catId: null,
-      content: 'message in thread 2',
-      mentions: [],
-      timestamp: 1000,
-      threadId: thread2.id,
-    });
+    const otherThreadMsg = messageStore.append(
+      canonicalTestMessageInput({
+        provenance: { author: 'user', routed: false, observation: 'original' },
+        userId: 'default-user',
+        catId: null,
+        content: 'message in thread 2',
+        mentions: [],
+        timestamp: 1000,
+        threadId: thread2.id,
+      }),
+    );
 
     const res = await app.inject({
       method: 'POST',
@@ -202,8 +220,8 @@ describe('POST /api/messages — replyTo validation', () => {
       },
     });
 
-    assert.equal(res.statusCode, 200);
-    const messages = messageStore.getByThread(thread1.id);
+    assert.equal(res.statusCode, 202);
+    const messages = messageStore.getByThreadIncludingQueued(thread1.id);
     const sent = messages.find((m) => m.content === 'cross-thread reply');
     assert.ok(sent, 'message should be stored');
     assert.equal(sent.replyTo, undefined, 'cross-thread replyTo should be dropped');
@@ -212,14 +230,17 @@ describe('POST /api/messages — replyTo validation', () => {
   test('silently drops replyTo referencing deleted message', async () => {
     const thread = await createThread();
 
-    const deleted = messageStore.append({
-      userId: 'default-user',
-      catId: null,
-      content: 'will be deleted',
-      mentions: [],
-      timestamp: 1000,
-      threadId: thread.id,
-    });
+    const deleted = messageStore.append(
+      canonicalTestMessageInput({
+        provenance: { author: 'user', routed: false, observation: 'original' },
+        userId: 'default-user',
+        catId: null,
+        content: 'will be deleted',
+        mentions: [],
+        timestamp: 1000,
+        threadId: thread.id,
+      }),
+    );
     messageStore.softDelete(deleted.id);
 
     const res = await app.inject({
@@ -232,8 +253,8 @@ describe('POST /api/messages — replyTo validation', () => {
       },
     });
 
-    assert.equal(res.statusCode, 200);
-    const messages = messageStore.getByThread(thread.id);
+    assert.equal(res.statusCode, 202);
+    const messages = messageStore.getByThreadIncludingQueued(thread.id);
     const sent = messages.find((m) => m.content === 'reply to deleted');
     assert.ok(sent, 'message should be stored');
     assert.equal(sent.replyTo, undefined, 'deleted-message replyTo should be dropped');
@@ -242,15 +263,18 @@ describe('POST /api/messages — replyTo validation', () => {
   test('silently drops replyTo referencing queued (undelivered) message', async () => {
     const thread = await createThread();
 
-    const queued = messageStore.append({
-      userId: 'default-user',
-      catId: null,
-      content: 'queued message',
-      mentions: [],
-      timestamp: 1000,
-      threadId: thread.id,
-      deliveryStatus: 'queued',
-    });
+    const queued = messageStore.append(
+      canonicalTestMessageInput({
+        provenance: { author: 'user', routed: false, observation: 'original' },
+        userId: 'default-user',
+        catId: null,
+        content: 'queued message',
+        mentions: [],
+        timestamp: 1000,
+        threadId: thread.id,
+        deliveryStatus: 'queued',
+      }),
+    );
 
     const res = await app.inject({
       method: 'POST',
@@ -262,8 +286,8 @@ describe('POST /api/messages — replyTo validation', () => {
       },
     });
 
-    assert.equal(res.statusCode, 200);
-    const messages = messageStore.getByThread(thread.id);
+    assert.equal(res.statusCode, 202);
+    const messages = messageStore.getByThreadIncludingQueued(thread.id);
     const sent = messages.find((m) => m.content === 'reply to queued');
     assert.ok(sent, 'message should be stored');
     assert.equal(sent.replyTo, undefined, 'queued-message replyTo should be dropped');
@@ -271,15 +295,18 @@ describe('POST /api/messages — replyTo validation', () => {
 
   test('preserves replyTo referencing queued cat speech already published to the timeline', async () => {
     const thread = await createThread();
-    const published = messageStore.append({
-      userId: 'default-user',
-      catId: 'codex',
-      content: 'published source-cat seed',
-      mentions: ['opus'],
-      timestamp: 1000,
-      threadId: thread.id,
-      deliveryStatus: 'queued',
-    });
+    const published = messageStore.append(
+      canonicalTestMessageInput({
+        provenance: { author: 'cat', routed: false, observation: 'original' },
+        userId: 'default-user',
+        catId: 'codex',
+        content: 'published source-cat seed',
+        mentions: ['opus'],
+        timestamp: 1000,
+        threadId: thread.id,
+        deliveryStatus: 'queued',
+      }),
+    );
 
     const res = await app.inject({
       method: 'POST',
@@ -291,9 +318,9 @@ describe('POST /api/messages — replyTo validation', () => {
       },
     });
 
-    assert.equal(res.statusCode, 200);
+    assert.equal(res.statusCode, 202);
     const sent = messageStore
-      .getByThread(thread.id)
+      .getByThreadIncludingQueued(thread.id)
       .find((message) => message.content === 'reply to published cat speech');
     assert.ok(sent, 'message should be stored');
     assert.equal(sent.replyTo, published.id);
@@ -302,15 +329,18 @@ describe('POST /api/messages — replyTo validation', () => {
   test('silently drops replyTo referencing canceled message', async () => {
     const thread = await createThread();
 
-    const canceled = messageStore.append({
-      userId: 'default-user',
-      catId: null,
-      content: 'canceled message',
-      mentions: [],
-      timestamp: 1000,
-      threadId: thread.id,
-      deliveryStatus: 'queued',
-    });
+    const canceled = messageStore.append(
+      canonicalTestMessageInput({
+        provenance: { author: 'user', routed: false, observation: 'original' },
+        userId: 'default-user',
+        catId: null,
+        content: 'canceled message',
+        mentions: [],
+        timestamp: 1000,
+        threadId: thread.id,
+        deliveryStatus: 'queued',
+      }),
+    );
     messageStore.markCanceled(canceled.id);
 
     const res = await app.inject({
@@ -323,8 +353,8 @@ describe('POST /api/messages — replyTo validation', () => {
       },
     });
 
-    assert.equal(res.statusCode, 200);
-    const messages = messageStore.getByThread(thread.id);
+    assert.equal(res.statusCode, 202);
+    const messages = messageStore.getByThreadIncludingQueued(thread.id);
     const sent = messages.find((m) => m.content === 'reply to canceled');
     assert.ok(sent, 'message should be stored');
     assert.equal(sent.replyTo, undefined, 'canceled-message replyTo should be dropped');
@@ -333,14 +363,17 @@ describe('POST /api/messages — replyTo validation', () => {
   test('preserves valid replyTo referencing message in same thread', async () => {
     const thread = await createThread();
 
-    const target = messageStore.append({
-      userId: 'default-user',
-      catId: null,
-      content: 'original message',
-      mentions: [],
-      timestamp: 1000,
-      threadId: thread.id,
-    });
+    const target = messageStore.append(
+      canonicalTestMessageInput({
+        provenance: { author: 'user', routed: false, observation: 'original' },
+        userId: 'default-user',
+        catId: null,
+        content: 'original message',
+        mentions: [],
+        timestamp: 1000,
+        threadId: thread.id,
+      }),
+    );
 
     const res = await app.inject({
       method: 'POST',
@@ -352,8 +385,8 @@ describe('POST /api/messages — replyTo validation', () => {
       },
     });
 
-    assert.equal(res.statusCode, 200);
-    const messages = messageStore.getByThread(thread.id);
+    assert.equal(res.statusCode, 202);
+    const messages = messageStore.getByThreadIncludingQueued(thread.id);
     const sent = messages.find((m) => m.content === 'valid reply');
     assert.ok(sent, 'message should be stored');
     assert.equal(sent.replyTo, target.id, 'valid replyTo should be preserved');
@@ -364,16 +397,19 @@ describe('POST /api/messages — replyTo validation', () => {
   test('silently drops replyTo when public message quotes a whisper', async () => {
     const thread = await createThread();
 
-    const whisperMsg = messageStore.append({
-      userId: 'default-user',
-      catId: 'opus',
-      content: 'secret whisper content',
-      mentions: [],
-      timestamp: 1000,
-      threadId: thread.id,
-      visibility: 'whisper',
-      whisperTo: ['codex'],
-    });
+    const whisperMsg = messageStore.append(
+      canonicalTestMessageInput({
+        provenance: { author: 'cat', routed: false, observation: 'original' },
+        userId: 'default-user',
+        catId: 'opus',
+        content: 'secret whisper content',
+        mentions: [],
+        timestamp: 1000,
+        threadId: thread.id,
+        visibility: 'whisper',
+        whisperTo: ['codex'],
+      }),
+    );
 
     const res = await app.inject({
       method: 'POST',
@@ -385,8 +421,8 @@ describe('POST /api/messages — replyTo validation', () => {
       },
     });
 
-    assert.equal(res.statusCode, 200);
-    const messages = messageStore.getByThread(thread.id);
+    assert.equal(res.statusCode, 202);
+    const messages = messageStore.getByThreadIncludingQueued(thread.id);
     const sent = messages.find((m) => m.content === 'public reply to whisper');
     assert.ok(sent, 'message should be stored');
     assert.equal(sent.replyTo, undefined, 'public reply to whisper should drop replyTo');
@@ -396,16 +432,19 @@ describe('POST /api/messages — replyTo validation', () => {
     const thread = await createThread();
 
     // Parent whispered only to codex
-    const whisperMsg = messageStore.append({
-      userId: 'default-user',
-      catId: 'opus',
-      content: 'private to codex only',
-      mentions: [],
-      timestamp: 1000,
-      threadId: thread.id,
-      visibility: 'whisper',
-      whisperTo: ['codex'],
-    });
+    const whisperMsg = messageStore.append(
+      canonicalTestMessageInput({
+        provenance: { author: 'cat', routed: false, observation: 'original' },
+        userId: 'default-user',
+        catId: 'opus',
+        content: 'private to codex only',
+        mentions: [],
+        timestamp: 1000,
+        threadId: thread.id,
+        visibility: 'whisper',
+        whisperTo: ['codex'],
+      }),
+    );
 
     // Reply whispered to codex AND gemini — gemini can't see parent
     const res = await app.inject({
@@ -420,8 +459,8 @@ describe('POST /api/messages — replyTo validation', () => {
       },
     });
 
-    assert.equal(res.statusCode, 200);
-    const messages = messageStore.getByThread(thread.id);
+    assert.equal(res.statusCode, 202);
+    const messages = messageStore.getByThreadIncludingQueued(thread.id);
     const sent = messages.find((m) => m.content === 'wider whisper reply');
     assert.ok(sent, 'message should be stored');
     assert.equal(sent.replyTo, undefined, 'wider-audience whisper reply should drop replyTo');
@@ -430,16 +469,19 @@ describe('POST /api/messages — replyTo validation', () => {
   test('preserves replyTo when whisper replies to whisper with same recipients', async () => {
     const thread = await createThread();
 
-    const whisperMsg = messageStore.append({
-      userId: 'default-user',
-      catId: 'opus',
-      content: 'whisper to codex',
-      mentions: [],
-      timestamp: 1000,
-      threadId: thread.id,
-      visibility: 'whisper',
-      whisperTo: ['codex'],
-    });
+    const whisperMsg = messageStore.append(
+      canonicalTestMessageInput({
+        provenance: { author: 'cat', routed: false, observation: 'original' },
+        userId: 'default-user',
+        catId: 'opus',
+        content: 'whisper to codex',
+        mentions: [],
+        timestamp: 1000,
+        threadId: thread.id,
+        visibility: 'whisper',
+        whisperTo: ['codex'],
+      }),
+    );
 
     // Same-audience whisper reply — safe, codex already saw the parent
     const res = await app.inject({
@@ -454,8 +496,8 @@ describe('POST /api/messages — replyTo validation', () => {
       },
     });
 
-    assert.equal(res.statusCode, 200);
-    const messages = messageStore.getByThread(thread.id);
+    assert.equal(res.statusCode, 202);
+    const messages = messageStore.getByThreadIncludingQueued(thread.id);
     const sent = messages.find((m) => m.content === 'same-audience whisper reply');
     assert.ok(sent, 'message should be stored');
     assert.equal(sent.replyTo, whisperMsg.id, 'same-audience whisper replyTo should be preserved');

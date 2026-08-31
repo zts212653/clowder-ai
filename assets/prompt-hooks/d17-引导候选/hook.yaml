@@ -13,6 +13,11 @@ resolver: D17GuideCandidateResolver
 inputs:
   - guideCandidate
 
+# Variable metadata (canonical source for Console editor)
+variables:
+  - name: GUIDE_PROMPT_LINES
+    description: 引导候选提示文本行
+    placeholder: ""
 # Override constraints
 disableable: true
 

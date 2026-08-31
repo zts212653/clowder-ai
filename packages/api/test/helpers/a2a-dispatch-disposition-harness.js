@@ -5,6 +5,7 @@ import { BallCustodyIngest } from '../../dist/domains/ball-custody/BallCustodyIn
 import { BallCustodyProjector } from '../../dist/domains/ball-custody/BallCustodyProjector.js';
 import { buildHandedEvent } from '../../dist/domains/ball-custody/ball-custody-events.js';
 import { MessageStore } from '../../dist/domains/cats/services/stores/ports/MessageStore.js';
+import { canonicalTestMessageInput } from './message-from-fixtures.js';
 
 class MemoryEventLog {
   events = [];
@@ -72,26 +73,28 @@ export async function createA2ADispositionHarness({
   const projector = new BallCustodyProjector(eventLog, projectionStore);
   const ingest = new BallCustodyIngest(eventLog, projector);
   const messageStore = new MessageStore();
-  const source = messageStore.append({
-    userId: 'user-1',
-    catId: createCatId(sourceCatId),
-    content: '@codex-sol review complete',
-    mentions: [createCatId('codex-sol')],
-    timestamp: 1_000,
-    threadId: 'thread-1',
-    origin: 'stream',
-    ...(deliveryStatus ? { deliveryStatus } : {}),
-    ...(crossPostSourceThreadId
-      ? {
-          extra: {
-            crossPost: {
-              sourceThreadId: crossPostSourceThreadId,
-              sourceInvocationId: 'source-invocation',
+  const source = messageStore.append(
+    canonicalTestMessageInput({
+      userId: 'user-1',
+      catId: createCatId(sourceCatId),
+      content: '@codex-sol review complete',
+      mentions: [createCatId('codex-sol')],
+      timestamp: 1_000,
+      threadId: 'thread-1',
+      origin: 'stream',
+      ...(deliveryStatus ? { deliveryStatus } : {}),
+      ...(crossPostSourceThreadId
+        ? {
+            extra: {
+              crossPost: {
+                sourceThreadId: crossPostSourceThreadId,
+                sourceInvocationId: 'source-invocation',
+              },
             },
-          },
-        }
-      : {}),
-  });
+          }
+        : {}),
+    }),
+  );
   await ingest.record(
     buildHandedEvent({
       threadId: 'thread-1',

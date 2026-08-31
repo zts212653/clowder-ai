@@ -20,6 +20,7 @@ import { ThreadUnseenChecker } from '../dist/domains/cats/services/freshness/Thr
 import { buildTmuxAgentCarrierPaneCommand } from '../dist/domains/terminal/tmux-agent-carrier-session.js';
 import { buildProviderNativeFreshnessCoverage } from '../dist/infrastructure/harness-eval/freshness/provider-native-freshness-coverage.js';
 import { fakeL0Compiler } from './helpers/fake-l0-compiler.js';
+import { canonicalTestQueueInput } from './helpers/message-from-fixtures.js';
 
 class AsyncInbox {
   #values = [];
@@ -123,18 +124,21 @@ describe('F254 D2 provider-native freshness truth', () => {
       '../dist/domains/cats/services/freshness/createProviderNativeFreshnessFactory.js'
     );
     const queue = new InvocationQueue();
-    queue.enqueue({
-      ownerAuthProvenance: 'strict',
-      threadId: 'thread-current-parent',
-      userId: 'user-1',
-      content: 'continue in the active provider turn',
-      source: 'user',
-      targetCats: ['opus'],
-      authorIntentByCatId: {
-        opus: { requested: 'continue_current', boundParentInvocationId: 'parent-active' },
-      },
-      intent: 'execute',
-    });
+    queue.enqueue(
+      canonicalTestQueueInput({
+        kind: 'conversation_input',
+        ownerAuthProvenance: 'strict',
+        threadId: 'thread-current-parent',
+        userId: 'user-1',
+        content: 'continue in the active provider turn',
+        source: 'user',
+        targetCats: ['opus'],
+        authorIntentByCatId: {
+          opus: { requested: 'continue_current', boundParentInvocationId: 'parent-active' },
+        },
+        intent: 'execute',
+      }),
+    );
     const factory = createProviderNativeFreshnessFactory({
       redis: new FakeRedis(),
       cursorStore: { getSeenCursor: async () => 'seen-cursor' },
@@ -382,13 +386,16 @@ describe('F254 D2 provider-native freshness truth', () => {
     const queueMessageId = 'queued-message-1';
     const mergedMessageId = 'queued-message-2';
     const queueEntries = [
-      {
+      canonicalTestQueueInput({
         entryId: 'queue-1',
         source: 'user',
+        userId: 'user-1',
+        threadId: 'thread-1',
+        targetCats: ['codex-sol'],
         content: 'exact queued body',
         messageId: queueMessageId,
         mergedMessageIds: [mergedMessageId],
-      },
+      }),
     ];
     const unseenChecker = new ThreadUnseenChecker({
       userId: 'user-1',
@@ -517,11 +524,14 @@ describe('F254 D2 provider-native freshness truth', () => {
       messageStore: { getByThreadAfter: async () => [] },
       queueChecker: {
         getQueuedForThread: () => [
-          {
+          canonicalTestQueueInput({
             entryId: 'queue-missing-id',
             source: 'user',
+            userId: 'user-1',
+            threadId: 'thread-1',
+            targetCats: ['codex-sol'],
             content: 'queued body without durable identity',
-          },
+          }),
         ],
       },
     });

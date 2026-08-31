@@ -5,6 +5,12 @@
  * into a single time-sorted stream for thread-level replay.
  *
  * AC-E2: "同一 thread 下所有 session 按时间串联"
+ *
+ * Note: CLI transcripts only contain assistant-side events (text, tool_use,
+ * tool_result, system_info). User prompts are stored in the chat message
+ * store, not in the CLI event stream. This fetcher supplements transcript
+ * events with user messages from the chat history API so the replay
+ * shows the complete conversation (user prompts + assistant responses).
  */
 
 import type { ChatMessage } from '@/stores/chat-types';
@@ -22,7 +28,9 @@ export { mergeSessionEvents } from './merge-session-events';
 // ---------------------------------------------------------------------------
 
 /**
- * Fetch all sealed session IDs for a thread.
+ * Fetch all session IDs for a thread.
+ * Includes active/sealing sessions so the current conversation is replayable
+ * — events already recorded are valid for replay even if the session is ongoing.
  */
 async function fetchThreadSessionIds(threadId: string): Promise<string[]> {
   const res = await apiFetch(`/api/threads/${threadId}/sessions`);
@@ -32,8 +40,7 @@ async function fetchThreadSessionIds(threadId: string): Promise<string[]> {
   const data = (await res.json()) as {
     sessions?: Array<{ id: string; status: 'active' | 'sealing' | 'sealed' }>;
   };
-  // Only replay sealed sessions — active/sealing sessions have incomplete events
-  return (data.sessions ?? []).filter((s) => s.status === 'sealed').map((s) => s.id);
+  return (data.sessions ?? []).map((s) => s.id);
 }
 
 /**
@@ -108,12 +115,13 @@ async function fetchThreadMessages(threadId: string): Promise<ChatMessage[]> {
 // ---------------------------------------------------------------------------
 
 /**
- * Fetch all events for a thread (all sealed sessions, merged by timestamp).
+ * Fetch all events for a thread (all sessions + user messages, merged by timestamp).
  *
  * Flow:
- * 1. GET /api/threads/:threadId/sessions → list sealed sessions
- * 2. For each sealed session: paginate all events
- * 3. Merge + sort by timestamp + re-index eventNo
+ * 1. GET /api/threads/:threadId/sessions → list sessions
+ * 2. For each session: paginate all events
+ * 3. GET /api/messages → extract user (owner) messages
+ * 4. Merge all + sort by timestamp + re-index eventNo
  */
 export async function fetchThreadReplayEvents(threadId: string): Promise<RawTranscriptEvent[]> {
   const sessionIds = await fetchThreadSessionIds(threadId);

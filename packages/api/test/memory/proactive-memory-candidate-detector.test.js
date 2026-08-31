@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { before, beforeEach, describe, it } from 'node:test';
+import { canonicalTestMessageInput } from '../helpers/message-from-fixtures.js';
 
 describe('ProactiveMemoryCandidateDetector', () => {
   let MessageStore;
@@ -35,15 +36,20 @@ describe('ProactiveMemoryCandidateDetector', () => {
   }
 
   function append(content, threadId, timestamp, overrides = {}) {
-    return messageStore.append({
-      userId: 'owner-1',
-      catId: null,
-      content,
-      mentions: [],
-      threadId,
-      timestamp,
-      ...overrides,
-    });
+    return messageStore.append(
+      canonicalTestMessageInput({
+        userId: 'owner-1',
+        catId: null,
+        content,
+        mentions: [],
+        threadId,
+        timestamp,
+        ...overrides,
+        provenance: {
+          observation: 'original',
+        },
+      }),
+    );
   }
 
   function detector(overrides = {}) {
@@ -147,7 +153,10 @@ describe('ProactiveMemoryCandidateDetector', () => {
     const current = append('Alden', 'thread-public-b', 200);
     append('Alden', 'thread-private', 210);
     append('Alden', 'thread-whisper', 220, { visibility: 'whisper' });
-    append('Alden', 'thread-connector', 230, { source: { provider: 'feishu', externalMessageId: 'ext-1' } });
+    append('Alden', 'thread-connector', 230, {
+      from: { kind: 'external', connectorId: 'feishu' },
+      source: { connector: 'feishu', label: 'Feishu', icon: 'feishu', meta: { externalMessageId: 'ext-1' } },
+    });
     append('Alden', 'thread-deleted', 235);
     const deleted = append('Alden', 'thread-message-deleted', 240);
     messageStore.softDelete(deleted.id, 'owner-1');

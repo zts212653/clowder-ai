@@ -70,7 +70,7 @@ END`,
 END`,
 ];
 
-export const CURRENT_SCHEMA_VERSION = 39;
+export const CURRENT_SCHEMA_VERSION = 40;
 
 // F163 Phase A: experiment infrastructure tables (cohorts, suggestions, logs)
 export const SCHEMA_V13_TABLES = `
@@ -1196,6 +1196,17 @@ export function applyMigrations(db: Database.Database): void {
       );
     `);
     db.prepare('INSERT INTO schema_version (version, applied_at) VALUES (?, ?)').run(39, new Date().toISOString());
+  }
+
+  // V40: F257 scheduler provenance — persist RUN_FAILED retry progress for once-tasks
+  // so that a restart during the backoff window does not lose the task as a missed window.
+  if (currentVersion < 40) {
+    try {
+      db.exec('ALTER TABLE dynamic_task_defs ADD COLUMN retry_attempts INTEGER DEFAULT 0');
+    } catch {
+      // Column may already exist from a partial migration.
+    }
+    db.prepare('INSERT INTO schema_version (version, applied_at) VALUES (?, ?)').run(40, new Date().toISOString());
   }
 }
 

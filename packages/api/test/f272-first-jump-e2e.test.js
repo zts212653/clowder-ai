@@ -4,6 +4,7 @@ import { AutoDreamStore } from '../dist/domains/auto-dream/AutoDreamStore.js';
 import { PresentLoopService } from '../dist/domains/auto-dream/PresentLoopService.js';
 import { ProactiveRelationshipService } from '../dist/domains/auto-dream/ProactiveRelationshipService.js';
 import { MessageStore } from '../dist/domains/cats/services/stores/ports/MessageStore.js';
+import { canonicalTestMessageInput } from './helpers/message-from-fixtures.js';
 
 const OWNER = 'owner-a';
 const CAT = 'codex-sol';
@@ -146,14 +147,17 @@ describe('F272 Phase A first-jump acceptance story', () => {
     assert.equal((await messageStore.getByThread(IMPLEMENTATION_THREAD, 20, OWNER)).length, 0);
 
     now += 1_000;
-    const landyReply = await messageStore.append({
-      threadId: HOME,
-      userId: OWNER,
-      catId: null,
-      content: '好呀，我看见你先画的草图了。',
-      mentions: [],
-      timestamp: now,
-    });
+    const landyReply = await messageStore.append(
+      canonicalTestMessageInput({
+        provenance: { author: 'user', routed: false, observation: 'original' },
+        threadId: HOME,
+        userId: OWNER,
+        catId: null,
+        content: '好呀，我看见你先画的草图了。',
+        mentions: [],
+        timestamp: now,
+      }),
+    );
     now += 1_000;
     const nextWake = await presentLoop.beginScheduledRun({
       ownerUserId: OWNER,

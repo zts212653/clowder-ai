@@ -20,6 +20,7 @@ import {
   type EvalDomainScheduleOpts,
   evaluatePublishPrereq,
 } from './eval-domain-daily.js';
+import { buildEvidencePrereqSkippedMessage, evaluateEvidencePrereq } from './eval-domain-evidence-gate.js';
 import { getEvalCatOverride } from './eval-domain-override.js';
 import {
   type EvalDomainRegistryEntry,
@@ -154,6 +155,20 @@ export function createEvalDomainNDaySpec(opts: EvalDomainScheduleOpts): TaskSpec
             [{ domainId: domain.domainId, systemThreadId: domain.systemThreadId, displayName: domain.displayName }],
             opts.defaultUserId,
           );
+        }
+
+        if (opts.evidencePrereqProbe) {
+          const evidencePrereq = await evaluateEvidencePrereq(opts.evidencePrereqProbe, domain);
+          if (!evidencePrereq.ok) {
+            if (ctx.deliver) {
+              await ctx.deliver({
+                threadId: domain.systemThreadId,
+                content: buildEvidencePrereqSkippedMessage(domain, evidencePrereq.reason),
+                userId: 'scheduler',
+              });
+            }
+            return;
+          }
         }
 
         // Direction B publish-prereq gate (same as daily/weekly spec)

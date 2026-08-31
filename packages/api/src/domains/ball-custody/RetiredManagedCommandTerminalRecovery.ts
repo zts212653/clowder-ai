@@ -160,8 +160,8 @@ async function publish(
     const stored =
       existing ??
       (await deps.messageStore.append({
+        from: { kind: 'system', service: 'managed-command-terminal-recovery' },
         userId: 'scheduler',
-        catId: null,
         content: `[定时任务] ${claimed.command.wakeContent}`,
         mentions: [],
         timestamp: now(),

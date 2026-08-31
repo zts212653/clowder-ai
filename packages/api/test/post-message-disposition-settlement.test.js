@@ -10,6 +10,7 @@ import {
   createA2ADispositionAuth as auth,
   createA2ADispositionHarness as harness,
 } from './helpers/a2a-dispatch-disposition-harness.js';
+import { canonicalTestQueueInput } from './helpers/message-from-fixtures.js';
 
 describe('post/read → A2A disposition → Queue settlement integration', () => {
   test('same-cat cross-thread completion settles one exact exposed carrier without requeue', async () => {
@@ -19,20 +20,23 @@ describe('post/read → A2A disposition → Queue settlement integration', () =>
       deliveryStatus: 'queued',
     });
     const queue = new InvocationQueue();
-    const enqueued = queue.enqueue({
-      threadId: 'thread-1',
-      userId: 'user-1',
-      ownerAuthProvenance: 'unknown',
-      content: h.source.content,
-      source: 'agent',
-      sourceCategory: 'a2a',
-      targetCats: ['codex-sol'],
-      intent: 'execute',
-      autoExecute: true,
-      callerCatId: 'codex-sol',
-      a2aParentInvocationId: 'source-invocation',
-      a2aTriggerMessageId: h.source.id,
-    });
+    const enqueued = queue.enqueue(
+      canonicalTestQueueInput({
+        kind: 'message_wake',
+        threadId: 'thread-1',
+        userId: 'user-1',
+        ownerAuthProvenance: 'unknown',
+        content: h.source.content,
+        source: 'agent',
+        sourceCategory: 'a2a',
+        targetCats: ['codex-sol'],
+        intent: 'execute',
+        autoExecute: true,
+        callerCatId: 'codex-sol',
+        a2aParentInvocationId: 'source-invocation',
+        a2aTriggerMessageId: h.source.id,
+      }),
+    );
     assert.equal(enqueued.outcome, 'enqueued');
     queue.backfillMessageId('thread-1', 'user-1', enqueued.entry.id, h.source.id);
     const queued = queue.getEntrySnapshot('thread-1', 'user-1', enqueued.entry.id);

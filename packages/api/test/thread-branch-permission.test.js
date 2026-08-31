@@ -9,6 +9,7 @@ import { describe, it } from 'node:test';
 import Fastify from 'fastify';
 import { MessageStore } from '../dist/domains/cats/services/stores/ports/MessageStore.js';
 import { threadBranchRoutes } from '../dist/routes/thread-branch.js';
+import { canonicalTestMessageInput } from './helpers/message-from-fixtures.js';
 
 function createMockSocketManager() {
   const events = [];
@@ -65,14 +66,17 @@ describe('F109: Branch from system-created thread', () => {
     const socketManager = createMockSocketManager();
 
     // Seed a system-created thread with a message
-    const msg = messageStore.append({
-      userId: 'user-1',
-      catId: null,
-      content: 'hello from system thread',
-      mentions: [],
-      timestamp: 1000,
-      threadId: 'thread-sys',
-    });
+    const msg = messageStore.append(
+      canonicalTestMessageInput({
+        provenance: { author: 'user', routed: false, observation: 'original' },
+        userId: 'user-1',
+        catId: null,
+        content: 'hello from system thread',
+        mentions: [],
+        timestamp: 1000,
+        threadId: 'thread-sys',
+      }),
+    );
 
     const threadStore = createMockThreadStore({
       'thread-sys': {
@@ -110,14 +114,17 @@ describe('F109: Branch from system-created thread', () => {
     const messageStore = new MessageStore();
     const socketManager = createMockSocketManager();
 
-    const msg = messageStore.append({
-      userId: 'user-1',
-      catId: null,
-      content: 'message',
-      mentions: [],
-      timestamp: 1000,
-      threadId: 'thread-other',
-    });
+    const msg = messageStore.append(
+      canonicalTestMessageInput({
+        provenance: { author: 'user', routed: false, observation: 'original' },
+        userId: 'user-1',
+        catId: null,
+        content: 'message',
+        mentions: [],
+        timestamp: 1000,
+        threadId: 'thread-other',
+      }),
+    );
 
     const threadStore = createMockThreadStore({
       'thread-other': {

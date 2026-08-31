@@ -3,7 +3,6 @@
  *
  * Tests cross-module interactions that verify AC-A1~A9:
  * - InvocationTracker + QueueProcessor (concurrent slots)
- * - WorklistRegistry (parentInvocationId isolation)
  * - AgentMessage invocationId tagging
  *
  * These are NOT redundant with unit tests — they test the *seams*
@@ -11,14 +10,11 @@
  */
 
 import assert from 'node:assert/strict';
-import { afterEach, describe, it, mock } from 'node:test';
+import { describe, it, mock } from 'node:test';
 
 const { InvocationTracker } = await import('../dist/domains/cats/services/agents/invocation/InvocationTracker.js');
 const { QueueProcessor } = await import('../dist/domains/cats/services/agents/invocation/QueueProcessor.js');
 const { InvocationQueue } = await import('../dist/domains/cats/services/agents/invocation/InvocationQueue.js');
-const { registerWorklist, unregisterWorklist, pushToWorklist, getWorklist } = await import(
-  '../dist/domains/cats/services/agents/routing/WorklistRegistry.js'
-);
 
 // ── Helpers ──
 
@@ -35,6 +31,7 @@ function stubDeps(overrides = {}) {
       update: mock.fn(async () => {}),
     },
     router: {
+      resolveConversationTargetsAtAdmission: mock.fn(async (targetCats) => [...targetCats]),
       routeExecution: mock.fn(async function* () {
         yield { type: 'done', catId: 'opus', timestamp: Date.now() };
       }),
@@ -61,6 +58,7 @@ function stubDeps(overrides = {}) {
 
 function enqueueEntry(queue, overrides = {}) {
   const entry = {
+    kind: 'conversation_input',
     ownerAuthProvenance: 'unknown',
     threadId: 't1',
     userId: 'u1',
@@ -93,13 +91,9 @@ describe('AC-A1: concurrent different-cat invocations (InvocationTracker + Queue
     assert.equal(deps.invocationTracker.has('t1', 'opus'), true);
     assert.equal(deps.invocationTracker.has('t1', 'codex'), true);
 
-    // QueueProcessor: completing opus slot doesn't pause codex slot
-    // Enqueue codex entry ONLY — opus has nothing queued
-    enqueueEntry(deps.queue, { targetCats: ['codex'] });
-    await processor.onInvocationComplete('t1', 'opus', 'canceled');
-    // opus slot gets paused (canceled + queue has entries for thread)
-    // but this is expected — the key test is codex is NOT paused
-    assert.equal(processor.isPaused('t1', 'codex'), false, 'codex not paused by opus cancel');
+    // Completing one slot must leave the sibling tracker slot alive.
+    await processor.onInvocationComplete('t1', 'opus', 'completed');
+    assert.equal(deps.invocationTracker.has('t1', 'codex'), true, 'codex remains active after opus completes');
   });
 });
 
@@ -118,6 +112,7 @@ describe('AC-A3: same cat same thread serializes (tracker → QueueProcessor)', 
     let resolveExecution;
     const slowDeps = stubDeps({
       router: {
+        resolveConversationTargetsAtAdmission: mock.fn(async (targetCats) => [...targetCats]),
         routeExecution: mock.fn(async function* () {
           await new Promise((r) => {
             resolveExecution = r;
@@ -148,9 +143,9 @@ describe('AC-A3: same cat same thread serializes (tracker → QueueProcessor)', 
   });
 });
 
-// ── AC-A5: Backward compatibility ──
+// ── AC-A5: Single-cat lifecycle ──
 
-describe('AC-A5: backward compatibility — single-cat execution unchanged', () => {
+describe('AC-A5: single-cat execution lifecycle', () => {
   it('single cat execute-then-complete cycle works', async () => {
     const deps = stubDeps();
     const processor = new QueueProcessor(deps);
@@ -175,44 +170,6 @@ describe('AC-A5: backward compatibility — single-cat execution unchanged', () 
     const result = tracker.cancel('t1', 'opus', 'bob');
     assert.equal(result.cancelled, false, 'wrong userId rejected');
     assert.equal(tracker.has('t1', 'opus'), true);
-  });
-});
-
-// ── AC-A6: WorklistRegistry parentInvocationId isolation ──
-
-describe('AC-A6: WorklistRegistry parentInvocationId isolation', () => {
-  afterEach(() => {
-    // Cleanup all registries
-    unregisterWorklist('t1', undefined, 'inv-opus-1');
-    unregisterWorklist('t1', undefined, 'inv-codex-1');
-    unregisterWorklist('t1');
-  });
-
-  it('two invocations in same thread have isolated worklists', () => {
-    // Register worklists for two invocations: opus and codex
-    const entry1 = registerWorklist('t1', ['opus'], 3, 'inv-opus-1');
-    const entry2 = registerWorklist('t1', ['codex'], 3, 'inv-codex-1');
-
-    // Push to opus worklist (callerCatId='opus' matches entry1.list[0])
-    pushToWorklist('t1', ['gemini'], 'opus', 'inv-opus-1');
-
-    // Opus worklist has the pushed cat
-    const w1 = getWorklist('t1', 'inv-opus-1');
-    assert.equal(w1?.list.length, 2); // ['opus', 'gemini']
-    assert.ok(w1?.list.includes('gemini'), 'gemini pushed to opus worklist');
-
-    // Codex worklist is separate
-    const w2 = getWorklist('t1', 'inv-codex-1');
-    assert.equal(w2?.list.length, 1, 'codex worklist untouched');
-    assert.ok(!w2?.list.includes('gemini'), 'gemini not in codex worklist');
-  });
-
-  it('fallback to threadId key when no parentInvocationId', () => {
-    const entry = registerWorklist('t1', ['opus'], 3);
-    pushToWorklist('t1', ['codex'], 'opus');
-    const w = getWorklist('t1');
-    assert.equal(w?.list.length, 2); // ['opus', 'codex']
-    assert.ok(w?.list.includes('codex'));
   });
 });
 

@@ -99,15 +99,18 @@ describe('Phase H AC-H4: eval cat instructions point to publish_verdict MCP tool
     assert.match(packet.instructions, /Use the MCP tool/, 'must redirect to MCP tool');
   });
 
-  it('instructions mention branch + commit + PR shape (so cat understands tool side-effects)', () => {
+  it('instructions expose artifact result shape and forbid runtime-evidence PRs', () => {
     const packet = buildEvalCatInvocation({
       domain: { ...TEST_DOMAIN_BASE, domainId: 'eval:a2a', sourceAdapter: 'f167-runtime-eval' },
       trendRefs: [],
       verdictRefs: [],
       legacyCleanup: { status: 'not_checked' },
     });
-    assert.match(packet.instructions, /verdict\/auto\/\{domainSlug\}\/\{verdictId\}/, 'branch name pattern');
-    assert.match(packet.instructions, /commit SHA \+ PR URL/, 'response shape');
+    assert.match(packet.instructions, /artifactId.*artifactUrl.*verdictPath.*bundleDir/s, 'artifact response shape');
+    assert.match(packet.instructions, /outside the product Git checkout/i, 'artifact storage boundary');
+    assert.match(packet.instructions, /do not.*create (?:an evidence|a verdict) PR/is, 'must forbid evidence PRs');
+    assert.doesNotMatch(packet.instructions, /verdict\/auto\/\{domainSlug\}\/\{verdictId\}/, 'no branch pattern');
+    assert.doesNotMatch(packet.instructions, /commit SHA \+ PR URL|self-merge|gh pr merge/i, 'no Git lifecycle');
   });
 
   it('instructions reference sourceRefs (砚砚 R1 P1 #2 + R2 P2: tool NEVER 造 evidence + basenames only)', () => {

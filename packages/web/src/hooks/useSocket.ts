@@ -1,5 +1,6 @@
 'use client';
 
+import { isLifecycleStoredMessageMetadata, isMessageFrom, type MessageFrom } from '@cat-cafe/shared';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { io, Socket } from 'socket.io-client';
 import {
@@ -53,6 +54,9 @@ interface AgentMessage {
   replyPreview?: { senderCatId: string | null; content: string; deleted?: true };
   /** F108: Invocation ID — distinguishes messages from concurrent invocations */
   invocationId?: string;
+  turnInvocationId?: string;
+  lifecycleResponseMessageId?: string;
+  activeRun?: import('@cat-cafe/shared').LifecycleActiveRun;
   /**
    * F183 Phase C — thread-scoped monotonic sequence number (KD-9).
    * Set by `SocketManager.broadcastAgentMessage` from `ThreadSequencer.next()`
@@ -248,10 +252,12 @@ export async function reconcileThreadWithServer(
     if (shouldAbort()) return;
     if (!res.ok) return;
     const data = (await res.json()) as {
+      queue?: import('../stores/chat-types').QueueEntry[];
       activeInvocations?: QueueActiveInvocationSlot[];
     };
     if (shouldAbort()) return;
     const store = useChatStore.getState();
+    if (Array.isArray(data.queue)) store.setQueue(threadId, data.queue);
     const serverSlots = data.activeInvocations && data.activeInvocations.length > 0 ? data.activeInvocations : null;
     const isActiveThread = store.currentThreadId === threadId;
 
@@ -526,7 +532,6 @@ export function useSocket(callbacks: SocketCallbacks, threadId?: string, foregro
         timestamp: event.timestamp ?? Date.now(),
         routeThreadId: event.routeThreadId ?? threadIdRef.current,
         storeThreadId: event.storeThreadId ?? store.currentThreadId,
-        queuePaused: event.queuePaused ?? threadState?.queuePaused,
         hasActiveInvocation: event.hasActiveInvocation ?? threadState?.hasActiveInvocation,
       });
     };
@@ -905,7 +910,10 @@ export function useSocket(callbacks: SocketCallbacks, threadId?: string, foregro
 
     const normalizeQueueForDebug = (queue: unknown): unknown[] => (Array.isArray(queue) ? queue : []);
     const isQueueEntryObject = (entry: unknown): entry is import('../stores/chat-types').QueueEntry =>
-      entry !== null && typeof entry === 'object' && !Array.isArray(entry);
+      entry !== null &&
+      typeof entry === 'object' &&
+      !Array.isArray(entry) &&
+      isMessageFrom((entry as { from?: unknown }).from);
     const normalizeQueueEntries = (queue: unknown): import('../stores/chat-types').QueueEntry[] =>
       Array.isArray(queue) ? queue.filter(isQueueEntryObject) : [];
     const getQueueStatusesForDebug = (queue: unknown) =>
@@ -928,11 +936,21 @@ export function useSocket(callbacks: SocketCallbacks, threadId?: string, foregro
         } else {
           store.setQueue(data.threadId, queue);
         }
+        if (data.threadId === store.currentThreadId) {
+          const epoch = bumpLiveQueueHydrateEpoch(data.threadId);
+          void reconcileThreadWithServer(
+            data.threadId,
+            () =>
+              useChatStore.getState().currentThreadId !== data.threadId ||
+              getLiveQueueHydrateEpoch(data.threadId) !== epoch,
+            'QueueUpdated',
+          );
+        }
         // F264: every durable user queue entry is owner-visible from admission.
         // Hydrate the authoritative message so its receipt stays live and the
         // same projection is recovered after F5. Connector/agent work remains
         // queue-only and must not trigger a browser history read.
-        if (queue.some((entry) => entry.source === 'user' && typeof entry.messageId === 'string')) {
+        if (queue.some((entry) => entry.from.kind === 'user' && typeof entry.messageId === 'string')) {
           store.requestStreamCatchUp(data.threadId);
         }
         // Queue processor started executing an entry: restore the coarse "active"
@@ -946,16 +964,6 @@ export function useSocket(callbacks: SocketCallbacks, threadId?: string, foregro
           // stale slots before raising the coarse marker; preserve uncorrelated
           // slots until canonical `/queue` supplies the new exact identity.
           store.setThreadHasActiveInvocation(data.threadId, true);
-          const epoch = bumpLiveQueueHydrateEpoch(data.threadId);
-          if (data.threadId === store.currentThreadId) {
-            void reconcileThreadWithServer(
-              data.threadId,
-              () =>
-                useChatStore.getState().currentThreadId !== data.threadId ||
-                getLiveQueueHydrateEpoch(data.threadId) !== epoch,
-              'QueueProcessing',
-            );
-          }
         }
         if (data.action === 'completed') {
           const epoch = bumpLiveQueueHydrateEpoch(data.threadId);
@@ -969,10 +977,6 @@ export function useSocket(callbacks: SocketCallbacks, threadId?: string, foregro
             'QueueCompleted',
           );
         }
-        // P1 fix: 'processing' means continue/auto-dequeue resumed the queue — clear paused state
-        if (data.action === 'processing' || data.action === 'cleared') {
-          store.setQueuePaused(data.threadId, false);
-        }
         if (isDebugEnabled()) {
           const stateAfterUpdate = store.getThreadState(data.threadId);
           recordInvocationEvent({
@@ -982,53 +986,6 @@ export function useSocket(callbacks: SocketCallbacks, threadId?: string, foregro
             queueLength: normalizeQueueForDebug(data.queue).length,
             queueStatuses: getQueueStatusesForDebug(data.queue),
             hasActiveInvocation: data.action === 'processing' ? true : stateAfterUpdate?.hasActiveInvocation,
-            queuePaused:
-              data.action === 'processing' || data.action === 'cleared' ? false : stateAfterUpdate?.queuePaused,
-          });
-        }
-      },
-    );
-    // F264: a cross-thread Queue carrier is visible as soon as durable custody
-    // accepts it. This does not mark the backend message delivered; it only
-    // installs the original source message so live queueReceipt updates have a
-    // stable timeline anchor before terminal completion.
-    socket.on(
-      'messages_queued',
-      (data: {
-        threadId: string;
-        messageIds: string[];
-        messages: Array<{
-          id: string;
-          content: string;
-          catId: string | null;
-          timestamp: number;
-          contentBlocks?: readonly unknown[];
-          extra?: Record<string, unknown>;
-          origin?: 'stream' | 'callback' | 'briefing';
-          replyTo?: string;
-          replyPreview?: { senderCatId: string | null; content: string; deleted?: boolean; kind?: string };
-          mentionsUser?: boolean;
-        }>;
-      }) => {
-        void invalidateSidebarProjection();
-        const store = useChatStore.getState();
-        for (const message of data.messages) {
-          store.addMessageToThread(data.threadId, {
-            id: message.id,
-            type: message.catId ? 'assistant' : 'user',
-            content: message.content,
-            timestamp: message.timestamp,
-            ...(message.catId ? { catId: message.catId } : {}),
-            ...(message.contentBlocks
-              ? { contentBlocks: message.contentBlocks as import('../stores/chat-types').ChatMessage['contentBlocks'] }
-              : {}),
-            ...(message.extra ? { extra: message.extra as import('../stores/chat-types').ChatMessage['extra'] } : {}),
-            ...(message.origin ? { origin: message.origin } : {}),
-            ...(message.replyTo ? { replyTo: message.replyTo } : {}),
-            ...(message.replyPreview
-              ? { replyPreview: message.replyPreview as import('../stores/chat-types').ChatMessage['replyPreview'] }
-              : {}),
-            ...(message.mentionsUser ? { mentionsUser: true } : {}),
           });
         }
       },
@@ -1042,7 +999,9 @@ export function useSocket(callbacks: SocketCallbacks, threadId?: string, foregro
         deliveredAt: number;
         messages?: Array<{
           id: string;
+          from?: MessageFrom;
           content: string;
+          lifecycle?: import('@cat-cafe/shared').LifecycleStoredMessageMetadata;
           catId: string | null;
           timestamp: number;
           timelineOrderAt?: number;
@@ -1060,23 +1019,77 @@ export function useSocket(callbacks: SocketCallbacks, threadId?: string, foregro
         useChatStore.getState().markMessagesDelivered(data.threadId, data.messageIds, data.deliveredAt, data.messages);
       },
     );
-
-    socket.on('queue_paused', (data: { threadId: string; reason: 'canceled' | 'failed'; queue: unknown[] }) => {
-      void invalidateSidebarProjection();
-      const store = useChatStore.getState();
-      store.setQueue(data.threadId, data.queue as import('../stores/chat-types').QueueEntry[]);
-      store.setQueuePaused(data.threadId, true, data.reason);
-      bumpLiveQueueHydrateEpoch(data.threadId);
-      if (isDebugEnabled()) {
-        recordInvocationEvent({
-          event: 'queue_paused',
-          threadId: data.threadId,
-          reason: data.reason,
-          queueLength: normalizeQueueForDebug(data.queue).length,
-          queueStatuses: getQueueStatusesForDebug(data.queue),
+    socket.on(
+      'message_lifecycle_updated',
+      (data: {
+        threadId: string;
+        message: {
+          id: string;
+          from?: MessageFrom;
+          catId: string | null;
+          content: string;
+          lifecycle: unknown;
+          timestamp: number;
+          timelineOrderAt?: number;
+          contentBlocks?: readonly unknown[];
+          extra?: Record<string, unknown>;
+          origin?: 'stream' | 'callback' | 'briefing';
+        };
+      }) => {
+        if (!isLifecycleStoredMessageMetadata(data.message.lifecycle)) return;
+        const lifecycle = data.message.lifecycle;
+        const isDeliveryFailure = lifecycle.kind === 'delivery_failure';
+        const store = useChatStore.getState();
+        if (lifecycle.kind === 'response') {
+          const threadState = store.getThreadState(data.threadId);
+          const exactRun = threadState.catInvocations[lifecycle.targetId]?.activeRun;
+          if (exactRun?.responseMessageId === data.message.id && exactRun.invocationId === lifecycle.invocationId) {
+            const liveBubble = threadState.messages.find(
+              (candidate) =>
+                candidate.id !== data.message.id &&
+                candidate.type === 'assistant' &&
+                candidate.catId === lifecycle.targetId &&
+                candidate.extra?.stream?.turnInvocationId === lifecycle.invocationId,
+            );
+            if (liveBubble) store.replaceThreadMessageId(data.threadId, liveBubble.id, data.message.id);
+          }
+        }
+        store.upsertLifecycleMessage(data.threadId, {
+          id: data.message.id,
+          type: isDeliveryFailure
+            ? 'system'
+            : data.message.from?.kind === 'agent'
+              ? 'assistant'
+              : data.message.from?.kind === 'external' || data.message.from?.kind === 'plugin'
+                ? 'connector'
+                : data.message.from?.kind === 'system'
+                  ? 'system'
+                  : data.message.from?.kind === 'user'
+                    ? 'user'
+                    : data.message.catId
+                      ? 'assistant'
+                      : 'user',
+          ...(data.message.from ? { from: data.message.from } : {}),
+          ...(isDeliveryFailure ? { variant: 'error' as const } : {}),
+          ...(data.message.catId && !isDeliveryFailure ? { catId: data.message.catId } : {}),
+          content: data.message.content,
+          lifecycle,
+          timestamp: data.message.timestamp,
+          ...(data.message.timelineOrderAt !== undefined ? { timelineOrderAt: data.message.timelineOrderAt } : {}),
+          ...(data.message.contentBlocks
+            ? {
+                contentBlocks: data.message
+                  .contentBlocks as import('../stores/chat-types').ChatMessage['contentBlocks'],
+              }
+            : {}),
+          ...(data.message.extra
+            ? { extra: data.message.extra as import('../stores/chat-types').ChatMessage['extra'] }
+            : {}),
+          ...(data.message.origin ? { origin: data.message.origin } : {}),
         });
-      }
-    });
+      },
+    );
+
     socket.on('queue_full_warning', (data: { threadId: string; source: 'user' | 'connector'; queue: unknown[] }) => {
       const store = useChatStore.getState();
       store.setQueue(data.threadId, data.queue as import('../stores/chat-types').QueueEntry[]);

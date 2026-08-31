@@ -298,7 +298,7 @@ describe('prompt-injection YAML validation', () => {
   });
 
   describe('DELETE /api/prompt-injection/segment/:id/override', () => {
-    it('rejects readonly template-backed segments with 403', async () => {
+    it('allows readonly safety-tier templates to reset their local overlay', async () => {
       await withDefaultOwnerUserId(TEST_USER_ID, async () => {
         const app = await buildSessionApp();
         try {
@@ -307,9 +307,10 @@ describe('prompt-injection YAML validation', () => {
             url: '/api/prompt-injection/segment/S1/override',
             headers: LOCAL_WRITE_HEADERS,
           });
-          assert.equal(res.statusCode, 403, `expected 403, got ${res.statusCode}: ${res.body}`);
+          assert.equal(res.statusCode, 200, `expected 200, got ${res.statusCode}: ${res.body}`);
           const body = JSON.parse(res.body);
-          assert.match(body.error, /readonly/i);
+          assert.equal(body.segmentId, 'S1');
+          assert.equal(body.deleted, false);
         } finally {
           await app.close();
         }

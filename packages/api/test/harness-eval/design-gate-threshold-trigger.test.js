@@ -74,7 +74,7 @@ function setup(value, overrides = {}) {
   return {
     store,
     deliver: mock.fn(async () => 'message-design-gate'),
-    invokeTrigger: { trigger: mock.fn(async () => 'dispatched') },
+    invokeTrigger: { trigger: mock.fn(async () => 'enqueued') },
     input: {
       provider: { resolveLatestTransition: async () => value },
       domain,

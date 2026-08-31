@@ -1,23 +1,31 @@
-import type { CatId, QueueReminderAttempt, QueueTargetAttempt, QueueTargetOutcome } from '@cat-cafe/shared';
+import type {
+  CatId,
+  QueueReminderAttempt,
+  QueueTargetAttempt,
+  QueueTargetAttemptTerminalReason,
+  QueueTargetOutcome,
+} from '@cat-cafe/shared';
 import { actionSuccessorFencesMatch } from '../../../../ball-custody/ActionSuccessorAdmissionContract.js';
 import type {
   RetryAuthorityCommit,
   RetryCustodyTransition,
 } from '../../../../ball-custody/WaitContinuationRetryCommitter.js';
 import type { RetryAuthorityFailureReason } from '../../../../ball-custody/WaitContinuationRetryPreflight.js';
-import type {
-  IMessageStore,
-  QueueCustodyAdmissionIntent,
-  QueuedMessageCustody,
-  RecallMessageToComposerDraftInput,
-  RecallMessageToComposerDraftResult,
-  StoredMessage,
+import {
+  type IMessageStore,
+  isTimelinePublished,
+  type QueueCustodyAdmissionIntent,
+  type QueuedMessageCustody,
+  type RecallMessageToComposerDraftInput,
+  type RecallMessageToComposerDraftResult,
+  type StoredMessage,
 } from '../../stores/ports/MessageStore.js';
 import {
   cloneQueuedMessageCustody,
   type QueueBodyExposure,
   type QueueCustodyActionSuccessorRebindProof,
   type QueueCustodyReplacementProof,
+  type QueueCustodyRetryReplacementProof,
   type QueueTargetCarrierBinding,
   settleQueueCustodyWithdrawal,
 } from '../../stores/ports/queued-message-custody.js';
@@ -33,6 +41,13 @@ import { normalizeOwnerAuthProvenance } from './owner-auth-provenance.js';
 interface CoordinatorDeps {
   messageStore: IMessageStore;
   now?: () => number;
+}
+
+function requireCanonicalMessageFrom(message: StoredMessage): NonNullable<StoredMessage['from']> {
+  if (!message.from) {
+    throw new Error(`Queue recovery requires canonical MessageFrom: ${message.id}`);
+  }
+  return structuredClone(message.from);
 }
 
 export interface RetireActionSuccessorQueueCustodyResult {
@@ -93,6 +108,16 @@ export interface QueueCustodyMessageCompletionResult extends QueueCustodyComplet
 
 export interface QueueCustodySettlementResult {
   perMessage: QueueCustodyMessageCompletionResult[];
+}
+
+export interface QueueCustodyFailureCompletionResult {
+  failedTargetCats: string[];
+  pendingTargetCats: string[];
+  fullyConsumed: boolean;
+}
+
+export interface QueueCustodyFailureSettlementResult {
+  perMessage: Array<QueueCustodyFailureCompletionResult & { messageId: string }>;
 }
 
 export type RetryTargetCustodyResult =
@@ -346,21 +371,134 @@ function markTargetAttemptsHandled(
   return attempts;
 }
 
-function markTargetAttemptsCancelled(
+function markTargetAttemptsActiveAppendAccepted(
   current: QueuedMessageCustody,
-  targetCats: readonly string[],
-  cancelledAt: number,
+  acceptedRuns: readonly { targetId: string; invocationId: string }[],
+  acceptedAt: number,
 ): QueueTargetAttempt[] {
   let attempts = ensureTargetAttempts(current);
-  for (const catId of targetCats) {
-    attempts = updateTargetAttempt(attempts, catId, (attempt) => ({
+  for (const run of acceptedRuns) {
+    const active = latestTargetAttempt(attempts, run.targetId);
+    const seenAt = active?.seenAt;
+    if (
+      !active ||
+      isTerminalTargetAttempt(active) ||
+      active.invocationId !== run.invocationId ||
+      seenAt === undefined ||
+      active.activeAppendAcceptedAt !== undefined
+    ) {
+      continue;
+    }
+    attempts = updateTargetAttempt(attempts, run.targetId, (attempt) => ({
       ...attempt,
-      state: 'cancelled',
-      terminalReason: 'source_withdrawn',
-      updatedAt: Math.max(attempt.updatedAt, cancelledAt),
+      activeAppendAcceptedAt: Math.max(acceptedAt, seenAt),
+      updatedAt: Math.max(attempt.updatedAt, acceptedAt),
     }));
   }
   return attempts;
+}
+
+function markTargetAttemptsFailed(
+  current: QueuedMessageCustody,
+  targetCats: readonly string[],
+  failedAt: number,
+  terminalReason: QueueTargetAttemptTerminalReason,
+  invocationIdByCatId: Readonly<Record<string, string | undefined>>,
+): QueueTargetAttempt[] {
+  let attempts = ensureTargetAttempts(current);
+  for (const catId of targetCats) {
+    const invocationId = invocationIdByCatId[catId];
+    const exposure = invocationId
+      ? current.bodyExposures?.find(
+          (candidate) => candidate.targetCatId === catId && candidate.invocationId === invocationId,
+        )
+      : undefined;
+    attempts = updateTargetAttempt(attempts, catId, (attempt) => ({
+      ...attempt,
+      state: terminalReason === 'invocation_failed' ? 'failed' : 'cancelled',
+      ...(invocationId ? { invocationId } : {}),
+      ...(exposure ? { seenAt: exposure.seenAt } : {}),
+      terminalReason,
+      updatedAt: Math.max(attempt.updatedAt, failedAt),
+    }));
+  }
+  return attempts;
+}
+
+function buildFailedTargetTransition(input: {
+  current: QueuedMessageCustody;
+  entryId: string;
+  failedTargetCats: readonly string[];
+  failedAt: number;
+  updatedAt: number;
+  terminalReason: QueueTargetAttemptTerminalReason;
+  invocationIdByCatId: Readonly<Record<string, string | undefined>>;
+}): { next: QueuedMessageCustody; completion: QueueCustodyFailureCompletionResult } {
+  const requested = new Set(input.failedTargetCats);
+  const failedTargetCats = input.current.pendingTargetCats.filter(
+    (catId) =>
+      requested.has(catId) &&
+      (!input.current.carrierByTargetCatId || input.current.carrierByTargetCatId[catId]?.entryId === input.entryId),
+  );
+  const pendingTargetCats = input.current.pendingTargetCats.filter((catId) => !failedTargetCats.includes(catId));
+  const completion = {
+    failedTargetCats,
+    pendingTargetCats,
+    fullyConsumed: pendingTargetCats.length === 0,
+  };
+  if (failedTargetCats.length === 0) return { next: input.current, completion };
+
+  const failed = new Set(input.current.failedByCatIds);
+  const awakenedInvocationIdByCatId = { ...(input.current.awakenedInvocationIdByCatId ?? {}) };
+  const awakenedAtByCatId = { ...(input.current.awakenedAtByCatId ?? {}) };
+  const seenInvocationIdByCatId = { ...input.current.seenInvocationIdByCatId };
+  const steeredInvocationIdByCatId = { ...(input.current.steeredInvocationIdByCatId ?? {}) };
+  const carrierStateByTargetCatId = { ...(input.current.carrierStateByTargetCatId ?? {}) };
+  for (const catId of failedTargetCats) {
+    failed.add(catId);
+    delete awakenedInvocationIdByCatId[catId];
+    delete awakenedAtByCatId[catId];
+    delete seenInvocationIdByCatId[catId];
+    delete steeredInvocationIdByCatId[catId];
+    delete carrierStateByTargetCatId[catId];
+  }
+  const remainingSteerRequests = (input.current.steerRequestedByCatIds ?? []).filter(
+    (catId) => !failedTargetCats.includes(catId),
+  );
+  const {
+    processingStartedAt: _processingStartedAt,
+    awakenedInvocationIdByCatId: _awakenedInvocationIdByCatId,
+    awakenedAtByCatId: _awakenedAtByCatId,
+    steerRequestedByCatIds: _steerRequestedByCatIds,
+    steeredInvocationIdByCatId: _steeredInvocationIdByCatId,
+    carrierStateByTargetCatId: _carrierStateByTargetCatId,
+    ...stableCurrent
+  } = input.current;
+  return {
+    completion,
+    next: {
+      ...stableCurrent,
+      revision: input.current.revision + 1,
+      status: completion.fullyConsumed ? 'terminal' : input.current.status === 'processing' ? 'processing' : 'queued',
+      pendingTargetCats,
+      notifiedByCatIds: input.current.notifiedByCatIds.filter((catId) => !failedTargetCats.includes(catId)),
+      ...(Object.keys(awakenedInvocationIdByCatId).length > 0 ? { awakenedInvocationIdByCatId } : {}),
+      ...(Object.keys(awakenedAtByCatId).length > 0 ? { awakenedAtByCatId } : {}),
+      seenInvocationIdByCatId,
+      ...(remainingSteerRequests.length > 0 ? { steerRequestedByCatIds: remainingSteerRequests } : {}),
+      ...(Object.keys(steeredInvocationIdByCatId).length > 0 ? { steeredInvocationIdByCatId } : {}),
+      ...(Object.keys(carrierStateByTargetCatId).length > 0 ? { carrierStateByTargetCatId } : {}),
+      failedByCatIds: [...failed],
+      targetAttempts: markTargetAttemptsFailed(
+        input.current,
+        failedTargetCats,
+        input.failedAt,
+        input.terminalReason,
+        input.invocationIdByCatId,
+      ),
+      updatedAt: input.updatedAt,
+    },
+  };
 }
 
 /**
@@ -487,14 +625,14 @@ export function createCrossThreadQueueEntryFromCustody(
     id: entryId,
     ...(durableCarrierIdempotencyKey ? { idempotencyKey: durableCarrierIdempotencyKey } : {}),
     ...(binding.actionSuccessorFence ? { actionSuccessorFence: { ...binding.actionSuccessorFence } } : {}),
-    threadId: primary.threadId,
-    userId: primary.userId,
+    threadId: binding.threadId ?? primary.threadId,
+    userId: binding.userId ?? primary.userId,
+    kind: 'message_wake',
     content: members.map(({ message }) => message.content).join('\n'),
     messageId: primary.id,
     mergedMessageIds: members.slice(1).map(({ message }) => message.id),
-    source: binding.source,
+    from: requireCanonicalMessageFrom(primary),
     ...(binding.sourceCategory ? { sourceCategory: binding.sourceCategory } : {}),
-    ...(binding.callerCatId ? { callerCatId: binding.callerCatId } : {}),
     ...(binding.a2aParentInvocationId ? { a2aParentInvocationId: binding.a2aParentInvocationId } : {}),
     ...(binding.a2aTriggerMessageId ? { a2aTriggerMessageId: binding.a2aTriggerMessageId } : {}),
     targetCats: pendingTargets,
@@ -544,7 +682,7 @@ export async function readCompleteCrossThreadQueueCarrierGroups(
   });
   for (const message of messages) {
     const custody = message.queueCustody;
-    if (message.deliveryStatus !== 'queued' || custody?.status !== 'queued') continue;
+    if (message.deliveryStatus === 'canceled' || custody?.status !== 'queued') continue;
     const matchingEntryIds = new Set(
       Object.values(custody.carrierByTargetCatId ?? {}).flatMap((binding) =>
         requestedEntryIds.has(binding.entryId) ? [binding.entryId] : [],
@@ -577,11 +715,11 @@ function bindTargetCarrierActionFence(
 ): QueueTargetCarrierBinding {
   return {
     entryId: binding.entryId,
+    ...(binding.threadId ? { threadId: binding.threadId } : {}),
+    ...(binding.userId ? { userId: binding.userId } : {}),
     idempotencyKey: actionSuccessorCarrierKey(fence, catId),
     actionSuccessorFence: { ...fence },
-    source: binding.source,
     sourceCategory: binding.sourceCategory,
-    ...(binding.callerCatId ? { callerCatId: binding.callerCatId } : {}),
     ...(binding.a2aParentInvocationId ? { a2aParentInvocationId: binding.a2aParentInvocationId } : {}),
     a2aTriggerMessageId: binding.a2aTriggerMessageId,
     autoExecute: binding.autoExecute,
@@ -757,7 +895,6 @@ export function createFanoutQueueCustodyAdmission(
     /** Complete requested group, including targets rejected before carrier staging. */
     requestedTargetCats?: readonly CatId[];
     intent: string;
-    callerCatId?: CatId;
     a2aParentInvocationId?: string;
     receiptScope?: QueueCustodyAdmissionIntent['receiptScope'];
     actionSuccessorFence?: QueueEntry['actionSuccessorFence'];
@@ -772,7 +909,6 @@ export function createFanoutQueueCustodyAdmission(
     intent: input.intent,
     targetCats: [...input.targetCats],
     ...(input.requestedTargetCats ? { requestedTargetCats: [...input.requestedTargetCats] } : {}),
-    ...(input.callerCatId ? { callerCatId: input.callerCatId } : {}),
     ...(input.a2aParentInvocationId ? { a2aParentInvocationId: input.a2aParentInvocationId } : {}),
     ...(input.receiptScope ? { receiptScope: input.receiptScope } : {}),
     ...(input.actionSuccessorFence ? { actionSuccessorFence: { ...input.actionSuccessorFence } } : {}),
@@ -786,12 +922,17 @@ export function createFanoutQueueEntriesFromAdmission(
   message: StoredMessage & { queueCustodyAdmission: QueueCustodyAdmissionIntent },
 ): QueueEntry[] {
   const admission = message.queueCustodyAdmission;
+  const from = requireCanonicalMessageFrom(message);
+  if (from.kind !== 'agent') {
+    throw new Error(`fan-out Queue admission ${message.id} is not agent-authored`);
+  }
   return admission.targetCats.map((targetCatId) => {
     const entryId = fanoutQueueCarrierIdempotencyKey(message.id, targetCatId);
     return {
       id: entryId,
       threadId: message.threadId,
       userId: admission.ownerUserId,
+      kind: 'message_wake' as const,
       ownerAuthProvenance: normalizeOwnerAuthProvenance(admission.ownerAuthProvenance),
       ...(admission.actionSuccessorFence
         ? {
@@ -802,7 +943,7 @@ export function createFanoutQueueEntriesFromAdmission(
       content: message.content,
       messageId: message.id,
       mergedMessageIds: [],
-      source: 'agent' as const,
+      from: structuredClone(from),
       sourceCategory: 'a2a' as const,
       targetCats: [targetCatId],
       allTargetCats: [targetCatId],
@@ -812,7 +953,6 @@ export function createFanoutQueueEntriesFromAdmission(
       autoExecute: true,
       queueCustodyAdmissionId: admission.admissionId,
       priority: admission.priority,
-      ...(admission.callerCatId ? { callerCatId: admission.callerCatId } : {}),
       ...(admission.a2aParentInvocationId ? { a2aParentInvocationId: admission.a2aParentInvocationId } : {}),
       a2aTriggerMessageId: message.id,
     };
@@ -840,12 +980,15 @@ function hasFanoutQueueCarrierIdentity(entry: QueueEntry, identity: FanoutQueueC
     entry.userId === identity.userId &&
     normalizeOwnerAuthProvenance(entry.ownerAuthProvenance) === identity.ownerAuthProvenance &&
     JSON.stringify(entry.actionSuccessorFence) === JSON.stringify(identity.actionSuccessorFence) &&
-    entry.source === 'agent' &&
+    entry.from.kind === 'agent' &&
     entry.sourceCategory === 'a2a'
   );
 }
 
 function appendFanoutQueueCarriers(messageId: string, entry: QueueEntry, carriers: FanoutQueueCarriers): void {
+  if (entry.from.kind !== 'agent') {
+    throw new Error(`fan-out Queue carrier ${entry.id} is not agent-authored`);
+  }
   for (const targetCatId of entry.targetCats) {
     if (carriers.carrierByTargetCatId[targetCatId]) {
       throw new Error(`fan-out Queue target has multiple carriers: ${targetCatId}`);
@@ -859,15 +1002,15 @@ function appendFanoutQueueCarriers(messageId: string, entry: QueueEntry, carrier
     carriers.targetCats.push(targetCatId as CatId);
     carriers.carrierByTargetCatId[targetCatId] = {
       entryId: entry.id,
+      threadId: entry.threadId,
+      userId: entry.userId,
       ...(entry.actionSuccessorFence
         ? {
             idempotencyKey: actionSuccessorCarrierKey(entry.actionSuccessorFence, targetCatId),
             actionSuccessorFence: { ...entry.actionSuccessorFence },
           }
         : {}),
-      source: 'agent',
       sourceCategory: 'a2a',
-      ...(entry.callerCatId ? { callerCatId: entry.callerCatId } : {}),
       ...(entry.a2aParentInvocationId ? { a2aParentInvocationId: entry.a2aParentInvocationId } : {}),
       a2aTriggerMessageId: entry.a2aTriggerMessageId ?? messageId,
       autoExecute: true,
@@ -986,6 +1129,7 @@ export function sameFanoutCustodyIdentity(
 }
 
 function activeCustodyFromEntry(entry: QueueEntry, current: QueuedMessageCustody, now: number): QueuedMessageCustody {
+  const updatedAt = Math.max(now, current.createdAt, current.updatedAt);
   if (current.ownerUserId !== undefined && current.ownerUserId !== entry.userId) {
     throw new Error(`Queue entry ${entry.id} owner principal is immutable`);
   }
@@ -1022,7 +1166,7 @@ function activeCustodyFromEntry(entry: QueueEntry, current: QueuedMessageCustody
       return next;
     };
     const bodyExposures = mergeBodyExposures(current.bodyExposures, entry.queuedBodyExposures);
-    const targetAttempts = projectTargetAttemptsFromEntry(current, entry, ownedTargets, now);
+    const targetAttempts = projectTargetAttemptsFromEntry(current, entry, ownedTargets, updatedAt);
     const carrierStateByTargetCatId = { ...(current.carrierStateByTargetCatId ?? {}) };
     for (const catId of ownedTargets) {
       carrierStateByTargetCatId[catId] = {
@@ -1079,7 +1223,7 @@ function activeCustodyFromEntry(entry: QueueEntry, current: QueuedMessageCustody
             },
           }
         : {}),
-      updatedAt: now,
+      updatedAt,
     };
   }
 
@@ -1093,11 +1237,19 @@ function activeCustodyFromEntry(entry: QueueEntry, current: QueuedMessageCustody
     ...stableCurrent
   } = current;
   const bodyExposures = mergeBodyExposures(current.bodyExposures, entry.queuedBodyExposures);
-  const targetAttempts = projectTargetAttemptsFromEntry(current, entry, current.allTargetCats, now);
+  const bindsResolvedTargetlessAdmission =
+    current.status === 'queued' &&
+    current.allTargetCats.length === 0 &&
+    current.pendingTargetCats.length === 0 &&
+    entry.status === 'processing' &&
+    entry.targetCats.length > 0;
+  const allTargetCats = bindsResolvedTargetlessAdmission ? catIds(entry.targetCats) : [...current.allTargetCats];
+  const targetAttempts = projectTargetAttemptsFromEntry(current, entry, allTargetCats, updatedAt);
   return {
     ...stableCurrent,
     revision: current.revision + 1,
     status: entry.status,
+    allTargetCats,
     ...(entry.authorIntentByCatId ? { authorIntentByCatId: structuredClone(entry.authorIntentByCatId) } : {}),
     pendingTargetCats: catIds(entry.targetCats),
     notifiedByCatIds: catIds(entry.queuedNotifiedByCatIds),
@@ -1130,7 +1282,7 @@ function activeCustodyFromEntry(entry: QueueEntry, current: QueuedMessageCustody
     ...(entry.status === 'processing' && entry.processingStartedAt !== undefined
       ? { processingStartedAt: entry.processingStartedAt }
       : {}),
-    updatedAt: now,
+    updatedAt,
   };
 }
 
@@ -1237,7 +1389,7 @@ function buildSuccessfulTargetTransition(input: {
     next: {
       ...stableCurrent,
       revision: input.current.revision + 1,
-      status: completion.fullyConsumed ? 'terminal' : 'queued',
+      status: completion.fullyConsumed ? 'terminal' : input.current.status === 'processing' ? 'processing' : 'queued',
       pendingTargetCats,
       notifiedByCatIds: input.current.notifiedByCatIds.filter((catId) => !handledTargetCats.includes(catId)),
       ...(Object.keys(awakenedInvocationIdByCatId).length > 0 ? { awakenedInvocationIdByCatId } : {}),
@@ -1264,11 +1416,23 @@ function buildSuccessfulTargetTransition(input: {
 
 function buildRetryTargetTransition(
   current: QueuedMessageCustody,
+  replacement: QueueEntry,
   targetCatId: string,
   expectedAttemptId: string,
   retriedAt: number,
-): { next: QueuedMessageCustody; attempt?: QueueTargetAttempt } {
-  if (!current.pendingTargetCats.includes(targetCatId as CatId)) return { next: current };
+): { next: QueuedMessageCustody; attempt?: QueueTargetAttempt; proof?: QueueCustodyRetryReplacementProof } {
+  const previousCarrier = current.carrierByTargetCatId?.[targetCatId];
+  const standardReplacement =
+    !previousCarrier && current.status === 'terminal' && current.pendingTargetCats.length === 0;
+  if (
+    (!standardReplacement && !previousCarrier) ||
+    current.pendingTargetCats.includes(targetCatId as CatId) ||
+    !current.failedByCatIds.includes(targetCatId as CatId) ||
+    replacement.targetCats.length !== 1 ||
+    replacement.targetCats[0] !== targetCatId
+  ) {
+    return { next: current };
+  }
   const attempts = ensureTargetAttempts(current);
   const previous = latestTargetAttempt(attempts, targetCatId);
   const retryableCancellation = previous?.state === 'cancelled' && previous.terminalReason === 'invocation_cancelled';
@@ -1276,30 +1440,67 @@ function buildRetryTargetTransition(
     return { next: current };
   }
   const sequence = previous.sequence + 1;
-  const attempt = initialTargetAttempt(current.entryId, targetCatId, retriedAt);
+  const attempt = initialTargetAttempt(replacement.id, targetCatId, retriedAt);
   attempt.sequence = sequence;
-  attempt.id = targetAttemptId(current.entryId, targetCatId, sequence);
+  attempt.id = targetAttemptId(replacement.id, targetCatId, sequence);
   const seenInvocationIdByCatId = { ...current.seenInvocationIdByCatId };
   const awakenedInvocationIdByCatId = { ...(current.awakenedInvocationIdByCatId ?? {}) };
   const awakenedAtByCatId = { ...(current.awakenedAtByCatId ?? {}) };
   delete seenInvocationIdByCatId[targetCatId];
   delete awakenedInvocationIdByCatId[targetCatId];
   delete awakenedAtByCatId[targetCatId];
+  const pendingTargetCats = current.allTargetCats.filter(
+    (catId) => current.pendingTargetCats.includes(catId) || catId === targetCatId,
+  );
+  const carrierByTargetCatId = current.carrierByTargetCatId
+    ? {
+        ...current.carrierByTargetCatId,
+        [targetCatId]: {
+          ...current.carrierByTargetCatId[targetCatId],
+          entryId: replacement.id,
+          createdAt: replacement.createdAt,
+        },
+      }
+    : undefined;
+  const carrierStateByTargetCatId = current.carrierByTargetCatId
+    ? {
+        ...(current.carrierStateByTargetCatId ?? {}),
+        [targetCatId]: { status: 'queued' as const },
+      }
+    : undefined;
+  const nextStatus = Object.values(carrierStateByTargetCatId ?? {}).some((state) => state.status === 'processing')
+    ? 'processing'
+    : 'queued';
   const {
+    processingStartedAt: _processingStartedAt,
     awakenedInvocationIdByCatId: _awakenedInvocationIdByCatId,
     awakenedAtByCatId: _awakenedAtByCatId,
     ...stableCurrent
   } = current;
   return {
     attempt,
+    proof: {
+      kind: 'verified_retry',
+      previousEntryId: previousCarrier?.entryId ?? current.entryId,
+      replacementEntryId: replacement.id,
+      sourceMessageId: replacement.messageId ?? '',
+      targetCatId: targetCatId as CatId,
+      expectedAttemptId,
+      nextAttemptId: attempt.id,
+    },
     next: {
       ...stableCurrent,
+      entryId: previousCarrier ? current.entryId : replacement.id,
       revision: current.revision + 1,
+      status: nextStatus,
+      pendingTargetCats,
       notifiedByCatIds: current.notifiedByCatIds.filter((catId) => catId !== targetCatId),
       seenByCatIds: current.seenByCatIds.filter((catId) => catId !== targetCatId),
       seenInvocationIdByCatId,
       ...(Object.keys(awakenedInvocationIdByCatId).length > 0 ? { awakenedInvocationIdByCatId } : {}),
       ...(Object.keys(awakenedAtByCatId).length > 0 ? { awakenedAtByCatId } : {}),
+      ...(carrierByTargetCatId ? { carrierByTargetCatId } : {}),
+      ...(carrierStateByTargetCatId ? { carrierStateByTargetCatId } : {}),
       failedByCatIds: current.failedByCatIds.filter((catId) => catId !== targetCatId),
       targetAttempts: [...attempts, attempt],
       updatedAt: retriedAt,
@@ -1316,16 +1517,97 @@ export class QueuedMessageCustodyCoordinator {
     this.now = deps.now ?? Date.now;
   }
 
+  private custodyNow(current: QueuedMessageCustody, lowerBound = 0): number {
+    return Math.max(this.now(), current.createdAt, current.updatedAt, lowerBound);
+  }
+
   async persistEntry(entry: QueueEntry): Promise<string[]> {
     return this.withEntryLock(entry.id, async () => {
       const managedMessageIds: string[] = [];
       for (const messageId of this.messageIds(entry)) {
         const result = await this.transitionManaged(messageId, (current) =>
-          activeCustodyFromEntry(entry, current, this.now()),
+          activeCustodyFromEntry(entry, current, this.custodyNow(current, entry.createdAt)),
         );
         if (result.managed) managedMessageIds.push(messageId);
       }
       return managedMessageIds;
+    });
+  }
+
+  /** Persist only provider-accepted, capability-gated active Append facts. */
+  async markActiveAppendAccepted(
+    entry: QueueEntry,
+    acceptedRuns: readonly { targetId: string; invocationId: string }[],
+    acceptedAt: number,
+  ): Promise<boolean> {
+    if (acceptedRuns.length === 0) return false;
+    return this.withEntryLock(entry.id, async () => {
+      let changed = false;
+      for (const messageId of this.messageIds(entry)) {
+        changed =
+          (await this.transition(messageId, (current) => {
+            const targetAttempts = markTargetAttemptsActiveAppendAccepted(current, acceptedRuns, acceptedAt);
+            if (JSON.stringify(targetAttempts) === JSON.stringify(current.targetAttempts ?? [])) return current;
+            return {
+              ...current,
+              revision: current.revision + 1,
+              targetAttempts,
+              updatedAt: this.custodyNow(current, acceptedAt),
+            };
+          })) || changed;
+      }
+      return changed;
+    });
+  }
+
+  /**
+   * Admit one exact processing carrier against its History source record.
+   * Queued conversation input is published here; already-public Agent speech
+   * keeps its original visibility identity while only its wake custody advances.
+   */
+  async admitEntryToHistory(entry: QueueEntry, admittedAt: number): Promise<string[]> {
+    if (entry.status !== 'processing') throw new Error('Queue admission requires processing custody');
+    return this.withEntryLock(entry.id, async () => {
+      const admittedMessageIds: string[] = [];
+      for (const messageId of this.messageIds(entry)) {
+        let admitted = false;
+        let deliveryTransitioned = false;
+        for (let attempt = 0; attempt < QUEUE_CUSTODY_CAS_MAX_ATTEMPTS; attempt += 1) {
+          const message = await this.messageStore.getById(messageId);
+          const current = message?.queueCustody;
+          if (!message || !current || current.status !== 'processing') {
+            throw new Error(`Queue admission source is not processing: ${messageId}`);
+          }
+          if (isTimelinePublished(message)) {
+            admitted = true;
+            break;
+          }
+          if (message.deliveryStatus !== 'queued') {
+            throw new Error(`Queue admission source has invalid delivery state: ${messageId}`);
+          }
+          const result = await this.messageStore.transitionQueueCustody(messageId, {
+            expectedRevision: current.revision,
+            next: {
+              ...current,
+              revision: current.revision + 1,
+              status: 'processing',
+              ...(entry.processingStartedAt !== undefined ? { processingStartedAt: entry.processingStartedAt } : {}),
+              updatedAt: Math.max(current.updatedAt, admittedAt),
+            },
+            deliveredAt: admittedAt,
+          });
+          if (result.kind === 'updated') {
+            admitted = true;
+            deliveryTransitioned = result.deliveryTransitioned;
+            break;
+          }
+          if (result.kind === 'not_found') break;
+          await waitForQueueCustodyCasRetry(attempt);
+        }
+        if (!admitted) throw new Error(`Queue admission did not publish source ${messageId}`);
+        if (deliveryTransitioned) admittedMessageIds.push(messageId);
+      }
+      return admittedMessageIds;
     });
   }
 
@@ -1373,7 +1655,7 @@ export class QueuedMessageCustodyCoordinator {
           status: 'queued',
           priority: replacement.priority,
           ...(replacement.position !== undefined ? { position: replacement.position } : {}),
-          updatedAt: this.now(),
+          updatedAt: this.custodyNow(current, replacement.createdAt),
         };
         const result = await this.messageStore.transitionQueueCustody(proof.sourceMessageId, {
           expectedRevision: current.revision,
@@ -1526,22 +1808,28 @@ export class QueuedMessageCustodyCoordinator {
    * for retry clicks; author withdrawals remain terminal.
    */
   async retryFailedTarget(
-    entry: QueueEntry,
+    replacement: QueueEntry,
     targetCatId: string,
     expectedAttemptId: string,
     commitAuthority: RetryAuthorityCommit,
   ): Promise<RetryTargetCustodyResult> {
-    return this.withEntryLock(entry.id, async () => {
+    return this.withEntryLock(replacement.id, async () => {
       let retriedAttempt: QueueTargetAttempt | undefined;
       const transitions: RetryCustodyTransition[] = [];
-      for (const messageId of this.messageIds(entry)) {
+      for (const messageId of this.messageIds(replacement)) {
         const message = await this.messageStore.getById(messageId);
         const current = message?.queueCustody;
-        if (!current || message.deliveryStatus !== 'queued') continue;
-        const result = buildRetryTargetTransition(current, targetCatId, expectedAttemptId, this.now());
-        if (!result.attempt || result.next === current) continue;
+        if (!current || (message.deliveryStatus !== 'queued' && message.deliveryStatus !== 'delivered')) continue;
+        const result = buildRetryTargetTransition(
+          current,
+          replacement,
+          targetCatId,
+          expectedAttemptId,
+          this.custodyNow(current, replacement.createdAt),
+        );
+        if (!result.attempt || !result.proof || result.next === current) continue;
         retriedAttempt = result.attempt;
-        transitions.push({ messageId, current, next: result.next });
+        transitions.push({ messageId, current, next: result.next, replacement: result.proof });
       }
       if (!retriedAttempt || transitions.length === 0) return { outcome: 'not_retryable' };
       const committed = await commitAuthority(transitions);
@@ -1563,7 +1851,7 @@ export class QueuedMessageCustodyCoordinator {
       for (const messageId of this.messageIds(entry)) {
         changed =
           (await this.transition(messageId, (current) =>
-            settleQueueCustodyWithdrawal(current, entry.targetCats, this.now()),
+            settleQueueCustodyWithdrawal(current, entry.targetCats, this.custodyNow(current, entry.createdAt)),
           )) || changed;
       }
       return changed;
@@ -1630,7 +1918,7 @@ export class QueuedMessageCustodyCoordinator {
                 ...current,
                 revision: current.revision + 1,
                 receiptScope: 'primary_trigger',
-                updatedAt: this.now(),
+                updatedAt: this.custodyNow(current, entry.createdAt),
               },
         );
         if (messageChanged) changed = true;
@@ -1657,6 +1945,49 @@ export class QueuedMessageCustodyCoordinator {
           outcomeByCatId,
         );
         perMessage.push({ messageId, ...result });
+      }
+      return { perMessage };
+    });
+  }
+
+  /**
+   * Terminalize one failed Queue attempt. Failure is terminal for this carrier:
+   * retry admission must create a new Queue attempt instead of resurrecting the
+   * same row or leaving one message simultaneously failed and queued.
+   */
+  async commitFailedTargets(
+    entry: QueueEntry,
+    failedTargetCats: readonly string[],
+    failedAt: number,
+    terminalReason: QueueTargetAttemptTerminalReason,
+    invocationIdByCatId: Readonly<Record<string, string | undefined>> = {},
+  ): Promise<QueueCustodyFailureSettlementResult> {
+    return this.withEntryLock(entry.id, async () => {
+      const perMessage: QueueCustodyFailureSettlementResult['perMessage'] = [];
+      for (const messageId of this.messageIds(entry)) {
+        let completion: QueueCustodyFailureCompletionResult = {
+          failedTargetCats: [],
+          pendingTargetCats: [],
+          fullyConsumed: false,
+        };
+        await this.transition(
+          messageId,
+          (current) => {
+            const transition = buildFailedTargetTransition({
+              current,
+              entryId: entry.id,
+              failedTargetCats,
+              failedAt,
+              updatedAt: this.custodyNow(current, failedAt),
+              terminalReason,
+              invocationIdByCatId,
+            });
+            completion = transition.completion;
+            return transition.next;
+          },
+          failedAt,
+        );
+        perMessage.push({ messageId, ...completion });
       }
       return { perMessage };
     });
@@ -1764,7 +2095,7 @@ export class QueuedMessageCustodyCoordinator {
           successfulTargetCats,
           invocationId,
           deliveredAt,
-          updatedAt: this.now(),
+          updatedAt: this.custodyNow(current, deliveredAt),
           outcomeByCatId,
         });
         completion = transition.completion;
@@ -1832,7 +2163,7 @@ export class QueuedMessageCustodyCoordinator {
       for (const messageId of this.messageIds(entry)) {
         changed =
           (await this.transition(messageId, (current) => {
-            const now = this.now();
+            const now = this.custodyNow(current, entry.createdAt);
             const mutated = mutate(current, now);
             if (mutated === current) return current;
             return { ...mutated, revision: current.revision + 1, updatedAt: now };
@@ -1865,12 +2196,14 @@ export class QueuedMessageCustodyCoordinator {
       }
       const next = buildNext(current);
       if (sameProjection(current, next)) return { managed: true, changed: false };
+      const transitionDeliveredAt =
+        message.deliveryStatus === 'queued' && current.status !== 'terminal' && next.status === 'terminal'
+          ? deliveredAt
+          : undefined;
       const result = await this.messageStore.transitionQueueCustody(messageId, {
         expectedRevision: current.revision,
         next,
-        ...(current.status !== 'terminal' && next.status === 'terminal' && deliveredAt !== undefined
-          ? { deliveredAt }
-          : {}),
+        ...(transitionDeliveredAt !== undefined ? { deliveredAt: transitionDeliveredAt } : {}),
       });
       if (result.kind === 'updated') return { managed: true, changed: true };
       if (result.kind === 'not_found') return { managed: false, changed: false };

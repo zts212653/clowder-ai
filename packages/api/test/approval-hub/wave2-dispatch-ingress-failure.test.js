@@ -2,6 +2,7 @@ import '../helpers/setup-cat-registry.js';
 import assert from 'node:assert/strict';
 import { beforeEach, describe, it } from 'node:test';
 import Fastify from 'fastify';
+import { canonicalTestMessageInput } from '../helpers/message-from-fixtures.js';
 import { proposedReviewAction } from './helpers.js';
 
 function createSucceedingIngress() {
@@ -68,14 +69,17 @@ describe('P1-1/P1-4: F193 dispatch proposal ingress failure', () => {
     const target = await threadStore.create('user-1', 'Target');
     await threadStore.addParticipants(source.id, ['opus']);
     await threadStore.addParticipants(target.id, ['sonnet']);
-    const origin = await messageStore.append({
-      userId: 'user-1',
-      catId: 'opus',
-      content: 'Dispatch origin',
-      mentions: [],
-      timestamp: Date.now(),
-      threadId: source.id,
-    });
+    const origin = await messageStore.append(
+      canonicalTestMessageInput({
+        provenance: { author: 'cat', routed: false, observation: 'original' },
+        userId: 'user-1',
+        catId: 'opus',
+        content: 'Dispatch origin',
+        mentions: [],
+        timestamp: Date.now(),
+        threadId: source.id,
+      }),
+    );
 
     const store = new InMemoryDispatchProposalStore();
     const socketManager = { broadcastAgentMessage() {}, broadcastToRoom() {}, emitToUser() {} };

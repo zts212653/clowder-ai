@@ -12,7 +12,7 @@ export function bindAsrPersonMemoryScenesFromQueueMessage(
   if (
     message.userId !== scope.ownerUserId ||
     message.threadId !== scope.threadId ||
-    message.catId !== null ||
+    (message.from ? message.from.kind !== 'user' : message.catId !== null) ||
     message.deletedAt !== undefined ||
     message._tombstone ||
     message.extra?.meetingArtifact?.trust !== 'untrusted_external' ||

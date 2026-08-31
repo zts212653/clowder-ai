@@ -62,7 +62,6 @@ function cachedThreadState(): ThreadState {
     hasUserMention: false,
     lastActivity: CACHED_MESSAGE.timestamp,
     queue: [],
-    queuePaused: false,
     queueFull: false,
     workspaceWorktreeId: null,
     workspaceOpenTabs: [],

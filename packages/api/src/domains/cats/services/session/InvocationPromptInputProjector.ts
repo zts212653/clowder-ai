@@ -13,6 +13,11 @@ export interface InvocationPromptInputProjectorDeps {
 }
 
 function messageAuthor(message: StoredMessage): 'user' | 'assistant' | 'system' {
+  if (message.from) {
+    if (message.from.kind === 'agent') return 'assistant';
+    if (message.from.kind === 'system') return 'system';
+    return 'user';
+  }
   if (message.catId === null) return 'user';
   return message.catId === 'system' ? 'system' : 'assistant';
 }

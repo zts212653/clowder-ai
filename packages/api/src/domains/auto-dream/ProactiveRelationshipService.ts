@@ -154,7 +154,13 @@ export class ProactiveRelationshipService {
     let reconciled = 0;
     for (let index = 0; index < messages.length; index += 1) {
       const message = messages[index];
-      if (!message || message.userId !== ownerUserId || message.catId !== null) continue;
+      if (
+        !message ||
+        message.userId !== ownerUserId ||
+        (message.from ? message.from.kind !== 'user' : message.catId !== null)
+      ) {
+        continue;
+      }
       const existing = await this.options.store.proactive.findNaturalEchoBySource(
         ownerUserId,
         config.bedroomThreadId,
@@ -218,9 +224,9 @@ function buildCanonicalMessage(
   timestamp: number,
 ) {
   return {
+    from: { kind: 'agent' as const, catId: visit.catId as CatId },
     threadId: visit.homeThreadId,
     userId: visit.ownerUserId,
-    catId: visit.catId as CatId,
     content,
     mentions: [] as CatId[],
     origin: 'callback' as const,

@@ -1,3 +1,4 @@
+import { createCatId } from '@cat-cafe/shared';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -35,7 +36,7 @@ const QUEUE_ENTRY: QueueEntry = {
   content: LONG_QUEUE_MESSAGE,
   messageId: 'message-f269',
   mergedMessageIds: [],
-  source: 'connector',
+  from: { kind: 'external', connectorId: 'test-connector' },
   sourceCategory: 'ci',
   targetCats: ['codex-sol'],
   intent: 'execute',
@@ -98,7 +99,6 @@ describe('QueueEntryRow long-content recovery', () => {
       messages: [],
       currentThreadId: 'thread-f269',
       queue: [QUEUE_ENTRY],
-      queuePaused: false,
     });
   });
 
@@ -150,5 +150,62 @@ describe('QueueEntryRow long-content recovery', () => {
     expect(document.body.querySelector('[role="dialog"][aria-modal="true"]')).toBeNull();
     expect(trigger.getAttribute('aria-expanded')).toBe('false');
     expect(document.activeElement).toBe(trigger);
+  });
+
+  it('renders structured routing warnings inside their Queue row', async () => {
+    useChatStore.setState({
+      queue: [
+        {
+          ...QUEUE_ENTRY,
+          routingWarnings: [{ kind: 'cat_not_found', mention: '@missing-cat', alternatives: [] }],
+        },
+      ],
+    });
+
+    await act(async () => {
+      root.render(<QueuePanel threadId="thread-f269" />);
+    });
+
+    const warning = requireElement(container.querySelector<HTMLElement>('[data-testid="routing-warning"]'));
+    expect(warning.textContent).toContain('@missing-cat 不存在');
+  });
+
+  it('renders ambiguous mentions with explicit unique-handle candidates', async () => {
+    useChatStore.setState({
+      queue: [
+        {
+          ...QUEUE_ENTRY,
+          routingWarnings: [
+            {
+              kind: 'mention_ambiguous',
+              mention: '@砚砚',
+              candidates: [
+                {
+                  catId: createCatId('cat-one'),
+                  mention: '@cat-one',
+                  displayName: '砚砚一号',
+                  family: 'Maine Coon',
+                },
+                {
+                  catId: createCatId('cat-two'),
+                  mention: '@cat-two',
+                  displayName: '砚砚二号',
+                  family: 'Maine Coon',
+                },
+              ],
+            },
+          ],
+        },
+      ],
+    });
+
+    await act(async () => {
+      root.render(<QueuePanel threadId="thread-f269" />);
+    });
+
+    const warning = requireElement(container.querySelector<HTMLElement>('[data-testid="routing-warning"]'));
+    expect(warning.textContent).toContain('@砚砚 同时指向多个成员');
+    expect(warning.textContent).toContain('@cat-one、@cat-two');
+    expect(warning.textContent).toContain('请改用唯一 handle');
   });
 });

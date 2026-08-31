@@ -3,11 +3,12 @@
  * Shared types, interfaces, and helper functions for route-serial and route-parallel.
  */
 
-import type { CatId, MessageContent, RichBlock, RichBlockBase } from '@cat-cafe/shared';
+import type { CatId, MessageContent, MessageFrom, RichBlock, RichBlockBase } from '@cat-cafe/shared';
 import { isCrossThreadProvenance } from '@cat-cafe/shared';
 import { resolveUnboundHistoryContextTokenCeiling } from '../../../../../config/context-capacity.js';
 import { DEFAULT_HIERARCHICAL_CONTEXT } from '../../../../../config/hierarchical-context-config.js';
 import { createModuleLogger } from '../../../../../infrastructure/logger.js';
+import type { CallerTraceContext } from '../../../../../infrastructure/telemetry/genai-semconv.js';
 import { visibilityCursorDeferredBoundaryRejected } from '../../../../../infrastructure/telemetry/instruments.js';
 import {
   assertCanonicalVisibilityCursor,
@@ -36,11 +37,15 @@ import {
 import { cursorFor } from '../../stores/cursor.js';
 import { DeliveryCursorStore } from '../../stores/ports/DeliveryCursorStore.js';
 import type { IDraftStore } from '../../stores/ports/DraftStore.js';
-import type { IMessageStore, StoredMessage, StoredToolEvent } from '../../stores/ports/MessageStore.js';
+import type {
+  AppendMessageInput,
+  IMessageStore,
+  StoredMessage,
+  StoredToolEvent,
+} from '../../stores/ports/MessageStore.js';
 import type { Thread } from '../../stores/ports/ThreadStore.js';
 import { canViewMessage, isTimelinePublished, resolveVisibleReplyParent } from '../../stores/visibility.js';
 import type { AgentMessage, AgentService, ToolExecutionPolicy } from '../../types.js';
-import type { InvocationTracker } from '../invocation/InvocationTracker.js';
 import type { InvocationDeps } from '../invocation/invoke-single-cat.js';
 import type { OwnerAuthProvenance } from '../invocation/owner-auth-provenance.js';
 import { extractRecentArtifacts, mergeLedger } from './artifact-tracking.js';
@@ -198,10 +203,10 @@ export async function hydrateVisibleA2ATriggerPromptMessage(
     message.threadId !== threadId ||
     message.deletedAt ||
     message._tombstone ||
-    message.userId === 'system' ||
+    (!message.from && message.userId === 'system') ||
     message.origin === 'briefing' ||
-    message.catId === null ||
-    message.catId === catId ||
+    (message.from ? message.from.kind !== 'agent' : message.catId === null) ||
+    (message.from?.kind === 'agent' ? message.from.catId === catId : message.catId === catId) ||
     !isTimelinePublished(message)
   ) {
     return undefined;
@@ -269,11 +274,7 @@ export interface RouteOptions {
   a2aCallerCatId?: string | undefined;
   /** Max A2A chain depth for routeSerial (default: MAX_A2A_DEPTH env or 2) */
   maxA2ADepth?: number | undefined;
-  /** Queue fairness hook: when true for current thread, routeSerial must stop extending A2A chain.
-   *  F185 Phase B: should use hasQueuedNonAgentForThread (user + connector), not user-only. */
-  queueHasQueuedMessages?: ((threadId: string) => boolean) | undefined;
-  /** F254 D1.1: Target-aware queued freshness input. Unlike queueHasQueuedMessages,
-   *  this must return only queued messages that the current cat would actually process. */
+  /** F254 D1.1: Target-aware queued freshness input. */
   getQueuedFreshnessMessagesForCat?:
     | ((
         threadId: string,
@@ -282,40 +283,30 @@ export interface RouteOptions {
         parentInvocationId?: string,
       ) => Array<{
         entryId?: string;
-        source: string;
+        from: MessageFrom;
         content: string;
-        callerCatId?: string;
         messageId?: string | null;
         mergedMessageIds?: string[];
         sourceCategory?: string;
       }>)
     | undefined;
-  /** A2A dedup hook: skip text-scan @mention if cat already dispatched via callback path. */
-  hasQueuedOrActiveAgentForCat?: ((threadId: string, catId: string) => boolean) | undefined;
   /** F254 D1.1: Any-source same-cat coverage check for stream freshness fallback. */
   hasPendingForCat?: ((threadId: string, userId: string, catId: string) => boolean) | undefined;
-  /** F185 Phase B: deferred A2A enqueue — called when fairness gate blocks text-scan expansion
-   *  but A2A targets were detected. Entry is queued behind non-agent entries instead of being silently dropped. */
-  deferA2AEnqueue?:
-    | ((entry: {
-        threadId: string;
+  /** Canonical completed-final path: terminalize the existing response and publish one durable message wake. */
+  commitCompletedA2AWake?:
+    | ((input: {
+        responseMessageId: string;
+        invocationId: string;
+        terminal: { status: 'completed'; completedAt: number; reason?: string };
+        message: AppendMessageInput;
+        targetCats: CatId[];
         userId: string;
         ownerAuthProvenance: OwnerAuthProvenance;
-        content: string;
-        source: 'agent';
-        sourceCategory: 'a2a';
-        targetCats: string[];
-        callerCatId: string;
-        messageId?: string;
-        a2aTriggerMessageId?: string;
-        autoExecute: true;
-        priority: 'normal';
-        intent: 'execute';
-        /** F153 Phase I: trace context of the mention_dispatch span, so the dispatched
-         *  route picked up by QueueProcessor reuses it as the parent — preserving cross-route
-         *  causality through the fairness-gate deferred path. */
+        threadId: string;
+        callerCatId: CatId;
+        parentInvocationId?: string;
         callerTraceContext?: import('../../../../../infrastructure/telemetry/genai-semconv.js').CallerTraceContext;
-      }) => { outcome: 'enqueued' | 'full' | string } | undefined)
+      }) => Promise<StoredMessage>)
     | undefined;
   /** ADR-008 S3: When provided, cursor boundaries are collected here instead of acking immediately.
    *  Caller acks after invocation succeeds. If absent, legacy immediate ack behavior. */
@@ -347,6 +338,28 @@ export interface RouteOptions {
         readonly import('../../../../ball-custody/TurnCustodyProjectionService.js').TurnCustodyWakeProvenance[] | void
       >)
     | undefined;
+  /** Create the exact child's durable processing response before provider startup. */
+  onLifecycleInvocationStarted?:
+    | ((input: {
+        threadId: string;
+        userId: string;
+        catId: CatId;
+        invocationId: string;
+        parentInvocationId: string;
+        startedAt: number;
+      }) => Promise<{
+        responseMessageId: string;
+        priorFrontierMessageId: string | null;
+        activeRun: import('@cat-cafe/shared').LifecycleActiveRun;
+      }>)
+    | undefined;
+  /** Bind a provider-native exact-turn dispatcher after the client accepts the run. */
+  onAgentClientActiveRunReady?:
+    | ((input: {
+        catId: CatId;
+        dispatcher: import('../../types.js').AgentClientActiveRunDispatcher;
+      }) => (() => void) | void)
+    | undefined;
   /** F254 Phase E stable sibling-exclusion identity for one parallel fan-out. */
   parallelBatchId?: string | undefined;
   /** F254 Phase E typed queue adoption proof for this route execution. */
@@ -356,15 +369,6 @@ export interface RouteOptions {
   freshnessSupplementRequiredMessageIds?: readonly string[] | undefined;
   /** ADR-042 provider/callback hard boundary for an automatic supplement. */
   toolExecutionPolicy?: ToolExecutionPolicy | undefined;
-  /** Parent invocation controller used to keep A2A worklist slots tied to the same cancel signal. */
-  invocationController?: AbortController | undefined;
-  /**
-   * Atomically claim an A2A worklist target in the outer invocation tracker.
-   * False means another live route owns the slot, so the caller must defer instead of invoking inline.
-   */
-  trackA2ASlot?: ((threadId: string, catId: CatId, userId: string, controller: AbortController) => boolean) | undefined;
-  /** Cleanup registered A2A worklist slots if the route exits before every target emits done. */
-  completeA2ASlots?: ((threadId: string, catIds: readonly CatId[], controller: AbortController) => void) | undefined;
   /** F153 Phase E: Root route span — invocation spans become children of this. */
   routeSpan?: import('@opentelemetry/api').Span | undefined;
   /** F222 P1: Whether this route is eligible for frustration auto-issue detection.
@@ -386,10 +390,9 @@ export interface RouteOptions {
         userId: string;
         ownerAuthProvenance: OwnerAuthProvenance;
         content: string;
-        source: 'agent';
+        from: { kind: 'agent'; catId: string };
         sourceCategory: 'freshness';
         targetCats: string[];
-        callerCatId: string;
         autoExecute: true;
         priority: 'normal';
         intent: 'execute';
@@ -411,6 +414,21 @@ export interface RouteOptions {
       }) => undefined | { outcome?: 'enqueued' | 'full' | string } | undefined)
     | undefined;
 }
+
+/**
+ * Public execution boundary owned jointly by QueueProcessor and AgentRouter.
+ * Keep this derived from RouteOptions so adding a strategy option cannot be
+ * silently dropped by an intermediate hand-written parameter list.
+ */
+export type RouteExecutionOptions = Omit<
+  RouteOptions,
+  'promptTags' | 'currentUserMessageId' | 'thinkingMode' | 'routeSpan' | 'humanDispositionInvocationOrigin'
+> & {
+  ownerAuthProvenance: NonNullable<RouteOptions['ownerAuthProvenance']>;
+  onPromptMessagesExposed: NonNullable<RouteOptions['onPromptMessagesExposed']>;
+  humanDispositionInvocationOrigin: HumanDispositionInvocationOrigin;
+  callerTraceContext?: CallerTraceContext;
+};
 
 const TASTE_JUDGMENT_STAGES = new Set(['quality_gate', 'review']);
 const TASTE_JUDGMENT_SKILLS = new Set(['writing-plans', 'co-creation-docs', 'fresh-context-review', 'request-review']);
@@ -476,44 +494,6 @@ export function judgmentSurfaceCueSeeds(input: {
       },
     },
   ];
-}
-
-/**
- * Bind every routeExecution ingress to the same atomic A2A slot-admission contract.
- * The returned controller is the parent batch gate; trackExternalSlot creates an
- * independent per-target controller while preserving exact cleanup ownership.
- */
-export type A2ASlotTrackingOptions = {
-  invocationController: NonNullable<RouteOptions['invocationController']>;
-  trackA2ASlot: NonNullable<RouteOptions['trackA2ASlot']>;
-  completeA2ASlots: NonNullable<RouteOptions['completeA2ASlots']>;
-};
-
-export function createA2ASlotTrackingBridge(
-  invocationTracker:
-    | {
-        trackExternalSlot?: InvocationTracker['trackExternalSlot'];
-        completeAll?: InvocationTracker['completeAll'];
-      }
-    | undefined,
-  invocationController: AbortController,
-  executionId?: string,
-): A2ASlotTrackingOptions {
-  return {
-    invocationController,
-    trackA2ASlot: (threadId, catId, userId, controller) => {
-      if (!invocationTracker?.trackExternalSlot || !invocationTracker.completeAll) {
-        throw new Error('A2A slot admission unavailable: InvocationTracker bridge missing');
-      }
-      return invocationTracker.trackExternalSlot(threadId, catId, controller, userId, [catId], executionId);
-    },
-    completeA2ASlots: (threadId, catIds, controller) => {
-      if (!invocationTracker?.completeAll) {
-        throw new Error('A2A slot cleanup unavailable: InvocationTracker bridge missing');
-      }
-      invocationTracker.completeAll(threadId, [...catIds], controller);
-    },
-  };
 }
 
 function canonicalDeferredBoundary(
@@ -1420,7 +1400,7 @@ export async function assembleIncrementalContext(
   const sameRouteBoundaryCap = resolveSameRouteBoundaryCap(unseen, cursor, playMode, options);
   const relevant = unseen.filter((m) => {
     // System-generated messages (persisted error badges) are display-only — never enter prompt
-    if (m.userId === 'system') return false;
+    if (m.from ? m.from.kind === 'system' : m.userId === 'system') return false;
     // F148 Phase E: briefing messages are non-routing — never enter incremental context (AC-E2)
     if (m.origin === 'briefing') return false;
     if (isSameRouteOutputWithheld(m, playMode, options)) return false;
@@ -1429,7 +1409,8 @@ export async function assembleIncrementalContext(
     // Exclude own messages (only include user messages and other cats' messages).
     // F052: only distinct source/target provenance earns the same-cat cross-post exemption.
     const isActualCrossPost = isCrossThreadProvenance(m.extra?.crossPost?.sourceThreadId, m.threadId);
-    if (!isActualCrossPost && m.catId !== null && m.catId === catId) return false;
+    const authorCatId = m.from?.kind === 'agent' ? m.from.catId : m.catId;
+    if (!isActualCrossPost && authorCatId !== null && authorCatId === catId) return false;
     // `origin` describes the transport that persisted a message, not whether its
     // visible body is private thinking. Persisted unread speech therefore follows
     // the same visibility contract for user and cat authors.
@@ -1453,7 +1434,10 @@ export async function assembleIncrementalContext(
   // F148 Phase F (KD-7): Navigation context — injected on ALL paths (cold + warm)
   // P1 fix: extract baton from unseen (pre-stream-filter) so cat→cat @ mentions via stream are visible
   const batonCandidates = unseen.filter(
-    (m) => (m.userId !== 'system' || m.catId !== null) && m.origin !== 'briefing' && canViewMessage(m, viewer),
+    (m) =>
+      (m.from ? m.from.kind !== 'system' : m.userId !== 'system' || m.catId !== null) &&
+      m.origin !== 'briefing' &&
+      canViewMessage(m, viewer),
   );
   const baton = extractBatonContext(batonCandidates, catId);
   let activeTasks: import('./navigation-context.js').TaskSummary[] = [];
@@ -1855,7 +1839,7 @@ async function assembleSmartWindowContext(
   const compositeQueryTerms = [threadTitle, currentMsgText]
     .concat(
       burst
-        .filter((m) => m.catId === null && m.userId !== 'system')
+        .filter((m) => (m.from ? m.from.kind === 'user' : m.catId === null && m.userId !== 'system'))
         .slice(-2)
         .map((m) => stripStructuralEnvelope(m.content).slice(0, 200)),
     )
@@ -1928,7 +1912,9 @@ async function assembleSmartWindowContext(
 
   // 3.8 Evidence recall (fail-open) — must run before coverage map so hints are populated
   const currentMsg = currentUserMessageId ? burst.find((m) => m.id === currentUserMessageId) : undefined;
-  const nonSystemRecent = burst.filter((m) => m.catId === null && m.userId !== 'system').slice(-2);
+  const nonSystemRecent = burst
+    .filter((m) => (m.from ? m.from.kind === 'user' : m.catId === null && m.userId !== 'system'))
+    .slice(-2);
   const recalledEvidence = usesLegacyRecall
     ? await recallEvidenceWithProvenance(
         deps.evidenceStore,

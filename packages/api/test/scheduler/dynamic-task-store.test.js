@@ -48,6 +48,7 @@ test('dynamic_task_defs has correct columns', () => {
   assert.ok(names.includes('enabled'));
   assert.ok(names.includes('created_by'));
   assert.ok(names.includes('created_at'));
+  assert.ok(names.includes('retry_attempts'), 'V27: retry_attempts column should exist');
   db.close();
 });
 

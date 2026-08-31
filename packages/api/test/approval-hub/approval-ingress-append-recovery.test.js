@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import { ApprovalCardCommittedError, ApprovalIngress } from '../../dist/domains/approval-hub/ApprovalIngress.js';
 import { MessageStore } from '../../dist/domains/cats/services/stores/ports/MessageStore.js';
+import { canonicalTestMessageInput } from '../helpers/message-from-fixtures.js';
 
 const ownerUserId = 'user-1';
 const requesterCatId = 'codex-sol';
@@ -31,14 +32,17 @@ class FakePublicationStore {
 
 function makeHarness() {
   const messageStore = new MessageStore();
-  const origin = messageStore.append({
-    userId: ownerUserId,
-    catId: null,
-    content: 'origin',
-    mentions: [],
-    timestamp: 1_721_111_110_000,
-    threadId: originRef.threadId,
-  });
+  const origin = messageStore.append(
+    canonicalTestMessageInput({
+      provenance: { author: 'user', routed: false, observation: 'original' },
+      userId: ownerUserId,
+      catId: null,
+      content: 'origin',
+      mentions: [],
+      timestamp: 1_721_111_110_000,
+      threadId: originRef.threadId,
+    }),
+  );
   origin.id = originRef.messageId;
   const broadcasts = [];
   const userEvents = [];

@@ -26,7 +26,7 @@ function createMockDeps() {
         },
       },
       queueProcessor: {
-        async tryAutoExecute(threadId) {
+        async requestDrain(threadId) {
           autoExecuteCalls.push(threadId);
         },
       },
@@ -55,8 +55,9 @@ describe('createWakeCatFn', () => {
     const entry = enqueuedEntries[0];
     assert.equal(entry.threadId, 'thread-game-1');
     assert.equal(entry.userId, 'user-landy');
+    assert.equal(entry.kind, 'private_input');
     assert.equal(entry.content, 'You are wolf.');
-    assert.equal(entry.source, 'agent');
+    assert.equal(entry.source, 'system');
     assert.deepEqual(entry.targetCats, ['opus']);
     assert.equal(entry.intent, 'execute');
     assert.equal(entry.autoExecute, true);

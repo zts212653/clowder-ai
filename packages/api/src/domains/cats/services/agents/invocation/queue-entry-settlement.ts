@@ -25,8 +25,7 @@ export interface QueueEntrySettlementInput {
   readonly replacement: QueueReplacementCustody;
   readonly actionFence: QueueEntryActionFence;
   readonly durableTerminalOwner?: QueueEntryDurableTerminalOwner;
-  /** Legacy rows without durable custody cannot be rolled back truthfully after their message was published. */
-  readonly custody?: 'durable' | 'legacy_unbound' | 'absent';
+  readonly custody?: 'durable' | 'absent';
 }
 
 /**
@@ -46,5 +45,5 @@ export function resolveQueueEntrySettlement(input: QueueEntrySettlementInput): Q
   if (input.actionFence.kind === 'action_successor' || input.durableTerminalOwner?.kind === 'freshness_supplement') {
     return 'consume';
   }
-  return input.custody === 'legacy_unbound' ? 'consume' : 'rollback';
+  return input.custody === 'durable' ? 'consume' : 'rollback';
 }

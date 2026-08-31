@@ -373,7 +373,7 @@ describe('TaskRunnerV2', () => {
       ledger,
       deliver: async ({ content }) => settleAfterTimeout(`msg:${content}`),
       invokeTrigger: {
-        trigger: async () => settleAfterTimeout('dispatched'),
+        trigger: async () => settleAfterTimeout('enqueued'),
       },
     });
     runner.setManagedCommandWakeRecovery(async () => settleAfterTimeout('recovered'));
@@ -439,11 +439,11 @@ describe('TaskRunnerV2', () => {
 
     assert.deepEqual(completed, [
       'msg:deliver',
-      'dispatched',
+      'enqueued',
       'recovered',
-      'msg:chain:dispatched',
+      'msg:chain:enqueued',
       'unbound-trigger-blocked',
-      'detached:dispatched',
+      'detached:enqueued',
     ]);
     assert.equal(
       ledger.query('completed-effect-timeout-test', 10).filter((row) => row.outcome === 'RUN_FAILED').length,

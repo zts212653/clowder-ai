@@ -6,7 +6,14 @@
  */
 
 import { readFileSync } from 'node:fs';
-import type { GovernanceTier, HookManifest, HookStage, SafetyTier, TransparencyTier } from '@cat-cafe/shared';
+import type {
+  GovernanceTier,
+  HookManifest,
+  HookStage,
+  HookVariableDef,
+  SafetyTier,
+  TransparencyTier,
+} from '@cat-cafe/shared';
 import { parse as parseYaml } from 'yaml';
 
 // ---------------------------------------------------------------------------
@@ -89,6 +96,9 @@ export function parseHookManifest(yamlPath: string): HookManifestParseResult {
   // Inputs array
   const inputs = requireStringArray(doc, 'inputs', errors);
 
+  // Variable definitions (optional, F257 Console 判据⑤)
+  const variables = requireVariableDefs(doc, 'variables', errors);
+
   // ID format validation
   if (id && !HOOK_ID_PATTERN.test(id)) {
     errors.push(`id '${id}' does not match pattern ${HOOK_ID_PATTERN}`);
@@ -116,6 +126,7 @@ export function parseHookManifest(yamlPath: string): HookManifestParseResult {
       template: template as string,
       resolver,
       inputs: inputs as string[],
+      variables: variables as HookVariableDef[] | undefined,
       disableable: disableable as boolean,
       safetyTier: safetyTier as SafetyTier,
       transparencyTier: transparencyTier as TransparencyTier,
@@ -181,4 +192,52 @@ function requireStringArray(doc: Record<string, unknown>, field: string, errors:
     return undefined;
   }
   return val as string[];
+}
+
+function requireVariableDefs(
+  doc: Record<string, unknown>,
+  field: string,
+  errors: string[],
+): HookVariableDef[] | undefined {
+  const val = doc[field];
+  if (val === undefined) return undefined;
+  if (!Array.isArray(val)) {
+    errors.push(`'${field}' must be an array`);
+    return undefined;
+  }
+
+  const result: HookVariableDef[] = [];
+  for (let i = 0; i < val.length; i++) {
+    const item = val[i];
+    if (typeof item !== 'object' || item === null || Array.isArray(item)) {
+      errors.push(`'${field}[${i}]' must be an object`);
+      continue;
+    }
+    const entry = item as Record<string, unknown>;
+    const name = entry.name;
+    if (typeof name !== 'string' || name.length === 0) {
+      errors.push(`'${field}[${i}].name' must be a non-empty string`);
+      continue;
+    }
+    const def: HookVariableDef = { name };
+    if (entry.description !== undefined) {
+      if (typeof entry.description !== 'string') {
+        errors.push(`'${field}[${i}].description' must be a string`);
+        continue;
+      }
+      def.description = entry.description;
+    }
+    if (entry.placeholder !== undefined) {
+      if (typeof entry.placeholder !== 'string') {
+        errors.push(`'${field}[${i}].placeholder' must be a string`);
+        continue;
+      }
+      def.placeholder = entry.placeholder;
+    }
+    result.push(def);
+  }
+
+  // If any item failed validation, return undefined so the manifest is rejected.
+  if (errors.length > 0) return undefined;
+  return result;
 }

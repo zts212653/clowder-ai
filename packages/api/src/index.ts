@@ -6,7 +6,7 @@
 // 必须最先 import：Node 24.16 undici setTypeOfService EINVAL 崩溃防护（见文件头注释）
 import './settos-guard.js';
 import { homedir } from 'node:os';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import {
   type CatConfig,
@@ -114,6 +114,7 @@ import {
 } from './domains/cats/services/agents/providers/codex-app-server-pool-registry.js';
 import { clearL0Cache, warmL0Cache } from './domains/cats/services/agents/providers/l0-compiler.js';
 import { AgentRegistry } from './domains/cats/services/agents/registry/AgentRegistry.js';
+import { analyzeA2AMentions } from './domains/cats/services/agents/routing/a2a-mentions.js';
 import { createPostCompactContextProjector } from './domains/cats/services/agents/routing/post-compact-context-projector.js';
 import { createFreshnessReinvokeCheck } from './domains/cats/services/freshness/createFreshnessReinvokeCheck.js';
 import { createProviderNativeFreshnessFactory } from './domains/cats/services/freshness/createProviderNativeFreshnessFactory.js';
@@ -178,11 +179,12 @@ import { createThreadStore } from './domains/cats/services/stores/factories/Thre
 import { createWorkflowSopStore } from './domains/cats/services/stores/factories/WorkflowSopStoreFactory.js';
 import { InMemoryContextEpochStore } from './domains/cats/services/stores/ports/ContextEpochStore.js';
 import { classifyInvocationRecoveryStatus } from './domains/cats/services/stores/ports/invocation-state-machine.js';
-import type { MessageAppendListener } from './domains/cats/services/stores/ports/MessageStore.js';
+import { type MessageAppendListener, routedProvenance } from './domains/cats/services/stores/ports/MessageStore.js';
 import { RedisContextEpochStore } from './domains/cats/services/stores/redis/RedisContextEpochStore.js';
 import { RedisInvocationRecordStore } from './domains/cats/services/stores/redis/RedisInvocationRecordStore.js';
 import { RedisMessageStore } from './domains/cats/services/stores/redis/RedisMessageStore.js';
 import { RedisPresentationLedgerStore } from './domains/cats/services/stores/redis/RedisPresentationLedgerStore.js';
+import { RedisRoutingFactProjection } from './domains/cats/services/stores/redis/RedisRoutingFactProjection.js';
 import { DocumentListenRepository } from './domains/cats/services/tts/DocumentListenRepository.js';
 import {
   resolveDocumentListenStatePath,
@@ -244,6 +246,7 @@ import {
 } from './infrastructure/email/index.js';
 import { fetchLatestIssueCommentCursor } from './infrastructure/github/comment-cursors.js';
 import { buildGhCliEnv, resolveGhCliToken, withHiddenGhCliWindow } from './infrastructure/github/gh-cli-env.js';
+import { RedisDeviationEventLog } from './infrastructure/harness-eval/deviation/DeviationEventLog.js';
 import type { EvalDomainId } from './infrastructure/harness-eval/domain/eval-domain-registry.js';
 import { ensureEvalDomainThreads } from './infrastructure/harness-eval/hub/eval-hub-thread-ensure.js';
 import { loadOrCreatePawFeelBundleSnapshotSigner } from './infrastructure/harness-eval/paw-feel-disposition/bundle-snapshot.js';
@@ -629,10 +632,26 @@ async function main(): Promise<void> {
     wireRedisGroundingSampleStore(redis);
   }
 
-  // F237: bootstrap injection trace store (fail-open — no Redis → no traces)
+  // F237/F257: bootstrap the shared trace and objective-evaluation runtime.
   if (redis) {
-    const { bootstrapTraceStore } = await import('./domains/prompt-hooks/trace-bootstrap.js');
+    const { bootstrapObjectiveEvaluationRuntime, bootstrapTraceStore } = await import(
+      './domains/prompt-hooks/trace-bootstrap.js'
+    );
     bootstrapTraceStore(redis);
+    // F257: load evaluation catalog + bootstrap objective evaluation runtime.
+    // Must follow bootstrapTraceStore (runtime depends on trace + annotation stores).
+    try {
+      const { loadEvaluationCatalog } = await import('./infrastructure/harness-eval/evaluation/evaluation-catalog.js');
+      const catalogResult = await loadEvaluationCatalog(findMonorepoRoot(process.cwd()));
+      if (catalogResult.ok) {
+        bootstrapObjectiveEvaluationRuntime(redis, catalogResult.catalog);
+        app.log.info('[api] F257: objective evaluation runtime bootstrapped');
+      } else {
+        app.log.warn(`[api] F257: evaluation catalog load failed (degraded): ${catalogResult.error}`);
+      }
+    } catch (err) {
+      app.log.warn(`[api] F257: evaluation runtime bootstrap failed (degraded): ${String(err)}`);
+    }
   }
 
   // F298 Phase A: callback auth is bound to the same exact child execution.
@@ -729,11 +748,45 @@ async function main(): Promise<void> {
   // F102 KD-34: append listener placeholder (wired after memoryServices init)
   let appendListener: MessageAppendListener | null = null;
 
+  let hardDeleteListener: ((msg: { id: string; threadId: string; userId: string }) => void) | null = null;
+  let deleteByThreadListener: ((threadId: string) => void) | null = null;
+  let deleteMagicWordRefsByEventIds: ((eventIds: readonly string[]) => void) | null = null;
+  let deleteMagicWordRefsByThread: ((threadId: string) => void) | null = null;
+
+  // F257 V1: routing facts are durable message authority with an async query projection.
+  const routingFactProjection = redis ? new RedisRoutingFactProjection(redis) : undefined;
+  // F257 V2: anomaly reports feed the fifth friction channel.
+  const deviationEventLog = redis ? new RedisDeviationEventLog(redis) : undefined;
+
   const messageStore = createMessageStore(redis, {
     onAppend: (msg) => {
       appendListener?.(msg);
     },
+    onBeforeHardDelete: (msg) => {
+      if (!hardDeleteListener) throw new Error('message hard-delete fence not initialized');
+      hardDeleteListener(msg);
+    },
+    onBeforeDeleteByThread: (threadId) => {
+      if (!deleteByThreadListener) throw new Error('message thread-delete fence not initialized');
+      deleteByThreadListener(threadId);
+    },
+    ...(routingFactProjection ? { routingFactProjection } : {}),
   });
+  // F257: bootstrap semantic sweep coordinator after both message and objective stores exist.
+  if (redis) {
+    try {
+      const { bootstrapSemanticSweepCoordinator, getObjectiveEvaluationRuntime } = await import(
+        './domains/prompt-hooks/trace-bootstrap.js'
+      );
+      if (getObjectiveEvaluationRuntime()) {
+        bootstrapSemanticSweepCoordinator(redis, messageStore);
+        app.log.info('[api] F257: semantic sweep coordinator bootstrapped');
+      }
+    } catch (err) {
+      app.log.warn(`[api] F257: semantic sweep coordinator bootstrap failed (degraded): ${String(err)}`);
+    }
+  }
+
   // Queue owners are initialized beside MessageStore so action-terminal
   // convergence can retire their projections at the completion boundary.
   const invocationQueue = new InvocationQueue();
@@ -1179,6 +1232,19 @@ async function main(): Promise<void> {
       return excluded;
     },
   });
+  // F257 R9: persisted fences are the deletion linearization point across
+  // Redis message authority, Event Memory/dead-letter, and episode refs.
+  hardDeleteListener = (msg) => {
+    if (!deleteMagicWordRefsByEventIds) throw new Error('magic-word ref deletion fence not initialized');
+    const eventIds = memoryServices.eventMemoryStore.getByCoord(msg.threadId, msg.id).map((event) => event.eventId);
+    deleteMagicWordRefsByEventIds(eventIds);
+    memoryServices.eventMemoryStore.deleteByCoord(msg.threadId, msg.id);
+  };
+  deleteByThreadListener = (threadId) => {
+    if (!deleteMagicWordRefsByThread) throw new Error('magic-word thread deletion fence not initialized');
+    deleteMagicWordRefsByThread(threadId);
+    memoryServices.eventMemoryStore.deleteByThread(threadId);
+  };
   const { MemoryCueEpisodeStore } = await import('./domains/memory/cue/MemoryCueEpisodeStore.js');
   const { createProcessMemoryCueDrillSecret, MemoryCueDrillHandleService } = await import(
     './domains/memory/cue/MemoryCueDrillHandleService.js'
@@ -2176,9 +2242,8 @@ async function main(): Promise<void> {
       opts?: { excludeEntryId?: string; parentInvocationId?: string },
     ): Array<{
       entryId?: string;
-      source: string;
+      from: import('@cat-cafe/shared').MessageFrom;
       content: string;
-      callerCatId?: string;
       messageId?: string | null;
       mergedMessageIds?: string[];
       sourceCategory?: string;
@@ -2241,6 +2306,28 @@ async function main(): Promise<void> {
   // F237 Phase 2: InjectionTraceStore — prompt injection trace persistence
   const { InjectionTraceStore: _ITSEarly } = await import('./domains/prompt-hooks/InjectionTraceStore.js');
   const injectionTraceStore = redis ? new _ITSEarly(redis) : undefined;
+
+  // F257 Line B: guard rejection observation is fail-open and never blocks business logic.
+  let guardRejectionLog:
+    | import('./infrastructure/harness-eval/GuardRejectionEventLog.js').GuardRejectionEventLog
+    | undefined;
+  if (redis) {
+    const { GuardRejectionEventLog } = await import('./infrastructure/harness-eval/GuardRejectionEventLog.js');
+    guardRejectionLog = new GuardRejectionEventLog(redis);
+  }
+
+  // F257 approval executor: share one runtime HookOverrideStore across builder and routes.
+  let hookOverrideStore: import('./domains/prompt-hooks/HookOverrideStore.js').HookOverrideStore | undefined;
+  if (redis) {
+    const { HookOverrideStore } = await import('./domains/prompt-hooks/HookOverrideStore.js');
+    const { setOverrideStore, getCachedRegistry, refreshOverrideSnapshot } = await import(
+      './domains/prompt-hooks/PipelinePromptBuilder.js'
+    );
+    const manifestLookup = (hookId: string) => getCachedRegistry()?.getHook(hookId)?.manifest;
+    hookOverrideStore = new HookOverrideStore(redis, manifestLookup);
+    setOverrideStore(hookOverrideStore);
+    await refreshOverrideSnapshot();
+  }
 
   // Shared AgentRouter — used by messagesRoutes and invocationsRoutes
   const { TurnCustodyProjectionService } = await import('./domains/ball-custody/TurnCustodyProjectionService.js');
@@ -2372,6 +2459,7 @@ async function main(): Promise<void> {
     profileRepository,
     ...(writeOpportunityTerminalLedger ? { writeOpportunityTerminalLedger } : {}),
     ...(writeOpportunityDeliveryStore ? { writeOpportunityDeliveryStore } : {}),
+    ...(guardRejectionLog ? { guardRejectionLog } : {}),
   });
 
   // F39: Message queue delivery
@@ -2410,6 +2498,7 @@ async function main(): Promise<void> {
     queueCustodyCoordinator,
     turnExecutionStore,
     log: app.log,
+    getPushService: getPushNotificationService,
     threadStore:
       threadStore as unknown as import('./domains/cats/services/agents/invocation/QueueProcessor.js').ThreadStoreLike,
     sessionContinuationCoordinator,
@@ -2431,15 +2520,15 @@ async function main(): Promise<void> {
     const targetCatIds = proposal.targetCats as CatId[];
     const senderCatId = proposal.senderCatId as CatId;
     const storedMsg = await messageStore.append({
+      from: { kind: 'agent', catId: senderCatId },
       userId: proposal.ownerUserId,
-      catId: senderCatId,
       content: proposal.content,
       mentions: targetCatIds,
       origin: 'callback',
       timestamp: Date.now(),
       threadId: proposal.targetThreadId,
-      deliveryStatus: 'queued',
       idempotencyKey: `dispatch-action:${proposal.proposalId}:message`,
+      ...routedProvenance(analyzeA2AMentions(proposal.content, senderCatId).attemptBatch),
       extra: {
         isExplicitPost: true as const,
         crossPost: {
@@ -2468,8 +2557,6 @@ async function main(): Promise<void> {
     try {
       enqueueResult = await enqueueA2ATargets(
         {
-          router: router as unknown as import('./routes/callback-a2a-trigger.js').A2ATriggerDeps['router'],
-          invocationRecordStore: invocationRecordStore!,
           socketManager: actionSocketManager,
           messageStore,
           ...(invocationTracker ? { invocationTracker } : {}),
@@ -2560,14 +2647,14 @@ async function main(): Promise<void> {
         }
 
         const result = invocationQueue.enqueue({
+          from: { kind: 'agent', catId: carrier.callerCatId },
           threadId: carrier.threadId,
           userId: carrier.userId,
+          kind: 'private_input',
           ownerAuthProvenance: 'unknown',
           content: carrier.content,
-          source: 'agent',
           sourceCategory: 'a2a',
           targetCats: [carrier.targetCatId],
-          callerCatId: carrier.callerCatId,
           intent: 'execute',
           autoExecute: true,
           priority: 'urgent',
@@ -2575,7 +2662,7 @@ async function main(): Promise<void> {
           actionSuccessorFence: carrier.fence,
         });
         if (result.outcome !== 'enqueued') return { outcome: 'unavailable' as const };
-        await queueProcessor.tryAutoExecute(carrier.threadId);
+        await queueProcessor.requestDrain(carrier.threadId);
         const admitted = await invocationRecordStore.getByIdempotencyKey(
           carrier.threadId,
           carrier.userId,
@@ -2676,14 +2763,14 @@ async function main(): Promise<void> {
         closureStore: freshnessClosureStore,
         enqueue: (closure) =>
           invocationQueue.enqueue({
+            from: { kind: 'agent', catId: closure.catId },
             threadId: closure.threadId,
             userId: closure.userId,
+            kind: 'private_input',
             ownerAuthProvenance: 'unknown',
             content: `[Freshness Catch Closure ${closure.id}] startup recovery`,
-            source: 'agent',
             sourceCategory: 'freshness',
             targetCats: [closure.catId],
-            callerCatId: closure.catId,
             autoExecute: true,
             priority: 'normal',
             intent: 'execute',
@@ -2691,7 +2778,7 @@ async function main(): Promise<void> {
             freshnessClosureId: closure.id,
             freshnessRequiredFrontierMessageId: closure.requiredFrontierMessageId,
           }),
-        executeThread: (threadId) => queueProcessor.tryAutoExecute(threadId),
+        executeThread: (threadId) => queueProcessor.requestDrain(threadId),
         onProjection: (projection) => {
           socketManager?.broadcastAgentMessage(
             {
@@ -2713,7 +2800,7 @@ async function main(): Promise<void> {
         closureStore: freshnessClosureStore,
         messageStore,
         enqueue: (supplement) => invocationQueue.enqueue({ ...supplement, ownerAuthProvenance: 'unknown' }),
-        executeThread: (threadId) => queueProcessor.tryAutoExecute(threadId),
+        executeThread: (threadId) => queueProcessor.requestDrain(threadId),
         onProjection: (projection) => {
           socketManager?.broadcastAgentMessage(
             {
@@ -2910,11 +2997,6 @@ async function main(): Promise<void> {
   await app.register(invocationsRoutes, {
     invocationRecordStore,
     turnExecutionStore,
-    messageStore,
-    socketManager,
-    router,
-    invocationTracker,
-    queueProcessor,
   });
   await app.register(messageActionsRoutes, {
     messageStore,
@@ -3004,6 +3086,7 @@ async function main(): Promise<void> {
 
   const { evalHubRoutes } = await import('./routes/eval-hub.js');
   const { evalVerdictLifecycleRoutes } = await import('./routes/eval-verdict-lifecycle.js');
+
   const evalHarnessFeedbackRoot = resolve(repoRoot, 'docs', 'harness-feedback');
   const reevalClosureEventLog = redis
     ? new (await import('./infrastructure/harness-eval/reeval-closure-event-log.js')).RedisReevalClosureEventLog(redis)
@@ -3083,12 +3166,13 @@ async function main(): Promise<void> {
           dispositionService: pawFeelDispositionService,
         })
       : undefined;
-  // F192 Phase H AC-H4: real GitPublisher (git worktree + gh) + per-domain generators
-  const { createGitWorktreePublisher } = await import(
-    './infrastructure/harness-eval/publish-verdict/git-worktree-publisher.js'
+  // F257 fork: local artifact publisher (replaces GitPublisher for durable local verdicts)
+  const { createLocalArtifactPublisher } = await import(
+    './infrastructure/harness-eval/publish-verdict/local-artifact-publisher.js'
   );
-  const verdictRepoFullName =
-    process.env.CAT_CAFE_VERDICT_REPO_FULL_NAME ?? process.env.CAT_CAFE_REPO_FULL_NAME ?? 'zts212653/cat-cafe';
+  const catCafeDataDir = process.env.CAT_CAFE_DATA_DIR ?? memoryServices.dataDir ?? join(homedir(), '.cat-cafe');
+  const artifactStoreRoot = resolve(catCafeDataDir, 'harness-feedback', 'artifacts');
+  const artifactPublisher = createLocalArtifactPublisher({ artifactRoot: artifactStoreRoot });
   const { createA2aGeneratorAdapter } = await import(
     './infrastructure/harness-eval/publish-verdict/a2a-generator-adapter.js'
   );
@@ -3105,6 +3189,12 @@ async function main(): Promise<void> {
   const { TaskOutcomeEpisodeStore } = await import('./infrastructure/harness-eval/task-outcome/task-outcome-store.js');
   const taskOutcomeDbPath = process.env.TASK_OUTCOME_DB ?? resolve(repoRoot, 'task-outcome-episodes.sqlite');
   const taskOutcomeStore = new TaskOutcomeEpisodeStore(taskOutcomeDbPath);
+  deleteMagicWordRefsByEventIds = (eventIds) => {
+    taskOutcomeStore.deleteMagicWordRefsByEventIds(eventIds);
+  };
+  deleteMagicWordRefsByThread = (threadId) => {
+    taskOutcomeStore.deleteMagicWordRefsByThread(threadId);
+  };
 
   // F192 Phase H 收尾 PR-2 (砚砚 R1 P1 + Q5): capability-wakeup generator wires a real
   // CapabilityWakeupTrialProviderImpl with all 4 required ports (sessionStore /
@@ -3122,6 +3212,12 @@ async function main(): Promise<void> {
     'eval:task-outcome': createTaskOutcomeGeneratorAdapter(),
     'eval:qc': createQcGeneratorAdapter(),
   };
+  if (guardRejectionLog) {
+    const { createHarnessLedgerGeneratorAdapter } = await import(
+      './infrastructure/harness-eval/publish-verdict/harness-ledger-generator-adapter.js'
+    );
+    verdictGenerators['eval:harness-ledger'] = createHarnessLedgerGeneratorAdapter();
+  }
   let designGateEpisodeSourceProvider:
     | import('./infrastructure/harness-eval/design-gate/design-gate-episode-source-provider.js').DesignGateEpisodeSourceProviderImpl
     | undefined;
@@ -3254,6 +3350,7 @@ async function main(): Promise<void> {
       frustrationIssueStore,
       harnessFeedbackRoot: resolve(repoRoot, 'docs', 'harness-feedback'),
       ...(memoryServices.embeddingService ? { embeddingService: memoryServices.embeddingService } : {}),
+      ...(deviationEventLog ? { deviationLog: deviationEventLog, deviationOwnerUserId: 'default-user' } : {}),
     });
     verdictGenerators['eval:friction'] = createFrictionGeneratorAdapter(frictionProvider);
   }
@@ -3271,16 +3368,19 @@ async function main(): Promise<void> {
     verdictGenerators['eval:anchor-first'] = createAnchorTelemetryGeneratorAdapter(anchorProvider);
   }
 
+  const { getSemanticSweepCoordinator, getUnitSemanticEvaluationCoordinator, getObjectiveEvaluationRuntime } =
+    await import('./domains/prompt-hooks/trace-bootstrap.js');
+  const semanticSweepCoordinator = getSemanticSweepCoordinator() ?? undefined;
+  const unitSemanticEvaluationCoordinator = getUnitSemanticEvaluationCoordinator() ?? undefined;
+
   await app.register(evalHubRoutes, {
     harnessFeedbackRoot: evalHarnessFeedbackRoot,
     threadStore,
     redis: redisClient ?? undefined,
     invokeTriggerProvider: invokeTriggerHolder,
     messageStore,
-    gitPublisher: createGitWorktreePublisher({
-      repoRoot,
-      expectedRepoFullName: verdictRepoFullName,
-    }),
+    artifactPublisher,
+    artifactStoreRoot,
     verdictGenerators,
     // 砚砚 R4 P1 + cloud R4 P1: register CallbackAuthRegistry for MCP route auth.
     callbackRegistry: registry,
@@ -3289,7 +3389,84 @@ async function main(): Promise<void> {
     lifecycleEventLog: reevalClosureEventLog,
     taskOutcomeDbPath,
     eventMemoryDbPath: memoryServices.eventMemoryDbPath,
+    guardRejectionLog,
+    semanticSweepCoordinator,
+    unitSemanticEvaluationCoordinator,
   });
+
+  // F257 approval executor: operator-gated runtime override management.
+  {
+    const { promptInjectionOverrideRoutes } = await import('./routes/prompt-injection-overrides.js');
+    await app.register(promptInjectionOverrideRoutes, { overrideStore: hookOverrideStore });
+  }
+
+  // F257 segment lifeline, objective truth, and true-scene replay read models.
+  {
+    const { segmentLifelineRoutes } = await import('./routes/segment-lifeline.js');
+    const { getCachedRegistry } = await import('./domains/prompt-hooks/PipelinePromptBuilder.js');
+    const { getTemplateFileInfo, getTemplateOverlayPath } = await import(
+      './domains/cats/services/context/prompt-template-loader.js'
+    );
+    const { existsSync } = await import('node:fs');
+    await app.register(segmentLifelineRoutes, {
+      traceStore: injectionTraceStore,
+      guardRejectionLog,
+      overrideStore: hookOverrideStore,
+      messageStore,
+      resolveManifestVersion: (segmentId) => getCachedRegistry()?.getHook(segmentId)?.manifest.version ?? 1,
+      resolveSegmentName: (segmentId) => getCachedRegistry()?.getHook(segmentId)?.manifest.name ?? segmentId,
+      resolveSegmentManifest: (segmentId) => {
+        const manifest = getCachedRegistry()?.getHook(segmentId)?.manifest;
+        if (!manifest) return null;
+        const fileInfo = getTemplateFileInfo(segmentId);
+        const overlayPath = getTemplateOverlayPath(segmentId);
+        return {
+          safetyTier: manifest.safetyTier,
+          allowLocalOverride: !!fileInfo?.local,
+          disableable: manifest.disableable,
+          hasBackup: overlayPath ? existsSync(`${overlayPath}.bak`) : false,
+        };
+      },
+    });
+  }
+  {
+    const { segmentEvaluationRoutes } = await import('./routes/segment-evaluation.js');
+    await app.register(segmentEvaluationRoutes, { runtime: getObjectiveEvaluationRuntime() ?? undefined });
+  }
+  {
+    const { segmentLifelineReplayRoutes } = await import('./routes/segment-lifeline-replay.js');
+    await app.register(segmentLifelineReplayRoutes, {
+      traceStore: injectionTraceStore,
+      guardRejectionLog,
+      messageStore,
+      threadStore,
+    });
+  }
+
+  if (guardRejectionLog && redis) {
+    const { createThresholdEscalationHook } = await import(
+      './infrastructure/harness-eval/guard-threshold-escalation.js'
+    );
+    const { handleTriggerNow } = await import('./infrastructure/harness-eval/manual-trigger/trigger-now.js');
+    const escalationTriggerDeps: import('./infrastructure/harness-eval/manual-trigger/types.js').ManualTriggerDeps = {
+      harnessFeedbackRoot: evalHarnessFeedbackRoot,
+      invokeTriggerProvider: invokeTriggerHolder,
+      messageStore,
+      threadStore,
+      redis,
+      guardRejectionLog,
+      semanticSweepCoordinator,
+      unitSemanticEvaluationCoordinator,
+    };
+    guardRejectionLog.setPostAppendHook(
+      createThresholdEscalationHook({
+        redis,
+        guardRejectionLog,
+        triggerEval: (input) => handleTriggerNow(escalationTriggerDeps, input),
+      }),
+    );
+    app.log.info('[api] F257: threshold escalation hook wired into GuardRejectionEventLog');
+  }
   const { createEvalReleaseTruthResolver } = await import(
     './infrastructure/harness-eval/eval-release-truth-resolver.js'
   );
@@ -4111,6 +4288,7 @@ async function main(): Promise<void> {
       ...(managedHoldDispositionService ? { managedHoldDispositionService } : {}),
       ...(a2aDispatchDispositionService ? { a2aDispatchDispositionService } : {}),
       ...(ballCustodyIngest ? { ballCustody: ballCustodyIngest } : {}),
+      ...(guardRejectionLog ? { guardRejectionLog } : {}),
       onHoldBallCancelFeedback: (input) => {
         void import('./domains/cats/services/frustration/FrustrationDetector.js')
           .then(({ evaluate }) =>
@@ -4485,13 +4663,14 @@ async function main(): Promise<void> {
       const targetCatIds = proposal.targetCats as CatId[];
       const senderCatId = proposal.senderCatId as CatId;
       const storedMsg = await messageStore.append({
+        from: { kind: 'agent', catId: senderCatId },
         userId: proposal.ownerUserId,
-        catId: senderCatId,
         content: proposal.content,
         mentions: targetCatIds,
         origin: 'callback',
         timestamp: Date.now(),
         threadId: proposal.targetThreadId,
+        ...routedProvenance(analyzeA2AMentions(proposal.content, senderCatId).attemptBatch),
         extra: {
           isExplicitPost: true as const,
           crossPost: {
@@ -4509,8 +4688,6 @@ async function main(): Promise<void> {
         try {
           await enqueueA2ATargets(
             {
-              router: router as unknown as import('./routes/callback-a2a-trigger.js').A2ATriggerDeps['router'],
-              invocationRecordStore: invocationRecordStore!,
               socketManager,
               messageStore,
               ...(invocationTracker ? { invocationTracker } : {}),
@@ -4925,8 +5102,8 @@ async function main(): Promise<void> {
   await app.register(configRoutes);
   await app.register(configSecretsRoutes);
   await app.register(rulesRoutes);
-  await app.register(promptInjectionRoutes);
-  await app.register(promptInjectionManifestRoutes);
+  await app.register(promptInjectionRoutes, { overrideStore: hookOverrideStore });
+  await app.register(promptInjectionManifestRoutes, { overrideStore: hookOverrideStore });
   await app.register(promptInjectionPreviewRoutes);
   await app.register(servicesRoutes, {
     lifecycle: {
@@ -5278,9 +5455,7 @@ async function main(): Promise<void> {
   await app.register(signalPodcastRoutes, {
     messageStore,
     threadStore,
-    router,
-    invocationRecordStore,
-    invocationTracker,
+    invocationQueue,
     queueProcessor,
   });
 
@@ -5448,6 +5623,17 @@ async function main(): Promise<void> {
     }
   });
 
+  // F257: volume sweep drain retry timer — pre-register cleanup (same pattern as F167).
+  // Timer created after listen; cleanup hook registered here because Fastify rejects
+  // addHook once listening.
+  let volumeSweepDrainTimer: ReturnType<typeof setInterval> | null = null;
+  app.addHook('onClose', async () => {
+    if (volumeSweepDrainTimer) {
+      clearInterval(volumeSweepDrainTimer);
+      volumeSweepDrainTimer = null;
+    }
+  });
+
   // F167 S.1-c: the sweep timer is created after listen (it needs invokeTrigger), but
   // Fastify rejects addHook once listening — so register the cleanup hook here and
   // late-bind the timer handle.
@@ -5536,7 +5722,7 @@ async function main(): Promise<void> {
         registry.markStartupRecoveryComplete();
         for (const scope of startupRecovery.queueResumeScopes) {
           try {
-            await queueProcessor.processNext(scope.threadId, scope.userId);
+            await queueProcessor.requestDrain(scope.threadId);
           } catch (error) {
             app.log.warn(
               { error, threadId: scope.threadId, userId: scope.userId },
@@ -5701,23 +5887,11 @@ async function main(): Promise<void> {
   // F140 Phase 3b: connector invoke trigger (auto-invoke cat after review feedback delivery via polling)
   const frontendBaseUrl = resolveFrontendBaseUrl(process.env, app.log);
   const invokeTrigger = new ConnectorInvokeTrigger({
-    router,
     socketManager,
-    invocationRecordStore,
-    invocationTracker,
     invocationQueue,
     queueProcessor,
     queueCustodyCoordinator,
     messageStore,
-    threadMetaLookup: async (threadId) => {
-      const thread = await threadStore.get(threadId);
-      if (!thread) return undefined;
-      return {
-        threadShortId: threadId.slice(0, 15),
-        threadTitle: thread.title ?? undefined,
-        deepLinkUrl: buildThreadDeepLink(frontendBaseUrl, threadId),
-      };
-    },
     log: app.log,
   });
 
@@ -5726,7 +5900,6 @@ async function main(): Promise<void> {
     isKnownCat: (catId) => catRegistry.tryGet(catId) !== undefined,
     messageStore,
     invokeTriggerProvider: { get: () => invokeTrigger },
-    socketManager,
   });
   const { LimbOutboundDeliveryHook } = await import('./domains/limb/LimbOutboundDeliveryHook.js');
   const limbOutboundDelivery = new LimbOutboundDeliveryHook({
@@ -5862,6 +6035,51 @@ async function main(): Promise<void> {
   // resolve the live trigger at request time. Without this bind, the route
   // returns 503 instead of waking the eval cat.
   invokeTriggerHolder.current = invokeTrigger;
+
+  // F257: bind volume-sweep invoke callback + start drain retry timer.
+  // The callback bridges trace volume threshold → handleTriggerNow for eval:harness-ledger.
+  // Late-bound here because invokeTrigger must exist first.
+  if (redis) {
+    try {
+      const { bindVolumeSweepInvoke, drainDueVolumeSweepRetries } = await import(
+        './domains/prompt-hooks/trace-bootstrap.js'
+      );
+      bindVolumeSweepInvoke(async (ownerUserId) => {
+        const { handleTriggerNow } = await import('./infrastructure/harness-eval/manual-trigger/index.js');
+        const result = await handleTriggerNow(
+          {
+            harnessFeedbackRoot: evalHarnessFeedbackRoot,
+            invokeTriggerProvider: invokeTriggerHolder,
+            messageStore,
+            threadStore,
+            redis: redisClient ?? undefined,
+            guardRejectionLog,
+            semanticSweepCoordinator,
+            unitSemanticEvaluationCoordinator,
+          },
+          { domainId: 'eval:harness-ledger', userId: ownerUserId },
+        );
+        if (!('ok' in result) || 'skipped' in result) return { dispatched: false };
+        return {
+          dispatched: true,
+          jobId: result.semanticSweepJobId,
+          unitEvaluationJobIds: result.unitEvaluationJobIds,
+        };
+      });
+      app.log.info('[api] F257: volume sweep invoke callback bound');
+
+      // Cadence timer: drain lease-expired volume sweep retries every 30s.
+      const VOLUME_SWEEP_DRAIN_INTERVAL_MS = 30_000;
+      volumeSweepDrainTimer = setInterval(() => {
+        void drainDueVolumeSweepRetries().catch((err) => {
+          app.log.warn({ err }, '[api] F257: volume sweep drain retry failed (best-effort)');
+        });
+      }, VOLUME_SWEEP_DRAIN_INTERVAL_MS);
+      volumeSweepDrainTimer.unref();
+    } catch (err) {
+      app.log.warn(`[api] F257: volume sweep wiring failed (degraded): ${String(err)}`);
+    }
+  }
 
   // F167 Phase M: late-bind busy checker for pre-fire defer (hold_ball activation).
   // Same thread-busy signal as delivery-batch-done (messages.ts:1822 /
@@ -6240,7 +6458,7 @@ async function main(): Promise<void> {
         reconciliationDedup,
         bindingStore: new RedisConnectorThreadBindingStore(redisClient),
         deliverFn: deliverConnectorMessage,
-        deliveryDeps: { messageStore, socketManager },
+        deliveryDeps: { messageStore },
         fetchOpenPRs,
         fetchOpenIssues,
         // F168 C0.3: repo-level comment poller wiring
@@ -6383,6 +6601,9 @@ async function main(): Promise<void> {
   );
   // N-day factory is in its own module (split from eval-domain-daily for file-size limit)
   const { createEvalDomainNDaySpec } = await import('./infrastructure/harness-eval/domain/eval-domain-nday.js');
+  const { createTelemetryEvidencePrereqProbe } = await import(
+    './infrastructure/harness-eval/domain/eval-domain-evidence-gate.js'
+  );
   const { getOwnerUserId } = await import('./config/cat-config-loader.js');
   // cloud R6 P2 (PR-2) + memory wire-up: mirror the same wired set the
   // eval-hub.ts route computes (Object.keys(verdictGenerators)). Bootstrap-time
@@ -6411,6 +6632,9 @@ async function main(): Promise<void> {
   // metrics, no runtime deps). Phase C bootstrap → keep_observe verdicts.
   wiredPublishDomains.add('eval:qc');
   wiredPublishDomains.add('eval:design-gate');
+  if (guardRejectionLog) {
+    wiredPublishDomains.add('eval:harness-ledger');
+  }
   wiredPublishDomains.add('eval:trajectory-inspector');
   if (freshnessClosureStore) {
     wiredPublishDomains.add('eval:freshness');
@@ -6452,6 +6676,9 @@ async function main(): Promise<void> {
     publishPrereqCache.set(domainId, ok);
     return ok;
   };
+  const evidencePrereqProbe = createTelemetryEvidencePrereqProbe({
+    otelEnabled: () => telemetryHandle.getMetricsText !== null,
+  });
 
   const evalScheduleOpts = {
     harnessFeedbackRoot: resolve(repoRoot, 'docs', 'harness-feedback'),
@@ -6461,6 +6688,10 @@ async function main(): Promise<void> {
     redis: redisClient ?? undefined,
     wiredPublishDomains,
     publishPrereqProbe,
+    guardRejectionLog,
+    evidencePrereqProbe,
+    semanticSweepCoordinator,
+    unitSemanticEvaluationCoordinator,
     triggerStore: redisClient
       ? new (
           await import('./infrastructure/harness-eval/domain/eval-domain-trigger-store.js')
@@ -6729,8 +6960,6 @@ async function main(): Promise<void> {
 
   function wireGatewayHooks(handle: NonNullable<Awaited<ReturnType<typeof startConnectorGateway>>>): void {
     handle.outboundHook.setLimbDelivery(limbOutboundDelivery);
-    invokeTrigger.setOutboundHook(handle.outboundHook);
-    invokeTrigger.setStreamingHook(handle.streamingHook);
     queueProcessor.setOutboundHook(handle.outboundHook as Parameters<typeof queueProcessor.setOutboundHook>[0]);
     queueProcessor.setStreamingHook(handle.streamingHook as Parameters<typeof queueProcessor.setStreamingHook>[0]);
     (callbackOpts as { outboundHook?: typeof handle.outboundHook }).outboundHook = handle.outboundHook;

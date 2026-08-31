@@ -7,7 +7,7 @@
  *   3. Load SOP definition from shared catalog
  *   4. Run evaluateSopDefinition → SopEvalResult[]
  *   5. Call generateSopLiveVerdict → writes bundle + verdict.md
- *   6. Return verdictPath + bundleDir + extraStagedPaths
+ *   6. Return verdictPath + bundleDir + replay-input paths
  */
 
 import { getSopDefinition, isSopDefinitionId } from '@cat-cafe/shared';

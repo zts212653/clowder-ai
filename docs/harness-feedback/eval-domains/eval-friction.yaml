@@ -11,12 +11,16 @@ evalCat:
   catId: gpt52
   handle: "@gpt52"
   model: gpt-5.4
-# F245 PR2: 本家 3-day cadence — N-day infra landed.
-# Community default remains `weekly` in community eval-domains/ copies.
-frequency: every-3d
+# F245 PR2: cadence adjusted 2026-07-31 (opus decision, thread_eval_friction).
+# Rationale: 3 consecutive 72h zero-signal windows (9 days) — system healthy,
+# empty verdict PR noise outweighs faster detection benefit. weekly still within
+# SLA (reevalWithinHours=168). Reversible: switch back to every-3d if friction
+# returns. Community default is also `weekly`.
+# Previous: every-3d (F245 PR2 original, 2026-06 onwards).
+frequency: weekly
 triggerPolicy:
   mode: time_only
-  maxDetectionDelayHours: 72
+  maxDetectionDelayHours: 168
 sourceAdapter: f245-friction-rollup
 sourceRefsKind: friction-rollup-snapshot
 threadPolicy:

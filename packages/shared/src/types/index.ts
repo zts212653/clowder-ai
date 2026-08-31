@@ -43,13 +43,8 @@ export type {
   A2ATask,
   A2ATaskStatus,
 } from './a2a.js';
-// F086/F216: structured A2A scheduling mode (serial vs parallel) — never inferred from ordering
-export {
-  A2A_INLINE_MENTION_MODE,
-  type A2ARoutingMode,
-  type A2ARoutingProjection,
-  isRoutingProjectionStartingNow,
-} from './a2a-routing-mode.js';
+// Structured routing mode and admitted parallel fan-out projection.
+export type { A2ARoutingMode, A2ARoutingProjection } from './a2a-routing-mode.js';
 // F167 Phase S: action-scoped A2A successor single-flight contract
 export {
   ACTION_SUBJECT_REF_DESCRIPTION,
@@ -263,6 +258,7 @@ export type {
 } from './cat-breed.js';
 // F182: Cat routing error types
 export type { CatAlternative, CatRoutingError } from './cat-routing.js';
+export { CatAlternativeSchema, CatRoutingErrorSchema } from './cat-routing.js';
 // F212: CLI error diagnostics (cross-package data contract; classifier/sanitizer impl stays in api)
 export type { CliActiveWriterRecoveryState, CliDiagnostics, CliErrorReasonCode } from './cli-diagnostics.js';
 export type { BuiltinAccountClient } from './client-routing.js';
@@ -639,6 +635,35 @@ export {
   type WaitOutcomeV1,
   type WaitOwnerFence,
 } from './github-wait.js';
+export type {
+  EvaluationSnapshot,
+  EvaluationUnitRef,
+  MetricDefinition,
+  MetricKind,
+  MetricResult,
+  MetricResultValue,
+  MetricTrigger,
+  ObjectiveJudgment,
+  PendingTraceMarker,
+  SegmentEvaluationResponse,
+  SegmentMetricEvaluationView,
+  SegmentObjectiveEvaluationView,
+  SegmentTracingEvaluationView,
+  TraceAnnotation,
+  TraceAnnotationPolarity,
+  TraceAnnotationSource,
+} from './harness-evaluation.js';
+export {
+  EVALUATION_READINESS_WINDOW_MS,
+  EVALUATION_TRACE_VOLUME_THRESHOLD,
+} from './harness-evaluation.js';
+export type {
+  HookOverride,
+  HookOverrideSnapshot,
+  HookOverrideSource,
+  OverrideAction,
+  OverrideChangeEvent,
+} from './hook-override.js';
 // F281 Phase A: server-bound human disposition feedback and exact-subject eligibility contract
 export {
   buildHumanDispositionEnvelope,
@@ -712,6 +737,10 @@ export type {
   InjectionTraceSummary,
   ObservedSegment,
   StageDeliveryDecision,
+  TraceEpisode,
+  TraceEpisodeRef,
+  TraceTerminalExtension,
+  TraceToolCall,
 } from './injection-trace.js';
 // Intent Card + Need Audit types (F076 需求翻译官)
 export type {
@@ -907,6 +936,28 @@ export {
   createCatMessage,
   createUserMessage,
 } from './message.js';
+// #1354 / RFC #1356: canonical Queue → History → Active Run lifecycle contract.
+export type {
+  LifecycleActiveRun,
+  LifecycleAppendAction,
+  LifecycleAppendExpectedRun,
+  LifecycleDeliveryFailureReason,
+  LifecycleDeliveryFailureResult,
+  LifecycleDispatchRef,
+  LifecycleInlinePayload,
+  LifecycleMessageFrom,
+  LifecycleMessageMetadata,
+  LifecycleMessageRefPayload,
+  LifecycleQueueEntry,
+  LifecycleQueuePriority,
+  LifecycleQueueSnapshot,
+  LifecycleResponseBubble,
+  LifecycleStoredMessageMetadata,
+  MessageFrom,
+  ReorderVisibleLifecycleEntriesCommand,
+  StructuredOwnerAdmissionBinding,
+} from './message-lifecycle.js';
+export { isLifecycleStoredMessageMetadata, isMessageFrom } from './message-lifecycle.js';
 // Mount Rules types (F228 Skill 挂载规则解耦)
 export type {
   CustomMountPointRule,
@@ -1151,6 +1202,7 @@ export type {
   HookManifest,
   HookResolver,
   HookStage,
+  HookVariableDef,
   PingPongInput,
   PromptPatch,
   RegisteredHook,
@@ -1259,6 +1311,29 @@ export {
   type SchedulerWaitPredicateKind,
   type SchedulerWaitSubjectRef,
 } from './scheduler-wait.js';
+export type {
+  ActionableInfo,
+  ActiveStage,
+  EvalStageSummary,
+  GovernanceStageSummary,
+  GuardMetric,
+  LifecycleEvent,
+  LifecycleEventKind,
+  ProvenanceGapKind,
+  ReplayGuardEvent,
+  ReplayProvenanceGap,
+  ReplaySnapshot,
+  ReplaySurroundingMessage,
+  SegmentContentSourceKind,
+  SegmentLifecycleResponse,
+  SegmentReplayResponse,
+  SegmentVerdict,
+  TracingStageSummary,
+  VersionEpoch,
+  VersionEpochStatus,
+  VersionOrigin,
+} from './segment-lifecycle.js';
+export { SEGMENT_VERDICTS } from './segment-lifecycle.js';
 // Session chain types (F24 Session Chain + Context Health)
 export type {
   ContextHealth,

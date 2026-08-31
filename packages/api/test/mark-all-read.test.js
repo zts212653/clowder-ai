@@ -5,6 +5,7 @@
 import assert from 'node:assert/strict';
 import { afterEach, beforeEach, describe, it } from 'node:test';
 import Fastify from 'fastify';
+import { canonicalTestMessageInput } from './helpers/message-from-fixtures.js';
 
 describe('POST /api/threads/read/mark-all', () => {
   let app;
@@ -63,22 +64,28 @@ describe('POST /api/threads/read/mark-all', () => {
 
     // Add messages to each thread
     for (const t of threads) {
-      messageStore.append({
-        userId: 'alice',
-        catId: 'opus',
-        content: `msg1 in ${t.id}`,
-        mentions: [],
-        timestamp: 1000,
-        threadId: t.id,
-      });
-      messageStore.append({
-        userId: 'alice',
-        catId: 'opus',
-        content: `msg2 in ${t.id}`,
-        mentions: [],
-        timestamp: 2000,
-        threadId: t.id,
-      });
+      messageStore.append(
+        canonicalTestMessageInput({
+          provenance: { author: 'cat', routed: false, observation: 'original' },
+          userId: 'alice',
+          catId: 'opus',
+          content: `msg1 in ${t.id}`,
+          mentions: [],
+          timestamp: 1000,
+          threadId: t.id,
+        }),
+      );
+      messageStore.append(
+        canonicalTestMessageInput({
+          provenance: { author: 'cat', routed: false, observation: 'original' },
+          userId: 'alice',
+          catId: 'opus',
+          content: `msg2 in ${t.id}`,
+          mentions: [],
+          timestamp: 2000,
+          threadId: t.id,
+        }),
+      );
     }
 
     const res = await app.inject({
@@ -95,15 +102,18 @@ describe('POST /api/threads/read/mark-all', () => {
 
   it('acks threads whose latest visible item is queued cat-authored speech', async () => {
     const thread = threadStore.create('alice', 'Source-cat seed only');
-    const seed = messageStore.append({
-      userId: 'alice',
-      catId: 'codex-sol',
-      content: 'published source-cat seed',
-      mentions: ['opus'],
-      timestamp: 1000,
-      threadId: thread.id,
-      deliveryStatus: 'queued',
-    });
+    const seed = messageStore.append(
+      canonicalTestMessageInput({
+        provenance: { author: 'cat', routed: false, observation: 'original' },
+        userId: 'alice',
+        catId: 'codex-sol',
+        content: 'published source-cat seed',
+        mentions: ['opus'],
+        timestamp: 1000,
+        threadId: thread.id,
+        deliveryStatus: 'queued',
+      }),
+    );
 
     const res = await app.inject({
       method: 'POST',
@@ -120,23 +130,29 @@ describe('POST /api/threads/read/mark-all', () => {
   // mark-all must ack to Q (latest visibilitySeq), not A.
   it('mixed thread: queued cat speech Q after ordinary A — acks to Q', async () => {
     const thread = threadStore.create('alice', 'Mixed: ordinary + queued');
-    messageStore.append({
-      userId: 'alice',
-      catId: null,
-      content: 'ordinary message A',
-      mentions: [],
-      timestamp: 1000,
-      threadId: thread.id,
-    });
-    const q = messageStore.append({
-      userId: 'alice',
-      catId: 'codex-sol',
-      content: 'queued cat speech Q',
-      mentions: ['opus'],
-      timestamp: 2000,
-      threadId: thread.id,
-      deliveryStatus: 'queued',
-    });
+    messageStore.append(
+      canonicalTestMessageInput({
+        provenance: { author: 'user', routed: false, observation: 'original' },
+        userId: 'alice',
+        catId: null,
+        content: 'ordinary message A',
+        mentions: [],
+        timestamp: 1000,
+        threadId: thread.id,
+      }),
+    );
+    const q = messageStore.append(
+      canonicalTestMessageInput({
+        provenance: { author: 'cat', routed: false, observation: 'original' },
+        userId: 'alice',
+        catId: 'codex-sol',
+        content: 'queued cat speech Q',
+        mentions: ['opus'],
+        timestamp: 2000,
+        threadId: thread.id,
+        deliveryStatus: 'queued',
+      }),
+    );
 
     const res = await app.inject({
       method: 'POST',
@@ -155,14 +171,17 @@ describe('POST /api/threads/read/mark-all', () => {
 
   it('is idempotent — second call advances 0', async () => {
     const t = threadStore.create('alice', 'Thread X');
-    messageStore.append({
-      userId: 'alice',
-      catId: 'opus',
-      content: 'hello',
-      mentions: [],
-      timestamp: 1000,
-      threadId: t.id,
-    });
+    messageStore.append(
+      canonicalTestMessageInput({
+        provenance: { author: 'cat', routed: false, observation: 'original' },
+        userId: 'alice',
+        catId: 'opus',
+        content: 'hello',
+        mentions: [],
+        timestamp: 1000,
+        threadId: t.id,
+      }),
+    );
 
     // First call
     await app.inject({ method: 'POST', url: '/api/threads/read/mark-all', headers: { 'x-cat-cafe-user': 'alice' } });

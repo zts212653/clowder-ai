@@ -34,7 +34,7 @@ const QUEUED_ENTRY: QueueEntry = {
   content: 'queued message',
   messageId: 'm1',
   mergedMessageIds: [],
-  source: 'user',
+  from: { kind: 'user', userId: 'test-user' },
   targetCats: ['opus'],
   intent: 'execute',
   status: 'queued',
@@ -155,7 +155,6 @@ describe('QueuePanel wait-reason render', () => {
     useChatStore.setState({
       messages: [],
       queue: [],
-      queuePaused: false,
       currentThreadId: 'thread-1',
       activeInvocations: {},
     });
@@ -190,7 +189,7 @@ describe('QueuePanel wait-reason render', () => {
     });
     expect(container.textContent).toContain('等待 布偶猫（Fable） 调度');
     expect(container.innerHTML).not.toContain('当前回合');
-    expect(container.querySelector('[data-testid="queue-recover"]')?.textContent).toBe('恢复');
+    expect(container.querySelector('[data-testid="queue-recover"]')).toBeNull();
   });
 
   // 砚砚 P1 end-to-end: queued entry targets opus; codex is active LONGER but is not the target.

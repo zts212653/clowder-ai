@@ -10,6 +10,7 @@
 
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
+import { canonicalTestQueueInput } from './helpers/message-from-fixtures.js';
 
 const { reconcileZombies } = await import('../dist/domains/cats/services/agents/invocation/reconcileZombies.js');
 const { InvocationRecordStore } = await import('../dist/domains/cats/services/stores/ports/InvocationRecordStore.js');
@@ -511,30 +512,36 @@ describe('F194 reconcileZombies — cleanup pathway', () => {
     store.update(parent.invocationId, { status: 'running', userMessageId: 'msg-parent' });
 
     // 2) Its queue entry is claimed -> `processing`. This is the entry that goes stale.
-    queue.enqueue({
-      ownerAuthProvenance: 'unknown',
-      threadId: 't1',
-      userId: 'u1',
-      content: '@codex go',
-      source: 'agent',
-      targetCats: ['opus'],
-      intent: 'execute',
-      messageId: 'msg-parent',
-    });
+    queue.enqueue(
+      canonicalTestQueueInput({
+        kind: 'message_wake',
+        ownerAuthProvenance: 'unknown',
+        threadId: 't1',
+        userId: 'u1',
+        content: '@codex go',
+        source: 'agent',
+        targetCats: ['opus'],
+        intent: 'execute',
+        messageId: 'msg-parent',
+      }),
+    );
     const claimed = queue.markProcessing('t1', 'u1');
     assert.equal(claimed?.messageId, 'msg-parent', 'precondition: parent entry is processing');
 
     // 3) A later USER `@codex` message queues BEHIND the processing entry.
-    queue.enqueue({
-      ownerAuthProvenance: 'unknown',
-      threadId: 't1',
-      userId: 'u1',
-      content: '@codex please',
-      source: 'user',
-      targetCats: ['codex'],
-      intent: 'execute',
-      messageId: 'msg-user',
-    });
+    queue.enqueue(
+      canonicalTestQueueInput({
+        kind: 'conversation_input',
+        ownerAuthProvenance: 'unknown',
+        threadId: 't1',
+        userId: 'u1',
+        content: '@codex please',
+        source: 'user',
+        targetCats: ['codex'],
+        intent: 'execute',
+        messageId: 'msg-user',
+      }),
+    );
 
     // 4) Parent is judged a zombie and swept.
     const terminalEvents = [];
@@ -587,16 +594,19 @@ describe('F194 reconcileZombies — cleanup pathway', () => {
       actionLeaseCarrier: { kind: 'none' },
     });
     store.update(parent.invocationId, { status: 'running', userMessageId: 'msg-parent' });
-    queue.enqueue({
-      ownerAuthProvenance: 'unknown',
-      threadId: 't-race',
-      userId: 'u1',
-      content: '@codex go',
-      source: 'agent',
-      targetCats: ['opus'],
-      intent: 'execute',
-      messageId: 'msg-parent',
-    });
+    queue.enqueue(
+      canonicalTestQueueInput({
+        kind: 'message_wake',
+        ownerAuthProvenance: 'unknown',
+        threadId: 't-race',
+        userId: 'u1',
+        content: '@codex go',
+        source: 'agent',
+        targetCats: ['opus'],
+        intent: 'execute',
+        messageId: 'msg-parent',
+      }),
+    );
     const claimed = queue.markProcessing('t-race', 'u1');
     assert.ok(claimed);
 
@@ -638,16 +648,19 @@ describe('F194 reconcileZombies — cleanup pathway', () => {
     });
     store.update(parent.invocationId, { status: 'running', userMessageId: 'msg-parent' });
     store.update(parent.invocationId, { status: 'failed', error: 'concurrent-zombie-detected' });
-    queue.enqueue({
-      ownerAuthProvenance: 'unknown',
-      threadId: 't-terminal',
-      userId: 'u1',
-      content: '@codex go',
-      source: 'agent',
-      targetCats: ['opus'],
-      intent: 'execute',
-      messageId: 'msg-parent',
-    });
+    queue.enqueue(
+      canonicalTestQueueInput({
+        kind: 'message_wake',
+        ownerAuthProvenance: 'unknown',
+        threadId: 't-terminal',
+        userId: 'u1',
+        content: '@codex go',
+        source: 'agent',
+        targetCats: ['opus'],
+        intent: 'execute',
+        messageId: 'msg-parent',
+      }),
+    );
     const claimed = queue.markProcessing('t-terminal', 'u1');
     assert.ok(claimed);
 

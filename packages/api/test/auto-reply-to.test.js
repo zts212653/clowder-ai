@@ -12,6 +12,7 @@ import assert from 'node:assert/strict';
 import { beforeEach, describe, test } from 'node:test';
 import Fastify from 'fastify';
 import './helpers/setup-cat-registry.js';
+import { canonicalTestMessageInput } from './helpers/message-from-fixtures.js';
 
 function createMockSocketManager() {
   const messages = [];
@@ -62,14 +63,17 @@ describe('auto-replyTo for A2A invocations', () => {
 
   test('auto-fills replyTo from trigger message when cat does not pass replyTo', async () => {
     // 1. Simulate the trigger message (cat A @mentions cat B)
-    const triggerMsg = messageStore.append({
-      userId: 'user-1',
-      catId: 'opus',
-      content: '请帮忙看一下\n@codex',
-      mentions: ['codex'],
-      timestamp: Date.now(),
-      threadId: 'thread-1',
-    });
+    const triggerMsg = messageStore.append(
+      canonicalTestMessageInput({
+        provenance: { author: 'cat', routed: false, observation: 'original' },
+        userId: 'user-1',
+        catId: 'opus',
+        content: '请帮忙看一下\n@codex',
+        mentions: ['codex'],
+        timestamp: Date.now(),
+        threadId: 'thread-1',
+      }),
+    );
 
     // 2. Create InvocationRecordStore record (as enqueueA2ATargets would)
     const createResult = invocationRecordStore.create({
@@ -130,24 +134,30 @@ describe('auto-replyTo for A2A invocations', () => {
 
   test('explicit replyTo takes precedence over auto-fill', async () => {
     // Trigger message
-    const triggerMsg = messageStore.append({
-      userId: 'user-1',
-      catId: 'opus',
-      content: '请看一下\n@codex',
-      mentions: ['codex'],
-      timestamp: Date.now(),
-      threadId: 'thread-1',
-    });
+    const triggerMsg = messageStore.append(
+      canonicalTestMessageInput({
+        provenance: { author: 'cat', routed: false, observation: 'original' },
+        userId: 'user-1',
+        catId: 'opus',
+        content: '请看一下\n@codex',
+        mentions: ['codex'],
+        timestamp: Date.now(),
+        threadId: 'thread-1',
+      }),
+    );
 
     // A different message the cat wants to reply to explicitly
-    const otherMsg = messageStore.append({
-      userId: 'user-1',
-      catId: null,
-      content: '用户的另一条消息',
-      mentions: [],
-      timestamp: Date.now(),
-      threadId: 'thread-1',
-    });
+    const otherMsg = messageStore.append(
+      canonicalTestMessageInput({
+        provenance: { author: 'user', routed: false, observation: 'original' },
+        userId: 'user-1',
+        catId: null,
+        content: '用户的另一条消息',
+        mentions: [],
+        timestamp: Date.now(),
+        threadId: 'thread-1',
+      }),
+    );
 
     // InvocationRecordStore setup
     const createResult = invocationRecordStore.create({
@@ -218,14 +228,17 @@ describe('auto-replyTo for A2A invocations', () => {
 
   test('P3-2: no auto-fill when parentInvocationRecord threadId mismatches', async () => {
     // Trigger message exists in thread-1
-    const triggerMsg = messageStore.append({
-      userId: 'user-1',
-      catId: 'opus',
-      content: '请看\n@codex',
-      mentions: ['codex'],
-      timestamp: Date.now(),
-      threadId: 'thread-1',
-    });
+    const triggerMsg = messageStore.append(
+      canonicalTestMessageInput({
+        provenance: { author: 'cat', routed: false, observation: 'original' },
+        userId: 'user-1',
+        catId: 'opus',
+        content: '请看\n@codex',
+        mentions: ['codex'],
+        timestamp: Date.now(),
+        threadId: 'thread-1',
+      }),
+    );
 
     // InvocationRecord created for thread-1
     const createResult = invocationRecordStore.create({
@@ -270,14 +283,17 @@ describe('auto-replyTo for A2A invocations', () => {
 
   test('no auto-fill when trigger message is in different thread', async () => {
     // Trigger message in thread-1
-    const triggerMsg = messageStore.append({
-      userId: 'user-1',
-      catId: 'opus',
-      content: '请看\n@codex',
-      mentions: ['codex'],
-      timestamp: Date.now(),
-      threadId: 'thread-1',
-    });
+    const triggerMsg = messageStore.append(
+      canonicalTestMessageInput({
+        provenance: { author: 'cat', routed: false, observation: 'original' },
+        userId: 'user-1',
+        catId: 'opus',
+        content: '请看\n@codex',
+        mentions: ['codex'],
+        timestamp: Date.now(),
+        threadId: 'thread-1',
+      }),
+    );
 
     const createResult = invocationRecordStore.create({
       threadId: 'thread-1',

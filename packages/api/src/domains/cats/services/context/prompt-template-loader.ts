@@ -9,11 +9,12 @@
  * - .local overlay files for user customization (Checkpoint C)
  *
  * Overlay priority: .cat-cafe/prompt-overlays/{id}.local.{ext} > assets/prompt-templates/{id}.{ext}
- * Only segments with allowLocalOverride: true support overlays.
+ * Every template-backed segment has a derived writable overlay filename.
  */
 
 import { existsSync, readFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
+import type { HookVariableDef } from '@cat-cafe/shared';
 import YAML from 'yaml';
 import { findMonorepoRoot } from '../../../../utils/monorepo-root.js';
 
@@ -73,36 +74,31 @@ export function stripComments(content: string): string {
  * Checks for workflow-triggers.local.yaml overlay first.
  * Returns Record<string, string> keyed by breedId.
  */
-export function loadWorkflowTriggers(): Record<string, string> {
-  const { path: filePath, isOverride } = resolveWithOverlay('workflow-triggers.yaml', 'workflow-triggers.local.yaml');
-  if (!existsSync(filePath)) {
-    console.warn('[prompt-template] workflow-triggers.yaml not found, using empty map');
-    return {};
-  }
-
-  let parsed: unknown;
+function parseYamlFile(filePath: string): unknown | undefined {
   try {
-    parsed = YAML.parse(readFileSync(filePath, 'utf-8'));
+    return YAML.parse(readFileSync(filePath, 'utf-8'));
   } catch (err) {
     console.warn(`[prompt-template] malformed YAML in ${filePath}: ${err}`);
-    // Bad overlay → fall back to base; bad base → empty map
-    if (isOverride) {
-      const basePath = templatePath('workflow-triggers.yaml');
-      if (existsSync(basePath)) {
-        try {
-          parsed = YAML.parse(readFileSync(basePath, 'utf-8'));
-        } catch {
-          console.warn('[prompt-template] base workflow-triggers.yaml also malformed, using empty map');
-          return {};
-        }
-      } else {
-        return {};
-      }
-    } else {
-      return {};
-    }
+    return undefined;
   }
+}
 
+function parseWorkflowTriggers(filePath: string, isOverride: boolean): unknown | undefined {
+  const parsed = parseYamlFile(filePath);
+  if (parsed !== undefined) return parsed;
+  if (!isOverride) return undefined;
+
+  const basePath = templatePath('workflow-triggers.yaml');
+  if (!existsSync(basePath)) return undefined;
+
+  const baseParsed = parseYamlFile(basePath);
+  if (baseParsed === undefined) {
+    console.warn('[prompt-template] base workflow-triggers.yaml also malformed, using empty map');
+  }
+  return baseParsed;
+}
+
+function extractWorkflowTriggers(parsed: unknown): Record<string, string> {
   if (parsed == null || typeof parsed !== 'object') return {};
 
   // YAML block scalars have trailing newline — trim to match original .join('\n') output
@@ -113,6 +109,17 @@ export function loadWorkflowTriggers(): Record<string, string> {
     }
   }
   return result;
+}
+
+export function loadWorkflowTriggers(): Record<string, string> {
+  const { path: filePath, isOverride } = resolveWithOverlay('workflow-triggers.yaml', 'workflow-triggers.local.yaml');
+  if (!existsSync(filePath)) {
+    console.warn('[prompt-template] workflow-triggers.yaml not found, using empty map');
+    return {};
+  }
+
+  const parsed = parseWorkflowTriggers(filePath, isOverride);
+  return parsed === undefined ? {} : extractWorkflowTriggers(parsed);
 }
 
 // ── S13: MCP Tools Section (allowLocalOverride: true) ────────
@@ -132,34 +139,33 @@ export function loadMcpToolsSection(vars: { RICH_BLOCK_SHORT: string }): string 
   return renderTemplate(stripComments(raw), vars);
 }
 
-// ── D8: A2A Ball Check (allowLocalOverride: false — no overlay) ──
+// ── D8: A2A Ball Check ───────────────────────────────────────
 
 /**
- * Load A2A ball ownership check prompt (no variables, no overlay).
+ * Load A2A ball ownership check prompt (no variables).
  */
 export function loadA2aBallCheck(): string {
-  const filePath = templatePath('a2a-ball-check.md');
-  if (!existsSync(filePath)) {
+  const content = renderSegment('D8');
+  if (content == null) {
     console.warn('[prompt-template] a2a-ball-check.md not found, returning empty');
     return '';
   }
-  return stripComments(readFileSync(filePath, 'utf-8'));
+  return content;
 }
 
-// ── D21: Handoff Decision Tree (allowLocalOverride: false — no overlay) ──
+// ── D21: Handoff Decision Tree ───────────────────────────────
 
 /**
- * Load handoff decision tree template (no overlay).
+ * Load handoff decision tree template.
  * Caller provides CC_MENTION (co-creator mention pattern).
  */
 export function loadHandoffDecisionTree(vars: { CC_MENTION: string }): string {
-  const filePath = templatePath('handoff-decision-tree.md');
-  if (!existsSync(filePath)) {
+  const content = renderSegment('D21', vars);
+  if (content == null) {
     console.warn('[prompt-template] handoff-decision-tree.md not found, returning empty');
     return '';
   }
-  const raw = readFileSync(filePath, 'utf-8');
-  return renderTemplate(stripComments(raw), vars);
+  return content;
 }
 
 // ── Override status query (for Console UI badges) ────────────
@@ -173,8 +179,11 @@ export interface OverrideStatus {
 
 /** Known template-backed segments and their file mappings.
  *  Tier A (F237 template unification): simple {{VAR}} substitution.
- *  Existing: S6, S13, D8, D21. New Tier A: S1, S2, S8, D1, D5, D9-D11, D14, D16. */
-const TEMPLATE_FILES: Record<string, { base: string; local: string }> = {
+ *  Existing: S6, S13, D8, D21. New Tier A: S1, S2, S8, D1, D5, D9-D11, D14, D16.
+ *  Exported so parity checks between placeholders and hook manifest variables
+ *  can be enforced as a fail-closed invariant (F257 Console 判据⑤).
+ */
+export const TEMPLATE_FILES: Record<string, { base: string; local: string; variables?: HookVariableDef[] }> = {
   // ── L0 section templates (compiled by compile-system-prompt-l0.mjs) ──
   L1: { base: 'l1-parallel-world.md', local: '' },
   L2: { base: 'l2-carry-over.md', local: '' },
@@ -184,10 +193,31 @@ const TEMPLATE_FILES: Record<string, { base: string; local: string }> = {
   L6: { base: 'l6-capability-wakeup.md', local: '' },
   L7: { base: 'l7-collaboration-philosophy.md', local: '' },
   // ── Non-Builder segments (M/C/N/B — migrated to template) ──
-  M1: { base: 'm1-dispatch-mission.md', local: '' },
-  M2: { base: 'm2-transcript-hints.md', local: '' },
+  M1: {
+    base: 'm1-dispatch-mission.md',
+    local: '',
+    variables: [
+      { name: 'MISSION', description: '当前任务名称' },
+      { name: 'WORK_ITEM', description: '当前工作项' },
+      { name: 'PHASE', description: '当前阶段' },
+      { name: 'DONE_WHEN_BLOCK', description: '完成条件块' },
+      { name: 'LINKS_BLOCK', description: '相关链接块' },
+    ],
+  },
+  M2: {
+    base: 'm2-transcript-hints.md',
+    local: '',
+    variables: [
+      { name: 'TRANSCRIPT_PATH', description: '会议转录文件路径' },
+      { name: 'LATEST_RANGE_LINE', description: '最新时间范围行' },
+      { name: 'PARTICIPANTS_LINE', description: '参会者行' },
+    ],
+  },
   C1: { base: 'c1-mcp-callback.md', local: 'c1-mcp-callback.local.md' },
   N1: { base: 'n1-navigation.md', local: '' },
+  B1: { base: '../prompt-hooks/b1-会话引导/b1-session-bootstrap.md', local: '' },
+  R1: { base: '../prompt-hooks/r1-路由组装-串行/r1-route-serial.md', local: '' },
+  R2: { base: '../prompt-hooks/r2-路由组装-并行/r2-route-parallel.md', local: '' },
   // ── Existing templates ──
   S6: { base: 'workflow-triggers.yaml', local: 'workflow-triggers.local.yaml' },
   S13: { base: 'mcp-tools.md', local: 'mcp-tools.local.md' },
@@ -211,8 +241,22 @@ const TEMPLATE_FILES: Record<string, { base: string; local: string }> = {
   D4: { base: 'd4-cross-thread-reply.md', local: '' },
   D6: { base: 'd6-teammates.md', local: '' },
   D7: { base: 'd7-mode-serial.md', local: '' }, // F237: default variant for manifest D7 viewing
-  D7_serial: { base: 'd7-mode-serial.md', local: '' },
-  D7_parallel: { base: 'd7-mode-parallel.md', local: '' },
+  D7_serial: {
+    base: 'd7-mode-serial.md',
+    local: '',
+    variables: [
+      { name: 'CHAIN_INDEX', description: '串行链中的当前猫序号' },
+      { name: 'CHAIN_TOTAL', description: '串行链中的猫总数' },
+    ],
+  },
+  D7_parallel: {
+    base: 'd7-mode-parallel.md',
+    local: '',
+    variables: [
+      { name: 'DISPLAY_NAME', description: '当前猫的显示名' },
+      { name: 'CAT_ID', description: '当前猫的稳定 ID' },
+    ],
+  },
   D7_solo: { base: 'd7-mode-solo.md', local: '' },
   D12: { base: 'd12-active-participant.md', local: '' },
   D13: { base: 'd13-routing-policy.md', local: '' },
@@ -233,17 +277,28 @@ const TEMPLATE_FILES: Record<string, { base: string; local: string }> = {
   D20: { base: 'd20-signal-articles.md', local: '' },
 };
 
+function defaultOverlayFilename(base: string): string {
+  const filename = basename(base);
+  const dot = filename.lastIndexOf('.');
+  return dot > 0 ? `${filename.slice(0, dot)}.local${filename.slice(dot)}` : `${filename}.local`;
+}
+
+function resolveTemplateEntry(
+  segmentId: string,
+): { base: string; local: string; variables?: HookVariableDef[] } | null {
+  const entry = TEMPLATE_FILES[segmentId];
+  if (!entry) return null;
+  return { ...entry, local: entry.local || defaultOverlayFilename(entry.base) };
+}
+
 /**
  * Check override status for a template-backed segment.
  * Returns null if the segment is not template-backed.
  */
 export function getOverrideStatus(segmentId: string): OverrideStatus | null {
-  const entry = TEMPLATE_FILES[segmentId];
+  const entry = resolveTemplateEntry(segmentId);
   if (!entry) return null;
   const basePath = templatePath(entry.base);
-  if (!entry.local) {
-    return { segmentId, hasOverride: false, basePath, overridePath: null };
-  }
   const localPath = overlayPath(entry.local);
   return {
     segmentId,
@@ -258,7 +313,7 @@ export function getOverrideStatus(segmentId: string): OverrideStatus | null {
  * For Console display — returns unrendered template with {{VAR}} placeholders.
  */
 export function getTemplateRawContent(segmentId: string, useOverride: boolean): string | null {
-  const entry = TEMPLATE_FILES[segmentId];
+  const entry = resolveTemplateEntry(segmentId);
   if (!entry) return null;
 
   if (useOverride && entry.local) {
@@ -274,14 +329,16 @@ export function getTemplateRawContent(segmentId: string, useOverride: boolean): 
 }
 
 /** Get the base filename for a template-backed segment */
-export function getTemplateFileInfo(segmentId: string): { base: string; local: string } | null {
-  return TEMPLATE_FILES[segmentId] ?? null;
+export function getTemplateFileInfo(
+  segmentId: string,
+): { base: string; local: string; variables?: HookVariableDef[] } | null {
+  return resolveTemplateEntry(segmentId);
 }
 
 /** Get the writable overlay path for a template-backed segment */
 export function getTemplateOverlayPath(segmentId: string): string | null {
-  const entry = TEMPLATE_FILES[segmentId];
-  if (!entry?.local) return null;
+  const entry = resolveTemplateEntry(segmentId);
+  if (!entry) return null;
   return overlayPath(entry.local);
 }
 
@@ -293,16 +350,10 @@ export function getTemplateOverlayPath(segmentId: string): string | null {
  * Overlay resolution: .local file takes priority when present.
  */
 export function renderSegment(segmentId: string, vars: Record<string, string> = {}): string | null {
-  const entry = TEMPLATE_FILES[segmentId];
+  const entry = resolveTemplateEntry(segmentId);
   if (!entry) return null;
 
-  let filePath: string;
-  if (entry.local) {
-    const resolved = resolveWithOverlay(entry.base, entry.local);
-    filePath = resolved.path;
-  } else {
-    filePath = templatePath(entry.base);
-  }
+  const filePath = resolveWithOverlay(entry.base, entry.local).path;
   if (!existsSync(filePath)) return null;
 
   const raw = readFileSync(filePath, 'utf-8');

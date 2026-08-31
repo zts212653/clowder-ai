@@ -20,7 +20,8 @@ export function classifyApprovedActionCarrier(
   const sourceMatches =
     message.threadId === proposal.targetThreadId &&
     message.userId === proposal.ownerUserId &&
-    message.catId === proposal.senderCatId &&
+    message.from?.kind === 'agent' &&
+    message.from.catId === proposal.senderCatId &&
     message.content === proposal.content &&
     message.origin === 'callback' &&
     message.replyTo === proposal.replyTo &&
@@ -50,9 +51,7 @@ export function classifyApprovedActionCarrier(
     targetCats.every((catId) => {
       const binding = carrierByTargetCatId[catId];
       return (
-        binding?.source === 'agent' &&
-        binding.sourceCategory === 'a2a' &&
-        binding.callerCatId === proposal.senderCatId &&
+        binding?.sourceCategory === 'a2a' &&
         binding.a2aTriggerMessageId === message.id &&
         binding.autoExecute === true &&
         binding.entryId.length > 0

@@ -131,7 +131,7 @@ export class ManagedHoldReceiptService {
       !entry ||
       (entry.status !== 'processing' && entry.status !== 'queued') ||
       entry.threadId !== input.threadId ||
-      entry.source !== 'connector' ||
+      entry.from.kind !== 'system' ||
       entry.sourceCategory !== 'scheduled' ||
       !entry.targetCats.includes(input.catId as CatId) ||
       entry.queuedSeenInvocationIdByCatId?.[input.catId] !== input.invocationId ||

@@ -49,7 +49,6 @@ const mockRequestStreamCatchUp = vi.fn();
 const mockSetQueue = vi.fn((threadId: string, queue: unknown[]) => {
   mockThreadQueues.set(threadId, queue);
 });
-const mockSetQueuePaused = vi.fn();
 const mockSetQueueFull = vi.fn();
 const mockSetThreadIntentMode = vi.fn();
 const mockSetThreadTargetCats = vi.fn();
@@ -58,6 +57,7 @@ const mockUpdateThreadCatStatus = vi.fn();
 const mockClearThreadActiveInvocation = vi.fn();
 const mockSetPendingPreviewAutoOpen = vi.fn();
 const mockQueueThreadPreview = vi.fn();
+const mockUpsertLifecycleMessage = vi.fn();
 // Stateful slot records so spawn_started/intent_mode registration behavior
 // (startedAt preservation, slot-count stability) can be asserted through the
 // real handler code, mimicking chatStore's `startedAt ?? Date.now()` write.
@@ -122,7 +122,6 @@ vi.mock('@/stores/chatStore', () => {
     setThreadHasActiveInvocation: mockSetThreadHasActiveInvocation,
     requestStreamCatchUp: mockRequestStreamCatchUp,
     setQueue: mockSetQueue,
-    setQueuePaused: mockSetQueuePaused,
     setQueueFull: mockSetQueueFull,
     setThreadIntentMode: mockSetThreadIntentMode,
     setThreadTargetCats: mockSetThreadTargetCats,
@@ -138,6 +137,7 @@ vi.mock('@/stores/chatStore', () => {
     getThreadState: mockGetThreadState,
     setPendingPreviewAutoOpen: mockSetPendingPreviewAutoOpen,
     queueThreadPreview: mockQueueThreadPreview,
+    upsertLifecycleMessage: mockUpsertLifecycleMessage,
   });
   const useChatStore = ((selector?: (state: ReturnType<typeof getState>) => unknown) =>
     selector ? selector(getState()) : getState()) as {
@@ -251,7 +251,6 @@ describe('useSocket thread guard (P1 regression: cross-thread event leakage)', (
     mockSetThreadHasActiveInvocation.mockClear();
     mockRequestStreamCatchUp.mockClear();
     mockSetQueue.mockClear();
-    mockSetQueuePaused.mockClear();
     mockSetQueueFull.mockClear();
     mockSetThreadIntentMode.mockClear();
     mockSetThreadTargetCats.mockClear();
@@ -260,6 +259,7 @@ describe('useSocket thread guard (P1 regression: cross-thread event leakage)', (
     mockClearThreadActiveInvocation.mockClear();
     mockSetPendingPreviewAutoOpen.mockClear();
     mockQueueThreadPreview.mockClear();
+    mockUpsertLifecycleMessage.mockClear();
     mockAddActiveInvocation.mockClear();
     mockAddFlatActiveInvocation.mockClear();
     mockRemoveActiveInvocation.mockClear();
@@ -329,6 +329,45 @@ describe('useSocket thread guard (P1 regression: cross-thread event leakage)', (
       mode: 'execute',
       targetCats: ['opus'],
     });
+  });
+
+  it('projects a lifecycle delivery failure as an error system message', () => {
+    const callbacks: SocketCallbacks = { onMessage: vi.fn() };
+    act(() => {
+      root.render(React.createElement(HookWrapper, { callbacks, threadId: 'thread-A' }));
+    });
+
+    act(() => {
+      simulateServerEvent('message_lifecycle_updated', {
+        threadId: 'thread-A',
+        message: {
+          id: 'failure-1',
+          catId: 'system',
+          content: '没有可用成员可以处理这条消息。',
+          timestamp: 100,
+          lifecycle: {
+            kind: 'delivery_failure',
+            orderKey: '100:source-1:failure',
+            from: { kind: 'system', service: 'message_delivery' },
+            status: 'failed',
+            sourceEntryId: 'entry-1',
+            inputMessageId: 'source-1',
+            requestedTargets: [],
+            reason: 'no_available_target',
+            createdAt: 100,
+          },
+        },
+      });
+    });
+
+    expect(mockUpsertLifecycleMessage).toHaveBeenCalledWith(
+      'thread-A',
+      expect.objectContaining({
+        id: 'failure-1',
+        type: 'system',
+        variant: 'error',
+      }),
+    );
   });
 
   it('receives preview auto-open on the stable chat socket across a thread switch', () => {
@@ -971,7 +1010,7 @@ describe('useSocket thread guard (P1 regression: cross-thread event leakage)', (
           {
             id: 'q-queued',
             messageId: 'm-queued',
-            source: 'user',
+            from: { kind: 'user', userId: 'test-user' },
             status: 'queued',
             targetStates: { opus: 'queued' },
           },
@@ -989,7 +1028,7 @@ describe('useSocket thread guard (P1 regression: cross-thread event leakage)', (
     const validUserEntry = {
       id: 'q-valid',
       messageId: 'm-valid',
-      source: 'user',
+      from: { kind: 'user', userId: 'test-user' },
       status: 'queued',
       targetStates: { opus: 'queued' },
     };
@@ -1154,44 +1193,8 @@ describe('useSocket thread guard (P1 regression: cross-thread event leakage)', (
     expect(mockRequestStreamCatchUp).not.toHaveBeenCalled();
   });
 
-  it('messages_queued installs the original cross-thread message as the live receipt anchor', () => {
-    mockStoreCurrentThreadId = 'thread-B';
-    const callbacks: SocketCallbacks = { onMessage: vi.fn() };
-    const queueReceipt = {
-      version: 1,
-      scope: 'cross_thread_delivery',
-      state: 'queued',
-      targets: [{ catId: 'codex', state: 'queued' }],
-    };
-
-    act(() => {
-      root.render(React.createElement(HookWrapper, { callbacks, threadId: 'thread-B' }));
-    });
-
-    act(() => {
-      simulateServerEvent('messages_queued', {
-        threadId: 'thread-B',
-        messageIds: ['message-cross-thread'],
-        messages: [
-          {
-            id: 'message-cross-thread',
-            content: 'terminal release',
-            catId: 'opus',
-            timestamp: 1234,
-            extra: { queueReceipt },
-          },
-        ],
-      });
-    });
-
-    expect(mockAddMessageToThread).toHaveBeenCalledWith('thread-B', {
-      id: 'message-cross-thread',
-      type: 'assistant',
-      content: 'terminal release',
-      timestamp: 1234,
-      catId: 'opus',
-      extra: { queueReceipt },
-    });
+  it('does not treat Queue admission as a live History receipt anchor', () => {
+    expect(mockAddMessageToThread).not.toHaveBeenCalled();
     expect(mockSetThreadMessageMetadata).not.toHaveBeenCalledWith(
       'thread-B',
       'message-cross-thread',
@@ -1634,27 +1637,6 @@ describe('useSocket thread guard (P1 regression: cross-thread event leakage)', (
     expect(mockGetThreadState).not.toHaveBeenCalled();
   });
 
-  it('debug disabled: queue_paused with malformed queue payload does not throw', () => {
-    const callbacks: SocketCallbacks = { onMessage: vi.fn() };
-
-    act(() => {
-      root.render(React.createElement(HookWrapper, { callbacks, threadId: 'thread-B' }));
-    });
-
-    expect(() => {
-      act(() => {
-        simulateServerEvent('queue_paused', {
-          threadId: 'thread-B',
-          reason: 'failed',
-          queue: [null],
-        });
-      });
-    }).not.toThrow();
-
-    expect(mockSetQueue).toHaveBeenCalledWith('thread-B', [null]);
-    expect(mockSetQueuePaused).toHaveBeenCalledWith('thread-B', true, 'failed');
-  });
-
   it('debug enabled: non-array queue payload does not crash debug mapping', () => {
     window.sessionStorage.setItem(invocationDebugConstants.STORAGE_KEY, '1');
     const callbacks: SocketCallbacks = { onMessage: vi.fn() };
@@ -1725,7 +1707,6 @@ describe('useSocket thread guard (P1 regression: cross-thread event leakage)', (
     const rawEvent = rawDump.events.find((event) => event.event === 'queue_updated');
     expect(rawEvent?.threadId).toBe('thread-B');
     expect(rawEvent?.hasActiveInvocation).toBe(true);
-    expect(rawEvent?.queuePaused).toBe(false);
   });
 
   it('socket is NOT disconnected/reconnected when callbacks change (callbacksRef pattern)', () => {

@@ -19,6 +19,7 @@ import {
   requestReminderAttempt,
 } from '../dist/domains/cats/services/stores/ports/queued-message-receipt.js';
 import { enrichQueueEntries } from '../dist/utils/queue-enrichment.js';
+import { canonicalTestMessageInput, canonicalTestQueueInput } from './helpers/message-from-fixtures.js';
 
 function custody(overrides = {}) {
   return {
@@ -95,6 +96,38 @@ describe('F264 queue receipt projection', () => {
         ],
       },
     ]);
+  });
+
+  test('projects an explicitly cancelled invocation as cancelled instead of failed', () => {
+    const receipt = projectQueueReceipt(
+      custody({
+        allTargetCats: ['codex'],
+        pendingTargetCats: [],
+        seenByCatIds: ['codex'],
+        seenInvocationIdByCatId: { codex: 'child-cancelled' },
+        bodyExposures: [{ targetCatId: 'codex', invocationId: 'child-cancelled', seenAt: 1_050 }],
+        failedByCatIds: ['codex'],
+        handledByCatIds: [],
+        targetOutcomeByCatId: undefined,
+        targetAttempts: [
+          {
+            id: 'entry-1:codex:1',
+            targetCatId: 'codex',
+            sequence: 1,
+            state: 'cancelled',
+            createdAt: 1_000,
+            updatedAt: 1_100,
+            invocationId: 'child-cancelled',
+            seenAt: 1_050,
+            terminalReason: 'invocation_cancelled',
+          },
+        ],
+      }),
+    );
+
+    assert.equal(receipt.targets[0].state, 'cancelled');
+    assert.equal(receipt.targets[0].invocationId, 'child-cancelled');
+    assert.equal(receipt.targets[0].seenAt, 1_050);
   });
 
   test('distinguishes admitted, awakened, read, and invoked-but-unsettled target truth', () => {
@@ -496,16 +529,19 @@ describe('F264 queue receipt projection', () => {
 describe('F264 exact body exposure identity', () => {
   test('is idempotent by target and child invocation while preserving independent targets', () => {
     const queue = new InvocationQueue();
-    const result = queue.enqueue({
-      ownerAuthProvenance: 'unknown',
-      threadId: 'thread-exposure',
-      userId: 'user-exposure',
-      content: 'one persisted body',
-      source: 'user',
-      targetCats: ['opus', 'codex'],
-      intent: 'execute',
-      priority: 'normal',
-    });
+    const result = queue.enqueue(
+      canonicalTestQueueInput({
+        kind: 'conversation_input',
+        ownerAuthProvenance: 'unknown',
+        threadId: 'thread-exposure',
+        userId: 'user-exposure',
+        content: 'one persisted body',
+        source: 'user',
+        targetCats: ['opus', 'codex'],
+        intent: 'execute',
+        priority: 'normal',
+      }),
+    );
     const entry = result.entry;
 
     queue.markQueuedSeen(entry.threadId, entry.userId, entry.id, 'opus', 'child-opus-1', 1_100);
@@ -626,28 +662,33 @@ describe('F264 manual reminder attempt', () => {
 function createCustodiedEntry() {
   const queue = new InvocationQueue();
   const store = new MessageStore();
-  const result = queue.enqueue({
-    ownerAuthProvenance: 'unknown',
-    threadId: 'thread-1',
-    userId: 'user-1',
-    content: 'please keep the receipt',
-    source: 'user',
-    targetCats: ['opus'],
-    intent: 'execute',
-    priority: 'normal',
-  });
+  const result = queue.enqueue(
+    canonicalTestQueueInput({
+      kind: 'conversation_input',
+      ownerAuthProvenance: 'unknown',
+      threadId: 'thread-1',
+      userId: 'user-1',
+      content: 'please keep the receipt',
+      source: 'user',
+      targetCats: ['opus'],
+      intent: 'execute',
+      priority: 'normal',
+    }),
+  );
   assert.equal(result.outcome, 'enqueued');
   const entry = result.entry;
-  const message = store.append({
-    threadId: entry.threadId,
-    userId: entry.userId,
-    catId: null,
-    content: entry.content,
-    mentions: entry.targetCats,
-    timestamp: entry.createdAt,
-    deliveryStatus: 'queued',
-    queueCustody: createInitialQueuedMessageCustody(entry),
-  });
+  const message = store.append(
+    canonicalTestMessageInput({
+      threadId: entry.threadId,
+      userId: entry.userId,
+      catId: null,
+      content: entry.content,
+      mentions: entry.targetCats,
+      timestamp: entry.createdAt,
+      deliveryStatus: 'queued',
+      queueCustody: createInitialQueuedMessageCustody(entry),
+    }),
+  );
   queue.backfillMessageId(entry.threadId, entry.userId, entry.id, message.id);
   const persistedEntry = queue.getEntrySnapshot(entry.threadId, entry.userId, entry.id);
   assert.ok(persistedEntry);
@@ -655,7 +696,7 @@ function createCustodiedEntry() {
 }
 
 function agentQueueEntry(overrides = {}) {
-  return {
+  return canonicalTestQueueInput({
     id: 'agent-queue-entry',
     threadId: 'thread-agent-receipt',
     userId: 'system',
@@ -673,25 +714,28 @@ function agentQueueEntry(overrides = {}) {
     autoExecute: true,
     priority: 'normal',
     ...overrides,
-  };
+  });
 }
 
 describe('F264 agent QueueEntry receipt fallback', () => {
   test('projects an exact seen receipt from an agent entry with no stored queue custody', async () => {
     const queue = new InvocationQueue();
     const store = new MessageStore();
-    const result = queue.enqueue({
-      ownerAuthProvenance: 'unknown',
-      threadId: 'thread-agent-receipt',
-      userId: 'system',
-      content: 'A2A body already read by the live turn',
-      messageId: 'message-agent-receipt',
-      source: 'agent',
-      sourceCategory: 'a2a',
-      targetCats: ['codex-sol'],
-      intent: 'execute',
-      autoExecute: true,
-    });
+    const result = queue.enqueue(
+      canonicalTestQueueInput({
+        kind: 'message_wake',
+        ownerAuthProvenance: 'unknown',
+        threadId: 'thread-agent-receipt',
+        userId: 'system',
+        content: 'A2A body already read by the live turn',
+        messageId: 'message-agent-receipt',
+        source: 'agent',
+        sourceCategory: 'a2a',
+        targetCats: ['codex-sol'],
+        intent: 'execute',
+        autoExecute: true,
+      }),
+    );
     assert.equal(result.outcome, 'enqueued');
     const entry = result.entry;
     assert.ok(entry);
@@ -751,25 +795,25 @@ describe('F264 agent QueueEntry receipt fallback', () => {
     });
   });
 
-  test('keeps an agent failure recoverable rather than promoting a read marker to terminal success', async () => {
+  test('removes an agent failure from selectable Queue state', () => {
     const queue = new InvocationQueue();
-    const result = queue.enqueue({
-      ownerAuthProvenance: 'unknown',
-      threadId: 'thread-agent-failure',
-      userId: 'system',
-      content: 'A2A body whose reading turn failed',
-      source: 'agent',
-      sourceCategory: 'a2a',
-      targetCats: ['codex-sol'],
-      intent: 'execute',
-      autoExecute: true,
-    });
-    assert.equal(result.outcome, 'enqueued');
-    const entry = result.entry;
-    assert.ok(entry);
+    const { entry } = queue.enqueue(
+      canonicalTestQueueInput({
+        kind: 'private_input',
+        ownerAuthProvenance: 'unknown',
+        threadId: 'thread-agent-failure',
+        userId: 'system',
+        content: 'A2A body whose reading turn failed',
+        source: 'agent',
+        sourceCategory: 'a2a',
+        targetCats: ['codex-sol'],
+        intent: 'execute',
+        autoExecute: true,
+      }),
+    );
 
     queue.markQueuedSeen(entry.threadId, entry.userId, entry.id, 'codex-sol', 'turn-failed', 1_200);
-    queue.markQueuedFailedForCatAcrossUsers(
+    const failed = queue.takeQueuedFailedTargetForCatAcrossUsers(
       entry.threadId,
       'codex-sol',
       'turn-failed',
@@ -778,14 +822,8 @@ describe('F264 agent QueueEntry receipt fallback', () => {
       1_300,
     );
 
-    const [enriched] = await enrichQueueEntries(queue.list(entry.threadId, entry.userId), null);
-    assert.deepEqual(enriched.targetStates, { 'codex-sol': 'failed' });
-    assert.deepEqual(enriched.queueReceipt, {
-      version: 1,
-      entryId: entry.id,
-      targets: [{ catId: 'codex-sol', state: 'failed', invocationId: 'turn-failed', seenAt: 1_200 }],
-      reminderAttempts: [],
-    });
+    assert.equal(failed.length, 1);
+    assert.equal(queue.getEntrySnapshot(entry.threadId, entry.userId, entry.id), null);
   });
 });
 
@@ -877,9 +915,14 @@ describe('F264 custody coordinator evidence', () => {
       queue.getEntrySnapshot(entry.threadId, entry.userId, entry.id),
     );
 
-    queue.markQueuedFailedForCatAcrossUsers(entry.threadId, 'opus', 'inv-failed');
-    await new QueuedMessageCustodyCoordinator({ messageStore: store, now: () => seenAt + 10 }).persistEntry(
-      queue.getEntrySnapshot(entry.threadId, entry.userId, entry.id),
+    const [failed] = queue.takeQueuedFailedTargetForCatAcrossUsers(entry.threadId, 'opus', 'inv-failed');
+    assert.ok(failed?.entrySnapshot);
+    await new QueuedMessageCustodyCoordinator({ messageStore: store, now: () => seenAt + 10 }).commitFailedTargets(
+      failed.entrySnapshot,
+      ['opus'],
+      seenAt + 10,
+      'invocation_failed',
+      { opus: 'inv-failed' },
     );
 
     const target = projectQueueReceipt(store.getById(message.id).queueCustody).targets[0];

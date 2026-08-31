@@ -10,11 +10,11 @@
  *  1. A2A dedup 守卫 hasQueuedAgentForCat 只检查 status==='queued'（故意的，
  *     让 processing 时还能排新 handoff）。
  *  2. 但 A2A entry autoExecute:true → enqueueA2ATargets enqueue 后立即
- *     tryAutoExecute → 第一条几乎瞬间从 queued 变 processing。
+ *     requestDrain → 第一条几乎瞬间从 queued 变 processing。
  *  3. 第二条到达时第一条已 processing 不是 queued → dedup 失效 → 第二条
  *     照常 enqueue → 两条独立 invocation 串行跑。
  *
- * 对照：用户消息（landy 连发两条）走 collectUserBatch → content 拼接合并。
+ * 对照：public conversation input 只共用一次 dispatch，Queue/History identity 仍独立。
  * agent A2A 路径完全没有 coalescing。
  *
  * 修复（coalesce-or-supersede）：
@@ -25,12 +25,14 @@
 
 import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
+import { canonicalTestMessageInput, canonicalTestQueueInput } from './helpers/message-from-fixtures.js';
 
 const QUEUE_PATH = '../dist/domains/cats/services/agents/invocation/InvocationQueue.js';
 const TRIGGER_PATH = '../dist/routes/callback-a2a-trigger.js';
 
 function agentEntryInput(overrides = {}) {
-  return {
+  return canonicalTestQueueInput({
+    kind: 'message_wake',
     ownerAuthProvenance: 'unknown',
     threadId: 't1',
     userId: 'system',
@@ -41,8 +43,36 @@ function agentEntryInput(overrides = {}) {
     intent: 'execute',
     autoExecute: true,
     callerCatId: 'opus',
+    a2aTriggerMessageId: 'trigger-default',
     ...overrides,
-  };
+  });
+}
+
+async function enqueueDurableA2ATargets(enqueueA2ATargets, deps, opts) {
+  const { MessageStore } = await import('../dist/domains/cats/services/stores/ports/MessageStore.js');
+  const messageStore = deps.messageStore ?? new MessageStore();
+  let triggerMessage = await messageStore.getById(opts.triggerMessage.id);
+  if (!triggerMessage) {
+    triggerMessage = await messageStore.append(
+      canonicalTestMessageInput({
+        userId: opts.userId,
+        threadId: opts.threadId,
+        catId: opts.triggerMessage.catId ?? opts.callerCatId ?? 'opus',
+        content: opts.triggerMessage.content,
+        mentions: opts.triggerMessage.mentions,
+        timestamp: opts.triggerMessage.timestamp ?? 100,
+      }),
+    );
+    triggerMessage.id = opts.triggerMessage.id;
+  }
+  return enqueueA2ATargets(
+    { ...deps, messageStore },
+    {
+      ...opts,
+      ownerAuthProvenance: opts.ownerAuthProvenance ?? 'unknown',
+      triggerMessage: { ...triggerMessage, ...opts.triggerMessage, id: triggerMessage.id },
+    },
+  );
 }
 
 describe('InvocationQueue.findInFlightAgentEntry (F-coalesce)', () => {
@@ -80,7 +110,15 @@ describe('InvocationQueue.findInFlightAgentEntry (F-coalesce)', () => {
   test('returns null for a USER-source entry (only agent entries coalesce)', async () => {
     const { InvocationQueue } = await import(QUEUE_PATH);
     const q = new InvocationQueue();
-    q.enqueue(agentEntryInput({ source: 'user', sourceCategory: undefined, targetCats: ['antig-opus'] }));
+    q.enqueue(
+      agentEntryInput({
+        kind: 'conversation_input',
+        source: 'user',
+        sourceCategory: undefined,
+        targetCats: ['antig-opus'],
+        a2aTriggerMessageId: undefined,
+      }),
+    );
     assert.equal(q.findInFlightAgentEntry('t1', 'antig-opus'), null);
   });
 
@@ -89,7 +127,14 @@ describe('InvocationQueue.findInFlightAgentEntry (F-coalesce)', () => {
   test('returns null for a CONTINUATION agent entry (sourceCategory mismatch)', async () => {
     const { InvocationQueue } = await import(QUEUE_PATH);
     const q = new InvocationQueue();
-    q.enqueue(agentEntryInput({ sourceCategory: 'continuation', targetCats: ['antig-opus'] }));
+    q.enqueue(
+      agentEntryInput({
+        kind: 'private_input',
+        sourceCategory: 'continuation',
+        targetCats: ['antig-opus'],
+        a2aTriggerMessageId: undefined,
+      }),
+    );
     assert.equal(
       q.findInFlightAgentEntry('t1', 'antig-opus'),
       null,
@@ -101,7 +146,13 @@ describe('InvocationQueue.findInFlightAgentEntry (F-coalesce)', () => {
     const { InvocationQueue } = await import(QUEUE_PATH);
     const q = new InvocationQueue();
     q.enqueue(
-      agentEntryInput({ sourceCategory: 'continuation', content: 'self-continuation', targetCats: ['antig-opus'] }),
+      agentEntryInput({
+        kind: 'private_input',
+        sourceCategory: 'continuation',
+        content: 'self-continuation',
+        targetCats: ['antig-opus'],
+        a2aTriggerMessageId: undefined,
+      }),
     );
     const a2a = q.enqueue(
       agentEntryInput({ sourceCategory: 'a2a', content: 'real handoff', targetCats: ['antig-opus'] }),
@@ -124,7 +175,7 @@ describe('PR7 failed A2A target ordinary eligibility', () => {
     const { InvocationQueue } = await import(QUEUE_PATH);
     const q = new InvocationQueue();
     const { entry } = q.enqueue(agentEntryInput({ content: 'failed handoff', messageId: 'message-failed' }));
-    q.markQueuedFailedForCatAcrossUsers(
+    q.takeQueuedFailedTargetForCatAcrossUsers(
       't1',
       'antig-opus',
       'invocation-failed',
@@ -148,23 +199,15 @@ describe('PR7 failed A2A target ordinary eligibility', () => {
     assert.equal(q.hasPendingForCat('t1', 'antig-opus'), false);
     assert.equal(q.hasQueuedOrProcessingForCat('t1', 'antig-opus'), false);
 
-    const stillFailed = q.getEntrySnapshot('t1', 'system', entry.id);
-    assert.deepEqual(stillFailed.queuedFailedByCatIds, ['antig-opus']);
-    assert.equal(stillFailed.content, 'failed handoff');
+    assert.equal(q.getEntrySnapshot('t1', 'system', entry.id), null);
 
     const fresh = q.enqueue(
       agentEntryInput({ content: 'later fresh handoff', messageId: 'message-fresh', targetCats: ['antig-opus'] }),
     ).entry;
     const advanced = q.markProcessingAcrossUsers('t1');
     assert.equal(advanced.id, fresh.id, 'a failed head must not starve later eligible work');
-    assert.deepEqual(q.getEntrySnapshot('t1', 'system', entry.id).queuedFailedByCatIds, ['antig-opus']);
-
-    const retry = q.retryFailedTarget('t1', 'system', entry.id, 'antig-opus');
-    assert.ok(retry, 'the explicit retry transition remains the sole reopening path');
-    assert.deepEqual(
-      q.listAutoExecute('t1').map((candidate) => candidate.id),
-      [entry.id],
-    );
+    assert.notEqual(fresh.id, entry.id, 'later work must use a fresh Queue identity');
+    assert.deepEqual(q.listAutoExecute('t1'), [], 'the old failed identity is terminal, not selectable Queue state');
   });
 
   test('a failed target cannot hide or re-enter through an eligible same-carrier sibling', async () => {
@@ -177,7 +220,7 @@ describe('PR7 failed A2A target ordinary eligibility', () => {
         targetCats: ['antig-opus', 'codex'],
       }),
     );
-    q.markQueuedFailedForCatAcrossUsers(
+    q.takeQueuedFailedTargetForCatAcrossUsers(
       't1',
       'antig-opus',
       'invocation-failed',
@@ -226,7 +269,11 @@ describe('PR7 fan-out custody admission fence', () => {
     assert.equal(q.hasQueuedAgentForCat('t1', 'antig-opus'), true, 'dedup must still see pending ownership');
     assert.equal(q.hasPendingForCat('t1', 'antig-opus'), true, 'liveness must still see pending ownership');
     assert.deepEqual(q.listAutoExecute('t1'), [], 'auto-execute must not publish a staged carrier');
-    assert.equal(q.peekNextQueued('t1', 'system'), null, 'continuation dequeue must not publish a staged carrier');
+    assert.equal(
+      q.peekNextQueued('t1', 'system')?.id,
+      entry.id,
+      'comparator peek retains the staged carrier while processing admission remains fenced',
+    );
     assert.equal(q.markProcessingById('t1', entry.id), false, 'entry-id races must recheck the fence');
     assert.equal(q.commitQueueCustodyAdmission('t1', 'system', 'wrong-admission', [entry.id]), false);
     assert.equal(q.getEntrySnapshot('t1', 'system', entry.id).queueCustodyAdmissionId, admissionId);
@@ -245,7 +292,13 @@ describe('InvocationQueue.coalesceContentIntoQueuedAgent (F-coalesce sourceCateg
     const { InvocationQueue } = await import(QUEUE_PATH);
     const q = new InvocationQueue();
     const cont = q.enqueue(
-      agentEntryInput({ sourceCategory: 'continuation', content: 'self-work', targetCats: ['antig-opus'] }),
+      agentEntryInput({
+        kind: 'private_input',
+        sourceCategory: 'continuation',
+        content: 'self-work',
+        targetCats: ['antig-opus'],
+        a2aTriggerMessageId: undefined,
+      }),
     );
     const ok = q.coalesceContentIntoQueuedAgent('t1', 'system', cont.entry.id, 'handoff content', 'm2');
     assert.equal(ok, false, 'must not splice a handoff into a continuation entry');
@@ -278,12 +331,15 @@ describe('InvocationQueue.findInFlightAgentEntry — caller scope (F216 c0)', ()
     assert.equal(found.id, r.entry.id);
   });
 
-  test('does NOT match when entry.callerCatId is undefined (no任意-caller adoption)', async () => {
+  test('rejects an agent entry without canonical sender identity', async () => {
     const { InvocationQueue } = await import(QUEUE_PATH);
     const q = new InvocationQueue();
-    q.enqueue(agentEntryInput({ callerCatId: undefined, content: 'orphan', targetCats: ['antig-opus'] }));
-    const found = q.findInFlightAgentEntry('t1', 'antig-opus', 'opus');
-    assert.equal(found, null, 'undefined-caller entry must not be adopted by an arbitrary caller');
+    const { from: _from, ...missingFrom } = agentEntryInput({ content: 'orphan', targetCats: ['antig-opus'] });
+    assert.throws(
+      () => q.enqueue(missingFrom),
+      /from must be explicit/,
+      'an identity-free entry must fail at admission instead of becoming adoptable',
+    );
   });
 
   test('coalesceContentIntoQueuedAgent refuses cross-caller merge', async () => {
@@ -368,7 +424,7 @@ describe('enqueueA2ATargets coalesce/supersede (F-coalesce integration)', () => 
       },
       queueProcessor: {
         onInvocationComplete() {},
-        tryAutoExecute() {
+        requestDrain() {
           return Promise.resolve();
         },
         clearPause() {},
@@ -389,7 +445,7 @@ describe('enqueueA2ATargets coalesce/supersede (F-coalesce integration)', () => 
     queue.enqueue(agentEntryInput({ content: 'do task X', messageId: 'm1' }));
 
     const deps = await buildDeps(queue);
-    const result = await enqueueA2ATargets(deps, {
+    const result = await enqueueDurableA2ATargets(enqueueA2ATargets, deps, {
       targetCats: ['antig-opus'],
       content: 'actually, stop — answer 3 questions first',
       userId: 'system',
@@ -399,7 +455,7 @@ describe('enqueueA2ATargets coalesce/supersede (F-coalesce integration)', () => 
     });
 
     // No new entry — merged into the existing queued one
-    const entries = queue.list('t1', 'system').filter((e) => e.source === 'agent');
+    const entries = queue.list('t1', 'system').filter((e) => e.from?.kind === 'agent');
     assert.equal(entries.length, 1, 'must NOT create a duplicate agent entry');
     assert.match(entries[0].content, /do task X/, 'original content kept');
     assert.match(entries[0].content, /answer 3 questions/, 'second handoff merged in');
@@ -424,7 +480,7 @@ describe('enqueueA2ATargets coalesce/supersede (F-coalesce integration)', () => 
     );
 
     const deps = await buildDeps(queue);
-    const result = await enqueueA2ATargets(deps, {
+    const result = await enqueueDurableA2ATargets(enqueueA2ATargets, deps, {
       targetCats: ['antig-opus'],
       content: 'independent handoff from thread B',
       userId: 'system',
@@ -436,7 +492,7 @@ describe('enqueueA2ATargets coalesce/supersede (F-coalesce integration)', () => 
 
     const entries = queue
       .list('t1', 'system')
-      .filter((entry) => entry.source === 'agent' && entry.targetCats.includes('antig-opus'));
+      .filter((entry) => entry.from?.kind === 'agent' && entry.targetCats.includes('antig-opus'));
     assert.equal(entries.length, 2, 'parallel invocations must enqueue independent handoffs');
     assert.equal(entries[0].content, 'old handoff from thread A', 'new content must not leak into the old invocation');
     assert.equal(entries[1].content, 'independent handoff from thread B');
@@ -460,7 +516,7 @@ describe('enqueueA2ATargets coalesce/supersede (F-coalesce integration)', () => 
     );
 
     const deps = await buildDeps(queue);
-    const result = await enqueueA2ATargets(deps, {
+    const result = await enqueueDurableA2ATargets(enqueueA2ATargets, deps, {
       targetCats: ['antig-opus'],
       content: 'second same-turn handoff',
       userId: 'system',
@@ -472,7 +528,7 @@ describe('enqueueA2ATargets coalesce/supersede (F-coalesce integration)', () => 
 
     const entries = queue
       .list('t1', 'system')
-      .filter((entry) => entry.source === 'agent' && entry.targetCats.includes('antig-opus'));
+      .filter((entry) => entry.from?.kind === 'agent' && entry.targetCats.includes('antig-opus'));
     assert.equal(entries.length, 1, 'one parent invocation should keep same-turn coalescing');
     assert.match(entries[0].content, /first same-turn handoff/);
     assert.match(entries[0].content, /second same-turn handoff/);
@@ -490,7 +546,7 @@ describe('enqueueA2ATargets coalesce/supersede (F-coalesce integration)', () => 
 
     const emitCalls = [];
     const deps = await buildDeps(queue, {}, emitCalls);
-    await enqueueA2ATargets(deps, {
+    await enqueueDurableA2ATargets(enqueueA2ATargets, deps, {
       targetCats: ['antig-opus'],
       content: 'actually, answer 3 questions first',
       userId: 'system',
@@ -514,9 +570,9 @@ describe('enqueueA2ATargets coalesce/supersede (F-coalesce integration)', () => 
   // F216 c3: when the first handoff is already PROCESSING, the second same-turn handoff from the
   // same caller→target SUPERSEDES it (last-wins): abort the running invocation and restart with the
   // follow-up. The superseded first handoff must NOT continue and must NOT re-run. This reuses the
-  // force-send abort-resume coordinate system (cancelInvocation + clearPause + releaseSlot) so we do
+  // force-send abort-resume coordinate system (cancelInvocation + releaseSlot) so we do
   // NOT fork a second abort path that races the QueueProcessor processingSlots mutex (LL-064). The
-  // follow-up is enqueued (fall-through) and restarted by tryAutoExecute once the slot frees.
+  // follow-up is enqueued (fall-through) and restarted by requestDrain once the slot frees.
   test('SUPERSEDE: second handoff to a PROCESSING cat aborts the running one and restarts with the follow-up', async () => {
     const { enqueueA2ATargets } = await import(TRIGGER_PATH);
     const { InvocationQueue } = await import(QUEUE_PATH);
@@ -527,10 +583,9 @@ describe('enqueueA2ATargets coalesce/supersede (F-coalesce integration)', () => 
     queue.markProcessingById('t1', r1.entry.id);
     const firstEntryId = r1.entry.id;
 
-    // Spy the abort-resume coordinate system — supersede MUST drive all three.
+    // Spy the abort-resume coordinate system.
     const controller = new AbortController();
     const cancelCalls = [];
-    const clearPauseCalls = [];
     const releaseSlotCalls = [];
     const deps = await buildDeps(
       queue,
@@ -545,12 +600,11 @@ describe('enqueueA2ATargets coalesce/supersede (F-coalesce integration)', () => 
       },
       [],
       {
-        clearPause: (threadId, catId) => clearPauseCalls.push({ threadId, catId }),
         releaseSlot: (threadId, catId) => releaseSlotCalls.push({ threadId, catId }),
       },
     );
 
-    const result = await enqueueA2ATargets(deps, {
+    const result = await enqueueDurableA2ATargets(enqueueA2ATargets, deps, {
       targetCats: ['antig-opus'],
       content: 'STOP — answer 3 questions first',
       userId: 'system',
@@ -565,14 +619,13 @@ describe('enqueueA2ATargets coalesce/supersede (F-coalesce integration)', () => 
     assert.equal(cancelCalls.length, 1, 'cancelInvocation called exactly once');
     assert.deepEqual(cancelCalls[0].cats, ['antig-opus']);
     assert.equal(cancelCalls[0].reason, 'preempted');
-    // 3. clearPause + releaseSlot called — drop the stale pause and free the mutex so the follow-up restarts.
-    assert.equal(clearPauseCalls.length, 1, 'clearPause called to drop the stale pause');
+    // 3. releaseSlot frees the mutex so the follow-up restarts.
     assert.equal(releaseSlotCalls.length, 1, 'releaseSlot called to free the mutex for restart');
     // 4. The superseded first handoff is removed — it must NOT re-run.
     const firstStillPresent = queue.list('t1', 'system').some((e) => e.id === firstEntryId);
     assert.equal(firstStillPresent, false, 'superseded first handoff removed — must not re-run');
     // 5. The follow-up is enqueued as the only executable next entry.
-    const queued = queue.list('t1', 'system').filter((e) => e.source === 'agent' && e.status === 'queued');
+    const queued = queue.list('t1', 'system').filter((e) => e.from?.kind === 'agent' && e.status === 'queued');
     assert.equal(queued.length, 1, 'follow-up enqueued as the next entry');
     assert.match(queued[0].content, /answer 3 questions/, 'follow-up carries the second handoff intent');
     assert.deepEqual(result.enqueued, ['antig-opus']);
@@ -582,7 +635,7 @@ describe('enqueueA2ATargets coalesce/supersede (F-coalesce integration)', () => 
   // registered yet (the await invocationRecordStore.create() gap), cancelInvocation would return
   // empty. The trigger uses removeProcessed as a TOMBSTONE signal — QueueProcessor.executeEntry
   // checks entry presence after startAll and self-aborts if removed. Trigger must NOT
-  // releaseSlot/clearPause (slot freed by executeEntry's .then chain after self-abort).
+  // releaseSlot (slot freed by executeEntry's .then chain after self-abort).
   test('SUPERSEDE pre-start window: tracker not registered → tombstone removal, no releaseSlot, follow-up queued', async () => {
     const { enqueueA2ATargets } = await import(TRIGGER_PATH);
     const { InvocationQueue } = await import(QUEUE_PATH);
@@ -614,7 +667,7 @@ describe('enqueueA2ATargets coalesce/supersede (F-coalesce integration)', () => 
       },
     );
 
-    const result = await enqueueA2ATargets(deps, {
+    const result = await enqueueDurableA2ATargets(enqueueA2ATargets, deps, {
       targetCats: ['antig-opus'],
       content: 'STOP — answer 3 questions first',
       userId: 'system',
@@ -634,7 +687,7 @@ describe('enqueueA2ATargets coalesce/supersede (F-coalesce integration)', () => 
     const firstStillPresent = queue.list('t1', 'system').some((e) => e.id === firstEntryId);
     assert.equal(firstStillPresent, false, 'first entry removed as tombstone — executeEntry will self-abort');
     // 5. Follow-up still enqueued (not lost — will run after onInvocationComplete)
-    const queued = queue.list('t1', 'system').filter((e) => e.source === 'agent' && e.status === 'queued');
+    const queued = queue.list('t1', 'system').filter((e) => e.from?.kind === 'agent' && e.status === 'queued');
     assert.equal(queued.length, 1, 'follow-up enqueued for deferred execution');
     assert.match(queued[0].content, /answer 3 questions/, 'follow-up carries second handoff intent');
     assert.deepEqual(result.enqueued, ['antig-opus']);
@@ -652,7 +705,7 @@ describe('enqueueA2ATargets coalesce/supersede (F-coalesce integration)', () => 
 
     const deps = await buildDeps(queue, { has: () => true, getController: () => new AbortController() });
 
-    await enqueueA2ATargets(deps, {
+    await enqueueDurableA2ATargets(enqueueA2ATargets, deps, {
       targetCats: ['antig-opus'],
       content: 'task C (final intent)',
       userId: 'system',
@@ -662,7 +715,7 @@ describe('enqueueA2ATargets coalesce/supersede (F-coalesce integration)', () => 
     });
 
     // Third coalesces into the queued follow-up — still exactly one queued entry, not two
-    const queued = queue.list('t1', 'system').filter((e) => e.source === 'agent' && e.status === 'queued');
+    const queued = queue.list('t1', 'system').filter((e) => e.from?.kind === 'agent' && e.status === 'queued');
     assert.equal(queued.length, 1, 'third handoff must merge into the queued follow-up, not add a duplicate');
     assert.match(queued[0].content, /task B/, 'follow-up retains earlier queued content');
     assert.match(queued[0].content, /task C/, 'follow-up gains the final intent');
@@ -677,7 +730,7 @@ describe('enqueueA2ATargets coalesce/supersede (F-coalesce integration)', () => 
     queue.enqueue(agentEntryInput({ targetCats: ['antig-opus'], content: 'for antig' }));
     const deps = await buildDeps(queue);
 
-    await enqueueA2ATargets(deps, {
+    await enqueueDurableA2ATargets(enqueueA2ATargets, deps, {
       targetCats: ['codex'],
       content: 'review please',
       userId: 'system',
@@ -707,7 +760,7 @@ describe('enqueueA2ATargets coalesce/supersede (F-coalesce integration)', () => 
     queue.enqueue(agentEntryInput({ content: 'B: do Y', callerCatId: 'gemini', messageId: 'mB' }));
 
     const deps = await buildDeps(queue);
-    const result = await enqueueA2ATargets(deps, {
+    const result = await enqueueDurableA2ATargets(enqueueA2ATargets, deps, {
       targetCats: ['antig-opus'],
       content: 'B: actually do Z',
       userId: 'system',
@@ -718,13 +771,13 @@ describe('enqueueA2ATargets coalesce/supersede (F-coalesce integration)', () => 
 
     const entries = queue
       .list('t1', 'system')
-      .filter((e) => e.source === 'agent' && e.targetCats.includes('antig-opus'));
+      .filter((e) => e.from?.kind === 'agent' && e.targetCats.includes('antig-opus'));
     assert.equal(entries.length, 2, "B's repeat must merge into B's own entry, not create a 3rd duplicate");
-    const bEntry = entries.find((e) => e.callerCatId === 'gemini');
+    const bEntry = entries.find((e) => e.from.catId === 'gemini');
     assert.ok(bEntry, "B's entry present");
     assert.match(bEntry.content, /do Y/, "B's original content retained");
     assert.match(bEntry.content, /do Z/, "B's repeat merged into B's own entry");
-    const aEntry = entries.find((e) => e.callerCatId === 'opus');
+    const aEntry = entries.find((e) => e.from.catId === 'opus');
     assert.ok(aEntry, "A's entry present");
     assert.match(aEntry.content, /do X/, "A's entry retained");
     assert.ok(!/do Z/.test(aEntry.content), "B's content must NOT leak into A's entry");

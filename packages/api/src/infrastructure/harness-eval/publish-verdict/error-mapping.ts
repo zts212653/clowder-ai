@@ -7,6 +7,9 @@ export function mapPublishVerdictError(message: string): HandlerError | null {
   if (message.startsWith('verdict_already_exists_on_main')) {
     return { status: 409, error: 'verdict_already_exists', detail: message };
   }
+  if (message.startsWith('artifact_already_exists')) {
+    return { status: 409, error: 'verdict_already_exists', detail: message };
+  }
   if (message.startsWith('invalid_source_ref')) {
     return { status: 400, error: 'invalid_source_ref', detail: message };
   }

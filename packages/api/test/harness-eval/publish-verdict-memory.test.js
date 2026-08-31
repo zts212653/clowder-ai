@@ -1,16 +1,40 @@
 import assert from 'node:assert/strict';
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, before, describe, it } from 'node:test';
 
 import { createMemoryGeneratorAdapter } from '../../dist/infrastructure/harness-eval/publish-verdict/memory-generator-adapter.js';
 import { handlePublishVerdict } from '../../dist/infrastructure/harness-eval/publish-verdict/publish-verdict.js';
 import { setupHarnessFeedback } from './eval-manual-trigger-fixtures.js';
-import {
-  buildPacket,
-  markMeasurementCensusDomainCertifiedUsable,
-  seedCanonicalMeasurementCensusState,
-} from './publish-verdict-fixtures.js';
+import { buildPacket } from './publish-verdict-fixtures.js';
+
+/**
+ * F257 / F192 sunset: custom ArtifactPublisher mock that seeds the eval-memory
+ * registry into the temporary output root before invoking the generator, so the
+ * adapter's loadDomains() call succeeds and files can be inspected after publish.
+ */
+function createMemoryArtifactPublisher(isoPath, { artifactId, artifactUrl } = {}) {
+  return {
+    async publishArtifact({ packet, generate }) {
+      rmSync(isoPath, { recursive: true, force: true });
+      const outputRoot = join(isoPath, 'docs', 'harness-feedback');
+      mkdirSync(join(outputRoot, 'eval-domains'), { recursive: true });
+      writeFileSync(
+        join(outputRoot, 'eval-domains', 'eval-memory.yaml'),
+        readFileSync(join(root, 'eval-domains', 'eval-memory.yaml'), 'utf8'),
+      );
+      const generated = await generate(outputRoot);
+      return {
+        artifactId: artifactId ?? packet.id,
+        domainSlug: packet.domainId.replace(/:/g, '-'),
+        verdictPath: generated.verdictPath,
+        bundleDir: generated.bundleDir,
+        artifactUrl: artifactUrl ?? `artifact://${packet.domainId}/${packet.id}`,
+      };
+    },
+  };
+}
 
 /**
  * F192 publish_verdict eval:memory wire-up — end-to-end test.
@@ -22,7 +46,7 @@ import {
  *     'memory-recall-snapshot' for eval:memory
  *   - Adapter resolves metrics via provider port → writes
  *     snapshot.json / attribution.json / provenance.json + raw inputs +
- *     verdict.md inside isolated worktree
+ *     verdict.md inside the artifact staging root
  *   - Provider failure modes (no_metrics_in_window, provider throws)
  *     map to 4xx, not 500 generator_failed
  *   - 501 still returned when domain has no generator wired
@@ -30,13 +54,76 @@ import {
 
 /** @type {string} */
 let root;
+/** @type {string} */
+let repoRoot;
+
+function writeCertifiedMemoryCensus() {
+  const registryDir = join(root, 'registry');
+  mkdirSync(registryDir, { recursive: true });
+  writeFileSync(
+    join(registryDir, 'measurement-bundles.yaml'),
+    JSON.stringify({
+      kind: 'f267-measurement-bundle-census',
+      schemaVersion: 2,
+      generatedAt: '2026-08-05T00:00:00.000Z',
+      sources: {
+        registryDir: 'docs/harness-feedback/eval-domains',
+        instructionMap: 'packages/api/src/infrastructure/harness-eval/eval-cat-invocation.ts#DOMAIN_INSTRUCTIONS',
+        publishMap:
+          'packages/api/src/infrastructure/harness-eval/eval-cat-invocation.ts#PUBLISH_VERDICT_INSTRUCTIONS_BY_DOMAIN',
+        verdictDir: 'docs/harness-feedback/verdicts',
+      },
+      verdictCorpusHash: '0'.repeat(64),
+      committedVerdictArtifactCount: 0,
+      entries: [
+        {
+          domainId: 'eval:memory',
+          classification: 'active_decision_bearing',
+          enabled: true,
+          decisionConsumer: {
+            featureId: 'F200',
+            ownerCatId: 'opus-47',
+            allowedActions: ['keep_observe', 'fix', 'build', 'delete_sunset'],
+          },
+          sourceSelector: { adapter: 'f200-f188-memory-eval', kind: 'memory-recall-snapshot' },
+          committedVerdictArtifactCount: 0,
+          functionalEquivalents: ['test-memory-generator'],
+          evidence: { domainInstructions: true, publishInstructions: true },
+          validityMigration: {
+            riskRank: 1,
+            batch: 1,
+            status: 'certified_usable',
+            certificateRef: 'docs/harness-feedback/certificates/test-memory.yaml',
+            resultRef: 'docs/harness-feedback/measurement-results/test-memory.yaml',
+            replayRef: 'docs/harness-feedback/replays/test-memory.yaml',
+            actionGate: 'certificate_actions_allowed',
+            hardBlockReason: null,
+          },
+        },
+      ],
+    }),
+  );
+}
+
+function cleanupIsoStub(name) {
+  const stub = join(root, '..', name);
+  if (existsSync(stub)) {
+    rmSync(stub, { recursive: true, force: true });
+  }
+}
 
 before(() => {
-  root = setupHarnessFeedback();
+  const seededRoot = setupHarnessFeedback();
+  repoRoot = mkdtempSync(join(tmpdir(), 'publish-verdict-memory-repo-'));
+  root = join(repoRoot, 'docs', 'harness-feedback');
+  mkdirSync(join(repoRoot, 'docs'), { recursive: true });
+  renameSync(seededRoot, root);
+  writeCertifiedMemoryCensus();
+  cleanupIsoStub('mem-e2e-iso-stub');
 });
 
 after(() => {
-  rmSync(root, { recursive: true, force: true });
+  rmSync(repoRoot, { recursive: true, force: true });
 });
 
 function buildMemoryPacket(overrides = {}) {
@@ -99,7 +186,7 @@ function buildLibraryHealth(overrides = {}) {
 }
 
 describe('handlePublishVerdict end-to-end with eval:memory generator', () => {
-  it('happy path: handler dispatches to memory adapter, returns verdict path + commit/PR', async () => {
+  it('happy path: handler dispatches to memory adapter and returns durable artifact refs', async () => {
     const provider = {
       resolve: async () => ({
         recallMetrics: buildRecallMetrics(),
@@ -108,29 +195,14 @@ describe('handlePublishVerdict end-to-end with eval:memory generator', () => {
     };
     const memGenerator = createMemoryGeneratorAdapter(provider);
 
-    /** @type {string} */
-    let isoStub;
-    const mockGitPublisher = {
-      async publishOnIsolatedWorktree(opts) {
-        isoStub = join(root, '..', 'mem-e2e-iso-stub');
-        // Mirror the registry into isolated worktree so loadDomains() works
-        mkdirSync(join(isoStub, 'docs', 'harness-feedback', 'eval-domains'), { recursive: true });
-        writeFileSync(
-          join(isoStub, 'docs', 'harness-feedback', 'eval-domains', 'eval-memory.yaml'),
-          readFileSync(join(root, 'eval-domains', 'eval-memory.yaml'), 'utf8'),
-        );
-        seedCanonicalMeasurementCensusState(isoStub);
-        const stageResult = await opts.stage(isoStub);
-        return {
-          commitSha: 'mem-sha-1234',
-          prUrl: 'https://github.com/zts212653/clowder-ai/pull/9100',
-          stageResult,
-        };
-      },
-    };
+    const isoStub = join(root, '..', 'mem-e2e-iso-stub');
+    const artifactPublisher = createMemoryArtifactPublisher(isoStub, {
+      artifactId: 'mem-artifact-1234',
+      artifactUrl: 'artifact://eval-memory/vhp-mem-e2e-test',
+    });
 
     const result = await handlePublishVerdict(
-      { harnessFeedbackRoot: root, gitPublisher: mockGitPublisher, generator: memGenerator },
+      { harnessFeedbackRoot: root, artifactPublisher, generator: memGenerator },
       {
         packet: buildMemoryPacket(),
         domain: 'eval:memory',
@@ -143,12 +215,12 @@ describe('handlePublishVerdict end-to-end with eval:memory generator', () => {
     );
 
     assert.ok(!('error' in result), `expected success, got: ${JSON.stringify(result)}`);
-    assert.equal(result.commitSha, 'mem-sha-1234');
-    assert.equal(result.prUrl, 'https://github.com/zts212653/clowder-ai/pull/9100');
-    assert.equal(result.verdictPath, 'docs/harness-feedback/verdicts/vhp-mem-e2e-test.md');
-    assert.equal(result.bundleDir, 'docs/harness-feedback/bundles/vhp-mem-e2e-test');
+    assert.equal(result.artifactId, 'mem-artifact-1234');
+    assert.equal(result.artifactUrl, 'artifact://eval-memory/vhp-mem-e2e-test');
+    assert.match(result.verdictPath, /verdicts\/vhp-mem-e2e-test\.md$/);
+    assert.match(result.bundleDir, /bundles\/vhp-mem-e2e-test$/);
 
-    // Verify generator wrote bundle artifacts inside isolated worktree
+    // Verify generator wrote bundle artifacts inside artifact staging
     const isoBundle = join(isoStub, 'docs', 'harness-feedback', 'bundles', 'vhp-mem-e2e-test');
     assert.ok(existsSync(join(isoBundle, 'snapshot.json')), 'snapshot.json must be written');
     assert.ok(existsSync(join(isoBundle, 'attribution.json')), 'attribution.json must be written');
@@ -193,26 +265,14 @@ describe('handlePublishVerdict end-to-end with eval:memory generator', () => {
     };
     const memGenerator = createMemoryGeneratorAdapter(provider);
 
-    /** @type {string} */
-    let isoStub;
-    const mockGitPublisher = {
-      async publishOnIsolatedWorktree(opts) {
-        isoStub = join(root, '..', 'mem-e2e-actionable-iso');
-        rmSync(isoStub, { recursive: true, force: true }); // idempotent — clean leftover from prior runs
-        mkdirSync(join(isoStub, 'docs', 'harness-feedback', 'eval-domains'), { recursive: true });
-        writeFileSync(
-          join(isoStub, 'docs', 'harness-feedback', 'eval-domains', 'eval-memory.yaml'),
-          readFileSync(join(root, 'eval-domains', 'eval-memory.yaml'), 'utf8'),
-        );
-        seedCanonicalMeasurementCensusState(isoStub);
-        markMeasurementCensusDomainCertifiedUsable(isoStub, 'eval:memory');
-        await opts.stage(isoStub);
-        return { commitSha: 'mem-actionable-sha', prUrl: 'https://github.com/zts212653/clowder-ai/pull/9101' };
-      },
-    };
+    const isoStub = join(root, '..', 'mem-e2e-actionable-iso');
+    const artifactPublisher = createMemoryArtifactPublisher(isoStub, {
+      artifactId: 'mem-actionable-sha',
+      artifactUrl: 'artifact://eval-memory/mem-actionable-artifact',
+    });
 
     const result = await handlePublishVerdict(
-      { harnessFeedbackRoot: root, gitPublisher: mockGitPublisher, generator: memGenerator },
+      { harnessFeedbackRoot: root, artifactPublisher, generator: memGenerator },
       {
         packet: buildMemoryPacket({
           id: 'vhp-mem-actionable-fix',
@@ -241,7 +301,7 @@ describe('handlePublishVerdict end-to-end with eval:memory generator', () => {
     // (Cloud Codex R5 P1: pre-fix, this hits resolveA2aEvidenceBundle's
     // 'attribution finding must include at least one bundled component evidence anchor'.)
     assert.ok(!('error' in result), `expected success, got: ${JSON.stringify(result)}`);
-    assert.equal(result.commitSha, 'mem-actionable-sha');
+    assert.equal(result.artifactId, 'mem-actionable-sha');
 
     // Verify attribution.json findings carry component-prefixed anchors
     const isoBundle = join(isoStub, 'docs', 'harness-feedback', 'bundles', 'vhp-mem-actionable-fix');
@@ -279,26 +339,14 @@ describe('handlePublishVerdict end-to-end with eval:memory generator', () => {
     };
     const memGenerator = createMemoryGeneratorAdapter(provider);
 
-    /** @type {string} */
-    let isoStub;
-    const mockGitPublisher = {
-      async publishOnIsolatedWorktree(opts) {
-        isoStub = join(root, '..', 'mem-e2e-f188-iso');
-        rmSync(isoStub, { recursive: true, force: true });
-        mkdirSync(join(isoStub, 'docs', 'harness-feedback', 'eval-domains'), { recursive: true });
-        writeFileSync(
-          join(isoStub, 'docs', 'harness-feedback', 'eval-domains', 'eval-memory.yaml'),
-          readFileSync(join(root, 'eval-domains', 'eval-memory.yaml'), 'utf8'),
-        );
-        seedCanonicalMeasurementCensusState(isoStub);
-        markMeasurementCensusDomainCertifiedUsable(isoStub, 'eval:memory');
-        await opts.stage(isoStub);
-        return { commitSha: 'mem-f188-sha', prUrl: 'https://github.com/zts212653/clowder-ai/pull/9102' };
-      },
-    };
+    const isoStub = join(root, '..', 'mem-e2e-f188-iso');
+    const artifactPublisher = createMemoryArtifactPublisher(isoStub, {
+      artifactId: 'mem-f188-sha',
+      artifactUrl: 'artifact://eval-memory/mem-f188-artifact',
+    });
 
     const result = await handlePublishVerdict(
-      { harnessFeedbackRoot: root, gitPublisher: mockGitPublisher, generator: memGenerator },
+      { harnessFeedbackRoot: root, artifactPublisher, generator: memGenerator },
       {
         // packet targets F188 (library health finding) — domain default is F200 but
         // resolveHandoffFeatureId in adapter properly routes F188/* findings to F188.
@@ -319,7 +367,7 @@ describe('handlePublishVerdict end-to-end with eval:memory generator', () => {
     // Cloud Codex R9 P1: pre-fix, my generator guard forced packet.featureId === F200
     // and rejected F188 — broke the adapter's existing cross-feature handoff contract.
     assert.ok(!('error' in result), `expected success, got: ${JSON.stringify(result)}`);
-    assert.equal(result.commitSha, 'mem-f188-sha');
+    assert.equal(result.artifactId, 'mem-f188-sha');
 
     // Verify snapshot + attribution reflect packet's actual F188 feature, not F200 default
     const isoBundle = join(isoStub, 'docs', 'harness-feedback', 'bundles', 'vhp-mem-f188-cross-feature');
@@ -346,24 +394,13 @@ describe('handlePublishVerdict end-to-end with eval:memory generator', () => {
       }),
     };
     const memGenerator = createMemoryGeneratorAdapter(provider);
-    const mockGitPublisher = {
-      async publishOnIsolatedWorktree(opts) {
-        const isoStub = join(root, '..', 'mem-e2e-invalid-fid-iso');
-        rmSync(isoStub, { recursive: true, force: true });
-        mkdirSync(join(isoStub, 'docs', 'harness-feedback', 'eval-domains'), { recursive: true });
-        writeFileSync(
-          join(isoStub, 'docs', 'harness-feedback', 'eval-domains', 'eval-memory.yaml'),
-          readFileSync(join(root, 'eval-domains', 'eval-memory.yaml'), 'utf8'),
-        );
-        seedCanonicalMeasurementCensusState(isoStub);
-        await opts.stage(isoStub);
-        rmSync(isoStub, { recursive: true, force: true });
-        return { commitSha: 'unreachable', prUrl: 'unreachable' };
-      },
-    };
+    const artifactPublisher = createMemoryArtifactPublisher(join(root, '..', 'mem-e2e-invalid-fid-iso'), {
+      artifactId: 'unreachable',
+      artifactUrl: 'unreachable',
+    });
 
     const result = await handlePublishVerdict(
-      { harnessFeedbackRoot: root, gitPublisher: mockGitPublisher, generator: memGenerator },
+      { harnessFeedbackRoot: root, artifactPublisher, generator: memGenerator },
       {
         packet: buildMemoryPacket({
           id: 'vhp-mem-invalid-fid',
@@ -471,24 +508,14 @@ describe('handlePublishVerdict end-to-end with eval:memory generator', () => {
     };
     const memGenerator = createMemoryGeneratorAdapter(emptyProvider);
 
-    /** @type {string} */
-    let isoStub;
-    const mockGitPublisher = {
-      async publishOnIsolatedWorktree(opts) {
-        isoStub = join(root, '..', 'mem-e2e-empty-iso');
-        mkdirSync(join(isoStub, 'docs', 'harness-feedback', 'eval-domains'), { recursive: true });
-        writeFileSync(
-          join(isoStub, 'docs', 'harness-feedback', 'eval-domains', 'eval-memory.yaml'),
-          readFileSync(join(root, 'eval-domains', 'eval-memory.yaml'), 'utf8'),
-        );
-        seedCanonicalMeasurementCensusState(isoStub);
-        await opts.stage(isoStub);
-        return { commitSha: 'unreachable', prUrl: 'unreachable' };
-      },
-    };
+    const isoStub = join(root, '..', 'mem-e2e-empty-iso');
+    const artifactPublisher = createMemoryArtifactPublisher(isoStub, {
+      artifactId: 'unreachable',
+      artifactUrl: 'unreachable',
+    });
 
     const result = await handlePublishVerdict(
-      { harnessFeedbackRoot: root, gitPublisher: mockGitPublisher, generator: memGenerator },
+      { harnessFeedbackRoot: root, artifactPublisher, generator: memGenerator },
       {
         packet: buildMemoryPacket({ id: 'vhp-mem-empty' }),
         domain: 'eval:memory',

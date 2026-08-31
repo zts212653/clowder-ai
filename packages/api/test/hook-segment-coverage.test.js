@@ -304,10 +304,14 @@ describe('Hook segment coverage (AC-P2-14)', () => {
     const first = ppb.drainCapturedTraces();
     assert.ok(first.session, 'Session trace should be captured');
     assert.ok(first.session.events.length > 0, 'Session events captured');
-    // All captured events should be S-prefix (scope filtering)
-    for (const ev of first.session.events) {
-      assert.ok(/^S\d/.test(ev.hookId), `Captured session event ${ev.hookId} should be S-prefix`);
-    }
+    // #839: captured trace now includes ALL session-init hooks (L+S+B+C),
+    // not just S-prefix — full pipeline observability for the harness.
+    // (#107 follow-up: this twin of dual-path-strict-equality.test.js kept the
+    // stale S-only assertion; prompt *output* scope filtering is still covered
+    // by the S-prefix / D-prefix output tests above.)
+    const prefixes = new Set(first.session.events.map((ev) => ev.hookId[0]));
+    assert.ok(prefixes.has('S'), 'Session trace should include S-prefix hooks');
+    assert.ok(prefixes.has('L'), 'Session trace should include L-prefix hooks (full pipeline)');
     // Second drain returns null (buffer cleared)
     const second = ppb.drainCapturedTraces();
     assert.equal(second.session, null, 'Buffer cleared after drain');

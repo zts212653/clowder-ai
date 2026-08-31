@@ -10,6 +10,7 @@ import { describe, it } from 'node:test';
 import Fastify from 'fastify';
 import { MessageStore } from '../dist/domains/cats/services/stores/ports/MessageStore.js';
 import { threadBranchRoutes } from '../dist/routes/thread-branch.js';
+import { canonicalTestMessageInput } from './helpers/message-from-fixtures.js';
 
 function createMockSocketManager() {
   const events = [];
@@ -90,44 +91,52 @@ function seedThread(messageStore, threadStore) {
 
   const msgs = [];
   msgs.push(
-    messageStore.append({
-      userId: 'user-1',
-      catId: null,
-      content: '你好',
-      mentions: ['opus'],
-      timestamp: 1000,
-      threadId: 'thread-orig',
-    }),
+    messageStore.append(
+      canonicalTestMessageInput({
+        userId: 'user-1',
+        catId: null,
+        content: '你好',
+        mentions: ['opus'],
+        timestamp: 1000,
+        threadId: 'thread-orig',
+      }),
+    ),
   );
   msgs.push(
-    messageStore.append({
-      userId: 'user-1',
-      catId: 'opus',
-      content: '你好！有什么可以帮你？',
-      mentions: [],
-      timestamp: 1001,
-      threadId: 'thread-orig',
-    }),
+    messageStore.append(
+      canonicalTestMessageInput({
+        userId: 'user-1',
+        catId: 'opus',
+        content: '你好！有什么可以帮你？',
+        mentions: [],
+        timestamp: 1001,
+        threadId: 'thread-orig',
+      }),
+    ),
   );
   msgs.push(
-    messageStore.append({
-      userId: 'user-1',
-      catId: null,
-      content: '帮我写个登录页',
-      mentions: ['opus'],
-      timestamp: 1002,
-      threadId: 'thread-orig',
-    }),
+    messageStore.append(
+      canonicalTestMessageInput({
+        userId: 'user-1',
+        catId: null,
+        content: '帮我写个登录页',
+        mentions: ['opus'],
+        timestamp: 1002,
+        threadId: 'thread-orig',
+      }),
+    ),
   );
   msgs.push(
-    messageStore.append({
-      userId: 'user-1',
-      catId: 'opus',
-      content: '好的，已创建登录页...',
-      mentions: [],
-      timestamp: 1003,
-      threadId: 'thread-orig',
-    }),
+    messageStore.append(
+      canonicalTestMessageInput({
+        userId: 'user-1',
+        catId: 'opus',
+        content: '好的，已创建登录页...',
+        mentions: [],
+        timestamp: 1003,
+        threadId: 'thread-orig',
+      }),
+    ),
   );
   return msgs;
 }
@@ -187,15 +196,17 @@ describe('POST /api/threads/:id/branch (ADR-008 D4 / S7)', () => {
     const messageStore = new MessageStore();
     const threadStore = createMockThreadStore();
     seedThread(messageStore, threadStore);
-    const seed = messageStore.append({
-      userId: 'user-1',
-      catId: 'codex',
-      content: 'published source-cat seed',
-      mentions: ['opus'],
-      timestamp: 1004,
-      threadId: 'thread-orig',
-      deliveryStatus: 'queued',
-    });
+    const seed = messageStore.append(
+      canonicalTestMessageInput({
+        userId: 'user-1',
+        catId: 'codex',
+        content: 'published source-cat seed',
+        mentions: ['opus'],
+        timestamp: 1004,
+        threadId: 'thread-orig',
+        deliveryStatus: 'queued',
+      }),
+    );
     const { app } = await setupApp(messageStore, threadStore);
 
     const res = await app.inject({
@@ -208,6 +219,48 @@ describe('POST /api/threads/:id/branch (ADR-008 D4 / S7)', () => {
     const body = res.json();
     assert.equal(body.messageCount, 5);
     assert.equal(messageStore.getByThread(body.threadId, 100).at(-1).content, 'published source-cat seed');
+    await app.close();
+  });
+
+  it('preserves canonical plugin identity and payload when branching', async () => {
+    const messageStore = new MessageStore();
+    const threadStore = createMockThreadStore();
+    threadStore._seedThread('thread-orig', {
+      title: 'Plugin source',
+      createdBy: 'user-1',
+    });
+    const pluginMessage = {
+      instanceId: 'plugin-instance-1',
+      revision: 1,
+      provenance: {
+        origin: { kind: 'plugin', instanceId: 'plugin-instance-1' },
+        epistemicStatus: 'inference',
+      },
+      elements: [{ elementId: 'el-1', kind: 'text', payload: { text: 'plugin output' } }],
+      appendOps: [],
+    };
+    const seed = messageStore.append({
+      from: { kind: 'plugin', instanceId: 'plugin-instance-1' },
+      userId: 'user-1',
+      content: 'plugin output',
+      mentions: [],
+      timestamp: 1000,
+      threadId: 'thread-orig',
+      extra: { pluginMessage },
+    });
+    const { app } = await setupApp(messageStore, threadStore);
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/threads/thread-orig/branch',
+      payload: { fromMessageId: seed.id, userId: 'user-1' },
+    });
+
+    assert.equal(res.statusCode, 201, res.body);
+    const copied = messageStore.getByThread(res.json().threadId, 100);
+    assert.equal(copied.length, 1);
+    assert.deepEqual(copied[0].from, { kind: 'plugin', instanceId: 'plugin-instance-1' });
+    assert.deepEqual(copied[0].extra?.pluginMessage, pluginMessage);
     await app.close();
   });
 
@@ -320,14 +373,16 @@ describe('POST /api/threads/:id/branch (ADR-008 D4 / S7)', () => {
     seedThread(messageStore, threadStore);
 
     // Create a message in a different thread
-    const otherMsg = messageStore.append({
-      userId: 'user-1',
-      catId: null,
-      content: 'other thread',
-      mentions: [],
-      timestamp: 2000,
-      threadId: 'other-thread',
-    });
+    const otherMsg = messageStore.append(
+      canonicalTestMessageInput({
+        userId: 'user-1',
+        catId: null,
+        content: 'other thread',
+        mentions: [],
+        timestamp: 2000,
+        threadId: 'other-thread',
+      }),
+    );
 
     threadStore._seedThread('other-thread', { title: 'Other' });
     const { app } = await setupApp(messageStore, threadStore);
@@ -534,14 +589,16 @@ describe('POST /api/threads/:id/branch (ADR-008 D4 / S7)', () => {
       title: null,
       createdBy: 'user-1',
     });
-    const msg = messageStore.append({
-      userId: 'user-1',
-      catId: null,
-      content: 'hi',
-      mentions: [],
-      timestamp: 1000,
-      threadId: 'thread-notitle',
-    });
+    const msg = messageStore.append(
+      canonicalTestMessageInput({
+        userId: 'user-1',
+        catId: null,
+        content: 'hi',
+        mentions: [],
+        timestamp: 1000,
+        threadId: 'thread-notitle',
+      }),
+    );
 
     const { app } = await setupApp(messageStore, threadStore);
 
@@ -568,34 +625,40 @@ describe('POST /api/threads/:id/branch (ADR-008 D4 / S7)', () => {
     });
 
     // User message (no origin)
-    messageStore.append({
-      userId: 'user-1',
-      catId: null,
-      content: 'Hello',
-      mentions: ['opus'],
-      timestamp: 1000,
-      threadId: 'thread-origin-test',
-    });
+    messageStore.append(
+      canonicalTestMessageInput({
+        userId: 'user-1',
+        catId: null,
+        content: 'Hello',
+        mentions: ['opus'],
+        timestamp: 1000,
+        threadId: 'thread-origin-test',
+      }),
+    );
     // Opus stream-origin persisted message
-    messageStore.append({
-      userId: 'user-1',
-      catId: 'opus',
-      content: 'persisted answer',
-      mentions: [],
-      origin: 'stream',
-      timestamp: 1001,
-      threadId: 'thread-origin-test',
-    });
+    messageStore.append(
+      canonicalTestMessageInput({
+        userId: 'user-1',
+        catId: 'opus',
+        content: 'persisted answer',
+        mentions: [],
+        origin: 'stream',
+        timestamp: 1001,
+        threadId: 'thread-origin-test',
+      }),
+    );
     // Codex callback message (origin: 'callback' — should be visible)
-    const m3 = messageStore.append({
-      userId: 'user-1',
-      catId: 'codex',
-      content: 'result',
-      mentions: [],
-      origin: 'callback',
-      timestamp: 1002,
-      threadId: 'thread-origin-test',
-    });
+    const m3 = messageStore.append(
+      canonicalTestMessageInput({
+        userId: 'user-1',
+        catId: 'codex',
+        content: 'result',
+        mentions: [],
+        origin: 'callback',
+        timestamp: 1002,
+        threadId: 'thread-origin-test',
+      }),
+    );
 
     const { app } = await setupApp(messageStore, threadStore);
 

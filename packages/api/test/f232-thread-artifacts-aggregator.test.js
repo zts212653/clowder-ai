@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
+import { canonicalTestMessageInput } from './helpers/message-from-fixtures.js';
 
 const { aggregateThreadArtifacts, collectAllThreadMessages } = await import(
   '../dist/domains/cats/services/agents/routing/thread-artifacts-aggregator.js'
@@ -193,7 +194,17 @@ test('collectAllThreadMessages paginates a REAL store with no overlap (oldest→
   const base = Date.now();
   // 250 > THREAD_SCAN_PAGE(200) → 强制多页
   for (let i = 0; i < 250; i++) {
-    store.append({ userId: 'u', catId: 'opus-48', content: `m${i}`, mentions: [], timestamp: base + i, threadId: 'T' });
+    store.append(
+      canonicalTestMessageInput({
+        provenance: { author: 'cat', routed: false, observation: 'original' },
+        userId: 'u',
+        catId: 'opus-48',
+        content: `m${i}`,
+        mentions: [],
+        timestamp: base + i,
+        threadId: 'T',
+      }),
+    );
   }
   const all = await collectAllThreadMessages(store, 'T');
   const uniqueIds = new Set(all.map((m) => m.id));
@@ -287,16 +298,29 @@ test('getByThreadBefore (in-memory) uses queued-work delivery time without re-in
   const { MessageStore } = await import('../dist/domains/cats/services/stores/ports/MessageStore.js');
   const store = new MessageStore();
   const base = Date.now();
-  store.append({ userId: 'u', catId: null, content: 'older', mentions: [], timestamp: base + 50, threadId: 'T' });
-  const queued = store.append({
-    userId: 'u',
-    catId: null,
-    content: 'queued',
-    mentions: [],
-    timestamp: base + 100,
-    threadId: 'T',
-    deliveryStatus: 'queued',
-  });
+  store.append(
+    canonicalTestMessageInput({
+      provenance: { author: 'user', routed: false, observation: 'original' },
+      userId: 'u',
+      catId: null,
+      content: 'older',
+      mentions: [],
+      timestamp: base + 50,
+      threadId: 'T',
+    }),
+  );
+  const queued = store.append(
+    canonicalTestMessageInput({
+      provenance: { author: 'user', routed: false, observation: 'original' },
+      userId: 'u',
+      catId: null,
+      content: 'queued',
+      mentions: [],
+      timestamp: base + 100,
+      threadId: 'T',
+      deliveryStatus: 'queued',
+    }),
+  );
   store.markDelivered(queued.id, base + 300); // re-scored: effective order time = base+300
 
   // 游标 = queued 的 effective order time（deliveredAt），与 collectAllThreadMessages 一致。

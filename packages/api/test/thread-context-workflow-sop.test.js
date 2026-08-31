@@ -6,6 +6,7 @@ import assert from 'node:assert/strict';
 import { beforeEach, describe, test } from 'node:test';
 import Fastify from 'fastify';
 import './helpers/setup-cat-registry.js';
+import { canonicalTestMessageInput } from './helpers/message-from-fixtures.js';
 
 function createMockSocketManager() {
   return {
@@ -125,14 +126,17 @@ describe('GET thread-context with workflowSop', () => {
     await workflowSopStore.upsert('item-73', 'F073', {}, 'opus', 'test-user');
 
     // Add a message so we have content
-    messageStore.append({
-      userId: 'user-1',
-      catId: null,
-      threadId: thread.id,
-      content: 'Hello',
-      mentions: [],
-      timestamp: Date.now(),
-    });
+    messageStore.append(
+      canonicalTestMessageInput({
+        provenance: { author: 'user', routed: false, observation: 'original' },
+        userId: 'user-1',
+        catId: null,
+        threadId: thread.id,
+        content: 'Hello',
+        mentions: [],
+        timestamp: Date.now(),
+      }),
+    );
 
     const response = await app.inject({
       method: 'GET',
@@ -311,14 +315,17 @@ describe('GET thread-context with workflowSop', () => {
       updatedBy: 'opus',
     });
 
-    messageStore.append({
-      userId: 'user-1',
-      catId: null,
-      threadId: thread.id,
-      content: 'Hello',
-      mentions: [],
-      timestamp: Date.now(),
-    });
+    messageStore.append(
+      canonicalTestMessageInput({
+        provenance: { author: 'user', routed: false, observation: 'original' },
+        userId: 'user-1',
+        catId: null,
+        threadId: thread.id,
+        content: 'Hello',
+        mentions: [],
+        timestamp: Date.now(),
+      }),
+    );
 
     const response = await app.inject({
       method: 'GET',
@@ -339,14 +346,17 @@ describe('GET thread-context with workflowSop', () => {
     const thread = threadStore.create('user-1', 'plain thread', 'default');
     const { invocationId, callbackToken } = await registry.create('user-1', 'opus', thread.id);
 
-    messageStore.append({
-      userId: 'user-1',
-      catId: null,
-      threadId: thread.id,
-      content: 'Hello',
-      mentions: [],
-      timestamp: Date.now(),
-    });
+    messageStore.append(
+      canonicalTestMessageInput({
+        provenance: { author: 'user', routed: false, observation: 'original' },
+        userId: 'user-1',
+        catId: null,
+        threadId: thread.id,
+        content: 'Hello',
+        mentions: [],
+        timestamp: Date.now(),
+      }),
+    );
 
     const response = await app.inject({
       method: 'GET',
@@ -374,14 +384,17 @@ describe('GET thread-context with workflowSop', () => {
     const { invocationId, callbackToken } = await registry.create('user-1', 'opus', ownThread.id);
 
     // Add a message so thread-context has content
-    messageStore.append({
-      userId: 'user-2',
-      catId: null,
-      threadId: otherThread.id,
-      content: 'Hello from other user',
-      mentions: [],
-      timestamp: Date.now(),
-    });
+    messageStore.append(
+      canonicalTestMessageInput({
+        provenance: { author: 'user', routed: false, observation: 'original' },
+        userId: 'user-2',
+        catId: null,
+        threadId: otherThread.id,
+        content: 'Hello from other user',
+        mentions: [],
+        timestamp: Date.now(),
+      }),
+    );
 
     // Try to read other user's thread context with override
     const response = await app.inject({
@@ -403,14 +416,17 @@ describe('GET thread-context with workflowSop', () => {
     threadStore.linkBacklogItem(thread.id, 'item-no-sop');
     const { invocationId, callbackToken } = await registry.create('user-1', 'opus', thread.id);
 
-    messageStore.append({
-      userId: 'user-1',
-      catId: null,
-      threadId: thread.id,
-      content: 'Hello',
-      mentions: [],
-      timestamp: Date.now(),
-    });
+    messageStore.append(
+      canonicalTestMessageInput({
+        provenance: { author: 'user', routed: false, observation: 'original' },
+        userId: 'user-1',
+        catId: null,
+        threadId: thread.id,
+        content: 'Hello',
+        mentions: [],
+        timestamp: Date.now(),
+      }),
+    );
 
     const response = await app.inject({
       method: 'GET',

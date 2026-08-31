@@ -5,6 +5,7 @@ export const GITHUB_WAIT_PREDICATE_KINDS = [
   'pr_review_result_available',
   'pr_review_decision_changed',
   'pr_review_thread_changed',
+  'pr_conversation_comment_added',
   'pr_ci_terminal',
   'pr_became_conflicting',
   'issue_comment_added',
@@ -18,9 +19,14 @@ export type GitHubWaitPredicate =
   | { readonly kind: 'pr_review_result_available'; readonly triggerCommentId?: number }
   | { readonly kind: 'pr_review_decision_changed' }
   | { readonly kind: 'pr_review_thread_changed'; readonly reviewThreadIds: readonly string[] }
+  | { readonly kind: 'pr_conversation_comment_added'; readonly authorLogins: readonly string[] }
   | { readonly kind: 'pr_ci_terminal' }
   | { readonly kind: 'pr_became_conflicting' }
-  | { readonly kind: 'issue_comment_added' }
+  | {
+      readonly kind: 'issue_comment_added';
+      /** Optional allowlist — when present, only comments by these authors trigger. */
+      readonly authorLogins?: readonly string[];
+    }
   | { readonly kind: 'issue_author_commented' };
 
 export type GitHubPrWaitPredicate = Extract<GitHubWaitPredicate, { readonly kind: `pr_${string}` }>;
@@ -99,8 +105,15 @@ export interface UnifiedAwaitStateV1<SubjectRef extends string, Baseline, Predic
     readonly when: readonly Predicate[];
     readonly then: string;
   };
-  readonly expiresAt: number;
+  /** Optional absolute deadline. When omitted, no time-based termination. */
+  readonly expiresAt?: number;
   readonly createdAt: number;
+  /**
+   * When true (default), predicate match delivery auto-renews with a fresh
+   * baseline and incremented generation. Terminal states suppress renewal.
+   * Callers set `false` for explicit single-fire semantics.
+   */
+  readonly autoRenew?: boolean;
 }
 
 type GitHubWaitProvenance = {
@@ -145,6 +158,8 @@ export interface WaitOutcomeV1 {
   readonly nextStep?: string;
   readonly terminalSubjectState?: 'merged' | 'closed';
   readonly actor?: WaitTerminationActor;
+  /** True when the system auto-renewed tracking after this outcome. */
+  readonly autoRenewed?: boolean;
 }
 
 function hasExactKeys(value: Record<string, unknown>, expected: readonly string[]): boolean {

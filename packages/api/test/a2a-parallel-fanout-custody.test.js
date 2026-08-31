@@ -17,6 +17,7 @@ import Fastify from 'fastify';
 import { InvocationQueue } from '../dist/domains/cats/services/agents/invocation/InvocationQueue.js';
 import { registerCallbackAuthHook } from '../dist/routes/callback-auth-prehandler.js';
 import { resetMultiMentionOrchestrator } from '../dist/routes/callback-multi-mention-routes.js';
+import { canonicalTestQueueInput } from './helpers/message-from-fixtures.js';
 
 function createMockRegistry() {
   const records = new Map();
@@ -83,7 +84,7 @@ function createMockQueueProcessor() {
     unregisterEntryCompleteHook(entryId) {
       hooks.delete(entryId);
     },
-    tryAutoExecute(threadId) {
+    requestDrain(threadId) {
       autoExecuteCalls.push(threadId);
       return Promise.resolve();
     },
@@ -202,17 +203,19 @@ describe('F086/F216: explicit parallel fan-out custody + projection', () => {
   test('depth-limited targets are NOT projected (projection follows admission, not the request)', async () => {
     // Fill the agent-entry depth budget so the fan-out cannot be admitted.
     for (let i = 0; i < 10; i++) {
-      invocationQueue.enqueue({
-        threadId: 'thread-par-1',
-        userId: 'user-1',
-        ownerAuthProvenance: 'strict',
-        content: `filler-${i}`,
-        source: 'agent',
-        targetCats: ['opus'],
-        intent: 'execute',
-        autoExecute: true,
-        callerCatId: 'opus',
-      });
+      invocationQueue.enqueue(
+        canonicalTestQueueInput({
+          kind: 'conversation_input',
+          threadId: 'thread-par-1',
+          userId: 'user-1',
+          ownerAuthProvenance: 'strict',
+          content: `filler-${i}`,
+          from: { kind: 'agent', catId: 'opus' },
+          targetCats: ['opus'],
+          intent: 'execute',
+          autoExecute: true,
+        }),
+      );
     }
 
     const res = await dispatchTwoTargets();
@@ -257,7 +260,7 @@ describe('F086/F216: explicit parallel fan-out custody + projection', () => {
   test('a NEVER-SETTLING projection writer still lets every admitted sibling start', async () => {
     // 砚砚 R2 P1: the previous test only proved a synchronous throw is survivable. A slow /
     // never-resolving store is the real hazard — with the projection awaited in front of
-    // `tryAutoExecute`, every admitted sibling would wait forever for a UI pill.
+    // `requestDrain`, every admitted sibling would wait forever for a UI pill.
     let appendCalls = 0;
     mockMessageStore.append = () => {
       appendCalls++;
@@ -343,17 +346,19 @@ describe('F086/F216: explicit parallel fan-out custody + projection', () => {
   // reconciliation, never `orch.recordResponse`.
   test('a queue target rejected at admission still lets the group terminate', async () => {
     // Pre-occupy gemini's agent slot so its enqueue is skipped as a duplicate.
-    invocationQueue.enqueue({
-      threadId: 'thread-par-1',
-      userId: 'user-1',
-      ownerAuthProvenance: 'strict',
-      content: 'gemini is already busy',
-      source: 'agent',
-      targetCats: ['gemini'],
-      intent: 'execute',
-      autoExecute: true,
-      callerCatId: 'opus',
-    });
+    invocationQueue.enqueue(
+      canonicalTestQueueInput({
+        kind: 'conversation_input',
+        threadId: 'thread-par-1',
+        userId: 'user-1',
+        ownerAuthProvenance: 'strict',
+        content: 'gemini is already busy',
+        from: { kind: 'agent', catId: 'opus' },
+        targetCats: ['gemini'],
+        intent: 'execute',
+        autoExecute: true,
+      }),
+    );
 
     const res = await dispatchTwoTargets();
     assert.equal(res.statusCode, 200);
@@ -383,17 +388,19 @@ describe('F086/F216: explicit parallel fan-out custody + projection', () => {
   test('partial admission: only the target that really got custody is projected', async () => {
     // 9 fillers → first target takes the 10th slot, second hits MAX_MM_DEPTH.
     for (let i = 0; i < 9; i++) {
-      invocationQueue.enqueue({
-        threadId: 'thread-par-1',
-        userId: 'user-1',
-        ownerAuthProvenance: 'strict',
-        content: `filler-${i}`,
-        source: 'agent',
-        targetCats: ['opus'],
-        intent: 'execute',
-        autoExecute: true,
-        callerCatId: 'opus',
-      });
+      invocationQueue.enqueue(
+        canonicalTestQueueInput({
+          kind: 'conversation_input',
+          threadId: 'thread-par-1',
+          userId: 'user-1',
+          ownerAuthProvenance: 'strict',
+          content: `filler-${i}`,
+          from: { kind: 'agent', catId: 'opus' },
+          targetCats: ['opus'],
+          intent: 'execute',
+          autoExecute: true,
+        }),
+      );
     }
 
     const res = await dispatchTwoTargets();
@@ -470,209 +477,5 @@ describe('F086/F216: explicit parallel fan-out custody + projection', () => {
     for (const m of persisted) {
       assert.equal(m.extra.a2aRouting.routing.mode, 'parallel');
     }
-  });
-});
-
-/**
- * 砚砚 R2 P1: the legacy direct-dispatch fallback (no InvocationQueue) has NO observable admission
- * point — `dispatchToTarget` is fire-and-forget and still returns without custody when the tracker
- * slot is already aborted or the invocation record is a duplicate. So `admitted === requested` is
- * false there, and the honest terminal state is to project nothing rather than to draw a pill for a
- * target that may never get an invocation. Absence is not a lie; a false arrow is (#1291).
- */
-describe('F086/F216: legacy fan-out is two-phase (admit all → project admitted → start)', () => {
-  let app;
-  let mockRegistry, mockSocket, mockMessageStore, mockRouter, creds;
-  let createOutcome, createInvocation, startedTargets, recordUpdates, releasedSlots, updateImpl;
-
-  beforeEach(async () => {
-    resetMultiMentionOrchestrator();
-    mockRegistry = createMockRegistry();
-    mockSocket = createMockSocketManager();
-    mockMessageStore = createMockMessageStore();
-    const executions = [];
-    startedTargets = { onStart: undefined };
-    mockRouter = {
-      // biome-ignore lint/correctness/useYield: legacy path only needs an async iterable
-      async *routeExecution(_userId, _message, _threadId, _invId, targetCats) {
-        startedTargets.onStart?.(targetCats[0]);
-        executions.push({ targetCats });
-      },
-      getExecutions: () => executions,
-    };
-    createOutcome = 'created';
-    recordUpdates = [];
-    releasedSlots = [];
-    updateImpl = (id, patch) => recordUpdates.push({ id, ...patch });
-    let seq = 0;
-    createInvocation = (_input) => ({ outcome: createOutcome, invocationId: `inv-legacy-${seq++}` });
-    creds = mockRegistry.register('opus', 'thread-legacy-1', 'user-1');
-
-    app = Fastify({ logger: false });
-    registerCallbackAuthHook(app, mockRegistry);
-    const { registerMultiMentionRoutes } = await import('../dist/routes/callback-multi-mention-routes.js');
-    registerMultiMentionRoutes(app, {
-      registry: mockRegistry,
-      messageStore: mockMessageStore,
-      socketManager: mockSocket,
-      router: mockRouter,
-      invocationRecordStore: {
-        create: (input) => createInvocation(input),
-        update: (id, patch) => updateImpl(id, patch),
-      },
-      invocationTracker: {
-        start: () => new AbortController(),
-        startAll: () => new AbortController(),
-        tryStartThreadAll: () => new AbortController(),
-        complete(_threadId, catId) {
-          releasedSlots.push(catId);
-        },
-        completeAll() {},
-      },
-      // NO invocationQueue / queueProcessor → legacy fallback
-    });
-    await app.ready();
-  });
-
-  afterEach(async () => {
-    await app.close();
-  });
-
-  async function dispatchTwoTargets() {
-    const res = await app.inject({
-      method: 'POST',
-      url: '/api/callbacks/multi-mention',
-      headers: { 'x-invocation-id': creds.invocationId, 'x-callback-token': creds.callbackToken },
-      payload: { targets: ['codex', 'gemini'], question: '独立看一眼', callbackTo: 'opus' },
-    });
-    for (let i = 0; i < 5; i++) await new Promise((r) => setImmediate(r));
-    return res;
-  }
-
-  test('every legacy sibling is admitted before ANY of them starts', async () => {
-    // The discriminating shape: make the SECOND target's admission slow. With admission
-    // interleaved inside each fire-and-forget dispatch (the old code), the fast target starts
-    // while its sibling still has no invocation — requirement 2 violated. A sync mock would let
-    // both admissions finish first by luck and make this test pass either way (a false green),
-    // so the delay is what gives it discriminating power.
-    const order = [];
-    const realCreate = createInvocation;
-    createInvocation = async (input) => {
-      const catId = input.targetCats[0];
-      if (catId === 'gemini') {
-        for (let i = 0; i < 3; i++) await new Promise((r) => setImmediate(r));
-      }
-      order.push(`admit:${catId}`);
-      return realCreate(input);
-    };
-    startedTargets.onStart = (catId) => order.push(`start:${catId}`);
-
-    const res = await dispatchTwoTargets();
-    assert.equal(res.statusCode, 200);
-    for (let i = 0; i < 5; i++) await new Promise((r) => setImmediate(r));
-
-    const admits = order.filter((o) => o.startsWith('admit:'));
-    assert.equal(admits.length, 2, 'both targets must be admitted');
-    const firstStart = order.findIndex((o) => o.startsWith('start:'));
-    assert.notEqual(firstStart, -1, 'precondition: at least one target actually started');
-    assert.equal(
-      order.slice(0, firstStart).filter((o) => o.startsWith('admit:')).length,
-      2,
-      `all siblings must hold custody before the first start — got ${order.join(',')}`,
-    );
-  });
-
-  test('a target that drops out during admission is never announced', async () => {
-    createOutcome = 'duplicate';
-    const res = await dispatchTwoTargets();
-    assert.equal(res.statusCode, 200);
-
-    const pills = mockSocket.getMessages().filter((m) => m.type === 'a2a_handoff');
-    assert.equal(pills.length, 0, 'duplicate targets never get an invocation — they must not be drawn');
-    const persisted = mockMessageStore.getMessages().filter((m) => m.extra?.systemKind === 'a2a_routing');
-    assert.equal(persisted.length, 0, 'and nothing phantom may reach durable history either');
-    assert.equal(mockRouter.getExecutions().length, 0, 'nor may an unadmitted target be started');
-  });
-
-  test('admission failing AFTER record create converges the record and settles the group', async () => {
-    // 砚砚 R4 P1, reproduced from his fault injection: make codex's `queued → running` update throw.
-    // Extracting admission out of `dispatchToTarget` moved the happy path but left that function's
-    // catch behind, so the created record was orphaned at `queued`, no failure response was
-    // registered, and the group sat at `partial` until the timeout.
-    const realUpdate = (id, patch) => recordUpdates.push({ id, ...patch });
-    let failedInvocationId;
-    const originalCreate = createInvocation;
-    createInvocation = (input) => {
-      const result = originalCreate(input);
-      if (input.targetCats[0] === 'codex') failedInvocationId = result.invocationId;
-      return result;
-    };
-    updateImpl = (id, patch) => {
-      if (id === failedInvocationId && patch.status === 'running') throw new Error('running update failed');
-      return realUpdate(id, patch);
-    };
-
-    const res = await dispatchTwoTargets();
-    assert.equal(res.statusCode, 200);
-    for (let i = 0; i < 8; i++) await new Promise((r) => setImmediate(r));
-
-    // 1. the orphaned record is converged, not left at `queued`
-    const converged = recordUpdates.find((u) => u.id === failedInvocationId && u.status !== 'running');
-    assert.ok(converged, `record ${failedInvocationId} must be converged, got ${JSON.stringify(recordUpdates)}`);
-    assert.ok(['failed', 'canceled'].includes(converged.status));
-
-    // 2. the tracker slot is released
-    assert.ok(releasedSlots.includes('codex'), 'the failed target must release its tracker slot');
-
-    // 3. the sibling is untouched and really runs
-    assert.deepEqual(
-      mockRouter.getExecutions().map((e) => e.targetCats[0]),
-      ['gemini'],
-      'a failed admission must not disturb its sibling',
-    );
-
-    // 4. the failure is registered so the group can terminate on its own
-    const aggregated = mockMessageStore.getMessages().find((m) => m.content?.includes('Multi-Mention 结果汇总'));
-    assert.ok(aggregated, 'the group must reach done/flush without waiting for the timeout timer');
-    assert.match(
-      aggregated.content,
-      /admission error|失败/,
-      'the failed target must be reported, not silently dropped',
-    );
-
-    // 5. only the admitted sibling is projected
-    const pills = mockSocket.getMessages().filter((m) => m.type === 'a2a_handoff');
-    assert.deepEqual(
-      pills.map((p) => p.targetCatId),
-      ['gemini'],
-    );
-  });
-
-  test('admitted legacy siblings still get a PARALLEL projection', async () => {
-    const res = await dispatchTwoTargets();
-    assert.equal(res.statusCode, 200);
-
-    const pills = mockSocket.getMessages().filter((m) => m.type === 'a2a_handoff');
-    assert.equal(pills.length, 2, 'requirement 5 applies to the legacy path too once admission is observable');
-    for (const pill of pills) {
-      assert.equal(pill.routing.mode, 'parallel');
-      assert.equal(pill.routing.total, 2);
-    }
-  });
-
-  test('single-target legacy dispatch still works (no fan-out contract to violate)', async () => {
-    const res = await app.inject({
-      method: 'POST',
-      url: '/api/callbacks/multi-mention',
-      headers: { 'x-invocation-id': creds.invocationId, 'x-callback-token': creds.callbackToken },
-      payload: { targets: ['codex'], question: '单独看一眼', callbackTo: 'opus' },
-    });
-    for (let i = 0; i < 5; i++) await new Promise((r) => setImmediate(r));
-
-    assert.equal(res.statusCode, 200, 'single-target legacy dispatch must not be collateral damage');
-    assert.equal(mockRouter.getExecutions().length, 1);
-    const pills = mockSocket.getMessages().filter((m) => m.type === 'a2a_handoff');
-    assert.equal(pills.length, 1);
-    assert.equal(pills[0].routing.total, 1, 'a lone target is its own group');
   });
 });

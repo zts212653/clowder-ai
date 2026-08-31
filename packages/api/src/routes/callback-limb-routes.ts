@@ -82,7 +82,12 @@ async function resolveLimbInvocationContext(
   }
 
   const message = await messageStore.getById(invocation.userMessageId);
-  if (!message || message.catId !== null || message.userId !== record.userId || message.threadId !== record.threadId) {
+  if (
+    !message ||
+    (message.from ? message.from.kind !== 'user' : message.catId !== null) ||
+    message.userId !== record.userId ||
+    message.threadId !== record.threadId
+  ) {
     return context;
   }
 

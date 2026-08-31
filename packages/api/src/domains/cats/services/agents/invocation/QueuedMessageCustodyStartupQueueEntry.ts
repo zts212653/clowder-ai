@@ -72,6 +72,9 @@ export function buildQueueEntry(messages: StoredMessage[], entryId: string): Que
   if (!primary || !custody || custody.pendingTargetCats.length === 0) {
     throw new Error('active queue custody group is missing its primary projection');
   }
+  if (!primary.from) {
+    throw new Error(`Queue recovery requires canonical MessageFrom: ${primary.id}`);
+  }
   if (custody.carrierByTargetCatId) {
     return createCrossThreadQueueEntryFromCustody(messages, entryId, { queuedTargetsOnly: true });
   }
@@ -91,6 +94,9 @@ export function buildQueueEntry(messages: StoredMessage[], entryId: string): Que
     throw new Error(`active queue custody group has no target for carrier ${entryId}`);
   }
   const allTargets = [...custody.allTargetCats];
+  const routingWarnings = messages.flatMap((message) =>
+    (message.extra?.routingWarnings ?? []).map((warning) => structuredClone(warning)),
+  );
   const waitContinuationCarrier = waitContinuationCarrierFromStoredMessage(primary);
   const managedHoldWake = isManagedHoldWakeMessage(primary);
   for (const sibling of messages.slice(1)) {
@@ -109,14 +115,16 @@ export function buildQueueEntry(messages: StoredMessage[], entryId: string): Que
     id: entryId,
     threadId: primary.threadId,
     userId: custody.ownerUserId ?? primary.userId,
+    kind: waitContinuationCarrier || managedHoldWake ? 'message_wake' : 'conversation_input',
     ownerAuthProvenance: normalizeOwnerAuthProvenance(custody.ownerAuthProvenance),
     content: messages.map((message) => message.content).join('\n'),
     messageId: primary.id,
     mergedMessageIds: messages.slice(1).map((message) => message.id),
-    source: waitContinuationCarrier || managedHoldWake ? 'connector' : 'user',
+    from: structuredClone(primary.from),
     ...(waitContinuationCarrier ? { waitContinuationCarrier } : {}),
     targetCats: pendingTargets,
     allTargetCats: allTargets,
+    ...(routingWarnings.length > 0 ? { routingWarnings } : {}),
     ...(custody.authorIntentByCatId ? { authorIntentByCatId: structuredClone(custody.authorIntentByCatId) } : {}),
     queuedNotifiedByCatIds: filterTargets(custody.notifiedByCatIds),
     queuedAwakenedInvocationIdByCatId: filterInvocationMap(custody.awakenedInvocationIdByCatId ?? {}),

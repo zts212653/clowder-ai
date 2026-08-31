@@ -78,8 +78,7 @@ export function eligibleOwnerMessage(
   return Boolean(
     message &&
       message.userId === auth.ownerUserId &&
-      message.catId === null &&
-      message.source === undefined &&
+      (message.from ? message.from.kind === 'user' : message.catId === null && message.source === undefined) &&
       message.deletedAt === undefined &&
       message._tombstone !== true &&
       isDelivered(message) &&

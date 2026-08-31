@@ -15,5 +15,6 @@ export function renderGitHubWaitOutcome(outcome: WaitOutcomeV1): string {
 
   lines.push('', `Matched reason: \`${outcome.reason}\``);
   if (outcome.nextStep) lines.push(`Next: ${outcome.nextStep}`);
+  if (outcome.autoRenewed) lines.push('', '🔄 Tracking auto-renewed with fresh baseline.');
   return lines.join('\n');
 }

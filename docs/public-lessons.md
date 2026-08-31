@@ -90,7 +90,83 @@ created: 2026-02-26
 
 ---
 
-## 6) Maine Coon侧首批条目（AGENTS + Review + Skills）
+## 6) 主题索引与高频核心
+
+> ⭐ = 高频核心（日常协作反复踩的认知/流程护栏）
+
+**根因分析与方向纠偏**
+- ⭐ LL-009: 关键前提不确定时，先提问再动作
+- LL-014: Bug 修复必须先写 Bug Report 再动手
+- LL-019: 过度修复反模式——根因修完后不要盲修触发器
+- ⭐ LL-020: 补丁数量是方向信号——N > 3 停下来复检方向
+- ⭐ LL-021: AI 倾向停在第一层"看起来合理"的答案，不主动追溯根因
+- ⭐ LL-058b: 热补丁反模式——已有治理机制不查就另起炉灶
+
+**交付验证与证据纪律**
+- ⭐ LL-006: 没有新鲜验证证据，不得宣称完成
+- ⭐ LL-029: 交付物验证不能只看 spec checkbox——必须核实 commit/PR
+- ⭐ LL-031: Quality gate 逐字段对账 AC——文档承诺 ≠ 代码已兑现
+- ⭐ LL-032: 愿景守护不能只看代码和测试报告——必须真实启动 dev 跑一遍
+- ⭐ LL-041: 写完产物不主动打开 = 做了菜不端上桌
+
+**Review 与协作纪律**
+- LL-002: Review 问题必须先 Red 再 Green，禁止先改后补测
+- LL-003: Reviewer 必须有立场，Author 必须技术性 push back
+- LL-004: P1/P2 当轮清零，P3 当场决断，不挂债务
+- LL-005: 修完 review 后必须回给 reviewer 二次确认再合 main
+- LL-033: 云端 review 不能只看 review body state——必须检查 inline code comments
+
+**Worktree / Runtime / 数据安全**
+- LL-008: Worktree 生命周期必须成套执行
+- LL-010: 删除文件必须用 trash，禁止 /bin/rm
+- LL-011: Worktree 清理的正确顺序——先 push，再 cd 回主仓，最后 remove
+- LL-012: 不要 --force 删有猫在工作的 worktree
+- LL-015: Worktree 开发必须用独立 Redis 端口（6398）
+- LL-045: Runtime worktree 反复被猫污染
+- ⭐ LL-049: `pnpm dev:direct` 无差别杀端口——review 踢翻 runtime
+- LL-055: spawn 出的"长尾 child runtime"必须能脱离 parent 自动死亡
+- LL-056: stale browser profile 不是 orphan——cleanup 要按资源所有权分组
+
+**知识工程与配置漂移**
+- LL-001: 提炼教训前先做时效性验证
+- LL-007: 交接缺 Why 会让接手方无法判断
+- LL-025: 协作规则不能写死个体名，必须引用角色
+- LL-027: Feature spec 与代码实现的时间线漂移
+- LL-028: "最小实现"不等于"做个玩具再重写"
+- LL-030: 共享脚本改默认值，同 commit 必须补显式环境值
+- LL-037: 共享记忆塑造视角——团队文化比模型参数更能影响判断趋同
+- LL-042: 配置真相源不加门禁就会漂移
+- LL-050: ADR 漂移 2 个月无人发现
+- LL-057: root prompt 重复可能是兼容副本，不是天然垃圾
+
+**工具与基础设施细节**
+- LL-013: Git commit 前必须检查暂存区
+- LL-016: ioredis keyPrefix 对 eval() 和 keys() 的行为不一致
+- LL-017: CAS 比较必须基于不可变快照
+- LL-018: Session 存储必须按 Thread 隔离
+- LL-022: 治理基线必须脚本化
+- LL-023: CLI JSON 格式陷阱与 jq 安全防护
+- LL-024: 状态字段多点写入会复发蜘蛛网
+- LL-026: 身份信息是硬约束常量
+- LL-034: Embedding 实现偷懒
+- LL-035: sync-to-opensource rsync --delete 打穿 runtime
+- LL-036: full sync 长跑不能在半路报喜
+- LL-038: Promise timeout 不等于 Promise 取消
+- LL-039: gate 里推进 cursor 等于"还没干活就划卡"
+- LL-040: AI 写文档日期不能凭内部时间感
+- LL-043: 删旧层前必须证明迁移已落成
+- LL-044: Chrome IME 回车误提交
+- LL-046: AOF/RDB 持久化脱节
+- LL-047: Socket.IO cors 不保护 WebSocket
+- LL-048: 用户可感知状态禁止默认 TTL
+- LL-051: 实验框架空转
+- LL-052: exec VAR=val cmd 不设置环境变量
+- LL-053: 无头 Codex CLI 长任务不能靠 shell 伪后台
+- LL-054: 猫的 callback env 泄漏到 unit test 子进程——用真身份发出 6 条 'hi'
+
+---
+
+## 7) 条目
 
 ### LL-002: Review 问题必须先 Red 再 Green，禁止先改后补测
 - 状态：validated
@@ -162,7 +238,7 @@ created: 2026-02-26
 
 - 关联：
   - `cat-cafe-skills/merge-approval-gate/SKILL.md`
-  - `review-notes/README.md`
+  - *(internal reference removed)*
 
 ### LL-006: 没有新鲜验证证据，不得宣称完成
 - 状态：validated
@@ -198,7 +274,7 @@ created: 2026-02-26
 
 - 关联：
   - `cat-cafe-skills/cross-cat-handoff/SKILL.md`
-  - `review-notes/README.md`
+  - *(internal reference removed)*
 
 ### LL-008: Worktree 生命周期必须成套执行（建-收敛-合入-清理）
 - 状态：validated
@@ -237,10 +313,6 @@ created: 2026-02-26
 - 关联：
   - `cat-cafe-skills/systematic-debugging/SKILL.md`
   - `cat-cafe-skills/cat-cafe-receiving-review/SKILL.md`
-
----
-
-## 7) Ragdoll侧首批条目（CLAUDE.md + Bug Report + Skills）
 
 ### LL-010: 删除文件必须用 trash，禁止 /bin/rm
 - 状态：validated
@@ -354,20 +426,6 @@ created: 2026-02-26
 
 - 关联：CLAUDE.md §7 Redis 测试规则 | ADR-008 Lua 原子操作
 
-### LL-023: CLI JSON 格式陷阱与 `jq` 安全防护
-- 状态：draft
-- 更新时间：2026-02-19
-
-- 坑：在 CLI 中手动拼接带变量的 JSON 字符串（如 `curl` 调用 API）时，极易因双引号转义、多层嵌套或变量内容包含特殊字符而导致 JSON 格式损坏，甚至导致消息发送失败或变成“只有用户可见”的悄悄话。
-- 根因：手动拼接 JSON 违反了“数据与格式分离”原则，AI 对 Shell 转义规则（尤其是多层引号）的处理在复杂场景下不可靠。
-- 触发条件：通过 `curl` 调用含有环境变量（如 `$CAT_CAFE_INVOCATION_ID`）的 API，且消息内容包含引号、换行或表情符号时。
-- 修复：强制使用 `jq` 构造 JSON（例如：`jq -nc --arg c "$MSG" '{content: $c}'`），利用工具确保内容被自动转义。
-- 防护：更新所有 Agent 的提示词模板，将 `curl` 示例改为 `jq` 构造法；在 `GEMINI.md` 中增加醒目警告。
-- 来源锚点：
-  - `GEMINI.md` (2026-02-19 更新)
-  - 2026-02-19 Siamese（Gemini）“猫猫杀”游戏调试过程
-- 原理：结构化数据必须由结构化工具生成。在命令行环境中，`jq` 是保证数据序列化健壮性的事实标准。
-
 ### LL-017: CAS 比较必须基于不可变快照，不能用内存活引用
 - 状态：validated
 - 更新时间：2026-02-13
@@ -463,11 +521,25 @@ created: 2026-02-26
 - 防护：P0 验收前与后续回归中运行健康脚本；失败即阻断“可用”结论。
 - 来源锚点：
   - `scripts/hindsight/p0-health-check.sh`
-  - `project-runbooks/hindsight-p0-health-check.md`
+  - *(internal reference removed)*
   - *(internal reference removed)*
 - 原理：治理有效性不是“策略存在”，而是“策略被持续验证”。没有自动化检查的治理，等同于没有治理。
 
 - 关联：`docs/decisions/005-hindsight-integration-decisions.md` | `docs/ROADMAP.md` | Task 4 可观测检查
+
+### LL-023: CLI JSON 格式陷阱与 `jq` 安全防护
+- 状态：draft
+- 更新时间：2026-02-19
+
+- 坑：在 CLI 中手动拼接带变量的 JSON 字符串（如 `curl` 调用 API）时，极易因双引号转义、多层嵌套或变量内容包含特殊字符而导致 JSON 格式损坏，甚至导致消息发送失败或变成"只有用户可见"的悄悄话。
+- 根因：手动拼接 JSON 违反了"数据与格式分离"原则，AI 对 Shell 转义规则（尤其是多层引号）的处理在复杂场景下不可靠。
+- 触发条件：通过 `curl` 调用含有环境变量（如 `$CAT_CAFE_INVOCATION_ID`）的 API，且消息内容包含引号、换行或表情符号时。
+- 修复：强制使用 `jq` 构造 JSON（例如：`jq -nc --arg c "$MSG" '{content: $c}'`），利用工具确保内容被自动转义。
+- 防护：更新所有 Agent 的提示词模板，将 `curl` 示例改为 `jq` 构造法；在 `GEMINI.md` 中增加醒目警告。
+- 来源锚点：
+  - `GEMINI.md` (2026-02-19 更新)
+  - 2026-02-19 Siamese（Gemini）"猫猫杀"游戏调试过程
+- 原理：结构化数据必须由结构化工具生成。在命令行环境中，`jq` 是保证数据序列化健壮性的事实标准。
 
 ### LL-024: 状态字段多点写入会复发蜘蛛网
 - 状态：validated
@@ -648,7 +720,7 @@ created: 2026-02-26
 
 - 状态：validated
 - 更新时间：2026-03-21
-- 坑：Maine Coon执行 `scripts/sync-to-opensource.sh` 时，TARGET_DIR 指向了 `cat-cafe-runtime`（runtime worktree）而非 `clowder-ai`（开源仓）。脚本核心操作 `rsync -a --delete` 把 runtime 当成开源仓目标来清洗：(a) 2057 个文件从磁盘删除（296,204 行代码消失）；(b) `.env` 被开源版覆盖（端口变 3003/3004、品牌变 Clowder AI、API keys 全丢、代理关闭）；(c) `.env` 被删除；(d) `node_modules` 损坏导致服务无法启动。**`.env` 是 gitignored 的，`git checkout .` 无法恢复，API keys、飞书/Telegram/GitHub IMAP 配置均无备份。**
+- 坑：Maine Coon执行 `scripts/sync-to-opensource.sh` 时，TARGET_DIR 指向了 `cat-cafe-runtime`（runtime worktree）而非 `clowder-ai`（开源仓）。脚本核心操作 `rsync -a --delete` 把 runtime 当成开源仓目标来清洗：(a) 2057 个文件从磁盘删除（296,204 行代码消失）；(b) `.env` 被开源版覆盖（端口变 3003/3004、品牌变 Cat Café、API keys 全丢、代理关闭）；(c) `.env` 被删除；(d) `node_modules` 损坏导致服务无法启动。**`.env` 是 gitignored 的，`git checkout .` 无法恢复，API keys、飞书/Telegram/GitHub IMAP 配置均无备份。**
 - 根因：(1) sync 脚本的 TARGET_DIR 没有安全护栏，任何路径都能被当成目标；(2) `CLOWDER_AI_DIR` 环境变量被设错或在错误目录执行了脚本；(3) `rsync --delete` 是不可逆破坏性操作，无 trash/回收站。
 - 触发条件：`CLOWDER_AI_DIR` 指向内部 worktree，或在 worktree 目录下执行 sync 脚本导致相对路径解析错误。
 - 修复：
@@ -917,7 +989,7 @@ created: 2026-02-26
 - 状态：validated
 - 更新时间：2026-04-10
 
-- 背景：Clowder AI Hub 的 Socket.IO 实时通道被发现存在 CSWSH（Cross-Site WebSocket Hijacking）风险。`Origin: https://evil.example` 可以成功建立 WebSocket 连接到 `127.0.0.1:3004`
+- 背景：Cat Café Hub 的 Socket.IO 实时通道被发现存在 CSWSH（Cross-Site WebSocket Hijacking）风险。`Origin: https://evil.example` 可以成功建立 WebSocket 连接到 `127.0.0.1:3004`
 
 - 影响：恶意网页可从任意 Origin 连接本机 WebSocket，冒充用户、监听消息、干扰猫猫工作
 
@@ -1233,24 +1305,50 @@ created: 2026-02-26
 - 状态：draft
 - 更新时间：2026-05-28
 
-- 坑：用户明确要“精美架构设计图 / 华为风 / 白底红黑 / 图片”时，Codex 第四五六次仍进入“先写 SVG 再转 PNG”的 coder 反射，产物方向错，且重复踩同一坑。
+- 坑：用户明确要”精美架构设计图 / 华为风 / 白底红黑 / 图片”时，Codex 第四五六次仍进入”先写 SVG 再转 PNG”的 coder 反射，产物方向错，且重复踩同一坑。
 - 根因：
-  1. 旧规则只是“默认建议”，没有进入执行前硬闸；一旦进入“文字可控、布局可控”的工程反射，imagegen 被错误降级成可选项。
-  2. 把“架构图需要精确”误判成“必须代码渲染”，但用户真正验收的是视觉完成度，而不是 SVG 源文件。
-  3. 已有猫档明确写了“Maine Coon原生图片生成强、禁止用 SVG 画”，但能力唤醒没有把这条转成 preflight。
-- 触发条件：复杂架构图、PPT 页面、企业信息图、华为风 / 红白黑风格、已有低保真蓝图但用户要求“精美图 / 终稿 / 图片”，且没有明确要求可编辑源文件。
-- 修复：已在 `cat-cafe-skills/image-generation/SKILL.md` 增加“Codex SVG 复发熔断闸”，匹配上述场景时禁止先写 SVG/HTML/Canvas，必须先原生 imagegen 整页直出。
+  1. 旧规则只是”默认建议”，没有进入执行前硬闸；一旦进入”文字可控、布局可控”的工程反射，imagegen 被错误降级成可选项。
+  2. 把”架构图需要精确”误判成”必须代码渲染”，但用户真正验收的是视觉完成度，而不是 SVG 源文件。
+  3. 已有猫档明确写了”Maine Coon原生图片生成强、禁止用 SVG 画”，但能力唤醒没有把这条转成 preflight。
+- 触发条件：复杂架构图、PPT 页面、企业信息图、华为风 / 红白黑风格、已有低保真蓝图但用户要求”精美图 / 终稿 / 图片”，且没有明确要求可编辑源文件。
+- 修复：已在 `cat-cafe-skills/image-generation/SKILL.md` 增加”Codex SVG 复发熔断闸”，匹配上述场景时禁止先写 SVG/HTML/Canvas，必须先原生 imagegen 整页直出。
 - 防护：
   1. image-generation skill 的 preflight：复杂架构/PPT/精美图 + 无可编辑要求 = imagegen-first。
   2. SVG/HTML 降级必须写出 `SVG override reason`，且只能基于已失败的 imagegen 产物或用户显式可编辑要求。
   3. “中文文字更可控 / 布局更可控 / 架构图需要精确 / 先 SVG 再转 PNG”都不是合格 override 理由。
 - 来源锚点：
   - `cat-cafe-skills/image-generation/SKILL.md`（Codex SVG 复发熔断闸）
-  - `docs/team/cat-dossier.md#L122`（Maine Coon原生图片生成能力与“禁止用 SVG 画”事故记录）
+  - `docs/team/cat-dossier.md#L122`（Maine Coon原生图片生成能力与”禁止用 SVG 画”事故记录）
   - 2026-05-28 LLE 自进化平台三张图生成事故复盘
 - 原理：**能力唤醒必须落到执行前硬闸。** “知道自己应该 imagegen”不等于会在任务压力下选择 imagegen；对复发型坏直觉，要把建议升级成 preflight + override reason。
 
 - 关联：image-generation skill | F203 L0 capability wakeup | *(internal reference removed)*
+
+---
+
+### LL-058b: 热补丁反模式——已有治理机制不查就另起炉灶
+- 状态：draft
+- 更新时间：2026-04-30
+
+- 坑：skill symlinks 指向旧版本，直接手动批量重链接 HOME 目录 + 改 `sync-skills.sh`，没有先分析已有的 worktree skill、`sync-skills.sh`、`check-skills-mount.sh`、`skill-sync.ts` 四层治理链条。同一天在 #598 verdict scope boundary 上也犯了类似错误——没分析 thread 根因、没和 reviewer 沟通就直接改了三个 skill 文件。
+- 根因：
+  1. **对已有机制缺乏检索习惯**：问题出现后直接跳到”怎么修”，没有先问”已有什么机制在处理这个”。
+  2. **把”能跑”等同于”方案正确”**：手动 symlink 确实能让当前 session 读到新 skill，但绕过了 worktree 创建时的自动同步链条，制造了新的不一致。
+  3. **执行速度 > 方向正确**（LL-009 复发）：铲屎官两次叫停，说明节奏判断失误不是个案。
+- 触发条件：发现”状态不对”时的冲动修复——尤其是 symlink/config/环境变量类问题，手动修一个很快，但会绕过治理链。
+- 修复：回退 `sync-skills.sh` 热补丁（`97ef3c2d`），改为先做根因分析 → 盘点已有机制 → 和 codex 对齐方案 → 开 worktree 走正常合入流程。
+- 防护：
+  1. 发现问题后第一步：`grep -r` / `git log` 搜已有机制（脚本、治理服务、skill 步骤）
+  2. 盘点完才提方案，方案必须说明”在已有机制的哪一层修”
+  3. 改动走 worktree → review → merge-gate，不直接在 develop_base 上热补丁
+- 来源锚点：
+  - `scripts/sync-skills.sh` | `scripts/check-skills-mount.sh` | `cat-cafe-skills/worktree/SKILL.md` | `packages/api/src/config/governance/skill-sync.ts`
+  - commit:`482b6f27`（sync-skills.sh 热补丁）→ commit:`97ef3c2d`（revert）
+  - commit:`82972f45` / `453a4b54`（#598 verdict scope boundary 规则修正）
+  - thread:`thread_moicgl47en8m98do`（铲屎官两次叫停的原始对话）
+- 原理：**治理机制存在的意义是把”正确做法”编码成自动化。绕过它 = 把一次性修复变成永久的手动负担，还会让治理机制逐渐失效（因为大家习惯绕过）。**
+
+- 关联：LL-009 | LL-020 | `cat-cafe-skills/refs/shared-rules.md` §P3
 
 ---
 
@@ -1789,7 +1887,7 @@ created: 2026-02-26
 - 状态：validated
 - 更新时间：2026-07-08
 
-- 坑：云端 ChatGPT 记忆在一次对话中把“任务毕业线”（领导/外部框架里的被批判对象）当成 You 可用概念；被纠正后，又把“可信承接 / 协作唤醒”（为了领导交付稿临时包装的表述）当成“我们家的方向”。两跳都被 operator 当场拦截，未进入 Clowder AI 长期 truth。
+- 坑：云端 ChatGPT 记忆在一次对话中把“任务毕业线”（领导/外部框架里的被批判对象）当成 You 可用概念；被纠正后，又把“可信承接 / 协作唤醒”（为了领导交付稿临时包装的表述）当成“我们家的方向”。两跳都被 operator 当场拦截，未进入 Cat Café 长期 truth。
 - 根因：摘要记忆缺 `origin_type / stance / status / scope / source_refs / usage_policy`，把 mention、critique target、deliverable voice 压成用户画像或项目 canon。无原文、无来源、无 stance 的画像一旦被注入高权重上下文，模型会天然把它当“我认识这个用户”的事实。
 - 触发条件：① 用户让猫改写/代写别人观点或领导文档；② 用户引用概念是为了批判/吐槽；③ 对话里有“我们”的多共同体歧义；④ 记忆系统只存摘要结论，不存原文 anchor 与使用策略。
 - 防护：

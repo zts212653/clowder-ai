@@ -5,6 +5,7 @@ import path from 'node:path';
 import { beforeEach, describe, test } from 'node:test';
 import Fastify from 'fastify';
 import './helpers/setup-cat-registry.js';
+import { canonicalTestMessageInput } from './helpers/message-from-fixtures.js';
 
 function createMockSocketManager() {
   const messages = [];
@@ -425,15 +426,17 @@ describe('Callback routes: agent-key auth path', () => {
 
   test('thread-context with agent-key can read owned soft-deleted thread tombstones', async () => {
     const deletedThread = await threadStore.create(TEST_USER, 'Deleted Readable Thread');
-    messageStore.append({
-      userId: TEST_USER,
-      catId: TEST_CAT,
-      content: 'context survives deletion',
-      mentions: [],
-      origin: 'callback',
-      timestamp: Date.now(),
-      threadId: deletedThread.id,
-    });
+    messageStore.append(
+      canonicalTestMessageInput({
+        userId: TEST_USER,
+        catId: TEST_CAT,
+        content: 'context survives deletion',
+        mentions: [],
+        origin: 'callback',
+        timestamp: Date.now(),
+        threadId: deletedThread.id,
+      }),
+    );
     assert.equal(await threadStore.softDelete(deletedThread.id), true);
     const app = await createApp();
     const { secret } = await issueKey();
@@ -527,17 +530,19 @@ describe('Callback routes: agent-key auth path', () => {
     const app = await createApp();
     const { secret } = await issueKey();
 
-    const queued = messageStore.append({
-      userId: TEST_USER,
-      catId: TEST_CAT,
-      content: 'same queued smoke report',
-      mentions: [],
-      origin: 'callback',
-      timestamp: Date.now(),
-      threadId: ownedThreadId,
-      deliveryStatus: 'queued',
-      extra: { isExplicitPost: true },
-    });
+    const queued = messageStore.append(
+      canonicalTestMessageInput({
+        userId: TEST_USER,
+        catId: TEST_CAT,
+        content: 'same queued smoke report',
+        mentions: [],
+        origin: 'callback',
+        timestamp: Date.now(),
+        threadId: ownedThreadId,
+        deliveryStatus: 'queued',
+        extra: { isExplicitPost: true },
+      }),
+    );
 
     const res = await app.inject({
       method: 'POST',

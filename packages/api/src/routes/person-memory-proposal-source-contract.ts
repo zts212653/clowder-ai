@@ -236,8 +236,7 @@ export async function resolveInteractionSourceEvidence(
     if (
       !message ||
       message.userId !== auth.userId ||
-      message.catId !== null ||
-      message.source !== undefined ||
+      (message.from ? message.from.kind !== 'user' : message.catId !== null || message.source !== undefined) ||
       message.deletedAt !== undefined ||
       message._tombstone === true ||
       !isDelivered(message) ||
@@ -278,8 +277,7 @@ export async function resolveProposalSourceMessageId(
   if (
     !message ||
     message.userId !== auth.userId ||
-    message.catId !== null ||
-    message.source !== undefined ||
+    (message.from ? message.from.kind !== 'user' : message.catId !== null || message.source !== undefined) ||
     message.deletedAt !== undefined ||
     message._tombstone === true ||
     !isDelivered(message) ||

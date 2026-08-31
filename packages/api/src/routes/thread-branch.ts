@@ -150,6 +150,10 @@ export const threadBranchRoutes: FastifyPluginAsync<ThreadBranchRoutesOptions> =
       return { error: '无法从已删除的消息创建分支', code: 'FROM_MESSAGE_DELETED' };
     }
     const messagesToCopy = allMessages.slice(0, cutIndex + 1);
+    // An edit is a fresh authenticated operator observation. Capture one
+    // request-time coordinate before writes so it enters the window where the
+    // edit happened instead of inheriting the source row's historical score.
+    const editTimestamp = Date.now();
 
     // ④ Create new thread with "(分支)" suffix
     const branchTitle = sourceThread.title ? `${sourceThread.title} (分支)` : '分支对话';
@@ -164,19 +168,39 @@ export const threadBranchRoutes: FastifyPluginAsync<ThreadBranchRoutesOptions> =
       for (let i = 0; i < messagesToCopy.length; i++) {
         const src = messagesToCopy[i]!;
         const isLast = i === messagesToCopy.length - 1;
-        const content = isLast && editedContent !== undefined ? editedContent : src.content;
+        const isEdited = isLast && editedContent !== undefined;
+        const content = isEdited ? editedContent : src.content;
+
+        // Copy the canonical sender identity. Legacy rows without MessageFrom
+        // cannot be branched safely because nullable catId/source are not an
+        // authorship authority.
+        if (!isEdited && !src.from) {
+          throw new Error(`Cannot branch legacy message ${src.id}: canonical MessageFrom is missing`);
+        }
+        const from = isEdited ? ({ kind: 'user', userId } as const) : src.from!;
+        const pluginMessage = from.kind === 'plugin' ? src.extra?.pluginMessage : undefined;
+        if (from.kind === 'plugin' && !pluginMessage) {
+          throw new Error(`Cannot branch plugin message ${src.id}: canonical plugin payload is missing`);
+        }
+        const provenance = isEdited
+          ? { observation: 'original' as const }
+          : {
+              observation: 'derived' as const,
+              sourceRef: `message:${src.id}`,
+            };
 
         await messageStore.append({
-          userId: src.userId,
-          catId: src.catId,
+          from,
+          provenance,
+          userId: isEdited ? userId : src.userId,
           content,
-          ...(src.contentBlocks && !(isLast && editedContent !== undefined)
-            ? { contentBlocks: src.contentBlocks }
-            : {}),
+          ...(src.contentBlocks && !isEdited ? { contentBlocks: src.contentBlocks } : {}),
           ...(src.metadata ? { metadata: src.metadata } : {}),
           ...(src.origin ? { origin: src.origin } : {}),
+          ...(src.source && !isEdited ? { source: src.source } : {}),
+          ...(pluginMessage ? { extra: { pluginMessage: structuredClone(pluginMessage) } } : {}),
           mentions: [...src.mentions],
-          timestamp: src.timestamp,
+          timestamp: isEdited ? editTimestamp : src.timestamp,
           threadId: newThread.id,
         });
       }

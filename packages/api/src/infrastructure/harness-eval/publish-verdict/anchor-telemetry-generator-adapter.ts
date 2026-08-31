@@ -39,7 +39,8 @@ export function createAnchorTelemetryGeneratorAdapter(provider: AnchorTelemetryM
 
     const rollup = await provider.resolve(selector);
 
-    const domains = loadDomains(deps.harnessFeedbackRoot);
+    // Registry is a live runtime contract; artifact staging contains outputs only.
+    const domains = loadDomains(deps.liveHarnessFeedbackRoot);
     const domain = domains.get(packet.domainId);
     if (!domain) {
       throw new Error(`unknown_domain: ${packet.domainId} not in registry`);

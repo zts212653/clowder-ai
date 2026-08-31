@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
-const EXPECTED_PUBLIC_KEYS = ['expiresAt', 'nextStep', 'prNumber', 'repoFullName', 'when'];
+const EXPECTED_PUBLIC_KEYS = ['autoRenew', 'expiresAt', 'nextStep', 'prNumber', 'repoFullName', 'when'];
 
 describe('F280 register_pr_tracking public contract', () => {
   it('exposes only the typed wait inputs', async () => {

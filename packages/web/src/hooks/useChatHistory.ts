@@ -283,7 +283,7 @@ function pickMessageExtraField<Key extends keyof MessageExtra>(
   return preferred?.[key] ?? fallback?.[key];
 }
 
-function mergeMessageExtra(
+export function mergeMessageExtra(
   preferred: ChatMessageData['extra'],
   fallback: ChatMessageData['extra'],
 ): ChatMessageData['extra'] | undefined {
@@ -295,6 +295,7 @@ function mergeMessageExtra(
   // immutable/additive projections, so the selected message wins and the other
   // side only fills a missing field. `rich` remains the sole structural merge.
   const fields: RequiredMessageExtraFields = {
+    routingWarnings: pick('routingWarnings'),
     crossPost: pick('crossPost'),
     stream: pick('stream'),
     turnExecution: pick('turnExecution'),
@@ -302,6 +303,7 @@ function mergeMessageExtra(
     targetCats: pick('targetCats'),
     messageBundle: pick('messageBundle'),
     isExplicitPost: pick('isExplicitPost'),
+    signatureLint: pick('signatureLint'),
     scheduler: pick('scheduler'),
     timeoutDiagnostics: pick('timeoutDiagnostics'),
     // F212 Phase B: diagnostics outlive one live event and must survive hydration.
@@ -851,7 +853,6 @@ export function useChatHistory(threadId: string) {
     replaceThreadTargetCats,
     updateThreadCatStatus,
     setQueue,
-    setQueuePaused,
     isOfflineSnapshot,
   } = useChatStore(
     useShallow((s) => ({
@@ -865,7 +866,6 @@ export function useChatHistory(threadId: string) {
       replaceThreadTargetCats: s.replaceThreadTargetCats,
       updateThreadCatStatus: s.updateThreadCatStatus,
       setQueue: s.setQueue,
-      setQueuePaused: s.setQueuePaused,
       isOfflineSnapshot: s.isOfflineSnapshot,
     })),
   );
@@ -1113,8 +1113,10 @@ export function useChatHistory(threadId: string) {
           (m: {
             id: string;
             type: string;
+            from?: import('@cat-cafe/shared').MessageFrom;
             catId?: string;
             content: string;
+            lifecycle?: import('@cat-cafe/shared').LifecycleStoredMessageMetadata;
             contentBlocks?: unknown[];
             toolEvents?: unknown[];
             metadata?: {
@@ -1165,17 +1167,27 @@ export function useChatHistory(threadId: string) {
           }) =>
             ({
               id: m.id,
-              type: (m.type === 'system'
-                ? 'system'
-                : m.summary
-                  ? 'summary'
-                  : m.source
-                    ? 'connector'
-                    : m.catId
-                      ? 'assistant'
-                      : 'user') as 'user' | 'assistant' | 'system' | 'summary' | 'connector',
+              type: (m.from?.kind === 'agent'
+                ? 'assistant'
+                : m.from?.kind === 'external' || m.from?.kind === 'plugin'
+                  ? 'connector'
+                  : m.from?.kind === 'system'
+                    ? 'system'
+                    : m.from?.kind === 'user'
+                      ? 'user'
+                      : m.type === 'system'
+                        ? 'system'
+                        : m.summary
+                          ? 'summary'
+                          : m.source
+                            ? 'connector'
+                            : m.catId
+                              ? 'assistant'
+                              : 'user') as 'user' | 'assistant' | 'system' | 'summary' | 'connector',
+              ...(m.from ? { from: m.from } : {}),
               catId: m.catId,
               content: m.content,
+              ...(m.lifecycle ? { lifecycle: m.lifecycle } : {}),
               ...(m.contentBlocks ? { contentBlocks: m.contentBlocks } : {}),
               ...(m.toolEvents ? { toolEvents: m.toolEvents as import('../stores/chat-types').ToolEvent[] } : {}),
               ...(m.metadata ? { metadata: m.metadata } : {}),
@@ -1446,13 +1458,10 @@ export function useChatHistory(threadId: string) {
       if (threadIdRef.current !== fetchForThread) return;
       const data = (await res.json()) as {
         queue: QueueEntry[];
-        paused: boolean;
-        pauseReason?: 'canceled' | 'failed';
         activeInvocations?: QueueActiveInvocationSlot[];
       };
       // Always sync server state — clears stale local data when server queue is empty
       setQueue(fetchForThread, data.queue);
-      setQueuePaused(fetchForThread, data.paused, data.pauseReason);
       // Issue #83: Reconcile processing state from server-side InvocationTracker.
       // Uses thread-scoped APIs so it works correctly for both active and background threads,
       // and always overwrites stale snapshots restored by setCurrentThread().
@@ -1513,7 +1522,7 @@ export function useChatHistory(threadId: string) {
       if (isAbortError(err)) return;
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [threadId, setQueue, setQueuePaused, updateThreadCatStatus]);
+  }, [threadId, setQueue, updateThreadCatStatus]);
 
   // Restore per-thread tasks before paint so revisiting a thread does not show
   // an empty secondary panel while revalidation is still in flight.

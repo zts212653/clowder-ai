@@ -1,4 +1,4 @@
-import { normalizeCatId, parseCommand } from '@cat-cafe/shared';
+import { type MessageFrom, normalizeCatId, parseCommand } from '@cat-cafe/shared';
 import type { CommandRegistry } from '../commands/CommandRegistry.js';
 import type { IConnectorPermissionStore } from './ConnectorPermissionStore.js';
 import type { IConnectorThreadBindingStore } from './ConnectorThreadBindingStore.js';
@@ -96,8 +96,10 @@ export interface ConnectorCommandLayerDeps {
       timestamp: number,
       limit?: number,
     ):
-      | Array<{ catId: string | null; userId?: string; content: string; timestamp: number }>
-      | Promise<Array<{ catId: string | null; userId?: string; content: string; timestamp: number }>>;
+      | Array<{ from?: MessageFrom; catId: string | null; userId?: string; content: string; timestamp: number }>
+      | Promise<
+          Array<{ from?: MessageFrom; catId: string | null; userId?: string; content: string; timestamp: number }>
+        >;
   };
 }
 
@@ -425,7 +427,8 @@ export class ConnectorCommandLayer {
 
     type Msg = Awaited<ReturnType<NonNullable<typeof this.deps.messageStore>['getByThreadBefore']>>[number];
     const SYSTEM_UIDS = new Set(['system', 'scheduler']);
-    const isUserMsg = (m: Msg): boolean => m.catId === null && !SYSTEM_UIDS.has(m.userId ?? '');
+    const isUserMsg = (m: Msg): boolean =>
+      m.from ? m.from.kind === 'user' : m.catId === null && !SYSTEM_UIDS.has(m.userId ?? '');
     const splitRounds = (msgs: Msg[]): Msg[][] => {
       const result: Msg[][] = [];
       let cur: Msg[] = [];
@@ -459,11 +462,15 @@ export class ConnectorCommandLayer {
     const TOTAL_BUDGET = PLATFORM_BUDGET[connectorId] ?? 2000;
     const roster = this.deps.catRoster;
     const resolveSender = (msg: Msg): string => {
-      if (msg.catId) {
-        const display = roster?.[msg.catId]?.displayName;
-        return `🐱 ${display ?? msg.catId}`;
+      const authorCatId = msg.from?.kind === 'agent' ? msg.from.catId : msg.catId;
+      if (authorCatId) {
+        const display = roster?.[authorCatId]?.displayName;
+        return `🐱 ${display ?? authorCatId}`;
       }
-      if (SYSTEM_UIDS.has(msg.userId ?? '')) return '🔔 系统';
+      if (msg.from?.kind === 'system' || (!msg.from && SYSTEM_UIDS.has(msg.userId ?? ''))) return '🔔 系统';
+      if (msg.from?.kind === 'external')
+        return `🔗 ${msg.from.sender?.name ?? msg.from.sender?.id ?? msg.from.connectorId}`;
+      if (msg.from?.kind === 'plugin') return `🔌 ${msg.from.instanceId}`;
       return '👤 你';
     };
 

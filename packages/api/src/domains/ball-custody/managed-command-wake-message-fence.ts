@@ -107,7 +107,7 @@ function releaseManagedCommandWakeMessageContentClaim(
 }
 
 export async function publishManagedCommandWakeMessage(
-  deps: Pick<ManagedCommandWakeRecoveryDeps, 'dynamicTaskStore' | 'messageStore' | 'socketManager'>,
+  deps: Pick<ManagedCommandWakeRecoveryDeps, 'dynamicTaskStore' | 'messageStore'>,
   parsed: ParsedManagedCommandWakeTask,
   now: () => number,
 ): Promise<boolean> {
@@ -118,12 +118,12 @@ export async function publishManagedCommandWakeMessage(
   const idempotencyKey = `${COMPLETION_MESSAGE_KEY_PREFIX}${claimed.task.id}`;
 
   try {
-    const existing = await deps.messageStore.getByIdempotencyKey('scheduler', claimed.threadId, idempotencyKey);
+    const existing = await deps.messageStore.getByIdempotencyKey(claimed.userId, claimed.threadId, idempotencyKey);
     const stored =
       existing ??
       (await deps.messageStore.append({
-        userId: 'scheduler',
-        catId: null,
+        from: { kind: 'system', service: 'managed-command-wake' },
+        userId: claimed.userId,
         content: triggerContent,
         mentions: [],
         timestamp: now(),
@@ -138,7 +138,6 @@ export async function publishManagedCommandWakeMessage(
         },
       }));
 
-    if (!existing) broadcastStoredMessage(deps.socketManager, claimed.threadId, stored);
     return commitManagedCommandWakeMessageVisibility(
       deps.dynamicTaskStore,
       claimed.task.id,
@@ -149,7 +148,11 @@ export async function publishManagedCommandWakeMessage(
   } catch (err) {
     let committedAfterError: StoredWakeMessage | null;
     try {
-      committedAfterError = await deps.messageStore.getByIdempotencyKey('scheduler', claimed.threadId, idempotencyKey);
+      committedAfterError = await deps.messageStore.getByIdempotencyKey(
+        claimed.userId,
+        claimed.threadId,
+        idempotencyKey,
+      );
     } catch (lookupErr) {
       log.warn(
         { err: lookupErr, taskId: claimed.task.id, threadId: claimed.threadId },
@@ -158,7 +161,6 @@ export async function publishManagedCommandWakeMessage(
       return false;
     }
     if (committedAfterError) {
-      broadcastStoredMessage(deps.socketManager, claimed.threadId, committedAfterError);
       return commitManagedCommandWakeMessageVisibility(
         deps.dynamicTaskStore,
         claimed.task.id,
@@ -178,21 +180,4 @@ export async function publishManagedCommandWakeMessage(
     );
     return false;
   }
-}
-
-function broadcastStoredMessage(
-  socketManager: ManagedCommandWakeRecoveryDeps['socketManager'],
-  threadId: string,
-  stored: StoredWakeMessage,
-): void {
-  socketManager.broadcastToRoom(`thread:${threadId}`, 'connector_message', {
-    threadId,
-    message: {
-      id: stored.id,
-      type: 'connector',
-      content: stored.content,
-      source: stored.source,
-      timestamp: stored.timestamp,
-    },
-  });
 }

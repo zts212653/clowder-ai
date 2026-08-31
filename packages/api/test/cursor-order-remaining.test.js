@@ -7,6 +7,7 @@
 
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
+import { canonicalTestMessageInput } from './helpers/message-from-fixtures.js';
 
 const { parseCursor, cursorFor } = await import('../dist/domains/cats/services/stores/cursor.js');
 const { MessageStore, generateSortableId } = await import('../dist/domains/cats/services/stores/ports/MessageStore.js');
@@ -22,15 +23,28 @@ describe('Cursor Order — Remaining RED tests (§8.8)', () => {
     const baseTs = Date.now() - 10000;
 
     // Simulate legacy messages (direct, no queuing)
-    const l1 = store.append({ userId: 'u1', catId: null, content: 'L1', mentions: [], timestamp: baseTs, threadId });
-    const l2 = store.append({
-      userId: 'u1',
-      catId: null,
-      content: 'L2',
-      mentions: [],
-      timestamp: baseTs + 100,
-      threadId,
-    });
+    const l1 = store.append(
+      canonicalTestMessageInput({
+        provenance: { author: 'user', routed: false, observation: 'original' },
+        userId: 'u1',
+        catId: null,
+        content: 'L1',
+        mentions: [],
+        timestamp: baseTs,
+        threadId,
+      }),
+    );
+    const l2 = store.append(
+      canonicalTestMessageInput({
+        provenance: { author: 'user', routed: false, observation: 'original' },
+        userId: 'u1',
+        catId: null,
+        content: 'L2',
+        mentions: [],
+        timestamp: baseTs + 100,
+        threadId,
+      }),
+    );
 
     // Read the legacy region
     const legacyPage = store.getByThreadAfter(threadId);
@@ -39,14 +53,17 @@ describe('Cursor Order — Remaining RED tests (§8.8)', () => {
     assert.equal(legacyPage[1].id, l2.id);
 
     // Append new messages — must have seqs strictly above legacy
-    const _n1 = store.append({
-      userId: 'u1',
-      catId: null,
-      content: 'N1',
-      mentions: [],
-      timestamp: baseTs + 5000,
-      threadId,
-    });
+    const _n1 = store.append(
+      canonicalTestMessageInput({
+        provenance: { author: 'user', routed: false, observation: 'original' },
+        userId: 'u1',
+        catId: null,
+        content: 'N1',
+        mentions: [],
+        timestamp: baseTs + 5000,
+        threadId,
+      }),
+    );
 
     const fullPage = store.getByThreadAfter(threadId);
     assert.equal(fullPage.length, 3);
@@ -65,22 +82,28 @@ describe('Cursor Order — Remaining RED tests (§8.8)', () => {
     const store = new MessageStore();
     const threadId = `red11-${Date.now()}`;
 
-    const _m1 = store.append({
-      userId: 'u1',
-      catId: null,
-      content: 'A-will-delete',
-      mentions: [],
-      timestamp: Date.now() - 2000,
-      threadId,
-    });
-    const m2 = store.append({
-      userId: 'u1',
-      catId: null,
-      content: 'B-live',
-      mentions: [],
-      timestamp: Date.now() - 1000,
-      threadId,
-    });
+    const _m1 = store.append(
+      canonicalTestMessageInput({
+        provenance: { author: 'user', routed: false, observation: 'original' },
+        userId: 'u1',
+        catId: null,
+        content: 'A-will-delete',
+        mentions: [],
+        timestamp: Date.now() - 2000,
+        threadId,
+      }),
+    );
+    const m2 = store.append(
+      canonicalTestMessageInput({
+        provenance: { author: 'user', routed: false, observation: 'original' },
+        userId: 'u1',
+        catId: null,
+        content: 'B-live',
+        mentions: [],
+        timestamp: Date.now() - 1000,
+        threadId,
+      }),
+    );
 
     // Record B's seq
     const page1 = store.getByThreadAfter(threadId);
@@ -91,14 +114,17 @@ describe('Cursor Order — Remaining RED tests (§8.8)', () => {
     const highestSeq = page1Full[page1Full.length - 1].visibilitySeq;
 
     // Now append another message — its seq must be > highestSeq
-    const m3 = store.append({
-      userId: 'u1',
-      catId: null,
-      content: 'C-after-delete',
-      mentions: [],
-      timestamp: Date.now(),
-      threadId,
-    });
+    const m3 = store.append(
+      canonicalTestMessageInput({
+        provenance: { author: 'user', routed: false, observation: 'original' },
+        userId: 'u1',
+        catId: null,
+        content: 'C-after-delete',
+        mentions: [],
+        timestamp: Date.now(),
+        threadId,
+      }),
+    );
 
     const page2 = store.getByThreadAfter(threadId);
     const m3Item = page2.find((m) => m.id === m3.id);
@@ -120,14 +146,17 @@ describe('Cursor Order — Remaining RED tests (§8.8)', () => {
     const store = new MessageStore();
     const threadId = `red16-${Date.now()}`;
 
-    const m = store.append({
-      userId: 'u1',
-      catId: null,
-      content: 'legacy-msg',
-      mentions: [],
-      timestamp: Date.now(),
-      threadId,
-    });
+    const m = store.append(
+      canonicalTestMessageInput({
+        provenance: { author: 'user', routed: false, observation: 'original' },
+        userId: 'u1',
+        catId: null,
+        content: 'legacy-msg',
+        mentions: [],
+        timestamp: Date.now(),
+        threadId,
+      }),
+    );
 
     // From after-path: carries visibilitySeq → v2 cursor
     const page = store.getByThreadAfter(threadId);
@@ -159,7 +188,17 @@ describe('Cursor Order — Remaining RED tests (§8.8)', () => {
     const msgs = [];
     for (let i = 0; i < 100; i++) {
       msgs.push(
-        store.append({ userId: 'u1', catId: null, content: `m${i}`, mentions: [], timestamp: Date.now(), threadId }),
+        store.append(
+          canonicalTestMessageInput({
+            provenance: { author: 'user', routed: false, observation: 'original' },
+            userId: 'u1',
+            catId: null,
+            content: `m${i}`,
+            mentions: [],
+            timestamp: Date.now(),
+            threadId,
+          }),
+        ),
       );
     }
 
@@ -182,27 +221,33 @@ describe('Cursor Order — Remaining RED tests (§8.8)', () => {
     const store = new MessageStore();
     const threadId = `red20-${Date.now()}`;
 
-    const _m1 = store.append({
-      userId: 'u1',
-      catId: null,
-      content: 'will-survive',
-      mentions: [],
-      timestamp: Date.now() + 100000,
-      threadId,
-    });
+    const _m1 = store.append(
+      canonicalTestMessageInput({
+        provenance: { author: 'user', routed: false, observation: 'original' },
+        userId: 'u1',
+        catId: null,
+        content: 'will-survive',
+        mentions: [],
+        timestamp: Date.now() + 100000,
+        threadId,
+      }),
+    );
 
     const page1 = store.getByThreadAfter(threadId);
     const prevHwm = page1[0].visibilitySeq;
 
     // Append with earlier timestamp (simulates clock rollback)
-    const m2 = store.append({
-      userId: 'u1',
-      catId: null,
-      content: 'after-rollback',
-      mentions: [],
-      timestamp: Date.now() - 100000,
-      threadId,
-    });
+    const m2 = store.append(
+      canonicalTestMessageInput({
+        provenance: { author: 'user', routed: false, observation: 'original' },
+        userId: 'u1',
+        catId: null,
+        content: 'after-rollback',
+        mentions: [],
+        timestamp: Date.now() - 100000,
+        threadId,
+      }),
+    );
 
     const page2 = store.getByThreadAfter(threadId);
     const newSeq = page2.find((m) => m.id === m2.id)?.visibilitySeq;
@@ -216,14 +261,17 @@ describe('Cursor Order — Remaining RED tests (§8.8)', () => {
     const store = new MessageStore();
     const threadId = `red21-${Date.now()}`;
 
-    const _m1 = store.append({
-      userId: 'u1',
-      catId: null,
-      content: 'msg1',
-      mentions: [],
-      timestamp: Date.now(),
-      threadId,
-    });
+    const _m1 = store.append(
+      canonicalTestMessageInput({
+        provenance: { author: 'user', routed: false, observation: 'original' },
+        userId: 'u1',
+        catId: null,
+        content: 'msg1',
+        mentions: [],
+        timestamp: Date.now(),
+        threadId,
+      }),
+    );
     const page1 = store.getByThreadAfter(threadId);
     const firstSeq = page1[0].visibilitySeq;
 
@@ -231,14 +279,17 @@ describe('Cursor Order — Remaining RED tests (§8.8)', () => {
     store.deleteByThread(threadId);
 
     // New append — seq must continue above the old hwm
-    const _m2 = store.append({
-      userId: 'u1',
-      catId: null,
-      content: 'after-delete',
-      mentions: [],
-      timestamp: Date.now(),
-      threadId,
-    });
+    const _m2 = store.append(
+      canonicalTestMessageInput({
+        provenance: { author: 'user', routed: false, observation: 'original' },
+        userId: 'u1',
+        catId: null,
+        content: 'after-delete',
+        mentions: [],
+        timestamp: Date.now(),
+        threadId,
+      }),
+    );
     const page2 = store.getByThreadAfter(threadId);
     assert.equal(page2.length, 1);
     assert.ok(page2[0].visibilitySeq > firstSeq, 'Seq must continue above old hwm after thread clear');
@@ -277,14 +328,17 @@ describe('Cursor Order — Remaining RED tests (§8.8)', () => {
     const threadId = `red25-${Date.now()}`;
 
     for (let i = 0; i < 500; i++) {
-      store.append({
-        userId: 'u1',
-        catId: null,
-        content: `msg-${i}`,
-        mentions: [],
-        timestamp: Date.now() - (500 - i) * 10,
-        threadId,
-      });
+      store.append(
+        canonicalTestMessageInput({
+          provenance: { author: 'user', routed: false, observation: 'original' },
+          userId: 'u1',
+          catId: null,
+          content: `msg-${i}`,
+          mentions: [],
+          timestamp: Date.now() - (500 - i) * 10,
+          threadId,
+        }),
+      );
     }
 
     // Paginate in chunks of 100
@@ -309,14 +363,17 @@ describe('Cursor Order — Remaining RED tests (§8.8)', () => {
     const msgs = [];
     for (let i = 0; i < 5; i++) {
       msgs.push(
-        store.append({
-          userId: 'u1',
-          catId: null,
-          content: `legacy-${i}`,
-          mentions: [],
-          timestamp: Date.now() - (5 - i) * 1000,
-          threadId,
-        }),
+        store.append(
+          canonicalTestMessageInput({
+            provenance: { author: 'user', routed: false, observation: 'original' },
+            userId: 'u1',
+            catId: null,
+            content: `legacy-${i}`,
+            mentions: [],
+            timestamp: Date.now() - (5 - i) * 1000,
+            threadId,
+          }),
+        ),
       );
     }
 

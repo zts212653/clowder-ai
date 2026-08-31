@@ -15,9 +15,8 @@ import { useIMEGuard } from '@/hooks/useIMEGuard';
 import { useLiveExecutionCancelControl } from '@/hooks/useLiveExecutionCancelControl';
 import { useMessageDispositionPreference } from '@/hooks/useMessageDispositionPreference';
 import { usePathCompletion } from '@/hooks/usePathCompletion';
-import type { UploadStatus, WhisperOptions } from '@/hooks/useSendMessage';
+import type { PostAdmissionAction, UploadStatus, WhisperOptions } from '@/hooks/useSendMessage';
 import { useThreadLiveness } from '@/hooks/useThreadScopedSelectors';
-import type { DeliveryMode } from '@/stores/chat-types';
 import { useChatStore } from '@/stores/chatStore';
 import { useInputHistoryStore } from '@/stores/inputHistoryStore';
 import { apiFetch } from '@/utils/api-client';
@@ -71,7 +70,7 @@ interface ChatInputProps {
     content: string,
     images?: File[],
     whisper?: WhisperOptions,
-    deliveryMode?: DeliveryMode,
+    postAdmissionAction?: PostAdmissionAction,
     replyToId?: string,
     messageDisposition?: MessageWorkDisposition,
     contextAttachments?: ContextAttachment[],
@@ -272,7 +271,7 @@ export function ChatInput({
   const pathCompletion = usePathCompletion(input);
 
   const doSend = useCallback(
-    (deliveryMode?: DeliveryMode) => {
+    (postAdmissionAction?: PostAdmissionAction) => {
       if (sendTemporarilyDisabled) return;
       if (whisperMode && whisperTargets.size === 0) return;
       const trimmed = input.trim();
@@ -291,7 +290,7 @@ export function ChatInput({
         // Only a one-shot override belongs on this message. Thread/global/product
         // inheritance resolves again at server admission, closing hydration races.
         const declaredDisposition =
-          dispositionIsMeaningful && deliveryMode !== 'force'
+          dispositionIsMeaningful && postAdmissionAction !== 'steer'
             ? dispositionCarrierSupport === 'exact'
               ? (messageDisposition.oneShot ?? undefined)
               : 'next_work'
@@ -305,7 +304,7 @@ export function ChatInput({
                   trimmed,
                   images.length > 0 ? images : undefined,
                   whisper,
-                  deliveryMode,
+                  postAdmissionAction,
                   replyToMessage?.id,
                   declaredDisposition,
                   contextAttachments,
@@ -314,7 +313,7 @@ export function ChatInput({
                   trimmed,
                   images.length > 0 ? images : undefined,
                   whisper,
-                  deliveryMode,
+                  postAdmissionAction,
                   replyToMessage?.id,
                   declaredDisposition,
                 );
@@ -363,9 +362,8 @@ export function ChatInput({
     ],
   );
 
-  const handleSend = useCallback(() => doSend(undefined), [doSend]);
-  const handleQueueSend = useCallback(() => doSend('queue'), [doSend]);
-  const handleForceSend = useCallback(() => doSend('force'), [doSend]);
+  const handleSend = useCallback(() => doSend(), [doSend]);
+  const handleSteerSend = useCallback(() => doSend('steer'), [doSend]);
 
   const closeMenus = useCallback(() => {
     setShowMentions(false);
@@ -646,9 +644,7 @@ export function ChatInput({
 
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
-      // F39+F108B: Enter while cat running → queue send; whisper to idle targets → normal send
-      if (hasActiveInvocation && !whisperTargetsAllIdle) handleQueueSend();
-      else handleSend();
+      handleSend();
     }
   };
 
@@ -1042,8 +1038,8 @@ export function ChatInput({
           onSend={handleSend}
           onStop={() => void handleProjectedStop()}
           stopState={stopState}
-          onQueueSend={handleQueueSend}
-          onForceSend={handleForceSend}
+          onQueueSend={handleSend}
+          onSteerSend={handleSteerSend}
           disabled={disabled}
           sendDisabled={sendTemporarilyDisabled}
           hasActiveInvocation={whisperTargetsAllIdle ? false : hasActiveInvocation}

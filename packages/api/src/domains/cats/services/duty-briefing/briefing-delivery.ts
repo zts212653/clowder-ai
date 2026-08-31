@@ -25,9 +25,9 @@ export async function deliverBriefingCard(
 ): Promise<string> {
   const rich: RichMessageExtra = { v: 1, blocks: [card] };
   const msg = await messageStore.append({
+    from: { kind: 'system', service: 'duty-briefing' },
     threadId,
     userId: BRIEFING_USER_ID,
-    catId: null,
     content: card.title,
     mentions: [],
     timestamp: now,

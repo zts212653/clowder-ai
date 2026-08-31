@@ -1,14 +1,14 @@
 import type { RichBlock } from '@cat-cafe/shared';
 import type { StoredMessage } from '../stores/ports/MessageStore.js';
 import type {
-  MessageSelectionAuthor,
   MessageSelectionTombstone,
   MessageSelectionTombstoneReason,
   ResolvedMessageSelectionItem,
 } from './message-selection-types.js';
 
-function authorFor(message: StoredMessage): MessageSelectionAuthor {
-  return message.catId === null ? { kind: 'user', userId: message.userId } : { kind: 'cat', catId: message.catId };
+function fromFor(message: StoredMessage): NonNullable<StoredMessage['from']> {
+  if (!message.from) throw new Error(`message selection source ${message.id} has no canonical MessageFrom`);
+  return structuredClone(message.from);
 }
 
 export function tombstone(messageId: string, reason: MessageSelectionTombstoneReason): MessageSelectionTombstone {
@@ -26,7 +26,7 @@ export function projectedItem(
     kind: item.kind,
     messageId: message.id,
     sourceThreadId: message.threadId,
-    author: authorFor(message),
+    from: fromFor(message),
     timestamp: message.timestamp,
     readableContent,
     ...(item.comment ? { comment: item.comment } : {}),

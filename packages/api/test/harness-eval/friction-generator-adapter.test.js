@@ -169,22 +169,27 @@ describe('createFrictionGeneratorAdapter', () => {
   });
 
   it('throws unknown_domain when packet.domainId not in registry', async () => {
-    const harnessFeedbackRoot = mkdtempSync(join(tmpdir(), 'friction-adapter-unknown-')); // empty domains dir
+    const liveRoot = mkdtempSync(join(tmpdir(), 'friction-adapter-unknown-')); // empty — no eval-domains/
     const provider = { resolve: async () => buildRollupInput() };
     const adapter = createFrictionGeneratorAdapter(provider);
     await assert.rejects(
       adapter(buildSubmittedPacket(), SELECTOR, {
-        harnessFeedbackRoot,
-        liveHarnessFeedbackRoot: '/tmp/live',
+        harnessFeedbackRoot: '/tmp/staging',
+        liveHarnessFeedbackRoot: liveRoot,
       }),
       /unknown_domain.*eval:friction/,
     );
   });
 
   it('happy path: passes selector to provider unchanged and returns bundle-only artifact paths', async () => {
-    const repoRoot = mkdtempSync(join(tmpdir(), 'friction-adapter-happy-repo-'));
-    const harnessFeedbackRoot = join(repoRoot, 'docs', 'harness-feedback');
-    seedFrictionDomain(harnessFeedbackRoot);
+    // Domain registry lives at liveHarnessFeedbackRoot (not staging output root).
+    const liveRepoRoot = mkdtempSync(join(tmpdir(), 'friction-adapter-live-'));
+    const liveHarnessFeedbackRoot = join(liveRepoRoot, 'docs', 'harness-feedback');
+    seedFrictionDomain(liveHarnessFeedbackRoot);
+
+    // Staging root is for artifact output — no domain YAML needed here.
+    const stagingRepoRoot = mkdtempSync(join(tmpdir(), 'friction-adapter-staging-'));
+    const harnessFeedbackRoot = join(stagingRepoRoot, 'docs', 'harness-feedback');
 
     let resolveCalledWith = null;
     const provider = {
@@ -198,7 +203,7 @@ describe('createFrictionGeneratorAdapter', () => {
     const packet = buildSubmittedPacket();
     const result = await adapter(packet, SELECTOR, {
       harnessFeedbackRoot,
-      liveHarnessFeedbackRoot: '/tmp/live-unused-for-friction',
+      liveHarnessFeedbackRoot,
     });
 
     assert.deepEqual(resolveCalledWith, SELECTOR, 'adapter passes selector to provider unchanged');

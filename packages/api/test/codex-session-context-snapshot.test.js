@@ -21,6 +21,38 @@ test('returns null when rollout file for session does not exist', async () => {
   }
 });
 
+test('resolves an invocation-scoped sessions root instead of the process default', async () => {
+  const defaultRoot = await mkdtemp(join(tmpdir(), 'codex-default-sessions-'));
+  const invocationRoot = await mkdtemp(join(tmpdir(), 'codex-invocation-sessions-'));
+  const sessionId = '019c5eaf-fa08-73b1-89bb-isolated0001';
+  const dayDir = join(invocationRoot, '2026', '08', '18');
+  await mkdir(dayDir, { recursive: true });
+  const file = join(dayDir, `rollout-2026-08-18T06-20-00-${sessionId}.jsonl`);
+  const row = JSON.stringify({
+    type: 'event_msg',
+    payload: {
+      type: 'token_count',
+      info: {
+        last_token_usage: { input_tokens: 96_105 },
+        model_context_window: 1_000_000,
+      },
+    },
+  });
+  await writeFile(file, `${row}\n`, 'utf8');
+
+  try {
+    const resolveSnapshot = createCodexSessionContextSnapshotResolver({ sessionsRoot: defaultRoot });
+    const snapshot = await resolveSnapshot(sessionId, { sessionsRoot: invocationRoot });
+
+    assert.ok(snapshot, 'snapshot should be found under the invocation-owned root');
+    assert.equal(snapshot.contextUsedTokens, 96_105);
+    assert.equal(snapshot.contextWindowTokens, 1_000_000);
+  } finally {
+    await rm(defaultRoot, { recursive: true, force: true });
+    await rm(invocationRoot, { recursive: true, force: true });
+  }
+});
+
 test('prefers latest token_count with non-zero rate usage when duplicates exist', async () => {
   const root = await mkdtemp(join(tmpdir(), 'codex-sessions-'));
   const sessionId = '019c5eaf-fa08-73b1-89bb-1e3d5939c9d3';

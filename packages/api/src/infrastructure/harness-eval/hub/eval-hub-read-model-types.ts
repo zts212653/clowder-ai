@@ -7,6 +7,8 @@ type CountRecord = Record<string, number | null>;
 
 export interface LoadEvalHubSummaryInput {
   harnessFeedbackRoot: string;
+  /** Durable runtime verdict store outside the product Git repository. */
+  artifactStoreRoot?: string;
   /** Injectable wall clock for deterministic staleness checks. */
   now?: Date;
 }

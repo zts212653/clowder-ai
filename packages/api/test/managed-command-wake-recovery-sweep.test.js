@@ -317,10 +317,10 @@ describe('F167 S.1-c ManagedCommandWakeRecoverySweep', () => {
     assert.equal(h.tasks.get('hold-ball-task-1').params.holdLifecycle.managedCommand.state, 'dispatch_pending');
     assert.equal(h.appended.length, 1);
     assert.equal(h.appended[0].deliveryStatus, 'queued', 'managed wake stays under F264 receipt custody');
-    assert.equal(
-      h.triggerCalls[0][6].forceQueue,
-      true,
-      'managed event always uses one Queue carrier even when the thread is idle',
+    assert.deepEqual(
+      h.triggerCalls[0][6],
+      { sourceCategory: 'scheduled' },
+      'managed event uses the same canonical Queue ingress as every connector source',
     );
 
     const graceAttempt = await sweep.runOnce();
@@ -369,9 +369,9 @@ describe('F167 S.1-c ManagedCommandWakeRecoverySweep', () => {
     assert.deepEqual(h.unregistered, ['hold-ball-task-1']);
   });
 
-  test('does not retire a dispatched wake until its InvocationRecord completed successfully', async () => {
+  test('does not retire an enqueued wake until its InvocationRecord completed successfully', async () => {
     const { ManagedCommandWakeRecoverySweep } = await loadSweep();
-    const h = makeHarness({ triggerOutcomes: ['dispatched'] });
+    const h = makeHarness({ triggerOutcomes: ['enqueued'] });
     const sweep = new ManagedCommandWakeRecoverySweep(h.deps);
 
     assert.equal(
@@ -384,7 +384,7 @@ describe('F167 S.1-c ManagedCommandWakeRecoverySweep', () => {
     );
     const first = h.tasks.get('hold-ball-task-1');
     assert.equal(first.enabled, true);
-    assert.equal(first.params.holdLifecycle.managedCommand.state, 'dispatched');
+    assert.equal(first.params.holdLifecycle.managedCommand.state, 'enqueued');
 
     const messageId = first.params.holdLifecycle.managedCommand.messageId;
     const invocation = {
@@ -403,7 +403,7 @@ describe('F167 S.1-c ManagedCommandWakeRecoverySweep', () => {
     assert.equal(h.tasks.get('hold-ball-task-1').params.holdLifecycle.managedCommand.invocationId, 'invocation-1');
   });
 
-  test('force-queued event carrier is not duplicated and retires only from exact F264 handled truth', async () => {
+  test('event carrier is not duplicated and retires only from exact F264 handled truth', async () => {
     const { ManagedCommandWakeRecoverySweep } = await loadSweep();
     const h = makeHarness({ triggerOutcomes: ['enqueued', 'enqueued'], eventCarrier: { state: 'missing' } });
     const sweep = new ManagedCommandWakeRecoverySweep(h.deps);
@@ -596,6 +596,7 @@ describe('F167 S.1-c ManagedCommandWakeRecoverySweep', () => {
     const custody = {
       status: 'queued',
       handledByCatIds: [],
+      failedByCatIds: [],
       pendingTargetCats: ['codex-sol'],
     };
 

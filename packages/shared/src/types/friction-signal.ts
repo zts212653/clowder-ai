@@ -11,8 +11,8 @@
  * domainId/sourceAdapter 注册枚举无关（Phase C 协调，勿混用）。
  */
 
-/** 摩擦信号来源通道。Phase A 仅实现 'paw-feel'，其余 Phase B 起补齐。 */
-export type FrictionChannel = 'paw-feel' | 'cancel' | 'user-feedback' | 'eval-domain';
+/** 摩擦信号来源通道。Phase A 仅实现 'paw-feel'；F257 V2 增补 'guard-anomaly'（第 5 通道）。 */
+export type FrictionChannel = 'paw-feel' | 'cancel' | 'user-feedback' | 'eval-domain' | 'guard-anomaly';
 
 /** 摩擦严重度。Phase A 采集层默认 'medium'，severity 推断留 Phase B。 */
 export type FrictionSeverity = 'low' | 'medium' | 'high';

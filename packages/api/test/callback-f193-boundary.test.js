@@ -20,6 +20,7 @@ function createMockSocketManager() {
   return {
     broadcastAgentMessage() {},
     broadcastToRoom() {},
+    emitToUser() {},
   };
 }
 
@@ -92,14 +93,17 @@ describe('F193 AC-A5: KD-1 boundary regression', () => {
   let invocationRecordStore;
   let mockRouter;
   let threadStore;
+  let invocationQueue;
 
   beforeEach(async () => {
     const { InvocationRegistry } = await import(
       '../dist/domains/cats/services/agents/invocation/InvocationRegistry.js'
     );
+    const { InvocationQueue } = await import('../dist/domains/cats/services/agents/invocation/InvocationQueue.js');
     const { MessageStore } = await import('../dist/domains/cats/services/stores/ports/MessageStore.js');
 
     registry = new InvocationRegistry();
+    invocationQueue = new InvocationQueue();
     messageStore = new MessageStore();
     socketManager = createMockSocketManager();
     invocationRecordStore = createMockInvocationRecordStore();
@@ -116,6 +120,8 @@ describe('F193 AC-A5: KD-1 boundary regression', () => {
       socketManager,
       router: mockRouter,
       invocationRecordStore,
+      invocationQueue,
+      queueProcessor: { async requestDrain() {} },
       threadStore,
     });
     return app;
@@ -170,17 +176,15 @@ describe('F193 AC-A5: KD-1 boundary regression', () => {
     });
 
     assert.equal(res.statusCode, 200, 'cross-post with line-start @opus must be accepted');
-    // Verify the cross-post created an InvocationRecord for opus in target thread
-    // (would be 0 if same-cat self-filter wrongly applied to cross-thread)
-    const records = invocationRecordStore.getRecords();
-    assert.ok(
-      records.length >= 1,
-      'cross-thread @opus must trigger target-thread opus session (self-filter exemption)',
-    );
-    const opusRecord = records.find((r) => r.targetCats?.includes('opus'));
-    assert.ok(
-      opusRecord,
-      'InvocationRecord for opus in target thread must exist; self-filter must NOT drop @opus on cross-thread',
+    // Canonical lifecycle admission is Queue-owned. The no-op drain deliberately
+    // leaves the entry at ingress, before an InvocationRecord is created.
+    const queued = invocationQueue.list(targetThread.id, 'user-1');
+    assert.equal(queued.length, 1, 'cross-thread @opus must admit one target-thread Queue entry');
+    assert.equal(queued[0]?.kind, 'message_wake');
+    assert.deepEqual(
+      queued[0]?.targetCats,
+      ['opus'],
+      'same-name self-filter must NOT drop @opus on a cross-thread wake',
     );
   });
 });

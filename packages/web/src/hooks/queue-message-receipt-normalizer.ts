@@ -19,6 +19,7 @@ const TARGET_STATES = new Set([
   'seen',
   'failed',
   'interrupted',
+  'cancelled',
   'steering',
   'withdrawn',
   'handled',
@@ -203,8 +204,18 @@ function normalizeTargetAttempt(value: unknown): QueueTargetAttempt | undefined 
     !isFiniteNumber(candidate.updatedAt) ||
     !isOptionalString(candidate.invocationId) ||
     !isOptionalNumber(candidate.seenAt) ||
+    !isOptionalNumber(candidate.activeAppendAcceptedAt) ||
     (candidate.terminalReason !== undefined &&
       (typeof candidate.terminalReason !== 'string' || !ATTEMPT_TERMINAL_REASONS.has(candidate.terminalReason)))
+  ) {
+    return undefined;
+  }
+  if (
+    candidate.activeAppendAcceptedAt !== undefined &&
+    (!isNonEmptyString(candidate.invocationId) ||
+      !isFiniteNumber(candidate.seenAt) ||
+      candidate.activeAppendAcceptedAt < candidate.seenAt ||
+      candidate.activeAppendAcceptedAt > candidate.updatedAt)
   ) {
     return undefined;
   }

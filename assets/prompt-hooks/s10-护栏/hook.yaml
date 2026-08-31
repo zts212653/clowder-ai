@@ -13,6 +13,11 @@ resolver: S10GuardrailsResolver
 inputs:
   - guardrails
 
+# Variable metadata (canonical source for Console editor)
+variables:
+  - name: PACK_GUARDRAILS_BLOCK
+    description: pack 护栏块
+    placeholder: ""
 # Override constraints
 disableable: false
 

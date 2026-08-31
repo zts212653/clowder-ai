@@ -70,4 +70,23 @@ describe('ChatMessage render isolation', () => {
 
     expect(getCatById).toHaveBeenCalledTimes(callsAfterInitialRender);
   });
+
+  it('keeps a delivered input routing warning attached to its History bubble', () => {
+    const message: ChatMessageData = {
+      id: 'message-with-routing-warning',
+      type: 'user',
+      content: '@missing-cat please inspect this',
+      timestamp: 1,
+      extra: {
+        routingWarnings: [{ kind: 'cat_not_found', mention: '@missing-cat', alternatives: [] }],
+      },
+    };
+
+    act(() => {
+      root.render(<ChatMessage message={message} threadId="thread-render" getCatById={() => undefined} />);
+    });
+
+    const warning = container.querySelector<HTMLElement>('[data-testid="routing-warning"]');
+    expect(warning?.textContent).toContain('@missing-cat 不存在');
+  });
 });

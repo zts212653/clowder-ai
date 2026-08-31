@@ -55,6 +55,7 @@ interface MessageAppender {
   markDelivered?(id: string, deliveredAt: number): unknown;
   /** #697: Scan for message IDs with a given deliveryStatus. */
   scanByDeliveryStatus?(status: string): string[] | Promise<string[]>;
+  scanByActiveQueueCustody?(): string[] | Promise<string[]>;
   getById?(id: string): unknown;
   initializeQueueCustody?(id: string, custody: unknown): unknown;
   transitionQueueCustody?(id: string, input: unknown): unknown;
@@ -325,9 +326,9 @@ export class StartupReconciler {
       if (messageStore) {
         try {
           const stored = await messageStore.append({
+            from: { kind: 'system', service: 'startup-reconciler' },
             threadId,
             userId,
-            catId: null,
             content,
             mentions: [],
             source: RECONCILER_SOURCE,
@@ -400,7 +401,7 @@ export class StartupReconciler {
     const { invocationQueue, messageStore } = this.deps;
     if (
       !invocationQueue ||
-      !messageStore?.scanByDeliveryStatus ||
+      (!messageStore?.scanByActiveQueueCustody && !messageStore?.scanByDeliveryStatus) ||
       !messageStore.getById ||
       !messageStore.initializeQueueCustody ||
       !messageStore.transitionQueueCustody

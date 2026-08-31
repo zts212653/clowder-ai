@@ -13,6 +13,14 @@ resolver: D7ModeResolver
 inputs:
   - mode
 
+# Variable metadata (canonical source for Console editor)
+variables:
+  - name: CHAIN_INDEX
+    description: 串行链中的当前猫序号
+    placeholder: ""
+  - name: CHAIN_TOTAL
+    description: 串行链中的猫总数
+    placeholder: ""
 # Override constraints
 disableable: true
 

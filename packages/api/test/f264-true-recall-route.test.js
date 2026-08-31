@@ -8,6 +8,11 @@ import { QueuedMessageCustodyCoordinator } from '../dist/domains/cats/services/a
 import { MessageStore } from '../dist/domains/cats/services/stores/ports/MessageStore.js';
 import { ThreadStore } from '../dist/domains/cats/services/stores/ports/ThreadStore.js';
 import { messageActionsRoutes } from '../dist/routes/message-actions.js';
+import {
+  adaptInvocationQueue,
+  canonicalTestMessageInput,
+  canonicalTestQueueInput,
+} from './helpers/message-from-fixtures.js';
 
 const THREAD_ID = 'thread-f264-gap-f-route';
 const OWNER_ID = 'owner-f264-gap-f';
@@ -36,10 +41,11 @@ function queueCustody(entryId, overrides = {}) {
 }
 
 function queueEntry(entryId, messages, overrides = {}) {
-  return {
+  return canonicalTestQueueInput({
     id: entryId,
     threadId: THREAD_ID,
     userId: OWNER_ID,
+    kind: 'conversation_input',
     ownerAuthProvenance: 'strict',
     content: messages.map((message) => message.content).join('\n\n'),
     messageId: messages[0]?.id ?? null,
@@ -53,28 +59,31 @@ function queueEntry(entryId, messages, overrides = {}) {
     autoExecute: false,
     priority: 'normal',
     ...overrides,
-  };
+  });
 }
 
 function appendQueued(messageStore, entryId, content, overrides = {}) {
-  return messageStore.append({
-    threadId: THREAD_ID,
-    userId: OWNER_ID,
-    catId: null,
-    content,
-    mentions: ['codex', 'fable5'],
-    timestamp: 1_000 + content.length,
-    deliveryStatus: 'queued',
-    queueCustody: queueCustody(entryId, overrides.custody),
-    ...overrides.message,
-  });
+  return messageStore.append(
+    canonicalTestMessageInput({
+      provenance: { author: 'user', routed: false, observation: 'original' },
+      threadId: THREAD_ID,
+      userId: OWNER_ID,
+      catId: null,
+      content,
+      mentions: ['codex', 'fable5'],
+      timestamp: 1_000 + content.length,
+      deliveryStatus: 'queued',
+      queueCustody: queueCustody(entryId, overrides.custody),
+      ...overrides.message,
+    }),
+  );
 }
 
 function createHarness(overrides = {}) {
   const messageStore = new MessageStore();
   const threadStore = new ThreadStore();
   threadStore.ensureThread(THREAD_ID, 'Gap F route test');
-  const invocationQueue = new InvocationQueue();
+  const invocationQueue = adaptInvocationQueue(new InvocationQueue());
   const queueCustodyCoordinator =
     overrides.queueCustodyCoordinatorFactory?.({ messageStore, invocationQueue }) ??
     new QueuedMessageCustodyCoordinator({ messageStore });

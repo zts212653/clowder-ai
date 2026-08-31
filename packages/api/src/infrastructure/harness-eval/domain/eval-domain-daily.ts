@@ -18,6 +18,11 @@ import type { TaskSpec_P1 } from '../../scheduler/types.js';
 import { buildEvalCatInvocation } from '../eval-cat-invocation.js';
 import { ensureEvalDomainThreads } from '../hub/eval-hub-thread-ensure.js';
 import { inventoryLegacyTasks, type LegacyScheduledTaskLike } from '../legacy-task-cleanup.js';
+import {
+  buildEvidencePrereqSkippedMessage,
+  type EvidencePrereqProbe,
+  evaluateEvidencePrereq,
+} from './eval-domain-evidence-gate.js';
 import { getEvalCatOverride } from './eval-domain-override.js';
 import {
   type EvalDomainRegistryEntry,
@@ -46,6 +51,11 @@ export interface EvalDomainScheduleOpts {
    * → legacy default (all known-wireable domains get publish instructions in invocation).
    */
   wiredPublishDomains?: ReadonlySet<EvalDomainRegistryEntry['domainId']>;
+  /**
+   * Pre-invocation evidence-source prerequisite probe. This runs before the
+   * publish prerequisite because evidence production is upstream of publishing.
+   */
+  evidencePrereqProbe?: EvidencePrereqProbe;
   /**
    * Direction B (clowder-ai#923 fix): pre-invocation prerequisite probe.
    *
@@ -199,6 +209,20 @@ function createEvalDomainSpec(config: EvalDomainSpecConfig): TaskSpec_P1<EvalDom
             ],
             config.defaultUserId,
           );
+        }
+
+        if (config.evidencePrereqProbe) {
+          const evidencePrereq = await evaluateEvidencePrereq(config.evidencePrereqProbe, domain);
+          if (!evidencePrereq.ok) {
+            if (ctx.deliver) {
+              await ctx.deliver({
+                threadId: domain.systemThreadId,
+                content: buildEvidencePrereqSkippedMessage(domain, evidencePrereq.reason),
+                userId: 'scheduler',
+              });
+            }
+            return;
+          }
         }
 
         // Direction B (clowder-ai#923 fix): publish-prereq gate.

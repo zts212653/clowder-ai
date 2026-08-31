@@ -168,7 +168,7 @@ function insertFreshnessClosureMessage(messages: ChatMessage[], msg: ChatMessage
  * dedup logic above). A global timestamp sort would touch F173 streaming/dedup
  * invariants and add O(n) per insert. Marker-gated insert avoids both.
  *
- * Why needed: a2a_handoff routing pill ("X → Y") emitted by route-serial.ts
+ * Why needed: a2a_handoff routing pill ("X ⇉ Y") emitted for parallel fan-out
  * arrives over WebSocket, can race against the next cat's stream bubble. If
  * the bubble arrives first (already appended), the handoff appended later
  * shows up visually after the bubble it was supposed to precede.
@@ -233,8 +233,6 @@ function snapshotActive(s: ChatState): ThreadState {
           s.messages.length > 0 ? getMessageTimelineOrderTime(s.messages[s.messages.length - 1]) : 0,
         ),
     queue: s.queue,
-    queuePaused: s.queuePaused,
-    queuePauseReason: s.queuePauseReason,
     queueFull: s.queueFull,
     queueFullSource: s.queueFullSource,
     workspaceWorktreeId: s.workspaceWorktreeId,
@@ -312,7 +310,6 @@ function buildQueueStoreUpdate(
     const patch: Partial<ThreadState> = {
       queue,
       messages,
-      queuePaused: queue.length === 0 ? false : state.queuePaused,
       ...(isShrinking ? { queueFull: false, queueFullSource: undefined } : {}),
     };
     return { ...patch, ...mirrorActiveToThreadStates(state, threadId, patch) };
@@ -326,7 +323,6 @@ function buildQueueStoreUpdate(
         ...nextThread,
         queue,
         messages,
-        queuePaused: queue.length === 0 ? false : nextThread.queuePaused,
         ...(isShrinking ? { queueFull: false, queueFullSource: undefined } : {}),
         lastActivity: Date.now(),
       },
@@ -369,8 +365,6 @@ function flattenThread(ts: ThreadState): Partial<ChatState> {
     catInvocations: ts.catInvocations,
     currentGame: ts.currentGame,
     queue: ts.queue,
-    queuePaused: ts.queuePaused,
-    queuePauseReason: ts.queuePauseReason,
     queueFull: ts.queueFull,
     queueFullSource: ts.queueFullSource,
     workspaceOpenTabs: ts.workspaceOpenTabs,
@@ -918,10 +912,6 @@ export interface ChatState {
   currentGame: GameState | null;
   /** F39: Message queue entries */
   queue: QueueEntry[];
-  /** F39: Whether the queue is paused */
-  queuePaused: boolean;
-  /** F39: Pause reason */
-  queuePauseReason?: 'canceled' | 'failed';
   /** F39: Queue full flag */
   queueFull: boolean;
   /** F39: Who triggered the full warning */
@@ -1144,6 +1134,8 @@ export interface ChatState {
 
   // ── Multi-thread actions (new) ──
   addMessageToThread: (threadId: string, msg: ChatMessage) => void;
+  /** Upsert a same-id durable lifecycle snapshot without manufacturing unread work. */
+  upsertLifecycleMessage: (threadId: string, msg: ChatMessage) => void;
   removeThreadMessage: (threadId: string, messageId: string) => void;
   replaceThreadMessageId: (threadId: string, fromId: string, toId: string) => void;
   patchThreadMessage: (threadId: string, messageId: string, patch: ChatMessagePatch) => void;
@@ -1219,7 +1211,6 @@ export interface ChatState {
 
   // ── F39: Queue actions ──
   setQueue: (threadId: string, queue: QueueEntry[], messageReceipts?: readonly QueueMessageReceiptProjection[]) => void;
-  setQueuePaused: (threadId: string, paused: boolean, reason?: 'canceled' | 'failed') => void;
   setQueueFull: (threadId: string, source: 'user' | 'connector') => void;
   /** Mark queued messages delivered, terminalize existing bubbles, and recover any missed live insert. */
   markMessagesDelivered: (
@@ -1228,7 +1219,9 @@ export interface ChatState {
     deliveredAt: number,
     messages?: Array<{
       id: string;
+      from?: import('@cat-cafe/shared').MessageFrom;
       content: string;
+      lifecycle?: import('@cat-cafe/shared').LifecycleStoredMessageMetadata;
       catId: string | null;
       timestamp: number;
       timelineOrderAt?: number;
@@ -1353,7 +1346,6 @@ export const useChatStore = create<ChatState>((set, get) => ({
   catInvocations: {},
   currentGame: null,
   queue: [],
-  queuePaused: false,
   queueFull: false,
 
   threadStates: {},
@@ -1418,25 +1410,6 @@ export const useChatStore = create<ChatState>((set, get) => ({
   setQueue: (threadId, queue, messageReceipts = []) =>
     set((state) => buildQueueStoreUpdate(state, threadId, queue, messageReceipts)),
 
-  setQueuePaused: (threadId, paused, reason) =>
-    set((state) => {
-      if (threadId === state.currentThreadId) {
-        return { queuePaused: paused, queuePauseReason: paused ? reason : undefined };
-      }
-      const existing = state.threadStates[threadId] ?? { ...DEFAULT_THREAD_STATE };
-      return {
-        threadStates: {
-          ...state.threadStates,
-          [threadId]: {
-            ...existing,
-            queuePaused: paused,
-            queuePauseReason: paused ? reason : undefined,
-            lastActivity: Date.now(),
-          },
-        },
-      };
-    }),
-
   setQueueFull: (threadId, source) =>
     set((state) => {
       if (threadId === state.currentThreadId) {
@@ -1472,6 +1445,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
             ...(serverMessage
               ? {
                   content: serverMessage.content,
+                  ...(serverMessage.from ? { from: serverMessage.from } : {}),
+                  ...(serverMessage.lifecycle ? { lifecycle: serverMessage.lifecycle } : {}),
                   timestamp: serverMessage.timestamp,
                   ...(serverMessage.contentBlocks
                     ? { contentBlocks: serverMessage.contentBlocks as ChatMessage['contentBlocks'] }
@@ -1505,9 +1480,21 @@ export const useChatStore = create<ChatState>((set, get) => ({
             if (existingIds.has(sm.id)) continue;
             const incoming: ChatMessage = {
               id: sm.id,
-              // #607: cat-originated messages (A2A triggers) have catId set
-              type: sm.catId ? 'assistant' : 'user',
+              type:
+                sm.from?.kind === 'agent'
+                  ? 'assistant'
+                  : sm.from?.kind === 'external' || sm.from?.kind === 'plugin'
+                    ? 'connector'
+                    : sm.from?.kind === 'system'
+                      ? 'system'
+                      : sm.from?.kind === 'user'
+                        ? 'user'
+                        : sm.catId
+                          ? 'assistant'
+                          : 'user',
+              ...(sm.from ? { from: sm.from } : {}),
               content: sm.content,
+              ...(sm.lifecycle ? { lifecycle: sm.lifecycle } : {}),
               timestamp: sm.timestamp,
               deliveredAt,
               ...(sm.timelineOrderAt !== undefined ? { timelineOrderAt: sm.timelineOrderAt } : {}),
@@ -2828,6 +2815,50 @@ export const useChatStore = create<ChatState>((set, get) => ({
             hasUserMention: existing.hasUserMention || !!msg.mentionsUser,
             lastActivity: isHistoricalFreshnessClosure ? existing.lastActivity : Date.now(),
           },
+        },
+      };
+    }),
+
+  upsertLifecycleMessage: (threadId, msg) =>
+    set((state) => {
+      const upsert = (messages: ChatMessage[]): ChatMessage[] => {
+        const existingIndex = messages.findIndex((candidate) => candidate.id === msg.id);
+        if (existingIndex === -1) return insertOrAppendMessage(messages, msg);
+        const existing = messages[existingIndex]!;
+        if (
+          existing.lifecycle?.kind === 'response' &&
+          existing.lifecycle.status !== 'processing' &&
+          msg.lifecycle?.kind === 'response' &&
+          msg.lifecycle.status === 'processing'
+        ) {
+          return messages;
+        }
+        const merged: ChatMessage = {
+          ...existing,
+          ...msg,
+          content:
+            msg.lifecycle?.kind === 'response' && msg.lifecycle.status === 'processing' && existing.content
+              ? existing.content
+              : msg.content,
+          extra: existing.extra || msg.extra ? { ...existing.extra, ...msg.extra } : undefined,
+        };
+        const next = [...messages];
+        next[existingIndex] = merged;
+        return next;
+      };
+
+      if (threadId === state.currentThreadId) {
+        const messages = upsert(state.messages);
+        if (messages === state.messages) return state;
+        return { messages, ...mirrorActiveToThreadStates(state, threadId, { messages }) };
+      }
+      const existing = state.threadStates[threadId] ?? { ...DEFAULT_THREAD_STATE };
+      const messages = upsert(existing.messages);
+      if (messages === existing.messages) return state;
+      return {
+        threadStates: {
+          ...state.threadStates,
+          [threadId]: { ...existing, messages },
         },
       };
     }),

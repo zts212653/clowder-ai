@@ -29,6 +29,7 @@ function compareRecords(left: StoredMessage, right: StoredMessage): number {
 }
 
 function isBrowserUserRecord(message: StoredMessage): boolean {
+  if (message.from) return message.from.kind === 'user';
   return message.catId === null && message.source === undefined && !isSystemUserMessage(message);
 }
 
@@ -38,9 +39,12 @@ function bubbleInvocationId(message: StoredMessage): string | null {
 }
 
 function assistantBaseKey(message: StoredMessage): string | null {
-  if (message.catId === null || isSystemUserMessage(message)) return null;
+  if (message.from ? message.from.kind !== 'agent' : message.catId === null || isSystemUserMessage(message)) {
+    return null;
+  }
   const invocationId = bubbleInvocationId(message);
-  return invocationId ? `${message.catId}::${invocationId}` : null;
+  const catId = message.from?.kind === 'agent' ? message.from.catId : message.catId;
+  return invocationId && catId ? `${catId}::${invocationId}` : null;
 }
 
 function buildTurnSegments(records: readonly StoredMessage[]): Map<StoredMessage, number> {

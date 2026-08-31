@@ -11,6 +11,7 @@
 
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
+import { canonicalTestMessageInput } from './helpers/message-from-fixtures.js';
 
 const { parseCursor, cursorFor } = await import('../dist/domains/cats/services/stores/cursor.js');
 
@@ -20,14 +21,17 @@ describe('#1200 v2 cursor in getByThreadAfter (§8.7 graded issuance)', () => {
     const store = new MessageStore();
     const threadId = `cursor-v2-test-${Date.now()}`;
 
-    store.append({
-      userId: 'u1',
-      catId: null,
-      content: 'hello',
-      mentions: [],
-      timestamp: Date.now(),
-      threadId,
-    });
+    store.append(
+      canonicalTestMessageInput({
+        provenance: { author: 'user', routed: false, observation: 'original' },
+        userId: 'u1',
+        catId: null,
+        content: 'hello',
+        mentions: [],
+        timestamp: Date.now(),
+        threadId,
+      }),
+    );
 
     const page = store.getByThreadAfter(threadId);
     assert.equal(page.length, 1);
@@ -43,22 +47,28 @@ describe('#1200 v2 cursor in getByThreadAfter (§8.7 graded issuance)', () => {
     const store = new MessageStore();
     const threadId = `cursor-v2-roundtrip-${Date.now()}`;
 
-    store.append({
-      userId: 'u1',
-      catId: null,
-      content: 'msg1',
-      mentions: [],
-      timestamp: Date.now() - 1000,
-      threadId,
-    });
-    store.append({
-      userId: 'u1',
-      catId: null,
-      content: 'msg2',
-      mentions: [],
-      timestamp: Date.now(),
-      threadId,
-    });
+    store.append(
+      canonicalTestMessageInput({
+        provenance: { author: 'user', routed: false, observation: 'original' },
+        userId: 'u1',
+        catId: null,
+        content: 'msg1',
+        mentions: [],
+        timestamp: Date.now() - 1000,
+        threadId,
+      }),
+    );
+    store.append(
+      canonicalTestMessageInput({
+        provenance: { author: 'user', routed: false, observation: 'original' },
+        userId: 'u1',
+        catId: null,
+        content: 'msg2',
+        mentions: [],
+        timestamp: Date.now(),
+        threadId,
+      }),
+    );
 
     const page1 = store.getByThreadAfter(threadId, undefined, 1);
     assert.equal(page1.length, 1);
@@ -76,22 +86,28 @@ describe('#1200 v2 cursor in getByThreadAfter (§8.7 graded issuance)', () => {
     const store = new MessageStore();
     const threadId = `cursor-v1-compat-${Date.now()}`;
 
-    const msg1 = store.append({
-      userId: 'u1',
-      catId: null,
-      content: 'first',
-      mentions: [],
-      timestamp: Date.now() - 1000,
-      threadId,
-    });
-    store.append({
-      userId: 'u1',
-      catId: null,
-      content: 'second',
-      mentions: [],
-      timestamp: Date.now(),
-      threadId,
-    });
+    const msg1 = store.append(
+      canonicalTestMessageInput({
+        provenance: { author: 'user', routed: false, observation: 'original' },
+        userId: 'u1',
+        catId: null,
+        content: 'first',
+        mentions: [],
+        timestamp: Date.now() - 1000,
+        threadId,
+      }),
+    );
+    store.append(
+      canonicalTestMessageInput({
+        provenance: { author: 'user', routed: false, observation: 'original' },
+        userId: 'u1',
+        catId: null,
+        content: 'second',
+        mentions: [],
+        timestamp: Date.now(),
+        threadId,
+      }),
+    );
 
     // Pass raw message ID (v1 cursor) — backward compat
     const page = store.getByThreadAfter(threadId, msg1.id);
@@ -106,16 +122,39 @@ describe('#1200 getLatestVisibleCursor (§8.7 read-state)', () => {
     const store = new MessageStore();
     const threadId = `latest-vis-cursor-${Date.now()}`;
 
-    store.append({ userId: 'u1', catId: null, content: 'first', mentions: [], timestamp: Date.now() - 2000, threadId });
-    store.append({
-      userId: 'u1',
-      catId: null,
-      content: 'second',
-      mentions: [],
-      timestamp: Date.now() - 1000,
-      threadId,
-    });
-    store.append({ userId: 'u1', catId: null, content: 'third', mentions: [], timestamp: Date.now(), threadId });
+    store.append(
+      canonicalTestMessageInput({
+        provenance: { author: 'user', routed: false, observation: 'original' },
+        userId: 'u1',
+        catId: null,
+        content: 'first',
+        mentions: [],
+        timestamp: Date.now() - 2000,
+        threadId,
+      }),
+    );
+    store.append(
+      canonicalTestMessageInput({
+        provenance: { author: 'user', routed: false, observation: 'original' },
+        userId: 'u1',
+        catId: null,
+        content: 'second',
+        mentions: [],
+        timestamp: Date.now() - 1000,
+        threadId,
+      }),
+    );
+    store.append(
+      canonicalTestMessageInput({
+        provenance: { author: 'user', routed: false, observation: 'original' },
+        userId: 'u1',
+        catId: null,
+        content: 'third',
+        mentions: [],
+        timestamp: Date.now(),
+        threadId,
+      }),
+    );
 
     const result = store.getLatestVisibleCursor(threadId);
     assert.ok(result, 'Should return a cursor');
@@ -132,26 +171,32 @@ describe('#1200 getLatestVisibleCursor (§8.7 read-state)', () => {
     const store = new MessageStore();
     const threadId = `latest-skip-queued-${Date.now()}`;
 
-    store.append({
-      userId: 'u1',
-      catId: null,
-      content: 'direct',
-      mentions: [],
-      timestamp: Date.now() - 1000,
-      threadId,
-    });
+    store.append(
+      canonicalTestMessageInput({
+        provenance: { author: 'user', routed: false, observation: 'original' },
+        userId: 'u1',
+        catId: null,
+        content: 'direct',
+        mentions: [],
+        timestamp: Date.now() - 1000,
+        threadId,
+      }),
+    );
     // #1269: hidden queued work (non-cat-speech) is not timeline-published,
     // so it has no visibilitySeq and is not returned by getLatestVisibleCursor.
     // Timeline-published cat speech (catId: 'opus') WOULD be visible at append.
-    store.append({
-      userId: 'scheduler',
-      catId: 'system',
-      content: 'queued-hidden',
-      mentions: [],
-      timestamp: Date.now(),
-      threadId,
-      deliveryStatus: 'queued',
-    });
+    store.append(
+      canonicalTestMessageInput({
+        provenance: { author: 'system', routed: false, observation: 'original' },
+        userId: 'scheduler',
+        catId: 'system',
+        content: 'queued-hidden',
+        mentions: [],
+        timestamp: Date.now(),
+        threadId,
+        deliveryStatus: 'queued',
+      }),
+    );
 
     const result = store.getLatestVisibleCursor(threadId);
     assert.ok(result, 'Should return a cursor');
@@ -174,23 +219,29 @@ describe('#1200 getLatestVisibleCursor (§8.7 read-state)', () => {
     const threadId = `latest-late-deliver-${Date.now()}`;
     const baseTs = Date.now() - 10000;
 
-    const c = store.append({
-      userId: 'u1',
-      catId: null,
-      content: 'C-direct',
-      mentions: [],
-      timestamp: baseTs + 100,
-      threadId,
-    });
-    const q = store.append({
-      userId: 'u1',
-      catId: 'opus',
-      content: 'Q-queued',
-      mentions: [],
-      timestamp: baseTs + 50,
-      threadId,
-      deliveryStatus: 'queued',
-    });
+    const c = store.append(
+      canonicalTestMessageInput({
+        provenance: { author: 'user', routed: false, observation: 'original' },
+        userId: 'u1',
+        catId: null,
+        content: 'C-direct',
+        mentions: [],
+        timestamp: baseTs + 100,
+        threadId,
+      }),
+    );
+    const q = store.append(
+      canonicalTestMessageInput({
+        provenance: { author: 'cat', routed: false, observation: 'original' },
+        userId: 'u1',
+        catId: 'opus',
+        content: 'Q-queued',
+        mentions: [],
+        timestamp: baseTs + 50,
+        threadId,
+        deliveryStatus: 'queued',
+      }),
+    );
     store.markDelivered(q.id, baseTs + 200);
 
     const result = store.getLatestVisibleCursor(threadId);
@@ -207,14 +258,17 @@ describe('#1200 canonicalizeCursor (§8.7 CAS ingress)', () => {
     const store = new MessageStore();
     const threadId = `canon-delivered-${Date.now()}`;
 
-    const m = store.append({
-      userId: 'u1',
-      catId: null,
-      content: 'direct',
-      mentions: [],
-      timestamp: Date.now(),
-      threadId,
-    });
+    const m = store.append(
+      canonicalTestMessageInput({
+        provenance: { author: 'user', routed: false, observation: 'original' },
+        userId: 'u1',
+        catId: null,
+        content: 'direct',
+        mentions: [],
+        timestamp: Date.now(),
+        threadId,
+      }),
+    );
 
     const cursor = store.canonicalizeCursor(m.id, threadId);
     assert.ok(cursor.startsWith('v2:'), `Expected v2 cursor, got "${cursor}"`);
@@ -232,15 +286,18 @@ describe('#1200 canonicalizeCursor (§8.7 CAS ingress)', () => {
 
     // #1269: hidden queued work (non-cat-speech) has no visibilitySeq → raw ID fallback.
     // Timeline-published cat speech (catId: 'opus') would get v2 at append.
-    const q = store.append({
-      userId: 'scheduler',
-      catId: 'system',
-      content: 'queued-hidden',
-      mentions: [],
-      timestamp: Date.now(),
-      threadId,
-      deliveryStatus: 'queued',
-    });
+    const q = store.append(
+      canonicalTestMessageInput({
+        provenance: { author: 'system', routed: false, observation: 'original' },
+        userId: 'scheduler',
+        catId: 'system',
+        content: 'queued-hidden',
+        mentions: [],
+        timestamp: Date.now(),
+        threadId,
+        deliveryStatus: 'queued',
+      }),
+    );
 
     // Hidden queued message has no visibility position → falls back to raw ID
     const cursor = store.canonicalizeCursor(q.id, threadId);
@@ -252,15 +309,18 @@ describe('#1200 canonicalizeCursor (§8.7 CAS ingress)', () => {
     const store = new MessageStore();
     const threadId = `canon-late-${Date.now()}`;
 
-    const q = store.append({
-      userId: 'u1',
-      catId: 'opus',
-      content: 'late-Q',
-      mentions: [],
-      timestamp: Date.now() - 1000,
-      threadId,
-      deliveryStatus: 'queued',
-    });
+    const q = store.append(
+      canonicalTestMessageInput({
+        provenance: { author: 'cat', routed: false, observation: 'original' },
+        userId: 'u1',
+        catId: 'opus',
+        content: 'late-Q',
+        mentions: [],
+        timestamp: Date.now() - 1000,
+        threadId,
+        deliveryStatus: 'queued',
+      }),
+    );
     store.markDelivered(q.id, Date.now());
 
     const cursor = store.canonicalizeCursor(q.id, threadId);
@@ -282,14 +342,17 @@ describe('#1200 canonicalizeCursor (§8.7 CAS ingress)', () => {
     const threadA = `canon-xthread-a-${Date.now()}`;
     const threadB = `canon-xthread-b-${Date.now()}`;
 
-    const m = store.append({
-      userId: 'u1',
-      catId: null,
-      content: 'in-thread-A',
-      mentions: [],
-      timestamp: Date.now(),
-      threadId: threadA,
-    });
+    const m = store.append(
+      canonicalTestMessageInput({
+        provenance: { author: 'user', routed: false, observation: 'original' },
+        userId: 'u1',
+        catId: null,
+        content: 'in-thread-A',
+        mentions: [],
+        timestamp: Date.now(),
+        threadId: threadA,
+      }),
+    );
 
     // Canonicalize with correct thread → v2
     const correct = store.canonicalizeCursor(m.id, threadA);
@@ -305,14 +368,17 @@ describe('#1200 canonicalizeCursor (§8.7 CAS ingress)', () => {
     const store = new MessageStore();
     const threadId = `canon-lex-${Date.now()}`;
 
-    const m = store.append({
-      userId: 'u1',
-      catId: null,
-      content: 'test',
-      mentions: [],
-      timestamp: Date.now(),
-      threadId,
-    });
+    const m = store.append(
+      canonicalTestMessageInput({
+        provenance: { author: 'user', routed: false, observation: 'original' },
+        userId: 'u1',
+        catId: null,
+        content: 'test',
+        mentions: [],
+        timestamp: Date.now(),
+        threadId,
+      }),
+    );
 
     const v2Cursor = store.canonicalizeCursor(m.id, threadId);
     const v1Cursor = m.id;

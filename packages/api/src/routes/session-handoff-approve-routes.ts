@@ -115,11 +115,12 @@ export const sessionHandoffApproveRoutes: FastifyPluginAsync<SessionHandoffAppro
       },
       enqueueContinuation: async (input) => {
         const enq = invocationQueue.enqueue({
+          from: { kind: 'agent', catId: input.catId },
           threadId: input.threadId,
           userId,
+          kind: 'private_input',
           ownerAuthProvenance,
           content: HANDOFF_CONTINUATION_PROMPT,
-          source: 'agent',
           sourceCategory: 'continuation',
           targetCats: [input.catId],
           intent: 'session_handoff_continuation',

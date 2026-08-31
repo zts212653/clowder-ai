@@ -18,7 +18,8 @@ export const SYSTEM_USER_IDS: ReadonlySet<string> = new Set(['scheduler', 'syste
  * Historical writes use `catId: 'system'`; newer display-only badges (for example
  * persisted ACP errors) use `catId: null`. Both must bypass per-user filtering.
  */
-export function isSystemUserMessage(msg: Pick<StoredMessage, 'userId' | 'catId'>): boolean {
+export function isSystemUserMessage(msg: Pick<StoredMessage, 'from' | 'userId' | 'catId'>): boolean {
+  if (msg.from) return msg.from.kind === 'system';
   return SYSTEM_USER_IDS.has(msg.userId) && (msg.catId === 'system' || msg.catId === null);
 }
 
@@ -40,12 +41,13 @@ export function isTimelinePublished(msg: StoredMessage): boolean {
  */
 type ManagedHoldConnectorVisibilityMessage = Pick<
   StoredMessage,
-  'userId' | 'catId' | 'threadId' | 'source' | 'extra' | 'queueCustody'
+  'from' | 'userId' | 'catId' | 'threadId' | 'source' | 'extra' | 'queueCustody'
 >;
 
 /** Classify the protected scheduler namespace before evaluating publication authority. */
 export function isManagedHoldConnectorMessage(msg: ManagedHoldConnectorVisibilityMessage): boolean {
-  return msg.userId === 'scheduler' && msg.catId === null && msg.source?.connector === 'hold-ball';
+  const systemAuthored = msg.from ? msg.from.kind === 'system' : msg.userId === 'scheduler' && msg.catId === null;
+  return systemAuthored && msg.source?.connector === 'hold-ball';
 }
 
 export function isOwnerVisibleManagedHoldConnector(
@@ -102,7 +104,7 @@ export function isDurableOwnerReadEvidence(msg: StoredMessage): boolean {
 export function hasDurableQueueBodyExposure(msg: StoredMessage, catId: CatId): boolean {
   return (
     msg.deliveryStatus === 'queued' &&
-    msg.catId === null &&
+    (msg.from ? msg.from.kind !== 'agent' : msg.catId === null) &&
     (msg.queueCustody?.bodyExposures ?? []).some((exposure) => exposure.targetCatId === catId)
   );
 }
@@ -157,6 +159,7 @@ function isDeliveredMessage(message: StoredMessage): boolean {
 }
 
 function isRealCatSpeech(message: StoredMessage): boolean {
+  if (message.from) return message.from.kind === 'agent' && message.origin !== 'briefing';
   return (
     message.catId !== null &&
     message.catId !== 'system' &&
@@ -178,10 +181,8 @@ function isQueuedCatTimelineMessage(message: StoredMessage): boolean {
 function isQueuedUserTimelineMessage(message: StoredMessage): boolean {
   if (
     message.deliveryStatus !== 'queued' ||
-    message.catId !== null ||
-    message.source !== undefined ||
-    message.userId === 'system' ||
-    message.userId === 'scheduler' ||
+    (message.from ? message.from.kind !== 'user' : message.catId !== null || message.source !== undefined) ||
+    (!message.from && (message.userId === 'system' || message.userId === 'scheduler')) ||
     message.origin === 'briefing'
   ) {
     return false;
@@ -192,7 +193,7 @@ function isQueuedUserTimelineMessage(message: StoredMessage): boolean {
 function isOwnerVisibleRecalledUserMessage(message: StoredMessage): boolean {
   return (
     message.deliveryStatus === 'canceled' &&
-    message.catId === null &&
+    (message.from ? message.from.kind === 'user' : message.catId === null) &&
     message._tombstone === true &&
     message.recall?.exposure === 'seen'
   );

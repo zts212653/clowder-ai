@@ -5,6 +5,7 @@ import { createPawFeelDutyTaskSpec } from '../../dist/infrastructure/harness-eva
 import { PawFeelDispositionReadModel } from '../../dist/infrastructure/harness-eval/paw-feel-disposition/read-model.js';
 import { PawFeelDispositionReconciler } from '../../dist/infrastructure/harness-eval/paw-feel-disposition/reconciler.js';
 import { PawFeelDispositionService } from '../../dist/infrastructure/harness-eval/paw-feel-disposition/service.js';
+import { canonicalTestMessageInput } from '../helpers/message-from-fixtures.js';
 
 const DAY = 86_400_000;
 const MINUTE = 60_000;
@@ -120,14 +121,17 @@ function appendSevenDayCorpus(messageStore) {
   const span = 7 * DAY - 6 * MINUTE;
   for (let index = SIGNAL_COUNT - 1; index >= 0; index -= 1) {
     const ageMs = 5 * MINUTE + Math.floor((index * span) / (SIGNAL_COUNT - 1));
-    messageStore.append({
-      userId: 'user-1',
-      catId: 'codex-sol',
-      threadId: `thread-${index % 8}`,
-      content: `[爪感差: tool-${index % 12}+capacity-signal-${index}]`,
-      mentions: [],
-      timestamp: NOW_MS - ageMs,
-    });
+    messageStore.append(
+      canonicalTestMessageInput({
+        provenance: { author: 'cat', routed: false, observation: 'original' },
+        userId: 'user-1',
+        catId: 'codex-sol',
+        threadId: `thread-${index % 8}`,
+        content: `[爪感差: tool-${index % 12}+capacity-signal-${index}]`,
+        mentions: [],
+        timestamp: NOW_MS - ageMs,
+      }),
+    );
   }
 }
 

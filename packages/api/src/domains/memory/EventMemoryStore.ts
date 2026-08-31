@@ -11,7 +11,7 @@
  * (enum | null) is stored verbatim.
  */
 
-import { appendFileSync, existsSync, readFileSync } from 'node:fs';
+import { appendFileSync, existsSync, readFileSync, writeFileSync } from 'node:fs';
 import type {
   CognitiveTransition,
   EventConfidence,
@@ -61,6 +61,10 @@ export interface IEventMemoryStore {
   listEvents(filter?: EventMemoryFilter): StoredEventMemory[];
   /** Teleport reverse lookup: events at a (threadId, messageId) coordinate, owner-scoped when provided. */
   getByCoord(threadId: string, messageId: string, ownerUserId?: string): StoredEventMemory[];
+  /** Hard-delete privacy boundary: remove every event/excerpt at this message coordinate. */
+  deleteByCoord(threadId: string, messageId: string): number;
+  /** Physical thread deletion: remove every event/excerpt belonging to the thread. */
+  deleteByThread(threadId: string): number;
   /** P1-3 (砚砚): persist a failed write + its owner scope for replay so events are not lost (最终不丢). */
   appendDeadLetter(record: EventMemoryRecord, ownerUserId: string, errorMessage: string): void;
   /** Read dead-lettered entries (replay / inspection). */
@@ -118,6 +122,17 @@ export class EventMemoryStore implements IEventMemoryStore {
       CREATE INDEX IF NOT EXISTS idx_event_trigger ON event_memory(trigger_type);
       CREATE INDEX IF NOT EXISTS idx_event_timestamp ON event_memory(timestamp);
       CREATE INDEX IF NOT EXISTS idx_event_confidence ON event_memory(confidence);
+
+      CREATE TABLE IF NOT EXISTS event_memory_deleted_coords (
+        threadId TEXT NOT NULL,
+        messageId TEXT NOT NULL,
+        deletedAt INTEGER NOT NULL,
+        PRIMARY KEY (threadId, messageId)
+      );
+      CREATE TABLE IF NOT EXISTS event_memory_deleted_threads (
+        threadId TEXT PRIMARY KEY,
+        deletedAt INTEGER NOT NULL
+      );
     `);
     // F227 (cloud-review P1): owner scope. A legacy table (pre-owner) lacks the column —
     // add it so initialize() upgrades in place. Existing un-owned rows get '' and stay
@@ -149,6 +164,21 @@ export class EventMemoryStore implements IEventMemoryStore {
     return this.db;
   }
 
+  private assertWritable(db: InstanceType<typeof Database>, threadId: string, messageId: string): void {
+    const deletedThread = db
+      .prepare('SELECT 1 FROM event_memory_deleted_threads WHERE threadId = ? LIMIT 1')
+      .get(threadId);
+    if (deletedThread) {
+      throw new Error(`EventMemoryStore: deleted thread write rejected (${threadId})`);
+    }
+    const deletedCoordinate = db
+      .prepare('SELECT 1 FROM event_memory_deleted_coords WHERE threadId = ? AND messageId = ? LIMIT 1')
+      .get(threadId, messageId);
+    if (deletedCoordinate) {
+      throw new Error(`EventMemoryStore: deleted coordinate write rejected (${threadId}/${messageId})`);
+    }
+  }
+
   markEvent(record: EventMemoryRecord, ownerUserId: string): MarkEventResult {
     // 砚砚 (non-blocking): validate untrusted payloads (backfill / tool writers)
     // with the shared guard before they hit SQLite.
@@ -161,65 +191,69 @@ export class EventMemoryStore implements IEventMemoryStore {
       throw new Error('EventMemoryStore.markEvent: ownerUserId is required (no fallback)');
     }
     const db = this.ensureOpen();
-    const eventId = generateEventId();
-    // INSERT OR IGNORE against UNIQUE(ownerUserId, threadId, messageId, type): atomically
-    // idempotent, so concurrent backfill / live writes on the same coordinate can't
-    // double-write.
-    const info = db
-      .prepare(
-        `INSERT OR IGNORE INTO event_memory
+    return db.transaction((): MarkEventResult => {
+      this.assertWritable(db, record.threadId, record.messageId);
+      const eventId = generateEventId();
+      // INSERT OR IGNORE against UNIQUE(ownerUserId, threadId, messageId, type): atomically
+      // idempotent, so concurrent backfill / live writes on the same coordinate can't
+      // double-write. The delete-fence check is in this SAME transaction: a writer holding
+      // a stale Redis snapshot cannot recreate private text after deletion linearizes.
+      const info = db
+        .prepare(
+          `INSERT OR IGNORE INTO event_memory
           (eventId, type, trigger_type, cat, ownerUserId, threadId, messageId, timestamp, summary, cognitiveTransition, relatedHarness, confidence)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      )
-      .run(
-        eventId,
-        record.type,
-        record.trigger,
-        record.cat,
-        ownerUserId,
-        record.threadId,
-        record.messageId,
-        record.timestamp,
-        record.summary,
-        record.cognitiveTransition,
-        record.relatedHarness === null ? null : JSON.stringify(record.relatedHarness),
-        record.confidence,
-      );
-    if (info.changes === 1) {
-      return { event: { eventId, ownerUserId, ...record }, inserted: true };
-    }
-    // Duplicate (ownerUserId, threadId, messageId, type) already present — no new row.
-    // Race resolution (cloud-review P2): if THIS writer has STRICTLY higher confidence than
-    // the existing row, upgrade its confidence + metadata. So a real live brake (high) is
-    // never left at a backfill grade (mid/low) just because backfill won the insert race;
-    // lower/equal confidence leaves the existing row untouched (idempotent).
-    db.prepare(
-      `UPDATE event_memory
+        )
+        .run(
+          eventId,
+          record.type,
+          record.trigger,
+          record.cat,
+          ownerUserId,
+          record.threadId,
+          record.messageId,
+          record.timestamp,
+          record.summary,
+          record.cognitiveTransition,
+          record.relatedHarness === null ? null : JSON.stringify(record.relatedHarness),
+          record.confidence,
+        );
+      if (info.changes === 1) {
+        return { event: { eventId, ownerUserId, ...record }, inserted: true };
+      }
+      // Duplicate (ownerUserId, threadId, messageId, type) already present — no new row.
+      // Race resolution (cloud-review P2): if THIS writer has STRICTLY higher confidence than
+      // the existing row, upgrade its confidence + metadata. So a real live brake (high) is
+      // never left at a backfill grade (mid/low) just because backfill won the insert race;
+      // lower/equal confidence leaves the existing row untouched (idempotent).
+      db.prepare(
+        `UPDATE event_memory
           SET confidence = ?, trigger_type = ?, cat = ?, summary = ?, cognitiveTransition = ?, relatedHarness = ?
         WHERE ownerUserId = ? AND threadId = ? AND messageId = ? AND type = ?
           AND (CASE ? WHEN 'high' THEN 3 WHEN 'mid' THEN 2 ELSE 1 END)
             > (CASE confidence WHEN 'high' THEN 3 WHEN 'mid' THEN 2 ELSE 1 END)`,
-    ).run(
-      record.confidence,
-      record.trigger,
-      record.cat,
-      record.summary,
-      record.cognitiveTransition,
-      record.relatedHarness === null ? null : JSON.stringify(record.relatedHarness),
-      ownerUserId,
-      record.threadId,
-      record.messageId,
-      record.type,
-      record.confidence,
-    );
-    // Return the existing (possibly just-upgraded) event so the live path still resolves a
-    // real eventId (砚砚); no duplicate row is ever written.
-    const existing = db
-      .prepare(
-        'SELECT * FROM event_memory WHERE ownerUserId = ? AND threadId = ? AND messageId = ? AND type = ? LIMIT 1',
-      )
-      .get(ownerUserId, record.threadId, record.messageId, record.type) as Record<string, unknown> | undefined;
-    return { event: existing ? this.rowToEvent(existing) : { eventId, ownerUserId, ...record }, inserted: false };
+      ).run(
+        record.confidence,
+        record.trigger,
+        record.cat,
+        record.summary,
+        record.cognitiveTransition,
+        record.relatedHarness === null ? null : JSON.stringify(record.relatedHarness),
+        ownerUserId,
+        record.threadId,
+        record.messageId,
+        record.type,
+        record.confidence,
+      );
+      // Return the existing (possibly just-upgraded) event so the live path still resolves a
+      // real eventId (砚砚); no duplicate row is ever written.
+      const existing = db
+        .prepare(
+          'SELECT * FROM event_memory WHERE ownerUserId = ? AND threadId = ? AND messageId = ? AND type = ? LIMIT 1',
+        )
+        .get(ownerUserId, record.threadId, record.messageId, record.type) as Record<string, unknown> | undefined;
+      return { event: existing ? this.rowToEvent(existing) : { eventId, ownerUserId, ...record }, inserted: false };
+    })();
   }
 
   getEvent(eventId: string): StoredEventMemory | null {
@@ -277,6 +311,63 @@ export class EventMemoryStore implements IEventMemoryStore {
     return rows.map((r) => this.rowToEvent(r));
   }
 
+  deleteByCoord(threadId: string, messageId: string): number {
+    const db = this.ensureOpen();
+    return db.transaction(() => {
+      db.prepare(
+        `INSERT INTO event_memory_deleted_coords (threadId, messageId, deletedAt)
+         VALUES (?, ?, ?)
+         ON CONFLICT(threadId, messageId) DO NOTHING`,
+      ).run(threadId, messageId, Date.now());
+      const result = db
+        .prepare('DELETE FROM event_memory WHERE threadId = ? AND messageId = ?')
+        .run(threadId, messageId);
+      return (
+        result.changes + this.deleteDeadLetters((entry) => entry.threadId === threadId && entry.messageId === messageId)
+      );
+    })();
+  }
+
+  deleteByThread(threadId: string): number {
+    const db = this.ensureOpen();
+    return db.transaction(() => {
+      db.prepare(
+        `INSERT INTO event_memory_deleted_threads (threadId, deletedAt)
+         VALUES (?, ?)
+         ON CONFLICT(threadId) DO NOTHING`,
+      ).run(threadId, Date.now());
+      db.prepare('DELETE FROM event_memory_deleted_coords WHERE threadId = ?').run(threadId);
+      const result = db.prepare('DELETE FROM event_memory WHERE threadId = ?').run(threadId);
+      return result.changes + this.deleteDeadLetters((entry) => entry.threadId === threadId);
+    })();
+  }
+
+  private deleteDeadLetters(matches: (record: EventMemoryRecord) => boolean): number {
+    const lines = this.deadLetterPath
+      ? existsSync(this.deadLetterPath)
+        ? readFileSync(this.deadLetterPath, 'utf8').split('\n').filter(Boolean)
+        : []
+      : [...this.inMemoryDeadLetter];
+    const retained: string[] = [];
+    let removed = 0;
+    for (const line of lines) {
+      const entry = JSON.parse(line) as DeadLetterEntry;
+      if (matches(entry.record)) {
+        removed += 1;
+      } else {
+        retained.push(line);
+      }
+    }
+    if (this.deadLetterPath) {
+      if (existsSync(this.deadLetterPath)) {
+        writeFileSync(this.deadLetterPath, retained.length > 0 ? `${retained.join('\n')}\n` : '', 'utf8');
+      }
+    } else {
+      this.inMemoryDeadLetter.splice(0, this.inMemoryDeadLetter.length, ...retained);
+    }
+    return removed;
+  }
+
   health(): boolean {
     try {
       this.ensureOpen().prepare('SELECT 1').get();
@@ -287,12 +378,22 @@ export class EventMemoryStore implements IEventMemoryStore {
   }
 
   appendDeadLetter(record: EventMemoryRecord, ownerUserId: string, errorMessage: string): void {
-    const line = `${JSON.stringify({ record, ownerUserId, error: errorMessage, failedAt: Date.now() })}\n`;
-    if (this.deadLetterPath) {
-      appendFileSync(this.deadLetterPath, line);
-    } else {
-      this.inMemoryDeadLetter.push(line);
+    if (!isEventMemoryRecord(record)) {
+      throw new Error('EventMemoryStore.appendDeadLetter: record failed isEventMemoryRecord guard');
     }
+    if (!isValidOwnerUserId(ownerUserId)) {
+      throw new Error('EventMemoryStore.appendDeadLetter: ownerUserId is required (no fallback)');
+    }
+    const db = this.ensureOpen();
+    db.transaction(() => {
+      this.assertWritable(db, record.threadId, record.messageId);
+      const line = `${JSON.stringify({ record, ownerUserId, error: errorMessage, failedAt: Date.now() })}\n`;
+      if (this.deadLetterPath) {
+        appendFileSync(this.deadLetterPath, line);
+      } else {
+        this.inMemoryDeadLetter.push(line);
+      }
+    })();
   }
 
   listDeadLetter(): DeadLetterEntry[] {

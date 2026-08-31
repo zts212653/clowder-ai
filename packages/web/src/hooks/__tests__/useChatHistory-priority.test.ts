@@ -55,7 +55,6 @@ describe('useChatHistory request priority', () => {
       threads: [],
       isLoadingThreads: false,
       queue: [],
-      queuePaused: false,
     });
   });
 

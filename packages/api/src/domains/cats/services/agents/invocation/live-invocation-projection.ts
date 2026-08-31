@@ -11,9 +11,11 @@
  * 从 `routes/queue.ts` 原样迁移的既有兼容逻辑，不是本 PR 新增的代偿层。
  */
 
+import type { LifecycleActiveRun } from '@cat-cafe/shared';
 import type { IDraftStore } from '../../stores/ports/DraftStore.js';
 import type { IInvocationRecordStore } from '../../stores/ports/InvocationRecordStore.js';
 import type { ITurnExecutionStore } from '../../stores/ports/TurnExecutionStore.js';
+import type { AgentClientActiveRunDispatcher } from '../../types.js';
 import type { CodexAppServerLifecycleSnapshot } from '../providers/CodexAppServerLifecycle.js';
 import { getCodexAppServerLifecycle } from '../providers/CodexAppServerLifecycleRegistry.js';
 import { getThreadLiveInvocations } from './getThreadLiveInvocations.js';
@@ -30,7 +32,9 @@ export interface InvocationTrackerLike {
     abortReason?: string,
   ): { cancelled: boolean; catIds: string[]; executionIds?: string[] };
   /** Issue #83: Get all active slots for a thread (F5 refresh recovery) */
-  getActiveSlots(threadId: string): Array<{ catId: string; startedAt: number }>;
+  getActiveSlots(threadId: string): Array<{ catId: string; startedAt: number; activeRun?: LifecycleActiveRun }>;
+  /** Exact live provider seam; absence means explicit Append is unsupported now. */
+  getAgentClientActiveRunDispatcher?(threadId: string, catId: string): AgentClientActiveRunDispatcher | undefined;
   /** 稀疏候选索引：本进程持有 slot 的 thread。 */
   listActiveThreadIds?(): string[];
   /** F-invocation-stale-recovery: Cancel ALL active slots for a thread (abort controllers + delete slots). */
@@ -67,6 +71,7 @@ export interface ActiveInvocationProjection {
   turnInvocationId?: string;
   appServerLifecycle?: CodexAppServerLifecycleSnapshot;
   freshnessCarrierCapability?: import('@cat-cafe/shared').FreshnessCarrierCapability;
+  activeRun?: LifecycleActiveRun;
 }
 
 export interface LifecycleProjectionCandidate {
@@ -74,6 +79,7 @@ export interface LifecycleProjectionCandidate {
   startedAt: number;
   lifecycleOwnerId?: string;
   turnInvocationId?: string;
+  activeRun?: LifecycleActiveRun;
 }
 
 export function getRequestOwnedTrackerExecutionId(
@@ -150,6 +156,12 @@ export async function resolveActiveInvocationsStrict(
     return projectActiveInvocations(threadId, trackerProjectionCandidates(threadId, userId, invocationTracker));
   }
   {
+    const trackerActiveRunByCatId = new Map(
+      invocationTracker
+        .getActiveSlots(threadId)
+        .filter((slot): slot is typeof slot & { activeRun: LifecycleActiveRun } => Boolean(slot.activeRun))
+        .map((slot) => [slot.catId, slot.activeRun]),
+    );
     const result = await getThreadLiveInvocations(threadId, userId, {
       listRunningRecords: (tid, uid) => recordStore.listRunningByThread(tid, uid),
       getActiveSlots: (tid) => invocationTracker.getActiveSlots(tid),
@@ -201,11 +213,17 @@ export async function resolveActiveInvocationsStrict(
         const lifecycleOwnerId = resolveLifecycleOwnerId(threadId, userId, s.catId, s.executionId, invocationTracker);
         const turnInvocationId =
           s.invocationId !== s.executionId && lifecycleOwnerId === s.executionId ? s.invocationId : undefined;
+        const activeRun = trackerActiveRunByCatId.get(s.catId);
+        const exactActiveRun =
+          activeRun && (activeRun.invocationId === s.invocationId || activeRun.invocationId === turnInvocationId)
+            ? activeRun
+            : undefined;
         byCatId.set(s.catId, {
           catId: s.catId,
           startedAt: s.startedAt,
           lifecycleOwnerId,
           ...(turnInvocationId ? { turnInvocationId } : {}),
+          ...(exactActiveRun ? { activeRun: exactActiveRun } : {}),
         });
       }
     }

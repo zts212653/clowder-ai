@@ -95,7 +95,7 @@ describe('F292 private-thread artifact handoff', () => {
 
     assert.equal(enqueued.length, 1);
     assert.deepEqual(enqueued[0].targetCats, ['codex-sol']);
-    assert.equal(enqueued[0].source, 'connector');
+    assert.deepEqual(enqueued[0].from, { kind: 'user', userId: 'owner-1' });
     assert.deepEqual(appended[0].source, {
       connector: 'feishu',
       label: '飞书会议入站 / 录音豆',
@@ -210,7 +210,7 @@ describe('F292 private-thread artifact handoff', () => {
         getByIdempotencyKey: async (userId, _threadId, key) => {
           if (userId === 'owner-1' && key === `meeting-artifact:intake-1:${artifact.sourceRevision}`)
             return sourceMessage;
-          if (userId === 'scheduler') return appended.find((message) => message.idempotencyKey === key) ?? null;
+          if (userId === 'owner-1') return appended.find((message) => message.idempotencyKey === key) ?? null;
           return null;
         },
         append: async (input) => {
@@ -239,8 +239,8 @@ describe('F292 private-thread artifact handoff', () => {
     assert.equal(receipt.triggerMessageId, 'retry-message-1');
     assert.equal(receipt.queueEntryId, 'q-retry');
     assert.deepEqual(enqueued[0].targetCats, ['codex-sol']);
-    assert.equal(enqueued[0].source, 'connector');
-    assert.equal(appended[0].userId, 'scheduler');
+    assert.deepEqual(enqueued[0].from, { kind: 'system', service: 'meeting-write-opportunity' });
+    assert.equal(appended[0].userId, 'owner-1');
     assert.equal(appended[0].extra.scheduler.hiddenTrigger, true);
     assert.equal(
       appended[0].extra.writeOpportunityPresentationRetry.sourceOpportunityId,

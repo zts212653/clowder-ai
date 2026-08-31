@@ -10,6 +10,7 @@ import {
 } from '../dist/domains/cats/services/agents/invocation/QueuedMessageCustodyCoordinator.js';
 import { QueueProcessor } from '../dist/domains/cats/services/agents/invocation/QueueProcessor.js';
 import { MessageStore } from '../dist/domains/cats/services/stores/ports/MessageStore.js';
+import { canonicalTestMessageInput, canonicalTestQueueInput } from './helpers/message-from-fixtures.js';
 
 const TARGET_CAT_ID = 'codex-sol';
 
@@ -81,52 +82,61 @@ function processorDeps(queue, messageStore, queueCustodyCoordinator) {
 async function failedWaitFixture({ ownerFence, leaseResult }) {
   const queue = new InvocationQueue();
   const messageStore = new MessageStore();
-  const queued = queue.enqueue({
-    threadId: 'thread-1',
-    userId: 'user-1',
-    content: 'retry the exact wait continuation',
-    source: 'agent',
-    ownerAuthProvenance: 'strict',
-    targetCats: [TARGET_CAT_ID],
-    intent: 'execute',
-    callerCatId: 'system',
-  });
+  const queued = queue.enqueue(
+    canonicalTestQueueInput({
+      threadId: 'thread-1',
+      userId: 'user-1',
+      kind: 'conversation_input',
+      content: 'retry the exact wait continuation',
+      source: 'connector',
+      ownerAuthProvenance: 'strict',
+      targetCats: [TARGET_CAT_ID],
+      intent: 'execute',
+      callerCatId: 'system',
+    }),
+  );
   assert.equal(queued.outcome, 'enqueued');
   assert.ok(queued.entry);
   const entry = queued.entry;
-  const message = messageStore.append({
-    threadId: entry.threadId,
-    userId: entry.userId,
-    catId: 'system',
-    content: entry.content,
-    mentions: entry.targetCats,
-    timestamp: entry.createdAt,
-    deliveryStatus: 'queued',
-    source: {
-      connector: 'github-wait',
-      meta: {
-        waitContinuationCarrier: {
-          v: 1,
-          waitId: 'task-wait-1',
-          outcomeId: 'wait:pr:zts212653/cat-cafe#1:g4:matched',
-          ownerFence,
+  const message = messageStore.append(
+    canonicalTestMessageInput({
+      threadId: entry.threadId,
+      userId: entry.userId,
+      catId: 'system',
+      content: entry.content,
+      mentions: entry.targetCats,
+      timestamp: entry.createdAt,
+      deliveryStatus: 'queued',
+      source: {
+        connector: 'github-wait',
+        meta: {
+          waitContinuationCarrier: {
+            v: 1,
+            waitId: 'task-wait-1',
+            outcomeId: 'wait:pr:zts212653/cat-cafe#1:g4:matched',
+            ownerFence,
+          },
         },
       },
-    },
-    queueCustody: createInitialQueuedMessageCustody(entry),
-  });
+      queueCustody: createInitialQueuedMessageCustody(entry),
+    }),
+  );
   queue.backfillMessageId(entry.threadId, entry.userId, entry.id, message.id);
 
   const coordinator = new QueuedMessageCustodyCoordinator({ messageStore });
   queue.markQueuedSeen(entry.threadId, entry.userId, entry.id, TARGET_CAT_ID, 'inv-failed');
-  queue.markQueuedFailedForCatAcrossUsers(
+  await coordinator.persistEntry(queue.getEntrySnapshot(entry.threadId, entry.userId, entry.id));
+  const [failed] = queue.takeQueuedFailedTargetForCatAcrossUsers(
     entry.threadId,
     TARGET_CAT_ID,
     'inv-failed',
     new Set([entry.id]),
     'invocation_failed',
   );
-  await coordinator.persistEntry(queue.getEntrySnapshot(entry.threadId, entry.userId, entry.id));
+  assert.ok(failed?.entrySnapshot);
+  await coordinator.commitFailedTargets(failed.entrySnapshot, [TARGET_CAT_ID], Date.now(), 'invocation_failed', {
+    [TARGET_CAT_ID]: 'inv-failed',
+  });
 
   let currentTask = waitTask(ownerFence);
   let currentLeaseResult = leaseResult;
@@ -183,8 +193,7 @@ async function failedWaitFixture({ ownerFence, leaseResult }) {
 }
 
 function assertRetryWasNotMinted(fixture) {
-  const queueEntry = fixture.queue.getEntrySnapshot(fixture.entry.threadId, fixture.entry.userId, fixture.entry.id);
-  assert.deepEqual(queueEntry.queuedFailedByCatIds, [TARGET_CAT_ID]);
+  assert.deepEqual(fixture.queue.list(fixture.entry.threadId, fixture.entry.userId), []);
   const custody = fixture.messageStore.getById(fixture.message.id).queueCustody;
   assert.deepEqual(
     custody.targetAttempts.map(({ id, state }) => ({ id, state })),
@@ -210,6 +219,7 @@ describe('Gate 5 retry authority mutation linearization', () => {
       fixture.entry.threadId,
       fixture.entry.userId,
       fixture.entry.id,
+      fixture.message.id,
       TARGET_CAT_ID,
       fixture.failedAttempt.id,
       fixture.commitAuthority,
@@ -229,6 +239,7 @@ describe('Gate 5 retry authority mutation linearization', () => {
       fixture.entry.threadId,
       fixture.entry.userId,
       fixture.entry.id,
+      fixture.message.id,
       TARGET_CAT_ID,
       fixture.failedAttempt.id,
       fixture.commitAuthority,
@@ -262,6 +273,7 @@ describe('Gate 5 retry authority mutation linearization', () => {
       fixture.entry.threadId,
       fixture.entry.userId,
       fixture.entry.id,
+      fixture.message.id,
       TARGET_CAT_ID,
       fixture.failedAttempt.id,
       fixture.commitAuthority,
@@ -287,6 +299,7 @@ describe('Gate 5 retry authority mutation linearization', () => {
       fixture.entry.threadId,
       fixture.entry.userId,
       fixture.entry.id,
+      fixture.message.id,
       TARGET_CAT_ID,
       fixture.failedAttempt.id,
       fixture.commitAuthority,

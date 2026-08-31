@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { after, before, beforeEach, describe, it } from 'node:test';
+import { canonicalTestMessageInput } from './helpers/message-from-fixtures.js';
 import {
   assertRedisIsolationOrThrow,
   cleanupPrefixedRedisKeys,
@@ -66,18 +67,20 @@ describe('F264 Gap F true recall contract (Redis store)', { skip: redisIsolation
   });
 
   async function appendQueued(queueCustody = custody()) {
-    return store.append({
-      threadId: 'thread-f264-gap-f-redis',
-      userId: 'owner-redis',
-      catId: null,
-      content: '修正后的正文',
-      contentBlocks: [{ type: 'image', url: '/uploads/proof.png' }],
-      mentions: ['codex', 'fable5'],
-      timestamp: 1_000,
-      deliveryStatus: 'queued',
-      queueCustody,
-      replyTo: 'parent-message',
-    });
+    return store.append(
+      canonicalTestMessageInput({
+        threadId: 'thread-f264-gap-f-redis',
+        userId: 'owner-redis',
+        catId: null,
+        content: '修正后的正文',
+        contentBlocks: [{ type: 'image', url: '/uploads/proof.png' }],
+        mentions: ['codex', 'fable5'],
+        timestamp: 1_000,
+        deliveryStatus: 'queued',
+        queueCustody,
+        replyTo: 'parent-message',
+      }),
+    );
   }
 
   it('rejects foreign owner and thread without mutating either Redis hash', async () => {

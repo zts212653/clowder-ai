@@ -18,6 +18,7 @@
 
 import assert from 'node:assert/strict';
 import { beforeEach, describe, it, mock } from 'node:test';
+import { canonicalTestQueueInput } from './helpers/message-from-fixtures.js';
 
 const { InvocationQueue } = await import('../dist/domains/cats/services/agents/invocation/InvocationQueue.js');
 const { QueueProcessor } = await import('../dist/domains/cats/services/agents/invocation/QueueProcessor.js');
@@ -40,6 +41,8 @@ function stubDeps(overrides = {}) {
       update: mock.fn(async () => {}),
     },
     router: {
+      resolveExplicitTargets: mock.fn(async (requestedCatIds) => [...requestedCatIds]),
+      resolveConversationTargetsAtAdmission: mock.fn(async (requestedCatIds) => [...requestedCatIds]),
       routeExecution: mock.fn(async function* () {
         yield { type: 'done', catId: 'opus', timestamp: Date.now() };
       }),
@@ -64,16 +67,19 @@ function stubDeps(overrides = {}) {
 }
 
 function enqueueEntry(queue, overrides = {}) {
-  const result = queue.enqueue({
-    ownerAuthProvenance: 'unknown',
-    threadId: 't1',
-    userId: 'u1',
-    content: 'hello',
-    source: 'user',
-    targetCats: ['opus'],
-    intent: 'execute',
-    ...overrides,
-  });
+  const result = queue.enqueue(
+    canonicalTestQueueInput({
+      kind: 'private_input',
+      ownerAuthProvenance: 'unknown',
+      threadId: 't1',
+      userId: 'u1',
+      content: 'hello',
+      source: 'agent',
+      targetCats: ['opus'],
+      intent: 'execute',
+      ...overrides,
+    }),
+  );
   return result.entry;
 }
 
@@ -93,9 +99,7 @@ describe('cancelAll must NOT auto-resume queued entries', () => {
   it('canceled_by_user does NOT auto-resume when suppressAutoResume is active', async () => {
     // Enqueue two entries — first is "processing", second is "queued"
     const entry1 = enqueueEntry(deps.queue);
-    deps.queue.backfillMessageId('t1', 'u1', entry1.id, 'msg-1');
     const entry2 = enqueueEntry(deps.queue, { content: 'second' });
-    deps.queue.backfillMessageId('t1', 'u1', entry2.id, 'msg-2');
 
     // Mark first as processing (simulates active invocation)
     deps.queue.markProcessing('t1', 'u1', entry1.id);
@@ -126,19 +130,14 @@ describe('cancelAll must NOT auto-resume queued entries', () => {
     );
   });
 
-  it('plain canceled from a direct connector does not enter #595 recovery when force-reset suppression is active', async (t) => {
+  it('plain canceled does not restart private work when force-reset suppression is active', async (t) => {
     t.mock.timers.enable({ apis: ['setTimeout'] });
-    const entry = enqueueEntry(deps.queue, { source: 'connector', content: 'managed-command completion' });
-    deps.queue.backfillMessageId('t1', 'u1', entry.id, 'msg-managed-command');
+    enqueueEntry(deps.queue, { content: 'managed-command completion' });
 
     processor.suppressAutoResume('t1', 'opus', ['inv-force-reset']);
     await processor.onInvocationComplete('t1', 'opus', 'canceled', 'inv-force-reset', []);
 
-    assert.equal(
-      processor.isPaused('t1', 'opus'),
-      false,
-      'force-reset cancellation must terminate without arming the delayed #595 restart path',
-    );
+    assert.equal(processor.isAutoResumeSuppressed('t1', 'opus'), false, 'the exact terminal consumes its fence');
     assert.equal(
       deps.router.routeExecution.mock.callCount(),
       0,
@@ -146,10 +145,9 @@ describe('cancelAll must NOT auto-resume queued entries', () => {
     );
   });
 
-  it('a late-bound direct connector identity makes an ID-less cancel-all fence consumable', async (t) => {
+  it('a late-bound private wake identity makes an ID-less cancel-all fence consumable', async (t) => {
     t.mock.timers.enable({ apis: ['setTimeout'] });
-    const entry = enqueueEntry(deps.queue, { source: 'connector', content: 'preserved after pre-bind reset' });
-    deps.queue.backfillMessageId('t1', 'u1', entry.id, 'msg-pre-bind-reset');
+    const entry = enqueueEntry(deps.queue, { content: 'preserved after pre-bind reset' });
 
     processor.suppressAutoResume('t1', 'opus');
     processor.bindAutoResumeSuppressionExecution('t1', 'opus', 'inv-late-bound');
@@ -162,7 +160,6 @@ describe('cancelAll must NOT auto-resume queued entries', () => {
       false,
       'the exact late-bound terminal must consume the formerly ID-less fence',
     );
-    assert.equal(processor.isPaused('t1', 'opus'), false, 'the consumed stop fence must not leave a stale pause');
     assert.equal(deps.router.routeExecution.mock.callCount(), 0, 'the preserved connector wake must not auto-resume');
     assert.equal(
       deps.queue.list('t1', 'u1').find((candidate) => candidate.id === entry.id)?.status,
@@ -171,93 +168,8 @@ describe('cancelAll must NOT auto-resume queued entries', () => {
     );
   });
 
-  it('force-reset suppression disarms a #595 recovery timer that was already scheduled', async (t) => {
-    t.mock.timers.enable({ apis: ['Date', 'setTimeout'], now: 1_000 });
-    const entry = enqueueEntry(deps.queue, { content: 'queued before force-reset' });
-    deps.queue.backfillMessageId('t1', 'u1', entry.id, 'msg-before-reset');
-
-    await processor.onInvocationComplete('t1', 'opus', 'failed');
-    assert.equal(processor.isPaused('t1', 'opus'), true, 'failed completion should arm #595 recovery');
-
-    processor.suppressAutoResume('t1', 'opus', ['inv-force-reset']);
-    processor.clearPause('t1', 'opus');
-    t.mock.timers.tick(10_000);
-    await new Promise((resolve) => setImmediate(resolve));
-
-    assert.equal(
-      deps.router.routeExecution.mock.callCount(),
-      0,
-      'a pre-armed recovery timer must not dispatch while force-reset suppression owns the slot',
-    );
-    assert.equal(
-      deps.queue.list('t1', 'u1').find((candidate) => candidate.id === entry.id)?.status,
-      'queued',
-      'the preserved entry must remain durably queued after reset',
-    );
-
-    t.mock.timers.tick(50_000);
-    await new Promise((resolve) => setImmediate(resolve));
-    assert.equal(
-      deps.router.routeExecution.mock.callCount(),
-      0,
-      'clearing the old pause must invalidate its timer even after the suppression TTL expires',
-    );
-  });
-
-  it('re-arms #595 recovery for the remaining suppression TTL when the same pause stays live', async (t) => {
-    t.mock.timers.enable({ apis: ['Date', 'setTimeout'], now: 1_000 });
-    const entry = enqueueEntry(deps.queue, { content: 'recover after the stop fence expires' });
-    deps.queue.backfillMessageId('t1', 'u1', entry.id, 'msg-recover-after-fence');
-
-    processor.suppressAutoResume('t1', 'opus', ['inv-missing-terminal']);
-    await processor.onInvocationComplete('t1', 'opus', 'failed', undefined, []);
-    assert.equal(processor.isPaused('t1', 'opus'), true, 'unrelated failure should own a #595 pause generation');
-
-    t.mock.timers.tick(10_000);
-    await new Promise((resolve) => setImmediate(resolve));
-    assert.equal(deps.router.routeExecution.mock.callCount(), 0, 'the 10-second timer must defer to the live fence');
-    assert.equal(processor.isPaused('t1', 'opus'), true, 'defer must retain the same pause generation');
-
-    t.mock.timers.tick(49_999);
-    await new Promise((resolve) => setImmediate(resolve));
-    assert.equal(deps.router.routeExecution.mock.callCount(), 0, 'recovery must wait for the full suppression TTL');
-
-    t.mock.timers.tick(1);
-    await new Promise((resolve) => setImmediate(resolve));
-    assert.equal(processor.isPaused('t1', 'opus'), false, 'the same pause must retire when its fence expires');
-    assert.equal(deps.router.routeExecution.mock.callCount(), 1, 'queued work must recover exactly once after expiry');
-  });
-
-  it('moves deferred #595 recovery to the renewed suppression expiry without duplicating it', async (t) => {
-    t.mock.timers.enable({ apis: ['Date', 'setTimeout'], now: 1_000 });
-    const entry = enqueueEntry(deps.queue, { content: 'recover after renewed fence' });
-    deps.queue.backfillMessageId('t1', 'u1', entry.id, 'msg-renewed-fence');
-
-    processor.suppressAutoResume('t1', 'opus', ['inv-first-missing-terminal']);
-    await processor.onInvocationComplete('t1', 'opus', 'failed', undefined, []);
-
-    t.mock.timers.tick(5_000);
-    processor.suppressAutoResume('t1', 'opus', ['inv-second-missing-terminal']);
-    t.mock.timers.tick(55_000);
-    await new Promise((resolve) => setImmediate(resolve));
-    assert.equal(
-      deps.router.routeExecution.mock.callCount(),
-      0,
-      'renewal must move recovery to the latest fence expiry',
-    );
-    assert.equal(processor.isPaused('t1', 'opus'), true, 'the renewed fence must retain the same pause');
-
-    t.mock.timers.tick(5_000);
-    await new Promise((resolve) => setImmediate(resolve));
-    assert.equal(processor.isPaused('t1', 'opus'), false, 'the pause must retire at the renewed expiry');
-    assert.equal(deps.router.routeExecution.mock.callCount(), 1, 'renewal must not create duplicate recovery attempts');
-  });
-
   it('an unrelated replacement cancellation cannot consume suppression owned by cancel-all', async (t) => {
     t.mock.timers.enable({ apis: ['setTimeout'] });
-    const entry = enqueueEntry(deps.queue, { content: 'preserved by cancel-all' });
-    deps.queue.backfillMessageId('t1', 'u1', entry.id, 'msg-preserved');
-
     processor.suppressAutoResume('t1', 'opus', ['inv-canceled-by-all']);
 
     await processor.onInvocationComplete('t1', 'opus', 'canceled', 'inv-replacement', []);
@@ -276,16 +188,7 @@ describe('cancelAll must NOT auto-resume queued entries', () => {
       'the exact canceled execution terminal must consume its own marker',
     );
 
-    assert.equal(
-      deps.router.routeExecution.mock.callCount(),
-      0,
-      'the original cancel-all terminal must still suppress queue restart',
-    );
-    assert.equal(
-      deps.queue.list('t1', 'u1').find((candidate) => candidate.id === entry.id)?.status,
-      'queued',
-      'cancel-all must preserve queued work after an unrelated replacement terminates',
-    );
+    assert.equal(deps.router.routeExecution.mock.callCount(), 0, 'neither terminal can invent queue work');
   });
 
   it('an older cancel-all terminal cannot consume a newer stop marker on the same slot', async () => {
@@ -363,9 +266,7 @@ describe('cancelAll must NOT auto-resume queued entries', () => {
   // ─────────────────────────────────────────────────────────────────────────
   it('canceled_by_user still auto-resumes when suppressAutoResume is NOT active', async () => {
     const entry1 = enqueueEntry(deps.queue);
-    deps.queue.backfillMessageId('t1', 'u1', entry1.id, 'msg-1');
-    const entry2 = enqueueEntry(deps.queue, { content: 'second' });
-    deps.queue.backfillMessageId('t1', 'u1', entry2.id, 'msg-2');
+    enqueueEntry(deps.queue, { content: 'second' });
 
     deps.queue.markProcessing('t1', 'u1', entry1.id);
 
@@ -395,9 +296,7 @@ describe('cancelAll must NOT auto-resume queued entries', () => {
   // ─────────────────────────────────────────────────────────────────────────
   it('succeeded completion does NOT consume suppress flag (race: steer after cancelAll)', async () => {
     const entry1 = enqueueEntry(deps.queue);
-    deps.queue.backfillMessageId('t1', 'u1', entry1.id, 'msg-1');
-    const entry2 = enqueueEntry(deps.queue, { content: 'second' });
-    deps.queue.backfillMessageId('t1', 'u1', entry2.id, 'msg-2');
+    enqueueEntry(deps.queue, { content: 'second' });
     deps.queue.markProcessing('t1', 'u1', entry1.id);
 
     // cancelAll sets suppress
@@ -442,7 +341,6 @@ describe('cancelAll must NOT auto-resume queued entries', () => {
 
     // Enqueue an entry for codex
     const codexEntry = enqueueEntry(deps.queue, { targetCats: ['codex'], content: 'codex msg' });
-    deps.queue.backfillMessageId('t1', 'u1', codexEntry.id, 'msg-codex');
 
     // codex invocation completes with canceled_by_user (new per-cat cancel)
     await processor.onInvocationComplete('t1', 'codex', 'canceled_by_user', 'inv-new-codex', []);
@@ -462,25 +360,22 @@ describe('cancelAll must NOT auto-resume queued entries', () => {
   // entry that was included in the attempted batch. Cleanup must not recreate
   // or immediately dispatch any of those bodies.
   // ─────────────────────────────────────────────────────────────────────────
-  it('single-cat user_cancel consumes the attempted batch and does not blind-spawn from cleanup', async () => {
+  it('single-cat user_cancel consumes the attempted primary and does not blind-spawn from cleanup', async () => {
     // Override start() to return a pre-aborted controller with 'user_cancel'
     const abortedController = new AbortController();
     abortedController.abort('user_cancel');
     deps.invocationTracker.start = mock.fn(() => abortedController);
     deps.invocationTracker.startAll = mock.fn(() => abortedController);
 
-    const entry1 = enqueueEntry(deps.queue);
-    deps.queue.backfillMessageId('t1', 'u1', entry1.id, 'msg-1');
-    const entry2 = enqueueEntry(deps.queue, { content: 'second' });
-    deps.queue.backfillMessageId('t1', 'u1', entry2.id, 'msg-2');
+    enqueueEntry(deps.queue);
 
     // Process entry1 — will detect pre-aborted controller with 'user_cancel'
     await processor.processNext('t1', 'u1');
     // Let fire-and-forget settle
     await new Promise((r) => setTimeout(r, 100));
 
-    // Both entries belonged to the same attempted user batch, so explicit stop
-    // terminalizes them instead of silently requeueing either one.
+    // Explicit stop terminalizes the attempted primary instead of silently
+    // requeueing it from cleanup.
     const remaining = deps.queue.list('t1', 'u1');
     assert.deepEqual(remaining, []);
     assert.equal(deps.router.routeExecution.mock.callCount(), 1, 'cleanup must not spawn a second attempt');
@@ -495,7 +390,6 @@ describe('cancelAll must NOT auto-resume queued entries', () => {
     // A second suppressAutoResume + onInvocationComplete should suppress,
     // but WITHOUT a second suppress call, it should NOT suppress.
     const entry = enqueueEntry(deps.queue, { content: 'after-suppress' });
-    deps.queue.backfillMessageId('t1', 'u1', entry.id, 'msg-3');
 
     // This completion should auto-resume (no suppress active)
     await processor.onInvocationComplete('t1', 'opus', 'succeeded');

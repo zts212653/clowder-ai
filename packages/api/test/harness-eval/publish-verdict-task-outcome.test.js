@@ -7,7 +7,6 @@ import { EventMemoryStore } from '../../dist/domains/memory/EventMemoryStore.js'
 import { handlePublishVerdict } from '../../dist/infrastructure/harness-eval/publish-verdict/publish-verdict.js';
 import { createTaskOutcomeGeneratorAdapter } from '../../dist/infrastructure/harness-eval/publish-verdict/task-outcome-generator-adapter.js';
 import { TaskOutcomeEpisodeStore } from '../../dist/infrastructure/harness-eval/task-outcome/task-outcome-store.js';
-import { seedCanonicalMeasurementCensusState } from './publish-verdict-fixtures.js';
 
 const root = mkdtempSync(join(tmpdir(), 'publish-verdict-taskoutcome-'));
 const harnessFeedbackRoot = join(root, 'docs/harness-feedback');
@@ -110,19 +109,29 @@ function buildPacket(overrides = {}) {
   };
 }
 
-function buildMockGitPublisher(isoName, commitSha, prNumber) {
+function buildMockArtifactPublisher(isoName, artifactId, artifactUrl) {
   return {
-    async publishOnIsolatedWorktree(opts) {
-      const iso = join(root, '..', isoName);
-      mkdirSync(join(iso, 'docs', 'harness-feedback', 'eval-domains'), { recursive: true });
-      writeFileSync(
-        join(iso, 'docs', 'harness-feedback', 'eval-domains', 'eval-task-outcome.yaml'),
-        readFileSync(join(harnessFeedbackRoot, 'eval-domains', 'eval-task-outcome.yaml'), 'utf8'),
-      );
-      seedCanonicalMeasurementCensusState(iso);
-      await (await opts.stage(iso)).afterPublish?.();
-      rmSync(iso, { recursive: true, force: true });
-      return { commitSha, prUrl: `https://github.com/zts212653/clowder-ai/pull/${prNumber}` };
+    async publishArtifact({ packet, generate }) {
+      const iso = mkdtempSync(join(root, `${isoName}-`));
+      try {
+        const outputRoot = join(iso, 'docs', 'harness-feedback');
+        mkdirSync(join(outputRoot, 'eval-domains'), { recursive: true });
+        writeFileSync(
+          join(outputRoot, 'eval-domains', 'eval-task-outcome.yaml'),
+          readFileSync(join(harnessFeedbackRoot, 'eval-domains', 'eval-task-outcome.yaml'), 'utf8'),
+        );
+        const generated = await generate(outputRoot);
+        await generated.afterPublish?.();
+        return {
+          artifactId,
+          domainSlug: packet.domainId.replace(/:/g, '-'),
+          verdictPath: generated.verdictPath,
+          bundleDir: generated.bundleDir,
+          artifactUrl,
+        };
+      } finally {
+        rmSync(iso, { recursive: true, force: true });
+      }
     },
   };
 }
@@ -139,10 +148,14 @@ after(() => {
 describe('handlePublishVerdict end-to-end with task-outcome generator', () => {
   it('happy path: handler dispatches to task-outcome adapter and returns repo-relative verdict paths', async () => {
     const generator = createTaskOutcomeGeneratorAdapter();
-    const mockGitPublisher = buildMockGitPublisher('task-outcome-e2e-iso', 'task-sha-1234', 9001);
+    const artifactPublisher = buildMockArtifactPublisher(
+      'task-outcome-e2e-iso',
+      'task-sha-1234',
+      'artifact://eval-task-outcome/task-artifact-1234',
+    );
 
     const result = await handlePublishVerdict(
-      { harnessFeedbackRoot: harnessFeedbackRoot, gitPublisher: mockGitPublisher, generator },
+      { harnessFeedbackRoot: harnessFeedbackRoot, artifactPublisher, generator },
       {
         packet: buildPacket(),
         domain: 'eval:task-outcome',
@@ -157,22 +170,27 @@ describe('handlePublishVerdict end-to-end with task-outcome generator', () => {
     );
 
     assert.ok(!('error' in result), `expected success, got: ${JSON.stringify(result)}`);
-    assert.equal(result.commitSha, 'task-sha-1234');
-    assert.equal(result.prUrl, 'https://github.com/zts212653/clowder-ai/pull/9001');
-    assert.equal(result.verdictPath, 'docs/harness-feedback/verdicts/vhp-task-outcome-e2e-test.md');
-    assert.equal(result.bundleDir, 'docs/harness-feedback/bundles/vhp-task-outcome-e2e-test');
+    assert.equal(result.artifactId, 'task-sha-1234');
+    assert.equal(result.artifactUrl, 'artifact://eval-task-outcome/task-artifact-1234');
+    // F257 / F192 sunset: ArtifactPublisher returns absolute store paths; assert suffix.
+    assert.match(result.verdictPath, /verdicts\/vhp-task-outcome-e2e-test\.md$/);
+    assert.match(result.bundleDir, /bundles\/vhp-task-outcome-e2e-test$/);
   });
 
   it('uses runtime-configured taskOutcomeDbPath when sourceRefs omit databasePath', async () => {
     const customTaskOutcomeDbPath = join(tmpdir(), `publish-verdict-taskoutcome-custom-${Date.now()}.sqlite`);
     await seedWindow(customTaskOutcomeDbPath);
     const generator = createTaskOutcomeGeneratorAdapter();
-    const mockGitPublisher = buildMockGitPublisher('task-outcome-configured-db-iso', 'task-sha-5678', 9002);
+    const artifactPublisher = buildMockArtifactPublisher(
+      'task-outcome-configured-db-iso',
+      'task-sha-5678',
+      'artifact://eval-task-outcome/task-artifact-5678',
+    );
 
     const result = await handlePublishVerdict(
       {
         harnessFeedbackRoot: harnessFeedbackRoot,
-        gitPublisher: mockGitPublisher,
+        artifactPublisher,
         generator,
         taskOutcomeDbPath: customTaskOutcomeDbPath,
       },
@@ -190,19 +208,23 @@ describe('handlePublishVerdict end-to-end with task-outcome generator', () => {
     );
 
     assert.ok(!('error' in result), `expected success, got: ${JSON.stringify(result)}`);
-    assert.equal(result.commitSha, 'task-sha-5678');
+    assert.equal(result.artifactId, 'task-sha-5678');
   });
 
   it('writes explicit 7-class episode verdicts back to the task-outcome DB', async () => {
     const customTaskOutcomeDbPath = join(tmpdir(), `publish-verdict-taskoutcome-writeback-${Date.now()}.sqlite`);
     const seeded = await seedWindow(customTaskOutcomeDbPath);
     const generator = createTaskOutcomeGeneratorAdapter();
-    const mockGitPublisher = buildMockGitPublisher('task-outcome-writeback-iso', 'task-sha-writeback', 9003);
+    const artifactPublisher = buildMockArtifactPublisher(
+      'task-outcome-writeback-iso',
+      'task-sha-writeback',
+      'artifact://eval-task-outcome/task-artifact-writeback',
+    );
 
     const result = await handlePublishVerdict(
       {
         harnessFeedbackRoot: harnessFeedbackRoot,
-        gitPublisher: mockGitPublisher,
+        artifactPublisher,
         generator,
         taskOutcomeDbPath: customTaskOutcomeDbPath,
       },
@@ -221,7 +243,7 @@ describe('handlePublishVerdict end-to-end with task-outcome generator', () => {
     );
 
     assert.ok(!('error' in result), `expected success, got: ${JSON.stringify(result)}`);
-    assert.equal(result.commitSha, 'task-sha-writeback');
+    assert.equal(result.artifactId, 'task-sha-writeback');
 
     const store = new TaskOutcomeEpisodeStore(customTaskOutcomeDbPath);
     assert.equal(store.getEpisode(seeded.episodeId)?.verdict, 'corrected_success');
@@ -236,24 +258,27 @@ describe('handlePublishVerdict end-to-end with task-outcome generator', () => {
     const customTaskOutcomeDbPath = join(tmpdir(), `publish-verdict-taskoutcome-publish-fail-${Date.now()}.sqlite`);
     const seeded = await seedWindow(customTaskOutcomeDbPath);
     const generator = createTaskOutcomeGeneratorAdapter();
-    const failingGitPublisher = {
-      async publishOnIsolatedWorktree(opts) {
-        const iso = join(root, '..', 'task-outcome-writeback-publish-fail-iso');
-        mkdirSync(join(iso, 'docs', 'harness-feedback', 'eval-domains'), { recursive: true });
-        writeFileSync(
-          join(iso, 'docs', 'harness-feedback', 'eval-domains', 'eval-task-outcome.yaml'),
-          readFileSync(join(harnessFeedbackRoot, 'eval-domains', 'eval-task-outcome.yaml'), 'utf8'),
-        );
-        seedCanonicalMeasurementCensusState(iso);
-        await opts.stage(iso);
-        rmSync(iso, { recursive: true, force: true });
-        throw new Error('simulated gh pr create failure');
+    const failingArtifactPublisher = {
+      async publishArtifact({ generate }) {
+        const iso = mkdtempSync(join(root, 'task-outcome-writeback-publish-fail-iso-'));
+        try {
+          const outputRoot = join(iso, 'docs', 'harness-feedback');
+          mkdirSync(join(outputRoot, 'eval-domains'), { recursive: true });
+          writeFileSync(
+            join(outputRoot, 'eval-domains', 'eval-task-outcome.yaml'),
+            readFileSync(join(harnessFeedbackRoot, 'eval-domains', 'eval-task-outcome.yaml'), 'utf8'),
+          );
+          await generate(outputRoot);
+          throw new Error('simulated artifact publish failure');
+        } finally {
+          rmSync(iso, { recursive: true, force: true });
+        }
       },
     };
     const result = await handlePublishVerdict(
       {
         harnessFeedbackRoot,
-        gitPublisher: failingGitPublisher,
+        artifactPublisher: failingArtifactPublisher,
         generator,
         taskOutcomeDbPath: customTaskOutcomeDbPath,
       },
@@ -273,7 +298,7 @@ describe('handlePublishVerdict end-to-end with task-outcome generator', () => {
 
     const store = new TaskOutcomeEpisodeStore(customTaskOutcomeDbPath);
     assert.equal(result.status, 500);
-    assert.equal(result.error, 'git_or_gh_failed');
+    assert.equal(result.error, 'publisher_failed');
     assert.equal(store.getEpisode(seeded.episodeId)?.verdict, null);
   });
 
@@ -288,12 +313,16 @@ describe('handlePublishVerdict end-to-end with task-outcome generator', () => {
       participants: ['gpt52'],
     });
     const generator = createTaskOutcomeGeneratorAdapter();
-    const mockGitPublisher = buildMockGitPublisher('task-outcome-writeback-invalid-iso', 'unreachable', 9004);
+    const artifactPublisher = buildMockArtifactPublisher(
+      'task-outcome-writeback-invalid-iso',
+      'unreachable',
+      'artifact://eval-task-outcome/task-artifact-invalid-terminal',
+    );
 
     const result = await handlePublishVerdict(
       {
         harnessFeedbackRoot: harnessFeedbackRoot,
-        gitPublisher: mockGitPublisher,
+        artifactPublisher,
         generator,
         taskOutcomeDbPath: customTaskOutcomeDbPath,
       },
@@ -322,12 +351,16 @@ describe('handlePublishVerdict end-to-end with task-outcome generator', () => {
     const seeded = await seedWindow(customTaskOutcomeDbPath);
     const invalidVerdictId = `vhp-task-outcome-e2e-writeback-outside-${Math.random().toString(36).slice(2, 8)}`;
     const generator = createTaskOutcomeGeneratorAdapter();
-    const mockGitPublisher = buildMockGitPublisher('task-outcome-writeback-outside-iso', 'unreachable', 9005);
+    const artifactPublisher = buildMockArtifactPublisher(
+      'task-outcome-writeback-outside-iso',
+      'unreachable',
+      'artifact://eval-task-outcome/task-artifact-outside-window',
+    );
 
     const result = await handlePublishVerdict(
       {
         harnessFeedbackRoot: harnessFeedbackRoot,
-        gitPublisher: mockGitPublisher,
+        artifactPublisher,
         generator,
         taskOutcomeDbPath: customTaskOutcomeDbPath,
       },

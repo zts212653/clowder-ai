@@ -40,8 +40,6 @@ type StoreState = {
   uiThinkingExpandedByDefault: boolean;
   workspaceWorktreeId: string | null;
   queue: [];
-  queuePaused: boolean;
-  queuePauseReason: null;
   queueFull: boolean;
   queueFullSource: null;
   threads: {
@@ -115,8 +113,6 @@ const makeStoreState = (): StoreState => ({
   uiThinkingExpandedByDefault: false,
   workspaceWorktreeId: null,
   queue: [],
-  queuePaused: false,
-  queuePauseReason: null,
   queueFull: false,
   queueFullSource: null,
   threads: [

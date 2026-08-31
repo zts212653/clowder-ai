@@ -87,7 +87,17 @@ function createStubRouter() {
     },
     async resolveTargetsAndIntent() {
       routeCalled = true;
-      return { targetCats: ['opus'], intent: { intent: 'execute', explicit: false, promptTags: [] } };
+      return {
+        attemptBatch: {
+          parserMode: 'user',
+          spanBasis: 'lowercased_message',
+          attempts: [],
+          truncated: false,
+          metricEligible: true,
+        },
+        targetCats: ['opus'],
+        intent: { intent: 'execute', explicit: false, promptTags: [] },
+      };
     },
     async *routeExecution() {
       routeCalled = true;

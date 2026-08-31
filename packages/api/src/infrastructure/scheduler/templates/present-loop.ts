@@ -55,7 +55,7 @@ async function executePresentLoop(input: PresentLoopExecutionInput): Promise<voi
     const messageId = await deliver({
       threadId,
       content: persistedContent,
-      userId: 'scheduler',
+      userId: input.ownerUserId,
       extra: { scheduler: { hiddenTrigger: true } },
     });
     const outcome = await invokeTrigger.trigger(

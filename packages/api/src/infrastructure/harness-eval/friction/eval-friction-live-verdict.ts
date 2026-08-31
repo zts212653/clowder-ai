@@ -50,7 +50,7 @@ export interface FrictionLiveVerdictArtifact {
  * no extraStagedPaths / no gitignore force-add), resolves canonical bundle refs,
  * and renders verdict.md from the cat-submitted packet (Decision 3). KD-4: the
  * generator performs NO writeback (no afterPublish side effect); the only writes
- * are verdict.md + bundle inside the publisher's isolated worktree. KD-8: root
+ * are verdict.md + bundle inside the publisher's artifact staging root. KD-8: root
  * cause (7-class) is the cat's verdict-layer judgment (carried in the packet's
  * rootCauseHypothesis), NOT rule-classified here.
  */

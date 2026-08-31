@@ -13,6 +13,7 @@
 
 import assert from 'node:assert/strict';
 import { after, describe, it } from 'node:test';
+import { canonicalTestMessageInput } from './helpers/message-from-fixtures.js';
 import {
   assertRedisIsolationOrThrow,
   cleanupClientKeyspace,
@@ -82,36 +83,45 @@ describe('#1269 R12: Redis mention publication boundary parity', () => {
     const threadId = `r12-mention-${Date.now()}`;
 
     // C: direct mention — visible immediately
-    const c = await store.append({
-      userId: 'u1',
-      catId: null,
-      content: '@opus direct mention',
-      mentions: ['opus'],
-      timestamp: Date.now() - 3000,
-      threadId,
-    });
+    const c = await store.append(
+      canonicalTestMessageInput({
+        provenance: { author: 'user', routed: false, observation: 'original' },
+        userId: 'u1',
+        catId: null,
+        content: '@opus direct mention',
+        mentions: ['opus'],
+        timestamp: Date.now() - 3000,
+        threadId,
+      }),
+    );
 
     // Q: queued real-cat speech mention — timeline-published at append
-    const q = await store.append({
-      userId: 'u1',
-      catId: 'opus',
-      content: '@opus cat speech mention',
-      mentions: ['opus'],
-      timestamp: Date.now() - 2000,
-      threadId,
-      deliveryStatus: 'queued',
-    });
+    const q = await store.append(
+      canonicalTestMessageInput({
+        provenance: { author: 'cat', routed: false, observation: 'original' },
+        userId: 'u1',
+        catId: 'opus',
+        content: '@opus cat speech mention',
+        mentions: ['opus'],
+        timestamp: Date.now() - 2000,
+        threadId,
+        deliveryStatus: 'queued',
+      }),
+    );
 
     // H: hidden scheduler work — NOT timeline-published until delivery
-    const h = await store.append({
-      userId: 'scheduler',
-      catId: null,
-      content: '@opus hidden scheduler work',
-      mentions: ['opus'],
-      timestamp: Date.now() - 1000,
-      threadId,
-      deliveryStatus: 'queued',
-    });
+    const h = await store.append(
+      canonicalTestMessageInput({
+        provenance: { author: 'user', routed: false, observation: 'original' },
+        userId: 'scheduler',
+        catId: null,
+        content: '@opus hidden scheduler work',
+        mentions: ['opus'],
+        timestamp: Date.now() - 1000,
+        threadId,
+        deliveryStatus: 'queued',
+      }),
+    );
 
     // Before H delivery: C and Q visible, H invisible
     const mentions1 = await store.getMentionsFor('opus', 20, undefined, threadId);
@@ -140,25 +150,31 @@ describe('#1269 R12: Redis mention publication boundary parity', () => {
     const threadId = `r12-cursor-${Date.now()}`;
 
     // C: direct mention
-    const c = await store.append({
-      userId: 'u1',
-      catId: null,
-      content: '@opus direct',
-      mentions: ['opus'],
-      timestamp: Date.now() - 2000,
-      threadId,
-    });
+    const c = await store.append(
+      canonicalTestMessageInput({
+        provenance: { author: 'user', routed: false, observation: 'original' },
+        userId: 'u1',
+        catId: null,
+        content: '@opus direct',
+        mentions: ['opus'],
+        timestamp: Date.now() - 2000,
+        threadId,
+      }),
+    );
 
     // Q: queued real-cat speech (timeline-published)
-    await store.append({
-      userId: 'u1',
-      catId: 'opus',
-      content: '@opus cat speech',
-      mentions: ['opus'],
-      timestamp: Date.now() - 1000,
-      threadId,
-      deliveryStatus: 'queued',
-    });
+    await store.append(
+      canonicalTestMessageInput({
+        provenance: { author: 'cat', routed: false, observation: 'original' },
+        userId: 'u1',
+        catId: 'opus',
+        content: '@opus cat speech',
+        mentions: ['opus'],
+        timestamp: Date.now() - 1000,
+        threadId,
+        deliveryStatus: 'queued',
+      }),
+    );
 
     // Get C's cursor
     const fullPage = await store.getMentionsFor('opus', 20, undefined, threadId);
@@ -181,36 +197,45 @@ describe('#1269 R12: Redis mention publication boundary parity', () => {
     const threadId = `r12-recent-${Date.now()}`;
 
     // C: direct mention
-    await store.append({
-      userId: 'u1',
-      catId: null,
-      content: '@opus direct recent',
-      mentions: ['opus'],
-      timestamp: Date.now() - 3000,
-      threadId,
-    });
+    await store.append(
+      canonicalTestMessageInput({
+        provenance: { author: 'user', routed: false, observation: 'original' },
+        userId: 'u1',
+        catId: null,
+        content: '@opus direct recent',
+        mentions: ['opus'],
+        timestamp: Date.now() - 3000,
+        threadId,
+      }),
+    );
 
     // Q: queued real-cat speech
-    await store.append({
-      userId: 'u1',
-      catId: 'opus',
-      content: '@opus cat speech recent',
-      mentions: ['opus'],
-      timestamp: Date.now() - 2000,
-      threadId,
-      deliveryStatus: 'queued',
-    });
+    await store.append(
+      canonicalTestMessageInput({
+        provenance: { author: 'cat', routed: false, observation: 'original' },
+        userId: 'u1',
+        catId: 'opus',
+        content: '@opus cat speech recent',
+        mentions: ['opus'],
+        timestamp: Date.now() - 2000,
+        threadId,
+        deliveryStatus: 'queued',
+      }),
+    );
 
     // H: hidden scheduler work
-    const h = await store.append({
-      userId: 'scheduler',
-      catId: null,
-      content: '@opus hidden recent',
-      mentions: ['opus'],
-      timestamp: Date.now() - 1000,
-      threadId,
-      deliveryStatus: 'queued',
-    });
+    const h = await store.append(
+      canonicalTestMessageInput({
+        provenance: { author: 'user', routed: false, observation: 'original' },
+        userId: 'scheduler',
+        catId: null,
+        content: '@opus hidden recent',
+        mentions: ['opus'],
+        timestamp: Date.now() - 1000,
+        threadId,
+        deliveryStatus: 'queued',
+      }),
+    );
 
     // Before delivery: C and Q visible, H invisible
     const recent1 = await store.getRecentMentionsFor('opus', 20, undefined, threadId);
@@ -239,26 +264,32 @@ describe('#1269 R12: Redis mention publication boundary parity', () => {
     const threadId = `r12-legacy-${Date.now()}`;
 
     // Q: queued real-cat speech — timeline-published
-    await store.append({
-      userId: 'u1',
-      catId: 'opus',
-      content: '@terra legacy cat speech',
-      mentions: ['terra'],
-      timestamp: Date.now() - 2000,
-      threadId,
-      deliveryStatus: 'queued',
-    });
+    await store.append(
+      canonicalTestMessageInput({
+        provenance: { author: 'cat', routed: false, observation: 'original' },
+        userId: 'u1',
+        catId: 'opus',
+        content: '@terra legacy cat speech',
+        mentions: ['terra'],
+        timestamp: Date.now() - 2000,
+        threadId,
+        deliveryStatus: 'queued',
+      }),
+    );
 
     // H: hidden scheduler work
-    const h = await store.append({
-      userId: 'scheduler',
-      catId: null,
-      content: '@terra legacy hidden',
-      mentions: ['terra'],
-      timestamp: Date.now() - 1000,
-      threadId,
-      deliveryStatus: 'queued',
-    });
+    const h = await store.append(
+      canonicalTestMessageInput({
+        provenance: { author: 'user', routed: false, observation: 'original' },
+        userId: 'scheduler',
+        catId: null,
+        content: '@terra legacy hidden',
+        mentions: ['terra'],
+        timestamp: Date.now() - 1000,
+        threadId,
+        deliveryStatus: 'queued',
+      }),
+    );
 
     // Legacy path (no threadId) — Q visible, H invisible
     const legacy1 = await store.getMentionsFor('terra', 20);

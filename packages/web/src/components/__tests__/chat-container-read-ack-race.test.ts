@@ -67,8 +67,6 @@ const baseStore = () => ({
   rightPanelMode: null,
   uiThinkingExpandedByDefault: false,
   queue: [],
-  queuePaused: false,
-  queuePauseReason: null,
   queueFull: false,
   queueFullSource: null,
   threads: [],

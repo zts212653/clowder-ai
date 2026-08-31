@@ -104,13 +104,16 @@ test('compileL0ViaSubprocess (no outPath) returns stdout as compiled L0', async 
   const out = await compileL0ViaSubprocess({ catId: 'opus-47', cwd: root, dataDir: root, spawnFn });
   assert.match(out, /布偶猫/);
   const call = spawnFn.calls[0];
-  assert.deepEqual(call.args, [
+  // F257 #2: --manifest-out <temp path> is always passed (temp path is a UUID → match on presence).
+  assert.deepEqual(call.args.slice(0, 5), [
     resolve(root, SCRIPT_REL),
     '--cat',
     'opus-47',
     '--profile-dir',
     resolve(root, 'profiles/default-user'),
   ]);
+  const mIdx = call.args.indexOf('--manifest-out');
+  assert.ok(mIdx >= 0 && typeof call.args[mIdx + 1] === 'string', 'passes --manifest-out <path>');
   assert.ok(!call.args.includes('--out'), 'no --out when outPath omitted');
 });
 
@@ -153,15 +156,17 @@ test('compileL0ViaSubprocess (outPath) passes --out and returns file content', a
   const out = await compileL0ViaSubprocess({ catId: 'codex', cwd: root, dataDir: root, outPath, spawnFn });
   assert.equal(out, 'COMPILED-L0-FILE-CONTENT');
   const call = spawnFn.calls[0];
-  assert.deepEqual(call.args, [
+  // F257 #2: --manifest-out is always present; --out carries the caller's path.
+  assert.deepEqual(call.args.slice(0, 5), [
     resolve(root, SCRIPT_REL),
     '--cat',
     'codex',
     '--profile-dir',
     resolve(root, 'profiles/default-user'),
-    '--out',
-    outPath,
   ]);
+  const oIdx = call.args.indexOf('--out');
+  assert.equal(call.args[oIdx + 1], outPath, 'passes --out <outPath>');
+  assert.ok(call.args.includes('--manifest-out'), 'also passes --manifest-out');
 });
 
 test('compileL0ViaSubprocess fail-closed: unresolvable script path throws', async () => {

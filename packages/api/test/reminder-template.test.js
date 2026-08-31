@@ -151,6 +151,42 @@ describe('reminderTemplate', () => {
     assert.equal(triggerMock.trigger.mock.calls[0].arguments[1], 'sonnet');
   });
 
+  it('F257 LI-001: hold-ball reminder opts into action-or-routing-exit completion', async () => {
+    const deliverMock = mock.fn(async () => 'msg-hold-wake');
+    const triggerMock = { trigger: mock.fn() };
+    const spec = reminderTemplate.createSpec('hold-ball-1748000000-liveness', {
+      trigger: { type: 'once', fireAt: Date.now() + 60_000 },
+      params: { message: '持球唤醒', targetCatId: 'gpt52' },
+      deliveryThreadId: 'th-hold-liveness',
+    });
+
+    await spec.run.execute('持球唤醒', 'thread-th-hold-liveness', {
+      assignedCatId: null,
+      deliver: deliverMock,
+      invokeTrigger: triggerMock,
+    });
+
+    assert.equal(triggerMock.trigger.mock.calls[0].arguments[6]?.completionRequirement, 'action-or-routing-exit');
+  });
+
+  it('F257 LI-001: ordinary reminder does not opt into action liveness', async () => {
+    const deliverMock = mock.fn(async () => 'msg-normal-reminder');
+    const triggerMock = { trigger: mock.fn() };
+    const spec = reminderTemplate.createSpec('dyn-1748000000-normal', {
+      trigger: { type: 'once', fireAt: Date.now() + 60_000 },
+      params: { message: 'ordinary reminder', targetCatId: 'gpt52' },
+      deliveryThreadId: 'th-normal-reminder',
+    });
+
+    await spec.run.execute('ordinary reminder', 'thread-th-normal-reminder', {
+      assignedCatId: null,
+      deliver: deliverMock,
+      invokeTrigger: triggerMock,
+    });
+
+    assert.equal(triggerMock.trigger.mock.calls[0].arguments[6]?.completionRequirement, undefined);
+  });
+
   it('uses default message when param is empty', async () => {
     const deliverMock = mock.fn(async () => 'msg-3');
     const spec = reminderTemplate.createSpec('rem-6', {
@@ -214,5 +250,54 @@ describe('reminderTemplate firePolicy activation guard (F167 Phase M — codex P
       deliveryThreadId: 'th-nodefer',
     });
     assert.equal(spec.firePolicy, undefined);
+  });
+});
+
+describe('reminderTemplate — once-trigger idempotency (sol P1 regression收口)', () => {
+  it('once trigger passes a per-instance idempotencyKey to deliver (bounded-retry safe)', async () => {
+    const deliverMock = mock.fn(async () => 'msg-once');
+    const spec = reminderTemplate.createSpec('hold-ball-1748000000-idem', {
+      trigger: { type: 'once', fireAt: Date.now() + 60_000 },
+      params: { message: 'wake' },
+      deliveryThreadId: 'th-idem',
+    });
+    await spec.run.execute('wake', 'thread-th-idem', { assignedCatId: null, deliver: deliverMock });
+    assert.equal(deliverMock.mock.calls[0].arguments[0].idempotencyKey, 'reminder:hold-ball-1748000000-idem');
+  });
+
+  it('cron trigger does NOT pass idempotencyKey (each slot is a distinct firing)', async () => {
+    const deliverMock = mock.fn(async () => 'msg-cron');
+    const spec = reminderTemplate.createSpec('rem-cron-idem', {
+      trigger: { type: 'cron', expression: '0 9 * * *' },
+      params: { message: '喝水提醒' },
+      deliveryThreadId: 'th-cron-idem',
+    });
+    await spec.run.execute('喝水提醒', 'thread-th-cron-idem', { assignedCatId: null, deliver: deliverMock });
+    assert.equal(deliverMock.mock.calls[0].arguments[0].idempotencyKey, undefined);
+  });
+
+  it('REGRESSION red→green: hold-ball once wake persists with system provenance via real store', async () => {
+    // 2026-07-20 → 23 incident: this exact path threw `append requires
+    // provenance` at the write boundary (RUN_FAILED → silent retire → lost
+    // hold-ball wake). End-to-end through the REAL in-memory MessageStore.
+    const { MessageStore } = await import('../dist/domains/cats/services/stores/ports/MessageStore.js');
+    const { createDeliverFn } = await import('../dist/infrastructure/scheduler/delivery.js');
+    const messageStore = new MessageStore();
+    const deliver = createDeliverFn({
+      messageStore,
+      socketManager: { broadcastToRoom: () => {}, emitToUser: () => {} },
+    });
+    const spec = reminderTemplate.createSpec('hold-ball-1748000000-e2e', {
+      trigger: { type: 'once', fireAt: Date.now() + 60_000 },
+      params: { message: '持球唤醒' },
+      deliveryThreadId: 'th-hold-e2e',
+    });
+
+    await spec.run.execute('持球唤醒', 'thread-th-hold-e2e', { assignedCatId: null, deliver });
+
+    const messages = messageStore.getByThread('th-hold-e2e');
+    assert.equal(messages.length, 1);
+    assert.deepEqual(messages[0].provenance, { author: 'system', routed: false, observation: 'original' });
+    assert.equal(messages[0].content, `${SCHEDULER_TRIGGER_PREFIX} 持球唤醒`);
   });
 });

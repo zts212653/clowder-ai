@@ -21,7 +21,7 @@ function makeTmpCwd() {
 // setupHookInfrastructure — settings.json creation
 // ---------------------------------------------------------------------------
 
-test('hook setup: creates .claude/settings.json with Stop + PostToolUse hooks', async () => {
+test('hook setup: creates .claude/settings.json with Stop + PostToolUse + PostToolUseFailure hooks', async () => {
   const tmpCwd = makeTmpCwd();
   const sidecarPath = join(tmpCwd, 'sidecar.jsonl');
   const result = await setupHookInfrastructure(tmpCwd, sidecarPath);
@@ -45,6 +45,13 @@ test('hook setup: creates .claude/settings.json with Stop + PostToolUse hooks', 
     assert.ok(
       settings.hooks.PostToolUse[0].hooks[0].command.includes(result.scriptPath),
       'PostToolUse hook must point to capture script',
+    );
+    // LI-005: PostToolUseFailure must be registered for failure path bridging
+    assert.ok(settings.hooks.PostToolUseFailure, 'PostToolUseFailure hook must be configured');
+    assert.ok(Array.isArray(settings.hooks.PostToolUseFailure), 'PostToolUseFailure must be array');
+    assert.ok(
+      settings.hooks.PostToolUseFailure[0].hooks[0].command.includes(result.scriptPath),
+      'PostToolUseFailure hook must point to capture script',
     );
   } finally {
     await result.cleanup();

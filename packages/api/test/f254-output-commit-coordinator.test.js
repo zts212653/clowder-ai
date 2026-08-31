@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
+import { canonicalTestMessageInput } from './helpers/message-from-fixtures.js';
 
 const { MessageStore } = await import('../dist/domains/cats/services/stores/ports/MessageStore.js');
 const { InMemoryFreshnessClosureStore } = await import(
@@ -15,7 +16,8 @@ const { getFreshnessGlassBoxTelemetrySnapshot, resetFreshnessGlassBoxTelemetryFo
 const scope = { userId: 'user-1', threadId: 'thread-1', catId: 'codex-sol' };
 
 function draft(content = 'draft') {
-  return {
+  return canonicalTestMessageInput({
+    provenance: { author: 'cat', routed: false, observation: 'original' },
     userId: scope.userId,
     catId: scope.catId,
     content,
@@ -23,7 +25,7 @@ function draft(content = 'draft') {
     timestamp: 200,
     threadId: scope.threadId,
     origin: 'stream',
-  };
+  });
 }
 
 function stale(messageId) {
@@ -56,14 +58,17 @@ function fresh(seenCursor) {
 describe('F254 ADR-042 — glass-box output commit', () => {
   it('publishes a known-stale original, annotates its exact boundary, and offers seq 1', async () => {
     const messageStore = new MessageStore();
-    const unseen = await messageStore.append({
-      userId: scope.userId,
-      catId: null,
-      content: 'late correction',
-      mentions: [scope.catId],
-      timestamp: 150,
-      threadId: scope.threadId,
-    });
+    const unseen = await messageStore.append(
+      canonicalTestMessageInput({
+        provenance: { author: 'user', routed: false, observation: 'original' },
+        userId: scope.userId,
+        catId: null,
+        content: 'late correction',
+        mentions: [scope.catId],
+        timestamp: 150,
+        threadId: scope.threadId,
+      }),
+    );
     const closureStore = new InMemoryFreshnessClosureStore();
     const coordinator = new FreshnessOutputCommitCoordinator({ messageStore, closureStore });
 
@@ -98,15 +103,18 @@ describe('F254 ADR-042 — glass-box output commit', () => {
 
   it('publishes the completed original but leaves ordinary queued work solely owned by Queue', async () => {
     const messageStore = new MessageStore();
-    const queued = await messageStore.append({
-      userId: scope.userId,
-      catId: null,
-      content: 'queued update',
-      mentions: [scope.catId],
-      timestamp: 150,
-      threadId: scope.threadId,
-      deliveryStatus: 'queued',
-    });
+    const queued = await messageStore.append(
+      canonicalTestMessageInput({
+        provenance: { author: 'user', routed: false, observation: 'original' },
+        userId: scope.userId,
+        catId: null,
+        content: 'queued update',
+        mentions: [scope.catId],
+        timestamp: 150,
+        threadId: scope.threadId,
+        deliveryStatus: 'queued',
+      }),
+    );
     const closureStore = new InMemoryFreshnessClosureStore();
     const coordinator = new FreshnessOutputCommitCoordinator({ messageStore, closureStore });
 
@@ -238,14 +246,17 @@ describe('F254 ADR-042 — glass-box output commit', () => {
 
   it('does not claim published_with_unseen when the successful offer annotation cannot persist', async () => {
     const messageStore = new MessageStore();
-    const unseen = await messageStore.append({
-      userId: scope.userId,
-      catId: null,
-      content: 'late correction',
-      mentions: [scope.catId],
-      timestamp: 150,
-      threadId: scope.threadId,
-    });
+    const unseen = await messageStore.append(
+      canonicalTestMessageInput({
+        provenance: { author: 'user', routed: false, observation: 'original' },
+        userId: scope.userId,
+        catId: null,
+        content: 'late correction',
+        mentions: [scope.catId],
+        timestamp: 150,
+        threadId: scope.threadId,
+      }),
+    );
     messageStore.updateExtra = async () => {
       throw new Error('metadata store unavailable');
     };
@@ -274,14 +285,17 @@ describe('F254 ADR-042 — glass-box output commit', () => {
 
   it('marks the published original when supplement responsibility cannot be persisted', async () => {
     const messageStore = new MessageStore();
-    const unseen = await messageStore.append({
-      userId: scope.userId,
-      catId: null,
-      content: 'late correction',
-      mentions: [scope.catId],
-      timestamp: 150,
-      threadId: scope.threadId,
-    });
+    const unseen = await messageStore.append(
+      canonicalTestMessageInput({
+        provenance: { author: 'user', routed: false, observation: 'original' },
+        userId: scope.userId,
+        catId: null,
+        content: 'late correction',
+        mentions: [scope.catId],
+        timestamp: 150,
+        threadId: scope.threadId,
+      }),
+    );
     const closureStore = new InMemoryFreshnessClosureStore();
     closureStore.offerSupplement = async () => {
       throw new Error('supplement store unavailable');
@@ -313,14 +327,17 @@ describe('F254 ADR-042 — glass-box output commit', () => {
 
   it('keeps the atomic pre-append frontier when another message arrives during the scan', async () => {
     const messageStore = new MessageStore();
-    const trigger = await messageStore.append({
-      userId: scope.userId,
-      catId: null,
-      content: 'question',
-      mentions: [scope.catId],
-      timestamp: 100,
-      threadId: scope.threadId,
-    });
+    const trigger = await messageStore.append(
+      canonicalTestMessageInput({
+        provenance: { author: 'user', routed: false, observation: 'original' },
+        userId: scope.userId,
+        catId: null,
+        content: 'question',
+        mentions: [scope.catId],
+        timestamp: 100,
+        threadId: scope.threadId,
+      }),
+    );
     const closureStore = new InMemoryFreshnessClosureStore();
     const coordinator = new FreshnessOutputCommitCoordinator({ messageStore, closureStore });
 
@@ -330,14 +347,17 @@ describe('F254 ADR-042 — glass-box output commit', () => {
       message: draft('answer linearized before later facts'),
       evaluateFreshness: async (priorFrontierMessageId) => {
         assert.equal(priorFrontierMessageId, trigger.id);
-        await messageStore.append({
-          userId: scope.userId,
-          catId: null,
-          content: 'arrived after publication',
-          mentions: [scope.catId],
-          timestamp: 250,
-          threadId: scope.threadId,
-        });
+        await messageStore.append(
+          canonicalTestMessageInput({
+            provenance: { author: 'user', routed: false, observation: 'original' },
+            userId: scope.userId,
+            catId: null,
+            content: 'arrived after publication',
+            mentions: [scope.catId],
+            timestamp: 250,
+            threadId: scope.threadId,
+          }),
+        );
         return { freshness: fresh(trigger.id), rawFrontierMessageId: priorFrontierMessageId };
       },
     });
@@ -352,14 +372,17 @@ describe('F254 ADR-042 — glass-box output commit', () => {
 
   it('idempotent retry reuses the published message and original observation boundary', async () => {
     const messageStore = new MessageStore();
-    const frontier = await messageStore.append({
-      userId: scope.userId,
-      catId: null,
-      content: 'question',
-      mentions: [],
-      timestamp: 100,
-      threadId: scope.threadId,
-    });
+    const frontier = await messageStore.append(
+      canonicalTestMessageInput({
+        provenance: { author: 'user', routed: false, observation: 'original' },
+        userId: scope.userId,
+        catId: null,
+        content: 'question',
+        mentions: [],
+        timestamp: 100,
+        threadId: scope.threadId,
+      }),
+    );
     const closureStore = new InMemoryFreshnessClosureStore();
     const coordinator = new FreshnessOutputCommitCoordinator({ messageStore, closureStore });
     const input = {
@@ -386,14 +409,17 @@ describe('F254 ADR-042 — glass-box output commit', () => {
 
   it('persists checked_no_supplement_needed without creating an empty bubble', async () => {
     const messageStore = new MessageStore();
-    const unseen = await messageStore.append({
-      userId: scope.userId,
-      catId: null,
-      content: 'late correction',
-      mentions: [],
-      timestamp: 150,
-      threadId: scope.threadId,
-    });
+    const unseen = await messageStore.append(
+      canonicalTestMessageInput({
+        provenance: { author: 'user', routed: false, observation: 'original' },
+        userId: scope.userId,
+        catId: null,
+        content: 'late correction',
+        mentions: [],
+        timestamp: 150,
+        threadId: scope.threadId,
+      }),
+    );
     const closureStore = new InMemoryFreshnessClosureStore();
     const coordinator = new FreshnessOutputCommitCoordinator({ messageStore, closureStore });
     const original = await coordinator.commit({
@@ -432,14 +458,17 @@ describe('F254 ADR-042 — glass-box output commit', () => {
   it('fails closed when a routing hook appends prose after the internal decline marker', async () => {
     resetFreshnessGlassBoxTelemetryForTest();
     const messageStore = new MessageStore();
-    const unseen = await messageStore.append({
-      userId: scope.userId,
-      catId: null,
-      content: 'late correction',
-      mentions: [],
-      timestamp: 150,
-      threadId: scope.threadId,
-    });
+    const unseen = await messageStore.append(
+      canonicalTestMessageInput({
+        provenance: { author: 'user', routed: false, observation: 'original' },
+        userId: scope.userId,
+        catId: null,
+        content: 'late correction',
+        mentions: [],
+        timestamp: 150,
+        threadId: scope.threadId,
+      }),
+    );
     const closureStore = new InMemoryFreshnessClosureStore();
     const coordinator = new FreshnessOutputCommitCoordinator({ messageStore, closureStore });
     const original = await coordinator.commit({
@@ -478,14 +507,17 @@ describe('F254 ADR-042 — glass-box output commit', () => {
 
   it('commits a supplement as a current-timestamp reply linked to the original', async () => {
     const messageStore = new MessageStore();
-    const unseen = await messageStore.append({
-      userId: scope.userId,
-      catId: null,
-      content: 'late correction',
-      mentions: [],
-      timestamp: 150,
-      threadId: scope.threadId,
-    });
+    const unseen = await messageStore.append(
+      canonicalTestMessageInput({
+        provenance: { author: 'user', routed: false, observation: 'original' },
+        userId: scope.userId,
+        catId: null,
+        content: 'late correction',
+        mentions: [],
+        timestamp: 150,
+        threadId: scope.threadId,
+      }),
+    );
     const closureStore = new InMemoryFreshnessClosureStore();
     const coordinator = new FreshnessOutputCommitCoordinator({ messageStore, closureStore });
     const original = await coordinator.commit({
@@ -530,14 +562,17 @@ describe('F254 ADR-042 — glass-box output commit', () => {
 
   it('retries the supplement state transition after the reply body is already durable', async () => {
     const messageStore = new MessageStore();
-    const unseen = await messageStore.append({
-      userId: scope.userId,
-      catId: null,
-      content: 'late correction',
-      mentions: [],
-      timestamp: 150,
-      threadId: scope.threadId,
-    });
+    const unseen = await messageStore.append(
+      canonicalTestMessageInput({
+        provenance: { author: 'user', routed: false, observation: 'original' },
+        userId: scope.userId,
+        catId: null,
+        content: 'late correction',
+        mentions: [],
+        timestamp: 150,
+        threadId: scope.threadId,
+      }),
+    );
     const closureStore = new InMemoryFreshnessClosureStore();
     const coordinator = new FreshnessOutputCommitCoordinator({ messageStore, closureStore });
     const original = await coordinator.commit({
@@ -583,14 +618,17 @@ describe('F254 ADR-042 — glass-box output commit', () => {
 
   it('returns a deliverable degraded decision if supplement state persistence remains unavailable', async () => {
     const messageStore = new MessageStore();
-    const unseen = await messageStore.append({
-      userId: scope.userId,
-      catId: null,
-      content: 'late correction',
-      mentions: [],
-      timestamp: 150,
-      threadId: scope.threadId,
-    });
+    const unseen = await messageStore.append(
+      canonicalTestMessageInput({
+        provenance: { author: 'user', routed: false, observation: 'original' },
+        userId: scope.userId,
+        catId: null,
+        content: 'late correction',
+        mentions: [],
+        timestamp: 150,
+        threadId: scope.threadId,
+      }),
+    );
     const closureStore = new InMemoryFreshnessClosureStore();
     const coordinator = new FreshnessOutputCommitCoordinator({ messageStore, closureStore });
     const original = await coordinator.commit({

@@ -5,7 +5,6 @@ export type DebugEventName =
   | 'intent_mode'
   | 'history_replace'
   | 'queue_updated'
-  | 'queue_paused'
   | 'agent_message'
   | 'bubble_lifecycle'
   | 'bubble_invariant_violation'
@@ -23,7 +22,6 @@ export const EVENT_KEYS = [
   'isFinal',
   'routeThreadId',
   'storeThreadId',
-  'queuePaused',
   'hasActiveInvocation',
   'reason',
   'catId',
@@ -57,7 +55,6 @@ export type StoredDebugEvent = {
   isFinal?: boolean;
   routeThreadId?: string;
   storeThreadId?: string;
-  queuePaused?: boolean;
   hasActiveInvocation?: boolean;
   reason?: string;
   catId?: string;

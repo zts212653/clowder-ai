@@ -2,19 +2,22 @@ import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
 
 import { MessageStore } from '../dist/domains/cats/services/stores/ports/MessageStore.js';
+import { canonicalTestMessageInput } from './helpers/message-from-fixtures.js';
 import { makeQueuedMessageCustody as makeCustody } from './helpers/queued-message-custody.js';
 
 function appendQueued(store, custody = makeCustody()) {
-  return store.append({
-    userId: 'user-1',
-    catId: null,
-    content: 'durable queued work',
-    mentions: ['opus', 'codex'],
-    timestamp: 1_000,
-    threadId: 'thread-1',
-    deliveryStatus: 'queued',
-    queueCustody: custody,
-  });
+  return store.append(
+    canonicalTestMessageInput({
+      userId: 'user-1',
+      catId: null,
+      content: 'durable queued work',
+      mentions: ['opus', 'codex'],
+      timestamp: 1_000,
+      threadId: 'thread-1',
+      deliveryStatus: 'queued',
+      queueCustody: custody,
+    }),
+  );
 }
 
 describe('F254 queued message custody store', () => {
@@ -98,38 +101,44 @@ describe('F254 queued message custody store', () => {
   test('forward queued-inclusive reads preserve raw thread order across an exposed queued cursor', () => {
     const store = new MessageStore();
     const threadId = 'thread-queued-inclusive-forward-memory';
-    const before = store.append({
-      userId: 'user-1',
-      catId: null,
-      content: 'before',
-      mentions: [],
-      timestamp: 1_000,
-      threadId,
-    });
-    const exposed = store.append({
-      userId: 'user-1',
-      catId: null,
-      content: 'exposed queued body',
-      mentions: ['opus'],
-      timestamp: 2_000,
-      threadId,
-      deliveryStatus: 'queued',
-      queueCustody: makeCustody({
-        allTargetCats: ['opus'],
-        pendingTargetCats: ['opus'],
-        seenByCatIds: ['opus'],
-        seenInvocationIdByCatId: { opus: 'sealed-child' },
-        bodyExposures: [{ targetCatId: 'opus', invocationId: 'sealed-child', seenAt: 2_100 }],
+    const before = store.append(
+      canonicalTestMessageInput({
+        userId: 'user-1',
+        catId: null,
+        content: 'before',
+        mentions: [],
+        timestamp: 1_000,
+        threadId,
       }),
-    });
-    const after = store.append({
-      userId: 'user-1',
-      catId: 'codex',
-      content: 'after',
-      mentions: [],
-      timestamp: 2_000,
-      threadId,
-    });
+    );
+    const exposed = store.append(
+      canonicalTestMessageInput({
+        userId: 'user-1',
+        catId: null,
+        content: 'exposed queued body',
+        mentions: ['opus'],
+        timestamp: 2_000,
+        threadId,
+        deliveryStatus: 'queued',
+        queueCustody: makeCustody({
+          allTargetCats: ['opus'],
+          pendingTargetCats: ['opus'],
+          seenByCatIds: ['opus'],
+          seenInvocationIdByCatId: { opus: 'sealed-child' },
+          bodyExposures: [{ targetCatId: 'opus', invocationId: 'sealed-child', seenAt: 2_100 }],
+        }),
+      }),
+    );
+    const after = store.append(
+      canonicalTestMessageInput({
+        userId: 'user-1',
+        catId: 'codex',
+        content: 'after',
+        mentions: [],
+        timestamp: 2_000,
+        threadId,
+      }),
+    );
     const options = {
       includeQueuedCatMessages: true,
       includeExposedQueuedUserMessagesForCatId: 'opus',

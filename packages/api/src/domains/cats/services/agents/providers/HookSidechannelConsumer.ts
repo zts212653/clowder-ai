@@ -11,7 +11,8 @@
  *
  * Design decisions (from Fable-5 spike b570d6148 + KD-7):
  * - Stop event → text AgentMessage (last_assistant_message = full reply)
- * - PostToolUse → tool_use AgentMessage (tool step visibility)
+ * - PostToolUse → tool_use + tool_result AgentMessages (tool step visibility + LI-005 durable trigger)
+ * - PostToolUseFailure → tool_result(error) AgentMessage (LI-005: failure path bridge)
  * - Stop = terminal signal (replaces transcript turn_duration detection)
  * - session_id from hook events (backup for transcript-watch)
  * - No usage/token data from hooks — accepted degradation
@@ -28,10 +29,25 @@ export interface HookConsumerOptions {
 }
 
 /**
+ * Normalize tool_response from hook events to a string for downstream parsing.
+ * PostToolUse tool_response shapes vary by tool:
+ *   - Read: `{type:'text', file:{content:'...', totalLines:50}}`
+ *   - Bash: `{stdout:'...'}`
+ *   - MCP: `'{"status":"ok",...}'` (string) or structured object
+ *   - Missing: `undefined`
+ */
+function normalizeToolResponse(raw: unknown): string | undefined {
+  if (raw == null) return undefined;
+  if (typeof raw === 'string') return raw;
+  if (typeof raw === 'object') return JSON.stringify(raw);
+  return String(raw);
+}
+
+/**
  * Transform hook sidecar entries to AgentMessages.
  *
  * Pure function — no I/O, no state. Safe for incremental tailing.
- * Only Stop and PostToolUse are recognized; unknown events are skipped.
+ * Stop, PostToolUse, and PostToolUseFailure are recognized; unknown events are skipped.
  */
 export function hookEntriesToAgentMessages(entries: unknown[], options: HookConsumerOptions): AgentMessage[] {
   const { catId } = options;
@@ -55,6 +71,7 @@ export function hookEntriesToAgentMessages(entries: unknown[], options: HookCons
 
     if (hookName === 'PostToolUse') {
       if (typeof entry.tool_name !== 'string') continue;
+      const toolUseId = typeof entry.tool_use_id === 'string' ? entry.tool_use_id : undefined;
       out.push({
         type: 'tool_use',
         catId,
@@ -62,9 +79,40 @@ export function hookEntriesToAgentMessages(entries: unknown[], options: HookCons
         toolInput: (typeof entry.tool_input === 'object' && entry.tool_input !== null
           ? entry.tool_input
           : {}) as Record<string, unknown>,
-        toolUseId: typeof entry.tool_use_id === 'string' ? entry.tool_use_id : undefined,
+        toolUseId,
         timestamp: Date.now(),
       });
+      // LI-005: emit tool_result for durable trigger classification.
+      // PostToolUse fires on successful tool completion (per cc hook contract).
+      // tool_response shape varies by tool: string, object, or array.
+      // Normalize to string so classifyDurableTriggerResult Level 2 can parse.
+      const resultMsg: AgentMessage = {
+        type: 'tool_result',
+        catId,
+        content: normalizeToolResponse(entry.tool_response),
+        timestamp: Date.now(),
+        toolResultStatus: 'ok',
+      };
+      if (toolUseId) resultMsg.toolUseId = toolUseId;
+      out.push(resultMsg);
+      continue;
+    }
+
+    // LI-005: PostToolUseFailure → tool_result(error) for failure path.
+    // cc fires PostToolUseFailure on tool execution failure; PostToolUse is
+    // success-only. Registering both ensures confirmedCallbackToolNames
+    // correctly excludes failed durable triggers.
+    if (hookName === 'PostToolUseFailure') {
+      const toolUseId = typeof entry.tool_use_id === 'string' ? entry.tool_use_id : undefined;
+      const resultMsg: AgentMessage = {
+        type: 'tool_result',
+        catId,
+        content: normalizeToolResponse(entry.tool_response),
+        timestamp: Date.now(),
+        toolResultStatus: 'error',
+      };
+      if (toolUseId) resultMsg.toolUseId = toolUseId;
+      out.push(resultMsg);
     }
 
     // Unknown hook event names — silently skip

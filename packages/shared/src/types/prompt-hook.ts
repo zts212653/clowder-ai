@@ -22,6 +22,13 @@ export type SafetyTier = 'readonly' | 'limited-edit' | 'editable';
 export type TransparencyTier = 'visible-by-default' | 'opt-in-view' | 'debug-only';
 export type GovernanceTier = 'immutable' | 'human-gated' | 'auto-evolve';
 
+/** Canonical description of a single {{VAR}} placeholder used by a segment. */
+export interface HookVariableDef {
+  name: string;
+  description?: string;
+  placeholder?: string;
+}
+
 // ---------------------------------------------------------------------------
 // HookManifest — parsed from hook.yaml
 // ---------------------------------------------------------------------------
@@ -49,6 +56,9 @@ export interface HookManifest {
   // -- Dependencies --
   /** AssemblerInput fields this hook reads */
   inputs: string[];
+
+  /** Per-variable definitions for templates that use {{VAR}} placeholders. */
+  variables?: HookVariableDef[];
 
   // -- Override constraints --
   /** Whether runtime disable is allowed (false = immutable, e.g. S1/D8/L1-L7) */
@@ -98,6 +108,10 @@ export interface TraceEventFired extends TraceEventBase {
   version: number;
   contentHash: string;
   tokenEstimate: number;
+  content?: string;
+  contentSourceKind?: import('./segment-lifecycle.js').SegmentContentSourceKind;
+  templateRef?: string | null;
+  templateVars?: Record<string, string> | null;
 }
 
 export interface TraceEventSkipped extends TraceEventBase {

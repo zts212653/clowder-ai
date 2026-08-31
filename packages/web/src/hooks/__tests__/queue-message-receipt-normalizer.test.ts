@@ -79,4 +79,80 @@ describe('normalizeQueueMessageReceiptProjections', () => {
       }),
     ]);
   });
+
+  it('preserves cancellation and exact active-append acceptance from Queue History', () => {
+    const projections = normalizeQueueMessageReceiptProjections([
+      {
+        messageId: 'message-cancelled',
+        queueReceipt: {
+          version: 1,
+          entryId: 'entry-cancelled',
+          targets: [
+            {
+              catId: 'codex-sol',
+              state: 'cancelled',
+              invocationId: 'invocation-cancelled',
+              seenAt: 1_100,
+              attempts: [
+                {
+                  id: 'entry-cancelled:codex-sol:1',
+                  targetCatId: 'codex-sol',
+                  sequence: 1,
+                  state: 'cancelled',
+                  invocationId: 'invocation-cancelled',
+                  seenAt: 1_100,
+                  activeAppendAcceptedAt: 1_150,
+                  terminalReason: 'invocation_cancelled',
+                  createdAt: 1_000,
+                  updatedAt: 1_200,
+                },
+              ],
+            },
+          ],
+          reminderAttempts: [],
+        },
+      },
+    ]);
+
+    expect(projections[0]?.queueReceipt.targets[0]).toMatchObject({
+      state: 'cancelled',
+      attempts: [{ state: 'cancelled', activeAppendAcceptedAt: 1_150 }],
+    });
+  });
+
+  it('drops append acceptance that is not fenced to a prior exact exposure', () => {
+    const projections = normalizeQueueMessageReceiptProjections([
+      {
+        messageId: 'message-malformed-append',
+        queueReceipt: {
+          version: 1,
+          entryId: 'entry-malformed-append',
+          targets: [
+            {
+              catId: 'codex-sol',
+              state: 'seen',
+              invocationId: 'invocation-1',
+              seenAt: 1_100,
+              attempts: [
+                {
+                  id: 'entry-malformed-append:codex-sol:1',
+                  targetCatId: 'codex-sol',
+                  sequence: 1,
+                  state: 'appended',
+                  invocationId: 'invocation-1',
+                  seenAt: 1_100,
+                  activeAppendAcceptedAt: 1_050,
+                  createdAt: 1_000,
+                  updatedAt: 1_200,
+                },
+              ],
+            },
+          ],
+          reminderAttempts: [],
+        },
+      },
+    ]);
+
+    expect(projections[0]?.queueReceipt.targets[0]?.attempts).toEqual([]);
+  });
 });

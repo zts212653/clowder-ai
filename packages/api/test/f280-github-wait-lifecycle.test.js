@@ -85,7 +85,7 @@ describe('F280 GitHub wait lifecycle integration', () => {
     });
 
     assert.equal(result.kind, 'state_only');
-    assert.equal(messageStore.getByThread('thread_1').length, 0);
+    assert.equal(messageStore.getByThreadIncludingQueued('thread_1').length, 0);
     assert.equal((await taskStore.get(task.id)).automationState.await.generation, 3);
     assert.equal((await taskStore.get(task.id)).automationState.review.lastDecisionCursor, 99);
   });
@@ -138,7 +138,7 @@ describe('F280 GitHub wait lifecycle integration', () => {
       { taskId: task.id },
     );
     assert.equal(commented.kind, 'skipped');
-    assert.equal(messageStore.getByThread('thread_1').length, 0);
+    assert.equal(messageStore.getByThreadIncludingQueued('thread_1').length, 0);
     assert.equal((await taskStore.get(task.id)).automationState.review.lastDecisionCursor, 99);
     assert.equal((await taskStore.get(task.id)).automationState.ci.lastBucket, 'fail');
 
@@ -158,7 +158,7 @@ describe('F280 GitHub wait lifecycle integration', () => {
     assert.equal(newHead.kind, 'notified');
     assert.match(newHead.content, /HEAD aaaa111 → bbbb222/);
     assert.doesNotMatch(newHead.content, /mindfn|UNTRUSTED_REVIEW_BODY/);
-    assert.equal(messageStore.getByThread('thread_1').length, 1);
+    assert.equal(messageStore.getByThreadIncludingQueued('thread_1').length, 1);
   });
 
   it('consumes a generation once and publishes only compact baseline delta plus next step', async () => {
@@ -174,7 +174,7 @@ describe('F280 GitHub wait lifecycle integration', () => {
 
     assert.equal(first.kind, 'notified');
     assert.notEqual(replay.kind, 'notified');
-    const messages = messageStore.getByThread('thread_1');
+    const messages = messageStore.getByThreadIncludingQueued('thread_1');
     assert.equal(messages.length, 1);
     assert.match(messages[0].content, /HEAD aaaa111 → bbbb222/);
     assert.match(messages[0].content, /Next: Re-lock the exact HEAD/);
@@ -291,8 +291,8 @@ describe('F280 GitHub wait lifecycle integration', () => {
     assert.equal((await eventLog.read(silent.id)).length, 1);
     assert.equal((await eventLog.read(silent.id))[0].reason, 'superseded');
     assert.equal((await eventLog.read(pending.id)).length, 1);
-    assert.equal(messageStore.getByThread('thread_silent').length, 0);
-    assert.equal(messageStore.getByThread('thread_pending').length, 1);
+    assert.equal(messageStore.getByThreadIncludingQueued('thread_silent').length, 0);
+    assert.equal(messageStore.getByThreadIncludingQueued('thread_pending').length, 1);
     assert.equal((await taskStore.get(pending.id)).automationState.waitOutcome.delivery, 'delivered');
   });
 
@@ -364,9 +364,9 @@ describe('F280 GitHub wait lifecycle integration', () => {
 
     assert.deepEqual(await sweep.run(), { recovered: 2 });
 
-    assert.equal(messageStore.getByThread(legacy.threadId).length, 0);
+    assert.equal(messageStore.getByThreadIncludingQueued(legacy.threadId).length, 0);
     assert.equal((await taskStore.get(legacy.id)).automationState.waitOutcome.delivery, 'legacy_unfenced');
-    assert.equal(messageStore.getByThread(current.threadId).length, 1);
+    assert.equal(messageStore.getByThreadIncludingQueued(current.threadId).length, 1);
     assert.equal((await taskStore.get(current.id)).automationState.waitOutcome.delivery, 'delivered');
     assert.ok(warnings.some((args) => args.some((value) => String(value).includes(legacy.id))));
   });

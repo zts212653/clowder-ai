@@ -11,6 +11,7 @@ import { TaskStore } from '../dist/domains/cats/services/stores/ports/TaskStore.
 import { ThreadStore } from '../dist/domains/cats/services/stores/ports/ThreadStore.js';
 import { CommandRegistry } from '../dist/infrastructure/commands/CommandRegistry.js';
 import { commandsRoutes } from '../dist/routes/commands.js';
+import { canonicalTestMessageInput } from './helpers/message-from-fixtures.js';
 
 // Mock opus service
 const mockOpusService = {
@@ -59,12 +60,15 @@ describe('Commands Routes', () => {
 
   it('POST /api/commands/extract-tasks creates tasks', async () => {
     // Add some messages first
-    await messageStore.append({
-      content: 'TODO: write tests',
-      userId: 'test-user',
-      threadId: ownThreadId,
-      timestamp: TEST_MESSAGE_TIMESTAMP,
-    });
+    await messageStore.append(
+      canonicalTestMessageInput({
+        provenance: { author: 'user', routed: false, observation: 'original' },
+        content: 'TODO: write tests',
+        userId: 'test-user',
+        threadId: ownThreadId,
+        timestamp: TEST_MESSAGE_TIMESTAMP,
+      }),
+    );
 
     const res = await app.inject({
       method: 'POST',
@@ -109,12 +113,15 @@ describe('Commands Routes', () => {
   });
 
   it('uses X-Cat-Cafe-User header over legacy payload userId', async () => {
-    await messageStore.append({
-      content: 'TODO: header identity should win',
-      userId: 'test-user',
-      threadId: ownThreadId,
-      timestamp: TEST_MESSAGE_TIMESTAMP,
-    });
+    await messageStore.append(
+      canonicalTestMessageInput({
+        provenance: { author: 'user', routed: false, observation: 'original' },
+        content: 'TODO: header identity should win',
+        userId: 'test-user',
+        threadId: ownThreadId,
+        timestamp: TEST_MESSAGE_TIMESTAMP,
+      }),
+    );
 
     const res = await app.inject({
       method: 'POST',
@@ -144,12 +151,15 @@ describe('Commands Routes', () => {
   });
 
   it('returns 403 when accessing another user thread', async () => {
-    await messageStore.append({
-      content: 'TODO: should not be visible',
-      userId: 'other-user',
-      threadId: otherThreadId,
-      timestamp: TEST_MESSAGE_TIMESTAMP,
-    });
+    await messageStore.append(
+      canonicalTestMessageInput({
+        provenance: { author: 'user', routed: false, observation: 'original' },
+        content: 'TODO: should not be visible',
+        userId: 'other-user',
+        threadId: otherThreadId,
+        timestamp: TEST_MESSAGE_TIMESTAMP,
+      }),
+    );
 
     const res = await app.inject({
       method: 'POST',

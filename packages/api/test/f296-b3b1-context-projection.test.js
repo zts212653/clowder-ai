@@ -1,6 +1,7 @@
 // @ts-check
 import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
+import { canonicalTestMessageInput } from './helpers/message-from-fixtures.js';
 
 const { assembleIncrementalContext, shouldPersistContextBriefing } = await import(
   '../dist/domains/cats/services/agents/routing/route-helpers.js'
@@ -13,14 +14,16 @@ const HISTORY_BUDGET = 500_000;
 function seedMessages(messageStore, count) {
   const baseTs = Date.now() - count * 60_000;
   for (let index = 0; index < count; index += 1) {
-    messageStore.append({
-      threadId: 'thread-b3b1',
-      userId: 'user-1',
-      catId: null,
-      content: `message ${index} about redis deployment continuity`,
-      mentions: [],
-      timestamp: baseTs + index * 60_000,
-    });
+    messageStore.append(
+      canonicalTestMessageInput({
+        threadId: 'thread-b3b1',
+        userId: 'user-1',
+        catId: null,
+        content: `message ${index} about redis deployment continuity`,
+        mentions: [],
+        timestamp: baseTs + index * 60_000,
+      }),
+    );
   }
 }
 

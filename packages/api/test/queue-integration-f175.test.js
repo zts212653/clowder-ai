@@ -5,6 +5,7 @@
 
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
+import { canonicalTestQueueInput } from './helpers/message-from-fixtures.js';
 
 const { InvocationQueue } = await import('../dist/domains/cats/services/agents/invocation/InvocationQueue.js');
 
@@ -16,17 +17,20 @@ describe('#564 regression: urgent connector does not break A2A chain', () => {
     const controller = new AbortController();
 
     // 2. Urgent connector message arrives and enqueues (F175: no preemption)
-    const result = queue.enqueue({
-      ownerAuthProvenance: 'unknown',
-      threadId: 't1',
-      userId: 'u1',
-      content: 'CI failed',
-      source: 'connector',
-      targetCats: ['opus'],
-      intent: 'execute',
-      priority: 'urgent',
-      sourceCategory: 'ci',
-    });
+    const result = queue.enqueue(
+      canonicalTestQueueInput({
+        kind: 'conversation_input',
+        ownerAuthProvenance: 'unknown',
+        threadId: 't1',
+        userId: 'u1',
+        content: 'CI failed',
+        source: 'connector',
+        targetCats: ['opus'],
+        intent: 'execute',
+        priority: 'urgent',
+        sourceCategory: 'ci',
+      }),
+    );
 
     // 3. Signal NOT aborted (the critical invariant from #564)
     assert.equal(controller.signal.aborted, false, 'active signal must not be aborted by urgent enqueue');
@@ -44,16 +48,19 @@ describe('#564 regression: urgent connector does not break A2A chain', () => {
     const controller = new AbortController();
 
     for (let i = 0; i < 3; i++) {
-      queue.enqueue({
-        ownerAuthProvenance: 'unknown',
-        threadId: 't1',
-        userId: 'u1',
-        content: `urgent-${i}`,
-        source: 'connector',
-        targetCats: ['opus'],
-        intent: 'execute',
-        priority: 'urgent',
-      });
+      queue.enqueue(
+        canonicalTestQueueInput({
+          kind: 'conversation_input',
+          ownerAuthProvenance: 'unknown',
+          threadId: 't1',
+          userId: 'u1',
+          content: `urgent-${i}`,
+          source: 'connector',
+          targetCats: ['opus'],
+          intent: 'execute',
+          priority: 'urgent',
+        }),
+      );
     }
 
     assert.equal(controller.signal.aborted, false);
@@ -66,28 +73,34 @@ describe('cross-priority auto-dequeue', () => {
     const queue = new InvocationQueue();
 
     // Normal enqueued first
-    queue.enqueue({
-      ownerAuthProvenance: 'unknown',
-      threadId: 't1',
-      userId: 'u1',
-      content: 'normal first',
-      source: 'user',
-      targetCats: ['opus'],
-      intent: 'execute',
-      priority: 'normal',
-    });
+    queue.enqueue(
+      canonicalTestQueueInput({
+        kind: 'conversation_input',
+        ownerAuthProvenance: 'unknown',
+        threadId: 't1',
+        userId: 'u1',
+        content: 'normal first',
+        source: 'user',
+        targetCats: ['opus'],
+        intent: 'execute',
+        priority: 'normal',
+      }),
+    );
 
     // Urgent enqueued second
-    queue.enqueue({
-      ownerAuthProvenance: 'unknown',
-      threadId: 't1',
-      userId: 'u2',
-      content: 'urgent second',
-      source: 'connector',
-      targetCats: ['opus'],
-      intent: 'execute',
-      priority: 'urgent',
-    });
+    queue.enqueue(
+      canonicalTestQueueInput({
+        kind: 'conversation_input',
+        ownerAuthProvenance: 'unknown',
+        threadId: 't1',
+        userId: 'u2',
+        content: 'urgent second',
+        source: 'connector',
+        targetCats: ['opus'],
+        intent: 'execute',
+        priority: 'urgent',
+      }),
+    );
 
     // markProcessingAcrossUsers should pick urgent first
     const first = queue.markProcessingAcrossUsers('t1');
@@ -98,26 +111,32 @@ describe('cross-priority auto-dequeue', () => {
   it('after urgent completes, normal entry is next in line', () => {
     const queue = new InvocationQueue();
 
-    queue.enqueue({
-      ownerAuthProvenance: 'unknown',
-      threadId: 't1',
-      userId: 'u1',
-      content: 'normal',
-      source: 'user',
-      targetCats: ['opus'],
-      intent: 'execute',
-      priority: 'normal',
-    });
-    queue.enqueue({
-      ownerAuthProvenance: 'unknown',
-      threadId: 't1',
-      userId: 'u2',
-      content: 'urgent',
-      source: 'connector',
-      targetCats: ['opus'],
-      intent: 'execute',
-      priority: 'urgent',
-    });
+    queue.enqueue(
+      canonicalTestQueueInput({
+        kind: 'conversation_input',
+        ownerAuthProvenance: 'unknown',
+        threadId: 't1',
+        userId: 'u1',
+        content: 'normal',
+        source: 'user',
+        targetCats: ['opus'],
+        intent: 'execute',
+        priority: 'normal',
+      }),
+    );
+    queue.enqueue(
+      canonicalTestQueueInput({
+        kind: 'conversation_input',
+        ownerAuthProvenance: 'unknown',
+        threadId: 't1',
+        userId: 'u2',
+        content: 'urgent',
+        source: 'connector',
+        targetCats: ['opus'],
+        intent: 'execute',
+        priority: 'urgent',
+      }),
+    );
 
     // Process urgent
     const urgent = queue.markProcessingAcrossUsers('t1');
@@ -133,27 +152,33 @@ describe('cross-priority auto-dequeue', () => {
   it('position override trumps priority in dequeue order', () => {
     const queue = new InvocationQueue();
 
-    const urgentResult = queue.enqueue({
-      ownerAuthProvenance: 'unknown',
-      threadId: 't1',
-      userId: 'u1',
-      content: 'urgent',
-      source: 'connector',
-      targetCats: ['opus'],
-      intent: 'execute',
-      priority: 'urgent',
-    });
+    const _urgentResult = queue.enqueue(
+      canonicalTestQueueInput({
+        kind: 'conversation_input',
+        ownerAuthProvenance: 'unknown',
+        threadId: 't1',
+        userId: 'u1',
+        content: 'urgent',
+        source: 'connector',
+        targetCats: ['opus'],
+        intent: 'execute',
+        priority: 'urgent',
+      }),
+    );
 
-    const normalResult = queue.enqueue({
-      ownerAuthProvenance: 'unknown',
-      threadId: 't1',
-      userId: 'u1',
-      content: 'normal-pinned',
-      source: 'user',
-      targetCats: ['opus'],
-      intent: 'execute',
-      priority: 'normal',
-    });
+    const normalResult = queue.enqueue(
+      canonicalTestQueueInput({
+        kind: 'conversation_input',
+        ownerAuthProvenance: 'unknown',
+        threadId: 't1',
+        userId: 'u1',
+        content: 'normal-pinned',
+        source: 'user',
+        targetCats: ['opus'],
+        intent: 'execute',
+        priority: 'normal',
+      }),
+    );
 
     // User drags normal entry to position 0
     queue.setPosition('t1', 'u1', normalResult.entry.id, 0);

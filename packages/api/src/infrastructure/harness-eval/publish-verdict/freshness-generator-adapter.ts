@@ -15,7 +15,8 @@ export function createFreshnessGeneratorAdapter(provider: FreshnessReplayProvide
     const validationError = validateFreshnessReplaySelector(selector);
     if (validationError) throw new Error(`invalid_source_ref: ${validationError}`);
     const replay = await provider.resolve(selector);
-    const domain = loadDomains(deps.harnessFeedbackRoot).get(packet.domainId);
+    // Registry is a live runtime contract; artifact staging contains outputs only.
+    const domain = loadDomains(deps.liveHarnessFeedbackRoot).get(packet.domainId);
     if (!domain) throw new Error(`unknown_domain: ${packet.domainId} not in registry`);
     if (domain.domainId !== 'eval:freshness') {
       throw new Error(`freshness_adapter_wrong_domain: ${domain.domainId}`);

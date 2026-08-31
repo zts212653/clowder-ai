@@ -4,6 +4,7 @@ import { AutoDreamStore } from '../dist/domains/auto-dream/AutoDreamStore.js';
 import { PresentLoopService } from '../dist/domains/auto-dream/PresentLoopService.js';
 import { ProactiveRelationshipService } from '../dist/domains/auto-dream/ProactiveRelationshipService.js';
 import { MessageStore } from '../dist/domains/cats/services/stores/ports/MessageStore.js';
+import { canonicalTestMessageInput } from './helpers/message-from-fixtures.js';
 
 const OWNER = 'owner-a';
 const CAT = 'codex-sol';
@@ -76,15 +77,18 @@ describe('F272 natural echo and next-wake memory', () => {
   }
 
   async function appendUserReply(content, replyTo) {
-    const message = await messageStore.append({
-      threadId: HOME,
-      userId: OWNER,
-      catId: null,
-      content,
-      mentions: [],
-      timestamp: now,
-      ...(replyTo ? { replyTo } : {}),
-    });
+    const message = await messageStore.append(
+      canonicalTestMessageInput({
+        provenance: { author: 'user', routed: false, observation: 'original' },
+        threadId: HOME,
+        userId: OWNER,
+        catId: null,
+        content,
+        mentions: [],
+        timestamp: now,
+        ...(replyTo ? { replyTo } : {}),
+      }),
+    );
     now += 1_000;
     return message;
   }

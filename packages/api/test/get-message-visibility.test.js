@@ -9,6 +9,7 @@ import { beforeEach, describe, test } from 'node:test';
 import Fastify from 'fastify';
 import { makeQueuedMessageCustody } from './helpers/queued-message-custody.js';
 import './helpers/setup-cat-registry.js';
+import { canonicalTestMessageInput } from './helpers/message-from-fixtures.js';
 
 function createMockSocketManager() {
   return {
@@ -71,16 +72,18 @@ describe('GET /api/callbacks/get-message visibility', () => {
     threadStore.updateThinkingMode(thread.id, 'play');
 
     // Create a whisper visible only to 'codex', not 'opus'
-    const whisperMsg = messageStore.append({
-      userId: 'user-1',
-      catId: null,
-      content: 'secret whisper',
-      mentions: [],
-      timestamp: 1000,
-      threadId: thread.id,
-      visibility: 'whisper',
-      whisperTo: ['codex'],
-    });
+    const whisperMsg = messageStore.append(
+      canonicalTestMessageInput({
+        userId: 'user-1',
+        catId: null,
+        content: 'secret whisper',
+        mentions: [],
+        timestamp: 1000,
+        threadId: thread.id,
+        visibility: 'whisper',
+        whisperTo: ['codex'],
+      }),
+    );
 
     const res = await app.inject({
       method: 'GET',
@@ -100,14 +103,16 @@ describe('GET /api/callbacks/get-message visibility', () => {
     const app = await createApp();
     const { invocationId, callbackToken } = await registry.create('user-1', 'opus');
     const thread = threadStore.create('user-1', 'system test');
-    const sysMsg = messageStore.append({
-      userId: 'system',
-      catId: null,
-      content: 'SYSTEM BADGE — internal',
-      mentions: [],
-      timestamp: 1000,
-      threadId: thread.id,
-    });
+    const sysMsg = messageStore.append(
+      canonicalTestMessageInput({
+        userId: 'system',
+        catId: null,
+        content: 'SYSTEM BADGE — internal',
+        mentions: [],
+        timestamp: 1000,
+        threadId: thread.id,
+      }),
+    );
     const res = await app.inject({
       method: 'GET',
       url: `/api/callbacks/get-message?messageId=${sysMsg.id}`,
@@ -120,15 +125,17 @@ describe('GET /api/callbacks/get-message visibility', () => {
     const app = await createApp();
     const { invocationId, callbackToken } = await registry.create('user-1', 'opus');
     const thread = threadStore.create('user-1', 'briefing test');
-    const briefingMsg = messageStore.append({
-      userId: 'user-1',
-      catId: null,
-      content: 'TOP SECRET BRIEFING',
-      mentions: [],
-      timestamp: 1000,
-      threadId: thread.id,
-      origin: 'briefing',
-    });
+    const briefingMsg = messageStore.append(
+      canonicalTestMessageInput({
+        userId: 'user-1',
+        catId: null,
+        content: 'TOP SECRET BRIEFING',
+        mentions: [],
+        timestamp: 1000,
+        threadId: thread.id,
+        origin: 'briefing',
+      }),
+    );
     const res = await app.inject({
       method: 'GET',
       url: `/api/callbacks/get-message?messageId=${briefingMsg.id}`,
@@ -141,31 +148,37 @@ describe('GET /api/callbacks/get-message visibility', () => {
     const app = await createApp();
     const { invocationId, callbackToken } = await registry.create('user-1', 'opus');
     const thread = threadStore.create('user-1', 'context test');
-    const target = messageStore.append({
-      userId: 'user-1',
-      catId: null,
-      content: 'normal target',
-      mentions: [],
-      timestamp: 1000,
-      threadId: thread.id,
-    });
-    messageStore.append({
-      userId: 'system',
-      catId: null,
-      content: 'SYSTEM BADGE neighbor',
-      mentions: [],
-      timestamp: 1001,
-      threadId: thread.id,
-    });
-    messageStore.append({
-      userId: 'user-1',
-      catId: null,
-      content: 'TOP SECRET BRIEFING neighbor',
-      mentions: [],
-      timestamp: 1002,
-      threadId: thread.id,
-      origin: 'briefing',
-    });
+    const target = messageStore.append(
+      canonicalTestMessageInput({
+        userId: 'user-1',
+        catId: null,
+        content: 'normal target',
+        mentions: [],
+        timestamp: 1000,
+        threadId: thread.id,
+      }),
+    );
+    messageStore.append(
+      canonicalTestMessageInput({
+        userId: 'system',
+        catId: null,
+        content: 'SYSTEM BADGE neighbor',
+        mentions: [],
+        timestamp: 1001,
+        threadId: thread.id,
+      }),
+    );
+    messageStore.append(
+      canonicalTestMessageInput({
+        userId: 'user-1',
+        catId: null,
+        content: 'TOP SECRET BRIEFING neighbor',
+        mentions: [],
+        timestamp: 1002,
+        threadId: thread.id,
+        origin: 'briefing',
+      }),
+    );
     const res = await app.inject({
       method: 'GET',
       url: `/api/callbacks/get-message?messageId=${target.id}&contextCount=5`,
@@ -182,16 +195,18 @@ describe('GET /api/callbacks/get-message visibility', () => {
     const { invocationId, callbackToken } = await registry.create('user-1', 'opus');
 
     // Debug mode (default) — cats see everything like the user
-    const whisperMsg = messageStore.append({
-      userId: 'user-1',
-      catId: null,
-      content: 'whisper for codex',
-      mentions: [],
-      timestamp: 1000,
-      threadId: 'thread-debug',
-      visibility: 'whisper',
-      whisperTo: ['codex'],
-    });
+    const whisperMsg = messageStore.append(
+      canonicalTestMessageInput({
+        userId: 'user-1',
+        catId: null,
+        content: 'whisper for codex',
+        mentions: [],
+        timestamp: 1000,
+        threadId: 'thread-debug',
+        visibility: 'whisper',
+        whisperTo: ['codex'],
+      }),
+    );
 
     const res = await app.inject({
       method: 'GET',
@@ -211,14 +226,16 @@ describe('GET /api/callbacks/get-message visibility', () => {
     const { invocationId, callbackToken } = await registry.create('user-1', 'opus');
 
     // Message belongs to user-2
-    const otherUserMsg = messageStore.append({
-      userId: 'user-2',
-      catId: null,
-      content: 'other user message',
-      mentions: [],
-      timestamp: 1000,
-      threadId: 'thread-other',
-    });
+    const otherUserMsg = messageStore.append(
+      canonicalTestMessageInput({
+        userId: 'user-2',
+        catId: null,
+        content: 'other user message',
+        mentions: [],
+        timestamp: 1000,
+        threadId: 'thread-other',
+      }),
+    );
 
     const res = await app.inject({
       method: 'GET',
@@ -236,14 +253,16 @@ describe('GET /api/callbacks/get-message visibility', () => {
     const app = await createApp();
     const { invocationId, callbackToken } = await registry.create('user-1', 'opus');
 
-    const msg = messageStore.append({
-      userId: 'user-1',
-      catId: null,
-      content: 'hello opus',
-      mentions: ['opus'],
-      timestamp: 1000,
-      threadId: 'thread-1',
-    });
+    const msg = messageStore.append(
+      canonicalTestMessageInput({
+        userId: 'user-1',
+        catId: null,
+        content: 'hello opus',
+        mentions: ['opus'],
+        timestamp: 1000,
+        threadId: 'thread-1',
+      }),
+    );
 
     const res = await app.inject({
       method: 'GET',
@@ -263,15 +282,17 @@ describe('GET /api/callbacks/get-message visibility', () => {
   test('returns queued cat speech already published to the timeline', async () => {
     const app = await createApp();
     const { invocationId, callbackToken } = await registry.create('user-1', 'opus');
-    const published = messageStore.append({
-      userId: 'user-1',
-      catId: 'codex',
-      content: 'published source-cat seed',
-      mentions: ['opus'],
-      timestamp: 1000,
-      threadId: 'thread-published',
-      deliveryStatus: 'queued',
-    });
+    const published = messageStore.append(
+      canonicalTestMessageInput({
+        userId: 'user-1',
+        catId: 'codex',
+        content: 'published source-cat seed',
+        mentions: ['opus'],
+        timestamp: 1000,
+        threadId: 'thread-published',
+        deliveryStatus: 'queued',
+      }),
+    );
 
     const res = await app.inject({
       method: 'GET',
@@ -286,23 +307,25 @@ describe('GET /api/callbacks/get-message visibility', () => {
   test('does not expose browser-published queued user work through cat get-message cognition', async () => {
     const app = await createApp();
     const { invocationId, callbackToken } = await registry.create('user-1', 'opus');
-    const queued = messageStore.append({
-      userId: 'user-1',
-      catId: null,
-      content: 'visible to the owner timeline, not generally delivered to cats',
-      mentions: ['opus'],
-      timestamp: 1100,
-      threadId: 'thread-browser-only-queued-user',
-      deliveryStatus: 'queued',
-      queueCustody: makeQueuedMessageCustody({
-        entryId: 'entry-browser-only-queued-user',
-        allTargetCats: ['opus'],
-        pendingTargetCats: ['opus'],
-        steerRequestedByCatIds: ['opus'],
-        createdAt: 1100,
-        updatedAt: 1150,
+    const queued = messageStore.append(
+      canonicalTestMessageInput({
+        userId: 'user-1',
+        catId: null,
+        content: 'visible to the owner timeline, not generally delivered to cats',
+        mentions: ['opus'],
+        timestamp: 1100,
+        threadId: 'thread-browser-only-queued-user',
+        deliveryStatus: 'queued',
+        queueCustody: makeQueuedMessageCustody({
+          entryId: 'entry-browser-only-queued-user',
+          allTargetCats: ['opus'],
+          pendingTargetCats: ['opus'],
+          steerRequestedByCatIds: ['opus'],
+          createdAt: 1100,
+          updatedAt: 1150,
+        }),
       }),
-    });
+    );
 
     const res = await app.inject({
       method: 'GET',
@@ -317,23 +340,25 @@ describe('GET /api/callbacks/get-message visibility', () => {
     const app = await createApp();
     const exposedCaller = await registry.create('user-1', 'opus');
     const unexposedCaller = await registry.create('user-1', 'codex');
-    const queued = messageStore.append({
-      userId: 'user-1',
-      catId: null,
-      content: 'survives the child session that first read it',
-      mentions: ['opus'],
-      timestamp: 1200,
-      threadId: 'thread-exposed-queued-user',
-      deliveryStatus: 'queued',
-      queueCustody: makeQueuedMessageCustody({
-        entryId: 'entry-exposed-queued-user',
-        allTargetCats: ['opus', 'codex'],
-        pendingTargetCats: ['opus', 'codex'],
-        seenByCatIds: ['opus'],
-        seenInvocationIdByCatId: { opus: 'sealed-child-opus' },
-        bodyExposures: [{ targetCatId: 'opus', invocationId: 'sealed-child-opus', seenAt: 1150 }],
+    const queued = messageStore.append(
+      canonicalTestMessageInput({
+        userId: 'user-1',
+        catId: null,
+        content: 'survives the child session that first read it',
+        mentions: ['opus'],
+        timestamp: 1200,
+        threadId: 'thread-exposed-queued-user',
+        deliveryStatus: 'queued',
+        queueCustody: makeQueuedMessageCustody({
+          entryId: 'entry-exposed-queued-user',
+          allTargetCats: ['opus', 'codex'],
+          pendingTargetCats: ['opus', 'codex'],
+          seenByCatIds: ['opus'],
+          seenInvocationIdByCatId: { opus: 'sealed-child-opus' },
+          bodyExposures: [{ targetCatId: 'opus', invocationId: 'sealed-child-opus', seenAt: 1150 }],
+        }),
       }),
-    });
+    );
 
     const exposed = await app.inject({
       method: 'GET',
@@ -363,14 +388,16 @@ describe('GET /api/callbacks/get-message visibility', () => {
     const app = await createApp();
     const { invocationId, callbackToken } = await registry.create('user-1', 'opus');
     const longContent = 'X'.repeat(500);
-    const msg = messageStore.append({
-      userId: 'user-1',
-      catId: null,
-      content: longContent,
-      mentions: ['opus'],
-      timestamp: 1000,
-      threadId: 'thread-1',
-    });
+    const msg = messageStore.append(
+      canonicalTestMessageInput({
+        userId: 'user-1',
+        catId: null,
+        content: longContent,
+        mentions: ['opus'],
+        timestamp: 1000,
+        threadId: 'thread-1',
+      }),
+    );
 
     // default = preview: bounded excerpt + honest flags
     const previewRes = await app.inject({
@@ -405,16 +432,18 @@ describe('GET /api/callbacks/get-message visibility', () => {
     const app = await createApp();
     const { invocationId, callbackToken } = await registry.create('user-1', 'opus');
 
-    const whisperMsg = messageStore.append({
-      userId: 'user-1',
-      catId: null,
-      content: 'whisper for opus',
-      mentions: [],
-      timestamp: 1000,
-      threadId: 'thread-1',
-      visibility: 'whisper',
-      whisperTo: ['opus'],
-    });
+    const whisperMsg = messageStore.append(
+      canonicalTestMessageInput({
+        userId: 'user-1',
+        catId: null,
+        content: 'whisper for opus',
+        mentions: [],
+        timestamp: 1000,
+        threadId: 'thread-1',
+        visibility: 'whisper',
+        whisperTo: ['opus'],
+      }),
+    );
 
     const res = await app.inject({
       method: 'GET',
@@ -439,36 +468,42 @@ describe('GET /api/callbacks/get-message visibility', () => {
     threadStore.updateThinkingMode(thread.id, 'play');
 
     // Public message (the target)
-    const target = messageStore.append({
-      userId: 'user-1',
-      catId: null,
-      content: 'public target',
-      mentions: [],
-      timestamp: 2000,
-      threadId: thread.id,
-    });
+    const target = messageStore.append(
+      canonicalTestMessageInput({
+        userId: 'user-1',
+        catId: null,
+        content: 'public target',
+        mentions: [],
+        timestamp: 2000,
+        threadId: thread.id,
+      }),
+    );
 
     // Whisper before target — addressed to codex, NOT opus
-    messageStore.append({
-      userId: 'user-1',
-      catId: null,
-      content: 'secret for codex only',
-      mentions: [],
-      timestamp: 1000,
-      threadId: thread.id,
-      visibility: 'whisper',
-      whisperTo: ['codex'],
-    });
+    messageStore.append(
+      canonicalTestMessageInput({
+        userId: 'user-1',
+        catId: null,
+        content: 'secret for codex only',
+        mentions: [],
+        timestamp: 1000,
+        threadId: thread.id,
+        visibility: 'whisper',
+        whisperTo: ['codex'],
+      }),
+    );
 
     // Public message after target — should appear in context
-    messageStore.append({
-      userId: 'user-1',
-      catId: null,
-      content: 'public after',
-      mentions: [],
-      timestamp: 3000,
-      threadId: thread.id,
-    });
+    messageStore.append(
+      canonicalTestMessageInput({
+        userId: 'user-1',
+        catId: null,
+        content: 'public after',
+        mentions: [],
+        timestamp: 3000,
+        threadId: thread.id,
+      }),
+    );
 
     const res = await app.inject({
       method: 'GET',
@@ -496,15 +531,17 @@ describe('GET /api/callbacks/get-message visibility', () => {
     threadStore.updateThinkingMode(thread.id, 'play');
 
     // codex's stream message in that thread
-    const streamMsg = messageStore.append({
-      userId: 'user-1',
-      catId: 'codex',
-      content: 'codex persisted answer',
-      mentions: [],
-      timestamp: 1000,
-      threadId: thread.id,
-      origin: 'stream',
-    });
+    const streamMsg = messageStore.append(
+      canonicalTestMessageInput({
+        userId: 'user-1',
+        catId: 'codex',
+        content: 'codex persisted answer',
+        mentions: [],
+        timestamp: 1000,
+        threadId: thread.id,
+        origin: 'stream',
+      }),
+    );
 
     const res = await app.inject({
       method: 'GET',
@@ -527,15 +564,17 @@ describe('GET /api/callbacks/get-message visibility', () => {
     threadStore.updateThinkingMode(thread.id, 'play');
 
     // opus's own stream message
-    const ownStream = messageStore.append({
-      userId: 'user-1',
-      catId: 'opus',
-      content: 'opus stream thinking',
-      mentions: [],
-      timestamp: 1000,
-      threadId: thread.id,
-      origin: 'stream',
-    });
+    const ownStream = messageStore.append(
+      canonicalTestMessageInput({
+        userId: 'user-1',
+        catId: 'opus',
+        content: 'opus stream thinking',
+        mentions: [],
+        timestamp: 1000,
+        threadId: thread.id,
+        origin: 'stream',
+      }),
+    );
 
     const res = await app.inject({
       method: 'GET',
@@ -557,36 +596,42 @@ describe('GET /api/callbacks/get-message visibility', () => {
     threadStore.updateThinkingMode(thread.id, 'play');
 
     // Target: user message (visible)
-    const target = messageStore.append({
-      userId: 'user-1',
-      catId: null,
-      content: 'user question',
-      mentions: [],
-      timestamp: 2000,
-      threadId: thread.id,
-    });
+    const target = messageStore.append(
+      canonicalTestMessageInput({
+        userId: 'user-1',
+        catId: null,
+        content: 'user question',
+        mentions: [],
+        timestamp: 2000,
+        threadId: thread.id,
+      }),
+    );
 
     // codex persisted answer in the same thread — visible to opus
-    messageStore.append({
-      userId: 'user-1',
-      catId: 'codex',
-      content: 'codex persisted answer',
-      mentions: [],
-      timestamp: 1000,
-      threadId: thread.id,
-      origin: 'stream',
-    });
+    messageStore.append(
+      canonicalTestMessageInput({
+        userId: 'user-1',
+        catId: 'codex',
+        content: 'codex persisted answer',
+        mentions: [],
+        timestamp: 1000,
+        threadId: thread.id,
+        origin: 'stream',
+      }),
+    );
 
     // opus's own stream — should be visible
-    messageStore.append({
-      userId: 'user-1',
-      catId: 'opus',
-      content: 'opus own stream',
-      mentions: [],
-      timestamp: 3000,
-      threadId: thread.id,
-      origin: 'stream',
-    });
+    messageStore.append(
+      canonicalTestMessageInput({
+        userId: 'user-1',
+        catId: 'opus',
+        content: 'opus own stream',
+        mentions: [],
+        timestamp: 3000,
+        threadId: thread.id,
+        origin: 'stream',
+      }),
+    );
 
     const res = await app.inject({
       method: 'GET',

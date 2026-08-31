@@ -231,7 +231,7 @@ class EvalDomainTriggerDispatchRun {
         windowKey: this.window.windowKey,
         dedupeKey: this.dedupeKey,
       }),
-      userId: 'scheduler',
+      userId: this.input.defaultUserId ?? 'default-user',
       idempotencyKey: this.dedupeKey,
     });
     if (!messageId) throw new Error('scheduled eval delivery returned no message id');

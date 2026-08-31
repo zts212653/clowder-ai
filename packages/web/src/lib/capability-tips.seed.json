@@ -1389,6 +1389,34 @@
     "owner": "codex-sol"
   },
   {
+    "id": "feature-f257-segment-lifeline",
+    "kind": "feature",
+    "sourceRef": {
+      "path": "docs/features/F257-harness-ledger.md",
+      "anchor": "Harness Ledger"
+    },
+    "structureSource": {
+      "path": "docs/features/F257-harness-ledger.md",
+      "anchor": "Phase D: Console"
+    },
+    "bodySource": {
+      "path": "docs/features/F257-harness-ledger.md",
+      "anchor": "User Journey"
+    },
+    "contexts": ["eval", "feature_dev"],
+    "audience": ["cvo", "developer"],
+    "body": "想看某个注入段正在用哪一版、收集了哪些 trace/guard/eval？打开 Console「协作与规则」→「生命周期与注入」，点段旁的 📊 生命线；可查看版本链并创建、激活、启禁用或回滚。",
+    "action": {
+      "type": "open_source",
+      "label": "打开 F257 spec",
+      "sourceRef": {
+        "path": "docs/features/F257-harness-ledger.md",
+        "anchor": "Harness Ledger"
+      }
+    },
+    "owner": "gpt52"
+  },
+  {
     "id": "feature-f195-true-companion-audio",
     "kind": "feature",
     "sourceRef": {

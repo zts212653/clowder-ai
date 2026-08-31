@@ -176,6 +176,11 @@ export async function sendCallbackRequest(
   const enableOutbox = options?.enableOutbox === true && isOutboxEnabled();
   if (enableOutbox) await flushOutbox();
 
+  // 砚砚 2026-06-17 P1: allow per-call retry-delays + timeout override. Publish-
+  // verdict passes `[]` (single attempt, no retry) because the route is long +
+  // side-effectful: auto-retry fires overlapping server-side publishes that race
+  // on the same branch name. Idempotency guards (verdict_already_exists) are the
+  // safety net for "did it publish", not client retries.
   const retryDelaysMs = options?.retryDelaysMs ?? getRetryDelaysMs();
   const payload = JSON.stringify(request.body);
   const result = await postJsonWithRetry(`${request.apiUrl}${request.path}`, payload, retryDelaysMs, request.headers, {

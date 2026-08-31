@@ -26,6 +26,7 @@ live baseline + typed predicate + nextStep + expiresAt
 | `pr_review_result_available` + `triggerCommentId` | 等 exact `@codex review` 的结果 |
 | `pr_review_decision_changed` | 等 GitHub review decision 变化 |
 | `pr_review_thread_changed` + `reviewThreadIds` | 等指定 review thread 变化 |
+| `pr_conversation_comment_added` + `authorLogins` | 等指定 GitHub 登录名发表普通 PR conversation comment |
 | `pr_ci_terminal` | 等 CI 从非终态进入 pass/fail |
 | `pr_became_conflicting` | 等 PR 首次变为 conflicting |
 

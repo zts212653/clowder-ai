@@ -2,6 +2,7 @@ import '../helpers/setup-cat-registry.js';
 import assert from 'node:assert/strict';
 import { afterEach, beforeEach, describe, it } from 'node:test';
 import Fastify from 'fastify';
+import { canonicalTestMessageInput } from '../helpers/message-from-fixtures.js';
 import { proposedReviewAction } from './helpers.js';
 
 function createSucceedingIngress() {
@@ -81,22 +82,28 @@ describe('staged recovery origin preservation', () => {
     const target = await threadStore.create('user-1', 'Target');
     await threadStore.addParticipants(source.id, ['opus']);
     await threadStore.addParticipants(target.id, ['sonnet']);
-    const originA = await messageStore.append({
-      userId: 'user-1',
-      catId: 'opus',
-      threadId: source.id,
-      content: 'Origin A',
-      mentions: [],
-      timestamp: Date.now() - 2000,
-    });
-    const originB = await messageStore.append({
-      userId: 'user-1',
-      catId: 'opus',
-      threadId: source.id,
-      content: 'Origin B',
-      mentions: [],
-      timestamp: Date.now() - 1000,
-    });
+    const originA = await messageStore.append(
+      canonicalTestMessageInput({
+        provenance: { author: 'cat', routed: false, observation: 'original' },
+        userId: 'user-1',
+        catId: 'opus',
+        threadId: source.id,
+        content: 'Origin A',
+        mentions: [],
+        timestamp: Date.now() - 2000,
+      }),
+    );
+    const originB = await messageStore.append(
+      canonicalTestMessageInput({
+        provenance: { author: 'cat', routed: false, observation: 'original' },
+        userId: 'user-1',
+        catId: 'opus',
+        threadId: source.id,
+        content: 'Origin B',
+        mentions: [],
+        timestamp: Date.now() - 1000,
+      }),
+    );
 
     const app = Fastify();
     apps.push(app);

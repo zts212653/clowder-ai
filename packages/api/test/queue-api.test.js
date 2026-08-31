@@ -6,6 +6,7 @@
 import assert from 'node:assert/strict';
 import { afterEach, beforeEach, describe, it, mock } from 'node:test';
 import Fastify from 'fastify';
+import { canonicalTestQueueInput } from './helpers/message-from-fixtures.js';
 
 const { InvocationQueue } = await import('../dist/domains/cats/services/agents/invocation/InvocationQueue.js');
 
@@ -36,12 +37,10 @@ function buildDeps(overrides = {}) {
   const queueProcessor = {
     canReleaseSlotForUser: mock.fn(() => true),
     processNext: mock.fn(async () => ({ started: false })),
-    isPaused: mock.fn(() => false),
-    getPauseReason: mock.fn(() => undefined),
-    clearPause: mock.fn(() => {}),
     releaseSlot: mock.fn(() => {}),
     releaseThread: mock.fn(() => {}),
     finalizeRemovedEntry: mock.fn(async () => true),
+    appendExactEntry: mock.fn(async () => ({ outcome: 'appended', entry: {}, acceptedTargetIds: ['opus'] })),
   };
   queueProcessor.processExactSteerReservation = mock.fn(async (threadId, userId) =>
     queueProcessor.processNext(threadId, userId),
@@ -111,16 +110,19 @@ function buildDeps(overrides = {}) {
 
 /** Enqueue a test entry */
 function enqueueEntry(queue, overrides = {}) {
-  return queue.enqueue({
-    threadId: 't1',
-    userId: 'user-a',
-    content: 'hello',
-    source: 'user',
-    ownerAuthProvenance: 'unknown',
-    targetCats: ['opus'],
-    intent: 'execute',
-    ...overrides,
-  });
+  return queue.enqueue(
+    canonicalTestQueueInput({
+      threadId: 't1',
+      userId: 'user-a',
+      kind: 'conversation_input',
+      content: 'hello',
+      source: 'user',
+      ownerAuthProvenance: 'unknown',
+      targetCats: ['opus'],
+      intent: 'execute',
+      ...overrides,
+    }),
+  );
 }
 
 function asyncGate() {
@@ -263,7 +265,73 @@ describe('Queue Management API', () => {
     });
   });
 
-  it('GET /queue hydrates notified, failed, and partially handled targets independently', async () => {
+  it('GET /queue projects Append only from the exact supporting Active Run dispatcher', async () => {
+    const queued = enqueueEntry(deps.invocationQueue, { ownerAuthProvenance: 'strict', messageId: 'message-1' });
+    const activeRun = {
+      threadId: 't1',
+      targetId: 'opus',
+      invocationId: 'turn-1',
+      responseMessageId: 'response-1',
+      inputEntryIds: ['entry-old'],
+      inputMessageIds: ['message-old'],
+      privateInputEntryIds: [],
+      startedAt: 100,
+    };
+    deps.invocationTracker.getActiveSlots.mock.mockImplementation(() => [{ catId: 'opus', startedAt: 100, activeRun }]);
+    deps.invocationTracker.getUserId.mock.mockImplementation(() => 'user-a');
+    deps.invocationTracker.getAgentClientActiveRunDispatcher = mock.fn(() => ({
+      invocationId: 'turn-1',
+      capabilities: { append: true, steer: true },
+      handle: { provider: 'openai_codex', carrier: 'codex_app_server', threadId: 'native-1', turnId: 'turn-1' },
+      dispatch: async () => ({ accepted: true, handle: {} }),
+    }));
+
+    const available = await app.inject({
+      method: 'GET',
+      url: '/api/threads/t1/queue',
+      headers: { 'x-cat-cafe-user': 'user-a' },
+    });
+    const body = JSON.parse(available.body);
+    assert.equal(body.queueRevision, deps.invocationQueue.snapshotRevision('t1', 'user-a'));
+    assert.deepEqual(body.queue[0].lifecycleActions.append, {
+      kind: 'append',
+      expectedQueueRevision: body.queueRevision,
+      expectedRuns: [{ targetId: 'opus', invocationId: 'turn-1', responseMessageId: 'response-1' }],
+    });
+
+    deps.invocationTracker.getAgentClientActiveRunDispatcher.mock.mockImplementation(() => undefined);
+    const unsupported = await app.inject({
+      method: 'GET',
+      url: '/api/threads/t1/queue',
+      headers: { 'x-cat-cafe-user': 'user-a' },
+    });
+    assert.equal(JSON.parse(unsupported.body).queue[0].lifecycleActions, undefined);
+    assert.equal(deps.invocationQueue.list('t1', 'user-a')[0].id, queued.entry.id);
+  });
+
+  it('POST /queue/:entryId/append forwards only the echoed server fences', async () => {
+    const queued = enqueueEntry(deps.invocationQueue, { ownerAuthProvenance: 'strict', messageId: 'message-1' });
+    const payload = {
+      expectedQueueRevision: deps.invocationQueue.snapshotRevision('t1', 'user-a'),
+      expectedRuns: [{ targetId: 'opus', invocationId: 'turn-1', responseMessageId: 'response-1' }],
+    };
+    const res = await app.inject({
+      method: 'POST',
+      url: `/api/threads/t1/queue/${queued.entry.id}/append`,
+      headers: { 'x-cat-cafe-user': 'user-a' },
+      payload,
+    });
+
+    assert.equal(res.statusCode, 200);
+    assert.deepEqual(deps.queueProcessor.appendExactEntry.mock.calls[0].arguments[0], {
+      threadId: 't1',
+      userId: 'user-a',
+      entryId: queued.entry.id,
+      ...payload,
+    });
+  });
+
+  it('GET /queue hydrates only still-pending targets after exact target settlement', async () => {
     const queued = enqueueEntry(deps.invocationQueue, {
       content: 'three targets',
       targetCats: ['opus', 'codex', 'gpt52'],
@@ -271,7 +339,7 @@ describe('Queue Management API', () => {
     });
     deps.invocationQueue.markQueuedNotified('t1', 'user-a', queued.entry.id, 'opus');
     deps.invocationQueue.markQueuedSeen('t1', 'user-a', queued.entry.id, 'codex', 'inv-codex');
-    deps.invocationQueue.markQueuedFailedForCatAcrossUsers('t1', 'codex', 'inv-codex');
+    deps.invocationQueue.takeQueuedFailedTargetForCatAcrossUsers('t1', 'codex', 'inv-codex');
     deps.invocationQueue.markQueuedSeen('t1', 'user-a', queued.entry.id, 'gpt52', 'inv-gpt52');
     deps.invocationQueue.markQueuedHandledForCatAcrossUsers('t1', 'gpt52', 'inv-gpt52');
 
@@ -288,7 +356,7 @@ describe('Queue Management API', () => {
       codex: 'failed',
       gpt52: 'handled',
     });
-    assert.deepEqual(body.queue[0].targetCats, ['opus', 'codex'], 'handled target must not be scheduled again');
+    assert.deepEqual(body.queue[0].targetCats, ['opus'], 'terminal targets must not remain scheduled');
   });
 
   it('DELETE /queue/:entryId returns 404 for another user entry', async () => {
@@ -319,27 +387,13 @@ describe('Queue Management API', () => {
     assert.equal(deps.invocationQueue.list('t1', 'user-b').length, 1);
   });
 
-  it('POST /queue/next only processes requesting user queue', async () => {
-    enqueueEntry(deps.invocationQueue, { userId: 'user-a' });
-    enqueueEntry(deps.invocationQueue, { userId: 'user-b', targetCats: ['codex'] });
-
-    deps.queueProcessor.processNext.mock.mockImplementation(async (_threadId, userId) => {
-      // Simulate processing user's queue
-      return { started: true, entry: { userId } };
-    });
-
+  it('does not expose a thread-wide manual Continue endpoint', async () => {
     const res = await app.inject({
       method: 'POST',
       url: '/api/threads/t1/queue/next',
       headers: { 'x-cat-cafe-user': 'user-a' },
     });
-    const body = JSON.parse(res.body);
-    assert.equal(body.started, true);
-
-    // Verify processNext was called with user-a
-    const call = deps.queueProcessor.processNext.mock.calls[0];
-    assert.equal(call.arguments[0], 't1');
-    assert.equal(call.arguments[1], 'user-a');
+    assert.equal(res.statusCode, 404);
   });
 
   it('POST /queue/:entryId/remind persists a non-interrupting attempt for the exact active invocation', async () => {
@@ -443,13 +497,8 @@ describe('Queue Management API', () => {
     assert.equal(deps.queueCustodyCoordinator.requestReminder.mock.calls.length, 0);
   });
 
-  // ── Functional: GET paused state (P1-2 fix) ──
-
-  it('GET /queue returns paused=true when queueProcessor reports paused', async () => {
+  it('GET /queue does not project thread-wide pause state', async () => {
     enqueueEntry(deps.invocationQueue);
-    // Stub isPaused to return true
-    deps.queueProcessor.isPaused = mock.fn(() => true);
-    deps.queueProcessor.getPauseReason = mock.fn(() => 'canceled');
 
     const res = await app.inject({
       method: 'GET',
@@ -457,36 +506,8 @@ describe('Queue Management API', () => {
       headers: { 'x-cat-cafe-user': 'user-a' },
     });
     const body = JSON.parse(res.body);
-    assert.equal(body.paused, true);
-  });
-
-  it('GET /queue returns paused=false when queueProcessor reports not paused', async () => {
-    enqueueEntry(deps.invocationQueue);
-    deps.queueProcessor.isPaused = mock.fn(() => false);
-    deps.queueProcessor.getPauseReason = mock.fn(() => undefined);
-
-    const res = await app.inject({
-      method: 'GET',
-      url: '/api/threads/t1/queue',
-      headers: { 'x-cat-cafe-user': 'user-a' },
-    });
-    const body = JSON.parse(res.body);
-    assert.equal(body.paused, false);
-  });
-
-  it('GET /queue returns pauseReason when paused', async () => {
-    enqueueEntry(deps.invocationQueue);
-    deps.queueProcessor.isPaused = mock.fn(() => true);
-    deps.queueProcessor.getPauseReason = mock.fn(() => 'failed');
-
-    const res = await app.inject({
-      method: 'GET',
-      url: '/api/threads/t1/queue',
-      headers: { 'x-cat-cafe-user': 'user-a' },
-    });
-    const body = JSON.parse(res.body);
-    assert.equal(body.paused, true);
-    assert.equal(body.pauseReason, 'failed');
+    assert.equal(Object.hasOwn(body, 'paused'), false);
+    assert.equal(Object.hasOwn(body, 'pauseReason'), false);
   });
 
   // ── Functional: GET ──
@@ -605,37 +626,6 @@ describe('Queue Management API', () => {
       headers: { 'x-cat-cafe-user': 'user-a' },
     });
     assert.equal(res.statusCode, 409);
-  });
-
-  // ── Functional: POST next ──
-
-  it('POST /queue/next triggers next entry processing', async () => {
-    deps.queueProcessor.processNext.mock.mockImplementation(async () => ({
-      started: true,
-      entry: {
-        ...enqueueEntry(deps.invocationQueue, { ownerAuthProvenance: 'strict' }).entry,
-        id: 'e1',
-      },
-    }));
-
-    const res = await app.inject({
-      method: 'POST',
-      url: '/api/threads/t1/queue/next',
-      headers: { 'x-cat-cafe-user': 'user-a' },
-    });
-    const body = JSON.parse(res.body);
-    assert.equal(body.started, true);
-    assert.equal(Object.hasOwn(body.entry, 'ownerAuthProvenance'), false);
-  });
-
-  it('POST /queue/next returns started=false when empty', async () => {
-    const res = await app.inject({
-      method: 'POST',
-      url: '/api/threads/t1/queue/next',
-      headers: { 'x-cat-cafe-user': 'user-a' },
-    });
-    const body = JSON.parse(res.body);
-    assert.equal(body.started, false);
   });
 
   // ── Functional: DELETE clear ──
@@ -940,7 +930,7 @@ describe('Queue Management API', () => {
       ownerAuthProvenance: 'strict',
       targetCats: ['opus', 'codex'],
     });
-    deps.invocationQueue.markQueuedFailedForCatAcrossUsers('t1', 'opus', 'inv-opus', new Set([queued.entry.id]));
+    deps.invocationQueue.takeQueuedFailedTargetForCatAcrossUsers('t1', 'opus', 'inv-opus', new Set([queued.entry.id]));
     deps.invocationTracker.has = mock.fn((_threadId, catId) => catId === 'codex');
     deps.invocationTracker.getUserId = mock.fn(() => 'user-a');
     deps.invocationTracker.cancel = mock.fn((_threadId, catId) => ({
@@ -1268,7 +1258,7 @@ describe('Queue Management API', () => {
       catIds: ['codex'],
       executionIds: ['inv-active'],
     }));
-    deps.queueProcessor.processNext = mock.fn(async () => ({ started: true, entry: { id: r1.entry.id } }));
+    deps.queueProcessor.processNext = mock.fn(async () => ({ started: true, entry: r1.entry }));
 
     const res = await app.inject({
       method: 'POST',
@@ -1276,7 +1266,7 @@ describe('Queue Management API', () => {
       headers: { 'x-cat-cafe-user': 'user-a', 'content-type': 'application/json' },
       payload: { mode: 'immediate' },
     });
-    assert.equal(res.statusCode, 200);
+    assert.equal(res.statusCode, 200, res.body);
     assert.equal(deps.invocationTracker.cancel.mock.calls.length, 1);
     assert.equal(deps.queueProcessor.processNext.mock.calls.length, 1);
     assert.deepEqual(deps.agentSessionMutex.forceReleaseByScope.mock.calls[0].arguments, [
@@ -1305,7 +1295,7 @@ describe('Queue Management API', () => {
     });
     deps.queueProcessor.processNext = mock.fn(async () => {
       if (locked) return { started: false };
-      return { started: true, entry: { id: r1.entry.id } };
+      return { started: true, entry: r1.entry };
     });
 
     const res = await app.inject({
@@ -1314,7 +1304,7 @@ describe('Queue Management API', () => {
       headers: { 'x-cat-cafe-user': 'user-a', 'content-type': 'application/json' },
       payload: { mode: 'immediate' },
     });
-    assert.equal(res.statusCode, 200);
+    assert.equal(res.statusCode, 200, res.body);
     assert.equal(deps.queueProcessor.releaseSlot.mock.calls.length, 1);
   });
 
@@ -1476,7 +1466,7 @@ describe('Queue Management API', () => {
     deps.invocationTracker.getUserId = mock.fn(() => 'user-a');
     // cancel returns multi-cat catIds (co-dispatched), but steer targets only opus
     deps.invocationTracker.cancel = mock.fn(() => ({ cancelled: true, catIds: ['opus', 'codex'] }));
-    deps.queueProcessor.processNext = mock.fn(async () => ({ started: true, entry: { id: r1.entry.id } }));
+    deps.queueProcessor.processNext = mock.fn(async () => ({ started: true, entry: r1.entry }));
 
     const res = await app.inject({
       method: 'POST',
@@ -1484,7 +1474,7 @@ describe('Queue Management API', () => {
       headers: { 'x-cat-cafe-user': 'user-a', 'content-type': 'application/json' },
       payload: { mode: 'immediate' },
     });
-    assert.equal(res.statusCode, 200);
+    assert.equal(res.statusCode, 200, res.body);
 
     // done should only be broadcast for opus (the steered cat), NOT codex
     const broadcastCalls = deps.socketManager.broadcastAgentMessage.mock.calls;

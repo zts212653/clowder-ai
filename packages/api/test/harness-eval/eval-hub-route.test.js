@@ -6,7 +6,7 @@ import { describe, it } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import Fastify from 'fastify';
 import { evalHubRoutes } from '../../dist/routes/eval-hub.js';
-import { seedCanonicalMeasurementCensusState } from './publish-verdict-fixtures.js';
+import { createMockArtifactPublisher } from './publish-verdict-fixtures.js';
 
 /**
  * 砚砚 R17 P1: snapshots/attributions are gitignored, raw evidence lives in LIVE
@@ -110,24 +110,10 @@ describe('Eval Hub API route', () => {
           return { ok: false, reason: 'unknown_invocation' };
         },
       };
-      const mockGitPublisher = {
-        async publishOnIsolatedWorktree(opts) {
-          // A real publisher checks out the complete repository before stage.
-          const wt = mkdtempSync(`${tmpdir()}/phase-h-r10-route-`);
-          seedCanonicalMeasurementCensusState(wt);
-          await opts.stage(wt);
-          return { commitSha: 'mock-sha', prUrl: 'https://example.com/pr/1' };
-        },
-        async refreshPublishedVerdictPr(opts) {
-          return {
-            outcome: 'updated',
-            previousHeadSha: opts.expectedHeadSha,
-            commitSha: 'b'.repeat(40),
-            baseSha: 'c'.repeat(40),
-            prUrl: 'https://example.com/pr/1',
-          };
-        },
-      };
+      const artifactPublisher = createMockArtifactPublisher({
+        artifactId: 'mock-artifact',
+        artifactUrl: 'artifact://eval-a2a/mock-artifact',
+      });
       const mockGenerator = async (packet, sources, deps) => {
         if (generatorSpy) generatorSpy(packet, sources, deps);
         const bundleDir = `${deps.harnessFeedbackRoot}/bundles/${packet.id}`;
@@ -139,7 +125,7 @@ describe('Eval Hub API route', () => {
       };
       app.register(evalHubRoutes, {
         harnessFeedbackRoot: liveHarnessRoot ?? repoHarnessFeedbackRoot,
-        gitPublisher: mockGitPublisher,
+        artifactPublisher,
         verdictGenerators: { 'eval:a2a': mockGenerator },
         callbackRegistry,
         ...(withAgentKeyRegistry ? { agentKeyRegistry } : {}),
@@ -196,32 +182,10 @@ describe('Eval Hub API route', () => {
       // Mock publisher returns success → 200.
       assert.equal(response.statusCode, 200, `expected 200, got ${response.statusCode}: ${response.body}`);
       const body = response.json();
-      assert.equal(body.commitSha, 'mock-sha');
-      assert.equal(body.prUrl, 'https://example.com/pr/1');
-      await app.close();
-    });
-
-    it('agent-key refresh action reaches the exact-head verdict PR lifecycle', async () => {
-      const app = buildAgentKeyPublishApp();
-      const response = await app.inject({
-        method: 'POST',
-        url: '/api/eval-domains/eval:a2a/publish-verdict/refresh',
-        headers: { 'x-agent-key-secret': 'agent-key-test-secret', 'content-type': 'application/json' },
-        payload: JSON.stringify({
-          verdictId: '2026-08-02-eval-a2a-refresh',
-          expectedHeadSha: 'a'.repeat(40),
-        }),
-      });
-
-      assert.equal(response.statusCode, 200, response.body);
-      assert.deepEqual(response.json(), {
-        ok: true,
-        outcome: 'updated',
-        previousHeadSha: 'a'.repeat(40),
-        commitSha: 'b'.repeat(40),
-        baseSha: 'c'.repeat(40),
-        prUrl: 'https://example.com/pr/1',
-      });
+      assert.equal(body.artifactId, 'mock-artifact');
+      assert.equal(body.artifactUrl, 'artifact://eval-a2a/mock-artifact');
+      assert.equal('commitSha' in body, false);
+      assert.equal('prUrl' in body, false);
       await app.close();
     });
 
@@ -302,12 +266,7 @@ describe('Eval Hub API route', () => {
       };
       app.register(evalHubRoutes, {
         harnessFeedbackRoot: repoHarnessFeedbackRoot,
-        gitPublisher: {
-          async publishOnIsolatedWorktree(opts) {
-            await opts.stage('/tmp/wrong-cat-test');
-            return { commitSha: 'x', prUrl: 'x' };
-          },
-        },
+        artifactPublisher: createMockArtifactPublisher({ artifactId: 'x', artifactUrl: 'x' }),
         verdictGenerators: { 'eval:a2a': async () => ({ verdictPath: '/x', bundleDir: '/x' }) },
         callbackRegistry: {
           async verify() {
@@ -331,6 +290,84 @@ describe('Eval Hub API route', () => {
       const body = response.json();
       assert.equal(body.error, 'not_allowed');
       assert.match(body.detail, /opus-47/);
+      await app.close();
+    });
+
+    it('sol R2 P2-5: publish 403 emits publish_policy_reject octet; non-403 errors do NOT emit', async () => {
+      const appended = [];
+      const guardRejectionLog = {
+        async append(event) {
+          appended.push(event);
+        },
+      };
+      const agentKeyRegistry = {
+        async verify() {
+          return {
+            ok: true,
+            record: {
+              agentKeyId: 'ak-test-003',
+              catId: 'opus-47',
+              userId: 'you',
+              secretHash: 'u',
+              salt: 'u',
+              scope: 'user-bound',
+              issuedAt: Date.now() - 1000,
+              expiresAt: Date.now() + 3_600_000,
+            },
+          };
+        },
+      };
+      const app = Fastify({ logger: false });
+      app.register(evalHubRoutes, {
+        harnessFeedbackRoot: repoHarnessFeedbackRoot,
+        artifactPublisher: createMockArtifactPublisher({ artifactId: 'x', artifactUrl: 'x' }),
+        verdictGenerators: { 'eval:a2a': async () => ({ verdictPath: '/x', bundleDir: '/x' }) },
+        callbackRegistry: {
+          async verify() {
+            return { ok: false, reason: 'unknown_invocation' };
+          },
+        },
+        agentKeyRegistry,
+        guardRejectionLog,
+      });
+
+      // 403 path (wrong cat for domain) → one publish_policy_reject event.
+      const forbidden = await app.inject({
+        method: 'POST',
+        url: '/api/eval-domains/eval:a2a/publish-verdict',
+        headers: { 'x-agent-key-secret': 'agent-key-test-secret', 'content-type': 'application/json' },
+        payload: JSON.stringify({
+          packet: validPacket,
+          sourceRefs: { snapshotName: 'snap.yaml', attributionName: 'attr.yaml' },
+        }),
+      });
+      assert.equal(forbidden.statusCode, 403);
+      assert.equal(forbidden.json().ledgerId, 'eval/publish-verdict-authority', 'rejection carries pot coordinate');
+      assert.equal(appended.length, 1, 'domain-authority 403 must emit exactly one event');
+      const event = appended[0];
+      assert.equal(event.kind, 'publish_policy_reject');
+      assert.equal(event.guardId, 'publish_verdict_authority');
+      assert.equal(event.ledgerId, 'eval/publish-verdict-authority');
+      assert.equal(event.catId, 'opus-47');
+      assert.equal(event.ownerUserId, 'you', 'owner scope server-injected');
+      assert.equal(event.threadId, 'unknown', 'agent_key principal has no thread binding');
+      assert.equal(event.invocationId, 'unknown');
+      assert.equal(event.correlationConfidence, 'window');
+      assert.equal(event.sourceTool, 'publish_verdict');
+      assert.equal(event.layer, 'api-route');
+
+      // Counter-example: unsupported domain → 501, NOT a pot firing.
+      const unsupported = await app.inject({
+        method: 'POST',
+        url: '/api/eval-domains/eval:no-such-domain/publish-verdict',
+        headers: { 'x-agent-key-secret': 'agent-key-test-secret', 'content-type': 'application/json' },
+        payload: JSON.stringify({
+          packet: validPacket,
+          sourceRefs: { snapshotName: 'snap.yaml', attributionName: 'attr.yaml' },
+        }),
+      });
+      assert.notEqual(unsupported.statusCode, 403, 'unsupported domain is not an authority rejection');
+      assert.equal(appended.length, 1, 'non-403 handler errors must NOT emit (auth-shape/infra are not pots)');
       await app.close();
     });
   });

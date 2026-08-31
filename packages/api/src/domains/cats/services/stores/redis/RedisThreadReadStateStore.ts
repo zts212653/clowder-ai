@@ -283,10 +283,11 @@ export class RedisThreadReadStateStore implements IThreadReadStateStore {
         includeQueuedCatMessages: true,
         unresolvedCursorPolicy: 'empty',
       });
-      // P1-2 fix: exclude user's own typed messages + deleted/tombstone messages
-      // Cat messages (catId !== null) and connector messages (source) are counted as unread.
-      // Only the user's own direct messages (catId === null, no source) are excluded.
-      const relevant = unreadMessages.filter((m) => !m.deletedAt && (m.catId !== null || !!m.source));
+      // Exclude the authenticated user's own messages. MessageFrom is the
+      // identity authority; catId/source are retained only for legacy rows.
+      const relevant = unreadMessages.filter(
+        (m) => !m.deletedAt && (m.from ? m.from.kind !== 'user' : m.catId !== null || !!m.source),
+      );
       const unreadCount = relevant.length;
       const hasUserMention = relevant.some((m) => !!m.mentionsUser);
 
