@@ -13,6 +13,8 @@ describe('Thread progress prompt adoption', () => {
     assert.match(l6, /关键变化/);
     assert.match(l6, /无需写回|abstain/i);
     assert.match(l6, /final 前/);
+    assert.match(l5, /co-creator.*主要交流语言/);
+    assert.match(l6, /中英混合.*中文叙述.*技术名词.*保留原文/);
   });
 
   test('compiled native L0 carries the progress adoption contract', async () => {
@@ -23,5 +25,7 @@ describe('Thread progress prompt adoption', () => {
     assert.match(prompt, /关键变化/);
     assert.match(prompt, /无需写回|abstain/i);
     assert.match(prompt, /final 前/);
+    assert.match(prompt, /co-creator.*主要交流语言/);
+    assert.match(prompt, /中英混合.*中文叙述.*技术名词.*保留原文/);
   });
 });

@@ -3345,6 +3345,8 @@ export const callbackTools = [
       '在 final 前为当前会话写入一条可读的关键变化回执。' +
       '关键变化必须提供新的、可验证且会影响后续恢复工作的事实：目标/范围、已验证结果、阻塞/恢复、下一步或责任归属。' +
       '普通问答、闲聊、仅确认收到、重复状态以及只有工具调用却没有新结论时无需写回（abstain）。' +
+      '回执叙述跟随 co-creator 在当前 thread 的主要交流语言；中英混合时使用中文叙述，' +
+      '技术名词、代码符号、commit、ID 与标准 verdict 保留原文，不因 reviewer final 或工具输出使用英文而切换整条回执语言。' +
       '一次终态交付最多调用一次；服务端从 callback 身份派生用户、会话、猫、时间与幂等键。' +
       'Output: Receipt 写入结果；写入失败不得阻止你继续发送 final。',
     inputSchema: recordThreadProgressToolInputSchema,

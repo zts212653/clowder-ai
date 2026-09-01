@@ -28,6 +28,8 @@ describe('cat_cafe_record_thread_progress', () => {
     }
     assert.match(tool.description, /关键变化/);
     assert.match(tool.description, /无需写回|abstain/i);
+    assert.match(tool.description, /co-creator.*主要交流语言/);
+    assert.match(tool.description, /中英混合.*中文叙述.*技术名词.*保留原文/);
     assert.equal(tool.policy.activeState, 'canonical');
     assert.equal(
       tool.policy.standaloneReason.admissionRef,

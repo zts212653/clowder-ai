@@ -126,6 +126,7 @@ candidate → semantic gate → auth/provenance gate → atomic appendIfAbsent
 - `impactAxes` 至少一个；
 - provenance 至少一个；
 - headline/detail/nextStep 有严格长度上限；
+- headline/detail/nextStep 的叙述跟随 co-creator 在当前 thread 的主要交流语言；中英混合时使用中文叙述，技术名词、代码符号、commit、ID 与标准 verdict 保留原文；不得仅因 reviewer final 或工具输出使用英文而切换整条 Receipt 的语言；
 - 无条件 Task-done adapter 明确排除；Task/Review/测试/产物仅作为 provenance；
 - 多项同类修复聚合为一条阶段回执；
 - Receipt 写失败 fail-open：不阻塞 final，不伪造已保存。
