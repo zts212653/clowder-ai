@@ -18,8 +18,11 @@ describe('Thread progress prompt adoption', () => {
   });
 
   test('compiled native L0 carries the progress adoption contract', async () => {
+    const { loadCatConfig, toAllCatConfigs } = await import('../dist/config/cat-config-loader.js');
     const { compileL0 } = await import('../../../scripts/compile-system-prompt-l0.mjs');
-    const prompt = await compileL0({ catId: 'codex-sol' });
+    const [registeredCatId] = Object.keys(toAllCatConfigs(loadCatConfig()));
+    assert.ok(registeredCatId, 'compiled L0 test requires at least one registered cat');
+    const prompt = await compileL0({ catId: registeredCatId });
 
     assert.match(prompt, /cat_cafe_record_thread_progress/);
     assert.match(prompt, /关键变化/);
