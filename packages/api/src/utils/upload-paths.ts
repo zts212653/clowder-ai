@@ -1,17 +1,14 @@
-import { dirname, resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
-
-const THIS_DIR = dirname(fileURLToPath(import.meta.url));
-const MODULE_DEFAULT_UPLOAD_DIR = resolve(THIS_DIR, '../../uploads');
+import { resolve } from 'node:path';
+import { resolveUploadsDir } from '../config/data-dirs.js';
 
 /**
  * Resolve the upload directory.
- * Explicit UPLOAD_DIR keeps the historical cwd-based behavior.
- * Without configuration, default to packages/api/uploads so API routes and
- * connector outbound delivery share the same on-disk truth source.
+ * Explicit override keeps the historical cwd-based behavior.
+ * Without configuration, use the data-dir resolver (DATA_DIR/uploads or the
+ * module-relative packages/api/uploads fallback).
  */
 export function getDefaultUploadDir(configuredUploadDir?: string): string {
-  return configuredUploadDir ? resolve(configuredUploadDir) : MODULE_DEFAULT_UPLOAD_DIR;
+  return configuredUploadDir ? resolve(configuredUploadDir) : resolveUploadsDir();
 }
 
 const INTERNAL_ROUTE_PREFIXES = ['/uploads/', '/api/connector-media/', '/api/tts/audio/'];

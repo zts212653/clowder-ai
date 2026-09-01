@@ -12,7 +12,7 @@ import { HubEnvFilesTab } from '@/components/HubEnvFilesTab';
 const mockApiFetch = vi.mocked(apiFetch);
 
 const MOCK_ENV_SUMMARY = {
-  categories: { server: '服务器', storage: '存储' },
+  categories: { server: '服务器', storage: '存储', evidence: '证据' },
   variables: [
     {
       name: 'API_SERVER_PORT',
@@ -57,6 +57,16 @@ const MOCK_ENV_SUMMARY = {
       description: 'OpenAI API Key',
       category: 'server',
       sensitive: true,
+      currentValue: '***',
+    },
+    {
+      name: 'F102_API_KEY',
+      defaultValue: '(未设置)',
+      description: 'F102 summarizer API key',
+      category: 'evidence',
+      sensitive: true,
+      runtimeEditable: true,
+      targetWritePolicy: 'read-only-opt-in',
       currentValue: '***',
     },
   ],
@@ -252,6 +262,35 @@ describe('HubEnvFilesTab', () => {
     await flushEffects();
 
     expect(container.textContent).toContain('保存失败（测试）');
+  });
+
+  it('does not render editor or save payload for read-only-opt-in vars', async () => {
+    await act(async () => {
+      root.render(React.createElement(HubEnvFilesTab));
+    });
+    await flushEffects();
+
+    // runtimeEditable=true but targetWritePolicy=read-only-opt-in → no input
+    expect(container.querySelector('input[aria-label="F102_API_KEY"]')).toBeNull();
+    expect(container.textContent).toContain('F102_API_KEY');
+
+    const frontendUrlInput = container.querySelector('input[aria-label="FRONTEND_URL"]') as HTMLInputElement;
+    await changeField(frontendUrlInput, 'http://localhost:3200');
+
+    const saveButton = Array.from(container.querySelectorAll('button')).find(
+      (button) => button.textContent === '保存到 .env',
+    );
+    await act(async () => {
+      saveButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    await flushEffects();
+
+    const patchCall = mockApiFetch.mock.calls.find(
+      ([path, init]) => path === '/api/config/env' && init?.method === 'PATCH',
+    );
+    expect(patchCall).toBeTruthy();
+    expect(String(patchCall?.[1]?.body)).not.toContain('F102_API_KEY');
+    expect(String(patchCall?.[1]?.body)).toContain('FRONTEND_URL');
   });
 
   it('serializes save requests when 保存到 .env is double-clicked', async () => {

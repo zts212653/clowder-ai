@@ -60,7 +60,7 @@ function hasParentTraversalSegment(value: string): boolean {
 
 export function resolveRefAudioPath(refAudio: string, characterBaseDir: string): string {
   if (refAudio.startsWith('/uploads/')) {
-    const uploadDir = resolve(getDefaultUploadDir(process.env.UPLOAD_DIR));
+    const uploadDir = resolve(getDefaultUploadDir());
     const uploadKey = refAudio.slice('/uploads/'.length);
     if (hasParentTraversalSegment(uploadKey)) return join(uploadDir, 'invalid-ref');
     const resolved = resolve(uploadDir, uploadKey);

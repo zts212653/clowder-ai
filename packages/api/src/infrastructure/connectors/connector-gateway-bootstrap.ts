@@ -27,7 +27,7 @@ import {
 import type { RedisClient } from '@cat-cafe/shared/utils';
 import type { FastifyBaseLogger } from 'fastify';
 import { isCatAvailable } from '../../config/cat-config-loader.js';
-import { resolveTtsCacheDir } from '../../domains/cats/services/tts/document-listen-paths.js';
+import { resolveConnectorMediaDir, resolveTtsCacheDir } from '../../config/data-dirs.js';
 import type { IssueCommentClassification } from '../../domains/community/issue-analysis/issue-comment-classifier.js';
 import type { ConnectorWebhookHandler } from '../../routes/connector-webhooks.js';
 import { resolveActiveProjectRoot } from '../../utils/active-project-root.js';
@@ -103,7 +103,7 @@ export interface ConnectorGatewayConfig {
   /** Override co-creator userId for connector threads. Read from DEFAULT_OWNER_USER_ID env. */
   coCreatorUserId?: string | undefined;
   whisperUrl?: string | undefined;
-  connectorMediaDir?: string | undefined;
+  connectorMediaDir: string;
   /** F151: XiaoYi OpenClaw 模式 */
   xiaoyiAk?: string | undefined;
   xiaoyiSk?: string | undefined;
@@ -269,7 +269,7 @@ export function loadConnectorGatewayConfig(): ConnectorGatewayConfig {
     wecomEncodingAesKey: process.env.WECOM_ENCODING_AES_KEY,
     coCreatorUserId: process.env.DEFAULT_OWNER_USER_ID,
     whisperUrl: process.env.WHISPER_URL,
-    connectorMediaDir: process.env.CONNECTOR_MEDIA_DIR,
+    connectorMediaDir: resolveConnectorMediaDir(),
     xiaoyiAk: process.env.XIAOYI_AK,
     xiaoyiSk: process.env.XIAOYI_SK,
     xiaoyiAgentId: process.env.XIAOYI_AGENT_ID,
@@ -520,7 +520,7 @@ export async function startConnectorGateway(
   });
 
   // Phase 5+6: Media service + STT provider (optional)
-  const mediaDir = config.connectorMediaDir ?? './data/connector-media';
+  const mediaDir = config.connectorMediaDir;
   const mediaService = new ConnectorMediaService({
     mediaDir,
   });
@@ -967,7 +967,7 @@ export async function startConnectorGateway(
   }
 
   // R3-P1: Resolve route URLs to local file paths for real media delivery
-  const uploadDir = getDefaultUploadDir(process.env.UPLOAD_DIR);
+  const uploadDir = getDefaultUploadDir();
   const ttsCacheDir = resolve(resolveTtsCacheDir());
   const resolvedMediaDir = resolve(mediaDir);
   const webPublicDir = resolve(process.env.WEB_PUBLIC_DIR ?? '../web/public');

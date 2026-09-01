@@ -19,6 +19,7 @@ import { randomUUID } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import { appendFile, mkdir, readdir, readFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
+import { resolveAuditLogsDir } from '../../../../config/data-dirs.js';
 import { createModuleLogger } from '../../../../infrastructure/logger.js';
 
 const log = createModuleLogger('audit');
@@ -35,15 +36,12 @@ export interface AuditEvent {
 
 export type AuditEventInput = Omit<AuditEvent, 'id' | 'timestamp'>;
 
-/** Default audit log directory */
-const DEFAULT_AUDIT_DIR = './data/audit-logs';
-
 export class EventAuditLog {
   private readonly auditDir: string;
   private initialized = false;
 
   constructor(options?: { auditDir?: string }) {
-    this.auditDir = options?.auditDir ?? process.env.AUDIT_LOG_DIR ?? DEFAULT_AUDIT_DIR;
+    this.auditDir = options?.auditDir ?? resolveAuditLogsDir();
   }
 
   /**

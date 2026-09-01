@@ -48,7 +48,7 @@ export interface InvocationsRoutesOptions {
 }
 
 export const invocationsRoutes: FastifyPluginAsync<InvocationsRoutesOptions> = async (app, opts) => {
-  const uploadDir = getDefaultUploadDir(opts.uploadDir ?? process.env.UPLOAD_DIR);
+  const uploadDir = getDefaultUploadDir(opts.uploadDir);
 
   // GET /api/invocations/:id — query InvocationRecord state
   app.get<{ Params: { id: string } }>('/api/invocations/:id', async (request, reply) => {

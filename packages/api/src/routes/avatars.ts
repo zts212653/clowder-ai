@@ -129,7 +129,7 @@ export const avatarsRoutes: FastifyPluginAsync = async (app) => {
     }
 
     const ext = extForMime(file.mimetype);
-    const uploadDir = getDefaultUploadDir(process.env.UPLOAD_DIR);
+    const uploadDir = getDefaultUploadDir();
     await mkdir(uploadDir, { recursive: true });
     const filename = `avatar-${Date.now()}-${randomUUID().slice(0, 8)}.${ext}`;
     await writeFile(join(uploadDir, filename), buffer);

@@ -10,13 +10,13 @@ import { getDefaultUploadDir, resolveInternalRouteUrl } from '../../../../../uti
 /**
  * Extract absolute image file paths from contentBlocks.
  * Converts relative URL paths (/uploads/foo.png) to absolute filesystem paths.
- * @param uploadDir Override for the upload directory (defaults to UPLOAD_DIR env or './uploads')
+ * @param uploadDir Override for the upload directory (defaults to DATA_DIR/uploads or packages/api/uploads)
  */
 export function extractImagePaths(contentBlocks: readonly MessageContent[] | undefined, uploadDir?: string): string[] {
   if (!contentBlocks) return [];
 
   const paths: string[] = [];
-  const resolvedUploadDir = getDefaultUploadDir(uploadDir ?? process.env.UPLOAD_DIR);
+  const resolvedUploadDir = getDefaultUploadDir(uploadDir);
   for (const block of contentBlocks) {
     if (block.type !== 'image') continue;
     const url = block.url;

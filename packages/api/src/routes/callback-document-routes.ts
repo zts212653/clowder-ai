@@ -71,7 +71,7 @@ export function registerCallbackDocumentRoutes(
     }
 
     // Copy generated file to uploads directory (P1-1: ensure dir exists)
-    const uploadDir = getDefaultUploadDir(process.env.UPLOAD_DIR);
+    const uploadDir = getDefaultUploadDir();
     await mkdir(uploadDir, { recursive: true });
     const uniqueName = `doc-${randomBytes(6).toString('hex')}-${result.fileName}`;
     const destPath = resolve(uploadDir, uniqueName);

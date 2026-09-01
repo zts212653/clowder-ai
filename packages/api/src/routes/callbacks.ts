@@ -4066,7 +4066,7 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
 
     // F211 BUG1 fix: resolve /uploads/ relative image URLs to absolute paths
     // so external runtimes (Antigravity/Bengal) can access image files.
-    const uploadDir = getDefaultUploadDir(process.env.UPLOAD_DIR);
+    const uploadDir = getDefaultUploadDir();
 
     // F236 Track-1: cat-controlled response mode. anchor (default) = token-lean previews + drillDown;
     // full = complete bodies per ordinary item inside a bounded, cursor-continuable aggregate page.
@@ -4617,7 +4617,7 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
       reply.status(404);
       return { error: 'Message not found' };
     }
-    const uploadDir = getDefaultUploadDir(process.env.UPLOAD_DIR);
+    const uploadDir = getDefaultUploadDir();
     // F236 AC-B1: bounded drill terminal. Default preview truncates content (keeps the `content`
     // field name for consumer continuity + adds contentLength/truncated); mode=full returns the
     // complete content + contentBlocks. Image hints stay in both modes.

@@ -26,6 +26,8 @@ export interface EnvVar {
   sensitive: boolean;
   maskMode?: 'url';
   runtimeEditable?: boolean;
+  /** #770: target write policy from env registry; overrides runtimeEditable for UI editability. */
+  targetWritePolicy?: 'editable' | 'read-only' | 'read-only-opt-in' | 'module-managed' | 'no-ui-write';
   deprecated?: string;
   allowedValues?: string[];
   currentValue: string | null;
@@ -99,12 +101,18 @@ function needsRestart(variable: EnvVar): boolean {
   return variable.runtimeEditable === false || RESTART_REQUIRED_ENV_VARS.has(variable.name);
 }
 
+/** #770: fail-closed — only vars with explicit runtimeEditable: true are editable.
+ * When the registry supplies a targetWritePolicy, it overrides runtimeEditable.
+ */
 export function isEditableVariable(variable: EnvVar): boolean {
+  if (variable.targetWritePolicy && variable.targetWritePolicy !== 'editable') {
+    return false;
+  }
   return variable.runtimeEditable === true;
 }
 
 export function isSensitiveEditable(variable: EnvVar): boolean {
-  return variable.sensitive && variable.runtimeEditable === true;
+  return variable.sensitive && isEditableVariable(variable);
 }
 
 export function isMaskedUrlVariable(variable: EnvVar): boolean {

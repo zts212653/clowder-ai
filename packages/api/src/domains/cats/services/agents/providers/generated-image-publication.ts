@@ -42,7 +42,7 @@ export interface PublishedGeneratedImage extends SavedImageAsset {
 }
 
 export async function publishGeneratedImage(input: GeneratedImagePublicationInput): Promise<PublishedGeneratedImage> {
-  const resolvedUploadDir = getDefaultUploadDir(input.uploadDir ?? process.env.UPLOAD_DIR);
+  const resolvedUploadDir = getDefaultUploadDir(input.uploadDir);
   const publicationStem = buildPublicationStem(input.publicationKey);
 
   const expectedFilename = `${sanitizeFilenameStem(publicationStem)}${mimeToImageExt(input.mimeType)}`;

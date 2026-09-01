@@ -26,9 +26,7 @@ export function collectRuntimePorts(): number[] {
   const envKeys = [
     'API_SERVER_PORT',
     'FRONTEND_PORT',
-    'MCP_SERVER_PORT',
     'PREVIEW_GATEWAY_PORT',
-    'REDIS_PORT',
     'VITE_PORT',
     'ANTHROPIC_PROXY_PORT', // P1 fix (砚砚 review): proxy port must be excluded
     'EMBED_PORT', // P1 fix: custom embed port

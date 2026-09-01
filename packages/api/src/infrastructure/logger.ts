@@ -13,6 +13,7 @@ import { existsSync, mkdirSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { format as utilFormat } from 'node:util';
 import pino from 'pino';
+import { resolveLogDir } from '../config/data-dirs.js';
 
 /**
  * --debug CLI flag: `node dist/index.js --debug` sets log level to 'debug'.
@@ -20,7 +21,7 @@ import pino from 'pino';
  */
 export const isDebugMode = process.argv.includes('--debug');
 const LOG_LEVEL = (isDebugMode ? 'debug' : (process.env.LOG_LEVEL ?? 'info')) as pino.Level;
-const LOG_DIR = process.env.LOG_DIR ? resolve(process.env.LOG_DIR) : resolve(process.cwd(), 'data', 'logs', 'api');
+const LOG_DIR = resolveLogDir();
 const RETENTION_FILES = 14;
 
 /**

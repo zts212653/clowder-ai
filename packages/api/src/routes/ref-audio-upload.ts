@@ -86,7 +86,7 @@ export const refAudioUploadRoutes: FastifyPluginAsync = async (app) => {
       });
     }
 
-    const uploadDir = getDefaultUploadDir(process.env.UPLOAD_DIR);
+    const uploadDir = getDefaultUploadDir();
     await mkdir(uploadDir, { recursive: true });
     const filename = `ref-audio-${Date.now()}-${randomUUID().slice(0, 8)}.${detected}`;
     await writeFile(join(uploadDir, filename), buffer, { flag: 'wx' });

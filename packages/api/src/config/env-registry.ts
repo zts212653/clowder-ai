@@ -70,6 +70,12 @@ export interface EnvDefinition {
   hubVisible?: boolean;
   /** If false, value is bootstrap-only and cannot be edited at runtime from Hub */
   runtimeEditable?: boolean;
+  /**
+   * Target write policy for the curated env UI (#770). When absent, `runtimeEditable`
+   * remains the source of truth. When present, it overrides `runtimeEditable` for
+   * fail-closed write decisions: only `editable` allows Hub writes.
+   */
+  targetWritePolicy?: 'editable' | 'read-only' | 'read-only-opt-in' | 'module-managed' | 'no-ui-write';
   /** If true, this var should appear in .env.example (enforced by check:env-example) */
   exampleRecommended?: boolean;
   /** Human-readable reason shown by Settings when a retained registry entry has no live consumer. */
@@ -87,6 +93,19 @@ export interface EnvDefinition {
     defaultOn: boolean;
     trueWhen?: 'parseBoolEnv' | 'exactTrue' | 'exactOne' | 'notZero';
   };
+  /**
+   * Explicit UI control type. When omitted, the renderer should infer it via
+   * `inferEnvControl(def)`:
+   * - explicit `control` metadata
+   * - `booleanSemantics` → toggle
+   * - `allowedValues` → dropdown
+   * - everything else → text
+   *
+   * Note: `dirpicker` is NEVER inferred from naming heuristics. A var must be
+   * explicitly marked `control: 'dirpicker'` to avoid misclassifying file
+   * paths such as `CHROME_EXECUTABLE_PATH`.
+   */
+  control?: 'text' | 'toggle' | 'dropdown' | 'dirpicker';
 }
 
 export const ENV_CATEGORIES: Record<EnvCategory, string> = {
@@ -138,23 +157,6 @@ export const ENV_VARS: EnvDefinition[] = [
     restartRequired: true,
   },
   {
-    name: 'REDIS_PORT',
-    defaultValue: '6399',
-    description: 'Redis 端口（governance pack 用于生成外部项目规则）',
-    category: 'server',
-    sensitive: false,
-    runtimeEditable: false,
-    exampleRecommended: true,
-  },
-  {
-    name: 'REDIS_DEV_PORT',
-    defaultValue: '6398',
-    description: 'Redis 开发/测试端口（governance pack 用于生成外部项目规则）',
-    category: 'server',
-    sensitive: false,
-    runtimeEditable: false,
-  },
-  {
     name: 'API_SERVER_HOST',
     defaultValue: '127.0.0.1',
     description: 'API 监听地址（改为 0.0.0.0 可让手机/平板通过局域网或 Tailscale 访问）',
@@ -180,17 +182,6 @@ export const ENV_VARS: EnvDefinition[] = [
     booleanSemantics: { defaultOn: false, trueWhen: 'exactTrue' },
   },
   {
-    name: 'UPLOAD_DIR',
-    defaultValue: './uploads',
-    description: '用户上传的文件（图片、附件等）存放位置',
-    category: 'server',
-    sensitive: false,
-    runtimeEditable: false,
-    label: '上传目录',
-    settingsGroup: 'storage',
-    restartRequired: true,
-  },
-  {
     name: 'PROJECT_ALLOWED_ROOTS',
     defaultValue: '(未设置 — 使用 denylist 模式，仅拦截系统目录)',
     description:
@@ -200,6 +191,9 @@ export const ENV_VARS: EnvDefinition[] = [
     runtimeEditable: false,
     label: '目录白名单',
     settingsGroup: 'security',
+    // NOT dirpicker: project-path.ts splits this on node:path delimiter into a
+    // multi-root LIST (e.g. /opt/a:/opt/b). A single-directory picker would drop
+    // the list semantics (codex/sol #1344 P2). Renders as multi-path text.
   },
   {
     name: 'PROJECT_ALLOWED_ROOTS_APPEND',
@@ -222,6 +216,9 @@ export const ENV_VARS: EnvDefinition[] = [
     runtimeEditable: false,
     label: '目录黑名单',
     settingsGroup: 'security',
+    // NOT dirpicker: project-path.ts splits this on node:path delimiter into a
+    // multi-root LIST (merged with platform defaults). A single-directory picker
+    // would drop the list semantics (codex/sol #1344 P2). Renders as multi-path text.
   },
   {
     name: 'FRONTEND_URL',
@@ -261,6 +258,7 @@ export const ENV_VARS: EnvDefinition[] = [
   },
   {
     name: 'CAT_CAFE_USER_ID',
+    hubVisible: false,
     defaultValue: 'default-user',
     description: '当前用户 ID',
     category: 'server',
@@ -268,6 +266,7 @@ export const ENV_VARS: EnvDefinition[] = [
   },
   {
     name: 'CAT_CAFE_F255_AWAKENED_LEASE_MS',
+    hubVisible: false,
     defaultValue: '5400000',
     description: 'F255 Present loop 醒来租约时长（毫秒，默认 90 分钟；启动时读取）',
     category: 'server',
@@ -276,6 +275,7 @@ export const ENV_VARS: EnvDefinition[] = [
   },
   {
     name: 'CAT_CAFE_HOME',
+    hubVisible: false,
     defaultValue: '<repoRoot>/.cat-cafe',
     description:
       'Service install data root (Python interpreter, per-service venvs, Piper voice models, etc.). Honored by scripts/services/* and the venv-probe path in service-registry — override to share install state across users / containers / mounts.',
@@ -285,6 +285,7 @@ export const ENV_VARS: EnvDefinition[] = [
   },
   {
     name: 'CAT_CAFE_INVOCATION_REGISTRY',
+    hubVisible: false,
     defaultValue: 'redis（Redis 不可用时启动失败）',
     description:
       'F298 callback auth 后端：redis 为 durable 默认；memory 仅限显式 degraded 本地/测试模式，并在容量满时拒绝新 admission',
@@ -294,6 +295,7 @@ export const ENV_VARS: EnvDefinition[] = [
   },
   {
     name: 'CAT_CAFE_AUTH_TOMBSTONE_GC_TTL_MS',
+    hubVisible: false,
     defaultValue: '2592000000',
     description: 'F298 callback auth 终态 tombstone GC 保留期（毫秒，默认 30 天；active principal 永不使用 TTL）',
     category: 'server',
@@ -302,6 +304,7 @@ export const ENV_VARS: EnvDefinition[] = [
   },
   {
     name: 'F233_BALL_CUSTODY_PROBE_INTERVAL_MS',
+    hubVisible: false,
     defaultValue: '60000',
     description: 'F233 ball-custody ProbeScheduler 轮询间隔（毫秒，启动时读取）',
     category: 'server',
@@ -309,15 +312,8 @@ export const ENV_VARS: EnvDefinition[] = [
     runtimeEditable: false,
   },
   {
-    name: 'CAT_CAFE_REPO_ROOT',
-    defaultValue: '(进程 CWD)',
-    description: 'F233 Phase C feat trajectory collector 所读 cat-cafe 仓根目录（含 .git）。未设置时用 process.cwd()',
-    category: 'server',
-    sensitive: false,
-    runtimeEditable: false,
-  },
-  {
     name: 'CAT_CAFE_REPO_FULL_NAME',
+    hubVisible: false,
     defaultValue: 'zts212653/cat-cafe',
     description: 'F233 Phase C feat trajectory collector 调 gh CLI 用的 owner/repo（GitHub PR 元数据查询）',
     category: 'server',
@@ -326,6 +322,7 @@ export const ENV_VARS: EnvDefinition[] = [
   },
   {
     name: 'CAT_CAFE_VERDICT_REPO_FULL_NAME',
+    hubVisible: false,
     defaultValue: 'CAT_CAFE_REPO_FULL_NAME or zts212653/cat-cafe',
     description:
       'F248 verdict publisher canonical owner/repo; automatic, pre-push, and managed agent-shell publication fail closed on target mismatch',
@@ -335,6 +332,7 @@ export const ENV_VARS: EnvDefinition[] = [
   },
   {
     name: 'CAT_CAFE_AGENT_KEY_SECRET',
+    hubVisible: false,
     defaultValue: '(空)',
     description: 'F178 Persistent MCP Agent-Key Auth — 共享密钥（直接环境变量提供）',
     category: 'server',
@@ -343,6 +341,7 @@ export const ENV_VARS: EnvDefinition[] = [
   },
   {
     name: 'CAT_CAFE_AGENT_KEY_FILE',
+    hubVisible: false,
     defaultValue: '(空)',
     description: 'F178 Persistent MCP Agent-Key Auth — 密钥文件路径（CAT_CAFE_AGENT_KEY_SECRET 的备选）',
     category: 'server',
@@ -351,6 +350,7 @@ export const ENV_VARS: EnvDefinition[] = [
   },
   {
     name: 'CAT_CAFE_AGENT_KEY_FILES',
+    hubVisible: false,
     defaultValue: '(空)',
     description: 'F178 Persistent MCP Agent-Key Auth — catId 到密钥文件路径的 JSON 映射（Antigravity variants）',
     category: 'server',
@@ -369,6 +369,7 @@ export const ENV_VARS: EnvDefinition[] = [
   },
   {
     name: 'CAT_CAFE_REMOTE_PORT',
+    hubVisible: false,
     defaultValue: '3098',
     description:
       'F247 B1a Cloud Cat — remote-spike.ts 监听端口（公网 Remote MCP gateway for cloud cat e.g. ChatGPT Pro 砚砚 Pro）',
@@ -378,6 +379,7 @@ export const ENV_VARS: EnvDefinition[] = [
   },
   {
     name: 'CAT_CAFE_GPT_PRO_AGENT_KEY_FILE',
+    hubVisible: false,
     defaultValue: '$CAT_CAFE_DATA_DIR/agent-keys/gpt-pro.secret',
     description:
       'F247 Cloud Cat — gpt-pro Remote MCP agent-key sidecar override；默认由 runtime owner 自动 provision/renew，无需手工 mint。',
@@ -417,6 +419,7 @@ export const ENV_VARS: EnvDefinition[] = [
   },
   {
     name: 'CAT_CAFE_ENABLE_LEGACY_PINCHTAB_BRIDGE',
+    hubVisible: false,
     defaultValue: '0',
     description:
       'F247 Cloud Cat — 显式启用会控制前台浏览器的 legacy PinchTab bridge；默认 0，Host Adapter 缺失时 fail closed。',
@@ -426,6 +429,7 @@ export const ENV_VARS: EnvDefinition[] = [
   },
   {
     name: 'CAT_CAFE_REMOTE_TOKEN',
+    hubVisible: false,
     defaultValue: '(空)',
     description:
       'F247 B1a Cloud Cat — remote-spike.ts ?token= disposable interim guard（B1a 单防线；B1b 升级 verified CF Access OAuth 替换）',
@@ -435,6 +439,7 @@ export const ENV_VARS: EnvDefinition[] = [
   },
   {
     name: 'CAT_CAFE_DESKTOP_MODE',
+    hubVisible: false,
     defaultValue: 'fable-phase0',
     description:
       'F247 B1a Cloud Cat — remote-spike.ts 工具白名单 mode 选择（fable-phase0 / cloud-pro-phase0；收窄到 10 项 collab+memory 工具）',
@@ -444,6 +449,7 @@ export const ENV_VARS: EnvDefinition[] = [
   },
   {
     name: 'CAT_CAFE_PROVISION_GLOBAL_SIDECAR',
+    hubVisible: false,
     defaultValue: '0',
     description:
       'F178 Persistent MCP Agent-Key Auth — 仅全局 sidecar owner（runtime 主实例）设为 1；alpha/dev 不得设置，避免覆盖 ~/.cat-cafe/agent-keys。',
@@ -453,6 +459,7 @@ export const ENV_VARS: EnvDefinition[] = [
   },
   {
     name: 'CAT_CAFE_AGENT_KEY_ALLOW_MEMORY_SIDECAR',
+    hubVisible: false,
     defaultValue: '0',
     description:
       'F178 Persistent MCP Agent-Key Auth — 本地降级开发开关；仅在 CAT_CAFE_PROVISION_GLOBAL_SIDECAR=1 且无 Redis 时允许 memory backend 写 sidecar。',
@@ -462,6 +469,7 @@ export const ENV_VARS: EnvDefinition[] = [
   },
   {
     name: 'CAT_CAFE_AGENT_KEY_SIDECAR_DISABLED',
+    hubVisible: false,
     defaultValue: '0',
     description: 'F178 Persistent MCP Agent-Key Auth — 强制关闭全局 sidecar provisioning，优先级高于 owner 标记。',
     category: 'server',
@@ -516,6 +524,7 @@ export const ENV_VARS: EnvDefinition[] = [
   },
   {
     name: 'RUNTIME_REPO_PATH',
+    hubVisible: false,
     defaultValue: '(未设置)',
     description: 'Runtime 仓库路径（自动更新用）',
     category: 'server',
@@ -523,15 +532,9 @@ export const ENV_VARS: EnvDefinition[] = [
   },
   {
     name: 'WORKSPACE_LINKED_ROOTS',
+    hubVisible: false,
     defaultValue: '(未设置)',
     description: '工作区关联的项目根（冒号分隔）',
-    category: 'server',
-    sensitive: false,
-  },
-  {
-    name: 'HYPERFOCUS_THRESHOLD_MS',
-    defaultValue: '5400000 (90分钟)',
-    description: 'Hyperfocus 健康提醒阈值',
     category: 'server',
     sensitive: false,
   },
@@ -546,7 +549,7 @@ export const ENV_VARS: EnvDefinition[] = [
   {
     name: 'LOG_LEVEL',
     defaultValue: 'info',
-    description: '日志级别（debug / info / warn / error）',
+    description: '日志级别（Pino 消费：fatal / error / warn / info / debug / trace / silent）',
     category: 'server',
     sensitive: false,
     runtimeEditable: false,
@@ -554,6 +557,7 @@ export const ENV_VARS: EnvDefinition[] = [
     label: '日志级别',
     settingsGroup: 'runtime',
     restartRequired: true,
+    allowedValues: ['fatal', 'error', 'warn', 'info', 'debug', 'trace', 'silent'],
   },
   {
     name: 'LOG_DIR',
@@ -562,6 +566,7 @@ export const ENV_VARS: EnvDefinition[] = [
     category: 'server',
     sensitive: false,
     exampleRecommended: true,
+    control: 'dirpicker',
   },
   {
     name: 'DEBUG',
@@ -570,15 +575,6 @@ export const ENV_VARS: EnvDefinition[] = [
     category: 'server',
     sensitive: false,
     hubVisible: false,
-  },
-  {
-    name: 'MCP_SERVER_PORT',
-    defaultValue: '3011',
-    description: 'MCP Server 监听端口',
-    category: 'server',
-    sensitive: false,
-    runtimeEditable: false,
-    exampleRecommended: true,
   },
   {
     name: 'PREVIEW_GATEWAY_ENABLED',
@@ -594,6 +590,7 @@ export const ENV_VARS: EnvDefinition[] = [
   },
   {
     name: 'CHROME_EXECUTABLE_PATH',
+    hubVisible: false,
     defaultValue: '(未设置 → 自动检测系统 Chrome/Edge/Chromium)',
     description: '对话导出截图使用的 Chromium 系浏览器路径。未设置时按 Chrome > Edge > Chromium 优先级自动检测',
     category: 'server',
@@ -633,6 +630,7 @@ export const ENV_VARS: EnvDefinition[] = [
   },
   {
     name: 'WEB_PUBLIC_DIR',
+    hubVisible: false,
     defaultValue: '../web/public',
     description: 'Web 前端静态文件目录（connector gateway 静态资源服务）',
     category: 'server',
@@ -665,6 +663,7 @@ export const ENV_VARS: EnvDefinition[] = [
   },
   {
     name: 'ALLOWED_WORKSPACE_DIRS',
+    hubVisible: false,
     defaultValue: '(未设置)',
     description: 'MCP Server 允许访问的工作目录列表（逗号分隔）',
     category: 'server',
@@ -673,15 +672,17 @@ export const ENV_VARS: EnvDefinition[] = [
   },
   {
     name: 'CAT_CAFE_RUNTIME_ROOT',
+    hubVisible: false,
     defaultValue: '(未设置 → process.cwd())',
     description:
-      'F061: Clowder AI runtime 二进制根目录（runtime startup 自动 export 为 $RUNTIME_DIR），优先级高于 capability orchestrator 的 auto-detection，用于 Antigravity MCP config args 路径',
+      'F061: runtime 二进制根目录（runtime startup 自动 export 为 $RUNTIME_DIR），优先级高于 capability orchestrator 的 auto-detection，用于 Antigravity MCP config args 路径',
     category: 'server',
     sensitive: false,
     runtimeEditable: false,
   },
   {
     name: 'CAT_CAFE_WORKSPACE_ROOT',
+    hubVisible: false,
     defaultValue: '(未设置 → process.cwd())',
     description:
       'F061: Bengal MCP 工具的 workspace 根目录（runtime startup 自动 export 为 $PROJECT_DIR），用于 Antigravity MCP config 的 ALLOWED_WORKSPACE_DIRS env 注入',
@@ -714,6 +715,24 @@ export const ENV_VARS: EnvDefinition[] = [
     label: '数据库前缀',
     settingsGroup: 'storage',
     restartRequired: true,
+  },
+  {
+    name: 'REDIS_DATA_DIR',
+    hubVisible: false,
+    defaultValue: '(未设置 → ~/.cat-cafe/redis-dev)',
+    description: 'Redis 数据目录（shell 层在 API 启动前设置；API 仅作 introspection）。DATA_DIR 设置后会被覆盖。',
+    category: 'storage',
+    sensitive: false,
+    runtimeEditable: false,
+  },
+  {
+    name: 'REDIS_BACKUP_DIR',
+    hubVisible: false,
+    defaultValue: '(未设置 → ~/.cat-cafe/redis-backups/dev)',
+    description: 'Redis 备份目录（shell 层在 API 启动前设置；API 仅作 introspection）。DATA_DIR 设置后会被覆盖。',
+    category: 'storage',
+    sensitive: false,
+    runtimeEditable: false,
   },
   {
     name: 'MEMORY_STORE',
@@ -795,15 +814,30 @@ export const ENV_VARS: EnvDefinition[] = [
     restartRequired: true,
   },
   {
-    name: 'TRANSCRIPT_DATA_DIR',
-    defaultValue: '<项目根>/data/transcripts',
-    description: '猫猫的对话录制文件存放位置',
+    name: 'DATA_DIR',
+    defaultValue: '(未设置 → 各路径沿用 legacy 默认)',
+    description:
+      '持久数据根目录（issue #671）：设置后 evidence.sqlite/world.sqlite/transcripts/audit-logs/cli-raw-archive/uploads 全部移到该目录下对应子路径。未设置时各路径沿用旧默认。',
     category: 'storage',
     sensitive: false,
     runtimeEditable: false,
-    label: '会话记录目录',
+    label: '数据根目录',
     settingsGroup: 'storage',
     restartRequired: true,
+    control: 'dirpicker',
+  },
+  {
+    name: 'CACHE_DIR',
+    defaultValue: '(未设置 → 各路径沿用 legacy 默认)',
+    description:
+      '可重建缓存根目录（issue #671）：设置后 tts/connector-media 移到该目录下对应子路径。未设置时各路径沿用旧默认。',
+    category: 'storage',
+    sensitive: false,
+    runtimeEditable: false,
+    label: '缓存根目录',
+    settingsGroup: 'storage',
+    restartRequired: true,
+    control: 'dirpicker',
   },
   {
     name: 'ANNOTATION_DATA_DIR',
@@ -821,6 +855,7 @@ export const ENV_VARS: EnvDefinition[] = [
   },
   {
     name: 'VISIBILITY_CURSOR_V2',
+    hubVisible: false,
     defaultValue: '(未设置 → off)',
     description:
       '#1269: Activation gate for v2 cursor durable-slot initiation. Set to "on" to enable v2 encoding in previously untouched durable slots (delivery/read/seen positions). Canonical comparison always uses v2 regardless of this flag. Deployment-scoped: OFF by default, rollback-safe (existing v2 slots remain advanceable).',
@@ -922,6 +957,7 @@ export const ENV_VARS: EnvDefinition[] = [
   },
   {
     name: 'CAT_TEMPLATE_PATH',
+    hubVisible: false,
     defaultValue: '(repo 根 cat-template.json)',
     description: '猫猫模板文件路径',
     category: 'cli',
@@ -938,22 +974,9 @@ export const ENV_VARS: EnvDefinition[] = [
   },
   {
     name: 'CAT_CAFE_MCP_SERVER_PATH',
+    hubVisible: false,
     defaultValue: '(自动检测)',
     description: 'MCP Server 路径',
-    category: 'cli',
-    sensitive: false,
-  },
-  {
-    name: 'AUDIT_LOG_DIR',
-    defaultValue: './data/audit-logs',
-    description: '审计日志目录',
-    category: 'cli',
-    sensitive: false,
-  },
-  {
-    name: 'CLI_RAW_ARCHIVE_DIR',
-    defaultValue: './data/cli-raw-archive',
-    description: 'CLI 原始日志归档目录',
     category: 'cli',
     sensitive: false,
   },
@@ -966,6 +989,7 @@ export const ENV_VARS: EnvDefinition[] = [
   },
   {
     name: 'CAT_BRANCH_ROLLBACK_RETRY_DELAYS_MS',
+    hubVisible: false,
     defaultValue: '1000,2000,4000',
     description: 'Branch 回滚重试间隔',
     category: 'cli',
@@ -982,6 +1006,7 @@ export const ENV_VARS: EnvDefinition[] = [
   },
   {
     name: 'CAT_CAFE_TMUX_AGENT',
+    hubVisible: false,
     defaultValue: '(未设置)',
     description: '设为 1 启用 tmux agent 模式',
     category: 'cli',
@@ -989,6 +1014,7 @@ export const ENV_VARS: EnvDefinition[] = [
   },
   {
     name: 'CAT_CAFE_TMUX_PATH',
+    hubVisible: false,
     defaultValue: '(未设置)',
     description: 'Tmux 可执行文件路径',
     category: 'cli',
@@ -1004,9 +1030,11 @@ export const ENV_VARS: EnvDefinition[] = [
     label: '数据根目录',
     settingsGroup: 'storage',
     restartRequired: true,
+    control: 'dirpicker',
   },
   {
     name: 'CAT_CAFE_CALLBACK_TOKEN',
+    hubVisible: false,
     defaultValue: '(未设置)',
     description: 'Callback 鉴权 token',
     category: 'cli',
@@ -1014,6 +1042,7 @@ export const ENV_VARS: EnvDefinition[] = [
   },
   {
     name: 'CAT_CAFE_CALLBACK_OUTBOX_ENABLED',
+    hubVisible: false,
     defaultValue: 'true',
     description: 'Callback outbox 是否启用',
     category: 'cli',
@@ -1021,13 +1050,16 @@ export const ENV_VARS: EnvDefinition[] = [
   },
   {
     name: 'CAT_CAFE_CALLBACK_OUTBOX_DIR',
+    hubVisible: false,
     defaultValue: '(自动)',
     description: 'Callback outbox 目录',
     category: 'cli',
     sensitive: false,
+    control: 'dirpicker',
   },
   {
     name: 'CAT_CAFE_CALLBACK_OUTBOX_MAX_ATTEMPTS',
+    hubVisible: false,
     defaultValue: '(默认)',
     description: 'Outbox 最大重试次数',
     category: 'cli',
@@ -1035,6 +1067,7 @@ export const ENV_VARS: EnvDefinition[] = [
   },
   {
     name: 'CAT_CAFE_CALLBACK_OUTBOX_MAX_FLUSH_BATCH',
+    hubVisible: false,
     defaultValue: '(默认)',
     description: 'Outbox 单次 flush 批量',
     category: 'cli',
@@ -1042,6 +1075,7 @@ export const ENV_VARS: EnvDefinition[] = [
   },
   {
     name: 'CAT_CAFE_CALLBACK_RETRY_DELAYS_MS',
+    hubVisible: false,
     defaultValue: '(默认)',
     description: 'Callback 重试间隔（逗号分隔）',
     category: 'cli',
@@ -1049,6 +1083,7 @@ export const ENV_VARS: EnvDefinition[] = [
   },
   {
     name: 'CAT_CAFE_CALLBACK_FETCH_TIMEOUT_MS',
+    hubVisible: false,
     defaultValue: '10000',
     description: 'Callback fetch 每次尝试超时（毫秒，防 hung socket 永久挂起，照 #1368）',
     category: 'cli',
@@ -1056,6 +1091,7 @@ export const ENV_VARS: EnvDefinition[] = [
   },
   {
     name: 'CDP_DEBUG',
+    hubVisible: false,
     defaultValue: '(未设置)',
     description: 'CDP Bridge 调试模式',
     category: 'cli',
@@ -1063,6 +1099,7 @@ export const ENV_VARS: EnvDefinition[] = [
   },
   {
     name: 'CODEX_HOME',
+    hubVisible: false,
     defaultValue: '~/.codex',
     description: 'Codex CLI home 目录',
     category: 'cli',
@@ -1070,6 +1107,7 @@ export const ENV_VARS: EnvDefinition[] = [
   },
   {
     name: 'ANTIGRAVITY_BRAIN_HOME',
+    hubVisible: false,
     defaultValue: '~/.gemini/antigravity/brain',
     description: 'Antigravity built-in generate_image brain dir (F172 Phase G scanner)',
     category: 'cli',
@@ -1162,6 +1200,7 @@ export const ENV_VARS: EnvDefinition[] = [
   // --- proxy ---
   {
     name: 'ANTHROPIC_PROXY_ENABLED',
+    hubVisible: false,
     defaultValue: '1',
     description: 'Anthropic 代理网关开关（0 关闭）',
     category: 'proxy',
@@ -1169,20 +1208,15 @@ export const ENV_VARS: EnvDefinition[] = [
   },
   {
     name: 'ANTHROPIC_PROXY_PORT',
+    hubVisible: false,
     defaultValue: '9877',
     description: '代理网关监听端口',
     category: 'proxy',
     sensitive: false,
   },
   {
-    name: 'ANTHROPIC_PROXY_DEBUG',
-    defaultValue: '(未设置)',
-    description: '设为 1 启用代理调试日志',
-    category: 'proxy',
-    sensitive: false,
-  },
-  {
     name: 'ANTHROPIC_PROXY_UPSTREAMS_PATH',
+    hubVisible: false,
     defaultValue: '.cat-cafe/proxy-upstreams.json',
     description: 'upstream 配置文件路径（解决 runtime 与源码分离问题）',
     category: 'proxy',
@@ -1219,6 +1253,7 @@ export const ENV_VARS: EnvDefinition[] = [
   // Only infrastructure-level and diagnostic vars remain here.
   {
     name: 'CONNECTOR_GATEWAY_AUTOSTART',
+    hubVisible: false,
     defaultValue: 'explicit-runtime-opt-in',
     description:
       '预配置 IM connector 自动接入开关：仅显式 true 启用。官方 runtime 入口默认注入 1；start:direct/alpha/dev/review 与绕过入口的 API 命令默认禁用。授权只能由官方 wrapper 或启动进程环境显式注入；项目 dotenv 配置不会授予该能力',
@@ -1234,6 +1269,7 @@ export const ENV_VARS: EnvDefinition[] = [
     category: 'connector',
     sensitive: false,
     runtimeEditable: true,
+    targetWritePolicy: 'read-only-opt-in',
     allowedValues: ['minimal', 'playtime', 'playtime-sec', 'playtime-encode', 'metadata'],
   },
   {
@@ -1243,6 +1279,7 @@ export const ENV_VARS: EnvDefinition[] = [
     category: 'connector',
     sensitive: false,
     runtimeEditable: true,
+    targetWritePolicy: 'read-only-opt-in',
     allowedValues: ['0', '1'],
   },
   {
@@ -1252,6 +1289,7 @@ export const ENV_VARS: EnvDefinition[] = [
     category: 'connector',
     sensitive: false,
     runtimeEditable: true,
+    targetWritePolicy: 'read-only-opt-in',
     allowedValues: ['0', '1'],
   },
 
@@ -1263,6 +1301,7 @@ export const ENV_VARS: EnvDefinition[] = [
     category: 'github_review',
     sensitive: true,
     runtimeEditable: true,
+    targetWritePolicy: 'read-only-opt-in',
     exampleRecommended: true,
   },
   {
@@ -1304,6 +1343,7 @@ export const ENV_VARS: EnvDefinition[] = [
     category: 'github_review',
     sensitive: false,
     runtimeEditable: true,
+    targetWritePolicy: 'read-only-opt-in',
   },
   {
     name: 'GITHUB_TOKEN',
@@ -1340,6 +1380,7 @@ export const ENV_VARS: EnvDefinition[] = [
   },
   {
     name: 'CAT_CAFE_CODEX_OAUTH_TRANSPORT',
+    hubVisible: false,
     defaultValue: 'builtin',
     description: 'Codex OAuth provider 传输策略（builtin 默认；HTTPS-only 故障回滚用 https）',
     category: 'codex',
@@ -1349,6 +1390,7 @@ export const ENV_VARS: EnvDefinition[] = [
   },
   {
     name: 'CAT_CAFE_CODEX_APP_SERVER_IDLE_TTL_MS',
+    hubVisible: false,
     defaultValue: '300000',
     description: 'Codex app-server 空闲 host 保温时长（毫秒；0 表示每轮结束立即回收）',
     category: 'codex',
@@ -1357,6 +1399,7 @@ export const ENV_VARS: EnvDefinition[] = [
   },
   {
     name: 'CAT_CAFE_CODEX_APP_SERVER_MAX_WARM_HOSTS',
+    hubVisible: false,
     defaultValue: '16',
     description: '每个 Codex profile 最多保留的空闲 app-server host 数；不限制正在执行的并发 host',
     category: 'codex',
@@ -1389,6 +1432,7 @@ export const ENV_VARS: EnvDefinition[] = [
   },
   {
     name: 'GEMINI_ADAPTER',
+    hubVisible: false,
     defaultValue: 'antigravity-cli',
     description: '暹罗猫适配器 (antigravity-cli/gemini-cli/antigravity)',
     category: 'gemini',
@@ -1396,6 +1440,7 @@ export const ENV_VARS: EnvDefinition[] = [
   },
   {
     name: 'CAT_CAFE_AGY_PROFILE_ROOT',
+    hubVisible: false,
     defaultValue: '~/.cat-cafe/agy-profiles',
     description: 'F210 Phase G：隔离 AGY profile HOME 根目录；每只 AGY profile 猫会在此目录下创建独立 HOME。',
     category: 'gemini',
@@ -1404,6 +1449,7 @@ export const ENV_VARS: EnvDefinition[] = [
   },
   {
     name: 'CAT_CAFE_AGY_CWD_ROOT',
+    hubVisible: false,
     defaultValue: '~/.cat-cafe/agy-cwd',
     description:
       'F210 cache-leak fix：无 agyProfile 时 AGY spawn cwd sandbox 根目录（每只 AGY 猫在此创建 <catId> 子目录），让 agy cwd-relative cache（cache/projects.json）落 sandbox 而非 repo root。',
@@ -1465,18 +1511,14 @@ export const ENV_VARS: EnvDefinition[] = [
     sensitive: false,
   },
   {
-    name: 'TTS_CACHE_DIR',
-    defaultValue: `\${CAT_CAFE_DATA_DIR:-~/.cat-cafe}/assets/tts`,
-    description: 'TTS 音频缓存目录；设置后覆盖 CAT_CAFE_DATA_DIR 下的稳定默认位置',
-    category: 'tts',
-    sensitive: false,
-  },
-  {
     name: 'LISTEN_MODE_DB',
     defaultValue: `\${CAT_CAFE_DATA_DIR:-~/.cat-cafe}/listen-mode.sqlite`,
     description: '听读模式持久状态数据库；设置后覆盖 CAT_CAFE_DATA_DIR 下的默认位置',
     category: 'tts',
     sensitive: false,
+    // NOT dirpicker: resolveDocumentListenStatePath() consumes this as the full
+    // SQLite FILE path (default ends in listen-mode.sqlite). A directory picker
+    // would make listen-mode open a directory as a database (codex #1344 P2).
   },
   {
     name: 'GENSHIN_VOICE_DIR',
@@ -1484,6 +1526,7 @@ export const ENV_VARS: EnvDefinition[] = [
     description: 'GPT-SoVITS 角色模型目录',
     category: 'tts',
     sensitive: false,
+    control: 'dirpicker',
   },
   {
     name: 'CHARACTER_VOICE_DIR',
@@ -1491,6 +1534,7 @@ export const ENV_VARS: EnvDefinition[] = [
     description: '角色语音模型根目录（优先级高于 GENSHIN_VOICE_DIR）',
     category: 'tts',
     sensitive: false,
+    control: 'dirpicker',
   },
 
   // --- stt ---
@@ -1502,18 +1546,10 @@ export const ENV_VARS: EnvDefinition[] = [
     sensitive: false,
   },
 
-  // --- connector media ---
-  {
-    name: 'CONNECTOR_MEDIA_DIR',
-    defaultValue: './data/connector-media',
-    description: '连接器媒体下载目录',
-    category: 'connector',
-    sensitive: false,
-  },
-
   // --- frontend ---
   {
     name: 'NEXT_PUBLIC_API_URL',
+    hubVisible: false,
     defaultValue: 'http://localhost:3004',
     description: '前端连接的 API 地址',
     category: 'frontend',
@@ -1538,6 +1574,7 @@ export const ENV_VARS: EnvDefinition[] = [
   },
   {
     name: 'NEXT_PUBLIC_PROJECT_ROOT',
+    hubVisible: false,
     defaultValue: '(空)',
     description: '前端项目根路径',
     category: 'frontend',
@@ -1546,6 +1583,7 @@ export const ENV_VARS: EnvDefinition[] = [
   },
   {
     name: 'NEXT_PUBLIC_DEBUG_SKIP_FILE_CHANGE_UI',
+    hubVisible: false,
     defaultValue: '(未设置)',
     description: '设为 1 跳过文件变更 UI',
     category: 'frontend',
@@ -1592,6 +1630,7 @@ export const ENV_VARS: EnvDefinition[] = [
     description: 'Signal 信号源数据目录',
     category: 'signal',
     sensitive: false,
+    control: 'dirpicker',
   },
   {
     name: 'CAT_CAFE_SIGNAL_USER',
@@ -1779,23 +1818,9 @@ export const ENV_VARS: EnvDefinition[] = [
     sensitive: false,
   },
   {
-    name: 'EVIDENCE_DB',
-    defaultValue: '{repoRoot}/evidence.sqlite',
-    description: 'F102 SQLite 数据库路径',
-    category: 'evidence',
-    sensitive: false,
-  },
-  {
     name: 'GLOBAL_KNOWLEDGE_DB',
     defaultValue: '~/.cat-cafe/global_knowledge.sqlite',
     description: 'F-4: 全局知识 SQLite 路径（Skills + MEMORY.md 编译产物）',
-    category: 'evidence',
-    sensitive: false,
-  },
-  {
-    name: 'WORLD_DB',
-    defaultValue: '{repoRoot}/world.sqlite',
-    description: 'F093 World Engine SQLite 数据库路径',
     category: 'evidence',
     sensitive: false,
   },
@@ -1827,6 +1852,7 @@ export const ENV_VARS: EnvDefinition[] = [
     category: 'evidence',
     sensitive: true,
     runtimeEditable: true,
+    targetWritePolicy: 'read-only-opt-in',
   },
   {
     name: 'EMBED_PORT',
@@ -1883,6 +1909,7 @@ export const ENV_VARS: EnvDefinition[] = [
   },
   {
     name: 'TELEMETRY_HMAC_SALT',
+    hubVisible: false,
     defaultValue: '(dev/test 自动 fallback)',
     description: 'HMAC salt — 遥测系统 ID 伪名化用。生产环境必设，缺失则禁用 OTel',
     category: 'telemetry',
@@ -1891,6 +1918,7 @@ export const ENV_VARS: EnvDefinition[] = [
   },
   {
     name: 'TELEMETRY_EXPORT_RAW_SYSTEM_IDS',
+    hubVisible: false,
     defaultValue: '(未设置 → HMAC 伪名化)',
     description: '设为 1 跳过 HMAC，导出原始系统 ID（仅限自托管受控环境）',
     category: 'telemetry',
@@ -1907,6 +1935,7 @@ export const ENV_VARS: EnvDefinition[] = [
   },
   {
     name: 'OTEL_EXPORTER_OTLP_ENDPOINT',
+    hubVisible: false,
     defaultValue: '(未设置 → 仅 Prometheus)',
     description: 'OTLP 导出端点（设置后同时推送 traces/metrics/logs 到该端点）',
     category: 'telemetry',
@@ -1915,6 +1944,7 @@ export const ENV_VARS: EnvDefinition[] = [
   },
   {
     name: 'OTEL_SDK_DISABLED',
+    hubVisible: false,
     defaultValue: '(未设置 → 启用)',
     description: '设为 true 完全禁用 OTel SDK',
     category: 'telemetry',
@@ -1923,6 +1953,7 @@ export const ENV_VARS: EnvDefinition[] = [
   },
   {
     name: 'TELEMETRY_ALERT_ERROR_RATE',
+    hubVisible: false,
     defaultValue: '0.3',
     description: 'Burn-rate 告警：错误率阈值（0-1）',
     category: 'telemetry',
@@ -1931,6 +1962,7 @@ export const ENV_VARS: EnvDefinition[] = [
   },
   {
     name: 'TELEMETRY_ALERT_P95_LATENCY_S',
+    hubVisible: false,
     defaultValue: '120',
     description: 'Burn-rate 告警：P95 延迟阈值（秒）',
     category: 'telemetry',
@@ -1939,6 +1971,7 @@ export const ENV_VARS: EnvDefinition[] = [
   },
   {
     name: 'TELEMETRY_ALERT_ACTIVE_INVOCATIONS',
+    hubVisible: false,
     defaultValue: '50',
     description: 'Burn-rate 告警：活跃 invocation 数阈值',
     category: 'telemetry',
@@ -1965,6 +1998,7 @@ export const ENV_VARS: EnvDefinition[] = [
   // --- antigravity (F061 Bridge) ---
   {
     name: 'ANTIGRAVITY_PORT',
+    hubVisible: false,
     defaultValue: '(未设置 → 自动发现)',
     description: 'Antigravity Language Server ConnectRPC 端口（覆盖自动发现）',
     category: 'antigravity',
@@ -1972,6 +2006,7 @@ export const ENV_VARS: EnvDefinition[] = [
   },
   {
     name: 'PINCHTAB_CDP_PORT',
+    hubVisible: false,
     defaultValue: '9870',
     description: 'PinchTab Chrome CDP 调试端口（覆盖默认 remote-debugging-port）',
     category: 'antigravity',
@@ -1979,6 +2014,7 @@ export const ENV_VARS: EnvDefinition[] = [
   },
   {
     name: 'ANTIGRAVITY_CSRF_TOKEN',
+    hubVisible: false,
     defaultValue: '(未设置 → 自动发现)',
     description: 'Antigravity Language Server CSRF Token（覆盖自动发现）',
     category: 'antigravity',
@@ -1986,6 +2022,7 @@ export const ENV_VARS: EnvDefinition[] = [
   },
   {
     name: 'ANTIGRAVITY_TLS',
+    hubVisible: false,
     defaultValue: 'true',
     description: 'Antigravity ConnectRPC 是否使用 TLS（默认 true）',
     category: 'antigravity',
@@ -2015,6 +2052,7 @@ export const ENV_VARS: EnvDefinition[] = [
   },
   {
     name: 'ANTIGRAVITY_RUN_COMMAND_TIMEOUT_MS',
+    hubVisible: false,
     defaultValue: '600000',
     description: '受控 YOLO run_command 单次原生命令执行超时（毫秒，1..3600000）；无效值回退默认值',
     category: 'antigravity',
@@ -2022,6 +2060,7 @@ export const ENV_VARS: EnvDefinition[] = [
   },
   {
     name: 'ANTIGRAVITY_TRACE_RAW',
+    hubVisible: false,
     defaultValue: '(未设置 → 关闭)',
     description: '设为 1 启用 Antigravity 原始轨迹 dump（rpc raw response + step shape snapshot）',
     category: 'antigravity',
@@ -2029,6 +2068,7 @@ export const ENV_VARS: EnvDefinition[] = [
   },
   {
     name: 'ANTIGRAVITY_NATIVE_EXECUTOR',
+    hubVisible: false,
     defaultValue: '(未设置 → 开启)',
     description: '设为 0 关闭 Antigravity 原生 executeAndPush（回落到通用 submit 路径）',
     category: 'antigravity',
@@ -2036,6 +2076,7 @@ export const ENV_VARS: EnvDefinition[] = [
   },
   {
     name: 'CAT_CAFE_RIPGREP_PATH',
+    hubVisible: false,
     defaultValue: '(未设置 → 使用内置 @vscode/ripgrep，失败时回落 PATH rg)',
     description: 'Antigravity grep_search native executor 的 ripgrep 二进制路径覆盖（异常部署/调试用）',
     category: 'antigravity',
@@ -2044,6 +2085,7 @@ export const ENV_VARS: EnvDefinition[] = [
   },
   {
     name: 'CAT_CAFE_READONLY',
+    hubVisible: false,
     defaultValue: '(未设置 → 全量注册)',
     description: 'MCP Server 只读模式：跳过 post_message 等写操作工具注册（Antigravity 持久 MCP 用）',
     category: 'antigravity',
@@ -2051,6 +2093,7 @@ export const ENV_VARS: EnvDefinition[] = [
   },
   {
     name: 'CAT_CAFE_RUNTIME_SESSION_SEAL_REAPER_INTERVAL_MS',
+    hubVisible: false,
     defaultValue: '30000',
     description: 'F211 runtime session pending seal reaper 轮询间隔（毫秒，启动时读取）',
     category: 'antigravity',
@@ -2071,6 +2114,7 @@ export const ENV_VARS: EnvDefinition[] = [
     description: 'F195 Phase D 转写持久化目录（Python 写 MD + meta.json，Node 读 meta 做路径注入）',
     category: 'audio',
     sensitive: false,
+    control: 'dirpicker',
   },
 ];
 
@@ -2111,6 +2155,61 @@ export function buildEnvSummary(): Array<EnvDefinition & { currentValue: string 
   });
 }
 
+export type EnvControlType = 'text' | 'toggle' | 'dropdown' | 'dirpicker';
+
+/**
+ * Infer the best UI control for an env var from its metadata.
+ * Order of precedence:
+ * 1. Explicit `control` metadata if present.
+ * 2. `booleanSemantics` → toggle.
+ * 3. `allowedValues` → dropdown.
+ * 4. Directory-like name heuristic (only for vars explicitly marked with
+ *    `control: 'dirpicker'`; this function does NOT auto-infer dirpicker from
+ *    names to avoid misclassifying file paths such as `CHROME_EXECUTABLE_PATH`).
+ * 5. Default → text.
+ */
+export function inferEnvControl(def: EnvDefinition): EnvControlType {
+  if (def.control) return def.control;
+  if (def.booleanSemantics) return 'toggle';
+  if (def.allowedValues && def.allowedValues.length > 0) return 'dropdown';
+  return 'text';
+}
+
+export function isEditableEnvVar(def: EnvDefinition): boolean {
+  // #770: fail-closed — only explicitly opted-in vars are editable.
+  // Every editable key must declare runtimeEditable: true. The 'read-only'
+  // policy is the only policy that blocks API writes here; 'read-only-opt-in'
+  // means the generic Hub UI hides the editor by default (see
+  // isEditableVariable in EnvSubComponents.tsx) but the variable remains
+  // API-editable so the existing owner/session gate can still authorize
+  // sensitive writes (e.g. F102_API_KEY).
+  if (def.targetWritePolicy === 'read-only') {
+    return false;
+  }
+  return def.runtimeEditable === true;
+}
+
+/** True if this env var is both sensitive AND editable under the current policy. */
+export function isSensitiveEditableEnvVar(def: EnvDefinition): boolean {
+  return def.sensitive && isEditableEnvVar(def);
+}
+
+export function isEditableEnvVarName(name: string): boolean {
+  return ENV_VARS.some((def) => def.name === name && isHubVisibleEnvVar(def) && isEditableEnvVar(def));
+}
+
+/** Check if any of the given env var names are sensitive-editable (requires owner gate). */
+export function hasSensitiveEditableVars(names: Iterable<string>): boolean {
+  const nameSet = new Set(names);
+  return ENV_VARS.some((def) => nameSet.has(def.name) && isSensitiveEditableEnvVar(def));
+}
+
+/** Return only the sensitive-editable keys from the given names (for audit filtering). */
+export function filterSensitiveEditableKeys(names: Iterable<string>): string[] {
+  const nameSet = new Set(names);
+  return ENV_VARS.filter((def) => nameSet.has(def.name) && isSensitiveEditableEnvVar(def)).map((def) => def.name);
+}
+
 /**
  * Curated platform-level settings for the System page. The full registry stays
  * canonical for Environment & Files and module-owned surfaces.
@@ -2119,9 +2218,11 @@ export const SYSTEM_VARS: ReadonlySet<string> = new Set([
   'API_SERVER_HOST',
   'API_SERVER_PORT',
   'BACKLOG_TTL_SECONDS',
+  'CACHE_DIR',
   'CAT_CAFE_DATA_DIR',
   'CLI_TIMEOUT_MS',
   'CORS_ALLOW_PRIVATE_NETWORK',
+  'DATA_DIR',
   'DEFAULT_OWNER_USER_ID',
   'DRAFT_TTL_SECONDS',
   'FRONTEND_PORT',
@@ -2139,35 +2240,73 @@ export const SYSTEM_VARS: ReadonlySet<string> = new Set([
   'SUMMARY_TTL_SECONDS',
   'TASK_TTL_SECONDS',
   'THREAD_TTL_SECONDS',
-  'TRANSCRIPT_DATA_DIR',
-  'UPLOAD_DIR',
 ]);
 
+/**
+ * Build a filtered env summary containing only System Settings vars.
+ * Used by GET /api/config/env-summary?surface=system.
+ * Deprecated variables are excluded even if they are in SYSTEM_VARS, as an extra
+ * defense-in-depth layer (the primary invariant is that deprecated vars are
+ * never added to SYSTEM_VARS in the first place).
+ */
 export function buildSystemEnvSummary(): Array<EnvDefinition & { currentValue: string | null }> {
-  return buildEnvSummary().filter((variable) => SYSTEM_VARS.has(variable.name));
+  return buildEnvSummary().filter((v) => SYSTEM_VARS.has(v.name) && !v.deprecated);
 }
 
-export function isEditableEnvVar(def: EnvDefinition): boolean {
-  return def.runtimeEditable === true;
+import {
+  buildModuleSectionEnvSummary,
+  ENV_SECTION_KEYS,
+  ENV_SECTION_LABELS,
+  type EnvSectionKey,
+  MODULE_SECTION_PROJECTION,
+} from './env-sections.js';
+
+export type { EnvSectionKey };
+export { ENV_SECTION_KEYS, ENV_SECTION_LABELS };
+
+/**
+ * #770: full section projection. `system` is exactly `SYSTEM_VARS`; every other
+ * section is defined in `env-sections.ts`. A test enforces that these stay in
+ * sync.
+ */
+export const SECTION_PROJECTION: Readonly<Record<EnvSectionKey, ReadonlySet<string>>> = {
+  system: SYSTEM_VARS,
+  ...MODULE_SECTION_PROJECTION,
+};
+
+/** Return the projection set for a section. Unknown sections return an empty set (fail-closed). */
+export function getSectionProjection(section: string): ReadonlySet<string> {
+  return SECTION_PROJECTION[section as EnvSectionKey] ?? new Set<string>();
 }
 
-/** True if this env var is both sensitive AND explicitly opted into runtime editing. */
-export function isSensitiveEditableEnvVar(def: EnvDefinition): boolean {
-  return def.sensitive && def.runtimeEditable === true;
+/** True if the named env var is part of the given section's projection. */
+export function isEnvVarInSection(name: string, section: EnvSectionKey): boolean {
+  return getSectionProjection(section).has(name);
 }
 
-export function isEditableEnvVarName(name: string): boolean {
-  return ENV_VARS.some((def) => def.name === name && isHubVisibleEnvVar(def) && isEditableEnvVar(def));
+/**
+ * Return all section keys a variable belongs to. Usually a variable is in at
+ * most one curated section (plus `system`), but this helper makes overlaps
+ * explicit and testable.
+ */
+export function getEnvVarSections(name: string): EnvSectionKey[] {
+  return ENV_SECTION_KEYS.filter((section) => getSectionProjection(section).has(name));
 }
 
-/** Check if any of the given env var names are sensitive-editable (requires owner gate). */
-export function hasSensitiveEditableVars(names: Iterable<string>): boolean {
-  const nameSet = new Set(names);
-  return ENV_VARS.some((def) => nameSet.has(def.name) && isSensitiveEditableEnvVar(def));
-}
-
-/** Return only the sensitive-editable keys from the given names (for audit filtering). */
-export function filterSensitiveEditableKeys(names: Iterable<string>): string[] {
-  const nameSet = new Set(names);
-  return ENV_VARS.filter((def) => nameSet.has(def.name) && isSensitiveEditableEnvVar(def)).map((def) => def.name);
+/**
+ * Build a filtered env summary for any section (system or module).
+ * - Deprecated variables are excluded.
+ * - Variables not in the section projection are excluded.
+ * - `hubVisible: false` vars are excluded.
+ * Module summaries are derived from the canonical `buildEnvSummary()` so that
+ * masking and visibility policy stay in one place.
+ */
+export function buildSectionEnvSummary(section: string): Array<EnvDefinition & { currentValue: string | null }> {
+  if (!ENV_SECTION_KEYS.includes(section as EnvSectionKey)) {
+    return [];
+  }
+  if (section === 'system') {
+    return buildSystemEnvSummary();
+  }
+  return buildModuleSectionEnvSummary(section as Exclude<EnvSectionKey, 'system'>, buildEnvSummary());
 }

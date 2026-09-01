@@ -5,8 +5,9 @@
 
 // 必须最先 import：Node 24.16 undici setTypeOfService EINVAL 崩溃防护（见文件头注释）
 import './settos-guard.js';
+import { existsSync as fsExistsSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { join } from 'node:path';
+import { join, resolve as pathResolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import {
   type CatConfig,
@@ -37,6 +38,18 @@ import {
 import { getCatModel } from './config/cat-models.js';
 import { resolveCodexCarrierTruth } from './config/codex-cli.js';
 import { configEventBus } from './config/config-event-bus.js';
+import {
+  resolveConnectorMediaDir,
+  resolveEvidenceDbPath,
+  resolveTranscriptsDir,
+  resolveTtsCacheDir,
+  resolveWorldDbPath,
+} from './config/data-dirs.js';
+import {
+  defaultDiskSpaceProbe,
+  runDataDirsMigration,
+  shouldAbortStartupOnMigration,
+} from './config/data-dirs-migration.js';
 import { resolveFrontendBaseUrl, resolveFrontendCorsOrigins } from './config/frontend-origin.js';
 import { resolveRuntimeDeploymentRevision } from './config/runtime-deployment-revision.js';
 import { initRuntimeOverrides } from './config/session-strategy-overrides.js';
@@ -184,10 +197,7 @@ import { RedisInvocationRecordStore } from './domains/cats/services/stores/redis
 import { RedisMessageStore } from './domains/cats/services/stores/redis/RedisMessageStore.js';
 import { RedisPresentationLedgerStore } from './domains/cats/services/stores/redis/RedisPresentationLedgerStore.js';
 import { DocumentListenRepository } from './domains/cats/services/tts/DocumentListenRepository.js';
-import {
-  resolveDocumentListenStatePath,
-  resolveTtsCacheDir,
-} from './domains/cats/services/tts/document-listen-paths.js';
+import { resolveDocumentListenStatePath } from './domains/cats/services/tts/document-listen-paths.js';
 import { MlxAudioTtsProvider } from './domains/cats/services/tts/MlxAudioTtsProvider.js';
 import { initStreamingTtsRegistry } from './domains/cats/services/tts/StreamingTtsChunker.js';
 import { TtsRegistry } from './domains/cats/services/tts/TtsRegistry.js';
@@ -461,6 +471,53 @@ async function main(): Promise<void> {
 
   if (isDebugMode) {
     app.log.info({ logDir: LOG_DIR_PATH }, '[api] Debug mode enabled (--debug flag)');
+  }
+
+  // #671: Migrate legacy data paths to DATA_DIR/CACHE_DIR before any consumer
+  // opens connections (SQLite, transcript writer, etc.). Logs are excluded.
+  {
+    const cwd = process.cwd();
+    const probeRepoRoot = fsExistsSync(pathResolve(cwd, 'docs', 'features'))
+      ? cwd
+      : fsExistsSync(pathResolve(cwd, '..', '..', 'docs', 'features'))
+        ? pathResolve(cwd, '..', '..')
+        : cwd;
+    const migrationResult = await runDataDirsMigration({
+      repoRoot: probeRepoRoot,
+      monorepoRoot: findMonorepoRoot(cwd),
+      trigger: 'startup',
+      io: { diskFree: defaultDiskSpaceProbe, logger: app.log },
+    });
+    if (migrationResult.attempted) {
+      app.log.info(
+        {
+          movedCount: migrationResult.items.filter((i) => i.status === 'moved').length,
+          skippedCount: migrationResult.items.filter((i) => i.status === 'skipped').length,
+          failedCount: migrationResult.items.filter((i) => i.status === 'failed').length,
+          allSucceeded: migrationResult.allSucceeded,
+          abortedReason: migrationResult.abortedReason,
+        },
+        '[#671] Data-dirs migration completed',
+      );
+    }
+
+    // Fail-fast: if the migration aborted or any item failed, the resolver
+    // now points at the new root but the legacy data is still on disk.
+    // Continuing would let SQLite/transcript/audit-log consumers open empty
+    // files at the new path — silent data loss from the operator's POV.
+    const abort = shouldAbortStartupOnMigration(migrationResult);
+    if (abort.shouldAbort) {
+      app.log.fatal(
+        {
+          reason: abort.reason,
+          leftBehind: abort.leftBehind,
+          DATA_DIR: process.env.DATA_DIR ?? null,
+          CACHE_DIR: process.env.CACHE_DIR ?? null,
+        },
+        '[#671] Data-dirs migration did not complete cleanly — refusing to start to avoid silent data loss. Free space (or restore the legacy paths) and retry, or unset the root env vars to fall back to legacy locations.',
+      );
+      process.exit(1);
+    }
   }
 
   // CORS for frontend
@@ -1042,7 +1099,8 @@ async function main(): Promise<void> {
   const runtimeSessionStore = createRuntimeSessionStore(redis);
   // F24: Transcript Writer/Reader for session chain
   // E7 fix: resolve relative to monorepo root, not CWD (same fix as docsRoot in PR #524)
-  const transcriptDataDir = process.env.TRANSCRIPT_DATA_DIR ?? `${findMonorepoRoot(process.cwd())}/data/transcripts`;
+  // #671: DATA_DIR/transcripts when set; otherwise monorepo-relative legacy default.
+  const transcriptDataDir = resolveTranscriptsDir(findMonorepoRoot(process.cwd()));
   const transcriptWriter = new TranscriptWriter({ dataDir: transcriptDataDir });
   const transcriptReader = new TranscriptReader({ dataDir: transcriptDataDir });
   // F065 Phase C: HandoffConfig for LLM-generated digest on seal
@@ -1124,7 +1182,7 @@ async function main(): Promise<void> {
   );
   const memoryServices = await createMemoryServices({
     type: 'sqlite',
-    sqlitePath: process.env.EVIDENCE_DB ?? resolve(repoRoot, 'evidence.sqlite'),
+    sqlitePath: resolveEvidenceDbPath(repoRoot),
     docsRoot,
     markersDir,
     dataDir: process.env.CAT_CAFE_DATA_DIR,
@@ -2099,7 +2157,7 @@ async function main(): Promise<void> {
   const { WorldRuntimeCoordinator } = await import('./domains/world/WorldRuntimeCoordinator.js');
   const { WorldContextProvider } = await import('./domains/world/WorldContextProvider.js');
   const { WorldKnowledgeAdapter } = await import('./domains/world/WorldKnowledgeAdapter.js');
-  const worldDbPath = process.env.WORLD_DB ?? resolve(repoRoot, 'world.sqlite');
+  const worldDbPath = resolveWorldDbPath(repoRoot);
   const worldStore = new SqliteWorldStore(worldDbPath);
   await worldStore.initialize();
   const worldCoordinator = new WorldRuntimeCoordinator(worldStore);
@@ -5285,12 +5343,12 @@ async function main(): Promise<void> {
   });
 
   // Serve uploaded files (images)
-  const uploadDir = getDefaultUploadDir(process.env.UPLOAD_DIR);
+  const uploadDir = getDefaultUploadDir();
   await app.register(uploadsRoutes, { uploadDir });
   await app.register(refAudioUploadRoutes);
 
   // F088: Serve downloaded connector media files
-  const connectorMediaDir = process.env.CONNECTOR_MEDIA_DIR ?? './data/connector-media';
+  const connectorMediaDir = resolveConnectorMediaDir();
   await app.register(connectorMediaRoutes, { mediaDir: connectorMediaDir });
 
   // F34: TTS Provider (mlx-audio → Python TTS server)

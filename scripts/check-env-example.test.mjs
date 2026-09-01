@@ -46,6 +46,8 @@ const EXAMPLE_ALLOWLIST = new Map([
   ['WECOM_AGENT_SECRET', 'F240 connector manifest/preconfigured gateway env, not global env registry'],
   ['WECOM_TOKEN', 'F240 connector manifest/preconfigured gateway env, not global env registry'],
   ['WECOM_ENCODING_AES_KEY', 'F240 connector manifest/preconfigured gateway env, not global env registry'],
+  ['REDIS_PORT', 'Redis server port, consumed by shell start scripts before API boot'],
+  ['MCP_SERVER_PORT', 'MCP server port placeholder in .env.example, not currently consumed by TypeScript API'],
 ]);
 
 // ── Parse .env.example keys ──
