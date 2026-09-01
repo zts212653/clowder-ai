@@ -1,7 +1,7 @@
 import type { FreshnessSupplementAggregate, FreshnessSupplementFailureReason } from '@cat-cafe/shared';
 import type { RedisClient } from '@cat-cafe/shared/utils';
 import { FreshnessSupplementKeys } from '../../stores/redis-keys/freshness-closure-keys.js';
-import type { OfferFreshnessSupplementResult } from '../freshness-closure-store-types.js';
+import type { OfferFreshnessSupplementResult } from '../closure/freshness-closure-store-types.js';
 import {
   advanceFreshnessSupplement,
   claimFreshnessSupplement,

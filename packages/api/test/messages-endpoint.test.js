@@ -19,7 +19,7 @@ describe('GET /api/messages', () => {
     );
     const { messagesRoutes } = await import('../dist/routes/messages.js');
     const { InMemoryFreshnessClosureStore } = await import(
-      '../dist/domains/cats/services/freshness/FreshnessClosureStore.js'
+      '../dist/domains/cats/services/freshness/closure/FreshnessClosureStore.js'
     );
 
     messageStore = new MessageStore();

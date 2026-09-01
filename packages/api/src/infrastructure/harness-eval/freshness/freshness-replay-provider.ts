@@ -1,6 +1,6 @@
 import type { FreshnessClosureAggregate } from '@cat-cafe/shared';
+import type { FreshnessClosureStore } from '../../../domains/cats/services/freshness/closure/FreshnessClosureStore.js';
 import type { FreshnessAttentionEventLog } from '../../../domains/cats/services/freshness/FreshnessAttentionEventLog.js';
-import type { FreshnessClosureStore } from '../../../domains/cats/services/freshness/FreshnessClosureStore.js';
 import { buildFreshnessReplayReport, deriveFreshnessClosureEvalSnapshot } from './freshness-closure-eval-adapter.js';
 import { FRESHNESS_AC_E9_FIXTURE_IDS, loadFreshnessReplayFixture } from './freshness-replay-fixtures.js';
 import type {

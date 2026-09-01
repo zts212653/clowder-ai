@@ -544,7 +544,7 @@ async function dispatchToTarget(
   const toolsUsed: string[] = [];
   // Custody was established by `admitLegacyTarget` before ANY sibling started (requirement 2).
   const { controller } = admission;
-  let invocationId: string | undefined = admission.invocationId;
+  const invocationId: string | undefined = admission.invocationId;
 
   try {
     let governanceErrorCode: string | undefined;

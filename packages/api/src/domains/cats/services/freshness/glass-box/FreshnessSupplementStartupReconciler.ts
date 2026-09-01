@@ -1,7 +1,7 @@
 import type { FreshnessSupplementAggregate, FreshnessSupplementProjection } from '@cat-cafe/shared';
 import type { EnqueueResult } from '../../agents/invocation/InvocationQueue.js';
 import type { IMessageStore } from '../../stores/ports/MessageStore.js';
-import type { FreshnessClosureStore } from '../FreshnessClosureStore.js';
+import type { FreshnessClosureStore } from '../closure/FreshnessClosureStore.js';
 import { projectFreshnessSupplement } from './FreshnessOutputCommitCoordinator.js';
 
 interface StartupRecoveryLogger {

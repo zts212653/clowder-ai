@@ -2,10 +2,10 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
 const { scanFreshnessClosurePreflight } = await import(
-  '../dist/domains/cats/services/freshness/FreshnessClosurePreflight.js'
+  '../dist/domains/cats/services/freshness/closure/FreshnessClosurePreflight.js'
 );
 const { createFreshnessClosure } = await import(
-  '../dist/domains/cats/services/freshness/FreshnessClosureStateMachine.js'
+  '../dist/domains/cats/services/freshness/closure/FreshnessClosureStateMachine.js'
 );
 const { cursorFor, parseCursor } = await import('../dist/domains/cats/services/stores/cursor.js');
 

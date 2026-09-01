@@ -9,7 +9,7 @@ const { QueuedMessageCustodyCoordinator } = await import(
 );
 const { MessageStore } = await import('../dist/domains/cats/services/stores/ports/MessageStore.js');
 const { InMemoryFreshnessClosureStore } = await import(
-  '../dist/domains/cats/services/freshness/FreshnessClosureStore.js'
+  '../dist/domains/cats/services/freshness/closure/FreshnessClosureStore.js'
 );
 const SLOT_KEY = JSON.stringify(['thread-1', 'opus']);
 const CODEX_SLOT_KEY = JSON.stringify(['thread-1', 'codex']);

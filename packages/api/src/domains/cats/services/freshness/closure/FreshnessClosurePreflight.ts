@@ -1,11 +1,11 @@
 import type { FreshnessClosureAggregate } from '@cat-cafe/shared';
-import { compareCursors, cursorFor, parseCursor } from '../stores/cursor.js';
-import type { IMessageStore, StoredMessage } from '../stores/ports/MessageStore.js';
-import type { ITurnExecutionStore, TurnExecutionRecord } from '../stores/ports/TurnExecutionStore.js';
-import { isExpectedA2AReplyForCat, isFreshnessRoutableMessage } from './checkFreshnessForPostMessage.js';
-import { decideFreshnessRelevance } from './FreshnessRelevancePolicy.js';
-import { isFreshnessSelfSourceMessage } from './FreshnessSourcePolicy.js';
-import { recordFreshnessRelevanceSuppression } from './freshness-relevance-telemetry.js';
+import { compareCursors, cursorFor, parseCursor } from '../../stores/cursor.js';
+import type { IMessageStore, StoredMessage } from '../../stores/ports/MessageStore.js';
+import type { ITurnExecutionStore, TurnExecutionRecord } from '../../stores/ports/TurnExecutionStore.js';
+import { isExpectedA2AReplyForCat, isFreshnessRoutableMessage } from '../checkFreshnessForPostMessage.js';
+import { decideFreshnessRelevance } from '../FreshnessRelevancePolicy.js';
+import { isFreshnessSelfSourceMessage } from '../FreshnessSourcePolicy.js';
+import { recordFreshnessRelevanceSuppression } from '../freshness-relevance-telemetry.js';
 
 const PAGE_SIZE = 20;
 const MAX_PAGES = 500;

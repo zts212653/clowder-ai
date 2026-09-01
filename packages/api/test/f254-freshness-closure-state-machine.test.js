@@ -11,9 +11,9 @@ const {
   blockFreshnessClosurePreflight,
   refreshFreshnessClosureFrontier,
   supersedeFreshnessClosureAttempt,
-} = await import('../dist/domains/cats/services/freshness/FreshnessClosureStateMachine.js');
+} = await import('../dist/domains/cats/services/freshness/closure/FreshnessClosureStateMachine.js');
 const { blockFreshnessClosureRecovery, recoverFreshnessClosureAttempt, retryFreshnessClosure } = await import(
-  '../dist/domains/cats/services/freshness/FreshnessClosureRecoveryState.js'
+  '../dist/domains/cats/services/freshness/closure/FreshnessClosureRecoveryState.js'
 );
 
 const scope = { userId: 'user-1', threadId: 'thread-1', catId: 'codex-sol' };

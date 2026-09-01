@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
 const { InMemoryFreshnessClosureStore } = await import(
-  '../dist/domains/cats/services/freshness/FreshnessClosureStore.js'
+  '../dist/domains/cats/services/freshness/closure/FreshnessClosureStore.js'
 );
 
 const base = {

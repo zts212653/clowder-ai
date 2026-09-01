@@ -1,8 +1,8 @@
 import type { FreshnessClosureAggregate, FreshnessClosureProjection } from '@cat-cafe/shared';
-import type { EnqueueResult } from '../agents/invocation/InvocationQueue.js';
+import type { EnqueueResult } from '../../agents/invocation/InvocationQueue.js';
+import { projectFreshnessClosure } from '../glass-box/FreshnessOutputCommitCoordinator.js';
 import type { FreshnessClosureStore } from './FreshnessClosureStore.js';
 import { recordFreshnessClosureTransition } from './freshness-closure-telemetry.js';
-import { projectFreshnessClosure } from './glass-box/FreshnessOutputCommitCoordinator.js';
 
 export const DEFAULT_RUNNING_RECOVERY_MAX_AGE_MS = 60 * 60_000;
 

@@ -15,7 +15,7 @@ const { validateRecoveryManifest, sha256Text } = await import(
   '../dist/scripts/f254-withheld-message-recovery/manifest.js'
 );
 const { InMemoryFreshnessClosureStore } = await import(
-  '../dist/domains/cats/services/freshness/FreshnessClosureStore.js'
+  '../dist/domains/cats/services/freshness/closure/FreshnessClosureStore.js'
 );
 
 const TARGET_CLOSURE_ID = '29a6b76b-cbe5-4e03-a919-8fb448e6c983';

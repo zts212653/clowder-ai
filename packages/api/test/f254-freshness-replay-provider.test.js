@@ -3,7 +3,7 @@ import { describe, it } from 'node:test';
 import { fileURLToPath } from 'node:url';
 
 const { InMemoryFreshnessClosureStore } = await import(
-  '../dist/domains/cats/services/freshness/FreshnessClosureStore.js'
+  '../dist/domains/cats/services/freshness/closure/FreshnessClosureStore.js'
 );
 const { FRESHNESS_AC_E9_SCENARIOS } = await import(
   '../dist/infrastructure/harness-eval/freshness/freshness-replay-fixtures.js'

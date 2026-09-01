@@ -4,7 +4,9 @@ import type {
   FreshnessSupplementFailureReason,
 } from '@cat-cafe/shared';
 import type { RedisClient } from '@cat-cafe/shared/utils';
-import { FreshnessClosureKeys } from '../stores/redis-keys/freshness-closure-keys.js';
+import { FreshnessClosureKeys } from '../../stores/redis-keys/freshness-closure-keys.js';
+import type { FreshnessSupplementOfferInput } from '../glass-box/FreshnessSupplementStateMachine.js';
+import { RedisFreshnessSupplementOperations } from '../glass-box/redis-freshness-supplement-operations.js';
 import { migrateLegacyFreshnessClosure } from './FreshnessClosureLegacyMigrationState.js';
 import {
   blockFreshnessClosureRecovery,
@@ -35,8 +37,6 @@ import {
   type RefreshFreshnessClosureFrontierInput,
   type SupersedeFreshnessClosureInput,
 } from './FreshnessClosureStore.js';
-import type { FreshnessSupplementOfferInput } from './glass-box/FreshnessSupplementStateMachine.js';
-import { RedisFreshnessSupplementOperations } from './glass-box/redis-freshness-supplement-operations.js';
 import { isTerminal, parseClosure } from './redis-freshness-closure-serialization.js';
 
 const OPEN_LINEAGE_LUA = `

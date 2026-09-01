@@ -6,7 +6,7 @@ const { threadsRoutes } = await import('../dist/routes/threads.js');
 const { ThreadStore } = await import('../dist/domains/cats/services/stores/ports/ThreadStore.js');
 const { MessageStore } = await import('../dist/domains/cats/services/stores/ports/MessageStore.js');
 const { InMemoryFreshnessClosureStore } = await import(
-  '../dist/domains/cats/services/freshness/FreshnessClosureStore.js'
+  '../dist/domains/cats/services/freshness/closure/FreshnessClosureStore.js'
 );
 
 async function makeBlockedClosure(store, threadId) {

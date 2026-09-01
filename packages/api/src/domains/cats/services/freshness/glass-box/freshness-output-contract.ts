@@ -8,7 +8,7 @@ import type {
 } from '@cat-cafe/shared';
 import type { AppendMessageInput } from '../../stores/ports/MessageStore.js';
 import type { StreamFreshnessResult } from '../checkStreamOutputFreshness.js';
-import type { FreshnessClosureScope } from '../FreshnessClosureStore.js';
+import type { FreshnessClosureScope } from '../closure/FreshnessClosureStore.js';
 
 export const SUPPLEMENT_DECLINE_MARKER = '<!-- cat-cafe:supplement-decline -->';
 

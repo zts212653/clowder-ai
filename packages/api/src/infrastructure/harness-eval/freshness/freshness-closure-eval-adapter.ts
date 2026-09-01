@@ -1,4 +1,4 @@
-import type { FreshnessClosureStore } from '../../../domains/cats/services/freshness/FreshnessClosureStore.js';
+import type { FreshnessClosureStore } from '../../../domains/cats/services/freshness/closure/FreshnessClosureStore.js';
 import type {
   FreshnessReplayAggregateSnapshot,
   FreshnessReplayReport,

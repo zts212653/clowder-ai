@@ -9,7 +9,7 @@ import {
 const REDIS_URL = process.env.REDIS_URL;
 
 const { RedisFreshnessClosureStore } = await import(
-  '../dist/domains/cats/services/freshness/RedisFreshnessClosureStore.js'
+  '../dist/domains/cats/services/freshness/closure/RedisFreshnessClosureStore.js'
 );
 const { FreshnessClosureKeys } = await import(
   '../dist/domains/cats/services/stores/redis-keys/freshness-closure-keys.js'

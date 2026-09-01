@@ -13,7 +13,7 @@ const { MessageStore } = await import('../dist/domains/cats/services/stores/port
 const { projectQueueReceipt } = await import('../dist/domains/cats/services/stores/ports/queued-message-receipt.js');
 const queuedTelemetry = await import('../dist/domains/cats/services/freshness/freshness-queue-telemetry.js');
 const { InMemoryFreshnessClosureStore } = await import(
-  '../dist/domains/cats/services/freshness/FreshnessClosureStore.js'
+  '../dist/domains/cats/services/freshness/closure/FreshnessClosureStore.js'
 );
 const { emitQueueUpdated } = await import('../dist/utils/queue-enrichment.js');
 const { buildDispatchHandledContinuationCapsule, completeCapsuleForSeal, buildCapsuleFromRouteState } = await import(

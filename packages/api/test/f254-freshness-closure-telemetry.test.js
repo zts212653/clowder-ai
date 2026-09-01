@@ -8,7 +8,7 @@ const {
   recordFreshnessReplayFence,
   recordFreshnessSuccessorPreflightCanceled,
   resetFreshnessClosureTelemetryForTest,
-} = await import('../dist/domains/cats/services/freshness/freshness-closure-telemetry.js');
+} = await import('../dist/domains/cats/services/freshness/closure/freshness-closure-telemetry.js');
 
 describe('F254 Phase E — closure eval telemetry', () => {
   beforeEach(() => resetFreshnessClosureTelemetryForTest());

@@ -76,7 +76,7 @@ import {
   type MessageSelectionAdmissionResult,
   MessageSelectionResolver,
 } from '../domains/cats/services/context/MessageSelectionResolver.js';
-import type { FreshnessClosureStore } from '../domains/cats/services/freshness/FreshnessClosureStore.js';
+import type { FreshnessClosureStore } from '../domains/cats/services/freshness/closure/FreshnessClosureStore.js';
 import {
   isLeakedSupplementDecline,
   projectFreshnessSupplementForHistory,

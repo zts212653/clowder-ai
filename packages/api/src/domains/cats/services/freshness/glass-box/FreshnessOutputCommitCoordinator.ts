@@ -7,7 +7,7 @@ import type {
   OutputCommitDecision,
 } from '@cat-cafe/shared';
 import type { IMessageStore, StoredMessage } from '../../stores/ports/MessageStore.js';
-import type { FreshnessClosureStore } from '../FreshnessClosureStore.js';
+import type { FreshnessClosureStore } from '../closure/FreshnessClosureStore.js';
 import { FreshnessOutputRefiner } from './FreshnessOutputRefiner.js';
 import { recordFreshnessGlassBoxTransition } from './freshness-glass-box-telemetry.js';
 import {

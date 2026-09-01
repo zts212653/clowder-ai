@@ -1,4 +1,4 @@
-import type { FreshnessClosureScope } from '../../freshness/FreshnessClosureStore.js';
+import type { FreshnessClosureScope } from '../../freshness/closure/FreshnessClosureStore.js';
 
 function part(value: string): string {
   return encodeURIComponent(value);

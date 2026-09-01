@@ -6,7 +6,7 @@ import { join, relative, resolve, sep } from 'node:path';
 import { createInterface } from 'node:readline';
 import { fileURLToPath } from 'node:url';
 import { createRedisClient } from '@cat-cafe/shared/utils';
-import { RedisFreshnessClosureStore } from '../domains/cats/services/freshness/RedisFreshnessClosureStore.js';
+import { RedisFreshnessClosureStore } from '../domains/cats/services/freshness/closure/RedisFreshnessClosureStore.js';
 import { parseRecoveryCensus } from './f254-withheld-message-recovery/census.js';
 import {
   buildLegacyClosureMigrationBundle,

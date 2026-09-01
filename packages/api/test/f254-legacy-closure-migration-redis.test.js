@@ -12,7 +12,7 @@ import {
 const REDIS_URL = process.env.REDIS_URL;
 const { createRedisClient } = await import('@cat-cafe/shared/utils');
 const { RedisFreshnessClosureStore } = await import(
-  '../dist/domains/cats/services/freshness/RedisFreshnessClosureStore.js'
+  '../dist/domains/cats/services/freshness/closure/RedisFreshnessClosureStore.js'
 );
 const { RedisMessageStore } = await import('../dist/domains/cats/services/stores/redis/RedisMessageStore.js');
 const { runLegacyClosureMigration } = await import('../dist/scripts/migrate-f254-legacy-closures.js');

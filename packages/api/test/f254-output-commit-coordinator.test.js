@@ -3,7 +3,7 @@ import { describe, it } from 'node:test';
 
 const { MessageStore } = await import('../dist/domains/cats/services/stores/ports/MessageStore.js');
 const { InMemoryFreshnessClosureStore } = await import(
-  '../dist/domains/cats/services/freshness/FreshnessClosureStore.js'
+  '../dist/domains/cats/services/freshness/closure/FreshnessClosureStore.js'
 );
 const { FreshnessOutputCommitCoordinator, SUPPLEMENT_DECLINE_MARKER } = await import(
   '../dist/domains/cats/services/freshness/glass-box/FreshnessOutputCommitCoordinator.js'

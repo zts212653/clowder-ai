@@ -5,7 +5,7 @@ import type {
   FreshnessSupplementFailureReason,
   LegacyClosureMigrationOutcomeCounts,
 } from '@cat-cafe/shared';
-import type { FreshnessSupplementOfferInput } from './glass-box/FreshnessSupplementStateMachine.js';
+import type { FreshnessSupplementOfferInput } from '../glass-box/FreshnessSupplementStateMachine.js';
 
 export type OfferFreshnessSupplementResult =
   | { kind: 'offered'; supplement: FreshnessSupplementAggregate }

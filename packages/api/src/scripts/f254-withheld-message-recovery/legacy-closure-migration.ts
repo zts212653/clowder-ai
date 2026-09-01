@@ -1,5 +1,5 @@
 import type { FreshnessClosureAggregate, LegacyClosureMigrationOutcomeCounts } from '@cat-cafe/shared';
-import type { MigrateLegacyFreshnessClosureInput } from '../../domains/cats/services/freshness/freshness-closure-store-types.js';
+import type { MigrateLegacyFreshnessClosureInput } from '../../domains/cats/services/freshness/closure/freshness-closure-store-types.js';
 import type { StoredMessage } from '../../domains/cats/services/stores/ports/MessageStore.js';
 import { planRecovery, type RecoveryPlanItem } from './core.js';
 import { type RecoveryManifestEntry, sha256Text, type ValidatedRecoveryManifest } from './manifest.js';

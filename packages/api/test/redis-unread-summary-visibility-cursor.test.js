@@ -36,8 +36,8 @@ describe('Redis unread summary visibility cursor contract', { skip: redisIsolati
       import('../dist/domains/cats/services/stores/redis/RedisMessageStore.js'),
       import('../dist/domains/cats/services/stores/redis/RedisThreadReadStateStore.js'),
       import('@cat-cafe/shared/utils'),
-      import('../dist/domains/cats/services/freshness/FreshnessClosureStateMachine.js'),
-      import('../dist/domains/cats/services/freshness/FreshnessClosurePreflight.js'),
+      import('../dist/domains/cats/services/freshness/closure/FreshnessClosureStateMachine.js'),
+      import('../dist/domains/cats/services/freshness/closure/FreshnessClosurePreflight.js'),
       import('../dist/routes/threads.js'),
       import('../dist/domains/cats/services/stores/ports/ThreadStore.js'),
     ]);

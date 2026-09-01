@@ -3,7 +3,7 @@ import { describe, it, mock } from 'node:test';
 
 const { MessageStore } = await import('../dist/domains/cats/services/stores/ports/MessageStore.js');
 const { InMemoryFreshnessClosureStore } = await import(
-  '../dist/domains/cats/services/freshness/FreshnessClosureStore.js'
+  '../dist/domains/cats/services/freshness/closure/FreshnessClosureStore.js'
 );
 const { reconcileFreshnessSupplementsAtStartup } = await import(
   '../dist/domains/cats/services/freshness/glass-box/FreshnessSupplementStartupReconciler.js'

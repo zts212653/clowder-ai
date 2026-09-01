@@ -1,5 +1,5 @@
 import type { FreshnessSupplementAggregate, FreshnessSupplementFailureReason } from '@cat-cafe/shared';
-import type { OfferFreshnessSupplementResult } from '../freshness-closure-store-types.js';
+import type { OfferFreshnessSupplementResult } from '../closure/freshness-closure-store-types.js';
 import {
   advanceFreshnessSupplement,
   claimFreshnessSupplement,

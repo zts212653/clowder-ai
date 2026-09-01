@@ -3,6 +3,8 @@ import type {
   FreshnessSupplementAggregate,
   FreshnessSupplementFailureReason,
 } from '@cat-cafe/shared';
+import type { FreshnessSupplementOfferInput } from '../glass-box/FreshnessSupplementStateMachine.js';
+import { InMemoryFreshnessSupplementOperations } from '../glass-box/in-memory-freshness-supplement-operations.js';
 import { migrateLegacyFreshnessClosure } from './FreshnessClosureLegacyMigrationState.js';
 import {
   blockFreshnessClosureRecovery,
@@ -33,8 +35,6 @@ import type {
   RefreshFreshnessClosureFrontierInput,
   SupersedeFreshnessClosureInput,
 } from './freshness-closure-store-types.js';
-import type { FreshnessSupplementOfferInput } from './glass-box/FreshnessSupplementStateMachine.js';
-import { InMemoryFreshnessSupplementOperations } from './glass-box/in-memory-freshness-supplement-operations.js';
 
 export type {
   BlockFreshnessClosureInput,

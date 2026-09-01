@@ -4,7 +4,7 @@ import { describe, it } from 'node:test';
 const { routeSerial } = await import('../dist/domains/cats/services/agents/routing/route-serial.js');
 const { MessageStore } = await import('../dist/domains/cats/services/stores/ports/MessageStore.js');
 const { InMemoryFreshnessClosureStore } = await import(
-  '../dist/domains/cats/services/freshness/FreshnessClosureStore.js'
+  '../dist/domains/cats/services/freshness/closure/FreshnessClosureStore.js'
 );
 const { FreshnessOutputCommitCoordinator, SUPPLEMENT_DECLINE_MARKER } = await import(
   '../dist/domains/cats/services/freshness/glass-box/FreshnessOutputCommitCoordinator.js'

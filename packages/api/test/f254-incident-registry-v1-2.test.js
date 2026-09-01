@@ -3,7 +3,7 @@ import { describe, it } from 'node:test';
 
 const { assembleContext } = await import('../dist/domains/cats/services/context/ContextAssembler.js');
 const { InMemoryFreshnessClosureStore } = await import(
-  '../dist/domains/cats/services/freshness/FreshnessClosureStore.js'
+  '../dist/domains/cats/services/freshness/closure/FreshnessClosureStore.js'
 );
 const { FreshnessOutputCommitCoordinator } = await import(
   '../dist/domains/cats/services/freshness/glass-box/FreshnessOutputCommitCoordinator.js'

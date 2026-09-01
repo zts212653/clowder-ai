@@ -3,7 +3,7 @@ import {
   freshnessClosureTransition,
   freshnessReplayFence,
   freshnessSuccessorPreflightCanceled,
-} from '../../../../infrastructure/telemetry/instruments.js';
+} from '../../../../../infrastructure/telemetry/instruments.js';
 
 export type FreshnessClosureTransitionKind = 'opened' | 'superseded' | 'committed' | 'blocked' | 'retried';
 

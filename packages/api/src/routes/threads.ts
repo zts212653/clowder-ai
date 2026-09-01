@@ -20,7 +20,7 @@ import {
   collectAllThreadMessages,
 } from '../domains/cats/services/agents/routing/thread-artifacts-aggregator.js';
 import { resolveBootcampWorkspaceRoot } from '../domains/cats/services/bootcamp/workspace-root.js';
-import { recordFreshnessClosureTransition } from '../domains/cats/services/freshness/freshness-closure-telemetry.js';
+import { recordFreshnessClosureTransition } from '../domains/cats/services/freshness/closure/freshness-closure-telemetry.js';
 import { projectFreshnessClosure } from '../domains/cats/services/freshness/glass-box/FreshnessOutputCommitCoordinator.js';
 import { projectFreshnessSupplementForHistory } from '../domains/cats/services/freshness/glass-box/freshness-supplement-history-projection.js';
 import { AuditEventTypes, getEventAuditLog } from '../domains/cats/services/orchestration/EventAuditLog.js';
@@ -385,7 +385,7 @@ export interface ThreadsRoutesOptions {
   /** Optional: cascade delete delivery cursors when thread is deleted */
   deliveryCursorStore?: DeliveryCursorStore;
   /** F254 Phase E: cascade persistent catch responsibility with thread deletion. */
-  freshnessClosureStore?: import('../domains/cats/services/freshness/FreshnessClosureStore.js').FreshnessClosureStore;
+  freshnessClosureStore?: import('../domains/cats/services/freshness/closure/FreshnessClosureStore.js').FreshnessClosureStore;
   /** F254 Phase E: explicit blocked-closure retry uses the unified queue. */
   invocationQueue?: InvocationQueue;
   queueProcessor?: QueueProcessor;

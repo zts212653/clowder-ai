@@ -4,7 +4,7 @@ import { describe, it } from 'node:test';
 const { routeParallel } = await import('../dist/domains/cats/services/agents/routing/route-parallel.js');
 const { MessageStore } = await import('../dist/domains/cats/services/stores/ports/MessageStore.js');
 const { InMemoryFreshnessClosureStore } = await import(
-  '../dist/domains/cats/services/freshness/FreshnessClosureStore.js'
+  '../dist/domains/cats/services/freshness/closure/FreshnessClosureStore.js'
 );
 const { FreshnessOutputCommitCoordinator } = await import(
   '../dist/domains/cats/services/freshness/glass-box/FreshnessOutputCommitCoordinator.js'

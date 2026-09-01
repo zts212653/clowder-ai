@@ -44,15 +44,15 @@ import {
   MessageBundlePromptUnavailableError,
   resolveMessageBundlePrompt,
 } from '../../context/MessageBundlePromptResolver.js';
-import type { FreshnessAttentionEventLog } from '../../freshness/FreshnessAttentionEventLog.js';
-import { scanFreshnessClosurePreflight } from '../../freshness/FreshnessClosurePreflight.js';
-import type { FreshnessClosureStore } from '../../freshness/FreshnessClosureStore.js';
-import { scanFreshnessSupplementPreflight } from '../../freshness/FreshnessSupplementPreflight.js';
+import { scanFreshnessClosurePreflight } from '../../freshness/closure/FreshnessClosurePreflight.js';
+import type { FreshnessClosureStore } from '../../freshness/closure/FreshnessClosureStore.js';
 import {
   recordFreshnessClosureStage,
   recordFreshnessClosureTransition,
   recordFreshnessSuccessorPreflightCanceled,
-} from '../../freshness/freshness-closure-telemetry.js';
+} from '../../freshness/closure/freshness-closure-telemetry.js';
+import type { FreshnessAttentionEventLog } from '../../freshness/FreshnessAttentionEventLog.js';
+import { scanFreshnessSupplementPreflight } from '../../freshness/FreshnessSupplementPreflight.js';
 import { recordQueuedHandledTelemetry, recordQueuedSeenTelemetry } from '../../freshness/freshness-queue-telemetry.js';
 import {
   freshnessClosureFinalIdempotencyKey,

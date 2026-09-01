@@ -6,8 +6,8 @@ import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRedisClient } from '@cat-cafe/shared/utils';
-import { migrateLegacyFreshnessClosure } from '../domains/cats/services/freshness/FreshnessClosureLegacyMigrationState.js';
-import { RedisFreshnessClosureStore } from '../domains/cats/services/freshness/RedisFreshnessClosureStore.js';
+import { migrateLegacyFreshnessClosure } from '../domains/cats/services/freshness/closure/FreshnessClosureLegacyMigrationState.js';
+import { RedisFreshnessClosureStore } from '../domains/cats/services/freshness/closure/RedisFreshnessClosureStore.js';
 import { RedisMessageStore } from '../domains/cats/services/stores/redis/RedisMessageStore.js';
 import { applyRecoveryEntries } from './f254-withheld-message-recovery/core.js';
 import {
