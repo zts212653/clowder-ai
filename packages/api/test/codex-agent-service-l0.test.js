@@ -127,6 +127,24 @@ test('Task 4: codex argv carries -c developer_instructions=<compiled L0>', async
   assert.match(developerInstructions, /do not append the cat signature to commentary\/progress messages/);
 });
 
+test('F308 exec resume recompiles and forwards the current progress adoption instructions', async () => {
+  const proc = createMockProcess();
+  const spawnFn = mock.fn(() => proc);
+  const adoption = '关键变化 → final 前调用 cat_cafe_record_thread_progress；否则 abstain';
+  const l0CompilerFn = fixedL0(adoption);
+  const service = new CodexAgentService({ spawnFn, catId: createCatId('codex'), l0CompilerFn });
+
+  const promise = collect(service.invoke('continue', { sessionId: 'thread-existing' }));
+  emitOk(proc);
+  await promise;
+
+  assert.equal(l0CompilerFn.calls.length, 1, 'resume must compile the current L0 again');
+  const args = spawnFn.mock.calls[0].arguments[1];
+  assert.ok(args.includes('resume'));
+  const developerInstructions = assertCompiledL0Preserved(args, adoption);
+  assert.match(developerInstructions, /cat_cafe_record_thread_progress/);
+});
+
 test('P0 security: prompt 正文走 stdin 不进 argv（ps -o command= 跨进程泄露防护）', async () => {
   // 2026-05-29 incident (cross-thread-context-contamination): codex 把完整 prompt 当
   // argv 位置参数传，任何并发进程 `ps -o command=` / 读 /proc/<pid>/cmdline 都能看到

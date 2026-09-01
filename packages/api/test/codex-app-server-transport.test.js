@@ -629,6 +629,28 @@ test('early generator return releases the carrier before cleanup lifecycle can b
   }
 });
 
+test('F308 app-server resume forwards the current progress adoption instructions', async () => {
+  const wire = new ProtocolWire();
+  const client = new CodexAppServerClient({ wire });
+  const adoption = '关键变化 → final 前调用 cat_cafe_record_thread_progress；否则 abstain';
+  const run = collect(
+    client.run({
+      prompt: 'continue real work',
+      thread: { kind: 'resume', threadId: 'thread-existing' },
+      developerInstructions: adoption,
+    }),
+  );
+  await waitFor(() => wire.writes.some((message) => message.method === 'turn/start'));
+  const resume = wire.writes.find((message) => message.method === 'thread/resume');
+  assert.equal(resume.params.threadId, 'thread-existing');
+  assert.equal(resume.params.developerInstructions, adoption);
+  wire.inbox.push({
+    method: 'turn/completed',
+    params: { threadId: 'thread-existing', turn: { id: 'turn-1', status: 'completed' } },
+  });
+  await run;
+});
+
 test('post-accept stream end transitions through failed before cleanup', async () => {
   const wire = new ProtocolWire();
   const lifecycle = [];

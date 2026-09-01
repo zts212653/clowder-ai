@@ -14,4 +14,14 @@ describe('Thread progress prompt adoption', () => {
     assert.match(l6, /无需写回|abstain/i);
     assert.match(l6, /final 前/);
   });
+
+  test('compiled native L0 carries the progress adoption contract', async () => {
+    const { compileL0 } = await import('../../../scripts/compile-system-prompt-l0.mjs');
+    const prompt = await compileL0({ catId: 'codex-sol' });
+
+    assert.match(prompt, /cat_cafe_record_thread_progress/);
+    assert.match(prompt, /关键变化/);
+    assert.match(prompt, /无需写回|abstain/i);
+    assert.match(prompt, /final 前/);
+  });
 });
