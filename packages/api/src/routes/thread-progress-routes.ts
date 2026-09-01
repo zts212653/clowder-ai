@@ -10,6 +10,7 @@ import {
   InvalidThreadProgressCursorError,
   type IThreadProgressReceiptStore,
 } from '../domains/thread-progress/ThreadProgressReceiptStore.js';
+import type { ThreadRuntimeBriefAssembler } from '../domains/thread-progress/ThreadRuntimeBriefAssembler.js';
 import { resolveUserId } from '../utils/request-identity.js';
 
 export interface ThreadProgressRoutesOptions {
@@ -17,6 +18,7 @@ export interface ThreadProgressRoutesOptions {
   readonly receiptStore: IThreadProgressReceiptStore;
   readonly assembler: ThreadBriefAssembler;
   readonly collectionAssembler: ThreadBriefCollectionAssembler;
+  readonly runtimeAssembler: ThreadRuntimeBriefAssembler;
   readonly messageStore: Pick<IMessageStore, 'getById'>;
   readonly taskStore: Pick<ITaskStore, 'get'>;
 }
@@ -84,6 +86,12 @@ export const threadProgressRoutes: FastifyPluginAsync<ThreadProgressRoutesOption
     const access = await requireOwnedConversation(request, reply, opts.threadStore, request.params.threadId);
     if (!access) return { error: 'Thread progress unavailable' };
     return opts.assembler.assemble(access.thread, access.userId);
+  });
+
+  app.get<{ Params: { threadId: string } }>('/api/threads/:threadId/runtime-brief', async (request, reply) => {
+    const access = await requireOwnedConversation(request, reply, opts.threadStore, request.params.threadId);
+    if (!access) return { error: 'Thread progress unavailable' };
+    return opts.runtimeAssembler.assemble(access.thread, access.userId);
   });
 
   app.get<{ Params: { threadId: string } }>('/api/threads/:threadId/progress', async (request, reply) => {

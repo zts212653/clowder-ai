@@ -100,3 +100,62 @@ export interface ThreadBriefCollectionV1 {
   readonly nextCursor: string | null;
   readonly generatedAt: number;
 }
+
+export interface ThreadRuntimePlanItem {
+  readonly id: string;
+  readonly subject: string;
+  readonly status: string;
+  readonly activeForm?: string;
+}
+
+export interface ThreadRuntimeCurrentExecution {
+  readonly catId: string;
+  readonly startedAt: number;
+  readonly confidence: 'confirmed' | 'degraded';
+  readonly plan?: {
+    readonly status: 'running' | 'completed' | 'interrupted';
+    readonly updatedAt: number;
+    readonly tasks: readonly ThreadRuntimePlanItem[];
+  };
+}
+
+export interface ThreadRuntimeSessionSummary {
+  readonly sessionId: string;
+  readonly cliSessionId?: string;
+  readonly catId: string;
+  readonly status: 'active' | 'sealing' | 'sealed';
+  readonly messageCount: number;
+  readonly updatedAt: number;
+  readonly sealedAt?: number;
+  readonly workingDirectory?: string;
+  readonly usage?: {
+    readonly inputTokens?: number;
+    readonly outputTokens?: number;
+    readonly cacheReadTokens?: number;
+    readonly costUsd?: number;
+  };
+  readonly contextHealth?: {
+    readonly fillRatio: number;
+    readonly source: 'exact' | 'approx';
+    readonly measuredAt: number;
+  };
+}
+
+/** Phase C read-only projection. It is assembled on demand and is never persisted. */
+export interface ThreadRuntimeBriefV1 {
+  readonly v: 1;
+  readonly thread: { readonly id: string; readonly title: string };
+  readonly availability: ThreadBriefAvailability;
+  readonly currentExecutions: readonly ThreadRuntimeCurrentExecution[];
+  readonly recentSessions: readonly ThreadRuntimeSessionSummary[];
+  readonly latestProgress: ThreadProgressReceiptSummary | null;
+  readonly nextStep: string | null;
+  readonly openWorkTaskCount: number;
+  readonly anchors: {
+    readonly worktrees: readonly string[];
+    readonly prs: readonly { readonly repo: string; readonly number: number }[];
+    readonly issues: readonly { readonly repo: string; readonly number: number }[];
+    readonly features: readonly string[];
+  };
+  readonly generatedAt: number;
+}

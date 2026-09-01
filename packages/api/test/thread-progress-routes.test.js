@@ -12,6 +12,7 @@ describe('thread progress read routes', () => {
       { ThreadProgressReceiptStore },
       { ThreadBriefAssembler },
       { ThreadBriefCollectionAssembler },
+      { ThreadRuntimeBriefAssembler },
       { threadProgressRoutes },
     ] = await Promise.all([
       import('../dist/domains/cats/services/stores/ports/ThreadStore.js'),
@@ -20,6 +21,7 @@ describe('thread progress read routes', () => {
       import('../dist/domains/thread-progress/ThreadProgressReceiptStore.js'),
       import('../dist/domains/thread-progress/ThreadBriefAssembler.js'),
       import('../dist/domains/thread-progress/ThreadBriefCollectionAssembler.js'),
+      import('../dist/domains/thread-progress/ThreadRuntimeBriefAssembler.js'),
       import('../dist/routes/thread-progress-routes.js'),
     ]);
     const threadStore = new ThreadStore();
@@ -40,12 +42,20 @@ describe('thread progress read routes', () => {
       briefAssembler: assembler,
       discoverCurrentFacts: async () => currentFacts,
     });
+    const runtimeAssembler = new ThreadRuntimeBriefAssembler({
+      receiptStore,
+      taskStore,
+      taskProgressStore: { getThreadSnapshots: async () => ({}) },
+      sessionChainStore: { getChainByThread: async () => [] },
+      readLiveExecutions: async () => [],
+    });
     const app = Fastify();
     await app.register(threadProgressRoutes, {
       threadStore,
       receiptStore,
       assembler,
       collectionAssembler,
+      runtimeAssembler,
       taskStore,
       messageStore,
     });
@@ -229,6 +239,27 @@ describe('thread progress read routes', () => {
       headers: { 'x-cat-cafe-user': 'user-1' },
     });
     assert.equal(invalidCursor.statusCode, 400);
+    await fx.app.close();
+  });
+
+  test('returns a runtime brief only for the ordinary thread owner', async () => {
+    const fx = await fixture();
+    const own = fx.threadStore.create('user-1', 'Runtime details');
+    const ok = await fx.app.inject({
+      method: 'GET',
+      url: `/api/threads/${own.id}/runtime-brief`,
+      headers: { 'x-cat-cafe-user': 'user-1' },
+    });
+    const denied = await fx.app.inject({
+      method: 'GET',
+      url: `/api/threads/${own.id}/runtime-brief`,
+      headers: { 'x-cat-cafe-user': 'user-2' },
+    });
+
+    assert.equal(ok.statusCode, 200);
+    assert.equal(ok.json().thread.title, 'Runtime details');
+    assert.deepEqual(ok.json().currentExecutions, []);
+    assert.equal(denied.statusCode, 403);
     await fx.app.close();
   });
 });

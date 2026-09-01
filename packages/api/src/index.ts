@@ -4425,12 +4425,14 @@ async function main(): Promise<void> {
     { ThreadBriefAssembler },
     { ThreadBriefCollectionAssembler },
     { ThreadBriefCurrentDiscovery },
+    { ThreadRuntimeBriefAssembler },
     { threadProgressRoutes },
     holdProjection,
   ] = await Promise.all([
     import('./domains/thread-progress/ThreadBriefAssembler.js'),
     import('./domains/thread-progress/ThreadBriefCollectionAssembler.js'),
     import('./domains/thread-progress/ThreadBriefCurrentDiscovery.js'),
+    import('./domains/thread-progress/ThreadRuntimeBriefAssembler.js'),
     import('./routes/thread-progress-routes.js'),
     import('./routes/hold-ball-cancel.js'),
   ]);
@@ -4540,11 +4542,19 @@ async function main(): Promise<void> {
     briefAssembler: threadBriefAssembler,
     discoverCurrentFacts: (ownerUserId) => threadBriefCurrentDiscovery.discover(ownerUserId),
   });
+  const threadRuntimeBriefAssembler = new ThreadRuntimeBriefAssembler({
+    receiptStore: threadProgressReceiptStore,
+    taskStore,
+    taskProgressStore,
+    sessionChainStore,
+    readLiveExecutions: readThreadBriefLiveExecutions,
+  });
   await app.register(threadProgressRoutes, {
     threadStore,
     receiptStore: threadProgressReceiptStore,
     assembler: threadBriefAssembler,
     collectionAssembler: threadBriefCollectionAssembler,
+    runtimeAssembler: threadRuntimeBriefAssembler,
     messageStore,
     taskStore,
   });

@@ -1444,6 +1444,10 @@ export {
   type ThreadProgressReceiptSummary,
   type ThreadProgressReceiptV1,
   type ThreadProgressSourceRef,
+  type ThreadRuntimeBriefV1,
+  type ThreadRuntimeCurrentExecution,
+  type ThreadRuntimePlanItem,
+  type ThreadRuntimeSessionSummary,
   threadProgressSourceRefSchema,
 } from './thread-progress.js';
 // F291: thread-scoped Codex requested speed read/write contract

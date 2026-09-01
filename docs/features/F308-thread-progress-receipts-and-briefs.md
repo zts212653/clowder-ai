@@ -8,7 +8,7 @@ created: 2026-08-31
 
 # F308: Thread Progress — 可读进展回执与会话近况
 
-> **Status**: Phase A accepted / Phase B implementation complete, deployment acceptance pending | **Owner**: Ragdoll / 宪宪 | **Priority**: P1
+> **Status**: Phase A accepted / Phase B merged / Phase C implementation complete, deployment acceptance pending | **Owner**: Ragdoll / 宪宪 | **Priority**: P1
 
 ## Why
 
@@ -224,7 +224,7 @@ GET /api/threads/briefs?scope=recent&limit=50&cursor=...
 - stale Task、参与猫、lastActiveAt、ThreadMemory、Session digest 不能使 thread 入选；
 - bulk route 禁止 `list all threads → N 次 liveness`。Phase B 开始前必须确定 owner-scoped current discovery seam；若缺索引，只新增查询索引/port，不新增业务状态。
 
-### Phase C Candidate: Runtime Details Information Architecture（仅规划）
+### Phase C: Runtime Details Read Model
 
 “运行详情”不再以 active invocation 为空时整页消失。它是当前运行与诊断的按需视图，不写入 Receipt，也不成为第二套状态机。
 
@@ -240,7 +240,7 @@ GET /api/threads/briefs?scope=recent&limit=50&cursor=...
 
 运行详情空态：显示“当前没有猫在执行”，并保留上一次运行摘要、最新关键进展、明确下一步及“查看毛线球”入口；不能只返回空白。内部 ID、原始日志和 token 明细只在用户主动展开“技术诊断”后进入 DOM。
 
-Phase C 不混入 Phase B：本轮只确保“近况”能进入对应会话；运行详情复用/迁移 PlanBoard、Session 与诊断面板需单独做 source audit、信息架构 Gate 和 owner-scope 测试。
+Phase C 不改写 Phase B：运行详情通过不持久化的 `ThreadRuntimeBrief` 读取 canonical live、TaskProgress、SessionChain、ThreadMetadata 与 Receipt。实际 runtime/provider/model 和原始日志没有稳定的 per-invocation 真相源，暂不展示。
 
 ## User Journey
 
@@ -297,6 +297,17 @@ Phase C 不混入 Phase B：本轮只确保“近况”能进入对应会话；�
 - [x] AC-B7: invalidation 与轮询重读 canonical collection；读取失败清除陈旧 current，不用 task/lastActiveAt 猜状态。
 - [ ] AC-B8: 使用隔离数据验证分页、owner 隔离、索引迁移和 UI；部署后再用当前用户真实 Receipt 做只读验收。
 
+### Phase C（Runtime Details）
+
+- [x] AC-C1: `ThreadRuntimeBriefV1` 只读组装、不持久化，不新增运行状态对象。
+- [x] AC-C2: 当前执行只来自 canonical live；liveness 失败时不从 Session/Task 推断正在运行。
+- [x] AC-C3: 本轮计划仅在 `TaskProgress.lastInvocationId` 精确匹配当前 turn 时展示，旧计划不冒充 current。
+- [x] AC-C4: 无 active invocation 时展示最近 Session、关键进展、下一步、待办与环境锚点，不出现空白页。
+- [x] AC-C5: 最近 Session 只读 owner 记录，并展示已有 usage/context health；缺失值不估算。
+- [x] AC-C6: Session/CLI ID 与工作目录默认不进入 DOM，用户主动展开技术诊断后才渲染。
+- [x] AC-C7: runtime brief 与单 thread Brief 使用相同 owner/普通 thread 授权边界。
+- [ ] AC-C8: 部署后完成 active/idle/partial 三种真实运行态的浏览器验收。
+
 ## Tips Contribution（F244）
 
 - [x] 新增/更新一条可执行 tip：首次出现可读会话进度时说明“展开查看关键进展；毛线球仍表示待办”。
@@ -320,6 +331,15 @@ Phase C 不混入 Phase B：本轮只确保“近况”能进入对应会话；�
 - ✅ 隔离 Redis E2E：两个真实 Receipt 分别进入 current/recent，同一 collection route 返回，recent 没有额外 liveness 调用。
 - ✅ Web 五分区、进入会话、翻页、invalidation 重读和读取失败清除陈旧数据测试通过。
 - ⏳ AC-B8 最后一项为部署后当前用户真实 Receipt 的只读验收；宿主 browser runtime 仍无可用实例，不以原型代替截图。
+
+## Phase C Acceptance Log
+
+- ✅ runtime assembler 验证 owner Session 过滤、usage/context health、Receipt/nextStep、ThreadMetadata 与 open work count。
+- ✅ live turn 与 TaskProgress 精确匹配时展示计划；旧 invocation snapshot 被拒绝。
+- ✅ liveness 失败时 availability=partial、currentExecutions=[]，但持久空态信息仍可读取。
+- ✅ UI 验证 idle 不空白、current plan 可读、毛线球入口可达、内部 ID/路径按需渲染。
+- ✅ Shared/API/Web production build 通过；Phase A/B/C 定向回归 API 60、Web 26、Shared 3 全绿。
+- ⏳ AC-C8 等待合入部署后真实浏览器验收。
 
 ## Dependencies
 
@@ -369,6 +389,7 @@ Phase C 不混入 Phase B：本轮只确保“近况”能进入对应会话；�
 | KD-10 | Phase A 完成后再验收，不做跨猫 Review | operator 2026-08-31 直接授权 |
 | KD-11 | Phase B 以 owner-scoped current/recent 查询索引实现 | 禁止全量 thread × liveness 扫描，不新增业务状态 |
 | KD-12 | 运行详情独立作为 Phase C | 空态和诊断信息源较多，不能搭 Phase B 顺手重构 |
+| KD-13 | Phase C 只新增 `ThreadRuntimeBrief` 读模型 | 复用既有持久事实与实时 current，避免新的陈旧运行状态对象 |
 
 ## Timeline
 
@@ -378,6 +399,7 @@ Phase C 不混入 Phase B：本轮只确保“近况”能进入对应会话；�
 | 2026-08-31 | 开源调研、领域/安全审计、三级开合视觉 Demo 与 1024px 响应式补充完成 |
 | 2026-08-31 | operator 授权按建议落盘并推进至 Phase A 完成，跳过跨猫 Review |
 | 2026-08-31 | Phase A 真实 Receipt/Brief 验收完成；operator 授权推进 Phase B，并冻结运行详情 Phase C 信息架构 |
+| 2026-09-01 | Phase B 合入本地 main；Phase C 非空白运行详情与按需技术诊断实现完成 |
 
 ## Review Gate
 
@@ -401,5 +423,5 @@ Phase C 不混入 Phase B：本轮只确保“近况”能进入对应会话；�
 - Receipt 手工编辑；
 - system/shared/eval/connector thread 的全局近况；
 - legacy pending authorization 迁移；
-- Phase C 运行详情重构；
+- 实际 runtime/provider/model 与原始日志展示（等待稳定 per-invocation 真相源）；
 - 修改生产配置或生产数据。

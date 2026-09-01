@@ -80,9 +80,9 @@ import { RuntimeUpdateRequiredDialog } from './RuntimeUpdateRequiredDialog';
 import { ScrollToBottomButton } from './ScrollToBottomButton';
 import { SplitPaneView } from './SplitPaneView';
 import { ThinkingIndicator } from './ThinkingIndicator';
-import { ThreadExecutionBar } from './ThreadExecutionBar';
 import { ThreadProgressCard } from './ThreadProgressCard';
 import { ThreadProgressDrawer } from './ThreadProgressDrawer';
+import { ThreadRuntimeDetails } from './ThreadRuntimeDetails';
 import { ThreadSidebar } from './ThreadSidebar';
 import { assignDocumentRoute, pushThreadRouteWithHistory } from './ThreadSidebar/thread-navigation';
 import { TransferTargetPicker } from './TransferTargetPicker';
@@ -1442,7 +1442,7 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
         threadId={threadId}
         onClose={() => setProgressOpen(false)}
         returnFocusTo={progressReturnFocusRef.current}
-        runDetails={<ThreadExecutionBar threadId={threadId} />}
+        runDetails={<ThreadRuntimeDetails threadId={threadId} />}
       />
 
       {/* F284: visited Workspace/Activity panels stay mounted across fold and sibling-host switches.
