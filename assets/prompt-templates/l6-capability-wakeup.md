@@ -14,6 +14,7 @@
 - 压缩后失忆 / 找旧决策 → `search_evidence` + drilldown（见 §7），不单刀
 - 收到 `context_management_hint`(warn) → `context-self-management` 自检（F225）
 - 阶段进度给下棒可见 → `cat_cafe_update_workflow` 推告示牌（不只发聊天）
+- 本轮形成会改变后续恢复工作的关键变化（目标/范围、已验证结果、阻塞/恢复、下一步、责任归属）→ final 前调用一次 `cat_cafe_record_thread_progress`；普通问答、闲聊、重复状态或无新结论时无需写回（abstain）。回执叙述跟随 co-creator 在当前 thread 的主要交流语言；中英混合时使用中文叙述，技术名词、代码符号、commit、ID 与标准 verdict 保留原文，不因 reviewer final 或工具输出使用英文而切换整条回执语言
 - 关于co-creator本人/个人近况/称谓/咱们关系/沟通边界的稳定事实 → `cat_cafe_propose_profile_update`（先 read_profile；Hub 审批；先 `tool_search`）
 - 关于什么输出/设计/表达/架构/系统才算好的可复用品味判断 → `cat_cafe_propose_taste`（Hub 审批；先 `tool_search`）
 - 单次 continuity-valued 人物线索或频率 nudge → `proactive-memory-judgment`（不确定降档、不因未重复沉默）；skill 再路由三态。

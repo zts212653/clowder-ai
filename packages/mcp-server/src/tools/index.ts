@@ -57,11 +57,13 @@ export {
   handleListThreads,
   handlePostMessage,
   handleRecordMemoryCueOutcome,
+  handleRecordThreadProgress,
   handleRegisterPrTracking,
   handleUpdateTask,
   listTasksInputSchema,
   listThreadsInputSchema,
   postMessageInputSchema,
+  recordThreadProgressToolInputSchema,
   registerPrTrackingInputSchema,
   updateTaskInputSchema,
 } from './callback-tools.js';

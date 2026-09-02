@@ -204,6 +204,7 @@ import {
 } from './callback-scope-helpers.js';
 import { registerCallbackTaskRoutes } from './callback-task-routes.js';
 import { registerCallbackThreadCatsRoutes } from './callback-thread-cats-routes.js';
+import { registerCallbackThreadProgressRoutes } from './callback-thread-progress-routes.js';
 import { registerCallbackWeComActionRoutes } from './callback-wecom-action-routes.js';
 import { registerCallbackWithdrawThreadProposalRoutes } from './callback-withdraw-thread-proposal-routes.js';
 import { registerCallbackWorkflowSopRoutes } from './callback-workflow-sop-routes.js';
@@ -767,6 +768,8 @@ export interface CallbackRoutesOptions {
     threadId: string,
   ) => Promise<{ memberCardCount: number }> | { memberCardCount: number };
   taskStore?: ITaskStore;
+  /** F308: append-only, owner-scoped human-readable thread progress receipts. */
+  threadProgressReceiptStore?: import('../domains/thread-progress/ThreadProgressReceiptStore.js').IThreadProgressReceiptStore;
   backlogStore?: IBacklogStore;
   /** For thinking mode filtering in thread-context + thread-cats discovery */
   threadStore?: IThreadStore;
@@ -5937,6 +5940,15 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
     });
   }
 
+  if (opts.threadProgressReceiptStore && threadStore) {
+    registerCallbackThreadProgressRoutes(app, {
+      receiptStore: opts.threadProgressReceiptStore,
+      threadStore,
+      messageStore,
+      ...(taskStore ? { taskStore } : {}),
+      socketManager,
+    });
+  }
   if (opts.workflowSopStore && opts.backlogStore) {
     registerCallbackWorkflowSopRoutes(app, {
       workflowSopStore: opts.workflowSopStore,

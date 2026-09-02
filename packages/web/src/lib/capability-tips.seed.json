@@ -711,6 +711,31 @@
     "owner": "codex-sol"
   },
   {
+    "id": "feature-f308-thread-progress",
+    "kind": "feature",
+    "sourceRef": {
+      "path": "docs/features/F308-thread-progress-receipts-and-briefs.md",
+      "anchor": "Phase A2: Single-Thread Brief & UX"
+    },
+    "structureSource": {
+      "path": "packages/web/src/components/ThreadProgressCard.tsx",
+      "anchor": "ThreadProgressCardView"
+    },
+    "bodySource": {
+      "path": "docs/features/F308-thread-progress-receipts-and-briefs.md",
+      "anchor": "Chat UX"
+    },
+    "contexts": ["long_running", "thinking"],
+    "audience": ["all"],
+    "body": "长期会话的头部现在能收起或展开：展开看关键进展，毛线球仍只表示未来待办；完整时间线从「查看完整进展」进入。",
+    "action": {
+      "type": "open_concierge_draft",
+      "label": "了解会话进展",
+      "draftPrompt": "请说明会话进展、关键回执和毛线球待办分别表示什么，以及我该从哪里查看完整时间线。"
+    },
+    "owner": "codex-sol"
+  },
+  {
     "id": "feature-thread-labels",
     "kind": "feature",
     "sourceRef": { "path": "docs/features/F187-thread-labels.md", "anchor": "Thread Labels" },

@@ -73,6 +73,34 @@ export class DynamicTaskStore {
     return rows.map(todef);
   }
 
+  /** Narrow owner/thread read for current wait projections; avoids polling the global task table. */
+  listEnabledByDeliveryThreadAndUser(threadId: string, userId: string): DynamicTaskDef[] {
+    const rows = this.db
+      .prepare(
+        `SELECT * FROM dynamic_task_defs
+         WHERE delivery_thread_id = ?
+           AND enabled = 1
+           AND json_extract(params_json, '$.triggerUserId') = ?
+         ORDER BY created_at DESC`,
+      )
+      .all(threadId, userId) as RawRow[];
+    return rows.map(todef);
+  }
+
+  /** Owner-scoped discovery seam for active wait projections; callers still validate typed hold lifecycle. */
+  listEnabledByTriggerUser(userId: string): DynamicTaskDef[] {
+    const rows = this.db
+      .prepare(
+        `SELECT * FROM dynamic_task_defs
+         WHERE enabled = 1
+           AND delivery_thread_id IS NOT NULL
+           AND json_extract(params_json, '$.triggerUserId') = ?
+         ORDER BY created_at DESC`,
+      )
+      .all(userId) as RawRow[];
+    return rows.map(todef);
+  }
+
   getById(id: string): DynamicTaskDef | null {
     const row = this.db.prepare('SELECT * FROM dynamic_task_defs WHERE id = ?').get(id) as RawRow | undefined;
     return row ? todef(row) : null;

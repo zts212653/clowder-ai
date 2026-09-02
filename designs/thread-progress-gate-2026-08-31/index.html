@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Thread Progress Visual Gate</title><style>
+:root{--bg:#201b18;--panel:#2b2420;--text:#fff8f1;--muted:#b9aaa0;--accent:#e0a17d}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font-family:Inter,"PingFang SC",sans-serif}
+.shell{min-height:100vh;display:grid;grid-template-columns:260px minmax(0,1fr)}
+aside{position:sticky;top:0;height:100vh;padding:24px 18px;background:var(--panel);border-right:1px solid #463a33}
+h1{font-size:18px;margin:0 0 8px}p{font-size:12px;line-height:1.6;color:var(--muted);margin:0 0 20px}
+nav{display:grid;gap:8px}button{border:1px solid #4c3f38;background:#352d28;color:var(--text);padding:10px 12px;border-radius:10px;text-align:left;cursor:pointer}
+button:hover,button.active{border-color:var(--accent);background:#4a352b}main{padding:20px;min-width:0}
+.truth{display:inline-flex;padding:5px 9px;border-radius:999px;background:#4a352b;color:#ffd7c2;font-size:11px;margin-bottom:14px}
+.view{display:none}.view.active{display:block}.view>header{display:flex;justify-content:space-between;align-items:center;margin:0 0 12px;color:var(--muted);font-size:12px}
+.view>header strong{color:var(--text);font-size:14px}.canvas{background:#15110f;border:1px solid #453a34;border-radius:14px;overflow:auto;padding:12px;box-shadow:0 16px 40px #0008}
+.canvas img{display:block;max-width:none;width:100%;height:auto;background:#fff}
+@media(max-width:760px){.shell{grid-template-columns:1fr}aside{position:relative;height:auto}nav{grid-template-columns:repeat(2,minmax(0,1fr))}main{padding:12px}}
+</style></head><body><div class="shell"><aside><h1>Thread Progress Visual Gate</h1>
+<p>product_experience_gate × internal_product_gate<br>点击切换同一产品壳的六个确定性状态。</p><nav><button data-view="desktop-collapsed" onclick="showView('desktop-collapsed')">桌面 · 收起态</button>
+<button data-view="desktop-summary" onclick="showView('desktop-summary')">桌面 · 摘要态</button>
+<button data-view="desktop-full" onclick="showView('desktop-full')">桌面 · 完整进展</button>
+<button data-view="global" onclick="showView('global')">全局 · 近况</button>
+<button data-view="mobile-collapsed" onclick="showView('mobile-collapsed')">移动 · 收起态</button>
+<button data-view="mobile-full" onclick="showView('mobile-full')">移动 · 全屏进展</button>
+<button data-view="narrow-overlay" onclick="showView('narrow-overlay')">窄桌面 · 覆盖进展</button></nav></aside>
+<main><span class="truth">功能原型 · 演示数据 · 未连接后端</span><section id="desktop-collapsed" class="view"><header><strong>桌面 · 收起态</strong><span>1440 × 900</span></header><div class="canvas"><img src="01-desktop-collapsed.svg" alt="桌面 · 收起态"></div></section>
+<section id="desktop-summary" class="view"><header><strong>桌面 · 摘要态</strong><span>1440 × 900</span></header><div class="canvas"><img src="02-desktop-summary.svg" alt="桌面 · 摘要态"></div></section>
+<section id="desktop-full" class="view"><header><strong>桌面 · 完整进展</strong><span>1440 × 900</span></header><div class="canvas"><img src="03-desktop-full-progress.svg" alt="桌面 · 完整进展"></div></section>
+<section id="global" class="view"><header><strong>全局 · 近况</strong><span>1440 × 900</span></header><div class="canvas"><img src="04-global-recent.svg" alt="全局 · 近况"></div></section>
+<section id="mobile-collapsed" class="view"><header><strong>移动 · 收起态</strong><span>390 × 844</span></header><div class="canvas"><img src="05-mobile-collapsed.svg" alt="移动 · 收起态"></div></section>
+<section id="mobile-full" class="view"><header><strong>移动 · 全屏进展</strong><span>390 × 844</span></header><div class="canvas"><img src="06-mobile-full-progress.svg" alt="移动 · 全屏进展"></div></section>
+<section id="narrow-overlay" class="view"><header><strong>窄桌面 · 覆盖进展</strong><span>1024 × 768</span></header><div class="canvas"><img src="07-narrow-desktop-overlay.svg" alt="窄桌面 · 覆盖进展"></div></section></main></div>
+<script>function showView(id){document.querySelectorAll('.view').forEach(v=>v.classList.toggle('active',v.id===id));document.querySelectorAll('button').forEach(b=>b.classList.toggle('active',b.dataset.view===id));location.hash=id}
+const first=location.hash.slice(1)||'desktop-collapsed';showView(document.getElementById(first)?first:'desktop-collapsed');</script></body></html>

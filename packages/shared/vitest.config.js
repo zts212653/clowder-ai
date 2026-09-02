@@ -39,6 +39,7 @@ export default defineConfig({
       'src/__tests__/context-attachment.test.ts',
       'test/message-bundle-schema.test.ts',
       'test/markdown-readable-text.test.ts',
+      'src/__tests__/thread-progress.test.ts',
     ],
   },
 });

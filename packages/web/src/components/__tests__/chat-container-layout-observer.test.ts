@@ -37,6 +37,7 @@ type StoreState = {
   showVoteModal: boolean;
   setShowVoteModal: ReturnType<typeof vi.fn>;
   rightPanelMode: null;
+  closeRightPanel: ReturnType<typeof vi.fn>;
   uiThinkingExpandedByDefault: boolean;
   workspaceWorktreeId: string | null;
   queue: [];
@@ -81,6 +82,7 @@ const makeStoreState = (): StoreState => ({
   showVoteModal: false,
   setShowVoteModal: vi.fn(),
   rightPanelMode: null,
+  closeRightPanel: vi.fn(),
   uiThinkingExpandedByDefault: false,
   workspaceWorktreeId: null,
   queue: [],
@@ -98,10 +100,18 @@ class MockResizeObserver {
   observe = vi.fn<(target: Element) => void>();
   disconnect = vi.fn();
   unobserve = vi.fn();
+  private readonly callback: ResizeObserverCallback;
 
-  constructor(_callback: ResizeObserverCallback) {
-    void _callback;
+  constructor(callback: ResizeObserverCallback) {
+    this.callback = callback;
     resizeObserverInstances.push(this);
+  }
+
+  emit(target: Element, width: number, height = 0) {
+    this.callback(
+      [{ target, contentRect: { width, height } as DOMRectReadOnly } as ResizeObserverEntry],
+      this as unknown as ResizeObserver,
+    );
   }
 }
 
@@ -297,29 +307,65 @@ describe('ChatContainer bottom chrome observer', () => {
       root.render(React.createElement(ChatContainer, { threadId: 'thread-1' }));
     });
 
-    const firstBottomChrome = resizeObserverInstances[0]?.observe.mock.calls[0]?.[0] as HTMLElement | undefined;
+    const firstRoot = container.querySelector('[data-testid="chat-container-root"]');
+    const firstContainerObserver = resizeObserverInstances.find(
+      (observer) => observer.observe.mock.calls[0]?.[0] === firstRoot,
+    );
+    const firstBottomObserver = resizeObserverInstances.find(
+      (observer) => observer.observe.mock.calls[0]?.[0] !== firstRoot,
+    );
+    const firstBottomChrome = firstBottomObserver?.observe.mock.calls[0]?.[0] as HTMLElement | undefined;
     expect(firstBottomChrome).toBeTruthy();
     expect(firstBottomChrome?.querySelector('[data-testid="chat-input"]')).toBeTruthy();
-    expect(resizeObserverInstances).toHaveLength(1);
-    expect(resizeObserverInstances[0]?.observe.mock.calls[0]?.[0]).toBe(firstBottomChrome);
+    expect(resizeObserverInstances).toHaveLength(2);
+    expect(firstContainerObserver).toBeTruthy();
 
     storeState = { ...storeState, viewMode: 'split' };
     await act(async () => {
       root.render(React.createElement(ChatContainer, { threadId: 'thread-1' }));
     });
     expect(container.querySelector('[data-testid="split-view"]')).toBeTruthy();
-    expect(resizeObserverInstances[0]?.disconnect).toHaveBeenCalledTimes(1);
+    expect(firstBottomObserver?.disconnect).toHaveBeenCalledTimes(1);
+    expect(firstContainerObserver?.disconnect).toHaveBeenCalledTimes(1);
 
     storeState = { ...storeState, viewMode: 'single' };
     await act(async () => {
       root.render(React.createElement(ChatContainer, { threadId: 'thread-1' }));
     });
 
-    const secondBottomChrome = resizeObserverInstances[1]?.observe.mock.calls[0]?.[0] as HTMLElement | undefined;
+    const secondRoot = container.querySelector('[data-testid="chat-container-root"]');
+    const secondObservers = resizeObserverInstances.slice(2);
+    const secondContainerObserver = secondObservers.find(
+      (observer) => observer.observe.mock.calls[0]?.[0] === secondRoot,
+    );
+    const secondBottomObserver = secondObservers.find((observer) => observer.observe.mock.calls[0]?.[0] !== secondRoot);
+    const secondBottomChrome = secondBottomObserver?.observe.mock.calls[0]?.[0] as HTMLElement | undefined;
     expect(secondBottomChrome).toBeTruthy();
     expect(secondBottomChrome?.querySelector('[data-testid="chat-input"]')).toBeTruthy();
     expect(secondBottomChrome).not.toBe(firstBottomChrome);
-    expect(resizeObserverInstances).toHaveLength(2);
-    expect(resizeObserverInstances[1]?.observe.mock.calls[0]?.[0]).toBe(secondBottomChrome);
+    expect(resizeObserverInstances).toHaveLength(4);
+    expect(secondContainerObserver).toBeTruthy();
+  });
+
+  it('switches a live progress drawer between docked and overlay when the host width changes', async () => {
+    await act(async () => {
+      root.render(React.createElement(ChatContainer, { threadId: 'thread-1' }));
+    });
+    const host = container.querySelector('[data-testid="chat-container-root"]');
+    const hostObserver = resizeObserverInstances.find((observer) => observer.observe.mock.calls[0]?.[0] === host);
+    expect(host).toBeTruthy();
+    expect(hostObserver).toBeTruthy();
+
+    const open = [...container.querySelectorAll('button')].find((button) => button.textContent === '查看完整进展');
+    await act(async () => open?.dispatchEvent(new MouseEvent('click', { bubbles: true })));
+    await act(async () => hostObserver?.emit(host as Element, 1200));
+    expect(container.querySelector('[data-testid="thread-progress-drawer"]')?.getAttribute('data-presentation')).toBe(
+      'docked',
+    );
+
+    await act(async () => hostObserver?.emit(host as Element, 900));
+    expect(container.querySelector('[data-testid="thread-progress-drawer"]')?.getAttribute('data-presentation')).toBe(
+      'overlay',
+    );
   });
 });

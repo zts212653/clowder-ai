@@ -155,6 +155,10 @@ vi.mock('../ThinkingIndicator', () => ({
 vi.mock('../ThreadExecutionBar', () => ({
   ThreadExecutionBar: () => React.createElement('div', { 'data-testid': 'thread-execution-bar' }),
 }));
+vi.mock('../ThreadProgressCard', () => ({
+  ThreadProgressCard: () => React.createElement('div', { 'data-testid': 'thread-progress-card' }),
+}));
+vi.mock('../ThreadProgressDrawer', () => ({ ThreadProgressDrawer: () => null }));
 vi.mock('../ThreadSidebar', () => ({ ThreadSidebar: () => null }));
 vi.mock('../VoteActiveBar', () => ({ VoteActiveBar: () => null }));
 vi.mock('../VoteConfigModal', () => ({ VoteConfigModal: () => null }));
@@ -325,7 +329,7 @@ describe('ChatContainer intent_mode loading lock', () => {
     });
 
     expect(container.querySelector('[data-testid="pending-member-bubble"]')).not.toBeNull();
-    expect(container.querySelector('[data-testid="thread-execution-bar"]')).not.toBeNull();
+    expect(container.querySelector('[data-testid="thread-progress-card"]')).not.toBeNull();
   });
 
   it('keeps the placeholder after app-server accepts the turn until a formal bubble can take over', () => {
@@ -364,7 +368,7 @@ describe('ChatContainer intent_mode loading lock', () => {
     });
 
     expect(container.querySelector('[data-testid="pending-member-bubble"]')).not.toBeNull();
-    expect(container.querySelector('[data-testid="thread-execution-bar"]')).not.toBeNull();
+    expect(container.querySelector('[data-testid="thread-progress-card"]')).not.toBeNull();
 
     storeState.messages = [
       ...storeState.messages,
@@ -425,7 +429,7 @@ describe('ChatContainer intent_mode loading lock', () => {
     });
 
     expect(container.querySelector('[data-testid="pending-member-bubble"]')).toBeNull();
-    expect(container.querySelector('[data-testid="thread-execution-bar"]')).not.toBeNull();
+    expect(container.querySelector('[data-testid="thread-progress-card"]')).not.toBeNull();
   });
 
   it('keeps the placeholder for a new invocation when the cat status is stale from a previous turn', () => {

@@ -17,6 +17,7 @@ const OklchTuner = lazy(() => import('./dev/OklchTuner').then((m) => ({ default:
 
 const NAV_ITEMS = [
   { id: 'home', path: '/', label: '对话', match: (p: string) => p === '/' || p.startsWith('/thread/') },
+  { id: 'recent', path: '/recent', label: '近况', match: (p: string) => p.startsWith('/recent') },
   { id: 'starry', path: '/starry', label: '猫猫星球', match: (p: string) => p.startsWith('/starry') },
   { id: 'memory', path: '/memory', label: '记忆', match: (p: string) => p.startsWith('/memory') },
   { id: 'mission', path: '/mission-hub', label: 'Mission Hub', match: (p: string) => p.startsWith('/mission') },
@@ -48,6 +49,16 @@ function MissionIcon({ className = 'w-5 h-5' }: { className?: string }) {
       <path d="M15 3v4a1 1 0 0 0 1 1h4" strokeLinecap="round" strokeLinejoin="round" />
       <path d="M9 13h6" strokeLinecap="round" />
       <path d="M9 17h3" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+function RecentIcon({ className = 'w-5 h-5' }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className={className}>
+      <title>近况</title>
+      <circle cx="12" cy="12" r="8.5" />
+      <path d="M12 7v5l3 2" strokeLinecap="round" strokeLinejoin="round" />
     </svg>
   );
 }
@@ -93,6 +104,7 @@ function SettingsIcon({ className = 'w-5 h-5' }: { className?: string }) {
 
 const ICON_MAP: Record<string, ({ className }: { className?: string }) => JSX.Element> = {
   home: ChatIcon,
+  recent: RecentIcon,
   starry: PlanetIcon,
   signals: SignalIcon,
   memory: MemoryIcon,

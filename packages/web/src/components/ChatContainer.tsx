@@ -80,7 +80,9 @@ import { RuntimeUpdateRequiredDialog } from './RuntimeUpdateRequiredDialog';
 import { ScrollToBottomButton } from './ScrollToBottomButton';
 import { SplitPaneView } from './SplitPaneView';
 import { ThinkingIndicator } from './ThinkingIndicator';
-import { ThreadExecutionBar } from './ThreadExecutionBar';
+import { ThreadProgressCard } from './ThreadProgressCard';
+import { ThreadProgressDrawer } from './ThreadProgressDrawer';
+import { ThreadRuntimeDetails } from './ThreadRuntimeDetails';
 import { ThreadSidebar } from './ThreadSidebar';
 import { assignDocumentRoute, pushThreadRouteWithHistory } from './ThreadSidebar/thread-navigation';
 import { TransferTargetPicker } from './TransferTargetPicker';
@@ -279,6 +281,8 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
   const setRightPanelOpen = useChatStore((s) => s.setRightPanelOpen);
   const [workspacePanelMounted, setWorkspacePanelMounted] = useState(rightPanelMode === 'workspace');
   const [activityPanelMounted, setActivityPanelMounted] = useState(false);
+  const [progressOpen, setProgressOpen] = useState(false);
+  const progressReturnFocusRef = useRef<HTMLElement | null>(null);
   const [showBootcampList, setShowBootcampList] = useState(false);
   const [editingCatId, setEditingCatId] = useState<string | null>(null);
   const editingCat = editingCatId ? (getCatById(editingCatId) ?? null) : null;
@@ -319,6 +323,7 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
     STATUS_PANEL_DEFAULT,
   );
   const containerRef = useRef<HTMLDivElement>(null);
+  const [containerWidth, setContainerWidth] = useState(0);
   const handleHorizontalResize = useCallback(
     (delta: number) => {
       if (!containerRef.current) return;
@@ -368,6 +373,28 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
   }, [setRightPanelMode, setWorkspaceMode, setWorkspaceSurface, setRightPanelOpen]);
 
   const isDesktop = useIsDesktop();
+  const progressDocked = progressOpen && isDesktop && containerWidth - 420 >= 640;
+
+  // biome-ignore lint/correctness/useExhaustiveDependencies: viewMode replaces the observed root node.
+  useLayoutEffect(() => {
+    const node = containerRef.current;
+    if (!node) {
+      setContainerWidth(0);
+      return;
+    }
+    const update = (width: number) => setContainerWidth(width);
+    update(node.getBoundingClientRect().width);
+    if (typeof ResizeObserver !== 'function') return;
+    const observer = new ResizeObserver(([entry]) => {
+      update(entry?.contentRect.width ?? node.getBoundingClientRect().width);
+    });
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, [viewMode]);
+
+  useEffect(() => {
+    if (statusPanelOpen) setProgressOpen(false);
+  }, [statusPanelOpen]);
 
   useEffect(() => {
     if (isDesktop || !statusPanelOpen) return;
@@ -1058,7 +1085,7 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
   }
 
   return (
-    <div ref={containerRef} className="flex h-screen h-dvh">
+    <div ref={containerRef} className="flex h-screen h-dvh" data-testid="chat-container-root">
       {connectionStatus.updateRequired && <RuntimeUpdateRequiredDialog onReload={() => window.location.reload()} />}
       {/* Mobile-only sidebar overlay — desktop sidebar is in AppShell */}
       {sidebarOpen && !isDesktop && (
@@ -1077,9 +1104,11 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
       <div
         className="flex flex-col min-w-0"
         style={
-          statusPanelOpen && isDesktop && (rightPanelMode === 'workspace' || rightPanelMode === 'transcript')
-            ? { flexBasis: `${chatBasis}%`, flexGrow: 0, flexShrink: 0 }
-            : { flex: '1 1 0%' }
+          progressDocked
+            ? { flex: '1 1 0%', minWidth: 640 }
+            : statusPanelOpen && isDesktop && (rightPanelMode === 'workspace' || rightPanelMode === 'transcript')
+              ? { flexBasis: `${chatBasis}%`, flexGrow: 0, flexShrink: 0 }
+              : { flex: '1 1 0%' }
         }
       >
         <ChatContainerHeader
@@ -1098,6 +1127,15 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
               setRightPanelMode('workspace');
               setRightPanelOpen(true);
             }
+          }}
+        />
+
+        <ThreadProgressCard
+          threadId={threadId}
+          onOpenProgress={(trigger) => {
+            progressReturnFocusRef.current = trigger;
+            closeStatusPanel();
+            setProgressOpen(true);
           }}
         />
 
@@ -1247,7 +1285,6 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
         </div>
 
         <div ref={attachBottomChromeRef}>
-          <ThreadExecutionBar threadId={threadId} />
           <QueuePanel threadId={threadId} />
           <VoteActiveBar threadId={threadId} onEnd={() => {}} />
 
@@ -1398,6 +1435,15 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
           }}
         />
       </div>
+
+      <ThreadProgressDrawer
+        open={progressOpen}
+        docked={progressDocked}
+        threadId={threadId}
+        onClose={() => setProgressOpen(false)}
+        returnFocusTo={progressReturnFocusRef.current}
+        runDetails={<ThreadRuntimeDetails threadId={threadId} />}
+      />
 
       {/* F284: visited Workspace/Activity panels stay mounted across fold and sibling-host switches.
           At 768px+ they use the split host; below 768px the same host becomes a full-screen overlay. */}

@@ -124,6 +124,14 @@ describe('F246 AC-D3: ActivityBar — ApprovalHubButton', () => {
     expect(bellBtn).not.toBeNull();
   });
 
+  it('exposes the global recent entry in the primary rail', async () => {
+    await act(async () => {
+      root.render(React.createElement(ActivityBar));
+    });
+
+    expect(container.querySelector('button[aria-label="近况"]')).not.toBeNull();
+  });
+
   it('no badge when count=0', async () => {
     mockCount = 0;
     await act(async () => {

@@ -1,0 +1,34 @@
+import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
+import { describe, test } from 'node:test';
+
+const root = resolve(import.meta.dirname, '../../..');
+
+describe('Thread progress prompt adoption', () => {
+  test('L5 and L6 expose the tool and high-precision abstention rule', () => {
+    const l5 = readFileSync(resolve(root, 'assets/prompt-templates/l5-mcp-tools-index.md'), 'utf8');
+    const l6 = readFileSync(resolve(root, 'assets/prompt-templates/l6-capability-wakeup.md'), 'utf8');
+    assert.match(l5, /cat_cafe_record_thread_progress/);
+    assert.match(l6, /关键变化/);
+    assert.match(l6, /无需写回|abstain/i);
+    assert.match(l6, /final 前/);
+    assert.match(l5, /co-creator.*主要交流语言/);
+    assert.match(l6, /中英混合.*中文叙述.*技术名词.*保留原文/);
+  });
+
+  test('compiled native L0 carries the progress adoption contract', async () => {
+    const { loadCatConfig, toAllCatConfigs } = await import('../dist/config/cat-config-loader.js');
+    const { compileL0 } = await import('../../../scripts/compile-system-prompt-l0.mjs');
+    const [registeredCatId] = Object.keys(toAllCatConfigs(loadCatConfig()));
+    assert.ok(registeredCatId, 'compiled L0 test requires at least one registered cat');
+    const prompt = await compileL0({ catId: registeredCatId });
+
+    assert.match(prompt, /cat_cafe_record_thread_progress/);
+    assert.match(prompt, /关键变化/);
+    assert.match(prompt, /无需写回|abstain/i);
+    assert.match(prompt, /final 前/);
+    assert.match(prompt, /co-creator.*主要交流语言/);
+    assert.match(prompt, /中英混合.*中文叙述.*技术名词.*保留原文/);
+  });
+});
