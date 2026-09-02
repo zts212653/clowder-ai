@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { readdir, readFile } from 'node:fs/promises';
 import { posix, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -7,6 +8,22 @@ const DEFAULT_CONFIG_PATH = resolve(
   'config/public-test-exclusions.json',
 );
 export const DEFAULT_POLICY_TIMEZONE = 'America/Los_Angeles';
+
+export function stablePublicTestSha256(value) {
+  return createHash('sha256').update(JSON.stringify(value)).digest('hex');
+}
+
+export function publicTestSelectionHash(selectedFiles) {
+  return stablePublicTestSha256({ selectedFiles: [...selectedFiles].sort() });
+}
+
+export function publicTestExclusionMatchHash(matchedFiles) {
+  return stablePublicTestSha256({ matchedFiles: [...matchedFiles].sort() });
+}
+
+export function publicTestExclusionRegistryHash(registry) {
+  return stablePublicTestSha256({ version: registry.version, entries: registry.entries });
+}
 
 function isNonEmptyString(value) {
   return typeof value === 'string' && value.trim().length > 0;
@@ -56,13 +73,29 @@ export async function loadPublicTestExclusions(options = {}) {
 }
 
 const REQUIRED_ENTRY_FIELDS = ['id', 'match', 'category', 'reason', 'owner', 'introducedBy', 'expiresOn'];
+const REQUIRED_AUDIT_FIELDS = [
+  'reviewedOn',
+  'sourceHead',
+  'publicHead',
+  'status',
+  'matchedFileCount',
+  'matchedFilesHash',
+];
 const ISO_DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
+const SHA_PATTERN = /^[a-f0-9]{40}$/;
+const SHA256_PATTERN = /^[a-f0-9]{64}$/;
+const AUDIT_STATUSES = new Set([
+  'resource_contract',
+  'source_dependency_failure',
+  'private_fixture_failure',
+  'pending_bounded_recheck',
+]);
 
 function assertRegistryShape(registry) {
   if (!registry || typeof registry !== 'object') {
     throw new Error('public test exclusion registry must be an object');
   }
-  if (registry.version !== 1) {
+  if (registry.version !== 2) {
     throw new Error(`unsupported public test exclusion registry version: ${registry.version}`);
   }
   if (!Array.isArray(registry.entries)) {
@@ -100,6 +133,43 @@ function assertEntryExpiresOnFormat(entry) {
   }
 }
 
+function assertAuditDate(audit, entry) {
+  if (!ISO_DATE_PATTERN.test(audit.reviewedOn)) {
+    throw new Error(
+      `public test exclusion "${entry.id}" audit.reviewedOn must be in YYYY-MM-DD format, got: ${audit.reviewedOn}`,
+    );
+  }
+  const parsed = new Date(`${audit.reviewedOn}T00:00:00Z`);
+  if (Number.isNaN(parsed.getTime()) || parsed.toISOString().slice(0, 10) !== audit.reviewedOn) {
+    throw new Error(`public test exclusion "${entry.id}" audit.reviewedOn is not a valid calendar date`);
+  }
+}
+
+function assertEntryAudit(entry) {
+  const audit = entry.audit;
+  if (!audit || typeof audit !== 'object' || Array.isArray(audit)) {
+    throw new Error(`public test exclusion "${entry.id}" is missing required audit object`);
+  }
+  for (const field of REQUIRED_AUDIT_FIELDS) {
+    if (audit[field] === undefined || audit[field] === null || audit[field] === '') {
+      throw new Error(`public test exclusion "${entry.id}" audit is missing required field: ${field}`);
+    }
+  }
+  assertAuditDate(audit, entry);
+  if (!SHA_PATTERN.test(audit.sourceHead) || !SHA_PATTERN.test(audit.publicHead)) {
+    throw new Error(`public test exclusion "${entry.id}" audit sourceHead/publicHead must be full 40-character SHAs`);
+  }
+  if (!AUDIT_STATUSES.has(audit.status)) {
+    throw new Error(`public test exclusion "${entry.id}" audit status is invalid: ${audit.status}`);
+  }
+  if (!Number.isSafeInteger(audit.matchedFileCount) || audit.matchedFileCount <= 0) {
+    throw new Error(`public test exclusion "${entry.id}" audit matchedFileCount must be a positive integer`);
+  }
+  if (!SHA256_PATTERN.test(audit.matchedFilesHash)) {
+    throw new Error(`public test exclusion "${entry.id}" audit matchedFilesHash must be a SHA-256 hex digest`);
+  }
+}
+
 function compileEntryPattern(entry) {
   try {
     return new RegExp(entry.match);
@@ -112,10 +182,17 @@ function assertEntryAgainstFilesystem(entry, pattern, allTestFiles, today) {
   if (entry.expiresOn < today) {
     throw new Error(`public test exclusion "${entry.id}" is expired (${entry.expiresOn} < ${today})`);
   }
-  const hasMatch = allTestFiles.some((file) => pattern.test(file));
-  if (!hasMatch) {
+  const matchedFiles = allTestFiles.filter((file) => pattern.test(file)).sort();
+  if (matchedFiles.length === 0) {
     throw new Error(`public test exclusion "${entry.id}" matches no current test files`);
   }
+  const actualHash = publicTestExclusionMatchHash(matchedFiles);
+  if (entry.audit.matchedFileCount !== matchedFiles.length || entry.audit.matchedFilesHash !== actualHash) {
+    throw new Error(
+      `public test exclusion "${entry.id}" audited match inventory drift (expected ${entry.audit.matchedFileCount}/${entry.audit.matchedFilesHash}, got ${matchedFiles.length}/${actualHash})`,
+    );
+  }
+  return matchedFiles;
 }
 
 export function validatePublicTestExclusions(registry, options = {}) {
@@ -129,13 +206,14 @@ export function validatePublicTestExclusions(registry, options = {}) {
   for (const entry of registry.entries) {
     assertEntryFields(entry);
     assertEntryExpiresOnFormat(entry);
+    assertEntryAudit(entry);
     if (seenIds.has(entry.id)) {
       throw new Error(`duplicate public test exclusion id: ${entry.id}`);
     }
     seenIds.add(entry.id);
     const pattern = compileEntryPattern(entry);
-    assertEntryAgainstFilesystem(entry, pattern, allTestFiles, today);
-    compiledEntries.push({ ...entry, regex: pattern });
+    const matchedFiles = assertEntryAgainstFilesystem(entry, pattern, allTestFiles, today);
+    compiledEntries.push({ ...entry, regex: pattern, matchedFiles });
   }
 
   // Backward-compatible default return is the registry; compiled patterns are
@@ -198,12 +276,24 @@ export function selectFocusedPublicTestFiles(result, rawFocus = '') {
   return requested;
 }
 
+export function buildPublicTestManifest(result, selectedFiles = result.selectedFiles) {
+  const selected = [...selectedFiles].sort();
+  const excluded = [...result.excludedFiles].sort();
+  return {
+    schemaVersion: 1,
+    selectedFiles: selected,
+    excludedFiles: excluded,
+    selectionHash: publicTestSelectionHash(selected),
+    exclusionRegistryHash: publicTestExclusionRegistryHash(result.registry),
+  };
+}
+
 async function main() {
   const format = process.argv.includes('--json') ? 'json' : 'plain';
   const result = await resolvePublicTestFiles();
   const selectedFiles = selectFocusedPublicTestFiles(result, process.env.CAT_CAFE_PUBLIC_TEST_FOCUS);
   if (format === 'json') {
-    process.stdout.write(JSON.stringify({ ...result, selectedFiles }, null, 2));
+    process.stdout.write(JSON.stringify({ ...result, ...buildPublicTestManifest(result, selectedFiles) }, null, 2));
     return;
   }
   process.stdout.write(selectedFiles.join('\n'));
