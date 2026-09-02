@@ -405,6 +405,43 @@ function toTomlString(value: string): string {
   return `"${escaped}"`;
 }
 
+const CODEX_NONINTERACTIVE_PLAYWRIGHT_APPROVED_TOOLS = [
+  'browser_navigate',
+  'browser_navigate_back',
+  'browser_tabs',
+] as const;
+
+function isOfficialPlaywrightMcpServer(server: {
+  name: string;
+  source: string;
+  command?: string;
+  args?: readonly string[];
+}): boolean {
+  if (server.name !== 'playwright' || server.source !== 'external') return false;
+  const launchSignature = [server.command ?? '', ...(server.args ?? [])].join(' ');
+  return /(?:^|\s)@playwright\/mcp(?:@[^\s]+)?(?:\s|$)/.test(launchSignature);
+}
+
+function appendNoninteractivePlaywrightApprovalPolicy(
+  args: string[],
+  tomlName: string,
+  server: { name: string; source: string; command?: string; args?: readonly string[] },
+  approvalSurface: CodexApprovalSurface,
+): void {
+  if (approvalSurface !== 'unavailable' || !isOfficialPlaywrightMcpServer(server)) return;
+
+  // Codex's `writes` mode trusts the official MCP readOnlyHint annotation while
+  // keeping input/click/evaluate/upload tools approval-gated. Playwright marks
+  // navigation and its mixed tabs tool as actions, although they only mutate
+  // browser-local state, so approve exactly those narrow tools. Do not broaden
+  // this to arbitrary external MCPs or page-interaction tools: this host cannot
+  // surface their confirmation prompts today.
+  args.push('--config', `mcp_servers.${tomlName}.default_tools_approval_mode="writes"`);
+  for (const tool of CODEX_NONINTERACTIVE_PLAYWRIGHT_APPROVED_TOOLS) {
+    args.push('--config', `mcp_servers.${tomlName}.tools.${tool}.approval_mode="approve"`);
+  }
+}
+
 const CODEX_SIGNATURE_BOUNDARY_INSTRUCTION =
   'Codex output boundary: do not append the cat signature to commentary/progress messages; append it exactly once, only at the end of the final response.';
 
@@ -624,6 +661,7 @@ function writeCodexMcpEnvWrapper(spec: {
 async function buildCatCafeMcpArgs(
   callbackEnv?: Record<string, string>,
   workingDirectory?: string,
+  approvalSurface?: CodexApprovalSurface,
 ): Promise<{ args: string[]; bearerEnv: Record<string, string>; declaredServerNames?: readonly string[] }> {
   if (!callbackEnv) return { args: [], bearerEnv: {} };
 
@@ -881,6 +919,8 @@ async function buildCatCafeMcpArgs(
             const value = callbackEnv[key];
             if (value) args.push('--config', `mcp_servers.${tomlName}.env.${key}=${toTomlString(value)}`);
           }
+        } else {
+          if (approvalSurface) appendNoninteractivePlaywrightApprovalPolicy(args, tomlName, s, approvalSurface);
         }
       }
       resolved = true;
@@ -1235,7 +1275,7 @@ export class CodexAgentService implements AgentService {
       declaredServerNames: declaredMcpServerNames,
     } = readOnly
       ? { args: [], bearerEnv: {}, declaredServerNames: [] as readonly string[] }
-      : await buildCatCafeMcpArgs(mcpCallbackEnv, options?.workingDirectory);
+      : await buildCatCafeMcpArgs(mcpCallbackEnv, options?.workingDirectory, this.approvalSurface);
     const gitRepoArgs = readOnly ? [] : buildGitRepoArgs(options?.workingDirectory);
     // User-defined CLI args from the member editor (#567) — passed as-is, no implicit wrapping.
     // Each entry is split by whitespace (e.g. "--config model_reasoning_effort=\"low\"").

@@ -204,6 +204,10 @@ test('pooled Codex materializes ordered MCP overlays without duplicate TOML tabl
     'mcp_servers.cat-cafe.default_tools_approval_mode="approve"',
     '--config',
     'mcp_servers.cat-cafe.env.CAT_CAFE_CREDENTIAL_FILE="/tmp/session.json"',
+    '--config',
+    'mcp_servers.playwright.default_tools_approval_mode="writes"',
+    '--config',
+    'mcp_servers.playwright.tools.browser_navigate.approval_mode="approve"',
   ]);
 
   assert.deepEqual(config, {
@@ -214,6 +218,10 @@ test('pooled Codex materializes ordered MCP overlays without duplicate TOML tabl
         enabled: true,
         default_tools_approval_mode: 'approve',
         env: { CAT_CAFE_CREDENTIAL_FILE: '/tmp/session.json' },
+      },
+      playwright: {
+        default_tools_approval_mode: 'writes',
+        tools: { browser_navigate: { approval_mode: 'approve' } },
       },
     },
   });

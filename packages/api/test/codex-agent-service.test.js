@@ -638,6 +638,137 @@ describe('CodexAgentService Tests (CLI mode)', { concurrency: false }, () => {
     }
   });
 
+  test('unavailable approval surface auto-approves only safe official Playwright navigation tools', async () => {
+    const runtimeRoot = makeTempDir('.tmp-codex-playwright-policy-root-');
+    const projectDir = makeTempDir('.tmp-codex-playwright-policy-project-');
+    const proc = createMockProcess();
+    const spawnFn = createMockSpawnFn(proc);
+    const service = new CodexAgentService({
+      l0CompilerFn: fakeL0Compiler,
+      spawnFn,
+      model: 'gpt-5.3-codex',
+      approvalSurface: 'unavailable',
+    });
+
+    try {
+      writeMcpDistStubs(runtimeRoot, ['index.js']);
+      writeCapabilitiesConfig(runtimeRoot, [
+        {
+          id: 'playwright',
+          type: 'mcp',
+          globalEnabled: true,
+          source: 'external',
+          mcpServer: { command: 'npx', args: ['-y @playwright/mcp@latest'] },
+        },
+      ]);
+
+      await withRuntimeRootEnv(runtimeRoot, async () => {
+        const promise = collect(
+          service.invoke('inspect a page', {
+            workingDirectory: projectDir,
+            callbackEnv: {
+              CAT_CAFE_INVOCATION_ID: 'inv-playwright-policy',
+              CAT_CAFE_CALLBACK_TOKEN: 'tok-playwright-policy',
+              CAT_CAFE_CAT_ID: 'codex',
+            },
+          }),
+        );
+        emitCodexEvents(proc, [{ type: 'thread.started', thread_id: 't-playwright-policy' }]);
+        await promise;
+
+        const args = spawnFn.mock.calls[0].arguments[1];
+        assert.ok(
+          args.includes('mcp_servers.playwright.default_tools_approval_mode="writes"'),
+          'annotated read-only Playwright tools should run without an unavailable confirmation surface',
+        );
+        for (const tool of ['browser_navigate', 'browser_navigate_back', 'browser_tabs']) {
+          assert.ok(
+            args.includes(`mcp_servers.playwright.tools.${tool}.approval_mode="approve"`),
+            `${tool} should be treated as safe browser-local navigation`,
+          );
+        }
+        for (const tool of ['browser_click', 'browser_type', 'browser_fill_form', 'browser_file_upload']) {
+          assert.ok(
+            !args.some((arg) => arg.includes(`mcp_servers.playwright.tools.${tool}.approval_mode="approve"`)),
+            `${tool} must remain approval-gated`,
+          );
+        }
+      });
+    } finally {
+      rmSync(runtimeRoot, { recursive: true, force: true });
+      rmSync(projectDir, { recursive: true, force: true });
+    }
+  });
+
+  test('Playwright approval fast path rejects lookalike servers and stays off with an interactive surface', async () => {
+    for (const fixture of [
+      {
+        label: 'lookalike',
+        approvalSurface: 'unavailable',
+        command: 'node',
+        args: ['untrusted-playwright.js'],
+      },
+      {
+        label: 'interactive',
+        approvalSurface: 'interactive',
+        command: 'npx',
+        args: ['-y', '@playwright/mcp@latest'],
+      },
+    ]) {
+      const runtimeRoot = makeTempDir(`.tmp-codex-playwright-${fixture.label}-root-`);
+      const projectDir = makeTempDir(`.tmp-codex-playwright-${fixture.label}-project-`);
+      const proc = createMockProcess();
+      const spawnFn = createMockSpawnFn(proc);
+      const service = new CodexAgentService({
+        l0CompilerFn: fakeL0Compiler,
+        spawnFn,
+        model: 'gpt-5.3-codex',
+        approvalSurface: fixture.approvalSurface,
+      });
+
+      try {
+        writeMcpDistStubs(runtimeRoot, ['index.js']);
+        writeCapabilitiesConfig(runtimeRoot, [
+          {
+            id: 'playwright',
+            type: 'mcp',
+            globalEnabled: true,
+            source: 'external',
+            mcpServer: { command: fixture.command, args: fixture.args },
+          },
+        ]);
+
+        await withRuntimeRootEnv(runtimeRoot, async () => {
+          const promise = collect(
+            service.invoke(`inspect a page (${fixture.label})`, {
+              workingDirectory: projectDir,
+              callbackEnv: {
+                CAT_CAFE_INVOCATION_ID: `inv-playwright-${fixture.label}`,
+                CAT_CAFE_CALLBACK_TOKEN: `tok-playwright-${fixture.label}`,
+                CAT_CAFE_CAT_ID: 'codex',
+              },
+            }),
+          );
+          emitCodexEvents(proc, [{ type: 'thread.started', thread_id: `t-playwright-${fixture.label}` }]);
+          await promise;
+
+          const args = spawnFn.mock.calls[0].arguments[1];
+          assert.ok(
+            !args.some((arg) => arg.startsWith('mcp_servers.playwright.default_tools_approval_mode=')),
+            `${fixture.label} server must retain the normal approval policy`,
+          );
+          assert.ok(
+            !args.some((arg) => arg.startsWith('mcp_servers.playwright.tools.')),
+            `${fixture.label} server must not receive safe-navigation overrides`,
+          );
+        });
+      } finally {
+        rmSync(runtimeRoot, { recursive: true, force: true });
+        rmSync(projectDir, { recursive: true, force: true });
+      }
+    }
+  });
+
   test('Codex MCP config suppresses external entry with unsupported transport as disabled dummy', async () => {
     // #1072 fix: external entry with managed name but unsupported transport
     // resolves as disabled (transport unsupported for this provider). The
