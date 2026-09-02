@@ -1,0 +1,11 @@
+{
+  "verdictId": "2026-09-02-eval-friction-c1-empty-window-streak-through-sep01",
+  "featureId": "F245",
+  "evalSnapshotId": "eval-F245-2026-09-02",
+  "generatedAt": "2026-09-02T03:01:48.000Z",
+  "findings": [],
+  "noFindingRecord": {
+    "reason": "no friction cluster surfaced in the selected window",
+    "evidence": "friction-rollup/cluster_count"
+  }
+}

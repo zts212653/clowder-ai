@@ -1,13 +1,13 @@
 kind: f267-measurement-bundle-census
 schemaVersion: 2
-generatedAt: 2026-08-27T06:35:32Z
+generatedAt: 2026-09-02T03:01:48.000Z
 sources:
   registryDir: docs/harness-feedback/eval-domains
   instructionMap: packages/api/src/infrastructure/harness-eval/eval-cat-invocation.ts#DOMAIN_INSTRUCTIONS
   publishMap: packages/api/src/infrastructure/harness-eval/eval-cat-invocation.ts#PUBLISH_VERDICT_INSTRUCTIONS_BY_DOMAIN
   verdictDir: docs/harness-feedback/verdicts
-verdictCorpusHash: f7ee57365b6a410f69841c0bfd3c75ece7c7f26c5b0ec37da1094f6daf623dec
-committedVerdictArtifactCount: 3
+verdictCorpusHash: 09f0e28e8bf0dd0dc1c0fbe69d2fed5c8d3736ed14742ecbe237d6da2d179b2f
+committedVerdictArtifactCount: 4
 entries:
   - domainId: eval:a2a
     classification: active_decision_bearing
@@ -227,7 +227,7 @@ entries:
     sourceSelector:
       adapter: f245-friction-rollup
       kind: friction-rollup-snapshot
-    committedVerdictArtifactCount: 1
+    committedVerdictArtifactCount: 2
     functionalEquivalents:
       - f245-friction-rollup/friction-rollup-snapshot public registry contract
     evidence:
