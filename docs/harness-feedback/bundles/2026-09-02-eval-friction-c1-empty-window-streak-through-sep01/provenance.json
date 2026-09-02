@@ -1,0 +1,21 @@
+{
+  "verdictId": "2026-09-02-eval-friction-c1-empty-window-streak-through-sep01",
+  "rawInputs": [
+    {
+      "path": "docs/harness-feedback/bundles/2026-09-02-eval-friction-c1-empty-window-streak-through-sep01/raw/rollup-report.json",
+      "sha256": "3d01568c83936cfe5aca3899335dac4c5efed798a101928278276a8182bcb7c0"
+    },
+    {
+      "path": "docs/harness-feedback/bundles/2026-09-02-eval-friction-c1-empty-window-streak-through-sep01/raw/measurement-validity.json",
+      "sha256": "0997179caf8b161dbe7895ffb25c8f5af42dfa1f8b762388039868a2a739c690"
+    }
+  ],
+  "generatedAt": "2026-09-02T03:01:48.000Z",
+  "generator": {
+    "name": "eval-friction-live-verdict",
+    "version": "2"
+  },
+  "sanitizeRulesVersion": "f267-friction-measurement-v1",
+  "sourceThreadId": "thread_eval_friction",
+  "sourceMessageId": "0001788317999740-000115-c46c3ce8"
+}
