@@ -635,7 +635,7 @@ test('F308 app-server resume forwards the current progress adoption instructions
   const adoption = '关键变化 → final 前调用 cat_cafe_record_thread_progress；否则 abstain';
   const run = collect(
     client.run({
-      prompt: 'continue real work',
+      prompt: frozenPrompt('continue real work'),
       thread: { kind: 'resume', threadId: 'thread-existing' },
       developerInstructions: adoption,
     }),
