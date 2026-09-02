@@ -26,6 +26,16 @@ import {
   canonicalizeActionIdentity,
   isActionSuccessorReturnReplay,
 } from './action-successor-state-machine.js';
+import {
+  type RecoverStrandedProducerInput,
+  type RecoverStrandedProducerResult,
+  recoverStrandedProducer,
+} from './action-successor-stranded-producer-recovery.js';
+import {
+  preflightTerminalProducerCapability,
+  type TerminalProducerCapability,
+  type TerminalProducerCapabilityResolver,
+} from './action-successor-terminal-producer-preflight.js';
 
 export type {
   ActionSuccessorAdmissionInput,
@@ -105,6 +115,8 @@ export type LocalReviewTerminalRoutePreflight =
     };
 
 export class ActionSuccessorAdmissionService {
+  private capabilityResolver: TerminalProducerCapabilityResolver | null = null;
+
   constructor(
     private readonly leaseStore: Pick<
       ActionSuccessorLeaseStore,
@@ -118,6 +130,16 @@ export class ActionSuccessorAdmissionService {
     >,
     private readonly truthResolver: Pick<ActionSubjectTruthResolver, 'resolve' | 'resolveFreshness'>,
   ) {}
+
+  /**
+   * F167: Inject the terminal producer capability resolver (lazy — set after
+   * AgentRouter is constructed, which happens after this service). Once set,
+   * ALL admission paths (claim, replace, continueFreshRevision) automatically
+   * get the preflight check, even if the caller doesn't pass capabilities.
+   */
+  setCapabilityResolver(resolver: TerminalProducerCapabilityResolver): void {
+    this.capabilityResolver = resolver;
+  }
 
   async markReturnedDelivered(input: { fence: ActionSuccessorFence; evidenceRef: string; now: number }): Promise<void> {
     const result = await this.leaseStore.markReturnDelivered(input.fence.leaseId, {
@@ -236,6 +258,28 @@ export class ActionSuccessorAdmissionService {
       successorSlot: input.action.successorSlot,
     });
     if (input.action.returnToPredecessor) return this.returnToPredecessor(identity.key, input);
+
+    // F167: terminal producer capability preflight — fail-closed when any
+    // holder carrier demonstrably cannot produce the required terminal
+    // predicate (e.g. native kimi-code without MCP tool access).
+    // Covers ALL lease-creating paths: claim, replace, continueFreshRevision.
+    // Auto-resolves from injected resolver when caller doesn't pass capabilities.
+    const capabilities =
+      input.holderTerminalProducerCapabilities ?? this.resolveCapabilitiesFromInjectedResolver(input.holderCatIds);
+    if (capabilities) {
+      const preflight = preflightTerminalProducerCapability({
+        holderCatIds: input.holderCatIds,
+        holderTerminalProducerCapabilities: capabilities,
+      });
+      if (!preflight.allow) {
+        return {
+          admit: false,
+          outcome: 'terminal_producer_unavailable',
+          incapableCatIds: preflight.incapableCatIds,
+        };
+      }
+    }
+
     if (input.action.replace) return this.replace(identity.key, input);
 
     const claimOrigin = input.action.claimOrigin ?? 'structured_transfer';
@@ -443,6 +487,81 @@ export class ActionSuccessorAdmissionService {
     const terminal = await this.truthResolver.resolve(input.action.subjectRef, input.now);
     if (terminal.terminal) return { admit: false, outcome: 'subject_terminal', terminal: terminal.truth };
     throw new Error(`${operation} CAS reported subject_terminal without durable terminal truth`);
+  }
+
+  /**
+   * F167: Auto-resolve terminal producer capabilities from the injected
+   * resolver when the caller doesn't pass them explicitly. Returns null
+   * when no resolver is available (legacy tolerance / startup race).
+   */
+  private resolveCapabilitiesFromInjectedResolver(
+    holderCatIds: readonly string[],
+  ): Readonly<Record<string, TerminalProducerCapability>> | null {
+    if (!this.capabilityResolver) return null;
+    const capabilities: Record<string, TerminalProducerCapability> = {};
+    for (const catId of holderCatIds) {
+      capabilities[catId] = this.capabilityResolver.resolve(catId);
+    }
+    return capabilities;
+  }
+
+  /**
+   * F167: Live CAS-fenced recovery for a stranded lease whose holder
+   * carrier cannot produce the required terminal predicate.
+   *
+   * 1. Reads current lease from store (CAS read)
+   * 2. Runs pure state machine guards
+   * 3. If recoverable, persists via commitOutcome (CAS write — generation +
+   *    holder_outcome_exists guard in Redis)
+   * 4. Maps CAS rejections back to appropriate results
+   */
+  async recoverStranded(input: {
+    leaseId: string;
+    recovery: RecoverStrandedProducerInput;
+  }): Promise<RecoverStrandedProducerResult> {
+    const lease = await this.leaseStore.get(input.leaseId);
+    if (!lease) {
+      throw new Error(`recovery target lease not found: ${input.leaseId}`);
+    }
+
+    const result = recoverStrandedProducer(lease, input.recovery);
+    if (result.outcome !== 'recovered') return result;
+
+    // Persist via CAS-fenced commitOutcome — competes with late-arriving
+    // typed verdicts at the Redis level (holder_outcome_exists guard).
+    const commit = await this.leaseStore.commitOutcome(input.leaseId, {
+      generation: input.recovery.expectedGeneration,
+      catId: input.recovery.holderCatId,
+      outcome: 'unavailable',
+      evidenceRef: input.recovery.evidenceRef,
+      now: input.recovery.now,
+    });
+
+    if (commit.outcome === 'recorded') {
+      return { outcome: 'recovered', lease: commit.lease };
+    }
+    // CAS race: another writer won (late verdict or concurrent recovery).
+    // Re-read is not needed — the commit result tells us what happened.
+    if (commit.outcome === 'holder_outcome_exists') {
+      // Late verdict won the race — check if it's our own replay
+      const updated = commit.lease ?? lease;
+      const existingOutcome = updated.holderOutcomes[input.recovery.holderCatId];
+      if (existingOutcome?.outcome === 'unavailable' && existingOutcome.evidenceRef === input.recovery.evidenceRef) {
+        return { outcome: 'replayed', lease: updated };
+      }
+      return { outcome: 'output_present', lease: updated };
+    }
+    // Other CAS rejections map directly
+    const outcomeMap: Record<string, RecoverStrandedProducerResult['outcome']> = {
+      stale_generation: 'stale_generation',
+      lease_not_active: 'lease_not_active',
+      subject_terminal: 'lease_not_active',
+      lease_missing: 'lease_not_active',
+    };
+    return {
+      outcome: outcomeMap[commit.outcome] ?? 'lease_not_active',
+      lease: commit.lease ?? lease,
+    };
   }
 
   private admitted(

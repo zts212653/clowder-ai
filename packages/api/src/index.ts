@@ -2374,6 +2374,14 @@ async function main(): Promise<void> {
     ...(writeOpportunityDeliveryStore ? { writeOpportunityDeliveryStore } : {}),
   });
 
+  // F167: wire terminal producer capability resolver now that AgentRouter exists
+  // (ActionSuccessorAdmissionService is constructed earlier, before AgentRouter)
+  if (actionSuccessorAdmissionService) {
+    actionSuccessorAdmissionService.setCapabilityResolver({
+      resolve: (catId) => router.terminalProducerCapability(catId as CatId),
+    });
+  }
+
   // F39: Message queue delivery
   // P2-1 fix: wire lazy ref now that InvocationQueue exists
   invocationQueueRef = invocationQueue;

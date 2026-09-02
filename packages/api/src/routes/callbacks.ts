@@ -2567,6 +2567,12 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
       const canonicalActionKey = useAtomicCanonicalActionAdmission
         ? tryComputeDispatchCanonicalActionKey(actor.userId, action)
         : undefined;
+
+      // F167: resolve terminal producer capabilities for all holder cats
+      const holderTerminalProducerCapabilities = opts.router
+        ? Object.fromEntries(actionHolderCatIds.map((catId) => [catId, opts.router!.terminalProducerCapability(catId)]))
+        : undefined;
+
       try {
         const incomingActionLeaseRef = action.replace
           ? await resolveCallbackActionLeaseRef(record, invocationRecordStore)
@@ -2583,6 +2589,7 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
             now: Date.now(),
             ...(incomingActionLeaseRef ? { incomingActionLeaseRef } : {}),
             action,
+            ...(holderTerminalProducerCapabilities ? { holderTerminalProducerCapabilities } : {}),
           },
           canonicalActionKey && atomicCanonicalAdmissionStore
             ? {
@@ -2606,6 +2613,15 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
         if (!admission.admit) {
           if (admission.outcome === 'subject_terminal') {
             return { status: admission.outcome, terminal: admission.terminal, clientMessageId };
+          }
+          if (admission.outcome === 'terminal_producer_unavailable') {
+            reply.status(400);
+            return {
+              status: admission.outcome,
+              message: 'One or more holder carriers cannot produce the required terminal predicate.',
+              incapableCatIds: admission.incapableCatIds,
+              clientMessageId,
+            };
           }
           if (admission.outcome !== 'replayed') {
             return { status: admission.outcome, actionLease: admission.lease, clientMessageId };

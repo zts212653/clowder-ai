@@ -380,6 +380,19 @@ export type AgentCarrierSessionFactory = (options: AgentCarrierSessionOptions) =
 /** F254 D2 carrier truth used to bind provider-native freshness telemetry. */
 export type AgentFreshnessCarrierCapability = FreshnessCarrierCapability;
 
+/**
+ * F167: whether this carrier can produce typed terminal predicates
+ * (e.g. `review_delivered` via MCP `localReviewVerdict`, `task_done`
+ * via MCP task status). Carriers without MCP tool access (e.g. native
+ * kimi-code 0.34) declare `unavailable`.
+ */
+export interface AgentTerminalProducerCapability {
+  readonly status: 'available' | 'unavailable' | 'undeclared';
+  readonly provider: string;
+  readonly carrier: string;
+  readonly reason?: string;
+}
+
 /** #1208: capability truth for the concrete provider/carrier used by an invocation. */
 export interface AgentContextCapability {
   readonly provider: string;
@@ -733,6 +746,12 @@ export interface AgentService {
 
   /** F254 D2: effective carrier capability for this concrete service instance. */
   freshnessCarrierCapability?(): AgentFreshnessCarrierCapability;
+
+  /**
+   * F167: whether this carrier can produce typed terminal predicates through
+   * MCP tools (e.g. `localReviewVerdict`, task status transitions).
+   */
+  terminalProducerCapability?(): AgentTerminalProducerCapability;
 
   /** #1208: effective context capability for this concrete service/carrier. */
   contextCapability?(): AgentContextCapability;

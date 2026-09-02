@@ -880,6 +880,21 @@ export class AgentRouter {
     );
   }
 
+  /**
+   * F167: terminal producer capability of the concrete carrier.
+   * Absence (no service or no declaration) returns `undeclared` — legacy
+   * tolerance. Only `unavailable` blocks admission.
+   */
+  terminalProducerCapability(catId: CatId): import('../../types.js').AgentTerminalProducerCapability {
+    return (
+      this.services[catId]?.terminalProducerCapability?.() ?? {
+        status: 'undeclared' as const,
+        provider: 'other',
+        carrier: 'other',
+      }
+    );
+  }
+
   /** #1208: exact context capability of the concrete service/carrier. */
   contextCapability(catId: CatId): import('../../types.js').AgentContextCapability {
     return (

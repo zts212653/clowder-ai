@@ -1,6 +1,7 @@
 import type { ActionSuccessorRequestMetadata } from '@cat-cafe/shared';
 import type { ActionSubjectTerminalTruth, ActionSuccessorClaimStoreResult } from './ActionSuccessorLeaseStore.js';
 import type { ActionSuccessorLease, ClaimActionSuccessorInput } from './action-successor-state-machine.js';
+import type { TerminalProducerCapability } from './action-successor-terminal-producer-preflight.js';
 
 export interface ActionSuccessorAdmissionInput {
   tenantScope: string;
@@ -13,6 +14,12 @@ export interface ActionSuccessorAdmissionInput {
   now: number;
   incomingActionLeaseRef?: { leaseId: string; generation: number };
   action: ActionSuccessorRequestMetadata;
+  /**
+   * F167: Per-holder terminal producer capability declarations. When provided,
+   * admission fail-closes if any holder has `status: 'unavailable'`. Omit for
+   * backwards compatibility with legacy callers (no check is performed).
+   */
+  holderTerminalProducerCapabilities?: Readonly<Record<string, TerminalProducerCapability>>;
 }
 
 export interface ActionSuccessorAdmissionOptions {
@@ -83,5 +90,10 @@ export type ActionSuccessorAdmissionResult =
         | 'parallel_return_unsupported'
         | 'review_reentry_ineligible';
       lease: ActionSuccessorLease;
+    }
+  | {
+      admit: false;
+      outcome: 'terminal_producer_unavailable';
+      incapableCatIds: readonly string[];
     }
   | { admit: false; outcome: 'subject_terminal'; terminal: ActionSubjectTerminalTruth };

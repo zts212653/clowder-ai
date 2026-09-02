@@ -130,6 +130,32 @@ export class KimiAgentService implements AgentService {
     return { provider: 'kimi', carrier: 'kimi_stream_json', deliverySemantics: 'unsupported' };
   }
 
+  /**
+   * F167: native kimi-code (≥0.34) does not support `--mcp-config-file` and
+   * only discovers MCP via `$KIMI_CODE_HOME/mcp.json`, git-root `.mcp.json`,
+   * or cwd `.kimi-code/mcp.json` — none of which our temp MCP config
+   * satisfies. Without MCP tools, the carrier cannot produce typed terminal
+   * predicates (`review_delivered`, `task_done`). Legacy `kimi-cli` passes
+   * `--mcp-config-file` explicitly and CAN produce terminals.
+   */
+  terminalProducerCapability(): import('../../types.js').AgentTerminalProducerCapability {
+    const isLegacy = resolveCliCommand('kimi-cli') !== null;
+    if (isLegacy) {
+      return {
+        status: 'available',
+        provider: 'kimi',
+        carrier: 'kimi_cli_mcp',
+        reason: 'legacy kimi-cli supports --mcp-config-file; MCP tools available',
+      };
+    }
+    return {
+      status: 'unavailable',
+      provider: 'kimi',
+      carrier: 'kimi_stream_json',
+      reason: 'native kimi-code does not support --mcp-config-file; MCP tools unreachable',
+    };
+  }
+
   contextCapability(): import('../../types.js').AgentContextCapability {
     return {
       provider: 'kimi',
