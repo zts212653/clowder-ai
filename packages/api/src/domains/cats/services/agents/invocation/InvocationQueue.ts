@@ -35,6 +35,8 @@ export interface QueueEntry {
   mergedMessageIds: string[];
   source: 'user' | 'connector' | 'agent';
   targetCats: string[];
+  /** Targets selected by explicit retry; generic dispatch must not broaden this set. */
+  retryTargetCatIds?: string[];
   /** Stable target identity for glass-box projection after individual targets are handled. */
   allTargetCats?: string[];
   /** F264: per-target human author intent. Missing user records use legacy next_work compatibility. */
@@ -613,6 +615,74 @@ export class InvocationQueue {
     return true;
   }
 
+  /**
+   * Restore only one target's failed-retry state while preserving concurrent
+   * changes to sibling targets. Retry clears this target in memory before its
+   * durable attempt fence commits; a whole-entry rollback would otherwise
+   * discard a sibling update and permanently lose the failed-target evidence.
+   */
+  restoreRetryTargetIfUnchanged(expectedCurrent: QueueEntry, replacement: QueueEntry, catId: string): boolean {
+    if (
+      expectedCurrent.id !== replacement.id ||
+      expectedCurrent.threadId !== replacement.threadId ||
+      expectedCurrent.userId !== replacement.userId
+    ) {
+      throw new Error('Queue retry target restore identity mismatch');
+    }
+    const q = this.queues.get(this.scopeKey(expectedCurrent.threadId, expectedCurrent.userId));
+    const index = q?.findIndex((entry) => entry.id === expectedCurrent.id) ?? -1;
+    if (!q || index < 0) return false;
+    const current = q[index];
+    if (
+      JSON.stringify(InvocationQueue.retryTargetState(current, catId)) !==
+      JSON.stringify(InvocationQueue.retryTargetState(expectedCurrent, catId))
+    ) {
+      return false;
+    }
+
+    const restored = InvocationQueue.cloneEntry(current);
+    const restoreMembership = (currentValues: string[] | undefined, sourceValues: string[] | undefined) => {
+      const values = new Set(currentValues ?? []);
+      if (sourceValues?.includes(catId)) values.add(catId);
+      else values.delete(catId);
+      return values.size > 0 ? [...values] : undefined;
+    };
+    const restoreMapValue = <T>(
+      currentMap: Record<string, T> | undefined,
+      sourceMap: Record<string, T> | undefined,
+    ): Record<string, T> | undefined => {
+      const next = { ...(currentMap ?? {}) };
+      if (sourceMap?.[catId] === undefined) delete next[catId];
+      else next[catId] = sourceMap[catId];
+      return Object.keys(next).length > 0 ? next : undefined;
+    };
+
+    restored.queuedFailedByCatIds = restoreMembership(restored.queuedFailedByCatIds, replacement.queuedFailedByCatIds);
+    restored.retryTargetCatIds = restoreMembership(restored.retryTargetCatIds, replacement.retryTargetCatIds);
+    restored.queuedFailureAtByCatId = restoreMapValue(
+      restored.queuedFailureAtByCatId,
+      replacement.queuedFailureAtByCatId,
+    );
+    restored.queuedFailureReasonByCatId = restoreMapValue(
+      restored.queuedFailureReasonByCatId,
+      replacement.queuedFailureReasonByCatId,
+    );
+    restored.queuedSeenInvocationIdByCatId = restoreMapValue(
+      restored.queuedSeenInvocationIdByCatId,
+      replacement.queuedSeenInvocationIdByCatId,
+    );
+    restored.queuedAwakenedInvocationIdByCatId = restoreMapValue(
+      restored.queuedAwakenedInvocationIdByCatId,
+      replacement.queuedAwakenedInvocationIdByCatId,
+    );
+    restored.queuedAwakenedAtByCatId = restoreMapValue(
+      restored.queuedAwakenedAtByCatId,
+      replacement.queuedAwakenedAtByCatId,
+    );
+    q[index] = restored;
+    return true;
+  }
+
   /** Remove one exact Queue snapshot while it is still current. */
   removeEntrySnapshotIfUnchanged(expectedCurrent: QueueEntry): boolean {
     const q = this.queues.get(this.scopeKey(expectedCurrent.threadId, expectedCurrent.userId));
@@ -829,6 +899,9 @@ export class InvocationQueue {
     };
     entry.queuedNotifiedByCatIds = entry.queuedNotifiedByCatIds?.filter((candidate) => candidate !== catId);
     if (entry.queuedNotifiedByCatIds?.length === 0) entry.queuedNotifiedByCatIds = undefined;
+    entry.queuedFailedByCatIds = entry.queuedFailedByCatIds?.filter((candidate) => candidate !== catId);
+    if (entry.queuedFailedByCatIds?.length === 0) entry.queuedFailedByCatIds = undefined;
+    this.clearQueuedFailure(entry, catId);
     return true;
   }
 
@@ -856,6 +929,9 @@ export class InvocationQueue {
     entry.queuedSeenByCatIds = [...seen];
     entry.queuedNotifiedByCatIds = entry.queuedNotifiedByCatIds?.filter((candidate) => candidate !== catId);
     if (entry.queuedNotifiedByCatIds?.length === 0) entry.queuedNotifiedByCatIds = undefined;
+    entry.queuedFailedByCatIds = entry.queuedFailedByCatIds?.filter((candidate) => candidate !== catId);
+    if (entry.queuedFailedByCatIds?.length === 0) entry.queuedFailedByCatIds = undefined;
+    this.clearQueuedFailure(entry, catId);
     if (invocationId) {
       entry.queuedSeenInvocationIdByCatId = { ...(entry.queuedSeenInvocationIdByCatId ?? {}), [catId]: invocationId };
       if (
@@ -895,6 +971,8 @@ export class InvocationQueue {
       if (!isOrdinaryQueueTargetEligible(entry, catId)) continue;
       seen.add(catId);
       notified.delete(catId);
+      failed.delete(catId);
+      this.clearQueuedFailure(entry, catId);
       entry.queuedSeenInvocationIdByCatId = {
         ...(entry.queuedSeenInvocationIdByCatId ?? {}),
         [catId]: invocationId,
@@ -961,6 +1039,8 @@ export class InvocationQueue {
           }
         }
         this.clearSteering(entry.threadId, entry.userId, entry.id, catId);
+        entry.retryTargetCatIds = entry.retryTargetCatIds?.filter((candidate) => candidate !== catId);
+        if (entry.retryTargetCatIds?.length === 0) entry.retryTargetCatIds = undefined;
         failed.push({ entryId: entry.id, userId: entry.userId });
       }
     }
@@ -988,6 +1068,9 @@ export class InvocationQueue {
       return null;
     }
     const before = InvocationQueue.cloneEntry(entry);
+    const retryTargets = new Set(entry.retryTargetCatIds ?? []);
+    retryTargets.add(catId);
+    entry.retryTargetCatIds = [...retryTargets];
     entry.queuedFailedByCatIds = entry.queuedFailedByCatIds.filter((candidate) => candidate !== catId);
     if (entry.queuedFailedByCatIds.length === 0) entry.queuedFailedByCatIds = undefined;
     this.clearQueuedFailure(entry, catId);
@@ -1152,6 +1235,8 @@ export class InvocationQueue {
     const entrySnapshot = InvocationQueue.cloneEntry(entry);
     const remainingTargetCats = entry.targetCats.filter((targetCat) => targetCat !== catId);
     entry.targetCats = remainingTargetCats;
+    entry.retryTargetCatIds = entry.retryTargetCatIds?.filter((targetCat) => targetCat !== catId);
+    if (entry.retryTargetCatIds?.length === 0) entry.retryTargetCatIds = undefined;
     const handledCats = new Set(entry.queuedHandledByCatIds ?? []);
     handledCats.add(catId);
     entry.queuedHandledByCatIds = [...handledCats];
@@ -1204,6 +1289,7 @@ export class InvocationQueue {
     return {
       ...entry,
       targetCats: [...entry.targetCats],
+      ...(entry.retryTargetCatIds ? { retryTargetCatIds: [...entry.retryTargetCatIds] } : {}),
       ...(entry.allTargetCats ? { allTargetCats: [...entry.allTargetCats] } : {}),
       ...(entry.authorIntentByCatId ? { authorIntentByCatId: structuredClone(entry.authorIntentByCatId) } : {}),
       ...(entry.queuedNotifiedByCatIds ? { queuedNotifiedByCatIds: [...entry.queuedNotifiedByCatIds] } : {}),
@@ -1260,6 +1346,21 @@ export class InvocationQueue {
       delete entry.queuedFailureReasonByCatId[catId];
       if (Object.keys(entry.queuedFailureReasonByCatId).length === 0) entry.queuedFailureReasonByCatId = undefined;
     }
+  }
+
+  private static retryTargetState(entry: QueueEntry, catId: string): Record<string, unknown> {
+    return {
+      status: entry.status,
+      isTargetPending: entry.targetCats.includes(catId),
+      isTargetHandled: entry.queuedHandledByCatIds?.includes(catId) ?? false,
+      isTargetFailed: entry.queuedFailedByCatIds?.includes(catId) ?? false,
+      isTargetRetryScoped: entry.retryTargetCatIds?.includes(catId) ?? false,
+      failureAt: entry.queuedFailureAtByCatId?.[catId],
+      failureReason: entry.queuedFailureReasonByCatId?.[catId],
+      seenInvocationId: entry.queuedSeenInvocationIdByCatId?.[catId],
+      awakenedInvocationId: entry.queuedAwakenedInvocationIdByCatId?.[catId],
+      awakenedAt: entry.queuedAwakenedAtByCatId?.[catId],
+    };
   }
 
   /** Count of queued (not processing) entries. */

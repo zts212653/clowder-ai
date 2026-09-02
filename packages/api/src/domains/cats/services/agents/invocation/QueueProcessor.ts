@@ -157,6 +157,10 @@ function exactSteerReservationTarget(entry: QueueEntry, reservationId: string): 
 
 /** Minimal interfaces for deps — avoid importing full types for testability */
 
+function executionTargetCats(entry: QueueEntry): string[] {
+  return entry.retryTargetCatIds?.length ? [...entry.retryTargetCatIds] : [...entry.targetCats];
+}
+
 interface TrackerLike {
   start(threadId: string, catId: string, userId: string, catIds?: string[], executionId?: string): AbortController;
   startAll(threadId: string, catIds: string[], userId?: string, executionId?: string): AbortController | null;
@@ -2100,12 +2104,15 @@ export class QueueProcessor {
     ];
     const filterMap = <T>(values: Readonly<Record<string, T>> | undefined): Record<string, T> =>
       Object.fromEntries(Object.entries(values ?? {}).filter(([catId]) => targetSet.has(catId)));
+    const retryTargetCatIds = filterTargets(current.retryTargetCatIds);
+    const { retryTargetCatIds: _retryTargetCatIds, ...stableCurrent } = current;
     return {
-      ...current,
+      ...stableCurrent,
       content: ordered.map((message) => message.content).join('\n'),
       messageId: primary.id,
       mergedMessageIds: ordered.slice(1).map((message) => message.id),
       targetCats: pendingTargets,
+      ...(retryTargetCatIds.length ? { retryTargetCatIds } : {}),
       allTargetCats: [...new Set(ordered.flatMap((message) => message.queueCustody?.allTargetCats ?? []))],
       status: 'queued',
       processingStartedAt: undefined,
@@ -3365,7 +3372,7 @@ export class QueueProcessor {
           entryCount: entries.length,
           entries: entries.map((entry) => ({
             id: entry.id,
-            targetCat: entry.targetCats[0] ?? 'unknown',
+            targetCat: executionTargetCats(entry)[0] ?? 'unknown',
             createdAt: entry.createdAt,
             ageMs: now - entry.createdAt,
           })),
@@ -3375,7 +3382,9 @@ export class QueueProcessor {
     }
 
     for (const entry of entries) {
-      const eligibleTargetCats = entry.targetCats.filter((catId) => isOrdinaryQueueTargetEligible(entry, catId));
+      const eligibleTargetCats = executionTargetCats(entry).filter((catId) =>
+        isOrdinaryQueueTargetEligible(entry, catId),
+      );
       const entryCat = eligibleTargetCats[0];
       if (!entryCat) continue;
       const sk = QueueProcessor.slotKey(threadId, entryCat);
@@ -3599,7 +3608,7 @@ export class QueueProcessor {
         return { started: false };
       }
 
-      const eligibleTargetCats = entry.targetCats.filter((targetCatId) =>
+      const eligibleTargetCats = executionTargetCats(entry).filter((targetCatId) =>
         isOrdinaryQueueTargetEligible(entry, targetCatId),
       );
       const entryCat = exact ? exactSteerReservationTarget(entry, exact.reservationId) : eligibleTargetCats[0];
@@ -3662,7 +3671,9 @@ export class QueueProcessor {
     const nextEntry = exact?.entry ?? this.deps.queue.peekNextQueued(threadId, userId);
     if (!nextEntry) return { started: false };
 
-    const eligibleTargetCats = nextEntry.targetCats.filter((catId) => isOrdinaryQueueTargetEligible(nextEntry, catId));
+    const eligibleTargetCats = executionTargetCats(nextEntry).filter((catId) =>
+      isOrdinaryQueueTargetEligible(nextEntry, catId),
+    );
     const entryCat = exact ? exactSteerReservationTarget(nextEntry, exact.reservationId) : eligibleTargetCats[0];
     if (!entryCat) return { started: false };
     const sk = QueueProcessor.slotKey(threadId, entryCat);
@@ -4651,7 +4662,8 @@ export class QueueProcessor {
         entry.source === 'user' &&
         !entry.queuedFailedByCatIds?.length &&
         !entry.exactSteerBatch &&
-        !entry.steerRequestedByCatIds?.length
+        !entry.steerRequestedByCatIds?.length &&
+        !entry.retryTargetCatIds?.length
       ) {
         const batch = queue.collectUserBatch(threadId, userId);
         const sortedTargets = [...entry.targetCats].sort();
@@ -4660,6 +4672,7 @@ export class QueueProcessor {
             e.source === 'user' &&
             !e.queuedFailedByCatIds?.length &&
             !e.steerRequestedByCatIds?.length &&
+            !e.retryTargetCatIds?.length &&
             e.intent === entry.intent &&
             e.ownerAuthProvenance === entry.ownerAuthProvenance &&
             e.targetCats.length === sortedTargets.length &&

@@ -107,6 +107,8 @@ export interface QueuedMessageCustody {
   status: QueuedMessageCustodyStatus;
   allTargetCats: CatId[];
   pendingTargetCats: CatId[];
+  /** Exact retry scope to restore after a busy target defers execution. */
+  retryTargetCatIds?: CatId[];
   notifiedByCatIds: CatId[];
   /** Exact child creation witness, persisted before prompt body exposure. */
   awakenedInvocationIdByCatId?: Record<string, string>;
@@ -444,8 +446,10 @@ function assertActionSuccessorCarrierRebind(
 }
 
 function assertTargetSubsets(custody: QueuedMessageCustody, allTargets: ReadonlySet<string>): void {
+  assertUniqueTargets(custody.retryTargetCatIds ?? [], 'retryTargetCatIds');
   const targetSets = [
     ['pendingTargetCats', custody.pendingTargetCats],
+    ['retryTargetCatIds', custody.retryTargetCatIds ?? []],
     ['notifiedByCatIds', custody.notifiedByCatIds],
     ['seenByCatIds', custody.seenByCatIds],
     ['failedByCatIds', custody.failedByCatIds],
@@ -479,6 +483,9 @@ function assertInvocationBindings(custody: QueuedMessageCustody, allTargets: Rea
   assertUniqueTargets(custody.steerRequestedByCatIds ?? [], 'steerRequestedByCatIds');
   if ((custody.steerRequestedByCatIds ?? []).some((catId) => !custody.pendingTargetCats.includes(catId))) {
     throw new Error('steerRequestedByCatIds must contain pending targets only');
+  }
+  if ((custody.retryTargetCatIds ?? []).some((catId) => !custody.pendingTargetCats.includes(catId))) {
+    throw new Error('retryTargetCatIds must contain pending targets only');
   }
 }
 
@@ -1293,6 +1300,7 @@ export function settleQueueCustodyWithdrawal(
     actionSuccessorTerminalFenceByTargetCatId: _actionSuccessorTerminalFenceByTargetCatId,
     reminderAttempts: _reminderAttempts,
     targetAttempts: _targetAttempts,
+    retryTargetCatIds: _retryTargetCatIds,
     ...stableCurrent
   } = current;
   const next: QueuedMessageCustody = {
@@ -1312,6 +1320,9 @@ export function settleQueueCustodyWithdrawal(
     ...(Object.keys(carrierStateByTargetCatId).length > 0 ? { carrierStateByTargetCatId } : {}),
     ...((current.steerRequestedByCatIds ?? []).some((catId) => !selected.has(catId))
       ? { steerRequestedByCatIds: (current.steerRequestedByCatIds ?? []).filter((catId) => !selected.has(catId)) }
+      : {}),
+    ...((current.retryTargetCatIds ?? []).some((catId) => !selected.has(catId))
+      ? { retryTargetCatIds: (current.retryTargetCatIds ?? []).filter((catId) => !selected.has(catId)) }
       : {}),
     ...(Object.keys(steeredInvocationIdByCatId).length > 0 ? { steeredInvocationIdByCatId } : {}),
     ...(reminderSettlement.attempts.length > 0 ? { reminderAttempts: reminderSettlement.attempts } : {}),

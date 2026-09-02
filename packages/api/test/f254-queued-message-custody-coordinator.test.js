@@ -543,6 +543,11 @@ describe('F254 queued message custody coordinator', () => {
 
     const custody = store.getById(message.id).queueCustody;
     assert.equal(store.getById(message.id).content, 'durable work');
+    assert.deepEqual(custody.retryTargetCatIds, ['opus']);
+
+    queue.markQueuedFailedForCatAcrossUsers(entry.threadId, 'opus', 'retry-failed', new Set([entry.id]));
+    await coordinator.persistEntry(queue.getEntrySnapshot(entry.threadId, entry.userId, entry.id));
+    assert.equal(store.getById(message.id).queueCustody.retryTargetCatIds, undefined);
     assert.deepEqual(
       custody.targetAttempts.map((attempt) => ({ id: attempt.id, state: attempt.state })),
       [
@@ -598,6 +603,34 @@ describe('F254 queued message custody coordinator', () => {
       await coordinator.retryFailedTarget(withdrawnCarrier, 'codex', withdrawnAttempt.id, allowRetry(store)),
       { outcome: 'not_retryable' },
       'an author withdrawal must never be reopened by retry',
+    );
+  });
+
+  test('restores only the failed retry target when a sibling changes before the durable fence rejects', () => {
+    const queue = new InvocationQueue();
+    const entry = enqueueUser(queue, ['opus', 'codex']);
+    queue.markQueuedSeen(entry.threadId, entry.userId, entry.id, 'opus', 'inv-failed', entry.createdAt + 10);
+    queue.markQueuedFailedForCatAcrossUsers(
+      entry.threadId,
+      'opus',
+      'inv-failed',
+      new Set([entry.id]),
+      'invocation_failed',
+      entry.createdAt + 20,
+    );
+
+    const retry = queue.retryFailedTarget(entry.threadId, entry.userId, entry.id, 'opus');
+    assert.ok(retry);
+    assert.equal(queue.markQueuedNotified(entry.threadId, entry.userId, entry.id, 'codex'), true);
+
+    assert.equal(queue.restoreRetryTargetIfUnchanged(retry.after, retry.before, 'opus'), true);
+    const restored = queue.getEntrySnapshot(entry.threadId, entry.userId, entry.id);
+    assert.deepEqual(restored.queuedFailedByCatIds, ['opus']);
+    assert.equal(restored.queuedFailureAtByCatId.opus, entry.createdAt + 20);
+    assert.deepEqual(restored.queuedNotifiedByCatIds, ['codex'], 'sibling update must survive retry rollback');
+    assert.ok(
+      queue.retryFailedTarget(entry.threadId, entry.userId, entry.id, 'opus'),
+      'the current failed attempt remains retryable after a rejected stale click',
     );
   });
 

@@ -568,6 +568,34 @@ describe('Queue Management API', () => {
     assert.equal(deleted, undefined);
   });
 
+  it('DELETE /queue/:entryId?deleteMessage=true removes recalled queued messages without canceling the active turn', async () => {
+    const r = enqueueEntry(deps.invocationQueue);
+    deps.invocationQueue.backfillMessageId('t1', 'user-a', r.entry.id, 'message-primary');
+    deps.invocationQueue.backfillMessageId('t1', 'user-a', r.entry.id, 'message-merged');
+
+    const res = await app.inject({
+      method: 'DELETE',
+      url: `/api/threads/t1/queue/${r.entry.id}?deleteMessage=true`,
+      headers: { 'x-cat-cafe-user': 'user-a' },
+    });
+
+    assert.equal(res.statusCode, 200);
+    assert.equal(deps.invocationQueue.list('t1', 'user-a').length, 0);
+    assert.deepEqual(
+      deps.messageStore.markCanceled.mock.calls.map((call) => call.arguments[0]),
+      ['message-primary', 'message-merged'],
+    );
+    const deleted = deps.socketManager.emitToUser.mock.calls
+      .filter((call) => call.arguments[1] === 'message_deleted')
+      .map((call) => call.arguments[2]);
+    assert.deepEqual(deleted, [
+      { messageId: 'message-primary', threadId: 't1', deletedBy: 'user-a' },
+      { messageId: 'message-merged', threadId: 't1', deletedBy: 'user-a' },
+    ]);
+    assert.equal(deps.invocationTracker.cancel.mock.calls.length, 0);
+    assert.equal(deps.queueProcessor.processNext.mock.calls.length, 0);
+  });
+
   it('DELETE /queue/:entryId restores the actionable entry when durable withdrawal fails', async () => {
     const r = enqueueEntry(deps.invocationQueue, { ownerAuthProvenance: 'strict' });
     deps.queueCustodyCoordinator.withdrawEntry.mock.mockImplementation(async () => {

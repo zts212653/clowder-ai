@@ -66,7 +66,7 @@ export interface QueueRoutesOptions {
   /** Shared owner-aware session lock released by explicit terminal actions. */
   agentSessionMutex?: AgentSessionMutexLike;
   socketManager: SocketManager;
-  /** MessageStore supplies receipt hydration; Queue withdrawal never deletes author history. */
+  /** MessageStore supplies receipt hydration; ordinary Queue withdrawal never deletes author history. */
   messageStore?: IMessageStore;
   /** F254: persist reorder/promote mutations before acknowledging them. */
   queueCustodyCoordinator?: QueuedMessageCustodyCoordinator;
@@ -583,6 +583,7 @@ export const queueRoutes: FastifyPluginAsync<QueueRoutesOptions> = async (app, o
     '/api/threads/:threadId/queue/:entryId',
     async (request, reply) => {
       const { threadId, entryId } = request.params;
+      const deleteMessage = request.query.deleteMessage === 'true';
       const guard = await guardThreadOwnership(request, reply, threadStore, threadId);
       if (!guard) return;
 
@@ -639,6 +640,23 @@ export const queueRoutes: FastifyPluginAsync<QueueRoutesOptions> = async (app, o
       // F122B B6 P2: Clean up completion hook to prevent leak when entry removed before execution
       queueProcessor.unregisterEntryCompleteHook?.(entryId);
       await queueProcessor.finalizeRemovedEntry?.(removed, 'user_cancel');
+
+      // Recall-edit replaces a queued author message; unlike ordinary withdrawal it
+      // must remove the original visible queued bubble before the edited resend.
+      // The entry has already been removed, so this cannot cancel or interrupt the
+      // active invocation. `markCanceled` is a queued-only CAS and only emits when it wins.
+      if (deleteMessage && removed && messageStore) {
+        const messageIds = [removed.messageId ?? '', ...removed.mergedMessageIds].filter(Boolean);
+        for (const messageId of messageIds) {
+          const canceled = await messageStore.markCanceled(messageId);
+          if (canceled?.deliveryTransitioned !== true) continue;
+          socketManager.emitToUser(guard.userId, 'message_deleted', {
+            messageId,
+            threadId,
+            deletedBy: guard.userId,
+          });
+        }
+      }
 
       await emitQueueUpdated(
         socketManager,
