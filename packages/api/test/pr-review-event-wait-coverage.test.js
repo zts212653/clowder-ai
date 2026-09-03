@@ -58,6 +58,10 @@ function execFixture({
   };
 }
 
+// Restored after F280 4b deleted it along with the old public predicate. The verifier itself was
+// never dead code: it is the only thing that proves a summoned bot ACCEPTED the job (EYES) and
+// has not already answered, which is what lets a cat clean-stop the same turn it triggered a
+// review. Deleting its tests destroyed the evidence that it ever worked.
 describe('F177 PR review event-wait coverage verifier', () => {
   test('same PR exact trigger + Codex connector EYES is covered', async () => {
     assert.deepEqual(

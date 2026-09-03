@@ -16,9 +16,23 @@ function activeWait(overrides = {}) {
     generation: 4,
     subjectRef: SUBJECT_KEY,
     ownerFence: { kind: 'containing_task', generation: 4 },
-    baseline: { capturedAt: 1, headSha: 'head-a' },
+    // F280 section 4b: the bypass proof is an OPEN bot turn in the live baseline, not a typed
+    // predicate the cat had to name at registration.
+    baseline: {
+      capturedAt: 1,
+      headSha: 'head-a',
+      // The round records WHO it was granted to and against WHICH head; the guard checks both.
+      botTurns: {
+        'chatgpt-codex-connector[bot]': {
+          triggerId: 4_936_000_000,
+          openedAt: 1,
+          headSha: 'head-a',
+          grantInvocationId: INVOCATION_ID,
+        },
+      },
+    },
     continuation: {
-      when: [{ kind: 'pr_review_result_available', triggerCommentId: 4_936_000_000 }],
+      when: [{ kind: 'pr_bot_interaction' }],
       // biome-ignore lint/suspicious/noThenProperty: F280's frozen wait contract field.
       then: 'Consume the exact review result.',
     },
@@ -82,7 +96,7 @@ describe('F177/F280 event-backed routing exit resolver', () => {
           generation: 4,
         },
         predicate: {
-          kind: 'pr_review_result_available',
+          kind: 'pr_bot_interaction',
           triggerCommentId: 4_936_000_000,
         },
       },

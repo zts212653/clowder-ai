@@ -10520,26 +10520,21 @@
         "create"
       ],
       "activeState": "canonical",
-      "description": "Register one explicit, bounded GitHub issue wait for the current task owner. Use when: you can name the exact typed issue condition that changes your next action: any new comment, or a comment by the exact issue author. NOT for: generic issue activity, actor-type guessing, source prose, another cat’s responsibility, or a different issue subject. Output: validates subject/owner, freezes a live issue baseline, and atomically installs the next generation. Registration history is baseline, never a wake. GOTCHA: `when` is a bounded typed predicate set. `nextStep` is display-only and never parsed. `expiresAt` is required and does not delete task history.",
-      "descriptionDigest": "sha256:d38a2f3b149a5c20bfe72539e74927c10822c3ea65145a6e96b925e4cfc07bb4",
-      "descriptionCharacters": 656,
-      "descriptionTokensCl100kBase": 136,
+      "description": "Track one GitHub issue and route every new external comment back to this registration thread. Use when: this thread owns follow-up for the issue. Output: validates the issue, freezes the current comment frontier, and registers durable tracking. Existing history is never replayed. GOTCHA: give only the repo and number (plus an optional next-step reminder). Human and bot comments both notify; your own comments do not. Tracking does not expire.",
+      "descriptionDigest": "sha256:efade2f1dd4986f7f7f967aa06b084ff074132531c1be424f4028e16ed338b42",
+      "descriptionCharacters": 445,
+      "descriptionTokensCl100kBase": 87,
       "inputSchema": {
         "$schema": "http://json-schema.org/draft-07/schema#",
         "additionalProperties": false,
         "properties": {
-          "expiresAt": {
-            "description": "Unix timestamp in milliseconds when responsibility expires.",
-            "exclusiveMinimum": 0,
-            "type": "integer"
-          },
           "issueNumber": {
             "description": "Issue number",
             "exclusiveMinimum": 0,
             "type": "integer"
           },
           "nextStep": {
-            "description": "What to do after a match. Display-only text; never parsed as wake policy.",
+            "description": "Optional display-only reminder of what you will do when someone comments. Never parsed as wake policy.",
             "maxLength": 500,
             "minLength": 1,
             "type": "string"
@@ -10548,54 +10543,15 @@
             "description": "Repository full name in owner/repo format (e.g. \"zts212653/cat-cafe\")",
             "minLength": 1,
             "type": "string"
-          },
-          "when": {
-            "description": "One to four typed issue conditions, evaluated as flat any-of against a server-frozen baseline.",
-            "items": {
-              "anyOf": [
-                {
-                  "additionalProperties": false,
-                  "properties": {
-                    "kind": {
-                      "const": "issue_comment_added",
-                      "type": "string"
-                    }
-                  },
-                  "required": [
-                    "kind"
-                  ],
-                  "type": "object"
-                },
-                {
-                  "additionalProperties": false,
-                  "properties": {
-                    "kind": {
-                      "const": "issue_author_commented",
-                      "type": "string"
-                    }
-                  },
-                  "required": [
-                    "kind"
-                  ],
-                  "type": "object"
-                }
-              ]
-            },
-            "maxItems": 4,
-            "minItems": 1,
-            "type": "array"
           }
         },
         "required": [
           "repoFullName",
-          "issueNumber",
-          "when",
-          "nextStep",
-          "expiresAt"
+          "issueNumber"
         ],
         "type": "object"
       },
-      "inputSchemaDigest": "sha256:ee62dcc201999722fab185a343e8dd05097f3377edce4b1ea7e08441d4b85fe3",
+      "inputSchemaDigest": "sha256:5cbbc435ecbf7a8370adee08776a9e980b0f5ed8863a2b555888c7d5f594cbda",
       "annotations": {
         "destructiveHint": false,
         "openWorldHint": false,
@@ -10609,7 +10565,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleRegisterIssueTracking",
-      "protectedImplementationDigest": "sha256:e74a5fe73a48451ed535446dfcef29d4bb8e427e7917c35f79347a79892bbae8"
+      "protectedImplementationDigest": "sha256:03837310efa03b7df952d3eef530b36e7f872807aced5966a2fb22d3ee739763"
     },
     {
       "name": "cat_cafe_register_pr_tracking",
@@ -10619,21 +10575,39 @@
         "create"
       ],
       "activeState": "canonical",
-      "description": "Register one explicit, bounded PR wait for the current task owner. Use when: you can name the exact typed GitHub condition that changes your next action, such as a new HEAD, review result, terminal executable CI, anchored review thread change, or new conflict. NOT for: generic PR activity, bare @codex review chatter, arbitrary comments, another cat’s responsibility, or a different PR subject. Output: validates subject/owner, freezes a live GitHub baseline, and atomically installs the next generation. Registration history is baseline, never a wake. GOTCHA: For exact-HEAD external PR review, run the Review Entry Mode Classifier before registration: formal instructions containing a no-comment / do-not-comment-on-GitHub directive fail closed; only explicit advisory_read_only may stay private, and advisory must never claim review-complete. GOTCHA: `when` is 1–4 flat any-of typed predicates. `nextStep` is display-only and never parsed. `expiresAt` is required and does not delete task history.",
-      "descriptionDigest": "sha256:05394580081e61ffbae6b9ae2ede8724c7699e3e74e0b1569d4d9529d90824b5",
-      "descriptionCharacters": 1001,
-      "descriptionTokensCl100kBase": 206,
+      "description": "Track GitHub activity for one PR and route every selected new event back to this registration thread. Use when: this thread owns follow-up for the PR. Output: validates the PR, freezes current source frontiers, and registers durable tracking. Existing history is never replayed. GOTCHA: six events are on for everyone (formal review, conversation comment, inline comment, CI terminal, conflict, base-behind), plus a seventh that depends on your role: `bot_interaction` (a bot round — your `@codex review` and the answer it gets) is on when you are the PR author and off when you are not, so a maintainer is not spammed by someone else's bot round and adds it with `include`. `head_changed` is off unless included. Use `exclude` only to disable an event explicitly. Your own activity never wakes you, but it still opens a bot round, so an unanswered round is reported to you. Tracking does not expire.",
+      "descriptionDigest": "sha256:5f6fa0da4ba6b717f49d6af26a5eb1d7bf9967e61b06224f9d0298c298880b90",
+      "descriptionCharacters": 900,
+      "descriptionTokensCl100kBase": 199,
       "inputSchema": {
         "$schema": "http://json-schema.org/draft-07/schema#",
         "additionalProperties": false,
         "properties": {
-          "expiresAt": {
-            "description": "Unix timestamp in milliseconds when responsibility expires without deleting history.",
-            "exclusiveMinimum": 0,
-            "type": "integer"
+          "exclude": {
+            "$ref": "#/properties/include",
+            "description": "Turn OFF a default event you do not want (e.g. [\"ci_terminal\"]). Omit to keep the full default set. Unknown names are rejected loudly."
+          },
+          "include": {
+            "description": "Add an event that is off by default for you. `head_changed` is always off; `bot_interaction` (a bot round: your @-mention of a known bot and its answer) is on for the PR author and off for everyone else, so a maintainer adds it here to watch someone else's bot round. Unknown names are rejected loudly — never silently dropped.",
+            "items": {
+              "enum": [
+                "review_decision",
+                "conversation_comment",
+                "inline_comment",
+                "bot_interaction",
+                "ci_terminal",
+                "conflict",
+                "base_behind",
+                "head_changed"
+              ],
+              "type": "string"
+            },
+            "maxItems": 8,
+            "minItems": 1,
+            "type": "array"
           },
           "nextStep": {
-            "description": "What to do after a match. Display-only text; never parsed as wake policy.",
+            "description": "Optional display-only reminder of what you will do when someone responds. Never parsed as wake policy.",
             "maxLength": 500,
             "minLength": 1,
             "type": "string"
@@ -10647,120 +10621,15 @@
             "description": "Repository full name in owner/repo format (e.g. \"zts212653/cat-cafe\")",
             "minLength": 1,
             "type": "string"
-          },
-          "when": {
-            "description": "One to four typed conditions, evaluated as flat any-of against a server-frozen live baseline.",
-            "items": {
-              "anyOf": [
-                {
-                  "additionalProperties": false,
-                  "properties": {
-                    "kind": {
-                      "const": "pr_head_changed",
-                      "type": "string"
-                    }
-                  },
-                  "required": [
-                    "kind"
-                  ],
-                  "type": "object"
-                },
-                {
-                  "additionalProperties": false,
-                  "properties": {
-                    "kind": {
-                      "const": "pr_review_result_available",
-                      "type": "string"
-                    },
-                    "triggerCommentId": {
-                      "exclusiveMinimum": 0,
-                      "type": "integer"
-                    }
-                  },
-                  "required": [
-                    "kind"
-                  ],
-                  "type": "object"
-                },
-                {
-                  "additionalProperties": false,
-                  "properties": {
-                    "kind": {
-                      "const": "pr_review_decision_changed",
-                      "type": "string"
-                    }
-                  },
-                  "required": [
-                    "kind"
-                  ],
-                  "type": "object"
-                },
-                {
-                  "additionalProperties": false,
-                  "properties": {
-                    "kind": {
-                      "const": "pr_review_thread_changed",
-                      "type": "string"
-                    },
-                    "reviewThreadIds": {
-                      "items": {
-                        "minLength": 1,
-                        "type": "string"
-                      },
-                      "maxItems": 20,
-                      "minItems": 1,
-                      "type": "array"
-                    }
-                  },
-                  "required": [
-                    "kind",
-                    "reviewThreadIds"
-                  ],
-                  "type": "object"
-                },
-                {
-                  "additionalProperties": false,
-                  "properties": {
-                    "kind": {
-                      "const": "pr_ci_terminal",
-                      "type": "string"
-                    }
-                  },
-                  "required": [
-                    "kind"
-                  ],
-                  "type": "object"
-                },
-                {
-                  "additionalProperties": false,
-                  "properties": {
-                    "kind": {
-                      "const": "pr_became_conflicting",
-                      "type": "string"
-                    }
-                  },
-                  "required": [
-                    "kind"
-                  ],
-                  "type": "object"
-                }
-              ]
-            },
-            "maxItems": 4,
-            "minItems": 1,
-            "type": "array"
           }
         },
         "required": [
           "repoFullName",
-          "prNumber",
-          "when",
-          "nextStep",
-          "expiresAt"
+          "prNumber"
         ],
         "type": "object"
       },
-      "inputSchemaDigest": "sha256:da38995548828973442087675869eed731fc2cf2c3d66270a5ec1cfdbf121310",
+      "inputSchemaDigest": "sha256:f74f631327d1c14fad44b9abfbcab3460e80d8fade2e0962406057d79c0d6c1e",
       "annotations": {
         "destructiveHint": false,
         "openWorldHint": false,
@@ -10774,7 +10643,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleRegisterPrTracking",
-      "protectedImplementationDigest": "sha256:e74a5fe73a48451ed535446dfcef29d4bb8e427e7917c35f79347a79892bbae8"
+      "protectedImplementationDigest": "sha256:03837310efa03b7df952d3eef530b36e7f872807aced5966a2fb22d3ee739763"
     },
     {
       "name": "cat_cafe_register_scheduled_task",

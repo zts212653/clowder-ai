@@ -22,6 +22,7 @@ import {
   classifyIssueComment,
   type IssueCommentClassification,
 } from '../../domains/community/issue-analysis/issue-comment-classifier.js';
+import { externalResponseSummary } from '../../domains/github-signals/GitHubTrackingEvent.js';
 import type { GitHubWaitLifecycleService } from '../../domains/github-signals/GitHubWaitLifecycleService.js';
 import type { ExecuteContext, TaskSpec_P1 } from '../../infrastructure/scheduler/types.js';
 import type { ConnectorInvokeTrigger, ConnectorTriggerPolicy } from './ConnectorInvokeTrigger.js';
@@ -124,6 +125,11 @@ function shouldCollectAsWaitFact(comment: IssueComment, classification: IssueCom
     suppressionReason: classification.suppressionReason,
   });
   return baseDecision !== 'silent-log';
+}
+
+function shouldTrackComment(comment: IssueComment, task: TaskItem, opts: IssueCommentTaskSpecOptions): boolean {
+  if (task.automationState?.await) return !opts.isEchoComment?.(comment);
+  return shouldCollectAsWaitFact(comment, classifyForTask(comment, opts));
 }
 
 export function createIssueCommentTaskSpec(opts: IssueCommentTaskSpecOptions): TaskSpec_P1<IssueCommentSignal> {
@@ -360,10 +366,13 @@ export function createIssueCommentTaskSpec(opts: IssueCommentTaskSpecOptions): T
               // Cloud R4 P1-2: use processedComments (successfully collected+projected),
               // not allPending. This prevents delivering notifications for comments whose
               // events were not appended to the event log (failed collection).
-              const pendingDelivery = processedComments.filter((c) => {
+              const trackingOwnsDelivery = task.automationState?.await !== undefined;
+              const deliveryCandidates = trackingOwnsDelivery ? allPending : processedComments;
+              const pendingDelivery = deliveryCandidates.filter((c) => {
                 if (c.id <= deliveryCursor) return false;
-                const commentClassification = classifications.get(c.id) ?? classifyForTask(c, opts);
-                return shouldCollectAsWaitFact(c, commentClassification);
+                return trackingOwnsDelivery
+                  ? !opts.isEchoComment?.(c)
+                  : shouldCollectAsWaitFact(c, classifications.get(c.id) ?? classifyForTask(c, opts));
               });
               const processedDeliveryBoundary =
                 processedComments.length > 0
@@ -464,10 +473,7 @@ export function createIssueCommentTaskSpec(opts: IssueCommentTaskSpecOptions): T
 
               // Use the same canonical classifier as dual-cursor collection/delivery so
               // legacy deployments preserve critical overrides and exact-only suppression.
-              const newComments = allNewComments.filter((c) => {
-                const commentClassification = classifyForTask(c, opts);
-                return shouldCollectAsWaitFact(c, commentClassification);
-              });
+              const newComments = allNewComments.filter((comment) => shouldTrackComment(comment, task, opts));
 
               const maxCommentId =
                 allNewComments.length > 0 ? Math.max(...allNewComments.map((c) => c.id)) : commentCursor;
@@ -573,8 +579,21 @@ export function createIssueCommentTaskSpec(opts: IssueCommentTaskSpecOptions): T
             (signal.newComments.length > 0
               ? Math.max(...signal.newComments.map((comment) => comment.id))
               : (task.automationState?.issue?.lastCommentCursor ?? 0));
-          await opts.waitLifecycle.observe({
+          const observed = await opts.waitLifecycle.observe({
             taskId: task.id,
+            events: signal.newComments.map((comment) => ({
+              type: 'issue_comment_added',
+              source: 'issue_comment',
+              id: comment.id,
+              author: comment.author,
+              summary: externalResponseSummary({
+                surface: 'issue comment',
+                id: comment.id,
+                author: comment.author,
+                body: comment.body,
+              }),
+              sourceRef: `github:issue-comment:${comment.id}`,
+            })),
             facts: {
               issue: {
                 state: signal.issueState ?? 'open',
@@ -595,6 +614,34 @@ export function createIssueCommentTaskSpec(opts: IssueCommentTaskSpecOptions): T
             ...(signal.issueState === 'closed' ? { subjectState: 'closed' as const } : {}),
           });
           ctx?.signal?.throwIfAborted();
+          // #1392 AC-6c: observe already delivered the compact github-wait connector message, but it
+          // still needs Queue admission — without firing invokeTrigger the owner never wakes (the
+          // early return here was the missing-notification bug). Mirrors the legacy path below.
+          // No pendingWake/restart-retry: delivery reliability is #1356/#1398's domain, not #1392's.
+          if (observed.kind === 'notified' && opts.invokeTrigger) {
+            const policy: ConnectorTriggerPolicy = {
+              priority: 'normal',
+              reason: 'github_issue_comment',
+              sourceCategory: 'issue',
+              coalesceKey: `${subjectKey}:issue-comment:${task.ownerCatId || 'unassigned'}`,
+            };
+            try {
+              const outcome = await opts.invokeTrigger.trigger(
+                task.threadId,
+                task.ownerCatId as CatId,
+                task.userId,
+                observed.content,
+                observed.messageId,
+                undefined,
+                policy,
+              );
+              if (outcome !== 'dispatched' && outcome !== 'enqueued') {
+                opts.log.error({ taskId: task.id, subjectKey, outcome }, '[issue-comment] wait wake was not accepted');
+              }
+            } catch (err) {
+              opts.log.error({ err, taskId: task.id, subjectKey }, '[issue-comment] wait wake trigger failed');
+            }
+          }
           return;
         }
 

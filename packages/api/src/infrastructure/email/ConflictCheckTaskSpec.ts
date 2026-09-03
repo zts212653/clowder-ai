@@ -19,7 +19,10 @@ import type { ConnectorInvokeTrigger, ConnectorTriggerPolicy } from './Connector
 
 export interface ConflictCheckTaskSpecOptions {
   readonly taskStore: ITaskStore;
-  readonly checkMergeable: (repoFullName: string, prNumber: number) => Promise<{ mergeState: string; headSha: string }>;
+  readonly checkMergeable: (
+    repoFullName: string,
+    prNumber: number,
+  ) => Promise<{ mergeState: string; mergeStateStatus?: string; headSha: string }>;
   readonly conflictRouter: ConflictRouter;
   readonly invokeTrigger?: ConnectorInvokeTrigger;
   readonly autoExecutor?: ConflictAutoExecutor;
@@ -73,10 +76,16 @@ export function createConflictCheckTaskSpec(opts: ConflictCheckTaskSpecOptions):
             if (!parsed) continue;
             const { repoFullName, prNumber } = parsed;
 
-            const { mergeState, headSha } = await opts.checkMergeable(repoFullName, prNumber);
+            const { mergeState, mergeStateStatus, headSha } = await opts.checkMergeable(repoFullName, prNumber);
             workItems.push({
               signal: {
-                signal: { repoFullName, prNumber, headSha, mergeState },
+                signal: {
+                  repoFullName,
+                  prNumber,
+                  headSha,
+                  mergeState,
+                  ...(mergeStateStatus ? { mergeStateStatus } : {}),
+                },
                 task,
               },
               subjectKey: task.subjectKey!,

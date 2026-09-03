@@ -61,7 +61,7 @@ describe('ConflictRouter F280 typed waits', () => {
       mergeState: 'CONFLICTING',
     });
     assert.equal(result.kind, 'notified');
-    assert.match(result.content, /mergeable → conflicting/);
+    assert.match(result.content, /PR became conflicting/);
     assert.equal(messageStore.getByThread('thread_1').length, 1);
   });
 

@@ -157,7 +157,7 @@ describe('F280 GitHub wait lifecycle integration', () => {
       { taskId: task.id },
     );
     assert.equal(newHead.kind, 'notified');
-    assert.match(newHead.content, /HEAD aaaa111 → bbbb222/);
+    assert.match(newHead.content, /HEAD changed to bbbb222/);
     assert.doesNotMatch(newHead.content, /mindfn|UNTRUSTED_REVIEW_BODY/);
     assert.equal(messageStore.getByThread('thread_1').length, 1);
   });

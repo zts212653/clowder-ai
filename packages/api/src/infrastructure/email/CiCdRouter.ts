@@ -15,10 +15,8 @@ import type {
   GitHubWaitLifecycleService,
 } from '../../domains/github-signals/GitHubWaitLifecycleService.js';
 import type { CiBucket, CiPollResult, CiRouteResult } from './ci-cd-contract.js';
-import { buildCiMessageContent, buildLifecycleMessageContent } from './ci-message-content.js';
 import type { ConnectorDeliveryDeps } from './deliver-connector-message.js';
 
-export { buildCiMessageContent, buildLifecycleMessageContent };
 export type {
   CiBucket,
   CiCheckDetail,
@@ -256,6 +254,24 @@ export class CiCdRouter {
   ): Promise<GitHubWaitLifecycleResult> {
     return this.opts.waitLifecycle.observe({
       taskId: task.id,
+      events: [
+        {
+          type: 'pr_head_changed',
+          source: 'pr_head',
+          id: poll.headSha,
+          summary: `HEAD changed to ${poll.headSha.slice(0, 7)}`,
+        },
+        ...(waitBucket === 'pass' || waitBucket === 'fail'
+          ? [
+              {
+                type: 'pr_ci_terminal' as const,
+                source: 'pr_ci' as const,
+                id: fingerprint,
+                summary: `CI reached ${waitBucket} (${poll.checks.filter((check) => check.bucket === 'fail').length} blockers)`,
+              },
+            ]
+          : []),
+      ],
       facts: {
         headSha: poll.headSha,
         ci: {

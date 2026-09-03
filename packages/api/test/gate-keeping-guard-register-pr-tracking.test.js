@@ -101,9 +101,7 @@ describe('F167 gate-keeping guard: POST /api/callbacks/register-pr-tracking', ()
     return {
       repoFullName: 'owner/repo',
       prNumber,
-      when: [{ kind: 'pr_head_changed' }],
       nextStep: `Re-lock HEAD for #${prNumber}.`,
-      expiresAt: Date.now() + 60_000,
       ...overrides,
     };
   }
@@ -120,9 +118,7 @@ describe('F167 gate-keeping guard: POST /api/callbacks/register-pr-tracking', ()
       payload: {
         repoFullName: 'owner/repo',
         prNumber: 100,
-        when: [{ kind: 'pr_head_changed' }],
         nextStep: 'Re-lock HEAD.',
-        expiresAt: Date.now() + 60_000,
       },
     });
 
@@ -394,9 +390,7 @@ describe('F167 gate-keeping guard: POST /api/callbacks/register-pr-tracking', ()
       payload: {
         repoFullName: 'owner/repo',
         prNumber: 200,
-        when: [{ kind: 'pr_head_changed' }],
         nextStep: 'Re-lock HEAD.',
-        expiresAt: Date.now() + 60_000,
       },
     });
 
@@ -426,9 +420,7 @@ describe('F167 gate-keeping guard: POST /api/callbacks/register-pr-tracking', ()
       payload: {
         repoFullName: 'owner/repo',
         prNumber: 300,
-        when: [{ kind: 'pr_head_changed' }],
         nextStep: 'Re-lock HEAD.',
-        expiresAt: Date.now() + 60_000,
         override: 'i-am-the-downstream-owner',
       },
     });
@@ -467,9 +459,7 @@ describe('F167 gate-keeping guard: POST /api/callbacks/register-pr-tracking', ()
       payload: {
         repoFullName: 'owner/repo',
         prNumber: 400,
-        when: [{ kind: 'pr_head_changed' }],
         nextStep: 'Re-lock HEAD.',
-        expiresAt: Date.now() + 60_000,
       },
     });
 

@@ -3853,54 +3853,17 @@ async function main(): Promise<void> {
   };
   const { createRepoActivityTemplate } = await import('./infrastructure/scheduler/templates/repo-activity.js');
   templateRegistry.register(createRepoActivityTemplate({ getGitHubToken }));
-  const fetchPrReviewThreads = async (
-    repo: string,
-    pr: number,
-    reviewThreadIds: readonly string[],
-  ): Promise<readonly import('@cat-cafe/shared').GitHubReviewThreadBaseline[]> => {
-    const { execFile } = await import('node:child_process');
-    const { promisify } = await import('node:util');
-    const execFileAsync = promisify(execFile);
-    const query =
-      'query($id:ID!){node(id:$id){... on PullRequestReviewThread{id isResolved pullRequest{number repository{nameWithOwner}} comments(last:1){nodes{id}}}}}';
-    return Promise.all(
-      reviewThreadIds.map(async (reviewThreadId) => {
-        const { stdout } = await execFileAsync(
-          'gh',
-          ['api', 'graphql', '-f', `query=${query}`, '-F', `id=${reviewThreadId}`],
-          getGitHubExecOptions(15_000),
-        );
-        const node = (
-          JSON.parse(stdout) as {
-            data?: {
-              node?: {
-                id?: string;
-                isResolved?: boolean;
-                pullRequest?: { number?: number; repository?: { nameWithOwner?: string } };
-                comments?: { nodes?: Array<{ id?: string }> };
-              };
-            };
-          }
-        ).data?.node;
-        if (
-          !node?.id ||
-          node.pullRequest?.number !== pr ||
-          node.pullRequest.repository?.nameWithOwner?.toLowerCase() !== repo.toLowerCase()
-        ) {
-          throw new Error(`Review thread ${reviewThreadId} does not belong to ${repo}#${pr}`);
-        }
-        return {
-          reviewThreadId: node.id,
-          resolved: node.isResolved === true,
-          lastCommentId: node.comments?.nodes?.at(-1)?.id ?? null,
-        };
-      }),
-    );
+  const fetchPrAuthorLogin = async (repoFullName: string, prNumber: number): Promise<string | null> => {
+    const login = await readGitHubApiResource(`repos/${repoFullName}/pulls/${prNumber}`, '.user.login', {
+      token: getGitHubToken(),
+    });
+    const trimmed = login?.trim();
+    return trimmed ? trimmed : null;
   };
   const fetchPrWaitBaseline = async (
     repoFullName: string,
     prNumber: number,
-    when: readonly import('@cat-cafe/shared').GitHubPrWaitPredicate[],
+    identity?: { readonly invocationId?: string; readonly isSelfLogin?: (login: string) => boolean | undefined },
   ) => {
     const [{ readGitHubWaitBaseline }, { fetchPaginated }] = await Promise.all([
       import('./domains/github-signals/GitHubWaitBaselineReader.js'),
@@ -3910,7 +3873,7 @@ async function main(): Promise<void> {
     const { promisify } = await import('node:util');
     const execFileAsync = promisify(execFile);
     return readGitHubWaitBaseline(
-      { repoFullName, prNumber, when },
+      { repoFullName, prNumber, ...identity },
       {
         fetchCi: (repo, pr) => fetchPrCiStatus(repo, pr, app.log, { ghToken: getGitHubToken() }),
         fetchInlineComments: (repo, pr) =>
@@ -3921,12 +3884,24 @@ async function main(): Promise<void> {
         fetchMergeState: async (repo, pr) => {
           const { stdout } = await execFileAsync(
             'gh',
-            ['pr', 'view', String(pr), '-R', repo, '--json', 'mergeable', '--jq', '.mergeable'],
+            ['pr', 'view', String(pr), '-R', repo, '--json', 'mergeable,mergeStateStatus'],
             getGitHubExecOptions(15_000),
           );
-          return stdout.trim() || 'UNKNOWN';
+          const data = JSON.parse(stdout) as { mergeable?: string; mergeStateStatus?: string };
+          return {
+            mergeState: data.mergeable ?? 'UNKNOWN',
+            mergeStateStatus: data.mergeStateStatus ?? 'UNKNOWN',
+          };
         },
-        fetchReviewThreads: fetchPrReviewThreads,
+        fetchAuthorLogin: fetchPrAuthorLogin,
+        // F177: the coverage verifier is what makes a freshly-summoned round provable in the
+        // same turn. It was orphaned when the typed predicate left the public surface.
+        verifyBotTriggerCoverage: async (coverageInput) => {
+          const { verifyPrReviewEventWaitCoverage } = await import(
+            './infrastructure/github/pr-review-event-wait-coverage.js'
+          );
+          return verifyPrReviewEventWaitCoverage(coverageInput, { ghToken: getGitHubToken() });
+        },
       },
     );
   };
@@ -3968,17 +3943,6 @@ async function main(): Promise<void> {
       },
     );
   };
-  const verifyPrReviewEventWaitCoverage = async (input: {
-    repoFullName: string;
-    prNumber: number;
-    triggerCommentId: number;
-  }) => {
-    const { verifyPrReviewEventWaitCoverage: verify } = await import(
-      './infrastructure/github/pr-review-event-wait-coverage.js'
-    );
-    return verify(input, { ghToken: getGitHubToken() });
-  };
-
   // F202: Plugin framework — discovery + config + resource activation
   {
     const { join } = await import('node:path');
@@ -4312,6 +4276,10 @@ async function main(): Promise<void> {
   }
   const meetingArtifactReaderHolder: import('./routes/callback-meeting-artifact-routes.js').MeetingArtifactReaderHolder =
     {};
+  // F280 section 2.4b: registration needs to know whether the registrant IS the PR author,
+  // so role defaults can be picked server-side. Late-bound because the GitHub identity is
+  // resolved (and can be refreshed) long after routes are mounted.
+  const githubSelfIdentity: { resolveIsSelf?: (login: string) => boolean | undefined } = {};
   const skillConsumptionReceipts = new SkillConsumptionReceiptService({
     skillSourceRoot: await resolveCatCafeSkillsSource(),
     auditLog: getEventAuditLog(),
@@ -4360,8 +4328,8 @@ async function main(): Promise<void> {
     validateIssue,
     fetchPrWaitBaseline,
     fetchIssueWaitBaseline,
+    githubSelfIdentity,
     waitLifecycleHolder,
-    verifyPrReviewEventWaitCoverage,
     ...(externalReviewVerdictService ? { externalReviewVerdictService } : {}),
     ...(externalReviewRecoveryService ? { externalReviewRecoveryService } : {}),
     ...(workflowSopStore ? { workflowSopStore } : {}),
@@ -6331,6 +6299,10 @@ async function main(): Promise<void> {
   };
   await refreshGitHubSelfLogin();
   const feedbackFilter = createGitHubFeedbackFilter({ getSelfGitHubLogin: () => selfLoginResolver.getCurrent() });
+  // "Not resolved" must stay distinguishable from "not you": isSelfAuthored answers false for
+  // both, and the registration role default reads the difference.
+  githubSelfIdentity.resolveIsSelf = (login: string) =>
+    selfLoginResolver.getCurrent() ? feedbackFilter.isSelfAuthored(login) : undefined;
 
   // F140 Phase E.2 cutover: setup-noise bot allowlist env name切换
   // GITHUB_SETUP_NOISE_BOT_LOGINS (new, post-E.2 semantics) takes precedence;
@@ -6493,17 +6465,24 @@ async function main(): Promise<void> {
       const execFileAsync = promisify(execFile);
       const { stdout } = await execFileAsync(
         'gh',
-        ['pr', 'view', String(pr), '-R', repo, '--json', 'mergeable,headRefOid'],
+        ['pr', 'view', String(pr), '-R', repo, '--json', 'mergeable,mergeStateStatus,headRefOid'],
         getGitHubExecOptions(15_000),
       );
       const data = JSON.parse(stdout);
-      return { mergeState: data.mergeable ?? 'UNKNOWN', headSha: data.headRefOid ?? '' };
+      return {
+        mergeState: data.mergeable ?? 'UNKNOWN',
+        mergeStateStatus: data.mergeStateStatus ?? 'UNKNOWN',
+        headSha: data.headRefOid ?? '',
+      };
     };
 
     const { ConflictAutoExecutor } = await import('./infrastructure/email/ConflictAutoExecutor.js');
     const autoExecutor = new ConflictAutoExecutor({ log: app.log });
 
     const { fetchPaginated: fetchPaginatedFn } = await import('./infrastructure/github/fetch-paginated.js');
+    const { normalizeIssueComments, normalizePrFeedbackComments, normalizePrReviewDecisions } = await import(
+      './infrastructure/github/github-feedback-payload.js'
+    );
     const fetchPaginated = (endpoint: string, sinceId?: number) =>
       fetchPaginatedFn(endpoint, { sinceId, ghToken: getGitHubToken() });
 
@@ -6548,79 +6527,20 @@ async function main(): Promise<void> {
         fetchPaginated(`/repos/${repo}/pulls/${pr}/comments`, cursors.inline),
         fetchPaginated(`/repos/${repo}/issues/${pr}/comments`, cursors.conversation),
       ]);
-      return [...reviewComments, ...issueComments].map(
-        (c: {
-          id: number;
-          body: string;
-          created_at: string;
-          user?: { login: string; type?: string };
-          commit_id?: string;
-          path?: string;
-          line?: number;
-          pull_request_review_id?: number;
-          author_association?: string; // F168 Phase B: needed for delivery policy
-        }) => ({
-          id: c.id,
-          ...(c.pull_request_review_id ? { reviewId: c.pull_request_review_id } : {}),
-          author: c.user?.login ?? 'unknown',
-          actorType: c.user?.type,
-          body: c.body,
-          createdAt: c.created_at,
-          ...(c.commit_id ? { commitId: c.commit_id } : {}),
-          commentType: c.pull_request_review_id ? ('inline' as const) : ('conversation' as const),
-          ...(c.path ? { filePath: c.path } : {}),
-          ...(c.line ? { line: c.line } : {}),
-          ...(c.author_association !== undefined ? { authorAssociation: c.author_association } : {}),
-        }),
-      );
+      return normalizePrFeedbackComments(reviewComments, issueComments);
     };
 
     const fetchReviews = async (repo: string, pr: number, sinceId?: number) => {
       await refreshGitHubSelfLogin();
       const reviews = await fetchPaginated(`/repos/${repo}/pulls/${pr}/reviews`, sinceId);
-      return reviews.map(
-        (r: {
-          id: number;
-          user?: { login: string; type?: string };
-          state: string;
-          body: string;
-          submitted_at: string;
-          commit_id?: string;
-          author_association?: string; // F168 Phase B: needed for delivery policy
-        }) => ({
-          id: r.id,
-          author: r.user?.login ?? 'unknown',
-          actorType: r.user?.type,
-          state: r.state as 'APPROVED' | 'CHANGES_REQUESTED' | 'DISMISSED' | 'COMMENTED',
-          body: r.body,
-          submittedAt: r.submitted_at,
-          ...(r.commit_id ? { commitId: r.commit_id } : {}),
-          ...(r.author_association !== undefined ? { authorAssociation: r.author_association } : {}),
-        }),
-      );
+      return normalizePrReviewDecisions(reviews);
     };
 
     // F202 Phase 2D: Issue comment fetchers (parallel to PR comment fetchers)
     const fetchIssueComments = async (repoFullName: string, issueNumber: number, sinceId?: number) => {
       await refreshGitHubSelfLogin();
       const comments = await fetchPaginated(`/repos/${repoFullName}/issues/${issueNumber}/comments`, sinceId);
-      return comments.map(
-        (c: {
-          id: number;
-          body: string;
-          created_at: string;
-          user?: { login: string; type?: string };
-          author_association?: string; // F168 Phase B: needed for delivery policy
-        }) => ({
-          id: c.id,
-          author: c.user?.login ?? 'unknown',
-          actorType: c.user?.type,
-          body: c.body,
-          createdAt: c.created_at,
-          // Map snake_case GitHub API field to camelCase IssueComment.authorAssociation
-          ...(c.author_association !== undefined ? { authorAssociation: c.author_association } : {}),
-        }),
-      );
+      return normalizeIssueComments(comments);
     };
 
     const fetchIssueMetadata = async (repoFullName: string, issueNumber: number) => {
@@ -6771,10 +6691,8 @@ async function main(): Promise<void> {
         fetchPrMetadata,
         fetchComments,
         fetchReviews,
-        fetchReviewThreads: fetchPrReviewThreads,
         isEchoComment: (c: { author: string }) => feedbackFilter.shouldSkipComment(c),
         isEchoReview: (r: { author: string }) => feedbackFilter.shouldSkipReview(r),
-        isNoiseComment: setupNoiseFilter,
         externalReviewCoordinator,
         isSelfMerge: (login: string) => feedbackFilter.isSelfAuthored(login),
         // F202 Phase 2D: issue comment tracking deps

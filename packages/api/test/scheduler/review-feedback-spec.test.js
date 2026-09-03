@@ -32,7 +32,7 @@ async function createTracked(store) {
           // biome-ignore lint/suspicious/noThenProperty: F280's frozen wait contract field.
           then: 'continue',
         },
-        expiresAt: Date.now() + 60_000,
+        autoRenew: true,
         createdAt: 100,
       },
     },
@@ -52,7 +52,7 @@ function options(taskStore, router, overrides = {}) {
 }
 
 describe('review scheduler F280 adapter', () => {
-  test('finishes routing after a persisted cursor even when cancellation arrives at the commit boundary', async () => {
+  test('routes before persisting the source cursor so a route failure remains retryable', async () => {
     const taskStore = new TaskStore();
     const task = await createTracked(taskStore);
     const controller = new AbortController();
@@ -88,7 +88,7 @@ describe('review scheduler F280 adapter', () => {
       )
       .catch(() => {});
 
-    assert.deepEqual(events, ['cursor-persisted', 'routed']);
+    assert.deepEqual(events, ['routed', 'cursor-persisted']);
   });
 
   test('current facts are evaluated even when no raw source body is deliverable', async () => {

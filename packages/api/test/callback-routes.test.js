@@ -42,9 +42,7 @@ function prWaitPayload(overrides = {}) {
   return {
     repoFullName: 'zts212653/cat-cafe',
     prNumber: 99,
-    when: [{ kind: 'pr_head_changed' }],
     nextStep: 'Re-lock the exact HEAD and continue.',
-    expiresAt: Date.now() + 60_000,
     ...overrides,
   };
 }
@@ -53,12 +51,23 @@ function issueWaitPayload(overrides = {}) {
   return {
     repoFullName: 'zts212653/cat-cafe',
     issueNumber: 861,
-    when: [{ kind: 'issue_comment_added' }],
     nextStep: 'Inspect the matched issue comment.',
-    expiresAt: Date.now() + 60_000,
     ...overrides,
   };
 }
+
+// F280 section 2.4b: these fixtures do not wire a GitHub identity, so the registrant's role
+// is unresolvable — and an unresolvable role ARMS bot_interaction. A26 is the reason: extra
+// noise is visible and recoverable, a muted real signal is neither.
+const defaultPrTrackingPredicates = [
+  { kind: 'pr_review_decision_changed' },
+  { kind: 'pr_conversation_comment_added' },
+  { kind: 'pr_inline_comment_added' },
+  { kind: 'pr_bot_interaction' },
+  { kind: 'pr_ci_terminal' },
+  { kind: 'pr_became_conflicting' },
+  { kind: 'pr_base_behind' },
+];
 
 describe('Callback Routes', () => {
   let registry;
@@ -5471,7 +5480,9 @@ describe('Callback Routes', () => {
     assert.equal(body.task.threadId, 'thread-pr');
     assert.ok(body.task.createdAt > 0);
     assert.equal(body.await.generation, 1);
-    assert.deepEqual(body.await.continuation.when, [{ kind: 'pr_head_changed' }]);
+    assert.deepEqual(body.await.continuation.when, defaultPrTrackingPredicates);
+    assert.equal(body.await.autoRenew, true);
+    assert.equal(Object.hasOwn(body.await, 'expiresAt'), false);
     assert.equal(body.await.baseline.headSha, 'test-head');
 
     // Verify stored in taskStore
@@ -5598,12 +5609,203 @@ describe('Callback Routes', () => {
     await notFoundApp.close();
   });
 
-  test('POST register-pr-tracking snapshots live baseline before verifying an exact review-result trigger', async () => {
-    const verificationCalls = [];
-    const callOrder = [];
+  /*
+   * F280 A23-A27 role defaults are decided HERE, at the registration seam: the PR author login
+   * from the snapshot, compared against our own GitHub identity. The scenario tests pass
+   * `registrantIsPrAuthor` straight into the builder, so they stay green even if this wiring is
+   * absent or inverted — which is exactly how a "role-aware" feature ships with no role.
+   */
+  const roleSeamApp = async (authorLogin, resolveIsSelf) =>
+    createApp({
+      fetchPrWaitBaseline: async () => ({
+        baseline: {
+          capturedAt: 100,
+          headSha: 'head-role',
+          review: { inlineCommentCursor: 0, conversationCommentCursor: 0, decisionCursor: 0 },
+          ci: { bucket: 'pending', fingerprint: 'head-role:pending' },
+          conflict: { mergeState: 'MERGEABLE' },
+        },
+        collectorState: {},
+        ...(authorLogin ? { authorLogin } : {}),
+      }),
+      ...(resolveIsSelf ? { githubSelfIdentity: { resolveIsSelf } } : {}),
+    });
+
+  const registeredKinds = async (app, prNumber) => {
+    const { invocationId, callbackToken } = await registry.create('user-1', 'opus', 'thread-role');
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/callbacks/register-pr-tracking',
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
+      payload: prWaitPayload({ prNumber }),
+    });
+    assert.equal(response.statusCode, 200);
+    return JSON.parse(response.body).await.continuation.when.map((predicate) => predicate.kind);
+  };
+
+  test('register-pr-tracking arms bot_interaction for the PR author and not for a maintainer', async () => {
+    const asAuthor = await roleSeamApp('PrAuthor', (login) => login.toLowerCase() === 'prauthor');
+    assert.ok((await registeredKinds(asAuthor, 401)).includes('pr_bot_interaction'));
+    await asAuthor.close();
+
+    const asMaintainer = await roleSeamApp('SomeoneElse', (login) => login.toLowerCase() === 'prauthor');
+    assert.ok(!(await registeredKinds(asMaintainer, 402)).includes('pr_bot_interaction'));
+    await asMaintainer.close();
+  });
+
+  /*
+   * F280 2.5b holds a live tracker's FRONTIERS on re-registration. An open bot round is not a
+   * frontier — it is a fact this registration just verified. Keeping the old baseline wholesale
+   * discarded it, so a cat that summoned a bot and then changed its subscription lost the round
+   * it had just opened and could never be told the bot went silent.
+   */
+  test('re-registering a live tracker keeps old frontiers AND the round it just verified', async () => {
+    const seeded = {
+      'chatgpt-codex-connector[bot]': { triggerId: 4936000123, openedAt: 1_788_000_000_000, headSha: 'head-live' },
+    };
+    // Real sequence: tracker exists first (no round yet), the cat THEN summons the bot, then
+    // re-registers. Only the second snapshot carries the verified round, so a test whose stub
+    // returns the round both times would pass no matter which baseline survives.
+    let call = 0;
     const app = await createApp({
       fetchPrWaitBaseline: async () => {
-        callOrder.push('fetch-baseline');
+        call += 1;
+        return {
+          botTurnProbe: 'verified',
+          baseline: {
+            capturedAt: 900,
+            headSha: 'head-live',
+            review: { inlineCommentCursor: 99, conversationCommentCursor: 99, decisionCursor: 99 },
+            ci: { bucket: 'pending', fingerprint: 'head-live:pending' },
+            conflict: { mergeState: 'MERGEABLE' },
+            ...(call === 1 ? {} : { botTurns: seeded }),
+          },
+          collectorState: {},
+        };
+      },
+    });
+    const { invocationId, callbackToken } = await registry.create('user-1', 'opus', 'thread-rereg');
+    const headers = { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken };
+    const first = await app.inject({
+      method: 'POST',
+      url: '/api/callbacks/register-pr-tracking',
+      headers,
+      payload: prWaitPayload({ prNumber: 410 }),
+    });
+    assert.equal(first.statusCode, 200);
+    const firstBaseline = JSON.parse(first.body).await.baseline;
+    assert.equal(firstBaseline.botTurns, undefined, 'no round exists before the cat summons anything');
+    const frozen = firstBaseline.review.conversationCommentCursor;
+
+    const second = await app.inject({
+      method: 'POST',
+      url: '/api/callbacks/register-pr-tracking',
+      headers,
+      payload: prWaitPayload({ prNumber: 410, exclude: ['ci_terminal'] }),
+    });
+    assert.equal(second.statusCode, 200);
+    const baseline = JSON.parse(second.body).await.baseline;
+    assert.equal(baseline.review.conversationCommentCursor, frozen, 'the old frontier must be held');
+    assert.deepEqual(baseline.botTurns, seeded, 'the freshly verified round must survive re-registration');
+    await app.close();
+  });
+
+  /*
+   * sol R21: a union could not express "the probe ran and found the round already answered", so
+   * a dead round survived re-registration and could release a ball or invent a timeout later.
+   */
+  test('re-registering drops a round the probe verified as finished', async () => {
+    const stale = { 'chatgpt-codex-connector[bot]': { triggerId: 1, openedAt: 1, headSha: 'head-live' } };
+    let call = 0;
+    const app = await createApp({
+      fetchPrWaitBaseline: async () => {
+        call += 1;
+        return {
+          botTurnProbe: 'verified',
+          baseline: {
+            capturedAt: 900,
+            headSha: 'head-live',
+            review: { inlineCommentCursor: 5, conversationCommentCursor: 5, decisionCursor: 5 },
+            ci: { bucket: 'pending', fingerprint: 'head-live:pending' },
+            conflict: { mergeState: 'MERGEABLE' },
+            ...(call === 1 ? { botTurns: stale } : {}),
+          },
+          collectorState: {},
+        };
+      },
+    });
+    const { invocationId, callbackToken } = await registry.create('user-1', 'opus', 'thread-closed');
+    const headers = { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken };
+    await app.inject({
+      method: 'POST',
+      url: '/api/callbacks/register-pr-tracking',
+      headers,
+      payload: prWaitPayload({ prNumber: 420 }),
+    });
+    const second = await app.inject({
+      method: 'POST',
+      url: '/api/callbacks/register-pr-tracking',
+      headers,
+      payload: prWaitPayload({ prNumber: 420, exclude: ['ci_terminal'] }),
+    });
+    assert.equal(second.statusCode, 200);
+    assert.equal(JSON.parse(second.body).await.baseline.botTurns, undefined, 'an answered round must not survive');
+    await app.close();
+  });
+
+  test('re-registering keeps a live round when the probe could not run', async () => {
+    const live = { 'chatgpt-codex-connector[bot]': { triggerId: 7, openedAt: 7, headSha: 'head-live' } };
+    let call = 0;
+    const app = await createApp({
+      fetchPrWaitBaseline: async () => {
+        call += 1;
+        return {
+          botTurnProbe: call === 1 ? 'verified' : 'unavailable',
+          baseline: {
+            capturedAt: 900,
+            headSha: 'head-live',
+            review: { inlineCommentCursor: 5, conversationCommentCursor: 5, decisionCursor: 5 },
+            ci: { bucket: 'pending', fingerprint: 'head-live:pending' },
+            conflict: { mergeState: 'MERGEABLE' },
+            ...(call === 1 ? { botTurns: live } : {}),
+          },
+          collectorState: {},
+        };
+      },
+    });
+    const { invocationId, callbackToken } = await registry.create('user-1', 'opus', 'thread-unavail');
+    const headers = { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken };
+    await app.inject({
+      method: 'POST',
+      url: '/api/callbacks/register-pr-tracking',
+      headers,
+      payload: prWaitPayload({ prNumber: 421 }),
+    });
+    const second = await app.inject({
+      method: 'POST',
+      url: '/api/callbacks/register-pr-tracking',
+      headers,
+      payload: prWaitPayload({ prNumber: 421, exclude: ['ci_terminal'] }),
+    });
+    assert.equal(second.statusCode, 200);
+    // GitHub being unreachable is not evidence that the bot answered.
+    assert.deepEqual(JSON.parse(second.body).await.baseline.botTurns, live);
+    await app.close();
+  });
+
+  test('register-pr-tracking arms bot_interaction when our own GitHub identity is unresolved', async () => {
+    // The echo filter answers `false` for "not you" AND for "I do not know who you are".
+    // Collapsing those two here would mute a real signal, which A26 ranks below extra noise.
+    const identityUnknown = await roleSeamApp('PrAuthor', () => undefined);
+    assert.ok((await registeredKinds(identityUnknown, 403)).includes('pr_bot_interaction'));
+    await identityUnknown.close();
+  });
+
+  test('POST register-pr-tracking snapshots every live source frontier before activation', async () => {
+    const baselineCalls = [];
+    const app = await createApp({
+      fetchPrWaitBaseline: async (repoFullName, prNumber) => {
+        baselineCalls.push({ repoFullName, prNumber });
         return {
           baseline: {
             capturedAt: 100,
@@ -5625,15 +5827,6 @@ describe('Callback Routes', () => {
           },
         };
       },
-      verifyPrReviewEventWaitCoverage: async (input) => {
-        callOrder.push('verify-coverage');
-        verificationCalls.push(input);
-        return {
-          covered: true,
-          triggerCommentId: input.triggerCommentId,
-          observedAt: 1_783_700_000_000,
-        };
-      },
     });
     const { invocationId, callbackToken } = await registry.create('user-1', 'codex-sol', 'thread-pr-event');
 
@@ -5644,52 +5837,23 @@ describe('Callback Routes', () => {
       payload: prWaitPayload({
         repoFullName: 'Zts212653/Cat-Cafe',
         prNumber: 2856,
-        when: [{ kind: 'pr_review_result_available', triggerCommentId: 4936000000 }],
       }),
     });
 
     assert.equal(response.statusCode, 200);
-    assert.deepEqual(
-      callOrder,
-      ['fetch-baseline', 'verify-coverage'],
-      'baseline must be frozen before coverage verification so a result posted in between cannot be lost',
-    );
-    assert.deepEqual(verificationCalls, [
-      {
-        repoFullName: 'Zts212653/Cat-Cafe',
-        prNumber: 2856,
-        triggerCommentId: 4936000000,
-      },
+    assert.deepEqual(baselineCalls, [
+      // The snapshot no longer depends on the subscription: every source frontier is frozen
+      // unconditionally, and the role-aware `when` is materialized after the snapshot returns.
+      { repoFullName: 'Zts212653/Cat-Cafe', prNumber: 2856 },
     ]);
     const body = JSON.parse(response.body);
-    assert.deepEqual(body.await, {
-      v: 1,
-      generation: 1,
-      subjectRef: 'pr:zts212653/cat-cafe#2856',
-      ownerFence: { kind: 'containing_task', generation: 1 },
-      baseline: {
-        capturedAt: 100,
-        headSha: 'head-before-review',
-        review: {
-          inlineCommentCursor: 10,
-          conversationCommentCursor: 11,
-          decisionCursor: 20,
-          resultTriggerCommentId: 4936000000,
-          resultTriggerHeadSha: 'head-before-review',
-        },
-      },
-      continuation: {
-        when: [{ kind: 'pr_review_result_available', triggerCommentId: 4936000000 }],
-        // biome-ignore lint/suspicious/noThenProperty: F280's frozen wait contract field.
-        then: 'Re-lock the exact HEAD and continue.',
-      },
-      expiresAt: body.await.expiresAt,
-      createdAt: body.await.createdAt,
-      provenance: 'explicit_registration',
-    });
+    assert.equal(body.await.baseline.headSha, 'head-before-review');
+    assert.equal(body.await.baseline.review.inlineCommentCursor, 10);
+    assert.deepEqual(body.await.continuation.when, defaultPrTrackingPredicates);
+    assert.equal(Object.hasOwn(body.await, 'expiresAt'), false);
   });
 
-  test('POST register-pr-tracking atomically supersedes the active generation with a fresh baseline', async () => {
+  test('POST register-pr-tracking supersedes the active generation while HOLDING the frontier', async () => {
     const baselineCalls = [];
     const lifecycleEvents = [];
     const baselines = [
@@ -5724,11 +5888,6 @@ describe('Callback Routes', () => {
         baselineCalls.push('fetch-baseline');
         return baselines.shift();
       },
-      verifyPrReviewEventWaitCoverage: async (input) => ({
-        covered: true,
-        triggerCommentId: input.triggerCommentId,
-        observedAt: 1_783_700_000_010,
-      }),
       waitLifecycleHolder: {
         current: {
           async recordOutcomeEvent(taskId, outcome) {
@@ -5755,7 +5914,8 @@ describe('Callback Routes', () => {
       headers,
       payload: prWaitPayload({
         prNumber: 2860,
-        when: [{ kind: 'pr_review_result_available', triggerCommentId: 4936000010 }],
+        include: ['head_changed'],
+        exclude: ['ci_terminal'],
       }),
     });
 
@@ -5763,8 +5923,14 @@ describe('Callback Routes', () => {
     assert.deepEqual(baselineCalls, ['fetch-baseline', 'fetch-baseline']);
     const body = JSON.parse(refreshed.body);
     assert.equal(body.await.generation, 2);
-    assert.equal(body.await.baseline.headSha, 'head-after-push');
-    assert.equal(body.task.automationState.ci.headSha, 'head-after-push');
+    // #1394 section 2.5b: re-registering a LIVE wait may not advance the frontier. It used to
+    // re-freeze at the live snapshot, which silently discarded everything that arrived in the
+    // gap. Holding 'head-before-push' means the push that happened in between is still an
+    // unseen event rather than being swallowed by the new baseline.
+    assert.equal(body.await.baseline.headSha, 'head-before-push');
+    assert.equal(body.task.automationState.ci.headSha, 'head-before-push');
+    // The first snapshot in this fixture carries no review frontier at all, so there is nothing
+    // to hold on that surface and the live snapshot legitimately fills the gap.
     assert.equal(body.task.automationState.review.lastInlineCommentCursor, 30);
     assert.equal(body.task.automationState.review.lastConversationCommentCursor, 31);
     assert.equal(body.task.automationState.review.lastDecisionCursor, 40);
@@ -5774,14 +5940,13 @@ describe('Callback Routes', () => {
     assert.equal(lifecycleEvents[0].outcome.reason, 'superseded');
   });
 
-  test('POST register-pr-tracking rejects an unverified exact review-result trigger without creating a wait', async () => {
+  test('POST register-pr-tracking rejects internal predicates before reading a baseline', async () => {
+    let baselineCalled = false;
     const app = await createApp({
-      verifyPrReviewEventWaitCoverage: async (input) => ({
-        covered: false,
-        reason: 'review_not_accepted',
-        triggerCommentId: input.triggerCommentId,
-        observedAt: 1_783_700_000_001,
-      }),
+      fetchPrWaitBaseline: async () => {
+        baselineCalled = true;
+        throw new Error('must not read a baseline for an invalid public request');
+      },
     });
     const { invocationId, callbackToken } = await registry.create('user-1', 'codex-sol', 'thread-pr-event');
 
@@ -5795,20 +5960,13 @@ describe('Callback Routes', () => {
       }),
     });
 
-    assert.equal(response.statusCode, 422);
-    const body = JSON.parse(response.body);
-    assert.equal(body.reason, 'review_not_accepted');
+    assert.equal(response.statusCode, 400);
+    assert.equal(baselineCalled, false);
     assert.equal(taskStore.getBySubject('pr:zts212653/cat-cafe#2857'), null);
   });
 
   test('POST register-pr-tracking rejects every deleted legacy PR mode field', async () => {
-    let verificationCalled = false;
-    const app = await createApp({
-      verifyPrReviewEventWaitCoverage: async () => {
-        verificationCalled = true;
-        throw new Error('must not verify an ineligible wait intent');
-      },
-    });
+    const app = await createApp();
     const { invocationId, callbackToken } = await registry.create('user-1', 'codex-sol', 'thread-pr-event');
 
     const response = await app.inject({
@@ -5826,16 +5984,11 @@ describe('Callback Routes', () => {
 
     assert.equal(response.statusCode, 400);
     assert.equal(JSON.parse(response.body).error, 'Invalid request body');
-    assert.equal(verificationCalled, false);
     assert.equal(taskStore.getBySubject('pr:zts212653/cat-cafe#2859'), null);
   });
 
-  test('POST register-pr-tracking fails closed when callback coverage query fails', async () => {
-    const app = await createApp({
-      verifyPrReviewEventWaitCoverage: async () => {
-        throw new Error('GitHub unavailable');
-      },
-    });
+  test('POST register-pr-tracking rejects caller-owned lifetime fields', async () => {
+    const app = await createApp();
     const { invocationId, callbackToken } = await registry.create('user-1', 'codex-sol', 'thread-pr-event');
 
     const response = await app.inject({
@@ -5844,12 +5997,12 @@ describe('Callback Routes', () => {
       headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
       payload: prWaitPayload({
         prNumber: 2858,
-        when: [{ kind: 'pr_review_result_available', triggerCommentId: 4936000002 }],
+        expiresAt: Date.now() + 60_000,
+        autoRenew: false,
       }),
     });
 
-    assert.equal(response.statusCode, 503);
-    assert.match(JSON.parse(response.body).error, /coverage unavailable/i);
+    assert.equal(response.statusCode, 400);
     assert.equal(taskStore.getBySubject('pr:zts212653/cat-cafe#2858'), null);
   });
 
@@ -6240,7 +6393,7 @@ describe('Callback Routes', () => {
 
   // F140: wake intent — default 'review' (quiet), explicit 'merge', and re-register preserves it.
 
-  test('POST register-pr-tracking persists only the explicit predicate contract', async () => {
+  test('POST register-pr-tracking materializes the default tracking set internally', async () => {
     const app = await createApp();
     const { invocationId, callbackToken } = await registry.create('user-1', 'opus', 'thread-pr');
     const response = await app.inject({
@@ -6251,13 +6404,13 @@ describe('Callback Routes', () => {
     });
     assert.equal(response.statusCode, 200);
     const body = JSON.parse(response.body);
-    assert.deepEqual(body.task.automationState.await.continuation.when, [{ kind: 'pr_head_changed' }]);
+    assert.deepEqual(body.task.automationState.await.continuation.when, defaultPrTrackingPredicates);
     for (const legacyKey of ['intent', 'wakePolicy', 'trackingInstructions', 'eventWait']) {
       assert.equal(Object.hasOwn(body.task.automationState, legacyKey), false);
     }
   });
 
-  test('POST register-pr-tracking accepts a bounded flat any-of predicate set', async () => {
+  test('POST register-pr-tracking applies include and exclude by public event name', async () => {
     const app = await createApp();
     const { invocationId, callbackToken } = await registry.create('user-1', 'opus', 'thread-pr');
     const response = await app.inject({
@@ -6266,18 +6419,24 @@ describe('Callback Routes', () => {
       headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
       payload: prWaitPayload({
         prNumber: 102,
-        when: [{ kind: 'pr_ci_terminal' }, { kind: 'pr_became_conflicting' }],
+        include: ['head_changed'],
+        exclude: ['ci_terminal'],
         nextStep: 'Re-check checks and mergeability.',
       }),
     });
     assert.equal(response.statusCode, 200);
     assert.deepEqual(JSON.parse(response.body).await.continuation.when, [
-      { kind: 'pr_ci_terminal' },
+      { kind: 'pr_review_decision_changed' },
+      { kind: 'pr_conversation_comment_added' },
+      { kind: 'pr_inline_comment_added' },
+      { kind: 'pr_bot_interaction' },
       { kind: 'pr_became_conflicting' },
+      { kind: 'pr_base_behind' },
+      { kind: 'pr_head_changed' },
     ]);
   });
 
-  test('POST register-pr-tracking re-register creates the next generation and replaces the predicate set', async () => {
+  test('POST register-pr-tracking re-register creates the next generation and replaces its event selection', async () => {
     const app = await createApp();
     const { invocationId, callbackToken } = await registry.create('user-1', 'opus', 'thread-pr');
     const headers = { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken };
@@ -6285,19 +6444,27 @@ describe('Callback Routes', () => {
       method: 'POST',
       url: '/api/callbacks/register-pr-tracking',
       headers,
-      payload: prWaitPayload({ prNumber: 103, when: [{ kind: 'pr_ci_terminal' }] }),
+      payload: prWaitPayload({ prNumber: 103, exclude: ['inline_comment'] }),
     });
     assert.equal(first.statusCode, 200);
     const response = await app.inject({
       method: 'POST',
       url: '/api/callbacks/register-pr-tracking',
       headers,
-      payload: prWaitPayload({ prNumber: 103, when: [{ kind: 'pr_head_changed' }] }),
+      payload: prWaitPayload({ prNumber: 103, include: ['head_changed'], exclude: ['ci_terminal'] }),
     });
     assert.equal(response.statusCode, 200);
     const body = JSON.parse(response.body);
     assert.equal(body.await.generation, 2);
-    assert.deepEqual(body.await.continuation.when, [{ kind: 'pr_head_changed' }]);
+    assert.deepEqual(body.await.continuation.when, [
+      { kind: 'pr_review_decision_changed' },
+      { kind: 'pr_conversation_comment_added' },
+      { kind: 'pr_inline_comment_added' },
+      { kind: 'pr_bot_interaction' },
+      { kind: 'pr_became_conflicting' },
+      { kind: 'pr_base_behind' },
+      { kind: 'pr_head_changed' },
+    ]);
     assert.equal(body.task.automationState.waitOutcome.reason, 'superseded');
   });
 
@@ -6738,7 +6905,7 @@ describe('Callback Routes', () => {
     assert.equal(taskStore.getBySubject('issue:zts212653/cat-cafe#861'), null);
   });
 
-  test('POST register-issue-tracking freezes the live issue baseline and typed continuation', async () => {
+  test('POST register-issue-tracking freezes the live issue baseline and catch-all continuation', async () => {
     const { callbacksRoutes } = await import('../dist/routes/callbacks.js');
     const app = Fastify();
     const cursorCalls = [];
@@ -6772,7 +6939,6 @@ describe('Callback Routes', () => {
       headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
       payload: issueWaitPayload({
         issueNumber: 861,
-        when: [{ kind: 'issue_author_commented' }],
         nextStep: 'Inspect the issue author reply.',
       }),
     });
@@ -6784,8 +6950,10 @@ describe('Callback Routes', () => {
     assert.equal(body.task.automationState.issue.lastCommentCursor, 1234);
     assert.equal(body.task.automationState.await.generation, 1);
     assert.equal(body.task.automationState.await.baseline.issue.lastCommentCursor, 1234);
-    assert.deepEqual(body.task.automationState.await.continuation.when, [{ kind: 'issue_author_commented' }]);
+    assert.deepEqual(body.task.automationState.await.continuation.when, [{ kind: 'issue_comment_added' }]);
     assert.equal(body.task.automationState.await.continuation.then, 'Inspect the issue author reply.');
+    assert.equal(body.task.automationState.await.autoRenew, true);
+    assert.equal(Object.hasOwn(body.task.automationState.await, 'expiresAt'), false);
     assert.equal(Object.hasOwn(body.task.automationState, 'wakePolicy'), false);
     assert.equal(Object.hasOwn(body.task.automationState, 'trackingInstructions'), false);
 
@@ -6794,7 +6962,7 @@ describe('Callback Routes', () => {
     assert.equal(stored.automationState.await.baseline.issue.authorLogin, 'issue-author');
   });
 
-  test('POST register-issue-tracking re-registers with a fresh baseline and next generation', async () => {
+  test('POST register-issue-tracking re-registers into a new generation while HOLDING the frontier', async () => {
     const { callbacksRoutes } = await import('../dist/routes/callbacks.js');
     const app = Fastify();
     const cursorValues = [9999, 10001];
@@ -6842,19 +7010,20 @@ describe('Callback Routes', () => {
       },
       payload: issueWaitPayload({
         issueNumber: 862,
-        when: [{ kind: 'issue_author_commented' }],
         nextStep: 'Inspect the author reply.',
       }),
     });
 
     assert.equal(response.statusCode, 200);
-    assert.equal(cursorValues.length, 0, 'each generation must freeze a fresh server-side baseline');
+    assert.equal(cursorValues.length, 0, 'the live cursor is still read on every registration');
 
     const updated = taskStore.getBySubject('issue:zts212653/cat-cafe#862');
     assert.equal(updated.threadId, 'thread-issue-2');
-    assert.equal(updated.automationState.issue.lastCommentCursor, 10001);
+    // #1394 section 2.5b: the frontier is held, not re-frozen. Advancing it to 10001 would
+    // silently drop every comment between 9999 and now.
+    assert.equal(updated.automationState.issue.lastCommentCursor, 9999);
     assert.equal(updated.automationState.await.generation, 2);
-    assert.equal(updated.automationState.await.baseline.issue.lastCommentCursor, 10001);
+    assert.equal(updated.automationState.await.baseline.issue.lastCommentCursor, 9999);
     assert.equal(updated.automationState.waitOutcome.generation, 1);
     assert.equal(updated.automationState.waitOutcome.reason, 'superseded');
   });

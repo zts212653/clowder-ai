@@ -13,17 +13,26 @@ const PROPOSAL_GATE_PATH = new URL('../src/routes/proposal-community-pr-gate.ts'
 const PROPOSAL_TRANSITION_PATH = new URL('../src/routes/proposal-community-pr-transition.ts', import.meta.url);
 
 describe('F280 PR wait cutover guards', () => {
-  it('the callback route accepts typed wait inputs and contains no legacy registration keys', () => {
+  it('the callback route exposes only the default-on tracking inputs', () => {
     const start = CALLBACK_SOURCE.indexOf('const registerPrTrackingSchema');
     const end = CALLBACK_SOURCE.indexOf("app.post('/api/callbacks/register-pr-tracking'", start);
     assert.notEqual(start, -1, 'registerPrTrackingSchema must exist');
     assert.notEqual(end, -1, 'register-pr-tracking route must exist');
     const schemaSource = CALLBACK_SOURCE.slice(start, end);
 
-    for (const required of ['repoFullName', 'prNumber', 'when', 'nextStep', 'expiresAt']) {
+    for (const required of ['repoFullName', 'prNumber', 'include', 'exclude', 'nextStep']) {
       assert.match(schemaSource, new RegExp(`\\b${required}\\b`), `${required} must be in the callback schema`);
     }
-    for (const forbidden of ['intent', 'wakePolicy', 'instructions', 'eventWait', 'baseline']) {
+    for (const forbidden of [
+      'when',
+      'expiresAt',
+      'autoRenew',
+      'intent',
+      'wakePolicy',
+      'instructions',
+      'eventWait',
+      'baseline',
+    ]) {
       assert.doesNotMatch(schemaSource, new RegExp(`\\b${forbidden}\\b`), `${forbidden} must not be public`);
     }
   });
@@ -52,45 +61,17 @@ describe('F280 PR wait cutover guards', () => {
     assert.equal(typeof store.replaceAutomationStateIfGeneration, 'function');
   });
 
-  it('compact review and CI renderers never include raw source body or legacy instructions', async () => {
+  it('external responses are visible inside an explicit untrusted boundary', async () => {
     const SOURCE_SENTINEL = 'SOURCE_BODY__f280_3f8d9a6e7c';
-    const INSTRUCTION_SENTINEL = 'LEGACY_INSTRUCTIONS__f280_a6d2c19b4e';
-    const { buildReviewFeedbackContent } = await import('../dist/infrastructure/email/ReviewFeedbackRouter.js');
-    const { buildCiMessageContent } = await import('../dist/infrastructure/email/ci-message-content.js');
+    const { externalResponseSummary } = await import('../dist/domains/github-signals/GitHubTrackingEvent.js');
 
-    const review = buildReviewFeedbackContent(
-      {
-        repoFullName: 'owner/repo',
-        prNumber: 7,
-        newComments: [
-          {
-            id: 99,
-            author: 'reviewer',
-            body: SOURCE_SENTINEL,
-            createdAt: '2026-07-30T00:00:00Z',
-            commentType: 'conversation',
-          },
-        ],
-        newDecisions: [],
-      },
-      INSTRUCTION_SENTINEL,
-    );
-    const ci = buildCiMessageContent(
-      {
-        repoFullName: 'owner/repo',
-        prNumber: 7,
-        headSha: 'abc123456789',
-        prState: 'open',
-        aggregateBucket: 'fail',
-        checks: [{ name: 'tests', bucket: 'fail', description: SOURCE_SENTINEL }],
-      },
-      INSTRUCTION_SENTINEL,
-    );
-
-    for (const rendered of [review, ci]) {
-      assert.equal(rendered.includes(SOURCE_SENTINEL), false, 'raw source body leaked into wake message');
-      assert.equal(rendered.includes(INSTRUCTION_SENTINEL), false, 'legacy instructions leaked into wake message');
-      assert.match(rendered, /PR #7|owner\/repo#7/);
-    }
+    const review = externalResponseSummary({
+      surface: 'conversation comment',
+      id: 99,
+      author: 'reviewer',
+      body: SOURCE_SENTINEL,
+    });
+    assert.match(review, /\[UNTRUSTED EXTERNAL CONTENT\]/);
+    assert.match(review, new RegExp(SOURCE_SENTINEL));
   });
 });

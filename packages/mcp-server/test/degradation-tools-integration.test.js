@@ -88,9 +88,8 @@ describe('write-class tool degradation policy declarations (F174-E AC-E2/E5)', (
       const result = await handleRegisterPrTracking({
         repoFullName: 'a/b',
         prNumber: 1,
-        when: [{ kind: 'pr_head_changed' }],
+        include: ['head_changed'],
         nextStep: 'Inspect the new HEAD.',
-        expiresAt: Date.now() + 60_000,
       });
       assert.ok(result.isError);
       const text = result.content[0].text;
@@ -98,14 +97,12 @@ describe('write-class tool degradation policy declarations (F174-E AC-E2/E5)', (
     });
   });
 
-  test('register_issue_tracking forwards the typed one-shot wait contract', async () => {
+  test('register_issue_tracking forwards the single durable tracking contract', async () => {
     await withCapturedCallbackPosts(async ({ handleRegisterIssueTracking }, requests) => {
       const result = await handleRegisterIssueTracking({
         repoFullName: 'a/b',
         issueNumber: 2,
-        when: [{ kind: 'issue_comment_added' }],
         nextStep: 'Inspect the comment.',
-        expiresAt: 1_785_500_000_000,
       });
 
       assert.equal(result.isError, undefined);
@@ -114,9 +111,7 @@ describe('write-class tool degradation policy declarations (F174-E AC-E2/E5)', (
       assert.deepEqual(requests[0].body, {
         repoFullName: 'a/b',
         issueNumber: 2,
-        when: [{ kind: 'issue_comment_added' }],
         nextStep: 'Inspect the comment.',
-        expiresAt: 1_785_500_000_000,
       });
     });
   });

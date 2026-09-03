@@ -1460,3 +1460,56 @@ describe('F168 dead-code cleanup: execute() guard — null/undefined ownerCatId 
     assert.ok(warnCalls.length > 0, 'warn() must be called when userId is undefined');
   });
 });
+
+describe('IssueCommentTaskSpec #1392 AC-6c — wait-lifecycle path admits the wake', () => {
+  const comment = { id: 100, author: 'maintainer', body: 'ping', createdAt: '2026-07-19T13:50:00Z' };
+  function specWith(observe) {
+    const taskStore = makeTaskStore();
+    taskStore.addTask(makeTask());
+    const triggerCalls = [];
+    const spec = createIssueCommentTaskSpec({
+      taskStore,
+      issueCommentRouter: makeIssueCommentRouter(),
+      fetchComments: async (_repo, _issue, since) => (since < 100 ? [comment] : []),
+      fetchIssueState: async () => 'open',
+      invokeTrigger: {
+        async trigger(...args) {
+          triggerCalls.push(args);
+          return 'dispatched';
+        },
+      },
+      waitLifecycle: { observe },
+      eventLog: makeEventLog(),
+      log: { info: () => {}, error: () => {}, warn: () => {} },
+    });
+    return { spec, taskStore, triggerCalls };
+  }
+
+  it('a notified wait observe fires invokeTrigger so the wake reaches the Queue', async () => {
+    const { spec, taskStore, triggerCalls } = specWith(async () => ({
+      kind: 'notified',
+      task: taskStore.tasks.get('task-1'),
+      outcome: { outcomeId: 'o1', reason: 'matched' },
+      messageId: 'msg-wait',
+      content: 'WAIT_FIRED',
+    }));
+
+    await runExecute(spec, await runGate(spec));
+
+    assert.equal(
+      triggerCalls.length,
+      1,
+      'a notified wait observe must admit the wake (the old early-return dropped it)',
+    );
+    assert.equal(triggerCalls[0][3], 'WAIT_FIRED', 'trigger content must be the delivered wait message');
+    assert.equal(triggerCalls[0][4], 'msg-wait', 'trigger must reuse the delivered message id');
+  });
+
+  it('a state-only wait observe does not admit a wake', async () => {
+    const { spec, triggerCalls } = specWith(async () => ({ kind: 'state_only', reason: 'predicates_not_matched' }));
+
+    await runExecute(spec, await runGate(spec));
+
+    assert.equal(triggerCalls.length, 0, 'a non-notified observe must not fire invokeTrigger');
+  });
+});

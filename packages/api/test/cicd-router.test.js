@@ -8,7 +8,7 @@ const { GitHubWaitLifecycleService } = await import('../dist/domains/github-sign
 const { DistillationCheckpoint, InMemoryOpportunityStore } = await import(
   '../dist/infrastructure/distillation/DistillationCheckpoint.js'
 );
-const { CiCdRouter, buildCiMessageContent } = await import('../dist/infrastructure/email/CiCdRouter.js');
+const { CiCdRouter } = await import('../dist/infrastructure/email/CiCdRouter.js');
 
 function awaitState(when) {
   return {
@@ -160,7 +160,7 @@ describe('CiCdRouter F280 typed waits', () => {
     const replay = await router.route(poll());
     assert.equal(first.kind, 'notified');
     assert.notEqual(replay.kind, 'notified');
-    assert.match(first.content, /CI pending → pass/);
+    assert.match(first.content, /CI reached pass/);
     assert.equal(messageStore.getByThread('thread_1').length, 1);
   });
 
@@ -418,19 +418,5 @@ describe('CiCdRouter F280 typed waits', () => {
     assert.equal((await opportunityStore.listPending()).length, 1);
     assert.equal(communityEvents.length, 1);
     assert.equal(projection.appliedEventCount, 1);
-  });
-});
-
-describe('CI preview renderer', () => {
-  test('never includes source descriptions or legacy caller prose', () => {
-    const content = buildCiMessageContent(
-      poll({
-        aggregateBucket: 'fail',
-        checks: [{ name: 'tests', bucket: 'fail', description: 'SOURCE_SECRET' }],
-      }),
-      'LEGACY_SECRET',
-    );
-    assert.equal(content.includes('SOURCE_SECRET'), false);
-    assert.equal(content.includes('LEGACY_SECRET'), false);
   });
 });

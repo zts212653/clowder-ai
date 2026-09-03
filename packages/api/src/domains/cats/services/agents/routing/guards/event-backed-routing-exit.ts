@@ -33,7 +33,7 @@ export interface EventBackedRoutingExitProof {
     generation: number;
   };
   predicate: {
-    kind: 'pr_review_result_available';
+    kind: 'pr_bot_interaction';
     triggerCommentId: number;
   };
 }
@@ -47,14 +47,33 @@ interface ResolveEventBackedRoutingExitInput {
 
 type EventBackedRoutingExitIdentity = Omit<ResolveEventBackedRoutingExitInput, 'taskStore'>;
 
-function reviewResultPredicate(active: AwaitStateV1) {
-  return active.continuation.when.find(
-    (
-      predicate,
-    ): predicate is Extract<AwaitStateV1['continuation']['when'][number], { kind: 'pr_review_result_available' }> & {
-      triggerCommentId: number;
-    } => predicate.kind === 'pr_review_result_available' && predicate.triggerCommentId !== undefined,
+/**
+ * F280 section 4b: the proof that an event will come back is an OPEN bot interaction turn —
+ * this cat asked a known bot something, and a live subscription will wake it when the bot
+ * answers or when the turn times out unanswered. Previously the proof was a typed
+ * `pr_review_result_available` predicate the caller had to register by hand; the turn is the
+ * same fact, produced by normalization instead of asked of the caller.
+ */
+function openBotTurnProof(
+  active: AwaitStateV1,
+  invocationId: string,
+): { readonly triggerCommentId: number } | undefined {
+  if (!active.continuation.when.some((predicate) => predicate.kind === 'pr_bot_interaction')) return undefined;
+  const baseline = active.baseline;
+  if (!('headSha' in baseline)) return undefined;
+  // `shared-rules.md` 2b: the guard honours a wait belonging to THIS invocation/owner/thread/
+  // subject. "Some pending summon exists on this PR" is not an exit — accepting that let a
+  // foreign invocation clean-stop on a round it never opened.
+  // The grant is the whole proof: a round carrying THIS invocation id was verified during THIS
+  // invocation's registration, so it cannot be stale. Comparing it against `baseline.headSha`
+  // additionally would compare it against a deliberately HELD frontier (section 2.5b) rather
+  // than against the live HEAD, and reject a clean stop that was just earned. "Is this verdict
+  // about the current diff" is a real question, but it belongs where the live HEAD is known
+  // (F168 / CloudReviewObservation), not here.
+  const openTurn = Object.values(baseline.botTurns ?? {}).find(
+    (turn) => turn.triggerId > 0 && turn.grantInvocationId === invocationId,
   );
+  return openTurn ? { triggerCommentId: openTurn.triggerId } : undefined;
 }
 
 export function isEventBackedRoutingBypassProofValid(
@@ -70,7 +89,7 @@ export function isEventBackedRoutingBypassProofValid(
     task.threadId === identity.threadId &&
     task.subjectKey === resolution.subjectKey &&
     task.generation > 0 &&
-    predicate.kind === 'pr_review_result_available' &&
+    predicate.kind === 'pr_bot_interaction' &&
     Number.isSafeInteger(predicate.triggerCommentId) &&
     predicate.triggerCommentId > 0
   );
@@ -89,7 +108,7 @@ function rejectCandidate(
   if (active.ownerFence.kind !== 'containing_task' || active.ownerFence.generation !== active.generation) {
     return 'generation_mismatch';
   }
-  if (!reviewResultPredicate(active)) return 'predicate_missing';
+  if (!openBotTurnProof(active, input.invocationId)) return 'predicate_missing';
   return null;
 }
 
@@ -122,7 +141,7 @@ export async function resolveEventBackedRoutingExit(
       catId: input.catId,
       invocationId: input.invocationId,
     });
-    const predicate = reviewResultPredicate(active);
+    const predicate = openBotTurnProof(active, input.invocationId);
     if (!reason && predicate) {
       return {
         kind: 'bypass',
@@ -139,7 +158,7 @@ export async function resolveEventBackedRoutingExit(
             generation: active.generation,
           },
           predicate: {
-            kind: predicate.kind,
+            kind: 'pr_bot_interaction',
             triggerCommentId: predicate.triggerCommentId,
           },
         },
