@@ -142,7 +142,7 @@ jobs:
           --lane "${{ matrix.lane }}"
           --report "${{ runner.temp }}/public-test/reports/${{ matrix.lane }}.json"
         env:
-          DEFAULT_OWNER_USER_ID: owner-user
+          DEFAULT_OWNER_USER_ID: default-user
           GIT_AUTHOR_NAME: CI Runner
           GIT_AUTHOR_EMAIL: ci@clowder-ai.dev
           GIT_COMMITTER_NAME: CI Runner

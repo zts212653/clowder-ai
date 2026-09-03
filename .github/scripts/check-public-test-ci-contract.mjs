@@ -19,7 +19,7 @@ const shardStep = workflow.jobs['public-test-shards'].steps.find((step) => step.
 assert.ok(shardStep, 'the public-test shard runner step must exist');
 assert.equal(
   shardStep.env?.DEFAULT_OWNER_USER_ID,
-  'owner-user',
+  'default-user',
   'public tests must use a deterministic local owner identity',
 );
 
