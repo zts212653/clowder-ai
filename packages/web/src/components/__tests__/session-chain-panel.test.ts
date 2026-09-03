@@ -172,6 +172,38 @@ describe('F24: SessionChainPanel', () => {
     });
   });
 
+  it('gives peer lifecycle actions the same visual weight and keeps linkage out of that row', async () => {
+    mockSessionsResponse([
+      {
+        id: 's-codex',
+        cliSessionId: 'native-1',
+        catId: 'codex',
+        seq: 0,
+        status: 'active',
+        messageCount: 4,
+        createdAt: Date.now(),
+      },
+    ]);
+    renderPanel('thread-1');
+    await flushFetch();
+
+    const row = container.querySelector('[data-testid="session-lifecycle-actions-s-codex"]');
+    const compact = container.querySelector('[data-testid="compact-native-session-s-codex"]') as HTMLButtonElement;
+    const seal = container.querySelector('[data-testid="seal-session-s-codex"]') as HTMLButtonElement;
+    expect(row).not.toBeNull();
+    expect(row?.contains(compact)).toBe(true);
+    expect(row?.contains(seal)).toBe(true);
+
+    // Native compaction and seal are peer actions on the same session's lifecycle,
+    // so neither may outrank the other visually.
+    expect(seal.className).toBe(compact.className);
+    expect(seal.getAttribute('style')).toBeNull();
+
+    // bind changes WHICH runtime session this card points at, not this session's
+    // lifecycle, so it stays outside the lifecycle row.
+    expect(row?.textContent).not.toContain('bind');
+  });
+
   it('seals an idle active session and refreshes the chain', async () => {
     mockSessionsResponse([
       { id: 's1', catId: 'opus', seq: 0, status: 'active', messageCount: 5, createdAt: Date.now() },
@@ -1395,7 +1427,17 @@ describe('F24: SessionChainPanel', () => {
 
     it('does not emit any of the legacy hardcoded color tokens', async () => {
       mockSessionsResponse([
-        { id: 's1', catId: 'codex', seq: 0, status: 'active', messageCount: 1, createdAt: Date.now() },
+        // cliSessionId present so the native-compact action actually renders — without it
+        // this guard silently skipped that button's classes.
+        {
+          id: 's1',
+          cliSessionId: 'native-1',
+          catId: 'codex',
+          seq: 0,
+          status: 'active',
+          messageCount: 1,
+          createdAt: Date.now(),
+        },
         { id: 's2', catId: 'gemini', seq: 1, status: 'active', messageCount: 1, createdAt: Date.now() },
         { id: 's3', catId: 'opus-45', seq: 2, status: 'active', messageCount: 1, createdAt: Date.now() },
         { id: 's4', catId: 'gpt52', seq: 3, status: 'active', messageCount: 1, createdAt: Date.now() },
