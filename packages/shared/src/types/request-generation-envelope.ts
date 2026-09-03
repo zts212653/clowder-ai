@@ -2,7 +2,70 @@ import { z } from 'zod';
 
 const nonEmpty = z.string().trim().min(1);
 const keyedDigest = z.string().regex(/^hmac-sha256:[a-f0-9]{64}$/);
+const publicDigest = z.string().regex(/^sha256:[a-f0-9]{64}$/);
 const utf8ByteLength = (value: string): number => new TextEncoder().encode(value).byteLength;
+
+export const MCP_SCHEMA_DELIVERY_REQUESTED_MODES = [
+  'host-default',
+  'always-visible',
+  'provider-native-deferred',
+  'catalog-deferred',
+  'upfront',
+  'unknown',
+] as const;
+
+export const MCP_SCHEMA_DELIVERY_EVIDENCE_CLAIM_MODES = [
+  'provider-native-deferred',
+  'catalog-deferred',
+  'upfront',
+] as const;
+
+const schemaDeliveryEvidenceClaimModes = new Set<string>(MCP_SCHEMA_DELIVERY_EVIDENCE_CLAIM_MODES);
+
+export const MCP_SCHEMA_DELIVERY_FALLBACK_REASONS = [
+  'attestation_unavailable',
+  'attestation_invalid',
+  'attestation_subject_mismatch',
+  'host_version_unavailable',
+  'unsupported_host',
+] as const;
+
+export const requestGenerationSchemaDeliverySchema = z
+  .object({
+    profileClass: z.enum(['full', 'readonly', 'agent-key', 'desktop']),
+    profileId: nonEmpty.max(80),
+    requestedMode: z.enum(MCP_SCHEMA_DELIVERY_REQUESTED_MODES),
+    hostVersion: nonEmpty.max(160).optional(),
+    attestation: z
+      .object({
+        ref: nonEmpty.max(320),
+        digest: publicDigest,
+      })
+      .strict()
+      .optional(),
+    fallbackReason: z.enum(MCP_SCHEMA_DELIVERY_FALLBACK_REASONS).optional(),
+  })
+  .strict()
+  .superRefine((delivery, context) => {
+    if (
+      schemaDeliveryEvidenceClaimModes.has(delivery.requestedMode) &&
+      (!delivery.hostVersion || !delivery.attestation)
+    ) {
+      context.addIssue({
+        code: 'custom',
+        message: 'evidence-claiming schema delivery requires host version and attestation',
+      });
+    }
+    if (delivery.attestation && !delivery.hostVersion) {
+      context.addIssue({ code: 'custom', message: 'attested schema delivery requires a host version' });
+    }
+    if (delivery.requestedMode === 'unknown' && !delivery.fallbackReason) {
+      context.addIssue({ code: 'custom', message: 'unknown schema delivery requires a bounded fallback reason' });
+    }
+    if (delivery.requestedMode !== 'unknown' && delivery.fallbackReason) {
+      context.addIssue({ code: 'custom', message: 'known schema delivery cannot carry a fallback reason' });
+    }
+  });
 
 export const REQUEST_GENERATION_RETRY_REASONS = [
   'prompt_token_limit',
@@ -100,6 +163,7 @@ export const requestGenerationToolSurfaceSchema = z
     catCafeSchemaSetHash: keyedDigest.optional(),
     providerObservedSchemaSetHash: keyedDigest.optional(),
     finalSurface: z.enum(['exact', 'declared_only', 'unsupported', 'unknown']),
+    schemaDelivery: requestGenerationSchemaDeliverySchema.optional(),
   })
   .strict()
   .superRefine((surface, context) => {
@@ -203,6 +267,7 @@ export type RequestGenerationPresentationV1 = z.infer<typeof requestGenerationPr
 export type SanitizedRequestedRuntimeConfigV1 = z.infer<typeof sanitizedRequestedRuntimeConfigSchema>;
 export type SanitizedObservedRuntimeConfigV1 = z.infer<typeof sanitizedObservedRuntimeConfigSchema>;
 export type RequestGenerationToolSurfaceV1 = z.infer<typeof requestGenerationToolSurfaceSchema>;
+export type RequestGenerationSchemaDeliveryV1 = z.infer<typeof requestGenerationSchemaDeliverySchema>;
 export type RequestGenerationEnvelopeV1 = z.infer<typeof requestGenerationEnvelopeV1Schema>;
 export type RequestGenerationAssembledEvent = z.infer<typeof requestGenerationAssembledEventSchema>;
 export type RequestGenerationObservedEvent = z.infer<typeof requestGenerationObservedEventSchema>;

@@ -15,6 +15,7 @@ import type {
 import type { LibraryCatalog } from './LibraryCatalog.js';
 import { redactForTranscript } from './privacy-redactor.js';
 import { redactGroupsForPersistence } from './RecallPersistenceRedactor.js';
+import { collectGenericRecallEligible } from './recall-delivery-eligibility.js';
 
 interface KnowledgeResolverDeps {
   projectStore: IEvidenceStore;
@@ -69,7 +70,7 @@ export class KnowledgeResolver implements IKnowledgeResolver {
         const store = this.stores.get(m.id);
         if (!store) return { manifest: m, items: [] as EvidenceItem[], noStore: true };
         const start = Date.now();
-        const execution = await searchStoreWithMeta(store, query, { ...options, limit });
+        const execution = await searchRecallEligibleStoreWithMeta(store, query, options, limit);
         return {
           manifest: m,
           items: execution.items,
@@ -135,7 +136,7 @@ export class KnowledgeResolver implements IKnowledgeResolver {
 
     if (dimension === 'global') {
       if (!this.globalStore) return { results: [], sources: [], query };
-      const execution = await searchStoreWithMeta(this.globalStore, query, { ...options, limit }).catch(
+      const execution = await searchRecallEligibleStoreWithMeta(this.globalStore, query, options, limit).catch(
         () =>
           ({
             items: [],
@@ -159,7 +160,7 @@ export class KnowledgeResolver implements IKnowledgeResolver {
     const sources: KnowledgeResult['sources'] = [];
     const projectPromise = searchStoreWithMeta(this.projectStore, query, { ...options, limit });
     const globalPromise = this.globalStore
-      ? searchStoreWithMeta(this.globalStore, query, { ...options, limit }).catch(
+      ? searchRecallEligibleStoreWithMeta(this.globalStore, query, options, limit).catch(
           () =>
             ({
               items: [],
@@ -182,10 +183,24 @@ export class KnowledgeResolver implements IKnowledgeResolver {
     }
 
     sources.push('global');
-    const globalResults = globalExecution.items;
-    const fused = rrfFusion(projectResults, globalResults, limit);
+    const fused = rrfFusion(projectResults, globalExecution.items, limit);
     return { results: fused, sources, query, meta: combineSearchMeta([projectExecution.meta, globalExecution.meta]) };
   }
+}
+
+async function searchRecallEligibleStoreWithMeta(
+  store: IEvidenceStore,
+  query: string,
+  options: SearchOptions | undefined,
+  limit: number,
+): Promise<EvidenceSearchExecution> {
+  let latestMeta: SearchExecutionMeta = { degraded: false };
+  const items = await collectGenericRecallEligible(async (candidateLimit) => {
+    const execution = await searchStoreWithMeta(store, query, { ...options, limit: candidateLimit });
+    latestMeta = execution.meta;
+    return execution.items;
+  }, limit);
+  return { items, meta: latestMeta };
 }
 
 async function searchStoreWithMeta(

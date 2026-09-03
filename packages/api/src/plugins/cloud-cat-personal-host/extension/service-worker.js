@@ -1,15 +1,18 @@
+// biome-ignore-all format: compact executable artifact must remain below the repository 350-line hard cap
 const NATIVE_HOST_NAME = 'ai.catcafe.personal_cloud_cat_host';
 const NATIVE_RECONNECT_ALARM = 'f247-native-host-reconnect';
 const NATIVE_RECONNECT_ALARM_DELAY_MINUTES = 0.5;
 const APPEND_PROTOCOL_VERSION = 2;
 const SAFE_TOKEN = /^[A-Za-z0-9._:-]+$/;
 const MAX_TEXT_BYTES = 128 * 1024;
-const EXTENSION_REVISION = chrome.runtime.getManifest?.().version ?? '0.2.5';
+const ASSISTANT_RESULT_TIMEOUT_MS = 2000;
+const EXTENSION_REVISION = chrome.runtime.getManifest?.().version ?? '0.2.10';
 let nativePort = null;
 let bindingRequestSequence = 0;
 let bindingQuerySequence = 0;
 let pendingBindingRequestId = null;
 let pendingBindingQueryRequestId = null;
+const pendingAssistantFinals = new Map();
 const nativeHealth = { connectAttempts: 0, connected: false, lastErrorCode: null };
 globalThis.__f247NativeHealth = nativeHealth;
 const conversationBinding = { status: 'unbound', conversationId: null, boundAt: null, errorCode: null };
@@ -22,41 +25,65 @@ function nativeDisconnectCode(message) {
   if (normalized.includes('has exited')) return 'HOST_EXITED';
   return 'HOST_DISCONNECTED';
 }
-function validToken(value, maximum) {
-  return typeof value === 'string' && value.length <= maximum && SAFE_TOKEN.test(value);
+const validToken = (value, maximum) => typeof value === 'string' && value.length <= maximum && SAFE_TOKEN.test(value);
+const validText = (value) => typeof value === 'string' && value.trim().length > 0 && new TextEncoder().encode(value).byteLength <= MAX_TEXT_BYTES;
+function validAssistantObservationDiagnostic(value) {
+  const fields = ['v', 'userTurnConnected', 'anchorTurnFound', 'followingTurnCount', 'assistantCandidateCount', 'laterUserTurnPresent', 'assistantHostIdStatus', 'assistantContentStatus', 'streamingControlPresent'];
+  return value?.v === 1 && Object.keys(value).length === fields.length && Object.keys(value).every((field) => fields.includes(field)) && ['userTurnConnected', 'anchorTurnFound', 'laterUserTurnPresent', 'streamingControlPresent'].every((field) => typeof value[field] === 'boolean') && ['followingTurnCount', 'assistantCandidateCount'].every((field) => Number.isInteger(value[field]) && value[field] >= 0 && value[field] <= 1000) && ['not_observed', 'unique', 'missing_or_ambiguous'].includes(value.assistantHostIdStatus) && ['not_observed', 'missing', 'present', 'oversized'].includes(value.assistantContentStatus);
 }
-function validText(value) {
-  return (
-    typeof value === 'string' && value.trim().length > 0 && new TextEncoder().encode(value).byteLength <= MAX_TEXT_BYTES
-  );
+const validRevisions = (value) => validToken(value?.helper, 135) && validToken(value?.extension, 32) && validToken(value?.pageAdapter, 32);
+function settleAssistantFinal(requestId, accepted) {
+  const pending = pendingAssistantFinals.get(requestId);
+  if (!pending) return;
+  pendingAssistantFinals.delete(requestId);
+  clearTimeout(pending.timeout);
+  pending.sendResponse?.({ accepted });
 }
-function validRevisions(value) {
-  return validToken(value?.helper, 135) && validToken(value?.extension, 32) && validToken(value?.pageAdapter, 32);
+function forwardAssistantOutcome(message, sendResponse) {
+  const commonValid =
+    message?.v === APPEND_PROTOCOL_VERSION &&
+    validToken(message.requestId, 200) &&
+    validToken(message.conversationId, 200) &&
+    validToken(message.idempotencyKey, 512) &&
+    validToken(message.hostMessageId, 512) &&
+    validRevisions(message.observedRevisions) &&
+    message.observedRevisions.extension === EXTENSION_REVISION;
+  const valid = commonValid && ((message.kind === 'assistant_final_observed' && validToken(message.assistantMessageId, 512) && validText(message.content)) || (message.kind === 'assistant_observation_failed' && validToken(message.errorCode, 80) && validAssistantObservationDiagnostic(message.diagnostic)));
+  if (!valid || !nativePort) {
+    sendResponse?.({ accepted: false });
+    return false;
+  }
+  settleAssistantFinal(message.requestId, false);
+  const timeout = setTimeout(() => settleAssistantFinal(message.requestId, false), ASSISTANT_RESULT_TIMEOUT_MS);
+  pendingAssistantFinals.set(message.requestId, { sendResponse, timeout });
+  try {
+    if (postNative(message)) return true;
+  } catch {}
+  settleAssistantFinal(message.requestId, false);
+  return false;
 }
-
+function acceptAssistantFinalResult(message) {
+  if (!['assistant_final_result', 'assistant_observation_failure_result'].includes(message?.kind)) return false;
+  if (
+    message.v === APPEND_PROTOCOL_VERSION &&
+    validToken(message.requestId, 200) &&
+    ['accepted', 'rejected', 'retryable'].includes(message.status)
+  ) {
+    settleAssistantFinal(message.requestId, message.status === 'accepted');
+  }
+  return true;
+}
 function validHealthRequest(request) {
-  return (
-    request?.v === APPEND_PROTOCOL_VERSION &&
-    request?.kind === 'health_check' &&
-    validToken(request.requestId, 200) &&
-    validRevisions(request.expectedRevisions)
-  );
+  return request?.v === APPEND_PROTOCOL_VERSION && request?.kind === 'health_check' && validToken(request.requestId, 200) && validRevisions(request.expectedRevisions);
 }
-
 function postNative(message) {
   if (!nativePort || typeof nativePort.postMessage !== 'function') return false;
   nativePort.postMessage(message);
   return true;
 }
-
 function observedRevisionsFor(request, pageAdapter = 'unobserved') {
-  return {
-    helper: request?.expectedRevisions?.helper,
-    extension: EXTENSION_REVISION,
-    pageAdapter,
-  };
+  return { helper: request?.expectedRevisions?.helper, extension: EXTENSION_REVISION, pageAdapter };
 }
-
 function failureFor(request, errorCode, pageAdapter) {
   return {
     v: APPEND_PROTOCOL_VERSION,
@@ -70,7 +97,6 @@ function failureFor(request, errorCode, pageAdapter) {
       : {}),
   };
 }
-
 function exactConversationId(tabUrl) {
   try {
     const url = new URL(tabUrl);
@@ -80,7 +106,6 @@ function exactConversationId(tabUrl) {
     return null;
   }
 }
-
 function exactContentResponse(response, request, kind) {
   const observed = response?.observedRevisions;
   return (
@@ -88,12 +113,9 @@ function exactContentResponse(response, request, kind) {
     response?.kind === kind &&
     response.requestId === request.requestId &&
     (kind !== 'append_result' || response.idempotencyKey === request.idempotencyKey) &&
-    observed?.helper === request.expectedRevisions.helper &&
-    observed?.extension === request.expectedRevisions.extension &&
-    observed?.pageAdapter === request.expectedRevisions.pageAdapter
+    ['helper', 'extension', 'pageAdapter'].every((field) => observed?.[field] === request.expectedRevisions[field])
   );
 }
-
 async function sendToCurrentContentAdapter(tabId, request, resultKind) {
   let response;
   let firstError;
@@ -110,64 +132,44 @@ async function sendToCurrentContentAdapter(tabId, request, resultKind) {
   await chrome.scripting.executeScript({ target: { tabId }, files: ['content-script.js'] });
   return chrome.tabs.sendMessage(tabId, request);
 }
-
 function projectBindingState(update) {
   Object.assign(conversationBinding, update);
   const failed = update.status === 'failed';
   chrome.action.setBadgeText({ text: failed ? '!' : update.status === 'bound' ? '✓' : '' });
-  chrome.action.setTitle({
-    title: failed ? '授权失败：请在目标 ChatGPT 会话重试' : update.status === 'bound' ? '已授权此会话' : '授权此会话',
-  });
+  chrome.action.setTitle({ title: failed ? '授权失败：请在目标 ChatGPT 会话重试' : update.status === 'bound' ? '已授权此会话' : '授权此会话' });
 }
-
+function projectBound(message) {
+  projectBindingState({ status: 'bound', conversationId: message.conversationId, boundAt: message.boundAt, errorCode: null });
+}
+function projectBindingFailure(message, fallback = 'BINDING_FAILED') {
+  projectBindingState({ status: 'failed', conversationId: null, boundAt: null, errorCode: validToken(message?.errorCode, 64) ? message.errorCode : fallback });
+}
 function acceptBindingResult(message) {
   if (message?.v !== 1 || message?.kind !== 'binding_result') return false;
   if (message.requestId !== pendingBindingRequestId) return true;
   pendingBindingRequestId = null;
   if (message.status === 'bound' && validToken(message.conversationId, 200) && typeof message.boundAt === 'string') {
-    projectBindingState({
-      status: 'bound',
-      conversationId: message.conversationId,
-      boundAt: message.boundAt,
-      errorCode: null,
-    });
+    projectBound(message);
     return true;
   }
-  projectBindingState({
-    status: 'failed',
-    conversationId: null,
-    boundAt: null,
-    errorCode: validToken(message.errorCode, 64) ? message.errorCode : 'BINDING_FAILED',
-  });
+  projectBindingFailure(message);
   return true;
 }
-
 function acceptBindingStatus(message) {
   if (message?.v !== 1 || message?.kind !== 'binding_status') return false;
   if (message.requestId !== pendingBindingQueryRequestId) return true;
   pendingBindingQueryRequestId = null;
   if (message.status === 'bound' && validToken(message.conversationId, 200) && typeof message.boundAt === 'string') {
-    projectBindingState({
-      status: 'bound',
-      conversationId: message.conversationId,
-      boundAt: message.boundAt,
-      errorCode: null,
-    });
+    projectBound(message);
     return true;
   }
   if (message.status === 'unbound' && message.errorCode === 'NEEDS_BINDING') {
     projectBindingState({ status: 'unbound', conversationId: null, boundAt: null, errorCode: null });
     return true;
   }
-  projectBindingState({
-    status: 'failed',
-    conversationId: null,
-    boundAt: null,
-    errorCode: validToken(message.errorCode, 64) ? message.errorCode : 'BINDING_FAILED',
-  });
+  projectBindingFailure(message);
   return true;
 }
-
 async function bindClickedConversation(tab) {
   const conversationId = exactConversationId(tab?.url);
   if (!conversationId) {
@@ -191,7 +193,6 @@ async function bindClickedConversation(tab) {
     projectBindingState({ status: 'failed', conversationId: null, boundAt: null, errorCode: 'HOST_DISCONNECTED' });
   }
 }
-
 async function dispatchAppend(request) {
   const expected = request?.expectedRevisions;
   if (
@@ -241,7 +242,6 @@ async function dispatchAppend(request) {
     postNative(failureFor(request, 'CONTENT_SCRIPT_UNAVAILABLE'));
   }
 }
-
 async function dispatchHealth(request) {
   const expected = request?.expectedRevisions;
   const result = (status, errorCode, pageAdapter = 'unobserved') => ({
@@ -289,7 +289,6 @@ async function dispatchHealth(request) {
     postNative(result('stale_adapter', 'CONTENT_SCRIPT_UNAVAILABLE'));
   }
 }
-
 function connectNativeHost() {
   nativeHealth.connectAttempts += 1;
   const port = chrome.runtime.connectNative(NATIVE_HOST_NAME);
@@ -297,6 +296,7 @@ function connectNativeHost() {
   nativeHealth.connected = true;
   nativeHealth.lastErrorCode = null;
   port.onMessage.addListener((message) => {
+    if (acceptAssistantFinalResult(message)) return;
     if (acceptBindingStatus(message)) return;
     if (acceptBindingResult(message)) return;
     if (message?.kind === 'health_check') {
@@ -319,6 +319,7 @@ function connectNativeHost() {
     console.warn('F247_NATIVE_HOST_DISCONNECTED', nativeHealth.lastErrorCode);
     if (nativePort === port) {
       nativePort = null;
+      for (const requestId of pendingAssistantFinals.keys()) settleAssistantFinal(requestId, false);
       pendingBindingQueryRequestId = null;
       setTimeout(() => {
         if (!nativePort) connectNativeHost();
@@ -329,19 +330,18 @@ function connectNativeHost() {
   pendingBindingQueryRequestId = requestId;
   postNative({ v: 1, kind: 'query_binding', requestId });
 }
-
-chrome.runtime.onMessage.addListener((message) => {
+chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+  if (['assistant_final_observed', 'assistant_observation_failed'].includes(message?.kind)) {
+    return forwardAssistantOutcome(message, sendResponse);
+  }
   if (message?.kind !== 'append_progress') return false;
   postNative(message);
   return false;
 });
-
 chrome.alarms.onAlarm.addListener((alarm) => {
   if (alarm?.name === NATIVE_RECONNECT_ALARM && !nativePort) connectNativeHost();
 });
-
 chrome.action.onClicked.addListener(bindClickedConversation);
-
 void chrome.alarms.create(NATIVE_RECONNECT_ALARM, {
   delayInMinutes: NATIVE_RECONNECT_ALARM_DELAY_MINUTES,
   periodInMinutes: NATIVE_RECONNECT_ALARM_DELAY_MINUTES,

@@ -3,6 +3,7 @@ import {
   buildCodexActiveWriterDiagnostics,
   type CodexActiveWriterDetection,
   CodexActiveWriterRecoveryError,
+  type CodexNativeResumeReplacementProvenance,
 } from '../../runtime-session/CodexSessionReplacementProvenance.js';
 import type { AgentCarrierSessionFactory, AgentCarrierSessionOptions } from '../../types.js';
 import {
@@ -11,6 +12,7 @@ import {
   type CodexAppServerLifecycleSnapshot,
   type CodexAppServerRunInput,
 } from './CodexAppServerClient.js';
+import { CodexAppServerCarrierReplacementRequiredError } from './CodexAppServerThreadResolver.js';
 import {
   type CodexCapacityRecoveryAnchor,
   type CodexCapacityRecoveryBlockReason,
@@ -158,6 +160,7 @@ export async function* runCodexAppServerWithRecovery(options: CodexAppServerRunn
   let recoveryAttempt = 0;
   let currentThread = options.runInput.thread;
   let resumeThreadId = currentThread.kind === 'resume' ? currentThread.threadId : undefined;
+  let resumeReplacement: CodexNativeResumeReplacementProvenance | undefined;
   let recoveryInstruction: string | undefined;
   let imagePaths = options.runInput.imagePaths;
   const checkpoint = new CodexCapacityRecoveryCheckpoint(options.recoveryAnchor);
@@ -170,7 +173,7 @@ export async function* runCodexAppServerWithRecovery(options: CodexAppServerRunn
     try {
       // Protocol cancellation is owned by CodexAppServerClient. Passing the
       // caller signal into the raw carrier would race turn/interrupt with SIGINT.
-      const { signal: _transportSignal, ...transportOptions } = options.sessionOptions;
+      const { signal: _transportSignal, sessionId: _configuredSessionId, ...transportOptions } = options.sessionOptions;
       const wire = await options.sessionFactory({
         ...transportOptions,
         ...(currentThread.kind === 'resume' ? { sessionId: currentThread.threadId } : {}),
@@ -187,6 +190,7 @@ export async function* runCodexAppServerWithRecovery(options: CodexAppServerRunn
         ...options.runInput,
         thread: currentThread,
         recoveryAttempt,
+        ...(resumeReplacement ? { resumeReplacement } : { resumeReplacement: undefined }),
         ...(recoveryInstruction ? { recoveryInstruction } : { recoveryInstruction: undefined }),
         ...(imagePaths ? { imagePaths } : { imagePaths: undefined }),
       };
@@ -221,6 +225,28 @@ export async function* runCodexAppServerWithRecovery(options: CodexAppServerRunn
       }
 
       const activeWriterThreadId = currentThread.kind === 'resume' ? currentThread.threadId : undefined;
+      if (
+        error instanceof CodexAppServerCarrierReplacementRequiredError &&
+        activeWriterThreadId === error.replacement.previousNativeThreadId &&
+        !capacityTerminalObserved &&
+        transportAttempt < retryBudget &&
+        canRetryBeforeTurn(failedAt, options.runInput.signal)
+      ) {
+        transportAttempt++;
+        recoveryAttempt++;
+        resumeReplacement = error.replacement;
+        currentThread = { kind: 'start' };
+        codexAppServerRecovery.add(1, { status: 'native_resume_replacement' });
+        yield {
+          type: 'app_server.recovery',
+          reason: 'pre_turn_transport',
+          attempt: transportAttempt,
+          retryBudget,
+          threadId: activeWriterThreadId,
+        } satisfies CodexAppServerRecoveryEvent;
+        continue;
+      }
+
       if (
         activeWriterThreadId &&
         isActiveWriterError(error) &&

@@ -195,6 +195,60 @@ export class MemoryCueEpisodeStore {
     ).map(fromRow);
   }
 
+  hasConsumptionOutcome(scope: RecallScopeV1, cueId: string, outcome: MemoryCueConsumptionOutcome): boolean {
+    const row = this.db
+      .prepare(
+        `SELECT 1 FROM memory_cue_events
+         WHERE owner_user_id = ? AND thread_id = ? AND invocation_id = ?
+           AND cue_id = ? AND axis = 'consumption' AND consumption_outcome = ?
+         LIMIT 1`,
+      )
+      .get(scope.ownerUserId, scope.threadId, scope.invocationId, cueId, outcome);
+    return row !== undefined;
+  }
+
+  hasExactConsumptionRequest(input: {
+    scope: RecallScopeV1;
+    cueId: string;
+    outcome: MemoryCueConsumptionOutcome;
+    idempotencyKey: string;
+  }): boolean {
+    const row = this.db
+      .prepare(
+        `SELECT 1 FROM memory_cue_events
+         WHERE owner_user_id = ? AND thread_id = ? AND invocation_id = ?
+           AND cue_id = ? AND axis = 'consumption' AND consumption_outcome = ? AND idempotency_key = ?
+         LIMIT 1`,
+      )
+      .get(
+        input.scope.ownerUserId,
+        input.scope.threadId,
+        input.scope.invocationId,
+        input.cueId,
+        input.outcome,
+        input.idempotencyKey,
+      );
+    return row !== undefined;
+  }
+
+  hasTerminalConsumptionForSource(input: {
+    ownerUserId: string;
+    resolverFamily: RecallResolverFamily;
+    sourceAnchor: string;
+    sourceRevision: string;
+  }): boolean {
+    const row = this.db
+      .prepare(
+        `SELECT 1 FROM memory_cue_events
+         WHERE owner_user_id = ? AND resolver_family = ?
+           AND source_anchor = ? AND source_revision = ?
+           AND axis = 'consumption' AND consumption_outcome IN ('applied', 'dismissed')
+         LIMIT 1`,
+      )
+      .get(input.ownerUserId, input.resolverFamily, input.sourceAnchor, input.sourceRevision);
+    return row !== undefined;
+  }
+
   findPresentedCoordinate(scope: RecallScopeV1, cueId: string, expiresAt: number): MemoryCueDrillCoordinate | null {
     const row = this.db
       .prepare(

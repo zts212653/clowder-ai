@@ -10,7 +10,9 @@ export const REJECT_PROPOSAL_DISPOSITION_CANDIDATE_LUA = `
 ${PERSON_MEMORY_DISPOSITION_PREFLIGHT_LUA}
 ${HUMAN_DISPOSITION_RECEIPT_FUNCTIONS_LUA}
 ${F276_DISPOSITION_VALIDATION_LUA}
-if #KEYS < 10 or #ARGV ~= 18 then return 'INVALID_ARGUMENTS' end
+if #KEYS < 11 or #ARGV ~= 19 then return 'INVALID_ARGUMENTS' end
+local settledKeyIndex = tonumber(ARGV[19]) or 0
+if settledKeyIndex < 11 or settledKeyIndex > #KEYS then return 'INVALID_ARGUMENTS' end
 if not allowed_type(KEYS[1], 'string')
   or not allowed_type(KEYS[2], 'zset')
   or not allowed_type(KEYS[3], 'string')
@@ -24,7 +26,9 @@ if not allowed_type(KEYS[1], 'string')
   return 'TYPE_CONFLICT'
 end
 for index = 11, #KEYS do
-  if not allowed_type(KEYS[index], 'set') then return 'TYPE_CONFLICT' end
+  if index == settledKeyIndex then
+    if not allowed_type(KEYS[index], 'zset') then return 'TYPE_CONFLICT' end
+  elseif not allowed_type(KEYS[index], 'set') then return 'TYPE_CONFLICT' end
 end
 if redis.call('EXISTS', KEYS[7]) == 1 then return 'NOT_AVAILABLE' end
 local score = finite_number(ARGV[14])
@@ -154,6 +158,7 @@ redis.call('SET', KEYS[3], ARGV[4])
 redis.call('SET', KEYS[4], ARGV[8])
 redis.call('SET', KEYS[5], ARGV[9])
 redis.call('SET', KEYS[6], ARGV[10])
+redis.call('ZADD', KEYS[settledKeyIndex], score, ARGV[3])
 for offset = 0, subjectCount - 1 do
   redis.call('SADD', KEYS[subjectStart + offset], ARGV[3])
 end

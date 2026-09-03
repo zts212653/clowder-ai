@@ -9,6 +9,8 @@ import {
   type ContextAttachment,
   ContextAttachmentsSchema,
   catIdSchema,
+  entrustedWorkClosureSpecV1Schema,
+  entrustedWorkV1Schema,
   type FileContent,
   type ImageContent,
   MESSAGE_BUNDLE_MAX_ITEMS,
@@ -20,6 +22,41 @@ import { z } from 'zod';
 
 const boundedBundleId = z.string().trim().min(1).max(128);
 const MESSAGE_BUNDLE_MAX_TARGET_CATS = 10;
+const custodyBoundedRef = z.string().trim().min(1).max(1_000);
+
+export const custodyOfferSourceParamsSchema = z.object({ sourceMessageId: custodyBoundedRef }).strict();
+
+export const custodyOfferReferenceSchema = z
+  .object({
+    sourceMessageRevision: z.string().regex(/^sha256:[a-f0-9]{64}$/),
+    offerId: custodyBoundedRef,
+  })
+  .strict();
+
+export const custodyOfferRefusalSchema = custodyOfferReferenceSchema
+  .extend({ disposition: z.enum(['declined', 'dismissed']) })
+  .strict();
+
+export const custodyOfferRecognitionSchema = z
+  .object({
+    sourceMessageId: custodyBoundedRef,
+    reasonCode: z.enum(['future_deliverable', 'follow_up_commitment', 'time_bound_obligation']),
+  })
+  .strict();
+
+export const custodyOfferRetryAdmissionSchema = z
+  .object({
+    sourceMessageId: custodyBoundedRef,
+    sourceMessageRevision: z.string().regex(/^sha256:[a-f0-9]{64}$/),
+    offerId: custodyBoundedRef,
+    title: z.string().trim().min(1).max(200),
+    why: z.string().max(1_000).default(''),
+    intendedOutcome: z.string().trim().min(1).max(4_000),
+    closure: entrustedWorkClosureSpecV1Schema,
+    time: entrustedWorkV1Schema.shape.time.optional(),
+    artifactRefs: z.array(custodyBoundedRef).max(64).optional(),
+  })
+  .strict();
 
 export const messageBundleForwardSchema = z
   .object({

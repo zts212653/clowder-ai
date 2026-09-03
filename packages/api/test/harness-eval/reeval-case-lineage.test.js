@@ -26,7 +26,9 @@ function event(type, overrides = {}) {
   const actors = {
     verdict_cycle_observed: { kind: 'automation', id: 'eval-verdict-closure-reconciler' },
     responsibility_blocked: { kind: 'automation', id: 'eval-verdict-closure-reconciler' },
+    custody_dispatch_blocked: { kind: 'automation', id: 'eval-verdict-closure-reconciler' },
     responsibility_bound: { kind: 'automation', id: 'eval-verdict-closure-reconciler' },
+    owner_reassigned: { kind: 'cvo', id: 'operator' },
     action_planned: { kind: 'cat', id: 'codex-sol' },
     main_landed: { kind: 'cat', id: 'codex-sol' },
     live_active: { kind: 'cat', id: 'codex-sol' },
@@ -57,6 +59,16 @@ function event(type, overrides = {}) {
           featureId: 'F203',
           ownerCatId: 'codex-sol',
           candidateThreadIds: [],
+        }
+      : {}),
+    ...(type === 'custody_dispatch_blocked'
+      ? {
+          stage: 'reevaluation',
+          reasonCode: 'carrier_not_enqueued',
+          taskId: 'task-reeval-1',
+          leaseId: 'lease-reeval-1',
+          leaseGeneration: 1,
+          carrierMessageId: 'message-reeval-blocked',
         }
       : {}),
     ...(['main_landed', 'live_active'].includes(type) ? { commitSha: 'a'.repeat(40) } : {}),
@@ -144,6 +156,45 @@ describe('F266 stable case lifecycle', () => {
     assert.throws(
       () => projectReevalCase(root, [...events.slice(0, 4), event('live_active', { commitSha: 'b'.repeat(40) })]),
       /same main commit/,
+    );
+  });
+
+  it('keeps custody dispatch blockers projectable and clears them on the successful transition', () => {
+    const active = throughPending().slice(0, 5);
+    const blocked = event('custody_dispatch_blocked', {
+      refs: [ref('task', 'task:task-reeval-1'), ref('other', 'lease:lease-reeval-1:1')],
+    });
+    const blockedProjection = projectReevalCase(root, [...active, blocked]);
+
+    assert.equal(EvalLifecycleEventSchema.safeParse(blocked).success, true);
+    assert.equal(blockedProjection.status, 'live_active');
+    assert.equal(blockedProjection.custodyDispatchBlocker?.reasonCode, 'carrier_not_enqueued');
+
+    const recovered = projectReevalCase(root, [
+      ...active,
+      blocked,
+      event('reeval_requested', { refs: [ref('reeval', 'eval:capability-wakeup:2026-08-08')] }),
+    ]);
+    assert.equal(recovered.status, 'reeval_pending');
+    assert.equal(recovered.custodyDispatchBlocker, undefined);
+  });
+  it('does not allow owner reassignment to bypass custody held by a dispatch blocker', () => {
+    const opened = event('verdict_cycle_observed');
+    const blocked = event('custody_dispatch_blocked', {
+      stage: 'responsibility',
+      taskId: 'task-responsibility-1',
+      leaseId: 'lease-responsibility-1',
+      carrierMessageId: 'message-responsibility-blocked',
+      refs: [
+        ref('task', 'task:task-responsibility-1'),
+        ref('other', 'lease:lease-responsibility-1:1'),
+        ref('other', 'message:message-responsibility-blocked'),
+      ],
+    });
+
+    assert.throws(
+      () => projectReevalCase(root, [opened, blocked, event('owner_reassigned', { targetOwnerCatId: 'opus' })]),
+      /active custody must be released before reassignment/,
     );
   });
 

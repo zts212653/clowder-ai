@@ -4,7 +4,7 @@ related_features: [F102, F152, F186, F188, F192, F200, F209, F227, F231, F255, F
 topics: [memory, people, relationship, privacy, provenance, lifecycle]
 doc_kind: spec
 created: 2026-07-25
-updated: 2026-08-11
+updated: 2026-08-31
 description: "为每位用户私域维护第三方人物、第一等关系与互动事件，并以有界关系卡按需解引用。"
 description_source: model
 description_author: codex-sol
@@ -460,6 +460,10 @@ You 与所有 owner-authorized cats。Activation = 已 materialize person 在新
 - [x] AC-A25: F153 health 只记录低基数 `capture` / `deferred_daily` stage outcome 与 latency，
   不含人物、owner、receipt、source 或 hash；utility 继续消费既有 F282/F276 eval，不以工程计数
   冒充 keep/tune/sunset verdict。
+- [x] AC-A26: terminal `materialized | rejected` candidate 必须进入 Approval Hub 历史并保留决定时间；
+  materialized 历史只从 canonical person 与 content-free decision receipt 投影，rejected 历史不得恢复
+  已按 AC-A10 清除的 name/draft/excerpt。partial/not-now/withdrawn 不进入历史；undo、person hard-forget
+  与 exact proposal forget 原子移除 settled 索引，部署前历史由 additive/idempotent backfill 补齐。
 
 ### Phase B（card + lifecycle）
 

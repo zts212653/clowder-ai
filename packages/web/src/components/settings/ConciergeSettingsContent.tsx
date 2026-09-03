@@ -188,7 +188,7 @@ export function ConciergeSettingsContent() {
             checked={state.skin === 'yanyan-codex'}
             disabled={saving}
             label="🐱 砚砚 v1"
-            hint="9 态动画精灵图，砚砚专属皮肤。（默认）"
+            hint="9 态动画精灵图，砚砚专属皮肤。"
             onChange={() => updateConfig({ skin: 'yanyan-codex' })}
           />
           <RadioOption
@@ -197,7 +197,7 @@ export function ConciergeSettingsContent() {
             checked={state.skin === 'xianxian-codex'}
             disabled={saving}
             label="🐱 宪宪 v1"
-            hint="9 态动画精灵图，宪宪专属皮肤（视频提取）。"
+            hint="9 态动画精灵图，宪宪专属皮肤（视频提取）。（默认）"
             onChange={() => updateConfig({ skin: 'xianxian-codex' })}
           />
         </div>

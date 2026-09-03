@@ -27,7 +27,7 @@ describe('F260 INV-5: entity seeds skip proposal-provenance entities', () => {
 
     // Entity with normal provenance — should NOT be skipped
     const seedEntity = {
-      entityId: 'person:landy',
+      entityId: 'person:operator',
       type: 'person',
       canonicalName: 'You',
       aliases: ['You', 'you'],

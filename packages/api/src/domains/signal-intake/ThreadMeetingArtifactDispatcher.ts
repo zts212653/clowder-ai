@@ -10,7 +10,9 @@ import type { InvocationQueue } from '../cats/services/agents/invocation/Invocat
 import { createInitialQueuedMessageCustody } from '../cats/services/agents/invocation/QueuedMessageCustodyCoordinator.js';
 import type { QueueProcessor } from '../cats/services/agents/invocation/QueueProcessor.js';
 import type { IMessageStore } from '../cats/services/stores/ports/MessageStore.js';
+import { projectQueueReceipt } from '../cats/services/stores/ports/queued-message-receipt.js';
 import { buildAsrPersonMemoryDynamicScenes } from './AsrPersonMemorySceneBuilder.js';
+import { createMeetingArtifactDescriptor } from './MeetingArtifactResourceService.js';
 import type { MeetingArtifactDispatcher, MeetingPresentationRetryReceipt } from './MeetingIntakeActionService.js';
 import { meetingArtifactCarrierIdempotencyKey } from './meeting-artifact-resource-contract.js';
 import type { MeetingThreadStore } from './ThreadDestinationAuthority.js';
@@ -21,6 +23,9 @@ export interface ThreadMeetingArtifactDispatcherOptions {
   readonly messageStore: Pick<IMessageStore, 'append' | 'getByIdempotencyKey'>;
   readonly invocationQueue: Pick<InvocationQueue, 'enqueue' | 'backfillMessageId' | 'rollbackEnqueue'>;
   readonly queueProcessor: Pick<QueueProcessor, 'processNext'>;
+  readonly socketManager: {
+    emitToUser(userId: string, event: string, data: unknown): void;
+  };
   readonly supportsPresentationRetry: (catId: CatId) => boolean;
   readonly now?: () => number;
 }
@@ -31,6 +36,21 @@ const MEETING_SOURCE = {
   label: '飞书会议入站 / 录音豆',
   icon: 'feishu',
 } as const;
+const ALPHA_CANARY_SOURCE = {
+  connector: 'cat-cafe-alpha',
+  label: 'F296 Alpha canonical producer',
+  icon: 'cat-cafe',
+} as const;
+
+type DynamicCarrierIntake = Pick<MeetingIntake, 'intakeId' | 'ownerId' | 'judgmentState' | 'choices' | 'updatedAt'>;
+
+interface DynamicCarrierReceipt {
+  readonly queueEntryId: string;
+  readonly sourceMessageId: string;
+  readonly targetCatId: CatId;
+  readonly deduped: boolean;
+  readonly started: boolean;
+}
 
 export function buildMeetingArtifactPrompt(intake: MeetingIntake, artifact: MeetingArtifactDescriptor): string {
   const choices = intake.choices;
@@ -106,7 +126,65 @@ export class ThreadMeetingArtifactDispatcher implements MeetingArtifactDispatche
     const threadId = destinationHandle ? parsePrivateThreadHandle(destinationHandle) : null;
     if (!threadId)
       throw Object.assign(new Error('meeting destination is not a private thread'), { code: 'ROUTE_UNAVAILABLE' });
-    const thread = await this.options.threadStore.get(threadId);
+    const content = buildMeetingArtifactPrompt(input.intake, input.artifact);
+    await this.dispatchDynamicCarrier({
+      intake: input.intake,
+      artifact: input.artifact,
+      threadId,
+      content,
+      source: MEETING_SOURCE,
+    });
+  }
+
+  async deliverAlphaDynamicCanary(input: {
+    readonly ownerId: string;
+    readonly threadId: string;
+    readonly runId: string;
+  }): Promise<DynamicCarrierReceipt> {
+    if (!/^[0-9a-f]{40}$/.test(input.runId)) {
+      throw Object.assign(new Error('Alpha canary run id is invalid'), { code: 'ROUTE_UNAVAILABLE' });
+    }
+    const observedAt = this.now();
+    const intakeId = `f296-alpha-${input.runId}`;
+    const sourceText = 'F296 Alpha canary: canonical person-memory write opportunity.';
+    const artifact = createMeetingArtifactDescriptor({
+      intakeId,
+      sourceHandle: `cat-cafe-alpha://f296/${input.runId}`,
+      contentType: 'text/plain',
+      text: sourceText,
+    });
+    const intake: DynamicCarrierIntake = {
+      intakeId,
+      ownerId: input.ownerId,
+      judgmentState: 'confirmed',
+      choices: {
+        speakerMap: { canary: 'F296 Alpha canary' },
+        destinationHandle: `host:private-thread:${input.threadId}`,
+      },
+      updatedAt: observedAt,
+    };
+    const content = [
+      '[F296 Alpha host-authored canonical dynamic canary]',
+      'This invocation verifies the canonical meeting-artifact write-opportunity presentation path.',
+      'Reply with the single word OK.',
+    ].join('\n');
+    return this.dispatchDynamicCarrier({
+      intake,
+      artifact,
+      threadId: input.threadId,
+      content,
+      source: ALPHA_CANARY_SOURCE,
+    });
+  }
+
+  private async dispatchDynamicCarrier(input: {
+    readonly intake: DynamicCarrierIntake;
+    readonly artifact: MeetingArtifactDescriptor;
+    readonly threadId: string;
+    readonly content: string;
+    readonly source: { readonly connector: string; readonly label: string; readonly icon: string };
+  }): Promise<DynamicCarrierReceipt> {
+    const thread = await this.options.threadStore.get(input.threadId);
     if (!thread || thread.deletedAt || thread.createdBy !== input.intake.ownerId) {
       throw Object.assign(new Error('meeting destination is no longer available'), { code: 'ROUTE_UNAVAILABLE' });
     }
@@ -114,22 +192,21 @@ export class ThreadMeetingArtifactDispatcher implements MeetingArtifactDispatche
     if (!catId)
       throw Object.assign(new Error('meeting destination has no cat workflow'), { code: 'ROUTE_UNAVAILABLE' });
 
-    const content = buildMeetingArtifactPrompt(input.intake, input.artifact);
     const queuedAt = this.now();
     const dynamicSceneEntries = buildAsrPersonMemoryDynamicScenes({
       intake: input.intake,
       artifact: input.artifact,
-      threadId,
+      threadId: input.threadId,
       consumerCatId: catId,
       now: queuedAt,
     });
     const idempotencyKey = meetingArtifactCarrierIdempotencyKey(input.intake.intakeId, input.artifact.sourceRevision);
     const enqueue = this.options.invocationQueue.enqueue({
-      threadId,
+      threadId: input.threadId,
       userId: input.intake.ownerId,
       ownerAuthProvenance: 'strict',
       idempotencyKey,
-      content,
+      content: input.content,
       source: 'connector',
       targetCats: [catId],
       intent: 'execute',
@@ -137,20 +214,22 @@ export class ThreadMeetingArtifactDispatcher implements MeetingArtifactDispatche
     if (enqueue.outcome === 'full' || !enqueue.entry) {
       throw Object.assign(new Error('meeting destination queue is full'), { code: 'ROUTE_UNAVAILABLE' });
     }
+    let sourceMessageId = enqueue.entry.messageId ?? null;
+    let sourceMessage: Awaited<ReturnType<IMessageStore['append']>> | null = null;
     if (!enqueue.deduped || !enqueue.entry.messageId) {
       try {
         const stored = await this.options.messageStore.append({
           userId: input.intake.ownerId,
           catId: null,
-          content,
+          content: input.content,
           mentions: [catId],
           timestamp: queuedAt,
-          threadId,
+          threadId: input.threadId,
           idempotencyKey,
           deliveryStatus: 'queued',
           queueCustody: createInitialQueuedMessageCustody(enqueue.entry),
           source: {
-            ...MEETING_SOURCE,
+            ...input.source,
             meta: { sourceRevision: input.artifact.sourceRevision },
           },
           extra: {
@@ -168,17 +247,84 @@ export class ThreadMeetingArtifactDispatcher implements MeetingArtifactDispatche
             dynamicSceneEntries,
           },
         });
-        this.options.invocationQueue.backfillMessageId(threadId, input.intake.ownerId, enqueue.entry.id, stored.id);
+        sourceMessage = stored;
+        sourceMessageId = stored.id;
+        this.options.invocationQueue.backfillMessageId(
+          input.threadId,
+          input.intake.ownerId,
+          enqueue.entry.id,
+          stored.id,
+        );
       } catch (error) {
-        this.options.invocationQueue.rollbackEnqueue(threadId, input.intake.ownerId, enqueue.entry.id);
+        this.options.invocationQueue.rollbackEnqueue(input.threadId, input.intake.ownerId, enqueue.entry.id);
         throw error;
       }
     }
+    if (!sourceMessageId) {
+      throw Object.assign(new Error('meeting destination source receipt is unavailable'), {
+        code: 'ROUTE_UNAVAILABLE',
+      });
+    }
+    sourceMessage ??= await this.options.messageStore.getByIdempotencyKey(
+      input.intake.ownerId,
+      input.threadId,
+      idempotencyKey,
+    );
+    if (
+      !sourceMessage ||
+      sourceMessage.id !== sourceMessageId ||
+      sourceMessage.userId !== input.intake.ownerId ||
+      sourceMessage.threadId !== input.threadId ||
+      sourceMessage.catId !== null ||
+      (sourceMessage.deliveryStatus !== 'queued' && sourceMessage.deliveryStatus !== 'delivered') ||
+      !sourceMessage.source
+    ) {
+      throw Object.assign(new Error('meeting destination source receipt failed admission publication'), {
+        code: 'ROUTE_UNAVAILABLE',
+      });
+    }
+    if (sourceMessage.deliveryStatus === 'queued') {
+      const queueReceipt = sourceMessage.queueCustody ? projectQueueReceipt(sourceMessage.queueCustody) : undefined;
+      // Admission publication is synchronous and happens before processNext can emit
+      // spawn_started. The source remains queued (and therefore excluded from prompt
+      // context); this event only installs its durable owner-visible timeline anchor.
+      this.options.socketManager.emitToUser(input.intake.ownerId, 'messages_queued', {
+        threadId: input.threadId,
+        messageIds: [sourceMessage.id],
+        messages: [
+          {
+            id: sourceMessage.id,
+            content: sourceMessage.content,
+            catId: sourceMessage.catId,
+            timestamp: sourceMessage.timestamp,
+            mentions: sourceMessage.mentions,
+            userId: sourceMessage.userId,
+            source: sourceMessage.source,
+            ...(sourceMessage.contentBlocks ? { contentBlocks: sourceMessage.contentBlocks } : {}),
+            extra: {
+              ...(sourceMessage.extra ?? {}),
+              ...(queueReceipt ? { queueReceipt } : {}),
+            },
+            ...(sourceMessage.origin ? { origin: sourceMessage.origin } : {}),
+            ...(sourceMessage.replyTo ? { replyTo: sourceMessage.replyTo } : {}),
+            ...(sourceMessage.mentionsUser ? { mentionsUser: true } : {}),
+          },
+        ],
+      });
+    }
+    let started = false;
     try {
-      await this.options.queueProcessor.processNext(threadId, input.intake.ownerId);
+      started = (await this.options.queueProcessor.processNext(input.threadId, input.intake.ownerId)).started;
     } catch {
       // Durable queue custody owns later execution; admission is already complete.
     }
+    return {
+      queueEntryId: enqueue.entry.id,
+      sourceMessageId,
+      targetCatId: catId,
+      deduped: enqueue.deduped === true,
+      started,
+    };
   }
 
   async retryPresentation(input: {

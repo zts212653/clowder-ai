@@ -2,15 +2,15 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { entry, harness, installPayload, readHeaders, writeHeaders } from './plugin-official-routes.fixture.js';
 
-test('pins the runnable alpha.8 artifact and activates its package-owned owner auth contract', () => {
-  assert.equal(entry.version, '0.1.0-alpha.8');
+test('pins the runnable alpha.9 artifact and activates its package-owned owner auth contract', () => {
+  assert.equal(entry.version, '0.1.0-alpha.9');
   assert.equal(
     entry.archiveUrl,
-    'https://registry.npmjs.org/@clowder-ai/feishu-meeting-intake/-/feishu-meeting-intake-0.1.0-alpha.8.tgz',
+    'https://registry.npmjs.org/@clowder-ai/feishu-meeting-intake/-/feishu-meeting-intake-0.1.0-alpha.9.tgz',
   );
   assert.equal(
     entry.packageDigest,
-    'sha512-unl8sq1rEMckgiqE8mI0e0+Qa6l69J4cxT2GOe5AMUSomkrbmpKdZR/EYljvH+hP4tNaR9l1KQd6T9GWX49L4w==',
+    'sha512-d1wf5Il1Ls18Db9EUB4S0qqhDFRe6mSLIyv9E3Tz7VqI59gffHCe+JKmCJOYVGJBiv1ItrTq8ChthF0SzdSWYQ==',
   );
   assert.deepEqual(entry.ownerAuth, {
     kind: 'lark-cli-device',
@@ -39,13 +39,13 @@ test('projects exact official catalog and durable installed state only to authen
     assert.equal(response.statusCode, 200, response.payload);
     const body = response.json();
     assert.equal(body.plugins[0].catalogId, 'feishu-meeting-intake');
-    assert.equal(body.plugins[0].version, '0.1.0-alpha.8');
-    assert.equal(body.plugins[0].availableVersion, '0.1.0-alpha.8');
+    assert.equal(body.plugins[0].version, '0.1.0-alpha.9');
+    assert.equal(body.plugins[0].availableVersion, '0.1.0-alpha.9');
     assert.equal(body.plugins[0].packageDigest, entry.packageDigest);
     assert.equal(body.plugins[0].updateAvailable, false);
     assert.equal(body.plugins[0].ownerAuthAvailable, true);
     assert.equal(body.plugins[0].instance.lifecycleRevision, 1);
-    assert.equal(body.plugins[0].instance.installedVersion, '0.1.0-alpha.8');
+    assert.equal(body.plugins[0].instance.installedVersion, '0.1.0-alpha.9');
     assert.equal(body.plugins[0].instance.packageDigest, entry.packageDigest);
     assert.equal(body.plugins[0].instance.runtimeState, 'stopped');
     assert.deepEqual(body.plugins[0].instance.lastRuntimeError, {
@@ -130,6 +130,156 @@ test('blocks activation when the package detects an owner catch-up decision wind
     assert.equal(response.statusCode, 409, response.payload);
     assert.equal(response.json().code, 'CATCH_UP_REQUIRED');
     assert.deepEqual(processCalls, []);
+  } finally {
+    await app.close();
+  }
+});
+
+test('repair cannot bypass owner auth while restoring the runtime', async () => {
+  const { app, store, processCalls } = await harness({
+    auth: {
+      status: async () => ({ status: 'not_connected' }),
+      start: async () => {
+        throw new Error('not used');
+      },
+    },
+    meetingIntake: {
+      project: async () => undefined,
+      detect: async () => ({ status: 'idle' }),
+      preview: async () => {
+        throw new Error('not used');
+      },
+      resolve: async () => {
+        throw new Error('not used');
+      },
+    },
+  });
+  try {
+    await store.transaction((transaction) => {
+      const current = transaction.instances.get('pi_official');
+      transaction.instances.put({
+        ...current,
+        configReadiness: 'ready',
+        activationState: 'error',
+        runtimeState: 'stopped',
+      });
+    });
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/plugins/official/pi_official/repair',
+      headers: writeHeaders,
+      remoteAddress: '127.0.0.1',
+      payload: { expectedRevision: 1 },
+    });
+
+    assert.equal(response.statusCode, 409, response.payload);
+    assert.equal(response.json().code, 'AUTH_REQUIRED');
+    assert.deepEqual(processCalls, []);
+  } finally {
+    await app.close();
+  }
+});
+
+test('repair cannot bypass the owner catch-up decision before restoring the runtime', async () => {
+  const { app, store, processCalls } = await harness({
+    auth: {
+      status: async () => ({ status: 'connected' }),
+      start: async () => {
+        throw new Error('not used');
+      },
+    },
+    meetingIntake: {
+      project: async () => undefined,
+      detect: async () => ({
+        status: 'needs-owner',
+        fromCursor: 'poll-v1:1000',
+        throughCursor: 'poll-v1:5000',
+        detectedAt: 5_200,
+      }),
+      preview: async () => {
+        throw new Error('not used');
+      },
+      resolve: async () => {
+        throw new Error('not used');
+      },
+    },
+  });
+  try {
+    await store.transaction((transaction) => {
+      const current = transaction.instances.get('pi_official');
+      transaction.instances.put({
+        ...current,
+        configReadiness: 'ready',
+        activationState: 'error',
+        runtimeState: 'stopped',
+      });
+    });
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/plugins/official/pi_official/repair',
+      headers: writeHeaders,
+      remoteAddress: '127.0.0.1',
+      payload: { expectedRevision: 1 },
+    });
+
+    assert.equal(response.statusCode, 409, response.payload);
+    assert.equal(response.json().code, 'CATCH_UP_REQUIRED');
+    assert.deepEqual(processCalls, []);
+  } finally {
+    await app.close();
+  }
+});
+
+test('repair atomically replaces a failed runtime when auth and catch-up are ready', async () => {
+  const { app, store, processCalls } = await harness({
+    auth: {
+      status: async () => ({ status: 'connected' }),
+      start: async () => {
+        throw new Error('not used');
+      },
+    },
+    meetingIntake: {
+      project: async () => undefined,
+      detect: async () => ({ status: 'idle' }),
+      preview: async () => {
+        throw new Error('not used');
+      },
+      resolve: async () => {
+        throw new Error('not used');
+      },
+    },
+  });
+  try {
+    await store.transaction((transaction) => {
+      const current = transaction.instances.get('pi_official');
+      transaction.instances.put({
+        ...current,
+        configReadiness: 'ready',
+        activationState: 'error',
+        runtimeState: 'stopped',
+        lastRuntimeError: {
+          code: 'UNAVAILABLE',
+          exitCode: 1,
+          signal: null,
+          occurredAt: 900,
+        },
+      });
+    });
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/plugins/official/pi_official/repair',
+      headers: writeHeaders,
+      remoteAddress: '127.0.0.1',
+      payload: { expectedRevision: 1 },
+    });
+
+    assert.equal(response.statusCode, 200, response.payload);
+    assert.equal(response.json().instance.activationState, 'enabled');
+    assert.equal(response.json().instance.lastRuntimeError, undefined);
+    assert.deepEqual(processCalls, ['stop:pi_official', 'start:pi_official']);
   } finally {
     await app.close();
   }
@@ -382,7 +532,7 @@ test('projects installed versus available truth and keeps a disabled owner inten
   try {
     const before = await app.inject({ method: 'GET', url: '/api/plugins/official', headers: readHeaders });
     assert.equal(before.statusCode, 200, before.payload);
-    assert.equal(before.json().plugins[0].availableVersion, '0.1.0-alpha.8');
+    assert.equal(before.json().plugins[0].availableVersion, '0.1.0-alpha.9');
     assert.equal(before.json().plugins[0].updateAvailable, true);
     assert.equal(before.json().plugins[0].instance.installedVersion, '0.1.0-alpha.2');
     assert.equal(before.json().plugins[0].instance.packageDigest, oldDigest);
@@ -408,7 +558,7 @@ test('projects installed versus available truth and keeps a disabled owner inten
       },
     ]);
     assert.equal(updated.json().updateAvailable, false);
-    assert.equal(updated.json().instance.installedVersion, '0.1.0-alpha.8');
+    assert.equal(updated.json().instance.installedVersion, '0.1.0-alpha.9');
     assert.equal(updated.json().instance.packageDigest, entry.packageDigest);
     assert.equal(updated.json().instance.activationState, 'disabled');
     assert.equal(updated.json().instance.runtimeState, 'stopped');

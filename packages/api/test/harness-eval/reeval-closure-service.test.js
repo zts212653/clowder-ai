@@ -95,8 +95,8 @@ describe('eval verdict lifecycle command service', () => {
     assert.deepEqual(result.projection.history.at(-1).actor, { kind: 'cat', id: 'codex-sol' });
 
     for (const extra of [
-      { actor: { kind: 'cvo', id: 'you' } },
-      { actorOverride: { kind: 'cvo', id: 'you' } },
+      { actor: { kind: 'cvo', id: 'operator' } },
+      { actorOverride: { kind: 'cvo', id: 'operator' } },
       { assignedEvalCatId: 'spoofed-eval' },
     ]) {
       await assert.rejects(
@@ -231,7 +231,7 @@ describe('eval verdict lifecycle command service', () => {
     );
 
     const reassigned = await service.execute(
-      { kind: 'cvo', id: 'you' },
+      { kind: 'cvo', id: 'operator' },
       command('reassign_owner', 'reassign', 2, {
         targetOwnerCatId: 'opus',
         refs: [ref('message', 'thread:audited-reassignment')],
@@ -278,7 +278,7 @@ describe('eval verdict lifecycle command service', () => {
 
     for (const [principal, attempted] of [
       [{ kind: 'automation', id: 'reconciler' }, command('record_fix', 'automation-fix', 3)],
-      [{ kind: 'cvo', id: 'you' }, command('record_fix', 'cvo-fix', 3)],
+      [{ kind: 'cvo', id: 'operator' }, command('record_fix', 'cvo-fix', 3)],
       [{ kind: 'cat', id: 'codex-sol' }, command('suppress', 'cat-suppress', 3)],
       [{ kind: 'automation', id: 'reconciler' }, command('suppress', 'automation-suppress', 3)],
       [{ kind: 'cat', id: 'codex-sol' }, command('merge_fix', 'merge', 3)],
@@ -287,7 +287,7 @@ describe('eval verdict lifecycle command service', () => {
     }
 
     const suppressed = await service.execute(
-      { kind: 'cvo', id: 'you' },
+      { kind: 'cvo', id: 'operator' },
       command('suppress', 'cvo-suppress', 3, { reason: 'operator accepts the measured tradeoff' }),
     );
     assert.equal(suppressed.projection.status, 'suppressed_with_reason');

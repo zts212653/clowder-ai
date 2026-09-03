@@ -15,6 +15,12 @@ import {
   clampBallSize,
 } from '../src/types/concierge.js';
 
+describe('ConciergeConfig defaults', () => {
+  it('uses the Xianxian atlas for unconfigured users', () => {
+    expect(CONCIERGE_CONFIG_DEFAULTS.skin).toBe('xianxian-codex');
+  });
+});
+
 describe('ConciergeConfig ballSize (E3)', () => {
   it('CONCIERGE_CONFIG_DEFAULTS includes ballSize with value 72', () => {
     expect(CONCIERGE_CONFIG_DEFAULTS).toHaveProperty('ballSize');

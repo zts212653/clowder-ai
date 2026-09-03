@@ -5,27 +5,82 @@ import type { ReevalCaseRoot } from './reeval-case.js';
 import { compareReevalCycles } from './reeval-case-cycle-order.js';
 
 export type LifecycleRootV2 = Extract<LifecycleRootArtifact, { schemaVersion: 2 }>;
+export type LifecycleRootV3 = Extract<LifecycleRootArtifact, { schemaVersion: 3 }>;
+export type LifecycleCaseRoot = LifecycleRootV2 | LifecycleRootV3;
+
+export const FRICTION_LIFECYCLE_V3_QUARANTINE_REASON = 'phase_c_cutover_incomplete' as const;
+
+export interface FrictionLifecycleV3QuarantineDiagnostic {
+  error: 'friction_lifecycle_v3_quarantined';
+  status: 'known-but-quarantined';
+  reason: typeof FRICTION_LIFECYCLE_V3_QUARANTINE_REASON;
+  effects: {
+    openCase: false;
+    approvalProposal: false;
+    approvalCard: false;
+    task: false;
+    f167Lease: false;
+  };
+}
 
 export interface ResolvedReevalCaseRoot {
-  requestedRoot: LifecycleRootV2;
-  roots: readonly LifecycleRootV2[];
+  requestedRoot: LifecycleCaseRoot;
+  roots: readonly LifecycleCaseRoot[];
   projectorRoot: ReevalCaseRoot;
 }
 
-export function loadReevalCaseRoot(
+export type ReevalCaseRootClassification =
+  | { status: 'available'; value: ResolvedReevalCaseRoot }
+  | {
+      status: 'known-but-quarantined';
+      root: LifecycleRootV3;
+      diagnostic: FrictionLifecycleV3QuarantineDiagnostic;
+    }
+  | { status: 'not-found' };
+
+export function frictionLifecycleV3QuarantineDiagnostic(): FrictionLifecycleV3QuarantineDiagnostic {
+  return {
+    error: 'friction_lifecycle_v3_quarantined',
+    status: 'known-but-quarantined',
+    reason: FRICTION_LIFECYCLE_V3_QUARANTINE_REASON,
+    effects: {
+      openCase: false,
+      approvalProposal: false,
+      approvalCard: false,
+      task: false,
+      f167Lease: false,
+    },
+  };
+}
+
+export function classifyReevalCaseRoot(
   harnessFeedbackRoot: string,
   verdictId: string,
   assignedEvalCatIdOverride?: string,
-): ResolvedReevalCaseRoot | undefined {
+  frictionV3Cutover?: { lifecycleVersion: 1 },
+): ReevalCaseRootClassification {
   const artifacts = loadLifecycleRootsWithLegacyCases(harnessFeedbackRoot);
-  const requested = artifacts.find(
-    (artifact): artifact is LifecycleRootV2 => artifact.schemaVersion === 2 && artifact.verdictId === verdictId,
+  const quarantined = artifacts.find(
+    (artifact): artifact is LifecycleRootV3 => artifact.schemaVersion === 3 && artifact.verdictId === verdictId,
   );
-  if (!requested) return undefined;
+  if (quarantined && frictionV3Cutover?.lifecycleVersion !== 1) {
+    return {
+      status: 'known-but-quarantined',
+      root: quarantined,
+      diagnostic: frictionLifecycleV3QuarantineDiagnostic(),
+    };
+  }
+
+  const requested = artifacts.find(
+    (artifact): artifact is LifecycleCaseRoot =>
+      (artifact.schemaVersion === 2 || artifact.schemaVersion === 3) && artifact.verdictId === verdictId,
+  );
+  if (!requested) return { status: 'not-found' };
 
   const roots = artifacts
     .filter(
-      (artifact): artifact is LifecycleRootV2 => artifact.schemaVersion === 2 && artifact.caseId === requested.caseId,
+      (artifact): artifact is LifecycleCaseRoot =>
+        (artifact.schemaVersion === 2 || artifact.schemaVersion === 3) && artifact.caseId === requested.caseId,
     )
     .sort(compareReevalCycles);
   for (const candidate of roots) {
@@ -42,15 +97,34 @@ export function loadReevalCaseRoot(
   if (!domain)
     throw new Error(`lifecycle case ${requested.caseId} references unregistered domain ${requested.domainId}`);
   return {
-    requestedRoot: requested,
-    roots,
-    projectorRoot: {
-      caseId: requested.caseId,
-      domainId: requested.domainId,
-      targetOwnerCatId: domain.handoffTargetResolver.ownerCatId,
-      assignedEvalCatId: assignedEvalCatIdOverride ?? domain.evalCat.catId,
-      reevalWithinHours: domain.sla.reevalWithinHours,
-      cycles: roots.map((root) => ({ verdictId: root.verdictId, createdAt: root.createdAt, verdict: root.verdict })),
+    status: 'available',
+    value: {
+      requestedRoot: requested,
+      roots,
+      projectorRoot: {
+        caseId: requested.caseId,
+        domainId: requested.domainId,
+        targetOwnerCatId:
+          requested.schemaVersion === 3 ? requested.repairTarget.ownerCatId : domain.handoffTargetResolver.ownerCatId,
+        assignedEvalCatId: assignedEvalCatIdOverride ?? domain.evalCat.catId,
+        reevalWithinHours: domain.sla.reevalWithinHours,
+        cycles: roots.map((root) => ({ verdictId: root.verdictId, createdAt: root.createdAt, verdict: root.verdict })),
+      },
     },
   };
+}
+
+export function loadReevalCaseRoot(
+  harnessFeedbackRoot: string,
+  verdictId: string,
+  assignedEvalCatIdOverride?: string,
+  frictionV3Cutover?: { lifecycleVersion: 1 },
+): ResolvedReevalCaseRoot | undefined {
+  const classification = classifyReevalCaseRoot(
+    harnessFeedbackRoot,
+    verdictId,
+    assignedEvalCatIdOverride,
+    frictionV3Cutover,
+  );
+  return classification.status === 'available' ? classification.value : undefined;
 }

@@ -98,6 +98,54 @@ describe('RecentBrowseResolver (AC-F2)', () => {
     assert.equal(items[1].source, 'project:cafe');
   });
 
+  test('list_recent excludes sunset F152 rows before the per-store limit', async () => {
+    const { RecentBrowseResolver } = await import('../dist/domains/memory/RecentBrowseResolver.js');
+    let capturedSql = '';
+    let capturedParams = [];
+    const store = {
+      async search() {
+        return [];
+      },
+      async upsert() {},
+      async deleteByAnchor() {},
+      getDb() {
+        return {
+          prepare(sql) {
+            capturedSql = sql;
+            return {
+              all(...params) {
+                capturedParams = params;
+                return [
+                  {
+                    anchor: 'global:skill/rank-two-kept',
+                    title: 'Eligible rank two',
+                    kind: 'plan',
+                    updatedAt: '2026-08-29T10:00:00Z',
+                  },
+                ];
+              },
+            };
+          },
+        };
+      },
+    };
+    const resolver = new RecentBrowseResolver(
+      fakeCatalog([{ id: 'global:methods', sensitivity: 'public', kind: 'global' }]),
+      new Map([['global:methods', store]]),
+    );
+
+    const { items } = await resolver.list({ since: '7d', limit: 1 });
+
+    assert.match(capturedSql, /anchor NOT LIKE \?/);
+    assert.ok(capturedSql.indexOf('anchor NOT LIKE ?') < capturedSql.indexOf('LIMIT ?'));
+    assert.equal(capturedParams[1], 'distilled:%');
+    assert.equal(capturedParams.at(-1), 1);
+    assert.deepEqual(
+      items.map((entry) => entry.anchor),
+      ['global:skill/rank-two-kept'],
+    );
+  });
+
   test('private collection requires explicit callerCollections include (KD-8 server-side)', async () => {
     const { RecentBrowseResolver } = await import('../dist/domains/memory/RecentBrowseResolver.js');
 
@@ -170,11 +218,12 @@ describe('RecentBrowseResolver (AC-F2)', () => {
     await resolver.list({ since: '7d', limit: 5, kinds: ['feature', 'decision'] });
 
     assert.ok(capturedSql.includes('kind IN (?,?)'), `sql must include kind filter, got: ${capturedSql}`);
-    // params order: [cutoff, ...kinds, limit]
-    assert.equal(capturedParams.length, 4);
-    assert.equal(capturedParams[1], 'feature');
-    assert.equal(capturedParams[2], 'decision');
-    assert.equal(capturedParams[3], 5);
+    // params order: [cutoff, retired-prefix, ...kinds, limit]
+    assert.equal(capturedParams.length, 5);
+    assert.equal(capturedParams[1], 'distilled:%');
+    assert.equal(capturedParams[2], 'feature');
+    assert.equal(capturedParams[3], 'decision');
+    assert.equal(capturedParams[4], 5);
   });
 
   test('scope ∩ kinds intersect (砚砚 cloud-3 P2): kinds narrows scope, never replaces', async () => {
@@ -214,7 +263,7 @@ describe('RecentBrowseResolver (AC-F2)', () => {
     // narrows to just 'feature' (intersection). Pre-fix this would have replaced scope.
     await resolver.list({ since: '7d', limit: 5, scope: 'docs', kinds: ['feature'] });
     assert.ok(capturedSql.includes('kind IN (?)'), `intersection produces single-kind filter: ${capturedSql}`);
-    assert.equal(capturedParams[1], 'feature');
+    assert.equal(capturedParams[2], 'feature');
 
     // scope=threads (kinds: ['discussion','thread',...]) ∩ kinds=['feature'] = [] →
     // store skipped entirely (no rows can match the contract — empty intersection).

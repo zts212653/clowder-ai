@@ -5,10 +5,12 @@ import { createPortal } from 'react-dom';
 import { CafeIcon } from '@/components/rich/CafeIcons';
 import { ThreadCatSettingsContent } from './ThreadCatSettings';
 import { ThreadEffortSettingsContent } from './ThreadEffortSettings';
+import { ThreadGoalSettingsContent } from './ThreadGoalSettings';
 import { ThreadLabelSettingsContent } from './ThreadLabelPicker';
+import { ThreadNativeStatusSettingsContent } from './ThreadNativeStatusSettings';
 import { ThreadSpeedSettingsContent } from './ThreadSpeedSettings';
 
-type SettingsSectionId = 'cats' | 'effort' | 'speed' | 'labels';
+type SettingsSectionId = 'goal' | 'status' | 'cats' | 'effort' | 'speed' | 'labels';
 
 interface ThreadSettingsPanelProps {
   open: boolean;
@@ -98,6 +100,26 @@ export function ThreadSettingsPanel({
       </header>
 
       <div className="min-h-0 flex-1 overflow-y-auto p-2">
+        <SettingsSection
+          id="goal"
+          title="对话目标"
+          description="保存、恢复并同步这条对话想达成的结果"
+          icon="target"
+          active={activeSection === 'goal'}
+          onToggle={() => toggleSection('goal')}
+        >
+          <ThreadGoalSettingsContent threadId={threadId} />
+        </SettingsSection>
+        <SettingsSection
+          id="status"
+          title="Codex 运行状态"
+          description="实时能力、权限、账户与额度来源"
+          icon="activity"
+          active={activeSection === 'status'}
+          onToggle={() => toggleSection('status')}
+        >
+          <ThreadNativeStatusSettingsContent threadId={threadId} />
+        </SettingsSection>
         {onSavePreferredCats && (
           <SettingsSection
             id="cats"

@@ -92,6 +92,38 @@ describe('Eval Domain Registry — metricGlossary (F248 Phase B)', () => {
     assert.equal(entry.metricGlossary['grounding.mismatch_sample_count']?.goodDirection, 'lower');
   });
 
+  it('keeps target-owned public verdict metric refs explainable', async () => {
+    const a2aRaw = await readFile(
+      new URL('../../../../docs/harness-feedback/eval-domains/eval-a2a.yaml', import.meta.url),
+      'utf8',
+    );
+    const frictionRaw = await readFile(
+      new URL('../../../../docs/harness-feedback/eval-domains/eval-friction.metrics.yaml', import.meta.url),
+      'utf8',
+    );
+    const a2aGlossary = parseEvalDomainRegistryFile(parse(a2aRaw)).metricGlossary;
+    const frictionGlossary = parse(frictionRaw);
+
+    for (const key of [
+      'rawevidenceagedays',
+      'nodatacomponents',
+      'openobservabilitygapfindings',
+      'counterwindowpresent',
+      'runtimetelemetryunavailableendpoints',
+      'groundingtelemetryavailable',
+    ]) {
+      assert.ok(a2aGlossary?.[key], `eval:a2a must explain public verdict metric ${key}`);
+    }
+
+    for (const key of [
+      'friction-rollup.cluster_count',
+      'friction-rollup.top_cluster_count',
+      'friction-rollup.tail_signal_count',
+    ]) {
+      assert.ok(frictionGlossary[key], `eval:friction must explain public verdict metric ${key}`);
+    }
+  });
+
   it('explains every Phase T turn-custody metric used by the cutover verdict', async () => {
     const raw = await readFile(
       new URL('../../../../docs/harness-feedback/eval-domains/eval-a2a.yaml', import.meta.url),

@@ -432,6 +432,26 @@ describe('cross-platform pnpm-start profile propagation (#421)', () => {
     );
   });
 
+  it('registers exact worktree Redis ownership before launching services and releases it on cleanup', () => {
+    const source = readFileSync(resolve(ROOT, 'scripts/start-dev.sh'), 'utf8');
+    const mainSource = source.slice(source.indexOf('\nmain() {'));
+    const setupIndex = mainSource.indexOf('\n    setup_storage');
+    const registerIndex = mainSource.indexOf('\n    register_redis_dev_lease');
+    const cleanupSource = source.slice(source.indexOf('\ncleanup() {'), source.indexOf('\ntrap cleanup EXIT'));
+
+    assert.ok(setupIndex >= 0, 'storage setup must remain discoverable');
+    assert.ok(registerIndex > setupIndex, 'worktree Redis ownership must be registered after Redis is healthy');
+    assert.match(source, /register-dev --port "\$REDIS_PORT" --redis-pid "\$redis_pid"/);
+    assert.match(source, /--data-dir "\$REDIS_DATA_DIR"/);
+    assert.match(source, /--owner-pid "\$\$" --project-root "\$PROJECT_DIR"/);
+    assert.match(
+      source,
+      /case "\$DAEMON_DEPLOYMENT_ID" in\s+runtime\|alpha\) return 0/s,
+      'runtime and Alpha deployments must remain outside the worktree dev lease namespace',
+    );
+    assert.match(cleanupSource, /remove_redis_dev_lease/);
+  });
+
   it('contains an optional F247 helper process failure inside the cloud capability boundary', () => {
     const sandboxDir = createSandbox();
     writeFileSync(join(sandboxDir, 'scripts', 'f247-cloud-services.mjs'), '', 'utf8');

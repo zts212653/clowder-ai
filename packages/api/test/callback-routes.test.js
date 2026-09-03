@@ -211,6 +211,175 @@ describe('Callback Routes', () => {
     assert.equal(recent[0].extra?.isExplicitPost, true, 'default post_message remains an independent bubble');
   });
 
+  test('POST post-message projects only the configured concierge duty cat', async () => {
+    const conciergeConfigStore = {
+      get: async () => ({ dutyCatProfileId: 'opus' }),
+    };
+    const app = await createApp({ conciergeConfigStore });
+    const thread = threadStore.create('user-1', 'Concierge projection');
+    thread.threadKind = 'concierge';
+    const { invocationId, callbackToken } = await registry.create('user-1', 'opus', thread.id);
+    const rawContent = `@opus\n找到了。\n\n[宪宪/claude-opus-5🐾]`;
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/callbacks/post-message',
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
+      payload: { content: rawContent },
+    });
+
+    assert.equal(response.statusCode, 200);
+    assert.equal(messageStore.getRecent(10)[0]?.content, '找到了。');
+    assert.equal(socketManager.getMessages()[0]?.content, '找到了。');
+  });
+
+  test('POST post-message preserves non-duty-cat content on a concierge thread', async () => {
+    const conciergeConfigStore = {
+      get: async () => ({ dutyCatProfileId: 'opus' }),
+    };
+    const app = await createApp({ conciergeConfigStore });
+    const thread = threadStore.create('user-1', 'Concierge non-duty projection');
+    thread.threadKind = 'concierge';
+    const { invocationId, callbackToken } = await registry.create('user-1', 'codex', thread.id);
+    const rawContent = `@codex\n保留这段诊断。\n\n[小太阳/gpt-5.5🐾]`;
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/callbacks/post-message',
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
+      payload: { content: rawContent },
+    });
+
+    assert.equal(response.statusCode, 200);
+    assert.equal(messageStore.getRecent(10)[0]?.content, rawContent);
+    assert.equal(socketManager.getMessages()[0]?.content, rawContent);
+  });
+
+  test('POST post-message fails retryably when concierge duty ownership cannot be verified', async () => {
+    let available = false;
+    const conciergeConfigStore = {
+      get: async () => {
+        if (!available) throw new Error('config unavailable');
+        return { dutyCatProfileId: 'opus' };
+      },
+    };
+    const app = await createApp({ conciergeConfigStore });
+    const thread = threadStore.create('user-1', 'Concierge projection unavailable');
+    thread.threadKind = 'concierge';
+    const { invocationId, callbackToken } = await registry.create('user-1', 'opus', thread.id);
+    const request = {
+      method: 'POST',
+      url: '/api/callbacks/post-message',
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
+      payload: { content: '@opus\n恢复后再写。', clientMessageId: 'concierge-projection-retry-1' },
+    };
+
+    const unavailable = await app.inject(request);
+    assert.equal(unavailable.statusCode, 503);
+    assert.equal(JSON.parse(unavailable.body).kind, 'concierge_projection_unavailable');
+    assert.equal(messageStore.getRecent(10).length, 0);
+
+    available = true;
+    const retried = await app.inject(request);
+    assert.equal(retried.statusCode, 200, 'projection failure must not consume the idempotency key');
+    assert.equal(messageStore.getRecent(10)[0]?.content, '恢复后再写。');
+  });
+
+  test('POST post-message fails closed when a concierge marker has no typed navigation action', async () => {
+    const conciergeConfigStore = {
+      get: async () => ({ dutyCatProfileId: 'opus' }),
+    };
+    const app = await createApp({ conciergeConfigStore });
+    const thread = threadStore.create('user-1', 'Concierge marker admission');
+    thread.threadKind = 'concierge';
+    const { invocationId, callbackToken } = await registry.create('user-1', 'opus', thread.id);
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/callbacks/post-message',
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
+      payload: {
+        content: '找到了：[跳过去 R2｜f229 猫猫球功能｜0123456789ab]',
+        clientMessageId: 'concierge-marker-retry-1',
+      },
+    });
+
+    assert.equal(response.statusCode, 422);
+    assert.equal(JSON.parse(response.body).kind, 'concierge_navigation_action_required');
+    assert.equal(messageStore.getRecent(10).length, 0);
+    assert.equal(socketManager.getMessages().length, 0);
+
+    const corrected = await app.inject({
+      method: 'POST',
+      url: '/api/callbacks/post-message',
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
+      payload: { content: '已改为普通说明。', clientMessageId: 'concierge-marker-retry-1' },
+    });
+    assert.equal(corrected.statusCode, 200, 'shape rejection must not consume the idempotency key');
+    assert.equal(messageStore.getRecent(10)[0]?.content, '已改为普通说明。');
+  });
+
+  test('POST post-message accepts a concierge marker when a typed navigation action is supplied', async () => {
+    const conciergeConfigStore = {
+      get: async () => ({ dutyCatProfileId: 'opus' }),
+    };
+    const app = await createApp({ conciergeConfigStore });
+    const thread = threadStore.create('user-1', 'Concierge marker action');
+    thread.threadKind = 'concierge';
+    const { invocationId, callbackToken } = await registry.create('user-1', 'opus', thread.id);
+    const richPayload = JSON.stringify({
+      v: 1,
+      blocks: [
+        {
+          id: 'nav-1',
+          kind: 'card',
+          v: 1,
+          title: '目标 thread',
+          actions: [
+            {
+              label: '跳过去：f229 猫猫球功能',
+              action: 'concierge_teleport',
+              payload: { threadId: 'thread-f229' },
+            },
+          ],
+        },
+      ],
+    });
+    const content = `找到了：[跳过去 R2｜f229 猫猫球功能｜0123456789ab]\n\`\`\`cc_rich\n${richPayload}\n\`\`\``;
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/callbacks/post-message',
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
+      payload: { content },
+    });
+
+    assert.equal(response.statusCode, 200);
+    assert.equal(messageStore.getRecent(10)[0]?.content, '找到了：跳过去 R2');
+    assert.equal(messageStore.getRecent(10)[0]?.extra?.rich?.blocks[0]?.actions[0]?.payload?.threadId, 'thread-f229');
+  });
+
+  test('POST post-message treats marker-shaped fenced examples as durable documentation', async () => {
+    const conciergeConfigStore = {
+      get: async () => ({ dutyCatProfileId: 'opus' }),
+    };
+    const app = await createApp({ conciergeConfigStore });
+    const thread = threadStore.create('user-1', 'Concierge marker documentation');
+    thread.threadKind = 'concierge';
+    const { invocationId, callbackToken } = await registry.create('user-1', 'opus', thread.id);
+    const content = '```md\n[跳过去 R2｜示例标题｜0123456789ab]\n```';
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/callbacks/post-message',
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
+      payload: { content },
+    });
+
+    assert.equal(response.statusCode, 200);
+    assert.equal(messageStore.getRecent(10)[0]?.content, content);
+  });
+
   test('POST post-message replace_final converges live and durable callback identity', async () => {
     const app = await createApp();
     const { invocationId, callbackToken } = await registry.create('user-1', 'opus');
@@ -5183,6 +5352,124 @@ describe('Callback Routes', () => {
     const found = taskStore.getBySubject('pr:zts212653/cat-cafe#99');
     assert.ok(found, 'task must be stored');
     assert.equal(found.threadId, 'thread-pr');
+  });
+
+  test('POST register-pr-tracking maps a confirmed GitHub 404 to 422', async () => {
+    const { resolveGitHubObjectLookup } = await import('../dist/infrastructure/github/github-object-validator.js');
+    const notFound = Object.assign(new Error('gh: Not Found (HTTP 404)'), {
+      code: 1,
+      stdout: '{"message":"Not Found","status":"404"}',
+      stderr: 'gh: Not Found (HTTP 404)',
+    });
+    const app = await createApp({
+      validateRepo: async () => true,
+      validatePr: async () =>
+        (
+          await resolveGitHubObjectLookup(async () => {
+            throw notFound;
+          })
+        ).found,
+    });
+    const { invocationId, callbackToken } = await registry.create('user-1', 'opus', 'thread-pr-404');
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/callbacks/register-pr-tracking',
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
+      payload: prWaitPayload(),
+    });
+
+    assert.equal(response.statusCode, 422);
+    assert.match(response.body, /does not exist or is not accessible/);
+  });
+
+  test('POST register-pr-tracking keeps a non-GitHub HTTP 404 retryable', async () => {
+    const { resolveGitHubObjectLookup } = await import('../dist/infrastructure/github/github-object-validator.js');
+    const proxyFailure = Object.assign(new Error('upstream proxy: HTTP 404'), { code: 1 });
+    const app = await createApp({
+      validateRepo: async () => true,
+      validatePr: async () =>
+        (
+          await resolveGitHubObjectLookup(async () => {
+            throw proxyFailure;
+          })
+        ).found,
+    });
+    const { invocationId, callbackToken } = await registry.create('user-1', 'opus', 'thread-pr-proxy-404');
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/callbacks/register-pr-tracking',
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
+      payload: prWaitPayload(),
+    });
+
+    assert.equal(response.statusCode, 503);
+    assert.match(response.body, /PR validation unavailable/);
+  });
+
+  test('POST register-pr-tracking maps a GitHub rate-limit failure to retryable 429', async () => {
+    const { GitHubValidationError } = await import('../dist/infrastructure/github/github-object-validator.js');
+    const app = await createApp({
+      validateRepo: async () => true,
+      validatePr: async () => {
+        throw new GitHubValidationError('rate_limited');
+      },
+    });
+    const { invocationId, callbackToken } = await registry.create('user-1', 'opus', 'thread-pr-403');
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/callbacks/register-pr-tracking',
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
+      payload: prWaitPayload(),
+    });
+
+    assert.equal(response.statusCode, 429);
+    assert.deepEqual(JSON.parse(response.body), {
+      error: 'GitHub rate limit reached during PR validation — retry later',
+      code: 'github_rate_limited',
+    });
+    assert.equal(taskStore.getBySubject('pr:zts212653/cat-cafe#99'), null);
+  });
+
+  test('POST register-pr-tracking distinguishes auth, permission, and real not-found failures', async () => {
+    const { GitHubValidationError } = await import('../dist/infrastructure/github/github-object-validator.js');
+    const cases = [
+      ['authentication_required', 503, 'github_authentication_required'],
+      ['permission_denied', 503, 'github_permission_denied'],
+    ];
+
+    for (const [kind, statusCode, code] of cases) {
+      const app = await createApp({
+        validateRepo: async () => true,
+        validatePr: async () => {
+          throw new GitHubValidationError(kind);
+        },
+      });
+      const { invocationId, callbackToken } = await registry.create('user-1', 'codex-sol', `thread-pr-${kind}`);
+      const response = await app.inject({
+        method: 'POST',
+        url: '/api/callbacks/register-pr-tracking',
+        headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
+        payload: prWaitPayload({ prNumber: kind === 'authentication_required' ? 1407 : 1408 }),
+      });
+      assert.equal(response.statusCode, statusCode);
+      assert.equal(JSON.parse(response.body).code, code);
+      await app.close();
+    }
+
+    const notFoundApp = await createApp({ validateRepo: async () => true, validatePr: async () => false });
+    const { invocationId, callbackToken } = await registry.create('user-1', 'codex-sol', 'thread-pr-not-found');
+    const notFound = await notFoundApp.inject({
+      method: 'POST',
+      url: '/api/callbacks/register-pr-tracking',
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
+      payload: prWaitPayload({ prNumber: 1409 }),
+    });
+    assert.equal(notFound.statusCode, 422);
+    assert.match(JSON.parse(notFound.body).error, /does not exist or is not accessible/);
+    await notFoundApp.close();
   });
 
   test('POST register-pr-tracking snapshots live baseline before verifying an exact review-result trigger', async () => {

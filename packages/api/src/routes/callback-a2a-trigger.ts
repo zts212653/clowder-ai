@@ -12,7 +12,7 @@
  * invocation as before.
  */
 
-import type { CatId } from '@cat-cafe/shared';
+import type { CatId, RoutingPreflightDecisionV1 } from '@cat-cafe/shared';
 import type { FastifyBaseLogger } from 'fastify';
 import { getDefaultCatId } from '../config/cat-config-loader.js';
 import type { ActionSuccessorFence } from '../domains/ball-custody/ActionSuccessorAdmissionService.js';
@@ -61,6 +61,12 @@ import type {
   StoredMessage,
 } from '../domains/cats/services/stores/ports/MessageStore.js';
 import { projectQueueReceipt } from '../domains/cats/services/stores/ports/queued-message-receipt.js';
+import {
+  inferRoutingContextIntent,
+  preflightRoutingDispatch,
+  type RoutingDispatchPreflightPort,
+  routingDispatchPreflightReceipt,
+} from '../domains/routing-context/RoutingDispatchPreflightPort.js';
 import { wrapWithDispatchSpan } from '../infrastructure/telemetry/dispatch-span.js';
 import type { CallerTraceContext } from '../infrastructure/telemetry/genai-semconv.js';
 import type { SocketManager } from '../infrastructure/websocket/index.js';
@@ -100,6 +106,8 @@ export interface A2ATriggerDeps {
   messageStore?: IMessageStore;
   /** F167 Phase T: persist accepted A2A dispatch custody before the child can execute. */
   ballCustody?: IBallCustodyIngest;
+  /** F293: fresh per-target decision before worklist, queue custody or fallback creation. */
+  routingDispatchPreflight?: RoutingDispatchPreflightPort;
   /** F122B: InvocationQueue for agent-sourced entries.
    *  F-coalesce: + findInFlightAgentEntry / coalesceContentIntoQueuedAgent for same-turn handoff merge. */
   invocationQueue?: Pick<
@@ -189,12 +197,50 @@ export async function enqueueA2ATargets(
     /** F167 Phase S: persistent subject/action/slot generation fence. */
     actionSuccessorFence?: ActionSuccessorFence;
   },
-): Promise<{ enqueued: CatId[]; coalesced?: CatId[]; fallback: boolean }> {
+): Promise<{
+  enqueued: CatId[];
+  coalesced?: CatId[];
+  fallback: boolean;
+  routingPreflight?: RoutingPreflightDecisionV1;
+}> {
   const { log } = deps;
   const { threadId, callerCatId } = opts;
   const ownerAuthProvenance = normalizeOwnerAuthProvenance(opts.ownerAuthProvenance);
   const triggerMessageId = opts.triggerMessage.id;
   const { deliveryCursorStore } = deps;
+  const requestedTargetCats = opts.targetCats;
+  const routingContextIntent = inferRoutingContextIntent(opts.content);
+  const routingPreflight = deps.routingDispatchPreflight
+    ? await preflightRoutingDispatch(deps.routingDispatchPreflight, {
+        ownerId: opts.userId,
+        targetCatIds: requestedTargetCats,
+        ...(routingContextIntent ? { intent: routingContextIntent } : {}),
+      })
+    : undefined;
+  if (routingPreflight) {
+    const receiptCatId = callerCatId ?? opts.triggerMessage.catId ?? getDefaultCatId();
+    for (const target of routingPreflight.targets) {
+      if (target.disposition === 'allowed') continue;
+      deps.socketManager.broadcastAgentMessage(
+        {
+          type: 'system_info',
+          catId: receiptCatId,
+          content: JSON.stringify(routingDispatchPreflightReceipt(routingPreflight, target.targetCatId)),
+          timestamp: Date.now(),
+        },
+        threadId,
+      );
+    }
+  }
+  const targetCats = routingPreflight
+    ? requestedTargetCats.filter(
+        (catId) => routingPreflight.targets.find((target) => target.targetCatId === catId)?.disposition !== 'rejected',
+      )
+    : requestedTargetCats;
+  const routingPreflightResult = routingPreflight ? { routingPreflight } : {};
+  if (targetCats.length === 0) {
+    return { enqueued: [], fallback: false, ...routingPreflightResult };
+  }
   const isCrossThread =
     !!opts.triggerMessage.extra?.crossPost?.sourceThreadId &&
     opts.triggerMessage.extra.crossPost.sourceThreadId !== opts.triggerMessage.threadId;
@@ -228,8 +274,6 @@ export async function enqueueA2ATargets(
   // no longer harness-enforced — cat-config.restrictions flows into sender & target
   // prompts (buildTeammateRoster / buildStaticIdentity); cats self-regulate.
   const fromCatId = callerCatId ?? opts.triggerMessage.catId ?? getDefaultCatId();
-  const targetCats = opts.targetCats;
-
   // F153 Phase I (Maine Coon P1): Lazy-create mention_dispatch span + a2a.dispatch.count counter
   // ONLY when a target is about to actually dispatch (passes all guards and reaches a real enqueue
   // or fallback invocation). Pre-creating would mint span/counter even when ALL cats are blocked
@@ -284,11 +328,11 @@ export async function enqueueA2ATargets(
     if (persistedQueueTrigger && !persistedQueueTrigger.queueCustody) {
       const existingAdmission = persistedQueueTrigger.queueCustodyAdmission;
       if (existingAdmission) {
-        const requestedTargetCats = existingAdmission.requestedTargetCats ?? existingAdmission.targetCats;
-        if (JSON.stringify(requestedTargetCats) !== JSON.stringify(targetCats)) {
+        const admittedRequestTargets = existingAdmission.requestedTargetCats ?? existingAdmission.targetCats;
+        if (JSON.stringify(admittedRequestTargets) !== JSON.stringify(requestedTargetCats)) {
           throw new Error('A2A fan-out Queue custody admission requested-target mismatch');
         }
-        admittedTargetCats = new Set(existingAdmission.targetCats);
+        admittedTargetCats = new Set(existingAdmission.targetCats.filter((catId) => targetCats.includes(catId)));
       } else {
         const acceptedTargetCats: CatId[] = [];
         let predictedDepth = deps.invocationQueue.countAgentEntriesForThread(threadId);
@@ -314,7 +358,7 @@ export async function enqueueA2ATargets(
           ownerUserId: opts.userId,
           ownerAuthProvenance,
           targetCats: acceptedTargetCats,
-          requestedTargetCats: targetCats,
+          requestedTargetCats,
           intent: 'execute',
           ...(callerCatId ? { callerCatId } : {}),
           ...(opts.parentInvocationId ? { a2aParentInvocationId: opts.parentInvocationId } : {}),
@@ -658,7 +702,7 @@ export async function enqueueA2ATargets(
       let initialized: Awaited<ReturnType<IMessageStore['initializeQueueCustody']>>;
       try {
         const custodyOptions = {
-          requestedTargetCats: targetCats,
+          requestedTargetCats,
           createdAt: opts.triggerMessage.timestamp,
         };
         expectedCustody = isCrossThread
@@ -793,7 +837,7 @@ export async function enqueueA2ATargets(
         ? '[F122B] A2A callback: enqueued to InvocationQueue'
         : '[F122B] A2A callback: no new InvocationQueue entries enqueued',
     );
-    return { enqueued, coalesced, fallback: false };
+    return { enqueued, coalesced, fallback: false, ...routingPreflightResult };
   }
 
   // Legacy path: F27 worklist + standalone fallback (when invocationQueue dep not wired)
@@ -847,7 +891,7 @@ export async function enqueueA2ATargets(
         },
         '[F27] A2A callback: enqueued targets to parent worklist',
       );
-      return { enqueued, fallback: false };
+      return { enqueued, fallback: false, ...routingPreflightResult };
     } else if (pushResult.reason === 'not_found') {
       // F122 AC-A3: Race condition — worklist vanished between hasWorklist() and pushToWorklist().
       // Fall through to standalone invocation path below.
@@ -888,7 +932,7 @@ export async function enqueueA2ATargets(
           `[F27] A2A callback: targets not enqueued (${pushResult.reason})`,
         );
       }
-      return { enqueued, fallback: false };
+      return { enqueued, fallback: false, ...routingPreflightResult };
     }
   }
 
@@ -907,7 +951,7 @@ export async function enqueueA2ATargets(
         { threadId, targetCats, activeSlotIds },
         '[F27] A2A fallback skipped: all targets already active in thread slots',
       );
-      return { enqueued: [], fallback: true };
+      return { enqueued: [], fallback: true, ...routingPreflightResult };
     }
     if (nonConflicting.length < targetCats.length) {
       log.info(
@@ -921,7 +965,7 @@ export async function enqueueA2ATargets(
       targetCats: nonConflicting,
       callerTraceContext: ensureDispatchTraceContext(),
     });
-    return { enqueued: nonConflicting, fallback: true };
+    return { enqueued: nonConflicting, fallback: true, ...routingPreflightResult };
   }
 
   // Create standalone invocation like the old triggerA2AInvocation
@@ -937,7 +981,7 @@ export async function enqueueA2ATargets(
   // fallback; Phase E retires L3, so targetCats == opts.targetCats now. Kept the
   // explicit spread for intent clarity and future filter hooks.
   await triggerA2AInvocation(deps, { ...opts, targetCats, callerTraceContext: ensureDispatchTraceContext() });
-  return { enqueued: targetCats, fallback: true };
+  return { enqueued: targetCats, fallback: true, ...routingPreflightResult };
 }
 
 /**

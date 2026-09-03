@@ -22,6 +22,7 @@ import {
   setDynamicTaskEnabledWithAudit,
   toAudit,
   toProposal,
+  updateDynamicTaskParamsAndEnabledWithAudit,
 } from './schedule-mutation-storage.js';
 
 export { fingerprintDynamicTaskDef } from './schedule-mutation-storage.js';
@@ -278,6 +279,16 @@ export class ScheduleMutationProposalStore implements ApprovalPublicationStore {
 
   setTaskEnabledWithAudit(taskId: string, enabled: boolean, audit: ScheduleMutationAuditEntry): boolean {
     return setDynamicTaskEnabledWithAudit(this.db, taskId, enabled, audit);
+  }
+
+  updateTaskParamsAndEnabledWithAudit(
+    taskId: string,
+    currentParams: Record<string, unknown>,
+    nextParams: Record<string, unknown>,
+    enabled: boolean,
+    audit: ScheduleMutationAuditEntry,
+  ): boolean {
+    return updateDynamicTaskParamsAndEnabledWithAudit(this.db, taskId, currentParams, nextParams, enabled, audit);
   }
 
   appendAudit(entry: ScheduleMutationAuditEntry): void {

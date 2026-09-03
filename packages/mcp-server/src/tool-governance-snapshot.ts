@@ -5,6 +5,7 @@ import { z } from 'zod';
 import { jsonSchemaToZod } from './json-schema-to-zod.js';
 import type {
   McpRuntimeProfile,
+  McpSchemaDeliveryPolicy,
   McpToolDefinition,
   ResolvedImplementationCatalog,
   ToolRegistryDelta,
@@ -28,12 +29,13 @@ export type McpSurfaceSnapshotEntry = {
   inputSchemaDigest: string;
   annotations: McpToolDefinition['annotations'];
   runtimeProfiles: readonly McpRuntimeProfile[];
+  schemaDelivery?: McpSchemaDeliveryPolicy;
   implementationRef: string;
   protectedImplementationDigest: string;
 };
 
 export type McpSurfaceSnapshot = {
-  schemaVersion: 1;
+  schemaVersion: 1 | 2;
   protectedBaseSha: string;
   comparisonEncoding: 'cl100k_base';
   tools: readonly McpSurfaceSnapshotEntry[];
@@ -113,12 +115,13 @@ export function createMcpSurfaceSnapshot(
         inputSchemaDigest: digestMcpInputSchema(definition.inputSchema),
         annotations: normalizeMcpAnnotations(definition.annotations),
         runtimeProfiles: [...definition.policy.runtimeProfiles].sort(),
+        schemaDelivery: stable(definition.policy.schemaDelivery) as McpSchemaDeliveryPolicy,
         implementationRef: definition.implementation.ref,
         protectedImplementationDigest: implementation.moduleDigest,
       };
     });
   return {
-    schemaVersion: 1,
+    schemaVersion: 2,
     protectedBaseSha: options.protectedBaseSha,
     comparisonEncoding: 'cl100k_base',
     tools,
@@ -156,11 +159,24 @@ export function compareMcpSurfaceRegistry(before: McpSurfaceSnapshot, after: Mcp
     const removed = setDelta(afterProfiles, beforeProfiles);
     return added.length || removed.length ? [{ name, added, removed }] : [];
   });
+  const schemaDeliveryChanges = [...new Set([...beforeNames, ...afterNames])].sort().flatMap((name) => {
+    const beforeDelivery = beforeByName.get(name)?.schemaDelivery;
+    const afterDelivery = afterByName.get(name)?.schemaDelivery;
+    if (JSON.stringify(beforeDelivery) === JSON.stringify(afterDelivery)) return [];
+    return [
+      {
+        name,
+        ...(beforeDelivery ? { before: beforeDelivery } : {}),
+        ...(afterDelivery ? { after: afterDelivery } : {}),
+      },
+    ];
+  });
   return {
     addedNames: setDelta(beforeNames, afterNames),
     removedNames: setDelta(afterNames, beforeNames),
     resourceActionChanges,
     profileChanges,
+    schemaDeliveryChanges,
   };
 }
 

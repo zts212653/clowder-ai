@@ -63,6 +63,7 @@ import {
   type SidebarPresence,
   type SidebarPresenceSource,
 } from './sidebar-presence-projection.js';
+import { sendCanonicalSidebarSnapshot } from './sidebar-snapshot-http.js';
 
 const log = createModuleLogger('routes/threads');
 const WRITE_OPS = new Set(['edit', 'create', 'delete']);
@@ -662,7 +663,18 @@ const updateThreadSchema = z
     bubbleCli: z.enum(['global', 'expanded', 'collapsed']).optional(),
     /** F168: Preferred workspace mode for auto-switch on thread open. null clears. */
     preferredWorkspaceMode: z
-      .enum(['dev', 'recall', 'schedule', 'tasks', 'community', 'artifacts', 'approval', 'trajectory', 'eval'])
+      .enum([
+        'dev',
+        'recall',
+        'product-schedule',
+        'schedule',
+        'tasks',
+        'community',
+        'artifacts',
+        'approval',
+        'trajectory',
+        'eval',
+      ])
       .nullable()
       .optional(),
     /** F187: Thread label IDs. */
@@ -779,6 +791,16 @@ export const threadsRoutes: FastifyPluginAsync<ThreadsRoutesOptions> = async (ap
     const hasBacklogItemId = parseOptionalBooleanQuery(hasBacklogItemIdRaw);
     const showDeleted = parseOptionalBooleanQuery(deletedRaw);
     const includeConcierge = parseOptionalBooleanQuery(includeConciergeRaw);
+    const isCanonicalSidebarSnapshot =
+      view === 'sidebar' &&
+      projectPath === undefined &&
+      q === undefined &&
+      backlogItemIds === undefined &&
+      hasBacklogItemIdRaw === undefined &&
+      featureIds === undefined &&
+      deletedRaw === undefined &&
+      includeConciergeRaw === undefined;
+    const sidebarCompositionStartedAt = isCanonicalSidebarSnapshot ? performance.now() : null;
     const userId = resolveUserId(request, { defaultUserId: 'default-user' });
     if (!userId) return { threads: [] };
 
@@ -923,9 +945,13 @@ export const threadsRoutes: FastifyPluginAsync<ThreadsRoutesOptions> = async (ap
         ? await composeSidebarPresence(threads, userId, opts.presenceSource)
         : undefined;
 
-    return {
+    const response = {
       threads: threads.map((thread) => projectThreadForListView(thread, view, presenceByThread?.get(thread.id))),
     };
+    if (sidebarCompositionStartedAt !== null) {
+      return sendCanonicalSidebarSnapshot(request, reply, response, sidebarCompositionStartedAt);
+    }
+    return response;
   });
 
   // GET /api/threads/:id - 获取对话详情

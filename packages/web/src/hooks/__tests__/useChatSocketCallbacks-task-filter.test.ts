@@ -9,6 +9,7 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } 
 
 const addTaskMock = vi.fn();
 const updateTaskMock = vi.fn();
+const requestStreamCatchUpMock = vi.fn();
 
 vi.mock('@/stores/chatStore', () => ({
   useChatStore: () => ({
@@ -20,7 +21,7 @@ vi.mock('@/stores/chatStore', () => ({
     addMessage: vi.fn(),
     removeMessage: vi.fn(),
     removeThreadMessage: vi.fn(),
-    requestStreamCatchUp: vi.fn(),
+    requestStreamCatchUp: requestStreamCatchUpMock,
   }),
 }));
 
@@ -63,6 +64,7 @@ describe('TaskPanel socket filter: kind + threadId guard', () => {
   beforeEach(() => {
     addTaskMock.mockClear();
     updateTaskMock.mockClear();
+    requestStreamCatchUpMock.mockClear();
     container = document.createElement('div');
     document.body.appendChild(container);
     root = createRoot(container);
@@ -115,5 +117,10 @@ describe('TaskPanel socket filter: kind + threadId guard', () => {
   it('allows work task_updated for the active thread', () => {
     captured!.onTaskUpdated!({ id: 't3', threadId: 'thread-1', kind: 'work', status: 'done' });
     expect(updateTaskMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('rehydrates the exact source thread when a custody offer changes', () => {
+    captured!.onCustodyOfferUpdated!({ messageId: 'message-1', threadId: 'thread-other' });
+    expect(requestStreamCatchUpMock).toHaveBeenCalledWith('thread-other');
   });
 });

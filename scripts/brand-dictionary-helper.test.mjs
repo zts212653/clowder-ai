@@ -65,6 +65,15 @@ describe('brand-dictionary-helper', () => {
     });
   });
 
+  describe('classifyPath — canonical public source', () => {
+    it('classifies site/** as public-source', async () => {
+      const { classifyPath } = await import(HELPER_PATH);
+      const result = classifyPath('site/index.html');
+      assert.equal(result.classification, 'public-source');
+      assert.equal(result.risk, 'P1');
+    });
+  });
+
   describe('classifyPath — safe-cherry-pick (default)', () => {
     it('classifies packages/api/src/index.ts as safe-cherry-pick', async () => {
       const { classifyPath } = await import(HELPER_PATH);
@@ -130,6 +139,14 @@ describe('brand-dictionary-helper', () => {
       const sanctum = terms.find((t) => t.id === 'l4.redis_sanctum');
       assert.ok(sanctum, 'l4.redis_sanctum term should exist');
       assert.ok(sanctum.homePatterns.includes('production data boundary'));
+    });
+
+    it('classifies bare lowercase operator as a private co-creator role variant', async () => {
+      const { getHomeTerms } = await import(HELPER_PATH);
+      const terms = getHomeTerms();
+      const coCreator = terms.find((t) => t.id === 'role.co_creator');
+      assert.ok(coCreator, 'role.co_creator term should exist');
+      assert.ok(coCreator.homePatterns.includes('operator'));
     });
   });
 

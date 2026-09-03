@@ -9,6 +9,10 @@ export interface RecoverActiveLocalReviewVerdictInput {
   tenantScope: string;
   headSha: string;
   evidenceRef: string;
+  candidateFence?: {
+    candidateRevision: number;
+    evidenceDigest: string;
+  };
   now: number;
 }
 
@@ -27,6 +31,19 @@ export type RecoverActiveLocalReviewVerdictResult =
         | 'return_present';
       lease: ActionSuccessorLease;
     };
+
+function recoveryCandidateMatches(current: ActionSuccessorLease, input: RecoverActiveLocalReviewVerdictInput): boolean {
+  const candidateEntries = Object.entries(current.completionCandidates);
+  if (!input.candidateFence) return candidateEntries.length === 0;
+  const candidate = current.completionCandidates[input.reviewerCatId];
+  return (
+    candidateEntries.length === 1 &&
+    candidate?.candidateRevision === input.candidateFence.candidateRevision &&
+    candidate.evidenceDigest === input.candidateFence.evidenceDigest &&
+    candidate.evidenceRefs.length === 1 &&
+    candidate.evidenceRefs[0] === input.evidenceRef
+  );
+}
 
 /**
  * Atomic lease transition used only after the service has verified the durable
@@ -68,7 +85,7 @@ export function recoverActiveLocalReviewVerdict(
   }
   if (current.status !== 'active') return { outcome: 'lease_not_active', lease: current };
   if (Object.keys(current.holderOutcomes).length > 0) return { outcome: 'output_present', lease: current };
-  if (Object.keys(current.completionCandidates).length > 0) return { outcome: 'candidate_present', lease: current };
+  if (!recoveryCandidateMatches(current, input)) return { outcome: 'candidate_present', lease: current };
   if (current.returnTransitions.length > 0) return { outcome: 'return_present', lease: current };
 
   return {

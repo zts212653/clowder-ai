@@ -210,7 +210,7 @@ return 'UPDATED'
  *
  * KEYS[1..3] = candidate, pending index, per-candidate suppression.
  * Remaining keys are subject memberships, optional personArtifacts, and
- * optional hard-forget fence. ARGV[7..10] carry their 1-based indexes.
+ * optional hard-forget fence and settled index. ARGV[7..12] carry their 1-based indexes and decision time.
  */
 export const REJECT_CANDIDATE_LUA = `
 local fenceKeyIndex = tonumber(ARGV[7]) or 0
@@ -246,9 +246,17 @@ if not current.publication or current.publication.state ~= 'anchored' then
   return 'CONFLICT'
 end
 
+local settledKeyIndex = tonumber(ARGV[11]) or 0
+local settledScore = tonumber(ARGV[12])
+if settledKeyIndex < 1 or settledKeyIndex > #KEYS then return 'INVALID_ARGUMENTS' end
+if not settledScore then return 'INVALID_ARGUMENTS' end
+local settledType = redis.call('TYPE', KEYS[settledKeyIndex]).ok
+if settledType ~= 'none' and settledType ~= 'zset' then return 'TYPE_CONFLICT' end
+
 redis.call('SET', KEYS[1], ARGV[2])
 redis.call('ZREM', KEYS[2], ARGV[3])
 redis.call('SET', KEYS[3], ARGV[4])
+redis.call('ZADD', KEYS[settledKeyIndex], settledScore, ARGV[3])
 
 local artifactKeyIndex = tonumber(ARGV[8]) or 0
 if artifactKeyIndex > 0 then

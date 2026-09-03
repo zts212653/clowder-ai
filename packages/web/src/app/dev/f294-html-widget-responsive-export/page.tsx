@@ -202,6 +202,30 @@ const CSSOM_ROOT_PSEUDO_WIDGET_HTML = `<!doctype html>
       p { margin: 8px; }
     </style>
     <style id="late-cssom-flow"></style>
+    <script>
+      // Delay only the first exporter challenge so this journey deterministically
+      // covers a valid proof that outlives the historical 2-second sub-deadline.
+      const nativeRequestAnimationFrame = window.requestAnimationFrame.bind(window);
+      let delayNextProof = true;
+      window.addEventListener('message', (event) => {
+        if (
+          !delayNextProof ||
+          event.source !== parent ||
+          !event.data ||
+          event.data.type !== 'cat-cafe:html-widget-proof-request'
+        ) return;
+        delayNextProof = false;
+        let delayedFrames = 2;
+        window.requestAnimationFrame = (callback) => {
+          if (delayedFrames === 0) return nativeRequestAnimationFrame(callback);
+          delayedFrames -= 1;
+          return window.setTimeout(() => nativeRequestAnimationFrame(callback), 1_100);
+        };
+        window.setTimeout(() => {
+          window.requestAnimationFrame = nativeRequestAnimationFrame;
+        }, 2_500);
+      });
+    </script>
   </head>
   <body>
     <p>Measurable CSSOM-generated flow must refresh and remain exportable.</p>

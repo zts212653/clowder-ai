@@ -76,6 +76,7 @@ describe('F284 WorkspaceNowSurface', () => {
           threadTitle: 'Background thread',
           catId: 'kimi',
           kind: 'managed_command',
+          activity: 'full_gate',
           startedAt: 2,
           cancelability: {
             state: 'cancelable',
@@ -93,7 +94,7 @@ describe('F284 WorkspaceNowSurface', () => {
     expect(container.textContent).toContain('cat-cafe');
     expect(container.textContent).toContain('feat/f284-ux-implementation');
     expect(container.textContent).toContain('Foreground thread · 实时回合');
-    expect(container.textContent).toContain('Background thread · 托管命令');
+    expect(container.textContent).toContain('Background thread · 全量门禁');
   });
 
   it('shows an explicit reason when canonical truth cannot offer a safe cancel target', async () => {
@@ -117,5 +118,39 @@ describe('F284 WorkspaceNowSurface', () => {
 
     expect(container.textContent).toContain('控制面暂不可用，无法安全停止');
     expect(container.querySelector('[data-testid="execution-not-cancelable"]')).not.toBeNull();
+  });
+
+  it('offers the real live invocation to an adapter without treating a managed command as Agent Run', async () => {
+    const request = useActiveExecutionStore.getState().beginHydration('thread-a');
+    useActiveExecutionStore.getState().applySnapshot('thread-a', request, {
+      projectPath: '/project/cafe',
+      executions: [
+        {
+          executionId: 'inv-1',
+          threadId: 'thread-a',
+          threadTitle: 'Live run',
+          catId: 'codex-sol',
+          kind: 'live_invocation',
+          startedAt: 1,
+          cancelability: { state: 'not_cancelable', reason: 'terminalizing' },
+        },
+        {
+          executionId: 'command-1',
+          threadId: 'thread-a',
+          threadTitle: 'Managed command',
+          catId: 'codex-sol',
+          kind: 'managed_command',
+          startedAt: 2,
+          cancelability: { state: 'not_cancelable', reason: 'terminalizing' },
+        },
+      ],
+    });
+    const onSelectExecution = vi.fn();
+    await act(async () => root.render(<WorkspaceNowSurface onSelectExecution={onSelectExecution} />));
+
+    const openButtons = container.querySelectorAll('[data-testid="workspace-open-running-object"]');
+    expect(openButtons).toHaveLength(1);
+    act(() => openButtons[0]?.dispatchEvent(new MouseEvent('click', { bubbles: true })));
+    expect(onSelectExecution).toHaveBeenCalledWith(expect.objectContaining({ executionId: 'inv-1' }));
   });
 });

@@ -180,6 +180,7 @@ export async function prepareProposalLedgerRejectMutation(input: {
   for (const subjectRef of suppressionState.subjectRefs) {
     keys.push(PersonMemoryKeys.suppressionSubject(input.decision.ownerUserId, subjectRef));
   }
+  const settledKeyIndex = keys.push(PersonMemoryKeys.settled(input.decision.ownerUserId));
   return {
     keys,
     updated,
@@ -203,6 +204,7 @@ export async function prepareProposalLedgerRejectMutation(input: {
       String(suppressionState.subjectRefs.length),
       input.closure.bindingKey,
       candidateKey,
+      String(settledKeyIndex),
     ],
   };
 }

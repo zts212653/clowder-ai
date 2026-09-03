@@ -1,4 +1,9 @@
-import type { ApprovalItem, EntityConflictContext, EntityConflictResolutionRequest } from '@cat-cafe/shared';
+import {
+  type ApprovalHubItem,
+  approvalProducerMeta,
+  type EntityConflictContext,
+  type EntityConflictResolutionRequest,
+} from '@cat-cafe/shared';
 import { ApprovalProvenanceLinks } from './ApprovalProvenanceLinks';
 import { EntityConflictResolutionPanel } from './EntityConflictResolutionPanel';
 import { PersonMemoryClaimSelector } from './PersonMemoryClaimSelector';
@@ -6,7 +11,6 @@ import { PersonMemoryClaimSelector } from './PersonMemoryClaimSelector';
 export function GenericApprovalDecisionActions({
   item,
   isStale,
-  isResumeOnly,
   isPersonMemoryClaimSelect,
   entityConflict,
   decidingState,
@@ -15,9 +19,8 @@ export function GenericApprovalDecisionActions({
   onEntityResolution,
   onBeforeNavigate,
 }: {
-  item: ApprovalItem;
+  item: ApprovalHubItem;
   isStale: boolean;
-  isResumeOnly: boolean;
   isPersonMemoryClaimSelect: boolean;
   entityConflict?: EntityConflictContext;
   decidingState?: string;
@@ -26,9 +29,11 @@ export function GenericApprovalDecisionActions({
   onEntityResolution: (resolution: EntityConflictResolutionRequest) => void;
   onBeforeNavigate: () => void;
 }) {
+  const originCardOwnsPendingDecision = approvalProducerMeta(item.sourceFeatureId).decisionSurface === 'origin_card';
+  const canDecide = item.resolution === 'open';
   return (
     <div className="space-y-2">
-      {entityConflict && (
+      {canDecide && entityConflict && (
         <EntityConflictResolutionPanel
           key={entityConflict.fingerprint}
           conflict={entityConflict}
@@ -38,21 +43,10 @@ export function GenericApprovalDecisionActions({
           onReject={onReject}
         />
       )}
-      {isPersonMemoryClaimSelect && <PersonMemoryClaimSelector item={item} onReject={onReject} />}
-      {!isPersonMemoryClaimSelect && (
+      {canDecide && isPersonMemoryClaimSelect && <PersonMemoryClaimSelector item={item} onReject={onReject} />}
+      {(!isPersonMemoryClaimSelect || !canDecide) && (
         <div className="flex flex-wrap items-center gap-2">
-          {item.inlineApprovable && isResumeOnly && (
-            <button
-              type="button"
-              onClick={onApprove}
-              disabled={Boolean(decidingState)}
-              className="rounded-md bg-[var(--semantic-warning)] px-3 py-1 text-micro font-medium text-[var(--cafe-accent-foreground)] disabled:opacity-50"
-              data-testid="resume-btn"
-            >
-              {decidingState === 'approving' ? '...' : '继续完成'}
-            </button>
-          )}
-          {item.inlineApprovable && !isResumeOnly && !entityConflict && (
+          {canDecide && item.inlineApprovable && !entityConflict && (
             <button
               type="button"
               onClick={onApprove}
@@ -63,7 +57,7 @@ export function GenericApprovalDecisionActions({
               {decidingState === 'approving' ? '...' : '批准'}
             </button>
           )}
-          {!entityConflict && (
+          {canDecide && !entityConflict && !originCardOwnsPendingDecision && (
             <button
               type="button"
               onClick={onReject}

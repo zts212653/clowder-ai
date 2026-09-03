@@ -26,14 +26,14 @@ function lifecycleEvent(type, overrides = {}) {
   eventSequence += 1;
   const actors = {
     verdict_opened: { kind: 'migration', id: 'f266-backfill' },
-    owner_reassigned: { kind: 'cvo', id: 'you' },
+    owner_reassigned: { kind: 'cvo', id: 'operator' },
     owner_acknowledged: { kind: 'cat', id: 'codex-sol' },
     action_planned: { kind: 'cat', id: 'codex-sol' },
     fix_recorded: { kind: 'cat', id: 'codex-sol' },
     reeval_requested: { kind: 'cat', id: 'codex-sol' },
     reeval_passed: { kind: 'cat', id: 'gpt52' },
     reeval_failed: { kind: 'cat', id: 'gpt52' },
-    cvo_suppressed: { kind: 'cvo', id: 'you' },
+    cvo_suppressed: { kind: 'cvo', id: 'operator' },
     sla_escalated: { kind: 'automation', id: 'eval-verdict-closure-reconciler' },
   };
 

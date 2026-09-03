@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import { saveSidebarSnapshot } from '@/utils/offline-store';
+import { recordSidebarClientApply } from '@/utils/sidebar-projection-observability';
 
 export type SidebarPresenceStatus = 'idle' | 'working' | 'done' | 'error';
 export type SidebarSystemKind = 'connector_hub' | 'eval_domain' | 'cat_bedroom';
@@ -132,6 +133,7 @@ export const useSidebarProjectionStore = create<SidebarProjectionState>((set, ge
   refreshing: false,
 
   applySidebarSnapshot: (snapshot, requestGeneration, options = {}) => {
+    const applyStartedAt = performance.now();
     const source = options.source ?? 'server';
     const state = get();
     if (source === 'cache') {
@@ -149,6 +151,7 @@ export const useSidebarProjectionStore = create<SidebarProjectionState>((set, ge
     });
 
     if (source === 'server') {
+      recordSidebarClientApply(rows.length, Math.round((performance.now() - applyStartedAt) * 1_000) / 1_000);
       void saveSidebarSnapshot(rows).catch(() => {});
     }
     return true;

@@ -143,6 +143,21 @@
 
 旅程中的每一跳都要能回答“谁拥有状态、什么事件让它变化、失败后从哪里继续”。无法回答的跳转不能靠旁白补齐。
 
+### 可证伪技术剖面 Claim Bench（仅在判题是“技术主张是否可信”时）
+
+只有主判断要求观众检查一项技术主张时才填写。普通理念故事、产品体验比较和用户旅程不要为了显得完整而补这一表。
+
+| falsifiable claim | failure mode 或 competing explanation | technical object 与 algorithm flow | manipulable variable | control 与 ablation | verdict rule | claim ceiling | provenance 与 status |
+|---|---|---|---|---|---|---|---|
+| | | | | | SUPPORTED、REFUTED 或 UNKNOWN | | |
+
+- 一项 claim 对应一个 bench；先写什么观察会让它失败，再设计画面。
+- 一次只改变一个操纵变量。control 固定其余状态，ablation 拿掉声称有效的机制。
+- verdict 必须由页面中的确定状态算出，不能由旁白临场宣布。
+- UNKNOWN 是合法结论；claim ceiling 写清概念原型不能推出的生产效果、因果范围与外推范围。
+- 外部数字、benchmark、趋势与因果来源另走 source-audit；本表只引用 provenance，不替代来源审计。
+- 没有明确 consumer 和 keep、tune 或 sunset 决策时，不为这一页额外挂 Eval。
+
 ### 真实交互 Claim Evidence（仅有真实交互 claim 时）
 
 只有交付声明包含编辑、输入、批注、聊天/讨论、发送、审批、拖动/加节点或可恢复草稿时填写。`concept_story` 的预设叙事和场景控制不填这一表；若它也声称上述能力，则同样必须填写。
@@ -210,6 +225,7 @@
 ### 确定契约
 
 - [ ] 场景顺序、角色连续性、标签与控件有自动检查
+- [ ] 若启用 Claim Bench，每项 falsifiable claim 都有 competing explanation、单变量 ablation、确定 verdict 与 claim ceiling
 - [ ] 页面无运行时错误
 - [ ] 暂停期间没有计时器偷跑
 - [ ] 概念数据与真实证据标注清楚

@@ -69,7 +69,7 @@ triggers:
 服务端不再自动注入 `opensource-ops` maintainer 五问、猜测作者角色或写入 PR metadata。
 子 thread 的第一项工作是主动加载 `opensource-ops` skill，在 child workspace 内完成 provider
 object 与 author grounding，再执行 maintainer 五问与 custody 判断。本地猫替外部作者修代码需要
-显式授权与 provenance，不能默认派给 `preferredCats` 里的猫。
+显式 Strategy B 授权 provenance，不能默认派给 `preferredCats` 里的猫。
 
 **命名规则**：`[优先级/批次] 动词 + 对象`
 - 例："P1 功能完善：Web UI + Semantic Scholar + API 降级"

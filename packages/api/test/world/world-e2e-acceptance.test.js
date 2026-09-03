@@ -59,7 +59,7 @@ describe('F093 Phase A — End-to-End Acceptance (AC-A10)', () => {
       name: '逐峰宇宙',
       constitution: '时间是线性的，因果不可逆',
       status: 'active',
-      createdBy: { kind: 'user', id: 'you' },
+      createdBy: { kind: 'user', id: 'operator' },
       createdAt: NOW,
       updatedAt: NOW,
     });

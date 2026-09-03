@@ -7,6 +7,44 @@ import { adaptTranscriptEvents } from '../adapter';
 import { makeEvent } from './adapter-test-helpers';
 
 describe('F252 adapter — system_info thinking events', () => {
+  it('suppresses hosted workspace semantics but keeps plan visible in timeline replay', () => {
+    const events = [
+      makeEvent(1, 1000, {
+        type: 'provider_signal',
+        content: '{"native":"must-not-render"}',
+        semanticEvent: {
+          v: 1,
+          id: 'review-replay-1',
+          kind: 'review',
+          occurredAt: 1000,
+          reviewId: 'review-1',
+          stage: 'result',
+          summary: '检查完成：没有阻塞项。',
+          provenance: { provider: 'codex', nativeType: 'review/result' },
+        },
+      }),
+      makeEvent(2, 1100, {
+        type: 'provider_signal',
+        content: '{"native":"plan-must-not-render"}',
+        semanticEvent: {
+          v: 1,
+          id: 'plan-replay-1',
+          kind: 'plan',
+          occurredAt: 1100,
+          stage: 'updated',
+          text: 'Locate the contract, then fix it.',
+        },
+      }),
+    ];
+
+    expect(adaptTranscriptEvents(events)).toEqual([
+      expect.objectContaining({
+        type: 'system',
+        role: 'system',
+        content: 'Locate the contract, then fix it.',
+      }),
+    ]);
+  });
   it('extracts thinking from system_info with JSON { type: "thinking" } content', () => {
     const events = [
       makeEvent(1, 1000, {

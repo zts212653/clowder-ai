@@ -95,7 +95,7 @@ comment/review body、CI 原始 description、legacy caller instructions 和未�
 
 ## CI 外部基础设施
 
-GitHub Actions job 同时满足 `runner_id=0`、`steps=[]`，且 annotation 指向 billing/payment/spending 时，归类为 `external_infrastructure`：记状态，不满足 `pr_ci_terminal`，也不把“账单红灯”当代码失败。
+GitHub Actions job 同时满足 `runner_id=0`、`steps=[]`，且 annotation 指向 billing/payment/spending 时，归类为 `external_infrastructure`：记状态，不把“账单红灯”当代码失败，也不把已知月底额度边界升级成 operator/maintainer 的付费、修账单或关 workflow 待办。它不构成可执行 CI 终态；当 claim 已有风险匹配的本地 gate 与独立 review 证据时，结束这条不可执行的 CI 等待并继续 merge-gate，而不是无限等或反复上报。
 
 ## Issue compatibility
 

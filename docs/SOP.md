@@ -245,7 +245,7 @@ cloud 不再是默认步骤，因此没有“先默认、再申请跳过”：
 7. **PR body 模式匹配**：body 含字符串 `Verdict published via cat_cafe_publish_verdict MCP tool` —— 防止被滥用为通用 cat-merge 绕道
 8. **作者 ≠ merger**：保留 cross-individual 原则（生成方猫 = 发起 publish 的 eval cat；merger = 任一非生成方猫）
 9. **`evidence-only` label 必须 present**（cloud R6 P2 — 锁住 policy 判断）：PR 必须有 `evidence-only` label。`computePublishPolicy` 只对 `keep_observe` verdict 应用该 label；`fix` / `build` / `delete_sunset` verdict policy 返回 `regular_pr`（无 evidence-only label） → 必须走 regular merge-gate（owner action required）。**关键**：title 含 `verdict(` 前缀和 body 含 `cat_cafe_publish_verdict` 字符串只能证明 PR 是 publish-verdict 自动生成的，**不能证明该 PR 不需要 owner action**。`evidence-only` label 是 policy 显式判断"这条 verdict 无 actionable 内容"的唯一信号；缺失 → 必须走 regular merge-gate（哪怕 PR 是自动生成的）。
-10. **Eval glossary check 必须成功**：GitHub check `Eval Metric Glossary Coverage` 必须为 `SUCCESS`。该 check 对 verdict / glossary 相关 PR 运行 `pnpm check:eval-metric-glossary`，保证最新 production verdict 的每个 `metricRef` 都有可读说明；check 缺失、pending 或失败都不能走 artifact-only merge。
+10. **Eval glossary check 必须成功**：GitHub check/status `Eval Metric Glossary Coverage` 必须为 `SUCCESS`。`cat_cafe_publish_verdict` 在任何 branch/commit/PR 副作用前验证 packet 的 glossary refs；candidate commit 生成后、push 前再运行全 production glossary 与 F267 measurement evidence contract，全部通过才推送 exact commit、写入该 GitHub status，随后创建 PR。check 缺失、pending 或失败都不能走 artifact-only merge。旧的 Actions workflow 因组织级 minutes 成本按 operator 决定退役，不再是此门禁的执行载体。
 
 #### 工作流
 
@@ -265,10 +265,10 @@ PR_NUMBER=N node scripts/check-hotfix-pattern.mjs N | jq -r '.hotfix'  # must be
 # fix/build/delete_sunset verdicts intentionally lack this label → must walk regular gate)
 gh pr view N --json labels --jq '.labels[].name' | rg -q '^evidence-only$' \
   || echo "FAIL #9: no evidence-only label — verdict has actionable verdict severity; walk regular merge-gate"
-# Condition #10: the targeted production glossary coverage check must pass.
+# Condition #10: the publisher's exact-commit glossary status must pass.
 gh pr checks N | rg -q '^Eval Metric Glossary Coverage.*pass' \
   || echo "FAIL #10: Eval Metric Glossary Coverage is missing, pending, or failing"
-# Local reproduction when the check is red:
+# Local reproduction when the status is red:
 pnpm check:eval-metric-glossary
 
 # 3. If all 10 pass: squash merge
@@ -413,18 +413,51 @@ CLOWDER_AI_DIR="$CLOWDER_AI_DIR" bash scripts/sync-to-opensource.sh \
 
 一句话：**先用便宜检查收敛冻结切面，再各跑一次昂贵门禁；不要把真实 `clowder-ai` 当第一轮验收场，更不能把 runtime 当验收靶子。**
 
+### Durable train recovery（F308）
+
+当 source 已包含 `sync:train` 时，维护者改由 receipt facade 启动/恢复同一 immutable cut；默认 state root
+位于 source Git common directory 下，因此 worktree 或 carrier 重启不会抹掉 terminal truth。
+
+```bash
+# launch returns a run id. It is no-write for preflight/validate.
+pnpm sync:train -- launch --no-write --stage preflight \
+  --source-sha="$SOURCE_SHA" \
+  --public-head="$EXPECTED_TARGET_HEAD" \
+  --reconciliation-file="$RECONCILIATION_FILE" \
+  --target-dir="$CLOWDER_AI_DIR"
+
+pnpm sync:train -- status --json
+pnpm sync:train -- resume --run-id=<returned-run-id>
+
+# After the preflight terminal is green, launch the same cut's validate stage.
+pnpm sync:train -- launch --no-write --stage validate \
+  --source-sha="$SOURCE_SHA" \
+  --public-head="$EXPECTED_TARGET_HEAD" \
+  --reconciliation-file="$RECONCILIATION_FILE" \
+  --target-dir="$CLOWDER_AI_DIR"
+```
+
+`resume` first consumes a matching terminal receipt; it must not repeat a completed stage. Source, public or
+reconciliation drift invalidates that receipt with a typed `start_next_train` action rather than silently borrowing
+evidence from an old cut. The optional `--stage write --write-handoff` only records a checked handoff for the
+existing authorized writer: it never authorizes or performs a public write itself. Review, merge truth and public
+write disposition remain separate terminals.
+
 ### Release Provenance（三点映射）
 
 公开 release 不要求 `cat-cafe` 和 `clowder-ai` 同 SHA；我们要求的是**可追溯映射**。
 
+发布有两条一等 provenance lane，必须显式选择真实发生的那一条：
+
+- `source-sync`（默认）：本次 release 来自一班新的 release-intended full sync。
+- `public-main`：本次 release 冻结当前稳定 public main；没有发生新的 source export，也不得伪造 source snapshot。
+
 硬规则：
-1. release-intended full sync 必须从家里 source 侧显式传 `--release-tag=vX.Y.Z`
-2. `sync-to-opensource.sh` 在 temp target public gate 通过后，会自动打并 push `clowder-vX.Y.Z-source`
-3. `.sync-provenance.json` 必须记录：
-   - `source_commit_sha`
-   - `release_tag`
-   - `source_snapshot_tag`
-4. target 仓后续真正切 `vX.Y.Z` 时，必须通过：
+1. `source-sync` 必须从家里 source 侧显式传 `--release-tag=vX.Y.Z`；`sync-to-opensource.sh` 在 temp target public gate 通过后自动打并 push `clowder-vX.Y.Z-source`。
+2. `source-sync` 的 `.sync-provenance.json` 必须记录 `source_commit_sha`、`release_tag`、`source_snapshot_tag`。
+3. `public-main` 必须显式传 `--provenance-lane=public-main --target-sha=<exact current public main>`；脚本先要求该 SHA 等于刷新后的 `clowder-ai origin/main`。本地裸仓 fixture 以单一 ref transaction compare-and-create；GitHub 生产路径因 `updateRefs` 只接受 commit target，改用无 bypass actor、只匹配 `refs/heads/main`、且 `updateAllowsFetchAndMerge=false` 的临时 `UPDATE` ruleset 建立服务端临界区，在锁内再次 fetch/比较 exact main、创建并验证 annotated tag ref，再删除该锁。创建后或重试接管时都必须精确验证上述 ruleset 结构；只要 `main`、tag 或 release-lock state 漂移，发布必须拒绝。annotated target tag 记录 `release-lane`、exact target、最近 sync provenance/source anchor，以及 `new-source-snapshot-tag: none`。
+4. 两条 lane 都必须以最近一次 `.sync-provenance.json` 为历史来源锚点；`public-main` 只引用它，不把它改写成一次新的 release sync。
+5. target 仓真正切 `vX.Y.Z` 时，必须通过 canonical script：
 
 ```bash
 bash scripts/publish-release-tag.sh \
@@ -434,13 +467,26 @@ bash scripts/publish-release-tag.sh \
   --push
 ```
 
-5. `publish-release-tag.sh` 会强制校验两层门禁：
-   - `source snapshot tag → .sync-provenance.json → target release tag` 三点映射
-   - `reconciliation report` 必须存在；如果报告把 issue 记为 `closed`，GitHub 上也必须已经是 `CLOSED`
+当前稳定 public main lane 使用：
+
+```bash
+bash scripts/publish-release-tag.sh \
+  --release-tag=vX.Y.Z \
+  --provenance-lane=public-main \
+  --target-sha=<exact_current_clowder_ai_main_sha> \
+  --reconciliation-report=docs/ops/reconciliation-vX.Y.Z.md \
+  --push
+```
+
+6. `publish-release-tag.sh` 会强制校验：
+   - `source-sync`：`source snapshot tag → .sync-provenance.json → target release tag` 三点映射。
+   - `public-main`：`latest sync provenance/source anchor → exact current public main → annotated target release tag` 三点映射；tag ref 可见性必须位于 GitHub 强制的 main read-only 临界区内（或本地裸仓的单一原子 transaction），且 annotation 明示没有新 source snapshot。
+   - 两条 lane 的 `reconciliation report` 都必须存在；如果报告把 issue 记为 `closed`，GitHub 上也必须已经是 `CLOSED`。
+7. `public-main` 的持久真相是远端 `main`、annotated tag 与 GitHub Release；本地 tag 只是可重建缓存。若进程在 GitHub main 锁建立后中断，新 checkout 只可接管名称与结构完全一致的 release lock；远端 tag 已存在时先 fetch 并校验其 raw object，再清除遗留锁并继续 Release，tag 尚不存在时则在锁内重新核对 main 后创建。不得合成带新 tagger timestamp 的本地 tag 来判定远端有效性，也不得遗留一个可绕过的 release lock。
 
 release notes /后续 backport 也必须引用这些锚点，而不是口头约定。
 
-一句话：**以后对齐 release，不靠“记得当时是哪次 sync”，靠 `source snapshot tag → target release tag → backport commit` 三点映射。**
+一句话：**发生了新 sync 就证明 source snapshot；直接发布稳定 public main 就证明 exact public head，并诚实写明没有新 source export。**
 
 ### 规则
 

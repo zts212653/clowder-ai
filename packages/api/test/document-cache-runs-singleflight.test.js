@@ -38,7 +38,7 @@ describe('F279 server-owned full-document cache runs — singleflight and schedu
 
     const first = { projectPath: '/repo', relativePath: 'first.md', contentDigest: 'digest' };
     const second = { projectPath: '/repo', relativePath: 'second.md', contentDigest: 'digest' };
-    await saveDocument(harness.app, 'you', first, ['first-anchor']);
+    await saveDocument(harness.app, 'operator', first, ['first-anchor']);
     await saveDocument(harness.app, 'other-user', second, ['second-anchor']);
 
     const cacheRequest = (userId, identity, anchor) =>
@@ -50,8 +50,8 @@ describe('F279 server-owned full-document cache runs — singleflight and schedu
       });
 
     const [firstStart, duplicateStart, secondStart] = await Promise.all([
-      cacheRequest('you', first, 'first-anchor'),
-      cacheRequest('you', first, 'first-anchor'),
+      cacheRequest('operator', first, 'first-anchor'),
+      cacheRequest('operator', first, 'first-anchor'),
       cacheRequest('other-user', second, 'second-anchor'),
     ]);
     for (const response of [firstStart, duplicateStart, secondStart]) {
@@ -64,7 +64,7 @@ describe('F279 server-owned full-document cache runs — singleflight and schedu
     gate.resolve();
 
     await waitFor(async () => {
-      const state = await loadDocument(harness.app, 'you', first);
+      const state = await loadDocument(harness.app, 'operator', first);
       assert.equal(state.cache.cachedSentences, 1);
     });
     await waitFor(async () => {
@@ -72,7 +72,7 @@ describe('F279 server-owned full-document cache runs — singleflight and schedu
       assert.equal(state.cache.cachedSentences, 1);
     });
 
-    const firstState = await loadDocument(harness.app, 'you', first);
+    const firstState = await loadDocument(harness.app, 'operator', first);
     const secondState = await loadDocument(harness.app, 'other-user', second);
     assert.equal(firstState.sentences[0].assetId, secondState.sentences[0].assetId);
     assert.equal(firstState.cacheRun.active, false);
@@ -91,12 +91,12 @@ describe('F279 server-owned full-document cache runs — singleflight and schedu
     });
     harnesses.push(harness);
     const identity = { projectPath: '/repo', relativePath: 'shared-entry.md', contentDigest: 'digest' };
-    await saveDocument(harness.app, 'you', identity, ['shared-anchor']);
+    await saveDocument(harness.app, 'operator', identity, ['shared-anchor']);
 
     const cacheStart = await harness.app.inject({
       method: 'POST',
       url: '/api/tts/listen/document/cache',
-      headers: headers('you'),
+      headers: headers('operator'),
       payload: { identity, sentences: [{ anchor: 'shared-anchor', text: '缓存与播放共用的一句。' }] },
     });
     assert.equal(cacheStart.statusCode, 200, cacheStart.body);
@@ -105,7 +105,7 @@ describe('F279 server-owned full-document cache runs — singleflight and schedu
     const playback = harness.app.inject({
       method: 'POST',
       url: '/api/tts/listen/stream',
-      headers: headers('you'),
+      headers: headers('operator'),
       payload: { text: '缓存与播放共用的一句。' },
     });
     gate.resolve();
@@ -114,7 +114,7 @@ describe('F279 server-owned full-document cache runs — singleflight and schedu
     assert.equal(playbackResponse.statusCode, 200, playbackResponse.body);
     assert.equal(streamCalls, 1, 'cache and playback must share the in-flight asset synthesis');
     await waitFor(async () => {
-      const state = await loadDocument(harness.app, 'you', identity);
+      const state = await loadDocument(harness.app, 'operator', identity);
       assert.equal(state.cache.cachedSentences, 1);
     });
   });
@@ -125,17 +125,17 @@ describe('F279 server-owned full-document cache runs — singleflight and schedu
     });
     harnesses.push(harness);
     const identity = { projectPath: '/repo', relativePath: 'manifest.md', contentDigest: 'digest' };
-    await saveDocument(harness.app, 'you', identity, ['known-anchor']);
+    await saveDocument(harness.app, 'operator', identity, ['known-anchor']);
 
     const response = await harness.app.inject({
       method: 'POST',
       url: '/api/tts/listen/document/cache',
-      headers: headers('you'),
+      headers: headers('operator'),
       payload: { identity, sentences: [{ anchor: 'unknown-anchor', text: 'This must never enter persistence.' }] },
     });
 
     assert.equal(response.statusCode, 409, response.body);
-    const state = await loadDocument(harness.app, 'you', identity);
+    const state = await loadDocument(harness.app, 'operator', identity);
     assert.deepEqual(state.sentences, [{ anchor: 'known-anchor' }]);
   });
 
@@ -153,12 +153,12 @@ describe('F279 server-owned full-document cache runs — singleflight and schedu
     });
     harnesses.push(harness);
     const identity = { projectPath: '/repo', relativePath: 'priority.md', contentDigest: 'digest' };
-    await saveDocument(harness.app, 'you', identity, ['background-first', 'background-second']);
+    await saveDocument(harness.app, 'operator', identity, ['background-first', 'background-second']);
 
     const started = await harness.app.inject({
       method: 'POST',
       url: '/api/tts/listen/document/cache',
-      headers: headers('you'),
+      headers: headers('operator'),
       payload: {
         identity,
         sentences: [
@@ -174,7 +174,7 @@ describe('F279 server-owned full-document cache runs — singleflight and schedu
     const playback = await harness.app.inject({
       method: 'POST',
       url: '/api/tts/listen/stream',
-      headers: headers('you'),
+      headers: headers('operator'),
       payload: { text: '播放缺失句。' },
     });
     assert.equal(playback.statusCode, 200, playback.body);

@@ -25,6 +25,15 @@ describe('preview gateway request identity', () => {
     );
   });
 
+  it('preserves fragments and bare query flags as separate URL components', () => {
+    expect(buildPreviewGatewayUrl(4111, 5173, '/thread/thread-f307#surface-terminal')).toBe(
+      'http://preview-5173.localhost:4111/thread/thread-f307#surface-terminal',
+    );
+    expect(buildPreviewGatewayUrl(4111, 5173, '/thread/thread-f307?f307WorkbenchGate#surface-terminal')).toBe(
+      'http://preview-5173.localhost:4111/thread/thread-f307?f307WorkbenchGate#surface-terminal',
+    );
+  });
+
   it('rejects invalid gateway and target ports', () => {
     expect(() => buildPreviewGatewayUrl(0, 5173)).toThrow(RangeError);
     expect(() => buildPreviewGatewayUrl(4111, 65536)).toThrow(RangeError);

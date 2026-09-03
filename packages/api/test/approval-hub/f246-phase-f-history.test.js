@@ -28,7 +28,7 @@ describe('F246 Phase F: Approval History', () => {
     sourceThreadId: 'thread-sender',
     targetThreadId: 'thread-target',
     senderCatId: 'opus',
-    ownerUserId: 'user-landy',
+    ownerUserId: 'user-operator',
     content: 'Fix the bug',
     targetCats: ['sonnet'],
     cardMessageId: 'msg-card-1',
@@ -42,9 +42,9 @@ describe('F246 Phase F: Approval History', () => {
     it('returns approved proposals for the user', async () => {
       const store = new InMemoryDispatchProposalStore();
       await store.create(createInput({ proposalId: 'dp-1' }));
-      await store.approve('dp-1', 'user-landy');
+      await store.approve('dp-1', 'user-operator');
 
-      const settled = await store.listSettledByUser('user-landy', 50);
+      const settled = await store.listSettledByUser('user-operator', 50);
       assert.equal(settled.length, 1);
       assert.equal(settled[0].proposalId, 'dp-1');
       assert.equal(settled[0].status, 'approved');
@@ -53,9 +53,9 @@ describe('F246 Phase F: Approval History', () => {
     it('returns rejected proposals for the user', async () => {
       const store = new InMemoryDispatchProposalStore();
       await store.create(createInput({ proposalId: 'dp-2' }));
-      await store.reject('dp-2', 'user-landy');
+      await store.reject('dp-2', 'user-operator');
 
-      const settled = await store.listSettledByUser('user-landy', 50);
+      const settled = await store.listSettledByUser('user-operator', 50);
       assert.equal(settled.length, 1);
       assert.equal(settled[0].proposalId, 'dp-2');
       assert.equal(settled[0].status, 'rejected');
@@ -65,7 +65,7 @@ describe('F246 Phase F: Approval History', () => {
       const store = new InMemoryDispatchProposalStore();
       await store.create(createInput({ proposalId: 'dp-pending' }));
 
-      const settled = await store.listSettledByUser('user-landy', 50);
+      const settled = await store.listSettledByUser('user-operator', 50);
       assert.equal(settled.length, 0);
     });
 
@@ -74,7 +74,7 @@ describe('F246 Phase F: Approval History', () => {
       await store.create(createInput({ proposalId: 'dp-other', ownerUserId: 'user-other' }));
       await store.approve('dp-other', 'user-other');
 
-      const settled = await store.listSettledByUser('user-landy', 50);
+      const settled = await store.listSettledByUser('user-operator', 50);
       assert.equal(settled.length, 0);
     });
 
@@ -87,10 +87,10 @@ describe('F246 Phase F: Approval History', () => {
       await store.create(
         createInput({ proposalId: 'dp-new', targetThreadId: 'thread-B', createdAt: Date.now() - 300_000 }),
       );
-      await store.reject('dp-old', 'user-landy');
-      await store.approve('dp-new', 'user-landy');
+      await store.reject('dp-old', 'user-operator');
+      await store.approve('dp-new', 'user-operator');
 
-      const settled = await store.listSettledByUser('user-landy', 50);
+      const settled = await store.listSettledByUser('user-operator', 50);
       assert.equal(settled.length, 2);
       // dp-new was decided later → should come first (decidedAt desc)
       assert.ok(
@@ -105,10 +105,10 @@ describe('F246 Phase F: Approval History', () => {
         await store.create(
           createInput({ proposalId: `dp-${i}`, targetThreadId: `thread-${i}`, createdAt: Date.now() - i * 10_000 }),
         );
-        await store.approve(`dp-${i}`, 'user-landy');
+        await store.approve(`dp-${i}`, 'user-operator');
       }
 
-      const settled = await store.listSettledByUser('user-landy', 3);
+      const settled = await store.listSettledByUser('user-operator', 3);
       assert.equal(settled.length, 3);
     });
 
@@ -123,10 +123,10 @@ describe('F246 Phase F: Approval History', () => {
       // The proposal must NOT appear in settled history — it is no longer decided.
       const store = new InMemoryDispatchProposalStore();
       await store.create(createInput({ proposalId: 'dp-reverted' }));
-      await store.approve('dp-reverted', 'user-landy');
+      await store.approve('dp-reverted', 'user-operator');
       await store.revertToPending('dp-reverted');
 
-      const settled = await store.listSettledByUser('user-landy', 50);
+      const settled = await store.listSettledByUser('user-operator', 50);
       assert.equal(settled.length, 0, 'reverted proposal must not appear in settled history');
     });
   });
@@ -156,34 +156,34 @@ describe('F246 Phase F: Approval History', () => {
         content: 'Investigate the F246 history feature',
         targetCats: ['sonnet', 'gpt52'],
       });
-      await store.approve('dp-settled-1', 'user-landy');
+      await store.approve('dp-settled-1', 'user-operator');
 
       const adapter = new F193ApprovalAdapter(store);
-      const settled = await adapter.listSettled('user-landy', { limit: 50 });
+      const settled = await adapter.listSettled('user-operator', { limit: 50 });
 
       assert.equal(settled.length, 1);
       const item = settled[0];
       assert.equal(item.proposalId, 'dp-settled-1');
       assert.equal(item.sourceFeatureId, 'F193');
       assert.equal(item.status, 'approved');
-      assert.equal(item.ownerUserId, 'user-landy');
+      assert.equal(item.ownerUserId, 'user-operator');
       assert.equal(item.requesterCatId, 'opus');
       assert.ok(typeof item.decidedAt === 'number' && item.decidedAt > 0, 'decidedAt must be a positive number');
-      assert.equal(item.decidedBy, 'user-landy');
+      assert.equal(item.decidedBy, 'user-operator');
       assert.ok(item.summary.includes('Investigate'), `summary should include content, got: ${item.summary}`);
     });
 
     it('returns SettledApprovalItem with status=rejected for rejected proposals', async () => {
       const store = new InMemoryDispatchProposalStore();
       await createAnchored(store, { proposalId: 'dp-rejected' });
-      await store.reject('dp-rejected', 'user-landy');
+      await store.reject('dp-rejected', 'user-operator');
 
       const adapter = new F193ApprovalAdapter(store);
-      const settled = await adapter.listSettled('user-landy', { limit: 50 });
+      const settled = await adapter.listSettled('user-operator', { limit: 50 });
 
       assert.equal(settled.length, 1);
       assert.equal(settled[0].status, 'rejected');
-      assert.equal(settled[0].decidedBy, 'user-landy');
+      assert.equal(settled[0].decidedBy, 'user-operator');
     });
 
     it('returns empty array when no settled proposals', async () => {
@@ -192,7 +192,7 @@ describe('F246 Phase F: Approval History', () => {
       await store.create(createInput({ proposalId: 'dp-pending' }));
 
       const adapter = new F193ApprovalAdapter(store);
-      const settled = await adapter.listSettled('user-landy', { limit: 50 });
+      const settled = await adapter.listSettled('user-operator', { limit: 50 });
       assert.deepEqual(settled, []);
     });
 
@@ -200,11 +200,11 @@ describe('F246 Phase F: Approval History', () => {
       const store = new InMemoryDispatchProposalStore();
       for (let i = 0; i < 5; i++) {
         await createAnchored(store, { proposalId: `dp-s-${i}`, targetThreadId: `thread-${i}` });
-        await store.approve(`dp-s-${i}`, 'user-landy');
+        await store.approve(`dp-s-${i}`, 'user-operator');
       }
 
       const adapter = new F193ApprovalAdapter(store);
-      const settled = await adapter.listSettled('user-landy', { limit: 2 });
+      const settled = await adapter.listSettled('user-operator', { limit: 2 });
       assert.equal(settled.length, 2);
     });
 

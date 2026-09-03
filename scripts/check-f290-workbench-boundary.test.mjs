@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
@@ -24,4 +24,10 @@ test('detects rejected F290 runtime surfaces, product mounts, and persistence', 
 
 test('the repository contains no rejected F290 workbench runtime surface', () => {
   assert.deepEqual(scanF290WorkbenchBoundary(), []);
+});
+
+test('the canonical Web test lane runs the real F290 Service-backed browser journey', () => {
+  const webPackage = JSON.parse(readFileSync(join(process.cwd(), 'packages/web/package.json'), 'utf8'));
+  assert.match(webPackage.scripts['pretest:browser'], /ensure-browser-test-artifacts\.cjs/);
+  assert.match(webPackage.scripts['test:browser'], /test\/browser\/f290-collective-runtime-journey\.test\.mjs/);
 });

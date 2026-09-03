@@ -75,7 +75,7 @@ describe('F279 listen audio continuity', () => {
   });
 
   it('versions listen assets separately and removes model startup silence before caching', async () => {
-    const headers = { 'x-cat-cafe-user': 'you', 'content-type': 'application/json' };
+    const headers = { 'x-cat-cafe-user': 'operator', 'content-type': 'application/json' };
     const text = '连续听读不能每句先空半秒。';
     const generic = await app.inject({ method: 'POST', url: '/api/tts/synthesize', headers, payload: { text } });
     const listen = await app.inject({ method: 'POST', url: '/api/tts/listen/stream', headers, payload: { text } });

@@ -52,11 +52,46 @@ const mapCodexAppServerItemNotification: CodexAppServerNotificationMapper = (met
   return item ? { type: method.replace('/', '.'), item } : null;
 };
 
+const CODEX_GOAL_STATUSES = new Set(['active', 'paused', 'blocked', 'usageLimited', 'budgetLimited', 'complete']);
+
+const mapCodexAppServerGoalUpdated: CodexAppServerNotificationMapper = (_method, params) => {
+  const threadId = params?.threadId;
+  const goal = asCodexAppServerRecord(params?.goal);
+  if (
+    typeof threadId !== 'string' ||
+    !threadId ||
+    goal?.threadId !== threadId ||
+    typeof goal.objective !== 'string' ||
+    !goal.objective.trim() ||
+    !CODEX_GOAL_STATUSES.has(String(goal.status)) ||
+    !isFiniteNumber(goal.updatedAt)
+  ) {
+    return null;
+  }
+  return {
+    type: 'thread.goal.updated',
+    thread_id: threadId,
+    goal: {
+      objective: goal.objective,
+      status: goal.status,
+      tokenBudget: isFiniteNumber(goal.tokenBudget) ? goal.tokenBudget : null,
+      updatedAt: goal.updatedAt,
+    },
+  };
+};
+
+const mapCodexAppServerGoalCleared: CodexAppServerNotificationMapper = (_method, params) => {
+  const threadId = params?.threadId;
+  return typeof threadId === 'string' && threadId ? { type: 'thread.goal.cleared', thread_id: threadId } : null;
+};
+
 const CODEX_APP_SERVER_NOTIFICATION_MAPPERS: Readonly<Record<string, CodexAppServerNotificationMapper>> = Object.freeze(
   Object.assign(Object.create(null) as Record<string, CodexAppServerNotificationMapper>, {
     'item/started': mapCodexAppServerItemNotification,
     'item/completed': mapCodexAppServerItemNotification,
     'turn/started': () => ({ type: 'turn.started' }),
+    'thread/goal/updated': mapCodexAppServerGoalUpdated,
+    'thread/goal/cleared': mapCodexAppServerGoalCleared,
     'turn/plan/updated': (_method, params) => {
       const plan = Array.isArray(params?.plan) ? params.plan : [];
       return {
@@ -83,6 +118,10 @@ const CODEX_APP_SERVER_NOTIFICATION_MAPPERS: Readonly<Record<string, CodexAppSer
     }),
   } satisfies Record<string, CodexAppServerNotificationMapper>),
 );
+
+function isFiniteNumber(value: unknown): value is number {
+  return typeof value === 'number' && Number.isFinite(value);
+}
 
 export function mapCodexAppServerNotification(envelopeValue: unknown): CodexAppServerJsonObject | null {
   const envelope = asCodexAppServerRecord(envelopeValue);
@@ -118,16 +157,8 @@ export function respondToCodexAppServerRequest(request: CodexAppServerJsonObject
     return { id, result: { decision: 'denied' } };
   }
   if (request.method === 'item/tool/requestUserInput') {
-    const params = asCodexAppServerRecord(request.params);
-    const questions = Array.isArray(params?.questions) ? params.questions : [];
-    const questionIds = questions.map((question) => asCodexAppServerRecord(question)?.id);
-    const isMcpApprovalRequest =
-      questionIds.length > 0 &&
-      questionIds.every(
-        (questionId): questionId is string =>
-          typeof questionId === 'string' && questionId.startsWith('mcp_tool_call_approval_'),
-      );
-    if (isMcpApprovalRequest) {
+    const questionIds = codexMcpApprovalCompatibilityQuestionIds(request);
+    if (questionIds) {
       // Upstream's request-user-input compatibility path recognizes this token
       // as a fail-closed decline. The completed tool event is then normalized by
       // codex-event-transform using the host's unavailable approval surface.
@@ -145,6 +176,24 @@ export function respondToCodexAppServerRequest(request: CodexAppServerJsonObject
     id,
     error: { code: -32601, message: `Unsupported app-server request: ${String(request.method)}` },
   };
+}
+
+export function isCodexMcpApprovalCompatibilityRequest(request: CodexAppServerJsonObject): boolean {
+  return codexMcpApprovalCompatibilityQuestionIds(request) !== null;
+}
+
+function codexMcpApprovalCompatibilityQuestionIds(request: CodexAppServerJsonObject): string[] | null {
+  if (request.method !== 'item/tool/requestUserInput') return null;
+  const params = asCodexAppServerRecord(request.params);
+  const questions = Array.isArray(params?.questions) ? params.questions : [];
+  const questionIds = questions.map((question) => asCodexAppServerRecord(question)?.id);
+  return questionIds.length > 0 &&
+    questionIds.every(
+      (questionId): questionId is string =>
+        typeof questionId === 'string' && questionId.startsWith('mcp_tool_call_approval_'),
+    )
+    ? questionIds
+    : null;
 }
 
 /**

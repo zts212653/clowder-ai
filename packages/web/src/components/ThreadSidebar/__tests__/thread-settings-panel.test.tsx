@@ -14,6 +14,15 @@ vi.mock('../ThreadSpeedSettings', () => ({
 vi.mock('../ThreadLabelPicker', () => ({
   ThreadLabelSettingsContent: () => React.createElement('div', { 'data-testid': 'labels-content' }, 'labels'),
 }));
+vi.mock('../ThreadGoalSettings', () => ({
+  ThreadGoalSettingsContent: () => React.createElement('div', { 'data-testid': 'goal-content' }, 'goal'),
+}));
+vi.mock('../ThreadNativeReviewSettings', () => ({
+  ThreadNativeReviewSettingsContent: () => React.createElement('div', { 'data-testid': 'review-content' }, 'review'),
+}));
+vi.mock('../ThreadNativeStatusSettings', () => ({
+  ThreadNativeStatusSettingsContent: () => React.createElement('div', { 'data-testid': 'status-content' }, 'status'),
+}));
 
 import { ThreadSettingsPanel } from '../ThreadSettingsPanel';
 
@@ -92,6 +101,13 @@ describe('ThreadSettingsPanel', () => {
     expect(document.querySelector('[data-testid="effort-content"]')).not.toBeNull();
     expect(sectionButton('默认猫猫')?.getAttribute('aria-expanded')).toBe('false');
     expect(sectionButton('思考档位')?.getAttribute('aria-expanded')).toBe('true');
+  });
+
+  it('keeps Goal and Codex runtime status in Thread settings while Review belongs to Workspace Changes', () => {
+    render();
+    expect(sectionButton('对话目标')).toBeDefined();
+    expect(sectionButton('Codex 运行状态')).toBeDefined();
+    expect(sectionButton('Codex 原生 Review')).toBeUndefined();
   });
 
   it('closes on outside pointer input without swallowing the underlying interaction', () => {

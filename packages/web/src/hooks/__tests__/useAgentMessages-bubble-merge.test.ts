@@ -1560,6 +1560,42 @@ describe('useAgentMessages bubble merge prevention (Bug B)', () => {
     );
   });
 
+  it('final done replaces raw streaming text with canonical persisted content', () => {
+    act(() => {
+      root.render(React.createElement(Harness));
+    });
+
+    storeState.messages.push({
+      id: 'msg-concierge-projection',
+      type: 'assistant',
+      catId: 'opus',
+      content: '@co-creator 原始流式正文 [跳过去 R1｜目标｜0123456789ab]',
+      isStreaming: true,
+      origin: 'stream',
+      extra: { stream: { invocationId: 'inv-concierge-projection' } },
+      timestamp: Date.now() - 1000,
+    });
+    storeState.catInvocations = { opus: { invocationId: 'inv-concierge-projection' } };
+    storeState.activeInvocations = {
+      'inv-concierge-projection': { catId: 'opus', mode: 'execute' },
+    };
+
+    act(() => {
+      captured?.handleAgentMessage({
+        type: 'done',
+        catId: 'opus',
+        invocationId: 'inv-concierge-projection',
+        messageId: 'persisted-concierge-message',
+        content: '原始流式正文 跳过去 R1',
+        isFinal: true,
+      });
+    });
+
+    expect(mockPatchMessage).toHaveBeenCalledWith('persisted-concierge-message', {
+      content: '原始流式正文 跳过去 R1',
+    });
+  });
+
   it('terminal error preserves a recovered partial stream bubble', () => {
     act(() => {
       root.render(React.createElement(Harness));

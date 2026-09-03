@@ -14,13 +14,25 @@ import {
   type VerdictHandoffPacket,
 } from '../verdict-handoff.js';
 import { mapPublishVerdictError } from './error-mapping.js';
-import { writeLifecycleRootArtifact } from './lifecycle-root-artifact.js';
+import {
+  rejectServerOwnedFrictionPacketFields,
+  validateFrictionAggregateWrite,
+  validateFrictionAnalysisInput,
+} from './friction-findings/friction-analysis-input.js';
+import {
+  generatedArtifactStagePaths,
+  writeGeneratedLifecycleArtifacts,
+} from './friction-findings/generated-lifecycle-artifacts.js';
 import { validateMetricRefsAgainstGlossary } from './metric-glossary-validation.js';
+import { verdictEvidenceContractSuccessStatuses } from './publication/verdict-commit-status-publisher.js';
 import { computePublishPolicy } from './publish-policy.js';
 import { validateSourceRefsForPublish } from './source-ref-handler-validation.js';
 import type {
+  GeneratedFindingArtifact,
+  GeneratedVerdictArtifact,
   GitPublisher,
   HandlerError,
+  PublishedVerdictChildArtifact,
   PublishVerdictDeps,
   PublishVerdictInput,
   PublishVerdictSuccess,
@@ -75,6 +87,8 @@ export async function handlePublishVerdict(
   deps: PublishVerdictDeps,
   input: PublishVerdictInput,
 ): Promise<PublishVerdictSuccess | HandlerError> {
+  const serverFieldError = rejectServerOwnedFrictionPacketFields(input.packet);
+  if (serverFieldError) return serverFieldError;
   // AC-H1: validate full packet schema
   let packet: VerdictHandoffPacket;
   try {
@@ -90,6 +104,25 @@ export async function handlePublishVerdict(
       status: 400,
       error: 'domain_mismatch',
       detail: `input.domain '${input.domain}' does not match packet.domainId '${packet.domainId}'`,
+    };
+  }
+
+  const analysisInput = validateFrictionAnalysisInput(packet.domainId, input.analysisFindings);
+  if (analysisInput.error) return analysisInput.error;
+  const analysisFindings = analysisInput.findings;
+  const aggregateError = validateFrictionAggregateWrite(packet, analysisFindings);
+  if (aggregateError) return aggregateError;
+
+  // One server-owned clock governs both future-time rejection and generator
+  // provenance. This must run before GitPublisher can create a branch, commit,
+  // remote ref, or PR; packet.createdAt remains the event time and may be old,
+  // but it cannot claim an event later than the publication request itself.
+  const publicationTime = (deps.now?.() ?? new Date()).toISOString();
+  if (Date.parse(packet.createdAt) > Date.parse(publicationTime)) {
+    return {
+      status: 400,
+      error: 'packet_created_at_in_future',
+      detail: `packet.createdAt '${packet.createdAt}' is later than server publication time '${publicationTime}'`,
     };
   }
 
@@ -234,12 +267,9 @@ export async function handlePublishVerdict(
   const domainSlug = packet.domainId.replace(/:/g, '-');
   const branchName = `verdict/auto/${domainSlug}/${packet.id}`;
 
-  let artifact: {
-    verdictPath: string;
-    bundleDir: string;
-    extraStagedPaths?: string[];
-    afterPublish?: () => void | Promise<void>;
-  } | null = null;
+  let artifact: GeneratedVerdictArtifact | null = null;
+  let findingArtifacts: GeneratedFindingArtifact[] = [];
+  let childArtifacts: PublishedVerdictChildArtifact[] = [];
   try {
     const { commitSha, prUrl } = await gitPublisher.publishOnIsolatedWorktree({
       branchName,
@@ -261,17 +291,20 @@ export async function handlePublishVerdict(
         const generatedArtifact = await generator(packet, input.sourceRefs, {
           harnessFeedbackRoot: isolatedHarnessFeedback,
           liveHarnessFeedbackRoot: deps.harnessFeedbackRoot,
+          publicationTime,
           ownerUserId: input.ownerUserId,
           taskOutcomeDbPath: deps.taskOutcomeDbPath,
           eventMemoryDbPath: deps.eventMemoryDbPath,
+          ...(analysisFindings ? { analysisFindings } : {}),
         });
-        writeLifecycleRootArtifact(generatedArtifact.bundleDir, packet);
+        childArtifacts = writeGeneratedLifecycleArtifacts(generatedArtifact, packet, isolatedHarnessFeedback);
         const refreshedCensusPath = refreshMeasurementBundleCensusFile(
           worktreeRoot,
           packet.createdAt,
           cleanCensusSource,
         );
         artifact = generatedArtifact;
+        findingArtifacts = generatedArtifact.findingArtifacts ?? [];
         // PR-3 (砚砚 R2): read attribution.json from bundle to compute publish policy.
         // Generator writes attribution.json into bundleDir; if absent or parse fails,
         // `computePublishPolicy` fail-opens to regular_pr (砚砚 R2 contract).
@@ -294,12 +327,13 @@ export async function handlePublishVerdict(
         return {
           // PR-2 R3 P1 (cloud): stage extra paths the generator wrote (cw raw inputs)
           // so the auto-PR includes all evidence referenced by provenance.json.
-          paths: [artifact.verdictPath, artifact.bundleDir, refreshedCensusPath, ...(artifact.extraStagedPaths ?? [])],
+          paths: [...generatedArtifactStagePaths(generatedArtifact), refreshedCensusPath],
           commitMessage: `verdict(${packet.domainId}): ${packet.id} — ${packet.verdict}\n\n${packet.phenomenon}\n\n[published via cat_cafe_publish_verdict MCP]`,
           prTitle: `verdict(${packet.domainId}): ${packet.id}`,
           prBody: `Verdict published via cat_cafe_publish_verdict MCP tool.\n\nVerdict: ${packet.verdict}\nDomain: ${packet.domainId}\nPhenomenon: ${packet.phenomenon}\n\nReviewed by: ${packet.ownerAsk.targetOwnerCatId}\nAction: ${packet.ownerAsk.requestedAction}${policyFooter}`,
           labels: policy.labels,
-          afterPublish: artifact.afterPublish,
+          statusChecks: verdictEvidenceContractSuccessStatuses(),
+          afterPublish: generatedArtifact.afterPublish,
         };
       },
     });
@@ -317,6 +351,8 @@ export async function handlePublishVerdict(
       bundleDir: `docs/harness-feedback/bundles/${packet.id}`,
       commitSha,
       prUrl,
+      findingArtifacts,
+      childArtifacts,
     };
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);

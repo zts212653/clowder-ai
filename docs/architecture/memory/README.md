@@ -4,11 +4,11 @@ doc_kind: architecture
 architecture_domain: memory
 truth_mode: current-map
 canonical_for: memory-architecture-navigation
-as_of: 2026-08-26
+as_of: 2026-08-29
 freshness_owner: memory-architecture
-constructor_version: memory-atlas-v1.2
+constructor_version: memory-atlas-v1.3
 view_state: fresh
-feature_ids: [F102, F152, F163, F186, F188, F200, F209, F221, F227, F231, F255, F256, F260, F263, F271, F272, F276, F281, F282, F287, F296]
+feature_ids: [F102, F152, F163, F186, F188, F200, F209, F221, F227, F231, F255, F256, F260, F263, F271, F272, F276, F281, F282, F287, F296, F312]
 related_features: [F139, F148, F153, F192, F229, F237, F242, F246, F267]
 related_docs:
   - docs/architecture/memory/memory-architecture-diagrams.md
@@ -20,11 +20,12 @@ related_docs:
   - docs/architecture/memory-standing-reflex-contract.md
   - docs/architecture/memory-derived-view-contract.md
   - docs/architecture/memory-outcome-attribution-source-map.md
+  - docs/features/F312-memory-initiative-closure-command.md
   - feature-specs/2026-08-15-memory-system-research-first-roadmap.md
   - feature-discussions/2026-08-24-memory-belief-admission/README.md
 topics: [memory, architecture, atlas, evidence, recall, write-side, standing-reflex, derived-view, context-presentation, governance, outcome]
 created: 2026-08-18
-revised: 2026-08-26
+revised: 2026-08-29
 status: active
 author: "小太阳·Maine Coon/GPT-5.6 Sol"
 description: "Clowder AI 记忆系统的唯一导航入口：用九个观察面登记权威 claim，用六层叙事、端到端状态流和问题路由连接现有架构、合同、census、source map、feature 与历史材料。"
@@ -33,7 +34,7 @@ description_author: codex-sol
 description_generated_by: codex-sol@gpt-5.6-sol
 description_generated_at: 2026-08-18T12:55:00Z
 description_confirmed_by: codex-sol
-description_updated_at: 2026-08-26T06:00:00Z
+description_updated_at: 2026-08-29T10:03:49Z
 ---
 
 # Memory Architecture Atlas｜记忆系统多视图图谱
@@ -165,7 +166,7 @@ F255/F272 的 owned seed、intent 与行动是记忆循环的下游主体边界�
 | RecallOpportunity catalog 与 cue 生命周期 | [F287](../../features/F287-memory-cue-plane.md) | 指向 feature 与 [source map](../memory-cue-source-map.md) | producer catalog、authority 或 lifecycle contract 改变 |
 | Context presentation / continuity | [F296](../../features/F296-continuity-aware-context-injection.md) | 不复制 carrier 支持矩阵和运行状态 | presentation authority、epoch 或 carrier contract 改变 |
 | outcome/attribution 的认识论 ceiling | [Outcome Source Map](../memory-outcome-attribution-source-map.md) | 只保留 presented→inspected→used→outcome 不可互相代证 | 新 typed observation 改变可证明层级 |
-| phase、AC、landed/live/UAT/verdict | 对应 feature doc；全局顺序见 roadmap | 不复写详细状态 | owner 或真相源迁移 |
+| memory-wide current release、terminal acceptance 与下一棒 | [F312](../../features/F312-memory-initiative-closure-command.md)；lane 内 phase/AC/live/UAT 仍回对应 feature；研究依据与历史 ledger 见 roadmap | 不复写 generated RED 或 lane 详细状态 | command owner、完成定义或真相源迁移 |
 
 ## 我想知道什么？从这里走
 
@@ -182,7 +183,7 @@ F255/F272 的 owned seed、intent 与行动是记忆循环的下游主体边界�
 | “它到底有没有帮助任务？” | Outcome Source Map | 只有明确 keep/tune/sunset consumer 才进入 eval 设计 |
 | “搜到了以后，这轮最多允许怎么用？” | Claim / Use Admission 讨论收敛 | 当前仍回 Philosophy、F287、F296、Derived View Contract 与 Outcome Source Map 分别查边界；讨论稿不是 frozen contract |
 | “一条 cue 怎样成为猫自己的 seed、意图和行动？” | [F255](../../features/F255-auto-dream.md) + [F272](../../features/F272-cat-jumps-on-the-table.md) | 查跨 owner 边界时进 Proactive Relationship Loop cell |
-| “现在做到哪了？” | 对应 feature doc + Research-First roadmap | 不从历史 discussion 或旧聊天卡片推断 |
+| “记忆与主动性闭环现在做到哪了、下一棒是谁？” | F312 + generated closure catalog；具体 lane 再进对应 feature | 不从 roadmap 历史 board、discussion 或旧聊天卡片推断 |
 | “为什么会长成这样？” | rethink、autopsy、postmortem | 历史材料不能反向覆盖 current truth |
 
 ## 文档类型不是可信度等级：它们拥有不同时间语义
@@ -225,11 +226,11 @@ views 是否共享同一 evidence ancestor。**同祖后代不能冒充独立佐
 | 字段 | 本 Atlas 的值 |
 |---|---|
 | `sourceRefs` | 上述 claim registry 中的 canonical docs |
-| `sourceRevision` | 初版取证基线 `main@3a5d1aa433853b3a98bdea152ceae8bad8e1d52e`；v1.1 语义增量回源 2026-08-24 discussion；运行状态仍回当前 feature truth，不在 Atlas 复制 |
-| `constructedAt / asOf` | 初版 2026-08-18；v1.1 重验 2026-08-24 |
+| `sourceRevision` | 初版取证基线 `main@3a5d1aa433853b3a98bdea152ceae8bad8e1d52e`；v1.1 语义增量回源 2026-08-24 discussion；v1.3 将 memory-wide execution/acceptance claim 路由到 F312；运行状态仍回 current feature/generated truth，不在 Atlas 复制 |
+| `constructedAt / asOf` | 初版 2026-08-18；v1.1 重验 2026-08-24；v1.3 command routing 2026-08-29 |
 | `validTime` | 直到下列 invalidator 命中；时间流逝本身不是失效证明 |
 | `ACL intersection` | 只引用 workspace 内公开共享文档；不复制 owner-private payload |
-| `constructorVersion` | `memory-atlas-v1.2` |
+| `constructorVersion` | `memory-atlas-v1.3` |
 | `state` | `fresh`；命中 invalidator 后必须先标 `suspect`，不能继续冒充当前入口 |
 
 ### Invalidators

@@ -1,8 +1,11 @@
 import { type CloudBridgeFailureDiagnosticV1, isCloudBridgeFailureDiagnosticV1 } from '@cat-cafe/shared';
+import { parseAssistantReturnCursorFields } from './assistant-return-cursor.js';
+
+type PersonalChromeAssistantReturnCursorFields = ReturnType<typeof parseAssistantReturnCursorFields>;
 
 export const PERSONAL_CHROME_PROTOCOL_VERSION = 2 as const;
-export const PERSONAL_CHROME_EXTENSION_REVISION = '0.2.5' as const;
-export const PERSONAL_CHROME_PAGE_ADAPTER_REVISION = '2026-08-27.1' as const;
+export const PERSONAL_CHROME_EXTENSION_REVISION = '0.2.10' as const;
+export const PERSONAL_CHROME_PAGE_ADAPTER_REVISION = '2026-09-02.1' as const;
 export const PERSONAL_CHROME_MAX_TEXT_BYTES = 128 * 1024;
 export const PERSONAL_CHROME_MAX_LOCAL_FRAME_BYTES = 256 * 1024;
 
@@ -51,9 +54,62 @@ export interface PersonalChromeAppendFailure {
 
 export type PersonalChromeAppendResult = PersonalChromeAppendSuccess | PersonalChromeAppendFailure;
 
-export interface PersonalChromeLocalEnvelope {
+export interface PersonalChromeAssistantReturn {
+  readonly conversationId: string;
+  readonly sourceMessageId: string;
+  readonly assistantMessageId: string;
+  readonly content: string;
+}
+
+export interface PersonalChromeListAssistantReturnsRequest extends PersonalChromeAssistantReturnCursorFields {
+  readonly v: typeof PERSONAL_CHROME_PROTOCOL_VERSION;
+  readonly kind: 'list_assistant_returns';
+  readonly requestId: string;
+}
+
+export interface PersonalChromeAckAssistantReturnRequest {
+  readonly v: typeof PERSONAL_CHROME_PROTOCOL_VERSION;
+  readonly kind: 'ack_assistant_return';
+  readonly requestId: string;
+  readonly conversationId: string;
+  readonly sourceMessageId: string;
+  readonly assistantMessageId: string;
+}
+
+export interface PersonalChromeAssistantReturnsResult {
+  readonly v: typeof PERSONAL_CHROME_PROTOCOL_VERSION;
+  readonly kind: 'assistant_returns';
+  readonly requestId: string;
+  readonly returns: readonly PersonalChromeAssistantReturn[];
+}
+
+export interface PersonalChromeAssistantReturnAckResult {
+  readonly v: typeof PERSONAL_CHROME_PROTOCOL_VERSION;
+  readonly kind: 'assistant_return_ack';
+  readonly requestId: string;
+  readonly status: 'acknowledged';
+}
+
+export interface PersonalChromeAssistantReturnErrorResult {
+  readonly v: typeof PERSONAL_CHROME_PROTOCOL_VERSION;
+  readonly kind: 'assistant_return_error';
+  readonly requestId: string;
+  readonly errorCode: string;
+}
+
+export type PersonalChromeAssistantReturnRequest =
+  | PersonalChromeListAssistantReturnsRequest
+  | PersonalChromeAckAssistantReturnRequest;
+export type PersonalChromeAssistantReturnResult =
+  | PersonalChromeAssistantReturnsResult
+  | PersonalChromeAssistantReturnAckResult
+  | PersonalChromeAssistantReturnErrorResult;
+
+export interface PersonalChromeLocalEnvelope<
+  TRequest extends PersonalChromeAppendRequest | PersonalChromeAssistantReturnRequest = PersonalChromeAppendRequest,
+> {
   readonly pairingSecret: string;
-  readonly request: PersonalChromeAppendRequest;
+  readonly request: TRequest;
 }
 
 function asRecord(value: unknown, label: string): Record<string, unknown> {
@@ -130,6 +186,66 @@ export function parsePersonalChromeAppendRequest(value: unknown): PersonalChrome
   };
 }
 
+export function parsePersonalChromeAssistantReturnRequest(value: unknown): PersonalChromeAssistantReturnRequest {
+  const record = asRecord(value, 'assistant return request');
+  if (record.v !== PERSONAL_CHROME_PROTOCOL_VERSION) {
+    throw new Error('assistant return request has an unsupported protocol version');
+  }
+  const base = {
+    v: PERSONAL_CHROME_PROTOCOL_VERSION,
+    requestId: requireString(record.requestId, 'requestId', { maxLength: 200, pattern: SAFE_TOKEN }),
+  };
+  if (record.kind === 'list_assistant_returns') {
+    if (
+      Object.keys(record).some(
+        (field) =>
+          ![
+            'v',
+            'kind',
+            'requestId',
+            'afterConversationId',
+            'afterSourceMessageId',
+            'afterAssistantMessageId',
+          ].includes(field),
+      )
+    ) {
+      throw new Error('assistant return list request contains an unknown field');
+    }
+    return {
+      ...base,
+      kind: 'list_assistant_returns',
+      ...parseAssistantReturnCursorFields(record),
+    };
+  }
+  if (record.kind === 'ack_assistant_return') {
+    if (
+      Object.keys(record).some(
+        (field) =>
+          !['v', 'kind', 'requestId', 'conversationId', 'sourceMessageId', 'assistantMessageId'].includes(field),
+      )
+    ) {
+      throw new Error('assistant return ack request contains an unknown field');
+    }
+    return {
+      ...base,
+      kind: 'ack_assistant_return',
+      conversationId: requireString(record.conversationId, 'conversationId', {
+        maxLength: 200,
+        pattern: SAFE_TOKEN,
+      }),
+      sourceMessageId: requireString(record.sourceMessageId, 'sourceMessageId', {
+        maxLength: 512,
+        pattern: SAFE_TOKEN,
+      }),
+      assistantMessageId: requireString(record.assistantMessageId, 'assistantMessageId', {
+        maxLength: 512,
+        pattern: SAFE_TOKEN,
+      }),
+    };
+  }
+  throw new Error('assistant return request has an unsupported shape');
+}
+
 export function parsePersonalChromeLocalEnvelope(value: unknown): PersonalChromeLocalEnvelope {
   const record = asRecord(value, 'local envelope');
   return {
@@ -180,4 +296,69 @@ export function parsePersonalChromeAppendResult(value: unknown): PersonalChromeA
     };
   }
   throw new Error('append result status must be host_observed or failed');
+}
+
+function parseAssistantReturn(value: unknown, label: string): PersonalChromeAssistantReturn {
+  const record = asRecord(value, label);
+  if (
+    Object.keys(record).some(
+      (field) => !['conversationId', 'sourceMessageId', 'assistantMessageId', 'content'].includes(field),
+    )
+  ) {
+    throw new Error(`${label} contains an unknown field`);
+  }
+  const content = requireString(record.content, `${label}.content`, {
+    maxLength: PERSONAL_CHROME_MAX_TEXT_BYTES,
+    allowWhitespace: true,
+  });
+  if (content.trim().length === 0 || Buffer.byteLength(content, 'utf8') > PERSONAL_CHROME_MAX_TEXT_BYTES) {
+    throw new Error(`${label}.content exceeds ${PERSONAL_CHROME_MAX_TEXT_BYTES} bytes`);
+  }
+  return {
+    conversationId: requireString(record.conversationId, `${label}.conversationId`, {
+      maxLength: 200,
+      pattern: SAFE_TOKEN,
+    }),
+    sourceMessageId: requireString(record.sourceMessageId, `${label}.sourceMessageId`, {
+      maxLength: 512,
+      pattern: SAFE_TOKEN,
+    }),
+    assistantMessageId: requireString(record.assistantMessageId, `${label}.assistantMessageId`, {
+      maxLength: 512,
+      pattern: SAFE_TOKEN,
+    }),
+    content,
+  };
+}
+
+export function parsePersonalChromeAssistantReturnResult(value: unknown): PersonalChromeAssistantReturnResult {
+  const record = asRecord(value, 'assistant return result');
+  if (record.v !== PERSONAL_CHROME_PROTOCOL_VERSION) {
+    throw new Error('assistant return result has an unsupported protocol version');
+  }
+  const base = {
+    v: PERSONAL_CHROME_PROTOCOL_VERSION,
+    requestId: requireString(record.requestId, 'requestId', { maxLength: 200, pattern: SAFE_TOKEN }),
+  };
+  if (record.kind === 'assistant_returns') {
+    if (!Array.isArray(record.returns) || record.returns.length > 1) {
+      throw new Error('assistant return result must contain at most one pending return');
+    }
+    return {
+      ...base,
+      kind: 'assistant_returns',
+      returns: record.returns.map((item, index) => parseAssistantReturn(item, `returns[${index}]`)),
+    };
+  }
+  if (record.kind === 'assistant_return_ack' && record.status === 'acknowledged') {
+    return { ...base, kind: 'assistant_return_ack', status: 'acknowledged' };
+  }
+  if (record.kind === 'assistant_return_error') {
+    return {
+      ...base,
+      kind: 'assistant_return_error',
+      errorCode: requireString(record.errorCode, 'errorCode', { maxLength: 64, pattern: SAFE_ERROR_CODE }),
+    };
+  }
+  throw new Error('assistant return result has an unsupported shape');
 }

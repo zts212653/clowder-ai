@@ -15,6 +15,7 @@
 import { randomUUID } from 'node:crypto';
 import type { CatId, ConnectorSource } from '@cat-cafe/shared';
 import type { A2ADispatchDispositionService } from '../../../../ball-custody/A2ADispatchDispositionService.js';
+import type { ActionSuccessorLeaseStore } from '../../../../ball-custody/ActionSuccessorLeaseStore.js';
 import type { IBallCustodyIngest } from '../../../../ball-custody/BallCustodyIngest.js';
 import { buildInvocationDiedEvent } from '../../../../ball-custody/ball-custody-events.js';
 import type { IInvocationRecordStore, InvocationRecord } from '../../stores/ports/InvocationRecordStore.js';
@@ -89,6 +90,8 @@ export interface StartupReconcilerDeps {
   invocationQueue?: InvocationQueue;
   /** F298: exact A2A replacement fence shared with live Queue admission. */
   a2aDispatchDispositionService?: Pick<A2ADispatchDispositionService, 'inspectHandoff'>;
+  /** #1371: exact completed review generation proves an inert decision may enter Queue. */
+  legacyLocalReviewDispositionLeaseStore?: Pick<ActionSuccessorLeaseStore, 'get'>;
   /** F254: natural next-spawn hook, invoked once for each newly restored queue scope. */
   resumeQueue?: (threadId: string, userId: string) => Promise<unknown>;
   /** Resume a durable exact-group retirement before any later entry in that scope may dispatch. */
@@ -412,6 +415,9 @@ export class StartupReconciler {
       ...(this.deps.turnExecutionStore ? { turnExecutionStore: this.deps.turnExecutionStore } : {}),
       ...(this.deps.a2aDispatchDispositionService
         ? { a2aDispatchDispositionService: this.deps.a2aDispatchDispositionService }
+        : {}),
+      ...(this.deps.legacyLocalReviewDispositionLeaseStore
+        ? { legacyLocalReviewDispositionLeaseStore: this.deps.legacyLocalReviewDispositionLeaseStore }
         : {}),
       invocationQueue,
       messageStore: messageStore as IMessageStore,

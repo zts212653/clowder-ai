@@ -1,3 +1,4 @@
+import { parseWaitOwnerFence } from '@cat-cafe/shared';
 import { createModuleLogger } from '../../infrastructure/logger.js';
 import type {
   ManagedCommandWakeDynamicTaskStore,
@@ -11,6 +12,17 @@ const log = createModuleLogger('ball-custody/managed-command-wake-message-fence'
 const COMPLETION_MESSAGE_KEY_PREFIX = 'hold-ball-completion:';
 const MESSAGE_CLAIM_STALE_MS = 30_000;
 type StoredWakeMessage = Awaited<ReturnType<ManagedCommandWakeRecoveryDeps['messageStore']['append']>>;
+
+function readManagedCommandWakeActionLeaseRef(
+  parsed: ParsedManagedCommandWakeTask,
+): { leaseId: string; generation: number } | undefined {
+  const awaiting = parsed.lifecycle.await;
+  if (!awaiting || typeof awaiting !== 'object' || Array.isArray(awaiting)) return undefined;
+  const ownerFence = parseWaitOwnerFence((awaiting as Record<string, unknown>).ownerFence);
+  return ownerFence?.kind === 'action_successor'
+    ? { leaseId: ownerFence.leaseId, generation: ownerFence.generation }
+    : undefined;
+}
 
 function updateCommand(
   store: ManagedCommandWakeDynamicTaskStore,
@@ -116,6 +128,7 @@ export async function publishManagedCommandWakeMessage(
   if (!claimed?.command.wakeContent) return false;
   const triggerContent = `[定时任务] ${claimed.command.wakeContent}`;
   const idempotencyKey = `${COMPLETION_MESSAGE_KEY_PREFIX}${claimed.task.id}`;
+  const actionLeaseRef = readManagedCommandWakeActionLeaseRef(claimed);
 
   try {
     const existing = await deps.messageStore.getByIdempotencyKey('scheduler', claimed.threadId, idempotencyKey);
@@ -134,7 +147,13 @@ export async function publishManagedCommandWakeMessage(
           connector: 'hold-ball',
           label: '持球通知',
           icon: '🏓',
-          meta: { taskId: claimed.task.id, threadId: claimed.threadId, catId: claimed.catId, wakeWhen: true },
+          meta: {
+            taskId: claimed.task.id,
+            threadId: claimed.threadId,
+            catId: claimed.catId,
+            wakeWhen: true,
+            ...(actionLeaseRef ? { actionLeaseRef } : {}),
+          },
         },
       }));
 

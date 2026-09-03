@@ -144,7 +144,7 @@ export function resolveLifecycleRootsWithLegacyCases(
   }
 
   return roots.map((root) => {
-    if (root.schemaVersion === 2) return root;
+    if (root.schemaVersion !== 1) return root;
     const migration = migrations.find((candidate) => matches(root, candidate));
     return migration ? asStableCaseRoot(root, migration) : root;
   });

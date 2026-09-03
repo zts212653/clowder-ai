@@ -115,6 +115,9 @@ export function useChatSocketCallbacks({
       onMessageReceiptUpdated: (data) => {
         requestStreamCatchUp(data.threadId);
       },
+      onCustodyOfferUpdated: (data) => {
+        requestStreamCatchUp(data.threadId);
+      },
       onThreadBranched: () => {
         void invalidateSidebarProjection();
       },

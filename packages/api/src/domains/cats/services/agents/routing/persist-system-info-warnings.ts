@@ -187,6 +187,11 @@ function parseVisibleNotice(
 
 type VisibleNotice = NonNullable<ReturnType<typeof parseVisibleNotice>>;
 
+/** Reuse the canonical system-info parser when a non-persistence consumer needs visible text. */
+export function userFacingSystemInfoNoticeContent(content: string, catId: string): string | undefined {
+  return parseVisibleNotice(content, catId)?.content;
+}
+
 async function appendVisibleNotice(
   messageStore: IMessageStore,
   threadId: string,

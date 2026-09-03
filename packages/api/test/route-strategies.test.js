@@ -1447,12 +1447,16 @@ describe('incremental current-message fallback integration', () => {
     captureService.calls.length = 0;
     hiddenMentionService.calls.length = 0;
     appendCalls.length = 0;
-    for await (const _ of routeSerial(deps, ['opus'], currentText, 'user1', 'thread-concierge', {
+    const serialProjectedEvents = [];
+    for await (const event of routeSerial(deps, ['opus'], currentText, 'user1', 'thread-concierge', {
       currentUserMessageId,
     })) {
+      serialProjectedEvents.push(event);
     }
     const serialStoredReply = appendCalls.find((msg) => msg.catId === 'opus');
     assertDanglingTriageStoredAsVisibleText(serialStoredReply, 'serial');
+    const serialDone = serialProjectedEvents.find((event) => event.type === 'done' && event.catId === 'opus');
+    assert.equal(serialDone?.content, serialStoredReply.content, 'serial done must expose the canonical stored body');
     assert.deepStrictEqual(serialStoredReply.mentions, [], 'serial should ignore hidden triage A2A mentions');
     assert.equal(
       hiddenMentionService.calls.length,
@@ -1464,13 +1468,19 @@ describe('incremental current-message fallback integration', () => {
     captureService.calls.length = 0;
     hiddenMentionService.calls.length = 0;
     appendCalls.length = 0;
-    for await (const _ of routeParallel(deps, ['opus'], currentText, 'user1', 'thread-concierge', {
+    const parallelProjectedEvents = [];
+    for await (const event of routeParallel(deps, ['opus'], currentText, 'user1', 'thread-concierge', {
       currentUserMessageId,
     })) {
+      parallelProjectedEvents.push(event);
     }
-    assertDanglingTriageStoredAsVisibleText(
-      appendCalls.find((msg) => msg.catId === 'opus'),
-      'parallel',
+    const parallelStoredReply = appendCalls.find((msg) => msg.catId === 'opus');
+    assertDanglingTriageStoredAsVisibleText(parallelStoredReply, 'parallel');
+    const parallelDone = parallelProjectedEvents.find((event) => event.type === 'done' && event.catId === 'opus');
+    assert.equal(
+      parallelDone?.content,
+      parallelStoredReply.content,
+      'parallel done must expose the canonical stored body',
     );
     assert.equal(hiddenMentionService.calls.length, 0, 'parallel should not invoke hidden triage mentions');
   });
@@ -1674,6 +1684,21 @@ describe('routeSerial', () => {
     assert.ok(textMsgs.length > 0, 'should have text messages');
     assert.ok(doneMsgs.length > 0, 'should have done message');
     assert.equal(textMsgs[0].content, 'serial response');
+    assert.equal(doneMsgs[0].content, undefined, 'ordinary serial done must not acquire a content contract');
+  });
+
+  it('keeps ordinary parallel done events free of persisted content', async () => {
+    const { routeParallel } = await import('../dist/domains/cats/services/agents/routing/route-parallel.js');
+    const deps = createMockDeps({ opus: createMockService('opus', 'parallel response') });
+
+    const messages = [];
+    for await (const msg of routeParallel(deps, ['opus'], 'test message', 'user1', 'thread1')) {
+      messages.push(msg);
+    }
+
+    const done = messages.find((message) => message.type === 'done' && message.catId === 'opus');
+    assert.ok(done, 'parallel route should yield a done event');
+    assert.equal(done.content, undefined, 'ordinary parallel done must not acquire a content contract');
   });
 
   it('persists toolEvents when agent yields tool_use and tool_result', async () => {

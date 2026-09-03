@@ -177,18 +177,8 @@ describe('QueuePanel hides processing entries', () => {
     expect(container.querySelector('[data-testid="steer-q1"]')).toBeNull();
   });
 
-  it('moves an agent/A2A exact receipt out of QueuePanel while its child live turn owns the parent slot', () => {
+  it('liveness-first: keeps an agent/A2A exact receipt out of QueuePanel when its child live turn is already bridged', () => {
     useChatStore.setState({
-      queue: [
-        {
-          ...withTargetStates({ opus: 'seen' }),
-          id: 'q-agent-live',
-          source: 'agent',
-          sourceCategory: 'a2a',
-          autoExecute: true,
-          callerCatId: 'codex',
-        },
-      ],
       queuePaused: false,
       activeInvocations: {
         'parent-opus': { catId: 'opus', mode: 'execute', startedAt: Date.now() },
@@ -201,6 +191,16 @@ describe('QueuePanel hides processing entries', () => {
         },
       },
     });
+    useChatStore.getState().setQueue('thread-1', [
+      {
+        ...withTargetStates({ opus: 'seen' }),
+        id: 'q-agent-live',
+        source: 'agent',
+        sourceCategory: 'a2a',
+        autoExecute: true,
+        callerCatId: 'codex',
+      },
+    ]);
     act(() => {
       root.render(React.createElement(QueuePanel, { threadId: 'thread-1' }));
     });
@@ -418,9 +418,11 @@ describe('QueuePanel hides processing entries', () => {
     expect(container.querySelector('[data-testid="queue-recover"]')).toBeNull();
   });
 
-  it('reports when recovery cannot start instead of failing silently', async () => {
+  it('refreshes Queue truth when recovery loses a race without inventing a busy or Steer reason', async () => {
     const { apiFetch } = await import('@/utils/api-client');
-    vi.mocked(apiFetch).mockResolvedValueOnce({ ok: true, json: async () => ({ started: false }) } as Response);
+    vi.mocked(apiFetch)
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ started: false }) } as Response)
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ queue: [], paused: false }) } as Response);
     useChatStore.setState({ queue: [QUEUED_ENTRY], queuePaused: false, activeInvocations: {} });
     act(() => {
       root.render(React.createElement(QueuePanel, { threadId: 'thread-1' }));
@@ -429,6 +431,67 @@ describe('QueuePanel hides processing entries', () => {
     const recovery = container.querySelector('[data-testid="queue-recover"]') as HTMLButtonElement;
     await act(async () => recovery.click());
 
-    expect(useToastStore.getState().toasts.at(-1)?.title).toBe('队列尚未恢复');
+    expect(apiFetch).toHaveBeenNthCalledWith(2, '/api/threads/thread-1/queue');
+    expect(useChatStore.getState().queue).toEqual([]);
+    const toast = useToastStore.getState().toasts.at(-1);
+    expect(toast?.title).toBe('队列状态已刷新');
+    expect(toast?.message).not.toContain('运行占用');
+    expect(toast?.message).not.toContain('Steer');
+  });
+
+  it('hydrates no-start liveness so exact-live work leaves QueuePanel and ordinary work stops looking orphaned', async () => {
+    const { apiFetch } = await import('@/utils/api-client');
+    const exactSeenEntry = {
+      ...withTargetStates({ opus: 'seen' }),
+      id: 'q-exact-seen',
+      content: 'exact seen work',
+    };
+    const ordinaryEntry = {
+      ...QUEUED_ENTRY,
+      id: 'q-ordinary',
+      content: 'ordinary queued work',
+    };
+    vi.mocked(apiFetch)
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ started: false }) } as Response)
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          queue: [exactSeenEntry, ordinaryEntry],
+          paused: false,
+          activeInvocations: [
+            {
+              catId: 'opus',
+              startedAt: NOW,
+              executionId: 'parent-opus',
+              turnInvocationId: 'inv-opus',
+            },
+          ],
+        }),
+      } as Response);
+    useChatStore.setState({
+      queue: [exactSeenEntry, ordinaryEntry],
+      queuePaused: false,
+      activeInvocations: {},
+      catInvocations: {},
+    });
+    act(() => {
+      root.render(React.createElement(QueuePanel, { threadId: 'thread-1' }));
+    });
+
+    const recovery = container.querySelector('[data-testid="queue-recover"]') as HTMLButtonElement;
+    expect(recovery).not.toBeNull();
+    await act(async () => recovery.click());
+
+    expect(useChatStore.getState().activeInvocations).toHaveProperty('parent-opus');
+    expect(useChatStore.getState().catInvocations.opus).toMatchObject({
+      invocationId: 'parent-opus',
+      turnInvocationId: 'inv-opus',
+    });
+    expect(container.textContent).not.toContain('exact seen work');
+    expect(container.querySelector('[data-testid="steer-q-exact-seen"]')).toBeNull();
+    expect(container.textContent).toContain('ordinary queued work');
+    expect(container.querySelector('[data-testid="queue-recover"]')).toBeNull();
+    expect(container.textContent).not.toContain('等待 opus 调度');
+    expect(container.textContent).toContain('等待 opus 当前回合');
   });
 });

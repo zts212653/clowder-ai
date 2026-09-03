@@ -1,3 +1,4 @@
+import type { EntrustedWorkTaskRefV1 } from './growing.js';
 import type { MeetingIntakeJudgmentField } from './signal-ingress.js';
 
 export type MeetingIntakeSourceState = 'ready' | 'not_ready' | 'auth_required' | 'deleted';
@@ -64,6 +65,7 @@ export interface MeetingIntake {
   readonly occurredAt: string;
   readonly metadata: Readonly<Record<string, unknown>>;
   readonly ingress: MeetingIntakeIngress;
+  readonly entrustedWorkTaskRef?: EntrustedWorkTaskRefV1;
   readonly sourceState: MeetingIntakeSourceState;
   readonly judgmentState: MeetingIntakeJudgmentState;
   readonly executionState: MeetingIntakeExecutionState;

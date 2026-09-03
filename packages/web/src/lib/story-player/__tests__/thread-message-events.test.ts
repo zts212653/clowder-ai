@@ -34,6 +34,37 @@ function raw(overrides: Partial<RawTranscriptEvent> = {}): RawTranscriptEvent {
 }
 
 describe('chatMessagesToTranscriptEvents', () => {
+  it('carries the durable semantic event through production replay and never replays raw stored copy', () => {
+    const semanticEvent = {
+      v: 1 as const,
+      id: 'warning-replay-1',
+      kind: 'warning' as const,
+      occurredAt: 1_788_000_000_000,
+      category: 'safety' as const,
+      severity: 'warning' as const,
+      message: '受保护操作已拒绝。',
+      provenance: { provider: 'codex', carrier: 'app_server' as const },
+    };
+    const events = chatMessagesToTranscriptEvents(
+      [
+        message({
+          id: 'semantic-message-1',
+          type: 'system',
+          catId: 'system',
+          content: '{"method":"provider/raw","secret":true}',
+          timestamp: semanticEvent.occurredAt,
+          extra: { semanticEvent },
+        }),
+      ],
+      'thread-1',
+    );
+
+    expect(events[0]?.event.semanticEvent).toEqual(semanticEvent);
+    const replayMessages = buildReplayChatMessages(adaptTranscriptEvents(events));
+    expect(replayMessages[0]?.content).toBe('警告：受保护操作已拒绝。');
+    expect(JSON.stringify(replayMessages)).not.toContain('provider/raw');
+  });
+
   it('preserves the real Hub participants instead of replaying only one cat session', () => {
     const events = chatMessagesToTranscriptEvents(
       [

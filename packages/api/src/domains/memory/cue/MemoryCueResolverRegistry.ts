@@ -44,14 +44,15 @@ export interface MemoryCueResolver {
   resolve(opportunity: RecallOpportunityV1, context: MemoryCueResolverContext): Promise<readonly CueEnvelopeV1[]>;
 }
 
-export const ZERO_ONLY_V1_RESOLVER_FAMILIES = Object.freeze(['profile' as const, 'project_knowledge' as const]);
+export const ZERO_ONLY_V3_RESOLVER_FAMILIES = Object.freeze(['project_knowledge' as const]);
 
-export const RECALL_RESOLVER_ADMISSION_V1 = Object.freeze({
+export const RECALL_RESOLVER_ADMISSION_V3 = Object.freeze({
   person_entity: 'catalog' as const,
   operational_precedent: 'catalog' as const,
   taste: 'catalog' as const,
-  profile: 'zero_only_v1' as const,
-  project_knowledge: 'zero_only_v1' as const,
+  profile: 'catalog' as const,
+  event: 'catalog' as const,
+  project_knowledge: 'zero_only_v3' as const,
 });
 
 export function buildCueEnvelope(input: {

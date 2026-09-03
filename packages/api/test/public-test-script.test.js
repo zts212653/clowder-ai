@@ -12,11 +12,17 @@ const resolverPath = resolve(__dirname, '../scripts/resolve-public-test-files.mj
 test('test:public delegates to run-public-tests.sh, never inline grep -v', () => {
   const pkg = JSON.parse(readFileSync(packageJsonPath, 'utf8'));
   const script = pkg.scripts?.['test:public'] ?? '';
+  const prepared = pkg.scripts?.['test:public:prepared'] ?? '';
+  const shard = pkg.scripts?.['test:public:shard'] ?? '';
+  const summary = pkg.scripts?.['test:public:summary'] ?? '';
 
   // P1 fix (codex review #2326): npm script must hand off to run-public-tests.sh
   // so resolver failures fail-propagate. Inline $(node resolver.mjs) inside the
   // node --test argv would discard the exit code and let Node walk the whole tree.
-  assert.match(script, /bash \.\/scripts\/run-public-tests\.sh/, script);
+  assert.match(script, /test:public:prepared/, script);
+  assert.match(prepared, /bash \.\/scripts\/run-public-tests\.sh/, prepared);
+  assert.match(shard, /with-test-home\.sh node \.\/scripts\/run-public-test-shard\.mjs/, shard);
+  assert.match(summary, /summarize-public-test-shards\.mjs/, summary);
   assert.doesNotMatch(script, /\$\(node \.\/scripts\/resolve-public-test-files\.mjs\)/, script);
   assert.doesNotMatch(script, /grep -v/, script);
 });

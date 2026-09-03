@@ -235,7 +235,7 @@ describe('F167 C2 AC-C7: shouldWarnVerdictWithoutPass', () => {
     assert.equal(
       shouldWarnVerdictWithoutPass({
         text: 'LGTM\n@co-creator review done',
-        lineStartMentions: ['you'],
+        lineStartMentions: ['operator'],
         toolNames: [],
         structuredTargetCats: [],
       }),
@@ -318,7 +318,7 @@ describe('F167 C2 AC-C7: shouldWarnVerdictWithoutPass', () => {
 
   test('verdict + co-creator line-start mention (hasCoCreatorLineStartMention=true) → false (砚砚 GPT-5.5 fix)', () => {
     // 2026-04-25 false-positive root cause: parseA2AMentions only parses cat handles,
-    // never returns co-creator handles like 'you'. route-serial passes that empty
+    // never returns co-creator handles like 'operator'. route-serial passes that empty
     // array to shouldWarnVerdictWithoutPass, so a cat ending its summary report with
     // line-start `@co-creator` (legitimate ball-pass to co-creator) gets flagged as
     // "verdict without pass". Fix: route-serial computes hasCoCreatorLineStartMention

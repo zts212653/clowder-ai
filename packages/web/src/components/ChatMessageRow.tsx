@@ -6,6 +6,7 @@ import type { ChatMessage as ChatMessageData } from '@/stores/chat-types';
 import { ChatMessage } from './ChatMessage';
 import { MessageActions } from './MessageActions';
 import { MessageViewportBoundary } from './MessageViewportBoundary';
+import type { CardConfirmationEntry } from './rich/CardBlock';
 
 interface ChatMessageRowProps {
   message: ChatMessageData;
@@ -25,6 +26,9 @@ interface ChatMessageRowProps {
   forwardingDisabled: boolean;
   eager?: boolean;
   backgroundMountDelayMs?: number;
+  /** Routes interactive rich-block sends back to the surface that rendered this row. */
+  sendContext?: string;
+  confirmations?: CardConfirmationEntry[];
 }
 
 /**
@@ -50,6 +54,8 @@ export const ChatMessageRow = memo(function ChatMessageRow({
   forwardingDisabled,
   eager,
   backgroundMountDelayMs,
+  sendContext,
+  confirmations,
 }: ChatMessageRowProps) {
   return (
     <MessageViewportBoundary messageId={message.id} eager={eager} backgroundMountDelayMs={backgroundMountDelayMs}>
@@ -74,6 +80,8 @@ export const ChatMessageRow = memo(function ChatMessageRow({
           hideDiagnosticsPanel={hideDiagnosticsPanel}
           dedupCount={dedupCount}
           forwardingDisabled={forwardingDisabled}
+          sendContext={sendContext}
+          confirmations={confirmations}
         />
       </MessageActions>
     </MessageViewportBoundary>

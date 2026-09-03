@@ -191,6 +191,7 @@ describe('trajectory inspector live verdict generator', () => {
             domain,
             episodeBundle: invalid,
             submittedPacket: { ...packet('fix'), id: `f299-trajectory-${name.replace(' ', '-')}` },
+            generatedAt: '2026-08-24T20:00:00.000Z',
           }),
         /trajectory_inspector_action_not_allowed/,
         name,
@@ -204,6 +205,7 @@ describe('trajectory inspector live verdict generator', () => {
         domain,
         episodeBundle: usable,
         submittedPacket: { ...packet('fix'), id: 'f299-trajectory-fix-usable' },
+        generatedAt: '2026-08-24T20:00:00.000Z',
       }),
     );
   });
@@ -222,6 +224,7 @@ describe('trajectory inspector live verdict generator', () => {
             domain,
             episodeBundle: bundle(),
             submittedPacket,
+            generatedAt: '2026-08-24T20:00:00.000Z',
           }),
         /trajectory_inspector_generator_wrong_domain|submitted_packet_evidence_mismatch/,
       );

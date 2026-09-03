@@ -15,6 +15,7 @@ export const PersonMemoryKeys = {
     `person-memory:candidate:${encodePart(ownerUserId)}:${encodePart(candidateId)}`,
   candidateOwner: (candidateId: string) => `person-memory:candidate-owner:${encodePart(candidateId)}`,
   pending: (ownerUserId: string) => `person-memory:pending:${encodePart(ownerUserId)}`,
+  settled: (ownerUserId: string) => `person-memory:settled:${encodePart(ownerUserId)}`,
   decision: (ownerUserId: string, candidateId: string, decisionId: string) =>
     `person-memory:decision:${encodePart(ownerUserId)}:${encodePart(candidateId)}:${encodePart(decisionId)}`,
   undo: (ownerUserId: string, candidateId: string, requestId: string) =>

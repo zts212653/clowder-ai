@@ -90,12 +90,12 @@ describe('mergeReplaceHydrationMessages queued user receipt', () => {
       catId: 'codex-sol',
       content: 'done',
       timestamp: 2_000,
-      extra: { targetCats: ['you'] },
+      extra: { targetCats: ['operator'] },
     };
     const current: ChatMessage = {
       ...history,
       extra: {
-        targetCats: ['you'],
+        targetCats: ['operator'],
         turnExecution: {
           invocationId: 'turn-primary',
           parentInvocationId: 'parent-1',

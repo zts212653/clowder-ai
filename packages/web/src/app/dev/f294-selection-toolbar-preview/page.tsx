@@ -105,6 +105,24 @@ export default function F294SelectionToolbarPreviewPage() {
               ]}
             />
           </section>
+          <section data-testid="f294-rich-file-source">
+            <RichBlocks
+              messageId="f294-rich-file-source-message"
+              sourceThreadId="f294-layout-preview"
+              sourceMessageIds={['f294-rich-file-stream', 'f294-rich-file-source-message']}
+              blocks={[
+                {
+                  id: 'resource-request-file',
+                  kind: 'file',
+                  v: 1,
+                  fileName: '昇腾算力资源申请-Agent自进化-单独转发这个富块-8-27B场景化后训练.docx',
+                  fileSize: 18_432,
+                  mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+                  url: '/uploads/f294-resource-request.docx',
+                },
+              ]}
+            />
+          </section>
           <section data-testid="f294-rich-group-source">
             <RichBlocks
               messageId="f294-rich-group-source-message"
@@ -188,7 +206,7 @@ export default function F294SelectionToolbarPreviewPage() {
                 readableContent: 'exact selected fragment',
               }}
               index={0}
-              createdBy="landy"
+              createdBy="operator"
               forwarderName="co-creator"
               getCatLabel={() => '小太阳·砚砚'}
               onJump={() => {}}

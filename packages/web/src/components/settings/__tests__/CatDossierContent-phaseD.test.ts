@@ -36,7 +36,7 @@ describe('Phase D: Evidence search key selection', () => {
 describe('Phase D: Observation provenance type invariant (AC-D3)', () => {
   // AC-D3: observations don't replace summary layer — they always have type 'cvo'
   it('observation provenance is always type cvo', () => {
-    const provenance = { type: 'cvo' as const, author: 'you', date: '2026-06-20' };
+    const provenance = { type: 'cvo' as const, author: 'operator', date: '2026-06-20' };
     expect(provenance.type).toBe('cvo');
     // This is a type-level constraint, but worth asserting in test
     // to document the AC-D3 invariant

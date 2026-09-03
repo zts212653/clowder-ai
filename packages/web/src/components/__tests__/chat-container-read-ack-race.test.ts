@@ -2,6 +2,15 @@ import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ChatContainer } from '@/components/ChatContainer';
+import { ThreadChatRuntimeProvider } from '@/components/thread-chat';
+
+function renderChatContainer(threadId: string) {
+  return React.createElement(
+    ThreadChatRuntimeProvider,
+    { routeThreadId: threadId },
+    React.createElement(ChatContainer, { threadId }),
+  );
+}
 
 type MockApiResponse = {
   ok: boolean;
@@ -145,7 +154,10 @@ vi.mock('../MessageNavigator', () => ({ MessageNavigator: () => null }));
 vi.mock('../MessageActions', () => ({
   MessageActions: ({ children }: { children: React.ReactNode }) => children,
 }));
-vi.mock('../SplitPaneView', () => ({ SplitPaneView: () => null }));
+vi.mock('../SplitPaneView', () => ({
+  SplitPaneView: () => null,
+  SplitPaneChatView: () => null,
+}));
 vi.mock('../QueuePanel', () => ({ QueuePanel: () => null }));
 vi.mock('@/components/ScrollToBottomButton', () => ({ ScrollToBottomButton: () => null }));
 vi.mock('@/components/WorkspacePanel', () => ({ WorkspacePanel: () => null }));
@@ -198,7 +210,7 @@ describe('F069-R5: read ack via POST /read/latest', () => {
 
   it('sends POST /read/latest on mount (no message ID needed)', async () => {
     act(() => {
-      root.render(React.createElement(ChatContainer, { threadId: 'thread-A' }));
+      root.render(renderChatContainer('thread-A'));
     });
     await act(async () => {
       await new Promise((r) => setTimeout(r, 10));
@@ -218,7 +230,7 @@ describe('F069-R5: read ack via POST /read/latest', () => {
 
   it('fires new POST /read/latest when threadId changes', async () => {
     act(() => {
-      root.render(React.createElement(ChatContainer, { threadId: 'thread-A' }));
+      root.render(renderChatContainer('thread-A'));
     });
     await act(async () => {
       await new Promise((r) => setTimeout(r, 10));
@@ -227,7 +239,7 @@ describe('F069-R5: read ack via POST /read/latest', () => {
 
     // Switch to thread-B
     act(() => {
-      root.render(React.createElement(ChatContainer, { threadId: 'thread-B' }));
+      root.render(renderChatContainer('thread-B'));
     });
     await act(async () => {
       await new Promise((r) => setTimeout(r, 10));
@@ -257,7 +269,7 @@ describe('F069-R5: read ack via POST /read/latest', () => {
     };
 
     act(() => {
-      root.render(React.createElement(ChatContainer, { threadId: 'thread-A' }));
+      root.render(renderChatContainer('thread-A'));
     });
     await act(async () => {
       await new Promise((r) => setTimeout(r, 10));
@@ -273,7 +285,7 @@ describe('F069-R5: read ack via POST /read/latest', () => {
   it('re-acks when new messages arrive in the active thread (P1 regression)', async () => {
     // Initial render with 1 message
     act(() => {
-      root.render(React.createElement(ChatContainer, { threadId: 'thread-A' }));
+      root.render(renderChatContainer('thread-A'));
     });
     await act(async () => {
       await new Promise((r) => setTimeout(r, 10));
@@ -309,7 +321,7 @@ describe('F069-R5: read ack via POST /read/latest', () => {
 
     // Re-render with updated store state (simulating store update from socket)
     act(() => {
-      root.render(React.createElement(ChatContainer, { threadId: 'thread-A' }));
+      root.render(renderChatContainer('thread-A'));
     });
     await act(async () => {
       await new Promise((r) => setTimeout(r, 10));
@@ -326,7 +338,7 @@ describe('F069-R5: read ack via POST /read/latest', () => {
 
   it('re-acks when the same mutable bubble reaches final delivery', async () => {
     act(() => {
-      root.render(React.createElement(ChatContainer, { threadId: 'thread-A' }));
+      root.render(renderChatContainer('thread-A'));
     });
     await act(async () => {
       await new Promise((r) => setTimeout(r, 10));
@@ -338,7 +350,7 @@ describe('F069-R5: read ack via POST /read/latest', () => {
       messages: storeState.messages.map((message) => ({ ...message, deliveredAt: Date.now() })),
     };
     act(() => {
-      root.render(React.createElement(ChatContainer, { threadId: 'thread-A' }));
+      root.render(renderChatContainer('thread-A'));
     });
     await act(async () => {
       await new Promise((r) => setTimeout(r, 10));
@@ -353,7 +365,7 @@ describe('F069-R5: read ack via POST /read/latest', () => {
   it('does not ACK while hidden and retries only after the selected document becomes visible', async () => {
     Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'hidden' });
     act(() => {
-      root.render(React.createElement(ChatContainer, { threadId: 'thread-A' }));
+      root.render(renderChatContainer('thread-A'));
     });
     await act(async () => {
       await new Promise((r) => setTimeout(r, 10));
@@ -378,7 +390,7 @@ describe('F069-R5: read ack via POST /read/latest', () => {
     });
 
     act(() => {
-      root.render(React.createElement(ChatContainer, { threadId: 'thread-A' }));
+      root.render(renderChatContainer('thread-A'));
     });
     await act(async () => {
       await new Promise((r) => setTimeout(r, 10));
@@ -394,7 +406,7 @@ describe('F069-R5: read ack via POST /read/latest', () => {
     });
 
     act(() => {
-      root.render(React.createElement(ChatContainer, { threadId: 'thread-A' }));
+      root.render(renderChatContainer('thread-A'));
     });
     await act(async () => {
       await new Promise((r) => setTimeout(r, 10));
@@ -410,7 +422,7 @@ describe('F069-R5: read ack via POST /read/latest', () => {
     });
 
     act(() => {
-      root.render(React.createElement(ChatContainer, { threadId: 'thread-A' }));
+      root.render(renderChatContainer('thread-A'));
     });
     await act(async () => {
       await new Promise((r) => setTimeout(r, 10));

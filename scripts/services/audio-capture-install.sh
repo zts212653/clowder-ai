@@ -7,11 +7,20 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 AUDIO_PY="$REPO_ROOT/scripts/meeting-copilot/audio-service.py"
 AUDIO_REQUIREMENTS="$REPO_ROOT/scripts/meeting-copilot/requirements.txt"
+CAPTURE_BUILD_SCRIPT="$REPO_ROOT/scripts/meeting-copilot/build-capture.sh"
 
 if [ ! -f "$AUDIO_PY" ] || [ ! -f "$AUDIO_REQUIREMENTS" ]; then
   echo "ERROR: audio-service.py not found at $AUDIO_PY" >&2
   echo "F195 audio-capture runtime or requirements are missing; refusing to install an unusable service." >&2
   exit 1
+fi
+
+if [ "$(uname -s)" = "Darwin" ]; then
+  if [ ! -f "$CAPTURE_BUILD_SCRIPT" ]; then
+    echo "ERROR: CaptureAppAudio build script not found: $CAPTURE_BUILD_SCRIPT" >&2
+    exit 1
+  fi
+  bash "$CAPTURE_BUILD_SCRIPT" --if-needed
 fi
 
 SERVICE_LABEL="Audio Capture"

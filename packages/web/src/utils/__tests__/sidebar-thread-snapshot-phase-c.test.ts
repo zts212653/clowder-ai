@@ -54,10 +54,17 @@ function deferred<T>() {
   return { promise, resolve };
 }
 
-function ok(threads: unknown[], generation = ++nextMockGetGeneration) {
-  const response = new Response(JSON.stringify({ threads }), { status: 200 });
+function ok(threads: unknown[], generation = ++nextMockGetGeneration, etag?: string) {
+  const response = new Response(JSON.stringify({ threads }), {
+    status: 200,
+    headers: etag ? { etag } : undefined,
+  });
   markApiGetGeneration(response, generation);
   return response;
+}
+
+function notModified(etag: string): Response {
+  return new Response(null, { status: 304, headers: { etag } });
 }
 
 describe('sidebar snapshot refresh controller', () => {
@@ -112,13 +119,49 @@ describe('sidebar snapshot refresh controller', () => {
     ]);
   });
 
+  it('retires unchanged invalidations on 304 without parsing or applying the snapshot', async () => {
+    const etag = '"sidebar-v1"';
+    const unchanged = notModified(etag);
+    const parse304 = vi.spyOn(unchanged, 'json');
+    mockApiFetch.mockResolvedValueOnce(ok([{ id: 'canonical' }], 1, etag)).mockResolvedValueOnce(unchanged);
+
+    await expect(refreshSidebarThreadSnapshot()).resolves.toBe(true);
+    await expect(invalidateSidebarProjection()).resolves.toBe(true);
+
+    expect(mockApiFetch).toHaveBeenNthCalledWith(2, '/api/threads?view=sidebar', undefined, {
+      afterCurrentGet: true,
+      ifNoneMatch: etag,
+    });
+    expect(parse304).not.toHaveBeenCalled();
+    expect(mockApplySidebarSnapshot).toHaveBeenCalledTimes(1);
+    expect(mockSetThreads).toHaveBeenCalledTimes(1);
+    expect(mockInitThreadUnread).toHaveBeenCalledTimes(0);
+    expect(mockSetLoadingThreads).toHaveBeenCalledTimes(1);
+    expect(mockSetRefreshing).toHaveBeenLastCalledWith(false);
+  });
+
+  it('skips JSON parse and every apply side effect when a 200 repeats the same representation identity', async () => {
+    const etag = '"sidebar-v1"';
+    const duplicate = new Response('not-json-by-design', { status: 200, headers: { etag } });
+    const parseDuplicate = vi.spyOn(duplicate, 'json');
+    mockApiFetch.mockResolvedValueOnce(ok([{ id: 'canonical' }], 1, etag)).mockResolvedValueOnce(duplicate);
+
+    await expect(refreshSidebarThreadSnapshot()).resolves.toBe(true);
+    await expect(refreshSidebarThreadSnapshot()).resolves.toBe(true);
+
+    expect(parseDuplicate).not.toHaveBeenCalled();
+    expect(mockApplySidebarSnapshot).toHaveBeenCalledTimes(1);
+    expect(mockSetThreads).toHaveBeenCalledTimes(1);
+    expect(mockSetLoadingThreads).toHaveBeenCalledTimes(1);
+  });
+
   it('hydrates legacy Chat owners only after the canonical snapshot is accepted', async () => {
     const threads = [
       {
         id: 'bedroom',
         projectPath: '/tmp/cat-cafe',
         title: 'Bedroom',
-        createdBy: 'you',
+        createdBy: 'operator',
         participants: ['codex-sol'],
         preferredCats: ['codex-sol'],
         lastActiveAt: 20,
@@ -148,7 +191,7 @@ describe('sidebar snapshot refresh controller', () => {
           id: 'stale',
           projectPath: '/tmp/old',
           title: 'Old',
-          createdBy: 'you',
+          createdBy: 'operator',
           participants: [],
           lastActiveAt: 1,
           createdAt: 1,

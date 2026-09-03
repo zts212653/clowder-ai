@@ -4,7 +4,10 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, test } from 'node:test';
 import './helpers/setup-cat-registry.js';
-import { hydrateProposal } from '../dist/domains/cats/services/stores/redis/RedisProposalStoreHelpers.js';
+import {
+  hydrateProposal,
+  serializeProposal,
+} from '../dist/domains/cats/services/stores/redis/RedisProposalStoreHelpers.js';
 import { createProposalTestContext } from './helpers/proposal-test-harness.js';
 
 function makeTempProjectPath() {
@@ -112,5 +115,66 @@ describe('F128 approval — no automatic external PR metadata or tracking', () =
     assert.equal(proposal.status, 'pending');
     assert.equal(proposal.title, 'Legacy proposal');
     assert.equal(proposal.sourceMessageId, 'msg_1');
+  });
+
+  test('current Redis rows remain readable by the legacy decoder after a legacy-to-current rewrite', () => {
+    const legacyRow = {
+      proposalId: 'prop_mixed_version_001',
+      status: 'pending',
+      sourceThreadId: 'thread_src',
+      sourceInvocationId: 'inv_1',
+      sourceCatId: 'opus',
+      sourceMessageId: 'msg_1',
+      title: 'Mixed-version proposal',
+      reason: 'Exercise current and legacy proposal readers.',
+      parentThreadId: 'thread_src',
+      preferredCats: JSON.stringify(['opus']),
+      projectPath: 'default',
+      createdBy: 'alice',
+      createdAt: '1700000000000',
+      communityPrContext: JSON.stringify({ repo: 'zts212653/clowder-ai', number: 1406 }),
+    };
+
+    const current = hydrateProposal(legacyRow);
+    const fields = serializeProposal(current);
+    assert.equal(fields.length % 2, 0, 'serialized Redis fields must be key/value pairs');
+    const rewrittenRow = Object.fromEntries(
+      Array.from({ length: fields.length / 2 }, (_, index) => [fields[index * 2], fields[index * 2 + 1]]),
+    );
+    const legacyAfterRewrite = {
+      proposalId: rewrittenRow.proposalId,
+      status: rewrittenRow.status ?? 'pending',
+      sourceThreadId: rewrittenRow.sourceThreadId,
+      sourceInvocationId: rewrittenRow.sourceInvocationId,
+      sourceCatId: rewrittenRow.sourceCatId,
+      sourceMessageId: rewrittenRow.sourceMessageId || undefined,
+      title: rewrittenRow.title,
+      reason: rewrittenRow.reason,
+      parentThreadId: rewrittenRow.parentThreadId,
+      preferredCats: JSON.parse(rewrittenRow.preferredCats ?? '[]'),
+      projectPath: rewrittenRow.projectPath,
+      createdBy: rewrittenRow.createdBy,
+      createdAt: Number(rewrittenRow.createdAt),
+      communityPrContext: rewrittenRow.communityPrContext ? JSON.parse(rewrittenRow.communityPrContext) : undefined,
+    };
+
+    assert.equal('communityPrContext' in current, false, 'current reader drops the retired inference field');
+    assert.equal(rewrittenRow.communityPrContext, undefined, 'current writer does not resurrect retired policy state');
+    assert.deepEqual(legacyAfterRewrite, {
+      proposalId: legacyRow.proposalId,
+      status: legacyRow.status,
+      sourceThreadId: legacyRow.sourceThreadId,
+      sourceInvocationId: legacyRow.sourceInvocationId,
+      sourceCatId: legacyRow.sourceCatId,
+      sourceMessageId: legacyRow.sourceMessageId,
+      title: legacyRow.title,
+      reason: legacyRow.reason,
+      parentThreadId: legacyRow.parentThreadId,
+      preferredCats: ['opus'],
+      projectPath: legacyRow.projectPath,
+      createdBy: legacyRow.createdBy,
+      createdAt: Number(legacyRow.createdAt),
+      communityPrContext: undefined,
+    });
   });
 });

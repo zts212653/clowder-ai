@@ -6,6 +6,7 @@ import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { QueuePanel } from '@/components/QueuePanel';
+import { ThreadChatHistoryAdmissionProvider } from '@/components/thread-chat/ThreadChatRuntimeProvider';
 import { useChatStore } from '@/stores/chatStore';
 import { apiFetch } from '@/utils/api-client';
 import { useChatHistory } from '../useChatHistory';
@@ -14,14 +15,26 @@ vi.mock('@/utils/api-client', () => ({
   apiFetch: vi.fn(),
 }));
 
-function HookHost({ threadId }: { threadId: string }) {
+function HookProbe({ threadId }: { threadId: string }) {
   useChatHistory(threadId);
   return null;
 }
 
-function QueueHydrationPanelHost({ threadId }: { threadId: string }) {
+function QueueHydrationPanelProbe({ threadId }: { threadId: string }) {
   useChatHistory(threadId);
   return React.createElement(QueuePanel, { threadId });
+}
+
+function HookHost({ threadId }: { threadId: string }) {
+  return React.createElement(ThreadChatHistoryAdmissionProvider, null, React.createElement(HookProbe, { threadId }));
+}
+
+function QueueHydrationPanelHost({ threadId }: { threadId: string }) {
+  return React.createElement(
+    ThreadChatHistoryAdmissionProvider,
+    null,
+    React.createElement(QueueHydrationPanelProbe, { threadId }),
+  );
 }
 
 describe('useChatHistory queue hydration (F39 Bug 1)', () => {
@@ -392,6 +405,72 @@ describe('useChatHistory queue hydration (F39 Bug 1)', () => {
       invocationId: 'parent-opus',
       turnInvocationId: 'child-opus',
     });
+  });
+
+  it('reconnect hydration keeps a seen exact child out of QueuePanel actions', async () => {
+    apiFetchMock.mockImplementation((url: string) => {
+      if (typeof url === 'string' && url.includes('/queue')) {
+        return Promise.resolve(
+          new Response(
+            JSON.stringify({
+              queue: [
+                {
+                  id: 'q-reconnect-seen',
+                  threadId: 'thread-q',
+                  userId: 'u1',
+                  content: 'the exact child already read this',
+                  messageId: 'm-reconnect-seen',
+                  mergedMessageIds: [],
+                  source: 'agent',
+                  sourceCategory: 'a2a',
+                  autoExecute: true,
+                  callerCatId: 'codex',
+                  targetCats: ['opus'],
+                  targetStates: { opus: 'seen' },
+                  queueReceipt: {
+                    version: 1,
+                    entryId: 'q-reconnect-seen',
+                    targets: [{ catId: 'opus', state: 'seen', invocationId: 'child-opus', seenAt: 1700000000000 }],
+                    reminderAttempts: [],
+                  },
+                  intent: 'execute',
+                  status: 'queued',
+                  createdAt: 1700000000000,
+                },
+              ],
+              paused: false,
+              activeInvocations: [
+                {
+                  catId: 'opus',
+                  startedAt: Date.now(),
+                  executionId: 'parent-opus',
+                  turnInvocationId: 'child-opus',
+                },
+              ],
+            }),
+            { status: 200 },
+          ),
+        );
+      }
+      return Promise.resolve(
+        new Response(JSON.stringify({ messages: [], hasMore: false, tasks: [] }), { status: 200 }),
+      );
+    });
+
+    await act(async () => {
+      root.render(React.createElement(QueueHydrationPanelHost, { threadId: 'thread-q' }));
+    });
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    expect(useChatStore.getState().activeInvocations).toHaveProperty('parent-opus');
+    expect(useChatStore.getState().catInvocations.opus).toMatchObject({
+      invocationId: 'parent-opus',
+      turnInvocationId: 'child-opus',
+    });
+    expect(container.querySelector('[data-testid="queue-recover"]')).toBeNull();
+    expect(container.querySelector('[data-testid="steer-q-reconnect-seen"]')).toBeNull();
   });
 
   it('F264: parent-only hydration clears a previous child turn identity', async () => {

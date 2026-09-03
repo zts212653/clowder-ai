@@ -8,16 +8,27 @@
  * DELETE /api/tasks/:id     → 删除 (204)
  */
 
-import type { CatId, CreateTaskInput, UpdateTaskInput } from '@cat-cafe/shared';
-import { catIdSchema } from '@cat-cafe/shared';
+import type {
+  CatId,
+  CreateTaskInput,
+  EntrustedWorkTerminalClosureV1,
+  TaskItem,
+  UpdateTaskInput,
+} from '@cat-cafe/shared';
+import { catIdSchema, entrustedWorkTerminalActionV1Schema } from '@cat-cafe/shared';
 import type { FastifyPluginAsync } from 'fastify';
 import { z } from 'zod';
 import { MAX_BALL_CUSTODY_HTTP_PROBE_TIMEOUT_MS } from '../domains/ball-custody/BallCustodyProbeTaskSpec.js';
 import type { ITaskStore } from '../domains/cats/services/stores/ports/TaskStore.js';
+import { isEntrustedWorkTerminalActionRequiredError } from '../domains/cats/services/stores/ports/TaskStoreContract.js';
 import type { GitHubWaitLifecycleService } from '../domains/github-signals/GitHubWaitLifecycleService.js';
+import {
+  EntrustedWorkLifecycleError,
+  EntrustedWorkLifecycleService,
+} from '../domains/growing/EntrustedWorkLifecycleService.js';
 import { validateUrl } from '../infrastructure/scheduler/content-fetcher.js';
 import type { SocketManager } from '../infrastructure/websocket/index.js';
-import { resolveUserId } from '../utils/request-identity.js';
+import { resolveStrictUserId, resolveUserId } from '../utils/request-identity.js';
 
 export interface TasksRoutesOptions {
   taskStore: ITaskStore;
@@ -105,8 +116,30 @@ function toUpdateInput(data: z.infer<typeof updateSchema>): UpdateTaskInput {
   return input;
 }
 
+function validateEntrustedWorkWebClose(
+  task: TaskItem,
+  userId: string,
+  closure: EntrustedWorkTerminalClosureV1,
+): { statusCode: 403; error: string } | null {
+  if (!task.userId || task.userId !== userId) {
+    return { statusCode: 403, error: 'Not your entrusted work' };
+  }
+  if (
+    closure.state !== 'satisfied' &&
+    (closure.disposition.actorKind !== 'human' || closure.disposition.actorRef !== `user:${userId}`)
+  ) {
+    return { statusCode: 403, error: 'Human disposition actor does not match the authenticated user' };
+  }
+  return null;
+}
+
+function entrustedWorkLifecycleHttpStatus(error: EntrustedWorkLifecycleError): 404 | 409 {
+  return error.code === 'ENTRUSTED_WORK_NOT_FOUND' ? 404 : 409;
+}
+
 export const tasksRoutes: FastifyPluginAsync<TasksRoutesOptions> = async (app, opts) => {
   const { taskStore, socketManager } = opts;
+  const entrustedWorkLifecycle = new EntrustedWorkLifecycleService(taskStore);
 
   // POST /api/tasks
   app.post('/api/tasks', async (request, reply) => {
@@ -165,7 +198,19 @@ export const tasksRoutes: FastifyPluginAsync<TasksRoutesOptions> = async (app, o
     ) {
       await opts.waitLifecycleHolder?.current?.ownerChanged(id);
     }
-    const updated = await taskStore.update(id, toUpdateInput(result.data));
+    let updated: TaskItem | null;
+    try {
+      updated = await taskStore.update(id, toUpdateInput(result.data));
+    } catch (error) {
+      if (isEntrustedWorkTerminalActionRequiredError(error)) {
+        reply.status(409);
+        return {
+          error: 'Entrusted work requires an evidence-backed typed closure action',
+          code: error.code,
+        };
+      }
+      throw error;
+    }
     if (!updated) {
       reply.status(404);
       return { error: 'Task not found' };
@@ -216,10 +261,55 @@ export const tasksRoutes: FastifyPluginAsync<TasksRoutesOptions> = async (app, o
     return { status: 'cancelled', result };
   });
 
+  // POST /api/tasks/:id/entrusted-work/close — Task-owned typed terminal action.
+  app.post('/api/tasks/:id/entrusted-work/close', async (request, reply) => {
+    const userId = resolveStrictUserId(request);
+    if (!userId) {
+      reply.status(401);
+      return { error: 'Identity required' };
+    }
+    const parsed = entrustedWorkTerminalActionV1Schema.safeParse(request.body);
+    if (!parsed.success) {
+      reply.status(400);
+      return { error: 'Invalid request body', details: parsed.error.issues };
+    }
+    const { id } = request.params as { id: string };
+    const existing = await taskStore.get(id);
+    if (!existing) {
+      reply.status(404);
+      return { error: 'Task not found' };
+    }
+    const { closure } = parsed.data;
+    const accessError = validateEntrustedWorkWebClose(existing, userId, closure);
+    if (accessError) {
+      reply.status(accessError.statusCode);
+      return { error: accessError.error };
+    }
+    try {
+      const task = await entrustedWorkLifecycle.close({ taskId: id, ...parsed.data });
+      socketManager.broadcastToRoom(`thread:${task.threadId}`, 'task_updated', task);
+      return { status: 'closed', task };
+    } catch (error) {
+      if (!(error instanceof EntrustedWorkLifecycleError)) throw error;
+      reply.status(entrustedWorkLifecycleHttpStatus(error));
+      return { error: error.message, code: error.code };
+    }
+  });
+
   // DELETE /api/tasks/:id
   app.delete('/api/tasks/:id', async (request, reply) => {
     const { id } = request.params as { id: string };
-    const deleted = await taskStore.delete(id);
+    let deleted: boolean;
+    try {
+      deleted = await taskStore.delete(id);
+    } catch (error) {
+      if (!isEntrustedWorkTerminalActionRequiredError(error)) throw error;
+      reply.status(409);
+      return {
+        error: 'Entrusted work cannot be deleted outside its evidence-backed typed lifecycle',
+        code: error.code,
+      };
+    }
     if (!deleted) {
       reply.status(404);
       return { error: 'Task not found' };

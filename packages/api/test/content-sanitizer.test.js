@@ -862,7 +862,7 @@ describe('sanitizeStoryExport', () => {
     // Phase 2 uses full standalone detection and redaction.
     assert.ok(!pack.events[0].content.includes('You'), 'Leaked coCreator name');
     assert.ok(!pack.events[0].content.includes('Lysander'), 'Leaked coCreator alias');
-    assert.ok(!pack.events[0].content.includes('you'), 'Leaked coCreator mention');
+    assert.ok(!pack.events[0].content.includes('operator'), 'Leaked coCreator mention');
   });
 
   // ─── R8: shared breed name belongs to breed catId, not variant ──

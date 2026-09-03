@@ -2,67 +2,90 @@
 
 /** F246 compact settled-history row. */
 
-import type { SettledApprovalItem } from '@cat-cafe/shared';
+import type { SettledApprovalHubItem } from '@cat-cafe/shared';
 import { useCatNameResolver } from '@/hooks/useCatNameResolver';
-import { approvalFeatureMeta } from '@/lib/approval-features';
+import {
+  approvalDisplayTitle,
+  approvalLifecyclePresentation,
+  formatApprovalAbsoluteTime,
+  formatApprovalRelativeTime,
+} from '@/lib/approval-presentation';
+import { type ApprovalCardDetails, ApprovalCardShell } from './ApprovalCardShell';
+import { ApprovalFeatureBadge } from './ApprovalFeatureBadge';
 import { ApprovalProvenanceLinks } from './ApprovalProvenanceLinks';
-
-function relativeTime(epochMs: number): string {
-  const delta = Date.now() - epochMs;
-  const minutes = Math.floor(delta / 60_000);
-  if (minutes < 1) return '刚刚';
-  if (minutes < 60) return `${minutes} 分钟前`;
-  const hours = Math.floor(minutes / 60);
-  if (hours < 24) return `${hours} 小时前`;
-  const days = Math.floor(hours / 24);
-  if (days < 30) return `${days} 天前`;
-  return new Date(epochMs).toLocaleDateString('zh-CN');
-}
+import { ApprovalTechnicalDetailContent } from './ApprovalTechnicalDetails';
+import { CompactLabel } from './content-overflow';
 
 interface SettledHistoryCardProps {
-  item: SettledApprovalItem;
+  item: SettledApprovalHubItem;
 }
 
 export function SettledHistoryCard({ item }: SettledHistoryCardProps) {
   const resolveCatName = useCatNameResolver();
-  const featureMeta = approvalFeatureMeta(item.sourceFeatureId);
-  const isApproved = item.status === 'approved';
+  const status = approvalLifecyclePresentation(item);
+  const details: ApprovalCardDetails | undefined =
+    Object.keys(item.detail).length > 0
+      ? {
+          label: '查看技术详情',
+          expandedLabel: '收起技术详情',
+          testId: 'settled-card-technical-details',
+          content: <ApprovalTechnicalDetailContent detail={item.detail} />,
+        }
+      : undefined;
 
   return (
-    <div
-      className="group px-3 py-2.5 transition-colors hover:bg-cafe-surface/55"
-      data-testid={`settled-card-${item.proposalId}`}
-    >
-      <div className="flex min-w-0 items-center gap-1.5">
-        <span
-          className="flex items-center gap-1 text-micro font-medium text-cafe-interactive/60"
-          data-testid="settled-card-feature-badge"
-        >
-          <span className="h-1.5 w-1.5 rounded-full" style={{ backgroundColor: featureMeta.color }} />
-          {featureMeta.label}
-        </span>
-        <span
-          className={`text-micro font-medium ${
-            isApproved ? 'text-[var(--semantic-success)]' : 'text-[var(--semantic-critical)]'
-          }`}
-          data-testid="settled-card-status"
-        >
-          {isApproved ? '✅ 已通过' : '❌ 已拒绝'}
-        </span>
-        <span className="truncate text-micro text-cafe-interactive/35">来自 {resolveCatName(item.requesterCatId)}</span>
-        <span className="ml-auto text-micro text-cafe-interactive/40" data-testid="settled-card-time">
-          {relativeTime(item.decidedAt)}
-        </span>
-      </div>
-
-      <div className="mt-1 flex items-start gap-2">
-        <p className="line-clamp-2 min-w-0 flex-1 text-sm text-cafe-interactive/80" data-testid="settled-card-summary">
-          {item.summary}
-        </p>
-      </div>
-      <div className="mt-1">
-        <ApprovalProvenanceLinks navigation={item.navigation} compact />
-      </div>
-    </div>
+    <ApprovalCardShell
+      testId={`settled-card-${item.proposalId}`}
+      className="group transition-colors hover:bg-cafe-surface/55"
+      header={
+        <div className="flex min-w-0 items-center gap-1.5">
+          <ApprovalFeatureBadge featureId={item.sourceFeatureId} testId="settled-card-feature-badge" />
+          <span
+            className={`text-micro font-medium ${
+              status.tone === 'success'
+                ? 'text-[var(--semantic-success)]'
+                : status.tone === 'critical'
+                  ? 'text-[var(--semantic-critical)]'
+                  : 'text-cafe-secondary'
+            }`}
+            data-testid="settled-card-status"
+          >
+            {status.label}
+          </span>
+          <span
+            className="ml-auto shrink-0 text-micro text-cafe-interactive/40"
+            data-testid="settled-card-time"
+            title={`处理于 ${formatApprovalAbsoluteTime(item.decidedAt)}`}
+          >
+            处理于 {formatApprovalRelativeTime(item.decidedAt)}
+          </span>
+        </div>
+      }
+      title={approvalDisplayTitle(item)}
+      titleLines={2}
+      titleTestId="settled-card-summary"
+      context={
+        <div className="flex min-w-0 flex-wrap gap-x-3 gap-y-1" data-testid="settled-card-actors">
+          <CompactLabel
+            label="发起人"
+            value={`发起人：${resolveCatName(item.requesterCatId)}`}
+            density="compact"
+            className="min-w-0 flex-1 basis-48 text-micro text-cafe-secondary"
+          />
+          <CompactLabel
+            label="决定人"
+            value={`决定人：${resolveCatName(item.decidedBy)}`}
+            density="compact"
+            className="min-w-0 flex-1 basis-48 text-micro text-cafe-secondary"
+          />
+        </div>
+      }
+      actions={
+        <div className="border-t border-cafe-subtle pt-2">
+          <ApprovalProvenanceLinks navigation={item.navigation} compact />
+        </div>
+      }
+      details={details}
+    />
   );
 }

@@ -10,6 +10,7 @@
 import type { BallResolveMode } from './ball-custody.js';
 import type { DispatchGateState } from './cross-thread-affordance.js';
 import type { GitHubIssueAwaitStateV1, GitHubPrAwaitStateV1, WaitOutcomeV1 } from './github-wait.js';
+import type { EntrustedWorkV1 } from './growing.js';
 import type { CatId } from './ids.js';
 
 // Re-export affordance types so existing consumers don't break
@@ -171,6 +172,7 @@ export interface TaskItem {
   /**
    * Unique subject key for dedup/lookup (#320 KD-15).
    * Format: `pr:{owner/repo}#{num}` | `thread:{threadId}` | `repo:{owner/repo}`
+   * | `entrusted:{sha256(idempotencyKey)}`
    * Null for kind=work tasks that don't need subject-based dedup.
    */
   readonly subjectKey: string | null;
@@ -193,6 +195,12 @@ export interface TaskItem {
   readonly probe?: TaskProbeSpec | null;
   /** F233 PR4: what to do once the probe is satisfied. */
   readonly resolveMode?: BallResolveMode | null;
+  /**
+   * F310 Phase B: Task-owned durable responsibility contract.
+   * This stays orthogonal to coarse progress status and deliberately contains
+   * no producer eligibility, salience, recommendation, or action fields.
+   */
+  readonly entrustedWork?: EntrustedWorkV1;
 
   // --- F193 Phase E (dispatch gate) ---
 

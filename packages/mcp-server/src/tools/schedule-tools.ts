@@ -1,4 +1,4 @@
-import { defineMcpMigrationFactory } from '../tool-governance-migration.js';
+import { defineMcpCanonicalFactory, defineMcpMigrationFactory } from '../tool-governance-migration.js';
 
 /**
  * F139 Phase 3A: Schedule MCP Tools (AC-G2)
@@ -13,10 +13,14 @@ import { callbackGet, callbackPost, getCallbackConfig } from './callback-tools.j
 import type { ToolResult } from './file-tools.js';
 import { errorResult } from './file-tools.js';
 
-const defineTool = defineMcpMigrationFactory('schedule-tools.ts', undefined, {
+const scheduleGovernance = {
   resourceFamily: 'schedule',
   authority: 'callback-owner',
-});
+} as const;
+const defineTool = defineMcpMigrationFactory('schedule-tools.ts', undefined, scheduleGovernance);
+const defineCanonicalTool = defineMcpCanonicalFactory('schedule-tools.ts', undefined, scheduleGovernance);
+
+const ENTRUSTED_WORK_REEVALUATION_TEMPLATE_ID = 'entrusted-work-producer-reevaluation';
 
 const agentKeyCatIdSchema = z
   .string()
@@ -83,6 +87,12 @@ export const registerScheduledTaskInputSchema = {
     .string()
     .optional()
     .describe('Template-specific parameters as JSON string (e.g. {"message":"检查 backlog"})'),
+  entrustedWorkReevaluation: z
+    .string()
+    .optional()
+    .describe(
+      'Typed F310 owner coordinates as JSON. Required only for entrusted-work-producer-reevaluation; never place these refs in params.',
+    ),
   deliveryThreadId: z
     .string()
     .optional()
@@ -99,6 +109,7 @@ export async function handleRegisterScheduledTask(input: {
   templateId: string;
   trigger: string;
   params?: string;
+  entrustedWorkReevaluation?: string;
   deliveryThreadId?: string;
   label?: string;
   category?: string;
@@ -125,6 +136,12 @@ export async function handleRegisterScheduledTask(input: {
     }
   }
 
+  const entrustedWorkReevaluation = parseJsonObject(
+    input.entrustedWorkReevaluation,
+    'Invalid entrustedWorkReevaluation JSON — must be a JSON object',
+  );
+  if (entrustedWorkReevaluation instanceof Error) return errorResult(entrustedWorkReevaluation.message);
+
   const authMode = resolveScheduleMcpAuthMode(input.agentKeyCatId);
   if (authMode === 'agent-key' && !input.deliveryThreadId) {
     return errorResult(
@@ -136,7 +153,7 @@ export async function handleRegisterScheduledTask(input: {
   // Auto-inject the selected cat's ID so reminder tasks wake the registering cat, not default opus.
   // Shared Antigravity MCP has no per-process CAT_CAFE_CAT_ID; the selected sidecar cat is the actor.
   const currentCatId = authMode === 'agent-key' ? input.agentKeyCatId : process.env['CAT_CAFE_CAT_ID'];
-  if (!params.targetCatId && currentCatId) {
+  if (input.templateId !== ENTRUSTED_WORK_REEVALUATION_TEMPLATE_ID && !params.targetCatId && currentCatId) {
     params.targetCatId = currentCatId;
   }
 
@@ -144,6 +161,7 @@ export async function handleRegisterScheduledTask(input: {
     templateId: input.templateId,
     trigger,
     params,
+    ...(entrustedWorkReevaluation ? { entrustedWorkReevaluation } : {}),
   };
 
   if (input.deliveryThreadId) body.deliveryThreadId = input.deliveryThreadId;
@@ -166,6 +184,10 @@ export const previewScheduledTaskInputSchema = {
   templateId: z.string().min(1).describe('Template ID from list_schedule_templates'),
   trigger: z.string().describe('Trigger config as JSON string'),
   params: z.string().optional().describe('Template-specific parameters as JSON string'),
+  entrustedWorkReevaluation: z
+    .string()
+    .optional()
+    .describe('Typed F310 owner coordinates as JSON for entrusted-work-producer-reevaluation'),
   deliveryThreadId: z
     .string()
     .optional()
@@ -179,6 +201,7 @@ export async function handlePreviewScheduledTask(input: {
   templateId: string;
   trigger: string;
   params?: string;
+  entrustedWorkReevaluation?: string;
   deliveryThreadId?: string;
   agentKeyCatId?: string | undefined;
 }): Promise<ToolResult> {
@@ -197,6 +220,11 @@ export async function handlePreviewScheduledTask(input: {
       return errorResult('Invalid params JSON');
     }
   }
+  const entrustedWorkReevaluation = parseJsonObject(
+    input.entrustedWorkReevaluation,
+    'Invalid entrustedWorkReevaluation JSON',
+  );
+  if (entrustedWorkReevaluation instanceof Error) return errorResult(entrustedWorkReevaluation.message);
 
   if (resolveScheduleMcpAuthMode(input.agentKeyCatId) === 'agent-key' && !input.deliveryThreadId) {
     return errorResult(
@@ -209,10 +237,22 @@ export async function handlePreviewScheduledTask(input: {
     templateId: input.templateId,
     trigger,
     params,
+    ...(entrustedWorkReevaluation ? { entrustedWorkReevaluation } : {}),
   };
   if (input.deliveryThreadId) body.deliveryThreadId = input.deliveryThreadId;
 
   return callbackPost('/api/schedule/tasks/preview', body, { agentKeyCatId: input.agentKeyCatId });
+}
+
+function parseJsonObject(value: string | undefined, errorMessage: string): Record<string, unknown> | null | Error {
+  if (!value) return null;
+  try {
+    const parsed: unknown = JSON.parse(value);
+    if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) return new Error(errorMessage);
+    return parsed as Record<string, unknown>;
+  } catch {
+    return new Error(errorMessage);
+  }
 }
 
 // ─── Remove scheduled task ──────────────────────────────────
@@ -265,7 +305,7 @@ export const scheduleTools = [
       runtimeProfiles: ['full', 'agent-key'],
     },
   }),
-  defineTool({
+  defineCanonicalTool({
     name: 'cat_cafe_preview_scheduled_task',
     description:
       'Preview a scheduled task before submitting it for approval. ' +
@@ -282,7 +322,7 @@ export const scheduleTools = [
       runtimeProfiles: ['full', 'agent-key'],
     },
   }),
-  defineTool({
+  defineCanonicalTool({
     name: 'cat_cafe_register_scheduled_task',
     description:
       'Submit a new scheduled task from a template for operator approval. ' +

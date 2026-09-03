@@ -35,6 +35,7 @@ function makeHarness(triggerOutcomes = ['enqueued']) {
   const tasks = new Map([[task.id, task]]);
   const messages = new Map();
   const triggerCalls = [];
+  const cancelCalls = [];
   const outcomes = [...triggerOutcomes];
   const deps = {
     dynamicTaskStore: {
@@ -70,6 +71,17 @@ function makeHarness(triggerOutcomes = ['enqueued']) {
         messages.set(input.idempotencyKey, stored);
         return stored;
       },
+      getById(id) {
+        return [...messages.values()].find((message) => message.id === id) ?? null;
+      },
+      markCanceled(id) {
+        cancelCalls.push(id);
+        const stored = [...messages.values()].find((message) => message.id === id);
+        if (!stored) return null;
+        if (stored.deliveryStatus !== 'queued') return { ...stored, deliveryTransitioned: false };
+        stored.deliveryStatus = 'canceled';
+        return { ...stored, deliveryTransitioned: true };
+      },
     },
     socketManager: { broadcastToRoom() {} },
     taskRunner: { unregister() {} },
@@ -91,6 +103,7 @@ function makeHarness(triggerOutcomes = ['enqueued']) {
     tasks,
     messages,
     triggerCalls,
+    cancelCalls,
     setNow(value) {
       now = value;
     },
@@ -98,14 +111,86 @@ function makeHarness(triggerOutcomes = ['enqueued']) {
 }
 
 async function loadRuntime() {
-  const [{ ManagedCommandWakeRecoverySweep }, { reminderTemplate }] = await Promise.all([
-    import('../dist/domains/ball-custody/ManagedCommandWakeRecoverySweep.js'),
-    import('../dist/infrastructure/scheduler/templates/reminder.js'),
-  ]);
-  return { ManagedCommandWakeRecoverySweep, reminderTemplate };
+  const [{ ManagedCommandWakeRecoverySweep }, { ManagedCommandWakeActionLeaseAdmissionError }, { reminderTemplate }] =
+    await Promise.all([
+      import('../dist/domains/ball-custody/ManagedCommandWakeRecoverySweep.js'),
+      import('../dist/domains/ball-custody/managed-command-wake-action-lease-admission.js'),
+      import('../dist/infrastructure/scheduler/templates/reminder.js'),
+    ]);
+  return { ManagedCommandWakeRecoverySweep, ManagedCommandWakeActionLeaseAdmissionError, reminderTemplate };
 }
 
 describe('F167 managed-command terminal reinvocation exactly-once', () => {
+  test('a permanently stale managed-review generation is canceled once and never redispatched', async () => {
+    const { ManagedCommandWakeRecoverySweep, ManagedCommandWakeActionLeaseAdmissionError } = await loadRuntime();
+    const h = makeHarness([
+      new ManagedCommandWakeActionLeaseAdmissionError(
+        'Managed-command action lease generation no longer matches canonical truth',
+      ),
+    ]);
+    h.task.params.holdLifecycle.await = {
+      v: 1,
+      generation: 1,
+      subjectRef: `command:${h.task.id}`,
+      ownerFence: {
+        kind: 'action_successor',
+        leaseId: 'lease-review-stale',
+        generation: 2,
+      },
+    };
+    const sweep = new ManagedCommandWakeRecoverySweep(h.deps);
+
+    assert.equal(
+      await sweep.recordCompletion({
+        taskId: h.task.id,
+        wakeContent: 'stale review wake',
+        result: { exitCode: 0, timedOut: false, durationMs: 9_000 },
+      }),
+      'recovered',
+    );
+    h.setNow(12_000);
+    assert.deepEqual(await sweep.runOnce(), { scanned: 0, recovered: 0, pending: 0 });
+    h.setNow(14_000);
+    assert.deepEqual(await sweep.runOnce(), { scanned: 0, recovered: 0, pending: 0 });
+
+    assert.equal(h.triggerCalls.length, 1, 'the rejected admission must not dispatch a second time');
+    assert.equal(h.cancelCalls.length, 1, 'the queued source receipt must be terminalized exactly once');
+    assert.equal([...h.messages.values()][0].deliveryStatus, 'canceled');
+    assert.equal([...h.messages.values()][0].queueCustody, undefined, 'no Queue carrier may survive admission');
+    assert.equal(h.deps.invocationRecordStore.getByIdempotencyKey(), null, 'no Invocation carrier may exist');
+    const command = h.tasks.get(h.task.id).params.holdLifecycle.managedCommand;
+    assert.equal(command.state, 'consumed');
+    assert.equal(command.carrierTerminalReason, 'canceled');
+  });
+
+  test('managed review wake persists the exact action-successor generation for terminal settlement', async () => {
+    const { ManagedCommandWakeRecoverySweep } = await loadRuntime();
+    const h = makeHarness();
+    h.task.params.holdLifecycle.await = {
+      v: 1,
+      generation: 1,
+      subjectRef: `command:${h.task.id}`,
+      ownerFence: {
+        kind: 'action_successor',
+        leaseId: 'lease-review-1',
+        generation: 3,
+      },
+    };
+    const sweep = new ManagedCommandWakeRecoverySweep(h.deps);
+
+    await sweep.recordCompletion({
+      taskId: h.task.id,
+      wakeContent: 'review command completed',
+      result: { exitCode: 0, timedOut: false, durationMs: 9_000 },
+    });
+
+    const stored = [...h.messages.values()][0];
+    assert.deepEqual(stored.source.meta.actionLeaseRef, {
+      leaseId: 'lease-review-1',
+      generation: 3,
+    });
+  });
+
   test('completion and fallback timer converge on one user-visible reinvocation', async () => {
     const { ManagedCommandWakeRecoverySweep, reminderTemplate } = await loadRuntime();
     const h = makeHarness();

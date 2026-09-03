@@ -7,7 +7,7 @@ import { applyMigrations } from '../../dist/domains/world/schema.js';
 const NOW = '2026-04-30T12:00:00Z';
 const LATER = '2026-04-30T13:00:00Z';
 const actor = { kind: 'cat', id: 'opus', displayName: '宪宪' };
-const userActor = { kind: 'user', id: 'you' };
+const userActor = { kind: 'user', id: 'operator' };
 
 function makeWorld(overrides = {}) {
   return {

@@ -64,7 +64,7 @@ skills:
       - "一次性 API 脚本"
       - "插件内部 bug fix"
     output: "Journey contract + ownership/authority map + lifecycle/recovery/release plan + fresh-consumer and real-dogfood evidence"
-    next: ["feat-lifecycle", "writing-plans", "console-dev", "quality-gate"]
+    next: ["feat-lifecycle", "writing-plans", "console-dev", "opensource-ops", "quality-gate"]
     sop_step: null
     merged_from: null
 
@@ -108,6 +108,24 @@ skills:
       - "代码实现"
     output: "Guide catalog judgment / choice card / state persistence / overlay start"
     next: ["guide-authoring"]
+    sop_step: null
+
+  custody-recognition:
+    category: "开发流程"
+    description: "Use when a source may entrust work. Not for casual mentions, terminal offers, generic planning, or Schedule/Needs Me. Output: abstain, admit, offer, or retry."
+    triggers:
+      - "帮我接住"
+      - "帮我跟踪"
+      - "之后要做"
+      - "别忘了"
+      - "custody offer"
+      - "needs_clarification"
+    not_for:
+      - "普通吐槽"
+      - "随口一提"
+      - "Schedule 或 Needs Me 判断"
+    output: "Safe abstention / Task admission / source-bound offer / same-key retry"
+    next: []
     sop_step: null
 
   # ── 协作思考 ──
@@ -425,28 +443,6 @@ skills:
     next: []
     sop_step: null
 
-  # ── 开源社区操作（PR / issue / review / triage / intake）──
-  opensource-ops:
-    category: "引导与协作"
-    description: >
-      Portable, provider-neutral workflow for external PRs/issues: grounding provider object + verified author/authenticated-identity comparison + adoption five questions + reverse provenance + review/tracking/closure.
-      Use when: a thread is reviewing, triaging, intaking, or advising on an external PR or issue in any repo (GitHub is one provider adapter example).
-      Not for: internal feature work with no external artifact, generic thread orchestration, or replacing the external maintainer's own decision.
-      Output: grounded provider-neutral subject + author/custody classification + adoption verdict + correctly routed review/tracking/closure.
-    triggers:
-      - "opensource-ops"
-      - "社区 PR"
-      - "external PR review"
-      - "GitHub PR review"
-      - "PR intake"
-      - "issue triage"
-    not_for:
-      - "内部 feature work"
-      - "generic thread orchestration"
-    output: "Grounded provider object + author/custody classification + adoption verdict + routed review/tracking/closure"
-    next: ["request-review", "receive-review", "merge-gate", "cross-cat-handoff"]
-    sop_step: null
-
   # ── 开源项目拆解 ──
   open-source-teardown:
     category: "调研与知识"
@@ -474,9 +470,45 @@ skills:
       - "社区 issue/PR 运营"
       - "只需要架构头脑风暴"
     output: "Code-evidence teardown report + Clowder AI comparison + candidate lessons"
-    next: ["collaborative-thinking", "writing-skills", "deep-research"]
+    next: ["collaborative-thinking", "writing-skills", "deep-research", "opensource-ops"]
     sop_step: null
     merged_from: null
+
+  # ── 开源社区运营（F116，替代 community-pr）──
+  opensource-ops:
+    description: >
+      外部 PR/issue 的 provider-neutral grounding、作者/认证身份比对、adoption 五问、reverse provenance 与 custody 路由；当前 deployment 可叠加 Issue Triage、Sync、Intake、Label、Hotfix 等私有 playbook。
+      Use when: 线程正在 review、triage、intake 或 advisory 外部 PR/issue，或执行当前 deployment 的社区运营 SOP。
+      Not for: 没有外部对象的内部开发（用 worktree/tdd）、普通内部 review（用 request-review）。
+      Output: grounded provider subject + author/custody classification + adoption verdict + 正确路由的 review/tracking/closure。
+      GOTCHA: F128 服务端不推断外部对象、作者角色或 maintainer policy；child thread 必须加载本 skill 自行 grounding。外部作者的修复球默认不得派给家猫；本地 fixup 需要显式 Strategy B 授权 provenance。
+    triggers:
+      - "社区 issue"
+      - "社区 PR"
+      - "community PR"
+      - "inbound PR"
+      - "是否值得 merge"
+      - "值得 intake"
+      - "外部贡献"
+      - "开源仓"
+      - "clowder-ai"
+      - "intake"
+      - "sync 到开源"
+      - "outbound sync"
+      - "issue triage"
+      - "打标签"
+      - "hotfix lane"
+      - "贡献 PR"
+      - "fork PR"
+      - "F128 社区 PR"
+    not_for:
+      - "内部 cat-cafe 开发（用 worktree/tdd）"
+      - "内部 review（用 request-review）"
+      - "内部 merge（用 merge-gate）"
+    output: "Grounded provider subject + author/custody classification + adoption verdict + deployment-specific closure"
+    next: ["request-review", "receive-review", "merge-gate", "cross-cat-handoff"]
+    sop_step: null
+    merged_from: ["community-pr"]
 
   # ── 自我进化 ──
   self-evolution:
@@ -892,7 +924,11 @@ skills:
       Use when: 用户说“做个 demo 让人 get 到”“先做概念片”“做一个家里可点的体验设计稿”“把完整用户旅程演出来”，或产品尚未落地但需要先形成可判断证据；也用于明确 demo 是给家里体验还是对外传播。
       Not for: 已有真实产品页面的常规前端开发（用 console-dev）、已有素材的剪辑成片（用 video-forge）、PPT（用 ppt-forge）、纯视觉探索（用 pencil-design / image-generation）。
       Output: 带 demo_kind × delivery_lane 双轴契约的 Demo Contract + 确定性交互原型 + 类型专属验证记录。
+      技术可信度判题可条件启用可证伪技术剖面：一项 claim 对应一组失效机制、可操纵消融、确定 verdict 与 claim ceiling；普通 Demo 不补。
     triggers:
+      - 可证伪技术剖面
+      - 证伪实验台
+      - 技术架构 demo
       - "概念 demo"
       - "概念演示"
       - "做个 demo"
@@ -1086,11 +1122,7 @@ skills:
   # ── 富媒体消息 ──
   rich-messaging:
     category: "创作与媒体"
-    description: >
-      富媒体消息发送：语音、图片、卡片、清单、代码 diff。
-      Use when: 发语音、发图、发卡片、展示结构化信息、庆祝、给我听听、给我看看。
-      Not for: 纯文字聊天、技术讨论、日常回复。
-      Output: rich block 附着在消息上。
+    description: 在当前 Chat 直接交付可看、可听或可操作产物（语音、图片、截图、HTML/demo、卡片、清单、diff、交互选择），无需用户说“富文本”；纯文字与讨论/修改 HTML 源码不使用，复杂 localhost 应用用 browser-preview。
     triggers:
       - "发语音"
       - "说一句"
@@ -1103,6 +1135,9 @@ skills:
       - "看图"
       - "截图给我看"
       - "screenshot"
+      - "画个 HTML 展示"
+      - "做个 demo 给我看"
+      - "在 Chat 里展示"
       - "发个卡片"
       - "rich block"
       - "checklist"
@@ -1112,9 +1147,13 @@ skills:
       - "给我听听"
       - "给我看看"
       - "show me"
+      - "html_widget"
+      - "media_gallery"
     not_for:
       - "纯文字聊天"
-      - "技术讨论"
+      - "讨论 HTML 技术"
+      - "修改 HTML 源文件"
+      - "复杂 localhost 页面用 browser-preview"
       - "日常回复"
     output: "Rich block attached to message"
     next: []
@@ -1424,7 +1463,12 @@ skills:
       Use when: 写技术博客、公众号文章、社区分享、对外 longform、技术文章 review、写推广语。
       Not for: 内部文档/spec（直接写）、PPT（用 ppt-forge）、纯调研报告（用 deep-research）。
       Output: 读者能代入的技术文章 + AI味自检通过 + 推广语。
+      技术叙事用 7P 组织问题与机制、用 5E 限制 claim；需要观众亲手判题时续接 concept-demo-design 的可证伪技术剖面。
     triggers:
+      - 技术叙事
+      - 技术竞争力
+      - 讲清技术含量
+      - 算法怎么讲
       - "写文章"
       - "技术分享"
       - "博客"

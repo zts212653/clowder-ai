@@ -1,6 +1,6 @@
 # Direction Card 模板（F168 Phase A）
 
-> 返回 → opensource-ops SKILL.md
+> 返回 → [opensource-ops SKILL.md](../opensource-ops/SKILL.md)
 > 返回 → [repo-inbox.md](./repo-inbox.md)
 
 ## 用法

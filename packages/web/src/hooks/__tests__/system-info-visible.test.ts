@@ -77,3 +77,68 @@ describe('formatVisibleSystemInfo — a2a_multi_target_serialized', () => {
     expect(visible?.content).toContain('cat_cafe_multi_mention');
   });
 });
+
+describe('formatVisibleSystemInfo — routing_preflight', () => {
+  it('turns warned and rejected receipts into owner-readable copy', () => {
+    const visible = formatVisibleSystemInfo(
+      {
+        type: 'routing_preflight',
+        v: 1,
+        ownerId: 'owner-1',
+        observedAt: 1_800_000_000_000,
+        resolverState: 'fresh',
+        target: {
+          targetCatId: 'opus5',
+          disposition: 'rejected',
+          reasons: [{ code: 'routing_signal_unavailable', summary: '当前暂不可用', sourceRefs: ['signal:1'] }],
+          alternatives: [{ catId: 'kimi', reasonRefs: ['catalog:1'] }],
+        },
+      },
+      (catId) => (catId === 'opus5' ? '宪宪' : catId),
+    );
+
+    expect(visible).toEqual({
+      content: '宪宪（@opus5）的发送前检查已拒绝：当前暂不可用。原目标未改派；可考虑 @kimi。',
+      variant: 'info',
+    });
+  });
+
+  it('keeps allowed receipts quiet', () => {
+    expect(
+      formatVisibleSystemInfo({
+        type: 'routing_preflight',
+        target: { targetCatId: 'opus5', disposition: 'allowed', reasons: [], alternatives: [] },
+      }),
+    ).toBeNull();
+  });
+
+  it('maps degraded routing reason codes to stable copy without exposing internal failure classes', () => {
+    const visible = formatVisibleSystemInfo({
+      type: 'routing_preflight',
+      v: 1,
+      ownerId: 'owner-1',
+      observedAt: 1_800_000_000_000,
+      resolverState: 'degraded',
+      target: {
+        targetCatId: 'codex-sol',
+        disposition: 'warned',
+        reasons: [
+          {
+            code: 'routing_context_unavailable',
+            summary:
+              'Routing context is degraded (resolver_degraded:built_in_profile_missing); the original target is preserved',
+            sourceRefs: ['routing-context:resolver_degraded:built_in_profile_missing'],
+          },
+        ],
+        alternatives: [],
+      },
+    });
+
+    expect(visible).toEqual({
+      content: 'codex-sol（@codex-sol）的发送前检查需注意：路由上下文暂时无法完整读取。原目标未改派。',
+      variant: 'info',
+    });
+    expect(visible?.content).not.toContain('resolver_degraded');
+    expect(visible?.content).not.toContain('original target');
+  });
+});

@@ -1,8 +1,8 @@
 ---
 feature_ids: [F266]
-related_features: [F167, F168, F192, F248, F267, F268]
+related_features: [F167, F168, F192, F246, F248, F267, F268, F311, F313]
 topics: [eval, control-plane, closure, lifecycle, sla, hub, reliability]
-tips_exempt: "Operational acceptance adds one narrowly scoped lifecycle-writeback MCP tool; its MCP description is the just-in-time cognitive entry, not a general proactive workflow tip"
+tips_exempt: "Renewed 2026-09-02: operational acceptance remains MCP-described lifecycle writeback, while the F313 Phase C approval-repair extension is fail-closed at zero activation (no proposal, card, task, or lease) until its owner adapter and epoch migration ship; add a real tip when that user-visible Approval Hub action activates"
 doc_kind: spec
 created: 2026-07-18
 description: "把 eval verdict 从一次性报警变成可持久追踪、可回链、可复评、超时可升级的责任闭环。"
@@ -63,6 +63,31 @@ Why: 本 Feature 只补齐 F192 已声明但未接线的 owner response、action
 - `nextEvalAt` 到期必须创建真实 re-evaluation task 与 active lease，再写入带 task/lease identity 的 `reeval_requested`；到期不是只把卡片染成 stale。
 - 新 trusted verdict 先作为新 cycle 进入原 case，再以 `reeval_passed` 或 `reeval_failed` 关闭/延续当前周期并提升新周期。禁止为同一 finding 产生平行 orphan case，也禁止较旧 cycle 触发当前 repair task 的误结算。
 - monitoring cycle 的 trusted re-eval 若失败，原 case 回到可绑定 responsibility 的 `open`，再创建 repair task/lease；Hub 的 repair/cadence debt 必须从当前 lifecycle state 与当前 activation 派生，不能被 `keep_observe` 标签或旧失败结果遮蔽。
+
+### F313 Phase C Extension: Approval-Gated Eval Repair（2026-09-02）
+
+F266 的 schema-v3 actionable finding 不再沿用 legacy direct-responsibility 路径。它在同一 append-only case event
+stream 中保存 immutable proposal、F246 publication anchor、canonical decision、drift supersession 与 custody
+receipt；F246 只通过既有 catalog/registry/adapter/Hub projection 读取这些记录，不新增 proposal store。
+
+- ref-only proposal callback 只接 `caseActionRef + clientMessageId`；InvocationRecord 服务端派生 requester、thread、
+  origin 与 Approval owner，raw `clientMessageId` 不持久化；
+- canonical owner resolver 在 proposal 前和 accepted dispatch 前均返回 opaque `ownerAuthorizationRef`、exact
+  `targetVersionRef`、owner/dispatch refs；缺失、不可读、过期、target mismatch 全部在 proposal/card/Task/lease
+  之前 typed fail closed；
+- owner/target/authorization 任一变化会用单一 supersession event 把旧 Approval 变为 audit-only record，并让
+  同一事件成为 linked fresh `caseActionRef` 的恢复源；旧批准永远不能派工，崩溃恢复不依赖第二次 append；
+- F266 先以 event-log CAS 持久化唯一 materialization attempt；canonical repair owner 再以
+  `dispatchId = proposal + targetVersionRef + ownerAuthorizationRef`，在复核 exact opaque refs 的同一原子边界内
+  幂等 upsert 一个 Task/F167 custody。stale/blocker 返回保证零 custody；F266 只保存 receipt refs，不解析权限
+  payload，不执行 Phase D mutation/outcome；
+- v3 loader、F266 producer、route、materializer、owner resolver/dispatcher 与 producer `v1_active` epoch 是同一
+  cutover unit。当前 production 未执行 epoch migration且未绑定 owner adapter，因而 route 明确返回
+  `approval_route_unavailable`，v3 root 继续零 proposal/card/Task/lease。
+
+Contract sources：Approval seal
+`[thread-id]#0001788327680802-000466-ba7a600b`；owner-backed authorization
+`docs/features/F311-capability-evolution-workspace.md@396a379d7b` hard constraint 13 / Phase 4 / KD-17。
 
 ## User Journey
 

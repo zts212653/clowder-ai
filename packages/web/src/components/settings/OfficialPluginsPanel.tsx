@@ -20,7 +20,13 @@ interface OfficialPluginCatalogStatus {
 }
 
 function actionConfirmed(plugin: OfficialPluginInfo, action: OfficialPluginAction): boolean {
-  if (action === 'enable') return window.confirm('确认启用飞书会议纪要同步？启用后会连接本机 lark-cli。');
+  if (action === 'enable') {
+    return window.confirm(
+      plugin.catalogId === 'collective-connector'
+        ? '确认启用 Collective Connector？它会恢复 Host 托管的 endpoint 连接，但不会启动 Collective Service。'
+        : '确认启用飞书会议纪要同步？启用后会连接本机 lark-cli。',
+    );
+  }
   if (action === 'update') {
     const enabled = plugin.instance?.activationState === 'enabled';
     return window.confirm(
@@ -121,6 +127,9 @@ export function OfficialPluginsPanel() {
               : '插件状态已变化，已刷新到最新状态，请重试。',
           );
           await load(false);
+        } else if (body.code === 'CATCH_UP_REQUIRED') {
+          setError('检测到未处理的接收缺口，请先预览，再选择“仅恢复以后”或“补抓并恢复”。');
+          await load(false);
         } else {
           setError(body.error ?? `官方插件操作失败 (${response.status})`);
         }
@@ -187,7 +196,7 @@ export function OfficialPluginsPanel() {
     [load],
   );
 
-  if (loading) return <SettingsText tone="muted">正在读取飞书会议纪要同步状态…</SettingsText>;
+  if (loading) return <SettingsText tone="muted">正在读取官方插件状态…</SettingsText>;
   if (plugins.length === 0 && !error) return null;
 
   return (

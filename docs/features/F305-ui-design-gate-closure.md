@@ -1,6 +1,6 @@
 ---
 feature_ids: [F305]
-related_features: [F056, F083, F246, F284, F287, F292, F299, F303]
+related_features: [F056, F083, F246, F284, F287, F292, F299, F303, F310]
 topics: [ui, ux, design-gate, frontend-design, workspace, approval, design-language]
 doc_kind: spec
 created: 2026-08-22
@@ -9,12 +9,12 @@ description_source: human
 description_author: codex-sol
 description_updated_at: 2026-08-22T15:01:32Z
 cvo_signoff: "2026-08-22 — sourceMessageId 0001787410376908-000078-52aceda2：由Maine Coon负责闭环当前问题，并给出未来可一句话触发的纠偏入口。"
-tips_exempt: "内部 UI 设计治理与既有审批体验修正；没有新增用户可发现的产品能力。"
+tips_exempt: "2026-08-31 terminal audit 续租：本轮只纠正 F305 full-gate receipt 与未绑定 workflow projection 的关闭真相，不新增用户可发现能力、操作入口或学习步骤。"
 ---
 
 # F305: UI Design Gate Closure — 先看真页面
 
-> **Status**: done — 2026-08-24 愿景守护 seal_close（fable-5，非作者非 reviewer；见 vision-guard-seal） | **Owner**: 小太阳·Maine Coon (@codex-sol, GPT-5.6 Sol) | **Priority**: P1
+> **Status**: done — 2026-08-24 愿景守护 seal_close（fable-5，非作者非 reviewer；见 vision-guard-seal） | **Owner**: 小太阳·Maine Coon (@codex-sol, GPT-5.6 Sol) | **Priority**: P1 | **Completed**: 2026-08-24
 
 Architecture cell: `harness-eval`
 
@@ -100,7 +100,7 @@ F056 AC-A3 下先形成一个窄 pattern，不启动全 Workspace 组件扫荡�
 4. 作决定必需的上下文；
 5. 工程细节与 Raw 默认折叠。
 
-`GenericApprovalItemCard` 与 F292 `MeetingIntakeCard` 共同消费该 pattern；F246/F292 的业务状态、持久化和决定契约保持不变。
+`GenericApprovalItemCard` 与 F292 `MeetingIntakeCard` 共同消费该 pattern；F246/F292 的业务状态、持久化和决定契约保持不变。F310 后续复用这份呈现默认来做全局 Needs Me Design Gate，但不会让已关闭的 F305 获得 attention lifecycle ownership。
 
 审批是这个 pattern 的**第一个生产验证点**，不是 F305 的永久边界，也不是验证完就丢弃的 spike。后续 Workspace 模块只有在新增或实质改动用户表面时，才经同一个 F083 Design Gate 判断是否复用已经证明的呈现结构；不批量翻修旧页面，也不强迫不同任务共用同一张卡。
 

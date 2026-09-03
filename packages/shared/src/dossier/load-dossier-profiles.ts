@@ -10,10 +10,9 @@
  *
  * Both must switch simultaneously (KD-12).
  *
- * Cache lifetime: process-scoped (no invalidation). Acceptable for Phase B because:
- * - compile-l0 is short-lived (script exits after compilation)
- * - API server restarts on deployment (new code → new process → fresh cache)
- * Phase C may add file-watcher or TTL invalidation if operator-driven hot-reload is needed.
+ * Parsed profiles are reused while the dossier content is unchanged. The file is
+ * reread on every access so an applied F208 revision becomes visible to routing
+ * on its next resolution without requiring a process restart.
  */
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
@@ -24,26 +23,29 @@ const DOSSIER_RELATIVE_PATH = 'docs/team/cat-dossier.md';
 
 let _cachedProfiles: Map<string, DossierProfile> | null = null;
 let _cachedProjectRoot: string | null = null;
+let _cachedContent: string | null = null;
 /** Whether the dossier file was found and loaded (vs ENOENT / community scenario). */
 let _dossierFileFound = false;
 
 /**
  * Load dossier profiles from the project root.
- * Results are cached per projectRoot (reloaded if root changes).
+ * Parsed results are cached per projectRoot and exact source content.
  */
 export function loadDossierProfiles(projectRoot: string): Map<string, DossierProfile> {
-  if (_cachedProfiles && _cachedProjectRoot === projectRoot) {
-    return _cachedProfiles;
-  }
-
   const dossierPath = resolve(projectRoot, DOSSIER_RELATIVE_PATH);
   try {
     const content = readFileSync(dossierPath, 'utf-8');
+    if (_cachedProfiles && _cachedProjectRoot === projectRoot && _cachedContent === content) {
+      _dossierFileFound = true;
+      return _cachedProfiles;
+    }
     _cachedProfiles = parseDossierProfiles(content);
+    _cachedContent = content;
     _dossierFileFound = true;
   } catch (err: unknown) {
     const isNotFound = (err as NodeJS.ErrnoException).code === 'ENOENT';
     _cachedProfiles = new Map();
+    _cachedContent = null;
     if (isNotFound) {
       // Community scenario — no dossier file. Silent fallback OK per KD-9.
       _dossierFileFound = false;
@@ -123,5 +125,6 @@ export function hasDossierEntry(catId: string, projectRoot: string): boolean {
 export function _resetDossierCache(): void {
   _cachedProfiles = null;
   _cachedProjectRoot = null;
+  _cachedContent = null;
   _dossierFileFound = false;
 }

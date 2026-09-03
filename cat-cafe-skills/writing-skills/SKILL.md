@@ -1,6 +1,5 @@
 ---
 name: writing-skills
-tips_exempt: internal shared-reference coordinate repair; no user-visible capability change
 description: >
   创建或修改 Clowder AI skill / MCP tool description 的元技能（含质量标准、范本、发布）。
   Use when: 写新 skill、修改现有 skill、写/改 MCP tool description、验证 skill 质量；
@@ -185,7 +184,7 @@ description: >
 1. **源文件**：`cat-cafe-skills/{skill-name}/SKILL.md`（+ 支持文件）
 2. **同步**：`pnpm sync:skills`（不要手动 ln -s）
 3. **注册**：`manifest.yaml` 添加条目（triggers / not_for / output / next）
-4. **验证**：`pnpm check:skills` 全绿；若改动提到 API route / localhost / script / CLI command / 第一方执行面，commit 前还必须跑 `pnpm check`（会跑 skill surface guard）
+4. **验证**：`pnpm check:skills`、`pnpm check:skills:references`、`pnpm check:skills:surfaces` 全绿；涉及 API route / localhost / script / CLI command / 第一方执行面时，再跑该 claim 对应的定向 checker/test。只有五轴实际命中高风险或 targeted 无法覆盖跨包合流风险时才跑 full `pnpm gate`，不把 `pnpm check` 当小改的默认收据。
 5. **Commit**：包含 `cat-cafe-skills/{skill-name}/`
 
 ## Common Mistakes
@@ -204,7 +203,7 @@ description: >
 | 文件 >150 行就机械拆分 | 核心执行语义被切碎，或为了达标制造 refs | 把 150 行当 smell；只下沉真正按需的重材料（T0-5） |
 | 功能实现时产出了 skill 但没加载 writing-skills | 漏 sync、漏 manifest | **动了 cat-cafe-skills/ 就必须加载本 skill** |
 | MCP description 缺路由契约 | 猫路由失败 | 用四项必需契约 + 条件 Gotcha 清单审查（T0-6） |
-| 小改 skill 直接 push 不跑检查 | 可能把 raw first-party `curl localhost` 主路径带进 main，下一只合 PR 的猫才踩雷 | 只要 skill/MCP description 涉及 API / localhost / script / CLI / 第一方执行面，即使 ≤5 行也跑 `pnpm check` |
+| 小改 skill 直接 push 不跑检查 | 可能把 raw first-party `curl localhost` 主路径带进 main，下一只合 PR 的猫才踩雷 | 跑 `check:skills:references` + `check:skills:surfaces` 与 claim 对应的定向测试；按五轴风险决定是否升 full gate |
 
 ## 深入学习（按需阅读）
 

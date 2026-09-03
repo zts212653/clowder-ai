@@ -12,6 +12,8 @@ import { MemoryIcon } from './icons/MemoryIcon';
 import { SETTINGS_SECTIONS } from './settings/settings-nav-config';
 import { ThemeMenu } from './ThemeMenu';
 import { getThreadIdFromPathname } from './ThreadSidebar/thread-navigation';
+import { useF307ExperienceWorkbenchStore } from './workbench/experience-workbench-store';
+import { resolveApprovalActionTarget } from './workbench/real-surface-adapters';
 
 const OklchTuner = lazy(() => import('./dev/OklchTuner').then((m) => ({ default: m.OklchTuner })));
 
@@ -19,6 +21,7 @@ const NAV_ITEMS = [
   { id: 'home', path: '/', label: '对话', match: (p: string) => p === '/' || p.startsWith('/thread/') },
   { id: 'starry', path: '/starry', label: '猫猫星球', match: (p: string) => p.startsWith('/starry') },
   { id: 'memory', path: '/memory', label: '记忆', match: (p: string) => p.startsWith('/memory') },
+  { id: 'collective', path: '/collective', label: 'Collective', match: (p: string) => p.startsWith('/collective') },
   { id: 'mission', path: '/mission-hub', label: 'Mission Hub', match: (p: string) => p.startsWith('/mission') },
   { id: 'signals', path: '/signals', label: '信号', match: (p: string) => p.startsWith('/signals') },
 ] as const;
@@ -48,6 +51,18 @@ function MissionIcon({ className = 'w-5 h-5' }: { className?: string }) {
       <path d="M15 3v4a1 1 0 0 0 1 1h4" strokeLinecap="round" strokeLinejoin="round" />
       <path d="M9 13h6" strokeLinecap="round" />
       <path d="M9 17h3" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+function CollectiveIcon({ className = 'w-5 h-5' }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className={className}>
+      <title>Collective</title>
+      <circle cx="7" cy="8" r="3" />
+      <circle cx="17" cy="8" r="3" />
+      <circle cx="12" cy="17" r="3" />
+      <path d="m9.5 10 1.2 4M14.5 10l-1.2 4M10 8h4" strokeLinecap="round" />
     </svg>
   );
 }
@@ -96,6 +111,7 @@ const ICON_MAP: Record<string, ({ className }: { className?: string }) => JSX.El
   starry: PlanetIcon,
   signals: SignalIcon,
   memory: MemoryIcon,
+  collective: CollectiveIcon,
   mission: MissionIcon,
   settings: SettingsIcon,
 };
@@ -182,22 +198,22 @@ function ApprovalHubButton() {
   const count = useApprovalHubStore((s) => s.count);
   const fetchPending = useApprovalHubStore((s) => s.fetchPending);
   const setWorkspaceMode = useChatStore((s) => s.setWorkspaceMode);
-  const workspaceMode = useChatStore((s) => s.workspaceMode);
   const rightPanelMode = useChatStore((s) => s.rightPanelMode);
-  const setRightPanelMode = useChatStore((s) => s.setRightPanelMode);
+  const rightPanelOpen = useChatStore((s) => s.rightPanelOpen);
+  const closeRightPanel = useChatStore((s) => s.closeRightPanel);
+  const approvalSurfaceActive = useF307ExperienceWorkbenchStore((state) => {
+    const activeSurface = state.layout.surfaces.find((surface) => surface.id === state.layout.activeSurfaceId);
+    return activeSurface ? resolveApprovalActionTarget(activeSurface) !== null : false;
+  });
 
   const handleClick = useCallback(() => {
-    // F246 Phase C: bell click → workspace approval tab (replaces drawer toggle)
-    if (workspaceMode === 'approval' && rightPanelMode === 'workspace') {
-      // Already on approval tab + workspace open → toggle close
-      setRightPanelMode('status');
+    if (approvalSurfaceActive && rightPanelMode === 'workspace' && rightPanelOpen) {
+      closeRightPanel();
     } else {
-      // Open workspace panel and switch to approval tab
       setWorkspaceMode('approval');
-      // Refresh pending approvals on open (preserves old drawer toggle semantics)
       fetchPending();
     }
-  }, [workspaceMode, rightPanelMode, setWorkspaceMode, setRightPanelMode, fetchPending]);
+  }, [approvalSurfaceActive, rightPanelMode, rightPanelOpen, closeRightPanel, setWorkspaceMode, fetchPending]);
 
   return (
     <button
@@ -341,7 +357,7 @@ export function ActivityBar({ className }: ActivityBarProps) {
       </Suspense>
 
       <div className="mt-auto flex flex-col items-center gap-1.5">
-        {/* F246: Approval Hub bell icon with badge count */}
+        {/* F246 remains the approval bell; F310 Needs Me is a sibling Workspace destination. */}
         <ApprovalHubButton />
         {/* F229: concierge re-entry —唤回入口，muted 时是唯一入口 (INV-3) */}
         <ConciergeRailToggle />

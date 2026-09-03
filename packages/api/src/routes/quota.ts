@@ -12,6 +12,7 @@
  */
 
 import { execFile } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
@@ -19,6 +20,7 @@ import { promisify } from 'node:util';
 import type { FastifyInstance } from 'fastify';
 import * as pty from 'node-pty';
 import { z } from 'zod';
+import type { RoutingQuotaSnapshotObserver } from '../domains/routing-context/F051QuotaRoutingSignalAdapter.js';
 import { resolveCliCommand } from '../utils/cli-resolve.js';
 
 const execFileAsync = promisify(execFile);
@@ -1575,7 +1577,53 @@ export function mergeClaudeCliUsage(
 
 // --- Route ---
 
-export async function quotaRoutes(app: FastifyInstance): Promise<void> {
+export interface QuotaRoutesOptions {
+  routingQuotaObserver?: RoutingQuotaSnapshotObserver;
+  routingOwnerId?: string;
+}
+
+function sanitizedRoutingQuotaItems(items: readonly CodexUsageItem[]) {
+  return items.map((item) => {
+    const resetAt = item.resetsAt ? Date.parse(item.resetsAt) : Number.NaN;
+    return {
+      ...(item.poolId ? { poolId: item.poolId } : {}),
+      usedPercent: item.usedPercent,
+      ...(item.percentKind ? { percentKind: item.percentKind } : {}),
+      ...(Number.isFinite(resetAt) && resetAt >= 0 ? { resetsAt: resetAt } : {}),
+    };
+  });
+}
+
+export async function quotaRoutes(app: FastifyInstance, options: QuotaRoutesOptions = {}): Promise<void> {
+  const observeCanonicalRefresh = async (
+    providerId: string,
+    items: readonly CodexUsageItem[],
+    checkedAt: string | null,
+  ): Promise<void> => {
+    if (!options.routingQuotaObserver || !options.routingOwnerId || !checkedAt || items.length === 0) return;
+    const observedAt = Date.parse(checkedAt);
+    if (!Number.isFinite(observedAt) || observedAt < 0) return;
+    const routingItems = sanitizedRoutingQuotaItems(items);
+    const observationDigest = createHash('sha256')
+      .update(JSON.stringify({ providerId, observedAt, items: routingItems }))
+      .digest('hex')
+      .slice(0, 32);
+    try {
+      await options.routingQuotaObserver.observeSnapshot({
+        v: 1,
+        kind: 'quota_snapshot',
+        ownerId: options.routingOwnerId,
+        observationId: `quota-refresh:${observationDigest}`,
+        observedAt,
+        evidenceRef: `quota-cache:${providerId}:${observedAt}`,
+        providerId,
+        items: routingItems,
+      });
+    } catch {
+      app.log.warn({ providerId }, 'F293 routing quota observation failed after canonical refresh');
+    }
+  };
+
   app.get('/api/quota/probes', async () => {
     return {
       probes: listQuotaProbeDescriptors(),
@@ -1607,6 +1655,7 @@ export async function quotaRoutes(app: FastifyInstance): Promise<void> {
     if (result.error) {
       return reply.status(502).send({ error: result.error });
     }
+    await observeCanonicalRefresh('kimi', kimiCache.usageItems, kimiCache.lastChecked);
     return { kimi: kimiCache, source: result.source, fallbackUsed: result.fallbackUsed };
   });
 
@@ -1671,6 +1720,12 @@ export async function quotaRoutes(app: FastifyInstance): Promise<void> {
     );
 
     const result = await refreshOfficialQuotaViaOAuth({ claudeCredentials, codexCredentials });
+    if ((result.claude?.items ?? 0) > 0) {
+      await observeCanonicalRefresh('claude', claudeCache.usageItems ?? [], claudeCache.lastChecked);
+    }
+    if ((result.codex?.items ?? 0) > 0) {
+      await observeCanonicalRefresh('codex', codexCache.usageItems, codexCache.lastChecked);
+    }
     const errors = [...missingCredentialErrors, result.claude?.error, result.codex?.error].filter(
       (error): error is string => Boolean(error),
     );

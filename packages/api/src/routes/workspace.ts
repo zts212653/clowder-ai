@@ -27,6 +27,12 @@ import { isAbsoluteFilesystemPath, normalizeWorkspaceRelativePath } from '@cat-c
 import type { FastifyPluginAsync, FastifyRequest } from 'fastify';
 import { type EventAuditLog, getEventAuditLog } from '../domains/cats/services/orchestration/EventAuditLog.js';
 import type { IThreadStore } from '../domains/cats/services/stores/ports/ThreadStore.js';
+import {
+  type SkillConsumptionReceiptService,
+  type SkillConsumptionScope,
+  type SkillConsumptionVerificationFailure,
+  WORKSPACE_NAVIGATOR_CONSUMER_ID,
+} from '../domains/cats/services/tool-usage/SkillConsumptionReceiptService.js';
 import { guessMime, readWorkspaceFilePreview } from '../domains/workspace/workspace-file-read.js';
 import type { WorkspaceNavigationEmitter } from '../domains/workspace/workspace-navigation-delivery.js';
 import { resolveWorkspaceDocumentHref } from '../domains/workspace/workspace-path-resolution.js';
@@ -48,6 +54,7 @@ import {
   registerCallbackAuthHook,
 } from './callback-auth-prehandler.js';
 import { resolvePrincipalThread } from './callback-scope-helpers.js';
+import { parseWorkspaceChangedFiles } from './workspace-diff.js';
 import {
   handleWorkspaceNavigateBody,
   parseWorkspaceNavigateBody,
@@ -279,6 +286,7 @@ interface WorkspaceRouteOpts extends WorkspaceNavigationEmitter {
   callbackRegistry?: CallbackAuthRegistry;
   agentKeyRegistry?: AgentKeyAuthRegistry;
   threadStore?: Pick<IThreadStore, 'get' | 'list'>;
+  skillConsumptionReceipts?: SkillConsumptionReceiptService;
 }
 
 function resolveWorkspaceInteractiveUserId(request: FastifyRequest): string | null {
@@ -291,6 +299,99 @@ function resolveWorkspaceNavigatePrincipal(request: FastifyRequest): WorkspaceNa
   if (request.callbackPrincipal) return request.callbackPrincipal;
   const userId = resolveWorkspaceInteractiveUserId(request);
   return userId ? { kind: 'interactive', userId } : null;
+}
+
+function skillConsumptionScope(principal: Extract<CallbackPrincipal, { kind: 'invocation' }>): SkillConsumptionScope {
+  return {
+    userId: principal.userId,
+    threadId: principal.threadId,
+    invocationId: principal.invocationId,
+    catId: principal.catId,
+  };
+}
+
+function skillConsumptionFailureStatus(reason: SkillConsumptionVerificationFailure): number {
+  if (reason === 'expired') return 410;
+  if (reason === 'source_revision_changed' || reason === 'already_consumed') return 409;
+  return 404;
+}
+
+function workspaceDeliveryStatus(value: unknown): 'applied' | 'queued' | 'blocked' | 'unconfirmed' | null {
+  if (!value || typeof value !== 'object') return null;
+  const candidate = (value as { deliveryStatus?: unknown }).deliveryStatus;
+  return candidate === 'applied' || candidate === 'queued' || candidate === 'blocked' || candidate === 'unconfirmed'
+    ? candidate
+    : null;
+}
+
+type SkillConsumptionContext = {
+  handle: string;
+  principal: Extract<CallbackPrincipal, { kind: 'invocation' }>;
+  receipts: SkillConsumptionReceiptService;
+};
+
+type SkillConsumptionPreflight =
+  | { ok: true; context?: SkillConsumptionContext }
+  | { ok: false; statusCode: number; body: Record<string, string> };
+
+async function preflightSkillConsumption(
+  body: WorkspaceNavigateBody,
+  principal: WorkspaceNavigatePrincipal,
+  receipts: SkillConsumptionReceiptService | undefined,
+): Promise<SkillConsumptionPreflight> {
+  const handle = body.skillConsumptionHandle;
+  if (!handle) return { ok: true };
+  if (principal.kind !== 'invocation') {
+    return {
+      ok: false,
+      statusCode: 409,
+      body: { error: 'carrier_unsupported', reason: 'same_invocation_receipt_requires_invocation_auth' },
+    };
+  }
+  if (body.threadId !== undefined && body.threadId !== principal.threadId) {
+    return { ok: false, statusCode: 409, body: { error: 'scope_mismatch' } };
+  }
+  if (!receipts) {
+    return { ok: false, statusCode: 503, body: { error: 'skill_consumption_receipt_unavailable' } };
+  }
+  if (body.action !== 'open') {
+    return { ok: false, statusCode: 409, body: { error: 'consumer_mismatch' } };
+  }
+  const verified = await receipts.verifyPrepared(
+    handle,
+    skillConsumptionScope(principal),
+    WORKSPACE_NAVIGATOR_CONSUMER_ID,
+  );
+  if (!verified.ok) {
+    return { ok: false, statusCode: skillConsumptionFailureStatus(verified.reason), body: { error: verified.reason } };
+  }
+  return { ok: true, context: { handle, principal, receipts } };
+}
+
+async function attachSkillConsumptionReceipt(
+  result: { statusCode: number; body: unknown },
+  context: SkillConsumptionContext | undefined,
+): Promise<{ statusCode: number; body: unknown }> {
+  if (!context || result.statusCode !== 200) return result;
+  const deliveryStatus = workspaceDeliveryStatus(result.body);
+  if (!deliveryStatus) {
+    return { statusCode: 500, body: { error: 'skill_consumption_outcome_unavailable' } };
+  }
+  const recorded = await context.receipts.recordApplied({
+    handle: context.handle,
+    scope: skillConsumptionScope(context.principal),
+    outcome: { kind: 'workspace_navigation_delivery.v1', deliveryStatus },
+  });
+  if (!recorded.ok) {
+    return {
+      statusCode: skillConsumptionFailureStatus(recorded.reason),
+      body: { error: recorded.reason },
+    };
+  }
+  return {
+    statusCode: result.statusCode,
+    body: { ...(result.body as Record<string, unknown>), skillConsumptionReceipt: recorded.receipt },
+  };
 }
 
 export const workspaceRoutes: FastifyPluginAsync<WorkspaceRouteOpts> = async (app, opts) => {
@@ -548,22 +649,7 @@ export const workspaceRoutes: FastifyPluginAsync<WorkspaceRouteOpts> = async (ap
         timeout: 5000,
       });
 
-      const changedFiles = statusOut
-        .trim()
-        .split('\n')
-        .filter(Boolean)
-        .map((line) => {
-          const status = line.slice(0, 2).trim();
-          let path = line.slice(3);
-          // Normalize rename paths: "old.ts -> new.ts" → "new.ts"
-          // Only apply for rename (R) or copy (C) statuses to avoid
-          // misparsing filenames that literally contain " -> "
-          if ((status.startsWith('R') || status.startsWith('C')) && path.includes(' -> ')) {
-            path = path.slice(path.indexOf(' -> ') + 4);
-          }
-          return { status, path };
-        })
-        .filter((f) => !isDenylisted(f.path));
+      const changedFiles = parseWorkspaceChangedFiles(statusOut).filter((file) => !isDenylisted(file.path));
 
       // Build pathspec: only diff allowed (non-denylisted) files
       // P0 security: git diff without pathspec would leak .env/.pem/.key content
@@ -782,6 +868,11 @@ export const workspaceRoutes: FastifyPluginAsync<WorkspaceRouteOpts> = async (ap
       reply.status(400);
       return { error: parsedBody.error };
     }
+    const skillPreflight = await preflightSkillConsumption(parsedBody.body, principal, opts.skillConsumptionReceipts);
+    if (!skillPreflight.ok) {
+      reply.status(skillPreflight.statusCode);
+      return skillPreflight.body;
+    }
     let threadId = parsedBody.body.threadId;
     if (principal.kind !== 'interactive') {
       const threadResolution = await resolvePrincipalThread(principal, threadId, {
@@ -795,7 +886,7 @@ export const workspaceRoutes: FastifyPluginAsync<WorkspaceRouteOpts> = async (ap
       }
       threadId = threadResolution.threadId;
     }
-    const result = await handleWorkspaceNavigateBody(
+    const consumerResult = await handleWorkspaceNavigateBody(
       {
         ...parsedBody.body,
         threadId,
@@ -807,6 +898,7 @@ export const workspaceRoutes: FastifyPluginAsync<WorkspaceRouteOpts> = async (ap
         warn: (data, message) => request.log.warn(data, message),
       },
     );
+    const result = await attachSkillConsumptionReceipt(consumerResult, skillPreflight.context);
     reply.status(result.statusCode);
     return result.body;
   });

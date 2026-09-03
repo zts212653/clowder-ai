@@ -249,7 +249,7 @@ describe('F260 Phase B — Entity Nudge Integration', () => {
   // ─── AC-B8: Route-hook integration (EntityNudgeService → formatForPrompt → prompt injection) ───
 
   describe('AC-B8 route-hook pattern', () => {
-    it('processInput + formatForPrompt produces injectable prompt context', () => {
+    it('detectCandidates + formatForPrompt produces a route-owned candidate fragment', () => {
       seedEntities(db, [
         {
           entityId: 'concept:未婚喵',
@@ -262,9 +262,9 @@ describe('F260 Phase B — Entity Nudge Integration', () => {
         },
       ]);
 
-      // Simulate the exact route-serial.ts hook: construct service → processInput → formatForPrompt
+      // Route discovery is side-effect free; invocation owns later presentation.
       const service = new EntityNudgeService(db);
-      const result = service.processInput({
+      const result = service.detectCandidates({
         text: '今天聊到了未婚喵',
         threadId: 'thread-route-test',
         ownerUserId: 'user-1',
@@ -285,7 +285,7 @@ describe('F260 Phase B — Entity Nudge Integration', () => {
     it('returns empty context when no entities match (zero-cost path)', () => {
       // No entities seeded — empty registry
       const service = new EntityNudgeService(db);
-      const result = service.processInput({
+      const result = service.detectCandidates({
         text: '今天天气真好',
         threadId: 'thread-route-test',
         ownerUserId: 'user-1',
@@ -302,16 +302,15 @@ describe('F260 Phase B — Entity Nudge Integration', () => {
       assert.equal(basePrompt, '今天天气真好');
     });
 
-    it('nudge survives incremental prompt assembly pattern (P1-1 R4 regression)', () => {
-      // Regression test for route-serial.ts incremental branch:
-      // The incremental path builds `prompt = parts.join(...)` which would
-      // overwrite any earlier injection. Nudge must be injected AFTER assembly.
+    it('nudge survives final invocation prompt assembly', () => {
+      // The invocation path builds final prompt bytes before it appends the
+      // consumer-bound fragment, so the fragment must survive assembly.
       //
       // This test reproduces the exact assembly pattern:
-      //   1. Compute nudge context from processInput + formatForPrompt
-      //   2. Simulate incremental assembly: prompt = parts.join('...')
-      //   3. Inject nudge AFTER assembly: prompt = `${prompt}\n${nudgeContext}`
-      //   4. Verify nudge block survives in final prompt
+      //   1. Discover candidates and format the fragment
+      //   2. Assemble final prompt bytes
+      //   3. Append the consumer-bound fragment
+      //   4. Verify the fragment survives in the exact body
 
       seedEntities(db, [
         {
@@ -326,7 +325,7 @@ describe('F260 Phase B — Entity Nudge Integration', () => {
       ]);
 
       const service = new EntityNudgeService(db);
-      const result = service.processInput({
+      const result = service.detectCandidates({
         text: '今天聊到了未婚喵',
         threadId: 'thread-incremental',
         ownerUserId: 'user-1',
@@ -334,7 +333,7 @@ describe('F260 Phase B — Entity Nudge Integration', () => {
       const nudgeContext = EntityNudgeService.formatForPrompt(result);
       assert.ok(nudgeContext.length > 0, 'precondition: nudge context must be non-empty');
 
-      // ── Simulate incremental assembly (route-serial.ts L1082 pattern) ──
+      // ── Simulate final invocation assembly ──
       // parts.join overwrites everything set before it
       const systemPart = 'You are a helpful cat assistant.';
       const messagePart = '今天聊到了未婚喵';
@@ -343,8 +342,7 @@ describe('F260 Phase B — Entity Nudge Integration', () => {
       // If nudge were injected BEFORE this line, it would be lost:
       let prompt = parts.join('\n\n---\n\n');
 
-      // ── Post-assembly injection (the fix) ──
-      // This is the pattern route-serial.ts now uses:
+      // ── Consumer-bound post-assembly injection ──
       if (nudgeContext) {
         prompt = `${prompt}\n${nudgeContext}`;
       }
@@ -379,7 +377,7 @@ describe('F260 Phase B — Entity Nudge Integration', () => {
       ]);
 
       const service = new EntityNudgeService(db);
-      const result = service.processInput({
+      const result = service.detectCandidates({
         text: '说到私密梗呢',
         threadId: 'thread-other',
         ownerUserId: 'user-other',

@@ -6,34 +6,32 @@ import { resolve } from 'node:path';
 import { promisify } from 'node:util';
 import { withHiddenGhCliWindow } from '../../github/gh-cli-env.js';
 import { MEASUREMENT_BUNDLE_CENSUS_REF } from '../measurement/measurement-bundle-census-file.js';
+import {
+  type PublishVerdictCommitStatusesInput,
+  publishVerdictCommitStatuses,
+} from './publication/verdict-commit-status-publisher.js';
+import {
+  runVerdictPublishContract,
+  type VerdictPublishContractRunner,
+} from './publication/verdict-publish-contract-runner.js';
+import {
+  acquireLocalBranchForRefresh,
+  deleteOwnedLocalBranch,
+  type OpenVerdictPr,
+  resolveLocalBranchOwnership,
+} from './refresh/verdict-refresh-branch-state.js';
+import { publishRefreshedVerdictCommit } from './refresh/verdict-refresh-publication.js';
 import type { RefreshPublishedVerdictPrOpts, RefreshPublishedVerdictPrResult } from './types.js';
 
 const exec = promisify(execFile);
 const PUBLISH_MARKER = 'Verdict published via cat_cafe_publish_verdict MCP tool.';
-const ZERO_OID = '0'.repeat(40);
-
-interface OpenVerdictPr {
-  url: string;
-  headRefOid: string;
-  headRefName: string;
-  baseRefName: string;
-  body: string;
-}
-
-interface LocalBranchOwnership {
-  existedBefore: boolean;
-  branchHead?: string;
-}
-
-interface LocalBranchAcquisition {
-  localBranch: LocalBranchOwnership;
-  createdByRefresh: boolean;
-}
 
 export interface GitVerdictPrRefresherDeps {
   repoRoot: string;
   expectedRepoFullName: string;
   identityRunner?: (repoRoot: string, expectedRepoFullName: string) => Promise<void>;
+  contractRunner?: VerdictPublishContractRunner;
+  commitStatusPublisher?: (input: PublishVerdictCommitStatusesInput) => Promise<void>;
   resolveOpenPr?: (branchName: string) => Promise<OpenVerdictPr[]>;
   beforeAcquireLocalBranch?: (args: { repoRoot: string; branchName: string; branchHead: string }) => Promise<void>;
   beforeAttachLocalBranch?: (args: { repoRoot: string; branchName: string; branchHead: string }) => Promise<void>;
@@ -115,89 +113,6 @@ async function gitSucceeds(repoRoot: string, args: string[]): Promise<boolean> {
   }
 }
 
-function parseWorktreePathForBranch(porcelain: string, branchName: string): string | null {
-  const branchRef = `refs/heads/${branchName}`;
-  const entries = porcelain
-    .trim()
-    .split('\n\n')
-    .map((entry) => entry.split('\n').filter(Boolean));
-  for (const entry of entries) {
-    let path: string | null = null;
-    let branch: string | null = null;
-    for (const line of entry) {
-      if (line.startsWith('worktree ')) path = line.slice('worktree '.length);
-      if (line.startsWith('branch ')) branch = line.slice('branch '.length);
-    }
-    if (path && branch === branchRef) return path;
-  }
-  return null;
-}
-
-async function resolveLocalBranchOwnership(
-  repoRoot: string,
-  branchName: string,
-  expectedHeadSha: string,
-): Promise<LocalBranchOwnership> {
-  let branchHead: string;
-  try {
-    branchHead = (await git(repoRoot, ['rev-parse', '--verify', `refs/heads/${branchName}`])).stdout.trim();
-  } catch {
-    return { existedBefore: false };
-  }
-
-  if (branchHead !== expectedHeadSha) {
-    throw new Error(
-      `verdict_pr_local_branch_conflict: local branch ${branchName} points to ${branchHead}, expected ${expectedHeadSha}`,
-    );
-  }
-
-  const worktreeList = (await git(repoRoot, ['worktree', 'list', '--porcelain'])).stdout;
-  const checkedOutPath = parseWorktreePathForBranch(worktreeList, branchName);
-  if (checkedOutPath) {
-    throw new Error(
-      `verdict_pr_local_branch_conflict: local branch ${branchName} is already checked out at ${checkedOutPath}`,
-    );
-  }
-
-  return { existedBefore: true, branchHead };
-}
-
-async function acquireLocalBranchForRefresh(
-  repoRoot: string,
-  branchName: string,
-  branchHead: string,
-  existingOwnership: LocalBranchOwnership,
-  beforeAcquireLocalBranch?: GitVerdictPrRefresherDeps['beforeAcquireLocalBranch'],
-): Promise<LocalBranchAcquisition> {
-  if (existingOwnership.existedBefore) {
-    return { localBranch: existingOwnership, createdByRefresh: false };
-  }
-
-  await beforeAcquireLocalBranch?.({ repoRoot, branchName, branchHead });
-  const branchRef = `refs/heads/${branchName}`;
-  try {
-    await git(repoRoot, ['update-ref', branchRef, branchHead, ZERO_OID]);
-    return {
-      localBranch: { existedBefore: false, branchHead },
-      createdByRefresh: true,
-    };
-  } catch (error) {
-    const ownership = await resolveLocalBranchOwnership(repoRoot, branchName, branchHead);
-    if (ownership.existedBefore) {
-      return { localBranch: ownership, createdByRefresh: false };
-    }
-    throw error;
-  }
-}
-
-async function deleteOwnedLocalBranch(repoRoot: string, branchName: string, expectedHeadSha: string): Promise<void> {
-  const worktreeList = (await git(repoRoot, ['worktree', 'list', '--porcelain'])).stdout;
-  if (parseWorktreePathForBranch(worktreeList, branchName)) {
-    return;
-  }
-  await git(repoRoot, ['update-ref', '-d', `refs/heads/${branchName}`, expectedHeadSha], 10_000);
-}
-
 function assertTargetScope(paths: string[], verdictId: string): void {
   const exact = new Set([`docs/harness-feedback/verdicts/${verdictId}.md`, MEASUREMENT_BUNDLE_CENSUS_REF]);
   const prefixes = [
@@ -215,36 +130,6 @@ function assertTargetScope(paths: string[], verdictId: string): void {
 async function assertRefScope(repoRoot: string, diffRange: string, verdictId: string): Promise<void> {
   const changedPaths = (await git(repoRoot, ['diff', '--name-only', diffRange])).stdout.split('\n').filter(Boolean);
   assertTargetScope(changedPaths, verdictId);
-}
-
-async function resolveEffectiveHooksPath(repoRoot: string): Promise<string> {
-  return (await git(repoRoot, ['rev-parse', '--path-format=absolute', '--git-path', 'hooks'])).stdout.trim();
-}
-
-async function pushValidatedCommitFromPinnedBranch(
-  repoRoot: string,
-  sourceRepoRoot: string,
-  pushRepoPath: string,
-  branchName: string,
-  commitSha: string,
-): Promise<void> {
-  const originUrl = (await git(repoRoot, ['remote', 'get-url', 'origin'])).stdout.trim();
-  const hooksPath = await resolveEffectiveHooksPath(sourceRepoRoot);
-  const sourceCheckoutRoot = (await git(sourceRepoRoot, ['rev-parse', '--show-toplevel'])).stdout.trim();
-  await exec('git', ['clone', '--no-checkout', '--shared', sourceRepoRoot, pushRepoPath], { timeout: 60_000 });
-  await git(pushRepoPath, ['remote', 'set-url', 'origin', originUrl]);
-  await git(pushRepoPath, ['config', 'core.hooksPath', hooksPath]);
-  // The pinned clone has no worktree, so the pre-push guard cannot find
-  // scripts/ at its toplevel; hand the source checkout root to the hook
-  // explicitly (effective hooks may point at <root>/.git/hooks, whose
-  // parent is not the checkout root).
-  await git(pushRepoPath, ['config', 'catcafe.verdictSourceRoot', sourceCheckoutRoot]);
-  await git(pushRepoPath, ['update-ref', `refs/heads/${branchName}`, commitSha]);
-  const pinnedHead = (await git(pushRepoPath, ['rev-parse', `refs/heads/${branchName}`])).stdout.trim();
-  if (pinnedHead !== commitSha) {
-    throw new Error(`verdict_pr_head_mismatch: expected ${commitSha}, found ${pinnedHead}`);
-  }
-  await git(pushRepoPath, ['push', '-u', 'origin', `refs/heads/${branchName}:refs/heads/${branchName}`], 120_000);
 }
 
 async function resolveRefreshContext(
@@ -284,8 +169,11 @@ async function updateVerdictBranch(
   pushRepoPath: string,
   opts: RefreshPublishedVerdictPrOpts,
   context: Awaited<ReturnType<typeof resolveRefreshContext>>,
+  expectedRepoFullName: string,
   beforeAttachLocalBranch?: GitVerdictPrRefresherDeps['beforeAttachLocalBranch'],
   beforePreparePinnedPush?: GitVerdictPrRefresherDeps['beforePreparePinnedPush'],
+  contractRunner: VerdictPublishContractRunner = runVerdictPublishContract,
+  commitStatusPublisher: (input: PublishVerdictCommitStatusesInput) => Promise<void> = publishVerdictCommitStatuses,
 ): Promise<RefreshPublishedVerdictPrResult> {
   // Keep the refresh worktree attached to the verdict branch so the subsequent
   // push is a same-branch update rather than a detached HEAD -> named branch
@@ -343,17 +231,18 @@ async function updateVerdictBranch(
   if (currentHeadBeforePush !== commitSha) {
     throw new Error(`verdict_pr_head_mismatch: expected ${commitSha}, found ${currentHeadBeforePush}`);
   }
-  await beforePreparePinnedPush?.({
+  await publishRefreshedVerdictCommit({
     repoRoot,
     worktreePath,
+    pushRepoPath,
+    expectedRepoFullName,
     branchName: opts.branchName,
-    branchHead: context.branchHead,
+    previousHeadSha: context.branchHead,
     commitSha,
+    contractRunner,
+    commitStatusPublisher,
+    beforePreparePinnedPush,
   });
-  // Push through an invocation-private named branch repo so the validated OID is
-  // the exact OID Git resolves at push time; shared-worktree actors cannot race
-  // the private source ref between final validation and transport.
-  await pushValidatedCommitFromPinnedBranch(repoRoot, repoRoot, pushRepoPath, opts.branchName, commitSha);
   return {
     outcome: 'updated',
     previousHeadSha: context.branchHead,
@@ -412,8 +301,11 @@ export function createGitVerdictPrRefresher(deps: GitVerdictPrRefresherDeps) {
         pushRepoPath,
         opts,
         context,
+        deps.expectedRepoFullName,
         deps.beforeAttachLocalBranch,
         deps.beforePreparePinnedPush,
+        deps.contractRunner,
+        deps.commitStatusPublisher,
       );
       if (createdLocalBranch) {
         ownedLocalBranchHead = result.commitSha;

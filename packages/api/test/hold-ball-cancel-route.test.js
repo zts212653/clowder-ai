@@ -6,6 +6,9 @@
  */
 
 import assert from 'node:assert/strict';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { beforeEach, describe, test } from 'node:test';
 import Fastify from 'fastify';
 
@@ -30,6 +33,18 @@ describe('F167 Phase J AC-J1: DELETE /api/callbacks/hold-ball/:taskId', () => {
       },
       remove(id) {
         removed.push(id);
+        return true;
+      },
+      updateParamsIfCurrent(id, expected, next) {
+        const task = tasks.find((candidate) => candidate.id === id && !removed.includes(candidate.id));
+        if (!task || task.params !== expected) return false;
+        task.params = next;
+        return true;
+      },
+      setEnabled(id, enabled) {
+        const task = tasks.find((candidate) => candidate.id === id && !removed.includes(candidate.id));
+        if (!task) return false;
+        task.enabled = enabled;
         return true;
       },
     };
@@ -57,6 +72,19 @@ describe('F167 Phase J AC-J1: DELETE /api/callbacks/hold-ball/:taskId', () => {
       scheduleMutationAuditStore: {
         deleteTaskWithAudit(taskId, audit) {
           if (!dynamicTaskStore.remove(taskId)) return false;
+          audits.push(audit);
+          return true;
+        },
+        setTaskEnabledWithAudit(taskId, enabled, audit) {
+          if (!dynamicTaskStore.setEnabled(taskId, enabled)) return false;
+          audits.push(audit);
+          return true;
+        },
+        updateTaskParamsAndEnabledWithAudit(taskId, currentParams, nextParams, enabled, audit) {
+          const task = tasks.find((candidate) => candidate.id === taskId && !removed.includes(candidate.id));
+          if (!task || task.params !== currentParams) return false;
+          task.params = nextParams;
+          task.enabled = enabled;
           audits.push(audit);
           return true;
         },
@@ -247,6 +275,276 @@ describe('F167 Phase J AC-J1: DELETE /api/callbacks/hold-ball/:taskId', () => {
       },
     ]);
     assert.deepEqual(deps._removed, ['hold-ball-retired-wake-running-command']);
+  });
+
+  test('durable gate cancel stays pending when a live worker birth fence belongs to another supervisor', async () => {
+    const task = makeHoldTask('hold-ball-durable-cancel', 'thread-durable-cancel', 'codex');
+    const dataRoot = mkdtempSync(join(tmpdir(), 'cat-cafe-hold-cancel-route-'));
+    const managedRoot = join(dataRoot, 'managed-gate-jobs');
+    const routeJob = {
+      kind: 'full_gate',
+      jobId: 'managed-gate-route-test',
+      originTaskId: task.id,
+      supervisorEpoch: 'route-requester-epoch',
+      recordPath: join(managedRoot, 'managed-gate-route-test.json'),
+      gateReceiptPath: join(managedRoot, 'managed-gate-route-test.gate.json'),
+      logPath: join(managedRoot, 'managed-gate-route-test.log'),
+      executionSlaMs: 3_600_000,
+      wallSlaMs: 10_800_000,
+      wakeTarget: { threadId: 'thread-durable-cancel', catId: 'codex', userId: 'user1' },
+    };
+    task.params = {
+      ...task.params,
+      holdLifecycle: {
+        mode: 'wake_when',
+        status: 'active',
+        wakeAt: task.trigger.fireAt,
+        createdBy: 'hold-ball:codex',
+        managedCommand: {
+          state: 'command_running',
+          command: 'pnpm gate',
+          startedAt: Date.now() - 1_000,
+          durableJob: routeJob,
+        },
+      },
+    };
+    const previousDataDir = process.env.CAT_CAFE_DATA_DIR;
+    process.env.CAT_CAFE_DATA_DIR = dataRoot;
+    const { initializeDurableManagedGateJob, recordDurableManagedGateProcess } = await import(
+      '../dist/domains/ball-custody/durable-managed-gate-job.js'
+    );
+    const { readUnixProcessSnapshotSync } = await import('../dist/utils/cli-process-ownership.js');
+    const identity = readUnixProcessSnapshotSync({ pids: [process.pid] }).get(process.pid);
+    assert.ok(identity);
+    const ownerJob = { ...routeJob, supervisorEpoch: 'live-worker-owner-epoch' };
+    initializeDurableManagedGateJob(ownerJob);
+    assert.equal(recordDurableManagedGateProcess(ownerJob, identity), true);
+    const deps = makeStubDeps([task], { 'thread-durable-cancel': 'test-user' });
+    const app = await createApp(deps);
+
+    try {
+      const res = await app.inject({
+        method: 'DELETE',
+        url: `/api/callbacks/hold-ball/${task.id}`,
+        headers: { 'x-cat-cafe-user': 'test-user' },
+      });
+
+      assert.equal(res.statusCode, 202);
+      assert.deepEqual(JSON.parse(res.body), {
+        status: 'pending',
+        cancelled: false,
+        cancellationRequested: true,
+        taskId: task.id,
+        owner: { catId: 'codex', userId: 'user1' },
+        actor: { kind: 'operator', id: 'test-user', role: 'operator' },
+      });
+      assert.deepEqual(deps._removed, []);
+      assert.equal(task.enabled, false);
+      assert.equal(task.params.holdLifecycle.status, 'cancel_requested');
+      assert.equal(deps._audits.length, 1);
+      assert.equal(deps._audits[0].action, 'pause');
+      assert.equal(JSON.parse(readFileSync(ownerJob.recordPath, 'utf8')).state, 'running');
+      assert.equal(existsSync(`${ownerJob.recordPath}.terminal`), false);
+      assert.equal(JSON.parse(readFileSync(`${ownerJob.recordPath}.cancel-request`, 'utf8')).jobId, ownerJob.jobId);
+    } finally {
+      if (previousDataDir === undefined) delete process.env.CAT_CAFE_DATA_DIR;
+      else process.env.CAT_CAFE_DATA_DIR = previousDataDir;
+      rmSync(dataRoot, { recursive: true, force: true });
+    }
+  });
+
+  test('corrupt durable cancel artifact remains retryable while a live worker is fenced by another supervisor', async () => {
+    const task = makeHoldTask('hold-ball-durable-corrupt-intent', 'thread-durable-corrupt-intent', 'codex');
+    const dataRoot = mkdtempSync(join(tmpdir(), 'cat-cafe-hold-cancel-corrupt-'));
+    const managedRoot = join(dataRoot, 'managed-gate-jobs');
+    const durableJob = {
+      kind: 'full_gate',
+      jobId: 'managed-gate-corrupt-intent',
+      originTaskId: task.id,
+      supervisorEpoch: 'corrupt-intent-epoch',
+      recordPath: join(managedRoot, 'managed-gate-corrupt-intent.json'),
+      gateReceiptPath: join(managedRoot, 'managed-gate-corrupt-intent.gate.json'),
+      logPath: join(managedRoot, 'managed-gate-corrupt-intent.log'),
+      executionSlaMs: 3_600_000,
+      wallSlaMs: 10_800_000,
+      wakeTarget: { threadId: task.deliveryThreadId, catId: 'codex', userId: 'user1' },
+    };
+    task.params = {
+      ...task.params,
+      holdLifecycle: {
+        mode: 'wake_when',
+        status: 'active',
+        wakeAt: task.trigger.fireAt,
+        createdBy: 'hold-ball:codex',
+        managedCommand: {
+          state: 'command_running',
+          command: 'pnpm gate',
+          startedAt: Date.now() - 1_000,
+          durableJob,
+        },
+      },
+    };
+    mkdirSync(managedRoot, { recursive: true });
+    writeFileSync(`${durableJob.recordPath}.cancel-request`, '{corrupt\n');
+    const previousDataDir = process.env.CAT_CAFE_DATA_DIR;
+    process.env.CAT_CAFE_DATA_DIR = dataRoot;
+    const { initializeDurableManagedGateJob, recordDurableManagedGateProcess } = await import(
+      '../dist/domains/ball-custody/durable-managed-gate-job.js'
+    );
+    const { readUnixProcessSnapshotSync } = await import('../dist/utils/cli-process-ownership.js');
+    const identity = readUnixProcessSnapshotSync({ pids: [process.pid] }).get(process.pid);
+    assert.ok(identity);
+    const ownerJob = { ...durableJob, supervisorEpoch: 'corrupt-intent-owner-epoch' };
+    initializeDurableManagedGateJob(ownerJob);
+    assert.equal(recordDurableManagedGateProcess(ownerJob, identity), true);
+    const deps = makeStubDeps([task], { 'thread-durable-corrupt-intent': 'test-user' });
+    const app = await createApp(deps);
+
+    try {
+      const first = await app.inject({
+        method: 'DELETE',
+        url: `/api/callbacks/hold-ball/${task.id}`,
+        headers: { 'x-cat-cafe-user': 'test-user' },
+      });
+
+      assert.equal(first.statusCode, 202);
+      assert.equal(JSON.parse(first.body).status, 'pending');
+      assert.equal(JSON.parse(first.body).cancelled, false);
+      assert.equal(task.params.holdLifecycle.status, 'cancel_requested');
+      assert.equal(task.enabled, false);
+      assert.match(deps._storedMessages[0].content, /已受理/);
+
+      const status = await app.inject({
+        method: 'GET',
+        url: `/api/callbacks/hold-ball/${task.id}/status`,
+        headers: { 'x-cat-cafe-user': 'test-user' },
+      });
+      assert.equal(status.statusCode, 200);
+      assert.equal(JSON.parse(status.body).cancelable, true, 'pending cancellation must remain retryable');
+
+      const second = await app.inject({
+        method: 'DELETE',
+        url: `/api/callbacks/hold-ball/${task.id}`,
+        headers: { 'x-cat-cafe-user': 'test-user' },
+      });
+      assert.equal(second.statusCode, 202);
+      assert.equal(JSON.parse(second.body).status, 'pending');
+      assert.equal(JSON.parse(second.body).cancelled, false);
+      assert.equal(JSON.parse(readFileSync(ownerJob.recordPath, 'utf8')).state, 'running');
+      assert.equal(existsSync(`${ownerJob.recordPath}.terminal`), false);
+    } finally {
+      if (previousDataDir === undefined) delete process.env.CAT_CAFE_DATA_DIR;
+      else process.env.CAT_CAFE_DATA_DIR = previousDataDir;
+      rmSync(dataRoot, { recursive: true, force: true });
+    }
+  });
+
+  test('durable gate cancel reports conflict instead of success when the persisted descriptor is invalid', async () => {
+    const task = makeHoldTask('hold-ball-durable-invalid', 'thread-durable-invalid', 'codex');
+    const dataRoot = mkdtempSync(join(tmpdir(), 'cat-cafe-hold-cancel-invalid-'));
+    const managedRoot = join(dataRoot, 'managed-gate-jobs');
+    task.params = {
+      ...task.params,
+      holdLifecycle: {
+        mode: 'wake_when',
+        status: 'active',
+        wakeAt: task.trigger.fireAt,
+        createdBy: 'hold-ball:codex',
+        managedCommand: {
+          state: 'command_running',
+          command: 'pnpm gate',
+          startedAt: Date.now() - 1_000,
+          durableJob: {
+            kind: 'full_gate',
+            jobId: 'managed-gate-invalid',
+            originTaskId: task.id,
+            supervisorEpoch: 'invalid-epoch',
+            recordPath: join(managedRoot, 'managed-gate-invalid.json'),
+            gateReceiptPath: join(managedRoot, 'managed-gate-invalid.gate.json'),
+            logPath: join(dataRoot, 'outside-managed-root.log'),
+            executionSlaMs: 3_600_000,
+            wallSlaMs: 10_800_000,
+            wakeTarget: { threadId: task.deliveryThreadId, catId: 'codex', userId: 'user1' },
+          },
+        },
+      },
+    };
+    const previousDataDir = process.env.CAT_CAFE_DATA_DIR;
+    process.env.CAT_CAFE_DATA_DIR = dataRoot;
+    const deps = makeStubDeps([task], { 'thread-durable-invalid': 'test-user' });
+    const app = await createApp(deps);
+
+    try {
+      const res = await app.inject({
+        method: 'DELETE',
+        url: `/api/callbacks/hold-ball/${task.id}`,
+        headers: { 'x-cat-cafe-user': 'test-user' },
+      });
+
+      assert.equal(res.statusCode, 409);
+      assert.equal(JSON.parse(res.body).cancelled, false);
+      assert.equal(JSON.parse(res.body).status, 'conflict');
+      assert.equal(task.params.holdLifecycle.status, 'cancel_requested');
+      assert.equal(task.enabled, false);
+    } finally {
+      if (previousDataDir === undefined) delete process.env.CAT_CAFE_DATA_DIR;
+      else process.env.CAT_CAFE_DATA_DIR = previousDataDir;
+      rmSync(dataRoot, { recursive: true, force: true });
+    }
+  });
+
+  test('durable gate cancel leaves lifecycle and enabled state unchanged when the audited mutation loses CAS', async () => {
+    const task = makeHoldTask('hold-ball-durable-cancel-cas', 'thread-durable-cancel-cas', 'codex');
+    const dataRoot = '/tmp/cat-cafe-hold-cancel-route-cas-test';
+    task.params = {
+      ...task.params,
+      holdLifecycle: {
+        mode: 'wake_when',
+        status: 'active',
+        wakeAt: task.trigger.fireAt,
+        createdBy: 'hold-ball:codex',
+        managedCommand: {
+          state: 'command_running',
+          command: 'pnpm gate',
+          startedAt: Date.now() - 1_000,
+          durableJob: {
+            kind: 'full_gate',
+            jobId: 'managed-gate-route-cas-test',
+            originTaskId: task.id,
+            supervisorEpoch: 'epoch-route-cas-test',
+            recordPath: `${dataRoot}/managed-gate-jobs/managed-gate-route-cas-test.json`,
+            gateReceiptPath: `${dataRoot}/managed-gate-jobs/managed-gate-route-cas-test.gate.json`,
+            logPath: `${dataRoot}/managed-gate-jobs/managed-gate-route-cas-test.log`,
+            executionSlaMs: 3_600_000,
+            wallSlaMs: 10_800_000,
+            wakeTarget: { threadId: 'thread-durable-cancel-cas', catId: 'codex', userId: 'user1' },
+          },
+        },
+      },
+    };
+    const originalParams = task.params;
+    const previousDataDir = process.env.CAT_CAFE_DATA_DIR;
+    process.env.CAT_CAFE_DATA_DIR = dataRoot;
+    const deps = makeStubDeps([task], { 'thread-durable-cancel-cas': 'test-user' });
+    deps.scheduleMutationAuditStore.updateTaskParamsAndEnabledWithAudit = () => false;
+    const app = await createApp(deps);
+
+    try {
+      const res = await app.inject({
+        method: 'DELETE',
+        url: `/api/callbacks/hold-ball/${task.id}`,
+        headers: { 'x-cat-cafe-user': 'test-user' },
+      });
+
+      assert.equal(res.statusCode, 409);
+      assert.equal(task.enabled, true);
+      assert.equal(task.params, originalParams);
+      assert.equal(task.params.holdLifecycle.status, 'active');
+      assert.equal(deps._audits.length, 0);
+    } finally {
+      if (previousDataDir === undefined) delete process.env.CAT_CAFE_DATA_DIR;
+      else process.env.CAT_CAFE_DATA_DIR = previousDataDir;
+    }
   });
 
   test('GET status returns retired-by-event tombstone as non-cancelable', async () => {

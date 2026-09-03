@@ -210,6 +210,8 @@ export const AuditEventTypes = {
   CAT_RESPONDED: 'cat_responded',
   /** 调用发生错误 */
   CAT_ERROR: 'cat_error',
+  /** F293: dynamic routing cognition could not be projected; invocation continued without it. */
+  ROUTING_CONTEXT_PROJECTION_FAILED: 'routing_context_projection_failed',
   /** 猫猫互调 handoff */
   A2A_HANDOFF: 'a2a_handoff',
   /** CLI 工具执行开始（command_execution started） */
@@ -256,6 +258,8 @@ export const AuditEventTypes = {
   BROWSER_PREVIEW_NAVIGATE: 'browser_preview_navigate',
   /** Workspace 面板导航 */
   WORKSPACE_NAVIGATE: 'workspace_navigate',
+  /** Revision-bound applied/dismissed skill receipt from a declared consumer */
+  SKILL_CONSUMPTION_RECEIPT: 'skill_consumption_receipt',
 
   // === Session Sealing (F118) ===
 

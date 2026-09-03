@@ -111,6 +111,11 @@ describe('F167 hold-ball rescue authorization', () => {
             if (removed) audits.push(audit);
             return removed;
           },
+          setTaskEnabledWithAudit(taskId, enabled, audit) {
+            const updated = dynamicTaskStore.setEnabled(taskId, enabled);
+            if (updated) audits.push(audit);
+            return updated;
+          },
         },
         messageStore: {
           async append(message) {

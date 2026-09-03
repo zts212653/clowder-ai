@@ -8,6 +8,7 @@ interface ContextualWorkspaceChromeProps {
   mode: WorkspaceHostMode;
   onFold: () => void;
   onNavigateHome?: () => void;
+  actions?: ReactNode;
   children: ReactNode;
 }
 
@@ -17,7 +18,13 @@ const HOST_LABELS: Record<WorkspaceHostMode, { label: string; dot: string }> = {
   transcript: { label: '会议伴随', dot: 'bg-[var(--semantic-success)]' },
 };
 
-export function ContextualWorkspaceChrome({ mode, onFold, onNavigateHome, children }: ContextualWorkspaceChromeProps) {
+export function ContextualWorkspaceChrome({
+  mode,
+  onFold,
+  onNavigateHome,
+  actions,
+  children,
+}: ContextualWorkspaceChromeProps) {
   const host = HOST_LABELS[mode];
 
   return (
@@ -56,6 +63,12 @@ export function ContextualWorkspaceChrome({ mode, onFold, onNavigateHome, childr
           <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${host.dot}`} aria-hidden="true" />
           <span className="truncate text-xs font-semibold text-cafe-black">{host.label}</span>
         </div>
+
+        {actions && (
+          <div className="flex shrink-0 items-center gap-1" data-testid="workspace-shell-actions">
+            {actions}
+          </div>
+        )}
 
         {mode !== 'workspace' && (
           <button

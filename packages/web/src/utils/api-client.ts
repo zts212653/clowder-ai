@@ -64,6 +64,11 @@ export interface ApiFetchOptions {
    * caller to one bounded trailing generation instead of the possibly stale one.
    */
   afterCurrentGet?: boolean;
+  /**
+   * Carry a representation validator on this physical GET generation without
+   * partitioning the exact-resource coordination key.
+   */
+  ifNoneMatch?: string | null;
 }
 
 interface GetGeneration {
@@ -73,6 +78,7 @@ interface GetGeneration {
   reject(error: unknown): void;
   path: string;
   init: RequestInit | undefined;
+  ifNoneMatch: string | null | undefined;
 }
 
 interface GetCoordinationState {
@@ -196,18 +202,38 @@ async function performApiFetch(path: string, init?: RequestInit): Promise<Respon
   return retryRes;
 }
 
-function createGetGeneration(path: string, init?: RequestInit): GetGeneration {
+function createGetGeneration(
+  path: string,
+  init: RequestInit | undefined,
+  ifNoneMatch: string | null | undefined,
+): GetGeneration {
   let resolve!: (response: Response) => void;
   let reject!: (error: unknown) => void;
   const promise = new Promise<Response>((resolvePromise, rejectPromise) => {
     resolve = resolvePromise;
     reject = rejectPromise;
   });
-  return { id: ++nextGetGeneration, promise, resolve, reject, path, init: withoutCallerSignal(init) };
+  return {
+    id: ++nextGetGeneration,
+    promise,
+    resolve,
+    reject,
+    path,
+    init: withoutCallerSignal(init),
+    ifNoneMatch,
+  };
+}
+
+function physicalGetInit(generation: GetGeneration): RequestInit | undefined {
+  const validator = generation.ifNoneMatch;
+  if (!validator) return generation.init;
+  const headers = new Headers(generation.init?.headers);
+  headers.set('if-none-match', validator);
+  return { ...generation.init, headers };
 }
 
 function startGetGeneration(key: string, state: GetCoordinationState, generation: GetGeneration): void {
-  void performApiFetch(generation.path, generation.init)
+  void performApiFetch(generation.path, physicalGetInit(generation))
     .then(generation.resolve, generation.reject)
     .finally(() => {
       if (state.active !== generation) return;
@@ -226,18 +252,19 @@ async function coordinatedGet(
   path: string,
   init: RequestInit | undefined,
   afterCurrentGet: boolean,
+  ifNoneMatch: string | null | undefined,
 ): Promise<Response> {
   const key = exactGetKey(path, init);
   let state = coordinatedGets.get(key);
   let generation: GetGeneration;
 
   if (!state) {
-    generation = createGetGeneration(path, init);
+    generation = createGetGeneration(path, init, ifNoneMatch);
     state = { active: generation, trailing: null };
     coordinatedGets.set(key, state);
     startGetGeneration(key, state, generation);
   } else if (afterCurrentGet) {
-    state.trailing ??= createGetGeneration(path, init);
+    state.trailing ??= createGetGeneration(path, init, ifNoneMatch);
     generation = state.trailing;
   } else {
     generation = state.active;
@@ -265,7 +292,7 @@ export async function apiFetch(path: string, init?: RequestInit, options?: ApiFe
     throw init.signal.reason ?? new DOMException('The operation was aborted.', 'AbortError');
   }
   if (requestMethod(init) === 'GET') {
-    return coordinatedGet(path, init, options?.afterCurrentGet === true);
+    return coordinatedGet(path, init, options?.afterCurrentGet === true, options?.ifNoneMatch);
   }
   return performApiFetch(path, init);
 }

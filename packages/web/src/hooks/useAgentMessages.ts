@@ -4,6 +4,7 @@ import type {
   A2ARoutingProjection,
   CliDiagnostics,
   FreshnessSupplementProjection,
+  ProviderSemanticEvent,
   ReplyPreview,
 } from '@cat-cafe/shared';
 import { useCallback, useEffect, useRef } from 'react';
@@ -14,6 +15,7 @@ import { recordBubbleInvariantViolation } from '@/debug/bubbleInvariantDiagnosti
 import { recordDebugEvent } from '@/debug/invocationEventDebug';
 import { adaptIncomingToBubbleEvent } from '@/hooks/bubble-event-adapter';
 import { useCatNameResolver } from '@/hooks/useCatNameResolver';
+import { resolveProviderSemanticMessage } from '@/lib/provider-semantic-registry';
 import { deriveBubbleKindFromMessage } from '@/stores/bubble-invariants';
 import { projectCanonicalBubbles } from '@/stores/bubble-projection';
 import { applyBubbleEvent, type BubbleReducerInput, type BubbleReducerOutput } from '@/stores/bubble-reducer';
@@ -275,6 +277,7 @@ function terminalizeSameParentLocalToolOnlyResidues(
 
 interface AgentMsg {
   type: string;
+  semanticEvent?: ProviderSemanticEvent;
   catId: string;
   content?: string;
   textMode?: 'append' | 'replace';
@@ -506,6 +509,7 @@ function isCurrentFreshParentSeed(
 
 export interface BackgroundAgentMessage {
   type: string;
+  semanticEvent?: ProviderSemanticEvent;
   catId: string;
   threadId: string;
   content?: string;
@@ -2126,11 +2130,13 @@ function addBackgroundSystemMessage(
   content: string,
   variant: 'info' | 'a2a_followup' = 'info',
   extra?: ChatMessage['extra'],
+  explicitId?: string,
 ): void {
   const id =
-    extra?.systemKind === 'a2a_routing' && msg.messageId
+    explicitId ??
+    (extra?.systemKind === 'a2a_routing' && msg.messageId
       ? msg.messageId
-      : `bg-sys-${msg.timestamp}-${msg.catId}-${options.nextBgSeq()}`;
+      : `bg-sys-${msg.timestamp}-${msg.catId}-${options.nextBgSeq()}`);
   options.store.addMessageToThread(msg.threadId, {
     id,
     type: 'system',
@@ -2140,6 +2146,26 @@ function addBackgroundSystemMessage(
     timestamp: msg.timestamp,
     ...(extra ? { extra } : {}),
   });
+}
+
+function resolveSemanticSystemMessage(
+  msg: Pick<BackgroundAgentMessage, 'catId' | 'semanticEvent' | 'timestamp'>,
+): { action: 'replace'; message: ChatMessage } | { action: 'augment' } | { action: 'suppress' } {
+  if (!msg.semanticEvent) return { action: 'augment' };
+  const result = resolveProviderSemanticMessage(msg.semanticEvent);
+  if (result.action !== 'replace') return { action: result.action };
+  return {
+    action: 'replace',
+    message: {
+      id: `semantic:${result.projection.eventId}`,
+      type: 'system',
+      variant: result.projection.severity === 'error' ? 'error' : 'info',
+      catId: msg.catId,
+      content: result.projection.content,
+      timestamp: msg.semanticEvent.occurredAt ?? msg.timestamp,
+      extra: { semanticEvent: msg.semanticEvent },
+    },
+  };
 }
 
 /**
@@ -2523,6 +2549,18 @@ export function handleBackgroundAgentMessage(
 ): void {
   const streamKey = getStreamKey(msg);
   const existing = options.bgStreamRefs.get(streamKey);
+
+  if (msg.semanticEvent) {
+    const semantic = resolveSemanticSystemMessage(msg);
+    if (semantic.action === 'replace') {
+      const exists = options.store
+        .getThreadState(msg.threadId)
+        .messages.some((message) => message.id === semantic.message.id);
+      if (exists) options.store.patchThreadMessage(msg.threadId, semantic.message.id, semantic.message);
+      else options.store.addMessageToThread(msg.threadId, semantic.message);
+    }
+    if (semantic.action !== 'augment') return;
+  }
 
   if (msg.type === 'text' && msg.content) {
     const isCallbackText = msg.origin === 'callback';
@@ -3026,9 +3064,14 @@ export function handleBackgroundAgentMessage(
 
   if (msg.type === 'done') {
     const finalizedStream = stopTrackedStream(streamKey, msg, options);
+    let finalizedMessageId = finalizedStream?.id;
     if (finalizedStream && msg.messageId && finalizedStream.id !== msg.messageId) {
       options.store.replaceThreadMessageId(msg.threadId, finalizedStream.id, msg.messageId);
       options.finalizedBgRefs.set(streamKey, msg.messageId);
+      finalizedMessageId = msg.messageId;
+    }
+    if (finalizedMessageId && msg.content !== undefined) {
+      options.store.patchThreadMessage(msg.threadId, finalizedMessageId, { content: msg.content });
     }
     const currentStatus = options.store.getThreadState(msg.threadId).catStatuses[msg.catId];
     if (currentStatus !== 'error') {
@@ -4659,6 +4702,16 @@ export function useAgentMessages() {
       // Reset timeout on any message (keeps timer alive during streaming)
       resetTimeout();
 
+      if (msg.semanticEvent) {
+        const semantic = resolveSemanticSystemMessage(msg as BackgroundAgentMessage);
+        if (semantic.action === 'replace') {
+          const exists = useChatStore.getState().messages.some((message) => message.id === semantic.message.id);
+          if (exists) patchMessage(semantic.message.id, semantic.message);
+          else addMessage(semantic.message);
+        }
+        if (semantic.action !== 'augment') return;
+      }
+
       if (msg.type === 'status') {
         const lifecycle = appServerLifecycleFromStatus(msg.metadata);
         if (lifecycle) {
@@ -5290,6 +5343,9 @@ export function useAgentMessages() {
             if (msg.messageId && msg.messageId !== messageId) {
               replaceMessageId(messageId, msg.messageId);
               messageId = msg.messageId;
+            }
+            if (msg.content !== undefined) {
+              patchMessage(messageId, { content: msg.content });
             }
             setStreaming(messageId, false);
             // Bug-G: back-fill invocationId on bubbles that somehow missed the

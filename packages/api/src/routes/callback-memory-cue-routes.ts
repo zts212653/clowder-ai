@@ -2,6 +2,10 @@ import { createHash } from 'node:crypto';
 import type { RecallScopeV1 } from '@cat-cafe/shared';
 import type { FastifyInstance, FastifyReply } from 'fastify';
 import { z } from 'zod';
+import {
+  EXPLICIT_APPROVED_TASTE_SOURCE_ANCHOR_PREFIX,
+  explicitApprovedTasteDrillPayloadSchema,
+} from '../domains/memory/cue/ExplicitApprovedTasteTriggerCatalog.js';
 import type {
   MemoryCueDrillCoordinate,
   MemoryCueDrillHandleService,
@@ -35,6 +39,9 @@ export interface CallbackMemoryCueDeps {
   handles: MemoryCueDrillHandleService;
   sourceReader: MemoryCueSourceReader;
   now: () => number;
+  applicationEvidence?: {
+    hasRichBlock(input: { threadId: string; catId: string; invocationId: string; kind: 'html_widget' }): boolean;
+  };
 }
 
 function invalid(reply: FastifyReply, error: z.ZodError): void {
@@ -82,14 +89,18 @@ function appendConsumption(
   requestId: string,
   occurredAt: number,
 ): void {
-  const digest = eventHash('consumption', coordinate.cueId, outcome, requestId);
+  const idempotencyKey = consumptionIdempotencyKey(coordinate.cueId, outcome, requestId);
   store.append({
     ...eventBase(coordinate, occurredAt),
-    eventId: `memory-cue-consumption-${digest}`,
-    idempotencyKey: `memory-cue-consumption-${digest}`,
+    eventId: idempotencyKey,
+    idempotencyKey,
     axis: 'consumption',
     consumptionOutcome: outcome,
   });
+}
+
+function consumptionIdempotencyKey(cueId: string, outcome: 'drilled' | 'applied' | 'dismissed', requestId: string) {
+  return `memory-cue-consumption-${eventHash('consumption', cueId, outcome, requestId)}`;
 }
 
 function serverScope(auth: { userId: string; threadId: string; invocationId: string }): RecallScopeV1 {
@@ -177,6 +188,50 @@ async function readCurrentSource(
   return null;
 }
 
+async function verifyApplicationEvidence(input: {
+  deps: CallbackMemoryCueDeps;
+  coordinate: MemoryCueDrillCoordinate;
+  outcome: 'applied' | 'dismissed';
+  requestId: string;
+  auth: { threadId: string; catId: string; invocationId: string };
+  now: number;
+  reply: FastifyReply;
+}): Promise<boolean> {
+  const { coordinate, deps, outcome, requestId, auth, now, reply } = input;
+  if (
+    outcome !== 'applied' ||
+    coordinate.family !== 'taste' ||
+    !coordinate.anchor.startsWith(EXPLICIT_APPROVED_TASTE_SOURCE_ANCHOR_PREFIX)
+  ) {
+    return true;
+  }
+  if (
+    deps.episodeStore.hasExactConsumptionRequest({
+      scope: coordinate.scope,
+      cueId: coordinate.cueId,
+      outcome,
+      idempotencyKey: consumptionIdempotencyKey(coordinate.cueId, outcome, requestId),
+    })
+  ) {
+    return true;
+  }
+  const source = await readCurrentSource(deps, coordinate, now, reply);
+  if (!source) return false;
+  const payload = explicitApprovedTasteDrillPayloadSchema.safeParse(source.payload);
+  const hasDrilled = deps.episodeStore.hasConsumptionOutcome(coordinate.scope, coordinate.cueId, 'drilled');
+  const hasRichBlock = payload.success
+    ? (deps.applicationEvidence?.hasRichBlock({
+        threadId: auth.threadId,
+        catId: auth.catId,
+        invocationId: auth.invocationId,
+        kind: payload.data.applicationContract.requiredRichBlockKind,
+      }) ?? false)
+    : false;
+  if (payload.success && hasDrilled && hasRichBlock) return true;
+  reply.status(409).send({ error: 'application_evidence_required' });
+  return false;
+}
+
 export function registerCallbackMemoryCueRoutes(app: FastifyInstance, deps: CallbackMemoryCueDeps): void {
   app.post('/api/callbacks/memory-cues/drill', async (request, reply) => {
     const auth = requireCallbackAuth(request, reply);
@@ -200,6 +255,18 @@ export function registerCallbackMemoryCueRoutes(app: FastifyInstance, deps: Call
     const now = deps.now();
     const coordinate = verifyCoordinate(deps, body.data.handle, serverScope(auth), now, reply);
     if (!coordinate) return;
+    if (
+      !(await verifyApplicationEvidence({
+        deps,
+        coordinate,
+        outcome: body.data.outcome,
+        requestId: body.data.requestId,
+        auth: { threadId: auth.threadId, catId: auth.catId as string, invocationId: auth.invocationId },
+        now,
+        reply,
+      }))
+    )
+      return;
     if (!appendConsumptionOrReply(deps, coordinate, body.data.outcome, body.data.requestId, now, reply)) return;
     return { status: 'recorded', outcome: body.data.outcome };
   });

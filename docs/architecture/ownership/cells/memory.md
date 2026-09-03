@@ -56,6 +56,7 @@ code_anchors:
   - cat-cafe-skills/proactive-memory-judgment/SKILL.md
   - packages/shared/src/types/memory-cue.ts
   - packages/api/src/domains/memory/cue/RecallOpportunityCatalog.ts
+  - packages/api/src/domains/memory/cue/ExplicitApprovedTasteTriggerCatalog.ts
   - packages/api/src/domains/memory/cue/MemoryCuePlaneService.ts
   - packages/api/src/domains/memory/cue/MemoryCueResolverRegistry.ts
   - packages/api/src/domains/memory/cue/MemoryCueInvocationPromptService.ts
@@ -109,6 +110,7 @@ cited_by:
   - {feature: F282, date: 2026-07-30, delta: "versioned cold-start constraint vector, opaque invocation-derived opportunity refs, ToolEventLog proposal/abstention projection, proactive-memory judgment skill, and compact L0 wakeup"}
   - {feature: F287, date: 2026-08-01, delta: "execution-time memory cue ownership: closed typed opportunities, lane-specific resolvers, bounded cue projection, content-free consumption episodes, and canonical-source invalidation without a second MemoryStore"}
   - {feature: F287, date: 2026-08-02, delta: "Phase E closes the v1 catalog with owner-authenticated Person, operational-precedent, and Taste journeys; exact source coordinates, drill revalidation, content-free lifecycle evidence, per-family keep decisions, and explicit main/Alpha/production truth remain separated"}
+  - {feature: F287, date: 2026-08-27, delta: "catalog v2 adds one closed direct-owner ELI5 opportunity bound to the exact approved F221 vignette; applied truth requires current-source drill plus same-invocation html_widget evidence, without adding a search lane or content store"}
 ---
 
 # Memory / Evidence

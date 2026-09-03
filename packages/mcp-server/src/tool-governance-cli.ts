@@ -8,6 +8,7 @@ import {
   createBootstrapAttestation,
   MCP_SURFACE_ATTESTATION_PATH,
   MCP_SURFACE_BASELINE_PATH,
+  resolveGovernanceTarget,
   validateBootstrapAttestation,
 } from './tool-governance-bootstrap.js';
 import { resolveToolGovernanceEvidence } from './tool-governance-evidence.js';
@@ -70,7 +71,7 @@ function evidenceRefs(definitions: readonly McpToolDefinition[]): readonly Evide
       .forEach((path) => {
         refs.add(path.enforcementRef);
       });
-    refs.add(definition.policy.exposureTier.evidenceRef);
+    refs.add(definition.policy.schemaDelivery.evidenceRef);
     refs.add(definition.policy.owner.domainCell);
     const reason = definition.policy.standaloneReason;
     refs.add(reason.disposition === 'accepted-boundary' ? reason.admissionRef : reason.evidenceRef);
@@ -231,8 +232,9 @@ async function writeBootstrapAttestation(input: {
 async function main(): Promise<void> {
   const command = requestedCommand(process.argv.slice(2));
   const repoRoot = (await git(process.cwd(), ['rev-parse', '--show-toplevel'])) as string;
-  await git(repoRoot, ['fetch', 'origin', 'main']);
-  const resolvedTargetSha = (await git(repoRoot, ['rev-parse', 'origin/main'])) as string;
+  const target = resolveGovernanceTarget(process.env.CAT_CAFE_GATE_BASE_SHA);
+  if (target.fetchLatest) await git(repoRoot, ['fetch', 'origin', 'main']);
+  const resolvedTargetSha = (await git(repoRoot, ['rev-parse', target.ref])) as string;
   const baselinePath = resolve(repoRoot, MCP_SURFACE_BASELINE_PATH);
   const attestationPath = resolve(repoRoot, MCP_SURFACE_ATTESTATION_PATH);
   const hasTargetBaseline = await targetHasBaseline(repoRoot, resolvedTargetSha);

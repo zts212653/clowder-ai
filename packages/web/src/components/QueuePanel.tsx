@@ -46,6 +46,24 @@ function reminderResultCopy(state: unknown) {
     : REMINDER_RESULT_COPY.requested;
 }
 
+function recoveryNoStartCopy(refreshed: boolean, error: unknown) {
+  if (typeof error === 'string') {
+    return { type: refreshed ? ('info' as const) : ('error' as const), title: '队列未启动', message: error };
+  }
+  if (refreshed) {
+    return {
+      type: 'info' as const,
+      title: '队列状态已刷新',
+      message: '系统没有启动新的处理；请按当前条目显示的可用操作继续。',
+    };
+  }
+  return {
+    type: 'error' as const,
+    title: '队列未启动',
+    message: '系统没有启动新的处理，刷新也未完成；请稍后重试。',
+  };
+}
+
 export function compareQueueEntries(
   a: { position?: number; priority?: string; createdAt: number },
   b: { position?: number; priority?: string; createdAt: number },
@@ -126,8 +144,15 @@ export function QueuePanel({ threadId }: QueuePanelProps) {
   const setPendingChatInsert = useChatStore((s) => s.setPendingChatInsert);
   const addToast = useToastStore((s) => s.addToast);
 
-  const { steerEntryId, retryingAttemptIds, handleRetry, handleSteerConfirm, handleSteerOpen, handleSteerCancel } =
-    useQueueActionConvergence(threadId);
+  const {
+    steerEntryId,
+    retryingAttemptIds,
+    handleRetry,
+    refreshQueue,
+    handleSteerConfirm,
+    handleSteerOpen,
+    handleSteerCancel,
+  } = useQueueActionConvergence(threadId);
   const [remindingTargetKeys, setRemindingTargetKeys] = useState<Set<string>>(() => new Set());
   const [collapsed, setCollapsed] = useState<boolean | null>(null);
 
@@ -162,7 +187,9 @@ export function QueuePanel({ threadId }: QueuePanelProps) {
     const dispatchTargetCatIds = visibleEntries.flatMap((entry) => {
       const targetStates = queueTargetStateEntries(entry);
       return targetStates.length > 0
-        ? targetStates.filter(([, state]) => state !== 'seen' && state !== 'awakened').map(([catId]) => catId)
+        ? targetStates
+            .filter(([, state]) => state !== 'seen' && state !== 'awakened' && state !== 'failed')
+            .map(([catId]) => catId)
         : entry.targetCats;
     });
     const hasBroadcastEntry = visibleEntries.some(
@@ -287,10 +314,10 @@ export function QueuePanel({ threadId }: QueuePanelProps) {
       const res = await apiFetch(`/api/threads/${threadId}/queue/next`, { method: 'POST' });
       const data = await res.json().catch(() => ({}));
       if (!res.ok || data.started !== true) {
+        const refreshed = await refreshQueue();
+        const feedback = recoveryNoStartCopy(refreshed, data?.error);
         addToast({
-          type: 'error',
-          title: '队列尚未恢复',
-          message: '仍有运行占用，稍后重试或使用 Steer 立即接管这条消息。',
+          ...feedback,
           threadId,
           duration: 5000,
         });
@@ -304,7 +331,7 @@ export function QueuePanel({ threadId }: QueuePanelProps) {
         duration: 5000,
       });
     }
-  }, [addToast, threadId]);
+  }, [addToast, refreshQueue, threadId]);
 
   const handleClear = useCallback(async () => {
     try {

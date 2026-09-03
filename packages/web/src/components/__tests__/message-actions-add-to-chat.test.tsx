@@ -6,17 +6,20 @@ import { syncContextAttachmentDraftToStorage } from '@/components/thread-drafts'
 import { useChatStore } from '@/stores/chatStore';
 
 function mockSelection(node: Node, text: string, rect: () => DOMRect) {
+  const range = document.createRange();
+  range.setStart(node, 0);
+  range.setEnd(node, text.length);
+  Object.defineProperties(range, {
+    getClientRects: { value: () => [rect()] },
+    getBoundingClientRect: { value: rect },
+  });
   const selection = {
     isCollapsed: false,
     anchorNode: node,
     focusNode: node,
-    toString: () => text,
+    toString: () => range.toString(),
     rangeCount: 1,
-    getRangeAt: () => ({
-      getClientRects: () => [rect()],
-      getBoundingClientRect: rect,
-      commonAncestorContainer: node,
-    }),
+    getRangeAt: () => range,
     removeAllRanges: vi.fn(),
   } as unknown as Selection;
   vi.spyOn(window, 'getSelection').mockReturnValue(selection);
@@ -41,43 +44,42 @@ function setTextareaValue(textarea: HTMLTextAreaElement, value: string) {
   textarea.dispatchEvent(new Event('input', { bubbles: true }));
 }
 
-function mockMixedSelection(anchorNode: Node, focusNode: Node, commonAncestorContainer: Node, rect: () => DOMRect) {
+function mockMixedSelection(anchorNode: Node, focusNode: Node, rect: () => DOMRect) {
+  const range = document.createRange();
+  range.setStart(anchorNode, 0);
+  range.setEnd(focusNode, focusNode.textContent?.length ?? 0);
+  Object.defineProperties(range, {
+    getClientRects: { value: () => [rect()] },
+    getBoundingClientRect: { value: rect },
+  });
   const selection = {
     isCollapsed: false,
     anchorNode,
     focusNode,
-    toString: () => 'message text and command output',
+    toString: () => range.toString(),
     rangeCount: 1,
-    getRangeAt: () => ({
-      getClientRects: () => [rect()],
-      getBoundingClientRect: rect,
-      commonAncestorContainer,
-    }),
+    getRangeAt: () => range,
     removeAllRanges: vi.fn(),
   } as unknown as Selection;
   vi.spyOn(window, 'getSelection').mockReturnValue(selection);
   document.dispatchEvent(new Event('selectionchange'));
 }
 
-function mockSelectionAcrossNestedSource(
-  anchorNode: Node,
-  focusNode: Node,
-  commonAncestorContainer: Node,
-  nestedSource: Element,
-  rect: () => DOMRect,
-) {
+function mockSelectionAcrossNestedSource(anchorNode: Node, focusNode: Node, rect: () => DOMRect) {
+  const range = document.createRange();
+  range.setStart(anchorNode, 0);
+  range.setEnd(focusNode, focusNode.textContent?.length ?? 0);
+  Object.defineProperties(range, {
+    getClientRects: { value: () => [rect()] },
+    getBoundingClientRect: { value: rect },
+  });
   const selection = {
     isCollapsed: false,
     anchorNode,
     focusNode,
-    toString: () => 'before command output after',
+    toString: () => range.toString(),
     rangeCount: 1,
-    getRangeAt: () => ({
-      getClientRects: () => [rect()],
-      getBoundingClientRect: rect,
-      commonAncestorContainer,
-      intersectsNode: (node: Node) => node === nestedSource,
-    }),
+    getRangeAt: () => range,
     removeAllRanges: vi.fn(),
   } as unknown as Selection;
   vi.spyOn(window, 'getSelection').mockReturnValue(selection);
@@ -272,6 +274,61 @@ describe('MessageActions Add to chat selection', () => {
       text: 'target',
       selectionStart: 0,
       selectionEnd: 6,
+      source: { kind: 'cli_output', threadId: 'thread-1', messageId: 'msg-1', segmentId: 'stdout' },
+    });
+  });
+
+  it('keeps a final CLI line quotable when the drag endpoint lands in outer message whitespace', () => {
+    const signature = '[小团团·砚砚/gpt-5.6-terra🐾]';
+    renderMessage(
+      <>
+        <div data-context-quote-source="cli_output">
+          <span
+            data-context-quote-segment-id="stdout"
+            data-context-quote-projection-version="2"
+            data-testid="cli-final-line"
+          >
+            {signature}
+          </span>
+        </div>
+        <span data-testid="outer-trailing-whitespace">{'\n\n'}</span>
+      </>,
+    );
+    const signatureNode = container.querySelector('[data-testid="cli-final-line"]')?.firstChild;
+    const trailingWhitespaceNode = container.querySelector('[data-testid="outer-trailing-whitespace"]')?.firstChild;
+    if (!signatureNode || !trailingWhitespaceNode) throw new Error('CLI final-line selection fixtures missing');
+    const range = document.createRange();
+    range.setStart(signatureNode, 0);
+    range.setEnd(trailingWhitespaceNode, trailingWhitespaceNode.textContent?.length ?? 0);
+    Object.defineProperties(range, {
+      getClientRects: { value: () => [rect()] },
+      getBoundingClientRect: { value: rect },
+    });
+    vi.spyOn(window, 'getSelection').mockReturnValue({
+      isCollapsed: false,
+      anchorNode: signatureNode,
+      focusNode: trailingWhitespaceNode,
+      toString: () => range.toString(),
+      rangeCount: 1,
+      getRangeAt: () => range,
+      removeAllRanges: vi.fn(),
+    } as unknown as Selection);
+
+    act(() => document.dispatchEvent(new Event('selectionchange')));
+    const action = document.body.querySelector<HTMLButtonElement>('[data-testid="message-selection-add-to-chat"]');
+    expect(action).not.toBeNull();
+    act(() => action?.click());
+    const comment = document.body.querySelector<HTMLTextAreaElement>('[data-testid="context-annotation-comment"]');
+    act(() => {
+      if (!comment) throw new Error('annotation comment editor missing');
+      setTextareaValue(comment, 'final CLI line');
+    });
+    act(() => document.body.querySelector<HTMLButtonElement>('[data-testid="context-annotation-save"]')?.click());
+
+    expect(useChatStore.getState().pendingChatInsert?.contextAttachments?.[0]).toMatchObject({
+      text: signature,
+      selectionStart: 0,
+      selectionEnd: signature.length,
       source: { kind: 'cli_output', threadId: 'thread-1', messageId: 'msg-1', segmentId: 'stdout' },
     });
   });
@@ -563,10 +620,30 @@ describe('MessageActions Add to chat selection', () => {
     );
     const anchorNode = container.querySelector('[data-testid="message-text"]')?.firstChild;
     const focusNode = container.querySelector('[data-testid="cli-text"]')?.firstChild;
-    const commonAncestor = container.querySelector('[data-testid="mixed-message"]');
-    if (!anchorNode || !focusNode || !commonAncestor) throw new Error('mixed selection fixtures missing');
+    if (!anchorNode || !focusNode) throw new Error('mixed selection fixtures missing');
 
-    act(() => mockMixedSelection(anchorNode, focusNode, commonAncestor, rect));
+    act(() => mockMixedSelection(anchorNode, focusNode, rect));
+
+    expect(document.body.querySelector('[data-testid="message-selection-add-to-chat"]')).toBeNull();
+    expect(useChatStore.getState().pendingChatInsert).toBeNull();
+  });
+
+  it('rejects a selection whose rendered text crosses two CLI projection segments', () => {
+    renderMessage(
+      <div data-context-quote-source="cli_output">
+        <span data-context-quote-segment-id="tool-detail:tool-1" data-testid="tool-detail-text">
+          tool detail
+        </span>
+        <span data-context-quote-segment-id="stdout" data-testid="stdout-text">
+          stdout text
+        </span>
+      </div>,
+    );
+    const anchorNode = container.querySelector('[data-testid="tool-detail-text"]')?.firstChild;
+    const focusNode = container.querySelector('[data-testid="stdout-text"]')?.firstChild;
+    if (!anchorNode || !focusNode) throw new Error('cross-segment selection fixtures missing');
+
+    act(() => mockMixedSelection(anchorNode, focusNode, rect));
 
     expect(document.body.querySelector('[data-testid="message-selection-add-to-chat"]')).toBeNull();
     expect(useChatStore.getState().pendingChatInsert).toBeNull();
@@ -584,13 +661,11 @@ describe('MessageActions Add to chat selection', () => {
     );
     const anchorNode = container.querySelector('[data-testid="before-text"]')?.firstChild;
     const focusNode = container.querySelector('[data-testid="after-text"]')?.firstChild;
-    const commonAncestor = container.querySelector('[data-testid="spanning-message"]');
-    const nestedSource = container.querySelector('[data-testid="nested-cli"]');
-    if (!anchorNode || !focusNode || !commonAncestor || !nestedSource) {
+    if (!anchorNode || !focusNode) {
       throw new Error('spanning selection fixtures missing');
     }
 
-    act(() => mockSelectionAcrossNestedSource(anchorNode, focusNode, commonAncestor, nestedSource, rect));
+    act(() => mockSelectionAcrossNestedSource(anchorNode, focusNode, rect));
 
     expect(document.body.querySelector('[data-testid="message-selection-add-to-chat"]')).toBeNull();
     expect(useChatStore.getState().pendingChatInsert).toBeNull();

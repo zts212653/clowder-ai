@@ -1,3 +1,9 @@
+import {
+  type PreviewVisiblePageAdmission,
+  type PreviewVisiblePageAttestation,
+  verifyPreviewVisiblePageAttestation,
+} from '@cat-cafe/shared';
+
 /**
  * F120 × F284: Preview auto-open delivery contract.
  *
@@ -29,22 +35,44 @@ export type PreviewAutoOpenReceiptReason =
   | 'thread_inactive'
   | 'presentation_lock'
   | 'worktree_mismatch'
-  | 'client_inactive';
+  | 'client_inactive'
+  | 'visible_page_timeout'
+  | 'visible_page_superseded'
+  | 'visible_page_unavailable'
+  | 'visible_page_load_error';
 
-export type PreviewAutoOpenDeliveryReason = PreviewAutoOpenReceiptReason | 'no_client_ack' | 'no_matching_client';
+export type PreviewAutoOpenDeliveryReason =
+  | PreviewAutoOpenReceiptReason
+  | 'no_client_ack'
+  | 'no_matching_client'
+  | 'visible_page_not_attested'
+  | 'visible_page_mismatch'
+  | 'visible_page_ambiguous_clients'
+  | 'visible_page_contract_invalid';
 
 interface PreviewAutoOpenReceipt {
-  status: Exclude<PreviewAutoOpenDeliveryStatus, 'unconfirmed'> | 'skipped';
+  status: Exclude<PreviewAutoOpenDeliveryStatus, 'unconfirmed'> | 'skipped' | 'rejected';
   eventId: string;
   reason?: PreviewAutoOpenReceiptReason;
+  attestation?: PreviewVisiblePageAttestation;
+}
+
+export interface PreviewAutoOpenEventData {
+  eventId: string;
+  port: number;
+  path?: string;
+  threadId?: string;
+  worktreeId?: string;
+  targetOrigin?: string;
+  visiblePageAdmission?: PreviewVisiblePageAdmission;
 }
 
 export interface PreviewAutoOpenEmitter {
   socketEmit?: (event: string, data: unknown, room: string) => void;
-  socketEmitWithAck?: (event: string, data: unknown, room: string) => Promise<unknown[]>;
+  socketEmitWithAck?: (event: string, data: unknown, room: string, timeoutMs?: number) => Promise<unknown[]>;
 }
 
-const STATUS_PRIORITY: Record<Exclude<PreviewAutoOpenReceipt['status'], 'skipped'>, number> = {
+const STATUS_PRIORITY: Record<'applied' | 'blocked' | 'queued', number> = {
   applied: 3,
   blocked: 2,
   queued: 1,
@@ -55,6 +83,10 @@ const REASON_PRIORITY: Record<PreviewAutoOpenReceiptReason, number> = {
   thread_inactive: 2,
   worktree_mismatch: 1,
   client_inactive: 0,
+  visible_page_timeout: 4,
+  visible_page_superseded: 4,
+  visible_page_unavailable: 4,
+  visible_page_load_error: 4,
 };
 
 function isReceiptReason(value: unknown): value is PreviewAutoOpenReceiptReason {
@@ -69,42 +101,121 @@ function isReceipt(value: unknown, eventId: string): value is PreviewAutoOpenRec
     (candidate.status === 'applied' ||
       candidate.status === 'queued' ||
       candidate.status === 'blocked' ||
-      candidate.status === 'skipped') &&
+      candidate.status === 'skipped' ||
+      candidate.status === 'rejected') &&
     (candidate.reason === undefined || isReceiptReason(candidate.reason))
   );
 }
 
-export function aggregatePreviewAutoOpenReceipts(
-  eventId: string,
-  values: readonly unknown[],
-): {
+export interface PreviewAutoOpenDeliveryResult {
   deliveryStatus: PreviewAutoOpenDeliveryStatus;
   deliveryReason?: PreviewAutoOpenDeliveryReason;
-} {
-  const receipts = values.filter((value): value is PreviewAutoOpenReceipt => isReceipt(value, eventId));
+  visiblePageAdmission?: {
+    verified: boolean;
+    targetPort?: number;
+    targetOrigin?: string;
+    targetPath?: string;
+    clientRevision?: string | null;
+    mismatches?: string[];
+  };
+}
+
+function verifyAppliedVisiblePageReceipts(
+  event: PreviewAutoOpenEventData,
+  admission: PreviewVisiblePageAdmission,
+  targetOrigin: string,
+  applied: PreviewAutoOpenReceipt[],
+): PreviewAutoOpenDeliveryResult {
+  if (applied.some((receipt) => receipt.attestation === undefined)) {
+    return { deliveryStatus: 'unconfirmed', deliveryReason: 'visible_page_not_attested' };
+  }
+  const verdicts = applied.map((receipt) =>
+    verifyPreviewVisiblePageAttestation(admission, {
+      eventId: event.eventId,
+      targetPort: event.port,
+      targetOrigin,
+      targetPath: event.path ?? '/',
+      attestation: receipt.attestation,
+    }),
+  );
+  const mismatches = [...new Set(verdicts.flatMap((verdict) => verdict.mismatches))];
+  if (mismatches.length > 0) {
+    return {
+      deliveryStatus: 'unconfirmed',
+      deliveryReason: 'visible_page_mismatch',
+      visiblePageAdmission: { verified: false, mismatches },
+    };
+  }
+  const proof = applied[0]?.attestation;
+  if (!proof) return { deliveryStatus: 'unconfirmed', deliveryReason: 'visible_page_not_attested' };
+  return {
+    deliveryStatus: 'applied',
+    visiblePageAdmission: {
+      verified: true,
+      targetPort: proof.targetPort,
+      targetOrigin: proof.targetOrigin,
+      targetPath: proof.targetPath,
+      clientRevision: proof.clientRevision,
+    },
+  };
+}
+
+function aggregateVisiblePageReceipts(
+  event: PreviewAutoOpenEventData,
+  receipts: PreviewAutoOpenReceipt[],
+): PreviewAutoOpenDeliveryResult {
+  const admission = event.visiblePageAdmission;
+  const targetOrigin = event.targetOrigin;
+  if (!admission || !targetOrigin) {
+    return { deliveryStatus: 'unconfirmed', deliveryReason: 'visible_page_contract_invalid' };
+  }
+  if (receipts.length === 0) return { deliveryStatus: 'unconfirmed', deliveryReason: 'no_client_ack' };
+
+  const rejected = receipts.find((receipt) => receipt.status === 'rejected');
+  if (rejected) {
+    return { deliveryStatus: 'unconfirmed', deliveryReason: rejected.reason ?? 'visible_page_not_attested' };
+  }
+  const applied = receipts.filter((receipt) => receipt.status === 'applied');
+  const otherActionable = receipts.filter((receipt) => receipt.status !== 'applied' && receipt.status !== 'skipped');
+  if (applied.length > 0 && otherActionable.length > 0) {
+    return { deliveryStatus: 'unconfirmed', deliveryReason: 'visible_page_ambiguous_clients' };
+  }
+  if (applied.length > 0) return verifyAppliedVisiblePageReceipts(event, admission, targetOrigin, applied);
+  return aggregateOrdinaryPreviewReceipts(receipts);
+}
+
+function aggregateOrdinaryPreviewReceipts(receipts: PreviewAutoOpenReceipt[]): PreviewAutoOpenDeliveryResult {
   const actionable = receipts
-    .filter((receipt) => receipt.status !== 'skipped')
+    .filter(
+      (receipt): receipt is PreviewAutoOpenReceipt & { status: 'applied' | 'blocked' | 'queued' } =>
+        receipt.status !== 'skipped' && receipt.status !== 'rejected',
+    )
     .sort((a, b) => {
-      const statusDelta =
-        STATUS_PRIORITY[b.status as keyof typeof STATUS_PRIORITY] -
-        STATUS_PRIORITY[a.status as keyof typeof STATUS_PRIORITY];
+      const statusDelta = STATUS_PRIORITY[b.status] - STATUS_PRIORITY[a.status];
       if (statusDelta !== 0) return statusDelta;
-      return (
-        REASON_PRIORITY[(b.reason ?? 'worktree_mismatch') as PreviewAutoOpenReceiptReason] -
-        REASON_PRIORITY[(a.reason ?? 'worktree_mismatch') as PreviewAutoOpenReceiptReason]
-      );
+      return REASON_PRIORITY[b.reason ?? 'worktree_mismatch'] - REASON_PRIORITY[a.reason ?? 'worktree_mismatch'];
     });
   const receipt = actionable[0];
   if (!receipt) {
-    // Every in-room client answered but none was in scope — distinct from a
-    // missing ack (timeout / no client connected).
-    if (receipts.length > 0) return { deliveryStatus: 'unconfirmed', deliveryReason: 'no_matching_client' };
-    return { deliveryStatus: 'unconfirmed', deliveryReason: 'no_client_ack' };
+    return receipts.length > 0
+      ? { deliveryStatus: 'unconfirmed', deliveryReason: 'no_matching_client' }
+      : { deliveryStatus: 'unconfirmed', deliveryReason: 'no_client_ack' };
   }
   return {
-    deliveryStatus: receipt.status as PreviewAutoOpenDeliveryStatus,
+    deliveryStatus: receipt.status,
     ...(receipt.reason ? { deliveryReason: receipt.reason } : {}),
   };
+}
+
+export function aggregatePreviewAutoOpenReceipts(
+  event: string | PreviewAutoOpenEventData,
+  values: readonly unknown[],
+): PreviewAutoOpenDeliveryResult {
+  const eventId = typeof event === 'string' ? event : event.eventId;
+  const receipts = values.filter((value): value is PreviewAutoOpenReceipt => isReceipt(value, eventId));
+  return typeof event !== 'string' && event.visiblePageAdmission
+    ? aggregateVisiblePageReceipts(event, receipts)
+    : aggregateOrdinaryPreviewReceipts(receipts);
 }
 
 /**
@@ -120,12 +231,15 @@ export function aggregatePreviewAutoOpenReceipts(
  */
 export async function emitPreviewAutoOpen(
   emitter: PreviewAutoOpenEmitter,
-  eventData: { eventId: string; port: number; path?: string; threadId?: string; worktreeId?: string },
+  eventData: PreviewAutoOpenEventData,
   ackRoom: string,
 ): Promise<ReturnType<typeof aggregatePreviewAutoOpenReceipts>> {
   if (emitter.socketEmitWithAck) {
-    const receipts = await emitter.socketEmitWithAck('preview:auto-open', eventData, ackRoom).catch(() => []);
-    return aggregatePreviewAutoOpenReceipts(eventData.eventId, receipts);
+    const timeoutMs = eventData.visiblePageAdmission ? 10_000 : undefined;
+    const receipts = await emitter
+      .socketEmitWithAck('preview:auto-open', eventData, ackRoom, timeoutMs)
+      .catch(() => []);
+    return aggregatePreviewAutoOpenReceipts(eventData, receipts);
   }
   return { deliveryStatus: 'unconfirmed', deliveryReason: 'no_client_ack' };
 }

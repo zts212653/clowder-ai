@@ -152,7 +152,7 @@ describe('parseDirection', () => {
     // getMentionToCat maps @co-creator/@co-creator to __co-creator__ — must not leak into UI
     const ownerToCat: Record<string, string> = {
       ...mockToCat,
-      landy: '__co-creator__',
+      operator: '__co-creator__',
       'co-creator': '__co-creator__',
     };
     const ownerAliases = Object.keys(ownerToCat).sort((a, b) => b.length - a.length);

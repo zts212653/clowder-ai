@@ -8,7 +8,7 @@
  * [宪宪/Claude Opus 4.6🐾]
  */
 
-import type { ApprovalItem, EntityConflictContext } from '@cat-cafe/shared';
+import type { ApprovalHubItem, EntityConflictContext } from '@cat-cafe/shared';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { anchoredApprovalNavigation } from '@/test-support/approval-navigation';
 
@@ -53,13 +53,14 @@ const CONFLICT: EntityConflictContext = {
   allowedActions: ['correct', 'transfer', 'polysemy', 'reject'],
 };
 
-function makeItem(overrides: Partial<ApprovalItem> & { proposalId: string }): ApprovalItem {
+function makeItem(overrides: Partial<ApprovalHubItem> & { proposalId: string }): ApprovalHubItem {
   return {
     sourceFeatureId: 'F193',
     navigation: anchoredApprovalNavigation('thread-1'),
     requesterCatId: 'opus',
     ownerUserId: 'user-1',
-    status: 'pending',
+    resolution: 'open',
+    materialization: { state: 'not_started' },
     summary: 'test',
     detail: {},
     inlineApprovable: true,

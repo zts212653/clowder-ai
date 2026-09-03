@@ -19,6 +19,7 @@ import {
   continuityEvidenceFromVerdict,
 } from '../dist/domains/cats/services/agents/providers/CodexAppServerClient.js';
 import {
+  CodexAppServerCarrierReplacementRequiredError,
   isThreadNotResumableRejection,
   resolveCodexAppServerThread,
 } from '../dist/domains/cats/services/agents/providers/CodexAppServerThreadResolver.js';
@@ -323,17 +324,42 @@ test('a JSON-RPC rejection is answered with a fallback start', async () => {
   assert.equal(verdict.threadId, 'thread-b');
 });
 
-test('an exact oversized native rollout rejection prepares one typed replacement before turn/start', async () => {
+test('an exact oversized native rollout rejection carries typed provenance onto a fresh start', async () => {
   const requests = [];
+  const replacement = {
+    cause: 'native_resume_rejected',
+    previousNativeThreadId: 'thread-oversized',
+    detectedAt: 1_787_642_000_000,
+    rejection: 'max_payload_size_exceeded',
+  };
+  await assert.rejects(
+    resolveCodexAppServerThread({
+      thread: { kind: 'resume', threadId: 'thread-oversized' },
+      params: { threadId: 'thread-oversized' },
+      startParams: {},
+      localLiveLease: false,
+      now: () => 1_787_642_000_000,
+      request: async (method) => {
+        requests.push(method);
+        throw new Error('Max payload size exceeded');
+      },
+    }),
+    (error) => {
+      assert.ok(error instanceof CodexAppServerCarrierReplacementRequiredError);
+      assert.deepEqual(error.replacement, replacement);
+      return true;
+    },
+  );
+  assert.deepEqual(requests, ['thread/resume'], 'the dead carrier must receive no fallback thread/start');
+
   const verdict = await resolveCodexAppServerThread({
-    thread: { kind: 'resume', threadId: 'thread-oversized' },
-    params: { threadId: 'thread-oversized' },
-    startParams: {},
+    thread: { kind: 'start' },
+    params: {},
+    resumeReplacement: replacement,
     localLiveLease: false,
-    now: () => 1_787_642_000_000,
+    now: () => 1_787_642_000_001,
     request: async (method) => {
       requests.push(method);
-      if (method === 'thread/resume') throw new Error('Max payload size exceeded');
       return { thread: { id: 'thread-cold-replacement' } };
     },
   });
@@ -343,12 +369,7 @@ test('an exact oversized native rollout rejection prepares one typed replacement
     kind: 'replaced',
     requestedThreadId: 'thread-oversized',
     threadId: 'thread-cold-replacement',
-    replacement: {
-      cause: 'native_resume_rejected',
-      previousNativeThreadId: 'thread-oversized',
-      detectedAt: 1_787_642_000_000,
-      rejection: 'max_payload_size_exceeded',
-    },
+    replacement,
     raw: { thread: { id: 'thread-cold-replacement' } },
   });
 });

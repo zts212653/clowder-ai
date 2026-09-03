@@ -1,11 +1,16 @@
+import { type PreviewVisiblePageAdmission, previewVisiblePageAdmissionSchema } from '@cat-cafe/shared';
 import { z } from 'zod';
-import { defineMcpMigrationFactory } from '../tool-governance-migration.js';
+import { defineMcpCanonicalFactory, defineMcpMigrationFactory } from '../tool-governance-migration.js';
 
 import { callbackPost, getCallbackConfig } from './callback-tools.js';
 import type { ToolResult } from './file-tools.js';
 import { errorResult } from './file-tools.js';
 
 const defineTool = defineMcpMigrationFactory('hub-action-tools.ts', undefined, {
+  resourceFamily: 'artifact-surface',
+  authority: 'callback-owner',
+});
+const defineCanonicalTool = defineMcpCanonicalFactory('hub-action-tools.ts', undefined, {
   resourceFamily: 'artifact-surface',
   authority: 'callback-owner',
 });
@@ -66,6 +71,11 @@ export const previewOpenInputSchema = {
   threadId: optionalContextSchemas.threadId,
   catId: optionalContextSchemas.catId,
   agentKeyCatId: optionalContextSchemas.agentKeyCatId,
+  visiblePageAdmission: previewVisiblePageAdmissionSchema
+    .optional()
+    .describe(
+      'Optional fail-closed visible-page proof. Requires the exact target browser build revision plus bounded DOM/text assertions; applied is withheld until the rendered iframe attests through the Preview bridge.',
+    ),
 };
 
 function resolveWorkspaceNavigateAuthMode(agentKeyCatId: string | undefined): 'agent-key' | 'invocation-or-none' {
@@ -112,6 +122,7 @@ export async function handlePreviewOpen(input: {
   threadId?: string | undefined;
   catId?: string | undefined;
   agentKeyCatId?: string | undefined;
+  visiblePageAdmission?: PreviewVisiblePageAdmission | undefined;
 }): Promise<ToolResult> {
   // F120 × F284 review P1: mirror workspace-navigate auth scope — persistent
   // agent-key callers must name the target thread; the API resolves and
@@ -131,8 +142,12 @@ export async function handlePreviewOpen(input: {
       ...(input.worktreeId ? { worktreeId: input.worktreeId } : {}),
       ...(input.threadId ? { threadId: input.threadId } : {}),
       ...(input.catId ? { catId: input.catId } : {}),
+      ...(input.visiblePageAdmission ? { visiblePageAdmission: input.visiblePageAdmission } : {}),
     },
-    { agentKeyCatId: input.agentKeyCatId },
+    {
+      agentKeyCatId: input.agentKeyCatId,
+      ...(input.visiblePageAdmission ? { fetchTimeoutMs: 15_000 } : {}),
+    },
   );
 }
 
@@ -156,7 +171,7 @@ export const hubActionTools = [
       runtimeProfiles: ['full', 'agent-key'],
     },
   }),
-  defineTool({
+  defineCanonicalTool({
     name: 'cat_cafe_preview_open',
     description:
       'Open a localhost app in the Hub Browser Preview panel. ' +
@@ -164,7 +179,8 @@ export const hubActionTools = [
       'Result: the Hub Browser panel auto-opens the localhost target through the preview gateway. ' +
       'Output: the accepted request plus deliveryStatus=applied|queued|blocked|unconfirmed. ' +
       'GOTCHA: allowed:true only means admission; only deliveryStatus=applied proves a connected Hub client ' +
-      'applied the preview — never report "已打开" on unconfirmed/queued/blocked. ' +
+      'applied the preview — never report "已打开" on unconfirmed/queued/blocked. For operator or visual acceptance, ' +
+      'pass visiblePageAdmission; applied then requires an exact iframe origin/port, embedded client revision, and DOM proof. ' +
       'threadId is required for agent-key auth and may be omitted for invocation auth. ' +
       'GOTCHA: validate the target dev server first; shared persistent MCP callers pass agentKeyCatId; do not handwrite curl to /api/preview/auto-open.',
     inputSchema: previewOpenInputSchema,

@@ -1,7 +1,7 @@
 'use client';
 
 import {
-  type ApprovalItem,
+  type ApprovalHubItem,
   candidateInteractionDraftSchema,
   type PersonMemoryInformedEvidence,
   type PersonMemoryInteractionApprovalDetail,
@@ -66,7 +66,7 @@ function parseDraft(value: unknown, remaining: Set<string>): PersonMemoryDraftVi
   };
 }
 
-function readDrafts(item: ApprovalItem): PersonMemoryDraftView[] {
+function readDrafts(item: ApprovalHubItem): PersonMemoryDraftView[] {
   if (!Array.isArray(item.detail.drafts)) return [];
   const remaining = new Set(
     Array.isArray(item.detail.remainingDraftIds)
@@ -195,7 +195,7 @@ function EventDraftDetails({
   );
 }
 
-export function PersonMemoryClaimSelector({ item, onReject }: { item: ApprovalItem; onReject: () => void }) {
+export function PersonMemoryClaimSelector({ item, onReject }: { item: ApprovalHubItem; onReject: () => void }) {
   const drafts = useMemo(() => readDrafts(item), [item]);
   const displayName = typeof item.detail.displayName === 'string' ? item.detail.displayName : '未命名人物';
   const replacesProposalId =

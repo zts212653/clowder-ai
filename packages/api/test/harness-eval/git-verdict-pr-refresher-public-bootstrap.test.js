@@ -62,6 +62,8 @@ describe('git verdict PR refresher public bootstrap', () => {
         repoRoot: repo,
         expectedRepoFullName: 'zts212653/clowder-ai',
         identityRunner: async () => {},
+        contractRunner: async () => {},
+        commitStatusPublisher: async () => {},
         resolveOpenPr: async () => [
           {
             url: 'https://github.com/zts212653/clowder-ai/pull/9999',

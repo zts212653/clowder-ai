@@ -58,8 +58,8 @@ type LocalReviewRecoveryPreflight =
     }
   | { ok: false; result: Exclude<LocalReviewVerdictRecordResult, { outcome: 'committed' }> };
 
-function isUntouchedRecoveryGeneration(lease: ActionSuccessorLease): boolean {
-  return Object.keys(lease.holderOutcomes).length === 0 && Object.keys(lease.completionCandidates).length === 0;
+function hasNoRecoveryOutcome(lease: ActionSuccessorLease): boolean {
+  return Object.keys(lease.holderOutcomes).length === 0;
 }
 
 function hasRecoverableReviewStatus(lease: ActionSuccessorLease): boolean {
@@ -101,10 +101,10 @@ function preflightLocalReviewRecovery(
       result: { outcome: 'mismatch', reason: 'local review recovery caller is outside the predecessor tenant' },
     };
   }
-  if (lease.status === 'active' && !isUntouchedRecoveryGeneration(lease)) {
+  if (lease.status === 'active' && !hasNoRecoveryOutcome(lease)) {
     return {
       ok: false,
-      result: { outcome: 'mismatch', reason: 'local review recovery requires an untouched active generation' },
+      result: { outcome: 'mismatch', reason: 'local review recovery requires an unsettled active generation' },
     };
   }
   if (lease.returnTransitions.length > 0) {
@@ -275,6 +275,18 @@ export class LocalReviewVerdictService {
     }
     if (freshness.status === 'insufficient') return { outcome: 'insufficient', reason: freshness.reason };
 
+    const candidateEntries = Object.entries(lease.completionCandidates);
+    const candidate = lease.completionCandidates[reviewerCatId];
+    if (
+      candidateEntries.length > 0 &&
+      (candidateEntries.length !== 1 ||
+        !candidate ||
+        candidate.evidenceRefs.length !== 1 ||
+        candidate.evidenceRefs[0] !== evidenceRef)
+    ) {
+      return { outcome: 'mismatch', reason: 'local review recovery candidate does not match the typed verdict' };
+    }
+
     const completion = await this.deps.leaseStore.recoverLocalReviewVerdict(input.leaseId, {
       expectedGeneration: input.generation,
       reviewerCatId,
@@ -283,6 +295,14 @@ export class LocalReviewVerdictService {
       tenantScope: input.principal.tenantScope,
       headSha: terminalPredicate.headSha,
       evidenceRef,
+      ...(candidate
+        ? {
+            candidateFence: {
+              candidateRevision: candidate.candidateRevision,
+              evidenceDigest: candidate.evidenceDigest,
+            },
+          }
+        : {}),
       now: input.now,
     });
     return completion.outcome === 'recovered' || completion.outcome === 'replayed'

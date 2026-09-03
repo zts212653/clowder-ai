@@ -52,6 +52,60 @@ describe('#939 part A (background chain): provider_capability silent consume + i
     finalizedBgRefs.clear();
   });
 
+  it('projects provider-neutral warning through the same registry in a background thread', () => {
+    dispatchBg({
+      type: 'system_info',
+      catId: 'codex',
+      threadId: 'thread-bg',
+      content: '{"method":"raw/provider/warning"}',
+      semanticEvent: {
+        v: 1,
+        id: 'warning-background-1',
+        kind: 'warning',
+        occurredAt: 1700000000000,
+        category: 'safety',
+        severity: 'warning',
+        message: '受保护操作已拒绝。',
+        provenance: { provider: 'codex', carrier: 'app_server', nativeType: 'warning' },
+      },
+      timestamp: 1700000000000,
+    });
+
+    expect(useChatStore.getState().getThreadState('thread-bg').messages).toEqual([
+      expect.objectContaining({
+        id: 'semantic:warning-background-1',
+        type: 'system',
+        content: '警告：受保护操作已拒绝。',
+      }),
+    ]);
+  });
+
+  it('keeps plan visible in a background timeline until a real Workspace host owns it', () => {
+    dispatchBg({
+      type: 'provider_signal',
+      catId: 'codex',
+      threadId: 'thread-bg',
+      content: 'raw plan copy must not become a system bubble',
+      semanticEvent: {
+        v: 1,
+        id: 'plan-background-1',
+        kind: 'plan',
+        occurredAt: 1700000000000,
+        stage: 'updated',
+        text: 'Locate the contract, then fix it.',
+      },
+      timestamp: 1700000000000,
+    });
+
+    expect(useChatStore.getState().getThreadState('thread-bg').messages).toEqual([
+      expect.objectContaining({
+        id: 'semantic:plan-background-1',
+        type: 'system',
+        content: 'Locate the contract, then fix it.',
+      }),
+    ]);
+  });
+
   it('background chain consumes provider_capability silently and stores on thread invocation snapshot', () => {
     dispatchBg({
       type: 'system_info',

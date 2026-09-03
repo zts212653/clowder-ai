@@ -2,7 +2,7 @@
 cell_id: plugin
 title: Plugin Framework
 summary: Repository-local plugin activation plus Host-governed external package inventory, Broker sessions, supervised stdio execution, grants, durable call settlement, owned resource adapters, and narrow receipt-bearing Host capabilities.
-canonical_features: [F202, F247, F285, F292]
+canonical_features: [F202, F247, F285, F290, F292]
 code_anchors:
   - packages/api/src/domains/plugin/PluginRegistry.ts
   - packages/api/src/domains/plugin/PluginResourceActivator.ts
@@ -14,6 +14,7 @@ code_anchors:
   - packages/api/src/domains/plugin/host-broker/events-publish-handler.ts
   - packages/api/src/domains/plugin/external-runtime/index.ts
   - packages/api/src/domains/plugin/runtime-composition.ts
+  - packages/api/src/domains/plugin/builtin-runtime/hybrid-supervisor.ts
   - packages/api/src/domains/plugin/official-catalog.ts
   - packages/api/src/domains/plugin/official-catalog-provider.ts
   - packages/api/src/domains/plugin/official-package-installer.ts
@@ -42,6 +43,7 @@ cited_by:
   - {feature: F202, date: 2026-08-10, delta: K-2B contract-native Broker sessions, durable call ledger, and typed signal-intake edge}
   - {feature: F202, date: 2026-08-11, delta: K-2D supervised stdio runtime and dormant production composition}
   - {feature: F292, date: 2026-08-15, delta: Host-policy-pinned hot official release discovery with explicit release-fenced update}
+  - {feature: F290, date: 2026-08-28, delta: bundled official Connector distribution and hybrid builtin/external lifecycle seam; Collective Service truth stays in collective-runtime}
 ---
 
 # Plugin Framework

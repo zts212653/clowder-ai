@@ -118,6 +118,7 @@ describe('F287 D2 billing-only golden journey', () => {
     );
     const { TasteCueResolver } = await import('../../dist/domains/memory/cue/resolvers/TasteCueResolver.js');
     const { ProfileCueResolver } = await import('../../dist/domains/memory/cue/resolvers/ProfileCueResolver.js');
+    const { EventCueResolver } = await import('../../dist/domains/memory/cue/resolvers/EventCueResolver.js');
     const { ProjectKnowledgeCueResolver } = await import(
       '../../dist/domains/memory/cue/resolvers/ProjectKnowledgeCueResolver.js'
     );
@@ -146,6 +147,7 @@ describe('F287 D2 billing-only golden journey', () => {
       new OperationalPrecedentCueResolver(source),
       new TasteCueResolver({ resolve: async () => null }),
       new ProfileCueResolver(),
+      new EventCueResolver({ resolve: async () => null }),
       new ProjectKnowledgeCueResolver(),
     ]);
     const service = new MemoryCueInvocationPromptService({
@@ -179,6 +181,8 @@ describe('F287 D2 billing-only golden journey', () => {
     assert.match(resolution.promptSegment, /runner_id=0/);
     assert.match(resolution.promptSegment, /steps=\[\]/);
     assert.match(resolution.promptSegment, /complete source evidence and an exact external billing condition/);
+    assert.match(resolution.promptSegment, /state-only external infrastructure, not an owner action/);
+    assert.match(resolution.promptSegment, /不要求 operator 付费、修账单或关闭 workflow/);
     assert.match(resolution.promptSegment, /Drill: evidence mch1\./);
     const cueId = resolution.promptSegment.match(/cue-id="([^"]+)"/)?.[1];
     assert.ok(cueId);

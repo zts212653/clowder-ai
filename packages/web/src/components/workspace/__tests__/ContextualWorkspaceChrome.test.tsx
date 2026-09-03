@@ -31,7 +31,11 @@ describe('F284 ContextualWorkspaceChrome', () => {
   it('keeps one quiet shell header without duplicating the global Workspace fold control', async () => {
     await act(async () => {
       root.render(
-        <ContextualWorkspaceChrome mode="workspace" onFold={() => {}}>
+        <ContextualWorkspaceChrome
+          mode="workspace"
+          onFold={() => {}}
+          actions={<button data-testid="workspace-header-action">+</button>}
+        >
           <div data-testid="canonical-surface">canonical</div>
         </ContextualWorkspaceChrome>,
       );
@@ -42,6 +46,9 @@ describe('F284 ContextualWorkspaceChrome', () => {
       expect(container.querySelector(`[data-testid="workspace-host-${mode}"]`)).toBeNull();
     }
     expect(container.querySelectorAll('[data-workspace-chrome-layer]')).toHaveLength(1);
+    expect(
+      container.querySelector('[data-workspace-chrome-layer] [data-testid="workspace-header-action"]'),
+    ).not.toBeNull();
     expect(container.querySelector('[data-testid="workspace-shell-fold"]')).toBeNull();
     expect(container.textContent).not.toContain('工作动态伴随');
   });

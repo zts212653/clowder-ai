@@ -25,23 +25,19 @@ const { ChatMessageRow } = await import('../ChatMessageRow');
 
 function selectText(node: Node) {
   const rect = () => ({ top: 120, right: 260, bottom: 140, left: 120, width: 140, height: 20 }) as DOMRect;
+  const range = document.createRange();
+  range.selectNodeContents(node);
+  Object.defineProperties(range, {
+    getClientRects: { value: () => [rect()] },
+    getBoundingClientRect: { value: rect },
+  });
   vi.spyOn(window, 'getSelection').mockReturnValue({
     isCollapsed: false,
     anchorNode: node,
     focusNode: node,
-    toString: () => 'selected source text',
+    toString: () => range.toString(),
     rangeCount: 1,
-    getRangeAt: () => ({
-      getClientRects: () => [rect()],
-      getBoundingClientRect: rect,
-      commonAncestorContainer: node,
-      toString: () => 'selected source text',
-      cloneRange: () => ({
-        selectNodeContents: vi.fn(),
-        setEnd: vi.fn(),
-        toString: () => '',
-      }),
-    }),
+    getRangeAt: () => range,
     removeAllRanges: vi.fn(),
   } as unknown as Selection);
   document.dispatchEvent(new Event('selectionchange'));

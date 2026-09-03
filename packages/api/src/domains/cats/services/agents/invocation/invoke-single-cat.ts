@@ -25,6 +25,7 @@ import {
   type RequestGenerationPresentationV1,
   type RequestGenerationRetryReason,
   type RequestGenerationSourceRef,
+  type RoutingPreflightDecisionV1,
   resolveCodexSpeed,
   type SealReason,
   type SessionPolicySnapshot,
@@ -80,17 +81,28 @@ import { resolvePersistentProjectPathDetailed } from '../../../../../utils/persi
 import { pathsEqual } from '../../../../../utils/project-path.js';
 import { tcpProbe } from '../../../../../utils/tcp-probe.js';
 import { estimateTokens } from '../../../../../utils/token-counter.js';
+import { resolveEntrustedWorkTaskRefFromSource } from '../../../../growing/EntrustedWorkRuntimeInteractionBinding.js';
 import {
   type MemoryCueInvocationPromptResolver,
   type MemoryCueOpportunitySeed,
   memoryCueOpportunityId,
 } from '../../../../memory/cue/MemoryCueInvocationPromptService.js';
 import type { MemoryCuePresentationEnvelope } from '../../../../memory/cue/MemoryCuePlaneService.js';
+import type { NudgePayload } from '../../../../memory/EntityNudgeBuilder.js';
+import type {
+  EntityNudgeCandidateBatch,
+  EntityNudgePromptPresentation,
+  EntityNudgeService,
+} from '../../../../memory/EntityNudgeService.js';
 import {
   AsrPersonMemoryOpportunityPromptService,
   type AsrPersonMemoryPresentationEnvelope,
   type AsrPersonMemoryPresentationReceipt,
 } from '../../../../memory/people/AsrPersonMemoryOpportunityPromptService.js';
+import {
+  classifyRoutingDispatchFailure,
+  type RoutingDispatchFailureClass,
+} from '../../../../routing-context/RoutingDispatchSignalContract.js';
 import type { AgentPaneRegistry } from '../../../../terminal/agent-pane-registry.js';
 import type { TmuxGateway } from '../../../../terminal/tmux-gateway.js';
 import { resolveBootcampWorkspaceRoot } from '../../bootcamp/workspace-root.js';
@@ -98,7 +110,7 @@ import {
   buildCloudBridgeStatusContent,
   type CloudBridgeAuditContext,
 } from '../../cloud-bridge/cloud-bridge-fallback.js';
-import type { BridgeDispatchOutcome } from '../../cloud-bridge/types.js';
+import type { BridgeDispatchOutcome, CloudDispatchProvenance } from '../../cloud-bridge/types.js';
 import { createPromptDigest } from '../../context/prompt-digest.js';
 // L0-budget-defense PR-B-impl (ADR-038): staging layer prepend, wired here
 // (next to F225 contextHintPrefix) so it lands every turn including resumes.
@@ -151,6 +163,7 @@ import {
   sealBeforeInvocationIfNeeded,
 } from './invocation-capacity-snapshot.js';
 import { resolveManagedWorkInvocationBinding } from './managed-work-invocation-binding.js';
+import { projectNativeGoalMessage } from './native-goal-observation.js';
 import {
   type ProviderPresentationAttempt,
   type ProviderPromptPresentationEnvelope,
@@ -235,6 +248,7 @@ export function requestGenerationMessageSourceRefs(input: {
   readonly injectSystemPrompt: boolean;
   readonly hasContextHint: boolean;
   readonly hasStagingPrepend: boolean;
+  readonly hasRoutingContextProjection?: boolean;
   readonly hasMissionPrefix: boolean;
 }): RequestGenerationSourceRef[] {
   const refs: RequestGenerationSourceRef[] = [
@@ -250,6 +264,9 @@ export function requestGenerationMessageSourceRefs(input: {
       ? [{ owner: 'runtime_context' as const, ref: `context-management-hint:${input.invocationId}` }]
       : []),
     ...(input.hasStagingPrepend ? [{ owner: 'system_prompt' as const, ref: 'staging:adr-038' }] : []),
+    ...(input.hasRoutingContextProjection
+      ? [{ owner: 'runtime_context' as const, ref: `routing-context:${input.invocationId}` }]
+      : []),
     ...(input.hasMissionPrefix ? [{ owner: 'home_state' as const, ref: `thread-mission:${input.threadId}` }] : []),
     { owner: 'runtime_context', ref: `transcript-path-hints:${input.threadId}` },
   ];
@@ -302,6 +319,19 @@ function resolveMemoryCueLegacyFallbacks(
     if (admitted.has(opportunityId)) return [];
     return [{ opportunityId }];
   });
+}
+
+function isSubjectSeenNudgeSeed(
+  seed: MemoryCueOpportunitySeed,
+): seed is Extract<MemoryCueOpportunitySeed, { kind: 'subject_seen' }> {
+  return seed.kind === 'subject_seen' && seed.producer === 'entity_nudge';
+}
+
+function subjectSeenSeedMatchesNudge(
+  seed: Extract<MemoryCueOpportunitySeed, { kind: 'subject_seen' }>,
+  nudge: NudgePayload,
+): boolean {
+  return seed.payload.entityId === nudge.entityId && seed.payload.matchedAlias === nudge.matchedAlias;
 }
 
 function isSubstantiveProviderOutput(message: AgentMessage): boolean {
@@ -543,6 +573,7 @@ import type {
 } from '../../stores/ports/TurnExecutionStore.js';
 import type {
   AgentMessage,
+  AgentRouteIntent,
   AgentService,
   AgentServiceOptions,
   ContextContinuityHandshake,
@@ -1045,6 +1076,10 @@ async function syncAntigravityRuntimeMetadata(input: {
  * Shared dependencies for all cat invocations within one AgentRouter
  */
 export interface InvocationDeps {
+  /** F293: fresh owner-scoped sparse routing projection resolved for every provider generation. */
+  readonly routingContextPromptProjection?: import('../../../../routing-context/RoutingContextPromptProjector.js').RoutingContextPromptProjectionPort;
+  /** F293: observes routing evidence only after the canonical child terminal is durable. */
+  readonly routingDispatchSignalObserver?: import('../../../../routing-context/RoutingDispatchSignalContract.js').RoutingDispatchTerminalObserver;
   /** F296 B3b-1: single owner of context epoch and cold/hot mode for provider-bound invocations. */
   readonly contextEpochOwner?: Pick<ContextEpochOwner, 'resolve' | 'observeCompaction' | 'confirmColdConsumed'>;
   /** Live project-hook auth readiness required before Claude can own a compaction sequence. */
@@ -1113,10 +1148,10 @@ export interface InvocationDeps {
    * silent no-op.
    */
   readonly cloudInvokeBridge?: import('../../cloud-bridge/types.js').ICloudInvokeBridge | null;
-  /** F247: server-owned signer for exact-source Remote MCP return capability. */
-  readonly cloudReturnBindingSigner?: Pick<
-    import('../../cloud-bridge/cloud-return-binding.js').CloudReturnBindingSigner,
-    'sign'
+  /** F247: server-custodied exact-source authorization, issued before Host delivery. */
+  readonly cloudReturnGrantStore?: Pick<
+    import('../../cloud-bridge/cloud-return-grant.js').CloudReturnGrantStore,
+    'issue'
   >;
   /** Server-owned exact A2A terminal producer used by the cloud transport. */
   readonly a2aDispatchDispositionService?: Pick<
@@ -1147,6 +1182,8 @@ export interface InvocationDeps {
     provider: string;
     capability: import('../../types.js').AgentFreshnessCarrierCapability;
   }) => Promise<import('../../freshness/FreshnessNoticeBroker.js').ActiveInvocationFreshnessController | null>;
+  /** F306: canonical cross-provider request/response surface. */
+  readonly runtimeInteractionPort?: import('../../../../runtime-interaction/ports/RuntimeInteractionPort.js').RuntimeInteractionPort;
   readonly freshnessReinvokeCheck?: (params: {
     invocationId: string;
     threadId: string;
@@ -1162,6 +1199,10 @@ export interface InvocationDeps {
   } | null>;
   /** F287: invocation-bound Cue resolver; receives only server-owned typed seeds. */
   readonly memoryCuePromptService?: MemoryCueInvocationPromptResolver;
+  /** F312: lane-owned standing predicate for an unconsumed canonical Profile revision. */
+  readonly profileCueOpportunitySource?: import('../../../../memory/cue/sources/ProfileMemoryCueSource.js').ProfileMemoryCueSource;
+  /** F312: lane-owned temporal/subject predicate for one unconsumed F227 Event revision. */
+  readonly eventCueOpportunitySource?: import('../../../../memory/cue/sources/EventMemoryCueSource.js').EventMemoryCueSource;
   /** F231 canonical owner used only to bind embedded L0 profile bytes to their source lifecycle. */
   readonly profileRepository?: import('../../profile/ProfileRepository.js').FileProfileRepository;
 }
@@ -1170,6 +1211,12 @@ export interface InvocationDeps {
  * Per-invocation parameters
  */
 export interface InvocationParams {
+  /** Route-owned intent projected to provider behavior only when its provenance permits it. */
+  readonly routeIntent?: AgentRouteIntent;
+  /** F293: deterministic message scope, independent from provider prompt inference. */
+  readonly routingContextIntent?: 'review' | 'architecture';
+  /** F293: exact actual-send decision retained until the durable terminal transition. */
+  readonly routingDispatchPreflightDecision?: RoutingPreflightDecisionV1;
   readonly catId: CatId;
   readonly service: AgentService;
   /** #1208: one pre-provider capacity owner shared by all invocation consumers. */
@@ -1224,6 +1271,10 @@ export interface InvocationParams {
    * When absent, transport is not attempted (see `mentionContent`).
    */
   readonly mentioningCatId?: CatId;
+  /** Server-authored exact source carrier for a queued/direct multi-mention cloud child. */
+  readonly cloudDispatchProvenance?: CloudDispatchProvenance;
+  /** Reject legacy reconstructed provenance when this invocation came from multi-mention. */
+  readonly requiresExactCloudDispatchProvenance?: boolean;
   readonly contentBlocks?: readonly MessageContent[];
   readonly uploadDir?: string;
   readonly signal?: AbortSignal;
@@ -1268,6 +1319,23 @@ export interface InvocationParams {
     seed: MemoryCueOpportunitySeed;
     promptContext: string;
   }[];
+  /** Route-level candidates, presented and accounted only for this exact consumer. */
+  readonly entityNudgePresentation?: {
+    readonly service: EntityNudgeService;
+    readonly candidates: EntityNudgeCandidateBatch;
+    readonly sourceMessageId: string;
+  };
+  /**
+   * Person entity candidates projected as typed F287 Memory Cues. They still
+   * use F260's per-consumer cooldown, but their delivery is confirmed only if
+   * their exact Cue envelope is admitted into the provider request.
+   */
+  readonly entityNudgeCuePresentation?: {
+    readonly service: EntityNudgeService;
+    readonly candidates: EntityNudgeCandidateBatch;
+    readonly sourceMessageId: string;
+    readonly seeds: readonly Extract<MemoryCueOpportunitySeed, { kind: 'subject_seen' }>[];
+  };
 }
 
 /**
@@ -1406,6 +1474,7 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
   let turnExecutionFailureReason: string | undefined;
   let turnExecutionInterruptionReason: string | undefined;
   let turnExecutionCompletedSuccessfully = false;
+  let routingDispatchFailureClass: RoutingDispatchFailureClass | undefined;
 
   // F153: Record cat invocation count with trigger type
   const triggerType = params.a2aTriggerMessageId ? 'mention' : params.parentInvocationId ? 'routing' : 'default';
@@ -1504,15 +1573,74 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
 
   let memoryCuePresentationEnvelopes: readonly InvocationPresentationEnvelope[] = [];
   let omittedMemoryCueOpportunityIds: readonly string[] = [];
+  let entityNudgePromptPresentation: EntityNudgePromptPresentation | undefined;
+  let entityNudgeCuePromptPresentation:
+    | {
+        readonly source: NonNullable<InvocationParams['entityNudgeCuePresentation']>;
+        readonly presentation: EntityNudgePromptPresentation;
+      }
+    | undefined;
   const resolveInvocationMemoryCues = async (): Promise<void> => {
     invocationPromptAdditions.length = 0;
     memoryCuePresentationEnvelopes = [];
     omittedMemoryCueOpportunityIds = [];
-    if (!deps.memoryCuePromptService || !params.memoryCueOpportunitySeeds?.length) return;
     const serverScope = { ownerUserId: userId, threadId, invocationId };
+    const cueSource = params.entityNudgeCuePresentation;
+    let seeds = params.memoryCueOpportunitySeeds ?? [];
+    let fallbacks = params.memoryCueLegacyFallbacks;
+    if (cueSource) {
+      entityNudgeCuePromptPresentation ??= {
+        source: cueSource,
+        presentation: cueSource.service.preparePresentation(cueSource.candidates, {
+          catId: catId as string,
+          invocationId,
+          sourceMessageId: cueSource.sourceMessageId,
+        }),
+      };
+      const sourceSeeds = new Set<MemoryCueOpportunitySeed>(cueSource.seeds);
+      const admittedNudges = entityNudgeCuePromptPresentation.presentation.result.nudges;
+      const mayPresentSeed = (seed: MemoryCueOpportunitySeed): boolean => {
+        if (!sourceSeeds.has(seed) || !isSubjectSeenNudgeSeed(seed)) return true;
+        return admittedNudges.some((nudge) => subjectSeenSeedMatchesNudge(seed, nudge));
+      };
+      seeds = seeds.filter(mayPresentSeed);
+      fallbacks = fallbacks?.filter((fallback) => mayPresentSeed(fallback.seed));
+    }
+    if (
+      deps.profileCueOpportunitySource &&
+      params.invocationOrigin === 'interactive' &&
+      params.ownerAuthProvenance === 'strict'
+    ) {
+      try {
+        const profileSeed = await deps.profileCueOpportunitySource.prepareOpportunity({
+          ownerUserId: userId,
+          occurredAt: Date.now(),
+        });
+        if (profileSeed) seeds = [...seeds, profileSeed];
+      } catch (err) {
+        log.warn({ err, invocationId, threadId, catId }, '[F312] Profile cue predicate failed closed');
+      }
+    }
+    if (
+      deps.eventCueOpportunitySource &&
+      params.invocationOrigin === 'interactive' &&
+      params.ownerAuthProvenance === 'strict'
+    ) {
+      try {
+        const eventSeed = await deps.eventCueOpportunitySource.prepareOpportunity({
+          ownerUserId: userId,
+          threadId,
+          occurredAt: Date.now(),
+        });
+        if (eventSeed) seeds = [...seeds, eventSeed];
+      } catch (err) {
+        log.warn({ err, invocationId, threadId, catId }, '[F312] Event cue predicate failed closed');
+      }
+    }
+    if (!deps.memoryCuePromptService || seeds.length === 0) return;
     try {
       const cueResolution = await deps.memoryCuePromptService.resolve({
-        seeds: params.memoryCueOpportunitySeeds,
+        seeds,
         serverScope,
         now: Date.now(),
       });
@@ -1526,7 +1654,7 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
       }));
       omittedMemoryCueOpportunityIds = cueResolution.omittedOpportunityIds ?? [];
       const fallbackProjections = resolveMemoryCueLegacyFallbacks(
-        params.memoryCueLegacyFallbacks,
+        fallbacks,
         serverScope,
         cueResolution.admittedOpportunityIds,
       );
@@ -1538,9 +1666,45 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
       ];
     } catch (err) {
       log.warn({ err, invocationId, threadId, catId }, '[F287] memory cue prompt resolution failed closed');
-      const fallbackProjections = resolveMemoryCueLegacyFallbacks(params.memoryCueLegacyFallbacks, serverScope);
+      const fallbackProjections = resolveMemoryCueLegacyFallbacks(fallbacks, serverScope);
       omittedMemoryCueOpportunityIds = fallbackProjections.map(({ opportunityId }) => opportunityId);
     }
+  };
+  const resolveEntityNudgePresentation = (): void => {
+    const source = params.entityNudgePresentation;
+    if (!source) return;
+    entityNudgePromptPresentation ??= source.service.preparePresentation(source.candidates, {
+      catId: catId as string,
+      invocationId,
+      sourceMessageId: source.sourceMessageId,
+    });
+    if (entityNudgePromptPresentation.promptContext) {
+      invocationPromptAdditions.push(entityNudgePromptPresentation.promptContext);
+    }
+  };
+  const confirmEntityNudgeCuePresentation = (preparedBody: string): void => {
+    const pending = entityNudgeCuePromptPresentation;
+    if (!pending || pending.presentation.result.nudges.length === 0) return;
+    const attempt = currentPresentationAttempt;
+    if (!attempt) throw new Error('entity_nudge_cue_presentation_attempt_unavailable');
+    const admittedPromptSegments = new Map<string, string>();
+    for (const admitted of attempt.admitted) {
+      if (admitted.envelope.receipt.domain !== 'memory_cue') continue;
+      admittedPromptSegments.set(admitted.envelope.receipt.receipt.event.opportunityId, admitted.promptSegment);
+    }
+    const exactNudges: NudgePayload[] = [];
+    for (const nudge of pending.presentation.result.nudges) {
+      const seed = pending.source.seeds.find((candidate) => subjectSeenSeedMatchesNudge(candidate, nudge));
+      if (!seed) throw new Error('entity_nudge_cue_seed_mapping_unavailable');
+      const opportunityId = memoryCueOpportunityId(seed, { ownerUserId: userId, threadId, invocationId });
+      const promptSegment = admittedPromptSegments.get(opportunityId);
+      if (!promptSegment) continue;
+      if (!preparedBody.includes(promptSegment)) {
+        throw new Error('entity_nudge_cue_prepared_prompt_not_exact');
+      }
+      exactNudges.push(nudge);
+    }
+    if (exactNudges.length > 0) pending.presentation.confirmAssembled(exactNudges);
   };
   const asrPersonMemoryPromptService = new AsrPersonMemoryOpportunityPromptService({
     ...(deps.writeOpportunityTerminalLedger ? { terminalLedger: deps.writeOpportunityTerminalLedger } : {}),
@@ -1862,27 +2026,36 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
     if (!params.contextPromptFactory) await exposeCurrentPromptMessages();
 
     if (isCloudOnlyInvocation) {
-      const sourceMessageId = params.a2aTriggerMessageId ?? params.executionCausal?.triggerMessageId;
+      const cloudDispatchProvenance = params.cloudDispatchProvenance;
+      const exactProvenanceMissing = params.requiresExactCloudDispatchProvenance && !cloudDispatchProvenance;
+      const sourceMessageId =
+        cloudDispatchProvenance?.sourceMessageId ??
+        (exactProvenanceMissing ? undefined : (params.a2aTriggerMessageId ?? params.executionCausal?.triggerMessageId));
+      const cloudIntent =
+        cloudDispatchProvenance?.intent ?? (exactProvenanceMissing ? undefined : params.mentionContent);
+      const cloudCalledBy =
+        cloudDispatchProvenance?.calledByCatId ?? (exactProvenanceMissing ? undefined : params.mentioningCatId);
       log.info(
         { catId, threadId, userId, provider: cloudOnlyConfig.provider, clientId: cloudOnlyConfig.clientId },
         'F247 KD-17: cloud-only cat — running bounded Host transport instead of provider CLI',
       );
       let outcome: BridgeDispatchOutcome;
       const sourceSender =
-        sourceMessageId && params.mentioningCatId
+        cloudDispatchProvenance?.sourceSender ??
+        (sourceMessageId && cloudCalledBy
           ? params.a2aTriggerMessageId
             ? {
                 kind: 'cat' as const,
-                id: params.mentioningCatId,
+                id: cloudCalledBy,
                 ...(params.parentInvocationId ? { invocationId: params.parentInvocationId } : {}),
               }
             : ({ kind: 'user' as const, id: userId } satisfies CloudBridgeAuditContext['sourceSender'])
-          : undefined;
+          : undefined);
       if (
         deps.cloudInvokeBridge &&
-        deps.cloudReturnBindingSigner &&
-        params.mentionContent &&
-        params.mentioningCatId &&
+        deps.cloudReturnGrantStore &&
+        cloudIntent &&
+        cloudCalledBy &&
         sourceMessageId &&
         sourceSender
       ) {
@@ -1897,37 +2070,52 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
             );
           }
         }
-        outcome = await deps.cloudInvokeBridge.dispatch({
-          catId,
-          threadId,
-          userId,
-          threadTitle: threadMetadata?.title ?? null,
-          participants: (threadMetadata?.participants ?? []).map((participantCatId) => ({
-            catId: participantCatId,
-            handle: `@${participantCatId}`,
-          })),
-          calledBy: params.mentioningCatId,
-          intent: params.mentionContent,
-          sourceMessageId,
-          cloudReturnBinding: deps.cloudReturnBindingSigner.sign({
+        let grant: Awaited<ReturnType<NonNullable<InvocationDeps['cloudReturnGrantStore']>['issue']>> | undefined;
+        try {
+          grant = await deps.cloudReturnGrantStore.issue({
             threadId,
             userId,
             sourceMessageId,
             dispatchInvocationId: invocationId,
             targetCatId: String(catId),
-          }),
-        });
+          });
+        } catch (err) {
+          log.warn(
+            { catId, threadId, invocationId, sourceMessageId, err },
+            'F247 cloud return grant persistence failed; suppressing Host dispatch',
+          );
+        }
+        if (!grant?.ok) {
+          outcome = {
+            kind: 'fallback',
+            reason: 'incomplete-dispatch-provenance',
+            detail: 'Cloud return grant could not be persisted before Host delivery',
+          };
+        } else {
+          outcome = await deps.cloudInvokeBridge.dispatch({
+            catId,
+            threadId,
+            userId,
+            threadTitle: threadMetadata?.title ?? null,
+            participants: (threadMetadata?.participants ?? []).map((participantCatId) => ({
+              catId: participantCatId,
+              handle: `@${participantCatId}`,
+            })),
+            calledBy: cloudCalledBy,
+            intent: cloudIntent,
+            sourceMessageId,
+          });
+        }
       } else {
         const reason = !sourceMessageId
           ? 'missing-source-message-id'
-          : deps.cloudInvokeBridge &&
-              (!deps.cloudReturnBindingSigner || !params.mentionContent || !params.mentioningCatId || !sourceSender)
+          : deps.cloudInvokeBridge && (!deps.cloudReturnGrantStore || !cloudIntent || !cloudCalledBy || !sourceSender)
             ? 'incomplete-dispatch-provenance'
             : 'no-adapter';
         const detail = !sourceMessageId
           ? 'Cloud bridge exact source message provenance was unavailable'
           : deps.cloudInvokeBridge
-            ? 'Cloud bridge invocation provenance or return-binding signer was incomplete'
+            ? 'Cloud bridge invocation provenance or return-grant store was incomplete'
             : 'No configured personal Chrome Host Adapter';
         outcome = { kind: 'fallback', reason, detail };
         log.warn(
@@ -1935,8 +2123,8 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
             catId,
             threadId,
             hasBridge: Boolean(deps.cloudInvokeBridge),
-            hasMentionContent: Boolean(params.mentionContent),
-            hasMentioningCatId: Boolean(params.mentioningCatId),
+            hasMentionContent: Boolean(cloudIntent),
+            hasMentioningCatId: Boolean(cloudCalledBy),
           },
           'F247 cloud transport unavailable before dispatch',
         );
@@ -3056,6 +3244,38 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
       await exposeCurrentPromptMessages();
       return true;
     };
+    let routingContextPrepend = '';
+    let routingContextProjectionFailureAudited = false;
+    const resolveRoutingContextProjection = async (): Promise<void> => {
+      routingContextPrepend = '';
+      if (!deps.routingContextPromptProjection) return;
+      try {
+        routingContextPrepend = await deps.routingContextPromptProjection.resolve({
+          ownerId: userId,
+          ...(params.routingContextIntent ? { intent: params.routingContextIntent } : {}),
+        });
+      } catch (err) {
+        log.warn(
+          { threadId, invocationId, catId, errorName: err instanceof Error ? err.name : 'unknown' },
+          'Routing context prompt projection failed; continuing without dynamic routing context',
+        );
+        if (routingContextProjectionFailureAudited) return;
+        routingContextProjectionFailureAudited = true;
+        try {
+          await auditLog.append({
+            type: AuditEventTypes.ROUTING_CONTEXT_PROJECTION_FAILED,
+            threadId,
+            data: {
+              catId,
+              invocationId,
+              errorName: err instanceof Error ? err.name : 'unknown',
+            },
+          });
+        } catch (auditErr) {
+          log.warn({ threadId, invocationId, auditErr }, 'Routing context projection failure audit write failed');
+        }
+      }
+    };
     const applyEpochScopedPrompt = async (): Promise<void> => {
       const promptBuiltForEpoch = await applyContextPromptFactory();
       if (
@@ -3070,7 +3290,9 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
         prompt = await params.rebuildPromptAfterSessionSeal();
       }
       await resolveInvocationMemoryCues();
+      resolveEntityNudgePresentation();
       await resolveAsrPersonMemoryOpportunities(contextContinuityHandshake);
+      await resolveRoutingContextProjection();
     };
 
     // F-BLOAT: Only inject staticIdentity (systemPrompt) on new provider sessions.
@@ -3149,6 +3371,9 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
           : `${promptWithMission}`;
       if (contextHintPrefix) composedEffectivePrompt = `${contextHintPrefix}\n\n---\n\n${composedEffectivePrompt}`;
       if (stagingPrepend) composedEffectivePrompt = `${stagingPrepend}\n\n---\n\n${composedEffectivePrompt}`;
+      if (routingContextPrepend) {
+        composedEffectivePrompt = `${routingContextPrepend}\n\n---\n\n${composedEffectivePrompt}`;
+      }
       /* @segment M2 — Transcript Path Hints */
       composedEffectivePrompt = appendTranscriptPathHints(composedEffectivePrompt, TRANSCRIPT_DIR, threadId);
       return { promptWithInvocationAdditions: composedPrompt, effectivePrompt: composedEffectivePrompt };
@@ -3310,6 +3535,7 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
                 injectSystemPrompt,
                 hasContextHint: Boolean(contextHintPrefix),
                 hasStagingPrepend: Boolean(stagingPrepend),
+                hasRoutingContextProjection: Boolean(routingContextPrepend),
                 hasMissionPrefix: Boolean(missionPrefix),
               });
               return {
@@ -3421,7 +3647,11 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
         })
       : null;
 
+    const entrustedWorkSourceMessageId = params.a2aTriggerMessageId ?? params.executionCausal?.triggerMessageId;
+    const entrustedWorkTaskStore = deps.taskStore;
+
     const baseOptions: AgentServiceOptions = {
+      ...(params.routeIntent ? { routeIntent: params.routeIntent } : {}),
       callbackEnv,
       ...(invocationCapacitySnapshot
         ? {
@@ -3461,6 +3691,18 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
       ...(spawnCliOverride ? { spawnCliOverride } : {}),
       ...(agentCarrierSessionFactory ? { agentCarrierSessionFactory } : {}),
       ...(activeInvocationFreshness ? { activeInvocationFreshness } : {}),
+      ...(deps.runtimeInteractionPort ? { runtimeInteractionPort: deps.runtimeInteractionPort } : {}),
+      ...(entrustedWorkTaskStore && entrustedWorkSourceMessageId
+        ? {
+            resolveEntrustedWorkTaskRef: async () =>
+              resolveEntrustedWorkTaskRefFromSource(await entrustedWorkTaskStore.listByThread(threadId), {
+                sourceMessageId: entrustedWorkSourceMessageId,
+                threadId,
+                ownerUserId: userId,
+                ownerCatId: catId,
+              }),
+          }
+        : {}),
       invocationId,
       ...(sessionId ? { cliSessionId: sessionId } : {}),
       ...(isResume && !injectSystemPrompt && params.systemPrompt
@@ -4710,6 +4952,12 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
     const streamProcessedOutputs = async function* (sourceMsg: AgentMessage | undefined): AsyncIterable<AgentMessage> {
       if (!sourceMsg) return;
       for (const out of await processMessage(sourceMsg)) {
+        routingDispatchFailureClass ??= classifyRoutingDispatchFailure({
+          ...(out.metadata?.cliDiagnostics?.reasonCode
+            ? { cliReasonCode: out.metadata.cliDiagnostics.reasonCode }
+            : {}),
+          ...(out.errorCode ? { providerErrorCode: out.errorCode } : {}),
+        });
         if (out.type === 'error') {
           hadError = true;
           turnExecutionFailureReason ??= 'provider_execution_failed';
@@ -4868,33 +5116,55 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
       const options: AgentServiceOptions = {
         ...(sessionId ? { sessionId } : {}),
         ...baseOptions,
-        ...(generationRecorder
+        ...(generationRecorder || entityNudgePromptPresentation || entityNudgeCuePromptPresentation
           ? {
               beforeProviderLaunch: async (prepared) => {
                 launchCountThisAttempt += 1;
-                const reason =
-                  nextRequestGenerationReason ??
-                  prepared.boundaryReason ??
-                  (launchCountThisAttempt > 1 ? ('provider_continuation' as const) : undefined);
-                if (currentRequestGenerationCommit) {
-                  const previousOutcome =
-                    reason === 'provider_continuation'
-                      ? 'accepted'
-                      : reason === 'provider_busy'
-                        ? 'rejected'
-                        : 'replaced';
-                  await generationRecorder.recordTerminal(
-                    currentRequestGenerationCommit,
-                    previousOutcome,
-                    reason ?? 'provider_generation_replaced',
-                  );
+                let committed: ProviderRequestGenerationCommitV1;
+                if (generationRecorder) {
+                  const reason =
+                    nextRequestGenerationReason ??
+                    prepared.boundaryReason ??
+                    (launchCountThisAttempt > 1 ? ('provider_continuation' as const) : undefined);
+                  if (currentRequestGenerationCommit) {
+                    const previousOutcome =
+                      reason === 'provider_continuation'
+                        ? 'accepted'
+                        : reason === 'provider_busy'
+                          ? 'rejected'
+                          : 'replaced';
+                    await generationRecorder.recordTerminal(
+                      currentRequestGenerationCommit,
+                      previousOutcome,
+                      reason ?? 'provider_generation_replaced',
+                    );
+                  }
+                  committed = await generationRecorder.recordPrepared(prepared, {
+                    attempt: attempt + 1,
+                    ...(reason ? { reason } : {}),
+                  });
+                  currentRequestGenerationCommit = committed;
+                  nextRequestGenerationReason = undefined;
+                } else {
+                  // Test/legacy embedders still need the adapter's exact boundary
+                  // to confirm an entity prompt, but have no durable transcript owner.
+                  committed = {
+                    requestGenerationId: `ephemeral:${invocationId}:${attempt + 1}:${launchCountThisAttempt}`,
+                    generationOrdinal: launchCountThisAttempt,
+                    sessionId: sessionId ?? `ephemeral:${invocationId}`,
+                  };
                 }
-                const committed = await generationRecorder.recordPrepared(prepared, {
-                  attempt: attempt + 1,
-                  ...(reason ? { reason } : {}),
-                });
-                currentRequestGenerationCommit = committed;
-                nextRequestGenerationReason = undefined;
+
+                const presentation = entityNudgePromptPresentation;
+                const hasCueNudge = Boolean(entityNudgeCuePromptPresentation?.presentation.result.nudges.length);
+                if (presentation?.promptContext || hasCueNudge) {
+                  if (!('body' in prepared.message)) throw new Error('entity_nudge_prepared_prompt_unavailable');
+                  if (presentation?.promptContext && !prepared.message.body.includes(presentation.promptContext)) {
+                    throw new Error('entity_nudge_prepared_prompt_not_exact');
+                  }
+                  presentation?.confirmAssembled();
+                  confirmEntityNudgeCuePresentation(prepared.message.body);
+                }
                 return committed;
               },
             }
@@ -4967,7 +5237,20 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
           activeServiceIterator = null;
           break;
         }
-        const msg = iterResult.value;
+        let msg = iterResult.value;
+        if (msg.nativeGoalObservation) {
+          if (!threadStore || !deps.sessionChainStore) continue;
+          const projected = await projectNativeGoalMessage({
+            threadStore,
+            sessionChainStore: deps.sessionChainStore,
+            threadId,
+            userId,
+            catId,
+            message: msg,
+          });
+          if (!projected) continue;
+          msg = projected;
+        }
         if (currentRequestGenerationCommit) await observeCurrentRequestGeneration(msg);
         // F149: provider_signal / liveness_signal must NOT reset timeout — prevents "续命"
         // F198 Phase C P2-1: status (daemon detail progress) also must NOT reset timeout —
@@ -5387,6 +5670,7 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
             prompt = await params.rebuildPromptAfterSessionSeal();
           }
           await resolveInvocationMemoryCues();
+          resolveEntityNudgePresentation();
           injectSystemPrompt = true;
           contextContinuityHandshake = contextCapability
             ? resolveContextContinuity({
@@ -5648,8 +5932,33 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
       }
       try {
         const result = await deps.turnExecutionStore.transitionTerminal(invocationId, terminal);
-        if (result.outcome === 'not_found') {
+        if (result.outcome === 'not_found' || result.record === null) {
           log.error({ invocationId, terminal }, 'Turn execution disappeared before terminal transition');
+        } else if (
+          deps.routingDispatchSignalObserver &&
+          params.routingDispatchPreflightDecision &&
+          result.record.status !== 'running' &&
+          result.record.endedAt !== undefined
+        ) {
+          const failureClass =
+            routingDispatchFailureClass ??
+            classifyRoutingDispatchFailure({ terminalReason: result.record.terminalReason });
+          try {
+            await deps.routingDispatchSignalObserver.observeTerminal({
+              ownerId: userId,
+              observationId: invocationId,
+              observedAt: result.record.endedAt,
+              evidenceRef: `turn-execution:${invocationId}`,
+              catId,
+              status: result.record.status,
+              ...(result.record.status === 'failed' && failureClass ? { failureClass } : {}),
+              preflightDecision: params.routingDispatchPreflightDecision,
+            });
+          } catch (err) {
+            // Durable lifecycle truth and delivery already committed. Routing observation
+            // is advisory and must never rewrite or suppress that canonical terminal.
+            log.warn({ invocationId, err }, 'F293 durable dispatch signal observation failed');
+          }
         }
       } catch (err) {
         // A running record is deliberately left for startup reconciliation;

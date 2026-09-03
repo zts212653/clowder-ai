@@ -1,7 +1,8 @@
 'use client';
 
 import { buildPreviewGatewayUrl } from '@cat-cafe/shared';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
+import { previewVisiblePageAdmissionController } from '@/lib/preview-visible-page-admission-controller';
 import { useChatStore } from '@/stores/chatStore';
 import { apiFetch } from '@/utils/api-client';
 import { BrowserTabBar } from './BrowserTabBar';
@@ -54,10 +55,24 @@ export function BrowserPanel({ initialPort, initialPath, previewOnly, onNavigate
   const [tabs, setTabs] = useState<BrowserTab[]>([]);
   const [activeTabId, setActiveTabId] = useState<string | null>(null);
   const iframeRef = useRef<HTMLIFrameElement>(null);
+  const [loadedGatewayUrl, setLoadedGatewayUrl] = useState<string | null>(null);
   const tabIdCounter = useRef(0);
   const hmrStatus = useHmrStatus(gatewayPort, targetPort);
-  const { consoleEntries, consoleOpen, setConsoleOpen, isCapturing, screenshotUrl, handleScreenshot, clearConsole } =
-    usePreviewBridge(iframeRef, gatewayPort, targetPort);
+  const pendingVisiblePageAdmission = useSyncExternalStore(
+    previewVisiblePageAdmissionController.subscribe,
+    previewVisiblePageAdmissionController.getSnapshot,
+    () => null,
+  );
+  const {
+    consoleEntries,
+    consoleOpen,
+    setConsoleOpen,
+    isCapturing,
+    screenshotUrl,
+    handleScreenshot,
+    clearConsole,
+    requestVisiblePageAttestation,
+  } = usePreviewBridge(iframeRef, gatewayPort, targetPort, previewVisiblePageAdmissionController.attest);
 
   const activateView = useCallback((port: number, path: string) => {
     setTargetPort(port);
@@ -152,6 +167,41 @@ export function BrowserPanel({ initialPort, initialPath, previewOnly, onNavigate
   })();
 
   const [warning, setWarning] = useState<string | null>(null);
+
+  const requestPendingVisiblePageAdmission = useCallback(() => {
+    if (
+      !pendingVisiblePageAdmission ||
+      pendingVisiblePageAdmission.port !== targetPort ||
+      pendingVisiblePageAdmission.path !== targetPath ||
+      loadedGatewayUrl !== gatewayUrl
+    ) {
+      return;
+    }
+    requestVisiblePageAttestation(pendingVisiblePageAdmission);
+  }, [
+    gatewayUrl,
+    loadedGatewayUrl,
+    pendingVisiblePageAdmission,
+    requestVisiblePageAttestation,
+    targetPath,
+    targetPort,
+  ]);
+
+  useEffect(() => {
+    if (targetHealth === 'reachable' && gatewayUrl && iframeRef.current) {
+      requestPendingVisiblePageAdmission();
+    }
+  }, [gatewayUrl, requestPendingVisiblePageAdmission, targetHealth]);
+
+  useEffect(() => {
+    if (
+      targetHealth === 'unreachable' &&
+      pendingVisiblePageAdmission?.port === targetPort &&
+      pendingVisiblePageAdmission.path === targetPath
+    ) {
+      previewVisiblePageAdmissionController.fail(pendingVisiblePageAdmission.eventId, 'visible_page_unavailable');
+    }
+  }, [pendingVisiblePageAdmission, targetHealth, targetPath, targetPort]);
 
   const handleNavigate = useCallback(() => {
     setError(null);
@@ -279,7 +329,7 @@ export function BrowserPanel({ initialPort, initialPath, previewOnly, onNavigate
   }, [activateView]);
 
   return (
-    <div className="flex flex-col h-full bg-[var(--ws-surface)]">
+    <div className="flex h-full min-h-0 min-w-0 w-full flex-1 flex-col bg-[var(--ws-surface)]">
       {!previewOnly && (
         <BrowserToolbar
           urlInput={urlInput}
@@ -377,10 +427,20 @@ export function BrowserPanel({ initialPort, initialPath, previewOnly, onNavigate
             referrerPolicy="no-referrer"
             className="w-full h-full border-0"
             title="Preview"
-            onLoad={() => setIsLoading(false)}
+            onLoad={() => {
+              setIsLoading(false);
+              setLoadedGatewayUrl(gatewayUrl);
+            }}
             onError={() => {
               setIsLoading(false);
+              setLoadedGatewayUrl(null);
               setError('Failed to load preview');
+              if (pendingVisiblePageAdmission?.port === targetPort && pendingVisiblePageAdmission.path === targetPath) {
+                previewVisiblePageAdmissionController.fail(
+                  pendingVisiblePageAdmission.eventId,
+                  'visible_page_load_error',
+                );
+              }
             }}
           />
         </div>

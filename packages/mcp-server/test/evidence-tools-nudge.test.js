@@ -119,7 +119,7 @@ describe('search_evidence nudge (AC-F3 + KD-7)', () => {
         results: [
           {
             title: 'AUDHD operating manual',
-            anchor: 'docs/stories/audhd-self-observation/landy-audhd-operating-manual.md',
+            anchor: 'docs/stories/audhd-self-observation/operator-audhd-operating-manual.md',
             snippet: 'canonical doc',
             matchRank: 'high',
             sourceType: 'lesson',
@@ -193,7 +193,7 @@ describe('search_evidence nudge (AC-F3 + KD-7)', () => {
         results: [
           {
             title: 'AUDHD operating manual',
-            anchor: 'docs/stories/audhd-self-observation/landy-audhd-operating-manual.md',
+            anchor: 'docs/stories/audhd-self-observation/operator-audhd-operating-manual.md',
             snippet: 'canonical doc',
             matchRank: 'high',
             sourceType: 'lesson',

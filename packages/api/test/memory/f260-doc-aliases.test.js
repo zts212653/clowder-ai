@@ -70,7 +70,7 @@ describe('F260 Phase A — doc_aliases & registry extensions', () => {
       const registry = new EntityRegistryStore(db);
       registry.upsert([
         {
-          entityId: 'person:landy',
+          entityId: 'person:operator',
           type: 'person',
           canonicalName: 'You',
           aliases: ['operator'],
@@ -81,7 +81,7 @@ describe('F260 Phase A — doc_aliases & registry extensions', () => {
 
       const row = db
         .prepare('SELECT stance, visibility_scope, status FROM entity_registry WHERE entity_id = ?')
-        .get('person:landy');
+        .get('person:operator');
       assert.equal(row.stance, 'unknown');
       assert.equal(row.visibility_scope, 'workspace');
       assert.equal(row.status, 'active');

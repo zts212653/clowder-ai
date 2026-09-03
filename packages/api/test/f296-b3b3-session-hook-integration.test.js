@@ -64,7 +64,7 @@ function printCapability() {
 }
 
 describe('F296 B3b-3: authenticated PreCompact → epoch → post-compact packet', () => {
-  test('one event advances once, resets epoch-scoped dedupe, and GET returns the trusted cold packet', async () => {
+  test('a legacy unknown lifetime total still advances once without fabricating historical telemetry', async () => {
     const epochStore = new InMemoryContextEpochStore();
     const contextEpochOwner = new ContextEpochOwner(epochStore);
     const before = await contextEpochOwner.resolve({
@@ -121,7 +121,7 @@ describe('F296 B3b-3: authenticated PreCompact → epoch → post-compact packet
     const record = sessionChainStore.create({
       ...SCOPE,
       cliSessionId: 'claude-runtime-1',
-      compressionCount: 0,
+      compressionCount: null,
     });
     sessionChainStore.applyPolicySnapshot(record.id, {
       config: {
@@ -160,6 +160,7 @@ describe('F296 B3b-3: authenticated PreCompact → epoch → post-compact packet
     });
     assert.equal(preCompact.statusCode, 200);
     const preBody = preCompact.json();
+    assert.equal(preBody.compressionCount, null);
     assert.equal(preBody.contextEpoch.status, 'observed');
     assert.equal(preBody.contextEpoch.decision.contextEpoch, before.contextEpoch + 1);
     assert.equal(preBody.contextEpoch.decision.contextMode, 'cold');

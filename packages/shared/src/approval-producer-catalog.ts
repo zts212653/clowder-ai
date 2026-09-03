@@ -7,14 +7,18 @@ import {
 } from './types/human-disposition-feedback.js';
 
 export interface ApprovalProducerCatalogEntry {
+  /** Canonical lifecycle/projection contract shared by every producer. */
+  lifecycleVersion: 1;
   /** Compact Chinese label used in filters and history. */
   label: string;
   /** Stable product label used on actionable cards. */
   badgeLabel: string;
   /** CSS token (with optional fallback) consumed by the Web surface. */
   colorToken: string;
-  /** Feature-owned approve/reject endpoint base. */
-  decisionEndpointBase: string;
+  /** Feature-owned approve/reject endpoint base; null when decisions exist only on the origin card. */
+  decisionEndpointBase: string | null;
+  /** Which surface owns the decision; origin-card producers are navigation-only in Hub while pending. */
+  decisionSurface: 'approval_hub' | 'origin_card';
   sourcePolicy: 'message-required' | 'message-or-event';
   /**
    * Whether this producer may use the system-authored origin exemption in
@@ -65,10 +69,12 @@ export interface ApprovalProducerCatalogEntry {
  */
 export const APPROVAL_PRODUCER_CATALOG = {
   F128: {
+    lifecycleVersion: 1,
     label: '线程',
     badgeLabel: 'Thread',
     colorToken: 'var(--semantic-info)',
     decisionEndpointBase: '/api/proposals',
+    decisionSurface: 'approval_hub',
     sourcePolicy: 'message-required',
     // TRANSITIVE binding. callback-propose-thread-routes writes the proposal row
     // entirely off the authenticated record — sourceThreadId=record.threadId,
@@ -80,20 +86,24 @@ export const APPROVAL_PRODUCER_CATALOG = {
     humanDispositionReasonCodes: null,
   },
   F139: {
+    lifecycleVersion: 1,
     label: '定时',
     badgeLabel: 'Schedule',
     colorToken: 'var(--semantic-warning, #f59e0b)',
     decisionEndpointBase: '/api/schedule-proposals',
+    decisionSurface: 'approval_hub',
     sourcePolicy: 'message-or-event',
     systemOriginExemption: 'forbidden',
     history: true,
     humanDispositionReasonCodes: null,
   },
   F193: {
+    lifecycleVersion: 1,
     label: '派发',
     badgeLabel: 'Dispatch',
     colorToken: 'var(--semantic-success, #22c55e)',
     decisionEndpointBase: '/api/dispatch-proposals',
+    decisionSurface: 'approval_hub',
     sourcePolicy: 'message-or-event',
     // deriveCallbackOriginRef takes messageId off the authenticated record; threadId
     // is either the authenticated actor's (DIRECT) or the persisted proposal's
@@ -104,20 +114,24 @@ export const APPROVAL_PRODUCER_CATALOG = {
     humanDispositionReasonCodes: null,
   },
   F221: {
+    lifecycleVersion: 1,
     label: '品味',
     badgeLabel: 'Taste',
     colorToken: 'var(--accent-taste, #e879f9)',
     decisionEndpointBase: '/api/taste-proposals',
+    decisionSurface: 'approval_hub',
     sourcePolicy: 'message-or-event',
     systemOriginExemption: 'forbidden',
     history: true,
     humanDispositionReasonCodes: null,
   },
   F225: {
+    lifecycleVersion: 1,
     label: '会话',
     badgeLabel: 'Handoff',
     colorToken: 'var(--semantic-secondary, #8b5cf6)',
     decisionEndpointBase: '/api/session-handoff',
+    decisionSurface: 'approval_hub',
     sourcePolicy: 'message-required',
     // callback-propose-session-handoff reads originTriggerMessageId /
     // a2aTriggerMessageId, threadId and userId off the authenticated
@@ -127,10 +141,12 @@ export const APPROVAL_PRODUCER_CATALOG = {
     humanDispositionReasonCodes: HUMAN_DISPOSITION_REASON_CODES,
   },
   F231: {
+    lifecycleVersion: 1,
     label: '画像',
     badgeLabel: 'Profile',
     colorToken: 'var(--semantic-warning, #f59e0b)',
     decisionEndpointBase: '/api/profile-updates',
+    decisionSurface: 'approval_hub',
     sourcePolicy: 'message-required',
     // DIRECT binding, and the strictest of the set: a body-supplied sourceMessageId
     // is rejected unless it equals the record-derived originMessageId
@@ -141,10 +157,12 @@ export const APPROVAL_PRODUCER_CATALOG = {
     humanDispositionReasonCodes: null,
   },
   F260: {
+    lifecycleVersion: 1,
     label: '实体',
     badgeLabel: 'Entity',
     colorToken: 'var(--accent-entity, #06b6d4)',
     decisionEndpointBase: '/api/entity-proposals',
+    decisionSurface: 'approval_hub',
     sourcePolicy: 'message-or-event',
     // deriveEntityOriginRef is the same shape as F193: messageId off the
     // authenticated record, threadId from the actor or the persisted proposal row.
@@ -155,22 +173,57 @@ export const APPROVAL_PRODUCER_CATALOG = {
     humanDispositionReasonCodes: null,
   },
   F276: {
+    lifecycleVersion: 1,
     label: '人物',
     badgeLabel: 'People',
     colorToken: 'var(--accent-people, #14b8a6)',
     decisionEndpointBase: '/api/person-memory-proposals',
+    decisionSurface: 'approval_hub',
     sourcePolicy: 'message-required',
     systemOriginExemption: 'forbidden',
     history: true,
     humanDispositionReasonCodes: ['not_important', 'wrong_lane', 'bad_evidence', 'wrong', 'other'],
   },
   F292: {
+    lifecycleVersion: 1,
     label: '会议',
     badgeLabel: 'Meeting',
     colorToken: 'var(--semantic-info, #3b82f6)',
     decisionEndpointBase: '/api/meeting-intakes',
+    decisionSurface: 'approval_hub',
     sourcePolicy: 'message-or-event',
     systemOriginExemption: 'forbidden',
+    history: true,
+    humanDispositionReasonCodes: null,
+  },
+  F306: {
+    lifecycleVersion: 1,
+    label: '运行',
+    badgeLabel: 'Runtime',
+    colorToken: 'var(--semantic-warning, #f59e0b)',
+    decisionEndpointBase: null,
+    decisionSurface: 'origin_card',
+    sourcePolicy: 'message-required',
+    // DIRECT binding: the runtime interaction request derives owner/thread/cat/
+    // invocation identity from invoke-single-cat AuditContext. A provider request
+    // and browser response cannot rewrite the origin card coordinates. F306 does
+    // not call ApprovalIngress, but this required catalog claim stays accurate if
+    // shared ingress validation is reused later.
+    systemOriginExemption: 'server_attested',
+    history: false,
+    humanDispositionReasonCodes: null,
+  },
+  F266: {
+    lifecycleVersion: 1,
+    label: '修复',
+    badgeLabel: 'Eval Repair',
+    colorToken: 'var(--semantic-warning, #f59e0b)',
+    decisionEndpointBase: '/api/eval-repair-proposals',
+    decisionSurface: 'approval_hub',
+    sourcePolicy: 'message-required',
+    // callback-propose-eval-repair accepts only an opaque caseActionRef and
+    // derives user/cat/thread/message identity from its InvocationRecord.
+    systemOriginExemption: 'server_attested',
     history: true,
     humanDispositionReasonCodes: null,
   },
@@ -184,9 +237,11 @@ export const APPROVAL_PRODUCER_IDS = Object.freeze([
   'F193',
   'F231',
   'F260',
+  'F266',
   'F221',
   'F276',
   'F292',
+  'F306',
 ] as const satisfies readonly ApprovalProducerId[]);
 
 export function approvalProducerMeta(producerId: ApprovalProducerId): ApprovalProducerCatalogEntry {

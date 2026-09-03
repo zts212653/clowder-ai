@@ -6,9 +6,22 @@
  */
 
 import { APPROVAL_PRODUCER_CATALOG } from '../approval-producer-catalog.js';
+import type { ApprovalLifecycleProjection, LegacyApprovalStatus } from './approval-lifecycle.js';
+import type { EntrustedWorkTaskRefV1 } from './growing.js';
 
 /** Producers admitted to the runtime registry in Wave 0. Later waves extend this union atomically with a binding. */
-export type ApprovalProducerId = 'F128' | 'F139' | 'F193' | 'F221' | 'F225' | 'F231' | 'F260' | 'F276' | 'F292';
+export type ApprovalProducerId =
+  | 'F128'
+  | 'F139'
+  | 'F193'
+  | 'F221'
+  | 'F225'
+  | 'F231'
+  | 'F260'
+  | 'F266'
+  | 'F276'
+  | 'F292'
+  | 'F306';
 
 /** @deprecated Use ApprovalProducerId. Kept as a source-compatible alias during Phase I. */
 export type ApprovalFeatureId = ApprovalProducerId;
@@ -60,11 +73,12 @@ export type ApprovalNavigation =
       legacyMessageId?: string;
     };
 
-/** Hub display status — a projection, not a canonical store status. */
+/** Historical status-filter vocabulary retained for compatibility. */
 export type ApprovalItemStatus = 'pending' | 'stale';
 
-/** Inline decision affordance. Defaults to approve-reject for backward compatibility. */
-export type ApprovalDecisionMode = 'approve-reject' | 'resume-only' | 'claim-select' | 'meeting-intake';
+/** Canonical renderer affordance. Legacy recovery modes stop at the API registry boundary. */
+export type ApprovalDecisionMode = 'approve-reject' | 'claim-select' | 'meeting-intake';
+export type LegacyApprovalDecisionMode = ApprovalDecisionMode | 'resume-only';
 
 /** Unified DTO that all producer adapters return. */
 export interface ApprovalItem {
@@ -72,22 +86,40 @@ export interface ApprovalItem {
   sourceFeatureId: ApprovalProducerId;
   requesterCatId: string;
   ownerUserId: string;
-  status: ApprovalItemStatus;
+  /** Producer-owned legacy vocabulary. It must stop at ApprovalProducerRegistry. */
+  status: LegacyApprovalStatus;
   summary: string;
   detail: Record<string, unknown>;
   navigation: ApprovalNavigation;
   inlineApprovable: boolean;
-  decisionMode?: ApprovalDecisionMode;
+  decisionMode?: LegacyApprovalDecisionMode;
   expiresAt?: number;
   createdAt: number;
+  entrustedWorkTaskRef?: EntrustedWorkTaskRefV1;
 }
 
-export type SettledStatus = 'approved' | 'rejected';
+/** Canonical renderer DTO. Legacy producer status words stop at the API registry boundary. */
+export interface ApprovalHubItem
+  extends Omit<ApprovalItem, 'status' | 'expiresAt' | 'decisionMode'>,
+    ApprovalLifecycleProjection {
+  decisionMode?: ApprovalDecisionMode;
+  expiresAt?: number;
+}
+
+/** Legacy adapter vocabulary; canonical renderers consume SettledApprovalHubItem. */
+export type SettledStatus = 'approved' | 'rejected' | 'withdrawn' | 'superseded';
 
 export interface SettledApprovalItem extends Omit<ApprovalItem, 'status' | 'expiresAt' | 'inlineApprovable'> {
   status: SettledStatus;
   decidedAt: number;
   decidedBy: string;
+}
+
+/** Canonical settled DTO; accepted is not evidence of successful materialization. */
+export interface SettledApprovalHubItem
+  extends Omit<SettledApprovalItem, 'status' | 'decisionMode'>,
+    ApprovalLifecycleProjection {
+  decisionMode?: ApprovalDecisionMode;
 }
 
 function requireNonBlank(value: string, field: string): void {

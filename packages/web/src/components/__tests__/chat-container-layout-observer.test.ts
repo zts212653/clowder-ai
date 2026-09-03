@@ -2,6 +2,15 @@ import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ChatContainer } from '@/components/ChatContainer';
+import { ThreadChatRuntimeProvider } from '@/components/thread-chat';
+
+function renderChatContainer(threadId: string) {
+  return React.createElement(
+    ThreadChatRuntimeProvider,
+    { routeThreadId: threadId },
+    React.createElement(ChatContainer, { threadId }),
+  );
+}
 
 type StoreState = {
   messages: [];
@@ -238,6 +247,7 @@ vi.mock('../VoteActiveBar', () => ({
 vi.mock('../ScrollToBottomButton', () => ({ ScrollToBottomButton: () => null }));
 vi.mock('../SplitPaneView', () => ({
   SplitPaneView: () => React.createElement('div', { 'data-testid': 'split-view' }),
+  SplitPaneChatView: () => React.createElement('div', { 'data-testid': 'split-view' }),
 }));
 vi.mock('../WorkspacePanel', () => ({ WorkspacePanel: () => null }));
 vi.mock('../BootstrapOrchestrator', () => ({ BootstrapOrchestrator: () => null }));
@@ -294,7 +304,7 @@ describe('ChatContainer bottom chrome observer', () => {
 
   it('re-observes the new bottom chrome after split view toggles back to single', async () => {
     await act(async () => {
-      root.render(React.createElement(ChatContainer, { threadId: 'thread-1' }));
+      root.render(renderChatContainer('thread-1'));
     });
 
     const firstBottomChrome = resizeObserverInstances[0]?.observe.mock.calls[0]?.[0] as HTMLElement | undefined;
@@ -305,14 +315,14 @@ describe('ChatContainer bottom chrome observer', () => {
 
     storeState = { ...storeState, viewMode: 'split' };
     await act(async () => {
-      root.render(React.createElement(ChatContainer, { threadId: 'thread-1' }));
+      root.render(renderChatContainer('thread-1'));
     });
     expect(container.querySelector('[data-testid="split-view"]')).toBeTruthy();
     expect(resizeObserverInstances[0]?.disconnect).toHaveBeenCalledTimes(1);
 
     storeState = { ...storeState, viewMode: 'single' };
     await act(async () => {
-      root.render(React.createElement(ChatContainer, { threadId: 'thread-1' }));
+      root.render(renderChatContainer('thread-1'));
     });
 
     const secondBottomChrome = resizeObserverInstances[1]?.observe.mock.calls[0]?.[0] as HTMLElement | undefined;

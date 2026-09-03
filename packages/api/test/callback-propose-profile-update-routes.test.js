@@ -92,7 +92,7 @@ describe('callback propose-profile-update route', () => {
   it('happy path: pins current primer as beforeContent + baseContentHash, creates pending + card', async () => {
     seedPrimer('OLD primer');
     const res = await propose({
-      body: { afterContent: 'NEW primer', rationale: 'landy likes blue', signalKind: 'cat-declared' },
+      body: { afterContent: 'NEW primer', rationale: 'operator likes blue', signalKind: 'cat-declared' },
     });
     assert.equal(res.statusCode, 200);
     const body = JSON.parse(res.body);

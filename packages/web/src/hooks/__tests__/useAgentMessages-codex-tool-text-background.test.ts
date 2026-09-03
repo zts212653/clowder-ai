@@ -63,6 +63,32 @@ describe('Codex background path — tool work-log + text converge', () => {
     expect(streamBubbles[0]!.toolEvents?.length ?? 0).toBeGreaterThan(0);
   });
 
+  it('keeps a background file_change tool card when its semantic diff augments the native carrier', () => {
+    bg.dispatchBg({
+      ...bgTool('parent-bg-file-change'),
+      toolName: 'file_change',
+      toolInput: { status: 'completed', changes: [{ path: 'src/a.ts', kind: 'update' }] },
+      semanticEvent: {
+        v: 1,
+        id: 'diff-background-1',
+        kind: 'diff',
+        occurredAt: 1000,
+        stage: 'completed',
+        summary: '1 个文件变更',
+      },
+    });
+
+    const streamBubbles = threadCodexStreamBubbles(BG);
+    expect(streamBubbles).toHaveLength(1);
+    expect(streamBubbles[0]?.toolEvents?.some((event) => event.label.includes('file_change'))).toBe(true);
+    expect(
+      useChatStore
+        .getState()
+        .getThreadState(BG)
+        .messages.some((message) => message.id === 'semantic:diff-background-1'),
+    ).toBe(false);
+  });
+
   it.each([
     {
       name: 'web_search',

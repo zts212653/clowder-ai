@@ -1,12 +1,10 @@
 /**
  * F260 Phase B: EntityNudgeService — orchestrates the entity nudge pipeline.
  *
- * Wraps InputEntityDetector + EntityNudgeBuilder + EntityNudgeCooldown
- * into a single service call: processInput(text, options) → NudgePayload[].
+ * Separates route-level candidate discovery from consumer-bound presentation.
  *
- * Intended to be called from the message routing pipeline (route-serial.ts)
- * when a human message arrives. The returned NudgePayload[] is rendered as
- * typed metadata (system notice) — not stored in canonical messages.
+ * Routing detects human-input candidates once. Each child invocation then
+ * prepares and confirms its own typed metadata at the provider boundary.
  *
  * Telemetry: increments entity_nudge.detected / delivered / suppressed /
  * privacy_blocked counters via OTel (AC-B5).
@@ -56,13 +54,13 @@ function isNudgeRenderable(nudge: NudgePayload): boolean {
 export interface NudgeProcessInput {
   /** Human input text to scan. */
   text: string;
-  /** Thread ID for cooldown keying and privacy gate. */
+  /** Thread ID for candidate scope and privacy gate. */
   threadId: string;
   /** Owner user ID for privacy gate. */
   ownerUserId?: string;
   /** Entity IDs already in conversation context (context suppression). */
   contextAnchors?: Set<string>;
-  /** Current timestamp (ms). Defaults to Date.now(). */
+  /** Compatibility test seam; delivery time belongs to EntityNudgeConsumer. */
   now?: number;
 }
 
@@ -71,10 +69,37 @@ export interface NudgeProcessResult {
   nudges: NudgePayload[];
   /** Count of entities detected before filtering. */
   detectedCount: number;
-  /** Count of entities suppressed by cooldown. */
+  /** Count of entities suppressed before or during consumer presentation. */
   suppressedCount: number;
   /** Count of entities blocked by privacy gate (AC-B5/B7). */
   privacyBlockedCount: number;
+}
+
+/** Route-owned discovery result. It is deliberately not a delivery receipt. */
+export interface EntityNudgeCandidateBatch extends NudgeProcessResult {
+  readonly threadId: string;
+  readonly unrenderableNudges: readonly NudgePayload[];
+}
+
+/** Coordinates that bind a nudge to one exact consumer prompt. */
+export interface EntityNudgeConsumer {
+  readonly catId: string;
+  readonly invocationId: string;
+  readonly sourceMessageId: string;
+  readonly now?: number;
+}
+
+/** A prompt fragment awaiting the adapter's exact pre-provider confirmation. */
+export interface EntityNudgePromptPresentation {
+  readonly result: NudgeProcessResult;
+  readonly promptContext: string;
+  /**
+   * Commits only the candidate nudge(s) that an exact request actually
+   * contains. A direct entity-nudge block confirms the full capped set; a
+   * typed Memory Cue can confirm only the cue envelopes that survived its
+   * own presentation admission.
+   */
+  confirmAssembled(confirmedNudges?: readonly NudgePayload[]): void;
 }
 
 export class EntityNudgeService {
@@ -91,18 +116,10 @@ export class EntityNudgeService {
   }
 
   /**
-   * Process human input text for entity nudges.
-   * Returns NudgePayload[] ready for typed-metadata rendering.
-   *
-   * Full pipeline: detect → build → cooldown filter → telemetry → record.
+   * Detect route-level candidates only. Discovery must not consume a cooldown
+   * slot or write a delivery event: one route can fan out to several cats.
    */
-  processInput(input: NudgeProcessInput): NudgeProcessResult {
-    const now = input.now ?? Date.now();
-
-    // ── Step 1: Detect entity references ──
-    // Detect more candidates than the final cap — cooldown may suppress some,
-    // and we want non-cooldown entities to fill the slots (R4 cap fix).
-    // Final AC-B4 cap (3) is applied after cooldown filtering in Step 3.
+  detectCandidates(input: NudgeProcessInput): EntityNudgeCandidateBatch {
     const DELIVERY_CAP = 3;
     const detectOptions: DetectOptions = {
       threadId: input.threadId,
@@ -120,7 +137,14 @@ export class EntityNudgeService {
     }
 
     if (detected.length === 0) {
-      return { nudges: [], detectedCount: 0, suppressedCount: 0, privacyBlockedCount };
+      return {
+        threadId: input.threadId,
+        nudges: [],
+        unrenderableNudges: [],
+        detectedCount: 0,
+        suppressedCount: 0,
+        privacyBlockedCount,
+      };
     }
 
     // ── Step 2: Build nudge payloads ──
@@ -132,9 +156,8 @@ export class EntityNudgeService {
       entityNudgeDetected.add(1, attrs);
     }
 
-    // ── Step 2.1: Renderability gate (F263 R9 — must run before cap/cooldown) ──
-    // A nudge with no story-coordinate provenance will never reach the prompt,
-    // so it must not consume a delivery slot, enter cooldown, or record as delivered.
+    // A nudge with no story-coordinate provenance never reaches a prompt, so it
+    // remains a candidate-side suppression and never touches delivery accounting.
     const allNudges = builtNudges.filter(isNudgeRenderable);
     const unrenderable = builtNudges.filter((n) => !allNudges.includes(n));
     if (unrenderable.length > 0) {
@@ -142,139 +165,117 @@ export class EntityNudgeService {
         const attrs = { sourceFamily: nudge.telemetry.sourceFamily, aliasClass: nudge.telemetry.aliasClass };
         entityNudgeSuppressed.add(1, attrs);
       }
-      if (this.eventStore) {
-        for (const nudge of unrenderable) {
-          this.eventStore.recordSuppressed({
-            threadId: input.threadId,
-            entityId: nudge.entityId ?? nudge.docAnchor ?? nudge.matchedAlias,
-            aliasMatched: nudge.matchedAlias,
-            sourceFamily: nudge.telemetry.sourceFamily,
-            aliasClass: nudge.telemetry.aliasClass,
-            renderedAt: now,
-            reason: 'no_story_coordinate',
-          });
-        }
-      }
     }
-
-    if (allNudges.length === 0) {
-      return {
-        nudges: [],
-        detectedCount: detected.length,
-        suppressedCount: unrenderable.length,
-        privacyBlockedCount,
-      };
-    }
-
-    // ── Step 2.5: Hydrate cooldown from persistent event store (restart continuity) ──
-    // If the in-memory cooldown has no record for an entity but the persistent
-    // event store does, pre-seed the cooldown. This ensures cooldown survives
-    // process restarts without requiring Redis or external state.
-    if (this.eventStore) {
-      for (const nudge of allNudges) {
-        const entityKey = nudge.entityId ?? nudge.docAnchor;
-        if (entityKey && !this.cooldown.hasRecord(entityKey, input.threadId)) {
-          const lastRendered = this.eventStore.lastRenderedAt(entityKey, input.threadId);
-          if (lastRendered != null) {
-            this.cooldown.record(entityKey, input.threadId, lastRendered);
-          }
-        }
-      }
-    }
-
-    // ── Step 3: Cooldown filter (AC-B4) ──
-    const postCooldown = this.cooldown.filterNudges(allNudges, input.threadId, now);
-    const suppressedCount = allNudges.length - postCooldown.length;
-
-    // Telemetry: suppressed nudges with per-nudge attributes
-    if (suppressedCount > 0) {
-      const suppressed = allNudges.filter((n) => !postCooldown.includes(n));
-      for (const nudge of suppressed) {
-        const attrs = { sourceFamily: nudge.telemetry.sourceFamily, aliasClass: nudge.telemetry.aliasClass };
-        entityNudgeSuppressed.add(1, attrs);
-      }
-    }
-
-    // ── Step 3.5: Apply delivery cap AFTER cooldown (R4 fix) ──
-    // Detection over-fetches so cooldown-suppressed entities don't eat slots
-    // that non-cooldown entities could fill. Cap applied here, not at detection.
-    const capped = postCooldown.slice(0, DELIVERY_CAP);
-    const capTruncated = postCooldown.slice(DELIVERY_CAP);
-
-    // ── Step 3.6: Telemetry for cap-truncated entities (F260 regression) ──
-    // Entities that passed cooldown but exceeded delivery cap are suppressed
-    // with reason='context_suppressed' — making truncation visible in telemetry.
-    const capTruncatedCount = capTruncated.length;
-    if (capTruncatedCount > 0) {
-      for (const nudge of capTruncated) {
-        const attrs = { sourceFamily: nudge.telemetry.sourceFamily, aliasClass: nudge.telemetry.aliasClass };
-        entityNudgeSuppressed.add(1, attrs);
-      }
-    }
-
-    // ── Step 4: Record delivered nudges in cooldown + event store ──
-    this.cooldown.recordAll(capped, input.threadId, now);
-
-    // Telemetry: delivered nudges with per-nudge attributes
-    for (const nudge of capped) {
-      const attrs = { sourceFamily: nudge.telemetry.sourceFamily, aliasClass: nudge.telemetry.aliasClass };
-      entityNudgeDelivered.add(1, attrs);
-    }
-
-    // AC-B5: Record events in persistent store (if wired).
-    // Delivered nudges get outcome='delivered' (pending resolution);
-    // cooldown-suppressed nudges get outcome='recurrence_caught';
-    // cap-truncated nudges get outcome='context_suppressed' (F260 regression fix).
-    if (this.eventStore) {
-      for (const nudge of capped) {
-        this.eventStore.recordDelivered({
-          threadId: input.threadId,
-          entityId: nudge.entityId ?? nudge.docAnchor ?? nudge.matchedAlias,
-          aliasMatched: nudge.matchedAlias,
-          sourceFamily: nudge.telemetry.sourceFamily,
-          aliasClass: nudge.telemetry.aliasClass,
-          renderedAt: now,
-        });
-      }
-      if (suppressedCount > 0) {
-        const suppressed = allNudges.filter((n) => !postCooldown.includes(n));
-        for (const nudge of suppressed) {
-          this.eventStore.recordSuppressed({
-            threadId: input.threadId,
-            entityId: nudge.entityId ?? nudge.docAnchor ?? nudge.matchedAlias,
-            aliasMatched: nudge.matchedAlias,
-            sourceFamily: nudge.telemetry.sourceFamily,
-            aliasClass: nudge.telemetry.aliasClass,
-            renderedAt: now,
-            reason: 'recurrence_caught',
-          });
-        }
-      }
-      // Cap-truncated entities: visible in event store as context_suppressed
-      if (capTruncatedCount > 0) {
-        for (const nudge of capTruncated) {
-          this.eventStore.recordSuppressed({
-            threadId: input.threadId,
-            entityId: nudge.entityId ?? nudge.docAnchor ?? nudge.matchedAlias,
-            aliasMatched: nudge.matchedAlias,
-            sourceFamily: nudge.telemetry.sourceFamily,
-            aliasClass: nudge.telemetry.aliasClass,
-            renderedAt: now,
-            reason: 'context_suppressed',
-          });
-        }
-      }
-    }
-
-    // Total suppressed = unrenderable + cooldown + cap-truncated (combined for result reporting)
-    const totalSuppressed = unrenderable.length + suppressedCount + capTruncatedCount;
 
     return {
-      nudges: capped,
+      threadId: input.threadId,
+      nudges: allNudges,
+      unrenderableNudges: unrenderable,
       detectedCount: detected.length,
-      suppressedCount: totalSuppressed,
+      suppressedCount: unrenderable.length,
       privacyBlockedCount,
     };
+  }
+
+  /**
+   * Bind candidates to one invocation after its identity exists. This is still
+   * not delivery accounting: callers must invoke confirmAssembled() from the
+   * adapter's exact pre-provider boundary.
+   */
+  preparePresentation(
+    candidates: EntityNudgeCandidateBatch,
+    consumer: EntityNudgeConsumer,
+  ): EntityNudgePromptPresentation {
+    this.assertConsumerCoordinates(consumer);
+    const now = consumer.now ?? Date.now();
+    for (const nudge of candidates.nudges) {
+      const entityKey = nudge.entityId ?? nudge.docAnchor;
+      if (!entityKey || this.cooldown.hasRecord(entityKey, candidates.threadId, consumer.catId)) continue;
+      const lastRendered = this.eventStore?.lastRenderedAt(entityKey, candidates.threadId, consumer.catId);
+      if (lastRendered != null) this.cooldown.record(entityKey, candidates.threadId, consumer.catId, lastRendered);
+    }
+
+    const postCooldown = this.cooldown.filterNudges(candidates.nudges, candidates.threadId, consumer.catId, now);
+    const cooldownSuppressed = candidates.nudges.filter((nudge) => !postCooldown.includes(nudge));
+    const capped = postCooldown.slice(0, 3);
+    const capTruncated = postCooldown.slice(3);
+    const result: NudgeProcessResult = {
+      nudges: capped,
+      detectedCount: candidates.detectedCount,
+      suppressedCount: candidates.suppressedCount + cooldownSuppressed.length + capTruncated.length,
+      privacyBlockedCount: candidates.privacyBlockedCount,
+    };
+
+    this.recordSuppressed(cooldownSuppressed, candidates.threadId, consumer, now, 'recurrence_caught');
+    this.recordSuppressed(capTruncated, candidates.threadId, consumer, now, 'context_suppressed');
+    let assembled = false;
+    return {
+      result,
+      promptContext: EntityNudgeService.formatForPrompt(result),
+      confirmAssembled: (confirmedNudges = capped) => {
+        if (assembled) return;
+        if (confirmedNudges.length === 0) return;
+        if (confirmedNudges.some((nudge) => !capped.includes(nudge))) {
+          throw new Error('entity_nudge_confirmation_candidate_not_admitted');
+        }
+        assembled = true;
+        if (this.eventStore) {
+          for (const nudge of confirmedNudges) {
+            this.eventStore.recordDelivered({
+              threadId: candidates.threadId,
+              invocationId: consumer.invocationId,
+              catId: consumer.catId,
+              sourceMessageId: consumer.sourceMessageId,
+              entityId: nudge.entityId ?? nudge.docAnchor ?? nudge.matchedAlias,
+              aliasMatched: nudge.matchedAlias,
+              sourceFamily: nudge.telemetry.sourceFamily,
+              aliasClass: nudge.telemetry.aliasClass,
+              renderedAt: now,
+            });
+          }
+        }
+        this.cooldown.recordAll([...confirmedNudges], candidates.threadId, consumer.catId, now);
+        for (const nudge of confirmedNudges) {
+          entityNudgeDelivered.add(1, {
+            sourceFamily: nudge.telemetry.sourceFamily,
+            aliasClass: nudge.telemetry.aliasClass,
+          });
+        }
+      },
+    };
+  }
+
+  private recordSuppressed(
+    nudges: readonly NudgePayload[],
+    threadId: string,
+    consumer: EntityNudgeConsumer,
+    now: number,
+    reason: 'recurrence_caught' | 'context_suppressed',
+  ): void {
+    for (const nudge of nudges) {
+      entityNudgeSuppressed.add(1, {
+        sourceFamily: nudge.telemetry.sourceFamily,
+        aliasClass: nudge.telemetry.aliasClass,
+      });
+      this.eventStore?.recordSuppressed({
+        threadId,
+        invocationId: consumer.invocationId,
+        catId: consumer.catId,
+        sourceMessageId: consumer.sourceMessageId,
+        entityId: nudge.entityId ?? nudge.docAnchor ?? nudge.matchedAlias,
+        aliasMatched: nudge.matchedAlias,
+        sourceFamily: nudge.telemetry.sourceFamily,
+        aliasClass: nudge.telemetry.aliasClass,
+        renderedAt: now,
+        reason,
+      });
+    }
+  }
+
+  private assertConsumerCoordinates(consumer: EntityNudgeConsumer): void {
+    if (!consumer.catId || !consumer.invocationId || !consumer.sourceMessageId) {
+      throw new Error('entity_nudge_presentation_consumer_coordinates_required');
+    }
   }
 
   /**

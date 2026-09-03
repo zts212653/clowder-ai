@@ -12,11 +12,11 @@
 
 import type {
   ApprovalFeatureId,
-  ApprovalItem,
+  ApprovalHubItem,
   EntityConflictContext,
   EntityConflictResolutionRequest,
   HumanDispositionFeedbackInput,
-  SettledApprovalItem,
+  SettledApprovalHubItem,
 } from '@cat-cafe/shared';
 import { create } from 'zustand';
 import { approvalFeatureMeta, isApprovalItemBatchDecidable } from '@/lib/approval-features';
@@ -35,7 +35,11 @@ function resolveEndpoint(
   proposalId: string,
   action: 'approve' | 'reject',
 ): string {
-  const base = (featureId && approvalFeatureMeta(featureId).decisionEndpointBase) ?? DEFAULT_ENDPOINT_BASE;
+  const metadata = featureId ? approvalFeatureMeta(featureId) : undefined;
+  if (metadata?.decisionSurface === 'origin_card') {
+    throw new Error(`${featureId} decisions are available only on the canonical origin card`);
+  }
+  const base = metadata?.decisionEndpointBase ?? DEFAULT_ENDPOINT_BASE;
   return `${base}/${proposalId}/${action}`;
 }
 
@@ -93,18 +97,18 @@ function withoutDecision(deciding: ApprovalHubState['deciding'], proposalId: str
 }
 
 function applyConflictFeedback(
-  items: ApprovalItem[],
+  items: ApprovalHubItem[],
   proposalId: string,
   conflict: EntityConflictContext,
   message: string,
-): ApprovalItem[] {
+): ApprovalHubItem[] {
   return items.map((item) =>
     item.proposalId === proposalId ? { ...item, detail: { ...item.detail, conflict, conflictError: message } } : item,
   );
 }
 
 interface ApprovalHubState {
-  items: ApprovalItem[];
+  items: ApprovalHubItem[];
   count: number;
   isLoading: boolean;
   isOpen: boolean;
@@ -115,12 +119,12 @@ interface ApprovalHubState {
   selectedIds: Set<string>;
   /** AC-D5: Results of the last batch operation (cleared on next batch) */
   batchResults: BatchItemResult[];
-  /** F246 Phase F: Settled (approved|rejected) history items */
-  settledItems: SettledApprovalItem[];
+  /** F246 Phase F: canonical settled lifecycle history items. */
+  settledItems: SettledApprovalHubItem[];
   settledIsLoading: boolean;
   settledError: string | null;
   fetchPending: () => Promise<void>;
-  /** F246 Phase F: fetch settled history (approved|rejected proposals) */
+  /** F246 Phase F: fetch normalized settled lifecycle history. */
   fetchSettled: (limit?: number) => Promise<void>;
   open: () => void;
   close: () => void;
@@ -167,7 +171,7 @@ export const useApprovalHubStore = create<ApprovalHubState>((set, get) => ({
     try {
       const res = await apiFetch('/api/approval-hub/pending');
       if (!res.ok) throw new Error(`Failed to fetch: ${res.status}`);
-      const data = (await res.json()) as { items: ApprovalItem[]; count: number };
+      const data = (await res.json()) as { items: ApprovalHubItem[]; count: number };
       set({ items: data.items, count: data.count, isLoading: false });
     } catch (err) {
       set({ error: err instanceof Error ? err.message : 'Unknown error', isLoading: false });
@@ -179,7 +183,7 @@ export const useApprovalHubStore = create<ApprovalHubState>((set, get) => ({
     try {
       const res = await apiFetch(`/api/approval-hub/settled?limit=${limit}`);
       if (!res.ok) throw new Error(`Failed to fetch: ${res.status}`);
-      const data = (await res.json()) as { items: SettledApprovalItem[]; count: number };
+      const data = (await res.json()) as { items: SettledApprovalHubItem[]; count: number };
       set({ settledItems: data.items, settledIsLoading: false });
     } catch (err) {
       set({ settledError: err instanceof Error ? err.message : 'Unknown error', settledIsLoading: false });

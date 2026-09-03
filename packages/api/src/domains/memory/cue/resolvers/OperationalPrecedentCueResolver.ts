@@ -41,7 +41,8 @@ export class OperationalPrecedentCueResolver implements MemoryCueResolver {
         opportunity,
         family: this.family,
         resolverVersion: this.resolverVersion,
-        whyNow: 'A merge decision has complete source evidence and an exact external billing condition.',
+        whyNow:
+          'A merge decision has complete source evidence and an exact external billing condition; zero-step billing is state-only external infrastructure, not an owner action.',
         source,
         context,
       }),

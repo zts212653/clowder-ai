@@ -18,8 +18,8 @@ describe('Capability Revoke', () => {
   });
 
   test('revoke records revoker and timestamp', () => {
-    const result = revokeCapability(makeEntry(), 'you');
-    assert.strictEqual(result.revokedBy, 'you');
+    const result = revokeCapability(makeEntry(), 'operator');
+    assert.strictEqual(result.revokedBy, 'operator');
     assert.ok(!Number.isNaN(Date.parse(result.revokedAt)));
   });
 

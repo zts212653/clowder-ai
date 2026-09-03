@@ -178,6 +178,51 @@ test('unexpected child exit closes the Broker session and marks runtime crashed'
   });
 });
 
+test('one transient unavailable exit is replaced without an unbounded restart loop', async () => {
+  const rootDir = await mkdtemp(join(tmpdir(), 'cat-cafe-k2d-transient-recovery-'));
+  const harness = await createExternalRuntimeHarness({ rootDir, methods: [eventsHandler([])] });
+  const processes = new FakePluginProcessAdapter();
+  const supervisor = new ExternalPluginRuntimeSupervisor({
+    inventory: harness.inventory,
+    broker: harness.broker,
+    packages: {
+      async resolveInstalledPackage() {
+        return {
+          rootDir,
+          manifest: externalManifest(),
+          verifyIntegrity: async () => undefined,
+          release: async () => undefined,
+        };
+      },
+    },
+    processes,
+    now: () => 5_000,
+  });
+  const firstStart = supervisor.start(EXTERNAL_INSTANCE_ID);
+  const firstChild = await processes.nextProcess();
+  await completeExternalHandshake(firstChild);
+  const firstHandle = await firstStart;
+
+  firstChild.exit({ code: 1, signal: null, diagnostic: { code: 'UNAVAILABLE' } });
+  await firstHandle.closed;
+  const replacement = await processes.waitForProcess(1);
+  await completeExternalHandshake(replacement);
+
+  let inventory = await harness.inventory.snapshot();
+  assert.equal(inventory.instances[0].activationState, 'enabled');
+  assert.equal(inventory.instances[0].runtimeState, 'healthy');
+  assert.equal(inventory.instances[0].lastRuntimeError, undefined);
+
+  replacement.exit({ code: 1, signal: null, diagnostic: { code: 'UNAVAILABLE' } });
+  await new Promise((resolve) => setImmediate(resolve));
+
+  inventory = await harness.inventory.snapshot();
+  assert.equal(processes.specs.length, 2, 'the replacement may not recursively hot-loop');
+  assert.equal(inventory.instances[0].activationState, 'error');
+  assert.equal(inventory.instances[0].runtimeState, 'crashed');
+  assert.equal(inventory.instances[0].lastRuntimeError.code, 'UNAVAILABLE');
+});
+
 test('Windows process exit codes remain durable when the runtime crashes', async () => {
   const harness = await runningHarness();
   harness.child.exit({ code: 0xc0000005, signal: null });

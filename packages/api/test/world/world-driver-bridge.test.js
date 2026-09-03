@@ -39,7 +39,7 @@ describe('WorldDriverBridge', () => {
       worldId: 'w1',
       name: '逐峰宇宙',
       status: 'active',
-      createdBy: { kind: 'user', id: 'you' },
+      createdBy: { kind: 'user', id: 'operator' },
       createdAt: NOW,
       updatedAt: NOW,
     });

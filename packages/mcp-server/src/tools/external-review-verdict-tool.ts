@@ -1,10 +1,15 @@
 import { z } from 'zod';
-import { defineMcpMigrationFactory } from '../tool-governance-migration.js';
+import { defineMcpCanonicalFactory, defineMcpMigrationFactory } from '../tool-governance-migration.js';
 
 import { callbackPost } from './callback-tools.js';
 import type { ToolResult } from './file-tools.js';
 
 const defineTool = defineMcpMigrationFactory('external-review-verdict-tool.ts', undefined, {
+  resourceFamily: 'tracking-review',
+  authority: 'callback-owner',
+});
+
+const defineCanonicalTool = defineMcpCanonicalFactory('external-review-verdict-tool.ts', undefined, {
   resourceFamily: 'tracking-review',
   authority: 'callback-owner',
 });
@@ -85,6 +90,26 @@ export async function handleExternalReviewVerdict(input: {
   });
 }
 
+export const externalReviewRecoveryInputSchema = {
+  actionLeaseRef: z
+    .object({
+      leaseId: z.string().min(1).describe('Canonical action-successor lease id.'),
+      generation: z.number().int().positive().describe('Canonical action-successor lease generation.'),
+    })
+    .strict(),
+  githubReviewUrl: z
+    .string()
+    .url()
+    .describe('GitHub pull request review permalink (e.g. https://github.com/owner/repo/pull/N#pullrequestreview-ID).'),
+};
+
+export async function handleRecoverExternalReviewVerdict(input: {
+  actionLeaseRef: { leaseId: string; generation: number };
+  githubReviewUrl: string;
+}): Promise<ToolResult> {
+  return callbackPost('/api/callbacks/recover-external-review-verdict', input);
+}
+
 export const externalReviewVerdictTools = [
   defineTool({
     name: 'cat_cafe_record_external_review_verdict',
@@ -104,6 +129,32 @@ export const externalReviewVerdictTools = [
       action: 'update',
       risk: { level: 'write', openWorld: false },
       runtimeProfiles: ['full'],
+    },
+  }),
+  defineCanonicalTool({
+    name: 'cat_cafe_recover_external_review_verdict',
+    description:
+      'Settle one active stale external-review generation from a persisted GitHub review artifact after the PR HEAD has advanced. ' +
+      'Use when: record_external_review_verdict rejects with stale_head because the PR HEAD advanced after the review was conducted, ' +
+      'and the sole holder verdict is durable (persisted as a GitHub review), but the original lease carrier is unavailable. ' +
+      'NOT for: ordinary holder completion, ordinary active replacement, current-HEAD reviews, local review verdicts (use recover_local_review_verdict), or admin closure. ' +
+      'Output: authenticates the predecessor (author) cat and tenant, verifies the GitHub review artifact URL, confirms server-observed HEAD advance, ' +
+      'and atomically settles only the specified old generation so the current owner can dispatch a new review for the current HEAD. ' +
+      'GOTCHA: actionLeaseRef is only a locator; it grants no authority and must name the exact active generation. ' +
+      'GOTCHA: githubReviewUrl must be a GitHub pull request review delivery proof URL anchored to the lease subject PR ' +
+      '(accepted fragments: #pullrequestreview-*, #discussion_r*, #issuecomment-*, #r*; /files path variant also accepted; commit URLs are not accepted).',
+    inputSchema: externalReviewRecoveryInputSchema,
+    handler: handleRecoverExternalReviewVerdict,
+    governance: {
+      implementationExport: 'handleRecoverExternalReviewVerdict',
+      action: 'recover',
+      risk: { level: 'write', openWorld: false },
+      runtimeProfiles: ['full'],
+      standaloneReason: {
+        disposition: 'accepted-boundary',
+        kind: 'authority-boundary',
+        admissionRef: 'file:docs/features/F167-a2a-chain-quality.md',
+      },
     },
   }),
 ] as const;

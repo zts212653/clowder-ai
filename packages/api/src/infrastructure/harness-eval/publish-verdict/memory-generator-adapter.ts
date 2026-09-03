@@ -67,6 +67,7 @@ export function createMemoryGeneratorAdapter(provider: MemoryMetricsProvider): V
       libraryHealth,
       windowDays: selector.windowDays,
       filters: { catId: selector.catId, toolName: selector.toolName },
+      generatedAt: deps.publicationTime,
       submittedPacket: packet,
     });
 

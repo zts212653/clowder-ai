@@ -30,6 +30,7 @@ import type {
 import { ExternalPluginRuntimeError } from './types.js';
 
 const DEFAULT_HANDSHAKE_TIMEOUT_MS = 10_000;
+const TRANSIENT_EXIT_RECOVERY_COOLDOWN_MS = 5 * 60_000;
 
 interface RunnableAuthority {
   readonly instance: PluginInstanceRecord;
@@ -71,11 +72,12 @@ function deferred<Value>(): Deferred<Value> {
 
 export class ExternalPluginRuntimeSupervisor {
   private readonly active = new Map<string, RuntimeExecution>();
-  private readonly handshakeTimeoutMs: number;
+  readonly handshakeTimeoutMs: number;
   private readonly now: () => number;
   private readonly heartbeatPolicy: RuntimeHeartbeatPolicy;
   private readonly processes;
   private readonly recovery: RuntimeLeaseRecoveryCoordinator;
+  private readonly transientRecoveryAt = new Map<string, number>();
 
   constructor(private readonly options: ExternalPluginRuntimeSupervisorOptions) {
     this.handshakeTimeoutMs = options.handshakeTimeoutMs ?? DEFAULT_HANDSHAKE_TIMEOUT_MS;
@@ -199,7 +201,8 @@ export class ExternalPluginRuntimeSupervisor {
     });
     void execution.process.exited.then((exit) => {
       execution.exit = exit;
-      return this.finish(execution, 'process_exit', 'crashed', false);
+      const terminalState = this.canRecoverTransientExit(execution, exit) ? 'restartable' : 'crashed';
+      return this.finish(execution, 'process_exit', terminalState, false);
     });
     this.assertOpen(execution);
     await this.setRuntimeState(execution, 'handshaking');
@@ -376,6 +379,20 @@ export class ExternalPluginRuntimeSupervisor {
       return;
     }
     await this.finish(execution, 'heartbeat_failure', 'crashed', true);
+  }
+
+  private canRecoverTransientExit(
+    execution: RuntimeExecution,
+    exit: Awaited<ExternalPluginProcess['exited']>,
+  ): boolean {
+    if (execution.ending || !execution.started || exit.diagnostic?.code !== 'UNAVAILABLE') return false;
+    const currentTime = this.now();
+    const previousRecoveryAt = this.transientRecoveryAt.get(execution.pluginInstanceId);
+    if (previousRecoveryAt !== undefined && currentTime - previousRecoveryAt < TRANSIENT_EXIT_RECOVERY_COOLDOWN_MS) {
+      return false;
+    }
+    this.transientRecoveryAt.set(execution.pluginInstanceId, currentTime);
+    return true;
   }
 
   private assertOpen(execution: RuntimeExecution): void {

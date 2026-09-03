@@ -166,7 +166,7 @@ describe('F260 entity conflict resolution', () => {
     registry.resolveConflict(
       incoming,
       { action: 'merge-aliases', fingerprint: conflict.fingerprint },
-      { source: 'proposal-approval', actorId: 'you', proposalId: 'ep-8' },
+      { source: 'proposal-approval', actorId: 'operator', proposalId: 'ep-8' },
     );
 
     const resolved = registry.get(incoming.entityId);
@@ -197,7 +197,7 @@ describe('F260 entity conflict resolution', () => {
     registry.resolveConflict(
       incoming,
       { action: 'replace', fingerprint: conflict.fingerprint },
-      { source: 'proposal-approval', actorId: 'you', proposalId: 'ep-replace' },
+      { source: 'proposal-approval', actorId: 'operator', proposalId: 'ep-replace' },
     );
 
     const resolved = registry.get(incoming.entityId);
@@ -318,7 +318,7 @@ describe('F260 entity conflict resolution', () => {
         fingerprint: conflict.fingerprint,
         replacementCanonicalNames: { 'concept:沉迷护栏': '旧防沉迷护栏' },
       },
-      { source: 'proposal-approval', actorId: 'you', proposalId: 'ep-correct' },
+      { source: 'proposal-approval', actorId: 'operator', proposalId: 'ep-correct' },
     );
 
     assert.equal(registry.get('concept:沉迷护栏').canonicalName, '旧防沉迷护栏');

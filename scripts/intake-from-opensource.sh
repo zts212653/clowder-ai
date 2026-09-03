@@ -104,7 +104,7 @@ is_public_only() {
 # Helper: scripts/brand-dictionary-helper.mjs provides CLI + module interface.
 #
 # Classify a path via the dictionary helper.  Returns the inbound classification
-# from path_policies (manual-port / brand-sensitive / public-only / pass-through / safe-cherry-pick).
+# from path_policies (manual-port / public-source / brand-sensitive / public-only / pass-through / safe-cherry-pick).
 classify_path() {
   local path="$1"
   local result
@@ -119,6 +119,16 @@ is_manual_port() {
   local cls
   cls=$(classify_path "$path")
   [ "$cls" = "manual-port" ]
+}
+
+# public-source: canonical home source intentionally contains public brand copy.
+# It is exempt from public-term contamination checks, but community changes must
+# still be manually ported into that source instead of being skipped as public-only.
+is_public_source() {
+  local path="$1"
+  local cls
+  cls=$(classify_path "$path")
+  [ "$cls" = "public-source" ]
 }
 
 # pass-through: file is exempt from both brand guard and intake classification.
@@ -261,13 +271,74 @@ detect_stateful_migration_quarantine() {
   fi
 }
 
+evaluate_source_head_soak() {
+  local pr_info="$1"
+  local soak_end_at="${2:-}"
+  local evaluation
+
+  evaluation=$(PR_JSON="$pr_info" SOAK_END_AT="$soak_end_at" node -e '
+const pr = JSON.parse(process.env.PR_JSON || "{}");
+const headRefOid = String(pr.headRefOid || "");
+const endRaw = String(process.env.SOAK_END_AT || "");
+const end = endRaw ? Date.parse(endRaw) : Date.now();
+if (!headRefOid || !Number.isFinite(end)) {
+  process.exit(2);
+}
+
+// Commit author/committer dates are contributor-controlled and do not prove
+// when an exact candidate first existed on the PR. Use only GitHub-created
+// evidence that is bound to the current HEAD: a check on statusCheckRollup,
+// or a submitted review whose commit oid matches headRefOid.
+const checks = Array.isArray(pr.statusCheckRollup) ? pr.statusCheckRollup : [];
+const reviews = Array.isArray(pr.reviews) ? pr.reviews : [];
+const witnesses = [
+  ...checks.flatMap((check) => [
+    { at: check?.startedAt, kind: "check" },
+    { at: check?.createdAt, kind: "check" },
+    { at: check?.completedAt, kind: "check" },
+  ]),
+  ...reviews
+    .filter((review) => String(review?.commit?.oid || "") === headRefOid)
+    .map((review) => ({ at: review?.submittedAt, kind: "review" })),
+]
+  .map((witness) => ({ ...witness, timestamp: Date.parse(String(witness.at || "")) }))
+  .filter((witness) => Number.isFinite(witness.timestamp) && witness.timestamp <= end)
+  .sort((a, b) => a.timestamp - b.timestamp);
+
+if (witnesses.length === 0) {
+  process.stdout.write("||UNVERIFIABLE|none");
+  process.exit(0);
+}
+
+const firstWitness = witnesses[0];
+const start = firstWitness.timestamp;
+const fullDays = Math.floor((end - start) / 86400000);
+process.stdout.write(
+  `${String(firstWitness.at)}|${fullDays}|${fullDays >= 7 ? "PASS" : "MISSED"}|${firstWitness.kind}`,
+);
+' 2>/dev/null || true)
+
+  if [ -z "$evaluation" ]; then
+    SOURCE_HEAD_WITNESSED_AT=""
+    SOURCE_HEAD_SOAK_DAYS=""
+    SOURCE_HEAD_SOAK_STATUS=""
+    SOURCE_HEAD_WITNESS_KIND=""
+    return 1
+  fi
+
+  IFS='|' read -r SOURCE_HEAD_WITNESSED_AT SOURCE_HEAD_SOAK_DAYS SOURCE_HEAD_SOAK_STATUS SOURCE_HEAD_WITNESS_KIND <<< "$evaluation"
+  [ -n "$SOURCE_HEAD_SOAK_STATUS" ] && [ -n "$SOURCE_HEAD_WITNESS_KIND" ]
+}
+
 print_stateful_migration_quarantine() {
   echo -e "${RED}⛔ STATEFUL MIGRATION QUARANTINE (1224-class)${NC}"
   echo "  Detected: $STATE_CORE_COUNT persistent-state core, $STATE_CONSUMER_COUNT consumer, $STATE_ROLLOUT_COUNT rollout/backfill file(s)"
   echo -e "  ${RED}HOLD: split representation contract, historical backfill, consumer migration, and activation/rollback into reviewable stages.${NC}"
-  echo "  Home absorption requires a minimum 7-day source quarantine after upstream merge."
+  echo "  Public merge requires a minimum 7-day source quarantine on the exact final source/fork HEAD."
+  echo "  The clock starts at the first durable GitHub check/review witness for that SHA; commit dates are not proof."
+  echo "  A new final SHA resets that pre-merge clock; post-merge waiting cannot repair a miss."
   echo "  Required proof: historical-state replay, mixed-version consumer matrix, rollback/off-mode semantics, and exact-HEAD review."
-  echo "  Source-fork soak is useful evidence but cannot replace home historical-state replay."
+  echo "  Source/fork soak is additional evidence; it cannot replace home historical-state replay."
 }
 
 is_high_risk() {
@@ -553,7 +624,7 @@ run_brand_validation() {
           # Skip brand-validation toolchain files — they reference brand terms as
           # detection constants, not as content that needs sanitization.
           case "$bsf" in
-            scripts/intake-from-opensource.sh|scripts/brand-dictionary-helper.mjs|scripts/brand-dictionary-helper.test.mjs) continue ;;
+            scripts/intake-from-opensource.sh|scripts/sync-to-opensource.sh|scripts/brand-dictionary-helper.mjs|scripts/brand-dictionary-helper.test.mjs) continue ;;
           esac
           # Skip already-checked files (dedup)
           if echo "$checked_files" | grep -qF "$bsf"; then continue; fi
@@ -876,16 +947,28 @@ console.log(hasFullA2ATest ? "yes" : "no");
 
 run_absorbed_record_guard() {
   SOURCE_STATEFUL_MIGRATION_QUARANTINE=false
+  SOURCE_HEAD_SOAK_STATUS=""
   local source_pr_info
-  source_pr_info=$(gh pr view "$PR_NUMBER" --repo "$TARGET_REPO" --json state,mergedAt,mergeCommit 2>/dev/null || true)
+  source_pr_info=$(gh pr view "$PR_NUMBER" --repo "$TARGET_REPO" --json state,mergedAt,mergeCommit,changedFiles,headRefOid,reviews,statusCheckRollup 2>/dev/null || true)
   if [ -z "$source_pr_info" ]; then
     echo -e "${RED}✗ Cannot fetch source PR #$PR_NUMBER from $TARGET_REPO for migration quarantine${NC}"
     return 1
   fi
 
+  local source_pr_state
+  source_pr_state=$(echo "$source_pr_info" | node -e "const d=JSON.parse(require('fs').readFileSync('/dev/stdin','utf-8')); console.log(String(d.state||''))")
   local source_pr_files
-  source_pr_files=$(gh api --paginate "repos/$TARGET_REPO/pulls/$PR_NUMBER/files" --jq '.[].filename' 2>/dev/null || true)
+  if ! source_pr_files=$(gh api --paginate "repos/$TARGET_REPO/pulls/$PR_NUMBER/files" --jq '.[].filename' 2>/dev/null); then
+    echo -e "${RED}✗ Cannot fetch source PR #$PR_NUMBER files for migration quarantine${NC}"
+    return 1
+  fi
   if [ -z "$source_pr_files" ]; then
+    local source_changed_files
+    source_changed_files=$(echo "$source_pr_info" | node -e "const d=JSON.parse(require('fs').readFileSync('/dev/stdin','utf-8')); const n=d.changedFiles; console.log(Number.isInteger(n)&&n>=0?String(n):'invalid')")
+    if [ "$SKIP_ABSORBED_GUARD" = true ] && [ "$source_pr_state" = "MERGED" ] && [ "$source_changed_files" = "0" ]; then
+      echo -e "${YELLOW}⚠ Source PR #$PR_NUMBER is a merged zero-diff historical backfill; no source files exist to quarantine${NC}"
+      return 0
+    fi
     echo -e "${RED}✗ Cannot resolve source PR #$PR_NUMBER files for migration quarantine${NC}"
     return 1
   fi
@@ -899,28 +982,29 @@ run_absorbed_record_guard() {
       return 1
     fi
 
-    local source_pr_state
     local source_merged_at
-    local quarantine_age_days
-    source_pr_state=$(echo "$source_pr_info" | node -e "const d=JSON.parse(require('fs').readFileSync('/dev/stdin','utf-8')); console.log(String(d.state||''))")
     source_merged_at=$(echo "$source_pr_info" | node -e "const d=JSON.parse(require('fs').readFileSync('/dev/stdin','utf-8')); console.log(String(d.mergedAt||''))")
     if [ "$source_pr_state" != "MERGED" ] || [ -z "$source_merged_at" ]; then
-      echo -e "${RED}✗ 1224-class source PR must be MERGED before its quarantine clock starts${NC}"
+      echo -e "${RED}✗ 1224-class source PR must be MERGED before home absorption${NC}"
+      echo "  Its quarantine clock belongs to the final source/fork HEAD before public merge."
       return 1
     fi
-    quarantine_age_days=$(SOURCE_MERGED_AT="$source_merged_at" node -e '
-const merged = Date.parse(process.env.SOURCE_MERGED_AT || "");
-if (!Number.isFinite(merged)) process.exit(2);
-console.log(Math.floor((Date.now() - merged) / 86400000));
-' 2>/dev/null || echo invalid)
-    if [ "$quarantine_age_days" = "invalid" ] || [ "$quarantine_age_days" -lt 7 ] 2>/dev/null; then
-      echo -e "${RED}✗ 1224-class stateful migration requires a minimum 7-day source quarantine${NC}"
-      echo "  mergedAt: $source_merged_at"
-      echo "  observed age: $quarantine_age_days day(s)"
-      echo "  Do not absorb it into cat-cafe until the source clock reaches 7 full days."
+
+    if ! evaluate_source_head_soak "$source_pr_info" "$source_merged_at"; then
+      echo -e "${RED}✗ Cannot evaluate the exact source/fork HEAD soak for 1224-class intake${NC}"
+      echo "  Required GitHub facts: headRefOid, mergedAt, and exact-HEAD check/review evidence."
       return 1
     fi
-    echo -e "${YELLOW}⚠ 1224-class quarantine detected; source age ${quarantine_age_days} day(s). Evidence guard remains active.${NC}"
+
+    if [ "$SOURCE_HEAD_SOAK_STATUS" = "PASS" ]; then
+      echo -e "${YELLOW}⚠ Source/fork pre-merge soak: PASS — exact HEAD witnessed for ${SOURCE_HEAD_SOAK_DAYS} full day(s). Evidence guard remains active.${NC}"
+    elif [ "$SOURCE_HEAD_SOAK_STATUS" = "MISSED" ]; then
+      echo -e "${YELLOW}⚠ Source/fork pre-merge soak: MISSED — exact HEAD witnessed for only ${SOURCE_HEAD_SOAK_DAYS} full day(s).${NC}"
+      echo "  Post-merge waiting cannot turn MISSED into PASS; an explicit disposition and all migration proofs remain required."
+    else
+      echo -e "${YELLOW}⚠ Source/fork pre-merge soak: UNVERIFIABLE — no durable pre-merge check/review witness binds the exact final HEAD.${NC}"
+      echo "  Commit timestamps are not accepted as soak evidence; an explicit disposition and all migration proofs remain required."
+    fi
   fi
 
   if [ "$SKIP_ABSORBED_GUARD" = true ]; then
@@ -1069,6 +1153,26 @@ console.log(Math.floor((Date.now() - merged) / 86400000));
   fi
 
   if [ "$SOURCE_STATEFUL_MIGRATION_QUARANTINE" = true ]; then
+    if [ "$SOURCE_HEAD_SOAK_STATUS" != "PASS" ]; then
+      local source_soak_disposition_ok
+      source_soak_disposition_ok=$(ISSUE_JSON="$intent_info" ABSORB_JSON="$absorb_pr_info" EXPECTED_STATUS="$SOURCE_HEAD_SOAK_STATUS" node -e '
+const issue = JSON.parse(process.env.ISSUE_JSON || "{}");
+const absorb = JSON.parse(process.env.ABSORB_JSON || "{}");
+const text = `${String(issue.body || "")}\n${String(absorb.body || "")}`
+  .replace(/[`*_]/g, " ");
+const expected = String(process.env.EXPECTED_STATUS || "");
+const marker = new RegExp(`Source\\/fork pre-merge soak\\s*:\\s*${expected}`, "i");
+console.log(marker.test(text) ? "yes" : "no");
+')
+      if [ "$source_soak_disposition_ok" != "yes" ]; then
+        echo -e "${RED}✗ 1224-class source pre-merge soak is ${SOURCE_HEAD_SOAK_STATUS} and lacks an explicit disposition marker${NC}"
+        echo "  Required exact marker (in Intake Issue or absorb PR):"
+        echo "    Source/fork pre-merge soak: ${SOURCE_HEAD_SOAK_STATUS}"
+        echo "  This records the defect honestly; it does not replace replay evidence or exact-HEAD review."
+        return 1
+      fi
+    fi
+
     local migration_evidence_ok
     migration_evidence_ok=$(ISSUE_JSON="$intent_info" ABSORB_JSON="$absorb_pr_info" node -e '
 const issue = JSON.parse(process.env.ISSUE_JSON || "{}");
@@ -1290,6 +1394,10 @@ if [ "$RECORD_DECISION" = true ]; then
     echo -e "${RED}✗ PR #$PR_NUMBER is $PR_REC_STATE, not MERGED.${NC}"; exit 1
   fi
   PR_MERGE_SHA=$(echo "$PR_MERGE_INFO" | node -e "const d=JSON.parse(require('fs').readFileSync('/dev/stdin','utf-8')); console.log((d.mergeCommit||{}).oid||'')")
+  if [ -z "$PR_MERGE_SHA" ]; then
+    echo -e "${RED}✗ PR #$PR_NUMBER has no merge commit SHA; refusing to record intake provenance.${NC}"
+    exit 1
+  fi
   PR_NUMBER_ENV="$PR_NUMBER" \
   PR_MERGE_SHA_ENV="$PR_MERGE_SHA" \
   DECISION_ENV="$DECISION" \
@@ -1302,12 +1410,23 @@ if [ "$RECORD_DECISION" = true ]; then
     const prNumber = Number(process.env.PR_NUMBER_ENV || '0');
     const decision = process.env.DECISION_ENV || '';
     const ledger = JSON.parse(fs.readFileSync('$INTAKE_LEDGER', 'utf-8'));
-    if (ledger.entries.some(e => e.pr_number === prNumber && e.action !== 'force_advance')) {
-      console.log('⚠ PR #' + prNumber + ' already recorded. Skipping.'); process.exit(0);
+    const existing = ledger.entries.find(e => e.pr_number === prNumber && e.action !== 'force_advance');
+    if (existing && existing.decision === decision) {
+      console.log('⚠ PR #' + prNumber + ' already recorded as ' + decision + '. Skipping.'); process.exit(0);
+    }
+    if (existing && !(existing.decision === 'public-only' && decision === 'absorbed')) {
+      console.error('✗ PR #' + prNumber + ' is already recorded as ' + existing.decision +
+        '; only the monotonic public-only → absorbed upgrade is supported.');
+      process.exit(1);
+    }
+    const mergeCommit = process.env.PR_MERGE_SHA_ENV || '';
+    if (existing && existing.target_merge_commit && existing.target_merge_commit !== mergeCommit) {
+      console.error('✗ PR #' + prNumber + ' merge commit changed since the provisional record; refusing reclassification.');
+      process.exit(1);
     }
     const entry = {
       pr_number: prNumber,
-      target_merge_commit: process.env.PR_MERGE_SHA_ENV || '',
+      target_merge_commit: mergeCommit,
       decision,
       timestamp: new Date().toISOString(),
     };
@@ -1327,10 +1446,20 @@ if [ "$RECORD_DECISION" = true ]; then
         entry.review_proof = reviewProof;
       }
     }
-    ledger.entries.push(entry);
+    if (existing) {
+      entry.previous_decision = existing.decision;
+      entry.previous_timestamp = existing.timestamp;
+      Object.assign(existing, entry);
+    } else {
+      ledger.entries.push(entry);
+    }
     fs.writeFileSync('$INTAKE_LEDGER', JSON.stringify(ledger, null, 2) + '\n');
     const mergeShort = (process.env.PR_MERGE_SHA_ENV || '').slice(0, 12);
-    console.log('✓ Recorded PR #' + prNumber + ' → ' + decision + ' (merge: ' + mergeShort + ')');
+    if (existing) {
+      console.log('✓ Upgraded PR #' + prNumber + ': public-only → absorbed (merge: ' + mergeShort + ')');
+    } else {
+      console.log('✓ Recorded PR #' + prNumber + ' → ' + decision + ' (merge: ' + mergeShort + ')');
+    }
   "
   # Auto-attempt advance-ledger after successful record
   echo ""
@@ -1629,7 +1758,7 @@ echo "Mode: $MODE"
 echo ""
 
 # Fetch PR info
-PR_INFO=$(gh pr view "$PR_NUMBER" --repo "$TARGET_REPO" --json title,state,author,mergedAt,mergeCommit 2>/dev/null || true)
+PR_INFO=$(gh pr view "$PR_NUMBER" --repo "$TARGET_REPO" --json title,state,author,mergedAt,mergeCommit,headRefOid,reviews,statusCheckRollup 2>/dev/null || true)
 if [ -z "$PR_INFO" ]; then
   echo -e "${RED}✗ Cannot fetch PR #$PR_NUMBER from $TARGET_REPO${NC}"
   exit 1
@@ -1705,7 +1834,7 @@ while IFS= read -r file; do
   elif is_high_risk "$file"; then
     HIGH_RISK_FILES="${HIGH_RISK_FILES}  ${file}\n"
     HIGH_RISK_COUNT=$((HIGH_RISK_COUNT + 1))
-  elif is_manual_port "$file"; then
+  elif is_public_source "$file" || is_manual_port "$file"; then
     MANUAL_FILES="${MANUAL_FILES}  ${file}\n"
     MANUAL_COUNT=$((MANUAL_COUNT + 1))
   else
@@ -1741,6 +1870,25 @@ fi
 
 if [ "$STATEFUL_MIGRATION_QUARANTINE" = true ]; then
   print_stateful_migration_quarantine
+  if [ "$MODE" = "risk-check" ]; then
+    RISK_SOAK_END_AT=""
+    if [ "$PR_STATE" = "MERGED" ]; then
+      RISK_SOAK_END_AT="$PR_MERGED"
+    fi
+    if ! evaluate_source_head_soak "$PR_INFO" "$RISK_SOAK_END_AT"; then
+      echo -e "  ${RED}Source/fork pre-merge soak: UNVERIFIABLE — cannot resolve the final HEAD or evaluation boundary.${NC}"
+    elif [ "$SOURCE_HEAD_SOAK_STATUS" = "PASS" ]; then
+      echo -e "  ${YELLOW}Source/fork pre-merge soak: PASS — exact HEAD has a ${SOURCE_HEAD_SOAK_DAYS}-day durable GitHub witness; the 1224-class HOLD still requires maintainer disposition and proofs.${NC}"
+    elif [ "$SOURCE_HEAD_SOAK_STATUS" = "UNVERIFIABLE" ]; then
+      echo -e "  ${RED}Source/fork pre-merge soak: UNVERIFIABLE — no durable check/review witness binds the exact final HEAD.${NC}"
+      echo "  Commit timestamps do not start the clock; run an exact-HEAD check or review to create a witness."
+    elif [ "$PR_STATE" = "MERGED" ]; then
+      echo -e "  ${RED}Source/fork pre-merge soak: MISSED — exact HEAD was witnessed for only ${SOURCE_HEAD_SOAK_DAYS} full day(s) before public merge.${NC}"
+      echo "  Post-merge waiting cannot turn MISSED into PASS; record the disposition and keep all migration proofs."
+    else
+      echo -e "  ${RED}Source/fork pre-merge soak: INCOMPLETE — exact HEAD has a ${SOURCE_HEAD_SOAK_DAYS}-day durable GitHub witness; a new final SHA resets the clock.${NC}"
+    fi
+  fi
   echo ""
 fi
 

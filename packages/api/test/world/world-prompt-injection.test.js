@@ -19,7 +19,7 @@ describe('F093 world context prompt injection', () => {
           name: '逐峰宇宙',
           status: 'active',
           constitution: '时间是线性的',
-          createdBy: { kind: 'user', id: 'you' },
+          createdBy: { kind: 'user', id: 'operator' },
           createdAt: '2026-04-30T12:00:00Z',
         },
         scene: {

@@ -16,6 +16,7 @@ import {
 import { MemoryCuePlaneService } from '../domains/memory/cue/MemoryCuePlaneService.js';
 import { type MemoryCueResolver, MemoryCueResolverRegistry } from '../domains/memory/cue/MemoryCueResolverRegistry.js';
 import { getRecallOpportunityCatalogEntry } from '../domains/memory/cue/RecallOpportunityCatalog.js';
+import { EventCueResolver } from '../domains/memory/cue/resolvers/EventCueResolver.js';
 import { OperationalPrecedentCueResolver } from '../domains/memory/cue/resolvers/OperationalPrecedentCueResolver.js';
 import { PersonEntityCueResolver } from '../domains/memory/cue/resolvers/PersonEntityCueResolver.js';
 import { ProfileCueResolver } from '../domains/memory/cue/resolvers/ProfileCueResolver.js';
@@ -194,6 +195,7 @@ function createRegistry(state: FixtureSourceState): MemoryCueResolverRegistry {
       },
     }),
     new ProfileCueResolver(),
+    new EventCueResolver({ resolve: async () => null }),
     new ProjectKnowledgeCueResolver(),
   ]);
 }
@@ -410,6 +412,7 @@ function createLifecycleRegistry(family: EvaluatedFamily, resolver: MemoryCueRes
     family === 'operational_precedent' ? resolver : new OperationalPrecedentCueResolver({ resolve: async () => null }),
     family === 'taste' ? resolver : new TasteCueResolver({ resolve: async () => null }),
     new ProfileCueResolver(),
+    new EventCueResolver({ resolve: async () => null }),
     new ProjectKnowledgeCueResolver(),
   ]);
 }

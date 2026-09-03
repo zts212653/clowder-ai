@@ -7,7 +7,7 @@ import { useApprovalHubStore } from '@/stores/approvalHubStore';
 import { ApprovalFeatureFilter } from './ApprovalFeatureFilter';
 import { ApprovalHistoryList } from './ApprovalHistoryList';
 
-export type ApprovalHistoryOutcomeFilter = 'all' | 'approved' | 'rejected';
+export type ApprovalHistoryOutcomeFilter = 'all' | 'accepted' | 'rejected' | 'closed_without_decision';
 
 interface ApprovalHistoryPaneProps {
   featureFilters: ReadonlySet<ApprovalFeatureId>;
@@ -31,7 +31,7 @@ export function ApprovalHistoryPane({
     if (featureFilters.size > 0) {
       filtered = filtered.filter((item) => featureFilters.has(item.sourceFeatureId));
     }
-    if (outcomeFilter !== 'all') filtered = filtered.filter((item) => item.status === outcomeFilter);
+    if (outcomeFilter !== 'all') filtered = filtered.filter((item) => item.resolution === outcomeFilter);
     return filtered;
   }, [settledItems, featureFilters, outcomeFilter]);
   const hasActiveFilters = featureFilters.size > 0 || outcomeFilter !== 'all';
@@ -50,9 +50,9 @@ export function ApprovalHistoryPane({
         />
         <span className="h-4 w-px bg-cafe-subtle/40" />
         <OutcomeButton
-          active={outcomeFilter === 'approved'}
-          onClick={() => onOutcomeFilterChange(outcomeFilter === 'approved' ? 'all' : 'approved')}
-          status="approved"
+          active={outcomeFilter === 'accepted'}
+          onClick={() => onOutcomeFilterChange(outcomeFilter === 'accepted' ? 'all' : 'accepted')}
+          status="accepted"
         />
         <OutcomeButton
           active={outcomeFilter === 'rejected'}
@@ -100,21 +100,21 @@ function OutcomeButton({
 }: {
   active: boolean;
   onClick: () => void;
-  status: 'approved' | 'rejected';
+  status: 'accepted' | 'rejected';
 }) {
-  const approved = status === 'approved';
+  const accepted = status === 'accepted';
   return (
     <button
       type="button"
       onClick={onClick}
       className={`rounded-full px-2 py-0.5 text-micro font-medium transition-all ${
         active
-          ? `border border-cafe-subtle/60 bg-cafe-surface ${approved ? 'text-[var(--semantic-success)]' : 'text-[var(--semantic-critical)]'}`
+          ? `border border-cafe-subtle/60 bg-cafe-surface ${accepted ? 'text-[var(--semantic-success)]' : 'text-[var(--semantic-critical)]'}`
           : 'text-cafe-interactive/40 hover:text-cafe-interactive/60'
       }`}
       data-testid={`approval-history-filter-${status}`}
     >
-      {approved ? '✅ 通过' : '❌ 拒绝'}
+      {accepted ? '接受' : '拒绝'}
     </button>
   );
 }

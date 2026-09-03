@@ -614,6 +614,88 @@ describe('F254 queued message custody Redis CAS', { skip: redisIsolationSkipReas
     assert.equal(latest[2].queueCustody.status, 'queued');
   });
 
+  test('browser timeline publishes owner-bound queued connector intake at admission and preserves its position', async () => {
+    const intake = await store.append({
+      userId: 'user-1',
+      catId: null,
+      content: '[F292 Host-authored meeting-intake envelope]',
+      mentions: ['codex-sol'],
+      timestamp: 1_200,
+      threadId: 'thread-browser-connector-timeline',
+      deliveryStatus: 'queued',
+      queueCustody: makeCustody({
+        entryId: 'entry-browser-connector-timeline',
+        allTargetCats: ['codex-sol'],
+        pendingTargetCats: ['codex-sol'],
+        createdAt: 1_200,
+        updatedAt: 1_200,
+      }),
+      source: {
+        connector: 'feishu',
+        label: '飞书会议入站 / 录音豆',
+        icon: 'feishu',
+      },
+    });
+    const reply = await store.append({
+      userId: 'user-1',
+      catId: 'codex-sol',
+      content: '猫已经开始处理',
+      mentions: [],
+      timestamp: 1_300,
+      threadId: 'thread-browser-connector-timeline',
+    });
+    const options = { includeQueuedCatMessages: true, includeQueuedUserMessages: true };
+
+    assert.deepEqual(
+      (await store.getByThread('thread-browser-connector-timeline', 20, 'user-1', options)).map(
+        (message) => message.id,
+      ),
+      [intake.id, reply.id],
+    );
+    assert.deepEqual(await store.getByThread('thread-browser-connector-timeline', 20, 'user-foreign', options), []);
+
+    const transition = await store.transitionQueueCustody(intake.id, {
+      expectedRevision: 1,
+      deliveredAt: 2_000,
+      next: makeCustody({
+        ...intake.queueCustody,
+        revision: 2,
+        status: 'terminal',
+        pendingTargetCats: [],
+        seenByCatIds: ['codex-sol'],
+        bodyExposures: [
+          {
+            targetCatId: 'codex-sol',
+            invocationId: 'inv-browser-connector-timeline',
+            seenAt: 1_250,
+          },
+        ],
+        handledByCatIds: ['codex-sol'],
+        targetOutcomeByCatId: {
+          'codex-sol': {
+            invocationId: 'inv-browser-connector-timeline',
+            disposition: 'completed_with_turn',
+            evidenceRef: {
+              kind: 'invocation_lineage',
+              invocationId: 'inv-browser-connector-timeline',
+            },
+            handledAt: 2_000,
+          },
+        },
+        updatedAt: 2_000,
+      }),
+    });
+    assert.equal(transition.kind, 'updated');
+    assert.equal(transition.message.timelineOrderAt, 1_200);
+    assert.equal(await redis.zscore(`msg:thread:thread-browser-connector-timeline`, intake.id), '1200');
+    assert.deepEqual(
+      (await store.getByThread('thread-browser-connector-timeline', 20, 'user-1', options)).map(
+        (message) => message.id,
+      ),
+      [intake.id, reply.id],
+    );
+  });
+
   test('managed-hold history binds scheduler publication to the durable owner across terminal delivery', async () => {
     const threadId = 'thread-managed-hold-owner-visibility';
     const anchor = await store.append({

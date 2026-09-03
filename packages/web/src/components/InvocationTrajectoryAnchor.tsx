@@ -3,7 +3,10 @@
 import type { InvocationTrajectoryStatus } from '@cat-cafe/shared';
 import { getBubbleInvocationId } from '@/debug/bubbleIdentity';
 import type { ChatMessage } from '@/stores/chat-types';
+import { useChatStore } from '@/stores/chatStore';
 import { captureMessageScrollAnchorForMessage } from '@/utils/scrollToMessage';
+import { useF307ExperienceWorkbenchStore } from './workbench/experience-workbench-store';
+import { createAgentRunSurface } from './workbench/real-surface-adapters';
 import { openInvocationTrajectory } from './workspace/trajectory/trajectory-navigation';
 
 export interface MessageInvocationTrajectoryDescriptor {
@@ -88,8 +91,23 @@ export function InvocationTrajectoryAnchor({
       data-trajectory-status={descriptor.status}
       onClick={(event) => {
         event.stopPropagation();
-        if (onOpen) onOpen(descriptor);
-        else openMessageInvocationTrajectory(message, threadId);
+        if (onOpen) {
+          onOpen(descriptor);
+        } else {
+          useF307ExperienceWorkbenchStore.getState().dispatch({
+            type: 'open-surface',
+            surface: createAgentRunSurface({
+              invocationId: descriptor.invocationId,
+              threadId,
+              catId: message.catId ?? undefined,
+              sourceMessageId: message.id,
+            }),
+            entitlement: { kind: 'user', reason: 'open-from-chat' },
+          });
+          const store = useChatStore.getState();
+          store.setRightPanelMode('workspace');
+          store.setRightPanelOpen(true);
+        }
       }}
       className={`inline-flex h-5 shrink-0 items-center gap-1 rounded-full border px-1.5 text-micro font-semibold transition-[opacity,color,background-color] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cafe-accent ${
         quiet

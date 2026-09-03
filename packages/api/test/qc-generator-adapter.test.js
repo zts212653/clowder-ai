@@ -81,7 +81,11 @@ describe('QC eval domain integration contract', () => {
     const result = await adapter(
       { id: 'test-path-contract', domainId: 'eval:qc' },
       { kind: 'qc-metrics-rollup', windowStartMs: now - 7 * 86400000, windowEndMs: now },
-      { harnessFeedbackRoot: tmpDir, liveHarnessFeedbackRoot: tmpDir },
+      {
+        harnessFeedbackRoot: tmpDir,
+        liveHarnessFeedbackRoot: tmpDir,
+        publicationTime: new Date(now).toISOString(),
+      },
     );
 
     // Verdict must be flat file: verdicts/<id>.md (not verdicts/<id>/verdict.md)
@@ -114,7 +118,11 @@ describe('QC verdict Eval Hub compatibility (cloud P1 fix)', () => {
     const result = await adapter(
       { id: 'hub-compat-test', domainId: 'eval:qc' },
       { kind: 'qc-metrics-rollup', windowStartMs: now - 7 * 86400000, windowEndMs: now },
-      { harnessFeedbackRoot: tmpDir, liveHarnessFeedbackRoot: tmpDir },
+      {
+        harnessFeedbackRoot: tmpDir,
+        liveHarnessFeedbackRoot: tmpDir,
+        publicationTime: new Date(now).toISOString(),
+      },
     );
     const verdictMd = fs.readFileSync(result.verdictPath, 'utf8');
     return { tmpDir, result, verdictMd, fs, path };
@@ -193,7 +201,11 @@ describe('QC verdict Eval Hub compatibility (cloud P1 fix)', () => {
         acceptanceReevalPlan: { nextEvalAt: '2026-07-05T00:00:00.000Z', closureCondition: 'FP < 20%' },
       },
       { kind: 'qc-metrics-rollup', windowStartMs: now - 7 * 86400000, windowEndMs: now },
-      { harnessFeedbackRoot: tmpDir, liveHarnessFeedbackRoot: tmpDir },
+      {
+        harnessFeedbackRoot: tmpDir,
+        liveHarnessFeedbackRoot: tmpDir,
+        publicationTime: new Date(now).toISOString(),
+      },
     );
 
     const verdictMd = fs.readFileSync(result.verdictPath, 'utf8');

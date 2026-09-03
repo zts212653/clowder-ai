@@ -103,6 +103,8 @@ function createTestRefresher(deps) {
   return createGitVerdictPrRefresher({
     expectedRepoFullName: 'zts212653/cat-cafe',
     identityRunner: async () => {},
+    contractRunner: async () => {},
+    commitStatusPublisher: async () => {},
     ...deps,
   });
 }
@@ -144,10 +146,13 @@ describe('git verdict PR refresher', () => {
 
   it('merges latest main, resolves only the derived census, and fast-forwards the same PR branch under pre-push guards', async () => {
     const { repo, remote, branchHead } = createDivergedVerdictRepo();
+    const publicationEvents = [];
     try {
       const refresh = createTestRefresher({
         repoRoot: repo,
         resolveOpenPr: async () => prFor(branchHead),
+        contractRunner: async (input) => publicationEvents.push({ kind: 'contract', input }),
+        commitStatusPublisher: async (input) => publicationEvents.push({ kind: 'status', input }),
       });
       const result = await refresh({
         branchName,
@@ -175,6 +180,66 @@ describe('git verdict PR refresher', () => {
       assert.equal(git(remote, 'show', `${newHead}:${censusPath}`), 'count: 2\nsource: main');
       assert.equal(git(remote, 'show', `${newHead}:${verdictPath}`), '# target verdict');
       assert.equal(git(remote, 'show', `${newHead}:docs/harness-feedback/verdicts/concurrent.md`), '# concurrent');
+      assert.deepEqual(
+        publicationEvents.map((event) => event.kind),
+        ['contract', 'status'],
+        'the candidate evidence contract must run before exact-HEAD status publication',
+      );
+      assert.equal(publicationEvents[0].input.sourceRef, 'HEAD');
+      assert.equal(publicationEvents[0].input.baseRef, 'origin/main');
+      assert.deepEqual(publicationEvents[1].input, {
+        repoFullName: 'zts212653/cat-cafe',
+        headSha: newHead,
+        statuses: [
+          {
+            context: 'Eval Metric Glossary Coverage',
+            state: 'success',
+            description: 'Candidate glossary, measurement, and publication contracts passed',
+          },
+        ],
+      });
+    } finally {
+      rmSync(repo, { recursive: true, force: true });
+      rmSync(remote, { recursive: true, force: true });
+    }
+  });
+
+  it('restores the previous remote and local PR head when exact-HEAD status publication fails', async () => {
+    const { repo, remote, branchHead } = createDivergedVerdictRepo();
+    try {
+      const refresh = createTestRefresher({
+        repoRoot: repo,
+        resolveOpenPr: async () => prFor(branchHead),
+        commitStatusPublisher: async () => {
+          throw new Error('status_publish_failed');
+        },
+      });
+
+      await assert.rejects(
+        refresh({
+          branchName,
+          verdictId,
+          expectedHeadSha: branchHead,
+          generatedAt: '2026-08-02T00:00:00.000Z',
+          refreshDerivedCensus(worktreeRoot, _generatedAt, cleanSource) {
+            assert.equal(cleanSource, 'count: 1\nsource: main\n');
+            writeFileSync(join(worktreeRoot, censusPath), 'count: 2\nsource: main\n');
+            return join(worktreeRoot, censusPath);
+          },
+        }),
+        /status_publish_failed/,
+      );
+
+      assert.equal(
+        git(remote, 'rev-parse', `refs/heads/${branchName}`),
+        branchHead,
+        'a refresh without its named check must not remain exposed as the PR head',
+      );
+      assert.equal(
+        git(repo, 'rev-parse', `refs/heads/${branchName}`),
+        branchHead,
+        'the pre-existing local branch must be restored with the remote PR head',
+      );
     } finally {
       rmSync(repo, { recursive: true, force: true });
       rmSync(remote, { recursive: true, force: true });

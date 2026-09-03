@@ -369,7 +369,6 @@ export const libraryLifecycleTools = [
       action: 'command',
       risk: { level: 'destructive', openWorld: false },
       runtimeProfiles: ['full'],
-      targetExposure: 'profile-gated',
     },
   }),
   defineTool({
@@ -386,7 +385,6 @@ export const libraryLifecycleTools = [
       action: 'command',
       risk: { level: 'destructive', openWorld: false },
       runtimeProfiles: ['full'],
-      targetExposure: 'profile-gated',
     },
   }),
   defineTool({

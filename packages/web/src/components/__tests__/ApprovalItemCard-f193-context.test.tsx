@@ -11,7 +11,7 @@
  * - F128/F225 cards remain unaffected (no regression)
  */
 
-import type { ApprovalItem } from '@cat-cafe/shared';
+import type { ApprovalHubItem } from '@cat-cafe/shared';
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -22,13 +22,14 @@ const TARGET_THREAD_ID = 'thread-target-beta';
 const SOURCE_THREAD_TITLE = 'Alpha 任务线';
 const TARGET_THREAD_TITLE = 'Beta 执行线';
 
-const F193_ITEM: ApprovalItem = {
+const F193_ITEM: ApprovalHubItem = {
   proposalId: 'ctx-f193-1',
   sourceFeatureId: 'F193',
   navigation: anchoredApprovalNavigation(SOURCE_THREAD_ID, { originMessageId: 'msg-ctx-1' }),
   requesterCatId: 'opus',
-  ownerUserId: 'user-landy',
-  status: 'pending',
+  ownerUserId: 'user-operator',
+  resolution: 'open',
+  materialization: { state: 'not_started' },
   summary: 'Work assignment: 请帮忙调研 F246 下一步方向',
   detail: {
     targetThreadId: TARGET_THREAD_ID,
@@ -40,7 +41,7 @@ const F193_ITEM: ApprovalItem = {
   createdAt: Date.now() - 120_000,
 };
 
-const F193_ITEM_NO_THREAD_IN_STORE: ApprovalItem = {
+const F193_ITEM_NO_THREAD_IN_STORE: ApprovalHubItem = {
   ...F193_ITEM,
   proposalId: 'ctx-f193-2',
   navigation: anchoredApprovalNavigation('thread-unknown-src'),
@@ -158,7 +159,7 @@ describe('F246 Bug 1: F193 card context + jump button', () => {
   });
 
   it('F193 provenance links exist even for non-inlineApprovable item', async () => {
-    const nonInlineF193: ApprovalItem = { ...F193_ITEM, proposalId: 'ctx-f193-3', inlineApprovable: false };
+    const nonInlineF193: ApprovalHubItem = { ...F193_ITEM, proposalId: 'ctx-f193-3', inlineApprovable: false };
     await act(async () => {
       root.render(React.createElement(ApprovalItemCard, { item: nonInlineF193 }));
     });

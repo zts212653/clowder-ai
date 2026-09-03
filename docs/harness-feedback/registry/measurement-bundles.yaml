@@ -1,6 +1,6 @@
 kind: f267-measurement-bundle-census
 schemaVersion: 2
-generatedAt: 2026-08-27T06:35:32Z
+generatedAt: 2026-09-03T00:17:12Z
 sources:
   registryDir: docs/harness-feedback/eval-domains
   instructionMap: packages/api/src/infrastructure/harness-eval/eval-cat-invocation.ts#DOMAIN_INSTRUCTIONS
@@ -69,6 +69,33 @@ entries:
       actionGate: keep_observe_only
       hardBlockReason: This public instance has not certified measurement validity for
         eval:anchor-first.
+  - domainId: eval:capability-evolution
+    classification: registered_nonoperational
+    enabled: true
+    decisionConsumer:
+      featureId: F311
+      ownerCatId: codex-sol
+      allowedActions: []
+    sourceSelector:
+      adapter: f311-evolution-program-owner-refs
+      kind: capability-evolution-owner-ref-window
+    committedVerdictArtifactCount: 0
+    functionalEquivalents:
+      - f311-evolution-program-owner-refs/capability-evolution-owner-ref-window
+        public registry contract
+    evidence:
+      domainInstructions: true
+      publishInstructions: false
+    validityMigration:
+      riskRank: null
+      batch: null
+      status: nonoperational
+      certificateRef: null
+      resultRef: null
+      replayRef: null
+      actionGate: keep_observe_only
+      hardBlockReason: Domain eval:capability-evolution has no operational publish
+        path in this public instance.
   - domainId: eval:capability-tips
     classification: gated
     enabled: false

@@ -97,6 +97,7 @@ terms:
         - "@co-creator"
         - "@co-creator"
         - "You"
+        - "operator"
         - "you"
     public:
       canonical: "co-creator"
@@ -234,6 +235,12 @@ path_policies:
     inbound: public-only
     risk: P1
     reason: "Home roster is generated into a public config; community edits need explicit policy before absorption."
+
+  - pattern: "site/**"
+    outbound: sanitize-except-brand
+    inbound: public-source
+    risk: P1
+    reason: "Canonical source for the Clowder AI public website; the public brand copy (\"extracted from Clowder AI\") is intentional and exempt, but identity, home paths, dev ports, and role vocabulary are still scrubbed — a whole-tree pass-through once let /home/user export unnoticed. Inbound changes must be ported into the source-owned site."
 
   - pattern: "sop-definitions/**"
     outbound: sanitize

@@ -1,7 +1,7 @@
 import {
   APPROVAL_PRODUCER_CATALOG,
   APPROVAL_PRODUCER_IDS,
-  type ApprovalItem,
+  type ApprovalHubItem,
   type ApprovalProducerCatalogEntry,
   type ApprovalProducerId,
 } from '@cat-cafe/shared';
@@ -22,13 +22,10 @@ export function approvalFeatureMeta(featureId: ApprovalProducerId): ApprovalFeat
   return APPROVAL_FEATURES[featureId];
 }
 
-export function isApprovalItemBatchDecidable(item: ApprovalItem): boolean {
+export function isApprovalItemBatchDecidable(item: ApprovalHubItem): boolean {
   const hasEntityConflict = item.sourceFeatureId === 'F260' && Boolean(item.detail.conflict);
   return (
-    item.inlineApprovable &&
-    item.decisionMode !== 'resume-only' &&
-    item.decisionMode !== 'claim-select' &&
-    !hasEntityConflict
+    item.resolution === 'open' && item.inlineApprovable && item.decisionMode !== 'claim-select' && !hasEntityConflict
   );
 }
 

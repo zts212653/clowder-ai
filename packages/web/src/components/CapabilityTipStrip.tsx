@@ -33,6 +33,7 @@ const DEFAULT_ROTATE_MS = 30000;
 
 const INVENTORY_TIP_IDS: readonly string[] = CAPABILITY_TIPS.map((t) => t.id);
 const CAPABILITY_SURFACE_ROUTES: Readonly<Record<string, string>> = {
+  collective: '/collective',
   'settings.plugins': '/settings?s=plugins',
 };
 

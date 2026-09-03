@@ -1,4 +1,4 @@
-import type { ApprovalItem } from '@cat-cafe/shared';
+import type { ApprovalHubItem } from '@cat-cafe/shared';
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -33,13 +33,14 @@ vi.mock('../ThreadSidebar/thread-navigation', () => ({ pushThreadRouteWithHistor
 
 import { ApprovalItemCard } from '../ApprovalItemCard';
 
-const ITEM: ApprovalItem = {
+const ITEM: ApprovalHubItem = {
   proposalId: 'handoff_feedback_1',
   sourceFeatureId: 'F225',
   navigation: anchoredApprovalNavigation('thread-handoff'),
   requesterCatId: 'codex-sol',
   ownerUserId: 'owner-1',
-  status: 'pending',
+  resolution: 'open',
+  materialization: { state: 'not_started' },
   summary: '接续 F281 Phase B',
   detail: { done: 'Phase A landed', nextSteps: 'capture feedback' },
   inlineApprovable: false,

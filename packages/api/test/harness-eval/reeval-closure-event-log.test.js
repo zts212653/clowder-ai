@@ -83,8 +83,8 @@ describe('eval verdict lifecycle event log (Redis)', { skip: redisIsolationSkipR
   it('lets only one concurrent writer win the same lifecycle edge', async () => {
     const opened = makeEvent();
     await eventLog.append(opened, 0);
-    const first = makeEvent({ eventId: 'race-a', type: 'cvo_suppressed', actor: { kind: 'cvo', id: 'you' } });
-    const second = makeEvent({ eventId: 'race-b', type: 'cvo_suppressed', actor: { kind: 'cvo', id: 'you' } });
+    const first = makeEvent({ eventId: 'race-a', type: 'cvo_suppressed', actor: { kind: 'cvo', id: 'operator' } });
+    const second = makeEvent({ eventId: 'race-b', type: 'cvo_suppressed', actor: { kind: 'cvo', id: 'operator' } });
 
     const results = await Promise.all([eventLog.append(first, 1), eventLog.append(second, 1)]);
     assert.deepEqual(results.map((result) => result.outcome).sort(), ['appended', 'conflict']);

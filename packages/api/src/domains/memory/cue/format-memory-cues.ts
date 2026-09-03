@@ -7,6 +7,28 @@ export interface FormattedMemoryCues {
   estimatedTokens: number;
 }
 
+function explicitTasteAction(cue: CueEnvelopeV1): string[] {
+  return cue.resolverFamily === 'taste' && cue.source.anchor.startsWith('taste-vignette:')
+    ? ['Action: Drill before responding; record applied only after satisfying the typed application contract.']
+    : [];
+}
+
+function profileAction(cue: CueEnvelopeV1): string[] {
+  return cue.resolverFamily === 'profile'
+    ? [
+        'Action: Drill before responding; record applied only if the approved Profile revision changes this response, otherwise dismissed.',
+      ]
+    : [];
+}
+
+function eventAction(cue: CueEnvelopeV1): string[] {
+  return cue.resolverFamily === 'event'
+    ? [
+        'Action: Drill before responding; record applied only if this Event establishes chronology or continuity used in the response, otherwise dismissed.',
+      ]
+    : [];
+}
+
 export function renderMemoryCue(cue: CueEnvelopeV1): string {
   return [
     `<memory-cue v="1" cue-id="${cue.cueId}" why-now="${cue.whyNow}">`,
@@ -16,6 +38,9 @@ export function renderMemoryCue(cue: CueEnvelopeV1): string {
       cue.source.asOf === undefined ? '' : ` asOf=${new Date(cue.source.asOf).toISOString()}`
     }`,
     `Drill: ${cue.drill.family} ${cue.drill.handle}`,
+    ...explicitTasteAction(cue),
+    ...profileAction(cue),
+    ...eventAction(cue),
     '</memory-cue>',
   ].join('\n');
 }
@@ -25,6 +50,9 @@ export function renderMemoryCuePointer(cue: CueEnvelopeV1): string {
   return [
     `<recall-opportunity-pointer v="1" opportunity-id="${cue.opportunityId}">`,
     `Drill: ${cue.drill.family} ${cue.drill.handle}`,
+    ...explicitTasteAction(cue),
+    ...profileAction(cue),
+    ...eventAction(cue),
     '</recall-opportunity-pointer>',
   ].join('\n');
 }

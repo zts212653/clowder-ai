@@ -35,10 +35,12 @@ describe('F248 B3 production metric glossary coverage', () => {
     assert.deepEqual(missing, [], `current production metric refs need human glossary entries:\n${missing.join('\n')}`);
   });
 
-  it('keeps the current eval:memory verdict fully explainable without freezing its metric count', () => {
+  it('keeps eval:memory portable and explains its latest verdict when this deployment has one', () => {
     const summary = loadEvalHubSummary({ harnessFeedbackRoot: repoHarnessFeedbackRoot });
     const memory = summary.domains.find((domain) => domain.domainId === 'eval:memory');
-    assert.ok(memory?.latestVerdictId, 'eval:memory must expose a latest verdict');
+    assert.ok(memory, 'eval:memory must remain registered even before a deployment publishes its first verdict');
+    assert.equal(memory.metricGlossary?.search_zero_hit_count?.label, '零结果搜索数');
+    if (!memory.latestVerdictId) return;
     const latest = summary.items.find((item) => item.id === memory.latestVerdictId);
     assert.ok(latest, 'eval:memory latest verdict must be present');
     assert.ok(latest.evidence.metricRefs.length > 0, 'eval:memory latest verdict must publish metric evidence');
@@ -49,6 +51,5 @@ describe('F248 B3 production metric glossary coverage', () => {
         `eval:memory metric needs a human glossary entry: ${ref}`,
       );
     }
-    assert.equal(memory.metricGlossary?.search_zero_hit_count?.label, '零结果搜索数');
   });
 });

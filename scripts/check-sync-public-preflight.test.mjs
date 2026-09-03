@@ -6,8 +6,10 @@ import { basename, dirname, join } from 'node:path';
 import { afterEach, describe, it } from 'node:test';
 
 import {
+  checkCapabilityTipExportCoverage,
   checkCapabilityTipReferenceRegressions,
   checkPublicPackageScriptClosure,
+  checkSyncPublicPreflight,
 } from './check-sync-public-preflight.mjs';
 
 const tempRoots = [];
@@ -86,6 +88,128 @@ describe('public package script closure', () => {
 });
 
 describe('capability-tip export reference regressions', () => {
+  it('uses the explicit aggregate baseRef for export coverage comparisons', () => {
+    const root = makeRoot();
+    write(root, 'package.json', JSON.stringify({ scripts: {} }));
+    write(
+      root,
+      'sync-manifest.yaml',
+      [
+        'managed_roots:',
+        'managed_files:',
+        '  - packages/web/src/lib/capability-tips.seed.json',
+        'managed_scripts:',
+        'docs_generated:',
+        'excluded:',
+        '',
+      ].join('\n'),
+    );
+    write(root, 'packages/web/src/lib/capability-tips.seed.json', '[]');
+    commitAll(root, 'baseline without origin/main');
+
+    const result = checkSyncPublicPreflight(root, { baseRef: 'HEAD' });
+
+    assert.equal(result.ok, true, result.errors.join('\n'));
+  });
+
+  it('requires every source of a newly introduced tip to be covered by the candidate export contract', () => {
+    const root = makeRoot();
+    write(
+      root,
+      'sync-manifest.yaml',
+      [
+        'managed_roots:',
+        '  - packages/api',
+        'managed_files:',
+        '  - packages/web/src/lib/capability-tips.seed.json',
+        'managed_scripts:',
+        'docs_generated:',
+        '  - target: docs/features/',
+        '    type: script',
+        'excluded:',
+        '  - docs/taste/',
+        '',
+      ].join('\n'),
+    );
+    write(root, 'packages/web/src/lib/capability-tips.seed.json', '[]');
+    write(root, 'docs/internal-source.md', '# Source anchor\n');
+    write(root, 'docs/internal-structure.md', '# Source anchor\n');
+    write(root, 'docs/taste/vignettes/internal-body.md', '# Body anchor\n');
+    commitAll(root, 'baseline');
+
+    const candidate = tip('docs/taste/vignettes/internal-body.md');
+    candidate.sourceRef.path = 'docs/internal-source.md';
+    candidate.structureSource.path = 'docs/internal-structure.md';
+    write(root, 'packages/web/src/lib/capability-tips.seed.json', JSON.stringify([candidate]));
+
+    const result = checkCapabilityTipExportCoverage(root, { baseRef: 'HEAD' });
+
+    assert.equal(result.ok, false);
+    assert.deepEqual(result.errors, [
+      'feature-export-contract: bodySource newly points outside public export coverage docs/taste/vignettes/internal-body.md',
+      'feature-export-contract: sourceRef newly points outside public export coverage docs/internal-source.md',
+      'feature-export-contract: structureSource newly points outside public export coverage docs/internal-structure.md',
+    ]);
+  });
+
+  it('accepts every source of a newly introduced tip when the export contract covers them', () => {
+    const root = makeRoot();
+    write(
+      root,
+      'sync-manifest.yaml',
+      [
+        'managed_roots:',
+        '  - packages/api',
+        'managed_files:',
+        '  - packages/web/src/lib/capability-tips.seed.json',
+        'managed_scripts:',
+        'docs_generated:',
+        '  - target: docs/features/',
+        '    type: script',
+        'excluded:',
+        '  - docs/taste/',
+        '',
+      ].join('\n'),
+    );
+    write(root, 'packages/web/src/lib/capability-tips.seed.json', '[]');
+    write(root, 'docs/features/F999.md', '# Source anchor\n# Body anchor\n');
+    write(root, 'packages/api/src/feature.ts', 'export const Source = true;\n');
+    commitAll(root, 'baseline');
+
+    const candidate = tip('docs/features/F999.md');
+    candidate.sourceRef.path = 'docs/features/F999.md';
+    candidate.structureSource = { path: 'packages/api/src/feature.ts', anchor: 'Source' };
+    write(root, 'packages/web/src/lib/capability-tips.seed.json', JSON.stringify([candidate]));
+
+    const result = checkCapabilityTipExportCoverage(root, { baseRef: 'HEAD' });
+
+    assert.equal(result.ok, true, result.errors.join('\n'));
+  });
+
+  it('fails closed when a source checkout has no public-export comparison baseline', () => {
+    const root = makeRoot();
+    write(
+      root,
+      'sync-manifest.yaml',
+      [
+        'managed_roots:',
+        '  - packages/api',
+        'managed_files:',
+        'managed_scripts:',
+        'docs_generated:',
+        'excluded:',
+        '',
+      ].join('\n'),
+    );
+    write(root, 'packages/web/src/lib/capability-tips.seed.json', JSON.stringify([tip('docs/internal-body.md')]));
+    commitAll(root, 'candidate without origin/main');
+
+    const result = checkCapabilityTipExportCoverage(root);
+
+    assert.equal(result.ok, false);
+    assert.match(result.errors.join('\n'), /unavailable at baseline origin\/main/);
+  });
+
   it('blocks a newly changed bodySource that is absent from the candidate export', () => {
     const root = makeRoot();
     write(root, 'docs/source.md', '# Source anchor\n');

@@ -76,6 +76,7 @@ class MemoryEventLog {
 function matchingLease(taskId, holderCatId = 'codex-sol') {
   return {
     leaseId: 'lease-cycle-1',
+    dispatchId: `f266:${caseId}:${verdictId}:responsibility`,
     generation: 1,
     status: 'active',
     subjectRef: `subject:task:${taskId}`,
@@ -92,6 +93,7 @@ function fixture(overrides = {}) {
   const taskStore = overrides.taskStore ?? new TaskStore();
   const eventLog = overrides.eventLog ?? new MemoryEventLog();
   const admissions = [];
+  const dispatches = [];
   const admissionService = overrides.admissionService ?? {
     async admit(input) {
       admissions.push(structuredClone(input));
@@ -104,16 +106,22 @@ function fixture(overrides = {}) {
     taskStore,
     eventLog,
     admissionService,
+    taskDispatcher: overrides.taskDispatcher ?? {
+      async dispatch(input) {
+        dispatches.push(structuredClone(input));
+        return { outcome: 'enqueued', messageId: 'message-responsibility-1' };
+      },
+    },
     resolveFeatureThreadId: overrides.resolveFeatureThreadId ?? (async () => 'thread_f203'),
     ownerUserId: 'user-1',
     now: () => '2026-08-01T01:00:00.000Z',
   });
-  return { taskStore, eventLog, admissions, service };
+  return { taskStore, eventLog, admissions, dispatches, service };
 }
 
 describe('F266 case responsibility binding', () => {
   it('binds one cycle task and one matching F167 lease before acknowledging responsibility', async () => {
-    const { taskStore, eventLog, admissions, service } = fixture();
+    const { taskStore, eventLog, admissions, dispatches, service } = fixture();
     const result = await service.reconcile(subject(), {
       systemThreadId: 'thread_eval_capability_wakeup',
       featureId: 'F203',
@@ -134,12 +142,18 @@ describe('F266 case responsibility binding', () => {
     assert.equal(admissions[0].targetThreadId, 'thread_f203');
     assert.equal(admissions[0].action.subjectRef, `subject:task:${task.id}`);
     assert.deepEqual(admissions[0].action.terminalPredicate, { kind: 'task_done' });
+    assert.equal(dispatches.length, 1);
+    assert.equal(dispatches[0].kind, 'responsibility');
+    assert.equal(dispatches[0].caseId, caseId);
+    assert.equal(dispatches[0].verdictId, verdictId);
+    assert.equal(dispatches[0].task.id, task.id);
 
     const events = await eventLog.read(caseId);
     assert.equal(events.length, 2);
     assert.equal(events[1].type, 'responsibility_bound');
     assert.equal(events[1].taskId, task.id);
     assert.equal(events[1].leaseId, 'lease-cycle-1');
+    assert.ok(events[1].refs.some((ref) => ref.value === 'message:message-responsibility-1'));
   });
 
   it('still binds durable responsibility after the acknowledgement SLA has escalated', async () => {
@@ -290,5 +304,45 @@ describe('F266 case responsibility binding', () => {
         /lease does not match persisted task responsibility/,
       );
     }
+  });
+
+  it('projects a recoverable custody blocker until the fenced responsibility carrier is dispatched', async () => {
+    let dispatchAttempts = 0;
+    const eventLog = new MemoryEventLog();
+    const { service } = fixture({
+      eventLog,
+      taskDispatcher: {
+        async dispatch() {
+          dispatchAttempts += 1;
+          if (dispatchAttempts === 1) {
+            return {
+              outcome: 'blocked',
+              reasonCode: 'carrier_not_enqueued',
+              messageId: 'message-responsibility-blocked',
+            };
+          }
+          return { outcome: 'enqueued', messageId: 'message-responsibility-retry' };
+        },
+      },
+    });
+    const context = {
+      systemThreadId: 'thread_eval_capability_wakeup',
+      featureId: 'F203',
+      ownerCatId: 'opus-47',
+      evalCatId: 'gpt52',
+    };
+
+    assert.equal((await service.reconcile(subject(), context)).outcome, 'blocked');
+    const blockedEvents = await eventLog.read(caseId);
+    assert.equal(blockedEvents.at(-1).type, 'custody_dispatch_blocked');
+    assert.equal(blockedEvents.at(-1).stage, 'responsibility');
+    assert.equal(blockedEvents.at(-1).reasonCode, 'carrier_not_enqueued');
+    assert.equal(blockedEvents.at(-1).carrierMessageId, 'message-responsibility-blocked');
+    assert.equal((await service.reconcile(subject(blockedEvents), context)).outcome, 'bound');
+    assert.equal(dispatchAttempts, 2);
+    const recoveredEvents = await eventLog.read(caseId);
+    assert.equal(recoveredEvents.at(-1).type, 'responsibility_bound');
+    const { projectReevalCase } = await import('../../dist/infrastructure/harness-eval/reeval-case.js');
+    assert.equal(projectReevalCase(subject().caseRoot, recoveredEvents).custodyDispatchBlocker, undefined);
   });
 });

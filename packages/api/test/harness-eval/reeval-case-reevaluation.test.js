@@ -78,6 +78,7 @@ describe('F266 executable re-evaluation responsibility', () => {
     const taskStore = new TaskStore();
     const eventLog = new MemoryEventLog([observed]);
     const admissions = [];
+    const dispatches = [];
     const service = new ReevalCaseReevaluationService({
       taskStore,
       eventLog,
@@ -90,6 +91,7 @@ describe('F266 executable re-evaluation responsibility', () => {
             outcome: 'claimed',
             lease: {
               leaseId: 'lease-reeval-1',
+              dispatchId: `f266:${caseId}:${verdictId}:reeval`,
               generation: 1,
               status: 'active',
               subjectRef: `subject:task:${taskId}`,
@@ -102,6 +104,12 @@ describe('F266 executable re-evaluation responsibility', () => {
             },
             fence: { leaseId: 'lease-reeval-1', generation: 1 },
           };
+        },
+      },
+      taskDispatcher: {
+        async dispatch(input) {
+          dispatches.push(structuredClone(input));
+          return { outcome: 'enqueued', messageId: 'message-reeval-1' };
         },
       },
       ownerUserId: 'user-1',
@@ -120,10 +128,17 @@ describe('F266 executable re-evaluation responsibility', () => {
     assert.equal(task.threadId, 'thread_eval_task_outcome');
     assert.equal(task.status, 'doing');
     assert.deepEqual(admissions[0].holderCatIds, ['gpt52']);
+    assert.equal(dispatches.length, 1);
+    assert.equal(dispatches[0].kind, 'reevaluation');
+    assert.equal(dispatches[0].caseId, caseId);
+    assert.equal(dispatches[0].verdictId, verdictId);
+    assert.equal(dispatches[0].task.id, task.id);
+    assert.equal(dispatches[0].lease.leaseId, 'lease-reeval-1');
     const events = await eventLog.read(caseId);
     assert.equal(events.at(-1).type, 'reeval_requested');
     assert.equal(events.at(-1).reevalTaskId, task.id);
     assert.equal(events.at(-1).reevalLeaseId, 'lease-reeval-1');
+    assert.ok(events.at(-1).refs.some((ref) => ref.value === 'message:message-reeval-1'));
     const projection = projectReevalCase(current.caseRoot, events);
     assert.equal(projection.status, 'reeval_pending');
     assert.equal(projection.reevalTaskId, task.id);
@@ -247,11 +262,85 @@ describe('F266 executable re-evaluation responsibility', () => {
           throw new Error('not expected');
         },
       },
+      taskDispatcher: {
+        async dispatch() {
+          throw new Error('not expected');
+        },
+      },
       ownerUserId: 'user-1',
       now: () => '2026-08-03T05:00:00.000Z',
     });
 
     assert.equal((await service.reconcile(current, current.responsibilityContext)).outcome, 'not_due');
     assert.equal((await taskStore.get(currentTask.id)).status, 'doing');
+  });
+
+  it('projects a recoverable custody blocker until the fenced re-evaluation carrier is dispatched', async () => {
+    const taskStore = new TaskStore();
+    const eventLog = new MemoryEventLog([observed]);
+    let dispatchAttempts = 0;
+    const service = new ReevalCaseReevaluationService({
+      taskStore,
+      eventLog,
+      admissionService: {
+        async admit(input) {
+          const taskId = input.action.subjectRef.slice('subject:task:'.length);
+          return {
+            admit: true,
+            outcome: 'claimed',
+            lease: {
+              leaseId: 'lease-reeval-retry',
+              dispatchId: `f266:${caseId}:${verdictId}:reeval`,
+              generation: 1,
+              status: 'active',
+              subjectRef: `subject:task:${taskId}`,
+              actionFamily: 'implement',
+              successorSlot: 'implementer',
+              holderCatIds: ['gpt52'],
+              holderThreadId: 'thread_eval_task_outcome',
+              tenantScope: 'user-1',
+              terminalPredicate: { kind: 'task_done' },
+            },
+          };
+        },
+      },
+      taskDispatcher: {
+        async dispatch() {
+          dispatchAttempts += 1;
+          if (dispatchAttempts === 1) {
+            return {
+              outcome: 'blocked',
+              reasonCode: 'carrier_not_enqueued',
+              messageId: 'message-reeval-blocked',
+            };
+          }
+          return { outcome: 'enqueued', messageId: 'message-reeval-retry' };
+        },
+      },
+      ownerUserId: 'user-1',
+      now: () => '2026-08-03T03:00:00.000Z',
+    });
+    const current = subject([observed]);
+
+    assert.equal((await service.reconcile(current, current.responsibilityContext)).outcome, 'blocked');
+    const blockedEvents = await eventLog.read(caseId);
+    assert.equal(blockedEvents.at(-1).type, 'custody_dispatch_blocked');
+    const blockedProjection = projectReevalCase(current.caseRoot, blockedEvents);
+    assert.equal(blockedProjection.status, 'monitoring');
+    assert.deepEqual(blockedProjection.custodyDispatchBlocker, {
+      eventId: `f266:${caseId}:cycle:${verdictId}:custody-dispatch-blocked:reevaluation:1:carrier_not_enqueued`,
+      stage: 'reevaluation',
+      reasonCode: 'carrier_not_enqueued',
+      taskId: blockedEvents.at(-1).taskId,
+      leaseId: 'lease-reeval-retry',
+      leaseGeneration: 1,
+      carrierMessageId: 'message-reeval-blocked',
+    });
+    const refreshed = subject(blockedEvents);
+    assert.equal((await service.reconcile(refreshed, refreshed.responsibilityContext)).outcome, 'requested');
+    assert.equal(dispatchAttempts, 2);
+    const recoveredEvents = await eventLog.read(caseId);
+    assert.equal(recoveredEvents.at(-1).type, 'reeval_requested');
+    assert.equal(projectReevalCase(current.caseRoot, recoveredEvents).custodyDispatchBlocker, undefined);
   });
 });

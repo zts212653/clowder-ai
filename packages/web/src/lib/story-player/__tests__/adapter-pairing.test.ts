@@ -167,6 +167,28 @@ describe('F252 adapter — positional orphan pairing (cloud R2)', () => {
     expect(result[1]?.toolResult).toBe('Tests passed');
   });
 
+  it('keeps file_change as a tool card when semantic diff augments the replay carrier', () => {
+    const events = [
+      makeEvent(1, 1000, {
+        type: 'tool_use',
+        toolName: 'file_change',
+        toolInput: { status: 'completed', changes: [{ path: 'src/a.ts', kind: 'update' }] },
+        semanticEvent: {
+          v: 1,
+          id: 'diff-replay-1',
+          kind: 'diff',
+          occurredAt: 1000,
+          stage: 'completed',
+          summary: '1 个文件变更',
+        },
+      }),
+    ];
+
+    const result = adaptTranscriptEvents(events);
+    expect(result).toHaveLength(1);
+    expect(result[0]).toMatchObject({ type: 'tool_call', toolName: 'file_change' });
+  });
+
   it('pairs consecutive no-id tool_use events with their positionally adjacent results', () => {
     const events = [
       makeEvent(1, 1000, { type: 'tool_use', toolName: 'command_execution', toolInput: { command: 'pwd' } }),

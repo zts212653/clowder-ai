@@ -4,7 +4,7 @@ related_features: [F167, F173, F194, F277, F280, F299]
 topics: [execution, liveness, cancel, managed-command, hydration, workspace, frontend, authorization]
 doc_kind: spec
 created: 2026-08-13
-updated: 2026-08-22
+updated: 2026-08-29
 description: "以具体 execution 为单位统一运行展示、thread 归属、可取消性与精确 Stop，让跨 thread 模型回合和托管命令共享一个可重建读投影。"
 description_source: human
 description_author: codex-sol
@@ -55,6 +55,29 @@ Why: F295 adds the canonical live/managed-command execution read-and-cancel proj
 - 未索引或 foreign thread 在读取 liveness 前返回 typed 403；`system-created` 本身不是授权。
 - 合法 shared/indexed thread 继续显示 foreign scheduler/system masked occupancy；session record 的
   per-user filter 不适用于 occupancy，精确取消仍由 execution/principal fence 决定。
+
+### Post-close: Project resource convergence ✅
+
+- project-wide 投影使用稳定的 `GET /api/executions/active?projectPath=...`；服务端先规范化
+  project selector，再以当前用户的 durable thread index 校验 scope，不信任 caller 提供的数据边界。
+- Web 同 project 的 A→B 导航复用同一 exact-GET resource；既有 request generation 继续阻止晚到结果
+  覆盖新 anchor，4 秒 background-discovery、online、visibility、reconnect 与 exact cancel 保持不变。
+- canonical `buildActiveExecutionList` 外层按 `userId + canonical projectPath` single-flight；不同 user/project
+  独立，foreign principal 仍只投影 masked occupancy。
+- F153 structured trace 记录 `candidate_enumeration`、`owner_truth`、`classification_assembly`、`total`
+  与 `single_flight_join`；耗时只作运行健康证据，不进入确定性单测阈值。
+
+F303 evidence:
+
+Architecture cell: dispatch
+Map delta: none
+Why: 只把既有 canonical read projection 的资源 identity 与 project-wide 数据范围对齐；不改变 lifecycle owner、writer 或 execution truth。
+- Canonical source: `packages/api/src/routes/active-execution-routes.ts#buildActiveExecutionList`
+- Consumer evidence: `rg -n "useActiveExecutionProjection\\(|executions/active" packages/web packages/api/test`
+- Claim guard: stable resource + late-generation guard → `useActiveExecutionProjection.test.tsx`; per-key single-flight
+  and user/project isolation → `f295-active-execution-projection.test.js`
+- Characterization/contract test: `pnpm exec vitest run src/hooks/__tests__/useActiveExecutionProjection.test.tsx`
+  and API F295/F297 sparse route tests; code-derived census is the `rg` command above.
 
 ## User Journey
 
@@ -133,7 +156,7 @@ Why: F295 adds the canonical live/managed-command execution read-and-cancel proj
 | 风险 | 缓解 |
 |------|------|
 | stale UI Stop 取消 replacement | cancel route exact execution fence + 409 regression |
-| project-wide hydration 成为昂贵扫描 | 当前按已有 user/project threads 线性组合 running record/task projection；不新建轮询账本，接受本地单用户规模下的 4s 轮询成本，并以实际 poll 耗时判断是否需要收紧 |
+| project-wide hydration 成为昂贵扫描 | 2026-08-29 现场 P90 超过 4s 已触发风险条件：资源 identity 收敛到 user/project，服务端同 key single-flight，并以 stage trace 继续定位 composition；4s 只保留为发现兜底 |
 | managed task 与 runner 身份漂移 | taskId 同时参与 display、cancel 和 runner match |
 | terminal 事件清掉新 execution | reducer/store 以 executionId 做单调替换与 terminal match |
 | 新 UI 加剧密度 | 原入口、两层文案、窄宽度折叠 thread 标题但保留可访问详情 |
@@ -150,4 +173,5 @@ Why: F295 adds the canonical live/managed-command execution read-and-cancel proj
 ## Review Gate
 
 - 实现作者：Sol；exact HEAD reviewer：Kimi；行为/API 契约跨包，走 PR + full gate。
+- 2026-08-29 performance convergence：实现作者 Sol；exact HEAD reviewer Opus 5；行为/API/资源边界继续走 PR + full gate。
 - 浏览器证据覆盖原始用户旅程；review P1/P2=0 后进入 merge-gate。

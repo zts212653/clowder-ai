@@ -1,6 +1,15 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { describe, it } from 'node:test';
@@ -11,6 +20,10 @@ import { requireBash } from './test-bash-runtime.mjs';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(__dirname, '..');
 const scriptPath = path.join(repoRoot, 'scripts', 'pre-merge-check.sh');
+const PREPARED_ARTIFACT_SCRIPT = path.join(repoRoot, 'scripts', 'gate-prepared-artifacts.mjs');
+const PREPARED_ARTIFACT_TEST_OPTIONS = {
+  skip: !existsSync(PREPARED_ARTIFACT_SCRIPT) && 'home-only prepared-artifact support is absent from public export',
+};
 
 function writeExecutable(filePath, source) {
   writeFileSync(filePath, source, 'utf8');
@@ -18,7 +31,7 @@ function writeExecutable(filePath, source) {
 }
 
 function createGitStub(logPath, stubRoot = repoRoot) {
-  return `#!/usr/bin/env node
+  return `#!${process.execPath}
 const { appendFileSync } = require('node:fs');
 const args = process.argv.slice(2);
 appendFileSync(${JSON.stringify(logPath)}, \`git \${args.join(' ')}\\n\`);
@@ -40,6 +53,15 @@ if (args[0] === 'fetch' && args[1] === 'origin' && args[2] === 'main') {
 }
 
 if (args[0] === 'rebase' && args[1] === 'origin/main') {
+  process.exit(0);
+}
+
+if (args[0] === 'rebase' && args[1] === '1111111111111111111111111111111111111111') {
+  process.exit(0);
+}
+
+if (args[0] === 'rev-parse' && args[1] === 'origin/main') {
+  process.stdout.write('1111111111111111111111111111111111111111\\n');
   process.exit(0);
 }
 
@@ -77,10 +99,18 @@ process.exit(1);
 }
 
 function createPnpmStub(logPath) {
-  return `#!/usr/bin/env node
+  return `#!${process.execPath}
 const { appendFileSync } = require('node:fs');
 const args = process.argv.slice(2);
 appendFileSync(${JSON.stringify(logPath)}, \`pnpm \${args.join(' ')}\\n\`);
+appendFileSync(
+  ${JSON.stringify(logPath)},
+  \`gate-base \${process.env.CAT_CAFE_GATE_BASE_SHA ?? '<unset>'}\\n\`,
+);
+appendFileSync(
+  ${JSON.stringify(logPath)},
+  \`prepared-artifacts \${process.env.CAT_CAFE_GATE_PREPARED_ARTIFACTS ?? '<unset>'}\\n\`,
+);
 if (args[0] === 'install') {
   appendFileSync(
     ${JSON.stringify(logPath)},
@@ -104,8 +134,10 @@ const knownCommands = new Set([
   'test',
   'check',
   '-r --if-present run build',
+  '-r --workspace-concurrency=1 --if-present --filter',
   '-r exec bash -lc',
   '--filter @cat-cafe/web lint',
+  '--filter @cat-cafe/web run',
   '--filter @cat-cafe/api run',
 ]);
 if (command === 'run check:fix' && process.env.STUB_CHECKFIX_FAIL === '1') {
@@ -120,11 +152,48 @@ process.exit(0);
 `;
 }
 
+function createNodeStub(logPath) {
+  return `#!${process.execPath}
+const { appendFileSync } = require('node:fs');
+const { spawnSync } = require('node:child_process');
+const args = process.argv.slice(2);
+appendFileSync(${JSON.stringify(logPath)}, 'node ' + args.join(' ') + '\\n');
+if (args[0]?.endsWith('gate-prepared-artifacts.mjs') && args[1] === 'record') {
+  process.exit(process.env.STUB_PREPARED_RECEIPT_FAIL === '1' ? 1 : 0);
+}
+if (args[0]?.endsWith('gate-prepared-artifacts.mjs') && args[1] === 'verify') {
+  process.exit(process.env.STUB_PREPARED_VERIFY_FAIL === '1' ? 1 : 0);
+}
+if (args[0]?.endsWith('gate-terminal-receipt.mjs')) {
+  if (args[1] === 'begin') {
+    process.stdout.write(JSON.stringify({ role: 'producer', runId: 'gate-run-test', fingerprint: 'fingerprint-test' }) + '\\n');
+  }
+  if (args[1] === 'stage-check') {
+    const stage = args[args.indexOf('--stage') + 1];
+    const greenStages = new Set((process.env.STUB_GREEN_STAGES ?? '').split(',').filter(Boolean));
+    process.exit(greenStages.has(stage) ? 0 : 3);
+  }
+  process.exit(0);
+}
+const result = spawnSync(${JSON.stringify(process.execPath)}, args, { env: process.env, stdio: 'inherit' });
+if (result.error) {
+  process.stderr.write(result.error.message + '\\n');
+  process.exit(1);
+}
+process.exit(typeof result.status === 'number' ? result.status : 1);
+`;
+}
+
 function createPublicSyncFixture(baseDir) {
   const fakeRoot = path.join(baseDir, 'fake-repo');
   mkdirSync(path.join(fakeRoot, 'packages', 'api'), { recursive: true });
-  // Symlink scripts/ so gate guard and other script references work
-  symlinkSync(path.join(repoRoot, 'scripts'), path.join(fakeRoot, 'scripts'));
+  mkdirSync(path.join(fakeRoot, 'scripts', 'lib'), { recursive: true });
+  // Model the real public export closure instead of exposing every source-only
+  // home script through one broad scripts/ symlink. In particular, the public
+  // package does not export the resource scheduler or prepared-artifact helper.
+  for (const relativePath of ['scripts/pre-merge-gate-guard.mjs', 'scripts/lib/fseventsd-pressure.mjs']) {
+    symlinkSync(path.join(repoRoot, relativePath), path.join(fakeRoot, relativePath));
+  }
   // Minimal package.json with test:public script — simulates public sync target
   writeFileSync(
     path.join(fakeRoot, 'packages', 'api', 'package.json'),
@@ -147,17 +216,30 @@ function runGate(bash, args = [], extraEnv = {}, options = {}) {
     mkdirSync(binDir, { recursive: true });
     writeExecutable(path.join(binDir, 'git'), createGitStub(logPath, effectiveRoot));
     writeExecutable(path.join(binDir, 'pnpm'), createPnpmStub(logPath));
+    writeExecutable(path.join(binDir, 'node'), createNodeStub(logPath));
+
+    const gateEnv = {
+      ...process.env,
+      ...extraEnv,
+      CAT_CAFE_GATE_GUARD_SKIP_PRESSURE: '1',
+      CAT_CAFE_FULL_GATE_LEASE_HELD: options.leaseHeld === false ? '0' : '1',
+      CAT_CAFE_FULL_GATE_LOCK_PATH: path.join(tempDir, 'full-gate-resource.lock'),
+      CAT_CAFE_FULL_GATE_RESOURCE_DB_PATH: path.join(tempDir, 'full-gate-resources.sqlite'),
+      CAT_CAFE_FULL_GATE_LEASE_POLL_MS: '5',
+      CAT_CAFE_GATE_LOCK_DIR: path.join(tempDir, 'pre-merge-check.lock'),
+      PATH: `${binDir}${path.delimiter}${process.env.PATH ?? ''}`,
+    };
+    if (!Object.hasOwn(extraEnv, 'CAT_CAFE_PROCESS_OWNER_ID')) {
+      delete gateEnv.CAT_CAFE_PROCESS_OWNER_ID;
+    }
+    if (!Object.hasOwn(extraEnv, 'CAT_CAFE_CLI_PROCESS_CONTEXT')) {
+      delete gateEnv.CAT_CAFE_CLI_PROCESS_CONTEXT;
+    }
 
     const result = spawnSync(bash, [scriptPath, ...args], {
       cwd: effectiveRoot,
       encoding: 'utf8',
-      env: {
-        ...process.env,
-        ...extraEnv,
-        CAT_CAFE_GATE_GUARD_SKIP_PRESSURE: '1',
-        CAT_CAFE_GATE_LOCK_DIR: path.join(tempDir, 'pre-merge-check.lock'),
-        PATH: `${binDir}${path.delimiter}${process.env.PATH ?? ''}`,
-      },
+      env: gateEnv,
     });
 
     const logLines = readFileSync(logPath, 'utf8').trim().split('\n').filter(Boolean);
@@ -168,6 +250,52 @@ function runGate(bash, args = [], extraEnv = {}, options = {}) {
 }
 
 describe('pre-merge-check dependency refresh order', () => {
+  it('rejects a full gate launched directly from a cat CLI process', (t) => {
+    const bash = requireBash(t);
+    const result = runGate(bash, [], { CAT_CAFE_PROCESS_OWNER_ID: 'cat-owned-process' });
+
+    assert.equal(result.status, 2);
+    assert.match(result.stderr, /cat_cafe_hold_ball/);
+    assert.match(result.stderr, /wakeWhen/);
+    assert.equal(result.logLines.length, 0, 'the rejected gate must not enter an expensive phase');
+  });
+
+  it('rejects a full gate launched by a cat carrier without a process-owner token', (t) => {
+    const bash = requireBash(t);
+    const result = runGate(bash, [], { CAT_CAFE_CLI_PROCESS_CONTEXT: 'cat' });
+
+    assert.equal(result.status, 2);
+    assert.match(result.stderr, /cat_cafe_hold_ball/);
+    assert.match(result.stderr, /wakeWhen/);
+    assert.equal(result.logLines.length, 0, 'the rejected carrier must not enter an expensive phase');
+  });
+
+  it('runs the canonical empty-argv gate through resource-scoped permits', (t) => {
+    const bash = requireBash(t);
+    const result = runGate(bash, [], {}, { leaseHeld: false });
+
+    assert.equal(result.status, 0, result.stderr);
+    assert.ok(
+      result.logLines.includes('pnpm install --frozen-lockfile'),
+      `expected the resource-scoped gate to run with empty argv, got:\n${result.logLines.join('\n')}`,
+    );
+  });
+
+  it('preserves non-empty argv without a whole-gate re-entry wrapper', (t) => {
+    const bash = requireBash(t);
+    const result = runGate(bash, ['--no-rebase', '--skip-install'], {}, { leaseHeld: false });
+
+    assert.equal(result.status, 0, result.stderr);
+    assert.ok(
+      !result.logLines.some((line) => line.startsWith('git fetch ') || line.startsWith('git rebase ')),
+      `expected --no-rebase to survive lease re-entry, got:\n${result.logLines.join('\n')}`,
+    );
+    assert.ok(
+      !result.logLines.some((line) => line.startsWith('pnpm install ')),
+      `expected --skip-install to survive lease re-entry, got:\n${result.logLines.join('\n')}`,
+    );
+  });
+
   it('keeps the directory-size guard in the root check chain', () => {
     const packageJson = JSON.parse(readFileSync(path.join(repoRoot, 'package.json'), 'utf8'));
 
@@ -177,6 +305,20 @@ describe('pre-merge-check dependency refresh order', () => {
       'pnpm gate must fail locally before public CI when a source directory crosses ADR-010 limits',
     );
   });
+
+  it(
+    'includes prepared-artifact receipt checks in the pre-merge gate check suite',
+    PREPARED_ARTIFACT_TEST_OPTIONS,
+    () => {
+      const packageJson = JSON.parse(readFileSync(path.join(repoRoot, 'package.json'), 'utf8'));
+
+      assert.match(
+        packageJson.scripts['check:pre-merge-gate'],
+        /scripts\/gate-prepared-artifacts\.test\.mjs/,
+        'pnpm check must run the prepared-artifact fail-closed contract tests',
+      );
+    },
+  );
 
   it('does not truncate git worktree output with a pipe that can SIGPIPE under pipefail', () => {
     const source = readFileSync(scriptPath, 'utf8');
@@ -190,7 +332,9 @@ describe('pre-merge-check dependency refresh order', () => {
     const result = runGate(bash);
 
     assert.equal(result.status, 0, result.stderr);
-    const rebaseIndex = result.logLines.findIndex((line) => line.startsWith('git rebase origin/main'));
+    const rebaseIndex = result.logLines.findIndex((line) =>
+      line.startsWith('git rebase 1111111111111111111111111111111111111111'),
+    );
     const installIndex = result.logLines.indexOf('pnpm install --frozen-lockfile');
     const biomeVersionIndex = result.logLines.indexOf('pnpm run check:biome-version');
     const buildIndex = result.logLines.indexOf('pnpm -r --if-present run build');
@@ -209,6 +353,85 @@ describe('pre-merge-check dependency refresh order', () => {
       `expected build after biome version guard, got:\n${result.logLines.join('\n')}`,
     );
     assert.ok(installIndex < buildIndex, `expected build after install, got:\n${result.logLines.join('\n')}`);
+    assert.ok(
+      result.logLines.some((line) => line === 'gate-base 1111111111111111111111111111111111111111'),
+      `expected every gate child to inherit the frozen base SHA, got:\n${result.logLines.join('\n')}`,
+    );
+  });
+
+  it('records Step 3 artifacts before enabling prepared-artifact reuse', PREPARED_ARTIFACT_TEST_OPTIONS, (t) => {
+    const bash = requireBash(t);
+    const result = runGate(bash, [], { CAT_CAFE_GATE_PREPARED_ARTIFACTS: '1' });
+
+    assert.equal(result.status, 0, result.stderr);
+    const buildIndex = result.logLines.indexOf('pnpm -r --if-present run build');
+    const receiptIndex = result.logLines.findIndex((line) => line.endsWith('gate-prepared-artifacts.mjs record'));
+    const tscIndex = result.logLines.findIndex((line) => line.startsWith('pnpm -r exec bash -lc'));
+    const stateAfter = (index) =>
+      result.logLines.slice(index + 1).find((line) => line.startsWith('prepared-artifacts '));
+
+    assert.notEqual(buildIndex, -1, `expected Step 3 build, got:\n${result.logLines.join('\n')}`);
+    assert.notEqual(receiptIndex, -1, `expected prepared-artifact receipt, got:\n${result.logLines.join('\n')}`);
+    assert.notEqual(tscIndex, -1, `expected Step 4 tsc, got:\n${result.logLines.join('\n')}`);
+    assert.ok(buildIndex < receiptIndex, `receipt must follow Step 3 build, got:\n${result.logLines.join('\n')}`);
+    assert.ok(receiptIndex < tscIndex, `reuse must start after receipt, got:\n${result.logLines.join('\n')}`);
+    assert.equal(stateAfter(buildIndex), 'prepared-artifacts <unset>');
+    assert.equal(stateAfter(tscIndex), 'prepared-artifacts 1');
+  });
+
+  it(
+    'fails closed before Step 4 when the prepared-artifact receipt cannot be recorded',
+    PREPARED_ARTIFACT_TEST_OPTIONS,
+    (t) => {
+      const bash = requireBash(t);
+      const result = runGate(bash, [], { STUB_PREPARED_RECEIPT_FAIL: '1' });
+
+      assert.notEqual(result.status, 0);
+      assert.match(result.stdout, /Build 产物收据记录失败/);
+      assert.ok(
+        !result.logLines.some((line) => line.startsWith('pnpm -r exec bash -lc')),
+        `gate must not enter Step 4 after a receipt failure, got:\n${result.logLines.join('\n')}`,
+      );
+    },
+  );
+
+  it(
+    'resumes exact-tree green stages while always refreshing worktree dependencies',
+    PREPARED_ARTIFACT_TEST_OPTIONS,
+    (t) => {
+      const bash = requireBash(t);
+      const greenStages = [
+        'build',
+        'tsc',
+        'test-non-browser',
+        'test-web-unit',
+        'test-web-browser',
+        'test-web-guards',
+        'lint-web',
+        'check',
+      ].join(',');
+      const result = runGate(bash, [], { STUB_GREEN_STAGES: greenStages });
+
+      assert.equal(result.status, 0, result.stderr);
+      assert.ok(result.logLines.includes('pnpm install --frozen-lockfile'));
+      assert.ok(result.logLines.includes('pnpm -r --if-present run build'));
+      assert.ok(!result.logLines.some((line) => line.endsWith('gate-prepared-artifacts.mjs verify')));
+      assert.ok(!result.logLines.some((line) => line.startsWith('pnpm -r exec bash -lc')));
+      assert.ok(!result.logLines.includes('pnpm test'));
+      const settle = result.logLines.find((line) => line.includes('gate-terminal-receipt.mjs settle'));
+      assert.match(settle, /--required-stages tsc,test-non-browser/);
+    },
+  );
+
+  it('never reuses the recursive root build without its complete output closure', (t) => {
+    const bash = requireBash(t);
+    const result = runGate(bash, [], {
+      STUB_GREEN_STAGES: 'build',
+    });
+
+    assert.equal(result.status, 0, result.stderr);
+    assert.ok(!result.logLines.some((line) => line.endsWith('gate-prepared-artifacts.mjs verify')));
+    assert.ok(result.logLines.includes('pnpm -r --if-present run build'));
   });
 
   it('clears inherited production install env before pnpm install', (t) => {
@@ -248,6 +471,20 @@ describe('pre-merge-check dependency refresh order', () => {
       `expected public test suite in public sync target, got:\n${result.logLines.join('\n')}`,
     );
     assert.ok(
+      result.logLines.includes('pnpm -r --if-present run build'),
+      `expected public gate to retain its build phase, got:\n${result.logLines.join('\n')}`,
+    );
+    assert.ok(
+      result.logLines.includes('pnpm -r exec bash -lc if command -v tsc >/dev/null 2>&1; then tsc --noEmit; fi'),
+      `expected public gate to retain its typecheck phase, got:\n${result.logLines.join('\n')}`,
+    );
+    assert.ok(
+      !result.logLines.some(
+        (line) => line.includes('run-with-gate-resource-permit.mjs') || line.includes('gate-prepared-artifacts.mjs'),
+      ),
+      `public gate must not consume source-only scheduler helpers, got:\n${result.logLines.join('\n')}`,
+    );
+    assert.ok(
       !result.logLines.includes('pnpm test'),
       `public sync target must not run source-only full tests, got:\n${result.logLines.join('\n')}`,
     );
@@ -258,10 +495,29 @@ describe('pre-merge-check dependency refresh order', () => {
     const result = runGate(bash, [], { CAT_CAFE_GATE_TEST_MODE: 'full' });
 
     assert.equal(result.status, 0, result.stderr);
-    assert.ok(result.logLines.includes('pnpm test'), `expected full test suite, got:\n${result.logLines.join('\n')}`);
+    assert.ok(
+      result.logLines.includes('pnpm -r --workspace-concurrency=1 --if-present --filter !@cat-cafe/web run test'),
+      `expected non-browser workspace tests, got:\n${result.logLines.join('\n')}`,
+    );
+    assert.ok(
+      result.logLines.includes('pnpm --filter @cat-cafe/web run test:browser'),
+      `expected exclusive web browser tests, got:\n${result.logLines.join('\n')}`,
+    );
     assert.ok(
       !result.logLines.includes('pnpm --filter @cat-cafe/api run test:public'),
       `full mode must not run public test suite, got:\n${result.logLines.join('\n')}`,
+    );
+  });
+
+  it('keeps a source checkout forced to public mode outside canonical receipt reuse', (t) => {
+    const bash = requireBash(t);
+    const result = runGate(bash, [], { CAT_CAFE_GATE_TEST_MODE: 'public' });
+
+    assert.equal(result.status, 0, result.stderr);
+    assert.ok(result.logLines.includes('pnpm --filter @cat-cafe/api run test:public'));
+    assert.ok(
+      !result.logLines.some((line) => line.includes('gate-terminal-receipt.mjs')),
+      `source public probes must not produce or consume canonical receipts, got:\n${result.logLines.join('\n')}`,
     );
   });
 });

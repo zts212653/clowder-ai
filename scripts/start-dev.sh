@@ -573,8 +573,10 @@ REDIS_PIDFILE="${REDIS_DATA_DIR}/redis-${REDIS_PORT}.pid"
 REDIS_LOGFILE="${REDIS_DATA_DIR}/redis-${REDIS_PORT}.log"
 STARTED_REDIS=false
 F247_CLOUD_OWNER_FILE=""
+REDIS_DEV_LEASE_FILE=""
 CLEANUP_RUNNING=false
 MANAGED_PIDS=()
+REDIS_LEASE_HELPER="$PROJECT_DIR/packages/api/scripts/redis-test-lease-cli.mjs"
 # The API shutdown path closes Fastify hooks, including active audio capture
 # finalization. One second was too short once Redis/telemetry cleanup preceded
 # app.close(), so managed children get a bounded graceful window before KILL.
@@ -649,6 +651,35 @@ redis_ping() {
     else
         redis-cli -p "$REDIS_PORT" ping &> /dev/null
     fi
+}
+
+register_redis_dev_lease() {
+    [ "$USE_REDIS" = true ] || return 0
+    case "$DAEMON_DEPLOYMENT_ID" in
+        runtime|alpha) return 0 ;;
+    esac
+    case "$REDIS_PORT" in
+        6099|6398|6399|6401) return 0 ;;
+    esac
+
+    local redis_pid
+    redis_pid="$(redis-cli -p "$REDIS_PORT" INFO server 2>/dev/null | tr -d '\r' | awk -F: '$1 == "process_id" { print $2; exit }')"
+    if [[ ! "$redis_pid" =~ ^[0-9]+$ ]]; then
+        echo -e "${RED}  ✗ 无法确认 Redis (端口 $REDIS_PORT) 的进程身份，拒绝留下无 owner 的 dev 实例${NC}" >&2
+        return 1
+    fi
+    if ! REDIS_DEV_LEASE_FILE="$(node "$REDIS_LEASE_HELPER" register-dev --port "$REDIS_PORT" --redis-pid "$redis_pid" --data-dir "$REDIS_DATA_DIR" --owner-pid "$$" --project-root "$PROJECT_DIR")"; then
+        REDIS_DEV_LEASE_FILE=""
+        echo -e "${RED}  ✗ 无法登记 Redis dev owner lease，拒绝继续启动${NC}" >&2
+        return 1
+    fi
+    echo "  ✓ Redis dev owner 已登记 (端口 $REDIS_PORT, pid $redis_pid)"
+}
+
+remove_redis_dev_lease() {
+    [ -n "$REDIS_DEV_LEASE_FILE" ] || return 0
+    node "$REDIS_LEASE_HELPER" remove-dev --lease-file "$REDIS_DEV_LEASE_FILE" 2>/dev/null || true
+    REDIS_DEV_LEASE_FILE=""
 }
 
 probe_port_with_dev_tcp() {
@@ -1394,6 +1425,7 @@ cleanup() {
         redis-cli -p "$REDIS_PORT" shutdown save &> /dev/null || true
         echo "  Redis (端口 $REDIS_PORT) 已关闭"
     fi
+    remove_redis_dev_lease
     wait 2>/dev/null || true
     # Only remove PID file if we are the daemon that wrote it (avoid orphaning a parallel daemon)
     if [ -f "$DAEMON_PID_FILE" ] && [ "$(cat "$DAEMON_PID_FILE" 2>/dev/null)" = "$$" ]; then
@@ -1518,6 +1550,7 @@ main() {
     echo ""
     echo -e "${CYAN}检查依赖...${NC}"
     setup_storage
+    register_redis_dev_lease
     configure_mcp_server_path
     echo "  数据保留 (秒): message=${MESSAGE_TTL_SECONDS} thread=${THREAD_TTL_SECONDS} task=${TASK_TTL_SECONDS} summary=${SUMMARY_TTL_SECONDS}"
     echo "  注: 0 表示永久保留（不自动过期）"

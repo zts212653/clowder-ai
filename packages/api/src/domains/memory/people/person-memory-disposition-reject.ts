@@ -228,6 +228,7 @@ export class PersonMemoryDispositionReject {
     const { artifactKeyIndex, fenceKeyIndex } = rejectable
       ? appendLegacyClosureKeys(keys, input, candidate)
       : { artifactKeyIndex: 0, fenceKeyIndex: 0 };
+    const settledKeyIndex = keys.push(PersonMemoryKeys.settled(input.ownerUserId));
     const result = String(
       await this.redis.eval(
         REJECT_CANDIDATE_LUA,
@@ -243,6 +244,8 @@ export class PersonMemoryDispositionReject {
         String(artifactKeyIndex),
         String(subjectKeyStart),
         String(subjectRefs.length),
+        String(settledKeyIndex),
+        String(input.decidedAt),
       ),
     );
     return mapLegacyRejectResult(result, updated, candidate);

@@ -43,6 +43,7 @@ import {
   resolveActiveInvocations,
   resolveActiveInvocationsStrict,
 } from './live-invocation-projection.js';
+import { classifyManagedCommandActivity } from './managed-command-activity.js';
 
 export {
   type ActiveInvocationProjection,
@@ -62,6 +63,7 @@ export interface ManagedCommandExecution {
   readonly threadId: string;
   readonly catId: string;
   readonly userId: string;
+  readonly activity: ReturnType<typeof classifyManagedCommandActivity>;
   readonly startedAt: number;
 }
 
@@ -108,6 +110,7 @@ export function listManagedCommandExecutions(
       threadId: parsed.threadId,
       catId: parsed.catId,
       userId: parsed.userId,
+      activity: classifyManagedCommandActivity(parsed.command.command),
       startedAt: parsed.command.startedAt,
     });
   }

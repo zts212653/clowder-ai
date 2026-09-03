@@ -11,6 +11,7 @@ import type {
   CrossThreadCoordination,
   FreshnessCarrierCapability,
   MessageContent,
+  ProviderSemanticEvent,
   QueueTerminalConsumptionWitness,
   ReplyPreview,
   RequestGenerationRetryReason,
@@ -186,6 +187,10 @@ export type AgentMessageType =
 export interface AgentMessage {
   /** The type of this message */
   type: AgentMessageType;
+  /** F306: provider-neutral user-meaning event; native wire names stop in the adapter. */
+  semanticEvent?: ProviderSemanticEvent;
+  /** F306: provider-neutral goal observation awaiting exact SessionChain fencing and ThreadStore revision. */
+  nativeGoalObservation?: ProviderNativeGoalObservation;
   /**
    * F296: provider-authored compaction edge; never inferred from message text.
    *
@@ -517,6 +522,128 @@ export interface ProviderCompactionObservation {
   readonly evidenceRef: string;
 }
 
+export type ProviderNativeGoalStatus = 'active' | 'paused' | 'blocked' | 'usageLimited' | 'budgetLimited' | 'complete';
+
+export type ProviderNativeGoalRequest =
+  | {
+      readonly action: 'set';
+      readonly objective: string;
+      readonly status: ProviderNativeGoalStatus;
+      readonly tokenBudget?: number | null;
+    }
+  | { readonly action: 'get' | 'clear' };
+
+/** Provider-neutral native goal observation; app-server wire fields stop in the adapter. */
+export interface ProviderNativeGoal {
+  readonly action: ProviderNativeGoalRequest['action'];
+  readonly runtimeSessionId: string;
+  readonly goal: {
+    readonly objective: string;
+    readonly status: ProviderNativeGoalStatus;
+    readonly tokenBudget: number | null;
+    readonly tokensUsed: number;
+    readonly timeUsedSeconds: number;
+    readonly createdAt: number;
+    readonly updatedAt: number;
+  } | null;
+}
+
+export type ProviderNativeGoalObservation =
+  | {
+      readonly state: 'updated';
+      readonly runtimeSessionId: string;
+      readonly objective: string;
+      readonly status: ProviderNativeGoalStatus;
+      readonly tokenBudget: number | null;
+      readonly providerUpdatedAt: number;
+      readonly source: string;
+    }
+  | {
+      readonly state: 'cleared';
+      readonly runtimeSessionId: string;
+      readonly source: string;
+    };
+
+export type ProviderNativeReviewTarget =
+  | { readonly kind: 'uncommitted_changes' }
+  | { readonly kind: 'base_branch'; readonly branch: string }
+  | { readonly kind: 'commit'; readonly sha: string; readonly title?: string }
+  | { readonly kind: 'custom'; readonly instructions: string };
+
+export interface ProviderNativeReviewRequest {
+  readonly target: ProviderNativeReviewTarget;
+  readonly delivery: 'inline' | 'detached';
+}
+
+export interface ProviderNativeReviewItem {
+  readonly id: string;
+  readonly kind: 'mode_entered' | 'message' | 'mode_exited';
+  readonly text: string;
+  readonly completedAt: number;
+}
+
+/** Provider-neutral review lifecycle; raw app-server turn/item shapes stop in the adapter. */
+export interface ProviderNativeReview {
+  readonly status: 'running' | 'completed' | 'failed';
+  readonly runtimeSessionId: string;
+  readonly reviewThreadId: string;
+  readonly turnId: string;
+  readonly items: readonly ProviderNativeReviewItem[];
+  readonly result?: {
+    readonly status: 'completed' | 'failed';
+    readonly summary?: string;
+    readonly errorCode?: string;
+  };
+}
+
+export type ProviderNativeAvailability<T extends object> =
+  | ({ readonly availability: 'available' } & T)
+  | { readonly availability: 'unavailable'; readonly reason: 'provider_request_failed' | 'invalid_response' };
+
+/** Live provider status. Every group is independently authoritative or unavailable; none is config-derived. */
+export interface ProviderNativeStatus {
+  readonly runtimeSessionId: string;
+  readonly source: 'codex_app_server';
+  readonly observedAt: number;
+  readonly thread: ProviderNativeAvailability<{
+    readonly status: 'notLoaded' | 'idle' | 'systemError' | 'active';
+    readonly canAcceptDirectInput: boolean | null;
+  }>;
+  readonly capabilities: ProviderNativeAvailability<{
+    readonly imageGeneration: boolean;
+    readonly namespaceTools: boolean;
+    readonly webSearch: boolean;
+  }>;
+  readonly permissionProfiles: ProviderNativeAvailability<{
+    readonly activeId: string | null;
+    readonly profiles: readonly { readonly id: string; readonly allowed: boolean }[];
+  }>;
+  readonly account: ProviderNativeAvailability<{
+    readonly authenticated: boolean;
+    readonly kind?: 'apiKey' | 'chatgpt' | 'amazonBedrock';
+    readonly plan?: string;
+  }>;
+  readonly rateLimits: ProviderNativeAvailability<{
+    readonly primary: { readonly usedPercent: number; readonly resetsAt: number | null } | null;
+    readonly secondary?: { readonly usedPercent: number; readonly resetsAt: number | null } | null;
+    readonly reachedType?: string | null;
+  }>;
+  /** Diagnostic evidence only. Provider rows/cursors never cross this port. */
+  readonly nativeThreadList: ProviderNativeAvailability<{
+    readonly count: number;
+    readonly boundThreadPresent: boolean;
+    readonly hasMore: boolean;
+  }>;
+}
+
+/** A provider fork is binding evidence, never a Clowder AI Thread representation. */
+export interface ProviderNativeThreadFork {
+  readonly sourceRuntimeSessionId: string;
+  readonly forkedRuntimeSessionId: string;
+  readonly source: 'codex_app_server';
+  readonly observedAt: number;
+}
+
 /**
  * F296 B4a preflight fence. The invocation hands this to a preflight-capable
  * adapter instead of a frozen prompt string.
@@ -566,9 +693,21 @@ export interface ToolExecutionPolicy {
 }
 
 /**
+ * Route-owned intent projection for provider behavior controls.
+ * `explicit` keeps a user-selected behavior mode distinct from an automatic
+ * routing strategy such as multi-cat independent thinking.
+ */
+export interface AgentRouteIntent {
+  readonly intent: 'execute' | 'ideate';
+  readonly explicit: boolean;
+}
+
+/**
  * Options for invoking an agent
  */
 export interface AgentServiceOptions {
+  /** Route-owned intent. Providers may project only explicit behavior intent onto native modes. */
+  routeIntent?: AgentRouteIntent;
   /** Session ID to resume (optional) */
   sessionId?: string;
   /** #1208: same capacity snapshot used by prompt assembly and lifecycle health. */
@@ -616,6 +755,10 @@ export interface AgentServiceOptions {
   agentCarrierSessionFactory?: AgentCarrierSessionFactory;
   /** F254 D2: per-invocation two-phase provider-native freshness controller. */
   activeInvocationFreshness?: import('./freshness/FreshnessNoticeBroker.js').ActiveInvocationFreshnessController;
+  /** F306: provider-neutral, invocation-bound human interaction port. */
+  runtimeInteractionPort?: import('../../runtime-interaction/ports/RuntimeInteractionPort.js').RuntimeInteractionPort;
+  /** F310: source-bound Task relation resolved from canonical Task truth for an F306 question. */
+  resolveEntrustedWorkTaskRef?: () => Promise<import('@cat-cafe/shared').EntrustedWorkTaskRefV1 | undefined>;
   /** F210-H1b: Override AGY --log-file path (test seam for the trajectory progress observer). */
   agyLogPathOverride?: string;
   /** F118: Invocation ID for diagnostic enrichment of __cliTimeout */
@@ -684,6 +827,8 @@ export interface PreparedProviderToolSurfaceV1 {
   readonly catCafeSchemas?: readonly unknown[];
   /** Schemas reported back by a provider-owned negotiation surface. */
   readonly providerObservedSchemas?: readonly unknown[];
+  /** Sanitized launch-time delivery facts; old generations may omit this field. */
+  readonly schemaDelivery?: import('@cat-cafe/shared').RequestGenerationSchemaDeliveryV1;
 }
 
 export function requireExactPreparedProviderMessage(request: PreparedProviderRequestV1): string {
@@ -727,6 +872,45 @@ export interface AgentService {
     preflight: ProviderContinuityPreflight,
     options?: AgentServiceOptions,
   ): AsyncIterable<AgentMessage>;
+
+  /** Request provider-native compaction on an already bound, idle runtime. */
+  requestNativeCompaction?(input: {
+    readonly sessionId: string;
+    readonly invocationId: string;
+    readonly timeoutMs: number;
+  }): Promise<ProviderCompactionObservation>;
+
+  /** F306: read or mutate the native goal for one exactly-bound runtime. */
+  requestNativeGoal?(input: {
+    readonly sessionId: string;
+    readonly invocationId: string;
+    readonly timeoutMs: number;
+    readonly request: ProviderNativeGoalRequest;
+  }): Promise<ProviderNativeGoal>;
+
+  /** F306: run one structured native review against an exactly-bound runtime. */
+  requestNativeReview?(input: {
+    readonly sessionId: string;
+    readonly invocationId: string;
+    readonly timeoutMs: number;
+    readonly request: ProviderNativeReviewRequest;
+    readonly onUpdate?: (review: ProviderNativeReview) => void | Promise<void>;
+  }): Promise<ProviderNativeReview>;
+
+  /** F306: query one exactly-bound native runtime without inferring from local configuration. */
+  requestNativeStatus?(input: {
+    readonly sessionId: string;
+    readonly invocationId: string;
+    readonly timeoutMs: number;
+    readonly cwd?: string;
+  }): Promise<ProviderNativeStatus>;
+
+  /** F306: fork one exact native binding; the caller remains responsible for Clowder AI target ownership. */
+  requestNativeFork?(input: {
+    readonly sessionId: string;
+    readonly invocationId: string;
+    readonly timeoutMs: number;
+  }): Promise<ProviderNativeThreadFork>;
 
   /** True only when this concrete carrier applies the requested policy before model launch. */
   supportsToolExecutionPolicy?(policy: ToolExecutionPolicy): boolean;

@@ -109,7 +109,7 @@ describe('DossierDistillationProposalStore (in-memory)', () => {
     store.create(baseInput({ sourceId: 'a' }));
     store.create(baseInput({ sourceId: 'b' }));
     const approved = store.create(baseInput({ sourceId: 'c' }));
-    store.markApproved(approved.proposalId, 'you');
+    store.markApproved(approved.proposalId, 'operator');
 
     const pending = store.listPending();
     assert.equal(pending.length, 2);
@@ -141,24 +141,24 @@ describe('DossierDistillationProposalStore (in-memory)', () => {
 
   it('markApproved → transitions pending → approved', () => {
     const created = store.create(baseInput());
-    const approved = store.markApproved(created.proposalId, 'you');
+    const approved = store.markApproved(created.proposalId, 'operator');
     assert.equal(approved.status, 'approved');
-    assert.equal(approved.approvedBy, 'you');
+    assert.equal(approved.approvedBy, 'operator');
     assert.ok(approved.approvedAt > 0, 'should have approvedAt timestamp');
   });
 
   it('markApproved → returns null if not pending', () => {
     const created = store.create(baseInput());
-    store.markApproved(created.proposalId, 'you');
+    store.markApproved(created.proposalId, 'operator');
     // second approve should fail — already approved
-    const secondApprove = store.markApproved(created.proposalId, 'you');
+    const secondApprove = store.markApproved(created.proposalId, 'operator');
     assert.equal(secondApprove, null);
   });
 
   it('markApproved → returns null for rejected proposal', () => {
     const created = store.create(baseInput());
-    store.markRejected(created.proposalId, 'you', 'not accurate');
-    const result = store.markApproved(created.proposalId, 'you');
+    store.markRejected(created.proposalId, 'operator', 'not accurate');
+    const result = store.markApproved(created.proposalId, 'operator');
     assert.equal(result, null);
   });
 
@@ -166,25 +166,25 @@ describe('DossierDistillationProposalStore (in-memory)', () => {
 
   it('markRejected → transitions pending → rejected', () => {
     const created = store.create(baseInput());
-    const rejected = store.markRejected(created.proposalId, 'you', 'evidence insufficient');
+    const rejected = store.markRejected(created.proposalId, 'operator', 'evidence insufficient');
     assert.equal(rejected.status, 'rejected');
-    assert.equal(rejected.rejectedBy, 'you');
+    assert.equal(rejected.rejectedBy, 'operator');
     assert.equal(rejected.rejectionReason, 'evidence insufficient');
     assert.ok(rejected.rejectedAt > 0);
   });
 
   it('markRejected → returns null if not pending', () => {
     const created = store.create(baseInput());
-    store.markApproved(created.proposalId, 'you');
-    const result = store.markRejected(created.proposalId, 'you');
+    store.markApproved(created.proposalId, 'operator');
+    const result = store.markRejected(created.proposalId, 'operator');
     assert.equal(result, null);
   });
 
   it('markRejected → works without rejection reason', () => {
     const created = store.create(baseInput());
-    const rejected = store.markRejected(created.proposalId, 'you');
+    const rejected = store.markRejected(created.proposalId, 'operator');
     assert.equal(rejected.status, 'rejected');
-    assert.equal(rejected.rejectedBy, 'you');
+    assert.equal(rejected.rejectedBy, 'operator');
     assert.equal(rejected.rejectionReason, undefined);
   });
 
@@ -192,14 +192,14 @@ describe('DossierDistillationProposalStore (in-memory)', () => {
 
   it('markApplied → transitions approved → applied', () => {
     const created = store.create(baseInput());
-    store.markApproved(created.proposalId, 'you');
+    store.markApproved(created.proposalId, 'operator');
     const applied = store.markApplied(created.proposalId, 'opus', 'abc123');
     assert.equal(applied.status, 'applied');
     assert.equal(applied.appliedBy, 'opus');
     assert.equal(applied.appliedCommitSha, 'abc123');
     assert.ok(applied.appliedAt > 0);
     // approval fields preserved
-    assert.equal(applied.approvedBy, 'you');
+    assert.equal(applied.approvedBy, 'operator');
     assert.ok(applied.approvedAt > 0);
   });
 
@@ -211,14 +211,14 @@ describe('DossierDistillationProposalStore (in-memory)', () => {
 
   it('markApplied → returns null if rejected', () => {
     const created = store.create(baseInput());
-    store.markRejected(created.proposalId, 'you');
+    store.markRejected(created.proposalId, 'operator');
     const result = store.markApplied(created.proposalId, 'opus', 'abc123');
     assert.equal(result, null);
   });
 
   it('markApplied → returns null for already applied', () => {
     const created = store.create(baseInput());
-    store.markApproved(created.proposalId, 'you');
+    store.markApproved(created.proposalId, 'operator');
     store.markApplied(created.proposalId, 'opus', 'abc123');
     const secondApply = store.markApplied(created.proposalId, 'opus', 'def456');
     assert.equal(secondApply, null);
@@ -232,7 +232,7 @@ describe('DossierDistillationProposalStore (in-memory)', () => {
     assert.equal(proposal.status, 'pending');
 
     // 2. operator approves
-    const approved = store.markApproved(proposal.proposalId, 'you');
+    const approved = store.markApproved(proposal.proposalId, 'operator');
     assert.equal(approved.status, 'approved');
 
     // 3. Cat applies to dossier + commits
@@ -243,18 +243,18 @@ describe('DossierDistillationProposalStore (in-memory)', () => {
     // 4. Verify final state
     const final = store.get(proposal.proposalId);
     assert.equal(final.status, 'applied');
-    assert.equal(final.approvedBy, 'you');
+    assert.equal(final.approvedBy, 'operator');
     assert.equal(final.appliedBy, 'opus');
   });
 
   it('full lifecycle: create → reject', () => {
     const proposal = store.create(baseInput());
-    const rejected = store.markRejected(proposal.proposalId, 'you', 'not accurate enough');
+    const rejected = store.markRejected(proposal.proposalId, 'operator', 'not accurate enough');
     assert.equal(rejected.status, 'rejected');
     assert.equal(rejected.rejectionReason, 'not accurate enough');
 
     // Cannot transition from rejected
-    assert.equal(store.markApproved(proposal.proposalId, 'you'), null);
+    assert.equal(store.markApproved(proposal.proposalId, 'operator'), null);
     assert.equal(store.markApplied(proposal.proposalId, 'opus', 'abc'), null);
   });
 });

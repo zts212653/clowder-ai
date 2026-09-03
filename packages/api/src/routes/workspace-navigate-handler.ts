@@ -37,6 +37,7 @@ export interface WorkspaceNavigateBody {
   line?: number;
   threadId?: string;
   catId?: string;
+  skillConsumptionHandle?: string;
 }
 
 export type WorkspaceNavigateBodyParseResult = { ok: true; body: WorkspaceNavigateBody } | { ok: false; error: string };
@@ -47,18 +48,27 @@ const WORKSPACE_NAVIGATE_ACTIONS = new Set<NonNullable<WorkspaceNavigateBody['ac
   'knowledge-feed',
 ]);
 
-export function parseWorkspaceNavigateBody(value: unknown): WorkspaceNavigateBodyParseResult {
-  if (value === undefined) return { ok: true, body: {} };
-  if (!value || typeof value !== 'object' || Array.isArray(value)) {
-    return { ok: false, error: 'Request body must be an object' };
-  }
-  const candidate = value as Record<string, unknown>;
-  for (const field of ['worktreeId', 'path', 'threadId', 'catId'] as const) {
+function validateOptionalStringFields(candidate: Record<string, unknown>): string | null {
+  for (const field of ['worktreeId', 'path', 'threadId', 'catId', 'skillConsumptionHandle'] as const) {
     const fieldValue = candidate[field];
     if (fieldValue !== undefined && (typeof fieldValue !== 'string' || fieldValue.length === 0)) {
-      return { ok: false, error: `${field} must be a non-empty string` };
+      return `${field} must be a non-empty string`;
     }
   }
+  if (typeof candidate.skillConsumptionHandle === 'string' && candidate.skillConsumptionHandle.length > 2_000) {
+    return 'skillConsumptionHandle must be at most 2000 characters';
+  }
+  return null;
+}
+
+export function parseWorkspaceNavigateBody(value: unknown): WorkspaceNavigateBodyParseResult {
+  const normalized = value ?? {};
+  if (!normalized || typeof normalized !== 'object' || Array.isArray(normalized)) {
+    return { ok: false, error: 'Request body must be an object' };
+  }
+  const candidate = normalized as Record<string, unknown>;
+  const stringFieldError = validateOptionalStringFields(candidate);
+  if (stringFieldError) return { ok: false, error: stringFieldError };
   if (
     candidate.action !== undefined &&
     (typeof candidate.action !== 'string' ||

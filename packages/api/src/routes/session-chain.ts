@@ -100,7 +100,13 @@ async function resolveManualSealCandidate(input: {
   if (!thread) {
     return { kind: 'error', status: 404, body: { error: 'Thread not found', code: 'THREAD_NOT_FOUND' } };
   }
-  if (!canAccessSessionRecord(thread, session, input.userId)) {
+  const access = await resolveThreadAccess({
+    threadStore: input.threadStore,
+    thread,
+    userId: input.userId,
+    request: { resource: 'sessions', action: 'read' },
+  });
+  if (!canReadThreadRecord(access, session)) {
     return { kind: 'error', status: 403, body: { error: 'Access denied', code: 'SESSION_ACCESS_DENIED' } };
   }
   if (session.status !== 'active') {
@@ -265,7 +271,13 @@ async function loadRestoreTarget(
   if (!thread) {
     return { response: { statusCode: 404, body: { error: 'Thread not found' } } };
   }
-  if (!canAccessSessionRecord(thread, session, userId)) {
+  const access = await resolveThreadAccess({
+    threadStore,
+    thread,
+    userId,
+    request: { resource: 'sessions', action: 'read' },
+  });
+  if (!canReadThreadRecord(access, session)) {
     return { response: { statusCode: 403, body: { error: 'Access denied' } } };
   }
   if (session.status === 'active') {

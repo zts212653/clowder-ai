@@ -102,6 +102,15 @@ export {
   parseMeasurementBundleCertificate,
   validateMeasurementBundleResult,
 } from './measurement/measurement-bundle-validation.js';
+export type { MeasurementDecisionProofOwnerObject } from './measurement/measurement-decision-proof-owner-object.js';
+export { MeasurementDecisionProofOwnerObjectSchema } from './measurement/measurement-decision-proof-owner-object.js';
+export type {
+  MeasurementDecisionProofRef,
+  MeasurementDecisionProofResolution,
+  MeasurementDecisionProofResolver,
+} from './measurement/measurement-decision-proof-resolver.js';
+export { createFileMeasurementDecisionProofResolver } from './measurement/measurement-decision-proof-resolver.js';
+export type { MeasurementDecisionProof } from './measurement/measurement-decision-proof-schema.js';
 export type {
   SameVersionReplayOptions,
   SameVersionReplayReport,

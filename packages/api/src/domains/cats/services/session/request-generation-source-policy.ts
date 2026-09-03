@@ -10,7 +10,7 @@ const MEMORY_CUE_PREFIX = 'memory-cue:v1:';
 export const CAT_CAFE_SYSTEM_PROMPT_SOURCE_REF = 'registry:cat-cafe-owned';
 
 type MemoryCueSourceCoordinate = {
-  readonly family: 'person_memory' | 'evidence' | 'taste';
+  readonly family: 'person_memory' | 'evidence' | 'taste' | 'profile' | 'event';
   readonly anchor: string;
   readonly revision: string;
 };
@@ -28,7 +28,11 @@ function decodeMemoryCueSourceRef(value: string): MemoryCueSourceCoordinate | nu
       revision?: unknown;
     };
     if (
-      (parsed.family !== 'person_memory' && parsed.family !== 'evidence' && parsed.family !== 'taste') ||
+      (parsed.family !== 'person_memory' &&
+        parsed.family !== 'evidence' &&
+        parsed.family !== 'taste' &&
+        parsed.family !== 'profile' &&
+        parsed.family !== 'event') ||
       typeof parsed.anchor !== 'string' ||
       !parsed.anchor ||
       typeof parsed.revision !== 'string' ||
@@ -162,6 +166,7 @@ function resolveRuntimeContextSource(
   const invocationRefs = new Set([
     `context-management-hint:${input.invocationId}`,
     `capacity-recovery:${input.invocationId}`,
+    `routing-context:${input.invocationId}`,
   ]);
   if (invocationRefs.has(sourceRef.ref)) return 'available';
   return sourceRef.ref === `transcript-path-hints:${input.threadId}` ? 'available' : 'redacted';

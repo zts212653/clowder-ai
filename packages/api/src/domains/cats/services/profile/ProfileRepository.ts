@@ -48,7 +48,7 @@ export class FileProfileRepository {
   }
 
   readCapsule(userId: string): { content: string; path: string } | null {
-    const path = resolve(this.profileDir(userId), 'landy-capsule.md');
+    const path = resolve(this.profileDir(userId), 'operator-capsule.md');
     if (!existsSync(path)) return null;
     return { content: readFileSync(path, 'utf8'), path };
   }

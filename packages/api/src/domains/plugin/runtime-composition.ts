@@ -4,6 +4,11 @@ import type { IMessageStore } from '../cats/services/stores/ports/MessageStore.j
 import { createMessagingDomain, type MessagingService } from '../messaging/messaging-service.js';
 import type { MeetingIntakeStore } from '../signal-intake/MeetingIntakeStore.js';
 import type { SignalRouteStore } from '../signal-intake/SignalRouteStore.js';
+import {
+  CollectiveConnectorBuiltinRuntime,
+  type CollectiveConnectorBuiltinRuntimeOptions,
+} from './builtin-runtime/collective-connector-runtime.js';
+import { HybridPluginRuntimeSupervisor } from './builtin-runtime/hybrid-supervisor.js';
 import { ExternalPluginLifecycleService } from './external-plugin-lifecycle.js';
 import { FilesystemVerifiedPluginPackageLocator } from './external-runtime/filesystem-package-locator.js';
 import { ExternalPluginRuntimeSupervisor } from './external-runtime/supervisor.js';
@@ -31,6 +36,9 @@ export interface DormantPluginRuntimeCompositionOptions {
   readonly processes?: ExternalPluginProcessAdapter;
   readonly packages?: VerifiedPluginPackageLocator;
   readonly now?: () => number;
+  readonly collectiveConnector?: Omit<CollectiveConnectorBuiltinRuntimeOptions, 'dataDirectory'> & {
+    readonly dataDirectory?: string;
+  };
 }
 
 export interface DormantPluginRuntimeRecovery {
@@ -45,7 +53,8 @@ export interface DormantPluginRuntimeComposition {
   readonly brokerStore: FileHostBrokerStore;
   readonly inventory: HostInventoryControlPlane;
   readonly broker: HostBrokerControlPlane;
-  readonly supervisor: ExternalPluginRuntimeSupervisor;
+  readonly supervisor: HybridPluginRuntimeSupervisor;
+  readonly collectiveConnectorRuntime?: CollectiveConnectorBuiltinRuntime;
   readonly messaging: MessagingService;
   readonly lifecycle: ExternalPluginLifecycleService;
   readonly packages: VerifiedPluginPackageLocator;
@@ -108,12 +117,28 @@ export function createDormantPluginRuntimeComposition(
     ...(options.now === undefined ? {} : { now: options.now }),
   });
   const packages = options.packages ?? new FilesystemVerifiedPluginPackageLocator(paths.packagesRoot);
-  const supervisor = new ExternalPluginRuntimeSupervisor({
+  const externalSupervisor = new ExternalPluginRuntimeSupervisor({
     inventory: inventoryStore,
     broker,
     packages,
     handshakeTimeoutMs: EXTERNAL_PLUGIN_PRE_ACTIVE_TIMEOUT_MS,
     ...(options.processes === undefined ? {} : { processes: options.processes }),
+    ...(options.now === undefined ? {} : { now: options.now }),
+  });
+  const collectiveConnectorRuntime = options.collectiveConnector
+    ? new CollectiveConnectorBuiltinRuntime({
+        ...options.collectiveConnector,
+        dataDirectory:
+          options.collectiveConnector.dataDirectory ??
+          resolve(options.projectRoot, '.cat-cafe', 'collective-connector'),
+      })
+    : undefined;
+  const supervisor = new HybridPluginRuntimeSupervisor({
+    inventory: inventoryStore,
+    external: externalSupervisor,
+    builtinRuntimes: new Map(
+      collectiveConnectorRuntime ? [['official.collective-connector', collectiveConnectorRuntime] as const] : [],
+    ),
     ...(options.now === undefined ? {} : { now: options.now }),
   });
   const lifecycle = new ExternalPluginLifecycleService({
@@ -129,6 +154,7 @@ export function createDormantPluginRuntimeComposition(
     inventory,
     broker,
     supervisor,
+    ...(collectiveConnectorRuntime === undefined ? {} : { collectiveConnectorRuntime }),
     messaging,
     lifecycle,
     packages,

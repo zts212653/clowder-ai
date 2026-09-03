@@ -1,6 +1,6 @@
 # F141: Repo Inbox — 通知格式 + 首反 SOP
 
-> 返回 → opensource-ops SKILL.md
+> 返回 → [opensource-ops SKILL.md](../opensource-ops/SKILL.md)
 > Feature spec → [F141](../../docs/features/F141-github-repo-inbox.md)
 
 ## Repo Inbox 是什么

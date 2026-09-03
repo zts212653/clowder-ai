@@ -27,7 +27,7 @@ function buildAgentKeyPublishApp() {
         record: {
           agentKeyId: 'ak-test-001',
           catId: 'codex',
-          userId: 'you',
+          userId: 'operator',
           secretHash: 'unused',
           salt: 'unused',
           scope: 'user-bound',

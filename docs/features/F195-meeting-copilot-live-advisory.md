@@ -4,7 +4,7 @@ related_features: [F066, F103, F104, F111, F112]
 topics: [meeting, live-advisory, augmentation, accessibility, AUDHD, speech-recognition, diarization, model-selection]
 doc_kind: spec
 created: 2026-05-09
-updated: 2026-08-25
+updated: 2026-08-29
 ---
 
 # F195: Meeting Copilot — 实时会议私人智囊团
@@ -388,6 +388,7 @@ Python 路径（直接嵌入 `audio-service.py`）：
 - [x] AC-I9: App source discovery 与 CaptureAppAudio 使用同一个 ScreenCaptureKit 身份坐标；`/sources.apps[]` 返回稳定 bundle ID 与显示名，UI/MCP 把该 ID 原样送入 start，禁止按具体 App 增加 alias/fallback。
 - [x] AC-I10: session-local Speaker N 只在重复相干声纹证据后出生；一次性候选有界且会过期/合并，cluster cap 饱和时能用更强的新证据替换未人工归名的陈旧/弱簇。隐私安全的两人合成 replay 和 owner-confirmed 两人私有录音本机只读 replay 都必须稳定为 2 个 confirmed clusters，不能再先膨胀到 8 后整屏 Unknown。
 - [x] AC-I11: speaker embedding 选型按 `docs/eval/f195-speaker-embedding-model-selection.md` 的单次 shadow eval 出生证裁决；CAM++ `v2.0.2` 继续作为生产 baseline，ReDimNet2-B3 只获离线候选资格。无 turn labels 的 silhouette/Unknown 聚合只能发现候选，不能授权换模型；晋级必须使用独立标注 holdout、多维误差/资源向量、三次重复与 checksum-pinned safe loader。
+- [x] AC-I12: macOS App capture 的 ignored native artifact 必须纳入安装与每次 audio sidecar 启动的 freshness 校验；source fingerprint 变化或 binary 缺失时原子重建，正常 runtime restart 足以刷新它。枚举器输出不可解析时必须留下根因日志并降级为空 source list，不能因日志变量错误把 native parse failure 覆盖成 HTTP 500。
 
 **Architecture decision**：ClusterRegistry 保持 AudioSession 级（不是 input 级），因为同一个人可能出现在多个输入中；输入来源只是证据维度，不是身份命名空间。回声抑制读取同一 session 最近已接纳行的纯投影，不新增 transcript/store。
 
@@ -396,6 +397,8 @@ Python 路径（直接嵌入 `audio-service.py`）：
 **Post-merge UAT correction (2026-08-25)**：真实 WeLink 证明 source picker 的 System Events 进程名不是 CaptureAppAudio 的 ScreenCaptureKit 坐标；真实两人视频又证明“一段 embedding 立即永久建簇”会在 12 个片段内耗尽 8 簇。纠偏实现把 App 枚举收敛到 CaptureAppAudio `{id=bundleIdentifier,name=applicationName}`，并把 cluster birth 改为 provisional → repeated confirmation，同时加入候选过期/合并、confirmed assignment 的独立成本、cap saturation recovery 与无 embedding 泄漏的诊断计数。私有录音只做本机只读聚合验证，不进入仓库或 fixture。
 
 **Speaker model selection boundary (2026-08-25)**：同一私有 episode 的 shadow A/B 只能说明 ReDimNet2-B3 值得进入离线候选，不能说明应替换 CAM++：无 turn-level labels，且 B3 CPU p95 超过 AC-G5 的 200ms 预算。当前纠偏保持 CAM++，先修共有的 cluster lifecycle；选型出生证冻结 DER、speaker-count error、fragmentation/swap/merge/Unknown 与 latency/init/RSS 向量，要求独立标注的中文视频、2–4 人会议、overlap/music 与公共 labelled holdout，禁止把单一 silhouette 或模型卡 EER 当生产 verdict。
+
+**Native artifact freshness correction (2026-08-29)**：post-merge UAT 证明代码新鲜且进程已重启仍不等于 ignored `CaptureAppAudio` binary 新鲜；旧 binary 把 `list --json` 当 legacy list 执行，而异常分支中的未定义 logger 又把可诊断降级升级为 `/sources` 500。纠偏把 Swift source fingerprint 与原子 binary/stamp 安装绑定到 install + 每次 sidecar start，并用正常 restart、首次 build/无变化 skip/source mutation rebuild 与 legacy-text parse failure 回归锁住 AC-I12；不增加 Chrome/WeLink alias，也不在 feature 验证中重启 3003/3004。
 
 ### 已知 Bug（实测发现）
 

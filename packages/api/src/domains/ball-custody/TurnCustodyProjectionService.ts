@@ -123,7 +123,10 @@ export class TurnCustodyProjectionService {
   }
 
   async close(projection: TurnCustodyProjection): Promise<TurnCustodyStopDecision> {
-    if (projection.state !== 'covered_active' || !projection.baseline) return decision(projection, false);
+    // Blocking state and transition observation are orthogonal. A managed wake
+    // superseded before adoption is non-blocking, but the exact adopting turn
+    // must still observe a later re-hold/handoff for its predecessor receipt.
+    if (!projection.baseline) return decision(projection, false);
     try {
       if (projection.baseline.kind === 'action_successor') {
         return decision(projection, await this.actionTransitionObserved(projection.baseline));
@@ -131,11 +134,14 @@ export class TurnCustodyProjectionService {
       const structuredTransition = await this.structuredTransitionObserved(projection.baseline);
       return decision(projection, structuredTransition !== undefined, projection.state, structuredTransition);
     } catch {
-      return decision(
-        { state: 'unknown_legacy', evidenceRefs: [...projection.evidenceRefs, 'unknown:query_failed'] },
-        false,
-        'unknown_legacy',
-      );
+      const evidenceRefs = [...projection.evidenceRefs, 'unknown:query_failed'];
+      // A covered-empty projection already proved that the predecessor is not
+      // a live obligation. A transient observation failure may withhold its
+      // continuation witness, but must not revive that obligation.
+      if (projection.state === 'covered_empty') {
+        return decision({ ...projection, evidenceRefs }, false);
+      }
+      return decision({ state: 'unknown_legacy', evidenceRefs }, false, 'unknown_legacy');
     }
   }
 
@@ -207,7 +213,13 @@ export class TurnCustodyProjectionService {
         { catId: wake.holderCatId, sourceMessageId: wake.sourceMessageId, taskId: wake.taskId },
         wake.subjectKey,
       );
-      if (superseded) return { state: 'covered_empty', evidenceRefs: [...superseded] };
+      if (superseded) {
+        return {
+          ...this.coveredActiveProjection(wake, events),
+          state: 'covered_empty',
+          evidenceRefs: [...superseded],
+        };
+      }
     }
     return this.coveredActiveProjection(wake, events);
   }

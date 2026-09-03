@@ -76,7 +76,7 @@ describe('RedisConciergeConfigStore', { skip: redisIsolationSkipReason(REDIS_URL
   it('get returns defaults when no config stored', async () => {
     const config = await store.get('user-1');
     assert.equal(config.enabled, true);
-    assert.equal(config.skin, 'yanyan-codex');
+    assert.equal(config.skin, 'xianxian-codex');
     assert.equal(config.displayName, '猫猫球');
     assert.equal(config.personaTone, '温暖、简短、不啰嗦');
     assert.equal(config.proactivePolicy, 'quiet-badge');
@@ -98,6 +98,7 @@ describe('RedisConciergeConfigStore', { skip: redisIsolationSkipReason(REDIS_URL
     await store.put('user-2', input);
     const retrieved = await store.get('user-2');
     assert.equal(retrieved.enabled, false);
+    assert.equal(retrieved.skin, 'ragdoll-v1');
     assert.equal(retrieved.displayName, 'KittyDesk');
     assert.equal(retrieved.dutyCatProfileId, 'gpt52');
     assert.equal(retrieved.proactivePolicy, 'ambient');

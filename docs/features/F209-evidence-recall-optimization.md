@@ -4,6 +4,7 @@ related_features: [F102, F188, F200, F192, F208, F211]
 topics: [memory, evidence-recall, passage-vector, entity-anchor, drill-down, perspective, eval]
 doc_kind: spec
 created: 2026-05-21
+tips_exempt: "2026-09-02 public identity and feature-history projection only; evidence-recall behavior and its existing memory-search entry surface are unchanged."
 ---
 
 # F209: Evidence Recall Optimization — 消息级语义、实体门牌号与活查询藤
@@ -60,7 +61,7 @@ F209 完整终态包含五层：
 1. **机制 ship**：该 Phase 的 ACs 在代码 / 测试 / 跨族 review 层全部 ✅。
 2. **真实可感知闭环**：至少 1 个真实端到端 dogfood demo，证明该 Phase 的能力对真实用户 / 猫**可感知**。
    - Phase A: 真实 raw `semantic`/`hybrid` query 找到一条**无字面命中**的旧消息。
-   - Phase B: 至少 seed 1 个真实实体（如 `person:landy`），搜别名能命中只提及别名的原消息。
+   - Phase B: 至少 seed 1 个真实实体（如 `person:operator`），搜别名能命中只提及别名的原消息。
    - Phase C: 真实 `search_evidence → drillDown → typed reader` 端到端打开原文窗口闭环。
    - Phase D: Perspective live query plan must run end-to-end, expose anchors / typed drill-down hints, and remain a live route rather than stored truth.
    - Close gate: independent vision guardian dogfood must verify Phase A-D are useful to a real cat workflow.
@@ -88,9 +89,9 @@ Phase A 不是“先只建一个向量表”的碎片切片。可关闭的最小
 
 ## Phase B: Entity Anchor / Alias Registry
 
-把实体做成一等检索轴，解决 `landy` / `operator` / `operator` 这种别名误伤。
+把实体做成一等检索轴，解决 `operator` / `operator` / `operator` 这种别名误伤。
 
-与 F208 / F032 的边界：**F209 owns entity registry / retrieval anchor 层**，回答“`landy` / `operator` / `operator` 是否同一个可检索实体”，提供 `entity_id`、alias、type 与 provenance 真相源；它不是 roster truth，不决定谁是猫、当前 model、role 或 reviewer eligibility。**F208 owns 实体能力画像层**，回答“Maine Coon强什么、盲点在哪、适合接什么任务”。F208 的 `cat-dossier` 消费 F209 的 `entity_id` 作为猫/人标识键，不另造一套猫 ID。
+与 F208 / F032 的边界：**F209 owns entity registry / retrieval anchor 层**，回答“`operator` / `operator` / `operator` 是否同一个可检索实体”，提供 `entity_id`、alias、type 与 provenance 真相源；它不是 roster truth，不决定谁是猫、当前 model、role 或 reviewer eligibility。**F208 owns 实体能力画像层**，回答“Maine Coon强什么、盲点在哪、适合接什么任务”。F208 的 `cat-dossier` 消费 F209 的 `entity_id` 作为猫/人标识键，不另造一套猫 ID。
 
 Phase B 隐私模型：entity registry 跟随所属 evidence store / collection 的边界；本 slice 不在实体记录上携带半接线的 `privacy_scope` / `sensitivity` 字段。AC-B5 由 collection routing 与 `redactForTranscript` 白名单 redaction 承担；mixed-scope entity seeding 后置到有完整 router enforcement 的设计。
 
@@ -98,10 +99,10 @@ Phase B 隐私模型：entity registry 跟随所属 evidence store / collection 
 
 - [x] AC-B1: 有 durable entity registry，支持 `entity_id`、aliases、type、provenance、updated_at。
 - [x] AC-B2: `search_evidence` query 可进行确定性 alias expansion；alias 字典不是 classifier。
-- [x] AC-B3: 索引层可记录 entity mentions，结果能解释“为何命中 person:landy / cat:gemini”。
+- [x] AC-B3: 索引层可记录 entity mentions，结果能解释“为何命中 person:operator / cat:gemini”。
 - [x] AC-B4: entity 与 project/global/library/collection 联邦检索兼容。
 - [x] AC-B5: 隐私实体默认受 scope 控制，不跨域泄漏。
-- [x] AC-B6: **transferred to F208 AC-A5** (2026-05-23 post-Phase-C reflection). F209 不再阻塞此 AC；F208 spec 持有对偶 AC `cat-dossier consumes F209 entity_id; no parallel namespace`。这是 ownership cleanup，不是新决策——47 / Maine Coon owner 对齐即可，不需 ping landy。
+- [x] AC-B6: **transferred to F208 AC-A5** (2026-05-23 post-Phase-C reflection). F209 不再阻塞此 AC；F208 spec 持有对偶 AC `cat-dossier consumes F209 entity_id; no parallel namespace`。这是 ownership cleanup，不是新决策——47 / Maine Coon owner 对齐即可，不需 ping operator。
 
 ## Phase B.1: Minimal Entity Seed Follow-up
 
@@ -115,7 +116,7 @@ Phase B 机制完成（registry + alias expansion + mention index）后，**生�
 ### Acceptance Criteria
 
 - [x] AC-B1.1: explicit seed 真相源存在并 git-tracked（`config/entity-seeds.json`）。
-- [x] AC-B1.2: 至少 1 个真实 `person:` 实体 seeded，覆盖 ≥ 4 个 alias（`person:landy ← landy / operator / operator / l.s. / L.S. / Lysander / @co-creator / @co-creator / @you`）。
+- [x] AC-B1.2: 至少 1 个真实 `person:` 实体 seeded，覆盖 ≥ 4 个 alias（`person:operator ← operator / operator / operator / l.s. / L.S. / Lysander / @co-creator / @co-creator / @you`）。
 - [x] AC-B1.3: 真实 `search_evidence("operator")` / `search_evidence("operator")` 能命中只提及另一 alias 的旧消息（`entity-seeds.test.js` 通过 `/api/evidence/search?q=operator` 覆盖 dogfood 路径）。
 - [x] AC-B1.4: 猫 roster aliases 同步是 **roster → registry 单向**，registry 不反写 cat-config.json / AgentRegistry。
 - [x] AC-B1.5: seed 真相源带 provenance（来源 + 日期 + 维护者），编辑历史进 git log。
@@ -292,7 +293,7 @@ Visibility audit: `docs/decisions/2026-05-24-f209-phase-d-visibility-audit.md`. 
 |----|------|
 | **Primary Users** | 需要从旧 thread/docs/sessions 找证据的猫；Activation Signal：`search_evidence` 在复杂 thread recall 中被调用 |
 | **Friction Metric** | 搜到摘要但打不开原文窗口的比例；raw 搜不到但人工能在 transcript 找到的比例；>3 轮 query reformulation |
-| **Regression Fixture** | Phase A fixture: `docs/eval/f209-phase-a-raw-retrieval-fixtures.md`（raw semantic 非字面消息召回；raw hybrid 保留 lexical + semantic passage hits）。Phase B fixture: `docs/eval/f209-phase-b-entity-anchor-fixtures.md`（`landy/operator/operator` alias 归一、raw entity passage anchor、private collection redaction）。Phase C fixture: `docs/eval/f209-phase-c-drilldown-fixtures.md`（message window / invocation detail chain / file slice bounded readers）。后续 Phase 继续贡献：Perspective 现场重跑、Perspective run 可见层 step / hits / typed reader route hints。F209 贡献 fixture，F200 统一纳入 golden set |
+| **Regression Fixture** | Phase A fixture: `docs/eval/f209-phase-a-raw-retrieval-fixtures.md`（raw semantic 非字面消息召回；raw hybrid 保留 lexical + semantic passage hits）。Phase B fixture: `docs/eval/f209-phase-b-entity-anchor-fixtures.md`（`operator/operator/operator` alias 归一、raw entity passage anchor、private collection redaction）。Phase C fixture: `docs/eval/f209-phase-c-drilldown-fixtures.md`（message window / invocation detail chain / file slice bounded readers）。后续 Phase 继续贡献：Perspective 现场重跑、Perspective run 可见层 step / hits / typed reader route hints。F209 贡献 fixture，F200 统一纳入 golden set |
 | **Sunset Signal** | 6 个月内 golden query recall@k 无提升，或猫仍主要绕过 F209 直接人工 grep transcript → 回滚 Perspective / entity layer，仅保留 passage vector |
 
 ## 需求点 Checklist

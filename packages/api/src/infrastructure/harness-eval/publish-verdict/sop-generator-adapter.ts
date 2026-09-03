@@ -51,6 +51,7 @@ export function createSopGeneratorAdapter(): VerdictGenerator {
       harnessFeedbackRoot: deps.harnessFeedbackRoot,
       trace,
       evalResults,
+      generatedAt: deps.publicationTime,
       submittedPacket: packet,
     });
 

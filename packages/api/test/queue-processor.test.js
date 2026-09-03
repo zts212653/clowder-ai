@@ -11,6 +11,7 @@ const {
 } = await import('../dist/domains/cats/services/agents/invocation/QueuedMessageCustodyCoordinator.js');
 const { MessageStore } = await import('../dist/domains/cats/services/stores/ports/MessageStore.js');
 const { projectQueueReceipt } = await import('../dist/domains/cats/services/stores/ports/queued-message-receipt.js');
+const { createA2ADispositionHarness } = await import('./helpers/a2a-dispatch-disposition-harness.js');
 const queuedTelemetry = await import('../dist/domains/cats/services/freshness/freshness-queue-telemetry.js');
 const { InMemoryFreshnessClosureStore } = await import(
   '../dist/domains/cats/services/freshness/closure/FreshnessClosureStore.js'
@@ -1459,6 +1460,86 @@ describe('QueueProcessor', () => {
       });
     });
 
+    it('retires an exact coordination terminal dispatch before committing its handled receipt', async () => {
+      const durableStore = new MessageStore();
+      const seenAt = 1_751;
+      let releaseRetirement;
+      const retirementFence = new Promise((resolve) => {
+        releaseRetirement = resolve;
+      });
+      const completeFromCoordinationTerminal = mock.fn(async () => retirementFence);
+      const durableDeps = stubDeps({
+        messageStore: durableStore,
+        a2aDispatchDispositionService: {
+          inspectHandoff: mock.fn(),
+          completeFromCoordinationTerminal,
+        },
+        router: {
+          routeExecution: mock.fn(async function* (...args) {
+            await args[6].onPromptMessagesExposed({
+              threadId: 't1',
+              userId: 'u1',
+              catId: 'fable5',
+              invocationId: 'child-terminal-retirement',
+              messageIds: [args[3]],
+              seenAt,
+            });
+            yield {
+              type: 'done',
+              catId: 'fable5',
+              invocationId: 'child-terminal-retirement',
+              turnCustodyTerminalWitness: {
+                kind: 'terminal_silent',
+                projectionState: 'covered_empty',
+                wake: 'coordination_terminal',
+              },
+              timestamp: Date.now(),
+            };
+          }),
+          ackCollectedCursors: mock.fn(async () => {}),
+        },
+      });
+      durableDeps.queueCustodyCoordinator = new QueuedMessageCustodyCoordinator({ messageStore: durableStore });
+      const durableProcessor = new QueueProcessor(durableDeps);
+      const activeSource = durableStore.append({
+        userId: 'u1',
+        catId: 'fable5',
+        content: '@opus active coordination',
+        mentions: ['opus'],
+        timestamp: 1_700,
+        threadId: 'source-thread',
+        extra: {
+          crossPost: { sourceThreadId: 't1', sourceInvocationId: 'predecessor-invocation' },
+          coordination: { id: 'coord-terminal-retirement', phase: 'active', hop: 1 },
+        },
+      });
+      const { message } = enqueueCustodiedEntry(durableDeps.queue, durableStore, { targetCats: ['fable5'] });
+      message.catId = 'opus';
+      message.mentions = ['fable5'];
+      message.extra = {
+        crossPost: { sourceThreadId: 'source-thread', sourceInvocationId: 'source-invocation' },
+        coordination: { id: 'coord-terminal-retirement', phase: 'terminal', hop: 2 },
+        causal: { kind: 'invocation_reply', triggerMessageId: activeSource.id },
+        stream: { invocationId: 'source-invocation', turnInvocationId: 'source-invocation' },
+        targetCats: ['fable5'],
+      };
+
+      const started = await durableProcessor.processNext('t1', 'u1');
+      assert.equal(started.started, true);
+      await waitFor(() => completeFromCoordinationTerminal.mock.calls.length === 1);
+      assert.equal(completeFromCoordinationTerminal.mock.calls[0].arguments[0], message.id);
+      assert.equal(durableStore.getById(message.id).deliveryStatus, 'queued');
+      assert.notEqual(durableStore.getById(message.id).queueCustody.status, 'terminal');
+
+      releaseRetirement();
+      await waitFor(() => durableStore.getById(message.id)?.deliveryStatus === 'delivered');
+      assert.deepEqual(durableStore.getById(message.id).queueCustody.targetOutcomeByCatId.fable5.consumption, {
+        kind: 'terminal_silent',
+        projectionState: 'covered_empty',
+        wake: 'coordination_terminal',
+      });
+    });
+
     it('settles a managed hold carrier only from exact structured-continuation proof', async () => {
       const durableStore = new MessageStore();
       const seenAt = 1_752;
@@ -1743,6 +1824,165 @@ describe('QueueProcessor', () => {
         durableStore.getById(secondarySource.id).queueCustody.targetOutcomeByCatId.opus.consumption,
         undefined,
         'the typed witness must remain attached only to its exact source message',
+      );
+    });
+
+    it('retires a consumed coordination terminal once after its exact source invocation was superseded', async () => {
+      const h = await createA2ADispositionHarness();
+      h.source.extra = {
+        crossPost: {
+          sourceThreadId: 'thread-origin',
+          sourceInvocationId: 'origin-invocation',
+        },
+        coordination: {
+          id: 'coord-superseded-source',
+          phase: 'active',
+          hop: 1,
+          subjectRef: 'task:superseded-source',
+        },
+        targetCats: ['codex-sol'],
+      };
+      const terminal = h.messageStore.append({
+        userId: 'user-1',
+        catId: 'codex-sol',
+        content: '@fable5 terminal result',
+        mentions: ['fable5'],
+        timestamp: 1_750,
+        threadId: 'thread-origin',
+        origin: 'callback',
+        deliveryStatus: 'queued',
+        extra: {
+          crossPost: {
+            sourceThreadId: 'thread-1',
+            sourceInvocationId: 'inv-1',
+          },
+          coordination: {
+            id: 'coord-superseded-source',
+            phase: 'terminal',
+            hop: 2,
+            subjectRef: 'task:superseded-source',
+          },
+          causal: {
+            kind: 'invocation_reply',
+            triggerMessageId: h.source.id,
+          },
+          stream: {
+            invocationId: 'inv-1',
+            turnInvocationId: 'inv-1',
+          },
+          targetCats: ['fable5'],
+        },
+      });
+      h.setLatest(false);
+
+      const durableDeps = stubDeps({
+        messageStore: h.messageStore,
+        a2aDispatchDispositionService: h.service,
+        router: {
+          routeExecution: mock.fn(async function* (...args) {
+            const childInvocationId = 'terminal-child';
+            await args[6].onPromptMessagesExposed({
+              threadId: terminal.threadId,
+              userId: terminal.userId,
+              catId: 'fable5',
+              invocationId: childInvocationId,
+              messageIds: [terminal.id],
+              seenAt: 1_760,
+            });
+            yield {
+              type: 'done',
+              catId: 'fable5',
+              invocationId: childInvocationId,
+              turnCustodyTerminalWitness: {
+                kind: 'terminal_silent',
+                projectionState: 'covered_empty',
+                wake: 'coordination_terminal',
+              },
+              timestamp: 1_770,
+            };
+          }),
+          ackCollectedCursors: mock.fn(async () => {}),
+        },
+      });
+      durableDeps.queueCustodyCoordinator = new QueuedMessageCustodyCoordinator({
+        messageStore: h.messageStore,
+      });
+      const entry = enqueueEntry(durableDeps.queue, {
+        threadId: terminal.threadId,
+        userId: terminal.userId,
+        content: terminal.content,
+        source: 'agent',
+        sourceCategory: 'a2a',
+        targetCats: ['fable5'],
+        autoExecute: true,
+        callerCatId: 'codex-sol',
+        a2aParentInvocationId: 'inv-1',
+        a2aTriggerMessageId: terminal.id,
+      });
+      durableDeps.queue.backfillMessageId(terminal.threadId, terminal.userId, entry.id, terminal.id);
+      const queued = durableDeps.queue.getEntrySnapshot(terminal.threadId, terminal.userId, entry.id);
+      h.messageStore.initializeQueueCustody(
+        terminal.id,
+        createInitialCrossThreadQueuedMessageCustody(terminal.id, [queued]),
+      );
+      const processor = new QueueProcessor(durableDeps);
+
+      const processing = durableDeps.queue.markProcessing(terminal.threadId, terminal.userId);
+      assert.equal(processing.id, entry.id);
+      const result = await processor.executeEntry(processing);
+      assert.equal(result.status, 'succeeded');
+      await processor.onInvocationComplete(
+        terminal.threadId,
+        'fable5',
+        result.status,
+        result.invocationId,
+        result.successfulCatIds,
+        result.primaryEntryRequeued,
+        result.terminalInvocationIdByCatId,
+        result.attemptedQueueEntryIds,
+        result.terminalConsumptionByInvocationId,
+      );
+
+      assert.equal(
+        durableDeps.queue.list(terminal.threadId, terminal.userId).length,
+        0,
+        'the already-completed terminal carrier must not be restored to Queue',
+      );
+      assert.equal(h.messageStore.getById(terminal.id).queueCustody.status, 'terminal');
+      assert.equal(
+        (await h.eventLog.read('ball:thread:thread-1')).filter((event) => event.kind === 'ball.dispatch_dispositioned')
+          .length,
+        1,
+      );
+      assert.equal(durableDeps.router.routeExecution.mock.calls.length, 1);
+
+      await processor.onInvocationComplete(
+        terminal.threadId,
+        'fable5',
+        'succeeded',
+        'inv-stub',
+        ['fable5'],
+        false,
+        { fable5: 'terminal-child' },
+        [entry.id],
+        {
+          'terminal-child': [
+            {
+              kind: 'terminal_silent',
+              projectionState: 'covered_empty',
+              wake: 'coordination_terminal',
+              sourceMessageId: terminal.id,
+            },
+          ],
+        },
+      );
+      assert.equal(durableDeps.queue.list(terminal.threadId, terminal.userId).length, 0);
+      assert.equal(durableDeps.router.routeExecution.mock.calls.length, 1, 'replay must not rerun the provider');
+      assert.equal(
+        (await h.eventLog.read('ball:thread:thread-1')).filter((event) => event.kind === 'ball.dispatch_dispositioned')
+          .length,
+        1,
+        'replay must keep one canonical disposition event',
       );
     });
 
@@ -2648,6 +2888,69 @@ describe('QueueProcessor', () => {
         kind: 'source_response',
         outputMessageIds: [response.id],
       });
+    });
+
+    it('terminalizes a detached managed predecessor exactly once across two completion sweeps', async () => {
+      const durableStore = new MessageStore();
+      const durableDeps = stubDeps({ messageStore: durableStore });
+      const { entry, message } = enqueueCustodiedEntry(durableDeps.queue, durableStore, {
+        source: 'connector',
+        sourceCategory: 'scheduled',
+        messageSource: {
+          connector: 'hold-ball',
+          label: 'managed completion',
+          meta: { taskId: 'task-detached-rehold', threadId: 't1', catId: 'opus', wakeWhen: true },
+        },
+      });
+      const childInvocationId = 'child-detached-managed-rehold';
+      const seenAt = entry.createdAt + 100;
+      const coordinator = new QueuedMessageCustodyCoordinator({ messageStore: durableStore });
+      durableDeps.queueCustodyCoordinator = coordinator;
+      assert.equal(durableDeps.queue.markQueuedSeen('t1', 'u1', entry.id, 'opus', childInvocationId, seenAt), true);
+      const exposedEntry = durableDeps.queue.getEntrySnapshot('t1', 'u1', entry.id);
+      await coordinator.persistEntry(exposedEntry);
+      assert.equal(durableDeps.queue.removeEntrySnapshotIfUnchanged(exposedEntry), true);
+      const exactWitness = {
+        kind: 'managed_hold_continued',
+        sourceMessageId: message.id,
+        taskId: 'task-detached-rehold',
+        transition: 'reheld',
+      };
+      const settle = (processor) =>
+        processor.onInvocationComplete(
+          't1',
+          'opus',
+          'succeeded',
+          'parent-detached-managed-rehold',
+          ['opus'],
+          false,
+          { opus: childInvocationId },
+          [entry.id],
+          { [childInvocationId]: [exactWitness] },
+        );
+
+      await settle(new QueueProcessor(durableDeps));
+      await settle(new QueueProcessor(durableDeps));
+
+      const settled = durableStore.getById(message.id);
+      assert.equal(settled.deliveryStatus, 'delivered');
+      assert.equal(settled.queueCustody.status, 'terminal');
+      assert.deepEqual(settled.queueCustody.handledByCatIds, ['opus']);
+      assert.deepEqual(settled.queueCustody.targetOutcomeByCatId.opus.consumption, exactWitness);
+      assert.equal(settled.queueCustody.targetOutcomeByCatId.opus.disposition, 'managed_hold_disposition');
+      assert.equal(durableDeps.queue.list('t1', 'u1').length, 0, 'the predecessor Queue carrier stays retired');
+      assert.equal(
+        durableDeps.router.routeExecution.mock.calls.length,
+        0,
+        'recovery does not start a second invocation',
+      );
+      assert.equal(
+        durableDeps.socketManager.broadcastToRoom.mock.calls.filter(
+          (call) => call.arguments[1] === 'message_receipt_updated' && call.arguments[2]?.messageId === message.id,
+        ).length,
+        1,
+        'the predecessor receipt terminalizes exactly once',
+      );
     });
 
     it('settles the exact child after exposed true recall removed its Queue carrier', async () => {

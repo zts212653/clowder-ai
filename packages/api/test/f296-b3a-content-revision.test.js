@@ -65,7 +65,7 @@ describe('F296 B3a gate 4: content-derived revision', () => {
   });
 
   test('the revision is content-free: it cannot leak payload into the ledger key', () => {
-    const secret = 'landy-private-note-do-not-store';
+    const secret = 'operator-private-note-do-not-store';
     const revision = contentRevision({ body: secret });
     assert.equal(revision.value.includes(secret), false);
     // Fixed width == a digest, not a truncated copy of the payload.

@@ -27,6 +27,7 @@ const ARTIFACT_TYPE_BY_PREFIX: ReadonlyArray<readonly [string, CanonicalRedisVal
   ['person-memory:suppression-subject:', 'set'],
   ['person-memory:candidate-decisions:', 'set'],
   ['person-memory:pending:', 'zset'],
+  ['person-memory:settled:', 'zset'],
   ['person-memory:person-claims:', 'zset'],
   ['person-memory:person-relationships:', 'zset'],
   ['person-memory:person-events:', 'zset'],
@@ -123,6 +124,7 @@ function planCandidatePurge(
 ): void {
   plan.expect(PersonMemoryKeys.candidate(ownerUserId, candidateId), candidateRaw);
   plan.zrem(PersonMemoryKeys.pending(ownerUserId), candidateId);
+  plan.zrem(PersonMemoryKeys.settled(ownerUserId), candidateId);
   plan.del(PersonMemoryKeys.candidate(ownerUserId, candidateId), 'string');
   plan.del(PersonMemoryKeys.candidateOwner(candidateId), 'string');
   plan.del(PersonMemoryKeys.candidatePerson(ownerUserId, candidateId), 'string');

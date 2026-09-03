@@ -60,7 +60,7 @@ describe('RedisProfileUpdateProposalStore', { skip: redisIsolationSkipReason(RED
     beforeContent: 'OLD',
     baseContentHash: 'hash_old',
     afterContent: 'NEW',
-    rationale: 'landy prefers blue',
+    rationale: 'operator prefers blue',
     signalProvenance: { kind: 'cat-declared', sourceThreadId: 'thread_1', sourceMessageId: 'msg_1' },
     createdBy: 'user_landy',
     ...over,
@@ -74,7 +74,7 @@ describe('RedisProfileUpdateProposalStore', { skip: redisIsolationSkipReason(RED
     assert.equal(got.baseContentHash, 'hash_old');
     assert.equal(got.beforeContent, 'OLD');
     assert.equal(got.afterContent, 'NEW');
-    assert.equal(got.rationale, 'landy prefers blue');
+    assert.equal(got.rationale, 'operator prefers blue');
     assert.equal(got.signalProvenance.kind, 'cat-declared');
     assert.equal(got.signalProvenance.sourceThreadId, 'thread_1');
     assert.equal(got.signalProvenance.sourceMessageId, 'msg_1');
@@ -83,8 +83,8 @@ describe('RedisProfileUpdateProposalStore', { skip: redisIsolationSkipReason(RED
   it('CAS claim: real concurrent claim — exactly one wins (Lua atomicity)', async () => {
     const p = await store.create(baseInput());
     const [a, b] = await Promise.all([
-      store.claimForApproval(p.proposalId, 'you'),
-      store.claimForApproval(p.proposalId, 'you'),
+      store.claimForApproval(p.proposalId, 'operator'),
+      store.claimForApproval(p.proposalId, 'operator'),
     ]);
     const winners = [a, b].filter(Boolean);
     assert.equal(winners.length, 1, 'exactly one claim wins under real concurrency');
@@ -93,7 +93,7 @@ describe('RedisProfileUpdateProposalStore', { skip: redisIsolationSkipReason(RED
 
   it('INV-2/7 crash recovery: checkpoints survive re-read by a fresh store (no in-memory state)', async () => {
     const p = await store.create(baseInput());
-    await store.claimForApproval(p.proposalId, 'you');
+    await store.claimForApproval(p.proposalId, 'operator');
     await store.recordCheckpoint(p.proposalId, { writtenPath: '/primer.md' });
     // crash: a fresh store reads the same Redis (persistent — Iron law#5 TTL=0)
     const fresh = new RedisProfileUpdateProposalStore(redis);
@@ -117,15 +117,15 @@ describe('RedisProfileUpdateProposalStore', { skip: redisIsolationSkipReason(RED
     assert.equal(await store.finalizeApproval(p.proposalId), null, 'cannot finalize pending');
     assert.equal(await store.recordCheckpoint(p.proposalId, { writtenPath: 'x' }), null, 'checkpoint no-op pending');
     assert.equal((await store.get(p.proposalId)).writtenPath, undefined);
-    const r = await store.markRejected(p.proposalId, 'you', 'inaccurate');
+    const r = await store.markRejected(p.proposalId, 'operator', 'inaccurate');
     assert.equal(r.status, 'rejected');
     assert.equal((await store.get(p.proposalId)).rejectionReason, 'inaccurate');
-    assert.equal(await store.claimForApproval(p.proposalId, 'you'), null, 'cannot claim rejected');
+    assert.equal(await store.claimForApproval(p.proposalId, 'operator'), null, 'cannot claim rejected');
   });
 
   it('rollbackClaim returns to pending + re-adds to pending index; dedup reserve idempotent', async () => {
     const p = await store.create(baseInput());
-    await store.claimForApproval(p.proposalId, 'you');
+    await store.claimForApproval(p.proposalId, 'operator');
     assert.equal(await store.rollbackClaim(p.proposalId), true);
     const back = await store.get(p.proposalId);
     assert.equal(back.status, 'pending');

@@ -206,7 +206,7 @@ describe('F254 AC-B5: FreshnessNoticeService telemetry', () => {
     const unseenChecker = {
       checkUnseen: async () => ({
         count: 2,
-        senders: ['you', 'codex'],
+        senders: ['operator', 'codex'],
         maxMessageId: '0000000000000002-000001-bbbbbbbb',
       }),
     };
@@ -243,7 +243,7 @@ describe('F254 AC-B5: FreshnessNoticeService telemetry', () => {
       invocationId: 'inv-test',
       timestamp: Date.now(),
       toolName: 'search_evidence',
-      unseenSenders: ['you'],
+      unseenSenders: ['operator'],
       noticeId: 'notice-inv-test-3',
       maxMessageId: '0000000000000099-000001-zzzzzzzz',
     };

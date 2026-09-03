@@ -1,9 +1,12 @@
 import type {
   CliDiagnostics,
   ContextAttachment,
+  CrossThreadCoordination,
+  CustodyOfferV1,
   FreshnessSupplementProjection,
   MessageBundleCarrierV1,
   MessageContent,
+  ProviderSemanticEvent,
   PublishedFreshnessAnnotation,
   QueueMessageReceipt,
   ReplyPreview,
@@ -286,7 +289,11 @@ export interface ChatMessage {
   evidence?: EvidenceData;
   /** F22+F52+F098-C1: Rich blocks + cross-thread origin + explicit targets */
   extra?: {
+    /** F306 durable projection input shared by live, hydration, callback and replay. */
+    semanticEvent?: ProviderSemanticEvent;
     rich?: { v: 1; blocks: RichBlock[] };
+    /** F310 source-owner projection; the card rehydrates canonical state before acting. */
+    custodyOfferV1?: CustodyOfferV1;
     crossPost?: { sourceThreadId: string; sourceInvocationId?: string };
     /** F081: Stream identity for continuity / hydration reconcile.
      *  F194 Phase Z3: dual id —
@@ -367,6 +374,27 @@ export interface ChatMessage {
       exposure: 'none' | 'seen';
       recalledAt: number;
       exposures?: ReadonlyArray<{ targetCatId: string; invocationId: string; seenAt: number }>;
+    };
+    /** F167: exact lifecycle projection used by message-local review recovery. */
+    coordination?: CrossThreadCoordination;
+    /** #1371: reviewer-authored typed verdict; prose is never parsed for authority. */
+    localReviewVerdict?: {
+      verdict: 'approved' | 'changes_requested' | 'commented';
+      clientMessageId: string;
+      reviewedHeadSha?: string;
+      carrierlessLeaseFence?: { leaseId: string; generation: number };
+    };
+    /** #1371: operator-authored typed settlement for one legacy prose-only terminal. */
+    legacyLocalReviewDisposition?: {
+      sourceMessageId: string;
+      leaseId: string;
+      generation: number;
+      subjectRef: string;
+      reviewerCatId: string;
+      predecessorCatId: string;
+      reviewedHeadSha: string;
+      verdict: 'approved' | 'changes_requested';
+      decisionId: string;
     };
     /**
      * F173 a2a-handoff bug fix: marker for system messages that must be
@@ -449,6 +477,8 @@ export interface Thread {
   pinnedAt?: number | null;
   favorited?: boolean;
   favoritedAt?: number | null;
+  /** F306: durable thread-level goal intent and native provider reconciliation. */
+  goal?: ThreadGoalStateV1;
   /** CLI stream visibility mode: play = 💭心里话 hidden cross-cat, debug = 💭心里话 shared cross-cat. 🧠Thinking (extended reasoning) is NEVER shared regardless of mode. */
   thinkingMode?: 'debug' | 'play';
   /** UI bubble display override: thinking block expand/collapse. 'global' = follow config hub default. */
@@ -476,6 +506,98 @@ export interface Thread {
   /** F187: User-defined label IDs for thread categorization. */
   labels?: string[];
 }
+
+export type ThreadGoalStatus = 'active' | 'paused' | 'blocked' | 'usageLimited' | 'budgetLimited' | 'complete';
+
+export interface ThreadGoalStateV1 {
+  v: 1;
+  intent: 'set' | 'clear';
+  objective?: string;
+  status?: ThreadGoalStatus;
+  tokenBudget?: number | null;
+  revision: number;
+  updatedAt: number;
+  clearedAt?: number;
+  sync: {
+    state: 'syncing' | 'synced' | 'clearing' | 'unavailable';
+    source: 'cat_cafe' | 'codex_app_server';
+    catId?: string;
+    sessionId?: string;
+    observedAt?: number;
+    reason?: string;
+  };
+}
+
+export type ThreadNativeReviewTarget =
+  | { kind: 'uncommitted_changes' }
+  | { kind: 'base_branch'; branch: string }
+  | { kind: 'commit'; sha: string; title?: string }
+  | { kind: 'custom'; instructions: string };
+
+export interface ThreadNativeReviewRunV1 {
+  v: 1;
+  id: string;
+  target: ThreadNativeReviewTarget;
+  delivery: 'inline' | 'detached';
+  status: 'queued' | 'running' | 'completed' | 'failed' | 'unavailable';
+  requestedAt: number;
+  updatedAt: number;
+  catId?: string;
+  sessionId?: string;
+  reviewThreadId?: string;
+  turnId?: string;
+  items: Array<{
+    id: string;
+    kind: 'mode_entered' | 'message' | 'finding' | 'mode_exited';
+    text: string;
+    completedAt: number;
+  }>;
+  result?: { status: 'completed' | 'failed'; summary?: string; errorCode?: string };
+  unavailableReason?: string;
+  truncated?: true;
+}
+
+export type NativeStatusAvailability<T extends object> =
+  | ({ availability: 'available' } & T)
+  | { availability: 'unavailable'; reason: string };
+
+interface AvailableThreadNativeStatusV1 {
+  catId: string;
+  runtimeSessionId: string;
+  observation: 'available';
+  source: 'codex_app_server';
+  observedAt: number;
+  thread: NativeStatusAvailability<{ status: string; canAcceptDirectInput: boolean | null }>;
+  capabilities: NativeStatusAvailability<{
+    imageGeneration: boolean;
+    namespaceTools: boolean;
+    webSearch: boolean;
+  }>;
+  permissionProfiles: NativeStatusAvailability<{
+    activeId: string | null;
+    profiles: Array<{ id: string; allowed: boolean }>;
+  }>;
+  account: NativeStatusAvailability<{ authenticated: boolean; kind?: string; plan?: string }>;
+  rateLimits: NativeStatusAvailability<{
+    primary: { usedPercent: number; resetsAt: number | null } | null;
+    secondary?: { usedPercent: number; resetsAt: number | null } | null;
+    reachedType?: string | null;
+  }>;
+  nativeThreadList: NativeStatusAvailability<{
+    count: number;
+    boundThreadPresent: boolean;
+    hasMore: boolean;
+  }>;
+}
+
+interface UnavailableThreadNativeStatusV1 {
+  catId: string;
+  runtimeSessionId: string;
+  observation: 'unavailable';
+  reason: string;
+}
+
+export type ThreadNativeStatusV1 = AvailableThreadNativeStatusV1 | UnavailableThreadNativeStatusV1;
 
 /** F087: Bootcamp state for operator onboarding threads */
 export interface BootcampStateV1 {
@@ -779,6 +901,19 @@ export type GameState = {
   round: number;
 };
 
+export type TeamWorkspaceSubject = { type: 'cat'; id: string } | { type: 'provider'; id: string };
+
+/** Explicit navigation into an owner-backed F307 surface. This is deliberately
+ * transient: durable Workspace selection stays per-thread, while this request
+ * only bridges a fresh user action into an already-hydrated Workbench host. */
+export interface WorkspaceOpenRequest {
+  revision: number;
+  threadId: string;
+  target:
+    | { kind: 'mode'; mode: Exclude<WorkspaceMode, 'dev' | 'team'> }
+    | { kind: 'team'; subject: TeamWorkspaceSubject | null };
+}
+
 /** Per-thread state — everything that varies by thread */
 export interface ThreadState {
   messages: ChatMessage[];
@@ -828,6 +963,8 @@ export interface ThreadState {
    * is not visible while another mode (for example Approval history) owns the
    * viewport, so explicit preview delivery must restore both coordinates. */
   workspaceMode?: WorkspaceMode;
+  /** F293: list/detail coordinate inside the canonical Team workspace. */
+  teamWorkspaceSubject?: TeamWorkspaceSubject | null;
   /** F284 × F120: browser preview target (port/path) per thread */
   workspacePreview?: WorkspacePreviewState;
   /** F284 × F120: right panel visibility mode per thread */
@@ -924,6 +1061,7 @@ export const DEFAULT_THREAD_STATE: ThreadState = {
   workspaceOpenFilePath: null,
   workspaceOpenFileLine: null,
   workspaceMode: 'dev',
+  teamWorkspaceSubject: null,
   workspaceSurface: 'home',
   workspacePreview: { port: undefined, path: '/' },
   rightPanelMode: 'status',

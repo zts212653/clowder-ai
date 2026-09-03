@@ -69,7 +69,7 @@ function makeMinimalDeps(extraDeps = {}) {
     sessionManager: {},
     threadStore: makeMockThreadStore(),
     apiUrl: 'http://localhost:0',
-    cloudReturnBindingSigner: { sign: () => 'cbr1.aW52LWNsb3Vk.signature' },
+    cloudReturnGrantStore: { issue: async () => ({ ok: true, status: 'issued' }) },
     ...extraDeps,
   };
 }
@@ -155,9 +155,60 @@ describe('F247 AC-B1c-2 R1: invokeSingleCat × bridge wiring contract', () => {
     assert.equal(dispatchedParams.calledBy, 'opus-47');
     assert.notEqual(dispatchedParams.calledBy, baseParams.userId, 'calledBy must not be the thread owner userId');
     assert.equal(dispatchedParams.sourceMessageId, 'source-message-user-1');
-    assert.equal(dispatchedParams.cloudReturnBinding, 'cbr1.aW52LWNsb3Vk.signature');
+    assert.equal('cloudReturnBinding' in dispatchedParams, false);
     assert.equal(bridgeStatus(messages).status, 'sent');
     assert.equal(messages.at(-1).type, 'done', 'guard still yields done');
+  });
+
+  it('prefers the exact queued multi-mention carrier over reconstructed route provenance', async () => {
+    ensureGptProRegistered();
+    const bridge = makeRecordingBridge();
+    const deps = makeMinimalDeps({ cloudInvokeBridge: bridge });
+    const messages = await drainGenerator(
+      invokeSingleCat(deps, {
+        ...baseParams,
+        executionCausal: { triggerMessageId: 'reconstructed-queue-message' },
+        mentionContent: '[Multi-Mention from opus-47]\n\nReconstructed wrapper',
+        mentioningCatId: 'alice',
+        cloudDispatchProvenance: {
+          sourceMessageId: 'msg-exact-source',
+          sourceSender: { kind: 'cat', id: 'opus-47', invocationId: 'inv-parent' },
+          calledByCatId: 'opus-47',
+          intent: 'Original raw intent',
+        },
+        requiresExactCloudDispatchProvenance: true,
+      }),
+    );
+
+    assert.equal(bridge.calls.length, 1);
+    assert.equal(bridge.calls[0].sourceMessageId, 'msg-exact-source');
+    assert.equal(bridge.calls[0].calledBy, 'opus-47');
+    assert.equal(bridge.calls[0].intent, 'Original raw intent');
+    assert.deepEqual(bridgeStatus(messages).outboundReceipt.sourceSender, {
+      kind: 'cat',
+      id: 'opus-47',
+      invocationId: 'inv-parent',
+    });
+  });
+
+  it('rejects reconstructed Queue fields when exact multi-mention provenance is required', async () => {
+    ensureGptProRegistered();
+    const bridge = makeRecordingBridge();
+    const deps = makeMinimalDeps({ cloudInvokeBridge: bridge });
+    const messages = await drainGenerator(
+      invokeSingleCat(deps, {
+        ...baseParams,
+        executionCausal: { triggerMessageId: 'reconstructed-queue-message' },
+        mentionContent: '[Multi-Mention from opus-47]\n\nReconstructed wrapper',
+        mentioningCatId: 'opus-47',
+        requiresExactCloudDispatchProvenance: true,
+      }),
+    );
+
+    assert.equal(bridge.calls.length, 0);
+    assert.equal(bridgeStatus(messages).status, 'unavailable');
+    assert.equal(bridgeStatus(messages).reason, 'missing-source-message-id');
+    assert.match(bridgeStatus(messages).message, /source message ID/);
   });
 
   it('fails closed with typed degraded status when the exact source message is absent', async () => {
@@ -175,6 +226,32 @@ describe('F247 AC-B1c-2 R1: invokeSingleCat × bridge wiring contract', () => {
 
     assert.equal(bridge.calls.length, 0);
     assert.equal(bridgeStatus(messages).reason, 'missing-source-message-id');
+  });
+
+  it('maps a return-grant store exception to the typed fail-closed bridge outcome', async () => {
+    ensureGptProRegistered();
+    const bridge = makeRecordingBridge();
+    const deps = makeMinimalDeps({
+      cloudInvokeBridge: bridge,
+      cloudReturnGrantStore: {
+        issue: async () => {
+          throw new Error('redis unavailable');
+        },
+      },
+    });
+
+    const messages = await drainGenerator(
+      invokeSingleCat(deps, {
+        ...baseParams,
+        mentionContent: 'must remain fail closed',
+        mentioningCatId: 'opus-47',
+      }),
+    );
+
+    assert.equal(bridge.calls.length, 0);
+    assert.equal(bridgeStatus(messages).status, 'unavailable');
+    assert.equal(bridgeStatus(messages).reason, 'incomplete-dispatch-provenance');
+    assert.equal(messages.at(-1).type, 'done');
   });
 
   it('waits for the bounded bridge receipt, but not for the cloud cat response', async () => {

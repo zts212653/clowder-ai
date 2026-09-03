@@ -53,6 +53,78 @@ describe('KnowledgeResolver dimension routing', () => {
     assert.deepEqual(result.sources, ['global']);
   });
 
+  it('sunset F152 distilled truths are not served by legacy global or all search', async () => {
+    const project = makeStore('proj', ['Project hit']);
+    const global = makeStore('glob', [], {
+      search: async () => [
+        {
+          anchor: 'distilled:legacy-candidate',
+          kind: 'lesson',
+          status: 'active',
+          title: 'Retired global distillation',
+          summary: 'Must remain forensic-only after the surface sunset.',
+          updatedAt: '2026-08-29T00:00:00Z',
+        },
+        {
+          anchor: 'global:skill/kept',
+          kind: 'plan',
+          status: 'active',
+          title: 'Supported global method',
+          summary: 'Still eligible for global recall.',
+          updatedAt: '2026-08-29T00:00:00Z',
+        },
+      ],
+    });
+    const resolver = new KnowledgeResolver({ projectStore: project, globalStore: global });
+
+    const globalOnly = await resolver.resolve('test', { dimension: 'global' });
+    assert.deepEqual(
+      globalOnly.results.map((item) => item.anchor),
+      ['global:skill/kept'],
+    );
+
+    const all = await resolver.resolve('test', { dimension: 'all' });
+    assert.ok(all.results.some((item) => item.anchor === 'proj:Project hit'));
+    assert.ok(all.results.some((item) => item.anchor === 'global:skill/kept'));
+    assert.ok(!all.results.some((item) => item.anchor.startsWith('distilled:')));
+  });
+
+  it('backfills eligible global results when a sunset item occupies the store limit', async () => {
+    const project = makeStore('proj', []);
+    const ranked = [
+      {
+        anchor: 'distilled:rank-one-retired',
+        kind: 'lesson',
+        status: 'active',
+        title: 'Retired rank one',
+        updatedAt: '2026-08-29T00:00:00Z',
+      },
+      {
+        anchor: 'global:skill/rank-two-kept',
+        kind: 'plan',
+        status: 'active',
+        title: 'Eligible rank two',
+        updatedAt: '2026-08-29T00:00:00Z',
+      },
+    ];
+    const global = makeStore('glob', [], {
+      search: async (_query, opts = {}) => ranked.slice(0, opts.limit ?? ranked.length),
+    });
+    const resolver = new KnowledgeResolver({ projectStore: project, globalStore: global });
+
+    const globalOnly = await resolver.resolve('test', { dimension: 'global', limit: 1 });
+    assert.deepEqual(
+      globalOnly.results.map((entry) => entry.anchor),
+      ['global:skill/rank-two-kept'],
+    );
+
+    const all = await resolver.resolve('test', { dimension: 'all', limit: 1 });
+    assert.deepEqual(
+      all.results.map((entry) => entry.anchor),
+      ['global:skill/rank-two-kept'],
+    );
+  });
+
   it('dimension=all (default) does RRF fusion of both stores', async () => {
     const proj = makeStore('proj', ['Alpha', 'Charlie']);
     const glob = makeStore('glob', ['Beta']);

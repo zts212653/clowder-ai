@@ -13,20 +13,20 @@ describe('F209 entity registry storage', () => {
   it('stores entity records with aliases, provenance, and updatedAt', async () => {
     await store.upsertEntities([
       {
-        entityId: 'person:landy',
+        entityId: 'person:operator',
         type: 'person',
         canonicalName: 'You',
-        aliases: ['you', 'co-creator', 'operator'],
+        aliases: ['operator', 'co-creator', 'operator'],
         provenance: [{ source: 'F209 Phase B test', anchor: 'F209' }],
         updatedAt: '2026-05-22T00:00:00Z',
       },
     ]);
 
-    const entity = await store.getEntity('person:landy');
-    assert.equal(entity.entityId, 'person:landy');
+    const entity = await store.getEntity('person:operator');
+    assert.equal(entity.entityId, 'person:operator');
     assert.equal(entity.type, 'person');
     assert.equal(entity.canonicalName, 'You');
-    assert.deepEqual(entity.aliases.sort(), ['operator', 'you', 'co-creator'].sort());
+    assert.deepEqual(entity.aliases.sort(), ['operator', 'operator', 'co-creator'].sort());
     assert.equal(entity.updatedAt, '2026-05-22T00:00:00Z');
     assert.deepEqual(entity.provenance, [{ source: 'F209 Phase B test', anchor: 'F209' }]);
     assert.equal(entity.privacyScope, undefined);
@@ -37,7 +37,7 @@ describe('F209 entity registry storage', () => {
   it('preserves the original createdAt when updating an existing entity', async () => {
     await store.upsertEntities([
       {
-        entityId: 'person:landy',
+        entityId: 'person:operator',
         type: 'person',
         canonicalName: 'You',
         aliases: ['operator'],
@@ -49,7 +49,7 @@ describe('F209 entity registry storage', () => {
 
     await store.upsertEntities([
       {
-        entityId: 'person:landy',
+        entityId: 'person:operator',
         type: 'person',
         canonicalName: 'You',
         aliases: ['operator', 'co-creator'],
@@ -58,7 +58,7 @@ describe('F209 entity registry storage', () => {
       },
     ]);
 
-    const entity = await store.getEntity('person:landy');
+    const entity = await store.getEntity('person:operator');
     assert.equal(entity.createdAt, '2026-05-20T00:00:00Z');
     assert.equal(entity.updatedAt, '2026-05-22T00:00:00Z');
     assert.deepEqual(entity.aliases.sort(), ['operator', 'co-creator'].sort());
@@ -67,7 +67,7 @@ describe('F209 entity registry storage', () => {
   it('updates stored alias surfaces when only alias casing changes', async () => {
     await store.upsertEntities([
       {
-        entityId: 'person:landy',
+        entityId: 'person:operator',
         type: 'person',
         canonicalName: 'You',
         aliases: ['operator'],
@@ -78,7 +78,7 @@ describe('F209 entity registry storage', () => {
 
     await store.upsertEntities([
       {
-        entityId: 'person:landy',
+        entityId: 'person:operator',
         type: 'person',
         canonicalName: 'You',
         aliases: ['cvo'],
@@ -87,13 +87,13 @@ describe('F209 entity registry storage', () => {
       },
     ]);
 
-    const entity = await store.getEntity('person:landy');
+    const entity = await store.getEntity('person:operator');
     assert.deepEqual(entity.aliases, ['cvo']);
 
     const matches = await store.resolveEntityAliases('operator asked about recall');
     assert.deepEqual(
       matches.map((m) => [m.entityId, m.matchedAlias]),
-      [['person:landy', 'cvo']],
+      [['person:operator', 'cvo']],
     );
   });
 
@@ -115,10 +115,10 @@ describe('F209 entity registry storage', () => {
   it('resolves query aliases deterministically without classifier inference', async () => {
     await store.upsertEntities([
       {
-        entityId: 'person:landy',
+        entityId: 'person:operator',
         type: 'person',
         canonicalName: 'You',
-        aliases: ['you', 'co-creator', 'operator'],
+        aliases: ['operator', 'co-creator', 'operator'],
         provenance: [{ source: 'F209 Phase B test' }],
         updatedAt: '2026-05-22T00:00:00Z',
       },
@@ -135,7 +135,7 @@ describe('F209 entity registry storage', () => {
     const cvoMatches = await store.resolveEntityAliases('operator asked about recall');
     assert.deepEqual(
       cvoMatches.map((m) => [m.entityId, m.matchedAlias]),
-      [['person:landy', 'operator']],
+      [['person:operator', 'operator']],
     );
 
     const catMatches = await store.resolveEntityAliases('@gemini should review this');
@@ -154,7 +154,7 @@ describe('F209 entity registry storage', () => {
   it('resolves canonical names even when they are not duplicated in aliases', async () => {
     await store.upsertEntities([
       {
-        entityId: 'person:landy',
+        entityId: 'person:operator',
         type: 'person',
         canonicalName: 'You',
         aliases: ['operator', 'co-creator'],
@@ -167,7 +167,7 @@ describe('F209 entity registry storage', () => {
 
     assert.deepEqual(
       matches.map((m) => [m.entityId, m.matchedAlias]),
-      [['person:landy', 'You']],
+      [['person:operator', 'You']],
     );
   });
 });

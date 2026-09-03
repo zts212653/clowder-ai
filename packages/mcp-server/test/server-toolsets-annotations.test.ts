@@ -9,6 +9,7 @@ import {
   buildSignalTools,
   CANONICAL_TOOL_REGISTRY,
   EXPLICIT_TOOL_ANNOTATIONS,
+  projectSchemaDeliveryMeta,
 } from '../src/server-toolsets.js';
 
 /**
@@ -25,6 +26,28 @@ import {
  */
 
 describe('F247 R8 P1-1: EXPLICIT_TOOL_ANNOTATIONS regression guard', () => {
+  it('projects only accepted always-visible delivery policy to Anthropic metadata', () => {
+    for (const definition of CANONICAL_TOOL_REGISTRY) {
+      assert.equal(
+        projectSchemaDeliveryMeta(definition),
+        undefined,
+        `${definition.name} must not become always-visible before an accepted pilot`,
+      );
+    }
+
+    const fixture = CANONICAL_TOOL_REGISTRY[0];
+    assert.deepEqual(
+      projectSchemaDeliveryMeta({
+        ...fixture,
+        policy: {
+          ...fixture.policy,
+          schemaDelivery: { policy: 'always-visible', evidenceRef: fixture.policy.schemaDelivery.evidenceRef },
+        },
+      }),
+      { 'anthropic/alwaysLoad': true },
+    );
+  });
+
   it('derives every SDK annotation from the canonical governance contract', () => {
     assert.equal(Object.keys(EXPLICIT_TOOL_ANNOTATIONS).length, CANONICAL_TOOL_REGISTRY.length);
     for (const definition of CANONICAL_TOOL_REGISTRY) {

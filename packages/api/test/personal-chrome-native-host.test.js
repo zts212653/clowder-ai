@@ -24,6 +24,7 @@ import {
 } from '../src/plugins/cloud-cat-personal-host/native-host/native-framing.mjs';
 import { createNativeHostBridge as createNativeHostBridgeImpl } from '../src/plugins/cloud-cat-personal-host/native-host/native-host.mjs';
 import {
+  hasCapacityForEntry,
   LEDGER_ENTRY_LIMIT,
   LEDGER_FILE_LIMIT,
   loadLedger,
@@ -48,8 +49,8 @@ async function createNativeHostBridge(options) {
               ...message,
               observedRevisions: {
                 helper: helperArtifactRevision,
-                extension: '0.2.5',
-                pageAdapter: '2026-08-27.1',
+                extension: '0.2.10',
+                pageAdapter: '2026-09-02.1',
               },
             }
           : message;
@@ -114,8 +115,8 @@ function appendRequest(overrides = {}) {
     idempotencyKey: 'source-message-9',
     expectedRevisions: {
       helper: helperArtifactRevision,
-      extension: '0.2.5',
-      pageAdapter: '2026-08-27.1',
+      extension: '0.2.10',
+      pageAdapter: '2026-09-02.1',
     },
     ...overrides,
   };
@@ -292,8 +293,8 @@ describe('personal Chrome native host bridge', () => {
       conversationId: 'conversation-7',
       expectedRevisions: {
         helper: helperArtifactRevision,
-        extension: '0.2.5',
-        pageAdapter: '2026-08-27.1',
+        extension: '0.2.10',
+        pageAdapter: '2026-09-02.1',
       },
     });
 
@@ -785,6 +786,244 @@ describe('personal Chrome native host bridge', () => {
     assert.equal(terminalRetry.idempotentReplay, true);
   });
 
+  it('durably exposes one source-bound assistant final until the API acknowledges it', async () => {
+    const paths = testPaths('assistant-return-inbox');
+    const forwarded = [];
+    const bridge = await createNativeHostBridge({
+      ...paths,
+      pairingSecret: 'a'.repeat(64),
+      sendNative: (message) => forwarded.push(message),
+    });
+    bridges.push(bridge);
+
+    const append = localAppend(paths.socketPath, 'a'.repeat(64), appendRequest());
+    await bridge.waitForDispatchCount(1);
+    await bridge.acceptNativeMessage({
+      v: 2,
+      kind: 'append_progress',
+      requestId: forwarded[0].requestId,
+      idempotencyKey: 'source-message-9',
+      status: 'submitted',
+    });
+    await bridge.acceptNativeMessage({
+      v: 2,
+      kind: 'append_result',
+      requestId: forwarded[0].requestId,
+      idempotencyKey: 'source-message-9',
+      status: 'host_observed',
+      hostMessageId: 'conversation-turn-41',
+    });
+    await append;
+
+    await bridge.acceptNativeMessage({
+      v: 2,
+      kind: 'assistant_final_observed',
+      requestId: forwarded[0].requestId,
+      conversationId: 'conversation-7',
+      idempotencyKey: 'source-message-9',
+      hostMessageId: 'conversation-turn-41',
+      assistantMessageId: 'conversation-turn-42',
+      content: 'ordinary assistant final captured from the exact next turn',
+      observedRevisions: appendRequest().expectedRevisions,
+    });
+    assert.deepEqual(forwarded.at(-1), {
+      v: 2,
+      kind: 'assistant_final_result',
+      requestId: forwarded[0].requestId,
+      status: 'accepted',
+    });
+
+    const listed = await localAppend(paths.socketPath, 'a'.repeat(64), {
+      v: 2,
+      kind: 'list_assistant_returns',
+      requestId: 'list-assistant-returns-1',
+    });
+    assert.deepEqual(listed, {
+      v: 2,
+      kind: 'assistant_returns',
+      requestId: 'list-assistant-returns-1',
+      returns: [
+        {
+          conversationId: 'conversation-7',
+          sourceMessageId: 'source-message-9',
+          assistantMessageId: 'conversation-turn-42',
+          content: 'ordinary assistant final captured from the exact next turn',
+        },
+      ],
+    });
+
+    const acknowledged = await localAppend(paths.socketPath, 'a'.repeat(64), {
+      v: 2,
+      kind: 'ack_assistant_return',
+      requestId: 'ack-assistant-return-1',
+      conversationId: 'conversation-7',
+      sourceMessageId: 'source-message-9',
+      assistantMessageId: 'conversation-turn-42',
+    });
+    assert.deepEqual(acknowledged, {
+      v: 2,
+      kind: 'assistant_return_ack',
+      requestId: 'ack-assistant-return-1',
+      status: 'acknowledged',
+    });
+
+    const empty = await localAppend(paths.socketPath, 'a'.repeat(64), {
+      v: 2,
+      kind: 'list_assistant_returns',
+      requestId: 'list-assistant-returns-2',
+    });
+    assert.deepEqual(empty.returns, []);
+    const persisted = await loadLedger(paths.ledgerPath);
+    assert.equal(persisted.get('conversation-7\u0000source-message-9').assistantReturn, undefined);
+  });
+
+  it('durably records why the source-bound assistant observer failed after a valid Host receipt', async () => {
+    const paths = testPaths('assistant-observation-failure');
+    const forwarded = [];
+    const bridge = await createNativeHostBridge({
+      ...paths,
+      pairingSecret: 'a'.repeat(64),
+      sendNative: (message) => forwarded.push(message),
+    });
+    bridges.push(bridge);
+
+    const append = localAppend(paths.socketPath, 'a'.repeat(64), appendRequest());
+    await bridge.waitForDispatchCount(1);
+    await bridge.acceptNativeMessage({
+      v: 2,
+      kind: 'append_progress',
+      requestId: forwarded[0].requestId,
+      idempotencyKey: 'source-message-9',
+      status: 'submitted',
+    });
+    await bridge.acceptNativeMessage({
+      v: 2,
+      kind: 'append_result',
+      requestId: forwarded[0].requestId,
+      idempotencyKey: 'source-message-9',
+      status: 'host_observed',
+      hostMessageId: 'conversation-turn-41',
+    });
+    await append;
+
+    const diagnostic = {
+      v: 1,
+      userTurnConnected: false,
+      anchorTurnFound: false,
+      followingTurnCount: 0,
+      assistantCandidateCount: 0,
+      laterUserTurnPresent: false,
+      assistantHostIdStatus: 'not_observed',
+      assistantContentStatus: 'not_observed',
+      streamingControlPresent: false,
+    };
+    await bridge.acceptNativeMessage({
+      v: 2,
+      kind: 'assistant_observation_failed',
+      requestId: forwarded[0].requestId,
+      conversationId: 'conversation-7',
+      idempotencyKey: 'source-message-9',
+      hostMessageId: 'conversation-turn-41',
+      errorCode: 'ASSISTANT_FINAL_NOT_OBSERVED',
+      diagnostic,
+      observedRevisions: appendRequest().expectedRevisions,
+    });
+    assert.deepEqual(forwarded.at(-1), {
+      v: 2,
+      kind: 'assistant_observation_failure_result',
+      requestId: forwarded[0].requestId,
+      status: 'accepted',
+    });
+    const persisted = await loadLedger(paths.ledgerPath);
+    assert.deepEqual(persisted.get('conversation-7\u0000source-message-9').assistantObservationFailure, {
+      state: 'failed',
+      errorCode: 'ASSISTANT_FINAL_NOT_OBSERVED',
+      diagnostic,
+      observedAt: persisted.get('conversation-7\u0000source-message-9').assistantObservationFailure.observedAt,
+    });
+  });
+
+  it('rejects an assistant final that is not bound to an admitted submitted append', async () => {
+    const paths = testPaths('assistant-return-forgery');
+    const forwarded = [];
+    const bridge = await createNativeHostBridge({
+      ...paths,
+      pairingSecret: 'a'.repeat(64),
+      sendNative: (message) => forwarded.push(message),
+    });
+    bridges.push(bridge);
+
+    await bridge.acceptNativeMessage({
+      v: 2,
+      kind: 'assistant_final_observed',
+      requestId: 'forged-request',
+      conversationId: 'conversation-7',
+      idempotencyKey: 'source-message-forged',
+      hostMessageId: 'conversation-turn-1',
+      assistantMessageId: 'conversation-turn-2',
+      content: 'must not escape the browser boundary',
+      observedRevisions: appendRequest().expectedRevisions,
+    });
+    assert.deepEqual(forwarded, [
+      { v: 2, kind: 'assistant_final_result', requestId: 'forged-request', status: 'rejected' },
+    ]);
+
+    const listed = await localAppend(paths.socketPath, 'a'.repeat(64), {
+      v: 2,
+      kind: 'list_assistant_returns',
+      requestId: 'list-forged-assistant-returns',
+    });
+    assert.deepEqual(listed.returns, []);
+  });
+
+  it('asks the extension to retry when the assistant final cannot be durably persisted', async () => {
+    const paths = testPaths('assistant-return-persist-retry');
+    const forwarded = [];
+    const bridge = await createNativeHostBridge({
+      ...paths,
+      pairingSecret: 'a'.repeat(64),
+      sendNative: (message) => forwarded.push(message),
+      writeLedger: async (path, entries) => {
+        if ([...entries.values()].some((entry) => entry.assistantReturn)) {
+          throw new Error('simulated assistant-return persistence failure');
+        }
+        await writeAtomicLedger(path, entries);
+      },
+    });
+    bridges.push(bridge);
+    const append = localAppend(paths.socketPath, 'a'.repeat(64), appendRequest());
+    await bridge.waitForDispatchCount(1);
+    const requestId = forwarded[0].requestId;
+    await bridge.acceptNativeMessage({
+      v: 2,
+      kind: 'append_progress',
+      requestId,
+      idempotencyKey: 'source-message-9',
+      status: 'submitted',
+    });
+    await bridge.acceptNativeMessage({
+      v: 2,
+      kind: 'append_result',
+      requestId,
+      idempotencyKey: 'source-message-9',
+      status: 'host_observed',
+      hostMessageId: 'conversation-turn-41',
+    });
+    await append;
+    await bridge.acceptNativeMessage({
+      v: 2,
+      kind: 'assistant_final_observed',
+      requestId,
+      conversationId: 'conversation-7',
+      idempotencyKey: 'source-message-9',
+      hostMessageId: 'conversation-turn-41',
+      assistantMessageId: 'conversation-turn-42',
+      content: 'retry me after durable storage recovers',
+      observedRevisions: appendRequest().expectedRevisions,
+    });
+    assert.deepEqual(forwarded.at(-1), { v: 2, kind: 'assistant_final_result', requestId, status: 'retryable' });
+  });
+
   it('does not expose a terminal receipt to retries before the terminal ledger write commits', async () => {
     const paths = testPaths('terminal-durability');
     let releaseTerminalWrite;
@@ -865,6 +1104,96 @@ describe('personal Chrome native host bridge', () => {
     assert.equal(result.errorCode, 'LEDGER_CAPACITY_EXCEEDED');
     assert.deepEqual(forwarded, []);
     assert.equal((await loadLedger(paths.ledgerPath)).size, LEDGER_ENTRY_LIMIT);
+  });
+
+  it('reserves the JSON-expanded durable footprint of one maximum-size assistant final', async () => {
+    const entries = new Map([
+      [
+        'conversation-existing\u0000source-existing',
+        {
+          conversationId: 'conversation-existing',
+          idempotencyKey: 'source-existing',
+          textDigest: 'x'.repeat(LEDGER_FILE_LIMIT - 190 * 1024),
+          state: 'failed',
+          errorCode: 'TEST_TERMINAL',
+        },
+      ],
+    ]);
+    assert.equal(
+      hasCapacityForEntry(entries, {
+        conversationId: 'conversation-new',
+        idempotencyKey: 'source-new',
+        state: 'accepted',
+      }),
+      false,
+    );
+  });
+
+  it('reserves a maximum-size assistant final for every outstanding dispatch', async () => {
+    const entries = new Map([
+      [
+        'conversation-filler\u0000source-filler',
+        {
+          conversationId: 'conversation-filler',
+          idempotencyKey: 'source-filler',
+          textDigest: 'x'.repeat(LEDGER_FILE_LIMIT - 400 * 1024),
+          state: 'failed',
+          errorCode: 'TEST_TERMINAL',
+        },
+      ],
+      [
+        'conversation-outstanding\u0000source-outstanding',
+        {
+          conversationId: 'conversation-outstanding',
+          idempotencyKey: 'source-outstanding',
+          state: 'host_observed',
+          hostMessageId: 'host-outstanding',
+        },
+      ],
+    ]);
+
+    assert.equal(
+      hasCapacityForEntry(entries, {
+        conversationId: 'conversation-new',
+        idempotencyKey: 'source-new',
+        state: 'accepted',
+      }),
+      false,
+    );
+  });
+
+  it('releases the per-dispatch reservation after assistant return acknowledgment', async () => {
+    const entries = new Map([
+      [
+        'conversation-filler\u0000source-filler',
+        {
+          conversationId: 'conversation-filler',
+          idempotencyKey: 'source-filler',
+          textDigest: 'x'.repeat(LEDGER_FILE_LIMIT - 400 * 1024),
+          state: 'failed',
+          errorCode: 'TEST_TERMINAL',
+        },
+      ],
+      [
+        'conversation-acknowledged\u0000source-acknowledged',
+        {
+          conversationId: 'conversation-acknowledged',
+          idempotencyKey: 'source-acknowledged',
+          state: 'host_observed',
+          hostMessageId: 'host-acknowledged',
+          assistantReturnAckedAt: '2026-08-31T06:00:00.000Z',
+        },
+      ],
+    ]);
+
+    assert.equal(
+      hasCapacityForEntry(entries, {
+        conversationId: 'conversation-new',
+        idempotencyKey: 'source-new',
+        state: 'accepted',
+      }),
+      true,
+    );
   });
 
   it('refuses an oversized serialized ledger before replacing the last valid file', async () => {
@@ -1192,8 +1521,8 @@ describe('native host install plan', () => {
         );
         const expectedRevisions = {
           helper: plan.artifactDigest,
-          extension: '0.2.5',
-          pageAdapter: '2026-08-27.1',
+          extension: '0.2.10',
+          pageAdapter: '2026-09-02.1',
         };
         const outboundPromise = readOneNativeMessage(child.stdout);
         const localResultPromise = localAppend(plan.socketPath, pairingSecret, appendRequest({ expectedRevisions }));

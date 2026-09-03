@@ -1,0 +1,123 @@
+.entry-wrap,
+.state-scene {
+  display: grid;
+  place-items: center;
+  width: 100%;
+  height: 100%;
+  padding: 28px;
+}
+
+.entry-card {
+  width: min(480px, 100%);
+  padding: 30px;
+  border: 1px solid var(--cafe-border);
+  border-radius: 18px;
+  background: var(--cafe-surface);
+  box-shadow: var(--cafe-shadow);
+}
+
+.entry-eyebrow {
+  margin: 0 0 6px;
+  color: var(--cafe-accent-ink);
+  font-size: 11px;
+  font-weight: 500;
+}
+
+.entry-card h2,
+.state-scene h2 {
+  margin: 0 0 9px;
+  font-family: ui-serif, Georgia, serif;
+  font-size: 25px;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+}
+
+.entry-card > p:not(.entry-eyebrow),
+.state-scene p {
+  margin: 0;
+  color: var(--cafe-text-secondary);
+  font-size: 13px;
+  line-height: 1.65;
+}
+
+.entry-card form,
+.entry-action {
+  display: grid;
+  gap: 16px;
+  margin-top: 22px;
+}
+
+.entry-card label {
+  display: grid;
+  gap: 7px;
+  color: var(--cafe-text-secondary);
+  font-size: 12px;
+}
+
+.entry-card input {
+  width: 100%;
+  padding: 11px 12px;
+  border: 1px solid var(--cafe-border-strong);
+  border-radius: 10px;
+  outline: 0;
+  background: var(--cafe-canvas);
+  color: var(--cafe-text);
+}
+
+.entry-card input:focus {
+  border-color: var(--cafe-accent);
+  box-shadow: 0 0 0 3px rgb(201 111 50 / 10%);
+}
+
+.entry-card form > button,
+.entry-action > button {
+  justify-self: start;
+  padding: 9px 15px;
+  border: 0;
+  border-radius: 9px;
+  background: var(--cafe-accent);
+  color: white;
+  font-size: 13px;
+  font-weight: 650;
+}
+
+.entry-card form > button:disabled,
+.entry-action > button:disabled {
+  opacity: 0.52;
+}
+
+.entry-card > p.form-error,
+.entry-card > p.provider-note {
+  margin-top: 12px;
+}
+
+.entry-card > p.form-error {
+  color: var(--cafe-danger);
+}
+
+.state-scene {
+  align-content: center;
+  text-align: center;
+}
+
+.state-scene > * {
+  max-width: 470px;
+}
+
+.state-scene-error small {
+  display: block;
+  margin-top: 9px;
+  color: var(--cafe-danger);
+  font-size: 11px;
+}
+
+@media (max-width: 620px) {
+  .entry-wrap,
+  .state-scene {
+    padding: 15px;
+  }
+
+  .entry-card {
+    padding: 22px;
+  }
+}

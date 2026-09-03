@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { createConnection } from 'node:net';
 
 import type { HostAppendMessageReceipt, IConversationHostAdapter } from '../conversation-host-adapter.js';
+import { assistantReturnCursorFields, type PersonalChromeAssistantReturnCursor } from './assistant-return-cursor.js';
 import {
   PERSONAL_CHROME_EXTENSION_REVISION,
   PERSONAL_CHROME_MAX_LOCAL_FRAME_BYTES,
@@ -9,9 +10,14 @@ import {
   PERSONAL_CHROME_PROTOCOL_VERSION,
   type PersonalChromeAppendRequest,
   type PersonalChromeAppendResult,
+  type PersonalChromeAssistantReturn,
+  type PersonalChromeAssistantReturnRequest,
+  type PersonalChromeAssistantReturnResult,
   type PersonalChromeLocalEnvelope,
   parsePersonalChromeAppendRequest,
   parsePersonalChromeAppendResult,
+  parsePersonalChromeAssistantReturnRequest,
+  parsePersonalChromeAssistantReturnResult,
 } from './protocol.js';
 
 const DEFAULT_TIMEOUT_MS = 15_000;
@@ -34,6 +40,13 @@ export interface PersonalChromeHostAdapterOptions {
   readonly helperArtifactRevision: string;
   readonly timeoutMs?: number;
   readonly requestId?: () => string;
+}
+
+export interface IPersonalChromeAssistantReturnAdapter {
+  list_assistant_returns(
+    after?: PersonalChromeAssistantReturnCursor,
+  ): Promise<readonly PersonalChromeAssistantReturn[]>;
+  ack_assistant_return(conversationId: string, sourceMessageId: string, assistantMessageId: string): Promise<void>;
 }
 
 function validateOptions(options: PersonalChromeHostAdapterOptions): void {
@@ -66,10 +79,14 @@ function revisionsMatch(
   );
 }
 
-function exchangeLocalFrame(
+function exchangeLocalFrame<
+  TRequest extends PersonalChromeAppendRequest | PersonalChromeAssistantReturnRequest,
+  TResult,
+>(
   options: PersonalChromeHostAdapterOptions,
-  envelope: PersonalChromeLocalEnvelope,
-): Promise<PersonalChromeAppendResult> {
+  envelope: PersonalChromeLocalEnvelope<TRequest>,
+  parseResult: (value: unknown) => TResult,
+): Promise<TResult> {
   const serialized = `${JSON.stringify(envelope)}\n`;
   if (Buffer.byteLength(serialized, 'utf8') > PERSONAL_CHROME_MAX_LOCAL_FRAME_BYTES) {
     return Promise.reject(new PersonalChromeHostError('REQUEST_TOO_LARGE', 'local append frame exceeds limit'));
@@ -107,7 +124,7 @@ function exchangeLocalFrame(
       const newline = input.indexOf('\n');
       if (newline === -1) return;
       try {
-        const result = parsePersonalChromeAppendResult(JSON.parse(input.slice(0, newline)));
+        const result = parseResult(JSON.parse(input.slice(0, newline)));
         finish(() => resolve(result));
       } catch (error) {
         const detail = error instanceof Error ? error.message : String(error);
@@ -122,7 +139,7 @@ function exchangeLocalFrame(
   });
 }
 
-export class PersonalChromeHostAdapter implements IConversationHostAdapter {
+export class PersonalChromeHostAdapter implements IConversationHostAdapter, IPersonalChromeAssistantReturnAdapter {
   private readonly requestId: () => string;
 
   constructor(private readonly options: PersonalChromeHostAdapterOptions) {
@@ -153,10 +170,11 @@ export class PersonalChromeHostAdapter implements IConversationHostAdapter {
     } catch (error) {
       throw new PersonalChromeHostError('INVALID_REQUEST', error instanceof Error ? error.message : String(error));
     }
-    const result = await exchangeLocalFrame(this.options, {
-      pairingSecret: this.options.pairingSecret,
-      request,
-    });
+    const result = await exchangeLocalFrame(
+      this.options,
+      { pairingSecret: this.options.pairingSecret, request },
+      parsePersonalChromeAppendResult,
+    );
     if (result.requestId !== request.requestId || result.idempotencyKey !== request.idempotencyKey) {
       throw new PersonalChromeHostError('INVALID_HOST_RECEIPT', 'host receipt does not match the append request');
     }
@@ -184,5 +202,61 @@ export class PersonalChromeHostAdapter implements IConversationHostAdapter {
       hostMessageId: result.hostMessageId,
       ...(result.idempotentReplay === undefined ? {} : { idempotentReplay: result.idempotentReplay }),
     };
+  }
+
+  private async exchangeAssistantReturnRequest(
+    input: PersonalChromeAssistantReturnRequest,
+  ): Promise<PersonalChromeAssistantReturnResult> {
+    let request: PersonalChromeAssistantReturnRequest;
+    try {
+      request = parsePersonalChromeAssistantReturnRequest(input);
+    } catch (error) {
+      throw new PersonalChromeHostError('INVALID_REQUEST', error instanceof Error ? error.message : String(error));
+    }
+    const result = await exchangeLocalFrame(
+      this.options,
+      { pairingSecret: this.options.pairingSecret, request },
+      parsePersonalChromeAssistantReturnResult,
+    );
+    if (result.requestId !== request.requestId) {
+      throw new PersonalChromeHostError('INVALID_HOST_RECEIPT', 'assistant return receipt does not match the request');
+    }
+    if (result.kind === 'assistant_return_error') {
+      throw new PersonalChromeHostError(result.errorCode, `personal Chrome host failed: ${result.errorCode}`);
+    }
+    return result;
+  }
+
+  async list_assistant_returns(
+    after?: PersonalChromeAssistantReturnCursor,
+  ): Promise<readonly PersonalChromeAssistantReturn[]> {
+    const result = await this.exchangeAssistantReturnRequest({
+      v: PERSONAL_CHROME_PROTOCOL_VERSION,
+      kind: 'list_assistant_returns',
+      requestId: this.requestId(),
+      ...assistantReturnCursorFields(after),
+    });
+    if (result.kind !== 'assistant_returns') {
+      throw new PersonalChromeHostError('INVALID_HOST_RECEIPT', 'host returned an unexpected assistant return result');
+    }
+    return result.returns;
+  }
+
+  async ack_assistant_return(
+    conversationId: string,
+    sourceMessageId: string,
+    assistantMessageId: string,
+  ): Promise<void> {
+    const result = await this.exchangeAssistantReturnRequest({
+      v: PERSONAL_CHROME_PROTOCOL_VERSION,
+      kind: 'ack_assistant_return',
+      requestId: this.requestId(),
+      conversationId,
+      sourceMessageId,
+      assistantMessageId,
+    });
+    if (result.kind !== 'assistant_return_ack') {
+      throw new PersonalChromeHostError('INVALID_HOST_RECEIPT', 'host returned an unexpected assistant return result');
+    }
   }
 }

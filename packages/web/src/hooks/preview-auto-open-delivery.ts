@@ -1,3 +1,5 @@
+import type { PreviewVisiblePageAdmission, PreviewVisiblePageAttestation } from '@cat-cafe/shared';
+
 /**
  * F120 × F284: Preview auto-open delivery decision (client side).
  *
@@ -19,18 +21,26 @@ export interface PreviewAutoOpenEvent {
   worktreeId?: string;
   threadId?: string;
   eventId?: string;
+  targetOrigin?: string;
+  visiblePageAdmission?: PreviewVisiblePageAdmission;
 }
 
 export type PreviewAutoOpenReceiptReason =
   | 'thread_inactive'
   | 'presentation_lock'
   | 'worktree_mismatch'
-  | 'client_inactive';
+  | 'client_inactive'
+  | 'visible_page_timeout'
+  | 'visible_page_superseded'
+  | 'visible_page_unavailable'
+  | 'visible_page_load_error'
+  | 'visible_page_contract_invalid';
 
 export interface PreviewAutoOpenReceipt {
-  status: 'applied' | 'queued' | 'blocked' | 'skipped';
+  status: 'applied' | 'queued' | 'blocked' | 'skipped' | 'rejected';
   eventId: string;
   reason?: PreviewAutoOpenReceiptReason;
+  attestation?: PreviewVisiblePageAttestation;
 }
 
 /**
@@ -85,6 +95,39 @@ export function deliverPreviewAutoOpenEvent(input: {
   const eventId = data.eventId ?? '';
 
   if (!input.clientVisible) {
+    // Visible-page admission requires attestation from a rendered visible
+    // iframe; hidden tabs cannot provide it — fail fast.
+    if (data.visiblePageAdmission) {
+      return { status: 'skipped', eventId, reason: 'client_inactive' };
+    }
+    // Hidden tab: cannot interactively confirm, but CAN stage the preview
+    // so it appears when the user returns. This prevents no_matching_client
+    // when all Hub tabs are merely behind the terminal window.
+    //
+    // Active thread: use apply() (setPendingPreviewAutoOpen) so the F307
+    // workbench surface dispatch fires — queueThreadPreview does NOT set
+    // pendingPreviewAutoOpen and would leave the workbench stale.
+    // presentationLock must be checked here (apply no-ops under lock,
+    // so an unchecked receipt would claim custody while persisting nothing).
+    //
+    // Inactive thread: use queueForThread (ThreadState) — the thread-switch
+    // mechanism hydrates state + dispatches when the user navigates to it.
+    const targetThreadId = data.threadId ?? input.activeThreadId;
+    if (targetThreadId) {
+      if (targetThreadId === input.activeThreadId) {
+        if (input.presentationLocked) return { status: 'skipped', eventId, reason: 'client_inactive' };
+        if (!isPreviewWorktreeScopeAcceptable(input.sessionWorktreeId, data.worktreeId)) {
+          return { status: 'skipped', eventId, reason: 'client_inactive' };
+        }
+        input.apply(data);
+        return { status: 'queued', eventId, reason: 'client_inactive' };
+      }
+      const scopeWorktreeId = input.resolveTargetWorktreeId(targetThreadId);
+      if (scopeWorktreeId !== undefined && isPreviewWorktreeScopeAcceptable(scopeWorktreeId, data.worktreeId)) {
+        input.queueForThread(targetThreadId, { port: data.port, path: data.path ?? '/' });
+        return { status: 'queued', eventId, reason: 'client_inactive' };
+      }
+    }
     return { status: 'skipped', eventId, reason: 'client_inactive' };
   }
 

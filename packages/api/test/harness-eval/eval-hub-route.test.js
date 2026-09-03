@@ -62,7 +62,7 @@ describe('Eval Hub API route', () => {
     const response = await app.inject({
       method: 'GET',
       url: '/api/eval-hub/summary',
-      headers: { 'x-test-user-id': 'you' },
+      headers: { 'x-test-user-id': 'operator' },
     });
 
     assert.equal(response.statusCode, 200);
@@ -95,7 +95,7 @@ describe('Eval Hub API route', () => {
             record: {
               agentKeyId: 'ak-test-001',
               catId: 'codex',
-              userId: 'you',
+              userId: 'operator',
               secretHash: 'unused',
               salt: 'unused',
               scope: 'user-bound',
@@ -290,7 +290,7 @@ describe('Eval Hub API route', () => {
             record: {
               agentKeyId: 'ak-test-002',
               catId: 'opus-47',
-              userId: 'you',
+              userId: 'operator',
               secretHash: 'u',
               salt: 'u',
               scope: 'user-bound',

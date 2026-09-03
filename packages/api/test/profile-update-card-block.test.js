@@ -12,7 +12,7 @@ describe('buildProfileUpdateCardBlock', () => {
     targetPath: 'relationship/codex-primer.md',
     beforeContent: 'OLD relationship notes',
     afterContent: 'NEW relationship notes',
-    rationale: 'landy prefers concise updates',
+    rationale: 'operator prefers concise updates',
     signalProvenance: { kind: 'cat-declared', sourceThreadId: 'thread_1' },
     createdBy: 'alice',
     createdAt: 1,
@@ -27,7 +27,7 @@ describe('buildProfileUpdateCardBlock', () => {
     assert.match(card.title, /codex/);
     assert.ok(card.bodyMarkdown.includes('OLD relationship notes'), 'shows before content');
     assert.ok(card.bodyMarkdown.includes('NEW relationship notes'), 'shows after content');
-    assert.ok(card.bodyMarkdown.includes('landy prefers concise updates'), 'shows rationale');
+    assert.ok(card.bodyMarkdown.includes('operator prefers concise updates'), 'shows rationale');
 
     const approveAction = card.actions.find((a) => a.action === 'profile-update:approve');
     const rejectAction = card.actions.find((a) => a.action === 'profile-update:reject');

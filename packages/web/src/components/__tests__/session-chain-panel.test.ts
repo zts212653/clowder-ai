@@ -117,6 +117,61 @@ function expandSealed() {
 }
 
 describe('F24: SessionChainPanel', () => {
+  it('fails closed instead of crashing when a successful response omits the sessions collection', async () => {
+    mockApiFetch.mockResolvedValue({
+      ok: true,
+      json: async () => ({}),
+    });
+
+    renderPanel('thread-malformed');
+    await flushFetch();
+
+    expect(container.querySelector('[data-testid="session-chain-load-failed"]')).not.toBeNull();
+    expect(container.textContent).toContain('Session Chain 加载失败');
+  });
+
+  it.each([
+    ['null entry', [null]],
+    ['malformed object', [{ id: 'session-without-required-fields' }]],
+  ])('fails closed instead of crashing when a successful response contains a %s', async (_case, sessions) => {
+    mockSessionsResponse(sessions);
+
+    renderPanel('thread-malformed-entry');
+    await flushFetch();
+
+    expect(container.querySelector('[data-testid="session-chain-load-failed"]')).not.toBeNull();
+    expect(container.textContent).toContain('Session Chain 加载失败');
+  });
+
+  it('runs native compaction beside an idle bound Codex session and refreshes canonical session truth', async () => {
+    const active = {
+      id: 's-codex',
+      cliSessionId: 'native-1',
+      catId: 'codex',
+      seq: 0,
+      status: 'active',
+      messageCount: 4,
+      createdAt: Date.now(),
+    };
+    mockSessionsResponse([active]);
+    renderPanel('thread-1');
+    await flushFetch();
+    const compact = container.querySelector<HTMLButtonElement>('[data-testid="compact-native-session-s-codex"]');
+    expect(compact).not.toBeNull();
+    mockApiFetch.mockImplementation((url: unknown) =>
+      Promise.resolve(
+        url === '/api/threads/thread-1/sessions/codex/compact-native'
+          ? { ok: true, json: async () => ({ outcome: 'observed', contextEpoch: 2 }) }
+          : { ok: true, json: async () => ({ sessions: [active] }) },
+      ),
+    );
+    act(() => compact?.click());
+    await flushFetch();
+    expect(mockApiFetch).toHaveBeenCalledWith('/api/threads/thread-1/sessions/codex/compact-native', {
+      method: 'POST',
+    });
+  });
+
   it('seals an idle active session and refreshes the chain', async () => {
     mockSessionsResponse([
       { id: 's1', catId: 'opus', seq: 0, status: 'active', messageCount: 5, createdAt: Date.now() },

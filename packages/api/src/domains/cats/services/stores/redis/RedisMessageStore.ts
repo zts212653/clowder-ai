@@ -12,7 +12,8 @@
  * 消息 TTL 可配置 (默认 7 天)。
  */
 
-import type { CatId } from '@cat-cafe/shared';
+import type { CatId, CustodyOfferV1 } from '@cat-cafe/shared';
+import { custodyOfferV1Schema } from '@cat-cafe/shared';
 import type { RedisClient } from '@cat-cafe/shared/utils';
 import { createModuleLogger } from '../../../../../infrastructure/logger.js';
 import { normalizeJsonUnicode } from '../../../../../utils/json-unicode.js';
@@ -21,7 +22,10 @@ import type {
   AppendMessageInput,
   BoundedThreadMessagePage,
   ClearOwnerComposerDraftResult,
+  CustodyOfferTransitionInput,
+  CustodyOfferTransitionResult,
   HostMessageExtra,
+  IdempotentAppendResult,
   MarkCanceledResult,
   MarkDeliveredResult,
   MessageAppendListener,
@@ -48,11 +52,13 @@ import type {
 } from '../ports/MessageStore.js';
 import {
   applyStreamMetadataAugment,
-  assertValidAppendDeliveryMetadata,
+  assertValidAppendMessageInput,
   assertValidStoredMessageTimestamp,
   DEFAULT_THREAD_ID,
+  deriveGrowingSourceMessageRevision,
   generateSortableId,
   isDelivered,
+  isValidCustodyOfferTransition,
 } from '../ports/MessageStore.js';
 import {
   assertQueueCustodyMessageBinding,
@@ -427,7 +433,7 @@ for _, exposure in ipairs(exposures) do
   if not found then table.insert(ids, messageId) end
   redis.call('HSET', KEYS[4], field, cjson.encode(ids))
 end
-redis.call('HDEL', KEYS[1], 'contentBlocks', 'toolEvents', 'metadata', 'extra', 'pluginMessage', 'thinking', 'replyTo')
+redis.call('HDEL', KEYS[1], 'contentBlocks', 'toolEvents', 'metadata', 'extra', 'pluginMessage', 'custodyOfferV1', 'thinking', 'replyTo')
 if not exposed then
   redis.call('ZREM', KEYS[3], redis.call('HGET', KEYS[1], 'id'))
 end
@@ -443,12 +449,28 @@ if ARGV[2] ~= '' then redis.call('HSETNX', KEYS[1], 'pluginMessage', ARGV[2]) en
 return 1
 `;
 
+const COMPARE_AND_TRANSITION_CUSTODY_OFFER_LUA = `
+if redis.call('EXISTS', KEYS[1]) == 0 then return {-1} end
+if redis.call('HGET', KEYS[1], 'recall') or redis.call('HGET', KEYS[1], '_tombstone') then return {-3} end
+local currentContent = redis.call('HGET', KEYS[1], 'content') or ''
+local currentBlocks = redis.call('HGET', KEYS[1], 'contentBlocks') or ''
+if currentContent ~= ARGV[1] or currentBlocks ~= ARGV[2] then return {-2} end
+local currentOffer = redis.call('HGET', KEYS[1], 'custodyOfferV1') or ''
+if currentOffer ~= ARGV[3] then return {0, currentOffer} end
+redis.call('HSET', KEYS[1], 'custodyOfferV1', ARGV[4])
+local fields = redis.call('HGETALL', KEYS[1])
+local result = {1}
+for _, field in ipairs(fields) do table.insert(result, field) end
+return result
+`;
+
 function splitMessageExtra(extra: StoredMessage['extra'] | undefined): {
   hostExtra: HostMessageExtra;
   pluginMessage: StoredPluginMessage | undefined;
+  custodyOfferV1: CustodyOfferV1 | undefined;
 } {
-  const { pluginMessage, ...hostExtra } = extra ?? {};
-  return { hostExtra, pluginMessage };
+  const { pluginMessage, custodyOfferV1, ...hostExtra } = extra ?? {};
+  return { hostExtra, pluginMessage, custodyOfferV1 };
 }
 
 function serializeHostExtra(extra: StoredMessage['extra'] | undefined): string {
@@ -456,15 +478,41 @@ function serializeHostExtra(extra: StoredMessage['extra'] | undefined): string {
   return Object.keys(hostExtra).length > 0 ? serializeExtra(hostExtra) : '';
 }
 
-function hydrateExtra(rawExtra: string | undefined, rawPluginMessage: string | undefined): StoredMessage['extra'] {
+type ParsedCustodyOffer = { kind: 'absent' } | { kind: 'valid'; offer: CustodyOfferV1 } | { kind: 'invalid' };
+
+function parseCustodyOfferRaw(raw: string | undefined | null): ParsedCustodyOffer {
+  if (!raw) return { kind: 'absent' };
+  try {
+    const parsed = custodyOfferV1Schema.safeParse(JSON.parse(raw));
+    return parsed.success ? { kind: 'valid', offer: parsed.data } : { kind: 'invalid' };
+  } catch {
+    return { kind: 'invalid' };
+  }
+}
+
+function hydrateExtra(
+  rawExtra: string | undefined,
+  rawPluginMessage: string | undefined,
+  rawCustodyOffer: string | undefined,
+): { extra: StoredMessage['extra']; custodyOfferParseFailure: boolean } {
   const parsedExtra = safeParseExtra(rawExtra);
   const { hostExtra, pluginMessage: legacyPluginMessage } = splitMessageExtra(parsedExtra);
+  const parsedCustody = parseCustodyOfferRaw(rawCustodyOffer);
+  const custodyOfferV1 = parsedCustody.kind === 'valid' ? parsedCustody.offer : undefined;
+  const custodyOfferParseFailure = parsedCustody.kind === 'invalid';
   // Once the independent field exists it is authoritative, including when
   // malformed (fail-closed); fall back only for pre-F288 embedded records.
   if (rawPluginMessage === undefined) {
     // Pre-F288 path: no independent field, fall back to legacy embedded record.
-    if (Object.keys(hostExtra).length === 0 && legacyPluginMessage === undefined) return undefined;
-    return { ...hostExtra, ...(legacyPluginMessage ? { pluginMessage: legacyPluginMessage } : {}) };
+    const extra =
+      Object.keys(hostExtra).length === 0 && legacyPluginMessage === undefined && custodyOfferV1 === undefined
+        ? undefined
+        : {
+            ...hostExtra,
+            ...(legacyPluginMessage ? { pluginMessage: legacyPluginMessage } : {}),
+            ...(custodyOfferV1 ? { custodyOfferV1 } : {}),
+          };
+    return { extra, custodyOfferParseFailure };
   }
   // F288 path: independent field exists. Preserve it even when invalid so
   // projectEnvelope enters the plugin branch and fail-closes (codex P1 fix).
@@ -473,7 +521,83 @@ function hydrateExtra(rawExtra: string | undefined, rawPluginMessage: string | u
   // object so `extra.pluginMessage !== undefined` remains true — projectEnvelope
   // will detect the malformed payload via readPluginMessageExtra and return null.
   const pluginValue = pluginMessage ?? ({} as StoredPluginMessage);
-  return { ...hostExtra, pluginMessage: pluginValue };
+  return {
+    extra: { ...hostExtra, pluginMessage: pluginValue, ...(custodyOfferV1 ? { custodyOfferV1 } : {}) },
+    custodyOfferParseFailure,
+  };
+}
+
+type CustodyOfferCasSnapshot =
+  | {
+      kind: 'ready';
+      content: string;
+      rawContentBlocks: string;
+      rawCurrentOffer: string;
+      currentOffer: CustodyOfferV1 | null;
+      actualSourceRevision: string;
+    }
+  | {
+      kind: 'failure';
+      result: Extract<CustodyOfferTransitionResult, { kind: 'not_found' | 'invalid_state' }>;
+    };
+
+async function readCustodyOfferCasSnapshot(redis: RedisClient, hashKey: string): Promise<CustodyOfferCasSnapshot> {
+  const [storedId, content, rawContentBlocks, rawCurrentOffer, recall, tombstone] = await redis.hmget(
+    hashKey,
+    'id',
+    'content',
+    'contentBlocks',
+    'custodyOfferV1',
+    'recall',
+    '_tombstone',
+  );
+  if (!storedId) return { kind: 'failure', result: { kind: 'not_found' } };
+  if (recall || tombstone) return { kind: 'failure', result: { kind: 'invalid_state' } };
+
+  const normalizedBlocks = rawContentBlocks ?? '';
+  const contentBlocks = normalizedBlocks ? safeParseContentBlocks(normalizedBlocks) : undefined;
+  if (normalizedBlocks && !contentBlocks) {
+    return { kind: 'failure', result: { kind: 'invalid_state' } };
+  }
+  const normalizedContent = content ?? '';
+  const actualSourceRevision = deriveGrowingSourceMessageRevision({
+    content: normalizedContent,
+    contentBlocks,
+  });
+  const parsedCustody = parseCustodyOfferRaw(rawCurrentOffer);
+  if (parsedCustody.kind === 'invalid') {
+    return { kind: 'failure', result: { kind: 'invalid_state' } };
+  }
+  const currentOffer = parsedCustody.kind === 'valid' ? parsedCustody.offer : null;
+  return {
+    kind: 'ready',
+    content: normalizedContent,
+    rawContentBlocks: normalizedBlocks,
+    rawCurrentOffer: rawCurrentOffer ?? '',
+    currentOffer,
+    actualSourceRevision,
+  };
+}
+
+type CustodyOfferCasReceipt =
+  | { kind: 'updated_hash'; fields: unknown[] }
+  | Exclude<CustodyOfferTransitionResult, { kind: 'updated' }>;
+
+function parseCustodyOfferCasReceipt(result: unknown): CustodyOfferCasReceipt {
+  if (!Array.isArray(result)) throw new Error('custody offer CAS returned malformed Redis receipt');
+  const code = Number(result[0]);
+  if (code === -1) return { kind: 'not_found' };
+  if (code === -2) return { kind: 'source_revision_mismatch' };
+  if (code === -3) return { kind: 'invalid_state' };
+  if (code === 1) return { kind: 'updated_hash', fields: result.slice(1) };
+  if (code !== 0) throw new Error('custody offer CAS returned unknown Redis receipt');
+
+  const concurrent = parseCustodyOfferRaw(typeof result[1] === 'string' ? result[1] : '');
+  if (concurrent.kind === 'invalid') return { kind: 'invalid_state' };
+  return {
+    kind: 'state_conflict',
+    currentOffer: concurrent.kind === 'valid' ? concurrent.offer : null,
+  };
 }
 
 export class RedisMessageStore {
@@ -512,9 +636,12 @@ export class RedisMessageStore {
   }
 
   async append(input: AppendMessageInput): Promise<StoredMessage> {
+    return (await this.appendIdempotent(input)).message;
+  }
+
+  async appendIdempotent(input: AppendMessageInput): Promise<IdempotentAppendResult> {
     const msg = normalizeJsonUnicode(input);
-    assertValidAppendDeliveryMetadata(msg);
-    assertValidStoredMessageTimestamp(msg.timestamp);
+    assertValidAppendMessageInput(msg);
     const threadId = msg.threadId ?? DEFAULT_THREAD_ID;
     const idempotencyIndexKey = msg.idempotencyKey
       ? MessageKeys.idempotency(msg.userId, threadId, msg.idempotencyKey)
@@ -527,7 +654,7 @@ export class RedisMessageStore {
       if (existingId) {
         const existingMessage = await this.getById(existingId);
         if (existingMessage) {
-          return existingMessage;
+          return { message: existingMessage, idempotent: true };
         }
       }
       // Stale reference: do NOT delete here (avoids a check-then-act race).
@@ -540,6 +667,7 @@ export class RedisMessageStore {
     const stored: StoredMessage = { ...payload, id, threadId };
     const score = msg.timestamp;
     const hashKey = MessageKeys.detail(id);
+    const { custodyOfferV1, ...appendExtra } = msg.extra ?? {};
 
     // Build hash fields as flat key-value pairs for the Lua HSET
     const hashFields: string[] = [
@@ -560,7 +688,7 @@ export class RedisMessageStore {
       'metadata',
       msg.metadata ? JSON.stringify(msg.metadata) : '',
       'extra',
-      msg.extra ? serializeExtra(msg.extra) : '',
+      Object.keys(appendExtra).length > 0 ? serializeExtra(appendExtra) : '',
       'mentions',
       JSON.stringify(msg.mentions),
       'timestamp',
@@ -573,6 +701,7 @@ export class RedisMessageStore {
     if (msg.source) hashFields.push('source', JSON.stringify(msg.source));
     if (msg.mentionsUser) hashFields.push('mentionsUser', '1');
     if (msg.deliveryStatus) hashFields.push('deliveryStatus', msg.deliveryStatus);
+    if (custodyOfferV1) hashFields.push('custodyOfferV1', JSON.stringify(custodyOfferV1));
     // #1269 P1-1: restore queueCustody serialization that createStoredMessageData() provided.
     // Without these, F254 custody CAS operations fail on messages appended with initial custody.
     if (msg.queueCustody) {
@@ -624,7 +753,7 @@ export class RedisMessageStore {
     if (typeof result === 'string' && result !== String(0)) {
       const existingMessage = await this.getById(result);
       if (existingMessage) {
-        return existingMessage;
+        return { message: existingMessage, idempotent: true };
       }
       // The concurrent winner's hash vanished (deleteByThread / TTL) between the
       // Lua claim and this hydration. Do not fall through to the created path,
@@ -648,7 +777,7 @@ export class RedisMessageStore {
       }
     }
 
-    return stored;
+    return { message: stored, idempotent: false };
   }
 
   async getLatestThreadMessageIdIncludingQueued(threadId: string): Promise<string | null> {
@@ -835,7 +964,7 @@ export class RedisMessageStore {
     const contentBlocks = safeParseContentBlocks(data.contentBlocks);
     const toolEvents = safeParseToolEvents(data.toolEvents);
     const parsedMetadata = safeParseMetadata(data.metadata);
-    const parsedExtra = hydrateExtra(data.extra, data.pluginMessage);
+    const extraHydration = hydrateExtra(data.extra, data.pluginMessage, data.custodyOfferV1);
     const sourceField = parseConnectorSourceField(data.source);
     const parsedSource = sourceField.kind === 'valid' ? sourceField.source : undefined;
     const parsedQueueCustody = safeParseQueueCustody(data.queueCustody);
@@ -851,7 +980,8 @@ export class RedisMessageStore {
       ...(contentBlocks ? { contentBlocks } : {}),
       ...(toolEvents ? { toolEvents } : {}),
       ...(parsedMetadata ? { metadata: parsedMetadata } : {}),
-      ...(parsedExtra ? { extra: parsedExtra } : {}),
+      ...(extraHydration.extra ? { extra: extraHydration.extra } : {}),
+      ...(extraHydration.custodyOfferParseFailure ? { custodyOfferParseFailure: true as const } : {}),
       mentions: safeParseMentions(data.mentions),
       timestamp: parseStoredMessageTimestamp(data.timestamp),
       ...(deletedAt ? { deletedAt, deletedBy: data.deletedBy ?? '' } : {}),
@@ -2013,6 +2143,7 @@ export class RedisMessageStore {
       metadata: '',
       extra: '',
       pluginMessage: '',
+      custodyOfferV1: '',
       thinking: '',
       mentions: '[]',
       deletedAt: String(now),
@@ -2071,7 +2202,12 @@ export class RedisMessageStore {
     const msg = await this.getById(id);
     if (!msg) return null;
     const { hostExtra: current, pluginMessage } = splitMessageExtra(msg.extra);
-    const merged = { ...current, ...extra };
+    const {
+      pluginMessage: _stripPlugin,
+      custodyOfferV1: _stripCustody,
+      ...hostPatch
+    } = extra as Record<string, unknown>;
+    const merged = { ...current, ...hostPatch };
     const updated = await this.redis.eval(
       UPDATE_EXTRA_IF_NOT_RECALLED_LUA,
       1,
@@ -2081,6 +2217,46 @@ export class RedisMessageStore {
     );
     if (Number(updated) !== 1) return null;
     return this.getById(id);
+  }
+
+  async compareAndTransitionCustodyOffer(
+    id: string,
+    input: CustodyOfferTransitionInput,
+  ): Promise<CustodyOfferTransitionResult> {
+    const hashKey = MessageKeys.detail(id);
+    const snapshot = await readCustodyOfferCasSnapshot(this.redis, hashKey);
+    if (snapshot.kind === 'failure') return snapshot.result;
+    if (snapshot.actualSourceRevision !== input.expectedSourceMessageRevision) {
+      return { kind: 'source_revision_mismatch' };
+    }
+    if (snapshot.currentOffer && snapshot.currentOffer.sourceMessageRevision !== input.expectedSourceMessageRevision) {
+      return { kind: 'invalid_state' };
+    }
+    const expectedParsed = input.expectedOffer === null ? null : custodyOfferV1Schema.safeParse(input.expectedOffer);
+    if (expectedParsed !== null && !expectedParsed.success) return { kind: 'invalid_transition' };
+    const expectedOffer = expectedParsed === null ? null : expectedParsed.data;
+    if (JSON.stringify(snapshot.currentOffer) !== JSON.stringify(expectedOffer)) {
+      return { kind: 'state_conflict', currentOffer: snapshot.currentOffer };
+    }
+    if (!isValidCustodyOfferTransition(input.expectedSourceMessageRevision, input.expectedOffer, input.nextOffer)) {
+      return { kind: 'invalid_transition' };
+    }
+
+    const nextOffer = custodyOfferV1Schema.parse(input.nextOffer);
+    const result = await this.redis.eval(
+      COMPARE_AND_TRANSITION_CUSTODY_OFFER_LUA,
+      1,
+      hashKey,
+      snapshot.content,
+      snapshot.rawContentBlocks,
+      snapshot.rawCurrentOffer,
+      JSON.stringify(nextOffer),
+    );
+    const receipt = parseCustodyOfferCasReceipt(result);
+    if (receipt.kind !== 'updated_hash') return receipt;
+    const message = this.parseLuaHgetall(receipt.fields);
+    if (!message) throw new Error('custody offer CAS lost canonical source message');
+    return { kind: 'updated', message };
   }
 
   async updatePluginMessage(
@@ -2337,6 +2513,36 @@ export class RedisMessageStore {
     return ids;
   }
 
+  async scanPendingLegacyLocalReviewDispositions(): Promise<string[]> {
+    const matchPattern = `${this.keyPrefix}${MessageKeys.detail('*')}`;
+    const ids: string[] = [];
+    let cursor = '0';
+    do {
+      const [nextCursor, keys] = await this.redis.scan(cursor, 'MATCH', matchPattern, 'COUNT', 200);
+      cursor = nextCursor;
+      if (keys.length > 0) {
+        const pipeline = this.redis.pipeline();
+        for (const key of keys) {
+          pipeline.hmget(this.stripPrefix(key), 'deliveryStatus', 'extra');
+        }
+        const results = await pipeline.exec();
+        for (let index = 0; index < keys.length; index += 1) {
+          const [error, value] = results?.[index] ?? [null, null];
+          if (error || !Array.isArray(value)) continue;
+          const [deliveryStatus, rawExtra] = value;
+          if (
+            (deliveryStatus === null || deliveryStatus === '') &&
+            typeof rawExtra === 'string' &&
+            safeParseExtra(rawExtra)?.legacyLocalReviewDisposition
+          ) {
+            ids.push(this.stripPrefix(keys[index]!).replace(/^msg:/, ''));
+          }
+        }
+      }
+    } while (cursor !== '0');
+    return ids;
+  }
+
   /** Hydrate message IDs into full StoredMessage objects */
   private async hydrateMessages(ids: string[], options?: { includeDeleted?: boolean }): Promise<StoredMessage[]> {
     const pipeline = this.redis.multi();
@@ -2360,7 +2566,7 @@ export class RedisMessageStore {
       const contentBlocks = safeParseContentBlocks(d.contentBlocks);
       const toolEvents = safeParseToolEvents(d.toolEvents);
       const parsedMetadata = safeParseMetadata(d.metadata);
-      const parsedExtra = hydrateExtra(d.extra, d.pluginMessage);
+      const extraHydration = hydrateExtra(d.extra, d.pluginMessage, d.custodyOfferV1);
       const sourceField = parseConnectorSourceField(d.source);
       const parsedSource = sourceField.kind === 'valid' ? sourceField.source : undefined;
       const parsedQueueCustody = safeParseQueueCustody(d.queueCustody);
@@ -2375,7 +2581,8 @@ export class RedisMessageStore {
         ...(contentBlocks ? { contentBlocks } : {}),
         ...(toolEvents ? { toolEvents } : {}),
         ...(parsedMetadata ? { metadata: parsedMetadata } : {}),
-        ...(parsedExtra ? { extra: parsedExtra } : {}),
+        ...(extraHydration.extra ? { extra: extraHydration.extra } : {}),
+        ...(extraHydration.custodyOfferParseFailure ? { custodyOfferParseFailure: true as const } : {}),
         mentions: safeParseMentions(d.mentions),
         timestamp: parseStoredMessageTimestamp(d.timestamp),
         ...(deletedAt ? { deletedAt, deletedBy: d.deletedBy ?? '' } : {}),

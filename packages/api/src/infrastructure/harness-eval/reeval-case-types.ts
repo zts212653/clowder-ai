@@ -23,6 +23,16 @@ export interface ReevalCaseResponsibilityBlocker {
   candidateThreadIds: readonly string[];
 }
 
+export interface ReevalCaseCustodyDispatchBlocker {
+  eventId: string;
+  stage: 'responsibility' | 'reevaluation';
+  reasonCode: 'carrier_persist_failed' | 'carrier_delivery_failed' | 'carrier_not_enqueued';
+  taskId: string;
+  leaseId: string;
+  leaseGeneration: number;
+  carrierMessageId?: string;
+}
+
 export interface ReevalCaseProjection {
   caseId: string;
   domainId: string;
@@ -36,6 +46,7 @@ export interface ReevalCaseProjection {
   leaseId?: string;
   leaseGeneration?: number;
   responsibilityBlocker?: ReevalCaseResponsibilityBlocker;
+  custodyDispatchBlocker?: ReevalCaseCustodyDispatchBlocker;
   mainCommitSha?: string;
   liveCommitSha?: string;
   reevalDueAt?: string;

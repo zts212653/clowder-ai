@@ -20,12 +20,59 @@ function attachFixtureMessageId({ document, messageIdPlacement, turn, message, s
   }
 }
 
+function appendFixtureUserMessage({
+  document,
+  messageIdPlacement,
+  addMessageId,
+  wrapRenderedMessage,
+  renderedInnerText,
+  renderedContentText,
+  renderedContentCopies,
+  renderedAffordanceText,
+  sendCount,
+  sentText,
+}) {
+  const turn = document.createElement('article');
+  if (messageIdPlacement === 'turn-testid') turn.dataset.testid = `conversation-turn-${sendCount}`;
+  const message = messageIdPlacement === 'message' ? turn : document.createElement('div');
+  message.dataset.messageAuthorRole = 'user';
+  if (addMessageId) attachFixtureMessageId({ document, messageIdPlacement, turn, message, sendCount });
+  if (wrapRenderedMessage) {
+    const renderedMessage = document.createElement('div');
+    Object.defineProperty(message, 'innerText', {
+      configurable: true,
+      value: renderedInnerText ?? sentText,
+    });
+    for (let index = 0; index < renderedContentCopies; index += 1) {
+      const renderedContent = document.createElement('div');
+      renderedContent.className = 'whitespace-pre-wrap';
+      renderedContent.textContent = renderedContentText ?? sentText;
+      renderedMessage.append(renderedContent);
+    }
+    message.append(renderedMessage);
+    if (renderedAffordanceText) {
+      const affordance = document.createElement('button');
+      affordance.textContent = renderedAffordanceText;
+      message.append(affordance);
+    }
+  } else {
+    message.textContent = sentText;
+  }
+  if (message !== turn) turn.append(message);
+  document.querySelector('#messages').append(turn);
+}
+
 function createFixture({
   conversationId = 'conversation-7',
   addMessageId = true,
   messageIdPlacement = 'message',
   initialComposerText = '',
   sendButton = 'present',
+  wrapRenderedMessage = false,
+  renderedInnerText,
+  renderedContentText,
+  renderedContentCopies = 1,
+  renderedAffordanceText,
 } = {}) {
   const dom = new JSDOM(
     `<!doctype html><body>
@@ -72,13 +119,18 @@ function createFixture({
       const composer = document.querySelector('#prompt-textarea');
       const sentText = composer.textContent;
       sentTexts.push(sentText);
-      const turn = document.createElement('article');
-      const message = messageIdPlacement === 'message' ? turn : document.createElement('div');
-      message.dataset.messageAuthorRole = 'user';
-      if (addMessageId) attachFixtureMessageId({ document, messageIdPlacement, turn, message, sendCount });
-      message.textContent = sentText;
-      if (message !== turn) turn.append(message);
-      document.querySelector('#messages').append(turn);
+      appendFixtureUserMessage({
+        document,
+        messageIdPlacement,
+        addMessageId,
+        wrapRenderedMessage,
+        renderedInnerText,
+        renderedContentText,
+        renderedContentCopies,
+        renderedAffordanceText,
+        sendCount,
+        sentText,
+      });
       composer.replaceChildren();
     });
   const initialButton = document.querySelector('[data-testid="send-button"]');
@@ -147,6 +199,426 @@ describe('ChatGPT page adapter', () => {
 
     assert.equal(result.hostMessageId, 'host-message-1');
     assert.equal(fixture.getSendCount(), 1);
+  });
+
+  it('accepts the unique Host-provided conversation turn ID when data-message-id is absent', async () => {
+    const fixture = createFixture({ addMessageId: false, messageIdPlacement: 'turn-testid' });
+    const adapter = createChatGptPageAdapter({
+      document: fixture.document,
+      location: fixture.dom.window.location,
+      MutationObserver: fixture.dom.window.MutationObserver,
+      observationTimeoutMs: 25,
+    });
+
+    const result = await adapter.appendMessage({
+      requestId: 'request-turn-testid',
+      conversationId: 'conversation-7',
+      text: 'new ChatGPT DOM exposes only the enclosing turn ID',
+      idempotencyKey: 'source-message-turn-testid',
+    });
+
+    assert.equal(result.hostMessageId, 'conversation-turn-1');
+    assert.equal(fixture.getSendCount(), 1);
+  });
+
+  it('observes a multiline runtime payload after ChatGPT wraps the rendered user message', async () => {
+    const fixture = createFixture({
+      addMessageId: false,
+      messageIdPlacement: 'turn-testid',
+      wrapRenderedMessage: true,
+    });
+    const adapter = createChatGptPageAdapter({
+      document: fixture.document,
+      location: fixture.dom.window.location,
+      MutationObserver: fixture.dom.window.MutationObserver,
+      observationTimeoutMs: 25,
+    });
+    const text = '<thread-runtime v=1 format=json>\n{"intent":"rua 大尾巴"}\n</thread-runtime>\n\nrua 大尾巴';
+
+    const result = await adapter.appendMessage({
+      requestId: 'request-wrapped-runtime-payload',
+      conversationId: 'conversation-7',
+      text,
+      idempotencyKey: 'source-message-wrapped-runtime-payload',
+    });
+
+    assert.equal(result.hostMessageId, 'conversation-turn-1');
+    assert.equal(fixture.getSendCount(), 1);
+  });
+
+  it('observes the exact runtime payload when ChatGPT collapses only the innerText projection', async () => {
+    const prefix = '<thread-runtime v=1 format=json>\n{"intent":"';
+    const suffix = '"}\n</thread-runtime>';
+    const text = `${prefix}${'x'.repeat(1_131 - prefix.length - suffix.length)}${suffix}`;
+    const fixture = createFixture({
+      addMessageId: false,
+      messageIdPlacement: 'turn-testid',
+      wrapRenderedMessage: true,
+      renderedInnerText: 'Show full message',
+    });
+    const adapter = createChatGptPageAdapter({
+      document: fixture.document,
+      location: fixture.dom.window.location,
+      MutationObserver: fixture.dom.window.MutationObserver,
+      observationTimeoutMs: 25,
+    });
+
+    assert.equal(text.length, 1_131);
+    assert.equal('Show full message'.length, 17);
+    const result = await adapter.appendMessage({
+      requestId: 'request-collapsed-runtime-payload',
+      conversationId: 'conversation-7',
+      text,
+      idempotencyKey: 'source-message-collapsed-runtime-payload',
+    });
+
+    assert.equal(result.hostMessageId, 'conversation-turn-1');
+    assert.equal(fixture.getSendCount(), 1);
+  });
+
+  it('observes the exact runtime payload inside a collapsed bubble with a sibling expand control', async () => {
+    const text = '<thread-runtime v=1 format=json>\n{"intent":"rua 小猫脚"}\n</thread-runtime>\n\nrua 小猫脚';
+    const fixture = createFixture({
+      addMessageId: false,
+      messageIdPlacement: 'turn-testid',
+      wrapRenderedMessage: true,
+      renderedInnerText: 'Show full message',
+      renderedAffordanceText: '展开',
+    });
+    const adapter = createChatGptPageAdapter({
+      document: fixture.document,
+      location: fixture.dom.window.location,
+      MutationObserver: fixture.dom.window.MutationObserver,
+      observationTimeoutMs: 25,
+    });
+
+    const result = await adapter.appendMessage({
+      requestId: 'request-collapsed-runtime-payload-with-affordance',
+      conversationId: 'conversation-7',
+      text,
+      idempotencyKey: 'source-message-collapsed-runtime-payload-with-affordance',
+    });
+
+    assert.equal(result.hostMessageId, 'conversation-turn-1');
+    assert.equal(fixture.getSendCount(), 1);
+  });
+
+  it('does not accept a collapsed bubble whose rendered content container changes the submitted payload', async () => {
+    const text = '<thread-runtime v=1 format=json>\n{"intent":"exact"}\n</thread-runtime>\n\nexact';
+    const fixture = createFixture({
+      addMessageId: false,
+      messageIdPlacement: 'turn-testid',
+      wrapRenderedMessage: true,
+      renderedInnerText: 'Show full message',
+      renderedContentText: `${text} `,
+      renderedAffordanceText: '展开',
+    });
+    const adapter = createChatGptPageAdapter({
+      document: fixture.document,
+      location: fixture.dom.window.location,
+      MutationObserver: fixture.dom.window.MutationObserver,
+      observationTimeoutMs: 25,
+    });
+
+    await assert.rejects(
+      adapter.appendMessage({
+        requestId: 'request-collapsed-runtime-payload-changed',
+        conversationId: 'conversation-7',
+        text,
+        idempotencyKey: 'source-message-collapsed-runtime-payload-changed',
+      }),
+      (error) => error.code === 'HOST_MESSAGE_NOT_OBSERVED',
+    );
+    assert.equal(fixture.getSendCount(), 1);
+  });
+
+  it('fails closed when a collapsed bubble exposes duplicate exact rendered content containers', async () => {
+    const text = '<thread-runtime v=1 format=json>\n{"intent":"exact"}\n</thread-runtime>\n\nexact';
+    const fixture = createFixture({
+      addMessageId: false,
+      messageIdPlacement: 'turn-testid',
+      wrapRenderedMessage: true,
+      renderedInnerText: text,
+      renderedContentCopies: 2,
+      renderedAffordanceText: '展开',
+    });
+    const adapter = createChatGptPageAdapter({
+      document: fixture.document,
+      location: fixture.dom.window.location,
+      MutationObserver: fixture.dom.window.MutationObserver,
+      observationTimeoutMs: 25,
+    });
+
+    await assert.rejects(
+      adapter.appendMessage({
+        requestId: 'request-ambiguous-collapsed-runtime-payload',
+        conversationId: 'conversation-7',
+        text,
+        idempotencyKey: 'source-message-ambiguous-collapsed-runtime-payload',
+      }),
+      (error) => error.code === 'HOST_MESSAGE_NOT_OBSERVED',
+    );
+    assert.equal(fixture.getSendCount(), 1);
+  });
+
+  it('fails closed when the Host-provided conversation turn ID is not globally unique', async () => {
+    const fixture = createFixture({ addMessageId: false, messageIdPlacement: 'turn-testid' });
+    const duplicate = fixture.document.createElement('article');
+    duplicate.dataset.testid = 'conversation-turn-1';
+    fixture.document.querySelector('#messages').append(duplicate);
+    const adapter = createChatGptPageAdapter({
+      document: fixture.document,
+      location: fixture.dom.window.location,
+      MutationObserver: fixture.dom.window.MutationObserver,
+      observationTimeoutMs: 25,
+    });
+
+    await assert.rejects(
+      adapter.appendMessage({
+        requestId: 'request-duplicate-turn-testid',
+        conversationId: 'conversation-7',
+        text: 'duplicate Host turn identifiers must not produce a receipt',
+        idempotencyKey: 'source-message-duplicate-turn-testid',
+      }),
+      (error) => error.code === 'HOST_MESSAGE_NOT_OBSERVED',
+    );
+  });
+
+  it('captures only the first assistant final causally following the exact dispatched user turn', async () => {
+    const fixture = createFixture({ addMessageId: false, messageIdPlacement: 'turn-testid' });
+    const messages = fixture.document.querySelector('#messages');
+    const historicTurn = fixture.document.createElement('article');
+    historicTurn.dataset.testid = 'conversation-turn-historic';
+    const historicAssistant = fixture.document.createElement('div');
+    historicAssistant.dataset.messageAuthorRole = 'assistant';
+    historicAssistant.textContent = 'historic assistant content must never be scanned';
+    historicTurn.append(historicAssistant);
+    messages.append(historicTurn);
+
+    let resolveObserved;
+    const observed = new Promise((resolve) => {
+      resolveObserved = resolve;
+    });
+    const adapter = createChatGptPageAdapter({
+      document: fixture.document,
+      location: fixture.dom.window.location,
+      MutationObserver: fixture.dom.window.MutationObserver,
+      observationTimeoutMs: 50,
+      assistantObservationTimeoutMs: 250,
+      assistantQuietMs: 15,
+      onAssistantFinal: (value) => resolveObserved(value),
+    });
+
+    const receipt = await adapter.appendMessage({
+      requestId: 'request-causal-assistant',
+      conversationId: 'conversation-7',
+      text: 'capture the exact next assistant turn',
+      idempotencyKey: 'source-message-causal-assistant',
+    });
+
+    const assistantTurn = fixture.document.createElement('article');
+    assistantTurn.dataset.testid = 'conversation-turn-2';
+    const assistant = fixture.document.createElement('div');
+    assistant.dataset.messageAuthorRole = 'assistant';
+    assistant.textContent = 'partial';
+    assistantTurn.append(assistant);
+    messages.append(assistantTurn);
+    setTimeout(() => {
+      assistant.textContent = 'the exact ordinary assistant final';
+    }, 5);
+
+    assert.equal(receipt.hostMessageId, 'conversation-turn-1');
+    assert.deepEqual(await observed, {
+      requestId: 'request-causal-assistant',
+      conversationId: 'conversation-7',
+      idempotencyKey: 'source-message-causal-assistant',
+      hostMessageId: 'conversation-turn-1',
+      assistantMessageId: 'conversation-turn-2',
+      content: 'the exact ordinary assistant final',
+    });
+  });
+
+  it('re-anchors the causal assistant observer when ChatGPT remounts the source user turn', async () => {
+    const fixture = createFixture({ addMessageId: false, messageIdPlacement: 'turn-testid' });
+    let resolveObserved;
+    const observed = new Promise((resolve) => {
+      resolveObserved = resolve;
+    });
+    const adapter = createChatGptPageAdapter({
+      document: fixture.document,
+      location: fixture.dom.window.location,
+      MutationObserver: fixture.dom.window.MutationObserver,
+      observationTimeoutMs: 50,
+      assistantObservationTimeoutMs: 80,
+      assistantQuietMs: 10,
+      onAssistantFinal: (value) => resolveObserved(value),
+    });
+
+    await adapter.appendMessage({
+      requestId: 'request-remounted-source-turn',
+      conversationId: 'conversation-7',
+      text: 'survive a React source-turn remount',
+      idempotencyKey: 'source-message-remounted-source-turn',
+    });
+    const sourceTurn = fixture.document.querySelector('[data-testid="conversation-turn-1"]');
+    sourceTurn.replaceWith(sourceTurn.cloneNode(true));
+    const assistantTurn = fixture.document.createElement('article');
+    assistantTurn.dataset.testid = 'conversation-turn-2';
+    const assistant = fixture.document.createElement('div');
+    assistant.dataset.messageAuthorRole = 'assistant';
+    assistant.textContent = 'assistant final after source turn remount';
+    assistantTurn.append(assistant);
+    fixture.document.querySelector('#messages').append(assistantTurn);
+
+    assert.equal(
+      (
+        await Promise.race([
+          observed,
+          new Promise((_, reject) =>
+            setTimeout(() => reject(new Error('remounted source turn was not re-anchored')), 150),
+          ),
+        ])
+      ).content,
+      'assistant final after source turn remount',
+    );
+  });
+
+  it('follows the same Host assistant turn across a streaming remount instead of returning the detached partial', async () => {
+    const fixture = createFixture({ addMessageId: false, messageIdPlacement: 'turn-testid' });
+    let resolveObserved;
+    const observed = new Promise((resolve) => {
+      resolveObserved = resolve;
+    });
+    const adapter = createChatGptPageAdapter({
+      document: fixture.document,
+      location: fixture.dom.window.location,
+      MutationObserver: fixture.dom.window.MutationObserver,
+      observationTimeoutMs: 50,
+      assistantObservationTimeoutMs: 120,
+      assistantQuietMs: 15,
+      onAssistantFinal: (value) => resolveObserved(value),
+    });
+    await adapter.appendMessage({
+      requestId: 'request-remounted-assistant-turn',
+      conversationId: 'conversation-7',
+      text: 'follow the live assistant turn across remount',
+      idempotencyKey: 'source-message-remounted-assistant-turn',
+    });
+
+    const stopButton = fixture.document.createElement('button');
+    stopButton.dataset.testid = 'stop-button';
+    fixture.document.body.append(stopButton);
+    const assistantTurn = fixture.document.createElement('article');
+    assistantTurn.dataset.testid = 'conversation-turn-2';
+    const assistant = fixture.document.createElement('div');
+    assistant.dataset.messageAuthorRole = 'assistant';
+    assistant.textContent = 'detached partial must never escape';
+    assistantTurn.append(assistant);
+    fixture.document.querySelector('#messages').append(assistantTurn);
+    await new Promise((resolve) => setTimeout(resolve, 5));
+
+    const remountedTurn = assistantTurn.cloneNode(true);
+    remountedTurn.querySelector('[data-message-author-role="assistant"]').textContent =
+      'complete assistant final after streaming remount';
+    assistantTurn.replaceWith(remountedTurn);
+    stopButton.remove();
+
+    assert.equal((await observed).content, 'complete assistant final after streaming remount');
+  });
+
+  it('reports a privacy-safe durable diagnostic when the causal assistant final cannot be identified', async () => {
+    const fixture = createFixture({ addMessageId: false, messageIdPlacement: 'turn-testid' });
+    let resolveFailure;
+    const failed = new Promise((resolve) => {
+      resolveFailure = resolve;
+    });
+    const adapter = createChatGptPageAdapter({
+      document: fixture.document,
+      location: fixture.dom.window.location,
+      MutationObserver: fixture.dom.window.MutationObserver,
+      observationTimeoutMs: 50,
+      assistantObservationTimeoutMs: 25,
+      assistantQuietMs: 10,
+      onAssistantObservationFailure: (value) => resolveFailure(value),
+    });
+
+    await adapter.appendMessage({
+      requestId: 'request-assistant-diagnostic',
+      conversationId: 'conversation-7',
+      text: 'diagnose the exact assistant observation boundary',
+      idempotencyKey: 'source-message-assistant-diagnostic',
+    });
+    const assistantTurn = fixture.document.createElement('article');
+    const assistant = fixture.document.createElement('div');
+    assistant.dataset.messageAuthorRole = 'assistant';
+    assistant.textContent = 'content exists but the Host does not expose a stable turn identifier';
+    assistantTurn.append(assistant);
+    fixture.document.querySelector('#messages').append(assistantTurn);
+
+    const failure = await Promise.race([
+      failed,
+      new Promise((_, reject) =>
+        setTimeout(() => reject(new Error('assistant observation failure was swallowed')), 100),
+      ),
+    ]);
+    assert.deepEqual(failure, {
+      requestId: 'request-assistant-diagnostic',
+      conversationId: 'conversation-7',
+      idempotencyKey: 'source-message-assistant-diagnostic',
+      hostMessageId: 'conversation-turn-1',
+      errorCode: 'ASSISTANT_FINAL_NOT_OBSERVED',
+      diagnostic: {
+        v: 1,
+        userTurnConnected: true,
+        anchorTurnFound: true,
+        followingTurnCount: 1,
+        assistantCandidateCount: 1,
+        laterUserTurnPresent: false,
+        assistantHostIdStatus: 'missing_or_ambiguous',
+        assistantContentStatus: 'present',
+        streamingControlPresent: false,
+      },
+    });
+    assert.equal(JSON.stringify(failure).includes('content exists'), false);
+  });
+
+  it('does not capture a quiet partial while ChatGPT still exposes the stop-generating control', async () => {
+    const fixture = createFixture({ addMessageId: false, messageIdPlacement: 'turn-testid' });
+    let resolveObserved;
+    const observed = new Promise((resolve) => {
+      resolveObserved = resolve;
+    });
+    const adapter = createChatGptPageAdapter({
+      document: fixture.document,
+      location: fixture.dom.window.location,
+      MutationObserver: fixture.dom.window.MutationObserver,
+      observationTimeoutMs: 50,
+      assistantObservationTimeoutMs: 250,
+      assistantQuietMs: 15,
+      onAssistantFinal: (value) => resolveObserved(value),
+    });
+    await adapter.appendMessage({
+      requestId: 'request-streaming-assistant',
+      conversationId: 'conversation-7',
+      text: 'wait for the complete assistant turn',
+      idempotencyKey: 'source-message-streaming-assistant',
+    });
+
+    const stopButton = fixture.document.createElement('button');
+    stopButton.dataset.testid = 'stop-button';
+    fixture.document.body.append(stopButton);
+    const assistantTurn = fixture.document.createElement('article');
+    assistantTurn.dataset.testid = 'conversation-turn-2';
+    const assistant = fixture.document.createElement('div');
+    assistant.dataset.messageAuthorRole = 'assistant';
+    assistant.textContent = 'quiet but partial';
+    assistantTurn.append(assistant);
+    fixture.document.querySelector('#messages').append(assistantTurn);
+    await new Promise((resolve) => setTimeout(resolve, 35));
+    assistant.textContent = 'complete assistant final';
+    stopButton.remove();
+
+    assert.equal((await observed).content, 'complete assistant final');
   });
 
   it('fails closed when the enclosing ChatGPT turn exposes multiple possible host IDs', async () => {

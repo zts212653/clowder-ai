@@ -4,7 +4,7 @@ related_features: [F148, F063, F095, F131]
 topics: [artifacts, thread, workspace, ui]
 doc_kind: spec
 created: 2026-06-11
-tips_exempt: artifacts panel is workspace-level UI with no new user-facing capability tip needed — panel discovery via workspace mode toggle is self-evident
+tips_exempt: "2026-09-02 docs-only User Journey and history clarification for the already-shipped Artifacts workspace surface; no runtime behavior or new entry action was added."
 ---
 
 # F232: Thread Artifacts Panel — Thread 产物视图
@@ -22,6 +22,24 @@ operator experience（2026-06-11）：
 **价值**：让operator不用记名字、不用搜半天、不用喊猫——点开一个 thread 就能浏览 / 筛选 / 搜索 / **点击直接看到产物内容**。这是 Claude/ChatGPT 的 artifacts 面板的"thread 级"加强版（他们只管"对话里生成的可编辑文档"，我们产物类型更多：代码、PR、设计稿、语音都算）。
 
 **🎯 核心愿景澄清（2026-06-12 operator dogfood 后明确）**：产物系统的灵魂是「**点一下就看到内容**」，不是「列一张清单告诉你有这些产物」。operator experience——"我想打开 backlog 我能点击打开 …… 现在这个只是我能看到有这个，但是我点击看不了他的内容"。即：**产物列表只是入口，点击产物按类型直接打开/查看内容才是价值落点**——docs/md 看正文、图看图、代码看 diff、语音播放、PR 打开。这也是operator想"和 workspace 整合"的真正本质：**复用 workspace「点文件看内容」的能力**（`FileContentRenderer` / `WorkspaceTree`），不是 UI 摆哪里的问题。mockup 每个产物项本就设计了类型化 action（打开/下载/查看 diff/播放）；Phase A 首版实现简化成"列表 + 外部 url 打开"，把这个核心丢了——是 Phase A.1 必补的灵魂缺口。
+
+## User Journey
+
+服务对象是**operator + 猫**（谁产出、谁回看都算），核心诉求"不用记名字、不用搜半天、点一下就看到内容"。两条主旅程：
+
+**旅程 1 — 回看「这个 thread」的某个产物（Phase A）**
+1. 一个 thread 跑下来产出一堆东西（文档 / 代码 diff / 图 / PR / 语音 / 视频），散在消息流里。
+2. 想回看但忘了名字 → 右侧 panel → **工作区 →「产物」顶层入口**（与 开发/记忆/调度/任务/社区 平级，AC-A8）。
+3. 看到该 thread 全部产物的聚合清单——按类型筛选（图/文件/代码·PR/语音/视频）、子串搜索（不用记全名）、相对时间 + 昵称标注（AC-A1/A2/A3）。
+4. **点产物 → panel 内直接看内容**（md/文本看正文、代码看 diff、图看图、语音/视频播放、PR 打开）——不只列清单（AC-A7/A9，F232 灵魂）。
+5. 要回生成现场 →「跳回原消息」锚点定位（AC-A4）。
+
+**旅程 2 — 跨「所有 thread」找一个产物（Phase B 全局产物中心）**
+1. 记得做过某产物但不记得在哪个 thread。
+2. 切 **`[全局]` scope** → 跨所有 thread 聚合，按名字/类型/时间/哪只猫做的筛选 + 分组（时间/对话/猫可切换）（AC-B1）。
+3. 命中项带 thread badge 显示归属 → **cross-thread teleport** 跳过去看内容（AC-B2 复用 Phase A 聚合管线）。
+
+**入口可达性**：桌面（≥1024px）经工作区「产物」入口可达；小屏产物入口为 OQ 待 operator（当前 desktop-only）。
 
 ## Current State / 现状基线
 

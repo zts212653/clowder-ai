@@ -12,7 +12,11 @@ import { bindMcpImplementation, defineMcpTool, type McpRuntimeProfile } from '..
 const run = async (_args: never): Promise<unknown> => ({ ok: true });
 const testRef = 'test:packages/mcp-server/test/canonical-tool-registry.test.ts' as const;
 
-function tool(name: string, runtimeProfiles: readonly [McpRuntimeProfile, ...McpRuntimeProfile[]]) {
+function tool(
+  name: string,
+  runtimeProfiles: readonly [McpRuntimeProfile, ...McpRuntimeProfile[]],
+  deliveryPolicy: 'host-default' | 'discoverable' = 'host-default',
+) {
   return defineMcpTool({
     name,
     description: `Operate ${name}`,
@@ -35,7 +39,7 @@ function tool(name: string, runtimeProfiles: readonly [McpRuntimeProfile, ...Mcp
     implementation: bindMcpImplementation(`module:./fixtures/tools.js#${name}`, run),
     policy: {
       resourceFamily: 'fixture',
-      exposureTier: { current: 'eager-core', evidenceRef: testRef },
+      schemaDelivery: { policy: deliveryPolicy, evidenceRef: testRef },
       runtimeProfiles,
       owner: {
         domainCell: 'architecture-cell:mcp-surface-governance',
@@ -123,6 +127,56 @@ describe('F286 canonical MCP registry projections', () => {
       ['limb_control'],
     );
     assert.deepEqual([...derivedProfileSet(canonical, 'agent-key')], ['cat_cafe_agent']);
+  });
+
+  it('does not remove discoverable tools from any authorized profile projection', () => {
+    const discoverable = buildCanonicalToolRegistry({
+      collab: [tool('cat_cafe_full', ['full'], 'discoverable')],
+      memory: [tool('cat_cafe_read', ['full', 'readonly'], 'discoverable')],
+      signals: [],
+      limb: [],
+      audio: [],
+      finance: [tool('cat_cafe_desktop', ['full', 'desktop:fable-phase0', 'desktop:cloud-pro-phase0'], 'discoverable')],
+    });
+
+    assert.deepEqual(
+      projectCanonicalToolRegistry(discoverable, {}).map((item) => item.name),
+      ['cat_cafe_desktop', 'cat_cafe_full', 'cat_cafe_read'],
+    );
+    assert.deepEqual(
+      projectCanonicalToolRegistry(discoverable, { readonly: true }).map((item) => item.name),
+      ['cat_cafe_read'],
+    );
+    assert.deepEqual(
+      projectCanonicalToolRegistry(discoverable, { desktopMode: 'fable-phase0' }).map((item) => item.name),
+      ['cat_cafe_desktop'],
+    );
+  });
+
+  it('preserves exact membership for all five runtime profiles when only delivery changes', () => {
+    const before = registry();
+    const after = before.map((definition) => ({
+      ...definition,
+      policy: {
+        ...definition.policy,
+        schemaDelivery: { policy: 'discoverable' as const, evidenceRef: testRef },
+      },
+    }));
+    const profiles = [
+      ['full', {}],
+      ['readonly', { readonly: true }],
+      ['agent-key', { readonly: true, hasAgentKey: true }],
+      ['desktop:fable-phase0', { desktopMode: 'fable-phase0' }],
+      ['desktop:cloud-pro-phase0', { desktopMode: 'cloud-pro-phase0' }],
+    ] as const;
+
+    for (const [profile, env] of profiles) {
+      assert.deepEqual(
+        projectCanonicalToolRegistry(after, env).map((definition) => definition.name),
+        projectCanonicalToolRegistry(before, env).map((definition) => definition.name),
+        `${profile} membership must not depend on schema delivery`,
+      );
+    }
   });
 
   it('fails fast on an unknown desktop profile', () => {

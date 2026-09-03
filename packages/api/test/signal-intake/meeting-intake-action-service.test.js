@@ -221,6 +221,7 @@ describe('F292 MeetingIntakeActionService', () => {
         rollbackEnqueue: () => {},
       },
       queueProcessor: { processNext: async () => ({ started: true }) },
+      socketManager: { emitToUser() {} },
       supportsPresentationRetry: () => true,
       now: () => 12_000,
     });

@@ -1009,7 +1009,7 @@ test('structured successor rejects a coordination subject that contradicts its a
   assert.equal(harness.invocationQueue.list(harness.thread.id, 'user-1').length, 0);
 });
 
-test('same-thread safe_wait persists and enqueues nothing', async () => {
+test('same-thread safe_wait without verifiable direct-carrier authority fails closed', async () => {
   const harness = await createHarness();
   harness.state.admit = (input) => ({ admit: false, outcome: 'safe_wait', lease: activeLease(input) });
 
@@ -1020,7 +1020,8 @@ test('same-thread safe_wait persists and enqueues nothing', async () => {
     action: actionMetadata(),
   });
 
-  assert.equal(toolJson(result).status, 'safe_wait');
+  assert.equal(result.isError, true);
+  assert.match(result.content[0]?.text ?? '', /action_carrier_unavailable/);
   assert.equal(harness.admissionCalls.length, 1);
   assert.equal(harness.messageStore.getByThreadIncludingQueued(harness.thread.id, 20, 'user-1').length, 0);
   assert.equal(harness.invocationQueue.list(harness.thread.id, 'user-1').length, 0);

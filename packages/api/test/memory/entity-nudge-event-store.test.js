@@ -6,7 +6,7 @@
  * source_family / alias_class dimensions.
  *
  * Also serves as the persistence layer for cooldown — replaces the
- * in-memory singleton with a durable (entity, thread, rendered_at) query.
+ * in-memory singleton with a durable (entity, thread, cat, rendered_at) query.
  *
  * [宪宪/Claude Opus 4.6🐾]
  */
@@ -48,6 +48,7 @@ describe('EntityNudgeEventStore', () => {
       'thread_id',
       'invocation_id',
       'cat_id',
+      'source_message_id',
       'entity_id',
       'alias_matched',
       'source_family',
@@ -67,6 +68,7 @@ describe('EntityNudgeEventStore', () => {
       threadId: 'thread_abc',
       invocationId: 'inv-1',
       catId: 'opus',
+      sourceMessageId: 'message-1',
       entityId: 'concept:未婚喵',
       aliasMatched: '未婚喵',
       sourceFamily: 'entity_registry',
@@ -79,6 +81,7 @@ describe('EntityNudgeEventStore', () => {
     const row = db.prepare('SELECT * FROM entity_nudge_events WHERE event_id = ?').get(eventId);
     assert.equal(row.thread_id, 'thread_abc');
     assert.equal(row.entity_id, 'concept:未婚喵');
+    assert.equal(row.source_message_id, 'message-1');
     assert.equal(row.outcome, 'delivered');
     assert.equal(row.rendered_at, 1720000000000);
     assert.equal(row.outcome_at, null, 'outcome_at should be null for delivered (pending resolution)');
@@ -87,6 +90,9 @@ describe('EntityNudgeEventStore', () => {
   it('records a context_suppressed event', () => {
     const eventId = store.recordSuppressed({
       threadId: 'thread_abc',
+      invocationId: 'inv-2',
+      catId: 'opus',
+      sourceMessageId: 'message-2',
       entityId: 'concept:猫猫共犯宣言',
       aliasMatched: '猫猫共犯宣言',
       sourceFamily: 'doc_aliases',
@@ -101,14 +107,17 @@ describe('EntityNudgeEventStore', () => {
 
   // ── Cooldown query (replaces in-memory singleton) ──
 
-  it('lastRenderedAt returns null when no events for entity+thread', () => {
-    const result = store.lastRenderedAt('concept:未婚喵', 'thread_abc');
+  it('lastRenderedAt returns null when no events for entity+thread+cat', () => {
+    const result = store.lastRenderedAt('concept:未婚喵', 'thread_abc', 'opus');
     assert.equal(result, null);
   });
 
-  it('lastRenderedAt returns the most recent rendered_at for entity+thread', () => {
+  it('lastRenderedAt returns the most recent rendered_at for entity+thread+cat', () => {
     store.recordDelivered({
       threadId: 'thread_abc',
+      invocationId: 'inv-3',
+      catId: 'opus',
+      sourceMessageId: 'message-3',
       entityId: 'concept:未婚喵',
       aliasMatched: '未婚喵',
       sourceFamily: 'entity_registry',
@@ -117,19 +126,25 @@ describe('EntityNudgeEventStore', () => {
     });
     store.recordDelivered({
       threadId: 'thread_abc',
+      invocationId: 'inv-4',
+      catId: 'opus',
+      sourceMessageId: 'message-4',
       entityId: 'concept:未婚喵',
       aliasMatched: '未婚喵',
       sourceFamily: 'entity_registry',
       aliasClass: 'exact',
       renderedAt: 1720000086400, // 86400ms later
     });
-    const result = store.lastRenderedAt('concept:未婚喵', 'thread_abc');
+    const result = store.lastRenderedAt('concept:未婚喵', 'thread_abc', 'opus');
     assert.equal(result, 1720000086400);
   });
 
   it('lastRenderedAt scopes to the given thread', () => {
     store.recordDelivered({
       threadId: 'thread_abc',
+      invocationId: 'inv-5',
+      catId: 'opus',
+      sourceMessageId: 'message-5',
       entityId: 'concept:未婚喵',
       aliasMatched: '未婚喵',
       sourceFamily: 'entity_registry',
@@ -137,7 +152,7 @@ describe('EntityNudgeEventStore', () => {
       renderedAt: 1720000000000,
     });
     // Different thread — should not affect
-    const result = store.lastRenderedAt('concept:未婚喵', 'thread_xyz');
+    const result = store.lastRenderedAt('concept:未婚喵', 'thread_xyz', 'opus');
     assert.equal(result, null);
   });
 
@@ -146,6 +161,9 @@ describe('EntityNudgeEventStore', () => {
   it('resolveOutcome updates outcome and outcome_at for a delivered event', () => {
     const eventId = store.recordDelivered({
       threadId: 'thread_abc',
+      invocationId: 'inv-6',
+      catId: 'opus',
+      sourceMessageId: 'message-6',
       entityId: 'concept:未婚喵',
       aliasMatched: '未婚喵',
       sourceFamily: 'entity_registry',
@@ -163,6 +181,9 @@ describe('EntityNudgeEventStore', () => {
   it('queryByOutcome returns events filtered by outcome bucket', () => {
     store.recordDelivered({
       threadId: 'thread_abc',
+      invocationId: 'inv-7',
+      catId: 'opus',
+      sourceMessageId: 'message-7',
       entityId: 'concept:未婚喵',
       aliasMatched: '未婚喵',
       sourceFamily: 'entity_registry',
@@ -171,6 +192,9 @@ describe('EntityNudgeEventStore', () => {
     });
     const suppressedId = store.recordSuppressed({
       threadId: 'thread_abc',
+      invocationId: 'inv-8',
+      catId: 'opus',
+      sourceMessageId: 'message-8',
       entityId: 'concept:猫猫共犯宣言',
       aliasMatched: '猫猫共犯宣言',
       sourceFamily: 'doc_aliases',
@@ -193,6 +217,9 @@ describe('EntityNudgeEventStore', () => {
     assert.throws(() => {
       store.recordSuppressed({
         threadId: 'thread_abc',
+        invocationId: 'inv-invalid',
+        catId: 'opus',
+        sourceMessageId: 'message-invalid',
         entityId: 'concept:test',
         aliasMatched: 'test',
         sourceFamily: 'entity_registry',

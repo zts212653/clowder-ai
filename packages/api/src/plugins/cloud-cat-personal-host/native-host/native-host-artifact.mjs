@@ -3,6 +3,7 @@ import { access, chmod, mkdir, mkdtemp, readFile, rename, rm, writeFile } from '
 import { join } from 'node:path';
 
 export const NATIVE_HOST_ARTIFACT_FILES = Object.freeze([
+  'assistant-return-inbox.mjs',
   'conversation-binding.mjs',
   'native-framing.mjs',
   'native-host-cli.mjs',

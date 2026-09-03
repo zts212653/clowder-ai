@@ -3,6 +3,62 @@ import type { Page } from 'puppeteer-core';
 
 const HTML_WIDGET_PROOF_REQUEST_EVENT = 'catcafe:html-widget-export-proof-request';
 const HTML_WIDGET_PROOF_ACK_ATTRIBUTE = 'data-html-widget-proof-request-id';
+// A proof is part of the bounded layout operation. This budget covers the
+// readiness challenge, three freshly-proved stable-height confirmations, and
+// the pre/post screenshot proofs under renderer contention. Eight seconds was
+// the old height-stability phase budget, not a sufficient whole-transaction
+// budget; the operation still owns one absolute deadline and fails closed.
+export const HTML_WIDGET_EXPORT_OPERATION_MAX_WAIT_MS = 12_000;
+
+export interface HtmlWidgetExportOperation {
+  readonly startedAt: number;
+  readonly deadlineAt: number;
+  proofSequence: number;
+}
+
+type HtmlWidgetExportDeadline = number | HtmlWidgetExportOperation;
+type HtmlWidgetExportDeadlineDetails = Readonly<Record<string, string | number>>;
+
+export function createHtmlWidgetExportOperation(
+  maxWaitMs = HTML_WIDGET_EXPORT_OPERATION_MAX_WAIT_MS,
+  startedAt = Date.now(),
+): HtmlWidgetExportOperation {
+  return { startedAt, deadlineAt: startedAt + maxWaitMs, proofSequence: 0 };
+}
+
+function resolveHtmlWidgetExportOperation(
+  operation: HtmlWidgetExportDeadline = createHtmlWidgetExportOperation(),
+): HtmlWidgetExportOperation {
+  if (typeof operation !== 'number') return operation;
+  return {
+    startedAt: operation - HTML_WIDGET_EXPORT_OPERATION_MAX_WAIT_MS,
+    deadlineAt: operation,
+    proofSequence: 0,
+  };
+}
+
+export function assertBeforeHtmlWidgetExportDeadline(
+  operationDeadline: HtmlWidgetExportDeadline,
+  operation: string,
+  details: HtmlWidgetExportDeadlineDetails = {},
+): void {
+  const exportOperation = resolveHtmlWidgetExportOperation(operationDeadline);
+  const now = Date.now();
+  const deadlineAt = exportOperation.deadlineAt;
+  if (now >= deadlineAt) {
+    const diagnosticDetails = {
+      ...details,
+      operationElapsedMs: now - exportOperation.startedAt,
+      remainingMs: deadlineAt - now,
+    };
+    const diagnosticText = Object.entries(diagnosticDetails)
+      .map(([key, value]) => `${key}=${value}`)
+      .join(', ');
+    throw new Error(
+      `HTML widget export operation deadline exceeded during ${operation}${diagnosticText ? ` (${diagnosticText})` : ''}`,
+    );
+  }
+}
 
 export interface BrowserElementSnapshot {
   scrollHeight: number;
@@ -28,7 +84,7 @@ export function resolveExportCaptureHeight(metrics: {
   return Math.max(1, Math.ceil(candidate));
 }
 
-export async function readImageExportCaptureHeight(page: Page): Promise<number> {
+export async function readImageExportCaptureHeight(page: Page, operation?: HtmlWidgetExportDeadline): Promise<number> {
   const captureMetrics = await page.evaluate(() => {
     const { document } = globalThis as unknown as { document: BrowserDocumentSnapshot };
     const exportRoot = document.querySelector('[data-export-root]');
@@ -39,6 +95,7 @@ export async function readImageExportCaptureHeight(page: Page): Promise<number> 
         : null,
     };
   });
+  if (operation !== undefined) assertBeforeHtmlWidgetExportDeadline(operation, 'capture height read');
   return resolveExportCaptureHeight(captureMetrics);
 }
 
@@ -93,8 +150,22 @@ export async function readHtmlWidgetExportLayoutSnapshot(page: Page, requiredPro
   };
 }
 
-export async function refreshHtmlWidgetExportLayoutProof(page: Page, maxWait = 2_000, interval = 25) {
+export async function refreshHtmlWidgetExportLayoutProof(
+  page: Page,
+  operationDeadline: HtmlWidgetExportDeadline = createHtmlWidgetExportOperation(),
+  interval = 25,
+) {
+  const operation = resolveHtmlWidgetExportOperation(operationDeadline);
+  const proofSequence = ++operation.proofSequence;
+  const proofStartedAt = Date.now();
   const proofRequestId = `export-${randomUUID()}`;
+  const proofDetails = (proofStage: string, pendingWidgets: readonly string[] = []) => ({
+    proofSequence,
+    proofStage,
+    proofElapsedMs: Date.now() - proofStartedAt,
+    ...(pendingWidgets.length > 0 ? { pendingWidgets: pendingWidgets.join('|') } : {}),
+  });
+  assertBeforeHtmlWidgetExportDeadline(operation, 'layout proof', proofDetails('before-dispatch'));
   await page.evaluate(
     (eventName: string, requestId: string) => {
       const browserGlobal = globalThis as unknown as {
@@ -106,38 +177,54 @@ export async function refreshHtmlWidgetExportLayoutProof(page: Page, maxWait = 2
     HTML_WIDGET_PROOF_REQUEST_EVENT,
     proofRequestId,
   );
+  assertBeforeHtmlWidgetExportDeadline(operation, 'layout proof', proofDetails('after-dispatch'));
 
-  const start = Date.now();
   let lastPending: string[] = [];
-  while (Date.now() - start < maxWait) {
+  while (true) {
+    assertBeforeHtmlWidgetExportDeadline(operation, 'layout proof', proofDetails('before-snapshot', lastPending));
     const snapshot = await readHtmlWidgetExportLayoutSnapshot(page, proofRequestId);
+    assertBeforeHtmlWidgetExportDeadline(
+      operation,
+      'layout proof',
+      proofDetails('after-snapshot', snapshot.readiness.widgetIds),
+    );
     if (snapshot.readiness.status === 'error') {
       throw new Error(`HTML widget layout failed: ${snapshot.readiness.widgetIds.join(', ')}`);
     }
     if (snapshot.readiness.status === 'ready') return snapshot;
     lastPending = snapshot.readiness.widgetIds;
-    await new Promise<void>((resolve) => setTimeout(resolve, interval));
+    const remainingWait = operation.deadlineAt - Date.now();
+    await new Promise<void>((resolve) => setTimeout(resolve, Math.min(interval, remainingWait)));
   }
-
-  throw new Error(
-    `HTML widget layout proof did not refresh: ${lastPending.join(', ') || 'unknown'} (${proofRequestId})`,
-  );
 }
 
-export async function assertFreshHtmlWidgetExportCapturePlan(page: Page, expectedHeight: number): Promise<void> {
-  await refreshHtmlWidgetExportLayoutProof(page);
-  const actualHeight = await readImageExportCaptureHeight(page);
+export async function assertFreshHtmlWidgetExportCapturePlan(
+  page: Page,
+  expectedHeight: number,
+  operationDeadline: HtmlWidgetExportDeadline = createHtmlWidgetExportOperation(),
+): Promise<void> {
+  const operation = resolveHtmlWidgetExportOperation(operationDeadline);
+  await refreshHtmlWidgetExportLayoutProof(page, operation);
+  assertBeforeHtmlWidgetExportDeadline(operation, 'capture plan');
+  const actualHeight = await readImageExportCaptureHeight(page, operation);
+  assertBeforeHtmlWidgetExportDeadline(operation, 'capture plan');
   if (actualHeight !== expectedHeight) {
     throw new Error(`HTML widget layout changed after capture plan: ${expectedHeight}px -> ${actualHeight}px`);
   }
 }
 
 export async function captureVerifiedImageExportCandidate<T>(
-  assertFreshCapturePlan: () => Promise<void>,
+  assertFreshCapturePlan: (operation: HtmlWidgetExportOperation) => Promise<void>,
   captureCandidate: () => Promise<T>,
+  operationDeadline: HtmlWidgetExportDeadline = createHtmlWidgetExportOperation(),
 ): Promise<T> {
-  await assertFreshCapturePlan();
+  const operation = resolveHtmlWidgetExportOperation(operationDeadline);
+  assertBeforeHtmlWidgetExportDeadline(operation, 'capture transaction');
+  await assertFreshCapturePlan(operation);
+  assertBeforeHtmlWidgetExportDeadline(operation, 'capture transaction');
   const candidate = await captureCandidate();
-  await assertFreshCapturePlan();
+  assertBeforeHtmlWidgetExportDeadline(operation, 'capture transaction');
+  await assertFreshCapturePlan(operation);
+  assertBeforeHtmlWidgetExportDeadline(operation, 'capture transaction');
   return candidate;
 }

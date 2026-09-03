@@ -63,7 +63,7 @@ describe('RedisPawFeelDutyConfigStore', { skip: redisIsolationSkipReason(REDIS_U
     );
 
     const created = await store.update(
-      { kind: 'cvo', id: 'you' },
+      { kind: 'cvo', id: 'operator' },
       { expectedVersion: 0, primaryCatId: 'codex-sol', backupCatId: 'opus' },
     );
     assert.deepEqual(created, {
@@ -72,13 +72,16 @@ describe('RedisPawFeelDutyConfigStore', { skip: redisIsolationSkipReason(REDIS_U
       backupCatId: 'opus',
       version: 1,
       updatedAt: NOW,
-      updatedBy: 'you',
+      updatedBy: 'operator',
     });
     assert.deepEqual(await store.read(), created);
     assert.equal(await redis.ttl(PawFeelDutyConfigKey), -1);
 
     await assert.rejects(
-      store.update({ kind: 'cvo', id: 'you' }, { expectedVersion: 0, primaryCatId: 'fable-5', backupCatId: 'opus' }),
+      store.update(
+        { kind: 'cvo', id: 'operator' },
+        { expectedVersion: 0, primaryCatId: 'fable-5', backupCatId: 'opus' },
+      ),
       (error) =>
         error instanceof PawFeelDutyConfigStoreError && error.code === 'version_conflict' && error.actualVersion === 1,
     );
@@ -86,23 +89,23 @@ describe('RedisPawFeelDutyConfigStore', { skip: redisIsolationSkipReason(REDIS_U
 
   it('rejects guessed or ambiguous duty and supports explicit operator reassignment', async () => {
     await assert.rejects(
-      store.update({ kind: 'cvo', id: 'you' }, { expectedVersion: 0, primaryCatId: 'codex-sol' }),
+      store.update({ kind: 'cvo', id: 'operator' }, { expectedVersion: 0, primaryCatId: 'codex-sol' }),
       (error) => error instanceof PawFeelDutyConfigStoreError && error.code === 'invalid_config',
     );
     await assert.rejects(
       store.update(
-        { kind: 'cvo', id: 'you' },
+        { kind: 'cvo', id: 'operator' },
         { expectedVersion: 0, primaryCatId: 'codex-sol', backupCatId: 'codex-sol' },
       ),
       (error) => error instanceof PawFeelDutyConfigStoreError && error.code === 'invalid_config',
     );
 
     await store.update(
-      { kind: 'cvo', id: 'you' },
+      { kind: 'cvo', id: 'operator' },
       { expectedVersion: 0, primaryCatId: 'codex-sol', backupCatId: 'opus' },
     );
     const reassigned = await store.update(
-      { kind: 'cvo', id: 'you' },
+      { kind: 'cvo', id: 'operator' },
       { expectedVersion: 1, primaryCatId: 'fable-5', backupCatId: 'codex-sol' },
     );
 

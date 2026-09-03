@@ -48,7 +48,7 @@ function toItem(p: TasteProposal): ApprovalItem | null {
     sourceFeatureId: 'F221' as const,
     requesterCatId: p.catId,
     ownerUserId: p.userId,
-    status: 'pending' as const,
+    status: p.status,
     summary: `Taste [${p.dimension}]: ${p.quote.slice(0, 60)}`,
     detail: {
       scene: p.scene,

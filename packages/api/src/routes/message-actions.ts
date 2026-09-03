@@ -6,11 +6,15 @@
 
 import type { FastifyPluginAsync } from 'fastify';
 import { z } from 'zod';
+import type { LegacyLocalReviewDispositionService } from '../domains/ball-custody/LegacyLocalReviewDispositionService.js';
 import type { IThreadStore } from '../domains/cats/services/stores/ports/ThreadStore.js';
+import { resolveDirectLocalAuthorizationUserId } from '../utils/request-identity.js';
 import { type ComposerDraftRecallRoutesOptions, composerDraftRecallRoutes } from './composer-draft-recall.js';
 
 export interface MessageActionsRoutesOptions extends ComposerDraftRecallRoutesOptions {
   threadStore?: IThreadStore;
+  ownerUserId?: string;
+  legacyLocalReviewDispositionService?: Pick<LegacyLocalReviewDispositionService, 'inspect' | 'settle'>;
 }
 
 const deleteBodySchema = z.object({
@@ -24,8 +28,74 @@ const restoreBodySchema = z.object({
   userId: z.string().min(1).max(100),
 });
 
+const legacyLocalReviewDispositionBodySchema = z.object({
+  decisionId: z.string().min(1).max(200),
+  verdict: z.enum(['approved', 'changes_requested']),
+});
+
 export const messageActionsRoutes: FastifyPluginAsync<MessageActionsRoutesOptions> = async (app, opts) => {
   await app.register(composerDraftRecallRoutes, opts);
+
+  function authorizeLegacyReviewDisposition(
+    request: Parameters<typeof resolveDirectLocalAuthorizationUserId>[0],
+    reply: { status(code: number): unknown },
+  ): string | null {
+    if (request.callbackPrincipal) {
+      reply.status(403);
+      return null;
+    }
+    const operatorUserId = resolveDirectLocalAuthorizationUserId(request);
+    if (!operatorUserId) {
+      reply.status(401);
+      return null;
+    }
+    if (!opts.ownerUserId || operatorUserId !== opts.ownerUserId) {
+      reply.status(403);
+      return null;
+    }
+    return operatorUserId;
+  }
+
+  app.get<{ Params: { id: string } }>('/api/messages/:id/legacy-local-review-disposition', async (request, reply) => {
+    const ownerUserId = authorizeLegacyReviewDisposition(request, reply);
+    if (!ownerUserId) return { error: 'operator authorization required', code: 'CVO_AUTH_REQUIRED' };
+    if (!opts.legacyLocalReviewDispositionService) {
+      reply.status(503);
+      return { error: 'Legacy review disposition unavailable', code: 'LEGACY_REVIEW_DISPOSITION_UNAVAILABLE' };
+    }
+    const inspection = await opts.legacyLocalReviewDispositionService.inspect({
+      sourceMessageId: request.params.id,
+      ownerUserId,
+    });
+    if (inspection.outcome === 'ineligible') reply.status(404);
+    if (inspection.outcome === 'stale') reply.status(409);
+    return inspection;
+  });
+
+  app.post<{ Params: { id: string } }>('/api/messages/:id/legacy-local-review-disposition', async (request, reply) => {
+    const ownerUserId = authorizeLegacyReviewDisposition(request, reply);
+    if (!ownerUserId) return { error: 'operator authorization required', code: 'CVO_AUTH_REQUIRED' };
+    const parsed = legacyLocalReviewDispositionBodySchema.safeParse(request.body);
+    if (!parsed.success) {
+      reply.status(400);
+      return { error: 'Invalid request body', details: parsed.error.issues };
+    }
+    if (!opts.legacyLocalReviewDispositionService) {
+      reply.status(503);
+      return { error: 'Legacy review disposition unavailable', code: 'LEGACY_REVIEW_DISPOSITION_UNAVAILABLE' };
+    }
+    const settlement = await opts.legacyLocalReviewDispositionService.settle({
+      sourceMessageId: request.params.id,
+      ownerUserId,
+      decisionId: parsed.data.decisionId,
+      verdict: parsed.data.verdict,
+      now: Date.now(),
+    });
+    if (settlement.outcome === 'ineligible') reply.status(404);
+    if (settlement.outcome === 'stale' || settlement.outcome === 'conflict') reply.status(409);
+    if (settlement.outcome === 'continuation_pending') reply.status(503);
+    return settlement;
+  });
 
   // DELETE /api/messages/:id — soft or hard delete a single message
   app.delete<{ Params: { id: string } }>('/api/messages/:id', async (request, reply) => {

@@ -16,6 +16,12 @@ export interface TasteDimensionMapSource {
     revision: string;
     visibility?: 'owner_public' | 'owner_private';
   } | null>;
+  resolveExplicit?(input: { ownerUserId: string; triggerKey: 'ELI5' }): Promise<{
+    triggerKey: 'ELI5';
+    sourcePath: string;
+    revision: string;
+    visibility: 'owner_public' | 'owner_private';
+  } | null>;
 }
 
 function normalizeDimensions(dimensions: readonly string[]): string[] {
@@ -24,11 +30,36 @@ function normalizeDimensions(dimensions: readonly string[]): string[] {
 
 export class TasteCueResolver implements MemoryCueResolver {
   readonly family = 'taste' as const;
-  readonly resolverVersion = 1;
+  readonly resolverVersion = 2;
 
   constructor(private readonly source: TasteDimensionMapSource) {}
 
   async resolve(opportunity: RecallOpportunityV1, context: MemoryCueResolverContext) {
+    if (opportunity.kind === 'approved_taste_invoked') {
+      if (!this.source.resolveExplicit) return [];
+      const result = await this.source.resolveExplicit({
+        ownerUserId: opportunity.scope.ownerUserId,
+        triggerKey: opportunity.payload.triggerKey,
+      });
+      if (!result) return [];
+      return [
+        buildCueEnvelope({
+          opportunity,
+          family: this.family,
+          resolverVersion: this.resolverVersion,
+          whyNow: 'The owner explicitly invoked a closed trigger backed by an approved Taste source.',
+          source: {
+            title: 'An explicitly requested Taste contract is available',
+            summary: 'Drill the exact approved Taste source before responding, then satisfy its application contract.',
+            anchor: `taste-vignette:${result.sourcePath}`,
+            revision: result.revision,
+            visibility: result.visibility,
+            drillFamily: 'taste',
+          },
+          context,
+        }),
+      ];
+    }
     if (opportunity.kind !== 'judgment_surface_entered') return [];
     const result = await this.source.resolve({
       ownerUserId: opportunity.scope.ownerUserId,

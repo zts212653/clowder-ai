@@ -1,6 +1,13 @@
 'use client';
 
+/*
+Architecture cell: dispatch
+Queue actions consume the existing per-target eligibility and authoritative Queue projection.
+*/
+
 import { useCallback, useState } from 'react';
+import type { QueueActiveInvocationSlot } from '@/hooks/queue-active-invocation-hydration';
+import { reconcileQueueActiveInvocationProjection } from '@/hooks/queue-active-invocation-reconciliation';
 import { useChatStore } from '@/stores/chatStore';
 import { useToastStore } from '@/stores/toastStore';
 import { apiFetch } from '@/utils/api-client';
@@ -13,16 +20,25 @@ function steerFailureMessage(status: number, code: unknown, error: unknown): str
 
 export function useQueueActionConvergence(threadId: string) {
   const setQueue = useChatStore((state) => state.setQueue);
+  const setQueuePaused = useChatStore((state) => state.setQueuePaused);
   const addToast = useToastStore((state) => state.addToast);
   const [steerEntryId, setSteerEntryId] = useState<string | null>(null);
   const [retryingAttemptIds, setRetryingAttemptIds] = useState<Set<string>>(() => new Set());
 
   const refreshQueue = useCallback(async () => {
     const response = await apiFetch(`/api/threads/${threadId}/queue`);
-    if (!response.ok) return;
+    if (!response.ok) return false;
     const data = await response.json().catch(() => ({}));
-    if (Array.isArray(data?.queue)) setQueue(threadId, data.queue);
-  }, [setQueue, threadId]);
+    if (!Array.isArray(data?.queue)) return false;
+    setQueue(threadId, data.queue);
+    if (typeof data?.paused === 'boolean') setQueuePaused(threadId, data.paused, data.pauseReason);
+    reconcileQueueActiveInvocationProjection({
+      threadId,
+      slots: data.activeInvocations as QueueActiveInvocationSlot[] | undefined,
+      source: 'QueueActionRefresh',
+    });
+    return true;
+  }, [setQueue, setQueuePaused, threadId]);
 
   const handleRetry = useCallback(
     async (messageId: string, targetCatId: string, attemptId: string) => {
@@ -88,6 +104,7 @@ export function useQueueActionConvergence(threadId: string) {
     steerEntryId,
     retryingAttemptIds,
     handleRetry,
+    refreshQueue,
     handleSteerConfirm,
     handleSteerOpen: setSteerEntryId,
     handleSteerCancel: () => setSteerEntryId(null),

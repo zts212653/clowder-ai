@@ -24,7 +24,11 @@ function trajectoryResolutionUrl(target: TrajectoryTarget): string {
   return `/api/invocations/${encodeURIComponent(target.invocationId)}/trajectory${query ? `?${query}` : ''}`;
 }
 
-export function useCanonicalTrajectoryTarget(target: TrajectoryTarget | undefined, activeThreadId: string) {
+export function useCanonicalTrajectoryTarget(
+  target: TrajectoryTarget | undefined,
+  activeThreadId: string,
+  syncNavigation = true,
+) {
   const key = targetKey(target);
   const [reload, setReload] = useState(0);
   const [resolved, setResolved] = useState<{ key: string; target: ResolvedTrajectoryTarget }>();
@@ -62,10 +66,12 @@ export function useCanonicalTrajectoryTarget(target: TrajectoryTarget | undefine
       .then((canonical) => {
         if (cancelled) return;
         setResolved({ key, target: canonical });
-        replaceInvocationTrajectoryTarget(canonical);
-        if (canonical.threadId !== activeThreadId) {
-          useChatStore.getState().setCurrentThread(canonical.threadId);
-          replaceInvocationTrajectoryThreadRoute(canonical.threadId);
+        if (syncNavigation) {
+          replaceInvocationTrajectoryTarget(canonical);
+          if (canonical.threadId !== activeThreadId) {
+            useChatStore.getState().setCurrentThread(canonical.threadId);
+            replaceInvocationTrajectoryThreadRoute(canonical.threadId);
+          }
         }
       })
       .catch((cause: unknown) => {
@@ -85,7 +91,7 @@ export function useCanonicalTrajectoryTarget(target: TrajectoryTarget | undefine
     return () => {
       cancelled = true;
     };
-  }, [activeThreadId, key, reload, target]);
+  }, [activeThreadId, key, reload, syncNavigation, target]);
 
   return useMemo(
     () => ({

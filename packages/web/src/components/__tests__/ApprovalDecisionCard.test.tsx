@@ -42,6 +42,7 @@ describe('F305 ApprovalDecisionCard presentation contract', () => {
           currentDecision: React.createElement('button', { type: 'button' }, '确认并开始整理'),
           details: {
             label: '查看来源与记录',
+            expandedLabel: '收起来源与记录',
             content: React.createElement('p', { 'data-testid': 'decision-detail-content' }, 'rev 1'),
           },
         }),
@@ -56,6 +57,14 @@ describe('F305 ApprovalDecisionCard presentation contract', () => {
     );
     expect(container.querySelector('details')?.hasAttribute('open')).toBe(false);
     expect(container.querySelector('[data-testid="decision-detail-content"]')).not.toBeNull();
+
+    const details = container.querySelector<HTMLDetailsElement>('details');
+    await act(async () => {
+      details?.querySelector('summary')?.click();
+      details?.dispatchEvent(new Event('toggle'));
+    });
+    expect(details?.open).toBe(true);
+    expect(details?.querySelector('summary')?.textContent).toBe('收起来源与记录');
   });
 
   it('gives long user-facing summaries a recoverable three-line disclosure', async () => {
@@ -78,6 +87,9 @@ describe('F305 ApprovalDecisionCard presentation contract', () => {
 
   it('stays presentation-only and does not acquire approval business concepts', () => {
     const source = readFileSync(resolve(process.cwd(), 'src/components/ApprovalDecisionCard.tsx'), 'utf8');
+    const shell = readFileSync(resolve(process.cwd(), 'src/components/ApprovalCardShell.tsx'), 'utf8');
+    const settled = readFileSync(resolve(process.cwd(), 'src/components/SettledHistoryCard.tsx'), 'utf8');
+    const approvalPresentation = readFileSync(resolve(process.cwd(), 'src/lib/approval-presentation.ts'), 'utf8');
     const genericAdapter = readFileSync(resolve(process.cwd(), 'src/components/GenericApprovalItemCard.tsx'), 'utf8');
     const meetingAdapter = readFileSync(resolve(process.cwd(), 'src/components/MeetingIntakeCard.tsx'), 'utf8');
     const candidate = readFileSync(
@@ -91,9 +103,16 @@ describe('F305 ApprovalDecisionCard presentation contract', () => {
     const workspacePane = readFileSync(resolve(process.cwd(), 'src/components/ApprovalPendingPane.tsx'), 'utf8');
     const mobileDrawer = readFileSync(resolve(process.cwd(), 'src/components/ApprovalHubDrawer.tsx'), 'utf8');
 
-    expect(source).not.toMatch(
-      /useApprovalHubStore|ApprovalItem|sourceFeatureId|proposalId|revision|resolveEndpoint|\/api\//,
+    expect(`${source}\n${shell}`).not.toMatch(
+      /useApprovalHubStore|ApprovalHubItem|sourceFeatureId|proposalId|revision|resolveEndpoint|\/api\//,
     );
+    expect(source).toMatch(/<ApprovalCardShell/);
+    expect(settled).toMatch(/<ApprovalCardShell/);
+    expect(settled).not.toMatch(/item\.status|status === ['"]approved['"]/);
+    expect(settled).toMatch(/approvalLifecyclePresentation\(item\)/);
+    expect(genericAdapter).toMatch(/approvalLifecyclePresentation\(item\)/);
+    expect(approvalPresentation).toMatch(/item\.resolution/);
+    expect(approvalPresentation).toMatch(/item\.materialization/);
     expect(genericAdapter).toMatch(/<ApprovalDecisionCard/);
     expect(meetingAdapter).toMatch(/<ApprovalDecisionCard/);
     expect(candidate).toMatch(/<ApprovalDecisionCard/);

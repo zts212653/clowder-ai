@@ -3,7 +3,11 @@ import { createRoot, type Root } from 'react-dom/client';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { CollapsibleMarkdown } from '../CollapsibleMarkdown';
 import { CliOutputBlock } from '../cli-output/CliOutputBlock';
-import { buildMessageDisclosureKey, resetMessageDisclosureStateForTest } from '../message-disclosure-state';
+import {
+  buildMessageDisclosureKey,
+  buildRichHtmlDisclosureKey,
+  resetMessageDisclosureStateForTest,
+} from '../message-disclosure-state';
 import { ThinkingContent } from '../ThinkingContent';
 
 const LONG_MESSAGE = Array.from({ length: 30 }, (_, index) => `line ${index}`).join('\n');
@@ -108,6 +112,30 @@ describe('message disclosure state', () => {
     expect(buildMessageDisclosureKey('thread-A', first, 'body')).not.toBe(
       buildMessageDisclosureKey('thread-A', second, 'body'),
     );
+  });
+
+  it('scopes Rich HTML disclosure by thread, stable message, block, and source content', () => {
+    const message = {
+      id: 'widget-message',
+      type: 'assistant' as const,
+      catId: 'codex-sol',
+      content: 'widget source v1',
+      projectionSourceMessageIds: ['source-row-1'],
+      extra: {
+        isExplicitPost: true,
+        stream: { invocationId: 'parent-A', turnInvocationId: 'turn-A' },
+      },
+    };
+    const block = { id: 'shared-widget', html: '<main>v1</main>' };
+    const original = buildRichHtmlDisclosureKey('thread-A', message, block);
+
+    expect(buildRichHtmlDisclosureKey('thread-A', message, block)).toBe(original);
+    expect(buildRichHtmlDisclosureKey('thread-B', message, block)).not.toBe(original);
+    expect(buildRichHtmlDisclosureKey('thread-A', { ...message, content: 'widget source v2' }, block)).not.toBe(
+      original,
+    );
+    expect(buildRichHtmlDisclosureKey('thread-A', message, { ...block, html: '<main>v2</main>' })).not.toBe(original);
+    expect(buildRichHtmlDisclosureKey('thread-A', { ...message, id: 'replacement-message' }, block)).not.toBe(original);
   });
 
   it('keeps separate explicit posts independently expanded', () => {

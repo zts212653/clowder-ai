@@ -21,6 +21,7 @@ import { MediaGalleryBlock } from './MediaGalleryBlock';
 import { PersonMemoryProposalCard } from './PersonMemoryProposalCard';
 import { isProposalCardBlock, ProposalCard } from './ProposalCard';
 import { RichBlockForwardButton } from './RichBlockForwardButton';
+import { isRuntimeInteractionCardBlock, RuntimeInteractionCard } from './RuntimeInteractionCard';
 import { isScheduleMutationProposalCardBlock, ScheduleMutationProposalCard } from './ScheduleMutationProposalCard';
 
 const RICH_BLOCK_OVERLAY_ACTIONS_CLASS =
@@ -83,6 +84,9 @@ function RichCardRenderer({
   if (isPersonMemoryProposalCardBlock(block)) {
     return <PersonMemoryProposalCard block={block} messageId={messageId} />;
   }
+  if (isRuntimeInteractionCardBlock(block)) {
+    return <RuntimeInteractionCard block={block} messageId={messageId} />;
+  }
   if (isProposalCardBlock(block)) return <ProposalCard block={block} messageId={messageId} />;
   if (isHandoffProposalCardBlock(block)) return <HandoffProposalCard block={block} messageId={messageId} />;
   if (isScheduleMutationProposalCardBlock(block)) {
@@ -110,6 +114,7 @@ function RichBlockRenderer({
   messageSource,
   confirmations,
   sendContext,
+  htmlWidgetDisclosureKeys,
 }: {
   block: RichBlock;
   catId?: string;
@@ -118,6 +123,7 @@ function RichBlockRenderer({
   confirmations?: CardConfirmationEntry[];
   /** F229 Bug 2 fix: propagated to InteractiveBlock to tag interactive-send events */
   sendContext?: string;
+  htmlWidgetDisclosureKeys?: Readonly<Record<string, string>>;
 }) {
   switch (block.kind) {
     case 'card':
@@ -140,7 +146,7 @@ function RichBlockRenderer({
     case 'interactive':
       return <InteractiveBlock block={block} messageId={messageId} sendContext={sendContext} />;
     case 'html_widget':
-      return <HtmlWidgetBlock block={block} />;
+      return <HtmlWidgetBlock block={block} disclosureKey={htmlWidgetDisclosureKeys?.[block.id]} />;
     case 'file':
       return <FileBlock block={block} />;
     default:
@@ -275,6 +281,7 @@ export function RichBlocks({
   messageSource,
   confirmations,
   sendContext,
+  htmlWidgetDisclosureKeys,
   readOnly = false,
   forwardingEnabled = true,
 }: {
@@ -294,6 +301,7 @@ export function RichBlocks({
   /** F229 Bug 2 fix: context tag for interactive-send events (e.g. 'concierge').
    *  Prevents InteractiveBlock events from leaking to the wrong thread's handler. */
   sendContext?: string;
+  htmlWidgetDisclosureKeys?: Readonly<Record<string, string>>;
   /** Forwarded blocks are inert evidence: no callbacks, specialised actions, or HTML execution. */
   readOnly?: boolean;
   /** The source must be terminal and the browser document admitted before forwarding can begin. */
@@ -326,10 +334,15 @@ export function RichBlocks({
                   messageSource={messageSource}
                   confirmations={confirmations}
                   sendContext={sendContext}
+                  htmlWidgetDisclosureKeys={htmlWidgetDisclosureKeys}
                 />
               )}
               {!readOnly && forwardingEnabled && messageId && sourceThreadId ? (
-                <RichBlockForwardActions blocks={[item]} onForward={setForwardBlockId} />
+                <RichBlockForwardActions
+                  blocks={[item]}
+                  layout={item.kind === 'file' ? 'flow' : 'overlay'}
+                  onForward={setForwardBlockId}
+                />
               ) : null}
             </div>
           ),

@@ -302,7 +302,7 @@ describe('CollectionGraph query resolution', () => {
       mockGraphFetch({
         status: 'no_match',
         queryKind: 'search',
-        query: 'landy salary',
+        query: 'operator salary',
         message: 'No knowledge nodes matched this query.',
         examples: ['F186', 'harness'],
       }),
@@ -313,7 +313,7 @@ describe('CollectionGraph query resolution', () => {
     const input = container.querySelector('[data-testid="graph-anchor-input"]') as HTMLInputElement;
     const btn = container.querySelector('[data-testid="graph-fetch-btn"]') as HTMLButtonElement;
     await act(async () => {
-      input.value = 'landy salary';
+      input.value = 'operator salary';
       input.dispatchEvent(new Event('input', { bubbles: true }));
       btn.click();
     });

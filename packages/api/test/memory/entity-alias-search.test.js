@@ -23,10 +23,10 @@ describe('F209 entity alias search', () => {
   async function seedYouEntity() {
     await store.upsertEntities([
       {
-        entityId: 'person:landy',
+        entityId: 'person:operator',
         type: 'person',
         canonicalName: 'You',
-        aliases: ['you', 'co-creator', 'operator'],
+        aliases: ['operator', 'co-creator', 'operator'],
         provenance: [{ source: 'F209 Phase B test', anchor: 'F209' }],
         updatedAt: '2026-05-22T00:00:00Z',
       },
@@ -50,11 +50,11 @@ describe('F209 entity alias search', () => {
     const results = await store.search('operator', { scope: 'docs', limit: 5, explain: true });
 
     assert.equal(results[0].anchor, 'F209-alias-doc');
-    assert.equal(results[0].matchReason, 'entity:person:landy');
-    assert.equal(results[0].entityMatches?.[0]?.entityId, 'person:landy');
+    assert.equal(results[0].matchReason, 'entity:person:operator');
+    assert.equal(results[0].entityMatches?.[0]?.entityId, 'person:operator');
     assert.equal(results[0].entityMatches?.[0]?.type, 'person');
     assert.equal(results[0].entityMatches?.[0]?.surface, 'co-creator');
-    assert.match(results[0].entityMatches?.[0]?.why ?? '', /operator.*person:landy.*co-creator/);
+    assert.match(results[0].entityMatches?.[0]?.why ?? '', /operator.*person:operator.*co-creator/);
   });
 
   it('limits entity doc hits by distinct anchors instead of raw mention rows', async () => {
@@ -205,13 +205,13 @@ describe('F209 entity alias search', () => {
     assert.equal(results[0].passages?.[0]?.passageId, 'msg-entity');
     assert.equal(results[0].passages?.[0]?.messageId, 'entity');
     assert.match(results[0].passages?.[0]?.content ?? '', /co-creator/);
-    assert.equal(results[0].entityMatches?.[0]?.entityId, 'person:landy');
+    assert.equal(results[0].entityMatches?.[0]?.entityId, 'person:operator');
   });
 
   it('deduplicates entity raw passage hits before applying the mention pool limit', async () => {
     await store.upsertEntities([
       {
-        entityId: 'person:landy',
+        entityId: 'person:operator',
         type: 'person',
         canonicalName: 'You',
         aliases: ['operator'],
@@ -262,7 +262,7 @@ describe('F209 entity alias search', () => {
     for (let index = 0; index < 25; index += 1) {
       const surface = `crowded-alias-${index}`;
       insertMention.run(
-        'person:landy',
+        'person:operator',
         'thread-thread_entity_dedupe',
         'msg-crowded',
         surface,
@@ -273,7 +273,7 @@ describe('F209 entity alias search', () => {
       );
     }
     insertMention.run(
-      'person:landy',
+      'person:operator',
       'thread-thread_entity_dedupe',
       'msg-rare',
       'rare-alias',
@@ -321,7 +321,7 @@ describe('F209 entity alias search', () => {
 
     const projectOnly = await resolver.resolve('operator', { dimension: 'project', limit: 5 });
     assert.equal(projectOnly.results[0].anchor, 'F209-private-entity-note');
-    assert.equal(projectOnly.results[0].entityMatches?.[0]?.entityId, 'person:landy');
+    assert.equal(projectOnly.results[0].entityMatches?.[0]?.entityId, 'person:operator');
   });
 
   it('works through collection search while preserving private collection redaction', async () => {
@@ -337,10 +337,10 @@ describe('F209 entity alias search', () => {
     for (const targetStore of [internalStore, privateStore]) {
       await targetStore.upsertEntities([
         {
-          entityId: 'person:landy',
+          entityId: 'person:operator',
           type: 'person',
           canonicalName: 'You',
-          aliases: ['you', 'co-creator', 'operator'],
+          aliases: ['operator', 'co-creator', 'operator'],
           provenance: [{ source: 'F209 Phase B test' }],
           updatedAt: '2026-05-22T00:00:00Z',
         },
@@ -406,7 +406,7 @@ describe('F209 entity alias search', () => {
       libraryResult.results.map((r) => r.anchor),
       ['F209-internal-alias-note'],
     );
-    assert.equal(libraryResult.results[0].entityMatches?.[0]?.entityId, 'person:landy');
+    assert.equal(libraryResult.results[0].entityMatches?.[0]?.entityId, 'person:operator');
 
     const privateResult = await resolver.resolve('operator', {
       dimension: 'collection',

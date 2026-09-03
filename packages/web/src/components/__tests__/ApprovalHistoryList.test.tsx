@@ -1,11 +1,11 @@
-import type { ApprovalFeatureId, SettledApprovalItem } from '@cat-cafe/shared';
+import type { ApprovalFeatureId, SettledApprovalHubItem } from '@cat-cafe/shared';
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { anchoredApprovalNavigation } from '@/test-support/approval-navigation';
 
 vi.mock('@/components/SettledHistoryCard', () => ({
-  SettledHistoryCard: ({ item }: { item: SettledApprovalItem }) =>
+  SettledHistoryCard: ({ item }: { item: SettledApprovalHubItem }) =>
     React.createElement('div', { 'data-testid': `settled-card-${item.proposalId}` }, item.summary),
 }));
 
@@ -17,14 +17,15 @@ function settledItem(
   proposalId: string,
   decidedAt: number,
   sourceFeatureId: ApprovalFeatureId = 'F221',
-): SettledApprovalItem {
+): SettledApprovalHubItem {
   return {
     proposalId,
     sourceFeatureId,
     navigation: anchoredApprovalNavigation(`thread-${proposalId}`),
     requesterCatId: 'codex-sol',
     ownerUserId: 'user-1',
-    status: 'approved',
+    resolution: 'accepted',
+    materialization: { state: 'outcome_unknown' },
     summary: proposalId,
     detail: {},
     createdAt: decidedAt - 1_000,

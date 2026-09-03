@@ -1,10 +1,20 @@
 import { strict as assert } from 'node:assert';
 import { describe, it } from 'node:test';
-import { createBootstrapAttestation, validateBootstrapAttestation } from '../src/tool-governance-bootstrap.js';
+import {
+  createBootstrapAttestation,
+  resolveGovernanceTarget,
+  validateBootstrapAttestation,
+} from '../src/tool-governance-bootstrap.js';
 
 const baseSha = 'a'.repeat(40);
 
 describe('F286 bootstrap attestation', () => {
+  it('uses an exact gate-start target instead of refetching a moving origin/main', () => {
+    assert.deepEqual(resolveGovernanceTarget(undefined), { fetchLatest: true, ref: 'origin/main' });
+    assert.deepEqual(resolveGovernanceTarget(baseSha), { fetchLatest: false, ref: baseSha });
+    assert.throws(() => resolveGovernanceTarget('origin/main'), /exact Git SHA/i);
+  });
+
   it('accepts the sole first-baseline target when the protected ref is exact and baseline-free', () => {
     const attestation = createBootstrapAttestation(baseSha);
     assert.doesNotThrow(() =>

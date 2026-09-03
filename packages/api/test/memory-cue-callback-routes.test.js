@@ -16,6 +16,7 @@ describe('F287 owner-authenticated memory cue callbacks', () => {
   let handles;
   let now;
   let readCalls;
+  let richBlockKinds;
 
   beforeEach(async () => {
     const { applyMigrations } = await import('../dist/domains/memory/schema.js');
@@ -25,6 +26,7 @@ describe('F287 owner-authenticated memory cue callbacks', () => {
 
     now = 1_000;
     readCalls = [];
+    richBlockKinds = new Set();
     db = new Database(':memory:');
     applyMigrations(db);
     episodeStore = new MemoryCueEpisodeStore(db, {
@@ -57,6 +59,21 @@ describe('F287 owner-authenticated memory cue callbacks', () => {
       sourceReader: {
         async read(input) {
           readCalls.push(input);
+          if (input.anchor.startsWith('taste-vignette:')) {
+            return {
+              status: 'ok',
+              payload: {
+                triggerKey: 'ELI5',
+                applicationContract: {
+                  v: 1,
+                  tool: 'cat_cafe_create_rich_block',
+                  requiredRichBlockKind: 'html_widget',
+                  plainMarkdownSatisfies: false,
+                },
+                vignette: { quotes: ['approved Taste'], scene: 'Render an HTML explanation.' },
+              },
+            };
+          }
           const invalidationReason = {
             'person:corrected': 'source_corrected',
             'person:forgotten': 'source_forgotten',
@@ -69,6 +86,11 @@ describe('F287 owner-authenticated memory cue callbacks', () => {
             status: 'ok',
             payload: { kind: input.family, anchor: input.anchor, body: 'canonical owner-visible source' },
           };
+        },
+      },
+      applicationEvidence: {
+        hasRichBlock({ kind }) {
+          return richBlockKinds.has(kind);
         },
       },
     });
@@ -84,7 +106,7 @@ describe('F287 owner-authenticated memory cue callbacks', () => {
     return {
       cueId: 'cue-1',
       opportunityId: 'opportunity-1',
-      catalogVersion: 1,
+      catalogVersion: 3,
       resolverFamily: 'person_entity',
       resolverVersion: 1,
       family: 'person_memory',
@@ -201,6 +223,74 @@ describe('F287 owner-authenticated memory cue callbacks', () => {
       },
     });
     assert.equal(poisoned.statusCode, 400);
+  });
+
+  it('records explicit approved Taste as applied only after drill and same-invocation HTML evidence', async () => {
+    const input = coordinate({
+      cueId: 'cue-eli5',
+      resolverFamily: 'taste',
+      resolverVersion: 2,
+      family: 'taste',
+      anchor: 'taste-vignette:docs/taste/vignettes/visual-quality-ELI5-pcpjsd.md',
+    });
+    present(input);
+    const handle = handles.issue(input);
+    const outcomePayload = { handle, outcome: 'applied', requestId: 'apply-eli5' };
+
+    const beforeDrill = await app.inject({
+      method: 'POST',
+      url: '/api/callbacks/memory-cues/outcome',
+      payload: outcomePayload,
+    });
+    assert.equal(beforeDrill.statusCode, 409);
+    assert.deepEqual(beforeDrill.json(), { error: 'application_evidence_required' });
+
+    const drill = await app.inject({
+      method: 'POST',
+      url: '/api/callbacks/memory-cues/drill',
+      payload: { handle, requestId: 'drill-eli5' },
+    });
+    assert.equal(drill.statusCode, 200);
+    assert.equal(drill.json().payload.applicationContract.requiredRichBlockKind, 'html_widget');
+
+    const markdownOnly = await app.inject({
+      method: 'POST',
+      url: '/api/callbacks/memory-cues/outcome',
+      payload: outcomePayload,
+    });
+    assert.equal(markdownOnly.statusCode, 409);
+    assert.deepEqual(markdownOnly.json(), { error: 'application_evidence_required' });
+
+    richBlockKinds.add('html_widget');
+    const applied = await app.inject({
+      method: 'POST',
+      url: '/api/callbacks/memory-cues/outcome',
+      payload: outcomePayload,
+    });
+    assert.equal(applied.statusCode, 200);
+    assert.deepEqual(applied.json(), { status: 'recorded', outcome: 'applied' });
+    assert.deepEqual(
+      episodeStore
+        .listByCue(OWNER_SCOPE.ownerUserId, input.cueId)
+        .map((event) => event.consumptionOutcome)
+        .filter(Boolean),
+      ['presented', 'drilled', 'applied'],
+    );
+
+    richBlockKinds.clear();
+    const exactRetry = await app.inject({
+      method: 'POST',
+      url: '/api/callbacks/memory-cues/outcome',
+      payload: outcomePayload,
+    });
+    assert.equal(exactRetry.statusCode, 200, 'an exact committed retry must not depend on transient buffer state');
+
+    const newRequestWithoutEvidence = await app.inject({
+      method: 'POST',
+      url: '/api/callbacks/memory-cues/outcome',
+      payload: { ...outcomePayload, requestId: 'apply-eli5-new' },
+    });
+    assert.equal(newRequestWithoutEvidence.statusCode, 409);
   });
 
   it('rejects never-presented and already-invalidated outcome telemetry', async () => {

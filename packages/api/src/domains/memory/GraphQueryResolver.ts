@@ -2,6 +2,11 @@ import type { CollectionSensitivity } from './collection-types.js';
 import { GraphResolver, type GraphResult, type GraphStore } from './GraphResolver.js';
 import { computeEdgeWeight } from './graph-edge-weight.js';
 import type { EvidenceItem, IEvidenceStore } from './interfaces.js';
+import {
+  collectGenericRecallEligible,
+  isGenericRecallEligible,
+  isGenericRecallEligibleAnchor,
+} from './recall-delivery-eligibility.js';
 
 const CANDIDATE_LIMIT = 8;
 const NO_MATCH_EXAMPLES = ['F186', 'f186', 'harness', 'doc:plans/example.md'];
@@ -258,7 +263,7 @@ export class GraphQueryResolver {
     const matches: ExactMatch[] = [];
     for (const [collectionId, store] of this.stores) {
       const item = await store.getByAnchor(query);
-      if (item) matches.push({ collectionId, item, store });
+      if (item && isGenericRecallEligible(item)) matches.push({ collectionId, item, store });
     }
     return matches;
   }
@@ -320,7 +325,10 @@ export class GraphQueryResolver {
     for (const [collectionId, store] of this.stores) {
       const manifest = this.catalog.get(collectionId);
       if (!canShowCandidate(manifest, collectionId, callerCollections)) continue;
-      const results = await store.search(query, { mode: 'hybrid', scope: 'all', limit: CANDIDATE_LIMIT * 2 });
+      const results = await collectGenericRecallEligible(
+        (candidateLimit) => store.search(query, { mode: 'hybrid', scope: 'all', limit: candidateLimit }),
+        CANDIDATE_LIMIT * 2,
+      );
       for (const item of results) {
         if (!hasExplainableFieldMatch(item, query)) continue;
         const key = `${collectionId}:${item.anchor}`;
@@ -362,8 +370,9 @@ export class GraphQueryResolver {
     let edgeCount: number | undefined;
     let weightedEdgeScore: number | undefined;
     if (isGraphStore(store)) {
-      const rels = (await store.getRelated(item.anchor)).filter((rel) =>
-        canCountRelationEdge(this.catalog, rel, callerCollections),
+      const rels = (await store.getRelated(item.anchor)).filter(
+        (rel) =>
+          isGenericRecallEligibleAnchor(rel.anchor) && canCountRelationEdge(this.catalog, rel, callerCollections),
       );
       edgeCount = rels.length;
       if (rels.length > 0) {

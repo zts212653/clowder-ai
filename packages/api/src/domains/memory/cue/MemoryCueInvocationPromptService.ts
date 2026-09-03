@@ -1,9 +1,12 @@
 import { createHash } from 'node:crypto';
 import type {
+  ApprovedTasteInvokedOpportunityV1,
   DeliveryDecisionOpportunityV1,
   JudgmentSurfaceEnteredOpportunityV1,
+  ProfileRevisionAvailableOpportunityV1,
   RecallOpportunityV1,
   RecallScopeV1,
+  RecentEventAvailableOpportunityV1,
   SubjectSeenOpportunityV1,
 } from '@cat-cafe/shared';
 import type {
@@ -32,6 +35,24 @@ export type MemoryCueOpportunitySeed =
       producer: 'workflow_sop';
       occurredAt: number;
       payload: JudgmentSurfaceEnteredOpportunityV1['payload'];
+    }
+  | {
+      kind: 'approved_taste_invoked';
+      producer: 'owner_message';
+      occurredAt: number;
+      payload: ApprovedTasteInvokedOpportunityV1['payload'];
+    }
+  | {
+      kind: 'profile_revision_available';
+      producer: 'profile_repository';
+      occurredAt: number;
+      payload: ProfileRevisionAvailableOpportunityV1['payload'];
+    }
+  | {
+      kind: 'recent_event_available';
+      producer: 'event_memory';
+      occurredAt: number;
+      payload: RecentEventAvailableOpportunityV1['payload'];
     };
 
 export interface ResolveMemoryCueInvocationPromptInput {
@@ -78,6 +99,12 @@ function bindSeed(seed: MemoryCueOpportunitySeed, scope: RecallScopeV1): RecallO
     case 'delivery_decision':
       return { ...base, kind: seed.kind, producer: seed.producer, payload: seed.payload };
     case 'judgment_surface_entered':
+      return { ...base, kind: seed.kind, producer: seed.producer, payload: seed.payload };
+    case 'approved_taste_invoked':
+      return { ...base, kind: seed.kind, producer: seed.producer, payload: seed.payload };
+    case 'profile_revision_available':
+      return { ...base, kind: seed.kind, producer: seed.producer, payload: seed.payload };
+    case 'recent_event_available':
       return { ...base, kind: seed.kind, producer: seed.producer, payload: seed.payload };
   }
 }

@@ -151,10 +151,10 @@ describe('evidence route DI (IEvidenceStore path)', () => {
           title: 'Vision discussion',
           summary: 'operator asked about entity anchors',
           updatedAt: new Date().toISOString(),
-          matchReason: 'entity:person:landy',
+          matchReason: 'entity:person:operator',
           entityMatches: [
             {
-              entityId: 'person:landy',
+              entityId: 'person:operator',
               type: 'person',
               canonicalName: 'You',
               matchedAlias: 'operator',
@@ -163,7 +163,7 @@ describe('evidence route DI (IEvidenceStore path)', () => {
               docAnchor: 'thread:vision',
               passageId: 'p1',
               provenance: [{ source: 'F209 Phase B route contract test' }],
-              why: 'query operator matched entity person:landy via alias co-creator',
+              why: 'query operator matched entity person:operator via alias co-creator',
             },
           ],
         },
@@ -186,11 +186,11 @@ describe('evidence route DI (IEvidenceStore path)', () => {
     assert.equal(res.statusCode, 200);
     const body = res.json();
     const match = body.results[0]?.entityMatches?.[0];
-    assert.equal(match?.entityId, 'person:landy');
+    assert.equal(match?.entityId, 'person:operator');
     assert.equal(match?.matchedAlias, 'operator');
     assert.equal(match?.surface, 'co-creator');
     assert.equal(match?.provenance?.[0]?.source, 'F209 Phase B route contract test');
-    assert.match(match?.why ?? '', /operator.*person:landy.*co-creator/);
+    assert.match(match?.why ?? '', /operator.*person:operator.*co-creator/);
   });
 
   it('preserves typed drillDown hints in search results', async () => {

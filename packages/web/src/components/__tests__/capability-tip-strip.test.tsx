@@ -151,24 +151,25 @@ describe('F244 CapabilityTipStrip', () => {
 
   it('records the context that matched the selected tip', async () => {
     const recordCapabilityTipEventMock = vi.mocked(recordCapabilityTipEvent);
+    const contexts = ['pet_waiting_for_user', 'long_running'] as const;
 
     await render(
-      <CapabilityTipStrip
-        surface="assistant_stream_bubble"
-        contexts={['pet_waiting_for_user', 'long_running']}
-        firstDelayMs={0}
-        rotateMs={12000}
-      />,
+      <CapabilityTipStrip surface="assistant_stream_bubble" contexts={contexts} firstDelayMs={0} rotateMs={12000} />,
     );
     await act(async () => {
       vi.advanceTimersByTime(0);
       await Promise.resolve();
     });
 
+    const tipId = container.querySelector('[data-testid="capability-tip-strip"]')?.getAttribute('data-tip-id');
+    const selectedTip = (rawTips as readonly SeedTip[]).find((tip) => tip.id === tipId);
+    const matchedContext = contexts.find((context) => selectedTip?.contexts.includes(context));
+    expect(matchedContext).toBeDefined();
+
     expect(recordCapabilityTipEventMock).toHaveBeenCalledWith(
       expect.objectContaining({
         event: 'capability_tip_exposed',
-        context: 'long_running',
+        context: matchedContext,
       }),
     );
 
@@ -183,7 +184,7 @@ describe('F244 CapabilityTipStrip', () => {
     expect(recordCapabilityTipEventMock).toHaveBeenCalledWith(
       expect.objectContaining({
         event: 'capability_tip_action',
-        context: 'long_running',
+        context: matchedContext,
       }),
     );
   });

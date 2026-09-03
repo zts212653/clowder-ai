@@ -49,7 +49,7 @@ describe('Eval Hub API route — F248 Phase C worktree id normalization', () => 
     const response = await app.inject({
       method: 'GET',
       url: '/api/eval-hub/summary',
-      headers: { 'x-test-user-id': 'you' },
+      headers: { 'x-test-user-id': 'operator' },
     });
 
     assert.equal(response.statusCode, 200);

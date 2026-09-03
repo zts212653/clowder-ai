@@ -67,6 +67,56 @@ function formatRoleRejected(parsed: Record<string, unknown>, resolveCatName: Res
   };
 }
 
+const ROUTING_REASON_COPY: Readonly<Record<string, string>> = {
+  routing_context_unavailable: '路由上下文暂时无法完整读取',
+  routing_target_not_in_catalog: '目标不在当前成员目录中',
+};
+
+function routingReasonCopy(reason: unknown): string {
+  if (typeof reason !== 'object' || reason === null) return '';
+  const record = reason as Record<string, unknown>;
+  const code = typeof record.code === 'string' ? record.code : '';
+  const stableCopy = ROUTING_REASON_COPY[code];
+  if (stableCopy) return stableCopy;
+  return typeof record.summary === 'string' ? record.summary : '';
+}
+
+function formatRoutingPreflight(
+  parsed: Record<string, unknown>,
+  resolveCatName: ResolveCatName,
+): VisibleSystemInfoResult | null {
+  if (parsed.type !== 'routing_preflight') return null;
+  const target =
+    typeof parsed.target === 'object' && parsed.target !== null
+      ? (parsed.target as Record<string, unknown>)
+      : undefined;
+  if (!target) return null;
+  const targetCatId = typeof target?.targetCatId === 'string' ? target.targetCatId : undefined;
+  const disposition = target?.disposition;
+  if (!targetCatId || disposition === 'allowed') return null;
+  if (disposition !== 'warned' && disposition !== 'rejected') return null;
+  const reasons = Array.isArray(target.reasons) ? target.reasons.map(routingReasonCopy).filter(Boolean) : [];
+  const alternatives = Array.isArray(target.alternatives)
+    ? target.alternatives
+        .map((alternative) =>
+          typeof alternative === 'object' &&
+          alternative !== null &&
+          typeof (alternative as Record<string, unknown>).catId === 'string'
+            ? ((alternative as Record<string, unknown>).catId as string)
+            : '',
+        )
+        .filter(Boolean)
+    : [];
+  const status = disposition === 'rejected' ? '已拒绝' : '需注意';
+  const reasonCopy = reasons.length > 0 ? reasons.join('；') : '路由上下文要求确认';
+  const alternativeCopy =
+    alternatives.length > 0 ? `；可考虑 ${alternatives.map((catId) => `@${catId}`).join('、')}` : '';
+  return {
+    content: `${resolveCatName(targetCatId)}（@${targetCatId}）的发送前检查${status}：${reasonCopy}。原目标未改派${alternativeCopy}。`,
+    variant: 'info',
+  };
+}
+
 function formatA2AFollowupAvailable(
   parsed: Record<string, unknown>,
   resolveCatName: ResolveCatName,
@@ -189,6 +239,7 @@ export function formatVisibleSystemInfo(
     (parsed?.type === 'a2a_pingpong_terminated' ? formatPingpongTerminated(parsed, resolveCatName) : null) ??
     (parsed?.type === 'a2a_multi_target_serialized' ? formatMultiTargetSerialized(parsed, resolveCatName) : null) ??
     (parsed?.type === 'a2a_role_rejected' ? formatRoleRejected(parsed, resolveCatName) : null) ??
+    formatRoutingPreflight(parsed, resolveCatName) ??
     formatModeSwitchProposal(parsed, resolveCatName) ??
     formatInvocationPreempted(parsed) ??
     formatSilentCompletion(parsed, resolveCatName, fallbackCatId)

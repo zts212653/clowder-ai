@@ -7,7 +7,7 @@ description_source: model
 description_author: codex-sol
 description_generated_by: codex-sol@gpt-5.6-sol
 description_generated_at: "2026-08-01T00:00:00-07:00"
-description_confirmed_by: landy
+description_confirmed_by: operator
 description_updated_at: "2026-08-01T00:00:00-07:00"
 doc_kind: architecture
 created: 2026-08-01

@@ -1,3 +1,4 @@
+import { type ProducerAttentionReevaluationLinkV1, producerAttentionReevaluationLinkV1Schema } from '@cat-cafe/shared';
 import type Database from 'better-sqlite3';
 import type { TaskDisplayMeta, TriggerSpec } from './types.js';
 
@@ -7,6 +8,7 @@ export interface DynamicTaskDef {
   templateId: string;
   trigger: TriggerSpec;
   params: Record<string, unknown>;
+  entrustedWorkReevaluation?: ProducerAttentionReevaluationLinkV1;
   display: TaskDisplayMeta;
   deliveryThreadId: string | null;
   enabled: boolean;
@@ -21,14 +23,15 @@ export class DynamicTaskStore {
   insert(def: DynamicTaskDef): void {
     this.db
       .prepare(
-        `INSERT INTO dynamic_task_defs (id, template_id, trigger_json, params_json, display_json, delivery_thread_id, enabled, created_by, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO dynamic_task_defs (id, template_id, trigger_json, params_json, entrusted_work_reevaluation_json, display_json, delivery_thread_id, enabled, created_by, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         def.id,
         def.templateId,
         JSON.stringify(def.trigger),
         JSON.stringify(def.params),
+        def.entrustedWorkReevaluation ? JSON.stringify(def.entrustedWorkReevaluation) : null,
         JSON.stringify(def.display),
         def.deliveryThreadId,
         def.enabled ? 1 : 0,
@@ -45,12 +48,13 @@ export class DynamicTaskStore {
   upsert(def: DynamicTaskDef): void {
     this.db
       .prepare(
-        `INSERT INTO dynamic_task_defs (id, template_id, trigger_json, params_json, display_json, delivery_thread_id, enabled, created_by, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `INSERT INTO dynamic_task_defs (id, template_id, trigger_json, params_json, entrusted_work_reevaluation_json, display_json, delivery_thread_id, enabled, created_by, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT(id) DO UPDATE SET
            template_id = excluded.template_id,
            trigger_json = excluded.trigger_json,
            params_json = excluded.params_json,
+           entrusted_work_reevaluation_json = excluded.entrusted_work_reevaluation_json,
            display_json = excluded.display_json,
            delivery_thread_id = excluded.delivery_thread_id,
            enabled = excluded.enabled`,
@@ -60,6 +64,7 @@ export class DynamicTaskStore {
         def.templateId,
         JSON.stringify(def.trigger),
         JSON.stringify(def.params),
+        def.entrustedWorkReevaluation ? JSON.stringify(def.entrustedWorkReevaluation) : null,
         JSON.stringify(def.display),
         def.deliveryThreadId,
         def.enabled ? 1 : 0,
@@ -123,6 +128,7 @@ interface RawRow {
   template_id: string;
   trigger_json: string;
   params_json: string;
+  entrusted_work_reevaluation_json: string | null;
   display_json: string;
   delivery_thread_id: string | null;
   enabled: number;
@@ -136,6 +142,13 @@ function todef(row: RawRow): DynamicTaskDef {
     templateId: row.template_id,
     trigger: JSON.parse(row.trigger_json),
     params: JSON.parse(row.params_json),
+    ...(row.entrusted_work_reevaluation_json
+      ? {
+          entrustedWorkReevaluation: producerAttentionReevaluationLinkV1Schema.parse(
+            JSON.parse(row.entrusted_work_reevaluation_json),
+          ),
+        }
+      : {}),
     display: JSON.parse(row.display_json),
     deliveryThreadId: row.delivery_thread_id,
     enabled: row.enabled === 1,

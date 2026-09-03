@@ -18,6 +18,7 @@ import {
   type ActionSuccessorFence,
   actionSuccessorFencesMatch,
 } from '../../../../ball-custody/ActionSuccessorAdmissionContract.js';
+import type { CloudDispatchProvenance } from '../../cloud-bridge/types.js';
 import type { QueueBodyExposure, QueuePrestartRetirementIntent } from '../../stores/ports/queued-message-custody.js';
 import type { ToolExecutionPolicy } from '../../types.js';
 import type { OwnerAuthProvenance } from './owner-auth-provenance.js';
@@ -99,6 +100,10 @@ export interface QueueEntry {
   callerCatId?: string;
   /** Source invocation lineage. Parallel invocations of one cat must not coalesce with each other. */
   a2aParentInvocationId?: string;
+  /** Exact cloud child provenance; never reconstructed from Queue display content. */
+  cloudDispatchProvenance?: CloudDispatchProvenance;
+  /** Multi-mention child must fail visibly if its exact cloud provenance is unavailable. */
+  requiresExactCloudDispatchProvenance?: boolean;
   /** F134: sender identity for connector group chat messages (used for UI display) */
   senderMeta?: { id: string; name?: string };
   /** F175: queue-internal priority — urgent entries sort before normal in dequeue */
@@ -414,6 +419,10 @@ export class InvocationQueue {
       queueCustodyAdmissionId: input.queueCustodyAdmissionId,
       callerCatId: input.callerCatId,
       a2aParentInvocationId: input.a2aParentInvocationId,
+      cloudDispatchProvenance: input.cloudDispatchProvenance
+        ? structuredClone(input.cloudDispatchProvenance)
+        : undefined,
+      requiresExactCloudDispatchProvenance: input.requiresExactCloudDispatchProvenance,
       senderMeta: input.senderMeta,
       priority,
       sourceCategory: input.sourceCategory,
@@ -1206,6 +1215,9 @@ export class InvocationQueue {
       targetCats: [...entry.targetCats],
       ...(entry.allTargetCats ? { allTargetCats: [...entry.allTargetCats] } : {}),
       ...(entry.authorIntentByCatId ? { authorIntentByCatId: structuredClone(entry.authorIntentByCatId) } : {}),
+      ...(entry.cloudDispatchProvenance
+        ? { cloudDispatchProvenance: structuredClone(entry.cloudDispatchProvenance) }
+        : {}),
       ...(entry.queuedNotifiedByCatIds ? { queuedNotifiedByCatIds: [...entry.queuedNotifiedByCatIds] } : {}),
       ...(entry.queuedAwakenedInvocationIdByCatId
         ? { queuedAwakenedInvocationIdByCatId: { ...entry.queuedAwakenedInvocationIdByCatId } }

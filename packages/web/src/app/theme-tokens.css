@@ -227,7 +227,7 @@
   --avatar-fallback-7: oklch(0.55 0.13 300);
   --avatar-fallback-8: oklch(0.55 0.13 345);
 
-  /* --- Surface 四档（dark — 铲屎官 2026-06-10 调优）---
+  /* --- Surface 四档（dark — co-creator 2026-06-10 调优）---
    * sunken=0.36 / surface=0.28 / elevated=0.21 / canvas=0.24
    * Chroma = base chroma × 0.15 (0.0022/0.0018/0.0008/0.0004).
    * 空间映射见 console-tokens.css（light/dark 统一，不再镜像） */

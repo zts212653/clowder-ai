@@ -39,6 +39,9 @@ function packet(verdictId, createdAt, verdict = 'keep_observe') {
 
 describe('eval:trajectory-inspector F192/F266 control-plane wiring', () => {
   it('constructs one runtime provider and flips generator-map and wired-domain support together', () => {
+    const providerStart = indexSource.indexOf('const trajectoryInspectorProvider');
+    const providerEnd = indexSource.indexOf("verdictGenerators['eval:trajectory-inspector']", providerStart);
+    const providerWiring = indexSource.slice(providerStart, providerEnd);
     assert.match(indexSource, /new TrajectoryInspectorSourceProviderImpl/);
     assert.match(indexSource, /new RepoTrajectoryInspectorEvidenceSource/);
     assert.match(
@@ -48,6 +51,11 @@ describe('eval:trajectory-inspector F192/F266 control-plane wiring', () => {
     assert.match(indexSource, /wiredPublishDomains\.add\('eval:trajectory-inspector'\)/);
     assert.match(indexSource, /resolveCanonicalInvocationTrajectory/);
     assert.match(indexSource, /session\.userId !== input\.userId/);
+    assert.match(providerWiring, /input\.invocationEventsBySession/);
+    assert.match(providerWiring, /transcriptReader\.readInvocationEvents/);
+    assert.match(providerWiring, /candidateLocator/);
+    assert.match(providerWiring, /execution\.userId === ownerUserId/);
+    assert.doesNotMatch(providerWiring, /readAllEvents/);
   });
 
   it('fires weekly through the shared time dispatcher with window/dedupe grounding and publish instructions', async () => {

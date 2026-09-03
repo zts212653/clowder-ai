@@ -7,7 +7,7 @@
  */
 
 import type { CatId, CliEffortPreset, CodexSpeedValue, ThreadKind, ThreadPhase } from '@cat-cafe/shared';
-import { generateThreadId } from '@cat-cafe/shared';
+import { generateThreadId, normalizeThreadGoalObjective } from '@cat-cafe/shared';
 import type { StoreReadOptions } from './StoreReadOptions.js';
 import { throwIfStoreReadAborted } from './StoreReadOptions.js';
 
@@ -131,6 +131,62 @@ export interface ThreadMentionRoutingFeedback {
   items: ThreadMentionRoutingFeedbackItem[];
 }
 
+export type ThreadGoalStatus = 'active' | 'paused' | 'blocked' | 'usageLimited' | 'budgetLimited' | 'complete';
+export type ThreadGoalSyncState = 'syncing' | 'synced' | 'clearing' | 'unavailable';
+
+/** F306: durable Clowder AI goal intent plus an honest provider-sync projection. */
+export interface ThreadGoalStateV1 {
+  v: 1;
+  intent: 'set' | 'clear';
+  objective?: string;
+  status?: ThreadGoalStatus;
+  tokenBudget?: number | null;
+  revision: number;
+  updatedAt: number;
+  /** Durable provider-clear fence; prevents an older native update from resurrecting a cleared goal. */
+  clearedAt?: number;
+  sync: {
+    state: ThreadGoalSyncState;
+    source: 'cat_cafe' | 'codex_app_server';
+    catId?: string;
+    sessionId?: string;
+    observedAt?: number;
+    reason?: string;
+  };
+}
+
+const THREAD_GOAL_STATUSES = new Set<string>([
+  'active',
+  'paused',
+  'blocked',
+  'usageLimited',
+  'budgetLimited',
+  'complete',
+]);
+
+export function isThreadGoalStateV1(value: unknown): value is ThreadGoalStateV1 {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  const candidate = value as Record<string, unknown>;
+  const sync = candidate.sync as Record<string, unknown> | undefined;
+  return (
+    candidate.v === 1 &&
+    (candidate.intent === 'set' || candidate.intent === 'clear') &&
+    Number.isInteger(candidate.revision) &&
+    Number(candidate.revision) > 0 &&
+    typeof candidate.updatedAt === 'number' &&
+    Number.isFinite(candidate.updatedAt) &&
+    (candidate.clearedAt === undefined ||
+      (typeof candidate.clearedAt === 'number' && Number.isFinite(candidate.clearedAt))) &&
+    (candidate.intent === 'clear' ||
+      (normalizeThreadGoalObjective(candidate.objective) === candidate.objective &&
+        typeof candidate.status === 'string' &&
+        THREAD_GOAL_STATUSES.has(candidate.status))) &&
+    !!sync &&
+    ['syncing', 'synced', 'clearing', 'unavailable'].includes(String(sync.state)) &&
+    (sync.source === 'cat_cafe' || sync.source === 'codex_app_server')
+  );
+}
+
 /**
  * A conversation thread
  */
@@ -146,6 +202,8 @@ export interface Thread {
   pinnedAt?: number | null;
   favorited?: boolean;
   favoritedAt?: number | null;
+  /** F306: ThreadStore-owned goal intent and provider reconciliation state. */
+  goal?: ThreadGoalStateV1;
   /** Thinking visibility mode: play = cats can't see each other's thinking, debug = cats share thinking. Default: debug */
   thinkingMode?: 'debug' | 'play';
   /**
@@ -199,6 +257,7 @@ export interface Thread {
   preferredWorkspaceMode?:
     | 'dev'
     | 'recall'
+    | 'product-schedule'
     | 'schedule'
     | 'tasks'
     | 'community'
@@ -614,6 +673,12 @@ export interface IThreadStore {
   updateThinkingMode(threadId: string, mode: 'debug' | 'play'): void | Promise<void>;
   updateMentionActionabilityMode(threadId: string, mode: MentionActionabilityMode): void | Promise<void>;
   updatePreferredCats(threadId: string, catIds: CatId[]): void | Promise<void>;
+  /** F306: exact-revision CAS; null means the field must be absent. */
+  compareAndSetGoal(
+    threadId: string,
+    expectedRevision: number | null,
+    next: ThreadGoalStateV1 | null,
+  ): boolean | Promise<boolean>;
   updatePhase(threadId: string, phase: ThreadPhase): void | Promise<void>;
   linkBacklogItem(threadId: string, backlogItemId: string): void | Promise<void>;
   /**
@@ -659,6 +724,7 @@ export interface IThreadStore {
     mode:
       | 'dev'
       | 'recall'
+      | 'product-schedule'
       | 'schedule'
       | 'tasks'
       | 'community'
@@ -1065,6 +1131,16 @@ export class ThreadStore implements IThreadStore {
     }
   }
 
+  compareAndSetGoal(threadId: string, expectedRevision: number | null, next: ThreadGoalStateV1 | null): boolean {
+    const thread = this.get(threadId);
+    if (!thread || (next && !isThreadGoalStateV1(next)) || (thread.goal?.revision ?? null) !== expectedRevision) {
+      return false;
+    }
+    if (next) thread.goal = { ...next, sync: { ...next.sync } };
+    else delete thread.goal;
+    return true;
+  }
+
   updatePhase(threadId: string, phase: ThreadPhase): void {
     const thread = this.get(threadId);
     if (thread) thread.phase = phase;
@@ -1218,6 +1294,7 @@ export class ThreadStore implements IThreadStore {
     mode:
       | 'dev'
       | 'recall'
+      | 'product-schedule'
       | 'schedule'
       | 'tasks'
       | 'community'

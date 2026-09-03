@@ -168,7 +168,7 @@ describe(`F297 AC-B2/AC-D3 — ${TOTAL_THREADS}/${PINNED}/${ACTIVE} scale invari
 
     const res = await app.inject({
       method: 'GET',
-      url: `/api/threads/thread-0/executions/active`,
+      url: `/api/executions/active?projectPath=${encodeURIComponent(PROJECT)}`,
       headers: { 'x-cat-cafe-user': USER_ID },
     });
     assert.equal(res.statusCode, 200);
@@ -261,7 +261,7 @@ describe(`F297 AC-B2/AC-D3 — ${TOTAL_THREADS}/${PINNED}/${ACTIVE} scale invari
       await app.ready();
       const res = await app.inject({
         method: 'GET',
-        url: '/api/threads/thread-0/executions/active',
+        url: `/api/executions/active?projectPath=${encodeURIComponent(PROJECT)}`,
         headers: { 'x-cat-cafe-user': USER_ID },
       });
       const body = JSON.parse(res.body);

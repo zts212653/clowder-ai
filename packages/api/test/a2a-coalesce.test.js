@@ -14,11 +14,11 @@
  *  3. 第二条到达时第一条已 processing 不是 queued → dedup 失效 → 第二条
  *     照常 enqueue → 两条独立 invocation 串行跑。
  *
- * 对照：用户消息（landy 连发两条）走 collectUserBatch → content 拼接合并。
+ * 对照：用户消息（operator 连发两条）走 collectUserBatch → content 拼接合并。
  * agent A2A 路径完全没有 coalescing。
  *
  * 修复（coalesce-or-supersede）：
- *  - 第一条还 queued（没开跑）→ 合并 content（landy 同款，无竞态，不丢信息）
+ *  - 第一条还 queued（没开跑）→ 合并 content（operator 同款，无竞态，不丢信息）
  *  - 第一条 fresh processing（已开跑）→ abort 正在跑的 + enqueue 第二条
  *    （last-wins，避免重跑已部分执行的第一条；满足"后者才是真实意图"）
  */

@@ -230,10 +230,12 @@ export function ArtifactsPanel({
   threadId,
   width,
   onClose,
+  onSelectArtifact,
 }: {
   threadId: string;
   width?: number;
   onClose?: () => void;
+  onSelectArtifact?: (artifact: ThreadArtifactDTO | GlobalArtifactDTO) => void;
 }) {
   // F232 Phase B: scope toggle state
   const [scope, setScope] = useState<ArtifactScope>('thread');
@@ -557,7 +559,7 @@ export function ArtifactsPanel({
                           index={i}
                           grouping={grouping}
                           resolveNick={resolveNickname}
-                          onSelect={setSelected}
+                          onSelect={onSelectArtifact ?? setSelected}
                           onJump={handleJump}
                         />
                       ))}

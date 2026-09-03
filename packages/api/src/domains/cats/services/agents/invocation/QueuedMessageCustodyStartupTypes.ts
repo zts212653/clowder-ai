@@ -1,4 +1,5 @@
 import type { A2ADispatchDispositionService } from '../../../../ball-custody/A2ADispatchDispositionService.js';
+import type { ActionSuccessorLeaseStore } from '../../../../ball-custody/ActionSuccessorLeaseStore.js';
 import type { IInvocationRecordStore } from '../../stores/ports/InvocationRecordStore.js';
 import type { IMessageStore, StoredMessage } from '../../stores/ports/MessageStore.js';
 import type { ITurnExecutionStore } from '../../stores/ports/TurnExecutionStore.js';
@@ -15,6 +16,8 @@ export interface StartupCustodyDeps {
   turnExecutionStore?: Pick<ITurnExecutionStore, 'get'>;
   /** Reuses the live Queue preflight to fence a source already superseded in Ball custody. */
   a2aDispatchDispositionService?: Pick<A2ADispatchDispositionService, 'inspectHandoff'>;
+  /** #1371: exact completed review generation proves an inert decision may enter Queue. */
+  legacyLocalReviewDispositionLeaseStore?: Pick<ActionSuccessorLeaseStore, 'get'>;
   invocationQueue: InvocationQueue;
   log: StartupCustodyLog;
   now?: () => number;

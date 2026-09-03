@@ -1,8 +1,11 @@
 export const WORKSPACE_MODES = [
   'dev',
   'recall',
+  'needs-me',
+  'product-schedule',
   'schedule',
   'tasks',
+  'team',
   'community',
   'artifacts',
   'approval',
@@ -40,6 +43,18 @@ export const WORKSPACE_MODE_META: Record<WorkspaceMode, WorkspaceModeMeta> = {
     group: 'knowledge',
     searchTerms: 'memory recall ledger feed 记忆 账本',
   },
+  'needs-me': {
+    label: 'Needs Me',
+    description: '只放需要你判断或修复的事项',
+    group: 'work',
+    searchTerms: 'needs me judgment repair attention 判断 修复 需要我',
+  },
+  'product-schedule': {
+    label: 'Schedule',
+    description: '托付工作的截止与审阅时间',
+    group: 'work',
+    searchTerms: 'schedule deadline review entrusted 日程 截止 审阅 托付',
+  },
   schedule: {
     label: '调度',
     description: '定时任务与后台运行',
@@ -51,6 +66,12 @@ export const WORKSPACE_MODE_META: Record<WorkspaceMode, WorkspaceModeMeta> = {
     description: '毛线球与执行进度',
     group: 'work',
     searchTerms: 'task plan backlog 毛线球 任务 计划',
+  },
+  team: {
+    label: '猫猫团队',
+    description: '成员能力、当前路由状态与协作偏好',
+    group: 'work',
+    searchTerms: 'team cats roster runtime routing availability preference 猫猫 团队 成员 路由 偏好',
   },
   community: {
     label: '社区',

@@ -106,6 +106,12 @@ export class RichBlockBuffer {
     return entry.blocks;
   }
 
+  /** Content-free proof for an in-flight invocation; never exposes buffered block bodies. */
+  hasKind(threadId: string, catId: string, invocationId: string, kind: RichBlock['kind']): boolean {
+    const entry = this.entries.get(bufferKey(threadId, catId));
+    return Boolean(entry && entry.invocationId === invocationId && entry.blocks.some((block) => block.kind === kind));
+  }
+
   private prune(): void {
     const now = Date.now();
     for (const [key, entry] of this.entries) {

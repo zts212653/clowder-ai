@@ -1,10 +1,10 @@
 ---
 feature_ids: [F231]
-related_features: [F221, F203, F102, F200, F229, F260, F263]
+related_features: [F221, F203, F102, F200, F229, F260, F263, F287, F296, F312]
 topics: [user-profile-capsule, per-user-alignment, l0-layering, relationship-distillation, nurturing-moat]
 doc_kind: spec
 created: 2026-06-11
-tips_exempt: agent-facing authenticated profile read is reached from the L0 logical pointer; no user action or standalone capability-tip surface
+tips_exempt: "Renewed 2026-09-02 for F312 Phase C: authenticated Profile recall remains an agent-facing read of the existing approved capsule and adds no standalone user action or Hub discovery surface."
 ---
 
 # F231: 启动胶囊 — per-user 画像注入与 L0 分层
@@ -23,7 +23,7 @@ Why: 给 identity 注入链加"用户维度"数据源，归属 agent identity �
 猫醒来第一眼看到的是规则和检讨书，不是主人。云端 ChatGPT 的Maine Coon开局自动带着"You 是谁"的画像，所以灵动；家里的猫开局带着 L0 铁律 + feedback 教训，认识规则但不认识人，活成"班味工具猫"。
 
 operator experience（2026-06-11）：
-- "我们家的 landy 是散落在记忆系统 散落在各种 thread 各处的！有一个统一的画像但是没做 thread 启动的注入！"
+- "我们家的 operator 是散落在记忆系统 散落在各种 thread 各处的！有一个统一的画像但是没做 thread 启动的注入！"
 - "这是我的Maine Coon的 personality！不是其他人Maine Coon的！！这个 L0 还得分层了——都是进系统提示词，但是专家对齐部分社区大家共享，per-user 部分（私有）"
 - "如果我们的猫咖希望是你们是温暖的毛绒绒的陪伴不是工具……这样社区的小伙伴也会养一群养熟了的猫咪"
 
@@ -57,6 +57,23 @@ operator experience（2026-06-11）：
 - **分层边界已天然存在但未利用**：`cat-template.json` tracked（outbound 进开源仓 = 社区共享）；`.cat-cafe/cat-catalog.json` gitignored（已验证 `git check-ignore` = per-instance 私有）。Maine Coon的 personality 现为岗位向描述（"严谨认真，注重细节，会直言不讳地指出问题"）。
 - **per-cat overlay 不齐**：`assets/system-prompts/cats/` 只有 opus.md / gemini.md，无 codex。
 
+### F312 Phase C recall extension（2026-09-02）
+
+F312 保留 F231 的 authority、Approval Hub writer 与 `${CAT_CAFE_DATA_DIR}/profiles/<userId>/` repository。
+它只给现有 Cue Plane 增加一个 read-only standing predicate：严格认证的 owner-facing interactive invocation
+若看到当前 capsule revision 尚无 `applied|dismissed` terminal receipt，就产生
+`profile_revision_available / profile_repository` source-only cue；terminal 后同 revision 不再重复，后续获批
+的新 revision 可重新 eligible。
+
+Drill 只读 approved bounded capsule；cross-owner、missing、correction/revision replacement 全部 fail closed。
+`applied` 的 bounded 含义是该 approved Profile context 实际改变了当前 owner response，`dismissed` 是没有改变；
+这不是单 revision utility causality。实现复用 `FileProfileRepository` 与 content-free
+`MemoryCueEpisodeStore`，没有新增 Profile store、writer 或审批权。Main/fixture 证据由
+`f312-profile-cue.test.js` 与 `f312-invocation-cue-wiring.test.js` 覆盖；#4222 merged `21196f0c73`，
+Alpha `c72b89139c` 已加载该 composition。该 Alpha owner 当时没有可用 capsule candidate，因此 Profile 的
+runtime ceiling 诚实记录为 loaded/no-candidate；Phase C 的真实 receipt 由 Event lane 完成，不为对称性伪造
+Profile UAT。
+
 ## What
 
 ### 四层分层模型（KD-1，operator 2026-06-11 拍板方向）
@@ -65,17 +82,17 @@ operator experience（2026-06-11）：
 |----|------|------|---------|
 | **Breed 层** | 品种出厂设定（Maine Coon=严谨守门直言） | `cat-template.json` | 社区共享（tracked，outbound 同步） |
 | **Instance 层** | 你家这只猫被养出来的性格 | `.cat-cafe/cat-catalog.json` personality 字段 | per-user 私有（gitignored，已验证） |
-| **User 层** | operator画像胶囊（这个人是谁、怎么相处） | `${CAT_CAFE_DATA_DIR}/profiles/<userId>/landy-capsule.md` | per-user 私有（data root 不出库） |
+| **User 层** | operator画像胶囊（这个人是谁、怎么相处） | `${CAT_CAFE_DATA_DIR}/profiles/<userId>/operator-capsule.md` | per-user 私有（data root 不出库） |
 | **Relationship 层** | 关系 primer（这个 persona 和这个人的轨迹 few-shot） | `${CAT_CAFE_DATA_DIR}/profiles/<userId>/relationship/<relationshipKey>-primer.md` | per-user × per-persona 私有 |
 
 原则：**专家对齐部分社区共享，关系部分绝不出库**。Capsule 是 per-user 的（全猫共享一份"You 是谁"）；Primer 是 per-(user×persona) 的（You×Maine Coon ≠ You×Ragdoll；同 persona 的新型号继承关系连续性）。
 
 ### Phase A: 分层机制 + L0 注入链 + You capsule 种子
 
-1. **建 `private/profile/` 目录**：`landy-capsule.md`（**≤300 字硬上限**，KD-7 budget 守恒）+ `relationship/` 子目录。种子内容从operator提供的云端画像蒸馏，operator 过目定稿。**此步不被 PR-C gate，立即可做。**
+1. **建 `private/profile/` 目录**：`operator-capsule.md`（**≤300 字硬上限**，KD-7 budget 守恒）+ `relationship/` 子目录。种子内容从operator提供的云端画像蒸馏，operator 过目定稿。**此步不被 PR-C gate，立即可做。**
 2. **L0 编译时注入（OQ-1 closed → KD-7）**：`compile-system-prompt-l0.mjs` 加 `{{USER_CAPSULE}}` 模板变量。行为契约：capsule 存在 → 注入"主人画像段"；不存在 → 空/默认段（**向后兼容：社区用户没写 capsule 必须照常跑**）；超长（>300 字）→ 编译显式报错。**注入锚落地 gated on ADR-038 PR-C**（gpt52/codex demote 回 ≤6000 后才有 headroom，ETA 2026-06-13）；走 promote queue #2。
 3. **Primer 挂载**：persona primer 不全文进 L0（budget），注入 `cat-cafe-profile://relationship/current` 单行指针；正文通过认证工具按需 recall。
-4. **守护测试（fixture 隔离）**：`compile-system-prompt-l0.test.mjs` 增加 capsule 三态断言（存在/缺失/超长）。**测试数据源用隔离 fixture**（fixture capsule/catalog），tracked 测试不得依赖本机 gitignored 真实文件（`private/profile/landy-capsule.md` 等）——CI 与社区环境必须稳定。fixture 机制开发不被 PR-C gate。
+4. **守护测试（fixture 隔离）**：`compile-system-prompt-l0.test.mjs` 增加 capsule 三态断言（存在/缺失/超长）。**测试数据源用隔离 fixture**（fixture capsule/catalog），tracked 测试不得依赖本机 gitignored 真实文件（`private/profile/operator-capsule.md` 等）——CI 与社区环境必须稳定。fixture 机制开发不被 PR-C gate。
 
 ### Phase B: Maine Coon dogfood（第一个养熟样本）
 
@@ -128,10 +145,10 @@ operator experience（2026-06-11）：
 <!-- 每条 AC trace 回 Why：A1-A3→"没做 thread 启动注入"；A4→"这是我的Maine Coon不是其他人的"（隐私分层）；B 组→第一个养熟样本；C 组→"养熟"机制本体。 -->
 
 ### Phase A（机制 + 种子）
-- [x] AC-A1: `private/profile/landy-capsule.md` 存在（**≤300 字**），内容经 operator 过目认可（✅ 2026-06-11 operator 签字 msg 0001781191204902-001074；v2 含remote review 四修补吸收 + operator"软件工程师不对"裁定，provenance 归档）
+- [x] AC-A1: `private/profile/operator-capsule.md` 存在（**≤300 字**），内容经 operator 过目认可（✅ 2026-06-11 operator 签字 msg 0001781191204902-001074；v2 含remote review 四修补吸收 + operator"软件工程师不对"裁定，provenance 归档）
 - [x] AC-A2: L0 编译链支持 `{{USER_CAPSULE}}`（KD-7），守护测试三态断言（存在/缺失/超长，**fixture 隔离**）全绿（✅ PR #2236 merged 2026-06-12，compile-system-prompt-l0.test.mjs 16 F231 tests + l0-compiler.test.js 17 tests 全绿）
 - [x] AC-A3: capsule 缺失时全猫开局注入照常通过（向后兼容）+ 公共 baseline 产物无私有锚点泄漏（✅ PR #2236 fixture 测试覆盖：missing capsule → '' 空注入、无 fixture 锚点泄漏断言）
-- [x] AC-A4: outbound sync dry-run 输出不含 `private/profile/`（命令输出为证）（✅ 2026-06-16 dry-run 验证：export 目录 0 个 `private/` 文件、`landy` 关键词零命中、`capsule` 仅出现在 docs/tests 公开引用中）
+- [x] AC-A4: outbound sync dry-run 输出不含 `private/profile/`（命令输出为证）（✅ 2026-06-16 dry-run 验证：export 目录 0 个 `private/` 文件、`operator` 关键词零命中、`capsule` 仅出现在 docs/tests 公开引用中）
 - [x] AC-A5: 四层分层模型文档化（本 spec + identity-session cell 更新），breed/instance/user/relationship 各层载体与共享范围一表可查（✅ spec KD-1 四层表已完整；`docs/architecture/ownership/cells/identity-session.md` 已含 `identity-user-profile` subcell + F231 canonical + cited_by 5 条 delta + scan hints；2026-06-16 验证）
 
 ### Phase B（Maine Coon dogfood）
@@ -237,8 +254,8 @@ operator experience（2026-06-11）：
 ### Runtime capsule 缺失 P1（2026-07-03 发现 + 止血）
 
 **现象**：Maine Coon在 codex thread 发起 `propose_profile_update` 后发现 runtime 编译 L0 无 `## 主人画像` 输出。
-**根因**：`private/` gitignored → worktree 间不共享文件。repo root `cat-cafe/private/profile/landy-capsule.md`（Phase B 手签）从未同步到 `cat-cafe-runtime/packages/api/private/profile/`。F231 Phase C approve 流程只写 `relationship/{catId}-primer.md`，不触碰 capsule。`resolveUserCapsule()` 在 runtime context 下 catch → `{{USER_CAPSULE}}` = 空。
-**止血**：一次性 `cp landy-capsule.md` 到 runtime profile dir。L0 编译验证通过（codex/opus 均输出 `## 主人画像` + primer 指针）。
+**根因**：`private/` gitignored → worktree 间不共享文件。repo root `cat-cafe/private/profile/operator-capsule.md`（Phase B 手签）从未同步到 `cat-cafe-runtime/packages/api/private/profile/`。F231 Phase C approve 流程只写 `relationship/{catId}-primer.md`，不触碰 capsule。`resolveUserCapsule()` 在 runtime context 下 catch → `{{USER_CAPSULE}}` = 空。
+**止血**：一次性 `cp operator-capsule.md` 到 runtime profile dir。L0 编译验证通过（codex/opus 均输出 `## 主人画像` + primer 指针）。
 **长期修复**：Phase D / KD-19 已以 canonical `${CAT_CAFE_DATA_DIR}/profiles/<userId>/` repository 取代 worktree bootstrap；读写、L0 与 provenance 不再从 cwd 猜根。现有两套 legacy 内容须先由 operator 解决 persona-primer 冲突，再由 hash-guarded migration apply，不能再复制止血。
 
 ### 前端 Viewer 缺失 P2（2026-07-03 确认）

@@ -1,6 +1,8 @@
 import type { FrictionRollupSourceSelector } from '@cat-cafe/shared';
 import { generateFrictionLiveVerdict } from '../friction/eval-friction-live-verdict.js';
+import { generateFrictionFindingChildren } from '../friction/friction-finding-child-artifact.js';
 import type { FrictionMeasurementCapture } from '../friction/friction-measurement-pilot.js';
+import type { FrictionRepairTargetResolver } from '../friction/friction-repair-target-resolver.js';
 import { loadDomains } from '../hub/eval-hub-read-model.js';
 import type { VerdictGenerator } from './types.js';
 import { validateFrictionRollupSelector } from './validation.js';
@@ -28,7 +30,10 @@ export interface FrictionMetricsProvider {
   resolve(selector: FrictionRollupSourceSelector): Promise<FrictionMeasurementCapture>;
 }
 
-export function createFrictionGeneratorAdapter(provider: FrictionMetricsProvider): VerdictGenerator {
+export function createFrictionGeneratorAdapter(
+  provider: FrictionMetricsProvider,
+  targetResolver?: FrictionRepairTargetResolver,
+): VerdictGenerator {
   return async (packet, sourceRefs, deps) => {
     const kind = (sourceRefs as { kind?: string }).kind;
     if (kind !== 'friction-rollup-snapshot') {
@@ -59,14 +64,37 @@ export function createFrictionGeneratorAdapter(provider: FrictionMetricsProvider
       domain,
       measurementCapture,
       selector,
+      generatedAt: deps.publicationTime,
       submittedPacket: packet,
     });
+
+    const findingBreakout = deps.analysisFindings
+      ? await generateFrictionFindingChildren({
+          parentPacket: artifact.packet,
+          parentBundleDir: artifact.bundleDir,
+          harnessFeedbackRoot: deps.harnessFeedbackRoot,
+          report: artifact.report,
+          selector,
+          analysisFindings: deps.analysisFindings,
+          targetResolver:
+            targetResolver ??
+            (() => {
+              throw new Error('friction_repair_target_resolver_unavailable');
+            })(),
+          ownerUserId:
+            deps.ownerUserId ??
+            (() => {
+              throw new Error('owner_user_required: friction finding target resolution requires callback owner');
+            })(),
+        })
+      : undefined;
 
     // Bundle-only: the raw rollup report is written under bundleDir/raw/, so the
     // publisher stages it via `bundleDir` — no extraStagedPaths needed.
     return {
       verdictPath: artifact.path,
       bundleDir: artifact.bundleDir,
+      ...(findingBreakout ?? {}),
     };
   };
 }

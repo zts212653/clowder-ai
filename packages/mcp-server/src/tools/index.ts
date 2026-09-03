@@ -36,7 +36,9 @@ export {
 } from './callback-memory-tools.js';
 export {
   ackMentionsInputSchema,
+  admitEntrustedWorkInputSchema,
   callbackTools,
+  closeEntrustedWorkInputSchema,
   crossPostMessageInputSchema,
   featIndexInputSchema,
   getPendingMentionsInputSchema,
@@ -44,6 +46,8 @@ export {
   getThreadContextInputSchema,
   getWorkflowSopInputSchema,
   handleAckMentions,
+  handleAdmitEntrustedWork,
+  handleCloseEntrustedWork,
   handleCompleteA2ADispatch,
   handleCompleteManagedHold,
   handleCrossPostMessage,
@@ -55,16 +59,40 @@ export {
   handleGetWorkflowSop,
   handleListTasks,
   handleListThreads,
+  handleOfferCustody,
   handlePostMessage,
   handleRecordMemoryCueOutcome,
   handleRegisterPrTracking,
+  handleRetryCustodyAdmission,
+  handleUpdateEntrustedWork,
   handleUpdateTask,
   listTasksInputSchema,
   listThreadsInputSchema,
+  offerCustodyInputSchema,
   postMessageInputSchema,
   registerPrTrackingInputSchema,
+  retryCustodyAdmissionInputSchema,
+  updateEntrustedWorkInputSchema,
   updateTaskInputSchema,
 } from './callback-tools.js';
+export {
+  capabilityEvolutionRoundTools,
+  constituteEvolutionProgramInputSchema,
+  handleConstituteEvolutionProgram,
+  handleOpenEvolutionRound,
+  handleRecordEvolutionEvaluation,
+  openEvolutionRoundInputSchema,
+  recordEvolutionEvaluationInputSchema,
+} from './capability-evolution-round-tools.js';
+export {
+  capabilityEvolutionTools,
+  getEvolutionProgramInputSchema,
+  handleGetEvolutionProgram,
+  handleStartEvolutionProgram,
+  handleUpdateEvolutionProgram,
+  startEvolutionProgramInputSchema,
+  updateEvolutionProgramInputSchema,
+} from './capability-evolution-tools.js';
 export {
   communityRouteAcceptanceInputSchema,
   communityRouteAcceptanceTools,
@@ -80,8 +108,15 @@ export {
   reviewDistillationInputSchema,
 } from './distillation-tools.js';
 export {
+  entrustedWorkReadTools,
+  handleReadEntrustedWork,
+  readEntrustedWorkInputSchema,
+} from './entrusted-work-read-tools.js';
+export {
   evalLifecycleTools,
+  handleProposeEvalRepair,
   handleRecordEvalLifecycle,
+  proposeEvalRepairInputSchema,
   recordEvalLifecycleInputSchema,
 } from './eval-lifecycle-tools.js';
 export {
@@ -258,3 +293,13 @@ export {
   signalSummarizeInputSchema,
   signalsTools,
 } from './signals-tools.js';
+export {
+  createSkillConsumptionTools,
+  dismissSkillConsumptionInputSchema,
+  handleDismissSkillConsumption,
+  handleOpenWithWorkspaceNavigator,
+  handlePrepareSkillConsumption,
+  openWithWorkspaceNavigatorInputSchema,
+  prepareSkillConsumptionInputSchema,
+  skillConsumptionTools,
+} from './skill-consumption-tools.js';

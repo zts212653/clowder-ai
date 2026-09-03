@@ -456,7 +456,7 @@ describe('SplitPaneView thread-state subscription', () => {
     });
     mocks.apiFetch.mockImplementation(async (url: string) => {
       if (url.includes('/cancel')) return cancelResponse;
-      if (url.endsWith('/executions/active')) {
+      if (url.startsWith('/api/executions/active?')) {
         return new Response(JSON.stringify({ projectPath: '/test', executions: [] }), { status: 200 });
       }
       return new Response('{}', { status: 200 });

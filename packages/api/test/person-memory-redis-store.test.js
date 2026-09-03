@@ -591,6 +591,7 @@ describe('RedisPersonMemoryStore', { skip: redisIsolationSkipReason(REDIS_URL) }
     assert.equal(first.outcome, 'applied');
     assert.equal(first.receipt.state, 'partially_materialized');
     assert.deepEqual(first.receipt.remainingDraftIds, [eventDraft.draftId]);
+    assert.deepEqual(await store.listSettled(input.ownerUserId), []);
 
     const claims = await store.listClaims(input.ownerUserId, first.receipt.personId);
     assert.equal(claims.length, 1);
@@ -626,6 +627,7 @@ describe('RedisPersonMemoryStore', { skip: redisIsolationSkipReason(REDIS_URL) }
     assert.equal(terminal.interactionDraft, undefined);
     assert.equal(terminal.sourceBundle, undefined);
     assert.deepEqual(await store.listPending(input.ownerUserId), []);
+    assert.deepEqual(await store.listSettled(input.ownerUserId), [{ candidate: terminal, decidedAt: 300 }]);
 
     const events = await store.listInteractionEvents(input.ownerUserId, second.receipt.personId);
     assert.equal(events.length, 1);
@@ -666,6 +668,7 @@ describe('RedisPersonMemoryStore', { skip: redisIsolationSkipReason(REDIS_URL) }
       decisionId: 'decision_quoted_role',
       authorizedAt: 200,
     });
+    assert.equal((await store.listSettled(input.ownerUserId))[0].candidate.candidateId, input.candidateId);
     const [claim] = await store.listClaims(input.ownerUserId, approved.receipt.personId);
     assert.equal(claim.typedProvenance.assertionBindings[0].role, 'quoted_third_party');
   });
@@ -898,6 +901,7 @@ describe('RedisPersonMemoryStore', { skip: redisIsolationSkipReason(REDIS_URL) }
     assert.equal(replay.outcome, 'replayed');
     assert.deepEqual(first.receipt, replay.receipt);
     assert.equal((await store.getCandidateForOwner(input.ownerUserId, input.candidateId)).state, 'withdrawn');
+    assert.deepEqual(await store.listSettled(input.ownerUserId), []);
     assert.equal(await store.getPerson(input.ownerUserId, approved.receipt.personId), null);
     assert.deepEqual(await store.listClaims(input.ownerUserId, approved.receipt.personId), []);
     assert.deepEqual(await store.listRelationships(input.ownerUserId, approved.receipt.personId), []);
@@ -922,6 +926,7 @@ describe('RedisPersonMemoryStore', { skip: redisIsolationSkipReason(REDIS_URL) }
     });
     assert.equal(forgotten.verdict, 'purged');
     assert.equal(await store.getCandidateForOwner(input.ownerUserId, input.candidateId), null);
+    assert.deepEqual(await store.listSettled(input.ownerUserId), []);
   });
 
   it('restores a partial proposal to pending when its only decision is undone', async () => {
@@ -1114,6 +1119,7 @@ describe('RedisPersonMemoryStore', { skip: redisIsolationSkipReason(REDIS_URL) }
     assert.equal(result.outcome, 'applied');
     assert.equal(result.candidate.state, 'rejected');
     assert.deepEqual(result.candidate.remainingDraftIds, []);
+    assert.deepEqual(await store.listSettled(input.ownerUserId), [{ candidate: result.candidate, decidedAt: 300 }]);
     assert.equal((await store.listClaims(input.ownerUserId, approved.receipt.personId)).length, 1);
     assert.equal((await store.getPerson(input.ownerUserId, approved.receipt.personId)).status, 'active');
   });
@@ -1370,6 +1376,7 @@ describe('RedisPersonMemoryStore', { skip: redisIsolationSkipReason(REDIS_URL) }
       decidedAt: 400,
     });
     assert.equal(applied.outcome, 'applied');
+    assert.equal((await store.listSettled(pending.ownerUserId))[0].candidate.candidateId, pending.candidateId);
     const entry = applied.candidate.humanDispositionLedgerEntry;
     assert.equal(entry.episode.subjectRef.startsWith('f281_lineage_'), true);
     assert.equal(entry.episode.sourceRef.startsWith('f281_receipt_'), true);
@@ -1592,6 +1599,7 @@ describe('RedisPersonMemoryStore', { skip: redisIsolationSkipReason(REDIS_URL) }
     assert.equal(JSON.stringify(forgotten.receipt).includes(pending.candidateId), false);
     assert.equal(JSON.stringify(forgotten.receipt).includes('wrong_lane'), false);
     assert.equal(await store.getCandidateForOwner(pending.ownerUserId, pending.candidateId), null);
+    assert.deepEqual(await store.listSettled(pending.ownerUserId), []);
     assert.equal(await redis.get(PersonMemoryKeys.suppression(pending.ownerUserId, pending.candidateId)), null);
     assert.equal(await redis.get(bindingKey), null);
     assert.equal(await redis.get(lineageLocatorKey), null);
@@ -2822,6 +2830,7 @@ describe('RedisPersonMemoryStore', { skip: redisIsolationSkipReason(REDIS_URL) }
       decisionId: 'decision_forget_seed',
       authorizedAt: 200,
     });
+    assert.equal((await store.listSettled(input.ownerUserId))[0].candidate.candidateId, input.candidateId);
     assert.equal((await store.resolveActivePersonByAlias(input.ownerUserId, '黄挺')).status, 'resolved');
     assert.equal(
       (await store.resolveActivePersonByWorkspaceEntityRef(input.ownerUserId, 'person:huang-ting-huawei')).status,
@@ -2841,6 +2850,7 @@ describe('RedisPersonMemoryStore', { skip: redisIsolationSkipReason(REDIS_URL) }
     assert.deepEqual(await store.listClaims(input.ownerUserId, approved.receipt.personId), []);
     assert.deepEqual(await store.listInteractionEvents(input.ownerUserId, approved.receipt.personId), []);
     assert.equal(await store.getCandidateForOwner(input.ownerUserId, input.candidateId), null);
+    assert.deepEqual(await store.listSettled(input.ownerUserId), []);
     assert.deepEqual(await store.resolveActivePersonByAlias(input.ownerUserId, '黄挺'), {
       status: 'not_available',
     });

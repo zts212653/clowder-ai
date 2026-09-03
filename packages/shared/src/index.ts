@@ -45,6 +45,8 @@ export * from './explicit-stop-intent.js';
 export * from './markdown-readable-text.js';
 // Browser Preview Gateway request identity shared by API and Web.
 export * from './preview-gateway.js';
+export * from './preview-visible-page-admission.js';
+export * from './provider-semantic-projection.js';
 // Export recall-result sidecar contract (producer → parser → persistence → UI)
 export * from './recall-outcome.js';
 // Dossier profile parser: import from '@cat-cafe/shared/dossier' (F208 KD-10)

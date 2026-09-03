@@ -138,8 +138,8 @@ export function collectLegacySources(
     const legacyRoot = resolve(legacyRootRaw);
     if (!existsSync(legacyRoot)) continue;
 
-    const capsulePath = join(legacyRoot, 'landy-capsule.md');
-    if (existsSync(capsulePath)) sources.push(readCandidate('legacy', capsulePath, 'landy-capsule.md'));
+    const capsulePath = join(legacyRoot, 'operator-capsule.md');
+    if (existsSync(capsulePath)) sources.push(readCandidate('legacy', capsulePath, 'operator-capsule.md'));
 
     const relationshipDir = join(legacyRoot, 'relationship');
     for (const primerPath of walkFiles(relationshipDir)) {

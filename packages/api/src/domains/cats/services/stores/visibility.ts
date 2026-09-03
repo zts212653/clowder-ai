@@ -129,7 +129,8 @@ export function resolveThreadMessageVisibility(
     return (
       isDeliveredMessage(message) ||
       (options?.includeQueuedCatMessages === true && isQueuedCatTimelineMessage(message)) ||
-      (options?.includeQueuedUserMessages === true && isQueuedUserTimelineMessage(message)) ||
+      (options?.includeQueuedUserMessages === true &&
+        (isQueuedUserTimelineMessage(message) || isQueuedOwnerConnectorTimelineMessage(message))) ||
       (options?.includeExposedQueuedUserMessagesForCatId !== undefined &&
         hasDurableQueueBodyExposure(message, options.includeExposedQueuedUserMessagesForCatId)) ||
       (options?.includeRecalledUserMessages === true && isOwnerVisibleRecalledUserMessage(message))
@@ -142,13 +143,22 @@ export function resolveThreadMessageVisibility(
  * published when authored, even if recipient execution custody ends later.
  */
 export function resolveDeliveryTimelineScore(message: StoredMessage, deliveredAt: number): number {
-  return isTimelinePublished(message) || isQueuedUserTimelineMessage(message) ? message.timestamp : deliveredAt;
+  return isTimelinePublished(message) ||
+    isQueuedUserTimelineMessage(message) ||
+    isQueuedOwnerConnectorTimelineMessage(message)
+    ? message.timestamp
+    : deliveredAt;
 }
 
 /** Match the Redis timeline score when constructing pagination cursors in memory. */
 export function getTimelineOrderTime(message: StoredMessage): number {
   if (message.timelineOrderAt !== undefined) return message.timelineOrderAt;
-  if (isQueuedCatTimelineMessage(message) || isQueuedUserTimelineMessage(message)) return message.timestamp;
+  if (
+    isQueuedCatTimelineMessage(message) ||
+    isQueuedUserTimelineMessage(message) ||
+    isQueuedOwnerConnectorTimelineMessage(message)
+  )
+    return message.timestamp;
   return message.deliveredAt ?? message.timestamp;
 }
 
@@ -187,6 +197,25 @@ function isQueuedUserTimelineMessage(message: StoredMessage): boolean {
     return false;
   }
   return message.queueCustody !== undefined;
+}
+
+/**
+ * Host-attributed connector ingress is already an owner-visible receipt at
+ * admission. Keep it browser-only until delivery just like queued user work:
+ * prompt/context readers must not learn it through `isTimelinePublished`, but
+ * the owner must see the source bubble before the target cat starts replying.
+ * System/scheduler connectors remain behind their dedicated visibility gates.
+ */
+function isQueuedOwnerConnectorTimelineMessage(message: StoredMessage): boolean {
+  return (
+    message.deliveryStatus === 'queued' &&
+    message.catId === null &&
+    message.source !== undefined &&
+    message.userId !== 'system' &&
+    message.userId !== 'scheduler' &&
+    message.origin !== 'briefing' &&
+    message.queueCustody !== undefined
+  );
 }
 
 function isOwnerVisibleRecalledUserMessage(message: StoredMessage): boolean {

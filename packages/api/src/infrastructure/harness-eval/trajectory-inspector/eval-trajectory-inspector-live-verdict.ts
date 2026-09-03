@@ -17,13 +17,13 @@ export interface GenerateTrajectoryInspectorLiveVerdictInput {
   domain: EvalDomainRegistryEntry;
   episodeBundle: TrajectoryInspectorEpisodeBundle;
   submittedPacket: VerdictHandoffPacket;
-  generatedAt?: string;
+  generatedAt: string;
   generatorCommit?: string;
 }
 
 export function generateTrajectoryInspectorLiveVerdict(input: GenerateTrajectoryInspectorLiveVerdictInput) {
   assertInput(input);
-  const generatedAt = input.generatedAt ?? new Date().toISOString();
+  const generatedAt = input.generatedAt;
   const bundleDir = join(input.harnessFeedbackRoot, 'bundles', input.verdictId);
   const rawDir = join(bundleDir, 'raw');
   const verdictPath = join(input.harnessFeedbackRoot, 'verdicts', `${input.verdictId}.md`);
@@ -110,6 +110,9 @@ export function generateTrajectoryInspectorLiveVerdict(input: GenerateTrajectory
 
 function assertInput(input: GenerateTrajectoryInspectorLiveVerdictInput): void {
   if (!SAFE_VERDICT_ID.test(input.verdictId)) throw new Error(`unsafe_verdict_id: ${input.verdictId}`);
+  if (!Number.isFinite(Date.parse(input.generatedAt))) {
+    throw new Error('trajectory_inspector_generated_at_invalid');
+  }
   if (
     input.domain.domainId !== 'eval:trajectory-inspector' ||
     input.submittedPacket.domainId !== input.domain.domainId

@@ -4,7 +4,7 @@ related_features: [F141, F116, F140, F055, F122, F167, F192, F220, F233, F280]
 topics: [community, orchestration, opensource]
 doc_kind: spec
 created: 2026-04-18
-tips_exempt: internal operations tool — board/reconciler/closure UX visible only to cat operators, not end users
+tips_exempt: "2026-09-02 public identity and provenance projection only; the Community Board, reconciler, and External Case closure remain cat/operator operations with no new user-invokable surface."
 ---
 
 # F168: Community Operations Board — 社区事务编排引擎
@@ -236,7 +236,7 @@ operator现在是人肉 dispatcher：手动 @ 猫看 issue/PR、手动分配线�
 
 **架构约束**：
 > "未来这个 feat 最后一个阶段就是要允许社区其他小伙伴用你们这套管理他们自己的社区！你们在架构设计上必须是解耦的！"
-> "人家也是用自己家里搭建的猫猫咖啡呀！不是用这本地这个！但是必须是比如说你的 landy 可以管理 clowder-ai 也能管理其他 landy 的自己的仓"
+> "人家也是用自己家里搭建的猫猫咖啡呀！不是用这本地这个！但是必须是比如说你的 operator 可以管理 clowder-ai 也能管理其他 operator 的自己的仓"
 
 **初版交互策略**：
 > "我建议我们最开始的 A-C 的完整版本，这里的 issue 和 PR 触发别是自动的巡检，而是我手动点击"

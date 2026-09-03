@@ -70,7 +70,7 @@ END`,
 END`,
 ];
 
-export const CURRENT_SCHEMA_VERSION = 39;
+export const CURRENT_SCHEMA_VERSION = 41;
 
 // F163 Phase A: experiment infrastructure tables (cohorts, suggestions, logs)
 export const SCHEMA_V13_TABLES = `
@@ -1196,6 +1196,74 @@ export function applyMigrations(db: Database.Database): void {
       );
     `);
     db.prepare('INSERT INTO schema_version (version, applied_at) VALUES (?, ?)').run(39, new Date().toISOString());
+  }
+
+  // V40: F310 Phase B — typed F139 producer re-evaluation owner coordinates.
+  if (currentVersion < 40) {
+    try {
+      db.exec('ALTER TABLE dynamic_task_defs ADD COLUMN entrusted_work_reevaluation_json TEXT');
+    } catch {
+      // Column may already exist from a partial migration.
+    }
+    db.prepare('INSERT INTO schema_version (version, applied_at) VALUES (?, ?)').run(40, new Date().toISOString());
+  }
+
+  // V41: F312 Phase C — admit the Event lane to the existing append-only Cue Plane ledger.
+  // SQLite cannot alter a CHECK constraint in place, so rebuild the table transactionally
+  // while preserving every content-free receipt and its immutable coordinates.
+  if (currentVersion < 41) {
+    db.transaction(() => {
+      db.exec(`
+        CREATE TABLE memory_cue_events_v41 (
+          event_id TEXT PRIMARY KEY,
+          idempotency_key TEXT NOT NULL UNIQUE,
+          cue_id TEXT NOT NULL,
+          opportunity_id TEXT NOT NULL,
+          owner_user_id TEXT NOT NULL,
+          thread_id TEXT NOT NULL,
+          invocation_id TEXT NOT NULL,
+          resolver_family TEXT NOT NULL CHECK (
+            resolver_family IN ('person_entity', 'operational_precedent', 'taste', 'profile', 'event', 'project_knowledge')
+          ),
+          source_anchor TEXT NOT NULL,
+          source_revision TEXT NOT NULL,
+          axis TEXT NOT NULL CHECK (axis IN ('consumption', 'invalidation')),
+          consumption_outcome TEXT CHECK (
+            consumption_outcome IN ('presented', 'drilled', 'applied', 'dismissed')
+          ),
+          invalidation_reason TEXT CHECK (
+            invalidation_reason IN ('source_corrected', 'source_forgotten', 'scope_revoked', 'superseded', 'expired')
+          ),
+          catalog_version INTEGER NOT NULL,
+          resolver_version INTEGER NOT NULL,
+          occurred_at INTEGER NOT NULL,
+          created_at TEXT NOT NULL,
+          CHECK (
+            (axis = 'consumption' AND consumption_outcome IS NOT NULL AND invalidation_reason IS NULL)
+            OR
+            (axis = 'invalidation' AND invalidation_reason IS NOT NULL AND consumption_outcome IS NULL)
+          )
+        );
+        INSERT INTO memory_cue_events_v41 SELECT * FROM memory_cue_events;
+        DROP TABLE memory_cue_events;
+        ALTER TABLE memory_cue_events_v41 RENAME TO memory_cue_events;
+        CREATE INDEX idx_memory_cue_events_cue_scope
+          ON memory_cue_events(owner_user_id, cue_id, occurred_at);
+        CREATE INDEX idx_memory_cue_events_opportunity
+          ON memory_cue_events(owner_user_id, opportunity_id, occurred_at);
+        CREATE TRIGGER memory_cue_events_no_update
+        BEFORE UPDATE ON memory_cue_events
+        BEGIN
+          SELECT RAISE(ABORT, 'memory cue events are append-only');
+        END;
+        CREATE TRIGGER memory_cue_events_no_delete
+        BEFORE DELETE ON memory_cue_events
+        BEGIN
+          SELECT RAISE(ABORT, 'memory cue events are append-only');
+        END;
+      `);
+      db.prepare('INSERT INTO schema_version (version, applied_at) VALUES (?, ?)').run(41, new Date().toISOString());
+    })();
   }
 }
 

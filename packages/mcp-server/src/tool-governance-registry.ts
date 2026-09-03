@@ -1,4 +1,9 @@
-import type { McpRuntimeProfile, McpToolDefinition, ToolRegistryDelta } from './tool-governance-types.js';
+import type {
+  McpRuntimeProfile,
+  McpSchemaDeliveryPolicy,
+  McpToolDefinition,
+  ToolRegistryDelta,
+} from './tool-governance-types.js';
 
 export function deriveProfileNames(
   definitions: readonly McpToolDefinition[],
@@ -12,6 +17,12 @@ export function deriveProfileNames(
 
 function setDelta(left: ReadonlySet<string>, right: ReadonlySet<string>): readonly string[] {
   return [...right].filter((value) => !left.has(value)).sort();
+}
+
+function schemaDeliveryEquals(left?: McpSchemaDeliveryPolicy, right?: McpSchemaDeliveryPolicy): boolean {
+  return (
+    left?.policy === right?.policy && left?.candidate === right?.candidate && left?.evidenceRef === right?.evidenceRef
+  );
 }
 
 export function compareToolRegistries(
@@ -48,10 +59,17 @@ export function compareToolRegistries(
     const removed = setDelta(newProfiles, oldProfiles);
     return added.length || removed.length ? [{ name, added, removed }] : [];
   });
+  const schemaDeliveryChanges = [...new Set([...beforeNames, ...afterNames])].sort().flatMap((name) => {
+    const previous = beforeByName.get(name)?.policy.schemaDelivery;
+    const next = afterByName.get(name)?.policy.schemaDelivery;
+    if (schemaDeliveryEquals(previous, next)) return [];
+    return [{ name, ...(previous ? { before: previous } : {}), ...(next ? { after: next } : {}) }];
+  });
   return {
     addedNames: setDelta(beforeNames, afterNames),
     removedNames: setDelta(afterNames, beforeNames),
     resourceActionChanges,
     profileChanges,
+    schemaDeliveryChanges,
   };
 }

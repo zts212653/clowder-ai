@@ -116,7 +116,8 @@ export function createSessionCompactionSurface(deps: SessionCompactionSurfaceDep
 
       const hasObservedCompact =
         (record.compressionCount !== null && record.compressionCount > 0) ||
-        (record.hybridProgress?.observedCount ?? 0) > 0;
+        (record.hybridProgress?.observedCount ?? 0) > 0 ||
+        authenticatedCompactionSequenceFromSession(record) !== null;
       const activeCompactContinuity =
         record.status === 'active' && hasObservedCompact ? compactContinuityFor(record) : undefined;
       if (record.status === 'active' && hasObservedCompact) {

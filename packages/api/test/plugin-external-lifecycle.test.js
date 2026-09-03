@@ -173,7 +173,7 @@ test('disable and uninstall stop process authority before their durable terminal
   assert.equal((await store.snapshot()).instances[0].lifecycleState, 'retired');
 });
 
-test('repair is dormant and restart recovery turns interrupted transitions into error', async () => {
+test('repair restores the enabled owner intent after restart recovery projects an error', async () => {
   const { store, lifecycle, calls } = await harness();
   await lifecycle.prepare('pi_official', 1);
   await store.transaction((transaction) => {
@@ -190,12 +190,24 @@ test('repair is dormant and restart recovery turns interrupted transitions into 
   const recovered = (await store.snapshot()).instances[0];
   assert.equal(recovered.activationState, 'error');
   assert.equal(recovered.runtimeState, 'stopped');
+  await store.transaction((transaction) => {
+    transaction.instances.put({
+      ...transaction.instances.get('pi_official'),
+      lastRuntimeError: {
+        code: 'UNAVAILABLE',
+        exitCode: 1,
+        signal: null,
+        occurredAt: 1_500,
+      },
+    });
+  });
 
   const repaired = await lifecycle.repair('pi_official', recovered.lifecycleRevision);
-  assert.equal(repaired.activationState, 'disabled');
+  assert.equal(repaired.activationState, 'enabled');
   assert.equal(repaired.configReadiness, 'ready');
   assert.equal(repaired.runtimeState, 'stopped');
-  assert.deepEqual(calls, ['stop:pi_official:error']);
+  assert.equal(repaired.lastRuntimeError, undefined);
+  assert.deepEqual(calls, ['stop:pi_official:error', 'start:pi_official']);
 });
 
 test('restart recovery preserves enabled owner intent and resumes a fresh runtime', async () => {
@@ -228,8 +240,8 @@ test('restart recovery does not create activation intent for a dormant configure
   assert.deepEqual(calls, []);
 });
 
-test('repair accepts the legacy enabled plus crashed projection and returns dormant', async () => {
-  const { store, lifecycle } = await harness();
+test('repair accepts the legacy enabled plus crashed projection and starts a fresh runtime', async () => {
+  const { store, lifecycle, calls } = await harness();
   await lifecycle.prepare('pi_official', 1);
   await lifecycle.enable('pi_official', 2);
   await store.transaction((transaction) => {
@@ -238,8 +250,9 @@ test('repair accepts the legacy enabled plus crashed projection and returns dorm
   });
 
   const repaired = await lifecycle.repair('pi_official', 4);
-  assert.equal(repaired.activationState, 'disabled');
+  assert.equal(repaired.activationState, 'enabled');
   assert.equal(repaired.runtimeState, 'stopped');
+  assert.deepEqual(calls, ['start:pi_official', 'stop:pi_official:enabled', 'start:pi_official']);
 });
 
 test('maintenance preserves enabled intent while serializing stop, mutation, and resume', async () => {

@@ -914,3 +914,74 @@ describe('stripTriagePlanMarkers (cloud P2)', () => {
     assert.strictEqual(result, '');
   });
 });
+
+describe('projectConciergeStoredContent (F229 M3)', () => {
+  let projectConciergeStoredContent;
+
+  before(async () => {
+    const mod = await import('../dist/domains/concierge/concierge-reply-validator.js');
+    projectConciergeStoredContent = mod.projectConciergeStoredContent;
+  });
+
+  it('persists clean content while typed rich actions carry the marker semantics', () => {
+    const text = `@codex-sol\n找到了：[跳过去 R2｜f229 猫猫球功能｜0123456789ab]\n\n[小太阳·砚砚/gpt-5.6-sol🐾]`;
+
+    assert.equal(projectConciergeStoredContent(text), '找到了：跳过去 R2');
+  });
+
+  it('removes triage control blocks and known inline routing mentions once', () => {
+    const text = `好的 @co-creator，我来处理。\n\n<!-- triage-plan -->\n**意图**: relay\n<!-- /triage-plan -->\n\n请确认。`;
+
+    assert.equal(projectConciergeStoredContent(text), '好的，我来处理。\n\n请确认。');
+  });
+
+  it('removes the canonical public co-creator routing mention', () => {
+    assert.equal(projectConciergeStoredContent('好的 @co-creator，我来处理。'), '好的，我来处理。');
+  });
+
+  it('preserves legitimate at-rules and documentation tags in durable content', () => {
+    const text = `CSS 示例：
+@media (max-width: 600px) {
+  body { display: block; }
+}
+
+JSDoc 示例：
+@param threadId 目标线程
+@scope/pkg`;
+
+    assert.equal(projectConciergeStoredContent(text), text);
+  });
+
+  it('never projects control-looking text inside fenced or quoted examples', () => {
+    const text = `外层 @co-creator 会被清理。
+
+\`\`\`md
+@codex-sol
+[跳过去 R2｜示例标题｜0123456789ab]
+<!-- triage-plan -->
+**意图**: relay
+<!-- /triage-plan -->
+\`\`\`
+
+> @opus5 [跳过去 R1｜引用示例｜abcdef012345]
+
+正文结束。`;
+
+    assert.equal(
+      projectConciergeStoredContent(text),
+      `外层会被清理。
+
+\`\`\`md
+@codex-sol
+[跳过去 R2｜示例标题｜0123456789ab]
+<!-- triage-plan -->
+**意图**: relay
+<!-- /triage-plan -->
+\`\`\`
+
+> @opus5 [跳过去 R1｜引用示例｜abcdef012345]
+
+正文结束。`,
+    );
+  });
+});

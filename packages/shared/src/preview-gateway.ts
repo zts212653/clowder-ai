@@ -24,16 +24,39 @@ export function parsePreviewGatewayHostname(hostname: string): number | null {
   return Number.isInteger(port) && port >= 1 && port <= 65535 ? port : null;
 }
 
+export interface PreviewTargetPath {
+  pathname: string;
+  search: string;
+  hash: string;
+}
+
+export function parsePreviewTargetPath(targetPath = '/'): PreviewTargetPath {
+  const hashIndex = targetPath.indexOf('#');
+  const pathAndSearch = hashIndex >= 0 ? targetPath.slice(0, hashIndex) : targetPath;
+  const searchIndex = pathAndSearch.indexOf('?');
+  return {
+    pathname: (searchIndex >= 0 ? pathAndSearch.slice(0, searchIndex) : pathAndSearch) || '/',
+    search: searchIndex >= 0 ? pathAndSearch.slice(searchIndex) : '',
+    hash: hashIndex >= 0 ? targetPath.slice(hashIndex) : '',
+  };
+}
+
+function applyPreviewTargetPath(url: URL, targetPath: string): void {
+  const parsed = parsePreviewTargetPath(targetPath);
+  url.pathname = parsed.pathname;
+  url.search = parsed.search;
+  url.hash = parsed.hash;
+}
+
+export function canonicalizePreviewTargetPath(targetPath = '/'): string {
+  const url = new URL('http://preview-target.localhost');
+  applyPreviewTargetPath(url, targetPath);
+  return `${url.pathname}${url.search}${url.hash}`;
+}
+
 export function buildPreviewGatewayUrl(gatewayPort: number, targetPort: number, targetPath = '/'): string {
   assertPort(gatewayPort, 'Preview gateway port');
   const url = new URL(`http://${buildPreviewGatewayHostname(targetPort)}:${gatewayPort}`);
-  const queryIndex = targetPath.indexOf('?');
-  if (queryIndex >= 0) {
-    url.pathname = targetPath.slice(0, queryIndex) || '/';
-    const params = new URLSearchParams(targetPath.slice(queryIndex + 1));
-    for (const [key, value] of params) url.searchParams.append(key, value);
-  } else {
-    url.pathname = targetPath || '/';
-  }
+  applyPreviewTargetPath(url, targetPath);
   return url.toString();
 }

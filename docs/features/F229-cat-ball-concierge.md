@@ -1,12 +1,11 @@
 ---
 feature_ids: [F229]
-related_features: [F155, F020, F092, F111, F128, F226, F227, F102, F099]
+related_features: [F020, F092, F099, F102, F111, F128, F155, F173, F183, F226, F227, F277, F297, F307]
 topics: [concierge, desktop-pet, pet-skin, routing, small-model, voice, memory, ux, community]
 doc_kind: spec
 created: 2026-06-09
-updated: 2026-08-08
+updated: 2026-09-01
 community_issue: "clowder-ai#841"
-tips_exempt: "Concierge action-provenance and UX bug fixes restore existing navigation behavior; no new capability surface"
 ---
 
 # F229: 猫猫球 — 前台猫常驻入口（Cat Ball Concierge）
@@ -14,6 +13,10 @@ tips_exempt: "Concierge action-provenance and UX bug fixes restore existing navi
 > **Status**: in-progress | **Owner**: Ragdoll (Fable-5) | **Priority**: P1
 >
 > **立项 signoff**：operator 2026-06-09（msg 0001781064063516-000541）："我判定是新立项 你可以把我想要的想想看 写好operator的愿景 然后立项吧？新的 feat"
+
+Architecture cell: `thread-chat-surface` + `concierge-surface` + `bubble-pipeline` + `thread-navigation` + `hub-action-surface`
+Map delta: new `thread-chat-surface` cell + narrowed `concierge-surface`
+Why: full Chat 与 compact Cat Ball 必须消费唯一 conversation runtime/UI contract，同时保留 concierge 岗位与 pet 领域边界。
 
 ## Why
 
@@ -33,6 +36,10 @@ Clowder AI 三个多月迭代 200+ feature，"一句话的事"和"一个 feature
 社区体验复审：clowder-ai#1265 基于旧版本集中指出工具栏、隐藏语义、控制可发现性、面板尺寸和动画注意力问题；2026-08-08 逐项对照最新 main 后，保留仍成立的体验缺口并在本轮修复，已过时的“完全没有动画/不能 resize”诊断不照抄。
 
 ## Current State / 现状基线
+
+### Chat Surface Convergence（2026-08-28 Gate）
+
+猫猫球不能继续拥有一套与主 Chat 平行的 mini-chat。唯一架构 owner 是 `thread-chat-surface`：full Chat 与 compact Cat Ball 只允许布局、density 与产品 chrome 不同；message semantics、history、socket、send、liveness、renderer 与 typed actions 必须共享。`bubble-pipeline` 继续拥有消息 identity/projection，`concierge-surface` 只拥有接待壳、concierge lifecycle、duty prompt、triage/investigation 与 pet behavior，跨 thread attention 归 `thread-navigation`。
 
 - **记忆入口不对称（实测）**：live runtime 1076 个 thread 仅 162 个有 threadMemory（15%，Maine Coon 2026-06-09 只读实测）；猫侧有 `search_evidence`/`graph_resolve`/`list_recent` + teleport，**用户侧零入口**——"金鱼的记忆"是系统欠的，不是operator记性差
 - **功能发现断层**：F155 guide engine done（9 个 YAML 场景 + `cat_cafe_get_available_guides`），但设计上是猫按上下文触发，**无用户常驻入口**；release notes / feature docs 无对话式查询面
@@ -317,7 +324,7 @@ petState = compose(
 - [x] BUG-UX-1: Maine Coon桌宠"狗皮膏药"——球按钮底色 `var(--cafe-surface-elevated)` 实心不透明方块，应为透明底浮在页面上。operator 2026-06-18 + 2026-06-21 两次报告。**已修复**：PR #2474 merged 2026-06-21，移除实心 `backgroundColor` + `boxShadow`，改为透明 `drop-shadow` filter
 - [x] BUG-UX-2: 调查报告 anchor 列表可读性崩溃——InvestigationReportCard 内文字一个字一个字竖排，列宽塌缩到单字符宽度。operator 2026-06-21 截图。**已修复**：PR #2474 merged 2026-06-21，flex 容器加 `min-w-0` + title span 加 `truncate`
 - [x] BUG-UX-3: 面板不可拉伸/不可发现——width/height resize 分别由 PR #2474/#2481 接通，但 clowder-ai#1265 复审确认仅有 1.5px 隐形边缘，功能存在却发现不了。2026-08-08 follow-up 增加可见角落拖拽柄，以及一键放大到安全 viewport / 恢复手动尺寸；原 localStorage 尺寸持久化保持不变
-- [x] BUG-UX-4: 猫猫球回复中可读性差——猫签名（`[Siamese/gemini-3.5-flash🐾]`）、`@co-creator`、内部协作格式对用户可见，应在 concierge 上下文中 strip 掉或简化。**已修复**：PR #2474 merged 2026-06-21，ConciergeMessageContent 渲染层 strip `[name/model🐾]` 签名 + 内部路由 mention
+- [x] BUG-UX-4: 猫猫球回复中可读性差——猫签名（`[Siamese/gemini-3.5-flash🐾]`）、`@co-creator`、内部协作格式对用户可见，应在 concierge 上下文中 strip 掉或简化。**归一修复**：旧 PR #2474 曾在 `ConciergeMessageContent` 渲染层 strip；F229 M3 删除该平行 renderer，改由 concierge domain producer 在 canonical persistence 前一次性清理签名、内部路由 mention 与 triage control block，并在 terminal `done` 到达时让 live 内容与 durable projection 收敛，full/compact 不再各自改写文本。流式生成期间仍保留原始增量内容，不声称逐 token 阶段已完成清理
 - [x] BUG-UX-5: Maine Coon拖动困难——operator 报告"好难拖动"，拖拽交互手感差（可能是拖拽区域 vs 点击区域冲突、touchAction 设置、或 drag threshold 过大）。operator 2026-06-21。**已修复**：PR #2474 merged 2026-06-21，drag threshold 5→8px + 移除阻塞拖拽的 `pointerEvents:'none'`
 - [x] BUG-UX-7: 猫猫球不渲染 Markdown——值班猫回复中 Markdown 语法显示为原始文本。**已修复**：PR #2488 merged 2026-06-22，统一使用 `MarkdownContent` 组件 + `buildMdComponents(tp?)` 工厂模式，textProcessor 覆盖所有文本容器（p/strong/em/del/h1-h6/li/a/th/td），code/pre 排除。gpt52 local review 2 轮 + cloud review 0 P1/P2
 - [x] BUG-UX-8: 原地看（peek）内容无收起机制。**已修复**：同 PR #2488——re-click toggle + ✕ dismiss button
@@ -338,7 +345,7 @@ petState = compose(
 - [x] AC-E1-4: Backward compatibility — ragdoll-v1 fallback entries for new states (running-right→running.png, waiting→idle.png, etc.), `PetSpriteResult` discriminated union (`string | AtlasSpriteResult`), 29 web + 20 shared + 5 animation unit tests
 - [x] AC-E2-1: Skin picker unlock — Settings page `皮肤` section upgraded from locked chip to 3 `RadioOption`s (`yanyan-codex` / `ragdoll-v1` / `yarn-ball`), reusing existing optimistic `updateConfig()` partial PUT flow
 - [x] AC-E1-5: xianxian-codex 9-state animated atlas — parallel `xianxian-codex` skin using same `YANYAN_ATLAS_ROWS` config + dynamic base path selection in `usePetSkin.ts`, 733KB spritesheet (1536×1872, 8×9 grid, 192×208 cells), `pet.json` manifest (ragdoll, seal bicolor, video-extraction provenance), Settings 4th radio option, API zod validator + shared type + store type aligned (6/6 consumer sites). 37 web tests (8 new). BUG-UX-6 素材升级 pipeline 首个产出
-- [x] AC-E2-2: Default skin change for unconfigured users — `CONCIERGE_CONFIG_DEFAULTS.skin` changed to `yanyan-codex`; existing TTL=0 persisted configs intentionally remain untouched and must switch via the unlocked picker
+- [x] AC-E2-2: Default skin for unconfigured users — `CONCIERGE_CONFIG_DEFAULTS.skin` is `xianxian-codex` per operator preference; existing TTL=0 persisted configs intentionally remain untouched and switch only through the unlocked picker
 - [x] AC-E3-1: Resizable ball via react-rnd `enableResizing={{ bottomRight: true }}` + `lockAspectRatio` — drag bottom-right corner to resize 48–192px (native atlas resolution ceiling). `clampBallSize()` shared utility (handles undefined/null/NaN, rounds, clamps). `ConciergeConfig.ballSize` persisted TTL=0. AtlasSprite dynamic scaling `Math.round(containerSize * 0.88)` height-fit. RangeSlider local state buffering + commit-on-pointerUp (P1 fix: pendingRef single-flight guard). Settings section 6 "猫猫球大小" slider + reset. `conciergeProjection.ts` extraction for store file-size hygiene (377→329 lines). 13 shared + full web test suite green. gpt52 local review 4 rounds (R1: 1P1 RangeSlider + 1P2 mailbox; R2: 0 findings on PR code, 1P1 store line-count → extraction; R3: 1P1 withdrawn dist-freshness; final: 0 findings) + cloud review 3 rounds (封板 LL-072, R3 stale ratio 60%). PR #2614
 - [x] AC-E4-1: `usePetBehavior()` hook — dual-input priority composition (business > autonomous, 10s idle hysteresis, zero-delay interrupt). Pure computation core `petBehaviorCore.ts` + React hook `usePetBehavior.ts`. `computeBehaviorPhase()` three-state machine (business→idle-countdown→autonomous). Single selector in ConciergeHost. 27 unit tests covering phase transitions + timing. PR #2631
 - [x] AC-E4-2: State isolation — ConciergeBallState read-only input. Autonomous outputs visual overlay only (`PetBehaviorOutput`), never writes to concierge store. Pure functions in `petBehaviorCore.ts` have zero store imports. Safety tests assert output shape is purely declarative. PR #2631

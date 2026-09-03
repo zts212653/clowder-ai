@@ -14,6 +14,7 @@ import type { AgentCarrierSession, AgentCarrierSessionOptions } from '../../type
 
 const SOCKET_READY_TIMEOUT_MS = 10_000;
 const CLOSE_GRACE_MS = 1_500;
+const MAX_TERMINAL_DIAGNOSTIC_LENGTH = 256;
 const SESSION_SCOPED_ENV_KEYS = new Set<string>([...MCP_CALLBACK_ENV_KEYS, 'CAT_CAFE_CREDENTIAL_FILE']);
 
 export interface CodexAppServerHostLaunch {
@@ -133,7 +134,10 @@ class CodexUnixWebSocketSession implements AgentCarrierSession {
       }
     });
     socket.once('error', (error) => this.inbox.end(error));
-    socket.once('close', () => this.inbox.end());
+    socket.once('close', (_code, reason) => {
+      const diagnostic = sanitizeCliStderr(reason.toString('utf8').trim()).slice(0, MAX_TERMINAL_DIAGNOSTIC_LENGTH);
+      this.inbox.end(diagnostic ? new Error(diagnostic) : undefined);
+    });
   }
 
   read(): AsyncIterable<unknown> {

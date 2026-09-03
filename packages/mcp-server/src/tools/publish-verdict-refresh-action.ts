@@ -20,9 +20,11 @@ export function validatePublishVerdictLifecycleInput(input: {
   action?: PublishVerdictRefreshAction;
   packet?: unknown;
   sourceRefs?: unknown;
+  analysisFindings?: unknown;
 }): string | null {
   const hasRefresh = input.action?.kind === 'refresh_pr';
-  const hasPublish = input.packet !== undefined || input.sourceRefs !== undefined;
+  const hasPublish =
+    input.packet !== undefined || input.sourceRefs !== undefined || input.analysisFindings !== undefined;
   if (hasRefresh === hasPublish || (!hasRefresh && (input.packet === undefined || input.sourceRefs === undefined))) {
     return 'Error: provide exactly one lifecycle form: packet + sourceRefs for initial publish, or action.kind=refresh_pr for an existing auto-verdict PR.';
   }

@@ -38,7 +38,44 @@ Step 3: 调 typed MCP — 让 Hub 前端导航
     action: "open",
     threadId: "当前 threadId（有就传）"
   })
+
+  如 receipt 三工具同时可用且目标是文件，可改走下方的 revision-bound receipt 路径
 ```
+
+## Revision-bound consumption receipt（workspace-navigator pilot）
+
+完整读完本文件后，如果当前工具面同时提供
+`cat_cafe_prepare_skill_consumption`、`cat_cafe_open_with_workspace_navigator` 与
+`cat_cafe_dismiss_skill_consumption`：
+
+```text
+cat_cafe_prepare_skill_consumption({ skillId: "workspace-navigator" })
+  → cat_cafe_open_with_workspace_navigator({
+      handle: "prepare 返回的 handle",
+      path: "/精确/绝对/路径",
+      threadId: "当前 threadId（有就传）"
+    })
+```
+
+1. 调 `cat_cafe_prepare_skill_consumption({ skillId: "workspace-navigator" })`。返回的
+   `state: prepared` 只绑定当前 package revision、invocation 与 Workspace consumer，**不是已应用收据**。
+2. 目标是要打开的文件时，把 handle 原样传给
+   `cat_cafe_open_with_workspace_navigator({ handle, path, ... })`。它固定调用既有 Workspace `open`
+   consumer；只有 consumer 产生 `deliveryStatus`，服务端才会写 `consumption: applied`，猫不能单独自报。
+3. 若本次明确选择右侧「运行日志 → 查看日志」原生快捷入口，或读完后确认请求不属于 Workspace
+   导航，或本次目标是 pilot 尚未覆盖的目录 `reveal`，调 `cat_cafe_dismiss_skill_consumption`，reason 分别用
+   `alternate_native_shortcut` / `outside_skill_scope`。
+
+`outcome` 只回答这次 Workspace consumer 的投递四态或 `not_applicable`，不代表整项任务成功，也不证明
+单个 skill 造成了任务结果。handle 过期、跨 invocation 重放或 package revision 已变化时，重新读当前
+skill 并 prepare；不得拿旧 receipt 假绿。
+
+完整读取仍是本 skill 的独立使用义务；receipt 本身不证明 package 曾被展示或读取，也不与既有
+presentation/full-read 事件做前置 join。
+
+如果 receipt 工具缺失，或返回 `carrier_unsupported`，照常完成导航任务，但明确记录
+`skill receipt: unsupported`；不得从 `ok:true`、普通工具调用、task success 或旧的 skill-load 事件反推
+`applied|dismissed`。
 
 ## Step 2 详解：意图→路径匹配策略
 

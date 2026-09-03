@@ -40,7 +40,7 @@ export function ApprovalProvenanceLinks({
     [onBeforeNavigate],
   );
   const buttonClass = compact
-    ? 'rounded px-1.5 py-0.5 text-micro text-cafe-interactive/55 transition-colors hover:bg-cafe-surface hover:text-cafe-interactive'
+    ? 'rounded-md border border-[var(--cafe-border)] px-2 py-1 text-micro text-cafe-interactive/55 transition-colors hover:bg-[var(--cafe-muted)] hover:text-cafe-interactive'
     : 'rounded-md border border-[var(--cafe-border)] px-3 py-1 text-micro font-medium transition-colors hover:bg-[var(--cafe-muted)]';
   if (navigation.state === 'legacy_unanchored') {
     const { legacyThreadId } = navigation;

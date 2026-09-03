@@ -88,6 +88,7 @@ export type {
   ActiveExecutionNonCancelableReason,
   ActiveExecutionProjection,
   LiveInvocationCancelTarget,
+  ManagedCommandActivity,
   ManagedCommandCancelTarget,
 } from './active-execution.js';
 // F178 Phase B: agent-key record + verify result
@@ -98,13 +99,13 @@ export {
   type AgentKeyFailureReason,
   isAgentKeyFailureReason,
 } from './agent-key-reasons.js';
-// Approval Hub types and provenance validators (F246 Phase I)
 export {
   type ApprovalCardRef,
   type ApprovalDecisionMode,
   type ApprovalEnvelope,
   type ApprovalEnvelopeIdentity,
   ApprovalFeatureId,
+  ApprovalHubItem,
   ApprovalItem,
   ApprovalItemStatus,
   type ApprovalNavigation,
@@ -113,6 +114,7 @@ export {
   type ApprovalPublication,
   assertApprovalEnvelopeIdentity,
   commitApprovalEnvelope,
+  SettledApprovalHubItem,
   SettledApprovalItem,
   SettledStatus,
   validateApprovalCardRef,
@@ -121,6 +123,8 @@ export {
   validateApprovalOriginRef,
   validateApprovalPublication,
 } from './approval-hub.js';
+// Approval Hub types and provenance validators (F246 Phase I)
+export * from './approval-lifecycle.js';
 // Backlog types (F049 Mission Control)
 export type {
   AcquireBacklogLeaseInput,
@@ -229,6 +233,10 @@ export type {
   ProbeState,
   SkillHealthSummary,
 } from './capability.js';
+// Capability evolution control-plane contracts (F311 Phase 1)
+export * from './capability-evolution.js';
+export * from './capability-evolution-observation.js';
+export * from './capability-evolution-refs.js';
 // Cat types
 export type {
   AgyProfileConfig,
@@ -283,6 +291,7 @@ export {
   isCloudBridgeFailureDiagnosticV1,
   isCloudBridgeOutboundReceiptV1,
 } from './cloud-bridge-outbound-receipt.js';
+export * from './collective.js';
 // Command types (F142 Phase B — slash command framework)
 export type {
   CommandSource,
@@ -500,6 +509,25 @@ export {
   ENTITY_STANCES,
   ENTITY_VISIBILITY_SCOPES,
 } from './entity-proposal.js';
+// F310 Phase B: source-owned custody, Task-owned entrusted work, and shared owner-read contracts.
+export {
+  type CustodyAdmissionRequestV1,
+  type CustodyAuthorityProvenanceV1,
+  custodyAdmissionRequestV1Schema,
+  custodyAuthorityProvenanceV1Schema,
+  type EntrustedWorkClosureSpecV1,
+  type EntrustedWorkTerminalActionV1,
+  type EntrustedWorkTerminalClosureV1,
+  type EntrustedWorkUpdateActionV1,
+  entrustedWorkClosureSpecV1Schema,
+  entrustedWorkTerminalActionV1Schema,
+  entrustedWorkTerminalClosureV1Schema,
+  entrustedWorkUpdateActionV1Schema,
+  type F310CustodyGrantRegistryV1,
+  PHASE_B_INITIAL_CUSTODY_GRANT_REGISTRY,
+  type RegisteredCustodyGrantV1,
+  registeredCustodyGrantV1Schema,
+} from './entrusted-work-actions.js';
 // F227: Event Memory types (cognitive-transition event index)
 export {
   COGNITIVE_TRANSITIONS,
@@ -639,6 +667,38 @@ export {
   type WaitOutcomeV1,
   type WaitOwnerFence,
 } from './github-wait.js';
+export {
+  type CustodyAdmissionResultV1,
+  type CustodyAdmissionStateV1,
+  type CustodyOfferV1,
+  custodyAdmissionResultV1Schema,
+  custodyAdmissionStateV1Schema,
+  custodyOfferV1Schema,
+  type EntrustedWorkOwnerReadV1,
+  type EntrustedWorkTaskRefV1,
+  type EntrustedWorkV1,
+  entrustedWorkOwnerReadV1Schema,
+  entrustedWorkTaskRefV1Schema,
+  entrustedWorkV1Schema,
+  growingSourceMessageRevisionV1Schema,
+  PHASE_B_NEEDS_ME_PRODUCER_IDS,
+  type PhaseBNeedsMeProducerId,
+  type ProducerAttentionReceiptV1,
+  type ProducerAttentionReevaluationLinkV1,
+  producerAttentionReceiptV1Schema,
+  producerAttentionReevaluationLinkV1Schema,
+} from './growing.js';
+export {
+  CUSTODY_OPPORTUNITY_CONTRACT_VIOLATION_CODES,
+  type CustodyOpportunityCohortSnapshotV1,
+  type CustodyOpportunityContractViolationV1,
+  type CustodyOpportunityEpisodeInputV1,
+  type CustodyOpportunityEpisodeV1,
+  type CustodyOpportunityVectorV1,
+  custodyOpportunityContractViolationV1Schema,
+  custodyOpportunityEpisodeInputV1Schema,
+  custodyOpportunityEpisodeV1Schema,
+} from './growing-opportunity.js';
 // F281 Phase A: server-bound human disposition feedback and exact-subject eligibility contract
 export {
   buildHumanDispositionEnvelope,
@@ -755,6 +815,12 @@ export type {
   StreakCat,
   WorkStats,
 } from './leaderboard.js';
+export {
+  type LessonConsumptionReplayV1,
+  type LessonPromotionContractV1,
+  lessonConsumptionReplayV1Schema,
+  lessonPromotionContractV1Schema,
+} from './lesson-learning-closure.js';
 // Limb types (F126 四肢控制面)
 export type {
   ILimbNode,
@@ -841,6 +907,18 @@ export type {
   MemoryEntry,
   MemoryInput,
 } from './memory.js';
+// Memory Architecture Closure Gate: lane-owned surface declarations + RecallFrame v0.
+export {
+  MEMORY_EVIDENCE_LEVELS,
+  MEMORY_SURFACE_ANSWER_STATES,
+  MEMORY_SURFACE_DISPOSITIONS,
+  type MemoryRecallFrameV0,
+  type MemorySurfaceClosureV1,
+  type MemorySurfaceOwnerV1,
+  memoryRecallFrameV0Schema,
+  memorySurfaceClosureV1Schema,
+  memorySurfaceOwnerV1Schema,
+} from './memory-architecture-closure.js';
 // F287 Phase C: bounded Memory Cue Plane shared contract.
 export {
   type CueEnvelopeV1,
@@ -856,14 +934,18 @@ export {
   MEMORY_CUE_INVALIDATORS,
   type MemoryCueInvalidator,
   memoryCueDrillFamilyForResolver,
+  type ProfileRevisionAvailableOpportunityV1,
+  profileRevisionAvailableOpportunityV1Schema,
   RECALL_OPPORTUNITY_CATALOG_VERSION,
   RECALL_OPPORTUNITY_V1_PAIRS,
   RECALL_RESOLVER_FAMILIES,
   type RecallOpportunityV1,
   type RecallResolverFamily,
   type RecallScopeV1,
+  type RecentEventAvailableOpportunityV1,
   recallOpportunityV1Schema,
   recallScopeV1Schema,
+  recentEventAvailableOpportunityV1Schema,
   type SubjectSeenOpportunityV1,
   subjectSeenOpportunityV1Schema,
 } from './memory-cue.js';
@@ -1175,6 +1257,23 @@ export type {
   ReportingMode,
   ThreadProposal,
 } from './proposal.js';
+export {
+  isProviderSemanticEvent,
+  normalizeThreadGoalObjective,
+  PROVIDER_SEMANTIC_EVENT_KINDS,
+  type ProviderCapabilitySemanticEvent,
+  type ProviderDiffSemanticEvent,
+  type ProviderGoalSemanticEvent,
+  type ProviderGuardianSemanticEvent,
+  type ProviderPlanSemanticEvent,
+  type ProviderReasoningSemanticEvent,
+  type ProviderReviewSemanticEvent,
+  type ProviderReviewStage,
+  type ProviderSemanticEvent,
+  type ProviderSemanticEventKind,
+  type ProviderSemanticProvenance,
+  type ProviderWarningSemanticEvent,
+} from './provider-semantic-event.js';
 // F264: durable per-target queued-message receipt and manual reminder truth
 export type {
   FreshnessCarrier,
@@ -1238,6 +1337,10 @@ export type {
   RichPersonMemoryProposalCardBlock,
 } from './rich.js';
 export { isPersonMemoryProposalCardBlock, isValidRichBlock, normalizeRichBlock } from './rich.js';
+// F293 Phase A: durable routing truth and pure advisory projection contracts.
+export * from './routing-context.js';
+// F306 Phase B: provider-neutral mid-run request ↔ human response contract.
+export * from './runtime-interaction.js';
 // F246 Phase I Wave 1: F139 schedule mutation proposal + audit contract
 export type {
   ScheduleMutation,

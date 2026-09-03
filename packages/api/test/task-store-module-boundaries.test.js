@@ -9,9 +9,19 @@ const moduleBudgets = [
     reason: 'extract focused task-store responsibilities',
   },
   {
+    path: '../src/domains/cats/services/stores/ports/TaskItemFactory.ts',
+    maxLines: 350,
+    reason: 'keep Task construction separate from storage mutation',
+  },
+  {
     path: '../src/domains/cats/services/stores/ports/TaskManagedWorkRegistrationStore.ts',
     maxLines: 350,
     reason: 'keep the in-memory managed-work aggregate focused',
+  },
+  {
+    path: '../src/domains/cats/services/stores/ports/TaskEntrustedWorkMutationStore.ts',
+    maxLines: 350,
+    reason: 'keep entrusted-work owner mutations separate from generic Task storage',
   },
   {
     path: '../src/domains/cats/services/stores/redis/RedisTaskStore.ts',
@@ -24,9 +34,29 @@ const moduleBudgets = [
     reason: 'keep the Redis managed-work aggregate focused',
   },
   {
+    path: '../src/domains/cats/services/stores/redis/RedisTaskEntrustedWorkMutationStore.ts',
+    maxLines: 350,
+    reason: 'keep Redis entrusted-work CAS transitions focused',
+  },
+  {
     path: '../src/domains/cats/services/stores/redis/RedisTaskCodec.ts',
     maxLines: 350,
     reason: 'keep task serialization focused',
+  },
+  {
+    path: '../src/domains/cats/services/stores/redis/RedisTaskCollectionReader.ts',
+    maxLines: 350,
+    reason: 'keep Redis collection reads and stale-index cleanup focused',
+  },
+  {
+    path: '../src/domains/cats/services/stores/redis/RedisTaskSubjectTransactions.ts',
+    maxLines: 350,
+    reason: 'keep atomic Task subject ownership transitions focused',
+  },
+  {
+    path: '../src/domains/cats/services/stores/redis/RedisWatchSession.ts',
+    maxLines: 350,
+    reason: 'keep WATCH lifecycle isolation focused',
   },
 ];
 

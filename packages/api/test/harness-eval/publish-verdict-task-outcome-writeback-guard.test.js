@@ -133,7 +133,7 @@ describe('task-outcome episode verdict writeback guards', () => {
         packet: buildPacket('vhp-task-outcome-e2e-writeback-already-verdicted'),
         domain: 'eval:task-outcome',
         catId: 'opus-47',
-        ownerUserId: 'you',
+        ownerUserId: 'operator',
         sourceRefs: {
           kind: 'task-outcome-snapshot',
           windowStartMs: seeded.baseMs - 60_000,
@@ -164,7 +164,7 @@ describe('task-outcome episode verdict writeback guards', () => {
         packet: buildPacket('vhp-task-outcome-e2e-writeback-replacement'),
         domain: 'eval:task-outcome',
         catId: 'opus-47',
-        ownerUserId: 'you',
+        ownerUserId: 'operator',
         sourceRefs: {
           kind: 'task-outcome-snapshot',
           windowStartMs: seeded.baseMs - 60_000,
@@ -214,7 +214,7 @@ describe('task-outcome episode verdict writeback guards', () => {
         packet: buildPacket('vhp-task-outcome-e2e-writeback-stale-pr'),
         domain: 'eval:task-outcome',
         catId: 'opus-47',
-        ownerUserId: 'you',
+        ownerUserId: 'operator',
         sourceRefs: {
           kind: 'task-outcome-snapshot',
           windowStartMs: seeded.baseMs - 60_000,
@@ -237,7 +237,7 @@ describe('task-outcome episode verdict writeback guards', () => {
     const deps = {
       harnessFeedbackRoot,
       liveHarnessFeedbackRoot: harnessFeedbackRoot,
-      ownerUserId: 'you',
+      ownerUserId: 'operator',
       taskOutcomeDbPath,
     };
     const sourceRefs = {
@@ -304,7 +304,7 @@ describe('task-outcome episode verdict writeback guards', () => {
       {
         harnessFeedbackRoot,
         liveHarnessFeedbackRoot: harnessFeedbackRoot,
-        ownerUserId: 'you',
+        ownerUserId: 'operator',
         taskOutcomeDbPath,
       },
     );
@@ -323,7 +323,7 @@ describe('task-outcome episode verdict writeback guards', () => {
     const deps = {
       harnessFeedbackRoot,
       liveHarnessFeedbackRoot: harnessFeedbackRoot,
-      ownerUserId: 'you',
+      ownerUserId: 'operator',
       taskOutcomeDbPath,
     };
     const artifact = await generator(

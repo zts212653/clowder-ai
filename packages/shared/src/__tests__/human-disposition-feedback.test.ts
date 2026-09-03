@@ -24,7 +24,7 @@ const baseBinding = {
   proposalId: 'proposal:memory:1',
   decision: 'rejected',
   producerCatId: 'codex-terra',
-  ownerUserId: 'user:landy',
+  ownerUserId: 'user:operator',
   decidedAt: 1_753_876_800_000,
   scope: { kind: 'exact_subject' },
   expiry: { kind: 'none' },

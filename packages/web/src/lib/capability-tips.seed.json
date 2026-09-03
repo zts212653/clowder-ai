@@ -343,6 +343,31 @@
     "owner": "codex"
   },
   {
+    "id": "workflow-memory-search-single-owner",
+    "kind": "workflow",
+    "sourceRef": {
+      "path": "cat-cafe-skills/memory-search-best-practices/SKILL.md",
+      "anchor": "单一 owner 闭环"
+    },
+    "structureSource": {
+      "path": "cat-cafe-skills/memory-search-best-practices/SKILL.md",
+      "anchor": "Output: 单一 owner"
+    },
+    "bodySource": {
+      "path": "cat-cafe-skills/memory-search-best-practices/SKILL.md",
+      "anchor": "query、scope、语言或工具切片不得升级"
+    },
+    "contexts": ["thinking", "long_running"],
+    "audience": ["cvo"],
+    "body": "让猫猫查「所有提过 X 的地方」时，它会在内部多路检索并统一收敛，最后只交一份完整结果，不把搜索切片变成你要追的多个任务。",
+    "action": {
+      "type": "open_concierge_draft",
+      "label": "帮我完整回溯",
+      "draftPrompt": "请完整回溯所有提过 X 的地方，多路查证后统一给我一份终局结论，不要拆成多个需要我跟踪的任务。"
+    },
+    "owner": "codex-sol"
+  },
+  {
     "id": "workflow-alpha-validation",
     "kind": "workflow",
     "sourceRef": { "path": "docs/SOP.md", "anchor": "pnpm alpha:start" },
@@ -357,14 +382,52 @@
   {
     "id": "workflow-merge-gate",
     "kind": "workflow",
-    "sourceRef": { "path": "docs/SOP.md", "anchor": "merge-gate" },
-    "structureSource": { "path": "docs/SOP.md", "anchor": "门禁 → PR → 云端 review" },
-    "bodySource": { "path": "cat-cafe-skills/merge-gate/SKILL.md", "anchor": "merge-gate" },
+    "sourceRef": {
+      "path": "cat-cafe-skills/merge-gate/SKILL.md",
+      "anchor": "昂贵 gate 连续性"
+    },
+    "structureSource": {
+      "path": "cat-cafe-skills/merge-gate/SKILL.md",
+      "anchor": "Gate 选择 — targeted 默认，高风险 full"
+    },
+    "bodySource": {
+      "path": "cat-cafe-skills/merge-gate/SKILL.md",
+      "anchor": "禁止仅因 main 又前进而重跑 full gate"
+    },
     "contexts": ["merge_gate", "review"],
     "audience": ["developer", "maintainer"],
-    "body": "准备合入时走 merge-gate：本地门禁、PR、云端 review、squash merge。",
-    "action": { "type": "open_concierge_draft", "label": "了解更多" },
-    "owner": "codex"
+    "body": "合入前按风险选择 targeted 或 full gate；一次 full gate 绑定作者 patch 与冻结 base，main 的无关前进不会让猫重复跑半小时门禁。",
+    "action": {
+      "type": "open_concierge_draft",
+      "label": "帮我选择门禁",
+      "draftPrompt": "请按这次改动的行为、数据、安全、契约和不可逆风险选择门禁；如果已有 full gate 证据，也请判断后续 base 变化是否真的需要重跑。"
+    },
+    "owner": "codex-sol"
+  },
+  {
+    "id": "workflow-skill-validation-risk-routed",
+    "kind": "workflow",
+    "sourceRef": {
+      "path": "cat-cafe-skills/writing-skills/SKILL.md",
+      "anchor": "发布检查清单"
+    },
+    "structureSource": {
+      "path": "cat-cafe-skills/writing-skills/SKILL.md",
+      "anchor": "验证"
+    },
+    "bodySource": {
+      "path": "cat-cafe-skills/writing-skills/SKILL.md",
+      "anchor": "只有五轴实际命中高风险"
+    },
+    "contexts": ["feature_dev", "merge_gate"],
+    "audience": ["developer", "maintainer"],
+    "body": "修改 skill 后先跑 skill、reference、surface 与 claim 对应的定向检查；只有高风险或跨包覆盖不足时才升级 full gate。",
+    "action": {
+      "type": "open_concierge_draft",
+      "label": "帮我验证 skill",
+      "draftPrompt": "请根据我修改的 skill 和具体 claim，列出最小但足够的定向验证；只有五轴高风险或跨包覆盖不足时才升级 full gate。"
+    },
+    "owner": "codex-sol"
   },
   {
     "id": "workflow-feature-tips-contribution",
@@ -393,16 +456,25 @@
   {
     "id": "workflow-community-decision-queue",
     "kind": "workflow",
-    "sourceRef": { "path": "cat-cafe-skills/opensource-ops/SKILL.md", "anchor": "Open Source Ops" },
-    "structureSource": { "path": "cat-cafe-skills/opensource-ops/SKILL.md", "anchor": "进入条件" },
-    "bodySource": { "path": "cat-cafe-skills/opensource-ops/SKILL.md", "anchor": "Server 不替你猜" },
+    "sourceRef": {
+      "path": "docs/features/F116-opensource-ops.md",
+      "anchor": "公开便携层与家内运营层分离"
+    },
+    "structureSource": {
+      "path": "docs/features/F116-opensource-ops.md",
+      "anchor": "场景 B: Inbound PR（社区 PR 评估 + 合入 + 吸收）"
+    },
+    "bodySource": {
+      "path": "cat-cafe-skills/opensource-ops/SKILL.md",
+      "anchor": "五问"
+    },
     "contexts": ["thinking", "feature_dev"],
     "audience": ["developer", "maintainer"],
     "body": "外部 PR/issue 进入子 thread 后，先加载 opensource-ops skill 做 grounding、五问与 custody 判断。",
     "action": {
       "type": "open_source",
       "label": "查看 opensource-ops skill",
-      "sourceRef": { "path": "cat-cafe-skills/opensource-ops/SKILL.md", "anchor": "Open Source Ops" }
+      "sourceRef": { "path": "cat-cafe-skills/opensource-ops/SKILL.md", "anchor": "Open-Source Ops" }
     },
     "owner": "codex"
   },
@@ -604,6 +676,31 @@
     "body": "有提案等你拍板？点左侧铃铛打开审批中心——待审项一目了然。",
     "action": { "type": "open_concierge_draft", "label": "了解更多" },
     "owner": "opus"
+  },
+  {
+    "id": "feature-f306-runtime-interaction",
+    "kind": "feature",
+    "sourceRef": {
+      "path": "docs/features/F306-codex-app-capability-parity.md",
+      "anchor": "## User Journey"
+    },
+    "structureSource": {
+      "path": "docs/features/F306-codex-app-capability-parity.md",
+      "anchor": "### Phase B: Provider-neutral Runtime Interaction"
+    },
+    "bodySource": {
+      "path": "docs/features/F306-codex-app-capability-parity.md",
+      "anchor": "### Primary Journey: 在 Clowder AI 使用 Codex App 的原生控制力"
+    },
+    "contexts": ["thinking", "waiting_external", "pet_waiting_for_user"],
+    "audience": ["cvo"],
+    "body": "Codex 运行中需要授权或补充信息时，直接在当前对话卡片回答；审批中心只负责提醒并带你回到同一请求，不会另存一份决定。",
+    "action": {
+      "type": "open_concierge_draft",
+      "label": "处理运行中请求",
+      "draftPrompt": "请带我找到当前对话里正在等待回答的 Codex 请求，并说明审批、普通问题或 MCP 补充信息应如何安全处理。"
+    },
+    "owner": "codex-sol"
   },
   {
     "id": "feature-f281-structured-rejection-feedback",
@@ -1284,6 +1381,31 @@
     "owner": "codex-sol"
   },
   {
+    "id": "capability-tech-writing-cutaway",
+    "kind": "capability",
+    "sourceRef": {
+      "path": "cat-cafe-skills/tech-writing/SKILL.md",
+      "anchor": "技术叙事的证据剖面"
+    },
+    "structureSource": {
+      "path": "cat-cafe-skills/concept-demo-design/refs/falsifiable-technical-cutaway.md",
+      "anchor": "Claim Bench 最小结构"
+    },
+    "bodySource": {
+      "path": "cat-cafe-skills/tech-writing/SKILL.md",
+      "anchor": "故事负责获得注意力；实验台负责赢得信任。"
+    },
+    "contexts": ["thinking", "feature_dev"],
+    "audience": ["cvo", "developer"],
+    "body": "技术方案讲得太泛？让猫猫把技术主张拆成失效机制、技术对象、可操纵消融、判词和 claim ceiling；需要时再做成能亲手证伪的实验台。",
+    "action": {
+      "type": "open_concierge_draft",
+      "label": "拆解技术主张",
+      "draftPrompt": "请把这项技术竞争力拆成可证伪的技术主张、失效机制、技术对象、可操纵消融、判词和 claim ceiling。"
+    },
+    "owner": "codex-sol"
+  },
+  {
     "id": "feature-session-strategy-policy",
     "kind": "feature",
     "sourceRef": {
@@ -1387,6 +1509,31 @@
     "owner": "codex-sol"
   },
   {
+    "id": "feature-f229-canonical-cat-ball-chat",
+    "kind": "feature",
+    "sourceRef": {
+      "path": "docs/features/F229-cat-ball-concierge.md",
+      "anchor": "Chat Surface Convergence（2026-08-28 Gate）"
+    },
+    "structureSource": {
+      "path": "packages/web/src/components/thread-chat/ThreadChatSurface.tsx",
+      "anchor": "ThreadChatSurface"
+    },
+    "bodySource": {
+      "path": "docs/features/F229-cat-ball-concierge.md",
+      "anchor": "full Chat 与 compact Cat Ball"
+    },
+    "contexts": ["concierge_open", "thinking"],
+    "audience": ["cvo"],
+    "body": "猫猫球现在和完整 Chat 共用同一条对话时间线：系统错误、连接诊断、操作卡片和发送状态都会保留，不会再因为紧凑布局被藏掉。",
+    "action": {
+      "type": "open_concierge_draft",
+      "label": "让前台猫帮我看看",
+      "draftPrompt": "请结合当前猫猫球对话里可见的错误、连接诊断和操作卡片，告诉我下一步该怎么处理。"
+    },
+    "owner": "codex-sol"
+  },
+  {
     "id": "feature-f302-portable-governance",
     "kind": "feature",
     "sourceRef": {
@@ -1458,6 +1605,106 @@
       "type": "open_concierge_draft",
       "label": "帮我找文件",
       "draftPrompt": "请打开 Workspace，帮我按文件名或正文找到目标文件并定位到匹配行。"
+    },
+    "owner": "codex-sol"
+  },
+  {
+    "id": "feature-f307-composable-workbench",
+    "kind": "feature",
+    "sourceRef": {
+      "path": "docs/features/F307-composable-workbench.md",
+      "anchor": "## User Journey"
+    },
+    "structureSource": {
+      "path": "packages/web/src/components/workbench/F307ExperienceWorkbench.tsx",
+      "anchor": "F307ExperienceWorkbench"
+    },
+    "bodySource": {
+      "path": "docs/features/F307-composable-workbench.md",
+      "anchor": "Workbench tabs/actions 区的 `+`"
+    },
+    "contexts": ["thinking", "feature_dev", "concierge_open"],
+    "audience": ["cvo", "developer"],
+    "body": "右侧 Workspace 现在会保留你打开的文件、Browser、Terminal 和 Agent Run。进入具体页面后，用 tab 后面的 `+` 回到完整 Workspace Home，再加一个工作现场；已有 tabs 不会消失。",
+    "action": {
+      "type": "open_concierge_draft",
+      "label": "打开工作台",
+      "draftPrompt": "请打开右侧 Workspace，带我保留并切换多个工作现场。"
+    },
+    "owner": "codex-sol"
+  },
+  {
+    "id": "feature-f287-explicit-eli5-html",
+    "kind": "feature",
+    "sourceRef": {
+      "path": "docs/features/F287-memory-cue-plane.md",
+      "anchor": "Post-close hardening: explicit approved Taste consumption"
+    },
+    "structureSource": {
+      "path": "packages/api/src/domains/memory/cue/ExplicitApprovedTasteTriggerCatalog.ts",
+      "anchor": "EXPLICIT_APPROVED_TASTE_TRIGGERS"
+    },
+    "bodySource": {
+      "path": "docs/features/F287-memory-cue-plane.md",
+      "anchor": "公开 `bodySource` 只指向本 feature 的已导出行为合同"
+    },
+    "contexts": ["thinking", "long_running", "concierge_open"],
+    "audience": ["cvo"],
+    "body": "想把复杂概念讲得一眼能懂？直接说「ELI5」；猫会读取已批准的表达偏好，用可视化 HTML 富文本回答，而不是只发 Markdown 长文。",
+    "action": {
+      "type": "open_concierge_draft",
+      "label": "用 ELI5 解释",
+      "draftPrompt": "请用 ELI5 解释这个概念，并按已批准的表达偏好生成可视化 HTML 富文本。"
+    },
+    "owner": "codex-sol"
+  },
+  {
+    "id": "feature-f290-collective",
+    "kind": "feature",
+    "sourceRef": {
+      "path": "docs/features/F290-ai-native-collective.md",
+      "anchor": "Collective Entry and Host Contract"
+    },
+    "structureSource": {
+      "path": "packages/web/src/components/collective/CollectiveLaunchSurface.tsx",
+      "anchor": "CollectiveLaunchSurface"
+    },
+    "bodySource": {
+      "path": "docs/features/F290-ai-native-collective.md",
+      "anchor": "Server owner"
+    },
+    "contexts": ["thinking", "feature_dev", "concierge_open"],
+    "audience": ["cvo", "developer"],
+    "body": "需要跨真人、跨 Café 协作？先用 Human 登录或邀请进入 Collective；要让本地猫参与，再配对 Collective Connector。浏览器直达与 Café 内入口打开同一个世界，登录身份与 endpoint 配对彼此独立。",
+    "action": {
+      "type": "open_capability_surface",
+      "label": "进入 Collective",
+      "surfaceId": "collective"
+    },
+    "owner": "codex-sol"
+  },
+  {
+    "id": "feature-f311-evolution-program",
+    "kind": "feature",
+    "sourceRef": {
+      "path": "docs/features/F311-capability-evolution-workspace.md",
+      "anchor": "Phase 1: 建制与可见（Start & See）"
+    },
+    "structureSource": {
+      "path": "packages/web/src/components/capability-evolution/EvolutionProgramSurface.tsx",
+      "anchor": "EvolutionProgramList"
+    },
+    "bodySource": {
+      "path": "docs/features/F311-capability-evolution-workspace.md",
+      "anchor": "Entry"
+    },
+    "contexts": ["thinking", "feature_dev", "concierge_idle", "concierge_open"],
+    "audience": ["cvo", "developer"],
+    "body": "想持续进化某项能力时，直接说“我们来进化 X”。家里会起草 durable Program；建制进度、typed blocker 和下一步都在 Workspace 可见。",
+    "action": {
+      "type": "open_concierge_draft",
+      "label": "开启 Evolution Program",
+      "draftPrompt": "我们来进化 "
     },
     "owner": "codex-sol"
   }

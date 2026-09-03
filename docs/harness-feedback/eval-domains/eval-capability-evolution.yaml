@@ -1,0 +1,37 @@
+domainId: eval:capability-evolution
+displayName: Capability Evolution Evidence Eval
+descriptionForHuman: 能力演化计划是否接到真实 owner 眼睛，并以独立、可消费、未污染的证据进入评估
+metricGlossaryRef: eval-capability-evolution.metrics.yaml
+systemThreadId: thread_eval_capability_evolution
+evalCat:
+  catId: codex-sol
+  handle: "@codex-sol"
+  model: gpt-5.6-sol
+frequency: weekly
+triggerPolicy:
+  mode: threshold_or_time
+  maxDetectionDelayHours: 168
+  cooldownHours: 24
+  eventSource: evolution-program-stream
+  threshold:
+    counter: connectedOwnerSurfaces
+    crossingAt: 2
+sourceAdapter: f311-evolution-program-owner-refs
+sourceRefsKind: capability-evolution-owner-ref-window
+threadPolicy:
+  role: working-home
+  stateSot: registry
+  allowedContent:
+    - longitudinal-analysis
+    - verdict-discussion
+    - handoff-drafts
+legacyScheduledTaskIds: []
+handoffTargetResolver:
+  featureId: F311
+  ownerCatId: codex-sol
+  threadLookup: feature-thread
+sla:
+  acknowledgeHours: 48
+  reevalWithinHours: 168
+fixtures: []
+enabled: true

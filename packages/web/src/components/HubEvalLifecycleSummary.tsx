@@ -120,6 +120,27 @@ function AvailableLifecycleDetails({
           </p>
         </div>
       ) : null}
+      {lifecycle.custodyDispatchBlocker ? (
+        <div className="mt-3 rounded-md border border-conn-amber-ring bg-conn-amber-bg px-3 py-2 text-xs text-conn-amber-text">
+          <div className="font-medium">
+            执行载体待恢复 · {lifecycle.custodyDispatchBlocker.stage === 'reevaluation' ? '复评' : '责任接单'}
+          </div>
+          <p className="mt-1 leading-relaxed">
+            {lifecycle.custodyDispatchBlocker.stage === 'reevaluation' ? '复评' : '责任'}任务已经建立并持有有效租约；
+            {lifecycle.custodyDispatchBlocker.reasonCode === 'carrier_persist_failed'
+              ? '执行载体尚未持久化'
+              : lifecycle.custodyDispatchBlocker.reasonCode === 'carrier_delivery_failed'
+                ? '执行载体已经持久化，但投递过程失败'
+                : '执行载体已经持久化，但尚未被队列接受'}
+            ；系统会原位重试。
+          </p>
+          <div className="mt-1">
+            task · {lifecycle.custodyDispatchBlocker.taskId}
+            {' · '}lease · {lifecycle.custodyDispatchBlocker.leaseId} · generation{' '}
+            {lifecycle.custodyDispatchBlocker.leaseGeneration}
+          </div>
+        </div>
+      ) : null}
       {lifecycle.escalation ? (
         <div className="mt-3 rounded-md border border-conn-red-ring bg-conn-red-bg px-3 py-2 text-xs text-conn-red-text">
           <span className="font-medium">{escalationLabel(lifecycle.escalation)}</span>

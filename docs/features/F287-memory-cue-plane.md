@@ -4,11 +4,10 @@ related_features: [F200, F209, F221, F231, F256, F260, F263, F276, F281, F282]
 topics: [memory, recall, cue-plane, agentic-recall, decision-opportunity, progressive-disclosure]
 doc_kind: spec
 created: 2026-08-01
-tips_exempt: "F287 改变猫的内部记忆线索与召回路径；Phase C 的 opaque drill/outcome MCP 仅消费尚待 Phase D 接线的 CueEnvelope，工具 description 已承载使用时机与安全边界，当前没有可独立教学的用户入口。"
 description: "让猫在执行过程的真实判断点想起有用记忆，并以有界线索、按需钻取和可失效消费闭合跨 lane 读侧。"
 description_source: human
 description_author: codex-sol
-description_updated_at: 2026-08-02T06:20:00Z
+description_updated_at: 2026-08-27T10:40:00Z
 ---
 
 # F287: Memory Cue Plane（记忆线索与召回闭环）
@@ -62,6 +61,7 @@ operator 于 `0001785580244904-000093-589e005d` 明确授权先立项，并保�
 | Lane 不对称 | Entity 有 alias nudge；Person 主要靠主动 tool；Taste/Profile 没有同等级自动 consumer | “存了”不等于猫能感知 |
 | 生产噪声 | F282 实际浮现过“App / 而言 / commit / 我希望 / 成本”等高背景频率碎片 | 主动 nudge 污染上下文并消耗人的审批注意力 |
 | 消费闭环 | presented / drilled / applied / dismissed 没有统一、无正文的 episode 语义；source correction 又与消费结果混在一起 | 无法判断线索有用、无用，还是底层记忆已经被纠正/失效 |
+| 明确 Taste 应用 | owner 两次明确说 `ELI5`，已批准 F221 Taste 可检索但没有 typed opportunity；手动读到 Index 后仍输出纯 Markdown | retrieved 被误当成 applied，批准的“HTML 富文本优先”没有进入执行合同 |
 | 状态投影 | F281 全部 AC 与代码已落，feature 仍为 `in-progress`，BACKLOG 仍写 `spec`；旧 task 仍出现在本 thread | 子系统完成后整体仍像永久半成品 |
 
 因此当前不是“缺一条更长 prompt”，而是生产质量、可检索性、触发、lane 路由、消费与 lifecycle truth 六处没有由同一个用户旅程闭合。
@@ -77,6 +77,7 @@ operator 于 `0001785580244904-000093-589e005d` 明确授权先立项，并保�
 | R5 | 人物、运行先例、Taste 三种记忆按不同机制被想起 | AC-D1..AC-D3 | three golden journeys | [x] |
 | R6 | 猫能 drill/use/ignore；纠正、遗忘、越权后 cue fail closed | AC-C4, AC-E1, AC-E2 | lifecycle fixtures + UAT | [x] |
 | R7 | 不把完成状态散落成永久半成品 | AC-A2, AC-E4 | feature/BACKLOG/task/cell parity check | [x] |
+| R8 | 明确命中已批准 Taste trigger 时，必须 exact drill 并用真实交付证据闭合 applied | AC-F1..AC-F4 | closed catalog + route/source/callback RED→GREEN | [x] |
 
 ### 覆盖检查
 
@@ -129,6 +130,13 @@ AC-B2 已发现三文件并行 WIP（`context-transport.ts`、`route-helpers.ts`
 - 验证 private scope、cross-owner fail closed、forget 后零 cue、无关事件零污染、预算和去重。
 - 形成 keep/tune/sunset verdict；同步 feature、BACKLOG、task、ownership cell、discussion 与完成索引。
 
+### Post-close hardening: explicit approved Taste consumption
+
+- Catalog v2 增加唯一 closed pair `owner_message / approved_taste_invoked`；v2 trigger registry 当前只接受 `ELI5`，不接受 raw query、全库 top-k 或 LLM intent classifier。
+- producer 只读取当前 direct-owner message 的 `stripStructuralEnvelope` 结果，并要求真实 `sourceMessageId`；history-only、connector/A2A、未知 trigger 都返回零 seed。
+- resolver 只读取 `docs/taste/vignettes/visual-quality-ELI5-pcpjsd.md`，投影阶段不复制 vignette；owner-auth drill 才返回当前 revision 的完整批准内容与 typed `html_widget` application contract。
+- explicit Taste 的 `applied` 必须已有 `presented + drilled`，source revision 仍有效，且同 callback-auth invocation 的 `RichBlockBuffer` 真实存在 `html_widget`。纯 Markdown、只检索/只读 Index 或跨 invocation rich block 都不能记为 applied。
+
 ## User Journey
 
 ### Primary Journey: 猫在真正需要时想起，而不是等人重复
@@ -153,6 +161,7 @@ AC-B2 已发现三文件并行 WIP（`context-transport.ts`、`route-helpers.ts`
 | S2 | decision episode | 猫猫 | zero-step billing failure → operational precedent cue → 交付判断 | replay fixture + gate outcome |
 | S3 | judgment surface | 猫猫 | design/review → Taste dimension map → drill vignette | negative pollution fixture + UAT |
 | S4 | memory lifecycle | operator | 纠正/forget → 同一机会重放 → 零旧 cue | deletion/invalidation fixture |
+| S5 | explicit Taste application | operator + 猫猫 | 当前 owner message 明确 `ELI5` → exact approved vignette cue → drill → `html_widget` → applied | serial/parallel seed + exact source + callback evidence fixture |
 
 ## Acceptance Criteria
 
@@ -205,6 +214,15 @@ Phase D landed evidence: PR #3372 merge `f9d0116f9be0c2eaa612bf907c0106bd38f96de
 - [x] AC-E4: feature、BACKLOG、task、ownership cell、discussion、completed index 与 thread 状态同一次关闭迁移完成；无 orphan task 或“代码 done / 文档 spec”漂移。
 
 Phase E close evidence: PR #3376 merge `e5ead065143bb0fe6fdf997b088ee8240cf9d2c8` 落地三份 metric birth certificate、byte-identical replay 与 content-free lifecycle hardening；PR #3381 merge `7831df17a281df21e0da78b959428c5ca5c1e594` 保证 trusted Billing carrier 在 Redis direct/queued 两条路径同 contract；真实 canonical LL-098 + opaque handle Alpha UAT 暴露 300-token family budget drop 后，PR #3383 merge `1a8b4012e8282de2005c3d0649f58a38e22ce058` 只把 operational precedent budget 调到 420，并保留 person/taste=300 与 737-token whole-cue drop。Alpha HEAD `cf9980b595168dbb5b64250c2e48022ba3ad27cd` 包含上述 merge，3011/3012/4111/6398 健康；Person、Taste、Operational 三条 owner-authenticated journey 与负向矩阵见 `docs/features/evidence/F287/README.md`。三个 family verdict 均为 `keep`，无 aggregate score；production 未重启、未验证。
+
+### Post-close explicit Taste correction
+
+- [x] AC-F1: shared catalog v2 只新增 `owner_message / approved_taste_invoked`，payload 固定为 `triggerKey=ELI5 + sourceMessageId`；unknown key、rawQuery、producer mismatch 均 parse 失败。
+- [x] AC-F2: serial/parallel 只从当前 direct-owner semantic message 生产一次 seed；结构历史命中、connector/A2A、缺 sourceMessageId 与未知 trigger 均为零。
+- [x] AC-F3: cue 只投影 exact F221 source coordinate，drill 才返回完整 current-revision vignette 与 typed `html_widget` contract；tag/revision 漂移按 `source_corrected` fail closed。
+- [x] AC-F4: explicit Taste `applied` 要求 presented、drilled、current source 与同 invocation `html_widget` 四项同时成立；Markdown-only 返回 `409 application_evidence_required`；已提交 request 的 exact retry 不依赖瞬态 buffer 且不新增事件，content-free episode 仍不保存 HTML 或 Taste 正文。
+
+Executable evidence: shared contract **14/14**；F287/F296 targeted API suites **63/63**；shared/API TypeScript builds PASS。生产 `3002/6399` 未触碰；Alpha/live verdict 在本修正合入后单独验证，不从 branch tests 推断。
 
 ## Dependencies
 
@@ -270,4 +288,4 @@ Phase E close evidence: PR #3376 merge `e5ead065143bb0fe6fdf997b088ee8240cf9d2c8
 
 ## Tips Contribution（F244）
 
-`tips_exempt: F287 改变猫的内部记忆线索与召回路径；kickoff 不新增用户可直接操作或发现的产品入口。`
+`feature-f287-explicit-eli5-html` 教用户直接说 `ELI5`，让猫用批准的可视化品味输出 HTML 富文本。公开 `bodySource` 只指向本 feature 的已导出行为合同；runtime 仍从 canonical F221 Taste 读取 exact approved vignette，不复制或外发 `docs/taste/`，也不另造能力真相。

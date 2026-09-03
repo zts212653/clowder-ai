@@ -4,14 +4,15 @@ import { formatMemoryCues } from '../../dist/domains/memory/cue/format-memory-cu
 import { MemoryCuePlaneService } from '../../dist/domains/memory/cue/MemoryCuePlaneService.js';
 import {
   MemoryCueResolverRegistry,
-  RECALL_RESOLVER_ADMISSION_V1,
-  ZERO_ONLY_V1_RESOLVER_FAMILIES,
+  RECALL_RESOLVER_ADMISSION_V3,
+  ZERO_ONLY_V3_RESOLVER_FAMILIES,
 } from '../../dist/domains/memory/cue/MemoryCueResolverRegistry.js';
 import {
   admitRecallOpportunity,
   getRecallOpportunityCatalogEntry,
-  RECALL_OPPORTUNITY_CATALOG_V1,
+  RECALL_OPPORTUNITY_CATALOG_V3,
 } from '../../dist/domains/memory/cue/RecallOpportunityCatalog.js';
+import { EventCueResolver } from '../../dist/domains/memory/cue/resolvers/EventCueResolver.js';
 import { OperationalPrecedentCueResolver } from '../../dist/domains/memory/cue/resolvers/OperationalPrecedentCueResolver.js';
 import { PersonEntityCueResolver } from '../../dist/domains/memory/cue/resolvers/PersonEntityCueResolver.js';
 import { ProfileCueResolver } from '../../dist/domains/memory/cue/resolvers/ProfileCueResolver.js';
@@ -75,6 +76,49 @@ const judgmentOpportunity = {
   },
 };
 
+const explicitTasteOpportunity = {
+  v: 1,
+  kind: 'approved_taste_invoked',
+  opportunityId: 'opportunity-explicit-taste-1',
+  producer: 'owner_message',
+  consumer: 'agent_route',
+  scope,
+  occurredAt: 1_000,
+  payload: {
+    triggerKey: 'ELI5',
+    sourceMessageId: 'message-3',
+  },
+};
+
+const profileOpportunity = {
+  v: 1,
+  kind: 'profile_revision_available',
+  opportunityId: 'opportunity-profile-1',
+  producer: 'profile_repository',
+  consumer: 'agent_route',
+  scope,
+  occurredAt: 1_000,
+  payload: {
+    profileUri: 'cat-cafe-profile://relationship/current',
+    sourceRevision: 'sha256:profile-revision-1',
+  },
+};
+
+const eventOpportunity = {
+  v: 1,
+  kind: 'recent_event_available',
+  opportunityId: 'opportunity-event-1',
+  producer: 'event_memory',
+  consumer: 'agent_route',
+  scope,
+  occurredAt: 1_000,
+  payload: {
+    eventId: 'evt_1',
+    subjectThreadId: scope.threadId,
+    sourceRevision: 'sha256:event-revision-1',
+  },
+};
+
 function source(overrides = {}) {
   return {
     title: 'A bounded source is available',
@@ -120,12 +164,50 @@ function makeHarness(overrides = {}) {
           }
         : overrides.tasteSource;
     },
+    async resolveExplicit(input) {
+      calls.push({ family: 'taste', input });
+      return overrides.explicitTasteSource === undefined
+        ? {
+            triggerKey: 'ELI5',
+            sourcePath: 'docs/taste/vignettes/visual-quality-ELI5-pcpjsd.md',
+            revision: 'taste-vignette-v1',
+            visibility: 'owner_public',
+          }
+        : overrides.explicitTasteSource;
+    },
+  };
+  const profileSource = {
+    async resolve(input) {
+      calls.push({ family: 'profile', input });
+      return overrides.profileSource === undefined
+        ? source({
+            title: 'A current Profile revision is available',
+            anchor: 'profile:cat-cafe-profile://relationship/current',
+            revision: 'sha256:profile-revision-1',
+            drillFamily: 'profile',
+          })
+        : overrides.profileSource;
+    },
+  };
+  const eventSource = {
+    async resolve(input) {
+      calls.push({ family: 'event', input });
+      return overrides.eventSource === undefined
+        ? source({
+            title: 'A recent Event is available',
+            anchor: 'event-memory:evt_1',
+            revision: 'sha256:event-revision-1',
+            drillFamily: 'event',
+          })
+        : overrides.eventSource;
+    },
   };
   const registry = new MemoryCueResolverRegistry([
     new PersonEntityCueResolver(personSource),
     new OperationalPrecedentCueResolver(operationalSource),
     new TasteCueResolver(tasteSource),
-    new ProfileCueResolver(),
+    new ProfileCueResolver(profileSource),
+    new EventCueResolver(eventSource),
     new ProjectKnowledgeCueResolver(),
   ]);
   const service = new MemoryCuePlaneService(registry, overrides.episodeStore);
@@ -135,15 +217,23 @@ function makeHarness(overrides = {}) {
 const createDrillHandle = (input) =>
   `opaque:${input.family}:${input.anchor}:${input.revision}:${input.scope.ownerUserId}`;
 
+// Production handles are encrypted, entropy-dense capabilities. A short test
+// double hides whether the catalog budget can carry the real presentation.
+const productionSizedDrillHandle =
+  'mch1.uOX7C7t5bClBKtMj.qrXdJADzsaRQ6ce-3kwO8VNa0W8PSdEnzUoIB5Bg6mO5_6Rv2WTcVpj38NplHBf_Cf10kDzjabF8_Ug3l53zs2awGZwPer9wsiyWuo_voA.1RjeRSG4837GkoSCJUbWGQ';
+
 describe('F287 RecallOpportunity catalog', () => {
   it('is closed, versioned and binds scope to server truth', () => {
-    assert.equal(RECALL_OPPORTUNITY_CATALOG_V1.version, 1);
+    assert.equal(RECALL_OPPORTUNITY_CATALOG_V3.version, 3);
     assert.deepEqual(
-      RECALL_OPPORTUNITY_CATALOG_V1.entries.map(({ kind, producer }) => ({ kind, producer })),
+      RECALL_OPPORTUNITY_CATALOG_V3.entries.map(({ kind, producer }) => ({ kind, producer })),
       [
         { kind: 'subject_seen', producer: 'entity_nudge' },
         { kind: 'delivery_decision', producer: 'github_ci' },
         { kind: 'judgment_surface_entered', producer: 'workflow_sop' },
+        { kind: 'approved_taste_invoked', producer: 'owner_message' },
+        { kind: 'profile_revision_available', producer: 'profile_repository' },
+        { kind: 'recent_event_available', producer: 'event_memory' },
       ],
     );
     assert.deepEqual(admitRecallOpportunity(subjectOpportunity, scope), subjectOpportunity);
@@ -164,19 +254,40 @@ describe('F287 RecallOpportunity catalog', () => {
 });
 
 describe('F287 MemoryCueResolverRegistry', () => {
-  it('registers all five families while keeping profile/project knowledge zero-only in v1', async () => {
+  it('registers all six families while keeping only project knowledge zero-only in v3', async () => {
     const { registry } = makeHarness();
     assert.deepEqual(registry.families(), [
       'person_entity',
       'operational_precedent',
       'taste',
       'profile',
+      'event',
       'project_knowledge',
     ]);
-    assert.deepEqual(ZERO_ONLY_V1_RESOLVER_FAMILIES, ['profile', 'project_knowledge']);
-    assert.equal(RECALL_RESOLVER_ADMISSION_V1.profile, 'zero_only_v1');
-    assert.equal(RECALL_RESOLVER_ADMISSION_V1.project_knowledge, 'zero_only_v1');
-    assert.deepEqual(await registry.get('profile').resolve(subjectOpportunity, {}), []);
+    assert.deepEqual(ZERO_ONLY_V3_RESOLVER_FAMILIES, ['project_knowledge']);
+    assert.equal(RECALL_RESOLVER_ADMISSION_V3.profile, 'catalog');
+    assert.equal(RECALL_RESOLVER_ADMISSION_V3.event, 'catalog');
+    assert.equal(RECALL_RESOLVER_ADMISSION_V3.project_knowledge, 'zero_only_v3');
+    assert.equal(
+      (
+        await registry.get('profile').resolve(profileOpportunity, {
+          now: 1_000,
+          expiresAt: 301_000,
+          createDrillHandle,
+        })
+      ).length,
+      1,
+    );
+    assert.equal(
+      (
+        await registry.get('event').resolve(eventOpportunity, {
+          now: 1_000,
+          expiresAt: 301_000,
+          createDrillHandle,
+        })
+      ).length,
+      1,
+    );
     assert.deepEqual(await registry.get('project_knowledge').resolve(subjectOpportunity, {}), []);
   });
 
@@ -215,7 +326,7 @@ describe('F287 MemoryCueResolverRegistry', () => {
     );
   });
 
-  it('keeps zero-only v1 families unreachable from every admitted catalog entry', async () => {
+  it('keeps zero-only v3 families unreachable from every admitted catalog entry', async () => {
     let profileCalls = 0;
     let projectCalls = 0;
     const { registry } = makeHarness();
@@ -243,7 +354,14 @@ describe('F287 MemoryCueResolverRegistry', () => {
       return registry.get(family);
     });
     const service = new MemoryCuePlaneService(new MemoryCueResolverRegistry(resolvers));
-    for (const candidate of [subjectOpportunity, deliveryOpportunity, judgmentOpportunity]) {
+    for (const candidate of [
+      subjectOpportunity,
+      deliveryOpportunity,
+      judgmentOpportunity,
+      explicitTasteOpportunity,
+      profileOpportunity,
+      eventOpportunity,
+    ]) {
       await service.resolve({
         candidate,
         serverScope: scope,
@@ -252,17 +370,66 @@ describe('F287 MemoryCueResolverRegistry', () => {
         createDrillHandle,
       });
     }
-    assert.equal(profileCalls, 0);
+    assert.equal(profileCalls, 1);
     assert.equal(projectCalls, 0);
   });
 });
 
 describe('F287 MemoryCuePlaneService', () => {
+  it('admits Profile and Event cues with production-sized drill handles', async () => {
+    for (const [candidate, expectedFamily, sourceProjection] of [
+      [
+        profileOpportunity,
+        'profile',
+        {
+          title: 'A current owner Profile revision is available',
+          summary: 'Drill the bounded approved capsule and use it only to personalize this owner-facing response.',
+          anchor: 'profile:cat-cafe-profile://relationship/current',
+          revision: 'sha256:38047ae158f7443fd1cff652c8a72167a4451f2f85e3a0fe32273bef991ca703',
+          visibility: 'owner_private',
+          drillFamily: 'profile',
+        },
+      ],
+      [
+        eventOpportunity,
+        'event',
+        {
+          title: 'A recent event can establish continuity',
+          summary:
+            'Drill the bounded Event record before using it to establish chronology or continuity in this thread.',
+          anchor: 'event-memory:evt_mtk5wba0djs1nduh',
+          revision: 'sha256:69117d827b74fee6d257f7cf119a28ece0c99157ac72213a922d3d13998a4d6b',
+          asOf: 1_788_357_527_064,
+          visibility: 'owner_private',
+          drillFamily: 'event',
+        },
+      ],
+    ]) {
+      const { service } = makeHarness({
+        ...(expectedFamily === 'profile' ? { profileSource: sourceProjection } : { eventSource: sourceProjection }),
+      });
+      const result = await service.resolve({
+        candidate,
+        serverScope: scope,
+        invocationState: { seenDedupeKeys: new Set() },
+        now: 1_001,
+        createDrillHandle: () => productionSizedDrillHandle,
+      });
+
+      assert.equal(result.status, 'admitted');
+      assert.equal(result.cues.length, 1, `${expectedFamily} cue was dropped by its prompt budget`);
+      assert.match(result.promptSegment, new RegExp(productionSizedDrillHandle.replaceAll('.', '\\.')));
+    }
+  });
+
   it('routes each opportunity to its single admitted lane with no cross-lane fallback', async () => {
     for (const [candidate, expectedFamily] of [
       [subjectOpportunity, 'person_entity'],
       [deliveryOpportunity, 'operational_precedent'],
       [judgmentOpportunity, 'taste'],
+      [explicitTasteOpportunity, 'taste'],
+      [profileOpportunity, 'profile'],
+      [eventOpportunity, 'event'],
     ]) {
       const { calls, service } = makeHarness();
       const result = await service.resolve({
@@ -292,7 +459,7 @@ describe('F287 MemoryCuePlaneService', () => {
         opportunityKind: 'recall',
         producerOwner: candidate.producer,
         consumerScope: { kind: 'invocation', ...scope },
-        entryVersion: `recall-catalog:1:${candidate.kind}:${candidate.producer}`,
+        entryVersion: `recall-catalog:3:${candidate.kind}:${candidate.producer}`,
         subjectKey: `memory-cue:${expectedFamily}:${result.cues[0].source.anchor}`,
         asOf: { kind: 'version', value: result.cues[0].source.revision },
         sourceRefs: [result.cues[0].source.anchor],
@@ -347,7 +514,7 @@ describe('F287 MemoryCuePlaneService', () => {
         sourceRevision: 'revision-1',
         axis: 'consumption',
         consumptionOutcome: 'presented',
-        catalogVersion: 1,
+        catalogVersion: 3,
         resolverVersion: 1,
         occurredAt: subjectOpportunity.occurredAt,
       },

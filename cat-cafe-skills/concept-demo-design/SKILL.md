@@ -1,6 +1,10 @@
 ---
 name: concept-demo-design
 tips_exempt: Existing concept-demo authoring workflow refinement; no new end-user Hub capability surface.
+triggers:
+  - 可证伪技术剖面
+  - 证伪实验台
+  - 技术架构 demo
 description: "把抽象理念、家内 UI/UX 可点稿或端到端用户旅程变成可讲解、可验证的交互 Demo。Use: 做个 demo 让人 get 到、做 F284 式体验 Gate、验证完整用户旅程。Not: 已签字的正式产品前端、已有素材剪辑、PPT、纯视觉探索。Output: 双轴 Demo Contract（判题类型 × 交付车道）+ 确定性交互原型 + 验证记录。"
 ---
 
@@ -13,6 +17,7 @@ Demo 的工作，是把尚未适合直接产品化的问题变成可以亲眼判
 | 当前任务 | 去向 |
 |---|---|
 | 理念还停在文字里，需要让人看见因果变化 | 本 skill，`demo_kind=concept_story` |
+| 技术名词很多，但观众仍无法判断主张是否站得住 | 本 skill 的条件式“可证伪技术剖面” |
 | 正式实现前，需要在家里比较布局、交互、折叠与恢复行为 | 本 skill，`demo_kind=product_experience_gate` |
 | 需要验证用户能否从起点走到目标结果，包括跨面板交接与失败恢复 | 本 skill，`demo_kind=journey_validation` |
 | Demo Contract 已定，需要实现交互前端 | `worktree` + `tdd`，视觉核验用 `browser-preview` |
@@ -122,6 +127,29 @@ Contract 必须记录：
 5. **新世界验证**：改完后用新样本、同题对照、灰度或真实后续行为证明有效。
 6. **拒绝时刻**：适用于自适应系统；展示它怎样拒绝坏尺子、越界反馈或虚假提升。
 
+#### 可证伪技术剖面：把技术名词变成 Claim Bench
+
+只有 Demo 要回答“某项技术主张是否站得住”，并且观众需要亲手检查技术主张时，才触发这一层。普通理念故事、布局比较和用户旅程不为显得专业而补实验台。
+
+故事负责获得注意力；实验台负责赢得信任。
+
+把每项关键技术压成一条可失败的证据链：
+
+~~~text
+主张 → 失效机制 → 技术对象 → 可操纵消融 → verdict → claim ceiling
+~~~
+
+- **主张**必须能输：写清什么观察会推翻它，而不是只写技术名词。
+- **失效机制**先于组件列表：列出至少一个 competing explanation，说明现象还可能由什么造成。
+- **技术对象**落到可指认的状态、算法步骤、数据流或控制面，不用“智能”“进化”代替机制。
+- **可操纵消融**一次只改变一个变量，并保留 control；观众应能亲手制造失败，而不只是切换说明文字。
+- **verdict**由确定规则算出 SUPPORTED、REFUTED 或 UNKNOWN；UNKNOWN 是合法结论。
+- **claim ceiling**限制结论能走多远：单个概念 Demo 不冒充生产效果、因果结论或跨域外推。
+
+外部数字、benchmark、趋势或因果 claim 先走 source-audit；只有存在明确 consumer，且结果会触发 keep、tune 或 sunset 决策时，才把效用问题交给 eval-design。这两者不是 Claim Bench 的必填装饰。
+
+字段模板见 [Demo Contract 的 Claim Bench](refs/demo-contract-template.md#可证伪技术剖面-claim-bench仅在判题是技术主张是否可信时)，展开方法见 [falsifiable-technical-cutaway](refs/falsifiable-technical-cutaway.md)。技术叙事的上游取材与证据边界沿用 [tech-writing 的 7P × 5E 摘要](../tech-writing/SKILL.md#技术叙事的证据剖面)，不在本 Skill 复制第二套理论。
+
 ### `product_experience_gate`
 
 1. **安静默认态**：没有相关工作时，界面能多克制。
@@ -196,6 +224,7 @@ tab chrome 本身不是证据。证据是陌生用户真的创造了一个新工
 | Claim | 机制 |
 |---|---|
 | `demo_kind` 是否选对，Demo 的证据能否回答所声明的判题 | Contract 审计 |
+| 可证伪技术剖面的主张、消融、verdict 与 claim ceiling 是否闭合 | Claim Bench 契约测试 + 确定性状态重放 |
 | 场景顺序、控件、暂停、标签、角色连续性 | 自动化 test / guard |
 | 真实交互 claim 的输入、动作与状态增长 | 语义控件 + 陌生 sentinel 的可重放浏览器旅程；恢复 claim 再加刷新断言 |
 | Workspace / product-shell claim 的用户工作集、异质 surface 与状态连续性 | 从真实入口创建新 typed tab / pane + 跨 surface 切换重放；多 Agent claim 再加后台运行与 exact result-return 证据 |
@@ -224,6 +253,7 @@ tab chrome 本身不是证据。证据是陌生用户真的创造了一个新工
 | 家内 UI 可点稿做成展示站 | 把产品体验判题误当概念宣传 | 选 `product_experience_gate`，从真实产品壳与待裁决变量开工 |
 | 用户旅程只剩几张总结卡 | 用叙事压缩替代真实步骤与交接 | 建 Journey ledger，逐步钉 canonical event、状态与恢复证据 |
 | 做成结论陈列页 | 没定义讲者与观众如何使用 | 先锁观众复述句与讲述节奏 |
+| 把五个技术名词做成五个只换说明文字的按钮 | 展示了分类，没有让 claim 承担失败风险 | 每个关键 claim 配一个可操纵变量、control、消融、确定 verdict 与 claim ceiling |
 | 只有四幕剧本，录不出东西 | 把叙事稿当 Demo | 交付可运行画面与场景控制 |
 | 花两天造真实引擎 | 把“真的 Demo”听成“真的后端” | 先问 claim 是否需要后端；默认纯前端编排 |
 | Skill 写了“复用原生组件”，结果仍做成泛用 SaaS 壳 | 交付对象只写成“观众”，家内体验与外部传播没有 typed lane；弱提醒可被绕过 | 先冻结 `delivery_lane` 与具体视觉真相源；家内 Demo 必须从原生产品壳开工 |
@@ -247,6 +277,9 @@ tab chrome 本身不是证据。证据是陌生用户真的创造了一个新工
 |---|---|---|---|---|
 | “做个让我在 Hub 里点点、决定 Workspace 怎么改的 Demo” | `product_experience_gate` | `internal_product_gate` | 具体产品页面 / 组件 / worktree；比较态；可隐藏开发控制层 | 独立 SaaS 壳或宣传页成为主界面 |
 | “给不了解 Clowder AI 的外部伙伴录一支 60 秒理念 showcase” | `concept_story` | `external_showcase` | 陌生观众导览、因果变化、品牌身份、原型诚实标注 | 堆家内缩写，或把叙事壳冒充生产 UI |
+| “把归因技术讲清，还要让我亲手试出它何时会判错” | `concept_story` + 可证伪技术剖面 | 依受众选择 | 单一 falsifiable claim、competing explanation、control、ablation、确定 verdict、claim ceiling | 按钮只切换技术说明，claim 永远不会输 |
+| “做一支有感染力的品牌愿景故事，不判具体技术主张” | `concept_story` | `external_showcase` | 因果变化、灵魂帧、诚实边界 | 为显得专业强塞五个实验台 |
+| “用论文数字证明我们的运行成本降低 30%” | `concept_story` + 可证伪技术剖面 | `external_showcase` | source-audit provenance、适用对象、可推翻条件、claim ceiling | 把外部 benchmark 直接改写成自家生产效果 |
 | “做个能录屏的 Demo 给我看看” | 由判题决定，默认先问证据 | `internal_product_gate` | 家内体验入口；录屏只是载体 | 因“录屏”自动切去对外风格 |
 | “把从我提出需求、猫调用工具、结果回到 Workspace、失败后恢复这一整条演出来” | `journey_validation` | `internal_product_gate` | Journey ledger、真实 handoff、失败恢复、可判定终态 | 用几个总结卡跳过真实交接 |
 | “先给家里验证完整旅程，以后也想对外发” | `journey_validation` | 先家内、后独立对外入口 | 同一旅程状态模型 + 两种入口与诚实边界 | 一个半产品、半宣传的混合壳 |

@@ -5,20 +5,30 @@ export async function createTestApprovalRegistry(adapters) {
   ]);
   const overrides = new Map(adapters.map((adapter) => [adapter.featureId, adapter]));
   const bindings = Object.fromEntries(
-    APPROVAL_PRODUCER_IDS.map((featureId) => [
-      featureId,
-      {
-        adapter: overrides.get(featureId) ?? {
-          featureId,
-          async listPending() {
-            return [];
-          },
-          async listSettled() {
-            return [];
-          },
+    APPROVAL_PRODUCER_IDS.map((featureId) => {
+      const override = overrides.get(featureId);
+      return [
+        featureId,
+        {
+          adapter: override
+            ? {
+                featureId: override.featureId,
+                listPending: (...args) => override.listPending(...args),
+                listSettled: (...args) => override.listSettled?.(...args) ?? [],
+              }
+            : {
+                featureId,
+                async listPending() {
+                  return [];
+                },
+                async listSettled() {
+                  return [];
+                },
+              },
+          lifecycle: { contractVersion: 1, writerGeneration: featureId === 'F266' ? 'v1' : 'legacy' },
         },
-      },
-    ]),
+      ];
+    }),
   );
   return new ApprovalProducerRegistry(bindings);
 }

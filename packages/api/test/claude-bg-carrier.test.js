@@ -171,6 +171,7 @@ test('Claude bg ownership strips process tokens and persists only its native sto
       },
     });
     assert.equal(fakeSpawn.lastEnv.CAT_CAFE_PROCESS_OWNER_ID, undefined);
+    assert.equal(fakeSpawn.lastEnv.CAT_CAFE_CLI_PROCESS_CONTEXT, 'cat');
     const ownerDirectory = join(ownerDataDir, 'claude-bg-job-owners');
     const [manifestName] = readdirSync(ownerDirectory);
     const manifest = JSON.parse(readFileSync(join(ownerDirectory, manifestName), 'utf8'));

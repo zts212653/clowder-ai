@@ -89,7 +89,7 @@ describe('F093 World Contracts — Schemas', () => {
         constitution: '不允许降智推进',
         status: 'active',
         threadId: 'thread_abc',
-        createdBy: { kind: 'user', id: 'you' },
+        createdBy: { kind: 'user', id: 'operator' },
         createdAt: NOW,
         updatedAt: NOW,
       });
@@ -352,7 +352,7 @@ describe('F093 World Contracts — Schemas', () => {
         summary: '世界规则：不允许时间穿越',
         category: 'world_rule',
         proposedBy: actor,
-        decidedBy: { kind: 'user', id: 'you' },
+        decidedBy: { kind: 'user', id: 'operator' },
         reason: '符合世界观基调',
         createdAt: NOW,
         decidedAt: NOW,

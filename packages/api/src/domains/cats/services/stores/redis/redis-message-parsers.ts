@@ -17,6 +17,7 @@ import type {
 import {
   asrPersonMemoryDynamicSceneEntryV1Schema,
   deliveryDecisionCueCarrierV1Schema,
+  isProviderSemanticEvent,
   MessageBundleCarrierV1Schema,
   MessageContentsSchema,
   writeOpportunityPresentationRetryCarrierV1Schema,
@@ -173,6 +174,7 @@ type ExtraCarrierPersistenceClassification<
  * Every StoredMessage.extra key must be classified when it is introduced.
  */
 type ExtraCarrierPersistence = ExtraCarrierPersistenceClassification<{
+  semanticEvent: 'parsed';
   rich: 'parsed';
   isExplicitPost: 'parsed';
   stream: 'parsed';
@@ -184,6 +186,7 @@ type ExtraCarrierPersistence = ExtraCarrierPersistenceClassification<{
   crossPost: 'parsed';
   coordination: 'parsed';
   localReviewVerdict: 'parsed';
+  legacyLocalReviewDisposition: 'parsed';
   callbackDedup: 'parsed';
   targetCats: 'parsed';
   messageBundle: 'parsed';
@@ -200,6 +203,7 @@ type ExtraCarrierPersistence = ExtraCarrierPersistenceClassification<{
   a2aRouting: 'parsed';
   queueReceipt: 'derived';
   pluginMessage: 'parsed';
+  custodyOfferV1: 'derived';
 }>;
 
 function isNonEmptyString(value: unknown): value is string {
@@ -241,6 +245,43 @@ function parseLocalReviewVerdictCarrier(value: unknown): StoredMessageExtra['loc
           },
         }
       : {}),
+  };
+}
+
+function parseLegacyLocalReviewDispositionCarrier(value: unknown): StoredMessageExtra['legacyLocalReviewDisposition'] {
+  if (typeof value !== 'object' || value === null) return undefined;
+  const candidate = value as Record<string, unknown>;
+  if (
+    !isNonEmptyString(candidate.sourceMessageId) ||
+    candidate.sourceMessageId.length > 200 ||
+    !isNonEmptyString(candidate.leaseId) ||
+    candidate.leaseId.length > 200 ||
+    !Number.isInteger(candidate.generation) ||
+    Number(candidate.generation) < 1 ||
+    !isNonEmptyString(candidate.subjectRef) ||
+    candidate.subjectRef.length > 256 ||
+    !isNonEmptyString(candidate.reviewerCatId) ||
+    candidate.reviewerCatId.length > 100 ||
+    !isNonEmptyString(candidate.predecessorCatId) ||
+    candidate.predecessorCatId.length > 100 ||
+    typeof candidate.reviewedHeadSha !== 'string' ||
+    !/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/.test(candidate.reviewedHeadSha) ||
+    (candidate.verdict !== 'approved' && candidate.verdict !== 'changes_requested') ||
+    !isNonEmptyString(candidate.decisionId) ||
+    candidate.decisionId.length > 200
+  ) {
+    return undefined;
+  }
+  return {
+    sourceMessageId: candidate.sourceMessageId,
+    leaseId: candidate.leaseId,
+    generation: candidate.generation as number,
+    subjectRef: candidate.subjectRef,
+    reviewerCatId: candidate.reviewerCatId,
+    predecessorCatId: candidate.predecessorCatId,
+    reviewedHeadSha: candidate.reviewedHeadSha,
+    verdict: candidate.verdict,
+    decisionId: candidate.decisionId,
   };
 }
 
@@ -310,6 +351,11 @@ export function safeParseExtra(raw: string | undefined): StoredMessage['extra'] 
 
     const result: StoredMessageExtra = {};
     let hasField = false;
+
+    if (isProviderSemanticEvent(parsed.semanticEvent)) {
+      result.semanticEvent = parsed.semanticEvent;
+      hasField = true;
+    }
 
     // Validate rich sub-field shape
     if (parsed.rich && typeof parsed.rich === 'object' && parsed.rich.v === 1 && Array.isArray(parsed.rich.blocks)) {
@@ -453,6 +499,12 @@ export function safeParseExtra(raw: string | undefined): StoredMessage['extra'] 
     const localReviewVerdict = parseLocalReviewVerdictCarrier(parsed.localReviewVerdict);
     if (localReviewVerdict) {
       result.localReviewVerdict = localReviewVerdict;
+      hasField = true;
+    }
+
+    const legacyLocalReviewDisposition = parseLegacyLocalReviewDispositionCarrier(parsed.legacyLocalReviewDisposition);
+    if (legacyLocalReviewDisposition) {
+      result.legacyLocalReviewDisposition = legacyLocalReviewDisposition;
       hasField = true;
     }
 

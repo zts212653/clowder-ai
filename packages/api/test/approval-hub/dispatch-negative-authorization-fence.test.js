@@ -92,7 +92,11 @@ async function createFixture(t, options = {}) {
           actionSuccessorAdmissionService: {
             async admit(input) {
               actionAdmissions.push(input);
-              return { admit: false, outcome: 'safe_wait', lease: { leaseId: 'existing-lease', generation: 1 } };
+              return {
+                admit: false,
+                outcome: 'return_proof_required',
+                lease: { leaseId: 'existing-lease', generation: 1 },
+              };
             },
           },
           invocationQueue: {},
@@ -353,7 +357,7 @@ test('a new structured transfer is blocked before F167 admission, while a persis
     200,
     'existing transition bypasses this fence and reaches F167 admission',
   );
-  assert.equal(existingTransition.json().status, 'safe_wait');
+  assert.equal(existingTransition.json().status, 'return_proof_required');
   assert.equal(fixture.actionAdmissions.length, 1);
 });
 

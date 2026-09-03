@@ -20,7 +20,7 @@ describe('DossierObservationStore (in-memory)', () => {
   const baseInput = (over = {}) => ({
     catId: 'opus',
     content: 'opus 在 F208 review 中连续 3 轮没发现 formatModelName 的 bug',
-    author: 'you',
+    author: 'operator',
     ...over,
   });
 
@@ -33,7 +33,7 @@ describe('DossierObservationStore (in-memory)', () => {
     assert.equal(obs.catId, 'opus');
     assert.equal(obs.content, 'opus 在 F208 review 中连续 3 轮没发现 formatModelName 的 bug');
     assert.equal(obs.provenance.type, 'cvo');
-    assert.equal(obs.provenance.author, 'you');
+    assert.equal(obs.provenance.author, 'operator');
     assert.ok(obs.provenance.date, 'provenance should have a date');
     assert.ok(obs.createdAt > 0, 'should have createdAt timestamp');
   });

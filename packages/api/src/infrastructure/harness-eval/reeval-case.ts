@@ -4,62 +4,18 @@ import {
   illegalCaseTransition as illegal,
   projectResponsibilityBlocker,
   requireCaseAutomation as requireAutomation,
-  requireCaseRootValue as requireNonEmpty,
+  requireCaseLifecycleActor,
   requireCaseOwner as requireOwner,
   TERMINAL_CASE_STATUSES as TERMINAL,
 } from './reeval-case-guards.js';
+import { parseReevalCaseHistory } from './reeval-case-history.js';
 import type { ReevalCaseCycleRoot, ReevalCaseProjection, ReevalCaseRoot } from './reeval-case-types.js';
 import { ReevalClosureProjectionError } from './reeval-closure.js';
-import {
-  EvalLifecycleEventSchema,
-  type EvalLifecycleRef,
-  type EvalVerdictLifecycleStatus,
-} from './reeval-closure-schema.js';
+import { type EvalLifecycleRef, type EvalVerdictLifecycleStatus } from './reeval-closure-schema.js';
 
 export type { ReevalCaseCycleRoot, ReevalCaseProjection, ReevalCaseRoot } from './reeval-case-types.js';
-
 export function projectReevalCase(root: ReevalCaseRoot, rawEvents: readonly unknown[]): ReevalCaseProjection {
-  requireNonEmpty(root.caseId, 'caseId');
-  requireNonEmpty(root.domainId, 'domainId');
-  requireNonEmpty(root.targetOwnerCatId, 'targetOwnerCatId');
-  if (root.assignedEvalCatId !== undefined) requireNonEmpty(root.assignedEvalCatId, 'assignedEvalCatId');
-  if (root.cycles.length === 0)
-    throw new ReevalClosureProjectionError('invalid_root', 'case root cycles must be non-empty');
-  const cycles = new Map(root.cycles.map((cycle) => [cycle.verdictId, cycle]));
-  if (cycles.size !== root.cycles.length) {
-    throw new ReevalClosureProjectionError('invalid_root', 'case root verdict cycles must be unique');
-  }
-
-  const history = rawEvents.map((rawEvent, index) => {
-    const parsed = EvalLifecycleEventSchema.safeParse(rawEvent);
-    if (!parsed.success) {
-      throw new ReevalClosureProjectionError(
-        'invalid_event',
-        `invalid case lifecycle event ${index}: ${parsed.error.message}`,
-      );
-    }
-    const event = parsed.data;
-    if (event.caseId !== root.caseId || event.domainId !== root.domainId) {
-      throw new ReevalClosureProjectionError(
-        'identity_mismatch',
-        `event ${index} does not belong to case ${root.caseId}`,
-      );
-    }
-    if (!cycles.has(event.verdictId)) {
-      throw new ReevalClosureProjectionError(
-        'identity_mismatch',
-        `event ${index} uses unregistered cycle ${event.verdictId}`,
-      );
-    }
-    return event;
-  });
-  if (history[0]?.type !== 'verdict_cycle_observed' && history[0]?.type !== 'legacy_case_migrated') {
-    throw new ReevalClosureProjectionError(
-      'invalid_history',
-      'first case event must establish a verdict cycle or legacy migration',
-    );
-  }
-
+  const { cycles, history } = parseReevalCaseHistory(root, rawEvents);
   let status: EvalVerdictLifecycleStatus = 'open';
   let targetOwnerCatId = root.targetOwnerCatId;
   let lifecycleOwnerCatId: string | undefined;
@@ -68,6 +24,7 @@ export function projectReevalCase(root: ReevalCaseRoot, rawEvents: readonly unkn
   let leaseId: string | undefined;
   let leaseGeneration: number | undefined;
   let responsibilityBlocker: ReevalCaseProjection['responsibilityBlocker'];
+  let custodyDispatchBlocker: ReevalCaseProjection['custodyDispatchBlocker'];
   let mainCommitSha: string | undefined;
   let liveCommitSha: string | undefined;
   let reevalDueAt: string | undefined;
@@ -83,7 +40,6 @@ export function projectReevalCase(root: ReevalCaseRoot, rawEvents: readonly unkn
   const planRefs: EvalLifecycleRef[] = [];
   const actionRefs: EvalLifecycleRef[] = [];
   const reevalRefs: EvalLifecycleRef[] = [];
-
   const resetCycle = (verdictId: string): void => {
     activeVerdictId = verdictId;
     status = cycles.get(verdictId)?.verdict === 'keep_observe' ? 'monitoring' : 'open';
@@ -92,6 +48,7 @@ export function projectReevalCase(root: ReevalCaseRoot, rawEvents: readonly unkn
     leaseId = undefined;
     leaseGeneration = undefined;
     responsibilityBlocker = undefined;
+    custodyDispatchBlocker = undefined;
     mainCommitSha = undefined;
     liveCommitSha = undefined;
     reevalDueAt = undefined;
@@ -106,7 +63,6 @@ export function projectReevalCase(root: ReevalCaseRoot, rawEvents: readonly unkn
     actionRefs.length = 0;
     reevalRefs.length = 0;
   };
-
   const promoteQueuedCycle = (): void => {
     if (!TERMINAL.has(status)) return;
     const activeCycle = cycles.get(activeVerdictId);
@@ -120,7 +76,6 @@ export function projectReevalCase(root: ReevalCaseRoot, rawEvents: readonly unkn
     if (nextCycle) resetCycle(nextCycle.verdictId);
   };
   const isMonitoring = (): boolean => status === 'monitoring';
-
   for (const event of history) {
     if (event.type === 'legacy_case_migrated') {
       assertLegacyCaseMigration(event, cycles, observedVerdictIds.length > 0);
@@ -159,7 +114,6 @@ export function projectReevalCase(root: ReevalCaseRoot, rawEvents: readonly unkn
       }
       continue;
     }
-
     if (event.verdictId !== activeVerdictId) {
       throw new ReevalClosureProjectionError(
         'identity_mismatch',
@@ -173,8 +127,28 @@ export function projectReevalCase(root: ReevalCaseRoot, rawEvents: readonly unkn
       );
     }
     refs.push(...event.refs);
-
     switch (event.type) {
+      case 'case_ready_for_proposal':
+      case 'approval_proposed':
+      case 'approval_anchored':
+      case 'approval_publication_tombstoned':
+      case 'approval_decided':
+      case 'approval_superseded':
+      case 'approval_materialization_started':
+        requireCaseLifecycleActor(event);
+        break;
+      case 'approval_materialized':
+        if (status !== 'open' && !(status === 'escalated' && escalation?.stage === 'acknowledgement')) {
+          illegal(status, event);
+        }
+        requireAutomation(event);
+        taskId = event.taskRef.ownerStateRef;
+        leaseId = event.leaseRef.ownerStateRef;
+        responsibilityBlocker = undefined;
+        custodyDispatchBlocker = undefined;
+        ownerResponseRefs.push(...event.refs);
+        status = 'acknowledged';
+        break;
       case 'responsibility_blocked':
         if (status !== 'open' && !(status === 'escalated' && escalation?.stage === 'acknowledgement'))
           illegal(status, event);
@@ -192,10 +166,38 @@ export function projectReevalCase(root: ReevalCaseRoot, rawEvents: readonly unkn
         leaseId = event.leaseId;
         leaseGeneration = event.leaseGeneration;
         responsibilityBlocker = undefined;
+        custodyDispatchBlocker = undefined;
         lifecycleOwnerCatId = targetOwnerCatId;
         ownerResponseRefs.push(...event.refs);
         status = 'acknowledged';
         break;
+      case 'custody_dispatch_blocked': {
+        const validStage =
+          (event.stage === 'responsibility' &&
+            (status === 'open' || (status === 'escalated' && escalation?.stage === 'acknowledgement'))) ||
+          (event.stage === 'reevaluation' && (status === 'live_active' || isMonitoring()));
+        if (!validStage) illegal(status, event);
+        requireAutomation(event);
+        if (
+          (event.reasonCode === 'carrier_persist_failed' && event.carrierMessageId !== undefined) ||
+          (event.reasonCode !== 'carrier_persist_failed' && event.carrierMessageId === undefined)
+        ) {
+          throw new ReevalClosureProjectionError(
+            'identity_mismatch',
+            'custody dispatch blocker message evidence must match the transport failure stage',
+          );
+        }
+        custodyDispatchBlocker = {
+          eventId: event.eventId,
+          stage: event.stage,
+          reasonCode: event.reasonCode,
+          taskId: event.taskId,
+          leaseId: event.leaseId,
+          leaseGeneration: event.leaseGeneration,
+          ...(event.carrierMessageId ? { carrierMessageId: event.carrierMessageId } : {}),
+        };
+        break;
+      }
       case 'owner_reassigned': {
         const currentOwner = lifecycleOwnerCatId ?? targetOwnerCatId;
         if (event.actor.kind !== 'cvo' && !(event.actor.kind === 'cat' && event.actor.id === currentOwner)) {
@@ -204,7 +206,7 @@ export function projectReevalCase(root: ReevalCaseRoot, rawEvents: readonly unkn
             'owner reassignment requires current owner or operator',
           );
         }
-        if (leaseId)
+        if (leaseId || custodyDispatchBlocker)
           throw new ReevalClosureProjectionError(
             'illegal_transition',
             'active custody must be released before reassignment',
@@ -250,6 +252,7 @@ export function projectReevalCase(root: ReevalCaseRoot, rawEvents: readonly unkn
         reevalTaskId = event.reevalTaskId;
         reevalLeaseId = event.reevalLeaseId;
         reevalLeaseGeneration = event.reevalLeaseGeneration;
+        custodyDispatchBlocker = undefined;
         reevalRefs.push(...event.refs);
         status = 'reeval_pending';
         break;
@@ -293,6 +296,7 @@ export function projectReevalCase(root: ReevalCaseRoot, rawEvents: readonly unkn
           throw new ReevalClosureProjectionError('authority_mismatch', 'suppression requires operator');
         }
         closureReason = event.reason;
+        custodyDispatchBlocker = undefined;
         status = 'suppressed_with_reason';
         break;
       case 'sla_escalated':
@@ -327,6 +331,7 @@ export function projectReevalCase(root: ReevalCaseRoot, rawEvents: readonly unkn
     ...(leaseId ? { leaseId } : {}),
     ...(leaseGeneration ? { leaseGeneration } : {}),
     ...(responsibilityBlocker ? { responsibilityBlocker } : {}),
+    ...(custodyDispatchBlocker ? { custodyDispatchBlocker } : {}),
     ...(mainCommitSha ? { mainCommitSha } : {}),
     ...(liveCommitSha ? { liveCommitSha } : {}),
     ...(activeReeval && reevalDueAt ? { reevalDueAt } : {}),

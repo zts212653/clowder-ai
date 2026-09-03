@@ -1,6 +1,6 @@
 ---
 name: worktree
-tips_exempt: "Renewed 2026-08-27 for link/reference hygiene only; the developer isolation workflow adds no end-user capability or useful Hub discovery moment."
+tips_exempt: "Renewed 2026-08-27 for public-link projection only; the developer isolation workflow adds no end-user capability or useful Hub discovery moment."
 description: 为代码、脚本、API 与第一方执行面创建隔离 Git worktree，并配置 Redis 6398；classifier 放行的 co-creation docs direct push 不进入本流程。
 triggers:
   - "开始开发"
@@ -11,7 +11,7 @@ renamed-from: using-git-worktrees
 
 # Worktree
 
-开始任何非 trivial 的功能开发前，必须拉 worktree 隔离，不要直接在 main 上改代码。Skill / MCP description 如果改到 API route、localhost、script、CLI command、第一方执行面，即使是 ≤5 行，也不按“纯文档免验证”处理：至少 commit 前跑 `pnpm check`；非 trivial 行为改动仍应开 worktree。
+开始任何非 trivial 的功能开发前，必须拉 worktree 隔离，不要直接在 main 上改代码。Skill / MCP description 如果改到 API route、localhost、script、CLI command、第一方执行面，即使只有几行，也不按“纯文档免验证”处理：默认跑 skill reference/surface 与 claim 对应的定向检查；只有五轴实际命中高风险或 targeted 无法覆盖跨包合流风险时才跑 full `pnpm gate`。非 trivial 行为改动仍应开 worktree。
 
 ## Co-Creation Docs 边界
 

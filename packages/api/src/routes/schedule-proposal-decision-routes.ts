@@ -61,6 +61,9 @@ export const scheduleProposalDecisionRoutes: FastifyPluginAsync<ScheduleProposal
           const spec = template.createSpec(effect.task.id, {
             trigger: effect.task.trigger,
             params: effect.task.params,
+            ...(effect.task.entrustedWorkReevaluation
+              ? { entrustedWorkReevaluation: effect.task.entrustedWorkReevaluation }
+              : {}),
             deliveryThreadId: effect.task.deliveryThreadId,
           });
           spec.display = effect.task.display;

@@ -75,6 +75,35 @@ describe('RichBlocks exact forwarding', () => {
     ]);
   });
 
+  it('keeps file forwarding in a separate flow row from copy and download actions', () => {
+    React.act(() => {
+      root.render(
+        <RichBlocks
+          blocks={[
+            {
+              id: 'file-1',
+              kind: 'file',
+              v: 1,
+              fileName: '昇腾算力资源申请-Agent自进化-单独转发这个富块-8-27B场景化后训练.docx',
+              url: '/uploads/resource-request.docx',
+            },
+          ]}
+          messageId="source-anchor"
+          sourceThreadId="source-thread"
+          sourceMessageIds={['source-anchor']}
+        />,
+      );
+    });
+
+    const richBlock = container.querySelector('[data-rich-block-id="file-1"]');
+    const actionDock = richBlock?.querySelector('[data-testid="rich-block-forward-actions"]');
+    const actionSurface = richBlock?.querySelector('[data-testid="rich-block-forward-action-dock"]');
+
+    expect(actionDock?.className).toContain('grid-rows-[0fr]');
+    expect(actionDock?.className).not.toContain('absolute');
+    expect(actionSurface).not.toBeNull();
+  });
+
   it('keeps individually addressable forwarding actions for blocks inside an interactive group', () => {
     React.act(() => {
       root.render(

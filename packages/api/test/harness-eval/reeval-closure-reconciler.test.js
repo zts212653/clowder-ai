@@ -222,6 +222,38 @@ fixtures: []
     assert.equal(planReevalClosureEvents(subject({ root, events: resolved }), '2026-08-01T00:00:00.000Z').length, 0);
   });
 
+  it('keeps v1 reconciliation intact while direct schema-v3 activation is impossible', () => {
+    assert.equal(planReevalClosureEvents(subject(), '2026-07-18T01:00:00.000Z').length, 1);
+    const repairTarget = {
+      featureId: 'F188',
+      ownerCatId: 'codex-sol',
+      version: `repair-target-v1-${'a'.repeat(64)}`,
+      resolutionRef: 'feature-thread-owner:v1:F188:thread_f188:codex-sol',
+      resolvedAt: '2026-07-18T00:00:00.000Z',
+    };
+    const v3 = lifecycleRoot({
+      schemaVersion: 3,
+      caseId: `eval-case-v1-${'b'.repeat(64)}`,
+      findingKey: 'evidence-reader-drilldown-path',
+      findingBinding: {
+        artifactRef: 'docs/harness-feedback/bundles/f313-child/finding.json',
+        artifactSha256: 'c'.repeat(64),
+        analysisDisposition: 'repair',
+        approvalRequirement: { kind: 'required', reason: 'repair' },
+      },
+      repairTarget,
+      ownerAsk: {
+        targetFeatureId: repairTarget.featureId,
+        targetOwnerCatId: repairTarget.ownerCatId,
+        requestedAction: 'repair the evidence reader drilldown path',
+      },
+    });
+    assert.throws(
+      () => planReevalClosureEvents(subject({ root: v3 }), '2026-07-18T01:00:00.000Z'),
+      /schema-v1 roots only/,
+    );
+  });
+
   it('TaskRunner wrapper remains idempotent across repeated gates and a new instance', async () => {
     const eventLog = new MemoryEventLog();
     const template = subject({ acknowledgeHours: 24 });

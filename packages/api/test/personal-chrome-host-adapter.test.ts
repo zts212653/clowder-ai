@@ -11,6 +11,7 @@ import {
   PersonalChromeHostError,
   RefreshablePersonalChromeHostAdapter,
 } from '../src/domains/cats/services/cloud-bridge/personal-chrome-host/personal-chrome-host-adapter.js';
+import { parsePersonalChromeAssistantReturnRequest } from '../src/domains/cats/services/cloud-bridge/personal-chrome-host/protocol.js';
 
 const sockets = new Set<string>();
 const roots = new Set<string>();
@@ -71,6 +72,26 @@ async function startReplyServer(
 }
 
 describe('PersonalChromeHostAdapter', () => {
+  it('fails closed when a list cursor omits or corrupts one identity field', () => {
+    const request = {
+      v: 2,
+      kind: 'list_assistant_returns',
+      requestId: 'assistant-return-invalid-cursor',
+      afterSourceMessageId: 'source-message-9',
+      afterAssistantMessageId: 'conversation-turn-2',
+    };
+
+    assert.throws(() => parsePersonalChromeAssistantReturnRequest(request), /must contain conversation, source/);
+    assert.throws(
+      () =>
+        parsePersonalChromeAssistantReturnRequest({
+          ...request,
+          afterConversationId: 'conversation with spaces',
+        }),
+      /invalid identity token/,
+    );
+  });
+
   it('requires an exact helper, extension, and page-adapter revision receipt', async () => {
     const server = await startReplyServer((envelope) => {
       const request = envelope.request as Record<string, unknown>;
@@ -83,7 +104,7 @@ describe('PersonalChromeHostAdapter', () => {
         hostMessageId: 'chatgpt-user-message-stale',
         observedRevisions: {
           helper: `sha512:${'a'.repeat(128)}`,
-          extension: '0.2.5',
+          extension: '0.2.10',
           pageAdapter: '2026-08-22.1',
         },
       };
@@ -102,8 +123,8 @@ describe('PersonalChromeHostAdapter', () => {
       );
       assert.deepEqual((server.calls[0].request as Record<string, unknown>).expectedRevisions, {
         helper: `sha512:${'a'.repeat(128)}`,
-        extension: '0.2.5',
-        pageAdapter: '2026-08-27.1',
+        extension: '0.2.10',
+        pageAdapter: '2026-09-02.1',
       });
     } finally {
       await server.close();
@@ -268,12 +289,98 @@ describe('PersonalChromeHostAdapter', () => {
             idempotencyKey: 'source-message-9',
             expectedRevisions: {
               helper: helperArtifactRevision,
-              extension: '0.2.5',
-              pageAdapter: '2026-08-27.1',
+              extension: '0.2.10',
+              pageAdapter: '2026-09-02.1',
             },
           },
         },
       ]);
+    } finally {
+      await server.close();
+    }
+  });
+
+  it('lists and acknowledges one durable exact-source assistant return through the paired local socket', async () => {
+    const server = await startReplyServer((envelope) => {
+      const request = envelope.request as Record<string, unknown>;
+      if (request.kind === 'list_assistant_returns') {
+        return {
+          v: 2,
+          kind: 'assistant_returns',
+          requestId: request.requestId,
+          returns: [
+            {
+              conversationId: 'conversation-7',
+              sourceMessageId: 'source-message-9',
+              assistantMessageId: 'conversation-turn-43',
+              content: 'bounded assistant final',
+            },
+          ],
+        };
+      }
+      return {
+        v: 2,
+        kind: 'assistant_return_ack',
+        requestId: request.requestId,
+        status: 'acknowledged',
+      };
+    });
+    let requestNumber = 0;
+    try {
+      const adapter = new PersonalChromeHostAdapter({
+        socketPath: server.socketPath,
+        pairingSecret: 's'.repeat(64),
+        helperArtifactRevision,
+        requestId: () => `assistant-return-${++requestNumber}`,
+      });
+
+      assert.deepEqual(await adapter.list_assistant_returns(), [
+        {
+          conversationId: 'conversation-7',
+          sourceMessageId: 'source-message-9',
+          assistantMessageId: 'conversation-turn-43',
+          content: 'bounded assistant final',
+        },
+      ]);
+      assert.deepEqual(
+        await adapter.list_assistant_returns({
+          conversationId: 'conversation-6',
+          sourceMessageId: 'source-message-8',
+          assistantMessageId: 'conversation-turn-42',
+        }),
+        [
+          {
+            conversationId: 'conversation-7',
+            sourceMessageId: 'source-message-9',
+            assistantMessageId: 'conversation-turn-43',
+            content: 'bounded assistant final',
+          },
+        ],
+      );
+      await adapter.ack_assistant_return('conversation-7', 'source-message-9', 'conversation-turn-43');
+
+      assert.deepEqual(
+        server.calls.map((envelope) => envelope.request),
+        [
+          { v: 2, kind: 'list_assistant_returns', requestId: 'assistant-return-1' },
+          {
+            v: 2,
+            kind: 'list_assistant_returns',
+            requestId: 'assistant-return-2',
+            afterConversationId: 'conversation-6',
+            afterSourceMessageId: 'source-message-8',
+            afterAssistantMessageId: 'conversation-turn-42',
+          },
+          {
+            v: 2,
+            kind: 'ack_assistant_return',
+            requestId: 'assistant-return-3',
+            conversationId: 'conversation-7',
+            sourceMessageId: 'source-message-9',
+            assistantMessageId: 'conversation-turn-43',
+          },
+        ],
+      );
     } finally {
       await server.close();
     }

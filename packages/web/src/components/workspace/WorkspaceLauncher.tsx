@@ -7,11 +7,12 @@ import { WORKSPACE_MODE_META, type WorkspaceMode } from '@/lib/workspace-modes';
 import type { WorkspaceSurface } from '@/stores/chat-types';
 import { useChatStore } from '@/stores/chatStore';
 import { RecentTrajectoryRecall } from './RecentTrajectoryRecall';
+import { WorkspaceLauncherMark } from './WorkspaceLauncherMark';
 import { type LauncherWorkspaceSearch, WorkspaceLauncherSearch } from './WorkspaceLauncherSearch';
 
 export type WorkspaceDevSurface = WorkspaceSurface;
 
-type LauncherDestination =
+export type WorkspaceLauncherDestination =
   | {
       kind: 'surface';
       id: Exclude<WorkspaceDevSurface, 'home'>;
@@ -34,6 +35,13 @@ type LauncherDestination =
       searchTerms: string;
     }
   | {
+      kind: 'workspace';
+      id: 'capability-evolution';
+      label: string;
+      description: string;
+      searchTerms: string;
+    }
+  | {
       kind: 'action';
       id: 'theater';
       label: string;
@@ -41,7 +49,7 @@ type LauncherDestination =
       searchTerms: string;
     };
 
-const WORK_DESTINATIONS: LauncherDestination[] = [
+const WORK_DESTINATIONS: WorkspaceLauncherDestination[] = [
   {
     kind: 'surface',
     id: 'files',
@@ -71,6 +79,13 @@ const WORK_DESTINATIONS: LauncherDestination[] = [
     searchTerms: 'terminal shell cli 终端 命令行',
   },
   {
+    kind: 'workspace',
+    id: 'capability-evolution',
+    label: '能力进化',
+    description: '让猫猫与系统持续变得更好',
+    searchTerms: 'capability evolution program 能力 进化 成长',
+  },
+  {
     kind: 'surface',
     id: 'browser',
     label: '页面预览',
@@ -79,7 +94,7 @@ const WORK_DESTINATIONS: LauncherDestination[] = [
   },
 ];
 
-const THREAD_DESTINATIONS: LauncherDestination[] = [
+const THREAD_DESTINATIONS: WorkspaceLauncherDestination[] = [
   {
     kind: 'host',
     id: 'status',
@@ -97,11 +112,11 @@ const THREAD_DESTINATIONS: LauncherDestination[] = [
 ];
 
 const MODE_GROUPS: Array<{ label: string; destinations: Array<Exclude<WorkspaceMode, 'dev'>> }> = [
-  { label: '组织工作', destinations: ['tasks', 'schedule', 'approval'] },
+  { label: '组织工作', destinations: ['team', 'needs-me', 'product-schedule', 'tasks', 'schedule', 'approval'] },
   { label: '回看与理解', destinations: ['recall', 'trajectory', 'artifacts', 'community', 'eval'] },
 ];
 
-function modeDestination(mode: Exclude<WorkspaceMode, 'dev'>): LauncherDestination {
+function modeDestination(mode: Exclude<WorkspaceMode, 'dev'>): WorkspaceLauncherDestination {
   const meta = WORKSPACE_MODE_META[mode];
   return {
     kind: 'mode',
@@ -112,85 +127,13 @@ function modeDestination(mode: Exclude<WorkspaceMode, 'dev'>): LauncherDestinati
   };
 }
 
-function ModeMark({ mode }: { mode: WorkspaceMode | 'status' | 'theater' }) {
-  const paths: Record<WorkspaceMode | 'status' | 'theater', ReactNode> = {
-    dev: <path d="M8 4 3 8l5 4M12 4l5 4-5 4M11 2 9 14" />,
-    recall: <path d="M8 3a3 3 0 0 0-3 3 3 3 0 0 0 0 6 3 3 0 0 0 3-3m0-6a3 3 0 0 1 3 3 3 3 0 0 1 0 6 3 3 0 0 1-3-3" />,
-    schedule: (
-      <>
-        <circle cx="8" cy="8" r="6" />
-        <path d="M8 4v4l3 2" />
-      </>
-    ),
-    tasks: (
-      <>
-        <circle cx="8" cy="8" r="6" />
-        <path d="m5 8 2 2 4-4" />
-      </>
-    ),
-    community: (
-      <>
-        <circle cx="6" cy="6" r="2.5" />
-        <circle cx="11.5" cy="7" r="2" />
-        <path d="M2.5 14c.5-3 2-4.5 4-4.5S10 11 10.5 14M10 10c2 0 3 1.5 3.5 4" />
-      </>
-    ),
-    artifacts: (
-      <>
-        <path d="m8 2 6 3-6 3-6-3 6-3Z" />
-        <path d="m2 8 6 3 6-3M2 11l6 3 6-3" />
-      </>
-    ),
-    approval: (
-      <>
-        <path d="M5 2h6l2 2v10H3V2h2" />
-        <path d="m5 9 2 2 4-4M5 5h5" />
-      </>
-    ),
-    trajectory: (
-      <>
-        <circle cx="4" cy="4" r="1.5" />
-        <circle cx="12" cy="12" r="1.5" />
-        <path d="M4 5.5v3A3.5 3.5 0 0 0 7.5 12h3" />
-      </>
-    ),
-    eval: (
-      <>
-        <path d="M3 14V8M8 14V3M13 14v-4" />
-        <path d="M2 14h12" />
-      </>
-    ),
-    status: (
-      <>
-        <circle cx="8" cy="8" r="6" />
-        <path d="M8 7v4M8 4.5h.01" />
-      </>
-    ),
-    theater: (
-      <>
-        <rect x="2" y="3" width="12" height="10" rx="2" />
-        <path d="m7 6 4 2-4 2V6Z" />
-      </>
-    ),
-  };
-
-  return (
-    <svg
-      aria-hidden="true"
-      className="h-5 w-5"
-      viewBox="0 0 16 16"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.4"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-    >
-      {paths[mode]}
-    </svg>
-  );
-}
-
-function DestinationCard({ destination, onSelect }: { destination: LauncherDestination; onSelect: () => void }) {
+function DestinationCard({
+  destination,
+  onSelect,
+}: {
+  destination: WorkspaceLauncherDestination;
+  onSelect: () => void;
+}) {
   const testId =
     destination.kind === 'surface'
       ? `workspace-launcher-dev-${destination.id}`
@@ -204,7 +147,7 @@ function DestinationCard({ destination, onSelect }: { destination: LauncherDesti
       className="group flex min-h-20 w-full items-center gap-3 rounded-xl border border-cafe-subtle/75 bg-[var(--console-card-bg)] px-3.5 py-3 text-left text-cafe-black transition-[border-color,background-color,transform] hover:-translate-y-px hover:border-cafe-accent/35 hover:bg-cafe-surface"
     >
       <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-cafe-accent/10 text-cafe-accent">
-        <ModeMark mode={destination.kind === 'surface' ? 'dev' : destination.id} />
+        <WorkspaceLauncherMark mode={destination.kind === 'surface' ? 'dev' : destination.id} />
       </span>
       <span className="min-w-0 flex-1">
         <span className="block text-sm font-semibold tracking-tight">{destination.label}</span>
@@ -228,6 +171,7 @@ function DestinationCard({ destination, onSelect }: { destination: LauncherDesti
 
 export function WorkspaceLauncher({
   onSelectDevSurface,
+  onSelectDestination,
   onOpenStatus,
   threadId,
   defaultCatId = 'opus',
@@ -235,6 +179,7 @@ export function WorkspaceLauncher({
   workspaceSearch,
 }: {
   onSelectDevSurface?: (surface: WorkspaceDevSurface) => void;
+  onSelectDestination?: (destination: WorkspaceLauncherDestination) => void;
   onOpenStatus?: () => void;
   threadId?: string;
   defaultCatId?: string;
@@ -242,6 +187,7 @@ export function WorkspaceLauncher({
   workspaceSearch?: LauncherWorkspaceSearch;
 }) {
   const setWorkspaceMode = useChatStore((state) => state.setWorkspaceMode);
+  const openTeamSubject = useChatStore((state) => state.openTeamSubject);
   const [query, setQuery] = useState('');
   const normalizedQuery = query.trim().toLocaleLowerCase();
 
@@ -271,17 +217,19 @@ export function WorkspaceLauncher({
     !normalizedQuery ||
     '陪伴 语音陪伴 会议伴随 朗读 录音 转写 voice companion meeting transcript'.includes(normalizedQuery);
 
-  const selectDestination = (destination: LauncherDestination) => {
+  const selectDestination = (destination: WorkspaceLauncherDestination) => {
     if (destination.kind === 'surface') {
       setWorkspaceMode('dev');
       onSelectDevSurface?.(destination.id);
     } else if (destination.kind === 'mode') {
-      setWorkspaceMode(destination.id);
+      if (destination.id === 'team') openTeamSubject(null);
+      else setWorkspaceMode(destination.id);
     } else if (destination.kind === 'host') {
       onOpenStatus?.();
-    } else if (threadId) {
+    } else if (destination.kind === 'action' && threadId) {
       openTheaterReplay(threadId);
     }
+    onSelectDestination?.(destination);
   };
 
   return (

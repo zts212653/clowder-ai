@@ -7,8 +7,9 @@ created: 2026-08-07
 community_issue: "clowder-ai#1303"
 description: "把用户持久数据从可重建代码投影中迁出，以一个与 cwd/worktree 无关的 canonical data root 服务源码与桌面用户。"
 description_source: human
-description_author: landy
+description_author: operator
 description_updated_at: 2026-08-11T13:29:00Z
+tips_exempt: "2026-09-02 public identity and timeline clarification only; canonical data-root production cutover remains paused and no user action or runtime migration was enabled."
 ---
 
 # F289: Canonical Data Root — 用户数据离开 runtime 投影

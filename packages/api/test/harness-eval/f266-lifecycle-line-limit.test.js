@@ -9,6 +9,7 @@ const lifecycleTestNames = readdirSync(testDir)
   .filter(
     (name) =>
       name.includes('lifecycle') ||
+      name.includes('eval-repair-approval') ||
       name.includes('reeval-closure') ||
       name.includes('reeval-case') ||
       name.includes('eval-verdict-closure'),

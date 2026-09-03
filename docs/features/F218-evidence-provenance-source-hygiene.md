@@ -4,7 +4,7 @@ related_features: [F086, F192, F203, F200, F152, F163]
 topics: [harness-engineering, meta-cognition, source-audit, evidence-quality, search-reliability]
 doc_kind: spec
 created: 2026-05-31
-tips_exempt: historical gate-truth correction only; no new user action or capability surface
+tips_exempt: "2026-09-02 public identity and provenance projection only; source-hygiene policy and source-audit workflow behavior are unchanged with no new user action."
 ---
 
 # F218: Evidence Provenance & Source Hygiene — 外部证据溯源与信源卫生
@@ -19,7 +19,7 @@ tips_exempt: historical gate-truth correction only; no new user action or capabi
 
 三猫圆桌诊断（@opus + @opus47 + @codex）：**失效在触发器缺口，不在能力**——猫被追问时展现了完整批判性能力（追溯营销博客、识别回声室、做代际校验），但日常引用时没有 dispatcher 把批判能力绑到"引用外部数据"这个动作上。
 
-operator experience（2026-05-31）："不能只靠 landy 拉闸——agent 领域我能拉，但如果聊的是达芬奇生平或者博士论文研究，你们交出一份看起来非常有道理实则胡说八道的东西，不是因为你们偷懒，是你们被外部不可靠信息源污染还没警惕。"
+operator experience（2026-05-31）："不能只靠 operator 拉闸——agent 领域我能拉，但如果聊的是达芬奇生平或者博士论文研究，你们交出一份看起来非常有道理实则胡说八道的东西，不是因为你们偷懒，是你们被外部不可靠信息源污染还没警惕。"
 
 这不是幻觉问题（模型自己编），是**外部证据污染问题**（模型被不可靠来源带跑了还没警觉）。搜索结果不是证据，只是候选线索；一旦我们把候选线索写进 research、PPT、ADR，它就会污染后续猫的判断链。
 

@@ -1,8 +1,12 @@
 #!/usr/bin/env node
 import {
+  cleanupStaleRedisDevLeases,
   cleanupStaleRedisTestLeases,
+  redisDevRegistryDir,
   redisTestRegistryDir,
+  removeRedisDevLease,
   removeRedisTestLease,
+  writeRedisDevLease,
   writeRedisTestLease,
 } from '../../../scripts/lib/redis-test-leases.mjs';
 
@@ -24,39 +28,61 @@ function positiveInteger(value, label) {
   return parsed;
 }
 
+function reportCleanup(result, prefix, preservedNoun) {
+  for (const lease of result.live) {
+    console.error(`[${prefix}] preserving live lease on port ${lease.port} (owner pid ${lease.owner.pid})`);
+  }
+  for (const lease of result.unknown) {
+    console.error(`[${prefix}] cannot prove lease owner dead on port ${lease.port}; preserving ${preservedNoun}`);
+  }
+  for (const file of result.invalidFiles) {
+    console.error(`[${prefix}] invalid lease metadata preserved for manual inspection: ${file}`);
+  }
+}
+
+function requiredLeaseFile(args) {
+  if (!args['lease-file']) throw new Error(`${args.command} requires --lease-file`);
+  return args['lease-file'];
+}
+
 function main() {
   const args = parseArgs(process.argv.slice(2));
   const registryDir = redisTestRegistryDir();
-  if (args.command === 'cleanup') {
-    const result = cleanupStaleRedisTestLeases(registryDir);
-    for (const lease of result.live) {
-      console.error(`[redis-test] preserving live lease on port ${lease.port} (owner pid ${lease.owner.pid})`);
-    }
-    for (const lease of result.unknown) {
-      console.error(`[redis-test] cannot prove lease owner dead on port ${lease.port}; preserving instance`);
-    }
-    for (const file of result.invalidFiles) {
-      console.error(`[redis-test] invalid lease metadata preserved for manual inspection: ${file}`);
-    }
-    return;
+  const devRegistryDir = redisDevRegistryDir();
+  const handlers = {
+    cleanup: () => reportCleanup(cleanupStaleRedisTestLeases(registryDir), 'redis-test', 'instance'),
+    'cleanup-dev': () => reportCleanup(cleanupStaleRedisDevLeases(devRegistryDir), 'redis-dev', 'metadata'),
+    register: () => {
+      const leaseFile = writeRedisTestLease({
+        port: positiveInteger(args.port, 'port'),
+        redisPid: positiveInteger(args['redis-pid'], 'redis-pid'),
+        dataDir: args['data-dir'],
+        ownerPid: positiveInteger(args['owner-pid'], 'owner-pid'),
+        registryDir,
+      });
+      process.stdout.write(`${leaseFile}\n`);
+    },
+    'register-dev': () => {
+      const leaseFile = writeRedisDevLease({
+        port: positiveInteger(args.port, 'port'),
+        redisPid: positiveInteger(args['redis-pid'], 'redis-pid'),
+        dataDir: args['data-dir'],
+        ownerPid: positiveInteger(args['owner-pid'], 'owner-pid'),
+        projectRoot: args['project-root'],
+        registryDir: devRegistryDir,
+      });
+      process.stdout.write(`${leaseFile}\n`);
+    },
+    remove: () => removeRedisTestLease(requiredLeaseFile(args), registryDir),
+    'remove-dev': () => removeRedisDevLease(requiredLeaseFile(args), devRegistryDir),
+  };
+  const handler = handlers[args.command];
+  if (!handler) {
+    throw new Error(
+      'usage: redis-test-lease-cli.mjs <cleanup|register|remove|cleanup-dev|register-dev|remove-dev> [options]',
+    );
   }
-  if (args.command === 'register') {
-    const leaseFile = writeRedisTestLease({
-      port: positiveInteger(args.port, 'port'),
-      redisPid: positiveInteger(args['redis-pid'], 'redis-pid'),
-      dataDir: args['data-dir'],
-      ownerPid: positiveInteger(args['owner-pid'], 'owner-pid'),
-      registryDir,
-    });
-    process.stdout.write(`${leaseFile}\n`);
-    return;
-  }
-  if (args.command === 'remove') {
-    if (!args['lease-file']) throw new Error('remove requires --lease-file');
-    removeRedisTestLease(args['lease-file'], registryDir);
-    return;
-  }
-  throw new Error('usage: redis-test-lease-cli.mjs <cleanup|register|remove> [options]');
+  handler();
 }
 
 try {

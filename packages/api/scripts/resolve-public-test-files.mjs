@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { existsSync } from 'node:fs';
 import { readdir, readFile } from 'node:fs/promises';
 import { posix, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -133,40 +134,48 @@ function assertEntryExpiresOnFormat(entry) {
   }
 }
 
-function assertAuditDate(audit, entry) {
+function assertAuditDate(audit, entry, field) {
   if (!ISO_DATE_PATTERN.test(audit.reviewedOn)) {
     throw new Error(
-      `public test exclusion "${entry.id}" audit.reviewedOn must be in YYYY-MM-DD format, got: ${audit.reviewedOn}`,
+      `public test exclusion "${entry.id}" ${field}.reviewedOn must be in YYYY-MM-DD format, got: ${audit.reviewedOn}`,
     );
   }
   const parsed = new Date(`${audit.reviewedOn}T00:00:00Z`);
   if (Number.isNaN(parsed.getTime()) || parsed.toISOString().slice(0, 10) !== audit.reviewedOn) {
-    throw new Error(`public test exclusion "${entry.id}" audit.reviewedOn is not a valid calendar date`);
+    throw new Error(`public test exclusion "${entry.id}" ${field}.reviewedOn is not a valid calendar date`);
+  }
+}
+
+function assertAuditRecord(entry, audit, field) {
+  if (!audit || typeof audit !== 'object' || Array.isArray(audit)) {
+    throw new Error(`public test exclusion "${entry.id}" is missing required ${field} object`);
+  }
+  for (const auditField of REQUIRED_AUDIT_FIELDS) {
+    if (audit[auditField] === undefined || audit[auditField] === null || audit[auditField] === '') {
+      throw new Error(`public test exclusion "${entry.id}" ${field} is missing required field: ${auditField}`);
+    }
+  }
+  assertAuditDate(audit, entry, field);
+  if (!SHA_PATTERN.test(audit.sourceHead) || !SHA_PATTERN.test(audit.publicHead)) {
+    throw new Error(
+      `public test exclusion "${entry.id}" ${field} sourceHead/publicHead must be full 40-character SHAs`,
+    );
+  }
+  if (!AUDIT_STATUSES.has(audit.status)) {
+    throw new Error(`public test exclusion "${entry.id}" ${field} status is invalid: ${audit.status}`);
+  }
+  if (!Number.isSafeInteger(audit.matchedFileCount) || audit.matchedFileCount <= 0) {
+    throw new Error(`public test exclusion "${entry.id}" ${field} matchedFileCount must be a positive integer`);
+  }
+  if (!SHA256_PATTERN.test(audit.matchedFilesHash)) {
+    throw new Error(`public test exclusion "${entry.id}" ${field} matchedFilesHash must be a SHA-256 hex digest`);
   }
 }
 
 function assertEntryAudit(entry) {
-  const audit = entry.audit;
-  if (!audit || typeof audit !== 'object' || Array.isArray(audit)) {
-    throw new Error(`public test exclusion "${entry.id}" is missing required audit object`);
-  }
-  for (const field of REQUIRED_AUDIT_FIELDS) {
-    if (audit[field] === undefined || audit[field] === null || audit[field] === '') {
-      throw new Error(`public test exclusion "${entry.id}" audit is missing required field: ${field}`);
-    }
-  }
-  assertAuditDate(audit, entry);
-  if (!SHA_PATTERN.test(audit.sourceHead) || !SHA_PATTERN.test(audit.publicHead)) {
-    throw new Error(`public test exclusion "${entry.id}" audit sourceHead/publicHead must be full 40-character SHAs`);
-  }
-  if (!AUDIT_STATUSES.has(audit.status)) {
-    throw new Error(`public test exclusion "${entry.id}" audit status is invalid: ${audit.status}`);
-  }
-  if (!Number.isSafeInteger(audit.matchedFileCount) || audit.matchedFileCount <= 0) {
-    throw new Error(`public test exclusion "${entry.id}" audit matchedFileCount must be a positive integer`);
-  }
-  if (!SHA256_PATTERN.test(audit.matchedFilesHash)) {
-    throw new Error(`public test exclusion "${entry.id}" audit matchedFilesHash must be a SHA-256 hex digest`);
+  assertAuditRecord(entry, entry.audit, 'audit');
+  if (entry.publicAudit !== undefined) {
+    assertAuditRecord(entry, entry.publicAudit, 'publicAudit');
   }
 }
 
@@ -178,7 +187,7 @@ function compileEntryPattern(entry) {
   }
 }
 
-function assertEntryAgainstFilesystem(entry, pattern, allTestFiles, today) {
+function assertEntryAgainstFilesystem(entry, pattern, allTestFiles, today, auditProfile) {
   if (entry.expiresOn < today) {
     throw new Error(`public test exclusion "${entry.id}" is expired (${entry.expiresOn} < ${today})`);
   }
@@ -186,10 +195,11 @@ function assertEntryAgainstFilesystem(entry, pattern, allTestFiles, today) {
   if (matchedFiles.length === 0) {
     throw new Error(`public test exclusion "${entry.id}" matches no current test files`);
   }
+  const audit = auditProfile === 'public' ? (entry.publicAudit ?? entry.audit) : entry.audit;
   const actualHash = publicTestExclusionMatchHash(matchedFiles);
-  if (entry.audit.matchedFileCount !== matchedFiles.length || entry.audit.matchedFilesHash !== actualHash) {
+  if (audit.matchedFileCount !== matchedFiles.length || audit.matchedFilesHash !== actualHash) {
     throw new Error(
-      `public test exclusion "${entry.id}" audited match inventory drift (expected ${entry.audit.matchedFileCount}/${entry.audit.matchedFilesHash}, got ${matchedFiles.length}/${actualHash})`,
+      `public test exclusion "${entry.id}" audited match inventory drift (expected ${audit.matchedFileCount}/${audit.matchedFilesHash}, got ${matchedFiles.length}/${actualHash})`,
     );
   }
   return matchedFiles;
@@ -200,6 +210,10 @@ export function validatePublicTestExclusions(registry, options = {}) {
 
   const allTestFiles = options.allTestFiles ?? [];
   const today = options.today ?? isoToday();
+  const auditProfile = options.auditProfile ?? 'source';
+  if (auditProfile !== 'source' && auditProfile !== 'public') {
+    throw new Error(`unsupported public test exclusion audit profile: ${auditProfile}`);
+  }
   const seenIds = new Set();
   const compiledEntries = [];
 
@@ -212,7 +226,7 @@ export function validatePublicTestExclusions(registry, options = {}) {
     }
     seenIds.add(entry.id);
     const pattern = compileEntryPattern(entry);
-    const matchedFiles = assertEntryAgainstFilesystem(entry, pattern, allTestFiles, today);
+    const matchedFiles = assertEntryAgainstFilesystem(entry, pattern, allTestFiles, today, auditProfile);
     compiledEntries.push({ ...entry, regex: pattern, matchedFiles });
   }
 
@@ -231,11 +245,15 @@ export function validatePublicTestExclusions(registry, options = {}) {
 export async function resolvePublicTestFiles(options = {}) {
   const packageRoot = options.packageRoot ?? fileURLToPath(new URL('..', import.meta.url));
   const configPath = options.configPath ?? DEFAULT_CONFIG_PATH;
+  const repoRoot = resolve(packageRoot, '..', '..');
+  const auditProfile =
+    options.auditProfile ?? (existsSync(resolve(repoRoot, '.sync-provenance.json')) ? 'public' : 'source');
   const allTestFiles = await listTestFiles(resolve(packageRoot, 'test'));
   const registry = await loadPublicTestExclusions({ configPath });
   const validated = validatePublicTestExclusions(registry, {
     allTestFiles,
     today: options.today,
+    auditProfile,
   });
   const compiledEntries = validated.compiledEntries;
 

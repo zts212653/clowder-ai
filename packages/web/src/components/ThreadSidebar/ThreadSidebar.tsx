@@ -975,8 +975,29 @@ export function ThreadSidebar({ onClose, className, routeThreadId }: ThreadSideb
   const activeTabIsEmpty =
     activeTabContent.kind === 'project' ? threadGroups.length === 0 : activeTabContent.threads.length === 0;
 
+  const selectedThreadInActiveTab = useMemo(
+    () => activeTabContent.threads.find((thread) => thread.id === currentThreadId),
+    [activeTabContent.threads, currentThreadId],
+  );
+  const revealMissingVirtualThread = useCallback(
+    (threadId: string) => {
+      if (activeTabContent.kind !== 'flat') return;
+      const index = activeTabContent.threads.findIndex((thread) => thread.id === threadId);
+      if (index >= 0) virtualThreadListRef.current?.ensureIndexVisible(index);
+    },
+    [activeTabContent],
+  );
+
   // F095 Phase E: Scroll anchor — keeps visible content in place when threads reorder
-  const { onScroll: handleScrollAnchor } = useScrollAnchor(scrollContainerRef, projectThreadGroups);
+  const { onScroll: handleScrollAnchor } = useScrollAnchor(scrollContainerRef, activeTabContent.threads, {
+    selectedThread: selectedThreadInActiveTab
+      ? {
+          threadId: selectedThreadInActiveTab.id,
+          isWorking: selectedThreadInActiveTab.presence?.status === 'working',
+        }
+      : null,
+    onSelectedThreadMissing: revealMissingVirtualThread,
+  });
 
   // F095: Collapse state with localStorage persistence + search/active auto-expand
   const { isCollapsed, toggleGroup, expandAll, collapseAll } = useCollapseState({

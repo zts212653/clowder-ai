@@ -14,14 +14,17 @@ const desktopPostInstallScriptPath = path.resolve(
 );
 const desktopInstallerScriptPath = path.resolve(import.meta.dirname, '../../../desktop/installer/cat-cafe.iss');
 
-test('api build script avoids unix-only file copy commands', async () => {
+test('api build uses the public native command without the prepared-artifact wrapper', async () => {
   const packageJson = JSON.parse(await readFile(packageJsonPath, 'utf8'));
   const buildScript = packageJson.scripts?.build;
 
   assert.equal(typeof buildScript, 'string');
+  assert.doesNotMatch(buildScript, /gate-prepared-artifacts/);
+  assert.match(buildScript, /pnpm --dir \.\.\/shared build/);
   assert.match(buildScript, /node \.\/scripts\/copy-marketplace-catalog-data\.mjs/);
   assert.doesNotMatch(buildScript, /\bmkdir -p\b/);
   assert.doesNotMatch(buildScript, /\bcp\s+src\/marketplace\/catalog-data/);
+  assert.equal(packageJson.scripts?.['build:actual'], undefined);
 });
 
 test('api test script builds mcp-server with workspace dependencies first', async () => {

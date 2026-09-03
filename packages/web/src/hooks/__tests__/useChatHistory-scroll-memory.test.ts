@@ -1,9 +1,11 @@
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { ThreadChatHistoryAdmissionProvider } from '@/components/thread-chat/ThreadChatRuntimeProvider';
 import type { ChatMessage, ThreadState } from '@/stores/chat-types';
 import { useChatStore } from '@/stores/chatStore';
 import { apiFetch } from '@/utils/api-client';
+import { CHAT_LAYOUT_CHANGED_EVENT } from '@/utils/chat-layout-change';
 import { MESSAGE_VIEWPORT_MOUNTED_EVENT, MOUNT_DEFERRED_MESSAGE_EVENT } from '@/utils/scrollToMessage';
 import { __resetPendingTeleportForTest, setPendingTeleport } from '@/utils/teleport';
 import { useChatHistory } from '../useChatHistory';
@@ -14,13 +16,17 @@ vi.mock('@/utils/api-client', () => ({
 
 let capturedHook: ReturnType<typeof useChatHistory> | null = null;
 
-function HookHost({ threadId }: { threadId: string }) {
+function HookProbe({ threadId }: { threadId: string }) {
   capturedHook = useChatHistory(threadId);
   return React.createElement(
     'div',
     { ref: capturedHook.scrollContainerRef },
     React.createElement('div', { ref: capturedHook.messagesEndRef }),
   );
+}
+
+function HookHost({ threadId }: { threadId: string }) {
+  return React.createElement(ThreadChatHistoryAdmissionProvider, null, React.createElement(HookProbe, { threadId }));
 }
 
 function makeMsg(id: string, timestamp: number): ChatMessage {
@@ -807,6 +813,56 @@ describe('useChatHistory scroll memory (#27)', () => {
     expect(scrollTop.get()).toBe(460);
   });
 
+  it('turns a widget disclosure into an offset anchor instead of following the old bottom anchor', async () => {
+    const threadId = 'thread-layout-widget-disclosure';
+    const messages = [makeMsg('m1', 1), makeMsg('m2', 2)];
+
+    useChatStore.setState({
+      currentThreadId: threadId,
+      messages,
+      hasMore: false,
+      isLoadingHistory: false,
+      threadStates: { [threadId]: makeThreadState(messages) },
+    });
+
+    await act(async () => {
+      root.render(React.createElement(HookHost, { threadId }));
+    });
+
+    const scrollEl = capturedHook!.scrollContainerRef.current!;
+    const scrollTop = defineMutableNumberProp(scrollEl, 'scrollTop', 400);
+    defineMutableNumberProp(scrollEl, 'clientHeight', 600);
+    defineMutableNumberProp(scrollEl, 'scrollHeight', 1000);
+    const endEl = capturedHook!.messagesEndRef.current!;
+    endEl.scrollIntoView = vi.fn(() => scrollTop.set(460));
+    cancelInitialRestoreWithWheel(scrollEl, 1);
+
+    act(() => capturedHook?.handleScroll());
+
+    let anchorTop = 340;
+    const anchor = document.createElement('div');
+    anchor.getBoundingClientRect = () => ({ top: anchorTop }) as DOMRect;
+    scrollEl.appendChild(anchor);
+    anchorTop = 380;
+
+    act(() => {
+      window.dispatchEvent(
+        new CustomEvent(CHAT_LAYOUT_CHANGED_EVENT, {
+          detail: { viewportAnchor: { element: anchor, viewportTop: 340, fallbackScrollTop: 400 } },
+        }),
+      );
+    });
+
+    expect(scrollTop.get()).toBe(440);
+    expect(endEl.scrollIntoView).not.toHaveBeenCalled();
+
+    act(() => {
+      window.dispatchEvent(new Event(CHAT_LAYOUT_CHANGED_EVENT));
+      flushAnimationFrames();
+    });
+    expect(endEl.scrollIntoView).not.toHaveBeenCalled();
+  });
+
   it('does not hijack scroll on layout-change events when the user is reading above the bottom', async () => {
     const threadId = 'thread-layout-offset';
     const messages = [makeMsg('m1', 1), makeMsg('m2', 2)];
@@ -847,5 +903,52 @@ describe('useChatHistory scroll memory (#27)', () => {
 
     expect(endEl.scrollIntoView).not.toHaveBeenCalled();
     expect(scrollTop.get()).toBe(200);
+  });
+
+  it('makes explicit jump-to-latest own the anchor before deferred rows mount', async () => {
+    const threadId = 'thread-latest-button-race';
+    const messages = [makeMsg('anchor-message', 1), makeMsg('tail-message', 2)];
+
+    useChatStore.setState({
+      currentThreadId: threadId,
+      messages,
+      hasMore: false,
+      isLoadingHistory: false,
+      threadStates: { [threadId]: makeThreadState(messages) },
+    });
+
+    await act(async () => root.render(React.createElement(HookHost, { threadId })));
+
+    const scrollEl = capturedHook!.scrollContainerRef.current!;
+    const scrollTop = defineMutableNumberProp(scrollEl, 'scrollTop', 200);
+    defineMutableNumberProp(scrollEl, 'clientHeight', 600);
+    defineMutableNumberProp(scrollEl, 'scrollHeight', 1200);
+    scrollEl.getBoundingClientRect = () => ({ top: 100, bottom: 700 }) as DOMRect;
+    appendMessageBoundary(scrollEl, 'anchor-message', () => ({
+      top: 80 + 200 - scrollTop.get(),
+      bottom: 260 + 200 - scrollTop.get(),
+    }));
+
+    cancelInitialRestoreWithWheel(scrollEl, -1);
+    act(() => capturedHook?.handleScroll());
+
+    const endEl = capturedHook!.messagesEndRef.current!;
+    endEl.scrollIntoView = vi.fn((options?: ScrollIntoViewOptions) => {
+      scrollTop.set(options?.behavior === 'smooth' ? 350 : 600);
+    });
+
+    expect(capturedHook?.jumpToLatest).toBeTypeOf('function');
+    act(() => capturedHook?.jumpToLatest());
+    expect(scrollTop.get()).toBe(350);
+
+    act(() => capturedHook?.handleScroll());
+    act(() => {
+      window.dispatchEvent(new CustomEvent(MESSAGE_VIEWPORT_MOUNTED_EVENT, { detail: { messageId: 'older-row' } }));
+      flushAnimationFrames();
+    });
+
+    expect(scrollTop.get()).toBe(600);
+    expect(endEl.scrollIntoView).toHaveBeenNthCalledWith(1, { behavior: 'smooth' });
+    expect(endEl.scrollIntoView).toHaveBeenNthCalledWith(2, { behavior: 'auto' });
   });
 });

@@ -1,20 +1,23 @@
 'use client';
 
+import type { ActiveExecutionProjection } from '@cat-cafe/shared';
 import { useMemo } from 'react';
 import { useCatData } from '@/hooks/useCatData';
 import { resolveCatDisplayName } from '@/lib/cat-display-name';
 import { useActiveExecutionStore } from '@/stores/activeExecutionStore';
 import { ExecutionCancelButton } from '../ExecutionCancelButton';
+import { managedCommandActivityLabel } from '../managed-command-activity-label';
 
 interface WorkspaceNowSurfaceProps {
   repository?: { name: string; branch: string };
+  onSelectExecution?: (execution: ActiveExecutionProjection) => void;
 }
 
-function runningLabel(kind: 'live_invocation' | 'managed_command'): string {
-  return kind === 'managed_command' ? '托管命令' : '实时回合';
+function runningLabel(execution: ActiveExecutionProjection): string {
+  return execution.kind === 'managed_command' ? managedCommandActivityLabel(execution.activity) : '实时回合';
 }
 
-export function WorkspaceNowSurface({ repository }: WorkspaceNowSurfaceProps) {
+export function WorkspaceNowSurface({ repository, onSelectExecution }: WorkspaceNowSurfaceProps) {
   const { getCatById } = useCatData();
   const executionsByKey = useActiveExecutionStore((state) => state.executionsByKey);
   const hydration = useActiveExecutionStore((state) => state.hydration);
@@ -91,9 +94,19 @@ export function WorkspaceNowSurface({ repository }: WorkspaceNowSurfaceProps) {
                   {resolveCatDisplayName(execution.catId, getCatById)}
                 </div>
                 <div className="mt-0.5 truncate text-micro text-cafe-secondary">
-                  {execution.threadTitle ?? execution.threadId} · {runningLabel(execution.kind)}
+                  {execution.threadTitle ?? execution.threadId} · {runningLabel(execution)}
                 </div>
               </div>
+              {onSelectExecution && execution.kind === 'live_invocation' && (
+                <button
+                  type="button"
+                  onClick={() => onSelectExecution(execution)}
+                  className="rounded-lg border border-cafe-subtle px-2.5 py-1 text-micro font-semibold text-cafe-secondary transition-colors hover:bg-cafe-surface hover:text-cafe"
+                  data-testid="workspace-open-running-object"
+                >
+                  打开
+                </button>
+              )}
               <ExecutionCancelButton execution={execution} label="停止" />
             </article>
           ))}

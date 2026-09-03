@@ -82,7 +82,7 @@ describe('MCP Callback Tools', () => {
     assert.equal(capturedOptions.headers['x-callback-token'], 'test-token');
   });
 
-  test('handlePostMessage forwards the exact F247 source binding fields', async () => {
+  test('handlePostMessage forwards only the exact F247 source anchor', async () => {
     const { handlePostMessage } = await import('../dist/tools/callback-tools.js');
     let capturedOptions;
     globalThis.fetch = async (_url, options) => {
@@ -93,12 +93,11 @@ describe('MCP Callback Tools', () => {
     await handlePostMessage({
       content: 'source-bound cloud return',
       replyTo: 'source-message-7',
-      cloudReturnBinding: 'cbr1.aW52LWNsb3Vk.signature',
     });
 
     const body = JSON.parse(capturedOptions.body);
     assert.equal(body.replyTo, 'source-message-7');
-    assert.equal(body.cloudReturnBinding, 'cbr1.aW52LWNsb3Vk.signature');
+    assert.equal('cloudReturnBinding' in body, false);
   });
 
   test('handlePostMessage rejects an invalid action subjectRef before sending or queueing a callback', async () => {
@@ -218,6 +217,35 @@ describe('MCP Callback Tools', () => {
     assert.equal(result.isError, undefined);
     assert.ok(capturedUrl.endsWith('/api/callbacks/complete-a2a-dispatch'));
     assert.deepEqual(JSON.parse(capturedOptions.body), { disposition: 'handled' });
+    assert.equal(capturedOptions.headers['x-invocation-id'], 'test-invocation');
+    assert.equal(capturedOptions.headers['x-callback-token'], 'test-token');
+  });
+
+  test('handleUpdateEntrustedWork forwards one typed nonterminal Task-owner action', async () => {
+    const { handleUpdateEntrustedWork } = await import('../dist/tools/callback-tools.js');
+    let capturedUrl;
+    let capturedOptions;
+    globalThis.fetch = async (url, options) => {
+      capturedUrl = url;
+      capturedOptions = options;
+      return { ok: true, json: async () => ({ status: 'updated' }) };
+    };
+
+    const result = await handleUpdateEntrustedWork({
+      taskId: 'task-f310',
+      expectedRevision: 2,
+      time: { reviewBy: null },
+      artifactRefs: ['artifact:ppt:final'],
+    });
+
+    assert.equal(result.isError, undefined);
+    assert.ok(capturedUrl.endsWith('/api/callbacks/update-entrusted-work'));
+    assert.deepEqual(JSON.parse(capturedOptions.body), {
+      taskId: 'task-f310',
+      expectedRevision: 2,
+      time: { reviewBy: null },
+      artifactRefs: ['artifact:ppt:final'],
+    });
     assert.equal(capturedOptions.headers['x-invocation-id'], 'test-invocation');
     assert.equal(capturedOptions.headers['x-callback-token'], 'test-token');
   });
@@ -719,7 +747,7 @@ describe('MCP Callback Tools', () => {
     assert.equal(body.content, 'hello from another thread');
   });
 
-  test('handleCrossPostMessage forwards the exact F247 source binding fields', async () => {
+  test('handleCrossPostMessage forwards only the exact F247 source anchor', async () => {
     const { handleCrossPostMessage } = await import('../dist/tools/callback-tools.js');
     let capturedOptions;
     globalThis.fetch = async (_url, options) => {
@@ -732,13 +760,12 @@ describe('MCP Callback Tools', () => {
       content: '@codex-sol source-bound cloud return',
       targetCats: ['codex-sol'],
       replyTo: 'source-message-8',
-      cloudReturnBinding: 'cbr1.aW52LWNsb3Vk.signature',
     });
 
     const body = JSON.parse(capturedOptions.body);
     assert.equal(body.threadId, 'thread-source-bound');
     assert.equal(body.replyTo, 'source-message-8');
-    assert.equal(body.cloudReturnBinding, 'cbr1.aW52LWNsb3Vk.signature');
+    assert.equal('cloudReturnBinding' in body, false);
   });
 
   test('handleCrossPostMessage forwards a typed local verdict with its terminal delivery', async () => {

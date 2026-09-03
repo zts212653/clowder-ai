@@ -129,7 +129,12 @@ type RegisterToolConfig = {
     destructiveHint: boolean;
     openWorldHint: boolean;
   };
+  _meta?: Record<string, unknown>;
 };
+
+export function projectSchemaDeliveryMeta(definition: Pick<ToolDef, 'policy'>): Record<string, unknown> | undefined {
+  return definition.policy.schemaDelivery.policy === 'always-visible' ? { 'anthropic/alwaysLoad': true } : undefined;
+}
 
 // ── F254 Phase B1: In-memory freshness notice state (per MCP server process = per invocation) ──
 const freshnessNoticeState = { toolCallCount: 0, noticeDeliveredCount: 0, lastNoticeToolCallNum: 0 };
@@ -194,6 +199,7 @@ function registerTools(server: McpServer, tools: readonly ToolDef[], env: Toolse
   ) => void;
   for (const tool of tools) {
     const annotations = tool.annotations;
+    const deliveryMeta = projectSchemaDeliveryMeta(tool);
     const postMessagePrincipal =
       tool.name === 'cat_cafe_post_message' ? resolvePostMessageRegistrationPrincipal(env) : null;
     // Distinguish Zod raw shape (callback tools) from plain JSON Schema (limb tools).
@@ -211,7 +217,12 @@ function registerTools(server: McpServer, tools: readonly ToolDef[], env: Toolse
     }
     registerExplicit(
       tool.name,
-      { description: tool.description, inputSchema: zodSchema, annotations },
+      {
+        description: tool.description,
+        inputSchema: zodSchema,
+        annotations,
+        ...(deliveryMeta ? { _meta: deliveryMeta } : {}),
+      },
       async (args: never) => {
         const result = await tool.handler(args);
         const typed = {

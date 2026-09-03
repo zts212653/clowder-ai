@@ -95,6 +95,11 @@ describe('F167 default-thread hold user fence', () => {
             audits.push(audit);
             return true;
           },
+          setTaskEnabledWithAudit(taskId, enabled, audit) {
+            if (!dynamicTaskStore.setEnabled(taskId, enabled)) return false;
+            audits.push(audit);
+            return true;
+          },
         },
         cancelManagedWakeIfTaskMatches(taskId, threadId, catId) {
           managedCancelCalls.push({ taskId, threadId, catId });

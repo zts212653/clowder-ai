@@ -1,6 +1,6 @@
 'use client';
 
-import type { SettledApprovalItem } from '@cat-cafe/shared';
+import type { SettledApprovalHubItem } from '@cat-cafe/shared';
 import { useMemo, useState } from 'react';
 import { SettledHistoryCard } from './SettledHistoryCard';
 
@@ -10,7 +10,7 @@ const DAY_MS = 86_400_000;
 
 export interface ApprovalHistoryGroup {
   label: '今天' | '本周' | '更早';
-  items: SettledApprovalItem[];
+  items: SettledApprovalHubItem[];
 }
 
 function startOfDay(epochMs: number): number {
@@ -19,11 +19,11 @@ function startOfDay(epochMs: number): number {
   return date.getTime();
 }
 
-export function groupSettledApprovals(items: SettledApprovalItem[], now = Date.now()): ApprovalHistoryGroup[] {
+export function groupSettledApprovals(items: SettledApprovalHubItem[], now = Date.now()): ApprovalHistoryGroup[] {
   const todayStart = startOfDay(now);
   const weekStart = todayStart - 6 * DAY_MS;
   const sorted = [...items].sort((left, right) => right.decidedAt - left.decidedAt);
-  const buckets: Record<ApprovalHistoryGroup['label'], SettledApprovalItem[]> = {
+  const buckets: Record<ApprovalHistoryGroup['label'], SettledApprovalHubItem[]> = {
     今天: [],
     本周: [],
     更早: [],
@@ -41,7 +41,7 @@ export function groupSettledApprovals(items: SettledApprovalItem[], now = Date.n
 }
 
 interface ApprovalHistoryListProps {
-  items: SettledApprovalItem[];
+  items: SettledApprovalHubItem[];
   now?: number;
 }
 
@@ -61,7 +61,7 @@ export function ApprovalHistoryList({ items, now }: ApprovalHistoryListProps) {
             <h3 className="text-micro font-semibold text-cafe-interactive/55">{group.label}</h3>
             <span className="text-micro tabular-nums text-cafe-interactive/30">{group.items.length}</span>
           </div>
-          <div className="divide-y divide-cafe-subtle/20">
+          <div className="space-y-2 px-3 py-3">
             {group.items.map((item) => (
               <SettledHistoryCard key={item.proposalId} item={item} />
             ))}

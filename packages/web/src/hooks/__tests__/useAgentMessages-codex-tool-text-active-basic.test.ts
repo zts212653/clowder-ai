@@ -66,6 +66,31 @@ describe('Codex active path — tool work-log + text converge', () => {
     expect(streamBubbles[0]!.toolEvents?.length ?? 0).toBeGreaterThan(0);
   });
 
+  it('keeps a file_change tool card when its semantic diff augments the native carrier', () => {
+    const parent = 'parent-file-change';
+    const turn = 'turn-file-change';
+    useChatStore.setState({ catInvocations: { codex: { invocationId: parent, turnInvocationId: turn } } });
+    harness.render();
+    harness.send({
+      ...tool(parent, 1000, turn),
+      toolName: 'file_change',
+      toolInput: { status: 'completed', changes: [{ path: 'src/a.ts', kind: 'update' }] },
+      semanticEvent: {
+        v: 1,
+        id: 'diff-active-1',
+        kind: 'diff',
+        occurredAt: 1000,
+        stage: 'completed',
+        summary: '1 个文件变更',
+      },
+    });
+
+    const streamBubbles = flatCodexStreamBubbles();
+    expect(streamBubbles).toHaveLength(1);
+    expect(streamBubbles[0]?.toolEvents?.some((event) => event.label.includes('file_change'))).toBe(true);
+    expect(useChatStore.getState().messages.some((message) => message.id === 'semantic:diff-active-1')).toBe(false);
+  });
+
   it('[multi-round-trip] two tool+text round-trips on one turn stay ONE stream bubble', () => {
     const PARENT = 'parent-inv-a2a';
     const TURN = 'turn-inv-codex';

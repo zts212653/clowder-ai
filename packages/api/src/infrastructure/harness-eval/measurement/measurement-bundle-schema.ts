@@ -240,6 +240,18 @@ export const MeasurementBundleResultSchema = z
           .strict(),
       })
       .strict(),
+    /**
+     * The comparison this result was scored against. OPTIONAL and additive: every historical
+     * result predates the field and stays valid without it, and a consumer that needs a baseline
+     * must read its absence as "the owner declared none" rather than substituting the cohort.
+     */
+    baseline: z
+      .object({
+        ref: nonEmpty,
+        sha256,
+      })
+      .strict()
+      .optional(),
     decisionProcedureVersionSetHash: sha256,
     metrics: z.array(MeasurementResultMetricSchema).min(1),
     decision: z.discriminatedUnion('status', [UsableDecisionSchema, InsufficientDecisionSchema]),

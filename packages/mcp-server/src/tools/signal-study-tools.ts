@@ -246,7 +246,6 @@ export const signalStudyTools = [
       action: 'close',
       risk: { level: 'destructive', openWorld: false },
       runtimeProfiles: ['full'],
-      targetExposure: 'profile-gated',
     },
   }),
   defineTool({
@@ -263,7 +262,6 @@ export const signalStudyTools = [
       action: 'update',
       risk: { level: 'destructive', openWorld: false },
       runtimeProfiles: ['full'],
-      targetExposure: 'profile-gated',
     },
   }),
   defineTool({

@@ -12,7 +12,7 @@ const MESSAGE_TYPES = new Set(['text', 'assistant', 'user', 'system']);
 const MAX_KEY_MESSAGES = 3;
 const MAX_KEY_MESSAGE_LENGTH = 140;
 
-interface TerminalEvidence {
+export interface InvocationTerminalEvidence {
   status: Exclude<InvocationTrajectoryStatus, 'running' | 'done'>;
   reason: string;
 }
@@ -66,7 +66,9 @@ function structuredReason(event: Record<string, unknown>): string | undefined {
   return undefined;
 }
 
-function terminalEvidence(event: Record<string, unknown>): TerminalEvidence | undefined {
+export function projectInvocationTerminalEvidence(
+  event: Record<string, unknown>,
+): InvocationTerminalEvidence | undefined {
   const reason = structuredReason(event);
   const normalized = reason?.toLowerCase() ?? '';
   if (normalized.includes('timeout') || normalized.includes('timed out')) {
@@ -88,13 +90,13 @@ function selectTerminal(group: TranscriptEvent[]): {
   status: InvocationTrajectoryStatus;
   reason?: string;
 } {
-  let error: TerminalEvidence | undefined;
-  let cancelled: TerminalEvidence | undefined;
-  let timeout: TerminalEvidence | undefined;
+  let error: InvocationTerminalEvidence | undefined;
+  let cancelled: InvocationTerminalEvidence | undefined;
+  let timeout: InvocationTerminalEvidence | undefined;
   let done = false;
   for (const envelope of group) {
     done ||= eventType(envelope) === 'done';
-    const evidence = terminalEvidence(envelope.event);
+    const evidence = projectInvocationTerminalEvidence(envelope.event);
     if (!evidence) continue;
     if (evidence.status === 'timeout') timeout ??= evidence;
     else if (evidence.status === 'cancelled') cancelled ??= evidence;

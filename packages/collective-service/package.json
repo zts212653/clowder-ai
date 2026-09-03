@@ -1,0 +1,30 @@
+{
+  "name": "@cat-cafe/collective-service",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "scripts": {
+    "build": "pnpm --dir ../shared build && pnpm --dir ../collective-client build && tsc",
+    "clean": "rm -rf dist",
+    "dev": "pnpm --dir ../collective-client build && tsx watch src/cli.ts",
+    "lint": "tsc --noEmit",
+    "start": "node dist/cli.js",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@cat-cafe/collective-client": "workspace:*",
+    "@cat-cafe/shared": "workspace:*",
+    "zod": "^3.22.4"
+  },
+  "devDependencies": {
+    "@types/node": "^20.19.31",
+    "tsx": "^4.21.0",
+    "typescript": "^5.9.3",
+    "vitest": "^4.0.18"
+  },
+  "engines": {
+    "node": ">=24.0.0"
+  }
+}

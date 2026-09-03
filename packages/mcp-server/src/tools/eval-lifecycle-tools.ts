@@ -51,6 +51,18 @@ export interface RecordEvalLifecycleInput {
   agentKeyCatId?: string;
 }
 
+export const proposeEvalRepairInputSchema = {
+  caseActionRef: nonEmpty.max(500).describe('Opaque F266 case/action ref emitted by the canonical reconciler.'),
+  clientMessageId: nonEmpty.max(240).describe('Retry-stable idempotency key; never treated as identity or authority.'),
+  agentKeyCatId,
+};
+
+export interface ProposeEvalRepairInput {
+  caseActionRef: string;
+  clientMessageId: string;
+  agentKeyCatId?: string;
+}
+
 export async function handleRecordEvalLifecycle(input: RecordEvalLifecycleInput): Promise<ToolResult> {
   const { verdictId, agentKeyCatId, action: lifecycleAction, ...base } = input;
   return callbackPost(
@@ -58,6 +70,11 @@ export async function handleRecordEvalLifecycle(input: RecordEvalLifecycleInput)
     { ...base, ...lifecycleAction },
     { agentKeyCatId },
   );
+}
+
+export async function handleProposeEvalRepair(input: ProposeEvalRepairInput): Promise<ToolResult> {
+  const { agentKeyCatId, ...body } = input;
+  return callbackPost('/api/callbacks/propose-eval-repair', body, { agentKeyCatId });
 }
 
 export const evalLifecycleTools = [
@@ -74,6 +91,23 @@ export const evalLifecycleTools = [
     governance: {
       implementationExport: 'handleRecordEvalLifecycle',
       action: 'update',
+      risk: { level: 'write', openWorld: false },
+      runtimeProfiles: ['full', 'agent-key'],
+    },
+  }),
+  defineTool({
+    name: 'cat_cafe_propose_eval_repair',
+    description:
+      'Submit one canonical F266 case/action ref to the shared F246 Approval lifecycle. ' +
+      'Use when: the F266 reconciler exposed an actionable repair cycle that requires owner approval. ' +
+      'NOT for: observe/insufficient findings, caller-authored owner/target/permission data, direct Task/F167 lease creation, or mutation. ' +
+      'Output: published/not_required/blocked with a canonical proposal ref. ' +
+      'GOTCHA: clientMessageId is idempotency only; invocation principal and Approval origin are derived by the server.',
+    inputSchema: proposeEvalRepairInputSchema,
+    handler: handleProposeEvalRepair,
+    governance: {
+      implementationExport: 'handleProposeEvalRepair',
+      action: 'create',
       risk: { level: 'write', openWorld: false },
       runtimeProfiles: ['full', 'agent-key'],
     },

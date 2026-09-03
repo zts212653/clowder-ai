@@ -7,6 +7,7 @@ import type {
   ScheduleMutationProposal,
   ScheduleMutationTaskDefinition,
 } from '@cat-cafe/shared';
+import { producerAttentionReevaluationLinkV1Schema } from '@cat-cafe/shared';
 import type Database from 'better-sqlite3';
 import type { DynamicTaskDef } from './DynamicTaskStore.js';
 
@@ -32,6 +33,7 @@ interface DynamicTaskRow {
   template_id: string;
   trigger_json: string;
   params_json: string;
+  entrusted_work_reevaluation_json: string | null;
   display_json: string;
   delivery_thread_id: string | null;
   enabled: number;
@@ -96,6 +98,13 @@ export function getDynamicTask(db: Database.Database, id: string): ScheduleMutat
     templateId: row.template_id,
     trigger: JSON.parse(row.trigger_json) as ScheduleMutationTaskDefinition['trigger'],
     params: JSON.parse(row.params_json) as Record<string, unknown>,
+    ...(row.entrusted_work_reevaluation_json
+      ? {
+          entrustedWorkReevaluation: producerAttentionReevaluationLinkV1Schema.parse(
+            JSON.parse(row.entrusted_work_reevaluation_json),
+          ),
+        }
+      : {}),
     display: JSON.parse(row.display_json) as ScheduleMutationTaskDefinition['display'],
     deliveryThreadId: row.delivery_thread_id,
     enabled: row.enabled === 1,
@@ -107,13 +116,14 @@ export function getDynamicTask(db: Database.Database, id: string): ScheduleMutat
 export function insertDynamicTask(db: Database.Database, task: ScheduleMutationTaskDefinition): void {
   db.prepare(
     `INSERT INTO dynamic_task_defs
-      (id, template_id, trigger_json, params_json, display_json, delivery_thread_id, enabled, created_by, created_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      (id, template_id, trigger_json, params_json, entrusted_work_reevaluation_json, display_json, delivery_thread_id, enabled, created_by, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(
     task.id,
     task.templateId,
     JSON.stringify(task.trigger),
     JSON.stringify(task.params),
+    task.entrustedWorkReevaluation ? JSON.stringify(task.entrustedWorkReevaluation) : null,
     JSON.stringify(task.display),
     task.deliveryThreadId,
     task.enabled ? 1 : 0,
@@ -158,6 +168,26 @@ export function setDynamicTaskEnabledWithAudit(
   assertDirectMutationAudit(audit, action, taskId);
   return db.transaction(() => {
     const result = db.prepare('UPDATE dynamic_task_defs SET enabled = ? WHERE id = ?').run(enabled ? 1 : 0, taskId);
+    if (result.changes !== 1) return false;
+    insertScheduleMutationAudit(db, audit);
+    return true;
+  })();
+}
+
+export function updateDynamicTaskParamsAndEnabledWithAudit(
+  db: Database.Database,
+  taskId: string,
+  currentParams: Record<string, unknown>,
+  nextParams: Record<string, unknown>,
+  enabled: boolean,
+  audit: ScheduleMutationAuditEntry,
+): boolean {
+  const action: ScheduleMutationAuditAction = enabled ? 'resume' : 'pause';
+  assertDirectMutationAudit(audit, action, taskId);
+  return db.transaction(() => {
+    const result = db
+      .prepare('UPDATE dynamic_task_defs SET params_json = ?, enabled = ? WHERE id = ? AND params_json = ?')
+      .run(JSON.stringify(nextParams), enabled ? 1 : 0, taskId, JSON.stringify(currentParams));
     if (result.changes !== 1) return false;
     insertScheduleMutationAudit(db, audit);
     return true;

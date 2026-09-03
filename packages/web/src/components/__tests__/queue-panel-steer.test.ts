@@ -38,31 +38,33 @@ const PROCESSING_ENTRY: QueueEntry = {
   status: 'processing',
 };
 
+const FAILED_RECEIPT = {
+  version: 1 as const,
+  entryId: QUEUED_ENTRY.id,
+  targets: [
+    {
+      catId: 'opus',
+      state: 'failed' as const,
+      attempts: [
+        {
+          id: 'q1:opus:3',
+          targetCatId: 'opus',
+          sequence: 3,
+          state: 'failed' as const,
+          createdAt: NOW - 100,
+          updatedAt: NOW,
+          terminalReason: 'invocation_failed' as const,
+        },
+      ],
+    },
+  ],
+  reminderAttempts: [],
+};
+
 const FAILED_ENTRY: QueueEntry = {
   ...QUEUED_ENTRY,
   targetStates: { opus: 'failed' },
-  queueReceipt: {
-    version: 1,
-    entryId: QUEUED_ENTRY.id,
-    targets: [
-      {
-        catId: 'opus',
-        state: 'failed',
-        attempts: [
-          {
-            id: 'q1:opus:3',
-            targetCatId: 'opus',
-            sequence: 3,
-            state: 'failed',
-            createdAt: NOW - 100,
-            updatedAt: NOW,
-            terminalReason: 'invocation_failed',
-          },
-        ],
-      },
-    ],
-    reminderAttempts: [],
-  },
+  queueReceipt: FAILED_RECEIPT,
 };
 
 function response(body: unknown, status = 200) {
@@ -120,14 +122,41 @@ describe('QueuePanel steer (F047)', () => {
     expect(container.querySelector('[data-testid="steer-q2"]')).toBeNull();
   });
 
-  it('routes a failed target to Retry instead of exposing Steer', () => {
+  it('routes a failed-only target exclusively to Retry', () => {
     useChatStore.setState({ queue: [FAILED_ENTRY] });
     act(() => {
       root.render(React.createElement(QueuePanel, { threadId: 'thread-1' }));
     });
 
+    expect(container.querySelectorAll('[data-testid="retry-q1-opus"]')).toHaveLength(1);
     expect(container.querySelector('[data-testid="steer-q1"]')).toBeNull();
-    expect(container.querySelector('[data-testid="retry-q1-opus"]')).not.toBeNull();
+    expect(container.querySelector('[data-testid="queue-recover"]')).toBeNull();
+    expect(container.textContent).not.toContain('等待 opus 调度');
+  });
+
+  it('lets only a non-failed sibling contribute mixed-target Recover and Steer', () => {
+    useChatStore.setState({
+      queue: [
+        {
+          ...FAILED_ENTRY,
+          targetCats: ['opus', 'codex'],
+          targetStates: { opus: 'failed', codex: 'queued' },
+          queueReceipt: {
+            ...FAILED_RECEIPT,
+            targets: [...FAILED_RECEIPT.targets, { catId: 'codex', state: 'queued' }],
+          },
+        },
+      ],
+    });
+    act(() => {
+      root.render(React.createElement(QueuePanel, { threadId: 'thread-1' }));
+    });
+
+    expect(container.querySelectorAll('[data-testid="retry-q1-opus"]')).toHaveLength(1);
+    expect(container.querySelector('[data-testid="steer-q1"]')).not.toBeNull();
+    expect(container.querySelector('[data-testid="queue-recover"]')).not.toBeNull();
+    expect(container.textContent).toContain('等待 codex 调度');
+    expect(container.textContent).not.toContain('等待 opus');
   });
 
   it('retries the exact failed target once through its message and attempt fence', async () => {

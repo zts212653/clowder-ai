@@ -24,20 +24,19 @@ const CODEX_EXEC = {
   reason: 'fixture',
 };
 
-function fixedEpochOwner() {
+function boundEpochOwner(owner) {
   return {
-    async resolve({ disposition }) {
-      return {
-        scopeKey: 'owner-1::codex::thread-f296-redis',
-        contextEpoch: 11,
-        contextMode: 'cold',
-        lastTransitionRef: 'fixture:fixed-epoch',
-        consumedCompactionEventIds: [],
-        transition: 'fresh',
-        normalizedDisposition: disposition,
-        healthSignals: [],
-      };
-    },
+    resolve: (input) =>
+      owner.resolve({
+        ...input,
+        disposition: {
+          state: 'resumed',
+          reason: 'resume_confirmed',
+          evidenceRef: 'provider:resume',
+          runtimeSessionId: 'native-f296',
+        },
+      }),
+    observeCompaction: (input) => owner.observeCompaction(input),
   };
 }
 
@@ -57,7 +56,7 @@ function cueResolution(invocationId) {
       sourceRevision: 'revision-1',
       axis: 'consumption',
       consumptionOutcome: 'presented',
-      catalogVersion: 1,
+      catalogVersion: 3,
       resolverVersion: 1,
       occurredAt: 1,
     },
@@ -90,7 +89,7 @@ function cueResolution(invocationId) {
             threadId: 'thread-f296-redis',
             invocationId,
           },
-          entryVersion: 'recall-catalog:1:subject_seen:entity_nudge',
+          entryVersion: 'recall-catalog:3:subject_seen:entity_nudge',
           subjectKey: 'memory-cue:operational_precedent:feature:F296',
           asOf: { kind: 'version', value: 'revision-1' },
           sourceRefs: ['feature:F296'],
@@ -108,7 +107,7 @@ function cueResolution(invocationId) {
   };
 }
 
-function deps(redis, invocationId, presented) {
+function deps(redis, invocationId, presented, contextEpochOwner) {
   return {
     registry: {
       create: async () => ({ invocationId, callbackToken: `token-${invocationId}` }),
@@ -122,7 +121,7 @@ function deps(redis, invocationId, presented) {
     },
     threadStore: null,
     apiUrl: 'http://127.0.0.1:3004',
-    contextEpochOwner: fixedEpochOwner(),
+    contextEpochOwner,
     presentationLedger: new PresentationLedger(new RedisPresentationLedgerStore(redis)),
     memoryCuePromptService: {
       resolve: async () => cueResolution(invocationId),
@@ -159,6 +158,8 @@ async function invoke(dependencies, prompts) {
 describe('F296 B3b-2 shared Redis ledger at the provider surface', () => {
   let redis;
   let available = false;
+  let ownerA;
+  let ownerB;
 
   before(async () => {
     assert.equal(new URL(TEST_REDIS_URL).port, '6398');
@@ -168,6 +169,7 @@ describe('F296 B3b-2 shared Redis ledger at the provider surface', () => {
       const { RedisContextEpochStore } = await import(
         '../dist/domains/cats/services/stores/redis/RedisContextEpochStore.js'
       );
+      const { ContextEpochOwner } = await import('../dist/domains/cats/services/session/ContextEpochOwner.js');
       const epochStore = new RedisContextEpochStore(redis);
       assert.equal(
         await epochStore.compareAndPut(
@@ -175,8 +177,10 @@ describe('F296 B3b-2 shared Redis ledger at the provider surface', () => {
             scopeKey: 'owner-1::codex::thread-f296-redis',
             contextEpoch: 11,
             contextMode: 'cold',
-            lastTransitionRef: 'fixture:fixed-epoch',
+            boundRuntimeSessionId: 'native-f296',
+            lastTransitionRef: 'provider:start',
             consumedCompactionEventIds: [],
+            coldConsumedAtEpoch: 11,
             version: 1,
             updatedAt: 1,
           },
@@ -184,6 +188,8 @@ describe('F296 B3b-2 shared Redis ledger at the provider surface', () => {
         ),
         true,
       );
+      ownerA = boundEpochOwner(new ContextEpochOwner(new RedisContextEpochStore(redis)));
+      ownerB = boundEpochOwner(new ContextEpochOwner(new RedisContextEpochStore(redis)));
       available = true;
     } catch {
       redis.disconnect();
@@ -206,14 +212,22 @@ describe('F296 B3b-2 shared Redis ledger at the provider surface', () => {
     const prompts = [];
     const presented = [];
 
-    await invoke(deps(redis, 'inv-f296-redis-a', presented), prompts);
-    await invoke(deps(redis, 'inv-f296-redis-b', presented), prompts);
+    await invoke(deps(redis, 'inv-f296-redis-a', presented, ownerA), prompts);
+    await invoke(deps(redis, 'inv-f296-redis-b', presented, ownerB), prompts);
+    await ownerB.observeCompaction({
+      userId: 'owner-1',
+      catId: 'codex',
+      threadId: 'thread-f296-redis',
+      event: { eventId: 'compact-1', runtimeSessionId: 'native-f296', evidenceRef: 'provider:compact-1' },
+    });
+    await invoke(deps(redis, 'inv-f296-redis-c', presented, ownerA), prompts);
 
-    assert.equal(prompts.length, 2);
+    assert.equal(prompts.length, 3);
     assert.match(prompts[0], /<recall-opportunity-pointer/);
     assert.doesNotMatch(prompts[0], /legacy candidate title and summary/);
     assert.doesNotMatch(prompts[1], /<recall-opportunity-pointer/);
-    assert.deepEqual(presented, ['cue-shared-redis']);
+    assert.match(prompts[2], /<recall-opportunity-pointer/);
+    assert.deepEqual(presented, ['cue-shared-redis', 'cue-shared-redis']);
 
     const keys = await redis.keys(`${TEST_PREFIX}presentation-ledger:*`);
     assert.ok(keys.length > 0);

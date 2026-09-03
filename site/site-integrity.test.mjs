@@ -498,13 +498,16 @@ describe('homepage Quick Start visual contract', () => {
 
 // ─── SETUP.md compatibility ──────────────────────────────────────────
 describe('SETUP.md compatibility', () => {
-  it('SETUP.md exists (not prematurely deleted)', () => {
-    assert.ok(existsSync(resolve(ROOT, 'SETUP.md')));
-  });
+  const sourceRepo = existsSync(resolve(ROOT, 'sync-manifest.yaml'));
+  const expectedSetupFiles = sourceRepo
+    ? ['SETUP.opensource.md', 'SETUP.opensource.zh-CN.md']
+    : ['SETUP.md', 'SETUP.zh-CN.md'];
 
-  it('SETUP.zh-CN.md exists', () => {
-    assert.ok(existsSync(resolve(ROOT, 'SETUP.zh-CN.md')));
-  });
+  for (const setupFile of expectedSetupFiles) {
+    it(`${setupFile} exists in the ${sourceRepo ? 'source' : 'public'} repository`, () => {
+      assert.ok(existsSync(resolve(ROOT, setupFile)));
+    });
+  }
 });
 
 // ─── CDN version pinning ─────────────────────────────────────────────

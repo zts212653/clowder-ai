@@ -143,6 +143,36 @@ describe('F284 WorkspaceLauncher', () => {
     expect(container.querySelector('[data-testid="workspace-companion-controls"]')).not.toBeNull();
   });
 
+  it('keeps product Schedule distinct from background scheduler management', async () => {
+    await renderLauncher();
+
+    const productSchedule = container.querySelector<HTMLButtonElement>(
+      '[data-testid="workspace-launcher-product-schedule"]',
+    );
+    const scheduler = container.querySelector<HTMLButtonElement>('[data-testid="workspace-launcher-schedule"]');
+    expect(productSchedule?.textContent).toContain('Schedule');
+    expect(scheduler?.textContent).toContain('调度');
+
+    await act(async () => {
+      productSchedule?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    expect(mocks.setWorkspaceMode).toHaveBeenCalledWith('product-schedule');
+  });
+
+  it('exposes global Needs Me as a sibling of product Schedule and Approval Hub', async () => {
+    await renderLauncher();
+
+    const needsMe = container.querySelector<HTMLButtonElement>('[data-testid="workspace-launcher-needs-me"]');
+    expect(needsMe?.textContent).toContain('Needs Me');
+    expect(container.querySelector('[data-testid="workspace-launcher-product-schedule"]')).not.toBeNull();
+    expect(container.querySelector('[data-testid="workspace-launcher-approval"]')).not.toBeNull();
+
+    await act(async () => {
+      needsMe?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    expect(mocks.setWorkspaceMode).toHaveBeenCalledWith('needs-me');
+  });
+
   it('opens status and session diagnostics from the Launcher instead of permanent header chrome', async () => {
     const onOpenStatus = vi.fn();
     await act(async () => {
@@ -287,6 +317,26 @@ describe('F284 WorkspaceLauncher', () => {
     });
 
     expect(mocks.setWorkspaceMode).toHaveBeenCalledWith('recall');
+  });
+
+  it('reports the canonical destination after preserving its existing domain action', async () => {
+    const onSelectDestination = vi.fn();
+    await act(async () => {
+      root.render(<WorkspaceLauncher onSelectDestination={onSelectDestination} />);
+    });
+
+    const item = container.querySelector('[data-testid="workspace-launcher-tasks"]');
+    await act(async () => {
+      item?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+
+    expect(mocks.setWorkspaceMode).toHaveBeenCalledWith('tasks');
+    expect(onSelectDestination).toHaveBeenCalledWith(
+      expect.objectContaining({ kind: 'mode', id: 'tasks', label: '任务' }),
+    );
+    expect(mocks.setWorkspaceMode.mock.invocationCallOrder[0]).toBeLessThan(
+      onSelectDestination.mock.invocationCallOrder[0],
+    );
   });
 
   it('routes development tools without restoring the permanent mode tab row', async () => {

@@ -60,6 +60,12 @@ test('F299 Claude awaits the recorder and launches from the exact prepared bytes
     ['CLAUDE-L0', 'append-pack'],
   );
   assert.equal(recorded.runtime.carrier, 'print_sdk');
+  assert.deepEqual(recorded.tools.schemaDelivery, {
+    profileClass: 'full',
+    profileId: 'full',
+    requestedMode: 'unknown',
+    fallbackReason: 'host_version_unavailable',
+  });
   assert.equal(spawned.stdinInput, recorded.message.body);
 });
 
@@ -96,6 +102,12 @@ test('F299 Codex exec_json awaits the recorder and launches from the exact prepa
   assert.equal(recorded.message.body, 'codex-message');
   assert.match(recorded.nativeInstructions[0].body, /CODEX-L0/);
   assert.equal(recorded.runtime.carrier, 'exec_json');
+  assert.deepEqual(recorded.tools.schemaDelivery, {
+    profileClass: 'full',
+    profileId: 'full',
+    requestedMode: 'unknown',
+    fallbackReason: 'host_version_unavailable',
+  });
   assert.equal(spawned.stdinInput, recorded.message.body);
 });
 

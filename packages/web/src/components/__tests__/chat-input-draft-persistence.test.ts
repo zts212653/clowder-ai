@@ -171,6 +171,73 @@ async function attachFiles(files: File[]) {
 }
 
 describe('ChatInput draft persistence', () => {
+  it('shares one live text draft across two composers for the same thread', async () => {
+    const onSend = vi.fn();
+    act(() => {
+      root.render(
+        React.createElement(
+          React.Fragment,
+          null,
+          React.createElement(ChatInput, { threadId: 'thread-SHARED', onSend }),
+          React.createElement(ChatInput, { threadId: 'thread-SHARED', onSend }),
+        ),
+      );
+    });
+
+    const [fullComposer, compactComposer] = Array.from(container.querySelectorAll('textarea'));
+    if (!fullComposer || !compactComposer) throw new Error('both composers must render');
+
+    await act(async () => {
+      typeInto(fullComposer, 'shared draft');
+      await Promise.resolve();
+    });
+
+    expect(fullComposer.value).toBe('shared draft');
+    expect(compactComposer.value).toBe('shared draft');
+    expect(threadDrafts.get('thread-SHARED')).toBe('shared draft');
+  });
+
+  it('applies each composer seed generation once without overwriting later user edits', async () => {
+    const onSend = vi.fn();
+
+    await act(async () => {
+      root.render(
+        React.createElement(ChatInput, {
+          threadId: 'thread-seed',
+          onSend,
+          seed: { id: 'seed-1', text: 'first prompt' },
+        }),
+      );
+      await Promise.resolve();
+    });
+    expect(getTextarea().value).toBe('first prompt');
+
+    act(() => typeInto(getTextarea(), 'user edited prompt'));
+    await act(async () => {
+      root.render(
+        React.createElement(ChatInput, {
+          threadId: 'thread-seed',
+          onSend,
+          seed: { id: 'seed-1', text: 'stale replacement' },
+        }),
+      );
+      await Promise.resolve();
+    });
+    expect(getTextarea().value).toBe('user edited prompt');
+
+    await act(async () => {
+      root.render(
+        React.createElement(ChatInput, {
+          threadId: 'thread-seed',
+          onSend,
+          seed: { id: 'seed-2', text: 'new prompt' },
+        }),
+      );
+      await Promise.resolve();
+    });
+    expect(getTextarea().value).toBe('new prompt');
+  });
+
   it('restores draft when remounting with same threadId', () => {
     const onSend = vi.fn();
 

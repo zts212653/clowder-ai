@@ -3,6 +3,7 @@ import { parseSidebarSnapshotRows, useSidebarProjectionStore } from '@/stores/si
 import { apiFetch } from '@/utils/api-client';
 import { getApiGetGeneration } from '@/utils/api-get-generation';
 import { loadSidebarSnapshot } from '@/utils/offline-store';
+import { __resetSidebarProjectionObservabilityForTests } from '@/utils/sidebar-projection-observability';
 
 type SidebarThread = Thread & {
   unreadCount?: number;
@@ -10,34 +11,59 @@ type SidebarThread = Thread & {
 };
 
 let activeRefreshCallers = 0;
+let sidebarSnapshotEtag: string | null = null;
+
+function isUnchangedSnapshot(response: Response, responseEtag: string | null): boolean {
+  if (response.status === 304) {
+    if (responseEtag) sidebarSnapshotEtag = responseEtag;
+    return true;
+  }
+  return Boolean(responseEtag && responseEtag === sidebarSnapshotEtag);
+}
+
+function hydrateLegacyThreadStore(threads: SidebarThread[]): void {
+  // Sidebar reads only the narrow projection above. Keep the wider response
+  // hydrated for legacy Chat-owned surfaces until their separate migration.
+  const chatStore = useChatStore.getState();
+  chatStore.setThreads(threads);
+  for (const thread of threads) {
+    if ((thread.unreadCount ?? 0) > 0 || thread.hasUserMention) {
+      chatStore.initThreadUnread(thread.id, thread.unreadCount ?? 0, !!thread.hasUserMention);
+    }
+  }
+  chatStore.setLoadingThreads(false);
+}
+
+async function applySidebarResponse(response: Response, responseEtag: string | null): Promise<boolean> {
+  const payload = (await response.json()) as { threads?: SidebarThread[] };
+  const threads = Array.isArray(payload.threads) ? payload.threads : [];
+  const rows = parseSidebarSnapshotRows(threads);
+  const generation = getApiGetGeneration(response);
+  if (generation == null) return false;
+  const applied = useSidebarProjectionStore.getState().applySidebarSnapshot(rows, generation);
+  if (!applied) {
+    // A peer consuming the same cloned physical response may have committed
+    // this exact generation first. That caller still observed canonical truth.
+    const observedByPeer = useSidebarProjectionStore.getState().appliedGeneration === generation;
+    if (observedByPeer && responseEtag) sidebarSnapshotEtag = responseEtag;
+    return observedByPeer;
+  }
+  if (responseEtag) sidebarSnapshotEtag = responseEtag;
+  hydrateLegacyThreadStore(threads);
+  return true;
+}
 
 async function fetchAndApplySidebarSnapshot(afterCurrentGet: boolean): Promise<boolean> {
   try {
-    const response = await apiFetch('/api/threads?view=sidebar', undefined, { afterCurrentGet });
+    const ifNoneMatch = sidebarSnapshotEtag;
+    const response = await apiFetch('/api/threads?view=sidebar', undefined, {
+      afterCurrentGet,
+      ...(ifNoneMatch ? { ifNoneMatch } : {}),
+    });
+    const responseEtag = response.headers.get('etag');
+    if (isUnchangedSnapshot(response, responseEtag)) return true;
     if (!response.ok) return false;
-    const payload = (await response.json()) as { threads?: SidebarThread[] };
-    const threads = Array.isArray(payload.threads) ? payload.threads : [];
-    const rows = parseSidebarSnapshotRows(threads);
-    const generation = getApiGetGeneration(response);
-    if (generation == null) return false;
-    const applied = useSidebarProjectionStore.getState().applySidebarSnapshot(rows, generation);
-    if (!applied) {
-      // A peer consuming the same cloned physical response may have committed
-      // this exact generation first. That caller still observed canonical truth.
-      return useSidebarProjectionStore.getState().appliedGeneration === generation;
-    }
-
-    // Sidebar reads only the narrow projection above. Keep the wider response
-    // hydrated for legacy Chat-owned surfaces until their separate migration.
-    const chatStore = useChatStore.getState();
-    chatStore.setThreads(threads);
-    for (const thread of threads) {
-      if ((thread.unreadCount ?? 0) > 0 || thread.hasUserMention) {
-        chatStore.initThreadUnread(thread.id, thread.unreadCount ?? 0, !!thread.hasUserMention);
-      }
-    }
-    chatStore.setLoadingThreads(false);
-    return true;
+    return await applySidebarResponse(response, responseEtag);
   } catch {
     return false;
   }
@@ -80,4 +106,6 @@ export async function bootstrapSidebarThreadSnapshot(): Promise<boolean> {
 
 export function __resetSidebarRefreshForTests(): void {
   activeRefreshCallers = 0;
+  sidebarSnapshotEtag = null;
+  __resetSidebarProjectionObservabilityForTests();
 }

@@ -4,7 +4,12 @@ import type { SignalSchemaCatalog } from '@clowder-ai/plugin-contract';
 import { FilesystemVerifiedPluginPackageLocator } from './external-runtime/index.js';
 import type { HostInventoryControlPlane } from './host-inventory/control-plane.js';
 import { type PackageAdmissionCandidate, PluginInventoryError } from './host-inventory/types.js';
-import { OFFICIAL_PLUGIN_CATALOG, type OfficialPluginCatalogEntry } from './official-catalog.js';
+import {
+  bundledManifestDigest,
+  COLLECTIVE_CONNECTOR_PLUGIN_MANIFEST,
+  OFFICIAL_PLUGIN_CATALOG,
+  type OfficialPluginCatalogEntry,
+} from './official-catalog.js';
 import {
   compareOfficialPluginVersions,
   type OfficialPluginCatalogProvider,
@@ -207,6 +212,9 @@ export class OfficialPluginPackageInstaller {
     entry: OfficialPluginCatalogEntry,
     accept: (candidate: PackageAdmissionCandidate) => Promise<T>,
   ): Promise<T> {
+    if (entry.distribution === 'bundled') {
+      return this.withBundledPackage(entry, accept);
+    }
     const bytes = await this.fetchArchive(entry);
     if (bytes.byteLength > MAX_OFFICIAL_PACKAGE_BYTES) {
       throw new OfficialPluginInstallError('PACKAGE_TOO_LARGE', 'official package exceeds the Host size limit');
@@ -241,6 +249,42 @@ export class OfficialPluginPackageInstaller {
     } finally {
       await located.release();
     }
+  }
+
+  private async withBundledPackage<T>(
+    entry: OfficialPluginCatalogEntry,
+    accept: (candidate: PackageAdmissionCandidate) => Promise<T>,
+  ): Promise<T> {
+    const manifest =
+      entry.pluginId === COLLECTIVE_CONNECTOR_PLUGIN_MANIFEST.pluginId
+        ? COLLECTIVE_CONNECTOR_PLUGIN_MANIFEST
+        : undefined;
+    if (!manifest) {
+      throw new OfficialPluginInstallError(
+        'INVALID_PACKAGE_SCHEMA',
+        'bundled official package is not registered by the Host',
+      );
+    }
+    if (manifest.version !== entry.version || manifest.pluginId !== entry.pluginId) {
+      throw new OfficialPluginInstallError(
+        'PACKAGE_VERSION_MISMATCH',
+        'bundled manifest identity differs from catalog',
+      );
+    }
+    if (manifest.runtime.transport !== 'builtin') {
+      throw new OfficialPluginInstallError('UNSUPPORTED_TRANSPORT', 'bundled package is not a builtin runtime');
+    }
+    if (bundledManifestDigest(manifest) !== entry.packageDigest) {
+      throw new OfficialPluginInstallError('PACKAGE_DIGEST_MISMATCH', 'bundled manifest digest differs from catalog');
+    }
+    return accept({
+      manifest,
+      computedPackageDigest: entry.packageDigest,
+      expectedPackageDigest: entry.packageDigest,
+      packagePluginId: entry.pluginId,
+      effectiveGrants: entry.effectiveGrants,
+      signalSchemas: {},
+    });
   }
 
   private async existingExactInstall(entry: OfficialPluginCatalogEntry) {

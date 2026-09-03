@@ -80,6 +80,63 @@ describe('durable message extra carriers survive Redis round-trips', () => {
     }
   });
 
+  it('#1371 preserves an auditable operator legacy-review disposition without converting it to reviewer authority', async () => {
+    const { serializeExtra, safeParseExtra } = await import(
+      '../dist/domains/cats/services/stores/redis/redis-message-parsers.js'
+    );
+    const input = {
+      legacyLocalReviewDisposition: {
+        sourceMessageId: 'legacy-review-terminal-1',
+        leaseId: 'lease-review-1',
+        generation: 2,
+        subjectRef: 'pr:owner/repo#4074',
+        reviewerCatId: 'codex-terra',
+        predecessorCatId: 'codex-sol',
+        reviewedHeadSha: 'a'.repeat(40),
+        verdict: 'changes_requested',
+        decisionId: 'decision-review-1',
+      },
+    };
+
+    const parsed = safeParseExtra(serializeExtra(input));
+    assert.deepEqual(parsed, input);
+    assert.equal(parsed?.localReviewVerdict, undefined);
+  });
+
+  it('#1371 drops malformed legacy-review dispositions without dropping sibling metadata', async () => {
+    const { serializeExtra, safeParseExtra } = await import(
+      '../dist/domains/cats/services/stores/redis/redis-message-parsers.js'
+    );
+    for (const legacyLocalReviewDisposition of [
+      {
+        sourceMessageId: '',
+        leaseId: 'lease-review-1',
+        generation: 1,
+        subjectRef: 'pr:owner/repo#4074',
+        reviewerCatId: 'codex-terra',
+        predecessorCatId: 'codex-sol',
+        reviewedHeadSha: 'a'.repeat(40),
+        verdict: 'changes_requested',
+        decisionId: 'decision-review-1',
+      },
+      {
+        sourceMessageId: 'legacy-review-terminal-1',
+        leaseId: 'lease-review-1',
+        generation: 0,
+        subjectRef: 'pr:owner/repo#4074',
+        reviewerCatId: 'codex-terra',
+        predecessorCatId: 'codex-sol',
+        reviewedHeadSha: 'A'.repeat(40),
+        verdict: 'commented',
+        decisionId: 'decision-review-1',
+      },
+    ]) {
+      const parsed = safeParseExtra(serializeExtra({ legacyLocalReviewDisposition, targetCats: ['codex-sol'] }));
+      assert.equal(parsed?.legacyLocalReviewDisposition, undefined);
+      assert.deepEqual(parsed?.targetCats, ['codex-sol']);
+    }
+  });
+
   it('F294 preserves a Message Bundle while tracing metadata is merged', async () => {
     const { serializeExtra, safeParseExtra } = await import(
       '../dist/domains/cats/services/stores/redis/redis-message-parsers.js'

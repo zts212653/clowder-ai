@@ -36,7 +36,11 @@ vi.mock('@/stores/approvalHubStore', () => ({
 // Mock ApprovalItemCard to avoid deep dependency tree
 vi.mock('@/components/ApprovalItemCard', () => ({
   ApprovalItemCard: ({ item }: { item: { proposalId: string } }) =>
-    React.createElement('div', { 'data-testid': `approval-card-${item.proposalId}` }, item.proposalId),
+    React.createElement(
+      'div',
+      { 'data-testid': `approval-card-${item.proposalId}` },
+      React.createElement('div', { 'data-testid': `approval-item-${item.proposalId}` }, item.proposalId),
+    ),
 }));
 
 import { ApprovalPanel } from '../ApprovalPanel';
@@ -122,6 +126,22 @@ describe('F246 AC-D3: ApprovalPanel', () => {
     const card2 = container.querySelector('[data-testid="approval-card-dp-2"]');
     expect(card1).not.toBeNull();
     expect(card2).not.toBeNull();
+  });
+
+  it('focuses the exact producer-owned proposal selected from Needs Me', async () => {
+    mockItems = [
+      { proposalId: 'proposal-one', content: 'First approval' },
+      { proposalId: 'proposal-two', content: 'Selected approval' },
+    ];
+    await act(async () => {
+      root.render(React.createElement(ApprovalPanel, { selectedProposalId: 'proposal-two' }));
+    });
+
+    const selected = container.querySelector<HTMLElement>('[data-testid="approval-item-proposal-two"]');
+    expect(container.querySelector('[data-testid="approval-panel"]')?.getAttribute('data-selected-proposal-id')).toBe(
+      'proposal-two',
+    );
+    expect(document.activeElement).toBe(selected);
   });
 
   it('displays badge count when count > 0', async () => {

@@ -26,6 +26,20 @@ export type BootstrapValidationContext = {
   requestedTargetOverride?: string;
 };
 
+export function resolveGovernanceTarget(gateBaseSha: string | undefined): {
+  fetchLatest: boolean;
+  ref: string;
+} {
+  if (gateBaseSha === undefined || gateBaseSha.trim() === '') {
+    return { fetchLatest: true, ref: 'origin/main' };
+  }
+  const exactSha = gateBaseSha.trim();
+  if (!/^[a-f0-9]{40}$/.test(exactSha)) {
+    throw new Error('CAT_CAFE_GATE_BASE_SHA must be one exact Git SHA');
+  }
+  return { fetchLatest: false, ref: exactSha };
+}
+
 const ATTESTATION_KEYS = [
   'adrAuthorizationRef',
   'attestationSourceDigest',

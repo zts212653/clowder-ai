@@ -99,6 +99,30 @@ describe('CapabilityWakeupRulesRegistry (砚砚 R1 P2)', () => {
       assert.equal(pattern.test('多视角分析一下这个架构决定'), true);
     });
 
+    it('routes visible Chat artifact intent to rich messaging without requiring the words 富文本', () => {
+      const rule = DEFAULT_CAPABILITY_WAKEUP_RULES.find((r) => r.id === 'rich-messaging-visible-artifact-request');
+      assert.ok(rule, 'missing visible artifact delivery rule');
+      assert.equal(rule.predicate.type, 'text_pattern_then_capability');
+      const pattern = new RegExp(rule.predicate.patterns[0], 'i');
+
+      for (const request of ['画个 HTML 展示给我', '做一张 demo 卡给我看', '截图给我看看', 'show this in Chat']) {
+        assert.equal(pattern.test(request), true, `expected visible delivery match: ${request}`);
+      }
+      for (const discussion of ['讨论一下 HTML 渲染原理', '修改 index.html 文件', '把 localhost 页面运行起来看']) {
+        assert.equal(pattern.test(discussion), false, `must not steal non-inline route: ${discussion}`);
+      }
+    });
+
+    it('keeps screenshot delivery out of external-runtime lost-session routing', () => {
+      const rule = DEFAULT_CAPABILITY_WAKEUP_RULES.find((r) => r.id === 'external-runtime-sessions-lost-session');
+      assert.ok(rule, 'missing external runtime sessions rule');
+      assert.equal(rule.predicate.type, 'text_pattern_then_capability');
+      const pattern = new RegExp(rule.predicate.patterns[0], 'i');
+
+      assert.equal(pattern.test('截图给我看'), false);
+      assert.equal(pattern.test('Antigravity 的会话丢了'), true);
+    });
+
     it('wakes convention graph on convention-surface file changes', () => {
       const rule = DEFAULT_CAPABILITY_WAKEUP_RULES.find(
         (r) => r.id === 'convention-graph-before-convention-surface-edit',

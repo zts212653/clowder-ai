@@ -24,10 +24,10 @@ describe('F209 entity seeds', () => {
     assert.equal(existsSync(defaultPath), true);
 
     const seeds = loadExplicitEntitySeeds(defaultPath);
-    const landy = seeds.find((entity) => entity.entityId === 'person:landy');
-    assert.ok(landy, 'default seed file should include person:landy');
-    assert.ok(landy.aliases.includes('operator'));
-    assert.ok(landy.aliases.includes('co-creator'));
+    const operator = seeds.find((entity) => entity.entityId === 'person:operator');
+    assert.ok(operator, 'default seed file should include person:operator');
+    assert.ok(operator.aliases.includes('operator'));
+    assert.ok(operator.aliases.includes('co-creator'));
   });
 
   it('loads explicit person seeds and one-way roster cat aliases on memory startup', async () => {
@@ -46,10 +46,10 @@ describe('F209 entity seeds', () => {
           version: 1,
           entities: [
             {
-              entityId: 'person:landy',
+              entityId: 'person:operator',
               type: 'person',
               canonicalName: 'You',
-              aliases: ['you', 'co-creator', 'operator', 'you'],
+              aliases: ['operator', 'co-creator', 'operator', 'you'],
               provenance: [
                 {
                   source: 'F209 Phase B.1 test seed',
@@ -79,10 +79,10 @@ describe('F209 entity seeds', () => {
         entitySeedPath: seedPath,
       });
 
-      const landy = await services.store.getEntity('person:landy');
-      assert.ok(landy, 'explicit person seed should be loaded');
-      assert.deepEqual(landy.aliases.sort(), ['operator', 'you', 'you', 'co-creator'].sort());
-      assert.equal(landy.provenance[0]?.source, 'F209 Phase B.1 test seed');
+      const operator = await services.store.getEntity('person:operator');
+      assert.ok(operator, 'explicit person seed should be loaded');
+      assert.deepEqual(operator.aliases.sort(), ['operator', 'you', 'operator', 'co-creator'].sort());
+      assert.equal(operator.provenance[0]?.source, 'F209 Phase B.1 test seed');
 
       const codex = await services.store.getEntity('cat:codex');
       assert.ok(codex, 'cat roster should seed retrieval anchors');
@@ -202,10 +202,10 @@ describe('F209 entity seeds', () => {
           version: 1,
           entities: [
             {
-              entityId: 'person:landy',
+              entityId: 'person:operator',
               type: 'person',
               canonicalName: 'You',
-              aliases: ['you', 'co-creator', 'operator', 'you'],
+              aliases: ['operator', 'co-creator', 'operator', 'you'],
               provenance: [{ source: 'F209 Phase B.1 test seed', anchor: 'F209', date: '2026-05-23' }],
               updatedAt: '2026-05-23T00:00:00.000Z',
             },
@@ -258,7 +258,7 @@ describe('F209 entity seeds', () => {
       const results = body.results;
       const hit = results.find((item) => item.anchor === 'thread-f209-b1-dogfood');
       assert.ok(hit, 'operator query should retrieve evidence that only contains co-creator');
-      assert.equal(hit.matchReason, 'entity:person:landy');
+      assert.equal(hit.matchReason, 'entity:person:operator');
       assert.equal(hit.entityMatches?.[0]?.matchedAlias, 'operator');
       assert.equal(hit.entityMatches?.[0]?.surface, 'co-creator');
     } finally {

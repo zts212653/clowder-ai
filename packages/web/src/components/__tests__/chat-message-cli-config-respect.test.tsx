@@ -1,6 +1,7 @@
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { CardConfirmationEntry } from '@/components/rich/CardBlock';
 import type { CatData } from '@/hooks/useCatData';
 import { primeCoCreatorConfigCache, resetCoCreatorConfigCacheForTest } from '@/hooks/useCoCreatorConfig';
 import type { ChatMessage as ChatMessageType } from '@/stores/chatStore';
@@ -9,6 +10,7 @@ import type { ChatMessage as ChatMessageType } from '@/stores/chatStore';
 let storeMessages: ChatMessageType[] = [];
 let globalCliOutputDefault: 'expanded' | 'collapsed' = 'collapsed';
 let richBlocksForwardingEnabled: boolean | undefined;
+let richBlocksConfirmations: CardConfirmationEntry[] | undefined;
 
 vi.mock('next/navigation', () => ({ useRouter: () => ({ push: vi.fn() }) }));
 
@@ -49,8 +51,15 @@ vi.mock('@/components/MarkdownContent', () => ({
 vi.mock('@/components/MetadataBadge', () => ({ MetadataBadge: () => null }));
 vi.mock('@/components/SummaryCard', () => ({ SummaryCard: () => null }));
 vi.mock('@/components/rich/RichBlocks', () => ({
-  RichBlocks: ({ forwardingEnabled }: { forwardingEnabled?: boolean }) => {
+  RichBlocks: ({
+    forwardingEnabled,
+    confirmations,
+  }: {
+    forwardingEnabled?: boolean;
+    confirmations?: CardConfirmationEntry[];
+  }) => {
     richBlocksForwardingEnabled = forwardingEnabled;
+    richBlocksConfirmations = confirmations;
     return null;
   },
 }));
@@ -104,6 +113,7 @@ describe('ChatMessage stream presentation contracts', () => {
     message: ChatMessageType;
     getCatById: (id: string) => CatData | undefined;
     forwardingDisabled?: boolean;
+    confirmations?: CardConfirmationEntry[];
   }>;
 
   beforeAll(async () => {
@@ -122,6 +132,7 @@ describe('ChatMessage stream presentation contracts', () => {
     storeMessages = [];
     globalCliOutputDefault = 'collapsed';
     richBlocksForwardingEnabled = undefined;
+    richBlocksConfirmations = undefined;
     resetCoCreatorConfigCacheForTest();
     primeCoCreatorConfigCache({
       name: 'co-creator',
@@ -141,14 +152,20 @@ describe('ChatMessage stream presentation contracts', () => {
     resetCoCreatorConfigCacheForTest();
     storeMessages = [];
     richBlocksForwardingEnabled = undefined;
+    richBlocksConfirmations = undefined;
   });
 
-  function renderMessage(message: ChatMessageType, forwardingDisabled = false): void {
+  function renderMessage(
+    message: ChatMessageType,
+    forwardingDisabled = false,
+    confirmations?: CardConfirmationEntry[],
+  ): void {
     act(() => {
       root.render(
         React.createElement(ChatMessage, {
           message,
           forwardingDisabled,
+          confirmations,
           getCatById: (id: string) => (id === 'opus' ? opusCat() : undefined),
         }),
       );
@@ -262,5 +279,24 @@ describe('ChatMessage stream presentation contracts', () => {
 
     renderMessage(makeStreamMessage({ isStreaming: false, extra: rich }), true);
     expect(richBlocksForwardingEnabled).toBe(false);
+  });
+
+  it('forwards restored confirmation state to the canonical rich renderer', () => {
+    const confirmations: CardConfirmationEntry[] = [
+      {
+        id: 'confirmation-1',
+        messageId: 'msg-stream',
+        status: 'confirmed',
+        action: { kind: 'concierge_triage_confirm', planId: 'plan-1' },
+      },
+    ];
+    const rich = {
+      rich: { v: 1 as const, blocks: [{ id: 'triage-card', kind: 'card' as const, v: 1 as const, title: 'Plan' }] },
+      stream: { invocationId: INVOCATION_ID },
+    };
+
+    renderMessage(makeStreamMessage({ extra: rich }), false, confirmations);
+
+    expect(richBlocksConfirmations).toBe(confirmations);
   });
 });

@@ -12,11 +12,13 @@ function isAtBottom(el: HTMLElement, thresholdPx: number): boolean {
 export function ScrollToBottomButton({
   scrollContainerRef,
   messagesEndRef,
+  onJumpToLatest,
   thresholdPx = 120,
   recomputeSignal,
 }: {
   scrollContainerRef: React.RefObject<HTMLElement | null>;
   messagesEndRef: React.RefObject<HTMLElement | null>;
+  onJumpToLatest: () => void;
   thresholdPx?: number;
   /** Changes when thread/messages change, to recompute visibility without scroll/resize events. */
   recomputeSignal?: unknown;
@@ -84,8 +86,8 @@ export function ScrollToBottomButton({
   }, [update, recomputeSignal]);
 
   const handleClick = useCallback(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messagesEndRef]);
+    onJumpToLatest();
+  }, [onJumpToLatest]);
 
   const classes = useMemo(
     () =>

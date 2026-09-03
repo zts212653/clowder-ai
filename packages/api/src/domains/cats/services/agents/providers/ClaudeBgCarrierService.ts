@@ -40,6 +40,7 @@ import {
   completeClaudeBgJobOwner,
   createClaudeBgJobOwnerManifest,
 } from '../../../../../utils/claude-bg-job-ownership.js';
+import { CAT_CLI_PROCESS_CONTEXT, CLI_PROCESS_CONTEXT_ENV } from '../../../../../utils/cli-process-environment.js';
 import { CLI_PROCESS_OWNER_ENV } from '../../../../../utils/cli-process-ownership.js';
 import { resolveCliCommandOrBare } from '../../../../../utils/cli-resolve.js';
 import { buildChildEnv } from '../../../../../utils/cli-spawn.js';
@@ -463,6 +464,7 @@ export class ClaudeBgCarrierService implements AgentService {
       // arbitrary dispatcher env. Never project a process token onto that
       // daemon; persist only the provider-native stop namespace instead.
       envOverrides[CLI_PROCESS_OWNER_ENV] = null;
+      envOverrides[CLI_PROCESS_CONTEXT_ENV] = CAT_CLI_PROCESS_CONTEXT;
       const childCwd = options?.workingDirectory ?? process.cwd();
       const env = buildChildEnv(envOverrides, { workingDirectory: childCwd });
       let owner: ClaudeBgJobOwnerHandle | undefined;

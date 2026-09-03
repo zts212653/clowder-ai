@@ -83,7 +83,7 @@ function duty(primaryCatId = 'codex-sol', backupCatId = 'opus') {
     backupCatId,
     version: 3,
     updatedAt: NOW,
-    updatedBy: 'you',
+    updatedBy: 'operator',
   };
 }
 

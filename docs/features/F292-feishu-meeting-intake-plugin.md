@@ -1,6 +1,6 @@
 ---
 feature_ids: [F292]
-related_features: [F141, F168, F195, F202, F240, F285, F288, F290]
+related_features: [F141, F168, F195, F202, F240, F285, F288, F290, F310]
 topics: [feishu, lark, meeting-intake, plugin, input-source, signal-ingress, needs-me, transcript]
 doc_kind: spec
 created: 2026-08-08
@@ -57,8 +57,9 @@ Ownership is split deliberately:
 - **The Feishu plugin** receives only the scoped authority selected by that Gate. Long-lived
   credentials, short-lived/scoped tokens or brokered calls, expiration, and revocation must have one
   explicit owner and testable boundary.
-- **Needs Me** is a Host projection for unresolved human judgment. It does not become an event bus or
-  the transcript truth source.
+- **Needs Me** is a Host projection for unresolved human judgment. F310 owns the global product
+  contract; `signal-intake` owns this meeting's current eligibility and F292 truth. It does not become
+  an event bus or transcript truth source.
 - **Feishu** remains the transcript source of truth. Host records bounded metadata and source refs;
   it resolves transcript text only under an explicit grant.
 - **Cats** own contextual understanding and artifact generation. The plugin never stores household
@@ -120,7 +121,7 @@ Anker recorder
 | Plugin repository | PR #41 merged as `37796035e4` and published Feishu `0.1.0-alpha.8`. It migrates state v1→v2 in memory, records observation/publication health, detects an old cursor before activation, and exposes bounded preview/fingerprint/replay/future-only recovery. Registry integrity is `sha512-unl8sq1rEMckgiqE8mI0e0+Qa6l69J4cxT2GOe5AMUSomkrbmpKdZR/EYljvH+hP4tNaR9l1KQd6T9GWX49L4w==` | Publication is closed; no registry or package-runnability blocker remains. The approved prerelease policy preserves npm's first-publish `latest` tag until stable replacement |
 | Host Broker direction | The paired Host repair preserves enabled intent across package update, exposes package-owned intake health, blocks stale-cursor activation, and gives the owner a previewed future-only versus replay choice before any enable/backfill. Replay still enters through the package outbox and existing Broker idempotency boundary | The change must pass review/merge and alpha verification; live alpha.7 update, enable, or replay remains owner-gated |
 | GitHub operations | Webhook/poll/event-log/inbox/guardian behavior proves long-lived-source value | It is specialized behavior and must not be generalized by copying its private schema |
-| Needs Me / F290 | F292 unresolved-choice and repair cards use the shared Needs Me surface; successful auto-resolved work stays quiet | F290 is still at Experience Design Gate; F292 honestly rejects Channel destinations |
+| Needs Me / F310 | F292 unresolved-choice and repair cards use the shared Needs Me surface; successful auto-resolved work stays quiet | F310 still needs the global eligibility/dedupe/salience/exact-return Design Gate; F290 remains only the future Channel destination |
 
 The preferred automatic trigger is “note/minute generated”, not merely “recording ended”: the latter
 can arrive before the artifact is ready. Manual import by Feishu URL/token remains a recovery path for
@@ -424,8 +425,9 @@ missed events and pre-plugin meetings, not the primary journey.
 - **Related**: F195（live meeting copilot; F292 owns post-meeting Feishu artifact intake only）.
 - **Related**: F285（official plugin source begins in the public plugin repository; core retains Host
   authority and avoids later migration）.
-- **Related**: F290（future Channel/Collective destination and global Needs Me experience; not a source
-  plugin dependency for the private-thread vertical slice）.
+- **Related**: F290（future Channel/Collective destination only; not a source plugin dependency for the
+  private-thread vertical slice）.
+- **Related**: F310（global Needs Me product contract; F292 keeps MeetingIntake truth and eligibility）.
 
 ## Risk
 
@@ -449,7 +451,7 @@ missed events and pre-plugin meetings, not the primary journey.
 | OQ-1 | Smallest C-2 manifest + publish wire shape that preserves source/provenance/privacy without growing a universal event bus? | F292 + plugin-contract maintainers | ⬜ Gate |
 | OQ-2 | Exact source-handle + credential-custody model: who holds the existing lark-cli long-lived login state, what scoped/short-lived token or brokered call reaches the plugin, and how do expiry/revocation/redaction/recovery work? | F292 + Host Broker owner | ⬜ Gate |
 | OQ-3 | Which stdio lease/health signals belong to K-2 versus C-2, and what is visible on an intake card? | K-2/F288 + F292 | ⬜ Gate |
-| OQ-4 | Canonical durable `MeetingIntake` state transitions and human-disposition fields reused by Needs Me? | F292 + F290 attention surface | ⬜ Gate |
+| OQ-4 | Canonical durable `MeetingIntake` state transitions and human-disposition fields reused by Needs Me? | F292 + F310 attention surface | ⬜ Gate |
 | OQ-5 | Can GitHub provide a reusable conformance fixture without being migrated or made dependent on C-2? | F141/F168 + F292 | ⬜ Gate |
 
 ## Key Decisions
@@ -467,6 +469,7 @@ missed events and pre-plugin meetings, not the primary journey.
 | KD-9 | The `plugin` cell owns only the C-2 contract surface; K-3a route, durable intake, and Needs Me projection require explicit Host-side ownership | Extension lifecycle and durable observation/workflow truth have different invariants; `github-signals` is the symmetry check | 2026-08-08 |
 | KD-10 | Official release coordinates hot-refresh inside a fixed Host policy; first enable remains explicit, while update preserves the instance's existing activation intent | Future reviewed prereleases should not require a Host code change/restart; treating package replacement as owner-disable caused a silent intake gap | 2026-08-24 |
 | KD-11 | Initial meeting delivery is a provider-authored bounded envelope; transcript consumption uses the canonical source resolver through a versioned cursor reader | A resource link or document projection alone still causes unbounded eager loading unless the read contract itself owns bounds and revision fencing | 2026-08-24 |
+| KD-12 | F310 owns global Needs Me; F292 keeps source-owned eligibility and F290 only owns future Channel destination | Meeting intake, global attention, and Collective answer different product claims | 2026-08-28 |
 
 ## Review Gate
 

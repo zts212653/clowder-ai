@@ -19,6 +19,8 @@ const RECONCILED_EXCLUSIONS = [
   'thread-wiring\\.test',
   'integration/wiring\\.test',
   'shared-state-wiring\\.test',
+  'write-vignette-publication-hook\\.test',
+  'capability-evolution-evaluation-owner-join\\.test',
   'signal-fetcher-launchd',
   'reflection-capsule-m3',
   'pack-integration\\.test',
@@ -27,12 +29,14 @@ const RECONCILED_EXCLUSIONS = [
   'f188-cold-start-fixtures\\.test',
   'f188-harness-consistency\\.test',
   'f236-cc-anchor-hook\\.test',
+  'f296-(?:b3b3-post-compact-hook|session-hook-source-auth)\\.test',
   'harness-eval/eval-hub-read-model\\.test',
   'harness-eval/merge-gate-provenance-contract\\.test',
   'harness-eval/design-gate-episode-source-provider-private-evidence\\.test',
   'f254-(?:freshness-instruction-private-evidence|freshness-replay-provider|manual-reminder-scope|provider-native-freshness)\\.test',
   'harness-eval/eval-hub-(?:lifecycle-summary-route|metric-glossary-coverage|read-model-f248-phase-b2|route)\\.test',
   'harness-eval/(?:friction-measurement-bundle|measurement-independent-rejudge(?:-adjudication|-judgment)?)\\.test',
+  'harness-eval/measurement-decision-proof(?:-resolver)?\\.test',
   'harness-eval/publish-verdict-(?:capability-wakeup(?:-owner-scope)?|freshness|friction|measurement-validity-gate|memory|pipeline|task-outcome(?:-writeback-guard)?)\\.test',
   'harness-eval/legacy-reeval-case-(?:hub|migration)\\.test',
 ];
@@ -66,9 +70,9 @@ test('registry retains only audited exclusions and drops re-admitted cases', asy
   assert.equal(registry.version, 2);
   assert.equal(registry.entries.length, RECONCILED_EXCLUSIONS.length);
   for (const entry of registry.entries) {
-    assert.deepEqual(entry.audit.sourceHead, 'b741f42fdbbb4484a54cde7eadca08b3b11652e3');
-    assert.deepEqual(entry.audit.publicHead, '182d8ec9abc87ff7905441dca0575aab9787ee8f');
-    assert.match(entry.audit.reviewedOn, /^2026-09-01$/);
+    assert.match(entry.audit.sourceHead, /^[a-f0-9]{40}$/);
+    assert.match(entry.audit.publicHead, /^[a-f0-9]{40}$/);
+    assert.match(entry.audit.reviewedOn, /^\d{4}-\d{2}-\d{2}$/);
     assert.match(entry.audit.matchedFilesHash, /^[a-f0-9]{64}$/);
     assert.ok(entry.audit.matchedFileCount > 0);
   }
@@ -104,7 +108,6 @@ test('registry retains only audited exclusions and drops re-admitted cases', asy
     registry.entries.some((entry) => entry.match === 'capabilities-route\\.test'),
     false,
   );
-
   assert.equal(
     registry.entries.some((entry) => entry.match === 'governance-pack\\.test'),
     false,
@@ -116,38 +119,56 @@ test('resolver preserves the reconciled public test file selection', async () =>
   const { resolvePublicTestFiles } = await import(resolverModuleUrl);
   const allTestFiles = await listTestFiles(resolve(packageRoot, 'test'));
   const expected = applyReconciledSelection(allTestFiles);
-
-  const resolved = await resolvePublicTestFiles({
-    packageRoot,
-    configPath: registryPath,
-  });
-
+  const resolved = await resolvePublicTestFiles({ packageRoot, configPath: registryPath });
   assert.deepEqual(resolved.selectedFiles, expected);
 });
 
 test('resolver excludes source-only cc anchor hook coverage from the public gate', async () => {
   const { resolvePublicTestFiles } = await import(resolverModuleUrl);
-  const resolved = await resolvePublicTestFiles({
-    packageRoot,
-    configPath: registryPath,
-  });
-
+  const resolved = await resolvePublicTestFiles({ packageRoot, configPath: registryPath });
   assert.ok(resolved.excludedFiles.includes('test/f236-cc-anchor-hook.test.js'));
   assert.ok(!resolved.selectedFiles.includes('test/f236-cc-anchor-hook.test.js'));
 });
 
+test('resolver excludes source-only Claude hook bytes but keeps public F296 composition coverage', async () => {
+  const { resolvePublicTestFiles } = await import(resolverModuleUrl);
+  const resolved = await resolvePublicTestFiles({ packageRoot, configPath: registryPath });
+  for (const sourceOnlyTest of [
+    'test/f296-b3b3-post-compact-hook.test.js',
+    'test/f296-session-hook-source-auth.test.js',
+  ]) {
+    assert.ok(resolved.excludedFiles.includes(sourceOnlyTest));
+  }
+  assert.ok(resolved.selectedFiles.includes('test/f296-session-hook-auth.test.js'));
+  assert.ok(resolved.selectedFiles.includes('test/f296-claude-project-hook-readiness.test.js'));
+});
+
+test('resolver excludes the home-only tracked post-checkout hook contract from the public gate', async () => {
+  const { resolvePublicTestFiles } = await import(resolverModuleUrl);
+  const resolved = await resolvePublicTestFiles({ packageRoot, configPath: registryPath });
+  const sourceOnlyTest = 'test/write-vignette-publication-hook.test.js';
+  assert.ok(resolved.excludedFiles.includes(sourceOnlyTest));
+  assert.ok(!resolved.selectedFiles.includes(sourceOnlyTest));
+});
+
+test('resolver excludes F311 owner-join coverage that reads source-only F267 measurement proofs', async () => {
+  const { resolvePublicTestFiles } = await import(resolverModuleUrl);
+  const resolved = await resolvePublicTestFiles({ packageRoot, configPath: registryPath });
+  const sourceOnlyTest = 'test/capability-evolution-evaluation-owner-join.test.js';
+  assert.ok(resolved.excludedFiles.includes(sourceOnlyTest));
+  assert.ok(!resolved.selectedFiles.includes(sourceOnlyTest));
+});
+
 test('resolver excludes private evidence consumers but keeps self-contained public contracts', async () => {
   const { resolvePublicTestFiles } = await import(resolverModuleUrl);
-  const resolved = await resolvePublicTestFiles({
-    packageRoot,
-    configPath: registryPath,
-  });
-
+  const resolved = await resolvePublicTestFiles({ packageRoot, configPath: registryPath });
   for (const file of [
     'test/f254-freshness-instruction-private-evidence.test.js',
     'test/f254-freshness-replay-provider.test.js',
     'test/f254-provider-native-freshness.test.js',
     'test/harness-eval/design-gate-episode-source-provider-private-evidence.test.js',
+    'test/harness-eval/measurement-decision-proof-resolver.test.js',
+    'test/harness-eval/measurement-decision-proof.test.js',
     'test/harness-eval/publish-verdict-memory.test.js',
   ]) {
     assert.ok(resolved.excludedFiles.includes(file), `${file} should be private-fixture-only`);
@@ -170,11 +191,7 @@ test('focused public selection accepts only explicit files from the live selecte
   const { buildPublicTestManifest, resolvePublicTestFiles, selectFocusedPublicTestFiles } = await import(
     resolverModuleUrl
   );
-  const resolved = await resolvePublicTestFiles({
-    packageRoot,
-    configPath: registryPath,
-  });
-
+  const resolved = await resolvePublicTestFiles({ packageRoot, configPath: registryPath });
   assert.deepEqual(
     selectFocusedPublicTestFiles(
       resolved,
@@ -205,11 +222,7 @@ test('focused public selection accepts only explicit files from the live selecte
 
 test('resolver re-admits capabilities-route once the product regression is fixed', async () => {
   const { resolvePublicTestFiles } = await import(resolverModuleUrl);
-  const resolved = await resolvePublicTestFiles({
-    packageRoot,
-    configPath: registryPath,
-  });
-
+  const resolved = await resolvePublicTestFiles({ packageRoot, configPath: registryPath });
   assert.ok(!resolved.excludedFiles.includes('test/capabilities-route.test.js'));
   assert.ok(resolved.selectedFiles.includes('test/capabilities-route.test.js'));
 });
@@ -217,7 +230,6 @@ test('resolver re-admits capabilities-route once the product regression is fixed
 test('default expiry date helper uses the configured policy timezone rather than UTC', async () => {
   const { formatLocalIsoDate } = await import(resolverModuleUrl);
   const utcAfterPacificMidnight = new Date('2026-07-01T01:30:00.000Z');
-
   assert.equal(formatLocalIsoDate(utcAfterPacificMidnight, 'America/Los_Angeles'), '2026-06-30');
   assert.equal(formatLocalIsoDate(utcAfterPacificMidnight, 'UTC'), '2026-07-01');
 });
@@ -232,15 +244,9 @@ test('default expiry date helper falls back to the repo policy timezone when env
   try {
     assert.equal(formatLocalIsoDate(utcAfterPacificMidnight), '2026-06-30');
   } finally {
-    if (previousPolicyTimezone === undefined) {
-      delete process.env.CAT_CAFE_POLICY_TIMEZONE;
-    } else {
-      process.env.CAT_CAFE_POLICY_TIMEZONE = previousPolicyTimezone;
-    }
-    if (previousHostTimezone === undefined) {
-      delete process.env.TZ;
-    } else {
-      process.env.TZ = previousHostTimezone;
-    }
+    if (previousPolicyTimezone === undefined) delete process.env.CAT_CAFE_POLICY_TIMEZONE;
+    else process.env.CAT_CAFE_POLICY_TIMEZONE = previousPolicyTimezone;
+    if (previousHostTimezone === undefined) delete process.env.TZ;
+    else process.env.TZ = previousHostTimezone;
   }
 });

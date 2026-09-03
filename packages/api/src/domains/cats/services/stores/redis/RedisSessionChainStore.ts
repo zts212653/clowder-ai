@@ -107,6 +107,17 @@ ${DEFAULT_TTL_SECONDS > 0 ? `redis.call('SET', KEYS[2], ARGV[1], 'EX', ${DEFAULT
 return {'bound', oldCli}
 `;
 
+const BIND_CLI_IF_UNBOUND_LUA = `
+if redis.call('EXISTS', KEYS[1]) == 0 then return 0 end
+if redis.call('HGET', KEYS[1], 'status') ~= 'active' then return 0 end
+if redis.call('HEXISTS', KEYS[1], 'cliSessionId') == 1 then return 0 end
+local claimedBy = redis.call('GET', KEYS[2])
+if claimedBy and claimedBy ~= ARGV[1] then return 0 end
+redis.call('HSET', KEYS[1], 'cliSessionId', ARGV[2], 'updatedAt', ARGV[3])
+${DEFAULT_TTL_SECONDS > 0 ? `redis.call('SET', KEYS[2], ARGV[1], 'EX', ${DEFAULT_TTL_SECONDS})` : `redis.call('SET', KEYS[2], ARGV[1])`}
+return 1
+`;
+
 const COMPARE_DELETE_LUA = `
 if redis.call('GET', KEYS[1]) == ARGV[1] then return redis.call('DEL', KEYS[1]) end
 return 0
@@ -208,17 +219,13 @@ if matched and redis.call('HGET', KEYS[1], 'appliedPolicyStrategy') == 'hybrid'
   hybridCount = tostring(redis.call('HINCRBY', KEYS[1], 'hybridObservedCount', 1))
 end
 local sequence = lifetime ~= '' and lifetime or hybridCount
-if sequence ~= '' then
-  redis.call('HSET', KEYS[1],
-    'compressionObservationInvocationId', ARGV[2],
-    'compressionObservationSequence', sequence,
-    'compressionObservationObservedAt', ARGV[3])
-else
-  redis.call('HDEL', KEYS[1],
-    'compressionObservationInvocationId',
-    'compressionObservationSequence',
-    'compressionObservationObservedAt')
+if sequence == '' then
+  sequence = tostring(redis.call('HINCRBY', KEYS[1], 'compressionObservationSequence', 1))
 end
+redis.call('HSET', KEYS[1],
+  'compressionObservationInvocationId', ARGV[2],
+  'compressionObservationSequence', sequence,
+  'compressionObservationObservedAt', ARGV[3])
 redis.call('HSET', KEYS[1], 'updatedAt', ARGV[3])
 return {'recorded', lifetime, hybridCount, matched and '1' or '0'}
 `;
@@ -433,6 +440,19 @@ export class RedisSessionChainStore implements ISessionChainStore {
       await this.redis.eval(COMPARE_DELETE_LUA, 1, SessionChainKeys.byCli(oldCli), id);
     }
     return this.get(id);
+  }
+
+  async bindCliSessionIdIfUnbound(id: string, cliSessionId: string): Promise<SessionRecord | null> {
+    const result = await this.redis.eval(
+      BIND_CLI_IF_UNBOUND_LUA,
+      2,
+      SessionChainKeys.detail(id),
+      SessionChainKeys.byCli(cliSessionId),
+      id,
+      cliSessionId,
+      String(Date.now()),
+    );
+    return Number(result) === 1 ? this.get(id) : null;
   }
 
   async applyPolicySnapshot(id: string, snapshot: SessionPolicySnapshot): Promise<SessionRecord | null> {

@@ -105,6 +105,8 @@ export interface ISessionChainStore {
   getOrCreateActive(input: CreateSessionInput): SessionRecord | Promise<SessionRecord>;
   /** Bind a provider runtime ID to an existing logical node without creating a new node. */
   bindCliSessionId(id: string, cliSessionId: string): SessionRecord | null | Promise<SessionRecord | null>;
+  /** CAS bind used by provider forks: succeeds only while the logical target remains unbound. */
+  bindCliSessionIdIfUnbound(id: string, cliSessionId: string): SessionRecord | null | Promise<SessionRecord | null>;
   /** Apply an invocation snapshot and reset hybrid progress only across policy revisions. */
   applyPolicySnapshot(
     id: string,
@@ -294,6 +296,17 @@ export class SessionChainStore implements ISessionChainStore {
     return record;
   }
 
+  bindCliSessionIdIfUnbound(id: string, cliSessionId: string): SessionRecord | null {
+    const record = this.records.get(id);
+    if (!record || record.status !== 'active' || record.cliSessionId) return null;
+    const claimedBy = this.cliIndex.get(cliSessionId);
+    if (claimedBy && claimedBy !== id) return null;
+    record.cliSessionId = cliSessionId;
+    this.cliIndex.set(cliSessionId, id);
+    record.updatedAt = Date.now();
+    return record;
+  }
+
   applyPolicySnapshot(id: string, snapshot: SessionPolicySnapshot): SessionRecord | null {
     const record = this.records.get(id);
     if (!record || record.status !== 'active') return null;
@@ -322,7 +335,13 @@ export class SessionChainStore implements ISessionChainStore {
       record.hybridProgress.observedCount += 1;
     }
     const observedAt = Date.now();
-    const sequence = record.compressionCount ?? record.hybridProgress?.observedCount;
+    const counterSequence = record.compressionCount ?? record.hybridProgress?.observedCount;
+    const previousSequence = record.compressionObservation?.sequence;
+    const sequence =
+      counterSequence ??
+      (typeof previousSequence === 'number' && Number.isSafeInteger(previousSequence) && previousSequence >= 1
+        ? previousSequence + 1
+        : 1);
     if (typeof sequence === 'number' && Number.isSafeInteger(sequence) && sequence >= 1) {
       record.compressionObservation = { invocationId, sequence, observedAt };
     } else {

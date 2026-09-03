@@ -5,7 +5,7 @@ import { chmod, mkdir } from 'node:fs/promises';
 import { createServer } from 'node:net';
 import { dirname, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
-
+import { createAssistantReturnInbox } from './assistant-return-inbox.mjs';
 import {
   authorizePersonalChromeConversation,
   conversationIdFromExactChatGptUrl,
@@ -281,6 +281,7 @@ export async function createNativeHostBridge(options) {
     persistenceQueue = write.catch(() => undefined);
     return write;
   };
+  const assistantReturnInbox = createAssistantReturnInbox({ ledger, persist, now });
 
   function announceDispatch() {
     dispatchCount += 1;
@@ -361,8 +362,23 @@ export async function createNativeHostBridge(options) {
     return true;
   }
 
-  async function handleEnvelope(socket, rawEnvelope) {
-    if (await handleHealthEnvelope(socket, rawEnvelope)) return;
+  async function handleAssistantReturnEnvelope(socket, rawEnvelope) {
+    const kind = rawEnvelope?.request?.kind;
+    if (kind !== 'list_assistant_returns' && kind !== 'ack_assistant_return') return false;
+    if (!secretsMatch(options.pairingSecret, rawEnvelope?.pairingSecret)) {
+      sendSocketResult(socket, {
+        v: APPEND_PROTOCOL_VERSION,
+        kind: 'assistant_return_error',
+        requestId: safeToken(rawEnvelope?.request?.requestId, 200) ? rawEnvelope.request.requestId : 'invalid-request',
+        errorCode: 'PAIRING_REJECTED',
+      });
+      return true;
+    }
+    sendSocketResult(socket, await assistantReturnInbox.handleLocalRequest(rawEnvelope.request));
+    return true;
+  }
+
+  async function handleAppendEnvelope(socket, rawEnvelope) {
     const parsed = parsePairedAppendEnvelope(options.pairingSecret, rawEnvelope);
     if (parsed.failure) {
       sendSocketResult(socket, parsed.failure);
@@ -397,6 +413,7 @@ export async function createNativeHostBridge(options) {
       idempotencyKey: request.idempotencyKey,
       textDigest: digest,
       state: 'accepted',
+      expectedRevisions: request.expectedRevisions,
     };
     if (!existing && !hasCapacityForEntry(ledger, acceptedEntry)) {
       sendSocketResult(socket, failureFor(request, 'LEDGER_CAPACITY_EXCEEDED'));
@@ -417,6 +434,12 @@ export async function createNativeHostBridge(options) {
     } catch {
       await settle(key, failureFor(request, 'NATIVE_DISPATCH_FAILED'));
     }
+  }
+
+  async function handleEnvelope(socket, rawEnvelope) {
+    if (await handleHealthEnvelope(socket, rawEnvelope)) return;
+    if (await handleAssistantReturnEnvelope(socket, rawEnvelope)) return;
+    await handleAppendEnvelope(socket, rawEnvelope);
   }
 
   const server = createServer((socket) => {
@@ -478,6 +501,10 @@ export async function createNativeHostBridge(options) {
       nextOrder >= currentOrder
     ) {
       entry.state = message.status;
+      if (message.status === 'submitted') {
+        entry.submitted = true;
+        entry.submittedAt = now().toISOString();
+      }
       await persist();
     }
     return true;
@@ -615,6 +642,27 @@ export async function createNativeHostBridge(options) {
     return true;
   }
 
+  async function acceptAssistantReturn(message) {
+    if (!['assistant_final_observed', 'assistant_observation_failed'].includes(message?.kind)) return false;
+    let status;
+    try {
+      status =
+        message.kind === 'assistant_final_observed'
+          ? await assistantReturnInbox.acceptObserved(message)
+          : await assistantReturnInbox.acceptObservationFailure(message);
+    } catch {
+      status = 'retryable';
+    }
+    await options.sendNative({
+      v: APPEND_PROTOCOL_VERSION,
+      kind:
+        message.kind === 'assistant_final_observed' ? 'assistant_final_result' : 'assistant_observation_failure_result',
+      requestId: safeToken(message?.requestId, 200) ? message.requestId : 'invalid-request',
+      status,
+    });
+    return true;
+  }
+
   return {
     socketPath: options.socketPath,
     ledgerPath: options.ledgerPath,
@@ -622,6 +670,7 @@ export async function createNativeHostBridge(options) {
       if (acceptHealthResult(message)) return;
       if (await acceptBindingRequest(message)) return;
       if (await acceptBindingQuery(message)) return;
+      if (await acceptAssistantReturn(message)) return;
       if (await acceptProgress(message)) return;
       await acceptTerminalResult(message);
     },

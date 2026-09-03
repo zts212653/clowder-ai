@@ -18,6 +18,7 @@
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, isAbsolute, join, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { type CatId, type CliEffortPreset, createCatId, resolveCliEffortOverride } from '@cat-cafe/shared';
 import {
   CAT_CAFE_SPLIT_ENTRYPOINTS,
@@ -37,6 +38,7 @@ import { formatCliExitError } from '../../../../../utils/cli-format.js';
 import { formatCliNotFoundError, resolveCliCommand } from '../../../../../utils/cli-resolve.js';
 import { isCliError, isCliTimeout, isLivenessWarning, spawnCli } from '../../../../../utils/cli-spawn.js';
 import type { SpawnFn } from '../../../../../utils/cli-types.js';
+import { findMonorepoRoot } from '../../../../../utils/monorepo-root.js';
 import { CliRawArchive } from '../../session/CliRawArchive.js';
 import type {
   AgentFreshnessCarrierCapability,
@@ -55,6 +57,11 @@ import { findGitBashPath } from './claude-agent-win.js';
 import { ClaudeNativeToolBoundaryClassifier } from './claude-native-tool-boundary.js';
 import { extractClaudeUsage, isResultErrorEvent, transformClaudeEvent } from './claude-ndjson-parser.js';
 import { compileL0ViaSubprocess } from './l0-compiler.js';
+import {
+  createMcpSchemaDeliveryLaunchConfig,
+  resolveMcpSchemaDeliveryDiscoverySurface,
+  resolveMcpSchemaDeliveryForProviderLaunch,
+} from './mcp-schema-delivery-capability.js';
 
 const log = createModuleLogger('claude-agent');
 
@@ -706,6 +713,22 @@ export class ClaudeAgentService implements AgentService {
             ]
           : []),
       ];
+      const schemaDeliveryProfile = readOnly ? ('readonly' as const) : ('full' as const);
+      const schemaDelivery = resolveMcpSchemaDeliveryForProviderLaunch({
+        repoRoot: findMonorepoRoot(dirname(fileURLToPath(import.meta.url))),
+        command: claudeCommand,
+        provider: 'anthropic',
+        carrier: 'print_sdk',
+        modelFamily: effectiveModel ?? 'provider-default',
+        profileClass: schemaDeliveryProfile,
+        profileId: schemaDeliveryProfile,
+        config: createMcpSchemaDeliveryLaunchConfig({
+          declaredServerNames: declaredMcpServerNames ?? [],
+          profileId: schemaDeliveryProfile,
+          hostSurface: resolveMcpSchemaDeliveryDiscoverySurface({ provider: 'anthropic', carrier: 'print_sdk' }),
+        }),
+        onHealthEvent: (event) => log.warn({ event }, 'F153 MCP schema delivery capability unknown'),
+      });
       const preparedRequest: PreparedProviderRequestV1 = Object.freeze({
         v: 1,
         message: Object.freeze({
@@ -729,6 +752,7 @@ export class ClaudeAgentService implements AgentService {
               : ('unknown' as const),
           ...(declaredMcpServerNames ? { declaredServerNames: Object.freeze(declaredMcpServerNames) } : {}),
           ...(readOnly ? { catCafeSchemas: Object.freeze([]) } : {}),
+          schemaDelivery: Object.freeze(schemaDelivery),
         }),
         providerNativeVisibility: 'unknown',
       });

@@ -279,10 +279,10 @@ describe('MCP Evidence Tools', () => {
             snippet: 'operator asked about entity anchors',
             matchRank: 'high',
             sourceType: 'discussion',
-            matchReason: 'entity:person:landy',
+            matchReason: 'entity:person:operator',
             entityMatches: [
               {
-                entityId: 'person:landy',
+                entityId: 'person:operator',
                 type: 'person',
                 canonicalName: 'You',
                 matchedAlias: 'operator',
@@ -291,7 +291,7 @@ describe('MCP Evidence Tools', () => {
                 docAnchor: 'thread:vision',
                 passageId: 'p1',
                 provenance: [{ source: 'F209 Phase B MCP contract test' }],
-                why: 'query operator matched entity person:landy via alias co-creator',
+                why: 'query operator matched entity person:operator via alias co-creator',
               },
             ],
           },
@@ -302,12 +302,12 @@ describe('MCP Evidence Tools', () => {
     const result = await handleSearchEvidence({ query: 'operator', mode: 'hybrid' });
     const text = result.content[0].text;
 
-    assert.ok(text.includes('match: entity:person:landy'), 'should keep coarse entity match reason');
-    assert.ok(text.includes('entity: person:landy'), 'should render entity id');
+    assert.ok(text.includes('match: entity:person:operator'), 'should keep coarse entity match reason');
+    assert.ok(text.includes('entity: person:operator'), 'should render entity id');
     assert.ok(text.includes('matchedAlias=operator'), 'should render the query alias');
     assert.ok(text.includes('surface=co-creator'), 'should render the matched surface');
     assert.ok(
-      text.includes('why: query operator matched entity person:landy via alias co-creator'),
+      text.includes('why: query operator matched entity person:operator via alias co-creator'),
       'should render entity match why explanation',
     );
     assert.ok(text.includes('provenance: F209 Phase B MCP contract test'), 'should render entity match provenance');

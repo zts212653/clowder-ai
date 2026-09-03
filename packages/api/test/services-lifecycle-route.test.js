@@ -448,6 +448,7 @@ describe('service lifecycle write routes', () => {
             return updated;
           },
         },
+        findPidsByPort: async () => [],
         runScript: async () =>
           new Promise((resolve) => {
             started = true;

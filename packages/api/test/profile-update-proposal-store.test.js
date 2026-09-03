@@ -21,7 +21,7 @@ describe('ProfileUpdateProposalStore (in-memory)', () => {
     beforeContent: 'old primer',
     baseContentHash: 'hash_old',
     afterContent: 'new primer',
-    rationale: 'landy said he prefers X',
+    rationale: 'operator said he prefers X',
     signalProvenance: { kind: 'cat-declared', sourceThreadId: 'thread_1' },
     createdBy: 'user_landy',
     ...over,
@@ -39,8 +39,8 @@ describe('ProfileUpdateProposalStore (in-memory)', () => {
 
   it('INV-3: concurrent claim — only one wins (CAS pending→approving)', () => {
     const p = store.create(baseInput());
-    const first = store.claimForApproval(p.proposalId, 'you');
-    const second = store.claimForApproval(p.proposalId, 'you');
+    const first = store.claimForApproval(p.proposalId, 'operator');
+    const second = store.claimForApproval(p.proposalId, 'operator');
     assert.ok(first, 'first claim wins');
     assert.equal(first.status, 'approving');
     assert.ok(first.claimedAt);
@@ -49,7 +49,7 @@ describe('ProfileUpdateProposalStore (in-memory)', () => {
 
   it('recordCheckpoint persists BOTH paths without changing status (P1-1)', () => {
     const p = store.create(baseInput());
-    store.claimForApproval(p.proposalId, 'you');
+    store.claimForApproval(p.proposalId, 'operator');
     const patched = store.recordCheckpoint(p.proposalId, {
       writtenPath: 'codex-primer.md',
       provenancePath: 'prov/2026-codex.md',
@@ -70,7 +70,7 @@ describe('ProfileUpdateProposalStore (in-memory)', () => {
   it('INV-1: finalize only from approving (null from pending)', () => {
     const p = store.create(baseInput());
     assert.equal(store.finalizeApproval(p.proposalId), null, 'cannot finalize pending');
-    store.claimForApproval(p.proposalId, 'you');
+    store.claimForApproval(p.proposalId, 'operator');
     const final = store.finalizeApproval(p.proposalId);
     assert.equal(final.status, 'approved');
     assert.ok(final.approvedAt);
@@ -79,7 +79,7 @@ describe('ProfileUpdateProposalStore (in-memory)', () => {
 
   it('rollbackClaim: approving→pending (write failure path)', () => {
     const p = store.create(baseInput());
-    store.claimForApproval(p.proposalId, 'you');
+    store.claimForApproval(p.proposalId, 'operator');
     assert.equal(store.rollbackClaim(p.proposalId), true);
     assert.equal(store.get(p.proposalId).status, 'pending');
     assert.equal(store.get(p.proposalId).approvedBy, undefined);
@@ -89,17 +89,17 @@ describe('ProfileUpdateProposalStore (in-memory)', () => {
 
   it('markRejected: pending→rejected (null if already approving)', () => {
     const p = store.create(baseInput());
-    assert.equal(store.markRejected(p.proposalId, 'you', 'not accurate').status, 'rejected');
+    assert.equal(store.markRejected(p.proposalId, 'operator', 'not accurate').status, 'rejected');
     assert.equal(store.get(p.proposalId).rejectionReason, 'not accurate');
     const p2 = store.create(baseInput());
-    store.claimForApproval(p2.proposalId, 'you');
-    assert.equal(store.markRejected(p2.proposalId, 'you'), null, 'cannot reject approving');
+    store.claimForApproval(p2.proposalId, 'operator');
+    assert.equal(store.markRejected(p2.proposalId, 'operator'), null, 'cannot reject approving');
   });
 
   it('ADV-5: reject then approve — claim returns null', () => {
     const p = store.create(baseInput());
-    store.markRejected(p.proposalId, 'you');
-    assert.equal(store.claimForApproval(p.proposalId, 'you'), null, 'cannot claim rejected');
+    store.markRejected(p.proposalId, 'operator');
+    assert.equal(store.claimForApproval(p.proposalId, 'operator'), null, 'cannot claim rejected');
   });
 
   it('INV-4 / ADV-4: dedup — same clientRequestId returns same proposalId', () => {
@@ -116,7 +116,7 @@ describe('ProfileUpdateProposalStore (in-memory)', () => {
   it('listPending returns only pending for the user (newest first)', () => {
     const p1 = store.create(baseInput());
     const p2 = store.create(baseInput());
-    store.markRejected(p2.proposalId, 'you');
+    store.markRejected(p2.proposalId, 'operator');
     const pending = store.listPending('user_landy');
     assert.equal(pending.length, 1);
     assert.equal(pending[0].proposalId, p1.proposalId);

@@ -135,6 +135,63 @@ describe('F266 Eval Hub stable case lineage', () => {
     assert.equal(enriched.counts.actionable, 1);
   });
 
+  it('projects a due re-evaluation carrier blocker with its durable task and lease', async (t) => {
+    const harnessFeedbackRoot = setupRoot(t, 'keep_observe');
+    const events = [
+      event('verdict_cycle_observed', verdictIds[0], { cycleCreatedAt: '2026-08-01T00:00:00.000Z' }),
+      event('responsibility_bound', verdictIds[0], {
+        taskId: 'task-case-cycle',
+        leaseId: 'lease-case-cycle',
+        leaseGeneration: 1,
+        refs: [ref('task', 'task:case-cycle'), ref('other', 'lease:case-cycle:1')],
+      }),
+      event('action_planned', verdictIds[0], { actor: { kind: 'cat', id: 'codex-sol' } }),
+      event('main_landed', verdictIds[0], {
+        actor: { kind: 'cat', id: 'codex-sol' },
+        commitSha: 'b'.repeat(40),
+        refs: [ref('commit', 'main:cycle-a')],
+      }),
+      event('live_active', verdictIds[0], {
+        actor: { kind: 'cat', id: 'codex-sol' },
+        commitSha: 'b'.repeat(40),
+        refs: [ref('commit', 'live:cycle-a')],
+      }),
+      event('custody_dispatch_blocked', verdictIds[0], {
+        stage: 'reevaluation',
+        reasonCode: 'carrier_not_enqueued',
+        taskId: 'task-reeval-cycle',
+        leaseId: 'lease-reeval-cycle',
+        leaseGeneration: 2,
+        carrierMessageId: 'message-reeval-blocked',
+        refs: [ref('task', 'task:reeval-cycle'), ref('other', 'lease:reeval-cycle:2')],
+      }),
+    ];
+    const summary = {
+      generatedAt: '2026-08-16T00:00:00.000Z',
+      counts: { total: 2, actionable: 1, keepObserve: 1, stale: 1, registeredDomains: 1 },
+      domains: [],
+      items: [item(verdictIds[0])],
+    };
+
+    const enriched = await enrichEvalHubLifecycle(summary, {
+      harnessFeedbackRoot,
+      eventLog: { read: async (subjectId) => (subjectId === caseId ? structuredClone(events) : []) },
+    });
+
+    assert.equal(enriched.items[0].lifecycle.closureStatus, 'live_active');
+    assert.deepEqual(enriched.items[0].lifecycle.custodyDispatchBlocker, {
+      eventId: `custody_dispatch_blocked:${verdictIds[0]}`,
+      stage: 'reevaluation',
+      reasonCode: 'carrier_not_enqueued',
+      taskId: 'task-reeval-cycle',
+      leaseId: 'lease-reeval-cycle',
+      leaseGeneration: 2,
+      carrierMessageId: 'message-reeval-blocked',
+    });
+    assert.equal(enriched.items[0].lifecycle.reevalDebtStatus, 'due');
+    assert.equal(enriched.counts.actionable, 1);
+  });
+
   it('renders one responsibility card for repeated verdict cycles in the same active case', async (t) => {
     const harnessFeedbackRoot = setupRoot(t);
     const events = [

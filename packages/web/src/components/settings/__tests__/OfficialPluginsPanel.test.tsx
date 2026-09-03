@@ -32,6 +32,16 @@ function plugin(instance: Record<string, unknown> | null, ownerAuthAvailable = f
   };
 }
 
+function collectivePlugin(instance: Record<string, unknown> | null) {
+  return {
+    ...plugin(instance),
+    catalogId: 'collective-connector',
+    packageName: '@cat-cafe/collective-connector',
+    pluginId: 'official.collective-connector',
+    ownerAuthAvailable: false,
+  };
+}
+
 function jsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
 }
@@ -163,6 +173,11 @@ describe('OfficialPluginsPanel', () => {
       lifecycleRevision: 5,
       updatedAt: 3,
     });
+    const repaired = plugin({
+      ...healthy.instance,
+      lifecycleRevision: 8,
+      updatedAt: 4,
+    });
     let reads = 0;
     mockApiFetch.mockImplementation(async (url) => {
       if (url === '/api/plugins/official') {
@@ -170,7 +185,7 @@ describe('OfficialPluginsPanel', () => {
         return jsonResponse({ plugins: [reads === 1 ? healthy : crashed] });
       }
       if (url.endsWith('/repair')) {
-        return jsonResponse({ ...crashed, instance: { ...crashed.instance, activationState: 'disabled' } });
+        return jsonResponse(repaired);
       }
       return jsonResponse({}, 404);
     });
@@ -194,6 +209,40 @@ describe('OfficialPluginsPanel', () => {
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ expectedRevision: 5 }),
     });
+    expect(container.textContent).toContain('运行中');
+    expect(findButtonByAriaLabel(container, '启用飞书会议纪要同步')).toBeUndefined();
+  });
+
+  it('explains the owner catch-up decision when repair cannot safely resume', async () => {
+    const failed = plugin({
+      pluginInstanceId: 'pi_official',
+      lifecycleState: 'installed',
+      configReadiness: 'ready',
+      activationState: 'error',
+      runtimeState: 'stopped',
+      lifecycleRevision: 9,
+      installedAt: 1,
+      updatedAt: 2,
+    });
+    let reads = 0;
+    mockApiFetch.mockImplementation(async (url) => {
+      if (url === '/api/plugins/official') {
+        reads += 1;
+        return jsonResponse({ plugins: [failed] });
+      }
+      if (url.endsWith('/repair')) {
+        return jsonResponse({ error: 'owner decision required', code: 'CATCH_UP_REQUIRED' }, 409);
+      }
+      return jsonResponse({}, 404);
+    });
+
+    await act(async () => root.render(<OfficialPluginsPanel />));
+    await flushEffects();
+    await act(async () => findButton(container, '修复')?.click());
+    await flushEffects();
+
+    expect(container.textContent).toContain('请先预览，再选择“仅恢复以后”或“补抓并恢复”');
+    expect(reads).toBe(2);
   });
 
   it('requires explicit confirmation and sends the current revision when enabling', async () => {
@@ -262,6 +311,27 @@ describe('OfficialPluginsPanel', () => {
     await flushEffects();
     expect(container.textContent).toContain('状态已变化');
     expect(reads).toBe(2);
+  });
+
+  it('shows Connector-specific recovery guidance without a Feishu authorization fallback', async () => {
+    const failed = collectivePlugin({
+      pluginInstanceId: 'pi_collective',
+      lifecycleState: 'installed',
+      configReadiness: 'ready',
+      activationState: 'error',
+      runtimeState: 'crashed',
+      lifecycleRevision: 3,
+      installedAt: 1,
+      updatedAt: 2,
+    });
+    mockApiFetch.mockResolvedValue(jsonResponse({ plugins: [failed] }));
+
+    await act(async () => root.render(<OfficialPluginsPanel />));
+    await flushEffects();
+    await act(async () => findButtonByAriaLabel(container, '查看 Collective Connector 详情')?.click());
+
+    expect(container.textContent).toContain('检查 Connector 运行错误与本地凭据目录权限');
+    expect(container.textContent).not.toContain('飞书账号授权');
   });
 
   it('runs user OAuth as an in-card action and unlocks enable after the QR flow completes', async () => {

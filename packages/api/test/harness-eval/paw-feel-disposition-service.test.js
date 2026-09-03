@@ -85,7 +85,7 @@ describe('PawFeelDispositionService', () => {
       }),
     ]) {
       await assert.rejects(
-        service.execute({ kind: 'cvo', id: 'you' }, disposition, { ownerCatId: 'opus' }),
+        service.execute({ kind: 'cvo', id: 'operator' }, disposition, { ownerCatId: 'opus' }),
         (error) => error?.code === 'named_owner_required',
       );
     }

@@ -83,6 +83,7 @@ function fixture(resolveFeatureThreadId, eventLog = new MemoryEventLog()) {
       const taskId = input.action.subjectRef.slice('subject:task:'.length);
       const lease = {
         leaseId: 'lease-cycle-1',
+        dispatchId: input.dispatchId,
         generation: 1,
         status: 'active',
         subjectRef: `subject:task:${taskId}`,
@@ -100,6 +101,11 @@ function fixture(resolveFeatureThreadId, eventLog = new MemoryEventLog()) {
     taskStore,
     eventLog,
     admissionService,
+    taskDispatcher: {
+      async dispatch() {
+        return { outcome: 'enqueued', messageId: 'message-responsibility-blocker-recovery' };
+      },
+    },
     resolveFeatureThreadId,
     ownerUserId: 'user-1',
     now: () => '2026-08-01T01:00:00.000Z',

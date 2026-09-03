@@ -539,6 +539,34 @@ describe('AgentRouter', () => {
     assert.equal(mockGeminiService.invoke.mock.callCount(), 0);
   });
 
+  test('projects explicit ideate intent to the selected provider invocation', async () => {
+    const { AgentRouter } = await import('../dist/domains/cats/services/agents/routing/AgentRouter.js');
+
+    let invocationOptions;
+    const mockCodexService = {
+      invoke: mock.fn(async function* (_prompt, options) {
+        invocationOptions = options;
+        yield { type: 'done', catId: 'codex', timestamp: Date.now() };
+      }),
+    };
+    const router = new AgentRouter(
+      await migrateRouterOpts({
+        claudeService: createMockAgentService('opus'),
+        codexService: mockCodexService,
+        geminiService: createMockAgentService('gemini'),
+        registry: createMockRegistry(),
+        messageStore: createMockMessageStore(),
+      }),
+    );
+
+    for await (const _ of router.route('user-1', '#ideate @codex ask me one question before proceeding')) {
+      // consume
+    }
+
+    assert.equal(mockCodexService.invoke.mock.callCount(), 1);
+    assert.deepEqual(invocationOptions?.routeIntent, { intent: 'ideate', explicit: true });
+  });
+
   test('routes to opus when Chinese mention @布偶猫 is used', async () => {
     const { AgentRouter } = await import('../dist/domains/cats/services/agents/routing/AgentRouter.js');
 
@@ -1758,16 +1786,20 @@ describe('AgentRouter', () => {
 
     let opusPrompt = '';
     let codexPrompt = '';
+    let opusOptions;
+    let codexOptions;
     const mockClaudeService = {
-      invoke: mock.fn(async function* (prompt) {
+      invoke: mock.fn(async function* (prompt, options) {
         opusPrompt = prompt;
+        opusOptions = options;
         yield { type: 'text', catId: 'opus', content: 'Opus thinks', timestamp: Date.now() };
         yield { type: 'done', catId: 'opus', timestamp: Date.now() };
       }),
     };
     const mockCodexService = {
-      invoke: mock.fn(async function* (prompt) {
+      invoke: mock.fn(async function* (prompt, options) {
         codexPrompt = prompt;
+        codexOptions = options;
         yield { type: 'text', catId: 'codex', content: 'Codex thinks', timestamp: Date.now() };
         yield { type: 'done', catId: 'codex', timestamp: Date.now() };
       }),
@@ -1796,6 +1828,8 @@ describe('AgentRouter', () => {
     assert.ok(codexPrompt.includes('独立思考'), 'Codex should get parallel mode');
     assert.ok(!opusPrompt.includes('被召唤'), 'Opus should NOT have serial chain text');
     assert.ok(!codexPrompt.includes('被召唤'), 'Codex should NOT have serial chain text');
+    assert.deepEqual(opusOptions?.routeIntent, { intent: 'ideate', explicit: false });
+    assert.deepEqual(codexOptions?.routeIntent, { intent: 'ideate', explicit: false });
 
     // Both texts should be present
     const textMsgs = messages.filter((m) => m.type === 'text');
@@ -2325,6 +2359,30 @@ describe('F078: Group mentions', () => {
     assert.ok(targetCats.includes('gemini'));
   });
 
+  test('inline @all routes to all registered cats without a false unknown warning', async () => {
+    const { AgentRouter } = await import('../dist/domains/cats/services/agents/routing/AgentRouter.js');
+
+    const router = new AgentRouter(
+      await migrateRouterOpts({
+        claudeService: createMockAgentService('opus'),
+        codexService: createMockAgentService('codex'),
+        geminiService: createMockAgentService('gemini'),
+        registry: createMockRegistry(),
+        messageStore: createMockMessageStore(),
+      }),
+    );
+
+    const { targetCats, hasMentions, routing_warnings } = await router.resolveTargetsAndIntent(
+      '大家一起看看 @all',
+      't1',
+    );
+    assert.equal(hasMentions, true);
+    assert.ok(targetCats.includes('opus'));
+    assert.ok(targetCats.includes('codex'));
+    assert.ok(targetCats.includes('gemini'));
+    assert.deepStrictEqual(routing_warnings, []);
+  });
+
   test('@all skips unavailable cats', async () => {
     await withAvailabilityConfig({ codex: false }, async () => {
       const { AgentRouter } = await import('../dist/domains/cats/services/agents/routing/AgentRouter.js');
@@ -2446,6 +2504,30 @@ describe('F078: Group mentions', () => {
 
     const { targetCats } = await router.resolveTargetsAndIntent('@thread 大家看看', 't1');
     assert.deepStrictEqual(new Set(targetCats), new Set(['opus', 'codex']));
+  });
+
+  test('inline @thread routes to current thread participants without a false unknown warning', async () => {
+    const { AgentRouter } = await import('../dist/domains/cats/services/agents/routing/AgentRouter.js');
+
+    const threadStore = createMockThreadStore({ t1: ['opus', 'codex'] });
+    const router = new AgentRouter(
+      await migrateRouterOpts({
+        claudeService: createMockAgentService('opus'),
+        codexService: createMockAgentService('codex'),
+        geminiService: createMockAgentService('gemini'),
+        registry: createMockRegistry(),
+        messageStore: createMockMessageStore(),
+        threadStore,
+      }),
+    );
+
+    const { targetCats, hasMentions, routing_warnings } = await router.resolveTargetsAndIntent(
+      '大家一起看看 @thread',
+      't1',
+    );
+    assert.equal(hasMentions, true);
+    assert.deepStrictEqual(new Set(targetCats), new Set(['opus', 'codex']));
+    assert.deepStrictEqual(routing_warnings, []);
   });
 
   test('@本帖 routes to thread participants', async () => {

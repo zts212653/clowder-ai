@@ -45,6 +45,7 @@ export async function projectOfficialPlugin(
     version: entry.version,
     availableVersion: entry.version,
     pluginId: entry.pluginId,
+    distribution: entry.distribution,
     packageDigest: entry.packageDigest,
     effectiveGrants: [...entry.effectiveGrants],
     ownerAuthAvailable: entry.ownerAuth !== undefined,

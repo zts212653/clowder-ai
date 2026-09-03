@@ -58,6 +58,37 @@ describe('callback delivery decision helper', () => {
     assert.equal(log.error.mock.calls.length, 0);
   });
 
+  it('preserves a rejected routing receipt through zero-target callback delivery', async () => {
+    const routingPreflight = {
+      v: 1,
+      ownerId: 'owner-1',
+      observedAt: 10,
+      resolverState: 'fresh',
+      snapshotRef: 'snapshot:1',
+      targets: [
+        {
+          targetCatId: 'opus',
+          disposition: 'rejected',
+          reasons: [{ code: 'unavailable', summary: '暂不可用', sourceRefs: ['signal:1'] }],
+          alternatives: [],
+        },
+      ],
+    };
+    const result = await MessageDeliveryService.resolveCallbackDeliveryDecision({
+      canEnqueueA2A: true,
+      willEnqueueToQueue: true,
+      messageId: 'm-routing',
+      threadId: 't1',
+      log: logger(),
+      enqueueA2A: mock.fn(async () => ({ enqueued: [], routingPreflight })),
+      zeroEnqueuedWarnMessage: 'routing blocked',
+      enqueueFailureMessage: 'fail',
+    });
+
+    assert.equal(result.shouldBroadcastNow, true);
+    assert.deepEqual(result.routingPreflight, routingPreflight);
+  });
+
   it('fails open to broadcast when enqueue throws', async () => {
     const log = logger();
     const markDelivered = mock.fn(async () => null);

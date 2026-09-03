@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import { after, before, describe, it } from 'node:test';
 import { AgentPaneRegistry } from '../dist/domains/terminal/agent-pane-registry.js';
 import { createTmuxSpawnOverride } from '../dist/domains/terminal/tmux-agent-spawner.js';
@@ -24,8 +25,8 @@ describe('createTmuxSpawnOverride', () => {
 
     const events = [];
     for await (const event of override({
-      command: '/bin/sh',
-      args: ['-c', 'echo \'{"type":"hello"}\''],
+      command: process.execPath,
+      args: ['-e', 'console.log(JSON.stringify({type:"hello",cliContext:process.env.CAT_CAFE_CLI_PROCESS_CONTEXT}))'],
     })) {
       events.push(event);
     }
@@ -37,6 +38,7 @@ describe('createTmuxSpawnOverride', () => {
     assert.ok(pane, 'pane should be registered');
     assert.equal(pane.worktreeId, WORKTREE);
     assert.equal(pane.status, 'running');
+    assert.equal(events.find((event) => event.type === 'hello')?.cliContext, 'cat');
   });
 
   it('override works without AgentPaneRegistry', async () => {
@@ -52,5 +54,14 @@ describe('createTmuxSpawnOverride', () => {
 
     const jsonEvents = events.filter((e) => e.type === 'ok');
     assert.equal(jsonEvents.length, 1);
+  });
+
+  it('the app-server tmux carrier applies the same cat CLI process context', () => {
+    const source = readFileSync(
+      new URL('../src/domains/terminal/tmux-agent-carrier-session.ts', import.meta.url),
+      'utf8',
+    );
+
+    assert.match(source, /withCatCliProcessContext\(options\.env \?\? \{\}\)/u);
   });
 });

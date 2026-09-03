@@ -11,8 +11,8 @@
  * never creates phantom cooldown.
  *
  * Also serves as the persistence layer for cooldown — replaces the
- * in-memory singleton with a durable (entity_id, thread_id, rendered_at)
- * query via lastRenderedAt().
+ * in-memory singleton with a durable (entity_id, thread_id, cat_id,
+ * rendered_at) query via lastRenderedAt().
  *
  * Table: entity_nudge_events (standalone, not tied to schema.ts V31 —
  * the store self-creates on construction for testability).
@@ -36,8 +36,10 @@ const VALID_OUTCOMES = new Set([
 
 export interface RecordDeliveredInput {
   threadId: string;
-  invocationId?: string;
-  catId?: string;
+  invocationId: string;
+  catId: string;
+  /** The human-origin message whose entity mention produced this prompt. */
+  sourceMessageId: string;
   entityId: string;
   aliasMatched: string;
   sourceFamily: string;
@@ -47,6 +49,9 @@ export interface RecordDeliveredInput {
 
 export interface RecordSuppressedInput {
   threadId: string;
+  invocationId: string;
+  catId: string;
+  sourceMessageId: string;
   entityId: string;
   aliasMatched: string;
   sourceFamily: string;
@@ -61,6 +66,7 @@ export interface NudgeEventRow {
   thread_id: string;
   invocation_id: string | null;
   cat_id: string | null;
+  source_message_id: string | null;
   entity_id: string;
   alias_matched: string;
   source_family: string;
@@ -83,16 +89,16 @@ export class EntityNudgeEventStore {
 
     this.insertStmt = db.prepare(`
       INSERT INTO entity_nudge_events
-        (event_id, thread_id, invocation_id, cat_id,
+        (event_id, thread_id, invocation_id, cat_id, source_message_id,
          entity_id, alias_matched, source_family, alias_class,
          outcome, rendered_at, outcome_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
 
     this.lastRenderedStmt = db.prepare(`
       SELECT MAX(rendered_at) as max_rendered
       FROM entity_nudge_events
-      WHERE entity_id = ? AND thread_id = ?
+      WHERE entity_id = ? AND thread_id = ? AND cat_id = ?
         AND outcome NOT IN ('context_suppressed', 'recurrence_caught', 'no_story_coordinate')
     `);
 
@@ -114,12 +120,14 @@ export class EntityNudgeEventStore {
    * Outcome starts as 'delivered' — can be resolved later via resolveOutcome().
    */
   recordDelivered(input: RecordDeliveredInput): string {
+    this.assertConsumerCoordinates(input);
     const eventId = randomUUID();
     this.insertStmt.run(
       eventId,
       input.threadId,
-      input.invocationId ?? null,
-      input.catId ?? null,
+      input.invocationId,
+      input.catId,
+      input.sourceMessageId,
       input.entityId,
       input.aliasMatched,
       input.sourceFamily,
@@ -139,12 +147,14 @@ export class EntityNudgeEventStore {
     if (!VALID_OUTCOMES.has(input.reason)) {
       throw new Error(`Invalid suppression reason: ${input.reason}. Valid: ${[...VALID_OUTCOMES].join(', ')}`);
     }
+    this.assertConsumerCoordinates(input);
     const eventId = randomUUID();
     this.insertStmt.run(
       eventId,
       input.threadId,
-      null,
-      null,
+      input.invocationId,
+      input.catId,
+      input.sourceMessageId,
       input.entityId,
       input.aliasMatched,
       input.sourceFamily,
@@ -157,12 +167,12 @@ export class EntityNudgeEventStore {
   }
 
   /**
-   * Get the most recent rendered_at timestamp for a given entity + thread.
-   * Used for cooldown: "was this entity nudged in this thread recently?"
+   * Get the most recent rendered_at timestamp for a given entity + thread + consumer.
+   * Used for cooldown: "was this entity nudged to this cat in this thread recently?"
    * Returns null if no events exist for the combination.
    */
-  lastRenderedAt(entityId: string, threadId: string): number | null {
-    const row = this.lastRenderedStmt.get(entityId, threadId) as { max_rendered: number | null } | undefined;
+  lastRenderedAt(entityId: string, threadId: string, catId: string): number | null {
+    const row = this.lastRenderedStmt.get(entityId, threadId, catId) as { max_rendered: number | null } | undefined;
     return row?.max_rendered ?? null;
   }
 
@@ -192,6 +202,7 @@ export class EntityNudgeEventStore {
         thread_id      TEXT NOT NULL,
         invocation_id  TEXT,
         cat_id         TEXT,
+        source_message_id TEXT,
         entity_id      TEXT NOT NULL,
         alias_matched  TEXT NOT NULL,
         source_family  TEXT NOT NULL,
@@ -201,6 +212,11 @@ export class EntityNudgeEventStore {
         outcome_at     INTEGER
       )
     `);
+
+    const columns = this.db.prepare('PRAGMA table_info(entity_nudge_events)').all() as Array<{ name: string }>;
+    if (!columns.some((column) => column.name === 'source_message_id')) {
+      this.db.exec('ALTER TABLE entity_nudge_events ADD COLUMN source_message_id TEXT');
+    }
 
     // Indexes for common queries
     this.db.exec(`
@@ -212,6 +228,14 @@ export class EntityNudgeEventStore {
         ON entity_nudge_events(rendered_at);
       CREATE INDEX IF NOT EXISTS idx_nudge_events_cooldown
         ON entity_nudge_events(entity_id, thread_id);
+      CREATE INDEX IF NOT EXISTS idx_nudge_events_cooldown_consumer
+        ON entity_nudge_events(entity_id, thread_id, cat_id);
     `);
+  }
+
+  private assertConsumerCoordinates(input: { catId: string; invocationId: string; sourceMessageId: string }): void {
+    if (!input.catId || !input.invocationId || !input.sourceMessageId) {
+      throw new Error('entity_nudge_event_consumer_coordinates_required');
+    }
   }
 }

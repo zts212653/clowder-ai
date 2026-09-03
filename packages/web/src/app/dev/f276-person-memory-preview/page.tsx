@@ -1,6 +1,6 @@
 'use client';
 
-import type { ApprovalItem } from '@cat-cafe/shared';
+import type { ApprovalHubItem } from '@cat-cafe/shared';
 import { ApprovalItemCard } from '@/components/ApprovalItemCard';
 import { PersonMemoryProposalCardView } from '@/components/rich/PersonMemoryProposalCardView';
 
@@ -12,12 +12,13 @@ const FIELDS = [
   { label: '写入', value: '在 Approval Hub 逐项勾选后自动完成' },
 ];
 
-const APPROVAL_ITEM: ApprovalItem = {
+const APPROVAL_ITEM: ApprovalHubItem = {
   proposalId: 'person_candidate_preview',
   sourceFeatureId: 'F276',
   requesterCatId: 'codex-sol',
   ownerUserId: 'owner-preview',
-  status: 'pending',
+  resolution: 'open',
+  materialization: { state: 'not_started' },
   summary: '记住人物：黄挺',
   detail: {
     displayName: '黄挺',

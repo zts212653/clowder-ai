@@ -571,7 +571,7 @@ describe('Community Issues Routes', () => {
     const res = await app.inject({
       method: 'POST',
       url: `/api/community-issues/${issue.id}/resolve`,
-      headers: { 'x-cat-cafe-user': 'you' },
+      headers: { 'x-cat-cafe-user': 'operator' },
       payload: { decision: 'accepted', relatedFeature: 'F056', threadId: 'thread_f056' },
     });
     assert.equal(res.statusCode, 200);
@@ -622,7 +622,7 @@ describe('Community Issues Routes', () => {
     const res = await app.inject({
       method: 'POST',
       url: `/api/community-issues/${issue.id}/resolve`,
-      headers: { 'x-cat-cafe-user': 'you' },
+      headers: { 'x-cat-cafe-user': 'operator' },
       payload: {
         decision: 'accepted',
         routeRecommendation: { kind: 'existing-thread', threadId: 'thread_community_ops' },
@@ -640,7 +640,7 @@ describe('Community Issues Routes', () => {
     const res = await app.inject({
       method: 'POST',
       url: `/api/community-issues/${issue.id}/resolve`,
-      headers: { 'x-cat-cafe-user': 'you' },
+      headers: { 'x-cat-cafe-user': 'operator' },
       payload: {
         decision: 'accepted',
         routeRecommendation: { kind: 'new-thread' },
@@ -658,7 +658,7 @@ describe('Community Issues Routes', () => {
     const res = await app.inject({
       method: 'POST',
       url: `/api/community-issues/${issue.id}/resolve`,
-      headers: { 'x-cat-cafe-user': 'you' },
+      headers: { 'x-cat-cafe-user': 'operator' },
       payload: {
         decision: 'accepted',
         routeRecommendation: { kind: 'existing-thread', threadId: 'thread_does_not_exist_xyz' },
@@ -689,7 +689,7 @@ describe('Community Issues Routes', () => {
     const res = await app.inject({
       method: 'POST',
       url: `/api/community-issues/${issue.id}/resolve`,
-      headers: { 'x-cat-cafe-user': 'you' },
+      headers: { 'x-cat-cafe-user': 'operator' },
       payload: {
         decision: 'accepted',
         relatedFeature: 'F168',
@@ -708,7 +708,7 @@ describe('Community Issues Routes', () => {
     const res = await app.inject({
       method: 'POST',
       url: `/api/community-issues/${issue.id}/resolve`,
-      headers: { 'x-cat-cafe-user': 'you' },
+      headers: { 'x-cat-cafe-user': 'operator' },
       payload: {
         decision: 'accepted',
         routeRecommendation: { kind: 'existing-thread', threadId: 'thread_soft_deleted' },
@@ -724,7 +724,7 @@ describe('Community Issues Routes', () => {
     const res = await app.inject({
       method: 'POST',
       url: `/api/community-issues/${issue.id}/resolve`,
-      headers: { 'x-cat-cafe-user': 'you' },
+      headers: { 'x-cat-cafe-user': 'operator' },
       payload: {
         decision: 'accepted',
         threadId: 'thread_does_not_exist_legacy',
@@ -740,7 +740,7 @@ describe('Community Issues Routes', () => {
     const res = await app.inject({
       method: 'POST',
       url: `/api/community-issues/${issue.id}/resolve`,
-      headers: { 'x-cat-cafe-user': 'you' },
+      headers: { 'x-cat-cafe-user': 'operator' },
       payload: {
         decision: 'accepted',
         threadId: 'thread_soft_deleted',
@@ -756,7 +756,7 @@ describe('Community Issues Routes', () => {
     const res = await app.inject({
       method: 'POST',
       url: `/api/community-issues/${issue.id}/resolve`,
-      headers: { 'x-cat-cafe-user': 'you' },
+      headers: { 'x-cat-cafe-user': 'operator' },
       payload: {
         decision: 'accepted',
         threadId: 'thread_anything',
@@ -802,7 +802,7 @@ describe('Community Issues Routes', () => {
     const res = await app.inject({
       method: 'POST',
       url: `/api/community-issues/${issue.id}/resolve`,
-      headers: { 'x-cat-cafe-user': 'you' },
+      headers: { 'x-cat-cafe-user': 'operator' },
       payload: {
         decision: 'accepted',
         catId: 'opus',
@@ -845,7 +845,7 @@ describe('Community Issues Routes', () => {
     const res = await app.inject({
       method: 'POST',
       url: `/api/community-issues/${issue.id}/resolve`,
-      headers: { 'x-cat-cafe-user': 'you' },
+      headers: { 'x-cat-cafe-user': 'operator' },
       payload: { decision: 'declined' },
     });
     assert.equal(res.statusCode, 200);
@@ -865,7 +865,7 @@ describe('Community Issues Routes', () => {
     const res = await app.inject({
       method: 'POST',
       url: `/api/community-issues/${issue.id}/resolve`,
-      headers: { 'x-cat-cafe-user': 'you' },
+      headers: { 'x-cat-cafe-user': 'operator' },
       payload: { decision: 'accepted' },
     });
     assert.equal(res.statusCode, 200);
@@ -1775,7 +1775,7 @@ describe('Community Issues Routes', () => {
     const res = await app.inject({
       method: 'POST',
       url: `/api/community-issues/${issue.id}/resolve`,
-      headers: { 'x-cat-cafe-user': 'you' },
+      headers: { 'x-cat-cafe-user': 'operator' },
       payload: {
         decision: 'accepted',
         catId: 'opus',
@@ -1838,7 +1838,7 @@ describe('Community Issues Routes', () => {
     const res = await app.inject({
       method: 'POST',
       url: `/api/community-issues/${issue.id}/resolve`,
-      headers: { 'x-cat-cafe-user': 'you' },
+      headers: { 'x-cat-cafe-user': 'operator' },
       payload: {
         decision: 'accepted',
         catId: 'opus',
@@ -1891,16 +1891,16 @@ describe('Community Issues Routes', () => {
     const res = await app.inject({
       method: 'POST',
       url: `/api/community-issues/${issue.id}/resolve`,
-      headers: { 'x-cat-cafe-user': 'you' },
+      headers: { 'x-cat-cafe-user': 'operator' },
       payload: { decision: 'accepted', catId: 'opus', threadId: 'thread_r13_test' },
     });
     assert.equal(res.statusCode, 200, 'resolve must succeed');
 
-    // The tracking task should carry the resolving userId ('you')
+    // The tracking task should carry the resolving userId ('operator')
     const tasks = await taskStore.listByKind('issue_tracking');
     const trackingTask = tasks.find((t) => t.subjectKey?.includes('222'));
     assert.ok(trackingTask, 'issue_tracking task must be auto-registered');
-    assert.equal(trackingTask.userId, 'you', 'tracking task userId must be the resolving user (Cloud R13 P1)');
+    assert.equal(trackingTask.userId, 'operator', 'tracking task userId must be the resolving user (Cloud R13 P1)');
   });
 
   test('POST resolve accepted — projector.apply() throwing must not skip registerRoutingTracking (Cloud R21 P1)', async () => {
@@ -1946,7 +1946,7 @@ describe('Community Issues Routes', () => {
     const res = await app.inject({
       method: 'POST',
       url: `/api/community-issues/${issue.id}/resolve`,
-      headers: { 'x-cat-cafe-user': 'you' },
+      headers: { 'x-cat-cafe-user': 'operator' },
       payload: { decision: 'accepted', catId: 'opus', threadId: 'thread_r21_p1_test' },
     });
     assert.equal(res.statusCode, 200, 'resolve must succeed even when projector throws');

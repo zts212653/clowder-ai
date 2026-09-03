@@ -17,7 +17,7 @@
  *
  * Renders as:
  *   <thread-runtime v=1 format=json>
- *   {"threadId": "...", "threadTitle": "...", "participants": [...], "calledBy": "...", "intent": "...", "sourceMessageId": "...", "cloudReturnBinding": "..."}
+ *   {"threadId": "...", "threadTitle": "...", "participants": [...], "calledBy": "...", "intent": "...", "sourceMessageId": "..."}
  *   </thread-runtime>
  *
  *   <intent text rendered separately for the cat to read as its message>
@@ -40,12 +40,6 @@ const TRUNCATE_SUFFIX = '...[truncated]';
 function assertExactSourceMessageId(sourceMessageId: string): void {
   if (!sourceMessageId || sourceMessageId.length > 512) {
     throw new Error('sourceMessageId must be an exact persisted message ID of at most 512 characters');
-  }
-}
-
-function assertCloudReturnBinding(binding: string): void {
-  if (!binding || binding.length > 800 || !/^cbr1\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/.test(binding)) {
-    throw new Error('cloudReturnBinding must be an opaque signed cbr1 token of at most 800 characters');
   }
 }
 
@@ -80,7 +74,6 @@ function renderAbsoluteFloor(params: CloudInvokeDispatchParams): string {
     calledBy: (params.calledBy as string).slice(0, 32) || 'X',
     intent: floorIntent,
     sourceMessageId: params.sourceMessageId,
-    cloudReturnBinding: params.cloudReturnBinding,
   };
   return renderEnvelope(absoluteFloor, floorIntent);
 }
@@ -109,7 +102,6 @@ function renderAbsoluteFloor(params: CloudInvokeDispatchParams): string {
  */
 export function buildDeltaPayload(params: CloudInvokeDispatchParams): string {
   assertExactSourceMessageId(params.sourceMessageId);
-  assertCloudReturnBinding(params.cloudReturnBinding);
   // Attempt 1: full payload as-is.
   const fitFull = tryFitWithIntentShrink(params);
   if (fitFull) return fitFull;
@@ -193,7 +185,6 @@ function renderEnvelope(params: CloudInvokeDispatchParams, intent: string): stri
     calledBy: params.calledBy,
     intent,
     sourceMessageId: params.sourceMessageId,
-    cloudReturnBinding: params.cloudReturnBinding,
   };
   // JSON.stringify with no spaces — compact, stable, escapes all delimiters.
   const json = JSON.stringify(delta);

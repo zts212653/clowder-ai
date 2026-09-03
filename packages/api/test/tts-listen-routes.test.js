@@ -58,13 +58,13 @@ describe('F279 TTS listen routes', () => {
     const first = await app.inject({
       method: 'POST',
       url: '/api/tts/synthesize',
-      headers: { 'x-cat-cafe-user': 'you', 'content-type': 'application/json' },
+      headers: { 'x-cat-cafe-user': 'operator', 'content-type': 'application/json' },
       payload: { text: '普通合成缓存。' },
     });
     const second = await app.inject({
       method: 'POST',
       url: '/api/tts/synthesize',
-      headers: { 'x-cat-cafe-user': 'you', 'content-type': 'application/json' },
+      headers: { 'x-cat-cafe-user': 'operator', 'content-type': 'application/json' },
       payload: { text: '普通合成缓存。' },
     });
 
@@ -85,7 +85,7 @@ describe('F279 TTS listen routes', () => {
     const response = await app.inject({
       method: 'POST',
       url: '/api/tts/synthesize',
-      headers: { 'x-cat-cafe-user': 'you', 'content-type': 'application/json' },
+      headers: { 'x-cat-cafe-user': 'operator', 'content-type': 'application/json' },
       payload: { text: '听读运行健康。', purpose: 'listen' },
     });
 
@@ -103,7 +103,7 @@ describe('F279 TTS listen routes', () => {
       url: '/api/tts/listen/stream',
       headers: {
         origin: 'http://localhost:3003',
-        'x-cat-cafe-user': 'you',
+        'x-cat-cafe-user': 'operator',
         'content-type': 'application/json',
       },
       payload: { text: '只为流式缓存测试。' },
@@ -149,7 +149,7 @@ describe('F279 TTS listen routes', () => {
         method: 'POST',
         headers: {
           origin: 'http://localhost:3003',
-          'x-cat-cafe-user': 'you',
+          'x-cat-cafe-user': 'operator',
           'content-type': 'application/json',
         },
         body: JSON.stringify({ text }),
@@ -197,7 +197,7 @@ describe('F279 TTS listen routes', () => {
     try {
       const response = await fetch(`${address}/api/tts/listen/stream`, {
         method: 'POST',
-        headers: { 'x-cat-cafe-user': 'you', 'content-type': 'application/json' },
+        headers: { 'x-cat-cafe-user': 'operator', 'content-type': 'application/json' },
         body: JSON.stringify({ text: '客户端会取消这一句。' }),
       });
       const reader = response.body.getReader();
@@ -276,7 +276,7 @@ describe('F279 TTS listen routes', () => {
       retention: '30d',
       updatedAt: 100,
     };
-    const headers = { 'x-cat-cafe-user': 'you', 'content-type': 'application/json' };
+    const headers = { 'x-cat-cafe-user': 'operator', 'content-type': 'application/json' };
     assert.equal(
       (await app.inject({ method: 'PUT', url: '/api/tts/listen/document', headers, payload: state })).statusCode,
       200,
@@ -315,7 +315,7 @@ describe('F279 TTS listen routes', () => {
     const loaded = await app.inject({
       method: 'GET',
       url: '/api/tts/listen/document?projectPath=%2Frepo&relativePath=paper.md',
-      headers: { 'x-cat-cafe-user': 'you' },
+      headers: { 'x-cat-cafe-user': 'operator' },
     });
     assert.equal(loaded.statusCode, 200);
     assert.deepEqual(loaded.json().position, state.position);
@@ -343,7 +343,7 @@ describe('F279 TTS listen routes', () => {
     });
     const flakyApp = Fastify({ logger: false });
     await flakyApp.register(ttsRoutes, { ttsRegistry: registry, cacheDir, documentListenRepository: repository });
-    const headers = { 'x-cat-cafe-user': 'you', 'content-type': 'application/json' };
+    const headers = { 'x-cat-cafe-user': 'operator', 'content-type': 'application/json' };
     const identity = { projectPath: '/repo', relativePath: 'fingerprint-unavailable.md', contentDigest: 'digest-a' };
     const state = {
       identity,
@@ -365,7 +365,7 @@ describe('F279 TTS listen routes', () => {
       const fingerprint = initial.json().synthesisFingerprint;
       assert.equal(typeof fingerprint, 'string');
       repository.setSentenceAsset(
-        { userId: 'you', projectPath: identity.projectPath, relativePath: identity.relativePath },
+        { userId: 'operator', projectPath: identity.projectPath, relativePath: identity.relativePath },
         'sentence-a',
         assetId,
       );
@@ -418,7 +418,7 @@ describe('F279 TTS listen routes', () => {
         await app.inject({
           method: 'PUT',
           url: '/api/tts/listen/document/asset',
-          headers: { 'x-cat-cafe-user': 'you', 'content-type': 'application/json' },
+          headers: { 'x-cat-cafe-user': 'operator', 'content-type': 'application/json' },
           payload: {
             projectPath: '/repo',
             relativePath: 'paper.md',
@@ -434,7 +434,7 @@ describe('F279 TTS listen routes', () => {
   it('rejects every browser mutation without a session instead of writing default-user state', async () => {
     const headers = {
       origin: 'http://localhost:3000',
-      'x-cat-cafe-user': 'you',
+      'x-cat-cafe-user': 'operator',
       'content-type': 'application/json',
     };
     const state = {
@@ -495,7 +495,7 @@ describe('F279 TTS listen routes', () => {
   });
 
   it('does not report a manifest asset as cached after its file disappeared', async () => {
-    const headers = { 'x-cat-cafe-user': 'you', 'content-type': 'application/json' };
+    const headers = { 'x-cat-cafe-user': 'operator', 'content-type': 'application/json' };
     const identity = { projectPath: '/repo', relativePath: 'missing-audio.md', contentDigest: 'digest' };
     const missingAssetId = `${'c'.repeat(64)}.wav`;
     await app.inject({
@@ -512,7 +512,7 @@ describe('F279 TTS listen routes', () => {
       },
     });
     repository.setSentenceAsset(
-      { userId: 'you', projectPath: identity.projectPath, relativePath: identity.relativePath },
+      { userId: 'operator', projectPath: identity.projectPath, relativePath: identity.relativePath },
       'sentence-missing',
       missingAssetId,
     );
@@ -533,7 +533,7 @@ describe('F279 TTS listen routes', () => {
   });
 
   it('does not forget asset metadata or report success when filesystem deletion fails', async () => {
-    const headers = { 'x-cat-cafe-user': 'you', 'content-type': 'application/json' };
+    const headers = { 'x-cat-cafe-user': 'operator', 'content-type': 'application/json' };
     const identity = { projectPath: '/repo', relativePath: 'undeletable.md', contentDigest: 'digest' };
     const assetId = `${'d'.repeat(64)}.wav`;
     await app.inject({
@@ -550,7 +550,7 @@ describe('F279 TTS listen routes', () => {
       },
     });
     repository.setSentenceAsset(
-      { userId: 'you', projectPath: identity.projectPath, relativePath: identity.relativePath },
+      { userId: 'operator', projectPath: identity.projectPath, relativePath: identity.relativePath },
       'sentence-undeletable',
       assetId,
     );

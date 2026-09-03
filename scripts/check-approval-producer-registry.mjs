@@ -46,7 +46,7 @@ function parseCatalogEntryIds(source) {
 }
 
 function parseApiBindingIds(source) {
-  const match = source.match(/new\s+ApprovalProducerRegistry\s*\(\s*\{([\s\S]*?)\n\s*\}\s*\)/);
+  const match = source.match(/new\s+ApprovalProducerRegistry\s*\(\s*\{([\s\S]*?)\n {2}\}\);/);
   if (!match) return [];
   return [...match[1].matchAll(/^ {4}(?:['"]([^'"]+)['"]|([A-Za-z][\w-]*))\s*:/gm)].map(
     (entry) => entry[1] ?? entry[2],

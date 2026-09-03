@@ -8,7 +8,7 @@ description: "per-user 品味信号的结构化提议、operator 审批、可靠
 description_source: human
 description_author: opus
 description_updated_at: 2026-07-12T12:45:00Z
-tips_exempt: internal durability correction; the existing Approval Hub action is unchanged and no new user-invokable capability is introduced
+tips_exempt: "2026-08-28 续租：修复既有 Approval Hub Taste 批准后的隔离 Git publisher 与私有 outbound exclusion；不新增用户可操作入口或学习步骤。"
 ---
 
 # F221: Taste Lane — per-user 品味导航
@@ -79,7 +79,9 @@ docs/taste/
 - search_evidence 自动检索（BM25 + embedding，已有能力）
 - F200 自动追踪消费（已有能力）
 - 敏感内容进 `private/taste/`
-- Outbound sync 安全：`docs/taste/` 不在 allowlist（白名单模式，已确认）
+- Outbound sync 安全：`docs/taste/` 不在 allowlist（白名单模式，已确认）。这里的
+  `privacy: public` 只表示**私有 Clowder AI 家仓内共享**，不是互联网公开；不得进入
+  `clowder-ai` 或任何开源同步目标。
 
 **事情 2：code-as-harness skill 加 taste 路径**
 
@@ -107,7 +109,7 @@ taste 信号（"这不美"/"太客服了"/"aha"/"这就是我要的"）
 | quote | string | operator experience（verbatim） |
 | tags | string[] | 搜索关键词 |
 | dimension | enum | taste index 维度（关系姿态/认知诚实/架构审美/视觉品质/表达真实/系统哲学/创作手法） |
-| privacy | enum | public / sensitive |
+| privacy | enum | public / sensitive（`public` = 私有 Clowder AI 家仓内共享，禁止开源同步） |
 
 - 猫猫身份 + user scope 由服务端从 invocation context 派生，不信任客户端
 - 工具只创建 proposal，**不直接写文件**——写入由 approve 回调触发
@@ -281,6 +283,7 @@ taste 信号（"这不美"/"太客服了"/"aha"/"这就是我要的"）
 | KD-8 | AC-D7 gate alpha 实测，不预判 | F221 = adapter #6（>5 threshold），但 p95 大概率 <250ms；按 AC-D7 纪律必须实测 | 2026-07-12 |
 | KD-9 | F221 approval 参照 F231 的 canonical repository + checkpointed service pattern | 通用 workspace root 不是 canonical-main locator；路径解析、原子写与恢复语义必须从 HTTP/writer 中抽离，但 public Taste 仍以 Git-tracked `docs/taste/` 为终态 | 2026-07-15 |
 | KD-10 | public Taste 的完成 terminal 是 `origin/main` publication，不是 primary-main local commit | typed proposal 是 canonical approval truth，Git docs 是授权投影；isolated publisher 避免共享 main 污染，并复用 `approving` checkpoint 恢复而不再造状态机 | 2026-08-25 |
+| KD-11 | `public` Taste 只对私有 Clowder AI 家仓公开，绝不进入 `clowder-ai` / outbound open-source sync | Taste 是家庭私人资产；Git remote durability 与互联网公开是两个正交维度，不能用同一个 “public” 词混淆 | 2026-08-28 |
 
 ## Review Gate
 

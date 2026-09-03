@@ -15,6 +15,7 @@
  */
 
 import type { DynamicTaskDef } from '../../infrastructure/scheduler/DynamicTaskStore.js';
+import type { DurableManagedGateJob } from './durable-managed-gate-job.js';
 
 export type ManagedCommandWakeState =
   | 'command_running'
@@ -41,6 +42,14 @@ export interface ManagedCommandWakeProjection {
   readonly state: ManagedCommandWakeState;
   readonly command: string;
   readonly startedAt: number;
+  /** F261: durable action-plane identity for canonical full gates. */
+  readonly durableJob?: DurableManagedGateJob;
+  /** F167 Phase P: persisted spawn pid. */
+  readonly pid?: number | null;
+  /** F167 Phase P: admission-fact text for startup re-delivery if append failed. */
+  readonly admissionFact?: string;
+  /** F167 Phase P: true once the admission-fact visibility message was durably appended. */
+  readonly admissionFactAppended?: boolean;
   readonly conditionMetAt?: number;
   readonly wakeContent?: string;
   readonly wakeSource?: 'command_completion' | 'fallback_timer';
@@ -138,6 +147,8 @@ export function readHoldLifecycleProjection(task: DynamicTaskDef): Record<string
   if (
     lifecycle.status !== 'active' &&
     lifecycle.status !== 'retired_by_event' &&
+    lifecycle.status !== 'retired_by_replacement' &&
+    lifecycle.status !== 'cancel_requested' &&
     lifecycle.status !== 'cancelled_by_user' &&
     lifecycle.status !== 'escalated' &&
     lifecycle.status !== 'fired'
@@ -180,7 +191,13 @@ export function isPendingHoldBallWakeTask(task: DynamicTaskDef): boolean {
 export function isRetiredWakeWithRunningManagedCommand(task: DynamicTaskDef): boolean {
   if (!isHoldBallWakeTask(task) || task.enabled) return false;
   const lifecycle = readHoldLifecycleProjection(task);
-  if (lifecycle?.mode !== 'wake_when' || lifecycle.status !== 'cancelled_by_user') return false;
+  if (
+    lifecycle?.mode !== 'wake_when' ||
+    (lifecycle.status !== 'cancel_requested' &&
+      lifecycle.status !== 'cancelled_by_user' &&
+      lifecycle.status !== 'retired_by_replacement')
+  )
+    return false;
   return readManagedCommandWakeProjection(task)?.state === 'command_running';
 }
 
@@ -200,7 +217,14 @@ export function parseRetiredManagedCommandWakeTask(task: DynamicTaskDef | null):
   if (!task || task.enabled || task.deliveryThreadId === null) return null;
   const lifecycle = task.params.holdLifecycle;
   const command = readManagedCommandWakeProjection(task);
-  if (!isPlainRecord(lifecycle) || lifecycle.status !== 'cancelled_by_user' || !command) return null;
+  if (
+    !isPlainRecord(lifecycle) ||
+    (lifecycle.status !== 'cancel_requested' &&
+      lifecycle.status !== 'cancelled_by_user' &&
+      lifecycle.status !== 'retired_by_replacement') ||
+    !command
+  )
+    return null;
   const catId = task.createdBy.startsWith('hold-ball:') ? task.createdBy.slice('hold-ball:'.length) : '';
   const userId = task.params.triggerUserId;
   if (!catId || typeof userId !== 'string' || !userId) return null;
@@ -210,6 +234,17 @@ export function parseRetiredManagedCommandWakeTask(task: DynamicTaskDef | null):
 export function createInitialManagedCommandWakeProjection(
   command: string,
   startedAt: number,
+  durableJob?: DurableManagedGateJob,
 ): ManagedCommandWakeProjection {
-  return { state: 'command_running', command, startedAt };
+  return { state: 'command_running', command, startedAt, ...(durableJob ? { durableJob } : {}) };
+}
+
+/**
+ * F167 Phase P R6: canonical idempotency key for admission-fact visibility
+ * messages. Shared by the route (original append) and the startup recovery
+ * sweep (dedup lookup) — a single source prevents key drift that would let
+ * crash-window duplicates slip through.
+ */
+export function buildAdmissionFactIdempotencyKey(taskId: string): string {
+  return `hold-ball-admission-fact:${taskId}`;
 }

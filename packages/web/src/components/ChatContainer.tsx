@@ -1,16 +1,11 @@
 'use client';
 
-import type { CapabilityTipContext, MessageBundleSelectionItem } from '@cat-cafe/shared';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useShallow } from 'zustand/react/shallow';
 import { useActiveExecutionProjection } from '@/hooks/useActiveExecutionProjection';
 import { useAgentHookHealth } from '@/hooks/useAgentHookHealth';
-import { useAgentMessages } from '@/hooks/useAgentMessages';
 import { formatCatName, useCatData } from '@/hooks/useCatData';
-import { useChatHistory } from '@/hooks/useChatHistory';
-import { useChatSocketCallbacks } from '@/hooks/useChatSocketCallbacks';
-import { useCoCreatorConfig } from '@/hooks/useCoCreatorConfig';
 import { useConnectionStatus } from '@/hooks/useConnectionStatus';
 import { godAction, submitAction } from '@/hooks/useGameApi';
 import { reconnectGame } from '@/hooks/useGameReconnect';
@@ -18,8 +13,6 @@ import { useGovernanceStatus } from '@/hooks/useGovernanceStatus';
 import { useIndexState } from '@/hooks/useIndexState';
 import { useIsDesktop } from '@/hooks/useIsDesktop';
 import { usePersistedState } from '@/hooks/usePersistedState';
-import { useSendMessage } from '@/hooks/useSendMessage';
-import { useSocket } from '@/hooks/useSocket';
 import { useSplitPaneKeys } from '@/hooks/useSplitPaneKeys';
 import { useTeleport } from '@/hooks/useTeleport';
 import { useThreadLiveness, useThreadMessages } from '@/hooks/useThreadScopedSelectors';
@@ -27,31 +20,19 @@ import { useVadInterrupt } from '@/hooks/useVadInterrupt';
 import { useVoiceAutoPlay } from '@/hooks/useVoiceAutoPlay';
 import { useVoiceStream } from '@/hooks/useVoiceStream';
 import { useActiveExecutionStore } from '@/stores/activeExecutionStore';
-import { type ChatMessage as ChatMessageData, type Thread, useChatStore } from '@/stores/chatStore';
+import { type ChatMessage, type Thread, useChatStore } from '@/stores/chatStore';
 import { useGameStore } from '@/stores/gameStore';
 import { useGuideStore } from '@/stores/guideStore';
 import { useSidebarProjectionStore } from '@/stores/sidebarProjectionStore';
 import { useSidebarStore } from '@/stores/sidebarStore';
 import { useTaskStore } from '@/stores/taskStore';
 import { apiFetch } from '@/utils/api-client';
-import { computeCliDiagnosticsDedup } from '@/utils/cli-diagnostics-dedup';
-import { computeScrollRecomputeSignal } from '@/utils/scrollRecomputeSignal';
 import { invalidateSidebarProjection } from '@/utils/sidebar-thread-snapshot';
-import { getUserId } from '@/utils/userId';
 import { AgentHookHealthNotice, shouldRenderAgentHookHealthNotice } from './AgentHookHealthNotice';
 import { BootcampListModal } from './BootcampListModal';
 import { BootstrapOrchestrator } from './BootstrapOrchestrator';
 import { ChatContainerHeader } from './ChatContainerHeader';
-import { ChatInput } from './ChatInput';
-import { ChatMessage } from './ChatMessage';
-import { ChatMessageRow } from './ChatMessageRow';
-import { ConnectionStatusBar } from './ConnectionStatusBar';
-import {
-  getSilentActiveTurnDeadline,
-  getStreamingTipContexts,
-  isStreamingTipSuppressed,
-} from './capability-tip-placement';
-import { buildChatTimelineProjectionKey } from './chat-timeline-projection-key';
+import { useConciergeConfirmations } from './concierge/useConciergeConfirmations';
 import { FirstRunQuestWizard } from './FirstRunQuestWizard';
 import { BootcampGuideOverlay } from './first-run-quest/BootcampGuideOverlay';
 import { QuestBanner } from './first-run-quest/QuestBanner';
@@ -59,32 +40,19 @@ import { syncLocalBootcampState } from './first-run-quest/syncLocalBootcampState
 import { useFirstProjectMistakeTipGate } from './first-run-quest/useFirstProjectMistakeTipGate';
 import { useFirstProjectPreviewAutoOpen } from './first-run-quest/useFirstProjectPreviewAutoOpen';
 import { GameOverlayConnector } from './game/GameOverlayConnector';
-import { HubCatEditor } from './HubCatEditor';
-import { HubCoCreatorEditor } from './HubCoCreatorEditor';
 import { BootcampIcon } from './icons/BootcampIcon';
+import { GameIcon } from './icons/GameIcon';
 import { PawIcon } from './icons/PawIcon';
-import { MessageNavigator } from './MessageNavigator';
-import { MessageSelectionToolbar } from './MessageSelectionToolbar';
 import { MobileApprovalSheet } from './MobileApprovalSheet';
-import { loadExportThreadTitle, selectMessagesForExport } from './message-export-selection';
-import { messageMountPolicy } from './message-mount-policy';
-import { isMessageSelectableForBundle, MAX_SELECTED_MESSAGES, normalizeSelectedMessageIds } from './message-selection';
 import { ParallelStatusBar } from './ParallelStatusBar';
-import { PendingMemberBubble } from './PendingMemberBubble';
 import { ProjectSetupCard } from './ProjectSetupCard';
-import { derivePendingMemberInvocations } from './pending-member-projection';
-import { QueuePanel } from './QueuePanel';
-import { collectExactLiveInvocationIds } from './queue-receipt-projection';
 import { RightStatusPanel } from './RightStatusPanel';
 import { RuntimeUpdateRequiredDialog } from './RuntimeUpdateRequiredDialog';
-import { ScrollToBottomButton } from './ScrollToBottomButton';
-import { SplitPaneView } from './SplitPaneView';
+import { SplitPaneChatView } from './SplitPaneView';
 import { ThinkingIndicator } from './ThinkingIndicator';
-import { ThreadExecutionBar } from './ThreadExecutionBar';
 import { ThreadSidebar } from './ThreadSidebar';
 import { assignDocumentRoute, pushThreadRouteWithHistory } from './ThreadSidebar/thread-navigation';
-import { TransferTargetPicker } from './TransferTargetPicker';
-import { VoteActiveBar } from './VoteActiveBar';
+import { ThreadChatExport, ThreadChatSurface, useThreadChatRuntime } from './thread-chat';
 import { type VoteConfig, VoteConfigModal } from './VoteConfigModal';
 
 import { WorkspacePanel } from './WorkspacePanel';
@@ -98,7 +66,27 @@ interface ChatContainerProps {
   threadId: string;
 }
 
+function hasConciergeConfirmationActions(messages: readonly ChatMessage[]): boolean {
+  return messages.some((message) =>
+    message.extra?.rich?.blocks.some(
+      (block) =>
+        block.kind === 'card' &&
+        block.actions?.some(
+          (action) => action.action === 'concierge_triage_confirm' || action.action === 'concierge_triage_cancel',
+        ),
+    ),
+  );
+}
+
 export function ChatContainer({ threadId }: ChatContainerProps) {
+  const searchParams = typeof window !== 'undefined' ? new URLSearchParams(window.location.search) : null;
+  if (searchParams?.get('export') === 'true') {
+    return <ThreadChatExport threadId={threadId} messageIds={searchParams.getAll('messageId')} />;
+  }
+  return <InteractiveChatContainer threadId={threadId} />;
+}
+
+function InteractiveChatContainer({ threadId }: ChatContainerProps) {
   const bottomChromeRef = useRef<HTMLDivElement | null>(null);
   const bottomChromeObserverRef = useRef<ResizeObserver | null>(null);
   const bottomChromeObserverRafRef = useRef<number | null>(null);
@@ -149,61 +137,12 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
   // AC-C6 race window for the entire ChatContainer surface (Task 2 only
   // covered hasActiveInvocation; this finishes the job).
   const allMessages = useThreadMessages(threadId);
-
-  // F264: the timeline is the durable authoring history. QueuePanel presents
-  // custody/actions for the same message, but must not erase its user bubble.
   const messages = allMessages;
+  const needsConciergeConfirmations = useMemo(() => hasConciergeConfirmationActions(messages), [messages]);
+  const { confirmations: messageConfirmations } = useConciergeConfirmations(needsConciergeConfirmations);
   const [documentVisible, setDocumentVisible] = useState(
     () => typeof document === 'undefined' || document.visibilityState === 'visible',
   );
-  const [selectionMode, setSelectionMode] = useState(false);
-  const [selectedMessageIds, setSelectedMessageIds] = useState<Set<string>>(() => new Set());
-  const [selectionForwardOpen, setSelectionForwardOpen] = useState(false);
-  const normalizedSelectedMessageIds = useMemo(
-    () => normalizeSelectedMessageIds(messages, selectedMessageIds),
-    [messages, selectedMessageIds],
-  );
-  const selectedBundleItems = useMemo<MessageBundleSelectionItem[]>(
-    () => normalizedSelectedMessageIds.map((messageId) => ({ kind: 'message', messageId })),
-    [normalizedSelectedMessageIds],
-  );
-
-  const clearMessageSelection = useCallback(() => {
-    setSelectionForwardOpen(false);
-    setSelectionMode(false);
-    setSelectedMessageIds(new Set());
-  }, []);
-
-  const enterMessageSelection = useCallback(
-    (messageId: string) => {
-      const candidate = messages.find((message) => message.id === messageId);
-      if (!candidate || !isMessageSelectableForBundle(candidate)) return;
-      setSelectedMessageIds(new Set([messageId]));
-      setSelectionMode(true);
-    },
-    [messages],
-  );
-
-  const toggleMessageSelection = useCallback((messageId: string) => {
-    setSelectedMessageIds((current) => {
-      const next = new Set(current);
-      if (next.has(messageId)) {
-        next.delete(messageId);
-      } else if (next.size < MAX_SELECTED_MESSAGES) {
-        next.add(messageId);
-      }
-      return next;
-    });
-  }, []);
-
-  useEffect(() => {
-    setSelectedMessageIds((current) => {
-      const selectableIds = new Set(messages.filter(isMessageSelectableForBundle).map((message) => message.id));
-      const next = new Set([...current].filter((messageId) => selectableIds.has(messageId)));
-      if (next.size === current.size && [...next].every((messageId) => current.has(messageId))) return current;
-      return next;
-    });
-  }, [messages]);
   const {
     hasActive: hasActiveInvocation,
     activeInvocations,
@@ -212,16 +151,9 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
     intentMode,
     targetCats,
   } = useThreadLiveness(threadId);
-  const activeInvocationIds = useMemo(
-    () => collectExactLiveInvocationIds(activeInvocations, catInvocations),
-    [activeInvocations, catInvocations],
-  );
   const navigateToThread = useCallback((tid: string) => {
     pushThreadRouteWithHistory(tid, typeof window !== 'undefined' ? window : undefined);
   }, []);
-  const uiThinkingExpandedByDefault = useChatStore((s) => s.uiThinkingExpandedByDefault);
-  const isOfflineSnapshot = useChatStore((s) => s.isOfflineSnapshot);
-
   // F101: Game state from Zustand store
   const gameView = useGameStore((s) => s.gameView);
   const isGameActive = useGameStore((s) => s.isGameActive);
@@ -241,33 +173,11 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
   const altActionName = useGameStore((s) => s.altActionName);
   const overlayMinimized = useGameStore((s) => s.overlayMinimized);
 
-  // Export mode: ?export=true triggers print-friendly layout (no scroll containers)
   const searchParams = typeof window !== 'undefined' ? new URLSearchParams(window.location.search) : null;
-  const isExport = searchParams?.get('export') === 'true';
-  const exportMessageIds = searchParams?.getAll('messageId') ?? [];
-  const [exportThreadTitle, setExportThreadTitle] = useState<string | null | undefined>(undefined);
-  useEffect(() => {
-    if (!isExport) {
-      setExportThreadTitle(undefined);
-      return;
-    }
-    let active = true;
-    setExportThreadTitle(undefined);
-    loadExportThreadTitle(threadId)
-      .then((title) => {
-        if (active) setExportThreadTitle(title);
-      })
-      .catch(() => {
-        if (active) setExportThreadTitle(null);
-      });
-    return () => {
-      active = false;
-    };
-  }, [isExport, threadId]);
   // AC-6: research=multi hint from Signal study "多猫研究" button
   const isResearchMode = searchParams?.get('research') === 'multi';
   const { clearTasks } = useTaskStore();
-  const { cats, getCatById, refresh: refreshCats, isLoading, hasFetched } = useCatData();
+  const { cats, isLoading, hasFetched } = useCatData();
   const workspaceWorktreeId = useChatStore((s) => s.workspaceWorktreeId);
   useTeleport(); // F227: drive the Hub to a teleport target message (thread:teleport)
   const { isOpen: sidebarOpen, open: openSidebar, close: closeSidebar, toggle: toggleSidebar } = useSidebarStore();
@@ -280,10 +190,6 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
   const [workspacePanelMounted, setWorkspacePanelMounted] = useState(rightPanelMode === 'workspace');
   const [activityPanelMounted, setActivityPanelMounted] = useState(false);
   const [showBootcampList, setShowBootcampList] = useState(false);
-  const [editingCatId, setEditingCatId] = useState<string | null>(null);
-  const editingCat = editingCatId ? (getCatById(editingCatId) ?? null) : null;
-  const [coCreatorEditorOpen, setCoCreatorEditorOpen] = useState(false);
-  const coCreator = useCoCreatorConfig();
   const [showFirstRunQuestPrompt, setShowFirstRunQuestPrompt] = useState(false);
   const [showQuestWizard, setShowQuestWizard] = useState(false);
   // F106: fetch bootcamp count independently of sidebar lifecycle
@@ -353,12 +259,6 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
     closeRightPanel();
   }, [closeRightPanel]);
 
-  const openStatusPanel = useCallback(() => {
-    setActivityPanelMounted(true);
-    setRightPanelMode('status');
-    setRightPanelOpen(true);
-  }, [setRightPanelMode, setRightPanelOpen]);
-
   const openWorkspaceLauncher = useCallback(() => {
     setWorkspacePanelMounted(true);
     setWorkspaceMode('dev');
@@ -387,23 +287,15 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
     }
   }, [isDesktop, openSidebar]);
 
-  const { handleAgentMessage, resetRefs, resetTimeout, clearDoneTimeout } = useAgentMessages();
-  const { handleScroll, scrollContainerRef, messagesEndRef, isLoadingHistory, hasMore } = useChatHistory(threadId);
-  const { handleSend, uploadStatus, uploadError } = useSendMessage(threadId);
-  // F096: Listen for interactive block send events
-  // F229 Bug 2 fix: ignore events tagged with sendContext (e.g. 'concierge')
-  // to prevent InteractiveBlock clicks in the concierge panel from leaking
-  // "确认"/"取消" text as messages to the main thread.
-  useEffect(() => {
-    const handler = (e: Event) => {
-      const detail = (e as CustomEvent<{ text: string; sendContext?: string }>).detail;
-      if (detail.sendContext) return; // belongs to another panel, not main thread
-      if (detail.text) handleSend(detail.text);
-    };
-    window.addEventListener('cat-cafe:interactive-send', handler);
-    return () => window.removeEventListener('cat-cafe:interactive-send', handler);
-  }, [handleSend]);
-
+  const splitPaneThreadIds = useChatStore((s) => s.splitPaneThreadIds);
+  const runtimeThreadIds = useMemo(
+    () =>
+      viewMode === 'split' && splitPaneThreadIds.length > 0
+        ? [...new Set([...splitPaneThreadIds, threadId])]
+        : [threadId],
+    [viewMode, splitPaneThreadIds, threadId],
+  );
+  const { socketConnected, resetAgentMessageRefs, registerIndexEventHandler } = useThreadChatRuntime(runtimeThreadIds);
   // F079: Vote modal
   const handleVoteSubmit = useCallback(
     async (config: VoteConfig) => {
@@ -433,7 +325,11 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
         const mentions = config.voters.map((v) => `@${v}`).join(' ');
         const optionList = config.options.map((o) => `• ${o}`).join('\n');
         const notifyMsg = `${mentions}\n投票请求：${data.question}\n\n选项：\n${optionList}\n\n请在回复中包含 [VOTE:你的选项]，例如 [VOTE:${config.options[0]}]`;
-        handleSend(notifyMsg);
+        window.dispatchEvent(
+          new CustomEvent('cat-cafe:interactive-send', {
+            detail: { text: notifyMsg, targetThreadId: threadId },
+          }),
+        );
       } catch (err) {
         addMessageToThread(threadId, {
           id: `vote-${Date.now()}`,
@@ -444,7 +340,7 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
         });
       }
     },
-    [threadId, handleSend, setShowVoteModal, addMessageToThread],
+    [threadId, setShowVoteModal, addMessageToThread],
   );
 
   const messageSummary = useMemo(() => {
@@ -675,10 +571,9 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
     if (prevThreadRef.current !== threadId) {
       // Thread switch: store saves/restores per-thread state automatically
       setCurrentThread(threadId);
-      clearMessageSelection();
       // F173 A.12 — resetRefs no longer touches suppression markers (invocation-driven cleanup).
       // It still clears activeRefs / finalizedStreamRef / sawStreamData per the original purpose.
-      resetRefs();
+      resetAgentMessageRefs();
       clearTasks();
       prevThreadRef.current = threadId;
     }
@@ -688,9 +583,8 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
     reconnectGame(threadId).catch(() => {});
   }, [
     threadId,
-    clearMessageSelection,
     clearTasks, // Clean up non-thread-scoped refs
-    resetRefs, // First mount — sync threadId to store without save/restore
+    resetAgentMessageRefs, // First mount — sync threadId to store without save/restore
     setCurrentThread,
   ]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -748,120 +642,13 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
     handleSocketEvent: handleIndexSocketEvent,
   } = useIndexState(currentProjectPath);
 
-  const socketCallbacks = useChatSocketCallbacks({
-    threadId,
-    userId: getUserId(),
-    handleAgentMessage,
-    resetTimeout,
-    clearDoneTimeout,
-    onNavigateToThread: navigateToThread,
-    onIndexEvent: handleIndexSocketEvent,
-  });
-  const splitPaneThreadIds = useChatStore((s) => s.splitPaneThreadIds);
-  const socketThreadIds = useMemo(
-    () =>
-      viewMode === 'split' && splitPaneThreadIds.length > 0
-        ? [...new Set([...splitPaneThreadIds, threadId])]
-        : [threadId],
-    [viewMode, splitPaneThreadIds, threadId],
+  useEffect(
+    () => registerIndexEventHandler(handleIndexSocketEvent),
+    [handleIndexSocketEvent, registerIndexEventHandler],
   );
-  const { socketConnected } = useSocket(socketCallbacks, threadId, socketThreadIds);
   useActiveExecutionProjection(threadId, socketConnected);
   const connectionStatus = useConnectionStatus(socketConnected);
   const hasProjectedExecution = useActiveExecutionStore((state) => Object.keys(state.executionsByKey).length > 0);
-
-  const handleEditCat = useCallback((catId: string) => setEditingCatId(catId), []);
-  const handleEditCoCreator = useCallback(() => setCoCreatorEditorOpen(true), []);
-  // F212 follow-up — UI-layer dedup for adjacent identical CliDiagnostics panels.
-  // Compute once per messages change; map is keyed by messageId.
-  const cliDedupMap = useMemo(() => computeCliDiagnosticsDedup(messages), [messages]);
-  const timelineProjectionKey = useMemo(() => buildChatTimelineProjectionKey(messages), [messages]);
-  // Keep the previous message-array identity while only stream text/tool events
-  // change. Cross-message projections do not consume those fields.
-  // biome-ignore lint/correctness/useExhaustiveDependencies: the projection key intentionally represents the consumed message fields
-  const timelineProjectionMessages = useMemo(
-    () => messages,
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [timelineProjectionKey],
-  );
-  const renderSingleMessage = useCallback(
-    (msg: ChatMessageData, index: number) => {
-      const dedupInfo = cliDedupMap.get(msg.id);
-      const selected = selectedMessageIds.has(msg.id);
-      const mountPolicy = messageMountPolicy(index, messages.length);
-      const selectionEligible =
-        isMessageSelectableForBundle(msg) &&
-        (!selectionMode || selected || selectedMessageIds.size < MAX_SELECTED_MESSAGES);
-      return (
-        <ChatMessageRow
-          key={msg.id}
-          message={msg}
-          threadId={threadId}
-          timelineMessages={timelineProjectionMessages}
-          activeInvocationIds={msg.extra?.queueReceipt ? activeInvocationIds : undefined}
-          getCatById={getCatById}
-          onEditCat={handleEditCat}
-          onEditCoCreator={handleEditCoCreator}
-          hideDiagnosticsPanel={dedupInfo?.hideDiagnosticsPanel}
-          dedupCount={dedupInfo?.dedupCount}
-          selectionMode={selectionMode}
-          selected={selected}
-          selectionEligible={selectionEligible}
-          onEnterSelection={enterMessageSelection}
-          onToggleSelection={toggleMessageSelection}
-          forwardingDisabled={connectionStatus.forwardingBlocked}
-          eager={mountPolicy.eager}
-          backgroundMountDelayMs={mountPolicy.backgroundMountDelayMs}
-        />
-      );
-    },
-    [
-      threadId,
-      messages.length,
-      activeInvocationIds,
-      getCatById,
-      handleEditCat,
-      handleEditCoCreator,
-      cliDedupMap,
-      timelineProjectionMessages,
-      enterMessageSelection,
-      selectedMessageIds,
-      selectionMode,
-      toggleMessageSelection,
-      connectionStatus.forwardingBlocked,
-    ],
-  );
-
-  const pendingInvocations = useMemo(
-    () => (hasActiveInvocation ? derivePendingMemberInvocations(activeInvocations, messages, threadId) : []),
-    [hasActiveInvocation, activeInvocations, messages, threadId],
-  );
-  const pendingTipContexts = useMemo<readonly CapabilityTipContext[]>(
-    () => getStreamingTipContexts(intentMode),
-    [intentMode],
-  );
-  const [, bumpPendingTipLiveness] = useState(0);
-  useEffect(() => {
-    const now = Date.now();
-    const futureDeadlines = new Set<number>();
-    for (const invocation of pendingInvocations) {
-      const deadline = getSilentActiveTurnDeadline(catInvocations[invocation.catId]?.appServerLifecycle);
-      if (deadline !== null && deadline > now) futureDeadlines.add(deadline);
-    }
-    if (futureDeadlines.size === 0) return;
-
-    const timers = [...futureDeadlines].map((deadline) =>
-      window.setTimeout(() => bumpPendingTipLiveness((epoch) => epoch + 1), Math.max(1, deadline - now + 1)),
-    );
-    return () => {
-      for (const timer of timers) window.clearTimeout(timer);
-    };
-  }, [pendingInvocations, catInvocations]);
-  const pendingTipInvocationId =
-    pendingInvocations.find(
-      (invocation) =>
-        !isStreamingTipSuppressed(catStatuses[invocation.catId], catInvocations[invocation.catId]?.appServerLifecycle),
-    )?.invocationId ?? null;
 
   useVoiceAutoPlay();
   useVoiceStream();
@@ -1007,53 +794,8 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
     return (
       <>
         {connectionStatus.updateRequired && <RuntimeUpdateRequiredDialog onReload={() => window.location.reload()} />}
-        <SplitPaneView
-          isReadonly={connectionStatus.isReadonly}
-          onSend={handleSend}
-          uploadStatus={uploadStatus}
-          uploadError={uploadError}
-          onZoomToThread={handleZoomToThread}
-        />
+        <SplitPaneChatView isReadonly={connectionStatus.isReadonly} onZoomToThread={handleZoomToThread} />
       </>
-    );
-  }
-
-  // Export mode: print-friendly layout — no sidebars, no scroll containers.
-  // data-export-ready signals to Puppeteer that messages + cat data are fully loaded and rendered.
-  if (isExport) {
-    const exportSelection = selectMessagesForExport(messages, exportMessageIds);
-    const exportReady = !isLoadingHistory && !isLoading && exportSelection.ready && exportThreadTitle !== undefined;
-    return (
-      <div
-        className="bg-[var(--console-shell-bg)]"
-        data-export-root
-        {...(exportReady ? { 'data-export-ready': 'true' } : {})}
-        data-export-message-count={exportSelection.messages.length}
-      >
-        <div className="max-w-4xl mx-auto p-4">
-          <header className="mb-4 border-b border-cafe-divider pb-3">
-            <h1 className="text-lg font-semibold text-cafe-primary">{exportThreadTitle ?? '未命名对话'}</h1>
-            <p className="mt-1 text-xs text-cafe-muted">来源 Thread: {threadId}</p>
-          </header>
-          {exportSelection.messages.map((msg) => {
-            const dedupInfo = cliDedupMap.get(msg.id);
-            return (
-              <ChatMessage
-                key={msg.id}
-                message={msg}
-                threadId={threadId}
-                activeInvocationIds={activeInvocationIds}
-                getCatById={getCatById}
-                onEditCat={handleEditCat}
-                onEditCoCreator={handleEditCoCreator}
-                hideDiagnosticsPanel={dedupInfo?.hideDiagnosticsPanel}
-                dedupCount={dedupInfo?.dedupCount}
-                forwardingDisabled
-              />
-            );
-          })}
-        </div>
-      </div>
     );
   }
 
@@ -1104,25 +846,14 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
         {intentMode === 'ideate' && <ParallelStatusBar threadId={threadId} />}
         <ThinkingIndicator threadId={threadId} />
 
-        <div className="flex-1 relative overflow-hidden">
-          <main
-            ref={scrollContainerRef}
-            onScroll={handleScroll}
-            className="h-full overflow-y-auto p-4"
-            data-guide-id="bootcamp.preview-result"
-            data-bootcamp-host="chat-messages"
-            data-chat-container
-          >
-            {isLoadingHistory && <div className="text-center py-3 text-sm text-cafe-muted">加载历史消息...</div>}
-            <ConnectionStatusBar
-              api={connectionStatus.api}
-              socket={connectionStatus.socket}
-              upstream={connectionStatus.upstream}
-              isReadonly={connectionStatus.isReadonly}
-              checkedAt={connectionStatus.checkedAt}
-              isOfflineSnapshot={isOfflineSnapshot}
-            />
-            {showAgentHookNotice && (
+        <ThreadChatSurface
+          threadId={threadId}
+          density="full"
+          messageConfirmations={messageConfirmations}
+          acceptUnscopedInteractiveSend
+          footerRef={attachBottomChromeRef}
+          timelineLead={
+            showAgentHookNotice ? (
               <div className="mb-3 flex justify-center text-left">
                 <div className="max-w-[85%] w-full">
                   <AgentHookHealthNotice
@@ -1135,213 +866,140 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
                   />
                 </div>
               </div>
-            )}
-            {!hasMore && messages.length > 0 && (
-              <div className="text-center py-3 text-xs text-cafe-muted">没有更多消息了</div>
-            )}
-            {messages.length === 0 && !isLoadingHistory ? (
-              <div className="text-center mt-20">
-                <PawIcon className="w-12 h-12 text-cafe-muted mx-auto mb-4" />
-                <p className="text-lg text-cafe-secondary mb-1">欢迎来到 Clowder AI!</p>
-                <p className="text-sm text-cafe-muted" suppressHydrationWarning>
-                  {cats.length > 0 ? '输入 @布偶 召唤布偶猫开始聊天' : '还没有可用成员，先开始新手教程创建第一只猫猫'}
-                </p>
-                {showSetupCard && govStatus && (
-                  <div className="mt-6 text-left">
-                    <ProjectSetupCard
-                      key={threadId}
+            ) : undefined
+          }
+          emptyState={
+            <div className="text-center mt-20">
+              <PawIcon className="w-12 h-12 text-cafe-muted mx-auto mb-4" />
+              <p className="text-lg text-cafe-secondary mb-1">欢迎来到 Clowder AI!</p>
+              <p className="text-sm text-cafe-muted" suppressHydrationWarning>
+                {cats.length > 0 ? '输入 @布偶 召唤布偶猫开始聊天' : '还没有可用成员，先开始新手教程创建第一只猫猫'}
+              </p>
+              {showSetupCard && govStatus && (
+                <div className="mt-6 text-left">
+                  <ProjectSetupCard
+                    key={threadId}
+                    projectPath={currentProjectPath}
+                    isEmptyDir={govStatus.isEmptyDir}
+                    isGitRepo={govStatus.isGitRepo}
+                    gitAvailable={govStatus.gitAvailable}
+                    agentHookHealth={agentHookHealth.health}
+                    agentHookHealthError={agentHookHealth.error}
+                    agentHookSyncing={agentHookHealth.syncing}
+                    agentHookSynced={agentHookHealth.synced}
+                    agentHookSyncAttempted={agentHookHealth.syncAttempted}
+                    onSyncAgentHooks={agentHookHealth.sync}
+                    onComplete={() => {
+                      setSetupDone(true);
+                      govRefetch();
+                      void agentHookHealth.refresh();
+                    }}
+                  />
+                </div>
+              )}
+              {!showSetupCard &&
+                currentProjectPath &&
+                currentProjectPath !== 'default' &&
+                currentProjectPath !== 'lobby' && (
+                  <div className="mt-4 text-left">
+                    <BootstrapOrchestrator
                       projectPath={currentProjectPath}
-                      isEmptyDir={govStatus.isEmptyDir}
-                      isGitRepo={govStatus.isGitRepo}
-                      gitAvailable={govStatus.gitAvailable}
-                      agentHookHealth={agentHookHealth.health}
-                      agentHookHealthError={agentHookHealth.error}
-                      agentHookSyncing={agentHookHealth.syncing}
-                      agentHookSynced={agentHookHealth.synced}
-                      agentHookSyncAttempted={agentHookHealth.syncAttempted}
-                      onSyncAgentHooks={agentHookHealth.sync}
-                      onComplete={() => {
-                        setSetupDone(true);
-                        govRefetch();
-                        void agentHookHealth.refresh();
-                      }}
+                      indexState={indexState}
+                      isSnoozed={isSnoozed}
+                      progress={bootstrapProgress}
+                      summary={bootstrapSummary}
+                      durationMs={bootstrapDurationMs}
+                      isNewProject={setupDone}
+                      governanceDone={setupDone}
+                      onStartBootstrap={startBootstrap}
+                      onSnooze={snoozeBootstrap}
+                      onSearchKnowledge={handleSearchKnowledge}
+                      onGoToMemoryHub={handleGoToMemoryHub}
                     />
                   </div>
                 )}
-                {/* F152 Phase B: memory bootstrap orchestrator */}
-                {!showSetupCard &&
-                  currentProjectPath &&
-                  currentProjectPath !== 'default' &&
-                  currentProjectPath !== 'lobby' && (
-                    <div className="mt-4 text-left">
-                      <BootstrapOrchestrator
-                        projectPath={currentProjectPath}
-                        indexState={indexState}
-                        isSnoozed={isSnoozed}
-                        progress={bootstrapProgress}
-                        summary={bootstrapSummary}
-                        durationMs={bootstrapDurationMs}
-                        isNewProject={setupDone}
-                        governanceDone={setupDone}
-                        onStartBootstrap={startBootstrap}
-                        onSnooze={snoozeBootstrap}
-                        onSearchKnowledge={handleSearchKnowledge}
-                        onGoToMemoryHub={handleGoToMemoryHub}
-                      />
-                    </div>
-                  )}
-                {(() => {
-                  const isCurrentBootcamp = storeThreads.find((t) => t.id === threadId)?.bootcampState;
-                  if (isCurrentBootcamp) return null; // already in bootcamp thread
-                  if (bootcampCount > 0) {
-                    return (
-                      <button
-                        type="button"
-                        onClick={() => setShowBootcampList(true)}
-                        className="mt-6 inline-flex items-center gap-2 px-4 py-2 rounded-xl border border-cafe-accent/20 bg-accent-50 text-cafe-accent hover:bg-accent-100 transition-colors text-sm font-medium"
-                        data-testid="empty-state-bootcamp-list"
-                      >
-                        <BootcampIcon className="w-4 h-4" />
-                        我的训练营（{bootcampCount}）
-                      </button>
-                    );
-                  }
+              {(() => {
+                const isCurrentBootcamp = storeThreads.find((thread) => thread.id === threadId)?.bootcampState;
+                if (isCurrentBootcamp) return null;
+                if (bootcampCount > 0) {
                   return (
                     <button
                       type="button"
                       onClick={() => setShowBootcampList(true)}
                       className="mt-6 inline-flex items-center gap-2 px-4 py-2 rounded-xl border border-cafe-accent/20 bg-accent-50 text-cafe-accent hover:bg-accent-100 transition-colors text-sm font-medium"
-                      data-testid="empty-state-bootcamp"
+                      data-testid="empty-state-bootcamp-list"
                     >
                       <BootcampIcon className="w-4 h-4" />
-                      第一次来？开始猫猫训练营
+                      我的训练营（{bootcampCount}）
                     </button>
                   );
-                })()}
-              </div>
-            ) : (
-              <>
-                {messages.map(renderSingleMessage)}
-                {pendingInvocations.map((invocation) => (
-                  <PendingMemberBubble
-                    key={`pending-${invocation.invocationId}`}
-                    catId={invocation.catId}
-                    invocationId={invocation.invocationId}
-                    catStatus={catStatuses[invocation.catId]}
-                    appServerLifecycle={catInvocations[invocation.catId]?.appServerLifecycle}
-                    tipContexts={pendingTipContexts}
-                    showCapabilityTip={invocation.invocationId === pendingTipInvocationId}
-                  />
-                ))}
-              </>
-            )}
-            <div ref={messagesEndRef} />
-          </main>
-          <ScrollToBottomButton
-            scrollContainerRef={scrollContainerRef}
-            messagesEndRef={messagesEndRef}
-            recomputeSignal={computeScrollRecomputeSignal(threadId, messages, uiThinkingExpandedByDefault ? 1 : 0)}
-            observerKey={threadId}
-          />
-          {messages.length > 5 && <MessageNavigator messages={messages} scrollContainerRef={scrollContainerRef} />}
-        </div>
-
-        <div ref={attachBottomChromeRef}>
-          <ThreadExecutionBar threadId={threadId} />
-          <QueuePanel threadId={threadId} />
-          <VoteActiveBar threadId={threadId} onEnd={() => {}} />
-
-          {!showFirstRunQuestPrompt &&
-            !showQuestWizard &&
-            (() => {
-              const currentThread = storeThreads.find((t) => t.id === threadId);
-              const questState = (currentThread as Record<string, unknown> | undefined)?.firstRunQuestState as
-                | { phase: string; firstCatName?: string }
-                | undefined;
-              if (!questState) return null;
-              return (
-                <QuestBanner
-                  phase={questState.phase}
-                  firstCatName={questState.firstCatName}
-                  onAddSecondCat={() => setShowQuestWizard(true)}
-                  onStartBootcamp={() => setShowBootcampList(true)}
-                  onComplete={() => assignDocumentRoute('/hub', typeof window !== 'undefined' ? window : undefined)}
-                />
-              );
-            })()}
-
-          {isResearchMode && (
-            <div className="mx-4 mb-2 rounded-lg border border-[var(--semantic-success)] bg-[var(--semantic-success-surface)] px-3 py-2 text-xs text-conn-emerald-text">
-              多猫研究模式 — 文章上下文已注入。请输入研究问题，猫猫会自动调用 multi_mention 邀请其他猫参与分析。
-            </div>
-          )}
-          {selectionMode ? (
-            <MessageSelectionToolbar
-              threadId={threadId}
-              selectedMessageIds={normalizedSelectedMessageIds}
-              onCancel={clearMessageSelection}
-              onExportSuccess={clearMessageSelection}
-              forwardingDisabled={connectionStatus.forwardingBlocked}
-              onForward={() => setSelectionForwardOpen(true)}
-            />
-          ) : (
-            <div
-              className={(() => {
-                if (showFirstRunQuestPrompt || showQuestWizard) return '';
-                const ct = storeThreads.find((t) => t.id === threadId);
-                // Bootcamp phase-1 with no messages: highlight + punch through overlay
-                const bs = ct?.bootcampState as { phase: string } | undefined;
-                if (bs?.phase === 'phase-1-intro' && messages.length === 0) {
-                  return 'relative z-[70] quest-input-highlight rounded-xl mx-1';
                 }
-                // Legacy quest support
-                const qs = (ct as Record<string, unknown> | undefined)?.firstRunQuestState as
-                  | { phase: string }
-                  | undefined;
-                return qs?.phase === 'quest-2-cat-intro' ? 'quest-input-highlight rounded-xl mx-1' : '';
+                return (
+                  <button
+                    type="button"
+                    onClick={() => setShowBootcampList(true)}
+                    className="mt-6 inline-flex items-center gap-2 px-4 py-2 rounded-xl border border-cafe-accent/20 bg-accent-50 text-cafe-accent hover:bg-accent-100 transition-colors text-sm font-medium"
+                    data-testid="empty-state-bootcamp"
+                  >
+                    <BootcampIcon className="w-4 h-4" />
+                    第一次来？开始猫猫训练营
+                  </button>
+                );
               })()}
-            >
-              <ChatInput
-                key={threadId}
-                threadId={threadId}
-                onSend={(content, images, whisper, deliveryMode, replyToId, messageDisposition, contextAttachments) =>
-                  handleSend(
-                    content,
-                    images,
-                    undefined,
-                    whisper,
-                    deliveryMode,
-                    replyToId,
-                    messageDisposition,
-                    contextAttachments,
-                  )
-                }
-                disabled={connectionStatus.isReadonly}
-                hasActiveInvocation={hasActiveInvocation}
-                uploadStatus={uploadStatus}
-                uploadError={uploadError}
-              />
             </div>
-          )}
-
-          {/* F101: "Return to game" banner when overlay is minimized */}
-          {isGameActive && overlayMinimized && gameView?.threadId === threadId && (
-            <button
-              onClick={() => useGameStore.getState().restoreOverlay()}
-              className="mx-4 mb-2 flex items-center justify-center gap-2 rounded-lg border border-[var(--color-cafe-accent)] bg-[var(--accent-50)] px-3 py-2 text-sm text-[var(--color-cafe-accent)] hover:bg-[var(--color-cocreator-surface)] transition-colors"
-            >
-              🎮 返回游戏
-            </button>
-          )}
-          <TransferTargetPicker
-            open={selectionForwardOpen && !connectionStatus.forwardingBlocked}
-            admissionBlocked={connectionStatus.forwardingBlocked}
-            sourceThreadId={threadId}
-            items={selectedBundleItems}
-            onClose={() => setSelectionForwardOpen(false)}
-            onSuccess={clearMessageSelection}
-          />
-        </div>
+          }
+          footerLead={
+            <>
+              {!showFirstRunQuestPrompt &&
+                !showQuestWizard &&
+                (() => {
+                  const currentThread = storeThreads.find((thread) => thread.id === threadId);
+                  const questState = (currentThread as Record<string, unknown> | undefined)?.firstRunQuestState as
+                    | { phase: string; firstCatName?: string }
+                    | undefined;
+                  if (!questState) return null;
+                  return (
+                    <QuestBanner
+                      phase={questState.phase}
+                      firstCatName={questState.firstCatName}
+                      onAddSecondCat={() => setShowQuestWizard(true)}
+                      onStartBootcamp={() => setShowBootcampList(true)}
+                      onComplete={() => assignDocumentRoute('/hub', typeof window !== 'undefined' ? window : undefined)}
+                    />
+                  );
+                })()}
+              {isResearchMode && (
+                <div className="mx-4 mb-2 rounded-lg border border-[var(--semantic-success)] bg-[var(--semantic-success-surface)] px-3 py-2 text-xs text-conn-emerald-text">
+                  多猫研究模式 — 文章上下文已注入。请输入研究问题，猫猫会自动调用 multi_mention 邀请其他猫参与分析。
+                </div>
+              )}
+            </>
+          }
+          composerClassName={(() => {
+            if (showFirstRunQuestPrompt || showQuestWizard) return '';
+            const currentThread = storeThreads.find((thread) => thread.id === threadId);
+            const bootcampState = currentThread?.bootcampState as { phase: string } | undefined;
+            if (bootcampState?.phase === 'phase-1-intro' && messages.length === 0) {
+              return 'relative z-[70] quest-input-highlight rounded-xl mx-1';
+            }
+            const questState = (currentThread as Record<string, unknown> | undefined)?.firstRunQuestState as
+              | { phase: string }
+              | undefined;
+            return questState?.phase === 'quest-2-cat-intro' ? 'quest-input-highlight rounded-xl mx-1' : '';
+          })()}
+          footerTail={
+            isGameActive && overlayMinimized && gameView?.threadId === threadId ? (
+              <button
+                type="button"
+                onClick={() => useGameStore.getState().restoreOverlay()}
+                className="mx-4 mb-2 flex items-center justify-center gap-2 rounded-lg border border-[var(--color-cafe-accent)] bg-[var(--accent-50)] px-3 py-2 text-sm text-[var(--color-cafe-accent)] hover:bg-[var(--color-cocreator-surface)] transition-colors"
+              >
+                <GameIcon />
+                返回游戏
+              </button>
+            ) : undefined
+          }
+        />
 
         {/* F101: Game overlay — renders when a game is active */}
         <GameOverlayConnector
@@ -1469,7 +1127,19 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
                 <WorkspacePanel
                   threadId={threadId}
                   defaultCatId={targetCats[0] || 'opus'}
-                  onOpenStatus={openStatusPanel}
+                  statusSurface={
+                    <RightStatusPanel
+                      intentMode={intentMode}
+                      targetCats={targetCats}
+                      catStatuses={catStatuses}
+                      catInvocations={catInvocations}
+                      activeInvocations={activeInvocations}
+                      hasActiveInvocation={hasActiveInvocation}
+                      threadId={threadId}
+                      messageSummary={messageSummary}
+                      width="100%"
+                    />
+                  }
                 />
               </div>
             )}
@@ -1520,24 +1190,6 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
       />
       <BootcampListModal open={showBootcampList} onClose={handleBootcampModalClose} currentThreadId={threadId} />
       {showVoteModal && <VoteConfigModal onSubmit={handleVoteSubmit} onCancel={() => setShowVoteModal(false)} />}
-      {editingCat && (
-        <HubCatEditor
-          open
-          cat={editingCat}
-          draft={null}
-          onClose={() => setEditingCatId(null)}
-          onSaved={async () => {
-            await refreshCats();
-            setEditingCatId(null);
-          }}
-        />
-      )}
-      <HubCoCreatorEditor
-        open={coCreatorEditorOpen}
-        coCreator={coCreator}
-        onClose={() => setCoCreatorEditorOpen(false)}
-        onSaved={() => setCoCreatorEditorOpen(false)}
-      />
       {/* Bootcamp guide overlay: intro phase tips + lifecycle tips (phase-7.5 uses guide engine) */}
       {(() => {
         if (showFirstRunQuestPrompt || showQuestWizard) return null;

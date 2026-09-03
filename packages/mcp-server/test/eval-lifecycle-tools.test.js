@@ -1,6 +1,10 @@
 import assert from 'node:assert/strict';
 import { afterEach, beforeEach, describe, it } from 'node:test';
-import { evalLifecycleTools, handleRecordEvalLifecycle } from '../dist/tools/eval-lifecycle-tools.js';
+import {
+  evalLifecycleTools,
+  handleProposeEvalRepair,
+  handleRecordEvalLifecycle,
+} from '../dist/tools/eval-lifecycle-tools.js';
 
 describe('F266 MCP stable-case lifecycle writeback', () => {
   const saved = {};
@@ -61,5 +65,20 @@ describe('F266 MCP stable-case lifecycle writeback', () => {
     assert.match(tool.description, /durable task\/F167 lease/);
     assert.match(tool.description, /suppressing on behalf of operator/);
     assert.match(tool.description, /main and live are separate server-verified facts/);
+  });
+
+  it('submits only an opaque action ref and idempotency key to the Approval ingress', async () => {
+    await handleProposeEvalRepair({
+      caseActionRef: `case-action:f266:${'a'.repeat(64)}`,
+      clientMessageId: 'retry-stable-1',
+    });
+
+    assert.equal(new URL(requests[0].url).pathname, '/api/callbacks/propose-eval-repair');
+    assert.deepEqual(JSON.parse(requests[0].init.body), {
+      caseActionRef: `case-action:f266:${'a'.repeat(64)}`,
+      clientMessageId: 'retry-stable-1',
+    });
+    assert.equal(requests[0].init.headers['x-invocation-id'], 'inv-owner');
+    assert.match(evalLifecycleTools[1].description, /idempotency only/);
   });
 });

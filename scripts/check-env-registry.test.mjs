@@ -46,6 +46,10 @@ const ALLOWLIST = new Map([
   ['F254_CLAUDE_MODEL', 'F254 developer-only Claude capability fixture model override; not a runtime setting'],
   ['F254_CODEX_TRANSPORT', 'F254 developer-only Codex fixture transport selector; not a runtime setting'],
   ['CAT_OPUS_MODEL', 'Existing provider model env reused only as a developer fixture fallback'],
+  [
+    'CAT_CAFE_GATE_BASE_SHA',
+    'Pre-merge gate internal exact-base handoff to MCP governance; not user or runtime configuration',
+  ],
   // F240: Per-connector env vars migrated to YAML manifests (connector.yaml / plugin.yaml).
   // Runtime still reads process.env as fallback in resolveConnectorEnv() chain, but
   // documentation/display is now driven by the YAML config.fields declarations.

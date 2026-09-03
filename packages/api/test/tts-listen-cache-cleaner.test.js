@@ -28,7 +28,7 @@ describe('F279 retention-aware TTS cleaner', () => {
     const expired = `${'a'.repeat(64)}.wav`;
     const forever = `${'b'.repeat(64)}.wav`;
     const save = (relativePath, retention, assetId) => {
-      const key = { userId: 'you', projectPath: '/repo', relativePath };
+      const key = { userId: 'operator', projectPath: '/repo', relativePath };
       repository.saveDocument(key, {
         identity: { projectPath: '/repo', relativePath, contentDigest: 'v1' },
         sentences: [{ anchor: 'sentence' }],
@@ -67,7 +67,7 @@ describe('F279 retention-aware TTS cleaner', () => {
     const retained30d = `${'e'.repeat(64)}.wav`;
     const retainedForever = `${'f'.repeat(64)}.wav`;
     const save = (relativePath, retention, assetId) => {
-      const key = { userId: 'you', projectPath: '/repo', relativePath };
+      const key = { userId: 'operator', projectPath: '/repo', relativePath };
       repository.saveDocument(key, {
         identity: { projectPath: '/repo', relativePath, contentDigest: 'v1' },
         sentences: [{ anchor: 'sentence' }],

@@ -3,7 +3,7 @@ doc_kind: architecture
 description: "W0-C 写入面 census v0.3：覆盖全部 durable memory-bearing surfaces，以感知→提案→裁决→消费四拍盘点，并拆分 LL/Decision/Method 与 F152 global distillation。"
 description_source: human
 description_author: codex-sol
-description_updated_at: 2026-08-26T06:00:00Z
+description_updated_at: 2026-08-29T11:36:16Z
 feature_ids: []
 related_features: [F102, F152, F221, F227, F231, F255, F260, F263, F276, F282, F287]
 related_docs:
@@ -41,7 +41,7 @@ status: v0.3
 | **Profile / F231** | standing trigger 从认知路径蒸发 | Hub 合同存在 | canonical data root→logical URI→authenticated reader 已接通；organic read 未量化 | 🔴 触发死；不能再造第三仓补偿 |
 | **Event / F227** | `mark_event` 活跃；历史 snapshot 2152 行 | typed write、轻校验 | timeline/magic-word reader 存在，消费健康未量化 | ✅ 写入活；缺运行健康证据，不等于缺 detector |
 | **Person / F276** | immediate propose + capture/defer；ASR scene 可形成 WriteOpportunity | owner evidence gate + 逐条审批 | relationship recall、cue、correct/forget 已有；Standing Reflex real runtime episode 仍待验证 | 🟡 合同最完整；继续作首案法庭 |
-| **Global distillation / F152** | `distillation_candidates=0`（2026-08-15 snapshot） | 独立 SQLite nominate/approve | materialize 到 global distilled truths；无已证明 consumer | 🔴 keep/sunset；**只代表跨项目蒸馏，不代表全部 Knowledge** |
+| **Global distillation / F152** | producer chain 已证明；36 份 retained artifacts 仅含 3 个重复测试标题 | 独立 SQLite nominate/approve；producer 保留 | 无 typed consumer；generic resolver 已停止送达 `distilled:` anchors | ⚫ **sunset（operator 2026-08-29）**；只退出跨项目蒸馏 consumer surface，不代表全部 Knowledge |
 | **Diary / F255** | present loop 定时唤醒 | 第一人称作者自治，合法免 operator 审批 | index + operator 阅读面 | ✅ 健康；不强塞 owner-approval 模型 |
 
 旧结论“Knowledge 零触发、无 consumer”在 v0.3 被**限缩**为 F152 global distillation。项目内
@@ -58,7 +58,7 @@ Operational Knowledge（LL / Decision / Method）每天都在被 scanner、searc
 | **Episode / Reflection / Diary** | 真实任务结束、present loop、自省 | typed store 或 direct file | 事实 episode 可先落 provenance；第一人称 reflection 由作者自治 | scanner/search/diary reader；promotion 成规范 LL 前必须另走裁决 | 🟡 证据与规范必须分层；F255/各 producer owner |
 | **Feedback / Verdict / harness evidence** | eval/harness 运行与用户反馈 | 各 producer 的 typed artifact/publication | Eval Hub/verdict-specific contract 已较强，不由 memory Hub 接管 | Eval consumer、sunset/iterate 决策；但 scanner 把 `harness-feedback` 等统一映射成 `lesson` | 🟡 保留原 authority；禁止“被检索为 lesson”自动升级成 LL |
 | **Provider-local MEMORY / primer** | provider/harness convention | runtime-local edit/compile | provider owner；repo 内无完整 current census | prompt injection/read；当前 source/失效坐标未闭环 | ⚪ `unknown`：在纳入统一只读 closure catalog 前不得声称健康 |
-| **Global distillation / F152** | 已索引 evidence 被标 generalizable；生产样本为零 | `distillation_candidates` nominate | 独立 approve + `~/.cat-cafe/distilled-truths/` | consumer 未证明 | 🔴 `sunset_candidate`，与项目 LL 分开裁决 |
+| **Global distillation / F152** | 已索引 evidence 被标 generalizable；producer 有 36 份 dev/test artifacts、生产内容为零 | `distillation_candidates` nominate | 独立 approve + `~/.cat-cafe/distilled-truths/`；producer/owner data 保留 | 无 named consumer；resolver retirement guard 阻止 generic delivery | ⚫ `sunset`；operator source `[thread-id]#0001788003376461-000497-78799bf8`，与项目 LL 分开裁决 |
 
 这里的目标不是让 ADR、Skill、Diary 都经过同一张 Hub 卡，而是让每个 surface 明说：为什么现在可以
 写、候选是什么、谁有权签字、写完谁会用。`exempt` 只免某一种审批，不免 provenance、canonical

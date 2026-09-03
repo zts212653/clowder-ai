@@ -8,12 +8,12 @@ description: "Govern the Clowder AI MCP surface as typed resource lifecycles wit
 description_source: human
 description_author: codex-sol
 description_updated_at: 2026-08-01T10:03:45Z
-tips_exempt: "Renewed after Phase C atomically sunset the internal generic permission MCP family: the deletion adds no user-invokable workflow, while Approval Hub and ACP-native permission remain unchanged; future resource-family pilots must add a tip when they introduce a teachable user-facing workflow."
+tips_exempt: "Renewed for Phase D: provider-native schema delivery, bounded server instructions, delivery attestations, and the Signals pilot change transparent agent/runtime governance rather than add a user-invokable workflow or Hub discovery moment; add a tip only when a future resource migration introduces a teachable user-facing action."
 ---
 
 # F286: MCP Surface Lifecycle Governance
 
-> **Status**: in-progress（Phase A–C complete；Phase D 未启动；live=dormant） | **Owner**: 小太阳·Maine Coon (@codex-sol, GPT-5.6 Sol) | **Priority**: P1
+> **Status**: in-progress（Phase A–C complete；Phase D incremental Design Gate accepted and implementation assigned to Sol；live=dormant） | **Owner**: 小太阳·Maine Coon (@codex-sol, GPT-5.6 Sol) | **Priority**: P1
 >
 > **Gate**: Architecture Design Gate accepted by operator (`0001785600399637-001062-9b03f289`). Phase B planning and one separately tested/reviewed reversible pilot are authorized; no candidate migration is authorized without its own plan and gates.
 
@@ -92,9 +92,12 @@ That pilot landed atomically in PR #3947: final HEAD `e9184caf4065ba3de3883e820f
 ### Phase D: Exposure Budget + Evidence-Gated Sunset
 
 - Make optional families lazy-discoverable by runtime/profile instead of eagerly injecting every schema.
+- Separate capability availability (`runtimeProfiles`) from schema-delivery policy (`host-default`, `always-visible`, or `discoverable`); host-observed behavior is version-attested evidence, not a canonical per-tool fact.
+- Reuse provider-native Tool Search/catalog delivery and add bounded instructions to all six Clowder AI MCP servers; do not build a Clowder AI ToolSearch MCP.
 - Remove duplicate connector/local projections atomically once transport parity is proven; do not leave both projections exposed.
-- Use F150 call evidence plus task-outcome/selection fixtures to keep, tune, revert, or sunset each migration.
+- Use the existing Claude/Codex history as a confounded discovery prior, then run a bounded Signals-family pilot with a named F286/operator keep/tune/revert consumer. F150 top-20 absence never substitutes for controlled parity evidence.
 - Treat the 57 consolidation candidates as hypotheses rather than a delivery queue; if the bounded pilot does not prove material utility, stopping after admission control and proven projection deduplication is a valid F286 outcome.
+- Treat the current 111 `migration-candidate` definitions the same way: they are hypotheses, not Phase D scope or a completion denominator.
 - No semantic deletion occurs from top-20 absence alone.
 - Treat `gh` as the canonical local GitHub execution path and the Clowder AI-managed external GitHub MCP catalog/runtime surface as an explicit sunset outside the 124 semantic rows; its code/config removal remains owned by the source thread.
 
@@ -215,13 +218,15 @@ Why: existing cells own capability execution (`hub-action-surface`), plugin reso
 | KD-6 | The 57 consolidation candidates are hypotheses, not a migration queue | Admission control has definite forward value; each existing-family migration must prove utility, and admission-only is a valid terminal state | 2026-08-01 |
 | KD-7 | Migration unit is one complete resource family or tightly coupled group, with no dual exposed surface | F043/F195 full-versus-split drift proved that parallel topologies duplicate schema/prompt cost and allow registry coverage to diverge | 2026-08-01 |
 | KD-8 | The first atomic pilot is a direct sunset of the generic `permission` family, with no canonical replacement | Fresh root census found no product consumer; operator says current need is absent. Approval Hub remains the pattern for future feature-specific typed gates, not a migration target for dead generic state | 2026-08-24 |
+| KD-9 | Phase D separates availability from schema delivery and uses provider-native discovery; current host delivery is version-attested rather than stored as a universal per-tool fact | Claude/Codex carriers already deliver MCP schemas differently, so the old exposure enum cannot truthfully encode both authorization and context delivery | 2026-08-29 |
+| KD-10 | Natural Claude/Codex history is a discovery prior only; Signals is the bounded controlled family, and 57/111 candidates stay out of scope | Provider/model/task confounds and F150 rank censoring make no-signal evidence too weak to waive deterministic profile/discovery proof | 2026-08-29 |
 
 ## Review Gate
 
 - Phase A: census/reviews complete and operator Architecture Design Gate accepted.
 - Phase B: complete. The canonical 130-tool registry, protected-base parity witness, admission/cutover guards, non-author review, full merge gate, and PR #3424 merge evidence are landed on `main`.
 - Phase C: complete. The generic `permission` family sunset is landed through PR #3947 with an exact seven-layer manifest, independent review, full gate plus mechanical rebase continuity, and no replacement/dual surface. Live runtime remains dormant.
-- Phase D: not started; exposure/lazy-discovery work remains separately gated and is not implied by the Phase C sunset.
+- Phase D: incremental Design Gate accepted and implementation assigned to Sol; provider rollout remains bounded by the approved probe/parity/pilot stop conditions. The close line preserves all authorized capabilities and explicitly excludes the 57 historical / 111 current migration candidates from the work queue.
 
 ## Tips Contribution（F244）
 

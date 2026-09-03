@@ -130,7 +130,7 @@ describe('deriveResultSummary — graph_resolve anchor parsing (砚砚 cloud P2)
       '<recall-meta>{"resultStatus":"overflow","resultCount":12,"artifactRef":{"path":"/tmp/cat-cafe/search-evidence-result.txt"},"readNextHint":"Read the artifact file for the complete result set."}</recall-meta>',
       '',
       '📬 提醒：你有 2 条未读消息（当前 thread）',
-      '来自：landy, opus48',
+      '来自：operator, opus48',
       '调 get_thread_context 查看完整内容',
     ].join('\n');
 

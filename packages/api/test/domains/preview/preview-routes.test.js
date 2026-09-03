@@ -272,6 +272,41 @@ describe('POST /api/preview/auto-open', () => {
     assert.ok(body.eventId, 'response carries an eventId for receipt correlation');
     assert.equal(ackEmitted[0].data.eventId, body.eventId, 'socket payload carries the same eventId');
   });
+
+  it('server-attaches the exact gateway origin to a bounded visible-page contract', async () => {
+    const visiblePageAdmission = {
+      expectedClientRevision: 'b'.repeat(40),
+      requiredDom: [{ selector: '[data-layout-owner="f307"]' }],
+    };
+    const res = await app2.inject({
+      method: 'POST',
+      url: '/api/preview/auto-open',
+      headers: INTERACTIVE_HEADERS,
+      payload: { port: 3011, path: '/threads/thread-f307', threadId: 'default', visiblePageAdmission },
+    });
+    assert.equal(res.statusCode, 200);
+    assert.equal(ackEmitted.length, 1);
+    assert.equal(ackEmitted[0].data.targetOrigin, 'http://preview-3011.localhost:4100');
+    assert.deepEqual(ackEmitted[0].data.visiblePageAdmission, visiblePageAdmission);
+  });
+
+  it('rejects an unbounded or non-revision visible-page contract before socket delivery', async () => {
+    const res = await app2.inject({
+      method: 'POST',
+      url: '/api/preview/auto-open',
+      headers: INTERACTIVE_HEADERS,
+      payload: {
+        port: 3011,
+        threadId: 'default',
+        visiblePageAdmission: {
+          expectedClientRevision: 'main',
+          requiredDom: [{ selector: '[data-layout-owner="f307"]' }],
+        },
+      },
+    });
+    assert.equal(res.statusCode, 400);
+    assert.equal(ackEmitted.length, 0);
+  });
 });
 
 // F120 × F284 review P1: auth matrix — anonymous / thread scope enforcement

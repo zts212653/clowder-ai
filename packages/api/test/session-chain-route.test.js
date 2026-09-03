@@ -470,6 +470,46 @@ describe('Session Chain Routes', () => {
     assert.notEqual(next.id, active.id);
   });
 
+  it('POST /api/sessions/:sessionId/seal allows the caller own record on a visible system thread', async () => {
+    const store = await setup(
+      mockThreadStore(
+        {
+          'thread-eval': { id: 'thread-eval', createdBy: 'system' },
+        },
+        { 'default-user': ['thread-eval'] },
+      ),
+    );
+    const active = store.create({
+      cliSessionId: 'cli-eval-active',
+      threadId: 'thread-eval',
+      catId: 'codex-sol',
+      userId: 'default-user',
+    });
+
+    const res = await app.inject({
+      method: 'POST',
+      url: `/api/sessions/${active.id}/seal`,
+      headers: { 'x-cat-cafe-user': 'default-user' },
+    });
+
+    assert.equal(res.statusCode, 200);
+    assert.equal(JSON.parse(res.payload).session.status, 'sealed');
+
+    const foreign = store.create({
+      cliSessionId: 'cli-eval-foreign',
+      threadId: 'thread-eval',
+      catId: 'opus',
+      userId: 'other-user',
+    });
+    const denied = await app.inject({
+      method: 'POST',
+      url: `/api/sessions/${foreign.id}/seal`,
+      headers: { 'x-cat-cafe-user': 'default-user' },
+    });
+    assert.equal(denied.statusCode, 403, 'system-thread visibility must not grant access to another user record');
+    assert.equal(store.get(foreign.id).status, 'active');
+  });
+
   it('POST /api/sessions/:sessionId/seal rejects a caller without session access', async () => {
     const store = await setup();
     const active = store.create({ cliSessionId: 'cli-private', threadId: 'thread-1', catId: 'opus', userId: 'user-1' });
@@ -738,6 +778,58 @@ describe('Session Chain Routes', () => {
     assert.equal(body.session.cliSessionId, 'cli-reopen');
     assert.equal(body.session.seq, 0);
     assert.equal(store.getChain('opus', 'thread-1').length, 1);
+  });
+
+  it('POST /api/sessions/:sessionId/unseal allows only the caller own record on a visible system thread', async () => {
+    const store = await setup(
+      mockThreadStore(
+        {
+          'thread-eval': { id: 'thread-eval', createdBy: 'system' },
+        },
+        { 'default-user': ['thread-eval'] },
+      ),
+    );
+    const sealed = store.create({
+      cliSessionId: 'cli-eval-sealed',
+      threadId: 'thread-eval',
+      catId: 'codex-sol',
+      userId: 'default-user',
+    });
+    store.update(sealed.id, {
+      status: 'sealed',
+      sealReason: 'manual',
+      sealedAt: Date.now(),
+      updatedAt: Date.now(),
+    });
+
+    const restored = await app.inject({
+      method: 'POST',
+      url: `/api/sessions/${sealed.id}/unseal`,
+      headers: { 'x-cat-cafe-user': 'default-user' },
+    });
+    assert.equal(restored.statusCode, 200);
+    assert.equal(JSON.parse(restored.payload).session.status, 'active');
+
+    const foreign = store.create({
+      cliSessionId: 'cli-eval-foreign-sealed',
+      threadId: 'thread-eval',
+      catId: 'opus',
+      userId: 'other-user',
+    });
+    store.update(foreign.id, {
+      status: 'sealed',
+      sealReason: 'manual',
+      sealedAt: Date.now(),
+      updatedAt: Date.now(),
+    });
+
+    const denied = await app.inject({
+      method: 'POST',
+      url: `/api/sessions/${foreign.id}/unseal`,
+      headers: { 'x-cat-cafe-user': 'default-user' },
+    });
+    assert.equal(denied.statusCode, 403, 'system-thread visibility must not grant access to another user record');
+    assert.equal(store.get(foreign.id).status, 'sealed');
   });
 
   it('POST /api/sessions/:sessionId/unseal restores over an explicitly confirmed empty active session', async () => {

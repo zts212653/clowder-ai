@@ -1,6 +1,7 @@
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { ThreadChatHistoryAdmissionProvider } from '@/components/thread-chat/ThreadChatRuntimeProvider';
 import type { ChatMessage, ThreadState } from '@/stores/chat-types';
 import { useChatStore } from '@/stores/chatStore';
 import { apiFetch } from '@/utils/api-client';
@@ -71,9 +72,13 @@ function cachedThreadState(): ThreadState {
   };
 }
 
-function HookHost() {
+function HookProbe() {
   useChatHistory(THREAD_ID);
   return null;
+}
+
+function HookHost() {
+  return React.createElement(ThreadChatHistoryAdmissionProvider, null, React.createElement(HookProbe));
 }
 
 describe('useChatHistory approval-card teleport refresh', () => {

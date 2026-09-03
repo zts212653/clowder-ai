@@ -9,7 +9,7 @@ source: community
 community_issue: https://github.com/zts212653/clowder-ai/issues/82
 community_pr: https://github.com/zts212653/clowder-ai/pull/85
 user_journey_exempt: "predates-journey-gate; user flow documented in Phase A-AA AC: cat proposes thread (propose_thread card) → operator approves in Hub → thread created"
-tips_exempt: "cat-internal proposal lifecycle (including requester withdrawal) is surfaced through F246 Approval Hub, not a standalone user-invokable capability"
+tips_exempt: "renewed 2026-08-31 for d6ecb1b20a: the delta only records the requester-withdraw merge; withdrawal remains a cat-internal proposal lifecycle action surfaced through F246 Approval Hub, not a standalone user-invokable capability"
 ---
 
 # F128: Cat-Proposed Thread Creation — 猫猫提议创建 Thread
@@ -179,7 +179,7 @@ F128 遵循 ADR-035 Proposal-First Agent Actions：
 
 - 提议/实施猫：Ragdoll（Opus-47 立项 + Opus-48 接手 default 收敛与实施）
 - 设计 input：Maine Coon（Codex GPT-5.5）— design constraint C-Y1~C-Y6 来源（C-Y5/C-Y6 为 default 收敛时补充的实现 review guard）
-- operator sign-off：landy（立项 + 委托猫讨论 default，2026-06-04）
+- operator sign-off：operator（立项 + 委托猫讨论 default，2026-06-04）
 
 ### Phase AA: Reporting Contract UX + Source Attribution（2026-06-07）
 
@@ -231,7 +231,7 @@ F128 遵循 ADR-035 Proposal-First Agent Actions：
 
 - 诊断与方案 input：Ragdoll（Opus-4.6）— 2026-06-07 指出 Phase Y default `none` + cross-post routing 指引缺失的叠加根因，并提出 source-cat attribution / F193-style source pill 方案。
 - 设计收敛：Maine Coon（Codex GPT-5.5）— 接受"上游 contract 完整化"方向，补充：保留 Phase Y triage 价值但 supersede 通用 default；routing credentials 是 report-back contract 的硬要求，不是 header 文案 polish。
-- operator correction：landy — 要求从第一性原理修 propose-time mode choice 和首条消息来源体验，避免下游补锅。
+- operator correction：operator — 要求从第一性原理修 propose-time mode choice 和首条消息来源体验，避免下游补锅。
 
 #### Final-Only Prompt Hardening（PR #2489, 2026-06-22）
 

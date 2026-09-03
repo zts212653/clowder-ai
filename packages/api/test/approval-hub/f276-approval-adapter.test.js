@@ -140,4 +140,106 @@ describe('F276ApprovalAdapter', () => {
       },
     ]);
   });
+
+  it('projects a materialized person into privacy-safe settled history', async () => {
+    const candidate = {
+      candidateId: 'person_candidate_wu_lang',
+      ownerUserId: 'owner-1',
+      requesterCatId: 'codex-sol',
+      sourceMessageRef: { kind: 'message', threadId: 'thread_people', messageId: 'msg_intent' },
+      claimDrafts: [],
+      remainingDraftIds: [],
+      retention: 'owner_controlled_no_ttl',
+      createdAt: 100,
+      state: 'materialized',
+      materializedPersonId: 'person_wu_lang',
+      latestDecisionReceipt: {
+        decisionId: 'decision_wu_lang',
+        candidateId: 'person_candidate_wu_lang',
+        state: 'materialized',
+        personId: 'person_wu_lang',
+        selectedDraftIds: ['person_draft_claim'],
+        materializedClaimIds: ['person_claim_wu_lang'],
+        materializedRelationshipIds: ['person_relationship_wu_lang'],
+        materializedEventIds: [],
+        remainingDraftIds: [],
+        decidedAt: 200,
+      },
+      publication: {
+        state: 'anchored',
+        envelope: {
+          canonicalProposalId: 'person_candidate_wu_lang',
+          sourceFeatureId: 'F276',
+          ownerUserId: 'owner-1',
+          requesterCatId: 'codex-sol',
+          originRef: { kind: 'message', threadId: 'thread_people', messageId: 'msg_intent' },
+          approvalCardRef: { threadId: 'thread_people', messageId: 'msg_card' },
+          createdAt: 100,
+        },
+      },
+    };
+    const store = {
+      async listSettled() {
+        return [{ candidate, decidedAt: 200 }];
+      },
+      async getPerson() {
+        return { personId: 'person_wu_lang', displayName: '吴浪' };
+      },
+    };
+
+    const [item] = await new F276ApprovalAdapter(store).listSettled('owner-1');
+
+    assert.equal(item.status, 'approved');
+    assert.equal(item.summary, '记住人物：吴浪');
+    assert.equal(item.decidedAt, 200);
+    assert.equal(item.decidedBy, 'owner-1');
+    assert.deepEqual(item.detail, {
+      displayName: '吴浪',
+      materialized: { claims: 1, relationships: 1, events: 0 },
+    });
+    assert.doesNotMatch(JSON.stringify(item), /evidenceExcerpt|sourceBundle|privateAliases/);
+  });
+
+  it('projects rejected history without resurrecting purged person drafts', async () => {
+    const candidate = {
+      candidateId: 'person_candidate_rejected',
+      ownerUserId: 'owner-1',
+      requesterCatId: 'codex-terra',
+      sourceMessageRef: { kind: 'message', threadId: 'thread_people', messageId: 'msg_rejected' },
+      claimDrafts: [],
+      remainingDraftIds: [],
+      retention: 'owner_controlled_no_ttl',
+      createdAt: 300,
+      state: 'rejected',
+      latestDecisionId: 'decision_rejected',
+      latestHumanDisposition: { reasonCode: 'not_important' },
+      publication: {
+        state: 'anchored',
+        envelope: {
+          canonicalProposalId: 'person_candidate_rejected',
+          sourceFeatureId: 'F276',
+          ownerUserId: 'owner-1',
+          requesterCatId: 'codex-terra',
+          originRef: { kind: 'message', threadId: 'thread_people', messageId: 'msg_rejected' },
+          approvalCardRef: { threadId: 'thread_people', messageId: 'msg_rejected_card' },
+          createdAt: 300,
+        },
+      },
+    };
+    const store = {
+      async listSettled() {
+        return [{ candidate, decidedAt: 400 }];
+      },
+      async getPerson() {
+        throw new Error('rejected history must not resolve a person');
+      },
+    };
+
+    const [item] = await new F276ApprovalAdapter(store).listSettled('owner-1');
+
+    assert.equal(item.status, 'rejected');
+    assert.equal(item.summary, '人物提案（内容已清除）');
+    assert.deepEqual(item.detail, { dispositionReason: 'not_important' });
+    assert.equal(item.decidedAt, 400);
+  });
 });

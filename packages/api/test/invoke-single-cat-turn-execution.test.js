@@ -49,6 +49,17 @@ function makeDeps(store, invocationId) {
   };
 }
 
+function routingDecision(catId = 'codex') {
+  return {
+    v: 1,
+    ownerId: 'user-1',
+    observedAt: 1,
+    resolverState: 'fresh',
+    snapshotRef: 'routing-snapshot:1',
+    targets: [{ targetCatId: catId, disposition: 'allowed', reasons: [], alternatives: [] }],
+  };
+}
+
 async function collect(iterable) {
   const messages = [];
   for await (const message of iterable) messages.push(message);
@@ -257,6 +268,95 @@ describe('invokeSingleCat durable child execution lifecycle', () => {
     assert.equal(terminal.status, 'failed');
     assert.equal(terminal.terminalReason, 'provider_execution_failed');
     assert.doesNotMatch(JSON.stringify(terminal), /secret-token-should-not-persist/);
+  });
+
+  test('observes success only after the canonical durable terminal and carries the exact preflight decision', async () => {
+    const store = new InMemoryTurnExecutionStore();
+    const observed = [];
+    const exactDecision = routingDecision();
+    const service = {
+      async *invoke() {
+        yield { type: 'done', catId: 'codex', timestamp: Date.now() };
+      },
+    };
+    const deps = {
+      ...makeDeps(store, 'child-routing-success'),
+      routingDispatchSignalObserver: {
+        async observeTerminal(evidence) {
+          assert.equal((await store.get('child-routing-success')).status, 'succeeded');
+          observed.push(evidence);
+        },
+      },
+    };
+
+    await collect(
+      invokeSingleCat(deps, {
+        catId: 'codex',
+        service,
+        prompt: 'test',
+        userId: 'user-1',
+        threadId: 'thread-1',
+        parentInvocationId: 'parent-1',
+        routingDispatchPreflightDecision: exactDecision,
+        isLastCat: true,
+      }),
+    );
+
+    assert.equal(observed.length, 1);
+    assert.equal(observed[0].status, 'succeeded');
+    assert.equal(observed[0].observationId, 'child-routing-success');
+    assert.equal(observed[0].evidenceRef, 'turn-execution:child-routing-success');
+    assert.equal(observed[0].preflightDecision, exactDecision);
+    assert.equal(observed[0].observedAt, (await store.get('child-routing-success')).endedAt);
+  });
+
+  test('maps structured provider failures after persistence and keeps observer failure advisory', async () => {
+    const store = new InMemoryTurnExecutionStore();
+    const observed = [];
+    const service = {
+      async *invoke() {
+        yield {
+          type: 'error',
+          catId: 'codex',
+          error: 'bounded provider failure',
+          metadata: {
+            provider: 'openai',
+            model: 'test',
+            cliDiagnostics: { reasonCode: 'quota_exceeded' },
+          },
+          timestamp: Date.now(),
+        };
+        yield { type: 'done', catId: 'codex', timestamp: Date.now() };
+      },
+    };
+    const deps = {
+      ...makeDeps(store, 'child-routing-failure'),
+      routingDispatchSignalObserver: {
+        async observeTerminal(evidence) {
+          assert.equal((await store.get('child-routing-failure')).status, 'failed');
+          observed.push(evidence);
+          throw new Error('routing observer unavailable');
+        },
+      },
+    };
+
+    await collect(
+      invokeSingleCat(deps, {
+        catId: 'codex',
+        service,
+        prompt: 'test',
+        userId: 'user-1',
+        threadId: 'thread-1',
+        parentInvocationId: 'parent-1',
+        routingDispatchPreflightDecision: routingDecision(),
+        isLastCat: true,
+      }),
+    );
+
+    assert.equal((await store.get('child-routing-failure')).status, 'failed');
+    assert.equal(observed.length, 1);
+    assert.equal(observed[0].status, 'failed');
+    assert.equal(observed[0].failureClass, 'quota_exhausted');
   });
 
   test('provider iterator ending without terminal done is interrupted, never succeeded', async () => {

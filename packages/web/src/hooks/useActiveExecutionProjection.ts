@@ -3,15 +3,25 @@
 import type { ActiveExecutionListResponse, ActiveExecutionProjection } from '@cat-cafe/shared';
 import { useEffect } from 'react';
 import { useActiveExecutionStore } from '@/stores/activeExecutionStore';
+import { useChatStore } from '@/stores/chatStore';
+import { useSidebarProjectionStore } from '@/stores/sidebarProjectionStore';
 import { apiFetch } from '@/utils/api-client';
 
 const ACTIVE_EXECUTION_REFRESH_MS = 4_000;
 
-export async function refreshActiveExecutionProjection(anchorThreadId: string, signal?: AbortSignal): Promise<void> {
+function activeExecutionResource(projectPath: string): string {
+  return `/api/executions/active?projectPath=${encodeURIComponent(projectPath)}`;
+}
+
+export async function refreshActiveExecutionProjection(
+  anchorThreadId: string,
+  projectPath: string,
+  signal?: AbortSignal,
+): Promise<void> {
   const store = useActiveExecutionStore.getState();
   const requestVersion = store.beginHydration(anchorThreadId);
   try {
-    const response = await apiFetch(`/api/threads/${encodeURIComponent(anchorThreadId)}/executions/active`, {
+    const response = await apiFetch(activeExecutionResource(projectPath), {
       signal,
     });
     if (!response.ok) throw new Error(`Execution hydration failed (${response.status})`);
@@ -47,8 +57,8 @@ export async function cancelProjectedExecution(execution: ActiveExecutionProject
       throw new Error(detail?.error ?? `Cancel failed (${response.status})`);
     }
     useActiveExecutionStore.getState().settleCancellation(execution);
-    const anchorThreadId = useActiveExecutionStore.getState().anchorThreadId;
-    if (anchorThreadId) await refreshActiveExecutionProjection(anchorThreadId);
+    const { anchorThreadId, projectPath } = useActiveExecutionStore.getState();
+    if (anchorThreadId && projectPath) await refreshActiveExecutionProjection(anchorThreadId, projectPath);
   } catch (error) {
     useActiveExecutionStore.getState().releaseCancellation(execution);
     throw error;
@@ -61,9 +71,18 @@ export async function cancelProjectedExecution(execution: ActiveExecutionProject
  * still discovered. The store retains the last good snapshot on transient error.
  */
 export function useActiveExecutionProjection(anchorThreadId: string, socketConnected: boolean | null): void {
+  const canonicalProjectPath = useSidebarProjectionStore(
+    (state) => state.rows.find((row) => row.id === anchorThreadId)?.projectPath,
+  );
+  const compatibilityProjectPath = useChatStore(
+    (state) => state.threads.find((thread) => thread.id === anchorThreadId)?.projectPath,
+  );
+  const projectPath = canonicalProjectPath ?? compatibilityProjectPath;
+
   useEffect(() => {
+    if (!projectPath) return;
     const controller = new AbortController();
-    const refresh = () => void refreshActiveExecutionProjection(anchorThreadId, controller.signal);
+    const refresh = () => void refreshActiveExecutionProjection(anchorThreadId, projectPath, controller.signal);
     refresh();
     const interval = window.setInterval(refresh, ACTIVE_EXECUTION_REFRESH_MS);
     const refreshWhenVisible = () => {
@@ -77,12 +96,12 @@ export function useActiveExecutionProjection(anchorThreadId: string, socketConne
       window.removeEventListener('online', refresh);
       document.removeEventListener('visibilitychange', refreshWhenVisible);
     };
-  }, [anchorThreadId]);
+  }, [anchorThreadId, projectPath]);
 
   useEffect(() => {
-    if (socketConnected !== true) return;
+    if (socketConnected !== true || !projectPath) return;
     const controller = new AbortController();
-    void refreshActiveExecutionProjection(anchorThreadId, controller.signal);
+    void refreshActiveExecutionProjection(anchorThreadId, projectPath, controller.signal);
     return () => controller.abort();
-  }, [anchorThreadId, socketConnected]);
+  }, [anchorThreadId, projectPath, socketConnected]);
 }

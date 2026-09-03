@@ -33,9 +33,16 @@ const REASONS = new Set([
   'telemetry_signal_missing',
   'metric_signal_missing',
   'continuity_mismatch',
+  'canonical_dynamic_producer_unavailable',
+  'dynamic_presentation_mismatch',
   'prerequisite_not_observed',
   'provider_replacement_trigger_unavailable',
   'provider_compaction_trigger_unavailable',
+  'replacement_state_mismatch',
+  'replacement_state_unavailable',
+  'compaction_state_mismatch',
+  'compaction_cursor_changed',
+  'cursor_evidence_unavailable',
   'contract_drift',
   'evidence_privacy_violation',
   'invalid_options',
@@ -208,6 +215,7 @@ export function metricsProveObservation(beforeText, afterText, projection) {
 }
 
 function exactKeys(value, allowed) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
   return Object.keys(value).every((key) => allowed.includes(key)) && allowed.every((key) => Object.hasOwn(value, key));
 }
 
@@ -215,55 +223,64 @@ export function assertContentFreeManifest(manifest) {
   const enums = CONTEXT_PROJECTION_ENUMS;
   const bounded = (value, values) => typeof value === 'string' && (values.includes(value) || value === 'unrecognized');
   const expectedTiers = [...enums.sourceTiers, 'unrecognized'];
+  const validObservation = (observation) =>
+    exactKeys(observation, [
+      'mode',
+      'reason',
+      'transition',
+      'delta',
+      'tiers',
+      'latencyMs',
+      'ledgerTerminal',
+      'traceRefs',
+    ]) &&
+    bounded(observation.mode, enums.contextModes) &&
+    bounded(observation.reason, enums.reasons) &&
+    bounded(observation.transition, enums.transitions) &&
+    bounded(observation.delta, enums.deltaSizes) &&
+    bounded(observation.ledgerTerminal, enums.ledgerOutcomes) &&
+    Number.isSafeInteger(observation.latencyMs) &&
+    observation.latencyMs >= 0 &&
+    Array.isArray(observation.tiers) &&
+    observation.tiers.length === expectedTiers.length &&
+    observation.tiers.every(
+      (tier, tierIndex) =>
+        exactKeys(tier, ['tier', 'count', 'bytes']) &&
+        tier.tier === expectedTiers[tierIndex] &&
+        Number.isSafeInteger(tier.count) &&
+        tier.count >= 0 &&
+        Number.isSafeInteger(tier.bytes) &&
+        tier.bytes >= 0,
+    ) &&
+    Array.isArray(observation.traceRefs) &&
+    observation.traceRefs.length === 1 &&
+    observation.traceRefs.every(
+      (ref) =>
+        exactKeys(ref, ['traceId', 'spanId']) &&
+        /^[0-9a-f]{32}$/.test(ref.traceId) &&
+        /^[0-9a-f]{16}$/.test(ref.spanId),
+    );
+  const validResult = (item, expectedJourney) => {
+    if (
+      !exactKeys(
+        item,
+        expectedJourney ? ['journey', 'outcome', 'reason', 'observation'] : ['outcome', 'reason', 'observation'],
+      )
+    ) {
+      return false;
+    }
+    if (expectedJourney && item.journey !== expectedJourney) return false;
+    if (!OUTCOMES.has(item.outcome) || !REASONS.has(item.reason)) return false;
+    if (item.observation === null) return item.outcome !== 'passed';
+    return validObservation(item.observation);
+  };
   const valid =
-    exactKeys(manifest, ['schemaVersion', 'revision', 'journeys']) &&
-    manifest.schemaVersion === 1 &&
+    exactKeys(manifest, ['schemaVersion', 'revision', 'dynamicPresentation', 'journeys']) &&
+    manifest.schemaVersion === 2 &&
     /^[0-9a-f]{40}$/.test(manifest.revision) &&
+    validResult(manifest.dynamicPresentation) &&
     Array.isArray(manifest.journeys) &&
     manifest.journeys.length === JOURNEYS.length &&
-    manifest.journeys.every((item, index) => {
-      if (!exactKeys(item, ['journey', 'outcome', 'reason', 'observation'])) return false;
-      if (item.journey !== JOURNEYS[index] || !OUTCOMES.has(item.outcome) || !REASONS.has(item.reason)) return false;
-      if (item.observation === null) return item.outcome !== 'passed';
-      const observation = item.observation;
-      return (
-        exactKeys(observation, [
-          'mode',
-          'reason',
-          'transition',
-          'delta',
-          'tiers',
-          'latencyMs',
-          'ledgerTerminal',
-          'traceRefs',
-        ]) &&
-        bounded(observation.mode, enums.contextModes) &&
-        bounded(observation.reason, enums.reasons) &&
-        bounded(observation.transition, enums.transitions) &&
-        bounded(observation.delta, enums.deltaSizes) &&
-        bounded(observation.ledgerTerminal, enums.ledgerOutcomes) &&
-        Number.isSafeInteger(observation.latencyMs) &&
-        observation.latencyMs >= 0 &&
-        Array.isArray(observation.tiers) &&
-        observation.tiers.length === expectedTiers.length &&
-        observation.tiers.every(
-          (tier, tierIndex) =>
-            exactKeys(tier, ['tier', 'count', 'bytes']) &&
-            tier.tier === expectedTiers[tierIndex] &&
-            Number.isSafeInteger(tier.count) &&
-            tier.count >= 0 &&
-            Number.isSafeInteger(tier.bytes) &&
-            tier.bytes >= 0,
-        ) &&
-        Array.isArray(observation.traceRefs) &&
-        observation.traceRefs.length === 1 &&
-        observation.traceRefs.every(
-          (ref) =>
-            exactKeys(ref, ['traceId', 'spanId']) &&
-            /^[0-9a-f]{32}$/.test(ref.traceId) &&
-            /^[0-9a-f]{16}$/.test(ref.spanId),
-        )
-      );
-    });
+    manifest.journeys.every((item, index) => validResult(item, JOURNEYS[index]));
   if (!valid) throw new UatError('failed', 'evidence_privacy_violation');
 }

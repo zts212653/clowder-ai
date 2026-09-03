@@ -7,7 +7,18 @@ import {
   type FreshnessCarrierCapability,
   type MessageWorkDisposition,
 } from '@cat-cafe/shared';
-import { KeyboardEvent, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import {
+  type Dispatch,
+  KeyboardEvent,
+  type SetStateAction,
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from 'react';
 import { useCatData } from '@/hooks/useCatData';
 import { useExecutionRecoveryVerification } from '@/hooks/useExecutionRecoveryVerification';
 import { reconnectGame } from '@/hooks/useGameReconnect';
@@ -39,12 +50,13 @@ import { PathCompletionMenu } from './PathCompletionMenu';
 import { ReplyPreviewBar } from './ReplyPreviewBar';
 import { pushThreadRouteWithHistory } from './ThreadSidebar/thread-navigation';
 import {
+  getThreadDraft,
   hasPendingThreadDraft,
+  subscribeThreadDrafts,
   syncContextAttachmentDraftToStorage,
   syncDraftToStorage,
   syncReplyDraftToStorage,
   threadContextAttachmentDrafts,
-  threadDrafts,
   threadImageDrafts,
   threadReplyDrafts,
 } from './thread-drafts';
@@ -80,6 +92,9 @@ interface ChatInputProps {
   hasActiveInvocation?: boolean;
   uploadStatus?: UploadStatus;
   uploadError?: string | null;
+  placeholder?: string;
+  seed?: { id: string; text: string };
+  onFocusChange?: (focused: boolean) => void;
 }
 
 const ACCEPTED_TYPES =
@@ -92,6 +107,9 @@ export function ChatInput({
   hasActiveInvocation: unscopedHasActiveInvocation,
   uploadStatus = 'idle',
   uploadError = null,
+  placeholder,
+  seed,
+  onFocusChange,
 }: ChatInputProps) {
   const { cats } = useCatData();
   const ime = useIMEGuard();
@@ -170,7 +188,26 @@ export function ChatInput({
     [canonicalExecutions],
   );
 
-  const [input, setInput] = useState(() => (threadId ? (threadDrafts.get(threadId) ?? '') : ''));
+  const [unscopedInput, setUnscopedInput] = useState('');
+  const scopedInput = useSyncExternalStore(
+    subscribeThreadDrafts,
+    () => getThreadDraft(threadId),
+    () => '',
+  );
+  const input = threadId ? scopedInput : unscopedInput;
+  const setInput = useCallback<Dispatch<SetStateAction<string>>>(
+    (next) => {
+      if (!threadId) {
+        setUnscopedInput(next);
+        return;
+      }
+      const previous = getThreadDraft(threadId);
+      const value = typeof next === 'function' ? next(previous) : next;
+      syncDraftToStorage(threadId, value || undefined);
+    },
+    [threadId],
+  );
+  const appliedSeedIdRef = useRef<string | null>(null);
   const [showMentions, setShowMentions] = useState(false);
   const [showGameMenu, setShowGameMenu] = useState(false);
   const [gameStep, setGameStep] = useState<'list' | 'modes'>('list');
@@ -219,6 +256,14 @@ export function ChatInput({
   const menuRef = useRef<HTMLDivElement>(null);
   const addButtonRef = useRef<HTMLButtonElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (!seed || appliedSeedIdRef.current === seed.id) return;
+    appliedSeedIdRef.current = seed.id;
+    setInput(seed.text);
+    const focusTimer = window.setTimeout(() => textareaRef.current?.focus(), 0);
+    return () => window.clearTimeout(focusTimer);
+  }, [seed, setInput]);
   const threads = useChatStore((s) => s.threads);
   const setThreadHasDraft = useChatStore((s) => s.setThreadHasDraft);
   const workspaceOpenFilePath = useChatStore((s) => s.workspaceOpenFilePath);
@@ -243,12 +288,15 @@ export function ChatInput({
     setIsPreparingImages,
   });
 
-  const handleTranscript = useCallback((text: string) => {
-    setInput((prev) => {
-      const separator = prev && !prev.endsWith(' ') ? ' ' : '';
-      return prev + separator + text;
-    });
-  }, []);
+  const handleTranscript = useCallback(
+    (text: string) => {
+      setInput((prev) => {
+        const separator = prev && !prev.endsWith(' ') ? ' ' : '';
+        return prev + separator + text;
+      });
+    },
+    [setInput],
+  );
 
   const filteredCatOptions = useMemo(() => {
     if (!mentionFilter) return catOptions;
@@ -360,6 +408,7 @@ export function ChatInput({
       dispositionCarrierSupport,
       beginComposerDraftAdmission,
       markComposerDraftOptimisticallyCleared,
+      setInput,
     ],
   );
 
@@ -402,7 +451,7 @@ export function ChatInput({
       }
       closeContextPicker();
     },
-    [closeContextPicker, contextShortcutRange],
+    [closeContextPicker, contextShortcutRange, setInput],
   );
 
   const [gameStarting, setGameStarting] = useState(false);
@@ -463,7 +512,7 @@ export function ChatInput({
       setMentionStart(-1);
       setTimeout(() => textareaRef.current?.focus(), 0);
     },
-    [input, mentionStart],
+    [input, mentionStart, setInput],
   );
 
   const handleChange = useCallback(
@@ -508,7 +557,7 @@ export function ChatInput({
         setMentionFilter('');
       }
     },
-    [closeMenus, catOptions, openContextPicker],
+    [closeMenus, catOptions, openContextPicker, setInput],
   );
 
   const handleHistorySelect = useCallback(
@@ -521,7 +570,7 @@ export function ChatInput({
       setMentionFilter('');
       setTimeout(() => textareaRef.current?.focus(), 0);
     },
-    [closeMenus],
+    [closeMenus, setInput],
   );
 
   const handleKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
@@ -1008,6 +1057,9 @@ export function ChatInput({
             onCompositionStart={ime.onCompositionStart}
             onCompositionEnd={ime.onCompositionEnd}
             onPaste={handlePaste}
+            onFocus={() => onFocusChange?.(true)}
+            onBlur={() => onFocusChange?.(false)}
+            aria-label="消息输入框"
             placeholder={
               whisperMode
                 ? '悄悄话...'
@@ -1015,7 +1067,7 @@ export function ChatInput({
                   ? displayedDisposition === 'continue_current'
                     ? '接着当前工作补充...'
                     : '继续输入，成为下一件工作...'
-                  : '输入消息... (@ 召唤猫猫 · /thread 引用对话)'
+                  : (placeholder ?? '输入消息... (@ 召唤猫猫 · /thread 引用对话)')
             }
             className={`w-full resize-none rounded-xl border p-3 text-sm focus:outline-none focus:ring-2 placeholder:text-cafe-muted ${
               whisperMode

@@ -8,17 +8,20 @@ description: "为 AGY 长任务建立独立于 invocation 与 hold_ball 的持�
 description_source: human
 description_author: codex-sol
 description_updated_at: 2026-07-10T15:10:30Z
+tips_exempt: "2026-09-02 Phase A audit and ownership truth only; the Managed Job user journey remains unshipped and Phase B implementation is still gated."
 ---
 
 # F261: AGY Durable Execution & Recovery — 长任务不随回合或重启消失
 
-> **Status**: spec | **Owner**: 小太阳·Maine Coon (@codex-sol, GPT-5.6 Sol) | **Priority**: P1
+> **Status**: in-progress | **Owner**: 小太阳·Maine Coon (@codex-sol, GPT-5.6 Sol) | **Priority**: P1
 >
 > **operator 立项 signoff**: 2026-07-10 “我同意，那你立项一下？不过你最好看看现在 F261 有没有被用了！”
 >
 > **编号核验**: 立项前已查当前文档、Git 历史、远端分支/标签、GitHub PR/Issue、记忆图和近期 thread；未发现真实 F261 占用。唯一 `git log -S F261` 命中来自二进制素材内容，thread 命中来自 SHA 子串，均为假阳性。
 >
-> **执行顺序铁律**: 立项 → 跨猫 spec review → **Phase A 零代码尸检/能力探针** → Design Gate → 实现。Phase B-E 是 candidate design，Phase A 证据可推翻其细节。
+> **执行顺序铁律**: 立项 → 跨猫 spec review → **Phase A 零代码尸检/能力探针** → Architecture Ownership Verdict → 实现。Phase B-E 是 candidate design，Phase A 证据可推翻其细节。
+>
+> **2026-08-30 Phase A 状态**: spec review 已 APPROVE kickoff、BLOCK Phase B；尸检与 Architecture Ownership Verdict 已落在 discussion audit。Phase B 仍须等本次 docs verdict 合入并按 red tests 开工。
 
 Architecture cell: action-plane
 
@@ -48,6 +51,7 @@ operator 把价值目标说得很准：**先救斑斑，再帮斑斑完成某一
 - F048 的 restart recovery 会终结父 invocation 并重排队列，但没有收养 nested background process 的 job record。
 - F201 已证明可复用的可靠性形状：durable supervisor + journal + probe + safe resume；F261 应复用契约，不另造一套“AGY 特例重试”。
 - ADR-029 规定 ActionService 是权限、审计、幂等、dry-run、resource handle 和错误归一化的治理边界；MCP 是暴露面，不是执行 backend。
+- 2026-08-30 现状已进一步收敛：Unix provider CLI 统一经过 owner manifest + lifecycle supervisor；API parent 消失会终止整棵 provider tree，startup reaper 负责精确清孤儿，不负责 adoption。`wakeWhen` 则只恢复 terminal delivery，running producer 仍由 API-memory `ManagedRunner` 持有。
 
 ### 回归问题台账
 
@@ -63,12 +67,15 @@ operator 把价值目标说得很准：**先救斑斑，再帮斑斑完成某一
 | REG-8 | 第三方依赖/权限/segfault 与 runtime death 混杂 | 原始 stderr、exit/signal、runtime termination reason 分层保存，禁止覆盖根因 |
 | REG-9 | 重启/重试没有幂等与 side-effect safety | idempotency key + explicit retry epoch；不得静默重复执行或遗留孤儿 |
 | REG-10 | 用户现场只有猫的叙述或 timeout，没有 job 实体 | invocation 原地出现单一 job 状态卡；终态只通知一次并可下钻日志 |
+| REG-11 | tmp log 在 terminal 删除，长 job 无 durable bounded artifact | 原始日志有界 chunk/retention；永久摘要保留 hash/provenance |
+| REG-12 | 单槽 runner 与 generic job cardinality/budget 都未定义 | admission 按 principal/owner 限额并持久审计并发预算 |
+| REG-13 | job lookup/idempotency 尚无 principal namespace | status/tail/cancel/idempotency 全部 principal-scoped，cross-principal fail-closed |
 
 ## What
 
 ### Phase A: 事故尸检与运行时能力探针（零代码门）
 
-先把 REG-1..10 全部还原成可复现 evidence：AGY 1.1.0 的 service/process 生命周期、nested background ownership、各层 timeout、signal/exit/log 行为，以及新 invocation 是否必然重启 transient service。交付 State Object Census、process tree/time sequence 和 Design Gate 结论；尸检前不写实现。
+先把 REG-1..13 全部还原成可复现 evidence：当前 AGY CLI 的 service/process 生命周期、nested background ownership、各层 timeout、signal/exit/log 行为，以及 host wrapper 对 parent death 的确定性处置。交付 State Object Census、process tree/time sequence 和 Architecture Ownership Verdict；尸检前不写实现。
 
 ### Phase B: Durable Managed Job Core（candidate design）
 
@@ -90,9 +97,9 @@ in_context_observability:
   noise_dedup_policy: one entity per job; update in place; emit one terminal notification per terminal epoch
 ```
 
-### Phase E: 回归套件、dogfood 与 eval 闭环（candidate design）
+### Phase E: 回归套件、dogfood 与运行健康闭环（candidate design）
 
-用确定性长命令覆盖后台阈值、聊天并发、API restart、worker restart、terminal failure、explicit cancel 和 idempotency replay；再用一次真实 12B load/download dogfood 验证端到端。真实大模型任务不进入每次 CI，只保留可重复的小型 fixture 和定期 verdict。
+用确定性长命令覆盖后台阈值、聊天并发、API restart、worker restart、terminal failure、explicit cancel 和 idempotency replay；再用一次真实 12B load/download dogfood 验证端到端。真实大模型任务不进入每次 CI，只保留可重复的小型 fixture。adoption/orphan/delivery/容量属于 logs/metrics/traces 的运行健康；只有出现明确 consumer + keep/tune/sunset 决策时才另建 eval。
 
 ## User Journey
 
@@ -123,7 +130,7 @@ in_context_observability:
 | ID | 需求点（operator experience/转述） | AC 编号 | 验证方式 | 状态 |
 |----|---------------------------|---------|----------|------|
 | R1 | “救斑斑比帮他完成任务重要”——先修承载生命周期，不为某次模型加载写特例 | AC-A1, AC-B1, AC-B2 | incident ledger + state model/restart tests | [ ] |
-| R2 | “把遇到的问题都列成回归 issue” | AC-A1, AC-E1 | REG-1..10 evidence matrix + automated suite | [ ] |
+| R2 | “把遇到的问题都列成回归 issue” | AC-A1, AC-E1 | REG-1..13 evidence matrix + automated suite | [ ] |
 | R3 | 5–10 分钟模型加载不能因约两分钟后台化或服务重启消失 | AC-B2, AC-E2, AC-E3 | deterministic restart test + 12B dogfood | [ ] |
 | R4 | “可能需要 F211？……F211 太长了”——新 feat 独立立项、旧 feat 只挂边不吞 scope | AC-A3 | source boundary review | [ ] |
 | R5 | “看看现在 F261 有没有被用了” | AC-A4 | docs/Git/remote/GitHub/memory absence audit | [ ] |
@@ -138,17 +145,19 @@ in_context_observability:
 
 ### Phase A（事故尸检与能力探针）
 
-- [ ] AC-A1: REG-1..10 每项都有复现步骤、process/log evidence、现状 verdict 和目标 owner，非作者可按报告复查。
-- [ ] AC-A2: 产出 AGY 1.1.0 process tree + timeout timeline，明确新 invocation、service restart、nested background 与 OS process 的真实 ownership。
-- [ ] AC-A3: Design Gate 完成 State Object Census 和 architecture ownership 裁定；证明没有把 job truth 塞入 invocation、hold_ball 或 MCP transport。
+- [x] AC-A1: REG-1..13 每项都有复现步骤、process/log evidence、现状 verdict 和目标 owner，非作者可按 Phase A audit 复查。
+- [x] AC-A2: 产出当前 AGY 1.1.19 + host wrapper process tree / timeout timeline，明确 parent death、nested background 与 OS process 的真实 ownership；旧 1.1.0 upstream restart trigger 不再作为设计前置。
+- [x] AC-A3: Architecture Ownership Verdict 完成 State Object Census；job lifecycle 归 Action Plane，F201/F167/CLI ownership 只持各自 typed evidence/receipt，不把 job truth 塞入 invocation、hold_ball 或 MCP transport。
 - [x] AC-A4: F261 编号经 docs、Git、remote、GitHub、memory 多入口核验为空号，假阳性已记录。
 
 ### Phase B（Durable Managed Job Core）
 
-- [ ] AC-B1: ManagedJobRecord 持久化 TTL=0，至少覆盖 owner/principal、state、process identity、log/result refs、idempotency、retry/cancel/recovery evidence；schema 与 transition tests 通过。
-- [ ] AC-B2: job worker/supervisor 与 API invocation 解耦；API restart integration test 中 running job 可被 adopt 或以带证据的 terminal/lost 状态收敛，不能静默消失。
-- [ ] AC-B3: 同一 idempotency key 不重复执行；retry epoch、explicit cancel、process-tree termination 和审计 actor 均有自动化测试。
+- [ ] AC-B1: ManagedJobRecord 持久化 TTL=0，至少覆盖 principal-scoped identity、typed origin/wake/provider refs、state、process birth identity、host-authored evidence、bounded log/result refs、idempotency、retry/cancel/recovery evidence；schema 与 transition tests 通过。
+- [ ] AC-B2: job worker/supervisor 与 API invocation 解耦；durable adoption lease + supervisorEpoch fencing 保证双实例只有一方能 adopt/terminalize/cancel；restart integration test 中 running job 可被 adopt 或以带证据的 terminal/lost 状态收敛。
+- [ ] AC-B3: 同 principal namespace 的 idempotency key 不重复执行；cross-principal lookup/dedupe/cancel fail-closed；retry epoch、explicit cancel、process-tree termination 和审计 actor 均有自动化测试。
 - [ ] AC-B4: orphan/duplicate census 在故障注入后为 0；无法收养的进程必须隔离并产生 operator-visible evidence。
+- [ ] AC-B5: v1 worker 不继承 managed-submit capability，nested managed job 默认拒绝；未来开放前必须先定义 parentJobId、预算与 cancel tree。
+- [ ] AC-B6: admission 按 principal/owner 执行并发与资源预算；log artifact 有有界 chunk/retention，永久摘要保留 hash/provenance。
 
 ### Phase C（AGY 安全接入）
 
@@ -162,28 +171,25 @@ in_context_observability:
 - [ ] AC-D2: terminal event 只唤醒正确 thread/cat 一次，并携结构化 exit/signal/result/error refs；重复 callback 不重复发答。
 - [ ] AC-D3: 用户在 job 运行时继续发消息不会取消 job；显式授权 cancel 才能进入 cancelling/terminal。
 - [ ] AC-D4: deep-dive 可查看完整 transition/recovery/log evidence，聊天现场不铺原始日志噪音。
+- [ ] AC-D5: submit 必须先 durable 创建 job + wake association + card ref，再开放 worker claim；fast-terminal 不会先于状态实体到达。terminal receipt 以 `jobId:terminalEpoch:wakeTarget` 幂等去重。
 
 ### Phase E（回归与 eval）
 
-- [ ] AC-E1: deterministic suite 覆盖 REG-1..10，包括后台阈值、follow-up message、API/worker restart、真实失败日志、cancel 和 idempotency replay。
+- [ ] AC-E1: deterministic suite 覆盖 REG-1..13，包括后台阈值、follow-up message、API/worker restart、真实失败日志、cancel、idempotency replay、principal isolation、retention 与 concurrency budget。
 - [ ] AC-E2: 故障注入连续 20 轮中 terminal result delivery=100%、user-message-induced cancel=0、duplicate execution=0、unaccounted orphan=0。
 - [ ] AC-E3: 一次真实 12B load/download dogfood 跨过原事故时间窗，产生可下钻 job trace；成功或真实任务失败均可验收，runtime 无证据杀死不可验收。
-- [ ] AC-E4: Eval Hub/verdict 可读地展示 restart adoption、terminal delivery、orphan、duplicate、user-message cancel 指标，并定义回退/升级阈值。
+- [ ] AC-E4: runtime logs/metrics/traces 可读地展示 restart adoption latency、terminal delivery、orphan、duplicate、user-message cancel、queue/runtime duration 与 log volume，并定义 operational alert/rollback 阈值；不默认要求 Eval Hub。
 
-## ADR-031 Harness 三层契约
+## ADR-031 机制选择
 
-| 层 | F261 落点 |
-|----|-----------|
-| 软 | AGY prompt/skill/convention：预计超前台预算的本地命令必须走 Managed Job，不得伪后台后遗忘 |
-| 硬 | ActionService + TTL=0 job truth + external supervisor/reconciler + auth/sandbox/idempotency/schema/tests |
-| Eval | terminal delivery、restart adoption、orphan、duplicate、user-message cancel 进入 telemetry/verdict 闭环 |
+| 要回答的 claim | 机制 | F261 落点 |
+|----|----|-----------|
+| state/auth/timeout/order 等确定契约 | test/type/schema/guard | ActionService + TTL=0 job truth + supervisor/reconciler + auth/sandbox/idempotency |
+| adoption、orphan、delivery、容量等运行健康 | logs/metrics/traces | terminal delivery、restart adoption、orphan、duplicate、user-message cancel 与 log volume |
+| 猫何时改用 Managed Job | convention/skill/tip | 预计超前台预算的本地命令走 Managed Job，不得伪后台后遗忘 |
+| 某项策略是否 keep/tune/sunset | 条件式 eval | 仅在有明确 consumer 与决策问题时按 eval-design 建出生证 |
 
-### Eval Contract
-
-1. **Primary users / activation**: AGY 猫执行预计超过前台 invocation 预算的本地命令时。
-2. **Friction metrics**: terminal result delivery rate、restart recovery/adoption rate、unaccounted orphan count、duplicate execution count、user-message-induced cancellation count。
-3. **Regression fixtures**: 长命令跨后台阈值、运行中 follow-up、API/worker restart、terminal failure、explicit cancel、idempotency replay。
-4. **Sunset**: 若 AGY upstream 提供有文档、跨 restart 稳定的 structured persistent-job API（handle/status/log/cancel/result），可 sunset 本地 AGY process adapter；Action Plane 的权限、幂等、审计和现场可见性契约不 sunset。
+**Sunset**: 若 AGY upstream 提供有文档、跨 restart 稳定的 structured persistent-job API（handle/status/log/cancel/result），可 sunset 本地 AGY process adapter；Action Plane 的权限、幂等、审计和现场可见性契约不 sunset。
 
 ## Tips Contribution
 
@@ -221,9 +227,14 @@ in_context_observability:
 | KD-3 | Action Plane owns execution；MCP only exposes | 继承 ADR-029 的权限/审计/幂等治理边界 | 2026-07-10 |
 | KD-4 | 先 Phase A 尸检，后 Design Gate/实现 | 当前仍未知 AGY service 的真实 process ownership；不能靠猜搭 supervisor | 2026-07-10 |
 | KD-5 | 第三方任务错误是需要保真的 terminal outcome，不是 F261 的修复 scope | 防止用 scope 膨胀掩盖 runtime lifecycle 根因 | 2026-07-10 |
+| KD-6 | Architecture Ownership Verdict：generic job ledger 归 Action Plane；F201 保持 provider adapter/read model | F201 store 无 list/CAS/lease/principal/process/log/cancel，强行泛化会污染已 closed provider contract | 2026-08-30 |
+| KD-7 | 复用 CLI owner token、PID birth identity 与 safe tree kill；reaper 仍 cleanup-only | 这些 primitive 已有 real-process tests，但没有 adoption 或 job terminal truth | 2026-08-30 |
+| KD-8 | 每个 supervisor writer 带 durable lease + supervisorEpoch fence | API/worker 解耦后滚动重启与双实例会产生 split-brain，不能只靠 single-process assumption | 2026-08-30 |
+| KD-9 | v1 禁止 nested managed job；card-before-terminal；terminal wake 用 durable receipt 去重 | 先消除隐式 cancel tree 与 fast-terminal race，再讨论递归能力 | 2026-08-30 |
+| KD-10 | deterministic contract 走 tests；运行健康走 logs/metrics/traces；Eval Hub 只在明确效用决策时启用 | 遵守 ADR-031 claim-by-claim 机制选择，不把机制当补齐清单 | 2026-08-30 |
 
 ## Review Gate
 
-- Spec：跨个体 reviewer 重点审 Job/invocation/ball 三界、Action Plane ownership 与 REG-1..10 完整性。
+- Spec：Opus 4.7 已审 Job/invocation/ball 三界、Action Plane ownership 与 REG 完整性；Phase A kickoff APPROVE，Phase B 在 F1-F5 收口前 BLOCK。
 - Phase A：尸检报告必须给出复现证据与 State Object Census，review 放行后才进 Design Gate。
 - Implementation：TDD + worktree；跨个体代码 review；按 merge-gate 合入；alpha 验收真实重启/对话并发旅程。

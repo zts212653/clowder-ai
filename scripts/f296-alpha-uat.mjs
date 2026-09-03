@@ -13,8 +13,10 @@ import {
   validateAlphaCoordinates,
   validateCanonicalContract,
 } from './lib/f296-alpha-uat-contract.mjs';
+import { runCompactionJourney, runReplacementJourney } from './lib/f296-alpha-uat-journeys.mjs';
 
 export * from './lib/f296-alpha-uat-contract.mjs';
+export { cursorDidNotRewind } from './lib/f296-alpha-uat-journeys.mjs';
 
 export const RESUMED_LARGE_CONTENT = `${'context-token '.repeat(5500)}\nReply with the single word OK.`;
 
@@ -26,6 +28,7 @@ function parseArgs(argv) {
     userId: 'f296-alpha-uat',
     timeoutMs: 300000,
     pollMs: 1000,
+    oversizedNativeThreadIds: [],
   };
   const fields = new Map([
     ['--api-url', 'apiUrl'],
@@ -34,13 +37,15 @@ function parseArgs(argv) {
     ['--user-id', 'userId'],
     ['--timeout-ms', 'timeoutMs'],
     ['--poll-ms', 'pollMs'],
+    ['--oversized-native-thread-id', 'oversizedNativeThreadIds'],
   ]);
   for (let index = 0; index < argv.length; index += 2) {
     const key = argv[index];
     const value = argv[index + 1];
     const field = fields.get(key);
     if (!field || !value) throw new UatError('failed', 'api_unavailable');
-    options[field] = field.endsWith('Ms') ? Number(value) : value;
+    if (field === 'oversizedNativeThreadIds') options.oversizedNativeThreadIds.push(value);
+    else options[field] = field.endsWith('Ms') ? Number(value) : value;
   }
   if (
     !/^[a-z0-9][a-z0-9_-]{0,99}$/i.test(options.catId) ||
@@ -50,7 +55,10 @@ function parseArgs(argv) {
     options.timeoutMs > 1_800_000 ||
     !Number.isSafeInteger(options.pollMs) ||
     options.pollMs < 100 ||
-    options.pollMs > 10_000
+    options.pollMs > 10_000 ||
+    options.oversizedNativeThreadIds.some(
+      (value) => !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value),
+    )
   ) {
     throw new UatError('failed', 'invalid_options');
   }
@@ -88,10 +96,20 @@ async function json(options, path, init, reason = 'api_unavailable') {
 async function establishSession(options) {
   const response = await request(options, '/api/session');
   const sessionCookie = response.headers.get('set-cookie')?.split(';', 1)[0]?.trim();
-  if (!response.ok || !/^cat_cafe_session=[0-9a-f]{64}$/.test(sessionCookie ?? '')) {
+  let session;
+  try {
+    session = await response.json();
+  } catch {
     throw new UatError('failed', 'api_unavailable');
   }
-  return { ...options, sessionCookie };
+  if (
+    !response.ok ||
+    !/^cat_cafe_session=[0-9a-f]{64}$/.test(sessionCookie ?? '') ||
+    !/^[a-z0-9][a-z0-9_-]{0,99}$/i.test(session?.userId)
+  ) {
+    throw new UatError('failed', 'api_unavailable');
+  }
+  return { ...options, userId: session.userId, sessionCookie };
 }
 
 async function metrics(options) {
@@ -101,6 +119,14 @@ async function metrics(options) {
 }
 
 const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+function errorOutcome(error) {
+  return typeof error?.outcome === 'string' ? error.outcome : 'failed';
+}
+
+function errorReason(error) {
+  return typeof error?.reason === 'string' ? error.reason : 'api_unavailable';
+}
 
 async function awaitInvocation(options, invocationId) {
   const deadline = Date.now() + options.timeoutMs;
@@ -187,8 +213,12 @@ async function observe(options, threadId, journey, content, expected) {
   );
   if (sent.status !== 'processing' || typeof sent.invocationId !== 'string')
     throw new UatError('failed', 'invocation_rejected');
-  await awaitInvocation(options, sent.invocationId);
-  const providerInvocationId = await awaitProviderInvocation(options, sent.invocationId);
+  return observeInvocation(options, sent.invocationId, journey, expected, before);
+}
+
+async function observeInvocation(options, parentInvocationId, journey, expected, before) {
+  await awaitInvocation(options, parentInvocationId);
+  const providerInvocationId = await awaitProviderInvocation(options, parentInvocationId);
   if (!providerInvocationId) return unsupportedJourney(journey, 'telemetry_signal_missing');
   const projection = await awaitProjection(options, providerInvocationId);
   if (!projection) return unsupportedJourney(journey, 'telemetry_signal_missing');
@@ -214,6 +244,90 @@ async function observe(options, threadId, journey, content, expected) {
   };
 }
 
+function dynamicPresentation(cold) {
+  const observation = cold.observation;
+  if (observation === null || observation === undefined) {
+    return {
+      outcome: cold.outcome,
+      reason: cold.reason,
+      observation: null,
+    };
+  }
+  const observed =
+    observation?.ledgerTerminal === 'committed' && observation.tiers.some(({ count }) => Number(count) > 0);
+  return {
+    outcome: observed ? 'passed' : 'failed',
+    reason: observed ? 'observed' : 'dynamic_presentation_mismatch',
+    observation: observation === undefined ? null : observation,
+  };
+}
+
+async function observeColdAndDynamic(options, threadId, expectedRevision, expected) {
+  const before = await metrics(options);
+  const response = await request(options, `/api/threads/${encodeURIComponent(threadId)}/f296-alpha-dynamic-canary`, {
+    method: 'POST',
+    body: JSON.stringify({ runId: expectedRevision }),
+  });
+  if ([404, 409].includes(response.status)) {
+    return {
+      cold: await observe(options, threadId, 'cold', 'Reply with the single word OK.', expected),
+      dynamic: {
+        outcome: 'unsupported',
+        reason: 'canonical_dynamic_producer_unavailable',
+        observation: null,
+      },
+    };
+  }
+  let carrier;
+  try {
+    carrier = await response.json();
+  } catch {
+    carrier = null;
+  }
+  if (
+    !response.ok ||
+    carrier?.status !== 'processing' ||
+    typeof carrier.invocationId !== 'string' ||
+    carrier.producer !== 'meeting_artifact' ||
+    carrier.opportunityKind !== 'memory_write_opportunity'
+  ) {
+    return {
+      cold: await observe(options, threadId, 'cold', 'Reply with the single word OK.', expected),
+      dynamic: { outcome: 'failed', reason: 'dynamic_presentation_mismatch', observation: null },
+    };
+  }
+  const cold = await observeInvocation(options, carrier.invocationId, 'cold', expected, before);
+  return { cold, dynamic: dynamicPresentation(cold) };
+}
+
+async function captureColdAndDynamic(options, threadId, expectedRevision, expected) {
+  try {
+    return await observeColdAndDynamic(options, threadId, expectedRevision, expected);
+  } catch (error) {
+    const cold = {
+      journey: 'cold',
+      outcome: errorOutcome(error),
+      reason: errorReason(error),
+      observation: null,
+    };
+    return {
+      cold,
+      dynamic: dynamicPresentation(cold),
+    };
+  }
+}
+
+async function createCanaryThread(options, title) {
+  const thread = await json(
+    options,
+    '/api/threads',
+    { method: 'POST', body: JSON.stringify({ title, preferredCats: [options.catId] }) },
+    'thread_creation_failed',
+  );
+  if (typeof thread.id !== 'string' || thread.id.length === 0) throw new UatError('failed', 'thread_creation_failed');
+  return thread.id;
+}
+
 export async function runAlphaUat(options) {
   validateCanonicalContract();
   validateAlphaCoordinates(options.apiUrl, options.redisUrl);
@@ -226,28 +340,8 @@ export async function runAlphaUat(options) {
   ]);
   assertAlphaSnapshot({ expectedRevision, health, readiness, cats, catId: options.catId });
   await metrics(sessionOptions);
-  const thread = await json(
-    sessionOptions,
-    '/api/threads',
-    {
-      method: 'POST',
-      body: JSON.stringify({ title: 'F296 B4c Alpha UAT canary', preferredCats: [options.catId] }),
-    },
-    'thread_creation_failed',
-  );
-  if (typeof thread.id !== 'string' || thread.id.length === 0) throw new UatError('failed', 'thread_creation_failed');
+  const threadId = await createCanaryThread(sessionOptions, 'F296 B4c Alpha UAT canary');
   const specs = [
-    [
-      'cold',
-      'Reply with the single word OK.',
-      {
-        disposition: 'fresh',
-        reason: 'no_prior_session',
-        transition: 'scope_first_seen',
-        mode: 'cold',
-        delta: 'small',
-      },
-    ],
     [
       'resumed-small',
       'Reply with the single word OK again.',
@@ -259,14 +353,22 @@ export async function runAlphaUat(options) {
       { disposition: 'resumed', reason: 'resume_confirmed', transition: 'resumed', mode: 'hot', delta: 'large' },
     ],
   ];
-  const journeys = [];
+  const coldExpected = {
+    disposition: 'fresh',
+    reason: 'no_prior_session',
+    transition: 'scope_first_seen',
+    mode: 'cold',
+    delta: 'small',
+  };
+  const coldAndDynamic = await captureColdAndDynamic(sessionOptions, threadId, expectedRevision, coldExpected);
+  const journeys = [coldAndDynamic.cold];
   for (const [journey, content, expected] of specs) {
     if (journeys.some((item) => item.outcome !== 'passed')) {
       journeys.push(unsupportedJourney(journey, 'prerequisite_not_observed'));
       continue;
     }
     try {
-      journeys.push(await observe(sessionOptions, thread.id, journey, content, expected));
+      journeys.push(await observe(sessionOptions, threadId, journey, content, expected));
     } catch (error) {
       journeys.push({
         journey,
@@ -276,9 +378,32 @@ export async function runAlphaUat(options) {
       });
     }
   }
-  journeys.push(unsupportedJourney('replacement', 'provider_replacement_trigger_unavailable'));
-  journeys.push(unsupportedJourney('authoritative-compaction', 'provider_compaction_trigger_unavailable'));
-  const manifest = { schemaVersion: 1, revision: expectedRevision, journeys };
+  try {
+    journeys.push(await runReplacementJourney({ options: sessionOptions, createCanaryThread, json, observe }));
+  } catch (error) {
+    journeys.push({
+      journey: 'replacement',
+      outcome: error.outcome ?? 'failed',
+      reason: error.reason ?? 'api_unavailable',
+      observation: null,
+    });
+  }
+  try {
+    journeys.push(await runCompactionJourney({ options: sessionOptions, threadId, request, observe }));
+  } catch (error) {
+    journeys.push({
+      journey: 'authoritative-compaction',
+      outcome: error.outcome ?? 'failed',
+      reason: error.reason ?? 'api_unavailable',
+      observation: null,
+    });
+  }
+  const manifest = {
+    schemaVersion: 2,
+    revision: expectedRevision,
+    dynamicPresentation: coldAndDynamic.dynamic,
+    journeys,
+  };
   assertContentFreeManifest(manifest);
   return manifest;
 }
@@ -287,10 +412,15 @@ async function main() {
   try {
     const manifest = await runAlphaUat(parseArgs(process.argv.slice(2)));
     process.stdout.write(`${JSON.stringify(manifest, null, 2)}\n`);
-    if (manifest.journeys.some((item) => item.outcome === 'failed')) process.exitCode = 1;
+    if (
+      manifest.dynamicPresentation.outcome === 'failed' ||
+      manifest.journeys.some((item) => item.outcome === 'failed')
+    ) {
+      process.exitCode = 1;
+    }
   } catch (error) {
     process.stdout.write(
-      `${JSON.stringify({ schemaVersion: 1, outcome: error.outcome ?? 'failed', reason: error.reason ?? 'api_unavailable' })}\n`,
+      `${JSON.stringify({ schemaVersion: 2, outcome: errorOutcome(error), reason: errorReason(error) })}\n`,
     );
     process.exitCode = 1;
   }

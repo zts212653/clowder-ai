@@ -981,6 +981,20 @@ describe('Thread API', () => {
     assert.equal(JSON.parse(fetched.body).preferredWorkspaceMode, 'community');
   });
 
+  it('PATCH /api/threads/:id persists the distinct F310 product Schedule destination', async () => {
+    const thread = threadStore.create('alice', 'Entrusted work Schedule');
+    const res = await app.inject({
+      method: 'PATCH',
+      url: `/api/threads/${thread.id}`,
+      payload: { preferredWorkspaceMode: 'product-schedule' },
+    });
+    assert.equal(res.statusCode, 200);
+    assert.equal(JSON.parse(res.body).preferredWorkspaceMode, 'product-schedule');
+
+    const fetched = await app.inject({ method: 'GET', url: `/api/threads/${thread.id}` });
+    assert.equal(JSON.parse(fetched.body).preferredWorkspaceMode, 'product-schedule');
+  });
+
   it('PATCH /api/threads/:id rejects invalid preferredWorkspaceMode', async () => {
     const thread = threadStore.create('alice', 'Bad Mode Thread');
 

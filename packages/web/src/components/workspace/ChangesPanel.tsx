@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
+import { ThreadNativeReviewSettingsContent } from '@/components/ThreadSidebar/ThreadNativeReviewSettings';
 import { apiFetch } from '@/utils/api-client';
 import { DiffViewer } from './DiffViewer';
 import { FileIcon } from './FileIcons';
@@ -31,9 +32,10 @@ function getStatusInfo(status: string) {
 interface ChangesPanelProps {
   worktreeId: string | null;
   basisPct: number;
+  threadId?: string | null;
 }
 
-export function ChangesPanel({ worktreeId, basisPct }: ChangesPanelProps) {
+export function ChangesPanel({ worktreeId, basisPct, threadId }: ChangesPanelProps) {
   const [data, setData] = useState<DiffData | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -68,6 +70,17 @@ export function ChangesPanel({ worktreeId, basisPct }: ChangesPanelProps) {
 
   return (
     <div className="flex flex-col min-h-0 flex-1">
+      {threadId && (
+        <details
+          className="flex-shrink-0 border-b border-cafe-subtle/40 bg-cafe-surface/40"
+          data-testid="native-review-workspace-strip"
+        >
+          <summary className="cursor-pointer px-3 py-2 text-xs font-semibold text-cafe-black">
+            让 Codex 检查当前改动
+          </summary>
+          <ThreadNativeReviewSettingsContent threadId={threadId} />
+        </details>
+      )}
       {/* Changed files list */}
       <div
         className="flex-shrink-0 overflow-y-auto border-b border-cafe-subtle/40"

@@ -186,6 +186,40 @@ describe('SessionChainStore', () => {
     });
   });
 
+  test('F296 mints authenticated event-local sequences for legacy compress sessions with unknown lifetime totals', async () => {
+    const store = await createStore();
+    const logical = store.getOrCreateActive({
+      threadId: 'thread-legacy-compress',
+      catId: 'opus',
+      userId: 'user-1',
+      compressionCount: null,
+    });
+    const snapshot = {
+      config: { strategy: 'compress', thresholds: { warn: 0.75, action: 0.85 } },
+      source: 'runtime_override',
+      revision: 'revision-legacy-compress',
+      changedAt: 10,
+      execution: { status: 'active', missingCapabilities: [] },
+    };
+    store.applyPolicySnapshot(logical.id, snapshot);
+
+    store.recordCompressionEvent(logical.id, snapshot.revision, 'inv-legacy-one');
+    assert.equal(store.get(logical.id).compressionCount, null, 'unknown lifetime history must stay unknown');
+    assert.deepEqual(store.get(logical.id).compressionObservation, {
+      invocationId: 'inv-legacy-one',
+      sequence: 1,
+      observedAt: store.get(logical.id).updatedAt,
+    });
+
+    store.recordCompressionEvent(logical.id, snapshot.revision, 'inv-legacy-two');
+    assert.equal(store.get(logical.id).compressionCount, null);
+    assert.deepEqual(store.get(logical.id).compressionObservation, {
+      invocationId: 'inv-legacy-two',
+      sequence: 2,
+      observedAt: store.get(logical.id).updatedAt,
+    });
+  });
+
   test('#1329 Redis result decoding preserves unknown counters when fields are absent', async () => {
     const { RedisSessionChainStore } = await import(
       '../dist/domains/cats/services/stores/redis/RedisSessionChainStore.js'

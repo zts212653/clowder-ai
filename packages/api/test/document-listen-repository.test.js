@@ -23,7 +23,7 @@ describe('DocumentListenRepository', () => {
   });
 
   it('persists position, rate, retention, and reuses unchanged sentence assets after an edit', () => {
-    const key = { userId: 'you', projectPath: '/repo', relativePath: 'paper.md' };
+    const key = { userId: 'operator', projectPath: '/repo', relativePath: 'paper.md' };
     repository.saveDocument(key, {
       identity: { projectPath: '/repo', relativePath: 'paper.md', contentDigest: 'v1' },
       sentences: [{ anchor: 'same' }, { anchor: 'changed' }],
@@ -56,8 +56,8 @@ describe('DocumentListenRepository', () => {
 
   it('does not orphan an asset while another document still references it', () => {
     const sharedAsset = 'c'.repeat(64);
-    const first = { userId: 'you', projectPath: '/repo', relativePath: 'first.md' };
-    const second = { userId: 'you', projectPath: '/repo', relativePath: 'second.md' };
+    const first = { userId: 'operator', projectPath: '/repo', relativePath: 'first.md' };
+    const second = { userId: 'operator', projectPath: '/repo', relativePath: 'second.md' };
     for (const key of [first, second]) {
       repository.saveDocument(key, {
         identity: { projectPath: key.projectPath, relativePath: key.relativePath, contentDigest: 'v1' },
@@ -79,8 +79,8 @@ describe('DocumentListenRepository', () => {
   it('derives cleanup eligibility from last use and the strongest live retention', () => {
     const asset7d = 'd'.repeat(64);
     const assetForever = 'e'.repeat(64);
-    const key7d = { userId: 'you', projectPath: '/repo', relativePath: '7d.md' };
-    const keyForever = { userId: 'you', projectPath: '/repo', relativePath: 'forever.md' };
+    const key7d = { userId: 'operator', projectPath: '/repo', relativePath: '7d.md' };
+    const keyForever = { userId: 'operator', projectPath: '/repo', relativePath: 'forever.md' };
     const save = (key, retention, assetId) => {
       repository.saveDocument(key, {
         identity: { projectPath: key.projectPath, relativePath: key.relativePath, contentDigest: 'v1' },
@@ -102,7 +102,7 @@ describe('DocumentListenRepository', () => {
 
   it('keeps an asset-level forever policy after an edit removes its final sentence reference', () => {
     const assetId = 'f'.repeat(64);
-    const key = { userId: 'you', projectPath: '/repo', relativePath: 'edited-forever.md' };
+    const key = { userId: 'operator', projectPath: '/repo', relativePath: 'edited-forever.md' };
     repository.saveDocument(key, {
       identity: { projectPath: '/repo', relativePath: key.relativePath, contentDigest: 'v1' },
       sentences: [{ anchor: 'removed' }],

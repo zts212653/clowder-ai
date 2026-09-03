@@ -8,12 +8,111 @@ import { loadAllowlist, scanSkillSurfaceText } from './check-skill-first-party-s
 
 const REL_PATH = 'cat-cafe-skills/workspace-navigator/SKILL.md';
 const INBOUND_RUNBOOK_URL = new URL('../cat-cafe-skills/refs/opensource-ops-inbound-pr.md', import.meta.url);
+const TECHNICAL_NARRATIVE_METHOD_URL = new URL(
+  '../docs/study/2026-08-29-technical-narrative-proof-loop-meta-method.md',
+  import.meta.url,
+);
 
 function scan(content, allowlist = []) {
   return scanSkillSurfaceText(content, REL_PATH, allowlist);
 }
 
 describe('check-skill-first-party-surfaces', () => {
+  it('keeps routine harness validation claim-routed and single-owner', () => {
+    const worktree = readFileSync(new URL('../cat-cafe-skills/worktree/SKILL.md', import.meta.url), 'utf8');
+    const writingSkills = readFileSync(new URL('../cat-cafe-skills/writing-skills/SKILL.md', import.meta.url), 'utf8');
+    const memorySearch = readFileSync(
+      new URL('../cat-cafe-skills/memory-search-best-practices/SKILL.md', import.meta.url),
+      'utf8',
+    );
+    const prSignals = readFileSync(new URL('../cat-cafe-skills/refs/pr-signals.md', import.meta.url), 'utf8');
+    const cicdTracking = readFileSync(new URL('../cat-cafe-skills/refs/cicd-tracking.md', import.meta.url), 'utf8');
+
+    for (const [name, content] of [
+      ['worktree', worktree],
+      ['writing-skills', writingSkills],
+    ]) {
+      assert.doesNotMatch(
+        content,
+        /(?:即使|哪怕|无论)[^。\n]{0,80}(?:必须|至少)[^。\n]{0,40}`?pnpm check`?/,
+        `${name} must not turn the exhaustive pnpm check bundle into a routine receipt`,
+      );
+      assert.match(content, /targeted|定向/, `${name} must name the targeted default`);
+      assert.match(content, /五轴|风险/, `${name} must reserve full-gate escalation for actual risk`);
+    }
+
+    assert.match(memorySearch, /单一 owner|单一负责人/);
+    assert.match(memorySearch, /一次终局交付|统一收敛/);
+    assert.match(memorySearch, /不得.*独立.*(?:feed|任务|交付)/);
+
+    for (const [name, content] of [
+      ['pr-signals', prSignals],
+      ['cicd-tracking', cicdTracking],
+    ]) {
+      assert.match(content, /不把.*(?:operator|maintainer).*付费.*修账单.*关 workflow.*待办/, name);
+      assert.match(content, /结束这条不可执行的 CI 等待并继续 merge-gate/, name);
+      assert.doesNotMatch(content, /由 maintainer 主动处理账户条件/, name);
+    }
+  });
+
+  it('reuses one completed full gate across an unrelated base-only rebase', () => {
+    const mergeGate = readFileSync(new URL('../cat-cafe-skills/merge-gate/SKILL.md', import.meta.url), 'utf8');
+
+    assert.match(mergeGate, /一次 full gate|full gate[^。\n]*一次/i);
+    assert.match(mergeGate, /作者 patch[^。\n]*(?:不变|等价)/i);
+    assert.match(mergeGate, /base[^。\n]*(?:无关|无关联)/i);
+    assert.match(mergeGate, /禁止[^。\n]*(?:重跑|重新运行)[^。\n]*full gate/i);
+  });
+
+  it('routes belief-testing explainers through an optional falsifiable technical cutaway', () => {
+    const conceptDemo = readFileSync(
+      new URL('../cat-cafe-skills/concept-demo-design/SKILL.md', import.meta.url),
+      'utf8',
+    );
+    const contractTemplate = readFileSync(
+      new URL('../cat-cafe-skills/concept-demo-design/refs/demo-contract-template.md', import.meta.url),
+      'utf8',
+    );
+    const cutaway = readFileSync(
+      new URL('../cat-cafe-skills/concept-demo-design/refs/falsifiable-technical-cutaway.md', import.meta.url),
+      'utf8',
+    );
+    const techWriting = readFileSync(new URL('../cat-cafe-skills/tech-writing/SKILL.md', import.meta.url), 'utf8');
+    const method = existsSync(TECHNICAL_NARRATIVE_METHOD_URL)
+      ? readFileSync(TECHNICAL_NARRATIVE_METHOD_URL, 'utf8')
+      : null;
+    const manifest = readFileSync(new URL('../cat-cafe-skills/manifest.yaml', import.meta.url), 'utf8');
+    const capabilityTips = JSON.parse(
+      readFileSync(new URL('../packages/web/src/lib/capability-tips.seed.json', import.meta.url), 'utf8'),
+    );
+
+    assert.match(conceptDemo, /可证伪技术剖面/u);
+    assert.match(conceptDemo, /主张.*失效机制.*可操纵消融.*verdict.*claim ceiling/su);
+    assert.match(conceptDemo, /只有[^。\n]*技术主张[^。\n]*才触发/u);
+    assert.match(contractTemplate, /可证伪技术剖面 Claim Bench/u);
+    for (const anchor of ['falsifiable claim', 'competing explanation', 'ablation', 'verdict', 'claim ceiling']) {
+      assert.match(contractTemplate, new RegExp(anchor, 'u'));
+    }
+    for (const pressureCase of ['Standard', 'Boundary', 'Conflict']) {
+      assert.match(cutaway, new RegExp(`### ${pressureCase}`, 'u'));
+    }
+    assert.match(techWriting, /7P × 5E/u);
+    assert.match(techWriting, /Exists.*Effect.*Explain.*Extend.*Endure/su);
+    assert.match(techWriting, /concept-demo-design/u);
+    assert.match(techWriting, /故事负责[^。\n]*注意力[^。\n]*实验台负责[^。\n]*信任/u);
+    if (method !== null) assert.match(method, /#2 · .*技术剖面/u);
+    assert.match(manifest, /可证伪技术剖面/u);
+    const cutawayTip = capabilityTips.find((tip) => tip.id === 'capability-tech-writing-cutaway');
+    assert.equal(cutawayTip?.sourceRef?.path, 'cat-cafe-skills/tech-writing/SKILL.md');
+    assert.equal(
+      cutawayTip?.structureSource?.path,
+      'cat-cafe-skills/concept-demo-design/refs/falsifiable-technical-cutaway.md',
+    );
+    assert.equal(cutawayTip?.structureSource?.anchor, 'Claim Bench 最小结构');
+    assert.equal(cutawayTip?.body?.includes('技术主张'), true);
+    assert.equal(cutawayTip?.action?.draftPrompt?.includes('技术竞争力'), true);
+  });
+
   it(
     'keeps open-source intake gate claims aligned with the live package check surface',
     { skip: !existsSync(INBOUND_RUNBOOK_URL) && 'home-only maintainer runbook is absent from public export' },

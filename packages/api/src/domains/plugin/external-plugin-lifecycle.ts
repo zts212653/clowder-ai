@@ -79,23 +79,7 @@ export class ExternalPluginLifecycleService {
         throw new PluginLifecycleError('INVALID_TRANSITION', 'plugin configuration is not ready');
       }
       this.assertState(current, ['disabled', 'error'], ['stopped', 'crashed'], 'enable');
-      const enabling = await this.advance(
-        instanceId,
-        expectedRevision,
-        { activationState: 'enabling' },
-        { clearRuntimeError: true },
-      );
-      const enabled = await this.advance(instanceId, enabling.lifecycleRevision, { activationState: 'enabled' });
-      try {
-        await this.options.supervisor.start(instanceId);
-      } catch {
-        await this.advance(instanceId, enabled.lifecycleRevision, {
-          activationState: 'error',
-          runtimeState: 'stopped',
-        });
-        throw new PluginLifecycleError('START_FAILED', 'official plugin runtime failed to start');
-      }
-      return this.readCurrent(instanceId);
+      return this.startFromDormant(instanceId, expectedRevision);
     });
   }
   disable(instanceId: string, expectedRevision: number): Promise<PluginInstanceRecord> {
@@ -122,11 +106,12 @@ export class ExternalPluginLifecycleService {
         throw new PluginLifecycleError('INVALID_TRANSITION', 'repair is not valid from the current plugin state');
       }
       await this.stopOrFail(instanceId, expectedRevision, 'owner_repair');
-      return this.advance(instanceId, expectedRevision, {
+      const dormant = await this.advance(instanceId, expectedRevision, {
         configReadiness: 'ready',
         activationState: 'disabled',
         runtimeState: 'stopped',
       });
+      return this.startFromDormant(instanceId, dormant.lifecycleRevision);
     });
   }
   uninstall(instanceId: string, expectedRevision: number): Promise<PluginInstanceRecord> {
@@ -309,6 +294,26 @@ export class ExternalPluginLifecycleService {
       transaction.instances.put(next);
       return next;
     });
+  }
+
+  private async startFromDormant(instanceId: string, expectedRevision: number): Promise<PluginInstanceRecord> {
+    const enabling = await this.advance(
+      instanceId,
+      expectedRevision,
+      { activationState: 'enabling' },
+      { clearRuntimeError: true },
+    );
+    const enabled = await this.advance(instanceId, enabling.lifecycleRevision, { activationState: 'enabled' });
+    try {
+      await this.options.supervisor.start(instanceId);
+    } catch {
+      await this.advance(instanceId, enabled.lifecycleRevision, {
+        activationState: 'error',
+        runtimeState: 'stopped',
+      });
+      throw new PluginLifecycleError('START_FAILED', 'official plugin runtime failed to start');
+    }
+    return this.readCurrent(instanceId);
   }
 
   private async readCurrent(instanceId: string): Promise<PluginInstanceRecord> {

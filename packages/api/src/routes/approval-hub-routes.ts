@@ -114,9 +114,9 @@ export const approvalHubRoutes: FastifyPluginAsync<ApprovalHubRoutesOptions> = a
       await measuredFanOut(
         request.log,
         'pending',
-        registry.listAdapters().map((adapter) => ({
-          producerId: adapter.featureId,
-          run: () => adapter.listPending(userId),
+        registry.manifest().map(({ id }) => ({
+          producerId: id,
+          run: () => registry.listPendingFor(id, userId),
         })),
       )
     ).sort((a, b) => b.createdAt - a.createdAt);
@@ -140,19 +140,13 @@ export const approvalHubRoutes: FastifyPluginAsync<ApprovalHubRoutesOptions> = a
         ? Math.min(parsedLimit, MAX_SETTLED_LIMIT)
         : DEFAULT_SETTLED_LIMIT;
 
-    // Only fan-out to adapters that implement listSettled (AC-F2: optional method)
-    const capableAdapters = registry.listAdapters().filter((adapter) => typeof adapter.listSettled === 'function');
     const items = (
       await measuredFanOut(
         request.log,
         'settled',
-        capableAdapters.map((adapter) => ({
-          producerId: adapter.featureId,
-          run: () => {
-            const { listSettled } = adapter;
-            if (!listSettled) throw new Error(`Approval adapter ${adapter.featureId} lost settled capability`);
-            return listSettled.call(adapter, userId, { limit });
-          },
+        registry.manifest().map(({ id }) => ({
+          producerId: id,
+          run: () => registry.listSettledFor(id, userId, limit),
         })),
       )
     )

@@ -24,6 +24,7 @@ import { SelectionAnnotationAction } from './SelectionAnnotationAction';
 import { pushThreadRouteWithHistory } from './ThreadSidebar/thread-navigation';
 import { TransferTargetPicker } from './TransferTargetPicker';
 import { TrueRecallActionButton } from './TrueRecallActionButton';
+import { useLegacyLocalReviewDisposition } from './useLegacyLocalReviewDisposition';
 import { useMessageAnnotationMarkers } from './useMessageAnnotationMarkers';
 
 function showErrorToast(title: string, body?: Record<string, unknown>) {
@@ -177,6 +178,7 @@ export function MessageActions({
   const removeThreadMessage = useChatStore((s) => s.removeThreadMessage);
   const isDesktop = useIsDesktop();
   const compactActions = useCompactMessageActions();
+  const legacyReviewDisposition = useLegacyLocalReviewDisposition(message);
 
   const isUser = message.type === 'user' && !message.catId;
   const isAssistant = message.type === 'assistant' || (message.type === 'user' && !!message.catId);
@@ -393,6 +395,20 @@ export function MessageActions({
 
   const overflowMenuItems = (
     <>
+      {legacyReviewDisposition.candidate && (
+        <button
+          type="button"
+          role="menuitem"
+          data-testid="legacy-local-review-disposition-action"
+          className="min-h-11 w-full px-3 py-2 text-left text-sm text-cafe-secondary transition-colors hover:bg-cafe-surface-elevated hover:text-cafe-primary"
+          onClick={() => {
+            setOverflowOpen(false);
+            void legacyReviewDisposition.begin();
+          }}
+        >
+          结算 Review
+        </button>
+      )}
       <button
         type="button"
         role="menuitem"
@@ -717,6 +733,8 @@ export function MessageActions({
           }}
         />
       )}
+
+      {legacyReviewDisposition.dialog}
 
       {/* Soft delete confirmation */}
       <ConfirmDialog

@@ -153,6 +153,31 @@ describe('MemoryCueEpisodeStore', () => {
     );
   });
 
+  it('preserves existing receipts while admitting Event receipts through migration v41', async () => {
+    const { applyMigrations, CURRENT_SCHEMA_VERSION } = await import('../../dist/domains/memory/schema.js');
+    const { MemoryCueEpisodeStore } = await import('../../dist/domains/memory/cue/MemoryCueEpisodeStore.js');
+    const db = new Database(':memory:');
+    applyMigrations(db);
+    const store = new MemoryCueEpisodeStore(db);
+    const person = store.append(consumption());
+    const eventReceipt = store.append(
+      consumption({
+        eventId: 'event-event-lane',
+        idempotencyKey: 'idempotency-event-lane',
+        cueId: 'cue-event-lane',
+        opportunityId: 'opportunity-event-lane',
+        resolverFamily: 'event',
+        sourceAnchor: 'event-memory:evt_1',
+        sourceRevision: 'sha256:event-revision-1',
+      }),
+    );
+
+    assert.equal(CURRENT_SCHEMA_VERSION, 41);
+    assert.equal(eventReceipt.resolverFamily, 'event');
+    assert.deepEqual(store.listByCue('owner-1', 'cue-1'), [person]);
+    assert.throws(() => db.prepare('DELETE FROM memory_cue_events').run(), /append-only/);
+  });
+
   it('serializes two independent WAL connections racing on one idempotency key', async () => {
     const { applyMigrations } = await import('../../dist/domains/memory/schema.js');
     const { db, dbPath } = openFileDb();

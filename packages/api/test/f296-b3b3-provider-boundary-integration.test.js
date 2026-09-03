@@ -19,7 +19,7 @@ const CLAUDE_PRINT = {
   reason: 'fixture',
 };
 
-test('F296 B3b-3 typed compact_boundary reaches the epoch owner through the real provider loop', async () => {
+test('F296 B3b-3 typed compact_boundary consumes a same-invocation legacy unknown-count attestation', async () => {
   const observations = [];
   const contextEpochOwner = {
     async resolve(input) {
@@ -66,7 +66,7 @@ test('F296 B3b-3 typed compact_boundary reaches the epoch owner through the real
     userId: 'owner-1',
     catId: 'opus',
     threadId: 'thread-f296',
-    compressionCount: 1,
+    compressionCount: null,
     compressionObservation: {
       invocationId: 'inv-f296-compact',
       sequence: 1,

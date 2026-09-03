@@ -19,8 +19,10 @@ const log = createModuleLogger('context-transport');
 const PROMPT_MESSAGE_SAFETY_CHAR_LIMIT = 100_000;
 
 import { estimateTokens } from '../../../../../utils/token-counter.js';
+import { matchExplicitApprovedTasteTrigger } from '../../../../memory/cue/ExplicitApprovedTasteTriggerCatalog.js';
 import type { MemoryCueOpportunitySeed } from '../../../../memory/cue/MemoryCueInvocationPromptService.js';
 import type { NudgeProcessResult } from '../../../../memory/EntityNudgeService.js';
+import type { CloudDispatchProvenance } from '../../cloud-bridge/types.js';
 import { buildMessageMap, formatMessage } from '../../context/ContextAssembler.js';
 import { BRIEFING_TIMEZONE } from '../../duty-briefing/constants.js';
 import { formatPromptTime } from '../../format-time.js';
@@ -39,7 +41,7 @@ import type { IDraftStore } from '../../stores/ports/DraftStore.js';
 import type { IMessageStore, StoredMessage, StoredToolEvent } from '../../stores/ports/MessageStore.js';
 import type { Thread } from '../../stores/ports/ThreadStore.js';
 import { canViewMessage, isTimelinePublished, resolveVisibleReplyParent } from '../../stores/visibility.js';
-import type { AgentMessage, AgentService, ToolExecutionPolicy } from '../../types.js';
+import type { AgentMessage, AgentRouteIntent, AgentService, ToolExecutionPolicy } from '../../types.js';
 import type { InvocationTracker } from '../invocation/InvocationTracker.js';
 import type { InvocationDeps } from '../invocation/invoke-single-cat.js';
 import type { OwnerAuthProvenance } from '../invocation/owner-auth-provenance.js';
@@ -99,6 +101,8 @@ export interface RouteBroadcaster {
 export interface RouteStrategyDeps {
   services: Record<string, AgentService>;
   invocationDeps: InvocationDeps;
+  /** F293: fresh advisory/rejection decision at each actual child boundary. */
+  routingDispatchPreflight?: import('../../../../routing-context/RoutingDispatchPreflightPort.js').RoutingDispatchPreflightPort;
   messageStore: IMessageStore;
   deliveryCursorStore?: DeliveryCursorStore;
   /** #80: Streaming draft persistence store */
@@ -230,6 +234,10 @@ export function mergePersistedPromptMessages(
 
 /** Common options for both strategies */
 export interface RouteOptions {
+  /** Route-owned intent plus whether the user explicitly selected it. */
+  routeIntent?: AgentRouteIntent;
+  /** F293: deterministic scope used to resolve sparse routing cognition. */
+  routingContextIntent?: 'review' | 'architecture';
   /** Authentication-grade owner provenance propagated unchanged to every child invocation. */
   ownerAuthProvenance?: OwnerAuthProvenance;
   /** F281 Phase C: explicit first-party ingress provenance; omitted legacy callers fail closed. */
@@ -267,6 +275,10 @@ export interface RouteOptions {
   a2aTriggerMessageId?: string | undefined;
   /** Server-owned caller identity paired with a2aTriggerMessageId. Never infer from display text. */
   a2aCallerCatId?: string | undefined;
+  /** Exact per-target cloud source carrier; route layers forward it unchanged. */
+  cloudDispatchProvenance?: CloudDispatchProvenance | undefined;
+  /** Cloud targets must reject reconstructed Queue/direct provenance when the carrier is absent. */
+  requiresExactCloudDispatchProvenance?: boolean | undefined;
   /** Max A2A chain depth for routeSerial (default: MAX_A2A_DEPTH env or 2) */
   maxA2ADepth?: number | undefined;
   /** Queue fairness hook: when true for current thread, routeSerial must stop extending A2A chain.
@@ -473,6 +485,28 @@ export function judgmentSurfaceCueSeeds(input: {
           | 'request-review',
         selectionSource,
         featureId: hint.featureId,
+      },
+    },
+  ];
+}
+
+export function explicitApprovedTasteCueSeeds(input: {
+  message: string;
+  sourceMessageId: string | undefined;
+  ownerOriginEligible: boolean;
+  occurredAt: number;
+}): Array<Extract<MemoryCueOpportunitySeed, { kind: 'approved_taste_invoked' }>> {
+  if (!input.ownerOriginEligible || !input.sourceMessageId) return [];
+  const trigger = matchExplicitApprovedTasteTrigger(stripStructuralEnvelope(input.message));
+  if (!trigger) return [];
+  return [
+    {
+      kind: 'approved_taste_invoked',
+      producer: 'owner_message',
+      occurredAt: input.occurredAt,
+      payload: {
+        triggerKey: trigger.triggerKey,
+        sourceMessageId: input.sourceMessageId,
       },
     },
   ];

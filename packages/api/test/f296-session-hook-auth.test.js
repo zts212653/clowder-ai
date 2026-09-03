@@ -17,19 +17,6 @@ describe('F296 invocation-scoped session hook authentication', () => {
     }
   });
 
-  test('all Claude project hooks use the invocation callback pair and never the legacy global bearer', () => {
-    for (const relativePath of [
-      '../../../.claude/hooks/f24-pre-compact.sh',
-      '../../../.claude/hooks/f24-post-compact-bootstrap.sh',
-      '../../../.claude/hooks/sop-stage-bookmark.sh',
-    ]) {
-      const source = readFileSync(new URL(relativePath, import.meta.url), 'utf8');
-      assert.match(source, /X-Invocation-Id:/, relativePath);
-      assert.match(source, /X-Callback-Token:/, relativePath);
-      assert.doesNotMatch(source, /CAT_CAFE_HOOK_TOKEN|X-Cat-Cafe-Hook-Token/, relativePath);
-    }
-  });
-
   test('production composition gives session hooks the callback registry without creating another secret', () => {
     const indexSource = readFileSync(new URL('../src/index.ts', import.meta.url), 'utf8');
     const registrySource = readFileSync(new URL('../src/config/env-registry.ts', import.meta.url), 'utf8');

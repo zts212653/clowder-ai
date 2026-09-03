@@ -204,7 +204,7 @@ describe('MCP audio client contract', () => {
       text: '本地评论',
       speaker_label: 'You',
       speaker_confidence: 1,
-      speaker_id: 'you',
+      speaker_id: 'operator',
       speaker_identity_source: 'exclusive_source',
       input_id: 'comment',
       input_source: 'mic',

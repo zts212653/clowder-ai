@@ -37,7 +37,7 @@ export function createUnsupportedNodeHarness({ mutateAfterInsert } = {}) {
     document,
     location: dom.window.location,
     MutationObserver: dom.window.MutationObserver,
-    adapterRevision: '2026-08-27.1',
+    adapterRevision: '2026-09-02.1',
     artifactRevision: '0.2.2',
     async onProgress(status) {
       if (status !== 'inserted') return;

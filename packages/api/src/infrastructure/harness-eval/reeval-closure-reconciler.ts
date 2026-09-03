@@ -1,3 +1,4 @@
+import { isEvalRepairAwaitingApproval, planEvalRepairReadyEvents } from './eval-repair-reconciliation.js';
 import { type LifecycleRootArtifact, LifecycleRootArtifactSchema } from './publish-verdict/lifecycle-root-artifact.js';
 import { projectReevalCase, type ReevalCaseRoot } from './reeval-case.js';
 import { compareReevalCycles, isLaterReevalCycle } from './reeval-case-cycle-order.js';
@@ -6,9 +7,10 @@ import { assertLifecycleBootstrapPrefix, buildLifecycleOpenedEvent } from './ree
 import type { EvalLifecycleEvent, EvalLifecycleRef } from './reeval-closure-schema.js';
 
 const RECONCILER_ACTOR = { kind: 'automation', id: 'eval-verdict-closure-reconciler' } as const;
+type LegacyLifecycleRoot = Extract<LifecycleRootArtifact, { schemaVersion: 1 }>;
 
 export interface ReevalClosureReconcileSubject {
-  root: LifecycleRootArtifact;
+  root: LegacyLifecycleRoot;
   assignedEvalCatId?: string;
   acknowledgeHours: number;
   events: readonly EvalLifecycleEvent[];
@@ -18,7 +20,7 @@ export interface ReevalClosureReconcileSubject {
 
 export interface ReevalCaseReconcileSubject {
   caseRoot: ReevalCaseRoot;
-  roots: readonly Extract<LifecycleRootArtifact, { schemaVersion: 2 }>[];
+  roots: readonly Extract<LifecycleRootArtifact, { schemaVersion: 2 | 3 }>[];
   assignedEvalCatId?: string;
   acknowledgeHours: number;
   events: readonly EvalLifecycleEvent[];
@@ -65,7 +67,7 @@ function dueAtAfterHours(createdAt: string, hours: number): string {
 }
 
 function makeEscalationEvent(
-  root: LifecycleRootArtifact,
+  root: LegacyLifecycleRoot,
   stage: 'acknowledgement' | 'reevaluation',
   dueAt: string,
   occurredAt: string,
@@ -91,7 +93,7 @@ function makeEscalationEvent(
 }
 
 function findDueEscalation(
-  root: LifecycleRootArtifact,
+  root: LegacyLifecycleRoot,
   projection: ReevalClosureProjection,
   acknowledgeHours: number,
   now: string,
@@ -113,6 +115,7 @@ export function planReevalClosureEvents(
 ): PlannedReevalClosureAppend[] {
   if ('caseRoot' in rawSubject) return planReevalCaseEvents(rawSubject, now);
   const root = LifecycleRootArtifactSchema.parse(rawSubject.root);
+  if (root.schemaVersion !== 1) throw new Error('legacy lifecycle reconciliation accepts schema-v1 roots only');
   const subject = { ...rawSubject, root };
   const nowMs = Date.parse(now);
   if (!Number.isFinite(nowMs)) throw new Error(`invalid reconciliation time: ${now}`);
@@ -143,7 +146,7 @@ export function planReevalClosureEvents(
 
 function makeCycleObservedEvent(
   subject: ReevalCaseReconcileSubject,
-  root: Extract<LifecycleRootArtifact, { schemaVersion: 2 }>,
+  root: Extract<LifecycleRootArtifact, { schemaVersion: 2 | 3 }>,
   occurredAt: string,
 ): EvalLifecycleEvent {
   return {
@@ -191,7 +194,7 @@ function makeCaseEscalationEvent(
 function makeTrustedReevalResultEvent(
   subject: ReevalCaseReconcileSubject,
   activeVerdictId: string,
-  evidenceRoot: Extract<LifecycleRootArtifact, { schemaVersion: 2 }>,
+  evidenceRoot: Extract<LifecycleRootArtifact, { schemaVersion: 2 | 3 }>,
   occurredAt: string,
 ): EvalLifecycleEvent {
   const assignedEvalCatId = subject.assignedEvalCatId;
@@ -311,12 +314,16 @@ function planReevalCaseEvents(subject: ReevalCaseReconcileSubject, now: string):
       working.push(result);
     }
   }
+  const approvalReady = planEvalRepairReadyEvents(subject, working, now);
+  planned.push(...approvalReady);
+  working.push(...approvalReady.map(({ event }) => event));
   if (working.length > 0) {
     const projection = projectReevalCase(subject.caseRoot, working);
     const activeRoot = subject.roots.find((root) => root.verdictId === projection.activeVerdictId);
     if (!activeRoot) throw new Error(`active verdict root unavailable: ${projection.activeVerdictId}`);
+    const awaitingApproval = isEvalRepairAwaitingApproval(activeRoot, projection.activeVerdictId, working);
     const due =
-      projection.status === 'open'
+      projection.status === 'open' && !awaitingApproval
         ? { stage: 'acknowledgement' as const, dueAt: dueAtAfterHours(activeRoot.createdAt, subject.acknowledgeHours) }
         : projection.status === 'reeval_pending' && projection.reevalDueAt
           ? { stage: 'reevaluation' as const, dueAt: projection.reevalDueAt }
@@ -330,3 +337,5 @@ function planReevalCaseEvents(subject: ReevalCaseReconcileSubject, now: string):
   }
   return planned;
 }
+
+export { deriveEvalRepairCaseActionRef } from './eval-repair-reconciliation.js';

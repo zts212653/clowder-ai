@@ -1,6 +1,18 @@
 'use client';
 
-import { Children, isValidElement, memo, type ReactNode, useCallback, useMemo, useRef, useState } from 'react';
+import {
+  Children,
+  type CSSProperties,
+  createContext,
+  isValidElement,
+  memo,
+  type ReactNode,
+  useCallback,
+  useContext,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 import ReactMarkdown, { type Components, defaultUrlTransform } from 'react-markdown';
 import rehypeKatex from 'rehype-katex';
 import remarkBreaks from 'remark-breaks';
@@ -90,6 +102,30 @@ export function normalizeMathDelimiters(md: string): string {
 
 /* ── @mention highlighting ─────────────────────────────────── */
 
+const InsideMarkdownLinkContext = createContext(false);
+
+function Mention({ catId, text, style }: { catId: string; text: string; style: CSSProperties }) {
+  const insideLink = useContext(InsideMarkdownLinkContext);
+  if (insideLink) {
+    return (
+      <span className="font-semibold" style={style}>
+        {text}
+      </span>
+    );
+  }
+  return (
+    <button
+      type="button"
+      className="cursor-pointer font-semibold"
+      onClick={() => useChatStore.getState().openTeamSubject({ type: 'cat', id: catId })}
+      aria-label={`在猫猫团队中查看 ${catId}`}
+      style={style}
+    >
+      {text}
+    </button>
+  );
+}
+
 function highlightMentions(text: string): ReactNode[] {
   const parts: ReactNode[] = [];
   let lastIdx = 0;
@@ -107,20 +143,13 @@ function highlightMentions(text: string): ReactNode[] {
     const r = Number.parseInt(catColor.slice(1, 3), 16);
     const g = Number.parseInt(catColor.slice(3, 5), 16);
     const b = Number.parseInt(catColor.slice(5, 7), 16);
-    parts.push(
-      <span
-        key={`m${m.index}`}
-        className="font-semibold"
-        style={{
-          color: catColor,
-          backgroundColor: `rgba(${r}, ${g}, ${b}, 0.15)`,
-          borderRadius: 4,
-          padding: '1px 5px',
-        }}
-      >
-        {m[0]}
-      </span>,
-    );
+    const style = {
+      color: catColor,
+      backgroundColor: `rgba(${r}, ${g}, ${b}, 0.15)`,
+      borderRadius: 4,
+      padding: '1px 5px',
+    };
+    parts.push(<Mention key={`m${m.index}`} catId={catId} text={m[0]} style={style} />);
     lastIdx = re.lastIndex;
   }
   if (lastIdx < text.length) parts.push(text.slice(lastIdx));
@@ -366,7 +395,11 @@ function buildMdComponents(tp?: (children: ReactNode) => ReactNode, listen?: Lis
     blockquote: ({ children }) => (
       <blockquote className="border-l-[3px] border-cafe pl-3 my-2 italic opacity-80">{children}</blockquote>
     ),
-    a: ({ href, children }) => <ChatWorkspaceLink href={href}>{m(children)}</ChatWorkspaceLink>,
+    a: ({ href, children }) => (
+      <InsideMarkdownLinkContext.Provider value={true}>
+        <ChatWorkspaceLink href={href}>{m(children)}</ChatWorkspaceLink>
+      </InsideMarkdownLinkContext.Provider>
+    ),
     hr: () => <hr className="my-3 border-cafe" />,
 
     /* Code blocks with copy button — textProcessor intentionally excluded */
@@ -492,7 +525,11 @@ export const MarkdownContent = memo(function MarkdownContent({
 
     if (basePath != null) {
       // When textProcessor is active, the workspace link component must also compose it
-      const mentionsFn = textProcessor ? (c: ReactNode) => withMentions(textProcessor(c)) : withMentions;
+      const mentionsFn = (children: ReactNode) => (
+        <InsideMarkdownLinkContext.Provider value={true}>
+          {textProcessor ? withMentions(textProcessor(children)) : withMentions(children)}
+        </InsideMarkdownLinkContext.Provider>
+      );
       nextComponents = { ...nextComponents, a: createWorkspaceLinkComponent(basePath, mentionsFn, worktreeId) };
       if (worktreeId) {
         nextComponents = { ...nextComponents, img: createWorkspaceImageComponent(basePath, worktreeId) };

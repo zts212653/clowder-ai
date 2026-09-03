@@ -631,7 +631,11 @@ describe('F263 Phase A coverage contract', () => {
         };
       },
     };
-    const service = new CoverageSearchService(store, null, { latencyBudgetMs: 20 });
+    // This case verifies partial-result preservation, not timer precision. Leave
+    // enough scheduling room for the fast source to actually start under the
+    // full-suite worker load; the adjacent stalled-source tests retain the 20ms
+    // deadline contract.
+    const service = new CoverageSearchService(store, null, { latencyBudgetMs: 250 });
 
     const result = await service.search('partial timeout', { scope: 'all', limit: 20 });
 

@@ -484,6 +484,42 @@ metricGlossary:
     goodDirection: neutral
     category: context
     component: event-backed-routing-exit
+  rawevidenceagedays:
+    label: 原始证据年龄
+    means: 最新一份已提交原始 A2A 证据距当前评估时点的天数；过旧时不能把零值当成当前健康证明。
+    goodDirection: lower
+    category: context
+    component: evidence-freshness
+  nodatacomponents:
+    label: 无数据组件数
+    means: 本轮 A2A 评估中没有足够遥测、因而无法形成有效判断的组件数量。
+    goodDirection: lower
+    category: friction
+    component: telemetry-coverage
+  openobservabilitygapfindings:
+    label: 未关闭可观测性缺口
+    means: 证据归因报告中仍未关闭、会阻止可靠 A2A 判断的可观测性缺口数量。
+    goodDirection: lower
+    category: friction
+    component: telemetry-coverage
+  counterwindowpresent:
+    label: 计数窗口是否存在
+    means: 当前快照是否携带可用于解释计数器速率与零值的实际采集窗口。
+    goodDirection: higher
+    category: activation
+    component: window
+  runtimetelemetryunavailableendpoints:
+    label: 不可用遥测端点数
+    means: 本轮运行态核验中无法访问的 metrics、history、traces 或 grounding 遥测端点数量。
+    goodDirection: lower
+    category: friction
+    component: telemetry-coverage
+  groundingtelemetryavailable:
+    label: Grounding 遥测是否可用
+    means: 当前部署是否能提供 grounding Phase O 的检查、结论与 mismatch 样本统计。
+    goodDirection: higher
+    category: activation
+    component: grounding
 systemThreadId: thread_eval_a2a
 evalCat:
   catId: codex

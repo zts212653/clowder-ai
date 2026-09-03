@@ -7,6 +7,13 @@ import { InvocationRecordStore } from '../dist/domains/cats/services/stores/port
 import { MessageStore } from '../dist/domains/cats/services/stores/ports/MessageStore.js';
 import { ConnectorInvokeTrigger } from '../dist/infrastructure/email/ConnectorInvokeTrigger.js';
 
+const { claimActionSuccessor, continueActionSuccessorFreshRevision, recordActionSuccessorOutcome } = await import(
+  '../dist/domains/ball-custody/action-successor-state-machine.js'
+);
+const { canonicalizeActionTerminalPredicate } = await import(
+  '../dist/domains/ball-custody/ActionTerminalPredicateCatalog.js'
+);
+
 // ─── Mocks ───────────────────────────────────────────────────────
 
 function noopLog() {
@@ -420,6 +427,37 @@ describe('ConnectorInvokeTrigger', () => {
           },
         },
       },
+    };
+  }
+
+  function activeManagedReviewLease(overrides = {}) {
+    const terminalPredicate = canonicalizeActionTerminalPredicate({
+      actionFamily: 'review',
+      subjectRef: 'pr:owner/repo#4049',
+      predicate: { kind: 'review_delivered', headSha: 'a'.repeat(40) },
+    });
+    const lease = claimActionSuccessor(null, {
+      leaseId: 'lease-review-1',
+      tenantScope: 'user-1',
+      subjectRef: 'pr:owner/repo#4049',
+      actionFamily: 'review',
+      successorSlot: 'reviewer',
+      mode: 'single',
+      holderCatIds: ['opus'],
+      holderThreadId: 'thread-managed-event',
+      dispatchId: 'dispatch-review-1',
+      claimOrigin: 'structured_transfer',
+      predecessorCatId: 'codex-sol',
+      predecessorThreadId: 'thread-author',
+      issuerStandingEvidenceRef: 'message:review-request-1',
+      evidenceRefs: ['message:review-request-1'],
+      terminalPredicate,
+      now: 100,
+    }).lease;
+    return {
+      ...lease,
+      generation: 3,
+      ...overrides,
     };
   }
 
@@ -2771,6 +2809,142 @@ describe('ConnectorInvokeTrigger', () => {
   // ── F185: thread-level busy gate (AC-1/AC-2) ──
 
   describe('F185: thread-level busy gate', () => {
+    it('managed review wake restores the exact action lease carrier for typed CHANGES_REQUESTED', async () => {
+      const messageStore = new MessageStore();
+      const activeLease = activeManagedReviewLease();
+      const source = messageStore.append({
+        userId: 'scheduler',
+        catId: null,
+        content: '[定时任务] review command completed',
+        mentions: [],
+        timestamp: 2_100,
+        threadId: 'thread-managed-event',
+        deliveryStatus: 'queued',
+        source: {
+          connector: 'hold-ball',
+          label: '持球通知',
+          meta: {
+            taskId: 'task-managed-review',
+            threadId: 'thread-managed-event',
+            catId: 'opus',
+            wakeWhen: true,
+            actionLeaseRef: { leaseId: 'lease-review-1', generation: 3 },
+          },
+        },
+      });
+      const trigger = createTrigger({
+        messageStore,
+        actionSuccessorLeaseStore: {
+          async get(leaseId) {
+            return leaseId === 'lease-review-1' ? activeLease : null;
+          },
+        },
+      });
+
+      assert.equal(
+        await trigger.trigger(
+          'thread-managed-event',
+          /** @type {any} */ ('opus'),
+          'user-1',
+          source.content,
+          source.id,
+          undefined,
+          { sourceCategory: 'scheduled' },
+        ),
+        'dispatched',
+      );
+      await waitForTrigger();
+
+      assert.deepEqual(recordMock.creates[0].actionLeaseCarrier, {
+        kind: 'action_successor',
+        leaseId: 'lease-review-1',
+        generation: 3,
+      });
+
+      const changesRequested = recordActionSuccessorOutcome(activeLease, {
+        generation: 3,
+        catId: 'opus',
+        outcome: 'succeeded',
+        evidenceRef: 'local-review:message-verdict-1:g3:changes_requested',
+        now: 200,
+      });
+      const repairedPredicate = canonicalizeActionTerminalPredicate({
+        actionFamily: 'review',
+        subjectRef: 'pr:owner/repo#4049',
+        predicate: { kind: 'review_delivered', headSha: 'b'.repeat(40) },
+      });
+      const reentry = continueActionSuccessorFreshRevision(changesRequested, {
+        successorLeaseId: 'lease-review-2',
+        expectedGeneration: 3,
+        terminalPredicate: repairedPredicate,
+        holderCatIds: ['opus'],
+        holderThreadId: 'thread-managed-event',
+        claimOrigin: 'structured_transfer',
+        predecessorCatId: 'codex-sol',
+        predecessorThreadId: 'thread-author',
+        dispatchId: 'dispatch-review-2',
+        issuerStandingEvidenceRef: 'message:review-request-2',
+        evidenceRef: `community:pr:owner/repo#4049:head:${'b'.repeat(40)}`,
+        reviewReentry: {
+          reason: 'behavioral_delta',
+          evidenceRef: `git:${'b'.repeat(40)}:authored-delta`,
+        },
+        now: 300,
+      });
+
+      assert.equal(changesRequested.status, 'completed');
+      assert.equal(reentry.outcome, 'continued');
+      assert.equal(reentry.lease.status, 'active');
+      assert.equal(reentry.lease.terminalPredicate.freshnessKey, `head:${'b'.repeat(40)}`);
+    });
+
+    it('managed review wake fails closed when its frozen generation is stale', async () => {
+      const messageStore = new MessageStore();
+      const source = messageStore.append({
+        userId: 'scheduler',
+        catId: null,
+        content: '[定时任务] stale review command completed',
+        mentions: [],
+        timestamp: 2_100,
+        threadId: 'thread-managed-event',
+        deliveryStatus: 'queued',
+        source: {
+          connector: 'hold-ball',
+          label: '持球通知',
+          meta: {
+            taskId: 'task-managed-review-stale',
+            threadId: 'thread-managed-event',
+            catId: 'opus',
+            wakeWhen: true,
+            actionLeaseRef: { leaseId: 'lease-review-1', generation: 3 },
+          },
+        },
+      });
+      const trigger = createTrigger({
+        messageStore,
+        actionSuccessorLeaseStore: {
+          async get() {
+            return activeManagedReviewLease({ generation: 4 });
+          },
+        },
+      });
+
+      await assert.rejects(
+        trigger.trigger(
+          'thread-managed-event',
+          /** @type {any} */ ('opus'),
+          'user-1',
+          source.content,
+          source.id,
+          undefined,
+          { sourceCategory: 'scheduled' },
+        ),
+        /generation/i,
+      );
+      assert.equal(recordMock.creates.length, 0);
+      assert.equal(queue.list('thread-managed-event', 'user-1').length, 0);
+    });
+
     it('managed event forceQueue creates one F254/F264 carrier even while idle', async () => {
       const messageStore = new MessageStore();
       const source = messageStore.append({
@@ -2789,6 +2963,7 @@ describe('ConnectorInvokeTrigger', () => {
             threadId: 'thread-managed-event',
             catId: 'opus',
             wakeWhen: true,
+            actionLeaseRef: { leaseId: 'lease-review-1', generation: 3 },
           },
         },
       });
@@ -2798,7 +2973,15 @@ describe('ConnectorInvokeTrigger', () => {
           autoExecuteCalls.push(threadId);
         },
       });
-      const trigger = createTrigger({ messageStore, queueProcessor });
+      const trigger = createTrigger({
+        messageStore,
+        queueProcessor,
+        actionSuccessorLeaseStore: {
+          async get(leaseId) {
+            return leaseId === 'lease-review-1' ? activeManagedReviewLease() : null;
+          },
+        },
+      });
       const args = [
         'thread-managed-event',
         /** @type {any} */ ('opus'),
@@ -2809,13 +2992,23 @@ describe('ConnectorInvokeTrigger', () => {
         { sourceCategory: 'scheduled', forceQueue: true },
       ];
 
-      assert.equal(await trigger.trigger(...args), 'enqueued');
-      assert.equal(await trigger.trigger(...args), 'enqueued');
+      assert.deepEqual(await Promise.all([trigger.trigger(...args), trigger.trigger(...args)]), [
+        'enqueued',
+        'enqueued',
+      ]);
 
       const entries = queue.list('thread-managed-event', 'user-1');
-      assert.equal(entries.length, 1, 'duplicate delivery must reuse the exact source carrier');
+      assert.equal(entries.length, 1, 'concurrent replay must reuse the exact action generation carrier');
       assert.equal(entries[0].messageId, source.id);
       assert.equal(entries[0].sourceCategory, 'scheduled');
+      assert.equal(entries[0].idempotencyKey, 'action:lease-review-1:3:opus');
+      assert.deepEqual(entries[0].actionSuccessorFence, {
+        leaseId: 'lease-review-1',
+        generation: 3,
+        dispatchId: 'dispatch-review-1',
+        terminalPredicateDigest: activeManagedReviewLease().terminalPredicate.digest,
+        invocationLineageRef: 'dispatch:dispatch-review-1',
+      });
       assert.equal(messageStore.getById(source.id).queueCustody.entryId, entries[0].id);
       assert.equal(routerMock.calls.length, 0, 'forceQueue never forks into direct admission');
       assert.equal(recordMock.creates.length, 0);

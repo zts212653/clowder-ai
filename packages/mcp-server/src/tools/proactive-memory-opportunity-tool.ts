@@ -157,7 +157,6 @@ export function createDeferredPersonMemoryTool(callbackPost: CallbackPost) {
           action: 'close',
           risk: { level: 'destructive', openWorld: false },
           runtimeProfiles: ['full'],
-          targetExposure: 'profile-gated',
           standaloneReason: {
             disposition: 'accepted-boundary',
             kind: 'destructive-boundary',

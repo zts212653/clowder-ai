@@ -29,7 +29,14 @@ export type HoldExpectedSignalKey =
   | 'managed_command_complete'
   | 'user_message';
 
-export type HoldLifecycleStatus = 'active' | 'retired_by_event' | 'cancelled_by_user' | 'escalated' | 'fired';
+export type HoldLifecycleStatus =
+  | 'active'
+  | 'retired_by_event'
+  | 'retired_by_replacement'
+  | 'cancel_requested'
+  | 'cancelled_by_user'
+  | 'escalated'
+  | 'fired';
 
 export interface HoldLifecycleProjection {
   readonly mode: 'timer' | 'wake_when';

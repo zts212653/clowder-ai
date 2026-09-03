@@ -3,7 +3,14 @@ import { useChatStore } from '../chatStore';
 
 describe('chatStore workspaceMode', () => {
   beforeEach(() => {
-    useChatStore.setState({ workspaceMode: 'dev', rightPanelMode: 'status' });
+    useChatStore.setState({
+      currentThreadId: 'thread-a',
+      workspaceMode: 'dev',
+      workspaceOpenRequest: null,
+      workspaceOpenRevision: 0,
+      rightPanelMode: 'status',
+      rightPanelOpen: false,
+    });
   });
 
   it('setWorkspaceMode accepts tasks mode', () => {
@@ -11,6 +18,31 @@ describe('chatStore workspaceMode', () => {
     setWorkspaceMode('tasks');
     expect(useChatStore.getState().workspaceMode).toBe('tasks');
     expect(useChatStore.getState().rightPanelMode).toBe('workspace');
+    expect(useChatStore.getState()).toMatchObject({
+      rightPanelOpen: true,
+      workspaceOpenRevision: 1,
+      workspaceOpenRequest: {
+        revision: 1,
+        threadId: 'thread-a',
+        target: { kind: 'mode', mode: 'tasks' },
+      },
+    });
+  });
+
+  it('uses one monotonic transient request for repeated explicit mode navigation', () => {
+    const { setWorkspaceMode, consumeWorkspaceOpenRequest } = useChatStore.getState();
+    setWorkspaceMode('approval');
+    consumeWorkspaceOpenRequest(1);
+    setWorkspaceMode('approval');
+
+    expect(useChatStore.getState()).toMatchObject({
+      workspaceOpenRevision: 2,
+      workspaceOpenRequest: {
+        revision: 2,
+        threadId: 'thread-a',
+        target: { kind: 'mode', mode: 'approval' },
+      },
+    });
   });
 
   it('setWorkspaceMode still works for existing modes', () => {
@@ -52,6 +84,7 @@ describe('chatStore workspaceMode', () => {
       rightPanelMode: 'status',
       workspaceMode: 'tasks',
       workspaceSurface: 'files',
+      workspaceOpenRequest: null,
     });
   });
 

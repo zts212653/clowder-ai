@@ -5,6 +5,7 @@ topics: [onboarding, open-source, cold-start, partner-setup, account-config]
 doc_kind: spec
 created: 2026-04-22
 community_pr: ["clowder-ai#520"]
+tips_exempt: "2026-09-02 public identity and feature-history projection only; First Partner Onboarding behavior and its existing entry surface are unchanged."
 ---
 
 # F171: First Partner Onboarding — 领养第一只猫 / 配置第一位伙伴
@@ -17,7 +18,7 @@ community_pr: ["clowder-ai#520"]
 
 operator判断（2026-04-21）：
 > “我们家现在对于开源小白不太友好所以才想接受他的产品语意。”
-> “不是每个人都是你的landy这么了解你们每只猫 每只猫猫的agent 且还是正版订阅用户。”
+> “不是每个人都是你的operator这么了解你们每只猫 每只猫猫的agent 且还是正版订阅用户。”
 
 因此需要把冷启动产品语意从“开始猫猫训练营”收敛成更基础、更普适的：
 

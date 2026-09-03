@@ -40,7 +40,7 @@ export const memoryCueDrillCoordinateSchema = z
     catalogVersion: z.literal(RECALL_OPPORTUNITY_CATALOG_VERSION),
     resolverFamily: z.enum(RECALL_RESOLVER_FAMILIES),
     resolverVersion: z.number().int().positive(),
-    family: z.enum(['person_memory', 'evidence', 'taste']),
+    family: z.enum(['person_memory', 'evidence', 'taste', 'profile', 'event']),
     anchor: identifierSchema,
     revision: identifierSchema,
     scope: recallScopeV1Schema,

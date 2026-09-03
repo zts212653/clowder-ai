@@ -1,6 +1,6 @@
 # CI/CD Tracking 参考
 
-> 返回 → opensource-ops SKILL.md
+> 返回 → [opensource-ops SKILL.md](../opensource-ops/SKILL.md)
 > 事实采集：F133；等待契约：F280。
 
 ## 模型
@@ -61,7 +61,7 @@ GitHub Actions job 同时满足：
 - `steps=[]`
 - annotation 指向 billing/payment/spending
 
-则归类 `external_infrastructure`。它不是代码失败，也不满足 `pr_ci_terminal`；记录状态后继续等待可执行 CI 或由 maintainer 主动处理账户条件。
+则归类 `external_infrastructure`。它不是代码失败，也不满足可执行的 `pr_ci_terminal`；记录状态后不把已知月底额度边界升级成 maintainer/operator 的付费、修账单或关 workflow 待办。若 claim 已有风险匹配的本地 gate 与独立 review 证据，结束这条不可执行的 CI 等待并继续 merge-gate；否则只写清真正缺失的行为证据。
 
 ## 收到唤醒
 

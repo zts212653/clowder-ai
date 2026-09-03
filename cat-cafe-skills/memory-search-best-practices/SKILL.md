@@ -1,11 +1,10 @@
 ---
 name: memory-search-best-practices
-tips_exempt: internal shared-reference coordinate repair; no user-visible capability change
 description: >
   记忆系统多刀检索 + recall coverage 策略（8 类题型 recipe）。
   Use when: 任务是 "哪些地方提过 X" / "X 的来源 / source map" / "有没有提过 Y / absence check" / "上次到现在变了什么 / delta" / 冷启动 onboard 复杂主题 / 任何召回任务搜了一刀觉得不够。
   Not for: 只是选哪个入口走第一刀（用 memory-navigation）/ 已知精确 anchor 单 Read（直接 Read）/ 代码符号查（Grep/LSP）/ 新功能开发（不是 recall 任务）。
-  Output: 多 query 多 scope 召回 union 结果 + coverage matrix（item/source/谁提到/直接 vs 间接）+ "何时停下来"判据。
+  Output: 单一 owner 在一条任务链内完成多 query / 多 scope union + coverage matrix（item/source/谁提到/直接 vs 间接）+ 一次终局交付。
   GOTCHA: 和 memory-navigation 互补不重叠 — memory-navigation 决定**第一刀走哪个工具**（search vs graph vs list_recent），本 skill 决定**要不要补刀 + 题型对应几刀几路 + 何时停**。Ragdoll家族必加载：opus 系治"我能猜出来 / 碎片够了"停太早病，fable 系治"再确认一轮"停太晚病（双向校准见正文）。
 triggers:
   - "哪些 thread"
@@ -37,6 +36,15 @@ triggers:
 - Agent（LLM）有领域知识，但**经常觉得"够了"就停**（Ragdoll家族尤甚——2026-05-17 dogfood 实证：三猫搜同题各拿 10 条，全集需三猫合）
 - 解法：教 agent **题型对应 recipe** + **何时停下来**判据，不在系统层加黑盒 expansion
 
+### 单一 owner 闭环（检索切片不是用户要追的 feed）
+
+多刀是同一只猫内部扩大召回的证据步骤，不是把一个结果拆成多份 custody：
+
+- 一个召回目标只保留**单一 owner**，由它持有 union、去重、Read 原文与停止判据，最后**一次终局交付**。
+- query、scope、语言或工具切片不得升级成需要用户分别跟踪的独立 feed、任务或半份报告。
+- 可以在同一 invocation 内并行调用只读工具以缩短墙钟时间，但调用完成后仍由当前 owner 统一收敛；中间切片不向用户索要推进决定。
+- 只有用户明确要求独立多猫观点，或子任务本身有不同、可独立验收的交付物时，才建立多 custody；这不属于普通 coverage 搜索。
+
 ## 8 类题型 → recipe
 
 | 题型 | 例 query | Recipe（≥几刀几路）| 关键 |
@@ -60,7 +68,7 @@ triggers:
 3. Agent 用领域知识 expand（不让系统猜）:
      audhd → sensory gating / 2e / RSD / PDA / hyperfocus / 倦怠 / 梦境 / 自闭 / 多动 / 神经多样性
    对每个二轮搜（中文一遍 + 英文/缩写一遍）
-4. Read top canonical doc (landy-audhd-operating-manual.md)
+4. Read top canonical doc (operator-audhd-operating-manual.md)
    → 从文档抽 source thread ids → 二轮 get_thread_context Read 原文
 5. 输出 coverage matrix（item / source / 谁提到 / 直接 vs 间接 / 置信度）
 ```

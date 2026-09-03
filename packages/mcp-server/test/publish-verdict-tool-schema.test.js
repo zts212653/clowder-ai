@@ -249,6 +249,63 @@ describe('cat_cafe_publish_verdict MCP schema (砚砚 R1 Q3: discriminated union
     assert.ok(result.success, `expected accept, got: ${JSON.stringify(result)}`);
   });
 
+  it('accepts typed friction analysis findings with target hints only', () => {
+    const result = schema.safeParse({
+      domainId: 'eval:friction',
+      packet: { ...validPacket, domainId: 'eval:friction' },
+      sourceRefs: {
+        kind: 'friction-rollup-snapshot',
+        windowStartMs: 1700000000000,
+        windowEndMs: 1700086400000,
+      },
+      analysisFindings: [
+        {
+          candidateRef: 'cluster-a',
+          findingKey: 'cluster-a-repair',
+          analysisDisposition: 'repair',
+          approvalRequirement: { kind: 'required', reason: 'repair' },
+          interventionKind: 'fix',
+          rationale: 'Repair the canonical target.',
+          uncertainty: 'medium',
+          falsifier: { condition: 'Fresh replay passes.', evidenceRef: 'measurement:falsifier/a' },
+          withdrawalCondition: 'Withdraw when the failure no longer reproduces.',
+          measurementResultRef: 'measurement:f267/a',
+          sourceSignalRefs: ['source-message:a'],
+          repairTargetHint: { featureId: 'F188', componentId: 'evidence-reader' },
+        },
+      ],
+    });
+    assert.ok(result.success, `expected accept, got: ${JSON.stringify(result)}`);
+  });
+
+  it('rejects caller-owned target truth in friction analysis findings', () => {
+    const result = schema.safeParse({
+      domainId: 'eval:friction',
+      packet: { ...validPacket, domainId: 'eval:friction' },
+      sourceRefs: {
+        kind: 'friction-rollup-snapshot',
+        windowStartMs: 1700000000000,
+        windowEndMs: 1700086400000,
+      },
+      analysisFindings: [
+        {
+          candidateRef: 'cluster-a',
+          findingKey: 'cluster-a-observe',
+          analysisDisposition: 'observe',
+          approvalRequirement: { kind: 'not_required' },
+          rationale: 'Observe.',
+          uncertainty: 'high',
+          falsifier: { condition: 'Fresh replay passes.', evidenceRef: 'measurement:falsifier/a' },
+          withdrawalCondition: 'Withdraw after fresh evidence.',
+          measurementResultRef: 'measurement:f267/a',
+          sourceSignalRefs: ['source-message:a'],
+          repairTargetHint: { featureId: 'F188', ownerCatId: 'caller-picked-owner' },
+        },
+      ],
+    });
+    assert.ok(!result.success);
+  });
+
   it('rejects friction-rollup-snapshot with non-finite windowStartMs', () => {
     const result = schema.safeParse({
       domainId: 'eval:friction',

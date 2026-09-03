@@ -296,6 +296,9 @@ export const evalHubRoutes: FastifyPluginAsync<EvalHubRoutesOptions> = async (ap
     if (body.sourceRefs !== undefined && (typeof body.sourceRefs !== 'object' || body.sourceRefs === null)) {
       return reply.status(400).send({ error: 'sourceRefs must be an object if provided' });
     }
+    if (body.analysisFindings !== undefined && !Array.isArray(body.analysisFindings)) {
+      return reply.status(400).send({ error: 'analysisFindings must be an array if provided' });
+    }
 
     // 砚砚 R4 P1 #2 + cloud R4 P1: inject real generator (handler's default throws).
     const generator = opts.verdictGenerators?.[domainId];
@@ -320,6 +323,7 @@ export const evalHubRoutes: FastifyPluginAsync<EvalHubRoutesOptions> = async (ap
         // adapter discriminates by `kind` field. Cast through unknown — handler/adapter validate shape.
         sourceRefs: (body.sourceRefs ??
           {}) as unknown as import('../infrastructure/harness-eval/publish-verdict/types.js').VerdictSourceRefs,
+        ...(body.analysisFindings !== undefined ? { analysisFindings: body.analysisFindings } : {}),
       },
     );
 

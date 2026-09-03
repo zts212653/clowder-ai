@@ -156,7 +156,9 @@ async function gotoHydratedFixture(page, timeout = HYDRATION_TIMEOUT_MS) {
   try {
     await Promise.race([
       (async () => {
-        await page.goto(baseUrl, { waitUntil: 'networkidle', timeout });
+        // The fixture owns an explicit hydration marker. Next dev can keep ancillary requests
+        // active after the page is usable, so network-idle is not part of this test's contract.
+        await page.goto(baseUrl, { waitUntil: 'domcontentloaded', timeout });
         await waitForHydratedFixture(page, timeout);
       })(),
       clientFailure,
@@ -194,7 +196,7 @@ async function gotoHydratedFixture(page, timeout = HYDRATION_TIMEOUT_MS) {
 }
 
 async function reloadHydratedFixture(page) {
-  await page.reload({ waitUntil: 'networkidle' });
+  await page.reload({ waitUntil: 'domcontentloaded' });
   await waitForHydratedFixture(page);
 }
 

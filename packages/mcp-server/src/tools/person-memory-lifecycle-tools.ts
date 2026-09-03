@@ -301,7 +301,6 @@ export function createPersonMemoryLifecycleTools(callbackPost: CallbackPost, cal
           action: 'close',
           risk: { level: 'destructive', openWorld: false },
           runtimeProfiles: ['full'],
-          targetExposure: 'profile-gated',
         },
       }),
       defineTool({
@@ -315,7 +314,6 @@ export function createPersonMemoryLifecycleTools(callbackPost: CallbackPost, cal
           action: 'close',
           risk: { level: 'destructive', openWorld: false },
           runtimeProfiles: ['full'],
-          targetExposure: 'profile-gated',
         },
       }),
       defineTool({
@@ -329,7 +327,6 @@ export function createPersonMemoryLifecycleTools(callbackPost: CallbackPost, cal
           action: 'close',
           risk: { level: 'destructive', openWorld: false },
           runtimeProfiles: ['full'],
-          targetExposure: 'profile-gated',
         },
       }),
     ],

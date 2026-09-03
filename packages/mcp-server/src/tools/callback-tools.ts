@@ -16,16 +16,26 @@ import { readFileSync } from 'node:fs';
 import type {
   ActionSuccessorRequestMetadata,
   CallbackAuthFailureReason,
+  CustodyAdmissionRequestV1,
   DispatchGateState,
+  EntrustedWorkClosureSpecV1,
+  EntrustedWorkTerminalClosureV1,
+  EntrustedWorkUpdateActionV1,
+  EntrustedWorkV1,
   SuggestedCrossPostAction,
 } from '@cat-cafe/shared';
 import {
   ACTION_SUBJECT_REF_DESCRIPTION,
   actionSuccessorMetadataSchema,
   CALLBACK_AUTH_FAILURE_REASONS,
+  custodyAdmissionRequestV1Schema,
   DEVELOPMENT_SOP_STAGE_IDS,
   dispatchProposedActionInputSchema,
   EXECUTABLE_ACTION_SUCCESSOR_CONTRACT_DESCRIPTION,
+  entrustedWorkClosureSpecV1Schema,
+  entrustedWorkTerminalActionV1Schema,
+  entrustedWorkUpdateActionV1Schema,
+  entrustedWorkV1Schema,
   executableActionSuccessorMetadataSchema,
   extractFeatureIds,
   isCallbackAuthFailureReason,
@@ -341,14 +351,6 @@ export const postMessageInputSchema = {
       'Target thread ID. Required for agent-key auth (persistent agent with no default thread). Omit for invocation auth (defaults to invocation thread).',
     ),
   replyTo: z.string().optional().describe('Optional message ID to reply to'),
-  cloudReturnBinding: z
-    .string()
-    .min(1)
-    .max(800)
-    .optional()
-    .describe(
-      'Opaque F247 runtime-delta capability. Required with replyTo for gpt-pro agent-key returns; copy exactly.',
-    ),
   clientMessageId: z
     .string()
     .min(1)
@@ -650,7 +652,12 @@ export const createTaskInputSchema = {
 
 export const updateTaskInputSchema = {
   taskId: z.string().min(1).describe('The ID of the task to update'),
-  status: z.enum(['todo', 'doing', 'blocked', 'done']).optional().describe('New task status'),
+  status: z
+    .enum(['todo', 'doing', 'blocked', 'done'])
+    .optional()
+    .describe(
+      'New task status. Entrusted work rejects status=done here; its Task owner requires an evidence-backed typed closure action.',
+    ),
   why: z.string().max(1000).optional().describe('Optional note explaining the status change'),
   // F193-E1 P1-4 fix: allow patching dispatchGate on existing tasks
   dispatchGate: z
@@ -681,6 +688,63 @@ export const updateTaskInputSchema = {
     .describe('Resolve a previously-missing dispatch gate on this task.'),
 };
 
+export const admitEntrustedWorkInputSchema = {
+  title: z.string().trim().min(1).max(200).describe('Title for the canonical entrusted-work Task'),
+  why: z.string().max(1000).optional().describe('Why this work was entrusted and why the Task owns it'),
+  admission: custodyAdmissionRequestV1Schema.describe(
+    'Explicit, accepted-offer, or registered-source admission basis with stable source and idempotency coordinates',
+  ),
+  closure: entrustedWorkClosureSpecV1Schema
+    .optional()
+    .describe('Required closure condition and expected signal; omission returns needs_clarification'),
+  time: entrustedWorkV1Schema.shape.time.optional().describe('Optional user-authored scheduling hints'),
+  artifactRefs: z.array(z.string().trim().min(1).max(1000)).max(64).optional(),
+};
+
+export const closeEntrustedWorkInputSchema = {
+  taskId: z.string().min(1).describe('Entrusted-work Task ID'),
+  expectedRevision: entrustedWorkTerminalActionV1Schema.shape.expectedRevision.describe(
+    'Current entrusted-work revision used for compare-and-set closure',
+  ),
+  closure: entrustedWorkTerminalActionV1Schema.shape.closure.describe(
+    'Evidence-backed satisfied closure or typed cancelled/abandoned disposition',
+  ),
+};
+
+export const updateEntrustedWorkInputSchema = {
+  taskId: entrustedWorkUpdateActionV1Schema.shape.taskId.describe('Entrusted-work Task ID'),
+  expectedRevision: entrustedWorkUpdateActionV1Schema.shape.expectedRevision.describe(
+    'Current entrusted-work revision used for compare-and-set update',
+  ),
+  time: entrustedWorkUpdateActionV1Schema.shape.time.describe(
+    'Optional businessDeadline/reviewBy patch; null clears one exact Task-owned time fact',
+  ),
+  artifactRefs: entrustedWorkUpdateActionV1Schema.shape.artifactRefs.describe(
+    'Optional complete replacement of canonical Artifact refs; values are deduplicated and sorted',
+  ),
+};
+
+export const offerCustodyInputSchema = {
+  sourceMessageId: z.string().trim().min(1).max(1_000).describe('Exact source message to carry the offer'),
+  reasonCode: z
+    .enum(['future_deliverable', 'follow_up_commitment', 'time_bound_obligation'])
+    .describe('Bounded recognition reason; venting and casual mentions are intentionally absent'),
+  agentKeyCatId: agentKeyCatIdSchema,
+};
+
+export const retryCustodyAdmissionInputSchema = {
+  sourceMessageId: z.string().trim().min(1).max(1_000),
+  sourceMessageRevision: z.string().regex(/^sha256:[a-f0-9]{64}$/),
+  offerId: z.string().trim().min(1).max(1_000),
+  title: z.string().trim().min(1).max(200),
+  why: z.string().max(1_000).optional(),
+  intendedOutcome: z.string().trim().min(1).max(4_000),
+  closure: entrustedWorkClosureSpecV1Schema,
+  time: entrustedWorkV1Schema.shape.time.optional(),
+  artifactRefs: z.array(z.string().trim().min(1).max(1_000)).max(64).optional(),
+  agentKeyCatId: agentKeyCatIdSchema,
+};
+
 export const crossPostMessageInputSchema = {
   threadId: z.string().min(1).describe('Target thread ID to post into'),
   content: z
@@ -698,12 +762,6 @@ export const crossPostMessageInputSchema = {
         'F193 KD-1 boundary: this is the routing list, NOT relay metadata. Agent-key callers do not inherit F052 sourceThreadId semantics.',
     ),
   replyTo: z.string().optional().describe('Optional message ID to reply to'),
-  cloudReturnBinding: z
-    .string()
-    .min(1)
-    .max(800)
-    .optional()
-    .describe('Opaque F247 runtime-delta capability required for a gpt-pro source-bound cross-thread return.'),
   clientMessageId: z
     .string()
     .min(1)
@@ -843,7 +901,6 @@ async function _executePostMessage(
     content: string;
     threadId?: string | undefined;
     replyTo?: string | undefined;
-    cloudReturnBinding?: string | undefined;
     clientMessageId?: string | undefined;
     targetCats?: string[] | undefined;
     streamDisposition?: 'independent' | 'replace_final' | undefined;
@@ -895,7 +952,6 @@ async function _executePostMessage(
           streamDisposition: input.streamDisposition ?? 'independent',
           ...(input.threadId ? { threadId: input.threadId } : {}),
           ...(input.replyTo ? { replyTo: input.replyTo } : {}),
-          ...(input.cloudReturnBinding ? { cloudReturnBinding: input.cloudReturnBinding } : {}),
           clientMessageId: input.clientMessageId ?? randomUUID(),
           ...(input.targetCats?.length ? { targetCats: input.targetCats } : {}),
           ...(input.effectClass ? { effectClass: input.effectClass } : {}),
@@ -1013,7 +1069,6 @@ export async function handlePostMessage(
     content: string;
     threadId?: string | undefined;
     replyTo?: string | undefined;
-    cloudReturnBinding?: string | undefined;
     clientMessageId?: string | undefined;
     targetCats?: string[] | undefined;
     streamDisposition?: 'independent' | 'replace_final' | undefined;
@@ -1285,6 +1340,127 @@ export async function handleUpdateTask(input: {
   });
 }
 
+export async function handleAdmitEntrustedWork(input: {
+  title: string;
+  why?: string | undefined;
+  admission: CustodyAdmissionRequestV1;
+  closure?: EntrustedWorkClosureSpecV1 | undefined;
+  time?: EntrustedWorkV1['time'] | undefined;
+  artifactRefs?: string[] | undefined;
+  agentKeyCatId?: string | undefined;
+}): Promise<ToolResult> {
+  return withDegradation({
+    toolName: 'admit_entrusted_work',
+    primary: () =>
+      callbackPost(
+        '/api/callbacks/admit-entrusted-work',
+        {
+          title: input.title,
+          ...(input.why !== undefined ? { why: input.why } : {}),
+          admission: input.admission,
+          ...(input.closure !== undefined ? { closure: input.closure } : {}),
+          ...(input.time !== undefined ? { time: input.time } : {}),
+          ...(input.artifactRefs !== undefined ? { artifactRefs: input.artifactRefs } : {}),
+        },
+        agentKeyOptions(input),
+      ),
+    policy: { kind: 'none' },
+  });
+}
+
+export async function handleCloseEntrustedWork(input: {
+  taskId: string;
+  expectedRevision: number;
+  closure: EntrustedWorkTerminalClosureV1;
+  agentKeyCatId?: string | undefined;
+}): Promise<ToolResult> {
+  return withDegradation({
+    toolName: 'close_entrusted_work',
+    primary: () =>
+      callbackPost(
+        '/api/callbacks/close-entrusted-work',
+        {
+          taskId: input.taskId,
+          expectedRevision: input.expectedRevision,
+          closure: input.closure,
+        },
+        agentKeyOptions(input),
+      ),
+    policy: { kind: 'none' },
+  });
+}
+
+export async function handleUpdateEntrustedWork(
+  input: EntrustedWorkUpdateActionV1 & { agentKeyCatId?: string | undefined },
+): Promise<ToolResult> {
+  return withDegradation({
+    toolName: 'update_entrusted_work',
+    primary: () =>
+      callbackPost(
+        '/api/callbacks/update-entrusted-work',
+        {
+          taskId: input.taskId,
+          expectedRevision: input.expectedRevision,
+          ...(input.time !== undefined ? { time: input.time } : {}),
+          ...(input.artifactRefs !== undefined ? { artifactRefs: input.artifactRefs } : {}),
+        },
+        agentKeyOptions(input),
+      ),
+    policy: { kind: 'none' },
+  });
+}
+
+export async function handleOfferCustody(input: {
+  sourceMessageId: string;
+  reasonCode: 'future_deliverable' | 'follow_up_commitment' | 'time_bound_obligation';
+  agentKeyCatId?: string | undefined;
+}): Promise<ToolResult> {
+  return withDegradation({
+    toolName: 'offer_custody',
+    primary: () =>
+      callbackPost(
+        '/api/callbacks/custody-offers',
+        { sourceMessageId: input.sourceMessageId, reasonCode: input.reasonCode },
+        agentKeyOptions(input),
+      ),
+    policy: { kind: 'none' },
+  });
+}
+
+export async function handleRetryCustodyAdmission(input: {
+  sourceMessageId: string;
+  sourceMessageRevision: string;
+  offerId: string;
+  title: string;
+  why?: string | undefined;
+  intendedOutcome: string;
+  closure: EntrustedWorkClosureSpecV1;
+  time?: EntrustedWorkV1['time'] | undefined;
+  artifactRefs?: string[] | undefined;
+  agentKeyCatId?: string | undefined;
+}): Promise<ToolResult> {
+  return withDegradation({
+    toolName: 'retry_custody_admission',
+    primary: () =>
+      callbackPost(
+        '/api/callbacks/custody-offers/retry-admission',
+        {
+          sourceMessageId: input.sourceMessageId,
+          sourceMessageRevision: input.sourceMessageRevision,
+          offerId: input.offerId,
+          title: input.title,
+          ...(input.why !== undefined ? { why: input.why } : {}),
+          intendedOutcome: input.intendedOutcome,
+          closure: input.closure,
+          ...(input.time !== undefined ? { time: input.time } : {}),
+          ...(input.artifactRefs !== undefined ? { artifactRefs: input.artifactRefs } : {}),
+        },
+        agentKeyOptions(input),
+      ),
+    policy: { kind: 'none' },
+  });
+}
+
 export async function handleCreateTask(input: {
   title: string;
   why?: string | undefined;
@@ -1365,7 +1541,6 @@ export async function handleCrossPostMessage(input: {
   content: string;
   targetCats?: string[] | undefined;
   replyTo?: string | undefined;
-  cloudReturnBinding?: string | undefined;
   clientMessageId?: string | undefined;
   agentKeyCatId?: string | undefined;
   effectClass?: 'fyi' | 'coordinate' | 'investigate' | 'assign_work' | undefined;
@@ -1447,7 +1622,6 @@ export async function handleCrossPostMessage(input: {
     threadId: input.threadId,
     content: input.content,
     ...(input.replyTo ? { replyTo: input.replyTo } : {}),
-    ...(input.cloudReturnBinding ? { cloudReturnBinding: input.cloudReturnBinding } : {}),
     ...(input.clientMessageId ? { clientMessageId: input.clientMessageId } : {}),
     ...(input.agentKeyCatId ? { agentKeyCatId: input.agentKeyCatId } : {}),
     ...(input.targetCats?.length ? { targetCats: input.targetCats } : {}),
@@ -3041,7 +3215,7 @@ export const callbackTools = [
       'For a local review terminal, put localReviewVerdict on that same post; the carrier fast path derives the exact lease/HEAD/route. If the invocation no longer carries the lease, also provide reviewedHeadSha: the server resolves only the inherited coordination subject + reviewer identity against the canonical active lease, and the HEAD fact grants no authority. Public prose is never parsed. ' +
       'Existing standing uses claimOrigin="existing_standing" + groundingEvidenceRef; rejected custody uses returnToPredecessor and targets the persisted predecessor. ' +
       'GOTCHA: structured action metadata currently requires invocation-token auth; agent-key callers fail closed with the non-retryable action_agent_key_unsupported status and never send an unfenced fallback. ' +
-      'F247: gpt-pro agent-key returns must copy both replyTo=sourceMessageId and cloudReturnBinding from the runtime delta; missing or mismatched bindings fail closed. ' +
+      'F247: gpt-pro agent-key returns copy only replyTo=sourceMessageId from the runtime delta; the server admits it only when an exact server-custodied dispatch grant exists. ' +
       'By default, a later provider final remains a separate durable message. Set streamDisposition="replace_final" only when this callback is the canonical replacement for that same final response. ' +
       'To hand off without structured action identity, write @猫名 on its own line at the START of the line (sentence-internal @mention does NOT route). ' +
       'GOTCHA: This tool uses callback credentials that expire — if it fails with 401, fall back to line-start @mention in your response text. ' +
@@ -3253,7 +3427,7 @@ export const callbackTools = [
       'Output: direct action admission posts and queues one fenced carrier; assign_work publishes one pending approval card and posts nothing to the target until approval atomically acquires the fence. ' +
       'Existing standing reuses the same CAS via claimOrigin="existing_standing" + groundingEvidenceRef. returnToPredecessor sends a rejected single generation to the server-persisted predecessor; parallel mode records only the rejecting holder terminal. ' +
       'Structured action metadata currently requires invocation-token auth; agent-key callers fail closed with the non-retryable action_agent_key_unsupported status and never send an unfenced fallback. ' +
-      'F247: gpt-pro agent-key returns must carry the exact replyTo and cloudReturnBinding from the runtime delta. ' +
+      'F247: gpt-pro agent-key returns carry only the exact replyTo from the runtime delta; authorization stays in server custody. ' +
       'Fallback must use replace with the active leaseId/generation after server-recorded terminal evidence. Use mode=parallel + parallelIntent only for deliberate independent review, #ideate, or explicit operator fan-out. ' +
       'TIP: The sub-thread "## 主 Thread" header includes exact routing credentials (threadId + targetCats/handle) — copy them directly.',
     inputSchema: crossPostMessageInputSchema,
@@ -3284,10 +3458,11 @@ export const callbackTools = [
       runtimeProfiles: ['full'],
     },
   }),
-  defineTool({
+  defineCanonicalTool({
     name: 'cat_cafe_update_task',
     description:
       'Update a task you own: mark as doing/blocked/done, or resolve a missing dispatch gate. ' +
+      'Entrusted work cannot be marked done through this generic tool; use its typed, evidence-backed closure action. ' +
       'GOTCHA: You can only update tasks assigned to you (your catId). ' +
       'TIP: Include a "why" note when marking as blocked — it helps others understand the situation. ' +
       'F193-E1: Pass dispatchGate to resolve a "missing" dispatch gate (e.g. after cross_posting to the owning thread).',
@@ -3300,6 +3475,125 @@ export const callbackTools = [
       authority: 'callback-owner',
       risk: { level: 'write', openWorld: false },
       runtimeProfiles: ['full'],
+      standaloneReason: {
+        disposition: 'accepted-boundary',
+        kind: 'side-effect-boundary',
+        admissionRef: 'file:docs/features/F310-growing-real-delegation.md',
+      },
+    },
+  }),
+  defineCanonicalTool({
+    name: 'cat_cafe_admit_entrusted_work',
+    description:
+      'Ask the canonical Task owner to admit or resume explicitly entrusted work. ' +
+      'The same idempotencyKey always returns the same Task coordinates; it never creates a sibling Task. ' +
+      'Accepted offers remain pending until this action returns a typed admitted/resumed/needs_clarification result. ' +
+      'Authorized-source admission fails closed unless its producer grant is registered and current.',
+    inputSchema: admitEntrustedWorkInputSchema,
+    handler: handleAdmitEntrustedWork,
+    governance: {
+      implementationExport: 'handleAdmitEntrustedWork',
+      resourceFamily: 'task-workflow',
+      action: 'create',
+      authority: 'callback-owner',
+      risk: { level: 'write', openWorld: false },
+      runtimeProfiles: ['full'],
+      standaloneReason: {
+        disposition: 'accepted-boundary',
+        kind: 'authority-boundary',
+        admissionRef: 'file:docs/features/F310-growing-real-delegation.md',
+      },
+    },
+  }),
+  defineCanonicalTool({
+    name: 'cat_cafe_close_entrusted_work',
+    description:
+      'Close entrusted work through the canonical Task owner using the current revision. ' +
+      'Satisfied closure requires evidence; cancelled or abandoned closure requires typed actor, authority, disposition, and time provenance. ' +
+      'Generic update_task status=done is intentionally rejected for entrusted work.',
+    inputSchema: closeEntrustedWorkInputSchema,
+    handler: handleCloseEntrustedWork,
+    governance: {
+      implementationExport: 'handleCloseEntrustedWork',
+      resourceFamily: 'task-workflow',
+      action: 'complete',
+      authority: 'callback-owner',
+      risk: { level: 'write', openWorld: false },
+      runtimeProfiles: ['full'],
+      standaloneReason: {
+        disposition: 'accepted-boundary',
+        kind: 'destructive-boundary',
+        admissionRef: 'file:docs/features/F310-growing-real-delegation.md',
+      },
+    },
+  }),
+  defineCanonicalTool({
+    name: 'cat_cafe_update_entrusted_work',
+    description:
+      'Update the current open entrusted-work Task using its exact revision. ' +
+      'Use this after canonical business time or Artifact ownership becomes known; the same Task remains the owner and its revision advances once. ' +
+      'Artifact refs replace the canonical set and are deduplicated/sorted; null clears one time fact. ' +
+      'No-op, stale, foreign-owner, and terminal updates fail closed; generic update_task remains forbidden.',
+    inputSchema: updateEntrustedWorkInputSchema,
+    handler: handleUpdateEntrustedWork,
+    governance: {
+      implementationExport: 'handleUpdateEntrustedWork',
+      resourceFamily: 'task-workflow',
+      action: 'update',
+      authority: 'callback-owner',
+      risk: { level: 'write', openWorld: false },
+      runtimeProfiles: ['full'],
+      standaloneReason: {
+        disposition: 'accepted-boundary',
+        kind: 'authority-boundary',
+        admissionRef: 'file:docs/features/F310-growing-real-delegation.md',
+      },
+    },
+  }),
+  defineCanonicalTool({
+    name: 'cat_cafe_offer_custody',
+    description:
+      'Use when: the exact source conversation contains a plausible future obligation but the human has not explicitly entrusted it. ' +
+      'NOT for: explicit entrustment or registered authorized sources (use cat_cafe_admit_entrusted_work), venting/casual mentions (make no durable mutation), or creating a global reminder. ' +
+      'Output: records or rereads one source-owned custodyOfferV1 bound to the immutable message revision; terminal replay never opens a second prompt. ' +
+      'GOTCHA: this is only an offer. No Task, Schedule, or Needs Me item exists until the human accepts and the Task owner returns admitted/resumed.',
+    inputSchema: offerCustodyInputSchema,
+    handler: handleOfferCustody,
+    governance: {
+      implementationExport: 'handleOfferCustody',
+      resourceFamily: 'source-custody',
+      action: 'create',
+      authority: 'callback-thread',
+      risk: { level: 'write', openWorld: false },
+      runtimeProfiles: ['full', 'agent-key'],
+      standaloneReason: {
+        disposition: 'accepted-boundary',
+        kind: 'resource-entry',
+        admissionRef: 'file:docs/features/F310-growing-real-delegation.md',
+      },
+    },
+  }),
+  defineCanonicalTool({
+    name: 'cat_cafe_retry_custody_admission',
+    description:
+      'Use when: an accepted source-owned custody offer currently has a typed needs_clarification result and the same conversation now supplies the missing Task contract. ' +
+      'NOT for: pending/declined/dismissed offers, a different source revision, or explicit new work (use cat_cafe_admit_entrusted_work). ' +
+      "Output: retries the canonical Task owner with the offer's original idempotency key and updates only the exact source admission result. " +
+      'GOTCHA: stale refs and key/state mismatches fail closed; never create a sibling Task or a source-independent clarification inbox.',
+    inputSchema: retryCustodyAdmissionInputSchema,
+    handler: handleRetryCustodyAdmission,
+    governance: {
+      implementationExport: 'handleRetryCustodyAdmission',
+      resourceFamily: 'source-custody',
+      action: 'update',
+      authority: 'callback-thread',
+      risk: { level: 'write', openWorld: false },
+      runtimeProfiles: ['full', 'agent-key'],
+      standaloneReason: {
+        disposition: 'accepted-boundary',
+        kind: 'resource-entry',
+        admissionRef: 'file:docs/features/F310-growing-real-delegation.md',
+      },
     },
   }),
   defineTool({
@@ -3332,6 +3626,8 @@ export const callbackTools = [
     description:
       'Create a rich block (card, diff, checklist, file, media_gallery, audio, interactive, or html_widget) attached to the current message. ' +
       'Use card for status/decisions, diff for code changes, checklist for inline todos, file for existing documents/audio/video, media_gallery for images, audio for voice, interactive for user selection/confirmation, html_widget for custom inline HTML. ' +
+      'Use this when the user wants to see, hear, or interact with the result directly in Clowder AI Chat (for example: show me, draw an HTML demo, or send a screenshot); the user does not need to say "rich text". Use html_widget for a self-contained HTML/demo, media_gallery for existing screenshots/images, and browser-preview for a complex localhost or multi-page app. ' +
+      'NOT for discussing or editing HTML without a visible-delivery request. ' +
       'Use this for long structured replies/reports with lists, tables, code blocks, diffs, status fields, or multi-step checklists; F192 rich-messaging wakeup treats plain long Markdown with these signals and no rich block as a miss. ' +
       'NOT for: persistent task tracking across sessions (use create_task for 🧶 毛线球). NOT for: document generation/export (use generate_document). ' +
       'Output: block rendered inline in the current message. ' +
@@ -3424,7 +3720,6 @@ export const callbackTools = [
       authority: 'callback-owner',
       risk: { level: 'destructive', openWorld: false },
       runtimeProfiles: ['full'],
-      targetExposure: 'profile-gated',
     },
   }),
   defineTool({
@@ -3588,7 +3883,7 @@ export const callbackTools = [
     },
   }),
   // F128: Cat-initiated thread proposal (user approves before thread is created)
-  defineTool({
+  defineCanonicalTool({
     name: 'cat_cafe_propose_thread',
     description:
       'Propose a new thread to the user. Returns proposalId, NOT a threadId — the thread is only created after the user approves the proposal card. Use sparingly: ' +

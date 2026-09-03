@@ -116,7 +116,7 @@ async function createFixture(t) {
         actionAdmissions.push(input);
         return {
           admit: false,
-          outcome: 'safe_wait',
+          outcome: 'proof_required',
           lease: { leaseId: 'existing-lease', generation: 1 },
         };
       },
@@ -288,7 +288,7 @@ test('a structured carrier with a different complete action key remains an indep
   });
 
   assert.equal(response.statusCode, 200);
-  assert.equal(response.json().status, 'safe_wait');
+  assert.equal(response.json().status, 'proof_required');
   assert.equal(fixture.actionAdmissions.length, 1, 'the full action key must reach F167 admission');
 });
 

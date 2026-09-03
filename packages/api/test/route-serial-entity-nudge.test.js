@@ -30,8 +30,16 @@ function createCapturingService(catId, text) {
   const calls = [];
   return {
     calls,
-    async *invoke(prompt) {
+    async *invoke(prompt, options) {
       calls.push(prompt);
+      await options?.beforeProviderLaunch?.({
+        v: 1,
+        message: { body: prompt },
+        nativeInstructions: [],
+        runtime: {},
+        tools: { finalSurface: 'unknown' },
+        providerNativeVisibility: 'unknown',
+      });
       yield { type: 'text', catId, content: text, timestamp: Date.now() };
       yield { type: 'done', catId, timestamp: Date.now() };
     },
@@ -129,6 +137,7 @@ describe('F260 AC-B8: route-serial entity nudge prompt injection (actual routeSe
       // Run routeSerial with a message containing a registered entity
       for await (const _ of routeSerial(deps, ['opus'], '今天聊到了未婚喵', 'user1', 'thread-nudge-test', {
         thinkingMode: 'play',
+        currentUserMessageId: 'msg-serial-1',
       })) {
         // consume all events
       }
@@ -144,6 +153,23 @@ describe('F260 AC-B8: route-serial entity nudge prompt injection (actual routeSe
       );
       assert.ok(promptStr.includes('未婚喵'), 'actual prompt must mention the detected entity');
       assert.ok(promptStr.includes('[/entity-nudge]'), 'actual prompt must contain closing entity-nudge tag');
+      assert.deepEqual(
+        evidenceDb
+          .prepare(
+            `SELECT cat_id, invocation_id, source_message_id, outcome
+             FROM entity_nudge_events WHERE outcome = 'delivered'`,
+          )
+          .all(),
+        [
+          {
+            cat_id: 'opus',
+            invocation_id: 'inv-1',
+            source_message_id: 'msg-serial-1',
+            outcome: 'delivered',
+          },
+        ],
+        'the ledger row must be written only after the exact captured prompt is assembled',
+      );
     } finally {
       _resetSharedNudgeState();
       evidenceDb?.close();

@@ -176,7 +176,7 @@ const YARN_BALL_FILENAME_OVERRIDES: Record<string, string> = {
 /**
  * Pure function: ConciergeBallState + skin → sprite info.
  *
- * - 'ragdoll-v1' (default): V0 projection → individual PNG URL (string)
+ * - 'ragdoll-v1': V0 projection → individual PNG URL (string; resolver fallback when skin is omitted)
  * - 'yanyan-codex': V1 projection → atlas descriptor (AtlasSpriteResult) — 砚砚
  * - 'xianxian-codex': V1 projection → atlas descriptor (AtlasSpriteResult) — 宪宪
  * - 'yarn-ball': legacy direct mapping → sprite URL (string)

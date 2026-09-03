@@ -1,4 +1,3 @@
-import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it, vi } from 'vitest';
 import { anchoredApprovalNavigation } from '@/test-support/approval-navigation';
@@ -23,7 +22,8 @@ describe('Console member identity labels', () => {
           navigation: anchoredApprovalNavigation('thread-1'),
           requesterCatId: 'cat-sol',
           ownerUserId: 'user-1',
-          status: 'approved',
+          resolution: 'accepted',
+          materialization: { state: 'outcome_unknown' },
           summary: '交接完成',
           detail: {},
           createdAt: Date.now() - 1_000,
@@ -33,7 +33,8 @@ describe('Console member identity labels', () => {
       />,
     );
 
-    expect(html).toContain('来自 缅因猫（sol）');
-    expect(html).not.toContain('来自 cat-sol');
+    expect(html).toContain('发起人：缅因猫（sol）');
+    expect(html).not.toContain('发起人：cat-sol');
+    expect(html).toContain('决定人：user-1');
   });
 });

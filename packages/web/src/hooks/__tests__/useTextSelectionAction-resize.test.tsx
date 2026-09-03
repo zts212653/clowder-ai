@@ -38,7 +38,12 @@ function HookHost() {
   return (
     <div>
       <div ref={containerRef} data-testid="selection-container">
-        selected text
+        <span data-context-quote-source="message" data-testid="selected-source">
+          selected text
+        </span>
+        <span data-context-quote-source="message" data-testid="unrelated-source">
+          unrelated text
+        </span>
       </div>
       <output data-testid="selection-position">
         {action ? `${action.position.top}:${action.position.left}` : 'none'}
@@ -52,6 +57,7 @@ describe('useTextSelectionAction container resize', () => {
   let root: Root;
   let originalResizeObserver: typeof globalThis.ResizeObserver;
   let selectionRect: DOMRect;
+  let intersectedNodes: Node[];
 
   beforeAll(() => {
     (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -70,26 +76,26 @@ describe('useTextSelectionAction container resize', () => {
     root = createRoot(container);
     observers.length = 0;
     selectionRect = new DOMRect(200, 200, 100, 20);
+    intersectedNodes = [];
 
     vi.spyOn(window, 'getSelection').mockImplementation(() => {
       const selectionContainer = container.querySelector('[data-testid="selection-container"]');
-      const textNode = selectionContainer?.firstChild ?? null;
+      const textNode = container.querySelector('[data-testid="selected-source"]')?.firstChild ?? null;
       if (!selectionContainer || !textNode) return null;
 
-      const range = {
-        cloneRange: () => ({
-          selectNodeContents: () => {},
-          setEnd: () => {},
-          toString: () => '',
-        }),
-        commonAncestorContainer: textNode,
-        getBoundingClientRect: () => selectionRect,
-        getClientRects: () => [selectionRect],
-        intersectsNode: () => false,
-        startContainer: textNode,
-        startOffset: 0,
-        toString: () => 'selected text',
-      };
+      const range = document.createRange();
+      range.selectNodeContents(textNode);
+      const nativeIntersectsNode = range.intersectsNode.bind(range);
+      Object.defineProperties(range, {
+        getBoundingClientRect: { value: () => selectionRect },
+        getClientRects: { value: () => [selectionRect] },
+        intersectsNode: {
+          value: (node: Node) => {
+            intersectedNodes.push(node);
+            return nativeIntersectsNode(node);
+          },
+        },
+      });
 
       return {
         anchorNode: textNode,
@@ -97,7 +103,7 @@ describe('useTextSelectionAction container resize', () => {
         getRangeAt: () => range,
         isCollapsed: false,
         rangeCount: 1,
-        toString: () => 'selected text',
+        toString: () => range.toString(),
       } as unknown as Selection;
     });
   });
@@ -116,6 +122,7 @@ describe('useTextSelectionAction container resize', () => {
     expect(container.querySelector('[data-testid="selection-position"]')?.textContent).toBe('160:188');
     expect(observers).toHaveLength(1);
     expect(observers[0]?.observed).toEqual([selectionContainer]);
+    expect(intersectedNodes).not.toContain(container.querySelector('[data-testid="unrelated-source"]'));
 
     selectionRect = new DOMRect(400, 300, 100, 20);
     await act(async () => {

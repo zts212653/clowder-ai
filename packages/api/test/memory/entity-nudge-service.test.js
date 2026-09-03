@@ -11,6 +11,23 @@ import { afterEach, beforeEach, describe, it } from 'node:test';
 import Database from 'better-sqlite3';
 
 let applyMigrations, EntityRegistryStore, EntityNudgeService, EntityNudgeEventStore;
+let testPresentationSequence = 0;
+
+/** Simulates the exact pre-provider assembly callback used by production. */
+function createDeliveringService(db, cooldown, eventStore, catId = 'test-cat') {
+  const service = new EntityNudgeService(db, cooldown, eventStore);
+  service.processInput = (input) => {
+    const presentation = service.preparePresentation(service.detectCandidates(input), {
+      catId,
+      invocationId: `inv-test-${++testPresentationSequence}`,
+      sourceMessageId: `message-test-${testPresentationSequence}`,
+      now: input.now,
+    });
+    presentation.confirmAssembled();
+    return presentation.result;
+  };
+  return service;
+}
 
 function seedEntities(db, entities) {
   const store = new EntityRegistryStore(db);
@@ -58,7 +75,7 @@ describe('EntityNudgeService (full pipeline)', () => {
     db.pragma('journal_mode = WAL');
     db.pragma('foreign_keys = ON');
     applyMigrations(db);
-    service = new EntityNudgeService(db);
+    service = createDeliveringService(db);
   });
 
   afterEach(() => {
@@ -309,7 +326,7 @@ describe('EntityNudgeService (full pipeline)', () => {
     const { EntityNudgeCooldown } = await import('../../dist/domains/memory/EntityNudgeCooldown.js');
     const sharedCooldown = new EntityNudgeCooldown();
 
-    const service1 = new EntityNudgeService(db, sharedCooldown);
+    const service1 = createDeliveringService(db, sharedCooldown);
     const r1 = service1.processInput({
       text: '未婚喵',
       threadId: 'thread-1',
@@ -318,7 +335,7 @@ describe('EntityNudgeService (full pipeline)', () => {
     assert.equal(r1.nudges.length, 1, 'first invocation should deliver');
 
     // Second service instance with SAME shared cooldown
-    const service2 = new EntityNudgeService(db, sharedCooldown);
+    const service2 = createDeliveringService(db, sharedCooldown);
     const r2 = service2.processInput({
       text: '又说到未婚喵了',
       threadId: 'thread-1',
@@ -404,12 +421,9 @@ describe('EntityNudgeService (full pipeline)', () => {
     // breakdown would differ.
   });
 
-  it('event-store-wired: no_story_coordinate records without throw and creates no cooldown (F263 R9 Terra regression)', () => {
-    // Terra re-review: recordSuppressed({ reason: 'no_story_coordinate' }) throws
-    // because 'no_story_coordinate' was not in VALID_OUTCOMES. Production wires
-    // sharedEventStore(evidenceDb), so this is a runtime crash, not a silent no-op.
+  it('event-store-wired: no_story_coordinate stays candidate-side and creates no cooldown (F263 R9)', () => {
     const eventStore = new EntityNudgeEventStore(db);
-    const serviceWithStore = new EntityNudgeService(db, undefined, eventStore);
+    const serviceWithStore = createDeliveringService(db, undefined, eventStore);
 
     seedEntities(db, [
       {
@@ -433,7 +447,7 @@ describe('EntityNudgeService (full pipeline)', () => {
       },
     ]);
 
-    // Must not throw (the bug: VALID_OUTCOMES rejected 'no_story_coordinate')
+    // The candidate-side gate must not produce a false delivery record.
     const r1 = serviceWithStore.processInput({
       text: 'nocoord and validfeat',
       threadId: 'thread-1',
@@ -445,22 +459,22 @@ describe('EntityNudgeService (full pipeline)', () => {
     assert.equal(r1.nudges[0].entityId, 'feature:valid');
     assert.ok(r1.suppressedCount >= 1, 'unrenderable counted in suppressed');
 
-    // Event store recorded the suppression with explicit outcome
+    // Route-level candidates have no exact consumer prompt yet, so no event is
+    // written for an unrenderable candidate.
     const suppEvents = eventStore.queryByOutcome('no_story_coordinate');
-    assert.equal(suppEvents.length, 1, 'should persist no_story_coordinate event');
-    assert.equal(suppEvents[0].entity_id, 'concept:nocoord');
+    assert.equal(suppEvents.length, 0, 'must not create a pre-presentation event');
 
     // Cooldown invariant: no_story_coordinate must NOT affect lastRenderedAt
-    const lastRendered = eventStore.lastRenderedAt('concept:nocoord', 'thread-1');
+    const lastRendered = eventStore.lastRenderedAt('concept:nocoord', 'thread-1', 'test-cat');
     assert.equal(lastRendered, null, 'no_story_coordinate must not create phantom cooldown');
 
     // Valid entity's cooldown IS set (it was delivered)
-    const validRendered = eventStore.lastRenderedAt('feature:valid', 'thread-1');
+    const validRendered = eventStore.lastRenderedAt('feature:valid', 'thread-1', 'test-cat');
     assert.equal(validRendered, NOW_MS, 'delivered entity should have cooldown set');
 
     // Second call with fresh service instance — nocoord must still be rejected
     // by renderability, NOT cooldown. validfeat is cooldown-suppressed.
-    const freshService = new EntityNudgeService(db, undefined, eventStore);
+    const freshService = createDeliveringService(db, undefined, eventStore);
     const r2 = freshService.processInput({
       text: 'nocoord and validfeat again',
       threadId: 'thread-1',
@@ -475,7 +489,7 @@ describe('EntityNudgeService (full pipeline)', () => {
     // Roster-only cats are filtered by isSelfDescribingMatch, but proposal-backed cats
     // carry real information value beyond common-knowledge roster identity.
     const eventStore = new EntityNudgeEventStore(db);
-    const serviceWithStore = new EntityNudgeService(db, undefined, eventStore);
+    const serviceWithStore = createDeliveringService(db, undefined, eventStore);
 
     seedEntities(db, [
       {
@@ -503,7 +517,7 @@ describe('EntityNudgeService (full pipeline)', () => {
     assert.equal(result.nudges[0].entityId, 'cat:incident-guide');
 
     // Cooldown set — proves it went through delivery, not suppression
-    const cooldown = eventStore.lastRenderedAt('cat:incident-guide', 'thread-pipeline');
+    const cooldown = eventStore.lastRenderedAt('cat:incident-guide', 'thread-pipeline', 'test-cat');
     assert.equal(cooldown, NOW_MS, 'delivered proposal-backed cat should have cooldown');
   });
 
@@ -669,7 +683,7 @@ describe('EntityNudgeService (full pipeline)', () => {
         },
       ]);
 
-      const svc = new EntityNudgeService(db, undefined, eventStore);
+      const svc = createDeliveringService(db, undefined, eventStore);
       const result = svc.processInput({
         text: '未婚喵',
         threadId: 'thread-event-test',
@@ -699,7 +713,7 @@ describe('EntityNudgeService (full pipeline)', () => {
         },
       ]);
 
-      const svc = new EntityNudgeService(db, undefined, eventStore);
+      const svc = createDeliveringService(db, undefined, eventStore);
 
       // First call: delivers
       svc.processInput({
@@ -740,7 +754,7 @@ describe('EntityNudgeService (full pipeline)', () => {
       ]);
 
       // First service instance: delivers and records in event store
-      const svc1 = new EntityNudgeService(db, undefined, eventStore);
+      const svc1 = createDeliveringService(db, undefined, eventStore);
       const result1 = svc1.processInput({
         text: '量子猫',
         threadId: 'thread-restart',
@@ -751,7 +765,7 @@ describe('EntityNudgeService (full pipeline)', () => {
       // Second service instance with FRESH cooldown (simulates process restart)
       // but shares the same event store (persistent DB)
       const freshCooldown = new EntityNudgeCooldown();
-      const svc2 = new EntityNudgeService(db, freshCooldown, eventStore);
+      const svc2 = createDeliveringService(db, freshCooldown, eventStore);
       const result2 = svc2.processInput({
         text: '量子猫',
         threadId: 'thread-restart',
@@ -780,7 +794,7 @@ describe('EntityNudgeService (full pipeline)', () => {
       const DAY = 24 * HOUR;
 
       // t0: First service delivers the nudge
-      const svc1 = new EntityNudgeService(db, undefined, eventStore);
+      const svc1 = createDeliveringService(db, undefined, eventStore);
       const r1 = svc1.processInput({ text: '量子猫', threadId: 'thread-boundary', now: NOW_MS });
       assert.ok(r1.nudges.length > 0, 'should deliver at t0');
 
@@ -791,7 +805,7 @@ describe('EntityNudgeService (full pipeline)', () => {
       // t0+24h+1ms: Fresh service (restart). Cooldown from DELIVERED at t0 has expired.
       // Must NOT be blocked by the suppressed event at t0+1h.
       const freshCooldown = new EntityNudgeCooldown();
-      const svc2 = new EntityNudgeService(db, freshCooldown, eventStore);
+      const svc2 = createDeliveringService(db, freshCooldown, eventStore);
       const r3 = svc2.processInput({ text: '量子猫', threadId: 'thread-boundary', now: NOW_MS + DAY + 1 });
       assert.ok(
         r3.nudges.length > 0,
@@ -815,7 +829,7 @@ describe('EntityNudgeService (full pipeline)', () => {
       ]);
 
       // t0: Deliver the nudge
-      const svc1 = new EntityNudgeService(db, undefined, eventStore);
+      const svc1 = createDeliveringService(db, undefined, eventStore);
       const r1 = svc1.processInput({ text: '量子猫', threadId: 'thread-resolved', now: NOW_MS });
       assert.ok(r1.nudges.length > 0, 'should deliver at t0');
 
@@ -828,7 +842,7 @@ describe('EntityNudgeService (full pipeline)', () => {
       // t0+1s: Fresh service (restart). The event is now 'followed', not 'delivered'.
       // Cooldown must still see it — resolved delivered is still a real delivery.
       const freshCooldown = new EntityNudgeCooldown();
-      const svc2 = new EntityNudgeService(db, freshCooldown, eventStore);
+      const svc2 = createDeliveringService(db, freshCooldown, eventStore);
       const r2 = svc2.processInput({ text: '量子猫', threadId: 'thread-resolved', now: NOW_MS + 1000 });
       assert.equal(r2.nudges.length, 0, 'should suppress — resolved delivered event still counts for cooldown');
       assert.equal(r2.suppressedCount, 1, 'should report suppression after restart with resolved event');
@@ -848,7 +862,7 @@ describe('EntityNudgeService (full pipeline)', () => {
       ]);
 
       // No event store passed — should still work without crash
-      const svc = new EntityNudgeService(db);
+      const svc = createDeliveringService(db);
       const result = svc.processInput({
         text: '未婚喵',
         threadId: 'thread-no-store',
@@ -921,7 +935,7 @@ describe('EntityNudgeService (full pipeline)', () => {
         },
       ]);
 
-      const svc = new EntityNudgeService(db, undefined, eventStore);
+      const svc = createDeliveringService(db, undefined, eventStore);
       const result = svc.processInput({
         text: '概念A和概念B还有概念C以及概念D加上概念E',
         threadId: 'thread-cap-test',
@@ -998,7 +1012,7 @@ describe('EntityNudgeService (full pipeline)', () => {
         },
       ]);
 
-      const svc = new EntityNudgeService(db);
+      const svc = createDeliveringService(db);
       const result = svc.processInput({
         text: '词A和词B还有词C以及词D加上词E',
         threadId: 'thread-cap-count',

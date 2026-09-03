@@ -273,7 +273,7 @@ describe('F254 D2 provider-native freshness truth', () => {
 
   it('keeps opportunity, delivered, and seen separate while coalescing a frontier', async () => {
     const events = [];
-    let unseen = { count: 1, senders: ['you'], maxMessageId: 'm-1' };
+    let unseen = { count: 1, senders: ['operator'], maxMessageId: 'm-1' };
     const broker = new FreshnessNoticeBroker({
       context: { invocationId: 'inv-1', threadId: 'thread-1', catId: 'codex-sol' },
       checkUnseen: async () => unseen,
@@ -313,7 +313,7 @@ describe('F254 D2 provider-native freshness truth', () => {
       null,
     );
 
-    unseen = { count: 2, senders: ['you'], maxMessageId: 'm-2' };
+    unseen = { count: 2, senders: ['operator'], maxMessageId: 'm-2' };
     assert.ok(
       await broker.prepare({
         provider: 'openai_codex',
@@ -636,7 +636,7 @@ describe('F254 D2 provider-native freshness truth', () => {
     assert.match(text, /thread-1/);
     assert.match(text, /responseMode.*full/);
     assert.doesNotMatch(text, /list_recent/);
-    assert.doesNotMatch(text, /secret body|landy/);
+    assert.doesNotMatch(text, /secret body|operator/);
   });
 
   it('steers the exact active turn after a native command completion', async () => {
@@ -1152,8 +1152,10 @@ describe('F254 D2 provider-native freshness truth', () => {
       }
     };
     let factoryInput;
+    let preparedRequest;
     const service = new CodexAgentService({
       carrierMode: 'app_server',
+      cliCommand: process.execPath,
       l0CompilerFn: fakeL0Compiler,
       model: 'gpt-5.3-codex',
       spawnFn: () => assert.fail('app-server mode must not invoke exec spawnFn'),
@@ -1163,6 +1165,14 @@ describe('F254 D2 provider-native freshness truth', () => {
       invocationId: 'inv-app-server',
       requestedServiceTier: 'standard',
       cliConfigArgs: ['--config=service_tier="fast"', '-c=service_tier="fast"', '-cservice_tier="fast"'],
+      beforeProviderLaunch: async (request) => {
+        preparedRequest = request;
+        return {
+          requestGenerationId: '76f0ef6f-6bc2-4cc8-a25d-36c0ff065a98',
+          generationOrdinal: 1,
+          sessionId: 'session-app-server',
+        };
+      },
       agentCarrierSessionFactory: async (input) => {
         factoryInput = input;
         return wire;
@@ -1173,6 +1183,12 @@ describe('F254 D2 provider-native freshness truth', () => {
 
     assert.deepEqual(factoryInput.args.slice(0, 2), ['app-server', '--stdio']);
     assert.equal(factoryInput.args.includes('exec'), false);
+    assert.equal(preparedRequest.runtime.carrier, 'app_server');
+    assert.equal(preparedRequest.tools.schemaDelivery.profileClass, 'full');
+    assert.equal(preparedRequest.tools.schemaDelivery.profileId, 'full');
+    assert.equal(preparedRequest.tools.schemaDelivery.requestedMode, 'unknown');
+    assert.equal(preparedRequest.tools.schemaDelivery.fallbackReason, 'host_version_unavailable');
+    assert.equal(preparedRequest.tools.schemaDelivery.hostVersion, undefined);
     assert.equal(
       factoryInput.args.some((arg) => arg.includes('service_tier=')),
       false,

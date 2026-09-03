@@ -67,6 +67,23 @@ interface SessionChainLoadError {
 
 const sessionCache = new Map<string, SessionSummary[]>();
 
+function isFiniteNumber(value: unknown): value is number {
+  return typeof value === 'number' && Number.isFinite(value);
+}
+
+function isSessionSummary(value: unknown): value is SessionSummary {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) return false;
+  const session = value as Record<string, unknown>;
+  return (
+    typeof session.id === 'string' &&
+    typeof session.catId === 'string' &&
+    isFiniteNumber(session.seq) &&
+    (session.status === 'active' || session.status === 'sealing' || session.status === 'sealed') &&
+    isFiniteNumber(session.messageCount) &&
+    isFiniteNumber(session.createdAt)
+  );
+}
+
 export function __resetSessionChainCacheForTest() {
   sessionCache.clear();
 }
@@ -181,6 +198,7 @@ export function SessionChainPanel({
   const [refreshKey, setRefreshKey] = useState(0);
   const [restoringSessionId, setRestoringSessionId] = useState<string | null>(null);
   const [sealingSessionId, setSealingSessionId] = useState<string | null>(null);
+  const [compactingSessionId, setCompactingSessionId] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [chainCollapsed, setChainCollapsed] = useState(false);
   const [sealedCollapsed, setSealedCollapsed] = useState(true);
@@ -240,10 +258,14 @@ export function SessionChainPanel({
           }
           return;
         }
-        const data = (await res.json()) as { sessions: SessionSummary[] };
+        const data = (await res.json()) as { sessions?: unknown };
+        if (!Array.isArray(data.sessions) || !data.sessions.every(isSessionSummary)) {
+          throw new Error('Session Chain response contained an invalid sessions collection');
+        }
+        const sessions = data.sessions;
         if (!cancelled) {
-          sessionCache.set(threadId, data.sessions);
-          setSessions(data.sessions);
+          sessionCache.set(threadId, sessions);
+          setSessions(sessions);
           setLoadedThreadId(threadId);
           setLoadError(null);
         }
@@ -364,6 +386,27 @@ export function SessionChainPanel({
       setRefreshKey((key) => key + 1);
     } finally {
       setSealingSessionId(null);
+    }
+  };
+
+  const handleNativeCompact = async (session: SessionSummary) => {
+    if (compactingSessionId || !session.cliSessionId) return;
+    setActionError(null);
+    setCompactingSessionId(session.id);
+    try {
+      const response = await apiFetch(`/api/threads/${threadId}/sessions/${session.catId}/compact-native`, {
+        method: 'POST',
+      });
+      if (!response.ok) {
+        const body = (await response.json().catch(() => ({}))) as { error?: string };
+        setActionError(body.error ?? `原生压缩失败 (${response.status})`);
+        return;
+      }
+      setRefreshKey((key) => key + 1);
+    } catch {
+      setActionError('原生压缩请求失败');
+    } finally {
+      setCompactingSessionId(null);
     }
   };
 
@@ -527,6 +570,22 @@ export function SessionChainPanel({
                 {/* Context health bar (already shows % internally, no duplicate text) */}
                 {health && <ContextHealthBar catId={session.catId} health={health} />}
                 <div className="mt-1 flex flex-wrap items-center gap-1.5">
+                  {session.cliSessionId && (
+                    <button
+                      type="button"
+                      data-testid={`compact-native-session-${session.id}`}
+                      onClick={() => void handleNativeCompact(session)}
+                      disabled={compactingSessionId !== null || isStale || invocationIsActive}
+                      title={
+                        invocationIsActive
+                          ? '请先停止该 Agent，再压缩原生上下文'
+                          : '请求 provider 原生压缩并保留 Clowder AI continuity'
+                      }
+                      className="rounded border border-cafe-subtle px-2 py-0.5 text-micro text-cafe-secondary hover:bg-cafe-surface-elevated disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      {compactingSessionId === session.id ? '压缩中…' : '原生压缩'}
+                    </button>
+                  )}
                   <button
                     type="button"
                     data-testid={`seal-session-${session.id}`}

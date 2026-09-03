@@ -124,6 +124,29 @@ describe('GraphResolver', () => {
     assert.equal(result.edges.length, 0);
   });
 
+  it('returns an empty graph for a sunset F152 center anchor', async () => {
+    await store.upsert([
+      {
+        anchor: 'distilled:legacy-candidate',
+        kind: 'lesson',
+        status: 'active',
+        title: 'Retired global distillation candidate',
+        updatedAt: '2026-08-29',
+      },
+    ]);
+    const catalog = {
+      list: () => [{ id: 'global:methods', sensitivity: 'public', kind: 'global' }],
+      get: (id) => catalog.list().find((manifest) => manifest.id === id),
+    };
+    const resolver = new GraphResolver(catalog, new Map([['global:methods', store]]));
+
+    const result = await resolver.buildSubgraph('distilled:legacy-candidate', { depth: 1 });
+
+    assert.deepEqual(result.nodes, []);
+    assert.deepEqual(result.edges, []);
+    assert.equal(result.center, undefined);
+  });
+
   it('resolves non-prefixed anchors via store lookup (P1-1)', async () => {
     await store.upsert([
       { anchor: 'F186', kind: 'feature', status: 'active', title: 'F186 Library Memory', updatedAt: '2026-05-05' },

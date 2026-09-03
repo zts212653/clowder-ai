@@ -1,3 +1,4 @@
+import { exactAssetVersionRefV1Schema, ownerTruthRefV1Schema } from '@cat-cafe/shared';
 import { z } from 'zod';
 
 const nonEmptyString = z.string().trim().min(1);
@@ -87,6 +88,25 @@ const eventBaseSchema = z
 
 const plainEvent = <T extends string>(type: T) => eventBaseSchema.extend({ type: z.literal(type) }).strict();
 
+const approvalRequestSnapshotSchema = z
+  .object({
+    ownerRef: ownerTruthRefV1Schema,
+    ownerAuthorizationRef: ownerTruthRefV1Schema,
+    targetVersionRef: exactAssetVersionRefV1Schema,
+    dispatchRef: ownerTruthRefV1Schema,
+  })
+  .strict();
+
+const approvalRequestOriginSchema = z
+  .object({
+    invocationId: nonEmptyString,
+    threadId: nonEmptyString,
+    messageId: nonEmptyString,
+    requesterCatId: nonEmptyString,
+    ownerUserId: nonEmptyString,
+  })
+  .strict();
+
 export const EvalLifecycleEventSchema = z.discriminatedUnion('type', [
   plainEvent('verdict_opened'),
   eventBaseSchema
@@ -94,6 +114,109 @@ export const EvalLifecycleEventSchema = z.discriminatedUnion('type', [
       type: z.literal('verdict_cycle_observed'),
       caseId: nonEmptyString,
       cycleCreatedAt: isoDateTime,
+    })
+    .strict(),
+  eventBaseSchema
+    .extend({
+      type: z.literal('case_ready_for_proposal'),
+      caseId: nonEmptyString,
+      caseActionRef: nonEmptyString,
+      findingArtifactRef: nonEmptyString,
+      supersedesProposalId: nonEmptyString.optional(),
+      requestSnapshot: approvalRequestSnapshotSchema.optional(),
+    })
+    .strict(),
+  eventBaseSchema
+    .extend({
+      type: z.literal('approval_proposed'),
+      caseId: nonEmptyString,
+      proposalId: nonEmptyString,
+      caseActionRef: nonEmptyString,
+      requestIdempotencyRef: nonEmptyString,
+      requestedAuthority: z.enum(['repair', 'accept_no_change', 'extend_budget', 'change_scope', 'change_owner']),
+      findingArtifactRef: nonEmptyString,
+      expectedChange: nonEmptyString,
+      costAndRollback: nonEmptyString,
+      withdrawalCondition: nonEmptyString,
+      summary: nonEmptyString,
+      detail: z.record(z.unknown()),
+      requestOrigin: approvalRequestOriginSchema,
+      requestSnapshot: approvalRequestSnapshotSchema,
+      supersedesProposalId: nonEmptyString.optional(),
+    })
+    .strict(),
+  eventBaseSchema
+    .extend({
+      type: z.literal('approval_anchored'),
+      caseId: nonEmptyString,
+      proposalId: nonEmptyString,
+      approvalEnvelopeRef: nonEmptyString,
+      approvalCardRef: z.object({ threadId: nonEmptyString, messageId: nonEmptyString }).strict(),
+    })
+    .strict(),
+  eventBaseSchema
+    .extend({
+      type: z.literal('approval_publication_tombstoned'),
+      caseId: nonEmptyString,
+      proposalId: nonEmptyString,
+      failedAt: isoDateTime,
+    })
+    .strict(),
+  eventBaseSchema
+    .extend({
+      type: z.literal('approval_decided'),
+      caseId: nonEmptyString,
+      proposalId: nonEmptyString,
+      resolution: z.enum(['accepted', 'rejected', 'closed_without_decision']),
+      decisionKind: z.enum(['accept', 'reject', 'withdraw']),
+      reasonCode: z.enum([
+        'accepted_as_proposed',
+        'wrong_target',
+        'insufficient_evidence',
+        'not_now',
+        'cost_too_high',
+        'other',
+      ]),
+      reasonText: nonEmptyString.optional(),
+      decidedByUserId: nonEmptyString,
+      approvalRef: ownerTruthRefV1Schema,
+      requestSnapshot: approvalRequestSnapshotSchema,
+    })
+    .strict(),
+  eventBaseSchema
+    .extend({
+      type: z.literal('approval_superseded'),
+      caseId: nonEmptyString,
+      proposalId: nonEmptyString,
+      drift: z.enum(['owner', 'authorization', 'target']),
+      freshCaseActionRef: nonEmptyString,
+      requestSnapshot: approvalRequestSnapshotSchema,
+      dispatchRejectionRef: ownerTruthRefV1Schema.optional(),
+    })
+    .strict(),
+  eventBaseSchema
+    .extend({
+      type: z.literal('approval_materialization_started'),
+      caseId: nonEmptyString,
+      proposalId: nonEmptyString,
+      approvalRef: ownerTruthRefV1Schema,
+      requestSnapshot: approvalRequestSnapshotSchema,
+      dispatchSnapshot: approvalRequestSnapshotSchema,
+      dispatchId: nonEmptyString,
+    })
+    .strict(),
+  eventBaseSchema
+    .extend({
+      type: z.literal('approval_materialized'),
+      caseId: nonEmptyString,
+      proposalId: nonEmptyString,
+      approvalRef: ownerTruthRefV1Schema,
+      requestSnapshot: approvalRequestSnapshotSchema,
+      dispatchSnapshot: approvalRequestSnapshotSchema,
+      dispatchId: nonEmptyString,
+      taskRef: ownerTruthRefV1Schema,
+      leaseRef: ownerTruthRefV1Schema,
+      custodyReceiptRef: ownerTruthRefV1Schema,
     })
     .strict(),
   eventBaseSchema
@@ -123,6 +246,18 @@ export const EvalLifecycleEventSchema = z.discriminatedUnion('type', [
       taskId: nonEmptyString,
       leaseId: nonEmptyString,
       leaseGeneration: z.number().int().positive(),
+    })
+    .strict(),
+  eventBaseSchema
+    .extend({
+      type: z.literal('custody_dispatch_blocked'),
+      caseId: nonEmptyString,
+      stage: z.enum(['responsibility', 'reevaluation']),
+      reasonCode: z.enum(['carrier_persist_failed', 'carrier_delivery_failed', 'carrier_not_enqueued']),
+      taskId: nonEmptyString,
+      leaseId: nonEmptyString,
+      leaseGeneration: z.number().int().positive(),
+      carrierMessageId: nonEmptyString.optional(),
     })
     .strict(),
   eventBaseSchema

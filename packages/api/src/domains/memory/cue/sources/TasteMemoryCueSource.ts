@@ -3,6 +3,11 @@ import { readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import type { TasteRepository } from '../../../taste/services/TasteRepository.js';
 import { TasteMemoryReader, type TasteMemoryReadResult } from '../../taste/TasteMemoryReader.js';
+import {
+  EXPLICIT_APPROVED_TASTE_SOURCE_ANCHOR_PREFIX,
+  getExplicitApprovedTasteTrigger,
+  getExplicitApprovedTasteTriggerBySourcePath,
+} from '../ExplicitApprovedTasteTriggerCatalog.js';
 import type { TasteDimensionMapSource } from '../resolvers/TasteCueResolver.js';
 
 const TASTE_MAP_VERSION = 1;
@@ -88,12 +93,37 @@ export class CanonicalTasteMemoryCueSource implements TasteDimensionMapSource {
       : null;
   }
 
+  async resolveExplicit(input: { ownerUserId: string; triggerKey: 'ELI5' }): Promise<{
+    triggerKey: 'ELI5';
+    sourcePath: string;
+    revision: string;
+    visibility: 'owner_public' | 'owner_private';
+  } | null> {
+    if (input.ownerUserId !== this.ownerUserId) return null;
+    const trigger = getExplicitApprovedTasteTrigger(input.triggerKey);
+    if (!trigger) return null;
+    const result = this.reader.read({ ownerUserId: input.ownerUserId, sourcePath: trigger.sourcePath });
+    if (!result || !trigger.requiredTags.every((tag) => result.payload.tags.includes(tag))) return null;
+    return {
+      triggerKey: trigger.triggerKey,
+      sourcePath: trigger.sourcePath,
+      revision: result.revision,
+      visibility: result.visibility === 'private' ? 'owner_private' : 'owner_public',
+    };
+  }
+
   async read(input: {
     ownerUserId: string;
     anchor: string;
     expectedRevision: string;
   }): Promise<TasteMemoryCueReadResult> {
-    if (input.ownerUserId !== this.ownerUserId || !input.anchor.startsWith('taste-dimensions:')) {
+    if (input.ownerUserId !== this.ownerUserId) {
+      return { status: 'not_available', invalidationReason: 'source_forgotten' };
+    }
+    if (input.anchor.startsWith(EXPLICIT_APPROVED_TASTE_SOURCE_ANCHOR_PREFIX)) {
+      return this.readExplicit(input);
+    }
+    if (!input.anchor.startsWith('taste-dimensions:')) {
       return { status: 'not_available', invalidationReason: 'source_forgotten' };
     }
     const dimensions = [...new Set(input.anchor.slice('taste-dimensions:'.length).split(',').filter(Boolean))].sort();
@@ -111,6 +141,32 @@ export class CanonicalTasteMemoryCueSource implements TasteDimensionMapSource {
         dimensions: snapshot.dimensions,
         totalCount: snapshot.totalCount,
         vignettes: snapshot.results,
+      },
+    };
+  }
+
+  private readExplicit(input: {
+    ownerUserId: string;
+    anchor: string;
+    expectedRevision: string;
+  }): TasteMemoryCueReadResult {
+    const sourcePath = input.anchor.slice(EXPLICIT_APPROVED_TASTE_SOURCE_ANCHOR_PREFIX.length);
+    const trigger = getExplicitApprovedTasteTriggerBySourcePath(sourcePath);
+    if (!trigger) return { status: 'not_available', invalidationReason: 'source_forgotten' };
+    const current = this.reader.read({ ownerUserId: input.ownerUserId, sourcePath });
+    if (!current) return { status: 'not_available', invalidationReason: 'source_forgotten' };
+    if (
+      current.revision !== input.expectedRevision ||
+      !trigger.requiredTags.every((tag) => current.payload.tags.includes(tag))
+    ) {
+      return { status: 'not_available', invalidationReason: 'source_corrected' };
+    }
+    return {
+      status: 'ok',
+      payload: {
+        triggerKey: trigger.triggerKey,
+        applicationContract: trigger.applicationContract,
+        vignette: current.payload,
       },
     };
   }

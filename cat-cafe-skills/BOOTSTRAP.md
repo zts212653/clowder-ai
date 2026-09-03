@@ -20,6 +20,7 @@ co-creation docs → co-creation-docs → direct push | merge-gate(docs PR)
 | `owner-friendly-plugin-development` | 设计有安装/授权/runtime/Host 路由的operator友好插件 | — |
 | `guide-authoring` | 编排场景引导 YAML / registry / 标签契约 | — |
 | `guide-interaction` | 判断是否需要交互引导，并按 Guide Matched/Pending/Active 等状态驱动回复 | — |
+| `custody-recognition` | 普通对话中的明确托付/隐式未来义务/原消息澄清重试分流 | — |
 | `collaborative-thinking` | brainstorm/多猫讨论/收敛 | — |
 | `expert-panel` | 专家辩论团/竞品分析/技术趋势/showcase | — |
 | `writing-plans` | 写实施计划 | ① impl |
@@ -34,6 +35,7 @@ co-creation docs → co-creation-docs → direct push | merge-gate(docs PR)
 | `receive-review` | 处理 review 反馈（Red→Green） | ③ |
 | `merge-gate` | 门禁→PR→remote review→merge→清理 | ④⑤⑥ |
 | `open-source-teardown` | 热门开源项目/竞品 agent/runtime 的源码拆解、算法剥皮、营销水分和 tradeoff 判断 | — |
+| `opensource-ops` | 外部 PR/issue grounding、作者/custody 与 adoption；deployment 可叠加 Issue/PR/Sync/Intake/Hotfix SOP | — |
 | `cross-cat-handoff` | 跨猫交接/传话（五件套） | — |
 | `deep-research` | 多源深度调研 | — |
 | `source-audit` | 外部数字/benchmark/因果/趋势等高风险 claim 的信源审计与 provenance | — |

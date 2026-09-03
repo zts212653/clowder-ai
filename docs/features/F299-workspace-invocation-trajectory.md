@@ -18,7 +18,7 @@ description_updated_at: 2026-08-18T13:05:00Z
 - **Reviewer**: spec 细节由 @codex-sol 补齐；@fable5 已对 exact `c22defbd0` 完成唯一一次最终架构审核并 `APPROVE`
 Architecture cell: identity-session, bubble-pipeline, hub-action-surface
 
-Map delta: none（2026-08-24，Phase A–D 已完成，Phase E 待接线）——Phase B.2 已把 `thread-access-policy` authority subcell 登记到 `identity-session`；B.1–D 只扩展既有 transcript / projection / read policy，Phase E 复用 `harness-eval` cell 的 registry、trigger、verdict 与 re-eval closure，不新建 Store / Queue / authority
+Map delta: none（2026-09-02，Phase A–D 已完成；Phase E control plane、bounded source adapter 与第一份可信 calibration lineage 已进入 production，真实效用 keep/tune/sunset closure 仍待后续有效窗口）——Phase B.2 已把 `thread-access-policy` authority subcell 登记到 `identity-session`；B.1–D 只扩展既有 transcript / projection / read policy，Phase E 复用 `harness-eval` cell 的 registry、trigger、verdict 与 re-eval closure，不新建 Store / Queue / authority
 
 ## Why
 
@@ -85,7 +85,7 @@ Gate 0 经 operator 与 @fable5 以奥卡姆剃刀收敛（`0001787500223746-000
 
 作为 F192 既有控制面的 `eval:trajectory-inspector` domain 注册，不在 F299 自建 scheduler、verdict store 或第二套 Eval Hub。consumer =「F299 owner 与 operator 对 You/猫调查异常 invocation 的体验作 keep/tune/sunset」；以异常调查 time-to-evidence、根因证据闭合结果、Raw/JSONL grep 回退为多维向量，不合成总分、不以打开率衡量价值。
 
-**当前进度（2026-08-24）**：Phase A–D 已全部 merge，并完成 merged-main Alpha；Phase E 是 F299 唯一剩余阶段。F192 Phase I 的共享 time/threshold trigger dispatcher 已落地，但仓库中尚无 `eval:trajectory-inspector` registry entry、source adapter、publish adapter 或 system thread，不能把“出生证已冻结”冒充“domain 已接线”。下一步只做 F192 domain onboarding + 可重放 episode/reducer + verdict/re-eval 闭环，不扩 F299 页面、不再设计第二套指标或调度。
+**当前进度（2026-09-02）**：Phase A–D 已全部 merge，并完成 merged-main Alpha。Phase E control plane 由 PR #3943（merge `098ed53cb`）接入 F192 registry、共享 trigger、source/publish adapter 与 system thread；PR #4111（merge `b203648afa`）把两次 production OOM 的 source adapter 收敛为 metadata 窗口预筛、两遍流式聚合、全局并发上限 2、bounded candidate evidence cache 与预算超限 fail-closed，**AC-E2 已关闭**。其后 PR #4135（merge `f1dee7f9b8`）统一 request-scoped publication clock、evidence contract 与 exact-SHA glossary status。operator 授权的唯一一次 post-repair bounded live publish 随后无 OOM、无重试地完成；证据 PR #4206（exact HEAD `fb6a08eacd`，merge `94cb7a19c7`）通过 `Eval Metric Glossary Coverage` exact-SHA SUCCESS 后由非生成猫合入。该窗口从 3,636 个候选中 canonical-resolve 8 个 eligible episode，8 个均为 `not_taken`，`wrong_ref=0`、Raw/JSONL fallback=0；因 eligible <10、coverage degraded、无 comparable baseline 与外部 review，结论依法为 `calibration_only / keep_observe`。这已建立第一份可信 F266 lineage 并关闭 OOM 事故的 bounded-live acceptance，但还不足以裁决 Inspector 效用，故 **AC-E1 保持 open**，等待 2026-09-06 起的后续可比有效窗口沿同一 lineage 产出 keep/tune/sunset。
 
 ## 消费者与时刻（防 Goal Drift · operator 灵魂拷问 `0001786985975123` 后修正）
 
@@ -143,6 +143,7 @@ F298 保证事实**活着** → F300 保证事实**到达**猫的判断点 → �
 | R12 | 侧栏能看见的 system thread，其轨迹/Sessions/大剧院不能 403；修在统一 access policy，不扩权也不各修各的 | AC-B12、AC-B13 | identity×resource×action contract 矩阵 + `thread_eval_friction` 红绿实测 | [x] |
 | R13 | “Design Gate 和真实页不能卖家秀/买家秀”——保留真实页更好的紧凑密度、单标签与内联工具详情，恢复设计稿更好的角色渐变与错误强调 | AC-B14 | 真实组件浏览器回归：light / dark / 390px + computed style 对照 | [x] |
 | R14 | F192/F153/F299 接线不能制造第四套 manifest/ref/availability 权威 | AC-C1、AC-C2、AC-C3 | ownership + negative contract tests | [x] |
+| R15 | Phase E source adapter 的工作集必须由窗口内 session / invocation / candidate 上界决定，不能随 owner 全历史 transcript 字节数线性驻留或按候选反复整份读取 | AC-E2 | 受限堆大 transcript 回归 + metadata 预筛/并发上界/无整份重读 contract test + merged-main Alpha | [x] |
 
 ### 覆盖检查
 
@@ -187,6 +188,7 @@ F298 保证事实**活着** → F300 保证事实**到达**猫的判断点 → �
 
 ### Phase E（P4 eval）
 - [ ] AC-E1: `eval:trajectory-inspector` 经 F192 registry / verdict / re-eval closure 产出 keep/tune/sunset；使用 time-to-evidence、根因证据闭合结果、Raw/JSONL grep 回退三维向量，沉默 episode 不从分母消失，不合成总分、不含打开率
+- [x] AC-E2: source adapter 必须先用 session metadata 排除不与 verdict window 重叠的 transcript，再以有界并发（上限 2）流式完成 discovery/evidence 两遍扫描；只保留 per-invocation reducer state 与候选所需 evidence，candidate resolver 不得重读整份 session。测试必须在 128 MiB heap 下处理多个 250k-event synthetic transcript，并对 production 最大 transcript 做 read-only streaming smoke；invocation/candidate/evidence 安全上界超限时 fail closed，不得退化为无界 materialization（PR #4111 merge `b203648afa`；feature 102/102、merged-main Alpha 35/35；366,859,186-byte transcript 在 128 MiB heap 下 peak 52.2 MiB）
 
 ## Eval / Tracking Contract（Phase E）
 
@@ -240,6 +242,7 @@ metric_birth_certificate:
 | Hub 为兼容历史债学习越来越多 ref grammar | 格式卫生在 F192 producer 侧收敛；F299 只认 `inv:<id>`，历史 artifact 不回写、不猜解析 |
 | F299 固化四源 manifest 后与 F153/F237/F200 状态漂移 | 来源集合开放、读取时由 owner 解析；F299 不持久化 availability/absent reason |
 | Phase E 因只采“主动打开”形成幸存者偏差 | eligible anomaly opportunity 是 episode；not_taken/unresolved 留在向量中，人工校准后才出 verdict |
+| Phase E 为构造窗口样本先把 owner 全历史 transcript 物化进堆，定时任务可打挂整台 API | metadata 先筛 session；JSONL 流式 reducer 两遍扫描；全局并发 ≤2；per-session invocation / candidate / evidence 均有 fail-closed 上界；candidate resolver 只消费已缓存的小证据集，不重读整份 transcript；用 128 MiB heap 与 production 最大文件守回归 |
 
 ## Tips Contribution（F244）
 
@@ -259,6 +262,7 @@ metric_birth_certificate:
 | KD-9 | Phase C 不建 evidence manifest / universal ref；跨 surface 只共享既有 `inv:<id>`，位置由 canonical child execution → parent record → session 解析 | 坐标维度应等于真实自由度；派生 thread/session 不应成为 evidence producer 的重复负担，也不能用当前页面值猜投 | 2026-08-22 |
 | KD-10 | Phase E 是 F192 `eval:trajectory-inspector` domain，不是 F299 自建 eval | 复用既有 registry、verdict、handoff 与 re-eval closure，避免第二套控制面 | 2026-08-22 |
 | KD-11 | Phase D envelope 是 Session transcript 的组成部分，段级按 `sourceRef` 继承既有 owner scope；You reveal 与猫 bounded drill 只是两种消费方式，不构成两套权限 | operator 指出 originating-cat/reviewer 限制会与记忆读取及 B.2 `thread-access-policy` 冲突；奥卡姆剃刀要求删除独立 privacy/access/delete 层，同时保留 actual-bytes-before-launch 的证据合同 | 2026-08-23 |
+| KD-12 | Phase E source adapter 采用 metadata 预筛 + 两遍流式 reducer + bounded candidate evidence cache；并发固定上限 2，越过安全预算 fail closed | 运行健康不能靠缩窗口或加 Node heap；同一 14 天 claim 在 6.02 GiB 历史 corpus 上仍应有与历史总字节数无关的有界工作集，且不能用另一个 eval 验证运行健康 | 2026-08-25 |
 
 ## Review Gate
 
@@ -267,4 +271,4 @@ metric_birth_certificate:
 - Phase B.1 / B.2 implementation: ✅ @codex-sol author；@kimi 已完成非作者 exact-HEAD review；Phase B.2 PR #3833 与 Phase B.1 PR #3834 均已合入
 - Phase C: ✅ 方向经 operator 2026-08-22 收敛；实现按 F299 resolver/UX 与 F192 producer hygiene 分属 ownership且不新建共同层；@opus47 exact-HEAD review `APPROVE` 后 PR #3871 合入，真实 ID-space P1 再由 PR #3877 修复（@luna 窄范围 `APPROVE`，P1/P2/P3=0；merge `528de1026`）
 - Phase D: ✅ PR #3905 已合入；`@opus5` 对 exact `ceccd78b3` `APPROVE`，full gate 与 merged-main Alpha 的真实聊天→trajectory→source-authorized reveal 链均通过，AC-D1 已关闭
-- Phase E: 🟡 唯一剩余阶段；出生证已落盘，F192 Phase I 控制面可复用，但 domain 尚未注册/接线。下一步按 F192 domain onboarding/review gate 实现，AC-E1 只在真实 keep/tune/sunset verdict + re-eval closure 后关闭
+- Phase E: 🟡 control plane、AC-E2 bounded source repair 与 evidence publication repair 均已合入；第一份可信 post-repair verdict 已由 PR #4206 建立 `calibration_only / keep_observe` lineage，证明 live scan/publish/check/merge 机械链闭合。AC-E1 仍等后续可比有效窗口沿同一 F266 lineage 产出 keep/tune/sunset，不把 8 个 eligible episode 的首窗冒充效用裁决

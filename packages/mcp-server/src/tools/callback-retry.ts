@@ -13,6 +13,7 @@ const DEFAULT_RETRY_DELAYS_MS = [1000, 2000, 4000];
  * 10s covers slow networks; each retry attempt gets a fresh timeout.
  */
 const DEFAULT_FETCH_TIMEOUT_MS = 10_000;
+const TERMINAL_CALLBACK_CODES = new Set(['github_authentication_required', 'github_permission_denied']);
 
 export interface CallbackPostFailure {
   error: string;
@@ -41,7 +42,22 @@ export function getFetchTimeoutMs(): number {
   return Number.isFinite(parsed) && parsed > 0 ? parsed : DEFAULT_FETCH_TIMEOUT_MS;
 }
 
-function shouldRetryStatus(status: number): boolean {
+function hasTerminalCallbackCode(text: string): boolean {
+  try {
+    const parsed = JSON.parse(text);
+    return (
+      parsed !== null &&
+      typeof parsed === 'object' &&
+      typeof parsed.code === 'string' &&
+      TERMINAL_CALLBACK_CODES.has(parsed.code)
+    );
+  } catch {
+    return false;
+  }
+}
+
+function shouldRetryStatus(status: number, text: string): boolean {
+  if (status >= 500 && hasTerminalCallbackCode(text)) return false;
   return status === 408 || status === 429 || status >= 500;
 }
 
@@ -107,7 +123,7 @@ export async function postJsonWithRetry(
       // branch on a typed marker instead of regex-matching prose.
       const reasonTag = response.status === 401 ? extractReasonTag(text) : '';
       lastError = `Callback failed (${response.status})${reasonTag}: ${text}`;
-      retryable = shouldRetryStatus(response.status);
+      retryable = shouldRetryStatus(response.status, text);
       if (!retryable || attempt >= retryDelaysMs.length) {
         return { ok: false, failure: { error: lastError, retryable } };
       }

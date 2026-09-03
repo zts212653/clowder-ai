@@ -93,6 +93,25 @@ export const personMemoryOutcome = lazy(() =>
   }),
 );
 
+export const routingPreflightEventTotal = lazy(() =>
+  meter().createCounter('cat_cafe.routing_context.preflight.event', {
+    description: 'F293 process-scoped routing preflight health events',
+  }),
+);
+
+export const routingPreflightDuration = lazy(() =>
+  meter().createHistogram('cat_cafe.routing_context.preflight.duration', {
+    description: 'F293 routing resolver attempt duration',
+    unit: 'ms',
+  }),
+);
+
+export const routingSignalObservationTotal = lazy(() =>
+  meter().createCounter('cat_cafe.routing_context.signal_observation', {
+    description: 'F293 bounded automatic routing signal observation outcomes',
+  }),
+);
+
 export const proactiveMemoryScanTotal = lazy(() =>
   meter().createCounter('cat_cafe.proactive_memory.scan', {
     description: 'F282 canonical owner-window scans without owner or subject attributes',
@@ -1347,4 +1366,5 @@ export function warmupCounters(): void {
   externalCaseUserNudgeRequired.add(0);
   contextProjectionTransitionTotal.add(0);
   contextProjectionLedgerOutcomeTotal.add(0);
+  routingSignalObservationTotal.add(0);
 }

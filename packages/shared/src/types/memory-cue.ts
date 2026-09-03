@@ -1,12 +1,14 @@
 import { z } from 'zod';
+import { CURRENT_RELATIONSHIP_PROFILE_URI } from '../profile-contract.js';
 
-export const RECALL_OPPORTUNITY_CATALOG_VERSION = 1 as const;
+export const RECALL_OPPORTUNITY_CATALOG_VERSION = 3 as const;
 
 export const RECALL_RESOLVER_FAMILIES = [
   'person_entity',
   'operational_precedent',
   'taste',
   'profile',
+  'event',
   'project_knowledge',
 ] as const;
 
@@ -24,6 +26,18 @@ export const RECALL_OPPORTUNITY_V1_PAIRS = Object.freeze([
   Object.freeze({
     kind: 'judgment_surface_entered' as const,
     producer: 'workflow_sop' as const,
+  }),
+  Object.freeze({
+    kind: 'approved_taste_invoked' as const,
+    producer: 'owner_message' as const,
+  }),
+  Object.freeze({
+    kind: 'profile_revision_available' as const,
+    producer: 'profile_repository' as const,
+  }),
+  Object.freeze({
+    kind: 'recent_event_available' as const,
+    producer: 'event_memory' as const,
   }),
 ]);
 
@@ -120,10 +134,56 @@ export const judgmentSurfaceEnteredOpportunityV1Schema = z
   })
   .strict();
 
+export const approvedTasteInvokedOpportunityV1Schema = z
+  .object({
+    ...opportunityBaseShape,
+    kind: z.literal('approved_taste_invoked'),
+    producer: z.literal('owner_message'),
+    payload: z
+      .object({
+        triggerKey: z.literal('ELI5'),
+        sourceMessageId: boundedIdentifier(200),
+      })
+      .strict(),
+  })
+  .strict();
+
+export const profileRevisionAvailableOpportunityV1Schema = z
+  .object({
+    ...opportunityBaseShape,
+    kind: z.literal('profile_revision_available'),
+    producer: z.literal('profile_repository'),
+    payload: z
+      .object({
+        profileUri: z.literal(CURRENT_RELATIONSHIP_PROFILE_URI),
+        sourceRevision: boundedIdentifier(200),
+      })
+      .strict(),
+  })
+  .strict();
+
+export const recentEventAvailableOpportunityV1Schema = z
+  .object({
+    ...opportunityBaseShape,
+    kind: z.literal('recent_event_available'),
+    producer: z.literal('event_memory'),
+    payload: z
+      .object({
+        eventId: boundedIdentifier(200),
+        subjectThreadId: boundedIdentifier(160),
+        sourceRevision: boundedIdentifier(200),
+      })
+      .strict(),
+  })
+  .strict();
+
 export const recallOpportunityV1Schema = z.discriminatedUnion('kind', [
   subjectSeenOpportunityV1Schema,
   deliveryDecisionOpportunityV1Schema,
   judgmentSurfaceEnteredOpportunityV1Schema,
+  approvedTasteInvokedOpportunityV1Schema,
+  profileRevisionAvailableOpportunityV1Schema,
+  recentEventAvailableOpportunityV1Schema,
 ]);
 
 const memoryCueInvalidatorsSchema = z.tuple([
@@ -155,7 +215,7 @@ export const cueEnvelopeV1Schema = z
       .strict(),
     drill: z
       .object({
-        family: z.enum(['person_memory', 'evidence', 'taste']),
+        family: z.enum(['person_memory', 'evidence', 'taste', 'profile', 'event']),
         handle: boundedIdentifier(2_000),
       })
       .strict(),
@@ -179,6 +239,9 @@ export type SubjectSeenOpportunityV1 = z.infer<typeof subjectSeenOpportunityV1Sc
 export type DeliveryDecisionOpportunityV1 = z.infer<typeof deliveryDecisionOpportunityV1Schema>;
 export type DeliveryDecisionCueCarrierV1 = z.infer<typeof deliveryDecisionCueCarrierV1Schema>;
 export type JudgmentSurfaceEnteredOpportunityV1 = z.infer<typeof judgmentSurfaceEnteredOpportunityV1Schema>;
+export type ApprovedTasteInvokedOpportunityV1 = z.infer<typeof approvedTasteInvokedOpportunityV1Schema>;
+export type ProfileRevisionAvailableOpportunityV1 = z.infer<typeof profileRevisionAvailableOpportunityV1Schema>;
+export type RecentEventAvailableOpportunityV1 = z.infer<typeof recentEventAvailableOpportunityV1Schema>;
 export type RecallOpportunityV1 = z.infer<typeof recallOpportunityV1Schema>;
 export type CueEnvelopeV1 = z.infer<typeof cueEnvelopeV1Schema>;
 export type RecallResolverFamily = (typeof RECALL_RESOLVER_FAMILIES)[number];
@@ -188,7 +251,8 @@ const MEMORY_CUE_DRILL_FAMILY_BY_RESOLVER = Object.freeze({
   person_entity: 'person_memory' as const,
   operational_precedent: 'evidence' as const,
   taste: 'taste' as const,
-  profile: null,
+  profile: 'profile' as const,
+  event: 'event' as const,
   project_knowledge: null,
 });
 

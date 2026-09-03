@@ -76,6 +76,7 @@ export function createCapabilityWakeupGeneratorAdapter(provider: CapabilityWakeu
               reason: 'no classified trials matched source window',
             }
           : undefined,
+      generatedAt: deps.publicationTime,
       submittedPacket: packet,
     });
 

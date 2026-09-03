@@ -181,7 +181,7 @@ describe('F296 B4a: epoch-fenced presentation generation retirement', () => {
         sourceRevision: 'revision-b4a',
         axis: 'consumption',
         consumptionOutcome: 'presented',
-        catalogVersion: 1,
+        catalogVersion: 3,
         resolverVersion: 1,
         occurredAt: 1,
       },

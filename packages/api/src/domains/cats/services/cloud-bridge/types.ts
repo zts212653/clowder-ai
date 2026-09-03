@@ -6,7 +6,20 @@
  * subsequent PR-C).
  */
 
-import type { CatId, CloudBridgeFailureDiagnosticV1 } from '@cat-cafe/shared';
+import type { CatId, CloudBridgeFailureDiagnosticV1, CloudBridgeOutboundReceiptV1 } from '@cat-cafe/shared';
+
+/**
+ * Server-authored provenance for one exact cloud dispatch child.
+ *
+ * Queue carriers preserve this value unchanged; route layers must not
+ * reconstruct it from display text or the current queue row.
+ */
+export interface CloudDispatchProvenance {
+  readonly sourceMessageId: string;
+  readonly sourceSender: CloudBridgeOutboundReceiptV1['sourceSender'];
+  readonly calledByCatId: CatId;
+  readonly intent: string;
+}
 
 /**
  * Parameters passed to the bridge when a local cat @ mentions a cloud cat.
@@ -39,8 +52,6 @@ export interface CloudInvokeDispatchParams {
   readonly intent: string;
   /** Exact persisted source message ID: return anchor and Host idempotency key. */
   readonly sourceMessageId: string;
-  /** Opaque server-signed capability binding a Remote MCP return to the exact source. */
-  readonly cloudReturnBinding: string;
 }
 
 /**

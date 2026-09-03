@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import fs, { mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import fs, { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { syncBuiltinESMExports } from 'node:module';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -34,11 +34,21 @@ function branchExists(repoRoot, branchName) {
   }
 }
 
-function createTestPublisher(createGitWorktreePublisher, repoRoot) {
+function refExists(repoRoot, refName) {
+  try {
+    execFileSync('git', ['rev-parse', '--verify', refName], { cwd: repoRoot, stdio: 'ignore' });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function createTestPublisher(createGitWorktreePublisher, repoRoot, overrides = {}) {
   return createGitWorktreePublisher({
     repoRoot,
     expectedRepoFullName: 'zts212653/cat-cafe',
     contractRunner: async () => {},
+    ...overrides,
   });
 }
 
@@ -47,6 +57,76 @@ afterEach(() => {
 });
 
 describe('createGitWorktreePublisher', () => {
+  it('creates no PR and removes the remote branch when exact-HEAD status publication fails', async () => {
+    const { repoRoot, remoteRoot } = createRepoWithOrigin();
+    const fakeBin = fs.mkdtempSync(join(tmpdir(), 'publish-wt-fake-bin-'));
+    const ghLog = join(fakeBin, 'gh.log');
+    const fakeGh = join(fakeBin, 'gh');
+    const originalPath = process.env.PATH;
+    const branchName = 'verdict/auto/eval-a2a/status-failure-cleanup';
+    writeFileSync(
+      fakeGh,
+      `#!/bin/sh
+printf '%s\\n' "$*" >> '${ghLog}'
+if [ "$1" = "pr" ] && [ "$2" = "list" ]; then
+  printf '[]\\n'
+  exit 0
+fi
+exit 97
+`,
+    );
+    fs.chmodSync(fakeGh, 0o755);
+    process.env.PATH = `${fakeBin}:${originalPath ?? ''}`;
+
+    try {
+      const { createGitWorktreePublisher } = await import(
+        `../../dist/infrastructure/harness-eval/publish-verdict/git-worktree-publisher.js?t=${Date.now()}-status-fail`
+      );
+      const publisher = createTestPublisher(createGitWorktreePublisher, repoRoot, {
+        commitStatusPublisher: async () => {
+          throw new Error('status_publish_failed');
+        },
+      });
+
+      await assert.rejects(
+        publisher.publishOnIsolatedWorktree({
+          branchName,
+          sourceBase: 'origin/main',
+          stage: async (worktreeRoot) => {
+            const path = join(worktreeRoot, 'docs/harness-feedback/verdicts/status-failure.md');
+            mkdirSync(dirname(path), { recursive: true });
+            writeFileSync(path, '# status failure\n');
+            return {
+              paths: [path],
+              commitMessage: 'verdict(test): status failure',
+              prTitle: 'verdict(test): status failure',
+              prBody: 'status failure regression',
+              statusChecks: [
+                {
+                  context: 'Eval Metric Glossary Coverage',
+                  state: 'success',
+                  description: 'Candidate glossary, measurement, and publication contracts passed',
+                },
+              ],
+            };
+          },
+        }),
+        /status_publish_failed/,
+      );
+
+      assert.equal(branchExists(repoRoot, branchName), false);
+      assert.equal(refExists(remoteRoot, `refs/heads/${branchName}`), false);
+      const ghCalls = readFileSync(ghLog, 'utf8');
+      assert.match(ghCalls, /^pr list /m, 'cleanup must prove no open PR before deleting the remote branch');
+      assert.doesNotMatch(ghCalls, /^pr create /m, 'status failure must stop before PR creation');
+    } finally {
+      process.env.PATH = originalPath;
+      rmSync(repoRoot, { recursive: true, force: true });
+      rmSync(remoteRoot, { recursive: true, force: true });
+      rmSync(fakeBin, { recursive: true, force: true });
+    }
+  });
+
   it('cleans up a partially-created local branch when worktree add fails before stage', async (t) => {
     const { repoRoot, remoteRoot } = createRepoWithOrigin();
     const worktreePath = fs.mkdtempSync(join(tmpdir(), 'publish-wt-target-'));
@@ -126,7 +206,10 @@ describe('createGitWorktreePublisher', () => {
       const { createGitWorktreePublisher } = await import(
         `../../dist/infrastructure/harness-eval/publish-verdict/git-worktree-publisher.js?t=${Date.now()}-noverify`
       );
-      const publisher = createTestPublisher(createGitWorktreePublisher, repoRoot);
+      const publishedStatuses = [];
+      const publisher = createTestPublisher(createGitWorktreePublisher, repoRoot, {
+        commitStatusPublisher: async (input) => publishedStatuses.push(input),
+      });
 
       // We expect the publisher to FAIL eventually (at `gh pr create` — there is no gh
       // configured for the bare local remote in tests). But the commit + push MUST have
@@ -147,6 +230,13 @@ describe('createGitWorktreePublisher', () => {
               commitMessage: 'verdict(test): no-verify hook bypass',
               prTitle: 'verdict(test): no-verify hook bypass',
               prBody: 'regression test for 砚砚 [爪感差] hook leak',
+              statusChecks: [
+                {
+                  context: 'Eval Metric Glossary Coverage',
+                  state: 'success',
+                  description: 'Candidate glossary, measurement, and publication contracts passed',
+                },
+              ],
             };
           },
         });
@@ -165,6 +255,19 @@ describe('createGitWorktreePublisher', () => {
         /^[0-9a-f]{40}$/,
         'verdict commit must have been pushed to origin despite the failing pre-commit hook',
       );
+      assert.deepEqual(publishedStatuses, [
+        {
+          repoFullName: 'zts212653/cat-cafe',
+          headSha: remoteBranchSha,
+          statuses: [
+            {
+              context: 'Eval Metric Glossary Coverage',
+              state: 'success',
+              description: 'Candidate glossary, measurement, and publication contracts passed',
+            },
+          ],
+        },
+      ]);
       const commitMsg = execFileSync('git', ['log', '-1', '--format=%s', remoteBranchSha], {
         cwd: remoteRoot,
         encoding: 'utf-8',

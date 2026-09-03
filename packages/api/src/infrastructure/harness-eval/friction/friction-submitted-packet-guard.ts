@@ -22,6 +22,11 @@ export function assertFrictionSubmittedPacketMatches(
   submitted: VerdictHandoffPacket,
   domain: EvalDomainRegistryEntry,
 ): void {
+  if ('repairTarget' in submitted || 'findingBinding' in submitted) {
+    throw new Error(
+      'submitted_packet_server_owned_fields: aggregate repairTarget/findingBinding are forbidden; the server constructs child-only routing truth',
+    );
+  }
   if (domain.domainId !== 'eval:friction') {
     throw new Error(`friction_generator_wrong_domain: input.domain.domainId=${domain.domainId} must be eval:friction`);
   }

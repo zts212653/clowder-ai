@@ -1,7 +1,7 @@
 ---
 name: merge-gate
-tips_exempt: harness/SOP workflow change (merge-gate Step 7.5 dev-process gate); no end-user capability
 description: 合入 main：按行为 / 数据 / 安全 / 契约 / 不可逆风险选择 targeted 或 full gate，并消费一个或多个有客观触发理由的独立 review source。
+tips_exempt: harness-internal gate routing policy; no distinct end-user capability surface
 triggers:
   - "合入 main"
   - "merge"
@@ -50,6 +50,8 @@ triggers:
 ### Review Continuity Guard（review 是否真的覆盖当前 HEAD）
 
 `pnpm gate`、rebase、fixup、biome 格式化刷新等都可能让 HEAD 变化。**HEAD 变化只触发 provenance 判定，不自动等于 re-review**：先分清 review 后是否真的改了本 PR 的内容、base 前进是否与本 PR 有逻辑关联；两者都没有，或只有可机械证明的派生物重建 / 规范化，旧 review 用 continuityProof 桥接。只有真实的作者 delta 或相关 base delta 回 active source，而且只看那一小块。
+
+**昂贵 gate 连续性（ROI 硬边界）**：一次 full gate 绑定“作者 patch + gate 开始时冻结的 base”，而不是绑定会继续移动的 `origin/main` 字符串。full gate 已完整通过后，若后续只是纯 rebase、作者 patch 不变或 patch-equivalent，且 C2 证明 base 增量无关联，则 rebase 后只跑风险匹配的 targeted continuity checks；**禁止仅因 main 又前进而重跑 full gate**。上一轮 full gate 未完整通过只会使旧 receipt 不可复用，**不会单独把本来属于 targeted 的改动升级为 full**。此时必须回到五轴风险路由，并消费 `pnpm classify:gate-route -- ...` 的机器结论：只有作者实质 delta、相关或无法判定的 base delta、冲突中的语义取舍、相关或无法判定的旧失败，或真实高风险面才重新运行 full gate。判为 `targeted` 时，必须刷新受影响检查与全仓跨包 typecheck；classifier 只选车道，不代替这些绿色证据。
 
 **Report 载体铁则（斩断 SHA 自噬环，operator 2026-07-15 投诉②修复）**：**review verdict 之后、merge 之前，不得再向被审分支 commit 任何 review report / handoff 信 / evidence 说明类文档**——这类内容的合法载体只有 PR comment、thread 消息、tracking 系统。被审分支的 HEAD 只应因代码内容（含 rebase）变化。病灶机制：report 进分支 → SHA 变 → 旧 APPROVE 失效 → re-review → 新 report → SHA 又变（round-10 自噬环）。review **请求**信（mailbox，reviewer 开审前已在 HEAD 内）不受此限。
 
@@ -611,6 +613,7 @@ cd "$MAIN_WT" && git pull origin main   # 取回刚 squash 的 commit，doc-sync
 
 | 错误 | 正确 |
 |------|------|
+| 上一轮 full gate 未完整通过就自动再跑 full | 非绿色 receipt 只禁止复用；回到五轴风险路由并消费 `classify:gate-route`，无关小改走 targeted + 全仓跨包 typecheck |
 | 因为“regular PR / packages 改动”默认叠 local + cloud | 先做五轴风险判断，默认一个合适的独立 source；高风险才按不同风险面叠加 |
 | PR body 里写了remote review 触发句柄 | 在 PR **comment** 里写（body 里写会触发代码修改权限而非 review） |
 | PR body 或 HTML 注释里写了 `@句柄`（例如签名） | **PR body 禁止任何 @句柄**，签名改为纯文本（如 `codex` / `gpt52`） |

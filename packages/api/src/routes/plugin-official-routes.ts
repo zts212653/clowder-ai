@@ -303,7 +303,8 @@ export function registerOfficialPluginRoutes(app: FastifyInstance, options: Offi
       );
       if (!resolved) return reply.status(404).send({ error: 'Official plugin instance not found' });
       try {
-        if (action === 'enable' && resolved.entry.ownerAuth) {
+        const startsRuntime = action === 'enable' || action === 'repair';
+        if (startsRuntime && resolved.entry.ownerAuth) {
           if (!options.auth) {
             return reply.status(503).send({
               error: 'Official plugin authentication is unavailable',
@@ -313,12 +314,12 @@ export function registerOfficialPluginRoutes(app: FastifyInstance, options: Offi
           const auth = await options.auth.status(resolved);
           if (auth.status !== 'connected') {
             return reply.status(409).send({
-              error: 'Connect the owner Feishu account before enabling',
+              error: 'Connect the owner Feishu account before starting meeting intake',
               code: 'AUTH_REQUIRED',
             });
           }
         }
-        if (action === 'enable' && options.meetingIntake) {
+        if (startsRuntime && options.meetingIntake) {
           const catchUp = await options.meetingIntake.detect(resolved.entry, resolved.instance);
           if (catchUp && catchUp.status !== 'idle') {
             return reply.status(409).send({

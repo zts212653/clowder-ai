@@ -52,14 +52,14 @@ describe('RedisApprovedLimbPairingPersistence', { skip: redisIsolationSkipReason
       endpointUrl: 'http://127.0.0.1:8770',
       capabilities: [{ cap: 'limb.observe.touch', commands: [], authLevel: 'free' }],
     });
-    await first.approve(pending.requestId, 'user-landy');
+    await first.approve(pending.requestId, 'user-operator');
 
     const restarted = await LimbPairingStore.restore(new RedisApprovedLimbPairingPersistence(redis));
     const approved = restarted.findApprovedByNodeId(pending.nodeId);
 
     assert.equal(approved.requestId, pending.requestId);
     assert.equal(approved.apiKey, pending.apiKey);
-    assert.equal(approved.approvedByUserId, 'user-landy');
+    assert.equal(approved.approvedByUserId, 'user-operator');
     assert.equal(await redis.ttl(ApprovedLimbPairingRedisKeys.approved), -1);
   });
 

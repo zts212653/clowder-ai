@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { cpSync, mkdirSync, mkdtempSync } from 'node:fs';
+import { cpSync, mkdirSync, mkdtempSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, it } from 'node:test';
@@ -107,7 +107,12 @@ describe('trajectory inspector publish adapter', () => {
     const result = await adapter(
       packet,
       { kind: 'trajectory-inspector-window', windowStartMs: 1_000, windowEndMs: 2_000 },
-      { harnessFeedbackRoot: root, liveHarnessFeedbackRoot: root, ownerUserId: 'owner' },
+      {
+        harnessFeedbackRoot: root,
+        liveHarnessFeedbackRoot: root,
+        publicationTime: '2026-08-30T23:30:00.000Z',
+        ownerUserId: 'owner',
+      },
     );
     assert.deepEqual(observed, {
       selector: { kind: 'trajectory-inspector-window', windowStartMs: 1_000, windowEndMs: 2_000 },
@@ -115,6 +120,8 @@ describe('trajectory inspector publish adapter', () => {
     });
     assert.match(result.verdictPath, /f299-adapter-observe\.md$/);
     assert.match(result.bundleDir, /bundles\/f299-adapter-observe$/);
+    const snapshot = JSON.parse(readFileSync(join(result.bundleDir, 'snapshot.json'), 'utf8'));
+    assert.equal(snapshot.generatedAt, '2026-08-30T23:30:00.000Z');
   });
 
   it('rejects wrong kind, invalid window, and missing trusted owner before source resolution', async () => {
@@ -133,6 +140,7 @@ describe('trajectory inspector publish adapter', () => {
         {
           harnessFeedbackRoot: root,
           liveHarnessFeedbackRoot: root,
+          publicationTime: '2026-08-30T23:30:00.000Z',
           ownerUserId: 'owner',
         },
       ),
@@ -145,6 +153,7 @@ describe('trajectory inspector publish adapter', () => {
         {
           harnessFeedbackRoot: root,
           liveHarnessFeedbackRoot: root,
+          publicationTime: '2026-08-30T23:30:00.000Z',
           ownerUserId: 'owner',
         },
       ),
@@ -157,6 +166,7 @@ describe('trajectory inspector publish adapter', () => {
         {
           harnessFeedbackRoot: root,
           liveHarnessFeedbackRoot: root,
+          publicationTime: '2026-08-30T23:30:00.000Z',
         },
       ),
       /owner identity unavailable/,

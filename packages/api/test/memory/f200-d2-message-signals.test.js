@@ -25,14 +25,14 @@ describe('F200 AC-D2.1 — operator acceptance signal', () => {
   };
 
   it('detects operator accept from thread messages with Chinese keywords', async () => {
-    const messageStore = mockMessageStore([{ id: 'm1', userId: 'user-landy', catId: null, text: '好的，可以合入' }]);
+    const messageStore = mockMessageStore([{ id: 'm1', userId: 'user-operator', catId: null, text: '好的，可以合入' }]);
     const sources = new ThreadAwareSignalSources(mockDb(), messageStore, EMPTY_TASK_STORE);
     const result = await sources.isCvoAcceptedForThread('thread-001');
     assert.equal(result, true);
   });
 
   it('detects operator accept with "通过" keyword', async () => {
-    const messageStore = mockMessageStore([{ id: 'm1', userId: 'user-landy', catId: null, text: '看了，通过' }]);
+    const messageStore = mockMessageStore([{ id: 'm1', userId: 'user-operator', catId: null, text: '看了，通过' }]);
     const sources = new ThreadAwareSignalSources(mockDb(), messageStore, EMPTY_TASK_STORE);
     const result = await sources.isCvoAcceptedForThread('thread-001');
     assert.equal(result, true);
@@ -58,7 +58,7 @@ describe('F200 AC-D2.1 — operator acceptance signal', () => {
       'not-lgtm, needs work',
       "it's lgtm-ish but not quite",
     ]) {
-      const messageStore = mockMessageStore([{ id: 'm1', userId: 'user-landy', catId: null, text }]);
+      const messageStore = mockMessageStore([{ id: 'm1', userId: 'user-operator', catId: null, text }]);
       const sources = new ThreadAwareSignalSources(mockDb(), messageStore, EMPTY_TASK_STORE);
       const result = await sources.isCvoAcceptedForThread('thread-001');
       assert.equal(result, false, `"${text}" should not trigger cvo_accepted`);
@@ -66,7 +66,7 @@ describe('F200 AC-D2.1 — operator acceptance signal', () => {
   });
 
   it('still accepts "没问题" (positive idiom despite 没)', async () => {
-    const messageStore = mockMessageStore([{ id: 'm1', userId: 'user-landy', catId: null, text: '看了，没问题' }]);
+    const messageStore = mockMessageStore([{ id: 'm1', userId: 'user-operator', catId: null, text: '看了，没问题' }]);
     const sources = new ThreadAwareSignalSources(mockDb(), messageStore, EMPTY_TASK_STORE);
     const result = await sources.isCvoAcceptedForThread('thread-001');
     assert.equal(result, true, '"没问题" is a positive idiom, should still accept');
@@ -101,7 +101,7 @@ describe('F200 AC-D2.1 — operator acceptance signal', () => {
       'not quite: LGTM',
       'LGTM. But needs fixes',
     ]) {
-      const messageStore = mockMessageStore([{ id: 'm1', userId: 'user-landy', catId: null, text }]);
+      const messageStore = mockMessageStore([{ id: 'm1', userId: 'user-operator', catId: null, text }]);
       const sources = new ThreadAwareSignalSources(mockDb(), messageStore, EMPTY_TASK_STORE);
       const result = await sources.isCvoAcceptedForThread('thread-001');
       assert.equal(result, false, `"${text}" is non-approval context, not operator approval`);
@@ -119,7 +119,7 @@ describe('F200 AC-D2.1 — operator acceptance signal', () => {
       '测试已经通过了',
       'CI check 通过了',
     ]) {
-      const messageStore = mockMessageStore([{ id: 'm1', userId: 'user-landy', catId: null, text }]);
+      const messageStore = mockMessageStore([{ id: 'm1', userId: 'user-operator', catId: null, text }]);
       const sources = new ThreadAwareSignalSources(mockDb(), messageStore, EMPTY_TASK_STORE);
       const result = await sources.isCvoAcceptedForThread('thread-001');
       assert.equal(result, false, `"${text}" is technical status, not operator approval`);
@@ -128,7 +128,7 @@ describe('F200 AC-D2.1 — operator acceptance signal', () => {
 
   it('accepts operator mixed tech-status + explicit approval in same message', async () => {
     for (const text of ['CI 已通过，可以合入', '测试已经通过了，走起', 'CI 已通过，没问题']) {
-      const messageStore = mockMessageStore([{ id: 'm1', userId: 'user-landy', catId: null, text }]);
+      const messageStore = mockMessageStore([{ id: 'm1', userId: 'user-operator', catId: null, text }]);
       const sources = new ThreadAwareSignalSources(mockDb(), messageStore, EMPTY_TASK_STORE);
       const result = await sources.isCvoAcceptedForThread('thread-001');
       assert.equal(result, true, `"${text}" has explicit accept after tech-status — should accept`);
@@ -146,7 +146,7 @@ describe('F200 AC-D2.1 — operator acceptance signal', () => {
       'merge 吗？',
       'merge when tests pass',
     ]) {
-      const messageStore = mockMessageStore([{ id: 'm1', userId: 'user-landy', catId: null, text }]);
+      const messageStore = mockMessageStore([{ id: 'm1', userId: 'user-operator', catId: null, text }]);
       const sources = new ThreadAwareSignalSources(mockDb(), messageStore, EMPTY_TASK_STORE);
       const result = await sources.isCvoAcceptedForThread('thread-001');
       assert.equal(result, false, `"${text}" should not trigger cvo_accepted`);
@@ -154,7 +154,7 @@ describe('F200 AC-D2.1 — operator acceptance signal', () => {
   });
 
   it('accepts operator imperative "merge" as standalone approval', async () => {
-    const messageStore = mockMessageStore([{ id: 'm1', userId: 'user-landy', catId: null, text: 'merge' }]);
+    const messageStore = mockMessageStore([{ id: 'm1', userId: 'user-operator', catId: null, text: 'merge' }]);
     const sources = new ThreadAwareSignalSources(mockDb(), messageStore, EMPTY_TASK_STORE);
     const result = await sources.isCvoAcceptedForThread('thread-001');
     assert.equal(result, true, 'standalone "merge" is an approval signal');
@@ -162,7 +162,7 @@ describe('F200 AC-D2.1 — operator acceptance signal', () => {
 
   it('accepts operator imperative "merge it" / "merge please"', async () => {
     for (const text of ['merge it', 'merge this', 'merge please', 'please merge', 'merge!']) {
-      const messageStore = mockMessageStore([{ id: 'm1', userId: 'user-landy', catId: null, text }]);
+      const messageStore = mockMessageStore([{ id: 'm1', userId: 'user-operator', catId: null, text }]);
       const sources = new ThreadAwareSignalSources(mockDb(), messageStore, EMPTY_TASK_STORE);
       const result = await sources.isCvoAcceptedForThread('thread-001');
       assert.equal(result, true, `"${text}" should be accepted as merge approval`);
@@ -173,8 +173,8 @@ describe('F200 AC-D2.1 — operator acceptance signal', () => {
 
   it('operator rejection after approval → latest decision wins (returns false)', async () => {
     const messageStore = mockMessageStore([
-      { id: 'm1', userId: 'user-landy', catId: null, text: '可以合入' },
-      { id: 'm2', userId: 'user-landy', catId: null, text: '等等，不通过' },
+      { id: 'm1', userId: 'user-operator', catId: null, text: '可以合入' },
+      { id: 'm2', userId: 'user-operator', catId: null, text: '等等，不通过' },
     ]);
     const sources = new ThreadAwareSignalSources(mockDb(), messageStore, EMPTY_TASK_STORE);
     const result = await sources.isCvoAcceptedForThread('thread-001');
@@ -183,8 +183,8 @@ describe('F200 AC-D2.1 — operator acceptance signal', () => {
 
   it('operator re-approval after rejection → latest decision wins (returns true)', async () => {
     const messageStore = mockMessageStore([
-      { id: 'm1', userId: 'user-landy', catId: null, text: '不通过' },
-      { id: 'm2', userId: 'user-landy', catId: null, text: '修好了，可以合入' },
+      { id: 'm1', userId: 'user-operator', catId: null, text: '不通过' },
+      { id: 'm2', userId: 'user-operator', catId: null, text: '修好了，可以合入' },
     ]);
     const sources = new ThreadAwareSignalSources(mockDb(), messageStore, EMPTY_TASK_STORE);
     const result = await sources.isCvoAcceptedForThread('thread-001');
@@ -197,7 +197,7 @@ describe('F200 AC-D2.1 — operator acceptance signal', () => {
     const messageStore = mockMessageStore([
       {
         id: 'm1',
-        userId: 'user-landy',
+        userId: 'user-operator',
         catId: null,
         text: '✅ **CI 通过**\n\nPR #42 (repo/name)',
         source: { connector: 'github-ci' },
@@ -212,12 +212,12 @@ describe('F200 AC-D2.1 — operator acceptance signal', () => {
     const messageStore = mockMessageStore([
       {
         id: 'm1',
-        userId: 'user-landy',
+        userId: 'user-operator',
         catId: null,
         text: '✅ **CI 通过**\n\nPR #42',
         source: { connector: 'github-ci' },
       },
-      { id: 'm2', userId: 'user-landy', catId: null, text: '可以合入' },
+      { id: 'm2', userId: 'user-operator', catId: null, text: '可以合入' },
     ]);
     const sources = new ThreadAwareSignalSources(mockDb(), messageStore, EMPTY_TASK_STORE);
     const result = await sources.isCvoAcceptedForThread('thread-001');
@@ -248,7 +248,7 @@ describe('F200 AC-D2.1 — operator acceptance signal', () => {
   });
 
   it('ignores reviewer approval from human (only cat messages count)', async () => {
-    const messageStore = mockMessageStore([{ id: 'm1', userId: 'user-landy', catId: null, text: 'LGTM' }]);
+    const messageStore = mockMessageStore([{ id: 'm1', userId: 'user-operator', catId: null, text: 'LGTM' }]);
     const sources = new ThreadAwareSignalSources(mockDb(), messageStore, EMPTY_TASK_STORE);
     const result = await sources.isReviewerApprovedForThread('thread-001');
     assert.equal(result, false);

@@ -100,6 +100,11 @@ export const DEFAULT_CAPABILITY_WAKEUP_RULES: CapabilityWakeupRule[] = [
     '怎么用|怎么配置|如何操作|新手引导|配置流程|how to (use|configure)|onboarding',
   ),
   textRule(
+    'rich-messaging-visible-artifact-request',
+    'rich-messaging',
+    '(?:画|做|生成).{0,12}(?:HTML|demo|演示卡|展示卡).{0,12}(?:展示|给我看|让我看|看看)|(?:截图|截个图).{0,8}(?:给我|发我|展示|看看|看)|show (?:this|it|the result) (?:directly )?in (?:the )?chat',
+  ),
+  textRule(
     'expert-panel-multi-perspective-request',
     'expert-panel',
     '多猫|专家团|多视角|辩论|架构决定|brainstorm|expert panel',
@@ -112,7 +117,7 @@ export const DEFAULT_CAPABILITY_WAKEUP_RULES: CapabilityWakeupRule[] = [
   textRule(
     'external-runtime-sessions-lost-session',
     'external-runtime-sessions',
-    '外部 runtime|Antigravity|IDE-direct|会话.*丢|截图给我看|runtime session',
+    '外部 runtime|Antigravity|IDE-direct|会话.*丢|runtime session',
   ),
   textRule(
     'cli-diagnostics-exit-debug',

@@ -5,8 +5,8 @@ related_decisions: [040, 041, 042]
 topics: [freshness, glass-box, supplement, inbox-notice, runtime-descriptor, side-effect-gate, codex-app-server, lifecycle, liveness, ax]
 doc_kind: spec
 created: 2026-06-27
-updated: 2026-08-08
-tips_exempt: true
+updated: 2026-08-28
+tips_exempt: historical protocol-contract correction only; no new user capability surface
 ---
 
 # F254: Side-Effect Freshness Gate — 副作用出口 freshness 拦截

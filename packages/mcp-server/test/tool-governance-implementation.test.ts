@@ -32,8 +32,8 @@ function definition(run = readSubject): McpToolDefinition {
     implementation: bindMcpImplementation(implementationRef, run),
     policy: {
       resourceFamily: 'subject',
-      exposureTier: {
-        current: 'eager-core',
+      schemaDelivery: {
+        policy: 'host-default',
         evidenceRef: 'test:packages/mcp-server/test/tool-governance-implementation.test.ts',
       },
       runtimeProfiles: ['full'],

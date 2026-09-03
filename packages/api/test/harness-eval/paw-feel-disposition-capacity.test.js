@@ -238,7 +238,7 @@ describe('F278 seven-day capacity contract', () => {
         backupCatId: 'opus',
         version: 1,
         updatedAt: NOW,
-        updatedBy: 'you',
+        updatedBy: 'operator',
       }),
       watermarkStore,
       receiptReconciler: {

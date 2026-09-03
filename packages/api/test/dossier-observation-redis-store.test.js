@@ -65,19 +65,19 @@ describe('RedisDossierObservationStore', () => {
 
   it('add persists observation to Redis hash + sorted set index', async () => {
     if (!store) return; // skip if no Redis
-    const obs = await store.add({ catId: 'opus', content: 'Strong at architecture', author: 'you' });
+    const obs = await store.add({ catId: 'opus', content: 'Strong at architecture', author: 'operator' });
     assert.ok(obs.id.startsWith('obs_'));
     assert.equal(obs.catId, 'opus');
     assert.equal(obs.content, 'Strong at architecture');
     assert.equal(obs.provenance.type, 'cvo');
-    assert.equal(obs.provenance.author, 'you');
+    assert.equal(obs.provenance.author, 'operator');
     assert.ok(obs.createdAt > 0);
 
     // Verify persisted in Redis hash
     const hash = await redis.hgetall(`dossier-obs:${obs.id}`);
     assert.equal(hash.catId, 'opus');
     assert.equal(hash.content, 'Strong at architecture');
-    assert.equal(hash.provenanceAuthor, 'you');
+    assert.equal(hash.provenanceAuthor, 'operator');
 
     // Verify in sorted set index
     const members = await redis.zrange(`dossier-obs:cat:opus`, 0, -1);
@@ -86,10 +86,10 @@ describe('RedisDossierObservationStore', () => {
 
   it('list returns observations newest first', async () => {
     if (!store) return;
-    const obs1 = await store.add({ catId: 'codex', content: 'First observation', author: 'you' });
+    const obs1 = await store.add({ catId: 'codex', content: 'First observation', author: 'operator' });
     // Small delay to ensure different timestamps
     await new Promise((r) => setTimeout(r, 5));
-    const obs2 = await store.add({ catId: 'codex', content: 'Second observation', author: 'you' });
+    const obs2 = await store.add({ catId: 'codex', content: 'Second observation', author: 'operator' });
 
     const list = await store.list('codex');
     assert.ok(list.length >= 2);
@@ -101,9 +101,9 @@ describe('RedisDossierObservationStore', () => {
 
   it('list respects limit parameter', async () => {
     if (!store) return;
-    await store.add({ catId: 'limited-cat', content: 'A', author: 'you' });
-    await store.add({ catId: 'limited-cat', content: 'B', author: 'you' });
-    await store.add({ catId: 'limited-cat', content: 'C', author: 'you' });
+    await store.add({ catId: 'limited-cat', content: 'A', author: 'operator' });
+    await store.add({ catId: 'limited-cat', content: 'B', author: 'operator' });
+    await store.add({ catId: 'limited-cat', content: 'C', author: 'operator' });
 
     const list = await store.list('limited-cat', 2);
     assert.equal(list.length, 2);
@@ -111,8 +111,8 @@ describe('RedisDossierObservationStore', () => {
 
   it('listAll groups observations by catId', async () => {
     if (!store) return;
-    await store.add({ catId: 'cat-a', content: 'Obs for A', author: 'you' });
-    await store.add({ catId: 'cat-b', content: 'Obs for B', author: 'you' });
+    await store.add({ catId: 'cat-a', content: 'Obs for A', author: 'operator' });
+    await store.add({ catId: 'cat-b', content: 'Obs for B', author: 'operator' });
 
     const all = await store.listAll();
     assert.ok(all['cat-a']?.length >= 1);
@@ -121,7 +121,7 @@ describe('RedisDossierObservationStore', () => {
 
   it('get returns observation by id', async () => {
     if (!store) return;
-    const obs = await store.add({ catId: 'opus', content: 'Retrievable', author: 'you' });
+    const obs = await store.add({ catId: 'opus', content: 'Retrievable', author: 'operator' });
     const found = await store.get(obs.id);
     assert.ok(found);
     assert.equal(found.id, obs.id);
@@ -136,7 +136,7 @@ describe('RedisDossierObservationStore', () => {
 
   it('delete removes from both hash and index', async () => {
     if (!store) return;
-    const obs = await store.add({ catId: 'delete-test', content: 'To delete', author: 'you' });
+    const obs = await store.add({ catId: 'delete-test', content: 'To delete', author: 'operator' });
     const deleted = await store.delete(obs.id);
     assert.equal(deleted, true);
 
@@ -157,7 +157,7 @@ describe('RedisDossierObservationStore', () => {
 
   it('observations have no TTL (Iron Rule #5: user state persists)', async () => {
     if (!store) return;
-    const obs = await store.add({ catId: 'ttl-test', content: 'Must persist', author: 'you' });
+    const obs = await store.add({ catId: 'ttl-test', content: 'Must persist', author: 'operator' });
     const ttl = await redis.ttl(`dossier-obs:${obs.id}`);
     // -1 means no expiry, -2 means key doesn't exist
     assert.equal(ttl, -1, 'observation hash must have no TTL (TTL=0 = persist forever)');

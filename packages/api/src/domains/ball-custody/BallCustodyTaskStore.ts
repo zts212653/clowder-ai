@@ -7,7 +7,15 @@ import type {
   UpdateTaskInput,
 } from '@cat-cafe/shared';
 import type { ITaskStore } from '../cats/services/stores/ports/TaskStore.js';
-import type { ReplaceAutomationStateIfGenerationInput } from '../cats/services/stores/ports/TaskStoreContract.js';
+import type {
+  AdmitEntrustedWorkStoreInput,
+  AdmitEntrustedWorkStoreResult,
+  CloseEntrustedWorkStoreInput,
+  CloseEntrustedWorkStoreResult,
+  ReplaceAutomationStateIfGenerationInput,
+  UpdateEntrustedWorkStoreInput,
+  UpdateEntrustedWorkStoreResult,
+} from '../cats/services/stores/ports/TaskStoreContract.js';
 import type { IBallCustodyIngest } from './BallCustodyIngest.js';
 import { buildTaskBlockedEvent, buildTaskDoneEvent, buildTaskUnblockedEvent } from './ball-custody-events.js';
 import type { TaskActionSuccessorLifecycle } from './TaskActionSuccessorLifecycle.js';
@@ -132,6 +140,32 @@ class BallCustodyTaskStore implements ITaskStore {
 
   getManagedWorkBinding(taskId: string): MaybePromise<ManagedWorkBinding | null> {
     return this.inner.getManagedWorkBinding(taskId);
+  }
+
+  admitEntrustedWork(input: AdmitEntrustedWorkStoreInput): MaybePromise<AdmitEntrustedWorkStoreResult> {
+    return this.inner.admitEntrustedWork(input);
+  }
+
+  closeEntrustedWork(taskId: string, input: CloseEntrustedWorkStoreInput): MaybePromise<CloseEntrustedWorkStoreResult> {
+    const beforeResult = this.inner.get(taskId);
+    const closeAfterBefore = (before: TaskItem | null): MaybePromise<CloseEntrustedWorkStoreResult> => {
+      const closedResult = this.inner.closeEntrustedWork(taskId, input);
+      const finish = (result: CloseEntrustedWorkStoreResult): MaybePromise<CloseEntrustedWorkStoreResult> => {
+        if (!before || result.kind !== 'closed') return result;
+        this.recordStatusTransition(before, result.task);
+        const completion = this.actionLifecycle?.completeStatusTransition(before, result.task);
+        return completion ? completion.then(() => result) : result;
+      };
+      return isPromiseLike(closedResult) ? closedResult.then(finish) : finish(closedResult);
+    };
+    return isPromiseLike(beforeResult) ? beforeResult.then(closeAfterBefore) : closeAfterBefore(beforeResult);
+  }
+
+  updateEntrustedWork(
+    taskId: string,
+    input: UpdateEntrustedWorkStoreInput,
+  ): MaybePromise<UpdateEntrustedWorkStoreResult> {
+    return this.inner.updateEntrustedWork(taskId, input);
   }
 
   replaceAutomationStateIfGeneration(

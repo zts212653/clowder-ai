@@ -121,7 +121,7 @@ async function seedWindow(
       relatedHarness: ['F227'],
       confidence: 'high',
     },
-    'you',
+    'operator',
   );
   store.appendSignal(inProgress.episodeId, {
     category: 'a2',
@@ -156,7 +156,7 @@ async function seedWindow(
       relatedHarness: ['F227'],
       confidence: 'mid',
     },
-    'you',
+    'operator',
   );
   store.appendSignal(inProgress.episodeId, {
     category: 'a2',
@@ -186,7 +186,7 @@ async function seedWindow(
       relatedHarness: ['F227'],
       confidence: 'low',
     },
-    'you',
+    'operator',
   );
   eventStore.markEvent(
     {
@@ -264,7 +264,7 @@ describe('eval:task-outcome live verdict generator', () => {
         windowEndMs: baseMs + 60_000,
       },
       harnessFeedbackRoot,
-      { ownerUserId: 'you' },
+      { ownerUserId: 'operator' },
     );
 
     const result = generateTaskOutcomeLiveVerdict({
@@ -379,7 +379,7 @@ describe('eval:task-outcome live verdict generator', () => {
         windowEndMs: baseMs + 60_000,
       },
       harnessFeedbackRoot,
-      { ownerUserId: 'you' },
+      { ownerUserId: 'operator' },
     );
 
     generateTaskOutcomeLiveVerdict({
@@ -418,7 +418,7 @@ describe('eval:task-outcome live verdict generator', () => {
             databasePath: taskOutcomeDbPath,
           },
           harnessFeedbackRoot,
-          { ownerUserId: 'you' },
+          { ownerUserId: 'operator' },
         ),
       /invalid_source_ref: databasePath must be repo-relative/i,
     );
@@ -433,7 +433,7 @@ describe('eval:task-outcome live verdict generator', () => {
             databasePath: '../task-outcome-episodes.sqlite',
           },
           harnessFeedbackRoot,
-          { ownerUserId: 'you' },
+          { ownerUserId: 'operator' },
         ),
       /invalid_source_ref: databasePath escapes the repo-root allowlist/i,
     );
@@ -474,7 +474,7 @@ describe('eval:task-outcome live verdict generator', () => {
       },
       harnessFeedbackRoot,
       {
-        ownerUserId: 'you',
+        ownerUserId: 'operator',
         defaultTaskOutcomeDbPath: customTaskOutcomeDbPath,
       },
     );
@@ -498,7 +498,7 @@ describe('eval:task-outcome live verdict generator', () => {
       },
       harnessFeedbackRoot,
       {
-        ownerUserId: 'you',
+        ownerUserId: 'operator',
         defaultEventMemoryDbPath: customEventMemoryDbPath,
       },
     );

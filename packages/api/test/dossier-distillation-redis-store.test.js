@@ -119,7 +119,7 @@ describe('RedisDossierDistillationProposalStore', () => {
     if (!store) return;
     const p1 = await store.create(baseInput({ sourceId: `pending-1-${Date.now()}` }));
     const p2 = await store.create(baseInput({ sourceId: `pending-2-${Date.now()}` }));
-    await store.markApproved(p2.proposalId, 'you');
+    await store.markApproved(p2.proposalId, 'operator');
 
     const pending = await store.listPending();
     const pendingIds = pending.map((p) => p.proposalId);
@@ -141,10 +141,10 @@ describe('RedisDossierDistillationProposalStore', () => {
     if (!store) return;
     const created = await store.create(baseInput({ sourceId: `approve-${Date.now()}` }));
 
-    const approved = await store.markApproved(created.proposalId, 'you');
+    const approved = await store.markApproved(created.proposalId, 'operator');
     assert.ok(approved);
     assert.equal(approved.status, 'approved');
-    assert.equal(approved.approvedBy, 'you');
+    assert.equal(approved.approvedBy, 'operator');
     assert.ok(approved.approvedAt > 0);
 
     // Verify persisted
@@ -159,8 +159,8 @@ describe('RedisDossierDistillationProposalStore', () => {
   it('markApproved returns null if not pending', async () => {
     if (!store) return;
     const created = await store.create(baseInput({ sourceId: `double-approve-${Date.now()}` }));
-    await store.markApproved(created.proposalId, 'you');
-    const second = await store.markApproved(created.proposalId, 'you');
+    await store.markApproved(created.proposalId, 'operator');
+    const second = await store.markApproved(created.proposalId, 'operator');
     assert.equal(second, null);
   });
 
@@ -168,10 +168,10 @@ describe('RedisDossierDistillationProposalStore', () => {
     if (!store) return;
     const created = await store.create(baseInput({ sourceId: `reject-${Date.now()}` }));
 
-    const rejected = await store.markRejected(created.proposalId, 'you', 'not accurate');
+    const rejected = await store.markRejected(created.proposalId, 'operator', 'not accurate');
     assert.ok(rejected);
     assert.equal(rejected.status, 'rejected');
-    assert.equal(rejected.rejectedBy, 'you');
+    assert.equal(rejected.rejectedBy, 'operator');
     assert.equal(rejected.rejectionReason, 'not accurate');
 
     // Verify removed from pending index
@@ -182,7 +182,7 @@ describe('RedisDossierDistillationProposalStore', () => {
   it('markApplied: approved → applied with commitSha', async () => {
     if (!store) return;
     const created = await store.create(baseInput({ sourceId: `apply-${Date.now()}` }));
-    await store.markApproved(created.proposalId, 'you');
+    await store.markApproved(created.proposalId, 'operator');
 
     const applied = await store.markApplied(created.proposalId, 'opus', 'abc123def');
     assert.ok(applied);
@@ -190,7 +190,7 @@ describe('RedisDossierDistillationProposalStore', () => {
     assert.equal(applied.appliedBy, 'opus');
     assert.equal(applied.appliedCommitSha, 'abc123def');
     // approval fields preserved
-    assert.equal(applied.approvedBy, 'you');
+    assert.equal(applied.approvedBy, 'operator');
 
     // Verify persisted
     const retrieved = await store.get(created.proposalId);
@@ -210,12 +210,12 @@ describe('RedisDossierDistillationProposalStore', () => {
     const created = await store.create(baseInput({ sourceId: `lifecycle-${Date.now()}` }));
     assert.equal(created.status, 'pending');
 
-    await store.markApproved(created.proposalId, 'you');
+    await store.markApproved(created.proposalId, 'operator');
     await store.markApplied(created.proposalId, 'opus', 'final-sha');
 
     const final = await store.get(created.proposalId);
     assert.equal(final.status, 'applied');
-    assert.equal(final.approvedBy, 'you');
+    assert.equal(final.approvedBy, 'operator');
     assert.equal(final.appliedBy, 'opus');
     assert.equal(final.appliedCommitSha, 'final-sha');
   });

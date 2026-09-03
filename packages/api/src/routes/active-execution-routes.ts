@@ -1,3 +1,4 @@
+import { performance } from 'node:perf_hooks';
 import type { ActiveExecutionListResponse, ActiveExecutionProjection } from '@cat-cafe/shared';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
@@ -8,6 +9,7 @@ import {
 import { resolveThreadAccess, threadAccessDeniedBody } from '../domains/cats/services/session/thread-access-policy.js';
 import type { IThreadStore, Thread } from '../domains/cats/services/stores/ports/ThreadStore.js';
 import type { DynamicTaskDef } from '../infrastructure/scheduler/DynamicTaskStore.js';
+import { migrateStoredProjectPath } from '../utils/persistent-project-path.js';
 import { resolveUserId } from '../utils/request-identity.js';
 
 export interface LiveExecutionCandidate {
@@ -62,6 +64,32 @@ export interface ActiveExecutionRouteDeps {
 }
 
 const cancelLiveBodySchema = z.object({ catId: z.string().min(1).max(100) }).strict();
+const activeProjectQuerySchema = z.object({ projectPath: z.string().min(1).max(4096) }).strict();
+
+type ActiveProjectionStage = 'candidate_enumeration' | 'owner_truth' | 'classification_assembly' | 'total';
+
+function elapsedMs(startedAt: number): number {
+  return Math.round((performance.now() - startedAt) * 1_000) / 1_000;
+}
+
+function traceActiveProjectionStage(
+  request: FastifyRequest,
+  stage: ActiveProjectionStage | 'single_flight_join',
+  durationMs: number,
+  counts: { threadCount?: number; scanTargetCount?: number; executionCount?: number } = {},
+): void {
+  request.log.info(
+    {
+      feature: 'F295',
+      measurement: 'active_execution_projection',
+      resourceScope: 'user_project',
+      stage,
+      durationMs,
+      ...counts,
+    },
+    '[F295] active execution projection stage completed',
+  );
+}
 
 /** `listByProject` is already user-index scoped; retain the legacy owner/system guard against malformed indexes. */
 function canProjectThread(thread: Thread, userId: string): boolean {
@@ -172,6 +200,7 @@ function projectManagedCommandExecution(
     threadTitle: thread.title,
     catId: execution.catId,
     kind: 'managed_command',
+    activity: execution.activity,
     startedAt: execution.startedAt,
     cancelability: ownedByViewer
       ? { state: 'cancelable', target: { kind: 'managed_command', taskId: execution.taskId } }
@@ -238,19 +267,31 @@ async function narrowLiveScanTargets(
 }
 
 async function buildActiveExecutionList(
-  currentThread: Thread,
+  projectPath: string,
   userId: string,
   request: FastifyRequest,
   deps: ActiveExecutionRouteDeps,
-  admittedVisibleThreads?: readonly Thread[],
 ): Promise<ActiveExecutionListResponse> {
-  const visibleThreads =
-    admittedVisibleThreads ?? (await deps.threadStore.listByProject(userId, currentThread.projectPath));
+  const totalStartedAt = performance.now();
+  const candidateStartedAt = performance.now();
+  const visibleThreads = await deps.threadStore.listByProject(userId, projectPath);
   const threads = visibleThreads.filter(
-    (thread) => thread.projectPath === currentThread.projectPath && canProjectThread(thread, userId),
+    (thread) => thread.projectPath === projectPath && canProjectThread(thread, userId),
   );
+  traceActiveProjectionStage(request, 'candidate_enumeration', elapsedMs(candidateStartedAt), {
+    threadCount: threads.length,
+  });
+  if (threads.length === 0) {
+    throw new ActiveProjectionProjectNotFoundError();
+  }
   const threadById = new Map(threads.map((thread) => [thread.id, thread]));
+  const ownerTruthStartedAt = performance.now();
   const scanTargets = await narrowLiveScanTargets(threads, userId, request, deps);
+  traceActiveProjectionStage(request, 'owner_truth', elapsedMs(ownerTruthStartedAt), {
+    threadCount: threads.length,
+    scanTargetCount: scanTargets.length,
+  });
+  const classificationStartedAt = performance.now();
   const liveGroups = await Promise.all(
     scanTargets.map(async (thread) => ({
       thread,
@@ -265,14 +306,72 @@ async function buildActiveExecutionList(
     const managedExecution = projectManagedCommandExecution(execution, userId, threadById);
     if (managedExecution) executions.push(managedExecution);
   }
-  return { projectPath: currentThread.projectPath, executions: sortExecutions(executions) };
+  const response = { projectPath, executions: sortExecutions(executions) };
+  traceActiveProjectionStage(request, 'classification_assembly', elapsedMs(classificationStartedAt), {
+    threadCount: threads.length,
+    scanTargetCount: scanTargets.length,
+    executionCount: response.executions.length,
+  });
+  traceActiveProjectionStage(request, 'total', elapsedMs(totalStartedAt), {
+    threadCount: threads.length,
+    scanTargetCount: scanTargets.length,
+    executionCount: response.executions.length,
+  });
+  return response;
+}
+
+class ActiveProjectionProjectNotFoundError extends Error {}
+
+function activeProjectionKey(userId: string, projectPath: string): string {
+  return JSON.stringify([userId, projectPath]);
 }
 
 export function registerActiveExecutionRoutes(app: FastifyInstance, deps: ActiveExecutionRouteDeps): void {
-  app.get<{ Params: { threadId: string } }>('/api/threads/:threadId/executions/active', async (request, reply) => {
-    const access = await requireAccessibleThread(request, reply, deps.threadStore, 'read');
-    if (!access) return;
-    return buildActiveExecutionList(access.thread, access.userId, request, deps, access.visibleThreads);
+  const activeBuilds = new Map<string, Promise<ActiveExecutionListResponse>>();
+
+  app.get<{ Querystring: { projectPath?: string } }>('/api/executions/active', async (request, reply) => {
+    const userId = resolveUserId(request);
+    if (!userId) {
+      reply.status(401);
+      return { error: 'Identity required', code: 'AUTH_REQUIRED' };
+    }
+    const parsed = activeProjectQuerySchema.safeParse(request.query);
+    if (!parsed.success) {
+      reply.status(400);
+      return { error: 'Invalid project selector', code: 'INVALID_REQUEST' };
+    }
+    const projectPath = await migrateStoredProjectPath(parsed.data.projectPath);
+    if (!projectPath) {
+      reply.status(404);
+      return { error: 'Project not found', code: 'PROJECT_NOT_FOUND' };
+    }
+
+    const key = activeProjectionKey(userId, projectPath);
+    const existing = activeBuilds.get(key);
+    const joinedAt = performance.now();
+    let build = existing;
+    if (!build) {
+      build = buildActiveExecutionList(projectPath, userId, request, deps).finally(() => {
+        if (activeBuilds.get(key) === build) activeBuilds.delete(key);
+      });
+      activeBuilds.set(key, build);
+    }
+
+    try {
+      const response = await build;
+      if (existing) {
+        traceActiveProjectionStage(request, 'single_flight_join', elapsedMs(joinedAt), {
+          executionCount: response.executions.length,
+        });
+      }
+      return response;
+    } catch (error) {
+      if (error instanceof ActiveProjectionProjectNotFoundError) {
+        reply.status(404);
+        return { error: 'Project not found', code: 'PROJECT_NOT_FOUND' };
+      }
+      throw error;
+    }
   });
 
   app.post<{

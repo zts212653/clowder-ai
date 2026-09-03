@@ -70,7 +70,7 @@ function makeParallelDeps({ bridge, disposition }) {
       threadStore: makeThreadStore(),
       apiUrl: 'http://localhost:0',
       cloudInvokeBridge: bridge,
-      cloudReturnBindingSigner: { sign: () => 'cbr1.aW52LWNsb3Vk.signature' },
+      cloudReturnGrantStore: { issue: async () => ({ ok: true, status: 'issued' }) },
       a2aDispatchDispositionService: disposition,
     },
     messageStore: {
@@ -143,7 +143,7 @@ describe('F247 cloud runtime terminal contract', () => {
               return bridgeOutcome;
             },
           },
-          cloudReturnBindingSigner: { sign: () => 'cbr1.aW52LWNsb3Vk.signature' },
+          cloudReturnGrantStore: { issue: async () => ({ ok: true, status: 'issued' }) },
           a2aDispatchDispositionService: disposition,
         },
         {
@@ -248,7 +248,7 @@ describe('F247 cloud runtime terminal contract', () => {
               idempotentReplay: false,
             }),
           },
-          cloudReturnBindingSigner: { sign: () => 'cbr1.aW52LWNsb3Vk.signature' },
+          cloudReturnGrantStore: { issue: async () => ({ ok: true, status: 'issued' }) },
           a2aDispatchDispositionService: disposition,
         },
         {
@@ -361,7 +361,7 @@ describe('F247 cloud runtime terminal contract', () => {
       .map((message) => JSON.parse(message.content))
       .find((payload) => payload.type === 'cloud_bridge_status');
     assert.equal(status.status, 'unavailable');
-    assert.match(status.detail, /provenance or return-binding signer was incomplete/);
+    assert.match(status.detail, /provenance or return-grant store was incomplete/);
     assert.equal(messages.filter((message) => message.type === 'done').length, 1);
   });
 
@@ -387,7 +387,7 @@ describe('F247 cloud runtime terminal contract', () => {
               return { kind: 'fallback', reason: 'no-adapter', detail: 'host unavailable' };
             },
           },
-          cloudReturnBindingSigner: { sign: () => 'cbr1.aW52LWNsb3Vk.signature' },
+          cloudReturnGrantStore: { issue: async () => ({ ok: true, status: 'issued' }) },
           a2aDispatchDispositionService: disposition,
         },
         baseParams,

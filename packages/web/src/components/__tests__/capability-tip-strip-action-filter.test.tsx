@@ -62,6 +62,18 @@ const pluginSettingsTip: CapabilityTip = {
   },
 };
 
+const collectiveTip: CapabilityTip = {
+  ...sourceTip,
+  id: 'feature-f290-collective',
+  kind: 'feature',
+  body: 'Enter the same Collective from Clowder AI without creating a second collaboration product.',
+  action: {
+    type: 'open_capability_surface',
+    label: 'Enter Collective',
+    surfaceId: 'collective',
+  },
+};
+
 vi.mock('@/lib/capabilityTipEvents', async () => ({
   recordCapabilityTipEvent: vi.fn(),
 }));
@@ -193,5 +205,34 @@ describe('F244 CapabilityTipStrip action eligibility', () => {
     const link = container.querySelector<HTMLAnchorElement>('[data-testid="capability-tip-open-surface"]');
     expect(link?.textContent).toContain('Open plugin settings');
     expect(link?.getAttribute('href')).toBe('/settings?s=plugins');
+  });
+
+  it('opens the canonical Collective launch surface from its capability tip', async () => {
+    vi.doMock('@/lib/capability-tips.seed.json', () => ({
+      default: [collectiveTip],
+    }));
+
+    const { CapabilityTipStrip } = await import('../CapabilityTipStrip');
+
+    await act(async () => {
+      root = createRoot(container);
+      root.render(
+        <CapabilityTipStrip
+          surface="assistant_stream_bubble"
+          contexts={['thinking']}
+          firstDelayMs={0}
+          rotateMs={12000}
+        />,
+      );
+      await Promise.resolve();
+    });
+    await act(async () => {
+      vi.advanceTimersByTime(0);
+      await Promise.resolve();
+    });
+
+    const link = container.querySelector<HTMLAnchorElement>('[data-testid="capability-tip-open-surface"]');
+    expect(link?.textContent).toContain('Enter Collective');
+    expect(link?.getAttribute('href')).toBe('/collective');
   });
 });

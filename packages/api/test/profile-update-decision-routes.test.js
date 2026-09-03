@@ -36,7 +36,7 @@ describe('profile-update decision routes (approve / reject)', () => {
       beforeContent: 'OLD',
       baseContentHash: writeMod.hashContent('OLD'),
       afterContent: 'NEW',
-      rationale: 'landy likes blue',
+      rationale: 'operator likes blue',
       signalProvenance: { kind: 'cat-declared', sourceThreadId: 'thread_1' },
       createdBy: 'alice',
       ...over,

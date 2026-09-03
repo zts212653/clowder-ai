@@ -23,13 +23,13 @@
  * Truth source (KD-25): cat-template.json (seed) + .cat-cafe/cat-catalog.json
  * (overlay), via /api/cats → useCatData hook → CatHueInjector.
  *
- * Exception: cocreator (铲屎官) is NOT a cat in the catalog — it's the human
+ * Exception: cocreator (co-creator) is NOT a cat in the catalog — it's the human
  * user. Cocreator tokens are static here (default hue=40 warm amber) because
  * CatHueInjector only handles catalog cats. ChatMessage inlines --msg-hue/
  * --msg-chroma from the live cocreator config for bubble derivation.
  */
 
-/* ── cocreator (铲屎官) static fallback tokens ── */
+/* ── cocreator (co-creator) static fallback tokens ── */
 :root {
   --cocreator-hue: 40;
   --cocreator-chroma: 0.13;

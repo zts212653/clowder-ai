@@ -1,8 +1,8 @@
 ---
 cell_id: harness-eval
 title: Harness Eval Control Plane
-summary: Harness contract、runtime eval、measurement validity、verdict handoff、domain registry、durable verdict lifecycle，以及 F278 每条爪感差的 disposition responsibility / Workspace live projection。
-canonical_features: [F192, F266, F267, F278]
+summary: Harness contract、runtime eval、measurement validity、verdict handoff、domain registry、durable verdict lifecycle、F313 immutable finding/repair-target artifacts，以及 F278 每条爪感差的 disposition responsibility / Workspace live projection。
+canonical_features: [F192, F266, F267, F278, F313]
 code_anchors:
   - packages/api/src/infrastructure/harness-eval/f167-eval.ts
   - packages/api/src/infrastructure/harness-eval/cross-thread-coordination-eval.ts
@@ -19,6 +19,12 @@ code_anchors:
   - packages/api/src/infrastructure/harness-eval/reeval-closure-reconciler.ts
   - packages/api/src/infrastructure/harness-eval/reeval-closure-task-spec.ts
   - packages/api/src/infrastructure/harness-eval/reeval-case.ts
+  - packages/api/src/infrastructure/harness-eval/eval-repair-approval-contracts.ts
+  - packages/api/src/infrastructure/harness-eval/eval-repair-approval-projection.ts
+  - packages/api/src/infrastructure/harness-eval/eval-repair-approval.ts
+  - packages/api/src/infrastructure/harness-eval/eval-repair-case-action-resolver.ts
+  - packages/api/src/infrastructure/harness-eval/eval-repair-cutover.ts
+  - packages/api/src/infrastructure/harness-eval/eval-repair-reconciliation.ts
   - packages/api/src/infrastructure/harness-eval/reeval-case-cycle-order.ts
   - packages/api/src/infrastructure/harness-eval/reeval-case-types.ts
   - packages/api/src/infrastructure/harness-eval/reeval-case-guards.ts
@@ -52,6 +58,9 @@ code_anchors:
   - packages/api/src/infrastructure/harness-eval/friction/friction-rollup-report.ts
   - packages/api/src/infrastructure/harness-eval/friction/friction-measurement-pilot.ts
   - packages/api/src/infrastructure/harness-eval/friction/friction-measurement-report.ts
+  - packages/api/src/infrastructure/harness-eval/friction/friction-finding-artifact.ts
+  - packages/api/src/infrastructure/harness-eval/friction/friction-finding-child-artifact.ts
+  - packages/api/src/infrastructure/harness-eval/friction/friction-repair-target-resolver.ts
   - packages/api/src/infrastructure/harness-eval/measurement/measurement-bundle-schema.ts
   - packages/api/src/infrastructure/harness-eval/measurement/measurement-bundle-validation.ts
   - packages/api/src/infrastructure/harness-eval/measurement/measurement-bundle-census.ts
@@ -104,13 +113,22 @@ cited_by:
   - F266 Phase B-C (immutable lifecycle root, append-only Redis event log, authenticated owner writeback, idempotent SLA reconciler, and F248 Settings / Workspace projections)
   - F266 production operational acceptance (stable finding/case lineage, durable TaskStore + F167 responsibility, and server-verified main/live/re-evaluation truth)
   - F278 Design Gate (per-signal source-ref disposition ledger, system-thread duty, and Workspace live inbox)
+  - F313 Phase B (one immutable finding/child/root per actionable friction candidate, canonical repair-target resolution, and schema-v3 quarantine before atomic Phase C cutover)
+  - F313 Phase C (F266 immutable Approval lineage, owner-backed exact refs, drift supersession, and exactly-once canonical repair custody behind one fail-closed v3 cutover)
 ---
 
 # Harness Eval Control Plane
 
 ## Canonical Owner
 
-F192 owns the socio-technical harness evaluation contract: harnesses declare expected behavior, runtime eval observes actual behavior, attribution explains gaps, verdict packets hand off evidence to feature owners, and later eval verifies closure. F266 owns the durable lifecycle control plane after an actionable verdict is published: the immutable bundle seeds identity, an append-only Redis event log records authenticated state transitions, a reconciler resurfaces overdue work, and F248 surfaces project canonical state for humans. Its operational acceptance layer also migrates audited legacy v1 roots into stable in-memory cases without rewriting artifacts, binds repair and cadence work to separate TaskStore + F167 responsibilities, and turns `nextEvalAt` into executable re-evaluation work. F254 extends this control plane with one domain adapter: `freshness-closure-replay` resolves only server-owned fixtures or durable closure identity, normalizes raw/snapshot/attribution/provenance evidence, and generates an `eval:freshness` verdict without moving control-plane ownership out of F192/F266. F278 owns the distinct pre-verdict responsibility object for each canonical cat-authored paw-feel signal: MessageStore remains body truth, F245 remains read-only analysis truth, and one append-only source-ref ledger projects duty into `thread_eval_friction`, Workspace「评估」live view, Settings Eval Hub history and the original message without copying marker prose. All four surfaces read the same F278 event projection; none owns a second disposition writer.
+F192 owns the socio-technical harness evaluation contract: harnesses declare expected behavior, runtime eval observes actual behavior, attribution explains gaps, verdict packets hand off evidence to feature owners, and later eval verifies closure. F313 Phase B extends the friction publisher without activating action custody: each actionable candidate receives one immutable finding artifact, deterministic child packet/bundle and schema-v3 root, while the server derives a separate repair target from canonical feature/thread-owner truth. Schema v3 is known but quarantined until Phase C can cut over atomically, so it creates no F266 case, Approval proposal/card, Task or F167 lease. F266 owns the durable lifecycle control plane after an actionable verdict is admitted: the immutable bundle seeds identity, an append-only Redis event log records authenticated state transitions, a reconciler resurfaces overdue work, and F248 surfaces project canonical state for humans. Its operational acceptance layer also migrates audited legacy v1 roots into stable in-memory cases without rewriting artifacts, binds repair and cadence work to separate TaskStore + F167 responsibilities, and turns `nextEvalAt` into executable re-evaluation work. F254 extends this control plane with one domain adapter: `freshness-closure-replay` resolves only server-owned fixtures or durable closure identity, normalizes raw/snapshot/attribution/provenance evidence, and generates an `eval:freshness` verdict without moving control-plane ownership out of F192/F266. F278 owns the distinct pre-verdict responsibility object for each canonical cat-authored paw-feel signal: MessageStore remains body truth, F245 remains read-only analysis truth, and one append-only source-ref ledger projects duty into `thread_eval_friction`, Workspace「评估」live view, Settings Eval Hub history and the original message without copying marker prose. All four surfaces read the same F278 event projection; none owns a second disposition writer.
+
+F313 Phase C replaces the schema-v3 quarantine exit with one compatibility/epoch cutover. F266 stores immutable
+proposal, Approval decision, owner/target/authorization snapshot, drift supersession and custody receipt refs in its
+existing event log; F246 owns the shared lifecycle/epoch/projection contract; the canonical repair owner alone creates
+Task/F167 custody. A proposal and an accepted dispatch each re-resolve exact owner-backed truth. Without every binding
+and an explicit production `v1_active` migration receipt, v3 remains side-effect-free and the action route returns a
+typed unavailable blocker.
 
 ## Use This When
 
@@ -132,6 +150,9 @@ F192 owns the socio-technical harness evaluation contract: harnesses declare exp
 - Keep raw telemetry ownership in F153; this cell consumes telemetry and produces derived verdicts.
 - Keep domain thread text as working context only; registry, snapshots, verdicts, and closure records are the state source of truth.
 - Keep finding truth immutable in the verdict bundle. Persist only lifecycle identity in `lifecycle-root.json` and authenticated transition deltas in the append-only event log.
+- For friction breakout, preserve F245 under `harnessUnderEval`, resolve feature/component/owner/version only on the server as `repairTarget`, and fail closed to a blocked finding artifact when canonical target truth is unavailable or ambiguous.
+- Treat schema-v3 friction roots as read-only, known-but-quarantined artifacts until the complete Phase C cutover exists. Do not open a legacy/stable case or call proposal, card, Task or F167 custody paths from Phase B readers.
+- For Phase C, require one stable `v1_active` producer epoch snapshot plus all loader/adapter/ingress/route/owner-dispatch bindings before activating schema v3. Re-resolve opaque owner authorization and exact target version before proposal and accepted dispatch; supersede drift and never reuse an old Approval.
 - Fail verdict publication closed unless the Git remote matches the configured owner repo, the candidate contains and refreshes the canonical measurement census, and its `{domainId,startMs,endMs}` identity is unique against base plus candidate. Automatic publisher, pre-push, and agent-shell PR fallback must reuse one executable guard.
 - Cover the manifest's explicit `reviewedThrough` legacy-v1 snapshot with audited completeness/freshness review. Synthesize stable v2 roots and recovered owner/action/re-evaluation continuity only at read/reconcile time; never rewrite historical verdict artifacts or let a later unknown v1 root take down reviewed cases.
 - Resolve current repair ownership from eval-domain registry truth, then bind repair and due re-evaluation work to separate deterministic TaskStore subjects and active F167 leases.

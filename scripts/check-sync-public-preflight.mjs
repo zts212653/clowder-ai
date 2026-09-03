@@ -7,6 +7,11 @@ import process from 'node:process';
 import { fileURLToPath } from 'node:url';
 
 import { checkCapabilityTipsForRepo } from './check-capability-tips.mjs';
+import {
+  candidateReferenceStatus,
+  isCoveredByPublicExport,
+  loadPublicExportCoverage,
+} from './lib/sync-public-export-coverage.mjs';
 
 const scriptDir = dirname(fileURLToPath(import.meta.url));
 const defaultRepoRoot = resolve(scriptDir, '..');
@@ -42,12 +47,6 @@ function readGitFile(repoRoot, ref, relativePath) {
   } catch {
     return null;
   }
-}
-
-function workingTreeReferenceStatus(repoRoot, sourceRef) {
-  const path = resolve(repoRoot, sourceRef.path);
-  if (!existsSync(path)) return 'missing path';
-  return readFileSync(path, 'utf8').includes(sourceRef.anchor) ? 'ok' : 'missing anchor';
 }
 
 function gitReferenceStatus(repoRoot, baseRef, sourceRef) {
@@ -118,12 +117,12 @@ function loadCapabilityTipInventories(repoRoot, baseRef) {
   }
 }
 
-function tipReferenceRegressionErrors(repoRoot, baseRef, tip, baselineTip) {
+function tipReferenceRegressionErrors(repoRoot, baseRef, tip, baselineTip, coverage) {
   if (!tip || typeof tip !== 'object' || typeof tip.id !== 'string') return [];
   return TIP_SOURCE_FIELDS.flatMap((field) => {
     const sourceRef = tip[field];
     if (!isSourceRef(sourceRef)) return [];
-    const candidateStatus = workingTreeReferenceStatus(repoRoot, sourceRef);
+    const candidateStatus = candidateReferenceStatus(repoRoot, sourceRef, coverage);
     if (candidateStatus === 'ok') return [];
 
     const baselineRef = baselineTip?.[field];
@@ -143,6 +142,7 @@ export function checkCapabilityTipReferenceRegressions(repoRoot = defaultRepoRoo
   const baseRef = options.baseRef ?? 'HEAD';
   const inventories = loadCapabilityTipInventories(repoRoot, baseRef);
   if (inventories.error) return { ok: false, errors: [inventories.error] };
+  const coverage = loadPublicExportCoverage(repoRoot);
 
   const baselineById = new Map(
     inventories.baselineTips
@@ -150,8 +150,37 @@ export function checkCapabilityTipReferenceRegressions(repoRoot = defaultRepoRoo
       .map((tip) => [tip.id, tip]),
   );
   const errors = inventories.candidateTips.flatMap((tip) =>
-    tipReferenceRegressionErrors(repoRoot, baseRef, tip, baselineById.get(tip?.id)),
+    tipReferenceRegressionErrors(repoRoot, baseRef, tip, baselineById.get(tip?.id), coverage),
   );
+
+  errors.sort();
+  return { ok: errors.length === 0, errors };
+}
+
+export function checkCapabilityTipExportCoverage(repoRoot = defaultRepoRoot, options = {}) {
+  const coverage = loadPublicExportCoverage(repoRoot);
+  if (coverage === null) return { ok: true, errors: [] };
+
+  const baseRef = options.baseRef ?? process.env.CAT_CAFE_GATE_BASE_SHA ?? 'origin/main';
+  const inventories = loadCapabilityTipInventories(repoRoot, baseRef);
+  if (inventories.error) return { ok: false, errors: [inventories.error] };
+
+  const baselineById = new Map(
+    inventories.baselineTips
+      .filter((tip) => tip && typeof tip === 'object' && typeof tip.id === 'string')
+      .map((tip) => [tip.id, tip]),
+  );
+  const errors = inventories.candidateTips.flatMap((tip) => {
+    if (!tip || typeof tip !== 'object' || typeof tip.id !== 'string') return [];
+    const baselineTip = baselineById.get(tip.id);
+    return TIP_SOURCE_FIELDS.flatMap((field) => {
+      const sourceRef = tip[field];
+      if (!isSourceRef(sourceRef)) return [];
+      if (sourceRefKey(baselineTip?.[field]) === sourceRefKey(sourceRef)) return [];
+      if (isCoveredByPublicExport(sourceRef.path, coverage)) return [];
+      return [`${tip.id}: ${field} newly points outside public export coverage ${sourceRef.path}`];
+    });
+  });
 
   errors.sort();
   return { ok: errors.length === 0, errors };
@@ -160,11 +189,17 @@ export function checkCapabilityTipReferenceRegressions(repoRoot = defaultRepoRoo
 export function checkSyncPublicPreflight(repoRoot = defaultRepoRoot, options = {}) {
   const packageClosure = checkPublicPackageScriptClosure(repoRoot);
   const tipReferenceRegressions = checkCapabilityTipReferenceRegressions(repoRoot, options);
+  const tipExportCoverage = checkCapabilityTipExportCoverage(repoRoot, options);
   const capabilityTips = checkCapabilityTipsForRepo(repoRoot, {
     changedFiles: options.changedFiles ?? [],
     baseRef: options.baseRef ?? 'HEAD',
   });
-  const errors = [...packageClosure.errors, ...tipReferenceRegressions.errors, ...capabilityTips.errors];
+  const errors = [
+    ...packageClosure.errors,
+    ...tipReferenceRegressions.errors,
+    ...tipExportCoverage.errors,
+    ...capabilityTips.errors,
+  ];
   const warnings = capabilityTips.warnings ?? [];
   return { ok: errors.length === 0, errors, warnings };
 }

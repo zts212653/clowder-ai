@@ -1,5 +1,11 @@
 import { z } from 'zod';
 import { evalDomainIdSchema } from './domain/eval-domain-registry.js';
+import {
+  type FindingBindingV1,
+  FindingBindingV1Schema,
+  type ResolvedRepairTargetV1,
+  ResolvedRepairTargetV1Schema,
+} from './friction/friction-finding-artifact.js';
 
 const stringRefArray = z.array(z.string().min(1));
 const nonEmptyStringArray = stringRefArray.min(1);
@@ -13,6 +19,8 @@ const verdictHandoffPacketSchema = z
     id: z.string().min(1),
     domainId: evalDomainIdSchema,
     findingKey: findingKeySchema.optional(),
+    findingBinding: FindingBindingV1Schema.optional(),
+    repairTarget: ResolvedRepairTargetV1Schema.optional(),
     createdAt: isoDateTime,
     phenomenon: z.string().min(1),
     harnessUnderEval: z.object({
@@ -56,17 +64,49 @@ const verdictHandoffPacketSchema = z
     counterarguments: nonEmptyStringArray,
   })
   .superRefine((packet, ctx) => {
-    if (packet.verdict !== 'delete_sunset') return;
-    if (packet.governance?.cvoAcceptRequired !== true) {
+    if (packet.verdict === 'delete_sunset' && packet.governance?.cvoAcceptRequired !== true) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
         message: 'delete_sunset verdict requires structured operator accept gate',
         path: ['governance', 'cvoAcceptRequired'],
       });
     }
+    const hasFrictionChildField = packet.findingBinding !== undefined || packet.repairTarget !== undefined;
+    if (hasFrictionChildField && (!packet.findingKey || !packet.findingBinding || !packet.repairTarget)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'friction child packet requires findingKey, findingBinding, and repairTarget together',
+        path: ['findingBinding'],
+      });
+    }
+    if (packet.findingBinding || packet.repairTarget) {
+      if (packet.domainId !== 'eval:friction') {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: 'findingBinding and repairTarget are child-only eval:friction fields',
+          path: ['domainId'],
+        });
+      }
+      if (
+        packet.repairTarget &&
+        (packet.ownerAsk.targetFeatureId !== packet.repairTarget.featureId ||
+          packet.ownerAsk.targetOwnerCatId !== packet.repairTarget.ownerCatId)
+      ) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: 'ownerAsk must exact-match server-resolved repairTarget',
+          path: ['repairTarget'],
+        });
+      }
+    }
   });
 
 export type VerdictHandoffPacket = z.infer<typeof verdictHandoffPacketSchema>;
+export type FrictionVerdictHandoffPacketV3 = VerdictHandoffPacket & {
+  findingKey: string;
+  findingBinding: FindingBindingV1;
+  repairTarget: ResolvedRepairTargetV1;
+};
 
 export interface HandoffDecision {
   ok: boolean;
@@ -75,6 +115,12 @@ export interface HandoffDecision {
 
 export function parseVerdictHandoffPacket(input: unknown): VerdictHandoffPacket {
   return verdictHandoffPacketSchema.parse(input);
+}
+
+export function isFrictionVerdictHandoffPacketV3(
+  packet: VerdictHandoffPacket,
+): packet is FrictionVerdictHandoffPacketV3 {
+  return Boolean(packet.findingKey && packet.findingBinding && packet.repairTarget);
 }
 
 export function assertCanCrossThreadHandoff(packet: VerdictHandoffPacket): HandoffDecision {

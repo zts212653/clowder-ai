@@ -1,4 +1,4 @@
-import type { ApprovalItem, ApprovalProducerId } from '@cat-cafe/shared';
+import type { ApprovalHubItem, ApprovalProducerId } from '@cat-cafe/shared';
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -35,13 +35,14 @@ vi.mock('../ThreadSidebar/thread-navigation', () => ({ pushThreadRouteWithHistor
 
 import { ApprovalItemCard } from '../ApprovalItemCard';
 
-function approvalItem(sourceFeatureId: ApprovalProducerId, detail: Record<string, unknown>): ApprovalItem {
+function approvalItem(sourceFeatureId: ApprovalProducerId, detail: Record<string, unknown>): ApprovalHubItem {
   return {
     proposalId: `f269-${sourceFeatureId.toLowerCase()}`,
     sourceFeatureId,
     requesterCatId: 'codex-sol',
-    ownerUserId: 'user-landy',
-    status: 'pending',
+    ownerUserId: 'user-operator',
+    resolution: 'open',
+    materialization: { state: 'not_started' },
     summary: `${sourceFeatureId} critical context`,
     detail,
     navigation: {

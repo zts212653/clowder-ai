@@ -7,7 +7,7 @@ export const CAPABILITY_WAKEUP_HISTORICAL_VERDICT_ID = '2026-07-12-capability-wa
 const VERDICT_REF = `docs/harness-feedback/verdicts/${CAPABILITY_WAKEUP_HISTORICAL_VERDICT_ID}.md`;
 const OWNER_RESPONSE_REF = 'thread:thread_eval_capability_wakeup:message:0001784195114335-000025-13f15128';
 
-const root: LifecycleRootArtifact = {
+const root: Extract<LifecycleRootArtifact, { schemaVersion: 1 }> = {
   schemaVersion: 1,
   verdictId: CAPABILITY_WAKEUP_HISTORICAL_VERDICT_ID,
   domainId: 'eval:capability-wakeup',

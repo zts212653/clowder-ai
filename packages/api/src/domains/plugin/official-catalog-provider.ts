@@ -268,7 +268,13 @@ export class RefreshingOfficialPluginCatalog implements OfficialPluginCatalogPro
 
   private async refresh(): Promise<OfficialPluginCatalogSnapshot> {
     try {
-      const releases = await Promise.all(this.options.policies.map((policy) => this.fetchRelease(policy)));
+      const releases = await Promise.all(
+        this.options.policies.map((policy) =>
+          policy.distribution === 'bundled'
+            ? Promise.resolve(this.releases.get(policy.catalogId) ?? policy.bootstrapRelease)
+            : this.fetchRelease(policy),
+        ),
+      );
       for (let index = 0; index < this.options.policies.length; index += 1) {
         this.releases.set(this.options.policies[index].catalogId, releases[index]);
       }

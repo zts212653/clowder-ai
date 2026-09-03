@@ -39,6 +39,7 @@ export interface FrictionLiveVerdictArtifact {
   };
   isLive: true;
   sentCrossThreadMessage: false;
+  report: FrictionRollupReport;
 }
 
 /**
@@ -141,6 +142,7 @@ export function generateFrictionLiveVerdict(input: GenerateFrictionLiveVerdictIn
     },
     isLive: true,
     sentCrossThreadMessage: false,
+    report,
   };
 }
 

@@ -1,25 +1,26 @@
 ---
 feature_ids: [F278]
-related_features: [F245, F222, F248, F128, F266, F167, F264]
+related_features: [F245, F222, F248, F128, F266, F167, F264, F311]
 topics: [paw-feel, friction, disposition, inbox, triage, system-thread, workspace, eval]
 doc_kind: spec
 created: 2026-07-26
-tips_exempt: task-custody verification reuses the existing typed disposition action and Workspace workflow; no new user-invokable capability is introduced
+tips_exempt: "Renewed 2026-08-29 for Phase G production acceptance and F311 refs-only federation truth sync; this records existing duty/disposition behavior and adds no new user-invokable action or discovery surface."
 description: "让每条猫猫爪感差进入系统 thread 负责的可见收件箱，并以原消息引用、猫签处置和 Workspace 实时投影形成责任闭环。"
 description_source: human
 description_author: codex-sol
-description_updated_at: 2026-08-08T00:00:00Z
+description_updated_at: 2026-08-28T16:24:00Z
 ---
 
 # F278: Paw-Feel Disposition Inbox — 爪感差责任收件箱
 
-> **Status**: in progress — Phase G production acceptance correction in branch; live remains on Phase F behavior
+> **Status**: done — Phase G merged and passed production acceptance; live duty remains active
 > **Owner**: 小太阳·Maine Coon（@codex-sol）
 > **Priority**: P1
 > **Initial delivery**: 2026-07-27
 > **Reopened**: 2026-07-30（live dogfood 暴露 review work unit 与 duty activation gap）
 > **Reopened again**: 2026-08-08（真实 duty 批次暴露 transport receipt 与业务责任真相混淆）
 > **Reopened a third time**: 2026-08-10（production duty 证明 stale repair 仍被计为修复中，incomplete batch 没有可审计收据）
+> **Operational completion**: 2026-08-28
 > **Evolved from**: F245
 
 ## Why
@@ -33,6 +34,7 @@ operator 要的不是“采到过”，而是每条爪感差都有人负责看�
 - `0001785418998194-000191-a53bd6bd`：授权更新 F278 spec、补全 gap；代码完成后再由 operator 重启并配置值班猫。
 - `0001786235537994-000350-dcdfd3c3`：真实 inbox 诊断显示 208 bundles / 262 active / 179 overdue，全部非终态仍被 UI 当作 “new”，且 `112876b3` 连续 `bundle_invalid`。
 - `0001786236680561-000372-aff77c69`：授权把真实 friction signal 推进到可验证责任状态，并要求每班留下逐 bundle rich receipt；本轮不启动 runtime、不碰 Redis 6399、不做 production activation。
+- `0001787933034346-000451-44d5c067`：要求 F311 连接既有能力时，由 F278 owner 修复并验收真实 responsibility inbox；禁止在 F311 复制第二套 inbox、duty ledger 或 disposition workflow。
 
 当前 F245 会回扫、聚类并产生周期 verdict，但 Top-N 之外的原始 signal 没有逐条责任状态。结果是“分析系统知道存在”不等于“某只猫必须看完”。F278 补的是责任控制面，不是 embedding 阈值。
 
@@ -61,6 +63,8 @@ F277 已被开放 PR #3234 占用，因此本功能使用最新可用编号 F278
 **2026-08-08 association verdict：再次 reopen F278，不另立 feature。** 真实 signal、bundle、duty watermark、四个 read surfaces 和责任 writer 全部仍属于 F278；本轮只把既有对象从“消息已送达”提升到“业务 exit 可证明”。
 
 **2026-08-10 association verdict：继续在 F278 内修正，不另立 feature/thread。** production 验收失败发生在同一 responsibility read model 与 duty receipt writer：安全门正确拒绝了非法出口，但人类看到的状态与 incomplete receipt 仍不诚实。这不是新的工作流，也不改变 F167/F266/F192 的 ownership。
+
+**2026-08-28 association verdict：F278 继续拥有 signal → responsibility → receipt 的 canonical loop；F311 只联邦读取。** Phase G 已在 production 以真实 duty cohort 验收；F311 若需要 join，只消费 F278 的 responsibility projection 与 durable receipt refs，不新增第二本 ledger、第二套 duty 或平行 disposition 状态机。
 
 ## Architecture Ownership
 
@@ -397,15 +401,15 @@ semantic suggestion 只是在 bundle 之上的候选合并层；未命中或 deg
 - [x] AC-E5: 本阶段不接 semantic suggestion；UI 明确问题族数量不可可靠计算。未来若启用，只比较 bundle 并显示 provenance/health；degraded 不影响 deterministic bundle / raw visibility。
 - [x] AC-E6: Workspace 默认 bundle-first 且 duty-unconfigured fail-loud；Settings 只保留 duty config + compact audit/deep link，不重复完整 history；原消息只显示一个可展开的聚合状态框。
 - [x] AC-E7: transport receipt / 任意字符串不能完成 `routed`；只有 resolver-verified F167 active custody 可签 `fix`。task-backed implement 必须由真实 task 的 named owner 在 task thread 建立 `implement/task_done` lease；owner ACK 不替代 custody。
-- [ ] AC-E8: 520/624 规模 cohort 已证明不丢 signal、raw/bundle denominator 一致；仍须 operator 从最新 main 重启 runtime，配置不同的 Primary/Backup，并走通一批真实 triage 后才允许重新标 done。
+- [x] AC-E8: operator 已从 main 激活 runtime 并配置不同的 Primary/Backup；真实 duty cohort 已完成 Primary 审阅、独立 signer CAS 与 durable 44/44 receipt（`0001787934303842-000491-4dd25ef6`）。
 
 ### F — Business Responsibility & Duty Receipt
 
 - [x] AC-F1: 公共 list→confirm 使用 server-authenticated exact membership snapshot；confirm 期间 source hydration 变化不会让旧列表漂移，late members 不被追溯签署。
-- [ ] AC-F2: 每个 bundle 派生五态 responsibility 与 `validExit`；transport-only `routed` 与失效 repair binding 均保持 `unreviewed`，只有 active exact binding 计入 `bound_in_repair`；UI、counts、filters 与原消息 bubble 使用同一投影。（Phase G code ready；等待 production 以同一真实 cohort 复验。）
-- [ ] AC-F3: actionable bundle 只有 terminal、权威 store 复验仍有效的 owner/task/active lease、当前仍 pending 的 proposal 或 explicit blocker 才能完成本班责任；过期绑定保留历史 evidence 但重新进入 duty，可重绑或显式阻塞；recoverable signature request 保持 active，直到独立 signer 完成 exact candidate 或记录 explicit blocker。（Phase G code ready；等待 production 以同一真实 cohort 复验。）
+- [x] AC-F2: 每个 bundle 派生五态 responsibility 与 `validExit`；transport-only `routed` 与失效 repair binding 均保持 `unreviewed`，只有 active exact binding 计入 `bound_in_repair`；UI、counts、filters 与原消息 bubble 使用同一投影。2026-08-28 production 全量 `fix` 成员复验为 754 raw / 516 context bundles，零 invalid exit；全局五态分母按未过滤 aggregate bundle 独立报告（`0001787934303842-000491-4dd25ef6`）。
+- [x] AC-F3: actionable bundle 只有 terminal、权威 store 复验仍有效的 owner/task/active lease、当前仍 pending 的 proposal 或 explicit blocker 才能完成本班责任；过期绑定保留历史 evidence 但重新进入 duty，可重绑或显式阻塞；recoverable signature request 保持 active，直到独立 signer 完成 exact candidate 或记录 explicit blocker。真实 cohort 经 Terra 独立签署 26 bundles / 35 signals 后 `signature_waiting=0`（`0001787919538372-000072-fcfb3069`）。
 - [x] AC-F4: source cat 可作为 verified repair owner，但不能 terminal-sign 自己的 signal；持久化 exact candidate 与 signer exclusion，preferred signer / Backup 中断后可由其他合法 signer 恢复。
-- [ ] AC-F5: duty delivery/wake 不完成 watermark；complete 与 incomplete 都更新同一 durable notice 的逐 bundle rich checklist，只有全部 checked 才 complete；scheduler-owned reconcile 在 duty invocation 失败时仍能留下 danger receipt，未完成 batch 不被新 watermark 覆盖。（Phase G code ready；等待 production 以同一真实 cohort 复验。）
+- [x] AC-F5: duty delivery/wake 不完成 watermark；complete 与 incomplete 都更新同一 durable notice 的逐 bundle rich checklist，只有全部 checked 才 complete；scheduler-owned reconcile 在 duty invocation 失败时仍能留下 danger receipt，未完成 batch 不被新 watermark 覆盖。Production notice `0001787140800835-000075-cad455f5` 在同一消息上持久更新为 44/44 success receipt，逐 bundle checklist 全 checked。
 - [x] AC-F6: 真实 `112876b3` failure mode 有 RED→GREEN 回归；focused API/MCP、shared contract、Web 全量与 isolated Redis 6398 DB 15 均有 fresh green evidence。
 - [x] AC-F7: operator 已显式重启 production runtime 并激活真实 duty；2026-08-10 首班 production 验收发现 Phase G blocker，证明 activation gate 已执行但 feature 尚未完成。
 
@@ -444,3 +448,5 @@ semantic suggestion 只是在 bundle 之上的候选合并层；未命中或 deg
 - Phase E implementation exact-HEAD review：Kimi 对 PR #3303 `229f339982c5646b8ccd45a436f3abec2e3f2514` APPROVE；reconciliation、strict parser、bundle fan-out、duty/F167/UI 均无阻塞 finding（`0001785429107743-000571-ce98a056`）。
 - Phase E post-merge vision guard：Opus 4.7 对 AC-E1..E7 PASS；AC-E8 明确保留为 operator activation gate（`0001785429890132-000581-1dbbd163`）。
 - Phase F 独立 review gate：唯一 reviewer 为 Opus 5；必须 exact-HEAD APPROVE 后才能进入 merge-gate，不追加第二轮 cloud AI review。合入不等于 runtime activation。
+- Phase G production acceptance correction：Opus 5 对 PR #3529 final HEAD `806f85afe7d51b29df8666f14a12a58bf3602978` delta review APPROVE（`0001786326305638-000115-f6743904`）；squash merge `2e2f4455049f267375f8d72fbd62edd284b62fa4`。
+- Phase G production acceptance：live duty receipt 44/44、独立 signer 26 bundles / 35 signals、`signature_waiting=0`，F278 owner 证据包 `0001787934303842-000491-4dd25ef6`。

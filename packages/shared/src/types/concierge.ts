@@ -10,7 +10,7 @@
 export interface ConciergeConfig {
   /** 是否启用前台猫 (default true) */
   enabled: boolean;
-  /** 皮肤 — E0: ragdoll-v1 默认 | E1: yanyan-codex / xianxian-codex (9-state atlas) | yarn-ball legacy */
+  /** 皮肤 — E1: xianxian-codex 默认；yanyan-codex / ragdoll-v1 / yarn-ball 可选 */
   skin: 'yarn-ball' | 'ragdoll-v1' | 'yanyan-codex' | 'xianxian-codex';
   /** 前台猫显示名（KD-6: per-deployment 可配置，本家 Phase A 落地投票） */
   displayName: string;
@@ -61,7 +61,7 @@ export function clampBallSize(size: number | null | undefined): number {
 /** ConciergeConfig 默认值（dutyCatProfileId 由 API 层根据 roster 解析） */
 export const CONCIERGE_CONFIG_DEFAULTS: Omit<ConciergeConfig, 'dutyCatProfileId'> = {
   enabled: true,
-  skin: 'yanyan-codex',
+  skin: 'xianxian-codex',
   displayName: '猫猫球',
   personaTone: '温暖、简短、不啰嗦',
   proactivePolicy: 'quiet-badge',

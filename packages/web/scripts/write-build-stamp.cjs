@@ -9,9 +9,10 @@
 // This runs as `postbuild` rather than from a launcher because `next build` wipes
 // and recreates .next: any stamp a launcher wrote beforehand is destroyed, and only
 // the build's own lifecycle is guaranteed to run for every caller.
-const { mkdirSync, writeFileSync } = require('node:fs');
+const { mkdirSync, rmSync, writeFileSync } = require('node:fs');
 const path = require('node:path');
 const { WEB_PACKAGE_DIR, resolveWebBuildRevision } = require('./build-revision.cjs');
+const { inspectWebBuildInputState } = require('./web-build-input-state.cjs');
 
 const DIST_DIR_NAME = '.next';
 const STAMP_FILE_NAME = '.build-commit';
@@ -20,12 +21,17 @@ function buildStampPath(webPackageDir = WEB_PACKAGE_DIR) {
   return path.join(webPackageDir, DIST_DIR_NAME, STAMP_FILE_NAME);
 }
 
-function writeBuildStamp({ webPackageDir = WEB_PACKAGE_DIR, ...revisionOptions } = {}) {
+function writeBuildStamp({ webPackageDir = WEB_PACKAGE_DIR, dirtyInputs, ...revisionOptions } = {}) {
   const revision = resolveWebBuildRevision(revisionOptions);
+  const inputState =
+    dirtyInputs === undefined ? inspectWebBuildInputState(revisionOptions.repoRoot) : dirtyInputs ? 'dirty' : 'clean';
+  const stampPath = buildStampPath(webPackageDir);
   // Never invent deployment identity: an unstamped build fails closed, a wrongly
   // stamped one ships incompatible clients as if they matched.
-  if (!revision) return null;
-  const stampPath = buildStampPath(webPackageDir);
+  if (!revision || inputState === 'dirty' || inputState === 'unknown') {
+    rmSync(stampPath, { force: true });
+    return null;
+  }
   mkdirSync(path.dirname(stampPath), { recursive: true });
   writeFileSync(stampPath, `${revision}\n`, 'utf8');
   return stampPath;
@@ -38,7 +44,7 @@ if (require.main === module) {
   // a non-git deploy must still be able to build.
   if (!writeBuildStamp()) {
     console.warn(
-      '[web] build revision unavailable; skipped .next/.build-commit (runtime deployment guard will fail closed)',
+      '[web] clean build identity unavailable; skipped .next/.build-commit (runtime deployment guard will fail closed)',
     );
   }
 }

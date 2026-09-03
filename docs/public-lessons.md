@@ -1135,11 +1135,12 @@ created: 2026-02-26
 
 ### LL-055: spawn 出的"长尾 child runtime"必须能脱离 parent 自动死亡
 - 状态：draft
-- 更新时间：2026-05-09（src extension）
+- 更新时间：2026-08-30（F294 controlled-contention recurrence）
 
 - 坑：两次同模式踩坑，1 天内连续暴露——
   1. **Test infra（首次）**：`process-liveness-probe.test.js` spawn `node -e while(true){}` 作为 busy CPU child；测试异常退出（runner timeout / 用户 Ctrl+C / `pnpm gate` 中断）时漏掉 child cleanup，每次泄漏一只 PPID=1 孤儿进程。累积 4 只时占满 ~270% CPU，导致 runtime `pnpm dev:direct` 在 20s 超时窗口内起不来 3002，看起来像"启动超时 + tsx Force killing"诡异连锁，根因实际在测试设计。
   2. **Src（次日 2026-05-09 发现）**：`packages/api/src/.../first-run-quest/client-detection.ts` 用 `execAsync('opencode version', { timeout: 5000 })` 探测 OpenCode CLI 是否安装。`opencode version` 不是简单 CLI 查询——`opencode` 是 agent runtime，`version` 子命令会拉起完整 agent process。`exec` 的 `timeout` 默认发 SIGTERM；agent process 不响应就僵住，parent promise reject 后 child 成 PPID=1 + 67% CPU 烧 50 分钟孤儿。**这是 LL 的范围扩展——同模式不限于 test，src 里"靠 SIGTERM 链 kill 复杂 child runtime"是同样系统性漏洞。**
+  3. **Harness acceptance（2026-08-30 再犯）**：F294 full-gate lease 的一次受控争用验收用 shell 启动 6 个无界 `while :; do :; done` worker，只在 controller 尾部逐个 `kill`。controller 中断后，6 个 worker 以 `PPID=1` 各烧一核近 15 小时，令 current-main HTML-widget 浏览器序列稳定撞上 12 秒产品 deadline；隔离用例仍约 1.3 秒通过。产品 deadline 和 proof 均正确，错误在验收负载没有自己的生命周期上限。
 - 根因：
   1. **结构性**：测试设计依赖 parent SIGTERM handler 链式 kill child；macOS 没有 Linux `PR_SET_PDEATHSIG`，parent 异常死亡（SIGKILL / runner timeout / Ctrl+C）后 child 不会自动陪葬，被 launchd 收编成 PPID=1，继续 `while(true)` 烧 CPU 直到外部干预。
   2. **可观测性**：孤儿没有指向源头的进程链（PPID=1），仅靠 `ps` 看不出"是谁 spawn 的"，只能 grep 字面量 `while(true){}` 反查代码。
@@ -1147,8 +1148,9 @@ created: 2026-02-26
 - 修复（已落地）：
   - **Test 修复（PR #1607, 2026-05-08）**：busy child 自带 5–10s 自杀 deadline——`while(Date.now() < end)` 替代 `while(true)`，最坏情况下泄漏一只也只活一个测试时长，不会跨 session 累积。`packages/api/test/process-liveness-probe.test.js` 第 145 行已改。
   - **Src 修复（2026-05-09）**：`client-detection.ts` 把"靠 `<cli> version`/`<cli> --version` 探测"换成"`command -v <cli>` 存在性探测"——`execFile` 走 `/bin/sh -c 'command -v "$1"'` 路径（POSIX 内置，不 spawn agent runtime），timeout 1s。`versionCmd` 字段从 `CliSpec` 删除，`DetectedClient.version` 字段保留为可选但永不填值（前端 `ClientStep` 已 conditional render，自然降级到只显示"已安装"）。同时把 `existsOnPath` 抽成可注入接口便于测试。
+  - **Harness 修复（F294, 2026-08-30）**：受控 CPU 压力统一走 `scripts/run-bounded-cpu-contention.mjs`。worker 同时持有最多 60 秒的单调时钟硬 deadline 和 controller PID 存活检查；回归覆盖 wall clock 回拨与 SIGKILL controller，并要求全部 worker 在有界时间内自行退出。parent signal handler 只做快速清理，不再是唯一生命线。
 - 防护：
-  1. **Test**：任何 `*.test.{js,ts}` 里 spawn 的 busy / long-lived 子进程必须满足两条之一：(a) 自带时间 deadline，(b) 暴露 child PID 让外部测试 finally 块独立 SIGKILL，**不依赖 parent SIGTERM handler 链式 kill**。
+  1. **Test**：任何 `*.test.{js,ts}` 或验收脚本 spawn 的 busy / long-lived 子进程都必须自带单调时钟硬 deadline；受控压力 worker 还要检查 exact parent 是否存活。暴露 child PID、`finally` 和 parent signal handler 只作加速清理，不能替代 child 自己的退出所有权。
   2. **Src**（新增）：低成本 detection / health probe 路径**禁止 spawn 复杂 runtime**——能用 `command -v` / `which` / `where` 就不用 `<cli> --version`。即使是看起来"应该是简单 CLI"的目标（`opencode version`），也不能假设其 child 会响应 SIGTERM；agent runtime / headless browser 这类复杂 child 的生命周期不能让 parent 信号链承担。
   3. **回归守护**：注入式 `existsOnPath` + unit test 断言所有 spec 没有 `versionCmd` / `versionArgs` 字段，CI 直接拦截重新引入。见 `packages/api/test/client-detection.test.js`（5 个 case，含 LL-055 src-extension regression guard）。
   4. 卡启动 / CPU 异常排查 SOP（顺序按出现频率）：
@@ -1158,6 +1160,7 @@ created: 2026-02-26
   5. CI lint（建议 follow-up）：扫 `**/*.{js,ts}` 中 `exec\\(.*<cli>\\s+(version|--version)` 模式（src + test 一起），匹配上直接 fail。
 - 来源锚点：
   - `packages/api/test/process-liveness-probe.test.js#L140-L155`（test 修复 PR #1607）
+  - `scripts/run-bounded-cpu-contention.mjs` + `.test.mjs`（F294 controlled-contention recurrence）
   - `packages/api/src/domains/cats/services/first-run-quest/client-detection.ts`（src 修复 2026-05-09）
   - `packages/api/test/client-detection.test.js`（regression guards）
   - 2026-05-08 runtime 启动超时事件（4 只 test 孤儿 6h–19h，270% CPU，3002 无法在 20s 内监听）
@@ -1876,7 +1879,7 @@ created: 2026-02-26
 - 状态：validated
 - 更新时间：2026-08-01
 
-- 坑：PR #3276 已完成 exact-HEAD review、全量 gate、mergeability 与路径安全/鉴权证据后，GitHub required check 仍返回 `runner_id=0`、`steps=[]` 的 billing/spending-limit 红灯。团队把同一外部账单状态再次升级成新的代码或合入选择，形成表演性等待；代码、重跑和本地猫都不能“变出钱”解决它。
+- 坑：PR #3276 已完成 exact-HEAD review、全量 gate、mergeability 与路径安全/鉴权证据后，GitHub required check 仍返回 `runner_id=0`、`steps=[]` 的 billing/spending-limit 红灯。团队把同一外部账单状态再次升级成新的代码或合入选择，形成表演性等待；代码、重跑和本地猫都不能“变出钱”解决它。**这不是 owner action：不要求 operator 付费、修账单或关闭 workflow，也不反复把同一额度边界上报成待办。**
 - 根因：把“外部执行器没有获得 runner”误读成“代码执行后失败”。zero-step job 没有 source-under-test 运行事实，只证明 GitHub 账户或 billing infrastructure 没有启动 job；它既不是代码失败，也不是绿色 CI 证据。
 - 修复：把该事件归入 operational evidence lane，保留 exact PR/head、独立 review、已完成 gate、mergeability、zero-step payload 与账户提示的 typed decision frame。若授权与 merge-gate 已闭合，billing-only 不重复制造新的等待或 operator 选择；若必需行为证据仍缺，则明确缺哪一项，不拿 zero-step 红灯替代它。
 - 防护：识别 `runner_id=0` 且 `steps=[]` 时先判 job 是否实际执行；把 billing/payment/spending-limit 与 source/test failure 分桶。只有真实 runner/step 输出才能支持代码通过或失败 claim；外部基础设施状态只影响可用证据面，不改写代码真相。
@@ -1942,3 +1945,18 @@ created: 2026-02-26
 - 边界：这不是减少 release 证据。完整 source gate、完整 temp-public gate、F251、startup acceptance 与真实 target 写前复核仍保留；`--fast-validate` 也不能替代它们。public main 前进时只重开 public/reconciliation 切面；只有 source/export binding 变化才使 source gate 证据失效。
 - 原理：**综合长门禁适合证明终态，不适合承担发现所有低成本错误的第一反馈。** 正确的加速不是少测，而是让确定性失败尽早、让昂贵证明只跑在稳定切面上、让失败及时取消剩余成本。
 - 关联：F116 / F251 / `scripts/sync-to-opensource.sh --preflight` / `docs/postmortems/2026-03-13-opensource-sync-incident-chain.md` / LL-035（temp-target 安全）/ LL-036（长跑终态诚实）/ LL-079（volatile ref）
+
+### LL-102: 防御性编程不能校正航向——流程机制必须分别证明方向、风险与成本
+
+- 状态：draft
+- 更新时间：2026-09-02
+
+- 坑：多个 development episode 中，作者和 reviewer 都高强度执行 worktree、兼容、复审与 full gate，但最终实现仍偏离 issue、feature contract 或产品愿景；同时长出第二套相似概念、更多球权对象和无人负责的 follow-up。质量仪式增加，方向正确性与真实质量没有同步提高，最后由operator人肉指出偏离、找 owner、催 main 红灯和协调收口。
+- 根因：流程围绕“把当前实现做得更牢”优化，没有把 accepted source → exact HEAD → non-author conclusion 作为同一条追溯链；又把确定契约、运行健康和不确定效用混成一项“质量”，于是 targeted/full、review、observability 与 eval 被按完整性仪式叠加。每发现一个协调裂缝就新造 state/owner/custody/verdict，令系统开始服务自己的流程对象。
+- 触发条件：小改动无客观风险仍跑 full gate；review 多轮继续扩张当前实现而不回读 accepted source；兼容旧实现时出现并行概念；任何方案需要operator日常判断 owner、催 follow-up 或替 main 健康值夜；为一个流程问题同时新增第二 command/file/receipt/registry/lifecycle。
+- 修复：以 accepted source 追溯链重画坐标；逐 claim 选择机制。Reviewer soft anchor、gate-time revision compare/内嵌 risk classifier/R4 自动重投刹车各守自己的确定契约；运行耗时与 main health 归 F153/opt-in guardian；只有“anchor 是否减少 intent drift”进入 F311 单变量 Program，并以 process cost 与 human coordination rescue 为不可抵消 guardrail。
+- 防护：新增流程对象前做 no-second-owner/state/custody/verdict census；review blocker 必须带 source/risk anchor、可核验失败与 diff 因果；classifier 只保留 ephemeral、only-more-strict 的人工 risk flag；无 owner follow-up 当场死亡；automation evidence 缺失时只降级 automation，不锁开发者；每条新机制预注册 keep/tune/sunset。
+- 来源锚点：`[thread-id]#0001788341832434-000718-34804917`（质量与方向纠偏）| `[thread-id]#0001788351266499-000900-e238081f`（保姆税）| `[thread-id]#0001788357372382-000081-190fec0d`（机制/概念增生与 F311 路由）| `[thread-id]#0001788356775127-000080-da443f31`（A2A/lease/verdict 反例）| 收敛蓝图 (internal)
+- 原理：**把车造得更坚固不会让它自动开向正确目的地。** 方向靠 accepted-source 追溯，确定风险靠 guard，运行健康靠 observability，不确定效用才靠 eval；机制的数量不是质量，能否更早发现偏航且不增加人类协调税才是质量。
+
+- 关联：ADR-031 v3.5 candidate | LL-071（A2A scope 误读放大）| LL-072/083（review 无不动点与开放纠缠）| LL-095（机制工具箱不是清单）| LL-101（长门禁先收敛）| F100 Process Evolution | F303 Design Gate Integrity | F311 Capability Evolution Workspace

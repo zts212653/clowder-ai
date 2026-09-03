@@ -76,6 +76,91 @@ describe('RedisThreadStore', { skip: redisIsolationSkipReason(REDIS_URL) }, () =
     assert.equal(fetched.createdBy, 'user1');
   });
 
+  it('persists goal intent without TTL and rejects stale provider reconciliation', async () => {
+    const persistentStore = new RedisThreadStore(redis, { ttlSeconds: 0 });
+    const thread = await persistentStore.create('user1', 'Goal Thread');
+    const first = {
+      v: 1,
+      intent: 'set',
+      objective: 'Finish the provider-neutral goal journey',
+      status: 'active',
+      tokenBudget: 12_000,
+      revision: 1,
+      updatedAt: Date.now(),
+      sync: { state: 'syncing', source: 'cat_cafe', catId: 'codex' },
+    };
+
+    assert.equal(
+      await persistentStore.compareAndSetGoal(thread.id, null, { ...first, objective: '   ' }),
+      false,
+      'invalid provider observations must be rejected before Redis can retain a ghost revision',
+    );
+    assert.equal((await persistentStore.get(thread.id)).goal, undefined);
+
+    assert.equal(await persistentStore.compareAndSetGoal(thread.id, null, first), true);
+    assert.equal(await redis.ttl(threadDetailKey(thread.id)), -1, 'user goal truth must not expire');
+    assert.deepEqual((await persistentStore.get(thread.id)).goal, first);
+
+    const newer = { ...first, objective: 'Keep the newer owner intent', revision: 2 };
+    assert.equal(await persistentStore.compareAndSetGoal(thread.id, 1, newer), true);
+    assert.equal(
+      await persistentStore.compareAndSetGoal(thread.id, 1, {
+        ...first,
+        sync: { state: 'synced', source: 'codex_app_server' },
+      }),
+      false,
+    );
+    assert.deepEqual((await persistentStore.get(thread.id)).goal, newer);
+
+    const clearedAt = Date.now();
+    const clearFence = {
+      v: 1,
+      intent: 'clear',
+      revision: 3,
+      updatedAt: clearedAt,
+      clearedAt,
+      sync: {
+        state: 'synced',
+        source: 'codex_app_server',
+        catId: 'codex',
+        sessionId: 'native-goal-thread',
+        observedAt: clearedAt,
+      },
+    };
+    assert.equal(await persistentStore.compareAndSetGoal(thread.id, 2, clearFence), true);
+    assert.deepEqual((await persistentStore.get(thread.id)).goal, clearFence);
+    assert.equal(await redis.ttl(threadDetailKey(thread.id)), -1, 'clear fence must not expire');
+  });
+
+  it('atomically replaces a persisted goal that fails the current schema', async () => {
+    const persistentStore = new RedisThreadStore(redis, { ttlSeconds: 0 });
+    const thread = await persistentStore.create('user1', 'Goal repair');
+    const malformed = JSON.stringify({
+      v: 1,
+      intent: 'set',
+      objective: '   ',
+      status: 'active',
+      revision: 41,
+      updatedAt: Date.now(),
+      sync: { state: 'synced', source: 'codex_app_server' },
+    });
+    await redis.hset(threadDetailKey(thread.id), 'goal', malformed);
+    assert.equal((await persistentStore.get(thread.id)).goal, undefined);
+
+    const repaired = {
+      v: 1,
+      intent: 'set',
+      objective: 'Recovered owner goal',
+      status: 'active',
+      tokenBudget: null,
+      revision: 1,
+      updatedAt: Date.now(),
+      sync: { state: 'syncing', source: 'cat_cafe' },
+    };
+    assert.equal(await persistentStore.compareAndSetGoal(thread.id, null, repaired), true);
+    assert.deepEqual((await persistentStore.get(thread.id)).goal, repaired);
+  });
+
   it('resolves a user-indexed system thread through the canonical read policy', async () => {
     const { resolveThreadAccess } = await import('../dist/domains/cats/services/session/thread-access-policy.js');
     const thread = await store.ensureThread('thread_eval_friction', 'Eval friction');

@@ -26,23 +26,20 @@ function setTextareaValue(textarea: HTMLTextAreaElement, value: string) {
 
 function selectText(node: Node, text: string) {
   const rect = () => ({ top: 120, right: 260, bottom: 140, left: 120, width: 140, height: 20 }) as DOMRect;
+  const range = document.createRange();
+  range.setStart(node, 0);
+  range.setEnd(node, text.length);
+  Object.defineProperties(range, {
+    getClientRects: { value: () => [rect()] },
+    getBoundingClientRect: { value: rect },
+  });
   vi.spyOn(window, 'getSelection').mockReturnValue({
     isCollapsed: false,
     anchorNode: node,
     focusNode: node,
-    toString: () => text,
+    toString: () => range.toString(),
     rangeCount: 1,
-    getRangeAt: () => ({
-      getClientRects: () => [rect()],
-      getBoundingClientRect: rect,
-      commonAncestorContainer: node,
-      toString: () => text,
-      cloneRange: () => ({
-        selectNodeContents: vi.fn(),
-        setEnd: vi.fn(),
-        toString: () => '',
-      }),
-    }),
+    getRangeAt: () => range,
     removeAllRanges: vi.fn(),
   } as unknown as Selection);
   document.dispatchEvent(new Event('selectionchange'));

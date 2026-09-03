@@ -76,6 +76,22 @@ function liveExecution({
   };
 }
 
+function managedGateExecution(): ActiveExecutionProjection {
+  return {
+    executionId: 'hold-ball-gate',
+    threadId: 'thread-1',
+    threadTitle: 'Gate thread',
+    catId: 'codex',
+    kind: 'managed_command',
+    activity: 'full_gate',
+    startedAt: Date.now() - 5000,
+    cancelability: {
+      state: 'cancelable',
+      target: { kind: 'managed_command', taskId: 'hold-ball-gate' },
+    },
+  };
+}
+
 function seedExecutions(executions: ActiveExecutionProjection[], anchorThreadId = 'thread-1'): void {
   useChatStore.setState({ currentThreadId: anchorThreadId });
   useActiveExecutionStore.setState({
@@ -204,6 +220,26 @@ describe('ThreadExecutionBar (F122B AC-B8 + B8/B9 polish)', () => {
     const text = container.textContent ?? '';
     expect(text).toContain('布偶猫');
     expect(text).toContain('缅因猫');
+  });
+
+  it('names a managed full gate without exposing the raw shell command', async () => {
+    seedExecutions([managedGateExecution()]);
+    await act(async () => root.render(React.createElement(ThreadExecutionBar)));
+
+    expect(container.textContent).toContain('全量门禁 · Gate thread');
+    expect(container.textContent).not.toContain('pnpm gate');
+  });
+
+  it('falls back to the generic managed label for a newer API activity value', async () => {
+    seedExecutions([
+      {
+        ...managedGateExecution(),
+        activity: 'future_activity' as unknown as ActiveExecutionProjection['activity'],
+      },
+    ]);
+    await act(async () => root.render(React.createElement(ThreadExecutionBar)));
+
+    expect(container.textContent).toContain('托管命令 · Gate thread');
   });
 
   it('keeps exact member controls without adding a second whole-thread Stop', async () => {

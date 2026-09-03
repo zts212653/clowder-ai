@@ -170,6 +170,37 @@ describe('background thread socket handling', () => {
         }),
       ]);
     });
+
+    it('done replaces a background raw stream with canonical persisted content', () => {
+      simulateBackgroundMessage({
+        type: 'text',
+        catId: 'codex-sol',
+        threadId: 'thread-bg',
+        invocationId: 'inv-bg-concierge',
+        content: '@co-creator 原始流式正文 [跳过去 R1｜目标｜0123456789ab]',
+        origin: 'stream',
+        timestamp: Date.now(),
+      });
+
+      simulateBackgroundMessage({
+        type: 'done',
+        catId: 'codex-sol',
+        threadId: 'thread-bg',
+        invocationId: 'inv-bg-concierge',
+        messageId: 'persisted-bg-concierge',
+        content: '原始流式正文 跳过去 R1',
+        isFinal: true,
+        timestamp: Date.now() + 1,
+      });
+
+      expect(useChatStore.getState().getThreadState('thread-bg').messages).toEqual([
+        expect.objectContaining({
+          id: 'persisted-bg-concierge',
+          content: '原始流式正文 跳过去 R1',
+          isStreaming: false,
+        }),
+      ]);
+    });
   });
 
   describe('P1-3 (R2): error must not be overwritten by done', () => {

@@ -87,6 +87,16 @@ describe('F221ApprovalAdapter', () => {
     assert.equal(item.inlineApprovable, true);
   });
 
+  it('preserves approving until the shared registry normalizes lifecycle truth', async () => {
+    const proposal = createAnchored();
+    store.claimForApproval(proposal.id, 'user-1');
+
+    const [item] = await adapter.listPending('user-1');
+
+    assert.equal(item.status, 'approving');
+    assert.equal(item.decisionMode, 'resume-only');
+  });
+
   it('includes scene, quote, dimension, tags in detail', async () => {
     createAnchored();
     const [item] = await adapter.listPending('user-1');

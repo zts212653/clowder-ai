@@ -5,7 +5,7 @@
  * fixes identified in gpt52 review of PR #2550.
  *
  * T8: wakeWhen runner cancelled on hold_ball cancel → no stale wake
- * T9: wakeWhen runner replaced by second hold → old runner cancelled
+ * T9: wakeWhen re-hold retires only the old carrier; authorized job keeps running
  * T10: messageStore.append failure → fallback task NOT removed
  * T11: cancelWakeWhenRunner export + activeRunners registry
  * T12: execution-plane queue full → fallback task NOT removed
@@ -14,6 +14,9 @@
  */
 
 import assert from 'node:assert/strict';
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import { beforeEach, describe, test } from 'node:test';
 import Fastify from 'fastify';
 import { tryAutoCancelPendingHolds } from '../dist/routes/messages.js';
@@ -226,6 +229,77 @@ describe('F167 Phase P: wakeWhen cancel/replace/delivery tests', () => {
       ),
       /outside the authenticated hold owner scope/,
     );
+  });
+
+  test('F261: canonical gate submission persists an independent job before admission and settles it once', async () => {
+    const { ManagedRunner } = await import('../dist/infrastructure/managed-runner.js');
+    const { recordDurableManagedGateProcess } = await import(
+      '../dist/domains/ball-custody/durable-managed-gate-job.js'
+    );
+    const originalStart = ManagedRunner.prototype.start;
+    let resolveCompletion;
+    ManagedRunner.prototype.start = (_command, options) => {
+      const processIdentity = { pid: 42, ppid: 1, pgid: 42, startedAt: 'birth-42' };
+      assert.ok(options.managedJob);
+      assert.equal(recordDurableManagedGateProcess(options.managedJob, processIdentity), true);
+      return {
+        admission: Promise.resolve({ spawned: true, pid: 42, processIdentity }),
+        completion: new Promise((resolve) => {
+          resolveCompletion = resolve;
+        }),
+      };
+    };
+    const tempDir = mkdtempSync(path.join(os.tmpdir(), 'hold-ball-durable-gate-route-'));
+    const previousDataDir = process.env.CAT_CAFE_DATA_DIR;
+    process.env.CAT_CAFE_DATA_DIR = tempDir;
+
+    try {
+      const deps = makeStubDeps();
+      const app = await createApp(deps);
+      const ownerUserId = 'user-durable-gate';
+      const thread = await threadStore.create(ownerUserId, 'durable gate');
+      const { invocationId, callbackToken } = await registry.create(ownerUserId, 'codex', thread.id);
+      const response = await app.inject({
+        method: 'POST',
+        url: '/api/callbacks/hold-ball',
+        headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
+        payload: {
+          reason: 'canonical gate',
+          nextStep: 'consume terminal truth',
+          wakeWhen: { command: 'pnpm gate' },
+        },
+      });
+
+      assert.equal(response.statusCode, 200, response.body);
+      const body = JSON.parse(response.body);
+      assert.match(body.wakeWhen.jobId, /^managed-gate-/);
+      assert.notEqual(body.wakeWhen.jobId, body.taskId);
+      const task = deps.dynamicTaskStore.getById(body.taskId);
+      const job = task.params.holdLifecycle.managedCommand.durableJob;
+      assert.equal(job.jobId, body.wakeWhen.jobId);
+      assert.equal(job.originTaskId, body.taskId);
+      const running = JSON.parse(readFileSync(job.recordPath, 'utf8'));
+      assert.equal(running.state, 'running');
+      assert.equal(running.ownerIdentity.startedAt, 'birth-42');
+
+      resolveCompletion({ exitCode: 0, timedOut: false, durationMs: 25, tailOutput: 'gate green' });
+      const deadline = Date.now() + 1_000;
+      while (JSON.parse(readFileSync(job.recordPath, 'utf8')).state !== 'terminal' && Date.now() < deadline) {
+        await new Promise((resolve) => setTimeout(resolve, 10));
+      }
+      assert.equal(JSON.parse(readFileSync(job.recordPath, 'utf8')).terminalStatus, 'green');
+      assert.equal(JSON.parse(readFileSync(`${job.recordPath}.terminal`, 'utf8')).terminalStatus, 'green');
+      while (getActiveRunnerCount() > 0 && Date.now() < deadline) {
+        await new Promise((resolve) => setTimeout(resolve, 10));
+      }
+      assert.equal(getActiveRunnerCount(), 0, 'terminal fake worker must leave no active registry residue');
+      await app.close();
+    } finally {
+      ManagedRunner.prototype.start = originalStart;
+      if (previousDataDir === undefined) delete process.env.CAT_CAFE_DATA_DIR;
+      else process.env.CAT_CAFE_DATA_DIR = previousDataDir;
+      rmSync(tempDir, { recursive: true, force: true });
+    }
   });
 
   // ─── T8: wakeWhen hold with cancel → runner is cancelled ────────────────
@@ -445,15 +519,22 @@ describe('F167 Phase P: wakeWhen cancel/replace/delivery tests', () => {
       releaseVisibilityAppend = resolve;
     });
     let completionCount = 0;
+    const t8cMessages = [];
+    let firstAppend = true;
     const deps = makeStubDeps({
       messageStore: {
         getByIdempotencyKey() {
           return null;
         },
         async append(message) {
-          markVisibilityAppendStarted();
-          await visibilityMayFinish;
-          return { id: 'visibility-message', ...message };
+          if (firstAppend) {
+            firstAppend = false;
+            markVisibilityAppendStarted();
+            await visibilityMayFinish;
+          }
+          const stored = { id: `t8c-msg-${t8cMessages.length}`, ...message };
+          t8cMessages.push(stored);
+          return stored;
         },
       },
       managedCommandWakeRecovery: {
@@ -517,6 +598,76 @@ describe('F167 Phase P: wakeWhen cancel/replace/delivery tests', () => {
     assert.equal(cancellation.outcome, 'applied');
     assert.equal(held.statusCode, 200);
     assert.equal(completionCount, 0, 'an applied cancellation must prevent managed launch and completion');
+
+    // Spawn-truth assertions: cancellation must prevent spawn, not just suppress delivery.
+    const heldBody = JSON.parse(held.body);
+    assert.strictEqual(heldBody.wakeWhen.pid, null, 'cancelled command must report pid: null in HTTP response');
+    assert.equal(getActiveRunnerCount(), 0, 'no active runner residue after cancellation');
+
+    // Durable admission-fact: cancellation must be projected as terminal ("已取消"),
+    // distinct from generic spawn failure ("未启动").
+    // Pre-launch cancellation deletes the registry entry (registry_mismatch), which
+    // the three-way formatter maps to the cancellation terminal state.
+    const admissionMessages = t8cMessages.filter((m) => m.content.includes('未启动'));
+    assert.ok(admissionMessages.length > 0, 'durable admission fact (未启动) must be appended after cancellation');
+    const cancelledMessages = t8cMessages.filter((m) => m.content.includes('已取消'));
+    assert.ok(cancelledMessages.length > 0, 'cancellation admission must say "已取消", not generic spawn failure');
+    const falseScheduledMessages = t8cMessages.filter((m) => m.content.includes('定时唤醒将触发'));
+    assert.equal(falseScheduledMessages.length, 0, 'cancelled path must not claim fallback timer will fire');
+
+    // DynamicTask must be removed by cancellation — no scheduler/task residue
+    const taskAfterCancel = deps.dynamicTaskStore.getById(waitId);
+    assert.ok(!taskAfterCancel, 'DynamicTask must be removed after applied cancellation');
+  });
+
+  test('T8c-2: pre-admission IIFE failure settles admission promise and terminates HTTP', async () => {
+    // Regression guard: if the async IIFE inside launchWakeWhenRunner throws
+    // before any explicit resolveExternalAdmission call, the catch block must
+    // still settle the admission promise so the route handler doesn't hang.
+    const { ManagedRunner } = await import('../dist/infrastructure/managed-runner.js');
+    const origStart = ManagedRunner.prototype.start;
+    ManagedRunner.prototype.start = () => {
+      throw new Error('injected pre-admission failure');
+    };
+
+    try {
+      const deps = makeStubDeps();
+      const app = await createApp(deps);
+      const ownerUserId = 'user-pre-admit';
+      const thread = await threadStore.create(ownerUserId, 'pre-admit');
+      const { invocationId, callbackToken } = await registry.create(ownerUserId, 'codex', thread.id);
+
+      const response = await app.inject({
+        method: 'POST',
+        url: '/api/callbacks/hold-ball',
+        headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
+        payload: {
+          reason: 'pre-admission failure test',
+          nextStep: 'verify hang-free',
+          wakeWhen: { command: 'echo never-runs' },
+        },
+      });
+
+      assert.equal(response.statusCode, 200, 'route must terminate without hanging');
+      const body = JSON.parse(response.body);
+      assert.strictEqual(body.wakeWhen.pid, null, 'failed admission must report pid: null');
+      assert.equal(getActiveRunnerCount(), 0, 'no active runner residue after pre-admission failure');
+
+      // Durable admission-fact: a "未启动" message must be appended
+      const failMessages = deps._appendedMessages.filter((m) => m.content.includes('未启动'));
+      assert.ok(failMessages.length > 0, 'spawn failure admission fact (未启动) must be durably projected');
+
+      // P1-2: DynamicTask lifecycle projection must have pid=null for spawn failure
+      const task = deps.dynamicTaskStore.getById(body.taskId);
+      assert.ok(task, 'DynamicTask must still exist after spawn failure');
+      const mc = task.params.holdLifecycle?.managedCommand;
+      assert.ok(mc, 'managedCommand projection must exist');
+      assert.strictEqual(mc.pid, null, 'spawn failure must persist pid=null in lifecycle projection');
+
+      await app.close();
+    } finally {
+      ManagedRunner.prototype.start = origStart;
+    }
   });
 
   test('T8d: failed persistence releases a pre-launch reservation and starts the original command', async () => {
@@ -604,8 +755,8 @@ describe('F167 Phase P: wakeWhen cancel/replace/delivery tests', () => {
     assert.equal(completionCount, 1, 'the original managed command must resume after proven persistence failure');
   });
 
-  // ─── T9: second wakeWhen replaces first → old runner cancelled ──────────
-  test('T9: second wakeWhen hold cancels first runner (single-slot)', async () => {
+  // ─── T9: second wakeWhen replaces custody, not authorized execution ─────
+  test('T9: second wakeWhen hold preserves the first authorized runner', async () => {
     const deps = makeStubDeps();
     const app = await createApp(deps);
     const thread = await threadStore.create('user-hb-t9', 'hb-t9');
@@ -626,7 +777,7 @@ describe('F167 Phase P: wakeWhen cancel/replace/delivery tests', () => {
     assert.equal(r1.statusCode, 200);
     const firstTaskId = JSON.parse(r1.body).taskId;
 
-    // Second wakeWhen hold (same thread, same cat) → should replace
+    // Second wakeWhen hold (same thread, same cat) supersedes only the wake carrier.
     const r2 = await app.inject({
       method: 'POST',
       url: '/api/callbacks/hold-ball',
@@ -641,13 +792,19 @@ describe('F167 Phase P: wakeWhen cancel/replace/delivery tests', () => {
     const secondTaskId = JSON.parse(r2.body).taskId;
     assert.notEqual(firstTaskId, secondTaskId, 'should get a new taskId');
 
-    // First task should be unregistered (single-slot replace)
+    // First scheduler carrier is retired, but its durable task projection and
+    // independently authorized process remain available for terminal recovery.
     assert.ok(
       deps._unregisteredIds.includes(firstTaskId),
       `first taskId should have been unregistered; got ${JSON.stringify(deps._unregisteredIds)}`,
     );
+    const firstTask = deps.dynamicTaskStore.getById(firstTaskId);
+    assert.ok(firstTask, 'replacement must retain a durable task tombstone');
+    assert.equal(firstTask.enabled, false);
+    assert.equal(firstTask.params.holdLifecycle.status, 'retired_by_replacement');
+    assert.ok(getActiveRunnerCount() >= 2, 'both authorized jobs must remain active after re-hold');
 
-    // Wait for any async completion of first runner (it should have been cancelled)
+    // Neither command is allowed to wake through the superseded carrier.
     await new Promise((r) => setTimeout(r, 200));
 
     // First runner's wake should NOT have been delivered
@@ -656,14 +813,14 @@ describe('F167 Phase P: wakeWhen cancel/replace/delivery tests', () => {
       (m) =>
         typeof m.content === 'string' && m.content.includes('first gate') && m.content.includes('持球唤醒（命令完成）'),
     );
-    assert.equal(firstGateMessages.length, 0, 'cancelled runner should not deliver wake for "first gate"');
+    assert.equal(firstGateMessages.length, 0, 'retired carrier must not deliver a duplicate wake for "first gate"');
 
     // Clean up: cancel the second runner to avoid dangling processes
     cancelWakeWhenRunner(thread.id, 'codex');
     await new Promise((r) => setTimeout(r, 200));
   });
 
-  test('T9a: a stale cancellation token cannot kill a replacement command', async () => {
+  test('T9a: an exact-task cancellation cannot kill a successor command', async () => {
     const deps = makeStubDeps();
     const app = await createApp(deps);
     const thread = await threadStore.create('user-hb-t9a', 'hb-t9a');
@@ -699,8 +856,8 @@ describe('F167 Phase P: wakeWhen cancel/replace/delivery tests', () => {
 
     assert.equal(
       commitManagedWakeCancellation(firstTaskId, thread.id, 'codex', firstReservation.token),
-      false,
-      'task-bound token must not cancel a replacement runner',
+      true,
+      'the exact first task remains explicitly cancellable after replacement',
     );
     const secondReservation = reserveManagedWakeCancellation(secondTaskId, thread.id, 'codex');
     assert.equal(secondReservation.outcome, 'reserved', 'replacement runner must remain active');
@@ -758,6 +915,352 @@ describe('F167 Phase P: wakeWhen cancel/replace/delivery tests', () => {
       false,
       'fallback task should NOT be removed when wake delivery fails — cat needs the fallback wake',
     );
+  });
+
+  test('T10b: admission-fact append failure is recoverable via startup sweep — both live and dead pid converge', async () => {
+    // RED proof: freeze a real command in command_running, fail ONLY the
+    // admission-fact append, tear down the original callback owner, construct
+    // a fresh sweep, and prove the admission fact is re-delivered exactly once
+    // for both an OS-live and dead process — with zero command re-execution.
+    //
+    // Key: use `sleep 60` so the command CANNOT naturally complete during
+    // the test. This prevents the false-positive where natural completion
+    // transitions the task out of command_running before the sweep runs.
+    let appendCount = 0;
+    const deps = makeStubDeps({
+      messageStore: {
+        getByIdempotencyKey() {
+          return null;
+        },
+        async append(msg) {
+          appendCount++;
+          // First append = visibility "待启动" message → succeed
+          if (appendCount === 1) return { id: `msg-${appendCount}`, ...msg };
+          // Second append = admission-fact → FAIL (simulated durability gap)
+          if (appendCount === 2) throw new Error('simulated admission-fact append failure');
+          // Third+ = completion etc → succeed
+          return { id: `msg-${appendCount}`, ...msg };
+        },
+      },
+    });
+    const app = await createApp(deps);
+    const thread = await threadStore.create('user-hb-t10b', 'hb-t10b');
+    const { invocationId, callbackToken } = await registry.create('user-hb-t10b', 'codex', thread.id);
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/callbacks/hold-ball',
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
+      payload: {
+        reason: 'admission append failure recovery',
+        nextStep: 'verify durable recovery',
+        wakeWhen: { command: 'sleep 60' },
+      },
+    });
+
+    assert.equal(response.statusCode, 200, 'route must succeed despite admission-fact append failure');
+    const body = JSON.parse(response.body);
+    assert.ok(body.wakeWhen.pid > 0, 'HTTP response must carry real pid from spawn');
+
+    // ── Pre-sweep assertions: freeze the state BEFORE any recovery ──
+    const task = deps.dynamicTaskStore.getById(body.taskId);
+    assert.ok(task, 'DynamicTask must still exist');
+    const mc = task.params.holdLifecycle?.managedCommand;
+    assert.ok(mc, 'managedCommand projection must exist');
+    assert.ok(mc.pid > 0, 'managedCommand.pid must record real pid from spawn');
+    assert.equal(mc.state, 'command_running', 'pre-sweep: state must be command_running (sleep 60 is still alive)');
+    assert.equal(mc.admissionFactAppended, false, 'pre-sweep: admissionFactAppended must be false (append failed)');
+    assert.ok(
+      typeof mc.admissionFact === 'string' && mc.admissionFact.length > 0,
+      'pre-sweep: admissionFact text must be persisted for recovery',
+    );
+    // Verify no admission-fact message was actually delivered (append #2 threw)
+    const admissionMessages = deps._appendedMessages.filter((m) => m.content.includes('已启动'));
+    assert.equal(admissionMessages.length, 0, 'pre-sweep: no admission-fact message in thread (append failed)');
+
+    // ── Tear down the original callback/IIFE owner ──
+    // Kill the sleep process to simulate server restart (process dies)
+    try {
+      process.kill(body.wakeWhen.pid, 'SIGKILL');
+    } catch {
+      /* may already be gone */
+    }
+    await app.close();
+
+    // ── Sweep: re-deliver admission fact for dead pid ──
+    const { ManagedCommandWakeRecoverySweep } = await import(
+      '../dist/domains/ball-custody/ManagedCommandWakeRecoverySweep.js'
+    );
+    const sweepAppended = [];
+    const sweepBroadcasts = [];
+    const makeSweepDeps = () => ({
+      dynamicTaskStore: deps.dynamicTaskStore,
+      messageStore: {
+        getById: () => null,
+        getByIdempotencyKey: () => null,
+        async append(msg) {
+          const stored = { id: `sweep-msg-${sweepAppended.length}`, ...msg };
+          sweepAppended.push(stored);
+          return stored;
+        },
+        markCanceled: async () => null,
+      },
+      socketManager: {
+        broadcastToRoom(_room, _event, payload) {
+          sweepBroadcasts.push(payload);
+        },
+      },
+      taskRunner: { unregister() {} },
+      invocationRecordStore: { getByIdempotencyKey: () => null },
+      getInvokeTrigger: () => undefined,
+      now: () => Date.now(),
+    });
+
+    const sweep = new ManagedCommandWakeRecoverySweep(makeSweepDeps());
+    const stats = await sweep.runOnce();
+
+    // ── Post-sweep: admission fact re-delivered ──
+    assert.ok(stats.scanned > 0, 'sweep must scan the undelivered admission task');
+    assert.ok(stats.recovered > 0, 'sweep must recover the admission fact');
+    assert.equal(sweepAppended.length, 1, 'exactly one admission-fact message re-delivered');
+    assert.ok(
+      sweepAppended[0].content.includes('已启动'),
+      'recovered message must contain the original admission fact',
+    );
+    assert.ok(sweepBroadcasts.length > 0, 'admission fact must be broadcast to thread');
+
+    // Task lifecycle: admissionFactAppended = true, state still command_running
+    // (sweep does NOT synthesize a completion — the fallback timer handles that)
+    const taskAfterSweep = deps.dynamicTaskStore.getById(body.taskId);
+    assert.ok(taskAfterSweep, 'task must still exist (no re-execution, no deletion)');
+    const mcAfter = taskAfterSweep.params.holdLifecycle?.managedCommand;
+    assert.equal(mcAfter?.admissionFactAppended, true, 'admissionFactAppended must be true after recovery');
+
+    // ── Idempotency: second sweep must NOT re-deliver ──
+    sweepAppended.length = 0;
+    const sweep2 = new ManagedCommandWakeRecoverySweep(makeSweepDeps());
+    await sweep2.runOnce();
+    assert.equal(sweepAppended.length, 0, 'idempotent: second sweep must not re-append');
+    // The task is no longer in the undelivered filter (admissionFactAppended=true)
+    // so undeliveredAdmission count is 0, total scanned excludes it
+  });
+
+  test('T10c: R6 P1-1 — route→sweep chain: crash after admission append, before flag, no duplicate', async () => {
+    // RED proof: go through the actual route to produce the admission-fact
+    // message (with shared idempotencyKey from buildAdmissionFactIdempotencyKey),
+    // block the admissionFactAppended=true CAS to simulate a crash at that
+    // boundary, then run the sweep with the SAME message store. The sweep must
+    // find the existing message by shared key and skip re-append — exactly one
+    // admission fact in the timeline. If the route's key is deleted or drifted,
+    // the sweep's getByIdempotencyKey finds nothing and re-appends a duplicate.
+    const { ManagedCommandWakeRecoverySweep, buildAdmissionFactIdempotencyKey } = await import(
+      '../dist/domains/ball-custody/ManagedCommandWakeRecoverySweep.js'
+    );
+
+    const deps = makeStubDeps();
+
+    // Intercept: block the admissionFactAppended=true update to simulate crash
+    const originalUpdateParams = deps.dynamicTaskStore.updateParams;
+    deps.dynamicTaskStore.updateParams = (id, params) => {
+      if (params?.holdLifecycle?.managedCommand?.admissionFactAppended === true) {
+        return false; // Simulate crash at exactly this boundary
+      }
+      return originalUpdateParams(id, params);
+    };
+
+    const app = await createApp(deps);
+    const thread = await threadStore.create('user-hb-t10c', 'hb-t10c');
+    const { invocationId, callbackToken } = await registry.create('user-hb-t10c', 'codex', thread.id);
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/callbacks/hold-ball',
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
+      payload: {
+        reason: 'idempotency dedup proof',
+        nextStep: 'verify no duplicate',
+        wakeWhen: { command: 'sleep 60' },
+      },
+    });
+
+    assert.equal(response.statusCode, 200, 'route must succeed');
+    const body = JSON.parse(response.body);
+    const taskId = body.taskId;
+
+    // ── Pre-sweep: verify the route produced the correct durable state ──
+    const task = deps.dynamicTaskStore.getById(taskId);
+    const mc = task.params.holdLifecycle?.managedCommand;
+    assert.equal(mc.admissionFactAppended, false, 'pre-sweep: flag must be false (update was blocked)');
+    assert.ok(mc.admissionFact, 'pre-sweep: admissionFact text must be persisted');
+
+    // Verify the route's append carried the canonical shared idempotency key
+    const canonicalKey = buildAdmissionFactIdempotencyKey(taskId);
+    const admissionMessages = deps._appendedMessages.filter((m) => m.content.includes('已启动'));
+    assert.equal(admissionMessages.length, 1, 'route must have appended exactly one admission message');
+    assert.equal(
+      admissionMessages[0].idempotencyKey,
+      canonicalKey,
+      'route admission message must carry the canonical shared idempotency key',
+    );
+
+    // ── Tear down route owner ──
+    try {
+      process.kill(body.wakeWhen.pid, 'SIGKILL');
+    } catch {
+      /* may already be gone */
+    }
+    await app.close();
+
+    // ── Sweep: reuse same message store — must find existing by key ──
+    const sweepAppended = [];
+    const sweepDeps = {
+      dynamicTaskStore: deps.dynamicTaskStore,
+      messageStore: {
+        getById: () => null,
+        getByIdempotencyKey(_userId, threadId, key) {
+          // Shared message store: the route's message is findable by key
+          return deps._appendedMessages.find((m) => m.threadId === threadId && m.idempotencyKey === key) ?? null;
+        },
+        async append(msg) {
+          const stored = { id: `sweep-msg-${sweepAppended.length}`, ...msg };
+          sweepAppended.push(stored);
+          return stored;
+        },
+        markCanceled: async () => null,
+      },
+      socketManager: { broadcastToRoom() {} },
+      taskRunner: { unregister() {} },
+      invocationRecordStore: { getByIdempotencyKey: () => null },
+      getInvokeTrigger: () => undefined,
+      now: () => Date.now(),
+    };
+
+    const sweep = new ManagedCommandWakeRecoverySweep(sweepDeps);
+    await sweep.runOnce();
+
+    // ── Assertions: no duplicate, flag converged ──
+    assert.equal(sweepAppended.length, 0, 'sweep must NOT re-append — route message found by shared key');
+
+    const taskAfter = deps.dynamicTaskStore.getById(taskId);
+    const mcAfter = taskAfter.params.holdLifecycle?.managedCommand;
+    assert.equal(mcAfter.admissionFactAppended, true, 'admissionFactAppended must converge to true');
+
+    // Timeline integrity: exactly one admission-fact message total
+    const totalAdmission = [...deps._appendedMessages, ...sweepAppended].filter((m) => m.content.includes('已启动'));
+    assert.equal(totalAdmission.length, 1, 'timeline must contain exactly one admission-fact message');
+  });
+
+  test('T10d: R6 P1-2 — condition_met + admissionFactAppended=false restart: admission fact before completion dispatch', async () => {
+    // RED proof: when a task reaches condition_met while admissionFactAppended
+    // is false (append crashed + command completed before restart), the sweep
+    // must re-deliver the admission fact BEFORE publishing the completion
+    // message. Without the R6 ordering fix, completion publishes first and the
+    // provider is woken before the timeline shows what happened at spawn.
+    const { ManagedCommandWakeRecoverySweep } = await import(
+      '../dist/domains/ball-custody/ManagedCommandWakeRecoverySweep.js'
+    );
+
+    const taskId = 'hold-ball-t10d';
+    const threadId = 'thread-t10d';
+    const admissionFactText = '✅ 已启动 (pid 99999)，等待完成…';
+    const completionContent = '命令完成 (exit 0, 1200ms)';
+
+    const insertedTasks = [
+      {
+        id: taskId,
+        templateId: 'reminder',
+        enabled: true,
+        deliveryThreadId: threadId,
+        createdBy: 'hold-ball:codex',
+        params: {
+          triggerUserId: 'user-t10d',
+          holdLifecycle: {
+            status: 'active',
+            mode: 'wake_when',
+            createdBy: 'hold-ball:codex',
+            managedCommand: {
+              state: 'condition_met',
+              command: 'pnpm test',
+              startedAt: Date.now() - 30000,
+              conditionMetAt: Date.now() - 5000,
+              pid: 99999,
+              admissionFact: admissionFactText,
+              admissionFactAppended: false,
+              wakeContent: completionContent,
+              wakeSource: 'command_completion',
+              result: { exitCode: 0, timedOut: false, durationMs: 1200 },
+            },
+          },
+        },
+      },
+    ];
+
+    const appendOrder = [];
+    let appendSeq = 0;
+    const deps = {
+      dynamicTaskStore: {
+        getAll() {
+          return insertedTasks;
+        },
+        getById(id) {
+          return insertedTasks.find((t) => t.id === id);
+        },
+        updateParamsIfCurrent(id, expected, params) {
+          const task = insertedTasks.find((t) => t.id === id);
+          if (!task || task.params !== expected) return false;
+          task.params = params;
+          return true;
+        },
+        setEnabled(id, enabled) {
+          const task = insertedTasks.find((t) => t.id === id);
+          if (!task) return false;
+          task.enabled = enabled;
+          return true;
+        },
+      },
+      messageStore: {
+        getById: () => null,
+        getByIdempotencyKey: () => null,
+        async append(msg) {
+          appendSeq++;
+          const stored = { id: `msg-${appendSeq}`, ...msg };
+          appendOrder.push({
+            seq: appendSeq,
+            content: stored.content,
+            userId: stored.userId,
+          });
+          return stored;
+        },
+        markCanceled: async () => null,
+      },
+      socketManager: { broadcastToRoom() {} },
+      taskRunner: { unregister() {} },
+      invocationRecordStore: { getByIdempotencyKey: () => null },
+      getInvokeTrigger: () => undefined,
+      now: () => Date.now(),
+    };
+
+    const sweep = new ManagedCommandWakeRecoverySweep(deps);
+    await sweep.runOnce();
+
+    // At least 2 messages: admission fact + completion
+    assert.ok(appendOrder.length >= 2, `expected at least 2 messages but got ${appendOrder.length}`);
+
+    // Find admission and completion messages by content
+    const admissionIdx = appendOrder.findIndex((m) => m.content.includes('已启动'));
+    const completionIdx = appendOrder.findIndex((m) => m.content.includes('[定时任务]'));
+
+    assert.ok(admissionIdx >= 0, 'admission-fact message must be appended');
+    assert.ok(completionIdx >= 0, 'completion message must be appended');
+    assert.ok(
+      admissionIdx < completionIdx,
+      `admission fact (seq=${appendOrder[admissionIdx]?.seq}) must be appended BEFORE ` +
+        `completion (seq=${appendOrder[completionIdx]?.seq})`,
+    );
+
+    // After sweep, admissionFactAppended must be true
+    const mcAfter = insertedTasks[0].params.holdLifecycle.managedCommand;
+    assert.equal(mcAfter.admissionFactAppended, true, 'admissionFactAppended must be true after recovery');
   });
 
   test('T12: queue-full trigger keeps fallback reminder alive after completion message is written', async () => {

@@ -297,6 +297,79 @@ export async function buildConciergeActions(
 const TRIAGE_PLAN_PATTERN = /<!--\s*triage-plan\s*-->([\s\S]*?)<!--\s*\/triage-plan\s*-->/;
 const TRIAGE_PLAN_BLOCKS_PATTERN = /<!--\s*triage-plan\s*-->[\s\S]*?<!--\s*\/triage-plan\s*-->/gi;
 const DANGLING_TRIAGE_PLAN_PATTERN = /<!--\s*triage-plan\s*-->[\s\S]*$/i;
+const CONCIERGE_HANDLE_MARKER_PATTERN = /\[(跳过去|原地看)\s+(R\d+)(?:\s*[|｜]\s*[^\]\r\n]+)?\]/gi;
+const CONCIERGE_HANDLE_MARKER_DETECTION_PATTERN = /\[(?:跳过去|原地看)\s+R\d+(?:\s*[|｜]\s*[^\]\r\n]+)?\]/i;
+const CAT_SIGNATURE_LINE_PATTERN = /(?:^|\n)\s*\[[^\]\r\n]{1,120}🐾\]\s*(?=\n|$)/g;
+const INTERNAL_HANDLE_PATTERN_SOURCE = String.raw`(?:co-creator|l\.s\.|operator|you|opus(?:-?4[678]|5)?|sonnet|fable5|codex(?:-sol|-terra)?|gpt52|spark|gemini(?:-?(?:25|35))?|antigravity|antig-opus)`;
+const LINE_START_ROUTING_MENTION_PATTERN = new RegExp(
+  String.raw`^@${INTERNAL_HANDLE_PATTERN_SOURCE}(?![a-z0-9_-])[ \t]*`,
+  'gim',
+);
+const KNOWN_INTERNAL_MENTION_PATTERN = new RegExp(
+  String.raw`(?:^|[ \t])@${INTERNAL_HANDLE_PATTERN_SOURCE}(?![a-z0-9_-])[ \t]*`,
+  'gi',
+);
+
+interface ProtectedMarkdownExamples {
+  masked: string;
+  restore(text: string): string;
+}
+
+type MarkdownFence = { char: '`' | '~'; length: number };
+
+function parseMarkdownFenceOpening(body: string): MarkdownFence | null {
+  const marker = body.match(/^\s*(`{3,}|~{3,})/)?.[1];
+  const char = marker?.[0];
+  if (!marker || (char !== '`' && char !== '~')) return null;
+  return { char, length: marker.length };
+}
+
+function advanceMarkdownFence(
+  current: MarkdownFence | null,
+  opening: MarkdownFence | null,
+  body: string,
+): MarkdownFence | null {
+  if (opening) return opening;
+  if (!current) return null;
+  const closing = new RegExp(`^\\s*${current.char}{${current.length},}\\s*$`);
+  return closing.test(body) ? null : current;
+}
+
+/**
+ * Control projection is destructive, so examples are outside its authority.
+ * Mask fenced blocks and quoted lines before stripping markers or internal
+ * handles, then restore the exact source bytes afterwards.
+ */
+function protectMarkdownExamples(text: string): ProtectedMarkdownExamples {
+  const originals: string[] = [];
+  let fence: MarkdownFence | null = null;
+  const masked = (text.match(/[^\n]*(?:\n|$)/g) ?? [])
+    .filter((line, index, lines) => line.length > 0 || index < lines.length - 1)
+    .map((line) => {
+      const hasNewline = line.endsWith('\n');
+      const body = hasNewline ? line.slice(0, -1) : line;
+      const opening = fence ? null : parseMarkdownFenceOpening(body);
+      const quoted = !fence && !opening && /^\s*>/.test(body);
+      const protect = Boolean(fence || opening || quoted);
+      fence = advanceMarkdownFence(fence, opening, body);
+
+      if (!protect) return line;
+      const index = originals.push(body) - 1;
+      return `\u0000concierge-example-${index}\u0000${hasNewline ? '\n' : ''}`;
+    })
+    .join('');
+
+  return {
+    masked,
+    restore(projected) {
+      let restored = projected;
+      originals.forEach((original, index) => {
+        restored = restored.replaceAll(`\u0000concierge-example-${index}\u0000`, original);
+      });
+      return restored;
+    },
+  };
+}
 
 /**
  * Strip every complete or dangling <!-- triage-plan --> control block before
@@ -308,6 +381,31 @@ export function stripTriagePlanMarkers(text: string): string {
   const stripped = text.replace(TRIAGE_PLAN_BLOCKS_PATTERN, '').replace(DANGLING_TRIAGE_PLAN_PATTERN, '');
   // Collapse 3+ consecutive newlines (from marker removal) to double-newline
   return stripped.replace(/\n{3,}/g, '\n\n').trim();
+}
+
+/**
+ * Canonical persisted presentation for concierge replies.
+ *
+ * Action extraction and routing inspect the original reply before this runs;
+ * storage receives one clean body plus typed rich actions. Every surface then
+ * consumes the same content instead of parsing or stripping markers locally.
+ */
+export function projectConciergeStoredContent(text: string): string {
+  const protectedExamples = protectMarkdownExamples(text);
+  const projected = stripTriagePlanMarkers(protectedExamples.masked)
+    .replace(CONCIERGE_HANDLE_MARKER_PATTERN, '$1 $2')
+    .replace(CAT_SIGNATURE_LINE_PATTERN, '\n')
+    .replace(LINE_START_ROUTING_MENTION_PATTERN, '')
+    .replace(KNOWN_INTERNAL_MENTION_PATTERN, '')
+    .replace(/[ \t]+\n/g, '\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+  return protectedExamples.restore(projected);
+}
+
+/** True only for live control markers, never marker-shaped documentation. */
+export function hasConciergeNavigationMarker(text: string): boolean {
+  return CONCIERGE_HANDLE_MARKER_DETECTION_PATTERN.test(protectMarkdownExamples(text).masked);
 }
 
 const VALID_INTENTS = new Set<TriagePlanIntent>(['relay', 'go', 'propose_thread', 'investigate']);

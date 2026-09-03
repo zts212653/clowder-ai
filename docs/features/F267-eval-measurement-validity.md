@@ -2,10 +2,10 @@
 feature_ids: [F267]
 related_features: [F192, F245, F263, F266, F268, F275]
 topics: [eval, measurement-validity, calibration, uncertainty, repeatability, friction, work-eligibility]
-tips_exempt: "Internal eval measurement governance and migration; no new user-invokable capability or action surface"
+tips_exempt: "Renewed 2026-09-01: decision-proof v1 and its owner-backed ref resolver are internal cross-feature measurement governance APIs; they add no user-invokable action or discovery surface."
 doc_kind: spec
 created: 2026-07-18
-updated: 2026-08-10
+updated: 2026-09-01
 description: "为决策型 eval bundle 建立目标、边界、不确定性与重裁契约，并以 friction 通道召回为首个实证迁移。"
 description_source: human
 description_author: codex-sol
@@ -49,6 +49,8 @@ eval 能稳定产出数字，不等于数字真的代表我们在乎的东西。
 - 完整出生证至少含：measurement target/estimand、decision consumer/action、target population/window、primary loss 与 guardrails、false-positive/false-negative cost、validity bounds、sample contract、uncertainty/power、calibration plan、withdrawal condition、intervention card。
 - judge/rubric/classifier/eval-cat prompt/model/code artifact 使用 first-class version/provenance；仅有 repo SHA 不替代可读版本与重裁输入。
 - 样本不足时必须报 `n + point estimate + interval/power + insufficient`，禁止只用点估计硬过阈值。
+- 跨 Feature consumer 若要把 measurement result 用于优化或 promotion，还必须提交独立的 decision-proof v1：同一 evaluation cohort 的 evidence role 与 optimizer exposure、certificate 指名 consumer 的 consumption receipt，以及一个不同于 evaluation cohort、对 candidate/rubric selection 均未暴露的 promotion holdout。holdout 只能以“optimizer selection 前已 sealed”或“selection cutoff 后才开始的 time-fresh window”证明独立性。
+- decision-proof 的 `verified` 只证明证据链和独立性可核验，不把原 measurement decision 的 `insufficient` 升格成 `usable`。任一 proof 缺失都返回 typed `insufficient` 与枚举化 withdrawal condition；不得从 `InterventionCard.holdout` 自由文本、默认值或 consumer 本地 ledger 补造。
 
 ### Phase C: Repeatability + Risk-Ordered Migration
 
@@ -113,6 +115,7 @@ eval 能稳定产出数字，不等于数字真的代表我们在乎的东西。
 - [x] AC-B3: judge/rubric/classifier/prompt/model/code provenance first-class versioned，并可用同版本重放 frozen cohort。
 - [x] AC-B4: verdict 若 n/判定力不足必须输出 `insufficient` 和撤回条件；只有 point threshold 的报告被 hard check 拒绝。
 - [x] AC-B5: 每次提出 fix/build/sunset 前存在 intervention card，说明干预目标、guardrail、预期变化与复评窗口。
+- [x] AC-B6: canonical decision-proof API 将 evidence role、named consumer consumption、optimizer exposure 与 sealed/time-fresh promotion holdout 绑定到 exact certificate/result/cohort refs；缺证或非独立 holdout 只能得到 typed `insufficient`，且 proof `verified` 与 measurement `usable` 保持正交。
 
 > 2026-07-19 Phase B contract acceptance：以上五项证明出生证、结果、版本集、同版本 replay、`insufficient` 与 intervention gate 的机制可执行；friction dogfood 仍为 `n=0`、recall=`null`、decision=`insufficient`。这不构成 Phase C 独立重裁、全量迁移或 cancel recall 健康证明，AC-C1..C4 全部保持关闭。
 
@@ -239,6 +242,8 @@ metric_birth_certificate:
 - executable census：`docs/harness-feedback/registry/measurement-bundles.yaml` 逐 entry 绑定 registry consumer/owner、allowed action、source selector、instruction/publish wiring、functional equivalents 与 committed verdict count；validator 从真实 registry 与 88 份 verdict 反查，新增/重复/错 consumer/错 classification 均 fail closed。
 - canonical certificate：`docs/harness-feedback/certificates/f267-friction-opportunity-to-action.yaml` 以 decision bundle 为单位，区分 primary loss / guardrail / context / diagnostic；judge、rubric、classifier、prompt、model、code 六类组件各有可读版本、repo ref、SHA-256，并汇成 deterministic version-set hash。
 - normalized result：`docs/harness-feedback/measurement-results/f267-friction-2026-07-18.yaml` 从 Phase A accepted artifact 重新投影；`cancel_adapter_recall` 保留 `n=0`、point estimate=`null`、`not_estimable`，overall decision 保留两条 reason 与两条 withdrawal condition，action 仅为 `keep_observe`。
+- decision-proof v1：`MeasurementDecisionProofCandidateSchema` 接收 owner-backed role/receipt/exposure/holdout refs，`assessMeasurementDecisionProofCandidate(...)` 只输出非权威的 `candidate_sufficient | candidate_insufficient`，且不从 `harness-eval` public barrel 导出；`createFileMeasurementDecisionProofResolver(...)` 是唯一公开的权威 proof producer，它将严格的 `measurement-proof:<id>` owner ref 解析为 F267-owned record，校验 record/certificate/result 的物理仓内路径，并解析 evidence-role、consumer receipt、optimizer exposure、promotion holdout cohort/proof 与 sealed seal 六类 owner object 的 owner、原始字节 hash 和 claim 绑定后，才可签发 normalized `verified`。sealed 必须严格早于 selection cutoff，time-fresh window 必须严格晚于 cutoff；等时边界不算独立。verified 分支四类 proof 全部必填；未知/错 owner/ref 或 source drift 均 fail closed，consumer 不读取 caller-chosen path，也不能直接解析或制造权威 `verified`。
+- compatibility boundary：历史 certificate/result schemaVersion 1、component/version hashes 与 `InterventionCard.holdout` 字节保持不变；自由文本 holdout 仍可描述 intervention plan，但不能充当 promotion independence proof。consumer 只消费新 API 的规范化结果，不为旧 artifact 制造默认 proof。
 - same-version replay：`docs/harness-feedback/replays/f267-friction-2026-07-18-same-version.yaml` 使用同 certificate、同 cohort ref/hash、同 version set 重新运行 friction projection，生成独立 replay result identity 后得到 `exact_agreement`；任一 cohort/version identity 漂移先 fail closed，不伪装成普通 disagreement。
 - hard layer：root `pnpm check:measurement-bundles` 验证 census、strict schema、component/cohort hash、canonical friction reprojection 与 replay；mutation tests 拒绝 stale census、路径逃逸、hash drift、thin legacy certificate、point-only/false-usable result。
 - F268 boundary：`eval:capability-tips` enable gate 已改为消费 canonical F267 parser，不再维护重复薄 schema；checked-in domain 仍 `enabled:false` 且 certificate/replay refs 为 `null`，没有签发证书、启动 pipeline 或开启 Phase C。

@@ -1,7 +1,7 @@
-import type { ApprovalItem } from '@cat-cafe/shared';
+import type { ApprovalItem, SettledApprovalItem } from '@cat-cafe/shared';
 import { projectCandidateInteractionInformedEvidence } from '../../memory/people/PersonMemoryInformedEvidence.js';
 import type { PersonMemoryStore, StoredPersonMemoryCandidate } from '../../memory/people/PersonMemoryStore.js';
-import type { IApprovalAdapter } from '../ports/IApprovalAdapter.js';
+import type { IApprovalAdapter, ListSettledOpts } from '../ports/IApprovalAdapter.js';
 import { compactApprovalProjections, projectApprovalNavigation } from '../projectApprovalNavigation.js';
 
 export class F276ApprovalAdapter implements IApprovalAdapter {
@@ -13,6 +13,22 @@ export class F276ApprovalAdapter implements IApprovalAdapter {
     if (!this.store) return [];
     const candidates = await this.store.listPending(userId);
     return compactApprovalProjections(candidates.map(toItem));
+  }
+
+  async listSettled(userId: string, opts?: ListSettledOpts): Promise<SettledApprovalItem[]> {
+    if (!this.store) return [];
+    const settled = await this.store.listSettled(userId, opts?.limit ?? 50);
+    return compactApprovalProjections(
+      await Promise.all(
+        settled.map(async ({ candidate, decidedAt }) => {
+          const person =
+            candidate.state === 'materialized' && candidate.materializedPersonId
+              ? await this.store?.getPerson(userId, candidate.materializedPersonId)
+              : null;
+          return toSettledItem(candidate, decidedAt, person?.displayName);
+        }),
+      ),
+    );
   }
 }
 
@@ -96,6 +112,46 @@ function toItem(candidate: StoredPersonMemoryCandidate): ApprovalItem | null {
     navigation,
     inlineApprovable: true,
     decisionMode: 'claim-select',
+    createdAt: candidate.createdAt,
+  };
+}
+
+function toSettledItem(
+  candidate: StoredPersonMemoryCandidate,
+  decidedAt: number,
+  displayName?: string,
+): SettledApprovalItem | null {
+  const navigation = projectApprovalNavigation(candidate, {});
+  if (!navigation || (candidate.state !== 'materialized' && candidate.state !== 'rejected')) return null;
+  const receipt = candidate.latestDecisionReceipt;
+  if (candidate.state === 'materialized' && (!displayName || !receipt)) return null;
+  const detail =
+    candidate.state === 'materialized'
+      ? {
+          displayName,
+          materialized: {
+            claims: receipt?.materializedClaimIds.length ?? 0,
+            relationships: receipt?.materializedRelationshipIds.length ?? 0,
+            events: receipt?.materializedEventIds.length ?? 0,
+          },
+        }
+      : {
+          ...(candidate.latestHumanDisposition
+            ? { dispositionReason: candidate.latestHumanDisposition.reasonCode }
+            : {}),
+        };
+  return {
+    proposalId: candidate.candidateId,
+    sourceFeatureId: 'F276',
+    requesterCatId: candidate.requesterCatId,
+    ownerUserId: candidate.ownerUserId,
+    status: candidate.state === 'materialized' ? 'approved' : 'rejected',
+    summary: candidate.state === 'materialized' ? `记住人物：${displayName}` : '人物提案（内容已清除）',
+    detail,
+    navigation,
+    decisionMode: 'claim-select',
+    decidedAt,
+    decidedBy: candidate.ownerUserId,
     createdAt: candidate.createdAt,
   };
 }

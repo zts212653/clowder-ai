@@ -32,16 +32,16 @@ describe('SkillSecurityStore', () => {
 
   test('approve transitions pending_review to approved', () => {
     store.register('s1', regData);
-    const entry = store.approve('s1', 'you');
+    const entry = store.approve('s1', 'operator');
     assert.strictEqual(entry.status, 'approved');
-    assert.strictEqual(entry.approvedBy, 'you');
+    assert.strictEqual(entry.approvedBy, 'operator');
     assert.ok(entry.approvedAt);
   });
 
   test('approve transitions quarantined to approved', () => {
     store.register('s1', regData);
     store.quarantine('s1', [{ pattern: 'test', severity: 'warning', line: 1, context: '' }]);
-    const entry = store.approve('s1', 'you');
+    const entry = store.approve('s1', 'operator');
     assert.strictEqual(entry.status, 'approved');
   });
 
@@ -68,14 +68,14 @@ describe('SkillSecurityStore', () => {
 
   test('fingerprint mismatch auto-quarantines approved skill', () => {
     store.register('s1', regData);
-    store.approve('s1', 'you');
+    store.approve('s1', 'operator');
     store.verifyFingerprint('s1', 'tampered');
     assert.strictEqual(store.get('s1').status, 'quarantined');
   });
 
   test('revoke marks entry as rejected', () => {
     store.register('s1', regData);
-    store.approve('s1', 'you');
+    store.approve('s1', 'operator');
     store.revoke('s1', 'opus');
     const entry = store.get('s1');
     assert.strictEqual(entry.status, 'rejected');
@@ -95,9 +95,9 @@ describe('SkillSecurityStore', () => {
 
   test('approve throws on rejected (terminal) entry', () => {
     store.register('s1', regData);
-    store.approve('s1', 'you');
+    store.approve('s1', 'operator');
     store.revoke('s1', 'opus');
-    assert.throws(() => store.approve('s1', 'you'), /rejected.*terminal/i);
+    assert.throws(() => store.approve('s1', 'operator'), /rejected.*terminal/i);
   });
 
   test('quarantine throws on rejected (terminal) entry', () => {

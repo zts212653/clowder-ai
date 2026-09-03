@@ -1,5 +1,7 @@
 import assert from 'node:assert/strict';
-import { existsSync, readFileSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { dirname, extname, join, normalize, relative, resolve, sep } from 'node:path';
 import { describe, it } from 'node:test';
 
@@ -12,6 +14,20 @@ const ROOT = resolve(import.meta.dirname, '..');
 const MANIFEST_PATH = resolve(ROOT, 'sync-manifest.yaml');
 const SYNC_SCRIPT_PATH = resolve(ROOT, 'scripts/sync-to-opensource.sh');
 const isHomeRepo = existsSync(MANIFEST_PATH);
+
+function readSanitizedTextExtensions(syncScript) {
+  const match = syncScript.match(/^SANITIZED_TEXT_EXTENSIONS=\(([^)]*)\)/m);
+  assert.ok(match, 'sync-to-opensource.sh must declare SANITIZED_TEXT_EXTENSIONS');
+  return match[1].trim().split(/\s+/).filter(Boolean);
+}
+
+// Read the blocking pattern out of the script rather than restating it: a second copy drifts, and
+// the literal home-machine token in it is itself rewritten by the sanitizer on export.
+function readBlockingScanPattern(syncScript) {
+  const match = syncScript.match(/BLOCK_RESULTS=\$\(grep -rEn '([^']+)'/);
+  assert.ok(match, 'sync-to-opensource.sh must define the Step 4 blocking grep');
+  return match[1];
+}
 
 function toRepoPath(absolutePath) {
   return relative(ROOT, absolutePath).split(sep).join('/');
@@ -88,6 +104,88 @@ describe('outbound sync runtime closure', { skip: !isHomeRepo && 'sync manifest 
     assert.ok(!excluded.has(template), `${template} must not be excluded from export`);
   });
 
+  it('exports the portable opensource-ops skill without leaking the home playbook', () => {
+    const privateSkill = 'cat-cafe-skills/opensource-ops/SKILL.md';
+    const portableSource = 'cat-cafe-skills/opensource-ops/SKILL.opensource.md';
+    const transform = (manifest.transforms ?? []).find((entry) => entry.target === privateSkill);
+    const syncScript = readFileSync(SYNC_SCRIPT_PATH, 'utf8');
+    const privateText = readFileSync(resolve(ROOT, privateSkill), 'utf8');
+    const portableText = readFileSync(resolve(ROOT, portableSource), 'utf8');
+    const featureText = readFileSync(resolve(ROOT, 'docs/features/F116-opensource-ops.md'), 'utf8');
+    const capabilityTips = JSON.parse(
+      readFileSync(resolve(ROOT, 'packages/web/src/lib/capability-tips.seed.json'), 'utf8'),
+    );
+    const communityWorkflowTip = capabilityTips.find((tip) => tip.id === 'workflow-community-decision-queue');
+
+    assert.ok(
+      !excluded.has('cat-cafe-skills/opensource-ops/'),
+      'the whole directory exclusion would delete the public skill',
+    );
+    assert.ok(excluded.has(privateSkill), 'the home playbook must remain excluded from direct export');
+    assert.ok(excluded.has(portableSource), 'the transform source must not leak under its source filename');
+    assert.deepEqual(
+      { type: transform?.type, source: transform?.source },
+      { type: 'generate', source: portableSource },
+      'the public path must be generated from the reviewed portable source',
+    );
+    assert.match(
+      syncScript,
+      /SKILL\.opensource\.md"[\s\S]*SKILL\.md"/,
+      'the sync runtime must materialize the portable target',
+    );
+    assert.match(privateText, /Repo Inbox 守门红线/, 'home must retain its deployment-specific maintainer playbook');
+    assert.match(portableText, /Server 不替你猜/, 'portable source must own the child-side grounding contract');
+    assert.doesNotMatch(portableText, /Repo Inbox 守门红线/, 'portable source must not expose the home-only playbook');
+    assert.deepEqual(communityWorkflowTip?.structureSource, {
+      path: 'docs/features/F116-opensource-ops.md',
+      anchor: '场景 B: Inbound PR（社区 PR 评估 + 合入 + 吸收）',
+    });
+    assert.deepEqual(communityWorkflowTip?.bodySource, {
+      path: privateSkill,
+      anchor: '五问',
+    });
+    assert.match(featureText, /场景 B: Inbound PR（社区 PR 评估 \+ 合入 \+ 吸收）/u);
+    assert.match(privateText, /五问/u);
+    assert.match(portableText, /五问/u);
+  });
+
+  it('keeps public technical-narrative skills independent of the home-only study note', () => {
+    const homeMethod = 'docs/study/2026-08-29-technical-narrative-proof-loop-meta-method.md';
+    const techWriting = readFileSync(resolve(ROOT, 'cat-cafe-skills/tech-writing/SKILL.md'), 'utf8');
+    const conceptDemo = readFileSync(resolve(ROOT, 'cat-cafe-skills/concept-demo-design/SKILL.md'), 'utf8');
+    const surfaceTest = readFileSync(resolve(ROOT, 'scripts/check-skill-first-party-surfaces.test.mjs'), 'utf8');
+
+    assert.ok(existsSync(resolve(ROOT, homeMethod)), 'home retains the deep research note as source lineage');
+    assert.ok(!isExported(homeMethod), 'the internal research note must not become a public runtime dependency');
+    assert.doesNotMatch(
+      techWriting,
+      /\.\.\/\.\.\/docs\/study\/2026-08-29-technical-narrative-proof-loop-meta-method\.md/u,
+    );
+    assert.match(techWriting, /本节[^。\n]*7P × 5E/u);
+    assert.doesNotMatch(
+      conceptDemo,
+      /\.\.\/\.\.\/docs\/study\/2026-08-29-technical-narrative-proof-loop-meta-method\.md/u,
+    );
+    assert.match(conceptDemo, /\.\.\/tech-writing\/SKILL\.md#技术叙事的证据剖面/u);
+    assert.match(surfaceTest, /existsSync\(TECHNICAL_NARRATIVE_METHOD_URL\)/u);
+  });
+
+  it('keeps public pre-merge tests independent of the home-only prepared-artifact optimizer', () => {
+    const preparedArtifactScript = 'scripts/gate-prepared-artifacts.mjs';
+    const preMergeTest = readFileSync(resolve(ROOT, 'scripts/pre-merge-check.test.mjs'), 'utf8');
+
+    assert.ok(!isExported(preparedArtifactScript), 'the prepared-artifact optimizer remains home-only');
+    assert.match(
+      preMergeTest,
+      /skip:\s*!existsSync\(PREPARED_ARTIFACT_SCRIPT\)[^\n]*home-only prepared-artifact support is absent from public export/u,
+    );
+    assert.equal(
+      [...preMergeTest.matchAll(/PREPARED_ARTIFACT_TEST_OPTIONS/g)].length,
+      5,
+      'the option declaration and all four source-only prepared-artifact tests must stay bound together',
+    );
+  });
+
   it('protects community-contributed assets from sync deletion', () => {
     // Regression guard for clowder-ai#1370 (F251 Layer 1, 2026-08-18): these paths were
     // introduced into the open-source repo by community PRs (bug reports, feature specs,
@@ -142,6 +240,48 @@ describe('outbound sync runtime closure', { skip: !isHomeRepo && 'sync manifest 
     assert.ok(isExported(absorbedScript), `${absorbedScript} must be exported from the source truth`);
     assert.ok(!targetOwned.has(absorbedScript), `${absorbedScript} must not be both source-owned and target-owned`);
     assert.ok(!excluded.has(absorbedScript), `${absorbedScript} must not be excluded from export`);
+  });
+
+  it('owns the public site and target companions absorbed from clowder-ai#1405', () => {
+    // clowder-ai#1405 introduced the public website as a community contribution.
+    // A full sync uses rsync --delete, so every surviving surface needs one explicit
+    // owner: source-managed assets are exported from Clowder AI, while deployment and
+    // public-document companions are backed up and restored from the target repo.
+    const targetOwned = new Set(manifest.target_owned_files ?? []);
+    const sourceOwned = [
+      ['managed root', 'site', managedRoots],
+      ['managed script', 'scripts/build-site-css.mjs', managedScripts],
+      ['managed file', 'tailwind.site.config.js', managedFiles],
+    ];
+    const publicCompanions = [
+      '.github/workflows/deploy-pages.yml',
+      'docs/architecture/a2a-protocol.md',
+      'docs/architecture/overview.md',
+      'docs/architecture/plugin-architecture.md',
+      'docs/configuration/environment.md',
+      'docs/configuration/startup.md',
+      'docs/faq.md',
+    ];
+
+    for (const [kind, path, ownerSet] of sourceOwned) {
+      assert.ok(ownerSet.has(path), `${path} must remain a ${kind} after clowder-ai#1405 intake`);
+      assert.ok(isExported(path), `${path} must be exported from the source truth`);
+      assert.ok(!targetOwned.has(path), `${path} must not be both source-owned and target-owned`);
+      assert.ok(!excluded.has(path), `${path} must not be excluded from export`);
+    }
+    const gitignore = readFileSync(resolve(ROOT, '.gitignore'), 'utf8');
+    assert.match(
+      gitignore,
+      /^!site\/assets\/guides\/\*\.mp4$/m,
+      'community-authored walkthrough videos must remain trackable inside the source-owned site',
+    );
+
+    for (const path of publicCompanions) {
+      assert.ok(
+        targetOwned.has(path),
+        `${path} is a public-repository companion from clowder-ai#1405 and must survive full sync`,
+      );
+    }
   });
 
   it('protects target-local environment configuration from sync deletion', () => {
@@ -280,7 +420,8 @@ describe('outbound sync runtime closure', { skip: !isHomeRepo && 'sync manifest 
       'packages/api/test/f296-b4c-alpha-uat-runner-guards.test.js',
     ];
     const runner = 'scripts/f296-alpha-uat.mjs';
-    const helper = 'scripts/lib/f296-alpha-uat-contract.mjs';
+    const contractHelper = 'scripts/lib/f296-alpha-uat-contract.mjs';
+    const journeyHelper = 'scripts/lib/f296-alpha-uat-journeys.mjs';
 
     for (const contract of contracts) {
       const source = readFileSync(resolve(ROOT, contract), 'utf8');
@@ -296,7 +437,12 @@ describe('outbound sync runtime closure', { skip: !isHomeRepo && 'sync manifest 
       /from '\.\/lib\/f296-alpha-uat-contract\.mjs'/,
       `${runner} must stay bound to its runtime contract`,
     );
-    for (const path of [runner, helper]) {
+    assert.match(
+      readFileSync(resolve(ROOT, runner), 'utf8'),
+      /from '\.\/lib\/f296-alpha-uat-journeys\.mjs'/,
+      `${runner} must stay bound to its journey helpers`,
+    );
+    for (const path of [runner, contractHelper, journeyHelper]) {
       assert.ok(
         managedScripts.has(path),
         `${path} must be exported with the public F296 contracts, otherwise the public suite fails before UAT guards run`,
@@ -397,6 +543,104 @@ describe('outbound sync runtime closure', { skip: !isHomeRepo && 'sync manifest 
       eventsRouteTest,
       /if\s*\(hasSourceStagingContent\)[\s\S]*staging 四象限 meaning present[\s\S]*assert\.equal\(quadrants,\s*undefined/,
       'the meanings endpoint test must require private meanings at home and require their absence publicly',
+    );
+  });
+
+  // F238 boundary closure (2026-08-31): the sanitizer used to prune the whole `site/` tree so the
+  // public website could keep its deliberate "Clowder AI" origin story. That also disabled personal
+  // info, home-path, and port scrubbing for every site file. The brand exemption now lives in
+  // _sanitize-rules.pl (site-scoped, product-name only), so the export pass must sanitize site/
+  // like any other managed root.
+  it('sanitizes the exported site/ tree instead of pruning it', () => {
+    const syncScript = readFileSync(resolve(ROOT, 'scripts/sync-to-opensource.sh'), 'utf8');
+    assert.ok(
+      !syncScript.includes('-path "$FILTERED_DIR/site" -prune'),
+      'site/ must not be pruned out of the outbound sanitizer; the brand exemption belongs in _sanitize-rules.pl',
+    );
+  });
+
+  // Stylesheets ship to the public repository like any other source file. They were on neither the
+  // sanitizer extension list nor the security-scan include list, so internal role vocabulary
+  // already reached clowder-ai through packages/web/src/app/*.css.
+  //
+  // Reviewer P1 (@codex-terra, PR #4153): keeping two hand-maintained lists is what produced the
+  // gap in the first place — the sanitizer rewrote .cjs/.ps1/.py/.bat/.iss that the scan could not
+  // see, and _sanitize-rules.pl has no secret-key redaction, so those types had no net at all.
+  // Both passes must derive from one declared list.
+  it('derives the sanitizer pass and the security scan from one text-type list', () => {
+    const syncScript = readFileSync(SYNC_SCRIPT_PATH, 'utf8');
+    const declared = readSanitizedTextExtensions(syncScript);
+    for (const ext of ['md', 'ts', 'js', 'cjs', 'mjs', 'json', 'sh', 'ps1', 'py', 'bat', 'iss', 'html', 'svg', 'css']) {
+      assert.ok(declared.includes(ext), `SANITIZED_TEXT_EXTENSIONS must declare ${ext} (got: ${declared.join(',')})`);
+    }
+    assert.match(
+      syncScript,
+      /for ext in "\$\{SANITIZED_TEXT_EXTENSIONS\[@\]\}"; do\n\s+if \[ \$\{#FIND_SANITIZED_EXPR\[@\]\} -gt 0 \]/,
+      'the sanitizer find expression must be built from SANITIZED_TEXT_EXTENSIONS',
+    );
+    assert.match(
+      syncScript,
+      /SCAN_INCLUDES=""\nfor ext in "\$\{SANITIZED_TEXT_EXTENSIONS\[@\]\}"; do/,
+      'SCAN_INCLUDES must be built from SANITIZED_TEXT_EXTENSIONS, not a second hand-kept list',
+    );
+    assert.doesNotMatch(
+      syncScript,
+      /^SCAN_INCLUDES='.*--include/m,
+      'a literal SCAN_INCLUDES list reintroduces the drift this guard exists to prevent',
+    );
+  });
+
+  // Behavioural, not textual: run the real blocking grep the way Step 4 runs it, over file types
+  // the sanitizer exports but cannot redact. A secret in exported CommonJS used to be invisible.
+  it('blocks a secret sentinel in every sanitized text type the scan must see', () => {
+    const syncScript = readFileSync(SYNC_SCRIPT_PATH, 'utf8');
+    const includes = readSanitizedTextExtensions(syncScript).map((ext) => `--include=*.${ext}`);
+    const fixtureDir = mkdtempSync(join(tmpdir(), 'scan-includes-'));
+    try {
+      const sentinels = ['cjs', 'ps1', 'py', 'bat', 'iss', 'html', 'mjs', 'css'];
+      for (const ext of sentinels) {
+        writeFileSync(join(fixtureDir, `sentinel.${ext}`), 'const key = "sk-ant-fixture-not-a-real-key";\n', 'utf8');
+      }
+      const matched = execFileSync('grep', ['-rEl', readBlockingScanPattern(syncScript), fixtureDir, ...includes], {
+        encoding: 'utf8',
+      });
+      for (const ext of sentinels) {
+        assert.ok(matched.includes(`sentinel.${ext}`), `Step 4 scan filters must see *.${ext} (got: ${matched})`);
+      }
+    } finally {
+      rmSync(fixtureDir, { recursive: true, force: true });
+    }
+  });
+
+  // The canonical public site is the one at the export root. Anchoring the exemption to the root
+  // the caller declares keeps a nested lookalike (packages/site/, docs/site/) from inheriting the
+  // brand pass-through, and an undeclared root falls back to full sanitization.
+  it('declares the export root when running the sanitizer', () => {
+    const syncScript = readFileSync(SYNC_SCRIPT_PATH, 'utf8');
+    assert.match(
+      syncScript,
+      /CAT_CAFE_SANITIZE_ROOT="\$FILTERED_DIR" xargs -0 perl -pi "\$SANITIZER"/,
+      'the outbound sanitizer pass must declare its export root',
+    );
+  });
+
+  // A guard nobody runs does not exist: both outbound boundary suites were unwired from every
+  // pnpm entry point, so sanitizer rule changes shipped without a red light.
+  it('runs the outbound boundary guards from a pnpm entry point', () => {
+    const pkg = JSON.parse(readFileSync(resolve(ROOT, 'package.json'), 'utf8'));
+    const guardScript = pkg.scripts['check:outbound-sanitizer'];
+    assert.ok(guardScript, 'package.json must expose check:outbound-sanitizer');
+    assert.ok(
+      guardScript.includes('scripts/sanitize-rules-regression.test.mjs'),
+      'the sanitizer regression suite must run in that entry point',
+    );
+    assert.ok(
+      guardScript.includes('scripts/boundary-roundtrip.test.mjs'),
+      'the boundary round-trip suite must run in that entry point',
+    );
+    assert.ok(
+      pkg.scripts.check.includes('check:outbound-sanitizer'),
+      'pnpm check must invoke check:outbound-sanitizer',
     );
   });
 

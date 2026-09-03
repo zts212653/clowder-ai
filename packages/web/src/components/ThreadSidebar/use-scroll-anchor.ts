@@ -17,6 +17,16 @@ interface ScrollAnchor {
   offsetFromTop: number;
 }
 
+interface SelectedThreadState {
+  threadId: string;
+  isWorking: boolean;
+}
+
+interface ScrollAnchorOptions {
+  selectedThread: SelectedThreadState | null;
+  onSelectedThreadMissing?: (threadId: string) => void;
+}
+
 /** Minimum scrollTop before we bother anchoring (skip when at the top). */
 const ANCHOR_THRESHOLD_PX = 40;
 
@@ -73,18 +83,35 @@ function revealOccludedFirstThread(container: HTMLElement): void {
   }
 }
 
+function revealThreadNearest(container: HTMLElement, threadId: string): boolean {
+  const selector = `[data-thread-id="${CSS.escape(threadId)}"]`;
+  const item = container.querySelector<HTMLElement>(selector);
+  if (!item) return false;
+
+  const visibleTop = getVisibleTop(container);
+  const visibleBottom = container.getBoundingClientRect().bottom;
+  const rect = item.getBoundingClientRect();
+  if (rect.top < visibleTop - DRIFT_TOLERANCE_PX) {
+    container.scrollTop = Math.max(0, container.scrollTop - (visibleTop - rect.top));
+    return true;
+  }
+  if (rect.bottom > visibleBottom + DRIFT_TOLERANCE_PX) container.scrollTop += rect.bottom - visibleBottom;
+  return true;
+}
+
 /**
  * Keeps the visible content in place when thread list reorders.
  *
  * @param containerRef - ref to the scrollable container div
- * @param threadGroups - the current sorted/grouped thread data (used as effect dep)
+ * @param reorderProjection - the current tab's sorted thread projection (used as effect dep)
  */
 export function useScrollAnchor(
   containerRef: RefObject<HTMLDivElement | null>,
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  threadGroups: readonly unknown[],
+  reorderProjection: readonly unknown[],
+  options: ScrollAnchorOptions,
 ) {
   const anchorRef = useRef<ScrollAnchor | null>(null);
+  const selectedThreadRef = useRef<SelectedThreadState | null>(options.selectedThread);
   const pendingRestoreRef = useRef<number | null>(readPersistedScrollTop());
   /** Tracks the last known scrollTop — safe to read even after DOM detach. */
   const lastScrollTopRef = useRef(readPersistedScrollTop() ?? 0);
@@ -139,7 +166,7 @@ export function useScrollAnchor(
    * This covers the "click a thread near the bottom → sidebar snaps back to top" path,
    * which is separate from the reorder drift handled below.
    */
-  // biome-ignore lint/correctness/useExhaustiveDependencies: rerun when threadGroups identity changes so async thread loads can restore scroll after remount
+  // biome-ignore lint/correctness/useExhaustiveDependencies: rerun when reorderProjection identity changes so async thread loads can restore scroll after remount
   useLayoutEffect(() => {
     const container = containerRef.current;
     const pendingTop = pendingRestoreRef.current;
@@ -158,13 +185,13 @@ export function useScrollAnchor(
       persistScrollTop();
       pendingRestoreRef.current = null;
     }
-  }, [containerRef, captureAnchor, persistScrollTop, threadGroups]);
+  }, [containerRef, captureAnchor, persistScrollTop, reorderProjection]);
 
   /**
    * After React commits DOM changes (layout phase), check if the anchor
    * element drifted and compensate scrollTop.
    */
-  // biome-ignore lint/correctness/useExhaustiveDependencies: effect intentionally keys off threadGroups reordering while reading live refs
+  // biome-ignore lint/correctness/useExhaustiveDependencies: effect intentionally keys off reorderProjection while reading live refs
   useLayoutEffect(() => {
     const anchor = anchorRef.current;
     const container = containerRef.current;
@@ -196,7 +223,36 @@ export function useScrollAnchor(
       offsetFromTop: el.getBoundingClientRect().top - getVisibleTop(container),
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps -- containerRef is a live ref, not a dependency
-  }, [persistScrollTop, threadGroups]);
+  }, [persistScrollTop, reorderProjection]);
+
+  const selectedThread = options.selectedThread;
+  const selectedThreadId = selectedThread ? selectedThread.threadId : null;
+  const selectedThreadIsWorking = selectedThread?.isWorking === true;
+  const onSelectedThreadMissing = options.onSelectedThreadMissing;
+
+  // The browsing anchor remains authoritative for background reorders. The one
+  // exception is the already-selected row itself starting work: after anchor
+  // compensation, recover only enough visibility to keep that row reachable.
+  useLayoutEffect(() => {
+    const previous = selectedThreadRef.current;
+    const nextSelectedThread =
+      selectedThreadId === null ? null : { threadId: selectedThreadId, isWorking: selectedThreadIsWorking };
+    selectedThreadRef.current = nextSelectedThread;
+    const selectedThreadStartedWorking =
+      previous !== null &&
+      nextSelectedThread !== null &&
+      previous.threadId === nextSelectedThread.threadId &&
+      !previous.isWorking &&
+      nextSelectedThread.isWorking;
+    if (!selectedThreadStartedWorking) return;
+
+    const container = containerRef.current;
+    if (!container) return;
+    if (!revealThreadNearest(container, nextSelectedThread.threadId)) {
+      onSelectedThreadMissing?.(nextSelectedThread.threadId);
+    }
+    persistScrollTop();
+  }, [containerRef, onSelectedThreadMissing, persistScrollTop, selectedThreadId, selectedThreadIsWorking]);
 
   return { onScroll };
 }

@@ -4,6 +4,7 @@ import { dirname } from 'node:path';
 
 export const LEDGER_FILE_LIMIT = 4 * 1024 * 1024;
 export const LEDGER_ENTRY_LIMIT = 2048;
+const ASSISTANT_RETURN_RESERVATION_CONTENT = '\n'.repeat(128 * 1024);
 const SAFE_TOKEN = /^[A-Za-z0-9._:-]+$/;
 const VALID_STATES = new Set(['accepted', 'extension_received', 'inserted', 'submitted', 'host_observed', 'failed']);
 
@@ -23,14 +24,38 @@ function ledgerPayload(entries) {
   return `${JSON.stringify({ version: 1, entries: [...entries.values()] })}\n`;
 }
 
-export function hasCapacityForEntry(entries, entry) {
-  if (entries.size >= LEDGER_ENTRY_LIMIT) return false;
-  const terminalReservation = new Map(entries);
-  terminalReservation.set(ledgerKey(entry.conversationId, entry.idempotencyKey), {
+function reserveOutstandingAssistantReturn(entry) {
+  if (
+    entry.state === 'failed' ||
+    entry.assistantReturn ||
+    entry.assistantReturnAckedAt ||
+    entry.assistantObservationFailure
+  )
+    return entry;
+  return {
     ...entry,
     state: 'host_observed',
     hostMessageId: 'x'.repeat(512),
-  });
+    assistantReturn: {
+      state: 'pending',
+      assistantMessageId: 'x',
+      // A return is bounded by its 256 KiB serialized frame, not just its
+      // 128 KiB UTF-8 content. Newlines exercise the maximum accepted JSON
+      // expansion while keeping the reservation inside the real content cap.
+      content: ASSISTANT_RETURN_RESERVATION_CONTENT,
+      contentDigest: 'x'.repeat(64),
+      observedAt: '9999-12-31T23:59:59.999Z',
+    },
+  };
+}
+
+export function hasCapacityForEntry(entries, entry) {
+  if (entries.size >= LEDGER_ENTRY_LIMIT) return false;
+  const projected = new Map(entries);
+  projected.set(ledgerKey(entry.conversationId, entry.idempotencyKey), entry);
+  const terminalReservation = new Map(
+    [...projected].map(([key, value]) => [key, reserveOutstandingAssistantReturn(value)]),
+  );
   return Buffer.byteLength(ledgerPayload(terminalReservation), 'utf8') <= LEDGER_FILE_LIMIT;
 }
 

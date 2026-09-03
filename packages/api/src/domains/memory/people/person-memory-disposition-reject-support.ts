@@ -234,6 +234,7 @@ export async function prepareLedgerRejectMutation(input: {
     keys.push(PersonMemoryKeys.suppressionSubject(input.decision.ownerUserId, subjectRef));
   }
   const closureProof = buildClosureProof(input.redis, input.decision, input.closure, locatorKey, keys);
+  const settledKeyIndex = keys.push(PersonMemoryKeys.settled(input.decision.ownerUserId));
   return {
     keys,
     updated,
@@ -258,6 +259,7 @@ export async function prepareLedgerRejectMutation(input: {
       JSON.stringify(closureProof),
       input.closure.bindingKey,
       candidateKey,
+      String(settledKeyIndex),
     ],
   };
 }

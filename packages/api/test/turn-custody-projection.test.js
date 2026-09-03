@@ -332,6 +332,126 @@ describe('F167 Phase T TurnCustodyProjectionService', () => {
     assert.equal((await hold.service.close(holdOpened)).shouldBlock, false);
   });
 
+  test('a superseded adopted hold stays non-blocking but observes the exact holder re-hold after adoption', async () => {
+    const h = harness({
+      projection: { state: 'active', holder: 'codex-sol' },
+      events: [
+        {
+          kind: 'ball.wake_condition_met',
+          sourceEventId: 'wakecond:task-managed-predecessor',
+          payload: { catId: 'codex-sol', taskId: 'task-managed-predecessor' },
+        },
+        {
+          kind: 'ball.handed',
+          sourceEventId: 'route:ordinary-trigger:codex-sol',
+          payload: { fromCatId: 'opus', toCatId: 'codex-sol' },
+        },
+      ],
+    });
+    const opened = await h.service.open({
+      kind: 'structured',
+      protocol: 'hold',
+      subjectKey: 'ball:thread:thread-managed-rehold',
+      holderCatId: 'codex-sol',
+      sourceMessageId: 'message-managed-predecessor',
+      taskId: 'task-managed-predecessor',
+    });
+
+    assert.equal(opened.state, 'covered_empty', 'pre-adoption supersession must not revive a blocking obligation');
+    h.addEvent({
+      kind: 'ball.held',
+      sourceEventId: 'hold:thread-managed-rehold:codex-sol:2000',
+      payload: { catId: 'codex-sol', fireAt: 2_000 },
+    });
+
+    assert.deepEqual(await h.service.close(opened), {
+      state: 'covered_empty',
+      shouldBlock: false,
+      transitionObserved: true,
+      structuredTransitionKind: 'held',
+      evidenceRefs: ['hold:ball:thread:thread-managed-rehold', 'superseded:route:ordinary-trigger:codex-sol'],
+    });
+  });
+
+  test('a superseded adopted hold stays non-blocking when its post-adoption event read fails', async () => {
+    const events = [
+      {
+        kind: 'ball.wake_condition_met',
+        sourceEventId: 'wakecond:task-managed-predecessor',
+        payload: { catId: 'codex-sol', taskId: 'task-managed-predecessor' },
+      },
+      {
+        kind: 'ball.handed',
+        sourceEventId: 'route:ordinary-trigger:codex-sol',
+        payload: { fromCatId: 'opus', toCatId: 'codex-sol' },
+      },
+    ];
+    let readCount = 0;
+    const service = new TurnCustodyProjectionService({
+      ballCustodyProjectionStore: {
+        async get() {
+          return { state: 'active', holder: 'codex-sol' };
+        },
+      },
+      ballCustodyEventLog: {
+        async read(_subjectKey, fromSequence = 0) {
+          readCount += 1;
+          if (readCount > 1) throw new Error('transient event-log fault');
+          return events.slice(fromSequence);
+        },
+      },
+    });
+    const opened = await service.open({
+      kind: 'structured',
+      protocol: 'hold',
+      subjectKey: 'ball:thread:thread-managed-rehold',
+      holderCatId: 'codex-sol',
+      sourceMessageId: 'message-managed-predecessor',
+      taskId: 'task-managed-predecessor',
+    });
+
+    assert.equal(opened.state, 'covered_empty');
+    assert.deepEqual(await service.close(opened), {
+      state: 'covered_empty',
+      shouldBlock: false,
+      transitionObserved: false,
+      evidenceRefs: [
+        'hold:ball:thread:thread-managed-rehold',
+        'superseded:route:ordinary-trigger:codex-sol',
+        'unknown:query_failed',
+      ],
+    });
+
+    const liveService = new TurnCustodyProjectionService({
+      ballCustodyEventLog: {
+        async read() {
+          throw new Error('transient event-log fault');
+        },
+      },
+    });
+    assert.deepEqual(
+      await liveService.close({
+        state: 'covered_active',
+        evidenceRefs: ['hold:ball:thread:thread-live'],
+        baseline: {
+          kind: 'structured',
+          subjectKey: 'ball:thread:thread-live',
+          holderCatId: 'codex-sol',
+          fromSequence: 1,
+          protocol: 'hold',
+          sourceMessageId: 'message-live',
+          taskId: 'task-live',
+        },
+      }),
+      {
+        state: 'unknown_legacy',
+        shouldBlock: true,
+        transitionObserved: false,
+        evidenceRefs: ['hold:ball:thread:thread-live', 'unknown:query_failed'],
+      },
+    );
+  });
+
   test('unknown projections preserve bounded machine-readable failure reasons', async () => {
     const actionMissing = new TurnCustodyProjectionService({
       actionSuccessorLeaseStore: { get: async () => null },

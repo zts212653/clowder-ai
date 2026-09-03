@@ -14,6 +14,7 @@
 import type Database from 'better-sqlite3';
 import type { CollectionSensitivity } from './collection-types.js';
 import type { IEvidenceStore } from './interfaces.js';
+import { isGenericRecallEligibleAnchor, SUNSET_GLOBAL_DISTILLATION_PREFIX } from './recall-delivery-eligibility.js';
 
 export interface RecentItem {
   anchor: string;
@@ -127,13 +128,13 @@ export class RecentBrowseResolver {
       const placeholders = effectiveKinds && effectiveKinds.length > 0 ? effectiveKinds.map(() => '?').join(',') : null;
       const sql = placeholders
         ? `SELECT anchor, title, kind, updated_at AS updatedAt FROM evidence_docs
-           WHERE updated_at >= ? AND kind IN (${placeholders})
+           WHERE updated_at >= ? AND anchor NOT LIKE ? AND kind IN (${placeholders})
            ORDER BY updated_at DESC LIMIT ?`
         : `SELECT anchor, title, kind, updated_at AS updatedAt FROM evidence_docs
-           WHERE updated_at >= ?
+           WHERE updated_at >= ? AND anchor NOT LIKE ?
            ORDER BY updated_at DESC LIMIT ?`;
 
-      const params: Array<string | number> = [cutoff];
+      const params: Array<string | number> = [cutoff, `${SUNSET_GLOBAL_DISTILLATION_PREFIX}%`];
       if (effectiveKinds) params.push(...effectiveKinds);
       params.push(opts.limit);
 
@@ -145,6 +146,7 @@ export class RecentBrowseResolver {
       }>;
 
       for (const r of rows) {
+        if (!isGenericRecallEligibleAnchor(r.anchor)) continue;
         results.push({ anchor: r.anchor, title: r.title, kind: r.kind, updatedAt: r.updatedAt, source: id });
       }
     }

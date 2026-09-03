@@ -22,6 +22,7 @@ export function addHtmlWidgetHeightBridge(html: string, blockId: string, instanc
   let lastMeasuredViewportHeight = null;
   let lastMeasuredViewportWidth = null;
   let pendingProofRequestId = null;
+  let preserveViewportUntil = 0;
   const observedElements = new WeakSet();
   let resizeObserver = null;
   const postPending = (cause) => {
@@ -104,6 +105,8 @@ export function addHtmlWidgetHeightBridge(html: string, blockId: string, instanc
       viewportWidth
     ].join(':');
     const sampleChanged = lastSample !== '' && sample !== lastSample;
+    const preserveViewport = sampleChanged && performance.now() <= preserveViewportUntil;
+    if (preserveViewport || performance.now() > preserveViewportUntil) preserveViewportUntil = 0;
     if (pendingProofRequestId !== null && sampleChanged && pendingCause === null) postPending('content');
     if (sample !== lastSample || pendingCause !== null || pendingProofRequestId !== null) {
       const proofRequestId = pendingProofRequestId;
@@ -124,6 +127,7 @@ export function addHtmlWidgetHeightBridge(html: string, blockId: string, instanc
         hasUnmeasurableVisualOverflow: unmeasurableVisualOverflow,
         viewportHeight,
         viewportWidth,
+        ...(preserveViewport ? { preserveViewport: true } : {}),
         ...(proofRequestId === null ? {} : { proofRequestId })
       }, '*');
     }
@@ -136,6 +140,11 @@ export function addHtmlWidgetHeightBridge(html: string, blockId: string, instanc
   };
   const scheduleContent = () => schedule('content');
   const scheduleViewport = () => schedule('viewport');
+  document.addEventListener('click', (event) => {
+    if (!event.isTrusted) return;
+    preserveViewportUntil = performance.now() + 1000;
+    scheduleContent();
+  }, true);
   const resizeCause = () =>
     lastMeasuredViewportHeight !== null &&
     (Math.abs(window.innerHeight - lastMeasuredViewportHeight) > 0 ||

@@ -43,7 +43,7 @@ description_updated_at: 2026-07-08T15:00:00Z
 
 **EntityRegistry 验尸实据（2026-07-08，生产库 `cat-cafe-runtime/evidence.sqlite` 只读查询）**：
 
-- `entity_registry` 全部 **27 行**：26 只猫（F032 roster 单向镜像，含 `fable5-test`/`cat-f70tzwib` 测试垃圾条目）+ 1 个 person:landy
+- `entity_registry` 全部 **27 行**：26 只猫（F032 roster 单向镜像，含 `fable5-test`/`cat-f70tzwib` 测试垃圾条目）+ 1 个 person:operator
 - schema 定义 5 种 entity type（person/cat/feature/concept/external），**feature/concept/external 三种 0 行**——设计了容器，从未接管子
 - 可复现命令（列名以 `schema.ts:666` 为准——`entity_type`，非 `type`；mentions 时间列是 `created_at`）：
   ```sql
@@ -290,7 +290,7 @@ Architecture cell: memory + approval-index
 
 ## 愿景守护记录（2026-07-09，Ragdoll/fable-5）
 
-**Verdict: BLOCKED — 组件质量真实，愿景状态未达成。** 三 PR 工程链认可（TDD 干净/review 扎实/privacy gate 三轮打磨），但：今天在任意 thread 输入"未婚喵"，结局与 2026-07-08 实验完全相同——registry 无此词（27 条纯猫名+landy，concept=0）、detector 零 production caller、nudge 不亮。三案任何一案今天重演，系统行为零变化。
+**Verdict: BLOCKED — 组件质量真实，愿景状态未达成。** 三 PR 工程链认可（TDD 干净/review 扎实/privacy gate 三轮打磨），但：今天在任意 thread 输入"未婚喵"，结局与 2026-07-08 实验完全相同——registry 无此词（27 条纯猫名+operator，concept=0）、detector 零 production caller、nudge 不亮。三案任何一案今天重演，系统行为零变化。
 
 | operator experience | 实际状态（守护取证命令见 thread） | 匹配 |
 |---|---|---|

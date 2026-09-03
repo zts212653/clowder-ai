@@ -9,6 +9,7 @@ export type DebugEventName =
   | 'agent_message'
   | 'bubble_lifecycle'
   | 'bubble_invariant_violation'
+  | 'semantic_suppressed'
   | 'done'
   | 'rejoin_rooms';
 

@@ -1,0 +1,123 @@
+{
+  "sourceVerdictId": "2026-08-29-eval-friction-pawfeel-breakout-insufficient-keep-observe",
+  "capturedAt": "2026-08-29T03:09:18.499Z",
+  "expectedChildDigests": [
+    {
+      "verdictId": "f313-three-candidate-fixture-finding-evidence-reader-drilldow-097e017475576856",
+      "findingKey": "evidence-reader-drilldown-path",
+      "findingArtifactSha256": "67fd677a0cb404630843117c0f90d5adbc67a5a193d17a59f126e442070b0a7c",
+      "lifecycleRootSha256": "c8403cea9b6be5c4ad39c748768fecf4621ff604a0042e6105aed4c66c492aa9"
+    },
+    {
+      "verdictId": "f313-three-candidate-fixture-finding-default-mode-tool-availa-ba207781ae2f18b7",
+      "findingKey": "default-mode-tool-availability",
+      "findingArtifactSha256": "f4cf9b3ee5aa68bac8b50e9028fb43cc15f7b1da3171a2c3ded19cc8c77102f7",
+      "lifecycleRootSha256": "07a12ade4b09e8ae51487b9e81429d0115d5198dfd05e38c52c3c24842a5536f"
+    },
+    {
+      "verdictId": "f313-three-candidate-fixture-finding-a2a-disposition-source-m-0a609eab1df6ca96",
+      "findingKey": "a2a-disposition-source-mismatch",
+      "findingArtifactSha256": "6194f6d436199ae32cc9efa904e80884b40d00bad8aea4eb051fa2dc72c74358",
+      "lifecycleRootSha256": "3a73eea8370763a916a7a5b34bccb4544db8615893012c241d7afd8409683e68"
+    }
+  ],
+  "selector": {
+    "kind": "friction-rollup-snapshot",
+    "windowStartMs": 1787713200000,
+    "windowEndMs": 1787972400000,
+    "topN": 10,
+    "tokenCap": 4000
+  },
+  "rollupInput": {
+    "window": { "sinceMs": 1787713200000, "untilMs": 1787972400000 },
+    "signals": [
+      {
+        "id": "paw-feel:0001787835904741-000003-1efb6454#0",
+        "channel": "paw-feel",
+        "timestamp": "2026-08-29T01:10:00.000Z",
+        "tool": "cat_cafe_search_evidence",
+        "symptom": "repo-relative drillDown resolves against package cwd",
+        "rawRef": "0001787835904741-000003-1efb6454#0",
+        "severity": "medium"
+      },
+      {
+        "id": "paw-feel:0001787835904741-000003-1efb6454#1",
+        "channel": "paw-feel",
+        "timestamp": "2026-08-29T01:11:00.000Z",
+        "tool": "cat_cafe_get_thread_context",
+        "symptom": "valid drillDown ref returns 404 from packages/api cwd",
+        "rawRef": "0001787835904741-000003-1efb6454#1",
+        "severity": "medium"
+      },
+      {
+        "id": "paw-feel:0001787877611899-000001-8ad43b02#0",
+        "channel": "paw-feel",
+        "timestamp": "2026-08-29T02:00:00.000Z",
+        "tool": "runtime-tools",
+        "symptom": "Default mode 下工具不可用",
+        "rawRef": "0001787877611899-000001-8ad43b02#0",
+        "severity": "medium"
+      },
+      {
+        "id": "paw-feel:0001787713902806-000014-eaf86174#0",
+        "channel": "paw-feel",
+        "timestamp": "2026-08-29T00:20:00.000Z",
+        "tool": "cat_cafe_post_message",
+        "symptom": "a2a dispatch disposition source mismatch blocks terminal",
+        "rawRef": "0001787713902806-000014-eaf86174#0",
+        "severity": "medium"
+      }
+    ],
+    "clusters": [
+      {
+        "clusterId": "9028c961c203",
+        "representative": "搜索结果返回仓库相对路径，但读取器按当前 packages/api 工作目录解析，导致有效 drillDown 404",
+        "channels": ["paw-feel"],
+        "count": 2,
+        "members": [
+          {
+            "signalId": "paw-feel:0001787835904741-000003-1efb6454#0",
+            "rawRef": "0001787835904741-000003-1efb6454#0",
+            "channel": "paw-feel"
+          },
+          {
+            "signalId": "paw-feel:0001787835904741-000003-1efb6454#1",
+            "rawRef": "0001787835904741-000003-1efb6454#1",
+            "channel": "paw-feel"
+          }
+        ],
+        "method": "rule"
+      },
+      {
+        "clusterId": "04eaba997290",
+        "representative": "Default mode 下工具不可用",
+        "channels": ["paw-feel"],
+        "count": 1,
+        "members": [
+          {
+            "signalId": "paw-feel:0001787877611899-000001-8ad43b02#0",
+            "rawRef": "0001787877611899-000001-8ad43b02#0",
+            "channel": "paw-feel"
+          }
+        ],
+        "method": "rule"
+      },
+      {
+        "clusterId": "1193e4fa241b",
+        "representative": "a2a_dispatch_disposition_source_mismatch，当前 invocation 无法终结这颗普通 A2A dispatch",
+        "channels": ["paw-feel"],
+        "count": 1,
+        "members": [
+          {
+            "signalId": "paw-feel:0001787713902806-000014-eaf86174#0",
+            "rawRef": "0001787713902806-000014-eaf86174#0",
+            "channel": "paw-feel"
+          }
+        ],
+        "method": "rule"
+      }
+    ],
+    "degraded": true,
+    "droppedChannels": []
+  }
+}

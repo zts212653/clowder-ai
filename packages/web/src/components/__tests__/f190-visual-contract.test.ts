@@ -299,10 +299,10 @@ describe('F190 visual contract — no hard borders in card/panel components', ()
     expect(src).toContain('conn-purple-bg');
   });
 
-  it('WorkspacePanel aside: no border-l, uses console-panel-bg', () => {
-    const src = readSrc('WorkspacePanel.tsx');
+  it('F307 Workbench host: no border-l, uses console-panel-bg', () => {
+    const src = readSrc('workbench/F307ExperienceWorkbench.tsx');
     expect(src).not.toMatch(/border-l border-cafe-subtle/);
-    expect(src).toMatch(/<aside[\s\S]{0,200}bg-\[var\(--console-panel-bg\)\]/);
+    expect(src).toMatch(/<section[\s\S]{0,200}bg-\[var\(--console-panel-bg\)\]/);
   });
 
   it('SettingsNav item text uses text-compact token, no hardcoded size', () => {

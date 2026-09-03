@@ -24,6 +24,7 @@ export interface ReevalClosureSubjectsLoaderOptions {
   harnessFeedbackRoot: string;
   eventLog: IReevalClosureEventLog;
   resolveAssignedEvalCatId?: (domainId: string, registryCatId: string) => Promise<string | undefined>;
+  frictionV3Cutover?: { lifecycleVersion: 1 };
 }
 
 export async function loadReevalClosureSubjects(
@@ -37,11 +38,12 @@ export async function loadReevalClosureSubjects(
   );
   const roots = loadLifecycleRootsWithLegacyCases(options.harnessFeedbackRoot);
   const subjects: ReevalLifecycleReconcileSubject[] = [];
-  const caseRoots = new Map<string, Extract<(typeof roots)[number], { schemaVersion: 2 }>[]>();
+  const caseRoots = new Map<string, Extract<(typeof roots)[number], { schemaVersion: 2 | 3 }>[]>();
 
   for (const root of roots) {
     if (root.verdictId === historical.root.verdictId && root.schemaVersion === 1) continue;
-    if (root.schemaVersion === 2) {
+    if (root.schemaVersion === 3 && options.frictionV3Cutover?.lifecycleVersion !== 1) continue;
+    if (root.schemaVersion === 2 || root.schemaVersion === 3) {
       const grouped = caseRoots.get(root.caseId) ?? [];
       grouped.push(root);
       caseRoots.set(root.caseId, grouped);
@@ -82,7 +84,8 @@ export async function loadReevalClosureSubjects(
       caseRoot: {
         caseId,
         domainId: first.domainId,
-        targetOwnerCatId: domain.handoffTargetResolver.ownerCatId,
+        targetOwnerCatId:
+          first.schemaVersion === 3 ? first.repairTarget.ownerCatId : domain.handoffTargetResolver.ownerCatId,
         assignedEvalCatId,
         reevalWithinHours: domain.sla.reevalWithinHours,
         cycles: groupedRoots.map((root) => ({
@@ -103,8 +106,8 @@ export async function loadReevalClosureSubjects(
       ),
       responsibilityContext: {
         systemThreadId: domain.systemThreadId,
-        featureId: domain.handoffTargetResolver.featureId,
-        ownerCatId: domain.handoffTargetResolver.ownerCatId,
+        featureId: first.schemaVersion === 3 ? first.repairTarget.featureId : domain.handoffTargetResolver.featureId,
+        ownerCatId: first.schemaVersion === 3 ? first.repairTarget.ownerCatId : domain.handoffTargetResolver.ownerCatId,
         evalCatId: assignedEvalCatId,
       },
       ...(migration ? { legacyMigration: migration.freshnessReview } : {}),
@@ -131,7 +134,7 @@ export async function loadReevalClosureSubjects(
   }
 
   const historicalRoot = roots.find((root) => root.verdictId === historical.root.verdictId);
-  if (historicalVerdictExists && historicalRoot?.schemaVersion !== 2) {
+  if (historicalVerdictExists && historicalRoot?.schemaVersion !== 2 && historicalRoot?.schemaVersion !== 3) {
     const domain = domains.get(historical.root.domainId);
     if (!domain) {
       throw new Error(`historical lifecycle ${historical.root.verdictId} references an unregistered domain`);
@@ -142,7 +145,9 @@ export async function loadReevalClosureSubjects(
     subjects.push({
       ...historical,
       assignedEvalCatId,
-      ...(historicalRoot ? { root: historicalRoot, openRefs: lifecycleRootRefs(historicalRoot) } : {}),
+      ...(historicalRoot?.schemaVersion === 1
+        ? { root: historicalRoot, openRefs: lifecycleRootRefs(historicalRoot) }
+        : {}),
       events: await options.eventLog.read(historical.root.verdictId),
     });
   }
@@ -166,6 +171,8 @@ function caseNeedsResponsibility(
   const events = [...subject.events, ...planned.map((item) => item.event)];
   if (events.length === 0) return false;
   const projection = projectReevalCase(subject.caseRoot, events);
+  const activeRoot = subject.roots.find((root) => root.verdictId === projection.activeVerdictId);
+  if (activeRoot?.schemaVersion === 3) return false;
   return (
     projection.status === 'open' ||
     (projection.status === 'escalated' && projection.escalation?.stage === 'acknowledgement')

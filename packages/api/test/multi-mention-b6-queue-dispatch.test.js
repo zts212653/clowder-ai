@@ -22,7 +22,7 @@ import {
 function createMockRegistry() {
   const records = new Map();
   return {
-    register(catId, threadId, userId) {
+    register(catId, threadId, userId, overrides = {}) {
       const id = `inv-${records.size}`;
       const token = `tok-${records.size}`;
       records.set(id, {
@@ -32,6 +32,7 @@ function createMockRegistry() {
         invocationId: id,
         callbackToken: token,
         ownerAuthProvenance: 'strict',
+        ...overrides,
       });
       return { invocationId: id, callbackToken: token };
     },
@@ -103,8 +104,8 @@ function createMockInvocationTracker() {
 function createMockRouter() {
   const executions = [];
   return {
-    async *routeExecution(userId, message, threadId, _invId, targetCats) {
-      executions.push({ userId, message, threadId, targetCats });
+    async *routeExecution(userId, message, threadId, userMessageId, targetCats, intent, options) {
+      executions.push({ userId, message, threadId, userMessageId, targetCats, intent, options });
       yield { type: 'text', catId: targetCats[0], content: `Response from ${targetCats[0]}`, timestamp: Date.now() };
       yield { type: 'done', catId: targetCats[0], isFinal: true, timestamp: Date.now() };
     },
@@ -231,6 +232,121 @@ describe('B6: multi_mention queue dispatch', () => {
     // Completion hook should have been registered for the enqueued entry
     assert.ok(mockQueueProcessor.getHooks().size > 0);
     assert.equal(actionAdmissionCalls.length, 0, 'legacy unscoped request must remain backward compatible');
+  });
+
+  test('preserves exact cloud source provenance and per-target lineage in every Queue carrier', async () => {
+    const source = mockMessageStore.append({
+      userId: 'user-1',
+      catId: null,
+      content: 'Ask local and cloud cats to review this exact request',
+      mentions: [],
+      timestamp: 100,
+      threadId: 'thread-1',
+      deliveryStatus: 'delivered',
+    });
+    creds = mockRegistry.register('opus', 'thread-1', 'user-1', {
+      originTriggerMessageId: source.id,
+    });
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/callbacks/multi-mention',
+      headers: { 'x-invocation-id': creds.invocationId, 'x-callback-token': creds.callbackToken },
+      payload: {
+        targets: ['codex', 'gpt-pro'],
+        question: 'Review the exact source',
+        context: 'Preserve this original context',
+        callbackTo: 'opus',
+      },
+    });
+
+    assert.equal(res.statusCode, 200);
+    const { requestId } = res.json();
+    const entries = invocationQueue.list('thread-1', 'user-1');
+    assert.equal(entries.length, 2);
+    assert.deepEqual(
+      entries.map((entry) => ({
+        targetCatId: entry.targetCats[0],
+        parentInvocationId: entry.a2aParentInvocationId,
+        idempotencyKey: entry.idempotencyKey,
+        requiresExactProvenance: entry.requiresExactCloudDispatchProvenance,
+        provenance: entry.cloudDispatchProvenance,
+      })),
+      [
+        {
+          targetCatId: 'codex',
+          parentInvocationId: creds.invocationId,
+          idempotencyKey: `multi-mention:${requestId}:codex`,
+          requiresExactProvenance: true,
+          provenance: {
+            sourceMessageId: source.id,
+            sourceSender: { kind: 'user', id: 'user-1' },
+            calledByCatId: 'opus',
+            intent: 'Review the exact source\n\n---\n\nPreserve this original context',
+          },
+        },
+        {
+          targetCatId: 'gpt-pro',
+          parentInvocationId: creds.invocationId,
+          idempotencyKey: `multi-mention:${requestId}:gpt-pro`,
+          requiresExactProvenance: true,
+          provenance: {
+            sourceMessageId: source.id,
+            sourceSender: { kind: 'user', id: 'user-1' },
+            calledByCatId: 'opus',
+            intent: 'Review the exact source\n\n---\n\nPreserve this original context',
+          },
+        },
+      ],
+    );
+  });
+
+  test('rejects caller-visible but cloud-ineligible Queue provenance while local sibling stays independent', async () => {
+    const source = mockMessageStore.append({
+      userId: 'user-1',
+      catId: null,
+      content: 'Private source for opus only',
+      mentions: [],
+      timestamp: 101,
+      threadId: 'thread-1',
+      deliveryStatus: 'delivered',
+      visibility: 'whisper',
+      whisperTo: ['opus'],
+    });
+    creds = mockRegistry.register('opus', 'thread-1', 'user-1', {
+      originTriggerMessageId: source.id,
+    });
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/callbacks/multi-mention',
+      headers: { 'x-invocation-id': creds.invocationId, 'x-callback-token': creds.callbackToken },
+      payload: {
+        targets: ['codex', 'gpt-pro'],
+        question: 'Do not leak the private source',
+        callbackTo: 'opus',
+      },
+    });
+
+    assert.equal(res.statusCode, 200);
+    const { requestId } = res.json();
+    const entries = invocationQueue.list('thread-1', 'user-1');
+    const localEntry = entries.find((entry) => entry.targetCats[0] === 'codex');
+    const cloudEntry = entries.find((entry) => entry.targetCats[0] === 'gpt-pro');
+    assert.ok(localEntry);
+    assert.ok(cloudEntry);
+    assert.equal(cloudEntry.requiresExactCloudDispatchProvenance, true);
+    assert.equal(cloudEntry.cloudDispatchProvenance, undefined);
+
+    const orch = getMultiMentionOrchestrator();
+    mockQueueProcessor.simulateComplete(cloudEntry.id, 'succeeded', '未发送给 @gpt-pro：精确来源不满足公开回程资格。');
+    assert.equal(orch.getStatus(requestId), 'partial');
+    mockQueueProcessor.simulateComplete(localEntry.id, 'succeeded', 'Local sibling completed');
+
+    assert.equal(orch.getStatus(requestId), 'done');
+    const flushMsg = mockMessageStore.getMessages().find((message) => message.content?.includes('Multi-Mention'));
+    assert.ok(flushMsg.content.includes('Local sibling completed'));
+    assert.ok(flushMsg.content.includes('未发送给 @gpt-pro'));
   });
 
   test('claims structured action before dispatch and carries the generation fence into QueueEntry', async () => {
@@ -409,7 +525,7 @@ describe('B6: multi_mention queue dispatch', () => {
     ]);
   });
 
-  test('safe_wait returns without creating orchestrator, timer, queue row, or hook', async () => {
+  test('safe_wait without durable carrier truth fails closed without creating work', async () => {
     actionAdmissionResult = {
       admit: false,
       outcome: 'safe_wait',
@@ -434,9 +550,10 @@ describe('B6: multi_mention queue dispatch', () => {
       },
     });
 
-    assert.equal(res.statusCode, 200);
+    assert.equal(res.statusCode, 409);
     assert.deepEqual(res.json(), {
-      status: 'safe_wait',
+      status: 'action_carrier_unavailable',
+      reason: 'carrier_missing',
       actionLease: { leaseId: 'lease-existing', generation: 3, holderCatIds: ['codex-terra'] },
     });
     assert.deepEqual(invocationQueue.list('thread-1', 'user-1'), []);
@@ -619,6 +736,31 @@ describe('B6: multi_mention queue dispatch', () => {
     assert.ok(flushMsg);
     assert.ok(flushMsg.content.includes('Codex response'));
     assert.ok(flushMsg.content.includes('Gemini response'));
+  });
+
+  test('a cloud provenance failure remains visible while its local sibling settles independently', async () => {
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/callbacks/multi-mention',
+      headers: { 'x-invocation-id': creds.invocationId, 'x-callback-token': creds.callbackToken },
+      payload: {
+        targets: ['codex', 'gpt-pro'],
+        question: 'Settle independently',
+        callbackTo: 'opus',
+      },
+    });
+
+    const { requestId } = res.json();
+    const orch = getMultiMentionOrchestrator();
+    const entryIds = [...mockQueueProcessor.getHooks().keys()];
+    mockQueueProcessor.simulateComplete(entryIds[1], 'succeeded', '未发送给 @gpt-pro：投递来源或回程绑定不完整。');
+    assert.equal(orch.getStatus(requestId), 'partial');
+    mockQueueProcessor.simulateComplete(entryIds[0], 'succeeded', 'Local sibling completed');
+
+    assert.equal(orch.getStatus(requestId), 'done');
+    const flushMsg = mockMessageStore.getMessages().find((message) => message.content?.includes('Multi-Mention'));
+    assert.ok(flushMsg.content.includes('Local sibling completed'));
+    assert.ok(flushMsg.content.includes('未发送给 @gpt-pro'));
   });
 
   test('failed dispatch records failure response', async () => {
@@ -1010,7 +1152,18 @@ describe('B6: multi_mention queue dispatch', () => {
     resetMultiMentionOrchestrator();
     const fallbackRouter = createMockRouter();
     const { registerMultiMentionRoutes } = await import('../dist/routes/callback-multi-mention-routes.js');
-    const fallbackCreds = mockRegistry.register('opus', 'thread-2', 'user-2');
+    const source = mockMessageStore.append({
+      userId: 'user-2',
+      catId: null,
+      content: 'Exact direct source',
+      mentions: [],
+      timestamp: 200,
+      threadId: 'thread-2',
+      deliveryStatus: 'delivered',
+    });
+    const fallbackCreds = mockRegistry.register('opus', 'thread-2', 'user-2', {
+      originTriggerMessageId: source.id,
+    });
 
     registerMultiMentionRoutes(fallbackApp, {
       registry: mockRegistry,
@@ -1041,6 +1194,158 @@ describe('B6: multi_mention queue dispatch', () => {
 
     // Direct dispatch should have been used (router called)
     assert.ok(fallbackRouter.getExecutions().length > 0);
+    const [execution] = fallbackRouter.getExecutions();
+    assert.equal(execution.userMessageId, source.id);
+    assert.equal(execution.options.requiresExactCloudDispatchProvenance, true);
+    assert.deepEqual(execution.options.cloudDispatchProvenance, {
+      sourceMessageId: source.id,
+      sourceSender: { kind: 'user', id: 'user-2' },
+      calledByCatId: 'opus',
+      intent: 'Fallback test',
+    });
+
+    await fallbackApp.close();
+  });
+
+  test('keeps a typed direct cloud provenance failure visible instead of recording empty success', async () => {
+    const fallbackApp = Fastify({ logger: false });
+    registerCallbackAuthHook(fallbackApp, mockRegistry);
+    resetMultiMentionOrchestrator();
+    const { registerMultiMentionRoutes } = await import('../dist/routes/callback-multi-mention-routes.js');
+    const routeCalls = [];
+    const fallbackRouter = {
+      async *routeExecution(_userId, _message, _threadId, _sourceMessageId, targetCats, _intent, options) {
+        routeCalls.push(options);
+        yield {
+          type: 'system_info',
+          catId: targetCats[0],
+          content: JSON.stringify({
+            type: 'cloud_bridge_status',
+            status: 'unavailable',
+            reason: 'incomplete-dispatch-provenance',
+            message: '未发送给 @gpt-pro：投递来源或回程绑定不完整。',
+          }),
+          timestamp: Date.now(),
+        };
+        yield { type: 'done', catId: targetCats[0], isFinal: true, timestamp: Date.now() };
+      },
+    };
+    const fallbackCreds = mockRegistry.register('opus', 'thread-2', 'user-2');
+
+    registerMultiMentionRoutes(fallbackApp, {
+      registry: mockRegistry,
+      messageStore: mockMessageStore,
+      socketManager: mockSocket,
+      router: fallbackRouter,
+      invocationRecordStore: mockInvocationRecordStore,
+      invocationTracker: mockInvocationTracker,
+    });
+    await fallbackApp.ready();
+
+    const res = await fallbackApp.inject({
+      method: 'POST',
+      url: '/api/callbacks/multi-mention',
+      headers: { 'x-invocation-id': fallbackCreds.invocationId, 'x-callback-token': fallbackCreds.callbackToken },
+      payload: {
+        targets: ['gpt-pro'],
+        question: 'Fail visibly',
+        callbackTo: 'opus',
+      },
+    });
+
+    assert.equal(res.statusCode, 200);
+    const { requestId } = res.json();
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    const result = getMultiMentionOrchestrator().getResult(requestId);
+    assert.equal(routeCalls[0].requiresExactCloudDispatchProvenance, true);
+    assert.equal(routeCalls[0].cloudDispatchProvenance, undefined);
+    assert.equal(result.responses[0].status, 'received');
+    assert.match(result.responses[0].content, /未发送给 @gpt-pro/);
+
+    await fallbackApp.close();
+  });
+
+  test('does not direct-dispatch a caller-visible source that is ineligible for the cloud return boundary', async () => {
+    const fallbackApp = Fastify({ logger: false });
+    registerCallbackAuthHook(fallbackApp, mockRegistry);
+    resetMultiMentionOrchestrator();
+    const { registerMultiMentionRoutes } = await import('../dist/routes/callback-multi-mention-routes.js');
+    const routeCalls = [];
+    let bridgeDispatches = 0;
+    const fallbackRouter = {
+      async *routeExecution(_userId, _message, _threadId, _sourceMessageId, targetCats, _intent, options) {
+        const targetCatId = targetCats[0];
+        routeCalls.push({ targetCatId, options });
+        if (targetCatId === 'gpt-pro') {
+          if (options.cloudDispatchProvenance) {
+            bridgeDispatches += 1;
+            yield { type: 'text', catId: targetCatId, content: 'Cloud bridge dispatched', timestamp: Date.now() };
+          } else {
+            yield {
+              type: 'system_info',
+              catId: targetCatId,
+              content: JSON.stringify({
+                type: 'cloud_bridge_status',
+                status: 'unavailable',
+                reason: 'missing-source-message-id',
+                message: '未发送给 @gpt-pro：精确来源不满足公开回程资格。',
+              }),
+              timestamp: Date.now(),
+            };
+          }
+        } else {
+          yield { type: 'text', catId: targetCatId, content: 'Local sibling completed', timestamp: Date.now() };
+        }
+        yield { type: 'done', catId: targetCatId, isFinal: true, timestamp: Date.now() };
+      },
+    };
+    const source = mockMessageStore.append({
+      userId: 'user-2',
+      catId: null,
+      content: 'Private source for opus only',
+      mentions: [],
+      timestamp: 201,
+      threadId: 'thread-2',
+      deliveryStatus: 'delivered',
+      visibility: 'whisper',
+      whisperTo: ['opus'],
+    });
+    const fallbackCreds = mockRegistry.register('opus', 'thread-2', 'user-2', {
+      originTriggerMessageId: source.id,
+    });
+
+    registerMultiMentionRoutes(fallbackApp, {
+      registry: mockRegistry,
+      messageStore: mockMessageStore,
+      socketManager: mockSocket,
+      router: fallbackRouter,
+      invocationRecordStore: mockInvocationRecordStore,
+      invocationTracker: mockInvocationTracker,
+    });
+    await fallbackApp.ready();
+
+    const res = await fallbackApp.inject({
+      method: 'POST',
+      url: '/api/callbacks/multi-mention',
+      headers: { 'x-invocation-id': fallbackCreds.invocationId, 'x-callback-token': fallbackCreds.callbackToken },
+      payload: {
+        targets: ['codex', 'gpt-pro'],
+        question: 'Do not leak the private source',
+        callbackTo: 'opus',
+      },
+    });
+
+    assert.equal(res.statusCode, 200);
+    const { requestId } = res.json();
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    const cloudCall = routeCalls.find((call) => call.targetCatId === 'gpt-pro');
+    assert.equal(bridgeDispatches, 0);
+    assert.equal(cloudCall.options.requiresExactCloudDispatchProvenance, true);
+    assert.equal(cloudCall.options.cloudDispatchProvenance, undefined);
+    const result = getMultiMentionOrchestrator().getResult(requestId);
+    assert.equal(result.request.status, 'done');
+    assert.match(result.responses.find((response) => response.catId === 'codex').content, /Local sibling completed/);
+    assert.match(result.responses.find((response) => response.catId === 'gpt-pro').content, /未发送给 @gpt-pro/);
 
     await fallbackApp.close();
   });
@@ -1113,6 +1418,128 @@ describe('B6: QueueProcessor entryCompleteHook integration', () => {
     assert.ok(hookResult, 'Hook should have been called');
     assert.equal(hookResult.status, 'succeeded');
     assert.equal(hookResult.responseText, 'Hello from hook');
+  });
+
+  test('dispatches one exact cloud child on Queue replay and returns its typed failure notice', async () => {
+    const { InvocationQueue: IQ } = await import('../dist/domains/cats/services/agents/invocation/InvocationQueue.js');
+    const { QueueProcessor: QP } = await import('../dist/domains/cats/services/agents/invocation/QueueProcessor.js');
+
+    const queue = new IQ();
+    const recordsByIdempotencyKey = new Map();
+    const recordsById = new Map();
+    let invocationCounter = 0;
+    const routeCalls = [];
+    const hookResults = [];
+    const stubDeps = {
+      queue,
+      invocationTracker: {
+        start: () => new AbortController(),
+        startAll: () => new AbortController(),
+        tryStartThreadAll: () => new AbortController(),
+        complete: () => {},
+        completeAll: () => {},
+        has: () => false,
+        getController: () => undefined,
+      },
+      invocationRecordStore: {
+        create(input) {
+          const prior = recordsByIdempotencyKey.get(input.idempotencyKey);
+          if (prior) return { outcome: 'duplicate', invocationId: prior.invocationId };
+          const invocationId = `inv-cloud-${invocationCounter++}`;
+          const record = { ...input, invocationId, status: 'queued' };
+          recordsByIdempotencyKey.set(input.idempotencyKey, record);
+          recordsById.set(invocationId, record);
+          return { outcome: 'created', invocationId };
+        },
+        update(invocationId, patch) {
+          Object.assign(recordsById.get(invocationId), patch);
+        },
+        get(invocationId) {
+          return recordsById.get(invocationId) ?? null;
+        },
+      },
+      router: {
+        async *routeExecution(userId, message, threadId, sourceMessageId, targetCats, intent, options) {
+          routeCalls.push({ userId, message, threadId, sourceMessageId, targetCats, intent, options });
+          yield {
+            type: 'system_info',
+            catId: targetCats[0],
+            content: JSON.stringify({
+              type: 'cloud_bridge_status',
+              status: 'unavailable',
+              reason: 'incomplete-dispatch-provenance',
+              message: '未发送给 @gpt-pro：投递来源或回程绑定不完整。',
+            }),
+            timestamp: Date.now(),
+          };
+          yield { type: 'done', catId: targetCats[0], isFinal: true, timestamp: Date.now() };
+        },
+        ackCollectedCursors: () => Promise.resolve(),
+      },
+      socketManager: {
+        broadcastAgentMessage: () => {},
+        broadcastToRoom: () => {},
+        emitToUser: () => {},
+      },
+      messageStore: {
+        markDelivered: () => null,
+        getById: () => null,
+      },
+      log: { info: () => {}, warn: () => {}, error: () => {} },
+    };
+
+    const qp = new QP(stubDeps);
+    const carrier = {
+      sourceMessageId: 'msg-exact-source',
+      sourceSender: { kind: 'user', id: 'user-1' },
+      calledByCatId: 'opus',
+      intent: 'Original raw intent',
+    };
+    const enqueue = () =>
+      queue.enqueue({
+        ownerAuthProvenance: 'strict',
+        threadId: 'thread-1',
+        userId: 'user-1',
+        content: '[Multi-Mention from opus]\n\nOriginal raw intent',
+        source: 'agent',
+        targetCats: ['gpt-pro'],
+        intent: 'execute',
+        autoExecute: true,
+        callerCatId: 'opus',
+        a2aParentInvocationId: 'inv-parent',
+        idempotencyKey: 'multi-mention:req-1:gpt-pro',
+        cloudDispatchProvenance: carrier,
+        requiresExactCloudDispatchProvenance: true,
+      });
+
+    const first = enqueue();
+    qp.registerEntryCompleteHook(first.entry.id, (_entryId, status, responseText) => {
+      hookResults.push({ status, responseText });
+    });
+    await qp.tryAutoExecute('thread-1');
+    await new Promise((resolve) => setTimeout(resolve, 200));
+
+    assert.equal(routeCalls.length, 1);
+    assert.equal(routeCalls[0].sourceMessageId, carrier.sourceMessageId);
+    assert.deepEqual(routeCalls[0].options.cloudDispatchProvenance, carrier);
+    assert.equal(routeCalls[0].options.requiresExactCloudDispatchProvenance, true);
+    assert.deepEqual(hookResults, [
+      {
+        status: 'succeeded',
+        responseText: '未发送给 @gpt-pro：投递来源或回程绑定不完整。',
+      },
+    ]);
+
+    const replay = enqueue();
+    qp.registerEntryCompleteHook(replay.entry.id, (_entryId, status, responseText) => {
+      hookResults.push({ status, responseText });
+    });
+    await qp.tryAutoExecute('thread-1');
+    await new Promise((resolve) => setTimeout(resolve, 200));
+
+    assert.equal(routeCalls.length, 1, 'stable replay must not dispatch the exact child twice');
+    assert.equal(hookResults.length, 2);
+    assert.equal(hookResults[1].status, 'succeeded');
   });
 
   test('hook is auto-removed after firing (one-shot)', async () => {

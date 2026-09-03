@@ -29,7 +29,7 @@ function toItem(proposal: ScheduleMutationProposal): ApprovalItem | null {
     sourceFeatureId: 'F139',
     requesterCatId: proposal.requesterCatId,
     ownerUserId: proposal.ownerUserId,
-    status: 'pending',
+    status: proposal.status,
     summary: summary(proposal),
     detail: detail(proposal),
     navigation,

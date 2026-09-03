@@ -31,6 +31,7 @@ export function createTrajectoryInspectorGeneratorAdapter(
       domain,
       episodeBundle,
       submittedPacket: packet,
+      generatedAt: deps.publicationTime,
     });
     return { verdictPath: artifact.path, bundleDir: artifact.bundleDir };
   };

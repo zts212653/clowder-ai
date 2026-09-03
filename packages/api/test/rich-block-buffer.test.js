@@ -36,6 +36,14 @@ describe('RichBlockBuffer', () => {
     assert.equal(result.length, 2);
   });
 
+  it('checks only rich block kind for the exact in-flight invocation', () => {
+    const buf = getRichBlockBuffer();
+    buf.add('t1', 'codex-sol', { id: 'html-1', kind: 'html_widget', v: 1, html: '<p>ELI5</p>' }, 'inv-1');
+    assert.equal(buf.hasKind('t1', 'codex-sol', 'inv-1', 'html_widget'), true);
+    assert.equal(buf.hasKind('t1', 'codex-sol', 'inv-other', 'html_widget'), false);
+    assert.equal(buf.hasKind('t1', 'codex-sol', 'inv-1', 'card'), false);
+  });
+
   it('isolates different thread/cat keys', () => {
     const buf = getRichBlockBuffer();
     buf.add('t1', 'opus', { id: 'b1', kind: 'card', v: 1, title: 'A' });

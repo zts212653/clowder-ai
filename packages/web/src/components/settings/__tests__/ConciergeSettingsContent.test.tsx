@@ -24,7 +24,7 @@ const CONFIG = {
   personaTone: '温暖',
   dutyCatProfileId: '',
   proactivePolicy: 'quiet-badge' as const,
-  skin: 'yanyan-codex' as const,
+  skin: 'xianxian-codex' as const,
   ballPosition: null,
   ballSize: 72,
   behaviorEnabled: true,
@@ -72,5 +72,15 @@ describe('ConciergeSettingsContent behavior controls', () => {
     });
     const put = mockApiFetch.mock.calls.find(([, init]) => (init as RequestInit | undefined)?.method === 'PUT');
     expect(JSON.parse(String((put?.[1] as RequestInit).body))).toEqual({ behaviorEnabled: false });
+  });
+
+  it('marks Xianxian as the default skin', async () => {
+    await act(async () => {
+      root.render(<ConciergeSettingsContent />);
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+
+    expect(container.textContent).toContain('宪宪专属皮肤（视频提取）。（默认）');
+    expect(container.textContent).not.toContain('砚砚专属皮肤。（默认）');
   });
 });

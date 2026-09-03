@@ -89,7 +89,7 @@ Clowder AI 的记忆检索不是一个简单的搜索引擎。它是一个 **多
 
 | # | 层 | 主要实现归属 | 当时为什么加这一层 |
 |---|---|---|---|
-| 1 | Entity Registry / alias recall | **F209 Phase B/B.1** | 关键词和 embedding 都不知道 `operator`、`operator`、`landy`、猫昵称、`cat:*` roster anchor 是同一个实体。F209 把 alias 变成确定性 registry + mention index，避免靠模型猜别名。 |
+| 1 | Entity Registry / alias recall | **F209 Phase B/B.1** | 关键词和 embedding 都不知道 `operator`、`operator`、`operator`、猫昵称、`cat:*` roster anchor 是同一个实体。F209 把 alias 变成确定性 registry + mention index，避免靠模型猜别名。 |
 | 2 | BM25 / FTS5 lexical search | **F102 Phase A/B/D** | F102 把记忆从 grep / Hindsight 迁到本地 `evidence.sqlite`：先用稳定、可过滤、可重建的 FTS5 做主召回入口，并支持 `scope/mode/depth` 检索协议。 |
 | 3 | FTS Progressive Relaxation | **F200 HW-6** | 2026-06-19 dogfood 发现长 query 在 FTS5 AND-all 下 75% 空结果。解决方式是 AND-all → strong-AND+weak-OR → OR-all 逐级放松，保留精确锚点同时减少 zero-hit。 |
 | 4 | Lexical Backfill | **F102 post-K dogfood fix** | FTS5 `unicode61` 会漏掉某些标识符 / heading / keyword 场景；子串回捞用 `title/summary/keywords` 补漏，并用 keyword/title/text hits 排序。 |

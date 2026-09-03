@@ -9,13 +9,13 @@
  */
 
 :root {
-  /* ============ Structural surfaces — cafe-surface 4 档（铲屎官指定梯度） ============
+  /* ============ Structural surfaces — cafe-surface 4 档（co-creator指定梯度） ============
    * 基于 develop_base 实测 hex 反推 OKLCH：
    *   sunken   (层1·基底) → ActivityBar / code / field
    *   surface  (层2·承载) → ThreadSidebar / RightPanel
    *   elevated (层3·抬升) → Chat 主区
    *   canvas   (层4·浮出) → Card 浮起
-   * Light/Dark 统一映射，不再镜像（铲屎官 2026-05-28 改版）。 */
+   * Light/Dark 统一映射，不再镜像（co-creator 2026-05-28 改版）。 */
   --console-shell-bg: var(--cafe-surface-elevated);
   --console-panel-bg: var(--cafe-surface);
   --console-card-bg: var(--cafe-surface-canvas);
@@ -188,7 +188,7 @@
 }
 
 /* ============================================================
- * Dark override — 统一三栏映射（铲屎官 2026-05-28 改版）
+ * Dark override — 统一三栏映射（co-creator 2026-05-28 改版）
  *
  * Light/Dark 共用同一 token→区域 映射，不再镜像：
  *   sunken (层1·基底)  → ActivityBar / code field

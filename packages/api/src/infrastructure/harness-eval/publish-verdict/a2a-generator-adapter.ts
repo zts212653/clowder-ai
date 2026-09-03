@@ -65,6 +65,7 @@ export function createA2aGeneratorAdapter(): VerdictGenerator {
       rawAttributionPath: isoAttrPath,
       harnessFeedbackRoot: deps.harnessFeedbackRoot,
       domain,
+      generatedAt: deps.publicationTime,
       submittedPacket: packet,
     });
 

@@ -2,6 +2,7 @@ import type { AutomationState, CreateTaskInput, ManagedWorkBinding, TaskItem } f
 import type { RedisClient } from '@cat-cafe/shared/utils';
 import { generateSortableId } from '../ports/MessageStore.js';
 import { createManagedWorkBindingConflict } from '../ports/TaskManagedWorkBinding.js';
+import { assertGenericTaskSubjectNamespaceAllowed } from '../ports/TaskStoreContract.js';
 import { assertSubjectUpdateOwnership, createSubjectOwnershipConflict } from '../ports/TaskSubjectOwnership.js';
 import { TaskKeys } from '../redis-keys/task-keys.js';
 import { hydrateTask, serializeTask } from './RedisTaskCodec.js';
@@ -93,6 +94,7 @@ export class RedisTaskManagedWorkRegistrationStore {
     if (!binding.workId || !binding.attemptId) {
       throw new Error('Managed-work registration requires complete workId and attemptId');
     }
+    assertGenericTaskSubjectNamespaceAllowed(input.subjectKey);
     return this.upsertInternal(input, binding, 0);
   }
 

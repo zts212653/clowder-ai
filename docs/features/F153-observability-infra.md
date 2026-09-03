@@ -5,18 +5,32 @@ topics: [observability, telemetry, metrics, health-check, infrastructure]
 doc_kind: spec
 created: 2026-04-09
 community_issue: "zts212653/clowder-ai#388"
-tips_exempt: "2026-08-27 link/reference hygiene only; no observability capability or user action changed."
+tips_exempt: "2026-08-27 public-link projection only; no observability capability or user action changed."
 ---
 
 # F153: Observability Infrastructure — 运行时可观测基础设施
 
-> **Status**: in-progress | **Owner**: Community + Ragdoll | **Priority**: P2
+> **Status**: done | **Owner**: Community + Ragdoll | **Priority**: P2
 
 ## Why
 
 Clowder AI 当前缺乏系统性运行时可观测能力：异常难定位、超时难检测、猫猫是否在工作没有可靠信号。F130 解决了日志落盘，但 metrics/tracing/health 这一层还是空白。社区贡献者提交了 clowder-ai#393 实现 Phase 1 基础设施。
 
-operator experience（2026-04-09）："这是可观测性基础设施 PR，核心是在 packages/api 里接入 OTel SDK，补 telemetry redaction、metrics allowlist、Prometheus/OTLP、/ready 健康检查，以及 cli-spawn 参数脱敏。"
+operator experience（2026-04-09）：“这是可观测性基础设施 PR，核心是在 packages/api 里接入 OTel SDK，补 telemetry redaction、metrics allowlist、Prometheus/OTLP、/ready 健康检查，以及 cli-spawn 参数脱敏。”
+
+## User Journey
+
+### Primary Journey: 维护者调查一次运行异常
+
+- **Scope unit**: 一次已鉴权的 invocation（由脱敏后的 trace / invocation 关联）
+- **Actor**: Clowder AI 维护者
+- **Entry**: Hub Observability 中的健康告警、异常调用，或 `/ready` 返回 degraded
+- **Flow**:
+  1. 维护者进入已鉴权的 telemetry 视图，确认服务健康状态与异常时间窗。
+  2. 维护者按 trace、调用或猫的脱敏关联筛选，查看父子 span、耗时、错误和 Step Summary，而不是从日志猜测链路。
+  3. 若进程已重启，系统从消息中的 tracing pointers hydrate 可恢复 span；缺少可恢复证据时明确显示缺失，不把空数据当健康。
+  4. 维护者据此定位下一步排障动作；原始 prompt、凭证和 raw identifier 始终不出现在 Hub telemetry 视图。
+- **Success**: 维护者得到一条可追溯、脱敏且有明确健康语义的执行链，而非不可验证的运行结论。
 
 ## What
 

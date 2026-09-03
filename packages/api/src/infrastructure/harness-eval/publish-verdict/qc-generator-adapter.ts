@@ -39,7 +39,7 @@ export function createQcGeneratorAdapter(): VerdictGenerator {
     }
 
     const qcMetrics = resolveQcMetrics(selector);
-    const generatedAt = new Date().toISOString();
+    const generatedAt = deps.publicationTime;
     const evalSnapshotId = `qc-snapshot-${packet.id}`;
     const windowMs = selector.windowEndMs - selector.windowStartMs;
 

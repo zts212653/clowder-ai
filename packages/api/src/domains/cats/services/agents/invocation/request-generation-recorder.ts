@@ -119,6 +119,7 @@ async function persistedToolSurface(
     ...(declaredServerSetHash ? { declaredServerSetHash } : {}),
     ...(catCafeSchemaSetHash ? { catCafeSchemaSetHash } : {}),
     ...(providerObservedSchemaSetHash ? { providerObservedSchemaSetHash } : {}),
+    ...(prepared.schemaDelivery ? { schemaDelivery: prepared.schemaDelivery } : {}),
   };
 }
 

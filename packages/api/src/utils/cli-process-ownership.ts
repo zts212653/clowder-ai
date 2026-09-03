@@ -14,8 +14,9 @@ import {
 import { homedir } from 'node:os';
 import { basename, dirname, isAbsolute, join, resolve } from 'node:path';
 import { debuglog } from 'node:util';
+import { CLI_PROCESS_OWNER_ENV } from './cli-process-environment.js';
 
-export const CLI_PROCESS_OWNER_ENV = 'CAT_CAFE_PROCESS_OWNER_ID';
+export { CLI_PROCESS_OWNER_ENV } from './cli-process-environment.js';
 export const CLI_EXECUTION_ID_ENV = 'CAT_CAFE_EXECUTION_ID';
 export const CLI_EXECUTION_OWNER_BINDING_ENV = 'CAT_CAFE_PROCESS_EXECUTION_OWNER';
 export const CLI_PROCESS_SNAPSHOT_TIMEOUT_MS = 2_000;

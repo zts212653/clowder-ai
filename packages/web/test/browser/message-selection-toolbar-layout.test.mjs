@@ -330,6 +330,28 @@ test(
       await page.getByRole('dialog', { name: '转发到' }).getByRole('button', { name: '取消', exact: true }).click();
 
       await page.mouse.move(350, 790);
+      const fileBlock = page.locator(
+        '[data-testid="f294-rich-file-source"] [data-rich-block-id="resource-request-file"]',
+      );
+      const fileForward = fileBlock.getByRole('button', {
+        name: '转发富块：昇腾算力资源申请-Agent自进化-单独转发这个富块-8-27B场景化后训练.docx',
+      });
+      await fileBlock.hover();
+      await fileForward.waitFor({ state: 'visible' });
+      const [fileForwardDockBox, fileCopyBox, fileDownloadBox] = await Promise.all([
+        fileBlock.getByTestId('rich-block-forward-action-dock').boundingBox(),
+        fileBlock.getByRole('button', { name: '复制完整文件名', exact: true }).boundingBox(),
+        fileBlock.getByRole('link', { name: '下载', exact: true }).boundingBox(),
+      ]);
+      assert.ok(fileForwardDockBox && fileCopyBox && fileDownloadBox, 'file Rich Block action geometry did not render');
+      for (const intrinsicActionBox of [fileCopyBox, fileDownloadBox]) {
+        assert.ok(
+          fileForwardDockBox.y >= intrinsicActionBox.y + intrinsicActionBox.height,
+          'file forwarding must render below, not inside, the file copy/download action row',
+        );
+      }
+
+      await page.mouse.move(350, 790);
       const richGroup = page.locator('[data-testid="f294-rich-group-source"] [data-rich-block-group-id]');
       const groupActions = richGroup.getByTestId('rich-block-forward-actions');
       const groupDock = richGroup.getByTestId('rich-block-forward-action-dock');

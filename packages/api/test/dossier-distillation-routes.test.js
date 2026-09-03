@@ -107,7 +107,7 @@ describe('dossier distillation routes', () => {
     await app.inject({
       method: 'POST',
       url: `/api/dossier/distillations/${proposalId}/approve`,
-      headers: { 'x-cat-cafe-user': 'you' },
+      headers: { 'x-cat-cafe-user': 'operator' },
     });
 
     const res = await app.inject({
@@ -123,7 +123,7 @@ describe('dossier distillation routes', () => {
 
   it('approve 403 if non-operator user tries to approve (owner gate)', async () => {
     const saved = process.env.DEFAULT_OWNER_USER_ID;
-    process.env.DEFAULT_OWNER_USER_ID = 'you';
+    process.env.DEFAULT_OWNER_USER_ID = 'operator';
     try {
       const createRes = await app.inject({
         method: 'POST',
@@ -148,7 +148,7 @@ describe('dossier distillation routes', () => {
 
   it('reject 403 if non-operator user tries to reject (owner gate)', async () => {
     const saved = process.env.DEFAULT_OWNER_USER_ID;
-    process.env.DEFAULT_OWNER_USER_ID = 'you';
+    process.env.DEFAULT_OWNER_USER_ID = 'operator';
     try {
       const createRes = await app.inject({
         method: 'POST',
@@ -223,7 +223,7 @@ describe('dossier distillation routes', () => {
     await app.inject({
       method: 'POST',
       url: `/api/dossier/distillations/${proposalId}/approve`,
-      headers: { 'x-cat-cafe-user': 'you' },
+      headers: { 'x-cat-cafe-user': 'operator' },
     });
 
     const res = await app.inject({
@@ -426,12 +426,12 @@ describe('dossier distillation routes', () => {
     const res = await app.inject({
       method: 'POST',
       url: `/api/dossier/distillations/${proposalId}/approve`,
-      headers: { 'x-cat-cafe-user': 'you' },
+      headers: { 'x-cat-cafe-user': 'operator' },
     });
     assert.equal(res.statusCode, 200);
     const body = JSON.parse(res.body);
     assert.equal(body.proposal.status, 'approved');
-    assert.equal(body.proposal.approvedBy, 'you');
+    assert.equal(body.proposal.approvedBy, 'operator');
   });
 
   it('approve 409 if not pending', async () => {
@@ -447,13 +447,13 @@ describe('dossier distillation routes', () => {
     await app.inject({
       method: 'POST',
       url: `/api/dossier/distillations/${proposalId}/approve`,
-      headers: { 'x-cat-cafe-user': 'you' },
+      headers: { 'x-cat-cafe-user': 'operator' },
     });
     // approve second time — already approved
     const res = await app.inject({
       method: 'POST',
       url: `/api/dossier/distillations/${proposalId}/approve`,
-      headers: { 'x-cat-cafe-user': 'you' },
+      headers: { 'x-cat-cafe-user': 'operator' },
     });
     assert.equal(res.statusCode, 409);
   });
@@ -473,7 +473,7 @@ describe('dossier distillation routes', () => {
       method: 'POST',
       url: `/api/dossier/distillations/${proposalId}/reject`,
       payload: { rejectionReason: 'evidence insufficient' },
-      headers: { 'x-cat-cafe-user': 'you' },
+      headers: { 'x-cat-cafe-user': 'operator' },
     });
     assert.equal(res.statusCode, 200);
     const body = JSON.parse(res.body);
@@ -496,7 +496,7 @@ describe('dossier distillation routes', () => {
     await app.inject({
       method: 'POST',
       url: `/api/dossier/distillations/${proposalId}/approve`,
-      headers: { 'x-cat-cafe-user': 'you' },
+      headers: { 'x-cat-cafe-user': 'operator' },
     });
 
     // apply
@@ -544,7 +544,7 @@ describe('dossier distillation routes', () => {
     await app.inject({
       method: 'POST',
       url: `/api/dossier/distillations/${proposalId}/approve`,
-      headers: { 'x-cat-cafe-user': 'you' },
+      headers: { 'x-cat-cafe-user': 'operator' },
     });
 
     const res = await app.inject({

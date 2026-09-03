@@ -21,6 +21,15 @@ import {
 import type { IBallCustodyIngest } from '../domains/ball-custody/BallCustodyIngest.js';
 import { buildHeldEvent, buildWakeConditionMetEvent } from '../domains/ball-custody/ball-custody-events.js';
 import {
+  createDurableManagedGateJob,
+  DURABLE_GATE_WALL_SLA_MS,
+  type DurableManagedGateJob,
+  initializeDurableManagedGateJob,
+  isDurableManagedGateCommand,
+  settleDurableManagedGateJobFromRunner,
+} from '../domains/ball-custody/durable-managed-gate-job.js';
+import {
+  buildAdmissionFactIdempotencyKey,
   createInitialManagedCommandWakeProjection,
   ManagedCommandWakeRecoverySweep,
   type RecordManagedCommandCompletionInput,
@@ -93,14 +102,16 @@ export function incrementHoldCount(threadId: string, catId: string, now: number 
 
 /**
  * F167 Phase P review P1-1 fix: active wakeWhen runner registry.
- * Keyed by `${threadId}:${catId}` — single-slot semantics means at most one
- * active runner per (thread, cat). Cancel/replace paths call cancelWakeWhenRunner()
- * so the old process is killed and its completion callback knows to bail out.
+ * Keyed by durable task id. A new hold may replace an obsolete wake carrier,
+ * but it cannot revoke an already-authorized independent execution. Explicit
+ * cancel remains task-fenced and can terminate exactly one runner.
  */
 type ManagedWakeCancellationDecision = 'cancel' | 'resume';
 
 interface ActiveManagedRunner {
   taskId: string;
+  threadId: string;
+  catId: string;
   runner: ManagedRunner;
   phase: 'pending_launch' | 'running' | 'cancellation_reserved' | 'delivering';
   reservationResumePhase?: 'pending_launch' | 'running';
@@ -130,11 +141,10 @@ function cancelManagedRunner(key: string, entry: ActiveManagedRunner): void {
  * No-op if no runner is active for the given key.
  */
 export function cancelWakeWhenRunner(threadId: string, catId: string): void {
-  const key = `${threadId}:${catId}`;
-  const entry = activeRunners.get(key);
-  if (entry) {
+  for (const [key, entry] of activeRunners) {
+    if (entry.threadId !== threadId || entry.catId !== catId) continue;
     cancelManagedRunner(key, entry);
-    log.info({ threadId, catId }, 'F167 Phase P: cancelled wakeWhen runner (cancel/replace)');
+    log.info({ threadId, catId, taskId: entry.taskId }, 'F167 Phase P: explicitly cancelled wakeWhen runner');
   }
 }
 
@@ -143,8 +153,8 @@ export function reserveManagedWakeCancellation(
   threadId: string,
   catId: string,
 ): ManagedWakeCancellationReservationResult {
-  const entry = activeRunners.get(`${threadId}:${catId}`);
-  if (!entry || entry.taskId !== taskId) return { outcome: 'not_found' };
+  const entry = activeRunners.get(taskId);
+  if (!entry || entry.threadId !== threadId || entry.catId !== catId) return { outcome: 'not_found' };
   if (entry.phase === 'delivering') return { outcome: 'execution_started' };
   if (entry.phase === 'cancellation_reserved') return { outcome: 'cancellation_pending' };
   let resolveDecision: (decision: ManagedWakeCancellationDecision) => void = () => {};
@@ -160,9 +170,9 @@ export function reserveManagedWakeCancellation(
 }
 
 export function commitManagedWakeCancellation(taskId: string, threadId: string, catId: string, token: number): boolean {
-  const key = `${threadId}:${catId}`;
+  const key = taskId;
   const entry = activeRunners.get(key);
-  if (entry?.taskId !== taskId || entry.reservationToken !== token) return false;
+  if (entry?.threadId !== threadId || entry.catId !== catId || entry.reservationToken !== token) return false;
   cancelManagedRunner(key, entry);
   return true;
 }
@@ -173,8 +183,8 @@ export function releaseManagedWakeCancellation(
   catId: string,
   token: number,
 ): boolean {
-  const entry = activeRunners.get(`${threadId}:${catId}`);
-  if (entry?.taskId !== taskId || entry.reservationToken !== token) return false;
+  const entry = activeRunners.get(taskId);
+  if (entry?.threadId !== threadId || entry.catId !== catId || entry.reservationToken !== token) return false;
   const decision = entry.reservationDecision;
   entry.phase = entry.reservationResumePhase ?? 'running';
   delete entry.reservationResumePhase;
@@ -185,9 +195,9 @@ export function releaseManagedWakeCancellation(
 }
 
 export function cancelManagedWakeIfTaskMatches(taskId: string, threadId: string, catId: string): boolean {
-  const key = `${threadId}:${catId}`;
+  const key = taskId;
   const entry = activeRunners.get(key);
-  if (entry?.taskId !== taskId) return false;
+  if (entry?.threadId !== threadId || entry.catId !== catId) return false;
   cancelManagedRunner(key, entry);
   return true;
 }
@@ -220,10 +230,11 @@ interface PreparedManagedWakeRunner {
 }
 
 function prepareWakeWhenRunner(threadId: string, catId: string, taskId: string): PreparedManagedWakeRunner {
-  const registryKey = `${threadId}:${catId}`;
-  cancelWakeWhenRunner(threadId, catId);
+  const registryKey = taskId;
   const entry: ActiveManagedRunner = {
     taskId,
+    threadId,
+    catId,
     runner: new ManagedRunner(),
     phase: 'pending_launch',
   };
@@ -317,6 +328,18 @@ export interface HoldBallRouteDeps {
   ownerUserId: string;
   scheduleMutationAuditStore: {
     deleteTaskWithAudit(taskId: string, audit: import('@cat-cafe/shared').ScheduleMutationAuditEntry): boolean;
+    setTaskEnabledWithAudit(
+      taskId: string,
+      enabled: boolean,
+      audit: import('@cat-cafe/shared').ScheduleMutationAuditEntry,
+    ): boolean;
+    updateTaskParamsAndEnabledWithAudit(
+      taskId: string,
+      currentParams: Record<string, unknown>,
+      nextParams: Record<string, unknown>,
+      enabled: boolean,
+      audit: import('@cat-cafe/shared').ScheduleMutationAuditEntry,
+    ): boolean;
   };
   onHoldBallCancelFeedback?: (input: {
     taskId: string;
@@ -381,12 +404,17 @@ export async function resolveHoldWaitOwnerFence(
 }
 
 /**
- * F167 Phase P: fire-and-forget managed command runner.
+ * F167 Phase P: two-phase managed command runner.
  * Extracted from route handler to reduce cognitive complexity.
  *
  * P1-1 fix: runner stored in activeRunners registry, cancel/replace-aware.
  * S.1-c: terminal result enters the durable hold lifecycle before visibility
  * and execution-plane dispatch are attempted.
+ *
+ * Spawn admission truth fix: uses runner.start() to split admission (fast,
+ * resolves on spawn|error) from completion (resolves on exit). The registry
+ * only transitions to 'running' after spawn succeeds, and the caller receives
+ * the real pid for truthful visibility messages and HTTP responses.
  */
 function launchWakeWhenRunner(opts: {
   wakeWhen: { command: string; cwd?: string; timeoutMs?: number };
@@ -397,27 +425,71 @@ function launchWakeWhenRunner(opts: {
   taskId: string;
   deps: HoldBallRouteDeps;
   prepared: PreparedManagedWakeRunner;
-}): void {
-  const { wakeWhen, reason, nextStep, threadId, catId, taskId, deps, prepared } = opts;
+  durableJob?: DurableManagedGateJob;
+}): { admissionPromise: Promise<import('../infrastructure/managed-runner.js').SpawnAdmission> } {
+  const { wakeWhen, reason, nextStep, threadId, catId, taskId, deps, prepared, durableJob } = opts;
   const { registryKey, entry: activeEntry } = prepared;
   const { runner } = activeEntry;
+
+  let resolveExternalAdmission!: (result: import('../infrastructure/managed-runner.js').SpawnAdmission) => void;
+  const admissionPromise = new Promise<import('../infrastructure/managed-runner.js').SpawnAdmission>((resolve) => {
+    resolveExternalAdmission = resolve;
+  });
 
   void (async () => {
     try {
       const pending = activeRunners.get(registryKey);
-      if (pending !== activeEntry || pending.taskId !== taskId) return;
+      if (pending !== activeEntry || pending.taskId !== taskId) {
+        resolveExternalAdmission({ spawned: false, pid: null, error: 'registry_mismatch' });
+        return;
+      }
       if (pending.phase === 'cancellation_reserved') {
         const decision = await pending.reservationDecision?.promise;
-        if (decision !== 'resume') return;
+        if (decision !== 'resume') {
+          resolveExternalAdmission({ spawned: false, pid: null, error: 'cancellation_reserved' });
+          return;
+        }
       }
       const admitted = activeRunners.get(registryKey);
-      if (admitted !== activeEntry || admitted.taskId !== taskId || admitted.phase !== 'pending_launch') return;
-      admitted.phase = 'running';
+      if (admitted !== activeEntry || admitted.taskId !== taskId || admitted.phase !== 'pending_launch') {
+        resolveExternalAdmission({ spawned: false, pid: null, error: 'phase_mismatch' });
+        return;
+      }
 
-      const result = await runner.launch(wakeWhen.command, {
+      // Two-phase start: admission resolves on spawn, commandDone on exit.
+      const { admission: spawnAdmission, completion: commandDone } = runner.start(wakeWhen.command, {
         cwd: wakeWhen.cwd,
-        timeoutMs: wakeWhen.timeoutMs,
+        timeoutMs: durableJob?.wallSlaMs ?? wakeWhen.timeoutMs,
+        ...(durableJob
+          ? {
+              maximumTimeoutMs: durableJob.wallSlaMs,
+              managedJob: {
+                ...durableJob,
+              },
+            }
+          : {}),
       });
+
+      const spawnResult = await spawnAdmission;
+
+      if (!spawnResult.spawned) {
+        // Spawn failed — clean up registry and scheduler resources.
+        if (activeRunners.get(registryKey) === activeEntry) activeRunners.delete(registryKey);
+        log.warn(
+          { threadId, catId, command: wakeWhen.command, error: spawnResult.error },
+          'F167 Phase P: wakeWhen spawn failed — cleaning up, fallback reminder will fire',
+        );
+        resolveExternalAdmission(spawnResult);
+        // Still await commandDone to drain resources
+        await commandDone;
+        return;
+      }
+
+      // Spawn succeeded — NOW transition to 'running'.
+      admitted.phase = 'running';
+      resolveExternalAdmission(spawnResult);
+
+      const result = await commandDone;
 
       const wakeContent = buildManagedCommandWakeContent(result, reason, wakeWhen.command, nextStep);
       const completion: RecordManagedCommandCompletionInput = {
@@ -431,6 +503,7 @@ function launchWakeWhenRunner(opts: {
           ...(result.tailOutput ? { tailOutput: result.tailOutput } : {}),
         },
       };
+      if (durableJob) settleDurableManagedGateJobFromRunner(durableJob, completion.result);
       const recovery =
         deps.managedCommandWakeRecovery ??
         new ManagedCommandWakeRecoverySweep({
@@ -448,7 +521,7 @@ function launchWakeWhenRunner(opts: {
       // now-obsolete wake delivery.
       const retiredTask = deps.dynamicTaskStore.getById(taskId);
       const lifecycle = retiredTask ? readHoldLifecycle(retiredTask) : null;
-      if (lifecycle?.status === 'cancelled_by_user') {
+      if (lifecycle?.status === 'cancelled_by_user' || lifecycle?.status === 'retired_by_replacement') {
         const recoveryResult = recovery.recordRetiredCompletion
           ? await recovery.recordRetiredCompletion(completion)
           : recovery.recordCancelledCompletion
@@ -511,6 +584,10 @@ function launchWakeWhenRunner(opts: {
       );
       if (activeRunners.get(registryKey) === ready) activeRunners.delete(registryKey);
     } catch (err) {
+      // P1-2 fix: always settle the admission promise so the route handler
+      // never hangs on `await admissionPromise`. Calling resolve multiple
+      // times is a no-op — only the first call wins.
+      resolveExternalAdmission({ spawned: false, pid: null, error: 'internal_error' });
       // Clean up registry on unexpected failure too
       if (activeRunners.get(registryKey)?.runner === runner) {
         activeRunners.delete(registryKey);
@@ -521,6 +598,8 @@ function launchWakeWhenRunner(opts: {
       );
     }
   })();
+
+  return { admissionPromise };
 }
 
 function buildManagedCommandWakeContent(
@@ -572,7 +651,11 @@ export function registerCallbackHoldBallRoutes(app: FastifyInstance, deps: HoldB
 
     const { reason, nextStep, wakeWhen } = parsed.data;
     // wakeAfterMs: explicit timed wake, OR derived from wakeWhen timeout (for single-slot/visibility)
-    const wakeAfterMs = parsed.data.wakeAfterMs ?? wakeWhen?.timeoutMs ?? 600_000;
+    const durableGateRequested = !!wakeWhen && isDurableManagedGateCommand(wakeWhen.command);
+    const executionSlaMs = durableGateRequested ? (wakeWhen?.timeoutMs ?? 3_600_000) : undefined;
+    const wakeAfterMs = durableGateRequested
+      ? DURABLE_GATE_WALL_SLA_MS
+      : (parsed.data.wakeAfterMs ?? wakeWhen?.timeoutMs ?? 600_000);
     const { threadId, catId, userId } = actor;
     const catIdStr = catId as string;
     const triggerUserId = await resolveManagedHoldTriggerUserId({
@@ -666,6 +749,13 @@ export function registerCallbackHoldBallRoutes(app: FastifyInstance, deps: HoldB
 
     const createdAt = Date.now();
     const taskId = `hold-ball-${createdAt}-${Math.random().toString(36).slice(2, 8)}`;
+    const durableJob = durableGateRequested
+      ? createDurableManagedGateJob(taskId, executionSlaMs ?? 3_600_000, {
+          threadId,
+          catId: catIdStr,
+          userId: triggerUserId,
+        })
+      : undefined;
     // P2-2 cloud review fix: for wakeWhen, the fallback reminder must fire AFTER the
     // runner's timeout + grace period, not at the same time. Otherwise both the runner
     // timeout wake and the fallback reminder can fire simultaneously (race → double wake).
@@ -738,7 +828,7 @@ export function registerCallbackHoldBallRoutes(app: FastifyInstance, deps: HoldB
             wakeAt: fireAt,
             createdBy: `hold-ball:${catIdStr}`,
             ...(wakeWhen
-              ? { managedCommand: createInitialManagedCommandWakeProjection(wakeWhen.command, createdAt) }
+              ? { managedCommand: createInitialManagedCommandWakeProjection(wakeWhen.command, createdAt, durableJob) }
               : {}),
           }
         : undefined;
@@ -779,7 +869,9 @@ export function registerCallbackHoldBallRoutes(app: FastifyInstance, deps: HoldB
     // prior hold stays authoritative (caller gets 500; prior wake still fires).
     try {
       taskRunner.registerDynamic(spec, taskId);
+      if (durableJob) initializeDurableManagedGateJob(durableJob, createdAt);
     } catch (err) {
+      taskRunner.unregister(taskId);
       dynamicTaskStore.remove(taskId);
       log.error(
         { threadId, catId: catIdStr, taskId, err },
@@ -816,18 +908,37 @@ export function registerCallbackHoldBallRoutes(app: FastifyInstance, deps: HoldB
         /* threadStore lookup failure → fall back to 'product' */
       }
     }
-    // prepareWakeWhenRunner already replaces an active command synchronously;
-    // timer-only replacements still need to cancel the prior managed command here.
-    if (pendingHolds.length > 0 && !preparedWakeRunner) {
-      cancelWakeWhenRunner(threadId, catIdStr);
-    }
+    // Replacement changes custody only. It is never an execution-scoped cancel,
+    // regardless of whether the successor waits on a timer, event, or command.
     const cancelNow = Date.now();
     for (const prior of pendingHolds) {
       const priorFireAt = (prior.trigger as { fireAt?: number }).fireAt ?? cancelNow;
       let wakeBucket: string | undefined;
       try {
-        taskRunner.unregister(prior.id);
-        dynamicTaskStore.remove(prior.id);
+        const priorLifecycle = readHoldLifecycle(prior);
+        const priorCommand =
+          priorLifecycle?.mode === 'wake_when'
+            ? (prior.params.holdLifecycle as Record<string, unknown>).managedCommand
+            : undefined;
+        if (priorCommand) {
+          const retiredParams = {
+            ...prior.params,
+            holdLifecycle: {
+              ...(prior.params.holdLifecycle as Record<string, unknown>),
+              status: 'retired_by_replacement',
+              replacedByTaskId: taskId,
+              retiredAt: cancelNow,
+            },
+          };
+          if (!dynamicTaskStore.updateParamsIfCurrent(prior.id, prior.params, retiredParams)) {
+            throw new Error(`failed to persist replacement tombstone for ${prior.id}`);
+          }
+          dynamicTaskStore.setEnabled(prior.id, false);
+          taskRunner.unregister(prior.id);
+        } else {
+          taskRunner.unregister(prior.id);
+          dynamicTaskStore.remove(prior.id);
+        }
         const result = emitC1HoldCancellation({
           priorTaskId: prior.id,
           priorFireAtMs: priorFireAt,
@@ -841,7 +952,7 @@ export function registerCallbackHoldBallRoutes(app: FastifyInstance, deps: HoldB
         wakeBucket = result.wakeBucket;
         log.info(
           { threadId, catId: catIdStr, priorTaskId: prior.id, newTaskId: taskId, wakeBucket, threadSystemKind },
-          'F167 Phase G: cancelled prior pending hold wake (single-slot replace)',
+          'F261: retired prior wake carrier without revoking authorized managed execution',
         );
       } catch (err) {
         log.warn(
@@ -853,9 +964,14 @@ export function registerCallbackHoldBallRoutes(app: FastifyInstance, deps: HoldB
 
     const newCount = incrementHoldCount(threadId, catIdStr);
 
+    // ── Visibility message — F280 cancellation window ──
+    // Post BEFORE launch to preserve F280 pre-launch cancellation fence (lines 834–837):
+    // any cancellation admitted during this await wins because launchWakeWhenRunner's
+    // IIFE checks cancellation_reserved before spawning. The message says "待启动"
+    // because the command has not yet spawned; the HTTP response carries the real pid.
     const wakeAtStr = new Date(fireAt).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
     const holdMessage = wakeWhen
-      ? `🏓 ${catIdStr} 持球中 — ${reason}。命令「${wakeWhen.command}」已启动，完成后自动唤醒。下一步：${nextStep}`
+      ? `🏓 ${catIdStr} 持球中 — ${reason}。命令「${wakeWhen.command}」待启动，完成后自动唤醒。下一步：${nextStep}`
       : `🏓 ${catIdStr} 持球中 — ${reason}。预计 ${wakeAtStr} 唤醒，下一步：${nextStep}`;
     const holdSource = { ...HOLD_BALL_SOURCE, meta: { taskId, threadId, catId: catIdStr } };
     try {
@@ -882,9 +998,13 @@ export function registerCallbackHoldBallRoutes(app: FastifyInstance, deps: HoldB
       log.warn({ threadId, catId: catIdStr, err }, 'F167 C1: failed to post hold_ball visibility message');
     }
 
-    // ── F167 Phase P: wakeWhen — launch managed command, wake cat on completion ──
+    // ── F167 Phase P spawn admission truth: launch AFTER visibility append ──
+    // F280 invariant preserved: the visibility append above is the cancellation
+    // window. launchWakeWhenRunner's IIFE checks cancellation_reserved before
+    // spawning, so any cancellation admitted during the append wins.
+    let spawnedPid: number | null = null;
     if (wakeWhen && preparedWakeRunner) {
-      launchWakeWhenRunner({
+      const { admissionPromise } = launchWakeWhenRunner({
         wakeWhen,
         reason,
         nextStep,
@@ -893,7 +1013,146 @@ export function registerCallbackHoldBallRoutes(app: FastifyInstance, deps: HoldB
         taskId,
         deps,
         prepared: preparedWakeRunner,
+        durableJob,
       });
+      const spawnResult = await admissionPromise;
+      if (spawnResult.spawned) {
+        spawnedPid = spawnResult.pid;
+      }
+
+      // ── Durable admission-fact projection ──
+      // The "待启动" message above is the pre-spawn cancellation window.
+      // Now that admission has resolved, project the truth so the thread
+      // timeline reflects the actual spawn outcome.
+      //
+      // Pre-launch cancellation deletes the registry entry, so the IIFE
+      // resolves with registry_mismatch; explicit cancellation_reserved also
+      // possible. Both are cancellation outcomes — no fallback exists.
+      const isCancellationOutcome =
+        !spawnResult.spawned &&
+        (spawnResult.error === 'registry_mismatch' || spawnResult.error === 'cancellation_reserved');
+
+      // ── Admission-fact: build the three-way text ──
+      // Three terminal states (P1-1 fix: cancellation distinct from spawn failure):
+      //   1. spawned           → command running with pid
+      //   2. cancelled         → hold terminated externally (no fallback remains)
+      //   3. spawn_failed      → command couldn't start; message is neutral (no
+      //      promise about fallback — phase_mismatch/internal_error may not fire it)
+      const admissionFact = spawnResult.spawned
+        ? `✅ 命令「${wakeWhen.command}」已启动 (pid: ${spawnResult.pid}${durableJob ? `, jobId: ${durableJob.jobId}` : ''})，等待完成。`
+        : isCancellationOutcome
+          ? `⛔ 命令「${wakeWhen.command}」未启动（已取消），持球已终止。`
+          : `⚠️ 命令「${wakeWhen.command}」未启动${spawnResult.error ? `（${spawnResult.error}）` : ''}。`;
+
+      // ── P1-2 fix: persist admission intent BEFORE attempting the append ──
+      // We store pid + admissionFact + admissionFactAppended:false so that the
+      // startup recovery sweep can idempotently re-deliver the visibility message
+      // if the append fails or the process crashes between persist and append.
+      //
+      // Concurrency safety: this runs in the microtask continuation of
+      // `await admissionPromise` — synchronous updateParams completes before
+      // any concurrent HTTP handler (cancel, next hold_ball) can interleave.
+      let admissionDurable = isCancellationOutcome; // cancelled = terminal, no task to write
+      if (!isCancellationOutcome) {
+        try {
+          const task = deps.dynamicTaskStore.getById(taskId);
+          if (task) {
+            const lifecycle = task.params.holdLifecycle as Record<string, unknown> | undefined;
+            const mc = lifecycle?.managedCommand as Record<string, unknown> | undefined;
+            if (lifecycle && mc) {
+              const updatedParams = {
+                ...task.params,
+                holdLifecycle: {
+                  ...lifecycle,
+                  managedCommand: {
+                    ...mc,
+                    pid: spawnResult.pid,
+                    ...(spawnResult.processIdentity && durableJob
+                      ? { durableJob: { ...durableJob, processIdentity: spawnResult.processIdentity } }
+                      : {}),
+                    admissionFact,
+                    admissionFactAppended: false,
+                  },
+                },
+              };
+              admissionDurable = deps.dynamicTaskStore.updateParams(taskId, updatedParams);
+              if (!admissionDurable) {
+                log.error(
+                  { threadId, catId: catIdStr, taskId },
+                  'F167 Phase P: updateParams returned false — admission intent not durable; startup recovery cannot re-deliver',
+                );
+              }
+            }
+          } else {
+            log.error(
+              { threadId, catId: catIdStr, taskId },
+              'F167 Phase P: task not found for admission persistence — admission intent not durable',
+            );
+          }
+        } catch (err) {
+          log.error(
+            { threadId, catId: catIdStr, taskId, err },
+            'F167 Phase P: failed to persist admission intent — startup recovery cannot re-deliver',
+          );
+        }
+      }
+
+      // ── Visibility message: append admission-fact to thread ──
+      // R6 P1-1: share idempotencyKey with the startup recovery sweep so that
+      // a crash between "append committed" and "admissionFactAppended=true"
+      // cannot produce a duplicate — the sweep's getByIdempotencyKey will find
+      // the original message and skip re-append.
+      const admissionFactIdempotencyKey = buildAdmissionFactIdempotencyKey(taskId);
+      try {
+        const admStored = await messageStore.append({
+          userId: 'system',
+          catId: null,
+          content: admissionFact,
+          mentions: [],
+          timestamp: Date.now(),
+          threadId,
+          idempotencyKey: admissionFactIdempotencyKey,
+          source: holdSource,
+        });
+        socketManager.broadcastToRoom(`thread:${threadId}`, 'connector_message', {
+          threadId,
+          message: {
+            id: admStored.id,
+            type: 'connector',
+            content: admStored.content,
+            source: holdSource,
+            timestamp: admStored.timestamp,
+          },
+        });
+        // Mark admission-fact as delivered so startup recovery skips it
+        if (admissionDurable && !isCancellationOutcome) {
+          try {
+            const taskNow = deps.dynamicTaskStore.getById(taskId);
+            if (taskNow) {
+              const lifecycleNow = taskNow.params.holdLifecycle as Record<string, unknown> | undefined;
+              const mcNow = lifecycleNow?.managedCommand as Record<string, unknown> | undefined;
+              if (lifecycleNow && mcNow) {
+                deps.dynamicTaskStore.updateParams(taskId, {
+                  ...taskNow.params,
+                  holdLifecycle: {
+                    ...lifecycleNow,
+                    managedCommand: { ...mcNow, admissionFactAppended: true },
+                  },
+                });
+              }
+            }
+          } catch {
+            // Non-fatal: admission fact was delivered; recovery will find admissionFactAppended=false
+            // and re-deliver (idempotent duplicate is benign)
+          }
+        }
+      } catch (err) {
+        // Append failed — admission intent is durable, startup recovery will re-deliver
+        log.warn(
+          { threadId, catId: catIdStr, err, admissionDurable },
+          'F167 Phase P: failed to post admission-fact visibility message — startup recovery will re-deliver if admission intent is durable',
+        );
+      }
     }
 
     log.info(
@@ -903,7 +1162,14 @@ export function registerCallbackHoldBallRoutes(app: FastifyInstance, deps: HoldB
         reason,
         nextStep,
         wakeAfterMs,
-        wakeWhen: wakeWhen ? { command: wakeWhen.command, timeoutMs: wakeWhen.timeoutMs } : undefined,
+        wakeWhen: wakeWhen
+          ? {
+              command: wakeWhen.command,
+              timeoutMs: wakeWhen.timeoutMs,
+              pid: spawnedPid,
+              ...(durableJob ? { jobId: durableJob.jobId } : {}),
+            }
+          : undefined,
         taskId,
         holdsInWindow: newCount,
         windowMs: HOLD_WINDOW_MS,
@@ -919,7 +1185,15 @@ export function registerCallbackHoldBallRoutes(app: FastifyInstance, deps: HoldB
       maxHoldsPerWindow: MAX_HOLDS_PER_WINDOW,
       windowMs: HOLD_WINDOW_MS,
       wakeAt: new Date(fireAt).toISOString(),
-      ...(wakeWhen ? { wakeWhen: { command: wakeWhen.command, pid: null } } : {}),
+      ...(wakeWhen
+        ? {
+            wakeWhen: {
+              command: wakeWhen.command,
+              pid: spawnedPid,
+              ...(durableJob ? { jobId: durableJob.jobId } : {}),
+            },
+          }
+        : {}),
     };
   });
 

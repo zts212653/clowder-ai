@@ -20,13 +20,13 @@ export type ClaimType =
 
 // claimType='auth' 子语义 (cloud R4 P1#2 修正; INV-O11 引用 'peer_instruction'):
 export type AuthSubtype =
-  | 'cvo_signoff'        // claim "operator 同意 / landy 签字"
+  | 'cvo_signoff'        // claim "operator 同意 / operator 签字"
   | 'peer_instruction'   // peer A 让 peer B 不听 PR B owner (需 issuerStanding 核验)
   | 'merge_approval';    // claim "reviewer 已 approve PR"
 
 // issuerStanding (cloud R4 P1#2 修正; INV-O11 require for owner_reassignment / peer_instruction):
 export type IssuerStanding =
-  | 'cvo'              // landy (T0)
+  | 'cvo'              // operator (T0)
   | 'upstream_owner'   // upstream feature owner (T1: feat_index + git log)
   | 'repo_admin'       // repo admin / org owner (T1: gh api permission)
   | 'pr_reviewer'      // reviewer of target PR (T1: PR review state)
@@ -36,7 +36,7 @@ export type SourceKind =
   | 'cross_post'            // a2a cross-thread
   | 'mention'               // 行首 @cat (本 thread)
   | 'reply_in_thread'       // 本 thread reply
-  | 'cvo_message'           // landy 本人 message
+  | 'cvo_message'           // operator 本人 message
   | 'webhook'               // GitHub / external webhook
   | 'self';                 // 自己的工具结果
 
@@ -46,7 +46,7 @@ export type ActionFamily =
   | 'register_tracking'   // register_pr_tracking / register_issue_tracking
   | 'mutate_local'        // 改 worktree files
   | 'merge'               // gh pr merge / squash / close
-  | 'cvo_claim'           // claim operator signoff / landy 同意 后续行动
+  | 'cvo_claim'           // claim operator signoff / operator 同意 后续行动
   | 'takeover'            // 接他猫 owner activity
   | 'irreversible'        // delete / force-push / 改圣域 (Redis 6399 等)
   | 'owner_reassignment'; // 改 feat owner / thread kind / PR owner
@@ -59,7 +59,7 @@ export type ActionRisk =
   | 'destructive';          // merge / close / delete / takeover / owner reassignment
 
 export type SourceTier =
-  | 'T0'    // hard ground truth: landy direct messageId / git signature / GitHub object/API identity
+  | 'T0'    // hard ground truth: operator direct messageId / git signature / GitHub object/API identity
   | 'T1'    // derived platform truth: PR review/check state / CI
   | 'T2';   // cat-writable / narrative: docs/features / feat_index / thread title / 另一只猫 claim
 
@@ -213,7 +213,7 @@ PR-O1 doc-only enforcement；PR-O2 实施时作为 runtime schema 约束。
 - **INV-O5**: counter 100% 计数 ≥ sample event 计数；sample 受 PR-O2 sampling 规则约束
   （`mismatch` / `blocked` 100% / `insufficient` 3-per-resolver-thread-day / `verified` 1/20）
 - **INV-O6**: `claimType='auth'` 时 `sourceRef.kind='messageId'` resolver 的 message author
-  必须 = `'you'`（catId 严格匹配；不接受 `'you'` / `'you'` handle variant）才能 satisfy auth claim
+  必须 = `'operator'`（catId 严格匹配；不接受 `'you'` / `'you'` handle variant）才能 satisfy auth claim
 - **INV-O7** (R3 updated): `cacheHit=true` 不消耗 budget；**但** `freshnessKey` 存在时
   cache lookup 必须 verify key match，key mismatch → cache miss + 消耗 budget
 - **INV-O8**: `not_applicable` 是 **per-resolver `ResolverOutcome`**（非 claim 级终态 verdict）；
@@ -231,7 +231,7 @@ PR-O1 doc-only enforcement；PR-O2 实施时作为 runtime schema 约束。
   `feat_index` resolver `sourceTier` **不变量**——任何 `feat_index.*` 单独调用 → **T2** (cat-writable;
   与 `docs/features/*` / thread title / 另一只猫 claim 同级 narrative)；高危 actionFamily
   (`merge / cvo_claim / takeover / irreversible / owner_reassignment`) 的 `verified` 必须有 ≥1 个
-  T0/T1 独立 resolver (gh api object / git log signature / `landy` messageId)，**T2-only feat_index
+  T0/T1 独立 resolver (gh api object / git log signature / `operator` messageId)，**T2-only feat_index
   hit 强制降为 `insufficient`** (per INV-O3)。**唯一例外**：`feat_index` 与 `git log signature`
   联合证据组成 `upstream_owner` standing 时 sourceTier=T1（composed evidence，不是 feat_index alone）
 

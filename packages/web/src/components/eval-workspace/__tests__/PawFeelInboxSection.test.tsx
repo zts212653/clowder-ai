@@ -461,7 +461,7 @@ describe('PawFeelInboxSection', () => {
                 primaryCatId: 'opus',
                 version: 2,
                 updatedAt: '2026-07-30T00:00:00.000Z',
-                updatedBy: 'you',
+                updatedBy: 'operator',
               },
             }),
           }

@@ -1,9 +1,19 @@
 import type { SessionRecord } from '@cat-cafe/shared';
-import { projectInvocationTrajectories } from '../../../domains/cats/services/session/InvocationTrajectoryProjector.js';
 import type { TranscriptEvent, TranscriptReader } from '../../../domains/cats/services/session/TranscriptReader.js';
 import type { ISessionChainStore } from '../../../domains/cats/services/stores/ports/SessionChainStore.js';
 import type { IThreadStore } from '../../../domains/cats/services/stores/ports/ThreadStore.js';
 import { reduceTrajectoryInspectorEpisodes } from './trajectory-inspector-reducer.js';
+import {
+  assertCandidateBudget,
+  mapWithConcurrency,
+  mergeTrajectoryCandidate,
+  scanOwnerTrajectoryWindow,
+  scanTrajectoryCandidateEvidence,
+  sessionOverlapsWindow,
+  TRAJECTORY_SCAN_CONCURRENCY,
+  type TrajectoryCandidate,
+  type TrajectoryDrill,
+} from './trajectory-inspector-transcript-scanner.js';
 import {
   type TrajectoryInspectorEpisode,
   type TrajectoryInspectorEpisodeBundle,
@@ -55,26 +65,7 @@ interface CanonicalResolverInput {
   userId: string;
   threadIdHint?: string;
   sessionIdHint?: string;
-}
-
-interface Candidate {
-  invocationId: string;
-  eligibleAtMs: number;
-  anomalyKind: TrajectoryInspectorEpisode['anomalyKind'];
-  eligibility: Set<TrajectoryInspectorEpisode['eligibility'][number]>;
-  threadId?: string;
-  sessionId?: string;
-  model?: string;
-  runtime?: string;
-  sourceRefs: Set<string>;
-}
-
-interface Drill {
-  targetInvocationId: string;
-  observedAtMs: number;
-  threadIdHint?: string;
-  sessionIdHint?: string;
-  successful: boolean;
+  invocationEventsBySession?: ReadonlyMap<string, readonly TranscriptEvent[]>;
 }
 
 export interface TrajectoryInspectorSourceProvider {
@@ -89,7 +80,11 @@ export class TrajectoryInspectorSourceProviderImpl implements TrajectoryInspecto
     private readonly deps: {
       threadStore: Pick<IThreadStore, 'list'>;
       sessionChainStore: Pick<ISessionChainStore, 'getChainByThread'>;
-      transcriptReader: Pick<TranscriptReader, 'hasTranscript' | 'readAllEvents'>;
+      transcriptReader: Pick<TranscriptReader, 'scanEvents'>;
+      candidateLocator?: (input: {
+        invocationId: string;
+        ownerUserId: string;
+      }) => Promise<{ threadId: string; catId: string } | undefined>;
       canonicalResolver: (input: CanonicalResolverInput) => Promise<CanonicalResolution>;
       externalEvidenceSource: TrajectoryInspectorExternalEvidenceSource;
     },
@@ -100,14 +95,32 @@ export class TrajectoryInspectorSourceProviderImpl implements TrajectoryInspecto
     context: { ownerUserId: string },
   ): Promise<TrajectoryInspectorEpisodeBundle> {
     const selector = trajectoryInspectorWindowSelectorSchema.parse(selectorInput);
-    const { sessions, events, missingTranscriptSessions } = await this.readOwnerTranscripts(context.ownerUserId);
-    const candidates = await this.collectCandidates(selector, sessions, events);
+    const { sessions, candidates, drills, fallbackCommands, missingTranscriptSessions } =
+      await scanOwnerTrajectoryWindow(this.deps, selector, context.ownerUserId);
+    const windowSessions = sessions.filter((session) => sessionOverlapsWindow(session, selector));
+    await this.mergeFindingCandidates(selector, candidates);
+    assertCandidateBudget(candidates.size);
     const acceptedEvidence = await this.deps.externalEvidenceSource.listAcceptedEvidence(selector);
-    const drills = collectDrills(events, selector);
-    const fallbackTargets = collectFallbackTargets(events, selector, [...candidates.keys()]);
-    const episodes = await Promise.all(
-      [...candidates.values()].map((candidate) =>
-        this.resolveEpisode(candidate, context.ownerUserId, drills, fallbackTargets, acceptedEvidence),
+    const fallbackTargets = collectFallbackTargets(fallbackCommands, [...candidates.keys()]);
+    const evidenceSessions = await this.selectEvidenceSessions(
+      sessions,
+      windowSessions,
+      candidates,
+      context.ownerUserId,
+    );
+    const evidenceIndex = await scanTrajectoryCandidateEvidence(
+      this.deps.transcriptReader,
+      evidenceSessions,
+      candidates,
+    );
+    const episodes = await mapWithConcurrency([...candidates.values()], TRAJECTORY_SCAN_CONCURRENCY, (candidate) =>
+      this.resolveEpisode(
+        candidate,
+        context.ownerUserId,
+        drills,
+        fallbackTargets,
+        acceptedEvidence,
+        evidenceIndex.get(candidate.invocationId),
       ),
     );
     const canonicalResolvedEpisodes = episodes.filter((episode) => episode.evidenceOutcome !== 'wrong_ref').length;
@@ -142,67 +155,56 @@ export class TrajectoryInspectorSourceProviderImpl implements TrajectoryInspecto
     };
   }
 
-  private async readOwnerTranscripts(ownerUserId: string): Promise<{
-    sessions: SessionRecord[];
-    events: TranscriptEvent[];
-    missingTranscriptSessions: number;
-  }> {
-    const threads = await this.deps.threadStore.list(ownerUserId);
-    const chains = await Promise.all(threads.map((thread) => this.deps.sessionChainStore.getChainByThread(thread.id)));
-    const sessions = chains.flat().filter((session) => session.userId === ownerUserId);
-    const transcriptRows = await Promise.all(
-      sessions.map(async (session) => ({
-        session,
-        present: await this.deps.transcriptReader.hasTranscript(session.id, session.threadId, session.catId),
-        events: await this.deps.transcriptReader.readAllEvents(session.id, session.threadId, session.catId),
-      })),
+  private async selectEvidenceSessions(
+    sessions: SessionRecord[],
+    windowSessions: SessionRecord[],
+    candidates: Map<string, TrajectoryCandidate>,
+    ownerUserId: string,
+  ): Promise<SessionRecord[]> {
+    const locations = await mapWithConcurrency(
+      [...candidates.values()],
+      TRAJECTORY_SCAN_CONCURRENCY,
+      async (candidate) => {
+        const needsCanonicalLocation = !candidate.threadId || !candidate.catId;
+        const canonical = needsCanonicalLocation
+          ? await this.deps.candidateLocator?.({ invocationId: candidate.invocationId, ownerUserId })
+          : undefined;
+        return {
+          sessionId: candidate.sessionId,
+          threadId: canonical?.threadId ?? candidate.threadId,
+          catId: canonical?.catId ?? candidate.catId,
+        };
+      },
     );
-    return {
-      sessions,
-      events: transcriptRows.flatMap((row) => row.events),
-      missingTranscriptSessions: transcriptRows.filter((row) => !row.present).length,
-    };
+    const selectedIds = new Set(windowSessions.map((session) => session.id));
+    const selectedThreads = new Set<string>();
+    const selectedThreadCats = new Set<string>();
+    for (const location of locations) {
+      if (location.sessionId) selectedIds.add(location.sessionId);
+      if (location.threadId && location.catId) selectedThreadCats.add(`${location.threadId}\0${location.catId}`);
+      else if (location.threadId) selectedThreads.add(location.threadId);
+    }
+    return sessions.filter(
+      (session) =>
+        selectedIds.has(session.id) ||
+        selectedThreads.has(session.threadId) ||
+        selectedThreadCats.has(`${session.threadId}\0${session.catId}`),
+    );
   }
 
-  private async collectCandidates(
+  private async mergeFindingCandidates(
     selector: TrajectoryInspectorWindowSelector,
-    sessions: SessionRecord[],
-    events: TranscriptEvent[],
-  ): Promise<Map<string, Candidate>> {
-    const candidates = new Map<string, Candidate>();
-    for (const session of sessions) {
-      const sessionEvents = events.filter((event) => event.sessionId === session.id);
-      for (const trajectory of projectInvocationTrajectories(sessionEvents, session)) {
-        if (!['error', 'cancelled', 'timeout'].includes(trajectory.status)) continue;
-        const eligibleAtMs = trajectory.endedAt ?? trajectory.startedAt;
-        if (!insideWindow(eligibleAtMs, selector)) continue;
-        const firstEvent = sessionEvents.find((event) => event.invocationId === trajectory.invocationId);
-        const fingerprint = eventFingerprint(firstEvent);
-        candidates.set(trajectory.invocationId, {
-          invocationId: trajectory.invocationId,
-          eligibleAtMs,
-          anomalyKind: trajectory.status as Candidate['anomalyKind'],
-          eligibility: new Set(['terminal_anomaly']),
-          threadId: session.threadId,
-          sessionId: session.id,
-          ...fingerprint,
-          sourceRefs: new Set([
-            `inv:${trajectory.invocationId}`,
-            `thread:${session.threadId}`,
-            `session:${session.id}`,
-          ]),
-        });
-      }
-    }
+    candidates: Map<string, TrajectoryCandidate>,
+  ): Promise<void> {
     for (const finding of await this.deps.externalEvidenceSource.listFindings(selector)) {
       if (!insideWindow(finding.foundAtMs, selector)) continue;
       const current = candidates.get(finding.invocationId);
       if (current) {
         current.eligibility.add('f192_invocation_finding');
-        finding.sourceRefs.forEach((ref) => current.sourceRefs.add(ref));
+        for (const ref of finding.sourceRefs) current.sourceRefs.add(ref);
         continue;
       }
-      candidates.set(finding.invocationId, {
+      mergeTrajectoryCandidate(candidates, {
         invocationId: finding.invocationId,
         eligibleAtMs: finding.foundAtMs,
         anomalyKind: 'finding',
@@ -212,33 +214,25 @@ export class TrajectoryInspectorSourceProviderImpl implements TrajectoryInspecto
         sourceRefs: new Set([`inv:${finding.invocationId}`, ...finding.sourceRefs]),
       });
     }
-    return candidates;
   }
 
   private async resolveEpisode(
-    candidate: Candidate,
+    candidate: TrajectoryCandidate,
     ownerUserId: string,
-    drills: Drill[],
+    drills: TrajectoryDrill[],
     fallbackTargets: Set<string>,
     acceptedEvidence: AcceptedEvidence[],
+    invocationEventsBySession: ReadonlyMap<string, readonly TranscriptEvent[]> | undefined,
   ): Promise<TrajectoryInspectorEpisode> {
-    const canonical = await this.deps.canonicalResolver({
-      invocationId: candidate.invocationId,
-      userId: ownerUserId,
-      threadIdHint: candidate.threadId,
-      sessionIdHint: candidate.sessionId,
-    });
+    const canonical = await this.deps.canonicalResolver(
+      canonicalInput(candidate, ownerUserId, candidate.threadId, candidate.sessionId, invocationEventsBySession),
+    );
     const matchingDrills = drills.filter(
       (drill) => drill.targetInvocationId === candidate.invocationId && drill.observedAtMs >= candidate.eligibleAtMs,
     );
-    const drillChecks = await Promise.all(
-      matchingDrills.map((drill) =>
-        this.deps.canonicalResolver({
-          invocationId: candidate.invocationId,
-          userId: ownerUserId,
-          threadIdHint: drill.threadIdHint,
-          sessionIdHint: drill.sessionIdHint,
-        }),
+    const drillChecks = await mapWithConcurrency(matchingDrills, TRAJECTORY_SCAN_CONCURRENCY, (drill) =>
+      this.deps.canonicalResolver(
+        canonicalInput(candidate, ownerUserId, drill.threadIdHint, drill.sessionIdHint, invocationEventsBySession),
       ),
     );
     const wrongRef = canonical.status !== 200 || drillChecks.some((result) => result.status !== 200);
@@ -248,13 +242,7 @@ export class TrajectoryInspectorSourceProviderImpl implements TrajectoryInspecto
       .sort((left, right) => left.acceptedAtMs - right.acceptedAtMs)[0];
     const canAccept = !wrongRef && successfulDrill && accepted && accepted.acceptedAtMs >= candidate.eligibleAtMs;
     const fallback = fallbackTargets.has(candidate.invocationId);
-    const evidenceOutcome = wrongRef
-      ? 'wrong_ref'
-      : canAccept
-        ? 'accepted'
-        : successfulDrill || fallback
-          ? 'unresolved'
-          : 'not_taken';
+    const evidenceOutcome = selectEvidenceOutcome({ wrongRef, canAccept: !!canAccept, successfulDrill, fallback });
     const threadId = canonical.status === 200 ? canonical.body.threadId : candidate.threadId;
     const sessionId = canonical.status === 200 ? canonical.body.sessionId : candidate.sessionId;
     return {
@@ -276,65 +264,43 @@ export class TrajectoryInspectorSourceProviderImpl implements TrajectoryInspecto
   }
 }
 
-function collectDrills(events: TranscriptEvent[], selector: TrajectoryInspectorWindowSelector): Drill[] {
-  const successfulIds = new Set(
-    events
-      .filter((event) => event.event.type === 'tool_result' && event.event.toolResultStatus !== 'error')
-      .map((event) => event.event.toolUseId)
-      .filter((value): value is string => typeof value === 'string'),
-  );
-  const seen = new Set<string>();
-  return events.flatMap((event) => {
-    if (!insideWindow(event.t, selector) || event.event.type !== 'tool_use') return [];
-    const toolName = String(event.event.toolName ?? event.event.name ?? '');
-    if (!toolName.endsWith('cat_cafe_read_invocation_detail')) return [];
-    const input = asRecord(event.event.toolInput ?? event.event.input);
-    if (typeof input?.invocationId !== 'string') return [];
-    const toolUseId = event.event.toolUseId;
-    const stableId = typeof toolUseId === 'string' ? toolUseId : `${event.sessionId}:${event.eventNo}`;
-    if (seen.has(stableId)) return [];
-    seen.add(stableId);
-    return [
-      {
-        targetInvocationId: input.invocationId,
-        observedAtMs: event.t,
-        ...(typeof input.threadId === 'string' ? { threadIdHint: input.threadId } : {}),
-        ...(typeof input.sessionId === 'string' ? { sessionIdHint: input.sessionId } : {}),
-        // A result can be correlated only through toolUseId. Missing IDs stay fail-closed,
-        // while the transcript-local fallback still keeps replay deduplication deterministic.
-        successful: typeof toolUseId === 'string' && successfulIds.has(toolUseId),
-      },
-    ];
-  });
-}
-
-function collectFallbackTargets(
-  events: TranscriptEvent[],
-  selector: TrajectoryInspectorWindowSelector,
-  invocationIds: string[],
-): Set<string> {
+function collectFallbackTargets(commands: string[], invocationIds: string[]): Set<string> {
   const targets = new Set<string>();
-  for (const event of events) {
-    if (!insideWindow(event.t, selector) || event.event.type !== 'tool_use') continue;
-    const input = asRecord(event.event.toolInput ?? event.event.input);
-    const command = typeof input?.command === 'string' ? input.command : '';
-    if (!/events\.jsonl|\bjsonl\b/i.test(command)) continue;
-    invocationIds.filter((invocationId) => command.includes(invocationId)).forEach((id) => targets.add(id));
+  for (const command of commands) {
+    for (const invocationId of invocationIds) {
+      if (command.includes(invocationId)) targets.add(invocationId);
+    }
   }
   return targets;
 }
 
-function eventFingerprint(event: TranscriptEvent | undefined): { model?: string; runtime?: string } {
-  const metadata = asRecord(event?.event.metadata);
-  const model = typeof metadata?.model === 'string' ? metadata.model : undefined;
-  const runtime = typeof metadata?.runtime === 'string' ? metadata.runtime : undefined;
-  return { ...(model ? { model } : {}), ...(runtime ? { runtime } : {}) };
+function canonicalInput(
+  candidate: TrajectoryCandidate,
+  ownerUserId: string,
+  threadIdHint: string | undefined,
+  sessionIdHint: string | undefined,
+  invocationEventsBySession: ReadonlyMap<string, readonly TranscriptEvent[]> | undefined,
+): CanonicalResolverInput {
+  return {
+    invocationId: candidate.invocationId,
+    userId: ownerUserId,
+    threadIdHint,
+    sessionIdHint,
+    ...(invocationEventsBySession ? { invocationEventsBySession } : {}),
+  };
+}
+
+function selectEvidenceOutcome(input: {
+  wrongRef: boolean;
+  canAccept: boolean;
+  successfulDrill: boolean;
+  fallback: boolean;
+}): TrajectoryInspectorEpisode['evidenceOutcome'] {
+  if (input.wrongRef) return 'wrong_ref';
+  if (input.canAccept) return 'accepted';
+  return input.successfulDrill || input.fallback ? 'unresolved' : 'not_taken';
 }
 
 function insideWindow(value: number, selector: TrajectoryInspectorWindowSelector): boolean {
   return value >= selector.windowStartMs && value < selector.windowEndMs;
-}
-
-function asRecord(value: unknown): Record<string, unknown> | undefined {
-  return typeof value === 'object' && value !== null ? (value as Record<string, unknown>) : undefined;
 }

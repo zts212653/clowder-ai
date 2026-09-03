@@ -34,6 +34,15 @@ export function requireCaseAutomation(event: EvalLifecycleEvent): void {
   }
 }
 
+export function requireCaseLifecycleActor(event: EvalLifecycleEvent): void {
+  if (event.actor.kind !== 'automation' && event.actor.kind !== 'cat' && event.actor.kind !== 'cvo') {
+    throw new ReevalClosureProjectionError(
+      'authority_mismatch',
+      `${event.type} requires authenticated lifecycle actor`,
+    );
+  }
+}
+
 export function projectResponsibilityBlocker(
   event: Extract<EvalLifecycleEvent, { type: 'responsibility_blocked' }>,
 ): ReevalCaseResponsibilityBlocker {

@@ -342,7 +342,7 @@ Clowder AI 是一个多智能体系统，多个由 LLM 驱动的"Clowder AI"在�
 |----|------|---------|--------|
 | **品种层** | 出厂默认性格（如"Ragdoll温柔但有主见"） | `cat-template.json` | 共享（社区可见） |
 | **实例层** | 这只猫被培养出的独特个性 | `.cat-cafe/cat-catalog.json` | 每个安装实例（私有） |
-| **用户层** | operator是什么样的人 | `private/profile/landy-capsule.md` | 每个用户（≤300 字符硬上限） |
+| **用户层** | operator是什么样的人 | `private/profile/operator-capsule.md` | 每个用户（≤300 字符硬上限） |
 | **关系层** | 这只猫和这个人怎么配合 | `private/profile/relationship/{catId}-primer.md` | 每个（用户 × 猫）对 |
 
 **用户胶囊**（第 3 层）是"这个人是谁？"层：
@@ -373,7 +373,7 @@ Clowder AI 是一个多智能体系统，多个由 LLM 驱动的"Clowder AI"在�
 这是**提议-审批-写入**流水线，不是自动更新。人类对自己的画像始终有最终决定权。
 
 **数据存放位置：**
-- 胶囊：`private/profile/landy-capsule.md`（300 字符画像，operator 签名）
+- 胶囊：`private/profile/operator-capsule.md`（300 字符画像，operator 签名）
 - 底片：`private/profile/relationship/{catId}-primer.md`（每猫轨迹）
 - 注入：`compile-system-prompt-l0.mjs` → `resolveUserCapsule()` → `{{USER_CAPSULE}}`
 - 更新工具：`cat_cafe_propose_profile_update` MCP 工具 → `RedisProfileUpdateProposalStore`

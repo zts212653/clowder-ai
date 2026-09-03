@@ -161,7 +161,7 @@ opportunity plane、一个回源闭环：
 - 不是自动升级 canonical truth；F271 不拥有 promotion / rejection / retirement。
 - 不是系统替猫宣布“我想要这个”；`cue ≠ owned seed`。
 - 不是 F272 的主动消息。F271 供给线索，F272 才负责形成意图、先做一步、再来开口。
-- 不是 F287 的 cue resolver。F287 只消费 closed typed opportunity，F271 在 catalog v1 不是隐式 producer。
+- 不是 F287 的 cue resolver。F287 只消费 closed typed opportunity，F271 在 catalog v2 不是隐式 producer。
 
 ### 当前状态
 
@@ -312,19 +312,21 @@ F287 解决的是“记忆已经存在，但当前猫在正确判断点没有想
 - owner/revision/source invalidation；
 - content-free consumption episode。
 
-Catalog v1 的 producer 只有三族：
+Catalog v2 的 producer 只有四个 closed pairs：
 
 1. `subject_seen`：来自 server-owned Entity nudge；
 2. `delivery_decision`：来自 typed GitHub CI / gate evidence；
 3. `judgment_surface_entered`：来自显式 workflow selection。
+4. `approved_taste_invoked`：来自当前 direct-owner message 的 closed `ELI5` trigger，绑定 exact F221 source coordinate。
 
-Profile 与 project knowledge 在 v1 注册为 zero-only；F152、F188、F200、F256、F263、F271
+Profile 与 project knowledge 在 v2 注册为 zero-only；F152、F188、F200、F256、F263、F271
 是 substrate、health/eval consumer 或 convention，不得被偷偷变成 implicit producer。F282 负责
 lane-neutral candidate detection/readiness，也不会因为频率高就直接出生 cue。
 
 ### 当前交付边界
 
 - Phase A–E 实现已进入 main：source census、readiness、Cue Contract、三条 golden slice、lifecycle replay、direct connector delivery 与 canonical billing budget hardening。
+- Post-close explicit Taste hardening 增加 closed `ELI5` trigger、exact approved-vignette drill，以及“drilled + same-invocation html_widget” applied proof；不把搜索命中冒充应用完成。
 - canonical Alpha 已完成 Person、operational precedent 与 Taste 的 presented→drilled→applied journey；Person correction/hard-forget、scope 与 over-budget 负向也已闭合。
 - 三个 family 的 utility birth certificate 均为 `keep`，且不存在跨 lane total score。
 - production `3002/6399` 未激活、未验证；它是授权边界，不是 F287 的 deferred AC。
@@ -407,7 +409,7 @@ lane-neutral candidate detection/readiness，也不会因为频率高就直接�
 | F281/F282 生产与反馈基础 | ✅ 工程闭 | lane-neutral detection、source bundle/preflight、human disposition/reflow 已落 |
 | F276 首个真实纵切 | ✅ 单例闭 | InteractionEvent approve→materialize→recall 已通过；不升级为完整 lifecycle/health/utility verdict |
 | Write Opportunity Plane | 🟡 合同闭 / runtime 未迁移 | F282/F276 已有局部骨架；Standing Reflex v1 已冻结 entry/disposition/admission 边界，尚无首个 migrated entry |
-| F287 Cue Plane | ✅ main + Alpha UAT 闭 | A–E + hardening landed；三条 family journey 与 lifecycle negatives 通过；production dormant/unverified |
+| F287 Cue Plane | ✅ main + Alpha UAT 闭；post-close correction 验证中 | A–E + budget hardening landed；catalog v2 新增 explicit approved Taste consumption，production dormant/unverified |
 | F296 context presentation | 🟡 合同闭 / runtime 未实现 | frozen-v1 已闭三坐标、handshake、epoch、mapper/ledger 权力边界；现有 runtime 无 `contextEpoch` / presentation ledger，B0 handshake 必须先于 epoch 与 mapper |
 | 通用 derived view lifecycle | 🟡 合同闭 / runtime 未迁移 | Derived View v1 已冻结 lineage/valid-time/facet invalidation；F276→F287 有局部先例，generic propagation 未实现 |
 | F271 session-close | ✅ 有真实产物 | 已有 5 条 durable typed outputs |

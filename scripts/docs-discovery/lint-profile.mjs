@@ -7,7 +7,7 @@ import process from 'node:process';
 import { fileURLToPath } from 'node:url';
 import { loadProfileEntries } from '@cat-cafe/shared/profile-frontmatter-parser';
 import { parse as parseYaml } from 'yaml';
-import { runScheduledDriftScan } from './lib/drift-scan.mjs';
+import { runDriftHealthScan } from './lib/drift-scan.mjs';
 import { resolveDocsProfileScope } from './lib/scope-resolver.mjs';
 
 const MISSING_DESCRIPTION_PROVENANCE_CODES = new Set([
@@ -306,7 +306,7 @@ if (import.meta.url === `file://${process.argv[1]}`) {
     const options = parseArgs(process.argv.slice(2));
     const repoRoot = path.resolve(options.repoRoot ?? defaultRepoRoot());
     if (options.driftScan) {
-      const result = runScheduledDriftScan(repoRoot, { thresholdMonths: options.driftThresholdMonths });
+      const result = runDriftHealthScan(repoRoot, { thresholdMonths: options.driftThresholdMonths });
       for (const warning of result.warnings) {
         console.warn(`[warn] ${warning.code} ${warning.relativePath}: ${warning.message}`);
       }

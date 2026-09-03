@@ -24,6 +24,15 @@ describe('bridge-script', () => {
     assert.ok(BRIDGE_SCRIPT.includes('__catCafeBridge'));
   });
 
+  it('attests exact visible DOM and embedded client revision on request', () => {
+    assert.ok(BRIDGE_SCRIPT.includes('visible-page-admission-request'));
+    assert.ok(BRIDGE_SCRIPT.includes('visible-page-attestation'));
+    assert.ok(BRIDGE_SCRIPT.includes('data-cat-cafe-build-revision'));
+    assert.ok(BRIDGE_SCRIPT.includes('window.location.pathname + window.location.search + window.location.hash'));
+    assert.ok(BRIDGE_SCRIPT.includes('querySelector'));
+    assert.ok(BRIDGE_SCRIPT.includes('forbiddenTextMatches'));
+  });
+
   it('is wrapped in a script tag', () => {
     assert.ok(BRIDGE_SCRIPT.includes('<script'));
     assert.ok(BRIDGE_SCRIPT.includes('</script>'));

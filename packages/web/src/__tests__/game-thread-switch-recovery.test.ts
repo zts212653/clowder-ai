@@ -12,6 +12,15 @@ import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ChatContainer } from '@/components/ChatContainer';
+import { ThreadChatRuntimeProvider } from '@/components/thread-chat';
+
+function renderChatContainer(threadId: string) {
+  return React.createElement(
+    ThreadChatRuntimeProvider,
+    { routeThreadId: threadId },
+    React.createElement(ChatContainer, { threadId }),
+  );
+}
 
 // ── The spy we want to verify ──
 const mockReconnectGame = vi.fn<(threadId: string) => Promise<void>>(async () => {});
@@ -163,7 +172,10 @@ vi.mock('../components/MessageNavigator', () => ({ MessageNavigator: () => null 
 vi.mock('../components/MessageActions', () => ({
   MessageActions: ({ children }: { children: React.ReactNode }) => children,
 }));
-vi.mock('../components/SplitPaneView', () => ({ SplitPaneView: () => null }));
+vi.mock('../components/SplitPaneView', () => ({
+  SplitPaneView: () => null,
+  SplitPaneChatView: () => null,
+}));
 vi.mock('../components/QueuePanel', () => ({ QueuePanel: () => null }));
 vi.mock('../components/ScrollToBottomButton', () => ({ ScrollToBottomButton: () => null }));
 vi.mock('@/components/WorkspacePanel', () => ({ WorkspacePanel: () => null }));
@@ -208,7 +220,7 @@ describe('F101: ChatContainer calls reconnectGame on thread switch (integration)
 
   it('AC1: calls reconnectGame(threadId) on mount', async () => {
     act(() => {
-      root.render(React.createElement(ChatContainer, { threadId: 'thread-game-1' }));
+      root.render(renderChatContainer('thread-game-1'));
     });
     await act(async () => {
       await new Promise((r) => setTimeout(r, 10));
@@ -220,7 +232,7 @@ describe('F101: ChatContainer calls reconnectGame on thread switch (integration)
   it('AC2: calls reconnectGame with NEW threadId when thread switches', async () => {
     // Initial mount on thread-A
     act(() => {
-      root.render(React.createElement(ChatContainer, { threadId: 'thread-A' }));
+      root.render(renderChatContainer('thread-A'));
     });
     await act(async () => {
       await new Promise((r) => setTimeout(r, 10));
@@ -231,7 +243,7 @@ describe('F101: ChatContainer calls reconnectGame on thread switch (integration)
 
     // Switch to thread-B
     act(() => {
-      root.render(React.createElement(ChatContainer, { threadId: 'thread-B' }));
+      root.render(renderChatContainer('thread-B'));
     });
     await act(async () => {
       await new Promise((r) => setTimeout(r, 10));
@@ -246,7 +258,7 @@ describe('F101: ChatContainer calls reconnectGame on thread switch (integration)
 
     // 1. Mount on game thread
     act(() => {
-      root.render(React.createElement(ChatContainer, { threadId: GAME_THREAD }));
+      root.render(renderChatContainer(GAME_THREAD));
     });
     await act(async () => {
       await new Promise((r) => setTimeout(r, 10));
@@ -256,7 +268,7 @@ describe('F101: ChatContainer calls reconnectGame on thread switch (integration)
 
     // 2. Switch to normal thread
     act(() => {
-      root.render(React.createElement(ChatContainer, { threadId: NORMAL_THREAD }));
+      root.render(renderChatContainer(NORMAL_THREAD));
     });
     await act(async () => {
       await new Promise((r) => setTimeout(r, 10));
@@ -266,7 +278,7 @@ describe('F101: ChatContainer calls reconnectGame on thread switch (integration)
 
     // 3. Switch back to game thread
     act(() => {
-      root.render(React.createElement(ChatContainer, { threadId: GAME_THREAD }));
+      root.render(renderChatContainer(GAME_THREAD));
     });
     await act(async () => {
       await new Promise((r) => setTimeout(r, 10));

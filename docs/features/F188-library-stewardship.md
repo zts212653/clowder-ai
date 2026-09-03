@@ -84,12 +84,12 @@ PR #1790 把 Health Dashboard 的问题数主动 surfacing 到 MemoryNav 后，o
 - 稀疏图应能直接解释关系（边标签或 Inspector 关系列表）；密集图可以隐藏边标签，但必须能通过 hover/click 获得 relation/provenance。
 
 **Graph Query Resolution（Phase C query follow-up）**：
-当前 Graph 输入框实际是精确 anchor lookup，但用户会自然把它当成搜索框使用。`harness`、`operator的工资`、`landy 最喜欢什么猫` 这类输入不是 anchor，却代表用户想从记忆库里找到一个可画图的知识节点。Graph 入口必须先定义从自然查询到 graph anchor 的解析契约，不能再用 "No graph data for this anchor" 把搜索失败伪装成 graph 为空。
+当前 Graph 输入框实际是精确 anchor lookup，但用户会自然把它当成搜索框使用。`harness`、`operator的工资`、`operator 最喜欢什么猫` 这类输入不是 anchor，却代表用户想从记忆库里找到一个可画图的知识节点。Graph 入口必须先定义从自然查询到 graph anchor 的解析契约，不能再用 "No graph data for this anchor" 把搜索失败伪装成 graph 为空。
 
 输入语义：
 - 精确 anchor：`F186` / `f186` / `doc:...` / `thread-...` / `global:...` 等已存在 anchor，直接解析为 graph center。
 - 主题关键词：`harness`、`Redis persistence` 等普通搜索词，先执行 evidence search，返回候选 anchor 列表，由用户选择后再画 graph。
-- 自然语言问题：`landy 最喜欢什么猫` 这类 query 只能基于已索引 evidence 生成候选；没有证据时明确 no-match，不允许编造节点或答案。
+- 自然语言问题：`operator 最喜欢什么猫` 这类 query 只能基于已索引 evidence 生成候选；没有证据时明确 no-match，不允许编造节点或答案。
 
 候选选择：
 - 候选项至少展示 `anchor`、title、kind、collection/source、命中理由（如 title/path/content snippet）。

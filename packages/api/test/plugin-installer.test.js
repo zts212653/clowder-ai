@@ -1,6 +1,16 @@
 import assert from 'node:assert/strict';
 import { execSync } from 'node:child_process';
-import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs';
+import os from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, it } from 'node:test';
 import {
@@ -10,7 +20,10 @@ import {
   uninstallPlugin,
 } from '../dist/infrastructure/connectors/plugins/plugin-installer.js';
 
-const TEST_ROOT = '/tmp/cat-cafe-plugin-installer-test';
+// Full gates intentionally run non-browser suites from multiple worktrees in
+// parallel. A fixed /tmp root lets another process's beforeEach/afterEach
+// cleanup delete this process's archive while tar is still reading it.
+const TEST_ROOT = mkdtempSync(join(os.tmpdir(), 'cat-cafe-plugin-installer-test-'));
 const BUILTIN_IDS = new Set(['feishu', 'dingtalk', 'telegram', 'weixin', 'wecom-bot', 'wecom-agent', 'xiaoyi']);
 
 /** Convert connector id to valid env var prefix (replace hyphens with underscores). */

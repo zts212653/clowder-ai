@@ -1,7 +1,7 @@
 {
   "id": "ragdoll-v1",
   "displayName": "布偶猫 v1",
-  "description": "Clowder AI default concierge skin — ragdoll cat pixel art.",
+  "description": "Clowder AI legacy individual-sprite concierge skin — ragdoll cat pixel art.",
   "version": 1,
   "format": "individual-sprites",
   "sprites": {

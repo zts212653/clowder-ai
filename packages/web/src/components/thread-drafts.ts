@@ -4,6 +4,7 @@ const STORAGE_KEY = 'cat-cafe:thread-drafts';
 const REPLY_STORAGE_KEY = 'cat-cafe:thread-reply-drafts';
 const CONTEXT_STORAGE_KEY = 'cat-cafe:thread-context-attachment-drafts';
 const EMPTY_CONTEXT_ATTACHMENTS: readonly ContextAttachment[] = [];
+const threadDraftListeners = new Set<() => void>();
 const contextAttachmentDraftListeners = new Set<() => void>();
 
 /**
@@ -130,14 +131,27 @@ export const threadImageDrafts = new Map<string, File[]>();
 export const threadReplyDrafts = hydrateReplyDrafts();
 export const threadContextAttachmentDrafts = hydrateContextAttachmentDrafts();
 
-/** Sync a draft write to sessionStorage. Call after mutating threadDrafts. */
+export function getThreadDraft(threadId: string | undefined): string {
+  return threadId ? (threadDrafts.get(threadId) ?? '') : '';
+}
+
+export function subscribeThreadDrafts(listener: () => void): () => void {
+  threadDraftListeners.add(listener);
+  return () => threadDraftListeners.delete(listener);
+}
+
+/** Canonical text-draft write for every composer mounted on the same thread. */
 export function syncDraftToStorage(threadId: string, text: string | undefined): void {
-  if (text && text.trim()) {
-    threadDrafts.set(threadId, text);
+  const previous = threadDrafts.get(threadId);
+  const next = text?.trim() ? text : undefined;
+  if (previous === next) return;
+  if (next !== undefined) {
+    threadDrafts.set(threadId, next);
   } else {
     threadDrafts.delete(threadId);
   }
   persistToStorage(threadDrafts);
+  for (const listener of threadDraftListeners) listener();
 }
 
 /** #934: Save/clear reply context for a thread draft. */

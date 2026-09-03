@@ -1,6 +1,8 @@
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { useF307ExperienceWorkbenchStore } from '@/components/workbench/experience-workbench-store';
+import { createInitialWorkbenchState } from '@/components/workbench/workbench-model';
 import type { ChatMessage } from '@/stores/chat-types';
 import { describeMessageInvocationTrajectory, InvocationTrajectoryAnchor } from '../InvocationTrajectoryAnchor';
 
@@ -49,6 +51,9 @@ describe('F299 message invocation anchor', () => {
   afterEach(() => {
     act(() => root.unmount());
     container.remove();
+    vi.unstubAllEnvs();
+    window.history.replaceState({}, '', '/');
+    useF307ExperienceWorkbenchStore.setState({ layout: createInitialWorkbenchState(), hydrated: false });
   });
   afterAll(() => {
     delete (globalThis as { React?: typeof React }).React;
@@ -97,5 +102,24 @@ describe('F299 message invocation anchor', () => {
     expect(error?.className).not.toContain('opacity-0');
     expect(done?.tagName).toBe('BUTTON');
     expect(error?.tagName).toBe('BUTTON');
+  });
+
+  it('opens a real Agent Run descriptor in the default F307 Workbench', async () => {
+    window.history.replaceState({}, '', '/thread/thread-a');
+    await act(async () => {
+      root.render(<InvocationTrajectoryAnchor message={message('running')} threadId="thread-a" />);
+    });
+
+    const button = container.querySelector<HTMLButtonElement>('[data-invocation-anchor="inv-running"]');
+    await act(async () => button?.click());
+
+    expect(useF307ExperienceWorkbenchStore.getState().layout.surfaces).toEqual([
+      expect.objectContaining({
+        type: 'agent-run',
+        objectRef: { kind: 'agent-run', id: 'inv-running' },
+        ownerStateRef: { owner: 'f299-invocation-trajectory', key: 'thread-a:inv-running' },
+        resultTargetRef: { owner: 'thread-message', key: 'thread-a:message-running' },
+      }),
+    ]);
   });
 });

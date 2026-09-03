@@ -58,13 +58,13 @@ function assertInstanceLocalMigrationContract(census, validateMeasurementBundleC
 }
 
 describe('F267 real measurement bundle census', () => {
-  it('covers each real registry entry once and derives the exact 11/1/1 classification', async () => {
+  it('covers each real registry entry once and derives the exact 11/1/2 classification', async () => {
     const { validateMeasurementBundleCensus } = await moduleUnderTest();
     const { scanMeasurementVerdictCorpus } = await corpusModuleUnderTest();
     const census = validateMeasurementBundleCensus(loadCensus(), repoRoot);
     const corpus = scanMeasurementVerdictCorpus(repoRoot);
 
-    assert.equal(census.entries.length, 13);
+    assert.equal(census.entries.length, 14);
     assert.equal(census.schemaVersion, 2);
     assert.deepEqual(
       census.entries
@@ -86,6 +86,10 @@ describe('F267 real measurement bundle census', () => {
       ],
     );
     assert.equal(census.entries.find((entry) => entry.domainId === 'eval:capability-tips')?.classification, 'gated');
+    assert.equal(
+      census.entries.find((entry) => entry.domainId === 'eval:capability-evolution')?.classification,
+      'registered_nonoperational',
+    );
     assert.equal(
       census.entries.find((entry) => entry.domainId === 'eval:external-case-closure')?.classification,
       'registered_nonoperational',

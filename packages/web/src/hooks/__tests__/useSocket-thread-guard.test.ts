@@ -173,6 +173,7 @@ vi.mock('@/utils/offline-store', () => ({
 }));
 
 import { configureDebug, invocationDebugConstants } from '@/debug/invocationEventDebug';
+import { previewVisiblePageAdmissionController } from '@/lib/preview-visible-page-admission-controller';
 // ── Import useSocket after mocks ──
 import { type OrchestrationFlow, useGuideStore } from '@/stores/guideStore';
 import { type SocketCallbacks, useSocket } from '../useSocket';
@@ -262,6 +263,7 @@ describe('useSocket thread guard (P1 regression: cross-thread event leakage)', (
     mockQueueThreadPreview.mockClear();
     mockAddActiveInvocation.mockClear();
     mockAddFlatActiveInvocation.mockClear();
+    mockSetCatStatus.mockClear();
     mockRemoveActiveInvocation.mockClear();
     for (const key of Object.keys(mockActiveInvocations)) delete mockActiveInvocations[key];
     for (const key of Object.keys(mockThreadActiveInvocations)) delete mockThreadActiveInvocations[key];
@@ -329,6 +331,44 @@ describe('useSocket thread guard (P1 regression: cross-thread event leakage)', (
       mode: 'execute',
       targetCats: ['opus'],
     });
+  });
+
+  it('forwards runtime interaction invalidations to canonical cards', () => {
+    const callbacks: SocketCallbacks = { onMessage: vi.fn() };
+    const updated = vi.fn();
+    window.addEventListener('cat-cafe:runtime-interaction-updated', updated);
+    act(() => {
+      root.render(React.createElement(HookWrapper, { callbacks, threadId: 'thread-B' }));
+    });
+    act(() => {
+      simulateServerEvent('runtime_interaction_updated', {
+        interactionId: 'interaction-1',
+        status: 'invalidated',
+      });
+    });
+    expect(updated).toHaveBeenCalledTimes(1);
+    expect((updated.mock.calls[0]?.[0] as CustomEvent).detail).toEqual({
+      interactionId: 'interaction-1',
+      status: 'invalidated',
+    });
+    window.removeEventListener('cat-cafe:runtime-interaction-updated', updated);
+  });
+
+  it('forwards custody invalidations to both the source card and thread catch-up owner', () => {
+    const onCustodyOfferUpdated = vi.fn();
+    const callbacks: SocketCallbacks = { onMessage: vi.fn(), onCustodyOfferUpdated };
+    const updated = vi.fn();
+    window.addEventListener('cat-cafe:custody-offer-updated', updated);
+    act(() => {
+      root.render(React.createElement(HookWrapper, { callbacks, threadId: 'thread-B' }));
+    });
+    const invalidation = { messageId: 'message-1', threadId: 'thread-A' };
+    act(() => {
+      simulateServerEvent('custody_offer_updated', invalidation);
+    });
+    expect(onCustodyOfferUpdated).toHaveBeenCalledWith(invalidation);
+    expect((updated.mock.calls[0]?.[0] as CustomEvent).detail).toEqual(invalidation);
+    window.removeEventListener('cat-cafe:custody-offer-updated', updated);
   });
 
   it('receives preview auto-open on the stable chat socket across a thread switch', () => {
@@ -403,6 +443,76 @@ describe('useSocket thread guard (P1 regression: cross-thread event leakage)', (
       eventId: 'preview-queued',
       reason: 'thread_inactive',
     });
+  });
+
+  it('withholds applied until the same visible iframe provides candidate identity proof', async () => {
+    mockStoreCurrentThreadId = 'thread-A';
+    act(() => {
+      root.render(
+        React.createElement(HookWrapper, {
+          callbacks: { onMessage: vi.fn() },
+          threadId: 'thread-A',
+        }),
+      );
+    });
+
+    const acknowledge = vi.fn();
+    const revision = 'b'.repeat(40);
+    const targetOrigin = 'http://preview-3011.localhost:4111';
+    const visiblePageAdmission = {
+      expectedClientRevision: revision,
+      requiredDom: [{ selector: '[data-layout-owner="f307"]' }],
+    };
+    act(() => {
+      simulateServerEvent(
+        'preview:auto-open',
+        {
+          port: 3011,
+          path: '/threads/thread-f307?workspaceView=surface',
+          threadId: 'thread-A',
+          eventId: 'preview-attested',
+          targetOrigin,
+          visiblePageAdmission,
+        },
+        acknowledge,
+      );
+    });
+
+    expect(acknowledge).not.toHaveBeenCalled();
+    expect(previewVisiblePageAdmissionController.getSnapshot()).toMatchObject({
+      eventId: 'preview-attested',
+      port: 3011,
+      targetOrigin,
+      admission: visiblePageAdmission,
+    });
+
+    await act(async () => {
+      previewVisiblePageAdmissionController.attest({
+        eventId: 'preview-attested',
+        targetPort: 3011,
+        targetOrigin,
+        targetPath: '/threads/thread-f307?workspaceView=surface',
+        clientRevision: revision,
+        dom: [
+          {
+            selector: '[data-layout-owner="f307"]',
+            found: true,
+            attributes: {},
+            textMatches: [],
+          },
+        ],
+        forbiddenTextMatches: [],
+      });
+      await Promise.resolve();
+    });
+
+    expect(acknowledge).toHaveBeenCalledWith(
+      expect.objectContaining({
+        status: 'applied',
+        eventId: 'preview-attested',
+        attestation: expect.objectContaining({ targetPort: 3011, clientRevision: revision }),
+      }),
+    );
   });
 
   it('intent_mode from OTHER thread routes to background path, not callback', () => {
@@ -983,6 +1093,33 @@ describe('useSocket thread guard (P1 regression: cross-thread event leakage)', (
     expect(mockRequestStreamCatchUp).toHaveBeenCalledWith('thread-B');
   });
 
+  it('queue_updated hydrates an owner-visible connector intake before its cat turn completes', () => {
+    mockStoreCurrentThreadId = 'thread-B';
+    const callbacks: SocketCallbacks = { onMessage: vi.fn() };
+
+    act(() => {
+      root.render(React.createElement(HookWrapper, { callbacks, threadId: 'thread-B' }));
+    });
+
+    act(() => {
+      simulateServerEvent('queue_updated', {
+        threadId: 'thread-B',
+        queue: [
+          {
+            id: 'q-connector',
+            messageId: 'm-connector',
+            source: 'connector',
+            status: 'processing',
+            targetStates: { 'codex-sol': 'processing' },
+          },
+        ],
+        action: 'processing',
+      });
+    });
+
+    expect(mockRequestStreamCatchUp).toHaveBeenCalledWith('thread-B');
+  });
+
   it('queue_updated filters malformed siblings without suppressing durable user hydration', () => {
     mockStoreCurrentThreadId = 'thread-B';
     const callbacks: SocketCallbacks = { onMessage: vi.fn() };
@@ -1199,6 +1336,48 @@ describe('useSocket thread guard (P1 regression: cross-thread event leakage)', (
     );
   });
 
+  it('installs a Host connector bubble before projecting its spawn indicator', () => {
+    mockStoreCurrentThreadId = 'thread-B';
+    const callbacks: SocketCallbacks = { onMessage: vi.fn() };
+    const source = { connector: 'feishu', label: '飞书会议入站 / 录音豆', icon: 'feishu' };
+
+    act(() => {
+      root.render(React.createElement(HookWrapper, { callbacks, threadId: 'thread-B' }));
+    });
+
+    act(() => {
+      simulateServerEvent('messages_queued', {
+        threadId: 'thread-B',
+        messageIds: ['meeting-source'],
+        messages: [
+          {
+            id: 'meeting-source',
+            content: 'Host-authored meeting intake',
+            catId: null,
+            timestamp: 1234,
+            source,
+          },
+        ],
+      });
+      simulateServerEvent('spawn_started', {
+        threadId: 'thread-B',
+        targetCats: ['codex-sol'],
+        invocationId: 'meeting-invocation',
+      });
+    });
+
+    expect(mockAddMessageToThread).toHaveBeenCalledWith('thread-B', {
+      id: 'meeting-source',
+      type: 'connector',
+      content: 'Host-authored meeting intake',
+      source,
+      timestamp: 1234,
+    });
+    expect(mockAddMessageToThread.mock.invocationCallOrder[0]).toBeLessThan(
+      mockSetCatStatus.mock.invocationCallOrder[0]!,
+    );
+  });
+
   it('queue_updated processing hydrates current-thread slot truth when intent_mode is missing', async () => {
     mockStoreCurrentThreadId = 'thread-B';
     mockApiFetch.mockResolvedValue({
@@ -1236,6 +1415,78 @@ describe('useSocket thread guard (P1 regression: cross-thread event leakage)', (
       'execute',
       1234,
     );
+  });
+
+  it('queue-first queued_seen reconciles its exact live child without waiting for refresh', async () => {
+    mockStoreCurrentThreadId = 'thread-B';
+    mockApiFetch.mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        activeInvocations: [
+          {
+            catId: 'codex-sol',
+            executionId: 'parent-sol',
+            turnInvocationId: 'turn-sol',
+            startedAt: 1234,
+          },
+        ],
+      }),
+    });
+
+    const callbacks: SocketCallbacks = { onMessage: vi.fn() };
+    act(() => {
+      root.render(React.createElement(HookWrapper, { callbacks, threadId: 'thread-B' }));
+    });
+
+    await act(async () => {
+      simulateServerEvent('queue_updated', {
+        threadId: 'thread-B',
+        queue: [
+          {
+            id: 'q-seen',
+            threadId: 'thread-B',
+            userId: 'test-user',
+            content: 'already read by this exact turn',
+            messageId: 'm-seen',
+            mergedMessageIds: [],
+            source: 'agent',
+            targetCats: ['codex-sol'],
+            targetStates: { 'codex-sol': 'seen' },
+            queueReceipt: {
+              version: 1,
+              entryId: 'q-seen',
+              targets: [
+                {
+                  catId: 'codex-sol',
+                  state: 'seen',
+                  invocationId: 'turn-sol',
+                  seenAt: 1233,
+                },
+              ],
+              reminderAttempts: [],
+            },
+            intent: 'execute',
+            status: 'queued',
+            createdAt: 1200,
+          },
+        ],
+        action: 'queued_seen',
+      });
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(mockApiFetch).toHaveBeenCalledWith('/api/threads/thread-B/queue');
+    expect(mockSetThreadCatInvocation).toHaveBeenCalledWith('thread-B', 'codex-sol', {
+      invocationId: 'parent-sol',
+      turnInvocationId: 'turn-sol',
+      freshnessCarrierCapability: {
+        provider: 'other',
+        carrier: 'other',
+        deliverySemantics: 'undeclared',
+      },
+    });
+    expect(mockAddActiveInvocation).toHaveBeenCalledWith('thread-B', 'parent-sol', 'codex-sol', 'execute', 1234);
   });
 
   it('queue_updated completed reconciles and persists idle for a background thread', async () => {
@@ -2177,6 +2428,105 @@ describe('useSocket thread guard (P1 regression: cross-thread event leakage)', (
       'thread-B',
       expect.objectContaining({ id: 'conn-1', type: 'connector' }),
     );
+  });
+
+  it('keeps entity semantic events out of the timeline because Settings owns their projection', () => {
+    mockStoreCurrentThreadId = 'thread-B';
+    const callbacks: SocketCallbacks = { onMessage: vi.fn() };
+
+    act(() => {
+      root.render(React.createElement(HookWrapper, { callbacks, threadId: 'thread-B' }));
+    });
+
+    const semanticEvent = {
+      v: 1 as const,
+      id: 'native-goal:thread-B:1:updated',
+      kind: 'goal' as const,
+      occurredAt: 1_788_000_000_000,
+      state: 'updated' as const,
+      revision: 1,
+      objective: 'Ship Phase C',
+      status: 'active' as const,
+      source: 'codex_app_server' as const,
+      observedAt: 1_788_000_000_000,
+      provenance: { provider: 'openai_codex', carrier: 'app_server' },
+    };
+    act(() => {
+      simulateServerEvent('connector_message', {
+        threadId: 'thread-B',
+        message: {
+          id: 'semantic-live-1',
+          type: 'connector',
+          content: 'thread/goal/updated raw provider copy',
+          extra: { semanticEvent },
+          timestamp: semanticEvent.occurredAt,
+        },
+      });
+    });
+
+    expect(mockAddMessageToThread).not.toHaveBeenCalled();
+  });
+
+  it('keeps plan visible over socket until a real Workspace host owns its projection', () => {
+    mockStoreCurrentThreadId = 'thread-B';
+    const callbacks: SocketCallbacks = { onMessage: vi.fn() };
+
+    act(() => {
+      root.render(React.createElement(HookWrapper, { callbacks, threadId: 'thread-B' }));
+    });
+
+    const semanticEvent = {
+      v: 1 as const,
+      id: 'plan-socket-1',
+      kind: 'plan' as const,
+      occurredAt: 1_788_000_000_000,
+      stage: 'updated' as const,
+      text: 'Locate the contract, then fix it.',
+    };
+    act(() => {
+      simulateServerEvent('connector_message', {
+        threadId: 'thread-B',
+        message: {
+          id: 'semantic-workspace-1',
+          type: 'connector',
+          content: 'raw plan copy must not become a connector bubble',
+          extra: { semanticEvent },
+          timestamp: semanticEvent.occurredAt,
+        },
+      });
+    });
+
+    expect(mockAddMessageToThread).toHaveBeenCalledWith(
+      'thread-B',
+      expect.objectContaining({
+        id: 'semantic-workspace-1',
+        type: 'connector',
+        content: 'Locate the contract, then fix it.',
+      }),
+    );
+  });
+
+  it('fails closed instead of leaking an invalid semantic connector payload', () => {
+    mockStoreCurrentThreadId = 'thread-B';
+    const callbacks: SocketCallbacks = { onMessage: vi.fn() };
+
+    act(() => {
+      root.render(React.createElement(HookWrapper, { callbacks, threadId: 'thread-B' }));
+    });
+    act(() => {
+      simulateServerEvent('connector_message', {
+        threadId: 'thread-B',
+        message: {
+          id: 'semantic-invalid-1',
+          type: 'connector',
+          content: '{"method":"review/start","params":{"raw":true}}',
+          extra: { semanticEvent: { method: 'review/start', params: { raw: true } } },
+          timestamp: Date.now(),
+        },
+      });
+    });
+
+    expect(mockAddMessageToThread).not.toHaveBeenCalled();
   });
 
   it('connector_message from background thread is added to that thread state', () => {

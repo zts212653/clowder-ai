@@ -47,6 +47,46 @@ describe('handlePublishVerdict — AC-H2 pipeline', () => {
   });
 
   describe('AC-H2 — GitPublisher isolated-worktree pipeline', () => {
+    it('rejects a future-dated packet before generator or GitPublisher side effects', async () => {
+      let publisherCalls = 0;
+      let generatorCalls = 0;
+      const result = await handlePublishVerdict(
+        {
+          harnessFeedbackRoot: root,
+          now: () => new Date('2026-06-05T11:00:00.000Z'),
+          gitPublisher: {
+            async publishOnIsolatedWorktree() {
+              publisherCalls += 1;
+              return { commitSha: 'unreachable', prUrl: 'unreachable' };
+            },
+          },
+          generator: async () => {
+            generatorCalls += 1;
+            return { verdictPath: '/unreachable', bundleDir: '/unreachable' };
+          },
+        },
+        {
+          packet: buildPacket({
+            id: 'vhp-future-created-at',
+            domainId: 'eval:a2a',
+            createdAt: '2026-06-05T11:00:00.001Z',
+          }),
+          domain: 'eval:a2a',
+          catId: 'codex',
+          sourceRefs: { snapshotName: 'future.yaml', attributionName: 'future.yaml' },
+        },
+      );
+
+      assert.deepEqual(result, {
+        status: 400,
+        error: 'packet_created_at_in_future',
+        detail:
+          "packet.createdAt '2026-06-05T11:00:00.001Z' is later than server publication time '2026-06-05T11:00:00.000Z'",
+      });
+      assert.equal(publisherCalls, 0, 'future timestamp must fail before branch/commit/PR publication');
+      assert.equal(generatorCalls, 0, 'future timestamp must fail before evidence generation');
+    });
+
     it('happy path: handler calls gitPublisher with correct branchName/sourceBase + invokes stage callback in isolated worktree', async () => {
       // 砚砚 R17 P1: seed LIVE evidence (gitignored, lives there); stage copies to isolated
       seedLiveEvidence(root, 'snap.yaml', 'attr.yaml');
@@ -71,6 +111,11 @@ describe('handlePublishVerdict — AC-H2 pipeline', () => {
         assert.equal(sourceRefs.attributionName, 'attr.yaml');
         assert.equal(deps.harnessFeedbackRoot, `${isolatedWorktree}/docs/harness-feedback`);
         assert.equal(deps.liveHarnessFeedbackRoot, root, 'live root from handler deps.harnessFeedbackRoot');
+        assert.equal(
+          deps.publicationTime,
+          '2026-06-05T11:00:01.000Z',
+          'generator and future-time validation must share one server publication clock',
+        );
         const bundleDir = `${deps.harnessFeedbackRoot}/bundles/${packet.id}`;
         mkdirSync(bundleDir, { recursive: true });
         const verdictPath = `${deps.harnessFeedbackRoot}/verdicts/${packet.id}.md`;
@@ -82,7 +127,12 @@ describe('handlePublishVerdict — AC-H2 pipeline', () => {
       };
 
       const result = await handlePublishVerdict(
-        { harnessFeedbackRoot: root, gitPublisher: mockGitPublisher, generator: mockGenerator },
+        {
+          harnessFeedbackRoot: root,
+          now: () => new Date('2026-06-05T11:00:01.000Z'),
+          gitPublisher: mockGitPublisher,
+          generator: mockGenerator,
+        },
         {
           packet: buildPacket({ id: 'vhp-h2-test', domainId: 'eval:a2a' }),
           domain: 'eval:a2a',
@@ -121,6 +171,13 @@ describe('handlePublishVerdict — AC-H2 pipeline', () => {
       assert.match(stage.commitMessage, /verdict\(eval:a2a\): vhp-h2-test/);
       assert.match(stage.commitMessage, /published via cat_cafe_publish_verdict MCP/);
       assert.match(stage.prTitle, /verdict\(eval:a2a\)/);
+      assert.deepEqual(stage.statusChecks, [
+        {
+          context: 'Eval Metric Glossary Coverage',
+          state: 'success',
+          description: 'Candidate glossary, measurement, and publication contracts passed',
+        },
+      ]);
 
       const lifecycleRoot = JSON.parse(
         readFileSync(`${isolatedWorktree}/docs/harness-feedback/bundles/vhp-h2-test/lifecycle-root.json`, 'utf8'),

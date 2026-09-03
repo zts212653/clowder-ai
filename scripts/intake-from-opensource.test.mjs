@@ -134,6 +134,9 @@ function captureAdvanceFailure(repoRoot) {
 
 function makePlanFixture(files, pr = {}) {
   const fixture = makeFixture();
+  const headRefOid = pr.headRefOid ?? '2222222222222222222222222222222222222222';
+  const headWitnessedAt = pr.headWitnessedAt ?? new Date(Date.now() - 2 * 86_400_000).toISOString();
+  const headCommittedAt = pr.headCommittedAt ?? new Date(Date.now() - 30 * 86_400_000).toISOString();
   const mockPrJson = JSON.stringify(
     {
       title: 'test high-risk intake plan',
@@ -141,6 +144,21 @@ function makePlanFixture(files, pr = {}) {
       author: { login: 'contributor' },
       mergedAt: Object.hasOwn(pr, 'mergedAt') ? pr.mergedAt : '2026-04-24T20:00:00Z',
       mergeCommit: { oid: '1111111111111111111111111111111111111111' },
+      headRefOid,
+      reviews: pr.reviews ?? [],
+      statusCheckRollup: pr.statusCheckRollup ?? [
+        {
+          startedAt: headWitnessedAt,
+          completedAt: headWitnessedAt,
+        },
+      ],
+      commits: pr.commits ?? [
+        {
+          oid: headRefOid,
+          authoredDate: headCommittedAt,
+          committedDate: headCommittedAt,
+        },
+      ],
       files: files.map((path) => ({ path })),
     },
     null,
@@ -265,7 +283,160 @@ describe('intake-from-opensource.sh --mode=plan high-risk guard', () => {
     });
 
     assert.match(output, /STATEFUL MIGRATION QUARANTINE/);
+    assert.match(output, /Source\/fork pre-merge soak: INCOMPLETE/i);
     assert.match(output, /HOLD.*split.*contract/i);
+  });
+
+  it('reports a final source HEAD that has soaked seven full days without clearing the 1224-class hold', () => {
+    const fixture = makePlanFixture(
+      [
+        'packages/api/src/domains/cats/services/stores/cursor.ts',
+        'packages/api/src/domains/cats/services/stores/redis/RedisMessageStore.ts',
+        'packages/api/src/domains/cats/services/stores/redis/redis-visibility-lua-scripts.ts',
+        'packages/shared/src/utils/redis.ts',
+        'packages/api/src/domains/cats/services/freshness/FreshnessGateService.ts',
+        'packages/api/src/routes/threads.ts',
+        'packages/api/src/config/env-registry.ts',
+      ],
+      {
+        state: 'OPEN',
+        mergedAt: null,
+        headWitnessedAt: new Date(Date.now() - 8 * 86_400_000).toISOString(),
+      },
+    );
+    fixtures.push(fixture.sandboxRoot);
+
+    const output = captureRiskCheckFailure(fixture.repoRoot, {
+      PATH: `${fixture.mockBin}:${process.env.PATH}`,
+    });
+
+    assert.match(output, /Source\/fork pre-merge soak: PASS/i);
+    assert.match(output, /1224-class risk-check failed closed/i);
+  });
+
+  it('does not treat a contributor-controlled old commit date as durable source soak evidence', () => {
+    const fixture = makePlanFixture(
+      [
+        'packages/api/src/domains/cats/services/stores/cursor.ts',
+        'packages/api/src/domains/cats/services/stores/redis/RedisMessageStore.ts',
+        'packages/api/src/domains/cats/services/stores/redis/redis-visibility-lua-scripts.ts',
+        'packages/shared/src/utils/redis.ts',
+        'packages/api/src/domains/cats/services/freshness/FreshnessGateService.ts',
+        'packages/api/src/routes/threads.ts',
+        'packages/api/src/config/env-registry.ts',
+      ],
+      {
+        state: 'OPEN',
+        mergedAt: null,
+        headCommittedAt: '2020-01-01T00:00:00Z',
+        reviews: [],
+        statusCheckRollup: [],
+      },
+    );
+    fixtures.push(fixture.sandboxRoot);
+
+    const output = captureRiskCheckFailure(fixture.repoRoot, {
+      PATH: `${fixture.mockBin}:${process.env.PATH}`,
+    });
+
+    assert.match(output, /Source\/fork pre-merge soak: UNVERIFIABLE/i);
+    assert.doesNotMatch(output, /Source\/fork pre-merge soak: PASS/i);
+    assert.match(output, /commit timestamps do not start the clock/i);
+  });
+
+  it('uses a review only when it is durably bound to the exact final source HEAD', () => {
+    const headRefOid = '2222222222222222222222222222222222222222';
+    const fixture = makePlanFixture(
+      [
+        'packages/api/src/domains/cats/services/stores/cursor.ts',
+        'packages/api/src/domains/cats/services/stores/redis/RedisMessageStore.ts',
+        'packages/api/src/domains/cats/services/stores/redis/redis-visibility-lua-scripts.ts',
+        'packages/shared/src/utils/redis.ts',
+        'packages/api/src/domains/cats/services/freshness/FreshnessGateService.ts',
+        'packages/api/src/routes/threads.ts',
+        'packages/api/src/config/env-registry.ts',
+      ],
+      {
+        state: 'OPEN',
+        mergedAt: null,
+        headRefOid,
+        statusCheckRollup: [],
+        reviews: [
+          {
+            commit: { oid: headRefOid },
+            submittedAt: new Date(Date.now() - 8 * 86_400_000).toISOString(),
+          },
+        ],
+      },
+    );
+    fixtures.push(fixture.sandboxRoot);
+
+    const output = captureRiskCheckFailure(fixture.repoRoot, {
+      PATH: `${fixture.mockBin}:${process.env.PATH}`,
+    });
+
+    assert.match(output, /Source\/fork pre-merge soak: PASS/i);
+  });
+
+  it('ignores an old review that belongs to a stale source HEAD', () => {
+    const fixture = makePlanFixture(
+      [
+        'packages/api/src/domains/cats/services/stores/cursor.ts',
+        'packages/api/src/domains/cats/services/stores/redis/RedisMessageStore.ts',
+        'packages/api/src/domains/cats/services/stores/redis/redis-visibility-lua-scripts.ts',
+        'packages/shared/src/utils/redis.ts',
+        'packages/api/src/domains/cats/services/freshness/FreshnessGateService.ts',
+        'packages/api/src/routes/threads.ts',
+        'packages/api/src/config/env-registry.ts',
+      ],
+      {
+        state: 'OPEN',
+        mergedAt: null,
+        statusCheckRollup: [],
+        reviews: [
+          {
+            commit: { oid: '3333333333333333333333333333333333333333' },
+            submittedAt: new Date(Date.now() - 8 * 86_400_000).toISOString(),
+          },
+        ],
+      },
+    );
+    fixtures.push(fixture.sandboxRoot);
+
+    const output = captureRiskCheckFailure(fixture.repoRoot, {
+      PATH: `${fixture.mockBin}:${process.env.PATH}`,
+    });
+
+    assert.match(output, /Source\/fork pre-merge soak: UNVERIFIABLE/i);
+    assert.doesNotMatch(output, /Source\/fork pre-merge soak: PASS/i);
+  });
+
+  it('keeps an already-merged source MISSED when its final HEAD was not seven days old at merge time', () => {
+    const fixture = makePlanFixture(
+      [
+        'packages/api/src/domains/cats/services/stores/cursor.ts',
+        'packages/api/src/domains/cats/services/stores/redis/RedisMessageStore.ts',
+        'packages/api/src/domains/cats/services/stores/redis/redis-visibility-lua-scripts.ts',
+        'packages/shared/src/utils/redis.ts',
+        'packages/api/src/domains/cats/services/freshness/FreshnessGateService.ts',
+        'packages/api/src/routes/threads.ts',
+        'packages/api/src/config/env-registry.ts',
+      ],
+      {
+        state: 'MERGED',
+        mergedAt: '2026-04-24T20:00:00Z',
+        headWitnessedAt: '2026-04-24T19:00:00Z',
+      },
+    );
+    fixtures.push(fixture.sandboxRoot);
+
+    const output = captureRiskCheckFailure(fixture.repoRoot, {
+      PATH: `${fixture.mockBin}:${process.env.PATH}`,
+    });
+
+    assert.match(output, /Source\/fork pre-merge soak: MISSED/i);
+    assert.doesNotMatch(output, /Source\/fork pre-merge soak: PASS/i);
+    assert.match(output, /post-merge waiting cannot/i);
   });
 
   it('does not quarantine an isolated store change without downstream consumer migration', () => {
@@ -551,6 +722,16 @@ describe('intake-from-opensource.sh --validate-inbound', () => {
 
   it('passes when all brand-sensitive files have correct values', () => {
     const f = makeBrandFixture();
+    fixtures.push(f.sandboxRoot);
+    const output = runValidate(f.repoRoot);
+    assert.match(output, /No brand violations detected/);
+  });
+
+  it('allows the outbound sync toolchain to name its public target repository', () => {
+    const f = makeBrandFixture({
+      'scripts/sync-to-opensource.sh':
+        '#!/bin/bash\n# Clowder AI to Clowder AI boundary exporter\necho "target: Clowder AI"\n',
+    });
     fixtures.push(f.sandboxRoot);
     const output = runValidate(f.repoRoot);
     assert.match(output, /No brand violations detected/);
@@ -1012,7 +1193,7 @@ function fixtureFilePath(file) {
 function makeRecordFixture(mock = {}) {
   const fixture = makeFixture();
   const baseHead = commitFile(fixture.targetRoot, 'README.md', 'base\n', 'chore: base');
-  writeLedger(fixture.ledgerPath, baseHead, []);
+  writeLedger(fixture.ledgerPath, baseHead, mock.initialEntries ?? []);
   for (const [relPath, content] of Object.entries(BRAND_GOOD)) {
     const absPath = join(fixture.repoRoot, relPath);
     mkdirSync(join(absPath, '..'), { recursive: true });
@@ -1100,18 +1281,37 @@ function makeRecordFixture(mock = {}) {
     null,
     2,
   );
+  const targetPrFiles = mock.targetPrFiles ?? [{ path: 'packages/web/src/components/hub-accounts.view.ts' }];
+  const targetMergeCommit =
+    mock.targetMergeCommit === undefined
+      ? { oid: mock.targetMergeSha ?? '1111111111111111111111111111111111111111' }
+      : mock.targetMergeCommit;
   const mockTargetPrJson = JSON.stringify(
     {
       state: mock.targetPrState ?? 'MERGED',
       mergedAt: mock.targetMergedAt ?? '2026-04-24T20:00:00Z',
-      mergeCommit: { oid: mock.targetMergeSha ?? '1111111111111111111111111111111111111111' },
+      mergeCommit: targetMergeCommit,
+      headRefOid: mock.targetHeadRefOid ?? '2222222222222222222222222222222222222222',
+      reviews: mock.targetReviews ?? [],
+      statusCheckRollup: mock.targetStatusCheckRollup ?? [
+        {
+          startedAt: mock.targetHeadWitnessedAt ?? '2026-04-16T20:00:00Z',
+          completedAt: mock.targetHeadWitnessedAt ?? '2026-04-16T20:00:00Z',
+        },
+      ],
+      commits: mock.targetCommits ?? [
+        {
+          oid: mock.targetHeadRefOid ?? '2222222222222222222222222222222222222222',
+          authoredDate: mock.targetHeadCommittedAt ?? '2026-04-16T20:00:00Z',
+          committedDate: mock.targetHeadCommittedAt ?? '2026-04-16T20:00:00Z',
+        },
+      ],
+      changedFiles: mock.targetChangedFiles ?? targetPrFiles.length,
     },
     null,
     2,
   );
-  const mockTargetPrFileList = (mock.targetPrFiles ?? [{ path: 'packages/web/src/components/hub-accounts.view.ts' }])
-    .map(fixtureFilePath)
-    .join('\n');
+  const mockTargetPrFileList = targetPrFiles.map(fixtureFilePath).join('\n');
   const mockAbsorbPrFileList = (mock.absorbPrFiles ?? [{ path: 'packages/web/src/components/hub-accounts.view.ts' }])
     .map(fixtureFilePath)
     .join('\n');
@@ -1174,6 +1374,9 @@ fi
 if [ "\${1:-}" = "api" ]; then
   for arg in "$@"; do
     if [[ "$arg" =~ ^repos/zts212653/clowder-ai/pulls/[0-9]+/files$ ]]; then
+      if [ "${mock.targetPrFilesApiFails ? 'true' : 'false'}" = "true" ]; then
+        exit 1
+      fi
       cat <<'FILES'
 ${mockTargetPrFileList}
 FILES
@@ -1367,9 +1570,10 @@ describe('intake-from-opensource.sh --record strict guard (absorbed)', () => {
     'packages/api/scripts/persist-dormant-cursors.mjs',
   ];
 
-  it('blocks same-day absorption of a 1224-class stateful migration', () => {
+  it('requires an explicit MISSED disposition when public merge preceded seven full days at final source HEAD', () => {
     const f = makeRecordFixture({
-      targetMergedAt: new Date().toISOString(),
+      targetMergedAt: '2026-04-24T20:00:00Z',
+      targetHeadWitnessedAt: '2026-04-24T19:00:00Z',
       targetPrFiles: statefulMigrationFiles,
     });
     fixtures.push(f.sandboxRoot);
@@ -1391,7 +1595,40 @@ describe('intake-from-opensource.sh --record strict guard (absorbed)', () => {
       { PATH: `${f.mockBin}:${process.env.PATH}` },
     );
 
-    assert.match(stripAnsi(String(error.stdout || '')), /minimum 7-day source quarantine/i);
+    const output = stripAnsi(String(error.stdout || ''));
+    assert.match(output, /Source\/fork pre-merge soak: MISSED/i);
+    assert.match(output, /explicit disposition marker/i);
+  });
+
+  it('requires an explicit UNVERIFIABLE disposition when no durable exact-HEAD witness exists', () => {
+    const f = makeRecordFixture({
+      targetPrFiles: statefulMigrationFiles,
+      targetHeadCommittedAt: '2020-01-01T00:00:00Z',
+      targetReviews: [],
+      targetStatusCheckRollup: [],
+    });
+    fixtures.push(f.sandboxRoot);
+
+    const error = captureRecordFailure(
+      f.repoRoot,
+      [
+        '--pr',
+        '495',
+        '--decision',
+        'absorbed',
+        '--intent-issue',
+        '1234',
+        '--absorb-pr',
+        '1236',
+        '--review-proof',
+        'https://github.com/zts212653/clowder-ai/pull/1236#pullrequestreview-789',
+      ],
+      { PATH: `${f.mockBin}:${process.env.PATH}` },
+    );
+
+    const output = stripAnsi(String(error.stdout || ''));
+    assert.match(output, /Source\/fork pre-merge soak: UNVERIFIABLE/i);
+    assert.match(output, /explicit disposition marker/i);
   });
 
   it('does not allow the historical backfill escape hatch to bypass 1224-class quarantine', () => {
@@ -1460,8 +1697,87 @@ describe('intake-from-opensource.sh --record strict guard (absorbed)', () => {
       { PATH: `${f.mockBin}:${process.env.PATH}` },
     );
 
-    assert.match(stripAnsi(output), /1224-class quarantine detected/);
+    assert.match(stripAnsi(output), /Source\/fork pre-merge soak: PASS/i);
     assert.match(stripAnsi(output), /Absorbed intake strict guard passed/);
+  });
+
+  it('accepts an already-merged source only when the missed pre-merge soak is explicit and all proofs remain present', () => {
+    const f = makeRecordFixture({
+      targetMergedAt: '2026-04-24T20:00:00Z',
+      targetHeadWitnessedAt: '2026-04-24T19:00:00Z',
+      targetPrFiles: statefulMigrationFiles,
+      reviewBody: 'APPROVE',
+      absorbPrBody: [
+        'Closes #1234',
+        'Source: clowder-ai#495',
+        'Source/fork pre-merge soak: MISSED',
+        'Historical-state replay: PASS',
+        'Mixed-version consumer matrix: PASS',
+        'Rollback/off-mode semantics: PASS',
+      ].join('\n'),
+    });
+    fixtures.push(f.sandboxRoot);
+
+    const output = runRecord(
+      f.repoRoot,
+      [
+        '--pr',
+        '495',
+        '--decision',
+        'absorbed',
+        '--intent-issue',
+        '1234',
+        '--absorb-pr',
+        '1236',
+        '--review-proof',
+        'https://github.com/zts212653/clowder-ai/pull/1236#pullrequestreview-789',
+      ],
+      { PATH: `${f.mockBin}:${process.env.PATH}` },
+    );
+
+    const plainOutput = stripAnsi(output);
+    assert.match(plainOutput, /Source\/fork pre-merge soak: MISSED/i);
+    assert.match(plainOutput, /Absorbed intake strict guard passed/);
+  });
+
+  it('accepts an explicit UNVERIFIABLE disposition without weakening the migration proofs', () => {
+    const f = makeRecordFixture({
+      targetPrFiles: statefulMigrationFiles,
+      targetHeadCommittedAt: '2020-01-01T00:00:00Z',
+      targetReviews: [],
+      targetStatusCheckRollup: [],
+      reviewBody: 'APPROVE',
+      absorbPrBody: [
+        'Closes #1234',
+        'Source: clowder-ai#495',
+        'Source/fork pre-merge soak: UNVERIFIABLE',
+        'Historical-state replay: PASS',
+        'Mixed-version consumer matrix: PASS',
+        'Rollback/off-mode semantics: PASS',
+      ].join('\n'),
+    });
+    fixtures.push(f.sandboxRoot);
+
+    const output = runRecord(
+      f.repoRoot,
+      [
+        '--pr',
+        '495',
+        '--decision',
+        'absorbed',
+        '--intent-issue',
+        '1234',
+        '--absorb-pr',
+        '1236',
+        '--review-proof',
+        'https://github.com/zts212653/clowder-ai/pull/1236#pullrequestreview-789',
+      ],
+      { PATH: `${f.mockBin}:${process.env.PATH}` },
+    );
+
+    const plainOutput = stripAnsi(output);
+    assert.match(plainOutput, /Source\/fork pre-merge soak: UNVERIFIABLE/i);
+    assert.match(plainOutput, /Absorbed intake strict guard passed/);
   });
 
   it('accepts Intent Issue with English decision table header', () => {
@@ -1844,6 +2160,89 @@ describe('intake-from-opensource.sh --record strict guard (absorbed)', () => {
     assert.equal(record.absorb_pr, 1236);
     assert.equal(record.review_proof, 'https://github.com/zts212653/clowder-ai/pull/1236#issuecomment-1');
     assert.equal(record.intent_issue, undefined, 'must use intake_intent_issue (existing schema), not intent_issue');
+  });
+
+  it('upgrades a provisional public-only record to absorbed after the strict lane passes', () => {
+    const f = makeRecordFixture({
+      reviewBody: 'APPROVE',
+      initialEntries: [
+        {
+          pr_number: 495,
+          target_merge_commit: '1111111111111111111111111111111111111111',
+          decision: 'public-only',
+          timestamp: '2026-04-24T20:00:00.000Z',
+        },
+      ],
+    });
+    fixtures.push(f.sandboxRoot);
+    const env = { PATH: `${f.mockBin}:${process.env.PATH}` };
+    const output = runRecord(
+      f.repoRoot,
+      [
+        '--pr',
+        '495',
+        '--decision',
+        'absorbed',
+        '--intent-issue',
+        '1234',
+        '--absorb-pr',
+        '1236',
+        '--review-proof',
+        'https://github.com/zts212653/clowder-ai/pull/1236#pullrequestreview-42',
+      ],
+      env,
+    );
+
+    assert.match(output, /Upgraded PR #495: public-only → absorbed/);
+    const ledger = JSON.parse(readFileSync(f.ledgerPath, 'utf-8'));
+    const records = ledger.entries.filter((entry) => entry.pr_number === 495);
+    assert.equal(records.length, 1, 'reclassification must update the existing row, not create a duplicate');
+    assert.equal(records[0].decision, 'absorbed');
+    assert.equal(records[0].previous_decision, 'public-only');
+    assert.equal(records[0].intake_intent_issue, 1234);
+    assert.equal(records[0].absorb_pr, 1236);
+    assert.equal(records[0].review_proof, 'https://github.com/zts212653/clowder-ai/pull/1236#pullrequestreview-42');
+  });
+
+  it('rejects an absorbed upgrade with a null merge commit without mutating the provisional ledger', () => {
+    const f = makeRecordFixture({
+      reviewBody: 'APPROVE',
+      targetMergeCommit: null,
+      initialEntries: [
+        {
+          pr_number: 495,
+          target_merge_commit: '1111111111111111111111111111111111111111',
+          decision: 'public-only',
+          timestamp: '2026-04-24T20:00:00.000Z',
+        },
+      ],
+    });
+    fixtures.push(f.sandboxRoot);
+    const env = { PATH: `${f.mockBin}:${process.env.PATH}` };
+    const ledgerBefore = readFileSync(f.ledgerPath, 'utf-8');
+    const err = captureRecordFailure(
+      f.repoRoot,
+      [
+        '--pr',
+        '495',
+        '--decision',
+        'absorbed',
+        '--intent-issue',
+        '1234',
+        '--absorb-pr',
+        '1236',
+        '--review-proof',
+        'https://github.com/zts212653/clowder-ai/pull/1236#pullrequestreview-42',
+      ],
+      env,
+    );
+
+    assert.match(err.stdout, /has no merge commit SHA; refusing to record intake provenance/);
+    assert.equal(
+      readFileSync(f.ledgerPath, 'utf-8'),
+      ledgerBefore,
+      'failed upgrade must leave the ledger byte-identical',
+    );
   });
 
   it('blocks absorbed record when absorb PR includes a file outside the Intent Issue table and exceptions', () => {
@@ -2769,6 +3168,70 @@ describe('intake-from-opensource.sh --record strict guard (absorbed)', () => {
     assert.equal(record.review_proof, undefined, 'skip path must not write review_proof: ""');
     assert.equal(record.intent_issue, undefined, 'legacy field name must not appear');
     assert.equal(record.notes, undefined, 'schema uses singular "note" not "notes"');
+  });
+
+  it('records a merged zero-diff historical backfill when the source files API is legitimately empty', () => {
+    const f = makeRecordFixture({ targetPrFiles: [], targetChangedFiles: 0 });
+    fixtures.push(f.sandboxRoot);
+    const env = { PATH: `${f.mockBin}:${process.env.PATH}` };
+
+    const output = runRecord(f.repoRoot, ['--pr', '495', '--decision', 'absorbed', '--skip-absorbed-guard'], env);
+
+    assert.match(output, /zero-diff historical backfill/i);
+    assert.match(output, /Recorded PR #495 → absorbed/);
+    const ledger = JSON.parse(readFileSync(f.ledgerPath, 'utf-8'));
+    assert.equal(ledger.entries.find((entry) => entry.pr_number === 495)?.decision, 'absorbed');
+  });
+
+  it('fails closed when an empty source files response conflicts with a nonzero changedFiles count', () => {
+    const f = makeRecordFixture({ targetPrFiles: [], targetChangedFiles: 1 });
+    fixtures.push(f.sandboxRoot);
+    const env = { PATH: `${f.mockBin}:${process.env.PATH}` };
+
+    const error = captureRecordFailure(
+      f.repoRoot,
+      ['--pr', '495', '--decision', 'absorbed', '--skip-absorbed-guard'],
+      env,
+    );
+
+    assert.match(stripAnsi(String(error.stdout || '')), /Cannot resolve source PR #495 files/i);
+  });
+
+  it('fails closed when an unmerged source PR reports zero changed files', () => {
+    const f = makeRecordFixture({ targetPrFiles: [], targetChangedFiles: 0, targetPrState: 'OPEN' });
+    fixtures.push(f.sandboxRoot);
+    const env = { PATH: `${f.mockBin}:${process.env.PATH}` };
+
+    const error = captureRecordFailure(
+      f.repoRoot,
+      ['--pr', '495', '--decision', 'absorbed', '--skip-absorbed-guard'],
+      env,
+    );
+
+    assert.match(stripAnsi(String(error.stdout || '')), /Cannot resolve source PR #495 files/i);
+  });
+
+  it('fails closed when the source files API fails for a merged zero-diff PR', () => {
+    const f = makeRecordFixture({
+      targetPrFiles: [],
+      targetChangedFiles: 0,
+      targetPrFilesApiFails: true,
+    });
+    fixtures.push(f.sandboxRoot);
+    const env = { PATH: `${f.mockBin}:${process.env.PATH}` };
+
+    const error = captureRecordFailure(
+      f.repoRoot,
+      ['--pr', '495', '--decision', 'absorbed', '--skip-absorbed-guard'],
+      env,
+    );
+
+    assert.match(stripAnsi(error.stdout), /Cannot fetch source PR #495 files/i);
+    const ledger = JSON.parse(readFileSync(f.ledgerPath, 'utf-8'));
+    assert.equal(
+      ledger.entries.some((entry) => entry.pr_number === 495),
+      false,
+    );
   });
 
   it('does not degrade to whole-repo Brand Guard when --skip-absorbed-guard is used with a pre-existing brand pattern present in the repo', () => {

@@ -110,6 +110,15 @@ export interface EvalHubLifecycleView {
     ownerCatId: string;
     candidateThreadIds: string[];
   };
+  custodyDispatchBlocker?: {
+    eventId: string;
+    stage: 'responsibility' | 'reevaluation';
+    reasonCode: 'carrier_persist_failed' | 'carrier_delivery_failed' | 'carrier_not_enqueued';
+    taskId: string;
+    leaseId: string;
+    leaseGeneration: number;
+    carrierMessageId?: string;
+  };
   mainCommitSha?: string;
   liveCommitSha?: string;
   ownerResponseRefs?: EvalLifecycleRef[];

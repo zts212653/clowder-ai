@@ -22,7 +22,19 @@ VENV_DIR="${CAT_CAFE_HOME}/audio-capture-venv"
 PORT="${AUDIO_SERVICE_PORT:-9881}"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 AUDIO_PY="$REPO_ROOT/scripts/meeting-copilot/audio-service.py"
+CAPTURE_BUILD_SCRIPT="$REPO_ROOT/scripts/meeting-copilot/build-capture.sh"
 echo "[start] resolved runtime: CAT_CAFE_HOME=$CAT_CAFE_HOME; venv=$VENV_DIR; python=python3; api=$AUDIO_PY; port=$PORT"
+
+# CaptureAppAudio is an ignored native artifact. A source checkout/restart can
+# therefore carry a binary compiled from an older Swift source revision. Bind
+# freshness to every service start so a normal runtime restart is sufficient.
+if [ "$(uname -s)" = "Darwin" ]; then
+  if [ ! -f "$CAPTURE_BUILD_SCRIPT" ]; then
+    echo "ERROR: CaptureAppAudio build script not found: $CAPTURE_BUILD_SCRIPT" >&2
+    exit 1
+  fi
+  bash "$CAPTURE_BUILD_SCRIPT" --if-needed
+fi
 
 if [ ! -d "$VENV_DIR" ]; then
   echo "[start] venv not found: $VENV_DIR -- auto-installing..." >&2

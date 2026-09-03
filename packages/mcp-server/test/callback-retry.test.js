@@ -17,7 +17,7 @@
 import assert from 'node:assert/strict';
 import { afterEach, beforeEach, describe, test } from 'node:test';
 
-describe('postJsonWithRetry — fetch timeout (hung socket)', () => {
+describe('postJsonWithRetry', () => {
   let originalEnv;
   let originalFetch;
 
@@ -85,5 +85,47 @@ describe('postJsonWithRetry — fetch timeout (hung socket)', () => {
 
     const result = await postJsonWithRetry('http://127.0.0.1:1/x', '{}', [0, 0]);
     assert.equal(result.ok, true, 'a fast response must not be aborted by the timeout');
+  });
+
+  test('does not retry terminal GitHub credential validation failures', async () => {
+    const { postJsonWithRetry } = await import('../dist/tools/callback-retry.js');
+
+    for (const code of ['github_authentication_required', 'github_permission_denied']) {
+      let attemptCount = 0;
+      globalThis.fetch = async () => {
+        attemptCount += 1;
+        return {
+          ok: false,
+          status: 503,
+          text: async () => JSON.stringify({ error: 'GitHub validation failed', code }),
+        };
+      };
+
+      const result = await postJsonWithRetry('http://127.0.0.1:1/x', '{}', [0, 0, 0]);
+
+      assert.equal(attemptCount, 1, `${code} cannot recover through transport retry`);
+      assert.deepEqual(result, {
+        ok: false,
+        failure: {
+          error: `Callback failed (503): ${JSON.stringify({ error: 'GitHub validation failed', code })}`,
+          retryable: false,
+        },
+      });
+    }
+  });
+
+  test('continues retrying an unclassified 503 response', async () => {
+    const { postJsonWithRetry } = await import('../dist/tools/callback-retry.js');
+    let attemptCount = 0;
+    globalThis.fetch = async () => {
+      attemptCount += 1;
+      return { ok: false, status: 503, text: async () => JSON.stringify({ error: 'temporarily unavailable' }) };
+    };
+
+    const result = await postJsonWithRetry('http://127.0.0.1:1/x', '{}', [0, 0, 0]);
+
+    assert.equal(attemptCount, 4);
+    assert.equal(result.ok, false);
+    assert.equal(result.failure.retryable, true);
   });
 });

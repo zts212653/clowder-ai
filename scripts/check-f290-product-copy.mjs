@@ -1,14 +1,31 @@
 #!/usr/bin/env node
 
-import { readdirSync, readFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { dirname, extname, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const SCRIPT_PATH = fileURLToPath(import.meta.url);
 const REPO_ROOT = resolve(dirname(SCRIPT_PATH), '..');
-const PRODUCT_DIRECTORY = resolve(REPO_ROOT, 'packages/web/src/app/dev/f290-asset-collaboration');
+const PRODUCT_PATHS = [
+  'packages/collective-client/src',
+  'packages/web/src/components/collective',
+  'packages/web/src/components/settings/OfficialPluginCard.tsx',
+  'packages/api/src/domains/plugin/official-catalog.ts',
+  'packages/web/src/app/dev/f290-asset-collaboration',
+];
 
-const FORBIDDEN_TERMS = ['镜片', 'canonical', '判断门', 'inspector', 'gate', 'endpoint', '望窗', 'lineage', '轨迹层'];
+const FORBIDDEN_TERMS = [
+  '镜片',
+  '判断门',
+  'inspector',
+  '望窗',
+  '轨迹层',
+  'canonical client',
+  'canonical order',
+  'service truth',
+  'backed by the service event log',
+  'ack #',
+];
 const SCANNED_EXTENSIONS = new Set(['.json', '.ts', '.tsx']);
 
 export function findForbiddenProductTerms(text) {
@@ -18,22 +35,23 @@ export function findForbiddenProductTerms(text) {
   );
 }
 
-function listProductFiles(directory) {
-  const entries = readdirSync(directory, { withFileTypes: true });
+function listProductFiles(path) {
+  if (!existsSync(path)) return [];
+  if (statSync(path).isFile()) return SCANNED_EXTENSIONS.has(extname(path)) ? [path] : [];
   const files = [];
-  for (const entry of entries) {
+  for (const entry of readdirSync(path, { withFileTypes: true })) {
     if (entry.name === '__tests__') continue;
-    const path = resolve(directory, entry.name);
-    if (entry.isDirectory()) files.push(...listProductFiles(path));
-    else if (SCANNED_EXTENSIONS.has(extname(entry.name))) files.push(path);
+    const child = resolve(path, entry.name);
+    if (entry.isDirectory()) files.push(...listProductFiles(child));
+    else if (SCANNED_EXTENSIONS.has(extname(entry.name))) files.push(child);
   }
   return files;
 }
 
 export function scanF290ProductCopy(root = REPO_ROOT) {
-  const productDirectory = resolve(root, relative(REPO_ROOT, PRODUCT_DIRECTORY));
   const findings = [];
-  for (const path of listProductFiles(productDirectory)) {
+  const files = PRODUCT_PATHS.flatMap((path) => listProductFiles(resolve(root, path)));
+  for (const path of files) {
     const content = readFileSync(path, 'utf8');
     for (const [lineIndex, line] of content.split('\n').entries()) {
       for (const term of findForbiddenProductTerms(line)) {
@@ -47,7 +65,7 @@ export function scanF290ProductCopy(root = REPO_ROOT) {
 function main() {
   const findings = scanF290ProductCopy();
   if (findings.length === 0) {
-    console.log('[check:f290-product-copy] PASS — no internal vocabulary in the asset experience');
+    console.log('[check:f290-product-copy] PASS — production Collective surfaces use product language');
     return;
   }
 

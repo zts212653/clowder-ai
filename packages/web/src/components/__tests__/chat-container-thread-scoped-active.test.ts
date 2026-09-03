@@ -19,6 +19,15 @@ import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ChatContainer } from '@/components/ChatContainer';
+import { ThreadChatRuntimeProvider } from '@/components/thread-chat';
+
+function renderChatContainer(threadId: string) {
+  return React.createElement(
+    ThreadChatRuntimeProvider,
+    { routeThreadId: threadId },
+    React.createElement(ChatContainer, { threadId }),
+  );
+}
 
 const capturedChatInputProps: Array<{ hasActiveInvocation?: boolean; threadId: string }> = [];
 
@@ -123,6 +132,7 @@ vi.mock('../RightStatusPanel', () => ({ RightStatusPanel: () => null }));
 vi.mock('../ScrollToBottomButton', () => ({ ScrollToBottomButton: () => null }));
 vi.mock('../SplitPaneView', () => ({
   SplitPaneView: ({ children }: { children?: React.ReactNode }) => children ?? null,
+  SplitPaneChatView: ({ children }: { children?: React.ReactNode }) => children ?? null,
 }));
 vi.mock('../ThinkingIndicator', () => ({ ThinkingIndicator: () => null }));
 vi.mock('../ThreadExecutionBar', () => ({ ThreadExecutionBar: () => null }));
@@ -194,7 +204,7 @@ describe('F173 Phase C Task 2 — ChatContainer.hasActiveInvocation thread-scope
     };
 
     act(() => {
-      root.render(React.createElement(ChatContainer, { threadId: 'thread-b' }));
+      root.render(renderChatContainer('thread-b'));
     });
 
     const lastProps = capturedChatInputProps.at(-1);
@@ -212,7 +222,7 @@ describe('F173 Phase C Task 2 — ChatContainer.hasActiveInvocation thread-scope
     storeState.activeInvocations = { 'inv-a': { catId: 'opus', mode: 'execute' } };
 
     act(() => {
-      root.render(React.createElement(ChatContainer, { threadId: 'thread-a' }));
+      root.render(renderChatContainer('thread-a'));
     });
 
     const lastProps = capturedChatInputProps.at(-1);
@@ -249,7 +259,7 @@ describe('F173 Phase C Task 2 — ChatContainer.hasActiveInvocation thread-scope
     };
 
     act(() => {
-      root.render(React.createElement(ChatContainer, { threadId: 'thread-b' }));
+      root.render(renderChatContainer('thread-b'));
     });
 
     const lastProps = capturedChatInputProps.at(-1);

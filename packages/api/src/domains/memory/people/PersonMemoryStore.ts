@@ -82,6 +82,11 @@ export interface StoredPersonMemoryCandidate
   replacedByProposalId?: CaptureCandidateId;
 }
 
+export interface StoredPersonMemorySettledCandidate {
+  candidate: StoredPersonMemoryCandidate;
+  decidedAt: number;
+}
+
 export interface PersonMemoryDecisionReceipt {
   decisionId: string;
   candidateId: CaptureCandidateId;
@@ -234,6 +239,7 @@ export interface PersonMemoryStore {
   ): Promise<RenewDeferredPersonMemoryCandidateClaimResult>;
   getCandidateForOwner(ownerUserId: string, candidateId: string): Promise<StoredPersonMemoryCandidate | null>;
   listPending(ownerUserId: string, limit?: number): Promise<StoredPersonMemoryCandidate[]>;
+  listSettled(ownerUserId: string, limit?: number): Promise<StoredPersonMemorySettledCandidate[]>;
   resolvePendingCandidateBySubject(ownerUserId: string, subject: string): Promise<StoredPersonMemoryCandidate | null>;
   resolveDormantCandidateBySubject(ownerUserId: string, subject: string): Promise<PersonMemorySuppressionToken | null>;
   getPublication(candidateId: string, ownerUserId?: string): Promise<ApprovalPublication | null>;

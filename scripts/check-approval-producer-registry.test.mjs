@@ -38,6 +38,22 @@ describe('F246 approval producer parity checker', () => {
     assert.deepEqual(validateApprovalProducerRegistrySources(valid), []);
   });
 
+  it('keeps scanning bindings after an adapter-owned callback closes', () => {
+    const violations = validateApprovalProducerRegistrySources({
+      ...valid,
+      apiCompositionSource: `
+const approvalProducerRegistry = new ApprovalProducerRegistry({
+    F128: bindLegacy(new Adapter(store, (row) => {
+      return row.id;
+    })),
+    F225: { adapter: f225 },
+    authorization: { adapter: authorization },
+  });
+`,
+    });
+    assert.deepEqual(violations, []);
+  });
+
   it('reports missing and extra API bindings', () => {
     const violations = validateApprovalProducerRegistrySources({
       ...valid,

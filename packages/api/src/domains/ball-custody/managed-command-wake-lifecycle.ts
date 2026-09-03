@@ -16,6 +16,7 @@ import {
  * 此处 re-export 保持既有 import 路径不变；判别仍然只有一份实现。
  */
 export {
+  buildAdmissionFactIdempotencyKey,
   createInitialManagedCommandWakeProjection,
   HOLD_BALL_TASK_ID_PREFIX,
   isHoldBallWakeTask,
@@ -114,7 +115,7 @@ export interface ManagedCommandWakeDynamicTaskStore {
 
 export interface ManagedCommandWakeRecoveryDeps {
   readonly dynamicTaskStore: ManagedCommandWakeDynamicTaskStore;
-  readonly messageStore: Pick<IMessageStore, 'append' | 'getByIdempotencyKey'> &
+  readonly messageStore: Pick<IMessageStore, 'append' | 'getByIdempotencyKey' | 'markCanceled'> &
     Partial<Pick<IMessageStore, 'getById'>>;
   readonly socketManager: { broadcastToRoom(room: string, event: string, payload: unknown): void };
   readonly taskRunner: { unregister(taskId: string): void };
@@ -169,7 +170,7 @@ export function buildCancelledManagedCommandCompletionParams(
     !command ||
     command.state !== 'command_running' ||
     !isPlainRecord(lifecycle) ||
-    lifecycle.status !== 'cancelled_by_user'
+    (lifecycle.status !== 'cancelled_by_user' && lifecycle.status !== 'cancel_requested')
   ) {
     return null;
   }
@@ -177,6 +178,7 @@ export function buildCancelledManagedCommandCompletionParams(
     ...task.params,
     holdLifecycle: {
       ...lifecycle,
+      status: 'cancelled_by_user',
       managedCommand: {
         ...command,
         state: 'cancelled',

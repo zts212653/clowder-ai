@@ -2,6 +2,7 @@ import type { CollectionSensitivity } from './collection-types.js';
 import { COLLECTION_SENSITIVITY_ORDER } from './collection-types.js';
 import { computeEdgeWeight } from './graph-edge-weight.js';
 import type { EvidenceItem } from './interfaces.js';
+import { isGenericRecallEligible, isGenericRecallEligibleAnchor } from './recall-delivery-eligibility.js';
 
 export interface GraphStore {
   getByAnchor(anchor: string): Promise<EvidenceItem | null>;
@@ -83,11 +84,12 @@ async function inferCollectionId(
   catalog: CatalogLike,
   stores: Map<string, GraphStore>,
 ): Promise<string | undefined> {
+  if (!isGenericRecallEligibleAnchor(anchor)) return undefined;
   const fast = inferCollectionIdSync(anchor, catalog);
   if (fast) return fast;
   for (const [collectionId, s] of stores) {
     const doc = await s.getByAnchor(anchor);
-    if (doc) return collectionId;
+    if (doc && isGenericRecallEligible(doc)) return collectionId;
   }
   return undefined;
 }
@@ -115,6 +117,7 @@ export class GraphResolver {
 
   async buildSubgraph(anchor: string, opts?: BuildSubgraphOptions): Promise<GraphResult> {
     const depth = opts?.depth ?? 1;
+    if (!isGenericRecallEligibleAnchor(anchor)) return { nodes: [], edges: [], depth };
     const callerCollections = new Set(opts?.callerCollections ?? []);
     const relationFilter = opts?.relations && opts.relations.length > 0 ? new Set<string>(opts.relations) : null;
     const nodesMap = new Map<string, GraphNode>();
@@ -159,7 +162,7 @@ export class GraphResolver {
     ): Promise<boolean> => {
       if (lookupAnchor === canonicalAnchor) return true;
       const lookupDoc = await store.getByAnchor(lookupAnchor);
-      return lookupDoc?.anchor === canonicalAnchor;
+      return Boolean(lookupDoc && isGenericRecallEligible(lookupDoc) && lookupDoc.anchor === canonicalAnchor);
     };
 
     for (let d = 0; d <= depth && frontier.length > 0; d++) {
@@ -167,11 +170,14 @@ export class GraphResolver {
 
       for (const currentAnchor of frontier) {
         if (visited.has(currentAnchor)) continue;
+        if (!isGenericRecallEligibleAnchor(currentAnchor)) continue;
         visited.add(currentAnchor);
 
         const preferredCollectionId = d === 0 && currentAnchor === anchor ? opts?.centerCollectionId : undefined;
         const preferredStore = preferredCollectionId ? this.stores.get(preferredCollectionId) : undefined;
-        const preferredDoc = preferredStore ? await preferredStore.getByAnchor(currentAnchor) : null;
+        const preferredCandidate = preferredStore ? await preferredStore.getByAnchor(currentAnchor) : null;
+        const preferredDoc =
+          preferredCandidate && isGenericRecallEligible(preferredCandidate) ? preferredCandidate : null;
         const collectionId =
           preferredCollectionId && preferredDoc
             ? preferredCollectionId
@@ -198,8 +204,10 @@ export class GraphResolver {
         const isRedacted =
           (sensitivity === 'private' || sensitivity === 'restricted') && !callerCollections.has(collectionId);
         const store = collectionId ? this.stores.get(collectionId) : undefined;
-        const doc = preferredDoc ?? (store ? await store.getByAnchor(currentAnchor) : null);
+        const storeCandidate = preferredDoc ? null : store ? await store.getByAnchor(currentAnchor) : null;
+        const doc = preferredDoc ?? (storeCandidate && isGenericRecallEligible(storeCandidate) ? storeCandidate : null);
         const canonicalAnchor = doc?.anchor ?? currentAnchor;
+        if (!isGenericRecallEligibleAnchor(canonicalAnchor)) continue;
         rememberLookupAlias(canonicalAnchor, currentAnchor);
 
         if (d === 0 && currentAnchor === anchor) {
@@ -241,6 +249,7 @@ export class GraphResolver {
             if (!(await canUseLookupAnchorInStore(s, lookupAnchor, canonicalAnchor))) continue;
             const related = await s.getRelated(lookupAnchor);
             for (const rel of related) {
+              if (!isGenericRecallEligibleAnchor(rel.anchor)) continue;
               if (!relationTouchesCollection(collectionId, rel)) continue;
               if (relationFilter && !relationFilter.has(rel.relation)) continue;
               const currentNodeEdges = nodeEdgeCount.get(canonicalAnchor) ?? 0;
@@ -251,8 +260,10 @@ export class GraphResolver {
               }
               const relCollectionId = await inferCollectionId(rel.anchor, this.catalog, this.stores);
               const relStore = relCollectionId ? this.stores.get(relCollectionId) : undefined;
-              const relDoc = relStore ? await relStore.getByAnchor(rel.anchor) : null;
+              const relCandidate = relStore ? await relStore.getByAnchor(rel.anchor) : null;
+              const relDoc = relCandidate && isGenericRecallEligible(relCandidate) ? relCandidate : null;
               const relCanonicalAnchor = relDoc?.anchor ?? rel.anchor;
+              if (!isGenericRecallEligibleAnchor(relCanonicalAnchor)) continue;
               rememberLookupAlias(relCanonicalAnchor, rel.anchor);
               const isCross = collectionId !== relCollectionId;
               const relManifest = relCollectionId ? this.catalog.get(relCollectionId) : undefined;

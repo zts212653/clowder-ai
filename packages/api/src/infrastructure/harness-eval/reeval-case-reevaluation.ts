@@ -3,8 +3,10 @@ import type { ActionSuccessorAdmissionService } from '../../domains/ball-custody
 import type { ActionSuccessorLease } from '../../domains/ball-custody/action-successor-state-machine.js';
 import type { ITaskStore } from '../../domains/cats/services/stores/ports/TaskStore.js';
 import { projectReevalCase } from './reeval-case.js';
+import { appendCustodyDispatchBlocker } from './reeval-case-custody-blocker.js';
 import { isLaterReevalCycle } from './reeval-case-cycle-order.js';
 import type { ReevalCaseResponsibilityContext } from './reeval-case-responsibility.js';
+import type { ReevalCaseTaskDispatchPort } from './reeval-case-task-dispatch.js';
 import type { IReevalClosureEventLog } from './reeval-closure-event-log.js';
 import type { ReevalCaseReconcileSubject } from './reeval-closure-reconciler.js';
 import type { EvalLifecycleEvent } from './reeval-closure-schema.js';
@@ -13,12 +15,14 @@ export interface ReevalCaseReevaluationServiceOptions {
   taskStore: Pick<ITaskStore, 'get' | 'getBySubject' | 'upsertBySubject' | 'update'>;
   eventLog: Pick<IReevalClosureEventLog, 'append'>;
   admissionService: Pick<ActionSuccessorAdmissionService, 'admit'>;
+  taskDispatcher: ReevalCaseTaskDispatchPort;
   ownerUserId: string;
   now?: () => string;
 }
 
 export type ReevalCaseReevaluationResult =
   | { outcome: 'requested' | 'duplicate'; task: TaskItem; lease: ActionSuccessorLease }
+  | { outcome: 'blocked'; task: TaskItem; lease: ActionSuccessorLease }
   | { outcome: 'settled'; taskIds: string[] }
   | { outcome: 'not_due' }
   | { outcome: 'conflict'; actualSequence: number };
@@ -201,6 +205,29 @@ export class ReevalCaseReevaluationService {
     const activeTask =
       task.status === 'doing' ? task : await this.options.taskStore.update(task.id, { status: 'doing' });
     if (!activeTask) throw new Error(`failed to activate re-evaluation task ${task.id}`);
+    const carrier = await this.options.taskDispatcher.dispatch({
+      kind: 'reevaluation',
+      caseId: subject.caseRoot.caseId,
+      verdictId: due.root.verdictId,
+      sourceThreadId: context.systemThreadId,
+      callerCatId: context.evalCatId,
+      task: activeTask,
+      lease,
+    });
+    if (carrier.outcome === 'blocked') {
+      const append = await appendCustodyDispatchBlocker({
+        eventLog: this.options.eventLog,
+        subject,
+        activeVerdictId: due.root.verdictId,
+        stage: 'reevaluation',
+        task: activeTask,
+        lease,
+        dispatch: carrier,
+        occurredAt,
+      });
+      if (append.outcome === 'conflict') return append;
+      return { outcome: 'blocked', task: activeTask, lease };
+    }
     const reevalWithinHours = requireReevaluationSla(subject);
     const dueAt = new Date(Date.parse(occurredAt) + reevalWithinHours * 3_600_000).toISOString();
     const append = await this.options.eventLog.append(
@@ -221,6 +248,7 @@ export class ReevalCaseReevaluationService {
         refs: [
           { kind: 'task', availability: 'available', value: `task:${activeTask.id}` },
           { kind: 'other', availability: 'available', value: `action-successor:${lease.leaseId}:${lease.generation}` },
+          { kind: 'other', availability: 'available', value: `message:${carrier.messageId}` },
         ],
       },
       subject.events.length,

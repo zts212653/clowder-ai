@@ -3,7 +3,7 @@
  *
  * Rules:
  *   - Max 3 nudges per message (already handled by InputEntityDetector.maxResults)
- *   - 24h cooldown per entity per thread: same entity in same thread = suppress
+ *   - 24h cooldown per entity per consumer per thread: same cat = suppress
  *   - Context dedup: already in conversation context = suppress (handled by detector)
  *
  * [宪宪/Claude Opus 4.6🐾]
@@ -13,6 +13,7 @@ import assert from 'node:assert/strict';
 import { beforeEach, describe, it } from 'node:test';
 
 let EntityNudgeCooldown;
+const CAT_ID = 'codex-sol';
 
 describe('EntityNudgeCooldown (AC-B4)', () => {
   beforeEach(async () => {
@@ -22,48 +23,48 @@ describe('EntityNudgeCooldown (AC-B4)', () => {
 
   it('allows first nudge for an entity in a thread', () => {
     const cooldown = new EntityNudgeCooldown();
-    const allowed = cooldown.isAllowed('concept:未婚喵', 'thread-1', Date.now());
+    const allowed = cooldown.isAllowed('concept:未婚喵', 'thread-1', CAT_ID, Date.now());
     assert.equal(allowed, true);
   });
 
   it('suppresses same entity in same thread within 24h', () => {
     const cooldown = new EntityNudgeCooldown();
     const now = Date.now();
-    cooldown.record('concept:未婚喵', 'thread-1', now);
-    const allowed = cooldown.isAllowed('concept:未婚喵', 'thread-1', now + 1000);
+    cooldown.record('concept:未婚喵', 'thread-1', CAT_ID, now);
+    const allowed = cooldown.isAllowed('concept:未婚喵', 'thread-1', CAT_ID, now + 1000);
     assert.equal(allowed, false, 'should suppress within 24h');
   });
 
   it('allows same entity in different thread', () => {
     const cooldown = new EntityNudgeCooldown();
     const now = Date.now();
-    cooldown.record('concept:未婚喵', 'thread-1', now);
-    const allowed = cooldown.isAllowed('concept:未婚喵', 'thread-2', now + 1000);
+    cooldown.record('concept:未婚喵', 'thread-1', CAT_ID, now);
+    const allowed = cooldown.isAllowed('concept:未婚喵', 'thread-2', CAT_ID, now + 1000);
     assert.equal(allowed, true, 'different thread should not be suppressed');
   });
 
   it('allows same entity after 24h cooldown expires', () => {
     const cooldown = new EntityNudgeCooldown();
     const now = Date.now();
-    cooldown.record('concept:未婚喵', 'thread-1', now);
+    cooldown.record('concept:未婚喵', 'thread-1', CAT_ID, now);
 
     const after24h = now + 24 * 60 * 60 * 1000 + 1;
-    const allowed = cooldown.isAllowed('concept:未婚喵', 'thread-1', after24h);
+    const allowed = cooldown.isAllowed('concept:未婚喵', 'thread-1', CAT_ID, after24h);
     assert.equal(allowed, true, 'should allow after 24h expiry');
   });
 
   it('allows different entity in same thread', () => {
     const cooldown = new EntityNudgeCooldown();
     const now = Date.now();
-    cooldown.record('concept:未婚喵', 'thread-1', now);
-    const allowed = cooldown.isAllowed('concept:新梗', 'thread-1', now + 1000);
+    cooldown.record('concept:未婚喵', 'thread-1', CAT_ID, now);
+    const allowed = cooldown.isAllowed('concept:新梗', 'thread-1', CAT_ID, now + 1000);
     assert.equal(allowed, true, 'different entity should not be suppressed');
   });
 
   it('filterNudges removes cooldown-suppressed entities', () => {
     const cooldown = new EntityNudgeCooldown();
     const now = Date.now();
-    cooldown.record('concept:未婚喵', 'thread-1', now);
+    cooldown.record('concept:未婚喵', 'thread-1', CAT_ID, now);
 
     const nudges = [
       { entityId: 'concept:未婚喵', kind: 'entity_nudge' },
@@ -71,7 +72,7 @@ describe('EntityNudgeCooldown (AC-B4)', () => {
       { docAnchor: 'some-doc.md', kind: 'entity_nudge' },
     ];
 
-    const filtered = cooldown.filterNudges(nudges, 'thread-1', now + 1000);
+    const filtered = cooldown.filterNudges(nudges, 'thread-1', CAT_ID, now + 1000);
     assert.equal(filtered.length, 2, 'should remove suppressed entity');
     assert.ok(!filtered.some((n) => n.entityId === 'concept:未婚喵'));
     assert.ok(filtered.some((n) => n.entityId === 'concept:新梗'));
@@ -87,9 +88,16 @@ describe('EntityNudgeCooldown (AC-B4)', () => {
       { docAnchor: 'some-doc.md', kind: 'entity_nudge' },
     ];
 
-    cooldown.recordAll(nudges, 'thread-1', now);
+    cooldown.recordAll(nudges, 'thread-1', CAT_ID, now);
 
-    assert.equal(cooldown.isAllowed('concept:未婚喵', 'thread-1', now + 1000), false);
-    assert.equal(cooldown.isAllowed('some-doc.md', 'thread-1', now + 1000), false);
+    assert.equal(cooldown.isAllowed('concept:未婚喵', 'thread-1', CAT_ID, now + 1000), false);
+    assert.equal(cooldown.isAllowed('some-doc.md', 'thread-1', CAT_ID, now + 1000), false);
+  });
+
+  it('does not let one cat consume another cat’s cooldown', () => {
+    const cooldown = new EntityNudgeCooldown();
+    const now = Date.now();
+    cooldown.record('concept:未婚喵', 'thread-1', 'codex-sol', now);
+    assert.equal(cooldown.isAllowed('concept:未婚喵', 'thread-1', 'fable5', now + 1000), true);
   });
 });

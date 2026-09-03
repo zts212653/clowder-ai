@@ -76,6 +76,33 @@ describe('GET /api/messages', () => {
     assert.equal(body.messages[1].content, 'hi there');
   });
 
+  it('F306 hydrates the durable semantic event used by the shared projector', async () => {
+    const semanticEvent = {
+      v: 1,
+      id: 'native-review:review-1:result',
+      kind: 'review',
+      occurredAt: 2_000,
+      reviewId: 'review-1',
+      stage: 'result',
+      summary: 'Review complete',
+      provenance: { provider: 'openai_codex', carrier: 'app_server' },
+    };
+    messageStore.append({
+      userId: 'default-user',
+      catId: 'codex',
+      content: 'provider wire copy must not become hydration truth',
+      mentions: [],
+      timestamp: 2_000,
+      threadId: 'thread-semantic-hydration',
+      extra: { semanticEvent },
+    });
+
+    const res = await app.inject({ method: 'GET', url: '/api/messages?threadId=thread-semantic-hydration' });
+
+    assert.equal(res.statusCode, 200);
+    assert.deepEqual(res.json().messages[0].extra.semanticEvent, semanticEvent);
+  });
+
   it('F247 F5 hydrates a durable cloud outbound receipt from its exact source without copying the body', async () => {
     const source = messageStore.append({
       userId: 'default-user',
@@ -261,6 +288,95 @@ describe('GET /api/messages', () => {
     assert.equal(body.messages[0].id, queued.id);
     assert.equal(body.messages[0].deliveredAt, undefined);
     assert.deepEqual(body.messages[0].extra.queueReceipt.targets, [{ catId: 'opus', state: 'queued' }]);
+  });
+
+  it('publishes owner-bound queued connector intake before its cat turn completes and keeps authored order', async () => {
+    const intake = messageStore.append({
+      userId: 'default-user',
+      catId: null,
+      content: '[F292 Host-authored meeting-intake envelope]',
+      mentions: ['codex-sol'],
+      timestamp: 1_400,
+      threadId: 'thread-queued-connector-publication',
+      deliveryStatus: 'queued',
+      queueCustody: makeQueuedMessageCustody({
+        entryId: 'entry-queued-connector-publication',
+        allTargetCats: ['codex-sol'],
+        pendingTargetCats: ['codex-sol'],
+        createdAt: 1_400,
+        updatedAt: 1_400,
+      }),
+      source: {
+        connector: 'feishu',
+        label: '飞书会议入站 / 录音豆',
+        icon: 'feishu',
+      },
+    });
+    const reply = messageStore.append({
+      userId: 'default-user',
+      catId: 'codex-sol',
+      content: '猫已经开始处理',
+      mentions: [],
+      timestamp: 1_500,
+      threadId: 'thread-queued-connector-publication',
+    });
+
+    const queuedResponse = await app.inject({
+      method: 'GET',
+      url: '/api/messages?threadId=thread-queued-connector-publication',
+    });
+    const queuedBody = queuedResponse.json();
+
+    assert.deepEqual(
+      queuedBody.messages.map((message) => message.id),
+      [intake.id, reply.id],
+    );
+    assert.equal(queuedBody.messages[0].type, 'connector');
+    assert.equal(queuedBody.messages[0].source.label, '飞书会议入站 / 录音豆');
+    assert.deepEqual(queuedBody.messages[0].extra.queueReceipt.targets, [{ catId: 'codex-sol', state: 'queued' }]);
+
+    await messageStore.transitionQueueCustody(intake.id, {
+      expectedRevision: 1,
+      deliveredAt: 2_000,
+      next: {
+        ...intake.queueCustody,
+        revision: 2,
+        status: 'terminal',
+        pendingTargetCats: [],
+        seenByCatIds: ['codex-sol'],
+        bodyExposures: [
+          {
+            targetCatId: 'codex-sol',
+            invocationId: 'inv-queued-connector-publication',
+            seenAt: 1_450,
+          },
+        ],
+        handledByCatIds: ['codex-sol'],
+        targetOutcomeByCatId: {
+          'codex-sol': {
+            invocationId: 'inv-queued-connector-publication',
+            disposition: 'completed_with_turn',
+            evidenceRef: {
+              kind: 'invocation_lineage',
+              invocationId: 'inv-queued-connector-publication',
+            },
+            handledAt: 2_000,
+          },
+        },
+        updatedAt: 2_000,
+      },
+    });
+    const deliveredResponse = await app.inject({
+      method: 'GET',
+      url: '/api/messages?threadId=thread-queued-connector-publication',
+    });
+    const deliveredBody = deliveredResponse.json();
+    assert.deepEqual(
+      deliveredBody.messages.map((message) => message.id),
+      [intake.id, reply.id],
+    );
+    assert.equal(deliveredBody.messages[0].deliveredAt, 2_000);
+    assert.equal(deliveredBody.messages[0].timelineOrderAt, 1_400);
   });
 
   it('F264 keeps canceled queued user work out of browser history after F5', async () => {

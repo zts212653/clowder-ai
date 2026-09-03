@@ -10,7 +10,7 @@
     {
       "path": "packages/api/src/routes",
       "owner": "opus",
-      "reason": "2026-08-31 renewal (F23 gate option b). 287 files. Routes need a domain/HTTP-boundary split.",
+      "reason": "2026-08-31 renewal (F23 gate option b). 305 files. Routes need a domain/HTTP-boundary split.",
       "expiresAt": "2026-10-31",
       "ticket": "F23-followup"
     },
@@ -24,14 +24,14 @@
     {
       "path": "packages/api/src/domains/cats/services/agents/invocation",
       "owner": "opus",
-      "reason": "2026-08-31 renewal (F23 gate option b). 67 files. Invocation should split by queue/registry/tracker/progress/reconciliation/delivery/auth.",
+      "reason": "2026-08-31 renewal (F23 gate option b). 69 files. Invocation should split by queue/registry/tracker/progress/reconciliation/delivery/auth.",
       "expiresAt": "2026-10-31",
       "ticket": "F23-followup"
     },
     {
       "path": "packages/api/src/domains/cats/services/agents/providers",
       "owner": "opus",
-      "reason": "2026-08-31 renewal (F23 gate option b). 71 files. Providers should split by agents/event-transforms/carriers/image/config.",
+      "reason": "2026-08-31 renewal (F23 gate option b). 81 files. Providers should split by agents/event-transforms/carriers/image/config.",
       "expiresAt": "2026-10-31",
       "ticket": "F23-followup"
     },
@@ -45,21 +45,21 @@
     {
       "path": "packages/api/src/domains/memory",
       "owner": "gpt52",
-      "reason": "2026-08-31 renewal. 145 files. Memory spans indexing/query/governance/library; F102 owns the split.",
+      "reason": "2026-08-31 renewal. 146 files. Memory spans indexing/query/governance/library; F102 owns the split.",
       "expiresAt": "2026-10-31",
       "ticket": "F102"
     },
     {
       "path": "packages/api/src/utils",
       "owner": "codex",
-      "reason": "2026-08-31 renewal (F23 gate option b). 48 files. Utils should split by cli/process/media/paths/network/parsing/skills.",
+      "reason": "2026-08-31 renewal (F23 gate option b). 49 files. Utils should split by cli/process/media/paths/network/parsing/skills.",
       "expiresAt": "2026-10-31",
       "ticket": "F23-followup"
     },
     {
       "path": "packages/api/src/infrastructure/harness-eval",
       "owner": "opus",
-      "reason": "2026-08-31 renewal. 41 files. Harness eval should split by capability-wakeup/a2a/domain/hub; F192 owns the debt.",
+      "reason": "2026-08-31 renewal. 44 files. Harness eval should split by capability-wakeup/a2a/domain/hub; F192 owns the debt.",
       "expiresAt": "2026-10-31",
       "ticket": "F192"
     },
@@ -80,7 +80,7 @@
     {
       "path": "packages/api/src/domains/ball-custody",
       "owner": "codex-sol",
-      "reason": "2026-08-31 renewal. 74 files. Ball custody mixes action-successor, observability, typed wait termination; F167/F233/F280 own split.",
+      "reason": "2026-08-31 renewal. 79 files. Ball custody mixes action-successor, observability, typed wait termination; F167/F233/F280 own split.",
       "expiresAt": "2026-10-31",
       "ticket": "F167/F233/F280"
     },
@@ -94,14 +94,14 @@
     {
       "path": "packages/api/src/domains/cats/services/session",
       "owner": "codex-sol",
-      "reason": "2026-08-31 public recount: 33 files. Session lifecycle now mixes transcript IO, compaction/presentation projection, trajectory resolution, and handoff management; F296/F299 own a boundary-led split.",
+      "reason": "2026-08-22 full-sync census: 30 files. Session lifecycle now mixes transcript IO, compaction/presentation projection, trajectory resolution, and handoff management; F296/F299 own a boundary-led split.",
       "expiresAt": "2026-09-15",
       "ticket": "F296/F299"
     },
     {
       "path": "packages/api/src/domains/cats/services/stores/redis-keys",
       "owner": "codex-sol",
-      "reason": "2026-08-31 public recount: 24 files. Root Redis key families need session/presentation/registry grouping while preserving existing community and proposal subdomains; F296/F299 own the split.",
+      "reason": "2026-08-22 full-sync census: 25 files. Root Redis key families need session/presentation/registry grouping while preserving existing community and proposal subdomains; F296/F299 own the split.",
       "expiresAt": "2026-09-15",
       "ticket": "F296/F299"
     }

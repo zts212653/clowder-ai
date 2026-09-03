@@ -6,7 +6,7 @@ import { resolveDocsProfileScope } from './scope-resolver.mjs';
 const DEFAULT_THRESHOLD_MONTHS = 6;
 const FRONTMATTER_DRIFT_FIELDS = ['status', 'topics', 'doc_kind', 'feature_ids', 'related_features'];
 
-export function runScheduledDriftScan(repoRoot, options = {}) {
+export function runDriftHealthScan(repoRoot, options = {}) {
   const thresholdMonths = options.thresholdMonths ?? DEFAULT_THRESHOLD_MONTHS;
   const scope = resolveDocsProfileScope(repoRoot);
   const loaded = loadProfileEntries(scope.profile_enforced.map((entry) => entry.path));

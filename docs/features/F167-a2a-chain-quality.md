@@ -5,7 +5,7 @@ topics: [a2a, collaboration, harness-engineering, agent-readiness]
 doc_kind: spec
 created: 2026-04-17
 updated: 2026-08-26
-tips_exempt: renewed for the Case E16 product-coordinate and authorization lesson; the typed MCP action schema remains the only operable surface and no user action changed
+tips_exempt: renewed for the safe_wait carrier-liveness correction; the typed MCP action schema remains the only operable surface and no user action or capability-discovery path changed
 user_journey_exempt: protocol behavior has no direct UI surface; end-to-end custody is dogfooded through the real MCP/task path
 mcp_admission_status: accepted
 mcp_admission_ref: "file:docs/features/F167-a2a-chain-quality.md"
@@ -18,6 +18,11 @@ mcp_admission_claims:
   - ref: "file:docs/features/F167-a2a-chain-quality.md"
     toolName: cat_cafe_complete_a2a_dispatch
     resourceFamily: task-workflow
+    boundaryKind: authority-boundary
+    decision: accepted
+  - ref: "file:docs/features/F167-a2a-chain-quality.md"
+    toolName: cat_cafe_recover_external_review_verdict
+    resourceFamily: tracking-review
     boundaryKind: authority-boundary
     decision: accepted
 ---
@@ -810,6 +815,36 @@ operator experience："简直了你和Maine Coon是没头脑（Maine Coon听不�
 | 纠正轮次 | 本次先由 `0001787752296857-000614-5db2a57c` 纠正“只是在讲想法，不应直接干活”，再由 `0001787798861085-000028-f5e4622f` 冻结“Workspace 本体就是共同工作台”并明确授权删除乌龙。纠正后未继续实现 F307 UI，只清理 #3974 留下的独立 F290 surface / mode / persistence，并加入窄边界 guard。 |
 | 元心智哪条没执行 | Q1 角色与授权确认：当时应是共同定义产品的讨论伙伴，不是已经接到实现球的 author；Q3 坐标变换：没有把“共同工作台”放回现有三栏 shell 的 application-level 坐标，误当成 Workspace 内的 child feature。 |
 
+### Case E17: 把生产控制面建设压成预制 MVP 纵切片（2026-08-28，codex-sol）
+
+| 维度 | 内容 |
+|------|------|
+| 我以为 | F311 先选一个 Harness v1→v2 纵切片，搭出完整 Evolution Program 后再泛化，是最快的产品验证方式；现有 F192/F266/F278 故障可以作为首条真实 Program 的施工材料。 |
+| 实际要求 | 不造两个月后拆掉的玩具闭环。确定契约/运行闭环 bug 由 canonical owner 立即修；F311 与其并行建设最终会保留的生产控制面并接回 owner truth。首个 Evolution Program 还必须是有真实用户目标、明确 consumer 和 keep/tune/sunset 决策的**不确定效用** claim，不能把普通 bug 重新包装成“自进化”。 |
+| 偏差根因 | **惯例化 MVP 顺序覆盖终态架构 + 机制选择坍缩**：虽然 Owner Matrix 已写“引用不是所有权”，执行顺序仍沿用“先造容器、跑示范、再泛化”的产品模板；被第一次纠正后又差点把 F266 确定性 bug 填进 Program 槽，说明没有先按 claim 判断 test/telemetry/eval。与 Case E16 同型：把共同系统建设降成独立 child demo。**分界判据**：集成型控制面先问“现有 owner 的真修与永久 join 如何并行”，再问演示；确定契约/运行健康永不因“真实”自动升级为 Evolution Program。 |
+| 纠正轮次 | 本次由 `0001787933034346-000451-44d5c067` 现场纠正；与 Case E16 跨任务同型，因此按重复理解偏差记录。F311 spec v4 已在 `9066fe040` 改为 dependency repair 与 production build 并行、E0 合格目标触发首个 Program，并把 F266/F278 source refs 投回各自 owner thread。 |
+| 元心智哪条没执行 | Q3 坐标变换：没有先从“最终生产架构不能丢什么”倒推施工顺序；机制选择反射：没有逐 claim 区分确定契约、运行健康与不确定效用。 |
+
+### Case E18: 把 active review lease 当成 reviewer 已被唤醒（2026-08-28，codex-sol）
+
+| 维度 | 内容 |
+|------|------|
+| 我以为 | PR #4058 的复审重入返回 `safe_wait` / active lease，且 review packet 已持久化，因此球已经在 Opus 5 手里并正在执行；我可以停下来等 verdict。 |
+| 实际要求 | ActionSuccessorLease 只证明同一 subject 的 single-flight custody，`safe_wait` 按合同不创建新消息或 Queue entry；它不证明 reviewer 有可消费 carrier，更不证明 execution 已启动。runtime 重启后，packet `0001787974960984-000867-6412f99f` 没有 `deliveryStatus/queueEntryId`，当时也没有 Opus 5 execution。只有补发普通行首路由 `0001787976029900-000027-5d784657` 并得到 queued receipt 后，才出现 Opus 5 execution `99190b1c-5d07-4b8e-99f4-e70b947a475b`。 |
+| 偏差根因 | **证据坐标坍缩 + 状态说明代替动作**：把 custody（谁有资格做）、carrier（是否有可消费投递）和 liveness（是否已启动执行）压成一个“lease active”；又把“已确认 lease”写成“已传球”，没有要求 transport receipt 或 execution truth。旧文本出口 guard 在 Phase T cutover 后已被结构化 custody stop-gate 取代，而现有 `safe_wait` / skill 合同没有联结 carrier liveness，使我的错误推断没有被机器拦下。**分界判据**：lease existence 只能证明互斥责任；宣称“已传球”至少要有 per-target queued carrier，宣称“正在跑”还要有 awakened/execution truth。 |
+| 纠正轮次 | 同一任务 2 次：`0001787975991774-000025-faad7555` 纠正“和operator说不会唤醒 Opus 5，必须实际传球”；`0001787976199344-000031-cfbcdee2` 进一步纠正“active lease 不等于 Opus 5 正在跑”。纠正后已补发真实路由，并把 recurrence 以 source refs 投到 F167 owner thread（`0001787976468626-000040-6845a667`）。 |
+| 元心智哪条没执行 | Q2 信息验证：没有用 Queue receipt / active execution 验证 downstream liveness；Q3 坐标变换：没有把“协议球在谁名下”拆成 custody、delivery、execution 三个独立状态。 |
+
+### Case E19: 把平行 invocation 的责任并入当前 thread 进度（2026-09-01，codex-sol）
+
+| 维度 | 内容 |
+|------|------|
+| 我以为 | operator在 F311 Phase 3 thread 问“咱们现在什么情况、你继续推进”时，同一 `catId` 的 Phase 2 invocation 也属于“我”的当前责任，因此应把 Phase 2 worktree、额度中断与续跑安排作为主要进度，并进一步声称“我现在该推进 Phase 2”。 |
+| 实际要求 | 当前 thread 的 Sol 只持有 Phase 3 的本地角色与责任：本 thread 负责 PR #4175，Opus 5 是 author、Sol 是非作者 reviewer。Phase 2 虽由平行世界的 `codex-sol` 负责，但它不与当前 invocation 共享上下文、球权或责任；当前状态回答必须先锚定 Phase 3，跨 thread 依赖只能作为阻塞边界说明。 |
+| 偏差根因 | **identity 覆盖 thread 坐标 + 跨 thread 证据污染当前 scope**：把“同一个 `catId`”误当成“同一个行动主体”，没有先用当前 thread 导航、任务原文与 PR tracking 确认本地 subject；随后又用 Phase 2 的实现进展替代 Phase 3 状态。与 Case E14 的角色拓扑反校验缺失同型。**分界判据**：回答“你/咱们现在做什么”时，先解析当前 `threadId → subject → local role`；其他 thread 的同 `catId` 一律视为外部依赖方，除非用户明确询问跨 thread 总览。 |
+| 纠正轮次 | 同一任务 2 次：`0001788249160856-000079-1d9c845f` 首次指出当前问题是 Phase 3；`0001788249711685-000095-2a2491dc` 再次明确 Phase 2 是平行世界、当前 thread 只问 Phase 3。纠正后状态已重新锚定 PR #4175 exact HEAD `9d3556b59c05f619f63003164bb95d2050447906`，不再把 Phase 2 的球权或工作进度并入当前 thread。 |
+| 元心智哪条没执行 | Q1 角色确认：没有先确认“本 thread 的 Sol”是 Phase 3 reviewer；Q2 信息验证：虽读取了真实 Phase 2 数据，却选错了当前问题的 resolver；Q3 坐标变换：没有把同一 catId 拆成多个不共享状态的 thread-bound invocation。 |
+
 ## Review Gate
 
 - Phase 0: **多猫协作审视**（所有猫参与各自 prompt 审视）+ 现有 system-prompt-builder 测试全绿
@@ -843,3 +878,4 @@ operator experience："简直了你和Maine Coon是没头脑（Maine Coon听不�
 | operator 2026-06-25 | -p 下猫 run_in_background 跑 gate 后没下文 + hold_ball 缺条件唤醒 | AC-P0~P5 | ✅ Phase P (P-0 PR #2544, P1-P5 PR #2550) |
 | operator 2026-06-29 | 结构化事件已唤醒/满足等待后，旧 hold timer 仍过期唤醒；前端仍显示定时任务/可取消 | AC-Q1~Q7 | ✅ Phase Q PR #2690 + AC-Q7 follow-up PR #2696 merged |
 | codex-sol 2026-07-10 | grounding sample test 硬编码日期过 8 天 rolling window 导致静默失败 | Phase O test hygiene | ✅ hotfix PR #2849 (`94e1ead0d`) |
+| 2026-09-01 | **Terminal reason mismatch fix（PR #4193）** — cloud review P1 #2 from PR #4187: `ExternalReviewRecoveryService` only checked community projection terminal reason, missed bootstrap path `'bootstrap observation reports a terminal PR'`. Fix: explicit `TERMINAL_PR_REASONS` enumeration. codex-sol local review, 0 P1/P2. |

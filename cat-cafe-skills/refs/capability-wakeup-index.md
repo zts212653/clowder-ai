@@ -146,7 +146,7 @@ opus-47 原把 `workspace-navigator` / `rich-messaging` / `browser-preview` 一�
 - 长讨论已超出当前 thread scope
 
 **用法**：propose-first 流程 — 猫填好 thread 信息 → 卡片让operator确认或编辑 → 系统创建
-**社区 PR 反射**：引用 GitHub PR/issue 时先加载 `opensource-ops`；服务端不推断外部对象身份、作者角色或 maintainer 策略。子 thread 自己用 `gh` grounding provider object 与作者，执行仓库中立五问，外部作者的修复球默认不派给本地猫。
+**社区 PR 反射**：引用外部 PR/issue 时先加载 `opensource-ops`；服务端不推断外部对象身份、作者角色或 maintainer 策略。子 thread 自己用 canonical provider adapter grounding 对象与作者，执行家里的 maintainer 五问；外部作者的修复球默认不派给家猫，家猫 fixup 需显式 Strategy B 授权 provenance。
 **ADR 锚点**：ADR-035
 
 ### 10. F211 外部 runtime session 查询

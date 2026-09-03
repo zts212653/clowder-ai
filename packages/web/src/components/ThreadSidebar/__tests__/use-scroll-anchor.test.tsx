@@ -20,7 +20,7 @@ const rect = (top: number, height: number): DOMRect =>
 
 function Harness({ revision }: { revision: number }) {
   const containerRef = useRef<HTMLDivElement>(null);
-  const { onScroll } = useScrollAnchor(containerRef, [revision]);
+  const { onScroll } = useScrollAnchor(containerRef, [revision], { selectedThread: null });
 
   return (
     <div ref={containerRef} data-testid="scroller" onScroll={onScroll}>

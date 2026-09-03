@@ -1,7 +1,14 @@
 import { type DBSchema, type IDBPDatabase, openDB } from 'idb';
 import type { WorkspaceMode } from '@/lib/workspace-modes';
-import type { ChatMessage, Thread, WorkspacePreviewState, WorkspaceSurface } from '../stores/chat-types';
+import type {
+  ChatMessage,
+  TeamWorkspaceSubject,
+  Thread,
+  WorkspacePreviewState,
+  WorkspaceSurface,
+} from '../stores/chat-types';
 import type { SidebarSnapshotRow } from '../stores/sidebarProjectionStore';
+import { recordSidebarIdbWrite } from './sidebar-projection-observability';
 
 const DB_NAME = 'cat-cafe-offline';
 /**
@@ -30,6 +37,8 @@ export interface PersistedThreadWorkspaceState {
   workspaceWorktreeId: string | null;
   /** Optional for pre-fix v5 records; missing mode is recovered by chatStore. */
   workspaceMode?: WorkspaceMode;
+  /** Optional for snapshots written before F293 Phase B. */
+  teamWorkspaceSubject?: TeamWorkspaceSubject | null;
   workspaceSurface: WorkspaceSurface;
   workspacePreview: WorkspacePreviewState;
   rightPanelMode: 'status' | 'workspace' | 'transcript';
@@ -107,12 +116,18 @@ function getDB(): Promise<IDBPDatabase<CatCafeOfflineDB>> {
 }
 
 export async function saveThreads(threads: Thread[]): Promise<void> {
+  const startedAt = performance.now();
   const db = await getDB();
   await db.put('threads', {
     id: 'thread-list',
     threads,
     updatedAt: Date.now(),
   });
+  recordSidebarIdbWrite(
+    'legacy_thread_list',
+    threads.length,
+    Math.round((performance.now() - startedAt) * 1_000) / 1_000,
+  );
 }
 
 export async function loadThreads(): Promise<Thread[] | null> {
@@ -122,6 +137,7 @@ export async function loadThreads(): Promise<Thread[] | null> {
 }
 
 export async function saveSidebarSnapshot(rows: readonly SidebarSnapshotRow[]): Promise<void> {
+  const startedAt = performance.now();
   const db = await getDB();
   await db.put('sidebar-snapshot', {
     id: 'canonical-sidebar',
@@ -134,6 +150,7 @@ export async function saveSidebarSnapshot(rows: readonly SidebarSnapshotRow[]): 
     })),
     updatedAt: Date.now(),
   });
+  recordSidebarIdbWrite('canonical_sidebar', rows.length, Math.round((performance.now() - startedAt) * 1_000) / 1_000);
 }
 
 export async function loadSidebarSnapshot(): Promise<SidebarSnapshotRow[] | null> {

@@ -244,11 +244,14 @@ test('production composition constructs and recovers K-2D but exposes no startup
     routeBootstrapIndex < runtimeCompositionIndex,
     'Host signal routes must exist before the external runtime can accept owner activation',
   );
-  assert.match(source, /await externalPluginRuntime\.recoverAfterRestart\(\)/);
-  assert.match(source, /await externalPluginRuntime\.shutdown\('api_shutdown'\)/);
+  const runtimeBinding = source.match(/const\s+([A-Za-z_$][\w$]*)\s*=\s*createDormantPluginRuntimeComposition\(\{/);
+  assert.ok(runtimeBinding, 'production must bind the dormant plugin runtime composition');
+  const runtimeName = runtimeBinding[1];
+  assert.match(source, new RegExp(`await ${runtimeName}\\.recoverAfterRestart\\(\\)`));
+  assert.match(source, new RegExp(`await ${runtimeName}\\.shutdown\\('api_shutdown'\\)`));
   assert.match(source, /OfficialPluginHistoryImportService/);
   assert.match(source, /createLarkCliFeishuArtifactInspector/);
   assert.match(source, /historyImport:/);
   assert.match(source, /registerOfficialPluginRoutes\(app/);
-  assert.doesNotMatch(source, /externalPluginRuntime\.supervisor\.start\(/);
+  assert.doesNotMatch(source, new RegExp(`${runtimeName}\\.supervisor\\.start\\(`));
 });

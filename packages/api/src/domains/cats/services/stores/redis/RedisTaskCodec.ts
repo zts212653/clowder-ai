@@ -1,4 +1,4 @@
-import type { CatId, TaskItem, TaskKind } from '@cat-cafe/shared';
+import { type CatId, entrustedWorkV1Schema, type TaskItem, type TaskKind } from '@cat-cafe/shared';
 
 export function serializeTask(task: TaskItem): Record<string, string> {
   const out: Record<string, string> = {
@@ -21,6 +21,7 @@ export function serializeTask(task: TaskItem): Record<string, string> {
   if (task.relatedFeatureId) out.relatedFeatureId = task.relatedFeatureId;
   if (task.detectedFeatureIds?.length) out.detectedFeatureIds = JSON.stringify(task.detectedFeatureIds);
   if (task.dispatchGate) out.dispatchGate = JSON.stringify(task.dispatchGate);
+  if (task.entrustedWork) out.entrustedWork = JSON.stringify(entrustedWorkV1Schema.parse(task.entrustedWork));
   return out;
 }
 
@@ -45,7 +46,22 @@ export function hydrateTask(data: Record<string, string>): TaskItem {
   if (data.relatedFeatureId) hydrated = { ...hydrated, relatedFeatureId: data.relatedFeatureId };
   hydrated = parseJsonField(hydrated, 'detectedFeatureIds', data.detectedFeatureIds);
   hydrated = parseJsonField(hydrated, 'dispatchGate', data.dispatchGate);
-  return hydrated;
+  return parseEntrustedWorkField(hydrated, data);
+}
+
+function parseEntrustedWorkField(task: TaskItem, data: Record<string, string>): TaskItem {
+  if (!data.entrustedWork) return task;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(data.entrustedWork);
+  } catch {
+    throw new Error(`Invalid entrustedWork JSON for Task ${data.id ?? '<unknown>'}`);
+  }
+  const entrustedWork = entrustedWorkV1Schema.safeParse(parsed);
+  if (!entrustedWork.success) {
+    throw new Error(`Invalid entrustedWork contract for Task ${data.id ?? '<unknown>'}`);
+  }
+  return { ...task, entrustedWork: entrustedWork.data };
 }
 
 function parseJsonField<K extends keyof TaskItem>(task: TaskItem, key: K, encoded?: string): TaskItem {

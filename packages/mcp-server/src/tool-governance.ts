@@ -20,6 +20,7 @@ export type {
   McpOperationContract,
   McpRisk,
   McpRuntimeProfile,
+  McpSchemaDeliveryPolicy,
   McpStandaloneReason,
   McpToolDefinition,
   McpToolDefinitionInput,
@@ -133,9 +134,9 @@ export function defineMigrationCandidateMcpTool(input: McpMigrationCandidateInpu
     implementation: bindMcpImplementation(governance.implementationRef, input.handler),
     policy: {
       resourceFamily: governance.resourceFamily,
-      exposureTier: {
-        current: 'eager-core',
-        ...(governance.targetExposure ? { target: governance.targetExposure } : {}),
+      schemaDelivery: {
+        policy: 'host-default',
+        ...(governance.targetExposure === 'lazy-discoverable' ? { candidate: 'discoverable' as const } : {}),
         evidenceRef: governance.sourceRef,
       },
       runtimeProfiles: governance.runtimeProfiles,

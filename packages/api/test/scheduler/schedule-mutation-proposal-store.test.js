@@ -301,11 +301,29 @@ describe('ScheduleMutationProposalStore', () => {
     assert.equal(store.setTaskEnabledWithAudit(target.id, true, audit('resume', target.id)), true);
     assert.equal(db.prepare('SELECT enabled FROM dynamic_task_defs WHERE id = ?').get(target.id).enabled, 1);
 
+    const currentParams = target.params;
+    const nextParams = { ...currentParams, holdLifecycle: { status: 'cancelled_by_user' } };
+    assert.equal(
+      store.updateTaskParamsAndEnabledWithAudit(
+        target.id,
+        currentParams,
+        nextParams,
+        false,
+        audit('pause', target.id, 'atomic-params-disable'),
+      ),
+      true,
+    );
+    assert.deepEqual(
+      JSON.parse(db.prepare('SELECT params_json FROM dynamic_task_defs WHERE id = ?').get(target.id).params_json),
+      nextParams,
+    );
+    assert.equal(db.prepare('SELECT enabled FROM dynamic_task_defs WHERE id = ?').get(target.id).enabled, 0);
+
     assert.equal(store.deleteTaskWithAudit(target.id, audit('delete', target.id)), true);
     assert.equal(db.prepare('SELECT COUNT(*) AS count FROM dynamic_task_defs WHERE id = ?').get(target.id).count, 0);
     assert.deepEqual(
       store.listAudit('owner-user').map((entry) => entry.action),
-      ['create', 'pause', 'resume', 'delete'],
+      ['create', 'pause', 'resume', 'pause', 'delete'],
     );
   });
 
@@ -367,6 +385,37 @@ describe('ScheduleMutationProposalStore', () => {
       assert.equal(store.listAudit('owner-user').length, 0);
     });
   }
+
+  it('rolls back an atomic params-and-disable mutation when its audit insert fails', () => {
+    const { db, store } = setup();
+    const target = task({ id: 'dyn-failed-params-disable' });
+    insertDynamicTask(db, target);
+    db.exec(`
+      CREATE TRIGGER fail_schedule_params_disable_audit
+      BEFORE INSERT ON schedule_mutation_audit
+      WHEN NEW.audit_id = 'schedule-audit-failed-params-disable'
+      BEGIN
+        SELECT RAISE(ABORT, 'forced params-and-disable audit failure');
+      END;
+    `);
+    const nextParams = { ...target.params, holdLifecycle: { status: 'cancelled_by_user' } };
+
+    assert.throws(
+      () =>
+        store.updateTaskParamsAndEnabledWithAudit(
+          target.id,
+          target.params,
+          nextParams,
+          false,
+          audit('pause', target.id, 'failed-params-disable'),
+        ),
+      /forced params-and-disable audit failure/,
+    );
+    const row = db.prepare('SELECT params_json, enabled FROM dynamic_task_defs WHERE id = ?').get(target.id);
+    assert.deepEqual(JSON.parse(row.params_json), target.params);
+    assert.equal(row.enabled, 1);
+    assert.equal(store.listAudit('owner-user').length, 0);
+  });
 });
 
 function insertDynamicTask(db, def) {

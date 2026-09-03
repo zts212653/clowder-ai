@@ -16,7 +16,7 @@ function createMockDeps() {
     deps: {
       threadStore: {
         async get(threadId) {
-          return { threadId, createdBy: 'user-landy', title: 'Game Thread' };
+          return { threadId, createdBy: 'user-operator', title: 'Game Thread' };
         },
       },
       invocationQueue: {
@@ -54,7 +54,7 @@ describe('createWakeCatFn', () => {
     assert.equal(enqueuedEntries.length, 1);
     const entry = enqueuedEntries[0];
     assert.equal(entry.threadId, 'thread-game-1');
-    assert.equal(entry.userId, 'user-landy');
+    assert.equal(entry.userId, 'user-operator');
     assert.equal(entry.content, 'You are wolf.');
     assert.equal(entry.source, 'agent');
     assert.deepEqual(entry.targetCats, ['opus']);

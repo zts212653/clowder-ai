@@ -23,6 +23,7 @@ export function createDesignGateGeneratorAdapter(provider: DesignGateEpisodeSour
       harnessFeedbackRoot: deps.harnessFeedbackRoot,
       domain,
       episodeBundle,
+      generatedAt: deps.publicationTime,
       submittedPacket: packet,
     });
     return { verdictPath: artifact.path, bundleDir: artifact.bundleDir };

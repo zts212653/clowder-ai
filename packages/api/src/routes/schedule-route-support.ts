@@ -82,6 +82,7 @@ function buildUnregisteredDynamicTaskSummary(
   const spec = template?.createSpec(def.id, {
     trigger: def.trigger,
     params: def.params,
+    ...(def.entrustedWorkReevaluation ? { entrustedWorkReevaluation: def.entrustedWorkReevaluation } : {}),
     deliveryThreadId: def.deliveryThreadId,
   });
   const display = spec?.display ? { ...spec.display, ...def.display } : def.display;

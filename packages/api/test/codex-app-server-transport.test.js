@@ -3,6 +3,7 @@ import { test } from 'node:test';
 import { setTimeout as delay } from 'node:timers/promises';
 import { CodexAppServerClient } from '../dist/domains/cats/services/agents/providers/CodexAppServerClient.js';
 import { runCodexAppServerWithRecovery } from '../dist/domains/cats/services/agents/providers/CodexAppServerRunner.js';
+import { buildCodexAppServerThreadParams } from '../dist/domains/cats/services/agents/providers/codex-app-server-client-helpers.js';
 import { CodexAppServerRpcError } from '../dist/domains/cats/services/agents/providers/codex-app-server-rpc-error.js';
 import { createDirectAgentCarrierSession } from '../dist/domains/cats/services/agents/providers/DirectAgentCarrierSession.js';
 import { captureCodexActiveWriterDetection } from '../dist/domains/cats/services/runtime-session/CodexSessionReplacementProvenance.js';
@@ -149,6 +150,12 @@ class ProtocolWire {
     this.inbox.close();
   }
 }
+
+test('F306 preserves every native approvalsReviewer route literal without a Clowder AI reviewer taxonomy', () => {
+  for (const approvalsReviewer of ['user', 'auto_review', 'guardian_subagent']) {
+    assert.equal(buildCodexAppServerThreadParams({ approvalsReviewer }).approvalsReviewer, approvalsReviewer);
+  }
+});
 
 test('F306 keeps sticky controls single-writer while mapping approved native parameters', async () => {
   const wire = new ProtocolWire();

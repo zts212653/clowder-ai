@@ -10,12 +10,12 @@ export interface L0CacheGeneration {
 function computeProfileContentSignature(profileDir: string): string | null {
   if (!existsSync(profileDir)) return 'missing';
   const entries: string[] = [];
-  const capsulePath = resolve(profileDir, 'landy-capsule.md');
+  const capsulePath = resolve(profileDir, 'operator-capsule.md');
   try {
-    entries.push(`landy-capsule.md\t${createHash('sha256').update(readFileSync(capsulePath)).digest('hex')}`);
+    entries.push(`operator-capsule.md\t${createHash('sha256').update(readFileSync(capsulePath)).digest('hex')}`);
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== 'ENOENT') return null;
-    entries.push('landy-capsule.md\tmissing');
+    entries.push('operator-capsule.md\tmissing');
   }
 
   const relationshipDir = resolve(profileDir, 'relationship');

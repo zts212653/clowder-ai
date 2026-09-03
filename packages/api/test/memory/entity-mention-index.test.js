@@ -17,10 +17,10 @@ describe('F209 entity mention indexing', () => {
     await store.initialize();
     await store.upsertEntities([
       {
-        entityId: 'person:landy',
+        entityId: 'person:operator',
         type: 'person',
         canonicalName: 'You',
-        aliases: ['you', 'co-creator', 'operator'],
+        aliases: ['operator', 'co-creator', 'operator'],
         provenance: [{ source: 'F209 Phase B test' }],
         updatedAt: '2026-05-22T00:00:00Z',
       },
@@ -54,7 +54,7 @@ describe('F209 entity mention indexing', () => {
     assert.ok(
       rows.some(
         (r) =>
-          r.entity_id === 'person:landy' &&
+          r.entity_id === 'person:operator' &&
           r.doc_anchor === 'thread-thread_entity_index' &&
           r.passage_id === 'msg-m1' &&
           r.surface === 'co-creator' &&
@@ -65,7 +65,7 @@ describe('F209 entity mention indexing', () => {
     const results = await store.search('operator', { depth: 'raw', scope: 'threads', limit: 5 });
     assert.equal(results[0].anchor, 'thread-thread_entity_index');
     assert.equal(results[0].passages?.[0]?.messageId, 'm1');
-    assert.equal(results[0].entityMatches?.[0]?.entityId, 'person:landy');
+    assert.equal(results[0].entityMatches?.[0]?.entityId, 'person:operator');
   });
 
   it('skips orphan passage rows when rebuilding entity mentions', async () => {
@@ -75,10 +75,10 @@ describe('F209 entity mention indexing', () => {
     await store.initialize();
     await store.upsertEntities([
       {
-        entityId: 'person:landy',
+        entityId: 'person:operator',
         type: 'person',
         canonicalName: 'You',
-        aliases: ['you', 'co-creator', 'operator'],
+        aliases: ['operator', 'co-creator', 'operator'],
         provenance: [{ source: 'F209 Phase B test' }],
         updatedAt: '2026-05-22T00:00:00Z',
       },
@@ -120,10 +120,10 @@ describe('F209 entity mention indexing', () => {
     ]);
 
     const seed = {
-      entityId: 'person:landy',
+      entityId: 'person:operator',
       type: 'person',
       canonicalName: 'You',
-      aliases: ['you', 'co-creator', 'operator'],
+      aliases: ['operator', 'co-creator', 'operator'],
       provenance: [{ source: 'F209 Phase B.1 test seed' }],
       updatedAt: '2026-05-23T00:00:00Z',
     };

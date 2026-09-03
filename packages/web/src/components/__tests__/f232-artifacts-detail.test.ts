@@ -117,6 +117,30 @@ describe('F232 AC-A7 ArtifactsPanel 内容查看交互', () => {
     expect(img?.getAttribute('src')).toContain('/uploads/arch.png');
   });
 
+  it('lets the F307 adapter consume the exact owner DTO instead of creating a second selected-record store', () => {
+    const artifact = {
+      type: 'pr',
+      name: 'PR #4030',
+      catId: 'opus-48',
+      createdAt: Date.now(),
+      sourceMessageId: 'message-review',
+      ref: 'zts212653/cat-cafe#4030',
+    };
+    mockState.artifacts = [artifact];
+    const onSelectArtifact = vi.fn();
+    const container = document.createElement('div');
+    document.body.appendChild(container);
+    const root = createRoot(container);
+    act(() => root.render(createElement(ArtifactsPanel, { threadId: 'T', onSelectArtifact })));
+
+    const row = container.querySelector<HTMLElement>('[data-artifact-row]');
+    act(() => row?.dispatchEvent(new MouseEvent('click', { bubbles: true })));
+
+    expect(onSelectArtifact).toHaveBeenCalledWith(artifact);
+    expect(container.querySelector('input')).toBeTruthy();
+    act(() => root.unmount());
+  });
+
   it('P1-2: 切 thread 后清空选中详情（不串 thread）', () => {
     mockState.artifacts = [
       { type: 'pr', name: 'PR #A', catId: 'opus-48', createdAt: Date.now(), sourceMessageId: null, ref: 'o/r#1' },

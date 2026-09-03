@@ -2,7 +2,8 @@ import { createHash } from 'node:crypto';
 import { existsSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { z } from 'zod';
-import type { VerdictHandoffPacket } from '../verdict-handoff.js';
+import { FindingBindingV1Schema, ResolvedRepairTargetV1Schema } from '../friction/friction-finding-artifact.js';
+import { isFrictionVerdictHandoffPacketV3, type VerdictHandoffPacket } from '../verdict-handoff.js';
 
 export const LIFECYCLE_ROOT_FILENAME = 'lifecycle-root.json';
 
@@ -43,10 +44,39 @@ const lifecycleRootV2Schema = lifecycleRootBaseSchema
   })
   .strict();
 
-export const LifecycleRootArtifactSchema = z.discriminatedUnion('schemaVersion', [
-  lifecycleRootV1Schema,
-  lifecycleRootV2Schema,
-]);
+const lifecycleRootV3Schema = lifecycleRootBaseSchema
+  .extend({
+    schemaVersion: z.literal(3),
+    caseId: z.string().regex(/^eval-case-v1-[a-f0-9]{64}$/),
+    findingKey: z.string().regex(/^[a-z0-9][a-z0-9._-]{0,127}$/),
+    findingBinding: FindingBindingV1Schema,
+    repairTarget: ResolvedRepairTargetV1Schema,
+    supersedes: z
+      .object({
+        verdictId: z.string().trim().min(1),
+        proposalId: z.string().trim().min(1),
+        targetResolutionVersion: z.string().trim().min(1),
+      })
+      .strict()
+      .optional(),
+  })
+  .strict();
+
+export const LifecycleRootArtifactSchema = z
+  .discriminatedUnion('schemaVersion', [lifecycleRootV1Schema, lifecycleRootV2Schema, lifecycleRootV3Schema])
+  .superRefine((root, ctx) => {
+    if (root.schemaVersion !== 3) return;
+    if (
+      root.ownerAsk.targetFeatureId !== root.repairTarget.featureId ||
+      root.ownerAsk.targetOwnerCatId !== root.repairTarget.ownerCatId
+    ) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['repairTarget'],
+        message: 'ownerAsk must exact-match server-resolved repairTarget',
+      });
+    }
+  });
 
 export type LifecycleRootArtifact = z.infer<typeof LifecycleRootArtifactSchema>;
 
@@ -56,12 +86,19 @@ export function deriveEvalCaseId(domainId: string, findingKey: string): string {
 }
 
 export function buildLifecycleRootArtifact(packet: VerdictHandoffPacket): LifecycleRootArtifact {
+  const frictionChild = isFrictionVerdictHandoffPacketV3(packet);
   return LifecycleRootArtifactSchema.parse({
-    schemaVersion: packet.findingKey ? 2 : 1,
+    schemaVersion: frictionChild ? 3 : packet.findingKey ? 2 : 1,
     ...(packet.findingKey
       ? {
           caseId: deriveEvalCaseId(packet.domainId, packet.findingKey),
           findingKey: packet.findingKey,
+        }
+      : {}),
+    ...(frictionChild
+      ? {
+          findingBinding: packet.findingBinding,
+          repairTarget: packet.repairTarget,
         }
       : {}),
     verdictId: packet.id,
@@ -83,6 +120,28 @@ export function buildLifecycleRootArtifact(packet: VerdictHandoffPacket): Lifecy
       closureCondition: packet.acceptanceReevalPlan.closureCondition,
     },
   });
+}
+
+export function digestLifecycleRootArtifact(artifact: LifecycleRootArtifact): string {
+  const parsed = LifecycleRootArtifactSchema.parse(artifact);
+  return createHash('sha256')
+    .update(`${JSON.stringify(parsed, null, 2)}\n`, 'utf8')
+    .digest('hex');
+}
+
+export function assertCompatibleFrictionLifecycleRootReplay(
+  existing: LifecycleRootArtifact,
+  replay: LifecycleRootArtifact,
+): void {
+  if (existing.schemaVersion !== 3 || replay.schemaVersion !== 3) {
+    throw new Error('friction lifecycle replay compatibility requires schema-v3 roots');
+  }
+  if (existing.caseId !== replay.caseId) throw new Error('friction lifecycle replay case mismatch');
+  if (existing.verdictId !== replay.verdictId) return;
+  if (existing.repairTarget.version !== replay.repairTarget.version) return;
+  if (digestLifecycleRootArtifact(existing) !== digestLifecycleRootArtifact(replay)) {
+    throw new Error(`same-version drift for friction lifecycle case ${existing.caseId}`);
+  }
 }
 
 export function writeLifecycleRootArtifact(bundleDir: string, packet: VerdictHandoffPacket): LifecycleRootArtifact {

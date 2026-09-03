@@ -283,6 +283,7 @@ export async function hardForgetPersonMemoryProposal(
     plan.expect(candidateKey, snapshot.raw);
     plan.expect(candidateOwnerKey, input.ownerUserId);
     plan.zrem(PersonMemoryKeys.pending(input.ownerUserId), candidateId);
+    plan.zrem(PersonMemoryKeys.settled(input.ownerUserId), candidateId);
     plan.del(candidateKey, 'string');
     plan.del(candidateOwnerKey, 'string');
     plan.del(PersonMemoryKeys.candidatePerson(input.ownerUserId, candidateId), 'string');

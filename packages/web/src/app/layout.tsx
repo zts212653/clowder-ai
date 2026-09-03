@@ -12,6 +12,7 @@ import { ThemeProvider } from '@/components/ThemeProvider';
 import { ToastContainer } from '@/components/ToastContainer';
 import { ConfirmProvider } from '@/components/useConfirm';
 import { META_THEME_COLOR } from '@/lib/color-defaults';
+import { buildPwaRetirementScript } from '@/lib/pwa-retirement-script';
 import './globals.css';
 
 export const viewport: Viewport = {
@@ -40,9 +41,21 @@ export const metadata: Metadata = {
   },
 };
 
+const browserBuildRevision = process.env.NEXT_PUBLIC_CAT_CAFE_BUILD_REVISION?.trim().toLowerCase();
+const embeddedBrowserBuildRevision =
+  browserBuildRevision && /^[0-9a-f]{40}$/.test(browserBuildRevision) ? browserBuildRevision : undefined;
+const pwaEnabled = process.env.NEXT_PUBLIC_CAT_CAFE_PWA_ENABLED === '1';
+const pwaRetirementScript = buildPwaRetirementScript({ enabled: pwaEnabled });
+
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="zh-CN" suppressHydrationWarning>
+    <html
+      lang="zh-CN"
+      suppressHydrationWarning
+      data-cat-cafe-build-revision={embeddedBrowserBuildRevision}
+      data-cat-cafe-pwa-retirement={pwaEnabled ? 'enabled' : 'disabled'}
+      data-pwa-cleanup-state={pwaEnabled ? 'enabled' : 'pending'}
+    >
       <head>
         <link rel="stylesheet" href="/vendor/app/theme-tokens.css" />
         <link rel="stylesheet" href="/vendor/app/cat-persona-tokens.css" />
@@ -56,6 +69,13 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         <link rel="stylesheet" href="/vendor/xterm/xterm.css" />
       </head>
       <body className="min-h-screen">
+        {pwaRetirementScript ? (
+          <script
+            id="cat-cafe-pwa-retirement"
+            // biome-ignore lint/security/noDangerouslySetInnerHtml: generated from a static allowlist/build flag and must stay inline because an old worker can serve every external chunk.
+            dangerouslySetInnerHTML={{ __html: pwaRetirementScript }}
+          />
+        ) : null}
         <SessionBootstrap />
         <CatHueInjector />
         <ThemeProvider>

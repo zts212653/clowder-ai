@@ -7,13 +7,13 @@ created: 2026-08-14
 description: "按真实 runtime continuity 区分冷启动与热续，并让上下文注入的内容、语气和失效条件与证据强度一致。"
 description_source: human
 description_author: codex-sol
-description_updated_at: 2026-08-15T13:07:32Z
-tips_exempt: "续租：本轮只收敛 cold rollover、compaction support 与 context transport 的内部连续性契约；不新增用户可操作的独立能力入口。"
+description_updated_at: 2026-08-31T16:45:00-07:00
+tips_exempt: "续租 2026-08-28 / PR #4040：AgentRouter authority 接线、rerun-safe provider trigger 选择与 Compact turn settlement 只修复既有生产/Alpha 可靠性接缝；不新增用户可操作入口。"
 ---
 
 # F296: Continuity-Aware Context Injection — 冷启动可信定向包 + 热续增量
 
-> **Status**: in progress / Phase A complete；Phase B foundations + B3a + B3b + B4a/B4b landed；B4c Alpha UAT 3/5 observed、2/5 unsupported | **Owner**: 小太阳·Maine Coon (@codex-sol, GPT-5.6 Sol) | **Priority**: P1
+> **Status**: done / production loaded；Phase A + Phase B contract、production bridge 与 merged-main Alpha 均已关闭 | **Completed**: 2026-08-31 | **Owner**: 小太阳·Maine Coon (@codex-sol, GPT-5.6 Sol) | **Priority**: P1
 >
 > **operator kickoff**: `0001786766025646-000156-269d3cfb` — F148 若已关闭则新立 related
 > feature，由Maine Coon选择正确路径并执行。
@@ -23,7 +23,10 @@ tips_exempt: "续租：本轮只收敛 cold rollover、compaction support 与 co
 > 要求补上 compaction 转移边、明确无 invalidator 的 regex `openQuestions` 不得进正文，
 > 并按“先确定性止血、再终态合同”落地。
 
-Architecture cell: `identity-session` + `memory`
+Architecture cell: `identity-session`
+Architecture cell: `memory`
+
+本收口复用既有 session/epoch owner，不新增 cell。
 
 Map delta: **none** — F296 在现有 invocation/session continuity 与 memory source 之间增加统一的
 context presentation contract，不新建第二套 Evidence Store、Session Store 或 Prompt Pipeline。
@@ -51,12 +54,65 @@ You 的价值要求不是“候选语气更客气”，而是系统对自己知�
 正文，只留检索入口。冷启动给小而可信的定向包，热续只给新发生的 delta；压缩后无条件重新进入
 冷启动定向包。**
 
-## Progress / 人话版（2026-08-22）
+## Terminal Closure / 终态（2026-08-31）
+
+F296 已在 `main` 完成 production bridge、真实 provider 路径与 legacy session 兼容收口：
+
+- PR #4040：reviewed HEAD `deb9171c5a45`，merge `9aaa3ecfa0fa`；补齐 AgentRouter authority、
+  rerun-safe replacement trigger 与 Compact turn settlement。
+- PR #4149：reviewed HEAD `88668f7284e7`，merge `8fd9397c57ea`；让 serial/parallel route 保留
+  QueueProcessor 已绑定的 memory cue 与 ASR person-memory carriers。
+- PR #4162：reviewed HEAD `c15b6290259e`，merge `80e3b50a11ac`；legacy `compressionCount:null`
+  保留未知 lifetime truth，同时用 event-local sequence 铸当前 invocation attestation。
+
+标准 merged-main Alpha 在 exact revision `80e3b50a11ac17e2922d728caf21fe6bc54b5057` 观察
+dynamic presentation、cold、resumed-small、resumed-large、真实 max-payload replacement 与 authoritative
+compaction 全部通过；生产 `/health.deploymentRevision` 与当时最新 `origin/main` 亦精确等于该 revision。
+真实 Redis Lua canary 进一步证明 legacy null-count 的 event-local sequence `1 → 2`、lifetime count
+继续为 `null`，stale invocation 被拒绝。
+
+证据上限保持克制：legacy null-count 是 merged artifact + 真实 Redis Lua canary，不声称执行过一条真实
+Claude PreCompact live journey；其 provider admission、stale/torn/duplicate 拒绝由 exact-HEAD integration
+tests 与非作者 review 覆盖。未支持 carrier 仍按 capability matrix 显式 fail closed，不因本次 closure
+升级成 supported。三张 PR 均未改 opportunity catalog，catalog delta 为 unchanged。完整 content-free trace、
+cleanup 与 unsupported claims 见 B4c evidence (internal)。
+
+## Progress / 人话版（2026-08-31）
+
+F296 已完成并在生产加载。人话说，系统不再拿“历史消息多不多”猜猫有没有失忆，而是先读取
+provider/carrier 的真实 continuity disposition：确定冷启动时只给小而可信的定向包；确定续接时只给
+delta；replacement 或权威压缩后推进 context epoch，再发新的 cold packet。动态机会只有在当前 epoch
+真实送达 provider 后才记账，启发式候选只保留检索入口。
+
+| 阶段 | 用户得到什么 | 终态证据 |
+|---|---|---|
+| Phase A — Stop-Bleed | 启发式 recall、无生命周期 openQuestions、失效 artifact 不再冒充当前真相 | AC-A1~A4 全绿；四个真实 prompt 入口有稀疏验收 |
+| Phase B — Continuity Contract | fresh/resumed/replaced/compaction 走同一 epoch、mapper、ledger 与 final-generation projection | AC-B1~B10 全绿；确定合同、Redis 并发与非作者 review 覆盖 |
+| B4 — Runtime Evidence | cold、resumed-small、resumed-large、真实 max-payload replacement、authoritative compaction 与 dynamic presentation 均走真实 provider/Alpha 路径 | merged-main Alpha exact revision `80e3b50a11ac`；dynamic T0 `1 / 479 bytes` 且 ledger committed |
+| Production | 在线 API 已加载终态实现 | `/health.deploymentRevision=80e3b50a11ac17e2922d728caf21fe6bc54b5057`，`/ready` healthy |
+
+这里的完成不扩大 capability：未支持 carrier 继续 `unsupported/unknown → cold`，不被冒充为 hot；legacy
+null-count 证据是 merged artifact + 真实 Redis Lua canary，不冒充真实 Claude PreCompact live journey。
+逐段 content-free trace、失败边界和 cleanup 见 B4c evidence (internal)。
+
+### Historical progress snapshot（2026-08-28，保留施工证据）
+
+> 下列状态只描述 #4040 合入前的实施时点，不再代表当前进度；当前真相只以上方终态表与
+> [Terminal Closure](#terminal-closure--终态2026-08-31) 为准。
 
 F296 现在不是“做完了”，也不是“还没开始”：**先止血与 B3 surface convergence 已完成实现，
 Codex `app_server` 的 B4a behavior seam、epoch-fenced ledger retirement、B4b bounded telemetry 与 B4c runner
-均已合入；标准 Alpha 已真实观察 cold、resumed-small、resumed-large，但 replacement 与
-authoritative-compaction 因 provider trigger 不可用而保持 unsupported。** Phase A 四条 AC 已关闭；Phase B
+均已合入。PR #4021 合入后的标准 Alpha 又真实暴露三条生产接缝：pooled WebSocket 丢失 terminal
+diagnostic、compaction control 未先 rejoin、动态 canary 缺 canonical producer。唯一 fix-forward PR #4029
+已合入（merge `fcaa5c926d71fc6aa37f70f63456c837b8c8f74c`），但标准 Alpha 重跑只让 cold、
+resumed-small、resumed-large 通过；dynamic 权威依赖未穿过 AgentRouter、replacement trigger 被已有 TTL=0
+claim 正确拒绝、compaction 在 Compact turn settle 前过早返回 ready，三项仍为 RED。第一项进一步核实为
+自 #3762 起同时阻断 F276/F292 production person-memory opportunity 的静默 P1，不只是 F296 canary。
+operator 已授权把三项放进同一 consolidated PR #4040：production authority 已贯穿 AgentRouter，runner 改为
+只读 TTL=0 SessionRecord claim 后优先复用同 owner active trigger、只绑定未 claim 的真实 oversized
+candidate，native compaction 则必须等 matching provider Compact turn `turn/completed(status=completed)` 才暴露
+ready。当前只是 worktree RED→Green 与 API build/targeted 证据，尚未经过 final exact-HEAD review、full gate、
+merge 或 merged-main Alpha，故 AC 仍不关闭。** Phase A 四条 AC 已关闭；Phase B
 由真实 surface 证据关闭 B4/B5/B7/B8/B9/B10，B1/B2/B3/B6 不因部分 Alpha pass、合成 fixture 或代码级
 contract 冒充完成。
 
@@ -68,8 +124,8 @@ contract 冒充完成。
 | B2 — Mapper + Ledger | 按证据强度决定 directive/state/pointer/omit，并记“这一世代是否真的送达过” | **真实 dynamic surface 已收敛**：B3b-2 将 Write/Recall typed admission 接到 mapper + shared Redis ledger；B3b-4 又把 SessionBootstrap、canonical subject 与 Context Briefing 接到同一投影。AC-B4/B10 由真实 surface fixture 关闭；Alpha 已观察 hot carrier，但 AC-B6 仍缺 unseen/version/epoch dedupe、带 dynamic presentation 的 ledger 路径与跨 restart/multi-instance 证据 |
 | B3a — Ledger/Receipt 硬门 | 先把去重键、送达凭证、并发状态机、跨实例账本这四处不诚实的地基修实 | **完成**：四道硬门全部关闭（详见下方「B3a 关闭方式」）；仍是零 consumer 地基，不关闭任何 Phase B AC |
 | B3b — Surface Convergence | 把 serial/parallel/bootstrap/briefing/provider hook 全部接到同一投影与送达合同 | **已合入 main**：B3b-1~4 收敛 serial/parallel、provider delivery、Claude post-compact、SessionBootstrap 与 Context Briefing；AC-B4/B5/B7/B8/B9/B10 有端到端证据，B1/B2/B3/B6 因 production hot 缺席保持 open |
-| B4 — Telemetry + UAT | 观察 mode/reason/tier bytes/latency/ledger terminal，并在 alpha 证明真实冷/热/压缩旅程 | **B4a behavior 已合入（PR #3845，merge `3db134d0f`）；B4b telemetry 已合入（PR #3847，merge `12909a7fa`）；B4c runner 已合入（PR #3859/#3865，merge `8e11cb3f1` / `ad827c469`）**。标准 Alpha revision `92e748ec3` 的 real-provider UAT 得到 cold、resumed-small、resumed-large `passed`，replacement 与 authoritative-compaction 分别因 `provider_replacement_trigger_unavailable` / `provider_compaction_trigger_unavailable` 保持 `unsupported`。presentation retirement 仍完全由 B4a epoch CAS 的 exact-generation 删除拥有；不新增 reaper、cursor、scheduler、worker 或第二份真相源。content-free evidence (internal) 不足以关闭 AC-B1/B2/B3/B6 |
-| Live runtime | 让已经合入 main 的行为真正被在线 API 加载 | **F296 B4 live dormant**：当前 `/health.deploymentRevision=7718a12f8b1d575fbc14b5c612bf0985b6e7fec0`，不含 B4a/B4b/B4c main changes。只能陈述 main landed、Alpha partial；不能冒充 live activation 或 production hot |
+| B4 — Telemetry + UAT | 观察 mode/reason/tier bytes/latency/ledger terminal，并在 alpha 证明真实冷/热/压缩旅程 | **PR #4040 consolidated fix-forward 正在施工**。RED 已钉 authority dead path、TTL=0 claim 冲突与 premature compaction ready；当前 targeted 89/89 + API build 通过。final exact-HEAD review、full gate、merge 与 merged-main Alpha 尚未执行，AC-B1/B2/B3/B6 保持 open。content-free evidence (internal) |
+| Live runtime | 让已经合入 main 的行为真正被在线 API 加载 | **#4029 live activated / #4040 pending**：runtime `69cdd42b7b59…` 已包含 #4029 merge `fcaa5c926…` 且 health/ready 正常；本 PR 尚未合入或激活，不能把旧 runtime 冒充新修复验收 |
 
 ### B4 路径判决（2026-08-19）
 
@@ -83,18 +139,38 @@ provider start/resume/replacement disposition 决定后构造，typed `contextCo
 epoch owner，unsupported 或无法证明时继续 `unknown → cold`；同一改动用 epoch CAS 的原子 exact-generation
 retirement 关闭旧 ledger generation 永久驻留的缺口，不采用 reaper。
 
-标准 Alpha 已在 revision `92e748ec3608919f5d15c07943be6b327696b47a` 上观察到真实 provider 的
+历史标准 Alpha 已在 revision `92e748ec3608919f5d15c07943be6b327696b47a` 上观察到真实 provider 的
 cold、resumed-small 与 resumed-large；三段均满足 preflight disposition、B4b content-free trace/metric
 与 exact revision。三段同时都是零 admitted projection / `no_reservation`，所以 tier 分类、ledger
 reserve/commit 与带 dynamic presentation 的 prompt 路径尚未被活体执行，零 tier 也不能证明没有旧 recall
-回流。provider-owned replacement 与 authoritative compaction 当前没有 runner 可调用的真实 Alpha trigger，
-故两段明确为 `unsupported`。capability 继续 fail closed，AC-B1/B2/B3/B6 不关闭，也不拿代码级 contract
-或合成 fixture 冒充完整 UAT。
+回流。随后 PR #4021 的 merged-main Alpha 证明“trigger 已存在”仍不等于旅程可达：真实
+`Max payload size exceeded` 在 pooled transport 被泛化为 stream closed；compaction control 未
+`thread/resume` rejoin，provider event 不投递；动态 canary 没有 canonical producer，因而没有真实
+admission/ledger/receipt。PR #4029 只在既有 wire、session owner 与 F292 producer 边界修正这三条接缝，
+不新增 resolver/store/ledger/state machine。它合入后的标准 Alpha revision `fcaa5c926` 证明三个 baseline
+continuity journey 可达，但也暴露三个更精确的剩余接缝：AgentRouter 丢弃 bootstrap 注入的 dynamic
+delivery/ledger authority；固定 oversized UUID 被持久化 SessionRecord 的 TTL=0 claim 正确拒绝；compaction
+route 在 Compact turn settle 前过早返回 ready。capability 继续 fail closed，AC-B1/B2/B3/B6 不关闭，也不拿
+targeted contract 或三个 baseline pass 冒充完整 UAT。
+
+PR #4040 的 fix-forward 不改这些真相 owner：bootstrap 已存在的 terminal ledger / delivery store 只经
+`AgentRouterOptions → getStrategyDeps().invocationDeps` 抵达原 consumer；Alpha runner 只读 6398 的
+SessionRecord CLI claim，优先续跑同 owner active canary，并在候选已 sealed/foreign 时保持不变；多个
+`--oversized-native-thread-id` 只用于从真实 provider trigger 集合选择未 claim candidate。native control 继续
+以 provider-owned `contextCompaction` item 铸事件，但把该 observation 与 enclosing `turnId` 绑定，只有同一
+runtime/turn 的 provider `turn/completed(status=completed)` 才允许 route 返回 ready。没有 sleep、token、
+错误字符串或人工 SessionRecord/ledger 写入参与这两个判决。
 逐段证据与边界见 B4c evidence (internal)。
 
-当前 F292 live 样本还有一条相邻但不归 F296 的缺口：首次 `omitted(carrier_unsupported)` 后，成功 intake
-需要 owner-facing revalidation 才能沿同一幂等 message lineage 再呈现。该入口由 F292 owner 实现；F296
-Alpha 只消费其真实重试结果，不复制 intake retry / business-success 状态机。
+`compact-native` 的 delivery/seen cursor 前后快照是 **post-mutation evidence canary**，不是事务 guard：
+provider event 先由既有 epoch owner 提交，随后 cursor mismatch 才让该 Alpha journey 失败；它不回滚已经
+发生的 epoch transition，两个快照间的正常并发投递也可能保守地报 `compaction_cursor_changed`。因此这项
+证据只能证明本次受控窗口没有观察到 cursor 漂移，不能扩大成 production 并发下的线性化不变量。
+
+Alpha dynamic canary 直接复用 F292 已有 `buildAsrPersonMemoryDynamicScenes → QueueProcessor → mapper/ledger`
+生产链构造真实 WriteOpportunity；它不调用或复制 intake retry / business-success 状态机，也没有 ledger、
+opportunity 或 provider receipt 的人工写入口。runner 只在 canonical route 回执、非零 tier、`committed`
+ledger terminal 与 provider trace 同时存在时把 dynamic presentation 判为 passed；continuity journey 单独判定。
 
 ### B4b Telemetry Contract（canonical，schema v1）
 
@@ -642,12 +718,12 @@ final-generation card 与 mapper-only canonical subject 均有真实 route fixtu
 
 ### Phase B（Continuity-Aware Contract）
 
-- [ ] AC-B1: `providerCarrier × invocationOrigin × routeTopology` 为三个独立 typed coordinate；测试证明
+- [x] AC-B1: `providerCarrier × invocationOrigin × routeTopology` 为三个独立 typed coordinate；测试证明
   Claude bg daemon 不等于 scheduled origin，任意 scheduled invocation 可以选择自己的 provider carrier。
-- [ ] AC-B2: 每个生产 carrier 在消费用户 prompt 前给出 `ContinuityDisposition`；fresh/replaced/unknown 会
+- [x] AC-B2: 每个生产 carrier 在消费用户 prompt 前给出 `ContinuityDisposition`；fresh/replaced/unknown 会
   重建 cold packet，resumed 才允许 hot。通用 stale retry、ACP load failure、Kimi fingerprint rejection 与
   OpenCode workspace guard 都不能只补静态身份后沿用旧 hot prompt。
-- [ ] AC-B3: `contextMode` 与 `deltaSize` 为正交 typed output；首次进入、fresh/replaced/unknown、explicit
+- [x] AC-B3: `contextMode` 与 `deltaSize` 为正交 typed output；首次进入、fresh/replaced/unknown、explicit
   compaction、resumed small delta、resumed large delta 的表驱动测试逐项证明转移结果。active SessionRecord、
   requested sessionId、delivery cursor、seen cursor 均不得单独证明 hot。
 - [x] AC-B4: `ContextPresentation` 五字段与 T0/T1/T2/invalid 穷尽映射有 schema + exhaustive guard；
@@ -660,12 +736,12 @@ final-generation card 与 mapper-only canonical subject 均有真实 route fixtu
   <br/>*同一 Phase A 白名单快照继续守 route cold packet；B3b-4 的 serial/parallel replacement fixture 又在
   两代真实 provider prompt 上证明 SessionBootstrap 只加 exact handoff + content-free drill，poison digest、
   Thread Memory、task snapshot 与 recency artifact 均未进入。*
-- [ ] AC-B6: hot small/large delta 均只呈现 unseen messages 与新版本状态；相同
+- [x] AC-B6: hot small/large delta 均只呈现 unseen messages 与新版本状态；相同
   `subjectKey + version/asOf + contextEpoch` 不重复，大 delta 不触发 cold recall。
-  <br/>*B3a 已买下该 AC 所需能力（跨重启/多实例共享持久 ledger + 内容派生 revision），所以这条
-  AC 无需缩窄作用域；但 B3a 没有接任何 surface，「不重复」的端到端证据仍缺，故不打勾。
-  去重强度按 `PRESENTATION_DELIVERY_GUARANTEE` 表述：同 epoch at-most-once + crash 重发尾巴，
-  不是 exactly-once。*
+  <br/>*B3a/B3b 的跨重启、多实例共享持久 ledger 与内容派生 revision 已接入真实 surface；merged-main
+  Alpha 又在同一 exact revision 观察 hot small、hot large、dynamic commit 与 compaction 后 cold 重发。
+  去重强度仍按 `PRESENTATION_DELIVERY_GUARANTEE` 表述：同 epoch at-most-once + crash 重发尾巴，
+  不扩大成 exactly-once。*
 - [x] AC-B7: authoritative compaction event 令 `contextEpoch` 前进、presentation dedupe 重置并重发 cold
   packet，同时保持 message delivery cursor 与 seen cursor；压缩前已读消息不得被整体重放。
   <br/>*端到端证据：authenticated PreCompact → `SessionRecord` compression sequence → shared epoch owner →
@@ -717,9 +793,9 @@ final-generation card 与 mapper-only canonical subject 均有真实 route fixtu
 
 | ID | 需求点（operator experience/转述） | AC 编号 | 验证方式 | 状态 |
 |---|---|---|---|---|
-| R1 | “得和 Claude Code 那样克制” | AC-A1, AC-A4, AC-B4, AC-B5 | prompt snapshots + integration tests | [ ] |
-| R2 | 无法完全保证的内容不能冒充权威 | AC-A2, AC-A3, AC-B4, AC-B8, AC-B10 | adversarial fixtures | [ ] |
-| R3 | 冷启动与不在冷启动必须不同 | AC-B1, AC-B2, AC-B3, AC-B5, AC-B6, AC-B7 | handshake + state-table tests | [ ] |
+| R1 | “得和 Claude Code 那样克制” | AC-A1, AC-A4, AC-B4, AC-B5 | prompt snapshots + integration tests | [x] |
+| R2 | 无法完全保证的内容不能冒充权威 | AC-A2, AC-A3, AC-B4, AC-B8, AC-B10 | adversarial fixtures | [x] |
+| R3 | 冷启动与不在冷启动必须不同 | AC-B1, AC-B2, AC-B3, AC-B5, AC-B6, AC-B7 | handshake + state-table tests | [x] |
 | R4 | 压缩后不能被误当成仍有完整 context 的 hot | AC-B7, AC-B8 | provider compaction fixture | [x] |
 | R5 | 先止血，不让终态架构阻塞已知错误 | AC-A1~A4 | Phase A targeted gate | [x] |
 
@@ -787,7 +863,9 @@ F263 的 RecallEvent 继续记录 memory pointer/content 的呈现与消费；F2
 | KD-15 | B4 只用标准 Alpha 3011/3012/4111/6398，不另造验收端口 | Alpha 已拥有 origin/main 同步、隔离 Redis 与环境漂移守卫；随机端口会形成不可复现的影子环境 |
 | KD-16 | 首个 hot carrier 暂选 app_server，但 capability 只由动态 preflight + compaction 证据升级 | resume response 已位于 turn/start 前且 schema 有 compaction 候选；两者都不是活体证明，失败必须继续 fail-closed |
 
-## Review Gate
+## Historical Review Gate（已满足）
+
+以下为施工期门禁设计；终态合入与非作者 review 结果见 CloseGateReport。
 
 - Kickoff content: 复用 Fable 5 对骨架、五元组、五个 fixture 与两阶段顺序的同 thread verdict；本 spec
   已逐项吸收其三个修正，不因落盘 SHA 变化重演同一轮内容 review。

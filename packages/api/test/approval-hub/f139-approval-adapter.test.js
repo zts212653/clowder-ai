@@ -96,6 +96,7 @@ describe('F139ApprovalAdapter', () => {
       const [item] = adapter.listPending('owner-user');
 
       assert.equal(item.proposalId, recovering.proposalId);
+      assert.equal(item.status, 'applying');
       assert.equal(item.decisionMode, 'resume-only');
     } finally {
       db.close();

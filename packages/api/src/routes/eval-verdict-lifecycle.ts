@@ -9,7 +9,10 @@ import { getEvalCatOverride } from '../infrastructure/harness-eval/domain/eval-d
 import type { EvalReleaseTruthResolver } from '../infrastructure/harness-eval/eval-release-truth-resolver.js';
 import { EvalReleaseTruthError } from '../infrastructure/harness-eval/eval-release-truth-resolver.js';
 import { loadEvalVerdictLifecycleRoot } from '../infrastructure/harness-eval/hub/eval-hub-lifecycle-projection.js';
-import { loadReevalCaseRoot } from '../infrastructure/harness-eval/reeval-case-root.js';
+import {
+  frictionLifecycleV3QuarantineDiagnostic,
+  loadReevalCaseRoot,
+} from '../infrastructure/harness-eval/reeval-case-root.js';
 import { ReevalCaseCommandError, ReevalCaseService } from '../infrastructure/harness-eval/reeval-case-service.js';
 import { ReevalClosureProjectionError } from '../infrastructure/harness-eval/reeval-closure.js';
 import { buildLifecycleOpenedEvent } from '../infrastructure/harness-eval/reeval-closure-bootstrap.js';
@@ -164,6 +167,7 @@ export const evalVerdictLifecycleRoutes: FastifyPluginAsync<EvalVerdictLifecycle
         eventLog: opts.eventLog,
         loadRoot: async (verdictId) => {
           const resolved = loadEvalVerdictLifecycleRoot(opts.harnessFeedbackRoot, verdictId);
+          if (resolved?.artifact.schemaVersion === 3) return undefined;
           if (!resolved || !opts.redis) return resolved?.projectorRoot;
           const override = await getEvalCatOverride(opts.redis, resolved.artifact.domainId);
           return override ? { ...resolved.projectorRoot, assignedEvalCatId: override.catId } : resolved.projectorRoot;
@@ -173,6 +177,7 @@ export const evalVerdictLifecycleRoutes: FastifyPluginAsync<EvalVerdictLifecycle
             return buildCapabilityWakeupClosureImport().bootstrapEvents;
           }
           const resolved = loadEvalVerdictLifecycleRoot(opts.harnessFeedbackRoot, verdictId);
+          if (resolved?.artifact.schemaVersion === 3) return undefined;
           if (!resolved || resolved.artifact.verdict === 'keep_observe') return undefined;
           return [buildLifecycleOpenedEvent(resolved.artifact)];
         },
@@ -202,6 +207,9 @@ export const evalVerdictLifecycleRoutes: FastifyPluginAsync<EvalVerdictLifecycle
     if (!actor) return;
     const { verdictId } = request.params as { verdictId: string };
     const resolved = loadEvalVerdictLifecycleRoot(opts.harnessFeedbackRoot, verdictId);
+    if (resolved?.artifact.schemaVersion === 3) {
+      return reply.status(409).send(frictionLifecycleV3QuarantineDiagnostic());
+    }
     if (resolved?.artifact.schemaVersion === 2) {
       if (!caseService) return reply.status(503).send({ error: 'verified release truth unavailable' });
       return executeLifecycleCommand(caseService, actor, commandBody, verdictId, reply);

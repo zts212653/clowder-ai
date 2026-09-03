@@ -1,6 +1,6 @@
 ---
 name: video-forge
-tips_exempt: renewed for agent-product-promo-director routing and risk-matched review guidance; this changes cat production discipline, not a user-invokable product capability
+tips_exempt: renewed 2026-08-27 for public-link projection of agent-product-promo-director routing and risk-matched review guidance; this changes cat production discipline, not a user-invokable product capability
 description: >
   视频制作全链路：素材入库 → 剧本冻结 → 全局配音 → 对齐 → 渲染 → 审查 → 交付。
   Use when: 已明确要制作视频、做 showcase、做教程视频、录屏剪辑、video review、节奏审查。

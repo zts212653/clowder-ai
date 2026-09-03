@@ -1,11 +1,16 @@
 'use client';
 
-import { useCallback } from 'react';
+import { useCallback, useRef } from 'react';
 import { useConfirm } from '@/components/useConfirm';
 import { useChatStore } from '@/stores/chatStore';
 import { apiFetch } from '@/utils/api-client';
 
-/** Ensure we have a valid edit token, refreshing if needed. Returns token or null. */
+interface ScopedEditToken {
+  worktreeId: string;
+  token: string;
+  expiry: number;
+}
+
 async function ensureToken(
   worktreeId: string,
   token: string | null,
@@ -28,17 +33,68 @@ async function ensureToken(
   }
 }
 
-export function useFileManagement() {
+async function uploadWorkspaceFile(
+  worktreeId: string,
+  token: string,
+  path: string,
+  file: File,
+  confirm: ReturnType<typeof useConfirm>,
+) {
+  const doUpload = async (overwrite: boolean) => {
+    const form = new FormData();
+    form.append('worktreeId', worktreeId);
+    form.append('path', path);
+    form.append('editSessionToken', token);
+    form.append('file', file);
+    const url = overwrite ? '/api/workspace/upload?overwrite=true' : '/api/workspace/upload';
+    return apiFetch(url, { method: 'POST', body: form });
+  };
+  let response = await doUpload(false);
+  if (response.status === 409) {
+    const name = path.includes('/') ? path.slice(path.lastIndexOf('/') + 1) : path;
+    if (!(await confirm({ title: '覆盖确认', message: `"${name}" 已存在，是否覆盖？` }))) return null;
+    response = await doUpload(true);
+  }
+  if (!response.ok) return null;
+  return response.json();
+}
+
+/**
+ * File actions for either the ambient Workspace selection or an explicitly
+ * persisted F307 owner. Explicit owners never reuse another worktree's token.
+ */
+export function useFileManagement(ownerWorktreeId?: string | null) {
   const confirm = useConfirm();
-  const worktreeId = useChatStore((s) => s.workspaceWorktreeId);
-  const editToken = useChatStore((s) => s.workspaceEditToken);
-  const editTokenExpiry = useChatStore((s) => s.workspaceEditTokenExpiry);
-  const setEditToken = useChatStore((s) => s.setWorkspaceEditToken);
+  const ambientWorktreeId = useChatStore((s) => s.workspaceWorktreeId);
+  const ambientEditToken = useChatStore((s) => s.workspaceEditToken);
+  const ambientEditTokenExpiry = useChatStore((s) => s.workspaceEditTokenExpiry);
+  const setAmbientEditToken = useChatStore((s) => s.setWorkspaceEditToken);
+  const ownerTokenRef = useRef<ScopedEditToken | null>(null);
+  const worktreeId = ownerWorktreeId === undefined ? ambientWorktreeId : ownerWorktreeId;
+
+  const ensureEditToken = useCallback(async () => {
+    if (!worktreeId) return null;
+    const usesAmbientOwner = worktreeId === ambientWorktreeId;
+    const cachedOwnerToken = ownerTokenRef.current?.worktreeId === worktreeId ? ownerTokenRef.current : null;
+    return ensureToken(
+      worktreeId,
+      usesAmbientOwner ? ambientEditToken : (cachedOwnerToken?.token ?? null),
+      usesAmbientOwner ? ambientEditTokenExpiry : (cachedOwnerToken?.expiry ?? null),
+      (token, expiresIn) => {
+        if (usesAmbientOwner) {
+          setAmbientEditToken(token, expiresIn);
+          return;
+        }
+        ownerTokenRef.current =
+          token && expiresIn ? { worktreeId, token, expiry: Date.now() + expiresIn * 1000 } : null;
+      },
+    );
+  }, [ambientEditToken, ambientEditTokenExpiry, ambientWorktreeId, setAmbientEditToken, worktreeId]);
 
   const createFile = useCallback(
     async (path: string, content = '') => {
       if (!worktreeId) return null;
-      const token = await ensureToken(worktreeId, editToken, editTokenExpiry, setEditToken);
+      const token = await ensureEditToken();
       if (!token) return null;
       const res = await apiFetch('/api/workspace/file/create', {
         method: 'POST',
@@ -48,13 +104,13 @@ export function useFileManagement() {
       if (!res.ok) return null;
       return res.json();
     },
-    [worktreeId, editToken, editTokenExpiry, setEditToken],
+    [ensureEditToken, worktreeId],
   );
 
   const createDir = useCallback(
     async (path: string) => {
       if (!worktreeId) return null;
-      const token = await ensureToken(worktreeId, editToken, editTokenExpiry, setEditToken);
+      const token = await ensureEditToken();
       if (!token) return null;
       const res = await apiFetch('/api/workspace/dir/create', {
         method: 'POST',
@@ -64,13 +120,13 @@ export function useFileManagement() {
       if (!res.ok) return null;
       return res.json();
     },
-    [worktreeId, editToken, editTokenExpiry, setEditToken],
+    [ensureEditToken, worktreeId],
   );
 
   const deleteItem = useCallback(
     async (path: string) => {
       if (!worktreeId) return false;
-      const token = await ensureToken(worktreeId, editToken, editTokenExpiry, setEditToken);
+      const token = await ensureEditToken();
       if (!token) return false;
       const res = await apiFetch('/api/workspace/file', {
         method: 'DELETE',
@@ -79,13 +135,13 @@ export function useFileManagement() {
       });
       return res.ok;
     },
-    [worktreeId, editToken, editTokenExpiry, setEditToken],
+    [ensureEditToken, worktreeId],
   );
 
   const renameItem = useCallback(
     async (oldPath: string, newPath: string) => {
       if (!worktreeId) return false;
-      const token = await ensureToken(worktreeId, editToken, editTokenExpiry, setEditToken);
+      const token = await ensureEditToken();
       if (!token) return false;
       const res = await apiFetch('/api/workspace/file/rename', {
         method: 'POST',
@@ -94,35 +150,16 @@ export function useFileManagement() {
       });
       return res.ok;
     },
-    [worktreeId, editToken, editTokenExpiry, setEditToken],
+    [ensureEditToken, worktreeId],
   );
 
   const uploadFile = useCallback(
     async (path: string, file: File) => {
       if (!worktreeId) return null;
-      const token = await ensureToken(worktreeId, editToken, editTokenExpiry, setEditToken);
-      if (!token) return null;
-      const doUpload = async (overwrite: boolean) => {
-        const form = new FormData();
-        form.append('worktreeId', worktreeId);
-        form.append('path', path);
-        form.append('editSessionToken', token);
-        form.append('file', file);
-        const url = overwrite ? '/api/workspace/upload?overwrite=true' : '/api/workspace/upload';
-        return apiFetch(url, { method: 'POST', body: form });
-      };
-      const res = await doUpload(false);
-      if (res.status === 409) {
-        const name = path.includes('/') ? path.slice(path.lastIndexOf('/') + 1) : path;
-        if (!(await confirm({ title: '覆盖确认', message: `"${name}" 已存在，是否覆盖？` }))) return null;
-        const retry = await doUpload(true);
-        if (!retry.ok) return null;
-        return retry.json();
-      }
-      if (!res.ok) return null;
-      return res.json();
+      const token = await ensureEditToken();
+      return token ? uploadWorkspaceFile(worktreeId, token, path, file, confirm) : null;
     },
-    [worktreeId, editToken, editTokenExpiry, setEditToken, confirm],
+    [confirm, ensureEditToken, worktreeId],
   );
 
   return { createFile, createDir, deleteItem, renameItem, uploadFile };

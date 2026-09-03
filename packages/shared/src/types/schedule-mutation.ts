@@ -1,4 +1,5 @@
 import type { ApprovalPublication } from './approval-hub.js';
+import type { ProducerAttentionReevaluationLinkV1 } from './growing.js';
 
 export type ScheduleMutationTrigger =
   | { type: 'interval'; ms: number }
@@ -12,6 +13,8 @@ export interface ScheduleMutationTaskDefinition {
   templateId: string;
   trigger: ScheduleMutationTrigger;
   params: Record<string, unknown>;
+  /** Typed F310 subject link for one F139 producer re-evaluation trigger. */
+  entrustedWorkReevaluation?: ProducerAttentionReevaluationLinkV1;
   display: {
     label: string;
     category: ScheduleMutationDisplayCategory;

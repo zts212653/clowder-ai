@@ -2,8 +2,17 @@ import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ChatContainer } from '@/components/ChatContainer';
+import { ThreadChatRuntimeProvider } from '@/components/thread-chat';
 import type { ChatMessage as ChatMessageData, QueueEntry } from '@/stores/chat-types';
 import { useSidebarStore } from '@/stores/sidebarStore';
+
+function renderChatContainer(threadId: string) {
+  return React.createElement(
+    ThreadChatRuntimeProvider,
+    { routeThreadId: threadId },
+    React.createElement(ChatContainer, { threadId }),
+  );
+}
 
 let mockMessages: ChatMessageData[] = [];
 let mockQueue: QueueEntry[] = [];
@@ -151,16 +160,19 @@ vi.mock('../RightStatusPanel', () => ({
   RightStatusPanel: () => React.createElement('div', { 'data-testid': 'right-status-panel' }),
 }));
 vi.mock('../WorkspacePanel', () => ({
-  WorkspacePanel: (props: { onOpenStatus: () => void }) =>
-    React.createElement(
+  WorkspacePanel: (props: { statusSurface?: React.ReactNode }) => {
+    const [statusOpen, setStatusOpen] = React.useState(false);
+    return React.createElement(
       'div',
       { 'data-testid': 'workspace-panel' },
       React.createElement('button', {
         type: 'button',
         'data-testid': 'workspace-launcher-status',
-        onClick: props.onOpenStatus,
+        onClick: () => setStatusOpen(true),
       }),
-    ),
+      statusOpen ? props.statusSurface : null,
+    );
+  },
 }));
 vi.mock('../workspace/ContextualWorkspaceChrome', () => ({
   ContextualWorkspaceChrome: ({ children }: { children: React.ReactNode }) =>
@@ -236,7 +248,10 @@ vi.mock('../TransferTargetPicker', () => ({
         })
       : null,
 }));
-vi.mock('../SplitPaneView', () => ({ SplitPaneView: () => null }));
+vi.mock('../SplitPaneView', () => ({
+  SplitPaneView: () => null,
+  SplitPaneChatView: () => null,
+}));
 
 describe('ChatContainer mobile interactions', () => {
   let container: HTMLDivElement;
@@ -299,7 +314,7 @@ describe('ChatContainer mobile interactions', () => {
   });
   it('sidebar is closed by default on mobile', () => {
     act(() => {
-      root.render(React.createElement(ChatContainer, { threadId: 'test-thread' }));
+      root.render(renderChatContainer('test-thread'));
     });
     expect(container.querySelector('[data-testid="sidebar"]')).toBeNull();
   });
@@ -322,7 +337,7 @@ describe('ChatContainer mobile interactions', () => {
     };
 
     act(() => {
-      root.render(React.createElement(ChatContainer, { threadId: 'test-thread' }));
+      root.render(renderChatContainer('test-thread'));
     });
     act(() => {
       (container.querySelector('[data-testid="enter-selection-quote-source"]') as HTMLButtonElement).click();
@@ -347,7 +362,7 @@ describe('ChatContainer mobile interactions', () => {
       updateRequired: false,
     };
     act(() => {
-      root.render(React.createElement(ChatContainer, { threadId: 'test-thread' }));
+      root.render(renderChatContainer('test-thread'));
     });
     expect(
       container.querySelector('[data-testid="forwarding-admission-quote-source"]')?.getAttribute('data-disabled'),
@@ -383,7 +398,7 @@ describe('ChatContainer mobile interactions', () => {
     };
 
     act(() => {
-      root.render(React.createElement(ChatContainer, { threadId: 'test-thread' }));
+      root.render(renderChatContainer('test-thread'));
     });
     // The 2026-08-17 outage in one assertion: an unverified deployment closes
     // forwarding, but must never take plain sending down with it.
@@ -408,7 +423,7 @@ describe('ChatContainer mobile interactions', () => {
       updateRequired: true,
     };
     act(() => {
-      root.render(React.createElement(ChatContainer, { threadId: 'test-thread' }));
+      root.render(renderChatContainer('test-thread'));
     });
     // A detected mismatch is the one state that does close the composer too.
     expect(container.querySelector('[data-testid="chat-input"]')?.getAttribute('data-disabled')).toBe('true');
@@ -443,7 +458,7 @@ describe('ChatContainer mobile interactions', () => {
     ];
 
     act(() => {
-      root.render(React.createElement(ChatContainer, { threadId: 'test-thread' }));
+      root.render(renderChatContainer('test-thread'));
     });
 
     expect(container.querySelector('[data-testid="chat-message-queued-user"]')).toBeTruthy();
@@ -451,7 +466,7 @@ describe('ChatContainer mobile interactions', () => {
 
   it('opens sidebar overlay when toggle button is clicked', () => {
     act(() => {
-      root.render(React.createElement(ChatContainer, { threadId: 'test-thread' }));
+      root.render(renderChatContainer('test-thread'));
     });
     const toggleBtn = container.querySelector('[data-testid="sidebar-toggle"]') as HTMLButtonElement;
     act(() => {
@@ -463,7 +478,7 @@ describe('ChatContainer mobile interactions', () => {
 
   it('closes sidebar when backdrop is clicked', () => {
     act(() => {
-      root.render(React.createElement(ChatContainer, { threadId: 'test-thread' }));
+      root.render(renderChatContainer('test-thread'));
     });
     const toggleBtn = container.querySelector('[data-testid="sidebar-toggle"]') as HTMLButtonElement;
     act(() => {
@@ -477,18 +492,20 @@ describe('ChatContainer mobile interactions', () => {
     expect(container.querySelector('[data-testid="sidebar"]')).toBeNull();
   });
 
-  it('opens the full status/session surface from the Workspace Launcher', () => {
+  it('keeps the status/session owner inside the Workspace instead of replacing the host', () => {
     mockRightPanelOpen = true;
     mockRightPanelMode = 'workspace';
     act(() => {
-      root.render(React.createElement(ChatContainer, { threadId: 'test-thread' }));
+      root.render(renderChatContainer('test-thread'));
     });
     const triggerBtn = container.querySelector('[data-testid="workspace-launcher-status"]') as HTMLButtonElement;
     expect(triggerBtn).toBeTruthy();
     act(() => {
       triggerBtn.click();
     });
-    expect(mockSetRightPanelMode).toHaveBeenCalledWith('status');
+    expect(container.querySelector('[data-testid="right-status-panel"]')).toBeTruthy();
+    expect(mockSetRightPanelMode).not.toHaveBeenCalledWith('status');
+    expect(container.querySelector('[data-testid="workspace-panel"]')).toBeTruthy();
   });
 
   it('renders the approval workspace as a closable mobile sheet', () => {
@@ -496,7 +513,7 @@ describe('ChatContainer mobile interactions', () => {
     mockRightPanelMode = 'workspace';
     mockWorkspaceMode = 'approval';
     act(() => {
-      root.render(React.createElement(ChatContainer, { threadId: 'test-thread' }));
+      root.render(renderChatContainer('test-thread'));
     });
 
     const approvalSheet = container.querySelector('[data-testid="mobile-approval"]') as HTMLButtonElement;
@@ -512,7 +529,7 @@ describe('ChatContainer mobile interactions', () => {
     mockRightPanelMode = 'workspace';
     mockWorkspaceMode = 'dev';
     await act(async () => {
-      root.render(React.createElement(ChatContainer, { threadId: 'test-thread' }));
+      root.render(renderChatContainer('test-thread'));
     });
 
     expect(container.querySelector('[data-testid="workspace-panel"]')).toBeTruthy();
@@ -523,7 +540,7 @@ describe('ChatContainer mobile interactions', () => {
     mockRightPanelOpen = true;
     mockRightPanelMode = 'workspace';
     await act(async () => {
-      root.render(React.createElement(ChatContainer, { threadId: 'test-thread' }));
+      root.render(renderChatContainer('test-thread'));
     });
 
     await act(async () => {
@@ -538,7 +555,7 @@ describe('ChatContainer mobile interactions', () => {
     mockRightPanelOpen = true;
     mockRightPanelMode = 'workspace';
     await act(async () => {
-      root.render(React.createElement(ChatContainer, { threadId: 'test-thread' }));
+      root.render(renderChatContainer('test-thread'));
     });
     expect(container.querySelector('[data-testid="workspace-panel"]')).toBeTruthy();
     const toggle = container.querySelector('[data-testid="workspace-toggle"]') as HTMLButtonElement;
@@ -546,7 +563,7 @@ describe('ChatContainer mobile interactions', () => {
     expect(container.querySelector('[data-testid="workspace-panel"]')).toBeTruthy();
     mockRightPanelMode = 'status';
     await act(async () => {
-      root.render(React.createElement(ChatContainer, { threadId: 'test-thread' }));
+      root.render(renderChatContainer('test-thread'));
     });
 
     expect(container.querySelector('[data-testid="workspace-panel"]')).toBeTruthy();
@@ -555,7 +572,7 @@ describe('ChatContainer mobile interactions', () => {
   it('auto-opens sidebar store on desktop but does not render mobile overlay', () => {
     mockMatchMedia(true);
     act(() => {
-      root.render(React.createElement(ChatContainer, { threadId: 'test-thread' }));
+      root.render(renderChatContainer('test-thread'));
     });
     expect(useSidebarStore.getState().isOpen).toBe(true);
     expect(container.querySelector('[data-testid="sidebar"]')).toBeNull();

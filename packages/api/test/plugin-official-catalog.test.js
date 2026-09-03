@@ -8,8 +8,8 @@ import {
 } from '../dist/domains/plugin/index.js';
 
 const policy = OFFICIAL_PLUGIN_POLICIES[0];
-const alpha8Digest = 'sha512-unl8sq1rEMckgiqE8mI0e0+Qa6l69J4cxT2GOe5AMUSomkrbmpKdZR/EYljvH+hP4tNaR9l1KQd6T9GWX49L4w==';
-const alpha9Digest = `sha512-${Buffer.alloc(64, 9).toString('base64')}`;
+const alpha9Digest = 'sha512-d1wf5Il1Ls18Db9EUB4S0qqhDFRe6mSLIyv9E3Tz7VqI59gffHCe+JKmCJOYVGJBiv1ItrTq8ChthF0SzdSWYQ==';
+const alpha10Digest = `sha512-${Buffer.alloc(64, 10).toString('base64')}`;
 
 function tarball(version) {
   return `https://registry.npmjs.org/@clowder-ai/feishu-meeting-intake/-/feishu-meeting-intake-${version}.tgz`;
@@ -38,7 +38,7 @@ function response(body, headers = {}) {
   });
 }
 
-test('bootstraps alpha.8 policy and hot-refreshes release coordinates without widening Host authority', async () => {
+test('bootstraps alpha.9 policy and hot-refreshes release coordinates without widening Host authority', async () => {
   let now = 1_000;
   let fetches = 0;
   const catalog = new RefreshingOfficialPluginCatalog({
@@ -48,7 +48,7 @@ test('bootstraps alpha.8 policy and hot-refreshes release coordinates without wi
     fetchFn: async () => {
       fetches += 1;
       return response(
-        metadata('0.1.0-alpha.9', alpha9Digest, {
+        metadata('0.1.0-alpha.10', alpha10Digest, {
           pluginId: 'attacker.plugin',
           effectiveGrants: ['filesystem.write'],
         }),
@@ -56,21 +56,21 @@ test('bootstraps alpha.8 policy and hot-refreshes release coordinates without wi
     },
   });
 
-  assert.equal(policy.bootstrapRelease.version, '0.1.0-alpha.8');
-  assert.equal(policy.bootstrapRelease.packageDigest, alpha8Digest);
+  assert.equal(policy.bootstrapRelease.version, '0.1.0-alpha.9');
+  assert.equal(policy.bootstrapRelease.packageDigest, alpha9Digest);
 
   const fresh = await catalog.snapshot();
   assert.equal(fetches, 1);
   assert.equal(fresh.status, 'fresh');
   assert.equal(fresh.checkedAt, 1_000);
-  assert.equal(fresh.entries[0].version, '0.1.0-alpha.9');
-  assert.equal(fresh.entries[0].packageDigest, alpha9Digest);
+  assert.equal(fresh.entries[0].version, '0.1.0-alpha.10');
+  assert.equal(fresh.entries[0].packageDigest, alpha10Digest);
   assert.equal(fresh.entries[0].pluginId, 'official.feishu-meeting-intake');
   assert.deepEqual(fresh.entries[0].effectiveGrants, ['events.publish']);
   assert.deepEqual(fresh.entries[0].ownerAuth?.domains, ['event', 'minutes', 'note', 'vc']);
 
   now = 1_999;
-  assert.equal((await catalog.snapshot()).entries[0].version, '0.1.0-alpha.9');
+  assert.equal((await catalog.snapshot()).entries[0].version, '0.1.0-alpha.10');
   assert.equal(fetches, 1, 'fresh reads must stay inside the TTL');
 });
 
@@ -100,10 +100,10 @@ test('joins concurrent refreshes and retains last-known-good with bounded degrad
   const first = catalog.snapshot();
   const second = catalog.snapshot();
   assert.equal(fetches, 1);
-  release(response(metadata('0.1.0-alpha.9', alpha9Digest)));
+  release(response(metadata('0.1.0-alpha.10', alpha10Digest)));
   assert.deepEqual(
     (await Promise.all([first, second])).map((snapshot) => snapshot.entries[0].version),
-    ['0.1.0-alpha.9', '0.1.0-alpha.9'],
+    ['0.1.0-alpha.10', '0.1.0-alpha.10'],
   );
 
   now = 2_000;
@@ -112,7 +112,7 @@ test('joins concurrent refreshes and retains last-known-good with bounded degrad
   assert.equal(degraded.status, 'degraded');
   assert.equal(degraded.errorCode, 'CATALOG_FETCH_FAILED');
   assert.equal(degraded.checkedAt, 2_000);
-  assert.equal(degraded.entries[0].version, '0.1.0-alpha.9');
+  assert.equal(degraded.entries[0].version, '0.1.0-alpha.10');
   assert.equal(JSON.stringify(degraded).includes('secret upstream detail'), false);
 
   now = 2_999;
@@ -122,7 +122,7 @@ test('joins concurrent refreshes and retains last-known-good with bounded degrad
 
 test('rejects a newer release that reuses any previously accepted digest', async () => {
   let now = 1_000;
-  let next = metadata('0.1.0-alpha.9', alpha9Digest);
+  let next = metadata('0.1.0-alpha.10', alpha10Digest);
   const catalog = new RefreshingOfficialPluginCatalog({
     policies: OFFICIAL_PLUGIN_POLICIES,
     now: () => now,
@@ -130,15 +130,15 @@ test('rejects a newer release that reuses any previously accepted digest', async
     fetchFn: async () => response(next),
   });
 
-  assert.equal((await catalog.snapshot()).entries[0].version, '0.1.0-alpha.9');
+  assert.equal((await catalog.snapshot()).entries[0].version, '0.1.0-alpha.10');
   now = 2_000;
-  next = metadata('0.1.0-alpha.10', alpha8Digest);
+  next = metadata('0.1.0-alpha.11', alpha9Digest);
 
   const degraded = await catalog.snapshot();
   assert.equal(degraded.status, 'degraded');
   assert.equal(degraded.errorCode, 'CATALOG_INVALID_METADATA');
-  assert.equal(degraded.entries[0].version, '0.1.0-alpha.9');
-  assert.equal(degraded.entries[0].packageDigest, alpha9Digest);
+  assert.equal(degraded.entries[0].version, '0.1.0-alpha.10');
+  assert.equal(degraded.entries[0].packageDigest, alpha10Digest);
 });
 
 for (const [label, metadataFactory, expectedCode] of [
@@ -149,31 +149,31 @@ for (const [label, metadataFactory, expectedCode] of [
   ],
   [
     'same-version digest equivocation',
-    () => metadata('0.1.0-alpha.8', `sha512-${Buffer.alloc(64, 8).toString('base64')}`),
+    () => metadata('0.1.0-alpha.9', `sha512-${Buffer.alloc(64, 8).toString('base64')}`),
     'CATALOG_EQUIVOCATION_REJECTED',
   ],
   [
     'newer version reusing the current digest',
-    () => metadata('0.1.0-alpha.9', alpha8Digest),
+    () => metadata('0.1.0-alpha.10', alpha9Digest),
     'CATALOG_INVALID_METADATA',
   ],
   [
     'wrong package identity',
-    () => metadata('0.1.0-alpha.9', alpha9Digest, { name: '@attacker/not-official' }),
+    () => metadata('0.1.0-alpha.10', alpha10Digest, { name: '@attacker/not-official' }),
     'CATALOG_INVALID_METADATA',
   ],
   [
     'wrong tarball origin',
     () => ({
-      ...metadata('0.1.0-alpha.9', alpha9Digest),
-      dist: { ...metadata('0.1.0-alpha.9', alpha9Digest).dist, tarball: 'https://attacker.invalid/p.tgz' },
+      ...metadata('0.1.0-alpha.10', alpha10Digest),
+      dist: { ...metadata('0.1.0-alpha.10', alpha10Digest).dist, tarball: 'https://attacker.invalid/p.tgz' },
     }),
     'CATALOG_INVALID_METADATA',
   ],
   [
     'credentials in tarball URL',
     () => {
-      const value = metadata('0.1.0-alpha.9', alpha9Digest);
+      const value = metadata('0.1.0-alpha.10', alpha10Digest);
       return {
         ...value,
         dist: { ...value.dist, tarball: value.dist.tarball.replace('https://', 'https://user:pass@') },
@@ -184,7 +184,7 @@ for (const [label, metadataFactory, expectedCode] of [
   [
     'credentials in provenance URL',
     () => {
-      const value = metadata('0.1.0-alpha.9', alpha9Digest);
+      const value = metadata('0.1.0-alpha.10', alpha10Digest);
       return {
         ...value,
         dist: {
@@ -201,8 +201,8 @@ for (const [label, metadataFactory, expectedCode] of [
   [
     'missing provenance',
     () => ({
-      ...metadata('0.1.0-alpha.9', alpha9Digest),
-      dist: { tarball: tarball('0.1.0-alpha.9'), integrity: alpha9Digest },
+      ...metadata('0.1.0-alpha.10', alpha10Digest),
+      dist: { tarball: tarball('0.1.0-alpha.10'), integrity: alpha10Digest },
     }),
     'CATALOG_INVALID_METADATA',
   ],
@@ -217,8 +217,8 @@ for (const [label, metadataFactory, expectedCode] of [
     const snapshot = await catalog.snapshot();
     assert.equal(snapshot.status, 'degraded');
     assert.equal(snapshot.errorCode, expectedCode);
-    assert.equal(snapshot.entries[0].version, '0.1.0-alpha.8');
-    assert.equal(snapshot.entries[0].packageDigest, alpha8Digest);
+    assert.equal(snapshot.entries[0].version, '0.1.0-alpha.9');
+    assert.equal(snapshot.entries[0].packageDigest, alpha9Digest);
   });
 }
 
@@ -226,11 +226,11 @@ test('rejects oversized metadata before parsing it', async () => {
   const catalog = new RefreshingOfficialPluginCatalog({
     policies: OFFICIAL_PLUGIN_POLICIES,
     now: () => 1_000,
-    fetchFn: async () => response(metadata('0.1.0-alpha.9', alpha9Digest), { 'content-length': '1048576' }),
+    fetchFn: async () => response(metadata('0.1.0-alpha.10', alpha10Digest), { 'content-length': '1048576' }),
   });
 
   const snapshot = await catalog.snapshot();
   assert.equal(snapshot.status, 'degraded');
   assert.equal(snapshot.errorCode, 'CATALOG_INVALID_METADATA');
-  assert.equal(snapshot.entries[0].version, '0.1.0-alpha.8');
+  assert.equal(snapshot.entries[0].version, '0.1.0-alpha.9');
 });

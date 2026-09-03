@@ -71,7 +71,6 @@ const baseParams = {
   calledBy: 'opus-47',
   intent: 'help me',
   sourceMessageId: 'source-message-123',
-  cloudReturnBinding: 'cbr1.aW52LWNsb3Vk.signature',
 };
 
 describe('F247 AC-B1c-2: dispatch non-throwing outcome contract', () => {

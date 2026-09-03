@@ -342,6 +342,7 @@ export class TaskRunnerV2 {
       const spec = template.createSpec(def.id, {
         trigger: def.trigger,
         params: def.params,
+        ...(def.entrustedWorkReevaluation ? { entrustedWorkReevaluation: def.entrustedWorkReevaluation } : {}),
         deliveryThreadId: def.deliveryThreadId,
       });
       // Override display with persisted display

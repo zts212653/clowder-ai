@@ -9,6 +9,9 @@ const session = {
   userId: 'owner',
   seq: 0,
   status: 'sealed',
+  createdAt: 800,
+  updatedAt: 1_800,
+  sealedAt: 1_800,
 };
 
 function envelope(eventNo, invocationId, t, event, overrides = {}) {
@@ -60,8 +63,11 @@ function buildProvider(events) {
       getChainByThread: async () => [session, { ...session, id: 'session-foreign', userId: 'foreign' }],
     },
     transcriptReader: {
-      hasTranscript: async (sessionId) => sessionId === 'session-owner',
-      readAllEvents: async (sessionId) => (sessionId === 'session-owner' ? events : []),
+      scanEvents: async (sessionId, _threadId, _catId, visitor) => {
+        if (sessionId !== 'session-owner') return { present: false, eventCount: 0 };
+        for (const event of events) await visitor(event);
+        return { present: true, eventCount: events.length };
+      },
     },
     canonicalResolver: async (input) => {
       const resolved = canonical.get(input.invocationId);
@@ -186,7 +192,7 @@ describe('trajectory inspector transcript source provider', () => {
     const missing = new TrajectoryInspectorSourceProviderImpl({
       threadStore: { list: async () => [{ id: 'thread-owner' }] },
       sessionChainStore: { getChainByThread: async () => [session] },
-      transcriptReader: { hasTranscript: async () => false, readAllEvents: async () => [] },
+      transcriptReader: { scanEvents: async () => ({ present: false, eventCount: 0 }) },
       canonicalResolver: async () => ({ status: 404, body: { code: 'INVOCATION_RECORD_NOT_FOUND' } }),
       externalEvidenceSource: {
         listFindings: async () => [],
@@ -220,6 +226,38 @@ describe('trajectory inspector transcript source provider', () => {
     );
 
     assert.equal(bundle.episodes.find((row) => row.invocationId === 'inv-silent').evidenceOutcome, 'not_taken');
+  });
+
+  it('correlates a successful result after the window for a drill started inside it', async () => {
+    const events = [
+      terminal(1, 'inv-unresolved', 1_200),
+      drill(2, 'investigator', 1_900, 'inv-unresolved', 'tool-crossing-window', {
+        threadId: 'thread-owner',
+        sessionId: 'session-owner',
+      }),
+      toolResult(3, 'investigator', 2_000, 'tool-crossing-window'),
+    ];
+
+    const bundle = await buildProvider(events).resolve(
+      { kind: 'trajectory-inspector-window', windowStartMs: 900, windowEndMs: 2_000 },
+      { ownerUserId: 'owner' },
+    );
+
+    assert.equal(bundle.episodes.find((row) => row.invocationId === 'inv-unresolved').evidenceOutcome, 'unresolved');
+  });
+
+  it('preserves terminal projection semantics when the terminal event precedes the selected window', async () => {
+    const bundle = await buildProvider([
+      terminal(1, 'inv-silent', 800),
+      envelope(2, 'inv-silent', 1_200, { type: 'status', content: 'post-terminal persistence' }),
+    ]).resolve(
+      { kind: 'trajectory-inspector-window', windowStartMs: 900, windowEndMs: 2_000 },
+      { ownerUserId: 'owner' },
+    );
+
+    const episode = bundle.episodes.find((row) => row.invocationId === 'inv-silent');
+    assert.equal(episode.anomalyKind, 'error');
+    assert.equal(episode.eligibleAtMs, 1_200);
   });
 
   it('rejects unbounded, reversed, oversized, and caller-authored source selectors', async () => {

@@ -46,6 +46,11 @@ export interface ReadEventsHandoffResult {
   total: number;
 }
 
+export interface ScanEventsResult {
+  present: boolean;
+  eventCount: number;
+}
+
 export interface SearchHit {
   score: number;
   sessionId: string;
@@ -380,6 +385,48 @@ export class TranscriptReader {
     }
 
     return events.length > 0 ? events : null;
+  }
+
+  /**
+   * Visit a transcript incrementally without retaining the full JSONL payload.
+   * Consumers that aggregate across many sessions must prefer this boundary to
+   * readAllEvents(), whose returned array scales with the entire transcript.
+   */
+  async scanEvents(
+    sessionId: string,
+    threadId: string,
+    catId: string,
+    visitor: (event: TranscriptEvent) => void | Promise<void>,
+    signal?: AbortSignal,
+  ): Promise<ScanEventsResult> {
+    signal?.throwIfAborted();
+    const jsonlPath = join(this.sessionDir(threadId, catId, sessionId), 'events.jsonl');
+
+    try {
+      await stat(jsonlPath);
+    } catch {
+      return { present: false, eventCount: 0 };
+    }
+
+    let eventCount = 0;
+    const rl = createInterface({
+      input: createReadStream(jsonlPath, { encoding: 'utf-8', signal }),
+      crlfDelay: Infinity,
+    });
+    for await (const line of rl) {
+      signal?.throwIfAborted();
+      if (line.trim().length === 0) continue;
+      let event: TranscriptEvent | undefined;
+      try {
+        event = normalizeTranscriptEvent(JSON.parse(line));
+      } catch {
+        /* skip malformed lines */
+      }
+      if (!event) continue;
+      eventCount += 1;
+      await visitor(event);
+    }
+    return { present: true, eventCount };
   }
 
   /**

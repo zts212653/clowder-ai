@@ -1,4 +1,4 @@
-import type { ApprovalItem } from '@cat-cafe/shared';
+import type { ApprovalHubItem } from '@cat-cafe/shared';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { anchoredApprovalNavigation } from '@/test-support/approval-navigation';
 
@@ -9,13 +9,14 @@ vi.mock('@/utils/api-client', () => ({
 
 import { useApprovalHubStore } from '../approvalHubStore';
 
-const ITEM: ApprovalItem = {
+const ITEM: ApprovalHubItem = {
   proposalId: 'person_candidate_1',
   sourceFeatureId: 'F276',
   navigation: anchoredApprovalNavigation('thread_people'),
   requesterCatId: 'codex-sol',
   ownerUserId: 'owner-1',
-  status: 'pending',
+  resolution: 'open',
+  materialization: { state: 'not_started' },
   summary: '记住人物：黄挺',
   detail: {
     displayName: '黄挺',

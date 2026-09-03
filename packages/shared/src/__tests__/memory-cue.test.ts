@@ -65,6 +65,46 @@ const fixtures = {
       featureId: 'F287',
     },
   },
+  approved_taste_invoked: {
+    v: 1,
+    kind: 'approved_taste_invoked',
+    opportunityId: 'opportunity-taste-1',
+    producer: 'owner_message',
+    consumer: 'agent_route',
+    scope,
+    occurredAt: 1_785_600_000_003,
+    payload: {
+      triggerKey: 'ELI5',
+      sourceMessageId: 'message-3',
+    },
+  },
+  profile_revision_available: {
+    v: 1,
+    kind: 'profile_revision_available',
+    opportunityId: 'opportunity-profile-1',
+    producer: 'profile_repository',
+    consumer: 'agent_route',
+    scope,
+    occurredAt: 1_785_600_000_004,
+    payload: {
+      profileUri: 'cat-cafe-profile://relationship/current',
+      sourceRevision: 'sha256:profile-revision-1',
+    },
+  },
+  recent_event_available: {
+    v: 1,
+    kind: 'recent_event_available',
+    opportunityId: 'opportunity-event-1',
+    producer: 'event_memory',
+    consumer: 'agent_route',
+    scope,
+    occurredAt: 1_785_600_000_005,
+    payload: {
+      eventId: 'evt_1',
+      subjectThreadId: scope.threadId,
+      sourceRevision: 'sha256:event-revision-1',
+    },
+  },
 } as const;
 
 describe('F287 memory cue shared contract', () => {
@@ -74,22 +114,48 @@ describe('F287 memory cue shared contract', () => {
       memoryCueDrillFamilyForResolver('operational_precedent'),
       memoryCueDrillFamilyForResolver('taste'),
       memoryCueDrillFamilyForResolver('profile'),
+      memoryCueDrillFamilyForResolver('event'),
       memoryCueDrillFamilyForResolver('project_knowledge'),
-    ]).toEqual(['person_memory', 'evidence', 'taste', null, null]);
+    ]).toEqual(['person_memory', 'evidence', 'taste', 'profile', 'event', null]);
   });
 
-  it('admits only the three versioned producer/kind pairs', () => {
-    expect(RECALL_OPPORTUNITY_CATALOG_VERSION).toBe(1);
+  it('admits only the six versioned producer/kind pairs after the Phase C vertical slices', () => {
+    expect(RECALL_OPPORTUNITY_CATALOG_VERSION).toBe(3);
     expect(RECALL_OPPORTUNITY_V1_PAIRS).toEqual([
       { kind: 'subject_seen', producer: 'entity_nudge' },
       { kind: 'delivery_decision', producer: 'github_ci' },
       { kind: 'judgment_surface_entered', producer: 'workflow_sop' },
+      { kind: 'approved_taste_invoked', producer: 'owner_message' },
+      { kind: 'profile_revision_available', producer: 'profile_repository' },
+      { kind: 'recent_event_available', producer: 'event_memory' },
     ]);
 
     for (const fixture of Object.values(fixtures)) {
       expect(recallOpportunityV1Schema.parse(fixture)).toEqual(fixture);
       expect(isRecallOpportunityV1(fixture)).toBe(true);
     }
+  });
+
+  it('keeps explicit Taste invocation strict and closed', () => {
+    expect(recallOpportunityV1Schema.parse(fixtures.approved_taste_invoked)).toEqual(fixtures.approved_taste_invoked);
+    expect(
+      recallOpportunityV1Schema.safeParse({
+        ...fixtures.approved_taste_invoked,
+        payload: { ...fixtures.approved_taste_invoked.payload, triggerKey: 'unknown-taste' },
+      }).success,
+    ).toBe(false);
+    expect(
+      recallOpportunityV1Schema.safeParse({
+        ...fixtures.approved_taste_invoked,
+        payload: { ...fixtures.approved_taste_invoked.payload, rawQuery: 'search Taste' },
+      }).success,
+    ).toBe(false);
+    expect(
+      recallOpportunityV1Schema.safeParse({
+        ...fixtures.approved_taste_invoked,
+        producer: 'workflow_sop',
+      }).success,
+    ).toBe(false);
   });
 
   it.each([
@@ -112,7 +178,7 @@ describe('F287 memory cue shared contract', () => {
       v: 1,
       cueId: 'cue-1',
       opportunityId: fixtures.subject_seen.opportunityId,
-      catalogVersion: 1,
+      catalogVersion: 3,
       resolverFamily: 'person_entity',
       resolverVersion: 1,
       whyNow: 'A named subject is present in the current decision frame.',

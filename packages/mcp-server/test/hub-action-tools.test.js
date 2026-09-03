@@ -156,6 +156,42 @@ test('cat_cafe_preview_open posts a typed preview auto-open request', async () =
   });
 });
 
+test('cat_cafe_preview_open forwards a bounded visible-page admission contract', async () => {
+  await withCallbackServer(async (requests) => {
+    const visiblePageAdmission = {
+      expectedClientRevision: 'b'.repeat(40),
+      requiredDom: [
+        {
+          selector: '[data-testid="f307-experience-workbench"]',
+          attributes: {
+            'data-layout-owner': 'f307',
+            'data-layout-hydrated': 'true',
+            'data-surface-count': '0',
+            'data-workbench-focus': 'home',
+            'data-zero-topology-contract': 'canonical-home',
+          },
+          textIncludes: ['你想打开什么？'],
+        },
+      ],
+      forbiddenText: ['工作台已清空'],
+    };
+    const result = await handlePreviewOpen({
+      port: 3011,
+      path: '/threads/thread-f307?f307WorkbenchGate=true',
+      threadId: 'thread-f307',
+      visiblePageAdmission,
+    });
+
+    assert.equal(result.isError, undefined);
+    assert.deepEqual(requests[0].body, {
+      port: 3011,
+      path: '/threads/thread-f307?f307WorkbenchGate=true',
+      threadId: 'thread-f307',
+      visiblePageAdmission,
+    });
+  });
+});
+
 test('Hub action tools use variant-scoped agent-key credentials when requested', async () => {
   const tempDir = mkdtempSync(join(tmpdir(), 'cat-cafe-hub-action-agent-key-'));
   try {

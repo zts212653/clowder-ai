@@ -10,7 +10,7 @@ import { ApprovalPendingPane, type ApprovalStatusFilter } from './ApprovalPendin
 
 type ActiveTab = 'pending' | 'history';
 
-export function ApprovalPanel() {
+export function ApprovalPanel({ selectedProposalId = null }: { selectedProposalId?: string | null }) {
   const [activeTab, setActiveTab] = useState<ActiveTab>('pending');
   const [featureFilters, setFeatureFilters] = useState<Set<ApprovalFeatureId>>(() => new Set());
   const [statusFilter, setStatusFilter] = useState<ApprovalStatusFilter>('all');
@@ -26,8 +26,21 @@ export function ApprovalPanel() {
     if (activeTab === 'history') fetchSettled?.();
   }, [activeTab, fetchSettled]);
 
+  useEffect(() => {
+    if (!selectedProposalId) return;
+    setActiveTab('pending');
+    setFeatureFilters(new Set());
+    setStatusFilter('all');
+    setThreadQuery('');
+    fetchPending?.();
+  }, [fetchPending, selectedProposalId]);
+
   return (
-    <div className="flex min-h-0 flex-1 flex-col" data-testid="approval-panel">
+    <div
+      className="flex min-h-0 flex-1 flex-col"
+      data-testid="approval-panel"
+      data-selected-proposal-id={selectedProposalId ?? ''}
+    >
       <div className="flex items-center justify-between border-b border-cafe-subtle/40 px-3 py-2">
         <div className="flex items-center gap-0.5" data-testid="approval-tab-bar">
           <TabButton active={activeTab === 'pending'} onClick={() => setActiveTab('pending')} testId="pending">
@@ -66,6 +79,7 @@ export function ApprovalPanel() {
 
       {activeTab === 'pending' ? (
         <ApprovalPendingPane
+          selectedProposalId={selectedProposalId}
           featureFilters={featureFilters}
           onFeatureFiltersChange={setFeatureFilters}
           statusFilter={statusFilter}

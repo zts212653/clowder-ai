@@ -3,7 +3,9 @@ import { lstat, readFile } from 'node:fs/promises';
 import { isAbsolute, resolve } from 'node:path';
 
 import type { HostAppendMessageReceipt, IConversationHostAdapter } from '../conversation-host-adapter.js';
+import type { PersonalChromeAssistantReturnCursor } from './assistant-return-cursor.js';
 import {
+  type IPersonalChromeAssistantReturnAdapter,
   PersonalChromeHostAdapter,
   type PersonalChromeHostAdapterOptions,
   PersonalChromeHostError,
@@ -121,7 +123,7 @@ async function readPersistedAdapterOptions(pairingRecordPath: string): Promise<P
 export function createPersonalChromeHostAdapterFromEnv(
   env: Readonly<Record<string, string | undefined>>,
   logger: PersonalChromeRuntimeLogger,
-): IConversationHostAdapter | null {
+): (IConversationHostAdapter & IPersonalChromeAssistantReturnAdapter) | null {
   const socketPath = env.CAT_CAFE_PERSONAL_CHROME_SOCKET;
   const pairingSecret = env.CAT_CAFE_PERSONAL_CHROME_PAIRING_SECRET;
   const helperArtifactRevision = env.CAT_CAFE_PERSONAL_CHROME_HELPER_ARTIFACT_REVISION;
@@ -150,7 +152,9 @@ export function createPersonalChromeHostAdapterFromEnv(
   }
 }
 
-export class RefreshablePersonalChromeHostAdapter implements IConversationHostAdapter {
+export class RefreshablePersonalChromeHostAdapter
+  implements IConversationHostAdapter, IPersonalChromeAssistantReturnAdapter
+{
   private readonly requestId: () => string;
 
   constructor(private readonly options: RefreshablePersonalChromeHostAdapterOptions) {
@@ -187,18 +191,33 @@ export class RefreshablePersonalChromeHostAdapter implements IConversationHostAd
     }
   }
 
+  private async resolveAdapter(): Promise<PersonalChromeHostAdapter> {
+    return new PersonalChromeHostAdapter({
+      ...(await this.resolveSnapshot()),
+      timeoutMs: this.options.timeoutMs,
+      requestId: this.requestId,
+    });
+  }
+
   async append_message(
     conversationId: string,
     text: string,
     idempotencyKey: string,
   ): Promise<HostAppendMessageReceipt> {
-    const snapshot = await this.resolveSnapshot();
-    const adapter = new PersonalChromeHostAdapter({
-      ...snapshot,
-      timeoutMs: this.options.timeoutMs,
-      requestId: this.requestId,
-    });
+    const adapter = await this.resolveAdapter();
     return adapter.append_message(conversationId, text, idempotencyKey);
+  }
+
+  async list_assistant_returns(after?: PersonalChromeAssistantReturnCursor) {
+    return (await this.resolveAdapter()).list_assistant_returns(after);
+  }
+
+  async ack_assistant_return(
+    conversationId: string,
+    sourceMessageId: string,
+    assistantMessageId: string,
+  ): Promise<void> {
+    return (await this.resolveAdapter()).ack_assistant_return(conversationId, sourceMessageId, assistantMessageId);
   }
 }
 
@@ -206,7 +225,7 @@ export function createRefreshablePersonalChromeHostAdapter(args: {
   readonly projectRoot: string;
   readonly env: Readonly<Record<string, string | undefined>>;
   readonly logger: PersonalChromeRuntimeLogger;
-}): IConversationHostAdapter {
+}): IConversationHostAdapter & IPersonalChromeAssistantReturnAdapter {
   const pairingRecordPath = resolvePersonalChromePairingRecordPath(args.projectRoot);
   args.logger.info(
     { pairingRecordPath, hasOperatorOverride: Boolean(args.env.CAT_CAFE_PERSONAL_CHROME_SOCKET) },

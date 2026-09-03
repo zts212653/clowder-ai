@@ -555,7 +555,10 @@ export async function readCompleteCrossThreadQueueCarrierGroups(
   return groups;
 }
 
-function actionSuccessorCarrierKey(fence: NonNullable<QueueEntry['actionSuccessorFence']>, catId: string): string {
+export function actionSuccessorCarrierKey(
+  fence: NonNullable<QueueEntry['actionSuccessorFence']>,
+  catId: string,
+): string {
   return `action:${fence.leaseId}:${fence.generation}:${catId}`;
 }
 

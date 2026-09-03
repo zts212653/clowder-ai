@@ -6,6 +6,7 @@ import {
   assertAlphaSnapshot,
   assertContentFreeManifest,
   boundEnum,
+  cursorDidNotRewind,
   metricsProveObservation,
   projectTraceEvidence,
   runAlphaUat,
@@ -13,6 +14,8 @@ import {
   validateAlphaCoordinates,
   validateCanonicalContract,
 } from '../../../scripts/f296-alpha-uat.mjs';
+import * as alphaJourneys from '../../../scripts/lib/f296-alpha-uat-journeys.mjs';
+import { runCompactionJourney } from '../../../scripts/lib/f296-alpha-uat-journeys.mjs';
 import {
   CONTEXT_PROJECTION_ENUMS,
   CONTEXT_PROJECTION_TELEMETRY_CONTRACT,
@@ -50,7 +53,7 @@ function canonicalSpan(overrides = {}) {
       [keys.tierUnrecognizedCount]: 0,
       [keys.tierUnrecognizedBytes]: 0,
       [keys.deliveryLatencyMs]: 12,
-      [keys.ledgerOutcome]: 'no_reservation',
+      [keys.ledgerOutcome]: 'committed',
       ...overrides,
     },
   };
@@ -81,6 +84,7 @@ describe('F296 B4c Alpha UAT runner red contracts', () => {
       await Promise.all([
         readFile(new URL('../../../scripts/f296-alpha-uat.mjs', import.meta.url), 'utf8'),
         readFile(new URL('../../../scripts/lib/f296-alpha-uat-contract.mjs', import.meta.url), 'utf8'),
+        readFile(new URL('../../../scripts/lib/f296-alpha-uat-journeys.mjs', import.meta.url), 'utf8'),
       ])
     ).join('\n');
     for (const forbidden of [
@@ -90,11 +94,18 @@ describe('F296 B4c Alpha UAT runner red contracts', () => {
       'presentation ledger',
       '__fixtures__',
       '/trigger',
-      '/compact',
       '/replace',
       'recordContextProjection',
     ])
       assert.equal(source.includes(forbidden), false, `runner contains forbidden seam: ${forbidden}`);
+    assert.match(source, /\/compact-native/);
+    assert.match(source, /\/bind/);
+    assert.match(source, /getDeliveryCursor/);
+    assert.match(source, /getSeenCursor/);
+    assert.match(source, /redis\.ttl/);
+    for (const mutation of ['redis.set(', 'redis.del(', 'redis.eval(']) {
+      assert.equal(source.includes(mutation), false, `runner mutates Redis evidence surface: ${mutation}`);
+    }
     for (const copied of [
       ...Object.values(CONTEXT_PROJECTION_TELEMETRY_CONTRACT.metricNames),
       ...Object.values(CONTEXT_PROJECTION_TELEMETRY_CONTRACT.traceAttributes),
@@ -151,6 +162,7 @@ describe('F296 B4c Alpha UAT runner red contracts', () => {
     const traceReads = new Map();
     let invocationNumber = 0;
     let metricsValue = 0;
+    let dynamicCanaryRequests = 0;
     t.after(() => {
       globalThis.fetch = originalFetch;
     });
@@ -169,7 +181,7 @@ describe('F296 B4c Alpha UAT runner red contracts', () => {
       return [
         `${name(contract.metricNames.transitionTotal)}{${labels}} ${value}`,
         `${name(contract.metricNames.deliveryLatency)}_count ${value}`,
-        `${name(contract.metricNames.ledgerOutcomeTotal)}{${name(attrs.ledgerOutcome)}="no_reservation"} ${value}`,
+        `${name(contract.metricNames.ledgerOutcomeTotal)}{${name(attrs.ledgerOutcome)}="${projection.evidence.ledgerTerminal}"} ${value}`,
         ...projection.evidence.tiers.flatMap(({ tier }) => [
           `${name(contract.metricNames.tierCount)}_count{${name(attrs.tier)}="${tier}"} ${value}`,
           `${name(contract.metricNames.tierBytes)}_count{${name(attrs.tier)}="${tier}"} ${value}`,
@@ -192,6 +204,16 @@ describe('F296 B4c Alpha UAT runner red contracts', () => {
         });
       }
       if (url.pathname === '/api/threads') return Response.json({ id: 'canary-thread' });
+      if (url.pathname === '/api/threads/canary-thread/f296-alpha-dynamic-canary') {
+        dynamicCanaryRequests += 1;
+        invocationNumber += 1;
+        return Response.json({
+          status: 'processing',
+          invocationId: `parent-${invocationNumber}`,
+          producer: 'meeting_artifact',
+          opportunityKind: 'memory_write_opportunity',
+        });
+      }
       if (url.pathname === '/api/messages') {
         invocationNumber += 1;
         return Response.json({ status: 'processing', invocationId: `parent-${invocationNumber}` });
@@ -230,6 +252,9 @@ describe('F296 B4c Alpha UAT runner red contracts', () => {
       pollMs: 100,
     });
     assert.equal(manifest.journeys[0].outcome, 'passed');
+    assert.equal(manifest.dynamicPresentation.outcome, 'passed');
+    assert.equal(manifest.dynamicPresentation.reason, 'observed');
+    assert.equal(dynamicCanaryRequests, 1);
     assert.equal(traceReads.get('child-1'), 2);
     assert.equal(traceReads.has('parent-1'), false);
   });
@@ -241,6 +266,76 @@ describe('F296 B4c Alpha UAT runner red contracts', () => {
     assert.equal(projection.evidence.transition, 'unrecognized');
   });
 
+  test('accepts monotonic cursor progress and rejects rewind or disappearance', () => {
+    const first = 'v2:0000000000000001:message-1';
+    const second = 'v2:0000000000000002:message-2';
+    assert.equal(cursorDidNotRewind(null, null), true);
+    assert.equal(cursorDidNotRewind(first, first), true);
+    assert.equal(cursorDidNotRewind(first, second), true);
+    assert.equal(cursorDidNotRewind(second, first), false);
+    assert.equal(cursorDidNotRewind(first, null), false);
+  });
+
+  test('selects a reusable same-owner active oversized trigger before binding an unclaimed candidate', () => {
+    assert.equal(typeof alphaJourneys.selectReplacementTriggerCandidate, 'function');
+    const selected = alphaJourneys.selectReplacementTriggerCandidate({
+      candidateIds: ['sealed-trigger', 'unclaimed-trigger', 'active-trigger'],
+      claims: new Map([
+        ['sealed-trigger', { status: 'sealed', threadId: 'old-thread', catId: 'codex-sol', userId: 'alpha-owner' }],
+        ['unclaimed-trigger', null],
+        [
+          'active-trigger',
+          { status: 'active', threadId: 'reusable-thread', catId: 'codex-sol', userId: 'alpha-owner' },
+        ],
+      ]),
+      catId: 'codex-sol',
+      userId: 'alpha-owner',
+    });
+    assert.deepEqual(selected, {
+      cliSessionId: 'active-trigger',
+      mode: 'reuse',
+      threadId: 'reusable-thread',
+    });
+  });
+
+  test('selects only an unclaimed oversized trigger when no reusable active claim exists', () => {
+    assert.equal(typeof alphaJourneys.selectReplacementTriggerCandidate, 'function');
+    const selected = alphaJourneys.selectReplacementTriggerCandidate({
+      candidateIds: ['foreign-trigger', 'sealed-trigger', 'unclaimed-trigger'],
+      claims: new Map([
+        [
+          'foreign-trigger',
+          { status: 'active', threadId: 'foreign-thread', catId: 'codex-sol', userId: 'other-owner' },
+        ],
+        ['sealed-trigger', { status: 'sealed', threadId: 'old-thread', catId: 'codex-sol', userId: 'alpha-owner' }],
+        ['unclaimed-trigger', null],
+      ]),
+      catId: 'codex-sol',
+      userId: 'alpha-owner',
+    });
+    assert.deepEqual(selected, {
+      cliSessionId: 'unclaimed-trigger',
+      mode: 'bind',
+    });
+  });
+
+  test('refuses to steal sealed or foreign oversized trigger claims', () => {
+    assert.equal(typeof alphaJourneys.selectReplacementTriggerCandidate, 'function');
+    const selected = alphaJourneys.selectReplacementTriggerCandidate({
+      candidateIds: ['foreign-trigger', 'sealed-trigger'],
+      claims: new Map([
+        [
+          'foreign-trigger',
+          { status: 'active', threadId: 'foreign-thread', catId: 'codex-sol', userId: 'other-owner' },
+        ],
+        ['sealed-trigger', { status: 'sealed', threadId: 'old-thread', catId: 'codex-sol', userId: 'alpha-owner' }],
+      ]),
+      catId: 'codex-sol',
+      userId: 'alpha-owner',
+    });
+    assert.equal(selected, null);
+  });
+
   test('missing real projection fields cannot become a passing observation', () => {
     assert.equal(projectTraceEvidence({ traceId, spanId, attributes: {} }), null);
     const keys = CONTEXT_PROJECTION_TELEMETRY_CONTRACT.traceAttributes;
@@ -249,6 +344,38 @@ describe('F296 B4c Alpha UAT runner red contracts', () => {
       journey: 'cold',
       outcome: 'unsupported',
       reason: 'telemetry_signal_missing',
+      observation: null,
+    });
+  });
+
+  test('classifies native compaction availability separately from provider and cursor state failures', async () => {
+    const options = { catId: 'codex' };
+    const invoke = (status, code) =>
+      runCompactionJourney({
+        options,
+        threadId: 'thread-1',
+        request: async () => Response.json({ code }, { status }),
+        observe: async () => assert.fail('failed or unsupported control must not run the observation journey'),
+      });
+
+    for (const status of [404, 409]) {
+      assert.deepEqual(await invoke(status, 'NATIVE_COMPACTION_UNSUPPORTED'), {
+        journey: 'authoritative-compaction',
+        outcome: 'unsupported',
+        reason: 'provider_compaction_trigger_unavailable',
+        observation: null,
+      });
+    }
+    assert.deepEqual(await invoke(502, 'NATIVE_COMPACTION_FAILED'), {
+      journey: 'authoritative-compaction',
+      outcome: 'failed',
+      reason: 'compaction_state_mismatch',
+      observation: null,
+    });
+    assert.deepEqual(await invoke(502, 'NATIVE_COMPACTION_CURSOR_CHANGED'), {
+      journey: 'authoritative-compaction',
+      outcome: 'failed',
+      reason: 'compaction_cursor_changed',
       observation: null,
     });
   });
@@ -268,7 +395,7 @@ describe('F296 B4c Alpha UAT runner red contracts', () => {
     const rows = [
       `${name(contract.metricNames.transitionTotal)}{${labels}} 1`,
       `${name(contract.metricNames.deliveryLatency)}_count 1`,
-      `${name(contract.metricNames.ledgerOutcomeTotal)}{${name(attrs.ledgerOutcome)}="no_reservation"} 1`,
+      `${name(contract.metricNames.ledgerOutcomeTotal)}{${name(attrs.ledgerOutcome)}="${projection.evidence.ledgerTerminal}"} 1`,
       ...projection.evidence.tiers.flatMap(({ tier }) => [
         `${name(contract.metricNames.tierCount)}_count{${name(attrs.tier)}="${tier}"} 1`,
         `${name(contract.metricNames.tierBytes)}_count{${name(attrs.tier)}="${tier}"} 1`,
@@ -281,8 +408,13 @@ describe('F296 B4c Alpha UAT runner red contracts', () => {
   test('rejects any prompt, content, user, thread, or subject field in the manifest', () => {
     const observation = projectTraceEvidence(canonicalSpan()).evidence;
     const manifest = {
-      schemaVersion: 1,
+      schemaVersion: 2,
       revision,
+      dynamicPresentation: {
+        outcome: 'unsupported',
+        reason: 'canonical_dynamic_producer_unavailable',
+        observation: null,
+      },
       journeys: [
         journey(observation),
         journey(observation, 'resumed-small'),
@@ -298,6 +430,13 @@ describe('F296 B4c Alpha UAT runner red contracts', () => {
       leaked.journeys[0].observation[leakedKey] = 'secret';
       throwsReason(() => assertContentFreeManifest(leaked), 'evidence_privacy_violation');
     }
+    const dynamicLeak = structuredClone(manifest);
+    dynamicLeak.dynamicPresentation = {
+      outcome: 'passed',
+      reason: 'observed',
+      observation: { ...observation, content: 'secret' },
+    };
+    throwsReason(() => assertContentFreeManifest(dynamicLeak), 'evidence_privacy_violation');
     const unbounded = structuredClone(manifest);
     unbounded.journeys[0].observation.mode = 'future-mode';
     throwsReason(() => assertContentFreeManifest(unbounded), 'evidence_privacy_violation');

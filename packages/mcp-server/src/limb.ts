@@ -15,14 +15,18 @@ import { fileURLToPath } from 'node:url';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { installShutdownHandlers, startRefreshLoop } from './refresh-loop.js';
+import { SERVER_INSTRUCTIONS } from './server-instructions.js';
 import { registerLimbToolset } from './server-toolsets.js';
 import { initCatCafeDir } from './utils/path-validator.js';
 
 function createBaseServer(name: string): McpServer {
-  return new McpServer({
-    name,
-    version: '0.1.0',
-  });
+  return new McpServer(
+    {
+      name,
+      version: '0.1.0',
+    },
+    { instructions: SERVER_INSTRUCTIONS.limb },
+  );
 }
 
 /**

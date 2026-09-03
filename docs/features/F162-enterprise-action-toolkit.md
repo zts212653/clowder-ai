@@ -5,7 +5,7 @@ related_decisions: [ADR-029]
 topics: [enterprise-action, wecom-cli, lark-cli, cli-integration, showcase]
 doc_kind: spec
 created: 2026-04-14
-tips_exempt: "2026-08-27 link/reference hygiene only; no enterprise-action capability or user action changed."
+tips_exempt: "2026-08-27 public-link projection only; no enterprise-action capability or user action changed."
 ---
 
 # F162: Enterprise Action Toolkit — 官方 CLI 驱动的企业工作流
@@ -27,6 +27,20 @@ Clowder AI 已通过 F088/F132 实现了企微的**消息收发**（Transport Pl
 2026 Q1 企微发布官方 CLI（`wecom-cli`）并附带 Agent Skills，让 AI Agent 直接编排企业操作成为可能。我们利用 ADR-029 定义的 `ActionService + CliExecutor` 模式，用企微打样验证这条路。
 
 **展示目标**：WXG 面试现场，群里一句话 → 猫自动创建企微文档 + 智能表格 + 待办 + 会议 → 链接回贴群聊。面试官打开企微即可看到成果。
+
+## User Journey
+
+### Primary Journey: 把一句协作请求交付为可追溯的企业工作流
+
+- **Scope unit**: 一次已授权的 workflow request 及其返回的资源句柄
+- **Actor**: operator或已授权协作者 + 代办猫
+- **Entry**: Hub 或企业 IM 中的一句自然语言请求，例如“整理 PRD、拆任务并约评审”。
+- **Flow**:
+  1. 猫提取文档、表格、待办、日程/会议等意图与参数，并通过受鉴权的 callback 请求 ActionService。
+  2. ActionService 对请求执行参数校验、审计、dry-run / idempotency 边界处理，再由对应官方 CLI 创建资源。
+  3. 猫把每个已确认资源的链接、句柄与状态汇总回贴到原会话，让请求人能继续打开、分派或校对产物。
+  4. CLI、权限或平台回执异常时，系统返回明确失败分类；不会把未确认的资源写成完成。
+- **Success**: 请求人得到可追溯的企业资源与回贴摘要；平台内可见性仍以各 AC 的独立实机验收为准。
 
 ## What
 

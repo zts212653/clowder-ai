@@ -59,7 +59,49 @@ export const BRIDGE_SCRIPT = `
 
   // --- Screenshot handler ---
   window.addEventListener('message', function(e) {
-    if (!e.data || e.data.type !== 'screenshot-request' || e.data.source !== 'cat-cafe-preview') return;
+    if (!e.data || e.data.source !== 'cat-cafe-preview' || e.source !== parent) return;
+
+    if (e.data.type === 'visible-page-admission-request') {
+      var admission = e.data.admission || {};
+      var requiredDom = Array.isArray(admission.requiredDom) ? admission.requiredDom : [];
+      var forbiddenText = Array.isArray(admission.forbiddenText) ? admission.forbiddenText : [];
+      var pageText = document.body ? (document.body.innerText || document.body.textContent || '') : '';
+      var dom = requiredDom.map(function(assertion) {
+        var element = null;
+        try {
+          element = document.querySelector(assertion.selector);
+        } catch(err) {}
+        var attributes = {};
+        var expectedAttributes = assertion.attributes || {};
+        Object.keys(expectedAttributes).forEach(function(name) {
+          attributes[name] = element ? element.getAttribute(name) : null;
+        });
+        var elementText = element ? (element.innerText || element.textContent || '') : '';
+        var textIncludes = Array.isArray(assertion.textIncludes) ? assertion.textIncludes : [];
+        return {
+          selector: assertion.selector,
+          found: !!element,
+          attributes: attributes,
+          textMatches: textIncludes.map(function(text) { return elementText.indexOf(text) !== -1; })
+        };
+      });
+      parent.postMessage({
+        type: 'visible-page-attestation',
+        source: 'cat-cafe-bridge',
+        attestation: {
+          eventId: e.data.eventId,
+          targetPort: e.data.targetPort,
+          targetOrigin: window.location.origin,
+          targetPath: window.location.pathname + window.location.search + window.location.hash,
+          clientRevision: document.documentElement.getAttribute('data-cat-cafe-build-revision'),
+          dom: dom,
+          forbiddenTextMatches: forbiddenText.map(function(text) { return pageText.indexOf(text) !== -1; })
+        }
+      }, '*');
+      return;
+    }
+
+    if (e.data.type !== 'screenshot-request') return;
     try {
       var html = document.documentElement.outerHTML;
       var svg = '<svg xmlns="http://www.w3.org/2000/svg" width="' + document.documentElement.scrollWidth + '" height="' + document.documentElement.scrollHeight + '">' +

@@ -94,7 +94,7 @@ export function queueEntryNeedsRecovery(
   const targetStates = queueTargetStateEntries(entry);
   if (targetStates.length > 0) {
     return targetStates.some(([catId, state]) => {
-      if (state === 'handled' || state === 'withdrawn') return false;
+      if (state === 'handled' || state === 'withdrawn' || state === 'failed') return false;
       if (state === 'seen' || state === 'awakened') {
         return !isExactSeenTargetLive(entry, catId, activeInvocationIds);
       }

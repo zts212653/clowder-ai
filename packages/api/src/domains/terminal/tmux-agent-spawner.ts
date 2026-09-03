@@ -17,6 +17,7 @@ import { createInterface } from 'node:readline';
 import { promisify } from 'node:util';
 import { createModuleLogger } from '../../infrastructure/logger.js';
 import { buildCliDiagnostics } from '../../utils/cli-diagnostics.js';
+import { withCatCliProcessContext } from '../../utils/cli-process-environment.js';
 import { maybeCollectStreamError } from '../../utils/cli-spawn.js';
 import { resolveCliTimeoutMs } from '../../utils/cli-timeout.js';
 import type { CliSpawnOptions } from '../../utils/cli-types.js';
@@ -530,7 +531,10 @@ export function createTmuxSpawnOverride(
 ): SpawnCliOverride {
   return async function* tmuxOverride(cliOpts: CliSpawnOptions) {
     await tmuxGateway.ensureServer(worktreeId);
-    const gen = spawnCliInTmux({ ...cliOpts, worktreeId, invocationId }, { tmuxGateway });
+    const gen = spawnCliInTmux(
+      { ...cliOpts, env: withCatCliProcessContext(cliOpts.env ?? {}), worktreeId, invocationId },
+      { tmuxGateway },
+    );
 
     let paneId: string | undefined;
     try {

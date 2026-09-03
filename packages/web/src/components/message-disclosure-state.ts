@@ -1,9 +1,9 @@
 'use client';
 
 import { type Dispatch, type SetStateAction, useCallback, useState, useSyncExternalStore } from 'react';
-import type { ChatMessage } from '@/stores/chat-types';
+import type { ChatMessage, RichHtmlWidgetBlock } from '@/stores/chat-types';
 
-export type MessageDisclosurePanel = 'body' | 'thinking' | 'cli';
+export type MessageDisclosurePanel = 'body' | 'thinking' | 'cli' | 'rich-html';
 
 const MAX_DISCLOSURE_OVERRIDES = 500;
 const disclosureOverrides = new Map<string, boolean>();
@@ -48,6 +48,32 @@ export function buildMessageDisclosureKey(
     : (message.extra?.stream?.turnInvocationId ?? message.extra?.stream?.invocationId ?? message.id);
   const owner = message.catId ?? message.type;
   return [threadId, owner, stableBubbleId, panel].map(encodeURIComponent).join(':');
+}
+
+function disclosureContentFingerprint(value: string): string {
+  let first = 0x811c9dc5;
+  let second = 0x9e3779b9;
+  for (let index = 0; index < value.length; index += 1) {
+    const code = value.charCodeAt(index);
+    first = Math.imul(first ^ code, 0x01000193);
+    second = Math.imul(second ^ code, 0x85ebca6b);
+  }
+  return `${value.length.toString(36)}-${(first >>> 0).toString(36)}-${(second >>> 0).toString(36)}`;
+}
+
+export function buildRichHtmlDisclosureKey(
+  threadId: string,
+  message: Pick<ChatMessage, 'id' | 'type' | 'catId' | 'content' | 'extra' | 'projectionSourceMessageIds'>,
+  block: Pick<RichHtmlWidgetBlock, 'id' | 'html'>,
+): string {
+  const bubbleKey = buildMessageDisclosureKey(threadId, message, 'rich-html');
+  const sourceIdentity = JSON.stringify([
+    message.content,
+    message.projectionSourceMessageIds ?? [],
+    block.id,
+    block.html,
+  ]);
+  return `${bubbleKey}:${encodeURIComponent(block.id)}:${disclosureContentFingerprint(sourceIdentity)}`;
 }
 
 export function useMessageDisclosureState(

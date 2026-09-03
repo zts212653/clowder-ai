@@ -11,7 +11,7 @@ const resolverModuleUrl = pathToFileURL(resolve(packageRoot, 'scripts/resolve-pu
 const AUDIT_SOURCE_HEAD = 'b741f42fdbbb4484a54cde7eadca08b3b11652e3';
 const AUDIT_PUBLIC_HEAD = '182d8ec9abc87ff7905441dca0575aab9787ee8f';
 
-function auditFor(matchedFiles) {
+function auditFor(matchedFiles, overrides = {}) {
   const normalized = [...matchedFiles].sort();
   return {
     reviewedOn: '2026-09-01',
@@ -22,6 +22,7 @@ function auditFor(matchedFiles) {
     matchedFilesHash: createHash('sha256')
       .update(JSON.stringify({ matchedFiles: normalized }))
       .digest('hex'),
+    ...overrides,
   };
 }
 
@@ -152,7 +153,6 @@ test('validator rejects non-ISO YYYY-MM-DD expiresOn formats (codex #2326 P2)', 
 
 test('validator requires a v2 audit for every live exclusion', async () => {
   const { validatePublicTestExclusions } = await import(resolverModuleUrl);
-
   assert.throws(
     () =>
       validatePublicTestExclusions(
@@ -204,6 +204,44 @@ test('validator rejects an audited exclusion when its matched test inventory dri
           allTestFiles: [...baselineFiles, 'test/governance-status-replay.test.js'],
           today: '2026-09-01',
         },
+      ),
+    /audited match inventory/i,
+  );
+});
+
+test('validator binds source and public test inventories to separate explicit audit profiles', async () => {
+  const { validatePublicTestExclusions } = await import(resolverModuleUrl);
+  const sourceFiles = ['test/redis-source-store.test.js'];
+  const publicFiles = [...sourceFiles, 'test/redis-community-store.test.js'];
+  const entry = {
+    id: 'redis-profiled-inventory',
+    match: 'redis-',
+    category: 'source_only',
+    reason: 'the public candidate adds one explicitly target-owned community test',
+    owner: '@zts212653',
+    introducedBy: 'deadbeef9',
+    expiresOn: '2026-10-01',
+    audit: auditFor(sourceFiles),
+    publicAudit: auditFor(publicFiles, { publicHead: '01c58feb40fab2a75016a9a8d290c87f6776d9a0' }),
+  };
+
+  assert.doesNotThrow(() =>
+    validatePublicTestExclusions(
+      { version: 2, entries: [entry] },
+      { allTestFiles: sourceFiles, today: '2026-09-02', auditProfile: 'source' },
+    ),
+  );
+  assert.doesNotThrow(() =>
+    validatePublicTestExclusions(
+      { version: 2, entries: [entry] },
+      { allTestFiles: publicFiles, today: '2026-09-02', auditProfile: 'public' },
+    ),
+  );
+  assert.throws(
+    () =>
+      validatePublicTestExclusions(
+        { version: 2, entries: [entry] },
+        { allTestFiles: publicFiles, today: '2026-09-02', auditProfile: 'source' },
       ),
     /audited match inventory/i,
   );

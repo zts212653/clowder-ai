@@ -36,6 +36,10 @@ import type {
   UndoPersonMemoryDecisionInput,
 } from './PersonMemoryStore.js';
 import { approvePersonMemoryDrafts } from './person-memory-approval.js';
+import {
+  listPendingPersonMemoryCandidates,
+  listSettledPersonMemoryCandidates,
+} from './person-memory-candidate-list.js';
 import { PersonMemoryCandidatePublication } from './person-memory-candidate-publication.js';
 import {
   resolveDormantPersonCandidateBySubject,
@@ -142,16 +146,11 @@ export class RedisPersonMemoryStore implements PersonMemoryStore {
   }
 
   async listPending(ownerUserId: string, limit = 100): Promise<StoredPersonMemoryCandidate[]> {
-    const ids = await this.redis.zrevrange(PersonMemoryKeys.pending(ownerUserId), 0, Math.max(0, limit - 1));
-    const candidates = await Promise.all(ids.map((id) => this.getCandidateForOwner(ownerUserId, id)));
-    return candidates.filter(
-      (candidate): candidate is StoredPersonMemoryCandidate =>
-        candidate !== null &&
-        candidate.publication.state === 'anchored' &&
-        (candidate.state === 'pending_approval' ||
-          candidate.state === 'not_now' ||
-          candidate.state === 'partially_materialized'),
-    );
+    return listPendingPersonMemoryCandidates(this.redis, ownerUserId, limit);
+  }
+
+  async listSettled(ownerUserId: string, limit = 50) {
+    return listSettledPersonMemoryCandidates(this.redis, ownerUserId, limit);
   }
 
   async resolvePendingCandidateBySubject(

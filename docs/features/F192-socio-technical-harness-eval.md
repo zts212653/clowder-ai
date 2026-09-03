@@ -4,13 +4,13 @@ related_features: [F167, F153, F086, F188, F200, F245, F266, F267, F275, F299]
 topics: [harness-engineering, eval, socio-technical, observability, cat-user-feedback]
 doc_kind: spec
 created: 2026-05-07
-tips_exempt: Dual-trigger eval dispatch, F299 handoff truth, and generic-permission sunset are harness-internal control-plane changes with no new user-visible capability
+tips_exempt: Dual-trigger dispatch, F299 bounded transcript repair and handoff truth, and generic-permission sunset are harness-internal control-plane changes with no new user-visible capability
 user_journey_exempt: "Internal harness eval infrastructure — all surfaces are developer/cat-facing, no end-user journey"
 ---
 
 # F192: Socio-Technical Harness Eval — harness 共创评估体系
 
-> **Status**: in-progress (Phase F re-eval closure + Phase G `eval:task-outcome` closure + Phase I dual-trigger control plane) | **Owner**: Ragdoll | **Truth sync**: 2026-08-24
+> **Status**: in-progress (Phase F re-eval closure + Phase G `eval:task-outcome` closure + Phase I dual-trigger control plane) | **Owner**: Ragdoll | **Truth sync**: 2026-08-25
 
 ## Architecture Ownership
 
@@ -74,7 +74,7 @@ F192 现在已经不是“某个 feature 结束后写一篇 feedback”的文档
 
 如果链路里任何一环需要人手工补文件、手工抄 bundle、手工 commit，那就还不算接进 F192 control plane。
 
-### Selected Domain Wire Status (2026-08-24 truth sync)
+### Selected Domain Wire Status (2026-08-25 truth sync)
 
 | Domain | Schedule | Publish path | Current truth |
 |--------|----------|--------------|---------------|
@@ -84,7 +84,7 @@ F192 现在已经不是“某个 feature 结束后写一篇 feedback”的文档
 | `eval:task-outcome` | daily live | wired (PR #2162, squash `c9aa0e16d`) | Publish path is live, but the current Episode estimator is thread/latest-in-progress based and has no managed-work eligibility. Until F275 + F267 migration gates pass, output is event/thread-level telemetry only; task-level success/latency/attempt conclusions are invalid. |
 | `eval:sop` | active (weekly) | wired (PR #2186) | Schema / predicate evaluator + SopTrace producer + file-writer + PUBLISH_VERDICT_INSTRUCTIONS all wired. Re-enabled 2026-06-10. |
 | `eval:anchor-first` | weekly | wired (F236 Track-2) | Preview↔drill open-rate rollup via in-memory event log. Generator adapter + live-verdict writer + provider wired. Eval design truth in F236. |
-| `eval:trajectory-inspector` | planned (F299 Phase E) | not wired | F299 metric birth certificate is frozen, but no registry entry, source adapter, publish adapter, or system thread exists yet. Onboarding must reuse F192 Phase I shared trigger dispatcher, verdict handoff, Eval Hub, and re-eval closure; F299 does not build a second control plane. |
+| `eval:trajectory-inspector` | weekly live | wired (PR #3943, merge `098ed53cb`) | Registry/source/publish/system-thread onboarding reuses Phase I. F299 AC-E2 bounded-source repair landed in PR #4111; publication-integrity repair landed in PR #4135. The first trusted post-repair artifact, PR #4206, completed without OOM or retry and passed exact-SHA glossary status. It is `calibration_only / keep_observe` (8 eligible, degraded coverage/no baseline/review), so the same F266 lineage continues to the next valid window rather than claiming keep/tune/sunset. |
 
 ## Why
 

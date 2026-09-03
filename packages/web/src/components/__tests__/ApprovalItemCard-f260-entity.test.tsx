@@ -8,19 +8,20 @@
  * [宪宪/Claude Opus 4.6🐾]
  */
 
-import type { ApprovalItem, EntityConflictContext } from '@cat-cafe/shared';
+import type { ApprovalHubItem, EntityConflictContext } from '@cat-cafe/shared';
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { anchoredApprovalNavigation } from '@/test-support/approval-navigation';
 
-const F260_ITEM: ApprovalItem = {
+const F260_ITEM: ApprovalHubItem = {
   proposalId: 'ent-f260-1',
   sourceFeatureId: 'F260',
   navigation: anchoredApprovalNavigation('thread-entity-src'),
   requesterCatId: 'opus',
   ownerUserId: 'user-1',
-  status: 'pending',
+  resolution: 'open',
+  materialization: { state: 'not_started' },
   summary: 'Entity proposal: 未婚喵 (concept)',
   detail: {
     entityId: 'concept:未婚喵',
@@ -171,7 +172,7 @@ describe('F260 T0: entity proposal card', () => {
   });
 
   it('F260 non-inlineApprovable card hides approve but still shows reject', async () => {
-    const nonInline: ApprovalItem = { ...F260_ITEM, proposalId: 'ent-f260-ni', inlineApprovable: false };
+    const nonInline: ApprovalHubItem = { ...F260_ITEM, proposalId: 'ent-f260-ni', inlineApprovable: false };
     await act(async () => {
       root.render(React.createElement(ApprovalItemCard, { item: nonInline }));
     });
@@ -186,13 +187,13 @@ describe('F260 T0: entity proposal card', () => {
 
   // --- P2 fix: badge ---
 
-  it('F260 card shows "Entity" badge', async () => {
+  it('F260 card shows the canonical Chinese "实体" badge', async () => {
     await act(async () => {
       root.render(React.createElement(ApprovalItemCard, { item: F260_ITEM }));
     });
 
     const card = container.querySelector('[data-testid="approval-item-ent-f260-1"]');
-    expect(card!.textContent).toContain('Entity');
+    expect(card!.querySelector('[data-testid="approval-feature-badge"]')?.textContent).toBe('实体');
   });
 
   // --- Detail section ---
@@ -240,7 +241,7 @@ describe('F260 T0: entity proposal card', () => {
   });
 
   it('same-entity conflict renders before/after and replaces generic approve with explicit actions', async () => {
-    const conflictItem: ApprovalItem = {
+    const conflictItem: ApprovalHubItem = {
       ...F260_ITEM,
       proposalId: 'same-entity',
       detail: { ...F260_ITEM.detail, conflict: SAME_ENTITY_CONFLICT },
@@ -260,7 +261,7 @@ describe('F260 T0: entity proposal card', () => {
   });
 
   it('submits merge-aliases with the rendered fingerprint', async () => {
-    const conflictItem: ApprovalItem = {
+    const conflictItem: ApprovalHubItem = {
       ...F260_ITEM,
       proposalId: 'merge-entity',
       detail: { ...F260_ITEM.detail, conflict: SAME_ENTITY_CONFLICT },
@@ -278,7 +279,7 @@ describe('F260 T0: entity proposal card', () => {
   });
 
   it('surface collision shows every candidate and the correction/transfer/polysemy choices', async () => {
-    const conflictItem: ApprovalItem = {
+    const conflictItem: ApprovalHubItem = {
       ...F260_ITEM,
       proposalId: 'surface-entity',
       detail: { ...F260_ITEM.detail, conflict: SURFACE_CONFLICT },
@@ -295,7 +296,7 @@ describe('F260 T0: entity proposal card', () => {
   });
 
   it('requires and submits an explicit canonical replacement for moved canonical surfaces', async () => {
-    const conflictItem: ApprovalItem = {
+    const conflictItem: ApprovalHubItem = {
       ...F260_ITEM,
       proposalId: 'canonical-entity',
       detail: { ...F260_ITEM.detail, conflict: SURFACE_CONFLICT },
@@ -325,7 +326,7 @@ describe('F260 T0: entity proposal card', () => {
   // --- Regression guard: F193 still works ---
 
   it('F193 card still shows approve/reject buttons (no regression)', async () => {
-    const f193: ApprovalItem = {
+    const f193: ApprovalHubItem = {
       ...F260_ITEM,
       proposalId: 'reg-f193-1',
       sourceFeatureId: 'F193',
@@ -340,24 +341,28 @@ describe('F260 T0: entity proposal card', () => {
     expect(card!.querySelector('[data-testid="reject-btn"]')).not.toBeNull();
   });
 
-  it('F221 recovery card exposes resume and reject/dismiss actions', async () => {
+  it('accepted outcome_unknown card uses canonical wording and exposes no legacy recovery controls', async () => {
     const recoveryItem = {
       ...F260_ITEM,
       proposalId: 'taste-recovery-1',
       sourceFeatureId: 'F221',
-      decisionMode: 'resume-only',
+      resolution: 'accepted',
+      materialization: { state: 'outcome_unknown' },
+      inlineApprovable: false,
       summary: 'Taste approval needs recovery',
       detail: { scene: 'persisted approving state', quote: 'resume me', dimension: 'system-philosophy' },
-    } as ApprovalItem & { decisionMode: 'resume-only' };
+    } as ApprovalHubItem;
     await act(async () => {
       root.render(React.createElement(ApprovalItemCard, { item: recoveryItem }));
     });
 
     const card = container.querySelector('[data-testid="approval-item-taste-recovery-1"]');
-    expect(card!.querySelector('[data-testid="resume-btn"]')).not.toBeNull();
-    expect(card!.querySelector('[data-testid="resume-btn"]')!.textContent).toContain('继续完成');
+    expect(card!.querySelector('[data-testid="approval-lifecycle-badge"]')!.textContent).toContain(
+      '已批准 · 结果待确认',
+    );
+    expect(card!.textContent).not.toContain('待恢复');
+    expect(card!.textContent).not.toContain('继续完成');
     expect(card!.querySelector('[data-testid="approve-btn"]')).toBeNull();
-    // Reject/dismiss is always available — user can dismiss stuck recovery proposals
-    expect(card!.querySelector('[data-testid="reject-btn"]')).not.toBeNull();
+    expect(card!.querySelector('[data-testid="reject-btn"]')).toBeNull();
   });
 });

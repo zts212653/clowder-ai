@@ -9,17 +9,17 @@ export interface SettingsSection {
 export const SETTINGS_SECTIONS: SettingsSection[] = [
   {
     id: 'members',
-    label: '成员管理',
+    label: '成员与运行时',
     icon: 'users',
     color: 'var(--color-opus-primary)',
-    description: '成员名册、默认协作对象与编排顺序。',
+    description: '成员名册、runtime 结构配置，以及只读路由账本。',
   },
   {
     id: 'profiles',
-    label: '猫猫画像',
+    label: '能力画像来源',
     icon: 'file-text',
     color: 'var(--color-opus-primary)',
-    description: '按模型分组的能力画像、路由信号与来源追溯。',
+    description: 'F208 能力画像的观察、证据与来源追溯；不编辑实时路由状态或协作偏好。',
   },
   {
     id: 'accounts',

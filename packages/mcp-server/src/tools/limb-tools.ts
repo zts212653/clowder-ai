@@ -261,7 +261,6 @@ export const limbTools = [
       action: 'create',
       risk: { level: 'destructive', openWorld: true },
       runtimeProfiles: ['full', 'readonly'],
-      targetExposure: 'profile-gated',
     },
   }),
   defineTool({

@@ -65,6 +65,7 @@ describe('web build stamp', () => {
     const written = writeBuildStamp({
       webPackageDir,
       env: { CAT_CAFE_WEB_BUILD_REVISION: `  ${revision}\n` },
+      dirtyInputs: false,
     });
 
     assert.equal(written, path.join(webPackageDir, DIST_DIR_NAME, STAMP_FILE_NAME));
@@ -80,6 +81,21 @@ describe('web build stamp', () => {
     const written = writeBuildStamp({
       webPackageDir,
       env: { CAT_CAFE_WEB_BUILD_REVISION: 'b'.repeat(40) },
+      dirtyInputs: false,
+    });
+
+    assert.ok(written && fs.existsSync(written));
+  });
+
+  it('allows an explicit revision outside a Git checkout', () => {
+    const repoRoot = makeNonGitRoot();
+    if (!repoRoot) return;
+    const webPackageDir = makeSandbox();
+
+    const written = writeBuildStamp({
+      webPackageDir,
+      repoRoot,
+      env: { CAT_CAFE_WEB_BUILD_REVISION: 'd'.repeat(40) },
     });
 
     assert.ok(written && fs.existsSync(written));

@@ -25,7 +25,7 @@ describe('WorldContextProvider', () => {
       name: '逐峰宇宙',
       constitution: '时间是线性的',
       status: 'active',
-      createdBy: { kind: 'user', id: 'you' },
+      createdBy: { kind: 'user', id: 'operator' },
       createdAt: NOW,
       updatedAt: NOW,
     });

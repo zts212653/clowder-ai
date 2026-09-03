@@ -10,7 +10,12 @@ export type WidgetHeightMessageResult =
   | { status: 'ignored' }
   | { status: 'invalid' }
   | { status: 'pending'; cause: WidgetLayoutInvalidation }
-  | { status: 'valid'; sample: WidgetHeightSample; proofRequestId: string | null };
+  | {
+      status: 'valid';
+      sample: WidgetHeightSample;
+      proofRequestId: string | null;
+      preserveViewport: boolean;
+    };
 
 export type WidgetLayoutInvalidation = 'content' | 'viewport';
 
@@ -197,6 +202,7 @@ export function readWidgetHeightMessage(
 
   const proofRequestId = message.proofRequestId ?? null;
   if (proofRequestId !== null && !isValidWidgetProofRequestId(proofRequestId)) return { status: 'invalid' };
+  const preserveViewport = message.preserveViewport ?? false;
 
   const values = [
     message.contentHeight,
@@ -209,13 +215,15 @@ export function readWidgetHeightMessage(
     values.some(
       (value) => typeof value !== 'number' || !Number.isFinite(value) || value < 1 || value > MAX_MEASURED_HEIGHT,
     ) ||
-    typeof message.hasUnmeasurableVisualOverflow !== 'boolean'
+    typeof message.hasUnmeasurableVisualOverflow !== 'boolean' ||
+    typeof preserveViewport !== 'boolean'
   ) {
     return { status: 'invalid' };
   }
   return {
     status: 'valid',
     proofRequestId,
+    preserveViewport,
     sample: {
       contentHeight: Math.ceil(message.contentHeight as number),
       bodyScrollHeight: Math.ceil(message.bodyScrollHeight as number),

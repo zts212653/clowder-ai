@@ -4,6 +4,7 @@ import { defineMcpCanonicalFactory } from '../tool-governance-migration.js';
 import { callbackPost } from './callback-tools.js';
 import { errorResult, type ToolResult } from './file-tools.js';
 import { freshnessReplaySourceRefsShape } from './publish-verdict-freshness-source-refs.js';
+import { frictionAnalysisFindingsShape } from './publish-verdict-friction-findings.js';
 import {
   handleRefreshVerdictAction,
   publishVerdictRefreshActionShape,
@@ -274,6 +275,7 @@ export const publishVerdictInputSchema = {
   domainId: z.string().min(1).describe('Your assigned registered eval domain. Must match packet.domainId.'),
   packet: verdictPacketShape.optional(),
   sourceRefs: sourceRefsShape.optional(),
+  analysisFindings: frictionAnalysisFindingsShape,
   action: publishVerdictRefreshActionShape.optional(),
   // 砚砚 R4 P1 + cloud R4 P1: catId is NOT a cat-supplied field — server
   // derives it from the trusted callback principal (invocationId → registry).
@@ -303,6 +305,7 @@ export async function handlePublishVerdict(input: PublishVerdictToolInput): Prom
     {
       packet: input.packet,
       sourceRefs: input.sourceRefs,
+      analysisFindings: input.analysisFindings,
     },
     {
       agentKeyCatId: input.agentKeyCatId,

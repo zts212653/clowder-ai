@@ -4,6 +4,7 @@ related_features: [F044, F059, F074, F156]
 topics: [auth, oauth, multi-user, security, session, thread-acl, github]
 doc_kind: spec
 created: 2026-03-07
+tips_exempt: "Spec-stage security/auth feature with no runtime implementation; capability tips will be contributed when Phase 1 MVP delivers a user-facing authentication surface."
 ---
 
 # F077 — Multi-User Secure Collaboration（多用户安全协作）
@@ -15,7 +16,7 @@ created: 2026-03-07
 
 Clowder AI Hub 当前 3001 端口零认证裸跑，同 WiFi 下任何人可直接访问所有 thread、以operator身份操作猫猫、浏览项目文件。operator想让朋友也能用 Hub 与猫猫协作，但需要独立身份、私有空间隔离、传输安全。
 
-**operator experience**："我朋友喊你们搞的哈哈哈哈 我们的 3001 没做任何防护 直接同个 wifi 就能访问到 好像很危险？能让他们以其他operator的身份接入吗？而不是 landy 以及我的这些 thread 能不让他们看见吗？他们只能看见共享区的 thread"
+**operator experience**："我朋友喊你们搞的哈哈哈哈 我们的 3001 没做任何防护 直接同个 wifi 就能访问到 好像很危险？能让他们以其他operator的身份接入吗？而不是 operator 以及我的这些 thread 能不让他们看见吗？他们只能看见共享区的 thread"
 
 ## What
 
@@ -55,6 +56,7 @@ GitHub OAuth 认证 + Thread ACL + Redis Session，实现安全的多用户协�
 - [ ] AC8: 现有路由越权审计完成，所有读写路由有 owner/member 校验
 - [ ] AC9: 现有单用户部署不受影响（auth 可选，默认关闭 = 向后兼容）
 - [ ] AC10: 用户只能在自己被授权的 projectPath 下操作，Agent 执行命令受 projectPath 沙盒约束
+- [ ] AC11: 多设备接入 — 同一用户从手机/平板/另一台电脑通过 Tailscale 访问 Hub，GitHub OAuth 保证身份一致，各设备独立 session 但共享 thread 权限和数据
 
 ## 需求点 Checklist
 
@@ -71,6 +73,7 @@ GitHub OAuth 认证 + Thread ACL + Redis Session，实现安全的多用户协�
 | R9 | Route audit 三级分类 | AC8 | test | [ ] |
 | R10 | 向后兼容（auth 可选） | AC9 | test | [ ] |
 | R11 | projectPath 沙盒（Agent 只在授权目录执行） | AC10 | test | [ ] |
+| R12 | 多设备 Tailscale 接入（同 userId 多 session） | AC11 | test + manual | [ ] |
 
 ### Route Audit 已知越权实例（R9/AC8 — 已修复，留作同类模式参考）
 

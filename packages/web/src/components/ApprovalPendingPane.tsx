@@ -1,7 +1,7 @@
 'use client';
 
-import type { ApprovalFeatureId, ApprovalItem } from '@cat-cafe/shared';
-import { useEffect, useMemo } from 'react';
+import type { ApprovalFeatureId, ApprovalHubItem } from '@cat-cafe/shared';
+import { useEffect, useMemo, useRef } from 'react';
 import { countApprovalFeatures, isApprovalItemBatchDecidable } from '@/lib/approval-features';
 import { approvalNavigationThreadIds } from '@/lib/approval-navigation';
 import { useApprovalHubStore } from '@/stores/approvalHubStore';
@@ -11,6 +11,7 @@ import { ApprovalItemCard } from './ApprovalItemCard';
 export type ApprovalStatusFilter = 'all' | 'pending' | 'stale';
 
 interface ApprovalPendingPaneProps {
+  selectedProposalId?: string | null;
   featureFilters: ReadonlySet<ApprovalFeatureId>;
   onFeatureFiltersChange: (features: Set<ApprovalFeatureId>) => void;
   statusFilter: ApprovalStatusFilter;
@@ -20,11 +21,11 @@ interface ApprovalPendingPaneProps {
 }
 
 function applyFilters(
-  items: ApprovalItem[],
+  items: ApprovalHubItem[],
   features: ReadonlySet<ApprovalFeatureId>,
   status: ApprovalStatusFilter,
   threadQuery: string,
-): ApprovalItem[] {
+): ApprovalHubItem[] {
   let filtered = items;
   if (features.size > 0) filtered = filtered.filter((item) => features.has(item.sourceFeatureId));
   if (status !== 'all') {
@@ -44,6 +45,7 @@ function applyFilters(
 }
 
 export function ApprovalPendingPane({
+  selectedProposalId = null,
   featureFilters,
   onFeatureFiltersChange,
   statusFilter,
@@ -82,6 +84,20 @@ export function ApprovalPendingPane({
     () => applyFilters(items, featureFilters, statusFilter, threadQuery),
     [items, featureFilters, statusFilter, threadQuery],
   );
+  const selectedProposalIsVisible = selectedProposalId
+    ? filteredItems.some((item) => item.proposalId === selectedProposalId)
+    : false;
+  const listRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!selectedProposalId || !selectedProposalIsVisible) return;
+    const target = Array.from(listRef.current?.querySelectorAll<HTMLElement>('[data-testid]') ?? []).find(
+      (candidate) => candidate.dataset.testid === `approval-item-${selectedProposalId}`,
+    );
+    if (!target) return;
+    target.scrollIntoView?.({ block: 'center' });
+    target.tabIndex = -1;
+    target.focus({ preventScroll: true });
+  }, [selectedProposalId, selectedProposalIsVisible]);
   const featureCounts = useMemo(() => countApprovalFeatures(items), [items]);
   const filteredIds = useMemo(() => filteredItems.map((item) => item.proposalId), [filteredItems]);
   const inlineCount = filteredItems.filter(isApprovalItemBatchDecidable).length;
@@ -160,7 +176,7 @@ export function ApprovalPendingPane({
                 className="rounded px-2 py-0.5 text-micro font-medium text-[var(--semantic-success)] hover:bg-[var(--semantic-success)]/10"
                 data-testid="approval-batch-approve"
               >
-                批量通过
+                批量批准
               </button>
               <button
                 type="button"
@@ -191,7 +207,7 @@ export function ApprovalPendingPane({
         </div>
       )}
 
-      <div className="flex-1 space-y-3 overflow-y-auto p-3">
+      <div ref={listRef} className="flex-1 space-y-3 overflow-y-auto p-3">
         {isLoading && items.length === 0 && <PanelMessage>加载中...</PanelMessage>}
         {error && (
           <div className="rounded-lg border border-[var(--semantic-critical)] p-3">

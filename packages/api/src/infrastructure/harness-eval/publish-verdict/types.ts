@@ -3,11 +3,12 @@ import type { Redis } from 'ioredis';
 import type { CapabilityWakeupSourceSelector } from '../capability-wakeup/capability-wakeup-trial-provider.js';
 import type { DesignGateEpisodeSourceSelector } from '../design-gate/design-gate-types.js';
 import type { FreshnessReplaySelector } from '../freshness/freshness-replay-types.js';
+import type { FrictionAnalysisFindingInputV1 } from '../friction/friction-finding-artifact.js';
 import type { QcMetricsSelector } from '../qc-metrics-provider.js';
 import type { SopTraceInput } from '../sop/sop-trace-adapter.js';
 import type { TaskOutcomeVerdict } from '../task-outcome/task-outcome-episode.js';
 import type { TrajectoryInspectorWindowSelector } from '../trajectory-inspector/trajectory-inspector-types.js';
-import type { VerdictHandoffPacket } from '../verdict-handoff.js';
+import type { FrictionVerdictHandoffPacketV3, VerdictHandoffPacket } from '../verdict-handoff.js';
 
 /**
  * F192 Phase H — Verdict Publishing Pipeline types.
@@ -30,6 +31,8 @@ export interface StageResult {
    *     rollup mechanism deferred to future Phase.
    */
   labels?: string[];
+  /** Exact-commit GitHub statuses emitted after every local publication contract passes. */
+  statusChecks?: VerdictCommitStatus[];
   /**
    * Optional live side effect that runs after commit/push/PR creation succeeds
    * but before the publisher returns success. If it fails, the publisher must
@@ -197,23 +200,39 @@ export interface ResolvedSourceRefs {
  * Handler stays domain-agnostic (砚砚 R1 P1: route layer dispatches single generator
  * via eval-hub.ts opts.verdictGenerators[domainId]).
  */
+export interface GeneratedFindingArtifact {
+  candidateRef: string;
+  findingKey: string;
+  artifactRef: string;
+  artifactSha256: string;
+  resolutionStatus: 'resolved' | 'blocked';
+  blockerReason?: 'owner_unresolved' | 'owner_ambiguous' | 'target_mismatch';
+}
+
+export interface GeneratedVerdictChildArtifact {
+  verdictId: string;
+  findingKey: string;
+  verdictPath: string;
+  bundleDir: string;
+  findingArtifactRef: string;
+  findingArtifactSha256: string;
+  packet: FrictionVerdictHandoffPacketV3;
+}
+
+export interface GeneratedVerdictArtifact {
+  verdictPath: string;
+  bundleDir: string;
+  findingArtifacts?: GeneratedFindingArtifact[];
+  childArtifacts?: GeneratedVerdictChildArtifact[];
+  extraStagedPaths?: string[];
+  afterPublish?: () => void | Promise<void>;
+}
+
 export type VerdictGenerator = (
   packet: VerdictHandoffPacket,
   sourceRefs: VerdictSourceRefs,
   deps: GeneratorDeps,
-) => Promise<{
-  verdictPath: string;
-  bundleDir: string;
-  /**
-   * F192 Phase H 收尾 PR-2 R3 P1 (cloud): extra paths the generator wrote that the
-   * publisher MUST also `git add` (e.g. cw's `generated/capability-wakeup/<verdictId>/`
-   * raw input dir, referenced by provenance.json). Omit/empty when generator writes
-   * everything under `bundleDir`.
-   */
-  extraStagedPaths?: string[];
-  /** Optional live side effect that may run only after commit/push/PR creation succeeds. */
-  afterPublish?: () => void | Promise<void>;
-}>;
+) => Promise<GeneratedVerdictArtifact>;
 
 export interface GeneratorDeps {
   /** ISOLATED worktree's docs/harness-feedback — where generator writes verdict.md + bundle. */
@@ -221,12 +240,16 @@ export interface GeneratorDeps {
   /** LIVE checkout's docs/harness-feedback — a2a needs this to read raw snapshot/attribution YAML
    *  that are gitignored from origin/main (砚砚 R17 P1 cloud). cw doesn't use it. */
   liveHarnessFeedbackRoot: string;
+  /** Server-owned clock sampled once per publish request and shared with timestamp validation. */
+  publicationTime: string;
   /** Server-trusted callback principal userId for owner-scoped evidence reads. */
   ownerUserId?: string;
   /** Runtime-configured task-outcome DB path (trusted server config, may be absolute). */
   taskOutcomeDbPath?: string;
   /** Runtime-configured event-memory DB path (trusted server config, may be absolute). */
   eventMemoryDbPath?: string;
+  /** Parsed eval:friction judgments. Other generators never receive this field. */
+  analysisFindings?: readonly FrictionAnalysisFindingInputV1[];
 }
 
 export interface PublishVerdictDeps {
@@ -241,6 +264,14 @@ export interface PublishVerdictDeps {
   taskOutcomeDbPath?: string;
   /** Runtime-configured event-memory DB path (trusted server config, may be absolute). */
   eventMemoryDbPath?: string;
+  /** Test seam for the single server publication clock. */
+  now?: () => Date;
+}
+
+export interface VerdictCommitStatus {
+  context: string;
+  state: 'success';
+  description: string;
 }
 
 export interface PublishVerdictInput {
@@ -252,6 +283,18 @@ export interface PublishVerdictInput {
   ownerUserId?: string;
   /** 砚砚 R1 P1 #2: explicit evidence refs (sanitized YAML basenames OR replayable selector). Tool NEVER fabricates. */
   sourceRefs: VerdictSourceRefs;
+  /** eval:friction only: caller judgments plus feature/component hints; routing truth is server-resolved. */
+  analysisFindings?: unknown;
+}
+
+export interface PublishedVerdictChildArtifact {
+  verdictId: string;
+  findingKey: string;
+  verdictPath: string;
+  bundleDir: string;
+  findingArtifactRef: string;
+  findingArtifactSha256: string;
+  lifecycleRootSha256: string;
 }
 
 export interface PublishVerdictSuccess {
@@ -260,6 +303,8 @@ export interface PublishVerdictSuccess {
   bundleDir: string;
   commitSha: string;
   prUrl: string;
+  findingArtifacts: GeneratedFindingArtifact[];
+  childArtifacts: PublishedVerdictChildArtifact[];
 }
 
 export interface HandlerError {

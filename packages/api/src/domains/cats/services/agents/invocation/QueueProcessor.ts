@@ -72,6 +72,7 @@ import { projectQueueReceipt } from '../../stores/ports/queued-message-receipt.j
 import type { IThreadStore } from '../../stores/ports/ThreadStore.js';
 import type { ITurnExecutionStore } from '../../stores/ports/TurnExecutionStore.js';
 import { type AgentMessage, mergeTokenUsage, type TokenUsage } from '../../types.js';
+import { userFacingSystemInfoNoticeContent } from '../routing/persist-system-info-warnings.js';
 import {
   createA2ASlotTrackingBridge,
   type PersistedPromptMessage,
@@ -565,8 +566,11 @@ export interface QueueProcessorDeps {
   turnExecutionStore?: Pick<ITurnExecutionStore, 'get'>;
   /** F167 Phase S.1: carrier preflight plus failed/canceled runtime outcomes; success requires Evidence→Verdict. */
   actionSuccessorLeaseStore?: Pick<ActionSuccessorLeaseStore, 'preflight' | 'preflightOutput' | 'commitOutcome'>;
-  /** F167: retire structurally replaced ordinary A2A carriers before provider publication. */
-  a2aDispatchDispositionService?: Pick<A2ADispatchDispositionService, 'inspectHandoff'>;
+  /** F167: inspect replacement and retire exact consumed terminals through the canonical dispatch fence. */
+  a2aDispatchDispositionService?: Pick<
+    A2ADispatchDispositionService,
+    'inspectHandoff' | 'completeFromCoordinationTerminal'
+  >;
   /**
    * F254 Phase E (ADR-041 §5): seed the freshness seenCursor when closure adoption
    * injects required bodies — injection must count as seen, or the output gate
@@ -2436,6 +2440,10 @@ export class QueueProcessor {
           continue;
         }
         try {
+          for (const messageId of h.messageIds) {
+            const exactConsumption = queueTerminalConsumptionForMessage(consumptions, messageId);
+            await this.retireConsumedCoordinationTerminal(messageId, exactConsumption);
+          }
           const settlement = await this.deps.queueCustodyCoordinator.commitSuccessfulTargetsForMessages(
             h.entrySnapshot,
             h.messageIds,
@@ -2560,6 +2568,23 @@ export class QueueProcessor {
         this.deps.log.warn({ err, threadId, userId, catId }, '[QueueProcessor] F254 D1.2b queue update failed');
       }
     }
+  }
+
+  private async retireConsumedCoordinationTerminal(
+    messageId: string,
+    consumption: QueueTerminalConsumptionWitness | undefined,
+  ): Promise<void> {
+    if (consumption?.kind !== 'terminal_silent') return;
+    const message = await this.deps.messageStore.getById(messageId);
+    if (message?.extra?.coordination?.phase !== 'terminal') return;
+    const sourceMessageId = message.extra.causal?.triggerMessageId;
+    if (!sourceMessageId) return;
+    const sourceMessage = await this.deps.messageStore.getById(sourceMessageId);
+    if (sourceMessage?.extra?.coordination?.phase !== 'active') return;
+    if (!this.deps.a2aDispatchDispositionService) {
+      throw new Error('a2a_dispatch_disposition_service_unavailable');
+    }
+    await this.deps.a2aDispatchDispositionService.completeFromCoordinationTerminal(messageId);
   }
 
   private async markQueuedFailedOnFailure(
@@ -3402,11 +3427,27 @@ export class QueueProcessor {
     for (const userId of this.deps.queue.listUsersForThread(threadId)) {
       for (const entry of this.deps.queue.list(threadId, userId)) {
         if (entry.source === 'agent' || entry.status !== 'queued') continue;
-        const cat = entry.targetCats[0];
-        if (!cat || !this.pausedSlots.has(QueueProcessor.slotKey(threadId, cat))) return true;
+        if (entry.targetCats.some((catId) => this.isAutomaticOrdinaryTargetEligible(threadId, entry, catId))) {
+          return true;
+        }
       }
     }
     return false;
+  }
+
+  private isAutomaticOrdinaryTargetEligible(threadId: string, entry: QueueEntry, catId: string): boolean {
+    return (
+      isOrdinaryQueueTargetEligible(entry, catId) && !this.pausedSlots.has(QueueProcessor.slotKey(threadId, catId))
+    );
+  }
+
+  private pausedTargetCats(threadId: string): Set<string> {
+    const catIds = new Set<string>();
+    for (const key of this.pausedSlots.keys()) {
+      const slot = QueueProcessor.parseSlotKey(key);
+      if (slot?.threadId === threadId) catIds.add(slot.catId);
+    }
+    return catIds;
   }
 
   private hasQueuedAutoContinuationForThreadCat(
@@ -3584,7 +3625,7 @@ export class QueueProcessor {
         ? this.deps.queue.claimExactSteerReservation(threadId, exact.entry.userId, exact.entry.id, exact.reservationId)
         : this.deps.queue.markProcessingAcrossUsers(
             threadId,
-            busyCats,
+            new Set([...busyCats, ...this.pausedTargetCats(threadId)]),
             opts.onlyTargetCat ? catId : undefined,
             opts.onlyNonAgent,
           );
@@ -3600,7 +3641,9 @@ export class QueueProcessor {
       }
 
       const eligibleTargetCats = entry.targetCats.filter((targetCatId) =>
-        isOrdinaryQueueTargetEligible(entry, targetCatId),
+        exact
+          ? isOrdinaryQueueTargetEligible(entry, targetCatId)
+          : this.isAutomaticOrdinaryTargetEligible(threadId, entry, targetCatId),
       );
       const entryCat = exact ? exactSteerReservationTarget(entry, exact.reservationId) : eligibleTargetCats[0];
       if (!entryCat) return { started: false };
@@ -4139,7 +4182,9 @@ export class QueueProcessor {
             ? `connector-${messageId}`
             : entry.actionSuccessorFence && entry.idempotencyKey
               ? actionSuccessorInvocationIdempotencyKey(entry.idempotencyKey)
-              : `queue-${entry.id}-${entry.processingStartedAt ?? entry.createdAt}`);
+              : entry.requiresExactCloudDispatchProvenance && entry.idempotencyKey
+                ? `cloud-dispatch:${entry.idempotencyKey}`
+                : `queue-${entry.id}-${entry.processingStartedAt ?? entry.createdAt}`);
       const actionLeaseCarrier: InvocationActionLeaseCarrier = entry.actionSuccessorFence
         ? {
             kind: 'action_successor',
@@ -4162,7 +4207,8 @@ export class QueueProcessor {
         const replayEligible =
           Boolean(retryAttemptId) ||
           (entry.source === 'connector' && Boolean(messageId)) ||
-          Boolean(entry.actionSuccessorFence);
+          Boolean(entry.actionSuccessorFence) ||
+          Boolean(entry.requiresExactCloudDispatchProvenance);
         const existing =
           replayEligible && invocationRecordStore.get ? await invocationRecordStore.get(invocationId) : null;
         if (
@@ -5080,7 +5126,7 @@ export class QueueProcessor {
         userId,
         content,
         threadId,
-        messageId,
+        entry.cloudDispatchProvenance?.sourceMessageId ?? messageId,
         targetCats,
         { intent, ...(entry.suggestedSkill ? { promptTags: [`skill:${entry.suggestedSkill}`] } : {}) },
         {
@@ -5135,6 +5181,8 @@ export class QueueProcessor {
             ? { a2aCallerCatId: entry.callerCatId }
             : {}),
           ...(entry.callerTraceContext ? { callerTraceContext: entry.callerTraceContext } : {}),
+          ...(entry.cloudDispatchProvenance ? { cloudDispatchProvenance: entry.cloudDispatchProvenance } : {}),
+          ...(entry.requiresExactCloudDispatchProvenance ? { requiresExactCloudDispatchProvenance: true } : {}),
           ...(entry.freshnessClosureId
             ? {
                 freshnessClosureId: entry.freshnessClosureId,
@@ -5192,6 +5240,15 @@ export class QueueProcessor {
             (msg as { content?: string }).content!,
             (msg as { textMode?: 'append' | 'replace' }).textMode,
           );
+        } else if (
+          hook &&
+          entry.requiresExactCloudDispatchProvenance &&
+          msg.catId === primaryCat &&
+          msg.type === 'system_info' &&
+          (msg as { content?: string }).content
+        ) {
+          const visibleNotice = userFacingSystemInfoNoticeContent((msg as { content?: string }).content!, primaryCat);
+          if (visibleNotice) responseText = accumulateTextAggregate(responseText, visibleNotice, 'append');
         }
         const continuationCapsule = extractContinuityCapsuleFromAgentMessage(msg);
         if (continuationCapsule) {

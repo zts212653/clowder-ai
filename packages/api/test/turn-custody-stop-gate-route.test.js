@@ -656,6 +656,73 @@ describe('F167 Phase T route custody stop gate', () => {
     });
   });
 
+  test('a superseded adopted managed hold emits the exact re-hold witness from the real projection', async () => {
+    const { TurnCustodyProjectionService } = await import(
+      '../dist/domains/ball-custody/TurnCustodyProjectionService.js'
+    );
+    const events = [
+      {
+        kind: 'ball.wake_condition_met',
+        sourceEventId: 'wakecond:task-managed-adopted-rehold',
+        payload: { catId: 'codex', taskId: 'task-managed-adopted-rehold' },
+      },
+      {
+        kind: 'ball.handed',
+        sourceEventId: 'route:ordinary-trigger:codex',
+        payload: { fromCatId: 'opus', toCatId: 'codex' },
+      },
+    ];
+    const projection = new TurnCustodyProjectionService({
+      ballCustodyProjectionStore: { get: async () => ({ state: 'active', holder: 'codex' }) },
+      ballCustodyEventLog: { read: async (_subjectKey, fromSequence = 0) => events.slice(fromSequence) },
+    });
+    const wake = {
+      kind: 'structured',
+      protocol: 'hold',
+      subjectKey: 'ball:thread:thread-managed-adopted-rehold',
+      holderCatId: 'codex',
+      sourceMessageId: 'message-managed-adopted-rehold',
+      taskId: 'task-managed-adopted-rehold',
+    };
+    const service = {
+      calls: [],
+      async *invoke(prompt) {
+        this.calls.push(prompt);
+        yield {
+          type: 'system_info',
+          catId: 'codex',
+          content: JSON.stringify({ type: 'invocation_created', invocationId: 'codex-inv-adopted-rehold' }),
+          timestamp: Date.now(),
+        };
+        events.push({
+          kind: 'ball.held',
+          sourceEventId: 'hold:thread-managed-adopted-rehold:codex:2000',
+          payload: { catId: 'codex', fireAt: 2_000 },
+        });
+        yield { type: 'text', catId: 'codex', content: 'Established the successor hold.', timestamp: Date.now() };
+        yield { type: 'done', catId: 'codex', timestamp: Date.now() };
+      },
+    };
+
+    const { yielded } = await runRoute(service, 'thread-managed-adopted-rehold', {
+      projectionService: projection,
+      routeOptions: {
+        turnCustodyWake: { kind: 'unstructured', source: 'user_chat' },
+        persistedPromptMessageIds: [wake.sourceMessageId],
+        onPromptMessagesExposed: async () => [wake],
+      },
+    });
+
+    assert.deepEqual(yielded.find((message) => message.type === 'done')?.turnCustodyTerminalWitnesses, [
+      {
+        kind: 'managed_hold_continued',
+        sourceMessageId: wake.sourceMessageId,
+        taskId: wake.taskId,
+        transition: 'reheld',
+      },
+    ]);
+  });
+
   test('a managed hold body adopted by an already-running turn emits its own continuation proof', async () => {
     const opens = [];
     const projection = {

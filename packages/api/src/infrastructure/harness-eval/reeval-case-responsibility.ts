@@ -6,6 +6,8 @@ import type {
 import type { ActionSuccessorLease } from '../../domains/ball-custody/action-successor-state-machine.js';
 import type { ITaskStore } from '../../domains/cats/services/stores/ports/TaskStore.js';
 import { projectReevalCase } from './reeval-case.js';
+import { appendCustodyDispatchBlocker } from './reeval-case-custody-blocker.js';
+import type { ReevalCaseTaskDispatchPort } from './reeval-case-task-dispatch.js';
 import type { IReevalClosureEventLog, ReevalClosureAppendResult } from './reeval-closure-event-log.js';
 import type { ReevalCaseReconcileSubject } from './reeval-closure-reconciler.js';
 
@@ -26,6 +28,7 @@ export interface ReevalCaseResponsibilityServiceOptions {
   taskStore: Pick<ITaskStore, 'getBySubject' | 'upsertBySubject' | 'update'>;
   eventLog: Pick<IReevalClosureEventLog, 'append'>;
   admissionService: Pick<ActionSuccessorAdmissionService, 'admit'>;
+  taskDispatcher: ReevalCaseTaskDispatchPort;
   resolveFeatureThreadId: (featureId: string, ownerUserId: string) => Promise<string>;
   ownerUserId: string;
   now?: () => string;
@@ -210,6 +213,28 @@ export class ReevalCaseResponsibilityService {
     const activeTask =
       task.status === 'doing' ? task : await this.options.taskStore.update(task.id, { status: 'doing' });
     if (!activeTask) throw new Error(`failed to activate responsibility task ${task.id}`);
+    const carrier = await this.options.taskDispatcher.dispatch({
+      kind: 'responsibility',
+      caseId: subject.caseRoot.caseId,
+      verdictId: projection.activeVerdictId,
+      sourceThreadId: context.systemThreadId,
+      callerCatId: context.evalCatId,
+      task: activeTask,
+      lease,
+    });
+    if (carrier.outcome === 'blocked') {
+      const append = await appendCustodyDispatchBlocker({
+        eventLog: this.options.eventLog,
+        subject,
+        activeVerdictId: projection.activeVerdictId,
+        stage: 'responsibility',
+        task: activeTask,
+        lease,
+        dispatch: carrier,
+        occurredAt,
+      });
+      return { outcome: 'blocked', append };
+    }
 
     const event = {
       eventId: `f266:${subject.caseRoot.caseId}:cycle:${projection.activeVerdictId}:responsibility`,
@@ -227,6 +252,7 @@ export class ReevalCaseResponsibilityService {
           availability: 'available' as const,
           value: `action-successor:${lease.leaseId}:${lease.generation}`,
         },
+        { kind: 'other' as const, availability: 'available' as const, value: `message:${carrier.messageId}` },
       ],
       taskId: activeTask.id,
       leaseId: lease.leaseId,

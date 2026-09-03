@@ -281,4 +281,66 @@ describe('F299 request-generation recorder', () => {
     assert.ok(digested.includes('["cat-cafe-collab","cat-cafe-memory"]'));
     assert.equal(digested.at(-1), digested.at(-2), 'schema-set hashes must ignore provider ordering');
   });
+
+  it('persists only sanitized launch-time schema-delivery facts and leaves older generations absent', async () => {
+    const { appended, recorder } = fixture();
+    await recorder.recordPrepared(prepared(), { attempt: 1 });
+    await recorder.recordPrepared(
+      {
+        ...prepared(),
+        tools: {
+          finalSurface: 'declared_only',
+          declaredServerNames: ['cat-cafe-signals'],
+          schemaDelivery: {
+            profileClass: 'full',
+            profileId: 'full',
+            requestedMode: 'provider-native-deferred',
+            hostVersion: '2.1.247',
+            attestation: {
+              ref: 'docs/features/evidence/F286/provider-schema-delivery/anthropic-print-sdk.json',
+              digest: `sha256:${'d'.repeat(64)}`,
+            },
+          },
+        },
+      },
+      { attempt: 2, reason: 'provider_continuation' },
+    );
+
+    assert.equal(appended[0].event.envelope.tools.schemaDelivery, undefined);
+    assert.deepEqual(appended[1].event.envelope.tools.schemaDelivery, {
+      profileClass: 'full',
+      profileId: 'full',
+      requestedMode: 'provider-native-deferred',
+      hostVersion: '2.1.247',
+      attestation: {
+        ref: 'docs/features/evidence/F286/provider-schema-delivery/anthropic-print-sdk.json',
+        digest: `sha256:${'d'.repeat(64)}`,
+      },
+    });
+    assert.ok(!JSON.stringify(appended[1].event.envelope.tools).includes('cat-cafe-signals'));
+  });
+
+  it('rejects an unproven known schema-delivery claim before durable persistence', async () => {
+    const { appended, recorder } = fixture();
+
+    await assert.rejects(
+      recorder.recordPrepared(
+        {
+          ...prepared(),
+          tools: {
+            finalSurface: 'unknown',
+            schemaDelivery: {
+              profileClass: 'full',
+              profileId: 'full',
+              requestedMode: 'provider-native-deferred',
+            },
+          },
+        },
+        { attempt: 1 },
+      ),
+      /evidence-claiming schema delivery requires host version and attestation/,
+    );
+
+    assert.equal(appended.length, 0);
+  });
 });

@@ -25,6 +25,7 @@ export function createFreshnessGeneratorAdapter(provider: FreshnessReplayProvide
       harnessFeedbackRoot: deps.harnessFeedbackRoot,
       domain,
       replay,
+      generatedAt: deps.publicationTime,
       submittedPacket: packet,
     });
     return { verdictPath: artifact.path, bundleDir: artifact.bundleDir };

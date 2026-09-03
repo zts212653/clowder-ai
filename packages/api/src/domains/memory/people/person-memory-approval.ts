@@ -394,6 +394,9 @@ export async function approvePersonMemoryDrafts(
   };
   const artifactSet = PersonMemoryKeys.personArtifacts(owner, person.personId);
   plan.sadd(artifactSet, decisionKey);
+  if (updated.state === 'materialized') {
+    plan.zadd(PersonMemoryKeys.settled(owner), input.authorizedAt, input.candidateId);
+  }
 
   const raw = await redis.eval(
     APPROVE_DRAFTS_LUA,

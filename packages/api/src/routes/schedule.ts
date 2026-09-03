@@ -14,7 +14,9 @@
  * DELETE /api/schedule/control/tasks/:id → remove task override (AC-D1)
  */
 
+import { type ProducerAttentionReevaluationLinkV1, producerAttentionReevaluationLinkV1Schema } from '@cat-cafe/shared';
 import type { FastifyPluginAsync } from 'fastify';
+import { ENTRUSTED_WORK_REEVALUATION_TEMPLATE_ID } from '../domains/growing/ProducerAttentionReevaluationTaskSpec.js';
 import { f255ConfigRequired, isF255ConfigOnlyTemplate } from '../infrastructure/scheduler/f255-template-boundary.js';
 import type { TriggerSpec } from '../infrastructure/scheduler/types.js';
 import { registerCallbackAuthHook } from './callback-auth-prehandler.js';
@@ -211,6 +213,7 @@ export const scheduleRoutes: FastifyPluginAsync<ScheduleRoutesOptions> = async (
       params?: Record<string, unknown>;
       display?: { label: string; category: string; description?: string };
       deliveryThreadId?: string;
+      entrustedWorkReevaluation?: unknown;
     };
 
     if (!body.templateId) {
@@ -251,7 +254,23 @@ export const scheduleRoutes: FastifyPluginAsync<ScheduleRoutesOptions> = async (
       reply.status(400);
       return targetResult.error;
     }
-    const params = targetResult.params;
+    let params = targetResult.params;
+    let entrustedWorkReevaluation: ProducerAttentionReevaluationLinkV1 | undefined;
+    if (body.templateId === ENTRUSTED_WORK_REEVALUATION_TEMPLATE_ID) {
+      const parsed = producerAttentionReevaluationLinkV1Schema.safeParse(body.entrustedWorkReevaluation);
+      if (!parsed.success || trigger.type !== 'once' || Object.keys(rawParams).length > 0) {
+        reply.status(400);
+        return {
+          error:
+            'Entrusted-work producer re-evaluation requires typed owner coordinates, one once trigger, and no opaque params',
+        };
+      }
+      entrustedWorkReevaluation = parsed.data;
+      params = {};
+    } else if (body.entrustedWorkReevaluation !== undefined) {
+      reply.status(400);
+      return { error: 'entrustedWorkReevaluation is reserved for its typed F310 template' };
+    }
     const display = body.display
       ? {
           label: body.display.label,
@@ -283,6 +302,7 @@ export const scheduleRoutes: FastifyPluginAsync<ScheduleRoutesOptions> = async (
         templateLabel: template.label,
         trigger,
         params,
+        ...(entrustedWorkReevaluation ? { entrustedWorkReevaluation } : {}),
         display,
         deliveryThreadId: resolution.deliveryThreadId,
         paramSchema: template.paramSchema,

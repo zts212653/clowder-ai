@@ -1,0 +1,2714 @@
+{
+  "v": 1,
+  "contractRevision": "MemoryArchitectureClosure.v1",
+  "recallFrameRevision": "RecallFrame.v0",
+  "sourceMode": "lane_owned_manifests",
+  "generatedViewMutable": false,
+  "universe": [
+    "cat-owned-seed",
+    "decision",
+    "diary",
+    "entity",
+    "episode",
+    "event",
+    "feedback",
+    "global-distillation-f152",
+    "lessons-learned",
+    "library-knowledge",
+    "method",
+    "person",
+    "proactive-candidate",
+    "profile",
+    "project-knowledge",
+    "provider-local-memory",
+    "recall-consumption-ledger",
+    "reflection",
+    "skill",
+    "taste",
+    "verdict"
+  ],
+  "declarations": [
+    "cat-owned-seed",
+    "decision",
+    "diary",
+    "entity",
+    "episode",
+    "event",
+    "feedback",
+    "global-distillation-f152",
+    "lessons-learned",
+    "library-knowledge",
+    "method",
+    "person",
+    "proactive-candidate",
+    "profile",
+    "project-knowledge",
+    "provider-local-memory",
+    "recall-consumption-ledger",
+    "reflection",
+    "skill",
+    "taste",
+    "verdict"
+  ],
+  "surfaces": [
+    {
+      "v": 1,
+      "surfaceId": "cat-owned-seed",
+      "label": "Cat-owned seed",
+      "ownerCell": "F255 auto-dream and F271 reflection",
+      "ownerRefs": [
+        "docs/features/F255-auto-dream.md",
+        "docs/features/F271-pragmatic-memory-reflection.md"
+      ],
+      "canonicalRefs": [
+        "docs/features/F255-auto-dream.md",
+        "docs/architecture/memory-write-lane-census.md"
+      ],
+      "authority": {
+        "state": "implemented",
+        "summary": "The producing cat and source-linked seed artifact own seed truth.",
+        "evidenceLevel": "main",
+        "evidenceRefs": [
+          "docs/features/F255-auto-dream.md"
+        ]
+      },
+      "declarationRevision": "G0-B-2026-08-28",
+      "disposition": "missing",
+      "writeCapture": {
+        "state": "implemented",
+        "summary": "F255 writes cat-owned seeds without promoting them into user memory authority.",
+        "evidenceLevel": "main",
+        "evidenceRefs": [
+          "docs/features/F255-auto-dream.md",
+          "docs/features/F271-pragmatic-memory-reflection.md"
+        ]
+      },
+      "typedCuePredicate": {
+        "state": "missing",
+        "summary": "No typed seed eligibility predicate closes source, scope, and revision.",
+        "evidenceLevel": "main",
+        "evidenceRefs": [
+          "docs/architecture/memory-cue-source-map.md"
+        ],
+        "breakClass": "B1",
+        "ownerRefs": [
+          "docs/features/F255-auto-dream.md"
+        ],
+        "nextAction": "cat-seed owner carrier: declare a source-safe predicate for one seed family."
+      },
+      "presentationDrill": {
+        "state": "implemented",
+        "summary": "Seed artifacts are inspectable through their source-linked project files.",
+        "evidenceLevel": "main",
+        "evidenceRefs": [
+          "docs/features/F255-auto-dream.md"
+        ]
+      },
+      "consumerAllowedUse": {
+        "state": "implemented",
+        "summary": "Cats may use their seeds as hypotheses; seeds cannot silently become user facts.",
+        "evidenceLevel": "main",
+        "evidenceRefs": [
+          "docs/features/F255-auto-dream.md"
+        ]
+      },
+      "consumptionReceipt": {
+        "state": "missing",
+        "summary": "Seed use has no uniform applied or dismissed receipt.",
+        "evidenceLevel": "main",
+        "evidenceRefs": [
+          "docs/features/F200-memory-recall-eval.md"
+        ],
+        "breakClass": "B2",
+        "ownerRefs": [
+          "docs/features/F255-auto-dream.md"
+        ],
+        "nextAction": "cat-seed owner carrier: emit seed-revision application receipts."
+      },
+      "outcome": {
+        "state": "missing",
+        "summary": "No declared consumer measures whether a seed helped or harmed work.",
+        "evidenceLevel": "main",
+        "evidenceRefs": [
+          "docs/features/F200-memory-recall-eval.md"
+        ],
+        "breakClass": "B3",
+        "ownerRefs": [
+          "docs/features/F255-auto-dream.md",
+          "docs/features/F200-memory-recall-eval.md"
+        ],
+        "nextAction": "cat-seed owner carrier: define a bounded hypothesis-utility outcome."
+      },
+      "invalidation": {
+        "state": "missing",
+        "summary": "Seed supersession and rejection lack projection invalidation refs.",
+        "evidenceLevel": "main",
+        "evidenceRefs": [
+          "docs/features/F263-memory-lifecycle-repair-and-metrics.md"
+        ],
+        "breakClass": "invalidation",
+        "ownerRefs": [
+          "docs/features/F255-auto-dream.md",
+          "docs/features/F263-memory-lifecycle-repair-and-metrics.md"
+        ],
+        "nextAction": "cat-seed owner carrier: declare rejection and supersession invalidation."
+      },
+      "evidence": {
+        "level": "main",
+        "refs": [
+          "docs/features/F255-auto-dream.md",
+          "docs/architecture/memory-write-lane-census.md"
+        ],
+        "limitations": "Seed production exists; recall and outcome closure do not."
+      }
+    },
+    {
+      "v": 1,
+      "surfaceId": "decision",
+      "label": "Decision and ADR knowledge",
+      "ownerCell": "ADR owner and operator decision authority",
+      "ownerRefs": [
+        "docs/decisions/index.md"
+      ],
+      "canonicalRefs": [
+        "docs/decisions/index.md",
+        "docs/decisions/015-knowledge-object-contract.md"
+      ],
+      "authority": {
+        "state": "implemented",
+        "summary": "Accepted ADRs and operator decision records own decision truth.",
+        "evidenceLevel": "main",
+        "evidenceRefs": [
+          "docs/decisions/index.md"
+        ]
+      },
+      "declarationRevision": "G0-B-2026-08-28",
+      "disposition": "missing",
+      "writeCapture": {
+        "state": "implemented",
+        "summary": "Decision owners write versioned ADRs under repository governance.",
+        "evidenceLevel": "main",
+        "evidenceRefs": [
+          "docs/decisions/015-knowledge-object-contract.md"
+        ]
+      },
+      "typedCuePredicate": {
+        "state": "missing",
+        "summary": "No typed subsystem-to-decision predicate is registered at invocation time.",
+        "evidenceLevel": "main",
+        "evidenceRefs": [
+          "docs/architecture/memory-cue-source-map.md"
+        ],
+        "breakClass": "B1",
+        "ownerRefs": [
+          "docs/decisions/index.md"
+        ],
+        "nextAction": "decision owner carrier: define a subsystem and contract trigger over accepted ADRs."
+      },
+      "presentationDrill": {
+        "state": "implemented",
+        "summary": "Decision index and F209 anchors support exact pull drill.",
+        "evidenceLevel": "live",
+        "evidenceRefs": [
+          "docs/decisions/index.md",
+          "docs/features/F209-evidence-recall-optimization.md"
+        ]
+      },
+      "consumerAllowedUse": {
+        "state": "implemented",
+        "summary": "Consumers may constrain implementation by accepted decisions, never by superseded drafts.",
+        "evidenceLevel": "main",
+        "evidenceRefs": [
+          "docs/decisions/015-knowledge-object-contract.md"
+        ]
+      },
+      "consumptionReceipt": {
+        "state": "missing",
+        "summary": "Decision use has no revision-bound applied or dismissed receipt.",
+        "evidenceLevel": "main",
+        "evidenceRefs": [
+          "docs/features/F200-memory-recall-eval.md"
+        ],
+        "breakClass": "B2",
+        "ownerRefs": [
+          "docs/decisions/index.md"
+        ],
+        "nextAction": "decision owner carrier: emit ADR-revision application receipts."
+      },
+      "outcome": {
+        "state": "missing",
+        "summary": "No declared consumer joins decision use to architecture conformance outcomes.",
+        "evidenceLevel": "main",
+        "evidenceRefs": [
+          "docs/features/F200-memory-recall-eval.md"
+        ],
+        "breakClass": "B3",
+        "ownerRefs": [
+          "docs/decisions/index.md",
+          "docs/features/F200-memory-recall-eval.md"
+        ],
+        "nextAction": "decision owner carrier: define a conformance outcome after receipts exist."
+      },
+      "invalidation": {
+        "state": "implemented",
+        "summary": "ADR status and Git revision identify superseded or amended decisions.",
+        "evidenceLevel": "main",
+        "evidenceRefs": [
+          "docs/decisions/index.md"
+        ]
+      },
+      "evidence": {
+        "level": "live",
+        "refs": [
+          "docs/decisions/index.md",
+          "docs/features/F209-evidence-recall-optimization.md"
+        ],
+        "limitations": "Decision truth and pull drill exist; proactive consumption closure does not."
+      }
+    },
+    {
+      "v": 1,
+      "surfaceId": "diary",
+      "label": "Diary",
+      "ownerCell": "F229 diary loop as cataloged by the write census",
+      "ownerRefs": [
+        "docs/architecture/memory-write-lane-census.md"
+      ],
+      "canonicalRefs": [
+        "docs/architecture/memory-write-lane-census.md",
+        "docs/architecture/memory-system-overview.md"
+      ],
+      "authority": {
+        "state": "implemented",
+        "summary": "The F229 diary lane owns persisted entries and timeline order.",
+        "evidenceLevel": "main",
+        "evidenceRefs": [
+          "docs/architecture/memory-write-lane-census.md"
+        ]
+      },
+      "declarationRevision": "G0-B-2026-08-28",
+      "disposition": "missing",
+      "writeCapture": {
+        "state": "implemented",
+        "summary": "The diary loop persists user-visible entries with source context.",
+        "evidenceLevel": "main",
+        "evidenceRefs": [
+          "docs/architecture/memory-write-lane-census.md"
+        ]
+      },
+      "typedCuePredicate": {
+        "state": "missing",
+        "summary": "No typed diary relevance predicate is registered.",
+        "evidenceLevel": "main",
+        "evidenceRefs": [
+          "docs/architecture/memory-cue-source-map.md"
+        ],
+        "breakClass": "B1",
+        "ownerRefs": [
+          "docs/architecture/memory-write-lane-census.md"
+        ],
+        "nextAction": "diary owner carrier: define a time and topic predicate without moving diary storage."
+      },
+      "presentationDrill": {
+        "state": "implemented",
+        "summary": "The diary reader presents entries and their stored detail on pull.",
+        "evidenceLevel": "main",
+        "evidenceRefs": [
+          "docs/architecture/memory-system-overview.md"
+        ]
+      },
+      "consumerAllowedUse": {
+        "state": "implemented",
+        "summary": "Consumers may use entries for continuity while retaining diary visibility policy.",
+        "evidenceLevel": "main",
+        "evidenceRefs": [
+          "docs/architecture/memory-system-overview.md"
+        ]
+      },
+      "consumptionReceipt": {
+        "state": "missing",
+        "summary": "Diary reads lack revision-bound applied or dismissed receipts.",
+        "evidenceLevel": "main",
+        "evidenceRefs": [
+          "docs/features/F200-memory-recall-eval.md"
+        ],
+        "breakClass": "B2",
+        "ownerRefs": [
+          "docs/architecture/memory-write-lane-census.md"
+        ],
+        "nextAction": "diary owner carrier: emit delivery and application receipts for eligible entries."
+      },
+      "outcome": {
+        "state": "missing",
+        "summary": "No declared consumer evaluates diary recall utility.",
+        "evidenceLevel": "main",
+        "evidenceRefs": [
+          "docs/features/F200-memory-recall-eval.md"
+        ],
+        "breakClass": "B3",
+        "ownerRefs": [
+          "docs/architecture/memory-write-lane-census.md",
+          "docs/features/F200-memory-recall-eval.md"
+        ],
+        "nextAction": "diary owner carrier: join receipts to a bounded continuity outcome."
+      },
+      "invalidation": {
+        "state": "missing",
+        "summary": "Diary edit and deletion do not publish projection invalidation refs.",
+        "evidenceLevel": "main",
+        "evidenceRefs": [
+          "docs/features/F263-memory-lifecycle-repair-and-metrics.md"
+        ],
+        "breakClass": "invalidation",
+        "ownerRefs": [
+          "docs/architecture/memory-write-lane-census.md",
+          "docs/features/F263-memory-lifecycle-repair-and-metrics.md"
+        ],
+        "nextAction": "diary owner carrier: specify edit and delete invalidation signals."
+      },
+      "evidence": {
+        "level": "main",
+        "refs": [
+          "docs/architecture/memory-write-lane-census.md",
+          "docs/architecture/memory-cue-source-map.md"
+        ],
+        "limitations": "Diary persistence exists; proactive consumption closure does not."
+      }
+    },
+    {
+      "v": 1,
+      "surfaceId": "entity",
+      "label": "Entity memory",
+      "ownerCell": "F260 entity registry",
+      "ownerRefs": [
+        "docs/features/F260-write-side-autopsy-entity-deref.md"
+      ],
+      "canonicalRefs": [
+        "docs/features/F260-write-side-autopsy-entity-deref.md",
+        "docs/architecture/memory-cue-source-map.md"
+      ],
+      "authority": {
+        "state": "implemented",
+        "summary": "F260 owns Entity identity, revisions, aliases, and retirement state.",
+        "evidenceLevel": "main",
+        "evidenceRefs": [
+          "docs/features/F260-write-side-autopsy-entity-deref.md"
+        ]
+      },
+      "declarationRevision": "F312-entity-nudge-per-consumer-2026-08-30",
+      "disposition": "active",
+      "writeCapture": {
+        "state": "implemented",
+        "summary": "Entity capture resolves or proposes a source-linked registry record before use.",
+        "evidenceLevel": "UAT",
+        "evidenceRefs": [
+          "docs/features/F260-write-side-autopsy-entity-deref.md"
+        ]
+      },
+      "typedCuePredicate": {
+        "state": "implemented",
+        "summary": "subject_seen resolves a typed Entity identity plus revision before eligibility.",
+        "evidenceLevel": "main",
+        "evidenceRefs": [
+          "docs/architecture/memory-cue-source-map.md"
+        ]
+      },
+      "presentationDrill": {
+        "state": "implemented",
+        "summary": "Direct Entity Nudge fanout binds presentation and cooldown to one exact consumer request; the prompt retains a narrow drill route to the authoritative revision.",
+        "evidenceLevel": "UAT",
+        "evidenceRefs": [
+          "docs/features/F260-write-side-autopsy-entity-deref.md",
+          "docs/features/F287-memory-cue-plane.md",
+          "docs/bug-report/2026-08-29-f312-entity-nudge-per-consumer/bug-report.md"
+        ]
+      },
+      "consumerAllowedUse": {
+        "state": "implemented",
+        "summary": "The active cat may resolve references and continuity within scope; cues cannot mutate the registry.",
+        "evidenceLevel": "main",
+        "evidenceRefs": [
+          "docs/features/F260-write-side-autopsy-entity-deref.md"
+        ]
+      },
+      "consumptionReceipt": {
+        "state": "implemented",
+        "summary": "F287 receipt states bind delivery and application to the Entity source revision.",
+        "evidenceLevel": "UAT",
+        "evidenceRefs": [
+          "docs/features/F287-memory-cue-plane.md"
+        ]
+      },
+      "outcome": {
+        "state": "implemented",
+        "summary": "F200 evaluates the shared subject_seen cue family with bounded utility conclusions.",
+        "evidenceLevel": "live",
+        "evidenceRefs": [
+          "docs/features/F200-memory-recall-eval.md"
+        ]
+      },
+      "invalidation": {
+        "state": "implemented",
+        "summary": "Entity correction, revision change, or retirement invalidates stale cue eligibility.",
+        "evidenceLevel": "UAT",
+        "evidenceRefs": [
+          "docs/features/F260-write-side-autopsy-entity-deref.md",
+          "docs/features/F263-memory-lifecycle-repair-and-metrics.md"
+        ]
+      },
+      "evidence": {
+        "level": "UAT",
+        "refs": [
+          "docs/features/F260-write-side-autopsy-entity-deref.md",
+          "docs/features/F287-memory-cue-plane.md",
+          "docs/bug-report/2026-08-29-f312-entity-nudge-per-consumer/bug-report.md"
+        ],
+        "limitations": "Alpha proves direct non-person fanout and per-consumer cooldown with a persisted document alias; it does not replay the absent 家属喵/未婚喵 records, exercise an unavailable fable-5 runtime, or establish single-Entity causal outcome."
+      }
+    },
+    {
+      "v": 1,
+      "surfaceId": "episode",
+      "label": "Episode",
+      "ownerCell": "Episode producer and source-linked artifact",
+      "ownerRefs": [
+        "docs/episodes/index.md"
+      ],
+      "canonicalRefs": [
+        "docs/episodes/index.md",
+        "docs/architecture/standing-reflex-episode-replay-shadow.md"
+      ],
+      "authority": {
+        "state": "implemented",
+        "summary": "Source-linked episode artifacts own reconstructed episode evidence.",
+        "evidenceLevel": "main",
+        "evidenceRefs": [
+          "docs/episodes/index.md"
+        ]
+      },
+      "declarationRevision": "G0-B-2026-08-28",
+      "disposition": "missing",
+      "writeCapture": {
+        "state": "implemented",
+        "summary": "Episode producers write provenance-bearing artifacts from task traces.",
+        "evidenceLevel": "fixture",
+        "evidenceRefs": [
+          "docs/architecture/standing-reflex-episode-replay-shadow.md"
+        ]
+      },
+      "typedCuePredicate": {
+        "state": "missing",
+        "summary": "No typed task-shape predicate selects an Episode for invocation-time recall.",
+        "evidenceLevel": "fixture",
+        "evidenceRefs": [
+          "docs/architecture/standing-reflex-episode-replay-shadow.md"
+        ],
+        "breakClass": "B1",
+        "ownerRefs": [
+          "docs/episodes/index.md"
+        ],
+        "nextAction": "episode owner carrier: declare one task-shape predicate over source-linked episodes."
+      },
+      "presentationDrill": {
+        "state": "implemented",
+        "summary": "Episode artifacts and source refs support pull presentation and drill.",
+        "evidenceLevel": "fixture",
+        "evidenceRefs": [
+          "docs/episodes/index.md",
+          "docs/architecture/standing-reflex-episode-replay-shadow.md"
+        ]
+      },
+      "consumerAllowedUse": {
+        "state": "implemented",
+        "summary": "Consumers may use episodes as reconstructable precedent, not as unqualified policy.",
+        "evidenceLevel": "main",
+        "evidenceRefs": [
+          "docs/episodes/index.md"
+        ]
+      },
+      "consumptionReceipt": {
+        "state": "missing",
+        "summary": "Episode replay has no typed applied or dismissed receipt.",
+        "evidenceLevel": "fixture",
+        "evidenceRefs": [
+          "docs/architecture/standing-reflex-episode-replay-shadow.md"
+        ],
+        "breakClass": "B2",
+        "ownerRefs": [
+          "docs/episodes/index.md"
+        ],
+        "nextAction": "episode owner carrier: emit source-revision replay receipts."
+      },
+      "outcome": {
+        "state": "missing",
+        "summary": "No declared consumer joins episode use to task outcome.",
+        "evidenceLevel": "fixture",
+        "evidenceRefs": [
+          "docs/features/F200-memory-recall-eval.md"
+        ],
+        "breakClass": "B3",
+        "ownerRefs": [
+          "docs/episodes/index.md",
+          "docs/features/F200-memory-recall-eval.md"
+        ],
+        "nextAction": "episode owner carrier: bind replay receipts to a bounded outcome."
+      },
+      "invalidation": {
+        "state": "missing",
+        "summary": "Episode source drift and supersession do not publish invalidation refs.",
+        "evidenceLevel": "fixture",
+        "evidenceRefs": [
+          "docs/architecture/standing-reflex-episode-replay-shadow.md"
+        ],
+        "breakClass": "invalidation",
+        "ownerRefs": [
+          "docs/episodes/index.md"
+        ],
+        "nextAction": "episode owner carrier: declare source-drift and supersession invalidation."
+      },
+      "evidence": {
+        "level": "fixture",
+        "refs": [
+          "docs/architecture/standing-reflex-episode-replay-shadow.md",
+          "docs/episodes/index.md"
+        ],
+        "limitations": "Replay contracts are fixture-backed and have not reached main runtime closure."
+      }
+    },
+    {
+      "v": 1,
+      "surfaceId": "event",
+      "label": "Event memory",
+      "ownerCell": "F227 event memory",
+      "ownerRefs": [
+        "docs/features/F227-event-memory.md"
+      ],
+      "canonicalRefs": [
+        "docs/features/F227-event-memory.md",
+        "docs/architecture/memory-write-lane-census.md"
+      ],
+      "authority": {
+        "state": "implemented",
+        "summary": "F227 event records and linked revisions own Event truth.",
+        "evidenceLevel": "main",
+        "evidenceRefs": [
+          "docs/features/F227-event-memory.md"
+        ]
+      },
+      "declarationRevision": "F312-C-event-v1",
+      "disposition": "active",
+      "writeCapture": {
+        "state": "implemented",
+        "summary": "F227 captures source-linked events into the event lane.",
+        "evidenceLevel": "main",
+        "evidenceRefs": [
+          "docs/features/F227-event-memory.md"
+        ]
+      },
+      "typedCuePredicate": {
+        "state": "implemented",
+        "summary": "recent_event_available selects only the newest high-confidence F227 event in the exact owner and subject thread within a bounded fifteen-minute window.",
+        "evidenceLevel": "main",
+        "evidenceRefs": [
+          "packages/api/src/domains/memory/cue/sources/EventMemoryCueSource.ts",
+          "packages/api/test/memory/f312-event-cue.test.js"
+        ]
+      },
+      "presentationDrill": {
+        "state": "implemented",
+        "summary": "Event timeline and source references provide pull presentation and drill.",
+        "evidenceLevel": "main",
+        "evidenceRefs": [
+          "docs/features/F227-event-memory.md"
+        ]
+      },
+      "consumerAllowedUse": {
+        "state": "implemented",
+        "summary": "Consumers may establish chronology and continuity while preserving source uncertainty.",
+        "evidenceLevel": "main",
+        "evidenceRefs": [
+          "docs/features/F227-event-memory.md"
+        ]
+      },
+      "consumptionReceipt": {
+        "state": "implemented",
+        "summary": "The existing Cue Plane records presented, drilled, applied, or dismissed against the exact Event revision; a terminal outcome suppresses that revision.",
+        "evidenceLevel": "main",
+        "evidenceRefs": [
+          "packages/api/src/domains/memory/cue/MemoryCueEpisodeStore.ts",
+          "packages/api/src/domains/memory/cue/sources/EventMemoryCueSource.ts"
+        ]
+      },
+      "outcome": {
+        "state": "implemented",
+        "summary": "The strictly authenticated response in the event subject thread is the bounded consumer: applied means the Event established chronology or continuity used in that response, dismissed means it did not; no utility causality is claimed.",
+        "evidenceLevel": "main",
+        "evidenceRefs": [
+          "packages/api/src/domains/memory/cue/format-memory-cues.ts",
+          "docs/features/F200-memory-recall-eval.md"
+        ]
+      },
+      "invalidation": {
+        "state": "implemented",
+        "summary": "Resolve and drill fail closed when the Event revision changes, its source message is deleted or loses visibility, owner/thread scope changes, or the fifteen-minute event window expires.",
+        "evidenceLevel": "main",
+        "evidenceRefs": [
+          "packages/api/src/domains/memory/cue/sources/EventMemoryCueSource.ts",
+          "packages/api/test/memory/f312-event-cue.test.js"
+        ]
+      },
+      "evidence": {
+        "level": "main",
+        "refs": [
+          "docs/features/F227-event-memory.md",
+          "packages/api/test/memory/f312-event-cue.test.js"
+        ],
+        "limitations": "Main proves temporal and subject admission, owner scope, bounded drill, receipt suppression, revision/source invalidation, and expiry; merged-main runtime acceptance is recorded separately."
+      }
+    },
+    {
+      "v": 1,
+      "surfaceId": "feedback",
+      "label": "Feedback signal",
+      "ownerCell": "F281 feedback channel",
+      "ownerRefs": [
+        "docs/features/F281-feedback-channel-first-class.md"
+      ],
+      "canonicalRefs": [
+        "docs/features/F281-feedback-channel-first-class.md",
+        "docs/harness-feedback/SPEC.md"
+      ],
+      "authority": {
+        "state": "implemented",
+        "summary": "F281 owns source-message identity, feedback disposition, and correction links.",
+        "evidenceLevel": "UAT",
+        "evidenceRefs": [
+          "docs/features/F281-feedback-channel-first-class.md"
+        ]
+      },
+      "declarationRevision": "G0-B-2026-08-28",
+      "disposition": "exempt",
+      "writeCapture": {
+        "state": "implemented",
+        "summary": "Feedback capture persists a source reference and bounded disposition instead of copying payload into memory.",
+        "evidenceLevel": "UAT",
+        "evidenceRefs": [
+          "docs/features/F281-feedback-channel-first-class.md",
+          "docs/harness-feedback/SPEC.md"
+        ]
+      },
+      "typedCuePredicate": {
+        "state": "exempt",
+        "summary": "Feedback is a control and invalidation input, not a recallable memory surface.",
+        "evidenceLevel": "main",
+        "evidenceRefs": [
+          "docs/features/F281-feedback-channel-first-class.md"
+        ]
+      },
+      "presentationDrill": {
+        "state": "implemented",
+        "summary": "Feedback records drill back to the exact source message and disposition.",
+        "evidenceLevel": "UAT",
+        "evidenceRefs": [
+          "docs/features/F281-feedback-channel-first-class.md"
+        ]
+      },
+      "consumerAllowedUse": {
+        "state": "implemented",
+        "summary": "Harness and lane owners may use feedback for correction and evaluation, never as user-profile truth.",
+        "evidenceLevel": "main",
+        "evidenceRefs": [
+          "docs/harness-feedback/SPEC.md"
+        ]
+      },
+      "consumptionReceipt": {
+        "state": "implemented",
+        "summary": "Disposition and linked repair state record whether feedback was acted on or dismissed.",
+        "evidenceLevel": "UAT",
+        "evidenceRefs": [
+          "docs/features/F281-feedback-channel-first-class.md"
+        ]
+      },
+      "outcome": {
+        "state": "implemented",
+        "summary": "Correction and repair state provide a bounded control-loop outcome.",
+        "evidenceLevel": "UAT",
+        "evidenceRefs": [
+          "docs/features/F281-feedback-channel-first-class.md"
+        ]
+      },
+      "invalidation": {
+        "state": "implemented",
+        "summary": "Source correction and disposition changes supersede stale feedback projections.",
+        "evidenceLevel": "UAT",
+        "evidenceRefs": [
+          "docs/features/F281-feedback-channel-first-class.md"
+        ]
+      },
+      "evidence": {
+        "level": "UAT",
+        "refs": [
+          "docs/features/F281-feedback-channel-first-class.md",
+          "docs/harness-feedback/SPEC.md"
+        ],
+        "limitations": "Exemption is deliberate: feedback closes control flow rather than participating in memory recall."
+      }
+    },
+    {
+      "v": 1,
+      "surfaceId": "global-distillation-f152",
+      "label": "F152 global distillation",
+      "ownerCell": "F152 expedition memory",
+      "ownerRefs": [
+        "docs/features/F152-expedition-memory.md"
+      ],
+      "canonicalRefs": [
+        "docs/features/F152-expedition-memory.md",
+        "docs/architecture/memory-write-lane-census.md"
+      ],
+      "authority": {
+        "state": "implemented",
+        "summary": "F152 owns only its nominations and materialized global-distillation artifacts; it does not own project knowledge or generic recall authority.",
+        "evidenceLevel": "main",
+        "evidenceRefs": [
+          "docs/features/F152-expedition-memory.md"
+        ]
+      },
+      "declarationRevision": "F312-PB-sunset-2026-08-29",
+      "disposition": "sunset",
+      "writeCapture": {
+        "state": "implemented",
+        "summary": "The live producer chain marks, nominates, approves, materializes, and indexes distilled artifacts; 36 retained distilled anchors prove the path, not consumer value.",
+        "evidenceLevel": "live",
+        "evidenceRefs": [
+          "packages/api/src/domains/memory/distillation-service.ts",
+          "packages/api/src/domains/memory/GlobalIndexBuilder.ts",
+          "thread_msheiy8wz5r7qsn4#0001787998930408-000417-fcacb8c2"
+        ]
+      },
+      "typedCuePredicate": {
+        "state": "sunset",
+        "summary": "No typed predicate ever selected distilled output, and the operator-approved sunset ends investment in one.",
+        "evidenceLevel": "live",
+        "evidenceRefs": [
+          "packages/api/src/domains/memory/KnowledgeResolver.ts",
+          "thread_msheiy8wz5r7qsn4#0001788003376461-000497-78799bf8"
+        ]
+      },
+      "presentationDrill": {
+        "state": "sunset",
+        "summary": "Generic search, graph resolve/traversal, and recent-browse delivery now omit distilled anchors; retained files and index rows are forensic producer evidence only.",
+        "evidenceLevel": "main",
+        "evidenceRefs": [
+          "packages/api/src/domains/memory/KnowledgeResolver.ts",
+          "packages/api/src/domains/memory/GraphQueryResolver.ts",
+          "packages/api/src/domains/memory/GraphResolver.ts",
+          "packages/api/src/domains/memory/RecentBrowseResolver.ts",
+          "packages/api/test/memory/knowledge-resolver-dimension.test.js",
+          "packages/api/test/memory/knowledge-resolver-federation.test.js",
+          "packages/api/test/memory/graph-query-resolver.test.js",
+          "packages/api/test/memory/graph-resolver.test.js",
+          "packages/api/test/recent-browse-resolver.test.js"
+        ]
+      },
+      "consumerAllowedUse": {
+        "state": "sunset",
+        "summary": "No runtime consumer or allowed-use contract was proven; retained artifacts may be inspected only as forensic producer evidence.",
+        "evidenceLevel": "live",
+        "evidenceRefs": [
+          "docs/features/F152-expedition-memory.md",
+          "thread_msheiy8wz5r7qsn4#0001788003376461-000497-78799bf8"
+        ]
+      },
+      "consumptionReceipt": {
+        "state": "sunset",
+        "summary": "No applied or dismissed receipt exists because runtime consumption is no longer supported for this surface.",
+        "evidenceLevel": "live",
+        "evidenceRefs": [
+          "docs/features/F200-memory-recall-eval.md",
+          "thread_msheiy8wz5r7qsn4#0001788003376461-000497-78799bf8"
+        ]
+      },
+      "outcome": {
+        "state": "sunset",
+        "summary": "The operator value decision ends consumer investment after zero named consumer and zero production content; this is not a utility verdict.",
+        "evidenceLevel": "live",
+        "evidenceRefs": [
+          "docs/features/F152-expedition-memory.md",
+          "thread_msheiy8wz5r7qsn4#0001788003376461-000497-78799bf8"
+        ]
+      },
+      "invalidation": {
+        "state": "sunset",
+        "summary": "No source-revision invalidation pipeline exists; the shared delivery-eligibility guard prevents retained forensic artifacts from reaching generic search, graph, or recent-browse consumers while the surface is retired.",
+        "evidenceLevel": "main",
+        "evidenceRefs": [
+          "packages/api/src/domains/memory/recall-delivery-eligibility.ts",
+          "packages/api/src/domains/memory/KnowledgeResolver.ts",
+          "packages/api/src/domains/memory/GraphQueryResolver.ts",
+          "packages/api/src/domains/memory/GraphResolver.ts",
+          "packages/api/src/domains/memory/RecentBrowseResolver.ts",
+          "docs/architecture/memory-derived-view-contract.md"
+        ]
+      },
+      "evidence": {
+        "level": "live",
+        "refs": [
+          "docs/features/F152-expedition-memory.md",
+          "packages/api/src/domains/memory/recall-delivery-eligibility.ts",
+          "packages/api/src/domains/memory/KnowledgeResolver.ts",
+          "packages/api/src/domains/memory/GraphQueryResolver.ts",
+          "packages/api/src/domains/memory/GraphResolver.ts",
+          "packages/api/src/domains/memory/RecentBrowseResolver.ts",
+          "thread_msheiy8wz5r7qsn4#0001787998930408-000417-fcacb8c2",
+          "thread_msheiy8wz5r7qsn4#0001788003376461-000497-78799bf8"
+        ],
+        "limitations": "Only the global-distillation-f152 consumer surface is sunset. F152 expedition/bootstrap and producer code remain. Durable files and index rows are retained without a utility claim; 36 observed artifacts contain only three repeated test titles. Explicit forensic/admin artifact browsing remains available, while search_evidence, graph_resolve, and list_recent delivery are ineligible."
+      }
+    },
+    {
+      "v": 1,
+      "surfaceId": "lessons-learned",
+      "label": "Lessons learned",
+      "ownerCell": "Normative lessons-learned document owner",
+      "ownerRefs": [
+        "docs/public-lessons.md"
+      ],
+      "canonicalRefs": [
+        "docs/public-lessons.md",
+        "docs/architecture/memory-write-lane-census.md"
+      ],
+      "authority": {
+        "state": "implemented",
+        "summary": "The versioned lessons-learned document owns accepted lessons.",
+        "evidenceLevel": "main",
+        "evidenceRefs": [
+          "docs/public-lessons.md"
+        ]
+      },
+      "declarationRevision": "G1-LL-2026-08-28",
+      "disposition": "active",
+      "writeCapture": {
+        "state": "implemented",
+        "summary": "LessonPromotionContract.v1 names the reviewed monolith patch as the sole canonical writer and freezes claim-family dedupe across direct edit, F102 candidate, and F152 downstream paths.",
+        "evidenceLevel": "main",
+        "evidenceRefs": [
+          "assets/memory-surfaces/lessons-learned/promotion.yaml",
+          "docs/architecture/memory-write-lane-census.md"
+        ]
+      },
+      "typedCuePredicate": {
+        "state": "implemented",
+        "summary": "The lane-owned worktree Redis sanctuary predicate binds LL-015 to the revisioned pre-storage guard event without creating a central cue engine.",
+        "evidenceLevel": "fixture",
+        "evidenceRefs": [
+          "assets/memory-surfaces/lessons-learned/consumption-replay.yaml",
+          "scripts/start-dev.sh#guard_runtime_redis_sanctuary"
+        ]
+      },
+      "presentationDrill": {
+        "state": "implemented",
+        "summary": "F209 search and source anchors provide exact lesson drill on pull.",
+        "evidenceLevel": "live",
+        "evidenceRefs": [
+          "docs/features/F209-evidence-recall-optimization.md"
+        ]
+      },
+      "consumerAllowedUse": {
+        "state": "implemented",
+        "summary": "Cats may use accepted lessons to avoid repeated failures while preserving source scope.",
+        "evidenceLevel": "main",
+        "evidenceRefs": [
+          "docs/public-lessons.md"
+        ]
+      },
+      "consumptionReceipt": {
+        "state": "implemented",
+        "summary": "A refs-only RecallFrame v0 binds the exact LL-015 and predicate revisions to a presented and applied guard receipt; F200 consumption remains observation-only.",
+        "evidenceLevel": "fixture",
+        "evidenceRefs": [
+          "assets/memory-surfaces/lessons-learned/consumption-replay.yaml",
+          "scripts/lesson-learning-closure.test.mjs"
+        ]
+      },
+      "outcome": {
+        "state": "implemented",
+        "summary": "The replay records zero recurrence inside the same guarded startup and states guard enforcement as a confounder and causal ceiling.",
+        "evidenceLevel": "fixture",
+        "evidenceRefs": [
+          "assets/memory-surfaces/lessons-learned/consumption-replay.yaml",
+          "scripts/lesson-learning-closure.test.mjs#same-operation-replay"
+        ]
+      },
+      "invalidation": {
+        "state": "implemented",
+        "summary": "Git revisions and explicit supersession update the canonical lesson source.",
+        "evidenceLevel": "main",
+        "evidenceRefs": [
+          "docs/public-lessons.md"
+        ]
+      },
+      "evidence": {
+        "level": "fixture",
+        "refs": [
+          "assets/memory-surfaces/lessons-learned/promotion.yaml",
+          "assets/memory-surfaces/lessons-learned/consumption-replay.yaml",
+          "scripts/lesson-learning-closure.test.mjs"
+        ],
+        "limitations": "The typed replay covers only LL-015 in one source-only guarded startup. It does not claim production execution, future-task correctness, global Lesson utility, or a central cue engine."
+      }
+    },
+    {
+      "v": 1,
+      "surfaceId": "library-knowledge",
+      "label": "Library knowledge",
+      "ownerCell": "F186 library memory",
+      "ownerRefs": [
+        "docs/features/F186-library-memory-architecture.md"
+      ],
+      "canonicalRefs": [
+        "docs/features/F186-library-memory-architecture.md",
+        "docs/decisions/015-knowledge-object-contract.md"
+      ],
+      "authority": {
+        "state": "implemented",
+        "summary": "F186 catalog and source revisions own ingested library knowledge.",
+        "evidenceLevel": "main",
+        "evidenceRefs": [
+          "docs/features/F186-library-memory-architecture.md"
+        ]
+      },
+      "declarationRevision": "G0-B-2026-08-28",
+      "disposition": "missing",
+      "writeCapture": {
+        "state": "implemented",
+        "summary": "F186 ingestion records source, collection, and catalog metadata.",
+        "evidenceLevel": "main",
+        "evidenceRefs": [
+          "docs/features/F186-library-memory-architecture.md"
+        ]
+      },
+      "typedCuePredicate": {
+        "state": "missing",
+        "summary": "No typed task-to-library predicate is registered for proactive recall.",
+        "evidenceLevel": "main",
+        "evidenceRefs": [
+          "docs/architecture/memory-cue-source-map.md"
+        ],
+        "breakClass": "B1",
+        "ownerRefs": [
+          "docs/features/F186-library-memory-architecture.md"
+        ],
+        "nextAction": "library owner carrier: declare collection and task-class eligibility with revisions."
+      },
+      "presentationDrill": {
+        "state": "implemented",
+        "summary": "F186 search and source views provide pull presentation and drill.",
+        "evidenceLevel": "main",
+        "evidenceRefs": [
+          "docs/features/F186-library-memory-architecture.md"
+        ]
+      },
+      "consumerAllowedUse": {
+        "state": "implemented",
+        "summary": "Consumers may use provenance-bearing library content subject to collection and source policy.",
+        "evidenceLevel": "main",
+        "evidenceRefs": [
+          "docs/features/F186-library-memory-architecture.md"
+        ]
+      },
+      "consumptionReceipt": {
+        "state": "missing",
+        "summary": "Library reads do not emit source-revision applied or dismissed receipts.",
+        "evidenceLevel": "main",
+        "evidenceRefs": [
+          "docs/features/F200-memory-recall-eval.md"
+        ],
+        "breakClass": "B2",
+        "ownerRefs": [
+          "docs/features/F186-library-memory-architecture.md"
+        ],
+        "nextAction": "library owner carrier: emit source-revision delivery and application receipts."
+      },
+      "outcome": {
+        "state": "missing",
+        "summary": "No declared consumer joins library use to task outcome.",
+        "evidenceLevel": "main",
+        "evidenceRefs": [
+          "docs/features/F200-memory-recall-eval.md"
+        ],
+        "breakClass": "B3",
+        "ownerRefs": [
+          "docs/features/F186-library-memory-architecture.md",
+          "docs/features/F200-memory-recall-eval.md"
+        ],
+        "nextAction": "library owner carrier: declare a bounded research-quality outcome."
+      },
+      "invalidation": {
+        "state": "implemented",
+        "summary": "Collection policy and source revision can retire or refresh stale catalog entries.",
+        "evidenceLevel": "main",
+        "evidenceRefs": [
+          "docs/features/F186-library-memory-architecture.md"
+        ]
+      },
+      "evidence": {
+        "level": "main",
+        "refs": [
+          "docs/features/F186-library-memory-architecture.md",
+          "docs/architecture/memory-cue-source-map.md"
+        ],
+        "limitations": "Library ingestion and pull use exist; typed application closure does not."
+      }
+    },
+    {
+      "v": 1,
+      "surfaceId": "method",
+      "label": "Method knowledge",
+      "ownerCell": "Method document owner",
+      "ownerRefs": [
+        "docs/methods"
+      ],
+      "canonicalRefs": [
+        "docs/methods",
+        "docs/decisions/015-knowledge-object-contract.md"
+      ],
+      "authority": {
+        "state": "implemented",
+        "summary": "Versioned method documents own reusable procedure truth.",
+        "evidenceLevel": "main",
+        "evidenceRefs": [
+          "docs/methods"
+        ]
+      },
+      "declarationRevision": "G0-B-2026-08-28",
+      "disposition": "missing",
+      "writeCapture": {
+        "state": "implemented",
+        "summary": "Method owners write and review versioned procedure documents.",
+        "evidenceLevel": "main",
+        "evidenceRefs": [
+          "docs/decisions/015-knowledge-object-contract.md"
+        ]
+      },
+      "typedCuePredicate": {
+        "state": "missing",
+        "summary": "Methods have no typed task-to-method invocation predicate.",
+        "evidenceLevel": "main",
+        "evidenceRefs": [
+          "docs/architecture/memory-cue-source-map.md"
+        ],
+        "breakClass": "B1",
+        "ownerRefs": [
+          "docs/methods"
+        ],
+        "nextAction": "method owner carrier: declare a task-class predicate for one method family."
+      },
+      "presentationDrill": {
+        "state": "implemented",
+        "summary": "F209 source anchors provide pull retrieval and exact method drill.",
+        "evidenceLevel": "live",
+        "evidenceRefs": [
+          "docs/features/F209-evidence-recall-optimization.md"
+        ]
+      },
+      "consumerAllowedUse": {
+        "state": "implemented",
+        "summary": "Consumers may follow current methods within their stated scope and prerequisites.",
+        "evidenceLevel": "main",
+        "evidenceRefs": [
+          "docs/methods"
+        ]
+      },
+      "consumptionReceipt": {
+        "state": "missing",
+        "summary": "Method use has no typed applied or dismissed receipt.",
+        "evidenceLevel": "main",
+        "evidenceRefs": [
+          "docs/features/F200-memory-recall-eval.md"
+        ],
+        "breakClass": "B2",
+        "ownerRefs": [
+          "docs/methods"
+        ],
+        "nextAction": "method owner carrier: emit method-revision application receipts."
+      },
+      "outcome": {
+        "state": "missing",
+        "summary": "No declared consumer joins method use to task quality.",
+        "evidenceLevel": "main",
+        "evidenceRefs": [
+          "docs/features/F200-memory-recall-eval.md"
+        ],
+        "breakClass": "B3",
+        "ownerRefs": [
+          "docs/methods",
+          "docs/features/F200-memory-recall-eval.md"
+        ],
+        "nextAction": "method owner carrier: define a bounded quality outcome after receipts exist."
+      },
+      "invalidation": {
+        "state": "implemented",
+        "summary": "Git revision and explicit supersession invalidate stale method versions.",
+        "evidenceLevel": "main",
+        "evidenceRefs": [
+          "docs/methods"
+        ]
+      },
+      "evidence": {
+        "level": "live",
+        "refs": [
+          "docs/methods",
+          "docs/features/F209-evidence-recall-optimization.md"
+        ],
+        "limitations": "Method truth and pull retrieval exist; typed application closure does not."
+      }
+    },
+    {
+      "v": 1,
+      "surfaceId": "person",
+      "label": "Person and relationship memory",
+      "ownerCell": "F276 people memory",
+      "ownerRefs": [
+        "docs/features/F276-people-relationship-memory.md"
+      ],
+      "canonicalRefs": [
+        "docs/features/F276-people-relationship-memory.md",
+        "docs/architecture/memory-cue-source-map.md"
+      ],
+      "authority": {
+        "state": "implemented",
+        "summary": "F276 owns approved Person records and field revisions.",
+        "evidenceLevel": "main",
+        "evidenceRefs": [
+          "docs/features/F276-people-relationship-memory.md"
+        ]
+      },
+      "declarationRevision": "G0-B-2026-08-28",
+      "disposition": "active",
+      "writeCapture": {
+        "state": "implemented",
+        "summary": "F276/F282 capture candidates and require proposal disposition before canonical write.",
+        "evidenceLevel": "UAT",
+        "evidenceRefs": [
+          "docs/features/F276-people-relationship-memory.md",
+          "docs/features/F282-proactive-memory-pipeline.md"
+        ]
+      },
+      "typedCuePredicate": {
+        "state": "implemented",
+        "summary": "subject_seen is a typed trigger over resolved Person identity and revision.",
+        "evidenceLevel": "main",
+        "evidenceRefs": [
+          "docs/architecture/memory-cue-source-map.md"
+        ]
+      },
+      "presentationDrill": {
+        "state": "implemented",
+        "summary": "The cue exposes a narrow authenticated Person drill instead of embedding private payload.",
+        "evidenceLevel": "UAT",
+        "evidenceRefs": [
+          "docs/features/F276-people-relationship-memory.md",
+          "docs/features/F287-memory-cue-plane.md"
+        ]
+      },
+      "consumerAllowedUse": {
+        "state": "implemented",
+        "summary": "The active cat may personalize the current interaction within F276 visibility and privacy policy.",
+        "evidenceLevel": "main",
+        "evidenceRefs": [
+          "docs/features/F276-people-relationship-memory.md"
+        ]
+      },
+      "consumptionReceipt": {
+        "state": "implemented",
+        "summary": "F287 records presented, drilled, applied, or dismissed states against the source revision.",
+        "evidenceLevel": "UAT",
+        "evidenceRefs": [
+          "docs/features/F287-memory-cue-plane.md"
+        ]
+      },
+      "outcome": {
+        "state": "implemented",
+        "summary": "F200 evaluates subject_seen utility and publishes a bounded keep verdict.",
+        "evidenceLevel": "live",
+        "evidenceRefs": [
+          "docs/features/F200-memory-recall-eval.md"
+        ]
+      },
+      "invalidation": {
+        "state": "implemented",
+        "summary": "F276 correction and forget invalidate derived Person cues and their prior revisions.",
+        "evidenceLevel": "UAT",
+        "evidenceRefs": [
+          "docs/features/F276-people-relationship-memory.md",
+          "docs/features/F263-memory-lifecycle-repair-and-metrics.md"
+        ]
+      },
+      "evidence": {
+        "level": "UAT",
+        "refs": [
+          "docs/features/F276-people-relationship-memory.md",
+          "docs/features/F287-memory-cue-plane.md"
+        ],
+        "limitations": "Closure is limited to approved Person facts and policy-visible fields."
+      }
+    },
+    {
+      "v": 1,
+      "surfaceId": "proactive-candidate",
+      "label": "Proactive memory candidate",
+      "ownerCell": "F282 candidate pipeline",
+      "ownerRefs": [
+        "docs/features/F282-proactive-memory-pipeline.md"
+      ],
+      "canonicalRefs": [
+        "docs/features/F282-proactive-memory-pipeline.md",
+        "docs/architecture/memory-write-lane-census.md"
+      ],
+      "authority": {
+        "state": "implemented",
+        "summary": "F282 owns candidate state and disposition; candidates are not approved memory authority.",
+        "evidenceLevel": "UAT",
+        "evidenceRefs": [
+          "docs/features/F282-proactive-memory-pipeline.md"
+        ]
+      },
+      "declarationRevision": "G0-B-2026-08-28",
+      "disposition": "exempt",
+      "writeCapture": {
+        "state": "implemented",
+        "summary": "The detector writes bounded candidate records and abstention reasons.",
+        "evidenceLevel": "UAT",
+        "evidenceRefs": [
+          "docs/features/F282-proactive-memory-pipeline.md"
+        ]
+      },
+      "typedCuePredicate": {
+        "state": "exempt",
+        "summary": "An unapproved candidate cannot be recalled as memory; only approval may hand it to a canonical lane.",
+        "evidenceLevel": "main",
+        "evidenceRefs": [
+          "docs/features/F282-proactive-memory-pipeline.md"
+        ]
+      },
+      "presentationDrill": {
+        "state": "implemented",
+        "summary": "Candidates present source refs and bounded context for human or cat disposition.",
+        "evidenceLevel": "UAT",
+        "evidenceRefs": [
+          "docs/features/F282-proactive-memory-pipeline.md"
+        ]
+      },
+      "consumerAllowedUse": {
+        "state": "implemented",
+        "summary": "Consumers may approve, defer, or abstain; they may not treat candidate payload as canonical truth.",
+        "evidenceLevel": "main",
+        "evidenceRefs": [
+          "docs/features/F282-proactive-memory-pipeline.md"
+        ]
+      },
+      "consumptionReceipt": {
+        "state": "implemented",
+        "summary": "Proposal, defer, and abstention states provide candidate disposition receipts.",
+        "evidenceLevel": "UAT",
+        "evidenceRefs": [
+          "docs/features/F282-proactive-memory-pipeline.md"
+        ]
+      },
+      "outcome": {
+        "state": "implemented",
+        "summary": "Candidate disposition and approved-lane handoff provide a bounded workflow outcome.",
+        "evidenceLevel": "UAT",
+        "evidenceRefs": [
+          "docs/features/F282-proactive-memory-pipeline.md"
+        ]
+      },
+      "invalidation": {
+        "state": "implemented",
+        "summary": "Suppression, expiry policy, source correction, and final disposition end candidate eligibility.",
+        "evidenceLevel": "UAT",
+        "evidenceRefs": [
+          "docs/features/F282-proactive-memory-pipeline.md"
+        ]
+      },
+      "evidence": {
+        "level": "UAT",
+        "refs": [
+          "docs/features/F282-proactive-memory-pipeline.md"
+        ],
+        "limitations": "Exemption prevents proposal workflow state from being mistaken for approved memory."
+      }
+    },
+    {
+      "v": 1,
+      "surfaceId": "profile",
+      "label": "User profile",
+      "ownerCell": "F231 profile capsule and F221 Approval Hub",
+      "ownerRefs": [
+        "docs/features/F231-user-profile-capsule.md",
+        "docs/features/F221-taste-lane.md"
+      ],
+      "canonicalRefs": [
+        "docs/features/F231-user-profile-capsule.md",
+        "docs/architecture/memory-write-lane-census.md"
+      ],
+      "authority": {
+        "state": "implemented",
+        "summary": "F231 profile capsule and Approval Hub revisions own profile truth.",
+        "evidenceLevel": "main",
+        "evidenceRefs": [
+          "docs/features/F231-user-profile-capsule.md"
+        ]
+      },
+      "declarationRevision": "F312-C-profile-v1",
+      "disposition": "active",
+      "writeCapture": {
+        "state": "implemented",
+        "summary": "Profile proposals are reviewed before persistence.",
+        "evidenceLevel": "main",
+        "evidenceRefs": [
+          "docs/features/F231-user-profile-capsule.md",
+          "docs/features/F221-taste-lane.md"
+        ]
+      },
+      "typedCuePredicate": {
+        "state": "implemented",
+        "summary": "profile_revision_available is emitted only for a current F231 capsule revision without a prior applied or dismissed terminal receipt.",
+        "evidenceLevel": "main",
+        "evidenceRefs": [
+          "packages/api/src/domains/memory/cue/sources/ProfileMemoryCueSource.ts",
+          "packages/api/test/memory/f312-profile-cue.test.js"
+        ]
+      },
+      "presentationDrill": {
+        "state": "implemented",
+        "summary": "Profile can be read through its bounded capsule and Approval Hub surfaces.",
+        "evidenceLevel": "main",
+        "evidenceRefs": [
+          "docs/features/F231-user-profile-capsule.md"
+        ]
+      },
+      "consumerAllowedUse": {
+        "state": "implemented",
+        "summary": "Cats may personalize within approved profile scope and may not infer unapproved fields.",
+        "evidenceLevel": "main",
+        "evidenceRefs": [
+          "docs/features/F231-user-profile-capsule.md"
+        ]
+      },
+      "consumptionReceipt": {
+        "state": "implemented",
+        "summary": "The existing Cue Plane records presented, drilled, applied, or dismissed against the exact capsule revision; a terminal outcome suppresses that revision on later invocations.",
+        "evidenceLevel": "main",
+        "evidenceRefs": [
+          "packages/api/src/domains/memory/cue/MemoryCueEpisodeStore.ts",
+          "packages/api/src/domains/memory/cue/sources/ProfileMemoryCueSource.ts"
+        ]
+      },
+      "outcome": {
+        "state": "implemented",
+        "summary": "The strictly authenticated owner-facing response is the bounded consumer: applied means approved Profile context changed that response, dismissed means it did not; no single-revision utility causality is claimed.",
+        "evidenceLevel": "main",
+        "evidenceRefs": [
+          "packages/api/src/domains/memory/cue/format-memory-cues.ts",
+          "docs/features/F200-memory-recall-eval.md"
+        ]
+      },
+      "invalidation": {
+        "state": "implemented",
+        "summary": "Approval, correction, and revision replacement invalidate stale profile projections.",
+        "evidenceLevel": "main",
+        "evidenceRefs": [
+          "docs/features/F231-user-profile-capsule.md",
+          "docs/features/F263-memory-lifecycle-repair-and-metrics.md"
+        ]
+      },
+      "evidence": {
+        "level": "main",
+        "refs": [
+          "docs/features/F231-user-profile-capsule.md",
+          "packages/api/test/memory/f312-profile-cue.test.js"
+        ],
+        "limitations": "Main proves revision admission, owner scope, drill, receipt suppression, correction, and forget behavior; merged-main runtime acceptance is recorded separately."
+      }
+    },
+    {
+      "v": 1,
+      "surfaceId": "project-knowledge",
+      "label": "Project operational knowledge",
+      "ownerCell": "F102 project knowledge and F209 retrieval",
+      "ownerRefs": [
+        "docs/decisions/020-f102-memory-system-architecture.md",
+        "docs/features/F209-evidence-recall-optimization.md"
+      ],
+      "canonicalRefs": [
+        "docs/decisions/020-f102-memory-system-architecture.md",
+        "docs/decisions/036-f209-retrieval-surface-multi-layer.md"
+      ],
+      "authority": {
+        "state": "implemented",
+        "summary": "Versioned project sources own facts; F209 indexes and cites them without taking authority.",
+        "evidenceLevel": "main",
+        "evidenceRefs": [
+          "docs/decisions/020-f102-memory-system-architecture.md",
+          "docs/features/F209-evidence-recall-optimization.md"
+        ]
+      },
+      "declarationRevision": "G0-B-2026-08-28",
+      "disposition": "missing",
+      "writeCapture": {
+        "state": "implemented",
+        "summary": "Repository-governed docs and source-linked artifacts capture operational knowledge.",
+        "evidenceLevel": "main",
+        "evidenceRefs": [
+          "docs/decisions/015-knowledge-object-contract.md"
+        ]
+      },
+      "typedCuePredicate": {
+        "state": "missing",
+        "summary": "Project knowledge remains generic zero-only recall with no lane-owned typed predicate set.",
+        "evidenceLevel": "live",
+        "evidenceRefs": [
+          "docs/features/F209-evidence-recall-optimization.md"
+        ],
+        "breakClass": "B1",
+        "ownerRefs": [
+          "docs/decisions/020-f102-memory-system-architecture.md"
+        ],
+        "nextAction": "project-knowledge owner carrier: define a small typed predicate set for high-value operational classes."
+      },
+      "presentationDrill": {
+        "state": "implemented",
+        "summary": "F209 provides multi-layer retrieval, source anchors, and exact drill.",
+        "evidenceLevel": "live",
+        "evidenceRefs": [
+          "docs/features/F209-evidence-recall-optimization.md",
+          "docs/decisions/036-f209-retrieval-surface-multi-layer.md"
+        ]
+      },
+      "consumerAllowedUse": {
+        "state": "implemented",
+        "summary": "Consumers may use cited current project sources within repository and task scope.",
+        "evidenceLevel": "main",
+        "evidenceRefs": [
+          "docs/decisions/020-f102-memory-system-architecture.md"
+        ]
+      },
+      "consumptionReceipt": {
+        "state": "missing",
+        "summary": "Generic project retrieval is not joined to typed applied or dismissed receipts.",
+        "evidenceLevel": "live",
+        "evidenceRefs": [
+          "docs/features/F200-memory-recall-eval.md"
+        ],
+        "breakClass": "B2",
+        "ownerRefs": [
+          "docs/features/F209-evidence-recall-optimization.md"
+        ],
+        "nextAction": "project-knowledge owner carrier: bind delivery and application receipts to source revisions."
+      },
+      "outcome": {
+        "state": "missing",
+        "summary": "No declared consumer attributes task outcome to a project-knowledge receipt.",
+        "evidenceLevel": "live",
+        "evidenceRefs": [
+          "docs/features/F200-memory-recall-eval.md"
+        ],
+        "breakClass": "B3",
+        "ownerRefs": [
+          "docs/features/F209-evidence-recall-optimization.md",
+          "docs/features/F200-memory-recall-eval.md"
+        ],
+        "nextAction": "project-knowledge owner carrier: declare a bounded outcome consumer with causal limits."
+      },
+      "invalidation": {
+        "state": "implemented",
+        "summary": "Source revision, eligibility, and index refresh prevent stale documents from silently owning truth.",
+        "evidenceLevel": "live",
+        "evidenceRefs": [
+          "docs/features/F209-evidence-recall-optimization.md",
+          "docs/architecture/memory-derived-view-contract.md"
+        ]
+      },
+      "evidence": {
+        "level": "live",
+        "refs": [
+          "docs/features/F209-evidence-recall-optimization.md",
+          "docs/decisions/020-f102-memory-system-architecture.md"
+        ],
+        "limitations": "Pull retrieval is live; typed use and outcome closure remain open."
+      }
+    },
+    {
+      "v": 1,
+      "surfaceId": "provider-local-memory",
+      "label": "Provider-local memory",
+      "ownerCell": "Provider runtime owner",
+      "ownerRefs": [
+        "docs/architecture/memory-write-lane-census.md"
+      ],
+      "canonicalRefs": [
+        "docs/architecture/memory-write-lane-census.md",
+        "docs/decisions/017-no-runtime-home-overwrite.md"
+      ],
+      "authority": {
+        "state": "missing",
+        "summary": "Provider ownership is known, but exact runtime source coordinates and revision semantics are not cataloged.",
+        "evidenceLevel": "docs-only",
+        "evidenceRefs": [
+          "docs/architecture/memory-write-lane-census.md"
+        ],
+        "breakClass": "B0",
+        "ownerRefs": [
+          "docs/architecture/memory-write-lane-census.md"
+        ],
+        "nextAction": "provider owner carrier: inventory each supported provider's canonical local-memory coordinate and revision rule."
+      },
+      "declarationRevision": "G0-B-2026-08-28",
+      "disposition": "missing",
+      "writeCapture": {
+        "state": "missing",
+        "summary": "Clowder AI has no cross-provider declaration of local capture entrypoints.",
+        "evidenceLevel": "docs-only",
+        "evidenceRefs": [
+          "docs/architecture/memory-write-lane-census.md"
+        ],
+        "breakClass": "B0",
+        "ownerRefs": [
+          "docs/architecture/memory-write-lane-census.md"
+        ],
+        "nextAction": "provider owner carrier: document native write entrypoints without overwriting runtime homes."
+      },
+      "typedCuePredicate": {
+        "state": "missing",
+        "summary": "No provider-specific typed eligibility predicate is declared.",
+        "evidenceLevel": "docs-only",
+        "evidenceRefs": [
+          "docs/architecture/memory-cue-source-map.md"
+        ],
+        "breakClass": "B1",
+        "ownerRefs": [
+          "docs/architecture/memory-write-lane-census.md"
+        ],
+        "nextAction": "provider owner carrier: declare provider-native predicate revisions for supported runtimes."
+      },
+      "presentationDrill": {
+        "state": "missing",
+        "summary": "No normalized source-safe drill contract exists across provider-local stores.",
+        "evidenceLevel": "docs-only",
+        "evidenceRefs": [
+          "docs/architecture/memory-cue-source-map.md"
+        ],
+        "breakClass": "B1",
+        "ownerRefs": [
+          "docs/architecture/memory-write-lane-census.md"
+        ],
+        "nextAction": "provider owner carrier: specify native read and drill boundaries per provider."
+      },
+      "consumerAllowedUse": {
+        "state": "missing",
+        "summary": "Allowed use and privacy boundaries are not declared per provider.",
+        "evidenceLevel": "docs-only",
+        "evidenceRefs": [
+          "docs/decisions/017-no-runtime-home-overwrite.md"
+        ],
+        "breakClass": "B3",
+        "ownerRefs": [
+          "docs/architecture/memory-write-lane-census.md"
+        ],
+        "nextAction": "provider owner carrier: name consumers and allowed-use boundaries for each supported provider."
+      },
+      "consumptionReceipt": {
+        "state": "missing",
+        "summary": "Provider-local use emits no common applied or dismissed receipt.",
+        "evidenceLevel": "docs-only",
+        "evidenceRefs": [
+          "docs/features/F200-memory-recall-eval.md"
+        ],
+        "breakClass": "B2",
+        "ownerRefs": [
+          "docs/architecture/memory-write-lane-census.md"
+        ],
+        "nextAction": "provider owner carrier: map native receipts or declare a bounded adapter contract."
+      },
+      "outcome": {
+        "state": "missing",
+        "summary": "No declared consumer joins provider-local use to outcomes.",
+        "evidenceLevel": "docs-only",
+        "evidenceRefs": [
+          "docs/features/F200-memory-recall-eval.md"
+        ],
+        "breakClass": "B3",
+        "ownerRefs": [
+          "docs/architecture/memory-write-lane-census.md",
+          "docs/features/F200-memory-recall-eval.md"
+        ],
+        "nextAction": "provider owner carrier: define outcome observation after custody and receipt semantics exist."
+      },
+      "invalidation": {
+        "state": "missing",
+        "summary": "Correction, deletion, and revision invalidation are not mapped across providers.",
+        "evidenceLevel": "docs-only",
+        "evidenceRefs": [
+          "docs/features/F263-memory-lifecycle-repair-and-metrics.md"
+        ],
+        "breakClass": "invalidation",
+        "ownerRefs": [
+          "docs/architecture/memory-write-lane-census.md"
+        ],
+        "nextAction": "provider owner carrier: document provider-native correction and deletion invalidation."
+      },
+      "evidence": {
+        "level": "docs-only",
+        "refs": [
+          "docs/architecture/memory-write-lane-census.md",
+          "docs/decisions/017-no-runtime-home-overwrite.md"
+        ],
+        "limitations": "This declaration records the exact coordination gap and does not invent a provider adapter."
+      }
+    },
+    {
+      "v": 1,
+      "surfaceId": "recall-consumption-ledger",
+      "label": "Recall consumption ledger",
+      "ownerCell": "F200 and F263 observation plane",
+      "ownerRefs": [
+        "docs/features/F200-memory-recall-eval.md",
+        "docs/features/F263-memory-lifecycle-repair-and-metrics.md"
+      ],
+      "canonicalRefs": [
+        "docs/features/F200-memory-recall-eval.md",
+        "docs/features/F263-memory-lifecycle-repair-and-metrics.md"
+      ],
+      "authority": {
+        "state": "implemented",
+        "summary": "F200/F263 trace records own delivery and consumption observations only.",
+        "evidenceLevel": "live",
+        "evidenceRefs": [
+          "docs/features/F200-memory-recall-eval.md",
+          "docs/features/F263-memory-lifecycle-repair-and-metrics.md"
+        ]
+      },
+      "declarationRevision": "G0-B-2026-08-28",
+      "disposition": "exempt",
+      "writeCapture": {
+        "state": "implemented",
+        "summary": "The observation plane records recall delivery and application lifecycle state.",
+        "evidenceLevel": "live",
+        "evidenceRefs": [
+          "docs/features/F200-memory-recall-eval.md",
+          "docs/features/F287-memory-cue-plane.md"
+        ]
+      },
+      "typedCuePredicate": {
+        "state": "exempt",
+        "summary": "The ledger observes cues; it must never produce or select recalled truth.",
+        "evidenceLevel": "main",
+        "evidenceRefs": [
+          "docs/features/F263-memory-lifecycle-repair-and-metrics.md"
+        ]
+      },
+      "presentationDrill": {
+        "state": "implemented",
+        "summary": "Trace refs drill to delivery, application, and source revision evidence.",
+        "evidenceLevel": "live",
+        "evidenceRefs": [
+          "docs/features/F200-memory-recall-eval.md"
+        ]
+      },
+      "consumerAllowedUse": {
+        "state": "implemented",
+        "summary": "Eval and lifecycle consumers may use ledger facts as proxies with explicit causal limits.",
+        "evidenceLevel": "live",
+        "evidenceRefs": [
+          "docs/features/F200-memory-recall-eval.md"
+        ]
+      },
+      "consumptionReceipt": {
+        "state": "implemented",
+        "summary": "Presented, drilled, applied, and dismissed states are the ledger's native receipt contract.",
+        "evidenceLevel": "UAT",
+        "evidenceRefs": [
+          "docs/features/F287-memory-cue-plane.md"
+        ]
+      },
+      "outcome": {
+        "state": "implemented",
+        "summary": "F200 can join observations to bounded outcomes while forbidding proxy-as-correctness claims.",
+        "evidenceLevel": "live",
+        "evidenceRefs": [
+          "docs/features/F200-memory-recall-eval.md"
+        ]
+      },
+      "invalidation": {
+        "state": "implemented",
+        "summary": "Source revision and lifecycle repair mark stale observations without rewriting historical trace.",
+        "evidenceLevel": "live",
+        "evidenceRefs": [
+          "docs/features/F263-memory-lifecycle-repair-and-metrics.md"
+        ]
+      },
+      "evidence": {
+        "level": "UAT",
+        "refs": [
+          "docs/features/F200-memory-recall-eval.md",
+          "docs/features/F287-memory-cue-plane.md"
+        ],
+        "limitations": "The ledger proves observation, not the correctness or causal value of recalled content."
+      }
+    },
+    {
+      "v": 1,
+      "surfaceId": "reflection",
+      "label": "Reflection",
+      "ownerCell": "F271 pragmatic reflection",
+      "ownerRefs": [
+        "docs/features/F271-pragmatic-memory-reflection.md"
+      ],
+      "canonicalRefs": [
+        "docs/features/F271-pragmatic-memory-reflection.md",
+        "docs/architecture/memory-write-lane-census.md"
+      ],
+      "authority": {
+        "state": "implemented",
+        "summary": "F271 reflection artifacts retain source-linked reflective claims.",
+        "evidenceLevel": "main",
+        "evidenceRefs": [
+          "docs/features/F271-pragmatic-memory-reflection.md"
+        ]
+      },
+      "declarationRevision": "G0-B-2026-08-28",
+      "disposition": "missing",
+      "writeCapture": {
+        "state": "implemented",
+        "summary": "F271 emits bounded reflections without rewriting canonical source memory.",
+        "evidenceLevel": "main",
+        "evidenceRefs": [
+          "docs/features/F271-pragmatic-memory-reflection.md"
+        ]
+      },
+      "typedCuePredicate": {
+        "state": "missing",
+        "summary": "No typed situation predicate selects a reflection at invocation time.",
+        "evidenceLevel": "main",
+        "evidenceRefs": [
+          "docs/architecture/memory-cue-source-map.md"
+        ],
+        "breakClass": "B1",
+        "ownerRefs": [
+          "docs/features/F271-pragmatic-memory-reflection.md"
+        ],
+        "nextAction": "reflection owner carrier: define one situation predicate with source revision guards."
+      },
+      "presentationDrill": {
+        "state": "implemented",
+        "summary": "Reflection artifacts and their source refs are inspectable on pull.",
+        "evidenceLevel": "main",
+        "evidenceRefs": [
+          "docs/features/F271-pragmatic-memory-reflection.md"
+        ]
+      },
+      "consumerAllowedUse": {
+        "state": "implemented",
+        "summary": "Consumers may use reflections as bounded hypotheses, not canonical facts.",
+        "evidenceLevel": "main",
+        "evidenceRefs": [
+          "docs/features/F271-pragmatic-memory-reflection.md"
+        ]
+      },
+      "consumptionReceipt": {
+        "state": "missing",
+        "summary": "Reflection use has no applied or dismissed receipt.",
+        "evidenceLevel": "main",
+        "evidenceRefs": [
+          "docs/features/F200-memory-recall-eval.md"
+        ],
+        "breakClass": "B2",
+        "ownerRefs": [
+          "docs/features/F271-pragmatic-memory-reflection.md"
+        ],
+        "nextAction": "reflection owner carrier: emit reflection-revision application receipts."
+      },
+      "outcome": {
+        "state": "missing",
+        "summary": "No declared consumer evaluates reflection utility.",
+        "evidenceLevel": "main",
+        "evidenceRefs": [
+          "docs/features/F200-memory-recall-eval.md"
+        ],
+        "breakClass": "B3",
+        "ownerRefs": [
+          "docs/features/F271-pragmatic-memory-reflection.md",
+          "docs/features/F200-memory-recall-eval.md"
+        ],
+        "nextAction": "reflection owner carrier: define a bounded utility outcome after receipts exist."
+      },
+      "invalidation": {
+        "state": "missing",
+        "summary": "Source correction and reflection supersession lack projection invalidation refs.",
+        "evidenceLevel": "main",
+        "evidenceRefs": [
+          "docs/features/F263-memory-lifecycle-repair-and-metrics.md"
+        ],
+        "breakClass": "invalidation",
+        "ownerRefs": [
+          "docs/features/F271-pragmatic-memory-reflection.md"
+        ],
+        "nextAction": "reflection owner carrier: declare source-correction and supersession invalidation."
+      },
+      "evidence": {
+        "level": "main",
+        "refs": [
+          "docs/features/F271-pragmatic-memory-reflection.md",
+          "docs/architecture/memory-cue-source-map.md"
+        ],
+        "limitations": "Reflection production exists; proactive application and outcome closure do not."
+      }
+    },
+    {
+      "v": 1,
+      "surfaceId": "skill",
+      "label": "Skill instruction knowledge",
+      "ownerCell": "Skill package owner and writing-skills governance",
+      "ownerRefs": [
+        "cat-cafe-skills/writing-skills/SKILL.md"
+      ],
+      "canonicalRefs": [
+        "cat-cafe-skills/writing-skills/SKILL.md",
+        "docs/decisions/009-cat-cafe-skills-distribution.md"
+      ],
+      "authority": {
+        "state": "implemented",
+        "summary": "Each shipped SKILL.md revision owns executable instruction truth.",
+        "evidenceLevel": "main",
+        "evidenceRefs": [
+          "cat-cafe-skills/writing-skills/SKILL.md"
+        ]
+      },
+      "declarationRevision": "skill-consumption-receipt-v1-2026-08-28",
+      "disposition": "active",
+      "writeCapture": {
+        "state": "implemented",
+        "summary": "writing-skills governs creation, review, and publication of skill packages.",
+        "evidenceLevel": "main",
+        "evidenceRefs": [
+          "cat-cafe-skills/writing-skills/SKILL.md",
+          "docs/decisions/009-cat-cafe-skills-distribution.md"
+        ]
+      },
+      "typedCuePredicate": {
+        "state": "implemented",
+        "summary": "Skill descriptions and explicit naming provide typed task-to-skill trigger predicates.",
+        "evidenceLevel": "main",
+        "evidenceRefs": [
+          "cat-cafe-skills/writing-skills/SKILL.md"
+        ]
+      },
+      "presentationDrill": {
+        "state": "implemented",
+        "summary": "A matched skill is presented by name and drilled by reading its full SKILL.md.",
+        "evidenceLevel": "main",
+        "evidenceRefs": [
+          "cat-cafe-skills/writing-skills/SKILL.md"
+        ]
+      },
+      "consumerAllowedUse": {
+        "state": "implemented",
+        "summary": "The active agent may execute instructions only within user authority and repository scope.",
+        "evidenceLevel": "main",
+        "evidenceRefs": [
+          "cat-cafe-skills/writing-skills/SKILL.md"
+        ]
+      },
+      "consumptionReceipt": {
+        "state": "implemented",
+        "summary": "workspace-navigator prepares an invocation-, consumer-, and package-revision-bound handle; only the real Workspace consumer writes applied, while a separate bounded path writes dismissed.",
+        "evidenceLevel": "main",
+        "evidenceRefs": [
+          "docs/architecture/skill-consumption-receipt-contract.md",
+          "packages/api/test/skill-consumption-receipt.test.js"
+        ]
+      },
+      "outcome": {
+        "state": "implemented",
+        "summary": "The pilot outcome is limited to the Workspace consumer's delivery four-state or not_applicable decision and explicitly excludes task-success or single-skill causal claims.",
+        "evidenceLevel": "main",
+        "evidenceRefs": [
+          "docs/architecture/skill-consumption-receipt-contract.md",
+          "packages/api/test/skill-consumption-receipt.test.js"
+        ]
+      },
+      "invalidation": {
+        "state": "implemented",
+        "summary": "Package revision changes invalidate prepared handles and reclassify prior receipts as stale; scoped sync replaces stale distributed copies.",
+        "evidenceLevel": "main",
+        "evidenceRefs": [
+          "docs/architecture/skill-consumption-receipt-contract.md",
+          "packages/api/test/skill-consumption-receipt.test.js",
+          "docs/decisions/009-cat-cafe-skills-distribution.md"
+        ]
+      },
+      "evidence": {
+        "level": "main",
+        "refs": [
+          "cat-cafe-skills/workspace-navigator/SKILL.md",
+          "docs/architecture/skill-consumption-receipt-contract.md",
+          "packages/api/test/skill-consumption-receipt.test.js"
+        ],
+        "limitations": "Receipt does not prove the package was presented or read. Production contract is proven for the workspace-navigator pilot on full invocation MCP; agent-key, readonly/desktop, direct REST, CatAgent, remote A2A, and unproven carrier/tool pairs remain explicit unsupported rather than inferred green."
+      }
+    },
+    {
+      "v": 1,
+      "surfaceId": "taste",
+      "label": "Taste",
+      "ownerCell": "F221 Taste authority and Approval Hub",
+      "ownerRefs": [
+        "docs/features/F221-taste-lane.md"
+      ],
+      "canonicalRefs": [
+        "docs/features/F221-taste-lane.md",
+        "docs/architecture/memory-cue-source-map.md"
+      ],
+      "authority": {
+        "state": "implemented",
+        "summary": "F221 owns approved Taste revisions and correction state.",
+        "evidenceLevel": "main",
+        "evidenceRefs": [
+          "docs/features/F221-taste-lane.md"
+        ]
+      },
+      "declarationRevision": "G0-B-2026-08-28",
+      "disposition": "active",
+      "writeCapture": {
+        "state": "implemented",
+        "summary": "Taste proposals flow through Approval Hub before canonical persistence.",
+        "evidenceLevel": "main",
+        "evidenceRefs": [
+          "docs/features/F221-taste-lane.md"
+        ]
+      },
+      "typedCuePredicate": {
+        "state": "implemented",
+        "summary": "F287 binds the explicit ELI5 phrase to approved_taste_invoked with predicate revision and exact Taste authority.",
+        "evidenceLevel": "main",
+        "evidenceRefs": [
+          "docs/features/F287-memory-cue-plane.md",
+          "docs/architecture/memory-cue-source-map.md"
+        ]
+      },
+      "presentationDrill": {
+        "state": "implemented",
+        "summary": "The cue presents an owner-authenticated drill handle and requires drill before response generation.",
+        "evidenceLevel": "UAT",
+        "evidenceRefs": [
+          "feature-specs/2026-08-15-memory-system-research-first-roadmap.md"
+        ]
+      },
+      "consumerAllowedUse": {
+        "state": "implemented",
+        "summary": "The responding cat may use the drilled Taste only to shape the matching visual explanation; the cue cannot confer write authority.",
+        "evidenceLevel": "main",
+        "evidenceRefs": [
+          "docs/features/F287-memory-cue-plane.md",
+          "docs/features/F221-taste-lane.md"
+        ]
+      },
+      "consumptionReceipt": {
+        "state": "implemented",
+        "summary": "PR #4019 canonical Alpha proved presented→drilled→applied→html_widget for the ELI5 cue.",
+        "evidenceLevel": "UAT",
+        "evidenceRefs": [
+          "feature-specs/2026-08-15-memory-system-research-first-roadmap.md"
+        ]
+      },
+      "outcome": {
+        "state": "implemented",
+        "summary": "F200 publishes a family-level keep verdict; it does not prove single-anchor causality.",
+        "evidenceLevel": "live",
+        "evidenceRefs": [
+          "docs/features/F200-memory-recall-eval.md"
+        ]
+      },
+      "invalidation": {
+        "state": "implemented",
+        "summary": "Predicate and source revisions force revalidation after Taste correction or deletion; stale authority fails closed.",
+        "evidenceLevel": "main",
+        "evidenceRefs": [
+          "docs/features/F287-memory-cue-plane.md",
+          "docs/features/F221-taste-lane.md"
+        ]
+      },
+      "evidence": {
+        "level": "UAT",
+        "refs": [
+          "feature-specs/2026-08-15-memory-system-research-first-roadmap.md",
+          "docs/features/F287-memory-cue-plane.md"
+        ],
+        "limitations": "UAT covers the explicit ELI5 cue on canonical Alpha, not every Taste trigger or production activation."
+      }
+    },
+    {
+      "v": 1,
+      "surfaceId": "verdict",
+      "label": "Evaluation verdict",
+      "ownerCell": "F192 Eval Hub verdict authority",
+      "ownerRefs": [
+        "docs/features/F192-socio-technical-harness-eval.md"
+      ],
+      "canonicalRefs": [
+        "docs/features/F192-socio-technical-harness-eval.md",
+        "docs/decisions/2026-05-27-f192-eval-sop-architecture.md"
+      ],
+      "authority": {
+        "state": "implemented",
+        "summary": "F192 definitions and published verdict artifacts own keep, tune, or sunset decisions.",
+        "evidenceLevel": "live",
+        "evidenceRefs": [
+          "docs/features/F192-socio-technical-harness-eval.md"
+        ]
+      },
+      "declarationRevision": "G0-B-2026-08-28",
+      "disposition": "exempt",
+      "writeCapture": {
+        "state": "implemented",
+        "summary": "Eval Hub publishes provenance-bearing verdicts from registered definitions and evidence.",
+        "evidenceLevel": "live",
+        "evidenceRefs": [
+          "docs/decisions/2026-05-27-f192-eval-sop-architecture.md"
+        ]
+      },
+      "typedCuePredicate": {
+        "state": "exempt",
+        "summary": "A verdict is a decision output consumed by governed workflow, not invocation-time memory recall.",
+        "evidenceLevel": "main",
+        "evidenceRefs": [
+          "docs/features/F192-socio-technical-harness-eval.md"
+        ]
+      },
+      "presentationDrill": {
+        "state": "implemented",
+        "summary": "Verdicts drill to definition, evidence bundle, attribution, and snapshot refs.",
+        "evidenceLevel": "live",
+        "evidenceRefs": [
+          "docs/features/F192-socio-technical-harness-eval.md",
+          "docs/harness-feedback/SPEC.md"
+        ]
+      },
+      "consumerAllowedUse": {
+        "state": "implemented",
+        "summary": "Lane owners may use verdicts only for the registered keep, tune, or sunset decision.",
+        "evidenceLevel": "main",
+        "evidenceRefs": [
+          "docs/decisions/2026-05-27-f192-eval-sop-architecture.md"
+        ]
+      },
+      "consumptionReceipt": {
+        "state": "implemented",
+        "summary": "Verdict publication and workflow transition provide delivery and application custody.",
+        "evidenceLevel": "live",
+        "evidenceRefs": [
+          "docs/features/F192-socio-technical-harness-eval.md"
+        ]
+      },
+      "outcome": {
+        "state": "implemented",
+        "summary": "The verdict is itself the bounded decision outcome and records its evidence ceiling.",
+        "evidenceLevel": "live",
+        "evidenceRefs": [
+          "docs/features/F192-socio-technical-harness-eval.md"
+        ]
+      },
+      "invalidation": {
+        "state": "implemented",
+        "summary": "A newer evidence window or superseding verdict invalidates prior decision applicability.",
+        "evidenceLevel": "live",
+        "evidenceRefs": [
+          "docs/decisions/2026-05-27-f192-eval-sop-architecture.md"
+        ]
+      },
+      "evidence": {
+        "level": "live",
+        "refs": [
+          "docs/features/F192-socio-technical-harness-eval.md",
+          "docs/decisions/2026-05-27-f192-eval-sop-architecture.md"
+        ],
+        "limitations": "Verdict closure does not make verdicts general-purpose recalled memory."
+      }
+    }
+  ],
+  "missing": [
+    {
+      "surfaceId": "cat-owned-seed",
+      "field": "typedCuePredicate",
+      "breakClass": "B1",
+      "ownerRefs": [
+        "docs/features/F255-auto-dream.md"
+      ],
+      "nextAction": "cat-seed owner carrier: declare a source-safe predicate for one seed family."
+    },
+    {
+      "surfaceId": "cat-owned-seed",
+      "field": "consumptionReceipt",
+      "breakClass": "B2",
+      "ownerRefs": [
+        "docs/features/F255-auto-dream.md"
+      ],
+      "nextAction": "cat-seed owner carrier: emit seed-revision application receipts."
+    },
+    {
+      "surfaceId": "cat-owned-seed",
+      "field": "outcome",
+      "breakClass": "B3",
+      "ownerRefs": [
+        "docs/features/F255-auto-dream.md",
+        "docs/features/F200-memory-recall-eval.md"
+      ],
+      "nextAction": "cat-seed owner carrier: define a bounded hypothesis-utility outcome."
+    },
+    {
+      "surfaceId": "cat-owned-seed",
+      "field": "invalidation",
+      "breakClass": "invalidation",
+      "ownerRefs": [
+        "docs/features/F255-auto-dream.md",
+        "docs/features/F263-memory-lifecycle-repair-and-metrics.md"
+      ],
+      "nextAction": "cat-seed owner carrier: declare rejection and supersession invalidation."
+    },
+    {
+      "surfaceId": "decision",
+      "field": "typedCuePredicate",
+      "breakClass": "B1",
+      "ownerRefs": [
+        "docs/decisions/index.md"
+      ],
+      "nextAction": "decision owner carrier: define a subsystem and contract trigger over accepted ADRs."
+    },
+    {
+      "surfaceId": "decision",
+      "field": "consumptionReceipt",
+      "breakClass": "B2",
+      "ownerRefs": [
+        "docs/decisions/index.md"
+      ],
+      "nextAction": "decision owner carrier: emit ADR-revision application receipts."
+    },
+    {
+      "surfaceId": "decision",
+      "field": "outcome",
+      "breakClass": "B3",
+      "ownerRefs": [
+        "docs/decisions/index.md",
+        "docs/features/F200-memory-recall-eval.md"
+      ],
+      "nextAction": "decision owner carrier: define a conformance outcome after receipts exist."
+    },
+    {
+      "surfaceId": "diary",
+      "field": "typedCuePredicate",
+      "breakClass": "B1",
+      "ownerRefs": [
+        "docs/architecture/memory-write-lane-census.md"
+      ],
+      "nextAction": "diary owner carrier: define a time and topic predicate without moving diary storage."
+    },
+    {
+      "surfaceId": "diary",
+      "field": "consumptionReceipt",
+      "breakClass": "B2",
+      "ownerRefs": [
+        "docs/architecture/memory-write-lane-census.md"
+      ],
+      "nextAction": "diary owner carrier: emit delivery and application receipts for eligible entries."
+    },
+    {
+      "surfaceId": "diary",
+      "field": "outcome",
+      "breakClass": "B3",
+      "ownerRefs": [
+        "docs/architecture/memory-write-lane-census.md",
+        "docs/features/F200-memory-recall-eval.md"
+      ],
+      "nextAction": "diary owner carrier: join receipts to a bounded continuity outcome."
+    },
+    {
+      "surfaceId": "diary",
+      "field": "invalidation",
+      "breakClass": "invalidation",
+      "ownerRefs": [
+        "docs/architecture/memory-write-lane-census.md",
+        "docs/features/F263-memory-lifecycle-repair-and-metrics.md"
+      ],
+      "nextAction": "diary owner carrier: specify edit and delete invalidation signals."
+    },
+    {
+      "surfaceId": "episode",
+      "field": "typedCuePredicate",
+      "breakClass": "B1",
+      "ownerRefs": [
+        "docs/episodes/index.md"
+      ],
+      "nextAction": "episode owner carrier: declare one task-shape predicate over source-linked episodes."
+    },
+    {
+      "surfaceId": "episode",
+      "field": "consumptionReceipt",
+      "breakClass": "B2",
+      "ownerRefs": [
+        "docs/episodes/index.md"
+      ],
+      "nextAction": "episode owner carrier: emit source-revision replay receipts."
+    },
+    {
+      "surfaceId": "episode",
+      "field": "outcome",
+      "breakClass": "B3",
+      "ownerRefs": [
+        "docs/episodes/index.md",
+        "docs/features/F200-memory-recall-eval.md"
+      ],
+      "nextAction": "episode owner carrier: bind replay receipts to a bounded outcome."
+    },
+    {
+      "surfaceId": "episode",
+      "field": "invalidation",
+      "breakClass": "invalidation",
+      "ownerRefs": [
+        "docs/episodes/index.md"
+      ],
+      "nextAction": "episode owner carrier: declare source-drift and supersession invalidation."
+    },
+    {
+      "surfaceId": "library-knowledge",
+      "field": "typedCuePredicate",
+      "breakClass": "B1",
+      "ownerRefs": [
+        "docs/features/F186-library-memory-architecture.md"
+      ],
+      "nextAction": "library owner carrier: declare collection and task-class eligibility with revisions."
+    },
+    {
+      "surfaceId": "library-knowledge",
+      "field": "consumptionReceipt",
+      "breakClass": "B2",
+      "ownerRefs": [
+        "docs/features/F186-library-memory-architecture.md"
+      ],
+      "nextAction": "library owner carrier: emit source-revision delivery and application receipts."
+    },
+    {
+      "surfaceId": "library-knowledge",
+      "field": "outcome",
+      "breakClass": "B3",
+      "ownerRefs": [
+        "docs/features/F186-library-memory-architecture.md",
+        "docs/features/F200-memory-recall-eval.md"
+      ],
+      "nextAction": "library owner carrier: declare a bounded research-quality outcome."
+    },
+    {
+      "surfaceId": "method",
+      "field": "typedCuePredicate",
+      "breakClass": "B1",
+      "ownerRefs": [
+        "docs/methods"
+      ],
+      "nextAction": "method owner carrier: declare a task-class predicate for one method family."
+    },
+    {
+      "surfaceId": "method",
+      "field": "consumptionReceipt",
+      "breakClass": "B2",
+      "ownerRefs": [
+        "docs/methods"
+      ],
+      "nextAction": "method owner carrier: emit method-revision application receipts."
+    },
+    {
+      "surfaceId": "method",
+      "field": "outcome",
+      "breakClass": "B3",
+      "ownerRefs": [
+        "docs/methods",
+        "docs/features/F200-memory-recall-eval.md"
+      ],
+      "nextAction": "method owner carrier: define a bounded quality outcome after receipts exist."
+    },
+    {
+      "surfaceId": "project-knowledge",
+      "field": "typedCuePredicate",
+      "breakClass": "B1",
+      "ownerRefs": [
+        "docs/decisions/020-f102-memory-system-architecture.md"
+      ],
+      "nextAction": "project-knowledge owner carrier: define a small typed predicate set for high-value operational classes."
+    },
+    {
+      "surfaceId": "project-knowledge",
+      "field": "consumptionReceipt",
+      "breakClass": "B2",
+      "ownerRefs": [
+        "docs/features/F209-evidence-recall-optimization.md"
+      ],
+      "nextAction": "project-knowledge owner carrier: bind delivery and application receipts to source revisions."
+    },
+    {
+      "surfaceId": "project-knowledge",
+      "field": "outcome",
+      "breakClass": "B3",
+      "ownerRefs": [
+        "docs/features/F209-evidence-recall-optimization.md",
+        "docs/features/F200-memory-recall-eval.md"
+      ],
+      "nextAction": "project-knowledge owner carrier: declare a bounded outcome consumer with causal limits."
+    },
+    {
+      "surfaceId": "provider-local-memory",
+      "field": "authority",
+      "breakClass": "B0",
+      "ownerRefs": [
+        "docs/architecture/memory-write-lane-census.md"
+      ],
+      "nextAction": "provider owner carrier: inventory each supported provider's canonical local-memory coordinate and revision rule."
+    },
+    {
+      "surfaceId": "provider-local-memory",
+      "field": "writeCapture",
+      "breakClass": "B0",
+      "ownerRefs": [
+        "docs/architecture/memory-write-lane-census.md"
+      ],
+      "nextAction": "provider owner carrier: document native write entrypoints without overwriting runtime homes."
+    },
+    {
+      "surfaceId": "provider-local-memory",
+      "field": "typedCuePredicate",
+      "breakClass": "B1",
+      "ownerRefs": [
+        "docs/architecture/memory-write-lane-census.md"
+      ],
+      "nextAction": "provider owner carrier: declare provider-native predicate revisions for supported runtimes."
+    },
+    {
+      "surfaceId": "provider-local-memory",
+      "field": "presentationDrill",
+      "breakClass": "B1",
+      "ownerRefs": [
+        "docs/architecture/memory-write-lane-census.md"
+      ],
+      "nextAction": "provider owner carrier: specify native read and drill boundaries per provider."
+    },
+    {
+      "surfaceId": "provider-local-memory",
+      "field": "consumerAllowedUse",
+      "breakClass": "B3",
+      "ownerRefs": [
+        "docs/architecture/memory-write-lane-census.md"
+      ],
+      "nextAction": "provider owner carrier: name consumers and allowed-use boundaries for each supported provider."
+    },
+    {
+      "surfaceId": "provider-local-memory",
+      "field": "consumptionReceipt",
+      "breakClass": "B2",
+      "ownerRefs": [
+        "docs/architecture/memory-write-lane-census.md"
+      ],
+      "nextAction": "provider owner carrier: map native receipts or declare a bounded adapter contract."
+    },
+    {
+      "surfaceId": "provider-local-memory",
+      "field": "outcome",
+      "breakClass": "B3",
+      "ownerRefs": [
+        "docs/architecture/memory-write-lane-census.md",
+        "docs/features/F200-memory-recall-eval.md"
+      ],
+      "nextAction": "provider owner carrier: define outcome observation after custody and receipt semantics exist."
+    },
+    {
+      "surfaceId": "provider-local-memory",
+      "field": "invalidation",
+      "breakClass": "invalidation",
+      "ownerRefs": [
+        "docs/architecture/memory-write-lane-census.md"
+      ],
+      "nextAction": "provider owner carrier: document provider-native correction and deletion invalidation."
+    },
+    {
+      "surfaceId": "reflection",
+      "field": "typedCuePredicate",
+      "breakClass": "B1",
+      "ownerRefs": [
+        "docs/features/F271-pragmatic-memory-reflection.md"
+      ],
+      "nextAction": "reflection owner carrier: define one situation predicate with source revision guards."
+    },
+    {
+      "surfaceId": "reflection",
+      "field": "consumptionReceipt",
+      "breakClass": "B2",
+      "ownerRefs": [
+        "docs/features/F271-pragmatic-memory-reflection.md"
+      ],
+      "nextAction": "reflection owner carrier: emit reflection-revision application receipts."
+    },
+    {
+      "surfaceId": "reflection",
+      "field": "outcome",
+      "breakClass": "B3",
+      "ownerRefs": [
+        "docs/features/F271-pragmatic-memory-reflection.md",
+        "docs/features/F200-memory-recall-eval.md"
+      ],
+      "nextAction": "reflection owner carrier: define a bounded utility outcome after receipts exist."
+    },
+    {
+      "surfaceId": "reflection",
+      "field": "invalidation",
+      "breakClass": "invalidation",
+      "ownerRefs": [
+        "docs/features/F271-pragmatic-memory-reflection.md"
+      ],
+      "nextAction": "reflection owner carrier: declare source-correction and supersession invalidation."
+    }
+  ],
+  "carriers": [
+    {
+      "carrierId": "cat-owned-seed-closure-carrier",
+      "surfaceId": "cat-owned-seed",
+      "fields": [
+        "typedCuePredicate",
+        "consumptionReceipt",
+        "outcome",
+        "invalidation"
+      ],
+      "breakClasses": [
+        "B1",
+        "B2",
+        "B3",
+        "invalidation"
+      ],
+      "ownerRefs": [
+        "docs/features/F200-memory-recall-eval.md",
+        "docs/features/F255-auto-dream.md",
+        "docs/features/F263-memory-lifecycle-repair-and-metrics.md"
+      ],
+      "actions": [
+        "cat-seed owner carrier: declare a source-safe predicate for one seed family.",
+        "cat-seed owner carrier: emit seed-revision application receipts.",
+        "cat-seed owner carrier: define a bounded hypothesis-utility outcome.",
+        "cat-seed owner carrier: declare rejection and supersession invalidation."
+      ]
+    },
+    {
+      "carrierId": "decision-closure-carrier",
+      "surfaceId": "decision",
+      "fields": [
+        "typedCuePredicate",
+        "consumptionReceipt",
+        "outcome"
+      ],
+      "breakClasses": [
+        "B1",
+        "B2",
+        "B3"
+      ],
+      "ownerRefs": [
+        "docs/decisions/index.md",
+        "docs/features/F200-memory-recall-eval.md"
+      ],
+      "actions": [
+        "decision owner carrier: define a subsystem and contract trigger over accepted ADRs.",
+        "decision owner carrier: emit ADR-revision application receipts.",
+        "decision owner carrier: define a conformance outcome after receipts exist."
+      ]
+    },
+    {
+      "carrierId": "diary-closure-carrier",
+      "surfaceId": "diary",
+      "fields": [
+        "typedCuePredicate",
+        "consumptionReceipt",
+        "outcome",
+        "invalidation"
+      ],
+      "breakClasses": [
+        "B1",
+        "B2",
+        "B3",
+        "invalidation"
+      ],
+      "ownerRefs": [
+        "docs/architecture/memory-write-lane-census.md",
+        "docs/features/F200-memory-recall-eval.md",
+        "docs/features/F263-memory-lifecycle-repair-and-metrics.md"
+      ],
+      "actions": [
+        "diary owner carrier: define a time and topic predicate without moving diary storage.",
+        "diary owner carrier: emit delivery and application receipts for eligible entries.",
+        "diary owner carrier: join receipts to a bounded continuity outcome.",
+        "diary owner carrier: specify edit and delete invalidation signals."
+      ]
+    },
+    {
+      "carrierId": "episode-closure-carrier",
+      "surfaceId": "episode",
+      "fields": [
+        "typedCuePredicate",
+        "consumptionReceipt",
+        "outcome",
+        "invalidation"
+      ],
+      "breakClasses": [
+        "B1",
+        "B2",
+        "B3",
+        "invalidation"
+      ],
+      "ownerRefs": [
+        "docs/episodes/index.md",
+        "docs/features/F200-memory-recall-eval.md"
+      ],
+      "actions": [
+        "episode owner carrier: declare one task-shape predicate over source-linked episodes.",
+        "episode owner carrier: emit source-revision replay receipts.",
+        "episode owner carrier: bind replay receipts to a bounded outcome.",
+        "episode owner carrier: declare source-drift and supersession invalidation."
+      ]
+    },
+    {
+      "carrierId": "library-knowledge-closure-carrier",
+      "surfaceId": "library-knowledge",
+      "fields": [
+        "typedCuePredicate",
+        "consumptionReceipt",
+        "outcome"
+      ],
+      "breakClasses": [
+        "B1",
+        "B2",
+        "B3"
+      ],
+      "ownerRefs": [
+        "docs/features/F186-library-memory-architecture.md",
+        "docs/features/F200-memory-recall-eval.md"
+      ],
+      "actions": [
+        "library owner carrier: declare collection and task-class eligibility with revisions.",
+        "library owner carrier: emit source-revision delivery and application receipts.",
+        "library owner carrier: declare a bounded research-quality outcome."
+      ]
+    },
+    {
+      "carrierId": "method-closure-carrier",
+      "surfaceId": "method",
+      "fields": [
+        "typedCuePredicate",
+        "consumptionReceipt",
+        "outcome"
+      ],
+      "breakClasses": [
+        "B1",
+        "B2",
+        "B3"
+      ],
+      "ownerRefs": [
+        "docs/features/F200-memory-recall-eval.md",
+        "docs/methods"
+      ],
+      "actions": [
+        "method owner carrier: declare a task-class predicate for one method family.",
+        "method owner carrier: emit method-revision application receipts.",
+        "method owner carrier: define a bounded quality outcome after receipts exist."
+      ]
+    },
+    {
+      "carrierId": "project-knowledge-closure-carrier",
+      "surfaceId": "project-knowledge",
+      "fields": [
+        "typedCuePredicate",
+        "consumptionReceipt",
+        "outcome"
+      ],
+      "breakClasses": [
+        "B1",
+        "B2",
+        "B3"
+      ],
+      "ownerRefs": [
+        "docs/decisions/020-f102-memory-system-architecture.md",
+        "docs/features/F200-memory-recall-eval.md",
+        "docs/features/F209-evidence-recall-optimization.md"
+      ],
+      "actions": [
+        "project-knowledge owner carrier: define a small typed predicate set for high-value operational classes.",
+        "project-knowledge owner carrier: bind delivery and application receipts to source revisions.",
+        "project-knowledge owner carrier: declare a bounded outcome consumer with causal limits."
+      ]
+    },
+    {
+      "carrierId": "provider-local-memory-closure-carrier",
+      "surfaceId": "provider-local-memory",
+      "fields": [
+        "authority",
+        "writeCapture",
+        "typedCuePredicate",
+        "presentationDrill",
+        "consumerAllowedUse",
+        "consumptionReceipt",
+        "outcome",
+        "invalidation"
+      ],
+      "breakClasses": [
+        "B0",
+        "B1",
+        "B2",
+        "B3",
+        "invalidation"
+      ],
+      "ownerRefs": [
+        "docs/architecture/memory-write-lane-census.md",
+        "docs/features/F200-memory-recall-eval.md"
+      ],
+      "actions": [
+        "provider owner carrier: inventory each supported provider's canonical local-memory coordinate and revision rule.",
+        "provider owner carrier: document native write entrypoints without overwriting runtime homes.",
+        "provider owner carrier: declare provider-native predicate revisions for supported runtimes.",
+        "provider owner carrier: specify native read and drill boundaries per provider.",
+        "provider owner carrier: name consumers and allowed-use boundaries for each supported provider.",
+        "provider owner carrier: map native receipts or declare a bounded adapter contract.",
+        "provider owner carrier: define outcome observation after custody and receipt semantics exist.",
+        "provider owner carrier: document provider-native correction and deletion invalidation."
+      ]
+    },
+    {
+      "carrierId": "reflection-closure-carrier",
+      "surfaceId": "reflection",
+      "fields": [
+        "typedCuePredicate",
+        "consumptionReceipt",
+        "outcome",
+        "invalidation"
+      ],
+      "breakClasses": [
+        "B1",
+        "B2",
+        "B3",
+        "invalidation"
+      ],
+      "ownerRefs": [
+        "docs/features/F200-memory-recall-eval.md",
+        "docs/features/F271-pragmatic-memory-reflection.md"
+      ],
+      "actions": [
+        "reflection owner carrier: define one situation predicate with source revision guards.",
+        "reflection owner carrier: emit reflection-revision application receipts.",
+        "reflection owner carrier: define a bounded utility outcome after receipts exist.",
+        "reflection owner carrier: declare source-correction and supersession invalidation."
+      ]
+    }
+  ]
+}

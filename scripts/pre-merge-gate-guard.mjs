@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, readFileSync, realpathSync, rmSync, writeFileSyn
 import os from 'node:os';
 import path from 'node:path';
 import { classifyFseventsdPressure, fseventsdAdvisoryRssKb } from './lib/fseventsd-pressure.mjs';
-import { cleanupStaleRedisTestLeases, redisTestRegistryDir } from './lib/redis-test-leases.mjs';
+import { cleanupRedisGateOwnership, inspectExpectedProcess } from './lib/redis-test-leases.mjs';
 
 // Backward-compatible advisory ceiling. The legacy env var keeps its name, but
 // RSS alone no longer proves active pressure and therefore does not hard-block.
@@ -14,13 +14,12 @@ const DEFAULT_FSEVENTSD_RSS_ADVISORY_KB = 4 * 1024 * 1024;
 // alongside 6399 (CAFE-INCIDENT-20260527).
 const PROTECTED_REDIS_PORTS = new Set([6099, 6398, 6399, 6401]);
 const ALLOWED_LOCAL_REDIS_PORTS = new Set([6379, ...PROTECTED_REDIS_PORTS]);
-// Concurrent-gate detection — another gate / pre-merge-check is already running.
-// Downgraded from hard-block to soft-warning (#1912 added this hard-block): gates run in
-// parallel safely — worktree outputs are isolated and Redis test metadata uses
-// per-instance owner-verified leases — while resource pressure has its own
-// independent valves (fseventsd RSS + redis orphan
-// checks below). The old hard-block was incident-era over-defense that mis-killed
-// legitimate multi-cat concurrency with zero independent protection value.
+// Compatibility detection for another gate / pre-merge-check process. Canonical
+// current gates use Git-common-dir phase permits around heavy stages and reserve
+// every permit for the browser stage. Keep the process scan advisory because it
+// cannot distinguish a queued current stage from an unre-based whole-gate process.
+// Reinstating the old fail-fast would make useful multi-thread work kick itself out
+// instead of waiting, while ignoring the row would hide migration-edge CPU pressure.
 const CONCURRENT_GATE_PATTERNS = [/pnpm\s+gate\b/, /pre-merge-check\.sh\b/];
 
 // Soft warning — resource-intensive but no data conflict with gate.
@@ -152,6 +151,7 @@ function readRedisConfig(port) {
 }
 
 function leaseMatchesRedis(lease) {
+  if (inspectExpectedProcess(lease.redis).status !== 'live') return false;
   const canonicalize = (filePath) => {
     try {
       return realpathSync(filePath);
@@ -172,9 +172,9 @@ function leaseMatchesRedis(lease) {
 
 function findRedisOrphans(liveLeases = []) {
   const uniqueListeners = [...new Map(readRedisListeners().map((listener) => [listener.port, listener])).values()];
-  return uniqueListeners.filter(({ port }) => {
+  return uniqueListeners.filter(({ port, pid }) => {
     if (port < 6300 || port > 65535 || ALLOWED_LOCAL_REDIS_PORTS.has(port)) return false;
-    return !liveLeases.some((lease) => lease.port === port && leaseMatchesRedis(lease));
+    return !liveLeases.some((lease) => lease.port === port && lease.redis?.pid === pid && leaseMatchesRedis(lease));
   });
 }
 
@@ -192,19 +192,26 @@ function findMatchingProcesses(rows, holderPid, patterns) {
   });
 }
 
-function collectRedisOrphanFailures(liveLeases) {
-  let orphans = findRedisOrphans(liveLeases);
+function collectRedisOrphanFailures(readOwnership) {
+  let ownership = readOwnership();
+  let orphans = findRedisOrphans([...ownership.test.live, ...ownership.dev.live]);
   if (orphans.length > 0) {
     spawnSync('sleep', ['3'], { stdio: 'ignore' });
-    orphans = findRedisOrphans(liveLeases);
+    // Refresh after grace: a concurrent runner may bind before atomically leasing.
+    ownership = readOwnership();
+    orphans = findRedisOrphans([...ownership.test.live, ...ownership.dev.live]);
   }
-  return orphans.map(
-    (orphan) =>
-      `unmanaged redis-server listener on port ${orphan.port}; ` +
-      `clean stale isolated Redis before gate. ` +
-      `Use 'kill <PID>' after confirming non-sanctuary, or 'pnpm process:cleanup'. ` +
-      `NEVER 'lsof -ti tcp:<range> | kill' — CAFE-INCIDENT-20260527.`,
-  );
+  return {
+    failures: orphans.map(
+      (orphan) =>
+        `unmanaged redis-server listener on port ${orphan.port}; ` +
+        `clean stale isolated Redis before gate. ` +
+        `Use 'kill <PID>' after confirming non-sanctuary, or 'pnpm process:cleanup'. ` +
+        `NEVER 'lsof -ti tcp:<range> | kill' — CAFE-INCIDENT-20260527.`,
+    ),
+    leaseCleanup: ownership.test,
+    devLeaseCleanup: ownership.dev,
+  };
 }
 
 function runPressureChecks(holderPid) {
@@ -229,24 +236,32 @@ function runPressureChecks(holderPid) {
     if (result?.level === 'warning') warnings.push(result.message);
   }
 
-  // A daemonized Redis has ppid=1 even while its test runner is alive. Cleanup
-  // therefore requires an exact owner identity from the per-instance lease;
-  // CONFIG ownership alone is not owner-death proof.
-  const leaseCleanup = cleanupStaleRedisTestLeases(redisTestRegistryDir());
+  // A daemonized Redis has ppid=1; CONFIG paths alone cannot prove owner identity.
+  const {
+    failures: redisOrphanFailures,
+    leaseCleanup,
+    devLeaseCleanup,
+  } = collectRedisOrphanFailures(() => cleanupRedisGateOwnership());
   for (const lease of leaseCleanup.unknown) {
     warnings.push(`cannot prove isolated Redis lease owner dead on port ${lease.port}; instance preserved`);
   }
   for (const file of leaseCleanup.invalidFiles) {
     warnings.push(`invalid isolated Redis lease metadata preserved for manual inspection: ${file}`);
   }
+  for (const lease of devLeaseCleanup.unknown) {
+    warnings.push(`cannot prove worktree dev Redis lease owner dead on port ${lease.port}; instance preserved`);
+  }
+  for (const file of devLeaseCleanup.invalidFiles) {
+    warnings.push(`invalid worktree dev Redis lease metadata preserved for manual inspection: ${file}`);
+  }
 
   // Phase 2: wait briefly for transient orphans (trap fired, Redis still exiting).
-  failures.push(...collectRedisOrphanFailures(leaseCleanup.live));
+  failures.push(...redisOrphanFailures);
 
   for (const row of findMatchingProcesses(rows, holderPid, CONCURRENT_GATE_PATTERNS)) {
     warnings.push(
-      `concurrent gate detected: pid ${row.pid} ${row.command}. Gates run in parallel safely ` +
-        `(isolated worktree outputs; owner-verified Redis test leases); if gate feels slow, concurrent gates are a likely cause.`,
+      `concurrent or queued gate detected: pid ${row.pid} ${row.command}. Canonical current gates use bounded ` +
+        `phase permits with an exclusive browser barrier; an unre-based gate can still add CPU pressure until it exits.`,
     );
   }
 

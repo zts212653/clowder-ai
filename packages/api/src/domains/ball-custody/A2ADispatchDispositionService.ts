@@ -71,6 +71,71 @@ export class A2ADispatchDispositionService {
   ): Promise<A2ADispatchDispositionResult> {
     await this.assertLatestInvocation(auth.invocationId);
     const source = await this.resolveSource(auth);
+    return this.completeResolved(auth, source, disposition);
+  }
+
+  /**
+   * A consumed coordination terminal is the exact completion witness for the
+   * ordinary dispatch that invoked its author. It shares the existing
+   * disposition event/fence; no second terminal lifecycle is created.
+   */
+  async completeFromCoordinationTerminal(terminalMessageId: string): Promise<A2ADispatchDispositionResult> {
+    const terminal = await this.deps.messageStore.getById(terminalMessageId);
+    const coordination = terminal?.extra?.coordination;
+    const provenance = terminal?.extra?.crossPost;
+    const causal = terminal?.extra?.causal;
+    const turnInvocationId = terminal?.extra?.stream?.turnInvocationId;
+    if (
+      !terminal ||
+      !terminal.catId ||
+      coordination?.phase !== 'terminal' ||
+      !provenance?.sourceThreadId ||
+      !provenance.sourceInvocationId ||
+      !causal?.triggerMessageId ||
+      !turnInvocationId
+    ) {
+      throw new A2ADispatchDispositionError('a2a_dispatch_coordination_terminal_identity_missing');
+    }
+
+    const auth: A2ADispatchDispositionAuth = {
+      invocationId: provenance.sourceInvocationId,
+      catId: terminal.catId,
+      threadId: provenance.sourceThreadId,
+      a2aTriggerMessageId: causal.triggerMessageId,
+      originTriggerMessageId: causal.triggerMessageId,
+    };
+    const sourceMessage = await this.deps.messageStore.getById(causal.triggerMessageId);
+    const sourceCoordination = sourceMessage?.extra?.coordination;
+    const sourceOriginThreadId = sourceMessage?.extra?.crossPost?.sourceThreadId;
+    const terminalTargetsSource = Boolean(
+      sourceMessage?.catId && this.messageTargetsCat(terminal, sourceMessage.catId),
+    );
+    if (
+      !sourceMessage ||
+      sourceCoordination?.phase !== 'active' ||
+      coordination.id !== sourceCoordination.id ||
+      coordination.hop !== sourceCoordination.hop + 1 ||
+      !coordination.subjectRef ||
+      !sourceCoordination.subjectRef ||
+      coordination.subjectRef !== sourceCoordination.subjectRef ||
+      sourceOriginThreadId !== terminal.threadId ||
+      terminal.threadId === provenance.sourceThreadId ||
+      terminal.userId !== sourceMessage.userId ||
+      turnInvocationId !== provenance.sourceInvocationId ||
+      !terminalTargetsSource
+    ) {
+      throw new A2ADispatchDispositionError('a2a_dispatch_coordination_terminal_mismatch');
+    }
+
+    const source = await this.resolveSource(auth);
+    return this.completeResolved(auth, source, 'completed');
+  }
+
+  private async completeResolved(
+    auth: A2ADispatchDispositionAuth,
+    source: DispatchSource,
+    disposition: A2ADispatchDisposition,
+  ): Promise<A2ADispatchDispositionResult> {
     const subjectKey = `ball:thread:${auth.threadId}`;
     const events = await this.deps.ballCustodyEventLog.read(subjectKey);
     const eventSourceId = dispatchDispositionEventSourceId({
@@ -163,9 +228,13 @@ export class A2ADispatchDispositionService {
         message.catId &&
         (message.catId !== auth.catId ||
           isCrossThreadProvenance(message.extra?.crossPost?.sourceThreadId, message.threadId)) &&
-        (message.mentions.some((candidate) => candidate === auth.catId) ||
-          message.extra?.targetCats?.includes(auth.catId)),
+        this.messageTargetsCat(message, auth.catId),
     );
+  }
+
+  private messageTargetsCat(message: StoredMessage, catId: string): boolean {
+    if (message.mentions.some((candidate) => candidate === catId)) return true;
+    return Boolean(message.extra?.targetCats?.includes(catId));
   }
 
   private async resolveRetired(subjectKey: string, catId: string): Promise<boolean> {

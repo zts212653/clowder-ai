@@ -1,11 +1,14 @@
 import {
+  approvedTasteInvokedOpportunityV1Schema,
   deliveryDecisionOpportunityV1Schema,
   judgmentSurfaceEnteredOpportunityV1Schema,
+  profileRevisionAvailableOpportunityV1Schema,
   RECALL_OPPORTUNITY_CATALOG_VERSION,
   type RecallOpportunityV1,
   type RecallResolverFamily,
   type RecallScopeV1,
   recallOpportunityV1Schema,
+  recentEventAvailableOpportunityV1Schema,
   subjectSeenOpportunityV1Schema,
 } from '@cat-cafe/shared';
 import type { z } from 'zod';
@@ -80,9 +83,64 @@ const entries: readonly RecallOpportunityCatalogEntry[] = Object.freeze([
         : 'invalid';
     },
   }),
+  Object.freeze({
+    kind: 'approved_taste_invoked',
+    producer: 'owner_message',
+    consumer: 'agent_route',
+    payloadSchema: approvedTasteInvokedOpportunityV1Schema.shape.payload,
+    scopeBinding: 'server_exact',
+    resolverFamilies: Object.freeze(['taste'] as const),
+    maxCues: 1,
+    maxPromptTokens: 300,
+    expiresAfterMs: 5 * 60_000,
+    dedupeKey(opportunity: RecallOpportunityV1): string {
+      return opportunity.kind === 'approved_taste_invoked'
+        ? ['approved_taste_invoked', opportunity.payload.triggerKey, opportunity.payload.sourceMessageId].join('\0')
+        : 'invalid';
+    },
+  }),
+  Object.freeze({
+    kind: 'profile_revision_available',
+    producer: 'profile_repository',
+    consumer: 'agent_route',
+    payloadSchema: profileRevisionAvailableOpportunityV1Schema.shape.payload,
+    scopeBinding: 'server_exact',
+    resolverFamilies: Object.freeze(['profile'] as const),
+    maxCues: 1,
+    maxPromptTokens: 260,
+    expiresAfterMs: 5 * 60_000,
+    dedupeKey(opportunity: RecallOpportunityV1): string {
+      return opportunity.kind === 'profile_revision_available'
+        ? ['profile_revision_available', opportunity.payload.profileUri, opportunity.payload.sourceRevision].join('\0')
+        : 'invalid';
+    },
+  }),
+  Object.freeze({
+    kind: 'recent_event_available',
+    producer: 'event_memory',
+    consumer: 'agent_route',
+    payloadSchema: recentEventAvailableOpportunityV1Schema.shape.payload,
+    scopeBinding: 'server_exact',
+    resolverFamilies: Object.freeze(['event'] as const),
+    maxCues: 1,
+    // Includes the entropy-dense encrypted drill capability and source hashes;
+    // otherwise valid Event cues can be silently omitted before presentation.
+    maxPromptTokens: 320,
+    expiresAfterMs: 5 * 60_000,
+    dedupeKey(opportunity: RecallOpportunityV1): string {
+      return opportunity.kind === 'recent_event_available'
+        ? [
+            'recent_event_available',
+            opportunity.payload.eventId,
+            opportunity.payload.subjectThreadId,
+            opportunity.payload.sourceRevision,
+          ].join('\0')
+        : 'invalid';
+    },
+  }),
 ]);
 
-export const RECALL_OPPORTUNITY_CATALOG_V1 = Object.freeze({
+export const RECALL_OPPORTUNITY_CATALOG_V3 = Object.freeze({
   version: RECALL_OPPORTUNITY_CATALOG_VERSION,
   entries,
 });
@@ -107,6 +165,6 @@ export function getRecallOpportunityCatalogEntry(opportunity: RecallOpportunityV
   const entry = entries.find(
     (candidate) => candidate.kind === opportunity.kind && candidate.producer === opportunity.producer,
   );
-  if (!entry) throw new Error('Recall opportunity is not admitted by catalog v1');
+  if (!entry) throw new Error('Recall opportunity is not admitted by catalog v3');
   return entry;
 }

@@ -503,7 +503,7 @@ describe('F167 Phase S: cross-thread action successor admission', () => {
     ]);
   });
 
-  test('safe_wait creates neither message nor queue entry', async () => {
+  test('safe_wait without a durable carrier fails closed and creates no work', async () => {
     actionService.admit = async (input) => {
       actionService.calls.push(input);
       return { admit: false, outcome: 'safe_wait', lease: activeLease(['codex']) };
@@ -521,8 +521,9 @@ describe('F167 Phase S: cross-thread action successor admission', () => {
       },
     });
 
-    assert.equal(response.statusCode, 200);
-    assert.equal(response.json().status, 'safe_wait');
+    assert.equal(response.statusCode, 409);
+    assert.equal(response.json().status, 'action_carrier_unavailable');
+    assert.equal(response.json().reason, 'authority_mismatch');
     assert.equal(invocationQueue.list(target.id, 'user-1').length, 0);
     assert.equal(messageStore.getByThread(target.id, 20, 'user-1').length, 0);
   });

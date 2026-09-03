@@ -42,7 +42,12 @@ import { resolveRuntimeDeploymentRevision } from './config/runtime-deployment-re
 import { initRuntimeOverrides } from './config/session-strategy-overrides.js';
 import { assertStorageReady } from './config/storage-guard.js';
 import { ApprovalIngress } from './domains/approval-hub/ApprovalIngress.js';
-import { ApprovalProducerRegistry } from './domains/approval-hub/ApprovalProducerRegistry.js';
+import { RedisApprovalLifecycleEpochAuthority } from './domains/approval-hub/ApprovalLifecycleEpochAuthority.js';
+import {
+  ApprovalProducerRegistry,
+  bindLegacyApprovalProducer,
+  bindV1ApprovalProducer,
+} from './domains/approval-hub/ApprovalProducerRegistry.js';
 import { F128ApprovalAdapter } from './domains/approval-hub/adapters/F128ApprovalAdapter.js';
 import { F139ApprovalAdapter } from './domains/approval-hub/adapters/F139ApprovalAdapter.js';
 import { F193ApprovalAdapter } from './domains/approval-hub/adapters/F193ApprovalAdapter.js';
@@ -50,8 +55,10 @@ import { F221ApprovalAdapter } from './domains/approval-hub/adapters/F221Approva
 import { F225ApprovalAdapter } from './domains/approval-hub/adapters/F225ApprovalAdapter.js';
 import { F231ApprovalAdapter } from './domains/approval-hub/adapters/F231ApprovalAdapter.js';
 import { F260ApprovalAdapter } from './domains/approval-hub/adapters/F260ApprovalAdapter.js';
+import { F266ApprovalAdapter } from './domains/approval-hub/adapters/F266ApprovalAdapter.js';
 import { F276ApprovalAdapter } from './domains/approval-hub/adapters/F276ApprovalAdapter.js';
 import { F292ApprovalAdapter } from './domains/approval-hub/adapters/F292ApprovalAdapter.js';
+import { F306ApprovalAdapter } from './domains/approval-hub/adapters/F306ApprovalAdapter.js';
 import { createDispatchProposalStore } from './domains/approval-hub/stores/factories/DispatchProposalStoreFactory.js';
 import { createEntityProposalStore } from './domains/approval-hub/stores/factories/EntityProposalStoreFactory.js';
 import { classifyApprovedActionCarrier } from './domains/ball-custody/ActionSuccessorRecoverySweep.js';
@@ -183,6 +190,7 @@ import { RedisContextEpochStore } from './domains/cats/services/stores/redis/Red
 import { RedisInvocationRecordStore } from './domains/cats/services/stores/redis/RedisInvocationRecordStore.js';
 import { RedisMessageStore } from './domains/cats/services/stores/redis/RedisMessageStore.js';
 import { RedisPresentationLedgerStore } from './domains/cats/services/stores/redis/RedisPresentationLedgerStore.js';
+import { SkillConsumptionReceiptService } from './domains/cats/services/tool-usage/SkillConsumptionReceiptService.js';
 import { DocumentListenRepository } from './domains/cats/services/tts/DocumentListenRepository.js';
 import {
   resolveDocumentListenStatePath,
@@ -194,6 +202,14 @@ import { TtsRegistry } from './domains/cats/services/tts/TtsRegistry.js';
 import { startTtsCacheCleaner } from './domains/cats/services/tts/tts-cache-cleaner.js';
 import { initVoiceBlockSynthesizer } from './domains/cats/services/tts/VoiceBlockSynthesizer.js';
 import type { AgentService } from './domains/cats/services/types.js';
+import { EntrustedWorkOwnerReadService } from './domains/growing/EntrustedWorkOwnerReadService.js';
+import { F232PreparedArtifactReader } from './domains/growing/F232PreparedArtifactReader.js';
+import {
+  F246NeedsMeProducerAdapter,
+  F292NeedsMeProducerAdapter,
+  F306NeedsMeProducerAdapter,
+} from './domains/growing/NeedsMeProducerAdapter.js';
+import { NeedsMeProducerCatalog } from './domains/growing/NeedsMeProducerCatalog.js';
 import { ActivityTracker } from './domains/health/ActivityTracker.js';
 import { shouldTrackApiActivity } from './domains/health/activity-route-filter.js';
 import { HumanDispositionFeedbackContextService } from './domains/human-disposition/HumanDispositionFeedbackContextService.js';
@@ -216,6 +232,8 @@ import { RedisDeferredPersonMemoryReceiptStore } from './domains/memory/RedisDef
 import { PortDiscoveryService } from './domains/preview/port-discovery.js';
 import { collectRuntimePorts } from './domains/preview/port-validator.js';
 import { PreviewGateway } from './domains/preview/preview-gateway.js';
+import { createRoutingContextRuntime } from './domains/routing-context/index.js';
+import { createRuntimeInteractionRuntime } from './domains/runtime-interaction/runtime-interaction-composition.js';
 import { appendServiceLog } from './domains/services/service-lifecycle.js';
 import { createSignalArticleLookup } from './domains/signals/services/signal-thread-lookup.js';
 import { FileTasteRepository } from './domains/taste/services/TasteRepository.js';
@@ -244,7 +262,10 @@ import {
 } from './infrastructure/email/index.js';
 import { fetchLatestIssueCommentCursor } from './infrastructure/github/comment-cursors.js';
 import { buildGhCliEnv, resolveGhCliToken, withHiddenGhCliWindow } from './infrastructure/github/gh-cli-env.js';
+import { readGitHubApiResource, validateGitHubApiResource } from './infrastructure/github/github-object-validator.js';
 import type { EvalDomainId } from './infrastructure/harness-eval/domain/eval-domain-registry.js';
+import { EvalRepairCaseActionResolver } from './infrastructure/harness-eval/eval-repair-case-action-resolver.js';
+import { createEvalRepairCutover } from './infrastructure/harness-eval/eval-repair-cutover.js';
 import { ensureEvalDomainThreads } from './infrastructure/harness-eval/hub/eval-hub-thread-ensure.js';
 import { loadOrCreatePawFeelBundleSnapshotSigner } from './infrastructure/harness-eval/paw-feel-disposition/bundle-snapshot.js';
 import { RedisPawFeelReconciliationCoverageStore } from './infrastructure/harness-eval/paw-feel-disposition/coverage-store.js';
@@ -283,6 +304,7 @@ import { configSecretsRoutes } from './routes/config-secrets.js';
 import { connectorWebhookRoutes } from './routes/connector-webhooks.js';
 import { dispatchProposalRoutes } from './routes/dispatch-proposal-routes.js';
 import { buildEntityRecord, registerEntityProposalDecisionRoutes } from './routes/entity-proposal-decision-routes.js';
+import { evalRepairApprovalRoutes } from './routes/eval-repair-approval-routes.js';
 import { gameRoutes } from './routes/games.js';
 import { registerHumanDispositionFeedbackRoutes } from './routes/human-disposition-feedback-routes.js';
 import {
@@ -296,6 +318,7 @@ import {
   brakeRoutes,
   callbacksRoutes,
   capabilitiesRoutes,
+  capabilityEvolutionProgramRoutes,
   catsRoutes,
   claudeRescueRoutes,
   commandsRoutes,
@@ -356,9 +379,13 @@ import {
   refluxRoutes,
   registerCallbackAuthDebugRoute,
   registerCallbackDocsRoutes,
+  registerCustodyOfferRoutes,
+  registerEntrustedWorkReadRoutes,
   registerProfileUpdateDecisionRoutes,
   resolutionRoutes,
+  routingContextRoutes,
   rulesRoutes,
+  runtimeInteractionRoutes,
   servicesRoutes,
   sessionChainRoutes,
   sessionHandoffApproveRoutes,
@@ -389,6 +416,7 @@ import {
   worldRoutes,
 } from './routes/index.js';
 import { knowledgeFeedRoutes } from './routes/knowledge-feed.js';
+import { createLegacyLocalReviewContinuationQueueAdapter } from './routes/legacy-local-review-continuation-queue-adapter.js';
 import { marketplaceRoutes } from './routes/marketplace.js';
 import { registerPersonMemoryDecisionRoutes } from './routes/person-memory-decision-routes.js';
 import { previewRoutes } from './routes/preview.js';
@@ -407,6 +435,7 @@ import { resolveMemoryRepoPaths } from './utils/memory-root.js';
 import { findMonorepoRoot } from './utils/monorepo-root.js';
 import { emitQueueUpdated } from './utils/queue-enrichment.js';
 import { resolveUserId } from './utils/request-identity.js';
+import { resolveCatCafeSkillsSource } from './utils/skill-source.js';
 import { getDefaultUploadDir } from './utils/upload-paths.js';
 
 const PORT = parseInt(process.env.API_SERVER_PORT ?? '3004', 10);
@@ -734,6 +763,18 @@ async function main(): Promise<void> {
       appendListener?.(msg);
     },
   });
+  const runtimeInteractionRuntime = await createRuntimeInteractionRuntime({
+    ...(redis ? { redis } : {}),
+    messageStore,
+    socketManager,
+  });
+  if (runtimeInteractionRuntime.startupInvalidated.length > 0) {
+    app.log.warn(
+      { count: runtimeInteractionRuntime.startupInvalidated.length },
+      '[api] Invalidated orphaned runtime interactions from an earlier host epoch',
+    );
+  }
+  await app.register(runtimeInteractionRoutes, { service: runtimeInteractionRuntime.service });
   // Queue owners are initialized beside MessageStore so action-terminal
   // convergence can retire their projections at the completion boundary.
   const invocationQueue = new InvocationQueue();
@@ -810,6 +851,9 @@ async function main(): Promise<void> {
     | undefined;
   let localReviewVerdictService:
     | import('./domains/ball-custody/LocalReviewVerdictService.js').LocalReviewVerdictService
+    | undefined;
+  let externalReviewRecoveryService:
+    | import('./domains/ball-custody/ExternalReviewRecoveryService.js').ExternalReviewRecoveryService
     | undefined;
   let taskActionSuccessorLifecycle:
     | import('./domains/ball-custody/TaskActionSuccessorLifecycle.js').TaskActionSuccessorLifecycle
@@ -926,6 +970,12 @@ async function main(): Promise<void> {
     localReviewVerdictService = localReviewCompletion.createVerdictService({
       leaseStore: actionSuccessorLeaseStore,
       completionService,
+      truthResolver: actionSubjectTruthResolver,
+    });
+    // F167: external review recovery — stale HEAD recovery for external reviews
+    const externalReviewRecoveryMod = await import('./domains/ball-custody/ExternalReviewRecoveryService.js');
+    externalReviewRecoveryService = new externalReviewRecoveryMod.ExternalReviewRecoveryService({
+      leaseStore: actionSuccessorLeaseStore,
       truthResolver: actionSubjectTruthResolver,
     });
     taskActionSuccessorLifecycle = new taskActionLifecycleMod.TaskActionSuccessorLifecycle({
@@ -1404,6 +1454,16 @@ async function main(): Promise<void> {
     app.log.error(`[api] Failed to load cat catalog — .cat-cafe/cat-catalog.json is required: ${String(err)}`);
     throw err;
   }
+
+  // F293 Phase B: one durable composition for owner API, cognition and every
+  // dispatch preflight. No Redis means typed 503/degradation, never memory truth.
+  const routingContextRuntime = redisClient
+    ? createRoutingContextRuntime({
+        redis: redisClient,
+        projectRoot: resolveActiveProjectRoot(),
+        getConfigs: () => catRegistry.getAllConfigs(),
+      })
+    : undefined;
 
   // F247: gpt-pro is a separate credential boundary from the shared local-agent map.
   // Reconcile it only on the global sidecar owner and only when the runtime catalog
@@ -2149,6 +2209,29 @@ async function main(): Promise<void> {
   const cloudReturnBindingSigner = redis
     ? await loadOrCreateCloudReturnBindingSigner(redis)
     : new CloudReturnBindingSigner();
+  const { MemoryCloudReturnGrantStore, RedisCloudReturnGrantStore } = await import(
+    './domains/cats/services/cloud-bridge/cloud-return-grant.js'
+  );
+  const cloudReturnGrantStore = redis ? new RedisCloudReturnGrantStore(redis) : new MemoryCloudReturnGrantStore();
+  const { CloudAssistantReturnIngestService } = await import(
+    './domains/cats/services/cloud-bridge/cloud-assistant-return-ingest.js'
+  );
+  const { PersonalChromeAssistantReturnPoller } = await import(
+    './domains/cats/services/cloud-bridge/personal-chrome-host/personal-chrome-assistant-return-poller.js'
+  );
+  const personalChromeAssistantReturnPoller = new PersonalChromeAssistantReturnPoller({
+    adapter: personalChromeHostAdapter,
+    ingestService: new CloudAssistantReturnIngestService({
+      messageStore,
+      grantStore: cloudReturnGrantStore,
+      socketManager: getSocketManager(),
+      logger: bridgeLogger,
+    }),
+    logger: bridgeLogger,
+    grantPersistence: redis ? 'durable' : 'ephemeral',
+  });
+  personalChromeAssistantReturnPoller.start();
+  app.addHook('onClose', async () => personalChromeAssistantReturnPoller.stop());
   const cloudInvokeBridge = new CloudInvokeBridge({
     hostAdapter: personalChromeHostAdapter,
     pinchTabAdapter,
@@ -2308,9 +2391,11 @@ async function main(): Promise<void> {
     handles: memoryCueHandles,
     evidenceStore: memoryServices.evidenceStore,
     messageStore,
+    eventStore: memoryServices.eventMemoryStore,
     ...(personMemoryRecallService ? { personRecall: personMemoryRecallService } : {}),
     tasteRepository,
     ownerUserId: privateUserId,
+    profileRepository,
   });
   memoryCueDeps.sourceReader = memoryCueRuntime.sourceReader;
   router = new AgentRouter({
@@ -2326,6 +2411,9 @@ async function main(): Promise<void> {
     hookAuthenticationReady: sessionHookAuthenticationReady,
     claudeProjectHookCarrierReady: isClaudeProjectHookCarrierReady,
     presentationLedger,
+    ...(routingContextRuntime ? { routingContextPromptProjection: routingContextRuntime.promptProjection } : {}),
+    ...(routingContextRuntime ? { routingDispatchPreflight: routingContextRuntime.dispatchPreflight } : {}),
+    ...(routingContextRuntime ? { routingDispatchSignalObserver: routingContextRuntime.dispatchSignalAdapter } : {}),
     runtimeSessionStore,
     transcriptWriter,
     transcriptReader,
@@ -2355,12 +2443,13 @@ async function main(): Promise<void> {
     conciergeConfigStore: conciergeConfigStoreShared,
     conciergeTriagePlanStore,
     cloudInvokeBridge,
-    cloudReturnBindingSigner,
+    cloudReturnGrantStore,
     ...(a2aDispatchDispositionService ? { a2aDispatchDispositionService } : {}),
     ...(freshnessReinvokeCheck ? { freshnessReinvokeCheck } : {}),
     turnExecutionStore,
     ...(freshnessStateStore ? { freshnessStateStore } : {}),
     ...(providerNativeFreshnessFactory ? { providerNativeFreshnessFactory } : {}),
+    runtimeInteractionPort: runtimeInteractionRuntime.service,
     ...(freshnessEventLog ? { freshnessEventLog } : {}),
     ...(freshnessOutputCommitCoordinator ? { freshnessOutputCommitCoordinator } : {}),
     ...(injectionTraceStore ? { injectionTraceStore } : {}),
@@ -2369,6 +2458,8 @@ async function main(): Promise<void> {
       messageStore,
     ),
     memoryCuePromptService: memoryCueRuntime.promptService,
+    profileCueOpportunitySource: memoryCueRuntime.profileOpportunitySource,
+    eventCueOpportunitySource: memoryCueRuntime.eventOpportunitySource,
     profileRepository,
     ...(writeOpportunityTerminalLedger ? { writeOpportunityTerminalLedger } : {}),
     ...(writeOpportunityDeliveryStore ? { writeOpportunityDeliveryStore } : {}),
@@ -2477,6 +2568,7 @@ async function main(): Promise<void> {
           queueProcessor,
           invocationQueue,
           ...(ballCustodyIngest ? { ballCustody: ballCustodyIngest } : {}),
+          ...(routingContextRuntime ? { routingDispatchPreflight: routingContextRuntime.dispatchPreflight } : {}),
           log: app.log,
         },
         {
@@ -2916,6 +3008,29 @@ async function main(): Promise<void> {
     invocationTracker,
     queueProcessor,
   });
+  const legacyLocalReviewDispositionService = actionSuccessorLeaseStore
+    ? new (
+        await import('./domains/ball-custody/LegacyLocalReviewDispositionService.js')
+      ).LegacyLocalReviewDispositionService({
+        messageStore,
+        leaseStore: actionSuccessorLeaseStore,
+        invocationRecordStore,
+        turnExecutionStore,
+        enqueueContinuation: createLegacyLocalReviewContinuationQueueAdapter({
+          router: router as unknown as import('./routes/callback-a2a-trigger.js').A2ATriggerDeps['router'],
+          invocationRecordStore,
+          socketManager: socketManager!,
+          messageStore,
+          invocationTracker,
+          deliveryCursorStore,
+          queueProcessor,
+          invocationQueue,
+          ...(ballCustodyIngest ? { ballCustody: ballCustodyIngest } : {}),
+          log: app.log,
+        }),
+      })
+    : undefined;
+
   await app.register(messageActionsRoutes, {
     messageStore,
     socketManager,
@@ -2924,6 +3039,8 @@ async function main(): Promise<void> {
     queueCustodyCoordinator,
     queueProcessor,
     indexBuilder: memoryServices.indexBuilder,
+    ownerUserId: privateUserId,
+    ...(legacyLocalReviewDispositionService ? { legacyLocalReviewDispositionService } : {}),
   });
   // F155: Frontend-facing guide actions (no MCP auth, uses userId header)
   if (threadStore) {
@@ -2936,6 +3053,9 @@ async function main(): Promise<void> {
   }
   await app.register(catsRoutes, {
     resolveContextCapacitySnapshot: (catId) => router.contextCapacitySnapshot(catId),
+  });
+  await app.register(routingContextRoutes, {
+    ...(routingContextRuntime ? { runtime: routingContextRuntime } : {}),
   });
 
   // F182 Phase D: disable-impact endpoint
@@ -2956,7 +3076,10 @@ async function main(): Promise<void> {
     return { pools, poolCount: acpPoolRegistry.size };
   });
 
-  await app.register(quotaRoutes);
+  await app.register(quotaRoutes, {
+    ...(routingContextRuntime ? { routingQuotaObserver: routingContextRuntime.quotaSignalAdapter } : {}),
+    routingOwnerId: privateUserId,
+  });
   // F128: Daily token usage aggregation
   await app.register(usageRoutes, { invocationRecordStore });
   // F150: Tool/Skill/MCP usage statistics
@@ -3163,6 +3286,12 @@ async function main(): Promise<void> {
         harnessFeedbackRoot: evalHarnessFeedbackRoot,
         artifactTruth: new GitTrajectoryInspectorArtifactTruth(repoRoot),
       }),
+      candidateLocator: async ({ invocationId, ownerUserId }) => {
+        const execution = await turnExecutionStore.get(invocationId);
+        return execution && execution.userId === ownerUserId
+          ? { threadId: execution.threadId, catId: execution.catId }
+          : undefined;
+      },
       canonicalResolver: (input) =>
         resolveCanonicalInvocationTrajectory(input, {
           invocationRecordStore,
@@ -3171,8 +3300,18 @@ async function main(): Promise<void> {
           threadStore,
           readInvocationEvents: async (session, invocationId) => {
             if (session.userId !== input.userId) return [];
-            return (await transcriptReader.readAllEvents(session.id, session.threadId, session.catId)).filter(
-              (event) => event.invocationId === invocationId,
+            if (input.invocationEventsBySession) {
+              return (input.invocationEventsBySession.get(session.id) ?? []).filter(
+                (event) => event.invocationId === invocationId,
+              );
+            }
+            return (
+              (await transcriptReader.readInvocationEvents(
+                session.id,
+                session.threadId,
+                session.catId,
+                invocationId,
+              )) ?? []
             );
           },
         }),
@@ -3248,6 +3387,9 @@ async function main(): Promise<void> {
     const { FrictionMetricsProviderImpl } = await import(
       './infrastructure/harness-eval/friction/friction-metrics-provider-impl.js'
     );
+    const { createFrictionRepairTargetResolver } = await import(
+      './infrastructure/harness-eval/friction/friction-repair-target-resolver.js'
+    );
     const frictionProvider = new FrictionMetricsProviderImpl({
       messageStore,
       taskOutcomeStore,
@@ -3255,7 +3397,10 @@ async function main(): Promise<void> {
       harnessFeedbackRoot: resolve(repoRoot, 'docs', 'harness-feedback'),
       ...(memoryServices.embeddingService ? { embeddingService: memoryServices.embeddingService } : {}),
     });
-    verdictGenerators['eval:friction'] = createFrictionGeneratorAdapter(frictionProvider);
+    verdictGenerators['eval:friction'] = createFrictionGeneratorAdapter(
+      frictionProvider,
+      createFrictionRepairTargetResolver({ threadStore, backlogStore, logger: app.log }),
+    );
   }
 
   // F236 Track-2 — anchor-first eval domain. Pure ctor (no store deps), unconditional.
@@ -3301,6 +3446,104 @@ async function main(): Promise<void> {
     callbackRegistry: registry,
     agentKeyRegistry,
     releaseTruth: evalReleaseTruth,
+  });
+  let evolutionRoundDispatch:
+    | ((context: { programId: string }) => Promise<{ outcome: string; dedupeKey: string }>)
+    | undefined;
+  let evolutionObservationDispatch:
+    | ((input: {
+        programEventId: string;
+        previousConnectedOwnerSurfaces: number;
+        currentConnectedOwnerSurfaces: number;
+      }) => Promise<unknown>)
+    | undefined;
+  const evolutionProgramService = redis
+    ? await (async () => {
+        const [
+          { EvolutionProgramService },
+          { RedisEvolutionProgramEventLog },
+          { ProgramJoinValidator },
+          { createProgramEvidenceProofResolver },
+          { createProgramEvaluationOwnerResolver },
+          { createFileMeasurementDecisionProofResolver },
+          { createEvolutionOwnerSurfaceResolvers },
+          { createEvolutionProgramTriggerRegistrationProvider },
+          { resolveCanonicalInvocationTrajectory },
+        ] = await Promise.all([
+          import('./infrastructure/capability-evolution/program-service.js'),
+          import('./infrastructure/capability-evolution/program-event-log.js'),
+          import('./infrastructure/capability-evolution/program-join-validator.js'),
+          import('./infrastructure/capability-evolution/program-evidence-proof-resolver.js'),
+          import('./infrastructure/capability-evolution/program-evaluation-owner-resolver.js'),
+          import('./infrastructure/harness-eval/measurement/measurement-decision-proof-resolver.js'),
+          import('./infrastructure/capability-evolution/program-owner-surface-resolvers.js'),
+          import('./infrastructure/capability-evolution/program-trigger-bridge.js'),
+          import('./domains/cats/services/session/CanonicalInvocationTrajectoryResolver.js'),
+        ]);
+        const decisionProofResolver = createFileMeasurementDecisionProofResolver({
+          repoRoot: findMonorepoRoot(process.cwd()),
+        });
+        const joinValidator = new ProgramJoinValidator({
+          trajectoryResolver: async ({ ownerUserId, invocationId }) => {
+            const result = await resolveCanonicalInvocationTrajectory(
+              { userId: ownerUserId, invocationId },
+              {
+                invocationRecordStore,
+                turnExecutionStore,
+                sessionChainStore,
+                threadStore,
+                readInvocationEvents: async (session, targetInvocationId) =>
+                  (await transcriptReader.readInvocationEvents(
+                    session.id,
+                    session.threadId,
+                    session.catId,
+                    targetInvocationId,
+                  )) ?? [],
+              },
+            );
+            return result.status === 200
+              ? { status: 'resolved' as const, ...result.body }
+              : { status: 'missing' as const };
+          },
+          sourceResolvers: createEvolutionOwnerSurfaceResolvers({
+            pawFeelEventLog: pawFeelDispositionEventLog,
+            humanDispositionLedger: humanDispositionLedger ?? undefined,
+            threadStore,
+          }),
+          evidenceProofResolver: createProgramEvidenceProofResolver({
+            decisionProofResolver,
+          }),
+        });
+        const triggerRegistration = createEvolutionProgramTriggerRegistrationProvider({
+          harnessFeedbackRoot: evalHarnessFeedbackRoot,
+        });
+        return new EvolutionProgramService({
+          eventLog: new RedisEvolutionProgramEventLog(redis),
+          joinValidator,
+          // Phase 3 evaluation reads owner truth from the same canonical F267 decision proofs.
+          evaluationOwnerResolver: createProgramEvaluationOwnerResolver({ decisionProofResolver }),
+          triggerRegistration: () => (evolutionObservationDispatch ? triggerRegistration() : undefined),
+          dispatchObservationTrigger: (input) => {
+            if (!evolutionObservationDispatch) {
+              throw new Error('F192 capability-evolution threshold dispatch is unavailable');
+            }
+            return evolutionObservationDispatch(input);
+          },
+          // A round opens only if F192 says it opened. No dispatcher = the Program cannot open one,
+          // which is the safe direction: it must never start a round on its own authority.
+          // A round opens only if F192 says it opened. The Program must never start one on its own
+          // authority, so an unwired dispatcher reports `unavailable` rather than pretending.
+          dispatchEvaluationTrigger: async (context: { programId: string }) => {
+            if (!evolutionRoundDispatch) return { outcome: 'unavailable', dedupeKey: '' };
+            return evolutionRoundDispatch(context);
+          },
+        });
+      })()
+    : undefined;
+  await app.register(capabilityEvolutionProgramRoutes, {
+    service: evolutionProgramService,
+    callbackRegistry: registry,
+    agentKeyRegistry,
   });
   if (evalReleaseTruth.loadedRuntimeHead) {
     app.log.info(`[api] F266: release truth frozen at runtime HEAD ${evalReleaseTruth.loadedRuntimeHead}`);
@@ -3441,67 +3684,26 @@ async function main(): Promise<void> {
     app.log.info('[api] F101 game routes registered');
   }
 
-  // Phase D (AC-D1): validate repo exists via `gh repo view` before PR tracking registration.
-  // Generic — works for any GitHub repo the caller has access to, not hardcoded to ours.
-  // Cloud P1: distinguish "repo not found" (return false) from infra failure (throw).
+  // Phase D (AC-D1): validate the repository through the same REST credential path
+  // as PR/issue validation. Only a verified 404 is represented as false.
   const validateRepo = async (repoFullName: string): Promise<boolean> => {
-    const { execFile } = await import('node:child_process');
-    const { promisify } = await import('node:util');
-    const execFileAsync = promisify(execFile);
-    try {
-      await execFileAsync('gh', ['repo', 'view', repoFullName, '--json', 'name'], getGitHubExecOptions(10_000));
-      return true;
-    } catch (err: unknown) {
-      // gh ran but repo not found/no access → process exit code is a number
-      if (err instanceof Error && 'code' in err && typeof (err as Record<string, unknown>).code === 'number') {
-        return false;
-      }
-      // Infrastructure failure (gh not found, timeout, auth broken) → propagate
-      throw err;
-    }
+    return validateGitHubApiResource(`repos/${repoFullName}`, '.full_name', { token: getGitHubToken() });
   };
 
   // F202 Phase 2 follow-up: validate specific PR exists (number-level, not just repo)
   const validatePr = async (repoFullName: string, prNumber: number): Promise<boolean> => {
-    const { execFile } = await import('node:child_process');
-    const { promisify } = await import('node:util');
-    const execFileAsync = promisify(execFile);
-    try {
-      await execFileAsync(
-        'gh',
-        ['api', `repos/${repoFullName}/pulls/${prNumber}`, '--jq', '.number'],
-        getGitHubExecOptions(10_000),
-      );
-      return true;
-    } catch (err: unknown) {
-      if (err instanceof Error && 'code' in err && typeof (err as Record<string, unknown>).code === 'number') {
-        return false;
-      }
-      throw err;
-    }
+    return validateGitHubApiResource(`repos/${repoFullName}/pulls/${prNumber}`, '.number', {
+      token: getGitHubToken(),
+    });
   };
 
   // F202 Phase 2 follow-up: validate specific issue exists (number-level, not just repo)
   // P2-cloud: also reject PR numbers — GitHub Issues API returns PRs with .pull_request set
   const validateIssue = async (repoFullName: string, issueNumber: number): Promise<boolean> => {
-    const { execFile } = await import('node:child_process');
-    const { promisify } = await import('node:util');
-    const execFileAsync = promisify(execFile);
-    try {
-      const { stdout } = await execFileAsync(
-        'gh',
-        ['api', `repos/${repoFullName}/issues/${issueNumber}`, '--jq', '.pull_request != null'],
-        getGitHubExecOptions(10_000),
-      );
-      // If .pull_request is set, this is a PR not a pure issue — reject
-      if (stdout.trim() === 'true') return false;
-      return true;
-    } catch (err: unknown) {
-      if (err instanceof Error && 'code' in err && typeof (err as Record<string, unknown>).code === 'number') {
-        return false;
-      }
-      throw err;
-    }
+    const stdout = await readGitHubApiResource(`repos/${repoFullName}/issues/${issueNumber}`, '.pull_request != null', {
+      token: getGitHubToken(),
+    });
+    return stdout !== null && stdout.trim() !== 'true';
   };
 
   // F126: Create LimbRegistry + Phase B deps for device/hardware capability management
@@ -4033,16 +4235,22 @@ async function main(): Promise<void> {
   }
   const meetingArtifactReaderHolder: import('./routes/callback-meeting-artifact-routes.js').MeetingArtifactReaderHolder =
     {};
+  const skillConsumptionReceipts = new SkillConsumptionReceiptService({
+    skillSourceRoot: await resolveCatCafeSkillsSource(),
+    auditLog: getEventAuditLog(),
+  });
   const callbackOpts = {
     registry,
     agentKeyRegistry,
     cloudReturnBindingSigner,
+    cloudReturnGrantStore,
     messageStore,
     socketManager,
     callbackAuthNotifier,
     taskStore,
     backlogStore,
     threadStore,
+    conciergeConfigStore: conciergeConfigStoreShared,
     sessionChainStore,
     runtimeSessionStore,
     proposalStore,
@@ -4060,10 +4268,12 @@ async function main(): Promise<void> {
         }
       : {}),
     memoryCueDeps,
+    skillConsumptionDeps: { receipts: skillConsumptionReceipts },
     approvalIngress,
     profileRepository,
     agentRegistry,
     router,
+    ...(routingContextRuntime ? { routingDispatchPreflight: routingContextRuntime.dispatchPreflight } : {}),
     invocationRecordStore,
     turnExecutionStore,
     invocationTracker,
@@ -4077,6 +4287,7 @@ async function main(): Promise<void> {
     verifyPrReviewEventWaitCoverage,
     ...(externalReviewVerdictService ? { externalReviewVerdictService } : {}),
     ...(localReviewVerdictService ? { localReviewVerdictService } : {}),
+    ...(externalReviewRecoveryService ? { externalReviewRecoveryService } : {}),
     ...(workflowSopStore ? { workflowSopStore } : {}),
     queueProcessor,
     invocationQueue,
@@ -4276,14 +4487,43 @@ async function main(): Promise<void> {
       `(created=${officialSignalRouteBootstrap.created}, preserved=${officialSignalRouteBootstrap.preserved})`,
   );
   const { createDormantPluginRuntimeComposition } = await import('./domains/plugin/runtime-composition.js');
-  const externalPluginRuntime = createDormantPluginRuntimeComposition({
+  const { createCollectiveAgentVerifier } = await import(
+    './domains/plugin/builtin-runtime/collective-agent-verifier.js'
+  );
+  const { CollectiveIngressDispatcher } = await import(
+    './domains/plugin/builtin-runtime/collective-ingress-dispatcher.js'
+  );
+  const resolveCollectiveAgentIdentity = (catId: string) => {
+    const config = catRegistry.tryGet(catId as CatId)?.config;
+    return config ? { agentId: catId, catId, displayName: config.displayName } : undefined;
+  };
+  const pluginRuntime = createDormantPluginRuntimeComposition({
     projectRoot: resolveActiveProjectRoot(),
     routes: signalRouteStore,
     intakes: meetingIntakeStore,
     messageStore,
     ...(redis ? { redis } : {}),
+    collectiveConnector: {
+      verifyAgent: createCollectiveAgentVerifier({
+        resolveCatDisplayName: (catId) => resolveCollectiveAgentIdentity(catId)?.displayName,
+        readTurnExecution: (invocationId) => turnExecutionStore.get(invocationId),
+      }),
+      createIngressDispatcher: (connector) =>
+        new CollectiveIngressDispatcher({
+          connector,
+          threadStore,
+          messageStore,
+          invocationQueue,
+          queueProcessor,
+          socketManager: {
+            broadcastToRoom: (room, event, data) => socketManager?.broadcastToRoom(room, event, data),
+            emitToUser: (userId, event, data) => socketManager?.emitToUser(userId, event, data),
+          },
+          isCatAvailable: (catId) => isCatAvailable(catId),
+        }),
+    },
   });
-  const externalPluginRecovery = await externalPluginRuntime.recoverAfterRestart();
+  const externalPluginRecovery = await pluginRuntime.recoverAfterRestart();
   app.log.info(
     `[api] K-2 external plugin runtime recovered ` +
       `(sessions=${externalPluginRecovery.brokerSessions}, instances=${externalPluginRecovery.inventoryInstances}, ` +
@@ -4291,10 +4531,10 @@ async function main(): Promise<void> {
       `live=${externalPluginRecovery.resumeRequested > 0 ? 'reconciling' : 'dormant'})`,
   );
   const { OfficialPluginAuthService } = await import('./domains/plugin/official-plugin-auth.js');
-  const officialPluginAuth = new OfficialPluginAuthService({ packages: externalPluginRuntime.packages });
+  const officialPluginAuth = new OfficialPluginAuthService({ packages: pluginRuntime.packages });
   app.addHook('onClose', async () => {
     await officialPluginAuth.shutdown();
-    await externalPluginRuntime.shutdown('api_shutdown');
+    await pluginRuntime.shutdown('api_shutdown');
   });
   const { OFFICIAL_PLUGIN_POLICIES } = await import('./domains/plugin/official-catalog.js');
   const { RefreshingOfficialPluginCatalog } = await import('./domains/plugin/official-catalog-provider.js');
@@ -4306,8 +4546,8 @@ async function main(): Promise<void> {
   const { registerOfficialPluginRoutes } = await import('./routes/plugin-official-routes.js');
   const officialPluginCatalog = new RefreshingOfficialPluginCatalog({ policies: OFFICIAL_PLUGIN_POLICIES });
   const officialPluginHistoryImport = new OfficialPluginHistoryImportService({
-    inventory: externalPluginRuntime.inventoryStore,
-    broker: externalPluginRuntime.broker,
+    inventory: pluginRuntime.inventoryStore,
+    broker: pluginRuntime.broker,
     parseReference: (reference) => {
       const locator = parseFeishuMinutesReference(reference);
       if (locator.kind !== 'minute') {
@@ -4323,17 +4563,28 @@ async function main(): Promise<void> {
     normalizeArtifact: normalizeGeneratedArtifact,
   });
   registerOfficialPluginRoutes(app, {
-    inventory: externalPluginRuntime.inventoryStore,
-    lifecycle: externalPluginRuntime.lifecycle,
+    inventory: pluginRuntime.inventoryStore,
+    lifecycle: pluginRuntime.lifecycle,
     auth: officialPluginAuth,
     catalogProvider: officialPluginCatalog,
     installer: new OfficialPluginPackageInstaller({
-      inventory: externalPluginRuntime.inventory,
-      packagesRoot: externalPluginRuntime.paths.packagesRoot,
+      inventory: pluginRuntime.inventory,
+      packagesRoot: pluginRuntime.paths.packagesRoot,
       catalogProvider: officialPluginCatalog,
     }),
     historyImport: officialPluginHistoryImport,
     meetingIntake: new OfficialPluginMeetingIntakeService({ homeDirectory: homedir() }),
+  });
+  if (!pluginRuntime.collectiveConnectorRuntime) {
+    throw new Error('Collective Connector builtin runtime was not composed');
+  }
+  const { registerCollectiveConnectorRoutes } = await import('./routes/collective-connector-routes.js');
+  registerCollectiveConnectorRoutes(app, {
+    runtime: pluginRuntime.collectiveConnectorRuntime,
+    callbackRegistry: registry,
+    resolveAgentIdentity: resolveCollectiveAgentIdentity,
+    threadStore,
+    isCatAvailable: (catId) => isCatAvailable(catId),
   });
   const { registerPersonalChromePluginRoutes } = await import('./routes/personal-chrome-plugin-routes.js');
   const personalChromeInstallModule = (await import(
@@ -4347,18 +4598,47 @@ async function main(): Promise<void> {
     port: personalChromeInstallModule.createPersonalChromePluginPort({ projectRoot: resolveActiveProjectRoot() }),
   });
 
+  // F246/F313: one registry and one renderer projection. The F266 writer stays
+  // fenced until an owner-backed resolver/dispatcher and a v1_active epoch are
+  // supplied by an explicit production migration.
+  const f266ApprovalAdapter = new F266ApprovalAdapter(reevalClosureEventLog);
+  const f266EpochAuthority = redis ? new RedisApprovalLifecycleEpochAuthority(redis) : undefined;
+  const f266CaseActionResolver = reevalClosureEventLog
+    ? new EvalRepairCaseActionResolver(evalHarnessFeedbackRoot, reevalClosureEventLog)
+    : undefined;
+  const f266Cutover = await createEvalRepairCutover({
+    lifecycleVersion: 1,
+    loaderVersion: 1,
+    routeVersion: 1,
+    materializerVersion: 1,
+    ...(reevalClosureEventLog ? { eventLog: reevalClosureEventLog } : {}),
+    approvalIngress,
+    approvalAdapter: f266ApprovalAdapter,
+    ...(f266EpochAuthority ? { epochAuthority: f266EpochAuthority } : {}),
+    ...(f266CaseActionResolver
+      ? { caseActionResolver: f266CaseActionResolver.resolve.bind(f266CaseActionResolver) }
+      : {}),
+  });
+  if (f266Cutover.status === 'blocked') {
+    app.log.info(
+      { missing: f266Cutover.missing },
+      '[api] F313 Phase C: eval repair Approval cutover remains fail-closed',
+    );
+  }
+
   // F246: Approval Hub — unified operator approval center, including F292 event-origin intake.
   const approvalProducerRegistry = new ApprovalProducerRegistry({
-    F128: { adapter: new F128ApprovalAdapter(proposalStore) },
-    F139: { adapter: new F139ApprovalAdapter(scheduleMutationProposalStore) },
-    F193: { adapter: new F193ApprovalAdapter(dispatchProposalStore) },
-    F221: { adapter: new F221ApprovalAdapter(tasteProposalStore) },
-    F225: { adapter: new F225ApprovalAdapter(handoffProposalStore) },
-    F231: { adapter: new F231ApprovalAdapter(profileUpdateProposalStore) },
-    F276: { adapter: new F276ApprovalAdapter(personMemoryStore) },
-    F292: { adapter: new F292ApprovalAdapter(meetingIntakeStore) },
-    F260: {
-      adapter: new F260ApprovalAdapter(entityProposalStore, (proposal) => {
+    F128: bindLegacyApprovalProducer(new F128ApprovalAdapter(proposalStore)),
+    F139: bindLegacyApprovalProducer(new F139ApprovalAdapter(scheduleMutationProposalStore)),
+    F193: bindLegacyApprovalProducer(new F193ApprovalAdapter(dispatchProposalStore)),
+    F221: bindLegacyApprovalProducer(new F221ApprovalAdapter(tasteProposalStore)),
+    F225: bindLegacyApprovalProducer(new F225ApprovalAdapter(handoffProposalStore)),
+    F231: bindLegacyApprovalProducer(new F231ApprovalAdapter(profileUpdateProposalStore)),
+    F276: bindLegacyApprovalProducer(new F276ApprovalAdapter(personMemoryStore)),
+    F292: bindLegacyApprovalProducer(new F292ApprovalAdapter(meetingIntakeStore)),
+    F306: bindLegacyApprovalProducer(new F306ApprovalAdapter(runtimeInteractionRuntime.store)),
+    F260: bindLegacyApprovalProducer(
+      new F260ApprovalAdapter(entityProposalStore, (proposal) => {
         if (!memoryServices.evidenceStore.inspectEntityConflict) {
           throw new Error('F260: evidenceStore.inspectEntityConflict not available — Hub projection blocked');
         }
@@ -4367,7 +4647,51 @@ async function main(): Promise<void> {
           proposal.ownerUserId,
         );
       }),
-    },
+    ),
+    F266: bindV1ApprovalProducer(f266ApprovalAdapter),
+  });
+  const needsMeProducerCatalog = new NeedsMeProducerCatalog([
+    new F246NeedsMeProducerAdapter(approvalProducerRegistry),
+    new F292NeedsMeProducerAdapter(meetingIntakeStore),
+    new F306NeedsMeProducerAdapter(runtimeInteractionRuntime.store),
+  ]);
+  const { createProducerAttentionReevaluationTemplate } = await import(
+    './domains/growing/ProducerAttentionReevaluationTaskSpec.js'
+  );
+  templateRegistry.register(
+    createProducerAttentionReevaluationTemplate({
+      tasks: taskStore,
+      producerCatalog: needsMeProducerCatalog,
+      invalidateProjection: (ownerUserId) => {
+        socketManager?.emitToUser(ownerUserId, 'entrusted_work_projection_invalidated', { ownerUserId });
+      },
+    }),
+  );
+  const preparedArtifactReader = new F232PreparedArtifactReader({
+    messages: messageStore,
+    tasks: taskStore,
+    threads: threadStore,
+  });
+  const entrustedWorkOwnerRead = new EntrustedWorkOwnerReadService({
+    tasks: taskStore,
+    producerCatalog: needsMeProducerCatalog,
+    artifactReader: preparedArtifactReader,
+  });
+  await app.register(async (scope) => {
+    registerEntrustedWorkReadRoutes(scope, {
+      service: entrustedWorkOwnerRead,
+      callbackRegistry: registry,
+      agentKeyRegistry,
+    });
+  });
+  await app.register(async (scope) => {
+    registerCustodyOfferRoutes(scope, {
+      messageStore,
+      taskStore,
+      callbackRegistry: registry,
+      agentKeyRegistry,
+      socketManager,
+    });
   });
   // F292 PR2: durable Host-owned MeetingIntake truth and recovery surface.
   if (redis) {
@@ -4384,18 +4708,20 @@ async function main(): Promise<void> {
       leases: new RedisSourceAccessLeaseStore(redis),
       resolvers: sourceResolvers,
     });
+    const meetingArtifactDispatcher = new ThreadMeetingArtifactDispatcher({
+      threadStore,
+      messageStore,
+      invocationQueue,
+      queueProcessor,
+      socketManager,
+      supportsPresentationRetry: (catId) =>
+        supportsWriteOpportunityPresentationCapability(router.contextCapability(catId)),
+    });
     const actions = new MeetingIntakeActionService({
       store: meetingIntakeStore,
       meeting: meetingService,
       sources: sourceAccess,
-      dispatcher: new ThreadMeetingArtifactDispatcher({
-        threadStore,
-        messageStore,
-        invocationQueue,
-        queueProcessor,
-        supportsPresentationRetry: (catId) =>
-          supportsWriteOpportunityPresentationCapability(router.contextCapability(catId)),
-      }),
+      dispatcher: meetingArtifactDispatcher,
     });
     meetingArtifactReaderHolder.current = new MeetingArtifactResourceService({
       intakes: meetingIntakeStore,
@@ -4407,10 +4733,21 @@ async function main(): Promise<void> {
       service: meetingService,
       actions,
     });
+    const { f296AlphaDynamicCanaryRoutes } = await import('./routes/f296-alpha-dynamic-canary-routes.js');
+    await app.register(f296AlphaDynamicCanaryRoutes, {
+      enabled: process.env.CAT_CAFE_DEPLOYMENT_ID === 'alpha',
+      threadStore,
+      dispatcher: meetingArtifactDispatcher,
+      invocationTracker,
+    });
   }
 
   await app.register(approvalHubRoutes, {
     registry: approvalProducerRegistry,
+  });
+  await app.register(evalRepairApprovalRoutes, {
+    callbackRegistry: registry,
+    ...(f266Cutover.status === 'active' ? { service: f266Cutover.service } : {}),
   });
   if (personMemoryStore) {
     registerPersonMemoryDecisionRoutes(app, { store: personMemoryStore, socketManager });
@@ -4518,6 +4855,7 @@ async function main(): Promise<void> {
               ...(queueProcessor ? { queueProcessor } : {}),
               ...(invocationQueue ? { invocationQueue } : {}),
               ...(ballCustodyIngest ? { ballCustody: ballCustodyIngest } : {}),
+              ...(routingContextRuntime ? { routingDispatchPreflight: routingContextRuntime.dispatchPreflight } : {}),
               log: app.log,
             },
             {
@@ -5001,6 +5339,7 @@ async function main(): Promise<void> {
     callbackRegistry: registry,
     agentKeyRegistry,
     threadStore,
+    skillConsumptionReceipts,
     socketEmit: (event, data, room) => {
       socketManager?.broadcastToRoom(room, event, data);
     },
@@ -5021,8 +5360,8 @@ async function main(): Promise<void> {
     socketEmit: (event, data, room) => {
       socketManager?.broadcastToRoom(room, event, data);
     },
-    socketEmitWithAck: async (event, data, room) =>
-      socketManager ? socketManager.broadcastToRoomWithAck(room, event, data) : [],
+    socketEmitWithAck: async (event, data, room, timeoutMs) =>
+      socketManager ? socketManager.broadcastToRoomWithAck(room, event, data, timeoutMs) : [],
     callbackRegistry: registry,
     agentKeyRegistry,
     threadStore,
@@ -5050,6 +5389,68 @@ async function main(): Promise<void> {
     invocationTracker,
     resolveSessionSealLiveness: (threadId, ownerUserId) =>
       activeExecutionService.resolveWorkingPresence(threadId, ownerUserId),
+  });
+  const { nativeSessionControlRoutes } = await import('./routes/native-session-control-routes.js');
+  await app.register(nativeSessionControlRoutes, {
+    enabled: process.env.CAT_CAFE_DEPLOYMENT_ID === 'alpha',
+    sessionChainStore,
+    threadStore,
+    agentRegistry,
+    contextEpochOwner,
+    deliveryCursorStore,
+    isSessionBusy: (threadId, catId, userId) =>
+      (invocationTracker.has(threadId, catId) && invocationTracker.getUserId(threadId, catId) === userId) ||
+      queueProcessor.hasPendingForCat(threadId, userId, catId),
+  });
+  const { nativeThreadGoalRoutes } = await import('./routes/native-thread-goal-routes.js');
+  await app.register(nativeThreadGoalRoutes, {
+    sessionChainStore,
+    threadStore,
+    messageStore,
+    agentRegistry,
+    isSessionBusy: (threadId, catId, userId) =>
+      (invocationTracker.has(threadId, catId) && invocationTracker.getUserId(threadId, catId) === userId) ||
+      queueProcessor.hasPendingForCat(threadId, userId, catId),
+    publishMessage: (threadId, stored) =>
+      socketManager?.broadcastToRoom(`thread:${threadId}`, 'connector_message', {
+        threadId,
+        message: {
+          id: stored.id,
+          type: 'cat',
+          catId: stored.catId,
+          content: stored.content,
+          timestamp: stored.timestamp,
+          extra: stored.extra,
+        },
+      }),
+  });
+  const { nativeThreadReviewRoutes } = await import('./routes/native-thread-review-routes.js');
+  await app.register(nativeThreadReviewRoutes, {
+    sessionChainStore,
+    threadStore,
+    messageStore,
+    agentRegistry,
+    isSessionBusy: (threadId, catId, userId) =>
+      (invocationTracker.has(threadId, catId) && invocationTracker.getUserId(threadId, catId) === userId) ||
+      queueProcessor.hasPendingForCat(threadId, userId, catId),
+    publishMessage: (threadId, stored) =>
+      socketManager?.broadcastToRoom(`thread:${threadId}`, 'connector_message', {
+        threadId,
+        message: {
+          id: stored.id,
+          type: 'cat',
+          catId: stored.catId,
+          content: stored.content,
+          timestamp: stored.timestamp,
+          extra: stored.extra,
+        },
+      }),
+  });
+  const { nativeThreadStatusRoutes } = await import('./routes/native-thread-status-routes.js');
+  await app.register(nativeThreadStatusRoutes, {
+    sessionChainStore,
+    threadStore,
+    agentRegistry,
   });
   await app.register(sessionTranscriptRoutes, {
     invocationRecordStore,
@@ -5529,6 +5930,7 @@ async function main(): Promise<void> {
           socketManager: socketManager ?? undefined,
           invocationQueue,
           ...(a2aDispatchDispositionService ? { a2aDispatchDispositionService } : {}),
+          ...(actionSuccessorLeaseStore ? { legacyLocalReviewDispositionLeaseStore: actionSuccessorLeaseStore } : {}),
           resumePrestartRetirement: (entries) => queueProcessor.resumeDurablePrestartRetirement(entries),
           ...(ballCustodyIngest ? { ballCustody: ballCustodyIngest } : {}),
         });
@@ -5709,6 +6111,7 @@ async function main(): Promise<void> {
     queueProcessor,
     queueCustodyCoordinator,
     messageStore,
+    actionSuccessorLeaseStore,
     threadMetaLookup: async (threadId) => {
       const thread = await threadStore.get(threadId);
       if (!thread) return undefined;
@@ -6477,6 +6880,34 @@ async function main(): Promise<void> {
   // A missed/degraded watch is recovered by startup replay and the weekly time fallback.
   const designGateTriggerProvider = designGateEpisodeSourceProvider;
   const evalDomainTriggerStore = evalScheduleOpts.triggerStore;
+  if (evalDomainTriggerStore) {
+    const { dispatchEvolutionProgramThresholdTrigger } = await import(
+      './infrastructure/capability-evolution/program-trigger-bridge.js'
+    );
+    const { dispatchEvolutionProgramRoundTrigger } = await import(
+      './infrastructure/capability-evolution/program-trigger-bridge.js'
+    );
+    evolutionRoundDispatch = (context) =>
+      dispatchEvolutionProgramRoundTrigger({
+        harnessFeedbackRoot: evalScheduleOpts.harnessFeedbackRoot,
+        programId: context.programId,
+        store: evalDomainTriggerStore,
+        deliver: schedulerDeliver,
+        invokeTrigger,
+        defaultUserId: evalScheduleOpts.defaultUserId,
+        wiredPublishDomains,
+      });
+    evolutionObservationDispatch = (input) =>
+      dispatchEvolutionProgramThresholdTrigger({
+        harnessFeedbackRoot: evalScheduleOpts.harnessFeedbackRoot,
+        ...input,
+        store: evalDomainTriggerStore,
+        deliver: schedulerDeliver,
+        invokeTrigger,
+        defaultUserId: evalScheduleOpts.defaultUserId,
+        wiredPublishDomains,
+      });
+  }
   if (designGateTriggerProvider && evalDomainTriggerStore) {
     const { loadDesignGateThresholdDomain, observeDesignGateThresholdTrigger, startDesignGateThresholdObserver } =
       await import('./infrastructure/harness-eval/design-gate/design-gate-threshold-trigger.js');
@@ -6514,32 +6945,75 @@ async function main(): Promise<void> {
       { getEvalCatOverride },
       { ReevalCaseResponsibilityService },
       { ReevalCaseReevaluationService },
+      { createReevalCaseTaskQueueDelivery, ReevalCaseTaskDispatcher },
       { resolveUniqueFeatureThreadId },
     ] = await Promise.all([
       import('./infrastructure/harness-eval/reeval-closure-task-spec.js'),
       import('./infrastructure/harness-eval/domain/eval-domain-override.js'),
       import('./infrastructure/harness-eval/reeval-case-responsibility.js'),
       import('./infrastructure/harness-eval/reeval-case-reevaluation.js'),
+      import('./infrastructure/harness-eval/reeval-case-task-dispatch.js'),
       import('./routes/feature-thread-resolver.js'),
     ]);
-    const responsibilityService = actionSuccessorAdmissionService
-      ? new ReevalCaseResponsibilityService({
-          taskStore,
-          eventLog: reevalClosureEventLog,
-          admissionService: actionSuccessorAdmissionService,
-          resolveFeatureThreadId: (featureId, ownerUserId) =>
-            resolveUniqueFeatureThreadId(threadStore, backlogStore, ownerUserId, featureId, app.log),
-          ownerUserId: privateUserId,
+    const f266AdmissionService = actionSuccessorAdmissionService;
+    const taskDispatcher = f266AdmissionService
+      ? new ReevalCaseTaskDispatcher({
+          messageStore,
+          log: { warn: app.log.warn.bind(app.log) },
+          deliver: createReevalCaseTaskQueueDelivery(async (input) => {
+            if (!socketManager) return { accepted: false };
+            const result = await enqueueA2ATargets(
+              {
+                router: router as unknown as import('./routes/callback-a2a-trigger.js').A2ATriggerDeps['router'],
+                invocationRecordStore: invocationRecordStore!,
+                socketManager,
+                messageStore,
+                ...(invocationTracker ? { invocationTracker } : {}),
+                ...(deliveryCursorStore ? { deliveryCursorStore } : {}),
+                queueProcessor,
+                invocationQueue,
+                ...(ballCustodyIngest ? { ballCustody: ballCustodyIngest } : {}),
+                ...(routingContextRuntime ? { routingDispatchPreflight: routingContextRuntime.dispatchPreflight } : {}),
+                log: app.log,
+              },
+              {
+                targetCats: [input.targetCatId],
+                content: input.content,
+                userId: input.userId,
+                ownerAuthProvenance: 'unknown',
+                threadId: input.threadId,
+                triggerMessage: input.triggerMessage,
+                callerCatId: input.callerCatId,
+                actionSuccessorFence: input.actionSuccessorFence,
+              },
+            );
+            const accepted = [...result.enqueued, ...(result.coalesced ?? [])];
+            return { accepted: !result.fallback && accepted.includes(input.targetCatId) };
+          }),
         })
       : undefined;
-    const reevaluationService = actionSuccessorAdmissionService
-      ? new ReevalCaseReevaluationService({
-          taskStore,
-          eventLog: reevalClosureEventLog,
-          admissionService: actionSuccessorAdmissionService,
-          ownerUserId: privateUserId,
-        })
-      : undefined;
+    const responsibilityService =
+      f266AdmissionService && taskDispatcher
+        ? new ReevalCaseResponsibilityService({
+            taskStore,
+            eventLog: reevalClosureEventLog,
+            admissionService: f266AdmissionService,
+            taskDispatcher,
+            resolveFeatureThreadId: (featureId, ownerUserId) =>
+              resolveUniqueFeatureThreadId(threadStore, backlogStore, ownerUserId, featureId, app.log),
+            ownerUserId: privateUserId,
+          })
+        : undefined;
+    const reevaluationService =
+      f266AdmissionService && taskDispatcher
+        ? new ReevalCaseReevaluationService({
+            taskStore,
+            eventLog: reevalClosureEventLog,
+            admissionService: f266AdmissionService,
+            taskDispatcher,
+            ownerUserId: privateUserId,
+          })
+        : undefined;
     taskRunnerV2.register(
       createReevalClosureTaskSpec({
         eventLog: reevalClosureEventLog,
@@ -6547,6 +7021,7 @@ async function main(): Promise<void> {
           loadReevalClosureSubjects({
             harnessFeedbackRoot: evalHarnessFeedbackRoot,
             eventLog: reevalClosureEventLog,
+            ...(f266Cutover.status === 'active' ? { frictionV3Cutover: f266Cutover.rootActivation } : {}),
             resolveAssignedEvalCatId: async (domainId, registryCatId) =>
               (await getEvalCatOverride(redis, domainId))?.catId ?? registryCatId,
           }),

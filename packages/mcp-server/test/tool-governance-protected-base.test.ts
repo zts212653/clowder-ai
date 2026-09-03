@@ -32,8 +32,8 @@ function fixture() {
     implementation: bindMcpImplementation(ref, run),
     policy: {
       resourceFamily: 'fixture',
-      exposureTier: {
-        current: 'eager-core',
+      schemaDelivery: {
+        policy: 'host-default',
         evidenceRef: 'test:packages/mcp-server/test/tool-governance-protected-base.test.ts',
       },
       runtimeProfiles: ['full', 'readonly'],

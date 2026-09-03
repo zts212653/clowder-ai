@@ -4,6 +4,7 @@ import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
+import { withCatCliProcessContext } from '../../utils/cli-process-environment.js';
 import { isParseError, parseNDJSON } from '../../utils/ndjson-parser.js';
 import type {
   AgentCarrierSession,
@@ -174,7 +175,7 @@ export function createTmuxAgentCarrierSessionFactory(input: {
       const paneId = await input.tmuxGateway.createAgentPane(input.worktreeId, {
         ...(options.cwd ? { cwd: options.cwd } : {}),
       });
-      for (const [key, value] of Object.entries(options.env ?? {})) {
+      for (const [key, value] of Object.entries(withCatCliProcessContext(options.env ?? {}))) {
         if (value !== null) {
           assertSafeEnvKey(key);
           await input.tmuxGateway.execInPane(input.worktreeId, paneId, `export ${key}=${shellEscape(value)}`);

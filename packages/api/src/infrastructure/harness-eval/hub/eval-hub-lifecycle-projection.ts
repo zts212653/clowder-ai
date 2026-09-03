@@ -90,6 +90,7 @@ function availableCaseLifecycle(
           },
         }
       : {}),
+    ...(projection.custodyDispatchBlocker ? { custodyDispatchBlocker: { ...projection.custodyDispatchBlocker } } : {}),
     ...(projection.mainCommitSha ? { mainCommitSha: projection.mainCommitSha } : {}),
     ...(projection.liveCommitSha ? { liveCommitSha: projection.liveCommitSha } : {}),
     ...(projection.reevalTaskId ? { reevalTaskId: projection.reevalTaskId } : {}),
@@ -164,6 +165,20 @@ export async function enrichEvalHubLifecycle(
   const items: EvalHubItem[] = [];
   for (const item of summary.items) {
     const root = roots.get(item.id);
+    if (root?.artifact.schemaVersion === 3) {
+      items.push({
+        ...item,
+        lifecycle: {
+          ...item.lifecycle,
+          availability: 'unavailable',
+          ownerResponseStatus: 'unavailable',
+          closureStatus: 'unavailable',
+          stale: false,
+          unavailableReason: 'schema-v3 known but quarantined until Phase C cutover',
+        },
+      });
+      continue;
+    }
     const legacyCase = legacyMigrations.find(
       (migration) =>
         migration.domainId === item.domainId &&

@@ -7,7 +7,7 @@ import { InvocationRegistry } from '../dist/domains/cats/services/agents/invocat
 import { invokeSingleCat } from '../dist/domains/cats/services/agents/invocation/invoke-single-cat.js';
 import { persistUserFacingSystemInfoNotices } from '../dist/domains/cats/services/agents/routing/persist-system-info-warnings.js';
 import { buildCloudBridgeStatusContent } from '../dist/domains/cats/services/cloud-bridge/cloud-bridge-fallback.js';
-import { CloudReturnBindingSigner } from '../dist/domains/cats/services/cloud-bridge/cloud-return-binding.js';
+import { MemoryCloudReturnGrantStore } from '../dist/domains/cats/services/cloud-bridge/cloud-return-grant.js';
 import { dispatchBoundConversationThroughHost } from '../dist/domains/cats/services/cloud-bridge/conversation-host-dispatch.js';
 import { MessageStore } from '../dist/domains/cats/services/stores/ports/MessageStore.js';
 import { ThreadStore } from '../dist/domains/cats/services/stores/ports/ThreadStore.js';
@@ -48,7 +48,7 @@ describe('F247 normal owner-Chrome product chain', () => {
       timestamp: 1_000,
       extra: { stream: { invocationId: 'inv-source', turnInvocationId: 'inv-source' } },
     });
-    const signer = new CloudReturnBindingSigner(Buffer.alloc(32, 17));
+    const grantStore = new MemoryCloudReturnGrantStore();
     const bridgeCalls = [];
     const dispositionCalls = [];
     const events = await drain(
@@ -70,7 +70,7 @@ describe('F247 normal owner-Chrome product chain', () => {
               };
             },
           },
-          cloudReturnBindingSigner: signer,
+          cloudReturnGrantStore: grantStore,
           a2aDispatchDispositionService: {
             async complete(auth, disposition) {
               dispositionCalls.push({ auth, disposition });
@@ -111,7 +111,7 @@ describe('F247 normal owner-Chrome product chain', () => {
 
     assert.equal(bridgeCalls.length, 1);
     assert.equal(bridgeCalls[0].sourceMessageId, source.id);
-    assert.match(bridgeCalls[0].cloudReturnBinding, /^cbr1\./);
+    assert.equal('cloudReturnBinding' in bridgeCalls[0], false);
     assert.equal(dispositionCalls.length, 1);
     const statusEvent = events.find(
       (event) =>
@@ -155,24 +155,11 @@ describe('F247 normal owner-Chrome product chain', () => {
     await app.register(callbacksRoutes, {
       registry: new InvocationRegistry(),
       agentKeyRegistry,
-      cloudReturnBindingSigner: signer,
+      cloudReturnGrantStore: grantStore,
       messageStore,
       threadStore,
       socketManager: { broadcastAgentMessage: () => undefined },
     });
-    const missingBinding = await app.inject({
-      method: 'POST',
-      url: '/api/callbacks/post-message',
-      headers: { 'x-agent-key-secret': secret },
-      payload: {
-        content: 'must not return without the exact capability',
-        threadId: thread.id,
-        replyTo: bridgeCalls[0].sourceMessageId,
-      },
-    });
-    assert.equal(missingBinding.statusCode, 400);
-    assert.equal(missingBinding.json().kind, 'cloud_return_binding_required');
-
     const wrongSource = messageStore.append({
       userId: 'alice',
       catId: 'codex-sol',
@@ -188,11 +175,10 @@ describe('F247 normal owner-Chrome product chain', () => {
         content: 'must not return to a substituted source',
         threadId: thread.id,
         replyTo: wrongSource.id,
-        cloudReturnBinding: bridgeCalls[0].cloudReturnBinding,
       },
     });
     assert.equal(substitutedSource.statusCode, 403);
-    assert.equal(substitutedSource.json().kind, 'cloud_return_binding_mismatch');
+    assert.equal(substitutedSource.json().kind, 'cloud_return_grant_not_found');
 
     const returned = await app.inject({
       method: 'POST',
@@ -202,7 +188,6 @@ describe('F247 normal owner-Chrome product chain', () => {
         content: 'source-bound product return',
         threadId: thread.id,
         replyTo: bridgeCalls[0].sourceMessageId,
-        cloudReturnBinding: bridgeCalls[0].cloudReturnBinding,
       },
     });
 

@@ -1,6 +1,6 @@
 ---
 feature_ids: [F297]
-related_features: [F069, F081, F095, F164, F183, F194, F277, F295, F304]
+related_features: [F069, F081, F095, F153, F164, F183, F194, F277, F295, F304]
 topics: [sidebar, projection, state-convergence, write-path, authority, thread-list]
 doc_kind: spec
 created: 2026-08-17
@@ -8,7 +8,7 @@ description: "把 Sidebar 收敛为服务端权威快照、前端单一 canonica
 description_source: human
 description_author: opus5
 description_updated_at: 2026-08-17T01:20:00-07:00
-tips_exempt: "内部状态收敛与写入面重构；不新增用户可操作的独立能力入口，用户可见变化是既有 Sidebar 状态终于正确。"
+tips_exempt: "续租 2026-08-29 / conditional full snapshot：ETag/304 只减少既有 Sidebar 权威刷新中的重复传输、前端 apply 与 IDB 写入，不新增用户可操作入口或学习步骤。"
 ---
 
 # F297: Sidebar Projection Convergence — 服务端权威快照，前端单一写入
@@ -136,6 +136,8 @@ F183 的 `lastSeq/lastSeqEpoch` 证明了一个可复用原则：**ordering auth
 - refresh single-flight 必须带 **dirty-while-flight trailing refresh**：请求在飞时又收到 invalidation，当前请求完成后至少再拉一次，保证最后一次变更后有一次观察。
 - mount、online、visibility regain、Socket.IO reconnect 都触发 refresh；它们是丢事件后的恢复边界。
 - 首期不定义 `applyDelta`。如果未来真实 metrics 证明 full snapshot 带宽不可接受，delta 必须另立 contract：统一 sequencer、base snapshot identity、gap recovery 与 replay parity；不能作为本 feature 的“顺便优化”。
+
+2026-08-29 的性能收敛保留上述契约，并启用 **conditional full snapshot**：服务端每次仍完整组合 user-scoped Sidebar 表示，只对最终序列化的精确 bytes 生成 opaque ETag；命中 `If-None-Match` 后返回 304。客户端在 304 或相同 representation identity 时不解析 JSON、不调用 `applySidebarSnapshot` / legacy `chatStore`，也不写 Sidebar 与 legacy thread-list 两份 IndexedDB snapshot。这个优化只减少响应 bytes 与客户端 churn，**不宣称省掉 server composition**；composition / serialize / 200-or-304 / bytes 与 client apply / IDB write count 由 F153 traces 观测。没有引入 TTL materialization cache、第二份 store 或 delta/replay 协议。
 
 ### OQ-3 决议：optimistic command 是 render overlay，不是 canonical writer
 
@@ -416,6 +418,7 @@ AC-C4 fixtures 必须同时证明：合法 Chat runtime fixture 写 `messages + 
 - [x] AC-D2: 当前诊断预测的 6 个未报告 race 已逐条核验：1/2/3/4/6 由 canonical snapshot、overlay 与 owner boundary 消除或隔离；5 明确归还 dispatch queue owner，不冒充 F297 修复。修复 merge `878181270` 上 boundary guard 7/7、API F297 5 suites / 37 tests、Web 10 files / 82 tests 通过。后续 #1371 PR5 暴露的 restart owner 错配同样按边界收口：producer 在 Queue custody 中持久化 server-derived `ownerUserId`，startup reconstruction 不再把 scheduler message authorship 当 execution owner；F297 的 `ActiveExecutionService` 仍按 user 隔离，未放宽 foreign-user scan。author 在 latest-main `08b6ea756` 重跑 restart discriminating test，owner presence=`working + activeSince`、scheduler/foreign 均无 row；隔离 Redis custody parity 14/14。
 - [x] AC-D3: F295 的现有 4s project scan 与 F297 refresh 做重复读取审计；保留一个 server composition service，不留两份 liveness 算法。**闭合 2026-08-18**：审计结论是「两份**读法**」而非两份算法——`active-execution-routes.ts` 的 project scan 仍 `threads.map(resolveLiveExecutions)`，每 4 秒 O(T)。已改为消费同一个 composition service 的 **live/child candidate view** 收窄候选：O(T) → O(A)；managed-command 不参与 live 定性，仍由完整投影枚举器读取，且同一请求只读一次 SQLite task 表。service 提前创建，queue / active-execution / Sidebar 注入同一实例，但两个 HTTP consumer 各自建立请求内 snapshot，不宣称跨请求共享物化结果。**降级方向与 Sidebar 相反且刻意**：Sidebar 漏报 → 显示 `idle`（用户无损）⇒ fail-closed；本列表漏报 → 正在跑的执行不在可取消列表里、用户停不掉（功能损坏）⇒ **fail-open**，未接线 / 读失败 / `complete=false` 一律退回全量扫描。三种降级路径各有 regression。
 - [x] AC-D4: **终态 attention/read 旅程闭合（#3817 / `c66ded63b`）**。#3798 的 lifecycle witness 与 attention gate 保留；修复归 F069 visibility/read-state owner，F297 未新增 `needsAttention` 或第二份 unread。`read/latest`、mark-all 与 direct `PATCH /read` 都以同一 durable-owner-read predicate 拒绝未 settled 的 mutable stream；最终 delivery 后，仅当前选中且 document visible 的消费面才 ACK。RED→GREEN 覆盖离开后完成 → `unread + done/error`、停留看到完成 → `idle`、hidden document 不提前 ACK，以及同一 bubble 的 final-delivery retry。fresh alpha 用真实 Redis 6398 验证 direct PATCH 在 partial 时为 `{advanced:false,caughtUp:false}`，同一 message final 后为 `{advanced:true,caughtUp:true}`；Memory/Redis parity 4/4，F5/reconnect 前后采用同一 durable evidence 规则。
+- [ ] AC-D6: **窄栏 crowded-row 可见性仍待闭合**（blocker: `0001787464914112-000015-317297b0`）。在 12 个 participants + preferred cat + label 的现场密度下，canonical C10 `done/error`、unread/mention 与 compact time 必须仍在 Sidebar viewport 内可见；只能裁剪或折叠可牺牲的 metadata rail，不得在 UI 新造 terminal/unread/time truth。完成条件是该真实密度旅程的 DOM/Alpha 证据与非作者 CloseGate；本次 conditional snapshot 性能 PR 不冒充已修复此展示契约。
 
 ### CloseGate User Visibility Disclosure（2026-08-21 final）
 
@@ -477,4 +480,5 @@ AC-C4 fixtures 必须同时证明：合法 Chat runtime fixture 写 `messages + 
 
 - Architecture reviewer: Sol（本 Design Gate）；Phase C implementation author 依 operator 授权改为 Sol，exact-HEAD reviewer 为 Kimi。
 - 实现触及 API/Web、read model 与缓存 authority，必须用隔离 worktree + TDD + 非作者 exact-HEAD review。
+- 2026-08-29 conditional snapshot 性能收敛的 exact-HEAD reviewer 固定为 Opus 5；不得由作者或其他 reviewer 替代。
 - 性能 claim 分成两类：结构成本用 call-count/load fixture；真实延迟/稳定性用 metrics/traces，不挂 Eval Hub。

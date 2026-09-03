@@ -2409,7 +2409,8 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
       ...(m.metadata ? { metadata: m.metadata } : {}),
       ...(m.origin ? { origin: m.origin } : {}),
       ...(m.thinking ? { thinking: m.thinking } : {}),
-      ...(m.extra?.rich ||
+      ...(m.extra?.semanticEvent ||
+      m.extra?.rich ||
       isCrossThreadProvenance(m.extra?.crossPost?.sourceThreadId, m.threadId) ||
       m.extra?.coordination ||
       m.extra?.isExplicitPost ||
@@ -2430,6 +2431,7 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
       m.extra?.recovery
         ? {
             extra: {
+              ...(m.extra?.semanticEvent ? { semanticEvent: m.extra.semanticEvent } : {}),
               ...(m.extra?.rich ? { rich: m.extra.rich } : {}),
               ...(isCrossThreadProvenance(m.extra?.crossPost?.sourceThreadId, m.threadId)
                 ? { crossPost: m.extra!.crossPost! }

@@ -6366,6 +6366,88 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
     assert.ok(promptsSeen[0].includes('user message'), 'original user prompt still present');
   });
 
+  it('F293: fresh sparse routing context reaches a resumed provider session with deterministic intent', async () => {
+    const promptsSeen = [];
+    const resolutions = [];
+    const service = {
+      l0CompilerFn: dummyL0CompilerFn,
+      async *invoke(prompt) {
+        promptsSeen.push(prompt);
+        yield { type: 'done', catId: 'opus', timestamp: Date.now() };
+      },
+    };
+    const deps = makeDeps();
+    deps.sessionManager = {
+      get: async () => 'existing-routing-session',
+      store: async () => {},
+      delete: async () => {},
+    };
+    deps.routingContextPromptProjection = {
+      async resolve(input) {
+        resolutions.push(input);
+        return '<runtime-routing-context>F293-SPARSE</runtime-routing-context>';
+      },
+    };
+
+    await collect(
+      invokeSingleCat(deps, {
+        catId: 'opus',
+        service,
+        prompt: 'review this change',
+        systemPrompt: 'static identity here',
+        routingContextIntent: 'review',
+        userId: 'owner-f293',
+        threadId: 'thread-routing-context-resume',
+        isLastCat: true,
+      }),
+    );
+
+    assert.deepEqual(resolutions, [{ ownerId: 'owner-f293', intent: 'review' }]);
+    assert.ok(promptsSeen[0].includes('F293-SPARSE'));
+    assert.ok(!promptsSeen[0].includes('static identity here'), 'dynamic projection is independent of static identity');
+  });
+
+  it('F293: projection failure omits dynamic bytes, preserves invocation, and writes a bounded audit event', async () => {
+    const promptsSeen = [];
+    const service = {
+      l0CompilerFn: dummyL0CompilerFn,
+      async *invoke(prompt) {
+        promptsSeen.push(prompt);
+        yield { type: 'done', catId: 'opus', timestamp: Date.now() };
+      },
+    };
+    const deps = makeDeps();
+    deps.routingContextPromptProjection = {
+      async resolve() {
+        throw new RangeError('sensitive routing ledger detail must not enter audit');
+      },
+    };
+
+    const messages = await collect(
+      invokeSingleCat(deps, {
+        catId: 'opus',
+        service,
+        prompt: 'ordinary prompt',
+        userId: 'owner-f293',
+        threadId: 'thread-routing-context-projection-failure',
+        isLastCat: true,
+      }),
+    );
+
+    assert.ok(messages.some((message) => message.type === 'done'));
+    assert.ok(promptsSeen[0].includes('ordinary prompt'));
+    assert.ok(!promptsSeen[0].includes('sensitive routing ledger detail'));
+    const { getEventAuditLog } = await import('../dist/domains/cats/services/orchestration/EventAuditLog.js');
+    const events = await getEventAuditLog().readByThread('thread-routing-context-projection-failure');
+    const failure = events.find((event) => event.type === 'routing_context_projection_failed');
+    assert.ok(failure, 'projection failure must be auditable');
+    assert.deepEqual(failure.data, {
+      catId: 'opus',
+      invocationId: 'inv-1',
+      errorName: 'RangeError',
+    });
+  });
+
   it('F053: Gemini (sessionChain=true) skips systemPrompt on resume like other cats', async () => {
     const promptsSeen = [];
     const service = {

@@ -365,7 +365,7 @@ function renderCvoRef() {
 // ─── F231: User profile capsule resolution ────────────────────────────────
 // Contract (F231 spec KD-7 + Phase A plan §三):
 //   profileDir is supplied by the canonical data-root repository; this compiler never guesses cwd.
-//   capsulePath = join(profileDir, 'landy-capsule.md')
+//   capsulePath = join(profileDir, 'operator-capsule.md')
 //   Three states:
 //     missing/unreadable → '' (empty string, no heading — backward compat)
 //     ≤300 Unicode chars  → '## 主人画像\n\n{body}' + optional primer pointer
@@ -376,13 +376,13 @@ function renderCvoRef() {
 /**
  * Resolve user profile capsule for L0 injection.
  *
- * @param {string} profileDir - directory containing landy-capsule.md
+ * @param {string} profileDir - directory containing operator-capsule.md
  * @param {string} relationshipKey - stable persona key from CatConfig.relationshipKey
  * @returns {string} available capsule section and/or logical relationship-profile pointer
  * @throws {Error} if capsule exceeds 300 Unicode characters
  */
 export function resolveUserCapsule(profileDir, relationshipKey) {
-  const capsulePath = resolve(profileDir, 'landy-capsule.md');
+  const capsulePath = resolve(profileDir, 'operator-capsule.md');
   const primerPath = resolve(profileDir, relationshipPrimerRelativePath(relationshipKey));
   let primerEntry = '';
   try {

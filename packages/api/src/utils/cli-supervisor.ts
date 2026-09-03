@@ -8,6 +8,7 @@
 
 import { type ChildProcessWithoutNullStreams, spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import { withCatCliProcessContext } from './cli-process-environment.js';
 import {
   CLI_PROCESS_OWNER_ENV,
   CLI_SUPERVISOR_SOCKET_DIR_ENV,
@@ -206,7 +207,7 @@ async function main(): Promise<void> {
     if (!childExited) signalChild('SIGKILL');
   });
 
-  const childEnv = { ...process.env };
+  const childEnv = withCatCliProcessContext({ ...process.env });
   if (owner) childEnv[CLI_PROCESS_OWNER_ENV] = owner.manifest.ownerId;
   delete childEnv[CLI_SUPERVISOR_SOCKET_DIR_ENV];
   child = spawn(command, args, {

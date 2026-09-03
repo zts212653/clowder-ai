@@ -1,3 +1,6 @@
+export * from './builtin-runtime/collective-agent-verifier.js';
+export * from './builtin-runtime/collective-connector-runtime.js';
+export * from './builtin-runtime/hybrid-supervisor.js';
 export * from './external-plugin-lifecycle.js';
 export * from './external-runtime/index.js';
 export * from './host-broker/index.js';

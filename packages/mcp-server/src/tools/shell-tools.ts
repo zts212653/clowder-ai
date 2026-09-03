@@ -291,7 +291,6 @@ export const shellTools = [
       action: 'command',
       risk: { level: 'destructive', openWorld: false },
       runtimeProfiles: ['full', 'readonly'],
-      targetExposure: 'profile-gated',
     },
   }),
 ] as const;

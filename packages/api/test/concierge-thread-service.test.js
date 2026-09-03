@@ -232,11 +232,30 @@ describe('ConciergeThreadService', () => {
     );
   });
 
-  it('MemoryConciergeConfigStore default dutyCatProfileId resolves to gemini35', async () => {
+  it('MemoryConciergeConfigStore returns current defaults for an unconfigured user', async () => {
     // Default duty cat: gemini35 (暹罗猫 Gemini Flash, current 3.6 Flash).
     const { MemoryConciergeConfigStore } = await import('../dist/domains/concierge/ConciergeConfigStore.js');
     const store = new MemoryConciergeConfigStore();
     const config = await store.get('user-default-check');
     assert.equal(config.dutyCatProfileId, 'gemini35', 'default duty cat should be gemini35 (暹罗猫 Gemini Flash)');
+    assert.equal(config.skin, 'xianxian-codex', 'default skin should be 宪宪');
+  });
+
+  it('MemoryConciergeConfigStore preserves an existing user skin choice', async () => {
+    const { MemoryConciergeConfigStore } = await import('../dist/domains/concierge/ConciergeConfigStore.js');
+    const store = new MemoryConciergeConfigStore();
+    await store.put('user-existing-skin', {
+      enabled: true,
+      skin: 'yanyan-codex',
+      displayName: '猫猫球',
+      personaTone: '温暖',
+      dutyCatProfileId: 'gemini35',
+      proactivePolicy: 'quiet-badge',
+      muted: false,
+      ballPosition: null,
+    });
+
+    const config = await store.get('user-existing-skin');
+    assert.equal(config.skin, 'yanyan-codex');
   });
 });

@@ -11,7 +11,7 @@ import type { ContextPresentationEnvelope } from '../../cats/services/session/co
 import { formatMemoryCues, renderMemoryCuePointer } from './format-memory-cues.js';
 import type { MemoryCueEventInput } from './MemoryCueEpisodeStore.js';
 import type { CreateMemoryCueDrillHandleInput, MemoryCueResolverRegistry } from './MemoryCueResolverRegistry.js';
-import { RECALL_RESOLVER_ADMISSION_V1 } from './MemoryCueResolverRegistry.js';
+import { RECALL_RESOLVER_ADMISSION_V3 } from './MemoryCueResolverRegistry.js';
 import {
   admitRecallOpportunity,
   getRecallOpportunityCatalogEntry,
@@ -170,7 +170,7 @@ export class MemoryCuePlaneService {
   ): Promise<CueEnvelopeV1[]> {
     const candidates: CueEnvelopeV1[] = [];
     for (const family of entry.resolverFamilies) {
-      if (RECALL_RESOLVER_ADMISSION_V1[family] !== 'catalog') continue;
+      if (RECALL_RESOLVER_ADMISSION_V3[family] !== 'catalog') continue;
       candidates.push(...(await this.resolveFamily(opportunity, family, expiresAt, input)));
     }
     return candidates.slice(0, entry.maxCues);

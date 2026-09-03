@@ -31,7 +31,6 @@ function baseParams(overrides = {}) {
     calledBy: 'opus-47',
     intent: 'Help me audit this auth flow',
     sourceMessageId: 'source-message-123',
-    cloudReturnBinding: 'cbr1.aW52LWNsb3Vk.signature',
     ...overrides,
   };
 }
@@ -44,7 +43,7 @@ describe('F247 AC-B1c-12: buildDeltaPayload — envelope shape', () => {
     assert.ok(out.endsWith('Help me audit this auth flow'), 'must append raw intent after envelope');
   });
 
-  it('embeds the exact return anchor plus its opaque server-signed binding', () => {
+  it('embeds the exact return anchor without exporting server-held authorization', () => {
     const out = buildDeltaPayload(baseParams());
     const jsonMatch = out.match(/<thread-runtime[^>]*>\n([\s\S]+?)\n<\/thread-runtime>/);
     assert.ok(jsonMatch, 'must find JSON inside envelope');
@@ -58,7 +57,7 @@ describe('F247 AC-B1c-12: buildDeltaPayload — envelope shape', () => {
     assert.equal(delta.calledBy, 'opus-47');
     assert.equal(delta.intent, 'Help me audit this auth flow');
     assert.equal(delta.sourceMessageId, 'source-message-123');
-    assert.equal(delta.cloudReturnBinding, 'cbr1.aW52LWNsb3Vk.signature');
+    assert.equal('cloudReturnBinding' in delta, false);
   });
 
   it('allows null threadTitle (un-named thread)', () => {

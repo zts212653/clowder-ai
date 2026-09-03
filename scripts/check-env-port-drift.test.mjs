@@ -195,6 +195,7 @@ function buildExportedRootScripts(sourceScripts) {
   delete scripts['test:architecture-ownership'];
 
   const internalScripts = [
+    'sync:train',
     'antigravity:smoke',
     'check:hmac-salt',
     'check:antigravity-smoke',
@@ -206,6 +207,11 @@ function buildExportedRootScripts(sourceScripts) {
     'check:source-hygiene',
     'check:f223-action-tracking',
     'check:docs-discovery',
+    // Memory Architecture Closure reads lane-owned manifests that are not part
+    // of the curated public source tree. Must mirror sync-to-opensource.sh.
+    'gen:memory-architecture-closure',
+    'check:memory-architecture-catalog',
+    'gate:memory-architecture-closure',
     // F267 measurement validity audits the complete home evidence archive, which
     // the curated public export intentionally does not contain.
     'check:measurement-bundles',
@@ -216,6 +222,9 @@ function buildExportedRootScripts(sourceScripts) {
     // (PR #2333). Must mirror sync-to-opensource.sh internalScripts list.
     'check:reverse-sanitizer',
     'check:boundary-roundtrip',
+    // Outbound boundary guards load scripts/_sanitize-rules.pl, which is internal by
+    // construction. Mirrors sync-to-opensource.sh internalScripts.
+    'check:outbound-sanitizer',
     // Privacy gate test — references F207 internal incident context; home-only.
     'check:export-privacy-gate',
     // F251 Task 4b — public delta gate test suite (classifier + cli + wire + replay).
@@ -252,6 +261,30 @@ function buildExportedRootScripts(sourceScripts) {
     if (key.startsWith('desktop:')) delete scripts[key];
   }
   return scripts;
+}
+
+function executeRootPackageTransform(sourceScripts) {
+  const syncScript = readFileSync(resolve(ROOT, 'scripts/sync-to-opensource.sh'), 'utf8');
+  const startMarker = 'node - "$FILTERED_DIR/package.json" <<\'PACKAGE_JSON_TRANSFORM_EOF\'\n';
+  const start = syncScript.indexOf(startMarker);
+  assert.notEqual(start, -1, 'public root package transform start marker must exist');
+  const programStart = start + startMarker.length;
+  const end = syncScript.indexOf('\nPACKAGE_JSON_TRANSFORM_EOF', programStart);
+  assert.notEqual(end, -1, 'public root package transform end marker must exist');
+
+  const tempRoot = mkdtempSync(resolve(tmpdir(), 'cat-cafe-public-package-transform-'));
+  const packagePath = resolve(tempRoot, 'package.json');
+  writeFileSync(packagePath, `${JSON.stringify({ scripts: sourceScripts }, null, 2)}\n`);
+  try {
+    execFileSync('node', ['-', packagePath], {
+      cwd: ROOT,
+      encoding: 'utf8',
+      input: syncScript.slice(programStart, end),
+    });
+    return JSON.parse(readFileSync(packagePath, 'utf8')).scripts;
+  } finally {
+    rmSync(tempRoot, { recursive: true, force: true });
+  }
 }
 
 function loadWorkspacePackageRootsByName() {
@@ -313,6 +346,9 @@ function sanitizeFixture(relPath, content) {
     execFileSync('perl', ['-pi', resolve(ROOT, 'scripts/_sanitize-rules.pl'), fixturePath], {
       cwd: ROOT,
       stdio: ['ignore', 'pipe', 'pipe'],
+      // Declared the way the sync script declares it, so path-anchored rules resolve against a
+      // real export root instead of an undeclared one.
+      env: { ...process.env, CAT_CAFE_SANITIZE_ROOT: tempRoot },
     });
     return readFileSync(fixturePath, 'utf-8');
   } finally {
@@ -331,6 +367,13 @@ function readClaudeHookTemplateCommands(template) {
 
 function readSyncScript() {
   return readFileSync(resolve(ROOT, 'scripts/sync-to-opensource.sh'), 'utf-8');
+}
+
+// One declared list drives both the sanitizer pass and the Step 4 security scan.
+function readSanitizedTextExtensions() {
+  const match = readSyncScript().match(/^SANITIZED_TEXT_EXTENSIONS=\(([^)]*)\)/m);
+  assert.ok(match, 'sync-to-opensource.sh must declare SANITIZED_TEXT_EXTENSIONS');
+  return match[1].trim().split(/\s+/).filter(Boolean);
 }
 
 function readFunctionBody(content, functionName) {
@@ -723,27 +766,27 @@ describe(
       assert.match(stagingTest, /defaultOut\.includes\('3003\/3004'\)/);
     });
 
+    // The sanitizer pass and the Step 4 security scan are both generated from
+    // SANITIZED_TEXT_EXTENSIONS, so membership in that list is what these guards assert.
     it('sync-to-opensource.sh runs sanitizer over CommonJS test files', () => {
-      const content = readFileSync(resolve(ROOT, 'scripts/sync-to-opensource.sh'), 'utf-8');
       assert.ok(
-        content.includes('-name "*.cjs"'),
+        readSanitizedTextExtensions().includes('cjs'),
         'sync sanitizer should include .cjs files such as packages/web/test/next-config.test.cjs',
       );
     });
 
     it('sync-to-opensource.sh runs sanitizer over ES module utility files', () => {
-      const content = readFileSync(resolve(ROOT, 'scripts/sync-to-opensource.sh'), 'utf-8');
       assert.ok(
-        content.includes('-name "*.mjs"'),
+        readSanitizedTextExtensions().includes('mjs'),
         'sync sanitizer should include .mjs files such as scripts/lib/platform-status.mjs',
       );
     });
 
     it('sync-to-opensource.sh runs sanitizer over desktop installer and launcher text files', () => {
-      const content = readFileSync(resolve(ROOT, 'scripts/sync-to-opensource.sh'), 'utf-8');
+      const declared = readSanitizedTextExtensions();
       for (const ext of ['ps1', 'py', 'bat', 'iss', 'html']) {
         assert.ok(
-          content.includes(`-name "*.${ext}"`),
+          declared.includes(ext),
           `sync sanitizer should include .${ext} files so public desktop release surfaces are sanitized`,
         );
       }
@@ -1062,6 +1105,23 @@ excluded:
       }
     });
 
+    it('public check:pre-merge-gate references only scripts exported by sync-manifest', () => {
+      const sourcePkg = JSON.parse(readFileSync(resolve(ROOT, 'package.json'), 'utf-8'));
+      const managedScripts = new Set(readYamlTopLevelList('sync-manifest.yaml', 'managed_scripts'));
+      const publicMirror = buildExportedRootScripts(sourcePkg.scripts)['check:pre-merge-gate'];
+      const shTransform = readFileSync(resolve(ROOT, 'scripts/sync-to-opensource.sh'), 'utf-8');
+      const transformedCommand = shTransform.match(/pkg\.scripts\["check:pre-merge-gate"\]\s*=\s*"([^"]+)";/)?.[1];
+
+      assert.ok(transformedCommand, 'sync-to-opensource.sh should assign public check:pre-merge-gate');
+      for (const [surface, command] of [
+        ['buildExportedRootScripts mirror', publicMirror],
+        ['sync-to-opensource.sh transform', transformedCommand],
+      ]) {
+        const unexportedScripts = extractScriptRefs(command).filter((scriptPath) => !managedScripts.has(scriptPath));
+        assert.deepEqual(unexportedScripts, [], `${surface} must not reference unexported scripts`);
+      }
+    });
+
     it('sync-manifest does not protect managed service wrappers as target-owned', () => {
       const managedScripts = readYamlTopLevelList('sync-manifest.yaml', 'managed_scripts');
       const targetOwnedFiles = readYamlTopLevelList('sync-manifest.yaml', 'target_owned_files');
@@ -1132,6 +1192,36 @@ excluded:
       assert.ok(
         !content.includes('"check:biome-version",'),
         'public package.json should keep check:biome-version because public hooks/pre-merge call it',
+      );
+    });
+
+    it('public package transform strips home-only memory architecture executables', () => {
+      const sourceScripts = readJsonFile('package.json').scripts;
+      const transformedScripts = executeRootPackageTransform(sourceScripts);
+      const mirroredScripts = buildExportedRootScripts(sourceScripts);
+      const homeOnlyScripts = [
+        'gen:memory-architecture-closure',
+        'check:memory-architecture-catalog',
+        'gate:memory-architecture-closure',
+      ];
+
+      for (const scriptName of homeOnlyScripts) {
+        assert.equal(
+          transformedScripts[scriptName],
+          undefined,
+          `${scriptName} depends on unpublished lane manifests and must not be advertised publicly`,
+        );
+        assert.equal(mirroredScripts[scriptName], transformedScripts[scriptName], `${scriptName} mirror drift`);
+      }
+      assert.doesNotMatch(
+        transformedScripts.check,
+        /check:memory-architecture-catalog/,
+        'public pnpm check must not invoke a catalog checker whose lane manifests are intentionally not published',
+      );
+      assert.doesNotMatch(
+        mirroredScripts.check,
+        /check:memory-architecture-catalog/,
+        'public check-chain mirror drift',
       );
     });
 
@@ -1986,8 +2076,8 @@ describe(
       );
       assert.match(
         gate,
-        /PROJECT_ALLOWED_ROOTS_APPEND=true[\s\\]+PROJECT_ALLOWED_ROOTS="\$gate_target_real"[\s\\]+pnpm --filter @cat-cafe\/api run test:public/,
-        'test:public in the temp target should treat the validation checkout as an allowed project root',
+        /PROJECT_ALLOWED_ROOTS_APPEND=true[\s\\]+PROJECT_ALLOWED_ROOTS="\$gate_target_real"[\s\\]+pnpm --filter @cat-cafe\/api run test:public:prepared/,
+        'prepared public suite in the temp target should treat the validation checkout as an allowed project root',
       );
       assert.match(
         gate,
@@ -2033,17 +2123,17 @@ describe(
       );
     });
 
-    it('temp target public gate preserves full test:public output before tailing', () => {
+    it('temp target public gate preserves full prepared-public-suite output before tailing', () => {
       const gate = readFunctionBody(readSyncScript(), 'run_target_public_gate');
       assert.match(
         gate,
         /test_public_log=\$\(mktemp "\$\{TMPDIR:-\/tmp\}\/cat-cafe-testpublic\.XXXXXX"\)/,
-        'run_target_public_gate should capture test:public output in a dedicated temp log',
+        'run_target_public_gate should capture prepared public suite output in a dedicated temp log',
       );
       assert.match(
         gate,
-        /pnpm --filter @cat-cafe\/api run test:public >"\$test_public_log" 2>&1/,
-        'test:public should write its full output to a log file before summary tailing',
+        /pnpm --filter @cat-cafe\/api run test:public:prepared >"\$test_public_log" 2>&1/,
+        'prepared public suite should write its full output to a log file before summary tailing',
       );
       assert.match(
         gate,
@@ -2052,8 +2142,8 @@ describe(
       );
       assert.doesNotMatch(
         gate,
-        /pnpm --filter @cat-cafe\/api run test:public 2>&1 \| tail -5/,
-        'test:public should not pipe directly into tail, or failures become opaque',
+        /pnpm --filter @cat-cafe\/api run test:public:prepared 2>&1 \| tail -5/,
+        'prepared public suite should not pipe directly into tail, or failures become opaque',
       );
     });
 
@@ -2118,6 +2208,31 @@ describe(
         content,
         /SANITIZER="\$SOURCE_SYNC_DIR\/scripts\/_sanitize-rules\.pl"/,
         'sanitizer rules must load from SOURCE_SYNC_DIR, not SOURCE_DIR (P1: no mixed provenance)',
+      );
+      // The canonical public site keeps its deliberate "Clowder AI" origin story, but that exemption
+      // is scoped to the product name inside _sanitize-rules.pl. Pruning the whole tree here also
+      // disabled identity, home-path, and port scrubbing for the website, and the security scan
+      // did not cover .html/.mjs/.css either — so a /home/user path exported with a clean scan.
+      assert.doesNotMatch(
+        content,
+        /-path "\$FILTERED_DIR\/site" -prune/,
+        'the public site brand exemption belongs in _sanitize-rules.pl, not a whole-tree sanitizer bypass',
+      );
+      const sanitizerRules = readFileSync(resolve(ROOT, 'scripts/_sanitize-rules.pl'), 'utf8');
+      assert.match(
+        sanitizerRules,
+        /\$is_public_site = index\(\$ARGV, "\$sanitize_root\/site\/"\) == 0/,
+        'the site exemption must be anchored to the declared export root, not any nested site/ segment',
+      );
+      assert.match(
+        content,
+        /if \[ "\$phase_label" = "final" \] && is_transform_target "\$excl"; then/,
+        'final exclusions must preserve files generated by declared manifest transforms',
+      );
+      assert.match(
+        content,
+        /assert_export_exclusions_absent "final"/,
+        'the final-tree invariant must distinguish transform targets from private source files',
       );
       assert.match(
         content,

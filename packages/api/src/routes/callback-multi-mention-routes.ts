@@ -26,6 +26,7 @@ import {
   reconcileActionSuccessorEnqueue,
 } from '../domains/ball-custody/reconcile-action-successor-enqueue.js';
 import type { InvocationQueue } from '../domains/cats/services/agents/invocation/InvocationQueue.js';
+import type { InvocationRecord } from '../domains/cats/services/agents/invocation/InvocationRegistry.js';
 import type { InvocationTracker } from '../domains/cats/services/agents/invocation/InvocationTracker.js';
 import type { OwnerAuthProvenance } from '../domains/cats/services/agents/invocation/owner-auth-provenance.js';
 import { isTerminalDispositionEvent } from '../domains/cats/services/agents/invocation/PerCatTerminalDispositionCollector.js';
@@ -35,7 +36,9 @@ import {
   type MultiMentionCreateParams,
   MultiMentionOrchestrator,
 } from '../domains/cats/services/agents/routing/MultiMentionOrchestrator.js';
+import { userFacingSystemInfoNoticeContent } from '../domains/cats/services/agents/routing/persist-system-info-warnings.js';
 import { createA2ASlotTrackingBridge } from '../domains/cats/services/agents/routing/route-helpers.js';
+import type { CloudDispatchProvenance } from '../domains/cats/services/cloud-bridge/types.js';
 import { parseIntent } from '../domains/cats/services/context/IntentParser.js';
 import {
   checkFreshnessForPostMessage,
@@ -51,13 +54,17 @@ import {
 import type { AgentRouter } from '../domains/cats/services/index.js';
 import type { DeliveryCursorStore } from '../domains/cats/services/stores/ports/DeliveryCursorStore.js';
 import type { IInvocationRecordStore } from '../domains/cats/services/stores/ports/InvocationRecordStore.js';
-import { type IMessageStore, isDelivered } from '../domains/cats/services/stores/ports/MessageStore.js';
+import {
+  type IMessageStore,
+  isDelivered,
+  type StoredMessage,
+} from '../domains/cats/services/stores/ports/MessageStore.js';
 import type { IThreadStore } from '../domains/cats/services/stores/ports/ThreadStore.js';
 import type {
   ITurnExecutionStore,
   TurnExecutionRecord,
 } from '../domains/cats/services/stores/ports/TurnExecutionStore.js';
-import { canViewMessage } from '../domains/cats/services/stores/visibility.js';
+import { canViewMessage, resolveVisibleReplyParent } from '../domains/cats/services/stores/visibility.js';
 import {
   protocolActionWithoutCustodyTotal,
   successorActionFenceUnavailable,
@@ -89,6 +96,78 @@ export function classifyMultiMentionCarrierUsage(input: { targetCount: number; h
 } {
   const singleTarget = input.targetCount === 1;
   return { singleTarget, unfencedSingleTarget: singleTarget && !input.hasAction };
+}
+
+function multiMentionIntent(question: string, context: string | undefined): string {
+  return [question, ...(context ? ['---', context] : [])].join('\n\n');
+}
+
+async function resolveCloudDispatchProvenance(input: {
+  record: InvocationRecord;
+  messageStore: IMessageStore;
+  question: string;
+  context: string | undefined;
+  log: FastifyBaseLogger;
+}): Promise<CloudDispatchProvenance | undefined> {
+  const sourceMessageId = input.record.originTriggerMessageId ?? input.record.a2aTriggerMessageId;
+  if (!sourceMessageId) {
+    input.log.warn(
+      { invocationId: input.record.invocationId },
+      '[F247] multi-mention exact source provenance unavailable',
+    );
+    return undefined;
+  }
+
+  let source: StoredMessage | null;
+  try {
+    source = await resolveVisibleReplyParent(input.messageStore, sourceMessageId, {
+      threadId: input.record.threadId,
+      viewer: { type: 'cat', catId: createCatId('gpt-pro') },
+      publicReply: true,
+    });
+  } catch (err) {
+    input.log.warn(
+      { invocationId: input.record.invocationId, sourceMessageId, err },
+      '[F247] multi-mention exact source lookup failed closed',
+    );
+    return undefined;
+  }
+  if (
+    !source ||
+    source.id !== sourceMessageId ||
+    source.threadId !== input.record.threadId ||
+    source.userId !== input.record.userId ||
+    source.deletedAt ||
+    !isDelivered(source) ||
+    source.userId === 'system' ||
+    source.catId === 'system' ||
+    source.origin === 'briefing' ||
+    !canViewMessage(source, { type: 'cat', catId: input.record.catId })
+  ) {
+    input.log.warn(
+      { invocationId: input.record.invocationId, sourceMessageId },
+      '[F247] multi-mention exact source failed scope or public-return eligibility validation',
+    );
+    return undefined;
+  }
+
+  const sourceSender: CloudDispatchProvenance['sourceSender'] = source.catId
+    ? {
+        kind: 'cat',
+        id: source.catId,
+        ...(source.extra?.stream?.turnInvocationId
+          ? { invocationId: source.extra.stream.turnInvocationId }
+          : source.extra?.stream?.invocationId
+            ? { invocationId: source.extra.stream.invocationId }
+            : {}),
+      }
+    : { kind: 'user', id: source.userId };
+  return {
+    sourceMessageId,
+    sourceSender,
+    calledByCatId: input.record.catId,
+    intent: multiMentionIntent(input.question, input.context),
+  };
 }
 
 // ── Schema ───────────────────────────────────────────────────────────
@@ -267,6 +346,8 @@ function enqueueMultiMentionTarget(input: {
   userId: string;
   ownerAuthProvenance: OwnerAuthProvenance;
   initiator: CatId;
+  cloudDispatchProvenance: CloudDispatchProvenance | undefined;
+  parentInvocationId: string;
   log: FastifyBaseLogger;
   actionFence: ActionSuccessorFence | undefined;
 }): 'enqueued' | 'skipped' | 'depth_limited' | 'unavailable' {
@@ -296,10 +377,15 @@ function enqueueMultiMentionTarget(input: {
     intent: 'execute',
     autoExecute: true,
     callerCatId: input.initiator,
+    a2aParentInvocationId: input.parentInvocationId,
+    idempotencyKey: input.actionFence
+      ? `action:${input.actionFence.leaseId}:${input.actionFence.generation}:${input.catId}`
+      : `multi-mention:${input.requestId}:${input.catId}`,
+    ...(input.cloudDispatchProvenance ? { cloudDispatchProvenance: input.cloudDispatchProvenance } : {}),
+    requiresExactCloudDispatchProvenance: true,
     ...(input.actionFence
       ? {
           actionSuccessorFence: input.actionFence,
-          idempotencyKey: `action:${input.actionFence.leaseId}:${input.actionFence.generation}:${input.catId}`,
         }
       : {}),
   });
@@ -331,6 +417,8 @@ async function dispatchViaQueue(
   userId: string,
   ownerAuthProvenance: OwnerAuthProvenance,
   initiator: CatId,
+  cloudDispatchProvenance: CloudDispatchProvenance | undefined,
+  parentInvocationId: string,
   log: FastifyBaseLogger,
   actionFence?: ActionSuccessorFence,
   actionCarrierDisposition?: ActionSuccessorCarrierDisposition,
@@ -366,6 +454,8 @@ async function dispatchViaQueue(
       userId,
       ownerAuthProvenance,
       initiator,
+      cloudDispatchProvenance,
+      parentInvocationId,
       log,
       actionFence,
     });
@@ -522,6 +612,7 @@ async function dispatchToTarget(
   userId: string,
   ownerAuthProvenance: OwnerAuthProvenance,
   initiator: CatId,
+  cloudDispatchProvenance: CloudDispatchProvenance | undefined,
   log: FastifyBaseLogger,
   /** Custody obtained by `admitLegacyTarget`. The caller admitted every sibling before any start. */
   admission: LegacyAdmission,
@@ -557,7 +648,7 @@ async function dispatchToTarget(
         userId,
         messageContent,
         threadId,
-        invocationId,
+        cloudDispatchProvenance?.sourceMessageId ?? invocationId,
         [targetCatId],
         intent,
         {
@@ -572,6 +663,8 @@ async function dispatchToTarget(
               }
             : {}),
           parentInvocationId: invocationId,
+          ...(cloudDispatchProvenance ? { cloudDispatchProvenance } : {}),
+          requiresExactCloudDispatchProvenance: true,
           onPromptMessagesExposed: (input) => deps.queueProcessor?.markPromptMessagesSeen?.(input) ?? Promise.resolve(),
           // F222 P1: Multi-mention fallback dispatch is callback-authenticated cat-to-cat
           // work (callerCatId = record.catId), consistent with queue path source:'agent'.
@@ -597,6 +690,9 @@ async function dispatchToTarget(
         if (msg.catId === targetCatId) {
           if (msg.type === 'text' && msg.content) {
             responseText += msg.content;
+          } else if (msg.type === 'system_info' && msg.content) {
+            const visibleNotice = userFacingSystemInfoNoticeContent(msg.content, targetCatId);
+            if (visibleNotice) responseText = responseText ? `${responseText}\n${visibleNotice}` : visibleNotice;
           } else if (msg.type === 'tool_use' && msg.toolName) {
             toolsUsed.push(msg.toolName);
           }
@@ -1001,6 +1097,13 @@ export function registerMultiMentionRoutes(app: FastifyInstance, deps: MultiMent
           if (admission.outcome === 'subject_terminal') {
             return reply.send({ status: admission.outcome, terminal: admission.terminal });
           }
+          if (admission.outcome === 'safe_wait') {
+            return reply.status(409).send({
+              status: 'action_carrier_unavailable',
+              reason: 'carrier_missing',
+              actionLease: admission.lease,
+            });
+          }
           if (admission.outcome !== 'replayed') {
             return reply.send({ status: admission.outcome, actionLease: admission.lease });
           }
@@ -1031,6 +1134,14 @@ export function registerMultiMentionRoutes(app: FastifyInstance, deps: MultiMent
       ...(body.searchEvidenceRefs ? { searchEvidenceRefs: body.searchEvidenceRefs } : {}),
       ...(body.overrideReason ? { overrideReason: body.overrideReason } : {}),
     } satisfies MultiMentionCreateParams;
+
+    const cloudDispatchProvenance = await resolveCloudDispatchProvenance({
+      record,
+      messageStore: deps.messageStore,
+      question: body.question,
+      context: body.context,
+      log: request.log,
+    });
 
     const mmRequest = orch.create(createParams);
 
@@ -1097,6 +1208,8 @@ export function registerMultiMentionRoutes(app: FastifyInstance, deps: MultiMent
         record.userId,
         record.ownerAuthProvenance,
         callerCatId,
+        cloudDispatchProvenance,
+        record.invocationId,
         request.log,
         actionFence,
         actionCarrierDisposition,
@@ -1154,6 +1267,7 @@ export function registerMultiMentionRoutes(app: FastifyInstance, deps: MultiMent
           record.userId,
           record.ownerAuthProvenance,
           callerCatId,
+          cloudDispatchProvenance,
           request.log,
           admission,
         );

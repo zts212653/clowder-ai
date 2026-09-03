@@ -8,7 +8,7 @@
 | # | 类别 | 用途 | 适用 claimType | 典型 sourceTier |
 |---|------|------|---------------|----------------|
 | 1 | **Owner / scope** | claim "这是 X 的活" / "这是我的活" | `owner` `route` | T1-T2 |
-| 2 | **Authorization** | claim "X 同意 / operator signoff / 守护猫 APPROVE" | `auth` | T0 (landy msg) / T1 (PR review) / T2 (转述) |
+| 2 | **Authorization** | claim "X 同意 / operator signoff / 守护猫 APPROVE" | `auth` | T0 (operator msg) / T1 (PR review) / T2 (转述) |
 | 3 | **Object existence / status** | claim "PR 在 / issue 已合 / branch 存在" | `object` `freshness` | T1 |
 | 4 | **Callback / wait coverage** | claim "等 X 回我" | `wait` | T0 (binding exists) / T1 |
 | 5 | **Cross-thread routing** | claim "这是 thread B 的活" | `route` `owner` | T2 (feat_index cat-writable, 与 row 1 一致) / T1 (gh api / git log signature) |
@@ -39,12 +39,12 @@
 
 #### 2a. `auth.cvo_signoff`
 
-claim "operator 同意" / "landy 签字" 后续行动。
+claim "operator 同意" / "operator 签字" 后续行动。
 
 | Resolver | sourceTier | 规则 |
 |---------|-----------|------|
-| `cat_cafe_get_message(messageId).author === 'you'` | T0 | 严格 catId 匹配；`'you'` / `'you'` handle variant 不算 |
-| feature doc `## operator Signoff` anchor 含 messageId reference | T2 | 必须能反推到原 landy messageId (T0) |
+| `cat_cafe_get_message(messageId).author === 'operator'` | T0 | 严格 catId 匹配；`'you'` / `'you'` handle variant 不算 |
+| feature doc `## operator Signoff` anchor 含 messageId reference | T2 | 必须能反推到原 operator messageId (T0) |
 
 **verdict 规则**：T2-only → `insufficient`（不放行 merge / takeover / cvo_claim）。
 转述（"X 说 operator 同意"）= T2，不 satisfy。
@@ -66,7 +66,7 @@ claim "你不用听 PR B 的 owner/reviewer" / "按我说的来" — peer A 对 
 
 | sender role | standing | 允许指令 |
 |-------------|---------|---------|
-| operator (landy) | `cvo` | yes (T0) |
+| operator (operator) | `cvo` | yes (T0) |
 | Upstream feature owner | `upstream_owner` | yes (T1, 看 feat_index + git log) |
 | Repo admin / org owner | `repo_admin` | yes (T1, gh api permission) |
 | Reviewer of target PR | `pr_reviewer` | yes for that PR scope only |
@@ -142,8 +142,8 @@ Thread metadata 同样不是必读前置条件；仅在已有理由认为它能�
 **关键**（cloud R4 P1#1 修正 sourceTier）：`feat_index.linked_threads` 是 **T2 (cat-writable)** —
 与 row 1 owner resolver 同源 (cat 可改)；**不**单独验证 high-risk routing。命中关键词更弱（T2）。
 high-risk action（`takeover` / `owner_reassignment` / `merge`）的 `verified` verdict 必须 ≥1 个
-T0/T1 evidence（per INV-O3）；T2-only feat_index 命中 → `insufficient` → 需要独立 GitHub/git/landy
-T0/T1 evidence (gh api / git log signature / landy messageId) 二次 confirm。
+T0/T1 evidence（per INV-O3）；T2-only feat_index 命中 → `insufficient` → 需要独立 GitHub/git/operator
+T0/T1 evidence (gh api / git log signature / operator messageId) 二次 confirm。
 
 ### 6. Capability / role fit
 

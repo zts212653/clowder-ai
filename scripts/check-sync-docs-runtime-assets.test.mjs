@@ -18,12 +18,27 @@ import {
   IGNORE_PATHS,
   isCoveredBySync,
   isIgnored,
+  loadSyncCoveragePaths,
   normalizeCapturedPath,
   parseDocsReferences,
+  parseManifestList,
 } from './check-sync-docs-runtime-assets.mjs';
 
 const SELF_DIR = dirname(fileURLToPath(import.meta.url));
+const REPO_ROOT = resolve(SELF_DIR, '..');
 const SYNC_SCRIPT_PATH = resolve(SELF_DIR, 'sync-to-opensource.sh');
+
+describe('F221 private Taste outbound exclusion', () => {
+  it('hard-excludes docs/taste and gives neither its index nor vignettes public sync coverage', () => {
+    const manifestText = readFileSync(resolve(REPO_ROOT, 'sync-manifest.yaml'), 'utf8');
+    const excluded = parseManifestList(manifestText, 'excluded');
+    const coverage = loadSyncCoveragePaths(REPO_ROOT);
+
+    assert.ok(excluded.includes('docs/taste/'));
+    assert.equal(isCoveredBySync('docs/taste/index.md', coverage), false);
+    assert.equal(isCoveredBySync('docs/taste/vignettes/private-house-memory.md', coverage), false);
+  });
+});
 
 describe('isCoveredBySync', () => {
   it('matches exact file paths', () => {

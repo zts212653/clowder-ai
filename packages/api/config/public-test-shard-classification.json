@@ -1,0 +1,21 @@
+{
+  "version": 1,
+  "rules": [
+    {
+      "id": "stateful-by-name",
+      "match": "^test/.*(?:redis|store|socket|server|port|watch|worker|process|network|integration|runtime|lifecycle|queue|invocation|session|thread).*\\.test\\.js$",
+      "lane": "serial",
+      "reason": "stateful or process-bound test names remain serial unless a narrower future isolation proof supersedes them"
+    },
+    {
+      "id": "pure-static-audit",
+      "match": "^test/(?!.*(?:redis|store|socket|server|port|watch|worker|process|network|integration|runtime|lifecycle|queue|invocation|session|thread)).*\\.test\\.js$",
+      "lane": "pure",
+      "isolationEvidence": {
+        "kind": "static-negative-scan",
+        "rulesVersion": "f308-static-v1",
+        "source": "The planner additionally requires a current per-file negative scan for Redis, ports, filesystem writes/watchers, child processes, workers, and network clients."
+      }
+    }
+  ]
+}

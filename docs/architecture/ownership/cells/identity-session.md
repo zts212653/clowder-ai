@@ -17,6 +17,8 @@ code_anchors:
   - packages/api/src/routes/thread-member-speed.ts
   - packages/api/src/domains/cats/services/agents/invocation/invoke-single-cat.ts
   - packages/api/src/domains/cats/services/agents/invocation/request-generation-recorder.ts
+  - packages/api/src/domains/runtime-interaction/ports/RuntimeInteractionPort.ts
+  - packages/api/src/domains/runtime-interaction/RuntimeInteractionService.ts
   - packages/api/src/domains/cats/services/agents/providers/CodexAgentService.ts
   - packages/web/src/components/HubCatEditor.tsx
   - packages/web/src/components/ThreadSidebar/ThreadSpeedSettings.tsx
@@ -61,10 +63,11 @@ doc_anchors:
   - docs/features/F262-per-thread-cat-effort-overrides.md
   - docs/features/F291-codex-oauth-fast-mode.md
   - docs/features/F299-workspace-invocation-trajectory.md
+  - docs/features/F306-codex-app-capability-parity.md
   - feature-discussions/2026-08-08-f291-codex-oauth-fast-mode/README.md
   - feature-discussions/2026-06-13-f231-phase-c-design-gate.md
   - feature-discussions/2026-07-10-f231-profile-topology-convergence.md
-static_scan_hints: [catId, relationshipKey, AgentRegistry, cat-config, roster, ConnectorThreadBindingStore, bubbleIdentity, session, SessionChainStore, cliSessionId, cascadeId, runtimeSession, serviceTier, CodexSpeed, memberSpeed, capsule, CAT_CAFE_DATA_DIR, cat-cafe-profile, "private/profile"]
+static_scan_hints: [catId, relationshipKey, AgentRegistry, cat-config, roster, ConnectorThreadBindingStore, bubbleIdentity, session, SessionChainStore, cliSessionId, cascadeId, runtimeSession, runtimeInteractionPort, interactionId, serviceTier, CodexSpeed, memberSpeed, capsule, CAT_CAFE_DATA_DIR, cat-cafe-profile, "private/profile"]
 cited_by:
   - {feature: F191, date: 2026-05-07, delta: new cell}
   - {feature: F193, date: 2026-05-08, delta: Phase B — typed crossThreadReplyHint field on InvocationContext + render block in buildInvocationContext (receiver-side reply hint hydrated from trigger message id)}
@@ -81,6 +84,7 @@ cited_by:
   - {feature: F231, date: 2026-07-10, delta: "Phase D topology repair (KD-18/19) — relationship continuity is per-persona relationshipKey, canonical private truth lives under CAT_CAFE_DATA_DIR/profiles/<userId>, L0 emits cat-cafe-profile://relationship/current, authenticated read/propose/approve share FileProfileRepository, legacy private/profile is migration input only."}
   - {feature: F299, date: 2026-08-21, delta: "Phase B.2 thread-access-policy authority — Sessions / Transcript / Invocations / Theater share one read decision; user-indexed system threads expose only the current user's session-backed records."}
   - {feature: F299, date: 2026-08-23, delta: "Phase D transcript-owned request-generation evidence — immutable provider-bound bytes are durably appended before launch; TurnExecution joins generations across replacement Sessions; exact reveal inherits thread and segment source ownership."}
+  - {feature: F306, date: 2026-08-27, delta: "Phase B invocation-bound runtime interaction identity — immutable user/thread/cat/invocation owner comes from AuditContext; provider thread/turn/item/request coordinates remain provenance; restart never reconstructs a waiter."}
 ---
 
 # Identity / Session
@@ -98,6 +102,7 @@ This is a top-level routing cell with six subcells. It exists to prevent identit
 - `identity-runtime-session`: F211 owns runtime session identity and binding for long-lived or external runtimes: cascade/conversation IDs, SessionChainStore bridge records, lifecycle registration, hidden external-runtime anchor threads, seal reason, and per-session identity history.
 - `thread-access-policy`: F299 Phase B.2 owns the canonical read decision for session-backed thread resources. Owner threads are thread-scoped; shared default, user-indexed system threads, and matching external-runtime anchors are current-user-scoped. Sessions, Transcript, Invocations, and Theater must consume this authority instead of spelling owner/default checks in each route.
 - `request-generation evidence`: F299 Phase D is an immutable event family inside the existing Session transcript, not a new store. The active Session at each launch owns that generation's assembled event; the durable child `TurnExecution` is the cross-Session join coordinate. Provider adapters must await the transcript commit before launch, and the invocation-scoped projector must reuse `thread-access-policy` plus each segment's source owner before revealing exact bytes.
+- `runtime-interaction identity`: F306 binds one provider-neutral interaction port from the invocation's authenticated `AuditContext`. The immutable owner is exact `(userId, threadId, catId, invocationId)`; provider request/thread/turn/item ids are opaque provenance. `RuntimeInteractionService` persists lifecycle truth, while the active response waiter remains process-local and is never restored after restart. One Redis namespace therefore has one active API lifecycle writer; multi-instance waiter routing is unsupported and fails closed as `transport_lost` instead of guessing which process owns the provider run.
 - `identity-user-profile`: F231 owns the per-user capsule and per-(user×persona) relationship primer. `catId` routes work, F208/model identity describes capability, and `relationshipKey` names stable relationship continuity. Canonical private content lives at `${CAT_CAFE_DATA_DIR}/profiles/<userId>/`; tracked code owns the repository/authentication contract, never the private bytes. L0 keeps the ≤300-char capsule plus `cat-cafe-profile://relationship/current`; the authenticated read surface derives user/persona from its principal. Profile proposals, approvals, provenance, L0 compilation, and cache invalidation share `FileProfileRepository`. Worktree-local `private/profile/` is legacy migration input only, with hash-guarded conflict resolution and rollback backup.
 
 F209's entity registry is adjacent but not canonical for agent identity. Its `entity_id` / aliases are retrievable memory anchors with provenance; they may point to cats, humans, features, or external concepts, but they do not decide roster membership, current model, role, reviewer eligibility, or who a cat is.
@@ -110,6 +115,7 @@ F209's entity registry is adjacent but not canonical for agent identity. Its `en
 - Changing runtime session binding, external conversation registration, cascade/session ownership, runtime-session list/read surfaces, or how `cliSessionId` maps to runtime-specific session IDs.
 - Changing whether an identity may list or read session-backed resources for a thread, or how shared/system threads filter records by user.
 - Changing provider request-generation identity, pre-launch transcript durability, cross-Session generation resolution, or exact segment reveal.
+- Changing how a mid-run human interaction is bound to its authenticated invocation owner or exact provider request coordinates.
 - Changing what cats know about their human at startup: user profile capsule content/injection, relationship primers, or which persona layer (breed/instance/user/relationship) a piece of identity data belongs to.
 
 ## Extend By
@@ -121,6 +127,7 @@ F209's entity registry is adjacent but not canonical for agent identity. Its `en
 - For runtime session binding, use Session Chain / runtime-session metadata keyed by Clowder AI session id and runtime session id. IDE-direct registration belongs behind the external runtime registration contract and agent-key authorization, not ad hoc JSON maps.
 - For session-backed thread reads, call `thread-access-policy`; a user index grants current-user-scoped reads, never access to every user's records under that thread id.
 - For request-generation evidence, append to the generation's active Session and join through the exact child invocation. Keep source bodies behind their existing owner resolvers; typed `unknown` is the safe result when no owner resolver exists.
+- For runtime interactions, derive owner identity from `AuditContext`, pass only the provider-neutral port through `AgentServiceOptions`, and invalidate process-local waiters on provider cancellation, transport loss, or host restart. Keep one active API lifecycle writer per Redis namespace; any future multi-instance topology needs a separate owner-lease and waiter-routing Design Gate. Never accept owner coordinates from a response body; browser reads and writes require the same strict authenticated owner, while the exact canonical `(threadId, messageId, blockId)` card ref is an additional response fence rather than the identity principal. Provider requests must also match the active app-server thread and every turn coordinate the upstream protocol supplies before publication; MCP's protocol-defined standalone `turnId:null` remains explicit provenance rather than a guessed turn. The canonical message/block must still be live immediately before terminal CAS.
 - When a feature touches more than one subcell, declare each one in the feature's Architecture cell note and explain the boundary.
 - If a feature consumes F209 `entity_id`, keep the direction one-way: identity/session truth may be referenced as provenance for entity aliases, but entity aliases must not rewrite roster or connector bindings.
 
@@ -132,10 +139,11 @@ F209's entity registry is adjacent but not canonical for agent identity. Its `en
 - `identity-runtime-session` is not `identity-agent`. A runtime can switch model/profile inside one cascade; the session records identity history but does not decide roster truth.
 - `thread-access-policy` is not sidebar presentation. The durable user index is one policy input; a route must still apply the returned record scope before reading sessions, transcripts, invocations, or Theater replay data.
 - Request-generation evidence is not a second prompt store or context ledger. F296 owns presentation/continuity decisions, source domains own their bodies and lifecycle, and F299 records only the immutable provider-bound assembly plus refs and typed capability.
+- Runtime-interaction identity is not a provider session store. The durable record proves who may answer and what provider request it came from; it does not replace `SessionChainStore`, reconstruct a provider waiter, or authorize replay after restart.
 - `identity-runtime-session` is not `memory`. Memory consumes transcript/digest evidence after runtime sessions are materialized; it does not own active cascade/conversation binding.
 - `identity-user-profile` is not `memory`. The capsule is push-mode startup truth; the persona primer is an authenticated profile read, while memory is pull-mode retrievable evidence. Shared capsule promotions are high-gate changes (KD-15); low-cost persona-primer/user-signal updates carry proposer provenance and correction paths (KD-12/18). Memory does not auto-promote into either profile layer (KD-5 data minimization).
 - `identity-user-profile` instance/user/relationship layers must never enter tracked shared assets (cat-template.json, public test baselines, outbound sync). Tracked tests verify the overlay mechanism via fixtures only (F231 KD-6).
-- F209 `entity_id` is not `identity-agent`. Entity aliases such as `landy` / `operator` / `operator` or `gemini` / `Siamese` are retrieval anchors, not roster truth.
+- F209 `entity_id` is not `identity-agent`. Entity aliases such as `operator` / `operator` / `operator` or `gemini` / `Siamese` are retrieval anchors, not roster truth.
 - `ConnectorThreadBindingStore` is an intentional shared touchpoint with `transport`: transport uses it for routing, while `identity-connector` uses it as the binding contract. Shared file ownership does not merge the cells.
 - Do not add a generic `IdentityStore` to cover all subcells. Shared vocabulary is not shared ownership.
 

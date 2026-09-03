@@ -1,3 +1,4 @@
+import type { RoutingPreflightDecisionV1 } from '@cat-cafe/shared';
 import type { FastifyBaseLogger } from 'fastify';
 
 export interface CallbackDeliveryDecisionInput {
@@ -7,7 +8,11 @@ export interface CallbackDeliveryDecisionInput {
   threadId: string;
   log: Pick<FastifyBaseLogger, 'error' | 'warn'>;
   logContext?: Record<string, unknown>;
-  enqueueA2A: () => Promise<{ enqueued: readonly string[]; coalesced?: readonly string[] }>;
+  enqueueA2A: () => Promise<{
+    enqueued: readonly string[];
+    coalesced?: readonly string[];
+    routingPreflight?: RoutingPreflightDecisionV1;
+  }>;
   markDelivered?: (deliveredAt: number) => Promise<unknown> | unknown;
   preserveQueuedOnEnqueueFailure?: boolean;
   zeroEnqueuedWarnMessage: string;
@@ -19,6 +24,7 @@ export interface CallbackDeliveryDecision {
   enqueued: readonly string[];
   enqueueAttempted: boolean;
   enqueueFailed: boolean;
+  routingPreflight?: RoutingPreflightDecisionV1;
 }
 
 async function recoverQueuedMessage(input: CallbackDeliveryDecisionInput, warnMessage: string): Promise<void> {
@@ -67,6 +73,7 @@ export class MessageDeliveryService {
             enqueued: a2aResult.enqueued,
             enqueueAttempted: true,
             enqueueFailed: true,
+            ...(a2aResult.routingPreflight ? { routingPreflight: a2aResult.routingPreflight } : {}),
           };
         }
         await recoverQueuedMessage(input, input.zeroEnqueuedWarnMessage);
@@ -75,6 +82,7 @@ export class MessageDeliveryService {
           enqueued: a2aResult.enqueued,
           enqueueAttempted: true,
           enqueueFailed: false,
+          ...(a2aResult.routingPreflight ? { routingPreflight: a2aResult.routingPreflight } : {}),
         };
       }
       return {
@@ -82,6 +90,7 @@ export class MessageDeliveryService {
         enqueued: a2aResult.enqueued,
         enqueueAttempted: true,
         enqueueFailed: false,
+        ...(a2aResult.routingPreflight ? { routingPreflight: a2aResult.routingPreflight } : {}),
       };
     } catch (err) {
       input.log.error(

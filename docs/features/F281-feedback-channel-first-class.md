@@ -12,7 +12,7 @@ description_updated_at: 2026-07-30T14:50:00-07:00
 
 # F281: Feedback Channel First-Class（反馈通道一等公民）
 
-> **Status**: done | **Owner**: Ragdoll (@fable-5, claude-fable-5) | **Priority**: P1
+> **Status**: done | **Owner**: Ragdoll (@fable-5, claude-fable-5) | **Priority**: P1 | **Completed**: 2026-08-01
 
 Architecture cell: human-disposition-feedback
 
@@ -199,3 +199,43 @@ operator 原话（2026-07-30，[thread-id]）：
 
 - Kickoff spec: Maine Coon @codex-sol（operator 指定）
 - Phase A 契约: 跨个体 review（分类集契约影响所有 proposal 面）
+| 2026-08-01 | Feature truth close（`21be77c25f`）：BACKLOG 移除、completed index 登记、task done——状态投影收口（F287 Phase A census 协同） |
+| 2026-08-02 | Close 仪式补齐（closure repair，源审计 [thread-id]）：愿景守护 @gpt52 PASS（4/4 对照 ✅，本 thread）+ User Visibility Disclosure + CloseGateReport + reflection capsule + Completed 日期 |
+| 2026-08-31 | Close 结算修正（grounding mismatch，[thread-id]）：撤回"无关红灯不扣押"豁免口径（Step 5.5 硬门 + gate 口径跨 feature 一致），completion task 置 blocked 等 repo gate 全绿；CloseGateReport/守护/capsule 有效产物保留 |
+| 2026-08-31 | Close 结算完成：repo 全量检查 exit 0（托管命令 26s）。红灯归因修正——非 main 真红/非 F290 代码问题，真根因 = 根仓 node_modules 被 F167 worktree 跨仓污染（证据链 [thread-id]：Sol clean-archive 反证 + realpath 实测 + 清理后双绿）；task 结 done，clean close 达成 |
+
+## User Visibility Disclosure
+
+| Surface | 用户能做什么（达成态） | 本 feat close 时实际 | 缺失/退化 | 处置 |
+|---------|----------------------|---------------------|----------|------|
+| hold_ball cancel | 取消持球时可表达 why | F280 canonical `user_cancel` 事件 + owner-auth feedback route 落地；旧 callback API 零改动 | 无 | — |
+| taste / entity / schedule 等其余 proposal lane | （spec scope = ≥2 lane，AC-B1） | 未接入拒因 UI，reject 仍为裸动作 | 符合 spec scope，非 defer | 后续面按 ADR-038 出生三件套在各自 feature 接入 |
+| 猫侧回流（用户感知"提案变准"） | 拒因回流校准同 subject 下次提案 | `main=landed`；**production 未激活（live=dormant）——用户当前生产体验尚无变化** | activation gate（全记忆域统一） | 激活属 F287 terminal release 声明的显式授权动作，非本 feat 尾巴 |
+
+## CloseGateReport
+
+```yaml
+close_gate_report:
+  feature_id: F281
+  spec_path: docs/features/F281-feedback-channel-first-class.md
+  head_sha: 21be77c25f   # feature truth close commit（2026-08-01）
+  report_date: 2026-08-02
+
+  ac_matrix:
+    - { ac_id: AC-A2, status: met, evidence: [{ kind: pr, ref: "#3307" }, { kind: test, ref: "packages/shared/.../human-disposition-feedback.test.ts" }], resolution: null }
+    - { ac_id: AC-B2, status: met, evidence: [{ kind: pr, ref: "#3323", description: "F280 Phase B0 canonical wait.terminated/user_cancel + owner-auth feedback route" }], resolution: null }
+    - { ac_id: AC-C1, status: met, evidence: [{ kind: pr, ref: "#3314", description: "exact-proposal feedback lifecycle + fenced purge" }], resolution: null }
+    - { ac_id: AC-C3, status: met, evidence: [{ kind: test, ref: "phase-c contract tests", description: "无面向猫的接受率/分数/global-policy token" }], resolution: null }
+    - { ac_id: AC-D1, status: met, evidence: [{ kind: doc, ref: "docs/decisions/038-l0-staging-protocol.md", description: "出生三件套进机制选择反射，F281 为首个合规样例" }], resolution: null }
+
+  vision_guardian:
+    cat: gpt52 (GPT-5.4，非作者非 reviewer)
+    verdict: PASS
+    date: 2026-08-02
+    evidence: "本 thread 守护回复：愿景原话 4 对照全 ✅ + 三问结论 + evidence 锚点"
+
+  harness_feedback: none
+  harness_feedback_reason: "回流 harness 行为已由 F287 Phase E alpha UAT 负向矩阵验证（utility verdict=keep）；production 未激活（live=dormant）无 live trace 可评；激活是 F287 terminal release 声明的独立授权动作，届时按 F153 观测"
+
+  repo_gate_note: "close 结算完成（2026-08-31）：repo 全量检查 exit 0（托管命令 26s，shared/collective-connector/api build 与全部 checker PASS）。红灯 forensic 全记录：①初判'F290 shared 导出断裂/main 真红'错误——真根因是根仓 node_modules workspace 链接被 F167 worktree 跨仓污染（指向无 Collective 导出的老版 packages）；'fresh install 排除环境因素'的排除法失效原因 = pnpm 见链接存在且包名匹配即跳过重建；证据链 [thread-id]（Sol clean-archive 反证 + realpath 实测 + 污染清理后双绿）。②2026-08-31 曾按 Step 5.5 硬门置 blocked 并撤回'无关红灯不扣押 close'豁免口径（billing-only taste 属外部基础设施噪音类，不覆盖 repo 内 build 红灯；gate 口径跨 feature 一致）。③污染修复 + 检查全绿后结算 done"
+```

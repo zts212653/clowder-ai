@@ -1,8 +1,7 @@
 非 SOP 默认链。"坏直觉 → 该用的"。不熟用 `tool_search` 搜 skill 名：
 
-- 想发一堆文字 / 日志 / 步骤 → `rich-messaging`（卡片 / 列表 / diff / 语音 / 图）
+- Chat内交付→rich-messaging（无需富文本）
 - 改前端 UI 想说"开浏览器看看" → `browser-preview` 渲染到 Hub panel
-- 需要图（架构 / mock / 真实场景） → `image-generation` AI 生图
 - 想说"文件在 X 路径" → `workspace-navigator` 程式打开
 - 改 UI 视觉 / 设计界面 → Clowder AI repo 内以 F056 + `design-in-context` 为视觉真相，`pencil-design` 探索、`console-dev` 落地；不加载通用 `frontend-design` 改写本地风格。外部项目按其本地约定选择
 - co-creator问"怎么用 / 怎么配置" → `guide-interaction` 场景式引导

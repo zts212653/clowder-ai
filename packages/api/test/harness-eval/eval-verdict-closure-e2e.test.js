@@ -188,10 +188,10 @@ describe('F266 eval verdict closure journeys (Redis)', { skip: redisIsolationSki
     await assert.rejects(service.execute({ kind: 'cat', id: 'codex-sol' }, suppression));
     assert.equal((await eventLog.read(root.verdictId)).length, 1);
 
-    const suppressed = await service.execute({ kind: 'cvo', id: 'you' }, suppression);
+    const suppressed = await service.execute({ kind: 'cvo', id: 'operator' }, suppression);
     assert.equal(suppressed.projection.status, 'suppressed_with_reason');
     assert.equal(suppressed.projection.closureReason, suppression.reason);
-    assert.deepEqual(suppressed.projection.history.at(-1).actor, { kind: 'cvo', id: 'you' });
+    assert.deepEqual(suppressed.projection.history.at(-1).actor, { kind: 'cvo', id: 'operator' });
     assert.deepEqual(suppressed.projection.history.at(-1).refs, suppression.refs);
     await replayThroughNewProcess(root, suppressed.projection);
   });

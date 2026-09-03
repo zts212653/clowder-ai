@@ -130,6 +130,7 @@ function appendMessageEvent(
     makeBaseEvent(message, threadId, events.length, timestamp, {
       type: messageEventType(message),
       content,
+      ...(message.extra?.semanticEvent ? { semanticEvent: message.extra.semanticEvent } : {}),
     }),
   );
 }

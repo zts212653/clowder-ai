@@ -16,7 +16,7 @@
  * 6. inlineApprovable=true items still have both approve AND reject (no regression)
  */
 
-import type { ApprovalItem } from '@cat-cafe/shared';
+import type { ApprovalHubItem } from '@cat-cafe/shared';
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -51,12 +51,13 @@ import { ApprovalItemCard } from '../ApprovalItemCard';
 const BASE_NAV = anchoredApprovalNavigation('thread-test-src');
 
 function makeItem(
-  overrides: Partial<ApprovalItem> & { proposalId: string; sourceFeatureId: ApprovalItem['sourceFeatureId'] },
-): ApprovalItem {
+  overrides: Partial<ApprovalHubItem> & { proposalId: string; sourceFeatureId: ApprovalHubItem['sourceFeatureId'] },
+): ApprovalHubItem {
   return {
     requesterCatId: 'opus',
-    ownerUserId: 'user-landy',
-    status: 'pending',
+    ownerUserId: 'user-operator',
+    resolution: 'open',
+    materialization: { state: 'not_started' },
     summary: 'Test proposal',
     detail: {},
     navigation: BASE_NAV,
@@ -186,5 +187,22 @@ describe('Reject/dismiss button renders for all items (狗皮膏药 fix)', () =>
 
     const card = container.querySelector('[data-testid="approval-item-rej-no-approve"]');
     expect(card!.querySelector('[data-testid="approve-btn"]')).toBeNull();
+  });
+
+  it('F306 is navigation-only because the canonical thread card owns every decision', async () => {
+    const item = makeItem({
+      proposalId: 'runtime-interaction-1',
+      sourceFeatureId: 'F306',
+      inlineApprovable: false,
+    });
+    await act(async () => {
+      root.render(React.createElement(ApprovalItemCard, { item }));
+    });
+
+    const card = container.querySelector('[data-testid="approval-item-runtime-interaction-1"]');
+    if (!card) throw new Error('expected F306 approval item card');
+    expect(card.querySelector('[data-testid="approve-btn"]')).toBeNull();
+    expect(card.querySelector('[data-testid="reject-btn"]')).toBeNull();
+    expect(card.textContent).toContain('查看审批卡');
   });
 });

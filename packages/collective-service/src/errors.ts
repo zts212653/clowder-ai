@@ -1,0 +1,42 @@
+export type CollectiveServiceErrorCode =
+  | 'ACK_OUT_OF_RANGE'
+  | 'AUTHENTICATION_REQUIRED'
+  | 'AUTH_ATTEMPT_CONSUMED'
+  | 'AUTH_ATTEMPT_EXPIRED'
+  | 'AUTH_ATTEMPT_INVALID'
+  | 'AUTH_BINDING_REQUIRED'
+  | 'AUTH_COMPLETION_CONSUMED'
+  | 'AUTH_COMPLETION_EXPIRED'
+  | 'AUTH_COMPLETION_INVALID'
+  | 'AUTH_IDENTITY_CONFLICT'
+  | 'AUTH_IDENTITY_INVALID'
+  | 'AUTH_PROVIDER_NOT_READY'
+  | 'BOOTSTRAP_ALREADY_CONSUMED'
+  | 'BOOTSTRAP_EXPIRED'
+  | 'CLIENT_EVENT_CONFLICT'
+  | 'COLLECTIVE_NOT_FOUND'
+  | 'CONNECTION_NOT_FOUND'
+  | 'CONNECTION_REVOKED'
+  | 'COORDINATE_MISMATCH'
+  | 'FORBIDDEN'
+  | 'HUMAN_AUTH_REQUIRED'
+  | 'INVALID_BOOTSTRAP'
+  | 'INVITE_EXPIRED'
+  | 'INVITE_INVALID'
+  | 'PAIRING_ALREADY_CONSUMED'
+  | 'PAIRING_EXPIRED'
+  | 'PAIRING_INVALID'
+  | 'POLL_CURSOR_MISMATCH'
+  | 'STATE_CORRUPT'
+  | 'STATE_MIGRATION_REQUIRED';
+
+export class CollectiveServiceError extends Error {
+  constructor(
+    readonly code: CollectiveServiceErrorCode,
+    message: string,
+    readonly statusCode: number,
+  ) {
+    super(message);
+    this.name = 'CollectiveServiceError';
+  }
+}

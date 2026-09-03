@@ -26,7 +26,7 @@ export type McpMigrationSeed = {
   authority?: MigrationAuthority;
   risk: McpActionBoundary['risk'];
   runtimeProfiles: NonEmptyReadonlyArray<McpRuntimeProfile>;
-  targetExposure?: 'profile-gated' | 'lazy-discoverable';
+  targetExposure?: 'lazy-discoverable';
   standaloneReason?: McpStandaloneReason;
 };
 
@@ -169,9 +169,9 @@ export function defineMcpCanonicalFactory(
       implementation: bindMcpImplementation(governance.implementationRef, input.handler),
       policy: {
         resourceFamily: governance.resourceFamily,
-        exposureTier: {
-          current: 'eager-core',
-          ...(governance.targetExposure ? { target: governance.targetExposure } : {}),
+        schemaDelivery: {
+          policy: 'host-default',
+          ...(governance.targetExposure === 'lazy-discoverable' ? { candidate: 'discoverable' as const } : {}),
           evidenceRef: governance.sourceRef,
         },
         runtimeProfiles: governance.runtimeProfiles,

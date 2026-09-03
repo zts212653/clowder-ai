@@ -222,7 +222,7 @@ describe('F295 active execution projection', () => {
   it('cold-discovers same-cat live work in every project thread and a post-invocation managed command', async () => {
     const response = await app.inject({
       method: 'GET',
-      url: '/api/threads/thread-a/executions/active',
+      url: '/api/executions/active?projectPath=%2Fproject%2Fcafe',
       headers: { 'x-cat-cafe-user': USER_ID },
     });
 
@@ -270,6 +270,7 @@ describe('F295 active execution projection', () => {
           threadTitle: 'Background work',
           catId: 'kimi',
           kind: 'managed_command',
+          activity: 'full_gate',
           startedAt: 300,
           cancelability: {
             state: 'cancelable',
@@ -301,7 +302,7 @@ describe('F295 active execution projection', () => {
 
     const response = await app.inject({
       method: 'GET',
-      url: '/api/threads/thread-a/executions/active',
+      url: '/api/executions/active?projectPath=%2Fproject%2Fcafe',
       headers: { 'x-cat-cafe-user': USER_ID },
     });
 
@@ -313,6 +314,7 @@ describe('F295 active execution projection', () => {
       threadTitle: 'Background work',
       catId: 'kimi',
       kind: 'managed_command',
+      activity: 'test',
       startedAt: 350,
       cancelability: {
         state: 'cancelable',
@@ -346,7 +348,7 @@ describe('F295 active execution projection', () => {
 
     const response = await app.inject({
       method: 'GET',
-      url: '/api/threads/thread-a/executions/active',
+      url: '/api/executions/active?projectPath=%2Fproject%2Fcafe',
       headers: { 'x-cat-cafe-user': USER_ID },
     });
 
@@ -384,7 +386,7 @@ describe('F295 active execution projection', () => {
 
     const projection = await app.inject({
       method: 'GET',
-      url: '/api/threads/thread-a/executions/active',
+      url: '/api/executions/active?projectPath=%2Fproject%2Fcafe',
       headers: { 'x-cat-cafe-user': USER_ID },
     });
     const processExecution = projection
@@ -447,7 +449,7 @@ describe('F295 active execution projection', () => {
 
     const projection = await app.inject({
       method: 'GET',
-      url: '/api/threads/thread-a/executions/active',
+      url: '/api/executions/active?projectPath=%2Fproject%2Fcafe',
       headers: { 'x-cat-cafe-user': USER_ID },
     });
     const occupied = projection.json().executions.find((execution) => execution.catId === 'opus5');
@@ -475,7 +477,7 @@ describe('F295 active execution projection', () => {
 
     const projection = await app.inject({
       method: 'GET',
-      url: '/api/threads/thread-a/executions/active',
+      url: '/api/executions/active?projectPath=%2Fproject%2Fcafe',
       headers: { 'x-cat-cafe-user': USER_ID },
     });
     const execution = projection.json().executions.find((item) => item.executionId === 'inv-owner-unknown');
@@ -502,7 +504,7 @@ describe('F295 active execution projection', () => {
 
     const projection = await app.inject({
       method: 'GET',
-      url: '/api/threads/thread-a/executions/active',
+      url: '/api/executions/active?projectPath=%2Fproject%2Fcafe',
       headers: { 'x-cat-cafe-user': USER_ID },
     });
     const merged = projection.json().executions.filter((execution) => execution.executionId === 'inv-a');
@@ -533,7 +535,7 @@ describe('F295 active execution projection', () => {
 
     const projection = await app.inject({
       method: 'GET',
-      url: '/api/threads/thread-a/executions/active',
+      url: '/api/executions/active?projectPath=%2Fproject%2Fcafe',
       headers: { 'x-cat-cafe-user': USER_ID },
     });
     const kimiRows = projection
@@ -553,7 +555,7 @@ describe('F295 active execution projection', () => {
 
     const projection = await app.inject({
       method: 'GET',
-      url: '/api/threads/thread-a/executions/active',
+      url: '/api/executions/active?projectPath=%2Fproject%2Fcafe',
       headers: { 'x-cat-cafe-user': USER_ID },
     });
     const execution = projection
@@ -635,7 +637,7 @@ describe('F295 active execution projection', () => {
 
     const projection = await app.inject({
       method: 'GET',
-      url: '/api/threads/thread-a/executions/active',
+      url: '/api/executions/active?projectPath=%2Fproject%2Fcafe',
       headers: { 'x-cat-cafe-user': USER_ID },
     });
 
@@ -669,7 +671,7 @@ describe('F295 active execution projection', () => {
 
     const projection = await app.inject({
       method: 'GET',
-      url: '/api/threads/thread-a/executions/active',
+      url: '/api/executions/active?projectPath=%2Fproject%2Fcafe',
       headers: { 'x-cat-cafe-user': USER_ID },
     });
 
@@ -706,7 +708,7 @@ describe('F295 active execution projection', () => {
 
     const projection = await app.inject({
       method: 'GET',
-      url: '/api/threads/thread-a/executions/active',
+      url: '/api/executions/active?projectPath=%2Fproject%2Fcafe',
       headers: { 'x-cat-cafe-user': USER_ID },
     });
 
@@ -784,7 +786,7 @@ describe('F295 active execution projection', () => {
 
     const projection = await app.inject({
       method: 'GET',
-      url: '/api/threads/thread-system/executions/active',
+      url: '/api/executions/active?projectPath=%2Fproject%2Fcafe',
       headers: { 'x-cat-cafe-user': USER_ID },
     });
     assert.equal(
@@ -826,7 +828,7 @@ describe('F295 active execution projection', () => {
 
     const projection = await app.inject({
       method: 'GET',
-      url: `/api/threads/${systemThread.id}/executions/active`,
+      url: '/api/executions/active?projectPath=%2Fproject%2Fprivate',
       headers: { 'x-cat-cafe-user': USER_ID },
     });
     const cancel = await app.inject({
@@ -835,21 +837,20 @@ describe('F295 active execution projection', () => {
       headers: { 'x-cat-cafe-user': USER_ID },
       payload: { catId: 'opus5' },
     });
-    const missing = await app.inject({
+    const invalid = await app.inject({
       method: 'GET',
-      url: '/api/threads/thread-system-missing/executions/active',
+      url: '/api/executions/active',
       headers: { 'x-cat-cafe-user': USER_ID },
     });
 
-    for (const response of [projection, cancel]) {
-      assert.equal(response.statusCode, 403);
-      assert.equal(response.json().code, 'THREAD_ACCESS_DENIED');
-      assert.equal(response.json().reason, 'not_visible_to_user');
-    }
-    assert.equal(missing.statusCode, 403);
-    assert.equal(missing.json().code, 'THREAD_ACCESS_DENIED');
-    assert.equal(missing.json().reason, 'thread_not_found');
-    assert.equal(deps.threadStore.listByProject.mock.callCount(), 0);
+    assert.equal(projection.statusCode, 404);
+    assert.equal(projection.json().code, 'PROJECT_NOT_FOUND');
+    assert.equal(cancel.statusCode, 403);
+    assert.equal(cancel.json().code, 'THREAD_ACCESS_DENIED');
+    assert.equal(cancel.json().reason, 'not_visible_to_user');
+    assert.equal(invalid.statusCode, 400);
+    assert.equal(invalid.json().code, 'INVALID_REQUEST');
+    assert.equal(deps.threadStore.listByProject.mock.callCount(), 1);
     assert.equal(deps.cliExecutionOwnerService.listLive.mock.callCount(), 0);
     assert.deepEqual(deps._processOwnerCancelCalls, []);
   });
@@ -862,7 +863,7 @@ describe('F295 active execution projection', () => {
 
     const response = await app.inject({
       method: 'GET',
-      url: '/api/threads/thread-a/executions/active',
+      url: '/api/executions/active?projectPath=%2Fproject%2Fcafe',
       headers: { 'x-cat-cafe-user': USER_ID },
     });
 
@@ -880,7 +881,7 @@ describe('F295 active execution projection', () => {
 
     const response = await app.inject({
       method: 'GET',
-      url: '/api/threads/thread-a/executions/active',
+      url: '/api/executions/active?projectPath=%2Fproject%2Fcafe',
       headers: { 'x-cat-cafe-user': USER_ID },
     });
     const foreign = response

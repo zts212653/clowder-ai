@@ -1,6 +1,6 @@
 'use client';
 
-import type { ApprovalItem, MeetingIntakeOutput } from '@cat-cafe/shared';
+import type { ApprovalHubItem, MeetingIntakeOutput } from '@cat-cafe/shared';
 import { useMemo, useState } from 'react';
 import { useApprovalHubStore } from '@/stores/approvalHubStore';
 import type { Thread } from '@/stores/chat-types';
@@ -23,7 +23,7 @@ import {
   userMeetingThreads,
 } from './meeting-intake-utils';
 
-export function MeetingIntakeCard({ item }: { item: ApprovalItem }) {
+export function MeetingIntakeCard({ item }: { item: ApprovalHubItem }) {
   const fetchPending = useApprovalHubStore((state) => state.fetchPending);
   const rawThreads = useChatStore((state) => state.threads as Thread[] | unknown);
   const currentProjectPath = useChatStore((state) => state.currentProjectPath);

@@ -1,10 +1,8 @@
 'use client';
 
-import type { ContextAttachment, MessageWorkDisposition } from '@cat-cafe/shared';
 import { useCallback, useMemo } from 'react';
 import { useShallow } from 'zustand/react/shallow';
-import type { UploadStatus, WhisperOptions } from '@/hooks/useSendMessage';
-import type { DeliveryMode } from '@/stores/chat-types';
+import { type UploadStatus, useSendMessage } from '@/hooks/useSendMessage';
 import { type Thread, useChatStore } from '@/stores/chatStore';
 import { ChatInput } from './ChatInput';
 import { PawIcon } from './icons/PawIcon';
@@ -13,16 +11,7 @@ import { SplitPaneCell, SplitPanePlaceholder } from './SplitPaneCell';
 
 interface SplitPaneViewProps {
   isReadonly?: boolean;
-  onSend: (
-    content: string,
-    images?: File[],
-    overrideThreadId?: string,
-    whisper?: WhisperOptions,
-    deliveryMode?: DeliveryMode,
-    replyToId?: string,
-    messageDisposition?: MessageWorkDisposition,
-    contextAttachments?: ContextAttachment[],
-  ) => void | boolean | Promise<void | boolean>;
+  onSend: ReturnType<typeof useSendMessage>['handleSend'];
   uploadStatus?: UploadStatus;
   uploadError?: string | null;
   /** Switch from split to single mode, focusing the given thread */
@@ -193,4 +182,12 @@ export function SplitPaneView({
       </div>
     </div>
   );
+}
+
+type SplitPaneChatViewProps = Pick<SplitPaneViewProps, 'isReadonly' | 'onZoomToThread'>;
+
+/** Production split-preview adapter: one target-aware send lifecycle for its shared composer. */
+export function SplitPaneChatView(props: SplitPaneChatViewProps) {
+  const { handleSend, uploadStatus, uploadError } = useSendMessage();
+  return <SplitPaneView {...props} onSend={handleSend} uploadStatus={uploadStatus} uploadError={uploadError} />;
 }

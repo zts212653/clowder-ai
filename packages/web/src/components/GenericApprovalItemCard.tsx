@@ -1,7 +1,7 @@
 'use client';
 
 import type {
-  ApprovalItem,
+  ApprovalHubItem,
   EntityConflictContext,
   EntityConflictResolutionRequest,
   HumanDispositionFeedbackInput,
@@ -10,15 +10,23 @@ import { useCallback, useMemo, useState } from 'react';
 import { useCatNameResolver } from '@/hooks/useCatNameResolver';
 import { approvalFeatureMeta } from '@/lib/approval-features';
 import { approvalOriginThreadId } from '@/lib/approval-navigation';
+import {
+  approvalDisplayTitle,
+  approvalLifecyclePresentation,
+  formatApprovalAbsoluteTime,
+  formatApprovalRelativeTime,
+} from '@/lib/approval-presentation';
 import { useApprovalHubStore } from '@/stores/approvalHubStore';
 import type { Thread } from '@/stores/chat-types';
 import { useChatStore } from '@/stores/chatStore';
-import { ApprovalDecisionCard } from './ApprovalDecisionCard';
+import { ApprovalDecisionCard, type ApprovalDecisionDetails } from './ApprovalDecisionCard';
+import { ApprovalFeatureBadge } from './ApprovalFeatureBadge';
+import { ApprovalTechnicalDetailContent } from './ApprovalTechnicalDetails';
 import { GenericApprovalDecisionActions } from './GenericApprovalDecisionActions';
 import { GenericApprovalRecommendation } from './GenericApprovalRecommendation';
 import { HumanDispositionFeedbackDialog } from './HumanDispositionFeedbackDialog';
 
-export function GenericApprovalItemCard({ item }: { item: ApprovalItem }) {
+export function GenericApprovalItemCard({ item }: { item: ApprovalHubItem }) {
   const close = useApprovalHubStore((state) => state.close);
   const resolveCatName = useCatNameResolver();
   const rawThreads = useChatStore((state) => state.threads as Thread[] | unknown);
@@ -38,7 +46,6 @@ export function GenericApprovalItemCard({ item }: { item: ApprovalItem }) {
   );
 
   const isStale = useMemo(() => item.expiresAt != null && item.expiresAt < Date.now(), [item.expiresAt]);
-  const isResumeOnly = item.decisionMode === 'resume-only';
   const isPersonMemoryClaimSelect = item.sourceFeatureId === 'F276' && item.decisionMode === 'claim-select';
   const approveProposal = useApprovalHubStore((state) => state.approveProposal);
   const rejectProposal = useApprovalHubStore((state) => state.rejectProposal);
@@ -109,15 +116,12 @@ export function GenericApprovalItemCard({ item }: { item: ApprovalItem }) {
 
   const header = (
     <div className="flex items-center gap-2 text-micro">
-      <span
-        className="rounded-md px-1.5 py-0.5 font-medium"
-        style={{ backgroundColor: featureMeta.color, color: 'var(--cafe-accent-foreground)' }}
-      >
-        {featureMeta.badgeLabel}
-      </span>
+      <ApprovalFeatureBadge featureId={item.sourceFeatureId} testId="approval-feature-badge" />
       {isStale && <StatusBadge testId="stale-badge">已过期</StatusBadge>}
-      {isResumeOnly && <StatusBadge testId="recovery-badge">待恢复</StatusBadge>}
-      <span className="ml-auto opacity-60">{formatAge(item.createdAt)}</span>
+      <ApprovalLifecycleBadge item={item} />
+      <span className="ml-auto opacity-60" title={`发起于 ${formatApprovalAbsoluteTime(item.createdAt)}`}>
+        发起于 {formatApprovalRelativeTime(item.createdAt)}
+      </span>
     </div>
   );
 
@@ -137,7 +141,6 @@ export function GenericApprovalItemCard({ item }: { item: ApprovalItem }) {
     <GenericApprovalDecisionActions
       item={item}
       isStale={isStale}
-      isResumeOnly={isResumeOnly}
       isPersonMemoryClaimSelect={isPersonMemoryClaimSelect}
       entityConflict={entityConflict}
       decidingState={decidingState}
@@ -153,10 +156,17 @@ export function GenericApprovalItemCard({ item }: { item: ApprovalItem }) {
       <ApprovalDecisionCard
         testId={`approval-item-${item.proposalId}`}
         header={header}
-        title={item.summary}
-        actionReason={<>由 {resolveCatName(item.requesterCatId)} 发起，需要你作出决定。</>}
+        title={approvalDisplayTitle(item)}
+        actionReason={
+          item.resolution === 'open' ? (
+            <>由 {resolveCatName(item.requesterCatId)} 发起，需要你作出决定。</>
+          ) : (
+            <>审批决议已记录；后续状态只认 canonical owner receipt。</>
+          )
+        }
         recommendation={recommendation}
         currentDecision={currentDecision}
+        details={approvalDetailDisclosure(item.detail)}
       />
       {feedbackReasonCodes && (
         <HumanDispositionFeedbackDialog
@@ -177,6 +187,21 @@ export function GenericApprovalItemCard({ item }: { item: ApprovalItem }) {
   );
 }
 
+function ApprovalLifecycleBadge({ item }: { item: ApprovalHubItem }) {
+  if (item.resolution === 'open') return null;
+  return <StatusBadge testId="approval-lifecycle-badge">{approvalLifecyclePresentation(item).label}</StatusBadge>;
+}
+
+function approvalDetailDisclosure(detail: Record<string, unknown>): ApprovalDecisionDetails | undefined {
+  if (Object.keys(detail).length === 0) return undefined;
+  return {
+    label: '查看技术详情',
+    expandedLabel: '收起技术详情',
+    testId: 'approval-item-technical-details',
+    content: <ApprovalTechnicalDetailContent detail={detail} />,
+  };
+}
+
 function StatusBadge({ children, testId }: { children: string; testId?: string }) {
   return (
     <span
@@ -186,15 +211,6 @@ function StatusBadge({ children, testId }: { children: string; testId?: string }
       {children}
     </span>
   );
-}
-
-function formatAge(createdAt: number): string {
-  const diffMs = Date.now() - createdAt;
-  const mins = Math.floor(diffMs / 60000);
-  if (mins < 60) return `${mins}m ago`;
-  const hours = Math.floor(mins / 60);
-  if (hours < 24) return `${hours}h ago`;
-  return `${Math.floor(hours / 24)}d ago`;
 }
 
 function formatDetailLines(entries: ReadonlyArray<readonly [label: string, value: unknown]>): string | undefined {

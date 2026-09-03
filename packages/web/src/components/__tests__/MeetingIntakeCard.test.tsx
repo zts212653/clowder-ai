@@ -101,7 +101,8 @@ const item = {
   sourceFeatureId: 'F292' as const,
   requesterCatId: 'system',
   ownerUserId: 'owner-1',
-  status: 'pending' as const,
+  resolution: 'open' as const,
+  materialization: { state: 'not_started' as const },
   summary: '整理会议：Weekly sync',
   detail: {
     revision: 1,

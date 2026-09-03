@@ -32,7 +32,7 @@ describe('writeProfilePrimer + writeProfileProvenance (split commit points)', ()
     afterContent: 'NEW primer content',
     beforeContent: 'OLD primer',
     baseContentHash: '',
-    rationale: 'landy prefers blue',
+    rationale: 'operator prefers blue',
     signalProvenance: { kind: 'cat-declared', sourceThreadId: 'thread_1', sourceMessageId: 'msg_1' },
     ...over,
   });

@@ -34,14 +34,28 @@ function referencedEvidence(definition: McpToolDefinition): readonly EvidenceRef
     definition.policy.standaloneReason.disposition === 'accepted-boundary'
       ? definition.policy.standaloneReason.admissionRef
       : definition.policy.standaloneReason.evidenceRef;
+  const deliveryRef = (definition.policy.schemaDelivery as { evidenceRef?: unknown } | undefined)?.evidenceRef;
   return [
     ...boundaries.flatMap((boundary) => boundary.authorizationPaths.map((path) => path.enforcementRef)),
-    definition.policy.exposureTier.evidenceRef,
+    ...(typeof deliveryRef === 'string' ? [deliveryRef as EvidenceRef] : []),
     definition.policy.owner.domainCell,
     reasonRef,
     ...definition.policy.cognitiveEntryPoints.map((entry) => entry.ref),
     ...definition.policy.verification.map((entry) => entry.ref),
   ];
+}
+
+function hasValidSchemaDeliveryPolicy(definition: McpToolDefinition): boolean {
+  const delivery = definition.policy.schemaDelivery as
+    | { policy?: unknown; candidate?: unknown; evidenceRef?: unknown }
+    | undefined;
+  if (!delivery || !['host-default', 'always-visible', 'discoverable'].includes(String(delivery.policy))) {
+    return false;
+  }
+  if (delivery.candidate !== undefined && !['always-visible', 'discoverable'].includes(String(delivery.candidate))) {
+    return false;
+  }
+  return typeof delivery.evidenceRef === 'string' && delivery.evidenceRef.length > 0;
 }
 
 function matchesProtectedBase(definition: McpToolDefinition, snapshot: ProtectedToolSnapshot): boolean {
@@ -188,6 +202,7 @@ function baseFindings(definition: McpToolDefinition, options: ValidationOptions)
     !definition.name.trim() ||
     !definition.description.trim() ||
     !definition.policy.resourceFamily.trim() ||
+    !hasValidSchemaDeliveryPolicy(definition) ||
     definition.policy.runtimeProfiles.length === 0 ||
     definition.policy.cognitiveEntryPoints.length === 0 ||
     definition.policy.verification.length === 0

@@ -93,7 +93,7 @@ describe('F208 AC-E3: execute-apply endpoint', () => {
   it('happy path: approved proposal → file written + git committed + marked applied', async () => {
     const proposal = createApprovedProposal();
     // Approve it
-    store.markApproved(proposal.proposalId, 'you');
+    store.markApproved(proposal.proposalId, 'operator');
 
     const res = await app.inject({
       method: 'POST',
@@ -118,7 +118,7 @@ describe('F208 AC-E3: execute-apply endpoint', () => {
 
   it('rejects with 401 when unauthenticated', async () => {
     const proposal = createApprovedProposal();
-    store.markApproved(proposal.proposalId, 'you');
+    store.markApproved(proposal.proposalId, 'operator');
 
     const res = await app.inject({
       method: 'POST',
@@ -131,7 +131,7 @@ describe('F208 AC-E3: execute-apply endpoint', () => {
 
   it('rejects with 403 when caller is not the target cat', async () => {
     const proposal = createApprovedProposal();
-    store.markApproved(proposal.proposalId, 'you');
+    store.markApproved(proposal.proposalId, 'operator');
 
     const res = await app.inject({
       method: 'POST',
@@ -158,7 +158,7 @@ describe('F208 AC-E3: execute-apply endpoint', () => {
   it('rejects with 409 on baseHash mismatch (stale-write lock)', async () => {
     // Create proposal with wrong baseHash
     const proposal = createApprovedProposal({ baseHash: 'deadbeef'.repeat(8) });
-    store.markApproved(proposal.proposalId, 'you');
+    store.markApproved(proposal.proposalId, 'operator');
 
     const res = await app.inject({
       method: 'POST',
@@ -189,7 +189,7 @@ describe('F208 AC-E3: execute-apply endpoint', () => {
     execFileSync('git', ['commit', '-m', 'reset for rollback test', '--allow-empty-message'], { cwd: tempDir });
 
     const proposal = createApprovedProposal();
-    store.markApproved(proposal.proposalId, 'you');
+    store.markApproved(proposal.proposalId, 'operator');
 
     // Sabotage git: corrupt index to make git add/commit fail
     const indexPath = join(tempDir, '.git', 'index');
@@ -234,7 +234,7 @@ describe('F208 AC-E3: execute-apply endpoint', () => {
     }
 
     const proposal = createApprovedProposal();
-    store.markApproved(proposal.proposalId, 'you');
+    store.markApproved(proposal.proposalId, 'operator');
 
     // Sabotage commit: install a pre-commit hook that always fails
     // This lets git add succeed but git commit fail
@@ -280,7 +280,7 @@ describe('F208 AC-E3: execute-apply endpoint', () => {
     }
 
     const proposal = createApprovedProposal();
-    store.markApproved(proposal.proposalId, 'you');
+    store.markApproved(proposal.proposalId, 'operator');
 
     // Sabotage push: point remote to non-existent path
     execFileSync('git', ['remote', 'set-url', 'origin', '/nonexistent/path.git'], { cwd: tempDir });

@@ -18,6 +18,7 @@ const thread = {
   createdAt: 1,
   lastActiveAt: 1,
 };
+const noopSocketManager = { emitToUser() {} };
 
 describe('F292 private-thread artifact handoff', () => {
   it('resolves only exact, live, owner-bound private-thread handles', async () => {
@@ -67,6 +68,7 @@ describe('F292 private-thread artifact handoff', () => {
       },
       invocationQueue: queue,
       queueProcessor: { processNext: async () => ({ started: true }) },
+      socketManager: noopSocketManager,
       supportsPresentationRetry: () => true,
       now: () => 12_000,
     });
@@ -124,6 +126,132 @@ describe('F292 private-thread artifact handoff', () => {
       'the first-turn context must remain constant-size as transcript bytes grow',
     );
     assert.equal(buildMeetingArtifactPrompt(intake, artifact), appended[0].content);
+  });
+
+  it('publishes the durable Host receipt before processNext even when execution does not start', async () => {
+    const order = [];
+    const published = [];
+    const dispatcher = new ThreadMeetingArtifactDispatcher({
+      threadStore: { get: async () => thread },
+      messageStore: {
+        append: async (input) => ({ ...input, id: 'meeting-message-visible', threadId: input.threadId }),
+        getByIdempotencyKey: async () => null,
+      },
+      invocationQueue: {
+        enqueue: () => ({ outcome: 'enqueued', entry: { id: 'queue-visible', messageId: null } }),
+        backfillMessageId() {},
+        rollbackEnqueue() {},
+      },
+      queueProcessor: {
+        processNext: async () => {
+          order.push('processNext');
+          return { started: false };
+        },
+      },
+      socketManager: {
+        emitToUser(userId, event, data) {
+          order.push(event);
+          published.push({ userId, event, data });
+        },
+      },
+      supportsPresentationRetry: () => true,
+      now: () => 12_345,
+    });
+    const artifact = {
+      contentType: 'text/plain',
+      resourceRef: `meeting-artifact://intakes/intake-visible?revision=sha256:${'b'.repeat(64)}`,
+      sourceHandle: 'example://meeting/artifact-visible',
+      sourceRevision: `sha256:${'b'.repeat(64)}`,
+      byteLength: 4,
+      trust: 'untrusted_external',
+      instructionPolicy: 'data_only',
+    };
+
+    const receipt = await dispatcher.deliver({
+      intake: {
+        intakeId: 'intake-visible',
+        ownerId: 'owner-1',
+        judgmentState: 'confirmed',
+        updatedAt: 12_345,
+        choices: {
+          destinationHandle: 'host:private-thread:thread-1',
+          outputs: ['minutes'],
+        },
+      },
+      artifact,
+    });
+
+    assert.equal(receipt, undefined);
+    assert.deepEqual(order, ['messages_queued', 'processNext']);
+    assert.equal(published.length, 1);
+    assert.equal(published[0].userId, 'owner-1');
+    assert.equal(published[0].data.threadId, 'thread-1');
+    assert.deepEqual(published[0].data.messageIds, ['meeting-message-visible']);
+    assert.deepEqual(published[0].data.messages[0].source, {
+      connector: 'feishu',
+      label: '飞书会议入站 / 录音豆',
+      icon: 'feishu',
+      meta: { sourceRevision: artifact.sourceRevision },
+    });
+    assert.equal(published[0].data.messages[0].timestamp, 12_345);
+    assert.equal(published[0].data.messages[0].deliveredAt, undefined);
+    assert.equal(published[0].data.messages[0].timelineOrderAt, undefined);
+  });
+
+  it('admits the Alpha canary through the canonical meeting write-opportunity producer', async () => {
+    const appended = [];
+    const processed = [];
+    const dispatcher = new ThreadMeetingArtifactDispatcher({
+      threadStore: { get: async () => thread },
+      messageStore: {
+        append: async (input) => {
+          appended.push(input);
+          return { ...input, id: 'msg-alpha', threadId: input.threadId };
+        },
+        getByIdempotencyKey: async () => null,
+      },
+      invocationQueue: {
+        enqueue: () => ({ outcome: 'enqueued', entry: { id: 'q-alpha', messageId: null } }),
+        backfillMessageId() {},
+        rollbackEnqueue() {},
+      },
+      queueProcessor: {
+        processNext: async (...args) => {
+          processed.push(args);
+          return { started: true };
+        },
+      },
+      socketManager: noopSocketManager,
+      supportsPresentationRetry: () => true,
+      now: () => 12_000,
+    });
+
+    const receipt = await dispatcher.deliverAlphaDynamicCanary({
+      ownerId: 'owner-1',
+      threadId: 'thread-1',
+      runId: 'a'.repeat(40),
+    });
+
+    assert.deepEqual(receipt, {
+      queueEntryId: 'q-alpha',
+      sourceMessageId: 'msg-alpha',
+      targetCatId: 'codex-sol',
+      deduped: false,
+      started: true,
+    });
+    assert.deepEqual(processed, [['thread-1', 'owner-1']]);
+    assert.equal(appended.length, 1);
+    assert.deepEqual(appended[0].source, {
+      connector: 'cat-cafe-alpha',
+      label: 'F296 Alpha canonical producer',
+      icon: 'cat-cafe',
+      meta: { sourceRevision: appended[0].extra.meetingArtifact.sourceRevision },
+    });
+    assert.match(appended[0].content, /F296 Alpha host-authored canonical dynamic canary/);
+    assert.doesNotMatch(appended[0].content, /cat_cafe_read_meeting_artifact/);
+    assert.equal(appended[0].extra.dynamicSceneEntries.length, 1);
+    assert.equal(appended[0].extra.dynamicSceneEntries[0].kind, 'memory_write_opportunity');
+    assert.equal(appended[0].extra.dynamicSceneEntries[0].opportunity.producer, 'meeting_artifact');
   });
 
   it('retries only the original F296 scene through a hidden refs-only carrier', async () => {
@@ -195,6 +323,7 @@ describe('F292 private-thread artifact handoff', () => {
     };
     const appended = [];
     const enqueued = [];
+    const published = [];
     const queue = {
       enqueue(input) {
         enqueued.push(input);
@@ -221,6 +350,11 @@ describe('F292 private-thread artifact handoff', () => {
       },
       invocationQueue: queue,
       queueProcessor: { processNext: async () => ({ started: true }) },
+      socketManager: {
+        emitToUser(...args) {
+          published.push(args);
+        },
+      },
       supportsPresentationRetry: () => true,
       now: () => now,
     });
@@ -249,6 +383,7 @@ describe('F292 private-thread artifact handoff', () => {
     assert.equal(JSON.stringify(appended[0]).includes('SECRET TRANSCRIPT BODY'), false);
     assert.equal(JSON.stringify(appended[0]).includes('You'), false);
     assert.equal(appended[0].extra.dynamicSceneEntries, undefined);
+    assert.equal(published.length, 0, 'scheduler-owned hidden retries must not publish a source bubble');
 
     const replay = await dispatcher.retryPresentation({
       intake: {
@@ -328,6 +463,8 @@ describe('F292 private-thread artifact handoff', () => {
           appended.push(input);
           return { ...input, id: 'meeting-message-1', threadId: input.threadId };
         },
+        getByIdempotencyKey: async () =>
+          appended.length > 0 ? { ...appended[0], id: 'meeting-message-1', threadId: appended[0].threadId } : null,
       },
       invocationQueue: {
         enqueue() {
@@ -340,6 +477,7 @@ describe('F292 private-thread artifact handoff', () => {
         rollbackEnqueue() {},
       },
       queueProcessor: { processNext: async () => ({ started: true }) },
+      socketManager: noopSocketManager,
       supportsPresentationRetry: () => true,
       now: () => 2,
     });
@@ -437,6 +575,7 @@ describe('F292 private-thread artifact handoff', () => {
         rollbackEnqueue() {},
       },
       queueProcessor: { processNext: async () => ({ started: true }) },
+      socketManager: noopSocketManager,
       supportsPresentationRetry: () => false,
     });
 

@@ -92,6 +92,62 @@ describe('GraphQueryResolver', () => {
     assert.equal(result.graph.edges.length, 1);
   });
 
+  it('never resolves sunset F152 anchors through exact or fuzzy graph queries', async () => {
+    const GraphQueryResolver = await loadResolver();
+    const store = createStore([
+      item('distilled:legacy-candidate', {
+        title: 'Retired global distillation candidate',
+        summary: 'Legacy materialized truth retained only for forensic inspection.',
+      }),
+    ]);
+    const resolver = new GraphQueryResolver(
+      catalog([{ id: 'global:methods', sensitivity: 'public', kind: 'global' }]),
+      new Map([['global:methods', store]]),
+    );
+
+    const exact = await resolver.resolve('distilled:legacy-candidate');
+    const fuzzy = await resolver.resolve('global distillation candidate');
+
+    assert.equal(exact.status, 'no_match');
+    assert.equal(fuzzy.status, 'no_match');
+  });
+
+  it('does not traverse from an eligible graph node into a sunset F152 anchor', async () => {
+    const GraphQueryResolver = await loadResolver();
+    const store = createStore(
+      [
+        item('F186', { title: 'Library Memory Architecture' }),
+        item('distilled:legacy-candidate', { title: 'Retired global distillation candidate' }),
+      ],
+      {
+        related: {
+          F186: [
+            {
+              anchor: 'distilled:legacy-candidate',
+              relation: 'related_to',
+              fromCollectionId: 'global:methods',
+              toCollectionId: 'global:methods',
+              edgeSensitivity: 'public',
+              provenance: 'content',
+            },
+          ],
+        },
+      },
+    );
+    const resolver = new GraphQueryResolver(
+      catalog([{ id: 'global:methods', sensitivity: 'public', kind: 'global' }]),
+      new Map([['global:methods', store]]),
+    );
+
+    const result = await resolver.resolve('F186', { depth: 1 });
+
+    assert.equal(result.status, 'graph');
+    assert.equal(result.graph.center, 'F186');
+    assert.equal(result.graph.nodes.length, 1);
+    assert.equal(result.graph.edges.length, 0);
+    assert.ok(!JSON.stringify(result).includes('distilled:legacy-candidate'));
+  });
+
   it('canonicalizes exact anchors case-insensitively before rendering graph', async () => {
     const GraphQueryResolver = await loadResolver();
     const store = createStore([item('F186', { title: 'Library Memory Architecture' })]);
@@ -198,7 +254,7 @@ describe('GraphQueryResolver', () => {
               anchor: 'secret:harness',
               relation: 'related_to',
               fromCollectionId: 'project:cat-cafe',
-              toCollectionId: 'private:landy',
+              toCollectionId: 'private:operator',
               edgeSensitivity: 'private',
               provenance: 'content',
             },
@@ -209,7 +265,7 @@ describe('GraphQueryResolver', () => {
     const resolver = new GraphQueryResolver(
       catalog([
         { id: 'project:cat-cafe', sensitivity: 'internal', kind: 'project' },
-        { id: 'private:landy', sensitivity: 'private', kind: 'domain' },
+        { id: 'private:operator', sensitivity: 'private', kind: 'domain' },
       ]),
       new Map([['project:cat-cafe', store]]),
     );
@@ -228,7 +284,7 @@ describe('GraphQueryResolver', () => {
       new Map([['project:cat-cafe', store]]),
     );
 
-    const result = await resolver.resolve('landy favorite salary cat', {
+    const result = await resolver.resolve('operator favorite salary cat', {
       callerCollections: ['project:cat-cafe'],
     });
 
@@ -284,11 +340,11 @@ describe('GraphQueryResolver', () => {
     const privateStore = createStore([item('secret:harness', { title: 'Harness private payroll note' })]);
     const manifests = [
       { id: 'project:cat-cafe', sensitivity: 'internal', kind: 'project' },
-      { id: 'private:landy', sensitivity: 'private', kind: 'domain' },
+      { id: 'private:operator', sensitivity: 'private', kind: 'domain' },
     ];
     const stores = new Map([
       ['project:cat-cafe', publicStore],
-      ['private:landy', privateStore],
+      ['private:operator', privateStore],
     ]);
     const resolver = new GraphQueryResolver(catalog(manifests), stores);
 
@@ -301,11 +357,11 @@ describe('GraphQueryResolver', () => {
     assert.ok(!JSON.stringify(hidden).includes('payroll'));
 
     const visible = await resolver.resolve('harness', {
-      callerCollections: ['project:cat-cafe', 'private:landy'],
+      callerCollections: ['project:cat-cafe', 'private:operator'],
     });
     assert.equal(visible.status, 'candidates');
     const visibleCollections = visible.candidates.map((candidate) => candidate.collectionId).sort();
-    assert.deepEqual(visibleCollections, ['private:landy', 'project:cat-cafe']);
+    assert.deepEqual(visibleCollections, ['private:operator', 'project:cat-cafe']);
   });
 
   it('sorts candidates by weightedEdgeScore (R2-P3 — edge weight ranking)', async () => {

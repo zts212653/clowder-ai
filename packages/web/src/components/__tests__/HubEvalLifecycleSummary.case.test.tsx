@@ -76,4 +76,34 @@ describe('F266 stable case lifecycle summary', () => {
     expect(html).toContain('target="_blank"');
     expect(html).toContain('rel="noopener noreferrer"');
   });
+
+  it('shows why executable custody is blocked while preserving task and lease truth', () => {
+    const html = renderToStaticMarkup(
+      <HubEvalLifecycleSummary
+        lifecycle={{
+          availability: 'available',
+          ownerResponseStatus: 'acknowledged',
+          closureStatus: 'live_active',
+          stale: true,
+          reevalDebtStatus: 'due',
+          reevalStatus: 'not_requested',
+          custodyDispatchBlocker: {
+            eventId: 'custody-dispatch-blocked',
+            stage: 'reevaluation',
+            reasonCode: 'carrier_not_enqueued',
+            taskId: 'task-reeval-cycle',
+            leaseId: 'lease-reeval-cycle',
+            leaseGeneration: 2,
+            carrierMessageId: 'message-reeval-blocked',
+          },
+        }}
+      />,
+    );
+
+    expect(html).toContain('执行载体待恢复');
+    expect(html).toContain('复评任务已经建立并持有有效租约');
+    expect(html).toContain('执行载体已经持久化，但尚未被队列接受');
+    expect(html).toContain('task-reeval-cycle');
+    expect(html).toContain('lease-reeval-cycle · generation 2');
+  });
 });

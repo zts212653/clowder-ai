@@ -4,7 +4,7 @@ related_features: [F237, F203, F116, F154, F168, F190]
 topics: [open-source, intake, sanitizer, brand-guard, harness, l0]
 doc_kind: spec
 created: 2026-06-16
-tips_exempt: harness-internal boundary/sanitizer infrastructure — no user-facing capability change
+tips_exempt: "Renewed 2026-08-31 for PR #4153's root-scoped site branding, sanitized .css coverage, and outbound boundary checks; renewed again for PR #4164's private-role export rewrite and Redis fixture-determinism mitigation. Both deliveries are automatic maintainer-side export and gate guards with no user action, configuration, or discoverable Hub surface."
 ---
 
 # F238: Bidirectional Boundary Symmetry
@@ -89,7 +89,7 @@ Add representative round-trip fixtures and a recurring verdict: public export ha
 - [x] AC-A4: `cat-cafe-skills/opensource-ops/SKILL.md` principles 12/13/22 reference `assets/brand-dictionary.yaml` as the boundary truth source.
 
 ### Phase B（Outbound Dictionary Enforcement）✅
-- [x] AC-B1: `_sanitize-rules.pl` extended to cover `.json`, `.mjs`, `.yaml/.yml` brand/L4 mappings (operator→co-creator/operator, operator→operator, production data boundary, 猫猫, Clowder AI/Café); two-pass key quoting for JS/TS; mentionPatterns dedupe. Remaining extensions (.html/.iss/.ps1/.bat/.py/.sh) deferred — no current leaks found in those types. (PR #2324)
+- [x] AC-B1: `_sanitize-rules.pl` extended to cover `.json`, `.mjs`, `.yaml/.yml` brand/L4 mappings (operator→co-creator/operator, operator→operator, production data boundary, 猫猫, Clowder AI/Café); two-pass key quoting for JS/TS; mentionPatterns dedupe. Remaining extensions (.html/.iss/.ps1/.bat/.py/.sh) deferred — no current leaks found in those types. (PR #2324) **Superseded 2026-08-31 (PR #4153)**: the deferral's premise expired. `.css` was never on either list and had already exported six occurrences of the role term through `packages/web/src/app/*.css`, and the Step 4 security scan covered a narrower set than the sanitizer, so `.cjs/.ps1/.py/.bat/.iss` had no net at all. One declared `SANITIZED_TEXT_EXTENSIONS` list in `sync-to-opensource.sh` now drives both the sanitizer pass and the scan.
 - [~] ~~AC-B2~~: Removed — `check:boundary-roundtrip` (AC-E1/E3) + reverse sanitizer `pnpm check` gate provide equivalent fail-closed protection in the development workflow. The sync script is a manual tool always run after `pnpm check`; in-script redundant gate adds complexity without additional protection. Reverse sanitizer can integrate into sync as a separate enhancement if needed.
 - [x] AC-B3: Regression coverage proves the current leaks are blocked: manifest, pet.json, cat-config generated roster text, native L0 residuals (production data boundary, operator), sop-definitions YAML, plugin manifest YAML, and public skill surfaces. 77 total regression tests. (PR #2324)
 

@@ -90,6 +90,22 @@ describe('R2-P1: ENOENT vs non-ENOENT error classification', () => {
 });
 
 describe('R2-P2: hasDossierEntry warning scope', () => {
+  test('reloads an applied dossier revision at the same project root without a process restart', () => {
+    const tempRoot = mkdtempSync(join(tmpdir(), 'dossier-revision-reload-'));
+    const dossierDir = join(tempRoot, 'docs', 'team');
+    const dossierPath = join(dossierDir, 'cat-dossier.md');
+    mkdirSync(dossierDir, { recursive: true });
+    writeFileSync(dossierPath, MINIMAL_DOSSIER);
+
+    try {
+      expect(loadDossierProfiles(tempRoot).get('opus')?.oneLiner).toBe('Main architect');
+      writeFileSync(dossierPath, MINIMAL_DOSSIER.replace('Main architect', 'Applied architecture revision'));
+      expect(loadDossierProfiles(tempRoot).get('opus')?.oneLiner).toBe('Applied architecture revision');
+    } finally {
+      rmSync(tempRoot, { recursive: true, force: true });
+    }
+  });
+
   test('canonical Fable engagement policy survives the typed loader', () => {
     const policy = loadDossierProfiles(REPO_ROOT).get('fable-5')?.engagementPolicy;
 

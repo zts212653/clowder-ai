@@ -1,18 +1,19 @@
-import type { SettledApprovalItem } from '@cat-cafe/shared';
+import type { SettledApprovalHubItem } from '@cat-cafe/shared';
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { anchoredApprovalNavigation } from '@/test-support/approval-navigation';
 
 const NOW = Date.now();
-const SETTLED_ITEMS: SettledApprovalItem[] = [
+const SETTLED_ITEMS: SettledApprovalHubItem[] = [
   {
     proposalId: 'taste-1',
     sourceFeatureId: 'F221',
     navigation: anchoredApprovalNavigation('thread-taste'),
     requesterCatId: 'codex-sol',
     ownerUserId: 'user-1',
-    status: 'approved',
+    resolution: 'accepted',
+    materialization: { state: 'outcome_unknown' },
     summary: 'Taste proposal',
     detail: {},
     createdAt: NOW - 2_000,
@@ -25,7 +26,8 @@ const SETTLED_ITEMS: SettledApprovalItem[] = [
     navigation: anchoredApprovalNavigation('thread-dispatch'),
     requesterCatId: 'opus',
     ownerUserId: 'user-1',
-    status: 'rejected',
+    resolution: 'rejected',
+    materialization: { state: 'not_started' },
     summary: 'Dispatch proposal',
     detail: {},
     createdAt: NOW - 4_000,
@@ -59,7 +61,7 @@ vi.mock('@/stores/approvalHubStore', () => ({
 }));
 
 vi.mock('@/components/SettledHistoryCard', () => ({
-  SettledHistoryCard: ({ item }: { item: SettledApprovalItem }) =>
+  SettledHistoryCard: ({ item }: { item: SettledApprovalHubItem }) =>
     React.createElement('div', { 'data-testid': `settled-card-${item.proposalId}` }, item.summary),
 }));
 

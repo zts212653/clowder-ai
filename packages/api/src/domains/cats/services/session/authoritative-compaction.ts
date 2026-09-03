@@ -114,18 +114,15 @@ export function authenticatedCompactionSequenceForInvocation(
 export function authenticatedCompactionSequenceFromSession(
   record: Pick<SessionRecord, 'compressionCount' | 'hybridProgress' | 'compressionObservation'>,
 ): number | null {
-  const sequence = record.compressionCount ?? record.hybridProgress?.observedCount;
+  const counterSequence = record.compressionCount ?? record.hybridProgress?.observedCount;
   const observation = record.compressionObservation;
-  if (
-    typeof sequence !== 'number' ||
-    !Number.isSafeInteger(sequence) ||
-    sequence < 1 ||
-    !observation ||
-    observation.sequence !== sequence
-  ) {
+  if (!observation || !Number.isSafeInteger(observation.sequence) || observation.sequence < 1) {
     return null;
   }
-  return sequence;
+  if (counterSequence !== undefined && observation.sequence !== counterSequence) {
+    return null;
+  }
+  return observation.sequence;
 }
 
 /**
@@ -134,10 +131,10 @@ export function authenticatedCompactionSequenceFromSession(
  * hook + stream delivery a replay of one event rather than two epoch advances.
  */
 export function authoritativeCompactionEventFromSession(
-  record: Pick<SessionRecord, 'id' | 'cliSessionId' | 'compressionCount' | 'hybridProgress'>,
+  record: Pick<SessionRecord, 'id' | 'cliSessionId' | 'compressionCount' | 'hybridProgress' | 'compressionObservation'>,
   eventSource: AuthoritativeCompactionEventSource,
 ): AuthoritativeCompactionEvent {
-  const sequence = record.compressionCount ?? record.hybridProgress?.observedCount;
+  const sequence = authenticatedCompactionSequenceFromSession(record);
   if (typeof sequence !== 'number' || !Number.isSafeInteger(sequence) || sequence < 1) {
     throw new Error(`authoritative_compaction_sequence_unavailable:${record.id}`);
   }

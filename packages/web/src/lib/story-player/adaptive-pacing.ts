@@ -50,7 +50,7 @@ const CAT_HANDLES = [
   'fable5',
   'gemini25',
   'gemini35',
-  'you',
+  'operator',
   'l\\.s\\.',
   'you',
   'antigravity',

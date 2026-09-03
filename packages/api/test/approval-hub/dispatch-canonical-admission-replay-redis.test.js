@@ -213,7 +213,7 @@ describe(
         },
         payload: {
           threadId: fixture.target.id,
-          content: `@${targetCats[0]}\nReview the exact HEAD.`,
+          content: `@${targetCats[0]}\nReview exact HEAD ${action.terminalPredicate.headSha}.`,
           targetCats,
           clientMessageId,
           action,
@@ -492,9 +492,25 @@ describe(
       );
 
       assert.equal(continued.statusCode, 200);
-      const renewed = await fixture.leaseStore.get(lease.leaseId);
-      assert.equal(renewed?.generation, 2);
-      assert.equal(renewed?.dispatchId, 'cross-post:continued-review-lease');
+      const persistedCompleted = await fixture.leaseStore.get(lease.leaseId);
+      assert.ok(persistedCompleted);
+      assert.equal(persistedCompleted.status, 'completed');
+      assert.equal(persistedCompleted.generation, 1);
+      assert.deepEqual(persistedCompleted.terminalPredicate, completed.lease.terminalPredicate);
+      assert.deepEqual(persistedCompleted.evidenceRefs, completed.lease.evidenceRefs);
+
+      const successor = await fixture.leaseStore.getByIdentity({
+        tenantScope: 'user-1',
+        subjectRef: 'pr:owner/repo#42',
+        actionFamily: 'review',
+        successorSlot: 'reviewer',
+      });
+      assert.ok(successor);
+      assert.notEqual(successor.leaseId, lease.leaseId);
+      assert.equal(successor.status, 'active');
+      assert.equal(successor.generation, 1);
+      assert.equal(successor.terminalPredicate.freshnessKey, `head:${'b'.repeat(40)}`);
+      assert.equal(successor.dispatchId, 'cross-post:continued-review-lease');
       assert.equal(await redis.get(REBUILD_MARKER_KEY), null, 'existing lease must precede projection readiness');
     });
   },

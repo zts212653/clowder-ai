@@ -26,7 +26,7 @@ describe('F231 profile migration', () => {
   const options = (extra = {}) => ({
     legacyRoots: [sourceRoot, runtimeRoot],
     dataDir,
-    userId: 'you',
+    userId: 'operator',
     relationshipKeys: { codex: 'maine-coon', 'codex-sol': 'maine-coon', opus: 'ragdoll' },
     ...extra,
   });
@@ -45,7 +45,7 @@ describe('F231 profile migration', () => {
       manifest.conflicts[0].candidates.map((candidate) => candidate.sha256).sort(),
       [mod.hashContent('OLD'), mod.hashContent('APPROVED')].sort(),
     );
-    assert.equal(existsSync(join(dataDir, 'profiles', 'you')), false);
+    assert.equal(existsSync(join(dataDir, 'profiles', 'operator')), false);
     assert.equal(existsSync(join(dataDir, 'profile-migration-backups')), false);
     assert.equal(existsSync(join(sourceRoot, '.migrated-to-cat-cafe-data-dir.json')), false);
   });
@@ -55,7 +55,7 @@ describe('F231 profile migration', () => {
     writeFileSync(join(runtimeRoot, 'relationship', 'codex-sol-primer.md'), 'APPROVED');
 
     assert.throws(() => mod.runProfileMigration(options({ apply: true })), /unresolved profile migration conflicts/i);
-    assert.equal(existsSync(join(dataDir, 'profiles', 'you')), false);
+    assert.equal(existsSync(join(dataDir, 'profiles', 'operator')), false);
     assert.equal(existsSync(join(dataDir, 'profile-migration-backups')), false);
   });
 
@@ -92,7 +92,7 @@ describe('F231 profile migration', () => {
 
     assert.equal(result.status, 'applied');
     assert.equal(
-      readFileSync(join(dataDir, 'profiles', 'you', 'relationship', 'maine-coon-primer.md'), 'utf8'),
+      readFileSync(join(dataDir, 'profiles', 'operator', 'relationship', 'maine-coon-primer.md'), 'utf8'),
       'MERGED',
     );
     assert.ok(result.backupDir);
@@ -112,8 +112,8 @@ describe('F231 profile migration', () => {
   it('recovers a resolved conflict when marker writing fails after canonical writes', () => {
     writeFileSync(join(sourceRoot, 'relationship', 'codex-primer.md'), 'OLD');
     writeFileSync(join(runtimeRoot, 'relationship', 'codex-sol-primer.md'), 'APPROVED');
-    const canonical = join(dataDir, 'profiles', 'you', 'relationship', 'maine-coon-primer.md');
-    mkdirSync(join(dataDir, 'profiles', 'you', 'relationship'), { recursive: true });
+    const canonical = join(dataDir, 'profiles', 'operator', 'relationship', 'maine-coon-primer.md');
+    mkdirSync(join(dataDir, 'profiles', 'operator', 'relationship'), { recursive: true });
     writeFileSync(canonical, 'CANONICAL BEFORE');
     const mergedPath = join(tmp, 'merged.md');
     writeFileSync(mergedPath, 'MERGED');
@@ -192,13 +192,13 @@ describe('F231 profile migration', () => {
       () => mod.runProfileMigration(options({ apply: true, resolutionFile })),
       /source hashes do not match/i,
     );
-    assert.equal(existsSync(join(dataDir, 'profiles', 'you')), false);
+    assert.equal(existsSync(join(dataDir, 'profiles', 'operator')), false);
   });
 
   it('repeated apply is a byte-identical no-op', () => {
     writeFileSync(join(sourceRoot, 'relationship', 'opus-primer.md'), 'ONE PERSONA');
     const first = mod.runProfileMigration(options({ apply: true }));
-    const canonical = join(dataDir, 'profiles', 'you', 'relationship', 'ragdoll-primer.md');
+    const canonical = join(dataDir, 'profiles', 'operator', 'relationship', 'ragdoll-primer.md');
     const firstBytes = readFileSync(canonical);
 
     const second = mod.runProfileMigration(options({ apply: true }));
@@ -211,8 +211,8 @@ describe('F231 profile migration', () => {
 
   it('rollback restores pre-existing canonical bytes and refuses to overwrite later edits', () => {
     writeFileSync(join(sourceRoot, 'relationship', 'opus-primer.md'), 'MIGRATED');
-    const canonical = join(dataDir, 'profiles', 'you', 'relationship', 'ragdoll-primer.md');
-    mkdirSync(join(dataDir, 'profiles', 'you', 'relationship'), { recursive: true });
+    const canonical = join(dataDir, 'profiles', 'operator', 'relationship', 'ragdoll-primer.md');
+    mkdirSync(join(dataDir, 'profiles', 'operator', 'relationship'), { recursive: true });
     writeFileSync(canonical, 'BEFORE');
     const mergedPath = join(tmp, 'merged.md');
     writeFileSync(mergedPath, 'MERGED');

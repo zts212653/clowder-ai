@@ -122,8 +122,8 @@ describe('personal Chrome extension contract', () => {
       readFile(join(apiRoot, 'src/domains/cats/services/cloud-bridge/personal-chrome-host/protocol.ts'), 'utf8'),
     ]);
 
-    assert.equal(manifest.version, '0.2.5');
-    for (const source of [worker, contentScriptEntry, contentScript, protocol]) assert.match(source, /0\.2\.5/);
+    assert.equal(manifest.version, '0.2.10');
+    for (const source of [worker, contentScriptEntry, contentScript, protocol]) assert.match(source, /0\.2\.10/);
   });
 
   it('checks in deterministic normalized icons derived from the formal gpt-pro repository asset', async () => {
@@ -220,6 +220,10 @@ describe('personal Chrome extension contract', () => {
     );
 
     for (const requiredTest of [
+      'f247-browser-assistant-return-ingest.test.js',
+      'personal-chrome-assistant-forwarding.test.js',
+      'personal-chrome-assistant-return-inbox.test.js',
+      'personal-chrome-assistant-return-poller.test.ts',
       'personal-chrome-native-messaging-integration.test.js',
       'personal-chrome-native-messaging-watchdog.test.js',
       'personal-chrome-plugin-state-route-exact.test.js',

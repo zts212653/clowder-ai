@@ -6,21 +6,22 @@
  * label, and filters to only profile proposals.
  */
 
-import type { ApprovalItem } from '@cat-cafe/shared';
+import type { ApprovalHubItem } from '@cat-cafe/shared';
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { anchoredApprovalNavigation } from '@/test-support/approval-navigation';
 
 const NOW = Date.now();
-const SAMPLE_ITEMS: ApprovalItem[] = [
+const SAMPLE_ITEMS: ApprovalHubItem[] = [
   {
     proposalId: 'dp-f128-1',
     sourceFeatureId: 'F128',
     navigation: anchoredApprovalNavigation('thread-abc'),
     requesterCatId: 'opus',
     ownerUserId: 'user-1',
-    status: 'pending',
+    resolution: 'open',
+    materialization: { state: 'not_started' },
     summary: 'Thread proposal A',
     detail: {},
     inlineApprovable: false,
@@ -32,7 +33,8 @@ const SAMPLE_ITEMS: ApprovalItem[] = [
     navigation: anchoredApprovalNavigation('thread-xyz'),
     requesterCatId: 'sonnet',
     ownerUserId: 'user-1',
-    status: 'pending',
+    resolution: 'open',
+    materialization: { state: 'not_started' },
     summary: 'Dispatch proposal B',
     detail: {},
     inlineApprovable: true,
@@ -44,7 +46,8 @@ const SAMPLE_ITEMS: ApprovalItem[] = [
     navigation: anchoredApprovalNavigation('thread-profile'),
     requesterCatId: 'opus',
     ownerUserId: 'user-1',
-    status: 'pending',
+    resolution: 'open',
+    materialization: { state: 'not_started' },
     summary: 'Profile update: user prefers dark mode',
     detail: {
       rationale: 'user prefers dark mode',
@@ -57,7 +60,7 @@ const SAMPLE_ITEMS: ApprovalItem[] = [
   },
 ];
 
-let mockItems: ApprovalItem[] = [];
+let mockItems: ApprovalHubItem[] = [];
 let mockCount = 0;
 const mockFetchPending = vi.fn();
 

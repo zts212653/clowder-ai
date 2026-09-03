@@ -352,7 +352,7 @@ test(
             exporter.capture(`${url}?fixture=short&unstable=1`, 'browser-test-user', {
               selectionMessageIds: [FIXTURE_MESSAGE_ID],
             }),
-          /Page height did not stabilize within maxWait/,
+          /HTML widget export operation deadline exceeded/,
           'an unstable export must fail instead of silently capturing a transient layout',
         );
         const pagesAfterFailure = (await exporterBrowser.pages()).length;

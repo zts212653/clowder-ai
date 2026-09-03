@@ -37,7 +37,7 @@ function definition(description = 'Read one governed subject.') {
       implementation: bindMcpImplementation(implementationRef, run),
       policy: {
         resourceFamily: 'subject',
-        exposureTier: { current: 'eager-core', evidenceRef: testRef },
+        schemaDelivery: { policy: 'host-default', candidate: 'discoverable', evidenceRef: testRef },
         runtimeProfiles: ['full', 'readonly'],
         owner: {
           domainCell: 'architecture-cell:mcp-surface-governance',
@@ -71,6 +71,12 @@ describe('F286 deterministic MCP surface snapshot', () => {
 
     assert.equal(tool?.descriptionCharacters, 26);
     assert.equal(tool?.activeState, 'migration-candidate');
+    assert.deepEqual(tool?.schemaDelivery, {
+      policy: 'host-default',
+      candidate: 'discoverable',
+      evidenceRef: testRef,
+    });
+    assert.equal(snapshot.schemaVersion, 2);
     assert.match(tool?.descriptionDigest ?? '', /^sha256:[a-f0-9]{64}$/);
     assert.match(tool?.inputSchemaDigest ?? '', /^sha256:[a-f0-9]{64}$/);
     assert.ok((tool?.descriptionTokensCl100kBase ?? 0) > 0);
@@ -104,7 +110,37 @@ describe('F286 deterministic MCP surface snapshot', () => {
       removedNames: [],
       resourceActionChanges: [{ resourceFamily: 'subject', added: ['inspect'], removed: ['read'] }],
       profileChanges: [{ name: 'cat_cafe_subject_read', added: [], removed: ['readonly'] }],
+      schemaDeliveryChanges: [],
     });
+  });
+
+  it('reports delivery drift separately from semantic protocol parity', () => {
+    const before = createMcpSurfaceSnapshot([definition()], {
+      protectedBaseSha: 'a'.repeat(40),
+      implementationCatalog,
+    });
+    const changed = definition();
+    const after = createMcpSurfaceSnapshot(
+      [
+        {
+          ...changed,
+          policy: {
+            ...changed.policy,
+            schemaDelivery: { policy: 'discoverable', evidenceRef: testRef },
+          },
+        },
+      ],
+      { protectedBaseSha: 'a'.repeat(40), implementationCatalog },
+    );
+
+    assert.deepEqual(compareMcpSurfaceRegistry(before, after).schemaDeliveryChanges, [
+      {
+        name: 'cat_cafe_subject_read',
+        before: { policy: 'host-default', candidate: 'discoverable', evidenceRef: testRef },
+        after: { policy: 'discoverable', evidenceRef: testRef },
+      },
+    ]);
+    assert.deepEqual(compareMcpSurfaceProtocol(before, after), []);
   });
 
   it('reports exact protocol drift but ignores comparison-only token and digest fields', () => {

@@ -15,7 +15,15 @@
         "publicHead": "182d8ec9abc87ff7905441dca0575aab9787ee8f",
         "status": "resource_contract",
         "matchedFileCount": 62,
-        "matchedFilesHash": "414a329e11828b5b202777c4b0560e7e8e7328292f6cb065551d691286c8a7f4"
+        "matchedFilesHash": "24038fff107dc7e88b1496a7038ac7fa155e22ebc87fe8af9236b9b4e4644ead"
+      },
+      "publicAudit": {
+        "reviewedOn": "2026-09-02",
+        "sourceHead": "578988365a6ff30928e7bc3e1863cf0cfa6d6f53",
+        "publicHead": "01c58feb40fab2a75016a9a8d290c87f6776d9a0",
+        "status": "resource_contract",
+        "matchedFileCount": 63,
+        "matchedFilesHash": "f62b1e46eb821795d0070c97c865261709d047b69f576ed5d6a302a60ef3dd33"
       }
     },
     {
@@ -99,8 +107,8 @@
         "sourceHead": "b741f42fdbbb4484a54cde7eadca08b3b11652e3",
         "publicHead": "182d8ec9abc87ff7905441dca0575aab9787ee8f",
         "status": "source_dependency_failure",
-        "matchedFileCount": 243,
-        "matchedFilesHash": "4953141167946fe4c413f545d503c37bb24794f4877b8f4a3693c79323f2e026"
+        "matchedFileCount": 248,
+        "matchedFilesHash": "69117d827b74fee6d257f7cf119a28ece0c99157ac72213a922d3d13998a4d6b"
       }
     },
     {
@@ -152,6 +160,48 @@
         "status": "source_dependency_failure",
         "matchedFileCount": 1,
         "matchedFilesHash": "0df9171f74a61605fcb0ad7ec7c9a1246afe814ff04adb8015bdb763ae4a5b2d"
+      }
+    },
+    {
+      "id": "write-vignette-publication-hook",
+      "match": "write-vignette-publication-hook\\.test",
+      "category": "source_only",
+      "reason": "The tracked post-checkout hook enforces the Clowder AI primary-worktree policy and is intentionally not exported; its integration test therefore remains a source-only contract.",
+      "owner": "@zts212653",
+      "introducedBy": "c8575732e",
+      "expiresOn": "2026-10-01",
+      "audit": {
+        "reviewedOn": "2026-09-02",
+        "sourceHead": "499beb6c81315025524e92e4966ddce938126e4a",
+        "publicHead": "01c58feb40fab2a75016a9a8d290c87f6776d9a0",
+        "status": "source_dependency_failure",
+        "matchedFileCount": 1,
+        "matchedFilesHash": "fc1e2052168010d8a8e26058ae6ce4137ffc7c389829b16dd6e069a4401de35d"
+      },
+      "publicAudit": {
+        "reviewedOn": "2026-09-02",
+        "sourceHead": "499beb6c81315025524e92e4966ddce938126e4a",
+        "publicHead": "01c58feb40fab2a75016a9a8d290c87f6776d9a0",
+        "status": "source_dependency_failure",
+        "matchedFileCount": 1,
+        "matchedFilesHash": "fc1e2052168010d8a8e26058ae6ce4137ffc7c389829b16dd6e069a4401de35d"
+      }
+    },
+    {
+      "id": "capability-evolution-evaluation-owner-join",
+      "match": "capability-evolution-evaluation-owner-join\\.test",
+      "category": "source_only",
+      "reason": "The real F311-to-F267 owner-join integration reads private measurement-result and certificate artifacts that are intentionally absent from the public export.",
+      "owner": "@zts212653",
+      "introducedBy": "fee877947",
+      "expiresOn": "2026-10-01",
+      "audit": {
+        "reviewedOn": "2026-09-02",
+        "sourceHead": "68847c8e92d5bfa0ec0e7dfb0fba03e8812eb73c",
+        "publicHead": "01c58feb40fab2a75016a9a8d290c87f6776d9a0",
+        "status": "private_fixture_failure",
+        "matchedFileCount": 1,
+        "matchedFilesHash": "cd7af3541334cb66d5e48e31052c71d6876cb91efa20f8d4f0bf4ddc3f01041e"
       }
     },
     {
@@ -291,6 +341,23 @@
       }
     },
     {
+      "id": "f296-source-hook-contracts",
+      "match": "f296-(?:b3b3-post-compact-hook|session-hook-source-auth)\\.test",
+      "category": "source_only",
+      "reason": "F296 Claude hook byte and execution contracts require source-only root hook scripts that are deliberately absent from the public export; runtime callback composition and temp-fixture readiness remain publicly tested.",
+      "owner": "@zts212653",
+      "introducedBy": "842656205e",
+      "expiresOn": "2026-10-01",
+      "audit": {
+        "reviewedOn": "2026-09-02",
+        "sourceHead": "c4c5f828ae79ef4221c14d2c37cd6f54e3c3f04b",
+        "publicHead": "01c58feb40fab2a75016a9a8d290c87f6776d9a0",
+        "status": "source_dependency_failure",
+        "matchedFileCount": 2,
+        "matchedFilesHash": "0c4804c84ca718adb7ffd8b836ea737de5875f8daa1452d0f909e04b30e7eb46"
+      }
+    },
+    {
       "id": "harness-eval-hub-read-model",
       "match": "harness-eval/eval-hub-read-model\\.test",
       "category": "source_only",
@@ -390,6 +457,23 @@
         "status": "private_fixture_failure",
         "matchedFileCount": 4,
         "matchedFilesHash": "2fefb759ec45a303e710a01fc3475c061ee1977d4cefde21fedeb4394805fd60"
+      }
+    },
+    {
+      "id": "harness-eval-measurement-decision-proof",
+      "match": "harness-eval/measurement-decision-proof(?:-resolver)?\\.test",
+      "category": "private_fixture",
+      "reason": "F267 decision-proof behavior and its file-backed resolver fixtures read home-only measurement certificates and results that are deliberately absent from the public export; self-contained normalized proof contracts remain public.",
+      "owner": "@zts212653",
+      "introducedBy": "656bd3e287",
+      "expiresOn": "2026-10-01",
+      "audit": {
+        "reviewedOn": "2026-09-02",
+        "sourceHead": "d788a4e899b1f1f4da4851f29a19ea64e5488aaa",
+        "publicHead": "01c58feb40fab2a75016a9a8d290c87f6776d9a0",
+        "status": "private_fixture_failure",
+        "matchedFileCount": 2,
+        "matchedFilesHash": "4ddee17849f53b58ddd90acdc081197de0e7c237174bd4709370be299bd2e132"
       }
     },
     {

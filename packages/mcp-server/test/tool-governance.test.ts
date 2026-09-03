@@ -9,6 +9,7 @@ import {
   type EvidenceRef,
   type McpActionBoundary,
   type McpOperationContract,
+  type McpRuntimeProfile,
   type McpStandaloneReason,
   type McpToolDefinition,
   type ProtectedToolSnapshot,
@@ -57,6 +58,7 @@ function makeDefinition(
     operation?: McpOperationContract;
     activeState?: 'canonical' | 'migration-candidate';
     runtimeProfiles?: readonly ['full', ...Array<'full' | 'readonly' | 'agent-key'>];
+    schemaDelivery?: McpToolDefinition['policy']['schemaDelivery'];
   } = {},
 ): McpToolDefinition {
   const name = options.name ?? 'cat_cafe_subject_read';
@@ -67,7 +69,7 @@ function makeDefinition(
     implementation: bindMcpImplementation('module:./fixtures/mcp-governance.js#run', run),
     policy: {
       resourceFamily: options.resourceFamily ?? 'subject',
-      exposureTier: { current: 'eager-core', evidenceRef: testRef },
+      schemaDelivery: options.schemaDelivery ?? { policy: 'host-default', evidenceRef: testRef },
       runtimeProfiles: options.runtimeProfiles ?? ['full', 'readonly'],
       owner: { domainCell: architectureRef, surface: 'mcp-surface-governance' },
       standaloneReason: options.standaloneReason ?? {
@@ -128,6 +130,55 @@ function protectedSnapshot(definition: McpToolDefinition) {
 }
 
 describe('F286 MCP governance contract', () => {
+  it('keeps availability and schema delivery as independent policy axes', () => {
+    const definition = makeDefinition({
+      runtimeProfiles: ['full', 'agent-key'],
+      schemaDelivery: { policy: 'host-default', candidate: 'discoverable', evidenceRef: testRef },
+      standaloneReason: {
+        disposition: 'consolidation-candidate',
+        kind: 'same-resource-lifecycle',
+        evidenceRef: testRef,
+      },
+      activeState: 'migration-candidate',
+    });
+
+    assert.deepEqual(definition.policy.runtimeProfiles, ['full', 'agent-key']);
+    assert.deepEqual(definition.policy.schemaDelivery, {
+      policy: 'host-default',
+      candidate: 'discoverable',
+      evidenceRef: testRef,
+    });
+    assert.equal('exposureTier' in definition.policy, false);
+    assert.deepEqual(
+      validate([definition], { protectedBase: new Map([[definition.name, protectedSnapshot(definition)]]) }),
+      {
+        ok: true,
+        findings: [],
+      },
+    );
+  });
+
+  it('rejects empty availability and mixed-axis schema-delivery values at runtime', () => {
+    const emptyAvailability = makeDefinition();
+    (emptyAvailability.policy.runtimeProfiles as unknown as McpRuntimeProfile[]) = [];
+    const mixedAxis = makeDefinition();
+    mixedAxis.policy.schemaDelivery.policy = 'profile-gated' as never;
+
+    assert.ok(validate([emptyAvailability]).findings.some((finding) => finding.code === 'invalid-policy'));
+    assert.ok(validate([mixedAxis]).findings.some((finding) => finding.code === 'invalid-policy'));
+  });
+
+  it('requires resolvable evidence for a schema-delivery candidate', () => {
+    const missingRef = 'test:packages/mcp-server/test/missing-delivery-evidence.test.ts' as const;
+    const definition = makeDefinition({
+      schemaDelivery: { policy: 'host-default', candidate: 'discoverable', evidenceRef: missingRef },
+    });
+
+    const result = validate([definition]);
+    assert.equal(result.ok, false);
+    assert.ok(result.findings.some((finding) => finding.message.includes(missingRef)));
+  });
+
   it('derives executable schema, action inventory, risk, and SDK annotations from one operation', () => {
     const schema = { subject: z.string(), depth: z.number().optional() };
     const definition = makeDefinition({
@@ -605,5 +656,16 @@ describe('F286 MCP governance contract', () => {
     const delta = compareToolRegistries([before], [after]);
     assert.deepEqual(delta.profileChanges, [{ name: after.name, added: ['agent-key'], removed: [] }]);
     assert.deepEqual(delta.resourceActionChanges, [{ resourceFamily: 'subject', added: ['inspect'], removed: [] }]);
+  });
+
+  it('compares schema-delivery policy by value rather than object insertion order', () => {
+    const before = makeDefinition({
+      schemaDelivery: { policy: 'host-default', candidate: 'discoverable', evidenceRef: testRef },
+    });
+    const after = makeDefinition({
+      schemaDelivery: { evidenceRef: testRef, candidate: 'discoverable', policy: 'host-default' },
+    });
+
+    assert.deepEqual(compareToolRegistries([before], [after]).schemaDeliveryChanges, []);
   });
 });

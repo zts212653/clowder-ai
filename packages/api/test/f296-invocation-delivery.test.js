@@ -65,7 +65,7 @@ function cueResolution(generation, invocationId = 'inv-f296') {
       sourceRevision: `revision-${generation}`,
       axis: 'consumption',
       consumptionOutcome: 'presented',
-      catalogVersion: 1,
+      catalogVersion: 3,
       resolverVersion: 1,
       occurredAt: generation,
     },

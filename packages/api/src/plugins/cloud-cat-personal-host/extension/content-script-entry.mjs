@@ -2,16 +2,50 @@ import { createChatGptPageAdapter } from './chatgpt-page-adapter.mjs';
 
 (() => {
   const APPEND_PROTOCOL_VERSION = 2;
-  const EXTENSION_REVISION = '0.2.5';
-  const PAGE_ADAPTER_REVISION = '2026-08-27.1';
+  const EXTENSION_REVISION = '0.2.10';
+  const PAGE_ADAPTER_REVISION = '2026-09-02.1';
+  const ASSISTANT_RETURN_RETRY_MS = 120_000;
   const previousListener = globalThis.__catCafePersonalChromeAdapterV2?.listener;
   if (typeof previousListener === 'function') chrome.runtime.onMessage.removeListener?.(previousListener);
+  const helperRevisionByRequestId = new Map();
+  const removeHelperRevision = (requestId) => {
+    const pending = helperRevisionByRequestId.get(requestId);
+    helperRevisionByRequestId.delete(requestId);
+    if (pending?.cleanupTimer !== undefined) clearTimeout(pending.cleanupTimer);
+    return pending?.helper;
+  };
+  const publishAssistantOutcome = async (kind, observed) => {
+    const helper = removeHelperRevision(observed.requestId);
+    if (typeof helper !== 'string') return;
+    const message = {
+      v: APPEND_PROTOCOL_VERSION,
+      kind,
+      ...observed,
+      observedRevisions: {
+        helper,
+        extension: EXTENSION_REVISION,
+        pageAdapter: PAGE_ADAPTER_REVISION,
+      },
+    };
+    const retryDeadline = Date.now() + ASSISTANT_RETURN_RETRY_MS;
+    do {
+      try {
+        const response = await chrome.runtime.sendMessage(message);
+        if (response?.accepted === true) return;
+      } catch {
+        // A sleeping/reconnecting service worker is retryable while this exact tab remains open.
+      }
+      await new Promise((resolve) => setTimeout(resolve, 500));
+    } while (Date.now() < retryDeadline);
+  };
   const adapter = createChatGptPageAdapter({
     document,
     location,
     MutationObserver,
     adapterRevision: PAGE_ADAPTER_REVISION,
     artifactRevision: EXTENSION_REVISION,
+    onAssistantFinal: (observed) => publishAssistantOutcome('assistant_final_observed', observed),
+    onAssistantObservationFailure: (failure) => publishAssistantOutcome('assistant_observation_failed', failure),
     onProgress: async (status, context) => {
       try {
         await chrome.runtime.sendMessage({
@@ -65,6 +99,9 @@ import { createChatGptPageAdapter } from './chatgpt-page-adapter.mjs';
       });
       return false;
     }
+    removeHelperRevision(request.requestId);
+    const cleanupTimer = setTimeout(() => removeHelperRevision(request.requestId), 180_000);
+    helperRevisionByRequestId.set(request.requestId, { helper: expected?.helper, cleanupTimer });
     void adapter
       .appendMessage(request)
       .then((receipt) => {
@@ -79,6 +116,7 @@ import { createChatGptPageAdapter } from './chatgpt-page-adapter.mjs';
         });
       })
       .catch((error) => {
+        removeHelperRevision(request.requestId);
         sendResponse({
           v: APPEND_PROTOCOL_VERSION,
           kind: 'append_result',

@@ -68,7 +68,8 @@ function NavItem({
 }
 
 const SECTION_KEYWORDS: Record<string, string> = {
-  members: '猫猫 成员 名册 roster cat',
+  members: '猫猫 成员 名册 runtime 路由账本 roster cat',
+  profiles: 'F208 能力画像 观察 证据 来源 provenance dossier',
   accounts: '密钥 API key 账号 credentials',
   im: '飞书 钉钉 企微 telegram 微信 connector',
   skills: 'skill 技能 能力 marketplace',

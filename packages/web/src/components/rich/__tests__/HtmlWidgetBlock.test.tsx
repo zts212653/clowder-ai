@@ -8,6 +8,10 @@ import { sanitizeWidgetHtml } from '../sanitize-widget-html';
 
 Object.assign(globalThis as Record<string, unknown>, { React });
 
+function optionalPreserveViewport(value: unknown): { preserveViewport?: unknown } {
+  return value === undefined ? {} : { preserveViewport: value };
+}
+
 describe('HtmlWidgetBlock', () => {
   it('server-renders a bounded loading state instead of committing an empty iframe', () => {
     const block = {
@@ -200,6 +204,7 @@ describe('HtmlWidgetBlock responsive height contract', () => {
     (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
     window.history.replaceState(null, '', '/');
     container = document.createElement('div');
+    container.dataset.chatContainer = '';
     document.body.appendChild(container);
     root = createRoot(container);
   });
@@ -258,6 +263,7 @@ describe('HtmlWidgetBlock responsive height contract', () => {
       viewportHeight?: number;
       viewportWidth?: number;
       proofRequestId?: unknown;
+      preserveViewport?: unknown;
     } = {},
   ) {
     const viewportHeight = overrides.viewportHeight ?? Number.parseFloat(fixture.iframe.style.height);
@@ -278,6 +284,7 @@ describe('HtmlWidgetBlock responsive height contract', () => {
             viewportHeight,
             viewportWidth: overrides.viewportWidth ?? 800,
             ...(overrides.proofRequestId === undefined ? {} : { proofRequestId: overrides.proofRequestId }),
+            ...optionalPreserveViewport(overrides.preserveViewport),
           },
           origin: overrides.origin ?? 'null',
           source: overrides.source === undefined ? fixture.iframe.contentWindow : overrides.source,
@@ -329,6 +336,36 @@ describe('HtmlWidgetBlock responsive height contract', () => {
     expect(fixture.widget.dataset.htmlWidgetLayoutState).toBe('ready');
     expect(fixture.widget.dataset.htmlWidgetMeasuredHeight).toBe('184');
     expect(container.querySelector('button[aria-expanded]')).toBeNull();
+  });
+
+  it('anchors user-interaction-driven child resizes but keeps passive resizes on the ordinary layout path', async () => {
+    const fixture = await renderWidget({ height: 500 });
+    Object.defineProperty(container, 'scrollTop', { configurable: true, writable: true, value: 180 });
+    fixture.widget.getBoundingClientRect = () => ({ top: 240 }) as DOMRect;
+    const changes: Event[] = [];
+    const onLayoutChange = (event: Event) => changes.push(event);
+    window.addEventListener('catcafe:chat-layout-changed', onLayoutChange);
+
+    try {
+      await reportHeight(fixture, 184);
+      changes.length = 0;
+
+      await reportHeight(fixture, 360, { preserveViewport: true });
+      const interactiveChange = changes.at(-1);
+      expect(interactiveChange).toBeInstanceOf(CustomEvent);
+      expect((interactiveChange as CustomEvent).detail?.viewportAnchor).toEqual({
+        element: fixture.widget,
+        viewportTop: 240,
+        fallbackScrollTop: 180,
+      });
+
+      changes.length = 0;
+      await reportHeight(fixture, 420);
+      const passiveChange = changes.at(-1);
+      expect(passiveChange).not.toBeInstanceOf(CustomEvent);
+    } finally {
+      window.removeEventListener('catcafe:chat-layout-changed', onLayoutChange);
+    }
   });
 
   it('keeps long content in a bounded preview with a visible recovery path and no iframe scrolling', async () => {
@@ -425,6 +462,15 @@ describe('HtmlWidgetBlock responsive height contract', () => {
     expect(fixture.widget.dataset.htmlWidgetLayoutState).toBe('error');
     expect(fixture.iframe.style.height).toBe('420px');
     expect(container.querySelector('[role="alert"]')?.textContent).toContain('内容高度异常');
+  });
+
+  it('rejects a non-boolean viewport-preservation claim from the authenticated frame', async () => {
+    const fixture = await renderWidget({ height: 420 });
+
+    await reportHeight(fixture, 180, { preserveViewport: 'true' });
+
+    expect(fixture.widget.dataset.htmlWidgetLayoutState).toBe('error');
+    expect(fixture.iframe.style.height).toBe('420px');
   });
 
   it.each(['true', '1'])('forces full expansion in export=%s mode', async (exportValue) => {

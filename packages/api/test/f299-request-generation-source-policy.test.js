@@ -188,6 +188,7 @@ describe('F299 request-generation source policy', () => {
       injectSystemPrompt: true,
       hasContextHint: true,
       hasStagingPrepend: true,
+      hasRoutingContextProjection: true,
       hasMissionPrefix: true,
     });
 
@@ -197,9 +198,25 @@ describe('F299 request-generation source policy', () => {
       { owner: 'system_prompt', ref: 'registry:cat-cafe-owned' },
       { owner: 'runtime_context', ref: 'context-management-hint:inv-1' },
       { owner: 'system_prompt', ref: 'staging:adr-038' },
+      { owner: 'runtime_context', ref: 'routing-context:inv-1' },
       { owner: 'home_state', ref: 'thread-mission:thread-1' },
       { owner: 'runtime_context', ref: 'transcript-path-hints:thread-1' },
     ]);
+  });
+
+  it('keeps a routing projection bound to its exact invocation', async () => {
+    const current = { owner: 'runtime_context', ref: 'routing-context:inv-1' };
+    const foreign = { owner: 'runtime_context', ref: 'routing-context:inv-2' };
+    const states = await resolveRequestGenerationSourceStates([current, foreign], {
+      userId: 'owner-1',
+      threadId: 'thread-1',
+      invocationId: 'inv-1',
+    });
+
+    assert.deepEqual(
+      [current, foreign].map((ref) => states.get(requestGenerationSourceKey(ref))),
+      ['available', 'redacted'],
+    );
   });
 
   it('redacts an older capsule revision and marks a forgotten capsule deleted', async () => {

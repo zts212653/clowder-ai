@@ -1,7 +1,9 @@
 'use client';
 
 import { useEffect, useId, useMemo, useRef, useState, useSyncExternalStore } from 'react';
+import { useMessageDisclosureState } from '@/components/message-disclosure-state';
 import type { RichHtmlWidgetBlock } from '@/stores/chat-types';
+import { type ChatLayoutViewportAnchor, dispatchChatLayoutChanged } from '@/utils/chat-layout-change';
 import { addHtmlWidgetHeightBridge } from './html-widget-height-bridge';
 import {
   createInitialWidgetLayoutState,
@@ -27,16 +29,59 @@ function readExportMode(): boolean {
   return typeof window !== 'undefined' && isExportSearch(window.location.search);
 }
 
-export function HtmlWidgetBlock({ block }: { block: RichHtmlWidgetBlock }) {
+function resolveMeasuredViewportAnchor({
+  block,
+  expanded,
+  isExport,
+  nextHeight,
+  preserveViewport,
+  previousHeight,
+  widget,
+}: {
+  block: RichHtmlWidgetBlock;
+  expanded: boolean;
+  isExport: boolean;
+  nextHeight: number | null;
+  preserveViewport: boolean;
+  previousHeight: number | null;
+  widget: HTMLElement | null;
+}): ChatLayoutViewportAnchor | null {
+  if (!preserveViewport || !widget) return null;
+  const previousVisibleHeight = resolveWidgetPresentation({
+    block,
+    expanded,
+    isExport,
+    measuredHeight: previousHeight,
+  }).visibleHeight;
+  const nextVisibleHeight = resolveWidgetPresentation({
+    block,
+    expanded,
+    isExport,
+    measuredHeight: nextHeight,
+  }).visibleHeight;
+  if (nextVisibleHeight === previousVisibleHeight) return null;
+  const chat = widget.closest('[data-chat-container]');
+  if (!(chat instanceof HTMLElement)) return null;
+  return {
+    element: widget,
+    viewportTop: widget.getBoundingClientRect().top,
+    fallbackScrollTop: chat.scrollTop,
+  };
+}
+
+export function HtmlWidgetBlock({ block, disclosureKey }: { block: RichHtmlWidgetBlock; disclosureKey?: string }) {
   const reactId = useId();
   const instanceId = `html-widget-${reactId}`;
   const iframeId = `${instanceId}-frame`;
   const accessibleTitle = block.title ?? 'Interactive Widget';
+  const widgetRef = useRef<HTMLDivElement>(null);
   const iframeRef = useRef<HTMLIFrameElement>(null);
+  const disclosureButtonRef = useRef<HTMLButtonElement>(null);
+  const pendingViewportAnchorRef = useRef<ChatLayoutViewportAnchor | null>(null);
   const requestedProofIdRef = useRef<string | null>(null);
   const [layout, setLayout] = useState(createInitialWidgetLayoutState);
   const [acknowledgedProofId, setAcknowledgedProofId] = useState<string | null>(null);
-  const [expanded, setExpanded] = useState(false);
+  const { expanded, setExpanded } = useMessageDisclosureState(disclosureKey, false);
   const [browserReady, setBrowserReady] = useState(false);
   const isExport = useSyncExternalStore(subscribeToLocation, readExportMode, () => false);
   const safeHtml = useMemo(() => (browserReady ? sanitizeWidgetHtml(block.html) : null), [block.html, browserReady]);
@@ -52,8 +97,8 @@ export function HtmlWidgetBlock({ block }: { block: RichHtmlWidgetBlock }) {
     setLayout(createInitialWidgetLayoutState());
     requestedProofIdRef.current = null;
     setAcknowledgedProofId(null);
-    setExpanded(false);
-  }, [block.html, block.id]);
+    if (!disclosureKey) setExpanded(false);
+  }, [block.html, block.id, disclosureKey, setExpanded]);
 
   useEffect(() => {
     const onMessage = (event: MessageEvent<unknown>) => {
@@ -62,18 +107,32 @@ export function HtmlWidgetBlock({ block }: { block: RichHtmlWidgetBlock }) {
         blockId: block.id,
         instanceId,
       });
-      if (result.status === 'ignored') return;
-      if (result.status === 'pending') {
-        if (result.cause === 'content') setAcknowledgedProofId(null);
-        setLayout((previous) => reduceWidgetLayout(previous, { type: 'pending', cause: result.cause }, isExport));
-        return;
+      switch (result.status) {
+        case 'ignored':
+          return;
+        case 'pending':
+          if (result.cause === 'content') setAcknowledgedProofId(null);
+          setLayout((previous) => reduceWidgetLayout(previous, { type: 'pending', cause: result.cause }, isExport));
+          return;
+        case 'invalid':
+          setAcknowledgedProofId(null);
+          setLayout((previous) => reduceWidgetLayout(previous, { type: 'invalid' }, isExport));
+          return;
       }
-      if (result.status === 'invalid') {
-        setAcknowledgedProofId(null);
-        setLayout((previous) => reduceWidgetLayout(previous, { type: 'invalid' }, isExport));
-        return;
-      }
-      setLayout((previous) => reduceWidgetLayout(previous, { type: 'measured', sample: result.sample }, isExport));
+      setLayout((previous) => {
+        const next = reduceWidgetLayout(previous, { type: 'measured', sample: result.sample }, isExport);
+        pendingViewportAnchorRef.current =
+          resolveMeasuredViewportAnchor({
+            block,
+            expanded,
+            isExport,
+            nextHeight: next.acceptedHeight,
+            preserveViewport: result.preserveViewport,
+            previousHeight: previous.acceptedHeight,
+            widget: widgetRef.current,
+          }) ?? pendingViewportAnchorRef.current;
+        return next;
+      });
       if (result.proofRequestId === requestedProofIdRef.current) {
         requestedProofIdRef.current = null;
         setAcknowledgedProofId(result.proofRequestId);
@@ -82,7 +141,7 @@ export function HtmlWidgetBlock({ block }: { block: RichHtmlWidgetBlock }) {
 
     window.addEventListener('message', onMessage);
     return () => window.removeEventListener('message', onMessage);
-  }, [block.id, instanceId, isExport]);
+  }, [block, expanded, instanceId, isExport]);
 
   useEffect(() => {
     if (!isExport) return;
@@ -119,11 +178,28 @@ export function HtmlWidgetBlock({ block }: { block: RichHtmlWidgetBlock }) {
   });
 
   useEffect(() => {
-    if (visibleHeight > 0) window.dispatchEvent(new Event('catcafe:chat-layout-changed'));
+    if (visibleHeight <= 0) return;
+    const viewportAnchor = pendingViewportAnchorRef.current;
+    pendingViewportAnchorRef.current = null;
+    dispatchChatLayoutChanged(viewportAnchor ? { viewportAnchor } : undefined);
   }, [visibleHeight]);
+
+  const toggleExpanded = () => {
+    const chat = widgetRef.current?.closest('[data-chat-container]');
+    const anchor = expanded ? disclosureButtonRef.current : widgetRef.current;
+    if (chat instanceof HTMLElement && anchor) {
+      pendingViewportAnchorRef.current = {
+        element: anchor,
+        viewportTop: anchor.getBoundingClientRect().top,
+        fallbackScrollTop: chat.scrollTop,
+      };
+    }
+    setExpanded((value) => !value);
+  };
 
   return (
     <div
+      ref={widgetRef}
       className="overflow-hidden rounded-lg border border-cafe"
       data-html-widget={block.id}
       data-html-widget-instance-id={instanceId}
@@ -175,10 +251,11 @@ export function HtmlWidgetBlock({ block }: { block: RichHtmlWidgetBlock }) {
       {longContent && !isExport ? (
         <div className="flex justify-center border-t border-cafe bg-cafe-surface px-3 py-2">
           <button
+            ref={disclosureButtonRef}
             type="button"
             aria-expanded={expanded}
             aria-controls={iframeId}
-            onClick={() => setExpanded((value) => !value)}
+            onClick={toggleExpanded}
             className="rounded-md px-3 py-1.5 text-xs font-semibold text-cafe-accent transition-colors hover:bg-cafe-accent/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cafe-accent"
           >
             {expanded ? '收起完整内容' : '展开完整内容'}

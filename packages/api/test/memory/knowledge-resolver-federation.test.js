@@ -76,6 +76,66 @@ describe('KnowledgeResolver N-collection federation', () => {
     assert.equal(result.collectionGroups.length, 2);
   });
 
+  it('sunset F152 distilled truths are omitted from N-collection delivery and group projection', async () => {
+    const catalog = new LibraryCatalog();
+    catalog.register(manifest('global:methods', 'global', 'public'));
+
+    const stores = new Map();
+    stores.set(
+      'global:methods',
+      mockStore([
+        item('distilled:legacy-candidate', 'Retired global distillation'),
+        item('global:skill/kept', 'Supported global method'),
+      ]),
+    );
+
+    const resolver = new KnowledgeResolver({
+      projectStore: mockStore([]),
+      catalog,
+      stores,
+    });
+
+    const result = await resolver.resolve('test', { dimension: 'library' });
+    assert.deepEqual(
+      result.results.map((entry) => entry.anchor),
+      ['global:skill/kept'],
+    );
+    assert.deepEqual(
+      result.collectionGroups[0].items.map((entry) => entry.anchor),
+      ['global:skill/kept'],
+    );
+  });
+
+  it('backfills an eligible N-collection result hidden behind a sunset store-limit hit', async () => {
+    const catalog = new LibraryCatalog();
+    catalog.register(manifest('global:methods', 'global', 'public'));
+    const ranked = [
+      item('distilled:rank-one-retired', 'Retired rank one'),
+      item('global:skill/rank-two-kept', 'Eligible rank two'),
+    ];
+    const stores = new Map([
+      [
+        'global:methods',
+        {
+          ...mockStore(ranked),
+          search: async (_query, options = {}) => ranked.slice(0, options.limit ?? ranked.length),
+        },
+      ],
+    ]);
+    const resolver = new KnowledgeResolver({ projectStore: mockStore([]), catalog, stores });
+
+    const result = await resolver.resolve('test', { dimension: 'library', limit: 1 });
+
+    assert.deepEqual(
+      result.results.map((entry) => entry.anchor),
+      ['global:skill/rank-two-kept'],
+    );
+    assert.deepEqual(
+      result.collectionGroups[0].items.map((entry) => entry.anchor),
+      ['global:skill/rank-two-kept'],
+    );
+  });
+
   it('dimension=collection routes to an explicitly authorized private ID', async () => {
     const catalog = new LibraryCatalog();
     catalog.register(manifest('world:secret', 'world', 'private'));

@@ -167,7 +167,7 @@ describe('HubEvalTab paw-feel settings surface', () => {
       backupCatId: 'codex-sol',
       version: 1,
       updatedAt: '2026-07-26T00:00:00.000Z',
-      updatedBy: 'you',
+      updatedBy: 'operator',
     };
     vi.mocked(apiFetch).mockImplementation(async (url, init) => {
       if (url === '/api/eval-hub/summary') return jsonResponse(emptyEvalSummary);
@@ -250,7 +250,7 @@ describe('HubEvalTab paw-feel settings surface', () => {
       backupCatId: 'codex-sol',
       version: 3,
       updatedAt: '2026-07-26T00:00:00.000Z',
-      updatedBy: 'you',
+      updatedBy: 'operator',
     };
     vi.mocked(apiFetch).mockImplementation(async (url) => {
       if (url === '/api/eval-hub/summary') return jsonResponse(emptyEvalSummary);

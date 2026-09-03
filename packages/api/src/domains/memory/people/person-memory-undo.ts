@@ -322,6 +322,9 @@ export async function undoPersonMemoryDecision(
   };
   const updatedCandidate = candidateAfterUndo(candidate, decision, undoReceipt);
   plan.set(candidateKey, JSON.stringify(updatedCandidate));
+  if (candidate.state === 'materialized') {
+    plan.zrem(PersonMemoryKeys.settled(owner), input.candidateId);
+  }
   plan.sadd(PersonMemoryKeys.personArtifacts(owner, decision.personId), undoKey);
 
   const raw = await redis.eval(

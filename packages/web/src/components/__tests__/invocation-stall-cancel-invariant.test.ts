@@ -90,7 +90,9 @@ describe('Invocation stall cancel invariant', () => {
       Promise.resolve({
         ok: true,
         json: () =>
-          Promise.resolve(url.endsWith('/executions/active') ? { projectPath: '/project/cafe', executions: [] } : {}),
+          Promise.resolve(
+            url.startsWith('/api/executions/active?') ? { projectPath: '/project/cafe', executions: [] } : {},
+          ),
       }),
     );
     storeState.targetCats = ['codex'];

@@ -2,6 +2,9 @@ import assert from 'node:assert/strict';
 import { describe, it, mock } from 'node:test';
 
 const { LocalReviewVerdictService } = await import('../dist/domains/ball-custody/LocalReviewVerdictService.js');
+const { ActionSuccessorCompletionService } = await import(
+  '../dist/domains/ball-custody/ActionSuccessorCompletionService.js'
+);
 const { MessageStoreLocalReviewEvidenceProvider } = await import(
   '../dist/domains/ball-custody/LocalReviewEvidenceProvider.js'
 );
@@ -10,6 +13,9 @@ const { claimActionSuccessor, recordActionSuccessorOutcome } = await import(
 );
 const { recoverActiveLocalReviewVerdict } = await import(
   '../dist/domains/ball-custody/action-successor-local-review-recovery-state-machine.js'
+);
+const { recordActionCompletionCandidate, commitActionCompletionVerdict } = await import(
+  '../dist/domains/ball-custody/action-successor-completion-state-machine.js'
 );
 const { canonicalizeActionTerminalPredicate } = await import(
   '../dist/domains/ball-custody/ActionTerminalPredicateCatalog.js'
@@ -664,7 +670,99 @@ function recoveryInput(overrides = {}) {
   };
 }
 
+function candidateBearingRecoveryHarness() {
+  let current = createLease();
+  const message = verdictMessage({
+    extra: {
+      targetCats: ['codex-sol'],
+      crossPost: { sourceThreadId: 'thread-review', effectClass: 'coordinate' },
+      stream: { invocationId: 'parent-inv-review-1', turnInvocationId: 'turn-inv-review-1' },
+      localReviewVerdict: {
+        verdict: 'changes_requested',
+        clientMessageId: 'typed-verdict-candidate-bearing',
+        reviewedHeadSha: HEAD,
+      },
+    },
+  });
+  const leaseStore = {
+    async get(leaseId) {
+      return current?.leaseId === leaseId ? current : null;
+    },
+    async recordCompletionCandidate(leaseId, candidate) {
+      if (current?.leaseId !== leaseId) return { outcome: 'lease_missing', lease: null };
+      current = recordActionCompletionCandidate(current, candidate);
+      return { outcome: 'recorded', lease: current };
+    },
+    async commitCompletionVerdict(leaseId, completion) {
+      if (current?.leaseId !== leaseId) return { outcome: 'lease_missing', lease: null };
+      current = commitActionCompletionVerdict(current, completion);
+      return { outcome: 'committed', lease: current };
+    },
+    async recoverLocalReviewVerdict(leaseId, recovery) {
+      if (current?.leaseId !== leaseId) throw new Error('lease missing');
+      const result = recoverActiveLocalReviewVerdict(current, recovery);
+      if (result.outcome === 'recovered') current = result.lease;
+      return result;
+    },
+  };
+  const messageStore = {
+    async getById(messageId) {
+      return messageId === message.id ? message : null;
+    },
+  };
+  const invocationRecordStore = {
+    async get(invocationId) {
+      if (invocationId !== 'parent-inv-review-1') return null;
+      return {
+        id: invocationId,
+        threadId: 'thread-review',
+        userId: 'user-1',
+        targetCats: ['codex-terra'],
+        actionLeaseCarrier: { kind: 'action_successor', leaseId: current.leaseId, generation: current.generation },
+      };
+    },
+  };
+  const truthResolver = {
+    async resolveCompletion() {
+      return { status: 'mismatch', reason: 'predicate HEAD is not the tracking-observed current HEAD' };
+    },
+    async resolveFreshness() {
+      return { status: 'mismatch', reason: 'predicate HEAD is not the tracking-observed current HEAD' };
+    },
+  };
+  const completionService = new ActionSuccessorCompletionService(leaseStore, truthResolver);
+  return {
+    getCurrentLease: () => current,
+    service: new LocalReviewVerdictService({
+      leaseStore,
+      evidenceProvider: new MessageStoreLocalReviewEvidenceProvider(messageStore, invocationRecordStore),
+      truthResolver,
+      completeActionLease: (completion) => completionService.complete(completion),
+    }),
+  };
+}
+
 describe('F167 active stale local-review settlement recovery', () => {
+  it('recovers the exact sole typed candidate written before a server-observed HEAD advance', async () => {
+    const { service, getCurrentLease } = candidateBearingRecoveryHarness();
+
+    assert.deepEqual(await service.record(input({ reviewedHeadSha: HEAD })), {
+      outcome: 'mismatch',
+      reason: 'predicate HEAD is not the tracking-observed current HEAD',
+    });
+    assert.deepEqual(Object.keys(getCurrentLease().completionCandidates), ['codex-terra']);
+
+    assert.deepEqual(await service.recover(recoveryInput()), {
+      outcome: 'committed',
+      leaseId: 'lease-review-1',
+      generation: 1,
+      evidenceRef: 'local-review:message-verdict-1:g1:changes_requested',
+    });
+    assert.equal(getCurrentLease().status, 'completed');
+    assert.equal(getCurrentLease().holderOutcomes['codex-terra'].outcome, 'succeeded');
+    assert.deepEqual(getCurrentLease().completionCandidates, {});
+  });
+
   it('recovers the exact persisted F286 historical BLOCK verdict rendering', async () => {
     const subjectRef = 'pr:zts212653/cat-cafe#3424';
     const lease = createLease({
@@ -787,7 +885,7 @@ describe('F167 active stale local-review settlement recovery', () => {
     });
   });
 
-  it('fails closed outside the exact untouched active single-review generation', async () => {
+  it('fails closed outside the exact unsettled active single-review generation', async () => {
     const cases = [
       {
         lease: {
@@ -814,14 +912,34 @@ describe('F167 active stale local-review settlement recovery', () => {
             },
           },
         },
-        reason: 'local review recovery requires an untouched active generation',
+        reason: 'local review recovery candidate does not match the typed verdict',
+      },
+      {
+        lease: {
+          ...createLease(),
+          completionCandidates: {
+            'codex-terra': {
+              evidenceRefs: ['local-review:message-verdict-1:g1:changes_requested'],
+              candidateRevision: 1,
+              evidenceDigest: 'exact-holder-digest',
+              recordedAt: 10,
+            },
+            opus: {
+              evidenceRefs: ['local-review:other:g1:approved'],
+              candidateRevision: 2,
+              evidenceDigest: 'conflicting-holder-digest',
+              recordedAt: 11,
+            },
+          },
+        },
+        reason: 'local review recovery candidate does not match the typed verdict',
       },
       {
         lease: {
           ...createLease(),
           holderOutcomes: { 'codex-terra': { outcome: 'failed', evidenceRef: 'failure:old', at: 10 } },
         },
-        reason: 'local review recovery requires an untouched active generation',
+        reason: 'local review recovery requires an unsettled active generation',
       },
       {
         lease: {

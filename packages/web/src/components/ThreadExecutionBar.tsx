@@ -14,6 +14,7 @@ import { apiFetch } from '@/utils/api-client';
 import { isSilentActiveTurn, isStreamingTipSuppressed } from './capability-tip-placement';
 import { ExecutionCancelButton } from './ExecutionCancelButton';
 import { ForceResetDialog } from './ForceResetDialog';
+import { managedCommandActivityLabel } from './managed-command-activity-label';
 
 const APP_SERVER_STAGE_LABELS: Record<AppServerLifecycleStage, string> = {
   child_spawned: '启动子进程',
@@ -259,7 +260,8 @@ function CatStatusChip({
       <span className="w-1.5 h-1.5 rounded-full animate-pulse" style={{ backgroundColor: color }} />
       <span className="text-cafe-secondary font-medium">{label}</span>
       <span className="text-cafe-muted">
-        {execution.kind === 'managed_command' ? '托管命令' : '实时回合'} · {execution.threadTitle ?? execution.threadId}
+        {execution.kind === 'managed_command' ? managedCommandActivityLabel(execution.activity) : '实时回合'} ·{' '}
+        {execution.threadTitle ?? execution.threadId}
       </span>
       {lifecycle && (
         <span className={appServerStalled ? 'text-conn-amber-text' : 'text-cafe-muted'}>

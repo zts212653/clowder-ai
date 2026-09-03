@@ -22,6 +22,7 @@ import type {
   IThreadStore,
   MentionActionabilityMode,
   Thread,
+  ThreadGoalStateV1,
   ThreadMemoryV1,
   ThreadMentionRoutingFeedback,
   ThreadMetadataPatch,
@@ -35,6 +36,7 @@ import {
   buildExternalRuntimeAnchorThreadId,
   DEFAULT_THREAD_ID,
   deriveAutoThreadTitle,
+  isThreadGoalStateV1,
   mergeThreadMetadata,
   parseThreadMetadataJson,
   validateMergedTotals,
@@ -85,6 +87,42 @@ if cur == ARGV[2] then
   return 1
 end
 return 0
+`;
+
+/** F306 exact-revision CAS for the durable thread goal field. */
+const CAS_THREAD_GOAL_LUA = `
+if redis.call('HEXISTS', KEYS[1], 'id') == 0 then
+  return 0
+end
+local raw = redis.call('HGET', KEYS[1], 'goal')
+if ARGV[3] == '1' then
+  if tonumber(ARGV[1]) ~= -1 or raw == false or raw ~= ARGV[4] then
+    return 0
+  end
+  if ARGV[2] == '' then
+    redis.call('HDEL', KEYS[1], 'goal')
+  else
+    redis.call('HSET', KEYS[1], 'goal', ARGV[2])
+  end
+  return 1
+end
+local currentRevision = -1
+if raw then
+  local ok, parsed = pcall(cjson.decode, raw)
+  if not ok or type(parsed) ~= 'table' or type(parsed.revision) ~= 'number' then
+    return 0
+  end
+  currentRevision = parsed.revision
+end
+if currentRevision ~= tonumber(ARGV[1]) then
+  return 0
+end
+if ARGV[2] == '' then
+  redis.call('HDEL', KEYS[1], 'goal')
+else
+  redis.call('HSET', KEYS[1], 'goal', ARGV[2])
+end
+return 1
 `;
 
 /**
@@ -576,6 +614,35 @@ export class RedisThreadStore implements IThreadStore {
     }
   }
 
+  async compareAndSetGoal(
+    threadId: string,
+    expectedRevision: number | null,
+    next: ThreadGoalStateV1 | null,
+  ): Promise<boolean> {
+    if (next && !isThreadGoalStateV1(next)) return false;
+    const key = ThreadKeys.detail(threadId);
+    const currentRaw = await this.redis.hget(key, 'goal');
+    let repairRaw: string | null = null;
+    if (currentRaw !== null) {
+      try {
+        if (!isThreadGoalStateV1(JSON.parse(currentRaw))) repairRaw = currentRaw;
+      } catch {
+        repairRaw = currentRaw;
+      }
+    }
+    const changed = (await this.redis.eval(
+      CAS_THREAD_GOAL_LUA,
+      1,
+      key,
+      String(expectedRevision ?? -1),
+      next ? JSON.stringify(next) : '',
+      repairRaw !== null ? '1' : '0',
+      repairRaw ?? '',
+    )) as number;
+    if (changed === 1) await this.applyKeyRetention([key]);
+    return changed === 1;
+  }
+
   async updatePhase(threadId: string, phase: ThreadPhase): Promise<void> {
     const key = ThreadKeys.detail(threadId);
     await this.setDetailFields(key, 'phase', phase);
@@ -717,6 +784,7 @@ export class RedisThreadStore implements IThreadStore {
     mode:
       | 'dev'
       | 'recall'
+      | 'product-schedule'
       | 'schedule'
       | 'tasks'
       | 'community'
@@ -1143,6 +1211,9 @@ export class RedisThreadStore implements IThreadStore {
     if (thread.phase) {
       result.phase = thread.phase;
     }
+    if (thread.goal) {
+      result.goal = JSON.stringify(thread.goal);
+    }
     if (thread.backlogItemId) {
       result.backlogItemId = thread.backlogItemId;
     }
@@ -1232,6 +1303,14 @@ export class RedisThreadStore implements IThreadStore {
     };
     if (data.mentionActionabilityMode === 'relaxed') {
       result.mentionActionabilityMode = 'relaxed';
+    }
+    if (data.goal) {
+      try {
+        const parsed = JSON.parse(data.goal);
+        if (isThreadGoalStateV1(parsed)) result.goal = parsed;
+      } catch {
+        /* ignore malformed goal state */
+      }
     }
     const phase = this.parsePhase(data.phase);
     if (phase) {
@@ -1354,6 +1433,7 @@ export class RedisThreadStore implements IThreadStore {
     const validModes = new Set([
       'dev',
       'recall',
+      'product-schedule',
       'schedule',
       'tasks',
       'community',

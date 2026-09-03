@@ -5,12 +5,13 @@ related_decisions: [ADR-020, ADR-032]
 topics: [memory, cross-project, bootstrap, knowledge-engineering, onboarding]
 doc_kind: spec
 created: 2026-04-08
-updated: 2026-07-26
+updated: 2026-08-29
+tips_exempt: "Global distillation consumer surface sunset by operator (2026-08-29); remaining expedition/bootstrap scope is internal infrastructure with no new user-invokable capability. Renewal required if Phase D+ adds user-facing expedition features."
 ---
 
 # F152: Expedition Memory — 外部项目记忆冷启动 + 经验回流
 
-> **Status**: in-progress | **Owner**: Ragdoll | **Priority**: P1 | **Close Gate**: 2026-07-26 Phase C durable supply 已补牢（PR #3243）：`generalizable`、candidate queue、approved truth 均跨 rebuild；仅 AC-C5 operator全链路终验待完成。durable truth 归属为个人本地全局层，只有显式 export/share 才进入 repo/shared collection。
+> **Status**: in-progress（retained expedition/bootstrap scope） | **Owner**: Ragdoll | **Priority**: P1 | **Scope decision**: 2026-08-29 operator 批准只 sunset `global-distillation-f152` consumer surface；Phase 0/A/B 与 producer code 保留，durable artifacts 仅作 forensic evidence，不再进入 generic recall delivery。此决定不等于关闭整个 F152，也不是 utility verdict。
 
 ## Why
 
@@ -199,12 +200,12 @@ interface ScannedEvidence {
 - [x] AC-B11: **摘要卡交互**：扫描完成后推结构化摘要（仓库画像 + 知识覆盖 `kindCoverage` 优先，缺失时 fallback 到 `tierCoverage` + 关键文档 Top N + 风险提示）+ CTA 按钮（搜索 / MemoryHub / 补文档建议）
 - [x] AC-B12: **安全护栏**：禁止 symlink 越界扫描、排除 secrets 路径和二进制大文件、大仓自动 skipSoftClues + 文件数/字节预算超时
 
-### Phase C（Global Lesson Distillation）— 2026-07-09 re-opened
+### Phase C（Global Lesson Distillation）— SUNSET 2026-08-29
 - [x] AC-C1: 外部项目的 lesson/decision 可以被**持久**标记 `generalizable: true/false`，普通 index rebuild 保留已有标记
 - [x] AC-C2: 默认 `generalizable: false`（fail-closed）
 - [x] AC-C3: `generalizable: true` 的 candidate 持久排队，走审核流程后物化到**用户拥有的本地个人全局 durable truth**，再编译进 `global_knowledge.sqlite`；只有显式 export/share 才进入 repo/shared collection
 - [x] AC-C4: 回流内容自动脱敏（移除项目私有标识）
-- [ ] AC-C5: operator亲手体验一轮完整的"出征→冷启动→干活→经验回流"链路
+- [ ] AC-C5: **SUNSET — 不再作为验收目标**。没有 named consumer、typed cue、allowed-use、receipt、outcome 或 invalidation；operator 已批准退出该 consumer surface
 
 ## 需求点 Checklist
 
@@ -214,7 +215,7 @@ interface ScannedEvidence {
 | R1 | "别人的项目未必从零开始" — 能吃已有项目 | AC-A1, AC-A3 | test: 对一个普通 Git 仓库运行 scanner | [x] |
 | R2 | 猫去外部项目能快速理解项目现状 | AC-B1, AC-B2 | manual: bootstrap 后猫能回答项目基本问题 | [x] |
 | R3 | "用你们开发其他项目" — 不要求先搭 cat-cafe 标准目录 | AC-A1, AC-A3 | test: 无 docs/ 结构的仓库能正常扫描 | [x] |
-| R4 | 猫踩的坑能带回来下次用 | AC-C1~C4 | manual: 一条经验跨 rebuild 回流到全局层 | [ ] |
+| R4 | 猫踩的坑能带回来下次用 | AC-C1~C4 | producer path 曾被证明；consumer surface 已 sunset，不再宣称跨项目复用价值 | sunset |
 | R5 | "代码仓可能和文档分开" — 猫要能识别并提醒 | AC-02 | manual: 猫检测到文档分仓场景时给出建议 | [x] |
 | R6 | "打开某个外部 project 你们这能用吗？怎么提示？" — 老用户能力发现 | AC-B7, AC-B8 | manual: 已有项目打开后收到确认卡提示 | [x] |
 | R7 | "考虑和之前的 bootstrap 联动" — 新项目无缝串联 | AC-B4, AC-B9 | test: ProjectSetupCard 完成后自动触发记忆 bootstrap | [x] |
@@ -224,7 +225,7 @@ interface ScannedEvidence {
 - [x] 每个 AC 都有验证方式
 - [x] 前端需求已准备需求→证据映射表（若适用）
 
-## 当前进度（2026-07-26 durable supply repair）
+## 当前进度（2026-08-29 consumer surface sunset）
 
 ### 已确认闭环
 
@@ -234,11 +235,13 @@ interface ScannedEvidence {
 - **freshness 读路径已闭环**：GET `/api/projects/index-state` 现在会在服务端计算 fingerprint，对比存储态后可把旧 summary 正确翻成 `stale`，驱动重建。
 - **重复删代码的回归已加守护**：`getKindCoverage` / `isSameRepo` 因 intake/merge 冲突被删过多次；现在已有 wiring guard 测试，后续再删应直接在测试阶段报红。
 
-### 当前不允许宣布 done 的原因
+### 当前边界
 
 - **AC-C1/C3 已修复**：project rebuild 通过 conflict-update 保留 `generalizable`；candidate queue 落 SQLite；批准结果物化为 `dataDir/distilled-truths` 下的 durable Markdown，再由 `GlobalIndexBuilder` 编译。拒绝候选允许在修正来源后重新提名。
-- **AC-C5 仍未完成**：我们还没有拿到operator亲手走完一轮“出征 → 冷启动 → 干活 → 经验回流”的终验记录。
-- **因此本 feature 现在的真实状态是**：Phase 0/A/B 完成，Phase C durable supply 完成；F152 继续保留在 BACKLOG，等待 AC-C5 产品终验，不能宣布 feature done。
+- **producer 能写，不等于 consumer 有价值**：live 本地层存在 36 份 materialized artifacts 与 36 条 `distilled:*` index row，但只有 3 个重复测试标题；它们证明 nominate→approve→materialize→index 的机械路径，不证明被召回、采用或产生结果。
+- **consumer surface 已退出**：`search_evidence` 的 global/all/N-collection、`graph_resolve` 的 exact/fuzzy/traversal 与 `list_recent` 都会在候选截断前过滤 `distilled:` anchors；typed cue、allowed-use、receipt、outcome 与 source-revision invalidation 不再建设。durable 文件、SQLite 行和 producer code 保留作 forensic evidence，显式 forensic/admin browse 仍可查看，不删除 owner data。
+- **AC-C5 不再阻塞**：它随 global-distillation consumer surface sunset，不再作为未来 close gate，也不能被补写成“已通过”。
+- **因此本 feature 现在的真实状态是**：Phase 0/A/B 的 expedition/bootstrap 能力继续保留；Phase C producer history 保留、consumer surface sunset。整个 F152 是否关闭由 retained scope 的 owner/operator 另行裁决，本次不得越界宣布 feature done。
 
 ## Dependencies
 

@@ -34,7 +34,7 @@ function makeProposal(overrides = {}) {
     baseHash: hash(fileContent),
     createdBy: 'system',
     createdAt: Date.now(),
-    approvedBy: 'you',
+    approvedBy: 'operator',
     approvedAt: Date.now(),
     ...overrides,
   };
@@ -93,7 +93,7 @@ describe('DossierDraftApplier', () => {
       assert.ok(result.result.commitMessage.includes('F208'));
       assert.ok(result.result.commitMessage.includes('opus'));
       assert.ok(result.result.commitMessage.includes('prop-001'));
-      assert.ok(result.result.commitMessage.includes('you'));
+      assert.ok(result.result.commitMessage.includes('operator'));
     });
 
     it('rejects with BASE_HASH_MISMATCH when file has changed since proposal', () => {

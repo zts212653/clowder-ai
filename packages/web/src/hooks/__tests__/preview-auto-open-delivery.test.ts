@@ -50,14 +50,104 @@ describe('deliverPreviewAutoOpenEvent', () => {
     expect(input.queueForThread).toHaveBeenCalledWith('thread-b', { port: 5173, path: '/dash' });
   });
 
-  it('does not let a hidden Hub tab claim custody of an inactive-thread preview', () => {
+  // ── Hidden-tab deferred delivery (F120 × F284 reliability fix) ──
+  // Hidden tabs queue previews instead of skipping, so the preview appears
+  // when the user returns. Prevents no_matching_client when all Hub tabs
+  // are merely behind the terminal window — a common pattern for CLI cats.
+
+  it('hidden tab applies for the active thread so F307 workbench surface fires', () => {
+    // Review finding 1: queueThreadPreview does NOT set pendingPreviewAutoOpen,
+    // so F307 workbench dispatch never fires. Active thread must use apply()
+    // (setPendingPreviewAutoOpen) instead. Receipt is still queued because the
+    // user hasn't seen it yet.
+    const input = makeInput({
+      data: makeEvent({ threadId: 'thread-a' }),
+      clientVisible: false,
+    });
+    const receipt = deliverPreviewAutoOpenEvent(input);
+    expect(receipt).toEqual({ status: 'queued', eventId: 'evt-1', reason: 'client_inactive' });
+    expect(input.apply).toHaveBeenCalledWith(makeEvent({ threadId: 'thread-a' }));
+    expect(input.queueForThread).not.toHaveBeenCalled();
+  });
+
+  it('hidden tab queues for an inactive target thread via ThreadState', () => {
     const input = makeInput({
       data: makeEvent({ threadId: 'thread-b' }),
       clientVisible: false,
     });
     const receipt = deliverPreviewAutoOpenEvent(input);
+    expect(receipt).toEqual({ status: 'queued', eventId: 'evt-1', reason: 'client_inactive' });
+    expect(input.apply).not.toHaveBeenCalled();
+    expect(input.queueForThread).toHaveBeenCalledWith('thread-b', { port: 5173, path: '/dash' });
+  });
+
+  it('hidden tab applies global event (no threadId) for the active thread', () => {
+    const input = makeInput({ clientVisible: false });
+    const receipt = deliverPreviewAutoOpenEvent(input);
+    expect(receipt).toEqual({ status: 'queued', eventId: 'evt-1', reason: 'client_inactive' });
+    expect(input.apply).toHaveBeenCalledWith(makeEvent());
+    expect(input.queueForThread).not.toHaveBeenCalled();
+  });
+
+  it('hidden tab + active thread + presentation lock → skips (no false custody)', () => {
+    // Review finding 2: apply / queueThreadPreview no-op under lock, so the
+    // receipt must NOT claim queued when nothing is persisted.
+    const input = makeInput({
+      data: makeEvent({ threadId: 'thread-a' }),
+      clientVisible: false,
+      presentationLocked: true,
+    });
+    const receipt = deliverPreviewAutoOpenEvent(input);
     expect(receipt).toEqual({ status: 'skipped', eventId: 'evt-1', reason: 'client_inactive' });
     expect(input.apply).not.toHaveBeenCalled();
+    expect(input.queueForThread).not.toHaveBeenCalled();
+  });
+
+  it('hidden tab still skips when worktree scope mismatches', () => {
+    const input = makeInput({
+      data: makeEvent({ threadId: 'thread-b', worktreeId: 'wt-other' }),
+      clientVisible: false,
+      resolveTargetWorktreeId: vi.fn(() => 'wt-mine'),
+    });
+    const receipt = deliverPreviewAutoOpenEvent(input);
+    expect(receipt).toEqual({ status: 'skipped', eventId: 'evt-1', reason: 'client_inactive' });
+    expect(input.apply).not.toHaveBeenCalled();
+    expect(input.queueForThread).not.toHaveBeenCalled();
+  });
+
+  it('hidden tab still skips when target scope is unprovable', () => {
+    const input = makeInput({
+      data: makeEvent({ threadId: 'thread-b', worktreeId: 'wt-a' }),
+      clientVisible: false,
+      resolveTargetWorktreeId: vi.fn(() => undefined),
+    });
+    const receipt = deliverPreviewAutoOpenEvent(input);
+    expect(receipt).toEqual({ status: 'skipped', eventId: 'evt-1', reason: 'client_inactive' });
+    expect(input.apply).not.toHaveBeenCalled();
+    expect(input.queueForThread).not.toHaveBeenCalled();
+  });
+
+  it('hidden tab still skips for visiblePageAdmission events (needs attestation)', () => {
+    const input = makeInput({
+      data: makeEvent({
+        threadId: 'thread-a',
+        visiblePageAdmission: { expectedClientRevision: 'a'.repeat(40), requiredDom: [] },
+      }),
+      clientVisible: false,
+    });
+    const receipt = deliverPreviewAutoOpenEvent(input);
+    expect(receipt).toEqual({ status: 'skipped', eventId: 'evt-1', reason: 'client_inactive' });
+    expect(input.apply).not.toHaveBeenCalled();
+    expect(input.queueForThread).not.toHaveBeenCalled();
+  });
+
+  it('hidden tab skips when there is no active thread and no event threadId', () => {
+    const input = makeInput({
+      activeThreadId: null,
+      clientVisible: false,
+    });
+    const receipt = deliverPreviewAutoOpenEvent(input);
+    expect(receipt).toEqual({ status: 'skipped', eventId: 'evt-1', reason: 'client_inactive' });
     expect(input.queueForThread).not.toHaveBeenCalled();
   });
 

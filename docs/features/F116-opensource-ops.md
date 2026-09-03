@@ -10,6 +10,9 @@ created: 2026-03-14
 
 > **Status**: done | **Completed**: 2026-03-14 | **Owner**: Ragdoll + Maine Coon | **Priority**: P1
 
+Architecture cell: `dispatch` + `community-ops` + `portable-governance` + `mcp-surface-governance`
+Map delta: none — #1406 removes external-policy inference from the existing F128 dispatch boundary and exports a reviewed portable skill through the existing public-sync transform; ownership and extension points stay unchanged.
+
 ## Why
 
 operator experience（2026-03-14 00:15~00:25）：
@@ -78,7 +81,7 @@ opensource-ops
 4. **一条线不断裂**：`Issue accept → Merge decision → Merge → Intake decision → Ledger record`，每个环节有 checklist。
 5. **签名归属**：所有开源仓的评论/操作带猫猫签名（如 `Maine Coon-gpt5.4`），可追溯。
 6. **Issue accept 是 Merge 前提**：没有 accepted issue 的 PR 不得 merge。Bug 需确认可复现；Feature 需完成 F 号分配 + 关联检测。
-7. **Skill 作为 public portable skill 同步到开源仓**：`opensource-ops` 已从内部运营 playbook 演进为 provider-neutral 的公开 skill（#1387）。它不再包含实例私有的同步策略或双仓操作细节，而是提供可重用的外部 PR/issue 落地、身份/custody 判断与路由框架；具体仓的 SOP 由子 thread 的 `projectPath` 与 deployment provider adapter 决定。
+7. **公开便携层与家内运营层分离**：家内 `SKILL.md` 与私有 refs 继续不导出；reviewed `SKILL.opensource.md` 通过显式 transform 生成公开路径的 provider-neutral skill，full sync 不得删除社区贡献。
 
 ### Phase B: community-pr 完全吸收（已完成）
 
@@ -98,7 +101,7 @@ opensource-ops
 - [x] AC-A6: 贯穿规则"双仓边界"明确：每个操作步骤标注在哪个仓执行
 - [x] AC-A7: Skill 加载后，猫猫能按场景路由找到对应操作步骤，不需要去翻 F059 spec 或 SOP
 - [x] AC-A8: 场景 F（Hotfix Lane）包含：worktree 基于 sync tag 创建、sync-hotfix.sh 用法、clowder-ai PR 流程、cherry-pick 回 main、intake 登记全链路
-- [x] AC-A9: `opensource-ops` 作为 public portable skill 注册在 `cat-cafe-skills/manifest.yaml` 中；实例私有的运营细节（sync 脚本、ledger、BACKLOG 更新）仍由项目自身 SOP 处理，不包含在本 skill 内
+- [x] AC-A9: `sync-manifest.yaml` 直接排除家内 `SKILL.md` 与私有 refs，但通过 `SKILL.opensource.md` transform 在公开路径生成 reviewed portable skill；全目录排除已移除，防止 full sync 删除社区贡献
 - [x] AC-A10: 场景 D Post-Sync Community Reconciliation：全量同步后按 Feature 分包搜社区 issue → 两猫对齐 → 逐包推operator核验 → 核验全过后执行关单/打标签/评论。全量同步完成 ≠ 技术发布完成，社区收敛做完才算闭环
 
 ### Phase B（完全吸收 — 已完成）
@@ -121,8 +124,8 @@ opensource-ops
 | 双仓操作步骤写错仓库 | 每个步骤强制标注 `[cat-cafe]` 或 `[clowder-ai]`，review 时逐条检查 |
 | community-pr 迁移遗漏 | 迁移前 diff 对照，Phase B 独立 review |
 | 社区 bug fix 误走全量 sync 而非 hotfix lane | 场景 F 单列 Hotfix Lane，触发条件明确区分 |
-| public skill 边界与实例私有运营细节混淆 | KD-5 + AC-A9：skill 只保留 provider-neutral 的落地/custody/路由框架；具体 sync、ledger、BACKLOG 等内部 SOP 留在项目自身文档 |
-| 外部部署缺少 provider adapter | skill 要求子 thread 在 `cwd` 内用 deployment 的 provider 工具（如 `gh`）自行 grounding；skill 不绑定任何特定 provider |
+| public skill 边界与家内运营细节混淆 | KD-5 revision + AC-A9：public transform 只发布 provider-neutral skill；家内 `SKILL.md` 与 refs 仍由 excluded 硬卡 |
+| full sync 删除社区贡献 | 公开路径是 manifest transform target，并由 runtime-closure regression 固化 |
 
 ## Key Decisions
 
@@ -133,7 +136,7 @@ opensource-ops
 | KD-3 | 所有开源仓操作必须带猫猫签名 | 可追溯，防止混淆是谁干的（operator要求） | 2026-03-14 |
 | KD-4 | Patch 类社区 PR 猫猫可自主 merge，需同时满足 4 条件 | 条件：① 有 accepted issue ② 只改 safe-cherry-pick 或 public-only 路径 ③ 公开仓 CI/测试过 ④ 不涉及 sync 脚本/ledger/边界规则/安全。碰到 manual-port/Feature/工具链 → 升级operator（Maine Coon-gpt5.4 提议，Ragdoll同意） | 2026-03-14 |
 | KD-5 | `opensource-ops` skill 不同步到开源仓 | 内部运营 playbook，排除出 sync-manifest.yaml excluded 列表（operator要求 2026-03-14 00:27） | 2026-03-14 |
-| KD-5 revision | `opensource-ops` 重新定位为 public portable skill | #1387 将 server-side PR 推断移除，child-side 需要可重用的 provider-neutral 落地/custody/路由框架；实例私有策略（sync/ledger/BACKLOG）保留在项目内部 SOP，不放入 skill（maintainer review #1406） | 2026-08-31 |
+| KD-5 revision | 同一路径在公开导出中生成 provider-neutral portable skill | #1387/#1406 移除 server-side PR 推断后，child-side 需要可重用的 grounding/custody 框架；家内 `SKILL.md` 与 refs 仍私有，reviewed `SKILL.opensource.md` 经 transform 生成公开 `SKILL.md`，两层互不覆盖 | 2026-09-01 |
 | KD-6 | Outbound Sync PR 必须列清同步内容（feat/bugfix/改动） | operator要求 2026-03-14 00:41 | 2026-03-14 |
 | KD-7 | Skill 写完Maine Coon放行后，@ operator亲自审核，不直接提 PR | operator要求 2026-03-14 00:41 | 2026-03-14 |
 

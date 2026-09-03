@@ -70,3 +70,21 @@ watch.local_6398_sideprobe_drift:
   goodDirection: lower
   category: friction
   component: watchlist
+friction-rollup.cluster_count:
+  label: 本轮摩擦聚类数
+  means: 当前 friction rollup 窗口内去重后的独立摩擦类型数量。
+  goodDirection: lower
+  category: friction
+  component: friction-rollup
+friction-rollup.top_cluster_count:
+  label: 头部摩擦聚类数
+  means: 当前窗口中进入 Top-N、需要优先观察或处置的摩擦聚类数量。
+  goodDirection: lower
+  category: friction
+  component: friction-rollup
+friction-rollup.tail_signal_count:
+  label: 长尾摩擦信号数
+  means: 当前窗口中没有进入头部聚类、但仍需保留作趋势证据的长尾信号数量。
+  goodDirection: lower
+  category: friction
+  component: friction-rollup
