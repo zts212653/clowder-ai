@@ -46,21 +46,6 @@ test('ci.yml installs and requires the exact OpenCode behavior baseline', () => 
   }
 });
 
-test('ci.yml pins one exact Node runtime across public-test plan producers and consumers', () => {
-  const document = parse(readFileSync(new URL('../../../.github/workflows/ci.yml', import.meta.url), 'utf8'));
-  const runtimeJobs = ['public-test-prepare', 'public-test-shards', 'public-test-summary'];
-  const versions = runtimeJobs.map((jobName) => {
-    const setupNode = document.jobs[jobName].steps.find((step) => step.uses === 'actions/setup-node@v4');
-    assert.ok(setupNode, `${jobName} must configure Node`);
-    return String(setupNode.with['node-version']);
-  });
-
-  for (const [index, version] of versions.entries()) {
-    assert.match(version, /^\d+\.\d+\.\d+$/, `${runtimeJobs[index]} must pin an exact Node patch version`);
-  }
-  assert.equal(new Set(versions).size, 1, 'plan producers and consumers must use the same Node runtime');
-});
-
 test('windows-smoke.yml installs and requires the exact OpenCode behavior baseline', () => {
   const document = parse(
     readFileSync(new URL('../../../.github/workflows/windows-smoke.yml', import.meta.url), 'utf8'),

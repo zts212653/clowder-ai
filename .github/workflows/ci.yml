@@ -32,6 +32,7 @@ jobs:
           node-version: 24
           cache: pnpm
       - run: pnpm install --frozen-lockfile
+      - run: node .github/scripts/check-public-test-ci-contract.mjs
       - run: pnpm check
 
   build:
@@ -141,6 +142,7 @@ jobs:
           --lane "${{ matrix.lane }}"
           --report "${{ runner.temp }}/public-test/reports/${{ matrix.lane }}.json"
         env:
+          DEFAULT_OWNER_USER_ID: owner-user
           GIT_AUTHOR_NAME: CI Runner
           GIT_AUTHOR_EMAIL: ci@clowder-ai.dev
           GIT_COMMITTER_NAME: CI Runner
