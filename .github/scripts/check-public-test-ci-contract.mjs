@@ -23,4 +23,6 @@ assert.equal(
   'public tests must use a deterministic local owner identity',
 );
 
-process.stdout.write(`public-test CI contract OK (Node ${versions[0]}, owner ${shardStep.env.DEFAULT_OWNER_USER_ID})\n`);
+process.stdout.write(
+  `public-test CI contract OK (Node ${versions[0]}, owner ${shardStep.env.DEFAULT_OWNER_USER_ID})\n`,
+);
