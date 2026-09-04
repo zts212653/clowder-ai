@@ -36,15 +36,20 @@ HTTP callback route 是 MCP tool 的底层实现和维护者调试面，不是 s
 
 ## Tracking registration policy
 
-PR tracking 是显式、一次性的 typed wait，不是事件订阅器。调用方必须给出：
+PR tracking 只有两个必填参数：`cat_cafe_register_pr_tracking(repoFullName, prNumber)`。没有第三个。
 
-- `when`：1–4 个 flat any-of predicate；只允许 F280 catalog 中的 typed 条件。
-- `nextStep`：条件满足后要做什么；只显示、不解析为 policy。
-- `expiresAt`：责任失效时间。baseline 与 owner fence 均由 server 从实时真相生成，调用方不能提交。
+- `nextStep`（可选）：纯展示，永不被解析为 policy。
+- `include` / `exclude`（可选）：按**事件名**增删，不是条件表达式。
 
-不匹配的 GitHub 事实只推进 collector 台账；匹配时每个 generation 最多投递一次 compact delta。merged/closed 会投递 terminal outcome；expiry、owner change、user cancel 静默终止。re-register 原子替换上一 generation。
+不接受条件表达式、过期时间、续订开关、游标或受众白名单——传了会被 schema 拒绝。让调用方挑内部条件正是 #1392 要消灭的病：挑错的表现是**静默不通知**而不是报错。
 
-Issue tracking 在 F280 Phase C 前仍保留自己的 comment actor policy；不要把 issue 的 `wakePolicy` 借回 PR。正常调用只传 MCP 参数，不要为了设置 policy 手写 callback HTTP。
+默认武装六项：`review_decision` / `conversation_comment` / `inline_comment` / `ci_terminal` / `conflict` / `base_behind`；`head_changed` 默认关，按需 include。第七项 `bot_interaction` 由**角色**决定：你是 PR 作者就默认开，不是作者就默认关。
+
+追踪**永不过期**，通知一次后自动续订；结束条件只有 merged / closed / `cat_cafe_unregister_tracking`。只想关掉某一类：`exclude=['ci_terminal']`。未知事件名会**报错**，不会静默忽略。
+
+不匹配的 GitHub 事实只推进 collector 台账；匹配时每个 generation 最多投递一次 compact delta。完整事件词表与语义见 ./pr-signals.md。
+
+Issue tracking 用同一形状的 `cat_cafe_register_issue_tracking(repoFullName, issueNumber)`。正常调用只传 MCP 参数，不要为了设置 policy 手写 callback HTTP。
 
 ## Credentials
 

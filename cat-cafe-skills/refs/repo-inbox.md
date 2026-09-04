@@ -182,29 +182,28 @@ handoff 中写明原因。
 
 #### PR WELCOME 后：按真实阻塞点注册显式等待（F141→F280）
 
-WELCOME 只建立 owner/case 真相，不自动订阅 PR activity。只有当前工作确实被一个外部条件阻塞时，owner 才注册 typed wait。例如，等 external author push：
+WELCOME 只建立 owner/case 真相，不自动订阅 PR activity。只有当前工作确实被一个外部条件阻塞时，owner 才注册追踪。例如，等 external author push：
 
 ```
 cat_cafe_register_pr_tracking(
   repoFullName,
   prNumber,
-  when=[{ kind: "pr_head_changed" }],
-  nextStep="Re-lock exact HEAD and review the delta.",
-  expiresAt=<future unix ms>
+  include=["head_changed"],
+  nextStep="Re-lock exact HEAD and review the delta."
 )
+# head_changed 是唯一对所有人默认关闭的事件，用 include 打开。注册不接受别的参数。
 ```
 
 | 参数 | 来源 |
 |------|------|
 | `repoFullName` | Repo Inbox 通知 `source.meta.repoFullName` |
 | `prNumber` | 通知 `source.meta.number` |
-| `when` | 当前真正改变下一步的 typed condition |
-| `nextStep` | 条件满足后 owner 要做的动作 |
-| `expiresAt` | 当前责任失效时间 |
+| `include` / `exclude` | 可选，按**事件名**增删默认订阅 |
+| `nextStep` | 可选，纯展示：收到回应后 owner 要做的动作 |
 
 > **owner / baseline 由服务端解析**：API 从当前 task/custody 和 GitHub live truth 生成，不接受 payload 覆盖。注册历史不会被回灌为 wake。
 
-等 CI 时改为 `when=[{kind:"pr_ci_terminal"},{kind:"pr_became_conflicting"}]`；等 cloud review 时必须锚定 exact trigger comment。等待目标变化就 re-register，新 generation 原子替换旧 generation。
+CI 与冲突默认就在订阅里，不必额外注册。等 cloud review 也不用锚定 trigger comment——发完召唤评论直接注册，服务端自己验证并把回合绑到本次 invocation。**通知后自动续订，不需要 re-register**；只有改订阅时才重复注册，此时旧 frontier 保留、本轮验证出的新回合并入。
 
 如果守门 thread 把 PR 或 issue 交给下游 thread，Direction Card / handoff 必须写清：
 
