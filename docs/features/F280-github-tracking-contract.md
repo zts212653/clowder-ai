@@ -41,8 +41,9 @@ created: 2026-09-02
 4. bot **没**回来 —— 半小时后猫收到"这轮没回来"，而不是无限期地以为自己还在等。
    报过一次就不再重复。
 5. maintainer 对同一个 PR 也调一次 `register_pr_tracking`。他不是作者，
-   所以默认**收不到**别人和 bot 的来回，但**一定收得到 PR 作者写的真回应**。
-   想看 bot 回合就 `include: ["bot_interaction"]`。
+   所以默认**收不到**别人和 bot 的来回，也**收不到第三方的闲聊**，
+   但**一定收得到 PR 作者写的真回应**和任何人提交的 formal review 决定。
+   不想要某一类就 `exclude` 掉它。
 6. 全程没人重新注册、没人填过期时间。追踪一直活着，直到 PR merged / closed 或显式取消。
 
 **坏掉时用户看到什么**：静默。这是本特性存在的原因，也是为什么 §4 每一条场景
@@ -64,8 +65,7 @@ register_issue_tracking(repoFullName, issueNumber)
 | 参数 | 作用 |
 |---|---|
 | `nextStep` | 纯展示文本，提醒自己收到回应后要做什么。永不被解析 |
-| `include` | 打开一个默认关闭的事件（按**事件名**，不是 predicate 名） |
-| `exclude` | 关掉一个默认开启的事件 |
+| `exclude` | 关掉一个默认开启的事件（按**事件名**，不是 predicate 名） |
 
 **调用方永远不接触**：GitHub 游标名、predicate 类型、`when`、`expiresAt`、
 `autoRenew`、受众白名单（`authorLogins`）。这些是服务端内部实现。
@@ -78,16 +78,18 @@ register_issue_tracking(repoFullName, issueNumber)
 
 | 事件名 | 默认 | 含义 |
 |---|:--:|---|
-| `review_decision` | ✅ | approve / request changes / dismiss |
+| `review_decision` | ✅ | 真正的 `APPROVED` / `CHANGES_REQUESTED` / `DISMISSED`。**属于 PR 状态**，通知所有 tracker（仍过滤提交者自己）；但 **bot 提交的 formal review 对非作者仍按角色静音**。普通 `COMMENTED` **不是** decision，它的正文与 inline finding 走评论受众规则 |
 | `conversation_comment` | ✅ | PR 顶层评论 |
 | `inline_comment` | ✅ | 代码行内 review 评论 |
 | `bot_interaction` | 按角色 | 一个 bot 交互回合（见 §2.4b）。作者默认 ✅，非作者默认 ❌ |
 | `ci_terminal` | ✅ | CI 通过 / 失败 |
 | `conflict` | ✅ | PR 变为冲突 |
 | `base_behind` | ✅ | base 分支有新提交（**仅通知**，见 §7） |
-| `head_changed` | ❌ | 作者推了新 commit。只对 maintainer 视角有用，需 `include` |
+| `head_changed` | ✅ | 作者推了新 commit（自过滤仍然生效，作者不会被自己吵醒）|
 
-`include` / `exclude` 传入未知名字 → **报错**，不静默忽略。
+**默认全部监听，只能显式关闭。** 只有 `exclude`，**没有 `include`**——
+让调用方去"加订阅"就意味着他必须先知道自己漏了什么，而"不知道自己漏了"正是 #1392 要消灭的病。
+`exclude` 传入未知名字 → **报错**，不静默忽略。
 
 ### 2.3 默认订阅集（issue）
 
@@ -98,9 +100,12 @@ issue 有两个面：**评论**与**状态**。没有 `include` / `exclude`，�
 | `issue_comment` | ✅ | 任何非自己的评论都通知 |
 | `issue_state_changed` | ✅ | open → closed（含 `state_reason`：completed / not_planned）、closed → reopened |
 
-**closed 既是状态变化也是结束条件**：投递一条带 `state_reason` 的通知，然后终止追踪。
-**reopened 不是结束**：通知并继续追踪——issue 被重开正是"这事又回来了"，
-比任何评论都值得知道，而追踪已经终止就再也不会有下文。
+**closed 与 reopened 都只是状态变化，都不结束追踪。**
+两者都投递一条带 `state_reason` 的通知，然后**继续监听**。
+
+> 早先这里写的是"closed 通知并终止"。那和 reopen 直接矛盾：**追踪都终止了，
+> 重开永远不可能被观察到。** issue 的生命周期本来就是可逆的，
+> 所以它没有自然终点——**issue 追踪的唯一结束条件是显式 `unregister_tracking`。**
 
 > 早期契约写的是「issue 只有一个回应面：评论」，于是 `issue_closed` 被当作非法谓词
 > **主动断言必须报错**，reopen 完全不存在。这不是范围克制，是把用户主流程写丢了：
@@ -145,8 +150,8 @@ bot_interaction = { @ 了已知 bot 账号的评论 }  ∪  { 已知 bot 发的�
 **不是正文关键词匹配**。`@` 是 GitHub 的一等结构，bot 账号是我们维护的身份数据；
 「这条评论看起来像触发词」那种猜测**禁止**（见 §2.4 与 §8.3）。
 
-它仍属于 §2.2 那一个 `include` / `exclude` 词表，**不引入第二个坐标轴**。
-非作者想看就 `include: ["bot_interaction"]`。
+它仍属于 §2.2 那一个 `exclude` 词表，**不引入第二个坐标轴**。
+非作者默认静音这一轮来回；这是**角色默认**，不是他要自己去打开的开关。
 
 > **「谁应答」和「@谁召唤」是两个字符串，混为一谈会让整个能力静默死掉。**
 > 你写 `@codex review`，而回答你的账号叫 `chatgpt-codex-connector[bot]`。所以一条已知 bot
@@ -160,32 +165,28 @@ bot_interaction = { @ 了已知 bot 账号的评论 }  ∪  { 已知 bot 发的�
 > - **召唤**（命令式 `@handle review`）→ 才开回合。"回头问下 @codex" 提到了但没许诺，
 >   当成回合会在 30 分钟后凭空报一条"没回来"
 
-**回合什么时候开**：注册那一刻就可以开。注册时如果发现**调用方自己**刚发出的召唤评论，且
-coverage verifier 确认**该 bot 已接单（EYES）且尚未回答**，就同步把回合开出来——否则刚发完
-`@codex review` 就结束本轮的猫拿不到任何凭据，得干等一个轮询周期。verifier 说没覆盖、
-或 verifier 不可用 ⇒ **不开回合**：凭空的回合会在半小时后报一条没人发起过的超时。
+**回合什么时候开**：只有一个来源——**归一化流里、游标之后、由 tracking owner 本人
+发出的召唤评论**。不看 MCP 调用、不看 registration verifier、不看 `EYES` reaction。
 
-**回合记住它属于谁、属于哪个 diff**（`grantInvocationId` + `headSha`），而这两个字段回答的是
-**两个不同的问题，各归各处**：
+- `EYES` 是**瞬态 reaction**，两次轮询之间可能整个错过；**召唤评论本身才是稳定事实**。
+  它可以作为展示信息，但**不得**成为正确性门槛
+- **别人的召唤不得给我建回合**。否则我会收到一条自己从没发起过的"这轮没回来"
+- 注册那一刻**不做同步探测**：没有任何一条 pending 标记来自 MCP 侧。
+  刚发完召唤就结束本轮的猫，等下一个轮询周期即可——**少等一个周期，
+  远好过引入一条只有 MCP 路径才走得到、因而永远测不到生产行为的分支**
 
-- **归属**（F177 出口）：只认 `grantInvocationId == 本次 invocation` 的回合。
-  `shared-rules.md` 2b 写死了"thread 里存在任意 tracker 不算出口"，而只查"这个 PR 上有没有
-  pending 召唤"恰好退化成它禁止的那种：别人的 invocation、别人发的召唤都会变成一个自己从没
-  挣来的 clean stop。**出口不比 HEAD**——它手上只有被 §2.5b 刻意保留的旧 frontier，拿它去比
-  会否掉一个刚刚挣到的 clean stop。
-- **对不对得上当前 diff**（F168 / `CloudReviewObservation`）：这个问题只能在**知道活 HEAD**
-  的地方回答，所以它在那里回答，且 `headSha` 缺失时 **fail closed**——"不知道这轮是关于哪个
-  diff 的"绝不能读成"就是关于当前这个"。
+**回合只记四个字段**：`{ 触发评论 id, 已知 bot 身份, 时间, headSha }`。
 
-**每条回合都必须绑 HEAD，不管它是谁开的。** 注册路径写了 `headSha`、轮询路径没写，而消费者又
-把"缺失"当"当前"——这不是防护，这是旧 bug 躲在一个新字段后面：主路径（轮询）上跨 commit 误报
-原封不动，而测试只覆盖了注册那条。**可选字段 + 宽容默认 = 静默回归。**
+没有 `grantInvocationId`——归属已经由"**是不是 owner 自己发的**"这一个判断回答了，
+再叠一个 invocation 维度只会制造两个真相源。
 
-**重复注册要把回合并进来**（§2.5b 只保留旧 frontier）。回合不是 frontier，它是本次注册刚**去查
-过**的事实——所以并集在两个方向上都是错的：查明"我的回合已被回答"却保留旧条目，会留下一个能
-放行球、又会稍后凭空报超时的死回合；而查询根本没跑通就丢掉旧条目，会因为 GitHub 一时不可达而
-弄丢一个活回合。**"查过了，没有回合" 与 "没查到" 必须是两种状态**（`botTurnProbe`），
-不能一起压成 `undefined`；只有真跑过的探测才可以覆盖回合，否则旧状态原样保留。
+**`headSha` 仍然必填，不管回合是谁开的。** 曾经注册路径写了、轮询路径没写，
+而消费者把"缺失"读成"当前"——**可选字段 + 宽容默认 = 静默回归**。
+
+**F168 只读，不写。** 它单向读取同一份归一化事实来判断云端 review 是否就绪。
+它失败、超时或不可用**不得**影响 tracking 的任何投递，也**不得**修改任何回合状态。
+**F177 使用它自己的 coordination 状态**，不从 tracking 取出口凭据——
+"thread 里存在任意 tracker"本来就不是出口，从这里借凭据只会把它变回来。
 
 > **自过滤只挡投递，不挡观察。** 作者自己的触发评论**仍然进归一化流**——它要开启回合，
 > A28 才有东西可超时；身份过滤那一行只决定"不叫醒写它的人"。所以对作者而言
@@ -205,7 +206,8 @@ A26 已经写明，静音一条真信号比多一条噪音严重得多。
 - 注册那一刻冻结基线：**注册之前的历史一律不通知**
 - 通知一次后**自动续订**，继续监听下一条。调用方永远不需要重新注册
 - **没有 `expiresAt`，永不过期**
-- 结束条件只有三个：PR merged / PR 或 issue closed / 显式 `unregister_tracking`
+- 结束条件：**PR** merged 或 closed → 通知并终止（PR 是单向的）；
+  **issue** 没有自然终点（closed 可被 reopen），只有显式 `unregister_tracking` 才结束
 - 每次通知投递到**注册时所在的那个 thread**
 
 ### 2.5b 重复注册不得前进游标
@@ -261,7 +263,10 @@ baseline: snapshot.baseline,        // 当前最大值
       Event { type, id, source, author, self, botTurn? }
   → 订阅过滤   e.type ∈ subscription
   → 已见过滤   e.id > frontier[e.source]     ← 每个来源一条游标，天然互不吞噬
-  → 身份过滤   !e.self                       ← 只在这一处，大小写不敏感
+  → 受众过滤   audience(role, prAuthor, e)      ← 只在这一处
+                 role = 注册者是不是 PR 作者（§2.4b）
+                 挡掉 e.self（大小写不敏感）
+                 非作者：评论面只放行 prAuthor 写的
   → 投递到注册 thread
   → 推进 frontier[e.source] + 回合状态         ← 与投递成对，不可能只做一半
 ```
@@ -275,7 +280,8 @@ baseline: snapshot.baseline,        // 当前最大值
 存在，判定发生在**归一化**那一步（mention 解析 + 已知 bot 身份清单），随后由**订阅过滤**
 这一行统一处理。
 
-- 身份过滤那一行**只认 self，永远不认 bot**——bot 不是"噪音身份"，它是正常外部回应者
+- 受众过滤那一行**永远不认 bot**——bot 不是"噪音身份"，它是正常外部回应者。
+  它只认两件事：**这是不是我自己写的**，以及**按我的角色，这个作者的话我要不要听**
 - 一条属于 bot 回合的评论是**换了名字**（`type` 变成 `bot_interaction`），不是多出一条事件。
   `source` 仍是它原来的面，所以 frontier 照旧各走各的游标，也不可能一条评论通知两次
 - 新增 `bot_interaction` = 归一化表加一行 + 词表加一个名字，**不是 matcher 加分支**
@@ -285,7 +291,12 @@ baseline: snapshot.baseline,        // 当前最大值
 也就不会像旧 classifier 那样反复播报同一轮。除此之外链子里仍然没有时间、没有 `headSha` 门、
 没有正文启发式。
 
-一旦有人在身份过滤里写 `if (isBot)`，就是回到了 §3.1 那个错误坐标系。
+一旦有人在受众过滤里写 `if (isBot)`，就是回到了 §3.1 那个错误坐标系。
+
+**受众过滤是一个函数，不是两处判断。** 曾经的实现把角色差异只表达成
+`bot_interaction: 'author'` 一个订阅默认，普通评论仍是"所有非自己"——
+于是 maintainer 照样被第三方刷屏。角色一旦只影响订阅表就必然漏掉这种情况；
+它必须进入过滤函数本身。
 
 ---
 
@@ -317,6 +328,7 @@ baseline: snapshot.baseline,        // 当前最大值
 | A17 | 放着不管一周 | 仍在监听 | 到期静默断线 |
 | A18 | PR merged | 通知并结束 | 永久空转 |
 | A19 | `exclude: ["ci_terminal"]` | CI 不通知，其余照常 | 关一个把别的也关了 |
+| A33 | 非作者注册：**别的 maintainer** 提交 formal review | 通知 | 静音了同行的决策 |
 | A20 | `exclude: ["不存在的名字"]` | 报错 | 静默忽略 |
 | A21 | 通知落在注册它的 thread | 是 | 投错 thread |
 | A22 | 已在追踪的 subject 上再次注册 | 旧游标保留，间隙期的回应仍通知 | 基线跳到"现在"，间隙期静默丢失 |
@@ -324,12 +336,11 @@ baseline: snapshot.baseline,        // 当前最大值
 | A24 | 非作者注册：bot 的 review / 行内评论 | 不通知 | maintainer 被别人的 bot 回合刷屏 |
 | A25 | 非作者注册：作者 @ 已知 bot 的触发评论 | 不通知 | 同上 |
 | A26 | 非作者注册：作者写的真回应 | 通知 | **静音了真信号——比刷屏严重得多** |
-| A27 | 非作者 `include: ["bot_interaction"]` | bot 回合恢复通知 | 覆盖不生效 |
 | A28 | 触发 bot 后超时无回应 | 通知"这轮没回来"，且只通知一次 | 静默——点了 review 石沉大海 |
 | A29 | 触发 bot 后正常回应 | 通知结果，回合闭合 | 回合永远挂着，之后误报超时 |
 | A30 | **非作者**注册：第三方（既非作者也非自己）发评论 | **不通知** | maintainer 被无关的人刷屏，他等的是作者回应 |
 | A31 | issue **reopened** | 通知，且**继续**追踪 | 重开后彻底失联 |
-| A32 | issue **closed** | 通知（带 `state_reason`）并终止 | 只终止不通知，或终止后仍空转 |
+| A32 | issue **closed** | 通知（带 `state_reason`）并**继续追踪** | 静默终止 → 之后的 reopen 永远看不到 |
 
 **A3 / A6 / A17 是历史事故的直接复现，必须有独立测试。**
 **A22 是"静默丢真信号"，优先级高于任何降噪诉求。**
@@ -344,10 +355,11 @@ baseline: snapshot.baseline,        // 当前最大值
 | 归一化（回合状态：开 / 闭 / 超时未闭） | A28 A29 — 回合状态随 frontier 同批推进，报了必然同时退休 |
 | 订阅过滤 | A1 A19 A20 A23 A24 A25 A27 |
 | 已见过滤（per-source frontier） | A12 A14 A16 |
-| 身份过滤（唯一一处，只挡投递） | A6 A7 A8 A9 A10 A11 A26 — 自己写的仍进流：它要开回合、要推 frontier |
+| 受众过滤（唯一一处，只挡投递） | A6 A7 A8 A9 A10 A11 A26 **A30** — 自己写的仍进流：它要开回合、要推 frontier。角色决定"这个作者的话我要不要听" |
 | 投递到注册 thread | A21 |
 | 推进 frontier | A13 A14 |
-| 终态短路 | A18 |
+| 终态短路 | A18 — **仅 PR**。issue 没有终态（closed 可 reopen），只有显式 unregister |
+| 状态变化归一化（issue 与 PR 同一形状） | **A31 A32** — issue 的 open/closed 与 PR 的 CI/冲突/base 一样，是**状态比较**型基线，不是游标 |
 | 注册时的基线安装（不得前进） | A22 |
 | **链子里没有的东西** | A15（无 `headSha` 门）· A17（追踪本身无期限）· A10（无正文判断）· A6（bot 不是噪音身份） |
 
@@ -390,7 +402,14 @@ baseline: snapshot.baseline,        // 当前最大值
 |---|---|
 | 投递可靠性、崩溃恢复、pendingWake 重试、single-flight admission、CAS 竞争载体 | #1356 / #1398 |
 | `preview → register` 两步注册 | 已废弃，注册不需要前置检查 |
-| 受众解析 / exact audience | 已从产品面移除 |
+| 调用方可传的受众参数 / exact audience | 已从产品面移除 |
+| MCP 侧的 bot-turn 工具、回合探测、`preview` | 不存在。回合只从 GitHub 事件推导（§2.4b） |
+| tracking 读取 registration verifier / `grantInvocationId` / F177 状态 | 已解除。F177 用自己的 coordination 状态 |
+
+> **§3.2 的"受众过滤"不是这里被移除的那个东西。** 被移除的是**调用方能传的受众参数**；
+> 留下的是**服务端从"注册者是不是 PR 作者"推导出来的角色**——它不出现在任何入参里，
+> 调用方也无法覆盖。两者同名不同物：一个是让调用方去猜自己需要什么（#1392 要消灭的病），
+> 一个是服务端替他答对。
 | 猫可选的 typed predicate | 服务端内部，不对外 |
 | 自动 update-branch（写操作） | 另开 issue，见 §7 |
 
