@@ -1,6 +1,6 @@
 ---
 name: custody-recognition
-tips_exempt: "F310 Phase B 尚在 pre-merge review；该 skill 只承载猫侧识别约定，待 runtime 合入并完成 post-restart dogfood 后再从稳定用户入口贡献 capability tip。"
+tips_exempt: "F310 Phase B soft-entry 仍在 pre-merge review；待本次自然语言触发合入并完成 source-linked Alpha dogfood 后，再从已验证的稳定用户入口贡献 capability tip。"
 description: "Use when a source may entrust work. Not for casual mentions, terminal offers, generic planning, or Schedule/Needs Me. Output: abstain, admit, offer, or retry."
 triggers:
   - "帮我接住"
@@ -45,6 +45,13 @@ Call cat_cafe_admit_entrusted_work immediately with:
 - the intended outcome;
 - a closure condition and expected signal;
 - only source-backed time and Artifact refs.
+
+When the source states an unambiguous deadline or review time, resolve it against the authenticated
+invocation date/time and pass it in the top-level canonical `time.businessDeadline` or `time.reviewBy`
+field with `sourceRef: message:<sourceMessageId>`. `admission.timeHints` may preserve the verbatim
+wording, but it never becomes Task time and never makes the item appear in Schedule. If the time cannot
+be resolved without changing the commitment, return `needs_clarification` instead of silently dropping
+the time.
 
 Do not show an offer after explicit entrustment. Return the compact typed receipt or the exact
 needs_clarification reason.

@@ -4,7 +4,7 @@ related_features: [F179, F180]
 topics: [desktop, electron, auto-update, inno-setup, dmg, github-releases, installer, opensource-ops]
 doc_kind: spec
 created: 2026-07-07
-updated: 2026-08-08
+updated: 2026-09-03
 description: "Desktop in-app update system: fresh GitHub release discovery, resumable verified download, Windows installer upgrade, and guided macOS DMG replacement."
 description_source: model
 description_author: codex-sol
@@ -16,13 +16,27 @@ description_updated_at: 2026-07-26T03:59:46Z
 
 # F273: Desktop In-App Update — 应用内检查更新 + 原地升级（无签名约束版）
 
-> **Status**: in-progress（Phase A–D 已通过 clowder-ai #1105 合入；Clowder AI intake #3222 已合入 `8424af315`；clowder-ai #1227 的 hardened renderer/update recovery 已合入并完成 Windows RC `.14` 主路径现场验收；**Phase E 首次 upstream stable release 的完整 field validation 仍待完成**） | **Source author**: mindfn | **Intake owner**: @codex-sol | **Priority**: P1
+> **Status**: in-progress（Phase A–D 已通过 clowder-ai #1105 合入；Clowder AI intake #3222 已合入 `8424af315`；clowder-ai #1227 的 hardened renderer/update recovery 已合入并完成 Windows RC `.14` 主路径现场验收；**Phase E 已于 2026-09-03 re-entered，`v0.12.0 → v0.13.0` stable-to-stable 双平台现场验收 ready-to-run**） | **Source author**: mindfn | **Phase E closure owner**: @codex-sol | **Priority**: P1
 >
 > **Source**: clowder-ai#1105（Phase A–D 实现 PR，已合入 `d908aa265`）→ clowder-ai#1102（issue）→ clowder-ai#1219（docs sync，已合入 `7207936a38`）→ clowder-ai#1227（renderer/update recovery，已合入 `c643961b8`）
 >
 > **operator signoff**: 2026-07-24，operator授权分配 F273 + intake 回家
 >
 > **operator sequencing decision (2026-07-26)**: 既有 Windows 安装验证作为合入前证据；真实旧版 → 首个 upstream stable release 升级验证移至合入后。若现场验证发现缺陷，以新的 follow-up issue / PR 修复，不改写已审 exact HEAD。
+
+> **Phase E active custody (2026-09-03)**: @codex-sol 持有既有 closure standing，负责组织现场证据、逐项回填 AC，并走 F273 正常关闭路径。`mindfn` 仍是 upstream implementation owner；本次 re-entry 不向外部作者或其他猫转移新的实现球权。
+
+## Phase E re-entry — stable-to-stable field validation（2026-09-03）
+
+**Release condition（已满足）**：公开 stable `v0.12.0` 于 2026-07-26 发布，4/4 桌面资产均为 uploaded 且带 SHA-256；当前 latest stable `v0.13.0` 于 2026-09-02 发布，tag 落到 `01c58feb40fab2a75016a9a8d290c87f6776d9a0`，同样具备 Windows installer / portable zip / macOS arm64+x64 DMG 四件资产与 digest。因此 Phase E 不再处于 release-wait，当前可执行旅程固定为 `v0.12.0 → v0.13.0`。
+
+**Concrete next action**：
+
+1. **Windows installer host**：安装并启动 `v0.12.0`，在 userData 写入可辨识 sentinel；从应用内发现 `v0.13.0`，完成下载、进度与 digest/size 校验、UAC 覆盖安装、普通用户权限重启；记录 before/after 版本、sentinel 保留、journal/log 与安装包路径。随后执行一次 UAC 取消→不重下重试，以及一次安装中断→app 外固定路径恢复。
+2. **macOS matching-arch host**：安装并启动 `v0.12.0`，写入同类 sentinel；从应用内发现并下载 `v0.13.0`，确认 digest/size、打开 DMG、退出旧版、拖拽替换、按未签名应用既有方式重新打开；记录 before/after 版本、sentinel 保留、journal 成功清理与用户可见指引。
+3. **Evidence packet**：每个平台记录 OS/arch、安装类型、开始/结束时间、旧/新版本、release asset name+digest、关键截图、`desktop.log`/installer log/journal 结果和 userData sentinel；任一失败即在 `clowder-ai` 新开 follow-up issue/PR，Phase E 保持 open，不移动或改写既有 release tag。
+
+**Invalidator**：若 `v0.13.0` 被撤回、改为 prerelease，或任一平台必需资产不再完整，则本旅程停止；重新选择“已安装的最近完整 stable → 更新的完整 stable”并先更新本节，不拿残缺 release 做验收。
 
 ## 2026-08-08 intake evidence — clowder-ai #1227
 
@@ -224,7 +238,7 @@ README / README.zh-CN 加 **Upgrading** 章节：数据存放位置 + 覆盖升�
 - **Phase B — Win 全链路**：downloader（进度/四元组校验/断点续传一致性）+ pendingUpdate journal 状态机 + iss 四处改造 + spawn→quit 时序 + portable/installType 开发项（含 config 脚本参数化修硬编码）。**实现注意（Codex）**：app 外恢复路径是硬要求——最坏情形下用户必须能在不打开 app 的前提下从 `updates/` 目录重跑 installer 修复（§3.2）
 - **Phase C — mac 半自动链路**：arch 选择 + 下载校验 + open dmg + 指引 dialog + quit + journal 成功/失败态
 - **Phase D — UX 与文档**：tray「检查更新」菜单 + skip version + 进度展示 + README 双语 Upgrading + release notes 模板 + 撤版运维说明
-- **Phase E — 验收（进行中）**：exact-head installer / portable / DMG 已完成构建与包体校验，macOS arm64 isolated old-install 路径已通过；Windows 既有安装验证由 operator 接受为合入前证据。首个 upstream stable release 发布后完成真实旧版升级、数据保留与 incident ownership field validation（沿 F179 Phase B 模式）。
+- **Phase E — 验收（进行中，owner: @codex-sol）**：exact-head installer / portable / DMG 已完成构建与包体校验，macOS arm64 isolated old-install 路径已通过；Windows 既有安装验证由 operator 接受为合入前证据。首个 updater stable `v0.12.0` 与后继完整 stable `v0.13.0` 均已发布，release condition 已满足；下一动作是执行上节固定的 Windows/macOS `v0.12.0 → v0.13.0` 真实升级、数据保留、恢复与 incident ownership field validation（沿 F179 Phase B 模式）。
 
 ## Acceptance Criteria
 
@@ -307,4 +321,7 @@ README / README.zh-CN 加 **Upgrading** 章节：数据存放位置 + 覆盖升�
 - 2026-07-26: clowder-ai PR #1105 合入（Phase A–D），merge commit `d908aa265`；Phase E 首次 stable release field validation 移至合入后（operator sequencing override，不改变安全/完整性/恢复/portable/持久化/平台契约）
 - 2026-07-26: clowder-ai PR #1219 docs sync 合入（`7207936a38`），status/AC-8/10/11/Timeline 同步更新；家里 intake 同步更新状态
 - 2026-07-26: Clowder AI intake PR #3222 合入（`8424af315`）；代码与家里品牌/路径/feature truth 已吸收，Phase E upstream stable release field validation 仍待完成
+- 2026-07-26: 首个 updater stable `v0.12.0` 发布（target `7207936a38`）；Windows installer/portable 与 macOS arm64/x64 四件资产完整并带 SHA-256
 - 2026-08-08: clowder-ai PR #1227 合入（`c643961b8`）；Windows RC `.14`（source `69e02c55e`）的检测、下载、安装主路径由 operator/吴浪现场确认。Clowder AI intake issue #3462 / PR #3463 合入（`cca11e79a`），吸收 renderer/update recovery；完整 Phase E stable validation 不因单一路径成功而提前关闭。
+- 2026-09-02: 后继 stable `v0.13.0` 发布（target `01c58feb40`），4/4 桌面资产完整并带 SHA-256；`v0.12.0 → v0.13.0` 成为可执行的真实应用内升级旅程
+- 2026-09-03: Phase E re-entered；closure owner 绑定 @codex-sol，Windows/macOS 现场步骤、证据包与 invalidator 已明确，不再以“等待首个 stable release”为 next action

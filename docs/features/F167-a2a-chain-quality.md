@@ -1,11 +1,11 @@
 ---
 feature_ids: [F167]
-related_features: [F064, F027, F055, F122, F246, F280]
+related_features: [F064, F027, F055, F122, F168, F246, F280]
 topics: [a2a, collaboration, harness-engineering, agent-readiness]
 doc_kind: spec
 created: 2026-04-17
-updated: 2026-08-26
-tips_exempt: renewed for the safe_wait carrier-liveness correction; the typed MCP action schema remains the only operable surface and no user action or capability-discovery path changed
+updated: 2026-09-02
+tips_exempt: local review reuses the existing post_message and cross_post_message discovery surface; this phase removes custody controls and tools rather than adding a user capability
 user_journey_exempt: protocol behavior has no direct UI surface; end-to-end custody is dogfooded through the real MCP/task path
 mcp_admission_status: accepted
 mcp_admission_ref: "file:docs/features/F167-a2a-chain-quality.md"
@@ -32,7 +32,7 @@ mcp_admission_claims:
 > **Status**: in-progress | **Owner**: Ragdoll | **Priority**: P0
 
 Architecture cell: `transport` + `harness-eval` + `ball-custody` + `dispatch`
-Map delta: updated — Phase R records structured cross-thread coordination in `transport`/`harness-eval`; Phase S gives action successor leases to `ball-custody` while `dispatch` owns carrier admission projection and queue generation preflight; Phase T binds explicit A2A and exact hold wake provenance to those existing custody owners without creating another ledger.
+Map delta: updated — Phase R records structured cross-thread coordination in `transport`/`harness-eval`; Phase S keeps implement and approved external-review successors in `ball-custody`, while Phase S.2 returns local cat review to ordinary durable `dispatch` plus typed merge evidence; Phase T binds explicit A2A and exact hold wake provenance to those existing owners without creating another ledger.
 
 ## Why
 

@@ -24,6 +24,7 @@ const approveBodySchema = z
     // roots (resolvePersistentProjectPath) — supplied-but-invalid → 400 (fail loud, never silent default).
     projectPath: z.string().min(1).max(500).optional(),
     reportingMode: z.enum(['none', 'final-only', 'state-transitions', 'blocking-ack']).optional(),
+    declaredWorkMode: z.enum(['subtask', 'parallel', 'investigation', 'standalone']).optional(),
   })
   .strict();
 
@@ -125,8 +126,14 @@ export const proposalRoutes: FastifyPluginAsync<ProposalRoutesOptions> = async (
       reply.status(resolution.status);
       return { error: resolution.error };
     }
-    const { finalTitle, finalParentThreadId, finalPreferredCats, finalProjectPath, finalizeOverrides } =
-      resolution.resolved;
+    const {
+      finalTitle,
+      finalParentThreadId,
+      finalPreferredCats,
+      finalProjectPath,
+      finalDeclaredWorkMode,
+      finalizeOverrides,
+    } = resolution.resolved;
 
     // Atomic claim — guards against concurrent approve/reject leaving an orphan thread.
     const claimed = await proposalStore.claimForApproval({ proposalId: proposal.proposalId, approvedBy: userId });
@@ -142,6 +149,9 @@ export const proposalRoutes: FastifyPluginAsync<ProposalRoutesOptions> = async (
       thread = await threadStore.create(userId, finalTitle, finalProjectPath, finalParentThreadId, {
         createdFromProposalId: proposal.proposalId,
         sourceThreadId: proposal.sourceThreadId,
+        sourceInvocationId: proposal.sourceInvocationId,
+        ...(proposal.sourceMessageId ? { sourceMessageId: proposal.sourceMessageId } : {}),
+        ...(finalDeclaredWorkMode ? { declaredWorkMode: finalDeclaredWorkMode } : {}),
         approvedBy: userId,
         approvedAt: Date.now(),
       });

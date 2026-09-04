@@ -3,7 +3,7 @@ import { z } from 'zod';
 const nonEmpty = z.string().trim().min(1);
 const featureId = z.string().regex(/^F\d{3}$/);
 const sha256 = z.string().regex(/^[a-f0-9]{64}$/, 'must be a lowercase SHA-256');
-const exposureState = z.enum(['exposed', 'not_exposed']);
+const fullGitRevision = z.string().regex(/^[a-f0-9]{40}$/, 'must be a full Git revision');
 
 export const DecisionProofMissingSchema = z.enum([
   'evidence_role',
@@ -82,6 +82,26 @@ export const MeasurementDecisionProofRecordSchema = z
     schemaVersion: z.literal(1),
     proofRef: nonEmpty,
     ownerUserId: nonEmpty,
+    /**
+     * Canonical source-owner manifests that the F267 issuer consumed. Historical records predate
+     * this additive field. The capability-evolution issuer also pins manifestRevision; its resolver
+     * requires that identity and replays the Git root-of-trust checks before authorizing `verified`.
+     */
+    sourceAttestations: z
+      .array(
+        z
+          .object({
+            ownerFeatureId: featureId,
+            ownerStateRef: nonEmpty,
+            artifactRef: nonEmpty,
+            sha256,
+            /** Exact commit whose regular Git blob contains artifactRef. */
+            manifestRevision: fullGitRevision.optional(),
+          })
+          .strict(),
+      )
+      .min(1)
+      .optional(),
     candidate: MeasurementDecisionProofCandidateSchema,
   })
   .strict();

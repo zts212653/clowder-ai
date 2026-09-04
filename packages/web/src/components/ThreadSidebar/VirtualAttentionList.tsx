@@ -1,0 +1,145 @@
+import {
+  forwardRef,
+  type ReactNode,
+  type RefObject,
+  useCallback,
+  useImperativeHandle,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from 'react';
+import type { AttentionListRow } from './attention-clusters';
+import type { VirtualThreadListHandle } from './VirtualThreadList';
+
+const ROW_HEIGHT_PX = 80;
+const OVERSCAN_ROWS = 5;
+const FALLBACK_VIEWPORT_HEIGHT_PX = 640;
+
+interface VirtualAttentionListProps {
+  rows: AttentionListRow[];
+  scrollContainerRef: RefObject<HTMLDivElement>;
+  renderItem: (row: AttentionListRow) => ReactNode;
+}
+
+function offsetTopWithin(element: HTMLElement, container: HTMLElement): number {
+  let top = 0;
+  let current: HTMLElement | null = element;
+  while (current && current !== container) {
+    top += current.offsetTop;
+    current = current.offsetParent as HTMLElement | null;
+  }
+  return top;
+}
+
+function visibleTopInset(container: HTMLElement): number {
+  const containerTop = container.getBoundingClientRect().top;
+  const occluder = container.querySelector<HTMLElement>('[data-scroll-occluder="true"]');
+  if (!occluder) return 0;
+  const rect = occluder.getBoundingClientRect();
+  return rect.top <= containerTop + 2 && rect.bottom > containerTop ? rect.bottom - containerTop : 0;
+}
+
+function viewportHeight(container: HTMLElement): number {
+  return container.clientHeight || FALLBACK_VIEWPORT_HEIGHT_PX;
+}
+
+export const VirtualAttentionList = forwardRef<VirtualThreadListHandle, VirtualAttentionListProps>(
+  function VirtualAttentionList({ rows, scrollContainerRef, renderItem }, ref) {
+    const listRef = useRef<HTMLDivElement>(null);
+    const [range, setRange] = useState(() => ({
+      start: 0,
+      end: Math.min(rows.length, Math.ceil(FALLBACK_VIEWPORT_HEIGHT_PX / ROW_HEIGHT_PX) + OVERSCAN_ROWS),
+    }));
+
+    const updateRange = useCallback(() => {
+      const container = scrollContainerRef.current;
+      const list = listRef.current;
+      if (!container || !list) return;
+      const listTop = offsetTopWithin(list, container);
+      const relativeScrollTop = Math.max(0, container.scrollTop - listTop);
+      const viewportHeight = container.clientHeight || FALLBACK_VIEWPORT_HEIGHT_PX;
+      const start = Math.max(0, Math.floor(relativeScrollTop / ROW_HEIGHT_PX) - OVERSCAN_ROWS);
+      const end = Math.min(
+        rows.length,
+        Math.ceil((relativeScrollTop + viewportHeight) / ROW_HEIGHT_PX) + OVERSCAN_ROWS,
+      );
+      setRange((current) => (current.start === start && current.end === end ? current : { start, end }));
+    }, [rows.length, scrollContainerRef]);
+
+    useLayoutEffect(() => {
+      const container = scrollContainerRef.current;
+      if (!container) return;
+      updateRange();
+      container.addEventListener('scroll', updateRange, { passive: true });
+      const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(updateRange);
+      observer?.observe(container);
+      window.addEventListener('resize', updateRange);
+      return () => {
+        container.removeEventListener('scroll', updateRange);
+        observer?.disconnect();
+        window.removeEventListener('resize', updateRange);
+      };
+    }, [scrollContainerRef, updateRange]);
+
+    useImperativeHandle(
+      ref,
+      () => ({
+        scrollToIndex(index: number) {
+          const container = scrollContainerRef.current;
+          const list = listRef.current;
+          if (!container || !list || index < 0 || index >= rows.length) return;
+          const height = viewportHeight(container);
+          container.scrollTop = Math.max(
+            0,
+            offsetTopWithin(list, container) + index * ROW_HEIGHT_PX - height / 2 + ROW_HEIGHT_PX / 2,
+          );
+          updateRange();
+        },
+        ensureIndexVisible(index: number) {
+          const container = scrollContainerRef.current;
+          const list = listRef.current;
+          if (!container || !list || index < 0 || index >= rows.length) return;
+          const height = viewportHeight(container);
+          const rowTop = offsetTopWithin(list, container) + index * ROW_HEIGHT_PX;
+          const rowBottom = rowTop + ROW_HEIGHT_PX;
+          const topInset = visibleTopInset(container);
+          const visibleTop = container.scrollTop + topInset;
+          const visibleBottom = container.scrollTop + height;
+
+          if (rowTop < visibleTop) {
+            container.scrollTop = Math.max(0, rowTop - topInset);
+            updateRange();
+            return;
+          }
+          if (rowBottom > visibleBottom) container.scrollTop = rowBottom - height;
+          updateRange();
+        },
+      }),
+      [rows.length, scrollContainerRef, updateRange],
+    );
+
+    const visibleRows = rows.slice(range.start, range.end);
+    return (
+      <div
+        ref={listRef}
+        className="relative"
+        style={{ height: rows.length * ROW_HEIGHT_PX }}
+        data-testid="virtual-attention-list"
+        data-rendered-count={visibleRows.length}
+      >
+        {visibleRows.map((row, offset) => {
+          const index = range.start + offset;
+          return (
+            <div
+              key={row.key}
+              className="absolute inset-x-0"
+              style={{ top: index * ROW_HEIGHT_PX, height: ROW_HEIGHT_PX }}
+            >
+              {renderItem(row)}
+            </div>
+          );
+        })}
+      </div>
+    );
+  },
+);

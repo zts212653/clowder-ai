@@ -17,6 +17,7 @@ describe('F287 owner-authenticated memory cue callbacks', () => {
   let now;
   let readCalls;
   let richBlockKinds;
+  let ownedSeedApplications;
 
   beforeEach(async () => {
     const { applyMigrations } = await import('../dist/domains/memory/schema.js');
@@ -27,6 +28,7 @@ describe('F287 owner-authenticated memory cue callbacks', () => {
     now = 1_000;
     readCalls = [];
     richBlockKinds = new Set();
+    ownedSeedApplications = new Set();
     db = new Database(':memory:');
     applyMigrations(db);
     episodeStore = new MemoryCueEpisodeStore(db, {
@@ -41,10 +43,11 @@ describe('F287 owner-authenticated memory cue callbacks', () => {
       const ownerUserId = header('x-test-owner', OWNER_SCOPE.ownerUserId);
       const threadId = header('x-test-thread', OWNER_SCOPE.threadId);
       const invocationId = header('x-test-invocation', OWNER_SCOPE.invocationId);
+      const catId = header('x-test-cat', 'codex-sol');
       request.callbackAuth = {
         invocationId,
         callbackToken: 'callback-token',
-        catId: 'codex-sol',
+        catId,
         threadId,
         userId: ownerUserId,
         clientMessageIds: new Set(),
@@ -74,6 +77,21 @@ describe('F287 owner-authenticated memory cue callbacks', () => {
               },
             };
           }
+          if (input.anchor.startsWith('owned-seed:')) {
+            const [, , seedId] = input.anchor.split(':');
+            return {
+              status: 'ok',
+              payload: {
+                seedId,
+                claim: 'private seed body',
+                sourceKind: 'originated',
+                sourceRunId: 'dreamrun-source',
+                sourceRevision: input.expectedRevision,
+                authority: 'producing_cat_private_hypothesis',
+                allowedUse: 'present_loop_private_intent_or_silence',
+              },
+            };
+          }
           const invalidationReason = {
             'person:corrected': 'source_corrected',
             'person:forgotten': 'source_forgotten',
@@ -92,6 +110,11 @@ describe('F287 owner-authenticated memory cue callbacks', () => {
         hasRichBlock({ kind }) {
           return richBlockKinds.has(kind);
         },
+        hasOwnedSeedIntent(input) {
+          return ownedSeedApplications.has(
+            [input.ownerUserId, input.catId, input.invocationId, input.seedId].join('\0'),
+          );
+        },
       },
     });
     await app.ready();
@@ -106,13 +129,14 @@ describe('F287 owner-authenticated memory cue callbacks', () => {
     return {
       cueId: 'cue-1',
       opportunityId: 'opportunity-1',
-      catalogVersion: 3,
+      catalogVersion: 5,
       resolverFamily: 'person_entity',
       resolverVersion: 1,
       family: 'person_memory',
       anchor: 'person:alden',
       revision: 'revision-1',
       scope: OWNER_SCOPE,
+      consumerCatId: 'codex-sol',
       expiresAt: 5_000,
       ...overrides,
     };
@@ -125,6 +149,7 @@ describe('F287 owner-authenticated memory cue callbacks', () => {
       cueId: input.cueId,
       opportunityId: input.opportunityId,
       scope: input.scope,
+      ...(input.consumerCatId ? { consumerCatId: input.consumerCatId } : {}),
       resolverFamily: input.resolverFamily,
       sourceAnchor: input.anchor,
       sourceRevision: input.revision,
@@ -140,12 +165,19 @@ describe('F287 owner-authenticated memory cue callbacks', () => {
     const input = coordinate({ anchor: 'person:secret-anchor' });
     present(input);
     const handle = handles.issue(input);
+    const { consumerCatId: _consumerCatId, ...unboundInput } = input;
+    const unboundHandle = handles.issue(unboundInput);
     assert.equal(handle.includes('secret-anchor'), false);
+    assert.equal(
+      handle.length,
+      unboundHandle.length,
+      'consumer binding belongs to the presented receipt, not duplicated prompt-carrier bytes',
+    );
     assert.ok(
       handle.length < 200,
       `content-free presented lookup should keep the opaque handle short: ${handle.length}`,
     );
-    assert.deepEqual(handles.verify(handle, OWNER_SCOPE, now), { ok: true, coordinate: input });
+    assert.deepEqual(handles.verify(handle, OWNER_SCOPE, now, 'codex-sol'), { ok: true, coordinate: input });
 
     const { MemoryCueDrillHandleService } = await import('../dist/domains/memory/cue/MemoryCueDrillHandleService.js');
     const restarted = new MemoryCueDrillHandleService(Buffer.alloc(32, 8), episodeStore);
@@ -153,7 +185,7 @@ describe('F287 owner-authenticated memory cue callbacks', () => {
       ok: false,
       reason: 'invalid_handle',
     });
-    assert.deepEqual(handles.verify(handle, { ...OWNER_SCOPE, threadId: 'thread-other' }, now), {
+    assert.deepEqual(handles.verify(handle, { ...OWNER_SCOPE, threadId: 'thread-other' }, now, 'codex-sol'), {
       ok: false,
       reason: 'scope_mismatch',
     });
@@ -179,6 +211,7 @@ describe('F287 owner-authenticated memory cue callbacks', () => {
         anchor: 'person:alden',
         expectedRevision: 'revision-1',
         scope: OWNER_SCOPE,
+        consumerCatId: 'codex-sol',
       },
     ]);
     const events = episodeStore.listByCue(OWNER_SCOPE.ownerUserId, input.cueId);
@@ -192,6 +225,31 @@ describe('F287 owner-authenticated memory cue callbacks', () => {
         { axis: 'consumption', consumptionOutcome: 'presented', invalidationReason: null },
         { axis: 'consumption', consumptionOutcome: 'drilled', invalidationReason: null },
       ],
+    );
+    assert.equal(JSON.stringify(events).includes('canonical owner-visible source'), false);
+  });
+
+  it('does not persist canonical Decision content returned by an evidence drill', async () => {
+    const input = coordinate({
+      cueId: 'cue-decision-content-free',
+      resolverFamily: 'decision',
+      family: 'evidence',
+      anchor: 'ADR-020',
+      revision: 'sha256:decision-revision',
+    });
+    present(input);
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/callbacks/memory-cues/drill',
+      payload: { handle: handles.issue(input), requestId: 'drill-decision-content-free' },
+    });
+
+    assert.equal(response.statusCode, 200);
+    assert.equal(response.json().payload.body, 'canonical owner-visible source');
+    const events = episodeStore.listByCue(OWNER_SCOPE.ownerUserId, input.cueId);
+    assert.deepEqual(
+      events.map((event) => event.consumptionOutcome),
+      ['presented', 'drilled'],
     );
     assert.equal(JSON.stringify(events).includes('canonical owner-visible source'), false);
   });
@@ -293,6 +351,62 @@ describe('F287 owner-authenticated memory cue callbacks', () => {
     assert.equal(newRequestWithoutEvidence.statusCode, 409);
   });
 
+  it('records a cat-owned Seed as applied only after same-invocation drill and exact cat intent evidence', async () => {
+    const input = coordinate({
+      cueId: 'cue-owned-seed',
+      resolverFamily: 'cat_owned_seed',
+      family: 'owned_seed',
+      anchor: 'owned-seed:codex-sol:seed_1',
+      revision: 'sha256:seed-revision-1',
+      consumerCatId: 'codex-sol',
+    });
+    present(input);
+    const handle = handles.issue(input);
+    const outcomePayload = { handle, outcome: 'applied', requestId: 'apply-owned-seed' };
+
+    const beforeDrill = await app.inject({
+      method: 'POST',
+      url: '/api/callbacks/memory-cues/outcome',
+      payload: outcomePayload,
+    });
+    assert.equal(beforeDrill.statusCode, 409);
+    assert.deepEqual(beforeDrill.json(), { error: 'application_evidence_required' });
+
+    const drill = await app.inject({
+      method: 'POST',
+      url: '/api/callbacks/memory-cues/drill',
+      payload: { handle, requestId: 'drill-owned-seed' },
+    });
+    assert.equal(drill.statusCode, 200);
+    assert.equal(drill.json().payload.claim, 'private seed body');
+
+    const withoutIntent = await app.inject({
+      method: 'POST',
+      url: '/api/callbacks/memory-cues/outcome',
+      payload: outcomePayload,
+    });
+    assert.equal(withoutIntent.statusCode, 409);
+    assert.deepEqual(withoutIntent.json(), { error: 'application_evidence_required' });
+
+    ownedSeedApplications.add([OWNER_SCOPE.ownerUserId, 'codex-sol', OWNER_SCOPE.invocationId, 'seed_1'].join('\0'));
+    const applied = await app.inject({
+      method: 'POST',
+      url: '/api/callbacks/memory-cues/outcome',
+      payload: outcomePayload,
+    });
+    assert.equal(applied.statusCode, 200);
+    assert.deepEqual(applied.json(), { status: 'recorded', outcome: 'applied' });
+    assert.equal(episodeStore.listByCue(OWNER_SCOPE.ownerUserId, input.cueId).at(-1).consumerCatId, 'codex-sol');
+
+    const crossCat = await app.inject({
+      method: 'POST',
+      url: '/api/callbacks/memory-cues/drill',
+      headers: { 'x-test-cat': 'codex-terra' },
+      payload: { handle, requestId: 'cross-cat-drill' },
+    });
+    assert.equal(crossCat.statusCode, 404);
+  });
+
   it('rejects never-presented and already-invalidated outcome telemetry', async () => {
     const neverPresented = coordinate({ cueId: 'cue-never-presented' });
     const response = await app.inject({
@@ -315,6 +429,7 @@ describe('F287 owner-authenticated memory cue callbacks', () => {
       cueId: invalidated.cueId,
       opportunityId: invalidated.opportunityId,
       scope: invalidated.scope,
+      consumerCatId: invalidated.consumerCatId,
       resolverFamily: invalidated.resolverFamily,
       sourceAnchor: invalidated.anchor,
       sourceRevision: invalidated.revision,
@@ -361,6 +476,7 @@ describe('F287 owner-authenticated memory cue callbacks', () => {
       cueId: input.cueId,
       opportunityId: input.opportunityId,
       scope: input.scope,
+      consumerCatId: input.consumerCatId,
       resolverFamily: input.resolverFamily,
       sourceAnchor: input.anchor,
       sourceRevision: input.revision,

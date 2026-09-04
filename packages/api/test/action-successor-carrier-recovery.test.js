@@ -10,19 +10,19 @@ import {
 import { reconcileActionSuccessorEnqueue } from '../dist/domains/ball-custody/reconcile-action-successor-enqueue.js';
 
 const terminalPredicate = canonicalizeActionTerminalPredicate({
-  actionFamily: 'review',
-  subjectRef: 'pr:owner/repo#4058',
-  predicate: { kind: 'review_delivered', headSha: 'a'.repeat(40) },
+  actionFamily: 'implement',
+  subjectRef: 'subject:task:task-4058',
+  predicate: { kind: 'task_done' },
 });
 
 function lease(overrides = {}) {
   return {
     leaseId: 'lease-review-4058',
-    key: 'user-1|pr:owner/repo#4058|review|reviewer',
+    key: 'user-1|subject:task:task-4058|implement|implementer',
     tenantScope: 'user-1',
-    subjectRef: 'pr:owner/repo#4058',
-    actionFamily: 'review',
-    successorSlot: 'reviewer',
+    subjectRef: 'subject:task:task-4058',
+    actionFamily: 'implement',
+    successorSlot: 'implementer',
     mode: 'single',
     holderCatIds: ['opus5'],
     dispatchId: 'cross-post:review-4058-old',
@@ -57,11 +57,11 @@ function request(overrides = {}) {
     evidenceRef: 'callback:new-invocation:review-4058-reentry',
     now: 200,
     action: {
-      subjectRef: 'pr:owner/repo#4058',
-      actionFamily: 'review',
-      successorSlot: 'reviewer',
+      subjectRef: 'subject:task:task-4058',
+      actionFamily: 'implement',
+      successorSlot: 'implementer',
       mode: 'single',
-      terminalPredicate: { kind: 'review_delivered', headSha: 'a'.repeat(40) },
+      terminalPredicate: { kind: 'task_done' },
     },
     ...overrides,
   };
@@ -80,7 +80,7 @@ function messageForTarget(targetCatId, state, overrides = {}) {
     threadId: currentLease.holderThreadId,
     userId: currentLease.tenantScope,
     catId: currentLease.predecessorCatId,
-    content: 'Review exact HEAD',
+    content: 'Implement task',
     mentions: [targetCatId],
     timestamp: 100,
     deliveryStatus: live ? 'queued' : 'delivered',
@@ -160,7 +160,7 @@ describe('direct action successor carrier recovery', () => {
       threadId: current.holderThreadId,
       userId: current.tenantScope,
       catId: current.predecessorCatId,
-      content: 'Review exact HEAD',
+      content: 'Implement task',
       mentions: ['opus5'],
       timestamp: 100,
       deliveryStatus: 'queued',
@@ -202,7 +202,11 @@ describe('direct action successor carrier recovery', () => {
       );
     }
 
-    const parallel = lease({ mode: 'parallel', holderCatIds: ['opus5', 'kimi'], parallelIntent: 'independent review' });
+    const parallel = lease({
+      mode: 'parallel',
+      holderCatIds: ['opus5', 'kimi'],
+      parallelIntent: 'independent implementation',
+    });
     assert.equal(
       classifyDirectActionSuccessorCarrier(parallel, [
         messageForTarget('opus5', 'interrupted', { lease: parallel }),
@@ -232,7 +236,7 @@ describe('direct action successor carrier recovery', () => {
         request({
           action: {
             ...request().action,
-            terminalPredicate: { kind: 'review_delivered', headSha: 'b'.repeat(40) },
+            subjectRef: 'subject:task:other-task',
           },
         }),
       ),

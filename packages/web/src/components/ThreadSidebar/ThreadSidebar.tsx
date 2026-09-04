@@ -19,7 +19,12 @@ import {
 } from '@/utils/sidebar-thread-snapshot';
 import { BootcampListModal } from '../BootcampListModal';
 import { BootcampIcon } from '../icons/BootcampIcon';
+import { AttentionArrangeToolbar } from './AttentionArrangeToolbar';
+import { AttentionClusterHeader, AttentionClusterMember } from './AttentionCluster';
+import { AttentionGroupableThreadRow } from './AttentionGroupableThreadRow';
 import { readProjectNames, writeProjectNames } from './active-workspace';
+import { type AttentionListRow, arrangeAttentionRows, flattenAttentionRows } from './attention-clusters';
+import { ConversationGroupOrganizerDialog } from './ConversationGroupOrganizerDialog';
 import { DirectoryPickerModal, type NewThreadOptions } from './DirectoryPickerModal';
 import { LabelFilterBar } from './LabelFilterBar';
 import { SectionGroup } from './SectionGroup';
@@ -43,9 +48,11 @@ import {
   type SidebarTabId,
   type ThreadGroup,
 } from './thread-utils';
+import { useAttentionClusters } from './use-attention-clusters';
 import { useCollapseState } from './use-collapse-state';
 import { useProjectPins } from './use-project-pins';
 import { useScrollAnchor } from './use-scroll-anchor';
+import { VirtualAttentionList } from './VirtualAttentionList';
 import { VIRTUAL_THREAD_LIST_THRESHOLD, VirtualThreadList, type VirtualThreadListHandle } from './VirtualThreadList';
 
 interface ThreadSidebarProps {
@@ -541,6 +548,76 @@ export function ThreadSidebar({ onClose, className, routeThreadId }: ThreadSideb
 
   const normalizedQuery = searchQuery.trim().toLowerCase();
   const liveThreads = threads;
+  const {
+    clusters: attentionClusters,
+    isOpen: isAttentionClusterOpen,
+    toggle: toggleAttentionCluster,
+    titleFor: attentionClusterTitle,
+    rename: renameAttentionCluster,
+    savedGroups: attentionSavedGroups,
+    mutateGroup: mutateAttentionGroup,
+    preferenceError: attentionPreferenceError,
+  } = useAttentionClusters(liveThreads, currentThreadId, normalizedQuery);
+  const [attentionArrangeMode, setAttentionArrangeMode] = useState(false);
+  const [attentionOrganizerThreadId, setAttentionOrganizerThreadId] = useState<string | null>(null);
+  const attentionOrganizerThread = attentionOrganizerThreadId
+    ? liveThreads.find((thread) => thread.id === attentionOrganizerThreadId)
+    : undefined;
+  const [draggedAttentionThreadId, setDraggedAttentionThreadId] = useState<string | null>(null);
+  const draggedAttentionThreadIdRef = useRef<string | null>(null);
+  const attentionClusterByThreadId = useMemo(() => {
+    const byThreadId = new Map<string, (typeof attentionClusters)[number]>();
+    for (const cluster of attentionClusters) {
+      for (const memberId of cluster.memberIds) byThreadId.set(memberId, cluster);
+    }
+    return byThreadId;
+  }, [attentionClusters]);
+  const commitAttentionThreadDrop = useCallback(
+    (sourceThreadId: string, targetThreadId: string) => {
+      if (sourceThreadId === targetThreadId) return;
+      const targetCluster = attentionClusterByThreadId.get(targetThreadId);
+      if (targetCluster?.groupId) {
+        void mutateAttentionGroup({
+          action: 'move',
+          groupId: targetCluster.groupId,
+          threadId: sourceThreadId,
+          beforeThreadId: targetThreadId,
+        });
+        return;
+      }
+      const threadIds = targetCluster
+        ? [...new Set([...targetCluster.memberIds, sourceThreadId])]
+        : [targetThreadId, sourceThreadId];
+      void mutateAttentionGroup({ action: 'create', threadIds });
+    },
+    [attentionClusterByThreadId, mutateAttentionGroup],
+  );
+  const commitAttentionClusterDrop = useCallback(
+    (sourceThreadId: string, targetCluster: (typeof attentionClusters)[number]) => {
+      if (targetCluster.memberIds.includes(sourceThreadId)) return;
+      if (targetCluster.groupId) {
+        void mutateAttentionGroup({
+          action: 'move',
+          groupId: targetCluster.groupId,
+          threadId: sourceThreadId,
+        });
+        return;
+      }
+      void mutateAttentionGroup({
+        action: 'create',
+        threadIds: [...new Set([...targetCluster.memberIds, sourceThreadId])],
+      });
+    },
+    [mutateAttentionGroup],
+  );
+  const removeAttentionThreadFromGroup = useCallback(
+    (threadId: string) => {
+      const sourceCluster = attentionClusterByThreadId.get(threadId);
+      if (!sourceCluster?.groupId) return;
+      void mutateAttentionGroup({ action: 'remove', groupId: sourceCluster.groupId, threadId });
+    },
+    [attentionClusterByThreadId, mutateAttentionGroup],
+  );
   const filteredThreads = useMemo(() => {
     if (!normalizedQuery) return liveThreads;
     return liveThreads.filter((thread) => {
@@ -862,6 +939,16 @@ export function ThreadSidebar({ onClose, className, routeThreadId }: ThreadSideb
     () => buildSidebarTabContent(activeTab, labelFilteredThreads, pinnedProjects, unreadIds),
     [activeTab, labelFilteredThreads, pinnedProjects, unreadIds],
   );
+  const flatAttentionItems = useMemo(() => {
+    if (activeTabContent.kind !== 'flat' || (activeTab !== 'pinned' && activeTab !== 'recent')) return null;
+    const arranged = arrangeAttentionRows(activeTabContent.threads, liveThreads, attentionClusters, activeTab);
+    return arranged.some((item) => item.kind === 'cluster') ? arranged : null;
+  }, [activeTab, activeTabContent, attentionClusters, liveThreads]);
+  const flatAttentionRows = useMemo(
+    () =>
+      flatAttentionItems ? flattenAttentionRows(flatAttentionItems, isAttentionClusterOpen, normalizedQuery) : null,
+    [flatAttentionItems, isAttentionClusterOpen, normalizedQuery],
+  );
   const recentThreadIds = useMemo(
     () =>
       new Set(
@@ -1035,6 +1122,14 @@ export function ThreadSidebar({ onClose, className, routeThreadId }: ThreadSideb
       targetTab === 'project'
         ? null
         : buildSidebarTabContent(targetTab, liveThreads, pinnedProjects, unreadIds).threads;
+    const targetAttentionRows =
+      targetFlatThreads && (targetTab === 'pinned' || targetTab === 'recent')
+        ? flattenAttentionRows(
+            arrangeAttentionRows(targetFlatThreads, liveThreads, attentionClusters, targetTab),
+            isAttentionClusterOpen,
+            '',
+          )
+        : null;
     const needsTabSwitch = activeTab !== targetTab;
     if (needsTabSwitch) handleSelectTab(targetTab);
 
@@ -1044,7 +1139,15 @@ export function ThreadSidebar({ onClose, className, routeThreadId }: ThreadSideb
       ).find((candidate) => candidate.dataset.threadId === currentThreadId);
       if (!element) {
         if (allowVirtualScroll && targetFlatThreads) {
-          const index = targetFlatThreads.findIndex((thread) => thread.id === currentThreadId);
+          const attentionIndex = targetAttentionRows?.findIndex((row) => {
+            if (row.kind === 'thread') return row.thread.id === currentThreadId;
+            if (row.kind === 'cluster-member') return row.member.id === currentThreadId;
+            return row.cluster.memberIds.includes(currentThreadId);
+          });
+          const index =
+            attentionIndex !== undefined && attentionIndex >= 0
+              ? attentionIndex
+              : targetFlatThreads.findIndex((thread) => thread.id === currentThreadId);
           if (index >= 0 && virtualThreadListRef.current) {
             virtualThreadListRef.current.scrollToIndex(index);
             requestAnimationFrame(() => scrollAndHighlight(false));
@@ -1064,9 +1167,11 @@ export function ThreadSidebar({ onClose, className, routeThreadId }: ThreadSideb
     }
   }, [
     activeTab,
+    attentionClusters,
     currentThreadId,
     handleSelectTab,
     isCollapsed,
+    isAttentionClusterOpen,
     labelFilter,
     liveThreads,
     pinnedProjects,
@@ -1078,37 +1183,70 @@ export function ThreadSidebar({ onClose, className, routeThreadId }: ThreadSideb
   ]);
 
   const renderThreadItem = useCallback(
-    (thread: SidebarSnapshotRow, indented = false) => (
-      <ThreadItem
-        key={thread.id}
-        id={thread.id}
-        title={thread.title}
-        participants={thread.participants}
-        lastActiveAt={thread.lastActiveAt}
-        isActive={currentThreadId === thread.id}
-        onSelect={handleSelect}
-        onDelete={handleDeleteRequest}
-        onRename={handleRename}
-        onTogglePin={handleTogglePin}
-        onToggleFavorite={handleToggleFavorite}
-        onUpdatePreferredCats={handleUpdatePreferredCats}
-        onUpdateLabels={handleUpdateLabels}
-        onReplay={handleReplay}
-        isPinned={thread.pinned}
-        isFavorited={thread.favorited}
-        presence={thread.presence}
-        unreadCount={thread.unreadCount}
-        hasUserMention={thread.hasUserMention}
-        projectPath={thread.projectPath}
-        indented={indented}
-        preferredCats={thread.preferredCats}
-        threadLabels={thread.labels}
-        isHubThread={thread.isHubThread}
-        systemKind={thread.systemKind}
-      />
-    ),
+    (thread: SidebarSnapshotRow, indented = false) => {
+      const groupable = thread.id !== 'default' && !thread.isHubThread && !thread.systemKind;
+      return (
+        <AttentionGroupableThreadRow
+          key={thread.id}
+          threadId={thread.id}
+          threadTitle={thread.title}
+          groupable={groupable}
+          arrangeMode={attentionArrangeMode}
+          draggedThreadId={draggedAttentionThreadId}
+          onEnterArrange={() => setAttentionArrangeMode(true)}
+          onDragStartThread={(threadId) => {
+            setDraggedAttentionThreadId(thread.id);
+            draggedAttentionThreadIdRef.current = threadId;
+          }}
+          onDragEndThread={() => {
+            draggedAttentionThreadIdRef.current = null;
+            setDraggedAttentionThreadId(null);
+          }}
+          getDraggedThreadId={() => draggedAttentionThreadIdRef.current}
+          onDropThread={commitAttentionThreadDrop}
+        >
+          <ThreadItem
+            id={thread.id}
+            title={thread.title}
+            participants={thread.participants}
+            lastActiveAt={thread.lastActiveAt}
+            isActive={currentThreadId === thread.id}
+            onSelect={handleSelect}
+            onDelete={handleDeleteRequest}
+            onRename={handleRename}
+            onTogglePin={handleTogglePin}
+            onToggleFavorite={handleToggleFavorite}
+            onUpdatePreferredCats={handleUpdatePreferredCats}
+            onUpdateLabels={handleUpdateLabels}
+            onOrganize={
+              groupable
+                ? () => {
+                    setAttentionArrangeMode(true);
+                    setAttentionOrganizerThreadId(thread.id);
+                  }
+                : undefined
+            }
+            onReplay={handleReplay}
+            isPinned={thread.pinned}
+            isFavorited={thread.favorited}
+            presence={thread.presence}
+            unreadCount={thread.unreadCount}
+            hasUserMention={thread.hasUserMention}
+            projectPath={thread.projectPath}
+            indented={indented}
+            preferredCats={thread.preferredCats}
+            threadLabels={thread.labels}
+            isHubThread={thread.isHubThread}
+            systemKind={thread.systemKind}
+          />
+        </AttentionGroupableThreadRow>
+      );
+    },
     [
+      attentionArrangeMode,
+      commitAttentionThreadDrop,
       currentThreadId,
+      draggedAttentionThreadId,
       handleDeleteRequest,
       handleRename,
       handleReplay,
@@ -1117,6 +1255,64 @@ export function ThreadSidebar({ onClose, className, routeThreadId }: ThreadSideb
       handleTogglePin,
       handleUpdateLabels,
       handleUpdatePreferredCats,
+    ],
+  );
+
+  const renderAttentionRow = useCallback(
+    (row: AttentionListRow) => {
+      if (row.kind === 'thread') {
+        return <div key={row.key}>{renderThreadItem(row.thread)}</div>;
+      }
+      if (row.kind === 'cluster-member') {
+        return (
+          <AttentionClusterMember
+            key={row.key}
+            cluster={row.cluster}
+            member={row.member}
+            isFirst={row.isFirst}
+            isLast={row.isLast}
+            renderThread={renderThreadItem}
+          />
+        );
+      }
+      return (
+        <div
+          key={row.key}
+          role="group"
+          aria-label={`对话组：${attentionClusterTitle(row.cluster)}`}
+          data-attention-drop-group={row.cluster.anchor}
+          onDragOver={(event) => {
+            if (!draggedAttentionThreadId || row.cluster.memberIds.includes(draggedAttentionThreadId)) return;
+            event.preventDefault();
+            if (event.dataTransfer) event.dataTransfer.dropEffect = 'move';
+          }}
+          onDrop={(event) => {
+            event.preventDefault();
+            const sourceThreadId =
+              draggedAttentionThreadIdRef.current || event.dataTransfer?.getData('text/plain') || null;
+            if (sourceThreadId) commitAttentionClusterDrop(sourceThreadId, row.cluster);
+            draggedAttentionThreadIdRef.current = null;
+            setDraggedAttentionThreadId(null);
+          }}
+        >
+          <AttentionClusterHeader
+            cluster={row.cluster}
+            members={row.members}
+            expanded={row.expanded}
+            displayTitle={attentionClusterTitle(row.cluster)}
+            onToggle={() => toggleAttentionCluster(row.cluster)}
+            onRename={(alias) => renameAttentionCluster(row.cluster, alias)}
+          />
+        </div>
+      );
+    },
+    [
+      attentionClusterTitle,
+      commitAttentionClusterDrop,
+      draggedAttentionThreadId,
+      renameAttentionCluster,
+      renderThreadItem,
+      toggleAttentionCluster,
     ],
   );
 
@@ -1141,7 +1337,11 @@ export function ThreadSidebar({ onClose, className, routeThreadId }: ThreadSideb
           onRenameProject={forProjectPath(projectPath, (path) => (name: string) => handleRenameProject(path, name))}
           onArchiveThreads={forProjectPath(projectPath, (path) => () => handleArchiveThreads(path))}
         >
-          {group.threads.map((thread) => renderThreadItem(thread, true))}
+          {flattenAttentionRows(
+            arrangeAttentionRows(group.threads, group.threads, attentionClusters, 'project'),
+            isAttentionClusterOpen,
+            normalizedQuery,
+          ).map(renderAttentionRow)}
         </SectionGroup>
       );
     },
@@ -1151,10 +1351,13 @@ export function ThreadSidebar({ onClose, className, routeThreadId }: ThreadSideb
       handleOpenInFinder,
       handleQuickCreate,
       handleRenameProject,
+      attentionClusters,
+      isAttentionClusterOpen,
       isCollapsed,
+      normalizedQuery,
       pinnedProjects,
       projectNames,
-      renderThreadItem,
+      renderAttentionRow,
       toggleGroup,
       toggleProjectPin,
     ],
@@ -1356,6 +1559,24 @@ export function ThreadSidebar({ onClose, className, routeThreadId }: ThreadSideb
           )}
 
           <div className="space-y-1 pt-1.5" data-testid="sidebar-tab-content">
+            {attentionArrangeMode && (
+              <AttentionArrangeToolbar
+                draggedThreadId={draggedAttentionThreadId}
+                canRemoveDragged={Boolean(
+                  draggedAttentionThreadId && attentionClusterByThreadId.get(draggedAttentionThreadId)?.groupId,
+                )}
+                onRemoveDragged={(threadId) => {
+                  removeAttentionThreadFromGroup(threadId);
+                  draggedAttentionThreadIdRef.current = null;
+                  setDraggedAttentionThreadId(null);
+                }}
+                onDone={() => {
+                  draggedAttentionThreadIdRef.current = null;
+                  setDraggedAttentionThreadId(null);
+                  setAttentionArrangeMode(false);
+                }}
+              />
+            )}
             {activeTabContent.kind === 'flat' && (
               <>
                 <div
@@ -1374,13 +1595,32 @@ export function ThreadSidebar({ onClose, className, routeThreadId }: ThreadSideb
                     <LocateThreadIcon />
                   </button>
                 </div>
+                {attentionPreferenceError && (
+                  <div
+                    role="alert"
+                    className="mx-3 mb-1 rounded-md bg-conn-amber-bg px-2 py-1 text-micro text-conn-amber-text"
+                  >
+                    {attentionPreferenceError}
+                  </div>
+                )}
                 {activeTabContent.threads.length >= VIRTUAL_THREAD_LIST_THRESHOLD ? (
-                  <VirtualThreadList
-                    ref={virtualThreadListRef}
-                    threads={activeTabContent.threads}
-                    scrollContainerRef={scrollContainerRef}
-                    renderItem={renderThreadItem}
-                  />
+                  flatAttentionRows ? (
+                    <VirtualAttentionList
+                      ref={virtualThreadListRef}
+                      rows={flatAttentionRows}
+                      scrollContainerRef={scrollContainerRef}
+                      renderItem={renderAttentionRow}
+                    />
+                  ) : (
+                    <VirtualThreadList
+                      ref={virtualThreadListRef}
+                      threads={activeTabContent.threads}
+                      scrollContainerRef={scrollContainerRef}
+                      renderItem={renderThreadItem}
+                    />
+                  )
+                ) : flatAttentionRows ? (
+                  flatAttentionRows.map(renderAttentionRow)
                 ) : (
                   activeTabContent.threads.map((thread) => renderThreadItem(thread))
                 )}
@@ -1563,6 +1803,18 @@ export function ThreadSidebar({ onClose, className, routeThreadId }: ThreadSideb
           onSuggestAll={handleSuggestAll}
           initialSuggestions={suggestions}
           loading={suggestLoading}
+        />
+      )}
+
+      {attentionOrganizerThread && (
+        <ConversationGroupOrganizerDialog
+          thread={attentionOrganizerThread}
+          threads={liveThreads}
+          groups={attentionSavedGroups}
+          onCommand={(command) => {
+            void mutateAttentionGroup(command);
+          }}
+          onClose={() => setAttentionOrganizerThreadId(null)}
         />
       )}
     </>

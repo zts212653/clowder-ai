@@ -6,6 +6,7 @@ import {
 } from '@cat-cafe/shared';
 import { z } from 'zod';
 import type { ITaskStore } from '../cats/services/stores/ports/TaskStore.js';
+import { composeEntrustedWorkBrief } from './EntrustedWorkBriefComposer.js';
 import type { NeedsMeProducerCatalog } from './NeedsMeProducerCatalog.js';
 
 const boundedRef = z.string().trim().min(1).max(1_000);
@@ -201,10 +202,12 @@ export class EntrustedWorkOwnerReadService {
             receipt.taskRef.subjectRef === subjectRef && receipt.taskRef.observedRevision === entrusted.revision,
         )
       : [];
+    const timeRefs = this.projectTaskTimeRefs(entrusted.time, subjectRef, ownerRef, entrusted.revision);
     const candidate = {
       envelope: {
         subjectRef,
         ownerRef,
+        admissionReceiptRef: entrusted.admission.receiptRef,
         sourceRefs: entrusted.admission.sourceRefs,
         revision: entrusted.revision,
         freshness: {
@@ -213,8 +216,21 @@ export class EntrustedWorkOwnerReadService {
         },
         visibility: { ownerUserId: input.viewer.userId, human: true, cat: true },
       },
+      brief: composeEntrustedWorkBrief({
+        currentState: openTaskStatus(task.status),
+        taskOwnerCatId: task.ownerCatId,
+        ownerRef,
+        ownerUserId: input.viewer.userId,
+        revision: entrusted.revision,
+        intendedOutcome: entrusted.intendedOutcome,
+        admissionReceiptRef: entrusted.admission.receiptRef,
+        freshnessState: isCurrent ? ('current' as const) : ('stale' as const),
+        preparedArtifact,
+        timeRefs,
+        attentionReceipts,
+      }),
       ...(preparedArtifact ? { preparedArtifact } : {}),
-      timeRefs: this.projectTaskTimeRefs(entrusted.time, subjectRef, ownerRef, entrusted.revision),
+      timeRefs,
       attentionReceipts,
     };
     const parsed = entrustedWorkOwnerReadV1Schema.safeParse(candidate);
@@ -280,4 +296,11 @@ function taskIdFromSubjectRef(subjectRef: string): string | null {
   if (!subjectRef.startsWith(prefix)) return null;
   const taskId = subjectRef.slice(prefix.length).trim();
   return taskId.length > 0 ? taskId : null;
+}
+
+function openTaskStatus(status: TaskItem['status']): 'todo' | 'doing' | 'blocked' {
+  if (status === 'done') {
+    throw new EntrustedWorkOwnerReadError('OWNER_READ_TERMINAL', 'Entrusted work is terminal');
+  }
+  return status;
 }

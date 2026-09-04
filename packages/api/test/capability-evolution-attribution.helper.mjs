@@ -77,7 +77,7 @@ export const completeCard = (overrides = {}) => ({
 export async function loadEvaluationModules() {
   const [bridge, gate, projection, explanation] = await Promise.all([
     import('../dist/infrastructure/capability-evolution/program-eval-bridge.js'),
-    import('../dist/infrastructure/capability-evolution/intervention-gate.js'),
+    import('../dist/infrastructure/capability-evolution/change/intervention-gate.js'),
     import('../dist/infrastructure/capability-evolution/program-attribution-projection.js'),
     import('../dist/infrastructure/capability-evolution/attribution-explanation.js'),
   ]);

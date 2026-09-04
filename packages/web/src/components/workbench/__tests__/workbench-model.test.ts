@@ -151,12 +151,21 @@ describe('shared Workbench kernel', () => {
       surface: REVIEW,
       entitlement: background,
     });
+    const deniedBulkClose = reduceWorkbench(deniedSidecar, {
+      type: 'close-other-surfaces',
+      preserveSurfaceId: FILE.id,
+      entitlement: background,
+    });
+    const deniedCollapse = reduceWorkbench(deniedBulkClose, {
+      type: 'collapse-split',
+      entitlement: background,
+    });
 
-    expect(deniedSidecar.activeSurfaceId).toBe(FILE.id);
-    expect(deniedSidecar.surfaces).toEqual([FILE, BROWSER]);
-    expect(deniedSidecar.split).toEqual(split.split);
-    expect(deniedSidecar.sidecar).toBeNull();
-    expect(deniedSidecar.activity).toEqual([expect.objectContaining({ surfaceId: REVIEW.id })]);
+    expect(deniedCollapse.activeSurfaceId).toBe(FILE.id);
+    expect(deniedCollapse.surfaces).toEqual([FILE, BROWSER]);
+    expect(deniedCollapse.split).toEqual(split.split);
+    expect(deniedCollapse.sidecar).toBeNull();
+    expect(deniedCollapse.activity).toEqual([expect.objectContaining({ surfaceId: REVIEW.id })]);
   });
 
   it('detaches a host, removes dangling topology, and restores only its descriptor', () => {
@@ -185,6 +194,44 @@ describe('shared Workbench kernel', () => {
     });
     expect(restored.surfaces).toEqual([FILE, BROWSER]);
     expect(restored.activeSurfaceId).toBe(BROWSER.id);
+  });
+
+  it('bulk-detaches only inactive unpinned hosts without touching their owner objects', () => {
+    let state = createInitialWorkbenchState([FILE, BROWSER, REVIEW]);
+    state = reduceWorkbench(state, {
+      type: 'pin-surface',
+      surfaceId: BROWSER.id,
+      pinned: true,
+      entitlement: USER,
+    });
+    state = reduceWorkbench(state, {
+      type: 'close-other-surfaces',
+      preserveSurfaceId: FILE.id,
+      entitlement: { kind: 'user', reason: 'bulk-close' },
+    });
+
+    expect(state.surfaces).toEqual([FILE, BROWSER]);
+    expect(state.activeSurfaceId).toBe(FILE.id);
+    expect(state.pinnedSurfaceIds).toEqual([BROWSER.id]);
+    expect(state.recentlyClosed).toEqual([REVIEW]);
+    expect(state).not.toHaveProperty('ownerRecords');
+  });
+
+  it('collapses split layout without detaching either hosted surface', () => {
+    let state = createInitialWorkbenchState([FILE, BROWSER]);
+    state = reduceWorkbench(state, {
+      type: 'split-with',
+      surfaceId: BROWSER.id,
+      entitlement: { kind: 'user', reason: 'explicit-split' },
+    });
+    state = reduceWorkbench(state, {
+      type: 'collapse-split',
+      entitlement: { kind: 'user', reason: 'collapse-split' },
+    });
+
+    expect(state.split).toBeNull();
+    expect(state.surfaces).toEqual([FILE, BROWSER]);
+    expect(state.recentlyClosed).toEqual([]);
   });
 
   it('restores schema v2 while filtering malformed and owner-dangling descriptors', () => {

@@ -42,6 +42,16 @@ body {
       0 0 4px rgba(245, 158, 11, 0.2);
   }
 }
+
+/* F277: arrange-mode feedback; motion-safe utility disables it for reduced motion. */
+@keyframes f277-jiggle {
+  from {
+    transform: rotate(-0.35deg) translateY(0);
+  }
+  to {
+    transform: rotate(0.35deg) translateY(-0.5px);
+  }
+}
 .quest-input-highlight {
   animation: quest-glow 2.5s ease-in-out infinite;
   border-color: rgb(245, 158, 11) !important;

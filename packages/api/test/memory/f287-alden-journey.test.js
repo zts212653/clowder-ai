@@ -168,6 +168,10 @@ describe('F287 D1 Alden golden journey', { concurrency: false }, () => {
     const { TasteCueResolver } = await import('../../dist/domains/memory/cue/resolvers/TasteCueResolver.js');
     const { ProfileCueResolver } = await import('../../dist/domains/memory/cue/resolvers/ProfileCueResolver.js');
     const { EventCueResolver } = await import('../../dist/domains/memory/cue/resolvers/EventCueResolver.js');
+    const { DecisionCueResolver } = await import('../../dist/domains/memory/cue/resolvers/DecisionCueResolver.js');
+    const { CatOwnedSeedCueResolver } = await import(
+      '../../dist/domains/memory/cue/resolvers/CatOwnedSeedCueResolver.js'
+    );
     const { ProjectKnowledgeCueResolver } = await import(
       '../../dist/domains/memory/cue/resolvers/ProjectKnowledgeCueResolver.js'
     );
@@ -197,7 +201,9 @@ describe('F287 D1 Alden golden journey', { concurrency: false }, () => {
       new TasteCueResolver({ resolve: async () => null }),
       new ProfileCueResolver(),
       new EventCueResolver({ resolve: async () => null }),
-      new ProjectKnowledgeCueResolver(),
+      new DecisionCueResolver({ resolve: async () => null }),
+      new ProjectKnowledgeCueResolver({ resolve: async () => null }),
+      new CatOwnedSeedCueResolver({ resolve: async () => null }),
     ]);
     const service = new MemoryCueInvocationPromptService({
       plane: new MemoryCuePlaneService(registry),
@@ -223,6 +229,7 @@ describe('F287 D1 Alden golden journey', { concurrency: false }, () => {
         invocationId: 'invocation-real',
       },
       now: 1_785_600_000_001,
+      consumerCatId: 'codex-sol',
     });
 
     assert.match(resolution.promptSegment, /<memory-cue v="1"/);
@@ -272,7 +279,7 @@ describe('F287 D1 Alden golden journey', { concurrency: false }, () => {
                       sourceRevision: 'revision-1',
                       axis: 'consumption',
                       consumptionOutcome: 'presented',
-                      catalogVersion: 3,
+                      catalogVersion: 5,
                       resolverVersion: 1,
                       occurredAt: seed.occurredAt,
                     },
@@ -296,7 +303,7 @@ describe('F287 D1 Alden golden journey', { concurrency: false }, () => {
                       opportunityKind: 'recall',
                       producerOwner: 'entity_nudge',
                       consumerScope: { kind: 'invocation', ...input.serverScope },
-                      entryVersion: 'recall-catalog:3:subject_seen:entity_nudge',
+                      entryVersion: 'recall-catalog:5:subject_seen:entity_nudge',
                       subjectKey: 'memory-cue:person_entity:person-memory:person-alden',
                       asOf: { kind: 'version', value: 'revision-1' },
                       sourceRefs: ['person-memory:person-alden'],
@@ -319,7 +326,7 @@ describe('F287 D1 Alden golden journey', { concurrency: false }, () => {
                         sourceRevision: 'revision-1',
                         axis: 'consumption',
                         consumptionOutcome: 'presented',
-                        catalogVersion: 3,
+                        catalogVersion: 5,
                         resolverVersion: 1,
                         occurredAt: seed.occurredAt,
                       },

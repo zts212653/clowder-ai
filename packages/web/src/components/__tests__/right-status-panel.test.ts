@@ -75,6 +75,8 @@ describe('RightStatusPanel', () => {
     expect(html).toContain('运行日志');
     expect(html).toContain('Thread:');
     expect(html).toContain('test-thread');
+    expect(html).toContain('ChatGPT Conversation');
+    expect(html.indexOf('data-testid="cloud-conversation-link"')).toBeLessThan(html.indexOf('对话信息'));
     expect(html).toContain('布偶猫');
     expect(html).toContain('缅因猫');
     expect(html).toContain('12');

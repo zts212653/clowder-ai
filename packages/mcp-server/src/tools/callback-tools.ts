@@ -26,6 +26,8 @@ import type {
 } from '@cat-cafe/shared';
 import {
   ACTION_SUBJECT_REF_DESCRIPTION,
+  acceptedRevisionSchema,
+  acceptedSourceRefSchema,
   actionSuccessorMetadataSchema,
   CALLBACK_AUTH_FAILURE_REASONS,
   custodyAdmissionRequestV1Schema,
@@ -39,8 +41,12 @@ import {
   executableActionSuccessorMetadataSchema,
   extractFeatureIds,
   isCallbackAuthFailureReason,
+  isValidAcceptedSource,
+  isValidReviewSubjectRef,
   isValidRichBlock,
+  localReviewVerdictSchema,
   normalizeRichBlock,
+  reviewSubjectRefSchema,
   SOP_DEFINITION_IDS,
 } from '@cat-cafe/shared';
 import { z } from 'zod';
@@ -113,6 +119,22 @@ const SYNTHESIZED_AUDIO_CALLBACK_TRANSPORT: CallbackTransportOptions = {
   retryDelaysMs: [],
   fetchTimeoutMs: SYNTHESIZED_AUDIO_CALLBACK_FETCH_TIMEOUT_MS,
 };
+
+interface LocalReviewAnchorInput {
+  reviewSubjectRef?: string | undefined;
+  acceptedSourceRef?: string | undefined;
+  acceptedRevision?: string | undefined;
+}
+
+function hasCompleteLocalReviewAnchor(input: LocalReviewAnchorInput): boolean {
+  if (!input.reviewSubjectRef || !isValidReviewSubjectRef(input.reviewSubjectRef)) return false;
+  if (!input.acceptedSourceRef || !input.acceptedRevision) return false;
+  return isValidAcceptedSource(input.acceptedSourceRef, input.acceptedRevision);
+}
+
+function hasAnyLocalReviewAnchor(input: LocalReviewAnchorInput): boolean {
+  return Boolean(input.reviewSubjectRef || input.acceptedSourceRef || input.acceptedRevision);
+}
 
 function requiresInlineAudioSynthesis(block: unknown): boolean {
   if (!block) return false;
@@ -330,8 +352,8 @@ function agentKeyOptions(input: AgentKeySelectable): { agentKeyCatId?: string | 
 }
 
 const PROPOSED_ACTION_EXECUTABLE_CONTRACT_DESCRIPTION =
-  'Executable pairs are closed: review + reviewer + review_delivered requires pr:<owner>/<repo>#<positive-number>; ' +
-  'implement + implementer + task_done requires subject:task:<taskId>. Other family, slot, predicate, or subject combinations are rejected before publication.';
+  'Executable proposed action pairs are closed: external review + reviewer + review_delivered requires pr:<owner>/<repo>#<positive-number>; ' +
+  'implement + implementer + task_done requires subject:task:<taskId>. Local cat review uses an ordinary durable handoff with localReviewVerdict + reviewedHeadSha + accepted-source fields.';
 
 const postMessageThreadIdSchema = z.string().min(1);
 
@@ -390,26 +412,35 @@ export const postMessageInputSchema = {
       'Invocation-token same-thread coordination lifecycle. Use active for a real handoff and terminal for the final result. ' +
         'A courtesy reply to terminal is persisted without waking the prior cat.',
     ),
-  localReviewVerdict: z
-    .enum(['approved', 'changes_requested', 'commented'])
+  localReviewVerdict: localReviewVerdictSchema
     .optional()
     .describe(
-      'Typed local-review decision carried by the same terminal post. Requires invocation-token credentials, coordination.phase="terminal", and clientMessageId. The carrier fast path derives the lease fields; carrier-free settlement additionally requires reviewedHeadSha and an inherited coordination subject. Public prose is presentation only.',
+      'Durable local-review fact. Requires clientMessageId, exact reviewedHeadSha, reviewSubjectRef, acceptedSourceRef, acceptedRevision, and an ordinary routed @author handoff. It is independent of action lease, coordination generation, and issuer route. Public prose is presentation only.',
     ),
   reviewedHeadSha: z
     .string()
     .regex(/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/)
     .optional()
     .describe(
-      'Reviewer-authored exact lowercase 40- or 64-character Git OID. Required only when the current invocation no longer carries the review lease; it fences identity resolution but grants no authority.',
+      'Reviewer-authored exact lowercase 40- or 64-character Git OID. Required with localReviewVerdict; merge-gate compares it with the current HEAD.',
     ),
+  reviewSubjectRef: reviewSubjectRefSchema
+    .optional()
+    .describe('Stable review subject, for example pr:owner/repo#123. Required with localReviewVerdict.'),
+  acceptedSourceRef: acceptedSourceRefSchema
+    .optional()
+    .describe(
+      'Accepted feature-document path or immutable threadId#messageId source. Required with localReviewVerdict.',
+    ),
+  acceptedRevision: acceptedRevisionSchema
+    .optional()
+    .describe('Exact feature Git OID or source message id corresponding to acceptedSourceRef.'),
   action: executableActionSuccessorMetadataSchema
     .optional()
     .describe(
       'Optional same-thread structured successor identity. New dispatches require mode=single; a parallel holder may use returnToPredecessor with one predecessor target to record only its rejected-ownership terminal. Requires explicit clientMessageId and exactly one targetCats entry. ' +
         'Use claimOrigin=existing_standing plus groundingEvidenceRef to claim verified standing through the same custody CAS. ' +
         'New claims require terminalPredicate typed parameters; server catalog owns completion semantics, and carrier exit/text never counts as action success. ' +
-        'A completed review lease can continue on a fresh exact HEAD only with reviewReentry reason behavioral_delta, stale_or_blocking, or explicit_matrix_route plus durable evidenceRef; omit reviewReentry for the initial review. ' +
         'A mismatched current holder returns with returnToPredecessor={leaseId, expectedGeneration, groundingEvidenceRef}; targetCats must name the persisted predecessor. ' +
         'Use multi_mention for deliberate parallel review/ideation. ' +
         EXECUTABLE_ACTION_SUCCESSOR_CONTRACT_DESCRIPTION +
@@ -437,15 +468,10 @@ export type PostMessageRegistrationPrincipal = 'invocation' | 'agent-key' | 'unc
  */
 export function projectPostMessageInputSchema(principal: PostMessageRegistrationPrincipal): Record<string, unknown> {
   const { threadId: _threadId, ...invocationCommon } = postMessageInputSchema;
-  const {
-    localReviewVerdict: _localReviewVerdict,
-    reviewedHeadSha: _reviewedHeadSha,
-    ...agentKeyCommon
-  } = invocationCommon;
   if (principal === 'invocation') return invocationCommon;
   if (principal === 'agent-key') {
     return {
-      ...agentKeyCommon,
+      ...invocationCommon,
       threadId: postMessageThreadIdSchema.describe(
         'Target thread ID. Required for agent-key auth because a persistent agent has no current invocation thread.',
       ),
@@ -697,7 +723,11 @@ export const admitEntrustedWorkInputSchema = {
   closure: entrustedWorkClosureSpecV1Schema
     .optional()
     .describe('Required closure condition and expected signal; omission returns needs_clarification'),
-  time: entrustedWorkV1Schema.shape.time.optional().describe('Optional user-authored scheduling hints'),
+  time: entrustedWorkV1Schema.shape.time
+    .optional()
+    .describe(
+      'Canonical source-backed businessDeadline/reviewBy facts. Required when the source states an unambiguous time; admission.timeHints alone never reaches Schedule.',
+    ),
   artifactRefs: z.array(z.string().trim().min(1).max(1000)).max(64).optional(),
 };
 
@@ -802,19 +832,29 @@ export const crossPostMessageInputSchema = {
         'Not available to agent-key target-thread writes because they have no source relay provenance. ' +
         'GOTCHA: Do not combine coordination with effectClass="assign_work"; approval proposals intentionally do not carry relay provenance.',
     ),
-  localReviewVerdict: z
-    .enum(['approved', 'changes_requested', 'commented'])
+  localReviewVerdict: localReviewVerdictSchema
     .optional()
     .describe(
-      'Typed local-review decision carried by the same terminal cross-post. Invocation-token credentials, coordination.phase="terminal", and clientMessageId are required. Carrier-free settlement additionally requires reviewedHeadSha and an inherited coordination subject; public prose is never parsed.',
+      'Durable local-review fact. Requires clientMessageId, exact reviewedHeadSha, reviewSubjectRef, acceptedSourceRef, acceptedRevision, and ordinary targetCats or a line-start @author. It is independent of action lease, coordination generation, and issuer route; public prose is never parsed.',
     ),
   reviewedHeadSha: z
     .string()
     .regex(/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/)
     .optional()
     .describe(
-      'Reviewer-authored exact lowercase 40- or 64-character Git OID. Required only for carrier-free local-review settlement; it is checked against the frozen canonical lease predicate.',
+      'Reviewer-authored exact lowercase 40- or 64-character Git OID. Required with localReviewVerdict; merge-gate compares it with the current HEAD.',
     ),
+  reviewSubjectRef: reviewSubjectRefSchema
+    .optional()
+    .describe('Stable review subject, for example pr:owner/repo#123. Required with localReviewVerdict.'),
+  acceptedSourceRef: acceptedSourceRefSchema
+    .optional()
+    .describe(
+      'Accepted feature-document path or immutable threadId#messageId source. Required with localReviewVerdict.',
+    ),
+  acceptedRevision: acceptedRevisionSchema
+    .optional()
+    .describe('Exact feature Git OID or source message id corresponding to acceptedSourceRef.'),
   action: executableActionSuccessorMetadataSchema
     .optional()
     .describe(
@@ -823,7 +863,6 @@ export const crossPostMessageInputSchema = {
         'mode=parallel requires at least two targets plus parallelIntent. A duplicate active action returns safe_wait. ' +
         'Use claimOrigin=existing_standing plus groundingEvidenceRef for a verified self-claim. ' +
         'New claims require terminalPredicate typed parameters; server catalog owns completion semantics and exact revision freshness. ' +
-        'A completed review lease can continue on a fresh exact HEAD only with reviewReentry reason behavioral_delta, stale_or_blocking, or explicit_matrix_route plus durable evidenceRef; omit reviewReentry for the initial review. ' +
         'Use returnToPredecessor for rejected custody: single mode returns the generation to the persisted predecessor; parallel mode records only the rejecting holder terminal and does not enqueue a whole-lease return. ' +
         EXECUTABLE_ACTION_SUCCESSOR_CONTRACT_DESCRIPTION +
         ' ' +
@@ -911,6 +950,9 @@ async function _executePostMessage(
       | undefined;
     localReviewVerdict?: 'approved' | 'changes_requested' | 'commented' | undefined;
     reviewedHeadSha?: string | undefined;
+    reviewSubjectRef?: string | undefined;
+    acceptedSourceRef?: string | undefined;
+    acceptedRevision?: string | undefined;
     action?: ActionSuccessorRequestMetadata | undefined;
     proposedAction?: ActionSuccessorRequestMetadata | undefined;
     acknowledgeHeld?: boolean | undefined;
@@ -918,25 +960,32 @@ async function _executePostMessage(
   transportOptions?: CallbackTransportOptions,
 ): Promise<ToolResult> {
   if (input.localReviewVerdict) {
-    if (!getInvocationAuthSignal().hasFullCredentials) {
-      return errorResult('post_message localReviewVerdict requires invocation-token credentials.');
-    }
-    if (input.coordination?.phase !== 'terminal') {
-      return errorResult('post_message localReviewVerdict requires coordination.phase="terminal".');
-    }
     if (!input.clientMessageId) {
       return errorResult(
         'post_message localReviewVerdict requires clientMessageId. Example: clientMessageId="review-owner-repo-1371-head".',
       );
     }
-    if (input.action || input.proposedAction) {
-      return errorResult('post_message localReviewVerdict cannot be combined with a new action or proposedAction.');
+    if (input.action || input.proposedAction || input.coordination) {
+      return errorResult(
+        'post_message localReviewVerdict must use ordinary A2A without action, proposedAction, or coordination.',
+      );
+    }
+    if (!input.reviewedHeadSha) {
+      return errorResult('post_message localReviewVerdict requires the exact reviewedHeadSha.');
+    }
+    if (!hasCompleteLocalReviewAnchor(input)) {
+      return errorResult(
+        'post_message localReviewVerdict requires reviewSubjectRef plus a valid acceptedSourceRef and acceptedRevision.',
+      );
     }
   }
   if (input.reviewedHeadSha && !input.localReviewVerdict) {
     return errorResult(
       'post_message reviewedHeadSha requires localReviewVerdict. Example: localReviewVerdict="approved", reviewedHeadSha="<exact lowercase Git OID>".',
     );
+  }
+  if (!input.localReviewVerdict && hasAnyLocalReviewAnchor(input)) {
+    return errorResult('post_message accepted-source fields require localReviewVerdict.');
   }
   // F174 Phase E (AC-E2/E5): explicit kind:'none' policy. There's no useful
   // local fallback for post_message — losing the message is preferable to
@@ -958,6 +1007,9 @@ async function _executePostMessage(
           ...(input.coordination ? { coordination: input.coordination } : {}),
           ...(input.localReviewVerdict ? { localReviewVerdict: input.localReviewVerdict } : {}),
           ...(input.reviewedHeadSha ? { reviewedHeadSha: input.reviewedHeadSha } : {}),
+          ...(input.reviewSubjectRef ? { reviewSubjectRef: input.reviewSubjectRef } : {}),
+          ...(input.acceptedSourceRef ? { acceptedSourceRef: input.acceptedSourceRef } : {}),
+          ...(input.acceptedRevision ? { acceptedRevision: input.acceptedRevision } : {}),
           ...(input.action ? { action: input.action } : {}),
           ...(input.proposedAction ? { proposedAction: input.proposedAction } : {}),
           ...(input.acknowledgeHeld ? { acknowledgeHeld: true } : {}),
@@ -1077,6 +1129,9 @@ export async function handlePostMessage(
       | undefined;
     localReviewVerdict?: 'approved' | 'changes_requested' | 'commented' | undefined;
     reviewedHeadSha?: string | undefined;
+    reviewSubjectRef?: string | undefined;
+    acceptedSourceRef?: string | undefined;
+    acceptedRevision?: string | undefined;
     agentKeyCatId?: string | undefined;
     action?: ActionSuccessorRequestMetadata | undefined;
     acknowledgeHeld?: boolean | undefined;
@@ -1547,6 +1602,9 @@ export async function handleCrossPostMessage(input: {
   coordination?: { phase: 'active' | 'terminal'; id?: string | undefined; subjectRef?: string | undefined } | undefined;
   localReviewVerdict?: 'approved' | 'changes_requested' | 'commented' | undefined;
   reviewedHeadSha?: string | undefined;
+  reviewSubjectRef?: string | undefined;
+  acceptedSourceRef?: string | undefined;
+  acceptedRevision?: string | undefined;
   action?: ActionSuccessorRequestMetadata | undefined;
   proposedAction?: ActionSuccessorRequestMetadata | undefined;
   acknowledgeHeld?: boolean | undefined;
@@ -1584,6 +1642,30 @@ export async function handleCrossPostMessage(input: {
         'Pass targetCats: ["catHandle"] OR add a line-start @catHandle in content. ' +
         'Without routing, the cross-thread message would land in the target thread but trigger no cat session.',
     );
+  }
+  if (input.localReviewVerdict) {
+    if (!input.clientMessageId) {
+      return errorResult('cross_post_message localReviewVerdict requires clientMessageId.');
+    }
+    if (!input.reviewedHeadSha) {
+      return errorResult('cross_post_message localReviewVerdict requires the exact reviewedHeadSha.');
+    }
+    if (!hasCompleteLocalReviewAnchor(input)) {
+      return errorResult(
+        'cross_post_message localReviewVerdict requires reviewSubjectRef plus a valid acceptedSourceRef and acceptedRevision.',
+      );
+    }
+    if (input.action || input.proposedAction || input.coordination) {
+      return errorResult(
+        'cross_post_message localReviewVerdict must use ordinary A2A without action, proposedAction, or coordination.',
+      );
+    }
+  }
+  if (input.reviewedHeadSha && !input.localReviewVerdict) {
+    return errorResult('cross_post_message reviewedHeadSha requires localReviewVerdict.');
+  }
+  if (!input.localReviewVerdict && hasAnyLocalReviewAnchor(input)) {
+    return errorResult('cross_post_message accepted-source fields require localReviewVerdict.');
   }
   if (input.action) {
     const parsedAction = executableActionSuccessorMetadataSchema.safeParse(input.action);
@@ -1629,6 +1711,9 @@ export async function handleCrossPostMessage(input: {
     ...(input.coordination ? { coordination: input.coordination } : {}),
     ...(input.localReviewVerdict ? { localReviewVerdict: input.localReviewVerdict } : {}),
     ...(input.reviewedHeadSha ? { reviewedHeadSha: input.reviewedHeadSha } : {}),
+    ...(input.reviewSubjectRef ? { reviewSubjectRef: input.reviewSubjectRef } : {}),
+    ...(input.acceptedSourceRef ? { acceptedSourceRef: input.acceptedSourceRef } : {}),
+    ...(input.acceptedRevision ? { acceptedRevision: input.acceptedRevision } : {}),
     ...(input.action ? { action: input.action } : {}),
     ...(input.proposedAction ? { proposedAction: input.proposedAction } : {}),
     ...(input.acknowledgeHeld ? { acknowledgeHeld: true } : {}),
@@ -1667,11 +1752,10 @@ function validateCrossPostProposedAction(input: {
   if (
     input.proposedAction.replace ||
     input.proposedAction.returnToPredecessor ||
-    input.proposedAction.reviewReentry ||
     input.proposedAction.claimOrigin === 'existing_standing'
   ) {
     return errorResult(
-      'cross_post_message proposedAction supports only a new structured transfer; use direct action for replacement, return, re-entry, or existing standing.',
+      'cross_post_message proposedAction supports only a new structured transfer; use direct action for replacement, return, or existing standing.',
     );
   }
   if (input.proposedAction.mode === 'single' && input.targetCats.length !== 1) {
@@ -2299,7 +2383,6 @@ export const multiMentionInputSchema = {
         'Action-scoped calls require idempotencyKey. Fallback uses replace with the active leaseId+generation and succeeds only after server-recorded terminal/unavailable/cancel evidence. ' +
         'A grounded existing holder may self-claim with claimOrigin=existing_standing + groundingEvidenceRef. ' +
         'New claims require terminalPredicate typed parameters; server-side Evidence→Verdict, not response text, ends the action. ' +
-        'A completed review lease can continue on a fresh exact HEAD only with reviewReentry reason behavioral_delta, stale_or_blocking, or explicit_matrix_route plus durable evidenceRef; omit reviewReentry for the initial review. ' +
         'A mismatched single holder may atomically return to the persisted predecessor with returnToPredecessor; in parallel mode the same disposition terminates only the rejecting holder. Failed single-return delivery stays pending for recovery. ' +
         EXECUTABLE_ACTION_SUCCESSOR_CONTRACT_DESCRIPTION +
         ' ' +
@@ -2507,6 +2590,12 @@ export const proposeThreadInputSchema = {
     .describe(
       'Optional F128 reporting contract for the sub-thread (AC-AA1: default is final-only). final-only (default): report a summary once on completion via cross_post with routing credentials. none (autonomous): downstream self-governs, no required report-back (only escalate operator/blocker/irreversible/cross-feature conflict per house rules). state-transitions: report at each phase boundary. blocking-ack: wait for source-thread ack at each blocker. Triage/dispatch → none; fork-and-return needing a summary → final-only.',
     ),
+  declaredWorkMode: z
+    .enum(['subtask', 'parallel', 'investigation', 'standalone'])
+    .optional()
+    .describe(
+      'Optional F277 placement role. subtask: sustained child work under the source thread; parallel: sustained same-group parallel workstream; investigation: one-off related investigation; standalone: keep the exact birth/source audit but do not continuously group it with the source thread. This is independent from reportingMode and can be changed by the user before approval.',
+    ),
   parentThreadId: z.string().min(1).optional().describe('Optional parent thread ID. Defaults to the current thread.'),
   projectPath: z
     .string()
@@ -2530,6 +2619,7 @@ export async function handleProposeThread(input: {
   preferredCats?: string[] | undefined;
   initialMessage?: string | undefined;
   reportingMode?: 'none' | 'final-only' | 'state-transitions' | 'blocking-ack' | undefined;
+  declaredWorkMode?: 'subtask' | 'parallel' | 'investigation' | 'standalone' | undefined;
   parentThreadId?: string | undefined;
   projectPath?: string | undefined;
   clientRequestId?: string | undefined;
@@ -2545,6 +2635,7 @@ export async function handleProposeThread(input: {
   if (input.preferredCats?.length) body.preferredCats = input.preferredCats;
   if (input.initialMessage) body.initialMessage = input.initialMessage;
   if (input.reportingMode) body.reportingMode = input.reportingMode;
+  if (input.declaredWorkMode) body.declaredWorkMode = input.declaredWorkMode;
   if (input.parentThreadId) body.parentThreadId = input.parentThreadId;
   if (input.projectPath) body.projectPath = input.projectPath;
 
@@ -3212,7 +3303,7 @@ export const callbackTools = [
       'Output: the message is persisted in the principal-selected thread; routed targets are queued, and action conflicts return safe_wait without creating work. ' +
       'GOTCHA: action requires explicit clientMessageId + exactly one targetCats entry; ordinary single-cat notifications do not need action. ' +
       'For a direct Claim/Release chain, pass coordination.phase=active on work hops and terminal on the final delivery; terminal recipients may clean-stop without another @. ' +
-      'For a local review terminal, put localReviewVerdict on that same post; the carrier fast path derives the exact lease/HEAD/route. If the invocation no longer carries the lease, also provide reviewedHeadSha: the server resolves only the inherited coordination subject + reviewer identity against the canonical active lease, and the HEAD fact grants no authority. Public prose is never parsed. ' +
+      'For a local review result, route an ordinary @author message with localReviewVerdict + exact reviewedHeadSha + reviewSubjectRef + acceptedSourceRef + acceptedRevision + clientMessageId. This durable fact needs no action lease, coordination generation, replacement, or issuer route. Public prose is never parsed. ' +
       'Existing standing uses claimOrigin="existing_standing" + groundingEvidenceRef; rejected custody uses returnToPredecessor and targets the persisted predecessor. ' +
       'GOTCHA: structured action metadata currently requires invocation-token auth; agent-key callers fail closed with the non-retryable action_agent_key_unsupported status and never send an unfenced fallback. ' +
       'F247: gpt-pro agent-key returns copy only replyTo=sourceMessageId from the runtime delta; the server admits it only when an exact server-custodied dispatch grant exists. ' +
@@ -3420,7 +3511,7 @@ export const callbackTools = [
       'GOTCHA: Requires threadId — use feat_index/list_threads plus thread truth to verify the exact owning thread; never guess a nearby thread. ' +
       'PAW-FEEL: The original [爪感差: ...] message is already collected. Cross-post only a marker-free sourceMessageId reference to a verified owner; if none exists, use cat_cafe_propose_thread (F128). New responsibility uses effectClass=assign_work plus proposedAction for Approval Hub review. ' +
       'GOTCHA: For Claim/Release coordination, pass coordination.phase=active on Claim/work hops and terminal on Release. ' +
-      'For a local review terminal, include localReviewVerdict on that same cross-post; the carrier fast path settles the invocation-bound exact generation. If the invocation no longer carries the lease, also provide reviewedHeadSha so the server can resolve only the inherited coordination subject + reviewer identity against the canonical active lease; the HEAD fact grants no authority and prose is never parsed. ' +
+      'For a local review result, route one ordinary @author cross-post with localReviewVerdict + exact reviewedHeadSha + reviewSubjectRef + acceptedSourceRef + acceptedRevision + clientMessageId. This durable fact needs no action lease, coordination generation, replacement, or issuer route; prose is never parsed. ' +
       'The server carries a stable id across active hops; a direct courtesy ACK after terminal is recorded without waking another cat. ' +
       'If terminal reveals genuinely new work, start a new coordination with phase=active instead of ACKing the closed chain. ' +
       'GOTCHA: For a direct named external action, pass action + explicit clientMessageId + targetCats. For operator-gated new responsibility, pass proposedAction with effectClass=assign_work instead; action and assign_work remain mutually exclusive. ' +

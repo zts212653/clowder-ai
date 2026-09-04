@@ -5,6 +5,7 @@ import {
   replayEvolutionProgramEvents,
 } from '@cat-cafe/shared';
 import type { EvolutionAttributionExplanationV1 } from './attribution-explanation.js';
+import { type EvolutionProgramLineageV1, projectEvolutionProgramLineage } from './change/program-lineage.js';
 import { projectEvolutionAttribution } from './program-attribution-projection.js';
 import type { ProgramObservationBlocker } from './program-join-validator.js';
 import {
@@ -54,6 +55,8 @@ export interface EvolutionProgramProjectionV1 extends EvolutionProgramStateV1 {
   observation: EvolutionObservationProjection;
   /** Null until this Cycle has an attribution; never carried over from a closed Cycle. */
   attribution: EvolutionAttributionExplanationV1 | null;
+  /** Ref-only F246/F266/asset-owner causal graph. */
+  lineage: EvolutionProgramLineageV1;
 }
 
 const missingConstitution: Array<{
@@ -191,5 +194,6 @@ export function projectEvolutionProgram(
     nextAction: nextAction(state, blockers),
     observation: projectEvolutionObservation(events, options.triggerRegistration, options.observationBlockers),
     attribution: projectEvolutionAttribution(events),
+    lineage: projectEvolutionProgramLineage(events),
   };
 }

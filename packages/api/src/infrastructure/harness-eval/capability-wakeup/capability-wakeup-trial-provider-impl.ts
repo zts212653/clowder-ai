@@ -11,7 +11,11 @@ import {
   classifyCapabilityWakeupTrials,
   evaluateCapabilityWakeupTrace,
 } from './eval-capability-wakeup-adapter.js';
-import type { ClassifiedCapabilityWakeupTrial } from './eval-capability-wakeup-types.js';
+import type {
+  CapabilityPromptEvent,
+  CapabilityPromptUnavailableEvent,
+  ClassifiedCapabilityWakeupTrial,
+} from './eval-capability-wakeup-types.js';
 
 /**
  * F192 Phase H 收尾 PR-2 — replay/reclassify provider impl (砚砚 R1 P1).
@@ -74,9 +78,25 @@ export interface SkillLoadEventReader {
   readBySession(sessionId: string): Promise<SkillLoadedEvent[]>;
 }
 
+export interface CapabilityWakeupPromptReader {
+  read(input: {
+    sessionId: string;
+    threadId: string;
+    catId: string;
+    userId: string;
+    invocationId: string;
+  }): Promise<CapabilityWakeupPromptReadResult>;
+}
+
+export type CapabilityWakeupPromptReadResult =
+  | { status: 'available'; sourceMessageId: string; content: string }
+  | { status: 'historical_unavailable'; reason: 'prompt_message_ids_unavailable' }
+  | { status: 'rejected'; reason: string };
+
 export interface CapabilityWakeupTrialProviderImplDeps {
   sessionStore: SessionRecordReader;
   transcriptReader: TranscriptEventReader;
+  promptReader: CapabilityWakeupPromptReader;
   toolEventLog: ToolEventReader;
   skillLoadEventLog: SkillLoadEventReader;
   sessionEnumerator?: SessionWindowEnumerator;
@@ -94,6 +114,7 @@ type CapabilityWakeupResolvedSession = {
 export class CapabilityWakeupTrialProviderImpl implements CapabilityWakeupTrialProvider {
   private readonly sessionStore: SessionRecordReader;
   private readonly transcriptReader: TranscriptEventReader;
+  private readonly promptReader: CapabilityWakeupPromptReader;
   private readonly toolEventLog: ToolEventReader;
   private readonly skillLoadEventLog: SkillLoadEventReader;
   private readonly sessionEnumerator?: SessionWindowEnumerator;
@@ -103,11 +124,13 @@ export class CapabilityWakeupTrialProviderImpl implements CapabilityWakeupTrialP
     if (!deps.sessionStore) throw new Error('CapabilityWakeupTrialProviderImpl: missing required port sessionStore');
     if (!deps.transcriptReader)
       throw new Error('CapabilityWakeupTrialProviderImpl: missing required port transcriptReader');
+    if (!deps.promptReader) throw new Error('CapabilityWakeupTrialProviderImpl: missing required port promptReader');
     if (!deps.toolEventLog) throw new Error('CapabilityWakeupTrialProviderImpl: missing required port toolEventLog');
     if (!deps.skillLoadEventLog)
       throw new Error('CapabilityWakeupTrialProviderImpl: missing required port skillLoadEventLog');
     this.sessionStore = deps.sessionStore;
     this.transcriptReader = deps.transcriptReader;
+    this.promptReader = deps.promptReader;
     this.toolEventLog = deps.toolEventLog;
     this.skillLoadEventLog = deps.skillLoadEventLog;
     this.sessionEnumerator = deps.sessionEnumerator;
@@ -137,6 +160,11 @@ export class CapabilityWakeupTrialProviderImpl implements CapabilityWakeupTrialP
       const sessionId = sessionRef.sessionId;
       const session = await this.resolveSessionRecord(sessionRef, scope);
       const transcriptEvents = await this.readAllTranscriptEvents(sessionId, session.threadId, session.catId);
+      const { promptEvents, promptUnavailableEvents } = await this.readPromptEvents(
+        sessionId,
+        session,
+        transcriptEvents,
+      );
       // PR #3613 explicit decision (gpt52 R1 OQ): tool-event-log is now capped
       // at the newest 2000 events per thread, so this thread-scoped read is
       // "recent 2000 only" while transcript/skill events stay session-scoped.
@@ -153,6 +181,8 @@ export class CapabilityWakeupTrialProviderImpl implements CapabilityWakeupTrialP
         catId: session.catId,
         ...(family ? { family } : {}),
         transcriptEvents,
+        promptEvents,
+        promptUnavailableEvents,
         toolEvents,
         skillLoadEvents,
       });
@@ -182,6 +212,48 @@ export class CapabilityWakeupTrialProviderImpl implements CapabilityWakeupTrialP
       throw new Error(`session_not_found: ${sessionRef.sessionId}`);
     }
     return session;
+  }
+
+  private async readPromptEvents(
+    sessionId: string,
+    session: CapabilityWakeupResolvedSession,
+    transcriptEvents: TranscriptEvent[],
+  ): Promise<{
+    promptEvents: CapabilityPromptEvent[];
+    promptUnavailableEvents: CapabilityPromptUnavailableEvent[];
+  }> {
+    if (!session.userId) return { promptEvents: [], promptUnavailableEvents: [] };
+    const invocationStarts = new Map<string, number>();
+    for (const event of transcriptEvents) {
+      if (event.sessionId !== sessionId || event.threadId !== session.threadId || event.catId !== session.catId)
+        continue;
+      if (!event.invocationId) continue;
+      const existing = invocationStarts.get(event.invocationId);
+      invocationStarts.set(event.invocationId, existing === undefined ? event.t : Math.min(existing, event.t));
+    }
+
+    const prompts: CapabilityPromptEvent[] = [];
+    const unavailablePrompts: CapabilityPromptUnavailableEvent[] = [];
+    for (const [invocationId, timestamp] of invocationStarts) {
+      const prompt = await this.promptReader.read({
+        sessionId,
+        threadId: session.threadId,
+        catId: session.catId,
+        userId: session.userId,
+        invocationId,
+      });
+      if (prompt.status === 'available') {
+        prompts.push({ invocationId, timestamp, sourceMessageId: prompt.sourceMessageId, content: prompt.content });
+      } else {
+        unavailablePrompts.push({
+          invocationId,
+          timestamp,
+          reason: prompt.reason,
+          status: prompt.status,
+        });
+      }
+    }
+    return { promptEvents: prompts, promptUnavailableEvents: unavailablePrompts };
   }
 
   private async resolveSessionRefs(

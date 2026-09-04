@@ -7,7 +7,7 @@ created: 2026-08-28
 description: "对任意家内或外部的受授权可变对象一句话开启受治理的进化：薄联邦控制面持有 Program 编排与 owner refs，由对象自己的 owner/Agent 在原系统写回并回传 outcome；人握价值、冻结与批准权，全程可感知，一切资产可回滚或退役。"
 description_source: human
 description_author: codex-sol
-description_updated_at: 2026-09-02T01:26:00-07:00
+description_updated_at: 2026-09-02T18:14:16-07:00
 mcp_admission_status: accepted
 mcp_admission_ref: "file:docs/features/F311-capability-evolution-workspace.md"
 mcp_admission_claims:
@@ -46,11 +46,16 @@ mcp_admission_claims:
     resourceFamily: evolution-program
     boundaryKind: resource-entry
     decision: accepted
+  - ref: "file:docs/features/F311-capability-evolution-workspace.md"
+    toolName: cat_cafe_advance_evolution_program_change
+    resourceFamily: evolution-program
+    boundaryKind: resource-entry
+    decision: accepted
 ---
 
 # F311: Capability Evolution Workspace（Meta-RSI 产品控制面）
 
-> **Status**: in-progress (v5 final-vision phases; Gate 0A + Phase 1–2 landed; Phase 2 Alpha loaded-runtime accepted; Phase 3 landed (AC-31–34 met; F267 owner-contract extended additively — see Phase 3 status block); Phase 4 next) | **Product phase owner**: Maine Coon (@codex-sol, gpt-5.6-sol)（本轮 operator 指定执行） | **Architecture co-creator/reviewer**: Ragdoll (@fable5, claude-fable-5) | **Priority**: P0
+> **Status**: in-progress (v5 final-vision phases; Gate 0A + Phase 1–3 landed; Phase 4 implementation landed; real E0 Alpha constitution complete, while AC-41–44 acceptance remains open on real observation/authorization/outcome truth) | **Product phase owner**: Maine Coon (@codex-sol, gpt-5.6-sol)（本轮 operator 指定执行） | **Architecture co-creator/reviewer**: Ragdoll (@fable5, claude-fable-5) | **Priority**: P0
 >
 > **operator signoff**: 2026-08-28 [thread-id] `0001787926983474`（今年双旗舰之一，与 F310 Growing 并列）。
 > **v1 修订**: 2026-08-28 owner review by @codex-sol（`0001787928166311` 后续 verdict，CHANGES_REQUESTED 六 P1）——核心纠偏：**引用不是所有权**；F311 是薄联邦控制面，不私藏任何领域真相。
@@ -64,6 +69,7 @@ mcp_admission_claims:
 > **开放世界代理式进化愿景澄清**: 这不是 2026-09-02 临时扩出的新方向。operator 在 2026-08-28 已明确把“家里的记忆系统 / 外部托管的记忆系统 / Claude Code Harness”并列为任意对象（`0001787926057722-000244-97daafa1`），并把“外部托管”定义为 day-1 schema 约束。2026-09-02 再次钉死执行含义（`0001788337265835-000643-0a6a598a`）：对象和 Harness 不必属于 Clowder AI；获得对象 owner 明确授权后，可由该对象自己的 Developer/PM Agent 在其原仓库或原系统修改可变资产、测试、发布与回滚，F311 只编排 Program、Approval 与 refs/lineage 并接收可信 outcome receipt。F311 不搬运外部真相、不凭空扩权，也不把执行代理升级为价值裁判。
 > **Phase 1 landed + Alpha accepted**: 2026-09-01 PR #4172 合入 `main`（merge `ed998da4088052a307ea6478a87cef6f86d8f215`）；非作者 @opus5 对 exact `f32e6d888179edc791cc47a9c11996a801b2cb0c` 最终 **APPROVED**，canonical `pnpm gate` PASS。Alpha loaded journey 在 thread `[thread-id]` 只输入“我们来进化 F311 Alpha 聊天入口验收”，猫经正式 MCP action 创建 `evolution-program:407070292b9ce01f374c523ef18de326`；REST、猫动作与 F307 Workbench 读取同一 Redis append-only truth。另以三个 Program 验证 pause/resume/needs_expert/withdraw/retention 审计、409 projection 恢复、terminal 不自动 TTL、active forget 原子 withdraw+retention 与四键同 TTL，以及进程重启后完整 replay。该验收运行于 Alpha（3011/3012/4111/6398），不冒充 production runtime deployment。
 > **Phase 1 production acceptance repair**: 2026-09-01 operator 现场验收发现 Home 直接倾倒机器化 Program projection，缺少一等产品入口；PR #4184 以 `dfcfa666d2ed6727c02a9e4242caf7d32565417a` 合入修复，非作者 @opus5 对 authored exact HEAD `37b8a55fd64cbba7775c8ea8484cc4e8ccf96719` 最终 **APPROVED**。Post-merge Alpha 在 exact `dfcfa666d2` 上真实点通 Workspace Home → 一等“能力进化”入口 → 专属 Capability Evolution Workspace → 人话 Program 标题、阶段与下一步 → typed blocker、历史与谱系 → canonical 生命周期 surface，并对 `evolution-program:407070292b9ce01f374c523ef18de326` 执行 pause/resume，API 两次 command 均 200、sequence `1→2→3`。该修复只改 Web presentation/admission，没有触碰 Phase 2 Program owner/composition 或 Phase 3 Attribution。
+> **Phase 1 用户入口与软层终态修复**: 2026-09-03 PR #4266（merge `d062840b54`）让 Workspace 主动作显式绑定目标对话、预览用户语言并保留既有草稿，把 owner/certificate/F 号、raw blocker 与 lineage 折叠到技术详情；PR #4270（merge `c586782a78`）加入 capability-evolution skill、catalog/wakeup 接线与信息问句/具体目标分流；PR #4275（merge `e294f443dc`）再把 `eval:capability-wakeup` 的机会判断绑定到 owner-scoped 触发消息，拒绝引用、截断证据与 assistant echo 伪 fallback。三笔均由非作者 @opus5 对最终实质 HEAD **APPROVED**。Fresh Alpha thread `[thread-id]` 先问“能自进化什么”时零 Program 写入，再说“我们来进化视频生成能力”时真实调用 canonical start tool，创建 `evolution-program:3285bc60902efcda2c259837430cac37` 并出现在 Workspace；sealed session `f0947e3f-9348-48f8-9aad-cb194cdb223e` 的真实 replay 产出恰好一条具体目标 trial。当前规则度量“消息以进化请求开头”；已有草稿后追加 CTA 的消息保守不进入分母，不能把较低 trial 数解释成较低产品使用量。
 >
 
 > **富文本导览**：[F311 终态施工地图：Phase 0 → 6](assets/F311/f311-final-phases-v5.html)——以用户旅程解释每个 Phase 的永久产品器官、用户收益、完成标准与 owner 边界。原始 Clowder AI 富文本锚点：`[thread-id]#0001788145036222-000045-f449310b`。
@@ -72,6 +78,8 @@ mcp_admission_claims:
 > 按风险只运行 API build、五个相关 suite（24/24）、diff check 与 staged Biome，未重复运行 full gate/review。Alpha 在 exact merge 上加载成功（Frontend/API/Redis 3011/3012/6398）；三个 canonical Program 均从真实投影返回 F192 event/quota/time 注册、weekly `nextEvaluationAt` 与 owner drilldown。
 > 当前没有可用 F267 proof record，F281 episode 也为空，因此真实 Program 诚实保持 typed `insufficient`，列出 trajectory/异质 owner surface/evidence role/consumption/optimizer exposure/promotion holdout 缺口；未追加假 ref、未复制 payload、未造 mock。
 > Hub visible-page receipt 因没有 matching client 未确认，故本次只声明 loaded-runtime/API acceptance，不冒充已完成可见点击验收。
+>
+> **Phase 4 implementation landed; real E0 Alpha acceptance is honestly incomplete**: 2026-09-02 PR #4254 合入 `main`（merge `2c2176119a35dc0d4ca6e2fa3b81ed7a82d1403f`）；非作者 @opus5 对 exact `89aa70bc3ff1cb15955e4fa121eca1aec2c6e84f` 最终 **APPROVED**、无 P1/P2，canonical `pnpm gate` PASS（1,097s）。同批落地 ref-only change bridge/lineage、exact Approval snapshot、owner receipt + fresh outcome join、五种代谢裁决与 F307 permanent surface；F246/F266/F313/asset owner 继续分别持有 Approval、dispatch/custody/outcome、mutation/receipt truth，F311 不建 shadow store。F267 Owner Repair 随后以 PR #4263 合入真实 E0 certificate/result/decision proof 与四角色 refs（merge `43ad070af04f37874ef1702571ed492c45414a2e`）；measurement 诚实保持两项指标 `n=0 · null · not_estimable`、decision=`insufficient`、唯一 action=`keep_observe`，且无 observation/consumption/exposure/holdout owner object。正式 Alpha 加载该 exact main 后，经公开 `cat_cafe_constitute_evolution_program` 将真实 Program `evolution-program:bcc336788a7df9d6075b1efb4c0a7e68` 从 `constituting · sequence=1` 推进至 `instrumenting · sequence=2`，三证书、value owner 与四角色均为 owner refs，constitution blockers 清零。其 observation 仍列出 trajectory、异质 owner surfaces、evidence role、consumption、optimizer exposure 与 promotion holdout 六项真实缺口，change lineage 仍为空。因而 AC-41–44 继续不勾选：没有 owner authorization、真实 audience observation、可开的评估轮、intervention/Approval、mutation receipt、fresh outcome 或 rollback/sunset/no-change ledger，不能把建制完成或 n=0 published-insufficient 冒充整环验收。
 
 Architecture cell: capability-evolution-control
 Map delta: new cell landed via Gate 0A（薄控制面）——它**只拥有**：Program identity/lifecycle、Goal/claim/经济页、各领域资产的 **owner refs**、调度与阶段投影、keep/tune/rollback/sunset 编排状态。上述用户可见生命周期是 **TTL=0、跨重启恢复的 canonical Program truth**；瞬时 scheduler/cache 只能重建投影，不能决定生命周期。**不拥有**：rubric 内容、原始轨迹、verdict lifecycle、资产版本、写回结果、通用 feedback/证据消费账本。
@@ -289,7 +297,7 @@ Program canonical truth 从第一次创建起 active/terminal 均 `TTL=0`、跨�
 
 ### Phase 4: 受治理写回、复验与代谢（Change & Learn）
 
-把“分析”闭成真实 outcome：只有请求真实 change/adopt/continue-investment 的 intervention 才进入 F246 Approval；`observe/insufficient` 自动复查且零审批。Approval 绑定 exact target/version 后，canonical asset owner 执行 mutation/rollback 并返回 receipt；F266/F313 负责 approval-gated dispatch、复评与 outcome closure；F311 只追加 AssetVersionRef、证据→干预→批准→写回→结果的因果边，并编排 `keep / tune / rollback / sunset / no_change`。
+把“分析”闭成真实 outcome：只有请求真实 change/adopt/continue-investment 的 intervention 才进入 F246 Approval；`observe/insufficient` 自动复查且零审批。Approval 绑定 exact target/version 后，canonical asset owner 执行 mutation/rollback 并返回 receipt；若 owner 判定本次无需 mutation，则返回独立的 no-change intervention receipt、保持 exact version 不变，并在 receipt 后重新测量，禁止伪造 mutation 或 loaded runtime。F266/F313 负责 approval-gated dispatch、复评与 outcome closure；F311 只追加 AssetVersionRef、证据→干预→批准→写回→结果的因果边，并编排 `keep / tune / rollback / sunset / no_change`。
 
 这一协议从设计上不限定执行者必须是家里的猫：任何已接入且 owner-authenticated 的 Developer/PM Agent 都可成为 owner 的执行代理，但只能操作 owner-backed adapter contract 允许的 exact surface。Phase 4 先闭合 owner-agnostic 的授权与结果协议；Phase 5 再以真实外部对象证明跨仓、跨 runtime 也能遵守同一协议。
 
@@ -398,6 +406,8 @@ Phase 6 的**产品能力**必须交付，但“Meta 机制已经提高能力”
 - [ ] AC-43: 一条 E0 合格的真实 Program 从一句话走到 merged+loaded 后的新鲜 outcome；合入的每个新增件都是终态生产架构的一部分，无 demo 删除/重写清单；首个对象不进入核心 schema→Why②
 - [ ] AC-44: `keep/tune/rollback/sunset/no_change` 均可执行并回链；至少一次真实 rollback、sunset 或 no-change 完整入账，包含 AssetVersionRef、证据、裁决、receipt 与后续结果→Why①②
 
+> 2026-09-03 Phase 4 状态：**代码与 loaded-runtime contract 已达成，真实 E0 已完成 owner-backed measurement publication 与 Alpha 建制，outcome acceptance 未达成**。PR #4254/merge `2c2176119a`、exact-HEAD review 与 full gate 证明确定契约；PR #4263/merge `43ad070af0` 关闭旧 `source_owner_manifest_missing`，但 owner 结论仍是 `n=0 · insufficient · keep_observe`。Alpha 在 exact `43ad070af0` 上通过公开猫动作把 Program 推进为 `instrumenting · sequence=2`，constitution blockers 清零，observation 六项缺口与 `lineage.cycles[0].changes=[]` 原样保留。当前终结条件是 source owner 取得真实 audience observation、consumption/exposure/holdout 等 owner proof，并由 operator 在独立高权限边界授权 production epoch/runtime 与 exact target owner action；此前不能合法开评估轮，更不能产生 Approval、mutation receipt、fresh outcome 或 rollback/sunset/no-change 入账。四项 AC 保持未勾选。
+
 ### Phase 5（多对象联邦与外部适配）
 - [ ] AC-51: 同一未增加对象特有字段的核心 schema 承载至少两个异质家内对象类别，各自走完整 Program journey；F307 同屏编排、domain truth 仍归 owner→Why②
 - [ ] AC-52: 一个外部托管对象通过 F202/F292/F302 owner-backed adapter 走完整 journey；owner-bound Agent 在该对象的 canonical repo/system 原地执行获授权 mutation，并返回 version/change/review/deploy/rollback 与 fresh outcome receipts；F311 只持 refs/lineage，不私建外部资产或 governance 状态→Why①②
@@ -503,7 +513,7 @@ Phase 6 的**产品能力**必须交付，但“Meta 机制已经提高能力”
 ## Review Gate
 
 - Phase 0: v4 已获 @fable5 final seal，Gate 0A 已完成；ownership 与 production-only 负向契约继续生效
-- Phase 1–2: PR #4172 + production acceptance repair PR #4184 + PR #4196 已合入；AC-11–24 closed。Phase 2 已完成 Alpha loaded-runtime/API acceptance 并诚实保留 owner-evidence 缺口；Phase 3–6 继续按 v5 终态器官顺序实施。每个 Phase 的代码按 SOP 风险路由，spec/plan 变更走 co-creation docs；首个 E0 目标只在 Phase 4 production acceptance 前必须存在
+- Phase 1–3: PR #4172 + production acceptance repair PR #4184 + PR #4196 + PR #4175 已合入；AC-11–34 closed。Phase 4 implementation PR #4254 与 F267 E0 artifact PR #4263 已合入；Alpha 已完成 owner-backed constitution，但真实 E0 仍在 audience observation、consumption/exposure/holdout proof、owner authorization 与 fresh-outcome evidence ceiling，故 AC-41–44 与 Phase 4 production acceptance 继续 open。每个 Phase 的代码按 SOP 风险路由，spec/plan 变更走 co-creation docs；不得以 merge、loaded runtime、constitution 或 n=0 inputs 替代 fresh outcome
 - Close Gate: 必须有 loaded-runtime 全闭环证据；非作者愿景守护复核确认不存在对象特化、shadow truth 或 demo 删除清单
 
 ## Tips Contribution（F244）

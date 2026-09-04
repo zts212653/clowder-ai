@@ -6,6 +6,7 @@ import path from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { chromium } from '../../../ppt-forge/node_modules/playwright/index.mjs';
+import { createNextDevTestEnvironment } from './next-dev-test-environment.mjs';
 
 const WEB_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const NEXT_BIN = path.resolve(WEB_ROOT, '../../node_modules/next/dist/bin/next');
@@ -51,9 +52,10 @@ test(
   async () => {
     const port = await findFreePort();
     const output = [];
+    const nextDev = await createNextDevTestEnvironment('live-message-id-selection');
     const server = spawn(process.execPath, [NEXT_BIN, 'dev', '-H', '127.0.0.1', '-p', String(port)], {
       cwd: WEB_ROOT,
-      env: { ...process.env, NEXT_TELEMETRY_DISABLED: '1', NODE_ENV: 'development' },
+      env: nextDev.env,
       stdio: ['ignore', 'pipe', 'pipe'],
     });
     server.stdout.on('data', (chunk) => output.push(chunk.toString()));
@@ -171,6 +173,7 @@ test(
     } finally {
       await browser?.close();
       await stopServer(server);
+      await nextDev.cleanup();
     }
   },
 );

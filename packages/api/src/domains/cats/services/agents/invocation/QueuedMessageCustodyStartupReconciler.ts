@@ -1,4 +1,3 @@
-import { recoverLegacyLocalReviewContinuationAdmissions } from '../../../../ball-custody/LegacyLocalReviewContinuationStartupRecovery.js';
 import { WaitContinuationCarrierError } from '../../../../ball-custody/wait-continuation-carrier.js';
 import type { StoredMessage } from '../../stores/ports/MessageStore.js';
 import type { QueueEntry } from './InvocationQueue.js';
@@ -50,14 +49,6 @@ export class QueuedMessageCustodyStartupReconciler {
   async reconcile(): Promise<QueueCustodyStartupResult> {
     const scan = this.deps.messageStore.scanByDeliveryStatus;
     if (!scan) return emptyResult();
-
-    await recoverLegacyLocalReviewContinuationAdmissions({
-      messageStore: this.deps.messageStore,
-      ...(this.deps.legacyLocalReviewDispositionLeaseStore
-        ? { leaseStore: this.deps.legacyLocalReviewDispositionLeaseStore }
-        : {}),
-      log: this.deps.log,
-    });
 
     const queuedMessageIds = await scan.call(this.deps.messageStore, 'queued');
     const activeMessages: StoredMessage[] = [];

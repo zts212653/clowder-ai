@@ -23,10 +23,17 @@ vi.mock('@/components/workspace/ChangesPanel', () => ({
 }));
 
 vi.mock('@/components/capability-evolution/CapabilityEvolutionWorkspace', () => ({
-  CapabilityEvolutionWorkspace: ({ onOpenProgram }: { onOpenProgram: (programId: string) => void }) => (
+  CapabilityEvolutionWorkspace: ({
+    targetThreadId,
+    onOpenProgram,
+  }: {
+    targetThreadId: string | null;
+    onOpenProgram: (programId: string) => void;
+  }) => (
     <button
       type="button"
       data-testid="open-program-lifecycle"
+      data-target-thread-id={targetThreadId ?? 'none'}
       onClick={() => onOpenProgram('evolution-program:bcc336788a7df9d6075b1efb4c0a7e68')}
     >
       能力进化 Workspace
@@ -190,9 +197,32 @@ describe('F307 owner surface renderer', () => {
     act(() => container.querySelector<HTMLButtonElement>('[data-testid="open-program-lifecycle"]')?.click());
 
     expect(container.querySelector('[data-testid="open-program-lifecycle"]')).not.toBeNull();
+    expect(
+      container.querySelector('[data-testid="open-program-lifecycle"]')?.getAttribute('data-target-thread-id'),
+    ).toBe('thread-f311');
     expect(onOpenSurface).toHaveBeenCalledWith(
       createEvolutionProgramSurface('evolution-program:bcc336788a7df9d6075b1efb4c0a7e68'),
     );
+  });
+
+  it('passes an honest empty destination when a restored Capability Evolution workspace is unbound', () => {
+    const surface = createCapabilityEvolutionWorkspaceSurface();
+
+    act(() =>
+      root.render(
+        <F307OwnerSurfaceRenderer
+          surface={surface}
+          onOpenSurface={() => undefined}
+          onOpenArtifactWithReturn={() => undefined}
+          onRefreshSurface={() => undefined}
+          onRequestDetach={() => undefined}
+        />,
+      ),
+    );
+
+    expect(
+      container.querySelector('[data-testid="open-program-lifecycle"]')?.getAttribute('data-target-thread-id'),
+    ).toBe('none');
   });
 
   it('promotes the exact F232 Artifact selected from product Schedule', () => {

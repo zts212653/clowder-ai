@@ -15,9 +15,15 @@ import type {
   WriteOpportunityReentryCarrierV1,
 } from '@cat-cafe/shared';
 import {
+  acceptedRevisionSchema,
+  acceptedSourceRefSchema,
   asrPersonMemoryDynamicSceneEntryV1Schema,
+  catOwnedSeedCueCarrierV1Schema,
   deliveryDecisionCueCarrierV1Schema,
   isProviderSemanticEvent,
+  isValidAcceptedSource,
+  isValidReviewSubjectRef,
+  localReviewGitRevisionSchema,
   MessageBundleCarrierV1Schema,
   MessageContentsSchema,
   writeOpportunityPresentationRetryCarrierV1Schema,
@@ -186,7 +192,6 @@ type ExtraCarrierPersistence = ExtraCarrierPersistenceClassification<{
   crossPost: 'parsed';
   coordination: 'parsed';
   localReviewVerdict: 'parsed';
-  legacyLocalReviewDisposition: 'parsed';
   callbackDedup: 'parsed';
   targetCats: 'parsed';
   messageBundle: 'parsed';
@@ -210,26 +215,36 @@ function isNonEmptyString(value: unknown): value is string {
   return typeof value === 'string' && value.trim().length > 0;
 }
 
+function isOptionalLocalReviewHead(value: unknown): boolean {
+  return value === undefined || localReviewGitRevisionSchema.safeParse(value).success;
+}
+
+function isValidOptionalAcceptedSourceAnchor(candidate: Record<string, unknown>): boolean {
+  const values = [candidate.reviewSubjectRef, candidate.acceptedSourceRef, candidate.acceptedRevision];
+  if (values.every((value) => value === undefined)) return true;
+  if (values.some((value) => typeof value !== 'string')) return false;
+  const reviewSubjectRef = candidate.reviewSubjectRef as string;
+  const acceptedSourceRef = candidate.acceptedSourceRef as string;
+  const acceptedRevision = candidate.acceptedRevision as string;
+  return (
+    isValidReviewSubjectRef(reviewSubjectRef) &&
+    acceptedSourceRefSchema.safeParse(acceptedSourceRef).success &&
+    acceptedRevisionSchema.safeParse(acceptedRevision).success &&
+    isValidAcceptedSource(acceptedSourceRef, acceptedRevision)
+  );
+}
+
 function parseLocalReviewVerdictCarrier(value: unknown): StoredMessageExtra['localReviewVerdict'] {
   if (typeof value !== 'object' || value === null) return undefined;
   const candidate = value as Record<string, unknown>;
   const verdict = candidate.verdict;
-  const carrierlessLeaseFence = candidate.carrierlessLeaseFence as Record<string, unknown> | undefined;
   if (
     (verdict !== 'approved' && verdict !== 'changes_requested' && verdict !== 'commented') ||
     typeof candidate.clientMessageId !== 'string' ||
     candidate.clientMessageId.length === 0 ||
     candidate.clientMessageId.length > 200 ||
-    (candidate.reviewedHeadSha !== undefined &&
-      (typeof candidate.reviewedHeadSha !== 'string' ||
-        !/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/.test(candidate.reviewedHeadSha))) ||
-    (candidate.carrierlessLeaseFence !== undefined &&
-      (typeof candidate.carrierlessLeaseFence !== 'object' ||
-        candidate.carrierlessLeaseFence === null ||
-        !isNonEmptyString(carrierlessLeaseFence?.leaseId) ||
-        carrierlessLeaseFence.leaseId.length > 200 ||
-        !Number.isInteger(carrierlessLeaseFence?.generation) ||
-        Number(carrierlessLeaseFence.generation) < 1))
+    !isOptionalLocalReviewHead(candidate.reviewedHeadSha) ||
+    !isValidOptionalAcceptedSourceAnchor(candidate)
   ) {
     return undefined;
   }
@@ -237,51 +252,9 @@ function parseLocalReviewVerdictCarrier(value: unknown): StoredMessageExtra['loc
     verdict,
     clientMessageId: candidate.clientMessageId,
     ...(typeof candidate.reviewedHeadSha === 'string' ? { reviewedHeadSha: candidate.reviewedHeadSha } : {}),
-    ...(carrierlessLeaseFence
-      ? {
-          carrierlessLeaseFence: {
-            leaseId: carrierlessLeaseFence.leaseId as string,
-            generation: carrierlessLeaseFence.generation as number,
-          },
-        }
-      : {}),
-  };
-}
-
-function parseLegacyLocalReviewDispositionCarrier(value: unknown): StoredMessageExtra['legacyLocalReviewDisposition'] {
-  if (typeof value !== 'object' || value === null) return undefined;
-  const candidate = value as Record<string, unknown>;
-  if (
-    !isNonEmptyString(candidate.sourceMessageId) ||
-    candidate.sourceMessageId.length > 200 ||
-    !isNonEmptyString(candidate.leaseId) ||
-    candidate.leaseId.length > 200 ||
-    !Number.isInteger(candidate.generation) ||
-    Number(candidate.generation) < 1 ||
-    !isNonEmptyString(candidate.subjectRef) ||
-    candidate.subjectRef.length > 256 ||
-    !isNonEmptyString(candidate.reviewerCatId) ||
-    candidate.reviewerCatId.length > 100 ||
-    !isNonEmptyString(candidate.predecessorCatId) ||
-    candidate.predecessorCatId.length > 100 ||
-    typeof candidate.reviewedHeadSha !== 'string' ||
-    !/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/.test(candidate.reviewedHeadSha) ||
-    (candidate.verdict !== 'approved' && candidate.verdict !== 'changes_requested') ||
-    !isNonEmptyString(candidate.decisionId) ||
-    candidate.decisionId.length > 200
-  ) {
-    return undefined;
-  }
-  return {
-    sourceMessageId: candidate.sourceMessageId,
-    leaseId: candidate.leaseId,
-    generation: candidate.generation as number,
-    subjectRef: candidate.subjectRef,
-    reviewerCatId: candidate.reviewerCatId,
-    predecessorCatId: candidate.predecessorCatId,
-    reviewedHeadSha: candidate.reviewedHeadSha,
-    verdict: candidate.verdict,
-    decisionId: candidate.decisionId,
+    ...(typeof candidate.reviewSubjectRef === 'string' ? { reviewSubjectRef: candidate.reviewSubjectRef } : {}),
+    ...(typeof candidate.acceptedSourceRef === 'string' ? { acceptedSourceRef: candidate.acceptedSourceRef } : {}),
+    ...(typeof candidate.acceptedRevision === 'string' ? { acceptedRevision: candidate.acceptedRevision } : {}),
   };
 }
 
@@ -364,8 +337,12 @@ export function safeParseExtra(raw: string | undefined): StoredMessage['extra'] 
     }
 
     const deliveryDecision = deliveryDecisionCueCarrierV1Schema.safeParse(parsed.memoryCue?.deliveryDecision);
-    if (deliveryDecision.success) {
-      result.memoryCue = { deliveryDecision: deliveryDecision.data };
+    const catOwnedSeed = catOwnedSeedCueCarrierV1Schema.safeParse(parsed.memoryCue?.catOwnedSeed);
+    if (deliveryDecision.success || catOwnedSeed.success) {
+      result.memoryCue = {
+        ...(deliveryDecision.success ? { deliveryDecision: deliveryDecision.data } : {}),
+        ...(catOwnedSeed.success ? { catOwnedSeed: catOwnedSeed.data } : {}),
+      };
       hasField = true;
     }
 
@@ -494,17 +471,12 @@ export function safeParseExtra(raw: string | undefined): StoredMessage['extra'] 
       hasField = true;
     }
 
-    // #1371 PR1b: the typed verdict is the only settlement fact. Public prose
-    // is presentation, so Redis hydration must preserve this carrier exactly.
+    // #1371: the typed verdict is durable review evidence. Public prose is
+    // presentation, so Redis hydration must preserve this carrier exactly;
+    // merge-gate separately requires an exact reviewedHeadSha for authority.
     const localReviewVerdict = parseLocalReviewVerdictCarrier(parsed.localReviewVerdict);
     if (localReviewVerdict) {
       result.localReviewVerdict = localReviewVerdict;
-      hasField = true;
-    }
-
-    const legacyLocalReviewDisposition = parseLegacyLocalReviewDispositionCarrier(parsed.legacyLocalReviewDisposition);
-    if (legacyLocalReviewDisposition) {
-      result.legacyLocalReviewDisposition = legacyLocalReviewDisposition;
       hasField = true;
     }
 

@@ -11,7 +11,6 @@ import {
 } from '../helpers/redis-test-helpers.js';
 
 const REDIS_URL = process.env.REDIS_URL;
-const HEAD_SHA = 'a'.repeat(40);
 const REBUILD_MARKER_KEY = 'dispatch-proposal-canonical-admission-rebuild-completed-at';
 const REDIS_KEYS = [
   'dispatch-proposal:*',
@@ -28,13 +27,13 @@ const REDIS_KEYS = [
   'action:successor:*',
 ];
 
-function reviewAction(overrides = {}) {
+function implementAction(overrides = {}) {
   return {
-    subjectRef: 'pr:owner/repo#42',
-    actionFamily: 'review',
-    successorSlot: 'reviewer',
+    subjectRef: 'subject:task:canonical-admission-42',
+    actionFamily: 'implement',
+    successorSlot: 'implementer',
     mode: 'single',
-    terminalPredicate: { kind: 'review_delivered', headSha: HEAD_SHA },
+    terminalPredicate: { kind: 'task_done' },
     ...overrides,
   };
 }
@@ -152,7 +151,7 @@ describe(
         async resolveFreshness(predicate) {
           return {
             status: 'verified',
-            evidenceRef: `community:${predicate.subjectRef}:head:${HEAD_SHA}`,
+            evidenceRef: `task:${predicate.subjectRef}:active`,
             freshnessKey: predicate.freshnessKey,
           };
         },
@@ -213,7 +212,7 @@ describe(
         },
         payload: {
           threadId: fixture.target.id,
-          content: `@${targetCats[0]}\nReview exact HEAD ${action.terminalPredicate.headSha}.`,
+          content: `@${targetCats[0]}\nImplement ${action.subjectRef}.`,
           targetCats,
           clientMessageId,
           action,
@@ -223,7 +222,7 @@ describe(
 
     async function createCanonicalBlock(fixture, proposalId, overrides = {}) {
       const targetCats = overrides.targetCats ?? ['sonnet'];
-      const validated = validateDispatchProposedAction(overrides.action ?? reviewAction(), targetCats);
+      const validated = validateDispatchProposedAction(overrides.action ?? implementAction(), targetCats);
       const { proposal } = await fixture.proposalStore.create({
         proposalId,
         sourceInvocationId: overrides.sourceInvocationId ?? `later-invocation-${proposalId}`,
@@ -231,7 +230,7 @@ describe(
         targetThreadId: fixture.target.id,
         senderCatId: 'opus',
         ownerUserId: 'user-1',
-        content: 'A later proposal for the same review identity.',
+        content: 'A later proposal for the same implementation identity.',
         targetCats,
         clientMessageId: `proposal-${proposalId}`,
         proposedAction: validated.action,
@@ -277,15 +276,11 @@ describe(
       assert.equal(await redis.scard('action:successor:all'), 0);
     }
 
-    test('blocks a first-time review re-entry with a pending canonical decision before side effects', async (t) => {
+    test('blocks a first-time implementation dispatch with a pending canonical decision before side effects', async (t) => {
       const fixture = await createFixture(t);
       await createCanonicalBlock(fixture, 'review-reentry-pending');
 
-      const response = await post(
-        fixture,
-        'first-review-reentry',
-        reviewAction({ reviewReentry: { reason: 'stale_or_blocking', evidenceRef: 'message:stale-review' } }),
-      );
+      const response = await post(fixture, 'first-review-reentry', implementAction());
 
       assert.equal(response.statusCode, 409);
       assert.equal(response.json().kind, 'dispatch_negative_authorization_blocked');
@@ -310,7 +305,7 @@ describe(
       const response = await post(
         fixture,
         'first-existing-standing',
-        reviewAction({
+        implementAction({
           claimOrigin: 'existing_standing',
           groundingEvidenceRef: 'message:verified-standing',
         }),
@@ -333,7 +328,7 @@ describe(
       const response = await post(
         fixture,
         'unblocked-existing-standing',
-        reviewAction({
+        implementAction({
           claimOrigin: 'existing_standing',
           groundingEvidenceRef: 'message:verified-standing',
         }),
@@ -344,9 +339,9 @@ describe(
       assert.equal(fixture.auditEvents.length, 0);
       const lease = await fixture.leaseStore.getByIdentity({
         tenantScope: 'user-1',
-        subjectRef: 'pr:owner/repo#42',
-        actionFamily: 'review',
-        successorSlot: 'reviewer',
+        subjectRef: 'subject:task:canonical-admission-42',
+        actionFamily: 'implement',
+        successorSlot: 'implementer',
       });
       assert.equal(lease?.claimOrigin, 'existing_standing');
     });
@@ -355,7 +350,7 @@ describe(
       const fixture = await createFixture(t);
       await createActionlessBlock(fixture, 'held-actionless-pending');
 
-      const response = await post(fixture, 'first-structured-after-actionless', reviewAction());
+      const response = await post(fixture, 'first-structured-after-actionless', implementAction());
 
       assert.equal(response.statusCode, 409);
       assert.equal(response.json().kind, 'dispatch_negative_authorization_blocked');
@@ -372,7 +367,7 @@ describe(
       await createActionlessBlock(fixture, 'held-actionless-rejected');
       assert.ok(await fixture.proposalStore.reject('held-actionless-rejected', 'user-1'));
 
-      const response = await post(fixture, 'first-structured-after-actionless-rejection', reviewAction());
+      const response = await post(fixture, 'first-structured-after-actionless-rejection', implementAction());
 
       assert.equal(response.statusCode, 409);
       assert.equal(response.json().kind, 'dispatch_negative_authorization_blocked');
@@ -388,7 +383,7 @@ describe(
       const fixture = await createFixture(t);
       await createLegacyActionlessBlock(fixture, 'legacy-held-actionless-pending');
 
-      const response = await post(fixture, 'first-structured-after-legacy-actionless', reviewAction());
+      const response = await post(fixture, 'first-structured-after-legacy-actionless', implementAction());
 
       assert.equal(response.statusCode, 409);
       assert.equal(response.json().kind, 'legacy_dispatch_lineage_unresolved');
@@ -406,7 +401,7 @@ describe(
       const fixture = await createFixture(t);
       await createLegacyActionlessBlock(fixture, 'legacy-post-cutover-actionless', 1);
 
-      const response = await post(fixture, 'first-structured-post-legacy-cutover', reviewAction());
+      const response = await post(fixture, 'first-structured-post-legacy-cutover', implementAction());
 
       assert.equal(response.statusCode, 200);
       assert.equal(fixture.auditEvents.length, 0);
@@ -419,7 +414,7 @@ describe(
       assert.ok(await fixture.proposalStore.reject('legacy-mixed-actionless', 'user-1'));
       await createActionlessBlock(fixture, 'exact-mixed-actionless');
 
-      const response = await post(fixture, 'first-structured-after-mixed-actionless', reviewAction());
+      const response = await post(fixture, 'first-structured-after-mixed-actionless', implementAction());
 
       assert.equal(response.statusCode, 409);
       assert.equal(response.json().kind, 'dispatch_negative_authorization_blocked');
@@ -437,7 +432,7 @@ describe(
     test('replays an already admitted dispatch despite a later canonical decision', async (t) => {
       const fixture = await createFixture(t);
       const clientMessageId = 'replay-before-later-proposal';
-      const action = reviewAction();
+      const action = implementAction();
       const first = await post(fixture, clientMessageId, action);
       assert.equal(first.statusCode, 200);
       assert.equal(await redis.scard('action:successor:all'), 1);
@@ -450,68 +445,6 @@ describe(
       assert.equal(replay.json().status, 'duplicate');
       assert.equal(await redis.scard('action:successor:all'), 1);
       assert.equal(await redis.get(REBUILD_MARKER_KEY), null, 'replay must precede projection readiness');
-    });
-
-    test('continues an existing completed review lease despite an unrelated later proposal', async (t) => {
-      const fixture = await createFixture(t);
-      const first = await post(fixture, 'completed-review-lease', reviewAction());
-      assert.equal(first.statusCode, 200);
-
-      const lease = await fixture.leaseStore.getByIdentity({
-        tenantScope: 'user-1',
-        subjectRef: 'pr:owner/repo#42',
-        actionFamily: 'review',
-        successorSlot: 'reviewer',
-      });
-      assert.ok(lease);
-      const completed = await fixture.leaseStore.commitOutcome(lease.leaseId, {
-        generation: lease.generation,
-        catId: 'sonnet',
-        outcome: 'succeeded',
-        evidenceRef: 'local-review:exact-head:a',
-        now: Date.now(),
-      });
-      assert.equal(completed.outcome, 'recorded');
-      assert.equal(completed.lease.status, 'completed');
-      await createCanonicalBlock(fixture, 'unrelated-exact-block-after-completion', {
-        sourceInvocationId: fixture.auth.invocationId,
-        action: reviewAction({ subjectRef: 'pr:owner/unrelated#99' }),
-      });
-      await redis.del(REBUILD_MARKER_KEY);
-
-      const continued = await post(
-        fixture,
-        'continued-review-lease',
-        reviewAction({
-          terminalPredicate: { kind: 'review_delivered', headSha: 'b'.repeat(40) },
-          reviewReentry: {
-            reason: 'stale_or_blocking',
-            evidenceRef: 'message:stale-local-review-verdict',
-          },
-        }),
-      );
-
-      assert.equal(continued.statusCode, 200);
-      const persistedCompleted = await fixture.leaseStore.get(lease.leaseId);
-      assert.ok(persistedCompleted);
-      assert.equal(persistedCompleted.status, 'completed');
-      assert.equal(persistedCompleted.generation, 1);
-      assert.deepEqual(persistedCompleted.terminalPredicate, completed.lease.terminalPredicate);
-      assert.deepEqual(persistedCompleted.evidenceRefs, completed.lease.evidenceRefs);
-
-      const successor = await fixture.leaseStore.getByIdentity({
-        tenantScope: 'user-1',
-        subjectRef: 'pr:owner/repo#42',
-        actionFamily: 'review',
-        successorSlot: 'reviewer',
-      });
-      assert.ok(successor);
-      assert.notEqual(successor.leaseId, lease.leaseId);
-      assert.equal(successor.status, 'active');
-      assert.equal(successor.generation, 1);
-      assert.equal(successor.terminalPredicate.freshnessKey, `head:${'b'.repeat(40)}`);
-      assert.equal(successor.dispatchId, 'cross-post:continued-review-lease');
-      assert.equal(await redis.get(REBUILD_MARKER_KEY), null, 'existing lease must precede projection readiness');
     });
   },
 );

@@ -6,7 +6,7 @@ import {
   observeOrInsufficientEventV1Schema,
 } from './capability-evolution-diagnosis.js';
 import { evolutionObservationSetupV1Schema } from './capability-evolution-observation.js';
-import { assetVersionRefV1Schema, bounded, exactAssetVersionRefV1Schema, type OwnerTruthRefV1, ownerTruthRefV1Schema, strictEvent, timestampSchema } from './capability-evolution-refs.js';
+import { assetOwnerIdentity, assetVersionRefV1Schema, bounded, exactAssetVersionRefV1Schema, ownerTruthRefV1Schema, strictEvent, timestampSchema } from './capability-evolution-refs.js';
 
 export * from './capability-evolution-diagnosis.js';
 export * from './capability-evolution-refs.js';
@@ -50,6 +50,14 @@ const retentionSchema = z.discriminatedUnion('mode', [
     })
     .strict(),
 ]);
+
+const interventionReceiptLinkedEventV1Schema = strictEvent({
+  type: z.literal('intervention_receipt_linked'),
+  result: z.enum(['changed', 'no_change']),
+  interventionReceiptRef: ownerTruthRefV1Schema,
+  assetVersionRef: exactAssetVersionRefV1Schema,
+  loadedRuntimeRef: ownerTruthRefV1Schema.optional(),
+});
 
 export const EVOLUTION_PROGRAM_LIFECYCLES = ['active', 'paused', 'needs_expert', 'terminal'] as const;
 // biome-ignore format: Dense canonical order mirrors the lifecycle table.
@@ -95,7 +103,7 @@ export const evolutionProgramV1Schema = z
         ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['stage'], message: 'ready stages require complete certificates, value owner, and measurement roles' });
       }
     }
-    const keys = value.currentAssetVersionRefs.map((ref) => `${ref.assetKind}\0${ref.assetId}`);
+    const keys = value.currentAssetVersionRefs.map(assetOwnerIdentity);
     if (new Set(keys).size !== keys.length) {
       ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['currentAssetVersionRefs'], message: 'asset identities must be unique' });
     }
@@ -139,7 +147,7 @@ export const evolutionProgramStateV1Schema = z
   });
 
 // biome-ignore format: Keeping the closed event vocabulary together makes payload auditing tractable.
-export const evolutionProgramEventV1Schema = z.discriminatedUnion('type', [
+const evolutionProgramEventV1Union = z.discriminatedUnion('type', [
   strictEvent({ type: z.literal('program_created'), workspaceId: bounded(240), objectRef: ownerTruthRefV1Schema, claimRef: ownerTruthRefV1Schema }),
   strictEvent({ type: z.literal('certificates_linked'), certificates: completeCertificatesSchema, valueOwnerRef: ownerTruthRefV1Schema, measurementRoleRefs: completeMeasurementRoleRefsSchema }),
   strictEvent({ type: z.literal('sources_and_triggers_linked'), sourceRefs: z.array(ownerTruthRefV1Schema).min(1).max(128), triggerRef: ownerTruthRefV1Schema, namedConsumerRef: ownerTruthRefV1Schema }),
@@ -149,11 +157,12 @@ export const evolutionProgramEventV1Schema = z.discriminatedUnion('type', [
   attributionLinkedEventV1Schema,
   strictEvent({ type: z.literal('intervention_linked'), interventionCardRef: ownerTruthRefV1Schema, interventionLayerRef: ownerTruthRefV1Schema, gateReceiptRef: ownerTruthRefV1Schema }),
   observeOrInsufficientEventV1Schema,
+  strictEvent({ type: z.literal('change_cycle_linked'), caseRef: ownerTruthRefV1Schema, proposalRef: ownerTruthRefV1Schema, ownerAuthorizationRef: ownerTruthRefV1Schema, targetVersionRef: exactAssetVersionRefV1Schema }),
   strictEvent({ type: z.literal('approval_linked'), approvalRef: ownerTruthRefV1Schema, targetVersionRef: exactAssetVersionRefV1Schema }),
-  strictEvent({ type: z.literal('approval_rejected_or_superseded'), result: z.enum(['rejected', 'superseded']), decisionRef: ownerTruthRefV1Schema }),
-  strictEvent({ type: z.literal('mutation_linked'), mutationReceiptRef: ownerTruthRefV1Schema, assetVersionRef: exactAssetVersionRefV1Schema }),
-  strictEvent({ type: z.literal('outcome_linked'), outcomeRef: ownerTruthRefV1Schema, loadedRuntimeRef: ownerTruthRefV1Schema, freshnessProofRef: ownerTruthRefV1Schema }),
-  strictEvent({ type: z.literal('decision_recorded'), decision: z.enum(['keep', 'tune', 'rollback', 'sunset', 'no_change']), decisionRef: ownerTruthRefV1Schema }),
+  strictEvent({ type: z.literal('approval_rejected_or_superseded'), result: z.enum(['rejected', 'withdrawn', 'superseded', 'target_drift']), decisionRef: ownerTruthRefV1Schema }),
+  interventionReceiptLinkedEventV1Schema,
+  strictEvent({ type: z.literal('outcome_linked'), outcomeReceiptRef: ownerTruthRefV1Schema, freshnessProofRef: ownerTruthRefV1Schema }),
+  strictEvent({ type: z.literal('decision_recorded'), decision: z.enum(['keep', 'tune', 'rollback', 'sunset', 'no_change']), decisionRef: ownerTruthRefV1Schema, executionReceiptRef: ownerTruthRefV1Schema.optional(), assetVersionRef: exactAssetVersionRefV1Schema.optional() }),
   strictEvent({ type: z.literal('program_paused'), reasonRef: ownerTruthRefV1Schema }),
   strictEvent({ type: z.literal('program_resumed'), resumeRef: ownerTruthRefV1Schema }),
   strictEvent({ type: z.literal('expert_required'), missingRole: z.enum(['observer', 'domain_owner', 'consumer', 'calibrator']), blockerRef: ownerTruthRefV1Schema }),
@@ -161,6 +170,47 @@ export const evolutionProgramEventV1Schema = z.discriminatedUnion('type', [
   strictEvent({ type: z.literal('program_withdrawn'), decisionRef: ownerTruthRefV1Schema }),
   strictEvent({ type: z.literal('retention_opted_in'), retention: retentionSchema, retentionActionRef: ownerTruthRefV1Schema }),
 ]);
+
+function validateInterventionReceipt(
+  event: z.infer<typeof interventionReceiptLinkedEventV1Schema>,
+  ctx: z.RefinementCtx,
+) {
+  if (event.result === 'changed' && event.loadedRuntimeRef === undefined) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'changed intervention requires a loaded runtime' });
+  }
+  if (event.result === 'no_change' && event.loadedRuntimeRef !== undefined) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'no_change intervention forbids a loaded runtime' });
+  }
+}
+
+function validateDecisionEvent(
+  event: Extract<z.infer<typeof evolutionProgramEventV1Union>, { type: 'decision_recorded' }>,
+  ctx: z.RefinementCtx,
+) {
+  if (
+    (event.decision === 'rollback' || event.decision === 'no_change') &&
+    (event.executionReceiptRef === undefined || event.assetVersionRef === undefined)
+  ) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: `${event.decision} requires owner receipt and exact asset version`,
+    });
+  }
+  if (event.decision === 'sunset' && event.executionReceiptRef === undefined) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'sunset requires owner execution receipt' });
+  }
+  if (event.decision !== 'rollback' && event.decision !== 'no_change' && event.assetVersionRef !== undefined) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: 'only rollback or no_change may bind an asset version at decision time',
+    });
+  }
+}
+
+export const evolutionProgramEventV1Schema = evolutionProgramEventV1Union.superRefine((event, ctx) => {
+  if (event.type === 'intervention_receipt_linked') validateInterventionReceipt(event, ctx);
+  if (event.type === 'decision_recorded') validateDecisionEvent(event, ctx);
+});
 
 export const evolutionProgramEventEnvelopeV1Schema = z
   .object({

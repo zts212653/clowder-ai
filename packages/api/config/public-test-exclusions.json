@@ -103,12 +103,12 @@
       "introducedBy": "78f3bc57c",
       "expiresOn": "2026-10-01",
       "audit": {
-        "reviewedOn": "2026-09-01",
-        "sourceHead": "b741f42fdbbb4484a54cde7eadca08b3b11652e3",
+        "reviewedOn": "2026-09-03",
+        "sourceHead": "c530c83ab5f4716c30c76719a9d753cc3be1c1fc",
         "publicHead": "182d8ec9abc87ff7905441dca0575aab9787ee8f",
         "status": "source_dependency_failure",
-        "matchedFileCount": 248,
-        "matchedFilesHash": "69117d827b74fee6d257f7cf119a28ece0c99157ac72213a922d3d13998a4d6b"
+        "matchedFileCount": 252,
+        "matchedFilesHash": "6044b10047380c5c4b4974cf952b0ba8f3901e7bce909daee18ca387bfa387ee"
       }
     },
     {
@@ -202,6 +202,23 @@
         "status": "private_fixture_failure",
         "matchedFileCount": 1,
         "matchedFilesHash": "cd7af3541334cb66d5e48e31052c71d6876cb91efa20f8d4f0bf4ddc3f01041e"
+      }
+    },
+    {
+      "id": "capability-evolution-private-owner-evidence",
+      "match": "(?:capability-evolution-e0-owner-inputs|f314-capability-evolution-owner-inputs|harness-eval/(?:capability-evolution-measurement-(?:issuer(?:-security)?|source-store)|f311-(?:capability-evolution-wakeup|e0-eval-repair-owner-provider)))\\.test",
+      "category": "private_fixture",
+      "reason": "These exact capability-evolution integration tests validate Clowder AI's canonical owner certificates, measurement sources, and intent fixtures, which are instance-owned evidence deliberately absent from the public export.",
+      "owner": "@zts212653",
+      "introducedBy": "da83ee2875",
+      "expiresOn": "2026-10-01",
+      "audit": {
+        "reviewedOn": "2026-09-04",
+        "sourceHead": "251d681e8fbd2ea20c5086ff73d3d47ca8d7f861",
+        "publicHead": "9f6ac206988f635feddd18d8b0ed517bb7ab2b1a",
+        "status": "private_fixture_failure",
+        "matchedFileCount": 7,
+        "matchedFilesHash": "e2f0a28bfba90b3e3ed4bb219e79cde7edef8eb55bdd01360be757aa4e3013cd"
       }
     },
     {

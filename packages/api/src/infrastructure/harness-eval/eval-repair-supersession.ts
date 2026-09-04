@@ -9,6 +9,7 @@ import {
   type EvalRepairApprovalSnapshot,
   projectEvalRepairApprovals,
 } from './eval-repair-approval-projection.js';
+import { evalRepairSupersessionDecisionRef } from './eval-repair-outcome-refs.js';
 import type { IReevalClosureEventLog } from './reeval-closure-event-log.js';
 import type { EvalLifecycleEvent } from './reeval-closure-schema.js';
 
@@ -26,6 +27,7 @@ export async function supersedeEvalRepairApproval(input: {
   drift: 'owner' | 'authorization' | 'target';
   occurredAt: string;
   dispatchRejectionRef?: OwnerTruthRefV1;
+  allowMaterialized?: boolean;
 }): Promise<SupersedeResult> {
   for (let attempt = 0; attempt < 4; attempt += 1) {
     const events = await input.eventLog.read(input.caseId);
@@ -36,6 +38,7 @@ export async function supersedeEvalRepairApproval(input: {
     const existing = existingSupersessionOutcome(record, input);
     if (existing) return existing;
     const freshCaseActionRef = deriveFreshCaseActionRef(record, input.owner);
+    const decisionRef = evalRepairSupersessionDecisionRef(record.proposal.proposalId, input.occurredAt);
     const event: EvalLifecycleEvent = {
       eventId: `f266:${input.caseId}:proposal:${record.proposal.proposalId}:superseded:${freshCaseActionRef}`,
       caseId: input.caseId,
@@ -60,6 +63,7 @@ export async function supersedeEvalRepairApproval(input: {
       proposalId: record.proposal.proposalId,
       drift: input.drift,
       freshCaseActionRef,
+      decisionRef,
       requestSnapshot: snapshot(input.owner),
       ...(input.dispatchRejectionRef
         ? { dispatchRejectionRef: ownerTruthRefV1Schema.parse(input.dispatchRejectionRef) }
@@ -74,7 +78,11 @@ export async function supersedeEvalRepairApproval(input: {
 
 function existingSupersessionOutcome(
   record: EvalRepairApprovalRecord,
-  input: { drift: 'owner' | 'authorization' | 'target'; dispatchRejectionRef?: OwnerTruthRefV1 },
+  input: {
+    drift: 'owner' | 'authorization' | 'target';
+    dispatchRejectionRef?: OwnerTruthRefV1;
+    allowMaterialized?: boolean;
+  },
 ): SupersedeResult | undefined {
   if (record.supersededByCaseActionRef) {
     return {
@@ -83,8 +91,8 @@ function existingSupersessionOutcome(
       drift: record.supersessionDrift ?? input.drift,
     };
   }
-  if (record.materialization) return { status: 'materialized' };
-  if (record.materializationAttempt && !input.dispatchRejectionRef) {
+  if (record.materialization && !input.allowMaterialized) return { status: 'materialized' };
+  if (record.materializationAttempt && !record.materialization && !input.dispatchRejectionRef) {
     return { status: 'materialization_in_progress' };
   }
   if (record.lifecycle.resolution !== 'open' && record.lifecycle.resolution !== 'accepted') {

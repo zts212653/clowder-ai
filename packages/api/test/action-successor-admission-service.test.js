@@ -179,61 +179,7 @@ describe('ActionSuccessorAdmissionService', () => {
     }
   });
 
-  it('rejects an old reviewer re-entry after a consumed review when no provenance route is supplied', async () => {
-    const oldPredicate = canonicalizeActionTerminalPredicate({
-      actionFamily: 'review',
-      subjectRef: 'pr:owner/repo#2868',
-      predicate: { kind: 'review_delivered', headSha: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' },
-    });
-    const completedLease = {
-      leaseId: 'lease-1',
-      generation: 1,
-      status: 'completed',
-      actionFamily: 'review',
-      mode: 'single',
-      holderCatIds: ['codex-terra'],
-      terminalPredicate: oldPredicate,
-    };
-    const { service, calls } = harness({
-      claimResult: { outcome: 'safe_wait', lease: completedLease },
-    });
-
-    const result = await service.admit(
-      request({
-        dispatchId: 'multi-mention:unproven-review-reentry',
-        action: {
-          ...request().action,
-          terminalPredicate: { kind: 'review_delivered', headSha: 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb' },
-        },
-      }),
-    );
-
-    assert.equal(result.admit, false);
-    assert.equal(result.outcome, 'review_reentry_ineligible');
-    assert.equal(calls.resolveFreshness.length, 1, 'initial current-HEAD verification still runs');
-    assert.equal(calls.continueFreshRevision.length, 0, 'an unproven old-reviewer route must not create a generation');
-
-    for (const evidenceRef of ['caller-says-there-is-a-delta', 'message:', 'git:']) {
-      const ungrounded = await service.admit(
-        request({
-          dispatchId: `multi-mention:ungrounded-review-reentry:${evidenceRef}`,
-          action: {
-            ...request().action,
-            reviewReentry: { reason: 'behavioral_delta', evidenceRef },
-            terminalPredicate: {
-              kind: 'review_delivered',
-              headSha: 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
-            },
-          },
-        }),
-      );
-      assert.equal(ungrounded.admit, false);
-      assert.equal(ungrounded.outcome, 'review_reentry_ineligible');
-    }
-    assert.equal(calls.continueFreshRevision.length, 0, 'free-form caller claims are not durable route evidence');
-  });
-
-  it('continues a completed review lease when a behavioral delta is grounded against a new HEAD', async () => {
+  it('continues an external completed review lease when server truth verifies a new HEAD', async () => {
     const oldPredicate = canonicalizeActionTerminalPredicate({
       actionFamily: 'review',
       subjectRef: 'pr:owner/repo#2868',
@@ -278,10 +224,6 @@ describe('ActionSuccessorAdmissionService', () => {
           actionFamily: 'review',
           successorSlot: 'reviewer',
           mode: 'single',
-          reviewReentry: {
-            reason: 'behavioral_delta',
-            evidenceRef: 'git:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb:authored-delta',
-          },
           terminalPredicate: { kind: 'review_delivered', headSha: 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb' },
         },
       }),
@@ -294,64 +236,6 @@ describe('ActionSuccessorAdmissionService', () => {
     assert.equal(calls.continueFreshRevision.length, 1);
     assert.equal(calls.continueFreshRevision[0].input.expectedGeneration, 1);
     assert.equal(calls.continueFreshRevision[0].input.claimOrigin, 'structured_transfer');
-    assert.equal(calls.continueFreshRevision[0].input.reviewReentry.reason, 'behavioral_delta');
-    assert.equal(
-      calls.continueFreshRevision[0].input.reviewReentry.evidenceRef,
-      'git:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb:authored-delta',
-    );
-  });
-
-  it('keeps stale/blocking and explicit matrix routes eligible for a verified fresh revision', async () => {
-    for (const reason of ['stale_or_blocking', 'explicit_matrix_route']) {
-      const oldPredicate = canonicalizeActionTerminalPredicate({
-        actionFamily: 'review',
-        subjectRef: 'pr:owner/repo#2868',
-        predicate: { kind: 'review_delivered', headSha: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' },
-      });
-      const newPredicate = canonicalizeActionTerminalPredicate({
-        actionFamily: 'review',
-        subjectRef: 'pr:owner/repo#2868',
-        predicate: { kind: 'review_delivered', headSha: 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb' },
-      });
-      const completedLease = {
-        leaseId: `lease-${reason}`,
-        generation: 1,
-        status: 'completed',
-        actionFamily: 'review',
-        mode: 'single',
-        holderCatIds: ['codex-terra'],
-        terminalPredicate: oldPredicate,
-      };
-      const continuedLease = {
-        ...completedLease,
-        leaseId: `lease-fresh-head-${reason}`,
-        generation: 1,
-        status: 'active',
-        terminalPredicate: newPredicate,
-      };
-      const { service, calls } = harness({
-        claimResult: { outcome: 'safe_wait', lease: completedLease },
-        continueResult: { outcome: 'continued', lease: continuedLease },
-      });
-
-      const result = await service.admit(
-        request({
-          dispatchId: `multi-mention:${reason}`,
-          action: {
-            ...request().action,
-            reviewReentry: { reason, evidenceRef: `message:${reason}:route-proof` },
-            terminalPredicate: {
-              kind: 'review_delivered',
-              headSha: 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
-            },
-          },
-        }),
-      );
-
-      assert.equal(result.admit, true, reason);
-      assert.equal(result.outcome, 'continued', reason);
-      assert.equal(calls.continueFreshRevision[0].input.reviewReentry.reason, reason);
-    }
   });
 
   it('continues a completed legacy lease when server truth verifies the current HEAD', async () => {
@@ -393,10 +277,6 @@ describe('ActionSuccessorAdmissionService', () => {
           actionFamily: 'review',
           successorSlot: 'reviewer',
           mode: 'single',
-          reviewReentry: {
-            reason: 'stale_or_blocking',
-            evidenceRef: 'message:legacy-review-route',
-          },
           terminalPredicate: { kind: 'review_delivered', headSha: 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb' },
         },
       }),
@@ -459,10 +339,6 @@ describe('ActionSuccessorAdmissionService', () => {
           actionFamily: 'review',
           successorSlot: 'reviewer',
           mode: 'single',
-          reviewReentry: {
-            reason: 'explicit_matrix_route',
-            evidenceRef: 'message:terminal-cas-review-route',
-          },
           terminalPredicate: { kind: 'review_delivered', headSha: 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb' },
         },
       }),
@@ -514,10 +390,6 @@ describe('ActionSuccessorAdmissionService', () => {
           request({
             action: {
               ...request().action,
-              reviewReentry: {
-                reason: 'explicit_matrix_route',
-                evidenceRef: 'message:disputed-terminal-cas-review-route',
-              },
               terminalPredicate: {
                 kind: 'review_delivered',
                 headSha: 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
@@ -1540,80 +1412,5 @@ describe('ActionSuccessorAdmissionService', () => {
       },
     ]);
     assert.deepEqual(calls.recordOutcome, []);
-  });
-
-  it('binds a local review terminal verdict to the direct review carrier thread', async () => {
-    const currentLease = {
-      leaseId: 'lease-review-route',
-      key: 'user-1\u001fpr:owner/repo#2868\u001freview\u001freviewer',
-      tenantScope: 'user-1',
-      subjectRef: 'pr:owner/repo#2868',
-      actionFamily: 'review',
-      successorSlot: 'reviewer',
-      generation: 3,
-      status: 'active',
-      mode: 'single',
-      holderCatIds: ['codex-terra'],
-      holderThreadId: 'thread-reviewer-session',
-      predecessorCatId: 'codex-sol',
-      predecessorThreadId: 'thread-direct-review-carrier',
-    };
-    const { service } = harness({ currentLease });
-
-    const allowed = await service.preflightLocalReviewTerminalRoute({
-      leaseId: currentLease.leaseId,
-      generation: currentLease.generation,
-      reviewerCatId: 'codex-terra',
-      holderThreadId: 'thread-reviewer-session',
-      targetThreadId: 'thread-direct-review-carrier',
-    });
-    assert.equal(allowed.applicable, true);
-    assert.equal(allowed.allow, true);
-    assert.equal(allowed.expectedThreadId, 'thread-direct-review-carrier');
-    assert.equal(allowed.predecessorCatId, 'codex-sol');
-
-    const ancestorRoute = await service.preflightLocalReviewTerminalRoute({
-      leaseId: currentLease.leaseId,
-      generation: currentLease.generation,
-      reviewerCatId: 'codex-terra',
-      holderThreadId: 'thread-reviewer-session',
-      targetThreadId: 'thread-task-ancestor',
-    });
-    assert.equal(ancestorRoute.applicable, true);
-    assert.equal(ancestorRoute.allow, false);
-    assert.equal(ancestorRoute.reason, 'target_thread_mismatch');
-    assert.equal(ancestorRoute.expectedThreadId, 'thread-direct-review-carrier');
-  });
-
-  it('does not apply the review route guard when lease family is unknown or non-review', async () => {
-    const { service: missingLeaseService } = harness();
-    const missingLease = await missingLeaseService.preflightLocalReviewTerminalRoute({
-      leaseId: 'lease-missing',
-      generation: 1,
-      reviewerCatId: 'codex-terra',
-      holderThreadId: 'thread-reviewer-session',
-      targetThreadId: 'thread-owner',
-    });
-    assert.deepEqual(missingLease, { applicable: false });
-
-    const { service: implementService } = harness({
-      currentLease: {
-        leaseId: 'lease-implement',
-        generation: 1,
-        status: 'active',
-        actionFamily: 'implement',
-        successorSlot: 'implementer',
-        holderCatIds: ['codex-terra'],
-        holderThreadId: 'thread-reviewer-session',
-      },
-    });
-    const implementLease = await implementService.preflightLocalReviewTerminalRoute({
-      leaseId: 'lease-implement',
-      generation: 1,
-      reviewerCatId: 'codex-terra',
-      holderThreadId: 'thread-reviewer-session',
-      targetThreadId: 'thread-owner',
-    });
-    assert.deepEqual(implementLease, { applicable: false });
   });
 });

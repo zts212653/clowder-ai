@@ -1,11 +1,11 @@
 ---
 doc_kind: architecture
-description: "Wave 1 Standing Reflex Contract v1.1：在既有 WriteOpportunity 状态机上补充所有持久写入面的四拍闭环声明（感知、提案、裁决、消费）；允许 none/exempt/sunset，但不允许答案缺席，并保持统一协议、不统一权力与存储。"
+description: "Wave 1 Standing Reflex Contract v1.2：在既有 WriteOpportunity 状态机上补充所有持久写入面的四拍闭环声明（感知、提案、裁决、消费）；允许 none/exempt/sunset，但不允许答案缺席，并保持统一协议、不统一权力与存储。"
 description_source: human
 description_author: codex-sol
-description_updated_at: 2026-08-26T06:00:00Z
+description_updated_at: 2026-09-03T08:30:00Z
 feature_ids: []
-related_features: [F102, F152, F221, F231, F237, F255, F276, F282, F287, F296]
+related_features: [F102, F152, F200, F209, F221, F231, F237, F255, F276, F282, F287, F296, F312]
 related_docs:
   - docs/architecture/standing-reflex-episode-replay-shadow.md
   - docs/architecture/memory-write-lane-census.md
@@ -15,10 +15,10 @@ related_docs:
   - feature-discussions/2026-08-10-memory-write-trigger-rethink.md
 topics: [memory, standing-reflex, write-opportunity, write-surface, contract, disposition, governance]
 created: 2026-08-15
-status: frozen-v1.1
+status: frozen-v1.2
 ---
 
-# Memory Standing Reflex Contract v1.1
+# Memory Standing Reflex Contract v1.2
 
 > **冻结对象**：为什么、何时把一次“是否写入记忆”的判断机会送给哪位 consumer，以及
 > consumer 如何留下 terminal disposition。本文冻结逻辑合同与权力边界，**不冻结中央 registry、
@@ -179,6 +179,54 @@ Compaction、resume、`-p`/interactive/bg-cron 只改变 presentation evidence�
 
 未选择的机制不是欠账。`proposal approved` 不能同时冒充 delivery health、判断质量和 utility。
 
+### 6.1 F312 Phase D：六段协议相同，不等于三条 lane 相同
+
+Decision、Method、Project Knowledge 在 Phase D 逐 lane 通过 E0；答案由 consumer 与 authority 决定，
+不是为了补满 catalog：
+
+| Lane | E0 disposition | Named consumer / bounded claim | Authority 与实现边界 |
+|---|---|---|---|
+| Decision | `active` | 当前 `agent_route`；仅当 owner 当前任务恰好点名一个 accepted ADR 时送达，`applied` 只表示该 ADR 约束了当前 response/action | accepted ADR / direct operator record 仍是 authority；Cue Plane 只投影与记 revision-bound receipt |
+| Method | `exempt` | 无已发布 Method Card、无 named consumer，因此没有 detector、receipt、outcome 或 eval | `docs/methods/` 保留未来 authority；TEMPLATE 与 generated index 不是 candidate |
+| Project Knowledge | `active` | 当前 feature-task `agent_route`；只送 workflow-bound F-ID，或无 workflow 时 owner 当前消息唯一 F-ID；`applied` 只表示 exact feature source grounding 了当前 task | versioned project source 仍是 authority；F209 仅定位/引用，不拥有 source bytes |
+
+两条 active lane 共用 `写入 → cue → 送达 → 采用/驳回 → 结果 → 失效` 的六段语言、F287 presentation/
+drill transport 与 content-free episode store；它们不共用 detector、source reader、canonical store、Hub 或
+authority。typed predicate 每次最多各生成一个 exact coordinate，不扫描或注入全部 ADR/feature 内容。
+`presented` 与 `drilled` 仍只是 delivery evidence；只有 consumer 按 lane action contract 使用了该 revision
+才可写 `applied`，否则写 `dismissed`。单条 receipt 不推出架构正确、项目质量或 causal utility。
+
+### 6.2 F312 Phase E：只给有 consumer 的 Seed 出生
+
+Diary、Episode、Reflection 与 Cat-owned Seed 分别做 E0，四面 authority 不因共享合同而合并：
+
+| Lane | E0 disposition | Named consumer / bounded claim | Authority 与实现边界 |
+|---|---|---|---|
+| Diary | `exempt` | `/starry` 是 owner pull reader，不是 invocation consumer；没有 typed relevance predicate | diary/timeline lane 保留第一人称记录、编辑与删除 authority；无 cue projection，故不造 receipt/outcome/eval |
+| Episode | `exempt` | `docs/episodes/` 只有 template，没有 production candidate 或 named invocation consumer | source-linked reconstruction 只可作 bounded precedent；fixture replay 不升级为人物事实、owner truth 或 production utility |
+| Reflection | `exempt` | F271 是 typed-delta producer 与 destination handoff，不是 reflection-level invocation consumer | reflection 保持 sourced/revised hypothesis；canonical truth、纠正与 disposition 仍归 destination lane |
+| Cat-owned Seed | `active` | producing cat 的 scheduled Present Loop invocation；最多一枚 exact owner/cat/current-revision seed | Seed 只作为 producing cat 的 private bounded hypothesis；prompt content-free，正文按需 drill，`applied` 需同 invocation/cat/seed intent |
+
+`owned_seed_available.v1` 只接受 server scheduler 在 F255 scheduled run 后生成的 typed carrier。carrier
+绑定 `runId / producingCatId / seedId / sourceRevision / occurredAt`，resolver 不扫描或注入全部 seed。
+content-free receipt 还绑定 consumer cat；跨猫 handle、scope drift、source correction、missing、dormant/retired
+均 fail closed。现有 F255 intent/visit/echo 只作为 bounded outcome lineage，不出生新的 utility eval。
+
+### 6.3 F312 Phase F：显式 pull 与 provider ambient context 不冒充 proactive consumer
+
+Library Knowledge 与 Provider-local Memory 都有真实 owner，但都不满足本协议的 E0 consumer 资格：
+
+| Lane | E0 disposition | Named consumer / bounded claim | Authority 与实现边界 |
+|---|---|---|---|
+| Library Knowledge | `exempt` | F186 `search_evidence` 是显式 pull；repo 内没有拥有主动 application 的 task-class consumer | Collection/catalog/source revision/ACL 继续归 F186；private collection 必须显式授权，不能由 ranking 或 generic search 自动入 prompt |
+| Provider-local Memory | `exempt` | 七个 runtime carrier 均无同时可验证的 immutable item revision、Clowder AI named consumer 与 authorized drill | 各 provider/account owner 保持 authority；Clowder AI 只登记 content-free support ceiling，不复制 provider home，不造共享 store/adapter/cue engine |
+
+所以 Library 的 `typedCuePredicate / consumptionReceipt / outcome` 与 Provider-local 除 authority 外的七段
+都合法 `exempt`。这不是把 provider-native memory 或 F186 sunset；只是禁止为了 closure gate 生成 detector、
+receipt、outcome 或 eval。未来资格变化时按单 collection consumer 或单 provider carrier 重跑 E0，不扩成
+跨 provider canonical authority。逐 carrier 证据见
+[Provider-local Memory Census](provider-local-memory-census.md)。
+
 四拍 episode、source-only deterministic replay、content-free shadow health 以及 Taste/Profile E0 的
 canonical 细化见 [Standing Reflex Episode / Replay / Shadow 基座](standing-reflex-episode-replay-shadow.md)。
 该基座只做 refs-only adapter/projection；不改变本文冻结的 detector、lane authority 与 storage 边界。
@@ -212,4 +260,4 @@ canonical 细化见 [Standing Reflex Episode / Replay / Shadow 基座](standing-
 - 不为首案新造 lane 专属真相源。
 
 ---
-*Frozen v1.1 · v1 小太阳·Maine Coon/gpt-5.6-sol · 四拍增补 2026-08-26*
+*Frozen v1.3 · v1 小太阳·Maine Coon/gpt-5.6-sol · Phase F 增补 2026-09-03*

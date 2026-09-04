@@ -2513,36 +2513,6 @@ export class RedisMessageStore {
     return ids;
   }
 
-  async scanPendingLegacyLocalReviewDispositions(): Promise<string[]> {
-    const matchPattern = `${this.keyPrefix}${MessageKeys.detail('*')}`;
-    const ids: string[] = [];
-    let cursor = '0';
-    do {
-      const [nextCursor, keys] = await this.redis.scan(cursor, 'MATCH', matchPattern, 'COUNT', 200);
-      cursor = nextCursor;
-      if (keys.length > 0) {
-        const pipeline = this.redis.pipeline();
-        for (const key of keys) {
-          pipeline.hmget(this.stripPrefix(key), 'deliveryStatus', 'extra');
-        }
-        const results = await pipeline.exec();
-        for (let index = 0; index < keys.length; index += 1) {
-          const [error, value] = results?.[index] ?? [null, null];
-          if (error || !Array.isArray(value)) continue;
-          const [deliveryStatus, rawExtra] = value;
-          if (
-            (deliveryStatus === null || deliveryStatus === '') &&
-            typeof rawExtra === 'string' &&
-            safeParseExtra(rawExtra)?.legacyLocalReviewDisposition
-          ) {
-            ids.push(this.stripPrefix(keys[index]!).replace(/^msg:/, ''));
-          }
-        }
-      }
-    } while (cursor !== '0');
-    return ids;
-  }
-
   /** Hydrate message IDs into full StoredMessage objects */
   private async hydrateMessages(ids: string[], options?: { includeDeleted?: boolean }): Promise<StoredMessage[]> {
     const pipeline = this.redis.multi();

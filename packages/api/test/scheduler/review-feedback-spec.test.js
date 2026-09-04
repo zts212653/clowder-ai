@@ -3,6 +3,7 @@ import { describe, test } from 'node:test';
 
 const { TaskStore } = await import('../../dist/domains/cats/services/stores/ports/TaskStore.js');
 const { createReviewFeedbackTaskSpec } = await import('../../dist/infrastructure/email/ReviewFeedbackTaskSpec.js');
+const { classifyGitHubReviewLoopBrake } = await import('../../dist/domains/github-signals/github-wait-renderer.js');
 
 async function createTracked(store) {
   return store.create({
@@ -203,5 +204,87 @@ describe('review scheduler F280 adapter', () => {
     assert.equal(routerCalls.length, 1);
     assert.equal(triggerCalls.length, 1);
     assert.equal(triggerCalls[0][6].reason, 'github_pr_merged');
+  });
+
+  test('the fourth formal changes-requested review pauses one automatic owner wake, while the fifth continues', async () => {
+    const taskStore = new TaskStore();
+    await createTracked(taskStore);
+    const calls = [];
+    const history = [1, 2, 3, 4].map((id) => ({
+      id: 27 + id,
+      author: `reviewer-${id}`,
+      state: 'CHANGES_REQUESTED',
+      body: '',
+      submittedAt: `2026-09-0${id}T00:00:00Z`,
+      commitId: 'aaa',
+    }));
+    const spec = createReviewFeedbackTaskSpec(
+      options(
+        taskStore,
+        {
+          route: async (signal) => ({
+            kind: 'notified',
+            threadId: 'thread_1',
+            catId: 'codex-sol',
+            messageId: 'msg_1',
+            content: signal.reviewLoopBrake?.kind ?? 'none',
+          }),
+        },
+        {
+          fetchPrMetadata: async () => ({ headSha: 'aaa', prState: 'open', authorLogin: 'pr-author' }),
+          fetchReviews: async (_repo, _pr, sinceId) =>
+            sinceId === undefined ? history : history.filter((r) => r.id > sinceId),
+          invokeTrigger: { trigger: async (...args) => calls.push(args) },
+        },
+      ),
+    );
+    const gate = await spec.admission.gate();
+    assert.equal(gate.workItems[0].signal.reviewLoopBrake.kind, 'pause_once');
+    await spec.run.execute(gate.workItems[0].signal, gate.workItems[0].subjectKey, {});
+    assert.equal(calls.length, 0);
+
+    const fifth = { ...history.at(-1), id: 32, author: 'reviewer-5' };
+    const continued = classifyGitHubReviewLoopBrake([...history, fifth], [fifth.id], 'pr-author');
+    assert.equal(continued.kind, 'continue');
+  });
+
+  test('review-history failure warns open and preserves automatic owner wake', async () => {
+    const taskStore = new TaskStore();
+    await createTracked(taskStore);
+    const calls = [];
+    const fresh = {
+      id: 31,
+      author: 'reviewer-4',
+      state: 'CHANGES_REQUESTED',
+      body: '',
+      submittedAt: '2026-09-04T00:00:00Z',
+      commitId: 'aaa',
+    };
+    const spec = createReviewFeedbackTaskSpec(
+      options(
+        taskStore,
+        {
+          route: async () => ({
+            kind: 'notified',
+            threadId: 'thread_1',
+            catId: 'codex-sol',
+            messageId: 'msg_1',
+            content: 'warn-open',
+          }),
+        },
+        {
+          fetchPrMetadata: async () => ({ headSha: 'aaa', prState: 'open', authorLogin: 'pr-author' }),
+          fetchReviews: async (_repo, _pr, sinceId) => {
+            if (sinceId === undefined) throw new Error('history unavailable');
+            return [fresh];
+          },
+          invokeTrigger: { trigger: async (...args) => calls.push(args) },
+        },
+      ),
+    );
+    const gate = await spec.admission.gate();
+    assert.equal(gate.workItems[0].signal.reviewLoopBrake.kind, 'warn_open');
+    await spec.run.execute(gate.workItems[0].signal, gate.workItems[0].subjectKey, {});
+    assert.equal(calls.length, 1);
   });
 });

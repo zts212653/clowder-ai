@@ -8,11 +8,9 @@ const { recoverActiveExternalReviewVerdict } = await import(
   '../dist/domains/ball-custody/action-successor-external-review-recovery-state-machine.js'
 );
 const { ExternalReviewRecoveryService } = await import('../dist/domains/ball-custody/ExternalReviewRecoveryService.js');
-const {
-  canonicalizeActionTerminalPredicate,
-  isMachineCheckableCompletionEvidenceRef,
-  isDurableReviewReentryEvidenceRef,
-} = await import('../dist/domains/ball-custody/ActionTerminalPredicateCatalog.js');
+const { canonicalizeActionTerminalPredicate, isMachineCheckableCompletionEvidenceRef } = await import(
+  '../dist/domains/ball-custody/ActionTerminalPredicateCatalog.js'
+);
 
 const HEAD = 'a'.repeat(40);
 const ADVANCED_HEAD = 'b'.repeat(40);
@@ -221,19 +219,13 @@ describe('F167 ExternalReviewRecoveryService', () => {
     assert.equal(truthResolver.resolveFreshness.mock.calls.length, 1);
   });
 
-  it('P1: evidenceRef uses github: prefix eligible for machine-check and review reentry', async () => {
+  it('P1: evidenceRef uses a machine-checkable github: prefix', async () => {
     const { service } = serviceHarness();
     const result = await service.recover(serviceInput());
     assert.equal(result.outcome, 'committed');
-    // The evidence ref must be recognized by the catalog validators
-    // so recovered leases can enter the next review cycle via reviewReentry
     assert.ok(
       isMachineCheckableCompletionEvidenceRef(result.evidenceRef),
       `evidenceRef ${result.evidenceRef} must be machine-checkable`,
-    );
-    assert.ok(
-      isDurableReviewReentryEvidenceRef(result.evidenceRef),
-      `evidenceRef ${result.evidenceRef} must be durable-review-reentry eligible`,
     );
   });
 

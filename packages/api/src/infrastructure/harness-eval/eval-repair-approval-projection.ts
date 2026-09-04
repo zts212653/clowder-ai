@@ -41,6 +41,7 @@ export interface EvalRepairApprovalRecord {
   decidedAt?: string;
   supersededByCaseActionRef?: string;
   supersessionDrift?: 'owner' | 'authorization' | 'target';
+  supersessionDecisionRef?: OwnerTruthRefV1;
   materializationAttempt?: Extract<EvalLifecycleEvent, { type: 'approval_materialization_started' }>;
   materialization?: Extract<EvalLifecycleEvent, { type: 'approval_materialized' }>;
 }
@@ -151,13 +152,13 @@ function supersedeApproval(
   if (record.lifecycle.resolution !== 'open' && record.lifecycle.resolution !== 'accepted') {
     throw new Error('only an open or accepted Approval can be superseded');
   }
-  if (record.materialization) throw new Error('materialized Approval cannot be superseded');
-  if (record.materializationAttempt && !event.dispatchRejectionRef) {
+  if (record.materializationAttempt && !record.materialization && !event.dispatchRejectionRef) {
     throw new Error('started materialization requires canonical owner rejection proof before supersession');
   }
   record.lifecycle = { resolution: 'closed_without_decision', materialization: { state: 'not_started' } };
   record.supersededByCaseActionRef = event.freshCaseActionRef;
   record.supersessionDrift = event.drift;
+  record.supersessionDecisionRef = event.decisionRef;
 }
 
 function startMaterialization(

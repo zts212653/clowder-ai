@@ -103,7 +103,6 @@
     "check:external-review-closure": "pnpm check:review-completion-routing",
     "check:review-completion-routing": "node --test scripts/check-external-review-closure.test.mjs scripts/check-external-review-entry.test.mjs && node scripts/check-external-review-closure.mjs",
     "classify:co-creation-docs": "node scripts/co-creation-docs-lane.mjs",
-    "classify:gate-route": "node scripts/classify-gate-route.mjs",
     "health:docs-discovery-drift": "node scripts/docs-discovery/lint-profile.mjs --drift-scan",
     "check:followup-tails": "node scripts/check-followup-tails.mjs",
     "check:prompt-time-apis": "node --test scripts/check-prompt-time-apis.test.mjs && node scripts/check-prompt-time-apis.mjs",

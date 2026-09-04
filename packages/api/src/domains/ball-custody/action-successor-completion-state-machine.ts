@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import type { ActionSuccessorClaimOrigin, ActionSuccessorMode, ReviewReentry } from '@cat-cafe/shared';
+import type { ActionSuccessorClaimOrigin, ActionSuccessorMode } from '@cat-cafe/shared';
 import {
   type CanonicalActionTerminalPredicate,
   isMachineCheckableCompletionEvidenceRef,
@@ -165,13 +165,7 @@ export interface ContinueActionSuccessorFreshRevisionInput {
   dispatchId: string;
   issuerStandingEvidenceRef: string;
   evidenceRef: string;
-  reviewReentry?: ReviewReentry;
   now: number;
-}
-
-function reviewReentryEvidenceRefs(reviewReentry: ReviewReentry | undefined): string[] {
-  if (!reviewReentry) return [];
-  return [`review-reentry:${reviewReentry.reason}:${reviewReentry.evidenceRef}`];
 }
 
 function normalizeHolders(mode: ActionSuccessorMode, holderCatIds: string[], parallelIntent?: string): string[] {
@@ -262,9 +256,7 @@ export function continueActionSuccessorFreshRevision(
       terminalPredicateState: { kind: 'predicate_backed' },
       terminalPredicate: input.terminalPredicate,
       completionCandidates: {},
-      evidenceRefs: [
-        ...new Set([issuerStandingEvidenceRef, evidenceRef, ...reviewReentryEvidenceRefs(input.reviewReentry)]),
-      ],
+      evidenceRefs: [...new Set([issuerStandingEvidenceRef, evidenceRef])],
       returnTransitions: [],
       revision: 1,
       createdAt: input.now,

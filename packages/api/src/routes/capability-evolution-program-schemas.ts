@@ -26,9 +26,16 @@ const ATTRIBUTION_LAYER_ORDER: Record<'execution' | 'harness' | 'rubric' | 'obse
 
 export const bounded = (max: number) => z.string().trim().min(1).max(max);
 export const clientMessageIdSchema = bounded(240);
+export const sourceMessageIdSchema = z
+  .string()
+  .min(1)
+  .max(240)
+  .refine((value) => value === value.trim(), { message: 'source message id must not be normalized' })
+  .refine((value) => !/[\r\n]/.test(value), { message: 'source message id must be a single line' });
 export const programIdSchema = z.string().regex(/^evolution-program:[0-9a-f]{32}$/);
 export const ownerRef = ownerTruthRefV1Schema;
 export const createProgramSchema = z.object({ targetRef: ownerRef, clientMessageId: clientMessageIdSchema }).strict();
+export const measurementIssuanceSchema = z.object({ clientMessageId: sourceMessageIdSchema }).strict();
 export const commandActionSchema = z.union([
   z.object({ type: z.literal('pause'), reasonRef: ownerRef }).strict(),
   z.object({ type: z.literal('resume'), resumeRef: ownerRef }).strict(),
@@ -79,6 +86,22 @@ export const commandSchema = z
     expectedSequence: z.number().int().nonnegative(),
     clientMessageId: clientMessageIdSchema,
     action: commandActionSchema,
+  })
+  .strict();
+export const changeSchema = z
+  .object({
+    expectedSequence: z.number().int().nonnegative(),
+    clientMessageId: clientMessageIdSchema,
+    action: z.discriminatedUnion('kind', [
+      z.object({ kind: z.literal('propose') }).strict(),
+      z.object({ kind: z.literal('sync') }).strict(),
+      z
+        .object({
+          kind: z.literal('decide'),
+          decision: z.enum(['keep', 'tune', 'rollback', 'sunset', 'no_change']),
+        })
+        .strict(),
+    ]),
   })
   .strict();
 export const assetRef = z

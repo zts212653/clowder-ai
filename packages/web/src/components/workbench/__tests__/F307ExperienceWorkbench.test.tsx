@@ -263,16 +263,33 @@ describe('F307 zero-surface canonical Home invariant', () => {
     ).toBe(FILE_SURFACE.id);
   });
 
-  it('keeps the add-tab affordance inline after the active tab and focuses Home without changing topology', async () => {
-    useF307ExperienceWorkbenchStore.setState({ layout: createInitialWorkbenchState([FILE_SURFACE]), hydrated: true });
+  it('keeps a fixed control rail outside the scrolling tabs and bulk-detaches only other unpinned views', async () => {
+    useF307ExperienceWorkbenchStore.setState({
+      layout: createInitialWorkbenchState([FILE_SURFACE, AGENT_RUN_SURFACE]),
+      hydrated: true,
+    });
     await renderWorkbench();
 
     const workbench = container.querySelector<HTMLElement>('[data-testid="f307-experience-workbench"]');
     const strip = container.querySelector<HTMLElement>('[data-testid="f307-tab-strip"]');
+    const controls = container.querySelector<HTMLElement>('[data-testid="f307-control-rail"]');
     const addSurface = container.querySelector<HTMLButtonElement>('[data-testid="f307-add-surface"]');
-    expect(strip?.lastElementChild).toBe(addSurface);
+    expect(strip?.contains(addSurface ?? null)).toBe(false);
+    expect(controls?.contains(addSurface ?? null)).toBe(true);
     expect(workbench?.dataset.workbenchFocus).toBe('surface');
-    expect(workbench?.dataset.surfaceCount).toBe('1');
+    expect(workbench?.dataset.surfaceCount).toBe('2');
+
+    const manage = container.querySelector<HTMLButtonElement>('[data-testid="f307-manage-surfaces"]');
+    await act(async () => manage?.click());
+    const closeOthers = container.querySelector<HTMLButtonElement>('[data-testid="f307-close-other-surfaces"]');
+    expect(closeOthers?.textContent).toContain('收起其他未固定页面');
+    await act(async () => closeOthers?.click());
+
+    expect(useF307ExperienceWorkbenchStore.getState().layout).toMatchObject({
+      surfaces: [FILE_SURFACE],
+      activeSurfaceId: FILE_SURFACE.id,
+      recentlyClosed: [AGENT_RUN_SURFACE],
+    });
 
     await act(async () => addSurface?.click());
 
@@ -281,6 +298,27 @@ describe('F307 zero-surface canonical Home invariant', () => {
     expect(useF307ExperienceWorkbenchStore.getState().layout).toMatchObject({
       surfaces: [FILE_SURFACE],
       activeSurfaceId: FILE_SURFACE.id,
+      split: null,
+    });
+  });
+
+  it('exposes an explicit split exit that preserves both hosted views', async () => {
+    const splitLayout = {
+      ...createInitialWorkbenchState([FILE_SURFACE, AGENT_RUN_SURFACE]),
+      split: {
+        primarySurfaceId: FILE_SURFACE.id,
+        secondarySurfaceId: AGENT_RUN_SURFACE.id,
+      },
+    };
+    useF307ExperienceWorkbenchStore.setState({ layout: splitLayout, hydrated: true });
+    await renderWorkbench();
+
+    const exitSplit = container.querySelector<HTMLButtonElement>('[data-testid="f307-exit-split"]');
+    expect(exitSplit?.getAttribute('aria-label')).toBe('退出分屏');
+    await act(async () => exitSplit?.click());
+
+    expect(useF307ExperienceWorkbenchStore.getState().layout).toMatchObject({
+      surfaces: [FILE_SURFACE, AGENT_RUN_SURFACE],
       split: null,
     });
   });

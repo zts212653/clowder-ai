@@ -16,6 +16,7 @@ import {
   type EvalRepairDecisionReason,
   type EvalRepairDecisionResult,
   type EvalRepairMaterializeResult,
+  type EvalRepairOwnerLineage,
   type EvalRepairOwnerResolution,
   type EvalRepairProposeResult,
   locateEvalRepairApproval,
@@ -29,6 +30,18 @@ import { supersedeEvalRepairApproval } from './eval-repair-supersession.js';
 import type { EvalLifecycleEvent } from './reeval-closure-schema.js';
 
 export { approvalEnvelopeRef } from './eval-repair-approval-contracts.js';
+
+function ownerLineageFields(ownerLineage: EvalRepairOwnerLineage | undefined) {
+  if (!ownerLineage) return {};
+  return {
+    ownerLineage: {
+      programRef: ownerTruthRefV1Schema.parse(ownerLineage.programRef),
+      cycleRef: ownerTruthRefV1Schema.parse(ownerLineage.cycleRef),
+      interventionRef: ownerTruthRefV1Schema.parse(ownerLineage.interventionRef),
+    },
+  };
+}
+
 export class EvalRepairApprovalService {
   private readonly now: () => string;
   private readonly publicationStore: EvalRepairApprovalPublicationStore;
@@ -41,6 +54,7 @@ export class EvalRepairApprovalService {
     caseActionRef: string;
     clientMessageId: string;
     principal: EvalRepairAuthenticatedPrincipal;
+    ownerLineage?: EvalRepairOwnerLineage;
   }): Promise<EvalRepairProposeResult> {
     requireNonEmpty(input.caseActionRef, 'caseActionRef');
     requireNonEmpty(input.clientMessageId, 'clientMessageId');
@@ -117,6 +131,7 @@ export class EvalRepairApprovalService {
           ownerUserId: input.principal.userId,
         },
         requestSnapshot: snapshot(owner),
+        ...ownerLineageFields(input.ownerLineage),
         ...(action.supersedesProposalId ? { supersedesProposalId: action.supersedesProposalId } : {}),
       };
       await appendEvalRepairEvent(this.options.eventLog, action.caseId, event);

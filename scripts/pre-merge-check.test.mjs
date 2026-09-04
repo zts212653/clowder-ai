@@ -24,6 +24,12 @@ const PREPARED_ARTIFACT_SCRIPT = path.join(repoRoot, 'scripts', 'gate-prepared-a
 const PREPARED_ARTIFACT_TEST_OPTIONS = {
   skip: !existsSync(PREPARED_ARTIFACT_SCRIPT) && 'home-only prepared-artifact support is absent from public export',
 };
+const GATE_TERMINAL_RECEIPT_SCRIPT = path.join(repoRoot, 'scripts', 'gate-terminal-receipt.mjs');
+const SOURCE_GATE_CONTROL_TEST_OPTIONS = {
+  skip:
+    !existsSync(GATE_TERMINAL_RECEIPT_SCRIPT) &&
+    'home-only route and terminal-receipt control plane is absent from public export',
+};
 
 function writeExecutable(filePath, source) {
   writeFileSync(filePath, source, 'utf8');
@@ -32,8 +38,10 @@ function writeExecutable(filePath, source) {
 
 function createGitStub(logPath, stubRoot = repoRoot) {
   return `#!${process.execPath}
-const { appendFileSync } = require('node:fs');
+const { appendFileSync, existsSync, readFileSync, writeFileSync } = require('node:fs');
 const args = process.argv.slice(2);
+const rebaseStatePath = ${JSON.stringify(`${logPath}.rebase-state`)};
+const rebaseCount = () => (existsSync(rebaseStatePath) ? Number(readFileSync(rebaseStatePath, 'utf8')) : 0);
 appendFileSync(${JSON.stringify(logPath)}, \`git \${args.join(' ')}\\n\`);
 
 if (args[0] === 'branch' && args[1] === '--show-current') {
@@ -57,6 +65,15 @@ if (args[0] === 'rebase' && args[1] === 'origin/main') {
 }
 
 if (args[0] === 'rebase' && args[1] === '1111111111111111111111111111111111111111') {
+  if (process.env.STUB_REBASE_ALWAYS_CHANGES_HEAD === '1') {
+    writeFileSync(rebaseStatePath, String(rebaseCount() + 1));
+  } else if (process.env.STUB_REBASE_CHANGES_HEAD === '1' && !existsSync(rebaseStatePath)) {
+    writeFileSync(rebaseStatePath, '1');
+  }
+  process.exit(0);
+}
+
+if (args[0] === 'merge-base' && args[1] === '--is-ancestor') {
   process.exit(0);
 }
 
@@ -66,12 +83,12 @@ if (args[0] === 'rev-parse' && args[1] === 'origin/main') {
 }
 
 if (args[0] === 'rev-parse' && args[1] === '--short' && args[2] === 'HEAD') {
-  process.stdout.write('abc1234\\n');
+  process.stdout.write(String.fromCharCode(97 + Math.min(rebaseCount(), 5)).repeat(7) + '\\n');
   process.exit(0);
 }
 
 if (args[0] === 'rev-parse' && args[1] === 'HEAD') {
-  process.stdout.write('abc1234def5678\\n');
+  process.stdout.write(String.fromCharCode(97 + Math.min(rebaseCount(), 5)).repeat(40) + '\\n');
   process.exit(0);
 }
 
@@ -110,6 +127,10 @@ appendFileSync(
 appendFileSync(
   ${JSON.stringify(logPath)},
   \`prepared-artifacts \${process.env.CAT_CAFE_GATE_PREPARED_ARTIFACTS ?? '<unset>'}\\n\`,
+);
+appendFileSync(
+  ${JSON.stringify(logPath)},
+  \`gate-reexec-depth \${process.env.CAT_CAFE_GATE_REEXEC_DEPTH ?? '<unset>'}\\n\`,
 );
 if (args[0] === 'install') {
   appendFileSync(
@@ -163,6 +184,14 @@ if (args[0]?.endsWith('gate-prepared-artifacts.mjs') && args[1] === 'record') {
 }
 if (args[0]?.endsWith('gate-prepared-artifacts.mjs') && args[1] === 'verify') {
   process.exit(process.env.STUB_PREPARED_VERIFY_FAIL === '1' ? 1 : 0);
+}
+if (args[0]?.endsWith('classify-gate-route.mjs')) {
+  process.stdout.write(JSON.stringify({
+    route: process.env.STUB_GATE_ROUTE ?? 'full',
+    reasons: ['stub route'],
+    requiredChecks: process.env.STUB_GATE_ROUTE === 'targeted' ? ['risk-matched-targeted-evidence'] : ['canonical-full-gate'],
+  }) + '\\n');
+  process.exit(0);
 }
 if (args[0]?.endsWith('gate-terminal-receipt.mjs')) {
   if (args[1] === 'begin') {
@@ -250,6 +279,24 @@ function runGate(bash, args = [], extraEnv = {}, options = {}) {
 }
 
 describe('pre-merge-check dependency refresh order', () => {
+  it(
+    'does not enter full-gate guards or expensive stages when the canonical route is targeted',
+    SOURCE_GATE_CONTROL_TEST_OPTIONS,
+    (t) => {
+      const bash = requireBash(t);
+      const result = runGate(bash, [], {
+        CAT_CAFE_PROCESS_OWNER_ID: 'cat-owned-process',
+        STUB_GATE_ROUTE: 'targeted',
+      });
+
+      assert.equal(result.status, 0, result.stderr);
+      assert.match(result.stdout, /route=targeted/i);
+      assert.ok(!result.logLines.some((line) => line.includes('pre-merge-gate-guard.mjs acquire')));
+      assert.ok(!result.logLines.some((line) => line.includes('gate-terminal-receipt.mjs begin')));
+      assert.ok(!result.logLines.some((line) => line.startsWith('pnpm ')));
+    },
+  );
+
   it('rejects a full gate launched directly from a cat CLI process', (t) => {
     const bash = requireBash(t);
     const result = runGate(bash, [], { CAT_CAFE_PROCESS_OWNER_ID: 'cat-owned-process' });
@@ -257,7 +304,9 @@ describe('pre-merge-check dependency refresh order', () => {
     assert.equal(result.status, 2);
     assert.match(result.stderr, /cat_cafe_hold_ball/);
     assert.match(result.stderr, /wakeWhen/);
-    assert.equal(result.logLines.length, 0, 'the rejected gate must not enter an expensive phase');
+    assert.ok(!result.logLines.some((line) => line.includes('pre-merge-gate-guard.mjs acquire')));
+    assert.ok(!result.logLines.some((line) => line.includes('gate-terminal-receipt.mjs begin')));
+    assert.ok(!result.logLines.some((line) => line.startsWith('pnpm ')));
   });
 
   it('rejects a full gate launched by a cat carrier without a process-owner token', (t) => {
@@ -267,7 +316,9 @@ describe('pre-merge-check dependency refresh order', () => {
     assert.equal(result.status, 2);
     assert.match(result.stderr, /cat_cafe_hold_ball/);
     assert.match(result.stderr, /wakeWhen/);
-    assert.equal(result.logLines.length, 0, 'the rejected carrier must not enter an expensive phase');
+    assert.ok(!result.logLines.some((line) => line.includes('pre-merge-gate-guard.mjs acquire')));
+    assert.ok(!result.logLines.some((line) => line.includes('gate-terminal-receipt.mjs begin')));
+    assert.ok(!result.logLines.some((line) => line.startsWith('pnpm ')));
   });
 
   it('runs the canonical empty-argv gate through resource-scoped permits', (t) => {
@@ -293,6 +344,22 @@ describe('pre-merge-check dependency refresh order', () => {
     assert.ok(
       !result.logLines.some((line) => line.startsWith('pnpm install ')),
       `expected --skip-install to survive lease re-entry, got:\n${result.logLines.join('\n')}`,
+    );
+  });
+
+  it('passes --risk through when preceded by pnpm passthrough -- separator', SOURCE_GATE_CONTROL_TEST_OPTIONS, (t) => {
+    const bash = requireBash(t);
+    // Simulates: pnpm gate -- --risk contract
+    // pnpm 9.x passes '--' as a literal arg to the script
+    const result = runGate(bash, ['--', '--risk', 'contract'], {}, { leaseHeld: false });
+
+    assert.equal(result.status, 0, `gate should succeed, stderr: ${result.stderr}`);
+    // The classifier (not receipt begin, which always logs GATE_ORIGINAL_ARGS) must receive --risk
+    const classifierLine = result.logLines.find((line) => line.includes('classify-gate-route.mjs'));
+    assert.ok(classifierLine, `expected classifier invocation in log, got:\n${result.logLines.join('\n')}`);
+    assert.ok(
+      classifierLine.includes('--risk') && classifierLine.includes('contract'),
+      `expected classifier to receive --risk contract, got: ${classifierLine}`,
     );
   });
 
@@ -359,6 +426,60 @@ describe('pre-merge-check dependency refresh order', () => {
     );
   });
 
+  it('re-execs the current gate before post-rebase commands when rebase changes HEAD', (t) => {
+    const bash = requireBash(t);
+    const result = runGate(bash, [], { STUB_REBASE_CHANGES_HEAD: '1' });
+
+    assert.equal(result.status, 0, result.stderr);
+    assert.match(result.stdout, /restarting gate from the rebased tree/i);
+
+    const rebaseIndexes = result.logLines
+      .map((line, index) => (line.startsWith('git rebase ') ? index : -1))
+      .filter((index) => index >= 0);
+    const branchIndexes = result.logLines
+      .map((line, index) => (line === 'git branch --show-current' ? index : -1))
+      .filter((index) => index >= 0);
+    const firstPostRebaseCommand = result.logLines.findIndex(
+      (line) => line.includes('classify-gate-route.mjs') || line.startsWith('pnpm '),
+    );
+
+    assert.equal(
+      rebaseIndexes.length,
+      2,
+      `expected the fresh process to verify the integration cut with one no-op rebase, got:\n${result.logLines.join('\n')}\nstdout:\n${result.stdout}\nstderr:\n${result.stderr}`,
+    );
+    assert.equal(branchIndexes.length, 2, `expected one fresh gate process, got:\n${result.logLines.join('\n')}`);
+    assert.ok(
+      rebaseIndexes[0] < branchIndexes[1] &&
+        branchIndexes[1] < rebaseIndexes[1] &&
+        rebaseIndexes[1] < firstPostRebaseCommand,
+      `expected fresh process startup before post-rebase commands, got:\n${result.logLines.join('\n')}`,
+    );
+    assert.ok(
+      result.logLines
+        .filter((line) => line.startsWith('gate-reexec-depth '))
+        .every((line) => line === 'gate-reexec-depth <unset>'),
+      `internal restart marker must not leak to gate children, got:\n${result.logLines.join('\n')}`,
+    );
+  });
+
+  it('fails closed before post-rebase commands when the integration cut never stabilizes', (t) => {
+    const bash = requireBash(t);
+    const result = runGate(bash, [], { STUB_REBASE_ALWAYS_CHANGES_HEAD: '1' });
+
+    assert.notEqual(result.status, 0);
+    assert.match(result.stderr, /HEAD kept changing across 3 post-rebase restarts/);
+    assert.equal(
+      result.logLines.filter((line) => line.startsWith('git rebase ')).length,
+      4,
+      `expected the initial attempt plus three bounded restarts, got:\n${result.logLines.join('\n')}`,
+    );
+    assert.ok(
+      !result.logLines.some((line) => line.includes('classify-gate-route.mjs') || line.startsWith('pnpm ')),
+      `unstable control plane must not execute post-rebase commands, got:\n${result.logLines.join('\n')}`,
+    );
+  });
+
   it('records Step 3 artifacts before enabling prepared-artifact reuse', PREPARED_ARTIFACT_TEST_OPTIONS, (t) => {
     const bash = requireBash(t);
     const result = runGate(bash, [], { CAT_CAFE_GATE_PREPARED_ARTIFACTS: '1' });
@@ -420,6 +541,22 @@ describe('pre-merge-check dependency refresh order', () => {
       assert.ok(!result.logLines.includes('pnpm test'));
       const settle = result.logLines.find((line) => line.includes('gate-terminal-receipt.mjs settle'));
       assert.match(settle, /--required-stages tsc,test-non-browser/);
+    },
+  );
+
+  it(
+    'writes route and stage duration into the existing terminal and stage receipts',
+    SOURCE_GATE_CONTROL_TEST_OPTIONS,
+    (t) => {
+      const bash = requireBash(t);
+      const result = runGate(bash);
+
+      assert.equal(result.status, 0, result.stderr);
+      const stageGreen = result.logLines.find((line) => line.includes('gate-terminal-receipt.mjs stage-green'));
+      const settle = result.logLines.find((line) => line.includes('gate-terminal-receipt.mjs settle'));
+      assert.match(stageGreen, /--duration-ms \d+ --route full/);
+      assert.match(settle, /--route-json \{/);
+      assert.match(settle, /--failure-output-file /);
     },
   );
 

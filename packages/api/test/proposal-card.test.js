@@ -35,6 +35,11 @@ function modeField(card) {
   return card.fields?.find((/** @type {{label:string}} */ f) => f.label === '回报模式');
 }
 
+/** @param {any} card */
+function workModeField(card) {
+  return card.fields?.find((/** @type {{label:string}} */ f) => f.label === '协作方式');
+}
+
 describe('F128 proposal card — reportingMode visibility (Phase Y P1-2)', () => {
   // AC-AA1: default is now final-only (supersedes Phase Y default none/autonomous).
   it('default (no reportingMode) → card surfaces 回报模式 = final-only（默认）', () => {
@@ -66,5 +71,25 @@ describe('F128 proposal card — reportingMode visibility (Phase Y P1-2)', () =>
       card.title.includes('提议新建 thread：通知卡片猫猫化'),
       `title keeps the readable label; got ${card.title}`,
     );
+  });
+});
+
+describe('F277 proposal card — declaredWorkMode visibility', () => {
+  it('keeps legacy proposals visibly undeclared instead of inventing a birth role', () => {
+    const card = buildProposalCardBlock(/** @type {any} */ (baseProposal()));
+    assert.match(workModeField(card)?.value ?? '', /未声明/);
+  });
+
+  it('surfaces all four placement choices in owner-facing language', () => {
+    const expected = {
+      subtask: /子任务/,
+      parallel: /并行推进/,
+      investigation: /调查/,
+      standalone: /独立对话/,
+    };
+    for (const [mode, label] of Object.entries(expected)) {
+      const card = buildProposalCardBlock(/** @type {any} */ (baseProposal({ declaredWorkMode: mode })));
+      assert.match(workModeField(card)?.value ?? '', label);
+    }
   });
 });

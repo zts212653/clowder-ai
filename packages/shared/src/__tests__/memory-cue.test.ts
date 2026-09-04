@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  catOwnedSeedCueCarrierV1Schema,
   cueEnvelopeV1Schema,
   deliveryDecisionCueCarrierV1Schema,
   isRecallOpportunityV1,
@@ -105,6 +106,49 @@ const fixtures = {
       sourceRevision: 'sha256:event-revision-1',
     },
   },
+  accepted_decision_required: {
+    v: 1,
+    kind: 'accepted_decision_required',
+    opportunityId: 'opportunity-decision-1',
+    producer: 'owner_message',
+    consumer: 'agent_route',
+    scope,
+    occurredAt: 1_785_600_000_006,
+    payload: {
+      decisionAnchor: 'ADR-020',
+      sourceMessageId: 'message-4',
+    },
+  },
+  project_source_required: {
+    v: 1,
+    kind: 'project_source_required',
+    opportunityId: 'opportunity-project-1',
+    producer: 'task_context',
+    consumer: 'agent_route',
+    scope,
+    occurredAt: 1_785_600_000_007,
+    payload: {
+      featureId: 'F312',
+      selectionSource: 'workflow_feature',
+      sourceMessageId: 'message-5',
+    },
+  },
+  owned_seed_available: {
+    v: 1,
+    kind: 'owned_seed_available',
+    opportunityId: 'opportunity-owned-seed-1',
+    producer: 'present_loop',
+    consumer: 'agent_route',
+    scope,
+    occurredAt: 1_785_600_000_008,
+    payload: {
+      runId: 'dreamrun_1',
+      producingCatId: 'codex-sol',
+      seedId: 'seed_1',
+      sourceRevision: 'sha256:seed-revision-1',
+      sourceMessageId: 'message-6',
+    },
+  },
 } as const;
 
 describe('F287 memory cue shared contract', () => {
@@ -115,12 +159,14 @@ describe('F287 memory cue shared contract', () => {
       memoryCueDrillFamilyForResolver('taste'),
       memoryCueDrillFamilyForResolver('profile'),
       memoryCueDrillFamilyForResolver('event'),
+      memoryCueDrillFamilyForResolver('decision'),
       memoryCueDrillFamilyForResolver('project_knowledge'),
-    ]).toEqual(['person_memory', 'evidence', 'taste', 'profile', 'event', null]);
+      memoryCueDrillFamilyForResolver('cat_owned_seed'),
+    ]).toEqual(['person_memory', 'evidence', 'taste', 'profile', 'event', 'evidence', 'evidence', 'owned_seed']);
   });
 
-  it('admits only the six versioned producer/kind pairs after the Phase C vertical slices', () => {
-    expect(RECALL_OPPORTUNITY_CATALOG_VERSION).toBe(3);
+  it('admits only the nine versioned producer/kind pairs after the Phase E vertical slice', () => {
+    expect(RECALL_OPPORTUNITY_CATALOG_VERSION).toBe(5);
     expect(RECALL_OPPORTUNITY_V1_PAIRS).toEqual([
       { kind: 'subject_seen', producer: 'entity_nudge' },
       { kind: 'delivery_decision', producer: 'github_ci' },
@@ -128,12 +174,33 @@ describe('F287 memory cue shared contract', () => {
       { kind: 'approved_taste_invoked', producer: 'owner_message' },
       { kind: 'profile_revision_available', producer: 'profile_repository' },
       { kind: 'recent_event_available', producer: 'event_memory' },
+      { kind: 'accepted_decision_required', producer: 'owner_message' },
+      { kind: 'project_source_required', producer: 'task_context' },
+      { kind: 'owned_seed_available', producer: 'present_loop' },
     ]);
 
     for (const fixture of Object.values(fixtures)) {
       expect(recallOpportunityV1Schema.parse(fixture)).toEqual(fixture);
       expect(isRecallOpportunityV1(fixture)).toBe(true);
     }
+  });
+
+  it('accepts only a server-scheduler cat-owned seed carrier with content-free coordinates', () => {
+    const carrier = {
+      v: 1,
+      producer: 'present_loop',
+      producerProvenance: 'server_scheduler',
+      runId: 'dreamrun_1',
+      producingCatId: 'codex-sol',
+      seedId: 'seed_1',
+      sourceRevision: 'sha256:seed-revision-1',
+      occurredAt: 1_785_600_000_008,
+    } as const;
+    expect(catOwnedSeedCueCarrierV1Schema.parse(carrier)).toEqual(carrier);
+    expect(catOwnedSeedCueCarrierV1Schema.safeParse({ ...carrier, claim: 'private body' }).success).toBe(false);
+    expect(catOwnedSeedCueCarrierV1Schema.safeParse({ ...carrier, producerProvenance: 'owner_message' }).success).toBe(
+      false,
+    );
   });
 
   it('keeps explicit Taste invocation strict and closed', () => {
@@ -178,7 +245,7 @@ describe('F287 memory cue shared contract', () => {
       v: 1,
       cueId: 'cue-1',
       opportunityId: fixtures.subject_seen.opportunityId,
-      catalogVersion: 3,
+      catalogVersion: 5,
       resolverFamily: 'person_entity',
       resolverVersion: 1,
       whyNow: 'A named subject is present in the current decision frame.',

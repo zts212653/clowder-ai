@@ -21,6 +21,9 @@ vi.mock('../BindNewSessionSection', () => ({
 vi.mock('../ContextHealthBar', () => ({
   ContextHealthBar: () => null,
 }));
+vi.mock('../CloudConversationLink', () => ({
+  CloudConversationLink: () => null,
+}));
 vi.mock('../SessionChainInputs', () => ({
   BindSessionInput: () => null,
   SessionIdTag: ({ id }: { id: string }) => React.createElement('span', null, id),

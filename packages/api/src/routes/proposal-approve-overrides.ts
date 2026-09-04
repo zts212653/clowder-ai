@@ -9,7 +9,14 @@
  * cognitive complexity in check.
  */
 
-import type { CatId, ProposalApproveOverrides, ReportingMode, ThreadProposal } from '@cat-cafe/shared';
+import type {
+  CatId,
+  DeclaredWorkMode,
+  ProposalApproveOverrides,
+  ReportingMode,
+  ThreadProposal,
+} from '@cat-cafe/shared';
+import { suggestedReportingModeForWorkMode } from '@cat-cafe/shared';
 import type { IThreadStore } from '../domains/cats/services/stores/ports/ThreadStore.js';
 import { migrateStoredProjectPath, resolvePersistentProjectPath } from '../utils/persistent-project-path.js';
 
@@ -21,6 +28,7 @@ export interface ApproveOverridesInput {
   initialMessage?: string | null | undefined;
   projectPath?: string | undefined;
   reportingMode?: ReportingMode | undefined;
+  declaredWorkMode?: DeclaredWorkMode | undefined;
 }
 
 export interface ResolvedApproveOverrides {
@@ -30,6 +38,7 @@ export interface ResolvedApproveOverrides {
   finalInitialMessage: string | undefined;
   finalProjectPath: string;
   finalReportingMode: ReportingMode;
+  finalDeclaredWorkMode: DeclaredWorkMode | undefined;
   /** The audit overrides to hand finalizeApproval so the proposal record matches the thread. */
   finalizeOverrides: ProposalApproveOverrides;
 }
@@ -67,7 +76,9 @@ export async function resolveApproveOverrides(
 
   const finalPreferredCats = (overrides.preferredCats ?? proposal.preferredCats) as CatId[];
   const finalInitialMessage = resolveInitialMessage(proposal.initialMessage, overrides.initialMessage);
-  const finalReportingMode = overrides.reportingMode ?? proposal.reportingMode ?? 'final-only';
+  const finalDeclaredWorkMode = overrides.declaredWorkMode ?? proposal.declaredWorkMode;
+  const finalReportingMode =
+    overrides.reportingMode ?? proposal.reportingMode ?? suggestedReportingModeForWorkMode(finalDeclaredWorkMode);
 
   // F128 projectPath priority: explicit override (validated, fail-loud 400) > re-parent
   // inheritance (new parent's ownership) > the proposal's projectPath (set at propose time).
@@ -108,6 +119,7 @@ export async function resolveApproveOverrides(
       finalInitialMessage,
       finalProjectPath,
       finalReportingMode,
+      finalDeclaredWorkMode,
       finalizeOverrides: {
         title: finalTitle,
         parentThreadId: finalParentThreadId,
@@ -117,6 +129,7 @@ export async function resolveApproveOverrides(
         // doesn't keep a stale projectPath after an approve-time re-home.
         projectPath: finalProjectPath,
         reportingMode: finalReportingMode,
+        ...(finalDeclaredWorkMode ? { declaredWorkMode: finalDeclaredWorkMode } : {}),
       },
     },
   };

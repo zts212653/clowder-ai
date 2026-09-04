@@ -30,6 +30,13 @@ describe('TemplateRegistry', () => {
     assert.equal(t.templateId, 'reminder');
   });
 
+  test('main-health is discoverable but creates no task until a project explicitly opts in', () => {
+    const template = templateRegistry.get('main-health');
+    assert.ok(template);
+    assert.equal(template.templateId, 'main-health');
+    assert.equal(templateRegistry.list().filter((item) => item.templateId === 'main-health').length, 1);
+  });
+
   test('get() returns null for unknown id', () => {
     assert.equal(templateRegistry.get('nonexistent'), null);
   });

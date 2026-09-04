@@ -23,7 +23,7 @@ import { ThreadChatRuntimeProvider } from './thread-chat';
 import { FloatingPresentationSurfaceHost } from './workspace/FloatingPresentationSurfaceHost';
 import { ResizeHandle } from './workspace/ResizeHandle';
 
-const CHROMELESS_ROUTES = ['/story', '/story-export', '/pixel-brawl', '/showcase'];
+const CHROMELESS_ROUTES = ['/story', '/story-export', '/pixel-brawl', '/showcase', '/dev/f277-attention-preview'];
 
 const SIDEBAR_HIDDEN_ROUTES = [
   '/settings',

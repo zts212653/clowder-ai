@@ -1,7 +1,7 @@
 ---
 name: merge-gate
 description: 合入 main：按行为 / 数据 / 安全 / 契约 / 不可逆风险选择 targeted 或 full gate，并消费一个或多个有客观触发理由的独立 review source。
-tips_exempt: harness-internal gate routing policy; no distinct end-user capability surface
+tips_exempt: F314 extends harness-internal review/source provenance policy; no distinct end-user-invocable capability surface
 triggers:
   - "合入 main"
   - "merge"
@@ -51,13 +51,21 @@ triggers:
 
 `pnpm gate`、rebase、fixup、biome 格式化刷新等都可能让 HEAD 变化。**HEAD 变化只触发 provenance 判定，不自动等于 re-review**：先分清 review 后是否真的改了本 PR 的内容、base 前进是否与本 PR 有逻辑关联；两者都没有，或只有可机械证明的派生物重建 / 规范化，旧 review 用 continuityProof 桥接。只有真实的作者 delta 或相关 base delta 回 active source，而且只看那一小块。
 
-**昂贵 gate 连续性（ROI 硬边界）**：一次 full gate 绑定“作者 patch + gate 开始时冻结的 base”，而不是绑定会继续移动的 `origin/main` 字符串。full gate 已完整通过后，若后续只是纯 rebase、作者 patch 不变或 patch-equivalent，且 C2 证明 base 增量无关联，则 rebase 后只跑风险匹配的 targeted continuity checks；**禁止仅因 main 又前进而重跑 full gate**。上一轮 full gate 未完整通过只会使旧 receipt 不可复用，**不会单独把本来属于 targeted 的改动升级为 full**。此时必须回到五轴风险路由，并消费 `pnpm classify:gate-route -- ...` 的机器结论：只有作者实质 delta、相关或无法判定的 base delta、冲突中的语义取舍、相关或无法判定的旧失败，或真实高风险面才重新运行 full gate。判为 `targeted` 时，必须刷新受影响检查与全仓跨包 typecheck；classifier 只选车道，不代替这些绿色证据。
+**昂贵 gate 连续性（ROI 硬边界）**：一次 full gate 绑定“作者 patch + gate 开始时冻结的 base”，而不是绑定会继续移动的 `origin/main` 字符串。full gate 已完整通过后，若后续只是纯 rebase、作者 patch 不变或 patch-equivalent，且 C2 证明 base 增量无关联，则 rebase 后只跑风险匹配的 targeted continuity checks；**禁止仅因 main 又前进而重跑 full gate**。上一轮 full gate 未完整通过只会使旧 receipt 不可复用，**不会单独把本来属于 targeted 的改动升级为 full**。`pnpm gate` 会在冻结 base 后从 Git diff、既有 terminal/stage receipt 与失败输出尾部自动选择车道：只有作者实质 delta、相关或无法判定的 base delta、冲突中的语义取舍、相关旧失败，或真实高风险面才重新运行 full gate。机器判为 `targeted` 时，命令会在申请 full-gate 资源前退出；必须另行刷新受影响检查与全仓跨包 typecheck，并把命令写进 evidence manifest。classifier 只选车道，不代替这些绿色证据。
+
+机器看不见的语义风险可用 `pnpm gate -- --risk <behavior|data|security|contract|irreversible>` 加严；该参数只能把 targeted 升为 full，不能降级机器的 full 结论。不要直接调用内部 `scripts/classify-gate-route.mjs`，也不要手填路径、历史状态或失败相关性。
 
 **Report 载体铁则（斩断 SHA 自噬环，operator 2026-07-15 投诉②修复）**：**review verdict 之后、merge 之前，不得再向被审分支 commit 任何 review report / handoff 信 / evidence 说明类文档**——这类内容的合法载体只有 PR comment、thread 消息、tracking 系统。被审分支的 HEAD 只应因代码内容（含 rebase）变化。病灶机制：report 进分支 → SHA 变 → 旧 APPROVE 失效 → re-review → 新 report → SHA 又变（round-10 自噬环）。review **请求**信（mailbox，reviewer 开审前已在 HEAD 内）不受此限。
 
 但 continuity 不是一个布尔 `reviewer`。进入 merge-gate 后必须维护 **Review Provenance Matrix**，先判当前 HEAD 变化由谁产生，再决定下一步 gate owner，避免把 cloud / CI / PR check 的外部 gate 投射成本地旧 reviewer。
 
-**Intake admission guard**：inbound intake 已携带有效、覆盖当前 HEAD 的独立 verdict 时，它就是 `already-consumed exact-HEAD review`；merge-gate 直接消费证据，`nextGateOwner=author|merge_owner`，不能把原 reviewer 当每个 callback 的固定下一棒。已完成 review generation 只有 `behavioral_delta`、`stale_or_blocking` 或 `explicit_matrix_route` 三类理由可用 `reviewReentry` + durable evidenceRef 重开。纯 ACK、状态复述、cloud finding 或其他 `no new information` 的消息必须 clean-stop。
+**Intake admission guard**：inbound intake 已携带有效、覆盖当前 HEAD 的 durable local review fact 时，它就是 `already-consumed exact-HEAD review`；merge-gate 直接消费消息上的 reviewer identity、typed `localReviewVerdict`、`reviewedHeadSha`、`reviewSubjectRef`、`acceptedSourceRef`、`acceptedRevision` 与 findings/evidence refs，`nextGateOwner=author|merge_owner`，不能把原 reviewer 当每个 callback 的固定下一棒。缺 exact HEAD、accepted-source anchor、reviewer 与 author 同一 cat、结论不明确，或仍有未解决 P1/P2 时 fail closed。旧 HEAD verdict 可保留为历史证据，但不能批准新 HEAD；有实质新内容时用普通 A2A 发起新 review，不使用 review lease、generation 或复入字段。纯 ACK、状态复述、cloud finding 或其他 `no new information` 的消息必须 clean-stop。
+
+**Accepted-source fence（procedural）**：对 local review fact，author 在 E3 前用下述仓库命令解析当前 accepted source revision 并与 artifact 精确比较；当前没有 runtime classifier 或 sidecar 代替这次 gate-time 对账。相同则零提示通过；不同则只接受 author 在现有 PR/evidence packet 写入的
+`Accepted-Source-Reack: <acceptedSourceRef>@<currentRevision>`，且 ref/revision 必须与当前 truth 完全一致。缺失、旧 revision、source ref 改名或不可解析一律 BLOCKED。re-ack 不替代 exact-HEAD review，也不创建 lease、generation、reentry、replacement、第二份 source 正文或新的 verdict 类型。
+Feature 文档的 current revision 必须取当前 integration cut 上
+`git log -1 --format=%H -- <acceptedSourceRef>` 的最后内容变更 commit，不能用无关 main 提交也会推动的裸 `HEAD`；
+source message 的 current revision 是 ref 中同一个不可变 `messageId`。
 
 | 字段 | 记录内容 |
 |------|----------|
@@ -140,7 +148,7 @@ merge-gate 执行时，在 Step 7（squash merge）**之前**，猫必须**组�
 |---|--------|----------|----------|
 | E1 | `head` === PR current HEAD | `git rev-parse HEAD` vs `gh pr view {PR_NUMBER} --json headRefOid --jq '.headRefOid'` | BLOCKED — HEAD 不一致，可能有 unpushed commit |
 | E2 | `stale` === false | 按 `headChangeCause` 判定的活跃 review 源覆盖当前 `head`（见上方 `stale` 字段定义的完整映射表）。`nextGateOwner=author` 时（merge-ready 态），沿用最后一次 `headChangeCause` 确定的活跃源；`nextGateOwner=ci/guardian` 时，review 覆盖规则不变（CI/guardian 是额外 gate，不改变 review 覆盖链） | BLOCKED — 补 continuityProof；只有真实新内容才 re-review |
-| E3 | reviewer provenance 闭合 | 至少一个按风险选定的 review 源（local 或 cloud）非空且覆盖 `head`；仅校验本 PR 实际选择的 source。**「覆盖」三种合法形态**：① review SHA == `head` 直接覆盖；② `old review APPROVE + continuityProof(C1,C2,C3)` 桥接 reviewedHead → `head`（Matrix `rebase` 行，桥凭证在 Evidence Manifest）；③ **对话内容审 + author 机械转录**（2026-07-16，operator 席位纠偏）：reviewer 已在 thread 对同一内容给出明确 verdict（含 message 锚点），PR diff 与已审内容一致由 **author 出机械证据**（`git diff <已审 ref>..HEAD` 为空 / patch-id 相同 / diff hash 对照）→ author 将 verdict 转录为 PR comment（带 thread 锚点 + 机械证据），**reviewer 零二次出场**。**席位原则：机械动作（对账/转录/落点确认）归 author 或机器，判断动作才归 reviewer——召唤 reviewer 的唯一合法理由是"存在需要判断力的新内容"，两个字符串的相等判断不配烧一只 reviewer invocation** | BLOCKED — 缺 review provenance |
+| E3 | reviewer provenance + accepted source 闭合 | 至少一个按风险选定的 review 源（local 或 cloud）非空且覆盖 `head`；local fact 还必须带完整 accepted-source anchor，并通过 unchanged/re-ack fence；仅校验本 PR 实际选择的 source。**「覆盖」三种合法形态**：① review SHA == `head` 直接覆盖；② `old review APPROVE + continuityProof(C1,C2,C3)` 桥接 reviewedHead → `head`（Matrix `rebase` 行，桥凭证在 Evidence Manifest）；③ **对话内容审 + author 机械转录**（2026-07-16，operator 席位纠偏）：reviewer 已在 thread 对同一内容给出明确 verdict（含 message 锚点），PR diff 与已审内容一致由 **author 出机械证据**（`git diff <已审 ref>..HEAD` 为空 / patch-id 相同 / diff hash 对照）→ author 将 verdict 转录为 PR comment（带 thread 锚点 + 机械证据），**reviewer 零二次出场**。**席位原则：机械动作（对账/转录/落点确认）归 author 或机器，判断动作才归 reviewer——召唤 reviewer 的唯一合法理由是"存在需要判断力的新内容"，两个字符串的相等判断不配烧一只 reviewer invocation** | BLOCKED — 缺 review/source provenance |
 | E4 | `verdict` !== "blocked" | review 结果为 APPROVE（非 BLOCK / CHANGES_REQUESTED） | BLOCKED — reviewer 未放行 |
 | E5 | `gate_passed` === true | 风险匹配的 targeted / full gate 已运行并通过，命令记录在 `gate_commands` | BLOCKED — gate 未通过、未跑或与风险不匹配 |
 
@@ -200,6 +208,28 @@ pnpm gate
 1. 命令：`pnpm gate`（全量，不是 `--filter`）
 2. SHA：基于最新 `origin/main` rebase 后的 HEAD SHA
 3. 状态：已 rebase 到最新 `origin/main`
+
+### Exact-Main Receipt（main 自身的 gate 验证）
+
+`pnpm gate` 要求在 feature branch 上运行（main 分支被拒绝）。当需要验证 main 当前内容本身通过 gate（例如 main-health guardian 初始 receipt），使用零差异隔离 worktree：
+
+```bash
+# 1. 拉最新 main 并创建零差异 feature worktree
+git fetch origin main
+git worktree add ../cat-cafe-exact-main-receipt -b gate/exact-main-receipt origin/main
+
+# 2. 在 worktree 里跑正常 gate（不加 --no-rebase，让 classifier + durable receipt 全走）
+cd ../cat-cafe-exact-main-receipt
+pnpm gate  # rebase 是零差异 no-op，receipt 正常铸造
+# 如需风险加严：pnpm gate --risk contract
+
+# 3. 完成后清理 worktree
+cd -
+git worktree remove ../cat-cafe-exact-main-receipt
+git branch -d gate/exact-main-receipt
+```
+
+**不要**加 `--no-rebase`——`--no-rebase` 跳过 route classifier 和 durable receipt `begin`，receipt 不会铸造。正常 gate 会 fetch + rebase，但因 branch 已在 `origin/main` HEAD，rebase 是 no-op；install、classifier、receipt 和全量检查全部正常走。
 
 ### Root Artifact Guard（Step 0.5，开 PR 前必跑）
 
@@ -264,85 +294,21 @@ printf '%s\n' "$PR_BODY" | rg -q '@(codex|chatgpt-codex-connector|gpt52|opus|son
 # 详细格式会让 Codex connector 误解为代码修改请求（2026-04-20 PR #1300 确认）
 # 详见 ../.cat-cafe-shared-refs/pr-template.md「云端 Review 触发 Comment 模板」
 
-# 5.1 去重防呆
-LAST_TRIGGER=”$(gh pr view {PR_NUMBER} --json comments | jq -r '
-  [.comments[] | select(.body | test(“^@codex\\s+review\\s*$”; “m”))] | last | .url // empty
-')”
-# 有已触发 → 检查是否需要重发（新 commit / create-environment 回复 / 无 👀）
-
+# 触发前按 pr-signals.md 读取同一 PR 的 exact trigger，避免重复 comment。
 gh pr comment {PR_NUMBER} --body '@codex review'
 
-# 6. 已选 cloud 时等remote review（事件驱动，不轮询）
-#
-# 6.1 👀 接单检测（触发后 5 分钟查一次）
-TRIGGER_COMMENT_ID=”$(gh api repos/{OWNER}/{REPO}/issues/{PR_NUMBER}/comments \
-  --jq '[.[] | select(.body | test(“^@codex\\s+review”; “m”))] | last | .id')”
-EYES=”$(gh api repos/{OWNER}/{REPO}/issues/comments/${TRIGGER_COMMENT_ID}/reactions \
-  --jq '[.[] | select(.content == “eyes” and .user.login == “chatgpt-codex-connector[bot]” and .user.type == “Bot”)] | length')”
-#   - Codex connector EYES > 0 → 云端已接单 → 停止监控，注册 exact trigger 的 typed wait。
-#     ⚠️ KD-27：此时必须释放 hold_ball，禁止续约轮询。typed wait 回调是唯一通知渠道。
-#     如果你之前 hold_ball 轮询等接单，现在 connector EYES > 0 = 切换到事件驱动模式，不再 hold。
-#     为让 routing guard 机械证明本 invocation 的 clean stop，必须用同 PR + exact trigger comment id
-#     注册一次 server-bound wait（server 会独立验证 comment subject/body/reaction actor）：
-#       cat_cafe_register_pr_tracking(
-#         repoFullName={OWNER}/{REPO}, prNumber={PR_NUMBER},
-#         when=[{
-#           kind:'pr_review_result_available',
-#           triggerCommentId:Number(TRIGGER_COMMENT_ID)
-#         }],
-#         nextStep='Consume the exact-HEAD cloud review verdict.',
-#         expiresAt=<future unix ms>
-#       )
-#     只有注册成功才可纯事件驱动停止；验证失败 / 503 均 fail closed，禁止把任意 active tracker
-#     或一句“PR tracking 会叫我”当合法出口。
-#   - connector EYES == 0 → 云端没接到 → 允许 re-trigger（进 6.2），可以 hold_ball 轮询等 EYES
-#
-# 6.2 允许再次触发的条件（满足任一即可）：
-#     a. HEAD SHA 变化（有新 commit）
-#     b. 触发 comment 存在但 5 分钟后仍无 👀 reaction
-#     c. 首次触发收到 “create an environment” 回复（= Codex 没接单）
-#     其它情况一律禁止二次触发
+# 6. 已选 cloud 时按 ../.cat-cafe-shared-refs/pr-signals.md 的 exact trigger contract 等结果：
+# EYES=0 才能 bounded hold/re-trigger；EYES>0 后只注册 pr_review_result_available typed wait，停止轮询。
 
 # 6.5 Guardian Sign-Off Gate (F168 Phase D — community intake PRs only)
 #
 # Trigger condition: PR branch links to a community issue (check PR body or branch name).
 # Skip this step for non-community PRs.
 #
-# Prerequisites: cat agent env vars $CAT_CAFE_INVOCATION_ID and $CAT_CAFE_CALLBACK_TOKEN
-# are set by invoke-single-cat.ts at launch. All guardian endpoints require callback auth.
-AUTH_HEADERS=(-H "X-Invocation-Id: $CAT_CAFE_INVOCATION_ID" \
-              -H "X-Callback-Token: $CAT_CAFE_CALLBACK_TOKEN")
-#
-# 6.5.1 Request guardian assignment (if not already assigned):
-ISSUE_ID="{COMMUNITY_ISSUE_ID}"  # from PR body or branch metadata
-GUARDIAN_STATUS="$(curl -sf "${AUTH_HEADERS[@]}" \
-  http://localhost:3004/api/community-issues/${ISSUE_ID}/guardian-status)"
-HAS_GUARDIAN="$(echo "$GUARDIAN_STATUS" | jq -r '.hasGuardian')"
-if [ "$HAS_GUARDIAN" != "true" ]; then
-  # request-guardian returns guardianAssignment + signoffToken (for later guardian-signoff)
-  ASSIGN_RESULT="$(curl -sf -X POST "${AUTH_HEADERS[@]}" \
-    -H 'Content-Type: application/json' \
-    -d "{\"author\": \"{AUTHOR_CAT_ID}\", \"reviewer\": \"{REVIEWER_CAT_ID}\"}" \
-    http://localhost:3004/api/community-issues/${ISSUE_ID}/request-guardian)"
-  SIGNOFF_TOKEN="$(echo "$ASSIGN_RESULT" | jq -r '.signoffToken')"
-  # Refresh status after assignment
-  GUARDIAN_STATUS="$(curl -sf "${AUTH_HEADERS[@]}" \
-    http://localhost:3004/api/community-issues/${ISSUE_ID}/guardian-status)"
-fi
-#
-# 6.5.2 Notify guardian via MCP (auto @ — AC-D1):
-GUARDIAN_CAT="$(echo "$ASSIGN_RESULT" | jq -r '.guardianAssignment.guardianCatId')"
-# Use cat_cafe_multi_mention to @ the guardian cat with intake checklist instructions.
-# Pass SIGNOFF_TOKEN to the guardian so they can call guardian-signoff with it.
-# The guardian cat receives the mention, reviews the checklist, and calls guardian-signoff.
-#
-# 6.5.3 Check sign-off status (blocking):
-SIGNED_OFF="$(echo "$GUARDIAN_STATUS" | jq -r '.signedOff')"
-if [ "$SIGNED_OFF" != "true" ]; then
-  echo "❌ Guardian sign-off missing. Cannot merge until guardian completes intake checklist."
-  echo "$GUARDIAN_STATUS" | jq .
-  exit 1
-fi
+# Do not call localhost:3004 or hand-build callback auth. The author calls
+# cat_cafe_community_request_guardian(caseId, author, reviewer); the assigned non-author/non-reviewer
+# guardian receives the returned checklist + signoffToken and calls cat_cafe_community_guardian_signoff.
+# Merge remains blocked until the canonical community case projects an approved durable signoff.
 
 # 6.8 Hotfix Cross-Cat Review Gate（F177 Phase E）🔴
 # 运行检测脚本（不纯依赖 label — 脚本扫 commit messages + PR title）
@@ -613,7 +579,7 @@ cd "$MAIN_WT" && git pull origin main   # 取回刚 squash 的 commit，doc-sync
 
 | 错误 | 正确 |
 |------|------|
-| 上一轮 full gate 未完整通过就自动再跑 full | 非绿色 receipt 只禁止复用；回到五轴风险路由并消费 `classify:gate-route`，无关小改走 targeted + 全仓跨包 typecheck |
+| 上一轮 full gate 未完整通过就自动再跑 full | 非绿色 receipt 只禁止复用；重新运行 canonical `pnpm gate` 消费其机器 route，无关小改走 targeted + 全仓跨包 typecheck |
 | 因为“regular PR / packages 改动”默认叠 local + cloud | 先做五轴风险判断，默认一个合适的独立 source；高风险才按不同风险面叠加 |
 | PR body 里写了remote review 触发句柄 | 在 PR **comment** 里写（body 里写会触发代码修改权限而非 review） |
 | PR body 或 HTML 注释里写了 `@句柄`（例如签名） | **PR body 禁止任何 @句柄**，签名改为纯文本（如 `codex` / `gpt52`） |

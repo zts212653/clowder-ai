@@ -60,10 +60,25 @@ const needsMeApprovalOwnerRead = {
   envelope: {
     subjectRef: 'task:work:f307-inline-approval',
     ownerRef: 'task:item:f307-inline-approval',
+    admissionReceiptRef: 'task:receipt:f307-inline-approval:4',
     sourceRefs: ['message:thread-f307-real-surface-adapters:source-inline-approval'],
     revision: 4,
     freshness: { state: 'current', observedRevision: 4 },
     visibility: { ownerUserId: 'f307-real-adapter-user', human: true, cat: true },
+  },
+  brief: {
+    outcome: { state: 'unknown' },
+    current: { state: 'doing', ownerRef: 'task:item:f307-inline-approval', revision: 4 },
+    verifiedMilestone: { kind: 'needs_judgment', evidenceRef: 'approval:proposal/one', revision: 7 },
+    nextOwner: {
+      kind: 'human',
+      ownerRef: 'user:f307-real-adapter-user',
+      evidence: [{ producerId: 'f246.approval', ownerRef: 'approval:proposal/one', revision: 7 }],
+    },
+    needsMe: {
+      state: 'needed',
+      evidence: [{ producerId: 'f246.approval', ownerRef: 'approval:proposal/one', revision: 7 }],
+    },
   },
   preparedArtifact: {
     artifactRef: 'packages/web/src/components/ActivityBar.tsx',

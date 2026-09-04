@@ -16,6 +16,7 @@ export async function createProposalTestContext({
   queueProcessorOverride,
   fetchPrTrackingBoundaryOverride,
   sidebarPresenceSourceOverride,
+  projectRoot,
 } = {}) {
   const { InvocationRegistry } = await import(
     '../../dist/domains/cats/services/agents/invocation/InvocationRegistry.js'
@@ -68,6 +69,7 @@ export async function createProposalTestContext({
     ...(invocationQueueOverride ? { invocationQueue: invocationQueueOverride } : {}),
     ...(queueProcessorOverride ? { queueProcessor: queueProcessorOverride } : {}),
     ...(fetchPrTrackingBoundaryOverride ? { fetchPrTrackingBoundary: fetchPrTrackingBoundaryOverride } : {}),
+    ...(projectRoot ? { projectRoot } : {}),
   });
   if (sidebarPresenceSourceOverride) {
     await app.register(threadsRoutes, {

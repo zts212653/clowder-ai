@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import type { EvolutionChangeOwnerPort } from './change/program-change-owner-contract.js';
 import type { EvaluationOwnerResolver } from './program-evaluation-contract.js';
 import type { IEvolutionProgramEventLog } from './program-event-log.js';
 import type { ProgramJoinValidator } from './program-join-validator.js';
@@ -20,6 +21,13 @@ export interface EvolutionProgramServiceOptions {
   triggerRegistration?: () => EvolutionTriggerRegistrationProjection | undefined;
   /** F267 measurement owner contract. Absent = the Phase 3 ingress fails closed. */
   evaluationOwnerResolver?: EvaluationOwnerResolver;
+  /** F266/F313 canonical change lifecycle. Absent = Phase 4 actions fail closed. */
+  changeOwner?: EvolutionChangeOwnerPort;
+  /**
+   * Late-bound F266/F313 composition. The Program service is created before the Approval/repair
+   * owner in the API bootstrap, so activation must not require reconstructing the Program service.
+   */
+  resolveChangeOwner?: () => EvolutionChangeOwnerPort | undefined;
   dispatchObservationTrigger?: (input: {
     programEventId: string;
     previousConnectedOwnerSurfaces: number;

@@ -54,3 +54,7 @@ export const refIdentity = (ref: OwnerTruthRefV1): string =>
 
 /** Asset refs always encode their asset identity; kind/id changes are real changes. */
 export const assetRefIdentity = (ref: AssetVersionRefV1): string => refIdentity(ref);
+
+/** Stable owner+asset identity for replacing one current version without touching another owner. */
+export const assetOwnerIdentity = (ref: AssetVersionRefV1): string =>
+  JSON.stringify(['asset-owner', ref.ownerFeatureId, ref.assetKind, ref.assetId]);

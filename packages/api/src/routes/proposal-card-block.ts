@@ -8,7 +8,7 @@
  * 350-line cap.
  */
 
-import type { ReportingMode, RichCardBlock, ThreadProposal } from '@cat-cafe/shared';
+import type { DeclaredWorkMode, ReportingMode, RichCardBlock, ThreadProposal } from '@cat-cafe/shared';
 
 // F128: user-facing label for each reporting mode. Phase AA makes `final-only`
 // the default; Phase AC lets the approver override this before creation.
@@ -19,12 +19,23 @@ const REPORTING_MODE_LABEL: Record<ReportingMode, string> = {
   'blocking-ack': 'blocking-ack（遇阻塞点等 ack）',
 };
 
+const DECLARED_WORK_MODE_LABEL: Record<DeclaredWorkMode, string> = {
+  subtask: '子任务（持续跟随来源对话）',
+  parallel: '并行推进（同组并发）',
+  investigation: '调查（一次性查证）',
+  standalone: '独立对话（只保留出生来源）',
+};
+
 export function buildProposalCardBlock(proposal: ThreadProposal): RichCardBlock {
   const fields: Array<{ label: string; value: string }> = [
     { label: '父 Thread', value: proposal.parentThreadId },
     {
       label: '建议成员',
       value: proposal.preferredCats.length > 0 ? proposal.preferredCats.join(', ') : '（未指定）',
+    },
+    {
+      label: '协作方式',
+      value: proposal.declaredWorkMode ? DECLARED_WORK_MODE_LABEL[proposal.declaredWorkMode] : '（未声明）',
     },
     { label: '回报模式', value: REPORTING_MODE_LABEL[proposal.reportingMode ?? 'final-only'] },
     {

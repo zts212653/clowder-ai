@@ -17,6 +17,7 @@ import {
   MemoryCuePresentationRequiredError,
 } from '../domains/memory/cue/MemoryCueEpisodeStore.js';
 import type { MemoryCueSourceReader } from '../domains/memory/cue/MemoryCueSourceReader.js';
+import { catOwnedSeedDrillPayloadSchema } from '../domains/memory/cue/sources/CatOwnedSeedMemoryCueSource.js';
 import { requireCallbackAuth } from './callback-auth-prehandler.js';
 
 const drillBodySchema = z
@@ -40,7 +41,13 @@ export interface CallbackMemoryCueDeps {
   sourceReader: MemoryCueSourceReader;
   now: () => number;
   applicationEvidence?: {
-    hasRichBlock(input: { threadId: string; catId: string; invocationId: string; kind: 'html_widget' }): boolean;
+    hasRichBlock?(input: { threadId: string; catId: string; invocationId: string; kind: 'html_widget' }): boolean;
+    hasOwnedSeedIntent?(input: {
+      ownerUserId: string;
+      catId: string;
+      invocationId: string;
+      seedId: string;
+    }): boolean | Promise<boolean>;
   };
 }
 
@@ -57,6 +64,7 @@ function eventBase(coordinate: MemoryCueDrillCoordinate, occurredAt: number) {
     cueId: coordinate.cueId,
     opportunityId: coordinate.opportunityId,
     scope: coordinate.scope,
+    ...(coordinate.consumerCatId ? { consumerCatId: coordinate.consumerCatId } : {}),
     resolverFamily: coordinate.resolverFamily,
     sourceAnchor: coordinate.anchor,
     sourceRevision: coordinate.revision,
@@ -144,10 +152,11 @@ function verifyCoordinate(
   deps: CallbackMemoryCueDeps,
   handle: string,
   scope: RecallScopeV1,
+  catId: string,
   now: number,
   reply: FastifyReply,
 ): MemoryCueDrillCoordinate | null {
-  const verified = deps.handles.verify(handle, scope, now);
+  const verified = deps.handles.verify(handle, scope, now, catId);
   if (verified.ok) return verified.coordinate;
   if (verified.reason === 'expired') {
     appendInvalidation(deps.episodeStore, verified.coordinate, 'expired', now);
@@ -165,6 +174,7 @@ function verifyCoordinate(
 async function readCurrentSource(
   deps: CallbackMemoryCueDeps,
   coordinate: MemoryCueDrillCoordinate,
+  consumerCatId: string,
   now: number,
   reply: FastifyReply,
 ): Promise<{ status: 'ok'; payload: unknown } | null> {
@@ -175,6 +185,7 @@ async function readCurrentSource(
       anchor: coordinate.anchor,
       expectedRevision: coordinate.revision,
       scope: coordinate.scope,
+      consumerCatId,
     });
   } catch {
     reply.status(404).send({ error: 'not_available' });
@@ -198,36 +209,56 @@ async function verifyApplicationEvidence(input: {
   reply: FastifyReply;
 }): Promise<boolean> {
   const { coordinate, deps, outcome, requestId, auth, now, reply } = input;
-  if (
-    outcome !== 'applied' ||
-    coordinate.family !== 'taste' ||
-    !coordinate.anchor.startsWith(EXPLICIT_APPROVED_TASTE_SOURCE_ANCHOR_PREFIX)
-  ) {
+  if (outcome !== 'applied') {
     return true;
   }
+  const requiresTasteEvidence =
+    coordinate.family === 'taste' && coordinate.anchor.startsWith(EXPLICIT_APPROVED_TASTE_SOURCE_ANCHOR_PREFIX);
+  const requiresOwnedSeedEvidence = coordinate.family === 'owned_seed';
+  if (!requiresTasteEvidence && !requiresOwnedSeedEvidence) return true;
   if (
     deps.episodeStore.hasExactConsumptionRequest({
       scope: coordinate.scope,
       cueId: coordinate.cueId,
       outcome,
       idempotencyKey: consumptionIdempotencyKey(coordinate.cueId, outcome, requestId),
+      ...(coordinate.consumerCatId ? { consumerCatId: coordinate.consumerCatId } : {}),
     })
   ) {
     return true;
   }
-  const source = await readCurrentSource(deps, coordinate, now, reply);
+  const source = await readCurrentSource(deps, coordinate, auth.catId, now, reply);
   if (!source) return false;
-  const payload = explicitApprovedTasteDrillPayloadSchema.safeParse(source.payload);
-  const hasDrilled = deps.episodeStore.hasConsumptionOutcome(coordinate.scope, coordinate.cueId, 'drilled');
-  const hasRichBlock = payload.success
-    ? (deps.applicationEvidence?.hasRichBlock({
-        threadId: auth.threadId,
-        catId: auth.catId,
-        invocationId: auth.invocationId,
-        kind: payload.data.applicationContract.requiredRichBlockKind,
-      }) ?? false)
-    : false;
-  if (payload.success && hasDrilled && hasRichBlock) return true;
+  const hasDrilled = deps.episodeStore.hasConsumptionOutcome(
+    coordinate.scope,
+    coordinate.cueId,
+    'drilled',
+    coordinate.consumerCatId,
+  );
+  if (requiresTasteEvidence) {
+    const payload = explicitApprovedTasteDrillPayloadSchema.safeParse(source.payload);
+    const hasRichBlock = payload.success
+      ? (deps.applicationEvidence?.hasRichBlock?.({
+          threadId: auth.threadId,
+          catId: auth.catId,
+          invocationId: auth.invocationId,
+          kind: payload.data.applicationContract.requiredRichBlockKind,
+        }) ?? false)
+      : false;
+    if (payload.success && hasDrilled && hasRichBlock) return true;
+  }
+  if (requiresOwnedSeedEvidence) {
+    const payload = catOwnedSeedDrillPayloadSchema.safeParse(source.payload);
+    const hasIntent = payload.success
+      ? ((await deps.applicationEvidence?.hasOwnedSeedIntent?.({
+          ownerUserId: coordinate.scope.ownerUserId,
+          catId: auth.catId,
+          invocationId: auth.invocationId,
+          seedId: payload.data.seedId,
+        })) ?? false)
+      : false;
+    if (payload.success && hasDrilled && hasIntent) return true;
+  }
   reply.status(409).send({ error: 'application_evidence_required' });
   return false;
 }
@@ -239,9 +270,9 @@ export function registerCallbackMemoryCueRoutes(app: FastifyInstance, deps: Call
     const body = drillBodySchema.safeParse(request.body);
     if (!body.success) return invalid(reply, body.error);
     const now = deps.now();
-    const coordinate = verifyCoordinate(deps, body.data.handle, serverScope(auth), now, reply);
+    const coordinate = verifyCoordinate(deps, body.data.handle, serverScope(auth), auth.catId as string, now, reply);
     if (!coordinate) return;
-    const source = await readCurrentSource(deps, coordinate, now, reply);
+    const source = await readCurrentSource(deps, coordinate, auth.catId as string, now, reply);
     if (!source) return;
     if (!appendConsumptionOrReply(deps, coordinate, 'drilled', body.data.requestId, now, reply)) return;
     return { status: 'ok', payload: source.payload };
@@ -253,7 +284,7 @@ export function registerCallbackMemoryCueRoutes(app: FastifyInstance, deps: Call
     const body = outcomeBodySchema.safeParse(request.body);
     if (!body.success) return invalid(reply, body.error);
     const now = deps.now();
-    const coordinate = verifyCoordinate(deps, body.data.handle, serverScope(auth), now, reply);
+    const coordinate = verifyCoordinate(deps, body.data.handle, serverScope(auth), auth.catId as string, now, reply);
     if (!coordinate) return;
     if (
       !(await verifyApplicationEvidence({

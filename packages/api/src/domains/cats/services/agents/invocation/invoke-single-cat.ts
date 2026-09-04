@@ -1643,6 +1643,7 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
         seeds,
         serverScope,
         now: Date.now(),
+        consumerCatId: catId as string,
       });
       const typedEnvelopes = cueResolution.presentationEnvelopes ?? [];
       if (cueResolution.promptSegment && typedEnvelopes.length === 0) {

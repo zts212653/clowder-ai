@@ -1,22 +1,23 @@
 ---
 doc_kind: architecture
-description: "W0-C 写入面 census v0.3：覆盖全部 durable memory-bearing surfaces，以感知→提案→裁决→消费四拍盘点，并拆分 LL/Decision/Method 与 F152 global distillation。"
+description: "W0-C 写入面 census v0.4：覆盖全部 durable memory-bearing surfaces，并以 Phase F provider carrier census 关闭最后的 provider-local coordination gap。"
 description_source: human
 description_author: codex-sol
-description_updated_at: 2026-08-29T11:36:16Z
+description_updated_at: 2026-09-03T00:00:00Z
 feature_ids: []
-related_features: [F102, F152, F221, F227, F231, F255, F260, F263, F276, F282, F287]
+related_features: [F102, F152, F200, F209, F221, F227, F231, F255, F260, F263, F276, F282, F287, F312]
 related_docs:
   - docs/architecture/memory-standing-reflex-contract.md
   - feature-specs/2026-08-15-memory-system-research-first-roadmap.md
   - docs/architecture/memory-write-side-autopsy-2026-07.md
   - docs/architecture/context-injection-reflex-source-map.md
   - docs/architecture/memory-outcome-attribution-source-map.md
+  - docs/architecture/provider-local-memory-census.md
   - docs/decisions/015-knowledge-object-contract.md
   - feature-discussions/2026-08-10-memory-write-trigger-rethink.md
 topics: [memory, write-side, census, lane, convention, lifecycle, lessons-learned]
 created: 2026-08-15
-status: v0.3
+status: v0.4
 ---
 
 # Memory Write Surface Census（W0-C）
@@ -53,11 +54,11 @@ Operational Knowledge（LL / Decision / Method）每天都在被 scanner、searc
 | Durable surface | ① 感知 | ② 提案 | ③ 裁决 / canonical target | ④ 消费与失效 | Verdict / owner |
 |---|---|---|---|---|---|
 | **Normative Lessons Learned** | feature/PR 收尾、用户纠正、self-evolution、L0 提醒；无共享 mechanical opportunity | A. 直接改 `docs/public-lessons.md`；B. F102 marker；C. `docs/lessons-learned/*.md` | A/C 依赖 Git author/review；F102 显式 candidate 可 auto-approve、推断 candidate 另审；Approval Hub producer catalog 无 Lesson/F102 | monolith 被 scanner 拆成 authoritative passages；目录项进入 search/F287，但 exact lesson adoption/harm 无统一 receipt；correction 走 Git | 🔴 **同一规范 authority 有多套出生法**；memory/knowledge governance owner |
-| **Decision / ADR** | 方向分歧、operator 拍板、feature lifecycle | discussion/plan 后 direct ADR edit | operator、reviewer 与 Git history；canonical 在 `docs/decisions/` | doc links、search、L0/Skill 引用；单次消费回执不统一 | 🟡 authority 较清楚，四拍未机器化；architecture governance owner |
-| **Method / Skill** | 重复成功/失败、self-evolution、writing-skills | direct Method doc 或 Skill package/edit | 方法 owner + reviewer/发布门；canonical 依对象而异 | Skill manifest/load 是真实 consumer；Method doc 走 search；usage evidence 不同源 | 🟡 不应强行合库；需 closure adapter 与 authority map |
-| **Episode / Reflection / Diary** | 真实任务结束、present loop、自省 | typed store 或 direct file | 事实 episode 可先落 provenance；第一人称 reflection 由作者自治 | scanner/search/diary reader；promotion 成规范 LL 前必须另走裁决 | 🟡 证据与规范必须分层；F255/各 producer owner |
+| **Decision / ADR** | 方向分歧、operator 拍板、feature lifecycle；F312 只识别 owner 当前任务唯一 `ADR-NNN` | discussion/plan 后 direct ADR edit | operator、reviewer 与 Git history；canonical 在 `docs/decisions/` | accepted ADR 可经 v4 bounded cue/drill，exact revision 写 applied/dismissed；direct operator records 保持 current-input/pull-only | ✅ F312 E0 active；authority 不变，Cue Plane 只承担送达与 receipt |
+| **Method / Skill** | 重复成功/失败、self-evolution、writing-skills | direct Method doc 或 Skill package/edit | 方法 owner + reviewer/发布门；Method 与 Skill 分属各自 canonical owner | Skill manifest/load 是真实 consumer；`docs/methods/` 当前只有 TEMPLATE/generated index，无已发布 Method candidate | ⚪ Method 经 F312 E0 `exempt`，不造 detector/receipt/eval；未来有 card+consumer 时重新资格审查 |
+| **Episode / Reflection / Diary** | 真实任务结束、present loop、自省 | typed store 或 direct file | 事实 episode 可先落 provenance；第一人称 reflection/diary 由作者自治 | scanner/search/diary reader；promotion 成规范 LL 前必须另走裁决 | ⚪ F312 Phase E 分面 E0 后均 `exempt`：pull/producer 存在，但无 typed invocation consumer；保留各 owner，不造 cue/receipt/eval |
 | **Feedback / Verdict / harness evidence** | eval/harness 运行与用户反馈 | 各 producer 的 typed artifact/publication | Eval Hub/verdict-specific contract 已较强，不由 memory Hub 接管 | Eval consumer、sunset/iterate 决策；但 scanner 把 `harness-feedback` 等统一映射成 `lesson` | 🟡 保留原 authority；禁止“被检索为 lesson”自动升级成 LL |
-| **Provider-local MEMORY / primer** | provider/harness convention | runtime-local edit/compile | provider owner；repo 内无完整 current census | prompt injection/read；当前 source/失效坐标未闭环 | ⚪ `unknown`：在纳入统一只读 closure catalog 前不得声称健康 |
+| **Provider-local MEMORY / primer** | provider-native ambient context 或 session continuity；不是 Clowder AI detector | provider/account 自有入口；Clowder AI 不写 provider home | 每个 runtime provider + account owner；逐 carrier census 只登记边界 | provider-native read/correction/delete；无 Clowder AI-visible immutable item revision、named consumer 或 drill | ⚪ F312 Phase F `exempt`：七个 carrier 已盘点，不造 cross-provider store/adapter/cue/receipt/eval |
 | **Global distillation / F152** | 已索引 evidence 被标 generalizable；producer 有 36 份 dev/test artifacts、生产内容为零 | `distillation_candidates` nominate | 独立 approve + `~/.cat-cafe/distilled-truths/`；producer/owner data 保留 | 无 named consumer；resolver retirement guard 阻止 generic delivery | ⚫ `sunset`；operator source `[thread-id]#0001788003376461-000497-78799bf8`，与项目 LL 分开裁决 |
 
 这里的目标不是让 ADR、Skill、Diary 都经过同一张 Hub 卡，而是让每个 surface 明说：为什么现在可以
@@ -131,12 +132,15 @@ Approval Hub 的 producer catalog 当前不含 F102、F152 或 Lesson。读侧�
 ## 5. 下一步边界
 
 - 先为上述 surface 逐条生成 lane-owned `MemoryWriteSurfaceClosureV1` 声明；这不是中央可写 registry；
-- LL/Decision/Method 先做 claim-family/authority map，再决定 F102/F152 的 migrate/adapter/sunset；
+- LL/Decision 已完成 bounded authority/consumer qualification；Method 因无 published card/consumer 保持
+  E0 exempt，未来出现真实 candidate 时再审，不由 F102/F152 代造；
 - Person 首案 replay 只验证已冻结的确定性合同；它不产出 utility verdict，也不替代真实 runtime
   episode；
 - Taste/Profile 下一案先过四拍 E0：有 consumer、有可裁决失败路径、有足够 observation；不为七格整齐
   自动施工；
-- Provider-local MEMORY/primer 仍是本 census 的 honest unknown，需 owner 坐标后再冻结。
+- Provider-local MEMORY/primer 已由 Phase F 按七个 runtime carrier 冻结为 E0 `exempt`；
+  [provider census](provider-local-memory-census.md) 记录各自 authority、source/revision ceiling、privacy 与
+  correction/delete 边界。未来只允许单 carrier 以真实 item revision + named consumer 重跑 E0。
 
 ---
-*W0-C v0.3 · 原始七 lane census Ragdoll/claude-fable-5；Wave 1/v0.3 current-truth correction 与 universe expansion 小太阳·Maine Coon/gpt-5.6-sol · 2026-08-26*
+*W0-C v0.4 · 原始七 lane census Ragdoll/claude-fable-5；Wave 1/v0.3 universe expansion、Phase F/v0.4 provider close 小太阳·Maine Coon/gpt-5.6-sol · 2026-09-03*

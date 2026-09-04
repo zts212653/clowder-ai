@@ -254,6 +254,7 @@ export interface StoredMessage {
     /** F287: server-written connector carrier; QueueProcessor still revalidates source + entry origin. */
     memoryCue?: {
       deliveryDecision?: import('@cat-cafe/shared').DeliveryDecisionCueCarrierV1;
+      catOwnedSeed?: import('@cat-cafe/shared').CatOwnedSeedCueCarrierV1;
     };
     /** F310: source-owned custody offer/disposition. Generic extra patches cannot mutate this field. */
     custodyOfferV1?: CustodyOfferV1;
@@ -275,22 +276,14 @@ export interface StoredMessage {
     localReviewVerdict?: {
       verdict: 'approved' | 'changes_requested' | 'commented';
       clientMessageId: string;
-      /** Reviewer-authored exact HEAD fact; required only for carrier-free settlement. */
+      /** Reviewer-authored exact HEAD fact; required for new durable review facts. */
       reviewedHeadSha?: string;
-      /** Server-written replay/stale fence; identifies no authority by itself. */
-      carrierlessLeaseFence?: { leaseId: string; generation: number };
-    };
-    /** #1371: explicit operator disposition for one legacy prose-only review terminal. */
-    legacyLocalReviewDisposition?: {
-      sourceMessageId: string;
-      leaseId: string;
-      generation: number;
-      subjectRef: string;
-      reviewerCatId: string;
-      predecessorCatId: string;
-      reviewedHeadSha: string;
-      verdict: 'approved' | 'changes_requested';
-      decisionId: string;
+      /** Stable subject whose formal review history is counted independently. */
+      reviewSubjectRef?: string;
+      /** Reviewer-accepted feature doc or immutable source-message coordinate. */
+      acceptedSourceRef?: string;
+      /** Exact feature commit or immutable source message id accepted by the reviewer. */
+      acceptedRevision?: string;
     };
     /** Internal callback-dedup provenance; never used as routing authority. */
     callbackDedup?: {
@@ -954,8 +947,6 @@ export interface IMessageStore {
   /** #697: Find message IDs with a given deliveryStatus. Used by StartupReconciler
    *  to recover orphaned queued messages after process restart. */
   scanByDeliveryStatus?(status: NonNullable<StoredMessage['deliveryStatus']>): string[] | Promise<string[]>;
-  /** #1371: Discover exact legacy-review decisions that may have settled before Queue admission. */
-  scanPendingLegacyLocalReviewDispositions?(): string[] | Promise<string[]>;
   /**
    * #1200 §8.7: Get the latest visible cursor for a thread.
    *
@@ -1979,17 +1970,6 @@ export class MessageStore {
     return { kind: 'prepared', message: { ...msg } };
   }
 
-  scanPendingLegacyLocalReviewDispositions(): string[] {
-    return this.messages
-      .filter(
-        (message) =>
-          message.deliveryStatus === undefined &&
-          !message.queueCustody &&
-          message.extra?.legacyLocalReviewDisposition !== undefined,
-      )
-      .map((message) => message.id);
-  }
-
   initializeQueueCustodyAdmission(
     id: string,
     admission: QueueCustodyAdmissionIntent,
@@ -2168,13 +2148,6 @@ export async function hydrateCrossThreadReplyHint(
   effectClass?: 'fyi' | 'coordinate' | 'investigate' | 'assign_work';
   /** F167 Phase R: stable coordination projection from the trigger message. */
   coordination?: CrossThreadCoordination;
-  /** #1371 Turn Truth: terminal review handback still carries one predecessor obligation. */
-  localReviewVerdict?: {
-    verdict: 'approved' | 'changes_requested' | 'commented';
-    clientMessageId: string;
-    reviewedHeadSha?: string;
-    carrierlessLeaseFence?: { leaseId: string; generation: number };
-  };
 } | null> {
   const trigger = await store.getById(triggerMessageId);
   if (!trigger) return null;
@@ -2190,6 +2163,5 @@ export async function hydrateCrossThreadReplyHint(
     senderCatId: trigger.catId,
     ...(hasCrossThreadProvenance && crossPost?.effectClass ? { effectClass: crossPost.effectClass } : {}),
     ...(coordination ? { coordination } : {}),
-    ...(trigger.extra?.localReviewVerdict ? { localReviewVerdict: trigger.extra.localReviewVerdict } : {}),
   };
 }

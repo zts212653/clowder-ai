@@ -2,13 +2,21 @@
 feature_ids: [F313]
 related_features: [F128, F167, F192, F245, F246, F266, F267, F278, F281, F311, F312]
 topics: [analysis, approval, repair, outcome, paw-feel, eval, closure, orchestration, runtime-acceptance]
-tips_exempt: "Phase B is merged but remains zero-activation and creates no user-visible proposal or action; after the delegated final seal, Phase C must remove this exemption and add a real tip only when the canonical Approval lifecycle contract and first repair proposal ship."
+tips_exempt: "Renewed 2026-09-02 for the Phase D owner-integration fix-forward: it adds internal callback wiring and an Alpha preflight only; production remains epoch-fenced and no user-invokable journey exists yet."
 doc_kind: spec
 created: 2026-08-29
 description: "把分析结论经正式审批、真实修复与新鲜复验闭成一条由单一 Feature 持续负责的交付责任田，同时保留各 canonical owner 的单写边界。"
 description_source: human
 description_author: codex-sol
 description_updated_at: 2026-08-29T13:57:01Z
+mcp_admission_status: accepted
+mcp_admission_ref: "file:docs/features/F313-analysis-to-outcome-closure-command.md"
+mcp_admission_claims:
+  - ref: "file:docs/features/F313-analysis-to-outcome-closure-command.md"
+    toolName: cat_cafe_propose_eval_repair
+    resourceFamily: eval-feedback
+    boundaryKind: resource-entry
+    decision: accepted
 ---
 
 # F313: Analysis-to-Outcome Closure Command｜分析结论到真实变化闭环总控
@@ -55,7 +63,7 @@ custody 仍由现有 `@` / structured coordination / task/lease 单点表达，�
 | F245/F267 analysis | Phase B 已为真实三 candidate bundle 生成逐 finding 四态、稳定 identity 与 verified repair target；v3 root 仍 quarantined | 尚未进入 F266 case/Approval/dispatch；保持 zero activation |
 | F266 lifecycle | 已有 stable case、TaskStore/F167、main/live/re-eval 事件形状；Phase C 新增 v3 Approval events 与 ref-only materializer | v1/v2 历史路径保持可读；v3 只有 complete cutover + `v1_active` epoch 才能出生 proposal/custody |
 | F246 Approval | 同一 ingress、producer catalog、runtime registry、adapter 与 decision route | F266 通过同一 extension point 接入；Hub 前统一为 canonical lifecycle v1，不新增 store |
-| outcome lineage | stable case 内可表达 re-eval | 当前真实 bundle 无 stable case/proposal/change/outcome join，无法证明能力因此进化 |
+| outcome lineage | Phase D 在 F266 既有 event log 内记录 owner-backed change/no-change receipt、loaded runtime 与 fresh typed outcome | production adapter 仍 dormant；Phase E 必须用真实 loaded-runtime journey 验收，代码/fixture 不能冒充能力已进化 |
 
 原始断点在 `F245 actionableCandidates[].followupDraft` 之后。Phase B 已在
 PR [#4136](https://github.com/zts212653/clowder-ai/pull/4136) / `main@91e6fc401f0dadbaf4212c8a4c8eb2f54b9bd23`
@@ -67,7 +75,7 @@ Approval lifecycle → safe dispatch**，且仍为零 open case/proposal/card/ta
 | 字段 | 当前真相 |
 |---|---|
 | Canonical command/theory thread | `[thread-id]`（本 thread） |
-| Current phase | Phase C 已合入 main、runtime 仍 dormant；下一步由独立 Phase D owner action 接续，production writer migration 保持硬停止 |
+| Current phase | Phase D owner receipt、fresh outcome 与 F311 ref-only owner port 已经 PR #4247 合入 `main@6ec0cbbc37de`；owner-integration fix-forward 已接入真实 F311 E0 provider、F311 consumer 与 outcome callback consumer，但 production 仍受独立 epoch fence 保持 dormant，Phase E 尚未开始 |
 | Durable task | `0001788011552734-000721-5bace058` · `doing` · owner `codex-sol` |
 | Thread convention | 复用 F312 的 command / phase execution / runtime acceptance 三类线程；不新增 role/store/status |
 | Implementation authorization | `[thread-id]#0001788052080007-000526-a81101af` |
@@ -75,7 +83,7 @@ Approval lifecycle → safe dispatch**，且仍为零 open case/proposal/card/ta
 | Owner-backed authorization source | `docs/features/F311-capability-evolution-workspace.md@396a379d7b` · hard constraint 13 / Phase 4 / KD-17 |
 | Phase C implementation baseline | reviewed base `origin/main@ff17a8cd50610a411cf13cba7abf5b8cc4cf1d11`；landed onto `main@e0e36943254fac0e46d788ab4b56f13cb11f0e32` |
 | Phase B terminal | PR #4136 · reviewed HEAD `9f2f26346a89eba34f9e9b64a59a44cf9fabde50` · merged `91e6fc401f0dadbaf4212c8a4c8eb2f54b9bd23` · Terra APPROVED · full gate PASS |
-| Next gate | Phase D owner-owned intervention / receipt join；Phase C 合入不等于 production migration，owner adapter/epoch migration 仍需后续显式授权 |
+| Next gate | command 核验 Phase D terminal 后，另行发车 Phase E runtime restart acceptance；本次 merge 不等于 loaded/live |
 
 ## Architecture Admission
 
@@ -158,10 +166,26 @@ card/provenance commit，不是业务 lifecycle，也没有新 store/queue/state
 
 ### Phase D: Mutation + Outcome Join｜真实变化、有意不变与新鲜复验
 
-- 真实 feature/asset owner 执行 mutation，并返回 commit/asset version、main、live 或 no-change receipt；
-- F266 将 proposal、approval decision、task/lease、mutation、intervention version 与 re-evaluation 连回同一 case；
-- outcome 只允许 `effective/keep`、`ineffective/tune-or-rollback`、`rubric_reopen`、`insufficient/observe` 等诚实终态；
-- `merge != live`、分析完成 != 能力进化；只有 merged+loaded 后的新鲜、未污染复验才能支持 keep。
+- 真实 feature/asset owner 执行 mutation；F266 只消费 canonical owner receipt，校验 exact case/proposal/
+  Approval/authorization/target/intervention refs，并在既有 event log 追加 immutable event，不替 owner 改资产；
+- changed receipt 必须同时带 asset version、full main commit、loaded runtime identity/time，且通过独立 main/live
+  truth resolver；no-change receipt 必须带 typed reason、撤回条件与 next eval。聊天、Approval 或 merge 单独不成立；
+- fresh outcome 把 source cycle、finding、case、proposal、Approval、intervention receipt、loaded runtime、
+  freshness proof 与 re-evaluation 连到同一 lineage；只接受 `effective_keep | ineffective_tune |
+  ineffective_rollback | rubric_reopen | insufficient_observe`；
+- F311 只经 owner port request/resolve/record refs；owner port 不返回 proposal/outcome payload。价值判断必须由
+  direct owner session（consumer 只传 userId，由 owner verifier 解析 authority ref）或 exact invocation/thread/
+  originMessageId 的 owner-backed source 签名，agent-key 只能同步 refs；reject/withdraw/supersede/target-drift
+  终态必须返回 canonical owner decisionRef，缺 ref 时 typed fail-closed，pending 不伪造 ref；
+- API 只从一个 read-only canonical-owner provider snapshot 原子组合 F266 cutover、outcome service 与 F311 port，
+  并要求 outcome owner 与 F311 分别注册真实 consumer seam；任一 producer/consumer binding 缺失、provider
+  不可读或 v1 epoch 未激活时整包 dormant 且 effects 全 false。Phase D fix-forward 为唯一真实 E0 target
+  `F311:capability:f311-investor-roadshow-expression` 注册同一 bootstrap seam：provider 交叉校验 charter、economic
+  certificate、measurement role assignment、F267 source manifest 与显式 owner binding；F311 late-bound port 和
+  refs-only outcome callback route 消费同一 runtime 生成的 owner/outcome service。当前 canonical source 仍是
+  `insufficient + keep_observe + ownerObjects=[]`，owner authorization、lineage 与 receipt catalogs 都为空，因此
+  即使 Alpha 测试 epoch 激活，业务命令仍 typed fail-closed；production 没有另行授权的 `v1_active` epoch，故继续
+  全包 dormant。`merge != live`、Alpha reachability != Phase E acceptance、分析完成 != 能力进化。
 
 ### Phase E: Runtime Acceptance + F311 Consumption｜重启后真实闭环与关账
 
@@ -352,10 +376,14 @@ human_disposition_feedback:
 
 ### Phase D（Mutation + Outcome）
 
-- [ ] AC-D1: repair 与 no-change 两条路径都生成 owner receipt，并分别记录 main/live/no-change；聊天或 merge
+- [x] AC-D1: repair 与 no-change 两条路径都生成 owner receipt，并分别记录 main/live/no-change；聊天或 merge
   不得单独满足 mutation AC。
-- [ ] AC-D2: outcome 与 source/finding/proposal/approval/intervention/change 同 case 回链；新鲜复验能诚实产出
+- [x] AC-D2: outcome 与 source/finding/proposal/approval/intervention/change 同 case 回链；新鲜复验能诚实产出
   keep/tune/rollback/rubric-reopen/insufficient，失败与不足不被吞掉。
+- [x] AC-D3: production composition root 从同一 owner-provider snapshot 生成 F266 cutover、D1/D2 outcome service
+  与 F311 ref-only port，并只向各自注册的真实 consumer seam 接出；完整 concrete producer/consumer bindings
+  可达，任一 binding/provider/consumer/epoch 缺失时所有 effects 为 false，不新增业务 store/state machine，
+  也不在 Phase D 激活 runtime。
 
 ### Phase E（Runtime Acceptance + Close）
 

@@ -1,6 +1,7 @@
 const envelope = Object.freeze({
   subjectRef: 'task:work:tomorrows-ppt',
   ownerRef: 'task:item:tomorrows-ppt',
+  admissionReceiptRef: 'task:receipt:tomorrows-ppt:7',
   sourceRefs: Object.freeze(['message:tomorrows-ppt']),
   revision: 7,
   freshness: Object.freeze({ state: 'current', observedRevision: 7 }),
@@ -32,16 +33,66 @@ const timeRefs = Object.freeze([
   }),
   Object.freeze({
     role: 'execution_trigger',
-    subjectRef: 'schedule:reevaluate:tomorrows-ppt',
-    ownerRef: 'f139:schedule:tomorrows-ppt',
-    revision: 3,
+    subjectRef: envelope.subjectRef,
+    ownerRef: envelope.ownerRef,
+    revision: envelope.revision,
     value: 1_788_231_600_000,
   }),
 ]);
 
 function snapshot(attentionReceipt) {
+  const actionable = attentionReceipt.eligible;
+  const producerRef = attentionReceipt.producer.ownerRef;
+  const producerRevision = attentionReceipt.producer.revision;
   return Object.freeze({
     envelope,
+    brief: Object.freeze({
+      outcome: Object.freeze({
+        state: 'known',
+        value: 'A reviewable presentation for tomorrow',
+        ownerRef: envelope.ownerRef,
+        revision: envelope.revision,
+      }),
+      current: Object.freeze({ state: 'doing', ownerRef: envelope.ownerRef, revision: envelope.revision }),
+      verifiedMilestone: Object.freeze(
+        actionable
+          ? { kind: 'needs_judgment', evidenceRef: producerRef, revision: producerRevision }
+          : {
+              kind: 'artifact_ready',
+              evidenceRef: preparedArtifact.completenessRef,
+              revision: preparedArtifact.artifactRevision,
+            },
+      ),
+      nextOwner: Object.freeze(
+        actionable
+          ? {
+              kind: 'human',
+              ownerRef: 'user:operator',
+              evidence: [
+                {
+                  producerId: attentionReceipt.producer.producerId,
+                  ownerRef: producerRef,
+                  revision: producerRevision,
+                },
+              ],
+            }
+          : { kind: 'cat', ownerRef: 'cat:codex-sol', evidenceRef: envelope.ownerRef, revision: envelope.revision },
+      ),
+      needsMe: Object.freeze(
+        actionable
+          ? {
+              state: 'needed',
+              evidence: [
+                {
+                  producerId: attentionReceipt.producer.producerId,
+                  ownerRef: producerRef,
+                  revision: producerRevision,
+                },
+              ],
+            }
+          : { state: 'not_needed', evidenceRef: envelope.ownerRef, revision: envelope.revision },
+      ),
+    }),
     preparedArtifact,
     timeRefs,
     attentionReceipts: Object.freeze([Object.freeze(attentionReceipt)]),

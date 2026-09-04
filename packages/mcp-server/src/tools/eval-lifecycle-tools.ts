@@ -1,13 +1,20 @@
 import { z } from 'zod';
-import { defineMcpMigrationFactory } from '../tool-governance-migration.js';
+import { defineMcpCanonicalFactory, defineMcpMigrationFactory } from '../tool-governance-migration.js';
 
 import { callbackPost } from './callback-tools.js';
 import type { ToolResult } from './file-tools.js';
 
-const defineTool = defineMcpMigrationFactory('eval-lifecycle-tools.ts', undefined, {
+const governanceDefaults = {
   resourceFamily: 'eval-feedback',
   authority: 'eval-lifecycle-callback',
-});
+} as const;
+const defineLifecycleTool = defineMcpMigrationFactory('eval-lifecycle-tools.ts', undefined, governanceDefaults);
+const defineProposalTool = defineMcpCanonicalFactory('eval-lifecycle-tools.ts', undefined, governanceDefaults);
+const proposalAdmissionReason = {
+  disposition: 'accepted-boundary',
+  kind: 'resource-entry',
+  admissionRef: 'file:docs/features/F313-analysis-to-outcome-closure-command.md',
+} as const;
 
 const nonEmpty = z.string().trim().min(1);
 const commitSha = z.string().regex(/^[a-f0-9]{40}(?:[a-f0-9]{24})?$/);
@@ -54,13 +61,11 @@ export interface RecordEvalLifecycleInput {
 export const proposeEvalRepairInputSchema = {
   caseActionRef: nonEmpty.max(500).describe('Opaque F266 case/action ref emitted by the canonical reconciler.'),
   clientMessageId: nonEmpty.max(240).describe('Retry-stable idempotency key; never treated as identity or authority.'),
-  agentKeyCatId,
 };
 
 export interface ProposeEvalRepairInput {
   caseActionRef: string;
   clientMessageId: string;
-  agentKeyCatId?: string;
 }
 
 export async function handleRecordEvalLifecycle(input: RecordEvalLifecycleInput): Promise<ToolResult> {
@@ -73,12 +78,11 @@ export async function handleRecordEvalLifecycle(input: RecordEvalLifecycleInput)
 }
 
 export async function handleProposeEvalRepair(input: ProposeEvalRepairInput): Promise<ToolResult> {
-  const { agentKeyCatId, ...body } = input;
-  return callbackPost('/api/callbacks/propose-eval-repair', body, { agentKeyCatId });
+  return callbackPost('/api/callbacks/propose-eval-repair', { ...input });
 }
 
 export const evalLifecycleTools = [
-  defineTool({
+  defineLifecycleTool({
     name: 'cat_cafe_record_eval_lifecycle',
     description:
       'Write one authenticated fact to an actionable eval finding stable-case lifecycle. ' +
@@ -95,7 +99,7 @@ export const evalLifecycleTools = [
       runtimeProfiles: ['full', 'agent-key'],
     },
   }),
-  defineTool({
+  defineProposalTool({
     name: 'cat_cafe_propose_eval_repair',
     description:
       'Submit one canonical F266 case/action ref to the shared F246 Approval lifecycle. ' +
@@ -109,7 +113,8 @@ export const evalLifecycleTools = [
       implementationExport: 'handleProposeEvalRepair',
       action: 'create',
       risk: { level: 'write', openWorld: false },
-      runtimeProfiles: ['full', 'agent-key'],
+      runtimeProfiles: ['full'],
+      standaloneReason: proposalAdmissionReason,
     },
   }),
 ] as const;

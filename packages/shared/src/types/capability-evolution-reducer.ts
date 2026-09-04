@@ -8,7 +8,8 @@ import {
   evolutionProgramEventEnvelopeV1Schema,
   evolutionProgramStateV1Schema,
 } from './capability-evolution.js';
-import type { OwnerTruthRefV1 } from './capability-evolution-refs.js';
+import { metabolismAssetTransitionError } from './capability-evolution-metabolism.js';
+import { assetOwnerIdentity, type OwnerTruthRefV1 } from './capability-evolution-refs.js';
 
 /**
  * The Program's pure reducer, kept apart from the schemas it folds over.
@@ -50,6 +51,14 @@ function addRefs(ctx: ReducerContext, ...values: OwnerTruthRefV1[]): void {
   ctx.cycle.lineageRefIds = [...new Set([...ctx.cycle.lineageRefIds, ...refs(...values)])];
 }
 
+function replaceCurrentAssetVersion(ctx: ReducerContext, next: EvolutionProgramV1['currentAssetVersionRefs'][number]) {
+  const identity = assetOwnerIdentity(next);
+  ctx.program.currentAssetVersionRefs = [
+    ...ctx.program.currentAssetVersionRefs.filter((value) => assetOwnerIdentity(value) !== identity),
+    next,
+  ];
+}
+
 function setStage(ctx: ReducerContext, next: EvolutionProgramStage): void {
   ctx.program.stage = next;
   ctx.cycle.stage = next;
@@ -58,6 +67,16 @@ function setStage(ctx: ReducerContext, next: EvolutionProgramStage): void {
 function requireActiveAt(ctx: ReducerContext, expected: EvolutionProgramStage): void {
   if (ctx.program.lifecycle !== 'active' || ctx.program.stage !== expected)
     reject('invalid_transition', `expected active/${expected}`);
+}
+
+function requireActiveAtAny(ctx: ReducerContext, expected: readonly EvolutionProgramStage[], message: string): void {
+  if (ctx.program.lifecycle !== 'active' || !expected.includes(ctx.program.stage))
+    reject('invalid_transition', message);
+}
+
+function assertMetabolismAssetTransition(ctx: ReducerContext, event: EvolutionProgramEventV1): void {
+  const error = metabolismAssetTransitionError(ctx.program.currentAssetVersionRefs, event);
+  if (error) reject('invalid_transition', error);
 }
 
 function applyLifecycleEvent(ctx: ReducerContext, event: EvolutionProgramEventV1): boolean {
@@ -149,14 +168,46 @@ function applyEvidenceEvent(ctx: ReducerContext, event: EvolutionProgramEventV1)
       addRefs(ctx, event.attributionRef, ...event.diagnosis.evidenceRefs);
       if ((event.diagnosis.verdict === 'attributed') !== (event.disposition === 'intervention_candidate'))
         reject('invalid_transition', 'only an attributed diagnosis may become an intervention candidate');
-      setStage(ctx, event.disposition === 'intervention_candidate' ? 'awaiting_intervention' : 'deciding');
+      // A non-actionable diagnosis still has to pass through the intervention gate so the owner-
+      // backed auto-recheck ref and typed why-not-change blockers are recorded. `deciding` is
+      // reserved for a fresh post-load outcome; entering it here would expose metabolism actions
+      // without any change cycle or outcome to decide about.
+      setStage(ctx, 'awaiting_intervention');
       return true;
     default:
       return false;
   }
 }
 
+function applyDecision(ctx: ReducerContext, event: Extract<EvolutionProgramEventV1, { type: 'decision_recorded' }>) {
+  requireActiveAt(ctx, 'deciding');
+  addRefs(ctx, event.decisionRef);
+  if (event.executionReceiptRef !== undefined) addRefs(ctx, event.executionReceiptRef);
+  if (event.assetVersionRef !== undefined) {
+    addRefs(ctx, event.assetVersionRef);
+    replaceCurrentAssetVersion(ctx, event.assetVersionRef);
+  }
+  ctx.cycle.decision = event.decision;
+  ctx.cycle.closedAt = ctx.occurredAt;
+  if (event.decision === 'tune' || event.decision === 'rollback') {
+    ctx.program.cycle += 1;
+    ctx.program.stage = 'instrumenting';
+    ctx.cycle = {
+      programId: ctx.program.programId,
+      cycle: ctx.program.cycle,
+      stage: 'instrumenting',
+      lineageRefIds: [],
+      openedAt: ctx.occurredAt,
+    };
+    ctx.cycles.push(ctx.cycle);
+    return;
+  }
+  ctx.program.lifecycle = 'terminal';
+  ctx.program.terminalDisposition = event.decision === 'keep' ? 'kept' : event.decision;
+}
+
 function applyChangeEvent(ctx: ReducerContext, event: EvolutionProgramEventV1): boolean {
+  assertMetabolismAssetTransition(ctx, event);
   switch (event.type) {
     case 'intervention_linked':
       requireActiveAt(ctx, 'awaiting_intervention');
@@ -171,53 +222,43 @@ function applyChangeEvent(ctx: ReducerContext, event: EvolutionProgramEventV1): 
       addRefs(ctx, event.autoRecheckRef);
       setStage(ctx, 'observing');
       return true;
+    case 'change_cycle_linked':
+      requireActiveAt(ctx, 'awaiting_approval');
+      addRefs(ctx, event.caseRef, event.proposalRef, event.ownerAuthorizationRef, event.targetVersionRef);
+      replaceCurrentAssetVersion(ctx, event.targetVersionRef);
+      return true;
     case 'approval_linked':
       requireActiveAt(ctx, 'awaiting_approval');
       addRefs(ctx, event.approvalRef, event.targetVersionRef);
       setStage(ctx, 'writing_back');
       return true;
     case 'approval_rejected_or_superseded':
-      requireActiveAt(ctx, 'awaiting_approval');
+      requireActiveAtAny(
+        ctx,
+        ['awaiting_approval', 'writing_back'],
+        'approval closure requires an unmutated active change attempt',
+      );
       addRefs(ctx, event.decisionRef);
-      setStage(ctx, event.result === 'rejected' ? 'deciding' : 'awaiting_approval');
+      // None of these terminal proposal states authorises dispatch, and none is an outcome. Keep the
+      // Program at Change Review so an explicit fresh proposal (or Program withdrawal) is the only
+      // next move. The owner may close an Approval after F311 observed it but before mutation; that
+      // pre-mutation drift must invalidate the old attempt instead of stranding it in writing_back.
+      setStage(ctx, 'awaiting_approval');
       return true;
-    case 'mutation_linked':
+    case 'intervention_receipt_linked':
       requireActiveAt(ctx, 'writing_back');
-      addRefs(ctx, event.mutationReceiptRef, event.assetVersionRef);
-      ctx.program.currentAssetVersionRefs = [
-        ...ctx.program.currentAssetVersionRefs.filter(
-          (value) =>
-            value.assetKind !== event.assetVersionRef.assetKind || value.assetId !== event.assetVersionRef.assetId,
-        ),
-        event.assetVersionRef,
-      ];
+      addRefs(ctx, event.interventionReceiptRef, event.assetVersionRef);
+      if (event.loadedRuntimeRef !== undefined) addRefs(ctx, event.loadedRuntimeRef);
+      if (event.result === 'changed') replaceCurrentAssetVersion(ctx, event.assetVersionRef);
       setStage(ctx, 'revalidating');
       return true;
     case 'outcome_linked':
       requireActiveAt(ctx, 'revalidating');
-      addRefs(ctx, event.outcomeRef, event.loadedRuntimeRef, event.freshnessProofRef);
+      addRefs(ctx, event.outcomeReceiptRef, event.freshnessProofRef);
       setStage(ctx, 'deciding');
       return true;
     case 'decision_recorded':
-      requireActiveAt(ctx, 'deciding');
-      addRefs(ctx, event.decisionRef);
-      ctx.cycle.decision = event.decision;
-      ctx.cycle.closedAt = ctx.occurredAt;
-      if (event.decision === 'tune' || event.decision === 'rollback') {
-        ctx.program.cycle += 1;
-        ctx.program.stage = 'instrumenting';
-        ctx.cycle = {
-          programId: ctx.program.programId,
-          cycle: ctx.program.cycle,
-          stage: 'instrumenting',
-          lineageRefIds: [],
-          openedAt: ctx.occurredAt,
-        };
-        ctx.cycles.push(ctx.cycle);
-      } else {
-        ctx.program.lifecycle = 'terminal';
-        ctx.program.terminalDisposition = event.decision === 'keep' ? 'kept' : event.decision;
-      }
+      applyDecision(ctx, event);
       return true;
     default:
       return false;

@@ -5109,6 +5109,7 @@ export class QueueProcessor {
           messageId,
           expectedThreadId: threadId,
           expectedUserId: userId,
+          expectedTargetCatIds: targetCats,
           messageStore,
         });
       } catch (err) {

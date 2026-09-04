@@ -881,6 +881,7 @@ export class ConnectorInvokeTrigger {
             messageId,
             expectedThreadId: threadId,
             expectedUserId: userId,
+            expectedTargetCatIds: targetCats,
             messageStore: this.opts.messageStore,
           });
         } catch (err) {

@@ -135,27 +135,30 @@ async function admitAcceptedOffer(
     };
   }
   const draft = command.taskDraft ?? defaultTaskDraft(source);
-  const admission = await lifecycle.admitOrResume({
-    task: {
-      threadId: source.threadId,
-      title: draft?.title ?? 'Clarify entrusted work from the source conversation',
-      why: draft?.why ?? `Accepted from source message ${source.id}`,
-      createdBy: (draft?.ownerCatId ?? 'system') as CatId | 'system',
-      ownerCatId: draft?.ownerCatId ?? null,
-      userId: source.userId,
+  const admission = await lifecycle.admitOrResume(
+    {
+      task: {
+        threadId: source.threadId,
+        title: draft?.title ?? 'Clarify entrusted work from the source conversation',
+        why: draft?.why ?? `Accepted from source message ${source.id}`,
+        createdBy: (draft?.ownerCatId ?? 'system') as CatId | 'system',
+        ownerCatId: draft?.ownerCatId ?? null,
+        userId: source.userId,
+      },
+      admission: {
+        basis: 'accepted_offer',
+        sourceRefs: [sourceRef(source.id)],
+        offerId: command.offerId,
+        sourceMessageRevision: command.sourceMessageRevision,
+        ...(draft ? { intendedOutcome: draft.intendedOutcome } : {}),
+        idempotencyKey: command.idempotencyKey,
+      },
+      ...(draft ? { closure: draft.closure } : {}),
+      ...(draft?.time ? { time: draft.time } : {}),
+      ...(draft?.artifactRefs ? { artifactRefs: draft.artifactRefs } : {}),
     },
-    admission: {
-      basis: 'accepted_offer',
-      sourceRefs: [sourceRef(source.id)],
-      offerId: command.offerId,
-      sourceMessageRevision: command.sourceMessageRevision,
-      ...(draft ? { intendedOutcome: draft.intendedOutcome } : {}),
-      idempotencyKey: command.idempotencyKey,
-    },
-    ...(draft ? { closure: draft.closure } : {}),
-    ...(draft?.time ? { time: draft.time } : {}),
-    ...(draft?.artifactRefs ? { artifactRefs: draft.artifactRefs } : {}),
-  });
+    { sourceRef: sourceRef(source.id), content: source.content },
+  );
   await publishAdmissionTask(options, admission);
   return admission;
 }

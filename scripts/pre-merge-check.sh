@@ -26,6 +26,7 @@ NC='\033[0m'
 NO_REBASE=false
 SKIP_INSTALL=false
 AUTO_FIX=false
+RISK_AXIS=""
 CAT_CAFE_GATE_TEST_MODE="${CAT_CAFE_GATE_TEST_MODE:-auto}"
 GATE_ORIGINAL_ARGS=("$@")
 GATE_ORIGINAL_ARG_COUNT=$#
@@ -33,10 +34,23 @@ GATE_TERMINAL_ACTIVE=false
 GATE_TERMINAL_STATUS="failed"
 GATE_RUN_ID=""
 GATE_REQUIRED_STAGES=""
+GATE_FAILED_STAGE=""
+GATE_FAILURE_OUTPUT_FILE=""
+GATE_ROUTE="full"
+GATE_ROUTE_JSON=""
+GATE_REEXEC_DEPTH="${CAT_CAFE_GATE_REEXEC_DEPTH:-0}"
+unset CAT_CAFE_GATE_REEXEC_DEPTH
+
+case "$GATE_REEXEC_DEPTH" in
+  ''|*[!0-9]*)
+    echo "Invalid CAT_CAFE_GATE_REEXEC_DEPTH: $GATE_REEXEC_DEPTH" >&2
+    exit 1
+    ;;
+esac
 
 usage() {
   cat <<'EOF'
-Usage: scripts/pre-merge-check.sh [--no-rebase] [--skip-install] [--auto-fix]
+Usage: scripts/pre-merge-check.sh [--no-rebase] [--skip-install] [--auto-fix] [--risk <axis>] [--]
 
 Default behavior:
   1. Fail if the worktree is dirty
@@ -48,6 +62,8 @@ Flags:
   --no-rebase    Skip fetch + rebase (local verification only)
   --skip-install Skip dependency refresh after rebase
   --auto-fix     Run allowlisted auto-fix (biome format) before gate, auto-commit changes as [qc-bot]
+  --risk <axis>  Elevate a machine-targeted route to full for behavior/data/security/contract/irreversible risk
+  --             pnpm passthrough separator (consumed; subsequent flags still parsed)
 EOF
 }
 
@@ -65,9 +81,21 @@ while [[ $# -gt 0 ]]; do
       AUTO_FIX=true
       shift
       ;;
+    --risk)
+      if [ $# -lt 2 ]; then
+        echo "Missing value for --risk" >&2
+        exit 1
+      fi
+      RISK_AXIS="$2"
+      shift 2
+      ;;
     --help|-h)
       usage
       exit 0
+      ;;
+    --)
+      # pnpm 9.x passes '--' as a literal arg; consume it and keep parsing
+      shift
       ;;
     *)
       echo "Unknown option: $1" >&2
@@ -85,17 +113,6 @@ case "$CAT_CAFE_GATE_TEST_MODE" in
     exit 1
     ;;
 esac
-
-# Long gates launched from a cat CLI must use the API-managed wakeWhen carrier.
-# ManagedRunner removes both cat-process markers from its child environment, so
-# human terminals and managed commands remain valid while every CLI carrier is
-# blocked from becoming a polling progress bar for foreground gates.
-if [ -n "${CAT_CAFE_PROCESS_OWNER_ID:-}" ] || [ "${CAT_CAFE_CLI_PROCESS_CONTEXT:-}" = "cat" ]; then
-  echo "⛔ 猫猫 CLI 不能前台运行 full gate。" >&2
-  echo "   请调用 cat_cafe_hold_ball({ wakeWhen: { command: \"pnpm gate\" } })。" >&2
-  echo "   Hub 会显示结构化运行状态，并在命令终态自动唤醒当前猫猫。" >&2
-  exit 2
-fi
 
 echo ""
 echo "╔══════════════════════════════════════════════════════╗"
@@ -236,23 +253,28 @@ gate_stage_is_green() {
 
 mark_gate_stage_green() {
   local stage="$1"
+  local duration_ms="$2"
   if [ "$GATE_TERMINAL_ACTIVE" = "true" ]; then
-    node "$REPO_ROOT/scripts/gate-terminal-receipt.mjs" stage-green --run-id "$GATE_RUN_ID" --stage "$stage" --owner-pid "$$"
+    node "$REPO_ROOT/scripts/gate-terminal-receipt.mjs" stage-green --run-id "$GATE_RUN_ID" --stage "$stage" --owner-pid "$$" --duration-ms "$duration_ms" --route "$GATE_ROUTE"
   fi
 }
 
 run_resumable_gate_stage() {
   local mode="$1"
   local stage="$2"
+  local stage_start=$SECONDS
   shift 2
   if gate_stage_is_green "$stage"; then
     echo -e "${GREEN}↻ Reused exact-tree green stage: $stage${NC}"
     return 0
   fi
-  if ! run_gate_resource_stage "$mode" "$stage" "$@"; then
-    return 1
+  : >"$GATE_FAILURE_OUTPUT_FILE"
+  if run_gate_resource_stage "$mode" "$stage" "$@" 2>&1 | tee "$GATE_FAILURE_OUTPUT_FILE"; then
+    mark_gate_stage_green "$stage" "$(( (SECONDS - stage_start) * 1000 ))"
+    return 0
   fi
-  mark_gate_stage_green "$stage"
+  GATE_FAILED_STAGE="$stage"
+  return 1
 }
 
 settle_gate_receipt() {
@@ -260,19 +282,25 @@ settle_gate_receipt() {
   if [ "$GATE_TERMINAL_ACTIVE" != "true" ]; then
     return 0
   fi
-  if [ "$status" = "green" ]; then
-    node "$REPO_ROOT/scripts/gate-terminal-receipt.mjs" settle --run-id "$GATE_RUN_ID" --status "$status" --required-stages "$GATE_REQUIRED_STAGES"
-  else
-    node "$REPO_ROOT/scripts/gate-terminal-receipt.mjs" settle --run-id "$GATE_RUN_ID" --status "$status"
+  local settle_args=(settle --run-id "$GATE_RUN_ID" --status "$status" --route-json "$GATE_ROUTE_JSON" --failure-output-file "$GATE_FAILURE_OUTPUT_FILE")
+  if [ -n "$GATE_FAILED_STAGE" ]; then
+    settle_args+=(--failed-stage "$GATE_FAILED_STAGE")
   fi
+  if [ "$status" = "green" ]; then
+    settle_args+=(--required-stages "$GATE_REQUIRED_STAGES")
+  fi
+  node "$REPO_ROOT/scripts/gate-terminal-receipt.mjs" "${settle_args[@]}"
   GATE_TERMINAL_ACTIVE=false
 }
 
 GATE_GUARD_SCRIPT="$REPO_ROOT/scripts/pre-merge-gate-guard.mjs"
 GATE_LOCK_DIR="${CAT_CAFE_GATE_LOCK_DIR:-$REPO_ROOT/.cat-cafe/gate/pre-merge-check.lock}"
-node "$GATE_GUARD_SCRIPT" acquire --lock-dir "$GATE_LOCK_DIR" --holder-pid "$$"
+GATE_GUARD_ACTIVE=false
 release_gate_guard() {
-  node "$GATE_GUARD_SCRIPT" release --lock-dir "$GATE_LOCK_DIR" --holder-pid "$$" >/dev/null 2>&1 || true
+  if [ "$GATE_GUARD_ACTIVE" = "true" ]; then
+    node "$GATE_GUARD_SCRIPT" release --lock-dir "$GATE_LOCK_DIR" --holder-pid "$$" >/dev/null 2>&1 || true
+    GATE_GUARD_ACTIVE=false
+  fi
 }
 gate_exit() {
   local exit_code=$?
@@ -281,13 +309,14 @@ gate_exit() {
   fi
   settle_gate_receipt "$GATE_TERMINAL_STATUS" >/dev/null 2>&1 || true
   release_gate_guard
+  if [ -n "$GATE_FAILURE_OUTPUT_FILE" ]; then
+    rm -f "$GATE_FAILURE_OUTPUT_FILE"
+  fi
   return "$exit_code"
 }
 trap gate_exit EXIT
 trap 'GATE_TERMINAL_STATUS=cancelled; exit 130' INT
 trap 'GATE_TERMINAL_STATUS=cancelled; exit 143' TERM
-echo -e "${GREEN}✓ Gate singleflight + system-pressure preflight${NC}"
-echo ""
 
 # ── Step 0.5: Auto-fix (--auto-fix only, F253) ──
 
@@ -363,6 +392,7 @@ else
   # running. Export this exact cut for base-aware child checkers; in particular,
   # governance checks must not fetch and replace their comparison target midway.
   GATE_BASE_SHA="$(git rev-parse origin/main)"
+  GATE_HEAD_BEFORE_REBASE="$(git rev-parse HEAD)"
 
   REBASE_RESULT=0
   git rebase "$GATE_BASE_SHA" --quiet 2>&1 || REBASE_RESULT=$?
@@ -386,10 +416,78 @@ else
   echo -e "${GREEN}✓ rebase frozen origin/main ${GATE_BASE_SHA:0:8} 成功${NC}"
   record_step "rebase" "$STEP_START"
   echo ""
+
+  # A rebase can replace this script or any gate-control dependency while the
+  # current Bash process still holds the pre-rebase function definitions. Do
+  # not mix that loaded shell with post-rebase CLIs. Re-exec the current tree
+  # before route classification, receipt creation, or any expensive stage.
+  GATE_HEAD_AFTER_REBASE="$(git rev-parse HEAD)"
+  if [ "$GATE_HEAD_AFTER_REBASE" != "$GATE_HEAD_BEFORE_REBASE" ]; then
+    if [ "$GATE_REEXEC_DEPTH" -ge 3 ]; then
+      echo -e "${RED}❌ Gate HEAD kept changing across 3 post-rebase restarts; refusing a mixed control plane${NC}" >&2
+      exit 1
+    fi
+    echo -e "${YELLOW}↻ Rebase changed HEAD; restarting gate from the rebased tree before post-rebase commands${NC}"
+    export CAT_CAFE_GATE_REEXEC_DEPTH="$((GATE_REEXEC_DEPTH + 1))"
+    if [ "$GATE_ORIGINAL_ARG_COUNT" -eq 0 ]; then
+      exec bash "$REPO_ROOT/scripts/pre-merge-check.sh"
+    else
+      exec bash "$REPO_ROOT/scripts/pre-merge-check.sh" "${GATE_ORIGINAL_ARGS[@]}"
+    fi
+  fi
 fi
 
 export CAT_CAFE_GATE_BASE_SHA="$GATE_BASE_SHA"
 echo -e "${GREEN}✓ Gate baseline frozen: ${GATE_BASE_SHA:0:8}${NC}"
+echo ""
+
+# Route from repository and receipt truth after the integration cut is frozen.
+# Public exports and --no-rebase probes retain the historical full contract.
+if [ "$NO_REBASE" = "false" ] && [ "$PUBLIC_EXPORT" = "false" ] && [ "$TEST_MODE" = "full" ]; then
+  GATE_DATABASE_PATH="${CAT_CAFE_FULL_GATE_RESOURCE_DB_PATH:-$(git rev-parse --path-format=absolute --git-common-dir)/cat-cafe-full-gate-resources.sqlite}"
+  GATE_ROUTE_ARGS=(--repo-root "$REPO_ROOT" --base-sha "$GATE_BASE_SHA" --database-path "$GATE_DATABASE_PATH")
+  if [ -n "$RISK_AXIS" ]; then
+    GATE_ROUTE_ARGS+=(--risk "$RISK_AXIS")
+  fi
+  GATE_ROUTE_JSON="$(node "$REPO_ROOT/scripts/classify-gate-route.mjs" "${GATE_ROUTE_ARGS[@]}")"
+  GATE_ROUTE="$(node -e 'process.stdout.write(JSON.parse(process.argv[1]).route)' "$GATE_ROUTE_JSON")"
+  GATE_ROUTE_REASONS="$(node -e 'process.stdout.write(JSON.parse(process.argv[1]).reasons.join("; "))' "$GATE_ROUTE_JSON")"
+  echo -e "${GREEN}✓ Gate route=${GATE_ROUTE}: ${GATE_ROUTE_REASONS}${NC}"
+  echo ""
+  case "$GATE_ROUTE" in
+    targeted)
+      echo -e "${YELLOW}⚠ Full gate intentionally skipped; attach exact-HEAD risk-matched targeted evidence before merge.${NC}"
+      exit 0
+      ;;
+    reuse)
+      echo -e "${GREEN}✓ Reused canonical exact-tree terminal-green evidence${NC}"
+      bash "$(dirname "$0")/write-gate-last-run.sh" "$REPO_ROOT"
+      exit 0
+      ;;
+    full)
+      ;;
+    *)
+      echo -e "${RED}❌ Invalid gate route: ${GATE_ROUTE}${NC}" >&2
+      exit 1
+      ;;
+  esac
+fi
+
+GATE_FAILURE_OUTPUT_FILE="$(mktemp "${TMPDIR:-/tmp}/cat-cafe-gate-output.XXXXXX")"
+
+# Long full gates launched from a cat CLI must use the API-managed wakeWhen carrier.
+# Classification stays cheap and foreground-safe, so targeted routes never get
+# rejected merely because their caller is a cat process.
+if [ -n "${CAT_CAFE_PROCESS_OWNER_ID:-}" ] || [ "${CAT_CAFE_CLI_PROCESS_CONTEXT:-}" = "cat" ]; then
+  echo "⛔ 猫猫 CLI 不能前台运行 full gate。" >&2
+  echo "   请调用 cat_cafe_hold_ball({ wakeWhen: { command: \"pnpm gate\" } })。" >&2
+  echo "   Hub 会显示结构化运行状态，并在命令终态自动唤醒当前猫猫。" >&2
+  exit 2
+fi
+
+node "$GATE_GUARD_SCRIPT" acquire --lock-dir "$GATE_LOCK_DIR" --holder-pid "$$"
+GATE_GUARD_ACTIVE=true
+echo -e "${GREEN}✓ Gate singleflight + system-pressure preflight${NC}"
 echo ""
 
 # Canonical exact-tree singleflight starts only for the complete source-full

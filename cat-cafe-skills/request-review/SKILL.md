@@ -1,6 +1,6 @@
 ---
 name: request-review
-tips_exempt: harness-internal review routing convention; no distinct end-user capability surface
+tips_exempt: F167/F314 keep local review as an internal durable handoff and add provenance guards; no distinct end-user-invocable capability surface
 description: >
   Route a change to a non-author local peer when local review is the selected independent validation source.
   Use when: risk routing chooses a stateful local reviewer for implementation, governance, or semantic context.
@@ -46,6 +46,7 @@ triggers:
 | 证据 | 何时必需 | 缺失动作 |
 |---|---|---|
 | 当前 diff / branch / HEAD | 始终 | BLOCKED — reviewer 不审漂移目标 |
+| `Review-Subject-Ref` + accepted source/revision | 始终 | BLOCKED — 无法把 verdict 归到同一 review episode 或判断 source 是否移动 |
 | 五轴风险判断（行为、数据、安全、契约、不可逆） | 始终 | BLOCKED — 无法判断 review 深度 |
 | 与风险匹配的验证输出 | 始终 | BLOCKED — 先跑 targeted 或 full gate |
 | 原始需求摘录 | 涉及用户意图 / 愿景 | BLOCKED — reviewer 无法判断做没做对 |
@@ -69,12 +70,18 @@ triggers:
 
 ```text
 Review target: <branch@HEAD>
+Review-Subject-Ref: <pr:owner/repo#N | task:taskId>
+Accepted-Source-Ref: <docs/features/F*.md | threadId#messageId>
+Accepted-Revision: <full Git OID | immutable source message id>
 Scope: <changed files / one-line intent>
 Risk: <最高风险面，或 none + 理由>
 Evidence: <真实命令 / preview 结果>
 Engagement: <iterative|one_shot_calibration|final_seal> + <stop condition / repair return>
 Ask: checked=<请 reviewer 指认最高风险面> verdict=approve|block
 ```
+
+Feature 以 `docs/features/F*.md` + 完整 40/64 位 Git OID 为 anchor；小事以
+`threadId#messageId` 为 anchor，revision 就是同一个 messageId。只传引用，不复制 source 正文。
 
 ### 完整 packet
 
@@ -128,17 +135,37 @@ instructions 中的 no-comment 禁令必须在新 HEAD 复审前清除。
 正式结论前按 **author/custody/handoff source** 分类，repo 名和 GitHub login 不参与分类：
 
 - 外部作者或 external PR / Issue custody：verdict 必须写回同一 GitHub subject，并绑定精确 PR HEAD / Issue body digest；没有 review/comment URL 就还没完成。
-- 本地猫通过 `@` / handoff 交来的 review：默认走 author cat route。**direct review carrier** 是直接承载本轮 review 请求、并被 lease 记录为 `predecessorThreadId` 的 thread；它压过任务祖先 thread、旧 `sourceThreadId` 与继承 coordination。开始真实 review 链时，同 thread 用 `post_message(coordination.phase=active)`，跨 thread 用 `cross_post_message(coordination.phase=active)`；final verdict 用同一 carrier 的 `coordination.phase=terminal` 回 direct review carrier。结构化 action 失败后的普通消息降级必须留在该 carrier，并显式带 `coordination={phase:"active", subjectRef:"<same subjectRef>"}`；不得裸继承旧链。包内带 final HEAD / content digest 与独立验证证据，不强制 GitHub comment。
+- 本地猫通过 `@` / handoff 交来的 review：默认走 author cat route。**direct review carrier** 是直接承载本轮 review 请求的 thread；它压过任务祖先 thread、旧 `sourceThreadId` 与继承 coordination。初审和复审都用 ordinary durable A2A（普通持久 A2A）：同 thread `post_message`，跨 thread `cross_post_message`，行首 `@reviewer`，并附 PR / exact HEAD（或文档 content digest）。不要附 structured action、review lease、generation、replacement authority 或 review coordination。
 
-  invocation-bound local review lease 的 final post 必须在同一次调用里同时带显式 `clientMessageId` 与 typed
-  `localReviewVerdict`（`approved | changes_requested | commented`）。`coordination.phase=terminal` 只确定返还路由，
-  不能代替 verdict 事实；漏字段会在持久化前返回 `400 local_review_verdict_required`。公开正文格式不参与授权。
+  reviewer 用同一 ordinary carrier 回行首 `@author`，并在同一次调用里带显式 `clientMessageId`、typed
+  `localReviewVerdict`（`approved | changes_requested | commented`）、`reviewedHeadSha`、`reviewSubjectRef`、
+  `acceptedSourceRef` 与 `acceptedRevision`。正文给出 reviewer identity、
+  findings / evidence refs；typed fact 才是 merge-gate 消费的 durable authority，公开正文格式不参与授权。
+
+### Accepted source revision
+
+发 review 到 merge-gate 之间，author 必须将 durable fact 的 `acceptedRevision` 与 accepted source 的当前 revision
+按下列仓库命令做一次精确的 procedural 比较；当前没有 runtime consumer 代替 author 执行这道 fence：
+
+- Feature 文档的 current revision 是当前 integration cut 上
+  `git log -1 --format=%H -- <acceptedSourceRef>` 返回的最后一次内容变更 commit；不能直接使用每次都会随无关
+  main 提交移动的 `HEAD`。
+- source message 的 current revision 就是 `threadId#messageId` 中同一个不可变 `messageId`。
+
+- 未移动：零提示、零 re-ack；
+- 移动：先回读同一个 `acceptedSourceRef`，在现有 PR/evidence packet 写一条
+  `Accepted-Source-Reack: <sourceRef>@<currentRevision>`，再继续 gate；
+- source ref 本身变了、revision 解析不了或 re-ack 仍指旧 revision：fail closed。不要用聊天概括、旧 verdict、
+  lease/generation/reentry 或第二份 source 正文补空。
+
+re-ack 只确认 author 已看到新的 source revision；它不批准新的代码 HEAD。代码有实质变化时仍按 exact-HEAD
+规则回 active review source。
 
 两条完成证据不能互相代偿。本地 review 只有在 **merge-gate、repository rule 或 operator** 明确要求时才额外写 GitHub；额外 artifact 不取代回作者猫的 custody。
 
-terminal verdict 是这条 direct review coordination 的最后一次必达投递。作者确认 exact target、`no open items` 后直接进入 merge-gate 或 clean-stop；不再为了“出口必须有 @”回传 courtesy ACK。即使作者补发礼貌 ACK，terminal fence 也只持久化、不再唤醒 reviewer。
+verdict 是这条 review 往返的最后一次必达投递。作者确认 exact target、`no open items` 后直接进入 merge-gate 或 clean-stop；不再为了“出口必须有 @”回传 courtesy ACK。
 
-已完成 review lease 只有出现需要判断力的新信息才可重开。新 exact HEAD 复审必须携带 `reviewReentry`：`behavioral_delta`、`stale_or_blocking` 或 `explicit_matrix_route` 三选一，并附 durable evidenceRef；初审省略该字段。cloud finding 不是把本地旧 reviewer 拉回来的理由，纯 ACK / 状态复述 / 无新信息也不是。
+新 exact HEAD 只有出现需要判断力的新信息才发起普通复审请求；旧 verdict 继续作为历史证据，但不能批准新 HEAD。cloud finding 不是把本地旧 reviewer 拉回来的理由，纯 ACK / 状态复述 / 无新信息也不是。local review 不使用复入字段、generation 或 replacement。
 
 需要额外 GitHub artifact 时，家里共享 GitHub login 不能用 `gh pr review --approve` 自我账号审批，应使用 `gh pr comment {N} --body-file <verdict.md>` 留逻辑 verdict，并包含：
 
@@ -155,6 +182,23 @@ terminal verdict 是这条 direct review coordination 的最后一次必达投�
 - 稀缺席位的 `one_shot_calibration` / `final_seal` findings 交回 author；普通修复不复入原稀缺 reviewer，仍需独立确认时选日常 reviewer 覆盖真实 delta 或 final HEAD。
 - cloud finding 修复回 cloud；local finding 修复回 local。不要把二者叠成常驻双门。
 - R2+ 同型 finding 再出现时，author 给出 Failure-Mode Sweep（pattern / scanned / fixed / N/A），避免 reviewer 逐点补锅。
+
+### 家里 R4 brake（action-time）
+
+自动发下一轮 review 前，从 durable thread history 读取同一 `reviewSubjectRef` 的 typed facts，只计
+`reviewerCatId != authorCatId && verdict=changes_requested`：
+
+`cat_cafe_get_thread_context` 的 `anchor` / `full` / `bounded` 消息投影都会把完整 artifact 投影为
+`localReviewFact`，并在每条 fact 上给出只针对该消息到达时刻的 `localReviewLoopBrakeOnArrival`。只有当前入站/触发消息就是这条 fact 时
+才消费该 sidecar；之后回读历史不能把旧 `pause_once` 再解释成一次新暂停。
+
+- history 不可读：`warn_open`，保留警告但不锁猫；
+- 新到达的 fact 让计数从 `<4` 跨到 `>=4`：本次自动 re-request **只暂停一次**，author 回读 accepted source，
+  写 Finding Pattern Summary（重复模式、共同根因、已扫 siblings、修复/不适用），然后由新的显式动作继续；
+- 同一 history 再处理、或第五轮及以后：继续，不重复暂停。
+
+author 自己的 verdict 不计数；不同 `reviewSubjectRef` 不串线。R4 不创建 Round/Reset、review lease、generation、
+replacement 或第二套 review 状态。
 
 ## 正反灰例
 
@@ -173,7 +217,7 @@ terminal verdict 是这条 direct review coordination 的最后一次必达投�
 | “没有截图”就把球扔给 operator | 用户替 author 做 QA | author 自跑 preview，截图只是载体 |
 | 只因 reviewer SHA ≠ 新 HEAD 就重开 review | 机械 rebase/合并重复烧判断力 | 先做 continuityProof；只有新增实质内容才回 active source |
 | 本地 finding 修完又找 cloud 续签 | review source 串线 | 回对应 active source |
-| terminal verdict 后 author 再 `@reviewer` ACK | 双方无 open items 仍制造乒乓 | clean-stop；新复审必须提供 `reviewReentry` |
+| verdict 后 author 再 `@reviewer` ACK | 双方无 open items 仍制造乒乓 | clean-stop；有实质新内容时发一条新的普通 review 请求 |
 
 ## 和其他 skill 的区别
 

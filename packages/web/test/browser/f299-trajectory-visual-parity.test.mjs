@@ -6,6 +6,7 @@ import path from 'node:path';
 import { after, before, test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { chromium } from '../../../ppt-forge/node_modules/playwright/index.mjs';
+import { createNextDevTestEnvironment } from './next-dev-test-environment.mjs';
 
 const WEB_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const NEXT_BIN = path.resolve(WEB_ROOT, '../../node_modules/next/dist/bin/next');
@@ -46,6 +47,7 @@ async function stopServer(server) {
 let server;
 let browser;
 let baseUrl;
+let nextDev;
 
 before(async () => {
   const sync = spawnSync(process.execPath, [path.resolve(WEB_ROOT, 'scripts/sync-vendor-assets.mjs')], {
@@ -55,9 +57,10 @@ before(async () => {
   assert.equal(sync.status, 0, `vendor token sync failed:\n${sync.stdout}\n${sync.stderr}`);
   const port = await findFreePort();
   const output = [];
+  nextDev = await createNextDevTestEnvironment('f299-trajectory-parity');
   server = spawn(process.execPath, [NEXT_BIN, 'dev', '-H', '127.0.0.1', '-p', String(port)], {
     cwd: WEB_ROOT,
-    env: { ...process.env, NEXT_TELEMETRY_DISABLED: '1', NODE_ENV: 'development' },
+    env: nextDev.env,
     stdio: ['ignore', 'pipe', 'pipe'],
   });
   server.stdout.on('data', (chunk) => output.push(chunk.toString()));
@@ -70,6 +73,7 @@ before(async () => {
 after(async () => {
   if (browser) await browser.close();
   if (server) await stopServer(server);
+  await nextDev?.cleanup();
 });
 
 async function semanticSurfaces(page) {

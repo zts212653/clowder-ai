@@ -86,6 +86,8 @@ export interface FocusEntitlement {
   kind: 'user' | 'background';
   reason:
     | 'close-button'
+    | 'bulk-close'
+    | 'collapse-split'
     | 'explicit-split'
     | 'open-from-chat'
     | 'owner-background'
@@ -118,6 +120,8 @@ export type WorkbenchAction =
   | ({ type: 'close-sidecar' } & EntitledAction)
   | ({ type: 'promote-sidecar'; destination: 'tab' | 'split' } & EntitledAction)
   | ({ type: 'close-surface'; surfaceId: string } & EntitledAction)
+  | ({ type: 'close-other-surfaces'; preserveSurfaceId: string } & EntitledAction)
+  | ({ type: 'collapse-split' } & EntitledAction)
   | ({ type: 'restore-surface'; surfaceId: string } & EntitledAction)
   | { type: 'dismiss-activity'; activityId: string };
 

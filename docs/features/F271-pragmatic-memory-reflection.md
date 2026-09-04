@@ -9,7 +9,7 @@ description: "把 session 收尾与每日 context 反射成有来源、有类型
 description_source: human
 description_author: codex-sol
 description_updated_at: 2026-07-20T08:00:00Z
-tips_exempt: "F271 is an internal write-side producer; user-visible review and reading reuse existing F221/F231/F255 surfaces."
+tips_exempt: "Renewed 2026-09-03 for F312 Phase E E0 qualification: F271 remains an internal write-side producer with no named invocation consumer of its own; user-visible review and reading still reuse existing F221/F231/F255 surfaces."
 ---
 
 # F271: Pragmatic Memory Reflection — 功利记忆写侧反射
@@ -173,6 +173,14 @@ producer 产物。故 Phase B 的工程 AC 已实现，运行闭环仍 blocked�
 | R4 | 功利线也要服务 proactive，而不是只回收过去 | A4 | [x] |
 
 ## Dependencies
+
+### F312 Phase E Standing Reflex qualification（2026-09-03）
+
+F271 reflection surface 保留为 source-linked、revision-bound hypothesis producer，并继续把 typed delta 交给
+既有 destination lane。它没有独立的 invocation consumer；supply ledger、public candidate 与 F255 cue sink
+都不能冒充 consumption predicate。因此本面在 F312 Standing Reflex catalog 中为 `exempt`：不新增 generic
+detector、receipt、outcome 或 utility eval。source correction、destination disposition 与 canonical truth 仍由
+source/destination lane 处理；未来若要激活 reflection-level recall，必须重新给出 named consumer 与 bounded use。
 
 - **Related**: F152（durable truth/compiler）、F221/F227/F231（既有 lanes）、F255（私有 cue 消费者）、F263（lifecycle 观测）。
 - **Not blocked by**: F272 第一跳；两者通过 typed cue 接口并行推进。

@@ -437,6 +437,13 @@ describe('Eval Domain Registry v0', () => {
         skill: 'cross-cat-handoff',
         signal: 'exact-head-external-pr-review-or-tracking-entry',
       },
+      {
+        id: 'f311-capability-evolution-intent-routing',
+        featureId: 'F311',
+        path: 'docs/harness-feedback/fixtures/f311-capability-evolution-intent-routing.md',
+        skill: 'capability-evolution',
+        signal: 'concrete-evolution-target-requires-canonical-start',
+      },
     ]);
   });
 

@@ -5,6 +5,7 @@ import { formatCatName, useCatData } from '@/hooks/useCatData';
 import type { CatInvocationInfo, ContextHealthData } from '@/stores/chat-types';
 import { apiFetch } from '@/utils/api-client';
 import { BindNewSessionSection } from './BindNewSessionSection';
+import { CloudConversationLink } from './CloudConversationLink';
 import { ContextHealthBar } from './ContextHealthBar';
 import { CriticalText } from './content-overflow';
 import { BindSessionInput, SessionIdTag } from './SessionChainInputs';
@@ -739,14 +740,17 @@ export function SessionChainPanel({
         </div>
       )}
 
-      {/* F33: Bind new external session (skip default thread — system-owned, bind returns 403) */}
-      {threadId !== 'default' && loadError?.kind !== 'access_denied' && (
-        <BindNewSessionSection
-          threadId={threadId}
-          activeCatIds={activeCatIds}
-          onBound={() => setRefreshKey((k) => k + 1)}
-          disabled={isStale}
-        />
+      {/* External conversation/session bindings (skip default thread — system-owned routes return 403). */}
+      {!chainCollapsed && threadId !== 'default' && loadError?.kind !== 'access_denied' && (
+        <>
+          <CloudConversationLink threadId={threadId} />
+          <BindNewSessionSection
+            threadId={threadId}
+            activeCatIds={activeCatIds}
+            onBound={() => setRefreshKey((k) => k + 1)}
+            disabled={isStale}
+          />
+        </>
       )}
 
       {loading && visibleSessions.length === 0 && (

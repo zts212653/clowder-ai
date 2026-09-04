@@ -1,9 +1,9 @@
 ---
-feature_ids: [F203, F192]
+feature_ids: [F203, F192, F311]
 topics: [l0, capability-wakeup, skills, features, awareness]
 doc_kind: reference
 created: 2026-05-27
-related_features: [F128, F192, F201, F210, F211, F212, F186, F188]
+related_features: [F128, F192, F201, F210, F211, F212, F186, F188, F311]
 ---
 
 # Capability Wakeup Index — 家里独有能力速查（L0 §8 配套）
@@ -292,6 +292,21 @@ opus-47 原把 `workspace-navigator` / `rich-messaging` / `browser-preview` 一�
 - 一句话生成完整工作流
 
 **Pipeline**：`lark-*` skill 家族（lark-doc / lark-base / lark-task / lark-calendar / etc.）
+
+### 24. `capability-evolution` — F311 能力进化入口
+
+**坏直觉**：听到“你们能进化什么”只加载通用 `self-evolution` 讲理念；听到“我们来进化 X”只给建议，不启动已经上线的 Program
+
+**场景 trigger**：
+
+- 信息型：“能进化什么 / 能力进化是什么” → 解释范围与边界，零写入
+- 动作型：“我们来进化 X”且 X 是具体目标 → 解析 canonical targetRef
+
+**用法**：加载 `capability-evolution`；只有动作型才调用 `cat_cafe_start_evolution_program`，并用触发消息的 exact `sourceMessageId` 作为 `clientMessageId`
+
+**边界**：重复错误/SOP/知识沉淀走 `self-evolution`；确定性 bug 走 test/guard；运行健康走 F153 logs/metrics/traces；未知 owner 不猜投，用 F311 admission identity + typed blocker 保持诚实
+
+**Eval**：`eval:capability-wakeup` 规则 `capability-evolution-concrete-target` 统计具体目标出现后 canonical start tool 的成功调用；连续 miss 再决定是否晋升 Tier 1
 
 ---
 

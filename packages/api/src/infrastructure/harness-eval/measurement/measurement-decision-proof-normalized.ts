@@ -46,6 +46,8 @@ export interface NormalizedMeasurementDecisionV1 {
   schemaVersion: typeof NORMALIZED_MEASUREMENT_DECISION_SCHEMA_VERSION;
   /** The owner's verdict about the MEASUREMENT. Orthogonal to the proof's `verified`. */
   measurementDecisionStatus: 'usable' | 'insufficient';
+  /** Owner-selected action; `keep_observe` never requests mutation authority. */
+  proposedAction: 'keep_observe' | 'fix' | 'build' | 'delete_sunset';
   certificateRef: MeasurementOwnerRefV1;
   resultRef: MeasurementOwnerRefV1;
   evaluationCohortRef: MeasurementOwnerRefV1;
@@ -251,6 +253,7 @@ export function normalizeMeasurementDecisionProof(input: {
     decision: {
       schemaVersion: NORMALIZED_MEASUREMENT_DECISION_SCHEMA_VERSION,
       measurementDecisionStatus: subject.measurementDecisionStatus,
+      proposedAction: result.actionProposal.action,
       certificateRef,
       resultRef,
       evaluationCohortRef,

@@ -1,5 +1,9 @@
 import type { CallbackPrincipal } from '@cat-cafe/shared';
 import type { FastifyReply, FastifyRequest } from 'fastify';
+import type {
+  EvolutionChangeRequestAuthority,
+  EvolutionValueDecisionAuthority,
+} from '../infrastructure/capability-evolution/change/program-change-owner-contract.js';
 
 /**
  * Who is asking, and on whose behalf.
@@ -15,6 +19,8 @@ export interface ProgramRequestContext {
   workspaceId: string;
   actorRef: string;
   originFor(clientMessageId: string): string;
+  changeRequestAuthority?: EvolutionChangeRequestAuthority;
+  valueDecisionAuthority?: EvolutionValueDecisionAuthority;
 }
 
 function sessionUserId(request: FastifyRequest): string | undefined {
@@ -22,14 +28,30 @@ function sessionUserId(request: FastifyRequest): string | undefined {
   return typeof value === 'string' && value.trim().length > 0 ? value.trim() : undefined;
 }
 
-function contextFromPrincipal(principal: CallbackPrincipal): ProgramRequestContext {
+function contextFromPrincipal(request: FastifyRequest, principal: CallbackPrincipal): ProgramRequestContext {
   if (principal.kind === 'invocation') {
+    const record = request.callbackAuth;
+    const originMessageId = record?.originTriggerMessageId ?? record?.a2aTriggerMessageId;
+    const changeRequestAuthority =
+      record?.invocationId === principal.invocationId && originMessageId
+        ? {
+            invocationId: record.invocationId,
+            userId: record.userId,
+            catId: record.catId,
+            threadId: record.threadId,
+            originMessageId,
+          }
+        : undefined;
     return {
       ownerUserId: principal.userId,
       workspaceId: `user:${principal.userId}`,
       actorRef: `cat:${principal.catId}`,
       originFor: (clientMessageId) =>
         `thread:${principal.threadId}:invocation:${principal.invocationId}:message:${clientMessageId}`,
+      ...(changeRequestAuthority ? { changeRequestAuthority } : {}),
+      ...(changeRequestAuthority
+        ? { valueDecisionAuthority: { kind: 'owner_source' as const, ...changeRequestAuthority } }
+        : {}),
     };
   }
   return {
@@ -41,7 +63,7 @@ function contextFromPrincipal(principal: CallbackPrincipal): ProgramRequestConte
 }
 
 export function requireContext(request: FastifyRequest, reply: FastifyReply): ProgramRequestContext | undefined {
-  if (request.callbackPrincipal) return contextFromPrincipal(request.callbackPrincipal);
+  if (request.callbackPrincipal) return contextFromPrincipal(request, request.callbackPrincipal);
   const userId = sessionUserId(request);
   if (!userId) {
     reply.status(401).send({ error: 'unauthorized' });
@@ -52,5 +74,6 @@ export function requireContext(request: FastifyRequest, reply: FastifyReply): Pr
     workspaceId: `user:${userId}`,
     actorRef: `user:${userId}`,
     originFor: (clientMessageId) => `browser:${userId}:message:${clientMessageId}`,
+    valueDecisionAuthority: { kind: 'owner_session', userId },
   };
 }

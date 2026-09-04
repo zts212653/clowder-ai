@@ -1,12 +1,20 @@
 import {
   type EvolutionProgramEventEnvelopeV1,
   type EvolutionProgramEventV1,
-  evolutionProgramEventEnvelopeV1Schema,
   type OwnerTruthRefV1,
   ownerTruthRefV1Schema,
-  reduceEvolutionProgramEvent,
-  replayEvolutionProgramEvents,
 } from '@cat-cafe/shared';
+import {
+  decideEvolutionProgramChange,
+  type EvolutionProgramChangeResult,
+  proposeEvolutionProgramChange,
+  syncEvolutionProgramChange,
+} from './change/program-change-bridge.js';
+import type {
+  EvolutionChangeOwnerPort,
+  EvolutionChangeRequestAuthority,
+  EvolutionValueDecisionAuthority,
+} from './change/program-change-owner-contract.js';
 import {
   type EvolutionProgramCommandAction,
   EvolutionProgramServiceError,
@@ -26,17 +34,15 @@ import {
   type ProgramInterventionLinkInput,
   type ProgramMeasurementLinkInput,
 } from './program-evaluation-linker.js';
+import { EvolutionProgramEventAppender } from './program-event-appender.js';
 import {
   buildEvolutionProgramEnvelope,
   type EvolutionProgramAppendOptions,
-  type EvolutionProgramAppendResult,
-  evolutionEventIdentityDigest,
   type IEvolutionProgramEventLog,
 } from './program-event-log.js';
 import { forgetEvolutionProgram } from './program-forget.js';
 import type { ProgramJoinValidator, ProgramObservationBlocker } from './program-join-validator.js';
 import {
-  type EvolutionTriggerDispatch,
   linkEvolutionProgramCertificates,
   type ProgramCertificatesLinkInput,
   type ProgramEvaluationTriggerInput,
@@ -59,6 +65,8 @@ export class EvolutionProgramService {
   private readonly evaluationOwnerResolver?: EvaluationOwnerResolver;
   private readonly dispatchObservationTrigger?: EvolutionProgramServiceOptions['dispatchObservationTrigger'];
   private readonly dispatchEvaluationTrigger?: EvolutionProgramServiceOptions['dispatchEvaluationTrigger'];
+  private readonly resolveChangeOwner: () => EvolutionChangeOwnerPort | undefined;
+  private readonly appender: EvolutionProgramEventAppender;
 
   constructor(options: EvolutionProgramServiceOptions) {
     this.eventLog = options.eventLog;
@@ -68,6 +76,9 @@ export class EvolutionProgramService {
     this.evaluationOwnerResolver = options.evaluationOwnerResolver;
     this.dispatchObservationTrigger = options.dispatchObservationTrigger;
     this.dispatchEvaluationTrigger = options.dispatchEvaluationTrigger;
+    this.resolveChangeOwner =
+      options.resolveChangeOwner ?? (options.changeOwner === undefined ? () => undefined : () => options.changeOwner);
+    this.appender = new EvolutionProgramEventAppender(this.eventLog, (events) => this.project(events));
   }
 
   async create(input: {
@@ -85,7 +96,7 @@ export class EvolutionProgramService {
       objectRef: targetRef,
       claimRef: { ownerFeatureId: 'F311', ownerStateRef: `evolution-claim:${programId}` },
     });
-    return this.appendValidated(envelope);
+    return this.appender.appendValidated(envelope);
   }
 
   async get(programId: string): Promise<EvolutionProgramProjectionV1> {
@@ -136,7 +147,7 @@ export class EvolutionProgramService {
         : input.action.type === 'retention' && input.action.mode === 'keep_forever'
           ? { persist: true }
           : {};
-    return this.appendValidated(envelope, appendOptions);
+    return this.appender.appendValidated(envelope, appendOptions);
   }
 
   async linkObservation(input: ProgramObservationLinkInput): Promise<EvolutionProgramObservationResult> {
@@ -154,7 +165,7 @@ export class EvolutionProgramService {
           command.originRef,
           event,
         ),
-      append: (envelope) => this.appendValidated(envelope),
+      append: (envelope) => this.appender.appendValidated(envelope),
       dispatch: this.dispatchObservationTrigger,
     });
   }
@@ -214,6 +225,28 @@ export class EvolutionProgramService {
     return linkEvolutionProgramIntervention({ ...input, attribution, decisionProofRef }, this.evaluationDependencies());
   }
 
+  /** Ref-only request. F266/F313 resolves the proposal, target, Approval publication and custody. */
+  proposeChange(
+    input: CommandBase & { requestAuthority?: EvolutionChangeRequestAuthority },
+  ): Promise<EvolutionProgramChangeResult> {
+    return proposeEvolutionProgramChange(input, this.changeDependencies());
+  }
+
+  /** Pulls one canonical owner transition; pending state appends nothing. */
+  syncChange(input: CommandBase): Promise<EvolutionProgramChangeResult> {
+    return syncEvolutionProgramChange(input, this.changeDependencies());
+  }
+
+  /** Owner executes/records the selected metabolism action before F311 links its receipt. */
+  decideChange(
+    input: CommandBase & {
+      decision: 'keep' | 'tune' | 'rollback' | 'sunset' | 'no_change';
+      decisionAuthority?: EvolutionValueDecisionAuthority;
+    },
+  ): Promise<EvolutionProgramChangeResult> {
+    return decideEvolutionProgramChange(input, this.changeDependencies());
+  }
+
   private evaluationDependencies(): ProgramEvaluationDependencies {
     return {
       read: (programId) => this.eventLog.read(programId),
@@ -229,8 +262,30 @@ export class EvolutionProgramService {
           this.now(),
           commandDigest,
         ),
-      append: (envelope) => this.appendValidated(envelope),
+      append: (envelope) => this.appender.appendValidated(envelope),
       ...(this.evaluationOwnerResolver === undefined ? {} : { ownerResolver: this.evaluationOwnerResolver }),
+    };
+  }
+
+  private changeDependencies() {
+    const changeOwner = this.resolveChangeOwner();
+    return {
+      read: (programId: string) => this.eventLog.read(programId),
+      project: (events: readonly EvolutionProgramEventEnvelopeV1[]) => this.project(events),
+      append: (input: CommandBase, event: EvolutionProgramEventV1, commandDigest: string) =>
+        this.appender.appendValidated(
+          this.envelope(
+            input.programId,
+            input.expectedSequence,
+            input.clientMessageId,
+            input.actorRef,
+            input.originRef,
+            event,
+            this.now(),
+            commandDigest,
+          ),
+        ),
+      ...(changeOwner === undefined ? {} : { owner: changeOwner }),
     };
   }
 
@@ -257,45 +312,6 @@ export class EvolutionProgramService {
     });
   }
 
-  private async appendValidated(
-    envelope: EvolutionProgramEventEnvelopeV1,
-    options: EvolutionProgramAppendOptions = {},
-  ): Promise<EvolutionProgramServiceResult> {
-    const events = await this.eventLog.read(envelope.programId);
-    const existing = events.find(
-      (candidate) => candidate.eventId === envelope.eventId || candidate.clientMessageId === envelope.clientMessageId,
-    );
-    if (existing) {
-      if (
-        existing.eventId === envelope.eventId &&
-        existing.clientMessageId === envelope.clientMessageId &&
-        evolutionEventIdentityDigest(existing) === evolutionEventIdentityDigest(envelope)
-      ) {
-        return { outcome: 'duplicate', projection: this.project(events) };
-      }
-      throw new EvolutionProgramServiceError(
-        'idempotency_collision',
-        'event identity was reused for different content',
-      );
-    }
-
-    if (events.length > 0) {
-      const projection = this.project(events);
-      if (envelope.expectedSequence !== projection.program.sequence) {
-        return {
-          outcome: 'conflict',
-          actualSequence: projection.program.sequence,
-          projection,
-        };
-      }
-    }
-
-    const state = replayEvolutionProgramEvents(events);
-    reduceEvolutionProgramEvent(state, envelope);
-    const append = await this.eventLog.append(envelope, options);
-    return this.resolveAppend(append, events, [envelope]);
-  }
-
   private async forget(input: CommandBase & { action: Extract<EvolutionProgramCommandAction, { type: 'forget' }> }) {
     return forgetEvolutionProgram(input, {
       eventLog: this.eventLog,
@@ -305,33 +321,9 @@ export class EvolutionProgramService {
         this.envelope(programId, expectedSequence, clientMessageId, actorRef, originRef, event, occurredAt),
       command: (command) => this.command(command as CommandBase & { action: EvolutionProgramCommandAction }),
       resolveAppend: (append, previousEvents, appendedEvents) =>
-        this.resolveAppend(append, previousEvents, appendedEvents),
+        this.appender.resolveAppend(append, previousEvents, appendedEvents),
       stableId,
     });
-  }
-
-  private async resolveAppend(
-    append: EvolutionProgramAppendResult,
-    previousEvents: EvolutionProgramEventEnvelopeV1[],
-    appendedEvents: EvolutionProgramEventEnvelopeV1[],
-  ): Promise<EvolutionProgramServiceResult> {
-    if (append.outcome === 'idempotency_collision') {
-      throw new EvolutionProgramServiceError(
-        'idempotency_collision',
-        'event identity was reused for different content',
-      );
-    }
-    if (append.outcome === 'conflict') {
-      return {
-        outcome: 'conflict',
-        actualSequence: append.actualSequence,
-        projection: await this.get(appendedEvents[0].programId),
-      };
-    }
-    if (append.outcome === 'duplicate') {
-      return { outcome: 'duplicate', projection: await this.get(appendedEvents[0].programId) };
-    }
-    return { outcome: 'appended', projection: this.project([...previousEvents, ...appendedEvents]) };
   }
 
   private project(

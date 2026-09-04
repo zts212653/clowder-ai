@@ -241,6 +241,7 @@ import {
   isUserFacingSystemInfoContent,
   judgmentSurfaceCueSeeds,
   mergePersistedPromptMessages,
+  operationalKnowledgeCueSeeds,
   routeContentBlocksForCat,
   sanitizeInjectedContent,
   shouldPersistContextBriefing,
@@ -985,6 +986,13 @@ export async function* routeSerial(
         promptTags: options.frustrationAutoIssueEligible !== false ? promptTags : undefined,
         occurredAt: cueOccurredAt,
       }),
+      ...operationalKnowledgeCueSeeds({
+        message,
+        sourceMessageId: currentUserMessageId,
+        ownerOriginEligible: options.frustrationAutoIssueEligible !== false,
+        sopStageHint,
+        occurredAt: cueOccurredAt,
+      }),
     );
   }
   const routeLevelNudgePromptContext = routeOwnedNudgePromptContext + humanDispositionFeedbackPromptContext;
@@ -1125,13 +1133,9 @@ export async function* routeSerial(
             // F246 Phase B: carry effectClass to SystemPromptBuilder for behavior constraints
             ...(crossThreadReplyHintRaw.effectClass ? { effectClass: crossThreadReplyHintRaw.effectClass } : {}),
             ...(crossThreadReplyHintRaw.coordination ? { coordination: crossThreadReplyHintRaw.coordination } : {}),
-            ...(crossThreadReplyHintRaw.localReviewVerdict
-              ? { localReviewVerdict: crossThreadReplyHintRaw.localReviewVerdict }
-              : {}),
           }
         : undefined;
-      const hasTerminalCoordinationExit =
-        crossThreadReplyHint?.coordination?.phase === 'terminal' && !crossThreadReplyHint.localReviewVerdict;
+      const hasTerminalCoordinationExit = crossThreadReplyHint?.coordination?.phase === 'terminal';
       let mentionRoutingFeedback = null;
       if (deps.invocationDeps.threadStore) {
         try {

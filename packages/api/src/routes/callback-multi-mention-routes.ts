@@ -186,6 +186,14 @@ const multiMentionSchema = z
   })
   .superRefine((value, ctx) => {
     if (!value.action) return;
+    if (value.action.actionFamily === 'review') {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['action'],
+        message:
+          'Local review uses ordinary durable A2A delivery with localReviewVerdict, reviewedHeadSha, and accepted-source fields, not multi_mention action custody.',
+      });
+    }
     if (!value.idempotencyKey) {
       ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['idempotencyKey'], message: 'required with action metadata' });
     }

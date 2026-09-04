@@ -164,6 +164,20 @@ describe('ThreadMetadataV1 merge semantics', () => {
     assert.deepEqual(result.prs, [{ repo: 'c/d', number: 2 }]);
     assert.deepEqual(result.features, ['F002']);
   });
+
+  test('mergeThreadMetadata — explicit Group membership sets and clears without changing other anchors', async () => {
+    const { mergeThreadMetadata } = await import('../dist/domains/cats/services/stores/ports/ThreadStore.js');
+    const existing = { v: 1, features: ['F277'] };
+    const grouped = mergeThreadMetadata(existing, {
+      attentionGroup: { v: 1, groupId: 'attention_release', order: 2 },
+    });
+    assert.deepEqual(grouped, {
+      v: 1,
+      features: ['F277'],
+      attentionGroup: { v: 1, groupId: 'attention_release', order: 2 },
+    });
+    assert.deepEqual(mergeThreadMetadata(grouped, { attentionGroup: null }), existing);
+  });
 });
 
 describe('parseThreadMetadataJson', () => {
@@ -245,6 +259,25 @@ describe('parseThreadMetadataJson', () => {
   test('notes with non-string values returns null', async () => {
     const { parseThreadMetadataJson } = await import('../dist/domains/cats/services/stores/ports/ThreadStore.js');
     assert.equal(parseThreadMetadataJson(JSON.stringify({ v: 1, notes: { ok: 'fine', bad: 42 } })), null);
+  });
+
+  test('attention Group metadata accepts only the typed stable shape', async () => {
+    const { parseThreadMetadataJson } = await import('../dist/domains/cats/services/stores/ports/ThreadStore.js');
+    assert.deepEqual(
+      parseThreadMetadataJson(
+        JSON.stringify({ v: 1, attentionGroup: { v: 1, groupId: 'attention_release', order: 0 } }),
+      )?.attentionGroup,
+      { v: 1, groupId: 'attention_release', order: 0 },
+    );
+    for (const attentionGroup of [
+      null,
+      { v: 2, groupId: 'attention_release', order: 0 },
+      { v: 1, groupId: 'release', order: 0 },
+      { v: 1, groupId: 'attention_release', order: -1 },
+      { v: 1, groupId: 'attention_release', order: 0.5 },
+    ]) {
+      assert.equal(parseThreadMetadataJson(JSON.stringify({ v: 1, attentionGroup })), null);
+    }
   });
 
   test('valid v1 with all fields passes shape validation', async () => {

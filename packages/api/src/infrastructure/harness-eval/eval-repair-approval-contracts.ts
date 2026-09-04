@@ -53,6 +53,12 @@ export interface EvalRepairAuthenticatedPrincipal {
   originMessageId: string;
 }
 
+export interface EvalRepairOwnerLineage {
+  programRef: OwnerTruthRefV1;
+  cycleRef: OwnerTruthRefV1;
+  interventionRef: OwnerTruthRefV1;
+}
+
 export interface CanonicalRepairDispatchInput extends EvalRepairApprovalSnapshot {
   dispatchId: string;
   caseRef: OwnerTruthRefV1;

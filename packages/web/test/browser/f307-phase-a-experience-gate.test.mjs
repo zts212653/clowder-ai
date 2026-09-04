@@ -256,7 +256,7 @@ test(
         )
         .catch(async () => {
           throw new Error(
-            `Needs Me did not focus the canonical Approval surface\nactive=${await workbench.getAttribute(
+            `Approval did not focus the canonical Approval surface\nactive=${await workbench.getAttribute(
               'data-active-surface',
             )}\nsurfaces=${await workbench.getAttribute('data-surface-order')}\npageErrors=${pageErrors.join(' | ')}\nbody=${(
               await page.locator('body').innerText()
@@ -267,7 +267,7 @@ test(
       assert.equal(
         await workbench.getAttribute('data-active-surface'),
         'workspace:mode:approval',
-        'the global Needs Me entry focuses the canonical F307 Approval surface',
+        'the global Approval entry focuses the canonical F307 Approval surface',
       );
       assert.equal(await workbench.getAttribute('data-surface-count'), '1');
       await page.getByTestId('f307-close-workspace').click();
@@ -295,10 +295,12 @@ test(
       assert.equal(await page.getByTestId('f307-tab-code').isVisible(), true);
       await page.getByText(`Owner file: ${WORKTREE_ID}`, { exact: false }).waitFor({ timeout: 5_000 });
       const tabStrip = page.getByTestId('f307-tab-strip');
+      const controlRail = page.getByTestId('f307-control-rail');
+      assert.equal(await tabStrip.getByTestId('f307-add-surface').count(), 0);
       assert.equal(
-        await tabStrip.evaluate((strip) => strip.lastElementChild?.getAttribute('data-testid')),
-        'f307-add-surface',
-        'the add affordance stays immediately after the final Workbench tab',
+        await controlRail.getByTestId('f307-add-surface').count(),
+        1,
+        'the add affordance stays fixed outside the scrolling Workbench tabs',
       );
 
       await addSurface.click();
@@ -312,10 +314,6 @@ test(
       assert.equal(await workbench.getAttribute('data-split-secondary'), '');
       assert.equal(await page.getByTestId('f307-tab-code').isVisible(), true);
       assert.equal(await page.getByTestId('f307-tab-terminal').isVisible(), true);
-      assert.equal(
-        await tabStrip.evaluate((strip) => strip.lastElementChild?.getAttribute('data-testid')),
-        'f307-add-surface',
-      );
       await page.screenshot({ path: path.join(EVIDENCE_DIR, '00-file-terminal-inline-add.png'), fullPage: true });
 
       await addSurface.click();
@@ -504,6 +502,28 @@ test(
           document.querySelector('[data-testid="f307-experience-workbench"]')?.getAttribute('data-layout-kind') ===
           'stack',
       );
+      const activeBrowserTab = page.locator(`[data-tab-surface-id="browser-owner:${WORKTREE_ID}"]`);
+      const activeBrowserClose = activeBrowserTab.getByTestId('f307-close-browser');
+      const resizedTabStrip = page.getByTestId('f307-tab-strip');
+      const [activeBrowserTabBox, activeBrowserCloseBox, tabStripBox] = await Promise.all([
+        activeBrowserTab.boundingBox(),
+        activeBrowserClose.boundingBox(),
+        resizedTabStrip.boundingBox(),
+      ]);
+      assert.ok(
+        activeBrowserTabBox && activeBrowserCloseBox && tabStripBox,
+        '390px active Browser tab and its close action must have measurable geometry',
+      );
+      assert.ok(
+        activeBrowserTabBox.x >= tabStripBox.x &&
+          activeBrowserTabBox.x + activeBrowserTabBox.width <= tabStripBox.x + tabStripBox.width,
+        'desktop-to-390px resize must bring the complete active tab inside the scrolling strip',
+      );
+      assert.ok(
+        activeBrowserCloseBox.x >= tabStripBox.x &&
+          activeBrowserCloseBox.x + activeBrowserCloseBox.width <= tabStripBox.x + tabStripBox.width,
+        'desktop-to-390px resize must keep the active tab close action reachable',
+      );
       assert.notEqual(await workbench.getAttribute('data-split-primary'), '');
       assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), true);
       await assertOwnerSurfaceFillsPane(browserPane, exactBrowserOwner);
@@ -518,13 +538,46 @@ test(
       await home.waitFor();
       assert.equal(await page.getByRole('dialog').count(), 0);
       assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), true);
-      await addSurface.scrollIntoViewIfNeeded();
-      assert.equal(await addSurface.isVisible(), true, '390px keeps the inline add affordance reachable');
+      assert.equal(await addSurface.isVisible(), true, '390px keeps the fixed add affordance reachable');
+      const addBox = await addSurface.boundingBox();
+      const controlBox = await controlRail.boundingBox();
+      assert.ok(addBox && controlBox, '390px Workbench controls must have measurable geometry');
+      assert.ok(addBox.x >= 0 && addBox.x + addBox.width <= 390, 'add control must remain inside the viewport');
+      assert.ok(
+        controlBox.x >= 0 && controlBox.x + controlBox.width <= 390,
+        'the entire fixed control rail must remain inside the viewport',
+      );
+      const surfaceCountBeforeExit = await workbench.getAttribute('data-surface-count');
+      const exitSplit = page.getByTestId('f307-exit-split');
+      assert.equal(await exitSplit.isVisible(), true, '390px exposes an explicit split exit');
+      await exitSplit.click();
+      assert.equal(await workbench.getAttribute('data-split-primary'), '');
+      assert.equal(await workbench.getAttribute('data-split-secondary'), '');
       assert.equal(
-        await tabStrip.evaluate((strip) => strip.lastElementChild?.getAttribute('data-testid')),
-        'f307-add-surface',
+        await workbench.getAttribute('data-surface-count'),
+        surfaceCountBeforeExit,
+        'exiting split keeps both hosted surfaces',
       );
       await page.screenshot({ path: path.join(EVIDENCE_DIR, '02-real-owner-narrow.png'), fullPage: true });
+
+      await page.getByTestId('f307-manage-surfaces').click();
+      const surfaceMenu = page.getByTestId('f307-surface-menu');
+      const menuBox = await surfaceMenu.boundingBox();
+      assert.ok(menuBox, '390px working-set menu must have measurable geometry');
+      assert.ok(
+        menuBox.x >= 0 && menuBox.x + menuBox.width <= 390,
+        'working-set management must remain inside the viewport',
+      );
+      await page.getByTestId('f307-close-other-surfaces').click();
+      assert.equal(await workbench.getAttribute('data-surface-count'), '1');
+      assert.deepEqual(terminalDeletes, [], 'bulk detach must not invoke an owner delete lifecycle');
+
+      const mobileFold = page.getByTestId('workspace-shell-fold');
+      assert.equal(await mobileFold.isVisible(), true, 'fullscreen Workspace exposes a touch-visible exit');
+      await mobileFold.click();
+      await workbench.waitFor({ state: 'hidden' });
+      await page.getByTestId('workspace-panel-toggle').click();
+      await workbench.waitFor({ state: 'visible' });
 
       assert.deepEqual(pageErrors, []);
       assert.deepEqual(

@@ -123,6 +123,36 @@ export function listOwnedSeeds(
   return rows.map(rowToOwnedSeed);
 }
 
+export function getOwnedSeed(
+  context: AutoDreamStoreContext,
+  ownerUserId: string,
+  catId: string,
+  seedId: string,
+): OwnedSeedRecord | null {
+  const row = context.db
+    .prepare('SELECT * FROM owned_seeds WHERE owner_user_id = ? AND cat_id = ? AND seed_id = ?')
+    .get(ownerUserId, catId, seedId) as DbRow | undefined;
+  return row ? rowToOwnedSeed(row) : null;
+}
+
+export function hasOwnedSeedIntentApplication(
+  context: AutoDreamStoreContext,
+  ownerUserId: string,
+  catId: string,
+  invocationId: string,
+  seedId: string,
+): boolean {
+  return (
+    context.db
+      .prepare(
+        `SELECT 1 FROM proactive_intents
+         WHERE owner_user_id = ? AND cat_id = ? AND created_by_invocation_id = ? AND seed_id = ?
+         LIMIT 1`,
+      )
+      .get(ownerUserId, catId, invocationId, seedId) !== undefined
+  );
+}
+
 export function decidePrivateSeed(
   context: AutoDreamStoreContext,
   principal: InvocationPrincipal,

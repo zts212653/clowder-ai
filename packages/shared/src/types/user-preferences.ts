@@ -26,9 +26,24 @@ export interface MessageDispositionPreferenceSnapshot {
   onboardingSeen: boolean;
 }
 
+/** F277: owner-scoped Group read model projected from per-thread metadata. */
+export interface ThreadAttentionGroup {
+  id: string;
+  name?: string;
+  threadIds: string[];
+}
+
+/** F277: private presentation state keyed only by a stable Group anchor. */
+export interface ThreadAttentionPreferences {
+  aliases?: Record<string, string>;
+  open?: Record<string, boolean>;
+}
+
 export interface UserPreferences {
   /** F166: Custom display order of cats. catIds not in this list fall back to cat-template.json order. */
   catOrder?: string[];
   /** F264: author-declared current-work/next-work preference inheritance. */
   messageDisposition?: MessageDispositionPreferences;
+  /** F277: owner-only Group aliases and fold overrides. Membership lives in thread metadata. No TTL. */
+  threadAttention?: ThreadAttentionPreferences;
 }

@@ -44,14 +44,9 @@ Phase N merge → 碰头（不是"要不要继续"，是"方向对不对"）→ 
 
 ## Runtime 单实例保护（P0）
 
-`../cat-cafe-runtime` 是咱们的运行态单实例（通常占用 `3003/3004`），默认视为**在线服务**，不是随手重启的实验环境。
-
-硬规则：
-1. 在 runtime 会话里，禁止执行会触发重启的命令：`pnpm start`、`pnpm runtime:start`、`./scripts/start-dev.sh`
-2. 做截图/验收/排查前，先复用现有服务（先查 `curl -sf http://localhost:3004/health`）
-3. 确实要重启，必须先拿到operator明确同意，再显式设置 `CAT_CAFE_RUNTIME_RESTART_OK=1` 执行启动命令
-
-说明：`--force` 不是重启授权，不能替代第 3 条。
+运行态单实例、3003/3004、重启授权与未合入验证边界只由 L0 五条铁律和
+[`shared-rules.md` §12](../cat-cafe-skills/refs/shared-rules.md#12-runtime-单实例保护anti-self-term) 维护；
+本 SOP 不复制命令或授权条件。开发流程只需记住：未合入改动在 feature worktree 自测，已合入改动走下方 Alpha 验收；runtime 激活仍需显式授权。
 
 ## Alpha 验收通道
 

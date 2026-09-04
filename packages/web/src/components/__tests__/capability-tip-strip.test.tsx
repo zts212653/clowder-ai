@@ -71,6 +71,19 @@ describe('F244 CapabilityTipStrip', () => {
     expect(tip?.body).not.toContain('移动端长按进入多选');
   });
 
+  it('teaches that F277 Groups are created deliberately and do not change the default list', () => {
+    const tip = (rawTips as readonly (SeedTip & { body?: string })[]).find(
+      (candidate) => candidate.id === 'feature-f277-thread-attention-navigation',
+    );
+
+    expect(tip).toBeDefined();
+    expect(tip?.body).toContain('长按');
+    expect(tip?.body).toContain('拖');
+    expect(tip?.body).toContain('Group');
+    expect(tip?.body).toContain('默认');
+    expect(tip?.body).not.toContain('相关对话会在侧边栏收成');
+  });
+
   it('shimmer placeholder has accessible status label (not hidden by aria-hidden)', async () => {
     await render(
       <CapabilityTipStrip

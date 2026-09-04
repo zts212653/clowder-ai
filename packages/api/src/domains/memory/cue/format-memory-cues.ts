@@ -29,6 +29,28 @@ function eventAction(cue: CueEnvelopeV1): string[] {
     : [];
 }
 
+function operationalKnowledgeAction(cue: CueEnvelopeV1): string[] {
+  if (cue.resolverFamily === 'decision') {
+    return [
+      'Action: Drill before responding; record applied only if this accepted decision constrains the current response or action, otherwise dismissed.',
+    ];
+  }
+  if (cue.resolverFamily === 'project_knowledge') {
+    return [
+      'Action: Drill before responding; record applied only if this exact feature source grounds the current task response, otherwise dismissed.',
+    ];
+  }
+  return [];
+}
+
+function catOwnedSeedAction(cue: CueEnvelopeV1): string[] {
+  return cue.resolverFamily === 'cat_owned_seed'
+    ? [
+        'Action: Drill only in this private Present Loop; record applied only after creating a same-invocation intent for this seed, otherwise dismissed.',
+      ]
+    : [];
+}
+
 export function renderMemoryCue(cue: CueEnvelopeV1): string {
   return [
     `<memory-cue v="1" cue-id="${cue.cueId}" why-now="${cue.whyNow}">`,
@@ -41,6 +63,8 @@ export function renderMemoryCue(cue: CueEnvelopeV1): string {
     ...explicitTasteAction(cue),
     ...profileAction(cue),
     ...eventAction(cue),
+    ...operationalKnowledgeAction(cue),
+    ...catOwnedSeedAction(cue),
     '</memory-cue>',
   ].join('\n');
 }
@@ -53,6 +77,8 @@ export function renderMemoryCuePointer(cue: CueEnvelopeV1): string {
     ...explicitTasteAction(cue),
     ...profileAction(cue),
     ...eventAction(cue),
+    ...operationalKnowledgeAction(cue),
+    ...catOwnedSeedAction(cue),
     '</recall-opportunity-pointer>',
   ].join('\n');
 }

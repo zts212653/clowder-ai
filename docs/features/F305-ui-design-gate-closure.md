@@ -1,6 +1,6 @@
 ---
 feature_ids: [F305]
-related_features: [F056, F083, F246, F284, F287, F292, F299, F303, F310]
+related_features: [F056, F083, F246, F284, F287, F292, F299, F303, F310, F315]
 topics: [ui, ux, design-gate, frontend-design, workspace, approval, design-language]
 doc_kind: spec
 created: 2026-08-22
@@ -9,7 +9,7 @@ description_source: human
 description_author: codex-sol
 description_updated_at: 2026-08-22T15:01:32Z
 cvo_signoff: "2026-08-22 — sourceMessageId 0001787410376908-000078-52aceda2：由Maine Coon负责闭环当前问题，并给出未来可一句话触发的纠偏入口。"
-tips_exempt: "2026-08-31 terminal audit 续租：本轮只纠正 F305 full-gate receipt 与未绑定 workflow projection 的关闭真相，不新增用户可发现能力、操作入口或学习步骤。"
+tips_exempt: "2026-09-03 F315 relationship renewal：本轮只链接新立项的存量 Workspace 可读性迁移 owner，不新增用户可发现能力、操作入口或学习步骤。"
 ---
 
 # F305: UI Design Gate Closure — 先看真页面

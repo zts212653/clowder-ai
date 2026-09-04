@@ -1254,6 +1254,132 @@ describe('Callback Routes', () => {
     assert.equal('content' in body.messages[0], false); // full body not inlined
   });
 
+  test('GET thread-context projects the typed accepted-source local-review fact', async () => {
+    const app = await createApp();
+    const { invocationId, callbackToken } = await registry.create('user-1', 'codex');
+    const stored = messageStore.append({
+      userId: 'user-1',
+      catId: 'opus5',
+      content: '@codex\n\nAPPROVED with anchored evidence in this message.',
+      mentions: ['codex'],
+      timestamp: 2,
+      extra: {
+        localReviewVerdict: {
+          verdict: 'approved',
+          clientMessageId: 'f314-thread-context-review-fact',
+          reviewedHeadSha: 'a'.repeat(40),
+          reviewSubjectRef: 'pr:zts212653/cat-cafe#4255',
+          acceptedSourceRef: 'docs/features/F314-development-episode-alignment-experiment.md',
+          acceptedRevision: 'b'.repeat(40),
+        },
+      },
+    });
+
+    const response = await app.inject({
+      method: 'GET',
+      url: '/api/callbacks/thread-context?responseMode=full',
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
+    });
+
+    assert.equal(response.statusCode, 200);
+    const fact = response.json().messages[0].localReviewFact;
+    assert.deepEqual(fact, {
+      messageId: stored.id,
+      threadId: stored.threadId,
+      reviewerCatId: 'opus5',
+      reviewSubjectRef: 'pr:zts212653/cat-cafe#4255',
+      acceptedSourceRef: 'docs/features/F314-development-episode-alignment-experiment.md',
+      acceptedRevision: 'b'.repeat(40),
+      reviewedHeadSha: 'a'.repeat(40),
+      verdict: 'approved',
+      clientMessageId: 'f314-thread-context-review-fact',
+      evidenceRef: `local-review:${stored.id}:approved`,
+    });
+    assert.deepEqual(response.json().messages[0].localReviewLoopBrakeOnArrival, {
+      kind: 'continue',
+      formalChangesRequested: 0,
+    });
+  });
+
+  test('GET thread-context marks only the fourth formal local-review arrival for an R4 pause', async () => {
+    const app = await createApp();
+    const { invocationId, callbackToken } = await registry.create('user-1', 'codex');
+    for (let round = 1; round <= 5; round += 1) {
+      messageStore.append({
+        userId: 'user-1',
+        catId: `reviewer-${round}`,
+        content: `@codex\n\nCHANGES_REQUESTED round ${round}.`,
+        mentions: ['codex'],
+        timestamp: round,
+        extra: {
+          localReviewVerdict: {
+            verdict: 'changes_requested',
+            clientMessageId: `f314-r4-${round}`,
+            reviewedHeadSha: `${round}`.repeat(40),
+            reviewSubjectRef: 'pr:zts212653/cat-cafe#4255',
+            acceptedSourceRef: 'docs/features/F314-development-episode-alignment-experiment.md',
+            acceptedRevision: 'b'.repeat(40),
+          },
+        },
+      });
+    }
+
+    const response = await app.inject({
+      method: 'GET',
+      url: '/api/callbacks/thread-context?responseMode=full',
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
+    });
+
+    assert.equal(response.statusCode, 200);
+    const messages = response.json().messages;
+    assert.equal(messages[3].localReviewLoopBrakeOnArrival.kind, 'pause_once');
+    assert.equal(messages[3].localReviewLoopBrakeOnArrival.formalChangesRequested, 4);
+    assert.equal(messages[4].localReviewLoopBrakeOnArrival.kind, 'continue');
+  });
+
+  test('GET thread-context warns open instead of counting an incomplete bounded review history', async () => {
+    const app = await createApp();
+    const { invocationId, callbackToken } = await registry.create('user-1', 'codex');
+    for (let index = 1; index <= 200; index += 1) {
+      messageStore.append({
+        userId: 'user-1',
+        catId: null,
+        content: `filler ${index}`,
+        mentions: [],
+        timestamp: index,
+      });
+    }
+    messageStore.append({
+      userId: 'user-1',
+      catId: 'opus5',
+      content: '@codex\n\nCHANGES_REQUESTED after an incomplete retained window.',
+      mentions: ['codex'],
+      timestamp: 201,
+      extra: {
+        localReviewVerdict: {
+          verdict: 'changes_requested',
+          clientMessageId: 'f314-r4-incomplete-history',
+          reviewedHeadSha: 'a'.repeat(40),
+          reviewSubjectRef: 'pr:zts212653/cat-cafe#4255',
+          acceptedSourceRef: 'docs/features/F314-development-episode-alignment-experiment.md',
+          acceptedRevision: 'b'.repeat(40),
+        },
+      },
+    });
+
+    const response = await app.inject({
+      method: 'GET',
+      url: '/api/callbacks/thread-context?responseMode=full&limit=1',
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
+    });
+
+    assert.equal(response.statusCode, 200);
+    assert.deepEqual(response.json().messages[0].localReviewLoopBrakeOnArrival, {
+      kind: 'warn_open',
+      reason: 'durable local-review history unavailable',
+    });
+  });
+
   test('GET thread-context includes published queued cat speech without exposing queued work', async () => {
     const app = await createApp();
     const { invocationId, callbackToken } = await registry.create('user-1', 'opus');
@@ -6096,211 +6222,20 @@ describe('Callback Routes', () => {
     assert.equal(JSON.parse(stale.body).code, 'stale_head');
   });
 
-  test('POST record-local-review-verdict recovers the action carrier and binds the callback principal', async () => {
-    const { InvocationRecordStore } = await import(
-      '../dist/domains/cats/services/stores/ports/InvocationRecordStore.js'
-    );
-    const invocationRecordStore = new InvocationRecordStore();
-    const { invocationId: parentInvocationId } = invocationRecordStore.create({
-      threadId: 'thread-review',
-      userId: 'user-1',
-      targetCats: ['codex-terra'],
-      intent: 'execute',
-      idempotencyKey: 'local-review-action-carrier',
-      actionLeaseCarrier: {
-        kind: 'action_successor',
-        leaseId: 'lease-review-local-1',
-        generation: 3,
-      },
-    });
-    const calls = [];
-    const app = await createApp({
-      invocationRecordStore,
-      localReviewVerdictService: {
-        async record(input) {
-          calls.push(input);
-          return {
-            outcome: 'committed',
-            leaseId: input.leaseId,
-            generation: input.generation,
-            evidenceRef: `local-review:${input.messageId}:g${input.generation}:changes_requested`,
-          };
-        },
-      },
-    });
-    const { invocationId, callbackToken } = await registry.create(
-      'user-1',
-      'codex-terra',
-      'thread-review',
-      parentInvocationId,
-    );
+  test('retired local review settlement endpoints are absent', async () => {
+    const app = await createApp();
+    const { invocationId, callbackToken } = await registry.create('user-1', 'codex-terra', 'thread-review');
     const headers = { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken };
-    const payload = { messageId: 'message-verdict-1' };
 
-    const response = await app.inject({
-      method: 'POST',
-      url: '/api/callbacks/record-local-review-verdict',
-      headers,
-      payload,
-    });
-    assert.equal(response.statusCode, 200);
-    assert.deepEqual(calls[0], {
-      leaseId: 'lease-review-local-1',
-      generation: 3,
-      messageId: 'message-verdict-1',
-      now: calls[0].now,
-      principal: { catId: 'codex-terra', threadId: 'thread-review', tenantScope: 'user-1' },
-    });
-
-    const drift = await app.inject({
-      method: 'POST',
-      url: '/api/callbacks/record-local-review-verdict',
-      headers,
-      payload: { ...payload, actionLeaseRef: { leaseId: 'other-lease', generation: 1 } },
-    });
-    assert.equal(drift.statusCode, 409);
-    assert.equal(JSON.parse(drift.body).code, 'action_lease_mismatch');
-    assert.equal(calls.length, 1);
-
-    for (const messageId of ['message:verdict:1', 'message verdict 1']) {
-      const malformedMessage = await app.inject({
+    for (const endpoint of ['record-local-review-verdict', 'recover-local-review-verdict']) {
+      const response = await app.inject({
         method: 'POST',
-        url: '/api/callbacks/record-local-review-verdict',
+        url: `/api/callbacks/${endpoint}`,
         headers,
-        payload: { ...payload, messageId },
+        payload: { messageId: 'message-verdict-1' },
       });
-      assert.equal(malformedMessage.statusCode, 400);
-      assert.equal(calls.length, 1, 'malformed message ids must be rejected before the service boundary');
+      assert.equal(response.statusCode, 404, endpoint);
     }
-
-    const ordinaryInvocation = await registry.create('user-1', 'codex-terra', 'thread-review');
-    const uncarried = await app.inject({
-      method: 'POST',
-      url: '/api/callbacks/record-local-review-verdict',
-      headers: {
-        'x-invocation-id': ordinaryInvocation.invocationId,
-        'x-callback-token': ordinaryInvocation.callbackToken,
-      },
-      payload: {
-        ...payload,
-        actionLeaseRef: { leaseId: 'lease-review-local-1', generation: 3 },
-      },
-    });
-    assert.equal(uncarried.statusCode, 409);
-    assert.equal(JSON.parse(uncarried.body).code, 'action_lease_required');
-    assert.equal(calls.length, 1, 'request-body lease truth must not replace a verified invocation carrier');
-  });
-
-  test('POST record-local-review-verdict accepts only an exact invocation action-successor carrier', async () => {
-    const calls = [];
-    const { invocationId, callbackToken } = await registry.create('user-1', 'codex-terra', 'thread-review-exact');
-    let carrier = {
-      kind: 'action_successor',
-      leaseId: 'lease-review-exact-1',
-      generation: 2,
-    };
-    const app = await createApp({
-      invocationRecordStore: {
-        async get(requestedInvocationId) {
-          assert.equal(requestedInvocationId, invocationId);
-          return {
-            threadId: 'thread-review-exact',
-            userId: 'user-1',
-            targetCats: ['codex-terra'],
-            actionLeaseCarrier: carrier,
-          };
-        },
-      },
-      localReviewVerdictService: {
-        async record(input) {
-          calls.push(input);
-          return {
-            outcome: 'committed',
-            leaseId: input.leaseId,
-            generation: input.generation,
-            evidenceRef: `local-review:${input.messageId}:g${input.generation}:approved`,
-          };
-        },
-      },
-    });
-    const headers = { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken };
-    const payload = { messageId: 'message-verdict-exact-1' };
-
-    const exactCarrier = await app.inject({
-      method: 'POST',
-      url: '/api/callbacks/record-local-review-verdict',
-      headers,
-      payload,
-    });
-    assert.equal(exactCarrier.statusCode, 200);
-    assert.equal(calls[0].leaseId, 'lease-review-exact-1');
-    assert.equal(calls[0].generation, 2);
-
-    carrier = { kind: 'none' };
-    const nonActionCarrier = await app.inject({
-      method: 'POST',
-      url: '/api/callbacks/record-local-review-verdict',
-      headers,
-      payload: {
-        ...payload,
-        actionLeaseRef: { leaseId: 'lease-review-exact-1', generation: 2 },
-      },
-    });
-    assert.equal(nonActionCarrier.statusCode, 409);
-    assert.equal(JSON.parse(nonActionCarrier.body).code, 'action_lease_required');
-    assert.equal(calls.length, 1);
-  });
-
-  test('POST recover-local-review-verdict uses predecessor callback identity without accepting a caller-supplied carrier', async () => {
-    const calls = [];
-    const app = await createApp({
-      localReviewVerdictService: {
-        async record() {
-          throw new Error('ordinary carrier path must remain separate');
-        },
-        async recover(input) {
-          calls.push(input);
-          return {
-            outcome: 'committed',
-            leaseId: input.leaseId,
-            generation: input.generation,
-            evidenceRef: `local-review:${input.messageId}:g${input.generation}:changes_requested`,
-          };
-        },
-      },
-    });
-    const { invocationId, callbackToken } = await registry.create('user-1', 'codex-sol', 'thread-author');
-    const headers = { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken };
-    const payload = {
-      messageId: 'message-verdict-recovery-1',
-      actionLeaseRef: { leaseId: 'lease-stale-review-1', generation: 1 },
-    };
-
-    const response = await app.inject({
-      method: 'POST',
-      url: '/api/callbacks/recover-local-review-verdict',
-      headers,
-      payload,
-    });
-    assert.equal(response.statusCode, 200);
-    assert.deepEqual(calls[0], {
-      leaseId: 'lease-stale-review-1',
-      generation: 1,
-      messageId: 'message-verdict-recovery-1',
-      now: calls[0].now,
-      principal: { catId: 'codex-sol', threadId: 'thread-author', tenantScope: 'user-1' },
-    });
-
-    const missingFence = await app.inject({
-      method: 'POST',
-      url: '/api/callbacks/recover-local-review-verdict',
-      headers,
-      payload: {
-        messageId: payload.messageId,
-      },
-    });
-    assert.equal(missingFence.statusCode, 400);
-    assert.equal(calls.length, 1);
   });
 
   // F140: wake intent — default 'review' (quiet), explicit 'merge', and re-register preserves it.

@@ -1,4 +1,4 @@
-import { SCHEDULER_TRIGGER_PREFIX } from '@cat-cafe/shared';
+import { type CatOwnedSeedCueCarrierV1, SCHEDULER_TRIGGER_PREFIX } from '@cat-cafe/shared';
 import type { PresentLoopService } from '../../../domains/auto-dream/PresentLoopService.js';
 import type { ExecuteContext, ScheduleRunTiming, TriggerSpec } from '../types.js';
 import type { DynamicTaskParams, TaskTemplate } from './types.js';
@@ -51,12 +51,28 @@ async function executePresentLoop(input: PresentLoopExecutionInput): Promise<voi
 
   const persistedContent = `${SCHEDULER_TRIGGER_PREFIX} ${input.service.renderPersistedWakeTrigger(started, schedule)}`;
   const invocationContent = `${SCHEDULER_TRIGGER_PREFIX} ${input.service.renderWakePrompt(started, schedule)}`;
+  const ownedSeed = started.proactiveContext.ownedSeeds[0];
+  const catOwnedSeed: CatOwnedSeedCueCarrierV1 | undefined = ownedSeed
+    ? {
+        v: 1,
+        producer: 'present_loop',
+        producerProvenance: 'server_scheduler',
+        runId: started.run.runId,
+        producingCatId: input.targetCatId,
+        seedId: ownedSeed.seedId,
+        sourceRevision: ownedSeed.sourceRevision,
+        occurredAt: Date.parse(schedule.firedAt),
+      }
+    : undefined;
   try {
     const messageId = await deliver({
       threadId,
       content: persistedContent,
       userId: 'scheduler',
-      extra: { scheduler: { hiddenTrigger: true } },
+      extra: {
+        scheduler: { hiddenTrigger: true },
+        ...(catOwnedSeed ? { memoryCue: { catOwnedSeed } } : {}),
+      },
     });
     const outcome = await invokeTrigger.trigger(
       threadId,

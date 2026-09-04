@@ -512,6 +512,56 @@ export function explicitApprovedTasteCueSeeds(input: {
   ];
 }
 
+function oneExactRef(message: string, pattern: RegExp): string | null {
+  const refs = [...new Set([...message.matchAll(pattern)].map((match) => match[0].toUpperCase()))];
+  return refs.length === 1 ? refs[0] : null;
+}
+
+/**
+ * F312 Phase D: lane-owned, bounded task predicates for operational knowledge.
+ * The producer carries only one exact canonical coordinate; source resolution and
+ * authority checks remain in the Decision and Project Knowledge lanes.
+ */
+export function operationalKnowledgeCueSeeds(input: {
+  message: string;
+  sourceMessageId: string | undefined;
+  ownerOriginEligible: boolean;
+  sopStageHint?: { stage: string; suggestedSkill: string; suggestedSkillSource: string; featureId: string };
+  occurredAt: number;
+}): MemoryCueOpportunitySeed[] {
+  if (!input.sourceMessageId) return [];
+  const currentMessage = stripStructuralEnvelope(input.message);
+  const seeds: MemoryCueOpportunitySeed[] = [];
+  if (input.ownerOriginEligible) {
+    const decisionAnchor = oneExactRef(currentMessage, /\bADR-\d{3}\b/giu);
+    if (decisionAnchor) {
+      seeds.push({
+        kind: 'accepted_decision_required',
+        producer: 'owner_message',
+        occurredAt: input.occurredAt,
+        payload: { decisionAnchor, sourceMessageId: input.sourceMessageId },
+      });
+    }
+  }
+
+  const workflowFeature = input.sopStageHint?.featureId;
+  const explicitFeature = input.ownerOriginEligible ? oneExactRef(currentMessage, /\bF\d{3,}\b/giu) : null;
+  const featureId = workflowFeature && /^F\d{3,}$/.test(workflowFeature) ? workflowFeature : explicitFeature;
+  if (featureId) {
+    seeds.push({
+      kind: 'project_source_required',
+      producer: 'task_context',
+      occurredAt: input.occurredAt,
+      payload: {
+        featureId,
+        selectionSource: workflowFeature === featureId ? 'workflow_feature' : 'explicit_owner_reference',
+        sourceMessageId: input.sourceMessageId,
+      },
+    });
+  }
+  return seeds;
+}
+
 /**
  * Bind every routeExecution ingress to the same atomic A2A slot-admission contract.
  * The returned controller is the parent batch gate; trackExternalSlot creates an

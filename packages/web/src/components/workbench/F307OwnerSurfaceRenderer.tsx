@@ -25,7 +25,10 @@ import { useThreadArtifacts } from '@/hooks/useThreadArtifacts';
 import { navigateToEntrustedWorkAction, resolveEntrustedWorkActionTarget } from '@/hooks/useWorkspaceNavigate';
 import { useChatStore } from '@/stores/chatStore';
 import { scrollToMessage } from '@/utils/scrollToMessage';
-import { isCapabilityEvolutionWorkspaceSurface } from './capability-evolution-workspace-adapter';
+import {
+  isCapabilityEvolutionWorkspaceSurface,
+  resolveCapabilityEvolutionTargetThreadId,
+} from './capability-evolution-workspace-adapter';
 import { F307FileOwnerSurface } from './F307FileOwnerSurface';
 import { F307FilesOwnerSurface } from './F307FilesOwnerSurface';
 import {
@@ -273,6 +276,7 @@ function WorkspaceDestinationOwnerSurface({
   if (isCapabilityEvolutionWorkspaceSurface(surface)) {
     return (
       <CapabilityEvolutionWorkspace
+        targetThreadId={resolveCapabilityEvolutionTargetThreadId(surface)}
         onOpenProgram={(programId) => onOpenSurface(createEvolutionProgramSurface(programId))}
       />
     );

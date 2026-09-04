@@ -28,3 +28,9 @@ export function isCapabilityEvolutionWorkspaceSurface(surface: WorkspaceSurfaceD
     surface.resultTargetRef.key.length > 0
   );
 }
+
+export function resolveCapabilityEvolutionTargetThreadId(surface: WorkspaceSurfaceDescriptor): string | null {
+  if (!isCapabilityEvolutionWorkspaceSurface(surface)) return null;
+  const targetThreadId = surface.resultTargetRef?.key;
+  return targetThreadId && targetThreadId !== 'global' ? targetThreadId : null;
+}

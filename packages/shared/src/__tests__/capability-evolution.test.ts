@@ -1,6 +1,5 @@
 import { describe, expect, it } from 'vitest';
 import {
-  EvolutionProgramReducerError,
   evolutionProgramEventEnvelopeV1Schema,
   evolutionProgramStateV1Schema,
   evolutionProgramV1Schema,
@@ -10,6 +9,8 @@ import {
 } from '../types/capability-evolution.js';
 import {
   activeCycleEvents,
+  assetRef,
+  decidingEvents,
   envelope,
   expectReducerCode,
   ref,
@@ -67,13 +68,13 @@ describe('capability evolution contracts', () => {
     expect(next.cycles).toHaveLength(2);
     expect(next.cycles[0]).toMatchObject({
       decision,
-      closedAt: '2026-08-31T05:10:00.000Z',
+      closedAt: '2026-08-31T05:11:00.000Z',
     });
     expect(next.cycles[1]).toMatchObject({
       cycle: 2,
       stage: 'instrumenting',
       lineageRefIds: [],
-      openedAt: '2026-08-31T05:10:00.000Z',
+      openedAt: '2026-08-31T05:11:00.000Z',
     });
     expect(next.cycles[1].interventionLayerRef).toBeUndefined();
     const inheritedBoundary = structuredClone(next);
@@ -95,7 +96,7 @@ describe('capability evolution contracts', () => {
       { lifecycle: 'needs_expert' },
     ],
   ] as const)('allows %s on a rotated Cycle before sources are linked', (name, event, expected) => {
-    const next = reduceEvolutionProgramEvent(rotatedCycle(), envelope(11, event, `rotated-${name}`));
+    const next = reduceEvolutionProgramEvent(rotatedCycle(), envelope(12, event, `rotated-${name}`));
     expect(next.program).toMatchObject(expected);
     expect(next.cycles[1].lineageRefIds).not.toHaveLength(0);
   });
@@ -107,14 +108,14 @@ describe('capability evolution contracts', () => {
       () =>
         reduceEvolutionProgramEvent(
           terminal,
-          envelope(11, { type: 'program_resumed', resumeRef: ref('resume:forbidden') }, 'terminal-resume'),
+          envelope(12, { type: 'program_resumed', resumeRef: ref('resume:forbidden') }, 'terminal-resume'),
         ),
       'program_terminal',
     );
     const retained = reduceEvolutionProgramEvent(
       terminal,
       envelope(
-        11,
+        12,
         {
           type: 'retention_opted_in',
           retention: {
@@ -141,6 +142,123 @@ describe('capability evolution contracts', () => {
     expect(events).toEqual(snapshot);
     expect(first?.program.sequence).toBe(events.length);
     expect(first?.cycles[0]).toMatchObject({ decision: 'keep', closedAt: events.at(-1)?.occurredAt });
+  });
+
+  it('keeps same-named assets from different canonical owners as distinct versions', () => {
+    const pending = replayEvolutionProgramEvents([
+      ...activeCycleEvents(),
+      envelope(7, {
+        type: 'change_cycle_linked',
+        caseRef: ref('case:1'),
+        proposalRef: ref('proposal:1'),
+        ownerAuthorizationRef: ref('authorization:1'),
+        targetVersionRef: {
+          ownerFeatureId: 'F267',
+          ownerStateRef: 'asset-version:video-forge-v1',
+          version: 'v1',
+          assetKind: 'skill',
+          assetId: 'video-forge',
+        },
+      }),
+      envelope(8, {
+        type: 'approval_linked',
+        approvalRef: ref('approval:1'),
+        targetVersionRef: {
+          ownerFeatureId: 'F267',
+          ownerStateRef: 'asset-version:video-forge-v1',
+          version: 'v1',
+          assetKind: 'skill',
+          assetId: 'video-forge',
+        },
+      }),
+    ]);
+    if (!pending) throw new Error('expected pending Program');
+    pending.program.currentAssetVersionRefs = [
+      ...pending.program.currentAssetVersionRefs,
+      {
+        ownerFeatureId: 'F202',
+        ownerStateRef: 'asset-version:video-forge-external-v7',
+        version: 'v7',
+        assetKind: 'skill',
+        assetId: 'video-forge',
+      },
+    ];
+
+    const mutated = reduceEvolutionProgramEvent(
+      pending,
+      envelope(9, {
+        type: 'intervention_receipt_linked',
+        result: 'changed',
+        interventionReceiptRef: ref('mutation:1'),
+        assetVersionRef: {
+          ownerFeatureId: 'F267',
+          ownerStateRef: 'asset-version:video-forge-v2',
+          version: 'v2',
+          assetKind: 'skill',
+          assetId: 'video-forge',
+        },
+        loadedRuntimeRef: ref('runtime:loaded-v2'),
+      }),
+    );
+
+    expect(mutated.program.currentAssetVersionRefs).toHaveLength(2);
+    expect(mutated.program.currentAssetVersionRefs.map((value) => value.ownerFeatureId).sort()).toEqual([
+      'F202',
+      'F267',
+    ]);
+  });
+
+  it('rejects a no_change event that moves the exact asset version', () => {
+    expectReducerCode(
+      () =>
+        reduceEvolutionProgramEvent(
+          replayEvolutionProgramEvents(decidingEvents()),
+          envelope(11, {
+            type: 'decision_recorded',
+            decision: 'no_change',
+            decisionRef: ref('decision:no-change-drift'),
+            executionReceiptRef: ref('no-change-receipt:drift'),
+            assetVersionRef: assetRef('asset-version:video-forge-v3', 'skill', 'video-forge', 'v3'),
+          }),
+        ),
+      'invalid_transition',
+    );
+  });
+
+  it.each([
+    { result: 'changed' as const },
+    { result: 'no_change' as const, loadedRuntimeRef: ref('runtime:invented') },
+  ])('requires loaded runtime truth only for changed interventions ($result)', (intervention) => {
+    expect(
+      evolutionProgramEventEnvelopeV1Schema.safeParse(
+        envelope(9, {
+          type: 'intervention_receipt_linked',
+          interventionReceiptRef: ref('intervention-receipt:1'),
+          assetVersionRef: assetRef('asset-version:video-forge-v2', 'skill', 'video-forge', 'v2'),
+          ...intervention,
+        }),
+      ).success,
+    ).toBe(false);
+  });
+
+  it.each([
+    assetRef('asset-version:video-forge-v2', 'skill', 'video-forge', 'v2'),
+    assetRef('asset-version:other-v1', 'skill', 'other', 'v1'),
+  ])('rejects a rollback event without a different version of the same current asset', (assetVersionRef) => {
+    expectReducerCode(
+      () =>
+        reduceEvolutionProgramEvent(
+          replayEvolutionProgramEvents(decidingEvents()),
+          envelope(11, {
+            type: 'decision_recorded',
+            decision: 'rollback',
+            decisionRef: ref('decision:rollback-invalid'),
+            executionReceiptRef: ref('rollback-receipt:invalid'),
+            assetVersionRef,
+          }),
+        ),
+      'invalid_transition',
+    );
   });
 
   it('INV-2 rejects owner payloads instead of accepting them as owner refs', () => {

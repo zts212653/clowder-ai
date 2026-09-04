@@ -375,26 +375,13 @@ export interface ChatMessage {
       recalledAt: number;
       exposures?: ReadonlyArray<{ targetCatId: string; invocationId: string; seenAt: number }>;
     };
-    /** F167: exact lifecycle projection used by message-local review recovery. */
+    /** F167: optional coordination projection retained independently from review delivery. */
     coordination?: CrossThreadCoordination;
     /** #1371: reviewer-authored typed verdict; prose is never parsed for authority. */
     localReviewVerdict?: {
       verdict: 'approved' | 'changes_requested' | 'commented';
       clientMessageId: string;
       reviewedHeadSha?: string;
-      carrierlessLeaseFence?: { leaseId: string; generation: number };
-    };
-    /** #1371: operator-authored typed settlement for one legacy prose-only terminal. */
-    legacyLocalReviewDisposition?: {
-      sourceMessageId: string;
-      leaseId: string;
-      generation: number;
-      subjectRef: string;
-      reviewerCatId: string;
-      predecessorCatId: string;
-      reviewedHeadSha: string;
-      verdict: 'approved' | 'changes_requested';
-      decisionId: string;
     };
     /**
      * F173 a2a-handoff bug fix: marker for system messages that must be

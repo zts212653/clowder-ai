@@ -1,9 +1,9 @@
 ---
 name: self-evolution
 description: >
-  Scope Guard + Process Evolution + Knowledge Evolution — 主动护栏与自我进化。
+  复盘已经发生的工作并沉淀改进，不是“我们来进化 X”的产品入口。
   Use when: operator scope 发散偏离愿景、同类错误反复出现、SOP 流程缺口、有价值的知识/方法论值得沉淀。
-  Not for: 日常 SOP 推进（正常执行）、一次性个案 bug fix。
+  Not for: 用户询问“能进化什么”、能力进化边界，或要求“我们来进化 X”（用 capability-evolution）；日常 SOP 推进（正常执行）；一次性个案 bug fix。
   Output: Scope Guard Log 记录 / Evolution Proposal 提案 / Episode Card → Method/Skill 蒸馏 → Eval 验证。
 ---
 
@@ -12,6 +12,14 @@ description: >
 > 三猫共用。猫猫是主动的共创伙伴（P2），不是被动的 agent。
 > 发现问题就护栏，发现规律就改进，发现知识就沉淀。
 > **闭环 = 触发→产出结构化记录→蒸馏复用资产→验证净增益→五级阶梯治理。**
+
+## 先排除 F311 产品意图
+
+- 用户问“能进化什么 / 能自进化什么 / 能力进化的边界” → `capability-evolution`，只解释、不创建 Program。
+- 用户说“我们来进化 X”并给出具体对象 → `capability-evolution`，进入 canonical Evolution Program。
+- 只有当用户在复盘**已经发生的工作**、收束 scope、修复重复流程缺口或沉淀知识时，才留在本 skill。
+
+分界不看“进化”这个词，看时间方向：**面向未来改变对象**是 F311 Capability Evolution；**面向过去提炼经验**是 Self-Evolution。
 
 ## 三个模式
 
@@ -270,6 +278,7 @@ Replay A/B 验证知识净增益。用 `evals/mode-c/TEMPLATE/` 结构创建。
 
 ## 和其他 Skill 的区别
 
+- `capability-evolution`：围绕一个具体能力/object 建 durable F311 Program；“能进化什么”或“我们来进化 X”走它，不走本 skill
 - `collaborative-thinking`：讨论收敛用它；scope 漂/犯错/知识沉淀 → self-evolution
 - `deep-research`：调研过程用它；调研产出有复用价值 → Mode C
 - `debugging`：定位 bug 用它；同类 bug 反复 → Mode B

@@ -1,6 +1,7 @@
 import type { GitHubReviewThreadBaseline } from '@cat-cafe/shared';
 import type { FastifyBaseLogger } from 'fastify';
 import type { GitHubWaitLifecycleService } from '../../domains/github-signals/GitHubWaitLifecycleService.js';
+import type { GitHubReviewLoopBrake } from '../../domains/github-signals/github-wait-renderer.js';
 import type { ConnectorDeliveryDeps } from './deliver-connector-message.js';
 
 export interface PrFeedbackComment {
@@ -51,6 +52,7 @@ export interface ReviewFeedbackSignal {
   readonly resultDecision?: string;
   readonly resultReviewer?: string;
   readonly subjectState?: 'merged' | 'closed';
+  readonly reviewLoopBrake?: GitHubReviewLoopBrake;
 }
 
 export type ReviewFeedbackRouteResult =
@@ -102,6 +104,7 @@ export class ReviewFeedbackRouter {
         },
       },
       ...(signal.subjectState ? { subjectState: signal.subjectState } : {}),
+      ...(signal.reviewLoopBrake ? { reviewLoopBrake: signal.reviewLoopBrake } : {}),
     });
     if (result.kind !== 'notified') return { kind: 'skipped', reason: result.reason };
     return {

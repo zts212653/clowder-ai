@@ -54,7 +54,8 @@ co-creation docs → co-creation-docs → direct push | merge-gate(docs PR)
 | `hyperfocus-brake` | operator健康提醒/三猫撒娇打断 | — |
 | `incident-response` | 闯祸了/不可挽回/人很难过 | — |
 | `image-generation` | 生成图片/画头像/AI 画图 | — |
-| `self-evolution` | scope 守护/流程改进/知识沉淀 | — |
+| `capability-evolution` | “我们来进化 X”/“能进化什么”的 F311 产品入口；信息问题只解释，具体目标才创建 canonical Evolution Program | — |
+| `self-evolution` | 复盘已发生的工作：scope 守护/重复流程改进/知识沉淀；不接能力进化产品入口 | — |
 | `vision-rescue` | 任务绝境/反复摆动/投降修辞/放弃愿景 | — |
 | `bootcamp-guide` | operator 新手训练营引导 | — |
 | `cross-thread-sync` | 跨 thread 协同/通知/争用协调 | — |

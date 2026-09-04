@@ -9,6 +9,17 @@ import test from 'node:test';
 import Fastify from 'fastify';
 import { proposedReviewAction } from './helpers.js';
 
+function implementAction(overrides = {}) {
+  return {
+    subjectRef: 'subject:task:negative-authorization-42',
+    actionFamily: 'implement',
+    successorSlot: 'implementer',
+    mode: 'single',
+    terminalPredicate: { kind: 'task_done' },
+    ...overrides,
+  };
+}
+
 function createMockInvocationRecordStore() {
   const records = [];
   return {
@@ -90,6 +101,7 @@ async function createFixture(t, options = {}) {
     ...(options.withActionAdmission
       ? {
           actionSuccessorAdmissionService: {
+            async preflightStructuredTransferStanding() {},
             async admit(input) {
               actionAdmissions.push(input);
               return {
@@ -149,13 +161,13 @@ async function post(fixture, auth, payload) {
   });
 }
 
-async function createAssignWorkProposal(fixture) {
+async function createAssignWorkProposal(fixture, proposedAction = proposedReviewAction()) {
   const response = await post(fixture, fixture.auth, {
     effectClass: 'assign_work',
-    proposedAction: proposedReviewAction(),
+    proposedAction,
     clientMessageId: 'assign-work-key',
   });
-  assert.equal(response.statusCode, 200);
+  assert.equal(response.statusCode, 200, response.body);
   assert.equal(response.json().status, 'proposal_created');
   const [proposal] = await fixture.dispatchProposalStore.listPendingByUser('user-1');
   assert.ok(proposal, 'assign_work must create a pending proposal');
@@ -328,14 +340,14 @@ test('target-set intersection blocks subset, superset, and reorder as one carrie
 
 test('a new structured transfer is blocked before F167 admission, while a persisted-lease transition reaches F167', async (t) => {
   const fixture = await createFixture(t, { withActionAdmission: true });
-  const proposal = await createAssignWorkProposal(fixture);
+  const proposal = await createAssignWorkProposal(fixture, implementAction());
   assert.ok(await fixture.dispatchProposalStore.reject(proposal.proposalId, 'user-1'));
 
   const defaultTransfer = await post(fixture, fixture.auth, {
     content: 'New structured transfer',
     targetCats: ['sonnet'],
     clientMessageId: 'new-structured-transfer',
-    action: proposedReviewAction(),
+    action: implementAction(),
   });
   assert.equal(defaultTransfer.statusCode, 409);
   assert.equal(defaultTransfer.json().kind, 'dispatch_negative_authorization_blocked');
@@ -344,7 +356,7 @@ test('a new structured transfer is blocked before F167 admission, while a persis
     content: 'Existing lease return',
     targetCats: ['sonnet'],
     clientMessageId: 'existing-lease-return',
-    action: proposedReviewAction({
+    action: implementAction({
       returnToPredecessor: {
         leaseId: 'lease-existing',
         expectedGeneration: 1,

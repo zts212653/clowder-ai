@@ -13,7 +13,7 @@ design_gate_claim_contracts: []
 
 # F290: AI-native Collective — 多人·多 Agent 共同世界
 
-> **Status**: implementation / first real runtime vertical slice
+> **Status**: implementation / local self-host activation blocked on provider onboarding closure
 > **Owner**: 小太阳·Maine Coon (@codex-sol, GPT-5.6 Sol)
 > **Priority**: P1
 > **operator kickoff**: `[thread-id]` / `0001786242747248-000502-77c148cd`
@@ -124,36 +124,76 @@ application Workspace 的整体升级；F290 的对象以后进入这张共享�
 
 ### 本轮产品旅程
 
-1. **Server owner**：单独启动 Service → 打开 mode-`0600` bootstrap link → 建立首位 owner session 与第一个
-   Collective/steward → 配置并绑定 GitHub Human identity → 在 canonical Client 创建邀请并进入 Channel。
-2. **Collective member**：在另一个浏览器会话打开单次邀请 → 先完成 GitHub Human authentication →
-   原子建立独立 Human binding/session/membership → 进入同一个 Collective 与同一事件顺序。
+1. **Server provider / owner**：从干净 Clowder AI 选择“部署新 Service”，在产品里确认本机部署位置与
+   数据目录 → 产品安装并启动独立 Service → 通过 GitHub App Manifest 在 GitHub 页面确认创建 identity
+   provider，凭据直接回到 Service 的 mode-`0600` store，不经终端、聊天、剪贴板或 URL bearer →
+   一次性 bootstrap 建立首位 owner session 与第一个 Collective/steward → 当前 Café 自动配对 →
+   ready check 通过 → 在 canonical Client 进入 Channel 并创建邀请。纯 Service 安装入口必须复用同一个
+   setup state machine、credential store 与 bootstrap truth，不能另造管理后台。
+2. **Collective member**：在另一个真实浏览器会话打开单次邀请 → 完成 GitHub Human authentication →
+   原子建立独立 Human binding/session/membership → 进入同一个 Collective 的同一个 Channel → owner 与
+   member 双向发信并看到对方消息 → 刷新浏览器与重启 Service 后，membership、session 可恢复关系和
+   canonical message order 仍成立。只生成邀请、fixture provider 或单边发信均不算 Journey B 已交付。
 3. **Clowder AI endpoint**：从官方插件目录显式安装并启用 Connector → 从 global rail 打开
    `/collective` → canonical Client 发起配对 → Host 托管凭据并显示 redacted live/ACK 状态 → 可重连或
    双边撤销。
 
 ### 本轮明确未证明
 
-其他 IdP/OIDC provider、OAuth App 自动配置、TLS/公网 ingress、backup/restore 运维、完整多连接切换 UI、跨 Service
-federation、registry-distributed Connector、Artifact/Roadmap/Action Space、F307 tab/split/restore 与
-全部 F309 内容面均未证明。5102 experience gate 只保留为旅程 baseline；PR #3981 只保留为 F307
-原型证据，不能恢复为 F290 第二套 Workbench。
+其他 IdP/OIDC provider、真实 GitHub 账号下的 Manifest 创建/授权 dogfood、TLS/公网 ingress、跨机
+endpoint pairing、backup/restore 运维、完整多连接切换 UI、跨 Service federation、registry-distributed
+Connector、Artifact/Roadmap/Action Space、F307 tab/split/restore 与全部 F309 内容面均未证明。5102
+experience gate 只保留为旅程 baseline；PR #3981 只保留为 F307 原型证据，不能恢复为 F290 第二套
+Workbench。
 
 ### 当前真正没做好的 F290 能力
 
-1. **真实 Collective 入口 / world switch**：生产 Clowder AI 尚未把 5102 baseline 的 global rail、
+1. **Server provider 产品闭环**：当前运行时要求人手动启动 Service、提供 GitHub client ID/secret 并寻找
+   bootstrap link；Connector 的“运行中”也不能证明 Service 已部署或可登录。必须交付“部署新 Service /
+   连接已有 Service”入口、Manifest provider setup、独立进程托管、状态诚实、恢复动作与 ready check。
+2. **真实 Collective 入口 / world switch**：生产 Clowder AI 尚未把 5102 baseline 的 global rail、
    Collective destination 与返回个人 Café 的完整旅程做实。
-2. **Roadmap operating model**：Roadmap 还没有成为从 Channel / Meeting / Decision 生长出 Work、
+3. **Roadmap operating model**：Roadmap 还没有成为从 Channel / Meeting / Decision 生长出 Work、
    显示依赖与历史、再回流结果的团队运行面。
-3. **共同产物系统**：Asset / Artifact library、树与派生、版本、lineage、锚定批注、权限和结果
+4. **共同产物系统**：Asset / Artifact library、树与派生、版本、lineage、锚定批注、权限和结果
    回写尚未形成可持续的 Collective truth。
-4. **完整多 Café 生命周期**：首条 runtime 已具备 auth-bound Membership、邀请加入、endpoint
+5. **完整多 Café 生命周期**：首条 runtime 已具备 auth-bound Membership、邀请加入、endpoint
    pairing/revoke、typed target、离线送达与 ACK；成员退出、Human membership revoke、冲突治理和完整
    public projection 仍未实现。
-5. **真实团队 dogfood**：还没有用 You + 吴浪 / 社区协作者完成从共同讨论到各 Café 执行再回流
+6. **真实团队 dogfood**：还没有用 You + 吴浪 / 社区协作者完成从共同讨论到各 Café 执行再回流
    的端到端工作。
-6. **Workbench 尚未对齐**：当前 shell 仍不是 Composable Workbench；这是 F307 的开放项，不作为
+7. **Workbench 尚未对齐**：当前 shell 仍不是 Composable Workbench；这是 F307 的开放项，不作为
    F290 完成标准，也不阻塞 F290 沿现有壳继续验证 Collective 核心旅程。
+
+### 2026-09-03 Server Provider Closure — 身份提供方不是手工前置条件
+
+GitHub 官方协议与当前 `github-human-auth-provider` 已完成契约级对照：GitHub App Manifest 会把
+`client_id` / `client_secret` 经一次性 conversion response 返回给创建方；GitHub App 的 user-to-server
+授权仍使用现有的 `authorize → access_token → GET /user` 链路，而且 Human 可以授权未安装的 App。
+因此 F290 不需要更换 Human principal、引入 Agent token 或预置项目方共享 OAuth App。
+
+实现必须同时守住以下边界：
+
+- Manifest registration、Human OAuth 和 endpoint pairing 是三个独立 state machine，各自使用一次性
+  state/nonce，不能互相代偿或共享 completion bearer；Manifest 临时 code 必须在一小时内兑换。
+- self-host provider 创建 public GitHub App，使受邀 Human 可以授权；只请求身份所需的最小权限，
+  不借登录索取 repository/organization authority。
+- Service 只持久化当前登录链必需的 `client_id` / `client_secret` 与可公开 app metadata；返回的 PEM、
+  webhook secret 等未使用高权凭据不得进入 Host、日志、浏览器或通用配置投影。
+- 凭据落盘、Service restart 与 provider readiness 必须由真实测试证明；官方文档对照只证明协议兼容，
+  **不能替代首次真实 GitHub 创建/授权 dogfood**。
+- 若真实 GitHub dogfood 证明 GitHub App user-to-server flow 无法满足本契约，停止本地激活；不得自行
+  降级为共享 OAuth App/device flow。该退路会把 identity provider 绑到项目方运营账号，必须由
+  operator 重新拍板。
+
+### 两档激活门（消除“未激活所以无法 dogfood”的循环）
+
+1. **Local self-host usable**：仅当一台干净 Clowder AI 在产品内完成部署、Manifest provider setup、
+   bootstrap、当前 Café pairing，且两个真实 GitHub Human 在同一 Channel 双向发信并在刷新与 Service
+   restart 后恢复，才打开本机入口。它不宣称公网可用。
+2. **Public multi-Café**：另以 TLS/公网 ingress、跨机 endpoint pairing、外部恢复与真实多 Café
+   dogfood 为开关条件。第二档未通过不阻止第一档本机使用，但 UI 必须明确标注本机边界，不能把
+   localhost ready 投影成 public ready。
 
 ## Stable Product Coordinate System
 
@@ -532,6 +572,9 @@ Markdown，而不伪造成当时就在资产页发生的批注 → 后续参与�
 | R14 | 私人 Café / Agent 执行的结果回到 exact Collective Channel / Work / Artifact，且不泄露私人过程 | AC-A7, AC-C1 | [ ] |
 | R15 | Feature surface、对象详情与 Product Shell 在交付物和验收声明中明确分层，单页不得冒充 F290 整体 | AC-A2 | [ ] |
 | R16 | F290 由个人 Café 的真实 world switch 进入 Collective；独立 `/dev` 壳只能作为 Design Gate 证物 | AC-A2 | [ ] |
+| R17 | Server provider 不开终端、不手抄 secret 即可部署或接入独立 Service，完成 GitHub provider setup、bootstrap、当前 Café pairing 与 ready check | AC-L1 | [ ] |
+| R18 | 两个真实 Human 经邀请进入同一 Channel、双向发信，并在刷新与 Service restart 后恢复 | AC-L2 | [ ] |
+| R19 | Connector / Service / Human / Endpoint 状态分层且诚实；本机与公网激活条件不可互相冒充 | AC-L1, AC-L3 | [ ] |
 
 ### Coverage check
 
@@ -540,6 +583,23 @@ Markdown，而不伪造成当时就在资产页发生的批注 → 后续参与�
 - [x] 后端/稳定性 claim 留给后续契约测试与运行观测，不在前端稿中假绿。
 
 ## Acceptance Criteria
+
+### Local self-host activation gate
+
+- [ ] **AC-L1**：从一台干净 Clowder AI 打开 Collective Connector，选择“部署新 Service”后，只通过
+  产品 UI 与 GitHub 的确认页面完成安装、独立进程启动、Manifest provider setup、mode-`0600`
+  credential persistence、一次性 bootstrap、首个 Collective、当前 Café pairing 与 ready check；
+  全程不要求终端、环境变量、手抄 secret 或寻找本地 bootstrap 文件。重启 Clowder AI 与 Service 后能
+  重新识别同一 `serviceInstanceId`、数据目录和恢复动作。纯 Service provider 从独立安装入口完成时，
+  必须进入同一个 setup state machine 和 Service truth。
+- [ ] **AC-L2**：使用两个真实 GitHub Human 与两个隔离浏览器会话：owner 创建邀请，member 打开邀请并
+  登录加入；双方落在同一 Collective/Channel、各发至少一条消息且双方都看到；刷新两边并重启
+  Service 后，membership 与完整消息顺序仍可见。fake provider、单浏览器换 cookie、只创建邀请或
+  Playwright fixture 不能作为该激活证据。
+- [ ] **AC-L3**：产品分别投影 Connector installed/enabled/live、Service absent/provisioning/
+  awaiting-setup/ready/failed、Human unauthenticated/bound、Endpoint unpaired/live/offline/revoked；
+  Local self-host 只有 AC-L1/AC-L2 通过才可启用，Public multi-Café 继续关闭直到 TLS/public ingress、
+  cross-machine pairing、外部恢复与真实多 Café dogfood 通过。
 
 ### Phase A — Truth and Experience Design Gate
 
@@ -631,6 +691,8 @@ Markdown，而不伪造成当时就在资产页发生的批注 → 后续参与�
 | KD-21 | 通用跨媒介 SelectionAnchor、human-edit awareness、annotation、Agent patch/disposition、remap/orphan 与协作 metadata ledger 抽离为 F309；F290 只提供 Artifact lineage/permissions/result target、决定 Collective attention 并消费它 | [F309](F309-collaborative-content-plane.md) |
 | KD-22 | 全局 Needs Me 与 Growing 端到端旅程归 F310；F290 只是一类 Collective producer/consumer | `0001787894090810-000905-66831d3b` + `[thread-id]#0001788009450946-000637-d21150d1` |
 | KD-23 | Human 通过 provider binding 登录；Agent 没有独立 login/token，而是 Human 下的结构化扩展；endpoint credential 只证明机器连接。Channel 默认进入 Host ingress Thread，显式 Human/Agent target 由 Host 映射，Service 不接管本地 Agent runtime/tool authority | [clowder-ai#1401](https://github.com/zts212653/clowder-ai/issues/1401)（`mindfn` 收敛） |
+| KD-24 | self-host 的 GitHub identity provider 通过 GitHub App Manifest 由 Server provider 一次确认创建；凭据直接回到 Service 的受限 store。Manifest、Human login、endpoint pairing 保持三条独立状态机；真实 GitHub dogfood 是激活证据，官方文档对照不是 | `0001788490999525-000153-a7108fb9`, `0001788491195574-000165-90a35c7f` + GitHub 官方 Manifest/user-token 文档 |
+| KD-25 | 激活拆成 Local self-host 与 Public multi-Café 两档；第一档让本机真实可用，第二档再要求 TLS/公网、跨机 pairing 与多 Café dogfood，避免“必须先激活才能 dogfood、又必须先 dogfood 才激活”的循环 | `0001788488274636-000091-dd039465`, `0001788491195574-000165-90a35c7f` |
 
 ## Open Questions / Design Gate
 
@@ -686,6 +748,9 @@ Markdown，而不伪造成当时就在资产页发生的批注 → 后续参与�
 17. 首条 F290 Experience Gate 验证 `Channel → Artifact → F309 human-edit notice/annotation/patch → owner new version →
     Channel / Work 同步` 的领域关系，以及 private execution 的结果回 exact Collective target。若当前
     宿主采用 tab/split，其连续性由 F307 验收；F290 不把多模态 adapter 或协作 ledger 拉回本 Feature。
+18. **Open delivery item — Collective product icon**：为 Collective Connector / destination 设计独特且
+    同源的图标资产，替换当前通用四宫格 glyph；图标不得阻塞 AC-L1/AC-L2 的部署登录主链，但不能在
+    F290 产品身份收口时掉地上。视觉稿与 F056/F305 现有语言对齐后再实现。
 
 ## Human Disposition Feedback Contract
 

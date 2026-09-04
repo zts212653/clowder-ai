@@ -341,10 +341,6 @@ describe('F167 Phase S action successor state machine', () => {
       dispatchId: 'dispatch-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
       issuerStandingEvidenceRef: 'message:request-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
       evidenceRef: 'community:pr:owner/repo#2868:head:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
-      reviewReentry: {
-        reason: 'behavioral_delta',
-        evidenceRef: 'git:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb:authored-delta',
-      },
       now: 120,
     });
 
@@ -357,11 +353,10 @@ describe('F167 Phase S action successor state machine', () => {
     assert.deepEqual(continued.lease.holderOutcomes, {});
     assert.deepEqual(continued.lease.completionCandidates, {});
     assert.equal(continued.lease.terminalPredicate.freshnessKey, 'head:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb');
-    assert.ok(
-      continued.lease.evidenceRefs.includes(
-        'review-reentry:behavioral_delta:git:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb:authored-delta',
-      ),
-    );
+    assert.deepEqual(continued.lease.evidenceRefs, [
+      'message:request-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
+      'community:pr:owner/repo#2868:head:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
+    ]);
     assert.deepEqual(preflightActionSuccessor(completed, { generation: 1, subjectTerminal: false }), {
       ok: false,
       reason: 'lease_not_active',
@@ -771,7 +766,7 @@ describe('F167 Phase S action successor state machine', () => {
     const withCandidate = recordActionCompletionCandidate(returned, {
       generation: 2,
       catId: 'codex-sol',
-      evidenceRefs: ['local-review:message-1:g2:approved'],
+      evidenceRefs: ['git:commit:reviewed-output'],
       now: 125,
     });
     assert.equal(replaceActionSuccessor(withCandidate, replacement()).outcome, 'candidate_present');

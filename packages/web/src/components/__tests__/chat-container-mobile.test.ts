@@ -175,8 +175,27 @@ vi.mock('../WorkspacePanel', () => ({
   },
 }));
 vi.mock('../workspace/ContextualWorkspaceChrome', () => ({
-  ContextualWorkspaceChrome: ({ children }: { children: React.ReactNode }) =>
-    React.createElement('div', { 'data-testid': 'workspace-chrome' }, children),
+  ContextualWorkspaceChrome: ({
+    children,
+    onFold,
+    showFold,
+  }: {
+    children: React.ReactNode;
+    onFold: () => void;
+    showFold?: boolean;
+  }) =>
+    React.createElement(
+      'div',
+      { 'data-testid': 'workspace-chrome' },
+      showFold
+        ? React.createElement('button', {
+            type: 'button',
+            'data-testid': 'workspace-shell-fold',
+            onClick: onFold,
+          })
+        : null,
+      children,
+    ),
 }));
 vi.mock('../workspace/TranscriptPanel', () => ({ TranscriptPanel: () => null }));
 vi.mock('../MobileApprovalSheet', () => ({
@@ -546,6 +565,21 @@ describe('ChatContainer mobile interactions', () => {
     await act(async () => {
       window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
     });
+
+    expect(mockCloseRightPanel).toHaveBeenCalledOnce();
+  });
+
+  it('closes the mobile Workspace overlay through a visible shell control', async () => {
+    mockRightPanelOpen = true;
+    mockRightPanelMode = 'workspace';
+    await act(async () => {
+      root.render(renderChatContainer('test-thread'));
+    });
+
+    const fold = container.querySelector<HTMLButtonElement>('[data-testid="workspace-shell-fold"]');
+    expect(fold).toBeTruthy();
+    if (!fold) throw new Error('mobile Workspace fold control is missing');
+    await act(async () => fold.click());
 
     expect(mockCloseRightPanel).toHaveBeenCalledOnce();
   });

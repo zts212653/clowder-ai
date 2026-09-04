@@ -109,6 +109,10 @@ Workspace owner 持有，Home 本身不进入 tab 集合或 persistence。
   同一 Workbench 中共存的宿主契约；Chat 只作为相邻沟通区和打开这些 surface 的入口。
 - 用户动作与后台事件的焦点纪律：后台更新不得静默替换 active surface；需要人判断时通过 Activity
   或明确 reveal 请求进入视野。
+- tab 内容可横向滚动，但 Home / 新增、working-set 管理与 split 退出组成不参与滚动的常驻控制轨；
+  active tab 自动进入可视区，窄屏 full-screen host 必须提供触摸可发现的退出动作。
+- working set 不设静默上限、不自动驱逐；用户可显式收起其他未固定页面，保留 active 与 pinned，
+  且批量收起与单页关闭一样只 detach host，不停止运行、不删除 Task / Artifact / owner object。
 - 桌面 split、窄屏 stack / full-screen host 与 fold / reopen 使用同一 working-set truth。
 - 从 F284 右侧 Workspace 状态迁移、坏持久化 fail closed、悬挂 objectRef 安全降级与可恢复验证；
   被否决的 F290 prototype state 不迁入未来 Workbench。
@@ -245,8 +249,9 @@ Artifact 与多 Café 信任闭环；需要进入 Workbench 的对象通过 adap
 | KD-11 | F307 只 mount F309-aware content surfaces；选区、编辑感知、批注、patch、版本重定位与 Agent admission 不进入 Workbench reducer/store | [F309](F309-collaborative-content-plane.md) |
 | KD-12 | Phase C personal adapters 只保存 typed descriptor、owner/result target 与 layout；File/Browser/Terminal/Artifact/Review/Agent Run 的 record、draft、history、session 与 invocation truth 均继续由 F063/F120/F232/F299 等 owner 持有。F290 只有在 owner-ready contract 到达后才接入，不从 prototype/fixture 猜 adapter | Phase C code-derived owner/consumer census + `[thread-id]#0001787880547100-000654-88ba3b33` |
 | KD-13 | 已挂载 surface 的 renderer 输入只从 persisted descriptor 解析，当前 Thread/worktree/preview 只服务 Workspace Home；Global Artifact 保留自身 source Thread，Browser 导航以无聚焦 refresh 更新 result target，Changes 将 exact worktree 同时写入 F063 owner/result target 并按 worktree 分离 surface ID。descriptor 不合法时 fail closed，不借 ambient Workspace 猜 owner | PR #4033 review P1 + cross-Thread A→B→reload File/Browser/Changes evidence |
-| KD-14 | Phase D 的 Workbench tab strip 在每个 active owner surface 上常驻；`+` 紧跟最后一个 tab，点击后聚焦 canonical Workspace Home，选择 destination 只新增并激活 typed surface，不丢已有 tab、不隐式 split，也不退出到 F284 单槽宿主 | `[thread-id]#0001787918799691-000032-3f30b74f` |
+| KD-14 | Phase D 的 Workbench tab strip 在每个 active owner surface 上常驻；早期约定 `+` 紧跟最后一个 tab，点击后聚焦 canonical Workspace Home，选择 destination 只新增并激活 typed surface，不丢已有 tab、不隐式 split，也不退出到 F284 单槽宿主。`+` 的位置约定已被真实 Runtime 的 responsive overload 证据与 KD-19 supersede，Home 语义继续成立 | `[thread-id]#0001787918799691-000032-3f30b74f` |
 | KD-15 | 七日 observation 不是代码合入、operator KEEP 或普通 Workspace activation 的硬门；TUNE-3 修复后由同一可见客户端证明候选 identity/DOM，operator 直接 KEEP 即进入 activation PR，multi-day evidence 仅作 activation 后非阻塞观察 | `[thread-id]#0001787923937141-000187-c7becb48` |
 | KD-16 | active F307 gate 下零 topology 的真实 product shell 只有在 `data-layout-hydrated=true` 后才可显式 attested 为 `data-zero-topology-contract=canonical-home`，同时满足 owner=`f307`、surface count=`0`、focus=`home`、canonical Home present 与旧占位文案 absent；hydration pending、缺任一项或 client revision 不符都不能进入 operator recheck | `[thread-id]#0001787995643278-000327-e0b0bf9b` |
 | KD-17 | canonical Workspace Home 本身不渲染 `+`：它已经是新增 surface 的目的地。只有 working set 至少包含一个具体 surface 时才显示 `[tabs][+]`；点击 `+` 只把焦点切回同一个完整 Home，不创建新 Workspace、Home tab、popover 或 topology 节点 | `[thread-id]#0001788108855969-000311-aa6431d2`, `[thread-id]#0001788139542841-000491-3224c2e7` |
 | KD-18 | Phase D operator KEEP 后，F307 是普通 Workspace 的默认 owner；删除启动变量、编译许可位与 URL query 三重候选开关。F290 Collective adapter 是 F290-owned downstream consumer，不再阻塞 generic Workbench activation/closure | `[thread-id]#0001788145510558-000063-394b8bdd` |
+| KD-19 | Runtime 真实使用下，tab 内容区可以滚动，但 Home / `+`、working-set 管理与 split 退出必须位于不滚动的常驻控制轨；active tab 自动进入可视区。批量收束只显式 detach 其他未固定 host，保留 active 与 pinned，不设静默上限、不自动驱逐、不停止或删除 owner object。390px full-screen Workspace 另有触摸可发现的退出，并保证折叠后的全局召回入口可点击 | `[thread-id]#0001788486535272-000059-830580ca`, `[thread-id]` independent vision review |

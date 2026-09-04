@@ -186,6 +186,22 @@ describe('outbound sync runtime closure', { skip: !isHomeRepo && 'sync manifest 
     );
   });
 
+  it('keeps public pre-merge tests independent of the home-only gate control plane', () => {
+    const terminalReceiptScript = 'scripts/gate-terminal-receipt.mjs';
+    const preMergeTest = readFileSync(resolve(ROOT, 'scripts/pre-merge-check.test.mjs'), 'utf8');
+
+    assert.ok(!isExported(terminalReceiptScript), 'the terminal-receipt writer remains home-only');
+    assert.match(
+      preMergeTest,
+      /skip:\s*[\s\S]*?!existsSync\(GATE_TERMINAL_RECEIPT_SCRIPT\)[\s\S]*?home-only route and terminal-receipt control plane is absent from public export/u,
+    );
+    assert.equal(
+      [...preMergeTest.matchAll(/SOURCE_GATE_CONTROL_TEST_OPTIONS/g)].length,
+      4,
+      'the option declaration and all three source-only gate-control tests must stay bound together',
+    );
+  });
+
   it('protects community-contributed assets from sync deletion', () => {
     // Regression guard for clowder-ai#1370 (F251 Layer 1, 2026-08-18): these paths were
     // introduced into the open-source repo by community PRs (bug reports, feature specs,
@@ -398,7 +414,7 @@ describe('outbound sync runtime closure', { skip: !isHomeRepo && 'sync manifest 
   });
 
   it('exports every project hook read by the public F296 authentication contract', () => {
-    const contract = 'packages/api/test/f296-session-hook-auth.test.js';
+    const contract = 'packages/api/test/f296-session-hook-source-auth.test.js';
     const source = readFileSync(resolve(ROOT, contract), 'utf8');
     const hookReferences = [...source.matchAll(/['"](\.\.\/\.\.\/\.\.\/\.claude\/hooks\/[^'"]+)['"]/g)].map((match) =>
       toRepoPath(resolveLocalImport(contract, match[1])),
@@ -412,6 +428,45 @@ describe('outbound sync runtime closure', { skip: !isHomeRepo && 'sync manifest 
       );
       assert.ok(!excluded.has(hook), `${hook} must not be excluded from the public filtered tree`);
     }
+  });
+
+  it('keeps explicitly managed .claude assets reachable through the final exclusion pass', () => {
+    const managedPaths = [...managedFiles, ...managedScripts];
+    const excludedDirectories = [...excluded].filter((entry) => entry.endsWith('/'));
+    const shadowedManagedPaths = managedPaths.flatMap((managedPath) =>
+      excludedDirectories
+        .filter((excludedDirectory) => managedPath.startsWith(excludedDirectory))
+        .map((excludedDirectory) => `${excludedDirectory} -> ${managedPath}`),
+    );
+
+    assert.deepEqual(
+      shadowedManagedPaths,
+      [],
+      `directory exclusions must not shadow explicit managed paths:\n${shadowedManagedPaths.join('\n')}`,
+    );
+
+    const trackedClaudePaths = execFileSync('git', ['-C', ROOT, 'ls-files', '.claude'], {
+      encoding: 'utf8',
+    })
+      .trim()
+      .split('\n')
+      .filter(Boolean);
+    const exportedClaudePaths = trackedClaudePaths.filter((repoPath) => isExported(repoPath)).sort();
+    const expectedClaudePaths = [
+      '.claude/hooks/f24-post-compact-bootstrap.sh',
+      '.claude/hooks/f24-pre-compact.sh',
+      '.claude/hooks/sop-stage-bookmark.sh',
+      '.claude/hooks/user-level/README.md',
+      '.claude/hooks/user-level/claude-settings.template.json',
+      '.claude/hooks/user-level/session-start-recall.sh',
+      '.claude/hooks/user-level/session-stop-check.sh',
+    ];
+
+    assert.deepEqual(
+      exportedClaudePaths,
+      expectedClaudePaths,
+      'the positive manifest allowlist must export the public hook closure without exposing unrelated .claude content',
+    );
   });
 
   it('exports the Alpha runner closure exercised by the public F296 contracts', () => {

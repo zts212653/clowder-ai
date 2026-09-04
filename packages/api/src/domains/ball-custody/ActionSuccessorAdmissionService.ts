@@ -18,7 +18,6 @@ import { admitActionSuccessorReplacement } from './ActionSuccessorReplacementAdm
 import {
   type CanonicalActionTerminalPredicate,
   canonicalizeActionTerminalPredicate,
-  isDurableReviewReentryEvidenceRef,
 } from './ActionTerminalPredicateCatalog.js';
 import {
   type ActionSuccessorLease,
@@ -89,21 +88,6 @@ export function assertActionSuccessorStanding(
   }
 }
 
-export type LocalReviewTerminalRoutePreflight =
-  | { applicable: false }
-  | { applicable: true; allow: true; expectedThreadId: string; predecessorCatId: string }
-  | {
-      applicable: true;
-      allow: false;
-      reason:
-        | 'generation_mismatch'
-        | 'reviewer_not_holder'
-        | 'holder_thread_mismatch'
-        | 'predecessor_route_missing'
-        | 'target_thread_mismatch';
-      expectedThreadId?: string;
-    };
-
 export class ActionSuccessorAdmissionService {
   constructor(
     private readonly leaseStore: Pick<
@@ -161,65 +145,6 @@ export class ActionSuccessorAdmissionService {
     const freshness = await this.requireVerifiedGenerationFreshness(terminalPredicate);
     assertActionSuccessorStanding(input, freshness);
     return freshness;
-  }
-
-  /**
-   * A local-review terminal carrier returns to the thread that directly issued
-   * the review lease. Task ancestry and older coordination provenance are not
-   * delivery authority. This runs before callback persistence.
-   */
-  async preflightLocalReviewTerminalRoute(input: {
-    leaseId: string;
-    generation: number;
-    reviewerCatId: string;
-    holderThreadId: string;
-    targetThreadId: string;
-  }): Promise<LocalReviewTerminalRoutePreflight> {
-    const lease = await this.leaseStore.get(input.leaseId);
-    // Without the lease there is no authoritative action-family evidence. Do
-    // not misclassify an unknown/non-review terminal as a review route error;
-    // the callback's other carrier and terminal guards remain in force.
-    if (!lease) return { applicable: false };
-    if (lease.actionFamily !== 'review' || lease.successorSlot !== 'reviewer') return { applicable: false };
-
-    const expectedThreadId = lease.predecessorThreadId;
-    const predecessorCatId = lease.predecessorCatId;
-    if (lease.generation !== input.generation) {
-      return {
-        applicable: true,
-        allow: false,
-        reason: 'generation_mismatch',
-        ...(expectedThreadId ? { expectedThreadId } : {}),
-      };
-    }
-    if (!lease.holderCatIds.includes(input.reviewerCatId)) {
-      return {
-        applicable: true,
-        allow: false,
-        reason: 'reviewer_not_holder',
-        ...(expectedThreadId ? { expectedThreadId } : {}),
-      };
-    }
-    if (lease.holderThreadId !== input.holderThreadId) {
-      return {
-        applicable: true,
-        allow: false,
-        reason: 'holder_thread_mismatch',
-        ...(expectedThreadId ? { expectedThreadId } : {}),
-      };
-    }
-    if (!expectedThreadId || !predecessorCatId) {
-      return { applicable: true, allow: false, reason: 'predecessor_route_missing' };
-    }
-    if (input.targetThreadId !== expectedThreadId) {
-      return {
-        applicable: true,
-        allow: false,
-        reason: 'target_thread_mismatch',
-        expectedThreadId,
-      };
-    }
-    return { applicable: true, allow: true, expectedThreadId, predecessorCatId };
   }
 
   async admit(
@@ -307,14 +232,6 @@ export class ActionSuccessorAdmissionService {
       if (lease.terminalPredicate.identityKey !== terminalPredicate.identityKey) return null;
       if (lease.terminalPredicate.freshnessKey === terminalPredicate.freshnessKey) return null;
     }
-    const reviewReentry = input.action.reviewReentry;
-    if (
-      lease.actionFamily === 'review' &&
-      (!reviewReentry || !isDurableReviewReentryEvidenceRef(reviewReentry.evidenceRef))
-    ) {
-      completedGenerationBlockedFreshRevisionTotal.add(1, { reason: 'review_reentry_ineligible' });
-      return { admit: false, outcome: 'review_reentry_ineligible', lease };
-    }
     const freshness = await this.resolveGenerationFreshness(terminalPredicate);
     if (freshness.status !== 'verified') return null;
     const continued = await this.leaseStore.continueFreshRevision(lease.leaseId, {
@@ -330,7 +247,6 @@ export class ActionSuccessorAdmissionService {
       dispatchId: input.dispatchId,
       issuerStandingEvidenceRef,
       evidenceRef: freshness.evidenceRef,
-      ...(reviewReentry ? { reviewReentry } : {}),
       now: input.now,
     });
     if (continued.outcome === 'continued') {

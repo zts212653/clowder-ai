@@ -1103,6 +1103,7 @@ function InteractiveChatContainer({ threadId }: ChatContainerProps) {
             mode={rightPanelMode}
             onFold={closeStatusPanel}
             onNavigateHome={rightPanelMode === 'workspace' ? undefined : openWorkspaceLauncher}
+            showFold={!isDesktop && rightPanelMode === 'workspace'}
           >
             {activityPanelMounted && (
               <div className={rightPanelMode === 'status' ? 'flex min-h-0 flex-1' : 'hidden'}>

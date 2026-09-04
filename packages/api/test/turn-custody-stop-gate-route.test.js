@@ -1326,7 +1326,7 @@ describe('F167 Phase T route custody stop gate', () => {
     });
   });
 
-  test('typed local-review terminal handback retains the exact structured dispatch obligation', async () => {
+  test('legacy typed local-review terminal handback no longer creates a structured dispatch obligation', async () => {
     const threadId = 'thread-typed-review-handback';
     const triggerMessage = {
       id: 'msg-typed-review-handback',
@@ -1340,39 +1340,18 @@ describe('F167 Phase T route custody stop gate', () => {
           effectClass: 'coordinate',
           coordination: { id: 'coord-review-1', phase: 'terminal', hop: 2 },
         },
-        localReviewVerdict: { verdict: 'approved', clientMessageId: 'typed-review-handback-1' },
+        localReviewVerdict: {
+          verdict: 'approved',
+          clientMessageId: 'typed-review-handback-1',
+          reviewedHeadSha: 'a'.repeat(40),
+        },
       },
     };
     const projection = createProjectionService({
-      state: 'covered_active',
-      closeDecisions: [
-        {
-          shouldBlock: false,
-          transitionObserved: true,
-          structuredTransitionKind: 'dispatch_dispositioned',
-          dispatchDisposition: 'completed',
-          dispatchDispositionEventId: 'dispatch-disposition:codex-inv-1:msg-typed-review-handback',
-          dispatchDispositionAt: 2_000,
-        },
-      ],
+      state: 'covered_empty',
+      closeDecisions: [{ shouldBlock: false, transitionObserved: false }],
     });
-    const service = createSequenceService('codex', [
-      [
-        {
-          type: 'tool_use',
-          toolName: 'mcp:cat-cafe/complete_a2a_dispatch',
-          toolUseId: 'complete-review-handback',
-          toolInput: { disposition: 'completed' },
-        },
-        {
-          type: 'tool_result',
-          toolName: 'mcp:cat-cafe/complete_a2a_dispatch',
-          toolUseId: 'complete-review-handback',
-          toolResultStatus: 'ok',
-          content: '{"outcome":"applied","disposition":"completed"}',
-        },
-      ],
-    ]);
+    const service = createSequenceService('codex', [[]]);
 
     const { yielded } = await runRoute(service, threadId, {
       projectionService: projection,
@@ -1394,9 +1373,15 @@ describe('F167 Phase T route custody stop gate', () => {
     });
 
     assert.equal(service.calls.length, 1);
-    assert.equal(projection.opens[0].kind, 'structured');
-    assert.equal(projection.opens[0].protocol, 'dispatch');
-    assert.equal(yielded.find((message) => message.type === 'done')?.turnCustodyTerminalWitness, undefined);
+    assert.deepEqual(projection.opens[0], {
+      kind: 'non_obligation',
+      source: 'coordination_terminal',
+    });
+    assert.deepEqual(yielded.find((message) => message.type === 'done')?.turnCustodyTerminalWitness, {
+      kind: 'terminal_silent',
+      projectionState: 'covered_empty',
+      wake: 'coordination_terminal',
+    });
   });
 
   test('ordinary and stop-gate remedial invocations retain separate durable child truth', async () => {

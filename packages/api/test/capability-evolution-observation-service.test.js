@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { before, describe, it } from 'node:test';
+import { appendCycleEvent, appendTunedChangeCycle } from './capability-evolution-phase4-event.helper.mjs';
 
 let EvolutionProgramService;
 
@@ -126,20 +127,6 @@ function observationInput(programId, overrides = {}) {
   };
 }
 
-async function appendCycleEvent(eventLog, programId, expectedSequence, event) {
-  await eventLog.append({
-    schemaVersion: 1,
-    eventId: `evolution-event:cycle:${expectedSequence}`,
-    programId,
-    expectedSequence,
-    clientMessageId: `cycle:${expectedSequence}`,
-    actorRef: 'cat:codex-sol',
-    originRef: `thread:f311:message:cycle:${expectedSequence}`,
-    occurredAt: `2026-09-01T00:00:0${expectedSequence}.000Z`,
-    event,
-  });
-}
-
 describe('F311 observation service integration', () => {
   it('appends only validated refs, projects owner drilldowns, and dispatches through F192', async () => {
     const eventLog = new MemoryEventLog();
@@ -240,9 +227,10 @@ describe('F311 observation service integration', () => {
     await appendCycleEvent(eventLog, programId, 5, {
       type: 'attribution_linked',
       attributionRef: { ownerFeatureId: 'F267', ownerStateRef: 'attribution:1' },
-      disposition: 'no_intervention',
+      disposition: 'intervention_candidate',
       diagnosis: {
-        verdict: 'unresolved',
+        verdict: 'attributed',
+        primaryLayer: 'execution',
         assessedLayers: ['execution'],
         competingLayers: [],
         evidenceRefs: [{ ownerFeatureId: 'F267', ownerStateRef: 'measurement-result:1' }],
@@ -252,14 +240,10 @@ describe('F311 observation service integration', () => {
         reasonCodes: ['no_discriminating_evidence'],
       },
     });
-    await appendCycleEvent(eventLog, programId, 6, {
-      type: 'decision_recorded',
-      decision: 'tune',
-      decisionRef: { ownerFeatureId: 'F267', ownerStateRef: 'measurement-decision:1' },
-    });
+    await appendTunedChangeCycle(eventLog, programId, 6);
 
     const result = await service.linkObservation(
-      observationInput(programId, { expectedSequence: 7, clientMessageId: 'observe-cycle-2' }),
+      observationInput(programId, { expectedSequence: 12, clientMessageId: 'observe-cycle-2' }),
     );
     assert.equal(result.outcome, 'appended');
     assert.equal(dispatched.length, 2);
