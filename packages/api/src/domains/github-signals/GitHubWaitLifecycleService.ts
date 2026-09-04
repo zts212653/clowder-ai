@@ -77,6 +77,12 @@ export interface GitHubWaitLifecycleServiceOptions {
     error: (...args: unknown[]) => void;
   };
   readonly now?: () => number;
+  /**
+   * F280 A30: our own GitHub login, so the audience filter can tell "mine" from "the PR
+   * author's" from "a third party's". Absent means the role is unresolved and the filter
+   * falls back to ON — A26: muting a real signal is worse than one extra notification.
+   */
+  readonly selfGitHubLogin?: () => string | undefined;
 }
 
 function mergeCollectorState(
@@ -212,7 +218,15 @@ export class GitHubWaitLifecycleService {
         };
       } else {
         const eventMatches = input.events
-          ? matchGitHubTrackingEvents(active.continuation.when, active.baseline, input.events, turnClock)
+          ? matchGitHubTrackingEvents(active.continuation.when, active.baseline, input.events, {
+              ...turnClock,
+              audience: {
+                ...(this.opts.selfGitHubLogin?.() ? { selfLogin: this.opts.selfGitHubLogin() } : {}),
+                ...('prAuthorLogin' in active.baseline && active.baseline.prAuthorLogin
+                  ? { prAuthorLogin: active.baseline.prAuthorLogin }
+                  : {}),
+              },
+            })
           : [];
         const typedPredicates = input.events
           ? active.continuation.when.filter((predicate) => !GITHUB_TRACKING_EVENT_KINDS.has(predicate.kind))

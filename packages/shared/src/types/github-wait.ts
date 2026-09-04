@@ -86,6 +86,12 @@ export type GitHubCiBaselineBucket = 'pending' | 'pass' | 'fail' | 'external_inf
 export interface GitHubPrWaitBaseline {
   readonly capturedAt: number;
   readonly headSha: string;
+  /**
+   * F280 A30: the PR author, frozen at registration so the audience filter can answer
+   * "whose words does this tracker want". Registration already resolved it to pick role
+   * defaults; not persisting it here is why the role could never reach the filter.
+   */
+  readonly prAuthorLogin?: string;
   readonly review?: {
     readonly inlineCommentCursor: number;
     readonly conversationCommentCursor: number;

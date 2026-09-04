@@ -123,6 +123,7 @@ export async function readGitHubWaitBaseline(
     baseline: {
       capturedAt,
       headSha: ci.headSha,
+      ...(authorLogin ? { prAuthorLogin: authorLogin } : {}),
       review: reviewState,
       ci: {
         bucket: ciBucket,
