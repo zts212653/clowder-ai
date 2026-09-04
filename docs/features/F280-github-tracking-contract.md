@@ -91,8 +91,20 @@ register_issue_tracking(repoFullName, issueNumber)
 
 ### 2.3 默认订阅集（issue）
 
-issue 只有一个回应面：评论。所以没有 `include` / `exclude`，只有
-"任何非自己的评论都通知"。
+issue 有两个面：**评论**与**状态**。没有 `include` / `exclude`，两个面都默认开。
+
+| 面 | 默认 | 含义 |
+|---|:--:|---|
+| `issue_comment` | ✅ | 任何非自己的评论都通知 |
+| `issue_state_changed` | ✅ | open → closed（含 `state_reason`：completed / not_planned）、closed → reopened |
+
+**closed 既是状态变化也是结束条件**：投递一条带 `state_reason` 的通知，然后终止追踪。
+**reopened 不是结束**：通知并继续追踪——issue 被重开正是"这事又回来了"，
+比任何评论都值得知道，而追踪已经终止就再也不会有下文。
+
+> 早期契约写的是「issue 只有一个回应面：评论」，于是 `issue_closed` 被当作非法谓词
+> **主动断言必须报错**，reopen 完全不存在。这不是范围克制，是把用户主流程写丢了：
+> PR 的状态变化（CI / 冲突 / base / merged）全都通知，issue 的却不通知，两边不对称。
 
 ### 2.4 过滤规则
 
@@ -110,10 +122,17 @@ issue 只有一个回应面：评论。所以没有 `include` / `exclude`，只�
 同一个 PR，作者和 maintainer 想要的东西不一样。所以**服务端按角色定默认**，
 调用方不需要多传参数：
 
-| 注册者 | `bot_interaction` 默认 | 理由 |
-|---|:--:|---|
-| **PR 作者** | ON | bot review 正是他在等的东西 |
-| **非作者**（maintainer / reviewer） | OFF | 他只关心作者的回应，不关心作者和 bot 的来回 |
+| 注册者 | `bot_interaction` | `conversation_comment` / `inline_comment` | 理由 |
+|---|:--:|:--:|---|
+| **PR 作者** | ON | 所有非自己的人 | bot review 正是他在等的；任何人的回应他都要 |
+| **非作者**（maintainer / reviewer） | OFF | **仅 PR 作者本人** | 他在等的是「我提的意见，作者回了没有」 |
+
+> **非作者的评论面按作者过滤，这是规范要求，不是可选降噪。**
+> 只关掉 `bot_interaction` 是不够的：那样 maintainer 仍会收到**第三方**的每一条评论
+> （其他 maintainer、路人、CI 机器人的独立留言），而他真正在等的只有作者 A 的回复。
+> 曾经的实现只做了 `bot_interaction: 'author'`，普通评论仍是「所有非自己」——
+> 代码注释写着 "a maintainer only wants the author's own replies"，实现里没有这条过滤。
+> **这条必须有独立测试：非作者注册 + 第三方评论 → 不通知。**
 
 `bot_interaction` 是**一个概念**，不是两条规则——「作者触发 bot」和「bot 回应」
 本来就是同一个交互回合的两半：
@@ -308,6 +327,9 @@ baseline: snapshot.baseline,        // 当前最大值
 | A27 | 非作者 `include: ["bot_interaction"]` | bot 回合恢复通知 | 覆盖不生效 |
 | A28 | 触发 bot 后超时无回应 | 通知"这轮没回来"，且只通知一次 | 静默——点了 review 石沉大海 |
 | A29 | 触发 bot 后正常回应 | 通知结果，回合闭合 | 回合永远挂着，之后误报超时 |
+| A30 | **非作者**注册：第三方（既非作者也非自己）发评论 | **不通知** | maintainer 被无关的人刷屏，他等的是作者回应 |
+| A31 | issue **reopened** | 通知，且**继续**追踪 | 重开后彻底失联 |
+| A32 | issue **closed** | 通知（带 `state_reason`）并终止 | 只终止不通知，或终止后仍空转 |
 
 **A3 / A6 / A17 是历史事故的直接复现，必须有独立测试。**
 **A22 是"静默丢真信号"，优先级高于任何降噪诉求。**
