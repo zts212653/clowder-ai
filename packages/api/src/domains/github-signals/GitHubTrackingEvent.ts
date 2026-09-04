@@ -260,6 +260,48 @@ function isAfterFrontier(id: number | string, frontier: number | string | null):
 export interface GitHubTrackingClockOptions {
   readonly now?: number;
   readonly botTurnTimeoutMs?: number;
+  readonly audience?: GitHubTrackingAudience;
+}
+
+/**
+ * F280 section 2.4b / A30. Who this tracker is, so the chain can answer "whose words do I
+ * want" — not just "is this mine".
+ *
+ * Expressing the role difference as a subscription default could only ever say "mute the bot
+ * round"; a maintainer stayed subscribed to conversation_comment and therefore heard every
+ * third party. The role has to reach the filter itself.
+ */
+export interface GitHubTrackingAudience {
+  /** The tracking owner's GitHub login. */
+  readonly selfLogin?: string;
+  /** The PR author's login. Absent for issues, or when it could not be resolved. */
+  readonly prAuthorLogin?: string;
+}
+
+/** Comment surfaces are audience-scoped; a formal review decision is PR state and is not. */
+const AUDIENCE_SCOPED_TYPES: ReadonlySet<string> = new Set([
+  'pr_conversation_comment_added',
+  'pr_inline_comment_added',
+]);
+
+const sameLogin = (a?: string, b?: string): boolean =>
+  a !== undefined && b !== undefined && a.toLowerCase() === b.toLowerCase();
+
+/**
+ * The single place that decides whether an event may wake this tracker.
+ *
+ * Role is derived, never passed in by the caller: letting a caller name its own audience is the
+ * defect #1392 exists to remove. An unresolved role falls back to ON — A26 is explicit that
+ * muting a real signal is worse than one extra notification.
+ */
+function passesAudience(event: GitHubTrackingEvent, audience?: GitHubTrackingAudience): boolean {
+  if (event.self) return false;
+  if (audience?.selfLogin && sameLogin(event.author, audience.selfLogin)) return false;
+  if (!AUDIENCE_SCOPED_TYPES.has(event.type)) return true;
+  const { selfLogin, prAuthorLogin } = audience ?? {};
+  if (!selfLogin || !prAuthorLogin) return true;
+  if (sameLogin(selfLogin, prAuthorLogin)) return true;
+  return sameLogin(event.author, prAuthorLogin);
 }
 
 export function matchGitHubTrackingEvents(
@@ -272,7 +314,7 @@ export function matchGitHubTrackingEvents(
   const matches = events.flatMap((event) => {
     if (!subscribed.has(event.type)) return [];
     if (!isAfterFrontier(event.id, sourceFrontier(baseline, event.source))) return [];
-    if (event.self) return [];
+    if (!passesAudience(event, options?.audience)) return [];
     return [
       {
         kind: event.type,
