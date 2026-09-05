@@ -2167,3 +2167,36 @@ describe('#772: template breeds must not leak into runtime', () => {
     }
   });
 });
+
+describe('#768: roleTemplates defaultClient backfill', () => {
+  it('roleTemplates include defaultClient field', () => {
+    const templatePath = resolve(dirname(fileURLToPath(import.meta.url)), '../../..', 'cat-template.json');
+    const raw = JSON.parse(readFileSync(templatePath, 'utf-8'));
+    assert.ok(Array.isArray(raw.roleTemplates), 'roleTemplates should be an array');
+    for (const t of raw.roleTemplates) {
+      assert.ok(typeof t.defaultClient === 'string', `template ${t.id} should have defaultClient`);
+      assert.ok(t.defaultClient.length > 0, `template ${t.id} defaultClient should not be empty`);
+    }
+  });
+
+  it('defaultClient values are valid ClientId values', () => {
+    const templatePath = resolve(dirname(fileURLToPath(import.meta.url)), '../../..', 'cat-template.json');
+    const raw = JSON.parse(readFileSync(templatePath, 'utf-8'));
+    const validClientIds = new Set([
+      'anthropic',
+      'openai',
+      'google',
+      'kimi',
+      'antigravity',
+      'opencode',
+      'catagent',
+      'acp',
+    ]);
+    for (const t of raw.roleTemplates) {
+      assert.ok(
+        validClientIds.has(t.defaultClient),
+        `template ${t.id} defaultClient "${t.defaultClient}" should be a valid ClientId`,
+      );
+    }
+  });
+});
