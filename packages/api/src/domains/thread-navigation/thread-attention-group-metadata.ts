@@ -5,8 +5,17 @@ import type {
   Thread,
   ThreadAttentionGroupMembershipV1,
 } from '../cats/services/stores/ports/ThreadStore.js';
+import {
+  assertOrganizeSnapshot,
+  type BatchGroupCommand,
+  buildGroupUndo,
+  type GroupUndoEntry,
+  restoreGroupSnapshot,
+  ThreadAttentionGroupConflict,
+} from './thread-attention-group-batch.js';
 
 export type ThreadAttentionGroupCommand =
+  | BatchGroupCommand
   | { action: 'create'; threadIds: string[] }
   | { action: 'move'; groupId: string; threadId: string; beforeThreadId?: string }
   | { action: 'remove'; groupId: string; threadId: string };
@@ -160,25 +169,42 @@ export async function applyThreadAttentionGroupCommand(
   store: GroupStore,
   userId: string,
   command: ThreadAttentionGroupCommand,
-  afterPersist?: (groups: readonly ThreadAttentionGroup[]) => void | Promise<void>,
+  afterPersist?: (groups: readonly ThreadAttentionGroup[], undo: GroupUndoEntry[]) => void | Promise<void>,
 ): Promise<ThreadAttentionGroup[]> {
   const records = await readMemberships(store, userId);
   const ownedIds = new Set(records.map(({ thread }) => thread.id));
-  const requiredIds = command.action === 'create' ? command.threadIds : [command.threadId];
-  if (requiredIds.some((threadId) => !ownedIds.has(threadId))) throw new Error('Thread not found');
+  const requiredIds =
+    command.action === 'create' || command.action === 'organize'
+      ? command.threadIds
+      : command.action === 'undo'
+        ? command.entries.map((entry) => entry.threadId)
+        : [command.threadId];
+  if (requiredIds.some((threadId) => !ownedIds.has(threadId))) {
+    if (command.action === 'undo') throw new ThreadAttentionGroupConflict();
+    throw new Error('Thread not found');
+  }
 
   const before = new Map(records.map(({ thread, membership }) => [thread.id, membership]));
   const after = new Map(
     [...before.entries()].map(([threadId, membership]) => [threadId, membership && { ...membership }]),
   );
-  if (command.action === 'create') createGroup(after, command.threadIds);
+  if (command.action === 'organize') {
+    assertOrganizeSnapshot(projectGroups(records), command);
+    if (command.groupId) {
+      for (const threadId of command.threadIds) {
+        if (after.get(threadId)?.groupId !== command.groupId)
+          moveThread(after, { action: 'move', threadId, groupId: command.groupId });
+      }
+    } else createGroup(after, command.threadIds);
+  } else if (command.action === 'undo') restoreGroupSnapshot(after, command.entries);
+  else if (command.action === 'create') createGroup(after, command.threadIds);
   else if (command.action === 'move') moveThread(after, command);
   else removeThread(after, command);
 
   await persistState(store, before, after);
   const groups = projectGroups(records.map(({ thread }) => ({ thread, membership: after.get(thread.id) ?? null })));
   try {
-    await afterPersist?.(groups);
+    await afterPersist?.(groups, command.action === 'organize' ? buildGroupUndo(before, after) : []);
   } catch (error) {
     await persistState(store, after, before);
     throw error;

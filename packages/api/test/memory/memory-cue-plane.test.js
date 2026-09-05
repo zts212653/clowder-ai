@@ -38,6 +38,7 @@ const subjectOpportunity = {
     entityId: 'entity-alden',
     matchedAlias: 'Alden',
     sourceMessageId: 'message-1',
+    sourceRevision: 'sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
   },
 };
 
@@ -289,7 +290,7 @@ function makeHarness(overrides = {}) {
     },
   };
   const registry = new MemoryCueResolverRegistry([
-    new PersonEntityCueResolver(personSource),
+    new PersonEntityCueResolver(personSource, { isCurrentVisibleRevision: () => true }),
     new OperationalPrecedentCueResolver(operationalSource),
     new TasteCueResolver(tasteSource),
     new ProfileCueResolver(profileSource),

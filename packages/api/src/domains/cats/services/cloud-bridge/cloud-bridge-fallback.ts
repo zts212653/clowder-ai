@@ -4,6 +4,8 @@ import type { BridgeDispatchOutcome, BridgeFallbackReason } from './types.js';
 const messageByReason: Record<BridgeFallbackReason, (catId: string) => string> = {
   'no-adapter': (catId) =>
     `未发送给 @${catId}：还没有可用的后台 Host Adapter。请先安装并配对 Chrome 扩展，再绑定目标 ChatGPT 会话；前台自动化保持关闭。`,
+  'needs-binding': () =>
+    '☁️ 砚砚 Pro 尚未绑定到这个 Thread。这条消息还没有发送。请在原消息旁选择已授权的 ChatGPT 会话后绑定并发送。',
   'adapter-not-ready': (catId) =>
     `未发送给 @${catId}：旧版 PinchTab 桥不可用或 ChatGPT 尚未登录；前台自动化不会自动接管。`,
   'inject-failed': (catId) =>

@@ -268,10 +268,11 @@ Without Pencil: Clowder still runs, coding tasks still work, design tasks degrad
 **Auto-configuration:** The capability orchestrator automatically detects your Pencil installation by scanning (in order):
 
 1. `PENCIL_MCP_BIN` environment variable (explicit path — highest priority)
-2. `~/.antigravity/extensions/highagency.pencildev-*/`
-3. `~/.vscode/extensions/highagency.pencildev-*/`
-4. `~/.cursor/extensions/highagency.pencildev-*/`
-5. `~/.vscode-insiders/extensions/highagency.pencildev-*/`
+2. `~/.antigravity-ide/extensions/highagency.pencildev-*/`
+3. `~/.antigravity/extensions/highagency.pencildev-*/` (legacy Antigravity)
+4. `~/.vscode/extensions/highagency.pencildev-*/`
+5. `~/.cursor/extensions/highagency.pencildev-*/`
+6. `~/.vscode-insiders/extensions/highagency.pencildev-*/`
 
 The newest version across all editors is selected. When two editors have the same version, Antigravity is preferred.
 

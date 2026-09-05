@@ -53,6 +53,8 @@ export interface WorkspaceSurfaceDescriptor {
     split: boolean;
     sidecar: boolean;
     pin: boolean;
+    /** The F307 host may temporarily move this exact mounted surface over the main Chat area. */
+    mainAreaAttention?: true;
     closePolicy: 'detach-host';
     restorePolicy: 'descriptor';
   };

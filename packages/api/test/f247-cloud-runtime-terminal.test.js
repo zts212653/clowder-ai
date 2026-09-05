@@ -120,6 +120,32 @@ const baseParams = {
 };
 
 describe('F247 cloud runtime terminal contract', () => {
+  it('keeps an A2A needs-binding outcome terminally completed instead of exposing direct-user retry semantics', async () => {
+    ensureGptProRegistered();
+    const disposition = makeDispositionRecorder();
+    const messages = await drain(
+      invokeSingleCat(
+        {
+          registry: new InvocationRegistry(),
+          sessionManager: {},
+          threadStore: makeThreadStore(),
+          apiUrl: 'http://localhost:0',
+          cloudInvokeBridge: {
+            dispatch: async () => ({ kind: 'fallback', reason: 'needs-binding', detail: 'route absent' }),
+          },
+          cloudReturnGrantStore: { issue: async () => ({ ok: true, status: 'issued' }) },
+          a2aDispatchDispositionService: disposition,
+        },
+        baseParams,
+      ),
+    );
+
+    assert.equal(disposition.calls.length, 1);
+    assert.equal(disposition.calls[0].disposition, 'completed');
+    assert.equal(messages.at(-1).type, 'done');
+    assert.equal(messages.at(-1).errorCode, undefined);
+  });
+
   it('waits for the Host bridge outcome, exposes one readable fallback, and terminalizes the exact A2A carrier', async () => {
     ensureGptProRegistered();
     let releaseBridge;

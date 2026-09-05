@@ -72,8 +72,8 @@ const entries: readonly RecallOpportunityCatalogEntry[] = Object.freeze([
     payloadSchema: judgmentSurfaceEnteredOpportunityV1Schema.shape.payload,
     scopeBinding: 'server_exact',
     resolverFamilies: Object.freeze(['taste'] as const),
-    maxCues: 1,
-    maxPromptTokens: 300,
+    maxCues: 4,
+    maxPromptTokens: 1_800,
     expiresAfterMs: 5 * 60_000,
     dedupeKey(opportunity: RecallOpportunityV1): string {
       return opportunity.kind === 'judgment_surface_entered'

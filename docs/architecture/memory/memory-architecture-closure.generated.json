@@ -453,64 +453,69 @@
       "authority": {
         "state": "implemented",
         "summary": "Source-linked episode artifacts own reconstructed evidence without becoming person facts or owner truth.",
-        "evidenceLevel": "fixture",
+        "evidenceLevel": "main",
         "evidenceRefs": [
           "docs/episodes/index.md",
+          "docs/episodes/2026-09-03-tech-writing-visual-narrative.md",
           "docs/architecture/standing-reflex-episode-replay-shadow.md"
         ]
       },
-      "declarationRevision": "F312-Phase-E-2026-09-03",
+      "declarationRevision": "F316-Phase-D-2026-09-05",
       "disposition": "exempt",
       "writeCapture": {
         "state": "implemented",
-        "summary": "Episode producers can write provenance-bearing artifacts from task traces.",
-        "evidenceLevel": "fixture",
+        "summary": "Episode producers can write provenance-bearing artifacts from task traces; the current corpus includes one real non-template artifact.",
+        "evidenceLevel": "main",
         "evidenceRefs": [
+          "docs/episodes/2026-09-03-tech-writing-visual-narrative.md",
           "docs/architecture/standing-reflex-episode-replay-shadow.md"
         ]
       },
       "typedCuePredicate": {
         "state": "exempt",
-        "summary": "The episode catalog contains only its template and has neither a production candidate nor a named invocation consumer.",
-        "evidenceLevel": "fixture",
+        "summary": "The generated catalog indexes one real non-template episode artifact plus the template, but no named invocation consumer exists; artifact presence alone does not license a proactive predicate.",
+        "evidenceLevel": "main",
         "evidenceRefs": [
           "docs/episodes/index.md",
-          "feature-discussions/2026-09-03-f312-phase-e-standing-reflex-e0.md"
+          "docs/episodes/2026-09-03-tech-writing-visual-narrative.md",
+          "feature-discussions/2026-09-05-f316-phase-d-remaining-active-lanes/README.md"
         ]
       },
       "presentationDrill": {
         "state": "implemented",
-        "summary": "Source-linked fixtures support bounded pull presentation and replay drill.",
-        "evidenceLevel": "fixture",
+        "summary": "The generated index and source-linked artifact support bounded pull presentation and replay drill.",
+        "evidenceLevel": "main",
         "evidenceRefs": [
           "docs/episodes/index.md",
+          "docs/episodes/2026-09-03-tech-writing-visual-narrative.md",
           "docs/architecture/standing-reflex-episode-replay-shadow.md"
         ]
       },
       "consumerAllowedUse": {
         "state": "implemented",
-        "summary": "Consumers may use source-linked reconstruction as bounded precedent, never as unqualified policy, person fact, or owner truth.",
-        "evidenceLevel": "fixture",
+        "summary": "Pull consumers may use source-linked reconstruction as bounded precedent, never as unqualified policy, person fact, or owner truth.",
+        "evidenceLevel": "main",
         "evidenceRefs": [
-          "docs/architecture/standing-reflex-episode-replay-shadow.md",
-          "feature-discussions/2026-09-03-f312-phase-e-standing-reflex-e0.md"
+          "docs/episodes/2026-09-03-tech-writing-visual-narrative.md",
+          "docs/architecture/standing-reflex-episode-replay-shadow.md"
         ]
       },
       "consumptionReceipt": {
         "state": "exempt",
-        "summary": "No production candidate or named invocation consumer exists, so no proactive application receipt is created.",
-        "evidenceLevel": "fixture",
+        "summary": "A real non-template artifact exists and is pull-readable, but no named proactive invocation consumer exists, so no application receipt is created.",
+        "evidenceLevel": "main",
         "evidenceRefs": [
-          "feature-discussions/2026-09-03-f312-phase-e-standing-reflex-e0.md"
+          "docs/episodes/index.md",
+          "feature-discussions/2026-09-05-f316-phase-d-remaining-active-lanes/README.md"
         ]
       },
       "outcome": {
         "state": "exempt",
-        "summary": "Fixture replay proves deterministic structure, not production use or utility; no outcome eval is licensed.",
-        "evidenceLevel": "fixture",
+        "summary": "Artifact publication and pull readability are not invocation application or utility outcomes; no outcome eval is licensed.",
+        "evidenceLevel": "main",
         "evidenceRefs": [
-          "docs/architecture/standing-reflex-episode-replay-shadow.md",
-          "feature-discussions/2026-09-03-f312-phase-e-standing-reflex-e0.md"
+          "docs/episodes/index.md",
+          "feature-discussions/2026-09-05-f316-phase-d-remaining-active-lanes/README.md"
         ]
       },
       "invalidation": {
@@ -523,13 +528,14 @@
         ]
       },
       "evidence": {
-        "level": "fixture",
+        "level": "main",
         "refs": [
           "docs/architecture/standing-reflex-episode-replay-shadow.md",
           "docs/episodes/index.md",
-          "feature-discussions/2026-09-03-f312-phase-e-standing-reflex-e0.md"
+          "docs/episodes/2026-09-03-tech-writing-visual-narrative.md",
+          "feature-discussions/2026-09-05-f316-phase-d-remaining-active-lanes/README.md"
         ],
-        "limitations": "Replay structure is fixture-backed; a production episode candidate and invocation consumer are absent."
+        "limitations": "One real non-template episode artifact is indexed and pull-readable; its lifecycle remains draft. No named proactive invocation consumer exists, so no cue, receipt, outcome, or utility claim is licensed."
       }
     },
     {
@@ -1846,7 +1852,8 @@
       ],
       "canonicalRefs": [
         "docs/features/F221-taste-lane.md",
-        "docs/architecture/memory-cue-source-map.md"
+        "docs/architecture/memory-cue-source-map.md",
+        "assets/memory-surfaces/taste/content-read.yaml"
       ],
       "authority": {
         "state": "implemented",

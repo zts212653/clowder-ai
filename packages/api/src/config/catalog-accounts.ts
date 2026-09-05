@@ -11,26 +11,19 @@
 import { copyFileSync, existsSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { resolve } from 'node:path';
-import type { AccountConfig } from '@cat-cafe/shared';
+import { type AccountConfig, builtinAccountFamilyForRef } from '@cat-cafe/shared';
+import {
+  canonicalizeAccount,
+  canonicalJson,
+  parseLegacyProviderProfiles,
+  parseLegacyProviderSecrets,
+} from './account-store-format.js';
+import { assertAccountWritable, readAccountCatalogSnapshot } from './account-store-snapshot.js';
+import { resolveAccountStoreTopology, resolveAccountWriteRoot } from './account-store-topology.js';
 import { assertSafeTestConfigRoot } from './test-config-write-guard.js';
 
 const CONFIG_SUBDIR = '.cat-cafe';
 const ACCOUNTS_FILENAME = 'accounts.json';
-const BUILTIN_ACCOUNT_REFS = new Set([
-  'claude',
-  'codex',
-  'gemini',
-  'kimi',
-  'opencode',
-  'anthropic',
-  'openai',
-  'google',
-  'builtin_anthropic',
-  'builtin_openai',
-  'builtin_google',
-  'builtin_kimi',
-  'builtin_opencode',
-]);
 const INSTALLER_ACCOUNT_REFS = new Set([
   'installer-anthropic',
   'installer-openai',
@@ -41,10 +34,7 @@ const INSTALLER_ACCOUNT_REFS = new Set([
 ]);
 
 function resolveGlobalRoot(projectRoot?: string): string {
-  const envRoot = process.env.CAT_CAFE_GLOBAL_CONFIG_ROOT;
-  if (envRoot) return resolve(envRoot);
-  if (projectRoot) return resolve(projectRoot);
-  return homedir();
+  return resolveAccountWriteRoot(projectRoot);
 }
 
 function assertSafeCatalogWrite(projectRoot: string | undefined, source: string): void {
@@ -99,58 +89,14 @@ function writeAllGlobal(accounts: Record<string, AccountConfig>, projectRoot?: s
   writeFileAtomic(accountsPath, `${JSON.stringify(accounts, null, 2)}\n`);
 }
 
-function normalizeBaseUrl(baseUrl: string | undefined): string | undefined {
-  const trimmed = baseUrl?.trim();
-  return trimmed ? trimmed.replace(/\/+$/, '') : undefined;
-}
-
-function normalizeDisplayName(displayName: string | undefined): string | undefined {
-  const trimmed = displayName?.trim();
-  return trimmed ? trimmed : undefined;
-}
-
-function normalizeModels(models: readonly string[] | undefined): string[] | undefined {
-  if (!Array.isArray(models)) return undefined;
-  const normalized = Array.from(
-    new Set(models.map((value) => String(value).trim()).filter((value) => value.length > 0)),
-  );
-  return normalized.length > 0 ? normalized.sort() : undefined;
-}
-
-function normalizeModelAliases(value: unknown): Record<string, string> | undefined {
-  if (typeof value !== 'object' || value === null || Array.isArray(value)) return undefined;
-  const normalized = Object.entries(value as Record<string, unknown>)
-    .filter((entry): entry is [string, string] => typeof entry[1] === 'string')
-    .map(([key, upstreamId]) => [key.trim(), upstreamId.trim()] as const)
-    .filter(([key, upstreamId]) => key.length > 0 && upstreamId.length > 0)
-    .sort(([left], [right]) => left.localeCompare(right));
-  return normalized.length > 0 ? Object.fromEntries(normalized) : undefined;
-}
-
-function canonicalizeAccount(account: AccountConfig): {
-  authType: 'oauth' | 'api_key';
-  baseUrl?: string;
-  displayName?: string;
-  models?: string[];
-  modelAliases?: Record<string, string>;
-} {
-  return {
-    authType: account.authType,
-    ...(normalizeBaseUrl(account.baseUrl) ? { baseUrl: normalizeBaseUrl(account.baseUrl) } : {}),
-    ...(normalizeDisplayName(account.displayName) ? { displayName: normalizeDisplayName(account.displayName) } : {}),
-    ...(normalizeModels(account.models) ? { models: normalizeModels(account.models) } : {}),
-    ...(normalizeModelAliases(account.modelAliases)
-      ? { modelAliases: normalizeModelAliases(account.modelAliases) }
-      : {}),
-  };
-}
-
 function describeAccountConflict(existing: AccountConfig, incoming: AccountConfig): string {
   const current = canonicalizeAccount(existing);
   const next = canonicalizeAccount(incoming);
   const diffs: string[] = [];
 
   if (current.authType !== next.authType) diffs.push(`authType ${current.authType} vs ${next.authType}`);
+  if (current.clientId !== next.clientId) diffs.push('clientId differs');
+  if (canonicalJson(current.envVars) !== canonicalJson(next.envVars)) diffs.push('envVars differ');
   if ((current.baseUrl ?? '(none)') !== (next.baseUrl ?? '(none)')) {
     diffs.push(`baseUrl ${current.baseUrl ?? '(none)'} vs ${next.baseUrl ?? '(none)'}`);
   }
@@ -171,24 +117,6 @@ function describeAccountConflict(existing: AccountConfig, incoming: AccountConfi
 
 function accountsEquivalent(existing: AccountConfig, incoming: AccountConfig): boolean {
   return describeAccountConflict(existing, incoming).length === 0;
-}
-
-function normalizeLegacyAuthType(value: unknown): AccountConfig['authType'] | undefined {
-  const normalized = String(value ?? '')
-    .trim()
-    .toLowerCase();
-  if (normalized === 'api_key') return 'api_key';
-  if (normalized === 'oauth' || normalized === 'subscription' || normalized === 'builtin') return 'oauth';
-  return undefined;
-}
-
-function inferLegacyAuthType(profile: Record<string, unknown>): AccountConfig['authType'] {
-  return (
-    normalizeLegacyAuthType(profile.authType) ??
-    normalizeLegacyAuthType(profile.mode) ??
-    normalizeLegacyAuthType(profile.kind) ??
-    'oauth'
-  );
 }
 
 function collectAccountRefs(value: unknown, refs: Set<string>): void {
@@ -236,7 +164,7 @@ function isInstallerAccountRef(ref: string): boolean {
 // Keep installer/builtin compatibility and project-bound custom accounts, but do not
 // copy old experimental profiles into every project-local runtime.
 function shouldImportCrossRootHomedirAccount(ref: string, referencedRefs: Set<string>): boolean {
-  return BUILTIN_ACCOUNT_REFS.has(ref) || isInstallerAccountRef(ref) || referencedRefs.has(ref);
+  return builtinAccountFamilyForRef(ref) !== null || isInstallerAccountRef(ref) || referencedRefs.has(ref);
 }
 
 /** Merge source accounts into global, preserving existing keys. */
@@ -280,51 +208,13 @@ function migrateLegacyFrom(
 ): void {
   const metaPath = resolve(root, CONFIG_SUBDIR, 'provider-profiles.json');
   if (!existsSync(metaPath)) return;
-  const meta = JSON.parse(readFileSync(metaPath, 'utf-8'));
-  // v2/v3: flat array of profiles.  v1: nested { providers: { <client>: { profiles: [...] } } }.
-  const rawProviders = meta?.providers ?? meta?.profiles;
-  let providers: Array<Record<string, unknown>>;
-  if (Array.isArray(rawProviders)) {
-    providers = rawProviders;
-  } else if (rawProviders != null && typeof rawProviders === 'object') {
-    providers = [];
-    for (const [, val] of Object.entries(rawProviders as Record<string, unknown>)) {
-      if (typeof val !== 'object' || val === null) continue;
-      const obj = val as Record<string, unknown>;
-      if (Array.isArray(obj.profiles)) {
-        // v1 nested: { anthropic: { profiles: [{ id, ... }, ...] } }
-        for (const p of obj.profiles) {
-          if (typeof p === 'object' && p !== null) providers.push(p as Record<string, unknown>);
-        }
-      } else {
-        // Simple object: treat as single provider entry
-        providers.push(obj);
-      }
-    }
-  } else {
-    providers = [];
-  }
-  if (providers.length === 0) return;
-
-  const accounts: Record<string, AccountConfig> = {};
-  for (const p of providers) {
-    const id = String(p.id ?? '').trim();
-    if (!id) continue;
-    const displayName = normalizeDisplayName(typeof p.displayName === 'string' ? p.displayName : undefined);
-    const baseUrl = normalizeBaseUrl(typeof p.baseUrl === 'string' ? p.baseUrl : undefined);
-    const models = normalizeModels(Array.isArray(p.models) ? p.models.map(String) : undefined);
-    const modelAliases = normalizeModelAliases(p.modelAliases);
-    // clowder-ai#340: protocol not migrated — derived at runtime from well-known account IDs.
-    const account: AccountConfig = {
-      authType: inferLegacyAuthType(p),
-      ...(displayName ? { displayName } : {}),
-      ...(baseUrl ? { baseUrl } : {}),
-      ...(models ? { models } : {}),
-      ...(modelAliases ? { modelAliases } : {}),
-    };
-    if (opts?.shouldImportAccount && !opts.shouldImportAccount(id, account)) continue;
-    accounts[id] = account;
-  }
+  const parsed = parseLegacyProviderProfiles(JSON.parse(readFileSync(metaPath, 'utf-8')));
+  const accounts = Object.fromEntries(
+    Object.entries(parsed).filter(
+      ([ref, account]) => !opts?.shouldImportAccount || opts.shouldImportAccount(ref, account),
+    ),
+  );
+  if (Object.keys(accounts).length === 0) return;
   const { merged } = mergeIntoGlobal(accounts, projectRoot, { skipConflicts: true });
   const mergedSet = new Set(merged);
   // Read global state after merge for retry-safe credential import
@@ -332,19 +222,7 @@ function migrateLegacyFrom(
 
   const secretsPath = resolve(root, CONFIG_SUBDIR, 'provider-profiles.secrets.local.json');
   if (!existsSync(secretsPath)) return;
-  const secretsMeta = JSON.parse(readFileSync(secretsPath, 'utf-8'));
-  // v2/v3: flat { profiles: { <id>: { apiKey } } }.
-  // v1: nested { providers: { <client>: { <id>: { apiKey } } } }.
-  let profileSecrets: Record<string, Record<string, unknown>> = {};
-  if (secretsMeta?.profiles && typeof secretsMeta.profiles === 'object') {
-    profileSecrets = secretsMeta.profiles;
-  } else if (secretsMeta?.providers && typeof secretsMeta.providers === 'object') {
-    for (const clientSecrets of Object.values(secretsMeta.providers as Record<string, unknown>)) {
-      if (typeof clientSecrets === 'object' && clientSecrets !== null) {
-        Object.assign(profileSecrets, clientSecrets as Record<string, Record<string, unknown>>);
-      }
-    }
-  }
+  const profileSecrets = parseLegacyProviderSecrets(JSON.parse(readFileSync(secretsPath, 'utf-8')));
   const globalRoot = resolveGlobalRoot(projectRoot);
   const credPath = resolve(globalRoot, CONFIG_SUBDIR, 'credentials.json');
   const existing = existsSync(credPath)
@@ -552,7 +430,10 @@ function migrateHomedirCredentials(projectRoot?: string): void {
   }
 }
 
-function ensureMigrated(projectRoot: string): void {
+export function migrateCatalogAccounts(projectRoot: string): void {
+  // Explicit format upgrades may touch the primary store, but never cut over runtime data.
+  const topology = resolveAccountStoreTopology(projectRoot);
+  if (topology.legacyRoot) projectRoot = topology.primaryRoot;
   // #506 source-owned intake: keep legacy homedir migrations for upgrades,
   // but allow new installs / opensource profile to opt out explicitly.
   const skipHomedirMigration = process.env.CAT_CAFE_SKIP_HOMEDIR_MIGRATION === '1';
@@ -583,19 +464,20 @@ export function resetMigrationState(): void {
 // ── Public API (signatures kept backward-compatible, projectRoot used for migration) ──
 
 export function readCatalogAccounts(projectRoot: string): Record<string, AccountConfig> {
-  ensureMigrated(projectRoot);
-  return readAllGlobal(projectRoot);
+  return readAccountCatalogSnapshot(projectRoot);
 }
 
 export function writeCatalogAccount(projectRoot: string, ref: string, account: AccountConfig): void {
-  ensureMigrated(projectRoot);
+  assertAccountWritable(projectRoot, ref);
+  migrateCatalogAccounts(projectRoot);
   const accounts = readAllGlobal(projectRoot);
   accounts[ref] = account;
   writeAllGlobal(accounts, projectRoot);
 }
 
 export function deleteCatalogAccount(projectRoot: string, ref: string): void {
-  ensureMigrated(projectRoot);
+  assertAccountWritable(projectRoot, ref);
+  migrateCatalogAccounts(projectRoot);
   const accounts = readAllGlobal(projectRoot);
   if (!(ref in accounts)) return;
   delete accounts[ref];

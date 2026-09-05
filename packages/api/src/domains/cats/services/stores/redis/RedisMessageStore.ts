@@ -29,6 +29,8 @@ import type {
   MarkCanceledResult,
   MarkDeliveredResult,
   MessageAppendListener,
+  MessageIdScanPage,
+  MessageScanCursor,
   OwnerComposerDraft,
   PutOwnerComposerDraftInput,
   PutOwnerComposerDraftResult,
@@ -54,6 +56,7 @@ import {
   applyStreamMetadataAugment,
   assertValidAppendMessageInput,
   assertValidStoredMessageTimestamp,
+  COORDINATION_TERMINAL_SCAN_PAGE_SIZE,
   DEFAULT_THREAD_ID,
   deriveGrowingSourceMessageRevision,
   generateSortableId,
@@ -805,9 +808,18 @@ export class RedisMessageStore {
   }
 
   async appendAndObservePriorFrontier(msg: AppendMessageInput): Promise<ThreadObservedAppendResult> {
+    const normalized = normalizeJsonUnicode(msg);
+    assertValidAppendMessageInput(normalized);
+    assertQueueCustodyMessageBinding(normalized);
+    const threadId = normalized.threadId ?? DEFAULT_THREAD_ID;
+    const timelinePublished = isTimelinePublished({ ...normalized, id: '', threadId });
+    if (timelinePublished) {
+      await this.ensureVisibilityMigrated(threadId);
+    }
     return appendMessageAndObservePriorFrontier({
       redis: this.redis,
-      message: msg,
+      message: normalized,
+      timelinePublished,
       ttlSeconds: this.ttlSeconds,
       loadById: (messageId) => this.getById(messageId),
       ...(this.onAppend ? { onAppend: this.onAppend } : {}),
@@ -2511,6 +2523,28 @@ export class RedisMessageStore {
       }
     } while (cursor !== '0');
     return ids;
+  }
+
+  /** A bounded pass over the existing raw timeline, never a full Redis key scan. */
+  async scanCoordinationTerminalMessageIds(cursor?: MessageScanCursor): Promise<MessageIdScanPage> {
+    const offset = cursor?.offset ?? 0;
+    const upperBound = cursor?.upperBound ?? (await this.redis.zcard(MessageKeys.TIMELINE));
+    const end = Math.min(offset + COORDINATION_TERMINAL_SCAN_PAGE_SIZE, upperBound);
+    if (offset >= end) return { messageIds: [] };
+    const ids = await this.redis.zrange(MessageKeys.TIMELINE, offset, end - 1);
+    const pipeline = this.redis.pipeline();
+    for (const id of ids) pipeline.hget(MessageKeys.detail(id), 'extra');
+    const extras = ids.length > 0 ? await pipeline.exec() : [];
+    if (!extras) throw new Error('coordination terminal message page unavailable');
+    const messageIds: string[] = [];
+    for (const [index, id] of ids.entries()) {
+      const extra = extras[index];
+      if (!extra) throw new Error('coordination terminal message page incomplete');
+      const [error, raw] = extra;
+      if (error) throw error;
+      if (typeof raw === 'string' && safeParseExtra(raw)?.coordination?.phase === 'terminal') messageIds.push(id);
+    }
+    return { messageIds, ...(end < upperBound ? { nextCursor: { offset: end, upperBound } } : {}) };
   }
 
   /** Hydrate message IDs into full StoredMessage objects */

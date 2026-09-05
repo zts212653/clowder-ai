@@ -163,6 +163,29 @@ describe('F276 deferred person-memory receipt contract', () => {
       updatedAt: 100,
     };
     expect(deferredPersonMemoryReceiptSchema.parse(base)).toEqual(base);
+    const claimed = {
+      ...base,
+      state: 'claimed',
+      claimId: 'claim-1',
+      claimUntil: 500,
+      processorCatId: 'codex-sol',
+      processingThreadId: 'thread-memory-operations',
+      processingMessageId: 'message-daily-batch',
+      processorInvocationId: 'invocation-daily-batch',
+    };
+    expect(deferredPersonMemoryReceiptSchema.parse(claimed)).toEqual(claimed);
+    expect(
+      deferredPersonMemoryReceiptSchema.safeParse({
+        ...claimed,
+        processingMessageId: undefined,
+      }).success,
+    ).toBe(false);
+    expect(
+      deferredPersonMemoryReceiptSchema.safeParse({
+        ...base,
+        processingMessageId: 'message-without-claim',
+      }).success,
+    ).toBe(false);
     expect(
       deferredPersonMemoryReceiptSchema.safeParse({
         ...base,

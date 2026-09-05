@@ -8,6 +8,7 @@
 
 import type { CatConfig, CatId } from '@cat-cafe/shared';
 import { getCatModel } from '../../../../../../config/cat-models.js';
+import { buildProviderEndpoint } from '../../../../../../config/provider-endpoint.js';
 import { createModuleLogger } from '../../../../../../infrastructure/logger.js';
 import type {
   AgentMessage,
@@ -141,7 +142,18 @@ export class CatAgentService implements AgentService {
       yield* emitError('Model resolution failed — no configured model', this.catId, 'unknown', now);
       return;
     }
-    const credentials = resolveApiCredentials(this.projectRoot, this.catId as string, this.catConfig);
+    let credentials: ReturnType<typeof resolveApiCredentials>;
+    try {
+      credentials = resolveApiCredentials(this.projectRoot, this.catId as string, this.catConfig);
+    } catch (error) {
+      yield* emitError(
+        `Credential resolution failed — ${error instanceof Error ? error.message : String(error)}`,
+        this.catId,
+        model,
+        now,
+      );
+      return;
+    }
     if (!credentials) {
       yield* emitError('Credential resolution failed — no bound account', this.catId, model, now);
       return;
@@ -327,7 +339,7 @@ export class CatAgentService implements AgentService {
     options?: AgentServiceOptions,
     turn = 0,
   ): Promise<Response> {
-    const url = `${(credentials.baseURL ?? DEFAULT_BASE_URL).replace(/\/+$/, '')}/v1/messages`;
+    const url = buildProviderEndpoint({ protocol: 'anthropic', baseUrl: credentials.baseURL ?? DEFAULT_BASE_URL });
     const body: Record<string, unknown> = { model, max_tokens: DEFAULT_MAX_TOKENS, messages, stream: true };
     if (tools.length > 0) body.tools = tools;
     if (options?.systemPrompt) body.system = options.systemPrompt;
@@ -360,6 +372,7 @@ export class CatAgentService implements AgentService {
     await options?.beforeProviderLaunch?.(preparedRequest);
     const resp = await fetch(url, {
       method: 'POST',
+      redirect: 'error',
       headers: {
         'Content-Type': 'application/json',
         'x-api-key': credentials.apiKey,

@@ -175,7 +175,7 @@ process.exit(0);
 
 function createNodeStub(logPath) {
   return `#!${process.execPath}
-const { appendFileSync } = require('node:fs');
+const { appendFileSync, mkdirSync } = require('node:fs');
 const { spawnSync } = require('node:child_process');
 const args = process.argv.slice(2);
 appendFileSync(${JSON.stringify(logPath)}, 'node ' + args.join(' ') + '\\n');
@@ -186,11 +186,19 @@ if (args[0]?.endsWith('gate-prepared-artifacts.mjs') && args[1] === 'verify') {
   process.exit(process.env.STUB_PREPARED_VERIFY_FAIL === '1' ? 1 : 0);
 }
 if (args[0]?.endsWith('classify-gate-route.mjs')) {
+  const currentHead = spawnSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).stdout.trim();
   process.stdout.write(JSON.stringify({
     route: process.env.STUB_GATE_ROUTE ?? 'full',
+    fingerprint: 'fingerprint-test',
+    headSha: process.env.STUB_ROUTE_HEAD_SHA ?? currentHead,
     reasons: ['stub route'],
     requiredChecks: process.env.STUB_GATE_ROUTE === 'targeted' ? ['risk-matched-targeted-evidence'] : ['canonical-full-gate'],
   }) + '\\n');
+  process.exit(0);
+}
+if (args[0]?.endsWith('snapshot-gate-control-plane.mjs')) {
+  const destination = args[args.indexOf('--destination') + 1];
+  mkdirSync(destination, { recursive: true });
   process.exit(0);
 }
 if (args[0]?.endsWith('gate-terminal-receipt.mjs')) {
@@ -199,8 +207,14 @@ if (args[0]?.endsWith('gate-terminal-receipt.mjs')) {
   }
   if (args[1] === 'stage-check') {
     const stage = args[args.indexOf('--stage') + 1];
+    if (process.env.STUB_STAGE_CHECK_ERROR_STAGE === stage) process.exit(1);
     const greenStages = new Set((process.env.STUB_GREEN_STAGES ?? '').split(',').filter(Boolean));
     process.exit(greenStages.has(stage) ? 0 : 3);
+  }
+  if (args[1] === 'heartbeat' && process.env.STUB_HEARTBEAT_ERROR === '1') process.exit(1);
+  if (args[1] === 'stage-green') {
+    const stage = args[args.indexOf('--stage') + 1];
+    if (process.env.STUB_STAGE_GREEN_ERROR_STAGE === stage) process.exit(1);
   }
   process.exit(0);
 }
@@ -237,11 +251,13 @@ function runGate(bash, args = [], extraEnv = {}, options = {}) {
   const tempDir = mkdtempSync(path.join(os.tmpdir(), 'pre-merge-check-test-'));
   const binDir = path.join(tempDir, 'bin');
   const logPath = path.join(tempDir, 'commands.log');
+  const pressurePath = path.join(tempDir, 'normal-pressure.json');
 
   const effectiveRoot = options.publicSyncFixture ? createPublicSyncFixture(tempDir) : repoRoot;
 
   try {
     writeFileSync(logPath, '', 'utf8');
+    writeFileSync(pressurePath, JSON.stringify({ pressure: 'normal' }), 'utf8');
     mkdirSync(binDir, { recursive: true });
     writeExecutable(path.join(binDir, 'git'), createGitStub(logPath, effectiveRoot));
     writeExecutable(path.join(binDir, 'pnpm'), createPnpmStub(logPath));
@@ -254,6 +270,7 @@ function runGate(bash, args = [], extraEnv = {}, options = {}) {
       CAT_CAFE_FULL_GATE_LEASE_HELD: options.leaseHeld === false ? '0' : '1',
       CAT_CAFE_FULL_GATE_LOCK_PATH: path.join(tempDir, 'full-gate-resource.lock'),
       CAT_CAFE_FULL_GATE_RESOURCE_DB_PATH: path.join(tempDir, 'full-gate-resources.sqlite'),
+      CAT_CAFE_FULL_GATE_PRESSURE_FIXTURE: pressurePath,
       CAT_CAFE_FULL_GATE_LEASE_POLL_MS: '5',
       CAT_CAFE_GATE_LOCK_DIR: path.join(tempDir, 'pre-merge-check.lock'),
       PATH: `${binDir}${path.delimiter}${process.env.PATH ?? ''}`,
@@ -541,6 +558,86 @@ describe('pre-merge-check dependency refresh order', () => {
       assert.ok(!result.logLines.includes('pnpm test'));
       const settle = result.logLines.find((line) => line.includes('gate-terminal-receipt.mjs settle'));
       assert.match(settle, /--required-stages tsc,test-non-browser/);
+    },
+  );
+
+  it(
+    'fails closed when the stage receipt control plane reports an integrity error',
+    SOURCE_GATE_CONTROL_TEST_OPTIONS,
+    (t) => {
+      const bash = requireBash(t);
+      const result = runGate(bash, [], { STUB_STAGE_CHECK_ERROR_STAGE: 'tsc' });
+
+      assert.notEqual(result.status, 0);
+      assert.match(result.stderr, /stage receipt integrity check failed/i);
+      assert.ok(
+        !result.logLines.some((line) => line.startsWith('pnpm -r exec bash -lc')),
+        `an integrity error must not be downgraded to a cache miss:\n${result.logLines.join('\n')}`,
+      );
+    },
+  );
+
+  it(
+    'propagates a receipt heartbeat failure before starting the guarded stage',
+    SOURCE_GATE_CONTROL_TEST_OPTIONS,
+    (t) => {
+      const bash = requireBash(t);
+      const result = runGate(bash, [], { STUB_HEARTBEAT_ERROR: '1' });
+
+      assert.notEqual(result.status, 0);
+      assert.ok(
+        !result.logLines.includes('pnpm install --frozen-lockfile'),
+        `a failed heartbeat must stop before the stage command:\n${result.logLines.join('\n')}`,
+      );
+    },
+  );
+
+  it(
+    'propagates a green receipt write failure instead of reporting the stage as reusable',
+    SOURCE_GATE_CONTROL_TEST_OPTIONS,
+    (t) => {
+      const bash = requireBash(t);
+      const result = runGate(bash, [], { STUB_STAGE_GREEN_ERROR_STAGE: 'tsc' });
+
+      assert.notEqual(result.status, 0);
+      assert.ok(
+        !result.logLines.some((line) => line.includes('--stage test-non-browser')),
+        `a failed green write must stop before the next stage:\n${result.logLines.join('\n')}`,
+      );
+    },
+  );
+
+  it(
+    'uses an exact-revision control-plane snapshot for route and receipt commands',
+    SOURCE_GATE_CONTROL_TEST_OPTIONS,
+    (t) => {
+      const bash = requireBash(t);
+      const result = runGate(bash);
+
+      assert.equal(result.status, 0, result.stderr);
+      assert.ok(
+        result.logLines.some((line) => line.includes('snapshot-gate-control-plane.mjs')),
+        `expected an immutable control-plane snapshot:\n${result.logLines.join('\n')}`,
+      );
+      const receiptCommands = result.logLines.filter((line) => line.includes('gate-terminal-receipt.mjs'));
+      assert.ok(receiptCommands.length > 0);
+      assert.ok(
+        receiptCommands.every((line) => !line.includes(GATE_TERMINAL_RECEIPT_SCRIPT)),
+        `receipt commands must not reload the mutable worktree copy:\n${receiptCommands.join('\n')}`,
+      );
+    },
+  );
+
+  it(
+    'rejects route evidence computed after the worktree leaves the snapshotted revision',
+    SOURCE_GATE_CONTROL_TEST_OPTIONS,
+    (t) => {
+      const bash = requireBash(t);
+      const result = runGate(bash, [], { STUB_ROUTE_HEAD_SHA: 'f'.repeat(40) });
+
+      assert.notEqual(result.status, 0);
+      assert.match(result.stderr, /route tree no longer matches.*control-plane snapshot/i);
+      assert.ok(!result.logLines.some((line) => line.includes('gate-terminal-receipt.mjs begin')));
     },
   );
 

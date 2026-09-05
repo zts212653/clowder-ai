@@ -84,6 +84,7 @@ export const subjectSeenOpportunityV1Schema = z
         entityId: boundedIdentifier(200),
         matchedAlias: boundedIdentifier(160),
         sourceMessageId: boundedIdentifier(200),
+        sourceRevision: boundedIdentifier(200),
       })
       .strict(),
   })

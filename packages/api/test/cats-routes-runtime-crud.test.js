@@ -1973,6 +1973,7 @@ describe('cats routes runtime CRUD', { concurrency: false }, () => {
     const { createProviderProfile } = await import('./helpers/create-test-account.js');
     await createProviderProfile(projectRoot, {
       displayName: 'Anthropic Key',
+      clientId: 'anthropic',
       authType: 'api_key',
       protocol: 'anthropic',
       baseUrl: 'https://api.anthropic.com',
@@ -2660,6 +2661,7 @@ describe('cats routes runtime CRUD', { concurrency: false }, () => {
     const { createProviderProfile } = await import('./helpers/create-test-account.js');
     const apiKeyProfile = await createProviderProfile(projectRoot, {
       displayName: 'Gemini Official API',
+      clientId: 'google',
       authType: 'api_key',
       protocol: 'openai',
       baseUrl: 'https://generativelanguage.googleapis.com/v1beta',
@@ -2742,7 +2744,7 @@ describe('cats routes runtime CRUD', { concurrency: false }, () => {
 
     assert.equal(createRes.statusCode, 400);
     const createBody = JSON.parse(createRes.body);
-    assert.match(createBody.error, /requires a valid baseUrl/i);
+    assert.match(createBody.error, /absolute HTTP\(S\) URL/i);
   });
 
   it('PATCH /api/cats/:id validates seed model edits against the active bootstrap account', async () => {
@@ -3569,6 +3571,7 @@ describe('cats routes runtime CRUD', { concurrency: false }, () => {
     const { createProviderProfile } = await import('./helpers/create-test-account.js');
     const acpProfile = await createProviderProfile(projectRoot, {
       displayName: 'Patchable ACP',
+      clientId: 'openai',
       authType: 'api_key',
       protocol: 'openai',
       apiKey: 'sk-patch',
@@ -3688,6 +3691,7 @@ describe('cats routes runtime CRUD', { concurrency: false }, () => {
     const { createProviderProfile } = await import('./helpers/create-test-account.js');
     const acpProfile = await createProviderProfile(projectRoot, {
       displayName: 'ACP Switch',
+      clientId: 'openai',
       authType: 'api_key',
       protocol: 'openai',
       apiKey: 'sk-switch',

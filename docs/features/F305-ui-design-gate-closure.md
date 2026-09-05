@@ -9,7 +9,7 @@ description_source: human
 description_author: codex-sol
 description_updated_at: 2026-08-22T15:01:32Z
 cvo_signoff: "2026-08-22 — sourceMessageId 0001787410376908-000078-52aceda2：由Maine Coon负责闭环当前问题，并给出未来可一句话触发的纠偏入口。"
-tips_exempt: "2026-09-03 F315 relationship renewal：本轮只链接新立项的存量 Workspace 可读性迁移 owner，不新增用户可发现能力、操作入口或学习步骤。"
+tips_exempt: "Renewed 2026-09-05 for the F056 KD-37 succession note: it records which parity guard replaces an historical design contract and adds no user-facing action or learning step."
 ---
 
 # F305: UI Design Gate Closure — 先看真页面
@@ -157,7 +157,7 @@ F056 AC-A3 下先形成一个窄 pattern，不启动全 Workspace 组件扫荡�
 - [x] **AC-A1**：新增或实质改变用户可见布局/交互会叠加触发 F083 体验确认；架构 lane 不会豁免，trivial 样式修正不误报。
 - [x] **AC-A2**：“先看真页面”可从 Clowder AI skill manifest 进入现有 `feat-lifecycle`，并在该 skill 内恢复真实壳 Design Gate 语义；未新增 skill/stage/registry。
 - [x] **AC-A3**：design-in-context checklist 的结构问题逐项映射 ADR-043/F056，Design Gate 与 review 不复制第二份清单。
-- [x] **AC-A4**：`DESIGN.md` 不再持有运行 token 字面值；F056 AC-E9 的无效 SHA/错误完成声明已按仓内事实修正。
+- [x] **AC-A4**：`DESIGN.md` 不再持有运行 token 字面值；F056 AC-E9 的无效 SHA/错误完成声明已按仓内事实修正。（历史契约，当时成立。2026-09-04 F056 KD-37 升级：根 `DESIGN.md` 改为 Google DESIGN.md 规格的**设计意图 / 目标值**真相源，其十六进制值是 F2 迁移目标而非运行时字面值的拷贝；AC-A4 反对的"第二份运行时拷贝会漂移"由 F056 AC-F6 的 parity 守护测试接管。本行不改写，只记录被谁、以什么机制取代。）
 - [x] **AC-A5**：Clowder AI 产品表面不会路由到冲突的通用 `frontend-design` 风格指令，且不修改用户在其他项目中的全局技能。
 - [x] **AC-B1**：Approval / Needs Me 共享 pattern 已由 generic approval、F292 meeting intake 与体验候选共同消费；F246/F292 store、schema 与 action 契约保持不变。
 - [x] **AC-B2**：F292 真实壳首屏只突出一个当前决定、系统建议和必要上下文；建议齐全时编辑表单默认折叠，主操作先于表单，工程细节默认折叠。

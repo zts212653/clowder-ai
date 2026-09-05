@@ -4,8 +4,9 @@ export type CrossThreadCoordinationInputPhase = 'active' | 'terminal';
 /** Caller-supplied transition. `id` is normally omitted and server-derived. */
 export interface CrossThreadCoordinationInput {
   phase: CrossThreadCoordinationInputPhase;
+  /** Terminal ids must match an incoming lineage; active ids may start a distinct chain. */
   id?: string;
-  /** Stable action subject. A changed subject starts a fresh coordination generation. */
+  /** Stable action subject. Active changes fork; terminal conflicts fail before delivery. */
   subjectRef?: string;
 }
 

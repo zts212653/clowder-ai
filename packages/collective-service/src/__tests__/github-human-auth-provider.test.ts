@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 
-import { createGitHubHumanAuthProvider } from '../github-human-auth-provider.js';
+import { ConfigurableGitHubHumanAuthProvider, createGitHubHumanAuthProvider } from '../github-human-auth-provider.js';
 
 describe('GitHubHumanAuthProvider', () => {
   it('is explicitly unavailable without complete OAuth configuration', () => {
@@ -91,5 +91,22 @@ describe('GitHubHumanAuthProvider', () => {
         redirectUri: 'https://collective.example/api/auth/github/callback',
       }),
     ).rejects.toThrow(/identity/i);
+  });
+
+  it('becomes ready after an in-process manifest conversion without exposing credentials', () => {
+    const provider = new ConfigurableGitHubHumanAuthProvider({});
+    expect(provider.readiness).toEqual({ ready: false, reason: 'not_configured' });
+
+    provider.configure({ clientId: 'manifest-client-id', clientSecret: 'manifest-client-secret' });
+
+    expect(provider.readiness).toEqual({ ready: true });
+    const authorization = new URL(
+      provider.authorizationUrl({
+        state: 'opaque-state',
+        redirectUri: 'http://127.0.0.1:5201/api/auth/github/callback',
+      }),
+    );
+    expect(authorization.searchParams.get('client_id')).toBe('manifest-client-id');
+    expect(JSON.stringify(provider)).not.toContain('manifest-client-secret');
   });
 });

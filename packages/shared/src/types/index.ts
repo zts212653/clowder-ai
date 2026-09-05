@@ -271,8 +271,11 @@ export type { CatAlternative, CatRoutingError } from './cat-routing.js';
 export type { CliActiveWriterRecoveryState, CliDiagnostics, CliErrorReasonCode } from './cli-diagnostics.js';
 export type { BuiltinAccountClient } from './client-routing.js';
 export {
+  BUILTIN_ACCOUNT_CLIENT_FOR_ID,
   builtinAccountFamilyForClient,
+  builtinAccountFamilyForRef,
   builtinAccountIdForClient,
+  legacyAccountFamilyForRef,
   protocolForClient,
 } from './client-routing.js';
 export type {
@@ -282,10 +285,12 @@ export type {
   CloudBridgeOutboundReceiptV1,
   CloudBridgeOutboundStatus,
   CloudBridgeOutboundTransport,
+  CloudBridgeRecoveryV1,
 } from './cloud-bridge-outbound-receipt.js';
 export {
   isCloudBridgeFailureDiagnosticV1,
   isCloudBridgeOutboundReceiptV1,
+  isCloudBridgeRecoveryV1,
 } from './cloud-bridge-outbound-receipt.js';
 export * from './collective.js';
 // Command types (F142 Phase B — slash command framework)
@@ -1182,12 +1187,15 @@ export type {
   PluginStatus,
 } from './plugin.js';
 export {
+  DEFERRED_PERSON_MEMORY_CLERK_DISPOSITIONS,
   DEFERRED_PERSON_MEMORY_RECEIPT_STATES,
+  type DeferredPersonMemoryClerkDispositionInput,
   type DeferredPersonMemoryInput,
   type DeferredPersonMemoryReceipt,
   type DeferredPersonMemoryResolvedSource,
   type DeferredPersonMemorySourceInput,
   type DeferredWriteOpportunityReceiptV1,
+  deferredPersonMemoryClerkDispositionInputSchema,
   deferredPersonMemoryInputSchema,
   deferredPersonMemoryReceiptIdSchema,
   deferredPersonMemoryReceiptSchema,
@@ -1297,6 +1305,8 @@ export type {
   QueueMessageReceiptProjection,
   QueueReceiptTarget,
   QueueReceiptTargetState,
+  QueueRecoveryAction,
+  QueueRecoveryRequest,
   QueueReminderAttempt,
   QueueReminderAttemptState,
   QueueReminderMissedReason,

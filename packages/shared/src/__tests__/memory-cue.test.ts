@@ -30,6 +30,7 @@ const fixtures = {
       entityId: 'entity-alden',
       matchedAlias: 'Alden',
       sourceMessageId: 'message-1',
+      sourceRevision: 'sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
     },
   },
   delivery_decision: {
@@ -235,6 +236,17 @@ describe('F287 memory cue shared contract', () => {
     ['future trigger tags', { ...fixtures.subject_seen, futureTriggerTags: ['when Alden appears'] }],
     ['client scope', { ...fixtures.subject_seen, clientScope: scope }],
     ['top-level owner override', { ...fixtures.subject_seen, ownerUserId: 'attacker' }],
+    [
+      'missing Entity revision',
+      {
+        ...fixtures.subject_seen,
+        payload: {
+          entityId: fixtures.subject_seen.payload.entityId,
+          matchedAlias: fixtures.subject_seen.payload.matchedAlias,
+          sourceMessageId: fixtures.subject_seen.payload.sourceMessageId,
+        },
+      },
+    ],
   ])('rejects forbidden opportunity structure: %s', (_label, candidate) => {
     expect(recallOpportunityV1Schema.safeParse(candidate).success).toBe(false);
     expect(isRecallOpportunityV1(candidate)).toBe(false);

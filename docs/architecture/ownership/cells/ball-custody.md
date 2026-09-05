@@ -41,6 +41,7 @@ code_anchors:
   - packages/api/src/domains/ball-custody/BallCustodyProjectionStore.ts
   - packages/api/src/domains/ball-custody/ball-custody-keys.ts
   - packages/api/src/domains/ball-custody/BallCustodyIngest.ts
+  - packages/api/src/domains/ball-custody/CoordinationTerminalRetirement.ts
   - packages/api/src/domains/ball-custody/ball-custody-events.ts
   - packages/api/src/domains/cats/services/freshness/FreshnessAttentionEventLog.ts
   - packages/api/src/domains/cats/services/freshness/FreshnessInvocationStateStore.ts

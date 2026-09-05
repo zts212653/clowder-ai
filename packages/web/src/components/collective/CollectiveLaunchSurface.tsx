@@ -7,8 +7,10 @@ import {
   type CollectiveConnectorStatus,
   type CollectivePairingIntentMessage,
   canonicalClientUrl,
+  type LocalCollectiveServiceLaunch,
   normalizeCollectiveServiceUrl,
 } from './collective-client';
+import { localServiceAction, localServiceDescription } from './collective-launch-copy';
 import { useCollectivePairingBridge } from './use-collective-pairing-bridge';
 
 const STATUS_REFRESH_MS = 5_000;
@@ -39,8 +41,9 @@ export function CollectiveLaunchSurface({
   const [status, setStatus] = useState<CollectiveConnectorStatus>();
   const [serviceInput, setServiceInput] = useState(initialServiceUrl);
   const [serviceUrl, setServiceUrl] = useState(() => normalizeCollectiveServiceUrl(initialServiceUrl));
+  const [launchUrl, setLaunchUrl] = useState(() => normalizeCollectiveServiceUrl(initialServiceUrl));
   const [error, setError] = useState<string>();
-  const [busy, setBusy] = useState<'pair' | 'reconnect' | 'revoke'>();
+  const [busy, setBusy] = useState<'provision' | 'pair' | 'reconnect' | 'revoke'>();
 
   const load = useCallback(async (afterMutation = false) => {
     try {
@@ -55,11 +58,40 @@ export function CollectiveLaunchSurface({
       const active = preferredConnection(body.connections);
       if (active) {
         setServiceUrl(active.serviceUrl);
+        setLaunchUrl(active.serviceUrl);
         setServiceInput(active.serviceUrl);
+      } else if (body.localService?.state === 'ready') {
+        setServiceUrl(body.localService.serviceUrl);
+        setLaunchUrl(body.localService.serviceUrl);
+        setServiceInput(body.localService.serviceUrl);
       }
       setError(undefined);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : 'Connector status failed');
+    }
+  }, []);
+
+  const provisionLocalService = useCallback(async () => {
+    setBusy('provision');
+    setError(undefined);
+    try {
+      const response = await apiFetch('/api/plugins/collective-connector/service/provision', { method: 'POST' });
+      const body = (await response.json().catch(() => ({}))) as LocalCollectiveServiceLaunch & { error?: string };
+      if (!response.ok || !body.service || !body.launchUrl) {
+        throw new Error(body.error ?? `Service creation failed (${response.status})`);
+      }
+      const normalized = normalizeCollectiveServiceUrl(body.service.serviceUrl);
+      if (!normalized || new URL(body.launchUrl).origin !== normalized) {
+        throw new Error('Host returned an invalid local Service address');
+      }
+      setStatus((current) => (current ? { ...current, localService: body.service } : current));
+      setServiceUrl(normalized);
+      setServiceInput(normalized);
+      setLaunchUrl(body.launchUrl);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'Service creation failed');
+    } finally {
+      setBusy(undefined);
     }
   }, []);
 
@@ -122,8 +154,8 @@ export function CollectiveLaunchSurface({
   const connection = status ? preferredConnection(status.connections) : undefined;
   const frameUrl = useMemo(
     () =>
-      serviceUrl && typeof window !== 'undefined' ? canonicalClientUrl(serviceUrl, window.location.origin) : undefined,
-    [serviceUrl],
+      launchUrl && typeof window !== 'undefined' ? canonicalClientUrl(launchUrl, window.location.origin) : undefined,
+    [launchUrl],
   );
 
   if (!status) {
@@ -178,34 +210,60 @@ export function CollectiveLaunchSurface({
         />
       ) : (
         <div className="grid h-full place-items-center p-6">
-          <form
-            className="flex w-full max-w-md gap-2 rounded-2xl bg-[var(--console-card-bg)] p-5 shadow-[var(--console-elevation-2)]"
-            onSubmit={(event) => {
-              event.preventDefault();
-              const normalized = normalizeCollectiveServiceUrl(serviceInput);
-              if (!normalized) {
-                setError('请输入有效的 http(s) Service 地址');
-                return;
-              }
-              setServiceUrl(normalized);
-              setError(undefined);
-            }}
-          >
-            <input
-              aria-label="Collective Service 地址"
-              value={serviceInput}
-              onChange={(event) => setServiceInput(event.target.value)}
-              placeholder="http://localhost:5201"
-              className="min-w-0 flex-1 rounded-lg border border-[var(--console-border-soft)] bg-[var(--cafe-surface-sunken)] px-3 py-2 text-sm text-cafe-primary outline-none focus:border-cafe-accent"
-            />
+          <section className="w-full max-w-lg rounded-2xl bg-[var(--console-card-bg)] p-6 shadow-[var(--console-elevation-2)]">
+            <p className="text-xs font-semibold uppercase tracking-wider text-cafe-accent">Collective Service</p>
+            <h1 className="mt-2 text-2xl font-semibold text-cafe-primary">建立共同家园</h1>
+            <p className="mt-3 text-sm leading-6 text-cafe-secondary">
+              Clowder AI 会创建并守护一份独立运行的本机 Service。登录凭据由 Service 保存，不需要打开终端或复制 secret。
+            </p>
             <button
-              type="submit"
-              className="rounded-lg bg-cafe-accent px-4 py-2 text-sm font-semibold"
+              type="button"
+              disabled={busy !== undefined || status.localService?.state === 'starting'}
+              onClick={() => void provisionLocalService()}
+              className="mt-5 rounded-lg bg-cafe-accent px-4 py-2 text-sm font-semibold disabled:opacity-50"
               style={{ color: 'var(--cafe-accent-foreground)' }}
             >
-              打开
+              {localServiceAction(status.localService?.state, busy === 'provision')}
             </button>
-          </form>
+            {status.localService && (
+              <div className="mt-4 rounded-xl bg-[var(--cafe-surface-sunken)] px-3 py-3 text-xs leading-5 text-cafe-muted">
+                <p>{localServiceDescription(status.localService.state)}</p>
+                <p className="mt-1 break-all">数据：{status.localService.dataDirectory}</p>
+                {status.localService.error && <p className="mt-1 text-conn-red-text">{status.localService.error}</p>}
+              </div>
+            )}
+            <details className="mt-5 border-t border-[var(--console-border-soft)] pt-4 text-sm text-cafe-secondary">
+              <summary className="cursor-pointer font-medium text-cafe-primary">连接已有 Service</summary>
+              <form
+                className="mt-3 flex gap-2"
+                onSubmit={(event) => {
+                  event.preventDefault();
+                  const normalized = normalizeCollectiveServiceUrl(serviceInput);
+                  if (!normalized) {
+                    setError('请输入有效的 http(s) Service 地址');
+                    return;
+                  }
+                  setServiceUrl(normalized);
+                  setLaunchUrl(normalized);
+                  setError(undefined);
+                }}
+              >
+                <input
+                  aria-label="Collective Service 地址"
+                  value={serviceInput}
+                  onChange={(event) => setServiceInput(event.target.value)}
+                  placeholder="https://collective.example.com"
+                  className="min-w-0 flex-1 rounded-lg border border-[var(--console-border-soft)] bg-[var(--cafe-surface-sunken)] px-3 py-2 text-sm text-cafe-primary outline-none focus:border-cafe-accent"
+                />
+                <button
+                  type="submit"
+                  className="rounded-lg border border-[var(--console-border-soft)] px-4 py-2 text-sm font-semibold hover:bg-[var(--console-hover-bg)]"
+                >
+                  打开
+                </button>
+              </form>
+            </details>
+          </section>
         </div>
       )}
       {(error || pairingBridge.error || busy === 'pair') && (

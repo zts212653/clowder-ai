@@ -28,6 +28,20 @@ const QUEUED_ENTRY: QueueEntry = {
   intent: 'execute',
   status: 'queued',
   createdAt: NOW,
+  recoveryActions: [
+    {
+      id: 'queue-steer:q1',
+      entryId: 'q1',
+      kind: 'steer',
+      request: { method: 'POST', path: '/api/threads/thread-1/queue/q1/steer' },
+    },
+    {
+      id: 'queue-withdraw:q1',
+      entryId: 'q1',
+      kind: 'withdraw',
+      request: { method: 'DELETE', path: '/api/threads/thread-1/queue/q1' },
+    },
+  ],
 };
 
 function response(body: unknown, status = 200) {

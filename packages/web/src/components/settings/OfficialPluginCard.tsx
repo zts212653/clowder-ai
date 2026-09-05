@@ -108,7 +108,7 @@ function presentation(plugin: OfficialPluginInfo): OfficialPluginPresentation {
       detailLabel: '查看 Collective Connector 详情',
       toggleLabel: 'Collective Connector',
       uninstallLabel: '卸载 Collective Connector',
-      icon: 'blocks',
+      icon: 'collective',
       avatarBackground: 'var(--cafe-accent)',
     };
   }

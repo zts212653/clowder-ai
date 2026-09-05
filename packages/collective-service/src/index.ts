@@ -1,5 +1,15 @@
 export { CollectiveServiceError } from './errors.js';
-export { createGitHubHumanAuthProvider, type GitHubHumanAuthProviderOptions } from './github-human-auth-provider.js';
+export {
+  type BeginGitHubAppManifestInput,
+  GitHubAppManifestSetup,
+  type GitHubAppManifestSetupOptions,
+} from './github-app-manifest-setup.js';
+export {
+  ConfigurableGitHubHumanAuthProvider,
+  createGitHubHumanAuthProvider,
+  type GitHubHumanAuthProviderOptions,
+  type GitHubOAuthCredentials,
+} from './github-human-auth-provider.js';
 export {
   type RunningCollectiveServer,
   type StartCollectiveServerOptions,

@@ -89,6 +89,7 @@ describe('F311 Evolution Program permanent API', { skip: redisIsolationSkipReaso
     assert.equal(body.projection.program.stage, 'constituting');
     assert.equal(body.surface.type, 'evolution-program');
     assert.equal(body.surface.objectRef.id, body.projection.program.programId);
+    assert.equal(body.surface.capabilities.mainAreaAttention, true);
     assert.ok(body.projection.blockers.some((blocker) => blocker.code === 'calibrator_missing'));
     assert.deepEqual(await service.get(body.projection.program.programId), body.projection);
 

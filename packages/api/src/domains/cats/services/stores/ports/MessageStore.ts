@@ -71,6 +71,19 @@ export { isTimelinePublished } from '../visibility.js';
 
 export type UnresolvedCursorPolicy = 'rescan' | 'empty';
 
+/** Ephemeral bounded pass over the existing raw timeline; never a durable work ledger. */
+export interface MessageScanCursor {
+  readonly offset: number;
+  readonly upperBound: number;
+}
+
+export interface MessageIdScanPage {
+  readonly messageIds: string[];
+  readonly nextCursor?: MessageScanCursor;
+}
+
+export const COORDINATION_TERMINAL_SCAN_PAGE_SIZE = 100;
+
 export interface ThreadMessageReadOptions {
   /** Include queued cat-authored speech that is already published to the timeline. */
   includeQueuedCatMessages?: boolean;
@@ -308,6 +321,8 @@ export interface StoredMessage {
     dynamicSceneEntries?: readonly import('@cat-cafe/shared').AsrPersonMemoryDynamicSceneEntryV1[];
     /** Server-written deferred-generation carrier; never accepted as owner-authored truth. */
     writeOpportunityReentry?: import('@cat-cafe/shared').WriteOpportunityReentryCarrierV1;
+    /** Server-written bounded batch of independent deferred-generation carriers. */
+    writeOpportunityReentries?: readonly import('@cat-cafe/shared').WriteOpportunityReentryCarrierV1[];
     /** Server-written same-generation presentation retry; contains refs only. */
     writeOpportunityPresentationRetry?: import('@cat-cafe/shared').WriteOpportunityPresentationRetryCarrierV1;
     freshness?:
@@ -947,6 +962,10 @@ export interface IMessageStore {
   /** #697: Find message IDs with a given deliveryStatus. Used by StartupReconciler
    *  to recover orphaned queued messages after process restart. */
   scanByDeliveryStatus?(status: NonNullable<StoredMessage['deliveryStatus']>): string[] | Promise<string[]>;
+  /** At most 100 raw timeline members per page, including queued and delivered sources.
+   * A pass has a fixed upper bound; mutations may revisit/skip members until the next
+   * idempotent pass. Callers must re-read each source's current consumption truth. */
+  scanCoordinationTerminalMessageIds?(cursor?: MessageScanCursor): MessageIdScanPage | Promise<MessageIdScanPage>;
   /**
    * #1200 §8.7: Get the latest visible cursor for a thread.
    *
@@ -1066,6 +1085,19 @@ function isRecallableOwnerMessage(message: StoredMessage): boolean {
 
 export class MessageStore {
   private messages: StoredMessage[] = [];
+
+  scanCoordinationTerminalMessageIds(cursor?: MessageScanCursor): MessageIdScanPage {
+    const offset = cursor?.offset ?? 0;
+    const upperBound = cursor?.upperBound ?? this.messages.length;
+    const end = Math.min(offset + COORDINATION_TERMINAL_SCAN_PAGE_SIZE, upperBound);
+    return {
+      messageIds: this.messages
+        .slice(offset, end)
+        .filter((message) => message.extra?.coordination?.phase === 'terminal')
+        .map((message) => message.id),
+      ...(end < upperBound ? { nextCursor: { offset: end, upperBound } } : {}),
+    };
+  }
   private readonly maxMessages: number;
   private readonly idempotencyIndex = new Map<string, string>();
   /** Content-dedup claims: fingerprint key → expiry timestamp (ms). Bounds the callback exact-duplicate race. */

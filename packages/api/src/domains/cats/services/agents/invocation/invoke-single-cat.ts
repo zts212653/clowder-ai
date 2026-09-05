@@ -38,6 +38,7 @@ import {
   resolveForClient,
   validateRuntimeProviderBinding,
 } from '../../../../../config/account-resolver.js';
+import { AccountStoreVerdictError } from '../../../../../config/account-store-format.js';
 import { resolveBoundAccountRefForCat } from '../../../../../config/cat-account-binding.js';
 import { buildCatGitIdentityEnv } from '../../../../../config/cat-git-identity.js';
 import { getCatModel } from '../../../../../config/cat-models.js';
@@ -331,7 +332,11 @@ function subjectSeenSeedMatchesNudge(
   seed: Extract<MemoryCueOpportunitySeed, { kind: 'subject_seen' }>,
   nudge: NudgePayload,
 ): boolean {
-  return seed.payload.entityId === nudge.entityId && seed.payload.matchedAlias === nudge.matchedAlias;
+  return (
+    seed.payload.entityId === nudge.entityId &&
+    seed.payload.matchedAlias === nudge.matchedAlias &&
+    seed.payload.sourceRevision === nudge.sourceRevision
+  );
 }
 
 function isSubstantiveProviderOutput(message: AgentMessage): boolean {
@@ -2166,7 +2171,16 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
         }),
         timestamp: Date.now(),
       };
-      turnExecutionCompletedSuccessfully = true;
+      const directUserNeedsBinding =
+        outcome.kind === 'fallback' &&
+        outcome.reason === 'needs-binding' &&
+        sourceSender?.kind === 'user' &&
+        !params.a2aTriggerMessageId;
+      if (directUserNeedsBinding) {
+        turnExecutionFailureReason = 'cloud_needs_binding';
+      } else {
+        turnExecutionCompletedSuccessfully = true;
+      }
       didComplete = true;
       yield {
         type: 'done' as const,
@@ -2174,6 +2188,7 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
         invocationId,
         isFinal: isLastCat,
         timestamp: Date.now(),
+        ...(directUserNeedsBinding ? { errorCode: 'CLOUD_NEEDS_BINDING' } : {}),
       };
       return;
     }
@@ -2753,6 +2768,8 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
     try {
       resolvedAccount = assertCompatibleRuntimeAccount(await resolveRuntimeAccount());
     } catch (err) {
+      // Absence may use ambient CLI auth; a malformed/torn/divergent store may not.
+      if (err instanceof AccountStoreVerdictError) throw err;
       if (isExplicitBindingCompatibilityError(err) || isBoundAccountResolutionError(err)) {
         throw err;
       }

@@ -8,12 +8,20 @@ export function F307WorkbenchTabs({
   onAddSurface,
   onActivateSurface,
   homeFocused,
+  isDesktop,
+  mainAreaAttentionSurfaceId,
+  onEnterMainAreaAttention,
+  onExitMainAreaAttention,
 }: {
   layout: WorkbenchLayoutState;
   dispatch: (action: WorkbenchAction) => void;
   onAddSurface: () => void;
   onActivateSurface: () => void;
   homeFocused: boolean;
+  isDesktop: boolean;
+  mainAreaAttentionSurfaceId: string | null;
+  onEnterMainAreaAttention: (surfaceId: string) => void;
+  onExitMainAreaAttention: () => void;
 }) {
   return (
     <div
@@ -36,6 +44,8 @@ export function F307WorkbenchTabs({
               active={active}
               dispatch={dispatch}
               onActivateSurface={onActivateSurface}
+              returnsFromMainArea={mainAreaAttentionSurfaceId === surface.id}
+              onExitMainAreaAttention={onExitMainAreaAttention}
             />
           );
         })}
@@ -45,6 +55,10 @@ export function F307WorkbenchTabs({
         dispatch={dispatch}
         onAddSurface={onAddSurface}
         homeFocused={homeFocused}
+        isDesktop={isDesktop}
+        mainAreaAttentionSurfaceId={mainAreaAttentionSurfaceId}
+        onEnterMainAreaAttention={onEnterMainAreaAttention}
+        onExitMainAreaAttention={onExitMainAreaAttention}
       />
     </div>
   );

@@ -55,7 +55,7 @@
     "dev": "pnpm -r --parallel run dev",
     "build": "pnpm -r run build",
     "lint": "pnpm -r run lint",
-    "check": "pnpm check:no-provider-canary-residue && pnpm check:paw-feel-disposition-boundaries && pnpm check:paw-feel-disposition-capacity && pnpm check:sidebar-projection-boundary && pnpm check:f290-product-copy && pnpm check:f290-workbench-boundary && pnpm biome check . --diagnostic-level=error && pnpm check:dir-size && pnpm check:daemon-lifecycle && pnpm check:biome-review-worktrees && pnpm check:features && pnpm check:eval-metric-glossary:prepared && pnpm check:capability-tips && pnpm check:capability-tips-enablement && pnpm check:sop-definitions && pnpm check:design-gate-real-interaction && pnpm check:co-creation-docs-lane && pnpm check:review-completion-routing && pnpm check:skills:manifest && pnpm check:skills:references && pnpm check:skills:surfaces && pnpm check:env-ports && pnpm check:env-registry && pnpm check:env-example && pnpm check:start-profile-isolation && pnpm check:node-runtime-guard && pnpm check:pre-merge-gate && pnpm check:prompt-time-apis && pnpm check:guides && pnpm check:followup-tails && pnpm check:scripts-ascii-only && pnpm check:no-codex-provider-exit-suppression && pnpm check:f212-reconciliation-eval && pnpm check:whisper-dispatch && pnpm check:tts-runtime && pnpm check:site-integrity && pnpm check:site-css",
+    "check": "pnpm check:no-provider-canary-residue && pnpm check:paw-feel-disposition-boundaries && pnpm check:paw-feel-disposition-capacity && pnpm check:sidebar-projection-boundary && pnpm check:f290-product-copy && pnpm check:f290-workbench-boundary && pnpm biome check . --diagnostic-level=error && pnpm check:dir-size && pnpm check:daemon-lifecycle && pnpm check:biome-review-worktrees && pnpm check:features && pnpm check:eval-metric-glossary:prepared && pnpm check:capability-tips && pnpm check:capability-tips-enablement && pnpm check:sop-definitions && pnpm check:design-gate-real-interaction && pnpm check:design-md && pnpm check:co-creation-docs-lane && pnpm check:review-completion-routing && pnpm check:skills:manifest && pnpm check:skills:references && pnpm check:skills:surfaces && pnpm check:env-ports && pnpm check:env-registry && pnpm check:env-example && pnpm check:start-profile-isolation && pnpm check:node-runtime-guard && pnpm check:pre-merge-gate && pnpm check:prompt-time-apis && pnpm check:guides && pnpm check:followup-tails && pnpm check:scripts-ascii-only && pnpm check:no-codex-provider-exit-suppression && pnpm check:f212-reconciliation-eval && pnpm check:whisper-dispatch && pnpm check:tts-runtime && pnpm check:site-integrity && pnpm check:site-css",
     "check:f290-product-copy": "node --test scripts/check-f290-product-copy.test.mjs && node scripts/check-f290-product-copy.mjs",
     "check:f290-workbench-boundary": "node --test scripts/check-f290-workbench-boundary.test.mjs && node scripts/check-f290-workbench-boundary.mjs",
     "check:design-gate-real-interaction": "node --test scripts/design-gate-real-interaction.test.mjs && node scripts/check-design-gate-claim-evidence.mjs",
@@ -130,10 +130,12 @@
     "check:brand-guard": "node --test scripts/intake-from-opensource.test.mjs scripts/lib/intake-gh-retry.test.mjs",
     "check:site-integrity": "node --test site/site-integrity.test.mjs",
     "check:site-css": "node scripts/build-site-css.mjs --check",
-    "build:site-css": "node scripts/build-site-css.mjs"
+    "build:site-css": "node scripts/build-site-css.mjs",
+    "check:design-md": "node --test scripts/check-design-md.test.mjs && node scripts/check-design-md.mjs"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.4.1",
+    "@google/design.md": "0.4.0",
     "@types/node": "^20.11.0",
     "dependency-cruiser": "^17.3.8",
     "dompurify": "3.2.4",

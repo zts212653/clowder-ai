@@ -1,5 +1,6 @@
 import type { ThreadAttentionGroup } from '@cat-cafe/shared';
 import type { SidebarSnapshotRow } from '@/stores/sidebarProjectionStore';
+import { matchesThreadSearch } from './thread-search';
 import type { SidebarTabId } from './thread-utils';
 
 export interface AttentionCluster {
@@ -120,7 +121,7 @@ export function arrangeAttentionRows(
 }
 
 function memberMatches(member: SidebarSnapshotRow, query: string): boolean {
-  return `${member.title ?? ''} ${member.id} ${member.projectPath}`.toLocaleLowerCase().includes(query);
+  return matchesThreadSearch(member, query);
 }
 
 /** Flatten cluster presentation into fixed-height visual rows so large grouped lists remain virtualizable. */

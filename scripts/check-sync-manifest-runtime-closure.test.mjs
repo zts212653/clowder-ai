@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, extname, join, normalize, relative, resolve, sep } from 'node:path';
 import { describe, it } from 'node:test';
@@ -123,6 +123,21 @@ describe('outbound sync runtime closure', { skip: !isHomeRepo && 'sync manifest 
     );
     assert.ok(excluded.has(privateSkill), 'the home playbook must remain excluded from direct export');
     assert.ok(excluded.has(portableSource), 'the transform source must not leak under its source filename');
+    for (const path of [
+      'cat-cafe-skills/refs/opensource-ops-community-census.md',
+      'cat-cafe-skills/refs/opensource-ops-incidents.md',
+      'scripts/community-census.mjs',
+      'scripts/lib/community-census-github.mjs',
+      'scripts/lib/community-census-report.mjs',
+      'docs/ops/2026-09-05-community-census.raw.json.gz',
+      'docs/ops/2026-09-05-community-census.json',
+      'docs/ops/2026-09-05-community-census.md',
+    ]) {
+      assert.ok(
+        excluded.has(path) || !isExported(path),
+        `${path} is internal operator evidence/tooling, not public product content`,
+      );
+    }
     assert.deepEqual(
       { type: transform?.type, source: transform?.source },
       { type: 'generate', source: portableSource },
@@ -136,6 +151,16 @@ describe('outbound sync runtime closure', { skip: !isHomeRepo && 'sync manifest 
     assert.match(privateText, /Repo Inbox 守门红线/, 'home must retain its deployment-specific maintainer playbook');
     assert.match(portableText, /Server 不替你猜/, 'portable source must own the child-side grounding contract');
     assert.doesNotMatch(portableText, /Repo Inbox 守门红线/, 'portable source must not expose the home-only playbook');
+    for (const tip of capabilityTips) {
+      for (const field of ['sourceRef', 'structureSource', 'bodySource']) {
+        const reference = tip?.[field];
+        if (reference?.path !== privateSkill) continue;
+        assert.ok(
+          portableText.includes(reference.anchor),
+          `${tip.id}.${field} anchor must survive the opensource-ops public transform: ${reference.anchor}`,
+        );
+      }
+    }
     assert.deepEqual(communityWorkflowTip?.structureSource, {
       path: 'docs/features/F116-opensource-ops.md',
       anchor: '场景 B: Inbound PR（社区 PR 评估 + 合入 + 吸收）',
@@ -147,6 +172,54 @@ describe('outbound sync runtime closure', { skip: !isHomeRepo && 'sync manifest 
     assert.match(featureText, /场景 B: Inbound PR（社区 PR 评估 \+ 合入 \+ 吸收）/u);
     assert.match(privateText, /五问/u);
     assert.match(portableText, /五问/u);
+  });
+
+  it('exported opensource-ops registry does not advertise the private community census', () => {
+    const registryPath = 'cat-cafe-skills/manifest.yaml';
+    assert.equal(manifest.transforms.find((entry) => entry.target === registryPath)?.type, 'sanitize');
+    const exportRoot = mkdtempSync(join(tmpdir(), 'community-registry-export-'));
+    try {
+      const target = join(exportRoot, registryPath);
+      mkdirSync(dirname(target), { recursive: true });
+      writeFileSync(target, readFileSync(resolve(ROOT, registryPath)));
+      execFileSync('perl', ['-pi', resolve(ROOT, 'scripts/_sanitize-rules.pl'), target], {
+        env: { ...process.env, CAT_CAFE_SANITIZE_ROOT: exportRoot },
+      });
+      const skill = YAML.parse(readFileSync(target, 'utf8')).skills['opensource-ops'];
+      assert.ok(skill, 'portable maintainer grounding must remain discoverable');
+      assert.doesNotMatch(JSON.stringify(skill), /census|社区积压盘点/i);
+    } finally {
+      rmSync(exportRoot, { recursive: true, force: true });
+    }
+  });
+
+  // Home-only governance regressions run in the existing check:env-ports lane.
+  const read = (path) => readFileSync(resolve(ROOT, path), 'utf8');
+
+  it('child-owned grounding is consistent with the actual F128 tool contract', () => {
+    const skill = read('cat-cafe-skills/opensource-ops/SKILL.md');
+    const tools = read('packages/mcp-server/src/tools/callback-tools.ts');
+    assert.ok(/does NOT infer external PR identity, author role, maintainer policy, or auto-inject/.test(tools));
+    assert.doesNotMatch(skill, /服务端都会把[\s\S]{0,100}五问/);
+    assert.match(skill, /子 thread[^。]*加载/);
+  });
+
+  it('patch classification never grants third-party merge authority absent operator evidence', () => {
+    const skill = read('cat-cafe-skills/opensource-ops/SKILL.md');
+    const inbound = read('cat-cafe-skills/refs/opensource-ops-inbound-pr.md');
+    const executor = read('scripts/clowder-merge-execution.mjs');
+    assert.match(executor, /authorization-ref/);
+    for (const doc of [skill, inbound]) {
+      assert.doesNotMatch(doc, /Patch[^\n]*(?:自主 merge|自主\s*\/)|条件同时满足才可自主 merge/);
+      assert.match(doc, /第三方 PR[^。\n]*operator[^。\n]*授权/);
+      assert.match(doc, /已(?:有|获)[^。\n]*授权/);
+    }
+  });
+
+  it('an open branch is coordination, not proof of a failed public sync candidate', () => {
+    const skill = read('cat-cafe-skills/opensource-ops/SKILL.md');
+    assert.match(skill, /open PR[^。\n]*overlap\/rebase[^。\n]*不[^。\n]*full-sync/);
+    assert.match(skill, /已落[^。\n]*public delta[^。\n]*candidate[^。\n]*operator/);
   });
 
   it('keeps public technical-narrative skills independent of the home-only study note', () => {

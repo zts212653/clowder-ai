@@ -39,6 +39,7 @@ export function CollectiveClient() {
           error={snapshot.error}
           onBootstrap={client.bootstrap}
           onAuthenticate={client.authenticate}
+          onConfigureProvider={client.configureProvider}
           onCreateCollective={client.createCollective}
         />
       )}

@@ -184,6 +184,17 @@ const STREAM_START_TIMEOUT_MS = 5_000;
 const INVOCATION_STARTUP_WATCHDOG_MS = 180_000;
 const QUEUE_COMPLETION_WATCHDOG_MS = 5_000;
 
+function currentRetryableAttemptId(message: StoredMessage, targetCatId: string): string | undefined {
+  const target = message.queueCustody
+    ? projectQueueReceipt(message.queueCustody).targets.find((candidate) => candidate.catId === targetCatId)
+    : undefined;
+  const latest = target?.attempts?.at(-1);
+  if (target?.state !== 'failed' || target.retryable === false || !latest) return undefined;
+  return latest.state === 'failed' || (latest.state === 'cancelled' && latest.terminalReason === 'invocation_cancelled')
+    ? latest.id
+    : undefined;
+}
+
 type ResolvedBundleAdmission = Extract<MessageSelectionAdmissionResult, { status: 'resolved' }>;
 
 function buildMessageBundleSummary(admission: ResolvedBundleAdmission): string {
@@ -484,6 +495,51 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
       gameAutoPlayer.stopAllLoops();
     });
   }
+
+  /**
+   * F247: hydrate the optimistic-concurrency fence after the connector notice
+   * arrives. The read is owner-scoped and runs the same transient authority
+   * preflight as the mutation; it never creates or advances Queue custody.
+   */
+  app.get<{ Params: { messageId: string; targetCatId: string } }>(
+    '/api/messages/:messageId/queue-targets/:targetCatId/retry-authority',
+    async (request, reply) => {
+      const userId = resolveUserId(request, { defaultUserId: 'default-user' });
+      if (!userId) {
+        reply.status(401);
+        return { error: 'Identity required (session cookie or X-Cat-Cafe-User header)' };
+      }
+      const retryAuthorityPreflight = opts.retryAuthorityPreflight;
+      if (!retryAuthorityPreflight) {
+        reply.status(503);
+        return { error: 'Queue retry is temporarily unavailable', code: 'QUEUE_RETRY_UNAVAILABLE' };
+      }
+      const message = await opts.messageStore.getById(request.params.messageId);
+      if (!message || message.userId !== userId || !message.queueCustody) {
+        reply.status(404);
+        return { error: 'Queued message was not found', code: 'QUEUE_MESSAGE_NOT_FOUND' };
+      }
+      const authority = await retryAuthorityPreflight.preflight({
+        message,
+        requestingUserId: userId,
+        targetCatId: request.params.targetCatId,
+      });
+      if (!authority.ok) {
+        reply.status(409);
+        return {
+          error: 'This target no longer has current retry authority',
+          code: 'QUEUE_RETRY_AUTHORITY_STALE',
+          reason: authority.reason,
+        };
+      }
+      const attemptId = currentRetryableAttemptId(message, request.params.targetCatId);
+      if (!attemptId) {
+        reply.status(409);
+        return { error: 'This target is no longer retryable', code: 'QUEUE_TARGET_NOT_RETRYABLE' };
+      }
+      return { attemptId };
+    },
+  );
 
   /**
    * F1308: retry one visible failed target without cloning or re-sending the
@@ -970,26 +1026,25 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
     // Whisper → check target cat's slot (side-dispatch to idle cat)
     // Broadcast with explicit @mention → any target busy = queue (P1 review fix)
     // Broadcast without @mention → thread-level check (any active → queue)
-    // #555: Cover the gap between one invocation ending (tracker cleared) and the
-    // next starting from queue (tracker not yet registered).
-    // Whisper / @mention use cat-specific isCatBusy; broadcast uses active execution,
-    // not queued leftovers, to avoid enqueue-only dead ends.
+    // #555: Cover the pre-start gap with QueueProcessor's live slot reservation.
+    // Queued leftovers are not an execution owner and cannot justify admitting
+    // another message behind a trigger that no longer exists.
     const hasActive = (() => {
       if (!opts.invocationTracker) {
         return opts.queueProcessor?.hasActiveExecution?.(resolvedThreadId) ?? false;
       }
       if (whisperVisibility === 'whisper' && primaryCat !== 'unknown') {
         return (
-          opts.invocationTracker.has(resolvedThreadId, primaryCat) ||
-          (opts.queueProcessor?.isCatBusy?.(resolvedThreadId, primaryCat) ?? false)
+          opts.queueProcessor?.hasActiveExecutionForCat?.(resolvedThreadId, primaryCat) ??
+          opts.invocationTracker.has(resolvedThreadId, primaryCat)
         );
       }
       if (hasMentions) {
         return targetCats.some(
           (cat) =>
             cat !== 'unknown' &&
-            (opts.invocationTracker!.has(resolvedThreadId, cat) ||
-              (opts.queueProcessor?.isCatBusy?.(resolvedThreadId, cat) ?? false)),
+            (opts.queueProcessor?.hasActiveExecutionForCat?.(resolvedThreadId, cat) ??
+              opts.invocationTracker!.has(resolvedThreadId, cat)),
         );
       }
       return (

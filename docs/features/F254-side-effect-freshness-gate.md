@@ -5,8 +5,8 @@ related_decisions: [040, 041, 042]
 topics: [freshness, glass-box, supplement, inbox-notice, runtime-descriptor, side-effect-gate, codex-app-server, lifecycle, liveness, ax]
 doc_kind: spec
 created: 2026-06-27
-updated: 2026-08-28
-tips_exempt: historical protocol-contract correction only; no new user capability surface
+updated: 2026-09-05
+tips_exempt: Remote-compaction capacity recovery continues the already-authorized task automatically; it adds no user action, setting, or capability to discover.
 ---
 
 # F254: Side-Effect Freshness Gate — 副作用出口 freshness 拦截
@@ -788,13 +788,15 @@ Phase E 不再增加另一层“提醒猫去读”的 fallback。它改变输出
   - [x] **AC-D14g Provider-neutral diagnostics**：Codex app-server failure 不进入 Claude-only structured
     diagnostic path；已见 disconnect wording 分类为 network error。PR #3082（`7dd7a4d51`）。
   - [x] **AC-D14h Capacity checkpoint continuation**：`turn.completed(status=failed)` 且错误精确等于 provider
-    model-capacity terminal 时，允许在同一 native thread 开一个有界恢复 turn，但不得发送通用“继续”。pre-tool
+    model-capacity terminal（含已取证的 `Error running remote compact task: ` 前缀）时，允许在同一 native thread 开一个有界恢复 turn，但不得发送通用“继续”。pre-tool
     恢复绑定 exact interrupted turn；post-tool 还必须同时具备 Clowder AI child invocation + prompt message IDs、
-    最新 `turn/plan/updated` 与逐 item terminal 账本。任一工具仍 in-flight 或 checkpoint 不完整即 fail closed；
+    本轮进度（最新 `turn/plan/updated` 或本 invocation 已完成的 agent progress message）与逐 item terminal 账本。
+    native plan 是可选事件，不再是唯一进度来源；没有任何进度、任一工具仍 in-flight 或 checkpoint 不完整即 fail closed；
     续接语义是 at-least-once，prompt 强制 verify-before-redo，不扩大 cwd/sandbox/approval/tool/授权边界。
-    中间重试留在 status channel；`blocked_inflight_tool` / `checkpoint_incomplete` / `budget_exhausted` 各保留
+    恢复阶段的原生 resume 拒绝或 identity mismatch 必须停止，不能携带空恢复输入换到新 thread。早到的容量 error notice
+    不单独授权重试；它由权威终态归并，成功恢复后不发布。中间重试留在 status channel；`blocked_inflight_tool` / `checkpoint_incomplete` / `budget_exhausted` 各保留
     一张用户可见断点卡。AC-D14e 对人工 interrupt / timeout 继续成立，本条只处理 provider 已给出的 failed 终态。
-    PR #3285（`65ef23d17`）。
+    按 operator source `0001788622146733-000382-aea9fce5` 收正可选计划、提前通知与 exact-resume 边界。
 
 > **AC-D14 lifecycle projection stateful-object gate**：canonical read 保留 parent execution owner 与 child turn
 > identity 两套坐标；tracker 只能在其 `getUserId(threadId, catId)` 等于本次 request user 时提供 lifecycle owner。

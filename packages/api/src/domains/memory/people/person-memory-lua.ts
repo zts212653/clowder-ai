@@ -47,6 +47,7 @@ if receipt.ownerUserId ~= ARGV[1] or receipt.receiptId ~= ARGV[3] then return 'C
 if receipt.state ~= 'claimed' or receipt.claimId ~= ARGV[5] then return 'CONFLICT' end
 if tonumber(receipt.claimUntil or 0) <= tonumber(ARGV[7]) then return 'CONFLICT' end
 if receipt.dedupeHash ~= ARGV[6] then return 'CONFLICT' end
+if receipt.processorInvocationId ~= ARGV[11] then return 'CONFLICT' end
 if candidate.deferredReceiptClaimId == ARGV[5] then return 'REPLAYED' end
 if candidate.deferredReceiptClaimId ~= ARGV[4] then return 'CONFLICT' end
 if candidateRaw ~= ARGV[8] then return 'CONFLICT' end
@@ -87,6 +88,7 @@ if candidate.state ~= 'staged' then return 'CONFLICT' end
 if receipt.state ~= 'claimed' or receipt.claimId ~= ARGV[6] then return 'CONFLICT' end
 if tonumber(receipt.claimUntil or 0) <= tonumber(ARGV[2]) then return 'CONFLICT' end
 if receipt.receiptId ~= ARGV[5] or receipt.dedupeHash ~= ARGV[7] then return 'CONFLICT' end
+if receipt.processorInvocationId ~= ARGV[11] then return 'CONFLICT' end
 if redis.call('GET', KEYS[8]) ~= ARGV[8] then return 'CONFLICT' end
 if redis.call('SISMEMBER', KEYS[7], ARGV[5]) ~= 1 then return 'CONFLICT' end
 redis.call('SET', KEYS[1], ARGV[1])

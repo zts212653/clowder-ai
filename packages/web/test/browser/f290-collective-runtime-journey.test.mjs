@@ -1,16 +1,18 @@
 import assert from 'node:assert/strict';
-import { spawn } from 'node:child_process';
 import { mkdtemp, rm } from 'node:fs/promises';
-import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
-import { fileURLToPath } from 'node:url';
 import { CollectiveServiceStore, startCollectiveServer } from '../../../collective-service/dist/index.js';
 import { chromium } from '../../../ppt-forge/node_modules/playwright/index.mjs';
-
-const WEB_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
-const REPO_ROOT = path.resolve(WEB_ROOT, '../..');
+import {
+  availablePort,
+  browserSessionToken,
+  startNext,
+  stopChild,
+  waitFor,
+  waitForHttp,
+} from './f290-runtime-journey.harness.mjs';
 
 test(
   'F290 owner/member direct journey and Clowder AI launch surface share one real Service-backed Client',
@@ -27,7 +29,8 @@ test(
       humanAuthProvider: fakeAuthProvider(),
       humanAuthRedirectUri: `${serviceUrl}/api/auth/github/callback`,
     });
-    const service = await startCollectiveServer({
+    let activeStore = opened.store;
+    let service = await startCollectiveServer({
       store: opened.store,
       host: '127.0.0.1',
       port: servicePort,
@@ -83,10 +86,38 @@ test(
       await memberPage.getByPlaceholder('发消息到 # general').fill('Member joined the same Collective');
       await memberPage.getByRole('button', { name: '发送', exact: true }).click();
       await memberPage.getByText('Member joined the same Collective', { exact: true }).waitFor();
+      await ownerPage.getByText('Member joined the same Collective', { exact: true }).waitFor();
       await memberPage.screenshot({ path: path.join(evidenceDirectory, 'member-direct.png'), fullPage: true });
       const memberSessionToken = await browserSessionToken(memberPage, serviceUrl);
 
-      const hostApi = await mockHostApi(memberContext, serviceUrl, opened.store.serviceInstanceId);
+      await Promise.all([
+        ownerPage.reload({ waitUntil: 'networkidle' }),
+        memberPage.reload({ waitUntil: 'networkidle' }),
+      ]);
+      await ownerPage.getByText('Member joined the same Collective', { exact: true }).waitFor();
+      await memberPage.getByText('Owner browser message', { exact: true }).waitFor();
+
+      await service.close();
+      const reopened = await CollectiveServiceStore.open({
+        dataDirectory,
+        humanAuthProvider: fakeAuthProvider(),
+        humanAuthRedirectUri: `${serviceUrl}/api/auth/github/callback`,
+      });
+      activeStore = reopened.store;
+      service = await startCollectiveServer({
+        store: activeStore,
+        host: '127.0.0.1',
+        port: servicePort,
+        allowedHostOrigins: [hostUrl],
+      });
+      await Promise.all([
+        ownerPage.reload({ waitUntil: 'networkidle' }),
+        memberPage.reload({ waitUntil: 'networkidle' }),
+      ]);
+      await ownerPage.getByText('Member joined the same Collective', { exact: true }).waitFor();
+      await memberPage.getByText('Owner browser message', { exact: true }).waitFor();
+
+      const hostApi = await mockHostApi(memberContext, serviceUrl, activeStore.serviceInstanceId);
       await memberPage.goto(`${hostUrl}/collective`, { waitUntil: 'networkidle' });
       const serviceInput = memberPage.getByLabel('Collective Service 地址');
       if (await serviceInput.isVisible().catch(() => false)) {
@@ -103,14 +134,14 @@ test(
       await frame.getByRole('button', { name: '连接此 Café' }).click();
       await waitFor(() => hostApi.pairRequests.length === 1, 'Host must receive the member pairing intent');
       assert.equal(hostApi.pairRequests[0].serviceUrl, serviceUrl);
-      assert.equal(hostApi.pairRequests[0].intent.serviceInstanceId, opened.store.serviceInstanceId);
+      assert.equal(hostApi.pairRequests[0].intent.serviceInstanceId, activeStore.serviceInstanceId);
       await memberPage.getByText('Café 连接在线').waitFor();
       await memberPage.screenshot({ path: path.join(evidenceDirectory, 'host-embedded-member.png'), fullPage: true });
 
-      const ownerProjection = await opened.store.getHumanProjection(ownerAuth.sessionToken());
-      const memberProjection = await opened.store.getHumanProjection(memberSessionToken);
+      const ownerProjection = await activeStore.getHumanProjection(ownerAuth.sessionToken());
+      const memberProjection = await activeStore.getHumanProjection(memberSessionToken);
       assert.equal(ownerProjection.collectives[0].collectiveId, memberProjection.collectives[0].collectiveId);
-      const events = await opened.store.listEventsForHuman(
+      const events = await activeStore.listEventsForHuman(
         ownerAuth.sessionToken(),
         ownerProjection.collectives[0].collectiveId,
       );
@@ -124,7 +155,7 @@ test(
           {
             serviceUrl,
             hostUrl,
-            serviceInstanceId: opened.store.serviceInstanceId,
+            serviceInstanceId: activeStore.serviceInstanceId,
             collectiveId: ownerProjection.collectives[0].collectiveId,
             clientBuildId: 'collective-client-v2',
             ownerHumanId: ownerProjection.human.humanId,
@@ -247,79 +278,20 @@ async function mockHostApi(context, serviceUrl, serviceInstanceId) {
       await route.fulfill({
         status: 200,
         contentType: 'application/json',
-        body: JSON.stringify({ runtimeStatus: 'active', connections: connected ? [connected] : [] }),
+        body: JSON.stringify({
+          runtimeStatus: 'active',
+          connections: connected ? [connected] : [],
+          localService: {
+            state: 'ready',
+            serviceUrl,
+            dataDirectory: '/tmp/f290-browser-managed-service',
+            serviceInstanceId,
+          },
+        }),
       });
       return;
     }
     await route.fulfill({ status: 404, contentType: 'application/json', body: '{}' });
   });
   return { pairRequests };
-}
-
-async function browserSessionToken(page, serviceUrl) {
-  return page.evaluate(
-    ({ origin, key }) => {
-      const token = window.sessionStorage.getItem(`${key}:${origin}`);
-      if (!token) throw new Error('Missing browser Service session');
-      return token;
-    },
-    { origin: serviceUrl, key: 'collective-session' },
-  );
-}
-
-function startNext(port) {
-  return spawn('pnpm', ['--filter', '@cat-cafe/web', 'exec', 'next', 'start', '-p', String(port)], {
-    cwd: REPO_ROOT,
-    env: {
-      ...process.env,
-      NEXT_TELEMETRY_DISABLED: '1',
-      NODE_ENV: 'production',
-    },
-    stdio: ['ignore', 'pipe', 'pipe'],
-  });
-}
-
-async function waitForHttp(url, child) {
-  const output = [];
-  child.stdout.on('data', (chunk) => output.push(String(chunk)));
-  child.stderr.on('data', (chunk) => output.push(String(chunk)));
-  for (let attempt = 0; attempt < 160; attempt += 1) {
-    if (child.exitCode !== null)
-      throw new Error(`Next exited early (${child.exitCode}): ${output.join('').slice(-4000)}`);
-    const response = await fetch(url).catch(() => undefined);
-    if (response?.ok) return;
-    await new Promise((resolve) => setTimeout(resolve, 250));
-  }
-  throw new Error(`Timed out waiting for ${url}: ${output.join('').slice(-4000)}`);
-}
-
-async function waitFor(predicate, failure) {
-  for (let attempt = 0; attempt < 80; attempt += 1) {
-    if (predicate()) return;
-    await new Promise((resolve) => setTimeout(resolve, 50));
-  }
-  throw new Error(failure);
-}
-
-async function stopChild(child) {
-  if (child.exitCode !== null) return;
-  child.kill('SIGTERM');
-  await Promise.race([
-    new Promise((resolve) => child.once('exit', resolve)),
-    new Promise((resolve) => setTimeout(resolve, 5_000)),
-  ]);
-  if (child.exitCode === null) child.kill('SIGKILL');
-}
-
-function availablePort() {
-  return new Promise((resolve, reject) => {
-    const server = createServer();
-    server.once('error', reject);
-    server.listen(0, '127.0.0.1', () => {
-      const address = server.address();
-      assert.ok(address && typeof address === 'object');
-      const { port } = address;
-      server.close((error) => (error ? reject(error) : resolve(port)));
-    });
-  });
 }

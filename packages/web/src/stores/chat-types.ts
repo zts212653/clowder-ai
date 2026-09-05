@@ -9,6 +9,7 @@ import type {
   ProviderSemanticEvent,
   PublishedFreshnessAnnotation,
   QueueMessageReceipt,
+  QueueRecoveryAction,
   ReplyPreview,
   SchedulerMessageExtra,
   TurnExecutionMessageProjection,
@@ -22,7 +23,7 @@ export type { A2ARoutingMode, A2ARoutingProjection, CliDiagnostics } from '@cat-
 
 import type { A2ARoutingProjection } from '@cat-cafe/shared';
 
-export type ThreadSystemKind = 'connector_hub' | 'eval_domain' | 'cat_bedroom';
+export type ThreadSystemKind = 'connector_hub' | 'eval_domain' | 'cat_bedroom' | 'memory_ops';
 
 export type { FileContent, ImageContent, MessageContent, TextContent } from '@cat-cafe/shared';
 
@@ -818,6 +819,8 @@ export interface QueueEntry {
   };
   /** F264: same durable receipt projection used by the terminal timeline bubble. */
   queueReceipt?: QueueMessageReceipt;
+  /** Server-owned executable recovery projection; absent only on legacy cached snapshots. */
+  recoveryActions?: QueueRecoveryAction[];
 }
 
 /** #706: Typed composer draft for recall-edit and cross-feature insert.

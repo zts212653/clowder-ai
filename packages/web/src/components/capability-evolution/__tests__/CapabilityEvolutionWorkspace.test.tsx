@@ -99,17 +99,19 @@ describe('F311 Capability Evolution Workspace', () => {
     );
   }
 
-  it('leads with what the system is doing, whether the user needs to act, and the next step', async () => {
+  it('shows a product status first and keeps setup mechanics below the selected capability', async () => {
     apiFetchMock.mockResolvedValue(new Response(JSON.stringify({ programs: [projection] }), { status: 200 }));
     await renderWorkspace();
 
     expect(container.textContent).toContain('能力进化');
-    expect(container.textContent).toContain('投资人路演表达能力');
-    expect(container.textContent).toContain('建制中');
-    expect(container.textContent).toContain('继续自动建制');
+    expect(container.textContent).toContain('投资人路演效果');
+    expect(container.textContent).toContain('配置中');
+    expect(container.textContent).toContain('1 项评估条件待完成');
     expect(container.textContent).not.toContain('F311');
     expect(container.textContent).not.toContain('Measurement certificate');
     expect(container.textContent).not.toContain('capability:f311-investor-roadshow-expression');
+    expect(container.textContent).not.toContain('能力进化目标');
+    expect(container.textContent).not.toContain('下一步：');
 
     await act(async () => {
       container
@@ -119,12 +121,14 @@ describe('F311 Capability Evolution Workspace', () => {
         ?.click();
     });
 
-    const summary = container.querySelector('[data-testid="capability-evolution-user-summary"]');
-    expect(summary?.textContent).toContain('系统正在');
-    expect(summary?.textContent).toContain('你现在无需');
-    expect(summary?.textContent).toContain('下一步');
-    expect(summary?.textContent).not.toContain('F311');
-    expect(summary?.textContent).not.toContain('Measurement certificate');
+    const setup = container.querySelector('[data-testid="capability-evolution-setup"]');
+    expect(setup?.textContent).toContain('评估配置');
+    expect(setup?.textContent).toContain('1 项待完成');
+    expect(setup?.textContent).toContain('接好评估方式');
+    expect(setup?.textContent).toContain('评估体系');
+    expect(setup?.textContent).not.toContain('F267');
+    expect(setup?.textContent).not.toContain('Measurement certificate');
+    expect(container.textContent).not.toContain('你现在是否需要行动');
 
     const technical = container.querySelector<HTMLDetailsElement>(
       '[data-testid="capability-evolution-technical-details"]',
@@ -140,22 +144,38 @@ describe('F311 Capability Evolution Workspace', () => {
     {
       lifecycle: 'paused',
       nextAction: { code: 'resume_program', label: '恢复 Program' },
-      systemStatus: '进化已暂停，正在等待恢复',
-      userAction: '需要你恢复后，系统才会继续推进',
+      status: '已暂停',
+      conclusion: '这项能力已暂停，现有记录仍然保留。',
+      blockers: [
+        {
+          code: 'program_paused',
+          message: 'Program 已暂停；生命周期与历史仍永久保留。',
+          ownerFeatureId: 'F311',
+        },
+      ],
     },
     {
       lifecycle: 'needs_expert',
       nextAction: { code: 'bind_expert', label: '绑定缺失角色' },
-      systemStatus: '系统正在等待补齐所需专家',
-      userAction: '需要你选择或绑定合适的专家',
+      status: '等待专家',
+      conclusion: '需要专业判断，当前进度已挂起。',
+      blockers: [
+        {
+          code: 'expert_required',
+          message: '当前 claim 缺少合格的 domain_owner，只挂起这条 Program。',
+          ownerFeatureId: 'F267',
+          ownerStateRef: 'expert-assignment:domain-owner',
+        },
+      ],
     },
     {
       lifecycle: 'terminal',
       nextAction: { code: 'inspect_history', label: '查看完整生命周期' },
-      systemStatus: '这一轮进化已结束，历史记录已保留',
-      userAction: '无需继续推进；需要时可以查看记录',
+      status: '已完成',
+      conclusion: '本轮已经结束，结论与证据已保留。',
+      blockers: [],
     },
-  ])('keeps the three-question summary honest when lifecycle is $lifecycle', async (scenario) => {
+  ])('keeps lifecycle $lifecycle in product language without inventing an action', async (scenario) => {
     apiFetchMock.mockResolvedValue(
       new Response(
         JSON.stringify({
@@ -175,6 +195,7 @@ describe('F311 Capability Evolution Workspace', () => {
                       decision: 'no_change',
                     }))
                   : projection.cycles,
+              blockers: scenario.blockers,
               nextAction: scenario.nextAction,
             },
           ],
@@ -192,10 +213,91 @@ describe('F311 Capability Evolution Workspace', () => {
         ?.click();
     });
 
-    const summary = container.querySelector('[data-testid="capability-evolution-user-summary"]');
-    expect(summary?.textContent).toContain(scenario.systemStatus);
-    expect(summary?.textContent).toContain(scenario.userAction);
-    expect(summary?.textContent).toContain(scenario.nextAction.label);
+    expect(container.textContent).toContain(scenario.status);
+    expect(container.textContent).toContain(scenario.conclusion);
+    if (scenario.lifecycle === 'terminal') {
+      expect(container.querySelector('[data-testid="capability-evolution-conclusion"]')).not.toBeNull();
+    } else {
+      expect(container.querySelector('[data-testid="capability-evolution-lifecycle-status"]')).not.toBeNull();
+      expect(container.querySelector('[data-testid="capability-evolution-setup"]')).toBeNull();
+      expect(container.textContent).not.toContain('补齐一项评估条件');
+      expect(container.textContent).not.toContain('完成后才会开始观测');
+    }
+    expect(container.textContent).not.toContain(scenario.nextAction.label);
+  });
+
+  it('renders the three real capabilities as independent rows with their own state', async () => {
+    const ownerRef = (ownerStateRef: string) => ({ ownerFeatureId: 'F311', ownerStateRef });
+    const program = (id: string, ownerStateRef: string, stage: string, blockers: typeof projection.blockers) => {
+      const readyRefs =
+        stage === 'constituting'
+          ? {}
+          : {
+              certificates: {
+                goal: ownerRef(`goal:${id}`),
+                measurement: ownerRef(`measurement:${id}`),
+                economic: ownerRef(`economic:${id}`),
+              },
+              valueOwnerRef: ownerRef(`value-owner:${id}`),
+              measurementRoleRefs: {
+                observer: ownerRef(`observer:${id}`),
+                domainOwner: ownerRef(`domain-owner:${id}`),
+                consumer: ownerRef(`consumer:${id}`),
+                calibrator: ownerRef(`calibrator:${id}`),
+              },
+            };
+      return {
+        ...projection,
+        program: {
+          ...projection.program,
+          programId: id,
+          objectRef: { ownerFeatureId: 'F311', ownerStateRef },
+          stage,
+          ...readyRefs,
+        },
+        cycles: projection.cycles.map((cycle) => ({ ...cycle, programId: id, stage })),
+        blockers,
+      };
+    };
+    apiFetchMock.mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          programs: [
+            program(
+              'evolution-program:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+              'capability:development-process-harness-effectiveness',
+              'instrumenting',
+              [projection.blockers[0], { ...projection.blockers[0], code: 'promotion_holdout_missing' }],
+            ),
+            program(
+              'evolution-program:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
+              'capability:microduck-walking-stability',
+              'constituting',
+              [projection.blockers[0]],
+            ),
+            program(
+              'evolution-program:cccccccccccccccccccccccccccccccc',
+              'capability:f311-investor-roadshow-expression',
+              'observing',
+              [],
+            ),
+          ],
+        }),
+        { status: 200 },
+      ),
+    );
+
+    await renderWorkspace();
+
+    const rows = [...container.querySelectorAll('[data-testid^="capability-evolution-program-"]')];
+    expect(rows).toHaveLength(3);
+    expect(rows[0]?.textContent).toContain('研发协作改进');
+    expect(rows[0]?.textContent).toContain('2 项评估条件待完成');
+    expect(rows[1]?.textContent).toContain('Microduck 行走稳定性');
+    expect(rows[1]?.textContent).toContain('1 项评估条件待完成');
+    expect(rows[2]?.textContent).toContain('投资人路演效果');
+    expect(rows[2]?.textContent).toContain('正在收集本轮证据');
+    expect(container.textContent).not.toContain('三个阶段');
   });
 
   it('F305 contract: shows the bound destination, then confirms the draft handoff without mechanism copy', async () => {
@@ -305,7 +407,7 @@ describe('F311 Capability Evolution Workspace', () => {
         )
         ?.click();
     });
-    const manage = [...container.querySelectorAll('button')].find((button) => button.textContent === '管理生命周期');
+    const manage = [...container.querySelectorAll('button')].find((button) => button.textContent === '管理');
     if (!manage) throw new Error('lifecycle entry missing from Program detail');
     act(() => manage.click());
 

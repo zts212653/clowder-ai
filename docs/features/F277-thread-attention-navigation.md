@@ -354,6 +354,17 @@ operator 亲自看过可操作原型并签字前，不进入 Phase B/C 实现；
 
 ### Supporting Journeys
 
+#### Search Group Organizing（2026-09-05 operator 授权）
+
+从置顶/最近/项目等分类搜索 → 数量栏同时说明当前分类匹配与全部普通对话匹配 →
+点击“整理全部 N 条” → 原处显示完整候选（含未置顶），勾选、命名新 Group 或选择已有 Group →
+一次确认写入。已有其他 Group 的成员默认不选，主动选中时说明来源；取消/失败保留现场。
+成功后展开目标 Group 并提供一次有前置条件的撤销；后来发生的 membership 改动不能被旧撤销覆盖。
+pin、label、project、title 与出生关系不变，新对话不自动吸收。搜索范围是当前用户完整普通对话集合中的
+标题/项目/ID 匹配，不能宣称正文提及检索或全部 feature 归属；完整 F 号避免匹配更长编号。
+首次搜索多条结果时显示可关闭的操作提示；同一文案进入 capability tip inventory。
+授权 source：`[thread-id]#0001788616514255-000177-bef93871`，author `codex-astra`。
+
 | ID | Scope unit | Actor | Flow | Evidence |
 |----|------------|-------|------|----------|
 | S1 | proposal | 猫 + You | F128 提议新 thread → 声明/修改 placement mode → 批准后双方看到同一出生契约 | proposal + context fixture |
@@ -454,10 +465,17 @@ operator 亲自看过可操作原型并签字前，不进入 Phase B/C 实现；
   滚动不被长按计时器劫持。鼠标、touch/pointer、键盘/读屏菜单路径在真实生产 `ThreadItem` 壳中
   产生相同 canonical group command；dev preview 不维护平行视觉实现。
 
-#### 当前实现证据（2026-09-02）
+#### 当前实现证据（2026-09-05）
+
+- [x] AC-C16: 任意 Sidebar 分类的搜索均提供完整普通对话匹配的批量入口；置顶下可收进未置顶匹配，系统/Hub 不入组，完整 F 号不误配更长编号。
+- [x] AC-C17: 原地多选、默认名、加入已有 Group、跨组来源提示与一次确认；取消不写入，失败保留选择/名称并可重试。
+- [x] AC-C18: 批量写入复用 owner-scoped metadata writer；保留 Group/pin 的独立真相，刷新后成员及别名恢复。
+- [x] AC-C19: 成功反馈提供前置条件保护的撤销；源组完整恢复，后续 membership 改动或成员消失时诚实拒绝覆盖。
+- [x] AC-C20: 搜索现场提示可关闭且持久记住；capability tip 教会同一真实操作，具有非作者 review 与真实浏览器证据。
 
 | 已闭合 AC | 证据 |
 |-----------|------|
+| C16–C20 | PR #4355，merge `9d410dde42028e08072294c59f83d9aac82d47b2`；API 34/34、生产 Sidebar 188/188、跨包类型检查与真实 Chromium 1/1。Terra R3 typed approval `0001788631632960-000655-779128e4`；四个作者提交 rebase 后 patch-equivalent，operator `0001788635490984-000737-6552439b` 明确授权手动相关检查后直接合入。旧 full gate 取消，未计为 PASS。 |
 | A4-L1 / A7 / A9 | operator source `0001787499735819-000062-789a686e`；真实 `ThreadItem` 集成测试 `thread-sidebar-attention-clusters.test.tsx` |
 | B1 / B4 | `proposal-flow.test.js`、`proposal-enrich-header.test.js`、`propose-thread-work-mode.test.js`、`thread-relation-projection.test.js` |
 | B2 | `thread-branch.test.js` + `thread-relation-projection.test.js` |

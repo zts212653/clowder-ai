@@ -5,7 +5,9 @@ import {
   resolveBuiltinClientForProvider,
   resolveByAccountRef,
   resolveForClient,
+  validateRuntimeProviderBinding,
 } from '../../../../../../config/account-resolver.js';
+import { AccountStoreVerdictError } from '../../../../../../config/account-store-format.js';
 import { resolveBoundAccountRefForCat } from '../../../../../../config/cat-account-binding.js';
 import type { AcpVariantConfig } from '../../../../../../config/cat-config-loader.js';
 import { resolveContextCapacity } from '../../../../../../config/context-capacity.js';
@@ -287,7 +289,18 @@ export async function createAcpServiceForConfig(
   }
 
   const bootstrap = resolveAcpBootstrap(projectRoot, profileId, acpConfig, effectiveModel);
-  const accountContext = resolveAcpAccount(bootstrap.projectRoot, config);
+  let accountContext: AcpAccountContext;
+  try {
+    accountContext = resolveAcpAccount(bootstrap.projectRoot, config);
+  } catch (error) {
+    if (!(error instanceof AccountStoreVerdictError)) throw error;
+    return skipAcpProfile(
+      input,
+      'rejected-account-binding',
+      { catId, profileId, reason: error.message },
+      'ACP registry sync skipped member because its account could not be adjudicated',
+    );
+  }
   if (accountContext.accountRef && !accountContext.account) {
     return skipAcpProfile(
       input,
@@ -295,6 +308,17 @@ export async function createAcpServiceForConfig(
       { catId, profileId, accountRef: accountContext.accountRef },
       'ACP registry sync skipped member because bound accountRef could not be resolved',
     );
+  }
+  if (accountContext.account) {
+    const error = validateRuntimeProviderBinding(config.clientId, accountContext.account, effectiveModel);
+    if (error) {
+      return skipAcpProfile(
+        input,
+        'incompatible-account-binding',
+        { catId, profileId, accountRef: accountContext.accountRef, error },
+        'ACP registry sync skipped member because account identity is incompatible with its destination',
+      );
+    }
   }
   const spawn = await prepareAcpSpawnContext(effectiveInput, bootstrap, accountContext);
   if (!spawn) return null;

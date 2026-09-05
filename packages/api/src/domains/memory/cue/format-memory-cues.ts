@@ -1,5 +1,7 @@
 import type { CueEnvelopeV1 } from '@cat-cafe/shared';
 import { estimateTokens } from '../../../utils/token-counter.js';
+import { EXPLICIT_APPROVED_TASTE_SOURCE_ANCHOR_PREFIX } from './ExplicitApprovedTasteTriggerCatalog.js';
+import { TASTE_TASK_BUNDLE_SOURCE_ANCHOR_PREFIX } from './TasteTaskBundleCatalog.js';
 
 export interface FormattedMemoryCues {
   cues: CueEnvelopeV1[];
@@ -8,7 +10,13 @@ export interface FormattedMemoryCues {
 }
 
 function explicitTasteAction(cue: CueEnvelopeV1): string[] {
-  return cue.resolverFamily === 'taste' && cue.source.anchor.startsWith('taste-vignette:')
+  if (cue.resolverFamily !== 'taste') return [];
+  if (cue.source.anchor.startsWith(TASTE_TASK_BUNDLE_SOURCE_ANCHOR_PREFIX)) {
+    return [
+      'Action: Drill this exact approved source; record applied/dismissed, or preserve an explicit unconfirmed row in task evidence.',
+    ];
+  }
+  return cue.source.anchor.startsWith(EXPLICIT_APPROVED_TASTE_SOURCE_ANCHOR_PREFIX)
     ? ['Action: Drill before responding; record applied only after satisfying the typed application contract.']
     : [];
 }

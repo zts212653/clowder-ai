@@ -13,7 +13,7 @@ design_gate_claim_contracts: []
 
 # F290: AI-native Collective — 多人·多 Agent 共同世界
 
-> **Status**: implementation / local self-host activation blocked on provider onboarding closure
+> **Status**: implementation / provider onboarding landed in PR #4296; local activation awaits real GitHub UAT
 > **Owner**: 小太阳·Maine Coon (@codex-sol, GPT-5.6 Sol)
 > **Priority**: P1
 > **operator kickoff**: `[thread-id]` / `0001786242747248-000502-77c148cd`
@@ -148,9 +148,10 @@ Workbench。
 
 ### 当前真正没做好的 F290 能力
 
-1. **Server provider 产品闭环**：当前运行时要求人手动启动 Service、提供 GitHub client ID/secret 并寻找
-   bootstrap link；Connector 的“运行中”也不能证明 Service 已部署或可登录。必须交付“部署新 Service /
-   连接已有 Service”入口、Manifest provider setup、独立进程托管、状态诚实、恢复动作与 ready check。
+1. **Server provider 真实 UAT**：本轮实现候选已把“部署新 Service / 连接已有 Service”、独立进程托管、
+   GitHub App Manifest provider setup、mode-`0600` 凭据、一次性 bootstrap、状态诚实与原实例恢复接进同一
+   产品入口；fake-provider 与真实进程测试均已通过。它仍须在 exact-HEAD review 后，用真实 GitHub 账号从
+   干净 Alpha 完成首次创建、授权、登录与当前 Café pairing，才能勾选 AC-L1 或打开本机激活门。
 2. **真实 Collective 入口 / world switch**：生产 Clowder AI 尚未把 5102 baseline 的 global rail、
    Collective destination 与返回个人 Café 的完整旅程做实。
 3. **Roadmap operating model**：Roadmap 还没有成为从 Channel / Meeting / Decision 生长出 Work、
@@ -748,9 +749,9 @@ Markdown，而不伪造成当时就在资产页发生的批注 → 后续参与�
 17. 首条 F290 Experience Gate 验证 `Channel → Artifact → F309 human-edit notice/annotation/patch → owner new version →
     Channel / Work 同步` 的领域关系，以及 private execution 的结果回 exact Collective target。若当前
     宿主采用 tab/split，其连续性由 F307 验收；F290 不把多模态 adapter 或协作 ledger 拉回本 Feature。
-18. **Open delivery item — Collective product icon**：为 Collective Connector / destination 设计独特且
-    同源的图标资产，替换当前通用四宫格 glyph；图标不得阻塞 AC-L1/AC-L2 的部署登录主链，但不能在
-    F290 产品身份收口时掉地上。视觉稿与 F056/F305 现有语言对齐后再实现。
+18. **Delivered implementation item — Collective product icon**：Collective Connector 已改用同源的
+    三节点连接 glyph，并由组件测试锁定，替换通用四宫格；后续 destination 若增加独立入口，继续复用
+    这套身份而不另造不相关图标。
 
 ## Human Disposition Feedback Contract
 

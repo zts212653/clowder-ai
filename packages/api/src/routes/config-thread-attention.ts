@@ -4,16 +4,20 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import {
   isStableThreadAttentionAnchor,
-  isStableThreadAttentionGroupId,
-  isStableThreadAttentionThreadId,
   resolveThreadAttentionPreferences,
   saveThreadAttentionPreference,
 } from '../config/user-preferences-thread-attention.js';
 import type { IThreadStore } from '../domains/cats/services/stores/ports/ThreadStore.js';
 import {
+  createGroupUndoProof,
+  type GroupUndoEntry,
+  ThreadAttentionGroupConflict,
+} from '../domains/thread-navigation/thread-attention-group-batch.js';
+import {
   applyThreadAttentionGroupCommand,
   resolveThreadAttentionGroups,
 } from '../domains/thread-navigation/thread-attention-group-metadata.js';
+import { groupCommandSchema } from '../domains/thread-navigation/thread-attention-group-schema.js';
 import { resolveOwnerGate } from '../utils/owner-gate.js';
 import { resolveUserId } from '../utils/request-identity.js';
 
@@ -35,43 +39,6 @@ const putSchema = z
   .refine((value) => value.alias !== undefined || value.open !== undefined, {
     message: 'alias or open is required',
   });
-const threadIdSchema = z.string().refine(isStableThreadAttentionThreadId, {
-  message: 'threadId must be an exact non-default thread id',
-});
-const groupIdSchema = z.string().refine(isStableThreadAttentionGroupId, {
-  message: 'groupId must be a stable attention group id',
-});
-const groupCommandSchema = z.discriminatedUnion('action', [
-  z
-    .object({
-      action: z.literal('create'),
-      threadIds: z
-        .array(threadIdSchema)
-        .min(2)
-        .max(100)
-        .refine((threadIds) => new Set(threadIds).size === threadIds.length, {
-          message: 'threadIds must be unique',
-        }),
-      name: z.string().trim().min(1).max(120).optional(),
-    })
-    .strict(),
-  z
-    .object({
-      action: z.literal('move'),
-      groupId: groupIdSchema,
-      threadId: threadIdSchema,
-      beforeThreadId: threadIdSchema.optional(),
-    })
-    .strict(),
-  z.object({ action: z.literal('remove'), groupId: groupIdSchema, threadId: threadIdSchema }).strict(),
-  z
-    .object({
-      action: z.literal('rename'),
-      groupId: groupIdSchema,
-      name: z.string().trim().min(1).max(120).nullable(),
-    })
-    .strict(),
-]);
 type GroupCommand = z.infer<typeof groupCommandSchema>;
 type GroupStore = Pick<IThreadStore, 'list' | 'getThreadMetadata' | 'atomicMergeThreadMetadata'>;
 
@@ -89,7 +56,7 @@ async function applyGroupCommand(
   projectRoot: string,
   userId: string,
   command: GroupCommand,
-): Promise<void> {
+): Promise<GroupUndoEntry[]> {
   if (command.action === 'rename') {
     const groups = await resolveThreadAttentionGroups(store, userId);
     if (!groups.some((group) => group.id === command.groupId)) throw new Error('Conversation group not found');
@@ -97,26 +64,19 @@ async function applyGroupCommand(
       anchor: `group:${command.groupId}`,
       alias: command.name,
     });
-    return;
+    return [];
   }
 
-  await applyThreadAttentionGroupCommand(
-    store,
-    userId,
-    command,
-    command.action === 'create' && command.name
-      ? (groups) => {
-          const created = groups.find((group) =>
-            command.threadIds.every((threadId) => group.threadIds.includes(threadId)),
-          );
-          if (!created) throw new Error('Created Group not found');
-          saveThreadAttentionPreference(projectRoot, {
-            anchor: `group:${created.id}`,
-            alias: command.name,
-          });
-        }
-      : undefined,
-  );
+  let undo: GroupUndoEntry[] = [];
+  await applyThreadAttentionGroupCommand(store, userId, command, (groups, entries) => {
+    undo = entries;
+    if ((command.action === 'create' || command.action === 'organize') && command.name) {
+      const created = groups.find((group) => command.threadIds.every((threadId) => group.threadIds.includes(threadId)));
+      if (!created) throw new Error('Created Group not found');
+      saveThreadAttentionPreference(projectRoot, { anchor: `group:${created.id}`, alias: command.name });
+    }
+  });
+  return undo;
 }
 
 function requireOwner(request: FastifyRequest, reply: FastifyReply): string | null {
@@ -140,6 +100,7 @@ export async function configThreadAttentionRoutes(
   opts: ThreadAttentionRoutesOptions,
 ): Promise<void> {
   let mutationQueue: Promise<unknown> = Promise.resolve();
+  const undoProof = createGroupUndoProof();
   const resolveSnapshot = async (userId: string) => {
     const preferences = resolveThreadAttentionPreferences(opts.projectRoot);
     const groups = opts.threadStore ? await resolveThreadAttentionGroups(opts.threadStore, userId) : [];
@@ -186,8 +147,11 @@ export async function configThreadAttentionRoutes(
     const command = parsed.data;
     try {
       const execute = async () => {
-        await applyGroupCommand(threadStore, opts.projectRoot, userId, command);
-        return resolveSnapshot(userId);
+        if (command.action === 'undo' && !undoProof.verify(userId, command.entries, command.proof)) {
+          throw new ThreadAttentionGroupConflict('本次撤销凭据无法验证，当前分组保持不变');
+        }
+        const undo = await applyGroupCommand(threadStore, opts.projectRoot, userId, command);
+        return { ...(await resolveSnapshot(userId)), ...(undo.length ? { undo: undoProof.issue(userId, undo) } : {}) };
       };
       const result = mutationQueue.then(execute, execute);
       mutationQueue = result.then(
@@ -196,7 +160,7 @@ export async function configThreadAttentionRoutes(
       );
       return await result;
     } catch (error) {
-      reply.status(isGroupCommandNotFound(error) ? 404 : 500);
+      reply.status(error instanceof ThreadAttentionGroupConflict ? 409 : isGroupCommandNotFound(error) ? 404 : 500);
       return { error: error instanceof Error ? error.message : 'Unable to update Group' };
     }
   });

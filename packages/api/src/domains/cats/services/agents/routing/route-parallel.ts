@@ -925,6 +925,7 @@ export async function* routeParallel(
               threadTitle: routeThread?.title ?? undefined,
               projectPath: routeThread?.projectPath,
               cursorOverlay: options.cursorBoundaries?.get(catId as string),
+              ...(currentUserMessageId ? { sameUserWaveTriggerMessageId: currentUserMessageId } : {}),
               ...(contextProjection ? { contextProjection } : {}),
             },
           );

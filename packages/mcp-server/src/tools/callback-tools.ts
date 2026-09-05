@@ -2835,8 +2835,12 @@ const proactiveMemoryAbstentionToolset = createProactiveMemoryAbstentionTool(cal
 const deferredPersonMemoryToolset = createDeferredPersonMemoryTool(callbackPost);
 export const { handleProposePersonMemory } = personMemoryProposalToolset;
 export const { handleRecordProactiveMemoryAbstention } = proactiveMemoryAbstentionToolset;
-export const { handleDeferPersonMemoryDelta, handleWithdrawDeferredPersonMemory, handleForgetDeferredPersonMemory } =
-  deferredPersonMemoryToolset;
+export const {
+  handleDeferPersonMemoryDelta,
+  handleDisposeDeferredPersonMemory,
+  handleWithdrawDeferredPersonMemory,
+  handleForgetDeferredPersonMemory,
+} = deferredPersonMemoryToolset;
 export const {
   handleGetPersonMemoryProposalStatus,
   handleRecallPersonRelationship,
@@ -3303,6 +3307,7 @@ export const callbackTools = [
       'Output: the message is persisted in the principal-selected thread; routed targets are queued, and action conflicts return safe_wait without creating work. ' +
       'GOTCHA: action requires explicit clientMessageId + exactly one targetCats entry; ordinary single-cat notifications do not need action. ' +
       'For a direct Claim/Release chain, pass coordination.phase=active on work hops and terminal on the final delivery; terminal recipients may clean-stop without another @. ' +
+      'A terminal id or bound subject that conflicts with the incoming coordination fails with HTTP 409 before message persistence or wake; start genuinely new work with phase=active. ' +
       'For a local review result, route an ordinary @author message with localReviewVerdict + exact reviewedHeadSha + reviewSubjectRef + acceptedSourceRef + acceptedRevision + clientMessageId. This durable fact needs no action lease, coordination generation, replacement, or issuer route. Public prose is never parsed. ' +
       'Existing standing uses claimOrigin="existing_standing" + groundingEvidenceRef; rejected custody uses returnToPredecessor and targets the persisted predecessor. ' +
       'GOTCHA: structured action metadata currently requires invocation-token auth; agent-key callers fail closed with the non-retryable action_agent_key_unsupported status and never send an unfenced fallback. ' +
@@ -3511,6 +3516,7 @@ export const callbackTools = [
       'GOTCHA: Requires threadId — use feat_index/list_threads plus thread truth to verify the exact owning thread; never guess a nearby thread. ' +
       'PAW-FEEL: The original [爪感差: ...] message is already collected. Cross-post only a marker-free sourceMessageId reference to a verified owner; if none exists, use cat_cafe_propose_thread (F128). New responsibility uses effectClass=assign_work plus proposedAction for Approval Hub review. ' +
       'GOTCHA: For Claim/Release coordination, pass coordination.phase=active on Claim/work hops and terminal on Release. ' +
+      'A terminal id or bound subject that conflicts with the incoming coordination fails with HTTP 409 before message persistence or wake; start genuinely new work with phase=active. ' +
       'For a local review result, route one ordinary @author cross-post with localReviewVerdict + exact reviewedHeadSha + reviewSubjectRef + acceptedSourceRef + acceptedRevision + clientMessageId. This durable fact needs no action lease, coordination generation, replacement, or issuer route; prose is never parsed. ' +
       'The server carries a stable id across active hops; a direct courtesy ACK after terminal is recorded without waking another cat. ' +
       'If terminal reveals genuinely new work, start a new coordination with phase=active instead of ACKing the closed chain. ' +

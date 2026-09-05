@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
 import { execFileSync, spawnSync } from 'node:child_process';
+import { realpathSync } from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { computeGateFingerprint, GATE_EXECUTION_PATHS, listGateRuns } from './lib/gate-terminal-receipt.mjs';
@@ -295,17 +296,23 @@ function valueAfter(args, name) {
   return index >= 0 ? args[index + 1] : undefined;
 }
 
-if (import.meta.url === pathToFileURL(process.argv[1]).href) {
+if (process.argv[1] && import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href) {
   try {
     const args = process.argv.slice(2);
     const repoRoot = path.resolve(valueAfter(args, '--repo-root') ?? process.cwd());
     const baseSha = valueAfter(args, '--base-sha');
     const databasePath = valueAfter(args, '--database-path');
     const riskAxis = valueAfter(args, '--risk') ?? null;
+    const invocationArgsJson = valueAfter(args, '--invocation-args-json');
     if (!baseSha || !databasePath) {
-      throw new Error('usage: classify-gate-route --base-sha SHA --database-path PATH [--risk AXIS]');
+      throw new Error(
+        'usage: classify-gate-route --base-sha SHA --database-path PATH [--risk AXIS] [--invocation-args-json JSON]',
+      );
     }
-    const invocationArgs = riskAxis ? ['--risk', riskAxis] : [];
+    const invocationArgs = invocationArgsJson ? JSON.parse(invocationArgsJson) : riskAxis ? ['--risk', riskAxis] : [];
+    if (!Array.isArray(invocationArgs) || invocationArgs.some((value) => typeof value !== 'string')) {
+      throw new Error('--invocation-args-json must encode a string array');
+    }
     console.log(JSON.stringify(deriveGateRoute({ repoRoot, baseSha, databasePath, riskAxis, invocationArgs })));
   } catch (error) {
     console.error(`[gate-route] ${error.message}`);

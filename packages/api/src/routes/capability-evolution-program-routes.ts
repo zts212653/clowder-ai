@@ -1,6 +1,7 @@
 import { EvolutionProgramReducerError } from '@cat-cafe/shared';
 import type { FastifyPluginAsync, FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
+import type { ProgramAdapterRegistry } from '../infrastructure/capability-evolution/adapters/program-adapter-registry.js';
 import type { EvolutionProgramChangeResult } from '../infrastructure/capability-evolution/change/program-change-bridge.js';
 import {
   type EvolutionProgramCommandAction,
@@ -15,6 +16,7 @@ import type { CapabilityEvolutionMeasurementIssuer } from '../infrastructure/har
 import type { AgentKeyAuthRegistry, CallbackAuthRegistry } from './callback-auth-prehandler.js';
 import { registerCallbackAuthHook } from './callback-auth-prehandler.js';
 import { registerCapabilityEvolutionMeasurementIssuanceRoute } from './capability-evolution-measurement-issuance-route.js';
+import { createCapabilityEvolutionProgramAdapterHandlers } from './capability-evolution-program-adapter-routes.js';
 import { createCapabilityEvolutionChangeHandler } from './capability-evolution-program-change-handler.js';
 import { requireContext } from './capability-evolution-program-context.js';
 import {
@@ -47,6 +49,7 @@ export interface CapabilityEvolutionProgramRoutesOptions {
   callbackRegistry?: CallbackAuthRegistry;
   agentKeyRegistry?: AgentKeyAuthRegistry;
   measurementIssuer?: Pick<CapabilityEvolutionMeasurementIssuer, 'issue'>;
+  adapterRegistry?: ProgramAdapterRegistry;
 }
 
 const PROGRAM_ERROR_STATUS = {
@@ -70,6 +73,7 @@ function surfaceFor(programId: string) {
       split: true,
       sidecar: true,
       pin: true,
+      mainAreaAttention: true,
       closePolicy: 'detach-host',
       restorePolicy: 'descriptor',
     },
@@ -123,6 +127,12 @@ export const capabilityEvolutionProgramRoutes: FastifyPluginAsync<CapabilityEvol
   const service = opts.service;
   const unavailable = (reply: FastifyReply) =>
     reply.status(503).send({ error: 'canonical_evolution_program_persistence_unavailable' });
+  const { adapterManifest, adapterMedia } = createCapabilityEvolutionProgramAdapterHandlers({
+    service,
+    adapterRegistry: opts.adapterRegistry,
+    unavailable,
+    sendError,
+  });
 
   const list = async (request: FastifyRequest, reply: FastifyReply) => {
     const context = requireContext(request, reply);
@@ -166,6 +176,7 @@ export const capabilityEvolutionProgramRoutes: FastifyPluginAsync<CapabilityEvol
       return sendError(error, reply);
     }
   };
+
   const command = async (request: FastifyRequest, reply: FastifyReply) => {
     const context = requireContext(request, reply);
     if (!context) return;
@@ -215,10 +226,7 @@ export const capabilityEvolutionProgramRoutes: FastifyPluginAsync<CapabilityEvol
     }
   };
 
-  /**
-   * Constitution and round-opening: the two transitions that previously had no public producer, so a
-   * freshly created Program could never leave `constituting` outside of a test that wrote to the log.
-   */
+  // Constitution and round-opening are public producers; callers never write the log directly.
   const constitution = async (request: FastifyRequest, reply: FastifyReply) => {
     const context = requireContext(request, reply);
     if (!context) return;
@@ -330,6 +338,8 @@ export const capabilityEvolutionProgramRoutes: FastifyPluginAsync<CapabilityEvol
     app.get(prefix, list);
     app.post(prefix, create);
     app.get(`${prefix}/:programId`, get);
+    app.get(`${prefix}/:programId/adapter-manifest`, adapterManifest);
+    app.get(`${prefix}/:programId/adapter-media/:sceneIndex`, adapterMedia);
     app.post(`${prefix}/:programId/commands`, command);
     app.post(`${prefix}/:programId/constitution`, constitution);
     app.post(`${prefix}/:programId/observations`, observation);

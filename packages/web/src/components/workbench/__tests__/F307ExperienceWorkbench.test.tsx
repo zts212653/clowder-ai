@@ -9,6 +9,7 @@ import { WORKBENCH_STORAGE_KEY } from '@/components/workbench/workbench-persiste
 import type { WorkspaceOpenRequest } from '@/stores/chat-types';
 import { useF307ExperienceWorkbenchStore } from '../experience-workbench-store';
 import { F307ExperienceWorkbench } from '../F307ExperienceWorkbench';
+import { createEvolutionProgramSurface } from '../real-surface-adapters';
 
 const mocks = vi.hoisted(() => ({
   isDesktop: true,
@@ -81,6 +82,8 @@ const AGENT_RUN_SURFACE: WorkspaceSurfaceDescriptor = {
   },
 };
 
+const PROGRAM_SURFACE = createEvolutionProgramSurface(`evolution-program:${'a'.repeat(32)}`);
+
 const hydrateWorkbench = useF307ExperienceWorkbenchStore.getState().hydrate;
 
 describe('F307 zero-surface canonical Home invariant', () => {
@@ -96,7 +99,11 @@ describe('F307 zero-surface canonical Home invariant', () => {
     mocks.isDesktop = true;
     mocks.executionsByKey = {};
     window.localStorage.clear();
-    useF307ExperienceWorkbenchStore.setState({ layout: createInitialWorkbenchState(), hydrated: true });
+    useF307ExperienceWorkbenchStore.setState({
+      layout: createInitialWorkbenchState(),
+      hydrated: true,
+      mainAreaAttentionSurfaceId: null,
+    });
     container = document.createElement('div');
     document.body.appendChild(container);
     root = createRoot(container);
@@ -109,6 +116,7 @@ describe('F307 zero-surface canonical Home invariant', () => {
     useF307ExperienceWorkbenchStore.setState({
       layout: createInitialWorkbenchState(),
       hydrated: false,
+      mainAreaAttentionSurfaceId: null,
       hydrate: hydrateWorkbench,
     });
   });
@@ -321,6 +329,31 @@ describe('F307 zero-surface canonical Home invariant', () => {
       surfaces: [FILE_SURFACE, AGENT_RUN_SURFACE],
       split: null,
     });
+  });
+
+  it('promotes an eligible active surface to the main area and treats close as return', async () => {
+    useF307ExperienceWorkbenchStore.setState({
+      layout: createInitialWorkbenchState([PROGRAM_SURFACE]),
+      hydrated: true,
+      mainAreaAttentionSurfaceId: null,
+    });
+    await renderWorkbench();
+
+    const promote = container.querySelector<HTMLButtonElement>('[data-testid="f307-enter-main-area"]');
+    expect(promote?.getAttribute('aria-label')).toBe('在主区打开 Evolution Program');
+    await act(async () => promote?.click());
+
+    expect(useF307ExperienceWorkbenchStore.getState().mainAreaAttentionSurfaceId).toBe(PROGRAM_SURFACE.id);
+    expect(
+      container.querySelector<HTMLElement>('[data-testid="f307-experience-workbench"]')?.dataset.mainAreaAttention,
+    ).toBe(PROGRAM_SURFACE.id);
+
+    const close = container.querySelector<HTMLButtonElement>('[data-testid="f307-close-evolution-program"]');
+    expect(close?.getAttribute('aria-label')).toBe('返回侧栏 Evolution Program');
+    await act(async () => close?.click());
+
+    expect(useF307ExperienceWorkbenchStore.getState().mainAreaAttentionSurfaceId).toBeNull();
+    expect(useF307ExperienceWorkbenchStore.getState().layout.surfaces).toEqual([PROGRAM_SURFACE]);
   });
 
   it('labels an Agent Run tab as running work and describes close as removing only its Workspace view', async () => {

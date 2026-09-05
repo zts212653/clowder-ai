@@ -1500,7 +1500,10 @@ describe('CodexAgentService Tests (CLI mode)', { concurrency: false }, () => {
           const pencilArgsArg = args.find((a) => a.includes('mcp_servers.pencil.args='));
           assert.ok(pencilArgsArg, 'pencil entry must inject args');
           assert.ok(pencilArgsArg.includes('--app'), 'pencil args must include --app');
-          assert.ok(pencilArgsArg.includes('vscode'), 'pencil args must include app name');
+          assert.ok(
+            pencilArgsArg.includes('visual_studio_code'),
+            'legacy vscode override must emit the current Pencil host identifier',
+          );
           // Must explicitly enable to override any stale config.toml disabled state
           assert.ok(
             args.includes('mcp_servers.pencil.enabled=true'),

@@ -36,6 +36,9 @@ GATE_RUN_ID=""
 GATE_REQUIRED_STAGES=""
 GATE_FAILED_STAGE=""
 GATE_FAILURE_OUTPUT_FILE=""
+GATE_CONTROL_PLANE_DIR=""
+GATE_ROUTE_CLASSIFIER_SCRIPT=""
+GATE_TERMINAL_RECEIPT_SCRIPT=""
 GATE_ROUTE="full"
 GATE_ROUTE_JSON=""
 GATE_REEXEC_DEPTH="${CAT_CAFE_GATE_REEXEC_DEPTH:-0}"
@@ -162,6 +165,8 @@ echo -e "${GREEN}✓ 工作区干净${NC}"
 # 向上解析到兄弟目录的 node_modules，造成 web build 假红。
 # 规则来源：cat-cafe-skills/worktree/SKILL.md "禁止在项目内部创建"
 REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null)"
+GATE_ROUTE_CLASSIFIER_SCRIPT="$REPO_ROOT/scripts/classify-gate-route.mjs"
+GATE_TERMINAL_RECEIPT_SCRIPT="$REPO_ROOT/scripts/gate-terminal-receipt.mjs"
 # Do not truncate the producer with `head`: under `set -o pipefail`, repositories
 # with enough worktrees make git receive SIGPIPE and abort the gate with exit 141.
 MAIN_WORKTREE="$(git worktree list --porcelain | sed -n '1s/^worktree //p')"
@@ -231,31 +236,36 @@ else
   run_gate_resource_stage() {
     local mode="$1"
     local stage="$2"
+    local heartbeat_status=0
     shift 2
-    heartbeat_gate_receipt
+    heartbeat_gate_receipt || heartbeat_status=$?
+    if [ "$heartbeat_status" -ne 0 ]; then
+      echo -e "${RED}❌ Gate receipt heartbeat failed before $stage${NC}" >&2
+      return "$heartbeat_status"
+    fi
     node "$GATE_RESOURCE_RUNNER" --mode "$mode" --stage "$stage" -- "$@"
   }
 fi
 
 heartbeat_gate_receipt() {
   if [ "$GATE_TERMINAL_ACTIVE" = "true" ]; then
-    node "$REPO_ROOT/scripts/gate-terminal-receipt.mjs" heartbeat --run-id "$GATE_RUN_ID" --owner-pid "$$"
+    node "$GATE_TERMINAL_RECEIPT_SCRIPT" heartbeat --run-id "$GATE_RUN_ID" --owner-pid "$$"
   fi
 }
 
 gate_stage_is_green() {
   local stage="$1"
   if [ "$GATE_TERMINAL_ACTIVE" != "true" ]; then
-    return 1
+    return 3
   fi
-  node "$REPO_ROOT/scripts/gate-terminal-receipt.mjs" stage-check --run-id "$GATE_RUN_ID" --stage "$stage"
+  node "$GATE_TERMINAL_RECEIPT_SCRIPT" stage-check --run-id "$GATE_RUN_ID" --stage "$stage"
 }
 
 mark_gate_stage_green() {
   local stage="$1"
   local duration_ms="$2"
   if [ "$GATE_TERMINAL_ACTIVE" = "true" ]; then
-    node "$REPO_ROOT/scripts/gate-terminal-receipt.mjs" stage-green --run-id "$GATE_RUN_ID" --stage "$stage" --owner-pid "$$" --duration-ms "$duration_ms" --route "$GATE_ROUTE"
+    node "$GATE_TERMINAL_RECEIPT_SCRIPT" stage-green --run-id "$GATE_RUN_ID" --stage "$stage" --owner-pid "$$" --duration-ms "$duration_ms" --route "$GATE_ROUTE"
   fi
 }
 
@@ -263,14 +273,31 @@ run_resumable_gate_stage() {
   local mode="$1"
   local stage="$2"
   local stage_start=$SECONDS
+  local receipt_status=0
   shift 2
-  if gate_stage_is_green "$stage"; then
-    echo -e "${GREEN}↻ Reused exact-tree green stage: $stage${NC}"
-    return 0
-  fi
+  gate_stage_is_green "$stage" || receipt_status=$?
+  case "$receipt_status" in
+    0)
+      echo -e "${GREEN}↻ Reused exact-tree green stage: $stage${NC}"
+      return 0
+      ;;
+    3)
+      ;;
+    *)
+      GATE_FAILED_STAGE="$stage"
+      echo -e "${RED}❌ Stage receipt integrity check failed before $stage${NC}" >&2
+      return "$receipt_status"
+      ;;
+  esac
+  receipt_status=0
   : >"$GATE_FAILURE_OUTPUT_FILE"
   if run_gate_resource_stage "$mode" "$stage" "$@" 2>&1 | tee "$GATE_FAILURE_OUTPUT_FILE"; then
-    mark_gate_stage_green "$stage" "$(( (SECONDS - stage_start) * 1000 ))"
+    mark_gate_stage_green "$stage" "$(( (SECONDS - stage_start) * 1000 ))" || receipt_status=$?
+    if [ "$receipt_status" -ne 0 ]; then
+      GATE_FAILED_STAGE="$stage"
+      echo -e "${RED}❌ Green stage receipt write failed for $stage${NC}" >&2
+      return "$receipt_status"
+    fi
     return 0
   fi
   GATE_FAILED_STAGE="$stage"
@@ -289,7 +316,7 @@ settle_gate_receipt() {
   if [ "$status" = "green" ]; then
     settle_args+=(--required-stages "$GATE_REQUIRED_STAGES")
   fi
-  node "$REPO_ROOT/scripts/gate-terminal-receipt.mjs" "${settle_args[@]}"
+  node "$GATE_TERMINAL_RECEIPT_SCRIPT" "${settle_args[@]}"
   GATE_TERMINAL_ACTIVE=false
 }
 
@@ -311,6 +338,16 @@ gate_exit() {
   release_gate_guard
   if [ -n "$GATE_FAILURE_OUTPUT_FILE" ]; then
     rm -f "$GATE_FAILURE_OUTPUT_FILE"
+  fi
+  if [ -n "$GATE_CONTROL_PLANE_DIR" ]; then
+    case "$GATE_CONTROL_PLANE_DIR" in
+      "${TMPDIR:-/tmp}"/cat-cafe-gate-control.*)
+        rm -rf "$GATE_CONTROL_PLANE_DIR"
+        ;;
+      *)
+        echo "refusing to remove unexpected gate control-plane path: $GATE_CONTROL_PLANE_DIR" >&2
+        ;;
+    esac
   fi
   return "$exit_code"
 }
@@ -444,13 +481,37 @@ echo ""
 # Route from repository and receipt truth after the integration cut is frozen.
 # Public exports and --no-rebase probes retain the historical full contract.
 if [ "$NO_REBASE" = "false" ] && [ "$PUBLIC_EXPORT" = "false" ] && [ "$TEST_MODE" = "full" ]; then
+  GATE_CONTROL_REVISION="$(git rev-parse HEAD)"
+  GATE_CONTROL_PLANE_DIR="$(mktemp -d "${TMPDIR:-/tmp}/cat-cafe-gate-control.XXXXXX")"
+  node "$REPO_ROOT/scripts/snapshot-gate-control-plane.mjs" \
+    --repo-root "$REPO_ROOT" \
+    --revision "$GATE_CONTROL_REVISION" \
+    --destination "$GATE_CONTROL_PLANE_DIR" >/dev/null
+  if [ "$(git rev-parse HEAD)" != "$GATE_CONTROL_REVISION" ]; then
+    echo -e "${RED}❌ Gate HEAD changed while freezing its receipt control plane${NC}" >&2
+    exit 1
+  fi
+  GATE_ROUTE_CLASSIFIER_SCRIPT="$GATE_CONTROL_PLANE_DIR/scripts/classify-gate-route.mjs"
+  GATE_TERMINAL_RECEIPT_SCRIPT="$GATE_CONTROL_PLANE_DIR/scripts/gate-terminal-receipt.mjs"
   GATE_DATABASE_PATH="${CAT_CAFE_FULL_GATE_RESOURCE_DB_PATH:-$(git rev-parse --path-format=absolute --git-common-dir)/cat-cafe-full-gate-resources.sqlite}"
   GATE_ROUTE_ARGS=(--repo-root "$REPO_ROOT" --base-sha "$GATE_BASE_SHA" --database-path "$GATE_DATABASE_PATH")
+  if [ "$GATE_ORIGINAL_ARG_COUNT" -eq 0 ]; then
+    GATE_ORIGINAL_ARGS_JSON='[]'
+  else
+    GATE_ORIGINAL_ARGS_JSON="$(node -e 'process.stdout.write(JSON.stringify(process.argv.slice(1)))' -- "${GATE_ORIGINAL_ARGS[@]}")"
+  fi
+  GATE_ROUTE_ARGS+=(--invocation-args-json "$GATE_ORIGINAL_ARGS_JSON")
   if [ -n "$RISK_AXIS" ]; then
     GATE_ROUTE_ARGS+=(--risk "$RISK_AXIS")
   fi
-  GATE_ROUTE_JSON="$(node "$REPO_ROOT/scripts/classify-gate-route.mjs" "${GATE_ROUTE_ARGS[@]}")"
+  GATE_ROUTE_JSON="$(node "$GATE_ROUTE_CLASSIFIER_SCRIPT" "${GATE_ROUTE_ARGS[@]}")"
   GATE_ROUTE="$(node -e 'process.stdout.write(JSON.parse(process.argv[1]).route)' "$GATE_ROUTE_JSON")"
+  GATE_ROUTE_HEAD_SHA="$(node -e 'process.stdout.write(JSON.parse(process.argv[1]).headSha)' "$GATE_ROUTE_JSON")"
+  GATE_ROUTE_FINGERPRINT="$(node -e 'process.stdout.write(JSON.parse(process.argv[1]).fingerprint)' "$GATE_ROUTE_JSON")"
+  if [ "$GATE_ROUTE_HEAD_SHA" != "$GATE_CONTROL_REVISION" ]; then
+    echo -e "${RED}❌ Gate route tree no longer matches its control-plane snapshot${NC}" >&2
+    exit 1
+  fi
   GATE_ROUTE_REASONS="$(node -e 'process.stdout.write(JSON.parse(process.argv[1]).reasons.join("; "))' "$GATE_ROUTE_JSON")"
   echo -e "${GREEN}✓ Gate route=${GATE_ROUTE}: ${GATE_ROUTE_REASONS}${NC}"
   echo ""
@@ -496,9 +557,9 @@ echo ""
 if [ "$NO_REBASE" = "false" ] && [ "$PUBLIC_EXPORT" = "false" ] && [ "$TEST_MODE" = "full" ]; then
   export CAT_CAFE_MANAGED_JOB_ID="${CAT_CAFE_MANAGED_JOB_ID:-full-gate-$(node -e 'console.log(crypto.randomUUID())')}"
   if [ "$GATE_ORIGINAL_ARG_COUNT" -eq 0 ]; then
-    GATE_CLAIM_JSON="$(node "$REPO_ROOT/scripts/gate-terminal-receipt.mjs" begin --owner-pid "$$" --)"
+    GATE_CLAIM_JSON="$(node "$GATE_TERMINAL_RECEIPT_SCRIPT" begin --owner-pid "$$" --expected-fingerprint "$GATE_ROUTE_FINGERPRINT" --)"
   else
-    GATE_CLAIM_JSON="$(node "$REPO_ROOT/scripts/gate-terminal-receipt.mjs" begin --owner-pid "$$" -- "${GATE_ORIGINAL_ARGS[@]}")"
+    GATE_CLAIM_JSON="$(node "$GATE_TERMINAL_RECEIPT_SCRIPT" begin --owner-pid "$$" --expected-fingerprint "$GATE_ROUTE_FINGERPRINT" -- "${GATE_ORIGINAL_ARGS[@]}")"
   fi
   GATE_CLAIM_ROLE="$(node -e 'process.stdout.write(JSON.parse(process.argv[1]).role)' "$GATE_CLAIM_JSON")"
   GATE_RUN_ID="$(node -e 'process.stdout.write(JSON.parse(process.argv[1]).runId)' "$GATE_CLAIM_JSON")"

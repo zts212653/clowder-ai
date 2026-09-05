@@ -2,7 +2,7 @@
 feature_ids: [F315]
 related_features: [F056, F083, F246, F284, F293, F299, F305, F307, F310, F311]
 topics: [workspace, ui, ux, readability, information-architecture, progressive-disclosure, product-language]
-tips_exempt: "2026-09-03 review renewal: this refines the audit and owner handoff contract without adding a new user-invokable capability or discovery step; each repaired surface must teach itself in place."
+tips_exempt: "2026-09-04 review renewal: this adds durable three-page visual findings and exact owner bindings without adding a new user-invokable capability or discovery step; each repaired surface must teach itself in place."
 doc_kind: spec
 created: 2026-09-03
 description: "盘点并迁移现有 Workspace 用户表面，使首屏先回答发生了什么、是否需要行动与下一步是什么，同时保留按需可达的精确证据。"
@@ -13,9 +13,15 @@ description_updated_at: 2026-09-03T21:40:00-07:00
 
 # F315: Workspace Readability Remediation｜存量页面从内部对象回到用户任务
 
-> **Status**: spec | **Owner**: 小太阳·Maine Coon（@codex-sol, GPT-5.6 Sol） | **Priority**: P1
+> **Status**: in-progress | **Owner**: 小太阳·Maine Coon（@codex-sol, GPT-5.6 Sol） | **Priority**: P1
 >
-> **operator source**: `[thread-id]#0001788492776995-000225-df6cc10c`——Workspace 多数页面仍违背 F305，信息难读、内部概念过多；F305 关闭后应另立 Feature 盘点现状并治理。
+> **operator sources**:
+> - `[thread-id]#0001788492776995-000225-df6cc10c`——Workspace 多数页面仍违背 F305，信息难读、内部概念过多；F305 关闭后应另立 Feature 盘点现状并治理。
+> - `[thread-id]#0001788494281788-000279-49ac2988`——先回答 Team、Needs Me、能力进化为什么读起来吃力，指出颜色、层级与信息表达的问题，并参考真实产品给出更清楚的方案。
+> - `[thread-id]#0001788513469323-000709-a23d8f5f`——operator 明确否定把 F315 的当前主线解释成“先换全局颜色、先规划 19 个房间”；F315 必须先交付点名页面的可见修复。
+> - `[thread-id]#0001788515250111-000776-c05f7e0c`——operator 对首版 after 明确要求继续调整：Team 只比 before 好但分组措辞不讲人话；Needs Me 缺少 populated 态；Capability Evolution 横排不自然且缺少图形落点。
+> - `[thread-id]#0001788516088680-000807-4144e5b7`、`#0001788516258766-000813-8bef4d8f`、`#0001788520033748-000893-23213efd`——Capability Evolution 的用户旅程不能照抄猫的执行阶段；根节点、首屏、展开层分别回答不同问题，并区分造仪器的准备态与真正开始观察/进化后的状态。
+> - `[thread-id]#0001788521646251-000943-bb82ce5d`——operator 退回“愿望 / 愿望名”措辞，并要求先用 F314、Microduck 与路演能力三份真实 Program 讲清前端到底如何表达。
 
 Architecture cell: **none（cross-owner presentation remediation）**；相关产品宿主为 `hub-action-surface`。
 
@@ -25,7 +31,9 @@ Map delta: **none**。F315 不取得 Workbench 布局、领域对象、业务 ac
 
 F305 解决的是“以后怎样不再从 schema 直接长出 UI”：把 F083、ADR-043、F056 与真实页面证据接成一条 Design Gate，并用 Approval / Needs Me 做第一个生产验证点。它明确把“重做整个 Workspace”列为 non-goal，因此 F305 关闭并不等于存量页面已经迁移。
 
-当前真实缺口是：**旧的 Workspace 表面仍以领域对象和工程字段为叙事中心，用户必须自己把 ID、状态、来源与内部术语翻译成任务。** 这不是颜色或圆角问题，而是信息架构债务。ADR-043 §4 已预留正确出口：存量不要求任意 PR 顺手重写；迁移超出当次授权时应另行立项。F315 就是这次被用户明确授权的迁移 owner。
+当前真实缺口是：**旧的 Workspace 表面仍以领域对象和工程字段为叙事中心，用户必须自己把 ID、状态、来源与内部术语翻译成任务。** 它同时表现为文案、信息投影、视觉层级与颜色语义的问题，不能被缩写成“换色”，也不能被转译成一场先于页面修复的 Workspace 房间规划。ADR-043 §4 已预留正确出口：存量不要求任意 PR 顺手重写；迁移超出当次授权时应另行立项。F315 就是这次被用户明确授权的迁移 owner。
+
+**F315 的第一可见结果不是 census 或 fold map，而是 Team、Needs Me、Capability Evolution 三页的逐页诊断、野外参照、改前/改后方案、领域 owner 修复与真实壳验收。** 全量 19 项盘点与目的地出生证审计仍然需要，但作为并行治理线，不得阻塞这三页，也不得成为向 operator 解释“我们正在解决”的替代品。
 
 终态只有一句话：
 
@@ -41,9 +49,9 @@ F305 解决的是“以后怎样不再从 schema 直接长出 UI”：把 F083�
 - 11 个领域 mode：Recall、Needs Me、Product Schedule、Schedule、Tasks、Team、Community、Artifacts、Approval、Trajectory、Eval；
 - 3 个其他宿主入口：Status、Capability Evolution、Theater。
 
-### 首批五个真实样本
+### operator 点名的三页与两个伴随样本
 
-operator 在同一条消息附了 Team、Needs Me、Capability Evolution、Status / Sessions、Approval 五个真实页面。独立读图与源码确认：
+operator 附了 Team、Needs Me、Capability Evolution、Status / Sessions、Approval 五个真实页面，并进一步明确先回答前三页“为什么看起来吃力、前端设计犯了什么错、别人怎样用颜色和层级表达”。因此前三页是第一交付批次；Status / Sessions 与 Approval 是紧随其后的第二批，不把五页捆成一道前置大门。
 
 1. **Team 猫详情**：每条可读结论后重复展示 `capability_strength`、SHA 与 source refs，工程 provenance 的视觉重量大于“这只猫适合做什么”。
 2. **Needs Me 空态**：层级克制，但“原 owner”“不复制审批状态”等实现边界进入了产品说明；空态在解释系统，而不是只回答用户接下来需不需要做事。
@@ -51,7 +59,27 @@ operator 在同一条消息附了 Team、Needs Me、Capability Evolution、Statu
 4. **Status / Sessions**：诊断详情本身有价值，但 UUID、token/cache/compression、封存与运行状态同时成为默认阅读层；缺少“现在是否正常、是否要处理”的摘要入口。
 5. **Approval**：F305 的共享卡结构仍在，但 producer summary / event provenance 可把内部任务标题、`Verified ... requested ...` 与空的“审批理由”重新送回首屏；说明共享壳正确并不足以保证领域文案正确。
 
-这五个样本足以证明问题存在，不足以代表另外 14 个目的地已经审完。F315 不把抽样冒充全量结论。
+这五个样本足以证明问题存在，不足以代表另外 14 个目的地已经审完。F315 不把抽样冒充全量结论，也不让全量结论的缺席推迟前三页修复。
+
+### 第一批 owner 收件状态（2026-09-04）
+
+- **Team / F293**：owner 已收到 L1 文案 finding，并提交 PR #4293（exact HEAD `fa0accbe805187541f0a1c11c37f8fc9c6dabc47`，当前 OPEN）；T1–T4 已绑定到 F293 主线程消息 `0001788514405609-000745-e877281f`。Owner receipt `0001788514594985-000756-c69a8a4d` 确认没有硬契约冲突，同时要求身份信息只做现有 `/api/cats` presentation join、exact provenance 只下沉不删除、nested back 与 F208 来源入口只降视觉权重不删行为。
+- **Needs Me / F310**：L1 用户处境文案已由 PR #4309 合入 main（merge `ec15b86c483997639e537f2af4cd4b448271893e`）；N1–N4 已绑定到 F310 主线程消息 `0001788514405649-000746-807db5fe`。Owner receipt `0001788514594355-000755-93c158ff` 确认 N2 已满足且没有领域契约冲突，同时要求 loading/error 不显示缓存计数或伪造 `0`、错误态保留可见重试、空态不声称 Schedule 必然存在任务并复用既有目的地。
+- **Capability Evolution / F311**：输入机制说明已由 PR #4292 合入 main（merge `f3abdd5f07bb149585f85183ec3f78b45f8c4c22`）；C1–C4 已绑定到 F311 主线程消息 `0001788514405784-000747-cdfc65ab`。Owner receipt `0001788515395998-000780-bd92d471` 确认没有 Program/action/revision 契约冲突，同时要求 `StartEvolution.submit` 继续绑定 exact `targetThreadId`、只写 `setPendingChatInsert` 且不自动发送；quiet conversation chip 保持未知 thread fail-closed；人类化标题与状态不删除 raw owner/lifecycle/stage truth 或 `onOpenProgram(programId)`；颜色与字体不得暗示不存在的业务 actionability。该回执工具响应误继承的 T2 coordination id/subject 不属于 F315 真相，F315 只引用这条持久消息正文。operator 后续思辨形成的 C5–C9 已随 `39003a6a58` 落地，并沿同一 carrier 以 `0001788520611809-000916-1f172264` 增量绑定 F311 owner；owner receipt `0001788520876264-000931-ad6a463a` 确认 after-v2 没有架构阻塞，并冻结下列实现条件。
+
+  - Program 标题使用该能力的实际产品名，只从 owner/claim display metadata 或可逆 ref-humanization 投影取得，不新增 free-text Program 字段或复制 owner payload；内部 token 留在 Raw。
+  - `已采纳` 只对应 fresh outcome 后的 `keep → terminalDisposition=kept`；`已回滚` 只作为历史回执，根节点显示新 Cycle 的当前状态；`writing_back`、`revalidating`、`deciding` 必须有诚实的非终态表达。
+  - pause/withdraw 可降入 `···`，但仍走 canonical lifecycle/sequence guard；只有当前用户确实拥有可执行 canonical action 时才显示实心主按钮，解释性的 `nextAction` 不构成授权。
+  - setup checklist 必须动态覆盖 canonical constitution/observation 要求和全部当前 blocking gaps，责任从 owner refs / `ownerFeatureId` 得出；不得硬编码“6”。`nextEvaluationAt` 是评估触发时间，不是准备完成 ETA；无 owner ETA 时省略或诚实标 unknown。
+  - 四层树只重排 canonical claim/object refs、observation、lineage、lifecycle/stage 与真实 action availability；缺 display/action binding 时 quiet/fail-closed。setup face 只是 `constituting | instrumenting` 的视图分类，journey 从 `observing` 起；不得新增 persisted `setup` enum 或第二状态机。
+
+因此“owner 知道了”已覆盖 L1、首版逐页视觉 finding 与 Capability Evolution C5–C9 增量，T1–T4、N1–N4、C1–C9 的 owner receipt 均已完成。这里不冒充 owner 已接受首版 after 或三页已经完成；既有回执只证明 finding 可在原领域契约内实现。生产实现仍以 operator 接受修订后的页面方案与后续 exact implementation carrier 为准。
+
+### Phase A 已接受的视觉证据（2026-09-04）
+
+operator 已在 `[thread-id]#0001788507425448-000448-484d78d7` 选择全家视觉基线 **Anthropic + Linear**，但没有接受首版三页 after。其 `[thread-id]#0001788515250111-000776-c05f7e0c` 明确指出：Team 仅是“比之前好”，分组措辞仍不讲人话；Needs Me 只画空态，无法判断有内容时的样子；Capability Evolution 横排别扭、缺少图标与视觉落点。首版 after 因此是有效诊断证据而不是 Design Gate 签字，下一次比较必须补 Team 对称用户语言、Needs Me populated 态、Capability Evolution 竖向节奏与图形锚点，并继续用真实同类产品 anatomy 校准。
+
+operator 又在 `[thread-id]#0001788521646251-000943-bb82ce5d` 明确退回“愿望 / 愿望名”及常驻“是否需要你”表达。Capability Evolution after-v2 必须以能力的实际产品名作标题，以稳定的产品状态 pill 表达进度，并且只有 canonical action 对当前用户真实可执行时才出现 attention / 主动作。方案必须把 F314-backed 开发流程改进、Microduck 行走稳定性、投资人路演表达能力三份真实 Program 并排代入同一 anatomy；三者是同一 Workspace 里的三个能力对象，不得假设为三个阶段、相互替代的方案或相同 lifecycle。
 
 ### 三层诊断，不把所有问题叫“换皮”
 
@@ -107,21 +135,27 @@ F315 拥有分层 finding、整批一致性与验收闭环，**不拥有各领�
 
 ## What
 
-### Phase A: 全量现状盘点与首批排序
+### Phase A: 三个点名页面的逐页 finding 与可选方案
 
-从 canonical Workspace registry、launcher 与 F307 owner adapters 生成 19 个目的地的 census。逐个打开真实产品壳，采集可获得的 empty / populated / error / narrow 状态，并用现有 design-in-context checklist 记录出生证、任务、最小事实、主操作与折叠详情。若一个目的地的 C1 出生证不成立，Phase A 不把它美化后默认保留，而是把 `fold-into:<existing destination>` 方案投给 F284/F307 host owner 与 operator Design Gate。
+先处理 Team、Needs Me、Capability Evolution。对每页在真实产品壳中指明：哪块颜色没有表达语义、哪块层级是平的、哪块重复或泄露内部术语、用户第一眼因此错过了什么。每页至少带一个与该任务相符的真实产品参照，以及一个同壳改后方案；输出是可指认的 before / annotated-after 证据，不是抽象方法论或全局换色截图。
 
-五个 operator 截图表面是第一批，不用“最丑页面”或主观打分重新排序；其余表面未看之前保持 unknown。
+三页进入同一场批次 Design Gate：每页独立回答任务与修法，整批只统一语义节奏与 F056 视觉纪律，不创造万能卡。operator 用并排方案作判别；猫负责把问题和选择做成看得见的页面，而不是要求 operator生成设计。
 
-### Phase B: 真实壳 Design Gate 与迁移批次冻结
+### Phase B: 领域 owner 修复与三页真实壳验收
 
-先为第一批表面做同壳 before / after，而不是独立 `/dev` 拼图。**五个页面进入同一场批次 Design Gate**：每页独立回答任务与修法，同时整批回答“跨 surface 如何保持一致”。一致的是语义节奏与视觉纪律，不是万能卡——标签保持中性，F056 单一强调色优先留给当前状态、真正差异、唯一决定或主操作，不用大面积强调眉题；每页带一个与自身任务相符的野外参照和至少一个备选形态。只有两个以上表面反复需要同一 disclosure primitive，才把它回流 F056。
+F293、F310、F311 各自修复本页命中的 renderer、projection 或必要 schema，并继续拥有数据、状态、action、权限与 recovery。F315 固定 finding、验收标准与跨页一致性，消费每个 owner 的 exact receipt 后，在 production entry 上验收 desktop / narrow 与适用状态。
 
-“遮住旁白后能否回答发生了什么、要不要我行动、下一步是什么”不得由本页 owner 自评。每页至少由一只非 owner 猫或 operator 在真实页面上作答，并把答案作为 disposition 证据；operator 确认整批用户旅程与信息层级后，才进入生产迁移。
+“遮住旁白后能否回答发生了什么、要不要我行动、下一步是什么”不得由本页 owner 自评。每页至少由一只非 owner 猫或 operator 在真实页面上作答；内部证据不是删除，而是移到命名清楚、可恢复的详情入口。
 
-### Phase C: 第一批生产迁移
+### Parallel Track P: 19 项 census 与目的地出生证审计（不阻塞 Phase A–B）
 
-优先处理 Team、Needs Me、Capability Evolution、Status / Sessions 与 Approval。F315 固定 finding、验收标准与批次一致性；F293/F310/F311/F246 及 Status / Sessions owner 各自修改命中问题的 renderer、projection 或必要 schema，并继续拥有数据、状态、action、权限与 recovery。内部信息不是删除，而是移到命名清楚、可恢复的详情入口。
+从 canonical Workspace registry、launcher 与 F307 owner adapters 生成 19 个目的地的 census，并逐项记录 canonical 入口、owner anchor、用户任务与当前 disposition。C1 出生证不成立时，提出 `fold-into:<existing destination>` 给 F284/F307 host owner 与 operator Design Gate；未看真实壳的项目保持 unknown。
+
+这条并行线回答“哪些能力应是独立目的地”，不替代前三页的可见修复，也不设置“fold map 完成后才能修三页”的门槛。已合入的 census guard 继续守 identity 完整性；real-shell 证据按可获得的 empty / populated / error / narrow 状态补齐。
+
+### Phase C: 第二批生产迁移
+
+处理 Status / Sessions 与 Approval，并消费 Parallel Track P 已确认的 owner / destination disposition。F246 及 Status / Sessions owner 各自修改命中问题的 renderer、projection 或必要 schema；F315 继续只持 finding、批次一致性与验收。
 
 ### Phase D: 剩余表面结算与回归守护
 
@@ -140,7 +174,7 @@ F315 拥有分层 finding、整批一致性与验收闭环，**不拥有各领�
   3. 用户无需阅读 Feature ID、hash、URI、revision、raw status token 或运行指标就能完成主任务。
   4. 用户需要核验时，展开明确命名的详情，仍能看到 canonical ID、来源、原文与运行证据。
   5. 在窄屏上，同一任务、主操作与详情恢复路径仍可达。
-- **Success evidence**: 19 项 exact-revision census；首批五个表面的 real-shell before / after；每页非 owner 猫或 operator 的三问答案；陌生 sentinel 可重放旅程；desktop / narrow 截图或录屏；operator sign-off；非作者 vision review。
+- **Success evidence**: Team、Needs Me、Capability Evolution 的逐页标注 finding、野外参照与真实壳 before / after；每页非 owner 猫或 operator 的三问答案；19 项 exact-revision census 与后续 disposition；陌生 sentinel 可重放旅程；desktop / narrow 截图或录屏；operator sign-off；非作者 vision review。
 - **Non-goals**: 由 F315 接管 F307 working-set 拓扑、F284 Shell 或领域 store/schema/action；删除诊断能力；造统一万能卡；批量换皮。领域 owner 为修正已证实的投影错误而调整自身 schema，不等于 F315 接管 schema。
 
 ### Supporting Journey: 专业诊断仍然精确
@@ -151,10 +185,12 @@ F315 拥有分层 finding、整批一致性与验收闭环，**不拥有各领�
 
 | ID | 需求点（operator experience/转述） | AC 编号 | 验证方式 | 状态 |
 |---|---|---|---|---|
-| R1 | “Workspace 的各个页面大多数做得违背了 F305” | AC-A1, AC-D1 | code-derived census + exact revision | [ ] |
-| R2 | “新建一个 feat 盘点一下我们的现状” | AC-A2, AC-A3 | audit snapshot + real-shell evidence | [ ] |
-| R3 | “页面太难让人读懂、获取信息量；颜色没有表达和突出真正语义” | AC-B1, AC-B2, AC-C1, AC-D2 | before/after journey + F056 visual review + operator sign-off | [ ] |
+| R1 | “Workspace 的各个页面大多数做得违背了 F305” | AC-P1, AC-P2, AC-D1 | code-derived census + exact revision | [ ] |
+| R2 | “新建一个 feat 盘点一下我们的现状” | AC-P1, AC-P2, AC-D1 | audit snapshot + real-shell evidence | [ ] |
+| R3 | “页面太难让人读懂、获取信息量；颜色没有表达和突出真正语义” | AC-A1, AC-A2, AC-B1, AC-B2, AC-C1, AC-D2 | annotated before/after + F056 visual review + operator sign-off | [ ] |
 | R4 | 不重复制造冲突规则和概念 | AC-A4, AC-D3 | diff + architecture/content review | [ ] |
+| R5 | “Team、Needs Me、能力进化为什么看起来那么吃力？前端设计犯了什么错误？别人如何设计？” | AC-A1, AC-A2, AC-B1 | annotated comparison + wild reference + real-shell answer | [ ] |
+| R6 | “我想要的完全不是你们在干的这个”——不以换色或房间规划替代三页修复 | AC-A3, AC-P3 | phase order + owner receipts + operator comparison | [ ] |
 
 ### 覆盖检查
 
@@ -164,22 +200,29 @@ F315 拥有分层 finding、整批一致性与验收闭环，**不拥有各领�
 
 ## Acceptance Criteria
 
-### Phase A（全量现状盘点）
+### Phase A（三页 finding 与方案）
 
-- [ ] AC-A1: 从 canonical registry / launcher / owner adapters 生成并锁定 exact revision 的 19 项 Workspace 目的地 census；新增或移除目的地会使 guard 失败，而不是让手写清单静默腐烂。
-- [ ] AC-A2: 每个目的地都有 canonical 入口、renderer/owner anchor、ADR-043 C1 出生证、用户任务、首屏最小事实、主操作、详情恢复与当前 disposition；出生证不成立时给出折入既有目的地的方案，未验证项明确标 unknown。
-- [ ] AC-A3: 第一批五个 operator 截图表面各有真实 empty / populated / error / narrow 中适用状态的复现证据，不以单张截图或 fixture 旁白代替交互。
-- [ ] AC-A4: 审计只引用 ADR-043、F056 与唯一 design-in-context checklist；仓内没有新增 Design Gate、评分体系、规则清单或 Workspace registry。
+- [x] AC-A1: Team、Needs Me、Capability Evolution 各有逐块标注的真实壳诊断，明确颜色语义、视觉层级、重复信息、内部术语及其对用户理解的影响。
+- [x] AC-A2: 三页各有至少一个任务相符的野外参照和一个同壳改后方案；参照说明借用的表达原则，不照抄品牌外观。
+- [x] AC-A3: 三页 finding 分别绑定 F293/F310/F311 的 renderer / projection / schema anchor 与 owner receipt，不等待 census 或 fold map 才行动。（T1–T4、N1–N4、C1–C9 均已完成 owner receipt；C5–C9 条件见 `0001788520876264-000931-ad6a463a`。）
+- [x] AC-A4: 审计只引用 ADR-043、F056、`DESIGN.md` 与唯一 design-in-context checklist；仓内没有新增 Design Gate、评分体系、规则清单或 Workspace registry。
 
-### Phase B（真实壳 Design Gate）
+### Phase B（三页 owner 修复与真实壳验收）
 
-- [ ] AC-B1: 第一批五个表面在**同一场批次 Design Gate**提供真实 Clowder AI 壳同入口 before / after；遮住设计说明后，每页由非 owner 猫或 operator 回答“发生了什么、要不要我行动、下一步是什么”，owner 自答不算证据。
-- [ ] AC-B2: desktop 与 narrow 状态都保留主任务、主操作和精确详情恢复；整批遵守 F056 single-accent discipline，颜色优先表达当前状态、真正差异、唯一决定或主操作；operator 在生产实现前给出 keep / tune / sunset。
-- [ ] AC-B3: 共享 primitive 只有在两个以上真实表面证明同型需求后才进入 F056；不同领域任务不被强迫共用同一张卡。
+- [ ] AC-B1: 三个表面在**同一场批次 Design Gate**提供真实 Clowder AI 壳同入口 before / after；遮住设计说明后，每页由非 owner 猫或 operator 回答“发生了什么、要不要我行动、下一步是什么”，owner 自答不算证据。Capability Evolution 还须以 F314-backed 开发流程改进、Microduck 行走稳定性、投资人路演表达能力三份真实 Program 并排证明同一 anatomy 能表达不同对象与当前状态。
+- [ ] AC-B2: desktop 与 narrow 状态都保留主任务、唯一主操作和精确详情恢复；颜色优先表达当前状态、真正差异、唯一决定或主操作；operator 在生产实现前给出方向裁决。
+- [ ] AC-B3: F293/F310/F311 的生产修复均有 exact receipt 与 targeted tests，且 typed action、权限、canonical store、revision/CAS 与 F307 working-set 行为保持不变。
+- [ ] AC-B4: 共享 primitive 只有在两个以上真实表面证明同型需求后才进入 F056；不同领域任务不被强迫共用同一张卡。
 
-### Phase C（第一批生产迁移）
+### Parallel Track P（全量现状盘点，不阻塞 Phase A–B）
 
-- [ ] AC-C1: Team、Needs Me、Capability Evolution、Status / Sessions、Approval 的首屏不再用 Feature/Gate/owner、hash/URI/revision、raw status token 或 provider event prose 承担主叙事；目标用户真正需要的技术术语除外。
+- [ ] AC-P1: 从 canonical registry / launcher / owner adapters 生成并锁定 exact revision 的 19 项 Workspace 目的地 census；新增或移除目的地会使 guard 失败，而不是让手写清单静默腐烂。
+- [ ] AC-P2: 每个目的地都有 canonical 入口、renderer/owner anchor、ADR-043 C1 出生证、用户任务、首屏最小事实、主操作、详情恢复与当前 disposition；出生证不成立时给出折入既有目的地的方案，未验证项明确标 unknown。
+- [ ] AC-P3: census / fold map 独立推进，但不是前三页 finding、owner 修复或真实壳验收的前置条件；没有以全局换色或 IA 讨论替代点名页面交付。
+
+### Phase C（第二批生产迁移）
+
+- [ ] AC-C1: Status / Sessions 与 Approval 的首屏不再用 Feature/Gate/owner、hash/URI/revision、raw status token 或 provider event prose 承担主叙事；目标用户真正需要的技术术语除外。
 - [ ] AC-C2: 每个内部字段仍可从明确详情入口恢复；原文、ID、复制/跳转与领域 recovery 不丢失。
 - [ ] AC-C3: 各领域的 typed action、权限、canonical store、revision/CAS 与 F307 working-set 行为保持不变，并由 targeted tests 覆盖。
 - [ ] AC-C4: 每条 migration finding 都落到真实 owner 的 renderer / projection / schema 修复与 receipt；F315 不复制领域 schema，也没有 finding 因“超出呈现层”被静默关闭。
@@ -195,7 +238,8 @@ F315 拥有分层 finding、整批一致性与验收闭环，**不拥有各领�
 - **Evolved from**: F305（Design Gate closure 与首个生产 pattern 证明）。
 - **Design authority**: ADR-043、F056、F083 与现有 design-in-context checklist。
 - **Host boundary**: F284（Contextual Shell）与 F307（Composable Workbench）。
-- **First batch domain owners**: F293 Team、F310 Needs Me、F311 Capability Evolution、F246 Approval；Status / Sessions 继续由现有运行与 session owner 提供 truth。
+- **First batch domain owners**: F293 Team、F310 Needs Me、F311 Capability Evolution。
+- **Second batch domain owners**: F246 Approval；Status / Sessions 继续由现有运行与 session owner 提供 truth。
 
 ## Risk
 
@@ -205,27 +249,30 @@ F315 拥有分层 finding、整批一致性与验收闭环，**不拥有各领�
 | 为了简洁删掉关键证据 | 首屏最小化与详情完整恢复成对验收；专业诊断面保留精确值。 |
 | F315 变成第二套设计规则 | 所有判断逐项锚到 ADR-043/F056/checklist；无 source 的规则不进入 spec。 |
 | 和 F284/F307 或领域 owner 抢所有权 | F315 只持 audit + migration closure；宿主拓扑、数据、action、store 与 lifecycle 原 owner 不变。 |
-| 19 个房间都被默认保留，只是变漂亮 | 每项必须回答 ADR-043 C1 出生证；不成立则进入折入既有目的地的 host/operator 裁决。 |
+| 19 个房间都被默认保留，只是变漂亮 | 并行 census 每项回答 ADR-043 C1；不成立则进入折入既有目的地的 host/operator 裁决。 |
+| census、fold map 或全局换色再次取代 operator 点名页面 | Phase A–B 先交付三页 finding、owner 修复与真实壳验收；Parallel Track P 不构成前置门。 |
 | owner 自己证明自己的页面易懂 | 三问必须由非 owner 猫或 operator 在真实页面回答。 |
 | 全量盘点再次变成人工腐烂清单 | 身份从 canonical code 生成；文档矩阵只保存 exact-revision audit evidence。 |
-| 一次铺开导致长期半成品 | 五个用户已指出的表面先过同壳 Design Gate，再按可验收批次迁移；最终仍以全 19 项 disposition 才可关闭。 |
+| 一次铺开导致长期半成品 | 三个用户点名表面先过同壳 Design Gate，再处理第二批与其余表面；最终仍以全 19 项 disposition 才可关闭。 |
 
 ## Key Decisions
 
 | # | 决策 | 理由 | 日期 |
 |---|---|---|---|
 | KD-1 | 新建 F315，不重开 F305 | 预防机制与存量迁移是两个可独立完成的终态。 | 2026-09-03 |
-| KD-2 | 先 census，再按用户已给出的五个样本开第一批 | 已知问题先行动，未知页面不靠猜测排序。 | 2026-09-03 |
+| KD-2 | 先交付 Team、Needs Me、Capability Evolution 三页的 finding→owner 修复→验收；census/fold map 并行且不阻塞 | operator 要的是点名页面看得见的修复，不是先完成房间规划。 | 2026-09-04 |
 | KD-3 | 不创建可读性评分或新检查单 | 正确判据已经存在；缺口是覆盖和迁移，不是概念。 | 2026-09-03 |
 | KD-4 | 技术信息渐进披露，不做删除 | “易读”和“可核验”必须同时成立。 | 2026-09-03 |
 | KD-5 | 三层诊断：文案 / 投影 / 出生证 | 三层由不同 owner 与机制解决；把它们统称换皮会漏掉 schema 形状与页面存在性。 | 2026-09-03 |
-| KD-6 | 第一批五页进入同一场 Design Gate | 各页修法归领域 owner，跨页语义节奏与 F056 单强调色由 F315 批次验收，避免三家三审美。 | 2026-09-03 |
+| KD-6 | 第一批三页进入同一场 Design Gate | 各页修法归领域 owner，跨页语义节奏与 F056 视觉纪律由 F315 批次验收，避免三家三审美。 | 2026-09-04 |
+| KD-7 | 全局换色与目的地出生证审计都不能冒充点名页面交付 | 它们解决不同问题；按 claim 选机制，并行推进但不设错误前置门。 | 2026-09-04 |
 
 ## Review Gate
 
-- Phase A census 是确定契约：静态/组件 guard + real-shell evidence。
-- Phase B 是用户可见设计：operator Design Gate，不用工程 review 代替体验裁决。
-- Phase C–D 依真实改动风险走 targeted tests、exact-HEAD 非作者 review 与 Alpha vision guard。
+- Phase A 是用户可见设计 finding：真实壳标注对比 + 野外参照 + operator Design Gate，不用工程语言代替体验裁决。
+- Phase B 是三页 production 修复与验收：依各 owner 的真实改动风险走 targeted tests、exact-HEAD 非作者 review 与 Alpha vision guard。
+- Parallel Track P 的 census 是确定契约：静态/组件 guard + real-shell evidence，但不阻塞 Phase A–B。
+- Phase C–D 按第二批与剩余表面的真实风险继续迁移和结算。
 
 ## Tips Contribution
 

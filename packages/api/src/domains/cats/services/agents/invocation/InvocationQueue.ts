@@ -986,6 +986,7 @@ export class InvocationQueue {
     userId: string,
     entryId: string,
     catId: string,
+    attemptId?: string,
   ): { before: QueueEntry; after: QueueEntry } | null {
     const entry = this.findEntry(threadId, userId, entryId);
     if (
@@ -1012,6 +1013,9 @@ export class InvocationQueue {
         entry.queuedAwakenedInvocationIdByCatId = undefined;
         entry.queuedAwakenedAtByCatId = undefined;
       }
+    }
+    if (attemptId) {
+      entry.queuedAttemptIdByCatId = { ...(entry.queuedAttemptIdByCatId ?? {}), [catId]: attemptId };
     }
     return { before, after: InvocationQueue.cloneEntry(entry) };
   }
@@ -1609,12 +1613,24 @@ export class InvocationQueue {
     return [...reservationIds].flatMap((reservationId) => this.releaseExactUserBatch(threadId, userId, reservationId));
   }
 
-  /** Drop rollback bookkeeping once no live Queue entry references the reservation. */
+  /** Release a consumed Steer target without restoring already-settled sibling snapshots. */
   pruneExactUserBatchReservation(reservationId: string): boolean {
-    const stillReferenced = [...this.queues.values()].some((q) =>
-      q.some((entry) => entry.exactSteerBatch?.reservationId === reservationId),
+    const referenced = [...this.queues.values()].flatMap((q) =>
+      q.filter((entry) => entry.exactSteerBatch?.reservationId === reservationId),
     );
-    if (stillReferenced) return false;
+    const reservation = this.exactSteerReservations.get(reservationId);
+    if (referenced.length > 0) {
+      if (
+        !reservation ||
+        reservation.phase !== 'activated' ||
+        referenced.some((entry) => entry.status !== 'queued' || entry.targetCats.includes(reservation.targetCatId))
+      )
+        return false;
+      for (const entry of referenced) {
+        entry.exactSteerBatch = undefined;
+        entry.position = reservation.entries.get(entry.id)?.position;
+      }
+    }
     return this.exactSteerReservations.delete(reservationId);
   }
 

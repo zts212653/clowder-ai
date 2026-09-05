@@ -99,17 +99,42 @@ describe('F276 repeated deferred write-opportunity re-entry', () => {
         async listReady() {
           return [receipt];
         },
+        async get() {
+          return receipt;
+        },
         async claim(input) {
           return {
             outcome: 'claimed',
-            receipt: { ...receipt, state: 'claimed', claimId: input.claimId, claimUntil: input.now + input.leaseMs },
+            receipt: {
+              ...receipt,
+              state: 'claimed',
+              claimId: input.claimId,
+              claimUntil: input.now + input.leaseMs,
+              processorCatId: input.processorCatId,
+              processingThreadId: input.processingThreadId,
+            },
           };
+        },
+        async bindProcessingMessage(input) {
+          return { outcome: 'bound', receipt: { receiptId: input.receiptId } };
         },
         async release() {
           return true;
         },
         async hardForget() {
           return { outcome: 'purged' };
+        },
+      },
+      ensureSystemThread: async () => 'thread_memory_operations',
+      routingDispatchPreflight: {
+        async preflight(input) {
+          return {
+            v: 1,
+            ownerId: input.ownerId,
+            observedAt: 1_000,
+            resolverState: 'fresh',
+            targets: [{ targetCatId: input.targetCatIds[0], disposition: 'allowed', reasons: [], alternatives: [] }],
+          };
         },
       },
       messageStore: {
@@ -163,11 +188,20 @@ describe('F276 repeated deferred write-opportunity re-entry', () => {
     });
 
     const admission = await spec.admission.gate({});
+    const delivered = [];
+    await spec.run.execute(admission.workItems[0].signal, admission.workItems[0].subjectKey, {
+      assignedCatId: 'codex-terra',
+      deliver: async (input) => {
+        delivered.push(input);
+        return 'daily-trigger-message';
+      },
+      invokeTrigger: { async trigger() {} },
+    });
 
     assert.equal(admission.run, true);
-    assert.equal(admission.workItems[0].signal.writeOpportunityReentry.scene.opportunity.generation, 3);
+    assert.equal(delivered[0].extra.writeOpportunityReentries[0].scene.opportunity.generation, 3);
     assert.equal(
-      admission.workItems[0].signal.writeOpportunityReentry.scene.opportunity.opportunityId,
+      delivered[0].extra.writeOpportunityReentries[0].scene.opportunity.opportunityId,
       writeOpportunityGenerationId(dedupeLineage, 3),
     );
   });

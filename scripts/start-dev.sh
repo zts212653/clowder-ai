@@ -51,6 +51,7 @@ print_start_dev_usage() {
         'Usage:' \
         '  ./scripts/start-dev.sh [--quick] [--memory|--no-redis] [--prod-web] [--debug]' \
         '                         [--profile=dev|production|opensource] [--daemon|-d]' \
+        '                         [--allow-account-regression] (accept new account unavailability)' \
         '                         [--] [--npm-registry=URL] [--pip-index-url=URL] [--hf-endpoint=URL]' \
         '  ./scripts/start-dev.sh --stop|stop' \
         '  ./scripts/start-dev.sh --status|status' \
@@ -91,6 +92,7 @@ PROD_WEB=false
 DEBUG_MODE=false
 PROFILE=""
 DAEMON_MODE=false
+ALLOW_ACCOUNT_REGRESSION=false
 for arg in "$@"; do
     case $arg in
         --quick|-q) QUICK_MODE=true ;;
@@ -99,6 +101,7 @@ for arg in "$@"; do
         --debug) DEBUG_MODE=true ;;
         --profile=*) PROFILE="${arg#*=}" ;;
         --daemon|-d) DAEMON_MODE=true ;;
+        --allow-account-regression) ALLOW_ACCOUNT_REGRESSION=true ;;
         --cat-cafe-daemon-token=*) ;;
         *)
             parse_manual_download_source_arg "$arg" || true
@@ -1514,10 +1517,44 @@ ensure_api_native_addons() {
     echo -e "${GREEN}  ✓ better-sqlite3 native 依赖已匹配当前 Node${NC}"
 }
 
+check_runtime_account_bindings() {
+    [ "${CAT_CAFE_DEPLOYMENT_ID:-}" = "runtime" ] || return 0
+    local checker="$PROJECT_DIR/packages/api/dist/scripts/runtime-account-preflight/cli.js"
+    local head package status=0
+    head=$(git -C "$PROJECT_DIR" rev-parse HEAD 2>/dev/null || true)
+    for package in shared api; do
+        if [ -z "$head" ] || [ ! -f "$PROJECT_DIR/packages/$package/dist/index.js" ] || \
+           [ "$(cat "$PROJECT_DIR/packages/$package/dist/.build-commit" 2>/dev/null)" != "$head" ]; then
+            echo "[accounts] Preflight unknown: candidate $package build invariant missing/stale. Continuing without a replacement availability claim; use the runtime wrapper to rebuild." >&2
+            return 0
+        fi
+    done
+    if [ ! -f "$checker" ]; then
+        echo "[accounts] Preflight unknown: candidate account preflight is missing. Continuing without an availability claim." >&2
+        return 0
+    fi
+    # The wrapper built the candidate; dotenv/root ownership have resolved.
+    # The checker compares the live API with that candidate, not with an empty
+    # baseline: existing rejected accounts must not make runtime unrestartable.
+    local args=(--api-port "$API_PORT")
+    [ "$ALLOW_ACCOUNT_REGRESSION" != true ] || args+=(--allow-account-regression)
+    node "$checker" "${args[@]}" || status=$?
+    if [ "$status" -eq 2 ]; then
+        # No services are owned yet; leave the existing runtime untouched.
+        trap - EXIT INT TERM
+        return 2
+    fi
+    if [ "$status" -ne 0 ]; then
+        echo "[accounts] Preflight unknown: checker failed; continuing partial startup without an availability claim." >&2
+    fi
+    return 0
+}
+
 # 主函数
 main() {
     guard_main_branch_start
     guard_runtime_redis_sanctuary
+    check_runtime_account_bindings || return $?
 
     # 1. 杀掉残余进程
     echo ""
@@ -1690,6 +1727,9 @@ if [[ "${1:-}" == "--status" ]] || [[ "${1:-}" == "status" ]]; then
 fi
 
 if [ "$DAEMON_MODE" = true ]; then
+    # Report a known regression to the caller before preparing a daemon or
+    # claiming that it started. The child rechecks immediately before cleanup.
+    check_runtime_account_bindings || exit $?
     maybe_migrate_legacy_daemon_state
     daemon_state prepare
 

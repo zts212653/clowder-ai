@@ -326,7 +326,7 @@ describe('F277 production Sidebar attention clusters', () => {
     vi.useRealTimers();
   });
 
-  it('offers the same durable create command from the ThreadItem menu fallback', async () => {
+  it('opens bulk selection from the ThreadItem menu and saves only explicit members', async () => {
     const mutations: unknown[] = [];
     mockApiFetch.mockImplementation((path: string, init?: RequestInit) => {
       if (path === '/api/labels') return jsonOk([]);
@@ -356,14 +356,17 @@ describe('F277 production Sidebar attention clusters', () => {
       (button) => button.textContent?.trim() === '整理 Group',
     );
     await act(async () => organize?.click());
-    const dialog = document.body.querySelector<HTMLElement>('[role="dialog"]');
-    expect(dialog?.textContent).toContain('与另一条对话新建 Group');
-    const create = [...(dialog?.querySelectorAll<HTMLButtonElement>('button') ?? [])].find(
-      (button) => button.textContent?.trim() === '新建 Group',
-    );
-    await act(async () => create?.click());
+    const editor = harness.container.querySelector<HTMLElement>('[data-testid="search-group-editor"]');
+    expect(editor?.textContent).toContain('整理 Group');
+    expect(mutations).toEqual([]);
+    await act(async () => editor?.querySelector<HTMLInputElement>('[data-select-thread="root-a"]')?.click());
+    await act(async () => editor?.querySelector<HTMLButtonElement>('[data-testid="search-group-save"]')?.click());
     await harness.flush();
-
-    expect(mutations).toContainEqual({ action: 'create', threadIds: ['root-a', 'root-b'] });
+    expect(mutations).toContainEqual({
+      action: 'organize',
+      threadIds: ['root-a', 'root-b'],
+      name: '新 Group',
+      expectedGroups: [],
+    });
   });
 });

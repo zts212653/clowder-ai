@@ -1,4 +1,9 @@
-import { type CloudBridgeOutboundReceiptV1, createCatId, isCloudBridgeOutboundReceiptV1 } from '@cat-cafe/shared';
+import {
+  type CloudBridgeOutboundReceiptV1,
+  type CloudBridgeRecoveryV1,
+  createCatId,
+  isCloudBridgeOutboundReceiptV1,
+} from '@cat-cafe/shared';
 import { createModuleLogger } from '../../../../../infrastructure/logger.js';
 import type { IMessageStore } from '../../stores/ports/MessageStore.js';
 import { resolveVisibleReplyParent } from '../../stores/visibility.js';
@@ -124,6 +129,7 @@ function parseVisibleNotice(
       tone: 'info' | 'warning';
       replyTo?: string;
       outboundReceipt?: CloudBridgeOutboundReceiptV1;
+      needsBindingRecovery?: boolean;
       idempotencyKey?: string;
       sessionRollover?: SessionRolloverNoticeMetadata;
     }
@@ -176,6 +182,7 @@ function parseVisibleNotice(
               outboundReceipt,
             }
           : {}),
+        ...(parsed.reason === 'needs-binding' ? { needsBindingRecovery: true } : {}),
       };
     }
     return undefined;
@@ -210,6 +217,19 @@ async function appendVisibleNotice(
         receipt: notice.outboundReceipt,
       })
     : undefined;
+  const cloudBridgeRecovery: CloudBridgeRecoveryV1 | undefined =
+    notice.needsBindingRecovery &&
+    outboundReceipt?.sourceSender.kind === 'user' &&
+    outboundReceipt.status === 'failed' &&
+    outboundReceipt.hostMessageId === undefined
+      ? {
+          v: 1,
+          kind: 'needs_binding',
+          sourceMessageId: outboundReceipt.sourceMessageId,
+          targetCatId: outboundReceipt.targetCatId,
+          dispatchInvocationId: outboundReceipt.dispatchInvocationId,
+        }
+      : undefined;
   await messageStore.append({
     userId: 'system',
     catId: null,
@@ -228,6 +248,7 @@ async function appendVisibleNotice(
         noticeTone: notice.tone,
         ...(notice.sessionRollover ? { sessionRollover: notice.sessionRollover } : {}),
         ...(outboundReceipt ? { cloudBridgeOutboundReceipt: outboundReceipt } : {}),
+        ...(cloudBridgeRecovery ? { cloudBridgeRecovery } : {}),
       },
     },
   });

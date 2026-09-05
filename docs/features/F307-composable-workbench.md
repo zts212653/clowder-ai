@@ -1,6 +1,6 @@
 ---
 feature_ids: [F307]
-related_features: [F063, F120, F131, F138, F223, F284, F290, F299, F306, F309]
+related_features: [F063, F120, F131, F138, F223, F284, F290, F299, F306, F309, F311]
 topics: [workspace, workbench, working-set, tabs, split, sidecar, restore, multi-agent, continuity]
 doc_kind: spec
 created: 2026-08-26
@@ -24,6 +24,10 @@ Architecture cell: `hub-action-surface`
 Map delta: `none through Phase C` — `hub-action-surface` already records F307 as the application-level
 working-set/layout owner; the personal adapters connect existing F063/F120/F232/F299 owners without creating
 a parallel Store, Queue, Router, or ownership cell.
+
+Post-activation delta: `hub-action-surface` additionally owns temporary main-area attention for opted-in
+Workspace surfaces. Domain owners advertise eligibility on their existing descriptor; they do not create a
+second layout shell, portal, modal, or feature-owned full-screen state.
 
 Why: 当前 cell 已登记 Workspace 导航、Preview、rich block 与 F284 右侧上下文 Workspace，却把全局
 typed working set 的 ownership 错挂在 F284/F290 关系上。F307 将 application-level Workbench 的
@@ -66,6 +70,31 @@ Phase A–C 曾用启动变量、非 production/runtime 构建许可和 URL quer
 因此 Phase D 的产品终态是不再存在 F307 专属开关：普通 Thread 的右侧 Workspace 默认由 F307
 Workbench owner 挂载；无需启动变量、编译许可位或 query。Alpha 继续只验收已合入 `origin/main`
 的切面，Feature worktree 继续承载未合入自测，但二者都使用与 Runtime 相同的普通 URL 产品入口。
+
+### Temporary main-area attention contract
+
+Architecture cell: `hub-action-surface`
+
+当领域 surface 需要比日常 Workspace 右栏更大的持续阅读空间时，它现有的
+`WorkspaceSurfaceDescriptor.capabilities` 可以声明 `mainAreaAttention: true`。这只是 eligibility，
+不是 layout 指令：只有 F307 能进入或退出主区 attention，而且只接纳当前 active、仍在 working set
+中的 surface。
+
+- `enterMainAreaAttention(surfaceId)` / `exitMainAreaAttention()` 是 canonical host actions。所选 surface
+  ID 只是瞬态 presentation state，绝不写入 persisted working-set topology。
+- 真实 `ChatContainer` 消费 F307 状态，把同一个 `ContextualWorkspaceChrome` host 投影到主内容区；
+  不 portal、不重挂 owner surface，原 Chat DOM tree 在 attention 期间保持 mounted，只停止可见交互。
+- 固定 Workbench control rail 提供进入/返回。在 attention surface 上，tab `×` 表示返回 Workspace
+  右栏而不是 detach；返回后保留同一 descriptor、owner component instance、选择与滚动。普通右栏
+  中的 tab close 继续保持 detach-only 语义。
+- 折叠 Workspace、离开 Workspace mode、切换 Chat split view、失去 desktop eligibility、激活或
+  detach 另一 surface，都会 fail-closed 结束瞬态 attention。
+- F311 继续拥有 Evolution Program 内容、数据、lifecycle 与 surface 内部的判断/历史导航；它只让现有
+  `evolution-program` descriptor opt in，不拥有 Chat/Workspace geometry。
+
+验收必须走真实 Thread shell，而不是只断言 width：Program 从窄栏出发，进入真实主内容 rectangle，
+保持 Chat 与 Program DOM identity 及 Program scroll，再从 tab `×` 返回，active surface 与 working set
+均不改变。
 
 ## Product Thesis — Workbench，不是 Tabification
 
@@ -255,3 +284,4 @@ Artifact 与多 Café 信任闭环；需要进入 Workbench 的对象通过 adap
 | KD-17 | canonical Workspace Home 本身不渲染 `+`：它已经是新增 surface 的目的地。只有 working set 至少包含一个具体 surface 时才显示 `[tabs][+]`；点击 `+` 只把焦点切回同一个完整 Home，不创建新 Workspace、Home tab、popover 或 topology 节点 | `[thread-id]#0001788108855969-000311-aa6431d2`, `[thread-id]#0001788139542841-000491-3224c2e7` |
 | KD-18 | Phase D operator KEEP 后，F307 是普通 Workspace 的默认 owner；删除启动变量、编译许可位与 URL query 三重候选开关。F290 Collective adapter 是 F290-owned downstream consumer，不再阻塞 generic Workbench activation/closure | `[thread-id]#0001788145510558-000063-394b8bdd` |
 | KD-19 | Runtime 真实使用下，tab 内容区可以滚动，但 Home / `+`、working-set 管理与 split 退出必须位于不滚动的常驻控制轨；active tab 自动进入可视区。批量收束只显式 detach 其他未固定 host，保留 active 与 pinned，不设静默上限、不自动驱逐、不停止或删除 owner object。390px full-screen Workspace 另有触摸可发现的退出，并保证折叠后的全局召回入口可点击 | `[thread-id]#0001788486535272-000059-830580ca`, `[thread-id]` independent vision review |
+| KD-20 | 领域 surface 只能用 typed `mainAreaAttention` capability 申请主区注意力，F307 仍是唯一 layout owner。晋升投影同一 Workspace/owner 实例并保持 Chat DOM 连续；attention 中 tab `×` 只返回右栏，不能 detach 对象。attention 是瞬态宿主状态，不持久化、不由 F311 自建 modal/portal/full-screen shell | operator `[thread-id]#0001788616059447-000158-f6ffe25e`; F311 source `[thread-id]#0001788616915473-000196-6144e483` |

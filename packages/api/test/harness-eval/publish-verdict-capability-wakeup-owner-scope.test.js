@@ -80,7 +80,7 @@ describe('handlePublishVerdict capability-wakeup owner scope', () => {
     const cwGenerator = createCapabilityWakeupGeneratorAdapter(provider);
     const mockGitPublisher = {
       async publishOnIsolatedWorktree(opts) {
-        const isolatedRoot = join(root, '..', 'cw-owner-iso');
+        const isolatedRoot = join(root, 'cw-owner-iso');
         seedCanonicalMeasurementCensusState(isolatedRoot);
         await opts.stage(isolatedRoot);
         return { commitSha: 'unreachable', prUrl: 'unreachable' };

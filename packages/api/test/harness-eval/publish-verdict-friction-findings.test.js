@@ -137,7 +137,7 @@ const targetResolver = {
 function isolatedPublisher(label, captures) {
   return {
     async publishOnIsolatedWorktree(opts) {
-      const iso = join(root, '..', `f313-friction-${label}`);
+      const iso = join(root, `f313-friction-${label}`);
       rmSync(iso, { recursive: true, force: true });
       mkdirSync(join(iso, 'docs', 'harness-feedback', 'eval-domains'), { recursive: true });
       writeFileSync(join(iso, 'docs', 'harness-feedback', 'eval-domains', 'eval-friction.yaml'), FRICTION_YAML);

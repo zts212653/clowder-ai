@@ -16,6 +16,7 @@ code_anchors:
   - packages/api/src/infrastructure/capability-evolution/program-event-log.ts
   - packages/api/src/infrastructure/capability-evolution/program-event-appender.ts
   - packages/api/src/infrastructure/capability-evolution/program-service.ts
+  - packages/api/src/infrastructure/capability-evolution/program-owner-surface-resolvers.ts
   - packages/api/src/infrastructure/capability-evolution/change/program-change-bridge.ts
   - packages/api/src/infrastructure/capability-evolution/change/program-change-owner-contract.ts
   - packages/api/src/infrastructure/capability-evolution/change/program-change-owner-event.ts
@@ -35,6 +36,7 @@ doc_anchors:
   - docs/features/F266-eval-verdict-closure-control-plane.md
   - docs/features/F267-eval-measurement-validity.md
   - docs/features/F278-paw-feel-disposition-inbox.md
+  - docs/features/F117-message-delivery-lifecycle.md
   - docs/features/F246-approval-hub.md
   - docs/features/F307-composable-workbench.md
   - docs/features/F309-collaborative-content-plane.md
@@ -69,12 +71,20 @@ Program identity and its own lifecycle are durable user-visible coordination tru
 | Measurement validity | F267 and the named measurement/source owner | Require and retain the issued measurement-certificate reference; honor its `insufficient`, cohort, version, holdout, and intervention constraints | A certificate issuer, frozen cohort, decision procedure, exposure calculation, or intervention-card authority |
 | Verdict lifecycle and re-evaluation | F266 / F313 | Retain case, proposal, decision, intervention-receipt, exact asset-version, freshness-proof, and outcome references; a changed intervention additionally retains loaded-runtime and enters deciding only after a fresh post-load outcome, while an owner no-change receipt retains the unchanged exact version and requires a fresh post-receipt outcome without inventing a deployment | Case/proposal identity, Approval lifecycle, dispatch custody, TaskStore subjects, F167 leases, mutation records, verdicts, re-evaluation scheduling, or an outcome ledger |
 | Paw-feel responsibility | F278 | Federate the five-state responsibility projection, denominator, evidence references, and durable receipt as an owner-backed join | Signal body, disposition writer, inbox, duty ledger, responsibility state machine, or a second durable receipt |
+| Direct owner message | F117 / canonical MessageStore | Resolve only `F117/message:<messageId>` + `thread:<threadId>` + `F117/instrumentation:owner-message-v1` when the message is a delivered, live, publicly visible, non-connector owner-authored row in that owner-owned thread; malformed connector provenance fails closed | Message text, correction classification, feedback lifecycle, generic sensing, or a second message/feedback store; F267/source-owner measurement still decides whether the referenced message is relevant evidence |
 | Human approval | F246 through the F266/F313 producer | An authenticated cat invocation may submit only the owner-backed intervention ref plus an idempotency key; retain the resulting canonical references | Browser-authored proposal creation, caller-authored owner/origin/authorization, ApprovalEnvelope state, proposal database, decision authority, or a second approval inbox |
 | Asset mutation and rollback | The named canonical asset owner | Ask the owner port to act only after the canonical approval/target snapshot is eligible; retain its opaque version and receipt references | Permission payloads, mutation/rollback execution, asset content, deployment state, or inferred owner authority |
 | Working surface | F307 | Supply a typed Program surface descriptor when a real Program has a named consumer | Workbench layout, tab topology, user-facing object state, or a new UI surface |
 | Content and feedback context | F309, F281, F300, and each content/source owner | Link canonical anchors, patches, feedback/episode evidence, and owner-backed sensing reads | Content versions, patch/writeback receipts, feedback/episode truth, memory truth, or a replacement self-sensing system |
 
 The value owner is accountable for the Program decision; the named asset/domain owner remains accountable for mutations and their receipts. F311 may coordinate the sequence, but it cannot turn a missing source-owner receipt into a positive Program outcome.
+
+Architecture cell: `capability-evolution-control`
+Map delta: none — F117/MessageStore retains direct-message lifecycle and body truth; F311 adds one read-only owner-surface resolver and stores only the caller-supplied canonical refs after validation.
+Why: a natural operator correction can be source evidence without being an F281 disposition; validating its existing message identity must not create an F300 substitute or a centralized feedback ledger.
+Canonical source: `packages/api/src/domains/cats/services/stores/ports/MessageStore.ts#IMessageStore.getById` + `docs/features/F117-message-delivery-lifecycle.md#Phase-A-deliveryStatus-字段--后端收口`
+Consumer evidence: `rg -n "createEvolutionOwnerSurfaceResolvers|sourceResolvers" packages/api/src/index.ts packages/api/src/infrastructure/capability-evolution packages/api/test/capability-evolution-owner-surface-resolvers.test.js`
+Claim guard: “only a live, publicly visible direct owner message in the exact owner thread resolves” → `capability-evolution-owner-surface-resolvers.test.js` → red when owner, thread, source provenance, visibility, deletion, delivery, instrumentation, or read-port truth is absent.
 
 ## Use This When
 

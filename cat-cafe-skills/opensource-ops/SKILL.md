@@ -1,10 +1,10 @@
 ---
 name: opensource-ops
 description: >
-  Portable workflow for operating on external PRs / issues from a child thread.
-  Use when: a thread is reviewing, triaging, intaking, or advising on an external PR or issue.
-  Not for: internal feature work with no external artifact, generic thread orchestration, or replacing the external maintainer's own decision.
-  Output: grounded provider-neutral subject + verified author/authenticated-identity comparison + adoption five-question answer + review/tracking/closure routed to the correct owner.
+  Portable workflow for external PR / issue operations and source-to-public publishing.
+  Use when: a thread is reviewing, triaging, intaking, or advising on an external artifact, or must distinguish outbound sync from a public release.
+  Not for: internal feature work with no external artifact, generic thread orchestration, replacing the external maintainer's own decision, or inventing deployment-specific export commands.
+  Output: grounded provider-neutral subject + verified author/authenticated-identity comparison + adoption five-question answer + correctly separated sync/release custody.
 triggers:
   - "opensource-ops"
   - "社区 PR"
@@ -12,6 +12,8 @@ triggers:
   - "GitHub PR review"
   - "PR intake"
   - "issue triage"
+  - "outbound sync"
+  - "public release"
 ---
 
 # Open Source Ops — 外部 PR/issue 操作
@@ -87,6 +89,25 @@ triggers:
 5. **Custody 边界**：谁负责修、谁负责 review、谁负责 merge、谁负责后续回归测试 / 文档 / 同步？
 
 回答必须引用 grounding 步骤中的具体字段（`verifiedAuthorIdentity`、`providerSubject.headSha`、`authenticatedRole` 等），不能只给主观结论。
+
+## Source-to-public publishing
+
+当一个仓库是真相源、另一个仓库是公开分发面时，把同步和发版当作两个独立状态迁移。这里定义的是可移植边界；具体 exporter、ledger、gate 与 tag 命令仍以当前 deployment 的真相源为准。
+
+### D: Outbound Sync
+
+1. 先核清 public main 上的社区改动与 source ownership，再冻结 exact source revision、exact public base 和 reconciliation evidence；冻结后的新提交进入下一班。
+2. 同一 source cut 只跑一次所选 source gate。已有写授权时，由 canonical writer 持有唯一 candidate-public validation；尚无写授权时，停在 no-write validate / write handoff。
+3. writer 只能从已冻结的 public base 生成候选内容，公共落地仍走可审查的 PR，并记录 source/public provenance。
+4. 未合入的外部 PR 本身不会被 writer 改写；只有明确的同车约束、已落 public delta 或候选行为冲突，才构成同步阻塞。
+
+### G: Public Release
+
+1. 给当前稳定 public main 发版时，绑定 exact public HEAD 与最近一次可信 sync provenance；不要为了制造发版证据而伪造新的 source export。
+2. release 只验证其明确承诺的分发物；没有承诺安装包时，零二进制资产可以是正确终态。
+3. 若一次 outbound sync 同时有明确 release intent，则让 release 引用该已落 public cut；同步与发版的 terminal 仍分别记录。
+
+**Sync ≠ Release**：outbound sync 更新公开分支，public release 给一个已经验证的公开状态打稳定承诺。前者完成不自动证明后者完成，后者也不要求凭空重跑前者。
 
 ## Step 4: 反向溯源（reverse provenance）
 

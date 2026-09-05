@@ -18,12 +18,18 @@ import { setPendingCrossPostScroll } from '@/utils/crosspost-scroll-target';
 import { doesAssistantMessageRenderBubble } from './assistant-message-renderability';
 import { CatAvatar } from './CatAvatar';
 import { CliDiagnosticsPanel, isKnownReason } from './CliDiagnosticsPanel';
+import { CloudBindingRecoveryCard } from './CloudBindingRecoveryCard';
 import { CollapsibleMarkdown } from './CollapsibleMarkdown';
 import { ConnectorBubble } from './ConnectorBubble';
 import { ContentBlocks } from './ContentBlocks';
 import { CopyIdButton } from './CopyIdButton';
 import { CliOutputBlock } from './cli-output/CliOutputBlock';
 import { toCliEvents } from './cli-output/toCliEvents';
+import {
+  hasCloudBindingRecoveryMetadata,
+  isLinkedCloudBindingRecoveryNotice,
+  projectCloudBindingRecovery,
+} from './cloud-binding-recovery';
 import { DirectionPill } from './DirectionPill';
 import { EvidencePanel } from './EvidencePanel';
 import { GovernanceBlockedCard } from './GovernanceBlockedCard';
@@ -168,6 +174,7 @@ interface ChatMessageProps {
 function needsTimelineProjection(message: ChatMessageType): boolean {
   return Boolean(
     message.extra?.queueReceipt ||
+      hasCloudBindingRecoveryMetadata(message) ||
       message.extra?.turnExecution ||
       message.extra?.auxiliaryTurnExecutions?.length ||
       (message.source?.connector === 'hold-ball' && typeof message.source.meta?.taskId === 'string') ||
@@ -221,6 +228,7 @@ export const ChatMessage = memo(function ChatMessage({
   const isSystem = message.type === 'system';
   const isSummary = message.type === 'summary';
   const isConnector = message.type === 'connector';
+  const cloudBindingRecovery = isUser ? projectCloudBindingRecovery(message, threadMessages) : undefined;
   const projectedSystemContent = message.extra?.systemInfo
     ? ((
         formatVisibleSystemInfo(
@@ -553,6 +561,7 @@ export const ChatMessage = memo(function ChatMessage({
 
   if (isConnector && message.source) {
     if (isConnectorSystemNotice(message)) {
+      if (isLinkedCloudBindingRecoveryNotice(message, threadMessages)) return null;
       return <SystemNoticeBar message={message} />;
     }
     return <ConnectorBubble message={message} threadId={currentThreadId} timelineMessages={threadMessages} />;
@@ -721,6 +730,14 @@ export const ChatMessage = memo(function ChatMessage({
         ) : (
           <CollapsibleMarkdown content={message.content} disclosureKey={bodyDisclosureKey} />
         )}
+        {cloudBindingRecovery && renderThreadId ? (
+          <CloudBindingRecoveryCard
+            threadId={renderThreadId}
+            sourceMessageId={message.id}
+            targetCatId={cloudBindingRecovery.targetCatId}
+            attemptId={cloudBindingRecovery.attemptId}
+          />
+        ) : null}
         {message.extra?.custodyOfferV1 ? (
           <CustodyOfferCard sourceMessageId={message.id} expectedOffer={message.extra.custodyOfferV1} />
         ) : null}

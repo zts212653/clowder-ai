@@ -5,7 +5,7 @@ import type { ReactNode } from 'react';
 import { AttentionArrangeToolbar } from '@/components/ThreadSidebar/AttentionArrangeToolbar';
 import type { AttentionCluster, AttentionRenderItem } from '@/components/ThreadSidebar/attention-clusters';
 import { ConversationGroupOrganizerDialog } from '@/components/ThreadSidebar/ConversationGroupOrganizerDialog';
-import type { ThreadAttentionGroupCommand } from '@/components/ThreadSidebar/use-attention-clusters';
+import type { LegacyThreadAttentionGroupCommand } from '@/components/ThreadSidebar/use-attention-clusters';
 import type { SidebarSnapshotRow } from '@/stores/sidebarProjectionStore';
 import { F277ClusterShell } from './cluster-shell';
 import type { F277PreviewThread } from './fixtures';
@@ -28,7 +28,7 @@ interface PreviewAttentionListProps {
   onToggleCluster: (viewId: string, expanded: boolean) => void;
   onRenameCluster: (cluster: AttentionCluster, alias: string | null) => void;
   onDropCluster: (sourceThreadId: string, cluster: AttentionCluster) => void;
-  onMutateGroup: (command: ThreadAttentionGroupCommand) => void;
+  onMutateGroup: (command: LegacyThreadAttentionGroupCommand) => void;
   onSetArrangeMode: (arranging: boolean) => void;
   onSetDraggedThreadId: (threadId: string | null) => void;
   onCloseOrganizer: () => void;

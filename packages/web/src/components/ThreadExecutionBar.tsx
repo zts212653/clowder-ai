@@ -6,7 +6,7 @@ import { formatCatName, useCatData } from '@/hooks/useCatData';
 import { useExecutionRecoveryVerification } from '@/hooks/useExecutionRecoveryVerification';
 import { useThreadLiveness } from '@/hooks/useThreadScopedSelectors';
 import { catColorVar } from '@/lib/cat-slug';
-import { useActiveExecutionStore } from '@/stores/activeExecutionStore';
+import { activeExecutionKey, useActiveExecutionStore } from '@/stores/activeExecutionStore';
 import type { AppServerLifecycleSnapshot, AppServerLifecycleStage } from '@/stores/chat-types';
 import { useChatStore } from '@/stores/chatStore';
 import { useToastStore } from '@/stores/toastStore';
@@ -154,7 +154,7 @@ export function ThreadExecutionBar({ threadId }: ThreadExecutionBarProps) {
           };
           return (
             <CatStatusChip
-              key={`${execution.kind}:${execution.executionId}`}
+              key={activeExecutionKey(execution)}
               execution={execution}
               label={info.label}
               color={info.color}

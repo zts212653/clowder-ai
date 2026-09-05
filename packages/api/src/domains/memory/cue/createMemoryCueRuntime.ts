@@ -1,6 +1,7 @@
 import type { AutoDreamStore } from '../../auto-dream/AutoDreamStore.js';
 import type { IMessageStore } from '../../cats/services/stores/ports/MessageStore.js';
 import type { TasteRepository } from '../../taste/services/TasteRepository.js';
+import type { EntityRegistryStore } from '../EntityRegistry.js';
 import type { IEventMemoryStore } from '../EventMemoryStore.js';
 import type { IEvidenceStore } from '../interfaces.js';
 import type { PersonMemoryRecallService } from '../people/PersonMemoryRecallService.js';
@@ -41,6 +42,7 @@ export function createMemoryCueRuntime(input: {
   evidenceStore: Pick<IEvidenceStore, 'getByAnchor'>;
   messageStore: Pick<IMessageStore, 'getById'>;
   eventStore: Pick<IEventMemoryStore, 'listEvents' | 'getEvent'>;
+  entityRegistry: Pick<EntityRegistryStore, 'isCurrentVisibleRevision'>;
   personRecall?: PersonMemoryRecallService;
   tasteRepository: TasteRepository;
   ownerUserId: string;
@@ -76,7 +78,7 @@ export function createMemoryCueRuntime(input: {
   });
   const catOwnedSeedSource = new CatOwnedSeedMemoryCueSource(input.autoDreamStore);
   const registry = new MemoryCueResolverRegistry([
-    new PersonEntityCueResolver(personSource ?? { resolve: async () => null }),
+    new PersonEntityCueResolver(personSource ?? { resolve: async () => null }, input.entityRegistry),
     new OperationalPrecedentCueResolver(operationalSource),
     new TasteCueResolver(tasteSource),
     new ProfileCueResolver(profileSource),

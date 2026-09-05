@@ -177,26 +177,29 @@ describe('F287 D1 Alden golden journey', { concurrency: false }, () => {
     );
 
     const registry = new MemoryCueResolverRegistry([
-      new PersonEntityCueResolver({
-        async resolve(input) {
-          assert.deepEqual(input, {
-            ownerUserId: 'owner-1',
-            threadId: 'thread-current',
-            entityId: 'person:alden',
-            matchedAlias: 'Alden',
-            sourceMessageId: 'message-current',
-          });
-          return {
-            title: 'Alden',
-            summary: 'Relationship and interaction memory are available.',
-            anchor: 'person-memory:person-alden',
-            revision: 'sha256:alden-v1',
-            asOf: 1_785_600_000_000,
-            visibility: 'owner_private',
-            drillFamily: 'person_memory',
-          };
+      new PersonEntityCueResolver(
+        {
+          async resolve(input) {
+            assert.deepEqual(input, {
+              ownerUserId: 'owner-1',
+              threadId: 'thread-current',
+              entityId: 'person:alden',
+              matchedAlias: 'Alden',
+              sourceMessageId: 'message-current',
+            });
+            return {
+              title: 'Alden',
+              summary: 'Relationship and interaction memory are available.',
+              anchor: 'person-memory:person-alden',
+              revision: 'sha256:alden-v1',
+              asOf: 1_785_600_000_000,
+              visibility: 'owner_private',
+              drillFamily: 'person_memory',
+            };
+          },
         },
-      }),
+        { isCurrentVisibleRevision: () => true },
+      ),
       new OperationalPrecedentCueResolver({ resolve: async () => null }),
       new TasteCueResolver({ resolve: async () => null }),
       new ProfileCueResolver(),
@@ -220,6 +223,7 @@ describe('F287 D1 Alden golden journey', { concurrency: false }, () => {
             entityId: 'person:alden',
             matchedAlias: 'Alden',
             sourceMessageId: 'message-current',
+            sourceRevision: 'sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
           },
         },
       ],
@@ -373,6 +377,7 @@ describe('F287 D1 Alden golden journey', { concurrency: false }, () => {
     for (const result of [serial, parallel]) {
       assert.equal(result.calls.length, 1, 'one resolver call per actual cat invocation');
       assert.equal(result.calls[0].seeds.length, 2, 'one Entity seed and one explicit approved Taste seed');
+      assert.match(result.calls[0].seeds[0].payload.sourceRevision, /^sha256:[a-f0-9]{64}$/);
       assert.deepEqual(result.calls[0].seeds[0], {
         kind: 'subject_seen',
         producer: 'entity_nudge',
@@ -381,6 +386,7 @@ describe('F287 D1 Alden golden journey', { concurrency: false }, () => {
           entityId: 'person:alden',
           matchedAlias: 'Alden',
           sourceMessageId: 'message-current',
+          sourceRevision: result.calls[0].seeds[0].payload.sourceRevision,
         },
       });
       assert.deepEqual(result.calls[0].seeds[1], {

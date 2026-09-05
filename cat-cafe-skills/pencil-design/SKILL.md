@@ -1,6 +1,6 @@
 ---
 name: pencil-design
-tips_exempt: internal shared-reference coordinate repair; no user-visible capability change
+tips_exempt: 2026-09-05 correct existing Pencil IDE host identifiers; no new user-visible capability
 description: >
   使用 Pencil MCP 创建/编辑 .pen 设计文件，或导出为 React 代码。
   Use when: 设计 UI、编辑 .pen 文件、从设计稿生成代码。
@@ -19,7 +19,9 @@ triggers:
 Pencil 是装在 **Antigravity IDE** 上的设计扩展。
 .pen 文件是加密格式，**只能通过 Pencil MCP 工具读写**，Read/Grep/cat 无法解析。
 
-配置要求：MCP 配置必须加 `--app antigravity`（不是默认 IDE）。
+配置要求：当前 Antigravity IDE 的 MCP 参数是 `--app antigravity_ide`；
+VS Code 是 `--app visual_studio_code`。不要沿用旧的 `antigravity` / `vscode`
+socket 标识；Clowder AI 的 resolver 会按扩展安装目录自动生成正确参数。
 
 ## SOP 位置
 
@@ -138,7 +140,7 @@ get_screenshot（验证）
 | **🔴 做独立 dashboard 而不是集成扩展** | 和产品割裂 | 问清楚是"扩展"还是"全新" |
 | 用 Read/Grep 读 .pen 文件 | 乱码，无法解析 | 只用 Pencil MCP 工具 |
 | batch_design 超过 25 ops | 工具报错 | 拆成多次调用 |
-| MCP 配置未加 `--app antigravity` | 工具不可用 | 加上后等下次激活 |
+| MCP 使用旧 `--app antigravity` / `vscode` 标识 | 找得到扩展却连不上当前 IDE socket | 让 resolver 生成 `antigravity_ide` / `visual_studio_code`，新 invocation 生效 |
 | 跨调用复用 binding | binding 失效 | 每次调用重新声明 |
 | `open_document("new")` 后忘记保存 | 内容丢失 | 告诉operator完整路径，请求 Cmd+S |
 | `get_style_guide` 的 tags 传字符串 | 参数格式错误 | 必须传 JSON 数组 |

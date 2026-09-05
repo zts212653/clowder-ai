@@ -32,6 +32,39 @@ describe('HandoffDigestGenerator', () => {
     { role: 'assistant', content: 'Done, applied patch.', timestamp: 1709700020000 },
   ];
 
+  test('versioned gateway keeps one v1 and preserves tenant query/hash', async () => {
+    let actual;
+    await generateHandoffDigest({
+      handoffSummaries,
+      extractiveDigest,
+      recentMessages,
+      apiKey: 'FAKE',
+      baseUrl: 'https://gateway.invalid/v1?tenant=fixture#part',
+      fetchFn: async (url) => {
+        actual = url;
+        return { ok: false };
+      },
+    });
+    assert.equal(actual, 'https://gateway.invalid/v1/messages?tenant=fixture#part');
+  });
+
+  test('invalid endpoint scheme never calls fetch', async () => {
+    let calls = 0;
+    const result = await generateHandoffDigest({
+      handoffSummaries,
+      extractiveDigest,
+      recentMessages,
+      apiKey: 'FAKE',
+      baseUrl: 'file:///tmp/fixture',
+      fetchFn: async () => {
+        calls++;
+        return { ok: false };
+      },
+    });
+    assert.equal(result, null);
+    assert.equal(calls, 0);
+  });
+
   test('returns markdown body on successful API response', async () => {
     const mockFetch = async () => ({
       ok: true,

@@ -198,6 +198,7 @@ type ExtraCarrierPersistence = ExtraCarrierPersistenceClassification<{
   meetingArtifact: 'parsed';
   dynamicSceneEntries: 'parsed';
   writeOpportunityReentry: 'parsed';
+  writeOpportunityReentries: 'parsed';
   writeOpportunityPresentationRetry: 'parsed';
   freshness: 'parsed';
   supplement: 'parsed';
@@ -385,6 +386,18 @@ export function safeParseExtra(raw: string | undefined): StoredMessage['extra'] 
     if (writeOpportunityReentry.success) {
       result.writeOpportunityReentry = writeOpportunityReentry.data as WriteOpportunityReentryCarrierV1;
       hasField = true;
+    }
+
+    if (Array.isArray(parsed.writeOpportunityReentries) && parsed.writeOpportunityReentries.length <= 8) {
+      const reentries = (parsed.writeOpportunityReentries as unknown[]).map((candidate: unknown) =>
+        writeOpportunityReentryCarrierV1Schema.safeParse(candidate),
+      );
+      if (reentries.length > 0 && reentries.every((candidate) => candidate.success)) {
+        result.writeOpportunityReentries = reentries.map(
+          (candidate) => candidate.data as WriteOpportunityReentryCarrierV1,
+        );
+        hasField = true;
+      }
     }
 
     const writeOpportunityPresentationRetry = writeOpportunityPresentationRetryCarrierV1Schema.safeParse(

@@ -147,7 +147,7 @@ describe('F287 D2 billing-only golden journey', () => {
     const episodeStore = new MemoryCueEpisodeStore(evidenceStore.getDb());
     const handles = new MemoryCueDrillHandleService(Buffer.alloc(32, 7), episodeStore);
     const registry = new MemoryCueResolverRegistry([
-      new PersonEntityCueResolver({ resolve: async () => null }),
+      new PersonEntityCueResolver({ resolve: async () => null }, { isCurrentVisibleRevision: () => false }),
       new OperationalPrecedentCueResolver(source),
       new TasteCueResolver({ resolve: async () => null }),
       new ProfileCueResolver(),

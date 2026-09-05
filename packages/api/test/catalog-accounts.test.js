@@ -4,6 +4,12 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, it } from 'node:test';
+import { migrateCatalogAccounts, readCatalogAccounts as readAccountSnapshot } from '../dist/config/catalog-accounts.js';
+
+function migrateAndReadAccounts(projectRoot) {
+  migrateCatalogAccounts(projectRoot);
+  return readAccountSnapshot(projectRoot);
+}
 
 describe('global accounts (clowder-ai#340)', () => {
   let globalRoot;
@@ -73,10 +79,8 @@ describe('global accounts (clowder-ai#340)', () => {
     assert.ok(result.b);
   });
 
-  it('migrates project-level accounts to global on first read', async () => {
-    const { readCatalogAccounts, resetMigrationState, resolveAccountsPath } = await import(
-      '../dist/config/catalog-accounts.js'
-    );
+  it('migrates project-level accounts to global on explicit migration', async () => {
+    const { resetMigrationState, resolveAccountsPath } = await import('../dist/config/catalog-accounts.js');
     resetMigrationState();
 
     // Write a catalog with accounts section in project
@@ -93,7 +97,7 @@ describe('global accounts (clowder-ai#340)', () => {
     await writeFile(join(projectRoot, '.cat-cafe', 'cat-catalog.json'), JSON.stringify(catalog, null, 2), 'utf-8');
 
     // First read triggers migration
-    const result = readCatalogAccounts(projectRoot);
+    const result = migrateAndReadAccounts(projectRoot);
     assert.equal(result.claude.protocol, 'anthropic');
     assert.equal(result['my-glm'].baseUrl, 'https://open.bigmodel.cn/api/paas/v4');
 
@@ -112,9 +116,7 @@ describe('global accounts (clowder-ai#340)', () => {
   });
 
   it('skips compatible duplicate project account IDs without overwriting; keeps skipped keys in project', async () => {
-    const { writeCatalogAccount, readCatalogAccounts, resetMigrationState } = await import(
-      '../dist/config/catalog-accounts.js'
-    );
+    const { writeCatalogAccount, resetMigrationState } = await import('../dist/config/catalog-accounts.js');
     resetMigrationState();
 
     // Pre-populate global with 'existing' account
@@ -134,7 +136,7 @@ describe('global accounts (clowder-ai#340)', () => {
     };
     await writeFile(join(projectRoot, '.cat-cafe', 'cat-catalog.json'), JSON.stringify(catalog, null, 2), 'utf-8');
 
-    const result = readCatalogAccounts(projectRoot);
+    const result = migrateAndReadAccounts(projectRoot);
     assert.equal(result.existing.authType, 'oauth', 'existing global key must not be overwritten');
     assert.ok(result['new-from-project'], 'new key from project should be merged');
 
@@ -149,7 +151,7 @@ describe('global accounts (clowder-ai#340)', () => {
   });
 
   it('migrates project-level legacy provider-profiles.json into global accounts', async () => {
-    const { readCatalogAccounts, resetMigrationState } = await import('../dist/config/catalog-accounts.js');
+    const { resetMigrationState } = await import('../dist/config/catalog-accounts.js');
     resetMigrationState();
 
     // Write legacy provider-profiles.json at project level (old installer output)
@@ -167,8 +169,8 @@ describe('global accounts (clowder-ai#340)', () => {
       'utf-8',
     );
 
-    // Reading accounts should trigger project-level legacy migration
-    const result = readCatalogAccounts(projectRoot);
+    // Explicitly run project-level legacy migration
+    const result = migrateAndReadAccounts(projectRoot);
     // clowder-ai#340: protocol not migrated — derived at runtime from well-known account IDs.
     assert.equal(result['my-custom'].protocol, undefined);
     assert.equal(result['my-custom'].baseUrl, 'https://custom.api/v1');
@@ -180,16 +182,16 @@ describe('global accounts (clowder-ai#340)', () => {
   });
 
   it('propagates global legacy provider-profile migration errors instead of failing open', async () => {
-    const { readCatalogAccounts, resetMigrationState } = await import('../dist/config/catalog-accounts.js');
+    const { resetMigrationState } = await import('../dist/config/catalog-accounts.js');
     resetMigrationState();
 
     await writeFile(join(globalRoot, '.cat-cafe', 'provider-profiles.json'), '{"version":2,"profiles":[', 'utf-8');
 
-    assert.throws(() => readCatalogAccounts(projectRoot), /Unexpected end of JSON input|JSON/i);
+    assert.throws(() => migrateAndReadAccounts(projectRoot), /Unexpected end of JSON input|JSON/i);
   });
 
   it('infers legacy api_key authType from mode/kind before migrating secrets', async () => {
-    const { readCatalogAccounts, resetMigrationState } = await import('../dist/config/catalog-accounts.js');
+    const { resetMigrationState } = await import('../dist/config/catalog-accounts.js');
     resetMigrationState();
 
     const legacyMeta = {
@@ -219,7 +221,7 @@ describe('global accounts (clowder-ai#340)', () => {
       'utf-8',
     );
 
-    const result = readCatalogAccounts(projectRoot);
+    const result = migrateAndReadAccounts(projectRoot);
     assert.equal(result['installer-managed'].authType, 'api_key');
 
     const credRaw = await readFile(join(globalRoot, '.cat-cafe', 'credentials.json'), 'utf-8');
@@ -228,7 +230,7 @@ describe('global accounts (clowder-ai#340)', () => {
   });
 
   it('migrates multiple projects without losing accounts', async () => {
-    const { readCatalogAccounts, resetMigrationState } = await import('../dist/config/catalog-accounts.js');
+    const { resetMigrationState } = await import('../dist/config/catalog-accounts.js');
     resetMigrationState();
 
     // Project A has account 'a'
@@ -262,8 +264,8 @@ describe('global accounts (clowder-ai#340)', () => {
     );
 
     // Read A first, then B — both should migrate
-    readCatalogAccounts(projectA);
-    const result = readCatalogAccounts(projectB);
+    migrateAndReadAccounts(projectA);
+    const result = migrateAndReadAccounts(projectB);
     assert.ok(result.a, 'account from project A should exist');
     assert.ok(result.b, 'account from project B should exist');
 
@@ -273,9 +275,7 @@ describe('global accounts (clowder-ai#340)', () => {
   });
 
   it('skips conflicting project catalog accounts without crashing (global wins)', async () => {
-    const { readCatalogAccounts, resetMigrationState, writeCatalogAccount } = await import(
-      '../dist/config/catalog-accounts.js'
-    );
+    const { resetMigrationState, writeCatalogAccount } = await import('../dist/config/catalog-accounts.js');
     resetMigrationState();
 
     // Global already has 'shared' with different fields
@@ -306,14 +306,14 @@ describe('global accounts (clowder-ai#340)', () => {
     );
 
     // Should NOT throw — project catalog is stale, global wins
-    const result = readCatalogAccounts(projectRoot);
+    const result = migrateAndReadAccounts(projectRoot);
     // Global version preserved, not overwritten by stale project version
     assert.equal(result.shared.baseUrl, 'https://global.example/v1');
     assert.equal(result.shared.displayName, 'Global Shared');
   });
 
   it('migrates v1 nested providers.<client>.profiles[] into flat accounts', async () => {
-    const { readCatalogAccounts, resetMigrationState } = await import('../dist/config/catalog-accounts.js');
+    const { resetMigrationState } = await import('../dist/config/catalog-accounts.js');
     resetMigrationState();
 
     // v1 format: providers keyed by client, each with a profiles array
@@ -353,7 +353,7 @@ describe('global accounts (clowder-ai#340)', () => {
       'utf-8',
     );
 
-    const result = readCatalogAccounts(projectRoot);
+    const result = migrateAndReadAccounts(projectRoot);
     // Both profiles should be migrated as individual accounts (not "anthropic" shell)
     assert.ok(result['my-proxy'], 'my-proxy account should exist');
     assert.equal(result['my-proxy'].authType, 'api_key');
@@ -373,9 +373,7 @@ describe('global accounts (clowder-ai#340)', () => {
   });
 
   it('skips conflicting legacy provider-profile without crashing (global wins)', async () => {
-    const { readCatalogAccounts, resetMigrationState, writeCatalogAccount } = await import(
-      '../dist/config/catalog-accounts.js'
-    );
+    const { resetMigrationState, writeCatalogAccount } = await import('../dist/config/catalog-accounts.js');
     resetMigrationState();
 
     writeCatalogAccount(projectRoot, 'shared', {
@@ -400,15 +398,13 @@ describe('global accounts (clowder-ai#340)', () => {
       'utf-8',
     );
 
-    const result = readCatalogAccounts(projectRoot);
+    const result = migrateAndReadAccounts(projectRoot);
     assert.equal(result.shared.authType, 'oauth', 'global account must win over legacy');
     assert.equal(result.shared.displayName, 'Global OAuth', 'global displayName must be preserved');
   });
 
   it('retries secret import when accounts already exist from previous migration', async () => {
-    const { readCatalogAccounts, resetMigrationState, writeCatalogAccount } = await import(
-      '../dist/config/catalog-accounts.js'
-    );
+    const { resetMigrationState, writeCatalogAccount } = await import('../dist/config/catalog-accounts.js');
     resetMigrationState();
 
     // Simulate previous successful account merge: account exists in global (same fields
@@ -431,7 +427,7 @@ describe('global accounts (clowder-ai#340)', () => {
     );
 
     // On retry: accounts already exist (mergedIds empty), but credentials must still import
-    const result = readCatalogAccounts(projectRoot);
+    const result = migrateAndReadAccounts(projectRoot);
     assert.ok(result['my-custom'], 'account should exist');
 
     const credRaw = await readFile(join(globalRoot, '.cat-cafe', 'credentials.json'), 'utf-8');
@@ -440,9 +436,7 @@ describe('global accounts (clowder-ai#340)', () => {
   });
 
   it('treats different model aliases as a legacy account conflict', async () => {
-    const { readCatalogAccounts, resetMigrationState, writeCatalogAccount } = await import(
-      '../dist/config/catalog-accounts.js'
-    );
+    const { resetMigrationState, writeCatalogAccount } = await import('../dist/config/catalog-accounts.js');
     resetMigrationState();
 
     writeCatalogAccount(projectRoot, 'shared', {
@@ -475,7 +469,7 @@ describe('global accounts (clowder-ai#340)', () => {
       'utf-8',
     );
 
-    const result = readCatalogAccounts(projectRoot);
+    const result = migrateAndReadAccounts(projectRoot);
     assert.deepEqual(result.shared.modelAliases, { 'kimi-code/k3': 'kimi-k3' });
     const credentialPath = join(globalRoot, '.cat-cafe', 'credentials.json');
     if (existsSync(credentialPath)) {
@@ -485,9 +479,7 @@ describe('global accounts (clowder-ai#340)', () => {
   });
 
   it('skips legacy secret when colliding with pre-existing global OAuth account', async () => {
-    const { readCatalogAccounts, resetMigrationState, writeCatalogAccount } = await import(
-      '../dist/config/catalog-accounts.js'
-    );
+    const { resetMigrationState, writeCatalogAccount } = await import('../dist/config/catalog-accounts.js');
     resetMigrationState();
 
     // Pre-existing OAuth account in global — NOT from this legacy source
@@ -509,7 +501,7 @@ describe('global accounts (clowder-ai#340)', () => {
     );
 
     // Must not crash — global wins, secret must NOT be imported
-    const result = readCatalogAccounts(projectRoot);
+    const result = migrateAndReadAccounts(projectRoot);
     assert.equal(result.shared.authType, 'oauth', 'global OAuth account must win');
 
     const credPath = join(globalRoot, '.cat-cafe', 'credentials.json');
@@ -522,13 +514,11 @@ describe('global accounts (clowder-ai#340)', () => {
 
   it('stores accounts in projectRoot/.cat-cafe/ when env override is unset', async () => {
     delete process.env.CAT_CAFE_GLOBAL_CONFIG_ROOT;
-    const { writeCatalogAccount, readCatalogAccounts, resetMigrationState } = await import(
-      '../dist/config/catalog-accounts.js'
-    );
+    const { writeCatalogAccount, resetMigrationState } = await import('../dist/config/catalog-accounts.js');
     resetMigrationState();
 
     writeCatalogAccount(projectRoot, 'local-test', { authType: 'api_key' });
-    const result = readCatalogAccounts(projectRoot);
+    const result = migrateAndReadAccounts(projectRoot);
     assert.deepEqual(result['local-test'], { authType: 'api_key' });
 
     // Must be in projectRoot, not globalRoot
@@ -542,9 +532,7 @@ describe('global accounts (clowder-ai#340)', () => {
   });
 
   it('skips legacy secret when colliding with different-source api_key account', async () => {
-    const { readCatalogAccounts, resetMigrationState, writeCatalogAccount } = await import(
-      '../dist/config/catalog-accounts.js'
-    );
+    const { resetMigrationState, writeCatalogAccount } = await import('../dist/config/catalog-accounts.js');
     resetMigrationState();
 
     // Pre-existing api_key account — same type, different source (different baseUrl)
@@ -566,7 +554,7 @@ describe('global accounts (clowder-ai#340)', () => {
     );
 
     // Must not crash — global wins, secret must NOT be imported
-    const result = readCatalogAccounts(projectRoot);
+    const result = migrateAndReadAccounts(projectRoot);
     assert.equal(result.shared.authType, 'api_key', 'global account must win');
     assert.equal(result.shared.baseUrl, 'https://existing.example/v1', 'global baseUrl must be preserved');
 
@@ -578,7 +566,7 @@ describe('global accounts (clowder-ai#340)', () => {
   });
 
   it('migrates well-known installer credentials from homedir when globalRoot differs from homedir', async () => {
-    const { readCatalogAccounts, resetMigrationState } = await import('../dist/config/catalog-accounts.js');
+    const { resetMigrationState } = await import('../dist/config/catalog-accounts.js');
     resetMigrationState();
 
     // Simulate: CAT_CAFE_GLOBAL_CONFIG_ROOT is unset, projectRoot != homedir.
@@ -607,7 +595,7 @@ describe('global accounts (clowder-ai#340)', () => {
       );
 
       // projectRoot is a separate directory — no legacy files there
-      const result = readCatalogAccounts(projectRoot);
+      const result = migrateAndReadAccounts(projectRoot);
       assert.equal(
         result['installer-openai']?.baseUrl,
         'https://home.api/v1',
@@ -627,7 +615,7 @@ describe('global accounts (clowder-ai#340)', () => {
   });
 
   it('migrates homedir installer credentials to multiple projects in the same process', async () => {
-    const { readCatalogAccounts, resetMigrationState } = await import('../dist/config/catalog-accounts.js');
+    const { resetMigrationState } = await import('../dist/config/catalog-accounts.js');
     resetMigrationState();
 
     delete process.env.CAT_CAFE_GLOBAL_CONFIG_ROOT;
@@ -655,11 +643,11 @@ describe('global accounts (clowder-ai#340)', () => {
       );
 
       // First project migrates successfully
-      const resultA = readCatalogAccounts(projectRoot);
+      const resultA = migrateAndReadAccounts(projectRoot);
       assert.equal(resultA['installer-openai']?.baseUrl, 'https://home.api/v1', 'projectA must get homedir account');
 
       // Second project must ALSO get the homedir credentials (not skipped by boolean cache)
-      const resultB = readCatalogAccounts(projectB);
+      const resultB = migrateAndReadAccounts(projectB);
       assert.equal(
         resultB['installer-openai']?.baseUrl,
         'https://home.api/v1',
@@ -678,7 +666,7 @@ describe('global accounts (clowder-ai#340)', () => {
   });
 
   it('imports homedir credentials for legacy project catalog.accounts refs', async () => {
-    const { readCatalogAccounts, resetMigrationState } = await import('../dist/config/catalog-accounts.js');
+    const { resetMigrationState } = await import('../dist/config/catalog-accounts.js');
     resetMigrationState();
 
     const fakeHome = await mkdtemp(join(tmpdir(), 'fake-home-catalog-accounts-creds-'));
@@ -709,7 +697,7 @@ describe('global accounts (clowder-ai#340)', () => {
         'utf-8',
       );
 
-      const result = readCatalogAccounts(projectRoot);
+      const result = migrateAndReadAccounts(projectRoot);
       assert.equal(result['legacy-custom']?.baseUrl, 'https://legacy-custom.example/v1');
 
       const credsRaw = await readFile(join(globalRoot, '.cat-cafe', 'credentials.json'), 'utf-8');
@@ -722,7 +710,7 @@ describe('global accounts (clowder-ai#340)', () => {
   });
 
   it('does not import unreferenced homedir legacy experiments into project-local accounts', async () => {
-    const { readCatalogAccounts, resetMigrationState } = await import('../dist/config/catalog-accounts.js');
+    const { resetMigrationState } = await import('../dist/config/catalog-accounts.js');
     resetMigrationState();
 
     delete process.env.CAT_CAFE_GLOBAL_CONFIG_ROOT;
@@ -763,7 +751,7 @@ describe('global accounts (clowder-ai#340)', () => {
         'utf-8',
       );
 
-      const result = readCatalogAccounts(projectRoot);
+      const result = migrateAndReadAccounts(projectRoot);
       assert.ok(result['installer-openai'], 'well-known installer account should still migrate');
       assert.equal(result['agent-teams-local'], undefined, 'unreferenced homedir experiment must not migrate');
       assert.equal(result['codex-sponsor'], undefined, 'unreferenced homedir test fixture must not migrate');
@@ -781,7 +769,7 @@ describe('global accounts (clowder-ai#340)', () => {
   });
 
   it('imports a homedir legacy account when the project catalog references it', async () => {
-    const { readCatalogAccounts, resetMigrationState } = await import('../dist/config/catalog-accounts.js');
+    const { resetMigrationState } = await import('../dist/config/catalog-accounts.js');
     resetMigrationState();
 
     delete process.env.CAT_CAFE_GLOBAL_CONFIG_ROOT;
@@ -829,7 +817,7 @@ describe('global accounts (clowder-ai#340)', () => {
         'utf-8',
       );
 
-      const result = readCatalogAccounts(projectRoot);
+      const result = migrateAndReadAccounts(projectRoot);
       assert.equal(result['modelarts-shared']?.baseUrl, 'https://api.modelarts-maas.com/v2');
 
       const credsRaw = await readFile(join(projectRoot, '.cat-cafe', 'credentials.json'), 'utf-8');
@@ -843,7 +831,7 @@ describe('global accounts (clowder-ai#340)', () => {
   });
 
   it('imports a homedir legacy account when the project catalog references legacy providerProfileId', async () => {
-    const { readCatalogAccounts, resetMigrationState } = await import('../dist/config/catalog-accounts.js');
+    const { resetMigrationState } = await import('../dist/config/catalog-accounts.js');
     resetMigrationState();
 
     delete process.env.CAT_CAFE_GLOBAL_CONFIG_ROOT;
@@ -890,7 +878,7 @@ describe('global accounts (clowder-ai#340)', () => {
         'utf-8',
       );
 
-      const result = readCatalogAccounts(projectRoot);
+      const result = migrateAndReadAccounts(projectRoot);
       assert.equal(result['legacy-provider-profile']?.baseUrl, 'https://legacy-provider.example/v1');
 
       const credsRaw = await readFile(join(projectRoot, '.cat-cafe', 'credentials.json'), 'utf-8');
@@ -904,7 +892,7 @@ describe('global accounts (clowder-ai#340)', () => {
   });
 
   it('imports project-referenced homedir legacy accounts across shared global roots', async () => {
-    const { readCatalogAccounts, resetMigrationState } = await import('../dist/config/catalog-accounts.js');
+    const { resetMigrationState } = await import('../dist/config/catalog-accounts.js');
     resetMigrationState();
 
     const fakeHome = await mkdtemp(join(tmpdir(), 'fake-home-shared-global-legacy-'));
@@ -957,11 +945,11 @@ describe('global accounts (clowder-ai#340)', () => {
         'utf-8',
       );
 
-      const resultA = readCatalogAccounts(projectRoot);
+      const resultA = migrateAndReadAccounts(projectRoot);
       assert.equal(resultA['modelarts-a']?.baseUrl, 'https://modelarts-a.example/v1');
       assert.equal(resultA['modelarts-b'], undefined, 'projectA must not import projectB-only account');
 
-      const resultB = readCatalogAccounts(projectB);
+      const resultB = migrateAndReadAccounts(projectB);
       assert.equal(resultB['modelarts-b']?.baseUrl, 'https://modelarts-b.example/v1');
 
       const credsRaw = await readFile(join(globalRoot, '.cat-cafe', 'credentials.json'), 'utf-8');
@@ -976,7 +964,7 @@ describe('global accounts (clowder-ai#340)', () => {
   });
 
   it('skips homedir profile + credentials migrations when CAT_CAFE_SKIP_HOMEDIR_MIGRATION=1', async () => {
-    const { readCatalogAccounts, resetMigrationState } = await import('../dist/config/catalog-accounts.js');
+    const { resetMigrationState } = await import('../dist/config/catalog-accounts.js');
     resetMigrationState();
 
     delete process.env.CAT_CAFE_GLOBAL_CONFIG_ROOT;
@@ -1002,7 +990,7 @@ describe('global accounts (clowder-ai#340)', () => {
         'utf-8',
       );
 
-      const result = readCatalogAccounts(projectRoot);
+      const result = migrateAndReadAccounts(projectRoot);
       assert.equal(
         result['homedir-account'],
         undefined,
@@ -1022,7 +1010,7 @@ describe('global accounts (clowder-ai#340)', () => {
   });
 
   it('skip flag still allows project-scoped legacy migrations', async () => {
-    const { readCatalogAccounts, resetMigrationState } = await import('../dist/config/catalog-accounts.js');
+    const { resetMigrationState } = await import('../dist/config/catalog-accounts.js');
     resetMigrationState();
 
     process.env.CAT_CAFE_SKIP_HOMEDIR_MIGRATION = '1';
@@ -1042,7 +1030,7 @@ describe('global accounts (clowder-ai#340)', () => {
         'utf-8',
       );
 
-      const result = readCatalogAccounts(projectRoot);
+      const result = migrateAndReadAccounts(projectRoot);
       assert.equal(result['project-account']?.baseUrl, 'https://project.api/v1');
       const credsRaw = await readFile(join(globalRoot, '.cat-cafe', 'credentials.json'), 'utf-8');
       const creds = JSON.parse(credsRaw);

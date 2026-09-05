@@ -68,8 +68,18 @@ function buildDeps(overrides = {}) {
         invocationId: 'inv-stub',
       })),
       update: mock.fn(async () => {}),
+      get: mock.fn(async () => null),
     },
     invocationQueue,
+    queueProcessor: {
+      hasActiveExecution: mock.fn(() => true),
+      hasActiveExecutionForCat: mock.fn((_threadId, catId) => catId === 'opus'),
+      // Legacy broad busy truth deliberately includes queued leftovers. Admission
+      // must not use it as proof that a target has a dequeue owner.
+      isCatBusy: mock.fn((_threadId, catId) => catId === 'opus'),
+      clearPause: mock.fn(() => {}),
+      onInvocationComplete: mock.fn(async () => {}),
+    },
     threadStore: {
       get: mock.fn(async () => ({
         id: 'thread-1',
@@ -198,6 +208,31 @@ describe('F108B: whisper slot-aware delivery mode', () => {
     const body = JSON.parse(res.body);
     assert.equal(body.status, 'processing', '@mention to idle cat should dispatch immediately');
     assert.equal(deps.invocationQueue.list('thread-1', 'user-1').length, 0, '@mention to idle cat should not enqueue');
+  });
+
+  it('P1: queued residue without an active target owner does not admit another @mention to Queue', async () => {
+    deps.router.resolveTargetsAndIntent.mock.mockImplementation(async () => ({
+      targetCats: ['codex'],
+      intent: { intent: 'execute' },
+      hasMentions: true,
+    }));
+    deps.queueProcessor.isCatBusy.mock.mockImplementation((_threadId, catId) => catId === 'codex');
+    deps.queueProcessor.hasActiveExecutionForCat.mock.mockImplementation(() => false);
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/messages',
+      headers: { 'x-cat-cafe-user': 'user-1', 'content-type': 'application/json' },
+      payload: {
+        content: '@codex queued residue is not an execution owner',
+        threadId: 'thread-1',
+      },
+    });
+
+    assert.equal(res.statusCode, 200, res.body);
+    assert.equal(JSON.parse(res.body).status, 'processing');
+    assert.equal(deps.invocationQueue.list('thread-1', 'user-1').length, 0);
+    assert.equal(deps.queueProcessor.isCatBusy.mock.calls.length, 0, 'admission must not consult queued residue');
   });
 
   it('AC-B4: broadcast @mention to busy cat → queued', async () => {

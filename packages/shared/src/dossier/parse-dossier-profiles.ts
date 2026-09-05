@@ -10,8 +10,15 @@
  * Format: fenced ```yaml blocks with first line `# structured-profile: cat:<catId>`.
  * See docs/team/cat-dossier.md "Schema: 结构化投影层" for full spec.
  *
- * No external YAML dependency — uses purpose-built parser for the known format.
+ * The existing field projection stays tolerant for roster consumers. Routing
+ * also consumes syntax/identity diagnostics from the same block traversal.
  */
+import { parseDocument } from 'yaml';
+
+export interface DossierProfileDiagnostic {
+  catId: string;
+  reason: 'invalid_yaml' | 'unclosed_block' | 'invalid_identity' | 'duplicate_profile';
+}
 
 export interface DossierEngagementPolicy {
   quota: 'weekly_subscription_scarce';
@@ -48,27 +55,43 @@ export interface DossierProfile {
  * Returns a Map keyed by catId (e.g. "opus", "codex", "opus-47").
  */
 export function parseDossierProfiles(markdownContent: string): Map<string, DossierProfile> {
+  return parseDossierProfilesWithDiagnostics(markdownContent).profiles;
+}
+
+export function parseDossierProfilesWithDiagnostics(markdownContent: string): {
+  profiles: Map<string, DossierProfile>;
+  diagnostics: DossierProfileDiagnostic[];
+} {
   const profiles = new Map<string, DossierProfile>();
-  if (!markdownContent) return profiles;
+  const diagnostics: DossierProfileDiagnostic[] = [];
 
   // Extract fenced yaml blocks: ```yaml ... ```
-  const yamlBlockPattern = /```yaml\n([\s\S]*?)```/g;
-  let match: RegExpExecArray | null;
-
-  while ((match = yamlBlockPattern.exec(markdownContent)) !== null) {
+  const yamlBlockPattern = /```yaml\r?\n([\s\S]*?)(?:```|$)/g;
+  for (const match of markdownContent.matchAll(yamlBlockPattern)) {
     const blockContent = match[1].trim();
     // Check for structured-profile marker
     const markerMatch = blockContent.match(/^# structured-profile:\s*cat:(.+)$/m);
     if (!markerMatch) continue;
 
     const catId = markerMatch[1].trim();
+    if (!match[0].endsWith('```')) {
+      diagnostics.push({ catId, reason: 'unclosed_block' });
+      continue;
+    }
+    if (parseDocument(blockContent).errors.length > 0) {
+      diagnostics.push({ catId, reason: 'invalid_yaml' });
+    }
     const profile = parseYamlBlock(blockContent);
+    if (!profile || profile.entityId !== `cat:${catId}`) {
+      diagnostics.push({ catId, reason: 'invalid_identity' });
+    }
     if (profile) {
+      if (profiles.has(catId)) diagnostics.push({ catId, reason: 'duplicate_profile' });
       profiles.set(catId, profile);
     }
   }
 
-  return profiles;
+  return { profiles, diagnostics };
 }
 
 /**

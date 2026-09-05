@@ -112,7 +112,7 @@ describe('handlePublishVerdict end-to-end with eval:memory generator', () => {
     let isoStub;
     const mockGitPublisher = {
       async publishOnIsolatedWorktree(opts) {
-        isoStub = join(root, '..', 'mem-e2e-iso-stub');
+        isoStub = join(root, 'mem-e2e-iso-stub');
         // Mirror the registry into isolated worktree so loadDomains() works
         mkdirSync(join(isoStub, 'docs', 'harness-feedback', 'eval-domains'), { recursive: true });
         writeFileSync(
@@ -197,7 +197,7 @@ describe('handlePublishVerdict end-to-end with eval:memory generator', () => {
     let isoStub;
     const mockGitPublisher = {
       async publishOnIsolatedWorktree(opts) {
-        isoStub = join(root, '..', 'mem-e2e-actionable-iso');
+        isoStub = join(root, 'mem-e2e-actionable-iso');
         rmSync(isoStub, { recursive: true, force: true }); // idempotent — clean leftover from prior runs
         mkdirSync(join(isoStub, 'docs', 'harness-feedback', 'eval-domains'), { recursive: true });
         writeFileSync(
@@ -283,7 +283,7 @@ describe('handlePublishVerdict end-to-end with eval:memory generator', () => {
     let isoStub;
     const mockGitPublisher = {
       async publishOnIsolatedWorktree(opts) {
-        isoStub = join(root, '..', 'mem-e2e-f188-iso');
+        isoStub = join(root, 'mem-e2e-f188-iso');
         rmSync(isoStub, { recursive: true, force: true });
         mkdirSync(join(isoStub, 'docs', 'harness-feedback', 'eval-domains'), { recursive: true });
         writeFileSync(
@@ -348,7 +348,7 @@ describe('handlePublishVerdict end-to-end with eval:memory generator', () => {
     const memGenerator = createMemoryGeneratorAdapter(provider);
     const mockGitPublisher = {
       async publishOnIsolatedWorktree(opts) {
-        const isoStub = join(root, '..', 'mem-e2e-invalid-fid-iso');
+        const isoStub = join(root, 'mem-e2e-invalid-fid-iso');
         rmSync(isoStub, { recursive: true, force: true });
         mkdirSync(join(isoStub, 'docs', 'harness-feedback', 'eval-domains'), { recursive: true });
         writeFileSync(
@@ -475,7 +475,7 @@ describe('handlePublishVerdict end-to-end with eval:memory generator', () => {
     let isoStub;
     const mockGitPublisher = {
       async publishOnIsolatedWorktree(opts) {
-        isoStub = join(root, '..', 'mem-e2e-empty-iso');
+        isoStub = join(root, 'mem-e2e-empty-iso');
         mkdirSync(join(isoStub, 'docs', 'harness-feedback', 'eval-domains'), { recursive: true });
         writeFileSync(
           join(isoStub, 'docs', 'harness-feedback', 'eval-domains', 'eval-memory.yaml'),

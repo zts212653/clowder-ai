@@ -60,7 +60,6 @@ describe('durable message extra carriers survive Redis round-trips', () => {
         reviewedHeadSha: 'a'.repeat(40),
       },
     };
-
     assert.deepEqual(safeParseExtra(serializeExtra(input)), input);
   });
 
@@ -234,6 +233,7 @@ describe('durable message extra carriers survive Redis round-trips', () => {
         sourceOpportunityId: dynamicScene.opportunity.opportunityId,
       },
     };
+    input.writeOpportunityReentries = [input.writeOpportunityReentry];
 
     assert.deepEqual(safeParseExtra(serializeExtra(input)), input);
   });

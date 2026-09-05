@@ -200,3 +200,37 @@ export interface QueueMessageReceiptProjection {
   messageId: string;
   queueReceipt: QueueMessageReceipt;
 }
+
+/** One server-projected Queue escape hatch, including its exact executable request. */
+export interface QueueRecoveryRequest {
+  method: 'POST' | 'DELETE';
+  path: string;
+  body?: Readonly<Record<string, string>>;
+}
+
+export type QueueRecoveryAction =
+  | {
+      id: string;
+      entryId: string;
+      kind: 'steer';
+      request: QueueRecoveryRequest;
+    }
+  | {
+      id: string;
+      entryId: string;
+      kind: 'retry_target';
+      targetCatId: string;
+      request: QueueRecoveryRequest;
+    }
+  | {
+      id: string;
+      entryId: string;
+      kind: 'force_reset';
+      request: QueueRecoveryRequest;
+    }
+  | {
+      id: string;
+      entryId: string;
+      kind: 'withdraw';
+      request: QueueRecoveryRequest;
+    };

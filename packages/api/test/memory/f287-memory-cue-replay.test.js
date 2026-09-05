@@ -6,7 +6,7 @@ const EXPECTED_FAMILIES = ['person_entity', 'operational_precedent', 'taste'];
 const EXPECTED_BUDGET_CANDIDATE_TOKENS = {
   person_entity: 752,
   operational_precedent: 751,
-  taste: 744,
+  taste: 2512,
 };
 
 function containsForbiddenScore(value) {

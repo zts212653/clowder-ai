@@ -3,6 +3,9 @@ import { createRoot, type Root } from 'react-dom/client';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ChatContainer } from '@/components/ChatContainer';
 import { ThreadChatRuntimeProvider } from '@/components/thread-chat';
+import { useF307ExperienceWorkbenchStore } from '@/components/workbench/experience-workbench-store';
+import { createEvolutionProgramSurface } from '@/components/workbench/real-surface-adapters';
+import { createInitialWorkbenchState } from '@/components/workbench/workbench-model';
 import type { ChatMessage as ChatMessageData, QueueEntry } from '@/stores/chat-types';
 import { useSidebarStore } from '@/stores/sidebarStore';
 
@@ -19,6 +22,7 @@ let mockQueue: QueueEntry[] = [];
 let mockRightPanelMode: 'status' | 'workspace' | 'transcript' = 'status';
 let mockRightPanelOpen = false;
 let mockWorkspaceMode = 'dev';
+let mockViewMode: 'single' | 'split' = 'single';
 let mockConnectionStatus = {
   api: 'online' as const,
   socket: 'online' as const,
@@ -33,6 +37,7 @@ let mockForwardSubmissions = 0;
 const mockCloseRightPanel = vi.fn();
 const mockSetRightPanelMode = vi.fn();
 const mockSetRightPanelOpen = vi.fn();
+const PROGRAM_SURFACE = createEvolutionProgramSurface(`evolution-program:${'c'.repeat(32)}`);
 
 const mockStoreState = () => ({
   currentThreadId: 'test-thread',
@@ -58,7 +63,7 @@ const mockStoreState = () => ({
   setCurrentGame: vi.fn(),
   currentGame: null,
 
-  viewMode: 'single' as const,
+  viewMode: mockViewMode,
   setViewMode: vi.fn(),
   clearUnread: vi.fn(),
   confirmUnreadAck: vi.fn(),
@@ -162,6 +167,7 @@ vi.mock('../RightStatusPanel', () => ({
 vi.mock('../WorkspacePanel', () => ({
   WorkspacePanel: (props: { statusSurface?: React.ReactNode }) => {
     const [statusOpen, setStatusOpen] = React.useState(false);
+    const [programFace, setProgramFace] = React.useState<'judgment' | 'history'>('judgment');
     return React.createElement(
       'div',
       { 'data-testid': 'workspace-panel' },
@@ -170,6 +176,24 @@ vi.mock('../WorkspacePanel', () => ({
         'data-testid': 'workspace-launcher-status',
         onClick: () => setStatusOpen(true),
       }),
+      React.createElement(
+        'button',
+        {
+          type: 'button',
+          'data-testid': 'mock-program-history',
+          onClick: () => setProgramFace('history'),
+        },
+        '更改历史',
+      ),
+      React.createElement(
+        'div',
+        {
+          'data-testid': 'mock-program-scroll',
+          'data-program-face': programFace,
+          style: { height: '40px', overflowY: 'auto' },
+        },
+        React.createElement('div', { style: { height: '400px' } }, programFace),
+      ),
       statusOpen ? props.statusSurface : null,
     );
   },
@@ -305,6 +329,7 @@ describe('ChatContainer mobile interactions', () => {
     mockRightPanelMode = 'status';
     mockRightPanelOpen = false;
     mockWorkspaceMode = 'dev';
+    mockViewMode = 'single';
     mockConnectionStatus = {
       api: 'online',
       socket: 'online',
@@ -320,6 +345,11 @@ describe('ChatContainer mobile interactions', () => {
     mockSetRightPanelMode.mockReset();
     mockSetRightPanelOpen.mockReset();
     useSidebarStore.setState({ isOpen: false });
+    useF307ExperienceWorkbenchStore.setState({
+      layout: createInitialWorkbenchState(),
+      hydrated: true,
+      mainAreaAttentionSurfaceId: null,
+    });
     container = document.createElement('div');
     document.body.appendChild(container);
     root = createRoot(container);
@@ -601,6 +631,77 @@ describe('ChatContainer mobile interactions', () => {
     });
 
     expect(container.querySelector('[data-testid="workspace-panel"]')).toBeTruthy();
+  });
+
+  it('moves the same Workspace instance over the main area and returns without losing owner state', async () => {
+    mockMatchMedia(true);
+    mockRightPanelOpen = true;
+    mockRightPanelMode = 'workspace';
+    useF307ExperienceWorkbenchStore.setState({
+      layout: createInitialWorkbenchState([PROGRAM_SURFACE]),
+      hydrated: true,
+      mainAreaAttentionSurfaceId: null,
+    });
+    await act(async () => {
+      root.render(renderChatContainer('test-thread'));
+    });
+
+    const workspaceBefore = container.querySelector<HTMLElement>('[data-testid="workspace-panel"]');
+    const programScrollBefore = container.querySelector<HTMLElement>('[data-testid="mock-program-scroll"]');
+    await act(async () => {
+      container.querySelector<HTMLButtonElement>('[data-testid="mock-program-history"]')?.click();
+    });
+    if (programScrollBefore) programScrollBefore.scrollTop = 96;
+
+    await act(async () => {
+      useF307ExperienceWorkbenchStore.setState({ mainAreaAttentionSurfaceId: PROGRAM_SURFACE.id });
+    });
+
+    const host = container.querySelector<HTMLElement>('[data-testid="contextual-workspace-host"]');
+    const chat = container.querySelector<HTMLElement>('[data-testid="thread-chat-host"]');
+    const workspaceAfter = container.querySelector<HTMLElement>('[data-testid="workspace-panel"]');
+    const programScrollAfter = container.querySelector<HTMLElement>('[data-testid="mock-program-scroll"]');
+    expect(host?.dataset.presentation).toBe('main-area-attention');
+    expect(host?.getAttribute('aria-label')).toBe('主区 Workspace');
+    expect(host?.className).toContain('absolute');
+    expect(host?.className).toContain('inset-0');
+    expect(chat?.getAttribute('aria-hidden')).toBe('true');
+    expect(chat?.className).toContain('invisible');
+    expect(workspaceAfter).toBe(workspaceBefore);
+    expect(programScrollAfter).toBe(programScrollBefore);
+    expect(programScrollAfter?.dataset.programFace).toBe('history');
+    expect(programScrollAfter?.scrollTop).toBe(96);
+
+    await act(async () => {
+      useF307ExperienceWorkbenchStore.getState().exitMainAreaAttention();
+    });
+    expect(host?.dataset.presentation).toBe('right-rail');
+    expect(host?.getAttribute('aria-label')).toBe('上下文侧栏');
+    expect(container.querySelector('[data-testid="workspace-panel"]')).toBe(workspaceBefore);
+    expect(programScrollAfter?.dataset.programFace).toBe('history');
+    expect(programScrollAfter?.scrollTop).toBe(96);
+  });
+
+  it('ends transient main-area attention when Chat switches to split view', async () => {
+    mockMatchMedia(true);
+    mockRightPanelOpen = true;
+    mockRightPanelMode = 'workspace';
+    useF307ExperienceWorkbenchStore.setState({
+      layout: createInitialWorkbenchState([PROGRAM_SURFACE]),
+      hydrated: true,
+      mainAreaAttentionSurfaceId: PROGRAM_SURFACE.id,
+    });
+    await act(async () => {
+      root.render(renderChatContainer('test-thread'));
+    });
+    expect(useF307ExperienceWorkbenchStore.getState().mainAreaAttentionSurfaceId).toBe(PROGRAM_SURFACE.id);
+
+    mockViewMode = 'split';
+    await act(async () => {
+      root.render(renderChatContainer('test-thread'));
+    });
+
+    expect(useF307ExperienceWorkbenchStore.getState().mainAreaAttentionSurfaceId).toBeNull();
   });
 
   it('auto-opens sidebar store on desktop but does not render mobile overlay', () => {

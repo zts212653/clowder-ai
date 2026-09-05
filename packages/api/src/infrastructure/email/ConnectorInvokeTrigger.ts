@@ -894,6 +894,7 @@ export class ConnectorInvokeTrigger {
               triggerMessage,
               ownerUserId: userId,
               threadId,
+              targetCatId: targetCats[0],
               messageStore: this.opts.messageStore,
             });
           }

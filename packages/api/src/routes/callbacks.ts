@@ -2656,6 +2656,10 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
             targetThreadId: effectiveThreadId,
           })
         : { suppressRouting: false, coordination: undefined };
+    if (coordinationResult.conflict) {
+      reply.status(409);
+      return coordinationResult.conflict;
+    }
     const coordinationDedupKey: CallbackCoordinationDedupKey | undefined =
       action && !explicitCoordination ? 'action-active-root' : coordinationResult.contentDedupCoordinationKey;
     // The combined Redis script preserves the F167 identity ordering: an

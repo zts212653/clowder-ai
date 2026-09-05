@@ -4,30 +4,11 @@ import { type FormEvent, useCallback, useEffect, useMemo, useState } from 'react
 import { useChatStore } from '@/stores/chatStore';
 import { apiFetch } from '@/utils/api-client';
 import { CapabilityEvolutionProgramDetail } from './CapabilityEvolutionProgramDetail';
+import { CapabilityEvolutionProgramRow } from './CapabilityEvolutionProgramRow';
 import {
   type EvolutionProgramPresentationProjection,
-  humanizeEvolutionTarget,
-  lifecycleLabel,
   parseEvolutionProgramProjection,
-  stageLabel,
 } from './capability-evolution-presentation';
-
-function EvolutionMark({ className = 'h-5 w-5' }: { className?: string }) {
-  return (
-    <svg
-      aria-hidden="true"
-      className={className}
-      viewBox="0 0 20 20"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.5"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-    >
-      <path d="M6 2.5c7 3.5 7 11.5 0 15M14 2.5c-7 3.5-7 11.5 0 15M6.8 5.2h6.4M5.8 10h8.4M6.8 14.8h6.4" />
-    </svg>
-  );
-}
 
 function StartEvolution({ targetThreadId }: { targetThreadId: string | null }) {
   const setPendingChatInsert = useChatStore((state) => state.setPendingChatInsert);
@@ -53,35 +34,10 @@ function StartEvolution({ targetThreadId }: { targetThreadId: string | null }) {
   };
 
   return (
-    <section className="rounded-2xl border border-cafe-accent/20 bg-cafe-accent/5 p-4 shadow-sm">
-      <div className="flex items-start gap-3">
-        <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-cafe-accent/10 text-cafe-accent">
-          <EvolutionMark />
-        </span>
-        <div>
-          <h2 className="text-sm font-semibold text-cafe-black">发起新的进化</h2>
-          <p className="mt-1 text-xs leading-5 text-cafe-secondary">
-            只说想改进什么。系统会整理目标和下一步，只有需要你判断时才会明确提醒。
-          </p>
-        </div>
-      </div>
-      <div className="mt-4 rounded-xl border border-cafe-subtle/75 bg-cafe-surface p-3">
-        <div data-testid="capability-evolution-chat-destination">
-          {targetThreadTitle ? (
-            <p className="text-sm font-semibold text-cafe-black">在「{targetThreadTitle}」继续</p>
-          ) : (
-            <>
-              <p className="text-sm font-semibold text-cafe-black">没有可写入的目标对话</p>
-              <p className="mt-1 text-xs leading-5 text-cafe-secondary">
-                请先回到一个对话，再从该对话的工作区打开能力进化。
-              </p>
-            </>
-          )}
-        </div>
-      </div>
-      <form className="mt-4 flex flex-col gap-2 sm:flex-row" onSubmit={submit}>
+    <section className="rounded-2xl border border-cafe-subtle/75 bg-[var(--console-card-bg)] p-4 shadow-sm">
+      <form className="flex flex-col gap-2 sm:flex-row" onSubmit={submit}>
         <label className="sr-only" htmlFor="capability-evolution-target">
-          想进化什么
+          想持续改进哪项能力
         </label>
         <input
           id="capability-evolution-target"
@@ -91,7 +47,7 @@ function StartEvolution({ targetThreadId }: { targetThreadId: string | null }) {
             setTarget(event.target.value);
             setNotice(null);
           }}
-          placeholder="例如：投资人路演表达能力"
+          placeholder="例如：投资人路演效果"
           className="min-w-0 flex-1 rounded-xl border border-cafe-subtle bg-cafe-surface px-3.5 py-2.5 text-sm text-cafe-black outline-none transition-colors placeholder:text-cafe-muted focus:border-cafe-accent"
         />
         <button
@@ -103,47 +59,24 @@ function StartEvolution({ targetThreadId }: { targetThreadId: string | null }) {
           带到这个对话
         </button>
       </form>
+      <div className="mt-2 flex items-start justify-between gap-3 text-xs text-cafe-muted">
+        <div data-testid="capability-evolution-chat-destination">
+          {targetThreadTitle ? (
+            <p>当前对话：{targetThreadTitle}</p>
+          ) : (
+            <>
+              <p className="font-semibold text-cafe-secondary">没有可写入的目标对话</p>
+              <p className="mt-1 leading-5">请先回到一个对话，再从该对话的工作区打开能力进化。</p>
+            </>
+          )}
+        </div>
+      </div>
       {notice && (
         <output className="mt-2 text-xs text-cafe-secondary" aria-live="polite">
           {notice}
         </output>
       )}
     </section>
-  );
-}
-
-function ProgramCard({
-  projection,
-  selected,
-  onSelect,
-}: {
-  projection: EvolutionProgramPresentationProjection;
-  selected: boolean;
-  onSelect: () => void;
-}) {
-  const target = humanizeEvolutionTarget(projection.program.objectRef);
-  return (
-    <button
-      type="button"
-      onClick={onSelect}
-      data-testid={`capability-evolution-program-${projection.program.programId}`}
-      aria-pressed={selected}
-      className="group w-full rounded-xl border border-cafe-subtle/75 bg-[var(--console-card-bg)] p-4 text-left transition-[border-color,background-color,transform] hover:-translate-y-px hover:border-cafe-accent/35 hover:bg-cafe-surface aria-pressed:border-cafe-accent/45 aria-pressed:bg-cafe-accent/5"
-    >
-      <span className="flex items-start justify-between gap-3">
-        <span className="min-w-0">
-          <span className="block text-micro font-bold uppercase tracking-[0.12em] text-cafe-accent">能力进化目标</span>
-          <span className="mt-1 block text-sm font-semibold text-cafe-black">{target.title}</span>
-        </span>
-        <span className="shrink-0 rounded-full bg-cafe-surface-sunken px-2.5 py-1 text-micro font-semibold text-cafe-secondary">
-          {lifecycleLabel(projection.program.lifecycle)}
-        </span>
-      </span>
-      <span className="mt-3 grid gap-1 border-t border-cafe-subtle/70 pt-3">
-        <span className="text-xs font-semibold text-cafe-secondary">{stageLabel(projection.program.stage)}</span>
-        <span className="text-xs leading-5 text-cafe-muted">下一步：{projection.nextAction.label}</span>
-      </span>
-    </button>
   );
 }
 
@@ -206,17 +139,9 @@ export function CapabilityEvolutionWorkspace({
       data-testid="capability-evolution-workspace"
     >
       <div className="mx-auto w-full max-w-5xl space-y-5 px-5 py-5">
-        <header className="flex items-start gap-3">
-          <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-cafe-accent/10 text-cafe-accent">
-            <EvolutionMark className="h-6 w-6" />
-          </span>
-          <div>
-            <p className="text-micro font-bold uppercase tracking-[0.16em] text-cafe-accent">持续成长</p>
-            <h1 className="mt-1 text-xl font-semibold tracking-tight text-cafe-black">能力进化</h1>
-            <p className="mt-1 max-w-2xl text-xs leading-5 text-cafe-secondary">
-              在这里发起、继续和回看一次能力进化。系统会保留过程，并在真正需要你判断时提醒你。
-            </p>
-          </div>
+        <header>
+          <h1 className="text-xl font-semibold tracking-tight text-cafe-black">能力进化</h1>
+          <p className="mt-1 max-w-2xl text-sm leading-6 text-cafe-secondary">持续观测、评估并采纳能力改进。</p>
         </header>
 
         <StartEvolution key={targetThreadId ?? 'unbound'} targetThreadId={targetThreadId} />
@@ -225,9 +150,9 @@ export function CapabilityEvolutionWorkspace({
           <div className="mb-2 flex items-end justify-between gap-3">
             <div>
               <h2 id="capability-evolution-programs-heading" className="text-sm font-semibold text-cafe-black">
-                正在进行与历史记录
+                能力项目
               </h2>
-              <p className="mt-1 text-xs text-cafe-muted">先看进展与下一步；技术信息需要时再展开。</p>
+              <p className="mt-1 text-xs text-cafe-muted">每一项能力独立观测、评估与保留改进。</p>
             </div>
             <button
               type="button"
@@ -265,9 +190,9 @@ export function CapabilityEvolutionWorkspace({
                   {rejectedProgramCount} 项进化记录暂时无法读取；其余记录仍可使用。
                 </output>
               )}
-              <div className="grid gap-3 sm:grid-cols-2">
+              <div className="space-y-2">
                 {programs.map((projection) => (
-                  <ProgramCard
+                  <CapabilityEvolutionProgramRow
                     key={projection.program.programId}
                     projection={projection}
                     selected={selectedProgramId === projection.program.programId}

@@ -12,6 +12,7 @@ interface AttentionClusterHeaderProps {
   displayTitle: string;
   onToggle: () => void;
   onRename: (alias: string | null) => void;
+  onAdd?: () => void;
 }
 
 interface AttentionClusterMemberProps {
@@ -46,6 +47,7 @@ export function AttentionClusterHeader({
   displayTitle,
   onToggle,
   onRename,
+  onAdd,
 }: AttentionClusterHeaderProps) {
   const [editingName, setEditingName] = useState(false);
   const [draftName, setDraftName] = useState(displayTitle);
@@ -103,6 +105,17 @@ export function AttentionClusterHeader({
             <span className="ml-auto shrink-0">{formatRelativeTime(latestActivity, false)}</span>
           </span>
         </button>
+        {onAdd && (
+          <button
+            type="button"
+            aria-label={`向 ${displayTitle} 添加对话`}
+            title="添加对话"
+            onClick={onAdd}
+            className="mt-2 rounded-md p-1 text-cafe-muted hover:bg-[var(--console-hover-bg)] hover:text-cafe-black"
+          >
+            +
+          </button>
+        )}
         <button
           type="button"
           aria-label={`重命名 ${displayTitle}`}

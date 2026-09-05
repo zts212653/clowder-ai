@@ -79,6 +79,7 @@ const CAPABILITIES_FILENAME = 'capabilities.json';
 const CONFIG_SUBDIR = '.cat-cafe';
 const MCP_RESOLVED_FILENAME = 'mcp-resolved.json';
 
+const ANTIGRAVITY_IDE_EXTENSIONS_DIR = resolve(homedir(), '.antigravity-ide/extensions');
 const PENCIL_EXTENSIONS_DIR = resolve(homedir(), '.antigravity/extensions');
 const VSCODE_EXTENSIONS_DIR = resolve(homedir(), '.vscode/extensions');
 const CURSOR_EXTENSIONS_DIR = resolve(homedir(), '.cursor/extensions');
@@ -131,6 +132,7 @@ export type ResolvedMcpState = Record<string, ResolvedMcpStateEntry>;
 interface PencilResolveOptions {
   env?: NodeJS.ProcessEnv;
   projectRoot?: string;
+  antigravityIdeDir?: string;
   antigravityDir?: string;
   vscodeDir?: string;
   cursorDir?: string;
@@ -139,7 +141,8 @@ interface PencilResolveOptions {
 
 type PencilCommandResolution = { command: string; args: string[] } | null;
 type PencilCommandResolver = (options?: PencilResolveOptions) => Promise<PencilCommandResolution>;
-type PencilApp = 'antigravity' | 'vscode';
+type PencilApp = 'antigravity_ide' | 'antigravity' | 'visual_studio_code' | 'vscode';
+type PencilAppFamily = 'antigravity' | 'vscode';
 interface PencilInstallCandidate {
   app: PencilApp;
   binaryPath: string;
@@ -443,19 +446,33 @@ export function deduplicateDiscoveredMcpServers<T extends DiscoveredMcpLike>(ser
 /** Normalize a raw app name to the PencilApp union. Returns undefined for unknown values. */
 function normalizePencilApp(raw?: string): PencilApp | undefined {
   const v = raw?.trim().toLowerCase();
-  if (v === 'antigravity') return 'antigravity';
-  if (v === 'vscode' || v === 'cursor' || v === 'vscode-insiders' || v === 'visual_studio_code') return 'vscode';
+  if (v === 'antigravity_ide') return 'antigravity_ide';
+  if (v === 'antigravity') return 'antigravity_ide';
+  if (v === 'visual_studio_code') return 'visual_studio_code';
+  if (v === 'vscode' || v === 'vscode-insiders') return 'visual_studio_code';
+  if (v === 'cursor') return 'vscode';
   return undefined;
+}
+
+function pencilAppFamily(app: PencilApp): PencilAppFamily {
+  return app === 'antigravity' || app === 'antigravity_ide' ? 'antigravity' : 'vscode';
 }
 
 function inferPencilApp(command: string, envApp?: string): PencilApp {
   const normalized = normalizePencilApp(envApp);
   if (normalized) return normalized;
   if (
-    command.includes(`${sep}.vscode${sep}extensions${sep}`) ||
+    command.includes(`${sep}.antigravity-ide${sep}extensions${sep}`) ||
+    command.includes('/.antigravity-ide/extensions/')
+  ) {
+    return 'antigravity_ide';
+  }
+  if (command.includes(`${sep}.vscode${sep}extensions${sep}`) || command.includes('/.vscode/extensions/')) {
+    return 'visual_studio_code';
+  }
+  if (
     command.includes(`${sep}.cursor${sep}extensions${sep}`) ||
     command.includes(`${sep}.vscode-insiders${sep}extensions${sep}`) ||
-    command.includes('/.vscode/extensions/') ||
     command.includes('/.cursor/extensions/') ||
     command.includes('/.vscode-insiders/extensions/')
   ) {
@@ -506,8 +523,9 @@ export async function resolvePencilCommand(
 
   const allCandidates = (
     await Promise.all([
+      collectAccessiblePencilCandidates(options.antigravityIdeDir ?? ANTIGRAVITY_IDE_EXTENSIONS_DIR, 'antigravity_ide'),
       collectAccessiblePencilCandidates(options.antigravityDir ?? PENCIL_EXTENSIONS_DIR, 'antigravity'),
-      collectAccessiblePencilCandidates(options.vscodeDir ?? VSCODE_EXTENSIONS_DIR, 'vscode'),
+      collectAccessiblePencilCandidates(options.vscodeDir ?? VSCODE_EXTENSIONS_DIR, 'visual_studio_code'),
       collectAccessiblePencilCandidates(options.cursorDir ?? CURSOR_EXTENSIONS_DIR, 'vscode'),
       collectAccessiblePencilCandidates(options.vscodeInsidersDir ?? VSCODE_INSIDERS_EXTENSIONS_DIR, 'vscode'),
     ])
@@ -516,18 +534,33 @@ export async function resolvePencilCommand(
     .sort((a, b) => {
       const versionCmp = comparePencilDirs(a.dirName, b.dirName);
       if (versionCmp !== 0) return versionCmp;
-      // Tie-break: prefer antigravity over vscode (specialty editor; if installed, user likely prefers it)
-      return (a.app === 'antigravity' ? 1 : 0) - (b.app === 'antigravity' ? 1 : 0);
+      // Tie-break: prefer the current Antigravity IDE host, then the legacy
+      // Antigravity host, over general-purpose editors.
+      const appPriority: Record<PencilApp, number> = {
+        vscode: 0,
+        visual_studio_code: 1,
+        antigravity: 2,
+        antigravity_ide: 3,
+      };
+      return appPriority[a.app] - appPriority[b.app];
     });
 
-  // PENCIL_MCP_APP (without PENCIL_MCP_BIN) filters candidates to the preferred app.
-  // Normalize aliases (cursor, vscode-insiders → vscode) to match candidate app values.
-  // Falls back to all candidates if the preferred app has no installations.
-  const preferredApp = normalizePencilApp(env.PENCIL_MCP_APP?.trim());
+  // A canonical host id names one live editor socket, so prefer that exact
+  // installation even when a legacy sibling has a higher extension version.
+  // Legacy aliases select a compatible editor family. If neither is installed,
+  // fall back to any usable Pencil host rather than disabling the capability.
+  const rawPreferredApp = env.PENCIL_MCP_APP?.trim().toLowerCase();
+  const preferredApp = normalizePencilApp(rawPreferredApp);
+  const preferredFamily = preferredApp ? pencilAppFamily(preferredApp) : undefined;
+  const canonicalHostSelected = rawPreferredApp === 'antigravity_ide' || rawPreferredApp === 'visual_studio_code';
+  const exactCandidates = canonicalHostSelected
+    ? allCandidates.filter((candidate) => candidate.app === preferredApp)
+    : [];
+  const familyCandidates = preferredFamily
+    ? allCandidates.filter((candidate) => pencilAppFamily(candidate.app) === preferredFamily)
+    : [];
   const candidates =
-    preferredApp && allCandidates.some((c) => c.app === preferredApp)
-      ? allCandidates.filter((c) => c.app === preferredApp)
-      : allCandidates;
+    exactCandidates.length > 0 ? exactCandidates : familyCandidates.length > 0 ? familyCandidates : allCandidates;
 
   const latest = candidates[candidates.length - 1];
   if (latest) {

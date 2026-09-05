@@ -63,10 +63,20 @@ describe('F276 deferred re-entry terminal fencing', () => {
         async listReady() {
           return [receipt];
         },
+        async get() {
+          return receipt;
+        },
         async claim(input) {
           return {
             outcome: 'claimed',
-            receipt: { ...receipt, state: 'claimed', claimId: input.claimId, claimUntil: input.now + input.leaseMs },
+            receipt: {
+              ...receipt,
+              state: 'claimed',
+              claimId: input.claimId,
+              claimUntil: input.now + input.leaseMs,
+              processorCatId: input.processorCatId,
+              processingThreadId: input.processingThreadId,
+            },
           };
         },
         async release(...args) {
@@ -111,9 +121,21 @@ describe('F276 deferred re-entry terminal fencing', () => {
       ownerUserId: 'owner-1',
       now: () => now,
       randomId: () => 'claim-terminal-fence',
+      ensureSystemThread: async () => 'thread_memory_operations',
+      routingDispatchPreflight: {
+        async preflight(input) {
+          return {
+            v: 1,
+            ownerId: input.ownerId,
+            observedAt: now,
+            resolverState: 'fresh',
+            targets: [{ targetCatId: input.targetCatIds[0], disposition: 'allowed', reasons: [], alternatives: [] }],
+          };
+        },
+      },
     });
     return {
-      ...(options.deferAdmission ? {} : { admission: await spec.admission.gate({}) }),
+      admission: await spec.admission.gate({}),
       spec,
       calls,
       opportunity,
@@ -121,14 +143,25 @@ describe('F276 deferred re-entry terminal fencing', () => {
     };
   }
 
+  async function executeWithoutPresentation(spec, admission) {
+    assert.equal(admission.run, true);
+    await spec.run.execute(admission.workItems[0].signal, admission.workItems[0].subjectKey, {
+      assignedCatId: 'codex-terra',
+      deliver: async () => {
+        throw new Error('terminal receipt must not be presented');
+      },
+      invokeTrigger: { async trigger() {} },
+    });
+  }
+
   it('does not re-present when the next generation is already terminal', async () => {
-    const { admission, calls, opportunity, receipt } = await fixture(
+    const { admission, spec, calls, opportunity, receipt } = await fixture(
       new Map([
         [1, 'defer'],
         [2, 'abstain'],
       ]),
     );
-    assert.equal(admission.run, false);
+    await executeWithoutPresentation(spec, admission);
     assert.deepEqual(calls.forgotten, [['owner-1', receipt.receiptId]]);
     assert.deepEqual(calls.purged, [['owner-1', opportunity.dedupeLineage]]);
     assert.deepEqual(calls.released, []);
@@ -136,12 +169,12 @@ describe('F276 deferred re-entry terminal fencing', () => {
 
   it('waits for durable defer truth and records expiry instead of silently dropping the receipt', async () => {
     const missing = await fixture(new Map());
-    assert.equal(missing.admission.run, false);
+    await executeWithoutPresentation(missing.spec, missing.admission);
     assert.equal(missing.calls.released.length, 1);
     assert.deepEqual(missing.calls.forgotten, []);
 
     const expired = await fixture(new Map([[1, 'defer']]), 9_000_000_000_000);
-    assert.equal(expired.admission.run, false);
+    await executeWithoutPresentation(expired.spec, expired.admission);
     assert.equal(expired.calls.terminals[0].outcome, 'expired');
     assert.equal(expired.calls.terminals[0].generation, 2);
     assert.deepEqual(expired.calls.forgotten, [['owner-1', expired.receipt.receiptId]]);
@@ -149,11 +182,10 @@ describe('F276 deferred re-entry terminal fencing', () => {
 
   it('releases the claim when durable re-entry authority fails', async () => {
     const setup = await fixture(new Map([[1, 'defer']]), 2_000, {
-      deferAdmission: true,
       readError: new Error('terminal ledger unavailable'),
     });
 
-    await assert.rejects(setup.spec.admission.gate({}), /terminal ledger unavailable/);
+    await assert.rejects(executeWithoutPresentation(setup.spec, setup.admission), /terminal ledger unavailable/);
     assert.deepEqual(setup.calls.released, [['owner-1', setup.receipt.receiptId, 'claim-terminal-fence', 2_000]]);
   });
 });

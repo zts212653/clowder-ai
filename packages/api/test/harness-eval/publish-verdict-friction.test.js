@@ -146,7 +146,7 @@ describe('handlePublishVerdict end-to-end with eval:friction generator', () => {
     let isoStub;
     const mockGitPublisher = {
       async publishOnIsolatedWorktree(opts) {
-        isoStub = join(root, '..', 'friction-e2e-iso-stub');
+        isoStub = join(root, 'friction-e2e-iso-stub');
         rmSync(isoStub, { recursive: true, force: true });
         mkdirSync(join(isoStub, 'docs', 'harness-feedback', 'eval-domains'), { recursive: true });
         writeFileSync(join(isoStub, 'docs', 'harness-feedback', 'eval-domains', 'eval-friction.yaml'), FRICTION_YAML);

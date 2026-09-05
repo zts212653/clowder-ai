@@ -248,6 +248,7 @@ export class AsrPersonMemoryContractTrial {
       reason: string;
       aclAllowed: boolean;
       terminalGenerationKeys: ReadonlySet<string>;
+      deliveryScope?: { threadId: string; consumerCatId: string };
     },
   ):
     | { status: 'reentered'; scene: AsrPersonMemoryDynamicSceneEntryV1; receipt: DeferredWriteOpportunityReceiptV1 }
@@ -286,6 +287,12 @@ export class AsrPersonMemoryContractTrial {
       opportunityId: writeOpportunityGenerationId(opportunity.dedupeLineage, generation),
       generation,
       eligibleAt: context.now,
+      ...(context.deliveryScope
+        ? {
+            scope: { ...opportunity.scope, threadId: context.deliveryScope.threadId },
+            consumer: { ...opportunity.consumer, catId: context.deliveryScope.consumerCatId },
+          }
+        : {}),
     };
     if (context.terminalGenerationKeys.has(generationKey(nextOpportunity))) {
       return this.reentryFailure('rejected', 'duplicate_generation');

@@ -1,6 +1,6 @@
 /**
- * QueuePanel: processing entries should NOT be visible
- * (processing = already executing, user sees it in chat area)
+ * QueuePanel keeps live processing work on the execution surface, but must
+ * expose a server-projected recovery for an orphaned processing row.
  */
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -28,6 +28,20 @@ const QUEUED_ENTRY: QueueEntry = {
   intent: 'execute',
   status: 'queued',
   createdAt: NOW,
+  recoveryActions: [
+    {
+      id: 'queue-steer:q1',
+      entryId: 'q1',
+      kind: 'steer',
+      request: { method: 'POST', path: '/api/threads/thread-1/queue/q1/steer' },
+    },
+    {
+      id: 'queue-withdraw:q1',
+      entryId: 'q1',
+      kind: 'withdraw',
+      request: { method: 'DELETE', path: '/api/threads/thread-1/queue/q1' },
+    },
+  ],
 };
 
 const PROCESSING_ENTRY: QueueEntry = {
@@ -35,6 +49,14 @@ const PROCESSING_ENTRY: QueueEntry = {
   id: 'q-proc',
   content: 'processing message',
   status: 'processing',
+  recoveryActions: [
+    {
+      id: 'queue-force-reset:q-proc:1234',
+      entryId: 'q-proc',
+      kind: 'force_reset',
+      request: { method: 'POST', path: '/api/projected/thread-1/recover-processing' },
+    },
+  ],
 };
 
 function withTargetStates(
@@ -62,7 +84,7 @@ function withTargetStates(
   };
 }
 
-describe('QueuePanel hides processing entries', () => {
+describe('QueuePanel processing recovery', () => {
   let container: HTMLDivElement;
   let root: Root;
 
@@ -98,8 +120,8 @@ describe('QueuePanel hides processing entries', () => {
     vi.clearAllMocks();
   });
 
-  it('does NOT render processing-only queue', () => {
-    useChatStore.setState({ queue: [PROCESSING_ENTRY] });
+  it('does NOT render processing-only queue without a server-projected recovery', () => {
+    useChatStore.setState({ queue: [{ ...PROCESSING_ENTRY, recoveryActions: [] }] });
     act(() => {
       root.render(React.createElement(QueuePanel, { threadId: 'thread-1' }));
     });
@@ -108,8 +130,13 @@ describe('QueuePanel hides processing entries', () => {
     expect(container.innerHTML).not.toContain('processing message');
   });
 
-  it('renders queued entries but hides processing entries', () => {
-    useChatStore.setState({ queue: [PROCESSING_ENTRY, QUEUED_ENTRY] });
+  it('renders queued entries but leaves actively-processing entries on the execution surface', () => {
+    useChatStore.setState({
+      queue: [PROCESSING_ENTRY, QUEUED_ENTRY],
+      activeInvocations: {
+        'inv-active': { catId: 'opus', mode: 'execute', startedAt: Date.now() },
+      },
+    });
     act(() => {
       root.render(React.createElement(QueuePanel, { threadId: 'thread-1' }));
     });
@@ -120,6 +147,44 @@ describe('QueuePanel hides processing entries', () => {
     expect(html).not.toContain('processing message');
     // Steer button for queued entry
     expect(container.querySelector('[data-testid="steer-q1"]')).not.toBeNull();
+  });
+
+  it('confirms thread-wide impact before executing the exact projected force-reset request', async () => {
+    const { apiFetch } = await import('@/utils/api-client');
+    useChatStore.setState({ queue: [PROCESSING_ENTRY], activeInvocations: {} });
+    act(() => {
+      root.render(React.createElement(QueuePanel, { threadId: 'thread-1' }));
+    });
+
+    expect(container.textContent).toContain('processing message');
+    const recovery = container.querySelector('[data-testid="force-reset-q-proc"]') as HTMLButtonElement | null;
+    expect(recovery).not.toBeNull();
+
+    await act(async () => recovery?.click());
+
+    expect(apiFetch).not.toHaveBeenCalled();
+    expect(container.textContent).toContain('强制重置这个对话');
+    expect(container.textContent).toContain('取消这个对话里所有正在运行的猫');
+
+    const cancel = Array.from(container.querySelectorAll('button')).find(
+      (button) => button.textContent?.trim() === '取消',
+    ) as HTMLButtonElement | undefined;
+    expect(document.activeElement).toBe(cancel);
+
+    await act(async () => cancel?.click());
+    expect(container.textContent).not.toContain('强制重置这个对话');
+    expect(apiFetch).not.toHaveBeenCalled();
+
+    await act(async () => recovery?.click());
+
+    const confirm = Array.from(container.querySelectorAll('button')).find(
+      (button) => button.textContent?.trim() === '强制重置',
+    ) as HTMLButtonElement | undefined;
+    expect(confirm).not.toBeUndefined();
+
+    await act(async () => confirm?.click());
+
+    expect(apiFetch).toHaveBeenNthCalledWith(1, '/api/projected/thread-1/recover-processing', { method: 'POST' });
   });
 
   it('offers an explicit recovery action when queued work has no active blocker', async () => {

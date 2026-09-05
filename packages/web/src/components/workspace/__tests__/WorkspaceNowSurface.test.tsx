@@ -1,3 +1,4 @@
+import type { ActiveExecutionProjection } from '@cat-cafe/shared';
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -46,6 +47,46 @@ describe('F284 WorkspaceNowSurface', () => {
     expect(container.querySelector('[data-testid="workspace-quiet"]')).toBeNull();
     expect(container.querySelectorAll('[data-testid="workspace-running-object"]')).toHaveLength(0);
     expect(container.textContent).toBe('');
+  });
+
+  it('keeps both parallel cats visible and preserves the remaining row on refresh', async () => {
+    const executions: ActiveExecutionProjection[] = ['codex-astra', 'fable5'].map((catId) => ({
+      executionId: 'shared-parent',
+      threadId: 'thread-a',
+      threadTitle: 'Parallel sampling',
+      catId,
+      kind: 'live_invocation',
+      startedAt: 100,
+      cancelability: { state: 'not_cancelable', reason: 'terminalizing' },
+    }));
+    const store = useActiveExecutionStore.getState();
+    const hydrate = (items: ActiveExecutionProjection[]) =>
+      store.applySnapshot('thread-a', store.beginHydration('thread-a'), {
+        projectPath: '/project/cafe',
+        executions: items,
+      });
+    hydrate(executions);
+    const onSelectExecution = vi.fn();
+    const consoleError = vi.spyOn(console, 'error');
+    try {
+      await act(async () => root.render(<WorkspaceNowSurface onSelectExecution={onSelectExecution} />));
+      expect(container.querySelectorAll('[data-testid="workspace-running-object"]')).toHaveLength(2);
+      expect(container.textContent).toContain('2 件工作正在进行');
+      const buttons = container.querySelectorAll<HTMLButtonElement>('[data-testid="workspace-open-running-object"]');
+      act(() => buttons[0]?.click());
+      act(() => buttons[1]?.click());
+      expect(onSelectExecution.mock.calls.map(([execution]) => execution.catId)).toEqual(['codex-astra', 'fable5']);
+
+      const remainingRow = container.querySelectorAll('[data-testid="workspace-running-object"]')[1];
+      await act(async () => hydrate(executions.slice(1)));
+      expect(container.querySelectorAll('[data-testid="workspace-running-object"]')).toHaveLength(1);
+      expect(container.querySelector('[data-testid="workspace-running-object"]')).toBe(remainingRow);
+      expect(container.textContent).toContain('fable5');
+      expect(container.textContent).not.toContain('codex-astra');
+      expect(consoleError).not.toHaveBeenCalled();
+    } finally {
+      consoleError.mockRestore();
+    }
   });
 
   it('renders exactly the real running objects instead of a permanent tool inventory', async () => {

@@ -33,7 +33,7 @@ const initialSnapshot: ClientSnapshot = {
 
 export function useCollectiveClient() {
   const [snapshot, setSnapshot] = useState<ClientSnapshot>(initialSnapshot);
-  const { token, request, loadMe, invitationMode, bootstrap, authenticate } = useHumanAuthSession(
+  const { token, request, loadMe, invitationMode, bootstrap, authenticate, configureProvider } = useHumanAuthSession(
     snapshot,
     setSnapshot,
   );
@@ -208,6 +208,7 @@ export function useCollectiveClient() {
     invitationMode,
     bootstrap,
     authenticate,
+    configureProvider,
     createCollective,
     sendMessage,
     createInvite,

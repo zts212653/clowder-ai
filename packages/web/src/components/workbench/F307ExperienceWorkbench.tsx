@@ -86,10 +86,10 @@ function RecentlyClosedSurfaces({
   if (layout.recentlyClosed.length === 0) return null;
   return (
     <aside
-      className="pointer-events-none absolute bottom-3 left-3 z-20 max-w-[calc(100%-1.5rem)]"
+      className="shrink-0 border-t border-cafe-subtle bg-[var(--console-panel-bg)] px-3 py-2"
       data-testid="f307-recently-closed"
     >
-      <div className="pointer-events-auto flex flex-wrap items-center gap-1.5 rounded-xl border border-cafe-subtle bg-cafe-surface/95 p-1.5 shadow-lg backdrop-blur">
+      <div className="flex flex-wrap items-center gap-1.5">
         <button
           type="button"
           onClick={() => setExpanded((current) => !current)}
@@ -217,10 +217,17 @@ export function F307ExperienceWorkbench({
   const hydrated = useF307ExperienceWorkbenchStore((state) => state.hydrated);
   const dispatch = useF307ExperienceWorkbenchStore((state) => state.dispatch);
   const hydrate = useF307ExperienceWorkbenchStore((state) => state.hydrate);
+  const mainAreaAttentionSurfaceId = useF307ExperienceWorkbenchStore((state) => state.mainAreaAttentionSurfaceId);
+  const enterMainAreaAttention = useF307ExperienceWorkbenchStore((state) => state.enterMainAreaAttention);
+  const exitMainAreaAttention = useF307ExperienceWorkbenchStore((state) => state.exitMainAreaAttention);
 
   useEffect(() => {
     if (!hydrated) hydrate(f284WorkspaceState);
   }, [f284WorkspaceState, hydrate, hydrated]);
+
+  useEffect(() => {
+    if (!isDesktop && mainAreaAttentionSurfaceId !== null) exitMainAreaAttention();
+  }, [exitMainAreaAttention, isDesktop, mainAreaAttentionSurfaceId]);
 
   useExplicitWorkspaceNavigation({
     dispatch,
@@ -297,15 +304,23 @@ export function F307ExperienceWorkbench({
       data-pinned-surfaces={layout.pinnedSurfaceIds.join(',')}
       data-workbench-focus={homeFocused ? 'home' : 'surface'}
       data-zero-topology-contract={topologyContract}
+      data-main-area-attention={mainAreaAttentionSurfaceId ?? ''}
     >
       <ListenModePlayer />
       {!zeroTopology && (
         <F307WorkbenchTabs
           layout={layout}
           dispatch={dispatch}
-          onAddSurface={() => setHomeOpen(true)}
+          onAddSurface={() => {
+            exitMainAreaAttention();
+            setHomeOpen(true);
+          }}
           onActivateSurface={() => setHomeOpen(false)}
           homeFocused={homeFocused}
+          isDesktop={isDesktop}
+          mainAreaAttentionSurfaceId={mainAreaAttentionSurfaceId}
+          onEnterMainAreaAttention={enterMainAreaAttention}
+          onExitMainAreaAttention={exitMainAreaAttention}
         />
       )}
 

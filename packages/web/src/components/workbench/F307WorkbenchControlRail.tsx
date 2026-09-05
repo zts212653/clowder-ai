@@ -23,16 +23,42 @@ function ManageIcon() {
   );
 }
 
+function MainAreaIcon({ returning = false }: { returning?: boolean }) {
+  return (
+    <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.35" aria-hidden="true">
+      {returning ? (
+        <>
+          <path d="M6.5 3.5 2 8l4.5 4.5M2.5 8H10" />
+          <path d="M9.5 3h3.25A1.25 1.25 0 0 1 14 4.25v7.5A1.25 1.25 0 0 1 12.75 13H9.5" />
+        </>
+      ) : (
+        <>
+          <path d="M2.5 6V3.5a1 1 0 0 1 1-1H6M10 2.5h2.5a1 1 0 0 1 1 1V6M13.5 10v2.5a1 1 0 0 1-1 1H10M6 13.5H3.5a1 1 0 0 1-1-1V10" />
+          <path d="m6 10 4-4M7 6h3v3" />
+        </>
+      )}
+    </svg>
+  );
+}
+
 export function F307WorkbenchControlRail({
   layout,
   dispatch,
   onAddSurface,
   homeFocused,
+  isDesktop,
+  mainAreaAttentionSurfaceId,
+  onEnterMainAreaAttention,
+  onExitMainAreaAttention,
 }: {
   layout: WorkbenchLayoutState;
   dispatch: (action: WorkbenchAction) => void;
   onAddSurface: () => void;
   homeFocused: boolean;
+  isDesktop: boolean;
+  mainAreaAttentionSurfaceId: string | null;
+  onEnterMainAreaAttention: (surfaceId: string) => void;
+  onExitMainAreaAttention: () => void;
 }) {
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRoot = useRef<HTMLDivElement>(null);
@@ -81,6 +107,30 @@ export function F307WorkbenchControlRail({
       >
         +
       </button>
+
+      {isDesktop && !homeFocused && activeSurface?.capabilities.mainAreaAttention === true && (
+        <button
+          type="button"
+          onClick={() => {
+            if (mainAreaAttentionSurfaceId === activeSurface.id) onExitMainAreaAttention();
+            else onEnterMainAreaAttention(activeSurface.id);
+          }}
+          className="flex h-8 w-8 items-center justify-center rounded-lg text-cafe-muted transition-colors hover:bg-cafe-surface-sunken hover:text-cafe"
+          aria-label={
+            mainAreaAttentionSurfaceId === activeSurface.id
+              ? `返回侧栏 ${activeSurface.title}`
+              : `在主区打开 ${activeSurface.title}`
+          }
+          title={mainAreaAttentionSurfaceId === activeSurface.id ? '返回 Workspace 侧栏' : '临时在主区阅读'}
+          data-testid={
+            mainAreaAttentionSurfaceId === activeSurface.id ? 'f307-return-from-main-area' : 'f307-enter-main-area'
+          }
+        >
+          <span className="h-4 w-4">
+            <MainAreaIcon returning={mainAreaAttentionSurfaceId === activeSurface.id} />
+          </span>
+        </button>
+      )}
 
       {layout.surfaces.length > 1 && (
         <button

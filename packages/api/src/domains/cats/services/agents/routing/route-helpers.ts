@@ -26,6 +26,7 @@ import type { CloudDispatchProvenance } from '../../cloud-bridge/types.js';
 import { buildMessageMap, formatMessage } from '../../context/ContextAssembler.js';
 import { BRIEFING_TIMEZONE } from '../../duty-briefing/constants.js';
 import { formatPromptTime } from '../../format-time.js';
+import { isSameUserWaveSiblingReply } from '../../freshness/FreshnessRelevancePolicy.js';
 import type { DegradationResult } from '../../orchestration/DegradationPolicy.js';
 import { mapToPresentation } from '../../session/context-presentation.js';
 import {
@@ -435,7 +436,7 @@ export function subjectSeenCueSeeds(input: {
   const sourceMessageId = input.sourceMessageId;
   if (!sourceMessageId) return [];
   return input.result.nudges.flatMap((nudge) =>
-    nudge.entityId?.startsWith('person:')
+    nudge.entityId?.startsWith('person:') && nudge.sourceRevision
       ? [
           {
             kind: 'subject_seen' as const,
@@ -445,6 +446,7 @@ export function subjectSeenCueSeeds(input: {
               entityId: nudge.entityId,
               matchedAlias: nudge.matchedAlias,
               sourceMessageId,
+              sourceRevision: nudge.sourceRevision,
             },
           },
         ]
@@ -648,6 +650,26 @@ export interface IncrementalContextResult {
   navigationHeader?: string;
   /** F263: only cold-context evidence lines that survived final token trimming. */
   pushRecallPresentations?: import('../../../../memory/f200-types.js').PushRecallPresentation[];
+  /** F153/F296: bounded refs-only explanation of the final message window. */
+  projectionAudit?: IncrementalProjectionAudit;
+}
+
+export type IncrementalProjectionReason =
+  | 'projected'
+  | 'system_display_only'
+  | 'briefing'
+  | 'same_route_output_isolation'
+  | 'same_user_wave_sibling_deferred'
+  | 'visibility'
+  | 'self_output'
+  | 'smart_window_omitted'
+  | 'token_budget';
+
+export interface IncrementalProjectionAudit {
+  candidateCount: number;
+  sampledCount: number;
+  truncatedCount: number;
+  messageRefs: Array<{ messageRef: string; reason: IncrementalProjectionReason }>;
 }
 
 /**
@@ -1326,6 +1348,13 @@ export interface IncrementalContextOptions {
   cursorOverlay?: string;
   /** Outputs persisted earlier in this same serial route; keep first-pass reasoning independent. */
   sameRouteOutputMessageIds?: ReadonlySet<string>;
+  /**
+   * User trigger that owns the active parallel wave. A sibling reply rooted in
+   * this trigger may be ignored for same-wave freshness, but that is not read
+   * evidence: defer it and keep the delivery boundary before it so a later
+   * directed turn can receive the body.
+   */
+  sameUserWaveTriggerMessageId?: string;
   /** A directly addressed same-route A2A trigger remains visible despite that isolation. */
   exactA2ATriggerMessageId?: string;
   /**
@@ -1383,24 +1412,75 @@ function projectVisibleMessages(messages: readonly StoredMessage[]) {
 
 type SameRouteBoundaryCap = { active: false } | { active: true; boundary: CanonicalVisibilityCursor | undefined };
 
+interface SameRouteIsolationContext {
+  readonly laterUserTurnBoundary?: CanonicalVisibilityCursor;
+  readonly directedReplyMessageIds: ReadonlySet<string>;
+  readonly sameUserWaveTriggerMessageIds: ReadonlySet<string>;
+}
+
 function isSameRouteOutputWithheld(
   message: StoredMessage,
   playMode: boolean,
   options: IncrementalContextOptions | undefined,
+  isolation: SameRouteIsolationContext,
 ): boolean {
-  return Boolean(
-    playMode && options?.sameRouteOutputMessageIds?.has(message.id) && message.id !== options.exactA2ATriggerMessageId,
-  );
+  if (!playMode || !options?.sameRouteOutputMessageIds?.has(message.id)) return false;
+  if (message.id === options.exactA2ATriggerMessageId || isolation.directedReplyMessageIds.has(message.id))
+    return false;
+  if (isolation.laterUserTurnBoundary) {
+    try {
+      if (compareCursors(cursorFor(message), isolation.laterUserTurnBoundary) < 0) return false;
+    } catch {
+      // Unresolved ordering cannot widen visibility; keep the route-local output isolated.
+    }
+  }
+  return true;
+}
+
+function isSameUserWaveSiblingDeferred(
+  message: StoredMessage,
+  catId: CatId,
+  playMode: boolean,
+  options: IncrementalContextOptions | undefined,
+  isolation: SameRouteIsolationContext,
+): boolean {
+  if (!playMode || !options?.sameUserWaveTriggerMessageId || message.catId === null || message.catId === catId) {
+    return false;
+  }
+  return isSameUserWaveSiblingReply(message, {
+    catId,
+    coveredTriggerMessageIds: isolation.sameUserWaveTriggerMessageIds,
+  });
+}
+
+function incrementalDeferralReason(
+  message: StoredMessage,
+  catId: CatId,
+  playMode: boolean,
+  options: IncrementalContextOptions | undefined,
+  isolation: SameRouteIsolationContext,
+): Extract<IncrementalProjectionReason, 'same_route_output_isolation' | 'same_user_wave_sibling_deferred'> | undefined {
+  if (isSameRouteOutputWithheld(message, playMode, options, isolation)) return 'same_route_output_isolation';
+  if (isSameUserWaveSiblingDeferred(message, catId, playMode, options, isolation)) {
+    return 'same_user_wave_sibling_deferred';
+  }
+  return undefined;
 }
 
 function resolveSameRouteBoundaryCap(
   unseen: StoredMessage[],
   cursor: string | undefined,
+  catId: CatId,
   playMode: boolean,
   options: IncrementalContextOptions | undefined,
+  isolation: SameRouteIsolationContext,
 ): SameRouteBoundaryCap {
-  if (!playMode || !options?.sameRouteOutputMessageIds?.size) return { active: false };
-  const firstWithheldIndex = unseen.findIndex((message) => isSameRouteOutputWithheld(message, playMode, options));
+  if (!playMode || (!options?.sameRouteOutputMessageIds?.size && !options?.sameUserWaveTriggerMessageId)) {
+    return { active: false };
+  }
+  const firstWithheldIndex = unseen.findIndex(
+    (message) => incrementalDeferralReason(message, catId, playMode, options, isolation) !== undefined,
+  );
   if (firstWithheldIndex < 0) return { active: false };
 
   const precedingCursor =
@@ -1409,6 +1489,89 @@ function resolveSameRouteBoundaryCap(
     active: true,
     boundary: canonicalDeferredBoundary(precedingCursor, 'same-route-withheld-predecessor'),
   };
+}
+
+function resolveLaterUserTurnBoundary(
+  unseen: readonly StoredMessage[],
+  currentUserMessageId: string | undefined,
+  viewer: { type: 'cat'; catId: CatId } | { type: 'user' },
+): CanonicalVisibilityCursor | undefined {
+  if (!currentUserMessageId) return undefined;
+  const current = unseen.find((message) => message.id === currentUserMessageId);
+  if (
+    !current ||
+    current.catId !== null ||
+    current.userId === 'system' ||
+    current.origin === 'briefing' ||
+    current.deletedAt ||
+    current._tombstone ||
+    !isTimelinePublished(current) ||
+    !canViewMessage(current, viewer)
+  ) {
+    return undefined;
+  }
+  return canonicalDeferredBoundary(cursorFor(current), 'same-route-later-user-turn');
+}
+
+async function resolveDirectedSameRouteReplies(input: {
+  readonly deps: RouteStrategyDeps;
+  readonly unseen: readonly StoredMessage[];
+  readonly threadId: string;
+  readonly catId: CatId;
+  readonly playMode: boolean;
+  readonly sameRouteOutputMessageIds: ReadonlySet<string> | undefined;
+}): Promise<ReadonlySet<string>> {
+  if (!input.playMode || !input.sameRouteOutputMessageIds?.size) return new Set();
+  const visibleById = new Map(input.unseen.map((message) => [message.id, message]));
+  const directed = new Set<string>();
+  for (const message of input.unseen) {
+    if (!input.sameRouteOutputMessageIds.has(message.id)) continue;
+    const triggerMessageId = exactCausalReplyTrigger(message);
+    if (!triggerMessageId) continue;
+    const trigger = await readDirectedReplyTrigger(input, visibleById, message.id, triggerMessageId);
+    if (isVisibleTargetTrigger(trigger, input.threadId, input.catId)) directed.add(message.id);
+  }
+  return directed;
+}
+
+function exactCausalReplyTrigger(message: StoredMessage): string | undefined {
+  if (message.catId === null) return undefined;
+  const triggerMessageId = message.extra?.causal?.triggerMessageId;
+  return triggerMessageId && message.replyTo === triggerMessageId ? triggerMessageId : undefined;
+}
+
+async function readDirectedReplyTrigger(
+  input: {
+    readonly deps: RouteStrategyDeps;
+    readonly threadId: string;
+    readonly catId: CatId;
+  },
+  visibleById: ReadonlyMap<string, StoredMessage>,
+  messageRef: string,
+  triggerMessageId: string,
+): Promise<StoredMessage | null> {
+  const visible = visibleById.get(triggerMessageId);
+  if (visible) return visible;
+  try {
+    return await input.deps.messageStore.getById(triggerMessageId);
+  } catch (err) {
+    log.warn(
+      { err, threadId: input.threadId, catId: input.catId as string, messageRef, triggerMessageId },
+      '[F296] directed same-route reply source lookup failed; preserving isolation',
+    );
+    return null;
+  }
+}
+
+function isVisibleTargetTrigger(trigger: StoredMessage | null, threadId: string, catId: CatId): boolean {
+  return Boolean(
+    trigger &&
+      trigger.threadId === threadId &&
+      trigger.catId === catId &&
+      !trigger.deletedAt &&
+      !trigger._tombstone &&
+      isTimelinePublished(trigger),
+  );
 }
 
 function clampToSameRouteBoundaryCap(
@@ -1450,6 +1613,40 @@ async function resolveRecentFilesTouched(
   }
 }
 
+interface ProjectionAuditCandidate {
+  readonly messageRef: string;
+  readonly filteredReason?: Exclude<IncrementalProjectionReason, 'projected' | 'smart_window_omitted' | 'token_budget'>;
+}
+
+interface ProjectionAuditCapture {
+  candidates: ProjectionAuditCandidate[];
+}
+
+const PROJECTION_AUDIT_SAMPLE_LIMIT = 16;
+
+function buildIncrementalProjectionAudit(
+  candidates: readonly ProjectionAuditCandidate[],
+  result: IncrementalContextResult,
+): IncrementalProjectionAudit {
+  const projected = new Set(result.projectedMessageIds);
+  const omittedReason: IncrementalProjectionReason =
+    result.degradation?.includes('token') || result.degradation?.includes('预算')
+      ? 'token_budget'
+      : 'smart_window_omitted';
+  const sampled: IncrementalProjectionAudit['messageRefs'] = candidates
+    .slice(-PROJECTION_AUDIT_SAMPLE_LIMIT)
+    .map((candidate) => ({
+      messageRef: candidate.messageRef,
+      reason: projected.has(candidate.messageRef) ? 'projected' : (candidate.filteredReason ?? omittedReason),
+    }));
+  return {
+    candidateCount: candidates.length,
+    sampledCount: sampled.length,
+    truncatedCount: Math.max(0, candidates.length - sampled.length),
+    messageRefs: sampled,
+  };
+}
+
 /* @segment N2 — 对话历史增量 */
 export async function assembleIncrementalContext(
   deps: RouteStrategyDeps,
@@ -1459,6 +1656,44 @@ export async function assembleIncrementalContext(
   currentUserMessageId?: string,
   thinkingMode?: 'debug' | 'play',
   options?: IncrementalContextOptions,
+): Promise<IncrementalContextResult> {
+  const auditCapture: ProjectionAuditCapture = { candidates: [] };
+  const result = await assembleIncrementalContextInternal(
+    deps,
+    userId,
+    threadId,
+    catId,
+    currentUserMessageId,
+    thinkingMode,
+    options,
+    auditCapture,
+  );
+  const projectionAudit = buildIncrementalProjectionAudit(auditCapture.candidates, result);
+  log.info(
+    {
+      f148: 'projection-audit',
+      threadId,
+      catId,
+      candidateCount: projectionAudit.candidateCount,
+      sampledCount: projectionAudit.sampledCount,
+      truncatedCount: projectionAudit.truncatedCount,
+      messageRefs: projectionAudit.messageRefs,
+      boundaryRef: result.boundaryId ?? null,
+    },
+    '[F153] bounded content-free incremental projection audit',
+  );
+  return { ...result, projectionAudit };
+}
+
+async function assembleIncrementalContextInternal(
+  deps: RouteStrategyDeps,
+  userId: string,
+  threadId: string,
+  catId: CatId,
+  currentUserMessageId: string | undefined,
+  thinkingMode: 'debug' | 'play' | undefined,
+  options: IncrementalContextOptions | undefined,
+  auditCapture: ProjectionAuditCapture,
 ): Promise<IncrementalContextResult> {
   if (!deps.deliveryCursorStore) {
     return {
@@ -1501,24 +1736,66 @@ export async function assembleIncrementalContext(
   // Debug mode: cats see all whispers (full transparency). Play mode: cats only see their own whispers.
   const playMode = thinkingMode !== 'debug';
   const viewer = playMode ? { type: 'cat' as const, catId } : { type: 'user' as const };
-  const sameRouteBoundaryCap = resolveSameRouteBoundaryCap(unseen, cursor, playMode, options);
+  const sameRouteIsolation: SameRouteIsolationContext = {
+    laterUserTurnBoundary: resolveLaterUserTurnBoundary(unseen, currentUserMessageId, viewer),
+    sameUserWaveTriggerMessageIds: options?.sameUserWaveTriggerMessageId
+      ? new Set([options.sameUserWaveTriggerMessageId])
+      : new Set(),
+    directedReplyMessageIds: await resolveDirectedSameRouteReplies({
+      deps,
+      unseen,
+      threadId,
+      catId,
+      playMode,
+      sameRouteOutputMessageIds: options?.sameRouteOutputMessageIds,
+    }),
+  };
+  const sameRouteBoundaryCap = resolveSameRouteBoundaryCap(
+    unseen,
+    cursor,
+    catId,
+    playMode,
+    options,
+    sameRouteIsolation,
+  );
+  const filteredReasons = new Map<string, ProjectionAuditCandidate['filteredReason']>();
   const relevant = unseen.filter((m) => {
     // System-generated messages (persisted error badges) are display-only — never enter prompt
-    if (m.userId === 'system') return false;
+    if (m.userId === 'system') {
+      filteredReasons.set(m.id, 'system_display_only');
+      return false;
+    }
     // F148 Phase E: briefing messages are non-routing — never enter incremental context (AC-E2)
-    if (m.origin === 'briefing') return false;
-    if (isSameRouteOutputWithheld(m, playMode, options)) return false;
+    if (m.origin === 'briefing') {
+      filteredReasons.set(m.id, 'briefing');
+      return false;
+    }
+    const deferralReason = incrementalDeferralReason(m, catId, playMode, options, sameRouteIsolation);
+    if (deferralReason) {
+      filteredReasons.set(m.id, deferralReason);
+      return false;
+    }
     // F35: Exclude whispers not intended for this cat (play mode only)
-    if (!canViewMessage(m, viewer)) return false;
+    if (!canViewMessage(m, viewer)) {
+      filteredReasons.set(m.id, 'visibility');
+      return false;
+    }
     // Exclude own messages (only include user messages and other cats' messages).
     // F052: only distinct source/target provenance earns the same-cat cross-post exemption.
     const isActualCrossPost = isCrossThreadProvenance(m.extra?.crossPost?.sourceThreadId, m.threadId);
-    if (!isActualCrossPost && m.catId !== null && m.catId === catId) return false;
+    if (!isActualCrossPost && m.catId !== null && m.catId === catId) {
+      filteredReasons.set(m.id, 'self_output');
+      return false;
+    }
     // `origin` describes the transport that persisted a message, not whether its
     // visible body is private thinking. Persisted unread speech therefore follows
     // the same visibility contract for user and cat authors.
     return true;
   });
+  auditCapture.candidates = unseen.map((message) => ({
+    messageRef: message.id,
+    ...(filteredReasons.get(message.id) ? { filteredReason: filteredReasons.get(message.id) } : {}),
+  }));
 
   // An explicit zero means fixed prompt parts exhausted the invocation budget.
   // An absent override identifies an unbound direct consumer and uses the

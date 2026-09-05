@@ -60,6 +60,55 @@ describe('CollectiveLaunchSurface', () => {
     expect(container.querySelector('a[href="/settings?s=plugins"]')).not.toBeNull();
   });
 
+  it('creates the independent local Service without a terminal and opens its one-time bootstrap in the canonical Client', async () => {
+    mockApiFetch.mockImplementation(async (url, init) => {
+      if (url === '/api/plugins/collective-connector/service/provision' && init?.method === 'POST') {
+        return response({
+          service: {
+            state: 'setup_required',
+            serviceUrl: 'http://127.0.0.1:5201',
+            dataDirectory: '/home/user/.cat-cafe/collective-service',
+            serviceInstanceId: 'svc_local',
+            setupStep: 'github_app',
+          },
+          launchUrl: 'http://127.0.0.1:5201/#bootstrap=one-time-secret',
+        });
+      }
+      return response({
+        runtimeStatus: 'active',
+        connections: [],
+        localService: {
+          state: 'not_created',
+          serviceUrl: 'http://127.0.0.1:5201',
+          dataDirectory: '/home/user/.cat-cafe/collective-service',
+        },
+      });
+    });
+
+    await act(async () => root.render(<CollectiveLaunchSurface />));
+    await flush();
+
+    expect(container.textContent).toContain('部署新 Service');
+    expect(container.textContent).toContain('不需要打开终端或复制 secret');
+    expect(container.textContent).toContain('/home/user/.cat-cafe/collective-service');
+    const deploy = Array.from(container.querySelectorAll('button')).find((button) =>
+      button.textContent?.includes('部署新 Service'),
+    );
+    expect(deploy).toBeDefined();
+    await act(async () => {
+      deploy?.click();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(mockApiFetch).toHaveBeenCalledWith('/api/plugins/collective-connector/service/provision', {
+      method: 'POST',
+    });
+    expect(container.querySelector('iframe')?.src).toBe(
+      'http://127.0.0.1:5201/?hostOrigin=http%3A%2F%2Flocalhost%3A3000#bootstrap=one-time-secret',
+    );
+  });
+
   it('embeds the canonical Service client and accepts pairing only from that exact frame and origin', async () => {
     let paired = false;
     mockApiFetch.mockImplementation(async (url, init) => {

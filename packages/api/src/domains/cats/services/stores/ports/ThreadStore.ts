@@ -29,7 +29,7 @@ export function deriveAutoThreadTitle(content: string): string | null {
 }
 
 /** System-owned thread surfaces that stay distinct from ordinary user conversations. */
-export type ThreadSystemKind = 'connector_hub' | 'eval_domain' | 'cat_bedroom';
+export type ThreadSystemKind = 'connector_hub' | 'eval_domain' | 'cat_bedroom' | 'memory_ops';
 
 /**
  * F032 Phase C: Participant activity data for reviewer matching.
@@ -262,7 +262,8 @@ export interface Thread {
   /** F171: First-Run Quest onboarding state. */
   firstRunQuestState?: FirstRunQuestStateV1;
   /** System thread kind — determines sidebar "系统" section visibility.
-   *  connector_hub = IM Hub, eval_domain = harness eval, cat_bedroom = F255 private bedroom. */
+   *  connector_hub = IM Hub, eval_domain = harness eval, cat_bedroom = F255 private bedroom,
+   *  memory_ops = owner-scoped background memory operations. */
   systemKind?: ThreadSystemKind;
   /** F088 Phase G: Connector Hub thread state — marks this thread as an IM Hub for command isolation. */
   connectorHubState?: ConnectorHubStateV1;

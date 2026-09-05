@@ -41,7 +41,7 @@ export interface DeferredCaptureDeps {
   messageStore: Pick<IMessageStore, 'getById'>;
   receiptStore: Pick<
     DeferredPersonMemoryReceiptStore,
-    'stage' | 'withdraw' | 'hardForget' | 'get' | 'rearmWriteOpportunity'
+    'stage' | 'withdraw' | 'hardForget' | 'get' | 'bindProcessorInvocation' | 'rearmWriteOpportunity' | 'disposeClaim'
   >;
   registryResolver: DeferredRegistryResolver;
   writeOpportunityDeliveryStore?: WriteOpportunityDeliveryStore;
@@ -153,6 +153,31 @@ async function prepareDeferredCapture(
   const receiptId = deferredPersonMemoryReceiptId(auth.userId, auth.catId, body.clientRequestId);
   const destinationReceiptId = body.reentryReceipt?.receiptId ?? receiptId;
   const now = Date.now();
+  if (body.reentryReceipt) {
+    const processingMessageId = auth.originTriggerMessageId ?? auth.a2aTriggerMessageId;
+    if (!processingMessageId) {
+      return {
+        status: 'error',
+        failure: { statusCode: 409, payload: { error: 'deferred_receipt_conflict' } },
+      };
+    }
+    const grant = await deps.receiptStore.bindProcessorInvocation({
+      ownerUserId: auth.userId,
+      receiptId: body.reentryReceipt.receiptId,
+      claimId: body.reentryReceipt.claimId,
+      processorCatId: auth.catId,
+      processingThreadId: auth.threadId,
+      processingMessageId,
+      processorInvocationId: auth.invocationId,
+      now,
+    });
+    if (grant.outcome !== 'bound' && grant.outcome !== 'replayed') {
+      return {
+        status: 'error',
+        failure: { statusCode: 409, payload: { error: 'deferred_receipt_conflict' } },
+      };
+    }
+  }
   const lineageResolution = await resolveDeferredWriteOpportunity(
     deps,
     body.writeOpportunityRef,
@@ -216,7 +241,9 @@ async function stageDeferredCapture(
           ownerUserId: auth.userId,
           receiptId: reentryReceipt.receiptId,
           claimId: reentryReceipt.claimId,
-          requesterCatId: auth.catId,
+          processorCatId: auth.catId,
+          processingThreadId: auth.threadId,
+          processorInvocationId: auth.invocationId,
           dedupeHash: context.dedupeHash,
           writeOpportunityLineage: lineageResolution.lineage,
           writeOpportunityReceipt: lineageResolution.receipt,
@@ -278,17 +305,21 @@ async function finishDeferredCapture(
   const { auth, body, lineageResolution, now } = context;
   const postStage = await context.sourceResolver.revalidate(body.sources, auth.userId, context.resolved.bundleDigest);
   if (postStage.status === 'invalid') {
+    if (lineageResolution.status === 'resolved') {
+      try {
+        await invalidateDeferredWriteOpportunity(
+          deps,
+          request,
+          auth.userId,
+          { writeOpportunityLineage: lineageResolution.lineage },
+          'source_corrected',
+        );
+      } catch {
+        return reply.code(503).send({ error: 'write_opportunity_invalidation_unavailable' });
+      }
+    }
     if (staged.outcome === 'created' || staged.outcome === 'rearmed') {
       await deps.receiptStore.hardForget(auth.userId, context.destinationReceiptId);
-    }
-    if (lineageResolution.status === 'resolved') {
-      await invalidateDeferredWriteOpportunity(
-        deps,
-        request,
-        auth.userId,
-        { writeOpportunityLineage: lineageResolution.lineage },
-        'source_corrected',
-      );
     }
     return reply.code(409).send({ error: 'source_drift' });
   }

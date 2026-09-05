@@ -1,5 +1,5 @@
 import type { ThreadAttentionGroup } from '@cat-cafe/shared';
-import type { ThreadAttentionGroupCommand } from '@/components/ThreadSidebar/use-attention-clusters';
+import type { LegacyThreadAttentionGroupCommand } from '@/components/ThreadSidebar/use-attention-clusters';
 
 export interface PreviewGroupState {
   groups: ThreadAttentionGroup[];
@@ -23,7 +23,7 @@ function nextGroupId(groups: readonly ThreadAttentionGroup[]): string {
 /** Mirrors the production persistence command semantics while keeping this fixture owner-local. */
 export function applyPreviewGroupCommand(
   state: PreviewGroupState,
-  command: ThreadAttentionGroupCommand,
+  command: LegacyThreadAttentionGroupCommand,
 ): PreviewGroupState {
   if (command.action === 'create') {
     const threadIds = [...new Set(command.threadIds)];

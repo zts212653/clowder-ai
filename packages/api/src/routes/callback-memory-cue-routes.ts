@@ -18,6 +18,7 @@ import {
 } from '../domains/memory/cue/MemoryCueEpisodeStore.js';
 import type { MemoryCueSourceReader } from '../domains/memory/cue/MemoryCueSourceReader.js';
 import { catOwnedSeedDrillPayloadSchema } from '../domains/memory/cue/sources/CatOwnedSeedMemoryCueSource.js';
+import { TASTE_TASK_BUNDLE_SOURCE_ANCHOR_PREFIX } from '../domains/memory/cue/TasteTaskBundleCatalog.js';
 import { requireCallbackAuth } from './callback-auth-prehandler.js';
 
 const drillBodySchema = z
@@ -212,10 +213,12 @@ async function verifyApplicationEvidence(input: {
   if (outcome !== 'applied') {
     return true;
   }
-  const requiresTasteEvidence =
+  const requiresExplicitTasteEvidence =
     coordinate.family === 'taste' && coordinate.anchor.startsWith(EXPLICIT_APPROVED_TASTE_SOURCE_ANCHOR_PREFIX);
+  const requiresTaskBundleEvidence =
+    coordinate.family === 'taste' && coordinate.anchor.startsWith(TASTE_TASK_BUNDLE_SOURCE_ANCHOR_PREFIX);
   const requiresOwnedSeedEvidence = coordinate.family === 'owned_seed';
-  if (!requiresTasteEvidence && !requiresOwnedSeedEvidence) return true;
+  if (!requiresExplicitTasteEvidence && !requiresTaskBundleEvidence && !requiresOwnedSeedEvidence) return true;
   if (
     deps.episodeStore.hasExactConsumptionRequest({
       scope: coordinate.scope,
@@ -235,7 +238,8 @@ async function verifyApplicationEvidence(input: {
     'drilled',
     coordinate.consumerCatId,
   );
-  if (requiresTasteEvidence) {
+  if (requiresTaskBundleEvidence && hasDrilled) return true;
+  if (requiresExplicitTasteEvidence) {
     const payload = explicitApprovedTasteDrillPayloadSchema.safeParse(source.payload);
     const hasRichBlock = payload.success
       ? (deps.applicationEvidence?.hasRichBlock?.({

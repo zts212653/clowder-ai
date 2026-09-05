@@ -4,10 +4,14 @@ import type {
   WriteOpportunityReentryCarrierV1,
 } from '@cat-cafe/shared';
 
-export interface DeferredPersonMemoryDailySignal {
+export interface DeferredPersonMemoryDailyBatchSignal {
+  ownerUserId: string;
+  receiptIds: string[];
+}
+
+export interface DeferredPersonMemoryDailyItem {
   receiptId: string;
   ownerUserId: string;
-  requesterCatId: string;
   originMessageRef: { kind: 'message'; threadId: string; messageId: string };
   subject: string;
   registryBinding: NonNullable<DeferredPersonMemoryReceipt['registryBinding']>;
@@ -15,6 +19,8 @@ export interface DeferredPersonMemoryDailySignal {
   state: 'claimed';
   claimId: string;
   claimUntil: number;
+  processorCatId: string;
+  processingThreadId: string;
   writeOpportunityLineage?: DeferredPersonMemoryReceipt['writeOpportunityLineage'];
   writeOpportunityReentry?: WriteOpportunityReentryCarrierV1;
 }
@@ -29,7 +35,7 @@ function coordinateText(source: DeferredPersonMemoryResolvedSource): string {
 }
 
 /** IDs-only attribution for a Standing Reflex write opportunity that re-entered after defer. */
-function writeOpportunityReentryText(signal: DeferredPersonMemoryDailySignal): string {
+function writeOpportunityReentryText(signal: DeferredPersonMemoryDailyItem): string {
   const lineage = signal.writeOpportunityLineage;
   if (!lineage) return '';
   return (
@@ -41,10 +47,10 @@ function writeOpportunityReentryText(signal: DeferredPersonMemoryDailySignal): s
   );
 }
 
-export function deferredPersonMemoryTriggerContent(signal: DeferredPersonMemoryDailySignal): string {
+function receiptPacket(signal: DeferredPersonMemoryDailyItem, index: number): string {
   const coordinates = signal.sourceCoordinates.map(coordinateText).join('\n- ');
   return (
-    '[F276 deferred person-memory daily clerk]\n' +
+    `## receipt ${index + 1}\n` +
     writeOpportunityReentryText(signal) +
     `receiptId=${signal.receiptId}\n` +
     `claimId=${signal.claimId}\n` +
@@ -55,6 +61,17 @@ export function deferredPersonMemoryTriggerContent(signal: DeferredPersonMemoryD
     'If they support a useful known-person delta, create one ordinary rejectable F276 proposal with a complete typed sourceBundle, ' +
     `deferredReceipt={receiptId:${signal.receiptId},claimId:${signal.claimId}}, and clientRequestId=${signal.receiptId}. ` +
     'Never materialize memory directly. Never turn the correction/capture itself into an interaction event. ' +
-    'If evidence is insufficient or an attachment/ASR lacks explicit owner confirmation, do not propose; let the claim expire for later resolution.'
+    'If an attachment/ASR lacks explicit owner confirmation, call cat_cafe_dispose_deferred_person_memory with disposition=awaiting_confirmation. ' +
+    'If no useful explicit fact is supported, call it with disposition=insufficient_evidence. Never leave a receipt unresolved.'
+  );
+}
+
+export function deferredPersonMemoryTriggerContent(signals: readonly DeferredPersonMemoryDailyItem[]): string {
+  return (
+    '[F276 unified Memory Operations clerk]\n' +
+    `Process ${signals.length} independent receipt packet(s). This is one bounded batch, not one entity worker.\n` +
+    'Read only each packet’s exact owner-visible sources. Do not scan thread history or all conversations. ' +
+    'Never mix facts or source coordinates across packets. Complete every packet independently with one proposal or one explicit disposition.\n\n' +
+    signals.map(receiptPacket).join('\n\n')
   );
 }

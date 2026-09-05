@@ -479,6 +479,34 @@
     "owner": "codex"
   },
   {
+    "id": "workflow-stable-public-sync-release",
+    "kind": "workflow",
+    "sourceRef": {
+      "path": "cat-cafe-skills/opensource-ops/SKILL.md",
+      "anchor": "D: Outbound Sync"
+    },
+    "structureSource": {
+      "path": "cat-cafe-skills/opensource-ops/SKILL.md",
+      "anchor": "G: Public Release"
+    },
+    "bodySource": {
+      "path": "cat-cafe-skills/opensource-ops/SKILL.md",
+      "anchor": "Sync ≠ Release"
+    },
+    "contexts": ["long_running", "feature_dev", "merge_gate"],
+    "audience": ["developer", "maintainer"],
+    "body": "要全量同步或给稳定 public main 发版时，先分清 Full Sync / Public Release；已有写授权只让 writer 跑一轮 public gate，无授权才做 no-write validate。",
+    "action": {
+      "type": "open_source",
+      "label": "查看稳定同步与发版车道",
+      "sourceRef": {
+        "path": "cat-cafe-skills/opensource-ops/SKILL.md",
+        "anchor": "D: Outbound Sync"
+      }
+    },
+    "owner": "codex-sol"
+  },
+  {
     "id": "workflow-thread-orchestration-community",
     "kind": "workflow",
     "sourceRef": { "path": "cat-cafe-skills/thread-orchestration/SKILL.md", "anchor": "社区 PR / issue 分发" },
@@ -818,6 +846,25 @@
     "body": "对话太多找不到？给 Thread 打标签（比如「重要」「待办」），方便在侧边栏筛选。",
     "action": { "type": "open_concierge_draft", "label": "了解更多" },
     "owner": "opus"
+  },
+  {
+    "id": "feature-f277-search-group",
+    "kind": "feature",
+    "sourceRef": { "path": "docs/features/F277-thread-attention-navigation.md", "anchor": "Search Group Organizing" },
+    "structureSource": {
+      "path": "docs/features/F277-thread-attention-navigation.md",
+      "anchor": "Search Group Organizing"
+    },
+    "bodySource": { "path": "docs/features/F277-thread-attention-navigation.md", "anchor": "Search Group Organizing" },
+    "contexts": ["thinking", "long_running", "concierge_open"],
+    "audience": ["all"],
+    "body": "搜索后点「整理全部」，未置顶的匹配对话也能一起收进 Group。",
+    "action": {
+      "type": "open_concierge_draft",
+      "label": "了解搜索整理",
+      "draftPrompt": "请带我从侧栏搜索开始，把匹配的对话（包括未置顶者）批量整理到 Group，并说明如何补入成员和撤销。"
+    },
+    "owner": "codex-astra"
   },
   {
     "id": "feature-f277-thread-attention-navigation",

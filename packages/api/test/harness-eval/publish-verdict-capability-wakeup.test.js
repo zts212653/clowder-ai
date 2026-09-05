@@ -137,7 +137,7 @@ function buildClassifiedTrial() {
 function createMockGitPublisher(isolatedDir, published = { commitSha: 'unreachable', prUrl: 'unreachable' }) {
   return {
     async publishOnIsolatedWorktree(opts) {
-      const isolatedRoot = join(root, '..', isolatedDir);
+      const isolatedRoot = join(root, isolatedDir);
       seedCanonicalMeasurementCensusState(isolatedRoot);
       await opts.stage(isolatedRoot);
       return published;
@@ -154,7 +154,7 @@ describe('handlePublishVerdict end-to-end with capability-wakeup generator', () 
       prUrl: 'https://github.com/zts212653/clowder-ai/pull/9000',
     });
     // Pre-create the isolated stub so cw generator's loadDomains() works
-    const isoStub = join(root, '..', 'cw-e2e-iso-stub');
+    const isoStub = join(root, 'cw-e2e-iso-stub');
     mkdirSync(join(isoStub, 'docs', 'harness-feedback', 'eval-domains'), { recursive: true });
     writeFileSync(
       join(isoStub, 'docs', 'harness-feedback', 'eval-domains', 'eval-capability-wakeup.yaml'),
@@ -225,7 +225,7 @@ sla:
     };
     const cwGenerator = createCapabilityWakeupGeneratorAdapter(provider);
     const mockGitPublisher = createMockGitPublisher('cw-e2e-nofound-iso');
-    mkdirSync(join(root, '..', 'cw-e2e-nofound-iso', 'docs', 'harness-feedback'), { recursive: true });
+    mkdirSync(join(root, 'cw-e2e-nofound-iso', 'docs', 'harness-feedback'), { recursive: true });
 
     const result = await handlePublishVerdict(
       { harnessFeedbackRoot: root, gitPublisher: mockGitPublisher, generator: cwGenerator },
@@ -248,7 +248,7 @@ sla:
     assert.equal(result.error, 'session_not_found');
     assert.match(result.detail, /stale-session-id/);
 
-    rmSync(join(root, '..', 'cw-e2e-nofound-iso'), { recursive: true, force: true });
+    rmSync(join(root, 'cw-e2e-nofound-iso'), { recursive: true, force: true });
   });
 
   // PR #3495: zero-trial keep_observe now succeeds with no-data confidence
@@ -261,7 +261,7 @@ sla:
       commitSha: 'cw-zero-trial-sha',
       prUrl: 'https://github.com/zts212653/clowder-ai/pull/9001',
     });
-    mkdirSync(join(root, '..', 'cw-e2e-empty2-iso', 'docs', 'harness-feedback'), { recursive: true });
+    mkdirSync(join(root, 'cw-e2e-empty2-iso', 'docs', 'harness-feedback'), { recursive: true });
 
     const result = await handlePublishVerdict(
       { harnessFeedbackRoot: root, gitPublisher: mockGitPublisher, generator: cwGenerator },
@@ -285,7 +285,7 @@ sla:
     assert.equal(result.verdictPath, 'docs/harness-feedback/verdicts/vhp-cw-empty2.md');
     assert.equal(result.bundleDir, 'docs/harness-feedback/bundles/vhp-cw-empty2');
 
-    rmSync(join(root, '..', 'cw-e2e-empty2-iso'), { recursive: true, force: true });
+    rmSync(join(root, 'cw-e2e-empty2-iso'), { recursive: true, force: true });
   });
 
   it('returns 501 when no generator wired for capability-wakeup domain', async () => {
@@ -322,7 +322,7 @@ sla:
     const emptyProvider = { resolve: async () => [] };
     const cwGenerator = createCapabilityWakeupGeneratorAdapter(emptyProvider);
     const mockGitPublisher = createMockGitPublisher('cw-e2e-empty-iso');
-    mkdirSync(join(root, '..', 'cw-e2e-empty-iso', 'docs', 'harness-feedback'), { recursive: true });
+    mkdirSync(join(root, 'cw-e2e-empty-iso', 'docs', 'harness-feedback'), { recursive: true });
 
     const result = await handlePublishVerdict(
       { harnessFeedbackRoot: root, gitPublisher: mockGitPublisher, generator: cwGenerator },
@@ -345,6 +345,6 @@ sla:
     assert.equal(result.error, 'measurement_validity_gate');
     assert.match(result.detail, /keep_observe_only/);
 
-    rmSync(join(root, '..', 'cw-e2e-empty-iso'), { recursive: true, force: true });
+    rmSync(join(root, 'cw-e2e-empty-iso'), { recursive: true, force: true });
   });
 });

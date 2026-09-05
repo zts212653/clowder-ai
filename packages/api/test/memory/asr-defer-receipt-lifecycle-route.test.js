@@ -12,6 +12,10 @@ describe('F276 deferred receipt lifecycle invalidates write-opportunity lineage'
   let storedReceipts;
   let invalidations;
   let purges;
+  let withdrawals;
+  let forgotten;
+  let terminalError;
+  let purgeError;
 
   before(async () => {
     const [routeMod, registryMod, messageMod, authMod] = await Promise.all([
@@ -38,10 +42,12 @@ describe('F276 deferred receipt lifecycle invalidates write-opportunity lineage'
           return storedReceipts.find((receipt) => receipt.receiptId === receiptId) ?? null;
         },
         async withdraw(_owner, receiptId) {
+          withdrawals.push(receiptId);
           const receipt = storedReceipts.find((candidate) => candidate.receiptId === receiptId);
           return receipt ? { outcome: 'withdrawn', receipt } : { outcome: 'not_available' };
         },
-        async hardForget() {
+        async hardForget(_owner, receiptId) {
+          forgotten.push(receiptId);
           return { outcome: 'purged' };
         },
       },
@@ -55,6 +61,7 @@ describe('F276 deferred receipt lifecycle invalidates write-opportunity lineage'
           return [];
         },
         async purgeLineage(ownerUserId, dedupeLineage) {
+          if (purgeError) throw purgeError;
           purges.push({ ownerUserId, dedupeLineage });
           return 1;
         },
@@ -62,6 +69,7 @@ describe('F276 deferred receipt lifecycle invalidates write-opportunity lineage'
       writeOpportunityTerminalLedger: {
         async recordTerminal() {},
         async recordInvalidated(input) {
+          if (terminalError) throw terminalError;
           invalidations.push(input);
         },
         async readLineageStates() {
@@ -76,6 +84,10 @@ describe('F276 deferred receipt lifecycle invalidates write-opportunity lineage'
     storedReceipts = [];
     invalidations = [];
     purges = [];
+    withdrawals = [];
+    forgotten = [];
+    terminalError = undefined;
+    purgeError = undefined;
   });
 
   const lineageReceipt = (receiptId) => ({
@@ -143,5 +155,29 @@ describe('F276 deferred receipt lifecycle invalidates write-opportunity lineage'
     await post('withdraw', receiptId);
     assert.deepEqual(invalidations, []);
     assert.deepEqual(purges, []);
+  });
+
+  it('does not report forget success or purge the receipt when the durable invalidation fence is unavailable', async () => {
+    const receiptId = `deferred_person_${'c'.repeat(32)}`;
+    storedReceipts.push(lineageReceipt(receiptId));
+    terminalError = new Error('terminal ledger unavailable');
+
+    const response = await post('forget', receiptId);
+
+    assert.equal(response.statusCode, 503, response.body);
+    assert.deepEqual(forgotten, []);
+    assert.deepEqual(purges, []);
+  });
+
+  it('does not report withdraw success or mutate the receipt when delivery purge fails', async () => {
+    const receiptId = `deferred_person_${'d'.repeat(32)}`;
+    storedReceipts.push(lineageReceipt(receiptId));
+    purgeError = new Error('delivery purge unavailable');
+
+    const response = await post('withdraw', receiptId);
+
+    assert.equal(response.statusCode, 503, response.body);
+    assert.equal(invalidations[0].reason, 'superseded');
+    assert.deepEqual(withdrawals, []);
   });
 });

@@ -55,7 +55,7 @@ mcp_admission_claims:
 
 # F311: Capability Evolution Workspace（Meta-RSI 产品控制面）
 
-> **Status**: in-progress (v5 final-vision phases; Gate 0A + Phase 1–3 landed; Phase 4 implementation landed; real E0 Alpha constitution complete, while AC-41–44 acceptance remains open on real observation/authorization/outcome truth) | **Product phase owner**: Maine Coon (@codex-sol, gpt-5.6-sol)（本轮 operator 指定执行） | **Architecture co-creator/reviewer**: Ragdoll (@fable5, claude-fable-5) | **Priority**: P0
+> **Status**: in-progress (v6 product-experience contract; v5 final-vision phases; Gate 0A + Phase 1–3 landed; Phase 4 implementation landed; real E0 Alpha constitution complete, while AC-41–44 acceptance remains open on real observation/authorization/outcome truth) | **Product phase owner**: Maine Coon (@codex-sol, gpt-5.6-sol)（本轮 operator 指定执行） | **Architecture co-creator/reviewer**: Ragdoll (@fable5, claude-fable-5) | **Priority**: P0
 >
 > **operator signoff**: 2026-08-28 [thread-id] `0001787926983474`（今年双旗舰之一，与 F310 Growing 并列）。
 > **v1 修订**: 2026-08-28 owner review by @codex-sol（`0001787928166311` 后续 verdict，CHANGES_REQUESTED 六 P1）——核心纠偏：**引用不是所有权**；F311 是薄联邦控制面，不私藏任何领域真相。
@@ -87,7 +87,7 @@ Why: "一个被进化对象的完整进化回合"这个绑定当前无 cell 拥�
 
 F311 复用 `harness-eval`（F192 registry/trigger/verdict + F266 closure + F267 validity）。**纠正 v0 错误：`memory` 不是 trace owner**（memory 只负责索引/检索；invocation trajectory 归 F299 所在链路）。
 
-## 硬约束（v5，负向契约优先）
+## 硬约束（v6，负向契约优先）
 
 1. **F299 是唯一 invocation trajectory 产品面**：F311 不拥有 TraceStore、trajectory ID、证据 manifest、第二套轨迹页面；共享锚点只用 `inv:<id>`，证据 payload 归各 source owner；invocation trajectory 的查看/解析/证据织入走 F299 与 source-owner adapter，其他外部 evidence 仍归对应 source owner。**缺能力 → 扩 F299 或改造 source owner，不在 F311 补一套**（架构归一铁律，operator `0001787928166311`："不要自己再多造已经有的那些轮子"）。
 2. **版本归资产 owner**：v0 的"通用 Version DAG"改为**联邦 lineage view**——F311 只保存 `AssetVersionRef` 与因果边（哪条证据触发哪次改动、被谁复用/退役）；版本、回滚、mutation receipt 由资产 owner 持有（提示词/harness 版本 = 吴浪 R1 地基；**canonical 内容 bytes/schema/version = content owner；F309 只持协作 anchor/patch/disposition 与 owner-returned change receipt**）。哪个 owner 缺版本能力，改造那个 owner。
@@ -102,6 +102,7 @@ F311 复用 `harness-eval`（F192 registry/trigger/verdict + F266 closure + F267
 11. **不造 CEW 玩具纵切片，也不把普通 bug 包装成自进化**：所有 Phase 都直接交付终态产品会永久保留的能力，不建设 Program demo、样例 Harness、临时 adapter、影子 UI 或模拟 owner。确定契约/运行健康问题按 ADR-031 机制选择直接进入 canonical owner 的 test/guard/telemetry 修复线；F311 只登记依赖与永久 join。真实 Evolution Program 另须满足 E0：真实用户目标、明确 consumer、存在 keep/tune/sunset 决策，且效用确有不确定性。若既有 owner 能力不合适，直接改造 owner；所有 F311 新增件从第一天就是生产架构的一部分，禁止“验证 MVP 后拆掉重做”。
 12. **Phase 只按终态能力器官拆，不按首个对象或依赖 bug 拆**：产品主线始终是 `建制与可见 → 开眼与取证 → 评估与归因 → 受治理写回与复验 → 多对象联邦 → 机制自身进化`。首个 E0 Program 只用于验收整条生产 journey，不定义 schema、Phase 或优先对象；dependency repair 只是一条横向 owner 车道，不能把 F311 退化成 bug 修理队，也不能成为等待全家修完的大瀑布。
 13. **开放世界代理不等于归属迁移或无限授权**：Evolution Object、asset owner 与执行 Agent 均可在 Clowder AI 之外；F311 只接受 owner-authenticated、exact target/version 绑定且由 owner-backed adapter contract 明确允许的动作。获授权的外部 Agent 可以在对象的 canonical 仓库或系统内改 Skill、prompt/角色配置、`CLAUDE.md`/`AGENTS.md`、hooks、commands、MCP、subagent 编排、代码、测试、CI 与部署配置，并返回 review/deploy/rollback/outcome receipts；资产 bytes、权限、运行状态与 mutation truth 始终留在外部 owner。未授权表面、闭源模型权重/二进制或没有正式 mutation API 的对象必须返回 typed blocker，禁止手工旁路、复制进家里或用“Agent 能操作”冒充“owner 已授权”。执行权可代理，Goal/rubric 冻结、风险边界和 value verdict 不可偷偷代理。
+14. **Growing 在行动现场显现，不成为新的产品导航**：F311 不新增“成长”Tab、总分或独立 dashboard。用户在触发 Program 的 Chat、需要判断的 Needs Me、对象详情与下一次真实任务中感知变化；F307 Workspace 只承担 Program 编排和证据下钻。四根轴是架构分析坐标，不是页面一级导航；“立尺 / 开眼”等内部简称不得进入前两层产品文案。面向技术领导的四轴控制室属于明确标注的路演技术剖面，与 canonical 产品 UI 分离。
 
 ## Canonical Owner Matrix（F311 与既有 feature 的权限拆分）
 
@@ -322,6 +323,21 @@ Program canonical truth 从第一次创建起 active/terminal 均 `TTL=0`、跨�
 
 Phase 6 的**产品能力**必须交付，但“Meta 机制已经提高能力”的经验 claim 只有在自然积累 ≥K 条可比较案例后才能成立（K 由 F267 校准）。未达到时诚实标记“机制已接通，效用未实证”，不制造样本、不降低验收门槛。
 
+### Product Experience Contract（v9：四个时刻，两条车道，按需晋升主区）
+
+四根轴（对象、过程、真值成本、时间积累）用于解释系统，不直接复制成用户导航。产品 UI 以一个对象的一次真实 journey 组织信息：
+
+1. **提出目标（Chat）**：用户用一句话发起；猫以紧凑目标卡确认“要改进什么、什么结果算好、哪些判断必须由人完成、何时采用或停止”。正常路径只需一次确认。
+2. **准备评估（Workspace 窄栏 + Needs Me）**：系统静默连接运行证据与独立验证，显示尚缺条件、下次检查时间和人工判断成本；只有不可替代的价值判断进入 Needs Me，并按同一 Program 去重。首页、正在进行、等我判断、最近完成与对象摘要都必须在真实窄栏内成立。
+3. **审阅候选（按需主区 Tab / split pane + F246）**：Program 摘要仍在窄栏；当用户需要持续阅读、并排回放或追版本来源时，从窄栏把 exact Program 晋升为临时主区 surface。同一主区内提供“本轮判断 / 更改历史”两种阅读面：前者呈现改进前后、单一主要改动、独立验证、成本、回滚与被拒候选；后者按时间选择 owner 资产版本，默认显示所选版本相对当前采用版的人话 diff，原始 diff、效果、来源与缺证按需下钻。“批准”只批准 exact action，不提前宣告已经采纳。采用成功后，owner 的 `currentVersionRef` 必须成为窄栏、审阅、历史与后续任务的共同状态源；`selectedVersionRef` 只表达用户当前阅读位置。普通往返恢复所选版本与滚动位置，来自原任务现场的来源入口则携带 exact version ref 并覆盖阅读选择。关闭或切回后，原 Program、所选版本对、滚动位置与未完成判断不能丢。
+4. **后续任务发生改变（原任务现场）**：下一次同类任务明确提示“已沿用上次确认的规则”，同时提供来源与撤销；将“上一轮发生什么”与“本轮行为为何不同”连成可追溯因果，不新增成长商店、成长页或总分。
+
+日常产品车道为 `journey_validation × internal_product_gate`，沿用 Clowder AI 现有视觉与 canonical owner truth。它是现有 Workspace 的 feature surface，不默认占据完整桌面，也不另造产品主壳。主区空间只在复杂裁决时按需借用，任务完成后回到原现场。路演技术剖面为 `concept_story × external_showcase`，可以展示四轴与对象版本 / 方法版本双时间线，但必须显式标注演示数据，不得伪装成生产界面或真实效果声明。两条车道共享概念和证据边界，不共享信息架构。
+
+谱系默认采用**稀疏版本历史投影**：版本关系回答“从哪个版本派生”，diff 回答“到底改了什么”，证据回答“凭什么采用”；F311 用 owner 资产 ref 与因果边把三者关联，但不把比赛、缺证、回退或裁决伪装成资产版本节点。窄栏始终只回答当前沿用什么、候选是什么、更改历史有几项与怎样进入对比；主区才显示版本 log、人话 diff、原始 diff、效果、来源、缺证与采用边界。每个来源与证据角色都绑定当前 `selectedVersionRef`，共有证据必须区分“比较基线 / 候选独立复验 / 采用后观察”，不得让另一版本继承不属于它的验证结果。只有 owner 已返回真实分叉时，才在版本关系列显示 compact graph，并区分未采用 / 仍可探索 / 停止投入；保留分支不自动触发新 rollout，一次个性化写回也不得直接命名为“能力已提升”。丰富搜索树属于高重复、低验证成本场景下的可选策略，不是每个 Program 的用户承诺。
+
+Meta Evolution 的正式定义为：**能力对象与改进机制的协同演进**。系统不仅持续改进环境、数据、模型与协作策略，也持续优化目标定义、证据获取、问题诊断、方案生成与成效验证的方法。二阶方法版本只有在后续一阶 Program 同时满足任务范围不缩水、独立或时间新鲜结果成立、失败可恢复且相对基线改善时才可晋升；用户介入次数下降只能作为辅助信号，不能单独证明成长。
+
 ### 横向 Owner Contract Repair Lane（不是 Phase）
 
 任一 Phase 实测到 canonical owner contract 缺失或故障时，F311 只登记 exact join、owner、live case 与 source ref，并把修复投给对应 owner thread；没有 verified owner 才走 F128。Owner receipt 回来后恢复该 join，单个 join 故障不阻塞无关器官建设。F266/F278 是这一规则的已有证据，不是 F311 的 Program 样例，更不是产品主线。
@@ -363,6 +379,13 @@ Phase 6 的**产品能力**必须交付，但“Meta 机制已经提高能力”
 ## Acceptance Criteria
 
 <!-- AC↔Why 同源；非作者可复核；度量类 AC 引 F267 契约（population/window/baseline/uncertainty/insufficient/withdrawal），不设未校准阈值。 -->
+
+### Product Experience（四个时刻与双车道）
+
+- [ ] AC-UX1: Chat 能以一张紧凑卡完成目标、结果标准、人工判断成本与采用/停止条件的确认；内部 F 号、owner token、“立尺 / 开眼”等实现术语不进入前两层文案
+- [ ] AC-UX2: 真实 Workspace 窄栏可独立完成 Program 首页、正在进行、等我判断、最近完成与对象摘要；只有不可替代的人类判断进入 Needs Me，且同一 Program 不重复催促
+- [ ] AC-UX3: 复杂候选审阅可从窄栏将 exact Program 晋升到 typed 主区 Tab / split pane；同屏呈现 before/after、单变量改动、独立验证、被拒候选、成本与回滚，切回后选择与审阅状态不丢；批准绑定 exact action，不能把 approval、deploy 或一次通过提前写成“已采纳”
+- [ ] AC-UX4: 下一次同类任务在原任务现场显示已沿用的上轮学习、来源与撤销；路演技术剖面与 canonical 产品 UI 分离，并对演示数据 / 未实证效用显式披露
 
 ### Phase 0（宪法与所有权，已落地）
 - [x] AC-01: 薄 cell + Owner Matrix + F299/decision/query/durability/role/intervention 负向契约已落 ownership map（PR #4053 / `0bdda236e`）；F311 不内建任何 owner 替代面
@@ -428,9 +451,9 @@ Phase 6 的**产品能力**必须交付，但“Meta 机制已经提高能力”
 3. **Regression Fixture**: ① 缺经济页拒绝启动 ② rubric 换版后在冻结 cohort 做 2×2 复判/重建 baseline；缺复判条件时 `incomparable`，禁止 score 拼接 ③ promotion holdout 曾暴露给 candidate/rubric selection 时拒绝晋升并返回 `insufficient` ④ 触发器三模式各一 ⑤ 缺必要 eval 角色时只挂起受影响 claim；用户不懂技术域但仍保有 value verdict，代理 Program 不转移 verdict ⑥ Program 重启恢复、active/terminal TTL=0、cache 丢失不改 lifecycle；完成/关闭不产生 TTL，只有显式 retention/forget opt-in 才允许 GC ⑦ 缺 owner-backed consumption/exposure proof 返回 `insufficient`，不创建 CEW query ledger ⑧ 缺 intervention card、`intervention_falsifier` 或独立 `rubric_reopen_trigger` 时拒绝 writeback ⑨ 外部 object 缺 owner auth、owner-backed permission/capability ref、exact target/version 或 mutation/outcome receipt 时 fail closed 且零副作用；执行 Agent 不得提升自己的权限或签发 value verdict
 4. **Sunset Signal**: 按 F267 withdrawal condition 登记（含 `insufficient` 出口）；CEW 整体若持续无活跃 Program 且 operator 不再发起 → 回 Design Gate 重审产品形态（窗口与判据在 Phase 4 的真实运行中校准冻结）
 
-## 需求点 Checklist（operator 语音与现场验收逐条核对，v5 更新落点）
+## 需求点 Checklist（operator 语音与现场验收逐条核对，v6 更新落点）
 
-| # | operator 需求 | Spec 落点（v5） |
+| # | operator 需求 | Spec 落点（v6） |
 |---|---|---|
 | 1 | Eval first：先设 rubric，人懂共创/人不懂猫主导 | Journey Step 1（value owner 与 Eval 四角色分权；缺必要角色才精确挂起；代理 claim 独立 Program） |
 | 2 | F299 配套 trajectory/governance/打点 | **硬约束 1：F299 唯一轨迹面**；打点设计=提案给 source owner |
@@ -451,6 +474,10 @@ Phase 6 的**产品能力**必须交付，但“Meta 机制已经提高能力”
 | 17 | 不造两个月后拆掉的 MVP；真实 bug 投原 owner，F311 串现有能力 | 硬约束 11/12；横向 Owner Contract Repair Lane；AC-X1/X2；KD-15/16 |
 | 18 | 不要单点自进化；按最终远景交付一整套能力闭环 | Phase 1–6 按永久器官拆分；首个 E0 Program 仅验收 Phase 4 整环，不定义产品路线 |
 | 19 | 家里或外部对象都能进化；可代理 Developer/PM Agent 在原仓改获授权表面 | 开放世界代理式进化；硬约束 13；External Journey；AC-52/53；KD-17 |
+| 20 | 从一句话、评估准备、每一版到元进化都要有明确产品形态 | Product Experience Contract 四个时刻；AC-UX1–4；09-04 产品体验设计 |
+| 21 | Growing 不是新页面，而是共同经历改变下一次行为 | 硬约束 14；时刻 4 原任务现场；F310 产品边界 |
+| 22 | 元进化同时表达对象版本与改进机制版本 | 路演技术剖面双时间线；Phase 6；KD-19/20 |
+| 23 | 正式表达不用内部黑话，也不降成聊天口语 | Meta Evolution 正式定义；AC-UX1；Design Gate 文案合同 |
 
 ## Dependencies
 
@@ -486,6 +513,9 @@ Phase 6 的**产品能力**必须交付，但“Meta 机制已经提高能力”
 | 把“可调用外部 Agent”误当成“拥有外仓权限” | authenticated owner + owner-backed permission/capability ref + exact target/version；未授权/不可变表面 typed blocker、零副作用 |
 | 外部执行代理同时控制目标、改动与价值裁决 | 执行权与 value verdict 分离；F246 Approval + owner receipts；独立 fresh outcome 决定 keep/tune/rollback/sunset |
 | 为接外仓把代码、凭据或 governance truth 复制进 F311 | F202/F292/F302 owner-backed ref adapter；资产与凭据留在外部 owner，F311 只持 refs/lineage |
+| 把“用户介入次数下降”误写成能力成长 | 介入次数只作辅助信号；同时检查任务范围、独立结果、静默失败 / 放弃与可恢复性，缺一不得晋升 |
+| 为表现成长新增 Tab、总分或全局 dashboard | 硬约束 14；成长只在下一次真实任务与对象详情中按来源显现，四根轴不作产品导航 |
+| 把路演技术剖面当作产品截图或真实实验结果 | 两条 UI 车道物理分离；外部展示固定标注“概念演示 / 演示数据 / 非生产效果声明” |
 | AC 诱导编案例 | AC-31 可 unresolved；AC-62 分离能力与效用 claim；阈值走 F267 校准 |
 
 ## Key Decisions
@@ -509,6 +539,9 @@ Phase 6 的**产品能力**必须交付，但“Meta 机制已经提高能力”
 | KD-15 | 依赖真修与 F311 生产建设并行：缺能力改 owner，F311 只补永久联邦控制面；真实 Program 另过 E0 | “修 bug 同时串联”比“先证明 CEW 再重做”更快；分开 bug 与不确定效用又避免概念吞并 | 2026-08-28 |
 | KD-16 | Phase 按终态能力器官拆：建制与可见→开眼与取证→评估与归因→受治理写回与代谢→多对象联邦→机制自身进化；owner repair 与首个 E0 journey 均为横向车道 | 防 execution-first 把“下一步能做什么”偷换成“产品是什么”，杜绝脚手架与单点自进化叙事 | 2026-08-31 |
 | KD-17 | F311 是开放世界的代理式进化控制面：外部 owner/Agent 在原仓原系统执行获授权 mutation，F311 只持 Program refs/lineage；执行权可代理，权限与 value verdict 不可偷渡 | 把 08-28“外部托管对象/Claude Code Harness”的定义性愿景补成可验收的执行契约，避免把 federation 错做成只读连接器或外仓复制器 | 2026-09-02 |
+| KD-18 | 日常产品按“提出目标→准备评估→审阅候选→后续任务发生改变”组织；Growing 不成为新页面 | 让成长发生在用户正在做的事里，以行为变化而非功能导航证明长期价值 | 2026-09-04 |
+| KD-19 | canonical 产品 UI 与路演技术剖面分成两条车道；后者用对象版本 / 方法版本双时间线解释四轴与元进化 | 产品需要低认知负担，技术领导需要机制可解释性；混用会同时损害可用性和证据诚实 | 2026-09-04 |
+| KD-20 | 二阶方法版本不得自证：只有后续一阶 Program 在范围不缩水、独立结果成立且可恢复时改善，方法才可晋升 | 防止 rubric、归因或流程通过改写自己的判据制造“进化” | 2026-09-04 |
 
 ## Review Gate
 

@@ -28,6 +28,22 @@ export interface CollectiveConnectionProjection {
 export interface CollectiveConnectorStatus {
   readonly runtimeStatus: 'active' | 'inactive';
   readonly connections: readonly CollectiveConnectionProjection[];
+  readonly localService?: LocalCollectiveServiceStatus;
+}
+
+export interface LocalCollectiveServiceStatus {
+  readonly state: 'not_created' | 'stopped' | 'starting' | 'setup_required' | 'ready' | 'error';
+  readonly serviceUrl: string;
+  readonly dataDirectory: string;
+  readonly serviceInstanceId?: string;
+  readonly bootstrapNeeded?: boolean;
+  readonly setupStep?: 'github_app' | 'owner_setup';
+  readonly error?: string;
+}
+
+export interface LocalCollectiveServiceLaunch {
+  readonly service: LocalCollectiveServiceStatus;
+  readonly launchUrl: string;
 }
 
 export function normalizeCollectiveServiceUrl(value: string): string | undefined {
@@ -42,7 +58,10 @@ export function normalizeCollectiveServiceUrl(value: string): string | undefined
 }
 
 export function canonicalClientUrl(serviceUrl: string, hostOrigin: string): string {
-  const url = new URL('/', serviceUrl);
+  const source = new URL(serviceUrl);
+  const bootstrapHash = source.hash;
+  const url = new URL('/', source.origin);
   url.searchParams.set('hostOrigin', hostOrigin);
+  url.hash = bootstrapHash;
   return url.toString();
 }

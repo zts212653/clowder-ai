@@ -3,13 +3,13 @@
 import type { ThreadAttentionGroup } from '@cat-cafe/shared';
 import { useMemo, useState } from 'react';
 import type { SidebarSnapshotRow } from '@/stores/sidebarProjectionStore';
-import type { ThreadAttentionGroupCommand } from './use-attention-clusters';
+import type { LegacyThreadAttentionGroupCommand } from './use-attention-clusters';
 
 interface ConversationGroupOrganizerDialogProps {
   thread: SidebarSnapshotRow;
   threads: readonly SidebarSnapshotRow[];
   groups: readonly ThreadAttentionGroup[];
-  onCommand: (command: ThreadAttentionGroupCommand) => void;
+  onCommand: (command: LegacyThreadAttentionGroupCommand) => void;
   onClose: () => void;
 }
 
@@ -37,7 +37,7 @@ export function ConversationGroupOrganizerDialog({
   );
   const [peerId, setPeerId] = useState(peers[0]?.id ?? '');
 
-  const commit = (command: ThreadAttentionGroupCommand) => {
+  const commit = (command: LegacyThreadAttentionGroupCommand) => {
     onCommand(command);
     onClose();
   };

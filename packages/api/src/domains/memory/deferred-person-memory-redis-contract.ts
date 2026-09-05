@@ -40,6 +40,18 @@ if ARGV[5] == '1' then redis.call('ZADD', KEYS[4], tonumber(ARGV[4]), ARGV[6]) e
 return 'CREATED'
 `;
 
+export const DEFERRED_RECEIPT_CONFIRM_LUA = `
+${TYPE_GUARD_LUA}
+if not allowed_type(KEYS[1], 'string') or not allowed_type(KEYS[2], 'zset') then return 0 end
+local raw = redis.call('GET', KEYS[1])
+if not raw then return 0 end
+local current = cjson.decode(raw)
+if current.state ~= 'awaiting_confirmation' or current.dedupeHash ~= ARGV[3] then return 0 end
+redis.call('SET', KEYS[1], ARGV[1])
+redis.call('ZADD', KEYS[2], tonumber(ARGV[4]), ARGV[2])
+return 1
+`;
+
 export const DEFERRED_RECEIPT_CLAIM_LUA = `
 local raw = redis.call('GET', KEYS[1])
 if not raw then return 'NOT_AVAILABLE' end
@@ -50,6 +62,37 @@ end
 if current.state ~= 'deferred' and current.state ~= 'claimed' then return 'NOT_AVAILABLE' end
 redis.call('SET', KEYS[1], ARGV[1])
 return 'CLAIMED'
+`;
+
+export const DEFERRED_RECEIPT_BIND_PROCESSING_MESSAGE_LUA = `
+local raw = redis.call('GET', KEYS[1])
+if not raw then return 'NOT_AVAILABLE' end
+local current = cjson.decode(raw)
+if current.state ~= 'claimed' or current.claimId ~= ARGV[2]
+  or current.processorCatId ~= ARGV[3] or current.processingThreadId ~= ARGV[4]
+  or tonumber(current.claimUntil or 0) <= tonumber(ARGV[6]) then return 'CONFLICT' end
+if current.processingMessageId then
+  if current.processingMessageId == ARGV[5] then return 'REPLAYED' end
+  return 'CONFLICT'
+end
+redis.call('SET', KEYS[1], ARGV[1])
+return 'BOUND'
+`;
+
+export const DEFERRED_RECEIPT_BIND_PROCESSOR_INVOCATION_LUA = `
+local raw = redis.call('GET', KEYS[1])
+if not raw then return 'NOT_AVAILABLE' end
+local current = cjson.decode(raw)
+if current.state ~= 'claimed' or current.claimId ~= ARGV[2]
+  or current.processorCatId ~= ARGV[3] or current.processingThreadId ~= ARGV[4]
+  or current.processingMessageId ~= ARGV[5]
+  or tonumber(current.claimUntil or 0) <= tonumber(ARGV[7]) then return 'CONFLICT' end
+if current.processorInvocationId then
+  if current.processorInvocationId == ARGV[6] then return 'REPLAYED' end
+  return 'CONFLICT'
+end
+redis.call('SET', KEYS[1], ARGV[1])
+return 'BOUND'
 `;
 
 export const DEFERRED_RECEIPT_RELEASE_LUA = `
@@ -66,9 +109,46 @@ local raw = redis.call('GET', KEYS[1])
 if not raw then return 0 end
 local current = cjson.decode(raw)
 if current.state ~= 'claimed' or current.claimId ~= ARGV[2]
-  or tonumber(current.claimUntil or 0) <= tonumber(ARGV[3]) then return 0 end
+  or tonumber(current.claimUntil or 0) <= tonumber(ARGV[3])
+  or current.processorInvocationId ~= ARGV[4] then return 0 end
 redis.call('SET', KEYS[1], ARGV[1])
 return 1
+`;
+
+export const DEFERRED_RECEIPT_DISPOSE_CLAIM_LUA = `
+${TYPE_GUARD_LUA}
+if not allowed_type(KEYS[1], 'string') or not allowed_type(KEYS[2], 'zset')
+  or not allowed_type(KEYS[3], 'string')
+  or (ARGV[3] == '1' and not allowed_type(KEYS[4], 'set')) then return 'CONFLICT' end
+local raw = redis.call('GET', KEYS[1])
+if not raw then return 'NOT_AVAILABLE' end
+local current = cjson.decode(raw)
+if current.state ~= 'claimed' or current.claimId ~= ARGV[5]
+  or current.processorCatId ~= ARGV[6] or current.processingThreadId ~= ARGV[7]
+  or current.processorInvocationId ~= ARGV[8]
+  or tonumber(current.claimUntil or 0) <= tonumber(ARGV[9]) then return 'CONFLICT' end
+redis.call('SET', KEYS[1], ARGV[1])
+redis.call('ZREM', KEYS[2], ARGV[2])
+if ARGV[10] == '1' then
+  if ARGV[3] == '1' then redis.call('SREM', KEYS[4], ARGV[2]) end
+end
+return 'DISPOSED'
+`;
+
+export const DEFERRED_RECEIPT_EXPIRE_CLAIM_LUA = `
+${TYPE_GUARD_LUA}
+if not allowed_type(KEYS[1], 'string') or not allowed_type(KEYS[2], 'zset')
+  or not allowed_type(KEYS[3], 'string')
+  or (ARGV[3] == '1' and not allowed_type(KEYS[4], 'set')) then return 'CONFLICT' end
+local raw = redis.call('GET', KEYS[1])
+if not raw then return 'NOT_AVAILABLE' end
+local current = cjson.decode(raw)
+if current.state ~= 'claimed' or current.claimId ~= ARGV[5]
+  or tonumber(current.claimUntil or 0) > tonumber(ARGV[6]) then return 'CONFLICT' end
+redis.call('SET', KEYS[1], ARGV[1])
+redis.call('ZREM', KEYS[2], ARGV[2])
+if ARGV[3] == '1' then redis.call('SREM', KEYS[4], ARGV[2]) end
+return 'DISPOSED'
 `;
 
 export const DEFERRED_RECEIPT_WITHDRAW_LUA = `

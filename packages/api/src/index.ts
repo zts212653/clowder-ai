@@ -22,7 +22,7 @@ import fastifyCookie from '@fastify/cookie';
 import cors from '@fastify/cors';
 import fastifyWebsocket from '@fastify/websocket';
 import Fastify, { type FastifyReply } from 'fastify';
-import { resolveAnthropicRuntimeProfile, resolveForClient } from './config/account-resolver.js';
+import { resolveAnthropicRuntimeProfile } from './config/account-resolver.js';
 import { regenerateStartupCliConfigs } from './config/capabilities/startup-cli-config.js';
 import { resolveBoundAccountRefForCat } from './config/cat-account-binding.js';
 import {
@@ -241,6 +241,12 @@ import { createVignetteWriter } from './domains/taste/services/writeVignette.js'
 import { createTasteProposalStore } from './domains/taste/stores/factories/TasteProposalStoreFactory.js';
 import { AgentPaneRegistry } from './domains/terminal/agent-pane-registry.js';
 import { TmuxGateway } from './domains/terminal/tmux-gateway.js';
+import {
+  createMicroduckApprovalResolver,
+  createMicroduckProposalResolver,
+} from './infrastructure/capability-evolution/adapters/microduck-governance-resolvers.js';
+import { createMicroduckRuntimeAdapter } from './infrastructure/capability-evolution/adapters/microduck-owner-runtime.js';
+import { ProgramAdapterRegistry } from './infrastructure/capability-evolution/adapters/program-adapter-registry.js';
 import { registerF311E0EvalRepairOwnerRuntime } from './infrastructure/capability-evolution/change/f311-e0-eval-repair-owner-runtime-registration.js';
 import type { EvolutionChangeOwnerPort } from './infrastructure/capability-evolution/change/program-change-owner-contract.js';
 import { CommandRegistry } from './infrastructure/commands/CommandRegistry.js';
@@ -1099,7 +1105,8 @@ async function main(): Promise<void> {
         const catConfig = catRegistry.tryGet(catId)?.config;
         if (catConfig?.clientId === 'anthropic' || catConfig?.clientId === 'opencode') {
           const effectiveAccountRef = resolveBoundAccountRefForCat(projectRoot, catId, catConfig);
-          const runtime = resolveForClient(projectRoot, catConfig.clientId, effectiveAccountRef);
+          // Digests always use Anthropic, including for an OpenCode-bound gateway.
+          const runtime = resolveAnthropicRuntimeProfile(projectRoot, effectiveAccountRef);
           if (!runtime?.apiKey) return null;
           return { apiKey: runtime.apiKey, baseUrl: runtime.baseUrl || 'https://api.anthropic.com' };
         }
@@ -1401,9 +1408,13 @@ async function main(): Promise<void> {
   const { RunLedger } = await import('./infrastructure/scheduler/RunLedger.js');
   const { createActorResolver } = await import('./infrastructure/scheduler/ActorResolver.js');
   const { getRoster } = await import('./config/cat-config-loader.js');
+  const { loadDossierProfiles } = await import('@cat-cafe/shared/dossier');
   const schedulerDb = memoryServices.store.getDb();
   const runLedger = new RunLedger(schedulerDb);
-  const actorResolver = createActorResolver(getRoster);
+  const dossierProfiles = loadDossierProfiles(resolveActiveProjectRoot());
+  const actorResolver = createActorResolver(getRoster, {
+    isScarce: (catId) => dossierProfiles.get(catId)?.engagementPolicy?.quota === 'weekly_subscription_scarce',
+  });
   // ── F139 Phase 3B: Governance + Emission stores ──
   const { GlobalControlStore } = await import('./infrastructure/scheduler/GlobalControlStore.js');
   const { EmissionStore } = await import('./infrastructure/scheduler/EmissionStore.js');
@@ -2343,6 +2354,14 @@ async function main(): Promise<void> {
         ? { repairProjection: (subjectKey: string) => ballCustodyProjector!.rebuild(subjectKey) }
         : {}),
     });
+    const { CoordinationTerminalRetirement } = await import('./domains/ball-custody/CoordinationTerminalRetirement.js');
+    const terminalRetirement = new CoordinationTerminalRetirement({
+      messageStore,
+      service: a2aDispatchDispositionService,
+      log: app.log,
+    });
+    app.addHook('onReady', async () => terminalRetirement.start());
+    app.addHook('onClose', async () => terminalRetirement.stop());
   }
   const proactiveCandidateRegistryResolver = personMemoryStore
     ? new ProactiveCandidateRegistryResolver({
@@ -2387,6 +2406,7 @@ async function main(): Promise<void> {
     evidenceStore: memoryServices.evidenceStore,
     messageStore,
     eventStore: memoryServices.eventMemoryStore,
+    entityRegistry: new EntityRegistryStore(memoryServices.store.getDb()),
     ...(personMemoryRecallService ? { personRecall: personMemoryRecallService } : {}),
     tasteRepository,
     ownerUserId: privateUserId,
@@ -2986,6 +3006,8 @@ async function main(): Promise<void> {
     agentSessionMutex,
     socketManager,
     messageStore, // F117: for marking queued messages as canceled on withdraw/clear
+    retryAuthorityPreflight,
+    retryAuthorityCommitter,
     queueCustodyCoordinator,
     invocationRecordStore, // F194 Phase B: canonical liveness read source
     draftStore, // F194 Phase B: canonical liveness read source
@@ -3477,6 +3499,13 @@ async function main(): Promise<void> {
   // the later canonical owner composition to activate the existing service without reconstruction.
   let evolutionChangeOwner: EvolutionChangeOwnerPort | undefined;
   let evalRepairOutcomeService: EvalRepairOutcomeService | undefined;
+  const evolutionProgramAdapterRegistry = new ProgramAdapterRegistry();
+  evolutionProgramAdapterRegistry.register(
+    createMicroduckRuntimeAdapter({
+      proposalResolver: createMicroduckProposalResolver(reevalClosureEventLog),
+      approvalResolver: createMicroduckApprovalResolver(reevalClosureEventLog),
+    }),
+  );
   const evolutionProgramService = redis
     ? await (async () => {
         const [
@@ -3528,6 +3557,7 @@ async function main(): Promise<void> {
           sourceResolvers: createEvolutionOwnerSurfaceResolvers({
             pawFeelEventLog: pawFeelDispositionEventLog,
             humanDispositionLedger: humanDispositionLedger ?? undefined,
+            messageStore,
             threadStore,
           }),
           evidenceProofResolver: createProgramEvidenceProofResolver({
@@ -3590,6 +3620,7 @@ async function main(): Promise<void> {
     measurementIssuer: capabilityEvolutionMeasurementIssuer,
     callbackRegistry: registry,
     agentKeyRegistry,
+    adapterRegistry: evolutionProgramAdapterRegistry,
   });
   if (evalReleaseTruth.loadedRuntimeHead) {
     app.log.info(`[api] F266: release truth frozen at runtime HEAD ${evalReleaseTruth.loadedRuntimeHead}`);
@@ -4624,9 +4655,26 @@ async function main(): Promise<void> {
   if (!pluginRuntime.collectiveConnectorRuntime) {
     throw new Error('Collective Connector builtin runtime was not composed');
   }
+  const { LocalCollectiveServiceManager } = await import(
+    './domains/plugin/builtin-runtime/local-collective-service-manager.js'
+  );
+  const localCollectiveService = new LocalCollectiveServiceManager({
+    env: process.env,
+    frontendBaseUrl: resolveFrontendBaseUrl(process.env, app.log),
+  });
+  const localCollectiveRecovery = await localCollectiveService.recover();
+  app.log.info(
+    {
+      state: localCollectiveRecovery.state,
+      serviceUrl: localCollectiveRecovery.serviceUrl,
+      serviceInstanceId: localCollectiveRecovery.serviceInstanceId,
+    },
+    '[api] local Collective Service recovery reconciled',
+  );
   const { registerCollectiveConnectorRoutes } = await import('./routes/collective-connector-routes.js');
   registerCollectiveConnectorRoutes(app, {
     runtime: pluginRuntime.collectiveConnectorRuntime,
+    localService: localCollectiveService,
     callbackRegistry: registry,
     resolveAgentIdentity: resolveCollectiveAgentIdentity,
     threadStore,
@@ -6138,6 +6186,9 @@ async function main(): Promise<void> {
     const { accountStartupHook } = await import('./config/account-startup.js');
     const startupResult = accountStartupHook(findMonorepoRoot(process.cwd()));
     app.log.info(`[api] clowder-ai#340 accounts: ${startupResult.accountCount} account(s) loaded`);
+    for (const diagnostic of startupResult.unavailableAccounts) {
+      app.log.warn({ ...diagnostic }, '[api] account unavailable; other accounts remain usable');
+    }
   }
 
   // F101 Phase G: Recover auto-play loops for active games after restart.
@@ -7087,12 +7138,36 @@ async function main(): Promise<void> {
   }
 
   if (deferredPersonMemoryReceiptStore) {
+    const { ensureMemoryOperationsThread } = await import('./domains/memory/MemoryOperationsThread.js');
     taskRunnerV2.register(
       createDeferredPersonMemoryDailyTaskSpec({
         receiptStore: deferredPersonMemoryReceiptStore,
         messageStore,
         ...(writeOpportunityTerminalLedger ? { writeOpportunityTerminalLedger } : {}),
         ...(writeOpportunityDeliveryStore ? { writeOpportunityDeliveryStore } : {}),
+        ensureSystemThread: () => ensureMemoryOperationsThread(threadStore, privateUserId),
+        routingDispatchPreflight: routingContextRuntime?.dispatchPreflight ?? {
+          async preflight(input) {
+            return {
+              v: 1,
+              ownerId: input.ownerId,
+              observedAt: Date.now(),
+              resolverState: 'degraded',
+              targets: input.targetCatIds.map((targetCatId) => ({
+                targetCatId,
+                disposition: 'warned' as const,
+                reasons: [
+                  {
+                    code: 'routing_context_unavailable',
+                    summary: 'Routing context is unavailable; scheduled memory work is parked',
+                    sourceRefs: ['routing-context:not-configured'],
+                  },
+                ],
+                alternatives: [],
+              })),
+            };
+          },
+        },
         ownerUserId: privateUserId,
       }),
     );

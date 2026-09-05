@@ -9,7 +9,18 @@ import { resolveDocsProfileScope } from './lib/scope-resolver.mjs';
 
 const GENERATOR_VERSION = 'f243-index-v1';
 const PROFILE_CONTRACT_VERSION = 'f243-profile-v1';
-const HAND_AUTHORED_INDEX_PATHS = new Set(['docs/taste/index.md']);
+// Indexes the generic finalizer must NOT touch. Two reasons a path lives here:
+//   1. Truly hand-authored (docs/taste/index.md — F221 direct-consumer contract).
+//   2. Directory has its own dedicated generator producing files with a
+//      different generator_version prefix, and a matching ownership guard
+//      that will red the merge gate if the generic finalizer overwrites or
+//      fabricates content here.
+//      - docs/catalogs/ → generate-catalogs.mjs produces `f243-catalog-*`
+//        (ADR-046 §1), enforced by scripts/docs-discovery/lib/catalog-ownership.mjs.
+//        Before this exclusion, my finalizer recovery `f0a4202216` invented
+//        docs/catalogs/index.md with the generic `f243-index-v1` marker and
+//        red the catalog ownership guard on origin/main until this landed.
+export const HAND_AUTHORED_INDEX_PATHS = new Set(['docs/taste/index.md', 'docs/catalogs/index.md']);
 
 export function listManagedIndexPathsForRepo(repoRoot, options = {}) {
   const root = path.resolve(repoRoot);

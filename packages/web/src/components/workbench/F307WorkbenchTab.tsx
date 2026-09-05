@@ -30,6 +30,8 @@ export function F307WorkbenchTab({
   active,
   dispatch,
   onActivateSurface,
+  returnsFromMainArea = false,
+  onExitMainAreaAttention,
 }: {
   surface: WorkspaceSurfaceDescriptor;
   index: number;
@@ -37,6 +39,8 @@ export function F307WorkbenchTab({
   active: boolean;
   dispatch: (action: WorkbenchAction) => void;
   onActivateSurface: () => void;
+  returnsFromMainArea?: boolean;
+  onExitMainAreaAttention: () => void;
 }) {
   const activity = layout.activity.filter((item) => item.surfaceId === surface.id);
   const pinned = layout.pinnedSurfaceIds.includes(surface.id);
@@ -143,18 +147,32 @@ export function F307WorkbenchTab({
       )}
       <button
         type="button"
-        onClick={() =>
+        onClick={() => {
+          if (returnsFromMainArea) {
+            onExitMainAreaAttention();
+            return;
+          }
           dispatch({
             type: 'close-surface',
             surfaceId: surface.id,
             entitlement: { kind: 'user', reason: 'close-button' },
-          })
-        }
+          });
+        }}
         className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-cafe-muted transition-colors hover:bg-cafe-surface-sunken hover:text-cafe"
         aria-label={
-          surface.type === 'agent-run' ? `从工作台收起 ${surface.title}（不会停止任务）` : `关闭 ${surface.title}`
+          returnsFromMainArea
+            ? `返回侧栏 ${surface.title}`
+            : surface.type === 'agent-run'
+              ? `从工作台收起 ${surface.title}（不会停止任务）`
+              : `关闭 ${surface.title}`
         }
-        title={surface.type === 'agent-run' ? '从工作台收起，不会停止任务' : undefined}
+        title={
+          returnsFromMainArea
+            ? '结束临时主区阅读，保留原 Workspace 页面'
+            : surface.type === 'agent-run'
+              ? '从工作台收起，不会停止任务'
+              : undefined
+        }
         data-testid={`f307-close-${surface.type}`}
       >
         <span className="h-3.5 w-3.5">

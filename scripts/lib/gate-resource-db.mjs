@@ -68,6 +68,7 @@ export function openGateResourcePool(databasePath) {
       request_order INTEGER NOT NULL,
       holder_pid INTEGER NOT NULL,
       holder_started_at TEXT,
+      cwd TEXT NOT NULL,
       stage TEXT NOT NULL,
       mode TEXT NOT NULL,
       weight INTEGER NOT NULL,
@@ -84,6 +85,9 @@ export function openGateResourcePool(databasePath) {
       leader_pid INTEGER NOT NULL,
       leader_started_at TEXT,
       leader_heartbeat_at INTEGER NOT NULL,
+      transfer_from_request_id TEXT,
+      transfer_from_pid INTEGER,
+      transfer_from_started_at TEXT,
       status TEXT NOT NULL,
       updated_at INTEGER NOT NULL
     );
@@ -95,10 +99,14 @@ export function openGateResourcePool(databasePath) {
     ensureColumn(database, 'gate_resource_requests', 'holder_started_at', 'TEXT');
     ensureColumn(database, 'gate_resource_requests', 'resource_class', "TEXT NOT NULL DEFAULT 'host-heavy'");
     ensureColumn(database, 'gate_resource_holders', 'holder_started_at', 'TEXT');
+    ensureColumn(database, 'gate_resource_holders', 'cwd', "TEXT NOT NULL DEFAULT ''");
     ensureColumn(database, 'gate_resource_holders', 'resource_class', "TEXT NOT NULL DEFAULT 'host-heavy'");
     ensureColumn(database, 'gate_resource_holders', 'heartbeat_at', 'INTEGER NOT NULL DEFAULT 0');
     ensureColumn(database, 'gate_resource_bridge', 'leader_started_at', 'TEXT');
     ensureColumn(database, 'gate_resource_bridge', 'leader_heartbeat_at', 'INTEGER NOT NULL DEFAULT 0');
+    ensureColumn(database, 'gate_resource_bridge', 'transfer_from_request_id', 'TEXT');
+    ensureColumn(database, 'gate_resource_bridge', 'transfer_from_pid', 'INTEGER');
+    ensureColumn(database, 'gate_resource_bridge', 'transfer_from_started_at', 'TEXT');
     database.exec(`
       CREATE TABLE IF NOT EXISTS gate_resource_class_config (
         resource_class TEXT PRIMARY KEY,
