@@ -13,6 +13,7 @@ import { ImportProjectModal } from './ImportProjectModal';
 import { QuickCreateForm } from './QuickCreateForm';
 import { SuggestionDrawer } from './SuggestionDrawer';
 import { ThreadSituationPanel } from './ThreadSituationPanel';
+import { TeamHomePanel } from './team-home/TeamHomePanel';
 import { WorkflowSopPanel } from './WorkflowSopPanel';
 
 interface BacklogListResponse {
@@ -472,6 +473,18 @@ export function MissionControlPage() {
           <div className="mt-4 flex console-divider-b">
             <button
               type="button"
+              onClick={() => setActiveTab('today')}
+              className={`px-5 py-2.5 text-sm font-semibold transition-colors ${
+                activeTab === 'today'
+                  ? 'rounded-lg bg-[var(--console-active-bg)] text-cafe'
+                  : 'text-cafe-muted hover:text-cafe-secondary hover:bg-[var(--console-hover-bg)]'
+              }`}
+              data-testid="mc-tab-today"
+            >
+              今日团队
+            </button>
+            <button
+              type="button"
               onClick={() => setActiveTab('features')}
               className={`px-5 py-2.5 text-sm font-semibold transition-colors ${
                 activeTab === 'features'
@@ -541,6 +554,8 @@ export function MissionControlPage() {
           <div className="min-h-0 flex-1 pt-4">
             {activeProject ? (
               <ExternalProjectTab project={activeProject} />
+            ) : activeTab === 'today' ? (
+              <TeamHomePanel items={items} threadsByBacklogId={threadsByBacklogId} />
             ) : activeTab === 'features' ? (
               <div className="grid min-h-0 grid-cols-1 gap-4 xl:grid-cols-[minmax(0,1fr)_340px]">
                 <div className="space-y-4">
