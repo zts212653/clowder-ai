@@ -2274,6 +2274,11 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
             }
           }
         }
+        // NOTE (#300): When chain is empty but Redis holds a stale sessionId (e.g. after
+        // restart clears in-memory chain store), the stale ID may cause --resume to fail
+        // (Gemini exit 42). We intentionally do NOT clear sessionId here because an empty
+        // chain is also the normal state for fresh threads. Instead, RC2 self-heals:
+        // classifyResumeFailure maps exit code 42 → missing_session → retry without session.
       } catch {
         // R9 P1: Fail-closed — if chain store read fails, discard sessionId.
         // Rationale: requestSeal accepted = hard seal boundary. When we can't
