@@ -13,11 +13,11 @@ Issue: [#1442](https://github.com/zts212653/clowder-ai/issues/1442)
 
 ## 结论与证据边界
 
-本轮已形成 58 项第一方 skill 的冻结来源清单，并对七项开发/检索 skill 做重点语义审计。候选修正身份、检索、review、调试和工件处置的入口/正文冲突，收窄规划、验收与调研流程。
+现已完成 58 项第一方 skill 的全文审读，保留冻结来源与逐项保留价值；第一批七项审计已扩展为全量来源检查。候选修正身份、检索、review、调试和工件处置的入口/正文冲突，收窄规划、验收与调研流程。
 
 这是**内容一致性与局部运行行为改进候选**。尚无模型配对实验、近期使用频率、真实请求完整覆盖或退役证据。不能把“少了多少行”“规则更一致”写成“GPT-6 提效多少”。
 
-[skill-inventory.json](./skill-inventory.json) 记录基线 commit、每份源文件 hash、行数、字节数、frontmatter 和审计状态。58 项全部进入清单：7 项 targeted_semantic、5 项 workflow_reference、46 项 inventory_only；全部 effectVerdict 为 unmeasured，usageFrequency 为 null。主机动态插件目录、HOME mounts 和运行覆盖不属于这个文件数的分母。
+[skill-inventory.json](./skill-inventory.json) 记录基线 commit、每份源文件 hash、行数、字节数、frontmatter 和审计状态。58 项均为 full_text_reviewed，sourceReview 记录所读 commit/hash、保留价值和静态建议；这些建议不是已证实的行为缺陷。全部 effectVerdict 仍为 unmeasured，usageFrequency 为 null。主机动态插件目录、HOME mounts 和运行覆盖不属于这个文件数的分母。
 
 ## 原始需求到本轮候选
 
@@ -34,6 +34,21 @@ Issue: [#1442](https://github.com/zts212653/clowder-ai/issues/1442)
 | A9 启动卫生提示 | 输出本地 ref 的 ahead/behind 并标注未刷新；不 fetch、不指令先同步/清理；根目录检查先过滤路径深度 | 启动状态不授权处置其他工作；新媒体仍按 evidence-output-contract 归档 |
 
 工件合同同步保留“新产物不写仓库根目录”，同时明确既有无关工件不自动阻断/接管当前任务。独立审查曾发现“skill 已改、引用源没改”的三处 P2，均已修正，见 review 记录。
+
+## 第二批：直接优化日常指令
+
+已修改并经跨模型内容复核的重点：
+
+- 讨论不再按 200–300 字逐段确认；review 不制造分歧，只澄清影响当前动作的缺口，并复用既有任务/精准 RED 与已选择的验证来源。
+- 调试不由修复次数直接判定架构错误；检索按题型停止，零命中保留 scope，旧模型习惯不由猫身份继承。
+- 调度准确报告 Approval Hub 提案与实际生效/删除的区别；训练营工具范围与合法跳步、引导的 catalog/offer/start 入口按现有代码对齐。
+- 图片按成品用途选择 raster 或原生/矢量流程；原生支持编辑时不强制转浏览器。PPT 复用内容/分页/风格确认；普通 Markdown 不需为未用富块申请例外。
+- worktree 不批量发布未知改动；review 沙盒仅对本次明确注册 worktree 使用 no-force remove，没有 rm 降级；未复现 finding 不自动降级放行。
+- 事故中的已授权止损与沟通并行；浏览器不得用 eval 绕过网络拒绝；发布必须通过真实受权工具与回执，不调用内部 helper 或写未知 runtime 的 uploadDir。
+
+本批只修改 skill、引用材料和相关 manifest 入口。主仓合流、评测产品和运行配置不扩进本轮。全文审读中的其他建议仍按实际证据与产品边界判断，不把每一条静态疑点直接升级为强制规则或“skill 已无效”。
+
+跨模型内容审查使用独立 GPT-5.6 Sol invocation：发现的正文/示例/检查清单不一致已逐项同步，最终 approve；不是效用分数，也不授予合入权限。
 
 ## 实际输入构建：源码确认与未知部分
 
@@ -102,7 +117,6 @@ scripts/session-start-recall.test.mjs 在隔离临时 git 仓库中执行：
 worktree skill / SopDefinition 的“main 双向同步才准隔离”本身是新增审计候选：本轮以冻结上游基线隔离保全了其他工作；不将此例直接升级成修改整个同步门禁的许可。
 
 仍未完成：
-- 46 项 inventory_only 的全文语义审计；
 - 使用频率与实际模型/调用版本的归属；
 - 完整 provider、新建/resume/recovery 的实际请求覆盖；
 - GPT-6 多次配对执行、独立 holdout 和效用结论；
@@ -110,8 +124,20 @@ worktree skill / SopDefinition 的“main 双向同步才准隔离”本身是�
 
 ## 下一步与回滚
 
+第二项评测产品优先评估插件化与社区开源，第一项完成后再深入讨论。
+
 当前以 Draft Protocol PR 提交审计与候选，供 maintainer 对治理范围与剩余审计安排作明确 review；#1442 当前尚无 maintainer 回复或 Feature ID。第一项工作并未因候选存在而整体完成。
 
 候选只包含源码、测试与本审计目录；激活前可直接不采纳该提交。若后续合入，按当前仓库策略 revert 对应提交；不涉及生产数据迁移，不要求修改 runtime 配置。
+
+
+
+## 本轮验证与沟通纠偏
+
+- 58 项 manifest 校验通过；first-party skill surfaces 15 pass / 1 skip，5 条既有 MCP availability advisory 保留。
+- 定时审批、训练营、引导与图片发布的对应现有契约测试 55/55 通过。初跑缺少本地 better-sqlite3 构建产物，递归重建该依赖后复跑通过；未改数据库或运行配置。
+- #1443 初版串行 CI 的唯一失败为 Collective Service 启动测试：构建入口漏构建该 CLI。隔离复现 4/5 → 构建已有 Service → 5/5；现成修复在 #1439（0f2f13e），本 PR 不重复接管其改动。远程串行 gate 尚不能宣称通过。
+- 本轮优先交付具体 skill/提示词修改；覆盖统计与 CI 排查只作为验证记录，不再替代修改进展。静态审计完成也不等于模型效用已实测。
+- 本轮复跑 Prompt/家规与 startup hook 合并集 143/143 通过；review completion routing 19/19、引用完整性 7/7（49 条声明）通过。
 
 [宪宪/gpt-6-astra🐾]

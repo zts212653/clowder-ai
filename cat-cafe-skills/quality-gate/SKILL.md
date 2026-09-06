@@ -277,8 +277,8 @@ pnpm gate → exit 0 ✅（仅 high 风险实际触发时填写）
 | 只看 spec checkbox 就声称完成/未完成 | 核实 `git log --grep` + `gh pr list` + 实际 commit（LL-029）|
 | AC 全 ✅ 就声明 phase close（机制 ship 但用户感受不到）| Step 4.5 Dogfood-Your-Slice：必做 feature 跑一条真实端到端 query 写进报告；豁免必须显式写理由（F209 反思 2026-05-23）|
 
-**Red flags — 立刻 STOP**：
-- 用 "should"、"probably"、"seems to"
+**完成声明的证据检查**：
+- 把 "should"、"probably"、"seems to" 当作已通过的证明时，先补证据；明确表达未知并继续调查不触发停工
 - 表达满足感（"好了！"、"完成！"）时还没运行命令
 - 信任 subagent 的 "success" 报告而没独立验证
 

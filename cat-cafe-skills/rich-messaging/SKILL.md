@@ -63,7 +63,7 @@ triggers:
 
 ## 默认触发：长结构化汇报
 
-当你想发一堆文字、日志、步骤，或回复已经有 3+ 结构化信号（列表、表格、代码块、diff、状态字段、行动项）时，默认用 1-2 句自然语言摘要 + `cat_cafe_create_rich_block`。纯长 Markdown 只在 rich block 不适合或工具不可用时使用，并说明原因。
+结构化信号只提示检查表达是否清楚。需要图片、交互或卡片显著改善阅读时使用 rich block；普通说明、列表和代码可以直接 Markdown，不需为纯文字申请例外。用户的格式与语音偏好优先。
 
 ## 八种 Rich Block 一览
 
@@ -161,18 +161,18 @@ DOMPurify 静默剥掉所有 `on*` 属性——widget 照常渲染，点击不�
 **优先使用 F172 共享发布合约**（自动处理 uploadDir 解析 + 幂等 + 富块生成）：
 - Codex `image_gen`：自动扫描 `~/.codex/generated_images/<sessionId>/`，无需手动操作
 - Antigravity 生成：工具结果中的文件路径自动检测并发布
-- 其他来源：调用 `publishGeneratedImage({ sourcePath, mimeType, publicationKey, provider, toolName })` 手动发布
+- 其他来源：使用当前实际暴露、绑定目标 runtime 与授权的上传/发布工具；`publishGeneratedImage` 是内部 helper，不是可直接调用的 MCP 工具
 
-发布后自动获得 `/uploads/...` 稳定 URL + `media_gallery` 富块，无需手动复制或验证。
+按真实发布/附块回执确认 `/uploads/...` URL 与消息可见性；生成文件或内部 helper 返回值不等于富块已投递。
 
-**仅当共享合约不可用时**才手动复制到 runtime 的 uploadDir。
+发布工具不可用时保留产物并如实说明缺口；不通过任意导入内部 helper 或手动写未知 runtime 的 uploadDir 冒充投递。
 
 如果你要发的是**已有文件或本地成片视频**：
 
 - 用 `kind:"file"`，不是 `media_gallery`
 - `url` 必须是 `/uploads/...`、`/api/...` 或 `https://...`
 - `mimeType` 以 `video/` 开头时，Web UI 会渲染内联 `<video>` 播放器
-- **当前自动发布合约只覆盖图片**；本地视频/通用文件没有 `publishGeneratedVideo()`，需要你先显式放到 `/uploads/...`
+- **当前自动发布合约只覆盖图片**；视频/通用文件通过实际暴露、绑定目标 runtime 与授权的上传/发布能力取得 URL，再附块并核对回执。能力不可用时保留产物、报告缺口，不直接写未知 uploadDir
 
 ## 三条纪律
 
@@ -186,8 +186,8 @@ DOMPurify 静默剥掉所有 `on*` 属性——widget 照常渲染，点击不�
 |------|------|----------|
 | 不知道自己能发语音 | operator说"发语音"你说"我是文字猫" | 你可以！用 audio block |
 | "发图"只想到 image-generation | 走 Chrome MCP 现场生成，慢且不稳定 | 先看家里有没有已有图片（`/avatars/`、`/uploads/`），有就 media_gallery 直接发 |
-| 本地成片视频只贴文件路径 | 前端拿不到，线程里也没有内联播放器 | 先把视频放到 `/uploads/...`，再用 `file` rich block；`mimeType:"video/mp4"` 时会内联播放 |
-| 本地生成图直接用 `file://` 或源码仓路径 | rich block 发得出去，但前端取不到 | 用 `publishGeneratedImage()` 发布到 `/uploads/...`（F172 共享合约自动解析 uploadDir） |
+| 本地成片视频只贴文件路径 | 前端拿不到，线程里也没有内联播放器 | 通过已暴露且受权的上传/发布工具取得 URL，再用 `file` rich block；以实际回执确认投递 |
+| 本地生成图直接用 `file://` 或源码仓路径 | rich block 发得出去，但前端取不到 | 使用已暴露的发布能力并核对回执；内部 helper 不是可直接调用的工具 |
 | audio 写长段话 | 合成效果差 | 短句口语化，1-2 句 |
 | 只发 block 不写文字 | 猫猫朋友看不懂上下文 | 先写 1-2 句自然语言摘要，再发 block |
 | `"type"` 而不是 `"kind"` | block 创建失败 | 字段是 `kind` 不是 `type` |

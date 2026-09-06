@@ -106,11 +106,11 @@ Not for:
 - **`search_evidence` 不是默认万能**——历史 hook 只提它是 one-trick legacy。三入口按场景选才是 Phase F 设计。
 - **看到 search_evidence payload 的 🧭 Memory navigation nudge**——这是低命中信号，立刻试 graph 或 recent，不要继续盲搜。
 - **猫的认知成本**来自"工具间互相找"而非"工具总数"，cross-reference 直接解决。
-- **没有 anchor 就走 recent**——比反复构造关键词 prompt search 高效。
+- **既无 anchor 也无概念关键词时走 recent**；已知概念关键词时按上面的 search 分支，不因缺精确 anchor 额外绕路。
 
 ## 隐私边界（KD-8）
 
-`graph_resolve` 和 `list_recent` 的 MCP schema 不接受 `callerCollections` / `collections` 参数。v1 只看 public/internal collections。需要 private/restricted 调 HTTP API 直接走 server-side ACL。
+`graph_resolve` 和 `list_recent` 的 MCP schema 不接受 `callerCollections` / `collections` 参数。v1 只看 public/internal collections。private/restricted 只能通过明确支持该范围、保留 server-side ACL 的受权工具或适配器读取；换成 HTTP 不会扩大权限，权限未知时保持未知。
 
 ## 链入下一 skill
 

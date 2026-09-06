@@ -132,10 +132,7 @@ skills:
   collaborative-thinking:
     category: "引导与协作"
     description: >
-      单人或多猫的创意探索、独立思考、讨论收敛。
-      Use when: brainstorm、多猫独立思考、讨论结束需要收敛、方向性问题需要多视角。
-      Not for: 已有明确 spec 直接写代码、单猫执行已定方案。
-      Output: 收敛报告（共识/分歧/行动项）+ 三件套沉淀检查。
+      单人或多猫的创意探索、独立思考、讨论收敛。 Use when: brainstorm、多猫独立思考、讨论结束需要收敛、方向性问题需要多视角。 Not for: 已有明确 spec 直接写代码、单猫执行已定方案。 Output: 收敛报告（共识/分歧/行动项）+ 三件套沉淀检查。
     triggers:
       - "brainstorm"
       - "讨论"
@@ -826,11 +823,7 @@ skills:
   memory-search-best-practices:
     category: "调研与知识"
     description: >
-      记忆系统多刀检索 + recall coverage 策略（8 类题型 recipe）。F200 v1.2 SW-1 配套 skill。
-      Use when: "哪些地方提过 X" / source-map / absence check / delta / coverage 全集 / 冷启动 onboard / 召回任务搜了 1 刀觉得不够。
-      Not for: 只是选入口走第一刀（用 memory-navigation）/ 已知精确 anchor 直接 Read / 代码符号查 Grep/LSP / 新功能开发。
-      Output: multi-query union 召回 + coverage matrix + "何时停下来"判据。
-      GOTCHA: 和 memory-navigation 互补不重叠 — memory-navigation 决定第一刀工具，本 skill 决定要不要补刀+几路+何时停。Ragdoll家族必加载：opus 系治"我能猜出来 / 碎片够了"停太早病，fable 系治"再确认一轮"停太晚病。
+      记忆系统多刀检索 + recall coverage 策略（8 类题型 recipe）。 Use when: 任务是 "哪些地方提过 X" / "X 的来源 / source map" / "有没有提过 Y / absence check" / "上次到现在变了什么 / delta" / 冷启动 onboard 复杂主题 / 任何召回任务搜了一刀觉得不够。 Not for: 只是选哪个入口走第一刀（用 memory-navigation）/ 已知精确 anchor 单 Read（直接 Read）/ 代码符号查（Grep/LSP）/ 新功能开发（不是 recall 任务）。 Output: 单一 owner 在一条任务链内完成多 query / 多 scope union + coverage matrix（item/source/谁提到/直接 vs 间接）+ 一次终局交付。 GOTCHA: 和 memory-navigation 互补不重叠 — memory-navigation 决定**第一刀走哪个工具**（search vs graph vs list_recent），本 skill 决定**要不要补刀 + 题型对应几刀几路 + 何时停**。按实际题型与失败信号选择历史校准；同一猫更换模型后不自动继承旧模型诊断。
     triggers:
       - "哪些 thread"
       - "哪些 md"
@@ -911,10 +904,7 @@ skills:
   schedule-tasks:
     category: "工具"
     description: >
-      定时任务注册、管理、能力指南。支持周期任务和一次性延迟任务。
-      Use when: 用户想设定时任务、定期提醒、周期巡检、定时发送内容、延迟执行一次性操作。
-      Not for: 已有 builtin 任务的手动触发。
-      Output: 注册/管理定时任务，任务到点唤醒猫执行。
+      定时任务注册、管理、能力指南。支持周期任务和一次性延迟任务。 ⚠️ ROUTING: 定时/schedule/cron 需求优先用本 skill（Clowder AI 本地定时任务）， 不要用另一个叫 `schedule` 的 skill（那是云端 remote-agent，用途不同）。 Use when: 用户想设定时任务、定期提醒、周期巡检、定时发送内容、延迟执行一次性操作。 Not for: 已有 builtin 任务的手动触发。 Output: 注册或删除的 Approval Hub 提案；批准并核对后才报告任务生效或删除。
     triggers:
       - "定时"
       - "每天"
@@ -935,7 +925,7 @@ skills:
       - "once"
     not_for:
       - "builtin 任务手动触发"
-    output: "Registered/managed scheduled task"
+    output: "Approval Hub proposal; activation or deletion only after approval and status verification"
     next: ["rich-messaging"]
     sop_step: null
     merged_from: null
@@ -1432,10 +1422,7 @@ skills:
   image-generation:
     category: "创作与媒体"
     description: >
-      通过 Chrome MCP 浏览器自动化，在 Gemini / ChatGPT 上生成图片并下载。
-      Use when: 需要生成概念图、UI 参考图、像素画素材、猫猫头像、任何图片资产。
-      Not for: Pencil .pen 文件内的简单形状/布局（用 pencil-design）。
-      Output: 生成的图片文件（PNG）保存到项目 assets/ 目录。
+      AI 图片生成：原生 tool call（Codex/Antigravity）或浏览器自动化（Gemini/ChatGPT）。 Use when: 需要 AI 生成概念图、UI 参考、像素画素材、完整 PPT 页面、复杂架构图、信息图或视觉 mock。 Not for: 已有图片的展示（用 media_gallery rich block）、硬要求可编辑/native text 的 PPT/图表（用 PPT/HTML 管线）。 Output: 生成图片自动发布，或作为完整视觉 mock / 图像素材进入后续交付。
     triggers:
       - "生成图片"
       - "画一张"
@@ -1446,7 +1433,7 @@ skills:
     not_for:
       - "Pencil 内部设计"
       - "简单形状布局"
-    output: "Generated PNG saved to assets/"
+    output: "Generated raster image with actual publication/delivery evidence"
     next: []
     sop_step: null
     merged_from: null
@@ -1455,10 +1442,7 @@ skills:
   ppt-forge:
     category: "创作与媒体"
     description: >
-      PPT 制作全链路：内容规划 → 风格定调 → Slide 制作 → 视觉审查 → 导出验证 → 交付。
-      Use when: 做 PPT、做演示文稿、做 slide、做海报、PPT review、视觉审查。
-      Not for: 纯代码开发（用 worktree/tdd）、纯文档写作（直接写）。
-      Output: 高密度 HTML slide + 多猫审查通过 + 导出验证。
+      PPT 制作全链路：内容分析 → 分页规划 → 低保真 MD → imagegen 精美图。 架构猫写低保真 MD（ASCII art 结构图 + 视觉指引），imagegen 猫逐页出精美图。 Use when: 做 PPT、做演示文稿、做 slide、帮朋友做 PPT、画架构图、画技术蓝图。 Not for: 要求可编辑/native text 的演示文稿或精确数据图表（选择对应原生文稿流程）、纯代码开发、纯文档写作。 Output: 低保真 MD + AI 原生精美图（raster PNG）。
     triggers:
       - "做 PPT"
       - "做个 PPT"
@@ -1473,7 +1457,7 @@ skills:
     not_for:
       - "纯代码开发"
       - "纯文档写作"
-    output: "High-density HTML slides + multi-cat visual review pass + export verification"
+    output: "Low-fidelity Markdown plan + raster PNG slides; not native editable text"
     next: ["feat-lifecycle"]
     sop_step: null
     merged_from: null
