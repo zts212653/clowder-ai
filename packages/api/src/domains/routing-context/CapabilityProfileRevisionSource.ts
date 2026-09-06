@@ -1,4 +1,11 @@
-import type { CapabilityProfileRevisionRefV1, RoutingCandidateBindingV1 } from '@cat-cafe/shared';
+import type { CapabilityProfileRevisionRefV1, RoutingCandidateBindingV1, RoutingReasonV1 } from '@cat-cafe/shared';
+
+export const CAPABILITY_PROFILE_INVALID_REASON = 'capability_profile_invalid';
+
+export interface CapabilityProfileDiagnostic {
+  catId: string;
+  reason: RoutingReasonV1;
+}
 
 export type CapabilityProfileDegradationReason =
   | 'dossier_unavailable'
@@ -17,6 +24,7 @@ export type CapabilityProfileRevisionLoadResult =
       status: 'fresh';
       profiles: CapabilityProfileRevisionRefV1[];
       absentCatIds: string[];
+      diagnostics?: CapabilityProfileDiagnostic[];
     }
   | {
       status: 'degraded';

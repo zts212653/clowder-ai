@@ -130,6 +130,9 @@ jobs:
       - run: pnpm --filter @cat-cafe/shared build
       - run: pnpm --filter @cat-cafe/mcp-server build
       - run: pnpm --filter @cat-cafe/api build
+      - name: Build Service for serial lifecycle tests
+        if: matrix.lane == 'serial'
+        run: pnpm --filter @cat-cafe/collective-service build
       - name: Download exact public-test plan
         uses: actions/download-artifact@v4
         with:

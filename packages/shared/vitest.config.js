@@ -37,6 +37,7 @@ export default defineConfig({
       'src/__tests__/load-dossier-profiles.test.ts',
       'src/__tests__/dossier-snapshot.test.ts',
       'src/__tests__/parse-dossier-profiles.test.ts',
+      'src/__tests__/dossier-parse-diagnostics.test.ts',
       'src/__tests__/profile-frontmatter-parser.test.ts',
       'src/__tests__/scanner-discovery-pure.test.ts',
       'src/__tests__/recall-outcome.test.ts',

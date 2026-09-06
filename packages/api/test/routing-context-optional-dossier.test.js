@@ -203,7 +203,8 @@ for (const [label, broken, expectedState] of [
     assert.equal(byId.get(catIds[1]).profile.state, expectedState);
     const decision = await runtime.dispatchPreflight.preflight(input);
     assert.equal(decision.targets[0].disposition, 'rejected');
-    assert.equal(decision.targets[1].disposition, 'allowed');
+    assert.equal(decision.targets[1].disposition, 'warned');
+    assert.ok(decision.targets[1].reasons.some((reason) => reason.code === 'capability_profile_invalid'));
   });
 }
 

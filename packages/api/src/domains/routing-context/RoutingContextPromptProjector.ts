@@ -4,6 +4,7 @@ import {
   type RoutingSubjectRefV1,
   routingContextReadModelV1Schema,
 } from '@cat-cafe/shared';
+import { CAPABILITY_PROFILE_INVALID_REASON } from './CapabilityProfileRevisionSource.js';
 
 export const ROUTING_CONTEXT_PROMPT_MAX_CHARS = 3_200;
 const MAX_ANOMALIES = 12;
@@ -107,7 +108,11 @@ export class RoutingContextPromptProjector {
     if (model.resolution.state === 'degraded') return '';
     const candidates = model.resolution.snapshot.candidates;
     const anomalies = [...candidates]
-      .filter((candidate) => candidate.availability !== 'available')
+      .filter(
+        (candidate) =>
+          candidate.availability !== 'available' ||
+          candidate.reasons.some((reason) => reason.code === CAPABILITY_PROFILE_INVALID_REASON),
+      )
       .sort((left, right) => Number(right.effect === 'blocked') - Number(left.effect === 'blocked'))
       .slice(0, MAX_ANOMALIES)
       .map((candidate) => ({
