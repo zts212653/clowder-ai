@@ -38,45 +38,13 @@
 - **启动命令**: 优先本机 binary 的 `pinchtab mcp`
 - 工具前缀：`mcp__pinchtab__*`
 
-## Clash TUN 环境注意事项
+## 代理与网络边界
 
-家里用 Clash TUN 代理，所有域名解析到 `198.18.x.x` 虚拟 IP。pinchtab 的 `nav` 命令在 Go 层做 DNS 预检，会把这些 IP 判定为 reserved 而 403 拒绝。
+部分代理环境使用 fake-IP，可能使导航的地址预检与实际连接路径不一致。这是需要查证的兼容性问题，不是绕过 SSRF/内网目标校验的许可。
 
-**workaround**：用 `eval` 让浏览器自己导航（浏览器带 `--proxy-server`，DNS + 连接都走代理）：
+遇到 403 或 private/internal IP 拒绝时，先核对目标、重定向与已授权网络范围。使用保留等效目标校验的受支持代理配置；若切换浏览器后端，也必须保留相同网络与权限边界。不得用 eval、脚本导航或另一个后端规避真实拒绝。
 
-```bash
-# ✗ nav 被 Go 层 SSRF 预检拦截
-pinchtab nav https://example.com  # → 403 blocked private/internal IP
-
-# ✓ eval 绕过 Go 层，浏览器走代理正常到达
-pinchtab eval 'window.location.href = "https://example.com"'
-pinchtab text  # 正常读取页面
-```
-
-localhost 导航不受影响，`pinchtab_navigate` 对 localhost 正常工作。
-
-需要 `security.allowEvaluate = true`（已在 `~/.pinchtab/config.json` 启用）。
-
-### MCP 工具用法
-
-猫通过 MCP 使用 pinchtab 时，外网导航用 `pinchtab_eval` 替代 `pinchtab_navigate`：
-
-```
-# ✗ pinchtab_navigate → 403
-mcp__pinchtab__pinchtab_navigate({ url: "https://example.com" })
-
-# ✓ pinchtab_eval → 浏览器自己走代理
-mcp__pinchtab__pinchtab_eval({ expression: 'window.location.href = "https://example.com"' })
-
-# 导航后正常用其他工具读取
-mcp__pinchtab__pinchtab_get_text()
-mcp__pinchtab__pinchtab_screenshot()
-mcp__pinchtab__pinchtab_snapshot()
-```
-
-### 根因
-
-pinchtab Go 进程在把 URL 交给浏览器前，先用 `net.LookupHost()` 做 DNS 解析。Clash TUN 把所有域名解析到 `198.18.0.0/15`（RFC 2544 reserved），Go 层判定为 private IP → 403。但浏览器带 `--proxy-server`，DNS 和连接都走 Clash 代理，完全能到达目标。这是 pinchtab 上游的 limitation — SSRF 预检没考虑浏览器有自己的代理配置。
+工具不可达或缺配置时如实报告。配置是否允许 evaluate 以当前实例为准，不假定用户 HOME 中已启用，也不擅自修改运行配置。
 
 ## 安装
 
