@@ -473,9 +473,16 @@ export interface EmbedModelInfo {
   dim: number;
 }
 
+export interface EmbedRequestOptions {
+  /** Cancel an in-flight online embedding request when its parent search is aborted. */
+  signal?: AbortSignal;
+  /** Per-call timeout override. Background indexing may be slower than online recall. */
+  timeoutMs?: number;
+}
+
 export interface IEmbeddingService {
   load(signal?: AbortSignal): Promise<void>;
-  embed(texts: string[], signal?: AbortSignal): Promise<Float32Array[]>;
+  embed(texts: string[], options?: EmbedRequestOptions): Promise<Float32Array[]>;
   isReady(): boolean;
   reprobeIfNeeded(signal?: AbortSignal): Promise<void>;
   getModelInfo(): EmbedModelInfo;
@@ -496,6 +503,8 @@ export function resolveEmbedConfig(partial?: Partial<EmbedConfig>): EmbedConfig 
     embedModel: model,
     embedDim: partial?.embedDim ?? 768, // LL-034: 768 is sweet spot for CJK bilingual; 256 too low
     maxModelMemMb: partial?.maxModelMemMb ?? 800,
+    // Online semantic/hybrid recall must fail open quickly. Background indexing
+    // supplies a longer per-call override through EmbedRequestOptions.
     embedTimeoutMs: partial?.embedTimeoutMs ?? 3000,
   };
 }

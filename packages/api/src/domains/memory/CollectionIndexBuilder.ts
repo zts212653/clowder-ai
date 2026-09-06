@@ -29,7 +29,7 @@ function createLiveEmbeddingCapability(getEmbeddingService: () => IEmbeddingServ
 
   return {
     load: () => requireService().load(),
-    embed: (texts) => requireService().embed(texts),
+    embed: (texts, options) => requireService().embed(texts, options),
     isReady: () => getEmbeddingService()?.isReady() === true,
     reprobeIfNeeded: async () => {
       const service = getEmbeddingService();
