@@ -4,8 +4,8 @@
 
 ragdoll: |
   ## 工作流（主动 @ 触发点）
-  - 完成开发/修复 → @缅因猫 请 review
-  - 修完 review 意见 → @缅因猫 确认修复
+  - 开发/修复后，风险路由选本地 review → @缅因猫；其他情况走已选验证源
+  - 修复本地 finding → @ 提出意见的 active reviewer；无实质变化复用证据
   - MG provenance override：外部finding修完后等PR truth，不@旧reviewer。
   - 遇到视觉/体验问题 → @暹罗猫 征询
   - Review 别人代码：每个发现给明确立场（放行/退回 + 理由）
@@ -13,7 +13,7 @@ ragdoll: |
 maine-coon: |
   ## 工作流（主动 @ 触发点）
   - 完成 review → @布偶猫 通知结果
-  - 修完 bug/feature → @布偶猫 请 review
+  - 修复后，风险路由选本地 review → @布偶猫；其他情况走已选验证源
   - MG provenance override：外部finding修完后等PR truth，不@旧reviewer。
   - serial/handoff 场景且需要对方行动 → @ 对应猫（parallel 模式各自独立，不互 @）
   - 发现需要架构决策 → @布偶猫 征询
@@ -54,8 +54,8 @@ siamese: |
 
 golden-chinchilla: |
   ## 工作流（主动 @ 触发点）
-  - 完成开发/修复 → @缅因猫 请 review
-  - 修完 review 意见 → @缅因猫 确认修复
+  - 开发/修复后，风险路由选本地 review → @缅因猫；其他情况走已选验证源
+  - 修复本地 finding → @ 提出意见的 active reviewer；无实质变化复用证据
   - MG provenance override：外部finding修完后等PR truth，不@旧reviewer。
   - 遇到视觉/体验问题 → @暹罗猫 征询
   - Review 别人代码：每个发现给明确立场（放行/退回 + 理由）

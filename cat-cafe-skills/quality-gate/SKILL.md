@@ -33,37 +33,43 @@ triggers:
 
 **为什么 AC 可能不够**：AC 是人写的，可能遗漏 UX 要求或场景覆盖。F041 教训：AC 全打勾，但operator的原始需求（能力显示描述、多项目管理）根本没进 AC——spec compliance check 检查了 AC，但 AC 本身就是错的。
 
+## 适用范围
+
+以用户已授权的交付单元为准。修复、局部候选与完整 feature close 各自核对相应目标和风险；不得自行缩小原始目标，或把未完成的整体需求改名成“小任务”。
+
+通用要求是需求对照、真实结果证据及风险匹配的独立验证。CloseGateReport 只用于 feature close；设计稿对照只用于相关 UI/设计改动。身份专属治理、hotfix、权限、数据与已选择 review 的独立性仍按自身触发条件执行，不随 close 检查的适用性一起跳过。
+
 ## 流程
 
 ```
 BEFORE 声称完成 / 提 review:
 
 Step 0: VISION CHECK（愿景核对）
-  ① 找原始 Discussion/Interview 文档（operator experience在里面）
+  ① 回读原始需求；当前上下文已有完整原话与来源时直接复用，需要补背景时再查 Discussion/Interview
   ② 读核心痛点："我要..."、"我不想..."
   ③ 问自己：operator坐在 Hub 前用这个功能，体验是什么样的？
   ④ AC 是否完整覆盖了operator的原始需求？
      → 如有遗漏，先补 AC 再继续
 
 Step 0.5: DELIVERY COMPLETENESS CHECK
-  ① 这次交付的是完整 feat 还是 feat 的一部分？
-     → 完整 feat：继续
-     → 部分：有operator明确同意分批交付的记录吗？没有就继续做完
+  ① 本次声明覆盖用户授权的哪个交付单元？
+     → 用户要求完整 feat：全部需求都要完成；分批需明确授权
+     → 用户明确要求局部修复/候选：验证该单元，不追加整个 feat 的收尾工作
   ② 本次产出后续需要"重写"还是"扩展"？
      → 扩展：通过
      → 重写：如果是已标注 Spike 且有结论，通过；否则不通过，回去重做
 
 Step 1: FIND — 找 spec/plan 文档
   - the active feature spec or implementation plan
-  - 同时找 Discussion/Interview（operator experience所在）
+  - 原始需求已在当前上下文完整可追溯时引用；需要补背景时再找 Discussion/Interview
 
 Step 2: CREATE — 建检查清单
   - 列出每一个 AC / 功能点 / 边界条件
-  - 列出 Discussion 里的 UX 描述和场景
+  - 当前交付涉及 UX 时，列出相应原始需求中的交互场景
 
 Step 2.5: CLOSE GATE MATRIX + FOLLOW-UP TAIL SCAN（F177 Phase A）🔴
-  - 检查 CloseGateReport 是否已生成（schema: `../.cat-cafe-shared-refs/close-gate.md`）
-  - 每个 unmet AC 是否三选一处置（immediate / delete / cvo_signoff）
+  - feature close 时检查 CloseGateReport 是否已生成（schema: `../.cat-cafe-shared-refs/close-gate.md`）
+  - feature close 时每个 unmet AC 是否三选一处置（immediate / delete / cvo_signoff）
   - **Follow-up tail scan**：扫以下文本来源，命中关键词 = **线索（进入语义判定），不是自动 BLOCKED**——判定标准只有一条：该词是否在把 **unmet AC 包装成已完成 / 偷偷延期**（close 借口）。正常阶段描述（"X 属 next phase 的 scope"）、风险讨论、路线图引用不触发（2026-07-15 修订：raw keyword 自动 BLOCK 误杀正常文本）：
     - 来源：close report、PR body、commit messages、spec 中 AC 注释、review 反馈回复
     - 线索关键词（不区分大小写；仅用于定位待语义检查处）：
@@ -152,12 +158,12 @@ Step 4.5: DOGFOOD-YOUR-SLICE — 用一次自己刚做的功能（F209 教训 20
     发现的 bug: 无 / 列表（含修复 commit SHA）
     ```
 
-Step 5: PEN CHECK — 自动化设计稿对照（不可跳过！）
-  ① glob designs/**/*.pen，匹配当前 feat 编号或关键词
+Step 5: PEN CHECK — 相关 UI/设计改动的设计稿对照
+  ① 本次涉及 UI/设计改动时，glob designs/**/*.pen 匹配当前 feat 编号或关键词；其他改动不进入本步骤
   ② 若匹配到 .pen 文件 → 强制进入设计稿对照流程（见下方"有 .pen 设计稿的功能额外要求"）
   ③ 若无匹配 → 检查 feat 是否有前端 UI 改动（改了 packages/web/src/components/）
      → 有 UI 改动但无 .pen → 在报告中标注"⚠️ 无设计稿，跳过对照"
-  ④ 此步骤不依赖猫猫"记得"——必须执行 glob 命令，用输出决定是否进入对照
+  ④ 相关 UI/设计改动必须用 glob 输出决定是否进入对照，不能仅凭记忆声称没有设计稿
 
 Step 6: RUN — 运行风险匹配的验证命令（必须这次真实运行）
   ① 先列五轴风险与受影响面；命令逐条对应 claim，不按“写了代码”机械全跑
@@ -174,7 +180,7 @@ Step 7.5: ARTIFACT HYGIENE CHECK — 根目录媒体垃圾闸门
     `git status --short | rg '^.. [^/]+\.(png|jpe?g|webp|gif|webm|mp4|mov|wav|pdf|pen)$'`
   - 执行（已提交差异）：
     `git diff --name-only origin/main...HEAD | rg '^[^/]+\.(png|jpe?g|webp|gif|webm|mp4|mov|wav|pdf|pen)$'`
-  - 任一命中 → BLOCK：说明仓库根目录出现了媒体/设计工件（含已跟踪和未跟踪）
+  - 归属本次交付的命中 → BLOCK；不相关的既有工件仅记录，不移动或清理其他工作的文件
   - 处理方式：移到 `${TMPDIR}/cat-cafe-evidence/...` 或显式归档到正式目录后再继续
   - 规则真相源：`../.cat-cafe-shared-refs/evidence-output-contract.md`
 
@@ -254,12 +260,12 @@ pnpm gate → exit 0 ✅（仅 high 风险实际触发时填写）
 
 | 错误 | 正确做法 |
 |------|----------|
-| 只检查 AC，没回读 Discussion | Step 0 先读原始需求，AC 可能不完整 |
+| 只检查 AC，没对照原始需求 | Step 0 回读对应原话，已有完整来源可复用 |
 | "上次跑测试是通过的" | 这次重新跑，看输出，再声明 |
 | "应该没问题" / "probably works" | Run the command. Read the output. |
 | 测试通过就声称 phase 完成 | 还要对照 spec 逐项检查 |
-| 部分实现就提 review | P1/P2 遗漏必须当轮补完再提 review |
-| 交付半成品让operator"先看看" | 交付完整 feat，步骤是内部节奏不是交付批次 |
+| 原始交付单元未做完却声称完成 | 补齐该单元的需求与 P1/P2；候选状态如实标注，不冒充最终交付 |
+| 将完整 feat 偷换成半成品 | 按用户授权范围交付；分批或缩减完整目标需要明确授权 |
 | 产出后续要重写而非扩展 | 如果要重写，说明绕路了（Spike 除外） |
 | author 没跑 frontend preview，把“缺截图”扔给 operator | author 走关键交互；按视觉风险选择截图 / 录屏 / DOM / 浏览器测试证据 |
 | 有 .pen 设计稿但没对照实现 | Step 5 自动 glob 检测，匹配到就强制对照，不靠记忆 |

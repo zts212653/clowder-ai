@@ -184,9 +184,9 @@ skills:
     category: "开发流程"
     description: >
       将 spec/需求拆分为可执行的分步实施计划。
-      Use when: 有 spec 或需求，准备动手前需要拆分步骤。
-      Not for: trivial 改动（≤5 行）、已有详细计划。
-      Output: 分步实施计划（含 TDD 步骤和检查点）。
+      Use when: 跨组件、状态对象或实施顺序需要明确，且已有需求但缺少可执行计划。
+      Not for: 已有可执行计划、已知根因的简单修复、无行为变化的机械改动。
+      Output: 目标、关键设计、风险与验证方式明确的实施计划。
     triggers:
       - "写计划"
       - "implementation plan"
