@@ -10,20 +10,20 @@
       "introducedBy": "78f3bc57c",
       "expiresOn": "2026-10-01",
       "audit": {
-        "reviewedOn": "2026-09-01",
-        "sourceHead": "b741f42fdbbb4484a54cde7eadca08b3b11652e3",
+        "reviewedOn": "2026-09-05",
+        "sourceHead": "5aa0f7d5fe9f7b00ac7b564dbd41211354157133",
         "publicHead": "182d8ec9abc87ff7905441dca0575aab9787ee8f",
         "status": "resource_contract",
-        "matchedFileCount": 62,
-        "matchedFilesHash": "24038fff107dc7e88b1496a7038ac7fa155e22ebc87fe8af9236b9b4e4644ead"
+        "matchedFileCount": 63,
+        "matchedFilesHash": "613776cced1400d311fd529f4b000a0c76c0306cd7e55fc9061b4115d8435a57"
       },
       "publicAudit": {
-        "reviewedOn": "2026-09-02",
-        "sourceHead": "578988365a6ff30928e7bc3e1863cf0cfa6d6f53",
-        "publicHead": "01c58feb40fab2a75016a9a8d290c87f6776d9a0",
+        "reviewedOn": "2026-09-05",
+        "sourceHead": "c5633cf643447e040af125d361d2156e38fdb081",
+        "publicHead": "f3dba7a1abb9474a88764f21283297cbe9935e2b",
         "status": "resource_contract",
-        "matchedFileCount": 63,
-        "matchedFilesHash": "f62b1e46eb821795d0070c97c865261709d047b69f576ed5d6a302a60ef3dd33"
+        "matchedFileCount": 64,
+        "matchedFilesHash": "5e21c0b349928349fbe2de8cb929538c801b354db1f1eedb07420658fbd508c6"
       }
     },
     {
@@ -103,12 +103,12 @@
       "introducedBy": "78f3bc57c",
       "expiresOn": "2026-10-01",
       "audit": {
-        "reviewedOn": "2026-09-01",
-        "sourceHead": "b741f42fdbbb4484a54cde7eadca08b3b11652e3",
+        "reviewedOn": "2026-09-04",
+        "sourceHead": "5a0b3a6bb96fa0ecefd4081ecd8cd739a991bd97",
         "publicHead": "182d8ec9abc87ff7905441dca0575aab9787ee8f",
         "status": "source_dependency_failure",
-        "matchedFileCount": 248,
-        "matchedFilesHash": "69117d827b74fee6d257f7cf119a28ece0c99157ac72213a922d3d13998a4d6b"
+        "matchedFileCount": 256,
+        "matchedFilesHash": "ce05e5d09e8db161d0cf131380ae0fcbb82e9838bbc2e14c2588a3f2341d538d"
       }
     },
     {
@@ -202,6 +202,23 @@
         "status": "private_fixture_failure",
         "matchedFileCount": 1,
         "matchedFilesHash": "cd7af3541334cb66d5e48e31052c71d6876cb91efa20f8d4f0bf4ddc3f01041e"
+      }
+    },
+    {
+      "id": "capability-evolution-private-owner-evidence",
+      "match": "(?:capability-evolution-e0-owner-inputs|f314-capability-evolution-owner-inputs|harness-eval/(?:capability-evolution-measurement-(?:issuer(?:-security)?|source-store)|f311-(?:capability-evolution-wakeup|e0-eval-repair-owner-provider)))\\.test",
+      "category": "private_fixture",
+      "reason": "These exact capability-evolution integration tests validate Clowder AI's canonical owner certificates, measurement sources, and intent fixtures, which are instance-owned evidence deliberately absent from the public export.",
+      "owner": "@zts212653",
+      "introducedBy": "da83ee2875",
+      "expiresOn": "2026-10-01",
+      "audit": {
+        "reviewedOn": "2026-09-04",
+        "sourceHead": "251d681e8fbd2ea20c5086ff73d3d47ca8d7f861",
+        "publicHead": "9f6ac206988f635feddd18d8b0ed517bb7ab2b1a",
+        "status": "private_fixture_failure",
+        "matchedFileCount": 7,
+        "matchedFilesHash": "e2f0a28bfba90b3e3ed4bb219e79cde7edef8eb55bdd01360be757aa4e3013cd"
       }
     },
     {

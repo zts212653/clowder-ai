@@ -7,6 +7,8 @@ import type { IThreadStore } from '../domains/cats/services/stores/ports/ThreadS
 import type { SocketManager } from '../infrastructure/websocket/index.js';
 
 export interface ProposalRoutesOptions {
+  /** Active config root for F277's TTL=0 owner conversation-group truth. */
+  projectRoot?: string;
   proposalStore: IProposalStore;
   threadStore: IThreadStore;
   messageStore: IMessageStore;

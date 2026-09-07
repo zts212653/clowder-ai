@@ -10,7 +10,7 @@
  */
 
 import type { ApprovalEnvelope, CatId, ThreadProposal } from '@cat-cafe/shared';
-import { catIdSchema, generateProposalId } from '@cat-cafe/shared';
+import { catIdSchema, generateProposalId, suggestedReportingModeForWorkMode } from '@cat-cafe/shared';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { ApprovalIngress } from '../domains/approval-hub/ApprovalIngress.js';
@@ -31,6 +31,8 @@ const proposeThreadCallbackSchema = z.object({
   initialMessage: z.string().max(4000).optional(),
   // F128 Phase AA (AC-AA1): reporting contract. Omitted → default final-only (supersedes Phase Y AC-Y6 none).
   reportingMode: z.enum(['none', 'final-only', 'state-transitions', 'blocking-ack']).optional(),
+  // F277: explicit placement role. `unknown` is projection-only and intentionally rejected.
+  declaredWorkMode: z.enum(['subtask', 'parallel', 'investigation', 'standalone']).optional(),
   // F128: explicit project ownership for the child thread. Validated against allowed roots
   // (resolvePersistentProjectPath) — NOT hardcoded. Omitted → inherit source thread's projectPath;
   // supplied-but-invalid → 400 (fail loud, never silently fall back to default).
@@ -68,6 +70,7 @@ export function registerCallbackProposeThreadRoutes(app: FastifyInstance, deps: 
       preferredCats,
       initialMessage: rawInitialMessage,
       reportingMode,
+      declaredWorkMode,
       projectPath: explicitProjectPath,
       parentThreadId,
       clientRequestId,
@@ -227,7 +230,8 @@ export function registerCallbackProposeThreadRoutes(app: FastifyInstance, deps: 
         projectPath: resolvedProjectPath,
         createdBy: record.userId,
         ...(initialMessage ? { initialMessage } : {}),
-        ...(reportingMode ? { reportingMode } : {}),
+        reportingMode: reportingMode ?? suggestedReportingModeForWorkMode(declaredWorkMode),
+        ...(declaredWorkMode ? { declaredWorkMode } : {}),
       });
     } catch (err) {
       // Critical: if we reserved a dedup key but failed to create the proposal it points at,

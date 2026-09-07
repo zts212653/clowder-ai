@@ -16,12 +16,13 @@ import {
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { resolveCatTarget } from '../domains/cats/services/agents/routing/cat-target-resolver.js';
-import type { IMessageStore } from '../domains/cats/services/stores/ports/MessageStore.js';
+import type { IMessageStore, StoredMessage } from '../domains/cats/services/stores/ports/MessageStore.js';
 import { deriveGrowingSourceMessageRevision } from '../domains/cats/services/stores/ports/MessageStore.js';
 import type { ITaskStore } from '../domains/cats/services/stores/ports/TaskStore.js';
 import { isEntrustedWorkTerminalActionRequiredError } from '../domains/cats/services/stores/ports/TaskStoreContract.js';
 import type { IThreadStore } from '../domains/cats/services/stores/ports/ThreadStore.js';
 import {
+  type EntrustedWorkAdmissionSourceContext,
   EntrustedWorkLifecycleError,
   EntrustedWorkLifecycleService,
 } from '../domains/growing/EntrustedWorkLifecycleService.js';
@@ -231,21 +232,24 @@ export function registerCallbackTaskRoutes(
     }
 
     try {
-      await assertDirectAdmissionSourceCustody(messageStore, actor, parsed.data.admission);
-      const admission = await entrustedWorkLifecycle.admitOrResume({
-        task: {
-          threadId: actor.threadId,
-          title: parsed.data.title,
-          why: parsed.data.why,
-          createdBy: actor.catId,
-          ownerCatId: actor.catId,
-          userId: actor.userId,
+      const source = await assertDirectAdmissionSourceCustody(messageStore, actor, parsed.data.admission);
+      const admission = await entrustedWorkLifecycle.admitOrResume(
+        {
+          task: {
+            threadId: actor.threadId,
+            title: parsed.data.title,
+            why: parsed.data.why,
+            createdBy: actor.catId,
+            ownerCatId: actor.catId,
+            userId: actor.userId,
+          },
+          admission: parsed.data.admission,
+          closure: parsed.data.closure,
+          time: parsed.data.time,
+          artifactRefs: parsed.data.artifactRefs,
         },
-        admission: parsed.data.admission,
-        closure: parsed.data.closure,
-        time: parsed.data.time,
-        artifactRefs: parsed.data.artifactRefs,
-      });
+        admissionSourceContext(source),
+      );
       if (admission.result === 'needs_clarification') {
         return { status: 'needs_clarification', admission };
       }
@@ -500,8 +504,8 @@ async function assertDirectAdmissionSourceCustody(
   messageStore: IMessageStore,
   actor: { readonly threadId: string; readonly userId: string },
   admission: CustodyAdmissionRequestV1,
-): Promise<void> {
-  if (admission.basis === 'authorized_source') return;
+): Promise<StoredMessage | null> {
+  if (admission.basis === 'authorized_source') return null;
   if (admission.sourceRefs.length !== 1 || !admission.sourceRefs[0]?.startsWith('message:')) {
     throw new EntrustedWorkLifecycleError(
       'ENTRUSTED_WORK_SOURCE_CUSTODY_MISMATCH',
@@ -544,7 +548,7 @@ async function assertDirectAdmissionSourceCustody(
         'An existing source offer disposition cannot be bypassed as explicit entrustment',
       );
     }
-    return;
+    return source;
   }
 
   const offer = custodyOfferV1Schema.safeParse(rawOffer);
@@ -563,6 +567,12 @@ async function assertDirectAdmissionSourceCustody(
       'Accepted-offer admission does not match current source custody',
     );
   }
+  return source;
+}
+
+function admissionSourceContext(source: StoredMessage | null): EntrustedWorkAdmissionSourceContext | undefined {
+  if (!source) return undefined;
+  return { sourceRef: `message:${source.id}`, content: source.content };
 }
 
 function replyEntrustedWorkLifecycleError(

@@ -1,6 +1,6 @@
 ---
 name: receive-review
-tips_exempt: harness-internal review re-entry convention; no distinct end-user capability surface
+tips_exempt: F167/F314 keep local review handback and accepted-source provenance internal to the harness; no distinct end-user-invocable capability surface
 description: "处理 reviewer 反馈：Red→Green 修复 + 按 engagement mode 收口。Use when: 收到 review 结果或 P1/P2。Not for: 发 review 请求、自检。Output: 按 iterative / one-shot 契约闭环。"
 triggers:
   - "review 结果"
@@ -191,19 +191,16 @@ VERIFY 完所有 findings 之后、动手修之前，做一次 failure-mode 判�
 `one_shot_calibration` / `final_seal` 按一次性契约退出，作者用 Red→Green + 风险匹配 gate 消费普通 finding，
 仍需独立确认时**转日常 reviewer**。只有新的架构/决策判断、无法机械验收的原 finding，或 operator 明确要求，才复入原稀缺 reviewer。
 
-对需要复入的本地 `iterative` review，权威来源是 **direct review carrier**（直接承载 review 请求、由 lease
-`predecessorThreadId` 绑定的 thread），不是任务祖先 thread，也不是第一次误投 verdict 的落点。若二者冲突，
-停止沿错路级联并回 direct review carrier。
+对需要复入的本地 `iterative` review，权威来源是 **direct review carrier**（直接承载 review 请求的 thread），
+不是任务祖先 thread，也不是第一次误投 verdict 的落点。若二者冲突，停止沿错路级联并回 direct review carrier。
 
 ### 本地 reviewer 复入载体（terminal 之后的新工作）
 
-只有 mode 判定确实需要复入时，P1/P2 修复产生的新 exact HEAD 才是一轮新的 review work。向本地 reviewer 发修复确认前，必须重新加载 `request-review`，并用结构化 successor 载体：同 thread 用 `post_message(action.mode=single)`，跨 thread 用对应 cross-thread action；两者都带 `coordination.phase=active`、`reviewReentry`（reason + durable evidenceRef）、显式 `clientMessageId` 与唯一 reviewer `targetCats`。exact-HEAD 变化本身不能越过稀缺席位的 one-shot 退出条件。
-
-只用普通行首 `@reviewer`、`replyTo` 或裸 `targetCats` 回 terminal verdict，服务端会按 ACK 正确抑制；不得把正文看起来“像正式复审”当机器可判 provenance，也不得靠反复重发碰运气。最终 verdict 仍按 `request-review` 用 terminal coordination 返回。
+只有 mode 判定确实需要复入时，P1/P2 修复产生的新 exact HEAD 才是一轮新的 review work。发送前重新加载 `request-review`，并严格消费其中唯一的 direct-carrier、ordinary durable A2A、accepted-source anchor 与 verdict-field 契约；本 skill 只保留守卫锚点：**普通 durable A2A** 必须携带 typed `localReviewVerdict` 与 `reviewedHeadSha`，其余字段和状态机不在这里复制。exact-HEAD 变化本身不能越过稀缺席位的 one-shot 退出条件。
 
 | Feedback source | 修复后动作 |
 |-----------------|------------|
-| 本地 `iterative` reviewer | 在 direct review carrier 向 `@reviewer` 发送结构化修复确认请求；等 reviewer 明确放行当前 SHA |
+| 本地 `iterative` reviewer | 在 direct review carrier 向 `@reviewer` 发送普通 durable 修复确认请求；等 reviewer 明确放行当前 SHA |
 | 稀缺 `one_shot_calibration` / `final_seal` reviewer | 作者修复 + 测试/gate；仍需独立确认则转日常 reviewer，不因普通 finding 或 SHA 变化召回原猫 |
 | cloud / GitHub review | 在 GitHub 回复或标注修复证据，push 新 SHA 后**只重新触发 cloud review**，等 PR tracking / review feedback；不要 @ 本地旧 reviewer |
 | CI / PR check | 修复后 rerun/check gate；若只是外部 check gate，不需要本地 reviewer 续签 |

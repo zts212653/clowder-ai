@@ -1,11 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { custodyAdmissionRequestV1Schema } from '../types/entrusted-work-actions.js';
-import {
-  custodyOfferV1Schema,
-  entrustedWorkOwnerReadV1Schema,
-  entrustedWorkV1Schema,
-  producerAttentionReceiptV1Schema,
-} from '../types/growing.js';
+import { entrustedWorkOwnerReadV1Schema } from '../types/entrusted-work-owner-read.js';
+import { custodyOfferV1Schema, entrustedWorkV1Schema, producerAttentionReceiptV1Schema } from '../types/growing.js';
 
 const sourceMessageRevision = `sha256:${'a'.repeat(64)}`;
 
@@ -77,10 +73,50 @@ const ownerRead = {
   envelope: {
     subjectRef: 'task:work:tomorrows-ppt',
     ownerRef: 'task:item:tomorrows-ppt',
+    admissionReceiptRef: 'task:receipt:tomorrows-ppt:7',
     sourceRefs: ['message:tomorrows-ppt'],
     revision: 7,
     freshness: { state: 'current' as const, observedRevision: 7 },
     visibility: { ownerUserId: 'operator', human: true, cat: true },
+  },
+  brief: {
+    outcome: {
+      state: 'known' as const,
+      value: 'A reviewable presentation for tomorrow',
+      ownerRef: 'task:item:tomorrows-ppt',
+      revision: 7,
+    },
+    current: {
+      state: 'doing' as const,
+      ownerRef: 'task:item:tomorrows-ppt',
+      revision: 7,
+    },
+    verifiedMilestone: {
+      kind: 'needs_judgment' as const,
+      evidenceRef: 'approval:proposal:ppt-direction',
+      revision: 12,
+    },
+    nextOwner: {
+      kind: 'human' as const,
+      ownerRef: 'user:operator',
+      evidence: [
+        {
+          producerId: 'f246.approval' as const,
+          ownerRef: 'approval:proposal:ppt-direction',
+          revision: 12,
+        },
+      ],
+    },
+    needsMe: {
+      state: 'needed' as const,
+      evidence: [
+        {
+          producerId: 'f246.approval' as const,
+          ownerRef: 'approval:proposal:ppt-direction',
+          revision: 12,
+        },
+      ],
+    },
   },
   preparedArtifact: {
     artifactRef: 'artifact:ppt:tomorrows-ppt',
@@ -203,6 +239,12 @@ describe('F310 shared Growing contracts', () => {
           ...ownerRead.envelope,
           freshness: { state: 'stale', observedRevision: 6 },
         },
+        brief: {
+          ...ownerRead.brief,
+          verifiedMilestone: { kind: 'unknown', reason: 'stale_owner_read' },
+          nextOwner: { kind: 'unknown' },
+          needsMe: { state: 'unknown', reason: 'stale_owner_read' },
+        },
         attentionReceipts: [],
       }).success,
     ).toBe(true);
@@ -319,6 +361,74 @@ describe('F310 shared Growing contracts', () => {
         attentionReceipts: [
           { ...eligibleReceipt, action: { ...eligibleReceipt.action, expectedProducerRevision: 11 } },
         ],
+      }).success,
+    ).toBe(false);
+  });
+
+  it('rejects custody and time milestones that are not linked to the canonical Task owner', () => {
+    const quietBrief = {
+      ...ownerRead.brief,
+      verifiedMilestone: {
+        kind: 'custody_admitted' as const,
+        evidenceRef: ownerRead.envelope.admissionReceiptRef,
+        revision: ownerRead.envelope.revision,
+      },
+      nextOwner: {
+        kind: 'cat' as const,
+        ownerRef: 'cat:codex-sol',
+        evidenceRef: ownerRead.envelope.ownerRef,
+        revision: ownerRead.envelope.revision,
+      },
+      needsMe: {
+        state: 'not_needed' as const,
+        evidenceRef: ownerRead.envelope.ownerRef,
+        revision: ownerRead.envelope.revision,
+      },
+    };
+    const custodyRead = {
+      ...ownerRead,
+      brief: quietBrief,
+      preparedArtifact: undefined,
+      timeRefs: [],
+      attentionReceipts: [],
+    };
+    expect(entrustedWorkOwnerReadV1Schema.safeParse(custodyRead).success).toBe(true);
+    expect(
+      entrustedWorkOwnerReadV1Schema.safeParse({
+        ...custodyRead,
+        brief: {
+          ...quietBrief,
+          verifiedMilestone: {
+            kind: 'custody_admitted',
+            evidenceRef: 'message:unrelated#receipt',
+            revision: 999,
+          },
+        },
+      }).success,
+    ).toBe(false);
+
+    const foreignTime = {
+      role: 'execution_trigger' as const,
+      subjectRef: 'schedule:f139:foreign-work',
+      ownerRef: 'schedule:item:foreign-work',
+      revision: 31,
+      value: 1_788_235_200_000,
+    };
+    expect(
+      entrustedWorkOwnerReadV1Schema.safeParse({
+        ...ownerRead,
+        brief: {
+          ...quietBrief,
+          verifiedMilestone: {
+            kind: 'time_committed',
+            role: foreignTime.role,
+            evidenceRef: foreignTime.ownerRef,
+            revision: foreignTime.revision,
+          },
+        },
+        preparedArtifact: undefined,
+        timeRefs: [foreignTime],
+        attentionReceipts: [],
       }).success,
     ).toBe(false);
   });

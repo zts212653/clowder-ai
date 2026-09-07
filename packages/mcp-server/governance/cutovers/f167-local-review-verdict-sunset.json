@@ -1,0 +1,62 @@
+{
+  "resource": {
+    "kind": "family",
+    "resourceFamily": "tracking-review"
+  },
+  "retiredNames": ["cat_cafe_record_local_review_verdict", "cat_cafe_recover_local_review_verdict"],
+  "canonicalNames": [],
+  "expectedProfiles": {},
+  "rollbackRevision": "3274799a13d68944dfc3087f3c459bcda31ab3da",
+  "layers": {
+    "mcp-definition": {
+      "status": "covered",
+      "consumers": [
+        "packages/mcp-server/src/canonical-server-tools.ts",
+        "packages/mcp-server/src/tools/index.ts",
+        "packages/mcp-server/src/tools/callback-tools.ts"
+      ]
+    },
+    "runtime-catalog-profile": {
+      "status": "covered",
+      "consumers": [
+        "packages/mcp-server/src/canonical-server-tools.ts",
+        "packages/mcp-server/governance/mcp-surface-baseline.json"
+      ]
+    },
+    "prompt-l0": {
+      "status": "not-applicable",
+      "rationale": "The retired local-review tools were not injected by L0; the ordinary post_message and cross_post_message review-fact fields remain the active prompt surface.",
+      "absenceEvidence": ["cat_cafe_record_local_review_verdict", "cat_cafe_recover_local_review_verdict"]
+    },
+    "skill-convention": {
+      "status": "covered",
+      "consumers": [
+        "cat-cafe-skills/request-review/SKILL.md",
+        "cat-cafe-skills/receive-review/SKILL.md",
+        "cat-cafe-skills/cross-cat-handoff/SKILL.md",
+        "cat-cafe-skills/merge-gate/SKILL.md"
+      ]
+    },
+    "fixture-test": {
+      "status": "covered",
+      "consumers": [
+        "packages/api/test/post-message-successor-e2e.test.js",
+        "packages/api/test/callback-routes.test.js",
+        "packages/api/test/action-successor-index-wiring.test.js",
+        "packages/mcp-server/test/tool-registration.test.js"
+      ]
+    },
+    "eval": {
+      "status": "covered",
+      "consumers": [
+        "packages/api/src/infrastructure/harness-eval/design-gate/resolve-design-gate-episode.ts",
+        "packages/api/test/harness-eval/design-gate-episode-source-provider.test.js"
+      ]
+    },
+    "observability": {
+      "status": "not-applicable",
+      "rationale": "This deletion removes local lease settlement rather than introducing a runtime-health claim; durable Queue delivery and retry outcomes stay observable through the existing message and Queue lifecycle.",
+      "absenceEvidence": ["cat_cafe_record_local_review_verdict", "cat_cafe_recover_local_review_verdict"]
+    }
+  }
+}

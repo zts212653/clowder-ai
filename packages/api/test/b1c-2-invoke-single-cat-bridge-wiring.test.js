@@ -160,6 +160,35 @@ describe('F247 AC-B1c-2 R1: invokeSingleCat × bridge wiring contract', () => {
     assert.equal(messages.at(-1).type, 'done', 'guard still yields done');
   });
 
+  it('marks a direct-user needs-binding outcome retryable on the exact source without emitting an error turn', async () => {
+    ensureGptProRegistered();
+    const bridge = {
+      dispatch: async () => ({
+        kind: 'fallback',
+        reason: 'needs-binding',
+        detail: 'Personal Chrome Host is available, but this thread has no bound ChatGPT conversation',
+      }),
+    };
+    const deps = makeMinimalDeps({ cloudInvokeBridge: bridge });
+
+    const messages = await drainGenerator(
+      invokeSingleCat(deps, {
+        ...baseParams,
+        mentionContent: 'send this exact message after binding',
+        mentioningCatId: 'alice',
+      }),
+    );
+
+    assert.equal(bridgeStatus(messages).reason, 'needs-binding');
+    assert.deepEqual(bridgeStatus(messages).outboundReceipt.sourceSender, { kind: 'user', id: 'alice' });
+    assert.equal(
+      messages.some((message) => message.type === 'error'),
+      false,
+    );
+    assert.equal(messages.at(-1).type, 'done');
+    assert.equal(messages.at(-1).errorCode, 'CLOUD_NEEDS_BINDING');
+  });
+
   it('prefers the exact queued multi-mention carrier over reconstructed route provenance', async () => {
     ensureGptProRegistered();
     const bridge = makeRecordingBridge();

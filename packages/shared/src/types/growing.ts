@@ -258,100 +258,6 @@ export const producerAttentionReceiptV1Schema = z
     }
   });
 
-const ownerReadEnvelopeV1Schema = z
-  .object({
-    subjectRef: boundedRef,
-    ownerRef: boundedRef,
-    sourceRefs: sourceRefsSchema,
-    revision: revisionSchema,
-    freshness: z
-      .object({
-        state: z.enum(['current', 'stale']),
-        observedRevision: revisionSchema,
-      })
-      .strict(),
-    visibility: z
-      .object({
-        ownerUserId: boundedRef,
-        human: z.boolean(),
-        cat: z.boolean(),
-      })
-      .strict(),
-  })
-  .strict()
-  .superRefine((envelope, context) => {
-    const { state, observedRevision } = envelope.freshness;
-    if (state === 'current' && observedRevision !== envelope.revision) {
-      context.addIssue({
-        code: z.ZodIssueCode.custom,
-        path: ['freshness', 'observedRevision'],
-        message: 'current read must observe the canonical owner revision',
-      });
-    }
-    if (state === 'stale' && observedRevision >= envelope.revision) {
-      context.addIssue({
-        code: z.ZodIssueCode.custom,
-        path: ['freshness', 'observedRevision'],
-        message: 'stale read must identify an older observed revision',
-      });
-    }
-  });
-
-const preparedArtifactReadV1Schema = z
-  .object({
-    artifactRef: boundedRef,
-    artifactRevision: boundedRef,
-    completenessRef: boundedRef,
-    previewRef: boundedRef,
-    openInWorkspaceRef: boundedRef,
-  })
-  .strict();
-
-const entrustedWorkTimeRefV1Schema = z
-  .object({
-    role: z.enum(['business_deadline', 'review_by', 'execution_trigger']),
-    subjectRef: boundedRef,
-    ownerRef: boundedRef,
-    revision: revisionSchema,
-    value: timestampSchema,
-  })
-  .strict();
-
-/** One discardable read composition consumed without reinterpretation by Web and cat tools. */
-export const entrustedWorkOwnerReadV1Schema = z
-  .object({
-    envelope: ownerReadEnvelopeV1Schema,
-    preparedArtifact: preparedArtifactReadV1Schema.optional(),
-    timeRefs: z.array(entrustedWorkTimeRefV1Schema).max(64),
-    attentionReceipts: z.array(producerAttentionReceiptV1Schema).max(PHASE_B_NEEDS_ME_PRODUCER_IDS.length),
-  })
-  .strict()
-  .superRefine((ownerRead, context) => {
-    if (ownerRead.envelope.freshness.state !== 'current' && ownerRead.attentionReceipts.length > 0) {
-      context.addIssue({
-        code: z.ZodIssueCode.custom,
-        path: ['attentionReceipts'],
-        message: 'stale owner reads cannot expose producer attention actions',
-      });
-    }
-    ownerRead.attentionReceipts.forEach((receipt, index) => {
-      if (receipt.taskRef.subjectRef !== ownerRead.envelope.subjectRef) {
-        context.addIssue({
-          code: z.ZodIssueCode.custom,
-          path: ['attentionReceipts', index, 'taskRef', 'subjectRef'],
-          message: 'attention receipt must reference the same Task subject',
-        });
-      }
-      if (receipt.taskRef.observedRevision !== ownerRead.envelope.revision) {
-        context.addIssue({
-          code: z.ZodIssueCode.custom,
-          path: ['attentionReceipts', index, 'taskRef', 'observedRevision'],
-          message: 'attention receipt must observe the current Task revision',
-        });
-      }
-    });
-  });
-
 export type CustodyAdmissionResultV1 = z.infer<typeof custodyAdmissionResultV1Schema>;
 export type CustodyAdmissionStateV1 = z.infer<typeof custodyAdmissionStateV1Schema>;
 export type CustodyOfferV1 = z.infer<typeof custodyOfferV1Schema>;
@@ -360,4 +266,3 @@ export type EntrustedWorkTaskRefV1 = z.infer<typeof entrustedWorkTaskRefV1Schema
 export type PhaseBNeedsMeProducerId = (typeof PHASE_B_NEEDS_ME_PRODUCER_IDS)[number];
 export type ProducerAttentionReevaluationLinkV1 = z.infer<typeof producerAttentionReevaluationLinkV1Schema>;
 export type ProducerAttentionReceiptV1 = z.infer<typeof producerAttentionReceiptV1Schema>;
-export type EntrustedWorkOwnerReadV1 = z.infer<typeof entrustedWorkOwnerReadV1Schema>;

@@ -1,23 +1,15 @@
 'use client';
 
-import type { EntrustedWorkOwnerReadV1, GlobalArtifactDTO, ProducerAttentionReceiptV1 } from '@cat-cafe/shared';
+import type { GlobalArtifactDTO } from '@cat-cafe/shared';
 import { useEffect, useMemo, useRef } from 'react';
 import { useEntrustedWorkProjection } from '@/hooks/useEntrustedWorkProjection';
+import { EntrustedWorkBrief } from './EntrustedWorkBrief';
+import { type EligibleNeedsMeReceipt, selectNeedsMeItems } from './needs-me-items';
 import { type PreparedArtifactCoordinate, PreparedArtifactPreview } from './PreparedArtifactPreview';
 
-type EligibleReceipt = Extract<ProducerAttentionReceiptV1, { eligible: true }>;
+export { needsMeItemRef } from './needs-me-items';
 
-export function needsMeItemRef(ownerRead: EntrustedWorkOwnerReadV1, receipt: ProducerAttentionReceiptV1): string {
-  return [
-    ownerRead.envelope.subjectRef,
-    ownerRead.envelope.revision,
-    receipt.producer.producerId,
-    receipt.producer.subjectRef,
-    receipt.producer.revision,
-  ].join('|');
-}
-
-function whyNow(receipt: EligibleReceipt): string {
+function whyNow(receipt: EligibleNeedsMeReceipt): string {
   if (receipt.salience === 'near_deadline') return '临近业务时间，需要你现在判断';
   if (receipt.salience === 'high_risk') return '来源 owner 标记为高风险，需要你判断';
   return receipt.kind === 'repair' ? '来源卡住了，需要你补齐信息' : '猫已准备到需要你定方向的地方';
@@ -36,17 +28,7 @@ export function NeedsMePanel({
 }) {
   const projection = useEntrustedWorkProjection('needs-me');
   const selectedRef = useRef<HTMLElement | null>(null);
-  const items = useMemo(
-    () =>
-      projection.ownerReads.flatMap((ownerRead) =>
-        ownerRead.attentionReceipts.flatMap((receipt) =>
-          receipt.eligible && ownerRead.envelope.freshness.state === 'current' && ownerRead.preparedArtifact
-            ? [{ ownerRead, receipt, itemRef: needsMeItemRef(ownerRead, receipt) }]
-            : [],
-        ),
-      ),
-    [projection.ownerReads],
-  );
+  const items = useMemo(() => selectNeedsMeItems(projection.ownerReads), [projection.ownerReads]);
 
   useEffect(() => {
     if (!selectedItemRef) return;
@@ -60,7 +42,7 @@ export function NeedsMePanel({
           <p className="text-micro font-bold uppercase tracking-[0.16em] text-cafe-accent">Needs Me · {items.length}</p>
           <h2 className="mt-1 text-lg font-semibold tracking-tight text-cafe-black">只留下真正需要你的判断</h2>
           <p className="mt-1 max-w-xl text-xs leading-5 text-cafe-secondary">
-            猫先把能推进的部分做好；这里返回原 owner 的判断或修复入口，不复制一份审批状态。
+            猫会先把能做的做好；只有真的需要你决定时，才带着准备好的内容回来。
           </p>
         </div>
         <button
@@ -72,16 +54,15 @@ export function NeedsMePanel({
         </button>
       </header>
 
-      {projection.loading ? <p className="mt-6 text-sm text-cafe-muted">正在读取当前判断…</p> : null}
+      {projection.loading ? <p className="mt-6 text-sm text-cafe-muted">正在看看有没有需要你判断的事…</p> : null}
       {projection.error ? (
         <div className="mt-6 rounded-xl border border-cafe-error/30 bg-cafe-error/5 p-4 text-sm text-cafe-secondary">
-          Needs Me 暂时读不到 owner truth；原 Task、Artifact 与判断记录没有被改写。
+          暂时无法读取需要你判断的事；任务和准备好的内容仍然保留，请稍后刷新。
         </div>
       ) : null}
       {!projection.loading && !projection.error && items.length === 0 ? (
         <div className="mt-6 rounded-xl border border-dashed border-cafe-subtle p-6 text-center">
-          <p className="text-sm font-medium text-cafe-black">现在没有必须由你判断的事项</p>
-          <p className="mt-1 text-xs text-cafe-muted">安静推进中的托付仍在 Schedule，不会为了提醒而挪进来。</p>
+          <p className="text-sm font-medium text-cafe-black">暂时没有要你判断的事</p>
         </div>
       ) : null}
 
@@ -123,6 +104,7 @@ export function NeedsMePanel({
                   {receipt.kind === 'repair' ? '回到原处修复' : '回到原处判断'}
                 </button>
               </div>
+              <EntrustedWorkBrief ownerRead={ownerRead} />
               <div className="mt-3">
                 <PreparedArtifactPreview
                   coordinate={coordinate}

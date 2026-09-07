@@ -7,6 +7,8 @@
  * co-creator原话："我们就不能让他返回自然语言直接帮他加格式吗？格式就是程序加。"
  */
 
+import { buildProviderEndpoint } from '../../config/provider-endpoint.js';
+
 export interface AbstractiveInput {
   previousSummary: string | null;
   messages: Array<{ id: string; content: string; catId?: string; timestamp: number }>;
@@ -280,17 +282,16 @@ export function createAbstractiveClient(
   logger: { info: (msg: string) => void; error: (msg: string, err?: unknown) => void },
 ): (input: AbstractiveInput) => Promise<AbstractiveResult | null> {
   return async (input: AbstractiveInput): Promise<AbstractiveResult | null> => {
-    const profile = await resolveProfile();
-    if (!profile || profile.mode !== 'api_key') {
-      logger.info('[abstractive-client] no API key profile, skipping');
-      return null;
-    }
-
-    const userContent = buildUserPrompt(input);
-
     try {
-      const res = await fetch(`${profile.baseUrl}/v1/messages`, {
+      const profile = await resolveProfile();
+      if (!profile || profile.mode !== 'api_key') {
+        logger.info('[abstractive-client] no API key profile, skipping');
+        return null;
+      }
+      const userContent = buildUserPrompt(input);
+      const res = await fetch(buildProviderEndpoint({ protocol: 'anthropic', baseUrl: profile.baseUrl }), {
         method: 'POST',
+        redirect: 'error',
         headers: {
           'x-api-key': profile.apiKey,
           'anthropic-version': '2023-06-01',

@@ -37,6 +37,7 @@ export interface StagePersonMemoryCandidateInput {
   sourceBundle: PersonMemoryResolvedSourceBundle;
   deferredReceiptId?: string;
   deferredReceiptClaimId?: string;
+  deferredReceiptProcessorInvocationId?: string;
   deltaFingerprint?: string;
   replacesProposalId?: CaptureCandidateId;
   /** IDs-only lineage for proposals created from a delivered Standing Reflex opportunity. */
@@ -52,6 +53,7 @@ export interface RenewDeferredPersonMemoryCandidateClaimInput {
   receiptId: string;
   previousClaimId: string;
   nextClaimId: string;
+  processorInvocationId: string;
   deltaFingerprint: string;
   renewedAt: number;
 }

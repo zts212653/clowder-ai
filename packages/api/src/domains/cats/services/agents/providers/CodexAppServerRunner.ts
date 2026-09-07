@@ -12,13 +12,24 @@ import {
   type CodexAppServerLifecycleSnapshot,
   type CodexAppServerRunInput,
 } from './CodexAppServerClient.js';
-import { CodexAppServerCarrierReplacementRequiredError } from './CodexAppServerThreadResolver.js';
+import {
+  CodexAppServerCarrierReplacementRequiredError,
+  CodexAppServerExactResumeRequiredError,
+} from './CodexAppServerThreadResolver.js';
 import {
   type CodexCapacityRecoveryAnchor,
   type CodexCapacityRecoveryBlockReason,
   CodexCapacityRecoveryCheckpoint,
   type CodexCapacityRecoveryCheckpointSnapshot,
 } from './CodexCapacityRecoveryCheckpoint.js';
+import {
+  canRetryBeforeTurn,
+  canRetryModelCapacity,
+  isActiveWriterError,
+  isModelCapacityError,
+  isModelCapacityNotice,
+  isModelCapacityTurnFailure,
+} from './codex-app-server-recovery-policy.js';
 
 export interface CodexAppServerRecoveryEvent {
   type: 'app_server.recovery';
@@ -53,7 +64,6 @@ export interface CodexAppServerRunnerOptions {
   recoveryAnchor?: CodexCapacityRecoveryAnchor;
 }
 
-const MODEL_CAPACITY_ERROR = 'Selected model is at capacity. Please try a different model.';
 const DEFAULT_MODEL_CAPACITY_RETRY_DELAYS_MS = [1_000, 3_000, 8_000, 15_000] as const;
 const DEFAULT_ACTIVE_WRITER_RETRY_DELAY_MS = 250;
 const MAX_ACTIVE_WRITER_RETRY_DELAY_MS = 5_000;
@@ -68,52 +78,6 @@ function buildModelCapacityRecoveryInstruction(checkpoint: CodexCapacityRecovery
     'Verify current state before repeating any external side effect.',
     'Do not mention this recovery.',
   ].join(' ');
-}
-
-function canRetryBeforeTurn(
-  lifecycle: CodexAppServerLifecycleSnapshot | null,
-  signal: AbortSignal | undefined,
-): boolean {
-  if (signal?.aborted) return false;
-  if (!lifecycle) return true;
-  if (lifecycle.interruptReason) return false;
-  return !lifecycle.turnStartSent && !lifecycle.turnAccepted && !lifecycle.itemObserved;
-}
-
-function canRetryModelCapacity(
-  lifecycle: CodexAppServerLifecycleSnapshot | null,
-  signal: AbortSignal | undefined,
-  checkpoint: CodexCapacityRecoveryCheckpoint,
-): boolean {
-  if (signal?.aborted) return false;
-  if (!lifecycle) return false;
-  if (lifecycle.interruptReason) return false;
-  if (!lifecycle.turnAccepted) return false;
-  if (!checkpoint.hasExactAnchor()) return false;
-  if (!lifecycle.toolSurfaceObserved) return true;
-  return checkpoint.canResumeAfterTools();
-}
-
-function isModelCapacityMessage(value: unknown): boolean {
-  return typeof value === 'string' && value.trim() === MODEL_CAPACITY_ERROR;
-}
-
-function isModelCapacityError(error: unknown): boolean {
-  return error instanceof Error && isModelCapacityMessage(error.message);
-}
-
-function isActiveWriterError(error: unknown): boolean {
-  return error instanceof Error && /^thread \S+ already has an active writer$/.test(error.message.trim());
-}
-
-function isModelCapacityTurnFailure(value: unknown): boolean {
-  if (!value) return false;
-  if (typeof value !== 'object') return false;
-  const record = value as { type?: unknown; error?: unknown };
-  if (record.type !== 'turn.failed') return false;
-  if (!record.error) return false;
-  if (typeof record.error !== 'object') return false;
-  return isModelCapacityMessage((record.error as { message?: unknown }).message);
 }
 
 function abortError(signal: AbortSignal): Error {
@@ -143,7 +107,7 @@ async function waitForRecoveryDelay(delayMs: number, signal: AbortSignal | undef
  * Transport recovery stays fenced before turn/start. The one accepted-turn
  * exception is the provider's exact model-capacity terminal: it may resume the
  * same thread only with exact Clowder AI task coordinates. After tool surface,
- * it additionally requires a latest plan and a fully terminal tool ledger.
+ * it additionally requires recorded progress and a fully terminal tool ledger.
  */
 export async function* runCodexAppServerWithRecovery(options: CodexAppServerRunnerOptions): AsyncGenerator<unknown> {
   const retryBudget = Math.max(0, options.retryBudget ?? 1);
@@ -170,6 +134,8 @@ export async function* runCodexAppServerWithRecovery(options: CodexAppServerRunn
     let lifecycle: CodexAppServerLifecycleSnapshot | null = null;
     const terminalBuffer: unknown[] = [];
     let capacityTerminalObserved = false;
+    let pendingCapacityNotice: unknown;
+    let successfulTerminalObserved = false;
     try {
       // Protocol cancellation is owned by CodexAppServerClient. Passing the
       // caller signal into the raw carrier would race turn/interrupt with SIGINT.
@@ -196,7 +162,14 @@ export async function* runCodexAppServerWithRecovery(options: CodexAppServerRunn
       };
       for await (const event of client.run(runInput)) {
         checkpoint.observe(event);
+        if (isModelCapacityNotice(event)) {
+          // The provider can announce an error before retrying it itself or
+          // committing a failed terminal. A notice alone never authorizes replay.
+          pendingCapacityNotice = event;
+          continue;
+        }
         if (isModelCapacityTurnFailure(event)) {
+          pendingCapacityNotice = undefined; // The authoritative terminal carries the same cause.
           capacityTerminalObserved = true;
           terminalBuffer.push(event);
           continue;
@@ -209,10 +182,15 @@ export async function* runCodexAppServerWithRecovery(options: CodexAppServerRunn
           checkpoint.setNativeThreadId(event.thread_id);
           wire.rememberSession?.(event.thread_id);
         }
+        if ((event as { type?: unknown; status?: unknown })?.type === 'turn.completed') {
+          successfulTerminalObserved = (event as { status?: unknown }).status === 'completed';
+          if (successfulTerminalObserved) pendingCapacityNotice = undefined;
+        }
         yield event;
       }
+      if (pendingCapacityNotice) yield pendingCapacityNotice;
       for (const event of terminalBuffer) yield event;
-      if (capacityAttempt > 0) {
+      if (capacityAttempt > 0 && successfulTerminalObserved) {
         codexAppServerRecovery.add(1, { status: 'recovered' });
       }
       return;
@@ -227,6 +205,7 @@ export async function* runCodexAppServerWithRecovery(options: CodexAppServerRunn
       const activeWriterThreadId = currentThread.kind === 'resume' ? currentThread.threadId : undefined;
       if (
         error instanceof CodexAppServerCarrierReplacementRequiredError &&
+        capacityAttempt === 0 &&
         activeWriterThreadId === error.replacement.previousNativeThreadId &&
         !capacityTerminalObserved &&
         transportAttempt < retryBudget &&
@@ -315,6 +294,7 @@ export async function* runCodexAppServerWithRecovery(options: CodexAppServerRunn
       if (
         !capacityTerminalObserved &&
         !isActiveWriterError(error) &&
+        !(error instanceof CodexAppServerExactResumeRequiredError) &&
         transportAttempt < retryBudget &&
         canRetryBeforeTurn(failedAt, options.runInput.signal)
       ) {
@@ -352,6 +332,7 @@ export async function* runCodexAppServerWithRecovery(options: CodexAppServerRunn
         } satisfies CodexAppServerRecoveryBlockedEvent;
       }
 
+      if (pendingCapacityNotice) yield pendingCapacityNotice;
       for (const event of terminalBuffer) yield event;
       throw error;
     }

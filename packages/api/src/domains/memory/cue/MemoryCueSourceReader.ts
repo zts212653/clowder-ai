@@ -8,6 +8,7 @@ export interface MemoryCueSourceReader {
     anchor: string;
     expectedRevision: string;
     scope: RecallScopeV1;
+    consumerCatId?: string;
   }): Promise<
     { status: 'ok'; payload: unknown } | { status: 'not_available'; invalidationReason?: MemoryCueInvalidationReason }
   >;

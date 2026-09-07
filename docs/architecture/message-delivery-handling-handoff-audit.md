@@ -2,10 +2,10 @@
 title: "A2A 消息投递、处理与交接生命周期架构"
 description: "从场景化主流程出发，定义消息封装、有序 Queue、被投递 History 消息的 target dispatch refs、事件驱动 admission coordination、typed owner disposition、运行气泡与终局收敛的端到端生命周期。"
 doc_kind: architecture
-feature_ids: [F039, F055, F078, F117, F122, F167, F175, F177, F194, F233, F254, F264, F275, F277, F280]
+feature_ids: [F039, F055, F078, F117, F122, F167, F175, F177, F194, F233, F254, F264, F275, F277, F280, F296]
 topics: [message, queue, delivery, execution, a2a, routing, history, failure, observability]
 created: 2026-08-13
-updated: 2026-08-26
+updated: 2026-09-04
 status: approved
 architecture_cell: "dispatch + ball-custody + bubble-pipeline + approval-index"
 architecture_map_delta: "none — consolidates existing delivery, custody, result, and responsibility owners; adds no canonical cell or parallel ledger"
@@ -388,6 +388,8 @@ Stop Agent 不直接写 History terminal。它只从 domain active-execution pro
 - Queue membership 是“尚未开始 normal dispatch”的唯一调度真相；已有、将被投递的 Agent History message 上的 `assigned` ref 只是同一 enqueue transaction 写出的可重建因果投影，不能代替 Queue；
 - exact live Agent Client 由 durable InvocationRecord/TurnExecution、process-local tracker 与 callback principal 共同形成 domain-owned active-execution projection。Active Run 是其中属于本 delivery kernel 的 exact input/response 关联，不是全部 execution 的唯一真相；
 - Queue custody/body exposure owner 记录 exact target/invocation 何时真正拿到 prompt body，以及随后是否 handled。`assigned`、`dispatched`、processing bubble 或 provider accepted 都不能自动推出 seen/handled；
+- freshness relevance suppression 只表示同一 source wave 不需要额外 rerun，不证明 sibling 正文已被当前 invocation 投影、provider 接收、seen 或 handled。若当前并行 wave 暂缓 sibling output，incremental projection 必须把 delivery boundary 截在该 output 之前；由不同的后续 public user trigger 发起的新回合再恢复该 output，沿既有 cursor/presentation owner 正常投递；
+- canonical visibility relation 是公开 History 输出进入增量投影的必要事实。每条可发布消息都必须在自身持久 append 的同一原子边界取得唯一 `visibilitySeq` 并进入 thread visibility index；raw timeline/thread ZSET 的 membership 不能替代它。`appendAndObservePriorFrontier` 等特殊写路径也必须满足同一合同。admission 前的 queued user work 不取得 visibility position；
 - ActionSuccessor、AwaitState、TurnExecution 与其他 structured owner 保留 generation、predicate、attempt、predecessor 和 responsibility terminal。delivery terminal 可以触发 owner disposition，但不能替它宣称责任完成；
 - 响应气泡的 `processing / completed / failed / canceled / interrupted` 是公开输出结果。`dispatchRefs` 只是从**实际被投递的公开 History 消息**到 Queue/结果事实的持久 derived projection。对 public conversation，这条 History 消息就是 enqueue 时取得 `sourceRecordId` 的同一记录；admission 前它只投影为 Queue row，不承载头像。transport carrier、structured source owner 与始终隐藏的 `private_input` 只提供 provenance/authority，不是公开消息或头像锚点。ref 不复制 outcome、body exposure、handled 或 typed carrier。
 
@@ -396,6 +398,16 @@ Stop Agent 不直接写 History terminal。它只从 domain active-execution pro
 本节固定三项重构契约：admission 前 public conversation 保持 Queue-only，并在 live cutover 时取代旧 owner-timeline 双表面；Queue 使用 `position → urgent/normal → same-priority FIFO` 的单一稳定 comparator，不保留 fixed private prefix 或 system/category-derived rank；用户态 `processing` 只表示 server-side Agent execution live，provider receipt/exposure 继续是独立内部事实。这些都是目标实现必须满足的规范，不是运行时可选分支。
 
 owner-timeline baseline 不是推断：当前 `packages/api/src/routes/messages.ts` 在 Queue acceptance 后写入 `deliveryStatus='queued'` 的 MessageStore record，`packages/api/src/domains/cats/services/stores/visibility.ts` 再把它作为 owner-facing browser timeline message，同时禁止普通 cat context 提前读取。重构在 live cutover 时删除的正是这条双表面契约；稳定 `sourceRecordId` 保留同一消息的恢复与 identity，但 admission 前不授予 History membership 或头像投影。
+
+定向投递的 supersession 与 presentation 必须共享 exact lineage 边界。旧 A2A carrier 只有在后继消息以 exact
+`replyTo`、服务端 `causal.triggerMessageId`，或相同 `coordination.id + subjectRef` 证明属于同一
+source chain 时才可退役；“同一目标猫后来参与过另一次 handoff”不是 replacement。模型窗口继续复用
+MessageStore、visibility、delivery cursor 与 projected/exposed ids：同一用户回合内的其他猫输出保持
+first-pass isolation；一条后续可见 public user message 形成新的投影边界，其之前已发布的输出重新可见；
+并行 wave 的 sibling freshness suppression 不能铸造 delivery/seen receipt，active wave 暂缓的 sibling
+必须同时截断 delivery boundary，并在后续不同 user trigger 下恢复；
+服务端写入且同时绑定 exact reply source 的 causal reply 可直接投影给该 source cat，裸 `replyTo` 不
+获得这个权限。每次窗口决策在 F153 seam 只记录最多 16 个 message refs 与 bounded reasons，不记录正文。
 
 | Contract family | 处置 | Canonical fact | 本 RFC 的集成边界 | Acceptance anchors |
 |---|---|---|---|---|
@@ -406,7 +418,7 @@ owner-timeline baseline 不是推断：当前 `packages/api/src/routes/messages.
 | routing / custody acceptance | **preserved and fenced at admission** | 当前 membership/capability/availability、owner generation 与 Agent Client acceptance 各自由原 owner 给出 | enqueue `targets` 只是 target intent；client effect 前重新验证、建立 exact owner/invocation binding。targetless fallback 只属于 public head，structured/private work 永不 fallback | A6–A7, A12–A14, A18, A27–A29, A40–A47, A74, A78 |
 | execution / cancel | **derived composition** | domain active-execution service 组合 InvocationRecord、tracker、TurnExecution、managed command/job 等 owner truth | Active Run 只贡献 Agent Client delivery slice；Stop Agent 只 cancel exact Agent Client snapshot，不能命中 managed command/job，也不能直接写 terminal | A22–A25, A27–A29, A60–A65 |
 | restart interruption | **preserved direct dependency** | durable running invocation/processing bubble、callback principal、immutable structured owner admission binding 与 Queue custody | startup 先按原 owner/predicate fence 区分 verified、mismatch、insufficient evidence；只有 binding 可验证且 live client 消失的 admitted Agent run 原位收敛为 `interrupted`，同步 owner disposition 与 derived refs。已提交 verdict 只补 apply；未 admission work 不自动重放。live cutover 前移除或隔离所有 selectable terminal-plus-queued legacy projection | A17, A19–A21, A49, A53, A59, A80–A89 |
-| model presentation | **normative derived projection** | History/Queue facts、body exposure、active-execution snapshot；动态 context 的 provider-received receipt 仍归 presentation ledger | UI 与 Agent situation packet 从同一 canonical snapshot 映射；用户态 `processing` 表示 exact server-side Agent execution 已开始且尚未终局，不承诺 provider 已接收或 Agent 已看到正文。launch/execution 失败仍让同一 bubble 原位 `failed`；`presented` 只由 provider receipt 推进 | A22–A23, A30–A32, A53, A67–A68, A76–A85 |
+| model presentation | **normative derived projection** | History/Queue facts、body exposure、active-execution snapshot；动态 context 的 provider-received receipt 仍归 presentation ledger | UI 与 Agent situation packet 从同一 canonical snapshot 映射；用户态 `processing` 表示 exact server-side Agent execution 已开始且尚未终局，不承诺 provider 已接收或 Agent 已看到正文。same-route first-pass isolation 只覆盖同一 public user turn；后续可见 user turn 让其之前的公开输出重新进入正常 window，server-authored causal direct reply 则以 exact source 校验投影，裸 `replyTo` 不扩权。launch/execution 失败仍让同一 bubble 原位 `failed`；`presented` 只由 provider receipt 推进；F153 projection audit 只留 bounded refs/reasons | A22–A23, A30–A32, A53, A67–A68, A76–A85 |
 | `dispatchRefs` | **rebuildable derived projection** | `assigned` 来自 exact message-wake Queue membership；`dispatched` 来自 delivered-message↔processing bubble/invocation binding；`settled` 来自 linked terminal record | History owner 可持久化 ref 供读取，但 startup/reconciler 必须能从上述事实重建。失配时 canonical facts 胜出；唯一映射可 CAS 修复，缺失/多义则 fail closed、隐藏 working claim并报警，不猜测；同一 public source record 仅在取得 History membership 后承载 ref，transport carrier、structured owner 与 private input 不能成为替代 UI anchor | A2, A6–A7, A10, A40, A53, A73, A75–A80, A90 |
 
 ### 3.5 五条 normative laws
@@ -1445,9 +1457,9 @@ API 启动时必须先完成 §10.2 的 owner-fence validation、canonical termi
 | Admission Coordinator | `packages/api/src/domains/cats/services/agents/invocation/QueueProcessor.ts` | 唯一 requestDrain、dirty-bit single owner、commit 后严格 comparator head、启动恢复；消费 Queue mutation、run terminal 与 external source-owner eligibility 的既有 post-commit signal，不持有 timer 或另一套排序策略，private input 单独 admission |
 | Agent 路由 | `packages/api/src/domains/cats/services/agents/routing/AgentRouter.ts` | enqueue 时解析 exact targets；targetless fallback 留到 head execution |
 | body exposure / handled | `queued-message-custody.ts` + `QueuedMessageCustodyCoordinator.ts` | 保留 exact target/invocation body exposures、seen 与 handled/target outcome；provider prompt exposure 后才写 seen，terminal predicate 后才写 handled；`dispatchRefs` 与 bubble 不得替代或反向推进这些 facts |
-| 未读 / provider presentation | `route-helpers.ts` + context presentation mapper/ledger | 复用 delivery cursor、visibility/window 与 projected/exposed ids；processing barrier + exact input。只有 provider adapter 已接收 projection 后才写 content-free presented receipt；不从 render、admission 或 `dispatchRefs` 提前消费 |
+| 未读 / provider presentation | `route-helpers.ts` + context presentation mapper/ledger | 复用 delivery cursor、visibility/window 与 projected/exposed ids；processing barrier + exact input。同一 public user turn 内保持 same-route output isolation；后续可见 user turn 前的输出恢复普通投影，服务端 causal direct reply 以 exact source author 校验，不把所有 replyTo 变成 target。只有 provider adapter 已接收 projection 后才写 content-free presented receipt；不从 render、admission 或 `dispatchRefs` 提前消费。窗口审计最多记录 16 个 message refs + bounded reasons，不写正文 |
 | admission / 响应发布 | `packages/api/src/domains/cats/services/agents/routing/route-serial.ts` | Agent Client effect 前让 existing owners CAS 提交 immutable exact admission binding（owner kind + lease/generation + frozen predicate/HEAD + principal/tenant/route）；同一 cutover take Queue、materialize/reuse delivered message、固定 response bubble、激活 callback principal，并把 delivered-message exact target ref 创建/推进为 `dispatched`。stream snapshot 原位更新；pre-admission mismatch 写 exact result/diagnostic，insufficient evidence 保持 pending；terminal 按 invocation 原子提交 typed owner dispositions、delivered-message refs、completed-final wake/assigned refs 与 predecessor return |
-| History 顺序 / dispatch-ref projection | `redis-message-append.ts` + `RedisMessageStore.ts` + startup reconciler | admission 复用 sourceRecordId 并为 delivered input/bubble 连续分配 orderKey；更新不重排；每个 actual target 的 ref 只允许单调 CAS。reconciler 从 Queue membership、delivered message/bubble input binding 与 terminal result 重建；唯一映射可修，缺失/多义 fail closed 并报警 |
+| History 顺序 / dispatch-ref projection | `redis-message-append.ts` + `redis-message-frontier-append.ts` + `RedisMessageStore.ts` + startup reconciler | 普通 append 与 freshness frontier append 在各自同一 Redis 原子边界为可发布消息分配唯一 visibility position；raw timeline 不能先于或替代 visibility membership。queued user work 延迟到 admission。admission 复用 sourceRecordId 并为 delivered input/bubble 连续分配 orderKey；更新不重排；每个 actual target 的 ref 只允许单调 CAS。reconciler 从 Queue membership、delivered message/bubble input binding 与 terminal result 重建；唯一映射可修，缺失/多义 fail closed 并报警 |
 | Active execution | `active-execution-service.ts` + InvocationRecord/Tracker/TurnExecution/managed-command owners | domain service 组合完整性标记与 typed execution kinds；Active Run 只保存 Agent Client exact run + responseMessageId + input IDs，不复制 source carrier。Stop Agent 只筛选/cancel Agent Client kind；owner read 不完整时不宣称 idle/working |
 | Agent wake | `packages/api/src/routes/callback-a2a-trigger.ts` + terminal path | 每条 `post_message` 独立写 History；Agent Client completed final 复用 response bubble；两者解析出有效 target 时原子建立唯一 message-ref entry 与每目标 `assigned` ref；structured dispatch owner 用 message identity 建立 invocation binding |
 | Structured source owners | existing `TurnExecution`、action-successor、event-wait stores/services | 保留各自 typed carrier、lease 与 predicate；preflight 产生 candidate，admission CAS 提交 immutable exact entry/target/invocation fence。unadmitted candidate 的 terminal/replacement/evidence mutation 以既有 durable post-commit event 唤醒 Queue coordinator，由后者重读 typed fact 并 exact CAS；admitted work 的 terminal/replay/startup 只按 invocation 找回原 binding，并让 owner 以同一 generation/predicate 提交或返回既有 disposition/predecessor；callback principal 与 carrier 都不能替代 lease authority；owner namespace 互不覆盖 |
@@ -1572,7 +1584,7 @@ API 启动时必须先完成 §10.2 的 owner-fence validation、canonical termi
 | A28 | 用户 Steer 一条 live A invocation 产生的 `A→B` wake | 原子 cutover 后取消 B 的 exact old run 与消息记录的 exact A source run；不按 author 猜测较新的 A run |
 | A29 | multi-target Append 中一个 adapter 拒绝 | 已接受 target 保留 input；拒绝 target 的原 run 保持并移除该 input，写独立 failure result；消息不丢 |
 | A30 | A 先开始、B 后开始、B 先完成 | UI、最终 History、Agent context 都保持 A bubble → B bubble |
-| A31 | cursor 遇到 processing bubble | 不越过；terminal 后在原位置读正文再推进 |
+| A31 | cursor 遇到 processing bubble；同一 public user turn 的 first-pass route 先后产生其他猫输出，随后用户又发一条可见消息点名目标猫 | processing bubble 不越过，terminal 后在原位置读正文再推进；same-route output 在原 user turn 内保持隔离，但后续 user turn 形成新边界，其之前的公开输出不得静默消失。server-authored causal direct reply 可按 exact source author 投影，只有 replyTo 而没有 causal carrier 的输出仍保持隔离 |
 | A32 | admission input 位于更早 processing barrier 之后 | materialize 后作为 exact input 注入；不错误推进普通 cursor |
 | A33 | run 失败且 source owner 返回 exact predecessor | 公开 failed；owner 先按自己的 typed carrier + generation 校验，再向 exact predecessor 追加一条正文含 failure evidence 的 Queue-only `private_input`；不按 History author 猜；failure return 不进入 History，只进 predecessor 的 exact input |
 | A34 | 上述 failure-evidence private input 再次失败 | 生产者不建立新的 predecessor binding，不递归创建交回树；Queue 不靠 payload subtype 特判 |
@@ -1662,6 +1674,7 @@ API 启动时必须先完成 §10.2 的 owner-fence validation、canonical termi
 - delivered-message `dispatchRef` 从 `dispatched` 倒退到 `assigned`、跳过 actual target、缺少 `statusMessageId`，或 `settled` ref 指向仍为 processing 的 canonical record；
 - response bubble 已 terminal，但对应 delivered-message ref 仍为 `dispatched`，或 ref 已 `settled` 而 linked canonical result 尚未在同一事务终局；
 - 无关 `hold_ball`、event wait 或展示 holder 改写了另一个 action/TurnExecution reservation；
+- 旧 inbound A2A carrier 仅因目标猫后来出现在无关反向 handoff / hold 中就被判为 replaced，或 successor 与 source 没有 exact reply/causal/coordination subject lineage；
 - 无有效 target/invocation 的 pre-admission failure 被伪造成 ResponseBubble、静默删除，或仍留在 Queue 可重放；
 - stream 与 final 使用不同 message id、每个 chunk 追加成 History row，或完成时重新插入位置；
 - failed/canceled 丢弃已经生成的 partial body，或把 error/cancel 追加成第二条 canonical chat / Agent 正文；
@@ -1675,6 +1688,10 @@ API 启动时必须先完成 §10.2 的 owner-fence validation、canonical termi
 - UI 仅因 Queue row 可见或 client capability 存在就把 Append/Steer 呈现为可提交，或 UI 与 command endpoint 不消费同一 Queue revision、完整 target set、source-owner verdict 与 exact Active Run preconditions；
 - typed stale/conflict 后旧确认仍可提交、自动重复相同命令而不刷新 canonical Queue/action projection；
 - Agent cursor 越过 processing bubble 后永远读不到其终局正文；
+- same-wave sibling 因 freshness suppression 被当作已读/已投递，或 incremental projection 在暂缓该 sibling 时仍把 delivery boundary 推到其后，导致后续定向 synthesis 无法恢复完整正文；
+- 已发布猫输出存在于 raw timeline/thread ZSET，却没有 `visibilitySeq` 或 thread visibility membership，导致增量投影在任何 filter/cursor 判定前永久看不见正文；
+- same-route first-pass isolation 跨过一条后续可见 public user message，继续吞掉该消息之前已发布的猫输出；或裸 `replyTo` 在没有服务端 causal source 校验时突破隔离；
+- 增量窗口诊断记录消息正文、无限 message refs、高基数字段，或只给 counts 而无法判断 sampled message ref 的 bounded filter reason；
 - covered Agent wake 已从 Queue 删除，却没有提交 structured dispatch owner binding（若有），或没有把 exact input IDs 附到 current bubble/run；
 - provider launch/execution 失败但 response bubble 永久 processing；
 - failed bubble 已终局，但 exact pre 对应的必要 predecessor return 因半提交永久缺失，或系统从 History author/source 猜出了一个 pre；

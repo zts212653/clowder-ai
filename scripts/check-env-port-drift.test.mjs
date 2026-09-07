@@ -207,6 +207,9 @@ function buildExportedRootScripts(sourceScripts) {
     'check:source-hygiene',
     'check:f223-action-tracking',
     'check:docs-discovery',
+    // Shared-red ownership is backed by the home gate receipt/database control
+    // plane. The public repository cannot verify or resolve those identities.
+    'gate:shared-red',
     // Memory Architecture Closure reads lane-owned manifests that are not part
     // of the curated public source tree. Must mirror sync-to-opensource.sh.
     'gen:memory-architecture-closure',
@@ -1200,6 +1203,7 @@ excluded:
       const transformedScripts = executeRootPackageTransform(sourceScripts);
       const mirroredScripts = buildExportedRootScripts(sourceScripts);
       const homeOnlyScripts = [
+        'gate:shared-red',
         'gen:memory-architecture-closure',
         'check:memory-architecture-catalog',
         'gate:memory-architecture-closure',
@@ -1259,6 +1263,17 @@ excluded:
         missing,
         [],
         `sync-manifest should export every scripts/* target referenced by exported package.json surfaces:\n${missing.join('\n')}`,
+      );
+    });
+
+    it('exports the portable signal adapter referenced outside the managed Web package root', () => {
+      const managedScripts = new Set(readYamlTopLevelList('sync-manifest.yaml', 'managed_scripts'));
+      const webBuild = readJsonFile('packages/web/package.json').scripts?.build;
+
+      assert.equal(webBuild, 'node ../../scripts/run-preserving-signal-exit.mjs next build');
+      assert.ok(
+        managedScripts.has('scripts/run-preserving-signal-exit.mjs'),
+        'the exported Web build must not reference an adapter omitted from the public sync closure',
       );
     });
 

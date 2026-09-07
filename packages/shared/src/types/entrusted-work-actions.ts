@@ -23,7 +23,11 @@ export const custodyAuthorityProvenanceV1Schema = z
 const admissionBase = {
   sourceRefs: z.array(boundedRef).min(1).max(64),
   intendedOutcome: boundedText.optional(),
-  timeHints: z.array(boundedText).max(16).optional(),
+  timeHints: z
+    .array(boundedText)
+    .max(16)
+    .optional()
+    .describe('Verbatim source wording only; never canonical Task time and never sufficient for Schedule'),
   idempotencyKey: boundedRef,
 };
 

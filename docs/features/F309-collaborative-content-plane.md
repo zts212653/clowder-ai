@@ -1,14 +1,14 @@
 ---
 feature_ids: [F309]
-related_features: [F063, F138, F290, F307]
+related_features: [F063, F138, F202, F290, F307]
 topics: [collaborative-content, co-editing, change-awareness, selection-anchors, annotations, agent-patch, office, media]
 doc_kind: spec
 created: 2026-08-27
 description: "让人和猫在异质内容上共同编辑、感知有版本的变化、精确批注并安全审阅 Agent patch，同时让 canonical 内容和版本留在各自 owner。"
 description_source: human
 description_author: codex-sol
-description_updated_at: 2026-09-01T16:38:00Z
-tips_exempt: "Phase A Research + Design Gate 尚无稳定用户入口；Phase D KEEP 后随真实共同编辑入口补 capability tip。"
+description_updated_at: 2026-09-04T07:10:00Z
+tips_exempt: "Phase A Research + Design Gate 的 GenOffice-first content-editor-provider admission 仍是未授权、未激活的候选设计，无稳定用户入口；Phase D KEEP 后随真实共同编辑入口补 capability tip。"
 ---
 
 # F309: Collaborative Content Plane — 跨媒介内容协作平面
@@ -20,6 +20,7 @@ tips_exempt: "Phase A Research + Design Gate 尚无稳定用户入口；Phase D 
 > **operator origin**: 从 F290 完整剥离 Office、富文本、图片、视频、画布的编辑、选区、批注与 Agent patch；“能用开源就用开源集成”；最终要支持人猫共同编辑，猫能感知人的编辑。来源：`0001787892832734-000882-d75c3999`。
 > **operator final-state correction**: DOCX + video 必须优先直接集成成熟开源能力；禁止用 fake owner、最小编辑器或独立脚手架证明“可行”，开发从真实候选的最终宿主/内容边界起步。来源：`0001787927110398-000292-cccc31fc`。
 > **operator Workspace correction**: Office 不是孤立工具或多内核拼盘；家里只维护一条 Office 主线，把它嵌入现有浏览器 Workspace。人和具名猫都是同一实时内容模型里的第一等 writer，不能让猫离线改旧文件或借用人的光标、身份冒充共同编辑。来源：`0001788227480178-000216-494528d3`、`0001788228380574-000234-d2034eaa`。
+> **operator plugin choice**: Office 是用户可选择安装/启用的 provider plugin，不是 core 默认重依赖；GenOffice 是第一个真实 admission candidate。第一轮只开 DOCX vertical slice，验证通过后 XLSX/PPTX/PDF 才在同一插件内逐项开放。来源：`0001788503343691-000297-3bfa0fb4`。
 
 Architecture cell: `collaborative-content-plane`
 
@@ -78,6 +79,7 @@ CAS、可见 attribution、owner receipt 与 undo，且用户可随时收回权�
 | [F290](F290-ai-native-collective.md) | Artifact lineage、权限、Collective result target 与局部 true-frontend 协作旅程 | 不应继续拥有公共跨媒介协作契约 |
 | [F063](F063-hub-workspace-explorer.md) | repo file/code 编辑与一次性 selection attachment | AC31 不承诺文件变化后的稳定 anchor；不覆盖 Office/media/canvas |
 | [F138](F138-video-studio.md) | video spec、素材、配音、render pipeline | 无 time/frame-range annotation + patch lifecycle |
+| [F202](F202-plugin-framework.md) | Host-owned external package、installation/grants/runtime/settlement boundary | 当前 manifest 只支持 skill/MCP/limb/schedule；还没有 content editor provider contribution |
 
 关联检测已覆盖 feature graph、ownership docs、相关 threads 与语义检索，三路命中后无新的 canonical
 anchor。结论：F309 不是 F307/F290/F063/F138 的 Phase 或 adapter 子任务，而是四者共同消费/实现的
@@ -91,6 +93,8 @@ anchor。结论：F309 不是 F307/F290/F063/F138 的 Phase 或 adapter 子任�
 - `AnnotationThread`、`PatchProposalV1`、accept/reject/undo disposition 与 provenance；
 - 上述用户可见协作 metadata 的 durable TTL=0 ledger；
 - content adapter registry/ports：resolve、validate、preview、apply、invert/undo receipt；
+- versioned `OfficeProviderBindingV1`：`contentRef → providerId + installationInstanceId + providerVersion + bindingRevision`
+  的唯一 authoritative selection；
 - owner-auth decision port 与 auditable `AuthorizationDecisionRefV1`：F309 在读取/投影、预览、裁决、
   direct apply 与 undo 时请求内容 owner 作最终授权，不保存第二套 policy truth；
 - versioned `ContentChangeReceiptV1` 与 bounded change-awareness contract：把 owner 的完整编辑事务投影为
@@ -116,15 +120,38 @@ anchor。结论：F309 不是 F307/F290/F063/F138 的 Phase 或 adapter 子任�
 - F063/F138 的保存、render、export、媒体处理或领域 undo 规则；
 - 在 Phase A candidate admission 前引入未经批准的第三方服务、依赖或生产 schema；获准后的实现必须
   走真实开源 owner/surface，不走 fake editor 或一次性原型壳。
+- 插件 package identity、installation instance、effective grants、runtime lease 或启用状态；这些归 F202 Host
+  inventory/Broker。F309 只定义 `content-editor-provider` 的领域 contribution 与 content binding，不把某个
+  vendor 当 core 内建分支。
 
 ### Ownership contract
 
 | Owner | Canonical truth | 与 F309 的边界 |
 |---|---|---|
-| 内容 owner（F063/F138/Office/Canvas 等） | content bytes/schema、version、editor transaction/presence state、最终 action authorization、apply/undo | 实现 adapter；以 F290 domain context 为约束输入，在 transaction boundary 返回 auth/change/resolve/mutation receipt |
-| F309 | anchors、annotation/patch/disposition ledger、change-awareness projection、跨 owner lifecycle | 不复制内容、raw input 或 policy；验证 auth/receipt，重判 anchor/patch，CAS 调 owner adapter 并记录引用 |
+| 内容 owner（F063/F138/Office/Canvas 等） | content bytes/schema、version、editor transaction/presence state、最终 action authorization、apply/undo | 实现 adapter；以 F290 domain context 为约束输入；只消费带 `bindingRevision` 的 F309 provider-binding projection，在 transaction boundary 返回 auth/change/resolve/mutation receipt |
+| F309 | anchors、annotation/patch/disposition ledger、Office provider binding authority、change-awareness projection、跨 owner lifecycle | 不复制内容、raw input 或 policy；验证 auth/receipt，重判 anchor/patch，CAS 调 owner adapter 并记录引用 |
 | F307 | surface descriptor、working set、layout/focus/restore | mount F309-aware editor surface；不保存 anchor/thread/patch truth |
+| F202 | package digest、installation、grants、runtime lease、Broker settlement | 承载 editor provider lifecycle；不拥有 content bytes、provider selection、selection/anchor、patch 或 owner receipt |
 | F290 / runtime consumer | Collective object、Artifact lineage、domain permission context、result target、Agent attention/admission | 提供 domain context 但不能越过 content-owner deny；消费经 owner-auth 的协作投影与 bounded change notice |
+
+### Office plugin contribution boundary
+
+F309 的 Office 实现必须扩展 F202 external-package contract，新增 versioned
+`content-editor-provider` contribution；不能把 GenOffice 塞进现有 `skill|mcp|limb|schedule` resource，也不能
+在 core 按 vendor 写产品分支。
+
+- contribution 声明 `providerId`、支持格式/capabilities、F307 surface entry、runtime mode 与请求的 Host grants；
+- Host 绑定 package digest、installation instance、effective grants、runtime lease 和 provider identity；
+  installed/configured/authorized/selected/live 是五种独立状态，任何一项不能替另一项报成功；
+- `clowder-ai-plugins` 拥有公开 contribution schema/SDK/conformance 与 GenOffice-specific provider source；
+  Clowder AI core 只实现可复用的 F202 Host adapter 和 F309/F307 domain ports；
+- F309/F307 Host adapter 只允许 open/render、owner load/settle、named actor、resolve、preview、apply/invert、
+  receipt 等窄 ports；插件不得获得任意文件系统、任意网络或 Clowder AI credentials；
+- F309 持久化唯一 authoritative `OfficeProviderBindingV1`；content owner 只缓存带 `bindingRevision` 的
+  非权威 projection 用于 settlement fence，不得自行选择/迁移 provider。一个 `contentRef` 任一时刻只绑定
+  一个 production provider；切换必须经 F309 显式转换/重开并产生新 lineage，禁止双引擎离线覆盖；
+- plugin UI 只是 F307 owner surface 的实现；Workspace topology、Cat identity、canonical Office bytes/version、
+  F309 ledger 与 mutation receipt 始终由 Host/owner 掌握。
 
 ## Contract Candidate
 
@@ -322,8 +349,9 @@ F309/F307/content-owner 边界，并指定 DOCX + video 直接走成熟开源终
 本 Phase 还需为 Office 与 video 各选一个能进入最终宿主的 exact-source candidate，闭合 license、host、
 部署、数据与维护边界。operator 先授权 leading candidates 的真实 final-surface dependency/service admission，
 但该授权不等于 adopted/admitted；只有 stable target、authoritative owner settlement 与跨会话 recovery 证据
-闭合后才完成 AC-A4。Office 只准入一条生产主线；SuperDoc、Collabora、GenOffice 等 challenger 只用同一组
-阻断旅程反证 leading candidate，不并行演化成第二套 Office 产品。未闭合前 Phase B 保持关闭。
+闭合后才完成 AC-A4。operator 已选 GenOffice `v0.8.1039@e833fff` 作为第一个 Office plugin candidate；
+dependency/runtime 仍待 exact Packet D 授权。Office 只准入一条 production binding；SuperDoc、ONLYOFFICE、
+Collabora 仅作退出路径，不并行演化成第二套 Office 产品。未闭合前 Phase B 保持关闭。
 
 ### Phase B: Real Open-source Owner Foundations + Contract Kernel
 
@@ -337,8 +365,9 @@ fake editor、demo-only owner 或可被误认成产品的最小实现。
 
 在上述两个真实开源 owner adapters 上完成同一条 DOCX text range + video temporal/frame range lifecycle：
 human change awareness、annotation、patch preview、accept/reject、concurrent revalidation、apply/undo receipt、
-replay/restart 与 remap/orphan。选择 ONLYOFFICE、GenOffice companion 或其他候选只由 Phase A admission
-证据决定；video 同理。F138 继续拥有 Clowder AI video canonical project，不复制第三方 labeling/editor store。
+replay/restart 与 remap/orphan。第一轮固定为 GenOffice DOCX provider；失败后才由 Phase A evidence 按冻结顺序
+转 SuperDoc 或服务型 provider，不保留平行 production engine；video 同理。F138 继续拥有
+Clowder AI video canonical project，不复制第三方 labeling/editor store。
 
 ### Phase D: Real Workbench/Collective Dogfood
 
@@ -414,6 +443,8 @@ remap/rebase/conflict/orphan 旅程后再 KEEP。
 | R17 | DOCX + video 从首个实现 commit 起使用获准的真实开源 owner engines；fake/minimal surface 不得作为 Phase 或可行性证据 | AC-A3, AC-A4, AC-B1 | dependency + mount + adapter claim + real-engine journey | [ ] |
 | R18 | 人与具名猫是同一实时 owner/collaboration room 的第一等 writer；direct/tracked 修改、attribution 与 undo scope 必须属于真实 actor | AC-A4, AC-B1, AC-D1 | Chinese IME + named writer + direct/tracked + undo journey | [ ] |
 | R19 | Agent 写入不能依赖人的当前光标或活跃 tab；无 server writer/专用 session 时必须诚实 unavailable | AC-A4, AC-B1 | close-tab + reconnect journey | [ ] |
+| R20 | Office editor 只能通过 F202 Host-governed `content-editor-provider` contribution 接入；plugin/Host/content-owner/F309 各守自己的 truth | AC-A4, AC-B1 | manifest/contract + lifecycle/grant/receipt tests | [ ] |
+| R21 | GenOffice 是首个 Office plugin candidate；第一轮只开放 DOCX，其他 surfaces 逐项过 Gate；一个 contentRef 同时只有一个 production provider | AC-A4, AC-B1, AC-D1 | exact package + binding/switch/fail-closed journeys | [ ] |
 
 ### 覆盖检查
 
@@ -425,9 +456,10 @@ remap/rebase/conflict/orphan 旅程后再 KEEP。
 
 ### Phase A — Research and Design Gate
 
-- [x] **AC-A1**：关联检测与四项目 exact-source ledger 记录 GenOffice `583a0452`、TabTin
-  `38265b50`、ONLYOFFICE `f580eb58`（含 exact submodules）和 Label Studio `3830034f` 的能力、
-  host seam、license 与反证；未发现能力只写“无证据”。
+- [x] **AC-A1**：关联检测与 exact-source ledger 记录 GenOffice 初始审计 `583a0452` 并在 operator 改选后
+  re-freeze `v0.8.1039@e833fff`、TabTin `38265b50`、ONLYOFFICE `f580eb58`（含 exact submodules）和
+  Label Studio `3830034f` 的能力、host seam、license 与反证；未发现能力只写“无证据”。GenOffice 的
+  Apache-2.0 core 与 Enterprise `ee/`、private workspace/Electron 形态、AI/network/privacy 边界分开记录。
 - [x] **AC-A2**：非作者 exact-source review 与 operator Design Gate 冻结 ownership、六类 anchor coordinate/
   timebase invariants、owner-auth decision/revocation/redaction、ContentChangeReceipt authentication/
   dedupe/order/gap/replay、resolve 四态、manual reanchor lineage、proposal-state + content-version CAS、
@@ -440,9 +472,10 @@ remap/rebase/conflict/orphan 旅程后再 KEEP。
 - [ ] **AC-A4**：Office 与 video 各有一个 exact-source 开源 candidate 通过 source/license、最终 host/mount、
   canonical content/version、transaction/selection、patch/apply/undo seam、部署/数据驻留、升级维护与退出路径
   Gate；operator 对实际第三方依赖/服务边界签字。签字只授权真实 final-surface admission，不自动让候选通过：
-  - Office 只依赖 public API，把 selection 建成 uniquely scoped native target；insert/delete/reopen 后唯一
+  - Office 只依赖 exact-source 或 public API 暴露的 bounded Host ports，把 selection 建成 uniquely scoped native target；insert/delete/reopen 后唯一
     re-resolve，duplicate/absent fail closed；Office owner 以 `expectedOwnerVersion` 原子持久化 bytes/version/
-    settlement outbox，callback/force-save/retry 只是输入；两个 editor sessions + crash/replay 不产生 stale receipt；
+    settlement outbox，provider save/callback/retry 只是输入；一个人类 editor surface + 一只具名猫 writer
+    session 的 crash/replay 不产生 stale receipt；
     中文 IME 输入中猫可改另一处而不打断 composition，human/cat interleave 不丢写；direct/tracked 两模式保留
     猫的 writer identity，猫只撤销自己的 operation；用户 tab 关闭后走 owner-backed writer/专用 session，
     不具备就明确 unavailable。
@@ -524,7 +557,11 @@ remap/rebase/conflict/orphan 旅程后再 KEEP。
 | # | 问题 | 推荐 | 状态 |
 |---|---|---|---|
 | OQ-1 | 第一切片是否用 DOCX + video | 是；两个媒介均直接走成熟开源终态集成 | ✅ operator `0001787927110398-000292-cccc31fc` |
+| OQ-2 | 哪个 Office/video 开源组合能通过最终 host、license、部署、数据与维护 Gate | Office 顺序已裁决：GenOffice `v0.8.1039@e833fff` 是首个 plugin pre-admission，SuperDoc v2 是 DOCX 退出路径，ONLYOFFICE/Collabora 是服务型 suite 退出路径；一个 contentRef 只绑定一个 production provider。Video：Elah 是 leading pre-admission | 🟨 operator plugin choice `0001788503343691-000297-3bfa0fb4` 已闭合顺序；Packet D dependency authorization + AC-A4 runtime proof 未闭合 |
 | OQ-3 | TabTin root AGPL 与 package MIT 的实际发布/复用边界 | 必须上游/法务澄清 | ⬜ 外部证据 |
+
+当前唯一可授权的 dependency/runtime scope 见
+历史 Packet C 已 superseded，不得作为执行授权。
 
 ## Key Decisions
 
@@ -545,6 +582,8 @@ remap/rebase/conflict/orphan 旅程后再 KEEP。
 | KD-13 | anchor union 统一 identity/coordinate invariants，不统一引擎 operation IR | 在保持小 union 的同时消除 pixel/ms/ordinal 静默漂移 | 2026-08-27 |
 | KD-14 | DOCX + video 直接集成获准的成熟开源 engines；fake owner/minimal editor 不作为 Phase、feasibility 或产品证据 | 面向最终状态开发，避免用一次性脚手架证明自己刚写的抽象 | 2026-08-28 |
 | KD-15 | Workspace 只维护一条 Office 生产主线；人和具名猫是同一 owner lineage 的第一等 writer | 避免多内核产品债，也避免“猫离线覆盖文件”冒充实时共同编辑 | 2026-09-01 |
+| KD-16 | Office editor 是 F202 Host-governed `content-editor-provider`，不是 core 默认依赖或现有四类 manifest resource | 让用户选择安装/启用，同时保留 Host 的 package/grant/runtime 与 owner 的内容真相 | 2026-09-03 |
+| KD-17 | GenOffice 是第一个 Office plugin admission candidate；第一轮只开 DOCX，其他格式逐项 Gate | 先验证效果最强候选的真实人猫路径，又不把完整 monorepo 一次性变成产品负担 | 2026-09-03 |
 
 ## Thread Topology（执行载体，不是真相源）
 
@@ -558,8 +597,9 @@ Feature、Research、ownership、commit/PR 与 task 状态仍是 canonical truth
 ## Review Gate
 
 - Phase A: @codex-terra 已对 exact-source、absence claims、typed union 与 ownership 做非作者攻击；operator
-  已批准边界与 final-state OSS integration posture。Office/video candidate admission 和实际第三方依赖/
-  服务授权未闭合前不进入 Phase B。
+  已批准边界、final-state OSS integration posture 与 GenOffice-first plugin 顺序。GenOffice `v0.8.1039`
+  re-audit、Packet D 和本次 provider contract delta 仍需非作者 review；实际 dependency/runtime 授权与
+  AC-A4 evidence 未闭合前不进入 Phase B。
 - Phase B/C: 按行为/数据/契约风险重新选择非作者 reviewer；第三方服务/依赖需 operator 授权。
 
 ## Tips Contribution (F244)

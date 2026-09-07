@@ -29,6 +29,14 @@ const QUEUED_ENTRY: QueueEntry = {
   intent: 'execute',
   status: 'queued',
   createdAt: NOW,
+  recoveryActions: [
+    {
+      id: 'steer:q1',
+      entryId: 'q1',
+      kind: 'steer',
+      request: { method: 'POST', path: '/api/threads/thread-1/queue/q1/steer' },
+    },
+  ],
 };
 
 const PROCESSING_ENTRY: QueueEntry = {
@@ -65,6 +73,19 @@ const FAILED_ENTRY: QueueEntry = {
   ...QUEUED_ENTRY,
   targetStates: { opus: 'failed' },
   queueReceipt: FAILED_RECEIPT,
+  recoveryActions: [
+    {
+      id: 'retry:q1:opus:3',
+      entryId: 'q1',
+      kind: 'retry_target',
+      targetCatId: 'opus',
+      request: {
+        method: 'POST',
+        path: '/api/threads/thread-1/queue/q1/targets/opus/retry',
+        body: { recoveryActionId: 'retry:q1:opus:3' },
+      },
+    },
+  ],
 };
 
 function response(body: unknown, status = 200) {
@@ -145,6 +166,15 @@ describe('QueuePanel steer (F047)', () => {
             ...FAILED_RECEIPT,
             targets: [...FAILED_RECEIPT.targets, { catId: 'codex', state: 'queued' }],
           },
+          recoveryActions: [
+            ...(FAILED_ENTRY.recoveryActions ?? []),
+            {
+              id: 'steer:q1',
+              entryId: 'q1',
+              kind: 'steer',
+              request: { method: 'POST', path: '/api/threads/thread-1/queue/q1/steer' },
+            },
+          ],
         },
       ],
     });
@@ -172,12 +202,43 @@ describe('QueuePanel steer (F047)', () => {
 
     expect(apiFetch).toHaveBeenCalledTimes(1);
     expect(apiFetch).toHaveBeenCalledWith(
-      '/api/messages/m1/queue-targets/opus/retry',
+      '/api/threads/thread-1/queue/q1/targets/opus/retry',
       expect.objectContaining({
         method: 'POST',
-        body: JSON.stringify({ attemptId: 'q1:opus:3' }),
+        body: JSON.stringify({ recoveryActionId: 'retry:q1:opus:3' }),
       }),
     );
+  });
+
+  it('renders and executes server-projected Retry when the failed A2A has no messageId', async () => {
+    vi.mocked(apiFetch).mockResolvedValueOnce(response({ status: 'retry_queued' }, 202) as Response);
+    useChatStore.setState({ queue: [{ ...FAILED_ENTRY, messageId: null }] });
+    act(() => {
+      root.render(React.createElement(QueuePanel, { threadId: 'thread-1' }));
+    });
+
+    const retry = container.querySelector('[data-testid="retry-q1-opus"]') as HTMLButtonElement | null;
+    expect(retry).not.toBeNull();
+    await act(async () => retry?.click());
+
+    expect(apiFetch).toHaveBeenCalledWith(
+      '/api/threads/thread-1/queue/q1/targets/opus/retry',
+      expect.objectContaining({
+        method: 'POST',
+        body: JSON.stringify({ recoveryActionId: 'retry:q1:opus:3' }),
+      }),
+    );
+  });
+
+  it('does not invent actions from target state when the server projects none', () => {
+    useChatStore.setState({ queue: [{ ...FAILED_ENTRY, recoveryActions: [] }] });
+    act(() => {
+      root.render(React.createElement(QueuePanel, { threadId: 'thread-1' }));
+    });
+
+    expect(container.querySelector('[data-testid="retry-q1-opus"]')).toBeNull();
+    expect(container.querySelector('[data-testid="steer-q1"]')).toBeNull();
+    expect(container.querySelector('[aria-label="停止后续处理"]')).toBeNull();
   });
 
   it('renders only actionable per-target queue truth hydrated from the server', () => {

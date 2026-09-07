@@ -46,6 +46,32 @@ if ARGV[4] == '1' then
 end
 local latestRows = redis.call('ZREVRANGE', KEYS[1], 0, 0)
 local prior = latestRows[1] or ''
+local timelinePublished = ARGV[7] == '1'
+local seq = 0
+if timelinePublished then
+  local hwmRaw = redis.call('HGET', KEYS[7], 'hwm')
+  local hwm
+  if hwmRaw == false then
+    hwm = 0
+  else
+    hwm = tonumber(hwmRaw)
+    if hwm == nil then
+      return redis.error_reply('VISIBILITY_HWM_UNPARSEABLE: raw=' .. tostring(hwmRaw) .. ' metaKey=' .. KEYS[7])
+    end
+    if hwm ~= hwm then
+      return redis.error_reply('VISIBILITY_HWM_NAN: metaKey=' .. KEYS[7])
+    end
+    if hwm ~= math.floor(hwm) or hwm < 0 then
+      return redis.error_reply('VISIBILITY_HWM_INVALID: hwm=' .. tostring(hwm) .. ' metaKey=' .. KEYS[7])
+    end
+  end
+  local t = redis.call('TIME')
+  local now_ms = tonumber(t[1]) * 1000 + math.floor(tonumber(t[2]) / 1000)
+  seq = math.max(hwm + 1, now_ms)
+  if seq > 9007199254730991 then
+    return redis.error_reply('VISIBILITY_SEQ_EXHAUSTED: seq=' .. tostring(seq))
+  end
+end
 if ARGV[4] == '1' then redis.call('SET', KEYS[5], ARGV[1]) end
 local fields = cjson.decode(ARGV[6])
 local extra = {}
@@ -59,7 +85,13 @@ for field, value in pairs(fields) do redis.call('HSET', KEYS[2], field, value) e
 redis.call('ZADD', KEYS[1], ARGV[2], ARGV[1])
 redis.call('ZADD', KEYS[3], ARGV[2], ARGV[1])
 redis.call('ZADD', KEYS[4], ARGV[2], ARGV[1])
-for index = 6, #KEYS do redis.call('ZADD', KEYS[index], ARGV[2], ARGV[1]) end
+for index = 8, #KEYS do redis.call('ZADD', KEYS[index], ARGV[2], ARGV[1]) end
+if timelinePublished then
+  redis.call('ZADD', KEYS[6], seq, ARGV[1])
+  redis.call('HSET', KEYS[7], 'hwm', tostring(seq))
+  redis.call('HSETNX', KEYS[7], 'migrated', '1')
+  redis.call('HSET', KEYS[2], 'visibilitySeq', tostring(seq))
+end
 local ttl = tonumber(ARGV[5])
 if ttl and ttl > 0 then
   redis.call('EXPIRE', KEYS[2], ttl)
@@ -67,7 +99,7 @@ if ttl and ttl > 0 then
   redis.call('EXPIRE', KEYS[3], ttl)
   redis.call('EXPIRE', KEYS[4], ttl)
   if ARGV[4] == '1' then redis.call('EXPIRE', KEYS[5], ttl) end
-  for index = 6, #KEYS do redis.call('EXPIRE', KEYS[index], ttl) end
+  for index = 8, #KEYS do redis.call('EXPIRE', KEYS[index], ttl) end
 end
 return {'committed', ARGV[1], prior}
 `;
@@ -174,11 +206,12 @@ function readStoredPriorFrontier(message: StoredMessage): string | null {
 export async function appendMessageAndObservePriorFrontier(input: {
   redis: RedisClient;
   message: AppendMessageInput;
+  timelinePublished: boolean;
   ttlSeconds: number | null;
   loadById: (messageId: string) => Promise<StoredMessage | null>;
   onAppend?: (message: StoredMessage) => void | Promise<void>;
 }): Promise<ThreadObservedAppendResult> {
-  const { redis, ttlSeconds, loadById, onAppend } = input;
+  const { redis, timelinePublished, ttlSeconds, loadById, onAppend } = input;
   const message = normalizeJsonUnicode(input.message);
   assertValidAppendMessageInput(message);
   assertQueueCustodyMessageBinding(message);
@@ -225,6 +258,8 @@ export async function appendMessageAndObservePriorFrontier(input: {
     MessageKeys.TIMELINE,
     MessageKeys.user(message.userId),
     idempotencyRedisKey,
+    MessageKeys.threadVisibility(threadId),
+    MessageKeys.threadVisibilityMeta(threadId),
     ...message.mentions.map((catId) => MessageKeys.mentions(catId)),
   ];
 
@@ -239,6 +274,7 @@ export async function appendMessageAndObservePriorFrontier(input: {
       message.idempotencyKey ? '1' : '0',
       String(ttlSeconds ?? 0),
       JSON.stringify(hashFields),
+      timelinePublished ? '1' : '0',
     )) as [string, string, string];
     const stored = await loadById(value);
     if (stored) {

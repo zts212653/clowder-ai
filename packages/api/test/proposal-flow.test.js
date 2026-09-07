@@ -37,6 +37,58 @@ describe('F128 propose / approve / reject lifecycle', () => {
     assert.equal(stored.parentThreadId, source.id);
   });
 
+  test('declaredWorkMode is explicit, overridable, and persisted with exact birth provenance', async () => {
+    const ctx = await createProposalTestContext();
+    const source = await ctx.threadStore.create('alice', 'Source');
+    const proposed = await ctx.propose({
+      userId: 'alice',
+      threadId: source.id,
+      body: { declaredWorkMode: 'parallel' },
+    });
+    assert.equal(proposed.statusCode, 200, proposed.body);
+    const { proposalId } = proposed.json();
+    assert.equal((await ctx.proposalStore.get(proposalId)).declaredWorkMode, 'parallel');
+
+    const approved = await ctx.approve('alice', proposalId, { declaredWorkMode: 'investigation' });
+    assert.equal(approved.statusCode, 200, approved.body);
+    const thread = await ctx.threadStore.get(approved.json().threadId);
+    assert.equal(thread.declaredWorkMode, 'investigation');
+    assert.equal(thread.sourceThreadId, source.id);
+    assert.equal(typeof thread.sourceInvocationId, 'string');
+    assert.equal(typeof thread.sourceMessageId, 'string');
+    assert.equal((await ctx.proposalStore.get(proposalId)).declaredWorkMode, 'investigation');
+    const seeds = await ctx.messageStore.getByThread(thread.id, 10, 'alice', { includeQueuedCatMessages: true });
+    assert.equal(seeds.length, 1);
+    assert.match(seeds[0].content, /协作方式/);
+    assert.match(seeds[0].content, /investigation/);
+  });
+
+  test('omitted declaredWorkMode remains absent through approval instead of fabricating birth truth', async () => {
+    const ctx = await createProposalTestContext();
+    const source = await ctx.threadStore.create('alice', 'Source');
+    const proposed = await ctx.propose({ userId: 'alice', threadId: source.id });
+    assert.equal(proposed.statusCode, 200, proposed.body);
+    const { proposalId } = proposed.json();
+    assert.equal((await ctx.proposalStore.get(proposalId)).declaredWorkMode, undefined);
+
+    const approved = await ctx.approve('alice', proposalId);
+    assert.equal(approved.statusCode, 200, approved.body);
+    const thread = await ctx.threadStore.get(approved.json().threadId);
+    assert.equal(thread.declaredWorkMode, undefined);
+    assert.equal((await ctx.proposalStore.get(proposalId)).declaredWorkMode, undefined);
+  });
+
+  test('unknown is projection-only and rejected as a declaredWorkMode', async () => {
+    const ctx = await createProposalTestContext();
+    const source = await ctx.threadStore.create('alice', 'Source');
+    const res = await ctx.propose({
+      userId: 'alice',
+      threadId: source.id,
+      body: { declaredWorkMode: 'unknown' },
+    });
+    assert.equal(res.statusCode, 400, res.body);
+  });
+
   test('direct user invocation publishes against its exact prompt origin without an A2A trigger', async () => {
     const ctx = await createProposalTestContext();
     const source = await ctx.threadStore.create('alice', 'Source');

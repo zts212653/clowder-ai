@@ -144,6 +144,7 @@ function DestinationCard({
       type="button"
       onClick={onSelect}
       data-testid={testId}
+      data-workspace-destination={`${destination.kind}:${destination.id}`}
       className="group flex min-h-20 w-full items-center gap-3 rounded-xl border border-cafe-subtle/75 bg-[var(--console-card-bg)] px-3.5 py-3 text-left text-cafe-black transition-[border-color,background-color,transform] hover:-translate-y-px hover:border-cafe-accent/35 hover:bg-cafe-surface"
     >
       <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-cafe-accent/10 text-cafe-accent">

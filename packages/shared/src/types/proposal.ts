@@ -32,6 +32,17 @@ export type ProposalStatus = 'pending' | 'approving' | 'approved' | 'rejected' |
 export type ReportingMode = 'none' | 'final-only' | 'state-transitions' | 'blocking-ack';
 
 /**
+ * F277: the declared placement role of a thread at birth.
+ * `unknown` is deliberately absent: it is a read-model fallback for legacy facts,
+ * never a value a cat or user may declare.
+ */
+export type DeclaredWorkMode = 'subtask' | 'parallel' | 'investigation' | 'standalone';
+
+/** F277/F128: zero-config reporting suggestion; an explicit reportingMode always wins. */
+export function suggestedReportingModeForWorkMode(mode: DeclaredWorkMode | undefined): ReportingMode {
+  return mode === 'parallel' || mode === 'standalone' ? 'none' : 'final-only';
+}
+/**
  * A thread proposal created by a cat, awaiting user decision.
  */
 export interface ThreadProposal {
@@ -58,6 +69,8 @@ export interface ThreadProposal {
    * ProposalApproveOverrides; still immutable after approve creates the thread.
    */
   reportingMode?: ReportingMode;
+  /** F277: user-editable placement role, immutable after approval creates the Thread. */
+  declaredWorkMode?: DeclaredWorkMode;
   projectPath: string;
 
   // Audit — creation
@@ -119,4 +132,6 @@ export interface ProposalApproveOverrides {
    * injected protocol must use this final value, not necessarily the cat's proposal default.
    */
   reportingMode?: ReportingMode;
+  /** F277: final placement role chosen on the approval card. */
+  declaredWorkMode?: DeclaredWorkMode;
 }

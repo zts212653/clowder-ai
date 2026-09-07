@@ -19,6 +19,7 @@ import {
 } from '@cat-cafe/shared';
 import { z } from 'zod';
 import type { EntrustedWorkTerminalClosure, ITaskStore } from '../cats/services/stores/ports/TaskStoreContract.js';
+import { containsEntrustedWorkTimeSignal } from './EntrustedWorkSourceSignals.js';
 
 const boundedRef = z.string().trim().min(1).max(1_000);
 
@@ -81,6 +82,11 @@ export interface EntrustedWorkLifecycleOptions {
   readonly custodyGrantRegistry?: F310CustodyGrantRegistryV1;
 }
 
+export interface EntrustedWorkAdmissionSourceContext {
+  readonly sourceRef: string;
+  readonly content: string;
+}
+
 export class EntrustedWorkLifecycleService {
   private readonly now: () => number;
   private readonly custodyGrantRegistry: F310CustodyGrantRegistryV1;
@@ -96,7 +102,10 @@ export class EntrustedWorkLifecycleService {
     );
   }
 
-  async admitOrResume(input: EntrustedWorkAdmissionCommandV1): Promise<CustodyAdmissionResultV1> {
+  async admitOrResume(
+    input: EntrustedWorkAdmissionCommandV1,
+    sourceContext?: EntrustedWorkAdmissionSourceContext,
+  ): Promise<CustodyAdmissionResultV1> {
     const command = entrustedWorkAdmissionCommandV1Schema.parse(input);
     if (!command.admission.intendedOutcome) {
       return {
@@ -112,6 +121,26 @@ export class EntrustedWorkLifecycleService {
     }
     if (command.admission.basis === 'authorized_source') {
       this.assertCurrentAuthorization(command.admission);
+    }
+    const canonicalTimeFacts = [command.time?.businessDeadline, command.time?.reviewBy].filter(
+      (fact): fact is NonNullable<typeof fact> => fact != null,
+    );
+    const sourceRequiresCanonicalTime =
+      (command.admission.timeHints?.length ?? 0) > 0 ||
+      (sourceContext !== undefined && containsEntrustedWorkTimeSignal(sourceContext.content));
+    if (sourceRequiresCanonicalTime && canonicalTimeFacts.length === 0) {
+      return {
+        result: 'needs_clarification',
+        clarificationReason:
+          'Source time requires a canonical businessDeadline or reviewBy before Task can claim custody.',
+      };
+    }
+    const canonicalTimeSourceRefs = sourceContext ? [sourceContext.sourceRef] : command.admission.sourceRefs;
+    if (canonicalTimeFacts.some((fact) => !canonicalTimeSourceRefs.includes(fact.sourceRef))) {
+      return {
+        result: 'needs_clarification',
+        clarificationReason: 'Canonical admission time must cite one of the exact admission source refs.',
+      };
     }
 
     const digest = createHash('sha256').update(command.admission.idempotencyKey).digest('hex');

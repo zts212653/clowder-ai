@@ -51,6 +51,20 @@ function seedMessages(messageStore, count, threadId = 'thread-1') {
   return stored;
 }
 
+function coldProjection(routeTopology = 'parallel') {
+  return {
+    coordinate: {
+      providerCarrier: { provider: 'codex', carrier: 'exec_json' },
+      invocationOrigin: 'interactive',
+      routeTopology,
+    },
+    contextEpoch: 1,
+    contextMode: 'cold',
+    transition: 'scope_first_seen',
+    reason: 'no_prior_session',
+  };
+}
+
 /** Mock thread store that returns a thread with title */
 function mockThreadStore(title = 'Test Thread', threadMemory = null) {
   return {
@@ -1067,6 +1081,280 @@ describe('assembleIncrementalContext — unread visible message contract', () =>
       exactA2ATriggerMessageId: earlierOutput.id,
     });
     assert.ok(directHandoff.contextText.includes('opus first-pass answer'));
+  });
+
+  test('defers a parallel sibling reply without consuming it before a later directed synthesis turn', async () => {
+    const messageStore = new MessageStore();
+    const deliveryCursorStore = new DeliveryCursorStore();
+    const threadId = 'thread-parallel-sibling-delivery';
+    const userId = 'user-parallel-sibling-delivery';
+    const source = messageStore.append({
+      userId,
+      catId: null,
+      content: '@codex-sol @fable-5 think independently',
+      mentions: ['codex-sol', 'fable-5'],
+      timestamp: 1,
+      threadId,
+    });
+    const sibling = messageStore.append({
+      userId,
+      catId: 'codex-sol',
+      content: 'SOL COMPLETE PARALLEL BODY sentinel-tail',
+      mentions: [],
+      origin: 'stream',
+      timestamp: 2,
+      threadId,
+      extra: {
+        stream: { parallelBatchId: 'batch-parallel-sibling' },
+        causal: { kind: 'invocation_reply', triggerMessageId: source.id },
+      },
+    });
+    const deps = buildDeps(messageStore, deliveryCursorStore);
+
+    const independentTurn = await assembleIncrementalContext(deps, userId, threadId, 'fable-5', source.id, 'play', {
+      sameUserWaveTriggerMessageId: source.id,
+      contextProjection: coldProjection(),
+    });
+
+    assert.ok(
+      !independentTurn.contextText.includes(sibling.content),
+      'a sibling answer that completed during this parallel wave must not leak into independent reasoning',
+    );
+    assert.equal(
+      independentTurn.boundaryId,
+      cursorFor(source),
+      'withholding the sibling must keep the delivery boundary before it',
+    );
+    assert.deepEqual(
+      independentTurn.projectionAudit.messageRefs.find((entry) => entry.messageRef === sibling.id),
+      { messageRef: sibling.id, reason: 'same_user_wave_sibling_deferred' },
+    );
+
+    await deliveryCursorStore.ackCursor(userId, 'fable-5', threadId, independentTurn.boundaryId);
+    const synthesis = messageStore.append({
+      userId,
+      catId: null,
+      content: '@fable-5 synthesize the two parallel answers',
+      mentions: ['fable-5'],
+      timestamp: 3,
+      threadId,
+    });
+    const synthesisTurn = await assembleIncrementalContext(deps, userId, threadId, 'fable-5', synthesis.id, 'play', {
+      sameUserWaveTriggerMessageId: synthesis.id,
+      contextProjection: coldProjection(),
+    });
+
+    assert.ok(synthesisTurn.contextText.includes(sibling.content));
+    assert.ok(
+      synthesisTurn.contextText.includes('sentinel-tail'),
+      'later synthesis receives the complete sibling body',
+    );
+    assert.ok(synthesisTurn.exposedMessageIds.includes(sibling.id));
+  });
+
+  test('does not defer explicitly directed or causally independent cat output', async () => {
+    const messageStore = new MessageStore();
+    const threadId = 'thread-parallel-sibling-counterexamples';
+    const userId = 'user-parallel-sibling-counterexamples';
+    const source = messageStore.append({
+      userId,
+      catId: null,
+      content: '@codex-sol @fable-5 think independently',
+      mentions: ['codex-sol', 'fable-5'],
+      timestamp: 1,
+      threadId,
+    });
+    const directed = messageStore.append({
+      userId,
+      catId: 'codex-sol',
+      content: 'EXPLICIT NEW WORK FOR FABLE',
+      mentions: ['fable-5'],
+      origin: 'stream',
+      timestamp: 2,
+      threadId,
+      extra: { causal: { kind: 'invocation_reply', triggerMessageId: source.id } },
+    });
+    const independent = messageStore.append({
+      userId,
+      catId: 'codex-sol',
+      content: 'CAUSALLY INDEPENDENT OUTPUT',
+      mentions: [],
+      origin: 'stream',
+      timestamp: 3,
+      threadId,
+      extra: { causal: { kind: 'invocation_reply', triggerMessageId: 'different-trigger' } },
+    });
+
+    const result = await assembleIncrementalContext(
+      buildDeps(messageStore, new DeliveryCursorStore()),
+      userId,
+      threadId,
+      'fable-5',
+      source.id,
+      'play',
+      { sameUserWaveTriggerMessageId: source.id },
+    );
+
+    assert.ok(result.contextText.includes(directed.content));
+    assert.ok(result.contextText.includes(independent.content));
+    assert.ok(result.exposedMessageIds.includes(directed.id));
+    assert.ok(result.exposedMessageIds.includes(independent.id));
+  });
+
+  test('projects the complete causal reply and public output after a newer user turn targets the receiver', async () => {
+    const messageStore = new MessageStore();
+    const threadId = 'thread-directed-window-regression';
+    const userId = 'user-directed-window-regression';
+    const fableOutput = messageStore.append({
+      userId,
+      catId: 'fable-5',
+      content: 'FABLE SOURCE OUTPUT',
+      mentions: [],
+      origin: 'stream',
+      timestamp: 1,
+      threadId,
+    });
+    const directReply = messageStore.append({
+      userId,
+      catId: 'codex',
+      content: 'DIRECT REPLY FULL BODY sentinel-tail',
+      mentions: [],
+      origin: 'stream',
+      timestamp: 2,
+      threadId,
+      replyTo: fableOutput.id,
+      extra: { causal: { kind: 'invocation_reply', triggerMessageId: fableOutput.id } },
+    });
+    messageStore.append({
+      userId,
+      catId: null,
+      content: '@codex-sol investigate the next point',
+      mentions: ['codex-sol'],
+      timestamp: 3,
+      threadId,
+    });
+    const publicOutput = messageStore.append({
+      userId,
+      catId: 'codex-sol',
+      content: 'PUBLIC CAT OUTPUT COMPLETE',
+      mentions: [],
+      origin: 'stream',
+      timestamp: 4,
+      threadId,
+    });
+    const current = messageStore.append({
+      userId,
+      catId: null,
+      content: '@fable-5 continue with every visible result',
+      mentions: ['fable-5'],
+      timestamp: 5,
+      threadId,
+    });
+
+    const result = await assembleIncrementalContext(
+      buildDeps(messageStore, new DeliveryCursorStore()),
+      userId,
+      threadId,
+      'fable-5',
+      current.id,
+      'play',
+      { sameRouteOutputMessageIds: new Set([directReply.id, publicOutput.id]) },
+    );
+
+    assert.ok(result.contextText.includes(directReply.content));
+    assert.ok(result.contextText.includes('sentinel-tail'), 'the direct reply must not degrade to its inline preview');
+    assert.ok(result.contextText.includes(publicOutput.content));
+    assert.ok(result.exposedMessageIds.includes(directReply.id));
+    assert.ok(result.exposedMessageIds.includes(publicOutput.id));
+  });
+
+  test('server-authored causal reply metadata, not replyTo alone, creates a directed same-route projection', async () => {
+    const messageStore = new MessageStore();
+    const threadId = 'thread-directed-causal-projection';
+    const userId = 'user-directed-causal-projection';
+    const current = messageStore.append({
+      userId,
+      catId: null,
+      content: '@codex answer first',
+      mentions: ['codex'],
+      timestamp: 1,
+      threadId,
+    });
+    const targetOutput = messageStore.append({
+      userId,
+      catId: 'codex',
+      content: 'codex source output',
+      mentions: [],
+      origin: 'stream',
+      timestamp: 2,
+      threadId,
+    });
+    const causalReply = messageStore.append({
+      userId,
+      catId: 'opus',
+      content: 'CAUSAL DIRECTED RESPONSE',
+      mentions: [],
+      origin: 'stream',
+      timestamp: 3,
+      threadId,
+      replyTo: targetOutput.id,
+      extra: { causal: { kind: 'invocation_reply', triggerMessageId: targetOutput.id } },
+    });
+    const plainReply = messageStore.append({
+      userId,
+      catId: 'fable-5',
+      content: 'PLAIN REPLY MUST STAY ISOLATED',
+      mentions: [],
+      origin: 'stream',
+      timestamp: 4,
+      threadId,
+      replyTo: targetOutput.id,
+    });
+
+    const result = await assembleIncrementalContext(
+      buildDeps(messageStore, new DeliveryCursorStore()),
+      userId,
+      threadId,
+      'codex',
+      current.id,
+      'play',
+      { sameRouteOutputMessageIds: new Set([causalReply.id, plainReply.id]) },
+    );
+
+    assert.ok(result.contextText.includes(causalReply.content));
+    assert.ok(!result.contextText.includes(plainReply.content));
+  });
+
+  test('emits bounded content-free message refs and filter reasons for the final projection', async () => {
+    const messageStore = new MessageStore();
+    const threadId = 'thread-projection-audit';
+    const userId = 'user-projection-audit';
+    for (let index = 0; index < 24; index++) {
+      messageStore.append({
+        userId,
+        catId: null,
+        content: `SECRET BODY ${index}`,
+        mentions: [],
+        timestamp: index + 1,
+        threadId,
+      });
+    }
+
+    const result = await assembleIncrementalContext(
+      buildDeps(messageStore, new DeliveryCursorStore()),
+      userId,
+      threadId,
+      'codex',
+      undefined,
+      'play',
+    );
+
+    assert.ok(result.projectionAudit);
+    assert.equal(result.projectionAudit.candidateCount, 24);
+    assert.equal(result.projectionAudit.messageRefs.length, 16);
+    assert.equal(result.projectionAudit.truncatedCount, 8);
+    assert.ok(result.projectionAudit.messageRefs.every((entry) => entry.messageRef && entry.reason));
+    assert.ok(!JSON.stringify(result.projectionAudit).includes('SECRET BODY'));
   });
 
   test('does not advance the cursor past an earlier same-route output withheld in play mode', async () => {

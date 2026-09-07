@@ -137,7 +137,7 @@ export function PanelToggle({
     <button
       type="button"
       onClick={onToggleStatusPanel}
-      className={`relative ml-1 inline-flex h-8 w-8 items-center justify-center rounded-full bg-transparent transition-colors ${
+      className={`relative z-40 ml-1 inline-flex h-8 w-8 items-center justify-center rounded-full bg-transparent transition-colors ${
         statusPanelOpen
           ? 'text-cafe-accent'
           : 'text-cafe-secondary hover:bg-[var(--console-hover-bg)] hover:text-cafe-accent'

@@ -159,7 +159,7 @@ export function PersonalChromePluginCard({
     state.distribution.publication === 'published';
 
   return (
-    <article className={settingsResourceCardClass} data-testid="personal-chrome-plugin-card">
+    <article id="personal-chatgpt-pro" className={settingsResourceCardClass} data-testid="personal-chrome-plugin-card">
       <div className={`${settingsResourceRowClass} w-full`}>
         <button
           type="button"

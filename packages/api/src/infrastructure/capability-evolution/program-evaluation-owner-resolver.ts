@@ -49,6 +49,7 @@ export function createProgramEvaluationOwnerResolver(input: {
           certificateRef: normalized.certificateRef,
           resultRef: normalized.resultRef,
           ownerDecisionStatus: normalized.measurementDecisionStatus,
+          proposedAction: normalized.proposedAction,
           frozenCohortRef: normalized.evaluationCohortRef,
           ...(normalized.baselineRef === undefined ? {} : { baselineRef: normalized.baselineRef }),
           ...(normalized.exposureProofRef === undefined ? {} : { exposureProofRef: normalized.exposureProofRef }),

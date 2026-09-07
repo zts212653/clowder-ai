@@ -1,8 +1,11 @@
 import type { CollectiveEventEnvelope, CollectivePairingIntent, CollectiveTarget } from '@cat-cafe/shared';
 
+export type { GitHubAppManifestBeginResult } from './github-app-manifest.js';
+
 export interface CollectiveMeta {
   readonly serviceInstanceId: string;
   readonly bootstrapNeeded: boolean;
+  readonly onboardingComplete: boolean;
   readonly clientBuildId: string;
 }
 
@@ -36,6 +39,7 @@ export interface HumanAuthProviderStatus {
   readonly id: 'github';
   readonly ready: boolean;
   readonly reason?: string;
+  readonly setupSupported?: boolean;
 }
 
 export interface HumanAuthBeginResult {

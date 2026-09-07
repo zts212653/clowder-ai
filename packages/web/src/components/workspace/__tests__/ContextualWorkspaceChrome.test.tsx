@@ -71,6 +71,22 @@ describe('F284 ContextualWorkspaceChrome', () => {
     expect(container.textContent).toContain('状态与会话');
   });
 
+  it('offers an explicit fold control for a fullscreen mobile Workspace host', async () => {
+    const onFold = vi.fn();
+    await act(async () => {
+      root.render(
+        <ContextualWorkspaceChrome mode="workspace" onFold={onFold} showFold>
+          content
+        </ContextualWorkspaceChrome>,
+      );
+    });
+
+    const fold = container.querySelector<HTMLButtonElement>('[data-testid="workspace-shell-fold"]');
+    expect(fold?.getAttribute('aria-label')).toBe('收起 Workspace');
+    await act(async () => fold?.click());
+    expect(onFold).toHaveBeenCalledOnce();
+  });
+
   it('returns a nested status or meeting surface to the Workspace Launcher', async () => {
     const onNavigateHome = vi.fn();
     await act(async () => {

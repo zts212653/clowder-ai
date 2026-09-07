@@ -40,6 +40,8 @@ export interface NudgePayload {
   docAnchor?: string;
   /** Matched alias text. */
   matchedAlias: string;
+  /** Exact Entity projection revision. Absent for doc-title-only nudges. */
+  sourceRevision?: string;
   /** AC-B6: Must NOT be stored as canonical message. */
   storable: false;
   /** AC-B6: Must NOT be indexed by evidence/digest/passage. */
@@ -83,6 +85,7 @@ export class EntityNudgeBuilder {
       entityId: d.entityId,
       docAnchor: d.docAnchor,
       matchedAlias: d.matchedAlias,
+      sourceRevision: d.sourceRevision,
       storable: false,
       indexable: false,
       provenance: d.provenance,

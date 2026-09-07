@@ -333,7 +333,7 @@
     {
       "id": "F056",
       "name": "Clowder AI 设计语言 — 猫猫化不是猫化",
-      "status": "doing（Phase E 10/12 done；AC-E9 console-dev 投影 partial，AC-E12 Playwright baseline deferred；Phase E Sweep 2026-05-25~28 的 bubble routing / variant slug / 350-line split / clowder-ai#784 review-response 已完成） | **Owner**: Maine Coon/GPT-5.2 + Ragdoll 主导设计执行 + Ragdoll工程架构 + Siamese概念方向",
+      "status": "doing（Phase F 视觉基线换底 2026-09-04 开工：F1 DESIGN.md 真相源 + lint gate 落地，F2 token/字体迁移待 A/B 截图；Phase E 10/12 done；AC-E9 console-dev 投影 partial，AC-E12 Playwright baseline deferred） | **Owner**: Maine Coon/GPT-5.2 + Ragdoll 主导设计执行 + Ragdoll工程架构 + Siamese概念方向；Phase F 执行 Ragdoll/fable-5",
       "file": "F056-cat-cafe-design-language.md"
     },
     {
@@ -1395,7 +1395,7 @@
     {
       "id": "F231",
       "name": "启动胶囊 — per-user 画像注入与 L0 分层",
-      "status": "in-progress (Phase C 功能性完成；Phase D topology 代码已合入；live migration apply 暂停——relationship granularity 于 2026-07-12 重新打开，不能再把 individual primer 冲突预设为待合并内容) | **Owner**: Ragdoll（Ragdoll Fable-5）；topology repair owner: Maine Coon Sol | **Priority**: P1",
+      "status": "in-progress (Phase C 功能性完成；Phase D topology 代码已合入；live migration apply 暂停——relationship granularity 于 2026-07-12 重新打开，不能再把 individual primer 冲突预设为待合并内容) ；Phase E（shared profile corpus / owner-wide 层）2026-09-05 登记，Design Gate pending，无实现 custody） | **Owner**: Ragdoll（Ragdoll Fable-5）；topology repair owner: Maine Coon Sol | **Priority**: P1",
       "file": "F231-user-profile-capsule.md"
     },
     {
@@ -1617,7 +1617,7 @@
     {
       "id": "F273",
       "name": "Desktop In-App Update — 应用内检查更新 + 原地升级（无签名约束版）",
-      "status": "in-progress（Phase A–D 已通过 clowder-ai #1105 合入；Clowder AI intake #3222 已合入 `8424af315`；clowder-ai #1227 的 hardened renderer/update recovery 已合入并完成 Windows RC `.14` 主路径现场验收；**Phase E 首次 upstream stable release 的完整 field validation 仍待完成**） | **Source author**: mindfn | **Intake owner**: @codex-sol | **Priority**: P1",
+      "status": "in-progress（Phase A–D 已通过 clowder-ai #1105 合入；Clowder AI intake #3222 已合入 `8424af315`；clowder-ai #1227 的 hardened renderer/update recovery 已合入并完成 Windows RC `.14` 主路径现场验收；**Phase E 已于 2026-09-03 re-entered，`v0.12.0 → v0.13.0` stable-to-stable 双平台现场验收 ready-to-run**） | **Source author**: mindfn | **Phase E closure owner**: @codex-sol | **Priority**: P1",
       "file": "F273-desktop-in-app-update.md"
     },
     {
@@ -1641,7 +1641,7 @@
     {
       "id": "F277",
       "name": "Thread Attention Navigation — 关系感知的注意力导航",
-      "status": "spec | **Owner**: 小太阳·Maine Coon (@codex-sol, GPT-5.6 Sol) | **Priority**: P1",
+      "status": "implementation — Phase B core + Phase C L1/L1b merged；remaining ACs + L2 pending | **Owner**: 小太阳·Maine Coon (@codex-sol, GPT-5.6 Sol) | **Priority**: P1",
       "file": "F277-thread-attention-navigation.md"
     },
     {
@@ -1707,7 +1707,7 @@
     {
       "id": "F290",
       "name": "AI-native Collective — 多人·多 Agent 共同世界",
-      "status": "implementation / first real runtime vertical slice",
+      "status": "implementation / provider onboarding landed in PR #4296; local activation awaits real GitHub UAT",
       "file": "F290-ai-native-collective.md"
     },
     {
@@ -1827,13 +1827,13 @@
     {
       "id": "F311",
       "name": "Capability Evolution Workspace（Meta-RSI 产品控制面）",
-      "status": "in-progress (v5 final-vision phases; Gate 0A + Phase 1–2 landed; Phase 2 Alpha loaded-runtime accepted; Phase 3 landed (AC-31–34 met; F267 owner-contract extended additively — see Phase 3 status block); Phase 4 next) | **Product phase owner**: Maine Coon (@codex-sol, gpt-5.6-sol)（本轮 operator 指定执行） | **Architecture co-creator/reviewer**: Ragdoll (@fable5, claude-fable-5) | **Priority**: P0",
+      "status": "in-progress (v6 product-experience contract; v5 final-vision phases; Gate 0A + Phase 1–3 landed; Phase 4 implementation landed; real E0 Alpha constitution complete, while AC-41–44 acceptance remains open on real observation/authorization/outcome truth) | **Product phase owner**: Maine Coon (@codex-sol, gpt-5.6-sol)（本轮 operator 指定执行） | **Architecture co-creator/reviewer**: Ragdoll (@fable5, claude-fable-5) | **Priority**: P0",
       "file": "F311-capability-evolution-workspace.md"
     },
     {
       "id": "F312",
       "name": "Memory Initiative Closure Command｜记忆与主动性闭环责任田",
-      "status": "in-progress | **Owner**: 小太阳·Maine Coon（@codex-sol, GPT-5.6 Sol）+ F312 总控线程责任猫 | **Priority**: P1",
+      "status": "done | **Completed**: 2026-09-03 | **Owner**: 小太阳·Maine Coon（@codex-sol, GPT-5.6 Sol）+ F312 总控线程责任猫 | **Priority**: P1",
       "file": "F312-memory-initiative-closure-command.md"
     },
     {
@@ -1845,8 +1845,20 @@
     {
       "id": "F314",
       "name": "Development Episode Alignment Experiment｜开发交付对齐自进化实验",
-      "status": "spec / experimental kickoff | **Owner**: 小太阳·Maine Coon（@codex-sol, GPT-5.6 Sol） | **Priority**: P0",
+      "status": "in-progress / Phase B landed behavior accepted except AC-B1's authorized delivery-budget exception and AC-B5's post-corrective runtime revalidation; Phase C remains with F311 | **Owner**: 小太阳·Maine Coon（@codex-sol, GPT-5.6 Sol） | **Priority**: P0",
       "file": "F314-development-episode-alignment-experiment.md"
+    },
+    {
+      "id": "F315",
+      "name": "Workspace Readability Remediation｜存量页面从内部对象回到用户任务",
+      "status": "in-progress | **Owner**: 小太阳·Maine Coon（@codex-sol, GPT-5.6 Sol） | **Priority**: P1",
+      "file": "F315-workspace-readability-remediation.md"
+    },
+    {
+      "id": "F316",
+      "name": "Memory Coverage & Recall Truth｜记忆内容覆盖与真实召回验收",
+      "status": "in-progress | **Owner**: 小太阳·Maine Coon（@codex-sol, GPT-5.6 Sol）+ F316 总控线程责任猫 | **Priority**: P1",
+      "file": "F316-memory-coverage-recall-truth.md"
     }
   ]
 }

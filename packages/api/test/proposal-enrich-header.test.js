@@ -26,6 +26,29 @@ const SOLO = /** @type {any} */ (['opus']);
 const PAIR = /** @type {any} */ (['opus', 'codex']);
 
 describe('F128 Phase Y — enrichWithParentThreadHeader reportingMode', () => {
+  test('F277 placement truth is injected independently from reporting mode', () => {
+    const out = enrichWithParentThreadHeader(
+      'hi',
+      SRC,
+      TITLE,
+      SOLO,
+      'hi',
+      null,
+      undefined,
+      'final-only',
+      '@proposer-cat',
+      'parallel',
+    );
+    assert.match(out, /协作方式/);
+    assert.match(out, /parallel/);
+    assert.match(out, /同组并行推进/);
+  });
+
+  test('omitted placement truth is not invented in the child header', () => {
+    const out = enrichWithParentThreadHeader('hi', SRC, TITLE, SOLO, 'hi');
+    assert.doesNotMatch(out, /协作方式/);
+  });
+
   // AC-AA1: Phase AA supersedes Phase Y default. Default is now 'final-only'.
   test('default (no reportingMode) → final-only report-back (AC-AA1, supersedes AC-Y6)', () => {
     const out = enrichWithParentThreadHeader('hi', SRC, TITLE, SOLO, 'hi');

@@ -81,7 +81,10 @@ before(() => {
   mkdirSync(tmpDir, { recursive: true });
   writeFileSync(join(tmpDir, 'hello.txt'), 'line1\nline2\nline3\n');
   mkdirSync(join(tmpDir, '.cat-cafe'), { recursive: true });
-  writeFileSync(join(tmpDir, '.cat-cafe', 'accounts.json'), JSON.stringify({ 'test-ant': { authType: 'api_key' } }));
+  writeFileSync(
+    join(tmpDir, '.cat-cafe', 'accounts.json'),
+    JSON.stringify({ 'test-ant': { authType: 'api_key', clientId: 'anthropic' } }),
+  );
   writeFileSync(join(tmpDir, '.cat-cafe', 'credentials.json'), JSON.stringify({ 'test-ant': { apiKey: 'sk-test-e' } }));
 });
 

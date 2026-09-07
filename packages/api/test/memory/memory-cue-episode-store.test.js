@@ -6,6 +6,7 @@ import { join } from 'node:path';
 import { afterEach, describe, it } from 'node:test';
 import { Worker } from 'node:worker_threads';
 import Database from 'better-sqlite3';
+import { installV41CueLedgerFixture } from '../helpers/v41-memory-cue-ledger-fixture.js';
 
 const roots = [];
 
@@ -153,29 +154,109 @@ describe('MemoryCueEpisodeStore', () => {
     );
   });
 
-  it('preserves existing receipts while admitting Event receipts through migration v41', async () => {
+  it('migrates a real v41 ledger to v43 without losing receipts or append-only guards', async () => {
     const { applyMigrations, CURRENT_SCHEMA_VERSION } = await import('../../dist/domains/memory/schema.js');
+    const { MemoryCueEpisodeStore } = await import('../../dist/domains/memory/cue/MemoryCueEpisodeStore.js');
+    const db = new Database(':memory:');
+    installV41CueLedgerFixture(db);
+    const rowsBefore = db.prepare('SELECT * FROM memory_cue_events ORDER BY occurred_at').all();
+    applyMigrations(db);
+    const store = new MemoryCueEpisodeStore(db);
+    const decisionReceipt = store.append(
+      consumption({
+        eventId: 'v42-decision-event',
+        idempotencyKey: 'v42-decision-idempotency',
+        cueId: 'v42-decision-cue',
+        opportunityId: 'v42-decision-opportunity',
+        resolverFamily: 'decision',
+        sourceAnchor: 'ADR-020',
+        sourceRevision: 'sha256:v42-decision-revision',
+      }),
+    );
+
+    assert.equal(CURRENT_SCHEMA_VERSION, 43);
+    assert.equal(db.prepare('SELECT MAX(version) AS version FROM schema_version').get().version, 43);
+    assert.deepEqual(
+      db
+        .prepare("SELECT * FROM memory_cue_events WHERE event_id LIKE 'v41-%' ORDER BY occurred_at")
+        .all()
+        .map(({ consumer_cat_id: _consumerCatId, ...row }) => row),
+      rowsBefore,
+    );
+    assert.equal(
+      db.prepare("SELECT consumer_cat_id FROM memory_cue_events WHERE event_id = 'v41-person-event'").get()
+        .consumer_cat_id,
+      'legacy-unbound',
+    );
+    assert.equal(decisionReceipt.resolverFamily, 'decision');
+    assert.deepEqual(
+      db
+        .prepare('PRAGMA table_info(memory_cue_events)')
+        .all()
+        .map(({ name }) => name),
+      [
+        'event_id',
+        'idempotency_key',
+        'cue_id',
+        'opportunity_id',
+        'owner_user_id',
+        'thread_id',
+        'invocation_id',
+        'consumer_cat_id',
+        'resolver_family',
+        'source_anchor',
+        'source_revision',
+        'axis',
+        'consumption_outcome',
+        'invalidation_reason',
+        'catalog_version',
+        'resolver_version',
+        'occurred_at',
+        'created_at',
+      ],
+    );
+    assert.deepEqual(
+      db
+        .prepare(
+          "SELECT name FROM sqlite_master WHERE type = 'index' AND name LIKE 'idx_memory_cue_events_%' ORDER BY name",
+        )
+        .all()
+        .map(({ name }) => name),
+      ['idx_memory_cue_events_cue_scope', 'idx_memory_cue_events_opportunity'],
+    );
+    assert.deepEqual(
+      db
+        .prepare(
+          "SELECT name FROM sqlite_master WHERE type = 'trigger' AND name LIKE 'memory_cue_events_no_%' ORDER BY name",
+        )
+        .all()
+        .map(({ name }) => name),
+      ['memory_cue_events_no_delete', 'memory_cue_events_no_update'],
+    );
+    assert.throws(() => db.prepare("UPDATE memory_cue_events SET source_revision = 'changed'").run(), /append-only/);
+    assert.throws(() => db.prepare('DELETE FROM memory_cue_events').run(), /append-only/);
+
+    const rowCount = db.prepare('SELECT COUNT(*) AS count FROM memory_cue_events').get().count;
+    applyMigrations(db);
+    assert.equal(db.prepare('SELECT COUNT(*) AS count FROM memory_cue_events').get().count, rowCount);
+    assert.equal(db.prepare('SELECT COUNT(*) AS count FROM schema_version WHERE version = 43').get().count, 1);
+  });
+
+  it('repairs rewound migration markers without downgrading a v43 ledger or losing its cat binding', async () => {
+    const { applyMigrations } = await import('../../dist/domains/memory/schema.js');
     const { MemoryCueEpisodeStore } = await import('../../dist/domains/memory/cue/MemoryCueEpisodeStore.js');
     const db = new Database(':memory:');
     applyMigrations(db);
     const store = new MemoryCueEpisodeStore(db);
-    const person = store.append(consumption());
-    const eventReceipt = store.append(
-      consumption({
-        eventId: 'event-event-lane',
-        idempotencyKey: 'idempotency-event-lane',
-        cueId: 'cue-event-lane',
-        opportunityId: 'opportunity-event-lane',
-        resolverFamily: 'event',
-        sourceAnchor: 'event-memory:evt_1',
-        sourceRevision: 'sha256:event-revision-1',
-      }),
-    );
+    store.append(consumption({ consumerCatId: 'codex-sol' }));
+    db.prepare('DELETE FROM schema_version WHERE version >= 41').run();
 
-    assert.equal(CURRENT_SCHEMA_VERSION, 41);
-    assert.equal(eventReceipt.resolverFamily, 'event');
-    assert.deepEqual(store.listByCue('owner-1', 'cue-1'), [person]);
-    assert.throws(() => db.prepare('DELETE FROM memory_cue_events').run(), /append-only/);
+    assert.doesNotThrow(() => applyMigrations(db));
+    assert.equal(
+      db.prepare("SELECT consumer_cat_id FROM memory_cue_events WHERE event_id = 'event-1'").get().consumer_cat_id,
+      'codex-sol',
+    );
+    assert.equal(db.prepare('SELECT MAX(version) AS version FROM schema_version').get().version, 43);
   });
 
   it('serializes two independent WAL connections racing on one idempotency key', async () => {

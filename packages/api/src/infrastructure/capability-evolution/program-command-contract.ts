@@ -28,7 +28,11 @@ export type EvolutionProgramServiceResult =
   | { outcome: 'appended' | 'duplicate'; projection: EvolutionProgramProjectionV1 }
   | { outcome: 'conflict'; actualSequence: number; projection: EvolutionProgramProjectionV1 };
 
-export type EvolutionProgramServiceErrorCode = 'program_not_found' | 'idempotency_collision' | 'invalid_command';
+export type EvolutionProgramServiceErrorCode =
+  | 'program_not_found'
+  | 'idempotency_collision'
+  | 'invalid_command'
+  | 'owner_contract_unavailable';
 
 export class EvolutionProgramServiceError extends Error {
   constructor(

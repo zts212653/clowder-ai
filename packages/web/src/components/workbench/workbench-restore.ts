@@ -80,6 +80,7 @@ function parseSurface(value: unknown, legacySchema: boolean): WorkspaceSurfaceDe
     resultTargetRef = { owner: candidate.owner, key: candidate.key };
   }
   if (!legacySchema && (capabilities.sidecar !== true || capabilities.pin !== true)) return null;
+  if (capabilities.mainAreaAttention !== undefined && capabilities.mainAreaAttention !== true) return null;
   return {
     id: surface.id,
     type,
@@ -93,6 +94,7 @@ function parseSurface(value: unknown, legacySchema: boolean): WorkspaceSurfaceDe
       split: true,
       sidecar: legacySchema ? true : capabilities.sidecar === true,
       pin: legacySchema ? true : capabilities.pin === true,
+      ...(capabilities.mainAreaAttention === true ? { mainAreaAttention: true as const } : {}),
       closePolicy: 'detach-host',
       restorePolicy: 'descriptor',
     },

@@ -1,5 +1,5 @@
 import { createServer, type Server } from 'node:http';
-
+import type { GitHubAppManifestSetup } from './github-app-manifest-setup.js';
 import { createCollectiveHttpHandler } from './http-router.js';
 import type { CollectiveServiceStore } from './store.js';
 
@@ -9,6 +9,7 @@ export interface StartCollectiveServerOptions {
   readonly port?: number;
   readonly allowedHostOrigins?: readonly string[];
   readonly bootstrapLinkPath?: string;
+  readonly githubAppSetup?: GitHubAppManifestSetup;
 }
 
 export interface RunningCollectiveServer {
@@ -31,6 +32,7 @@ export async function startCollectiveServer(options: StartCollectiveServerOption
     store: options.store,
     allowedHostOrigins: options.allowedHostOrigins ?? [],
     bootstrapLinkPath: options.bootstrapLinkPath,
+    githubAppSetup: options.githubAppSetup,
   });
   const server = createServer(handler);
   await new Promise<void>((resolve, reject) => {

@@ -1,5 +1,15 @@
 import { fileURLToPath } from 'node:url';
 
+export type {
+  GitHubAppManifest,
+  GitHubAppManifestBeginResult,
+  GitHubAppManifestSubmission,
+} from './github-app-manifest.js';
+export {
+  prepareGitHubAppManifestSubmission,
+  trustedGitHubAppRegistrationUrl,
+} from './github-app-manifest.js';
+
 export const COLLECTIVE_CLIENT_BUILD_ID = 'collective-client-v2';
 
 const assets = {

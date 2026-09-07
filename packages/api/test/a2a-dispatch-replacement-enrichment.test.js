@@ -17,7 +17,7 @@ function throwForSuccessor(messageStore, successorId, failure) {
 }
 
 describe('F167 A2A replacement metadata enrichment', () => {
-  test('handed replacement verdict survives optional successor metadata lookup failure', async () => {
+  test('unreadable successor metadata cannot manufacture a handed replacement verdict', async () => {
     const h = await harness();
     const successor = h.messageStore.append({
       userId: 'user-1',
@@ -38,22 +38,10 @@ describe('F167 A2A replacement metadata enrichment', () => {
     );
     throwForSuccessor(h.messageStore, successor.id, 'successor metadata unavailable');
 
-    await assert.rejects(
-      () => h.service.complete(auth(h), 'completed'),
-      (error) => {
-        assert.equal(error.code, 'a2a_dispatch_disposition_replaced');
-        assert.deepEqual(error.replacement, {
-          kind: 'handed',
-          sourceEventId: `route:${successor.id}:codex-sol`,
-          fromCatId: 'opus',
-          toCatId: 'codex-sol',
-        });
-        return true;
-      },
-    );
+    assert.equal((await h.service.complete(auth(h), 'completed')).outcome, 'applied');
   });
 
-  test('handed-to-operator replacement verdict survives optional successor metadata lookup failure', async () => {
+  test('unreadable successor metadata cannot manufacture a handed-to-operator replacement verdict', async () => {
     const h = await harness();
     const successor = h.messageStore.append({
       userId: 'user-1',
@@ -74,18 +62,9 @@ describe('F167 A2A replacement metadata enrichment', () => {
     );
     throwForSuccessor(h.messageStore, successor.id, 'operator successor metadata unavailable');
 
-    await assert.rejects(
-      () => h.service.complete(auth(h), 'completed'),
-      (error) => {
-        assert.equal(error.code, 'a2a_dispatch_disposition_replaced');
-        assert.deepEqual(error.replacement, {
-          kind: 'handed_cvo',
-          sourceEventId: `route:${successor.id}`,
-          fromCatId: 'codex-sol',
-          intent: 'handoff',
-        });
-        return true;
-      },
-    );
+    const result = await h.service.complete(auth(h), 'completed');
+    assert.equal(result.outcome, 'applied');
+    assert.equal(result.retired, true);
+    assert.equal((await h.projectionStore.get('ball:thread:thread-1')).state, 'parked');
   });
 });

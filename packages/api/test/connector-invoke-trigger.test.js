@@ -2865,7 +2865,7 @@ describe('ConnectorInvokeTrigger', () => {
         generation: 3,
         catId: 'opus',
         outcome: 'succeeded',
-        evidenceRef: 'local-review:message-verdict-1:g3:changes_requested',
+        evidenceRef: 'github:review:message-verdict-1',
         now: 200,
       });
       const repairedPredicate = canonicalizeActionTerminalPredicate({
@@ -2885,10 +2885,6 @@ describe('ConnectorInvokeTrigger', () => {
         dispatchId: 'dispatch-review-2',
         issuerStandingEvidenceRef: 'message:review-request-2',
         evidenceRef: `community:pr:owner/repo#4049:head:${'b'.repeat(40)}`,
-        reviewReentry: {
-          reason: 'behavioral_delta',
-          evidenceRef: `git:${'b'.repeat(40)}:authored-delta`,
-        },
         now: 300,
       });
 

@@ -16,6 +16,10 @@ function fixture() {
       { role: 'primary_loss', uncertainty: { kind: 'interval' } },
       { role: 'primary_loss', uncertainty: { kind: 'not_estimable' } },
     ],
+    actionProposal: {
+      action: 'keep_observe',
+      rationale: 'The measurement is insufficient, so observation continues without mutation authority.',
+    },
   };
   const certificate = {
     decisionProcedure: { components: [], versionSetHash: 'b'.repeat(64) },
@@ -78,6 +82,7 @@ describe('F267 normalized measurement decision projection', () => {
     // `verified` is about the evidence chain. The measurement verdict is carried through unchanged,
     // so a verified proof over an insufficient measurement can never authorise an action.
     assert.equal(normalized.measurementDecisionStatus, proof.subject.measurementDecisionStatus);
+    assert.equal(normalized.proposedAction, result.actionProposal.action);
     // Holdout exposure is about the HOLDOUT, not the evaluation cohort. This fixture exposes the
     // evaluation cohort to candidate selection while the sealed holdout stays clean, and the
     // projection must not conflate the two.

@@ -139,6 +139,11 @@ export const DEFAULT_CAPABILITY_WAKEUP_RULES: CapabilityWakeupRule[] = [
     'update-workflow',
     '阶段进度|下一棒|告示牌|workflow|Mission Control|update_workflow|stage status',
   ),
+  textRule(
+    'capability-evolution-concrete-target',
+    'capability-evolution',
+    '^我们来进化(?![^\\n]*(?:什么|哪些|啥|是什么))[ \\t]*[^？?\\n…]{2,}[ \\t]*$',
+  ),
 ];
 
 function textRule(id: string, capability: CapabilityName, pattern: string): CapabilityWakeupRule {

@@ -78,6 +78,7 @@ export const ownerResolver = (bundle = {}, certificate = { ref: undefined }) => 
             certificateRef: certificate.ref,
             resultRef: owner('F267', `measurement-result:${evidenceProofRef.ownerStateRef.split(':')[1]}`),
             ownerDecisionStatus: 'usable',
+            proposedAction: 'fix',
             frozenCohortRef: COHORT,
             // The ruler is owner truth. This stub moves it on `proof-2` so a test can exercise a real
             // version move without ever stating the rubric from the caller side.
@@ -188,6 +189,8 @@ export async function observingProgram(options = {}) {
       dispatchedRounds.push(context);
       return options.roundDispatch ?? { outcome: 'dispatched', dedupeKey: 'round-1' };
     },
+    ...(options.changeOwner === undefined ? {} : { changeOwner: options.changeOwner }),
+    ...(options.resolveChangeOwner === undefined ? {} : { resolveChangeOwner: options.resolveChangeOwner }),
     // The owner is reachable while the Program is constituted and the round opens — it has to be,
     // or no round could open at all. `options.evaluationOwnerResolver` then takes over for the
     // measurement itself, which is how the real hazard looks: the owner goes away BETWEEN steps.

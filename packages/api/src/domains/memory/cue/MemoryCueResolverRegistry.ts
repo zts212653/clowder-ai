@@ -29,12 +29,14 @@ export interface CreateMemoryCueDrillHandleInput {
   anchor: string;
   revision: string;
   scope: RecallScopeV1;
+  consumerCatId?: string;
   expiresAt: number;
 }
 
 export interface MemoryCueResolverContext {
   now: number;
   expiresAt: number;
+  consumerCatId?: string;
   createDrillHandle(input: CreateMemoryCueDrillHandleInput): string;
 }
 
@@ -44,15 +46,15 @@ export interface MemoryCueResolver {
   resolve(opportunity: RecallOpportunityV1, context: MemoryCueResolverContext): Promise<readonly CueEnvelopeV1[]>;
 }
 
-export const ZERO_ONLY_V3_RESOLVER_FAMILIES = Object.freeze(['project_knowledge' as const]);
-
-export const RECALL_RESOLVER_ADMISSION_V3 = Object.freeze({
+export const RECALL_RESOLVER_ADMISSION_V5 = Object.freeze({
   person_entity: 'catalog' as const,
   operational_precedent: 'catalog' as const,
   taste: 'catalog' as const,
   profile: 'catalog' as const,
   event: 'catalog' as const,
-  project_knowledge: 'zero_only_v3' as const,
+  decision: 'catalog' as const,
+  project_knowledge: 'catalog' as const,
+  cat_owned_seed: 'catalog' as const,
 });
 
 export function buildCueEnvelope(input: {
@@ -103,6 +105,7 @@ export function buildCueEnvelope(input: {
         anchor: input.source.anchor,
         revision: input.source.revision,
         scope: input.opportunity.scope,
+        ...(input.context.consumerCatId ? { consumerCatId: input.context.consumerCatId } : {}),
         expiresAt: input.context.expiresAt,
       }),
     },

@@ -1,7 +1,7 @@
 ---
 cell_id: harness-eval
 title: Harness Eval Control Plane
-summary: Harness contract、runtime eval、measurement validity、verdict handoff、domain registry、durable verdict lifecycle、F313 immutable finding/repair-target artifacts，以及 F278 每条爪感差的 disposition responsibility / Workspace live projection。
+summary: Harness contract、runtime eval、measurement validity/owner-backed issuance、verdict handoff、domain registry、durable verdict lifecycle、F313 immutable finding/repair-target artifacts，以及 F278 每条爪感差的 disposition responsibility / Workspace live projection。
 canonical_features: [F192, F266, F267, F278, F313]
 code_anchors:
   - packages/api/src/infrastructure/harness-eval/f167-eval.ts
@@ -25,6 +25,13 @@ code_anchors:
   - packages/api/src/infrastructure/harness-eval/eval-repair-case-action-resolver.ts
   - packages/api/src/infrastructure/harness-eval/eval-repair-cutover.ts
   - packages/api/src/infrastructure/harness-eval/eval-repair-reconciliation.ts
+  - packages/api/src/infrastructure/harness-eval/eval-repair-outcome.ts
+  - packages/api/src/infrastructure/harness-eval/eval-repair-fresh-outcome.ts
+  - packages/api/src/infrastructure/harness-eval/eval-repair-evolution-owner-port.ts
+  - packages/api/src/infrastructure/harness-eval/eval-repair-owner-runtime.ts
+  - packages/api/src/infrastructure/capability-evolution/change/f311-e0-eval-repair-owner-binding.ts
+  - packages/api/src/infrastructure/capability-evolution/change/f311-e0-eval-repair-owner-provider.ts
+  - packages/api/src/infrastructure/capability-evolution/change/f311-e0-eval-repair-owner-runtime-registration.ts
   - packages/api/src/infrastructure/harness-eval/reeval-case-cycle-order.ts
   - packages/api/src/infrastructure/harness-eval/reeval-case-types.ts
   - packages/api/src/infrastructure/harness-eval/reeval-case-guards.ts
@@ -66,14 +73,24 @@ code_anchors:
   - packages/api/src/infrastructure/harness-eval/measurement/measurement-bundle-census.ts
   - packages/api/src/infrastructure/harness-eval/measurement/friction-measurement-bundle.ts
   - packages/api/src/infrastructure/harness-eval/measurement/measurement-replay.ts
+  - packages/api/src/infrastructure/harness-eval/measurement/capability-evolution/capability-evolution-measurement-source.ts
+  - packages/api/src/infrastructure/harness-eval/measurement/capability-evolution/capability-evolution-measurement-source-validation.ts
+  - packages/api/src/infrastructure/harness-eval/measurement/capability-evolution/capability-evolution-measurement-source-store.ts
+  - packages/api/src/infrastructure/harness-eval/measurement/capability-evolution/capability-evolution-measurement-issuer.ts
+  - packages/api/src/infrastructure/harness-eval/measurement/measurement-artifact-files.ts
+  - packages/api/src/infrastructure/harness-eval/measurement/measurement-decision-proof-owner-object-spec.ts
+  - packages/api/src/infrastructure/harness-eval/measurement/measurement-decision-proof-resolver.ts
   - packages/api/src/infrastructure/harness-eval/publish-verdict/git-worktree-publisher.ts
   - scripts/check-verdict-publish-contract.mjs
   - scripts/guarded-bin/gh
   - packages/shared/src/types/friction-signal.ts
   - packages/api/src/routes/eval-hub.ts
   - packages/api/src/routes/eval-verdict-lifecycle.ts
+  - packages/api/src/routes/eval-repair-outcome-routes.ts
+  - packages/api/src/routes/capability-evolution-measurement-issuance-route.ts
   - packages/api/src/routes/feature-thread-resolver.ts
   - packages/mcp-server/src/tools/eval-lifecycle-tools.ts
+  - packages/mcp-server/src/tools/capability-evolution-tools.ts
   - packages/web/src/components/HubEvalTab.tsx
   - packages/web/src/components/HubEvalLifecycleSummary.tsx
   - packages/web/src/components/eval-workspace/EvalWorkspaceEventCard.tsx
@@ -92,13 +109,15 @@ doc_anchors:
   - docs/features/F254-side-effect-freshness-gate.md
   - docs/features/F267-eval-measurement-validity.md
   - docs/features/F278-paw-feel-disposition-inbox.md
+  - docs/features/F313-analysis-to-outcome-closure-command.md
   - feature-discussions/2026-07-26-f278-paw-feel-disposition-inbox/README.md
   - docs/harness-feedback/migrations/f266-legacy-reeval-cases.yaml
   - docs/harness-feedback/eval-domains/eval-freshness.yaml
   - docs/harness-feedback/registry/measurement-bundles.yaml
+  - docs/harness-feedback/measurement-sources/capability-evolution/owner-inputs/evolution-program-bcc336788a7df9d6075b1efb4c0a7e68-eval-repair-owner-binding-v1.yaml
   - feature-discussions/2026-05-21-f192-phase-e-eval-hub-kickoff/README.md
   - sop-definitions/README.md
-static_scan_hints: [harness-eval, VerdictHandoffPacket, lifecycle-root.json, eval:verdict-lifecycle, reeval-closure, reeval-case, legacy_case_migrated, legacy-reeval-case-migration, repairDebtStatus, reevalDebtStatus, eval-case-v1, eval-domain, reeval, harness-fit-digest, Eval Hub, freshness-closure-replay, f254-freshness-replay, FreshnessReplayProvider, evalFreshnessLiveVerdict, no_data, rawArtifactSha256, SopDefinition, sop-definitions, predicate, friction, paw-feel, PawFeelDisposition, paw-feel-inbox, FrictionSignal, measurement-validity, measurement-certificate, measurement-bundle-result, same-version-replay, prospective_paired_capture]
+static_scan_hints: [harness-eval, VerdictHandoffPacket, lifecycle-root.json, eval:verdict-lifecycle, reeval-closure, reeval-case, legacy_case_migrated, legacy-reeval-case-migration, repairDebtStatus, reevalDebtStatus, eval-case-v1, eval-domain, reeval, harness-fit-digest, Eval Hub, freshness-closure-replay, f254-freshness-replay, FreshnessReplayProvider, evalFreshnessLiveVerdict, no_data, rawArtifactSha256, SopDefinition, sop-definitions, predicate, friction, paw-feel, PawFeelDisposition, paw-feel-inbox, FrictionSignal, measurement-validity, measurement-certificate, measurement-bundle-result, measurement-issuance, measurement-proof, same-version-replay, prospective_paired_capture]
 cited_by:
   - F192 Phase E-pilot
   - F245 Phase A (paw-feel friction collector) + Phase B (cancel/user-feedback/eval-domain adapters + aggregator + clusterer + rollup input; domain registration + rollup sink land in Phase C)
@@ -115,6 +134,7 @@ cited_by:
   - F278 Design Gate (per-signal source-ref disposition ledger, system-thread duty, and Workspace live inbox)
   - F313 Phase B (one immutable finding/child/root per actionable friction candidate, canonical repair-target resolution, and schema-v3 quarantine before atomic Phase C cutover)
   - F313 Phase C (F266 immutable Approval lineage, owner-backed exact refs, drift supersession, and exactly-once canonical repair custody behind one fail-closed v3 cutover)
+  - F313 Phase D (owner-backed changed/no-change receipts, loaded-runtime freshness, typed outcomes, and a dormant ref-only F311 owner port)
 ---
 
 # Harness Eval Control Plane
@@ -129,6 +149,24 @@ existing event log; F246 owns the shared lifecycle/epoch/projection contract; th
 Task/F167 custody. A proposal and an accepted dispatch each re-resolve exact owner-backed truth. Without every binding
 and an explicit production `v1_active` migration receipt, v3 remains side-effect-free and the action route returns a
 typed unavailable blocker.
+
+F313 Phase D keeps the same F266 event log and adds no mutation or outcome store. The asset owner resolves an opaque
+receipt and remains the only mutation writer; F266 verifies exact case/proposal/Approval/authorization/target/
+intervention bindings, main containment, loaded runtime identity/time, then appends one immutable changed or no-change
+event. Fresh outcome evidence must cite that receipt, follow the Approval decision and loaded runtime, and carry an
+uncontaminated freshness proof. The F311-facing owner port exposes refs/status/times only. Its value decision verifier
+accepts a direct owner user session or exact callback source and resolves the authority ref inside the owner boundary;
+agent-key identity cannot sign keep/tune/rollback/sunset/no-change. Terminal rejection, withdrawal and supersession
+snapshots expose an owner-backed decision ref, while pending remains append-free. Missing any port binding leaves every
+production effect false. The API composes the F266 cutover, Phase D outcome service and F311-facing port from one
+read-only canonical-owner binding snapshot, then connects the outcome service and F311 port only through registered
+consumer seams. The F311 E0 fix-forward registers one real provider plus both consumers through the same bootstrap used
+by the API and official Alpha: it cross-validates the Program charter, economic authorization certificate, measurement
+roles, F267 measurement source, and the explicit owner binding for
+`F311:capability:f311-investor-roadshow-expression`. That source currently says `insufficient + keep_observe`, has no
+owner objects, and the owner binding has no authorization, lineage, intervention receipt, outcome receipt, or decision
+receipt. Consequently Alpha can prove the composition is reachable while every business command remains typed
+fail-closed; production remains wholly dormant until an independently authorized F266 `v1_active` epoch exists.
 
 ## Use This When
 
@@ -153,6 +191,13 @@ typed unavailable blocker.
 - For friction breakout, preserve F245 under `harnessUnderEval`, resolve feature/component/owner/version only on the server as `repairTarget`, and fail closed to a blocked finding artifact when canonical target truth is unavailable or ambiguous.
 - Treat schema-v3 friction roots as read-only, known-but-quarantined artifacts until the complete Phase C cutover exists. Do not open a legacy/stable case or call proposal, card, Task or F167 custody paths from Phase B readers.
 - For Phase C, require one stable `v1_active` producer epoch snapshot plus all loader/adapter/ingress/route/owner-dispatch bindings before activating schema v3. Re-resolve opaque owner authorization and exact target version before proposal and accepted dispatch; supersede drift and never reuse an old Approval.
+- For Phase D, resolve change/no-change and re-evaluation receipts from their canonical owners; reject caller-authored
+  payload, mismatched lineage, missing main/live/no-change truth, merge-only claims, stale/pre-load evidence and replay
+  collisions before appending F266 events. Compose the F266 cutover, outcome service and F311 adapter from one atomic
+  owner-provider snapshot, and require registered outcome-owner plus F311 consumer seams before checking the v1 epoch;
+  keep the whole runtime dormant until every producer/consumer binding exists. A registered pilot provider may expose
+  canonical missing truth, but must not convert a target string, chat text, agent-key identity, zero-sample measurement,
+  or empty owner-object list into authorization, lineage, or a receipt.
 - Fail verdict publication closed unless the Git remote matches the configured owner repo, the candidate contains and refreshes the canonical measurement census, and its `{domainId,startMs,endMs}` identity is unique against base plus candidate. Automatic publisher, pre-push, and agent-shell PR fallback must reuse one executable guard.
 - Cover the manifest's explicit `reviewedThrough` legacy-v1 snapshot with audited completeness/freshness review. Synthesize stable v2 roots and recovered owner/action/re-evaluation continuity only at read/reconcile time; never rewrite historical verdict artifacts or let a later unknown v1 root take down reviewed cases.
 - Resolve current repair ownership from eval-domain registry truth, then bind repair and due re-evaluation work to separate deterministic TaskStore subjects and active F167 leases.
@@ -164,6 +209,7 @@ typed unavailable blocker.
 - Resolve replay selectors on the server, cap windows/IDs, derive metrics and sample refs from the normalized artifact, and carry raw/snapshot/attribution/provenance hashes through publish. Treat zero eligible data as `no_data`, never as healthy.
 - Freeze canonical opportunity rows at a closed window boundary, reconcile adapter output per ID, and keep adapter recall separate from downstream aggregation/clustering/ranking exclusions.
 - Issue one measurement certificate per decision bundle, keep context/diagnostic metrics non-decision-bearing, bind every result to a frozen cohort and exact decision-procedure version set, and require an intervention card before fix/build/delete_sunset.
+- For capability-evolution issuance, accept only Program identity through the authenticated callback. Re-read the target owner's exact source manifest on origin/main, bind the named consumer role to the Program's value-owner or opaque workspace user ref, hash-bind every owner object and role artifact, and publish through the measurement-only worktree allowlist; leave Program advancement to F311.
 - Require dry-run evidence before disabling or redirecting legacy scheduled tasks.
 - Reuse `extractPawFeelMarkers`; persist source refs, digest identity and cat-signed disposition only. Keep system-thread notices content-free and let Workspace resolve previews from the canonical source on read.
 - Derive Workspace live and Settings history from the same F278 event log/projection. Their different presentation and retention views must not introduce separate status stores, cache authority or mutation endpoints.
@@ -181,6 +227,7 @@ typed unavailable blocker.
 - Do not infer source coverage from `droppedChannels=[]`, convert unavailable observations into zero, or publish a decision-bearing friction rollup without its measurement-validity artifact.
 - Do not infer a verdict PR target from the current directory, publish from a checkout missing the canonical census, or use a manual PR fallback to bypass domain/window collision checks.
 - Do not accept point-only results as usable, compare replay outputs across different cohort/version identities, or let an unissued/thin certificate unlock a gated eval domain.
+- Do not accept certificate/result/proof payloads through the capability-evolution action, manufacture owner objects from prose, or treat proof `verified` as measurement `usable` or Program advancement.
 - Do not let clustering, embedding, Top-N, degradation or source-preview availability gate per-signal visibility.
 - Do not reuse F266 verdict identity for raw paw-feel signals, and do not present F278 `routed` as “fixed”.
 - Do not let Workspace, Settings, the duty thread or the original-message annotation become a second F278 control plane; they are projections, not owners.

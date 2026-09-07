@@ -3,17 +3,22 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import { activeExecutionKey, useActiveExecutionStore } from '../activeExecutionStore';
 import { DEFAULT_THREAD_STATE, useChatStore } from '../chatStore';
 
-function live(executionId: string, startedAt: number): ActiveExecutionProjection {
+function live(
+  executionId: string,
+  startedAt: number,
+  catId = 'kimi',
+  threadId = 'thread-a',
+): ActiveExecutionProjection {
   return {
     executionId,
-    threadId: 'thread-a',
+    threadId,
     threadTitle: 'Alpha',
-    catId: 'kimi',
+    catId,
     kind: 'live_invocation',
     startedAt,
     cancelability: {
       state: 'cancelable',
-      target: { kind: 'live_invocation', threadId: 'thread-a', catId: 'kimi', executionId },
+      target: { kind: 'live_invocation', threadId, catId, executionId },
     },
   };
 }
@@ -39,6 +44,51 @@ function response(executions: ActiveExecutionProjection[]): ActiveExecutionListR
 
 describe('F295 activeExecutionStore', () => {
   beforeEach(() => useActiveExecutionStore.getState().reset());
+
+  it('preserves parallel cats sharing a parent execution and retires only the finished slot', () => {
+    const astra = live('shared-parent', 100, 'codex-astra');
+    const fable = live('shared-parent', 100, 'fable5');
+    const otherThread = live('shared-parent', 100, 'codex-astra', 'thread-b');
+    const store = useActiveExecutionStore.getState();
+    store.applySnapshot('thread-a', store.beginHydration('thread-a'), response([astra, fable, otherThread]));
+
+    expect(Object.values(useActiveExecutionStore.getState().executionsByKey)).toEqual([astra, fable, otherThread]);
+
+    store.applySnapshot('thread-a', store.beginHydration('thread-a'), response([fable, otherThread]));
+    expect(Object.values(useActiveExecutionStore.getState().executionsByKey)).toEqual([fable, otherThread]);
+  });
+
+  it('isolates cancellation pending, settlement, and retry between parallel cats', () => {
+    const astra = live('shared-parent', 100, 'codex-astra');
+    const fable = live('shared-parent', 100, 'fable5');
+    const store = useActiveExecutionStore.getState();
+    store.applySnapshot('thread-a', store.beginHydration('thread-a'), response([astra, fable]));
+
+    expect(store.beginCancellation(astra)).toBe(true);
+    expect(useActiveExecutionStore.getState().cancelPendingByKey[activeExecutionKey(fable)]).toBeUndefined();
+    expect(store.beginCancellation(fable)).toBe(true);
+    store.releaseCancellation(astra);
+    expect(useActiveExecutionStore.getState().cancelPendingByKey[activeExecutionKey(fable)]).toBe(true);
+    expect(store.beginCancellation(astra)).toBe(true);
+    store.settleCancellation(astra);
+    expect(Object.values(useActiveExecutionStore.getState().executionsByKey)).toEqual([fable]);
+
+    store.applySnapshot('thread-a', store.beginHydration('thread-a'), response([fable]));
+    expect(useActiveExecutionStore.getState().cancelPendingByKey[activeExecutionKey(astra)]).toBeUndefined();
+    expect(useActiveExecutionStore.getState().cancelPendingByKey[activeExecutionKey(fable)]).toBe(true);
+  });
+
+  it('retains managed task lookup identity alongside a live execution with the same id', () => {
+    const managed = command();
+    const invocation = live(managed.executionId, 100);
+    const store = useActiveExecutionStore.getState();
+    store.applySnapshot('thread-a', store.beginHydration('thread-a'), response([managed, invocation]));
+
+    expect(Object.values(useActiveExecutionStore.getState().executionsByKey)).toEqual([managed, invocation]);
+    expect(useActiveExecutionStore.getState().executionsByKey[`managed_command:${managed.executionId}`]).toEqual(
+      managed,
+    );
+  });
 
   it('retires only identities absent from the newest canonical snapshot', () => {
     const firstRequest = useActiveExecutionStore.getState().beginHydration('thread-a');

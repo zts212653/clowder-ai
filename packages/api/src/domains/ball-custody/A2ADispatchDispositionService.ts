@@ -160,7 +160,7 @@ export class A2ADispatchDispositionService {
     if (inspection.outcome === 'replaced') {
       throw new A2ADispatchDispositionError('a2a_dispatch_disposition_replaced', inspection.replacement);
     }
-    const retired = await this.resolveRetired(subjectKey, auth.catId);
+    const retired = await this.resolveRetired(subjectKey, auth.catId, source.handoffSourceEventId, events);
     await this.recordDisposition(auth, source, disposition, subjectKey, eventSourceId, events.length, retired);
     const committed = (await this.deps.ballCustodyEventLog.read(subjectKey)).find(
       (event) => event.sourceEventId === eventSourceId,
@@ -237,12 +237,29 @@ export class A2ADispatchDispositionService {
     return Boolean(message.extra?.targetCats?.includes(catId));
   }
 
-  private async resolveRetired(subjectKey: string, catId: string): Promise<boolean> {
-    const projection = await this.deps.ballCustodyProjectionStore.get(subjectKey);
-    if (projection?.state !== 'active' && projection?.state !== 'blocked') {
+  private async resolveRetired(
+    subjectKey: string,
+    catId: string,
+    handoffSourceEventId: string,
+    events: readonly BallCustodyEvent[],
+  ): Promise<boolean> {
+    let projection = await this.deps.ballCustodyProjectionStore.get(subjectKey);
+    if (!projection && this.deps.repairProjection) {
+      await this.deps.repairProjection(subjectKey);
+      projection = await this.deps.ballCustodyProjectionStore.get(subjectKey);
+    }
+    if (!projection) {
       throw new A2ADispatchDispositionError('a2a_dispatch_disposition_holder_mismatch');
     }
-    return projection.holder !== catId;
+    const handoffIndex = events.findIndex((event) => event.sourceEventId === handoffSourceEventId);
+    const acquiredAfterDispatch = events
+      .slice(handoffIndex + 1)
+      .some((event) => event.kind === 'ball.handed' || event.kind === 'ball.held');
+    return (
+      acquiredAfterDispatch ||
+      (projection.state !== 'active' && projection.state !== 'blocked') ||
+      projection.holder !== catId
+    );
   }
 
   private async inspectResolvedHandoff(
@@ -330,7 +347,14 @@ export class A2ADispatchDispositionService {
       .slice(dispositionIndex + 1)
       .some((event) => event.kind === 'ball.handed' || event.kind === 'ball.held');
     const projection = await this.deps.ballCustodyProjectionStore.get(subjectKey);
-    if (!reopenedAfterDisposition && projection?.state !== 'resolved') {
+    // An inert retirement never promises a resolved thread. Rebuilding a healthy
+    // active/parked projection on every recovery pass would rewrite unrelated work.
+    const rejectedDisposition = projection?.lastRejectedEvent?.sourceEventId === dispositionEvent.sourceEventId;
+    if (
+      !projection ||
+      rejectedDisposition ||
+      (dispositionEvent.payload.retired !== true && !reopenedAfterDisposition && projection.state !== 'resolved')
+    ) {
       await this.deps.repairProjection(subjectKey);
     }
   }

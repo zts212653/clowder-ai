@@ -279,6 +279,42 @@ describe('F247 AC-B1c-2: existing binding read + corruption-safe', () => {
 });
 
 describe('F247 Host Adapter: background append without foreground UI takeover', () => {
+  it('reports needs-binding without touching Host or legacy transport when Host exists but the thread has no route', async () => {
+    const threadStore = makeMockThreadStore();
+    const fallback = makeRecordingFallback();
+    let hostCalls = 0;
+    let legacyCalls = 0;
+    const bridge = new CloudInvokeBridge({
+      hostAdapter: {
+        append_message: async () => {
+          hostCalls += 1;
+          return { hostMessageId: 'must-not-send' };
+        },
+      },
+      pinchTabAdapter: {
+        isReady: async () => true,
+        injectAndCaptureUrl: async () => {
+          legacyCalls += 1;
+          return 'https://chatgpt.com/c/must-not-create';
+        },
+      },
+      emitFallback: fallback.fn,
+      threadStore,
+    });
+
+    const outcome = await bridge.dispatchInternal(baseParams);
+
+    assert.deepEqual(outcome, {
+      kind: 'fallback',
+      reason: 'needs-binding',
+      detail: 'Personal Chrome Host is available, but this thread has no bound ChatGPT conversation',
+    });
+    assert.equal(hostCalls, 0);
+    assert.equal(legacyCalls, 0);
+    assert.equal(fallback.calls.length, 1);
+    assert.equal(fallback.calls[0].reason, 'needs-binding');
+  });
+
   it('routes two Clowder AI threads to two exact authorized conversation IDs without cross-talk', async () => {
     const bindingsByThread = new Map([
       ['thread_a', { 'gpt-pro': 'https://chatgpt.com/c/conversation-7' }],
@@ -392,6 +428,35 @@ describe('F247 Host Adapter: background append without foreground UI takeover', 
     assert.equal(legacyCalls, 0);
   });
 
+  it('maps the Host exact NEEDS_BINDING rejection to the same zero-send typed outcome', async () => {
+    const existing = 'https://chatgpt.com/c/existing-uuid';
+    const threadStore = makeMockThreadStore({ initialBindings: { 'gpt-pro': existing } });
+    const fallback = makeRecordingFallback();
+    let legacyCalls = 0;
+    const needsBinding = new Error('owner route is no longer authorized');
+    needsBinding.code = 'NEEDS_BINDING';
+    const bridge = new CloudInvokeBridge({
+      hostAdapter: { append_message: async () => Promise.reject(needsBinding) },
+      pinchTabAdapter: {
+        isReady: async () => true,
+        injectAndCaptureUrl: async () => {
+          legacyCalls += 1;
+          return existing;
+        },
+      },
+      emitFallback: fallback.fn,
+      threadStore,
+    });
+
+    const outcome = await bridge.dispatchInternal(baseParams);
+
+    assert.equal(outcome.kind, 'fallback');
+    assert.equal(outcome.reason, 'needs-binding');
+    assert.equal(legacyCalls, 0);
+    assert.equal(fallback.calls.length, 1);
+    assert.equal(fallback.calls[0].reason, 'needs-binding');
+  });
+
   it('treats a refreshable Host with no installation as unavailable rather than a broken delivery', async () => {
     const existing = 'https://chatgpt.com/c/existing-uuid';
     const threadStore = makeMockThreadStore({ initialBindings: { 'gpt-pro': existing } });
@@ -455,6 +520,7 @@ describe('F247 AC-B1c-4: fallback message content', () => {
       'inject-failed',
       'invalid-captured-url',
       'host-append-failed',
+      'needs-binding',
       'missing-source-message-id',
       'incomplete-dispatch-provenance',
     ]) {

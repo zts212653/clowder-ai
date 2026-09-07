@@ -153,7 +153,12 @@ export const threadBranchRoutes: FastifyPluginAsync<ThreadBranchRoutesOptions> =
 
     // ④ Create new thread with "(分支)" suffix
     const branchTitle = sourceThread.title ? `${sourceThread.title} (分支)` : '分支对话';
-    const newThread = await threadStore.create(userId, branchTitle, sourceThread.projectPath);
+    const branchedAt = Date.now();
+    const newThread = await threadStore.create(userId, branchTitle, sourceThread.projectPath, id, undefined, {
+      sourceThreadId: id,
+      sourceMessageId: fromMessageId,
+      branchedAt,
+    });
 
     // ⑤ Copy participants + messages inside guarded block; rollback on any failure
     try {

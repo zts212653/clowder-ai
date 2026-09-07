@@ -881,6 +881,7 @@ export class ConnectorInvokeTrigger {
             messageId,
             expectedThreadId: threadId,
             expectedUserId: userId,
+            expectedTargetCatIds: targetCats,
             messageStore: this.opts.messageStore,
           });
         } catch (err) {
@@ -893,6 +894,7 @@ export class ConnectorInvokeTrigger {
               triggerMessage,
               ownerUserId: userId,
               threadId,
+              targetCatId: targetCats[0],
               messageStore: this.opts.messageStore,
             });
           }

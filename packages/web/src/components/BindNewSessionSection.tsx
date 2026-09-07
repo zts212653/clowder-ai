@@ -63,7 +63,7 @@ export function BindNewSessionSection({ threadId, activeCatIds, onBound, disable
         disabled={disabled}
         className="text-micro text-cafe-muted hover:text-cafe-secondary transition-colors mt-1 disabled:opacity-40 disabled:cursor-not-allowed"
       >
-        + 绑定外部 Session
+        + 绑定 CLI Session
       </button>
     );
   }
@@ -71,7 +71,7 @@ export function BindNewSessionSection({ threadId, activeCatIds, onBound, disable
   return (
     <div className="mt-2 p-2 rounded-lg bg-[var(--console-shell-bg)]">
       <div className="flex items-center justify-between mb-1.5">
-        <span className="text-micro font-medium text-cafe-secondary">绑定外部 Session</span>
+        <span className="text-micro font-medium text-cafe-secondary">绑定 CLI Session</span>
         <button
           type="button"
           onClick={() => {

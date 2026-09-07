@@ -27,6 +27,12 @@ describe('F276 defer-person-memory callback', () => {
       registry,
       messageStore,
       receiptStore: {
+        async get() {
+          return null;
+        },
+        async bindProcessorInvocation() {
+          return { outcome: 'not_available' };
+        },
         async stage(input) {
           staged.push(input);
           return {

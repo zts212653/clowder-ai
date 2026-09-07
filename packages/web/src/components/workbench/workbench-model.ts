@@ -274,6 +274,34 @@ function closeSurface(
   };
 }
 
+function closeOtherSurfaces(
+  state: WorkbenchLayoutState,
+  action: Extract<WorkbenchAction, { type: 'close-other-surfaces' }>,
+): WorkbenchLayoutState {
+  if (!state.surfaces.some((surface) => surface.id === action.preserveSurfaceId)) return state;
+  const retained = state.surfaces.filter(
+    (surface) => surface.id === action.preserveSurfaceId || state.pinnedSurfaceIds.includes(surface.id),
+  );
+  if (retained.length === state.surfaces.length) return state;
+  const retainedIds = new Set(retained.map((surface) => surface.id));
+  const detached = state.surfaces.filter((surface) => !retainedIds.has(surface.id));
+  const recentWithoutDetached = detached.reduce(
+    (recent, surface) => withoutObject(recent, surface),
+    state.recentlyClosed,
+  );
+  const splitRemainsValid =
+    state.split !== null &&
+    retainedIds.has(state.split.primarySurfaceId) &&
+    retainedIds.has(state.split.secondarySurfaceId);
+  return {
+    ...state,
+    surfaces: retained,
+    activeSurfaceId: action.preserveSurfaceId,
+    split: splitRemainsValid ? state.split : null,
+    recentlyClosed: [...detached, ...recentWithoutDetached].slice(0, 5),
+  };
+}
+
 function restoreSurface(
   state: WorkbenchLayoutState,
   action: Extract<WorkbenchAction, { type: 'restore-surface' }>,
@@ -306,15 +334,7 @@ function refreshSurface(state: WorkbenchLayoutState, surface: WorkspaceSurfaceDe
   };
 }
 
-export function reduceWorkbench(state: WorkbenchLayoutState, action: WorkbenchAction): WorkbenchLayoutState {
-  if (action.type === 'dismiss-activity') {
-    return { ...state, activity: state.activity.filter((item) => item.id !== action.activityId) };
-  }
-  if (action.type === 'open-surface') return openSurface(state, action);
-  if (action.type === 'refresh-surface') return refreshSurface(state, action.surface);
-  if (action.type === 'open-artifact-with-return') return openArtifactWithReturn(state, action);
-  if (action.type === 'close-artifact-to-return') return closeArtifactToReturn(state, action);
-  if (!isUserEntitled(action.entitlement)) return state;
+function reduceUserAction(state: WorkbenchLayoutState, action: WorkbenchAction): WorkbenchLayoutState {
   if (action.type === 'activate-surface') {
     return state.surfaces.some((surface) => surface.id === action.surfaceId)
       ? {
@@ -338,7 +358,22 @@ export function reduceWorkbench(state: WorkbenchLayoutState, action: WorkbenchAc
     };
   }
   if (action.type === 'close-surface') return closeSurface(state, action);
-  return restoreSurface(state, action);
+  if (action.type === 'close-other-surfaces') return closeOtherSurfaces(state, action);
+  if (action.type === 'collapse-split') return { ...state, split: null };
+  if (action.type === 'restore-surface') return restoreSurface(state, action);
+  return state;
+}
+
+export function reduceWorkbench(state: WorkbenchLayoutState, action: WorkbenchAction): WorkbenchLayoutState {
+  if (action.type === 'dismiss-activity') {
+    return { ...state, activity: state.activity.filter((item) => item.id !== action.activityId) };
+  }
+  if (action.type === 'open-surface') return openSurface(state, action);
+  if (action.type === 'refresh-surface') return refreshSurface(state, action.surface);
+  if (action.type === 'open-artifact-with-return') return openArtifactWithReturn(state, action);
+  if (action.type === 'close-artifact-to-return') return closeArtifactToReturn(state, action);
+  if (!isUserEntitled(action.entitlement)) return state;
+  return reduceUserAction(state, action);
 }
 
 export function projectWorkbench(state: WorkbenchLayoutState, width: number): WorkbenchProjection {

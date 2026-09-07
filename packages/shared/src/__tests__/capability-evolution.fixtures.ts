@@ -11,10 +11,6 @@ import {
   type EvolutionProgramEventEnvelopeV1,
   type EvolutionProgramEventV1,
   EvolutionProgramReducerError,
-  evolutionProgramEventEnvelopeV1Schema,
-  evolutionProgramStateV1Schema,
-  evolutionProgramV1Schema,
-  ownerTruthRefV1Schema,
   reduceEvolutionProgramEvent,
   replayEvolutionProgramEvents,
 } from '../types/capability-evolution.js';
@@ -122,22 +118,30 @@ export function terminalEvents(): EvolutionProgramEventEnvelopeV1[] {
   return [
     ...activeCycleEvents(),
     envelope(7, {
-      type: 'approval_linked',
-      approvalRef: ref('approval:1'),
-      targetVersionRef: assetRef('asset-version:video-forge-v2', 'skill', 'video-forge', 'v2'),
+      type: 'change_cycle_linked',
+      caseRef: ref('case:1'),
+      proposalRef: ref('proposal:1'),
+      ownerAuthorizationRef: ref('authorization:1'),
+      targetVersionRef: assetRef('asset-version:video-forge-v1', 'skill', 'video-forge', 'v1'),
     }),
     envelope(8, {
-      type: 'mutation_linked',
-      mutationReceiptRef: ref('mutation:1'),
-      assetVersionRef: assetRef('asset-version:video-forge-v2', 'skill', 'video-forge', 'v2'),
+      type: 'approval_linked',
+      approvalRef: ref('approval:1'),
+      targetVersionRef: assetRef('asset-version:video-forge-v1', 'skill', 'video-forge', 'v1'),
     }),
     envelope(9, {
-      type: 'outcome_linked',
-      outcomeRef: ref('outcome:1'),
+      type: 'intervention_receipt_linked',
+      result: 'changed',
+      interventionReceiptRef: ref('mutation:1'),
+      assetVersionRef: assetRef('asset-version:video-forge-v2', 'skill', 'video-forge', 'v2'),
       loadedRuntimeRef: ref('runtime:loaded-v2'),
-      freshnessProofRef: ref('freshness:holdout-1'),
     }),
     envelope(10, {
+      type: 'outcome_linked',
+      outcomeReceiptRef: ref('outcome:1'),
+      freshnessProofRef: ref('freshness:holdout-1'),
+    }),
+    envelope(11, {
       type: 'decision_recorded',
       decision: 'keep',
       decisionRef: ref('decision:keep-1'),
@@ -152,7 +156,17 @@ export function decidingEvents(): EvolutionProgramEventEnvelopeV1[] {
 export function rotatedCycle(decision: 'tune' | 'rollback' = 'tune') {
   return reduceEvolutionProgramEvent(
     replayEvolutionProgramEvents(decidingEvents()),
-    envelope(10, { type: 'decision_recorded', decision, decisionRef: ref(`decision:${decision}-1`) }),
+    envelope(11, {
+      type: 'decision_recorded',
+      decision,
+      decisionRef: ref(`decision:${decision}-1`),
+      ...(decision === 'rollback'
+        ? {
+            executionReceiptRef: ref('rollback-receipt:1'),
+            assetVersionRef: assetRef('asset-version:video-forge-v1', 'skill', 'video-forge', 'v1'),
+          }
+        : {}),
+    }),
   );
 }
 

@@ -479,6 +479,34 @@
     "owner": "codex"
   },
   {
+    "id": "workflow-stable-public-sync-release",
+    "kind": "workflow",
+    "sourceRef": {
+      "path": "cat-cafe-skills/opensource-ops/SKILL.md",
+      "anchor": "D: Outbound Sync"
+    },
+    "structureSource": {
+      "path": "cat-cafe-skills/opensource-ops/SKILL.md",
+      "anchor": "G: Public Release"
+    },
+    "bodySource": {
+      "path": "cat-cafe-skills/opensource-ops/SKILL.md",
+      "anchor": "Sync ≠ Release"
+    },
+    "contexts": ["long_running", "feature_dev", "merge_gate"],
+    "audience": ["developer", "maintainer"],
+    "body": "要全量同步或给稳定 public main 发版时，先分清 Full Sync / Public Release；已有写授权只让 writer 跑一轮 public gate，无授权才做 no-write validate。",
+    "action": {
+      "type": "open_source",
+      "label": "查看稳定同步与发版车道",
+      "sourceRef": {
+        "path": "cat-cafe-skills/opensource-ops/SKILL.md",
+        "anchor": "D: Outbound Sync"
+      }
+    },
+    "owner": "codex-sol"
+  },
+  {
     "id": "workflow-thread-orchestration-community",
     "kind": "workflow",
     "sourceRef": { "path": "cat-cafe-skills/thread-orchestration/SKILL.md", "anchor": "社区 PR / issue 分发" },
@@ -818,6 +846,53 @@
     "body": "对话太多找不到？给 Thread 打标签（比如「重要」「待办」），方便在侧边栏筛选。",
     "action": { "type": "open_concierge_draft", "label": "了解更多" },
     "owner": "opus"
+  },
+  {
+    "id": "feature-f277-search-group",
+    "kind": "feature",
+    "sourceRef": { "path": "docs/features/F277-thread-attention-navigation.md", "anchor": "Search Group Organizing" },
+    "structureSource": {
+      "path": "docs/features/F277-thread-attention-navigation.md",
+      "anchor": "Search Group Organizing"
+    },
+    "bodySource": { "path": "docs/features/F277-thread-attention-navigation.md", "anchor": "Search Group Organizing" },
+    "contexts": ["thinking", "long_running", "concierge_open"],
+    "audience": ["all"],
+    "body": "搜索后点「整理全部」，未置顶的匹配对话也能一起收进 Group。",
+    "action": {
+      "type": "open_concierge_draft",
+      "label": "了解搜索整理",
+      "draftPrompt": "请带我从侧栏搜索开始，把匹配的对话（包括未置顶者）批量整理到 Group，并说明如何补入成员和撤销。"
+    },
+    "owner": "codex-astra"
+  },
+  {
+    "id": "feature-f277-thread-attention-navigation",
+    "kind": "feature",
+    "sourceRef": {
+      "path": "docs/features/F277-thread-attention-navigation.md",
+      "anchor": "Supporting Journeys"
+    },
+    "structureSource": {
+      "path": "docs/features/F277-thread-attention-navigation.md",
+      "anchor": "Phase C: L1 Navigation + L2 Dual-Thread Reading"
+    },
+    "bodySource": {
+      "path": "docs/features/F277-thread-attention-navigation.md",
+      "anchor": "Group Display Name Boundary"
+    },
+    "contexts": ["thinking", "long_running"],
+    "audience": ["cvo"],
+    "body": "默认侧边栏不会自动归组。想整理时，长按一条对话进入整理模式，再拖到另一条对话上创建 Group；也可以从更多操作进入，之后随时改名、移入或移出。",
+    "action": {
+      "type": "open_source",
+      "label": "查看 Group 整理说明",
+      "sourceRef": {
+        "path": "docs/features/F277-thread-attention-navigation.md",
+        "anchor": "Supporting Journeys"
+      }
+    },
+    "owner": "codex-sol"
   },
   {
     "id": "feature-f127-native-cli-effort",
@@ -1616,16 +1691,16 @@
       "anchor": "## User Journey"
     },
     "structureSource": {
-      "path": "packages/web/src/components/workbench/F307ExperienceWorkbench.tsx",
-      "anchor": "F307ExperienceWorkbench"
+      "path": "packages/web/src/components/workbench/F307WorkbenchControlRail.tsx",
+      "anchor": "F307WorkbenchControlRail"
     },
     "bodySource": {
       "path": "docs/features/F307-composable-workbench.md",
-      "anchor": "Workbench tabs/actions 区的 `+`"
+      "anchor": "tab 内容可横向滚动"
     },
     "contexts": ["thinking", "feature_dev", "concierge_open"],
     "audience": ["cvo", "developer"],
-    "body": "右侧 Workspace 现在会保留你打开的文件、Browser、Terminal 和 Agent Run。进入具体页面后，用 tab 后面的 `+` 回到完整 Workspace Home，再加一个工作现场；已有 tabs 不会消失。",
+    "body": "右侧 Workspace 会保留你打开的文件、Browser、Terminal 和 Agent Run。顶部常驻控制轨可随时回 Home、收起其他未固定页面或退出分屏；收起视图不会停止任务或删除对象。",
     "action": {
       "type": "open_concierge_draft",
       "label": "打开工作台",
@@ -1671,7 +1746,7 @@
     },
     "bodySource": {
       "path": "docs/features/F290-ai-native-collective.md",
-      "anchor": "Server owner"
+      "anchor": "本轮产品旅程"
     },
     "contexts": ["thinking", "feature_dev", "concierge_open"],
     "audience": ["cvo", "developer"],
@@ -1680,6 +1755,56 @@
       "type": "open_capability_surface",
       "label": "进入 Collective",
       "surfaceId": "collective"
+    },
+    "owner": "codex-sol"
+  },
+  {
+    "id": "capability-self-evolution",
+    "kind": "capability",
+    "sourceRef": {
+      "path": "cat-cafe-skills/self-evolution/SKILL.md",
+      "anchor": "Self-Evolution — Scope Guard + Process Evolution + Knowledge Evolution"
+    },
+    "structureSource": {
+      "path": "cat-cafe-skills/self-evolution/SKILL.md",
+      "anchor": "三个模式"
+    },
+    "bodySource": {
+      "path": "cat-cafe-skills/self-evolution/SKILL.md",
+      "anchor": "先排除 F311 产品意图"
+    },
+    "contexts": ["thinking", "feature_dev", "review", "long_running"],
+    "audience": ["all"],
+    "body": "想把这次已经发生的偏差、重复踩坑或好方法沉淀下来，可以让猫猫复盘并改进对应规则、Skill 或 Harness；这是经验闭环，不会冒充“我们来进化 X”的 Evolution Program。",
+    "action": {
+      "type": "open_concierge_draft",
+      "label": "复盘并沉淀",
+      "draftPrompt": "请复盘这次已经发生的工作，把可复用的教训沉淀到正确机制；一次性问题不要过度进化。"
+    },
+    "owner": "codex-sol"
+  },
+  {
+    "id": "capability-evolution-intent",
+    "kind": "capability",
+    "sourceRef": {
+      "path": "cat-cafe-skills/capability-evolution/SKILL.md",
+      "anchor": "Capability Evolution — 从一句话进入受治理的进化"
+    },
+    "structureSource": {
+      "path": "packages/api/src/infrastructure/harness-eval/capability-wakeup/capability-wakeup-rules.ts",
+      "anchor": "capability-evolution"
+    },
+    "bodySource": {
+      "path": "cat-cafe-skills/capability-evolution/SKILL.md",
+      "anchor": "先分意图，再决定是否写入"
+    },
+    "contexts": ["thinking", "feature_dev", "concierge_idle", "concierge_open"],
+    "audience": ["all"],
+    "body": "想知道咱们能进化什么，直接问猫猫；只有说“我们来进化 X”并给出具体目标时，才会创建可追踪的 Evolution Program，普通复盘仍走 self-evolution。",
+    "action": {
+      "type": "open_concierge_draft",
+      "label": "了解可进化对象",
+      "draftPrompt": "你们能进化什么？"
     },
     "owner": "codex-sol"
   },

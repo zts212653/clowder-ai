@@ -30,6 +30,16 @@ export function PersonalChromePluginPanel() {
     void load();
   }, [load]);
 
+  useEffect(() => {
+    const revealConversationSettings = () => {
+      if (window.location.hash === '#personal-chatgpt-pro') setExpanded(true);
+    };
+
+    revealConversationSettings();
+    window.addEventListener('hashchange', revealConversationSettings);
+    return () => window.removeEventListener('hashchange', revealConversationSettings);
+  }, []);
+
   const refresh = useCallback(async () => {
     setBusy(true);
     await load();

@@ -97,10 +97,16 @@ export class CollectiveServiceStore {
 
   getMetadata() {
     const state = this.persistence.snapshot();
+    const ownerHumanId = state.bootstrap.ownerHumanId;
     return {
       serviceInstanceId: state.serviceInstanceId,
       createdAt: state.createdAt,
       bootstrapNeeded: state.bootstrap.consumedAt === undefined,
+      onboardingComplete:
+        state.bootstrap.consumedAt !== undefined &&
+        ownerHumanId !== undefined &&
+        Object.values(state.humanAuthBindings).some((binding) => binding.humanId === ownerHumanId) &&
+        Object.keys(state.collectives).length > 0,
       clientBuildId: COLLECTIVE_CLIENT_BUILD_ID,
     };
   }
@@ -111,6 +117,10 @@ export class CollectiveServiceStore {
 
   requireSession(sessionToken: string) {
     return this.#identity.requireSession(sessionToken);
+  }
+
+  authorizeProviderSetup(input: { readonly bootstrapSecret?: string; readonly sessionToken?: string }) {
+    return this.#identity.authorizeProviderSetup(input);
   }
 
   createCollective(input: { sessionToken: string; name: string }) {

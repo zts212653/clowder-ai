@@ -16,6 +16,7 @@ import {
   type PersistentServiceState,
   secretMatches,
 } from './persistence.js';
+import { assertProviderSetupAuthorization, type ProviderSetupAuthority } from './provider-setup-authorization.js';
 import {
   type CollectiveRecord,
   type HumanAuthIntent,
@@ -70,6 +71,15 @@ export class CollectiveIdentityStore {
 
   async requireSession(sessionToken: string): Promise<AuthenticatedHuman> {
     return resolveSession(this.persistence.snapshot(), sessionToken);
+  }
+
+  authorizeProviderSetup(input: ProviderSetupAuthority): void {
+    assertProviderSetupAuthorization(
+      this.persistence.snapshot(),
+      this.now(),
+      input,
+      (state, token) => resolveSession(state, token).human.humanId,
+    );
   }
 
   async createCollective(input: { sessionToken: string; name: string }): Promise<CollectiveRecord> {

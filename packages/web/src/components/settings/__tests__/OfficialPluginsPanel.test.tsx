@@ -334,6 +334,17 @@ describe('OfficialPluginsPanel', () => {
     expect(container.textContent).not.toContain('飞书账号授权');
   });
 
+  it('gives Collective its own connected-nodes identity instead of the generic blocks icon', async () => {
+    mockApiFetch.mockResolvedValue(jsonResponse({ plugins: [collectivePlugin(null)] }));
+
+    await act(async () => root.render(<OfficialPluginsPanel />));
+    await flushEffects();
+
+    const card = findButtonByAriaLabel(container, '查看 Collective Connector 详情');
+    expect(card?.querySelector('[data-hub-icon="collective"]')).not.toBeNull();
+    expect(card?.querySelector('[data-hub-icon="blocks"]')).toBeNull();
+  });
+
   it('runs user OAuth as an in-card action and unlocks enable after the QR flow completes', async () => {
     vi.useFakeTimers();
     const installed = plugin(

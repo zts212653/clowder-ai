@@ -1,11 +1,11 @@
 ---
 feature_ids: [F167]
-related_features: [F064, F027, F055, F122, F246, F280]
+related_features: [F064, F027, F055, F122, F168, F246, F280]
 topics: [a2a, collaboration, harness-engineering, agent-readiness]
 doc_kind: spec
 created: 2026-04-17
-updated: 2026-08-26
-tips_exempt: renewed for the safe_wait carrier-liveness correction; the typed MCP action schema remains the only operable surface and no user action or capability-discovery path changed
+updated: 2026-09-04
+tips_exempt: "Renewed 2026-09-04 for the Phase R terminal-lineage conflict repair: it makes the existing post_message and cross_post_message coordination surface fail loud instead of closing the wrong chain, without adding a user-invokable action or discovery workflow."
 user_journey_exempt: protocol behavior has no direct UI surface; end-to-end custody is dogfooded through the real MCP/task path
 mcp_admission_status: accepted
 mcp_admission_ref: "file:docs/features/F167-a2a-chain-quality.md"
@@ -32,7 +32,7 @@ mcp_admission_claims:
 > **Status**: in-progress | **Owner**: Ragdoll | **Priority**: P0
 
 Architecture cell: `transport` + `harness-eval` + `ball-custody` + `dispatch`
-Map delta: updated — Phase R records structured cross-thread coordination in `transport`/`harness-eval`; Phase S gives action successor leases to `ball-custody` while `dispatch` owns carrier admission projection and queue generation preflight; Phase T binds explicit A2A and exact hold wake provenance to those existing custody owners without creating another ledger.
+Map delta: updated — Phase R records structured cross-thread coordination in `transport`/`harness-eval`; Phase S keeps implement and approved external-review successors in `ball-custody`, while Phase S.2 returns local cat review to ordinary durable `dispatch` plus typed merge evidence; Phase T binds explicit A2A and exact hold wake provenance to those existing owners without creating another ledger.
 
 ## Why
 
@@ -844,6 +844,26 @@ operator experience："简直了你和Maine Coon是没头脑（Maine Coon听不�
 | 偏差根因 | **identity 覆盖 thread 坐标 + 跨 thread 证据污染当前 scope**：把“同一个 `catId`”误当成“同一个行动主体”，没有先用当前 thread 导航、任务原文与 PR tracking 确认本地 subject；随后又用 Phase 2 的实现进展替代 Phase 3 状态。与 Case E14 的角色拓扑反校验缺失同型。**分界判据**：回答“你/咱们现在做什么”时，先解析当前 `threadId → subject → local role`；其他 thread 的同 `catId` 一律视为外部依赖方，除非用户明确询问跨 thread 总览。 |
 | 纠正轮次 | 同一任务 2 次：`0001788249160856-000079-1d9c845f` 首次指出当前问题是 Phase 3；`0001788249711685-000095-2a2491dc` 再次明确 Phase 2 是平行世界、当前 thread 只问 Phase 3。纠正后状态已重新锚定 PR #4175 exact HEAD `9d3556b59c05f619f63003164bb95d2050447906`，不再把 Phase 2 的球权或工作进度并入当前 thread。 |
 | 元心智哪条没执行 | Q1 角色确认：没有先确认“本 thread 的 Sol”是 Phase 3 reviewer；Q2 信息验证：虽读取了真实 Phase 2 数据，却选错了当前问题的 resolver；Q3 坐标变换：没有把同一 catId 拆成多个不共享状态的 thread-bound invocation。 |
+
+### Case E20: 把 Theseus 的外部卖点重报成 F311 的学习项（2026-09-04，codex-sol）
+
+| 维度 | 内容 |
+|------|------|
+| 我以为 | 把 Theseus 与 Clowder AI 从“竞争”改画为“互补”后，可以把环境进化、多文件项目评测、纵向能力账、难例生长与前后案例表达列为“咱们向 Theseus 学”的五项，再用“Theseus 进化引擎 + Clowder AI 价值治理控制面”拼成完整闭环。 |
+| 实际要求 | [F311](./F311-capability-evolution-workspace.md) 已经定义从 Program 建制、开眼取证、评估归因到受治理写回、复验、资产代谢和二阶机制进化的完整联邦闭环，也显式覆盖 workspace、外部 Harness 与 owner 原地 mutation。外部伙伴比较必须先以 F311 canonical capability 为基线，把每项 claim 分成“家里已有的产品/宪法”“对方可能更深的 owner 实现”“真正缺口”；Theseus 更合理的合作位置是可接入 F311 的 environment/data/eval/model owner，而不是补上咱们缺失的半条进化链。 |
+| 偏差根因 | **外部叙事锚定 + 已读真相源未进入判定函数 + 能力层与实现层坍缩**：虽然读取了 F311，却继续沿 Theseus BP 的分类组织结论，把双方共有的目标层主张误写成单向学习项，也把 F311 的薄联邦控制面缩成单一治理层。与 Case E11/E12 的“读到 canonical source 却选错比较坐标”及 Case E17 的 F311 产品层级坍缩同型。**分界判据**：回答“咱们向外部项目学什么”前，先逐 claim 做 `canonical baseline → overlap → implementation delta → evidence ceiling`；只有 implementation delta 或真实未覆盖能力可称为学习项。 |
+| 纠正轮次 | 同一任务 2 次：`0001788512204305-000666-1cae5ac8` 首次纠正“不是竞争关系，而是可能合作关系”；`0001788512591644-000677-7b9d8477` 再次指出五条学习项忽略 F311。纠正后已发布 V2 更正图 `0001788513082011-000684-d53781e1`，撤回四项为“F311 已有”，将案例表达降为视频未取得、待补证，并把真实增量收敛到环境算法、数据工艺、参数级能力与 benchmark 生产。 |
+| 元心智哪条没执行 | Q2 信息验证：虽然读了 F311，却没有逐项用原文否证“这是咱们没有的”；Q3 坐标变换：从竞争改成合作只换了关系语气，没有把比较原点从 Theseus BP 移回 F311 canonical capability。 |
+
+### Case E21: 把“去黑话”钟摆式改写成口语 slogan（2026-09-04，codex-sol × fable-5）
+
+| 维度 | 内容 |
+|------|------|
+| 我以为 | operator指出“判断与信任递归演进”等表达拧巴、黑话过重，意味着应把 Growing slogan 降到最口语、最容易立即理解的表达，因此收敛为“一起做过一次，下一次就不用从头来”。 |
+| 实际要求 | 目标语体是技术路演和正式文档可用的现代书面中文：术语有定义、主谓清楚、修辞克制；既不堆叠内部黑话，也不把概念降成宣传口语。正确方向是“让共同经历沉淀为持续演进的能力”一类正式、自然且概念边界清楚的表达。 |
+| 偏差根因 | **把两个维度压成一根轴，导致钟摆式过度纠正**：将“术语透明度”与“语体正式度”错误合并为“学术黑话 ↔ 大白话”，收到去黑话反馈后直接滑到口语端，漏掉“透明且正式”的目标象限。与 Case E7 的语域整体预测缺失同型。**分界判据**：改写正式表达时分别检查（1）术语是否可解释，（2）句法是否自然，（3）语体是否匹配场合；去掉黑话不等于降低正式度。 |
+| 纠正轮次 | 同一任务 2 次：`0001788539041626-001301-d8b1f4fa` 首次指出标题和图中文字仍有奇怪黑话；`0001788543273574-001378-6801c11d` 再次指出“大白话”不是目标。 |
+| 元心智哪条没执行 | Q3 坐标变换——没有把“可理解性”和“正式度”拆成正交维度，也没有在技术领导路演这一真实使用场景里朗读检查整句。 |
 
 ## Review Gate
 

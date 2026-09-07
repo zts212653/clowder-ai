@@ -83,6 +83,7 @@ export class RedisProposalStore implements IProposalStore {
       publication: { state: 'staged', stagedAt: now },
       ...(input.initialMessage ? { initialMessage: input.initialMessage } : {}),
       ...(input.reportingMode ? { reportingMode: input.reportingMode } : {}),
+      ...(input.declaredWorkMode ? { declaredWorkMode: input.declaredWorkMode } : {}),
     };
 
     const key = ProposalKeys.detail(proposal.proposalId);
@@ -305,13 +306,11 @@ export class RedisProposalStore implements IProposalStore {
       updated.projectPath,
       'reportingMode',
       updated.reportingMode ?? '',
+      'declaredWorkMode',
+      updated.declaredWorkMode ?? '',
     ];
     if (updated.createdThreadId) fields.push('createdThreadId', updated.createdThreadId);
-    if (updated.initialMessage !== undefined) {
-      fields.push('initialMessage', updated.initialMessage);
-    } else {
-      fields.push('initialMessage', '');
-    }
+    fields.push('initialMessage', updated.initialMessage ?? '');
     return fields;
   }
 
@@ -323,6 +322,7 @@ export class RedisProposalStore implements IProposalStore {
     if (overrides.preferredCats !== undefined) fields.push('preferredCats', JSON.stringify(overrides.preferredCats));
     if (overrides.projectPath !== undefined) fields.push('projectPath', overrides.projectPath);
     if (overrides.reportingMode !== undefined) fields.push('reportingMode', overrides.reportingMode);
+    if (overrides.declaredWorkMode !== undefined) fields.push('declaredWorkMode', overrides.declaredWorkMode);
     if (overrides.initialMessage === null) fields.push('initialMessage', '');
     else if (typeof overrides.initialMessage === 'string') fields.push('initialMessage', overrides.initialMessage);
     return fields;

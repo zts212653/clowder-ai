@@ -76,6 +76,11 @@ export {
   updateTaskInputSchema,
 } from './callback-tools.js';
 export {
+  advanceEvolutionProgramChangeInputSchema,
+  capabilityEvolutionChangeTools,
+  handleAdvanceEvolutionProgramChange,
+} from './capability-evolution-change-tools.js';
+export {
   capabilityEvolutionRoundTools,
   constituteEvolutionProgramInputSchema,
   handleConstituteEvolutionProgram,
@@ -201,13 +206,6 @@ export {
   limbListToolsInputSchema,
   limbTools,
 } from './limb-tools.js';
-export {
-  handleLocalReviewVerdict,
-  handleRecoverLocalReviewVerdict,
-  localReviewRecoveryInputSchema,
-  localReviewVerdictInputSchema,
-  localReviewVerdictTools,
-} from './local-review-verdict-tool.js';
 export {
   handleReadMeetingArtifact,
   meetingArtifactTools,

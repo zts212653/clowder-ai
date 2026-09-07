@@ -20,18 +20,14 @@ export function projectReevalCase(root: ReevalCaseRoot, rawEvents: readonly unkn
   let targetOwnerCatId = root.targetOwnerCatId;
   let lifecycleOwnerCatId: string | undefined;
   let activeVerdictId = history[0].verdictId;
-  let taskId: string | undefined;
-  let leaseId: string | undefined;
-  let leaseGeneration: number | undefined;
+  let taskId: string | undefined, leaseId: string | undefined, leaseGeneration: number | undefined;
   let responsibilityBlocker: ReevalCaseProjection['responsibilityBlocker'];
   let custodyDispatchBlocker: ReevalCaseProjection['custodyDispatchBlocker'];
   let mainCommitSha: string | undefined;
   let liveCommitSha: string | undefined;
   let reevalDueAt: string | undefined;
   let reevalAssignedCatId: string | undefined;
-  let reevalTaskId: string | undefined;
-  let reevalLeaseId: string | undefined;
-  let reevalLeaseGeneration: number | undefined;
+  let reevalTaskId: string | undefined, reevalLeaseId: string | undefined, reevalLeaseGeneration: number | undefined;
   let closureReason: string | undefined;
   let escalation: ReevalCaseProjection['escalation'];
   const observedVerdictIds: string[] = [];
@@ -135,6 +131,10 @@ export function projectReevalCase(root: ReevalCaseRoot, rawEvents: readonly unkn
       case 'approval_decided':
       case 'approval_superseded':
       case 'approval_materialization_started':
+      case 'repair_intervention_changed':
+      case 'repair_intervention_no_change':
+      case 'repair_outcome_recorded':
+      case 'repair_metabolism_decided':
         requireCaseLifecycleActor(event);
         break;
       case 'approval_materialized':
@@ -316,7 +316,6 @@ export function projectReevalCase(root: ReevalCaseRoot, rawEvents: readonly unkn
     }
     promoteQueuedCycle();
   }
-
   const activeReeval = status === 'reeval_pending' || (status === 'escalated' && escalation?.stage === 'reevaluation');
   return {
     caseId: root.caseId,

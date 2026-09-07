@@ -19,9 +19,18 @@ const runnerPath = resolve(webRoot, 'scripts', 'run-with-node-env-test.mjs');
 const browserLeasePath = resolve(webRoot, 'scripts', 'browser-test-resource-lease.mjs');
 const leaseLibraryPaths = [
   'process-resource-lease.mjs',
+  'process-resource-lease-handle.mjs',
   'process-resource-lease-lock.mjs',
   'process-resource-lease-queue.mjs',
 ];
+
+function readLocalLeaseDependencies(name) {
+  const source = readFileSync(resolve(webRoot, '..', '..', 'scripts', 'lib', name), 'utf8');
+  return Array.from(
+    source.matchAll(/(?:\bfrom\s+|\bimport\s*)['"]\.\/([^'"]+\.mjs)['"]/g),
+    ([, dependency]) => dependency,
+  );
+}
 
 function createCompatibilityRunner(lockDir) {
   const publishedRoot = mkdtempSync(join(dirname(lockDir), 'published-'));
@@ -147,6 +156,17 @@ test('run-with-node-env-test forces NODE_ENV=test for node commands', () => {
   );
 
   assert.equal(result.status, 0, result.stderr || result.stdout);
+});
+
+test('published browser lease fixture closes every local library import', () => {
+  const copiedLibraries = new Set(leaseLibraryPaths);
+  const missingDependencies = leaseLibraryPaths.flatMap((name) =>
+    readLocalLeaseDependencies(name)
+      .filter((dependency) => !copiedLibraries.has(dependency))
+      .map((dependency) => `${name} -> ${dependency}`),
+  );
+
+  assert.deepEqual(missingDependencies, []);
 });
 
 test('test runner does not synthesize an F307-only activation environment', () => {

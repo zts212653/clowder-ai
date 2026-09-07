@@ -1,8 +1,14 @@
 import type { ActiveExecutionListResponse, ActiveExecutionProjection } from '@cat-cafe/shared';
 import { create } from 'zustand';
 
-export function activeExecutionKey(execution: Pick<ActiveExecutionProjection, 'kind' | 'executionId'>): string {
-  return `${execution.kind}:${execution.executionId}`;
+export function activeExecutionKey(
+  execution: Pick<ActiveExecutionProjection, 'kind' | 'threadId' | 'catId' | 'executionId'>,
+): string {
+  // Parallel cats share a parent executionId; live identity follows the exact cancel slot.
+  // Managed commands retain their globally unique task identity (also read by ConnectorBubble).
+  return execution.kind === 'managed_command'
+    ? `${execution.kind}:${execution.executionId}`
+    : JSON.stringify([execution.kind, execution.threadId, execution.catId, execution.executionId]);
 }
 
 interface ActiveExecutionState {

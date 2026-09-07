@@ -113,7 +113,7 @@ function buildPacket(overrides = {}) {
 function buildMockGitPublisher(isoName, commitSha, prNumber) {
   return {
     async publishOnIsolatedWorktree(opts) {
-      const iso = join(root, '..', isoName);
+      const iso = join(root, isoName);
       mkdirSync(join(iso, 'docs', 'harness-feedback', 'eval-domains'), { recursive: true });
       writeFileSync(
         join(iso, 'docs', 'harness-feedback', 'eval-domains', 'eval-task-outcome.yaml'),
@@ -238,7 +238,7 @@ describe('handlePublishVerdict end-to-end with task-outcome generator', () => {
     const generator = createTaskOutcomeGeneratorAdapter();
     const failingGitPublisher = {
       async publishOnIsolatedWorktree(opts) {
-        const iso = join(root, '..', 'task-outcome-writeback-publish-fail-iso');
+        const iso = join(root, 'task-outcome-writeback-publish-fail-iso');
         mkdirSync(join(iso, 'docs', 'harness-feedback', 'eval-domains'), { recursive: true });
         writeFileSync(
           join(iso, 'docs', 'harness-feedback', 'eval-domains', 'eval-task-outcome.yaml'),

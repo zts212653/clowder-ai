@@ -1,9 +1,8 @@
 /**
  * Shared file-backed owner preference store.
  *
- * All feature-specific preference writers must update through this module so
- * one setting cannot clobber another. Writes are crash-safe temp+rename and
- * preferences intentionally have no TTL.
+ * All feature-specific preference writers update through this module so one
+ * setting cannot clobber another. Writes are crash-safe temp+rename and no-TTL.
  */
 
 import { existsSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from 'node:fs';
@@ -36,6 +35,8 @@ export function updateUserPreferences(
   projectRoot: string,
   update: (current: UserPreferences) => UserPreferences,
 ): UserPreferences {
+  // The single API owner cannot yield between read and atomic rename, so same-process
+  // writers cannot interleave. Cross-process writers are outside runtime ownership.
   const directory = resolve(projectRoot, '.cat-cafe');
   const path = preferencesPath(projectRoot);
   const tempPath = `${path}.${process.pid}.${Date.now()}.tmp`;

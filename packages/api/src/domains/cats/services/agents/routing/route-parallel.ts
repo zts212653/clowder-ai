@@ -119,6 +119,7 @@ import {
   isUserFacingSystemInfoContent,
   judgmentSurfaceCueSeeds,
   mergePersistedPromptMessages,
+  operationalKnowledgeCueSeeds,
   routeContentBlocksForCat,
   sanitizeInjectedContent,
   shouldPersistContextBriefing,
@@ -533,6 +534,13 @@ export async function* routeParallel(
         promptTags: options.frustrationAutoIssueEligible !== false ? promptTags : undefined,
         occurredAt: cueOccurredAt,
       }),
+      ...operationalKnowledgeCueSeeds({
+        message,
+        sourceMessageId: currentUserMessageId,
+        ownerOriginEligible: options.frustrationAutoIssueEligible !== false,
+        sopStageHint,
+        occurredAt: cueOccurredAt,
+      }),
     );
   }
   const routeLevelNudgePromptContext = routeOwnedNudgePromptContext + humanDispositionFeedbackPromptContext;
@@ -917,6 +925,7 @@ export async function* routeParallel(
               threadTitle: routeThread?.title ?? undefined,
               projectPath: routeThread?.projectPath,
               cursorOverlay: options.cursorBoundaries?.get(catId as string),
+              ...(currentUserMessageId ? { sameUserWaveTriggerMessageId: currentUserMessageId } : {}),
               ...(contextProjection ? { contextProjection } : {}),
             },
           );

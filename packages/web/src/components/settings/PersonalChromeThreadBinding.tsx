@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useChatStore } from '@/stores/chatStore';
 import { apiFetch } from '@/utils/api-client';
+import { parseChatGptConversationUrl } from '@/utils/chatgpt-chat-url';
 import type { PersonalChromeAuthorizedConversation } from './PersonalChromeAuthorizationList';
 import { PersonalChromeThreadRouteOptions } from './PersonalChromeThreadRouteOptions';
 import { SettingsBadge } from './primitives/SettingsBadge';
@@ -13,10 +14,6 @@ type BindingLoadState = 'loading' | 'ready' | 'unsupported' | 'error';
 interface CloudBindingsResponse {
   bindings?: Record<string, string>;
   error?: string;
-}
-
-function conversationIdFromUrl(chatUrl: string | null) {
-  return chatUrl?.match(/^https:\/\/chatgpt\.com\/c\/([A-Za-z0-9-]+)\/?$/)?.[1] ?? null;
 }
 
 export function PersonalChromeThreadBinding({
@@ -91,7 +88,7 @@ export function PersonalChromeThreadBinding({
     [currentThreadId],
   );
 
-  const boundConversationId = conversationIdFromUrl(bindingUrl);
+  const boundConversationId = parseChatGptConversationUrl(bindingUrl)?.conversationId ?? null;
   const bindingIsAuthorized = conversations.some((conversation) => conversation.conversationId === boundConversationId);
   const threadLabel = currentThreadTitle?.trim() || currentThreadId;
 

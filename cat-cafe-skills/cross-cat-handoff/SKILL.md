@@ -1,6 +1,6 @@
 ---
 name: cross-cat-handoff
-tips_exempt: harness-internal successor routing convention; no distinct end-user capability surface
+tips_exempt: F167/F314 keep local-review custody and accepted-source provenance inside harness routing; no distinct end-user-invocable capability surface
 description: "跨猫交接与 review 双路由。Use when: 交接、exact-HEAD external PR review task 或 PR tracking。Not for: 自己任务。Output: 五件套 + formal/advisory 分类 + provenance 路由。"
 triggers:
   - "交接"
@@ -31,7 +31,7 @@ triggers:
 
 ## Action Successor Single-Flight
 
-当交接会实际唤醒下一只猫时，先判断它是不是某个外部动作的 successor。若是，交接信之外还要携带结构化身份：
+当交接会实际唤醒下一只猫时，先判断它是不是某个支持 structured successor 的动作。local cat review 已退出此路径；implement/task_done 与 external review 等仍受下面规则约束。若是，交接信之外还要携带结构化身份：
 
 ```text
 subjectRef + actionFamily + successorSlot
@@ -46,8 +46,7 @@ subjectRef + actionFamily + successorSlot
 - `mode=parallel`：只用于独立多猫评审、`#ideate` 或明确 operator fan-out，并写 `parallelIntent`；holder 集合一次冻结，不在重复调用中偷偷加猫。
 - failure domain 只用于选择顺序：默认选一个与前手独立的 provider/quota domain；它不是 identity，也不是强制拒绝条件。
 - 外部 subject 已 merged/closed 等终态：停止交接；晚到响应由 generation/terminal fence 抑制。
-- 已完成的 `review/reviewer` lease 不能仅因出现新 HEAD 自动复活。确有复审时附 `reviewReentry`：`behavioral_delta`、`stale_or_blocking` 或 `explicit_matrix_route` + durable evidenceRef；纯 ACK、状态复述或 cloud finding 都不是本地旧 reviewer 的复入凭证。
-- 结构化 action admission 失败后若必须降级为普通消息，仍留在当前 direct review carrier，并显式发送 `coordination={phase:"active", subjectRef:"<same subjectRef>"}`。禁止裸 `phase=active` 继承更早的 task coordination；降级消息只作通知，不伪称已经取得 custody。
+- local cat review 的初审与复审直接用 ordinary A2A；不要尝试 `review/reviewer` lease、复入字段、generation 或 replacement。新 HEAD 需要判断时发一条新的普通 review 请求；旧 verdict 只作历史证据。
 
 安全等待是合法动作。找不到有证据的 fallback，不等于必须立刻再喊一只猫。
 
@@ -101,13 +100,12 @@ body SHA 已锁定，且回读到同一 subject 的 review/comment URL，才能�
 ## Local Cat Review Return Route
 
 本地猫通过 `@` / handoff 交来的 review，默认把 verdict 回给作者猫。**direct review carrier** 是直接承载本轮
-review 请求、并被 lease 记录为 `predecessorThreadId` 的 thread；它的路由权高于任务祖先 thread、旧
-`sourceThreadId` 和继承来的 coordination。开始真实协作链时，同 thread 用
-`post_message(coordination.phase=active)`，跨 thread 用 `cross_post_message(coordination.phase=active)`；final
-verdict 用同一 carrier 的 `coordination.phase=terminal` 回 direct review carrier。持有 invocation-bound local
-review lease 时，同一 terminal post 还必须带显式 `clientMessageId` 和 typed `localReviewVerdict`
-（`approved | changes_requested | commented`）；只发 terminal coordination 会在持久化前得到
-`400 local_review_verdict_required`。公开正文只负责向人解释结论，不承载机器语法。完成包必须同时包含：
+review 请求的 thread；它的路由权高于任务祖先 thread、旧 `sourceThreadId` 和继承来的 coordination。初审和
+复审都用 ordinary durable A2A；不要附 structured action、review lease、generation、replacement authority 或
+review coordination。reviewer 在同一 carrier 行首 `@author`，同时带显式 `clientMessageId`、typed
+`localReviewVerdict`（`approved | changes_requested | commented`）、`reviewedHeadSha`、`reviewSubjectRef`、
+`acceptedSourceRef` 和 `acceptedRevision`。公开正文解释结论与
+findings / evidence refs，typed fact 作为机器 authority。完成包必须同时包含：
 
 1. exact target evidence：commit/PR HEAD、文档 body/content digest 等不可变目标；
 2. 验证证据：targeted test、diff finding 或可复核命令；
@@ -117,10 +115,9 @@ GitHub comment 不能代偿 author cat route；反过来，本地猫 handoff 也
 本地 review 仅在 merge-gate、repository rule 或 operator 明确要求时额外写 GitHub，额外 artifact 不改变
 默认回作者的 custody。
 
-terminal verdict 已完成最后一次合法交接：作者在 exact target 匹配且 `no open items` 时可直接进入
-merge-gate 或 clean-stop，不需要再 `@reviewer` 证明收到。礼貌 ACK 可以落盘，但 terminal fence 不再派生下一棒。
-如后续真有新行为 delta、stale/blocking 或 Review Provenance Matrix 显式指回 local peer，使用
-`reviewReentry` + durable evidenceRef 建立新 generation；没有新信息就拒绝回传。
+verdict 已完成最后一次合法交接：作者在 exact target 匹配且 `no open items` 时可直接进入 merge-gate 或
+clean-stop，不需要再 `@reviewer` 证明收到。如后续真有行为 delta、stale/blocking 或 Review Provenance Matrix
+显式指回 local peer，发一条新的普通 review 请求；没有新信息就拒绝回传。旧 verdict 保留为历史证据，但不批准新 HEAD。
 
 ## 检查流程
 
@@ -280,7 +277,7 @@ Author 猫准备写: "@ Reviewer 我加了 CAS 保护，因为发现竞态问题
 | 只派一只 reviewer 却调用 `multi_mention` | 入口语义反直觉，迁移数据持续污染 | 新调用改用 `post_message(action.mode=single)` |
 | 为绕 single-flight 换 thread/slot 名 | 重复或 stale 工作继续运行 | 使用 server-authorized slot；thread/carrier 不进 identity |
 | 把所有 review completion 一律写 GitHub | 本地猫作者收不到 verdict，平台账号还会伪装成 self-review | 先按 author/custody/handoff source 分类，再选 external artifact 或 author cat route |
-| terminal verdict 后为了出口再 `@` 回 reviewer | 无新信息也被路由规则变成 ACK ping-pong | terminal recipient clean-stop；复审走有证据的 `reviewReentry` |
+| verdict 后为了出口再 `@` 回 reviewer | 无新信息也被路由规则变成 ACK ping-pong | recipient clean-stop；有实质新内容才发新的普通 review 请求 |
 | 旧 dispatch 被超替仍尝试 approve/reject | 超替是终态，409（approve 和 reject 均拒绝） | 直接操作最新 pending 提案即可（旧提案已被超替无需手动处理） |
 | legacy 提案在 required 模式下尝试 approve | 无 ActionEnvelope，409 | reject legacy 提案 + 通过新 dispatch 入口重新提交（re-attest） |
 

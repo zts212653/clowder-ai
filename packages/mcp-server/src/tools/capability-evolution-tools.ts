@@ -14,6 +14,12 @@ const admissionReason = {
   admissionRef: 'file:docs/features/F311-capability-evolution-workspace.md' as const,
 };
 
+const measurementAdmissionReason = {
+  disposition: 'accepted-boundary' as const,
+  kind: 'authority-boundary' as const,
+  admissionRef: 'file:docs/features/F267-eval-measurement-validity.md' as const,
+};
+
 const bounded = (max: number) => z.string().trim().min(1).max(max);
 const ownerRef = z
   .object({
@@ -24,6 +30,12 @@ const ownerRef = z
   .strict();
 const programId = z.string().regex(/^evolution-program:[0-9a-f]{32}$/);
 const clientMessageId = bounded(240);
+const sourceMessageId = z
+  .string()
+  .min(1)
+  .max(240)
+  .refine((value) => value === value.trim(), { message: 'source message id must not be normalized' })
+  .refine((value) => !/[\r\n]/.test(value), { message: 'source message id must be a single line' });
 const ttlSeconds = z.number().int().positive().max(31_536_000);
 const agentKeyCatId = bounded(120)
   .optional()
@@ -77,6 +89,14 @@ export const updateEvolutionProgramInputSchema = {
   expectedSequence: z.number().int().nonnegative().describe('Current Program sequence for CAS.'),
   clientMessageId: clientMessageId.describe('Stable idempotency id for this lifecycle command.'),
   action: commandAction.describe('One lifecycle command; owner truth remains ref-only.'),
+  agentKeyCatId,
+};
+
+export const issueCapabilityEvolutionMeasurementInputSchema = {
+  programId: programId.describe(
+    'Exact canonical Evolution Program id whose target owner supplies the source manifest.',
+  ),
+  clientMessageId: sourceMessageId.describe('Stable source message id for the immutable issuance PR.'),
   agentKeyCatId,
 };
 
@@ -137,6 +157,12 @@ export interface LinkEvolutionProgramObservationInput {
   agentKeyCatId?: string;
 }
 
+export interface IssueCapabilityEvolutionMeasurementInput {
+  programId: string;
+  clientMessageId: string;
+  agentKeyCatId?: string;
+}
+
 export function handleStartEvolutionProgram(input: StartEvolutionProgramInput): Promise<ToolResult> {
   return callbackPost(
     '/api/callbacks/evolution-programs',
@@ -183,7 +209,36 @@ export function handleLinkEvolutionProgramObservation(
   );
 }
 
+export function handleIssueCapabilityEvolutionMeasurement(
+  input: IssueCapabilityEvolutionMeasurementInput,
+): Promise<ToolResult> {
+  return callbackPost(
+    `/api/callbacks/evolution-programs/${encodeURIComponent(input.programId)}/measurement-issuance`,
+    { clientMessageId: input.clientMessageId },
+    { agentKeyCatId: input.agentKeyCatId },
+  );
+}
+
 export const capabilityEvolutionTools = [
+  defineTool({
+    name: 'cat_cafe_issue_capability_evolution_measurement',
+    description:
+      'Ask F267 to issue the canonical measurement chain for one Evolution Program from its target owner source-owner manifest. ' +
+      'Use only the exact Program id + source message id after the owner has committed a real certificate, role assignment, and revision-bound cohort; consumer-consumption, optimizer-exposure, or independent-holdout proof may be absent and then resolves as typed insufficient. ' +
+      'NOT for: uploading evidence payloads, inventing defaults, relabeling content as measurement proof, or advancing the F311 Program. ' +
+      'Output: an immutable owner-backed artifact PR, or typed insufficient with the precise missing owner contract; issuance does not advance the Program. ' +
+      'GOTCHA: only the configured eval-domain cat may issue; shared persistent MCP callers pass agentKeyCatId.',
+    inputSchema: issueCapabilityEvolutionMeasurementInputSchema,
+    handler: handleIssueCapabilityEvolutionMeasurement,
+    governance: {
+      implementationExport: 'handleIssueCapabilityEvolutionMeasurement',
+      action: 'create',
+      authority: 'eval-callback',
+      risk: { level: 'write', openWorld: false },
+      runtimeProfiles: ['full', 'agent-key'],
+      standaloneReason: measurementAdmissionReason,
+    },
+  }),
   defineTool({
     name: 'cat_cafe_start_evolution_program',
     description:

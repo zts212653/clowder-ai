@@ -1,4 +1,4 @@
-import type { CatId, ReportingMode } from '@cat-cafe/shared';
+import type { CatId, DeclaredWorkMode, ReportingMode } from '@cat-cafe/shared';
 import type { InvocationQueue } from '../domains/cats/services/agents/invocation/InvocationQueue.js';
 import type { OwnerAuthProvenance } from '../domains/cats/services/agents/invocation/owner-auth-provenance.js';
 import type { QueueProcessor } from '../domains/cats/services/agents/invocation/QueueProcessor.js';
@@ -86,6 +86,8 @@ export interface AppendApprovedInitialMessageInput extends ProposalInitialMessag
   preferredCats?: readonly CatId[];
   /** F128 Phase AA (AC-AA1): reporting mode (undefined → enrich default final-only, supersedes AC-Y6 none). */
   reportingMode?: ReportingMode;
+  /** F277: approved placement truth, injected into the first message context. */
+  declaredWorkMode?: DeclaredWorkMode;
   /** Phase AA (AC-AA4): the cat that proposed this thread — seed message author. */
   sourceCatId?: CatId | null;
   /** Phase AA (AC-AA5): invocation id from the proposal — for crossPost metadata. */
@@ -162,6 +164,7 @@ export async function appendApprovedInitialMessage({
   sourceThreadTitle,
   preferredCats,
   reportingMode,
+  declaredWorkMode,
   sourceCatId,
   sourceInvocationId,
   messageStore,
@@ -224,6 +227,7 @@ export async function appendApprovedInitialMessage({
       primaryMentionHandleForCatId,
       reportingMode,
       sourceCatHandle,
+      declaredWorkMode,
     );
     const stored = await messageStore.append({
       userId,
@@ -271,6 +275,7 @@ export async function appendApprovedInitialMessage({
     primaryMentionHandleForCatId,
     reportingMode,
     sourceCatHandle, // Phase AA (AC-AA6): routing credentials
+    declaredWorkMode,
   );
 
   if (targetCats.length === 0) {

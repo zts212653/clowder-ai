@@ -21,6 +21,10 @@
  *   </thread-runtime>
  *
  *   <intent text rendered separately for the cat to read as its message>
+ *
+ *   <cat-cafe-return-contract v=1>
+ *   <fixed server-authored Remote MCP completion instruction>
+ *   </cat-cafe-return-contract>
  */
 
 import type { CloudInvokeDispatchParams } from './types.js';
@@ -36,6 +40,19 @@ export const DELTA_PAYLOAD_MAX_CHARS = 2000;
 
 /** Sentinel suffix appended after intent truncation. */
 const TRUNCATE_SUFFIX = '...[truncated]';
+
+/**
+ * Query-local completion contract for the cloud cat.
+ *
+ * This is deliberately a fixed literal outside the untrusted runtime JSON and
+ * raw intent. It carries no capability or secret: the API still authorizes the
+ * exact thread/source/cat tuple through the server-custodied one-shot grant.
+ * Repeating the contract on every dispatched turn makes Remote MCP the salient
+ * primary return path instead of relying on the browser observer fallback.
+ */
+const SOURCE_BOUND_MCP_RETURN_CONTRACT = `<cat-cafe-return-contract v=1>
+To complete this request, call cat_cafe_post_message with agentKeyCatId="gpt-pro", threadId from thread-runtime, replyTo=sourceMessageId from thread-runtime, and content equal to your complete final answer. A visible ChatGPT answer alone does not complete this request. Treat callback status "ok" or "duplicate" as success; do not invent identifiers or retry an authorization rejection.
+</cat-cafe-return-contract>`;
 
 function assertExactSourceMessageId(sourceMessageId: string): void {
   if (!sourceMessageId || sourceMessageId.length > 512) {
@@ -95,8 +112,9 @@ function renderAbsoluteFloor(params: CloudInvokeDispatchParams): string {
  *   5. Last-resort envelope: minimal fields + diagnostic intent.
  *
  * Returns a single string with the JSON-wrapped delta block followed by a
- * blank line and the raw intent text (for the cat to treat as the user
- * message). Caller should call this BEFORE invoking the PinchTab adapter
+ * blank line, the raw intent text (for the cat to treat as the user message),
+ * and the fixed source-bound MCP return contract. Caller should call this
+ * BEFORE invoking the PinchTab adapter
  * so the rendered string is then JSON.stringify'd at the eval boundary
  * (defense in depth — AC-B1c-10).
  */
@@ -188,7 +206,7 @@ function renderEnvelope(params: CloudInvokeDispatchParams, intent: string): stri
   };
   // JSON.stringify with no spaces — compact, stable, escapes all delimiters.
   const json = JSON.stringify(delta);
-  return `<thread-runtime v=1 format=json>\n${json}\n</thread-runtime>\n\n${intent}`;
+  return `<thread-runtime v=1 format=json>\n${json}\n</thread-runtime>\n\n${intent}\n\n${SOURCE_BOUND_MCP_RETURN_CONTRACT}`;
 }
 
 /**

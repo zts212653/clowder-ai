@@ -511,19 +511,41 @@ skills:
     merged_from: ["community-pr"]
 
   # ── 自我进化 ──
+  capability-evolution:
+    category: "治理"
+    description: >
+      “我们来进化 X” / “能进化什么” → F311 Capability Evolution 产品入口，不是事后复盘。
+      Use when: 用户询问可进化对象或边界，或要求进化一个具体能力、Agent、Skill、工作流、代码仓或外部系统。
+      Not for: 复盘已经发生的重复错误、SOP 缺口或知识沉淀（用 self-evolution）；确定性 bug；只有运行健康问题（走 F153 logs/metrics/traces）。
+      Output: 问“能进化什么”时只解释且不创建；给出具体目标时解析 canonical targetRef，并用 sourceMessageId 作为 clientMessageId 调用 cat_cafe_start_evolution_program，返回 durable Program 与 Workspace 入口。
+    triggers:
+      - "我们来进化"
+      - "能进化什么"
+      - "自进化什么"
+      - "能力进化"
+      - "Evolution Program"
+      - "Capability Evolution"
+    not_for:
+      - "复盘已经发生的重复错误、流程缺口或知识沉淀"
+      - "确定性 bug 修复"
+      - "性能、耗时或稳定性诊断"
+    output: "Informational explanation with zero writes, or canonical durable Evolution Program + F307 Workspace surface"
+    next: ["self-evolution"]
+    sop_step: null
+    merged_from: null
+
   self-evolution:
     category: "治理"
     description: >
-      Scope Guard + Process Evolution + Knowledge Evolution — 主动护栏与自我进化。
+      复盘已经发生的工作并沉淀改进，不是“我们来进化 X”的产品入口。
       Use when: operator scope 发散偏离愿景、同类错误反复出现、SOP 流程缺口、有价值的知识/方法论值得沉淀。
-      Not for: 日常 SOP 推进（正常执行）、一次性个案 bug fix。
+      Not for: 用户询问“能进化什么”、能力进化边界，或要求“我们来进化 X”（用 capability-evolution）；日常 SOP 推进（正常执行）；一次性个案 bug fix。
       Output: Scope 收束提醒 / 流程改进提案 / 知识沉淀提案。
     triggers:
       - "scope 发散"
       - "又犯了"
       - "反复犯错"
       - "流程缺口"
-      - "我们应该改"
       - "self-evolution"
       - "这个错误犯了好多次"
       - "要不要拆成多个 feat"
@@ -537,10 +559,12 @@ skills:
       - "eval ledger"
       - "成熟度"
     not_for:
+      - "询问能进化什么或能力进化边界"
+      - "要求我们来进化 X"
       - "日常 SOP 推进"
       - "一次性 bug fix"
     output: "Scope Guard Log / Evolution Proposal / Episode Card → Method/Skill → Eval"
-    next: []
+    next: ["capability-evolution"]
     sop_step: null
     merged_from: null
 
@@ -1459,11 +1483,11 @@ skills:
   tech-writing:
     category: "创作与媒体"
     description: >
-      技术文章对外写作：从内部实践到读者能代入的叙事。
-      Use when: 写技术博客、公众号文章、社区分享、对外 longform、技术文章 review、写推广语。
-      Not for: 内部文档/spec（直接写）、PPT（用 ppt-forge）、纯调研报告（用 deep-research）。
-      Output: 读者能代入的技术文章 + AI味自检通过 + 推广语。
-      技术叙事用 7P 组织问题与机制、用 5E 限制 claim；需要观众亲手判题时续接 concept-demo-design 的可证伪技术剖面。
+      技术文章对外写作：把内部实践变成读者能代入、证据可见的文字与页面叙事。
+      Use when: 写技术博客、公众号文章、社区分享、对外 longform、技术文章 review、文章配图与推广语。
+      Not for: 内部文档/spec（直接写）、PPT（用 ppt-forge）、单独生成图片（用 image-generation）、纯调研报告（用 deep-research）。
+      Output: 文章叙事弧 + claim/证据边界 + 视觉叙事图谱 + 页面级自检。
+      技术叙事用 7P 组织问题与机制、用 5E 限制 claim；图片先做 Figure Contract，再按证据阶梯选择截图、案例、解释图或氛围图。
     triggers:
       - 技术叙事
       - 技术竞争力
@@ -1477,13 +1501,16 @@ skills:
       - "对外发布"
       - "社区分享"
       - "推广语"
+      - "文章配图"
+      - "视觉叙事"
       - "tech writing"
     not_for:
       - "内部文档"
       - "spec"
       - "PPT"
+      - "单独生成图片"
       - "调研报告"
-    output: "Reader-friendly technical article + AI-flavor check passed + promo copy"
+    output: "Reader-friendly technical article + claim/evidence boundaries + visual narrative map + page-level QA"
     next: []
     sop_step: null
     merged_from: null

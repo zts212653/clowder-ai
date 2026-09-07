@@ -154,6 +154,7 @@ async function dispatchApprovedInitialMessage(
       sourceThreadTitle,
       preferredCats: proposal.preferredCats,
       reportingMode: proposal.reportingMode,
+      declaredWorkMode: proposal.declaredWorkMode,
       sourceCatId: proposal.sourceCatId,
       sourceInvocationId: proposal.sourceInvocationId,
       messageStore,

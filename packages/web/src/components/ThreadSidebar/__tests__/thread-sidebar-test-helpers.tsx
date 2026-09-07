@@ -95,6 +95,8 @@ export function textFail(status = 500, body = 'fail') {
 
 export function defaultSidebarApiMock(path: string) {
   if (path === '/api/threads?view=sidebar') return jsonOk({ threads: mockStore.threads });
+  if (path === '/api/threads/relations') return jsonOk({ v: 1, nodes: [] });
+  if (path === '/api/config/thread-attention') return jsonOk({ aliases: {}, open: {} });
   if (path === '/api/governance/health') return jsonOk({ projects: [] });
   if (path === '/api/projects/cwd') return jsonOk({ path: '/test' });
   if (path === '/api/backlog/items') return jsonOk({ items: [] });

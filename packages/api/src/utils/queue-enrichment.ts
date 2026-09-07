@@ -8,9 +8,19 @@
  * pointers; the enrichment layer joins persisted message data at emit time.
  */
 
-import type { MessageContent, QueueMessageReceipt, QueueMessageReceiptProjection } from '@cat-cafe/shared';
+import type {
+  MessageContent,
+  QueueMessageReceipt,
+  QueueMessageReceiptProjection,
+  QueueRecoveryAction,
+} from '@cat-cafe/shared';
 import type { QueueEntry } from '../domains/cats/services/agents/invocation/InvocationQueue.js';
-import type { IMessageStore } from '../domains/cats/services/stores/ports/MessageStore.js';
+import {
+  canSteerQueueSources,
+  projectUnconsumedQueueCarrier,
+  readQueueCarrierMessages,
+} from '../domains/cats/services/agents/invocation/QueueCarrierSourceProjection.js';
+import type { IMessageStore, StoredMessage } from '../domains/cats/services/stores/ports/MessageStore.js';
 import { projectQueueReceipt } from '../domains/cats/services/stores/ports/queued-message-receipt.js';
 import type { SocketManager } from '../infrastructure/websocket/index.js';
 
@@ -25,6 +35,8 @@ export interface EnrichedQueueEntry extends Omit<QueueEntry, 'ownerAuthProvenanc
   targetStates: Record<string, 'queued' | 'notified' | 'awakened' | 'seen' | 'failed' | 'steering' | 'handled'>;
   messagePreview?: QueueEntryMessagePreview;
   queueReceipt?: QueueMessageReceipt;
+  /** Canonical executable escape hatches. Browser code must not reconstruct these from raw state. */
+  recoveryActions: QueueRecoveryAction[];
 }
 
 export interface QueueUpdatePublicationOptions {
@@ -169,6 +181,74 @@ function projectAgentQueueReceipt(
   };
 }
 
+function encodePathSegment(value: string): string {
+  return encodeURIComponent(value);
+}
+
+/**
+ * Stable optimistic-concurrency fence for a failed Queue target. The fence is
+ * derived only from Queue's canonical failure facts, so it survives durable
+ * restore and changes whenever a later attempt fails again.
+ */
+export function failedQueueRecoveryActionId(entry: QueueEntry, catId: string): string {
+  const failedAt = entry.queuedFailureAtByCatId?.[catId] ?? 'legacy';
+  const reason = entry.queuedFailureReasonByCatId?.[catId] ?? 'unknown';
+  const attemptId = entry.queuedAttemptIdByCatId?.[catId] ?? 'initial';
+  return ['queue-retry', entry.id, encodeURIComponent(catId), failedAt, reason, encodeURIComponent(attemptId)].join(
+    ':',
+  );
+}
+
+export function projectQueueRecoveryActions(entry: QueueEntry): QueueRecoveryAction[] {
+  if (!entry.id || !entry.threadId) return [];
+  const threadPath = encodePathSegment(entry.threadId);
+  const entryPath = encodePathSegment(entry.id);
+  if (entry.status === 'processing') {
+    return [
+      {
+        id: `queue-force-reset:${entry.id}:${entry.processingStartedAt ?? entry.createdAt}`,
+        entryId: entry.id,
+        kind: 'force_reset',
+        request: { method: 'POST', path: `/api/threads/${threadPath}/force-reset` },
+      },
+    ];
+  }
+
+  const failed = new Set(entry.queuedFailedByCatIds ?? []);
+  const targetCats = Array.isArray(entry.targetCats) ? entry.targetCats : [];
+  const actions: QueueRecoveryAction[] = [...failed]
+    .filter((catId) => targetCats.includes(catId))
+    .map((catId) => {
+      const id = failedQueueRecoveryActionId(entry, catId);
+      return {
+        id,
+        entryId: entry.id,
+        kind: 'retry_target' as const,
+        targetCatId: catId,
+        request: {
+          method: 'POST' as const,
+          path: `/api/threads/${threadPath}/queue/${entryPath}/targets/${encodePathSegment(catId)}/retry`,
+          body: { recoveryActionId: id },
+        },
+      };
+    });
+  if (targetCats.some((catId) => !failed.has(catId))) {
+    actions.unshift({
+      id: `queue-steer:${entry.id}`,
+      entryId: entry.id,
+      kind: 'steer',
+      request: { method: 'POST', path: `/api/threads/${threadPath}/queue/${entryPath}/steer` },
+    });
+  }
+  actions.push({
+    id: `queue-withdraw:${entry.id}`,
+    entryId: entry.id,
+    kind: 'withdraw',
+    request: { method: 'DELETE', path: `/api/threads/${threadPath}/queue/${entryPath}` },
+  });
+  return actions;
+}
+
 export function projectPublicQueueEntry(entry: QueueEntry): EnrichedQueueEntry {
   const {
     ownerAuthProvenance: _internalOwnerAuthProvenance,
@@ -197,6 +277,7 @@ export function projectPublicQueueEntry(entry: QueueEntry): EnrichedQueueEntry {
   return {
     ...publicEntry,
     targetStates,
+    recoveryActions: projectQueueRecoveryActions(entry),
     ...(queueReceipt ? { queueReceipt } : {}),
   };
 }
@@ -208,14 +289,61 @@ function collectMessageIds(entry: Pick<QueueEntry, 'messageId' | 'mergedMessageI
   );
 }
 
+type DurableRetryEntry = Pick<QueueEntry, 'id' | 'threadId' | 'userId'>;
+
+/**
+ * Resolve the durable attempt that makes one message-backed Retry executable.
+ * GET projection and POST execution share this static custody gate; live retry
+ * authority is still revalidated atomically by the command route.
+ */
+export function resolveDurableRetryAttemptId(
+  entry: DurableRetryEntry,
+  message: StoredMessage,
+  targetCatId: string,
+): string | undefined {
+  if (message.userId !== entry.userId || message.threadId !== entry.threadId || !message.queueCustody) {
+    return undefined;
+  }
+  const targetCarrier = message.queueCustody.carrierByTargetCatId?.[targetCatId];
+  const carrierEntryId = targetCarrier?.entryId ?? message.queueCustody.entryId;
+  if (carrierEntryId !== entry.id) return undefined;
+  const target = projectQueueReceipt(message.queueCustody).targets.find((candidate) => candidate.catId === targetCatId);
+  const latest = target?.attempts?.at(-1);
+  if (
+    target?.state !== 'failed' ||
+    target.retryable === false ||
+    !latest ||
+    (latest.state !== 'failed' && !(latest.state === 'cancelled' && latest.terminalReason === 'invocation_cancelled'))
+  ) {
+    return undefined;
+  }
+  return latest.id;
+}
+
+function failClosedMessageBackedRetry(entry: EnrichedQueueEntry): EnrichedQueueEntry {
+  if (collectMessageIds(entry).length === 0) return entry;
+  return {
+    ...entry,
+    recoveryActions: entry.recoveryActions.filter(
+      (action) => action.kind !== 'retry_target' && action.kind !== 'steer',
+    ),
+  };
+}
+
 /** Build a message preview by aggregating content from all related messages. */
 async function buildMessageEnrichment(
+  entry: EnrichedQueueEntry,
   msgIds: string[],
   messageStore: IMessageStore,
-): Promise<{ messagePreview?: QueueEntryMessagePreview; queueReceipt?: QueueMessageReceipt } | null> {
+): Promise<{
+  messagePreview?: QueueEntryMessagePreview;
+  queueReceipt?: QueueMessageReceipt;
+  retryableTargetCatIds: ReadonlySet<string>;
+}> {
   const blocks: MessageContent[] = [];
   let replyTo: string | undefined;
   let queueReceipt: QueueMessageReceipt | undefined;
+  const retryableTargetCatIds = new Set<string>();
 
   const mergeQueueReceipt = (projected: QueueMessageReceipt): void => {
     if (queueReceipt && JSON.stringify(queueReceipt) !== JSON.stringify(projected)) {
@@ -230,9 +358,13 @@ async function buildMessageEnrichment(
     if (msg.contentBlocks) blocks.push(...msg.contentBlocks);
     if (!replyTo && msg.replyTo) replyTo = msg.replyTo;
     if (msg.queueCustody) mergeQueueReceipt(projectQueueReceipt(msg.queueCustody));
+    for (const action of entry.recoveryActions) {
+      if (action.kind === 'retry_target' && resolveDurableRetryAttemptId(entry, msg, action.targetCatId)) {
+        retryableTargetCatIds.add(action.targetCatId);
+      }
+    }
   }
 
-  if (blocks.length === 0 && !replyTo && !queueReceipt) return null;
   return {
     ...(blocks.length > 0 || replyTo
       ? {
@@ -243,6 +375,7 @@ async function buildMessageEnrichment(
         }
       : {}),
     ...(queueReceipt ? { queueReceipt } : {}),
+    retryableTargetCatIds,
   };
 }
 
@@ -257,31 +390,56 @@ export async function enrichQueueEntries(
   entries: QueueEntry[],
   messageStore: IMessageStore | null | undefined,
 ): Promise<EnrichedQueueEntry[]> {
-  const projected = entries.map(projectPublicQueueEntry);
-  return enrichProjectedQueueEntries(projected, messageStore);
+  return enrichProjectedQueueEntries(entries, messageStore);
 }
 
 async function enrichProjectedQueueEntries(
-  projected: EnrichedQueueEntry[],
+  entries: QueueEntry[],
   messageStore: IMessageStore | null | undefined,
 ): Promise<EnrichedQueueEntry[]> {
-  if (!messageStore || projected.length === 0) return projected;
+  if (entries.length === 0) return [];
+  if (!messageStore) return entries.map(projectPublicQueueEntry).map(failClosedMessageBackedRetry);
 
-  try {
-    return await Promise.all(
-      projected.map(async (entry) => {
-        const msgIds = collectMessageIds(entry);
-        if (msgIds.length === 0) return entry;
+  const enriched = await Promise.all(
+    entries.map(async (raw): Promise<EnrichedQueueEntry | null> => {
+      let entry = projectPublicQueueEntry(raw);
+      const msgIds = collectMessageIds(entry);
+      if (msgIds.length === 0) return entry;
 
-        const enrichment = await buildMessageEnrichment(msgIds, messageStore);
-        return enrichment ? { ...entry, ...enrichment } : entry;
-      }),
-    );
-  } catch {
-    // Presentation-layer enrichment must not break queue mutations.
-    // Fall back to raw entries on any messageStore error.
-    return projected;
-  }
+      try {
+        const messages = await readQueueCarrierMessages(raw, messageStore);
+        const live = projectUnconsumedQueueCarrier(raw, messages);
+        if (!live) return null;
+        entry = projectPublicQueueEntry(live);
+        const { retryableTargetCatIds, ...enrichment } = await buildMessageEnrichment(
+          entry,
+          collectMessageIds(entry),
+          messageStore,
+        );
+        return {
+          ...entry,
+          ...enrichment,
+          recoveryActions: entry.recoveryActions.filter(
+            (action) =>
+              (action.kind !== 'retry_target' || retryableTargetCatIds.has(action.targetCatId)) &&
+              (action.kind !== 'steer' ||
+                live.targetCats.some((catId) =>
+                  canSteerQueueSources(
+                    live,
+                    messages.filter((message) => collectMessageIds(entry).includes(message.id)),
+                    catId,
+                  ),
+                )),
+          ),
+        };
+      } catch {
+        // Preview failures do not suppress Queue publication, but custody-dependent
+        // Retry must fail closed until the store can prove the exact action again.
+        return failClosedMessageBackedRetry(entry);
+      }
+    }),
+  );
+  return enriched.filter((entry): entry is EnrichedQueueEntry => entry !== null);
 }
 
 async function projectMessageReceipts(
@@ -312,7 +470,8 @@ async function buildQueueUpdateProjectionWithinDeadline(
   receiptMessageIds: readonly string[],
 ): Promise<{ queue: EnrichedQueueEntry[]; messageReceipts?: QueueMessageReceiptProjection[] }> {
   const projected = entries.map(projectPublicQueueEntry);
-  if (!messageStore) return { queue: projected };
+  const failClosedProjection = projected.map(failClosedMessageBackedRetry);
+  if (!messageStore) return { queue: failClosedProjection };
   if (projected.length === 0 && receiptMessageIds.length === 0) return { queue: projected };
 
   let timer: ReturnType<typeof setTimeout> | undefined;
@@ -322,13 +481,13 @@ async function buildQueueUpdateProjectionWithinDeadline(
   });
   try {
     const update = Promise.all([
-      enrichProjectedQueueEntries(projected, messageStore),
+      enrichProjectedQueueEntries(entries, messageStore),
       projectMessageReceipts(receiptMessageIds, messageStore),
     ]).then(([queue, messageReceipts]) => ({
       queue,
       ...(messageReceipts.length > 0 ? { messageReceipts } : {}),
     }));
-    return (await Promise.race([update, deadline])) ?? { queue: projected };
+    return (await Promise.race([update, deadline])) ?? { queue: failClosedProjection };
   } finally {
     if (timer) clearTimeout(timer);
   }

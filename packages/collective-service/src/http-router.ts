@@ -7,6 +7,8 @@ import {
   resolveCollectiveClientAsset,
 } from '@cat-cafe/collective-client';
 import { CollectiveServiceError } from './errors.js';
+import type { GitHubAppManifestSetup } from './github-app-manifest-setup.js';
+import { routeGitHubAppSetupGet, routeGitHubAppSetupPost } from './github-app-setup-routes.js';
 import {
   applySecurityHeaders,
   clearHumanAuthCompletionCookie,
@@ -32,6 +34,7 @@ interface CollectiveHttpHandlerOptions {
   readonly store: CollectiveServiceStore;
   readonly allowedHostOrigins: readonly string[];
   readonly bootstrapLinkPath?: string;
+  readonly githubAppSetup?: GitHubAppManifestSetup;
 }
 
 export function createCollectiveHttpHandler(options: CollectiveHttpHandlerOptions) {
@@ -47,7 +50,14 @@ export function createCollectiveHttpHandler(options: CollectiveHttpHandlerOption
         response.writeHead(origin && allowedOrigins.has(origin) ? 204 : 403).end();
         return;
       }
-      await routeRequest(options.store, allowedOrigins, options.bootstrapLinkPath, request, response);
+      await routeRequest(
+        options.store,
+        allowedOrigins,
+        options.bootstrapLinkPath,
+        options.githubAppSetup,
+        request,
+        response,
+      );
     } catch (error) {
       writeError(response, error);
     }
@@ -58,6 +68,7 @@ async function routeRequest(
   store: CollectiveServiceStore,
   allowedOrigins: ReadonlySet<string>,
   bootstrapLinkPath: string | undefined,
+  githubAppSetup: GitHubAppManifestSetup | undefined,
   request: IncomingMessage,
   response: ServerResponse,
 ): Promise<void> {
@@ -71,18 +82,19 @@ async function routeRequest(
     return;
   }
   if (method === 'GET') {
-    await routeGet(store, url, request, response);
+    await routeGet(store, githubAppSetup, url, request, response);
     return;
   }
   if (method !== 'POST') {
     routeClientFallback(url, response);
     return;
   }
-  await routePost(store, allowedOrigins, bootstrapLinkPath, url, request, response);
+  await routePost(store, allowedOrigins, bootstrapLinkPath, githubAppSetup, url, request, response);
 }
 
 async function routeGet(
   store: CollectiveServiceStore,
+  githubAppSetup: GitHubAppManifestSetup | undefined,
   url: URL,
   request: IncomingMessage,
   response: ServerResponse,
@@ -95,10 +107,7 @@ async function routeGet(
     writeJson(response, 200, store.getMetadata());
     return;
   }
-  if (url.pathname === '/api/auth/providers') {
-    writeJson(response, 200, { providers: store.getHumanAuthProviders() });
-    return;
-  }
+  if (await routeGitHubAppSetupGet(store, githubAppSetup, url, response)) return;
   if (url.pathname === '/api/auth/github/callback') {
     if (url.searchParams.has('error')) {
       redirectHumanAuthError(response, 'authorization_denied', humanAuthCookieIsSecure(store));
@@ -181,11 +190,13 @@ async function routePost(
   store: CollectiveServiceStore,
   allowedOrigins: ReadonlySet<string>,
   bootstrapLinkPath: string | undefined,
+  githubAppSetup: GitHubAppManifestSetup | undefined,
   url: URL,
   request: IncomingMessage,
   response: ServerResponse,
 ): Promise<void> {
   const body = await readJsonBody(request);
+  if (await routeGitHubAppSetupPost(store, githubAppSetup, url.pathname, request, response, body)) return;
   if (await routeIdentityPost(store, bootstrapLinkPath, url.pathname, request, response, body)) return;
   if (await routeConnectionPost(store, allowedOrigins, url.pathname, request, response, body)) return;
   if (await routeEventPost(store, url.pathname, request, response, body)) return;

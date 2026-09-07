@@ -177,6 +177,11 @@ export class CloudInvokeBridge implements ICloudInvokeBridge {
     // The Host Adapter can append only to an existing binding; it never
     // manufactures a conversation by driving the foreground composer.
     const boundUrl = await this.readBoundUrl(params);
+    if (hostAdapter && !boundUrl) {
+      const detail = 'Personal Chrome Host is available, but this thread has no bound ChatGPT conversation';
+      await this.fallback(params, 'needs-binding', detail);
+      return { kind: 'fallback', reason: 'needs-binding', detail };
+    }
     const hostDecision = await dispatchBoundConversationThroughHost({
       adapter: hostAdapter,
       boundUrl,

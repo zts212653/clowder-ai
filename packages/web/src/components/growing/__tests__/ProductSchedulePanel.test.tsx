@@ -26,14 +26,43 @@ function ownerRead(input: {
   actionable?: boolean;
 }): EntrustedWorkOwnerReadV1 {
   const subjectRef = `task:work:${input.id}`;
+  const ownerRef = `task:item:${input.id}`;
+  const producerRef = `approval:${input.id}`;
   return {
     envelope: {
       subjectRef,
-      ownerRef: `task:item:${input.id}`,
+      ownerRef,
+      admissionReceiptRef: `task:receipt:${input.id}:3`,
       sourceRefs: [input.titleRef],
       revision: 3,
       freshness: { state: 'current', observedRevision: 3 },
       visibility: { ownerUserId: 'owner-1', human: true, cat: true },
+    },
+    brief: {
+      outcome: {
+        state: 'known',
+        value: `Prepare ${input.id} outcome`,
+        ownerRef,
+        revision: 3,
+      },
+      current: { state: 'doing', ownerRef, revision: 3 },
+      verifiedMilestone: input.actionable
+        ? { kind: 'needs_judgment', evidenceRef: producerRef, revision: 5 }
+        : {
+            kind: 'artifact_ready',
+            evidenceRef: `artifact:ppt:${input.id}#complete:7`,
+            revision: '7',
+          },
+      nextOwner: input.actionable
+        ? {
+            kind: 'human',
+            ownerRef: 'user:owner-1',
+            evidence: [{ producerId: 'f246.approval', ownerRef: producerRef, revision: 5 }],
+          }
+        : { kind: 'cat', ownerRef: 'cat:codex-sol', evidenceRef: ownerRef, revision: 3 },
+      needsMe: input.actionable
+        ? { state: 'needed', evidence: [{ producerId: 'f246.approval', ownerRef: producerRef, revision: 5 }] }
+        : { state: 'not_needed', evidenceRef: ownerRef, revision: 3 },
     },
     preparedArtifact: {
       artifactRef: `artifact:ppt:${input.id}`,
@@ -57,8 +86,8 @@ function ownerRead(input: {
             eligible: true,
             producer: {
               producerId: 'f246.approval',
-              ownerRef: `approval:${input.id}`,
-              subjectRef: `approval:${input.id}`,
+              ownerRef: producerRef,
+              subjectRef: producerRef,
               revision: 5,
             },
             taskRef: { subjectRef, observedRevision: 3 },
@@ -66,8 +95,8 @@ function ownerRead(input: {
             reasonCode: 'direction_choice',
             recommendation: 'Use the evidence-first direction',
             salience: 'normal',
-            action: { actionRef: `approval:${input.id}#decide`, expectedProducerRevision: 5 },
-            reEvaluateActionRef: `approval:${input.id}#reevaluate`,
+            action: { actionRef: `${producerRef}#decide`, expectedProducerRevision: 5 },
+            reEvaluateActionRef: `${producerRef}#reevaluate`,
           },
         ]
       : [],
@@ -124,8 +153,21 @@ describe('F310 ProductSchedulePanel', () => {
     expect(rows[0]?.getAttribute('data-owner-ref')).toBe('task:item:actionable');
     expect(rows[0]?.textContent).toContain('请你审阅');
     expect(rows[0]?.textContent).toContain('需要判断');
+    expect(rows[0]?.textContent).toContain('Prepare actionable outcome');
+    expect(rows[0]?.textContent).toContain('已到需要你判断的节点');
+    expect(rows[0]?.textContent).toContain('You');
+    expect(rows[0]?.textContent).toContain('现在需要你');
+    expect(rows[0]?.textContent).toContain('Artifact r7');
+    expect(rows[0]?.querySelector('[data-testid="entrusted-work-brief-artifact"]')?.textContent).toContain(
+      'artifact:ppt:actionable',
+    );
     expect(rows[1]?.getAttribute('data-owner-ref')).toBe('task:item:quiet');
     expect(rows[1]?.textContent).toContain('业务截止');
+    expect(rows[1]?.textContent).toContain('codex-sol');
+    expect(rows[1]?.textContent).toContain('现在不需要你');
+    expect(rows[1]?.querySelector('[data-testid="entrusted-work-brief-artifact"]')?.textContent).toContain(
+      'artifact:ppt:quiet',
+    );
     expect(container.textContent).not.toContain('Unadmitted conversation candidate');
   });
 
@@ -173,5 +215,33 @@ describe('F310 ProductSchedulePanel', () => {
     const panel = container.querySelector<HTMLElement>('[data-testid="product-schedule-panel"]');
     expect(panel?.className).toContain('min-w-0');
     expect(panel?.className).toContain('overflow-x-hidden');
+  });
+
+  it('shows unknown instead of inventing outcome, milestone, owner, or Artifact truth', async () => {
+    const unknown = ownerRead({
+      id: 'unknown',
+      titleRef: 'message:unknown',
+      timeRole: 'review_by',
+      time: now + 3_600_000,
+    });
+    mocks.ownerReads = [
+      {
+        ...unknown,
+        brief: {
+          ...unknown.brief,
+          outcome: { state: 'unknown' },
+          verifiedMilestone: { kind: 'unknown' },
+          nextOwner: { kind: 'unknown' },
+        },
+        preparedArtifact: undefined,
+      },
+    ];
+
+    await act(async () => {
+      root.render(<ProductSchedulePanel now={() => now} />);
+    });
+
+    const item = container.querySelector('[data-testid="product-schedule-item"]');
+    expect(item?.textContent?.match(/unknown/g)?.length).toBeGreaterThanOrEqual(4);
   });
 });

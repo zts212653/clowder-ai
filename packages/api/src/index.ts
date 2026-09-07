@@ -22,7 +22,7 @@ import fastifyCookie from '@fastify/cookie';
 import cors from '@fastify/cors';
 import fastifyWebsocket from '@fastify/websocket';
 import Fastify, { type FastifyReply } from 'fastify';
-import { resolveAnthropicRuntimeProfile, resolveForClient } from './config/account-resolver.js';
+import { resolveAnthropicRuntimeProfile } from './config/account-resolver.js';
 import { regenerateStartupCliConfigs } from './config/capabilities/startup-cli-config.js';
 import { resolveBoundAccountRefForCat } from './config/cat-account-binding.js';
 import {
@@ -241,6 +241,14 @@ import { createVignetteWriter } from './domains/taste/services/writeVignette.js'
 import { createTasteProposalStore } from './domains/taste/stores/factories/TasteProposalStoreFactory.js';
 import { AgentPaneRegistry } from './domains/terminal/agent-pane-registry.js';
 import { TmuxGateway } from './domains/terminal/tmux-gateway.js';
+import {
+  createMicroduckApprovalResolver,
+  createMicroduckProposalResolver,
+} from './infrastructure/capability-evolution/adapters/microduck-governance-resolvers.js';
+import { createMicroduckRuntimeAdapter } from './infrastructure/capability-evolution/adapters/microduck-owner-runtime.js';
+import { ProgramAdapterRegistry } from './infrastructure/capability-evolution/adapters/program-adapter-registry.js';
+import { registerF311E0EvalRepairOwnerRuntime } from './infrastructure/capability-evolution/change/f311-e0-eval-repair-owner-runtime-registration.js';
+import type { EvolutionChangeOwnerPort } from './infrastructure/capability-evolution/change/program-change-owner-contract.js';
 import { CommandRegistry } from './infrastructure/commands/CommandRegistry.js';
 import { parseManifestSlashCommands } from './infrastructure/commands/manifest-commands.js';
 import { buildThreadDeepLink } from './infrastructure/connectors/connector-command-helpers.js';
@@ -265,7 +273,11 @@ import { buildGhCliEnv, resolveGhCliToken, withHiddenGhCliWindow } from './infra
 import { readGitHubApiResource, validateGitHubApiResource } from './infrastructure/github/github-object-validator.js';
 import type { EvalDomainId } from './infrastructure/harness-eval/domain/eval-domain-registry.js';
 import { EvalRepairCaseActionResolver } from './infrastructure/harness-eval/eval-repair-case-action-resolver.js';
-import { createEvalRepairCutover } from './infrastructure/harness-eval/eval-repair-cutover.js';
+import type { EvalRepairOutcomeService } from './infrastructure/harness-eval/eval-repair-outcome.js';
+import {
+  createEvalRepairOwnerRuntime,
+  evalRepairOwnerRuntimeRegistration,
+} from './infrastructure/harness-eval/eval-repair-owner-runtime.js';
 import { ensureEvalDomainThreads } from './infrastructure/harness-eval/hub/eval-hub-thread-ensure.js';
 import { loadOrCreatePawFeelBundleSnapshotSigner } from './infrastructure/harness-eval/paw-feel-disposition/bundle-snapshot.js';
 import { RedisPawFeelReconciliationCoverageStore } from './infrastructure/harness-eval/paw-feel-disposition/coverage-store.js';
@@ -305,6 +317,7 @@ import { connectorWebhookRoutes } from './routes/connector-webhooks.js';
 import { dispatchProposalRoutes } from './routes/dispatch-proposal-routes.js';
 import { buildEntityRecord, registerEntityProposalDecisionRoutes } from './routes/entity-proposal-decision-routes.js';
 import { evalRepairApprovalRoutes } from './routes/eval-repair-approval-routes.js';
+import { evalRepairOutcomeRoutes } from './routes/eval-repair-outcome-routes.js';
 import { gameRoutes } from './routes/games.js';
 import { registerHumanDispositionFeedbackRoutes } from './routes/human-disposition-feedback-routes.js';
 import {
@@ -416,7 +429,6 @@ import {
   worldRoutes,
 } from './routes/index.js';
 import { knowledgeFeedRoutes } from './routes/knowledge-feed.js';
-import { createLegacyLocalReviewContinuationQueueAdapter } from './routes/legacy-local-review-continuation-queue-adapter.js';
 import { marketplaceRoutes } from './routes/marketplace.js';
 import { registerPersonMemoryDecisionRoutes } from './routes/person-memory-decision-routes.js';
 import { previewRoutes } from './routes/preview.js';
@@ -849,9 +861,6 @@ async function main(): Promise<void> {
   let actionSuccessorCompletionService:
     | import('./domains/ball-custody/ActionSuccessorCompletionService.js').ActionSuccessorCompletionService
     | undefined;
-  let localReviewVerdictService:
-    | import('./domains/ball-custody/LocalReviewVerdictService.js').LocalReviewVerdictService
-    | undefined;
   let externalReviewRecoveryService:
     | import('./domains/ball-custody/ExternalReviewRecoveryService.js').ExternalReviewRecoveryService
     | undefined;
@@ -889,7 +898,6 @@ async function main(): Promise<void> {
       actionCompletionMod,
       actionProjectionRetirementMod,
       taskActionLifecycleMod,
-      localReviewBootstrapMod,
     ] = await Promise.all([
       import('./domains/ball-custody/RedisActionSuccessorLeaseStore.js'),
       import('./domains/ball-custody/ActionSubjectTruthResolver.js'),
@@ -897,13 +905,8 @@ async function main(): Promise<void> {
       import('./domains/ball-custody/ActionSuccessorCompletionService.js'),
       import('./domains/ball-custody/ActionSuccessorProjectionRetirementService.js'),
       import('./domains/ball-custody/TaskActionSuccessorLifecycle.js'),
-      import('./domains/ball-custody/LocalReviewCompletionBootstrap.js'),
     ]);
     actionSuccessorLeaseStore = new actionStoreMod.RedisActionSuccessorLeaseStore(redis);
-    const localReviewCompletion = localReviewBootstrapMod.createLocalReviewCompletionBootstrap({
-      messageStore,
-      invocationRecordStore,
-    });
     actionSubjectTruthResolver = new actionTruthMod.ActionSubjectTruthResolver(
       actionSuccessorLeaseStore,
       communityObjectStore,
@@ -931,7 +934,6 @@ async function main(): Promise<void> {
           return taskStore.get(taskId);
         },
       },
-      localReviewCompletion.evidenceProvider,
       {
         async observe(input) {
           return (await observeLivePrFreshness?.(input)) ?? null;
@@ -967,11 +969,6 @@ async function main(): Promise<void> {
       projectionRetirement,
     );
     actionSuccessorCompletionService = completionService;
-    localReviewVerdictService = localReviewCompletion.createVerdictService({
-      leaseStore: actionSuccessorLeaseStore,
-      completionService,
-      truthResolver: actionSubjectTruthResolver,
-    });
     // F167: external review recovery — stale HEAD recovery for external reviews
     const externalReviewRecoveryMod = await import('./domains/ball-custody/ExternalReviewRecoveryService.js');
     externalReviewRecoveryService = new externalReviewRecoveryMod.ExternalReviewRecoveryService({
@@ -1108,7 +1105,8 @@ async function main(): Promise<void> {
         const catConfig = catRegistry.tryGet(catId)?.config;
         if (catConfig?.clientId === 'anthropic' || catConfig?.clientId === 'opencode') {
           const effectiveAccountRef = resolveBoundAccountRefForCat(projectRoot, catId, catConfig);
-          const runtime = resolveForClient(projectRoot, catConfig.clientId, effectiveAccountRef);
+          // Digests always use Anthropic, including for an OpenCode-bound gateway.
+          const runtime = resolveAnthropicRuntimeProfile(projectRoot, effectiveAccountRef);
           if (!runtime?.apiKey) return null;
           return { apiKey: runtime.apiKey, baseUrl: runtime.baseUrl || 'https://api.anthropic.com' };
         }
@@ -1410,9 +1408,13 @@ async function main(): Promise<void> {
   const { RunLedger } = await import('./infrastructure/scheduler/RunLedger.js');
   const { createActorResolver } = await import('./infrastructure/scheduler/ActorResolver.js');
   const { getRoster } = await import('./config/cat-config-loader.js');
+  const { loadDossierProfiles } = await import('@cat-cafe/shared/dossier');
   const schedulerDb = memoryServices.store.getDb();
   const runLedger = new RunLedger(schedulerDb);
-  const actorResolver = createActorResolver(getRoster);
+  const dossierProfiles = loadDossierProfiles(resolveActiveProjectRoot());
+  const actorResolver = createActorResolver(getRoster, {
+    isScarce: (catId) => dossierProfiles.get(catId)?.engagementPolicy?.quota === 'weekly_subscription_scarce',
+  });
   // ── F139 Phase 3B: Governance + Emission stores ──
   const { GlobalControlStore } = await import('./infrastructure/scheduler/GlobalControlStore.js');
   const { EmissionStore } = await import('./infrastructure/scheduler/EmissionStore.js');
@@ -1580,8 +1582,8 @@ async function main(): Promise<void> {
   );
   const autoDream = await bootstrapAutoDream({
     app,
-    dataDir: memoryServices.dataDir,
     ownerUserId: privateUserId,
+    dataDir: memoryServices.dataDir,
     catalog: memoryServices.catalog,
     collectionStores: memoryServices.collectionStores,
     registry,
@@ -1614,6 +1616,10 @@ async function main(): Promise<void> {
     },
     awakenedLeaseMs: resolvePresentLoopLeaseMs(process.env.CAT_CAFE_F255_AWAKENED_LEASE_MS),
   });
+  memoryCueDeps.applicationEvidence = {
+    hasOwnedSeedIntent: ({ ownerUserId, catId, invocationId, seedId }) =>
+      autoDream.services.store.hasOwnedSeedIntentApplication(ownerUserId, catId, invocationId, seedId),
+  };
   app.log.info(
     `[api] F255 Present loop ready (startup projected=${autoDream.services.startupReconciliation.projected}, removed=${autoDream.services.startupReconciliation.removed}, failed=${autoDream.services.startupReconciliation.failed}; proactive messages=${autoDream.startupProactiveReconciliation.reconciled}, proactive failures=${autoDream.startupProactiveReconciliation.failed}; life configs=${autoDream.startupLifeReconciliation.reconciled}, orphan tasks disabled=${autoDream.startupLifeReconciliation.disabledOrphans}, life failures=${autoDream.startupLifeReconciliation.failed})`,
   );
@@ -2348,6 +2354,14 @@ async function main(): Promise<void> {
         ? { repairProjection: (subjectKey: string) => ballCustodyProjector!.rebuild(subjectKey) }
         : {}),
     });
+    const { CoordinationTerminalRetirement } = await import('./domains/ball-custody/CoordinationTerminalRetirement.js');
+    const terminalRetirement = new CoordinationTerminalRetirement({
+      messageStore,
+      service: a2aDispatchDispositionService,
+      log: app.log,
+    });
+    app.addHook('onReady', async () => terminalRetirement.start());
+    app.addHook('onClose', async () => terminalRetirement.stop());
   }
   const proactiveCandidateRegistryResolver = personMemoryStore
     ? new ProactiveCandidateRegistryResolver({
@@ -2392,10 +2406,13 @@ async function main(): Promise<void> {
     evidenceStore: memoryServices.evidenceStore,
     messageStore,
     eventStore: memoryServices.eventMemoryStore,
+    entityRegistry: new EntityRegistryStore(memoryServices.store.getDb()),
     ...(personMemoryRecallService ? { personRecall: personMemoryRecallService } : {}),
     tasteRepository,
     ownerUserId: privateUserId,
     profileRepository,
+    projectDocsRoot: docsRoot,
+    autoDreamStore: autoDream.services.store,
   });
   memoryCueDeps.sourceReader = memoryCueRuntime.sourceReader;
   router = new AgentRouter({
@@ -2989,6 +3006,8 @@ async function main(): Promise<void> {
     agentSessionMutex,
     socketManager,
     messageStore, // F117: for marking queued messages as canceled on withdraw/clear
+    retryAuthorityPreflight,
+    retryAuthorityCommitter,
     queueCustodyCoordinator,
     invocationRecordStore, // F194 Phase B: canonical liveness read source
     draftStore, // F194 Phase B: canonical liveness read source
@@ -3008,29 +3027,6 @@ async function main(): Promise<void> {
     invocationTracker,
     queueProcessor,
   });
-  const legacyLocalReviewDispositionService = actionSuccessorLeaseStore
-    ? new (
-        await import('./domains/ball-custody/LegacyLocalReviewDispositionService.js')
-      ).LegacyLocalReviewDispositionService({
-        messageStore,
-        leaseStore: actionSuccessorLeaseStore,
-        invocationRecordStore,
-        turnExecutionStore,
-        enqueueContinuation: createLegacyLocalReviewContinuationQueueAdapter({
-          router: router as unknown as import('./routes/callback-a2a-trigger.js').A2ATriggerDeps['router'],
-          invocationRecordStore,
-          socketManager: socketManager!,
-          messageStore,
-          invocationTracker,
-          deliveryCursorStore,
-          queueProcessor,
-          invocationQueue,
-          ...(ballCustodyIngest ? { ballCustody: ballCustodyIngest } : {}),
-          log: app.log,
-        }),
-      })
-    : undefined;
-
   await app.register(messageActionsRoutes, {
     messageStore,
     socketManager,
@@ -3039,8 +3035,6 @@ async function main(): Promise<void> {
     queueCustodyCoordinator,
     queueProcessor,
     indexBuilder: memoryServices.indexBuilder,
-    ownerUserId: privateUserId,
-    ...(legacyLocalReviewDispositionService ? { legacyLocalReviewDispositionService } : {}),
   });
   // F155: Frontend-facing guide actions (no MCP auth, uses userId header)
   if (threadStore) {
@@ -3212,6 +3206,15 @@ async function main(): Promise<void> {
   );
   const verdictRepoFullName =
     process.env.CAT_CAFE_VERDICT_REPO_FULL_NAME ?? process.env.CAT_CAFE_REPO_FULL_NAME ?? 'zts212653/cat-cafe';
+  const harnessGitPublisher = createGitWorktreePublisher({
+    repoRoot,
+    expectedRepoFullName: verdictRepoFullName,
+  });
+  const capabilityEvolutionMeasurementGitPublisher = createGitWorktreePublisher({
+    repoRoot,
+    expectedRepoFullName: verdictRepoFullName,
+    stageScope: 'capability-evolution-measurement',
+  });
   const { createA2aGeneratorAdapter } = await import(
     './infrastructure/harness-eval/publish-verdict/a2a-generator-adapter.js'
   );
@@ -3341,12 +3344,50 @@ async function main(): Promise<void> {
     const { CapabilityWakeupTrialProviderImpl } = await import(
       './infrastructure/harness-eval/capability-wakeup/capability-wakeup-trial-provider-impl.js'
     );
-    const { createCapabilityWakeupRuntimeSessionEnumerator } = await import(
-      './infrastructure/harness-eval/capability-wakeup/capability-wakeup-session-enumerator.js'
-    );
+    const [{ createCapabilityWakeupRuntimeSessionEnumerator }, { projectInvocationPromptInput }] = await Promise.all([
+      import('./infrastructure/harness-eval/capability-wakeup/capability-wakeup-session-enumerator.js'),
+      import('./domains/cats/services/session/InvocationPromptInputProjector.js'),
+    ]);
     const cwProvider = new CapabilityWakeupTrialProviderImpl({
       sessionStore: sessionChainStore,
       transcriptReader,
+      promptReader: {
+        read: async ({ threadId, catId, userId, invocationId }) => {
+          const projection = await projectInvocationPromptInput(
+            { messageStore, turnExecutionStore },
+            { threadId, catId },
+            invocationId,
+            userId,
+          );
+          if (projection.status !== 'available') {
+            if (projection.reason === 'prompt_message_ids_unavailable') {
+              return {
+                status: 'historical_unavailable' as const,
+                reason: projection.reason,
+              };
+            }
+            return {
+              status: 'rejected' as const,
+              reason: projection.reason,
+            };
+          }
+          const prompt = projection.messages.find(
+            (message) => message.status === 'available' && message.author === 'user',
+          );
+          if (prompt?.status === 'available') {
+            return {
+              status: 'available' as const,
+              sourceMessageId: prompt.messageId,
+              content: prompt.excerpt,
+            };
+          }
+          const first = projection.messages[0];
+          return {
+            status: 'rejected' as const,
+            reason: first && first.status !== 'available' ? first.status : 'non_user_prompt',
+          };
+        },
+      },
       toolEventLog,
       skillLoadEventLog,
       sessionEnumerator: createCapabilityWakeupRuntimeSessionEnumerator({
@@ -3422,10 +3463,7 @@ async function main(): Promise<void> {
     redis: redisClient ?? undefined,
     invokeTriggerProvider: invokeTriggerHolder,
     messageStore,
-    gitPublisher: createGitWorktreePublisher({
-      repoRoot,
-      expectedRepoFullName: verdictRepoFullName,
-    }),
+    gitPublisher: harnessGitPublisher,
     verdictGenerators,
     // 砚砚 R4 P1 + cloud R4 P1: register CallbackAuthRegistry for MCP route auth.
     callbackRegistry: registry,
@@ -3457,6 +3495,17 @@ async function main(): Promise<void> {
         currentConnectedOwnerSurfaces: number;
       }) => Promise<unknown>)
     | undefined;
+  // The Program is composed before F266/F313. This holder keeps Phase 4 dormant now while allowing
+  // the later canonical owner composition to activate the existing service without reconstruction.
+  let evolutionChangeOwner: EvolutionChangeOwnerPort | undefined;
+  let evalRepairOutcomeService: EvalRepairOutcomeService | undefined;
+  const evolutionProgramAdapterRegistry = new ProgramAdapterRegistry();
+  evolutionProgramAdapterRegistry.register(
+    createMicroduckRuntimeAdapter({
+      proposalResolver: createMicroduckProposalResolver(reevalClosureEventLog),
+      approvalResolver: createMicroduckApprovalResolver(reevalClosureEventLog),
+    }),
+  );
   const evolutionProgramService = redis
     ? await (async () => {
         const [
@@ -3508,6 +3557,7 @@ async function main(): Promise<void> {
           sourceResolvers: createEvolutionOwnerSurfaceResolvers({
             pawFeelEventLog: pawFeelDispositionEventLog,
             humanDispositionLedger: humanDispositionLedger ?? undefined,
+            messageStore,
             threadStore,
           }),
           evidenceProofResolver: createProgramEvidenceProofResolver({
@@ -3522,6 +3572,7 @@ async function main(): Promise<void> {
           joinValidator,
           // Phase 3 evaluation reads owner truth from the same canonical F267 decision proofs.
           evaluationOwnerResolver: createProgramEvaluationOwnerResolver({ decisionProofResolver }),
+          resolveChangeOwner: () => evolutionChangeOwner,
           triggerRegistration: () => (evolutionObservationDispatch ? triggerRegistration() : undefined),
           dispatchObservationTrigger: (input) => {
             if (!evolutionObservationDispatch) {
@@ -3529,8 +3580,6 @@ async function main(): Promise<void> {
             }
             return evolutionObservationDispatch(input);
           },
-          // A round opens only if F192 says it opened. No dispatcher = the Program cannot open one,
-          // which is the safe direction: it must never start a round on its own authority.
           // A round opens only if F192 says it opened. The Program must never start one on its own
           // authority, so an unwired dispatcher reports `unavailable` rather than pretending.
           dispatchEvaluationTrigger: async (context: { programId: string }) => {
@@ -3540,10 +3589,38 @@ async function main(): Promise<void> {
         });
       })()
     : undefined;
+  if (evolutionProgramService) {
+    registerF311E0EvalRepairOwnerRuntime({
+      registration: evalRepairOwnerRuntimeRegistration,
+      repoRoot: findMonorepoRoot(process.cwd()),
+      ownerUserId: privateUserId,
+      programReader: evolutionProgramService,
+      invocationRegistry: registry,
+      connectEvolutionOwner(owner) {
+        evolutionChangeOwner = owner;
+      },
+      connectOutcomeService(service) {
+        evalRepairOutcomeService = service;
+      },
+    });
+  }
+  const capabilityEvolutionMeasurementIssuer = evolutionProgramService
+    ? (
+        await import(
+          './infrastructure/harness-eval/measurement/capability-evolution/capability-evolution-measurement-issuer.js'
+        )
+      ).createCapabilityEvolutionMeasurementIssuer({
+        repoRoot,
+        programReader: evolutionProgramService,
+        gitPublisher: capabilityEvolutionMeasurementGitPublisher,
+      })
+    : undefined;
   await app.register(capabilityEvolutionProgramRoutes, {
     service: evolutionProgramService,
+    measurementIssuer: capabilityEvolutionMeasurementIssuer,
     callbackRegistry: registry,
     agentKeyRegistry,
+    adapterRegistry: evolutionProgramAdapterRegistry,
   });
   if (evalReleaseTruth.loadedRuntimeHead) {
     app.log.info(`[api] F266: release truth frozen at runtime HEAD ${evalReleaseTruth.loadedRuntimeHead}`);
@@ -4185,7 +4262,7 @@ async function main(): Promise<void> {
       },
       completionResolvers: new Set(['review_delivery', 'task_done_status']),
       freshnessResolvers: new Set(['community_current_head', 'task_active_owner']),
-      producers: new Set(['external_review_verdict', 'local_review_verdict', 'task_status_transition']),
+      producers: new Set(['external_review_verdict', 'task_status_transition']),
     });
     externalReviewVerdictService = new ExternalReviewVerdictService({
       repoConfigStore: communityRepoConfigStore,
@@ -4286,7 +4363,6 @@ async function main(): Promise<void> {
     waitLifecycleHolder,
     verifyPrReviewEventWaitCoverage,
     ...(externalReviewVerdictService ? { externalReviewVerdictService } : {}),
-    ...(localReviewVerdictService ? { localReviewVerdictService } : {}),
     ...(externalReviewRecoveryService ? { externalReviewRecoveryService } : {}),
     ...(workflowSopStore ? { workflowSopStore } : {}),
     queueProcessor,
@@ -4434,6 +4510,7 @@ async function main(): Promise<void> {
   };
 
   await app.register(proposalRoutes, {
+    projectRoot: resolveActiveProjectRoot(),
     proposalStore,
     threadStore,
     messageStore,
@@ -4578,9 +4655,26 @@ async function main(): Promise<void> {
   if (!pluginRuntime.collectiveConnectorRuntime) {
     throw new Error('Collective Connector builtin runtime was not composed');
   }
+  const { LocalCollectiveServiceManager } = await import(
+    './domains/plugin/builtin-runtime/local-collective-service-manager.js'
+  );
+  const localCollectiveService = new LocalCollectiveServiceManager({
+    env: process.env,
+    frontendBaseUrl: resolveFrontendBaseUrl(process.env, app.log),
+  });
+  const localCollectiveRecovery = await localCollectiveService.recover();
+  app.log.info(
+    {
+      state: localCollectiveRecovery.state,
+      serviceUrl: localCollectiveRecovery.serviceUrl,
+      serviceInstanceId: localCollectiveRecovery.serviceInstanceId,
+    },
+    '[api] local Collective Service recovery reconciled',
+  );
   const { registerCollectiveConnectorRoutes } = await import('./routes/collective-connector-routes.js');
   registerCollectiveConnectorRoutes(app, {
     runtime: pluginRuntime.collectiveConnectorRuntime,
+    localService: localCollectiveService,
     callbackRegistry: registry,
     resolveAgentIdentity: resolveCollectiveAgentIdentity,
     threadStore,
@@ -4606,7 +4700,7 @@ async function main(): Promise<void> {
   const f266CaseActionResolver = reevalClosureEventLog
     ? new EvalRepairCaseActionResolver(evalHarnessFeedbackRoot, reevalClosureEventLog)
     : undefined;
-  const f266Cutover = await createEvalRepairCutover({
+  const f266OwnerRuntime = await createEvalRepairOwnerRuntime({
     lifecycleVersion: 1,
     loaderVersion: 1,
     routeVersion: 1,
@@ -4618,11 +4712,14 @@ async function main(): Promise<void> {
     ...(f266CaseActionResolver
       ? { caseActionResolver: f266CaseActionResolver.resolve.bind(f266CaseActionResolver) }
       : {}),
+    releaseTruth: evalReleaseTruth,
+    registration: evalRepairOwnerRuntimeRegistration,
   });
-  if (f266Cutover.status === 'blocked') {
+  const f266Cutover = f266OwnerRuntime.status === 'active' ? f266OwnerRuntime.cutover : f266OwnerRuntime;
+  if (f266OwnerRuntime.status === 'dormant') {
     app.log.info(
-      { missing: f266Cutover.missing },
-      '[api] F313 Phase C: eval repair Approval cutover remains fail-closed',
+      { missing: f266OwnerRuntime.missing },
+      '[api] F313 Phase D: eval repair owner runtime remains fail-closed',
     );
   }
 
@@ -4748,6 +4845,11 @@ async function main(): Promise<void> {
   await app.register(evalRepairApprovalRoutes, {
     callbackRegistry: registry,
     ...(f266Cutover.status === 'active' ? { service: f266Cutover.service } : {}),
+  });
+  await app.register(evalRepairOutcomeRoutes, {
+    callbackRegistry: registry,
+    ownerUserId: privateUserId,
+    ...(evalRepairOutcomeService ? { service: evalRepairOutcomeService } : {}),
   });
   if (personMemoryStore) {
     registerPersonMemoryDecisionRoutes(app, { store: personMemoryStore, socketManager });
@@ -5260,7 +5362,7 @@ async function main(): Promise<void> {
   });
   await app.register(exportRoutes, { messageStore, threadStore });
   await app.register(debugInvocationExportRoutes, { projectRoot: findMonorepoRoot(process.cwd()) });
-  await app.register(configRoutes);
+  await app.register(configRoutes, { threadStore });
   await app.register(configSecretsRoutes);
   await app.register(rulesRoutes);
   await app.register(promptInjectionRoutes);
@@ -5930,7 +6032,6 @@ async function main(): Promise<void> {
           socketManager: socketManager ?? undefined,
           invocationQueue,
           ...(a2aDispatchDispositionService ? { a2aDispatchDispositionService } : {}),
-          ...(actionSuccessorLeaseStore ? { legacyLocalReviewDispositionLeaseStore: actionSuccessorLeaseStore } : {}),
           resumePrestartRetirement: (entries) => queueProcessor.resumeDurablePrestartRetirement(entries),
           ...(ballCustodyIngest ? { ballCustody: ballCustodyIngest } : {}),
         });
@@ -6085,6 +6186,9 @@ async function main(): Promise<void> {
     const { accountStartupHook } = await import('./config/account-startup.js');
     const startupResult = accountStartupHook(findMonorepoRoot(process.cwd()));
     app.log.info(`[api] clowder-ai#340 accounts: ${startupResult.accountCount} account(s) loaded`);
+    for (const diagnostic of startupResult.unavailableAccounts) {
+      app.log.warn({ ...diagnostic }, '[api] account unavailable; other accounts remain usable');
+    }
   }
 
   // F101 Phase G: Recover auto-play loops for active games after restart.
@@ -7034,12 +7138,36 @@ async function main(): Promise<void> {
   }
 
   if (deferredPersonMemoryReceiptStore) {
+    const { ensureMemoryOperationsThread } = await import('./domains/memory/MemoryOperationsThread.js');
     taskRunnerV2.register(
       createDeferredPersonMemoryDailyTaskSpec({
         receiptStore: deferredPersonMemoryReceiptStore,
         messageStore,
         ...(writeOpportunityTerminalLedger ? { writeOpportunityTerminalLedger } : {}),
         ...(writeOpportunityDeliveryStore ? { writeOpportunityDeliveryStore } : {}),
+        ensureSystemThread: () => ensureMemoryOperationsThread(threadStore, privateUserId),
+        routingDispatchPreflight: routingContextRuntime?.dispatchPreflight ?? {
+          async preflight(input) {
+            return {
+              v: 1,
+              ownerId: input.ownerId,
+              observedAt: Date.now(),
+              resolverState: 'degraded',
+              targets: input.targetCatIds.map((targetCatId) => ({
+                targetCatId,
+                disposition: 'warned' as const,
+                reasons: [
+                  {
+                    code: 'routing_context_unavailable',
+                    summary: 'Routing context is unavailable; scheduled memory work is parked',
+                    sourceRefs: ['routing-context:not-configured'],
+                  },
+                ],
+                alternatives: [],
+              })),
+            };
+          },
+        },
         ownerUserId: privateUserId,
       }),
     );

@@ -213,6 +213,8 @@ export interface QueryEntityMatch {
   canonicalName: string;
   matchedAlias: string;
   provenance: EntityProvenance[];
+  /** Exact hash of the current Entity projection; changes on correction or retirement. */
+  sourceRevision: string;
 }
 
 export interface EntityMatch {

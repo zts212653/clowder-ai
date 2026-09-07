@@ -106,7 +106,7 @@ function resolveDisposition(
   snapshot: BallTransitionSnapshot,
   current: BallState,
 ): BallTransitionResult {
-  if (!set('active', 'blocked').has(current)) return reject('invalid_transition');
+  if (event.payload.retired !== true && !set('active', 'blocked').has(current)) return reject('invalid_transition');
   const catId = event.payload.catId;
   if (typeof catId !== 'string') return reject('bad_payload');
   // Invocation-bound dispositions carry an exact child/wake identity while the

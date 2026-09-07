@@ -5,6 +5,82 @@ export const OTHER_WORKTREE_ID = 'worktree-f307-owner-b';
 export const FILE_PATH = 'docs/features/F307-composable-workbench.md';
 export const INVOCATION_ID = 'inv-f307-real-run';
 export const SESSION_ID = 'session-f307-real-run';
+export const EVOLUTION_PROGRAM_ID = `evolution-program:${'e'.repeat(32)}`;
+
+export const evolutionProgramProjection = {
+  program: {
+    schemaVersion: 1,
+    programId: EVOLUTION_PROGRAM_ID,
+    workspaceId: 'user:f307-real-adapter-user',
+    objectRef: { ownerFeatureId: 'F311', ownerStateRef: 'capability:development-process-harness-effectiveness' },
+    claimRef: { ownerFeatureId: 'F311', ownerStateRef: `evolution-claim:${EVOLUTION_PROGRAM_ID}` },
+    certificates: {},
+    measurementRoleRefs: {},
+    currentAssetVersionRefs: [],
+    lifecycle: 'active',
+    stage: 'constituting',
+    cycle: 1,
+    sequence: 1,
+    createdAt: '2026-09-04T08:42:00.000Z',
+    updatedAt: '2026-09-04T08:42:00.000Z',
+  },
+  cycles: [
+    {
+      programId: EVOLUTION_PROGRAM_ID,
+      cycle: 1,
+      stage: 'constituting',
+      lineageRefIds: [
+        'capability:development-process-harness-effectiveness',
+        `evolution-claim:${EVOLUTION_PROGRAM_ID}`,
+      ],
+      openedAt: '2026-09-04T08:42:00.000Z',
+    },
+  ],
+  drafts: {
+    goal: { ownerFeatureId: 'F311', ownerStateRef: `evolution-goal-draft:${EVOLUTION_PROGRAM_ID}` },
+    claim: { ownerFeatureId: 'F311', ownerStateRef: `evolution-claim-draft:${EVOLUTION_PROGRAM_ID}` },
+    measurement: { ownerFeatureId: 'F267', ownerStateRef: `evolution-measurement-draft:${EVOLUTION_PROGRAM_ID}` },
+    economic: { ownerFeatureId: 'F311', ownerStateRef: `evolution-economic-draft:${EVOLUTION_PROGRAM_ID}` },
+    roles: {
+      observer: { ownerFeatureId: 'F267', ownerStateRef: `evolution-role-draft:${EVOLUTION_PROGRAM_ID}:observer` },
+      calibrator: { ownerFeatureId: 'F267', ownerStateRef: `evolution-role-draft:${EVOLUTION_PROGRAM_ID}:calibrator` },
+    },
+  },
+  blockers: [
+    {
+      code: 'measurement_certificate_missing',
+      message: 'Measurement certificate remains owned by F267.',
+      ownerFeatureId: 'F267',
+    },
+  ],
+  nextAction: { code: 'complete_constitution', label: '继续自动建制' },
+  observation: {
+    status: 'connected',
+    trajectory: {
+      ref: { ownerFeatureId: 'F299', ownerStateRef: `inv:${INVOCATION_ID}` },
+      invocationId: INVOCATION_ID,
+      threadId: THREAD_ID,
+    },
+    connectedEyes: [
+      {
+        sourceKind: 'human-disposition',
+        ownerSurfaceRef: { ownerFeatureId: 'F281', ownerStateRef: 'human-disposition:f307-main-attention' },
+        joinKey: 'message:f307-main-attention',
+        namedConsumerRef: { ownerFeatureId: 'F311', ownerStateRef: 'evolution-consumer:program' },
+        instrumentationRef: { ownerFeatureId: 'F281', ownerStateRef: 'instrumentation:human-disposition-v1' },
+        ownerHref: '/api/human-disposition-feedback/episodes?subjectRef=f307-main-attention',
+      },
+    ],
+    gaps: [],
+    trigger: {
+      registrationRef: { ownerFeatureId: 'F192', ownerStateRef: 'eval-domain:eval:capability-evolution' },
+      channels: ['event', 'quota', 'time'],
+    },
+    nextEvaluationAt: '2026-09-05T08:42:00.000Z',
+  },
+  attribution: null,
+  lineage: { cycles: [{ cycle: 1, changes: [] }] },
+};
 
 export const invocationSummary = {
   invocationId: INVOCATION_ID,
@@ -60,10 +136,25 @@ const needsMeApprovalOwnerRead = {
   envelope: {
     subjectRef: 'task:work:f307-inline-approval',
     ownerRef: 'task:item:f307-inline-approval',
+    admissionReceiptRef: 'task:receipt:f307-inline-approval:4',
     sourceRefs: ['message:thread-f307-real-surface-adapters:source-inline-approval'],
     revision: 4,
     freshness: { state: 'current', observedRevision: 4 },
     visibility: { ownerUserId: 'f307-real-adapter-user', human: true, cat: true },
+  },
+  brief: {
+    outcome: { state: 'unknown' },
+    current: { state: 'doing', ownerRef: 'task:item:f307-inline-approval', revision: 4 },
+    verifiedMilestone: { kind: 'needs_judgment', evidenceRef: 'approval:proposal/one', revision: 7 },
+    nextOwner: {
+      kind: 'human',
+      ownerRef: 'user:f307-real-adapter-user',
+      evidence: [{ producerId: 'f246.approval', ownerRef: 'approval:proposal/one', revision: 7 }],
+    },
+    needsMe: {
+      state: 'needed',
+      evidence: [{ producerId: 'f246.approval', ownerRef: 'approval:proposal/one', revision: 7 }],
+    },
   },
   preparedArtifact: {
     artifactRef: 'packages/web/src/components/ActivityBar.tsx',
@@ -157,6 +248,8 @@ export function fixedFixture(pathname) {
     ['/api/messages', { messages: [], hasMore: false }],
     ['/api/tasks', { tasks: [] }],
     ['/api/bootcamp/threads', { threads: [] }],
+    ['/api/capability-evolution/programs', { programs: [evolutionProgramProjection] }],
+    [`/api/capability-evolution/programs/${encodeURIComponent(EVOLUTION_PROGRAM_ID)}`, evolutionProgramProjection],
     [
       '/api/threads',
       {

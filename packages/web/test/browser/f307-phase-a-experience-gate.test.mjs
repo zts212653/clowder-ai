@@ -9,6 +9,7 @@ import { after, before, test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { chromium } from '../../../ppt-forge/node_modules/playwright/index.mjs';
 import {
+  EVOLUTION_PROGRAM_ID,
   INVOCATION_ID,
   OTHER_THREAD_ID,
   OTHER_WORKTREE_ID,
@@ -16,6 +17,7 @@ import {
   THREAD_ID,
   WORKTREE_ID,
 } from './f307-real-surface-fixtures.mjs';
+import { ensureWorkspaceOpen } from './f307-workspace-open.mjs';
 
 const WEB_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const NEXT_BIN = path.resolve(WEB_ROOT, '../../node_modules/next/dist/bin/next');
@@ -56,28 +58,6 @@ async function stopServer(server) {
 
 function json(route, body, status = 200) {
   return route.fulfill({ status, contentType: 'application/json', body: JSON.stringify(body) });
-}
-
-async function ensureWorkspaceOpen(page) {
-  const toggle = page.getByTestId('workspace-panel-toggle');
-  await toggle.waitFor();
-  const workbench = page.getByTestId('f307-experience-workbench');
-  for (let attempt = 0; attempt < 5; attempt += 1) {
-    if (await workbench.isVisible()) return;
-    if ((await toggle.getAttribute('aria-label')) === '打开 Workspace') await toggle.click();
-    if (
-      await workbench
-        .waitFor({ state: 'visible', timeout: 1_000 })
-        .then(() => true)
-        .catch(() => false)
-    )
-      return;
-  }
-  throw new Error(
-    `Workspace did not open at ${page.url()}\naria-label=${await toggle.getAttribute('aria-label')}\nbody=${(
-      await page.locator('body').innerText()
-    ).slice(0, 4_000)}`,
-  );
 }
 
 async function assertCanonicalZeroTopologyShell(page) {
@@ -256,7 +236,7 @@ test(
         )
         .catch(async () => {
           throw new Error(
-            `Needs Me did not focus the canonical Approval surface\nactive=${await workbench.getAttribute(
+            `Approval did not focus the canonical Approval surface\nactive=${await workbench.getAttribute(
               'data-active-surface',
             )}\nsurfaces=${await workbench.getAttribute('data-surface-order')}\npageErrors=${pageErrors.join(' | ')}\nbody=${(
               await page.locator('body').innerText()
@@ -267,7 +247,7 @@ test(
       assert.equal(
         await workbench.getAttribute('data-active-surface'),
         'workspace:mode:approval',
-        'the global Needs Me entry focuses the canonical F307 Approval surface',
+        'the global Approval entry focuses the canonical F307 Approval surface',
       );
       assert.equal(await workbench.getAttribute('data-surface-count'), '1');
       await page.getByTestId('f307-close-workspace').click();
@@ -295,10 +275,12 @@ test(
       assert.equal(await page.getByTestId('f307-tab-code').isVisible(), true);
       await page.getByText(`Owner file: ${WORKTREE_ID}`, { exact: false }).waitFor({ timeout: 5_000 });
       const tabStrip = page.getByTestId('f307-tab-strip');
+      const controlRail = page.getByTestId('f307-control-rail');
+      assert.equal(await tabStrip.getByTestId('f307-add-surface').count(), 0);
       assert.equal(
-        await tabStrip.evaluate((strip) => strip.lastElementChild?.getAttribute('data-testid')),
-        'f307-add-surface',
-        'the add affordance stays immediately after the final Workbench tab',
+        await controlRail.getByTestId('f307-add-surface').count(),
+        1,
+        'the add affordance stays fixed outside the scrolling Workbench tabs',
       );
 
       await addSurface.click();
@@ -312,10 +294,6 @@ test(
       assert.equal(await workbench.getAttribute('data-split-secondary'), '');
       assert.equal(await page.getByTestId('f307-tab-code').isVisible(), true);
       assert.equal(await page.getByTestId('f307-tab-terminal').isVisible(), true);
-      assert.equal(
-        await tabStrip.evaluate((strip) => strip.lastElementChild?.getAttribute('data-testid')),
-        'f307-add-surface',
-      );
       await page.screenshot({ path: path.join(EVIDENCE_DIR, '00-file-terminal-inline-add.png'), fullPage: true });
 
       await addSurface.click();
@@ -421,6 +399,14 @@ test(
 
       await page.getByTestId('f307-tab-browser').click();
       await page.getByTestId('f307-close-browser').click();
+      const mountedSurfaceHostBox = await page.getByTestId('f307-mounted-surface-host').boundingBox();
+      const recentlyClosedBox = await page.getByTestId('f307-recently-closed').boundingBox();
+      assert.ok(mountedSurfaceHostBox, 'mounted owner surface host must have measurable geometry');
+      assert.ok(recentlyClosedBox, 'Recently Closed must have measurable geometry');
+      assert.ok(
+        recentlyClosedBox.y >= mountedSurfaceHostBox.y + mountedSurfaceHostBox.height - 1,
+        'Recently Closed must reserve layout space below owner content instead of overlaying it',
+      );
       await page.getByTestId('f307-recently-closed-toggle').click();
       await page.getByTestId('f307-restore-browser').waitFor();
       assert.equal(await workbench.locator(`[data-surface-id="browser-owner:${WORKTREE_ID}"]`).count(), 1);
@@ -504,6 +490,28 @@ test(
           document.querySelector('[data-testid="f307-experience-workbench"]')?.getAttribute('data-layout-kind') ===
           'stack',
       );
+      const activeBrowserTab = page.locator(`[data-tab-surface-id="browser-owner:${WORKTREE_ID}"]`);
+      const activeBrowserClose = activeBrowserTab.getByTestId('f307-close-browser');
+      const resizedTabStrip = page.getByTestId('f307-tab-strip');
+      const [activeBrowserTabBox, activeBrowserCloseBox, tabStripBox] = await Promise.all([
+        activeBrowserTab.boundingBox(),
+        activeBrowserClose.boundingBox(),
+        resizedTabStrip.boundingBox(),
+      ]);
+      assert.ok(
+        activeBrowserTabBox && activeBrowserCloseBox && tabStripBox,
+        '390px active Browser tab and its close action must have measurable geometry',
+      );
+      assert.ok(
+        activeBrowserTabBox.x >= tabStripBox.x &&
+          activeBrowserTabBox.x + activeBrowserTabBox.width <= tabStripBox.x + tabStripBox.width,
+        'desktop-to-390px resize must bring the complete active tab inside the scrolling strip',
+      );
+      assert.ok(
+        activeBrowserCloseBox.x >= tabStripBox.x &&
+          activeBrowserCloseBox.x + activeBrowserCloseBox.width <= tabStripBox.x + tabStripBox.width,
+        'desktop-to-390px resize must keep the active tab close action reachable',
+      );
       assert.notEqual(await workbench.getAttribute('data-split-primary'), '');
       assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), true);
       await assertOwnerSurfaceFillsPane(browserPane, exactBrowserOwner);
@@ -518,13 +526,46 @@ test(
       await home.waitFor();
       assert.equal(await page.getByRole('dialog').count(), 0);
       assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), true);
-      await addSurface.scrollIntoViewIfNeeded();
-      assert.equal(await addSurface.isVisible(), true, '390px keeps the inline add affordance reachable');
+      assert.equal(await addSurface.isVisible(), true, '390px keeps the fixed add affordance reachable');
+      const addBox = await addSurface.boundingBox();
+      const controlBox = await controlRail.boundingBox();
+      assert.ok(addBox && controlBox, '390px Workbench controls must have measurable geometry');
+      assert.ok(addBox.x >= 0 && addBox.x + addBox.width <= 390, 'add control must remain inside the viewport');
+      assert.ok(
+        controlBox.x >= 0 && controlBox.x + controlBox.width <= 390,
+        'the entire fixed control rail must remain inside the viewport',
+      );
+      const surfaceCountBeforeExit = await workbench.getAttribute('data-surface-count');
+      const exitSplit = page.getByTestId('f307-exit-split');
+      assert.equal(await exitSplit.isVisible(), true, '390px exposes an explicit split exit');
+      await exitSplit.click();
+      assert.equal(await workbench.getAttribute('data-split-primary'), '');
+      assert.equal(await workbench.getAttribute('data-split-secondary'), '');
       assert.equal(
-        await tabStrip.evaluate((strip) => strip.lastElementChild?.getAttribute('data-testid')),
-        'f307-add-surface',
+        await workbench.getAttribute('data-surface-count'),
+        surfaceCountBeforeExit,
+        'exiting split keeps both hosted surfaces',
       );
       await page.screenshot({ path: path.join(EVIDENCE_DIR, '02-real-owner-narrow.png'), fullPage: true });
+
+      await page.getByTestId('f307-manage-surfaces').click();
+      const surfaceMenu = page.getByTestId('f307-surface-menu');
+      const menuBox = await surfaceMenu.boundingBox();
+      assert.ok(menuBox, '390px working-set menu must have measurable geometry');
+      assert.ok(
+        menuBox.x >= 0 && menuBox.x + menuBox.width <= 390,
+        'working-set management must remain inside the viewport',
+      );
+      await page.getByTestId('f307-close-other-surfaces').click();
+      assert.equal(await workbench.getAttribute('data-surface-count'), '1');
+      assert.deepEqual(terminalDeletes, [], 'bulk detach must not invoke an owner delete lifecycle');
+
+      const mobileFold = page.getByTestId('workspace-shell-fold');
+      assert.equal(await mobileFold.isVisible(), true, 'fullscreen Workspace exposes a touch-visible exit');
+      await mobileFold.click();
+      await workbench.waitFor({ state: 'hidden' });
+      await page.getByTestId('workspace-panel-toggle').click();
+      await workbench.waitFor({ state: 'visible' });
 
       assert.deepEqual(pageErrors, []);
       assert.deepEqual(
@@ -611,6 +652,127 @@ test(
     }
   },
 );
+
+test('Evolution Program temporarily owns the main area and returns the same owner instance to its rail', async () => {
+  const evolutionSurfaceId = `evolution-program:${EVOLUTION_PROGRAM_ID}`;
+  const context = await browser.newContext({ viewport: { width: 1440, height: 760 } });
+  await context.addInitScript(() => window.localStorage.clear());
+  const page = await context.newPage();
+  await page.route('**/api/**', (route) => {
+    const response = realSurfaceApiResponse(route.request(), false);
+    return json(route, response.body, response.status);
+  });
+
+  try {
+    await page.goto(baseUrl, { waitUntil: 'domcontentloaded' });
+    await ensureWorkspaceOpen(page);
+    await assertCanonicalZeroTopologyShell(page);
+
+    await page.getByTestId('workspace-launcher-capability-evolution').click();
+    const programRow = page.getByTestId(`capability-evolution-program-${EVOLUTION_PROGRAM_ID}`);
+    await programRow.waitFor();
+    await programRow.click();
+    await page.getByRole('button', { name: '管理', exact: true }).click();
+
+    const workbench = page.getByTestId('f307-experience-workbench');
+    const programOwner = page.getByTestId('evolution-program-surface');
+    const chatHost = page.getByTestId('thread-chat-host');
+    const contextualHost = page.getByTestId('contextual-workspace-host');
+    await programOwner.waitFor();
+    assert.equal(await workbench.getAttribute('data-active-surface'), evolutionSurfaceId);
+    assert.equal(await contextualHost.getAttribute('data-presentation'), 'right-rail');
+
+    const railBox = await contextualHost.boundingBox();
+    const chatBox = await chatHost.boundingBox();
+    assert.ok(railBox && chatBox, 'rail and Chat geometry must be measurable before promotion');
+    assert.ok(railBox.width < chatBox.width, 'daily Program reading must begin in the narrow Workspace rail');
+
+    await programOwner.evaluate((node) => {
+      node.scrollTop = Math.min(180, node.scrollHeight - node.clientHeight);
+      window.__f307ProgramOwner = node;
+      window.__f307ChatHost = document.querySelector('[data-testid="thread-chat-host"]');
+    });
+    const scrollBefore = await programOwner.evaluate((node) => node.scrollTop);
+    assert.ok(scrollBefore > 0, 'the real Program owner must have scroll state to preserve');
+
+    await page.getByTestId('f307-enter-main-area').click();
+    await page.waitForFunction(
+      () =>
+        document.querySelector('[data-testid="contextual-workspace-host"]')?.getAttribute('data-presentation') ===
+        'main-area-attention',
+    );
+    const promotedBox = await contextualHost.boundingBox();
+    assert.ok(promotedBox, 'promoted Workspace geometry must be measurable');
+    assert.ok(
+      promotedBox.width > railBox.width + chatBox.width * 0.75,
+      'promotion must occupy the real main area instead of merely widening the right rail',
+    );
+    assert.equal(await chatHost.getAttribute('aria-hidden'), 'true');
+    assert.equal(
+      await page.evaluate(() => window.__f307ChatHost === document.querySelector('[data-testid="thread-chat-host"]')),
+      true,
+      'promotion must preserve the original Chat DOM tree',
+    );
+    assert.equal(
+      await page.evaluate(
+        () => window.__f307ProgramOwner === document.querySelector('[data-testid="evolution-program-surface"]'),
+      ),
+      true,
+      'promotion must preserve the exact Program owner instance',
+    );
+    assert.equal(await programOwner.evaluate((node) => node.scrollTop), scrollBefore);
+    await page.screenshot({ path: path.join(EVIDENCE_DIR, '06-evolution-program-main-area.png'), fullPage: true });
+
+    await page.getByTestId('f307-close-workspace').click();
+    await page.waitForFunction(
+      () =>
+        document.querySelector('[data-testid="contextual-workspace-host"]')?.getAttribute('data-presentation') ===
+        'right-rail',
+    );
+    assert.equal(await workbench.getAttribute('data-active-surface'), evolutionSurfaceId);
+    assert.equal(await workbench.getAttribute('data-surface-count'), '1');
+    assert.equal(await chatHost.getAttribute('aria-hidden'), null);
+    assert.equal(
+      await page.evaluate(
+        () => window.__f307ProgramOwner === document.querySelector('[data-testid="evolution-program-surface"]'),
+      ),
+      true,
+      'detaching another surface must return the same Program owner to the rail',
+    );
+    assert.equal(await programOwner.evaluate((node) => node.scrollTop), scrollBefore);
+    await page.screenshot({
+      path: path.join(EVIDENCE_DIR, '07-evolution-program-sibling-detach-return.png'),
+      fullPage: true,
+    });
+
+    await page.getByTestId('f307-enter-main-area').click();
+    await page.waitForFunction(
+      () =>
+        document.querySelector('[data-testid="contextual-workspace-host"]')?.getAttribute('data-presentation') ===
+        'main-area-attention',
+    );
+    await page.getByTestId('f307-close-evolution-program').click();
+    await page.waitForFunction(
+      () =>
+        document.querySelector('[data-testid="contextual-workspace-host"]')?.getAttribute('data-presentation') ===
+        'right-rail',
+    );
+    assert.equal(await workbench.getAttribute('data-active-surface'), evolutionSurfaceId);
+    assert.equal(await workbench.getAttribute('data-surface-count'), '1');
+    assert.equal(await chatHost.getAttribute('aria-hidden'), null);
+    assert.equal(
+      await page.evaluate(
+        () => window.__f307ProgramOwner === document.querySelector('[data-testid="evolution-program-surface"]'),
+      ),
+      true,
+      'return must restore the same Program owner rather than reconstructing it',
+    );
+    assert.equal(await programOwner.evaluate((node) => node.scrollTop), scrollBefore);
+    await page.screenshot({ path: path.join(EVIDENCE_DIR, '08-evolution-program-returned-rail.png'), fullPage: true });
+  } finally {
+    await context.close();
+  }
+});
 
 test(
   'Workspace Home Files opens its persisted worktree tree before opening a file surface',

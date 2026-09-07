@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import { CURRENT_RELATIONSHIP_PROFILE_URI } from '../profile-contract.js';
 
-export const RECALL_OPPORTUNITY_CATALOG_VERSION = 3 as const;
+export const RECALL_OPPORTUNITY_CATALOG_VERSION = 5 as const;
 
 export const RECALL_RESOLVER_FAMILIES = [
   'person_entity',
@@ -9,7 +9,9 @@ export const RECALL_RESOLVER_FAMILIES = [
   'taste',
   'profile',
   'event',
+  'decision',
   'project_knowledge',
+  'cat_owned_seed',
 ] as const;
 
 export const MEMORY_CUE_INVALIDATORS = [
@@ -38,6 +40,18 @@ export const RECALL_OPPORTUNITY_V1_PAIRS = Object.freeze([
   Object.freeze({
     kind: 'recent_event_available' as const,
     producer: 'event_memory' as const,
+  }),
+  Object.freeze({
+    kind: 'accepted_decision_required' as const,
+    producer: 'owner_message' as const,
+  }),
+  Object.freeze({
+    kind: 'project_source_required' as const,
+    producer: 'task_context' as const,
+  }),
+  Object.freeze({
+    kind: 'owned_seed_available' as const,
+    producer: 'present_loop' as const,
   }),
 ]);
 
@@ -70,6 +84,7 @@ export const subjectSeenOpportunityV1Schema = z
         entityId: boundedIdentifier(200),
         matchedAlias: boundedIdentifier(160),
         sourceMessageId: boundedIdentifier(200),
+        sourceRevision: boundedIdentifier(200),
       })
       .strict(),
   })
@@ -114,6 +129,20 @@ export const deliveryDecisionCueCarrierV1Schema = z
     gateOutcome: z.literal('source_evidence_complete'),
     externalCondition: z.literal('billing_spending_limit_zero_step'),
     candidateAction: z.literal('merge'),
+    occurredAt: timestampSchema,
+  })
+  .strict();
+
+/** Server-private, content-free transport frame produced by one F255 Present Loop wake. */
+export const catOwnedSeedCueCarrierV1Schema = z
+  .object({
+    v: z.literal(1),
+    producer: z.literal('present_loop'),
+    producerProvenance: z.literal('server_scheduler'),
+    runId: boundedIdentifier(200),
+    producingCatId: boundedIdentifier(120),
+    seedId: boundedIdentifier(200),
+    sourceRevision: boundedIdentifier(200),
     occurredAt: timestampSchema,
   })
   .strict();
@@ -177,6 +206,52 @@ export const recentEventAvailableOpportunityV1Schema = z
   })
   .strict();
 
+export const acceptedDecisionRequiredOpportunityV1Schema = z
+  .object({
+    ...opportunityBaseShape,
+    kind: z.literal('accepted_decision_required'),
+    producer: z.literal('owner_message'),
+    payload: z
+      .object({
+        decisionAnchor: z.string().regex(/^ADR-\d{3}$/),
+        sourceMessageId: boundedIdentifier(200),
+      })
+      .strict(),
+  })
+  .strict();
+
+export const projectSourceRequiredOpportunityV1Schema = z
+  .object({
+    ...opportunityBaseShape,
+    kind: z.literal('project_source_required'),
+    producer: z.literal('task_context'),
+    payload: z
+      .object({
+        featureId: z.string().regex(/^F\d{3,}$/),
+        selectionSource: z.enum(['workflow_feature', 'explicit_owner_reference']),
+        sourceMessageId: boundedIdentifier(200),
+      })
+      .strict(),
+  })
+  .strict();
+
+export const ownedSeedAvailableOpportunityV1Schema = z
+  .object({
+    ...opportunityBaseShape,
+    kind: z.literal('owned_seed_available'),
+    producer: z.literal('present_loop'),
+    payload: z
+      .object({
+        runId: boundedIdentifier(200),
+        producingCatId: boundedIdentifier(120),
+        seedId: boundedIdentifier(200),
+        sourceRevision: boundedIdentifier(200),
+        sourceMessageId: boundedIdentifier(200),
+      })
+      .strict(),
+  })
+  .strict();
+
 export const recallOpportunityV1Schema = z.discriminatedUnion('kind', [
   subjectSeenOpportunityV1Schema,
   deliveryDecisionOpportunityV1Schema,
@@ -184,6 +259,9 @@ export const recallOpportunityV1Schema = z.discriminatedUnion('kind', [
   approvedTasteInvokedOpportunityV1Schema,
   profileRevisionAvailableOpportunityV1Schema,
   recentEventAvailableOpportunityV1Schema,
+  acceptedDecisionRequiredOpportunityV1Schema,
+  projectSourceRequiredOpportunityV1Schema,
+  ownedSeedAvailableOpportunityV1Schema,
 ]);
 
 const memoryCueInvalidatorsSchema = z.tuple([
@@ -215,7 +293,7 @@ export const cueEnvelopeV1Schema = z
       .strict(),
     drill: z
       .object({
-        family: z.enum(['person_memory', 'evidence', 'taste', 'profile', 'event']),
+        family: z.enum(['person_memory', 'evidence', 'taste', 'profile', 'event', 'owned_seed']),
         handle: boundedIdentifier(2_000),
       })
       .strict(),
@@ -238,10 +316,14 @@ export type RecallScopeV1 = z.infer<typeof recallScopeV1Schema>;
 export type SubjectSeenOpportunityV1 = z.infer<typeof subjectSeenOpportunityV1Schema>;
 export type DeliveryDecisionOpportunityV1 = z.infer<typeof deliveryDecisionOpportunityV1Schema>;
 export type DeliveryDecisionCueCarrierV1 = z.infer<typeof deliveryDecisionCueCarrierV1Schema>;
+export type CatOwnedSeedCueCarrierV1 = z.infer<typeof catOwnedSeedCueCarrierV1Schema>;
 export type JudgmentSurfaceEnteredOpportunityV1 = z.infer<typeof judgmentSurfaceEnteredOpportunityV1Schema>;
 export type ApprovedTasteInvokedOpportunityV1 = z.infer<typeof approvedTasteInvokedOpportunityV1Schema>;
 export type ProfileRevisionAvailableOpportunityV1 = z.infer<typeof profileRevisionAvailableOpportunityV1Schema>;
 export type RecentEventAvailableOpportunityV1 = z.infer<typeof recentEventAvailableOpportunityV1Schema>;
+export type AcceptedDecisionRequiredOpportunityV1 = z.infer<typeof acceptedDecisionRequiredOpportunityV1Schema>;
+export type ProjectSourceRequiredOpportunityV1 = z.infer<typeof projectSourceRequiredOpportunityV1Schema>;
+export type OwnedSeedAvailableOpportunityV1 = z.infer<typeof ownedSeedAvailableOpportunityV1Schema>;
 export type RecallOpportunityV1 = z.infer<typeof recallOpportunityV1Schema>;
 export type CueEnvelopeV1 = z.infer<typeof cueEnvelopeV1Schema>;
 export type RecallResolverFamily = (typeof RECALL_RESOLVER_FAMILIES)[number];
@@ -253,7 +335,9 @@ const MEMORY_CUE_DRILL_FAMILY_BY_RESOLVER = Object.freeze({
   taste: 'taste' as const,
   profile: 'profile' as const,
   event: 'event' as const,
-  project_knowledge: null,
+  decision: 'evidence' as const,
+  project_knowledge: 'evidence' as const,
+  cat_owned_seed: 'owned_seed' as const,
 });
 
 export function memoryCueDrillFamilyForResolver(

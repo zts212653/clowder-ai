@@ -34,6 +34,7 @@ import {
 import { updateRuntimeCoCreator } from '../config/runtime-cat-catalog.js';
 import { isValidTimeZone } from '../config/time-zone.js';
 import { AuditEventTypes, getEventAuditLog } from '../domains/cats/services/orchestration/EventAuditLog.js';
+import type { IThreadStore } from '../domains/cats/services/stores/ports/ThreadStore.js';
 // F212 Phase F (cloud codex R4 P2-#2 on fc69597675): import logger's captured LOG_DIR
 // so env-summary returns the path the active pino destination is actually writing to.
 // Reading process.env.LOG_DIR here would diverge from logger after a runtime
@@ -46,6 +47,7 @@ import { resolveHeaderUserId } from '../utils/request-identity.js';
 import { getDefaultUploadDir } from '../utils/upload-paths.js';
 import { configCatOrderRoutes } from './config-cat-order.js';
 import { configMessageDispositionRoutes } from './config-message-disposition.js';
+import { configThreadAttentionRoutes } from './config-thread-attention.js';
 
 const patchSchema = z.object({
   key: z.string().min(1),
@@ -87,6 +89,7 @@ interface ConfigRoutesOptions {
   };
   envFilePath?: string;
   projectRoot?: string;
+  threadStore?: Pick<IThreadStore, 'list' | 'getThreadMetadata' | 'atomicMergeThreadMetadata'>;
 }
 
 function getSnapshotValue(snapshot: ConfigSnapshot, key: string): unknown {
@@ -158,6 +161,7 @@ export async function configRoutes(app: FastifyInstance, opts: ConfigRoutesOptio
 
   await app.register(configCatOrderRoutes, { projectRoot });
   await app.register(configMessageDispositionRoutes, { projectRoot });
+  await app.register(configThreadAttentionRoutes, { projectRoot, threadStore: opts.threadStore });
 
   app.get('/api/config', async () => ({
     config: collectConfigSnapshot(),

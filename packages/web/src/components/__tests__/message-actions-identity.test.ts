@@ -135,22 +135,8 @@ describe('MessageActions identity source', () => {
     expect(body.userId).toBe('alice');
   });
 
-  it('settles an exact legacy review terminal through the operator-only typed endpoint', async () => {
+  it('does not expose a legacy review settlement action', async () => {
     const { MessageActions } = await import('@/components/MessageActions');
-    apiFetchMock
-      .mockResolvedValueOnce({
-        ok: true,
-        json: async () => ({
-          outcome: 'eligible',
-          reviewerCatId: 'codex-terra',
-          subjectRef: 'pr:owner/repo#4074',
-          reviewedHeadSha: '6a907b316a907b316a907b316a907b316a907b31',
-        }),
-      })
-      .mockResolvedValueOnce({
-        ok: true,
-        json: async () => ({ outcome: 'committed', queueEntryId: 'queue-1' }),
-      });
 
     await act(async () => {
       root.render(
@@ -186,29 +172,7 @@ describe('MessageActions identity source', () => {
     const settleAction = document.querySelector<HTMLButtonElement>(
       '[data-testid="legacy-local-review-disposition-action"]',
     );
-    expect(settleAction).not.toBeNull();
-
-    await act(async () => {
-      settleAction?.click();
-    });
-    expect(apiFetchMock).toHaveBeenNthCalledWith(1, '/api/messages/legacy-terminal-1/legacy-local-review-disposition', {
-      method: 'GET',
-    });
-    expect(document.body.textContent).toContain('系统不会从正文猜 verdict');
-
-    const changesRequested = Array.from(document.querySelectorAll<HTMLButtonElement>('button')).find(
-      (button) => button.textContent === '需要修改',
-    );
-    await act(async () => {
-      changesRequested?.click();
-    });
-
-    expect(apiFetchMock).toHaveBeenCalledTimes(2);
-    const [url, init] = apiFetchMock.mock.calls[1] as [string, { body?: string }];
-    expect(url).toBe('/api/messages/legacy-terminal-1/legacy-local-review-disposition');
-    const body = JSON.parse(init.body ?? '{}') as { decisionId?: string; verdict?: string };
-    expect(body.verdict).toBe('changes_requested');
-    expect(body.decisionId).toBeTypeOf('string');
-    expect(body.decisionId).not.toHaveLength(0);
+    expect(settleAction).toBeNull();
+    expect(apiFetchMock).not.toHaveBeenCalled();
   });
 });

@@ -7401,6 +7401,108 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
     assert.equal(callbackEnv.OPENAI_API_BASE, undefined);
   });
 
+  for (const bound of [false, true]) {
+    it(`account store verdict blocks invocation without hiding its diagnostic (bound=${bound})`, async () => {
+      const root = await mkdtemp(join(tmpdir(), 'invoke-malformed-account-'));
+      const savedRoot = process.env.CAT_CAFE_GLOBAL_CONFIG_ROOT;
+      const registrySnapshot = catRegistry.getAllConfigs();
+      const { accountRef: _ref, ...config } = catRegistry.tryGet('codex').config;
+      const catId = 'account-verdict-fixture';
+      catRegistry.register(catId, {
+        ...config,
+        id: catId,
+        mentionPatterns: [`@${catId}`],
+        ...(bound ? { accountRef: 'fixture' } : {}),
+      });
+      let invoked = 0;
+      try {
+        process.env.CAT_CAFE_GLOBAL_CONFIG_ROOT = root;
+        await mkdir(join(root, '.cat-cafe'));
+        await writeFile(join(root, '.cat-cafe/accounts.json'), '{');
+        const messages = await collect(
+          invokeSingleCat(makeDeps(), {
+            catId,
+            prompt: 'fixture',
+            userId: 'fixture-owner',
+            threadId: 'fixture-thread',
+            isLastCat: true,
+            service: {
+              l0CompilerFn: dummyL0CompilerFn,
+              async *invoke() {
+                invoked++;
+                yield { type: 'done', catId, timestamp: Date.now() };
+              },
+            },
+          }),
+        );
+        assert.equal(invoked, 0, 'invalid store must never fall back to ambient CLI credentials');
+        assert.ok(
+          messages.some((message) => message.type === 'error' && /malformed account store/.test(message.error)),
+          JSON.stringify(messages.filter((message) => message.type === 'error')),
+        );
+      } finally {
+        if (savedRoot === undefined) delete process.env.CAT_CAFE_GLOBAL_CONFIG_ROOT;
+        else process.env.CAT_CAFE_GLOBAL_CONFIG_ROOT = savedRoot;
+        catRegistry.reset();
+        for (const [id, previous] of Object.entries(registrySnapshot)) catRegistry.register(id, previous);
+        await rmWithRetry(root);
+      }
+    });
+  }
+
+  for (const authType of ['oauth', 'subscription', 'api_key']) {
+    it(`credential family guard blocks ${authType} before service invocation`, async () => {
+      const root = await mkdtemp(join(tmpdir(), 'invoke-foreign-account-'));
+      const savedRoot = process.env.CAT_CAFE_GLOBAL_CONFIG_ROOT;
+      const registrySnapshot = catRegistry.getAllConfigs();
+      const catId = 'foreign-account-fixture';
+      catRegistry.register(catId, {
+        ...catRegistry.tryGet('opus').config,
+        id: catId,
+        mentionPatterns: [`@${catId}`],
+        clientId: 'anthropic',
+        accountRef: 'claude',
+      });
+      let invoked = 0;
+      try {
+        process.env.CAT_CAFE_GLOBAL_CONFIG_ROOT = root;
+        await mkdir(join(root, '.cat-cafe'));
+        await writeFile(
+          join(root, '.cat-cafe/accounts.json'),
+          JSON.stringify({ claude: { authType, clientId: 'openai' } }),
+        );
+        await writeFile(
+          join(root, '.cat-cafe/credentials.json'),
+          JSON.stringify({ claude: { apiKey: 'FAKE_FOREIGN_KEY' } }),
+        );
+        const messages = await collect(
+          invokeSingleCat(makeDeps(), {
+            catId,
+            prompt: 'fixture',
+            userId: 'fixture-owner',
+            threadId: 'fixture-thread',
+            isLastCat: true,
+            service: {
+              l0CompilerFn: dummyL0CompilerFn,
+              async *invoke() {
+                invoked++;
+                yield { type: 'done', catId, timestamp: Date.now() };
+              },
+            },
+          }),
+        );
+        assert.equal(invoked, 0);
+        assert.ok(messages.some((message) => message.type === 'error' && /identity.*incompatible/.test(message.error)));
+      } finally {
+        if (savedRoot === undefined) delete process.env.CAT_CAFE_GLOBAL_CONFIG_ROOT;
+        else process.env.CAT_CAFE_GLOBAL_CONFIG_ROOT = savedRoot;
+        catRegistry.reset();
+        for (const [id, config] of Object.entries(registrySnapshot)) catRegistry.register(id, config);
+        await rmWithRetry(root);
+      }
+    });
+  }
+
   it('F127 P1: preserves explicit bound-account failures instead of masking them as generic resolution errors', async () => {
     const root = await mkdtemp(join(tmpdir(), 'f127-bound-account-missing-'));
     const apiDir = join(root, 'packages', 'api');
@@ -8343,8 +8445,9 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
       await writeFile(join(mcpDir, entry), '// stub split server', 'utf-8');
     }
 
-    // Create a subscription-mode profile (no API key)
+    // OpenCode owns this native subscription; the model provider is Anthropic.
     const subscriptionProfile = await createProviderProfile(root, {
+      clientId: 'opencode',
       provider: 'anthropic',
       name: 'claude-subscription',
       mode: 'subscription',
@@ -8841,6 +8944,7 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
     await writeFile(join(root, 'pnpm-workspace.yaml'), 'packages:\n  - "packages/*"\n', 'utf-8');
 
     const oaiProfile = await createProviderProfile(root, {
+      clientId: 'openai',
       provider: 'anthropic',
       name: 'openai-compat',
       mode: 'api_key',

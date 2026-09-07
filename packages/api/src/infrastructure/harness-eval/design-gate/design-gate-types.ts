@@ -118,7 +118,7 @@ export interface DesignGateReviewMessage {
   threadId: string;
   catId: string | null;
   content: string;
-  extra?: { localReviewVerdict?: { verdict?: string } };
+  extra?: { localReviewVerdict?: { verdict?: string; reviewedHeadSha?: string } };
 }
 
 export interface DesignGateReviewMessageReader {

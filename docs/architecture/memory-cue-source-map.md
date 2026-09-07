@@ -8,7 +8,7 @@ created: 2026-08-01
 description: "F287 对既有记忆源、消费者、cue 路径、drill、纠正遗忘以及 main/live/UAT 真相的逐 lane 边界普查。"
 description_source: human
 description_author: codex-sol
-description_updated_at: 2026-08-27T10:40:00Z
+description_updated_at: 2026-09-03T00:00:00Z
 ---
 
 # F287 Memory Cue Source Map
@@ -30,14 +30,16 @@ snapshot 是 origin/main / Alpha@cf9980b595168dbb5b64250c2e48022ba3ad27cd。
   unit test 或旧卡片重标成自己的 UAT。
 - v2 zero-only：resolver family 有明确边界和零结果语义，但 closed catalog v2 没有 producer
   能到达它；启用必须提升 catalog version。
-- v3 zero-only：F312 Phase C 把 Profile 与 Event 以各自 lane-owned predicate 加入 catalog v3；只有
-  project knowledge 继续注册但无 producer。v1/v2 段落保留为历史快照，不是 current catalog truth。
+- v5 active：F312 Phase E 在 catalog v5 加入 Cat-owned Seed 的 bounded predicate；Diary、Episode、Reflection
+  经 E0 判为 exempt，未加入 resolver/catalog。v1/v2/v3/v4 段落保留为历史快照，不是 current catalog truth。
+- v6 closure：F312 Phase F 不新增 producer/kind pair。Library 维持 F186 显式 pull，Provider-local 维持
+  provider/account authority；两者 E0 exempt，current resolver catalog 仍是 v5 的九个 closed pair。
 
 ## Source census
 
 | Feature | Exact main truth anchor | Canonical truth / owner | Existing consumer | F287 cue path | Drill | Correction / forget | main / live / UAT | Verifiable anchors |
 |---|---|---|---|---|---|---|---|---|
-| F102 | 36af7fd0271cd8bf03e0976cc74ae3ccc77e41e0 | IEvidenceStore、IIndexBuilder 与本地 SQLite evidence；owner=memory cell | search_evidence、graph/query resolvers | project knowledge resolver；v2 zero-only | EvidenceStore anchor/passage reader | Git source status、supersession 与 rebuild；F287 不改 evidence | main=landed；live=unknown；UAT=feature doc runtime history，Phase A 未复跑 | docs/features/F102-memory-adapter-refactor.md；packages/api/src/domains/memory/interfaces.ts；SqliteEvidenceStore.ts |
+| F102 | 36af7fd0271cd8bf03e0976cc74ae3ccc77e41e0 | IEvidenceStore、IIndexBuilder 与本地 SQLite evidence；owner=memory cell | search_evidence、graph/query resolvers | catalog v4 的 project_source_required 只借 F209/F102 index 定位当前 task 的 exact feature source；index 不取得 authority | canonical feature document reader + Evidence drill carrier | canonical feature bytes/status/path 失效；index refresh 只更新定位，不改原 owner truth | main=Phase D candidate；live=unknown；UAT=须 merged-main Alpha | docs/features/F102-memory-adapter-refactor.md；ProjectKnowledgeMemoryCueSource.ts；f312-project-knowledge-cue.test.js |
 | F152 | bdcf7824434445d1eb59a2b9a03d0c8ccd23086c | RepoScanner 选择、CatCafeScanner 与 bootstrap；owner=memory cell | IndexBuilder rebuild/incremental update | readiness materialization only，不是 opportunity producer | scanned sourcePath → evidence anchor | source file deletion/rebuild | main=landed；live=unknown；UAT=feature doc source-owned，Phase A 未复跑 | docs/features/F152-expedition-memory.md；packages/api/src/domains/memory/CatCafeScanner.ts；IndexBuilder.ts |
 | F186 | 8ec53796eac7a059b5c74bb476c8515b31306e5e | library catalog / collection lifecycle 与安全边界；owner=memory cell | library collection readers | project knowledge resolver；v2 zero-only | collection/evidence typed readers | collection lifecycle policy；F287 不复制 collection state | main=landed；live=unknown；UAT=feature close truth，Phase A 未复跑 | docs/features/F186-library-memory-architecture.md；packages/api/src/domains/memory/LibraryCatalog.ts；collection routes/tests |
 | F188 | cbc10f8e2c83dc6459082e719686d671825bd4a2 | library stewardship、verification 与 search health；owner=memory cell | operator health/repair surfaces | no cue truth；只提供 health evidence | verification/read-model routes | verification workflow；不是 user-memory forget | main=landed；live=unknown；UAT=feature dogfood/screenshot anchors，Phase A 未复跑 | docs/features/F188-library-stewardship.md；packages/api/test/memory/f188-library-health.test.js |
@@ -46,6 +48,7 @@ snapshot 是 origin/main / Alpha@cf9980b595168dbb5b64250c2e48022ba3ad27cd。
 | F221 | 0c3cbade662ea1f74fb197e14596ebadc9110e4a | approved public vignette in docs/taste、owner-private sensitive vignette in private/taste；owner=Taste lane | Taste proposal approval and manual index | judgment_surface_entered → Taste dimension map；owner_message / approved_taste_invoked (`ELI5`) → exact approved vignette + typed `html_widget` contract | owner-auth TasteMemoryReader，public/private 同 contract | proposal/lane owns approval, replacement and deletion；F287 revalidates revision/tags and records applied only after drill + same-invocation rich block | existing Phase E map main/alpha=landed/loaded；post-close explicit path branch journey=PASS，main/live/UAT require merge + fresh Alpha readback | docs/features/F221-taste-lane.md；docs/taste/vignettes/visual-quality-ELI5-pcpjsd.md；f287-explicit-taste-consumption.test.js；TasteMemoryCueSource.ts |
 | F227 | 6f0d6b5f3ade12544aa67482bcbef34788c1275c | owner-scoped EventMemoryStore + source message coordinate；owner=Event memory lane | Event timeline、filter、teleport、F192 ref consumer | recent_event_available → newest exact-owner/current-thread high-confidence Event inside 15m | owner-auth bounded Event record via event-memory anchor | revision change、source delete/visibility/scope change、event-window expiry；handle expiry remains Cue Plane-owned | main=landed；Alpha=loaded@`c72b89139c`；UAT=`5a54ab2f…` / `cue_4156e2b…` recorded presented→drilled→applied, then synthetic source soft-delete produced immutable `source_forgotten` invalidation | docs/features/F227-event-memory.md；EventMemoryStore.ts；EventMemoryCueSource.ts；f312-event-cue.test.js |
 | F231 | 21196f0c734c4b4e1f9bfc2af1de948106d95bc3 | user profile capsule / persona primer；owner=identity-session profile subcell | startup profile/context | profile_revision_available → current canonical capsule revision without terminal receipt | authenticated bounded capsule reader | profile proposal/correction/revision lifecycle；cross-owner/missing fail closed | main=landed；Alpha=loaded@`c72b89139c`；UAT=owner capsule candidate absent，ceiling=loaded/no-candidate，不伪造 receipt | docs/features/F231-user-profile-capsule.md；ProfileRepository.ts；ProfileMemoryCueSource.ts；f312-profile-cue.test.js |
+| F255 | Phase E main candidate | private diary plus cue/seed/intent/visit/echo；owner=producing cat + owner scope | Present Loop, `/starry`, F272 | owned_seed_available → exact producing-cat/current-revision seed during scheduled Present Loop | content-free prompt coordinate → owner/cat-bound opaque drill → current private claim | missing/source correction/scope mismatch/dormant/retired fail closed | main-candidate；live=unknown；UAT=requires merged-main Alpha | docs/features/F255-auto-dream.md；CatOwnedSeedCueResolver.ts；CatOwnedSeedMemoryCueSource.ts；cat-owned-seed-memory-cue.test.js |
 | F256 | dfe4ef0a33fb0a358fc0fb8d1663c420edad182a | memory search strategy convention and skill behavior；owner=memory search strategy | cats doing pull recall | no canonical source and no automatic cue producer | existing search tools | skill/convention revision, not user-memory forget | main=landed；live=unknown；UAT=feature dogfood truth，非 F287 cue UAT | docs/features/F256-memory-search-strategy-evolution.md；cat-cafe-skills/memory-search-best-practices/SKILL.md |
 | F260 | 452a826ebff3554731c8e2430b0ff70eb35fd477 | entity_registry、entity_aliases、entity_mentions and append-only revisions；owner=memory cell | EntityNudgeService and exact entity lookup | subject_seen producer via typed EntityNudge result | entity anchor/alias provenance | registry correction/transfer/retire; unknown/deleted zero cue | main=landed；alpha=loaded；UAT=exact subject producer produced owner cue once；serial/parallel consume-once 与 legacy de-dup executable fixtures PASS | docs/features/F260-write-side-autopsy-entity-deref.md；docs/features/evidence/F287/README.md；EntityNudgeService.ts；f287-alden-journey.test.js |
 | F263 | 0551d82b9460cad0b5c522670bfd95f735254f3f | recall lifecycle traces and three-axis observation；owner=memory cell | RecallLedger/health analysis | no cue truth；Phase C events remain a separate content-free F287 ledger | trace/ledger read model | append-only trace policy | main=landed；alpha=loaded；UAT=F287 Phase B transport fixtures + Phase E SQLite readback confirms four cues use enum/coordinate-only rows and zero content columns | docs/features/F263-memory-lifecycle-repair-and-metrics.md；docs/features/evidence/F287/README.md；MemoryCueEpisodeStore.ts；f148-context-transport.test.js |
@@ -93,6 +96,57 @@ Event lane on Alpha `c72b89139c`: one exact-owner/current-thread cue recorded `p
 source soft-delete caused same-handle `404 not_available` plus immutable `source_forgotten` invalidation. Profile is
 loaded but had no owner capsule candidate, so its runtime ceiling remains honest `loaded/no-candidate`.
 
+## F312 Phase D Catalog v4
+
+Catalog v4 adds two bounded source-owned pairs after per-lane E0. It reuses the Cue Plane transport and terminal
+episode receipts, but does not add a central registry, global cue engine, authority, or utility score:
+
+| Catalog pair | E0 consumer + predicate | Canonical source / drill | Applied + invalidation ceiling |
+|---|---|---|---|
+| `owner_message / accepted_decision_required` | current `agent_route`; exactly one `ADR-NNN` in the current direct-owner task message; ambiguous/history-only/non-owner zero | F209 locates `docs/decisions/NNN-*.md`; drill returns a ≤4,000-character window from the physical-contained canonical accepted ADR bytes, which own the revision; F209 metadata stays navigation-only | applied only if the drilled ADR constrains this response/action; content-free terminal receipt suppresses the exact revision; correction/non-accepted/removal/path escape fail closed |
+| `task_context / project_source_required` | current feature-task `agent_route`; workflow-bound feature ID, otherwise exactly one current direct-owner `FNNN`; ambiguous/history-only/non-owner zero | F209 locates `docs/features/FNNN-*.md`; drill returns a ≤4,000-character window from the physical-contained canonical feature bytes, which own the revision; F209 metadata stays navigation-only | applied only if that exact feature source grounds this task response/action; content-free terminal receipt suppresses the exact revision; correction/inactive/superseded/removal/path escape fail closed |
+
+Method is not a third pair. Its canonical directory currently contains only `TEMPLATE.md`, generated `index.md`, and
+`.gitkeep`; E0 found neither a published Method Card nor a named consumer. Its closure is therefore `exempt`, with no
+detector, receipt, outcome claim, or eval. Publishing a real Method Card must re-run E0 before any proactive path exists.
+
+The shared append-only ledger admits both active resolver families but persists only source coordinates and enum outcomes;
+canonical content remains ephemeral. The generated closure universe stays 21=21. Phase D removes exactly nine RED keys—Decision, Method, and Project
+Knowledge `typedCuePredicate / consumptionReceipt / outcome`—so exact RED moves 36→27 and missing surfaces 9→6.
+This is main-candidate truth until exact-head review, merge, and merged-main Alpha acceptance complete.
+
+## F312 Phase E Catalog v5
+
+Catalog v5 adds exactly one source-owned pair after four independent E0 packets. Diary, Episode and Reflection remain
+real durable surfaces but are Standing Reflex `exempt`: none has both a typed candidate and a named invocation consumer,
+so Phase E creates no detector, receipt, outcome or eval for them.
+
+| Catalog pair | E0 consumer + predicate | Canonical source / drill | Applied + invalidation ceiling |
+|---|---|---|---|
+| `present_loop / owned_seed_available` | server scheduler after F255 `beginScheduledRun`; at most one `status=owned` seed for exact owner, producing cat and current source revision | `owned-seed:<catId>:<seedId>`; prompt carries no claim, exact-cat opaque drill reads current private seed | applied only with prior drill plus exact same-invocation/cat/seed F255 intent; receipts bind consumer cat; missing→`source_forgotten`, revision drift→`source_corrected`, scope mismatch→`scope_revoked`, dormant/retired→`superseded` |
+
+The pair reuses the append-only Cue Plane ledger. V43 adds `consumer_cat_id` to receipt coordinates and admits the
+owned-seed resolver family without adding a content column, central store, mutable registry, Hub or authority. The
+bounded outcome is intent application with optional existing visit/echo lineage; it is not a long-term utility verdict.
+The generated closure universe remains 21=21. Regeneration mechanically removes the four Seed RED keys and the twelve
+exempt Diary/Episode/Reflection RED keys: missing surfaces 6→2 and exact RED 27→11. The generated catalog owns these
+counts; this paragraph records its output rather than an independently maintained target.
+
+## F312 Phase F Catalog v6 Closure
+
+Catalog v6 changes no runtime producer/kind pair. It closes the last eleven RED keys by declaring the E0 result instead
+of constructing unused runtime machinery:
+
+| Surface | E0 result | Preserved authority | Why no pair is born |
+|---|---|---|---|
+| Library Knowledge | `exempt` | F186 Collection/catalog/source revision/ACL and explicit pull search | no named task-class invocation consumer；private collections cannot enter a prompt from ranking or generic search |
+| Provider-local Memory | `exempt` | each runtime provider + account owner, inventoried per carrier | no carrier exposes a Clowder AI-verifiable item revision plus authorized drill and named consumer |
+
+The provider census is metadata only: no provider content, central mutable registry, shared adapter, unified cue engine,
+Hub authority or eval is added. Generated universe stays 21=21; disposition becomes active 10 / exempt 10 / sunset 1,
+with missing surfaces 2→0, exact RED 11→0 and carriers empty. Because no Phase F pair is active, runtime evidence is
+honestly bounded to catalog/gate truth; there can be no valid Phase F `applied` episode.
+
 ## Operational evidence migration
 
 The billing-only precedent is operational evidence, not a Taste claim. Its canonical source is
@@ -109,7 +163,7 @@ budget/dedupe, content-free consumption episodes and canonical-source invalidati
 not own any row above called canonical truth. A source that is unknown, deleted, unauthorized,
 superseded, forgotten or not admitted by the closed catalog produces zero cue.
 
-The current catalog version has six closed producer/kind pairs:
+The current catalog version has nine closed producer/kind pairs:
 
 1. subject_seen from the server-owned Entity nudge result;
 2. delivery_decision from typed GitHub CI / gate evidence;
@@ -117,8 +171,13 @@ The current catalog version has six closed producer/kind pairs:
 4. approved_taste_invoked from a current direct-owner `ELI5` trigger, bound to one approved F221 source;
 5. profile_revision_available from an unconsumed current F231 capsule revision;
 6. recent_event_available from an exact-owner/current-thread high-confidence F227 Event inside its temporal window.
+7. accepted_decision_required from exactly one accepted ADR anchor in the current direct-owner task message;
+8. project_source_required from the workflow-bound feature ID, or one explicit current-owner feature reference.
+9. owned_seed_available from an exact producing-cat scheduled Present Loop carrier.
 
-Project knowledge remains the sole registered zero-only family in v3. F152, F188, F200, F256, F263 and F271 are
+All eight registered resolver families are reachable only through their admitted v5 pair; catalog v6 adds no runtime
+resolver and there is no generic project search fallback. Method, Diary, Episode, Reflection, Library Knowledge and
+Provider-local Memory remain E0-exempt outside the resolver catalog. F152, F188, F200, F256, F263 and F271 are
 substrates, health/eval consumers or conventions, not new implicit opportunity producers.
 
 ## Phase A truth exceptions

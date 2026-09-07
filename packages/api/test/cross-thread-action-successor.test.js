@@ -65,11 +65,11 @@ function createMockAgentKeyRegistry() {
 function activeLease(holderCatIds, overrides = {}) {
   return {
     leaseId: 'lease-review-1',
-    key: 'user-1|pr:owner/repo#2868|review|reviewer',
+    key: 'user-1|subject:task:task-2868|implement|implementer',
     tenantScope: 'user-1',
-    subjectRef: 'pr:owner/repo#2868',
-    actionFamily: 'review',
-    successorSlot: 'reviewer',
+    subjectRef: 'subject:task:task-2868',
+    actionFamily: 'implement',
+    successorSlot: 'implementer',
     mode: holderCatIds.length > 1 ? 'parallel' : 'single',
     holderCatIds,
     generation: 1,
@@ -166,7 +166,7 @@ describe('F167 Phase S: cross-thread action successor admission', () => {
         'x-invocation-id': auth.invocationId,
         'x-callback-token': auth.callbackToken,
       },
-      payload: { threadId: target.id, content: 'Review PR 2868', ...payload },
+      payload: { threadId: target.id, content: 'Implement task 2868', ...payload },
     });
   }
 
@@ -178,7 +178,7 @@ describe('F167 Phase S: cross-thread action successor admission', () => {
         'x-invocation-id': auth.invocationId,
         'x-callback-token': auth.callbackToken,
       },
-      payload: { content: 'Review PR 2915', ...payload },
+      payload: { content: 'Implement task 2915', ...payload },
     });
   }
 
@@ -188,10 +188,10 @@ describe('F167 Phase S: cross-thread action successor admission', () => {
       clientMessageId: 'invalid-subject-ref',
       action: {
         subjectRef: 'github:zts212653/cat-cafe#3677@181099d2',
-        actionFamily: 'review',
-        successorSlot: 'reviewer',
+        actionFamily: 'implement',
+        successorSlot: 'implementer',
         mode: 'single',
-        terminalPredicate: { kind: 'review_delivered', headSha: 'a'.repeat(40) },
+        terminalPredicate: { kind: 'task_done' },
       },
     });
 
@@ -207,11 +207,11 @@ describe('F167 Phase S: cross-thread action successor admission', () => {
       targetCats: ['codex'],
       clientMessageId: 'review-2915',
       action: {
-        subjectRef: 'pr:owner/repo#2915',
-        actionFamily: 'review',
-        successorSlot: 'reviewer',
+        subjectRef: 'subject:task:task-2915',
+        actionFamily: 'implement',
+        successorSlot: 'implementer',
         mode: 'single',
-        terminalPredicate: { kind: 'review_delivered', headSha: 'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee' },
+        terminalPredicate: { kind: 'task_done' },
       },
     });
 
@@ -232,11 +232,11 @@ describe('F167 Phase S: cross-thread action successor admission', () => {
       targetCats: ['codex', 'gpt52'],
       clientMessageId: 'parallel-review-2915',
       action: {
-        subjectRef: 'pr:owner/repo#2915',
-        actionFamily: 'review',
-        successorSlot: 'reviewer',
+        subjectRef: 'subject:task:task-2915',
+        actionFamily: 'implement',
+        successorSlot: 'implementer',
         mode: 'parallel',
-        terminalPredicate: { kind: 'review_delivered', headSha: 'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee' },
+        terminalPredicate: { kind: 'task_done' },
         parallelIntent: 'independent reviews',
       },
     });
@@ -264,11 +264,11 @@ describe('F167 Phase S: cross-thread action successor admission', () => {
       targetCats: ['opus'],
       clientMessageId: 'parallel-reject-2915',
       action: {
-        subjectRef: 'pr:owner/repo#2915',
-        actionFamily: 'review',
-        successorSlot: 'reviewer',
+        subjectRef: 'subject:task:task-2915',
+        actionFamily: 'implement',
+        successorSlot: 'implementer',
         mode: 'parallel',
-        terminalPredicate: { kind: 'review_delivered', headSha: 'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee' },
+        terminalPredicate: { kind: 'task_done' },
         parallelIntent: 'independent reviews',
         returnToPredecessor: {
           leaseId: 'lease-review-1',
@@ -289,11 +289,11 @@ describe('F167 Phase S: cross-thread action successor admission', () => {
       targetCats: ['codex'],
       clientMessageId: 'review-2868',
       action: {
-        subjectRef: 'pr:owner/repo#2868',
-        actionFamily: 'review',
-        successorSlot: 'reviewer',
+        subjectRef: 'subject:task:task-2868',
+        actionFamily: 'implement',
+        successorSlot: 'implementer',
         mode: 'single',
-        terminalPredicate: { kind: 'review_delivered', headSha: 'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee' },
+        terminalPredicate: { kind: 'task_done' },
       },
     });
 
@@ -332,11 +332,11 @@ describe('F167 Phase S: cross-thread action successor admission', () => {
       targetCats: ['codex'],
       clientMessageId: 'return-review-2868',
       action: {
-        subjectRef: 'pr:owner/repo#2868',
-        actionFamily: 'review',
-        successorSlot: 'reviewer',
+        subjectRef: 'subject:task:task-2868',
+        actionFamily: 'implement',
+        successorSlot: 'implementer',
         mode: 'single',
-        terminalPredicate: { kind: 'review_delivered', headSha: 'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee' },
+        terminalPredicate: { kind: 'task_done' },
         returnToPredecessor: {
           leaseId: 'lease-review-1',
           expectedGeneration: 1,
@@ -381,11 +381,11 @@ describe('F167 Phase S: cross-thread action successor admission', () => {
       targetCats: ['codex'],
       clientMessageId: 'return-replay-review-2868',
       action: {
-        subjectRef: 'pr:owner/repo#2868',
-        actionFamily: 'review',
-        successorSlot: 'reviewer',
+        subjectRef: 'subject:task:task-2868',
+        actionFamily: 'implement',
+        successorSlot: 'implementer',
         mode: 'single',
-        terminalPredicate: { kind: 'review_delivered', headSha: 'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee' },
+        terminalPredicate: { kind: 'task_done' },
         returnToPredecessor: {
           leaseId: 'lease-review-1',
           expectedGeneration: 1,
@@ -432,11 +432,11 @@ describe('F167 Phase S: cross-thread action successor admission', () => {
       targetCats: ['codex'],
       clientMessageId: 'return-replay-blocked-2868',
       action: {
-        subjectRef: 'pr:owner/repo#2868',
-        actionFamily: 'review',
-        successorSlot: 'reviewer',
+        subjectRef: 'subject:task:task-2868',
+        actionFamily: 'implement',
+        successorSlot: 'implementer',
         mode: 'single',
-        terminalPredicate: { kind: 'review_delivered', headSha: 'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee' },
+        terminalPredicate: { kind: 'task_done' },
         returnToPredecessor: {
           leaseId: 'lease-review-1',
           expectedGeneration: 1,
@@ -465,11 +465,11 @@ describe('F167 Phase S: cross-thread action successor admission', () => {
       targetCats: ['codex'],
       clientMessageId: 'return-same-client-2868',
       action: {
-        subjectRef: 'pr:owner/repo#2868',
-        actionFamily: 'review',
-        successorSlot: 'reviewer',
+        subjectRef: 'subject:task:task-2868',
+        actionFamily: 'implement',
+        successorSlot: 'implementer',
         mode: 'single',
-        terminalPredicate: { kind: 'review_delivered', headSha: 'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee' },
+        terminalPredicate: { kind: 'task_done' },
         returnToPredecessor: {
           leaseId: 'lease-review-1',
           expectedGeneration: 1,
@@ -513,11 +513,11 @@ describe('F167 Phase S: cross-thread action successor admission', () => {
       targetCats: ['codex'],
       clientMessageId: 'review-2868',
       action: {
-        subjectRef: 'pr:owner/repo#2868',
-        actionFamily: 'review',
-        successorSlot: 'reviewer',
+        subjectRef: 'subject:task:task-2868',
+        actionFamily: 'implement',
+        successorSlot: 'implementer',
         mode: 'single',
-        terminalPredicate: { kind: 'review_delivered', headSha: 'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee' },
+        terminalPredicate: { kind: 'task_done' },
       },
     });
 
@@ -546,11 +546,11 @@ describe('F167 Phase S: cross-thread action successor admission', () => {
       targetCats: ['codex'],
       clientMessageId: 'review-2868',
       action: {
-        subjectRef: 'pr:owner/repo#2868',
-        actionFamily: 'review',
-        successorSlot: 'reviewer',
+        subjectRef: 'subject:task:task-2868',
+        actionFamily: 'implement',
+        successorSlot: 'implementer',
         mode: 'single',
-        terminalPredicate: { kind: 'review_delivered', headSha: 'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee' },
+        terminalPredicate: { kind: 'task_done' },
       },
     });
 
@@ -573,11 +573,11 @@ describe('F167 Phase S: cross-thread action successor admission', () => {
       targetCats: ['codex'],
       clientMessageId: 'action-review-2868',
       action: {
-        subjectRef: 'pr:owner/repo#2868',
-        actionFamily: 'review',
-        successorSlot: 'reviewer',
+        subjectRef: 'subject:task:task-2868',
+        actionFamily: 'implement',
+        successorSlot: 'implementer',
         mode: 'single',
-        terminalPredicate: { kind: 'review_delivered', headSha: 'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee' },
+        terminalPredicate: { kind: 'task_done' },
       },
     });
 
@@ -595,11 +595,11 @@ describe('F167 Phase S: cross-thread action successor admission', () => {
       targetCats: ['codex'],
       clientMessageId: 'recover-review-2868',
       action: {
-        subjectRef: 'pr:owner/repo#2868',
-        actionFamily: 'review',
-        successorSlot: 'reviewer',
+        subjectRef: 'subject:task:task-2868',
+        actionFamily: 'implement',
+        successorSlot: 'implementer',
         mode: 'single',
-        terminalPredicate: { kind: 'review_delivered', headSha: 'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee' },
+        terminalPredicate: { kind: 'task_done' },
       },
     });
     assert.equal(first.statusCode, 200);
@@ -622,11 +622,11 @@ describe('F167 Phase S: cross-thread action successor admission', () => {
       targetCats: ['codex'],
       clientMessageId: 'recover-review-2868',
       action: {
-        subjectRef: 'pr:owner/repo#2868',
-        actionFamily: 'review',
-        successorSlot: 'reviewer',
+        subjectRef: 'subject:task:task-2868',
+        actionFamily: 'implement',
+        successorSlot: 'implementer',
         mode: 'single',
-        terminalPredicate: { kind: 'review_delivered', headSha: 'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee' },
+        terminalPredicate: { kind: 'task_done' },
         returnToPredecessor: {
           leaseId: 'lease-review-1',
           expectedGeneration: 1,
@@ -657,11 +657,11 @@ describe('F167 Phase S: cross-thread action successor admission', () => {
     const missingKey = await post({
       targetCats: ['codex'],
       action: {
-        subjectRef: 'pr:owner/repo#2868',
-        actionFamily: 'review',
-        successorSlot: 'reviewer',
+        subjectRef: 'subject:task:task-2868',
+        actionFamily: 'implement',
+        successorSlot: 'implementer',
         mode: 'single',
-        terminalPredicate: { kind: 'review_delivered', headSha: 'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee' },
+        terminalPredicate: { kind: 'task_done' },
       },
     });
     assert.equal(missingKey.statusCode, 400);
@@ -671,11 +671,11 @@ describe('F167 Phase S: cross-thread action successor admission', () => {
       targetCats: ['codex', 'gpt52'],
       clientMessageId: 'parallel-review-2868',
       action: {
-        subjectRef: 'pr:owner/repo#2868',
-        actionFamily: 'review',
-        successorSlot: 'reviewer',
+        subjectRef: 'subject:task:task-2868',
+        actionFamily: 'implement',
+        successorSlot: 'implementer',
         mode: 'parallel',
-        terminalPredicate: { kind: 'review_delivered', headSha: 'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee' },
+        terminalPredicate: { kind: 'task_done' },
         parallelIntent: 'independent security and architecture reviews',
       },
     });
@@ -727,15 +727,15 @@ describe('F167 Phase S: cross-thread action successor admission', () => {
         headers: { 'x-agent-key-secret': 'agent-key-secret' },
         payload: {
           threadId: agentThread.id,
-          content: 'Review PR 2915',
+          content: 'Implement task 2915',
           targetCats: ['codex'],
           clientMessageId: 'agent-review-2915',
           action: {
-            subjectRef: 'pr:owner/repo#2915',
-            actionFamily: 'review',
-            successorSlot: 'reviewer',
+            subjectRef: 'subject:task:task-2915',
+            actionFamily: 'implement',
+            successorSlot: 'implementer',
             mode: 'single',
-            terminalPredicate: { kind: 'review_delivered', headSha: 'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee' },
+            terminalPredicate: { kind: 'task_done' },
           },
         },
       });

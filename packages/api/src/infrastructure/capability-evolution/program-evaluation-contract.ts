@@ -4,7 +4,7 @@ import type {
   EvolutionProgramEventV1,
   OwnerTruthRefV1,
 } from '@cat-cafe/shared';
-import type { AttributionGateView, OwnerHeldInterventionCardRefs } from './intervention-gate.js';
+import type { AttributionGateView, OwnerHeldInterventionCardRefs } from './change/intervention-gate.js';
 import type { EvolutionProgramServiceResult } from './program-command-contract.js';
 import type {
   AttributionCandidateInput,
@@ -59,6 +59,8 @@ export interface OwnerMeasurementBundle {
   /** The measurement result the proof is bound to, as a canonical owner ref. */
   resultRef?: OwnerTruthRefV1;
   ownerDecisionStatus: 'usable' | 'insufficient';
+  /** Read from F267's result; absent legacy/custom resolvers fail the intervention gate closed. */
+  proposedAction?: 'keep_observe' | 'fix' | 'build' | 'delete_sunset';
   frozenCohortRef?: OwnerTruthRefV1;
   baselineRef?: OwnerTruthRefV1;
   exposureProofRef?: OwnerTruthRefV1;

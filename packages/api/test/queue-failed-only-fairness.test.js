@@ -3,6 +3,7 @@ import { describe, it } from 'node:test';
 
 const { InvocationQueue } = await import('../dist/domains/cats/services/agents/invocation/InvocationQueue.js');
 const { QueueProcessor } = await import('../dist/domains/cats/services/agents/invocation/QueueProcessor.js');
+const { projectPublicQueueEntry } = await import('../dist/utils/queue-enrichment.js');
 const { QueuedMessageCustodyCoordinator, createInitialQueuedMessageCustody } = await import(
   '../dist/domains/cats/services/agents/invocation/QueuedMessageCustodyCoordinator.js'
 );
@@ -207,6 +208,12 @@ describe('#1371 failed-only non-agent fairness gate', () => {
       failedConnector.id,
     );
     assert.deepEqual(restored.queuedFailedByCatIds, ['opus']);
+    assert.ok(
+      projectPublicQueueEntry(restored).recoveryActions.some(
+        (action) => action.kind === 'retry_target' && action.targetCatId === 'opus',
+      ),
+      'restart restoration must retain an executable exact Retry projection',
+    );
     const harness = createProcessorHarness({ queue: restartedQueue, messageStore });
     await enqueueFreshA2A(harness, { crossThread: false });
     await flushDispatch();
@@ -344,5 +351,59 @@ describe('#1371 failed-only non-agent fairness gate', () => {
     const processing = queue.markProcessingAcrossUsers('thread-fairness');
     assert.equal(processing.id, failedConnector.id);
     assert.deepEqual(processing.queuedFailedByCatIds, undefined);
+  });
+
+  it('message-less A2A Retry consumes one exact failure fence without reopening its sibling', async () => {
+    const harness = createProcessorHarness({ busyCatIds: new Set(['opus']) });
+    const entry = enqueue(harness.queue, {
+      userId: 'user-a2a',
+      source: 'agent',
+      sourceCategory: 'a2a',
+      autoExecute: true,
+      messageId: null,
+      targetCats: ['opus', 'codex'],
+    });
+    harness.queue.markQueuedFailedForCatAcrossUsers(
+      entry.threadId,
+      'opus',
+      'inv-opus',
+      new Set([entry.id]),
+      'invocation_failed',
+      1234,
+    );
+    harness.queue.markQueuedFailedForCatAcrossUsers(
+      entry.threadId,
+      'codex',
+      'inv-codex',
+      new Set([entry.id]),
+      'invocation_failed',
+      1235,
+    );
+    const projected = projectPublicQueueEntry(harness.queue.getEntrySnapshot(entry.threadId, entry.userId, entry.id));
+    const action = projected.recoveryActions.find(
+      (candidate) => candidate.kind === 'retry_target' && candidate.targetCatId === 'opus',
+    );
+    assert.ok(action);
+
+    const first = await harness.processor.retryFailedTargetWithoutCustody(
+      entry.threadId,
+      entry.userId,
+      entry.id,
+      'opus',
+      action.id,
+    );
+    const second = await harness.processor.retryFailedTargetWithoutCustody(
+      entry.threadId,
+      entry.userId,
+      entry.id,
+      'opus',
+      action.id,
+    );
+
+    assert.equal(first.outcome, 'retried');
+    assert.equal(second.outcome, 'not_retryable');
+    const current = harness.queue.getEntrySnapshot(entry.threadId, entry.userId, entry.id);
+    assert.deepEqual(current.queuedFailedByCatIds, ['codex']);
+    assert.equal(current.queuedAttemptIdByCatId.opus, `${action.id}:attempt`);
   });
 });

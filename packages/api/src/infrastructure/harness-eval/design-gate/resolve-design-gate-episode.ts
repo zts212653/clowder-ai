@@ -13,7 +13,7 @@ import {
 const PR_REF = /^github:pr:([^/\s]+\/[^#\s]+)#([1-9]\d*)$/;
 const GIT_REF = /^git:([0-9a-f]{40})$/;
 const REVIEW_MESSAGE_REF = /^cat-cafe:thread:([^/\s]+)\/message:([^\s]+)$/;
-const REVIEW_VERDICT_REF = /^local-review:([^:\s]+):g([1-9]\d*):(approved|changes_requested|commented)$/;
+const REVIEW_VERDICT_REF = /^local-review:([^:\s]+):(approved|changes_requested|commented)$/;
 
 interface RepoRefEvidence {
   path: string;
@@ -119,7 +119,7 @@ async function resolveReview(
     if (review.extra?.localReviewVerdict?.verdict !== verdictRef.verdict || verdictRef.verdict !== 'approved') {
       reasons.push('non-author review has no matching typed approved verdict');
     }
-    if (!review.content.includes(parseGitRef(source.exactHeadRef))) {
+    if (review.extra?.localReviewVerdict?.reviewedHeadSha !== parseGitRef(source.exactHeadRef)) {
       reasons.push('non-author review verdict is not bound to exact HEAD');
     }
     if (!review.catId || review.catId === authorCatId) reasons.push('non-author review requirement is not satisfied');
@@ -247,8 +247,8 @@ function parseReviewMessageRef(ref: string): { threadId: string; messageId: stri
 
 function parseReviewVerdictRef(ref: string): { messageId: string; verdict: string } {
   const match = REVIEW_VERDICT_REF.exec(ref);
-  if (!match?.[1] || !match[3]) throw new Error(`invalid local review verdict ref: ${ref}`);
-  return { messageId: match[1], verdict: match[3] };
+  if (!match?.[1] || !match[2]) throw new Error(`invalid local review verdict ref: ${ref}`);
+  return { messageId: match[1], verdict: match[2] };
 }
 
 function uniqueRefs(source: DesignGateEpisodeSource): string[] {

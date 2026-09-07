@@ -1,5 +1,7 @@
 import {
+  type DeferredPersonMemoryClerkDispositionInput,
   type DeferredPersonMemoryInput,
+  deferredPersonMemoryClerkDispositionInputSchema,
   deferredPersonMemoryInputSchema,
   deferredPersonMemoryReceiptIdSchema,
   type ProactiveMemoryAbstentionInput,
@@ -21,6 +23,8 @@ const defineCanonicalTool = defineMcpCanonicalFactory(
 
 export const proactiveMemoryAbstentionToolInputSchema = proactiveMemoryAbstentionInputSchema.shape;
 export const deferredPersonMemoryToolInputSchema = deferredPersonMemoryInputSchema.shape;
+export const deferredPersonMemoryClerkDispositionToolInputSchema =
+  deferredPersonMemoryClerkDispositionInputSchema.shape;
 
 type CallbackPost = (path: string, body: Record<string, unknown>) => Promise<ToolResult>;
 
@@ -89,6 +93,24 @@ export function createDeferredPersonMemoryTool(callbackPost: CallbackPost) {
   const handleForgetDeferredPersonMemory = (input: { receiptId: string }) =>
     callbackPost('/api/callbacks/person-memory/deferred/forget', { receiptId: input.receiptId });
 
+  async function handleDisposeDeferredPersonMemory(
+    input: DeferredPersonMemoryClerkDispositionInput,
+  ): Promise<ToolResult> {
+    const parsed = deferredPersonMemoryClerkDispositionInputSchema.safeParse(input);
+    if (!parsed.success) return errorResult('Invalid deferred person-memory clerk disposition input.');
+    const result = await callbackPost('/api/callbacks/person-memory/deferred/dispose', parsed.data);
+    if (result.isError) return result;
+    try {
+      const body = JSON.parse(result.content[0]?.text ?? '{}') as Record<string, unknown>;
+      if (body.status === 'stale_ignored') {
+        return errorResult('Deferred receipt was NOT disposed because this invocation is stale.');
+      }
+      return successResult(JSON.stringify({ receiptId: body.receiptId, status: body.status }));
+    } catch {
+      return errorResult('Deferred receipt disposition callback returned an invalid response.');
+    }
+  }
+
   const receiptInputSchema = {
     receiptId: deferredPersonMemoryReceiptIdSchema.describe(
       'Exact deferred receipt ID returned by cat_cafe_defer_person_memory_delta.',
@@ -99,6 +121,7 @@ export function createDeferredPersonMemoryTool(callbackPost: CallbackPost) {
     handleDeferPersonMemoryDelta,
     handleWithdrawDeferredPersonMemory,
     handleForgetDeferredPersonMemory,
+    handleDisposeDeferredPersonMemory,
     tool: defineCanonicalTool({
       name: 'cat_cafe_defer_person_memory_delta',
       description:
@@ -124,6 +147,27 @@ export function createDeferredPersonMemoryTool(callbackPost: CallbackPost) {
       },
     }),
     lifecycleTools: [
+      defineCanonicalTool({
+        name: 'cat_cafe_dispose_deferred_person_memory',
+        description:
+          'Close one exact claimed F276 Memory Operations receipt when its bounded sources cannot support a proposal. ' +
+          'Use disposition=awaiting_confirmation only when an attachment or ASR source still needs explicit owner confirmation; use insufficient_evidence when the exact sources contain no useful owner-explicit person fact. ' +
+          'Pass the exact receiptId and claimId printed in the unified clerk packet. If that packet also prints a writeOpportunityRef, pass its exact triple; the server binds the disposition to the authenticated processor, system thread, invocation, and canonical opportunity generation. ' +
+          'This never creates or materializes person memory and never accepts source text, person facts, or aliases.',
+        inputSchema: deferredPersonMemoryClerkDispositionToolInputSchema,
+        handler: handleDisposeDeferredPersonMemory,
+        governance: {
+          implementationExport: 'handleDisposeDeferredPersonMemory',
+          action: 'close',
+          risk: { level: 'write', openWorld: false },
+          runtimeProfiles: ['full'],
+          standaloneReason: {
+            disposition: 'accepted-boundary',
+            kind: 'side-effect-boundary',
+            admissionRef: 'file:docs/features/F276-people-relationship-memory.md',
+          },
+        },
+      }),
       defineCanonicalTool({
         name: 'cat_cafe_withdraw_deferred_person_memory',
         description:

@@ -5,6 +5,7 @@ import { z } from 'zod';
 
 import { requireCapabilityWriteOwner } from '../config/capabilities/capability-write-guards.js';
 import type { CollectiveConnectorBuiltinRuntime } from '../domains/plugin/builtin-runtime/collective-connector-runtime.js';
+import type { LocalCollectiveServiceManager } from '../domains/plugin/builtin-runtime/local-collective-service-manager.js';
 import {
   type CallbackAuthRegistry,
   registerCallbackAuthHook,
@@ -45,6 +46,7 @@ const hostRouteBodySchema = z
 
 interface CollectiveConnectorRouteOptions {
   readonly runtime: Pick<CollectiveConnectorBuiltinRuntime, 'connector'>;
+  readonly localService: Pick<LocalCollectiveServiceManager, 'status' | 'provision'>;
   readonly callbackRegistry: CallbackAuthRegistry;
   readonly resolveAgentIdentity: (catId: string) => Omit<VerifiedAgent, 'sessionRef'> | undefined;
   readonly threadStore: {
@@ -118,12 +120,26 @@ export function registerCollectiveConnectorRoutes(
 ): void {
   app.get('/api/plugins/collective-connector', async (request, reply) => {
     if (!requireAccess(request, reply, 'read')) return;
+    const localService = await options.localService.status();
     const connector = options.runtime.connector();
-    if (!connector) return { runtimeStatus: 'inactive', connections: [] };
+    if (!connector) return { runtimeStatus: 'inactive', connections: [], localService };
     return {
       runtimeStatus: 'active',
       connections: await connector.listConnections(),
+      localService,
     };
+  });
+
+  app.post('/api/plugins/collective-connector/service/provision', async (request, reply) => {
+    if (!requireAccess(request, reply, 'write')) return;
+    try {
+      return await options.localService.provision();
+    } catch (error) {
+      return reply.status(409).send({
+        error: error instanceof Error ? error.message : 'Local Collective Service could not be created',
+        code: 'COLLECTIVE_SERVICE_PROVISION_FAILED',
+      });
+    }
   });
 
   app.post<{ Body: unknown }>('/api/plugins/collective-connector/pair', async (request, reply) => {

@@ -5,8 +5,8 @@ import {
   type OwnerTruthRefV1,
   refIdentity,
 } from '@cat-cafe/shared';
+import { INTERVENTION_GATE_BLOCKER_TEXT, type InterventionGateVerdict } from './change/intervention-gate.js';
 import { EVOLUTION_EVAL_REASON_TEXT } from './eval-reasons.js';
-import { INTERVENTION_GATE_BLOCKER_TEXT, type InterventionGateVerdict } from './intervention-gate.js';
 import {
   type AttributionAssessment,
   EVOLUTION_ATTRIBUTION_LAYERS,

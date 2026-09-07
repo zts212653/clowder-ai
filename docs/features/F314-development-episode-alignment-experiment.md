@@ -1,8 +1,8 @@
 ---
 feature_ids: [F314]
 related_features: [F100, F153, F167, F192, F267, F281, F303, F311]
-topics: [development-process, intent-alignment, review, merge-gate, process-cost, main-health, experiment, self-evolution]
-tips_exempt: "Internal development-process experiment with no end-user-invocable product surface; its user-visible value is lower coordination tax rather than a new command or UI."
+topics: [development-process, intent-alignment, review, merge-gate, process-cost, main-health, soft-surface-convergence, experiment, self-evolution]
+tips_exempt: "Renewed for the Phase B durable-review and soft-surface convergence: this changes internal author/reviewer governance and operator-authored gate guidance, with no new end-user-invocable command or UI."
 doc_kind: spec
 created: 2026-09-02
 description: "让开发从 accepted source 到 exact HEAD 保持同向，以风险匹配的最小证据交付，并把后续效用优化交给 F311 的可回滚单变量实验。"
@@ -13,7 +13,7 @@ description_updated_at: 2026-09-02T08:35:00-07:00
 
 # F314: Development Episode Alignment Experiment｜开发交付对齐自进化实验
 
-> **Status**: spec / experimental kickoff | **Owner**: 小太阳·Maine Coon（@codex-sol, GPT-5.6 Sol） | **Priority**: P0
+> **Status**: in-progress / Phase B landed behavior accepted except AC-B1's authorized delivery-budget exception and AC-B5's post-corrective runtime revalidation; Phase C remains with F311 | **Owner**: 小太阳·Maine Coon（@codex-sol, GPT-5.6 Sol） | **Priority**: P0
 >
 > **operator kickoff**: `[thread-id]#0001788362521422-000191-49e92a70`——“这个项目可能可以特殊点实验项目；这个出生是我们建立的，但是后续优化迭代我们接入 F311 的自进化。”
 >
@@ -67,8 +67,11 @@ F314 要兑现的价值不是“再建一套更严格的 SOP”，而是：
 4. 同一 PR 正式 `CHANGES_REQUESTED >= 4` 时暂停一次自动 re-request，回读 accepted source 并写 Finding Pattern Summary；
 5. 通用、项目 opt-in 的 main-health schedule template + guardian skill；Clowder AI 在能力落地时明确 opt in；
 6. F153 接入 stage duration、full-gate 次数、失败相关性与重跑观测。
+7. 对 L0、SOP、shared rules、review/merge/feature/intake skills 与模板做一次存量 soft-surface convergence：逐项给出 keep / rewrite / retire 及证据，删除已被 canonical guard、owner source 或新契约替代的旧教法，只保留唯一权威入口。
 
 Soft / hard / eval 按 claim 分工：anchor 模板先作为低成本软干预；revision、gate route 与 R4 brake 是确定契约 guard；耗时与 main 红灯是运行健康；只有“anchor 是否真的减少 intent drift”进入 F311。
+
+Soft-surface convergence 是 Phase B 的交付范围，不是 Cycle 1 的 eval 变量，也不以删行数作为成功信号。真实安全、授权、不可逆与 owner/custody 边界必须保留；未改项必须记录 keep 理由，不得再次静默缩 scope。operator scope confirmation：`[thread-id]#0001788418307430-000121-f85e4764`；执行指令：`[thread-id]#0001788420018566-000179-bfeb0143`。
 
 ### Phase C: F311 接管后续效用迭代
 
@@ -97,7 +100,7 @@ Phase B 的 exact version、证据与 owner receipts 进入既有 Evolution Prog
   6. 合入后，项目若 opt in main-health subscription，由 guardian 猫看红灯并完成 triage；operator不用巡夜。
   7. 后续真实 episode 被既有 F153/F281/feat-close/F299 owner surfaces 观察；F311 的 consumer 决定 anchor 机制 keep、tune 或 sunset。
 - **Success evidence**: exact-source → exact-HEAD → non-author verdict 的可追溯链；targeted regression tests；Clowder AI main-health opt-in 的真实通知/triage；F311 canonical Program 的首次可行动 verdict。
-- **Non-goals**: 新 UI、新 store、新 task/incident/verdict/receipt/registry；让用户打标签；把 main-health 强加给社区；在第一周期修改 L0；用更多 PR、reviewer 或 full gate 代表质量。
+- **Non-goals**: 新 UI、新 store、新 task/incident/verdict/receipt/registry；让用户打标签；把 main-health 强加给社区；用机械删行目标替代 soft-surface 判断；用更多 PR、reviewer 或 full gate 代表质量。
 
 ## Eval Birth Certificate / F311 出生证
 
@@ -168,13 +171,14 @@ metric_birth_certificate:
 
 ### Phase B（初始干预交付）
 
-- [ ] AC-B1: 一次实现交付覆盖蓝图六项能力；默认一个 PR、至多两个且每次拆分有真实 ownership/rollback 证据；changed files 与 PR/commit 可复核→Why②
-- [ ] AC-B2: request-review durable artifact 在 #1371 退役 lease 后仍能保存 accepted-source anchor；至少一个 source-moved fixture 要求 re-ack、一个 unchanged fixture 零提示→Why①
-- [ ] AC-B3: `pnpm gate` 在不增加第二命令/文件/receipt 的前提下推导 targeted/full；`--risk <axis>` 只能加严；targeted/full 正反 fixture 均通过→Why②
-- [ ] AC-B4: 同一 PR 的正式 changes-requested 达到 4 次时仅暂停一次自动 re-request；外部 GitHub 路径不等 #1371，家里路径只接退役后 durable review fact；history 不可得时 warn-open；回归证明没有 Round/Reset/lease/verdict 新状态→Why①②
-- [ ] AC-B5: 通用 main-health template 可由任意项目显式注册；Clowder AI 真实 opt in 后以覆盖 main HEAD 的既有 exact-tree receipt + 便宜 `pnpm check` 为 health source，由 guardian 收到 red/green/unknown + bisect candidates；不得为 main 另排 full gate，且没有新 task/incident/store/UI→Why③
-- [ ] AC-B6: F153 可从真实 run 读取 stage duration、full-gate 次数、失败相关性与 rerun；失败路径与 diff 无关时在原执行面就地可见→Why②
-- [ ] AC-B7: exact-HEAD targeted tests、非作者 review 与 landed Alpha/真实运行验收共同证明最终内容；不得以 full gate 次数或旧 review SHA 冒充完成→Why①②
+- [ ] AC-B1: 一次实现交付覆盖蓝图六项能力与 soft-surface convergence；默认一个 PR、至多两个且每次拆分有真实 ownership/rollback 证据；changed files 与 PR/commit 可复核→Why②。**Typed exception**：实际为 PR #4245、operator 授权的严格两文件 corrective PR #4257、PR #4268；三张均可复核，但不把授权例外改写成“至多两张”的字面合规。授权 source：`[thread-id]#0001788399177967-000628-f267a59e`。
+- [x] AC-B2: request-review durable artifact 在 #1371 退役 lease 后仍能保存 accepted-source anchor；至少一个 source-moved fixture 要求 re-ack、一个 unchanged fixture 零提示→Why①
+- [x] AC-B3: `pnpm gate` 在不增加第二命令/文件/receipt 的前提下推导 targeted/full；`--risk <axis>` 只能加严；targeted/full 正反 fixture 均通过→Why②
+- [x] AC-B4: 同一 PR 的正式 changes-requested 达到 4 次时仅暂停一次自动 re-request；外部 GitHub 路径不等 #1371，家里路径只接退役后 durable review fact；history 不可得时 warn-open；回归证明没有 Round/Reset/lease/verdict 新状态→Why①②
+- [ ] AC-B5: 通用 main-health template 可由任意项目显式注册；Clowder AI 真实 opt in 后以覆盖 main HEAD 的既有 exact-tree receipt + 便宜 `pnpm check` 为 health source，由 guardian 收到 red/green/unknown + bisect candidates；命令 admission 只接受 canonical bare executable 与不改变 `repo` cwd 的正向语法，且仅在 clean checkout 的 HEAD/tree 同 receipt 完全一致时执行；不得为 main 另排 full gate，且没有新 task/incident/store/UI→Why③。**Typed gap**：preview 与真实 green/red/unknown 执行已通过；生产 bootstrap 的 `ownerUserId` 漏传已由 PR #4279（`38c2e9adc60ddd4a99056f7b645e221c90425501`）修复并落入 main，但尚未在 runtime reload 后重新运行 governed opt-in，因此仍无 post-fix Approval proposal、live subscription 或 guardian wake 证据。验收 Task `[thread-id]#task:0001788443825245-000033-8bafdf99` 继续拥有这条真实运行闭环，禁止绕过 Approval。
+- [x] AC-B6: F153 可从真实 run 读取 stage duration、full-gate 次数、失败相关性与 rerun；失败路径与 diff 无关时在原执行面就地可见→Why②
+- [x] AC-B7: exact-HEAD targeted tests、非作者 review 与 landed Alpha/真实运行验收共同证明最终内容；不得以 full gate 次数或旧 review SHA 冒充完成→Why①②
+- [x] AC-B8: `assets/system-prompts/system-prompt-l0.md`、`docs/SOP.md`、`cat-cafe-skills/refs/shared-rules.md`、`merge-gate`、`request-review`、`receive-review`、`feat-lifecycle`、`opensource-ops` 与相关模板均有 keep / rewrite / retire 结论；已被 canonical guard/owner source/新契约替代的旧教法被删除，保留项有理由，且 L0 不复制详细 SOP→Why②③
 
 ### Phase C（F311 后续自进化）
 
@@ -193,12 +197,29 @@ metric_birth_certificate:
 | R3 | “这个出生是我们建立的” | AC-A1, AC-A3, AC-B1 | 两猫蓝图 + operator kickoff + initial delivery receipt | [ ] |
 | R4 | “后续优化迭代我们接入 F311 的自进化” | AC-C1–AC-C5 | canonical Program projection + outcome refs | [ ] |
 | R5 | 质量与效率都必须改善，不能把闭环甩给operator | AC-B3–AC-B7, AC-C4–AC-C5 | targeted tests + F153/F281 guardrails + role resolution | [ ] |
+| R6 | L0 / SOP / skills 中过期机制、失效概念、假命令与重复教法必须审查并收敛 | AC-B1, AC-B8 | keep/rewrite/retire audit + exact diff + non-author review | [ ] |
 
 ### 覆盖检查
 
 - [x] 每个需求点映射到至少一个 AC。
 - [x] 每个 AC 均有可执行的命令、source ref、owner projection 或真实运行证据。
 - [x] 本 Feature 无新 UI，前端需求→证据映射不适用。
+
+## Phase B Landed Acceptance / 2026-09-03
+
+本轮只验收已落地行为，不重新实现机制。Canonical accepted main 为 `d249768b2a1400489e45cf71926f660a6fa8c144`；验收时 `origin/main` / Alpha 为 `4216eb222fb78bba96fe7050ca31cfb13c01aab5`。两者之间没有触及 F314 的 main-health、gate receipt、durable local review、soft-surface 或 feature/plan 文件，因此 Alpha 证据覆盖同一 landed substantive content，但不把两个 SHA 写成同一 revision。
+
+| AC | Verdict | Landed / runtime evidence |
+|---|---|---|
+| B1 | `exception_open` | 三张 merged PR 的 live objects 与 merge SHA 已复核：#4245=`1f641f6e1daac79bcbcef5a0bb51c3e0776aa1eb`、#4257=`48faec8ea1c516e5dc61c860de99c203ffc8f4cb`、#4268=`6c3abbf6ff712eaa54e76ce4688e2594453cc637`。#4257 是 operator 明确授权的严格两文件 corrective；它解决真实 gate split-brain，但让原“至多两张 PR”字面条件不成立。 |
+| B2 | `accepted` | PR #4268 exact review HEAD `e699d901fa64f3fb8ad2d991c48fa95e60d8c68e` 的 durable verdict 同时携带 `acceptedSourceRef`、`acceptedRevision=6e0642701258be2d29263233b35b652d4bfc34f1`、reviewed HEAD 与非作者 verdict；Alpha API durable carrier / route 回归 223/223。Procedural 两切面 fixture：该 review cut 的 source revision 仍为 `6e064270...`（unchanged，零 re-ack）；当前 main 的 source revision 已为 `d249768...`（moved，必须 re-ack）。 |
+| B4 | `accepted` | Alpha 外部 GitHub R4 / wait / scheduler 回归 20/20，local durable review/callback 回归包含“第四次只暂停一次”“history 不可得 warn-open”；实现只读既有 GitHub history / durable message fact，没有新增 Round、Reset、lease 或 verdict lifecycle。 |
+| B5 | `blocked` | Clean exact review tree + receipt `8d2b36fa-d226-462f-a078-9b6eb330d9d7`：`pnpm check:review-completion-routing` 实跑为 green；同树 `pnpm check` 实跑为 red，并投递真实 failure tail / triage；当前 clean main 无 exact-tree green receipt，实跑为 unknown 且 check=`not_run`。compiled delivery/guardian trigger contract均被实际调用，template / command / clean-tree 回归 22/22；没有定时 full gate 或新 UI/store/incident。Clowder AI preview 成功；此前令正式 governed registration 返回 503 的 `ownerUserId` 生产装配缺口已由 PR #4279 修复并落地，但 runtime 尚未 reload/revalidate，故仍无 post-fix Approval proposal、live subscription 或 guardian wake。 |
+| B6 | `accepted` | F153 直接读取真实 receipt：green run `8d2b36fa...` 为 `route=full/fullGateCount=1`，七 stage duration=`19s/376s/120s/329s/1s/3s/247s`；failed run `db472b64...` 给出 `failedStage=check` 与 `relation=related`（failure/diff packages 均为 api+mcp）；`ee84e693...` 给出 `relation=unknown`；`f4841320...` 证明前三阶段复用 `8685dcc3...`、后续阶段本 run 执行。运行健康保留在 receipt/F153，没有挂 Eval Hub。 |
+| B7 | `accepted` | 非作者 Opus 5 对 exact HEAD `e699d901...` 的 typed APPROVED：`[thread-id]#0001788424897777-000346-ca71cdb2`，accepted revision `6e064270...`。其独立 targeted 证据为 API 215/215、MCP 90/90；本轮 landed Alpha 又通过 main-health 22/22、durable review API 223/223、MCP 90/90、R4 20/20。PR #4268 exact-tree full gate receipt只作为补充，不代替 exact-HEAD review 或 Alpha。 |
+| B8 | `accepted` | 实施计划 Task 6 对九类 surface 逐项记录 keep / rewrite / retire 与 canonical replacement；PR #4268 的实际 diff对应 audit。Landed Alpha 上 `check:sop-definitions`、`check:skills:references`、`check:sync-docs-runtime-assets` 与 `check:review-completion-routing` 全绿；L0仍是编译模板 / placeholder，没有复制详细 review/merge SOP。 |
+
+Vision comparison 仍以最初四条 operator source 为准：`0001788341832434-000718-34804917`（实现/review 同漂与流程成本）、`0001788351266499-000900-e238081f`（对齐前不开工、猫内闭环）、`0001788357372382-000081-190fec0d`（不出生新 a2a/lease/verdict，main-health 项目 opt-in）、`0001788362521422-000191-49e92a70`（人工出生、F311 后续进化）。Phase B 当前唯一产品缺口是 AC-B5 在 corrective 落地后的 runtime reload + governed opt-in 真实 GREEN；Phase C 的成熟 keep/tune/sunset 仍由既有 F311 Program 拥有，F314 不在本轮冒充完成。
 
 ## Dependencies
 
@@ -228,6 +249,7 @@ metric_birth_certificate:
 | KD-5 | 产品 main-health 默认 off，Clowder AI day-one opt in | 社区项目自主选择；咱们自己的已知痛点立即有人负责 | 2026-09-02 |
 | KD-6 | Phase B 只用一个执行 thread、至多两个 PR | PR 边界只服从 #1371 owner seam；避免一个机制一条线导致无法收敛 | 2026-09-02 |
 | KD-7 | Phase B 由Maine Coon实现；PR-1 Terra review、PR-2 Opus 5 review | 把高成本架构猫用于边界判断，不用于常规编码；两张 PR 均由同一实现 owner 保持收敛 | 2026-09-02 |
+| KD-8 | PR-2 同时完成 soft-surface convergence，不另开 cleanup PR | operator 确认它属于原始 F314 scope；拆出 follow-up 会再次制造 scope 漂移与无人欠账 | 2026-09-03 |
 
 ## Review Gate
 

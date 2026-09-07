@@ -146,6 +146,54 @@ describe('F167 ordinary A2A dispatch disposition', () => {
     );
   });
 
+  test('an unrelated reverse handoff cannot retire a live inbound A2A carrier', async () => {
+    const h = await harness({ sourceCatId: 'opus' });
+    const unrelated = h.messageStore.append({
+      userId: 'user-1',
+      catId: createCatId('codex-sol'),
+      content: '@fable-5 take unrelated work',
+      mentions: [createCatId('fable-5')],
+      timestamp: 1_500,
+      threadId: 'thread-1',
+    });
+    await h.ingest.record(
+      buildHandedEvent({
+        threadId: 'thread-1',
+        fromCatId: 'codex-sol',
+        toCatId: 'fable-5',
+        messageId: unrelated.id,
+        at: 1_500,
+      }),
+    );
+
+    const result = await h.service.complete(auth(h), 'completed');
+
+    assert.equal(result.outcome, 'applied');
+    assert.equal(result.retired, true);
+  });
+
+  test('a hold without message lineage cannot replace a live inbound A2A carrier', async () => {
+    const h = await harness();
+    await h.ingest.record(
+      buildHeldEvent({
+        threadId: 'thread-1',
+        catId: 'codex-sol',
+        fireAt: 99_000,
+        at: 1_500,
+      }),
+    );
+
+    const inspection = await h.service.inspectHandoff({
+      threadId: 'thread-1',
+      catId: 'codex-sol',
+      sourceMessageId: h.source.id,
+    });
+    const result = await h.service.complete(auth(h), 'completed');
+
+    assert.equal(inspection.outcome, 'live');
+    assert.equal(result.outcome, 'applied');
+  });
+
   test('wrong source/invocation/thread/holder/from-cat plus stale and replaced calls fail closed', async () => {
     const mutations = [
       (h) => auth(h, { a2aTriggerMessageId: 'other-message', originTriggerMessageId: 'other-message' }),
@@ -161,12 +209,22 @@ describe('F167 ordinary A2A dispatch disposition', () => {
         return auth(h);
       },
       async (h) => {
+        const replacement = h.messageStore.append({
+          userId: 'user-1',
+          catId: createCatId('codex-sol'),
+          content: '@opus continue the exact source',
+          mentions: [createCatId('opus')],
+          timestamp: 1_500,
+          threadId: 'thread-1',
+          replyTo: h.source.id,
+          extra: { causal: { kind: 'invocation_reply', triggerMessageId: h.source.id } },
+        });
         await h.ingest.record(
           buildHandedEvent({
             threadId: 'thread-1',
             fromCatId: 'codex-sol',
             toCatId: 'opus',
-            messageId: 'replacement-message',
+            messageId: replacement.id,
             at: 1_500,
           }),
         );
@@ -195,6 +253,7 @@ describe('F167 ordinary A2A dispatch disposition', () => {
       timestamp: 1_500,
       threadId: 'thread-1',
       extra: {
+        causal: { kind: 'invocation_reply', triggerMessageId: h.source.id },
         coordination: {
           id: 'coord-successor',
           phase: 'active',
@@ -235,7 +294,7 @@ describe('F167 ordinary A2A dispatch disposition', () => {
     );
   });
 
-  test('replacement metadata never crosses the disposition thread boundary', async () => {
+  test('a foreign-thread event cannot retire the live source', async () => {
     const h = await harness();
     const foreign = h.messageStore.append({
       userId: 'user-1',
@@ -258,19 +317,7 @@ describe('F167 ordinary A2A dispatch disposition', () => {
       }),
     );
 
-    await assert.rejects(
-      () => h.service.complete(auth(h), 'completed'),
-      (error) => {
-        assert.equal(error.code, 'a2a_dispatch_disposition_replaced');
-        assert.deepEqual(error.replacement, {
-          kind: 'handed',
-          sourceEventId: `route:${foreign.id}:codex-sol`,
-          fromCatId: 'opus',
-          toCatId: 'codex-sol',
-        });
-        return true;
-      },
-    );
+    assert.equal((await h.service.complete(auth(h), 'completed')).outcome, 'applied');
   });
 
   test('reports the successor even when replacement handed custody away from the caller', async () => {
@@ -282,7 +329,11 @@ describe('F167 ordinary A2A dispatch disposition', () => {
       mentions: [createCatId('opus')],
       timestamp: 1_500,
       threadId: 'thread-1',
-      extra: { coordination: { id: 'coord-outbound', phase: 'active', hop: 2 } },
+      replyTo: h.source.id,
+      extra: {
+        causal: { kind: 'invocation_reply', triggerMessageId: h.source.id },
+        coordination: { id: 'coord-outbound', phase: 'active', hop: 2 },
+      },
     });
     await h.ingest.record(
       buildHandedEvent({
@@ -304,6 +355,65 @@ describe('F167 ordinary A2A dispatch disposition', () => {
         return true;
       },
     );
+  });
+
+  test('coordination replacement requires the same stable id and subject lineage', async () => {
+    const coordination = {
+      id: 'coord-stable-lineage',
+      phase: 'active',
+      hop: 1,
+      subjectRef: 'pr:zts212653/cat-cafe#4099',
+    };
+    const matching = await harness({ sourceExtra: { coordination } });
+    const matchingSuccessor = matching.messageStore.append({
+      userId: 'user-1',
+      catId: createCatId('opus'),
+      content: '@codex-sol continue the same coordination',
+      mentions: [createCatId('codex-sol')],
+      timestamp: 1_500,
+      threadId: 'thread-1',
+      extra: { coordination: { ...coordination, hop: 2 } },
+    });
+    await matching.ingest.record(
+      buildHandedEvent({
+        threadId: 'thread-1',
+        fromCatId: 'opus',
+        toCatId: 'codex-sol',
+        messageId: matchingSuccessor.id,
+        at: 1_500,
+      }),
+    );
+    await assert.rejects(
+      () => matching.service.complete(auth(matching), 'completed'),
+      /a2a_dispatch_disposition_replaced/,
+    );
+
+    const divergent = await harness({ sourceExtra: { coordination } });
+    const divergentSuccessor = divergent.messageStore.append({
+      userId: 'user-1',
+      catId: createCatId('opus'),
+      content: '@codex-sol same id but a different subject',
+      mentions: [createCatId('codex-sol')],
+      timestamp: 1_500,
+      threadId: 'thread-1',
+      extra: {
+        coordination: {
+          ...coordination,
+          hop: 2,
+          subjectRef: 'pr:zts212653/cat-cafe#4100',
+        },
+      },
+    });
+    await divergent.ingest.record(
+      buildHandedEvent({
+        threadId: 'thread-1',
+        fromCatId: 'opus',
+        toCatId: 'codex-sol',
+        messageId: divergentSuccessor.id,
+        at: 1_500,
+      }),
+    );
+    assert.equal((await divergent.service.complete(auth(divergent), 'completed')).outcome, 'applied');
   });
 
   test('unrelated task, command, merge, and another coordination terminal never close this dispatch', async () => {

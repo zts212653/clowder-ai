@@ -9,15 +9,9 @@ export interface A2ADispatchHandoffSource {
 
 export type A2ADispatchReplacement =
   | {
-      readonly kind: 'held';
-      readonly sourceEventId: string;
-      readonly holderCatId: string;
-      readonly fireAt: number;
-    }
-  | {
       readonly kind: 'handed';
       readonly sourceEventId: string;
-      readonly sourceMessageId?: string;
+      readonly sourceMessageId: string;
       readonly fromCatId?: string;
       readonly toCatId: string;
       readonly coordination?: CrossThreadCoordination;
@@ -25,7 +19,7 @@ export type A2ADispatchReplacement =
   | {
       readonly kind: 'handed_cvo';
       readonly sourceEventId: string;
-      readonly sourceMessageId?: string;
+      readonly sourceMessageId: string;
       readonly fromCatId: string;
       readonly intent: 'handoff' | 'done_notify' | 'fyi';
       readonly coordination?: CrossThreadCoordination;
@@ -33,11 +27,6 @@ export type A2ADispatchReplacement =
 
 export type A2ADispatchHandoffInspection = A2ADispatchHandoffSource &
   ({ readonly outcome: 'live' } | { readonly outcome: 'replaced'; readonly replacement: A2ADispatchReplacement });
-
-type HeldReplacementEvent = Omit<BallCustodyEvent, 'kind' | 'payload'> & {
-  readonly kind: 'ball.held';
-  readonly payload: { readonly catId: string; readonly fireAt: number };
-};
 
 type HandedReplacementEvent = Omit<BallCustodyEvent, 'kind' | 'payload'> & {
   readonly kind: 'ball.handed';
@@ -52,7 +41,7 @@ type HandedCvoReplacementEvent = Omit<BallCustodyEvent, 'kind' | 'payload'> & {
   };
 };
 
-type ReplacementEvent = HeldReplacementEvent | HandedReplacementEvent | HandedCvoReplacementEvent;
+type ReplacementEvent = HandedReplacementEvent | HandedCvoReplacementEvent;
 
 export async function resolveA2ADispatchHandoff(input: {
   readonly threadId: string;
@@ -71,31 +60,56 @@ export async function resolveA2ADispatchHandoff(input: {
   );
   if (exactHandoffIndex === -1) return { outcome: 'missing' };
 
-  let replacementEvent: ReplacementEvent | undefined;
-  for (let index = input.events.length - 1; index > exactHandoffIndex; index -= 1) {
+  const lineageMessageIds = new Set([input.source.sourceMessageId]);
+  const lineageCoordinations: CrossThreadCoordination[] = [];
+  await seedSourceCoordination(input, lineageCoordinations);
+
+  // Walk forward so a later successor may prove a transitive chain through an
+  // earlier verified successor. Cat participation alone is never lineage.
+  let replacement: A2ADispatchReplacement | undefined;
+  for (let index = exactHandoffIndex + 1; index < input.events.length; index += 1) {
     const candidate = input.events[index];
-    if (candidate && isReplacementEvent(candidate, input.catId)) {
-      replacementEvent = candidate;
-      break;
-    }
+    if (!candidate || !isReplacementEvent(candidate, input.catId)) continue;
+    const candidateMessageId = replacementSourceMessageId(candidate);
+    if (!candidateMessageId) continue;
+    const candidateMessage = await readLineageMessage(
+      input.messageStore,
+      candidateMessageId,
+      input.threadId,
+      input.log,
+    );
+    if (!isVerifiedReplacementMessage(candidateMessage, input.threadId, candidate)) continue;
+    if (!hasCausalLineage(candidateMessage, lineageMessageIds, lineageCoordinations)) continue;
+
+    replacement = describeReplacement(candidate, candidateMessage);
+    lineageMessageIds.add(candidateMessage.id);
+    if (candidateMessage.extra?.coordination) lineageCoordinations.push(candidateMessage.extra.coordination);
   }
-  if (!replacementEvent) return { outcome: 'live', ...input.source };
-  return {
-    outcome: 'replaced',
-    ...input.source,
-    replacement: await describeReplacement(input.threadId, replacementEvent, input.messageStore, input.log),
-  };
+  if (!replacement) return { outcome: 'live', ...input.source };
+  return { outcome: 'replaced', ...input.source, replacement };
+}
+
+async function seedSourceCoordination(
+  input: {
+    readonly threadId: string;
+    readonly source: A2ADispatchHandoffSource;
+    readonly messageStore: Pick<IMessageStore, 'getById'>;
+    readonly log?: { warn(obj: unknown, msg?: string): void };
+  },
+  lineageCoordinations: CrossThreadCoordination[],
+): Promise<void> {
+  const sourceMessage = await readLineageMessage(
+    input.messageStore,
+    input.source.sourceMessageId,
+    input.threadId,
+    input.log,
+  );
+  if (sourceMessage?.threadId === input.threadId && sourceMessage.extra?.coordination) {
+    lineageCoordinations.push(sourceMessage.extra.coordination);
+  }
 }
 
 function isReplacementEvent(event: BallCustodyEvent, catId: string): event is ReplacementEvent {
-  if (event.kind === 'ball.held') {
-    return (
-      typeof event.payload.catId === 'string' &&
-      event.payload.catId === catId &&
-      typeof event.payload.fireAt === 'number' &&
-      Number.isFinite(event.payload.fireAt)
-    );
-  }
   if (event.kind === 'ball.handed') {
     const fromCatId = event.payload.fromCatId;
     const toCatId = event.payload.toCatId;
@@ -113,56 +127,28 @@ function isReplacementEvent(event: BallCustodyEvent, catId: string): event is Re
   );
 }
 
-async function describeReplacement(
-  threadId: string,
-  event: ReplacementEvent,
-  messageStore: Pick<IMessageStore, 'getById'>,
-  log?: { warn(obj: unknown, msg?: string): void },
-): Promise<A2ADispatchReplacement> {
-  if (event.kind === 'ball.held') {
-    return {
-      kind: 'held',
-      sourceEventId: event.sourceEventId,
-      holderCatId: event.payload.catId,
-      fireAt: event.payload.fireAt,
-    };
-  }
+function describeReplacement(event: ReplacementEvent, message: StoredMessage): A2ADispatchReplacement {
   if (event.kind === 'ball.handed') {
-    const base = {
-      kind: 'handed' as const,
+    return {
+      kind: 'handed',
       sourceEventId: event.sourceEventId,
+      sourceMessageId: message.id,
       ...(event.payload.fromCatId ? { fromCatId: event.payload.fromCatId } : {}),
       toCatId: event.payload.toCatId,
-    };
-    const sourceMessageId = handedSourceMessageId(event);
-    if (!sourceMessageId) return base;
-    const message = await readReplacementMessage(messageStore, sourceMessageId, threadId, log);
-    if (!isVerifiedReplacementMessage(message, threadId, event.payload.fromCatId, event.payload.toCatId)) return base;
-    return {
-      ...base,
-      sourceMessageId,
       ...(message.extra?.coordination ? { coordination: { ...message.extra.coordination } } : {}),
     };
   }
-
-  const base = {
-    kind: 'handed_cvo' as const,
+  return {
+    kind: 'handed_cvo',
     sourceEventId: event.sourceEventId,
+    sourceMessageId: message.id,
     fromCatId: event.payload.fromCatId,
     intent: event.payload.intent,
-  };
-  const sourceMessageId = event.sourceEventId.startsWith('route:') ? event.sourceEventId.slice('route:'.length) : '';
-  if (!sourceMessageId) return base;
-  const message = await readReplacementMessage(messageStore, sourceMessageId, threadId, log);
-  if (!message || message.threadId !== threadId || message.catId !== event.payload.fromCatId) return base;
-  return {
-    ...base,
-    sourceMessageId,
     ...(message.extra?.coordination ? { coordination: { ...message.extra.coordination } } : {}),
   };
 }
 
-async function readReplacementMessage(
+async function readLineageMessage(
   messageStore: Pick<IMessageStore, 'getById'>,
   sourceMessageId: string,
   threadId: string,
@@ -173,10 +159,15 @@ async function readReplacementMessage(
   } catch (err) {
     log?.warn(
       { err, threadId, sourceMessageId },
-      '[F167] replacement metadata enrichment unavailable; preserving event-derived verdict',
+      '[F167] replacement lineage metadata unavailable; keeping the dispatch live unless another candidate proves lineage',
     );
     return null;
   }
+}
+
+function replacementSourceMessageId(event: ReplacementEvent): string | null {
+  if (event.kind === 'ball.handed') return handedSourceMessageId(event);
+  return event.sourceEventId.startsWith('route:') ? event.sourceEventId.slice('route:'.length) || null : null;
 }
 
 function handedSourceMessageId(event: HandedReplacementEvent): string | null {
@@ -190,13 +181,30 @@ function handedSourceMessageId(event: HandedReplacementEvent): string | null {
 function isVerifiedReplacementMessage(
   message: StoredMessage | null,
   threadId: string,
-  fromCatId: string | undefined,
-  toCatId: string,
+  event: ReplacementEvent,
 ): message is StoredMessage {
+  if (!message || message.threadId !== threadId) return false;
+  if (event.kind === 'ball.handed_cvo') return message.catId === event.payload.fromCatId;
   return Boolean(
-    message &&
-      message.threadId === threadId &&
-      (!fromCatId || message.catId === fromCatId) &&
-      (message.mentions.some((candidate) => candidate === toCatId) || message.extra?.targetCats?.includes(toCatId)),
+    (!event.payload.fromCatId || message.catId === event.payload.fromCatId) &&
+      (message.mentions.some((candidate) => candidate === event.payload.toCatId) ||
+        message.extra?.targetCats?.includes(event.payload.toCatId)),
+  );
+}
+
+function hasCausalLineage(
+  message: StoredMessage,
+  lineageMessageIds: ReadonlySet<string>,
+  lineageCoordinations: readonly CrossThreadCoordination[],
+): boolean {
+  if (message.replyTo && lineageMessageIds.has(message.replyTo)) return true;
+  const causalSource = message.extra?.causal?.triggerMessageId;
+  if (causalSource && lineageMessageIds.has(causalSource)) return true;
+  const coordination = message.extra?.coordination;
+  return Boolean(
+    coordination &&
+      lineageCoordinations.some(
+        (candidate) => candidate.id === coordination.id && candidate.subjectRef === coordination.subjectRef,
+      ),
   );
 }

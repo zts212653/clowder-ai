@@ -55,7 +55,7 @@ function appendUserMessage(messageStore, { content, threadId = 'thread-f310', ti
   });
 }
 
-function admissionPayload(admission) {
+function admissionPayload(admission, overrides = {}) {
   return {
     title: 'Held work from canonical source custody',
     admission: {
@@ -64,6 +64,15 @@ function admissionPayload(admission) {
       idempotencyKey: admission.idempotencyKey ?? 'entrusted:forged',
     },
     closure: { condition: 'The result is reviewable', expectedSignal: 'artifact:final' },
+    ...overrides,
+  };
+}
+
+function canonicalDeadline(source) {
+  return {
+    time: {
+      businessDeadline: { value: now + 86_400_000, sourceRef: `message:${source.id}` },
+    },
   };
 }
 
@@ -94,12 +103,12 @@ async function callbackHarness() {
   };
 }
 
-async function postAdmission(app, headers, admission) {
+async function postAdmission(app, headers, admission, overrides) {
   return app.inject({
     method: 'POST',
     url: '/api/callbacks/admit-entrusted-work',
     headers,
-    payload: admissionPayload(admission),
+    payload: admissionPayload(admission, overrides),
   });
 }
 
@@ -259,6 +268,53 @@ describe('F310 entrusted-work custody guards', () => {
     await app.close();
   });
 
+  test('ordinary time-bound source must admit exact canonical time or ask for clarification', async () => {
+    const { app, headers, messageStore, taskStore } = await callbackHarness();
+    const source = appendUserMessage(messageStore, {
+      content: '下周一下午 3 点前帮我准备两个方向，做完回来让我选',
+    });
+    const admission = {
+      ...admissionCommand().admission,
+      sourceRefs: [`message:${source.id}`],
+      idempotencyKey: `entrusted:${source.id}`,
+    };
+
+    const omitted = await postAdmission(app, headers, admission);
+    assert.equal(omitted.statusCode, 200);
+    assert.equal(omitted.json().status, 'needs_clarification');
+    assert.equal(taskStore.listByThread('thread-f310').length, 0);
+
+    const hintsOnly = await postAdmission(app, headers, {
+      ...admission,
+      timeHints: ['下周一下午 3 点前'],
+    });
+    assert.equal(hintsOnly.statusCode, 200);
+    assert.equal(hintsOnly.json().status, 'needs_clarification');
+    assert.equal(taskStore.listByThread('thread-f310').length, 0);
+
+    const wrongSource = await postAdmission(app, headers, admission, {
+      time: {
+        businessDeadline: { value: now + 86_400_000, sourceRef: 'message:unrelated' },
+      },
+    });
+    assert.equal(wrongSource.statusCode, 200);
+    assert.equal(wrongSource.json().status, 'needs_clarification');
+    assert.equal(taskStore.listByThread('thread-f310').length, 0);
+
+    const admitted = await postAdmission(app, headers, admission, {
+      time: {
+        businessDeadline: { value: now + 86_400_000, sourceRef: `message:${source.id}` },
+      },
+    });
+    assert.equal(admitted.statusCode, 200);
+    assert.equal(admitted.json().status, 'admitted');
+    assert.deepEqual(admitted.json().task.entrustedWork.time, {
+      businessDeadline: { value: now + 86_400_000, sourceRef: `message:${source.id}` },
+    });
+    assert.equal(taskStore.listByThread('thread-f310').length, 1);
+    await app.close();
+  });
+
   test('Web and callback projections close through the same typed Task owner action', async () => {
     const webStore = new TaskStore();
     const webLifecycle = new EntrustedWorkLifecycleService(webStore, { now: () => now });
@@ -286,11 +342,16 @@ describe('F310 entrusted-work custody guards', () => {
 
     const { app, headers, messageStore } = await callbackHarness();
     const source = appendUserMessage(messageStore, { content: 'Please prepare tomorrow presentation' });
-    const callbackAdmission = await postAdmission(app, headers, {
-      ...admissionCommand().admission,
-      sourceRefs: [`message:${source.id}`],
-      idempotencyKey: `entrusted:${source.id}`,
-    });
+    const callbackAdmission = await postAdmission(
+      app,
+      headers,
+      {
+        ...admissionCommand().admission,
+        sourceRefs: [`message:${source.id}`],
+        idempotencyKey: `entrusted:${source.id}`,
+      },
+      canonicalDeadline(source),
+    );
     assert.equal(callbackAdmission.statusCode, 200);
     assert.equal(callbackAdmission.json().status, 'admitted');
     const callbackTask = callbackAdmission.json().task;
@@ -317,11 +378,16 @@ describe('F310 entrusted-work custody guards', () => {
   test('callback owner can typed-update open entrusted work while foreign and stale actors fail closed', async () => {
     const { app, headers, messageStore, taskStore } = await callbackHarness();
     const source = appendUserMessage(messageStore, { content: 'Please prepare tomorrow presentation' });
-    const admission = await postAdmission(app, headers, {
-      ...admissionCommand().admission,
-      sourceRefs: [`message:${source.id}`],
-      idempotencyKey: `entrusted:${source.id}`,
-    });
+    const admission = await postAdmission(
+      app,
+      headers,
+      {
+        ...admissionCommand().admission,
+        sourceRefs: [`message:${source.id}`],
+        idempotencyKey: `entrusted:${source.id}`,
+      },
+      canonicalDeadline(source),
+    );
     const task = admission.json().task;
 
     const foreignRegistry = new InvocationRegistry();
@@ -384,11 +450,16 @@ describe('F310 entrusted-work custody guards', () => {
   test('soft-deleted invocation Thread blocks typed update and close with zero Task mutation', async () => {
     const { app, headers, messageStore, taskStore, threadStore } = await callbackHarness();
     const source = appendUserMessage(messageStore, { content: 'Please prepare tomorrow presentation' });
-    const admission = await postAdmission(app, headers, {
-      ...admissionCommand().admission,
-      sourceRefs: [`message:${source.id}`],
-      idempotencyKey: `entrusted:${source.id}`,
-    });
+    const admission = await postAdmission(
+      app,
+      headers,
+      {
+        ...admissionCommand().admission,
+        sourceRefs: [`message:${source.id}`],
+        idempotencyKey: `entrusted:${source.id}`,
+      },
+      canonicalDeadline(source),
+    );
     assert.equal(admission.statusCode, 200);
     const task = admission.json().task;
     assert.equal(threadStore.softDelete('thread-f310'), true);

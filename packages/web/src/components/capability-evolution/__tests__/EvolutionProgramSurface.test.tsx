@@ -79,6 +79,9 @@ const projection = {
     gaps: [],
     hiddenOwnerPayload: 'DO NOT RENDER',
   },
+  lineage: {
+    cycles: [{ cycle: 1, changes: [] }],
+  },
 };
 
 describe('F311 Evolution Program Workbench surface', () => {
@@ -145,7 +148,12 @@ describe('F311 Evolution Program Workbench surface', () => {
       verdict: 'unresolved',
       headline: '证据还不能确诊是哪一层出的问题。',
       evidence: [
-        { label: '本轮度量结果', ownerFeatureId: 'F267', ownerStateRef: 'measurement-result:evolve-video-skill:w7' },
+        {
+          label: '本轮度量结果',
+          ownerFeatureId: 'F267',
+          ownerStateRef: 'measurement-result:evolve-video-skill:w7',
+          identity: '["owner","F267","measurement-result:evolve-video-skill:w7",null]',
+        },
       ],
       competingAttributions: [{ layer: 'execution', label: '执行层：被进化的对象自己', discriminating: true }],
       notAssessedLayers: [{ layer: 'rubric', label: '尺子层（这一轮没有证据，只是没看，不等于已排除）' }],

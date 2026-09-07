@@ -24,24 +24,6 @@ export type ActionSuccessorSlot = (typeof ACTION_SUCCESSOR_SLOTS)[number];
 export type ActionSuccessorMode = 'single' | 'parallel';
 export type ActionSuccessorClaimOrigin = 'structured_transfer' | 'existing_standing';
 
-export const REVIEW_REENTRY_REASONS = ['behavioral_delta', 'stale_or_blocking', 'explicit_matrix_route'] as const;
-
-export type ReviewReentryReason = (typeof REVIEW_REENTRY_REASONS)[number];
-
-export const reviewReentrySchema = z
-  .object({
-    reason: z.enum(REVIEW_REENTRY_REASONS),
-    evidenceRef: z
-      .string()
-      .trim()
-      .min(1)
-      .max(300)
-      .describe('Durable evidence for the Review Provenance Matrix route back to a local reviewer.'),
-  })
-  .strict();
-
-export type ReviewReentry = z.infer<typeof reviewReentrySchema>;
-
 export const ACTION_TERMINAL_PREDICATE_KINDS = [
   'pr_merged',
   'review_delivered',
@@ -94,19 +76,19 @@ const reviewDispatchProposedActionSchema = z
     subjectRef: z
       .string()
       .regex(/^pr:[^/\s]+\/[^#\s]+#[1-9]\d*$/)
-      .describe('Exact PR subject: pr:<owner>/<repo>#<positive-number>.'),
-    actionFamily: z.literal(reviewProposalCapability.actionFamily).describe('Executable family: review.'),
-    successorSlot: z.literal(reviewProposalCapability.successorSlot).describe('Required slot for review: reviewer.'),
+      .describe('Exact external PR subject: pr:<owner>/<repo>#<positive-number>.'),
+    actionFamily: z.literal(reviewProposalCapability.actionFamily).describe('Executable family: external review.'),
+    successorSlot: z.literal(reviewProposalCapability.successorSlot).describe('Required slot: reviewer.'),
     ...proposedActionCommonShape,
     terminalPredicate: z
       .object({
         kind: z
           .literal(reviewProposalCapability.terminalPredicateKind)
-          .describe('Review completion is the durable review_delivered verdict.'),
+          .describe('External review completion is the durable review_delivered verdict.'),
         headSha: canonicalGitObjectIdSchema.describe('Exact lowercase 40- or 64-character PR HEAD Git OID.'),
       })
       .strict()
-      .describe('Exact review completion predicate and revision.'),
+      .describe('Exact external review completion predicate and revision.'),
   })
   .strict();
 
@@ -212,11 +194,6 @@ export const actionSuccessorMetadataObjectSchema = z.object({
   terminalPredicate: actionTerminalPredicateInputSchema
     .optional()
     .describe('Typed completion parameters; server catalog owns predicate semantics and subject binding.'),
-  reviewReentry: reviewReentrySchema
-    .optional()
-    .describe(
-      'Required only to continue a completed local-review lease on a new exact HEAD. Omit for an initial review.',
-    ),
   replace: z
     .object({
       leaseId: z.string().min(1).max(200),
@@ -309,30 +286,11 @@ function refineTerminalPredicate(value: ActionSuccessorMetadataValue, ctx: z.Ref
   }
 }
 
-function refineReviewReentry(value: ActionSuccessorMetadataValue, ctx: z.RefinementCtx): void {
-  if (!value.reviewReentry) return;
-  if (value.actionFamily !== 'review' || value.successorSlot !== 'reviewer') {
-    ctx.addIssue({
-      code: z.ZodIssueCode.custom,
-      path: ['reviewReentry'],
-      message: 'reviewReentry is valid only for the review/reviewer action identity',
-    });
-  }
-  if (value.replace || value.returnToPredecessor) {
-    ctx.addIssue({
-      code: z.ZodIssueCode.custom,
-      path: ['reviewReentry'],
-      message: 'reviewReentry cannot be combined with replacement or return metadata',
-    });
-  }
-}
-
 export function refineActionSuccessorMetadata(value: ActionSuccessorMetadataValue, ctx: z.RefinementCtx): void {
   refineSlotAndMode(value, ctx);
   refineClaimOrigin(value, ctx);
   refineReturn(value, ctx);
   refineTerminalPredicate(value, ctx);
-  refineReviewReentry(value, ctx);
 }
 
 export const actionSuccessorMetadataSchema =

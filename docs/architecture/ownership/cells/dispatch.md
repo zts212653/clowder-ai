@@ -12,6 +12,7 @@ code_anchors:
   - packages/api/src/domains/cats/services/agents/invocation/invoke-single-cat.ts
   - packages/api/src/domains/cats/services/agents/invocation/InvocationQueue.ts
   - packages/api/src/domains/cats/services/agents/invocation/QueueProcessor.ts
+  - packages/api/src/domains/cats/services/agents/invocation/QueueCarrierSourceProjection.ts
   - packages/api/src/domains/cats/services/stores/ports/InvocationRecordStore.ts
   - packages/api/src/domains/cats/services/stores/redis/RedisInvocationRecordStore.ts
   - packages/api/src/domains/cats/services/agents/invocation/queue-entry-settlement.ts

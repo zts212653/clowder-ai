@@ -22,6 +22,17 @@ function proposedReviewAction(overrides = {}) {
   };
 }
 
+function proposedImplementAction(overrides = {}) {
+  return {
+    subjectRef: 'subject:task:canonical-admission-42',
+    actionFamily: 'implement',
+    successorSlot: 'implementer',
+    mode: 'single',
+    terminalPredicate: { kind: 'task_done' },
+    ...overrides,
+  };
+}
+
 function proposedInvestigationAction() {
   return {
     subjectRef: 'pr:owner/repo#42',
@@ -112,6 +123,7 @@ async function createFixture(t) {
     },
     approvalIngress: { async publish() {} },
     actionSuccessorAdmissionService: {
+      async preflightStructuredTransferStanding() {},
       async admit(input) {
         actionAdmissions.push(input);
         return {
@@ -165,11 +177,26 @@ async function createPendingReviewProposal(fixture) {
     proposedAction: proposedReviewAction(),
     clientMessageId: 'pending-review-proposal',
   });
-  assert.equal(response.statusCode, 200);
+  assert.equal(response.statusCode, 200, response.body);
   assert.equal(response.json().status, 'proposal_created');
   const [proposal] = await fixture.dispatchProposalStore.listPendingByUser('user-1');
   assert.ok(proposal, 'assign_work must create a pending proposal');
   assert.deepEqual(proposal.proposedAction, proposedReviewAction());
+  return proposal;
+}
+
+async function createPendingImplementProposal(fixture) {
+  const proposedAction = proposedImplementAction();
+  const response = await post(fixture, fixture.auth, {
+    effectClass: 'assign_work',
+    proposedAction,
+    clientMessageId: 'pending-implement-proposal',
+  });
+  assert.equal(response.statusCode, 200, response.body);
+  assert.equal(response.json().status, 'proposal_created');
+  const [proposal] = await fixture.dispatchProposalStore.listPendingByUser('user-1');
+  assert.ok(proposal, 'assign_work must create a pending implement proposal');
+  assert.deepEqual(proposal.proposedAction, proposedAction);
   return proposal;
 }
 
@@ -214,11 +241,11 @@ test('pending proposal blocks a weaker cross-invocation coordinate carrier befor
 
 test('a structured admission rejection cannot be weakened into an actionless coordinate retry', async (t) => {
   const fixture = await createFixture(t);
-  const proposal = await createPendingReviewProposal(fixture);
+  const proposal = await createPendingImplementProposal(fixture);
   const freshAuth = await fixture.registry.create('user-1', 'opus', fixture.sourceId);
 
   const structured = await post(fixture, freshAuth, {
-    action: proposedReviewAction(),
+    action: proposedImplementAction(),
     clientMessageId: 'structured-admission-rejected',
   });
   assert.equal(structured.statusCode, 409, 'the structured action must be rejected before successor admission');
@@ -241,14 +268,14 @@ test('a structured admission rejection cannot be weakened into an actionless coo
 
 test('the full canonical action key, not content or effectClass, blocks a fresh structured carrier', async (t) => {
   const fixture = await createFixture(t);
-  await createPendingReviewProposal(fixture);
+  await createPendingImplementProposal(fixture);
   const freshAuth = await fixture.registry.create('user-1', 'opus', fixture.sourceId);
   const clientMessageId = 'canonical-key-ignores-carrier-shape';
 
   const response = await post(fixture, freshAuth, {
     content: '@sonnet\nThis text intentionally shares no words with the held request.',
     effectClass: 'coordinate',
-    action: proposedReviewAction({ terminalPredicate: { kind: 'review_delivered', headSha: 'b'.repeat(40) } }),
+    action: proposedImplementAction(),
     clientMessageId,
   });
 

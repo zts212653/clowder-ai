@@ -1,10 +1,10 @@
 ---
 feature_ids: [F276]
-related_features: [F102, F152, F186, F188, F192, F200, F209, F227, F231, F255, F256, F260, F263, F271, F282]
+related_features: [F102, F152, F186, F188, F192, F200, F209, F227, F231, F255, F256, F260, F263, F271, F282, F293, F296]
 topics: [memory, people, relationship, privacy, provenance, lifecycle]
 doc_kind: spec
 created: 2026-07-25
-updated: 2026-08-31
+updated: 2026-09-04
 description: "为每位用户私域维护第三方人物、第一等关系与互动事件，并以有界关系卡按需解引用。"
 description_source: model
 description_author: codex-sol
@@ -26,6 +26,11 @@ mcp_admission_claims:
     boundaryKind: side-effect-boundary
     decision: accepted
   - ref: "file:docs/features/F276-people-relationship-memory.md"
+    toolName: cat_cafe_dispose_deferred_person_memory
+    resourceFamily: memory-write
+    boundaryKind: side-effect-boundary
+    decision: accepted
+  - ref: "file:docs/features/F276-people-relationship-memory.md"
     toolName: cat_cafe_forget_deferred_person_memory
     resourceFamily: memory-write
     boundaryKind: destructive-boundary
@@ -37,8 +42,8 @@ mcp_admission_claims:
 > **Status**: Phase A/B + live proposal-status resolver + pending-card atomic
 > replacement/withdrawal + cross-thread owner evidence + the operator-approved
 > known-person delta dual path are landed on main. The dual path keeps immediate
-> proposal and adds a content-free `capture/defer` receipt followed by a bounded
-> daily clerk. On 2026-08-11 the first real `InteractionEvent`
+> proposal and adds a content-free `capture/defer` receipt followed by one bounded,
+> batched Memory Operations clerk in a shared system thread. On 2026-08-11 the first real `InteractionEvent`
 > approve→materialize→relationship-card recall vertical slice passed against live
 > owner-private truth. Phase C remains open for the rest of AC-C1 and AC-C2/C3; this
 > single slice is not an overall utility or standing-reflex verdict. |
@@ -67,6 +72,10 @@ Why: F209/F260 拥有 workspace person identity root / locator，F231 只拥有 
 - `cat_cafe_defer_person_memory_delta` 是独立的 side-effect boundary：只持久化
   content-free、exact-source-bound receipt，不创建 Approval Hub 卡，也不写人物记忆；失败时
   零 receipt，后续只能由有界 daily clerk 显式 claim。
+- `cat_cafe_dispose_deferred_person_memory` 是 clerk 的 terminal side-effect boundary：只接受
+  系统线程 packet 中的 exact receipt/claim fence，并以当前 processor grant 核验调用猫与 thread；
+  `awaiting_confirmation` 将 receipt 移出 ready queue，`insufficient_evidence` 清除 payload 并终结
+  receipt。它不创建 proposal，不写人物记忆，也不接受人物事实或 source body。
 - `cat_cafe_withdraw_deferred_person_memory` 是独立的 rollback boundary：只能按 exact receipt ID
   在 proposal 生成前移出 daily queue 并清除 dedupe/source payload；它不等价于再次 capture，且
   对已生成 proposal fail closed。
@@ -74,7 +83,7 @@ Why: F209/F260 拥有 workspace person identity root / locator，F231 只拥有 
   locator，必须 owner 明确请求并保持 profile-gated；已生成 proposal 时拒绝局部遗忘，改走 F276
   proposal/person hard-forget lifecycle。
 
-上述三个工具共享 server-derived owner/invocation 与 typed provenance，但 side-effect、rollback 与
+上述四个工具共享 server-derived owner/invocation 与 typed provenance，但 side-effect、rollback 与
 destructive risk 不同；将它们并入 proposal 或一个混合 action union 会污染审批写入与 destructive
 annotation，违反 ADR-044 的 authority/risk boundary。既有 `cat_cafe_propose_person_memory` 仅新增
 daily-clerk 的 fenced `deferredReceipt` lineage，因此提升为 canonical 的同资源 lifecycle contract，
@@ -130,6 +139,15 @@ operator 已经明确介绍过一个低频但高价值的具名人物、稳定�
   owner 审批的 F276 proposal。daily 不扫描对话、不接触私密正文，也绝不静默 materialize；
   本次 status/recall 证据未区分该 candidate 来自即时 propose 还是 deferred daily clerk，
   因而不能据此宣称双路径均已完成生产 dogfood。
+- 2026-09-02 runtime evidence 暴露旧 clerk 把 capture-time `requesterCatId` 当执行 authority，
+  因而在原业务 thread 逐 receipt 唤醒 capture 猫，甚至可反复唤醒稀缺判断席位。修订契约改为：
+  全 owner 只有一个 `memory_ops` 系统 thread；每个 cron tick 把最多 8 条独立 receipt 合成一次
+  invocation；actor 由 cheap memory-curator policy 独立选择并排除 `weekly_subscription_scarce`；
+  `requesterCatId` 只保留 capture provenance。claim 在 dispatch 前绑定 processor cat + processing
+  thread + lease，并对实际目标执行 F293 preflight。每条 receipt 必须以 proposal、
+  `awaiting_confirmation` 或 `insufficient_evidence` 明确收口；旧 attempt lease 过期后直接成为
+  payload-free `not_actionable`，不得再唤醒下一只猫。原 owner source thread 仍是 provenance，
+  ASR/F296 generation 只把 presentation scope 委托给系统 thread/processor，不改写来源坐标。
 - Phase C 的 `InteractionEvent` approve→materialize→recall vertical slice 已于 2026-08-11
   首次通过：exact proposal 当前为 `materialized`、`publicationState=anchored`、无 remaining
   drafts；同一人物 alias 的只读 recall 返回 bounded person/relationship/latest-interaction
@@ -197,8 +215,11 @@ operator 已经明确介绍过一个低频但高价值的具名人物、稳定�
 - deferred receipt 只保存 server-derived owner/cat/invocation/origin、人物 identity binding、
   exact typed source coordinates/digests 与状态，不保存消息正文。known-person delta 允许进入，
   但 exact registry + source bundle delta 在 capture/proposal/materialized lineage 间去重。
-- daily clerk 每轮最多消费 8 条显式 confirmed receipt，只把 exact refs 交回原 requester cat
-  生成普通可拒绝 F276 proposal；未确认 ASR/第三方转写保持 `awaiting_confirmation`，不会入队。
+- daily clerk 每轮最多消费 8 条显式 confirmed receipt，并在唯一 `memory_ops` 系统 thread 中
+  合成一次 bounded invocation；exact refs 仍逐 receipt 隔离。`requesterCatId` 只作 provenance，
+  处理猫由 cheap/non-scarce memory-curator policy 独立选择，实际 dispatch 必须通过 F293 preflight。
+  未确认 ASR/第三方转写显式转为 `awaiting_confirmation` 并移出 ready queue；无充分事实显式转为
+  payload-free `not_actionable`，禁止靠 claim expiry 形成重复唤醒循环。
 
 ### Phase B: Authorized relationship card + lifecycle
 
@@ -441,9 +462,17 @@ You 与所有 owner-authorized cats。Activation = 已 materialize person 在新
   在 immediate → defer 或 defer → immediate 任一方向生成第二条 receipt/card lineage。direct proposal
   即使使用不同 `sourceId`，只要解析到同一 message/attachment coordinate，也必须在 candidate/card
   写入前以 `duplicate_source_coordinate` fail closed。
-- [x] AC-A22: daily clerk 只读取最多 8 条显式 deferred receipt，使用有期限 claim fence；
-  它不扫描全量对话、不读取正文，只唤醒原 requester cat 以 exact typed refs 生成普通 F276
-  approval proposal。投递失败释放 exact claim；成功时 candidate anchor、pending index、payload-free
+- [x] AC-A22: daily clerk 只读取最多 8 条显式 deferred receipt，使用一个 owner-scoped
+  `memory_ops` system thread 合成一次 invocation，不创建 per-person/per-entity worker/thread。
+  它不扫描全量对话、不读取正文；capture-time requester 只作 provenance，actor 由 cheap
+  memory-curator policy 独立选择，`weekly_subscription_scarce` 猫不可被该车道选择，实际目标须经
+  F293 dispatch preflight。每条 claim 绑定 processor cat + processing thread + 有期限 lease；batch
+  投递后再绑定 exact processing message，首个合法 callback 将它原子绑定到实际 processor invocation，
+  后续 propose/rearm/dispose 及 Redis terminal transition 均重验同一 invocation。仅同猫同 thread 但
+  未收到该 batch 的 successor 也必须拒绝。投递失败释放整批 exact claims；成功时
+  每条 receipt 必须 proposal 或显式 `awaiting_confirmation | insufficient_evidence`，不得沉默等 expiry。
+  已过期的旧 attempt 直接 payload-purge 为 `not_actionable/unresolved_after_clerk_attempt`，不再唤醒。
+  candidate anchor、pending index、payload-free
   terminal receipt、ready/binding/proposal indexes 与 lineage swap 在同一个 Redis Lua 内提交，并原子
   重验 receipt state、claim id、`claimUntil`、fingerprint 与 binding membership。并发 withdraw 或 lease
   expiry 只能得到 409 + 非 approvable staged candidate，不能留下可审批的 orphan card/candidate。若
@@ -456,7 +485,9 @@ You 与所有 owner-authorized cats。Activation = 已 materialize person 在新
 - [x] AC-A24: owner 可按 exact receipt 撤回或 hard forget；proposal hard-forget 与整个人物
   hard-forget 都清除关联 receipt、owner/dedupe/proposal locator 与 ready index。terminal receipt
   只留 content-free disposition/lineage，不可从隐藏 derived person id 反查；receipt 一旦绑定
-  proposal，receipt-only forget 必须拒绝，避免“收据已删、事实卡仍在”的假 purge。
+  proposal，receipt-only forget 必须拒绝，避免“收据已删、事实卡仍在”的假 purge。若 receipt 带
+  F296 write-opportunity lineage，withdraw/forget/source drift 必须先写入 durable invalidation fence 并
+  清除 delivery；任一步失败均返回 503 且不得先删除或终结 receipt，重试可恢复闭环。
 - [x] AC-A25: F153 health 只记录低基数 `capture` / `deferred_daily` stage outcome 与 latency，
   不含人物、owner、receipt、source 或 hash；utility 继续消费既有 F282/F276 eval，不以工程计数
   冒充 keep/tune/sunset verdict。

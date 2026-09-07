@@ -246,6 +246,7 @@ export class CodexAppServerClient {
           input.thread.kind === 'resume' ? { threadId: input.thread.threadId } : undefined,
         ),
         startParams: buildCodexAppServerThreadParams(input),
+        requireExactResume: Boolean(recoveryInstruction),
         ...(input.resumeReplacement ? { resumeReplacement: input.resumeReplacement } : {}),
         localLiveLease: this.deps.wire.reusedSessionHost === true,
         request: (method, params) => this.request(method, params),

@@ -244,6 +244,7 @@ export class RedisThreadStore implements IThreadStore {
     projectPath?: string,
     parentThreadId?: string,
     proposalAudit?: import('../ports/ThreadStore.js').ThreadProposalAudit,
+    branchAudit?: import('../ports/ThreadStore.js').ThreadBranchAudit,
   ): Promise<Thread> {
     const now = Date.now();
     const thread: Thread = {
@@ -259,10 +260,14 @@ export class RedisThreadStore implements IThreadStore {
         ? {
             createdFromProposalId: proposalAudit.createdFromProposalId,
             sourceThreadId: proposalAudit.sourceThreadId,
+            ...(proposalAudit.sourceInvocationId ? { sourceInvocationId: proposalAudit.sourceInvocationId } : {}),
+            ...(proposalAudit.sourceMessageId ? { sourceMessageId: proposalAudit.sourceMessageId } : {}),
+            ...(proposalAudit.declaredWorkMode ? { declaredWorkMode: proposalAudit.declaredWorkMode } : {}),
             approvedBy: proposalAudit.approvedBy,
             approvedAt: proposalAudit.approvedAt,
           }
         : {}),
+      ...(branchAudit ? { branchAudit: { ...branchAudit } } : {}),
     };
 
     const key = ThreadKeys.detail(thread.id);
@@ -1249,6 +1254,18 @@ export class RedisThreadStore implements IThreadStore {
     if (thread.sourceThreadId) {
       result.sourceThreadId = thread.sourceThreadId;
     }
+    if (thread.sourceInvocationId) {
+      result.sourceInvocationId = thread.sourceInvocationId;
+    }
+    if (thread.sourceMessageId) {
+      result.sourceMessageId = thread.sourceMessageId;
+    }
+    if (thread.declaredWorkMode) {
+      result.declaredWorkMode = thread.declaredWorkMode;
+    }
+    if (thread.branchAudit) {
+      result.branchAudit = JSON.stringify(thread.branchAudit);
+    }
     if (thread.approvedBy) {
       result.approvedBy = thread.approvedBy;
     }
@@ -1380,6 +1397,38 @@ export class RedisThreadStore implements IThreadStore {
     if (data.sourceThreadId) {
       result.sourceThreadId = data.sourceThreadId;
     }
+    if (data.sourceInvocationId) {
+      result.sourceInvocationId = data.sourceInvocationId;
+    }
+    if (data.sourceMessageId) {
+      result.sourceMessageId = data.sourceMessageId;
+    }
+    if (
+      data.declaredWorkMode === 'subtask' ||
+      data.declaredWorkMode === 'parallel' ||
+      data.declaredWorkMode === 'investigation' ||
+      data.declaredWorkMode === 'standalone'
+    ) {
+      result.declaredWorkMode = data.declaredWorkMode;
+    }
+    if (data.branchAudit) {
+      try {
+        const parsed = JSON.parse(data.branchAudit) as Record<string, unknown>;
+        if (
+          typeof parsed.sourceThreadId === 'string' &&
+          typeof parsed.sourceMessageId === 'string' &&
+          typeof parsed.branchedAt === 'number'
+        ) {
+          result.branchAudit = {
+            sourceThreadId: parsed.sourceThreadId,
+            sourceMessageId: parsed.sourceMessageId,
+            branchedAt: parsed.branchedAt,
+          };
+        }
+      } catch {
+        /* ignore malformed immutable audit */
+      }
+    }
     if (data.approvedBy) {
       result.approvedBy = data.approvedBy;
     }
@@ -1399,7 +1448,10 @@ export class RedisThreadStore implements IThreadStore {
     }
     if (
       data.systemKind &&
-      (data.systemKind === 'connector_hub' || data.systemKind === 'eval_domain' || data.systemKind === 'cat_bedroom')
+      (data.systemKind === 'connector_hub' ||
+        data.systemKind === 'eval_domain' ||
+        data.systemKind === 'cat_bedroom' ||
+        data.systemKind === 'memory_ops')
     ) {
       result.systemKind = data.systemKind as ThreadSystemKind;
     }

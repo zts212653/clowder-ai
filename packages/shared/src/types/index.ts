@@ -74,10 +74,6 @@ export {
   type DispatchProposedActionInput,
   dispatchProposedActionInputSchema,
   isAllowedActionSuccessorSlot,
-  REVIEW_REENTRY_REASONS,
-  type ReviewReentry,
-  type ReviewReentryReason,
-  reviewReentrySchema,
 } from './action-successor.js';
 // F295 execution-scoped liveness and cancellation projection.
 export type {
@@ -275,8 +271,11 @@ export type { CatAlternative, CatRoutingError } from './cat-routing.js';
 export type { CliActiveWriterRecoveryState, CliDiagnostics, CliErrorReasonCode } from './cli-diagnostics.js';
 export type { BuiltinAccountClient } from './client-routing.js';
 export {
+  BUILTIN_ACCOUNT_CLIENT_FOR_ID,
   builtinAccountFamilyForClient,
+  builtinAccountFamilyForRef,
   builtinAccountIdForClient,
+  legacyAccountFamilyForRef,
   protocolForClient,
 } from './client-routing.js';
 export type {
@@ -286,10 +285,12 @@ export type {
   CloudBridgeOutboundReceiptV1,
   CloudBridgeOutboundStatus,
   CloudBridgeOutboundTransport,
+  CloudBridgeRecoveryV1,
 } from './cloud-bridge-outbound-receipt.js';
 export {
   isCloudBridgeFailureDiagnosticV1,
   isCloudBridgeOutboundReceiptV1,
+  isCloudBridgeRecoveryV1,
 } from './cloud-bridge-outbound-receipt.js';
 export * from './collective.js';
 // Command types (F142 Phase B — slash command framework)
@@ -528,6 +529,12 @@ export {
   type RegisteredCustodyGrantV1,
   registeredCustodyGrantV1Schema,
 } from './entrusted-work-actions.js';
+export {
+  type EntrustedWorkBriefV1,
+  type EntrustedWorkOwnerReadV1,
+  entrustedWorkBriefV1Schema,
+  entrustedWorkOwnerReadV1Schema,
+} from './entrusted-work-owner-read.js';
 // F227: Event Memory types (cognitive-transition event index)
 export {
   COGNITIVE_TRANSITIONS,
@@ -674,10 +681,8 @@ export {
   custodyAdmissionResultV1Schema,
   custodyAdmissionStateV1Schema,
   custodyOfferV1Schema,
-  type EntrustedWorkOwnerReadV1,
   type EntrustedWorkTaskRefV1,
   type EntrustedWorkV1,
-  entrustedWorkOwnerReadV1Schema,
   entrustedWorkTaskRefV1Schema,
   entrustedWorkV1Schema,
   growingSourceMessageRevisionV1Schema,
@@ -921,7 +926,9 @@ export {
 } from './memory-architecture-closure.js';
 // F287 Phase C: bounded Memory Cue Plane shared contract.
 export {
+  type CatOwnedSeedCueCarrierV1,
   type CueEnvelopeV1,
+  catOwnedSeedCueCarrierV1Schema,
   cueEnvelopeV1Schema,
   type DeliveryDecisionCueCarrierV1,
   type DeliveryDecisionOpportunityV1,
@@ -934,6 +941,8 @@ export {
   MEMORY_CUE_INVALIDATORS,
   type MemoryCueInvalidator,
   memoryCueDrillFamilyForResolver,
+  type OwnedSeedAvailableOpportunityV1,
+  ownedSeedAvailableOpportunityV1Schema,
   type ProfileRevisionAvailableOpportunityV1,
   profileRevisionAvailableOpportunityV1Schema,
   RECALL_OPPORTUNITY_CATALOG_VERSION,
@@ -1178,12 +1187,15 @@ export type {
   PluginStatus,
 } from './plugin.js';
 export {
+  DEFERRED_PERSON_MEMORY_CLERK_DISPOSITIONS,
   DEFERRED_PERSON_MEMORY_RECEIPT_STATES,
+  type DeferredPersonMemoryClerkDispositionInput,
   type DeferredPersonMemoryInput,
   type DeferredPersonMemoryReceipt,
   type DeferredPersonMemoryResolvedSource,
   type DeferredPersonMemorySourceInput,
   type DeferredWriteOpportunityReceiptV1,
+  deferredPersonMemoryClerkDispositionInputSchema,
   deferredPersonMemoryInputSchema,
   deferredPersonMemoryReceiptIdSchema,
   deferredPersonMemoryReceiptSchema,
@@ -1252,11 +1264,13 @@ export type {
 } from './prompt-hook.js';
 // Proposal types (F128 Cat Thread Proposal)
 export type {
+  DeclaredWorkMode,
   ProposalApproveOverrides,
   ProposalStatus,
   ReportingMode,
   ThreadProposal,
 } from './proposal.js';
+export { suggestedReportingModeForWorkMode } from './proposal.js';
 export {
   isProviderSemanticEvent,
   normalizeThreadGoalObjective,
@@ -1291,6 +1305,8 @@ export type {
   QueueMessageReceiptProjection,
   QueueReceiptTarget,
   QueueReceiptTargetState,
+  QueueRecoveryAction,
+  QueueRecoveryRequest,
   QueueReminderAttempt,
   QueueReminderAttemptState,
   QueueReminderMissedReason,
@@ -1571,6 +1587,8 @@ export type {
   MessageDispositionPreferenceSnapshot,
   MessageDispositionPreferenceSource,
   MessageDispositionPreferences,
+  ThreadAttentionGroup,
+  ThreadAttentionPreferences,
   UserPreferences,
 } from './user-preferences.js';
 // F280: canonical wait termination event consumed by F281 feedback adapters.

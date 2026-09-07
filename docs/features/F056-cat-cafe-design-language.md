@@ -4,12 +4,12 @@ related_features: [F051, F057]
 topics: [design-language, ux, branding, cat-aesthetic]
 doc_kind: feature-spec
 created: 2026-03-04
-tips_exempt: visual design correction and lint enforcement; no new discoverable user action
+tips_exempt: "Renewed 2026-09-05 for Phase F1: DESIGN.md design-intent governance and its lint contract are developer-facing standards, with no new user-invokable action or discovery surface."
 ---
 
 # F056: Clowder AI 设计语言 — 猫猫化不是猫化
 
-> **Status**: doing（Phase E 10/12 done；AC-E9 console-dev 投影 partial，AC-E12 Playwright baseline deferred；Phase E Sweep 2026-05-25~28 的 bubble routing / variant slug / 350-line split / clowder-ai#784 review-response 已完成） | **Owner**: Maine Coon/GPT-5.2 + Ragdoll 主导设计执行 + Ragdoll工程架构 + Siamese概念方向
+> **Status**: doing（Phase F 视觉基线换底 2026-09-04 开工：F1 DESIGN.md 真相源 + lint gate 落地，F2 token/字体迁移待 A/B 截图；Phase E 10/12 done；AC-E9 console-dev 投影 partial，AC-E12 Playwright baseline deferred） | **Owner**: Maine Coon/GPT-5.2 + Ragdoll 主导设计执行 + Ragdoll工程架构 + Siamese概念方向；Phase F 执行 Ragdoll/fable-5
 > **Priority**: P1
 > **Evolved from**: F051（猫粮看板猫爪导航概念）、F052 Phase C（跨线程气泡设计打样）
 
@@ -497,6 +497,40 @@ Phase E 主提交（`62c93fc5`）落地后，9 个 follow-up commit 处理 bubbl
 - **Copy current mode only**：`exportText(params, mode)` 只导出当前主题配置，增加 surfaceHue/surfaceChroma 到输出
 - 删除冗余 `migrate-hardcoded-colors.mjs`（一次性批量迁移脚本，使命已完成）
 
+### Phase F：视觉基线换底 — Anthropic 暖编辑感 + Linear 精密结构（2026-09-04 开工）
+
+**触发**：2026-09-04 operator（[thread-id]）："家里的猫做的 UI 也好 UX 也好……一切涉及到审美的都非常丑"；"我的审美不行，你得自己去找给我选"；Ragdoll拿 Anthropic / Notion / Linear / Airbnb / Vercel 五家真实产品截图让他选，他选 **Anthropic + Linear**，并说"我们家最开始对标的就是 Anthropic"。
+
+**根因（三条，都有证据）**：
+1. 家里的设计真相源（`docs/design-system.md`，2026-02，Gemini 维护）是猫自己发明的审美（"Cozy, Playful"、薰衣草紫身份色），从未与任何operator认可的参照对标——猫拿猫的品味当标准，循环自证。
+2. F083 / F303 / F305 / design-in-context checklist / console-dev 四道门全是**过程门**，能保证"不出错"，保证不了"好看"；F305 明文"问题不是颜色不好看"，于是视觉审美层至今无 owner。
+3. LLM 默认审美 = 全网中位数（紫渐变、圆角卡片、emoji、通用 Tailwind）；无强参照时必然回归均值，且猫多数时候盲画（文字→代码，交付前不看渲染结果）。
+
+**市场对标（检索日期 2026-09-04，计数为当日快照、会变）**：
+- Google Stitch 开源 DESIGN.md 规格（YAML token + 设计理由）：https://github.com/google-labs-code/design.md ；CLI `@google/design.md@0.4.0`（lint / diff / export，Apache-2.0）；发布说明 https://blog.google/innovation-and-ai/models-and-research/google-labs/stitch-design-md/
+- VoltAgent/awesome-design-md：README 当日列 73 家真实站点提取的 DESIGN.md（含 Claude、Linear）：https://github.com/VoltAgent/awesome-design-md
+- OpenDesign（nexu-io/open-design，Apache-2.0）：官网当日自述 "152 design systems"，定位为 Claude Design 的开源替代：https://open-design.ai/ · https://github.com/nexu-io/open-design
+- Claude Design（Anthropic Labs，2026-04-17 公告，基于 Opus 4.7）：https://www.anthropic.com/news/claude-design-anthropic-labs
+- Atlassian 实测：DESIGN.md 把 AI slop 变成可识别的品牌感，但它是可移植的意图快照，生产 token 应从代码来：https://www.atlassian.com/blog/how-we-build/atlassians-design-md-is-here-what-we-learned-testing-portable-design-context-in-practice
+
+结论：**换底子，不换工具**。
+
+**F1（本 PR）**：
+- 仓库根目录 `DESIGN.md` 从"指针文件"升级为 Google 规格的**视觉意图 / 目标值 canonical 真相源**（design intent）：种子 = Anthropic（画布 / 衬线 display / 赭红 / 暖近黑）+ Linear（4px 节奏、32px 控件、发丝线分层、单一强调色、产品内容当主角），再按"密集协作工作区"重新定标（正文 14px、section 64px、按钮 8px、气泡 12px）。**两个真相域**：AC-F6 parity 守护落地前，运行时以 `theme-tokens.css` 为准，DESIGN.md 的值是 F2 目标；之后由测试强制一致（F305 AC-A4 的"不做运行时字面值第二拷贝"由此机制接管，F305 doc 已记录取代关系）。
+- 对比度契约按**角色配对**声明并由确定性矩阵测试守住（lint 只覆盖已声明组件对）：白字 × primary 4.6:1；链接 / 选中 / 强调文字用 `primary-active`（5.15–6.41:1），`primary` 不做正文级文字；muted 压深到 #5f5d57（四档表面 ≥ 5.0:1）；语义色永不做文字色。
+- `scripts/check-design-md.mjs` + test + `pnpm check:design-md`（接入 `pnpm check`）：linter 有任何 error / warning 即红（含 warning 负向 fixture）；test 同时守 prose 允许的全部文字 × 表面配对 ≥ 4.5:1 与 `rounded.full` = `rounded.pill` = 9999px。
+- 根 `DESIGN.md` 与 gate 脚本加入 `sync-manifest.yaml` managed_files——tombstone 指向它，公开仓不能 404。
+- `docs/design-system.md` 与 `docs/design/design-system.md` 退役为 tombstone（历史引用不改）。
+- `docs/design/console-design-system.md` 顶部加权威指针（结构判据仍归它；token 与字体声音归 DESIGN.md）。
+- `@google/design.md@0.4.0` 加入根 devDependencies。
+
+**F2（后续 PR，逐步）**：
+- token 迁移：`--accent-hue` 50→≈38、chroma 0.14→≈0.11；`--surface-hue` 80→≈75 并对齐 canvas → surface-3 四档；dark 四档对齐 `dark-canvas → dark-surface-3`；每步出 light/dark A/B 渲染截图由operator 10 秒选，选定后才落 token。
+- 字体：增加衬线 display 栈（Source Serif 4 / Songti SC / Noto Serif CJK SC），只在 ≥ 22px 的标题、空态、猫的"人话"时刻使用；正文保持 Inter。
+- 圆角 / 密度：气泡 24→12px、pill 按钮 → 8px、控件 32px。
+- 守护测试：解析 `DESIGN.md` front matter，与 `theme-tokens.css` 解析值对比（ΔE 容差），红 = 文或码漂移。
+- Design Gate 硬规则：任何视觉交付必须附渲染截图，无截图不过门（写入 design-in-context checklist，Skill PR 单独走）。
+
 ---
 
 ## Acceptance Criteria
@@ -549,6 +583,15 @@ Phase E 主提交（`62c93fc5`）落地后，9 个 follow-up commit 处理 bubbl
 - [x] AC-E10: WCAG 对比度自动测试脚本（`oklchContrast` 纯函数 + 25 个测试覆盖 Cat Persona / Neutral / Cafe Surface / Accent button / Semantic icon / Surface 三档 L 跨度） — current truth: `packages/web/src/lib/__tests__/f056-wcag-contrast.test.ts`
 - [x] AC-E11: ESLint `cafe/no-hardcoded-colors` 升级，禁止 className `bg-[oklch(...)]` arbitrary value + style prop 行内 `oklch()` 字面值 — current truth: `packages/web/eslint-plugins/no-hardcoded-colors.js`
 - [/] AC-E12: Playwright 截图基线 light + dark ≥10 页面 — **deferred to 阶段 2 集成验证或 maintainer 接 PR 时**（理由：worktree 阶段 1 无 .env / 无 .cat-cafe runtime data / dev server 起不起 cat-catalog API；Playwright 引入新 dev dependency 需 maintainer 一并决策；详见下方 "E12 实施 Plan"）
+
+### Phase F（视觉基线换底 — 2026-09-04 开工）
+- [x] AC-F1: 根目录 `DESIGN.md` 符合 Google DESIGN.md 规格，`pnpm check:design-md` 0 error / 0 warning；prose **允许的**文字 × 表面角色配对（ink/body/muted × canvas..surface-3、primary-active × canvas..surface-3 与 primary-soft、on-primary × primary/primary-active、on-dark/on-dark-muted × dark-canvas..dark-surface-3）全部 WCAG AA ≥ 4.5:1，由确定性矩阵测试守住；不允许的配对（primary 作正文、语义色作文字）在 prose 明文禁止 — 本 PR
+- [x] AC-F2: `docs/design-system.md` + `docs/design/design-system.md` 退役为 tombstone；`console-design-system.md` 顶部指向新权威；根 `DESIGN.md` 与 gate 脚本进入 `sync-manifest.yaml` 导出闭包 — 本 PR
+- [ ] AC-F3: token 迁移（accent hue/chroma、surface 四档、dark 四档）每步附 light/dark A/B 截图，由operator选定后落地
+- [ ] AC-F4: 衬线 display 字体栈接入，仅 ≥ 22px 场景；正文不变
+- [ ] AC-F5: 圆角 / 控件密度迁移（气泡 12px、按钮 8px、控件 32px），存量 pill 按钮清零
+- [ ] AC-F6: DESIGN.md ↔ `theme-tokens.css` 一致性守护测试落地并绿
+- [ ] AC-F7: design-in-context checklist 增加"无渲染截图不过 Design Gate"硬规则（Skill PR）
 
 ## 需求点 Checklist
 
@@ -615,6 +658,8 @@ Phase E 主提交（`62c93fc5`）落地后，9 个 follow-up commit 处理 bubbl
 | KD-34 | Surface 层 hue 独立于 accent（`--surface-hue` 独立旋钮），微量色调 chroma 由 `surfaceChroma` multiplier 控制 | operator拍板：页面背景色调可独立调整（light 默认 warm beige H=80, dark 默认 warm neutral H=30），不强制跟 accent hue 走——brand 色和底色解耦；Tuner "页面层次" 4 档控制 lightness，hue/chroma 由 surfaceHue/surfaceChroma 独立控制 | 2026-05-28 |
 | KD-35 | Per-preset INIT 默认值：Light 和 Dark 各有独立 accent/surface hue+chroma（INIT_LIGHT vs INIT_DARK），migrateTunerState 按 base mode 匹配 | Light preset: accentHue=50/C=0.14, surfaceHue=80/C*=1.0; Dark preset: accentHue=35/C=0.08, surfaceHue=30/C*=0.15。themeStore 迁移时用 `initForBase(base)` 确保 custom theme 不会继承错误 preset 的默认值 | 2026-05-29 |
 | KD-36 | 正式产品 UI 的语义图标不用原生 emoji；用 Clowder AI 自绘 SVG / 正式设计资产。production TSX/JSX 不设 parser 豁免；兼容解析迁入非渲染 `.ts` 模块。非语义猫爪关系文案只走专用、可审计的窄标注 | 2026-07-26 RecallLedger 实弹反馈；恢复 Phase B-0 的原始目标，并用增量 guard 防回归 | 2026-07-26 |
+| KD-37 | 视觉基线换底：Anthropic 暖编辑感 + Linear 精密结构；根目录 `DESIGN.md` 升级为 Google DESIGN.md 规格的**视觉意图 / 目标值** canonical 真相源（AC-F6 parity 守护前运行时以 `theme-tokens.css` 为准；取代 F305 AC-A4 的历史契约），猫编的 `docs/design-system.md` 退役 | operator 2026-09-04 在五家真实产品截图中选定 Anthropic + Linear（"我们家最开始对标的就是 anthropic"）；根因是家里的设计真相源是猫自己发明的审美、过程门保证不了好看；行业已把审美标准化成 DESIGN.md 文件（Google Stitch 开源规格 + 73 家品牌提取库），换底子不换工具 | 2026-09-04 |
+| KD-38 | 视觉判断权归operator的判别器，不归猫的生成器：F2 每步 token/字体/密度迁移以 light/dark A/B 渲染截图让operator 10 秒选，猫只给可选项；任何视觉交付无渲染截图不过 Design Gate | operator"只知道丑、说不出为什么"= 稳定的判别器；猫盲画（文字→代码不看渲染）是 AI slop 的直接成因 | 2026-09-04 |
 
 ## Dependencies
 
@@ -640,3 +685,4 @@ Phase E 主提交（`62c93fc5`）落地后，9 个 follow-up commit 处理 bubbl
 - Phase A: operator + Siamese视觉 review（设计语言必须三猫+operator认可）
 - Phase B/C: 常规跨家族 review
 - Phase D: operator拍板企业定制边界 + 跨家族 review
+- Phase F: F1 文档 + gate 走跨家族 review；F2 每一步 token/字体/密度迁移以 A/B 渲染截图由operator选定，猫不自判"好看"

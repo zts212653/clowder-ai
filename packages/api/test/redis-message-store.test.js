@@ -448,7 +448,6 @@ describe('RedisMessageStore', { skip: redisIsolationSkipReason(REDIS_URL) }, () 
       verdict: 'changes_requested',
       clientMessageId: 'local-review-verdict-redis-1',
       reviewedHeadSha: 'a'.repeat(40),
-      carrierlessLeaseFence: { leaseId: 'lease-review-redis-1', generation: 7 },
     };
     const stored = await store.append({
       userId: 'user-f167-reviewer',
@@ -463,72 +462,6 @@ describe('RedisMessageStore', { skip: redisIsolationSkipReason(REDIS_URL) }, () 
     const hydrated = await store.getById(stored.id);
 
     assert.deepEqual(hydrated?.extra?.localReviewVerdict, localReviewVerdict);
-  });
-
-  it('#1371 rehydrates an auditable operator legacy-review disposition from the real Redis hash', async () => {
-    const legacyLocalReviewDisposition = {
-      sourceMessageId: 'legacy-review-terminal-redis-1',
-      leaseId: 'lease-review-redis-1',
-      generation: 7,
-      subjectRef: 'pr:owner/repo#4074',
-      reviewerCatId: 'codex-terra',
-      predecessorCatId: 'codex-sol',
-      reviewedHeadSha: 'b'.repeat(40),
-      verdict: 'changes_requested',
-      decisionId: 'decision-review-redis-1',
-    };
-    const stored = await store.append({
-      userId: 'owner-f167',
-      catId: null,
-      content: 'operator legacy review disposition',
-      mentions: ['codex-sol'],
-      timestamp: Date.now(),
-      threadId: 'thread-f167-legacy-review-disposition',
-      extra: { legacyLocalReviewDisposition },
-    });
-
-    const hydrated = await store.getById(stored.id);
-
-    assert.deepEqual(hydrated?.extra?.legacyLocalReviewDisposition, legacyLocalReviewDisposition);
-    assert.equal(hydrated?.extra?.localReviewVerdict, undefined);
-  });
-
-  it('#1371 scans only unadmitted legacy-review decisions for cold-start recovery', async () => {
-    const carrier = {
-      sourceMessageId: 'review-source-pending-scan',
-      leaseId: 'lease-pending-scan',
-      generation: 1,
-      subjectRef: 'pr:owner/repo#4151',
-      reviewerCatId: 'codex-terra',
-      predecessorCatId: 'codex-sol',
-      reviewedHeadSha: '68a69193b2783e5895464d7dbf8725d54cec099d',
-      verdict: 'changes_requested',
-      decisionId: 'decision-pending-scan',
-    };
-    const pending = await store.append({
-      userId: 'user-f167-startup',
-      catId: null,
-      threadId: 'thread-f167-startup',
-      content: 'pending legacy review decision',
-      mentions: ['codex-sol'],
-      timestamp: Date.now(),
-      extra: { targetCats: ['codex-sol'], legacyLocalReviewDisposition: carrier },
-    });
-    await store.append({
-      userId: 'user-f167-startup',
-      catId: null,
-      threadId: 'thread-f167-startup',
-      content: 'already admitted legacy review decision',
-      mentions: ['codex-sol'],
-      timestamp: Date.now() + 1,
-      deliveryStatus: 'queued',
-      extra: {
-        targetCats: ['codex-sol'],
-        legacyLocalReviewDisposition: { ...carrier, sourceMessageId: 'review-source-queued-scan' },
-      },
-    });
-
-    assert.deepEqual(await store.scanPendingLegacyLocalReviewDispositions(), [pending.id]);
   });
 
   it('F167 rehydrates the managed-command action lease generation from the real Redis hash', async () => {

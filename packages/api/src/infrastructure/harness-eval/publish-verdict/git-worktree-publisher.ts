@@ -5,6 +5,7 @@ import { resolve, sep } from 'node:path';
 import { promisify } from 'node:util';
 import { withHiddenGhCliWindow } from '../../github/gh-cli-env.js';
 import { createGitVerdictPrRefresher } from './git-verdict-pr-refresher.js';
+import { createGitPublishedWorktreeResolver } from './publication/git-published-worktree-resolver.js';
 import { closeAutoVerdictPr, openAutoVerdictPr, withGitHubRepoScope } from './publication/git-verdict-pr.js';
 import {
   type PublishVerdictCommitStatusesInput,
@@ -27,11 +28,22 @@ const ALLOWED_PATH_PREFIXES = [
   'generated/sop/',
 ];
 const ALLOWED_EXACT_PATHS = new Set(['docs/harness-feedback/registry/measurement-bundles.yaml']);
+const CAPABILITY_EVOLUTION_MEASUREMENT_PREFIXES = [
+  'docs/harness-feedback/certificates/',
+  'docs/harness-feedback/measurement-results/',
+  'docs/harness-feedback/decision-proofs/records/',
+  'docs/harness-feedback/decision-proofs/owner-objects/',
+  'docs/harness-feedback/measurement-roles/',
+];
 
 export function isAllowedVerdictStagePath(relativePath: string): boolean {
   return (
     ALLOWED_EXACT_PATHS.has(relativePath) || ALLOWED_PATH_PREFIXES.some((prefix) => relativePath.startsWith(prefix))
   );
+}
+
+export function isAllowedCapabilityEvolutionMeasurementStagePath(relativePath: string): boolean {
+  return CAPABILITY_EVOLUTION_MEASUREMENT_PREFIXES.some((prefix) => relativePath.startsWith(prefix));
 }
 
 /**
@@ -59,6 +71,8 @@ export interface GitWorktreePublisherDeps {
   contractRunner?: VerdictPublishContractRunner;
   /** Test seam for the local-guard → exact-commit GitHub status projection. */
   commitStatusPublisher?: (input: PublishVerdictCommitStatusesInput) => Promise<void>;
+  /** Select the exact immutable artifact family this publisher may stage; default remains verdict-only. */
+  stageScope?: 'verdict' | 'capability-evolution-measurement';
 }
 
 export { withGitHubRepoScope } from './publication/git-verdict-pr.js';
@@ -167,10 +181,14 @@ export function createGitWorktreePublisher(deps: GitWorktreePublisherDeps): GitP
         //                                                ← refreshed derived verdict counts
         // Any new generator adding a new path MUST extend this allowlist explicitly +
         // add a regression test below — defaulting to deny.
-        const outsideAllowlist = relativePaths.filter((rel) => !isAllowedVerdictStagePath(rel));
+        const allowStagePath =
+          deps.stageScope === 'capability-evolution-measurement'
+            ? isAllowedCapabilityEvolutionMeasurementStagePath
+            : isAllowedVerdictStagePath;
+        const outsideAllowlist = relativePaths.filter((rel) => !allowStagePath(rel));
         if (outsideAllowlist.length > 0) {
           throw new Error(
-            `staged_path_outside_allowlist: stage callback returned ${outsideAllowlist.length} path(s) outside the verdict allowlist: ${JSON.stringify(outsideAllowlist)}. Allowed prefixes: ${ALLOWED_PATH_PREFIXES.join(', ')}. Allowed exact paths: ${[...ALLOWED_EXACT_PATHS].join(', ')}. Verdict commits use --no-verify so the pre-commit guards (biome/brand/shared-state) cannot catch foreign paths; this allowlist is the only backstop.`,
+            `staged_path_outside_allowlist: stage callback returned ${outsideAllowlist.length} path(s) outside the ${deps.stageScope ?? 'verdict'} allowlist: ${JSON.stringify(outsideAllowlist)}. Machine artifact commits use --no-verify so this scope-specific allowlist is the final path backstop.`,
           );
         }
 
@@ -315,6 +333,11 @@ export function createGitWorktreePublisher(deps: GitWorktreePublisherDeps): GitP
         }
       }
     },
+    resolvePublishedOnIsolatedWorktree: createGitPublishedWorktreeResolver({
+      repoRoot: deps.repoRoot,
+      expectedRepoFullName: deps.expectedRepoFullName,
+      contractRunner,
+    }),
     refreshPublishedVerdictPr: createGitVerdictPrRefresher({
       repoRoot: deps.repoRoot,
       expectedRepoFullName: deps.expectedRepoFullName,

@@ -1960,6 +1960,16 @@ export class AgentRouter {
     for (const [catId, boundaryId] of boundaries) {
       try {
         await this.deliveryCursorStore.ackCursor(userId, catId as CatId, threadId, boundaryId);
+        log.info(
+          {
+            f148: 'delivery-cursor-ack',
+            threadId,
+            catId,
+            boundaryRef: boundaryId,
+            writer: 'AgentRouter.ackCollectedCursors',
+          },
+          '[F153] content-free delivery cursor writer audit',
+        );
       } catch (err) {
         log.error({ catId, err }, `[ackCollectedCursors] failed`);
       }

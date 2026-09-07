@@ -72,6 +72,30 @@ export {
   evaluateExternalCaseReplay,
 } from './external-case-closure-eval.js';
 export type {
+  CapabilityEvolutionMeasurementIssuance,
+  CapabilityEvolutionMeasurementIssueInput,
+  CapabilityEvolutionMeasurementIssuer,
+  CapabilityEvolutionMeasurementIssuerOptions,
+} from './measurement/capability-evolution/capability-evolution-measurement-issuer.js';
+export {
+  CAPABILITY_EVOLUTION_MEASUREMENT_BLOCKERS,
+  createCapabilityEvolutionMeasurementIssuer,
+} from './measurement/capability-evolution/capability-evolution-measurement-issuer.js';
+export type {
+  CapabilityEvolutionMeasurementRoleBinding,
+  CapabilityEvolutionMeasurementSource,
+} from './measurement/capability-evolution/capability-evolution-measurement-source.js';
+export {
+  CapabilityEvolutionMeasurementRoleBindingSchema,
+  CapabilityEvolutionMeasurementSourceSchema,
+} from './measurement/capability-evolution/capability-evolution-measurement-source.js';
+export type {
+  CapabilityEvolutionMeasurementSourceRead,
+  CapabilityEvolutionMeasurementSourceRevisionVerification,
+  CapabilityEvolutionMeasurementSourceStore,
+} from './measurement/capability-evolution/capability-evolution-measurement-source-store.js';
+export { createGitCapabilityEvolutionMeasurementSourceStore } from './measurement/capability-evolution/capability-evolution-measurement-source-store.js';
+export type {
   DomainNegativeControlCase,
   DomainNegativeControlCohort,
   DomainNegativeControlResultOptions,

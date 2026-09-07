@@ -71,6 +71,19 @@ export { isTimelinePublished } from '../visibility.js';
 
 export type UnresolvedCursorPolicy = 'rescan' | 'empty';
 
+/** Ephemeral bounded pass over the existing raw timeline; never a durable work ledger. */
+export interface MessageScanCursor {
+  readonly offset: number;
+  readonly upperBound: number;
+}
+
+export interface MessageIdScanPage {
+  readonly messageIds: string[];
+  readonly nextCursor?: MessageScanCursor;
+}
+
+export const COORDINATION_TERMINAL_SCAN_PAGE_SIZE = 100;
+
 export interface ThreadMessageReadOptions {
   /** Include queued cat-authored speech that is already published to the timeline. */
   includeQueuedCatMessages?: boolean;
@@ -254,6 +267,7 @@ export interface StoredMessage {
     /** F287: server-written connector carrier; QueueProcessor still revalidates source + entry origin. */
     memoryCue?: {
       deliveryDecision?: import('@cat-cafe/shared').DeliveryDecisionCueCarrierV1;
+      catOwnedSeed?: import('@cat-cafe/shared').CatOwnedSeedCueCarrierV1;
     };
     /** F310: source-owned custody offer/disposition. Generic extra patches cannot mutate this field. */
     custodyOfferV1?: CustodyOfferV1;
@@ -275,22 +289,14 @@ export interface StoredMessage {
     localReviewVerdict?: {
       verdict: 'approved' | 'changes_requested' | 'commented';
       clientMessageId: string;
-      /** Reviewer-authored exact HEAD fact; required only for carrier-free settlement. */
+      /** Reviewer-authored exact HEAD fact; required for new durable review facts. */
       reviewedHeadSha?: string;
-      /** Server-written replay/stale fence; identifies no authority by itself. */
-      carrierlessLeaseFence?: { leaseId: string; generation: number };
-    };
-    /** #1371: explicit operator disposition for one legacy prose-only review terminal. */
-    legacyLocalReviewDisposition?: {
-      sourceMessageId: string;
-      leaseId: string;
-      generation: number;
-      subjectRef: string;
-      reviewerCatId: string;
-      predecessorCatId: string;
-      reviewedHeadSha: string;
-      verdict: 'approved' | 'changes_requested';
-      decisionId: string;
+      /** Stable subject whose formal review history is counted independently. */
+      reviewSubjectRef?: string;
+      /** Reviewer-accepted feature doc or immutable source-message coordinate. */
+      acceptedSourceRef?: string;
+      /** Exact feature commit or immutable source message id accepted by the reviewer. */
+      acceptedRevision?: string;
     };
     /** Internal callback-dedup provenance; never used as routing authority. */
     callbackDedup?: {
@@ -315,6 +321,8 @@ export interface StoredMessage {
     dynamicSceneEntries?: readonly import('@cat-cafe/shared').AsrPersonMemoryDynamicSceneEntryV1[];
     /** Server-written deferred-generation carrier; never accepted as owner-authored truth. */
     writeOpportunityReentry?: import('@cat-cafe/shared').WriteOpportunityReentryCarrierV1;
+    /** Server-written bounded batch of independent deferred-generation carriers. */
+    writeOpportunityReentries?: readonly import('@cat-cafe/shared').WriteOpportunityReentryCarrierV1[];
     /** Server-written same-generation presentation retry; contains refs only. */
     writeOpportunityPresentationRetry?: import('@cat-cafe/shared').WriteOpportunityPresentationRetryCarrierV1;
     freshness?:
@@ -954,8 +962,10 @@ export interface IMessageStore {
   /** #697: Find message IDs with a given deliveryStatus. Used by StartupReconciler
    *  to recover orphaned queued messages after process restart. */
   scanByDeliveryStatus?(status: NonNullable<StoredMessage['deliveryStatus']>): string[] | Promise<string[]>;
-  /** #1371: Discover exact legacy-review decisions that may have settled before Queue admission. */
-  scanPendingLegacyLocalReviewDispositions?(): string[] | Promise<string[]>;
+  /** At most 100 raw timeline members per page, including queued and delivered sources.
+   * A pass has a fixed upper bound; mutations may revisit/skip members until the next
+   * idempotent pass. Callers must re-read each source's current consumption truth. */
+  scanCoordinationTerminalMessageIds?(cursor?: MessageScanCursor): MessageIdScanPage | Promise<MessageIdScanPage>;
   /**
    * #1200 §8.7: Get the latest visible cursor for a thread.
    *
@@ -1075,6 +1085,19 @@ function isRecallableOwnerMessage(message: StoredMessage): boolean {
 
 export class MessageStore {
   private messages: StoredMessage[] = [];
+
+  scanCoordinationTerminalMessageIds(cursor?: MessageScanCursor): MessageIdScanPage {
+    const offset = cursor?.offset ?? 0;
+    const upperBound = cursor?.upperBound ?? this.messages.length;
+    const end = Math.min(offset + COORDINATION_TERMINAL_SCAN_PAGE_SIZE, upperBound);
+    return {
+      messageIds: this.messages
+        .slice(offset, end)
+        .filter((message) => message.extra?.coordination?.phase === 'terminal')
+        .map((message) => message.id),
+      ...(end < upperBound ? { nextCursor: { offset: end, upperBound } } : {}),
+    };
+  }
   private readonly maxMessages: number;
   private readonly idempotencyIndex = new Map<string, string>();
   /** Content-dedup claims: fingerprint key → expiry timestamp (ms). Bounds the callback exact-duplicate race. */
@@ -1979,17 +2002,6 @@ export class MessageStore {
     return { kind: 'prepared', message: { ...msg } };
   }
 
-  scanPendingLegacyLocalReviewDispositions(): string[] {
-    return this.messages
-      .filter(
-        (message) =>
-          message.deliveryStatus === undefined &&
-          !message.queueCustody &&
-          message.extra?.legacyLocalReviewDisposition !== undefined,
-      )
-      .map((message) => message.id);
-  }
-
   initializeQueueCustodyAdmission(
     id: string,
     admission: QueueCustodyAdmissionIntent,
@@ -2168,13 +2180,6 @@ export async function hydrateCrossThreadReplyHint(
   effectClass?: 'fyi' | 'coordinate' | 'investigate' | 'assign_work';
   /** F167 Phase R: stable coordination projection from the trigger message. */
   coordination?: CrossThreadCoordination;
-  /** #1371 Turn Truth: terminal review handback still carries one predecessor obligation. */
-  localReviewVerdict?: {
-    verdict: 'approved' | 'changes_requested' | 'commented';
-    clientMessageId: string;
-    reviewedHeadSha?: string;
-    carrierlessLeaseFence?: { leaseId: string; generation: number };
-  };
 } | null> {
   const trigger = await store.getById(triggerMessageId);
   if (!trigger) return null;
@@ -2190,6 +2195,5 @@ export async function hydrateCrossThreadReplyHint(
     senderCatId: trigger.catId,
     ...(hasCrossThreadProvenance && crossPost?.effectClass ? { effectClass: crossPost.effectClass } : {}),
     ...(coordination ? { coordination } : {}),
-    ...(trigger.extra?.localReviewVerdict ? { localReviewVerdict: trigger.extra.localReviewVerdict } : {}),
   };
 }

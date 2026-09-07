@@ -3,7 +3,8 @@ import { homedir } from 'node:os';
 import { resolve } from 'node:path';
 
 import { resolveCollectivePublicUrl } from './cli-config.js';
-import { createGitHubHumanAuthProvider } from './github-human-auth-provider.js';
+import { GitHubAppManifestSetup } from './github-app-manifest-setup.js';
+import { ConfigurableGitHubHumanAuthProvider } from './github-human-auth-provider.js';
 import { startCollectiveServer } from './http-server.js';
 import { CollectiveServiceStore } from './store.js';
 
@@ -13,11 +14,12 @@ async function main(): Promise<void> {
   const dataDirectory = resolveDataDirectory(process.env.COLLECTIVE_SERVICE_DATA_DIR);
   const allowedHostOrigins = parseOrigins(process.env.COLLECTIVE_SERVICE_ALLOWED_HOST_ORIGINS);
   const publicUrl = resolveCollectivePublicUrl(process.env.COLLECTIVE_SERVICE_PUBLIC_URL, host, port);
-  const humanAuthProvider = createGitHubHumanAuthProvider({
+  const humanAuthProvider = new ConfigurableGitHubHumanAuthProvider({
     clientId: process.env.COLLECTIVE_GITHUB_CLIENT_ID,
     clientSecret: process.env.COLLECTIVE_GITHUB_CLIENT_SECRET,
   });
   await mkdir(dataDirectory, { recursive: true, mode: 0o700 });
+  const githubAppSetup = await GitHubAppManifestSetup.open({ dataDirectory, provider: humanAuthProvider });
   const opened = await CollectiveServiceStore.open({
     dataDirectory,
     humanAuthProvider,
@@ -30,6 +32,7 @@ async function main(): Promise<void> {
     port,
     allowedHostOrigins,
     bootstrapLinkPath,
+    githubAppSetup,
   });
   if (bootstrapLinkPath && opened.bootstrapSecret) {
     await writeFile(bootstrapLinkPath, `${running.url}/#bootstrap=${encodeURIComponent(opened.bootstrapSecret)}\n`, {

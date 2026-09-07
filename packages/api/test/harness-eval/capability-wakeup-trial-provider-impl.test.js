@@ -62,6 +62,12 @@ function buildMocks(overrides = {}) {
         return { events, total: events.length };
       },
     },
+    promptReader: {
+      read: async () => ({
+        status: 'historical_unavailable',
+        reason: 'prompt_message_ids_unavailable',
+      }),
+    },
     toolEventLog: { readByThread: async () => [] },
     skillLoadEventLog: { readBySession: async () => [] },
     ...overrides,

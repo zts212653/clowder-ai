@@ -77,6 +77,65 @@ describe('RedisMessageStore F254 conditional append', { skip: redisIsolationSkip
     assert.notEqual(result.priorFrontierMessageId, trigger.id);
   });
 
+  it('publishes concurrent cat outputs into the canonical visibility relation', async () => {
+    const trigger = await store.append(message('parallel request', 100));
+    const [source, target] = await Promise.all([
+      store.appendAndObservePriorFrontier(
+        message('source sibling body', 200, {
+          catId: 'codex-sol',
+          origin: 'stream',
+          idempotencyKey: 'f254-published:parallel-source',
+        }),
+      ),
+      store.appendAndObservePriorFrontier(
+        message('target first-pass body', 200, {
+          catId: 'gpt52',
+          origin: 'stream',
+          idempotencyKey: 'f254-published:parallel-target',
+        }),
+      ),
+    ]);
+    const later = await store.append(message('synthesize the sibling', 300));
+
+    const unseen = await store.getByThreadAfter('thread-1', trigger.id, undefined, 'user-1');
+
+    assert.deepEqual(new Set(unseen.map((item) => item.id)), new Set([source.message.id, target.message.id, later.id]));
+    assert.ok(source.message.visibilitySeq, 'source output must receive a canonical visibility position');
+    assert.ok(target.message.visibilitySeq, 'target output must receive a canonical visibility position');
+    assert.notEqual(source.message.visibilitySeq, target.message.visibilitySeq);
+    assert.equal(unseen.at(-1)?.id, later.id, 'the later directed turn must remain after both sibling outputs');
+  });
+
+  it('keeps queued user work outside the canonical visibility relation', async () => {
+    const trigger = await store.append(message('visible trigger', 100));
+    const queued = await store.appendAndObservePriorFrontier(
+      message('private queued work', 200, {
+        deliveryStatus: 'queued',
+        idempotencyKey: 'f254-observed:queued-user',
+      }),
+    );
+
+    assert.equal(queued.message.visibilitySeq, undefined);
+    assert.deepEqual(await store.getByThreadAfter('thread-1', trigger.id, undefined, 'user-1'), []);
+  });
+
+  it('fails before publication when the visibility high-water mark is invalid', async () => {
+    const trigger = await store.append(message('visible trigger', 100));
+    await redis.hset(MessageKeys.threadVisibilityMeta('thread-1'), 'hwm', 'not-a-number');
+    const candidate = message('must remain unpublished', 200, {
+      catId: 'codex-sol',
+      origin: 'stream',
+      idempotencyKey: 'f254-published:invalid-hwm',
+    });
+
+    await assert.rejects(store.appendAndObservePriorFrontier(candidate), /VISIBILITY_HWM_UNPARSEABLE/);
+    assert.deepEqual(
+      (await store.getByThread('thread-1')).map((item) => item.id),
+      [trigger.id],
+    );
+    assert.equal(await store.getByIdempotencyKey('user-1', 'thread-1', candidate.idempotencyKey), null);
+  });
+
   it('idempotent unconditional replay returns the original boundary and body', async () => {
     const trigger = await store.append(message('question', 100));
     const candidate = message('first body', 200, {

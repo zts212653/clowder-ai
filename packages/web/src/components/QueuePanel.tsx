@@ -1,6 +1,6 @@
 'use client';
 
-import type { FreshnessCarrierCapability } from '@cat-cafe/shared';
+import type { FreshnessCarrierCapability, QueueRecoveryAction } from '@cat-cafe/shared';
 import { type QueueReminderAttemptState, SCHEDULER_TRIGGER_PREFIX } from '@cat-cafe/shared';
 import { closestCenter, DndContext, type DragEndEvent, PointerSensor, useSensor, useSensors } from '@dnd-kit/core';
 import { arrayMove, SortableContext, verticalListSortingStrategy } from '@dnd-kit/sortable';
@@ -12,6 +12,7 @@ import { useChatStore } from '@/stores/chatStore';
 import { useToastStore } from '@/stores/toastStore';
 import { apiFetch } from '@/utils/api-client';
 import { composerInsertFromRecall, requestTrueRecall, TrueRecallRequestError } from '@/utils/true-recall';
+import { ForceResetDialog } from './ForceResetDialog';
 import { SortableQueueEntryRow } from './QueueEntryRow';
 import {
   collectExactLiveInvocationIds,
@@ -146,12 +147,17 @@ export function QueuePanel({ threadId }: QueuePanelProps) {
 
   const {
     steerEntryId,
+    forceResetAction,
     retryingAttemptIds,
+    resettingActionIds,
     handleRetry,
     refreshQueue,
     handleSteerConfirm,
     handleSteerOpen,
     handleSteerCancel,
+    handleForceResetConfirm,
+    handleForceResetOpen,
+    handleForceResetCancel,
   } = useQueueActionConvergence(threadId);
   const [remindingTargetKeys, setRemindingTargetKeys] = useState<Set<string>>(() => new Set());
   const [collapsed, setCollapsed] = useState<boolean | null>(null);
@@ -169,13 +175,20 @@ export function QueuePanel({ threadId }: QueuePanelProps) {
   const visibleEntries = useMemo(
     () =>
       queue
-        .filter(
-          (e) => e.status === 'queued' && !(e.source === 'connector' && e.content.startsWith(SCHEDULER_TRIGGER_PREFIX)),
-        )
+        .filter((entry) => {
+          if (entry.source === 'connector' && entry.content.startsWith(SCHEDULER_TRIGGER_PREFIX)) return false;
+          if (entry.status === 'queued') return true;
+          const hasProjectedReset = entry.recoveryActions?.some((action) => action.kind === 'force_reset') ?? false;
+          const hasActiveTarget =
+            entry.targetCats.length === 0
+              ? activeInvocationIds.size > 0
+              : entry.targetCats.some((catId) => activeCatIds.has(catId));
+          return hasProjectedReset && !hasActiveTarget;
+        })
         .map((entry) => projectQueueEntryForActions(entry, activeInvocationIds))
         .filter((entry): entry is NonNullable<typeof entry> => entry !== null)
         .sort(compareQueueEntries),
-    [activeInvocationIds, queue],
+    [activeCatIds, activeInvocationIds, queue],
   );
 
   // A2A queue visibility: explain WHY entries are queued (waiting behind the active turn) so the
@@ -184,7 +197,8 @@ export function QueuePanel({ threadId }: QueuePanelProps) {
   // oldest active turn. Recomputed when activeInvocations/visibleEntries change; elapsed reflects
   // the last store update (acceptable for v1 — no per-second tick).
   const waitInfo = useMemo(() => {
-    const dispatchTargetCatIds = visibleEntries.flatMap((entry) => {
+    const waitingEntries = visibleEntries.filter((entry) => entry.status === 'queued');
+    const dispatchTargetCatIds = waitingEntries.flatMap((entry) => {
       const targetStates = queueTargetStateEntries(entry);
       return targetStates.length > 0
         ? targetStates
@@ -192,14 +206,17 @@ export function QueuePanel({ threadId }: QueuePanelProps) {
             .map(([catId]) => catId)
         : entry.targetCats;
     });
-    const hasBroadcastEntry = visibleEntries.some(
+    const hasBroadcastEntry = waitingEntries.some(
       (entry) => queueTargetStateEntries(entry).length === 0 && entry.targetCats.length === 0,
     );
     if (dispatchTargetCatIds.length === 0 && !hasBroadcastEntry) return null;
     return computeQueueWaitInfo(activeInvocations, dispatchTargetCatIds);
   }, [activeInvocations, visibleEntries]);
   const canRecoverOrphanedQueue =
-    !queuePaused && visibleEntries.some((entry) => queueEntryNeedsRecovery(entry, activeInvocationIds, activeCatIds));
+    !queuePaused &&
+    visibleEntries.some(
+      (entry) => entry.status === 'queued' && queueEntryNeedsRecovery(entry, activeInvocationIds, activeCatIds),
+    );
   const activeInvocationIdByCatId = useMemo(
     () =>
       Object.fromEntries(
@@ -219,14 +236,14 @@ export function QueuePanel({ threadId }: QueuePanelProps) {
   );
 
   const handleRemove = useCallback(
-    async (entryId: string) => {
+    async (action: Extract<QueueRecoveryAction, { kind: 'withdraw' }>) => {
       const prevQueue = queue;
       setQueue(
         threadId,
-        prevQueue.filter((e) => e.id !== entryId),
+        prevQueue.filter((e) => e.id !== action.entryId),
       );
       try {
-        const res = await apiFetch(`/api/threads/${threadId}/queue/${entryId}`, { method: 'DELETE' });
+        const res = await apiFetch(action.request.path, { method: action.request.method });
         if (!res.ok) {
           const data = await res.json().catch(() => ({}));
           setQueue(threadId, prevQueue);
@@ -449,7 +466,7 @@ export function QueuePanel({ threadId }: QueuePanelProps) {
 
   const isCollapsed = collapsed ?? visibleEntries.length >= COLLAPSE_THRESHOLD;
   const pauseLabel = queuePauseReason === 'canceled' ? '当前调用已取消' : '当前调用失败';
-  const entryIds = visibleEntries.map((e) => e.id);
+  const entryIds = visibleEntries.filter((entry) => entry.status === 'queued').map((entry) => entry.id);
 
   const selectedSteerEntry = steerEntryId ? (queue.find((e) => e.id === steerEntryId) ?? null) : null;
 
@@ -570,11 +587,13 @@ export function QueuePanel({ threadId }: QueuePanelProps) {
                     onRecallEdit={handleRecallEdit}
                     onSteer={handleSteerOpen}
                     onRetry={handleRetry}
+                    onForceReset={handleForceResetOpen}
                     onRemind={handleRemind}
                     activeInvocationIdByCatId={activeInvocationIdByCatId}
                     activeCarrierCapabilityByCatId={activeCarrierCapabilityByCatId}
                     remindingTargetKeys={remindingTargetKeys}
                     retryingAttemptIds={retryingAttemptIds}
+                    resettingActionIds={resettingActionIds}
                   />
                 );
               })}
@@ -586,6 +605,12 @@ export function QueuePanel({ threadId }: QueuePanelProps) {
       {selectedSteerEntry && selectedSteerEntry.status === 'queued' && (
         <SteerQueuedEntryModal onCancel={handleSteerCancel} onConfirm={handleSteerConfirm} />
       )}
+      <ForceResetDialog
+        open={forceResetAction !== null}
+        busy={forceResetAction !== null && resettingActionIds.has(forceResetAction.id)}
+        onCancel={handleForceResetCancel}
+        onConfirm={handleForceResetConfirm}
+      />
     </div>
   );
 }

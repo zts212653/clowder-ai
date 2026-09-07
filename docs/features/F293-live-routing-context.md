@@ -2,7 +2,7 @@
 feature_ids: [F293]
 related_features: [F051, F083, F127, F153, F154, F167, F190, F192, F203, F208, F216, F220, F233, F246, F248, F254, F264, F280, F284, F298, F299, F300, F307, F310, F311, F312, F313]
 topics: [routing, availability, quota, provider-health, capability-profile, custody, cancellation, approval, workspace, settings, l0, freshness]
-tips_exempt: "Renewed 2026-09-02 after Phase C merge: automatic F051/F153/durable-terminal evidence changes backend routing behavior without adding a user-invoked capability or discovery moment; AC-E4 still requires a real Workspace tip at product acceptance."
+tips_exempt: "Renewed 2026-09-04 for the current F308 public-link projection after Phase C: automatic F051/F153/durable-terminal evidence changes backend routing behavior without adding a user-invoked capability or discovery moment; AC-E4 still requires a real Workspace tip at product acceptance."
 doc_kind: spec
 created: 2026-08-08
 description: "把能力、偏好与新鲜供给接入发送边界，并贯通可验证接责、失败回弹、用户取消与精确多方确认，使传球不再停在消息已发。"

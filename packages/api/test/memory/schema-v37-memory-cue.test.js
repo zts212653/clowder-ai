@@ -10,6 +10,7 @@ const columns = [
   'owner_user_id',
   'thread_id',
   'invocation_id',
+  'consumer_cat_id',
   'resolver_family',
   'source_anchor',
   'source_revision',
@@ -31,6 +32,7 @@ function insert(db, overrides = {}) {
     owner_user_id: 'owner-1',
     thread_id: 'thread-1',
     invocation_id: 'invocation-1',
+    consumer_cat_id: 'codex-sol',
     resolver_family: 'person_entity',
     source_anchor: 'person:alden',
     source_revision: 'revision-1',
@@ -55,7 +57,7 @@ describe('V37 memory cue event ledger migration', () => {
     const db = new Database(':memory:');
     applyMigrations(db);
 
-    assert.equal(CURRENT_SCHEMA_VERSION, 41);
+    assert.equal(CURRENT_SCHEMA_VERSION, 43);
     assert.deepEqual(
       db
         .prepare('PRAGMA table_info(memory_cue_events)')

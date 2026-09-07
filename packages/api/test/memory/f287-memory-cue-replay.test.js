@@ -5,8 +5,8 @@ import { runF287MemoryCueReplay } from '../../dist/scripts/f287-memory-cue-repla
 const EXPECTED_FAMILIES = ['person_entity', 'operational_precedent', 'taste'];
 const EXPECTED_BUDGET_CANDIDATE_TOKENS = {
   person_entity: 752,
-  operational_precedent: 750,
-  taste: 744,
+  operational_precedent: 751,
+  taste: 2512,
 };
 
 function containsForbiddenScore(value) {
@@ -24,7 +24,7 @@ describe('F287 memory cue utility replay', () => {
 
     assert.equal(JSON.stringify(first), JSON.stringify(second));
     assert.equal(first.fixtureRevision, 'f287-memory-cue-eval-v1');
-    assert.equal(first.catalogVersion, 3);
+    assert.equal(first.catalogVersion, 5);
     assert.deepEqual(
       first.families.map(({ family }) => family),
       EXPECTED_FAMILIES,

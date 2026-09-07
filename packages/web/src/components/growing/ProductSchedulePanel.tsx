@@ -3,6 +3,7 @@
 import type { EntrustedWorkOwnerReadV1 } from '@cat-cafe/shared';
 import { useEffect, useMemo, useRef } from 'react';
 import { useEntrustedWorkProjection } from '@/hooks/useEntrustedWorkProjection';
+import { EntrustedWorkBrief } from './EntrustedWorkBrief';
 
 export type PreparedArtifactCoordinate = NonNullable<EntrustedWorkOwnerReadV1['preparedArtifact']>;
 
@@ -21,13 +22,6 @@ function primaryTime(ownerRead: EntrustedWorkOwnerReadV1) {
     (earliest, candidate) => (!earliest || candidate.value < earliest.value ? candidate : earliest),
     undefined,
   );
-}
-
-function artifactLabel(ownerRead: EntrustedWorkOwnerReadV1): string {
-  const ref = ownerRead.preparedArtifact?.artifactRef;
-  if (!ref) return '托付工作';
-  const label = ref.split(/[/:]/).filter(Boolean).at(-1);
-  return label?.replaceAll('-', ' ') || '托付工作';
 }
 
 function formatBusinessTime(value: number, currentTime: number): string {
@@ -106,7 +100,7 @@ export function ProductSchedulePanel({
           const time = primaryTime(ownerRead);
           if (!time) return null;
           const artifact = ownerRead.preparedArtifact;
-          const actionable = ownerRead.attentionReceipts.some((receipt) => receipt.eligible);
+          const actionable = ownerRead.brief.needsMe.state === 'needed';
           const itemRef = scheduleItemRef(ownerRead);
           const selected = selectedItemRef === itemRef;
           return (
@@ -126,9 +120,7 @@ export function ProductSchedulePanel({
               <div className="flex min-w-0 flex-wrap items-start justify-between gap-3">
                 <div className="min-w-0 flex-1">
                   <div className="flex min-w-0 flex-wrap items-center gap-2">
-                    <h3 className="min-w-0 break-words text-sm font-semibold text-cafe-black">
-                      {artifactLabel(ownerRead)}
-                    </h3>
+                    <h3 className="min-w-0 break-words text-sm font-semibold text-cafe-black">托付工作</h3>
                     <span className="rounded-full bg-cafe-accent/10 px-2 py-0.5 text-micro font-medium text-cafe-accent">
                       {actionable ? '需要判断' : '安静进行中'}
                     </span>
@@ -136,17 +128,7 @@ export function ProductSchedulePanel({
                   <p className="mt-2 text-xs font-medium text-cafe-secondary">
                     {TIME_LABELS[time.role]} · {formatBusinessTime(time.value, currentTime)}
                   </p>
-                  {artifact ? (
-                    <p
-                      className="mt-1 break-words text-micro text-cafe-muted"
-                      title={artifact.completenessRef}
-                      data-artifact-ref={artifact.artifactRef}
-                    >
-                      Artifact r{artifact.artifactRevision} · 准备状态来自产物 owner
-                    </p>
-                  ) : (
-                    <p className="mt-1 text-micro text-cafe-muted">产物尚在准备</p>
-                  )}
+                  <EntrustedWorkBrief ownerRead={ownerRead} />
                 </div>
                 {artifact ? (
                   <button

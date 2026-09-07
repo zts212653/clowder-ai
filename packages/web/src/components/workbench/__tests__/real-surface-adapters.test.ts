@@ -34,6 +34,7 @@ describe('F307 real surface adapters', () => {
       objectRef: { kind: 'evolution-program', id: programId },
       ownerStateRef: { owner: 'f311-capability-evolution-control', key: programId },
       resultTargetRef: { owner: 'f311-capability-evolution-control', key: programId },
+      capabilities: { mainAreaAttention: true },
     });
     expect(surface).not.toHaveProperty('program');
     expect(resolveEvolutionProgramId(surface)).toBe(programId);

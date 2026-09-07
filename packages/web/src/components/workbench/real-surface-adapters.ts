@@ -33,6 +33,11 @@ export const SURFACE_CAPABILITIES: WorkspaceSurfaceDescriptor['capabilities'] = 
   restorePolicy: 'descriptor',
 };
 
+const EVOLUTION_PROGRAM_CAPABILITIES: WorkspaceSurfaceDescriptor['capabilities'] = {
+  ...SURFACE_CAPABILITIES,
+  mainAreaAttention: true,
+};
+
 function encodedId(value: unknown): string {
   return encodeURIComponent(JSON.stringify(value));
 }
@@ -122,7 +127,7 @@ export function createEvolutionProgramSurface(programId: string): WorkspaceSurfa
     objectRef: { kind: 'evolution-program', id: programId },
     ownerStateRef: { owner: REAL_SURFACE_OWNERS.evolutionProgram, key: programId },
     resultTargetRef: { owner: REAL_SURFACE_OWNERS.evolutionProgram, key: programId },
-    capabilities: SURFACE_CAPABILITIES,
+    capabilities: EVOLUTION_PROGRAM_CAPABILITIES,
   };
 }
 

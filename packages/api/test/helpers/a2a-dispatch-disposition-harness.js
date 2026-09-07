@@ -66,6 +66,7 @@ export async function createA2ADispositionHarness({
   crossPostSourceThreadId,
   deliveryStatus,
   registry,
+  sourceExtra,
 } = {}) {
   const eventLog = new MemoryEventLog();
   const projectionStore = new MemoryProjectionStore();
@@ -81,13 +82,18 @@ export async function createA2ADispositionHarness({
     threadId: 'thread-1',
     origin: 'stream',
     ...(deliveryStatus ? { deliveryStatus } : {}),
-    ...(crossPostSourceThreadId
+    ...(crossPostSourceThreadId || sourceExtra
       ? {
           extra: {
-            crossPost: {
-              sourceThreadId: crossPostSourceThreadId,
-              sourceInvocationId: 'source-invocation',
-            },
+            ...(crossPostSourceThreadId
+              ? {
+                  crossPost: {
+                    sourceThreadId: crossPostSourceThreadId,
+                    sourceInvocationId: 'source-invocation',
+                  },
+                }
+              : {}),
+            ...sourceExtra,
           },
         }
       : {}),

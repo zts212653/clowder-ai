@@ -9,7 +9,7 @@ const REASON_COPY: Record<CodexAppServerRecoveryBlockedEvent['reason'], { title:
   },
   checkpoint_incomplete: {
     title: '自动续跑缺少可靠断点',
-    body: '系统没有同时拿到本轮的明确任务坐标和最新计划，因此没有用一句模糊的“继续”替你选择任务。',
+    body: '本轮任务或进度记录不完整，暂时无法可靠地自动续跑。已完成的工作仍保留。',
   },
   budget_exhausted: {
     title: '自动续跑暂未恢复',
@@ -19,7 +19,7 @@ const REASON_COPY: Record<CodexAppServerRecoveryBlockedEvent['reason'], { title:
 
 function summarizePlan(event: CodexAppServerRecoveryBlockedEvent): string {
   const plan = event.checkpoint.latestPlan?.plan ?? [];
-  if (plan.length === 0) return '未取得可靠计划快照';
+  if (plan.length === 0) return event.checkpoint.lastAgentMessage ?? '未取得本轮进度记录';
   return plan
     .slice(0, 6)
     .map((item) => `${item.status === 'completed' ? '✓' : item.status === 'inProgress' ? '→' : '○'} ${item.step}`)
@@ -60,7 +60,7 @@ export function buildCodexCapacityRecoveryCardMessage(input: {
   const nextStep =
     event.checkpoint.latestPlan?.plan.find((item) => item.status === 'inProgress')?.step ??
     event.checkpoint.latestPlan?.plan.find((item) => item.status === 'pending')?.step ??
-    '等待可靠断点；不自动选择 thread 里的其他任务';
+    (event.checkpoint.lastAgentMessage ? '从以上进度继续本轮任务，先核对已完成的操作' : '等待本轮任务的可靠进度记录');
   const block = {
     id: `codex-capacity-recovery-${anchor?.invocationId ?? event.checkpoint.nativeThreadId ?? timestamp}`,
     kind: 'card',

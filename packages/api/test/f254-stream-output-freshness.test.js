@@ -288,6 +288,35 @@ describe('F254 Phase D — checkStreamOutputFreshness', () => {
     assert.deepEqual(result.unseenSenders, ['sonnet']);
   });
 
+  it('suppresses a same-user-wave sibling for rerun only without minting a read or delivery receipt', async () => {
+    await cursorStore.ackCursor(userId, catId, threadId, msgId1);
+    await cursorStore.ackSeenCursor(userId, catId, threadId, msgId1);
+    const messageStore = createMockMessageStore([
+      { id: msgId1, catId: null, content: 'parallel source', threadId },
+      {
+        id: msgId2,
+        catId: 'codex-sol',
+        content: 'parallel sibling result',
+        threadId,
+        extra: { causal: { kind: 'invocation_reply', triggerMessageId: msgId1 } },
+      },
+    ]);
+
+    const result = await checkStreamOutputFreshness({
+      userId,
+      catId,
+      threadId,
+      coveredMessageIds: [msgId1],
+      cursorStore,
+      messageStore,
+    });
+
+    assert.equal(result.stale, false);
+    assert.equal(result.reason, 'self_only');
+    assert.equal(await cursorStore.getCursor(userId, catId, threadId), msgId1);
+    assert.equal(await cursorStore.getSeenCursor(userId, catId, threadId), msgId1);
+  });
+
   it('returns stale for another cat reply when parent did not route to that cat', async () => {
     const callerCatId = 'gpt52';
     const targetCatId = 'opus48';

@@ -278,7 +278,7 @@ async function get(baseUrl: string, path: string, token?: string) {
   });
   const payload = (await response.json()) as Record<string, unknown>;
   if (!response.ok) throw new Error(`${response.status}: ${JSON.stringify(payload)}`);
-  return payload as Record<string, string | boolean> & { events: unknown[] };
+  return payload as Record<string, unknown> & { events: unknown[] };
 }
 
 async function completeAuth(baseUrl: string, state: string, code: string) {

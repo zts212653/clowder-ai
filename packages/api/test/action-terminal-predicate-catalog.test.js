@@ -30,13 +30,8 @@ describe('F167 S.1-b ActionTerminalPredicateCatalog', () => {
           kind: 'review_delivered',
           completionResolver: 'review_delivery',
           freshnessResolver: 'community_current_head',
-          producers: ['external_review_verdict', 'local_review_verdict'],
-          requiredPorts: [
-            'community_projection',
-            'message_store',
-            'action_successor_preflight',
-            'action_successor_completion',
-          ],
+          producers: ['external_review_verdict'],
+          requiredPorts: ['community_projection', 'action_successor_preflight', 'action_successor_completion'],
         },
         {
           actionFamily: 'implement',
@@ -52,14 +47,13 @@ describe('F167 S.1-b ActionTerminalPredicateCatalog', () => {
     const ready = {
       runtimePorts: {
         community_projection: {},
-        message_store: {},
         task_store: {},
         action_successor_preflight: () => {},
         action_successor_completion: () => {},
       },
       completionResolvers: new Set(['review_delivery', 'task_done_status']),
       freshnessResolvers: new Set(['community_current_head', 'task_active_owner']),
-      producers: new Set(['external_review_verdict', 'local_review_verdict', 'task_status_transition']),
+      producers: new Set(['external_review_verdict', 'task_status_transition']),
     };
     assert.doesNotThrow(() => assertActionTerminalCapabilityRegistryReady(ready));
     assert.throws(
@@ -179,7 +173,6 @@ describe('F167 S.1-b ActionTerminalPredicateCatalog', () => {
     for (const ref of [
       'community:pr:owner/repo#3018:review:g2',
       'github:review:123',
-      'local-review:message-1:g2:approved',
       'ci:run-9',
       'test:sha256:abc',
       'verdict:message-1',
@@ -188,6 +181,7 @@ describe('F167 S.1-b ActionTerminalPredicateCatalog', () => {
     }
     for (const ref of [
       'local-review:free-form',
+      'local-review:message-1:g2:approved',
       'queue:dispatch:opus:succeeded',
       'invocation:inv-1',
       'response:looks-good',

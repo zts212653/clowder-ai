@@ -65,6 +65,8 @@ export * from './types/auto-dream.js';
 export * from './types/executable-action-successor.js';
 // Export all types
 export * from './types/index.js';
+// F314: one accepted-source contract shared by API persistence and MCP producers.
+export * from './types/local-review.js';
 // F287 bounded opportunity/cue contract (kept explicit for API/MCP consumers).
 export * from './types/memory-cue.js';
 // Export subject key utilities (#320)

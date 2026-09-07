@@ -4,7 +4,7 @@ import type { ActiveExecutionProjection } from '@cat-cafe/shared';
 import { useMemo } from 'react';
 import { useCatData } from '@/hooks/useCatData';
 import { resolveCatDisplayName } from '@/lib/cat-display-name';
-import { useActiveExecutionStore } from '@/stores/activeExecutionStore';
+import { activeExecutionKey, useActiveExecutionStore } from '@/stores/activeExecutionStore';
 import { ExecutionCancelButton } from '../ExecutionCancelButton';
 import { managedCommandActivityLabel } from '../managed-command-activity-label';
 
@@ -71,7 +71,7 @@ export function WorkspaceNowSurface({ repository, onSelectExecution }: Workspace
         <div className="divide-y divide-cafe-subtle/60 border-y border-cafe-subtle/60">
           {running.map((execution) => (
             <article
-              key={`${execution.kind}:${execution.executionId}`}
+              key={activeExecutionKey(execution)}
               className="group flex items-center gap-3 py-3.5"
               data-testid="workspace-running-object"
             >

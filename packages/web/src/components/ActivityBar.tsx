@@ -4,16 +4,14 @@ import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { lazy, Suspense, useCallback, useState } from 'react';
 import { useApprovalHubSync } from '@/hooks/useApprovalHub';
 import { usePinnedSections } from '@/hooks/usePinnedSections';
-import { useApprovalHubStore } from '@/stores/approvalHubStore';
 import { useChatStore } from '@/stores/chatStore';
+import { AttentionRailButtons } from './attention/AttentionRailButtons';
 import { ConciergeRailToggle } from './concierge/ConciergeRailToggle';
 import { HubIcon } from './hub-icons';
 import { MemoryIcon } from './icons/MemoryIcon';
 import { SETTINGS_SECTIONS } from './settings/settings-nav-config';
 import { ThemeMenu } from './ThemeMenu';
 import { getThreadIdFromPathname } from './ThreadSidebar/thread-navigation';
-import { useF307ExperienceWorkbenchStore } from './workbench/experience-workbench-store';
-import { resolveApprovalActionTarget } from './workbench/real-surface-adapters';
 
 const OklchTuner = lazy(() => import('./dev/OklchTuner').then((m) => ({ default: m.OklchTuner })));
 
@@ -181,69 +179,6 @@ function PinnedSections({ pinned, onNav }: { pinned: readonly string[]; onNav: (
   );
 }
 
-function BellIcon({ className = 'w-5 h-5' }: { className?: string }) {
-  return (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className={className}>
-      <title>Needs Me</title>
-      <path
-        d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9M13.73 21a2 2 0 0 1-3.46 0"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-    </svg>
-  );
-}
-
-function ApprovalHubButton() {
-  const count = useApprovalHubStore((s) => s.count);
-  const fetchPending = useApprovalHubStore((s) => s.fetchPending);
-  const setWorkspaceMode = useChatStore((s) => s.setWorkspaceMode);
-  const rightPanelMode = useChatStore((s) => s.rightPanelMode);
-  const rightPanelOpen = useChatStore((s) => s.rightPanelOpen);
-  const closeRightPanel = useChatStore((s) => s.closeRightPanel);
-  const approvalSurfaceActive = useF307ExperienceWorkbenchStore((state) => {
-    const activeSurface = state.layout.surfaces.find((surface) => surface.id === state.layout.activeSurfaceId);
-    return activeSurface ? resolveApprovalActionTarget(activeSurface) !== null : false;
-  });
-
-  const handleClick = useCallback(() => {
-    if (approvalSurfaceActive && rightPanelMode === 'workspace' && rightPanelOpen) {
-      closeRightPanel();
-    } else {
-      setWorkspaceMode('approval');
-      fetchPending();
-    }
-  }, [approvalSurfaceActive, rightPanelMode, rightPanelOpen, closeRightPanel, setWorkspaceMode, fetchPending]);
-
-  return (
-    <button
-      type="button"
-      onClick={handleClick}
-      className="relative flex h-10 w-10 items-center justify-center rounded-lg transition-all hover:bg-[var(--console-rail-item)] hover:shadow-[var(--console-rail-shadow)]"
-      title={count > 0 ? `${count} 项需要处理` : 'Needs Me'}
-      data-testid="approval-hub-button"
-    >
-      <BellIcon className="h-5 w-5" />
-      {count > 0 && (
-        <span
-          className="absolute -top-0.5 -right-0.5 min-w-[16px] h-4 px-1 rounded-full text-micro font-bold flex items-center justify-center"
-          style={{
-            backgroundColor: 'var(--semantic-warning)',
-            color: 'var(--cafe-accent-foreground)',
-            maxWidth: '22px',
-            overflow: 'hidden',
-            textOverflow: 'ellipsis',
-            whiteSpace: 'nowrap',
-          }}
-          data-testid="approval-hub-badge"
-        >
-          {count > 99 ? '99+' : String(count)}
-        </span>
-      )}
-    </button>
-  );
-}
-
 function SettingsButton({ pathname, onNav }: { pathname: string; onNav: (path: string) => void }) {
   const searchParams = useSearchParams();
   const isSettingsRoute = pathname.startsWith('/settings');
@@ -358,7 +293,7 @@ export function ActivityBar({ className }: ActivityBarProps) {
 
       <div className="mt-auto flex flex-col items-center gap-1.5">
         {/* F246 remains the approval bell; F310 Needs Me is a sibling Workspace destination. */}
-        <ApprovalHubButton />
+        <AttentionRailButtons />
         {/* F229: concierge re-entry —唤回入口，muted 时是唯一入口 (INV-3) */}
         <ConciergeRailToggle />
         <PresentationRailToggle />

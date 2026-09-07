@@ -21,6 +21,7 @@ const RECONCILED_EXCLUSIONS = [
   'shared-state-wiring\\.test',
   'write-vignette-publication-hook\\.test',
   'capability-evolution-evaluation-owner-join\\.test',
+  '(?:capability-evolution-e0-owner-inputs|f314-capability-evolution-owner-inputs|harness-eval/(?:capability-evolution-measurement-(?:issuer(?:-security)?|source-store)|f311-(?:capability-evolution-wakeup|e0-eval-repair-owner-provider)))\\.test',
   'signal-fetcher-launchd',
   'reflection-capsule-m3',
   'pack-integration\\.test',
@@ -157,6 +158,23 @@ test('resolver excludes F311 owner-join coverage that reads source-only F267 mea
   const sourceOnlyTest = 'test/capability-evolution-evaluation-owner-join.test.js';
   assert.ok(resolved.excludedFiles.includes(sourceOnlyTest));
   assert.ok(!resolved.selectedFiles.includes(sourceOnlyTest));
+});
+
+test('resolver excludes capability-evolution integrations backed by home-only owner evidence', async () => {
+  const { resolvePublicTestFiles } = await import(resolverModuleUrl);
+  const resolved = await resolvePublicTestFiles({ packageRoot, configPath: registryPath });
+  for (const sourceOnlyTest of [
+    'test/capability-evolution-e0-owner-inputs.test.js',
+    'test/f314-capability-evolution-owner-inputs.test.js',
+    'test/harness-eval/capability-evolution-measurement-issuer-security.test.js',
+    'test/harness-eval/capability-evolution-measurement-issuer.test.js',
+    'test/harness-eval/capability-evolution-measurement-source-store.test.js',
+    'test/harness-eval/f311-capability-evolution-wakeup.test.js',
+    'test/harness-eval/f311-e0-eval-repair-owner-provider.test.js',
+  ]) {
+    assert.ok(resolved.excludedFiles.includes(sourceOnlyTest), `${sourceOnlyTest} should be private-fixture-only`);
+    assert.ok(!resolved.selectedFiles.includes(sourceOnlyTest));
+  }
 });
 
 test('resolver excludes private evidence consumers but keeps self-contained public contracts', async () => {

@@ -25,6 +25,7 @@ test('accounts route accepts kimi api_key account creation', async () => {
       payload: JSON.stringify({
         projectPath: projectDir,
         displayName: 'Moonshot',
+        clientId: 'kimi',
         authType: 'api_key',
         baseUrl: 'https://api.moonshot.ai/v1',
         apiKey: 'sk-kimi',

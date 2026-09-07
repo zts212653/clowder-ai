@@ -65,7 +65,6 @@ function harness({
   trackingHead,
   trackingSnapshot,
   task = null,
-  localReviewEvidenceProvider,
   livePrSnapshot: observedLivePr,
 } = {}) {
   const marks = [];
@@ -122,7 +121,6 @@ function harness({
           return task?.id === taskId ? task : null;
         },
       },
-      localReviewEvidenceProvider,
       livePrFreshnessProvider,
     ),
     marks,
@@ -231,167 +229,6 @@ describe('ActionSubjectTruthResolver', () => {
       ).status,
       'insufficient',
     );
-  });
-
-  it('verifies a durable typed local-cat verdict against the exact lease route and server-owned HEAD', async () => {
-    const evidenceRef = 'local-review:message-1:g2:changes_requested';
-    const localReviewEvidenceProvider = {
-      async resolve(input) {
-        assert.deepEqual(input, {
-          messageId: 'message-1',
-          leaseId: 'lease-review-2',
-          generation: 2,
-          reviewerCatId: 'codex-terra',
-          holderThreadId: 'thread-review',
-          predecessorCatId: 'codex-sol',
-          predecessorThreadId: 'thread-review',
-          tenantScope: 'user-1',
-        });
-        return { status: 'verified', evidenceRef, verdict: 'changes_requested' };
-      },
-    };
-    const { resolver } = harness({
-      object: projection('in_progress', {
-        externalReview: {
-          currentHeadSha: HEAD_NEW,
-          lastReviewedHeadSha: null,
-          delivery: null,
-          ci: null,
-        },
-      }),
-      localReviewEvidenceProvider,
-    });
-    const predicate = canonicalizeActionTerminalPredicate({
-      actionFamily: 'review',
-      subjectRef: 'pr:owner/repo#2868',
-      predicate: { kind: 'review_delivered', headSha: HEAD_NEW },
-    });
-    const snapshot = {
-      evidenceRefs: [evidenceRef],
-      candidateRevision: 1,
-      evidenceDigest: 'local-review-digest',
-      recordedAt: 300,
-    };
-
-    assert.deepEqual(
-      await resolver.resolveCompletion(predicate, snapshot, {
-        leaseId: 'lease-review-2',
-        generation: 2,
-        catId: 'codex-terra',
-        holderThreadId: 'thread-review',
-        predecessorCatId: 'codex-sol',
-        predecessorThreadId: 'thread-review',
-        tenantScope: 'user-1',
-      }),
-      {
-        status: 'verified',
-        evidenceRef,
-        predicateDigest: predicate.digest,
-        freshnessKey: predicate.freshnessKey,
-        candidateRevision: snapshot.candidateRevision,
-        evidenceDigest: snapshot.evidenceDigest,
-      },
-    );
-  });
-
-  it('rejects exact local evidence when the server-observed PR HEAD has advanced', async () => {
-    const evidenceRef = 'local-review:message-stale:g2:approved';
-    const { resolver } = harness({
-      object: projection('in_progress', {
-        externalReview: {
-          currentHeadSha: HEAD_NEW,
-          lastReviewedHeadSha: null,
-          delivery: null,
-          ci: null,
-        },
-      }),
-      localReviewEvidenceProvider: {
-        async resolve() {
-          return { status: 'verified', evidenceRef };
-        },
-      },
-    });
-    const predicate = canonicalizeActionTerminalPredicate({
-      actionFamily: 'review',
-      subjectRef: 'pr:owner/repo#2868',
-      predicate: { kind: 'review_delivered', headSha: HEAD_OLD },
-    });
-
-    const result = await resolver.resolveCompletion(predicate, candidate([evidenceRef]), {
-      leaseId: 'lease-review-2',
-      generation: 2,
-      catId: 'codex-terra',
-      holderThreadId: 'thread-review',
-      predecessorCatId: 'codex-sol',
-      predecessorThreadId: 'thread-review',
-      tenantScope: 'user-1',
-    });
-
-    assert.equal(result.status, 'mismatch');
-    assert.equal(result.reason, 'predicate HEAD is not the server-observed current HEAD');
-  });
-
-  it('accepts exact local evidence with active tracking HEAD when community freshness is unavailable', async () => {
-    const evidenceRef = 'local-review:message-tracked:g2:approved';
-    const { resolver } = harness({
-      object: null,
-      trackingHead: HEAD_NEW,
-      localReviewEvidenceProvider: {
-        async resolve() {
-          return { status: 'verified', evidenceRef };
-        },
-      },
-    });
-    const predicate = canonicalizeActionTerminalPredicate({
-      actionFamily: 'review',
-      subjectRef: 'pr:owner/repo#2868',
-      predicate: { kind: 'review_delivered', headSha: HEAD_NEW },
-    });
-
-    assert.equal(
-      (
-        await resolver.resolveCompletion(predicate, candidate([evidenceRef]), {
-          leaseId: 'lease-review-2',
-          generation: 2,
-          catId: 'codex-terra',
-          holderThreadId: 'thread-review',
-          predecessorCatId: 'codex-sol',
-          predecessorThreadId: 'thread-review',
-          tenantScope: 'user-1',
-        })
-      ).status,
-      'verified',
-    );
-  });
-
-  it('rejects exact local evidence when neither current-HEAD source is available', async () => {
-    const evidenceRef = 'local-review:message-unfresh:g2:approved';
-    const { resolver } = harness({
-      object: null,
-      localReviewEvidenceProvider: {
-        async resolve() {
-          return { status: 'verified', evidenceRef };
-        },
-      },
-    });
-    const predicate = canonicalizeActionTerminalPredicate({
-      actionFamily: 'review',
-      subjectRef: 'pr:owner/repo#2868',
-      predicate: { kind: 'review_delivered', headSha: HEAD_NEW },
-    });
-
-    const result = await resolver.resolveCompletion(predicate, candidate([evidenceRef]), {
-      leaseId: 'lease-review-2',
-      generation: 2,
-      catId: 'codex-terra',
-      holderThreadId: 'thread-review',
-      predecessorCatId: 'codex-sol',
-      predecessorThreadId: 'thread-review',
-      tenantScope: 'user-1',
-    });
-
-    assert.equal(result.status, 'insufficient');
-    assert.equal(result.reason, 'current HEAD projection unavailable');
   });
 
   it('uses a persisted terminal marker when the projection is not newer', async () => {

@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { apiFetch } from '@/utils/api-client';
 import { EvolutionAttributionPanel } from './EvolutionAttributionPanel';
+import { EvolutionChangePanel } from './EvolutionChangePanel';
 import { EvolutionObservationPanel } from './EvolutionObservationPanel';
 import { type EvolutionProgramProjection, isProjection, type OwnerRef } from './evolution-program-projection';
 
@@ -206,6 +207,8 @@ export function EvolutionProgramSurface({ programId }: { programId: string }) {
 
         {/* Tolerate a projection from a runtime that predates Phase 3: no attribution is honest, undefined is not. */}
         <EvolutionAttributionPanel explanation={projection.attribution ?? null} />
+
+        <EvolutionChangePanel projection={projection} onProjection={setProjection} />
 
         <section className="rounded-xl border border-cafe-subtle bg-cafe-surface p-4">
           <h3 className="text-sm font-semibold text-cafe">建制 refs</h3>

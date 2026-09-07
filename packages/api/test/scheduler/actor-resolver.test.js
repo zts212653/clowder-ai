@@ -43,6 +43,36 @@ describe('ActorResolver', () => {
     assert.equal(catId, 'sonnet'); // sonnet is non-lead architect
   });
 
+  it('cheap memory work prefers reasoning capability and excludes scarce subscription cats', async () => {
+    const { createActorResolver } = await import('../../dist/infrastructure/scheduler/ActorResolver.js');
+    const roster = {
+      'fable-5': { family: 'claude', roles: ['architect'], lead: false, available: true },
+      'codex-sol': { family: 'openai', roles: ['reasoning'], lead: false, available: true },
+    };
+    const resolve = createActorResolver(() => roster, { isScarce: (catId) => catId === 'fable-5' });
+
+    assert.equal(resolve('memory-curator', 'cheap'), 'codex-sol');
+    assert.equal(
+      createActorResolver(() => ({ 'fable-5': roster['fable-5'] }), { isScarce: (catId) => catId === 'fable-5' })(
+        'memory-curator',
+        'cheap',
+      ),
+      null,
+    );
+  });
+
+  it('routes the production-shaped cheap memory roster to the assistant instead of an architect', async () => {
+    const { createActorResolver } = await import('../../dist/infrastructure/scheduler/ActorResolver.js');
+    const roster = {
+      opus: { family: 'claude', roles: ['architect'], lead: true, available: true },
+      sonnet: { family: 'claude', roles: ['assistant'], lead: false, available: true },
+      'fable-5': { family: 'claude', roles: ['architect'], lead: false, available: true },
+    };
+    const resolve = createActorResolver(() => roster, { isScarce: (catId) => catId === 'fable-5' });
+
+    assert.equal(resolve('memory-curator', 'cheap'), 'sonnet');
+  });
+
   it('returns null when no cat matches role', async () => {
     const { createActorResolver } = await import('../../dist/infrastructure/scheduler/ActorResolver.js');
     // gemini has visual-designer which maps to nothing in actor roles

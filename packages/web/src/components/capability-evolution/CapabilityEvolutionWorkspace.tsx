@@ -4,34 +4,19 @@ import { type FormEvent, useCallback, useEffect, useMemo, useState } from 'react
 import { useChatStore } from '@/stores/chatStore';
 import { apiFetch } from '@/utils/api-client';
 import { CapabilityEvolutionProgramDetail } from './CapabilityEvolutionProgramDetail';
+import { CapabilityEvolutionProgramRow } from './CapabilityEvolutionProgramRow';
 import {
   type EvolutionProgramPresentationProjection,
-  humanizeEvolutionTarget,
-  lifecycleLabel,
   parseEvolutionProgramProjection,
-  stageLabel,
 } from './capability-evolution-presentation';
 
-function EvolutionMark({ className = 'h-5 w-5' }: { className?: string }) {
-  return (
-    <svg
-      aria-hidden="true"
-      className={className}
-      viewBox="0 0 20 20"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.5"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-    >
-      <path d="M6 2.5c7 3.5 7 11.5 0 15M14 2.5c-7 3.5-7 11.5 0 15M6.8 5.2h6.4M5.8 10h8.4M6.8 14.8h6.4" />
-    </svg>
-  );
-}
-
-function StartEvolution() {
-  const threadId = useChatStore((state) => state.currentThreadId);
+function StartEvolution({ targetThreadId }: { targetThreadId: string | null }) {
   const setPendingChatInsert = useChatStore((state) => state.setPendingChatInsert);
+  const targetThreadTitle = useChatStore((state) => {
+    if (!targetThreadId) return null;
+    const thread = state.threads.find((candidate) => candidate.id === targetThreadId);
+    return thread ? thread.title?.trim() || '未命名对话' : null;
+  });
   const [target, setTarget] = useState('');
   const [notice, setNotice] = useState<string | null>(null);
 
@@ -39,49 +24,53 @@ function StartEvolution() {
     event.preventDefault();
     const normalized = target.trim();
     if (!normalized) return;
-    if (!threadId) {
-      setNotice('请先打开一个聊天，再从这里发起进化。');
+    if (!targetThreadId || !targetThreadTitle) {
+      setNotice('当前工作区没有可写入的目标对话。');
       return;
     }
-    setPendingChatInsert({ threadId, text: `我们来进化 ${normalized}` });
+    setPendingChatInsert({ threadId: targetThreadId, text: `我们来进化 ${normalized}` });
     setTarget('');
-    setNotice('已放进当前聊天输入框；发送后猫猫会建立 canonical Program。');
+    setNotice(`已带到「${targetThreadTitle}」，原有草稿已保留。由你确认后发送。`);
   };
 
   return (
-    <section className="rounded-2xl border border-cafe-accent/20 bg-cafe-accent/5 p-4 shadow-sm">
-      <div className="flex items-start gap-3">
-        <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-cafe-accent/10 text-cafe-accent">
-          <EvolutionMark />
-        </span>
-        <div>
-          <h2 className="text-sm font-semibold text-cafe-black">发起新的进化</h2>
-          <p className="mt-1 text-xs leading-5 text-cafe-secondary">
-            只说想改进什么。猫猫会解析 owner、起草证书与角色，不会让你填写大表。
-          </p>
-        </div>
-      </div>
-      <form className="mt-4 flex flex-col gap-2 sm:flex-row" onSubmit={submit}>
+    <section className="rounded-2xl border border-cafe-subtle/75 bg-[var(--console-card-bg)] p-4 shadow-sm">
+      <form className="flex flex-col gap-2 sm:flex-row" onSubmit={submit}>
         <label className="sr-only" htmlFor="capability-evolution-target">
-          想进化什么
+          想持续改进哪项能力
         </label>
         <input
           id="capability-evolution-target"
           data-testid="capability-evolution-start-input"
           value={target}
-          onChange={(event) => setTarget(event.target.value)}
-          placeholder="例如：投资人路演表达能力"
+          onChange={(event) => {
+            setTarget(event.target.value);
+            setNotice(null);
+          }}
+          placeholder="例如：投资人路演效果"
           className="min-w-0 flex-1 rounded-xl border border-cafe-subtle bg-cafe-surface px-3.5 py-2.5 text-sm text-cafe-black outline-none transition-colors placeholder:text-cafe-muted focus:border-cafe-accent"
         />
         <button
           type="submit"
           data-testid="capability-evolution-start"
-          disabled={!target.trim()}
+          disabled={!target.trim() || !targetThreadTitle}
           className="rounded-xl bg-cafe-accent px-4 py-2.5 text-sm font-semibold text-[var(--cafe-surface)] transition-opacity disabled:cursor-not-allowed disabled:opacity-40"
         >
-          放进聊天
+          带到这个对话
         </button>
       </form>
+      <div className="mt-2 flex items-start justify-between gap-3 text-xs text-cafe-muted">
+        <div data-testid="capability-evolution-chat-destination">
+          {targetThreadTitle ? (
+            <p>当前对话：{targetThreadTitle}</p>
+          ) : (
+            <>
+              <p className="font-semibold text-cafe-secondary">没有可写入的目标对话</p>
+              <p className="mt-1 leading-5">请先回到一个对话，再从该对话的工作区打开能力进化。</p>
+            </>
+          )}
+        </div>
+      </div>
       {notice && (
         <output className="mt-2 text-xs text-cafe-secondary" aria-live="polite">
           {notice}
@@ -91,44 +80,13 @@ function StartEvolution() {
   );
 }
 
-function ProgramCard({
-  projection,
-  selected,
-  onSelect,
+export function CapabilityEvolutionWorkspace({
+  targetThreadId,
+  onOpenProgram,
 }: {
-  projection: EvolutionProgramPresentationProjection;
-  selected: boolean;
-  onSelect: () => void;
+  targetThreadId: string | null;
+  onOpenProgram: (programId: string) => void;
 }) {
-  const target = humanizeEvolutionTarget(projection.program.objectRef);
-  return (
-    <button
-      type="button"
-      onClick={onSelect}
-      data-testid={`capability-evolution-program-${projection.program.programId}`}
-      aria-pressed={selected}
-      className="group w-full rounded-xl border border-cafe-subtle/75 bg-[var(--console-card-bg)] p-4 text-left transition-[border-color,background-color,transform] hover:-translate-y-px hover:border-cafe-accent/35 hover:bg-cafe-surface aria-pressed:border-cafe-accent/45 aria-pressed:bg-cafe-accent/5"
-    >
-      <span className="flex items-start justify-between gap-3">
-        <span className="min-w-0">
-          <span className="block text-micro font-bold uppercase tracking-[0.12em] text-cafe-accent">
-            {target.eyebrow}
-          </span>
-          <span className="mt-1 block text-sm font-semibold text-cafe-black">{target.title}</span>
-        </span>
-        <span className="shrink-0 rounded-full bg-cafe-surface-sunken px-2.5 py-1 text-micro font-semibold text-cafe-secondary">
-          {lifecycleLabel(projection.program.lifecycle)}
-        </span>
-      </span>
-      <span className="mt-3 grid gap-1 border-t border-cafe-subtle/70 pt-3">
-        <span className="text-xs font-semibold text-cafe-secondary">{stageLabel(projection.program.stage)}</span>
-        <span className="text-xs leading-5 text-cafe-muted">下一步：{projection.nextAction.label}</span>
-      </span>
-    </button>
-  );
-}
-
-export function CapabilityEvolutionWorkspace({ onOpenProgram }: { onOpenProgram: (programId: string) => void }) {
   const [programs, setPrograms] = useState<EvolutionProgramPresentationProjection[]>([]);
   const [loading, setLoading] = useState(true);
   const [unavailable, setUnavailable] = useState(false);
@@ -181,30 +139,20 @@ export function CapabilityEvolutionWorkspace({ onOpenProgram }: { onOpenProgram:
       data-testid="capability-evolution-workspace"
     >
       <div className="mx-auto w-full max-w-5xl space-y-5 px-5 py-5">
-        <header className="flex items-start gap-3">
-          <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-cafe-accent/10 text-cafe-accent">
-            <EvolutionMark className="h-6 w-6" />
-          </span>
-          <div>
-            <p className="text-micro font-bold uppercase tracking-[0.16em] text-cafe-accent">
-              Capability Evolution Workspace
-            </p>
-            <h1 className="mt-1 text-xl font-semibold tracking-tight text-cafe-black">能力进化</h1>
-            <p className="mt-1 max-w-2xl text-xs leading-5 text-cafe-secondary">
-              在这里发起、继续和回看一次能力进化。所有状态都来自 canonical Program，不在页面里复制第二份真相。
-            </p>
-          </div>
+        <header>
+          <h1 className="text-xl font-semibold tracking-tight text-cafe-black">能力进化</h1>
+          <p className="mt-1 max-w-2xl text-sm leading-6 text-cafe-secondary">持续观测、评估并采纳能力改进。</p>
         </header>
 
-        <StartEvolution />
+        <StartEvolution key={targetThreadId ?? 'unbound'} targetThreadId={targetThreadId} />
 
         <section aria-labelledby="capability-evolution-programs-heading">
           <div className="mb-2 flex items-end justify-between gap-3">
             <div>
               <h2 id="capability-evolution-programs-heading" className="text-sm font-semibold text-cafe-black">
-                正在进行与历史 Programs
+                能力项目
               </h2>
-              <p className="mt-1 text-xs text-cafe-muted">先看阶段与下一步；阻塞和谱系进入详情再看。</p>
+              <p className="mt-1 text-xs text-cafe-muted">每一项能力独立观测、评估与保留改进。</p>
             </div>
             <button
               type="button"
@@ -217,20 +165,20 @@ export function CapabilityEvolutionWorkspace({ onOpenProgram }: { onOpenProgram:
 
           {loading ? (
             <div className="rounded-xl border border-cafe-subtle px-4 py-8 text-center text-xs text-cafe-muted">
-              正在读取能力进化 Programs…
+              正在读取能力进化记录…
             </div>
           ) : unavailable && programs.length === 0 ? (
             <div className="rounded-xl border border-cafe-subtle px-4 py-8 text-center text-xs text-cafe-muted">
-              Program owner 暂时不可用；这里不会创建 mock 或本地副本。
+              暂时无法读取进化记录，请稍后刷新。系统不会用临时数据冒充真实进展。
             </div>
           ) : rejectedProgramCount > 0 && programs.length === 0 ? (
             <div className="rounded-xl border border-cafe-subtle px-4 py-8 text-center text-xs text-cafe-muted">
-              {rejectedProgramCount} 个 Program 暂时无法读取；canonical 数据仍由 owner 保管，请刷新或更新页面。
+              {rejectedProgramCount} 项进化记录暂时无法读取；原始记录仍安全保留，请刷新或更新页面。
             </div>
           ) : programs.length === 0 ? (
             <div className="rounded-xl border border-dashed border-cafe-subtle px-4 py-8 text-center">
-              <p className="text-sm font-semibold text-cafe-black">还没有 Program</p>
-              <p className="mt-1 text-xs text-cafe-muted">在上方写下想改进什么，再从聊天发送即可开始。</p>
+              <p className="text-sm font-semibold text-cafe-black">还没有进化记录</p>
+              <p className="mt-1 text-xs text-cafe-muted">在上方写下想改进什么，再由你从目标对话发送即可开始。</p>
             </div>
           ) : (
             <div className="space-y-3">
@@ -239,12 +187,12 @@ export function CapabilityEvolutionWorkspace({ onOpenProgram }: { onOpenProgram:
                   aria-live="polite"
                   className="block rounded-xl border border-cafe-subtle px-3 py-2 text-xs text-cafe-muted"
                 >
-                  {rejectedProgramCount} 个 Program 暂时无法读取；其余 canonical Programs 仍可使用。
+                  {rejectedProgramCount} 项进化记录暂时无法读取；其余记录仍可使用。
                 </output>
               )}
-              <div className="grid gap-3 sm:grid-cols-2">
+              <div className="space-y-2">
                 {programs.map((projection) => (
-                  <ProgramCard
+                  <CapabilityEvolutionProgramRow
                     key={projection.program.programId}
                     projection={projection}
                     selected={selectedProgramId === projection.program.programId}

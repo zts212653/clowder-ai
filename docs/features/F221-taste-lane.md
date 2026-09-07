@@ -8,7 +8,7 @@ description: "per-user 品味信号的结构化提议、operator 审批、可靠
 description_source: human
 description_author: opus
 description_updated_at: 2026-07-12T12:45:00Z
-tips_exempt: "2026-08-28 续租：修复既有 Approval Hub Taste 批准后的隔离 Git publisher 与私有 outbound exclusion；不新增用户可操作入口或学习步骤。"
+tips_exempt: "2026-09-04 续租：修复既有 Taste authority/index/reader 锚点漂移并增加集合守卫；不新增用户可操作入口或学习步骤。"
 ---
 
 # F221: Taste Lane — per-user 品味导航

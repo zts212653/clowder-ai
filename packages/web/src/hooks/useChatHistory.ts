@@ -319,7 +319,6 @@ function mergeMessageExtra(
     recall: pick('recall'),
     coordination: pick('coordination'),
     localReviewVerdict: pick('localReviewVerdict'),
-    legacyLocalReviewDisposition: pick('legacyLocalReviewDisposition'),
     systemKind: pick('systemKind'),
     a2aRouting: pick('a2aRouting'),
     recovery: pick('recovery'),

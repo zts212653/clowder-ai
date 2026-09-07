@@ -44,6 +44,7 @@ describe('F311 Phase 3 intervention gate', () => {
 
     const gateInput = (cardOverrides) => ({
       attribution: toAttributionGateView(attributed()),
+      proposedAction: 'fix',
       card: completeCard(cardOverrides),
       interventionLayerRef: ownerRef('F202', 'intervention-layer:skill:video-forge'),
       gateReceiptRef: ownerRef('F267', 'intervention-gate-receipt:evolve-video-skill:c1'),
@@ -140,8 +141,19 @@ describe('F311 Phase 3 intervention gate', () => {
       assert.ok(verdict.blockers.some((blocker) => blocker.code === 'attribution_not_actionable'));
     });
 
+    it('keeps owner-declared observe on the zero-approval lane even when a card exists', () => {
+      const verdict = evaluateInterventionGate({ ...gateInput(), proposedAction: 'keep_observe' });
+      assert.equal(verdict.status, 'blocked');
+      assert.equal(verdict.event, undefined);
+      assert.equal(verdict.fallbackEvent.result, 'observe');
+      assert.ok(verdict.blockers.some((blocker) => blocker.code === 'intervention_not_authority_requesting'));
+    });
+
     it('offers a zero-approval fallback and human why-not-change text when blocked', () => {
-      const verdict = evaluateInterventionGate({ attribution: toAttributionGateView(attributed()) });
+      const verdict = evaluateInterventionGate({
+        attribution: toAttributionGateView(attributed()),
+        proposedAction: 'fix',
+      });
       assert.equal(verdict.fallbackEvent.type, 'observe_or_insufficient_recorded');
       assert.equal(verdict.fallbackEvent.result, 'observe');
       assert.deepEqual(

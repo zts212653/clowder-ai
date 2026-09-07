@@ -25,7 +25,7 @@ related_docs:
   - feature-discussions/2026-08-24-memory-belief-admission/README.md
 topics: [memory, architecture, atlas, evidence, recall, write-side, standing-reflex, derived-view, context-presentation, governance, outcome]
 created: 2026-08-18
-revised: 2026-08-29
+revised: 2026-09-05
 status: active
 author: "小太阳·Maine Coon/GPT-5.6 Sol"
 description: "Clowder AI 记忆系统的唯一导航入口：用九个观察面登记权威 claim，用六层叙事、端到端状态流和问题路由连接现有架构、合同、census、source map、feature 与历史材料。"
@@ -83,6 +83,14 @@ Clowder AI 的记忆系统不是一个数据库，也不是“把旧聊天自动
 - **治理层**负责批准、拒绝、纠正、遗忘、权限和派生视图失效。
 
 公众叙事图见 EP04 正式主图。
+第一次向人解释“同一条记忆怎样留下、想起、回源与纠正”时，可从
+ChatGPT × Clowder AI 互动对照样稿
+进入。它是带 provenance 的解释性快照，不拥有 Clowder AI 架构或运行状态；工程判断仍回本 Atlas
+指向的 canonical owner。
+
+2026-09-05 的第一用户架构与交付路线提案
+把三猫愿景转为完整使用旅程、跨 epoch 接续和近期交付顺序，并附低保真与 imagegen 总图。
+它是目标设计与执行提案，不替代本 Atlas 的 claim registry，也不把新入口写成已上线能力。
 
 ![记忆系统全局星图：一栋楼、两个方向、三条横切](./assets/memory-architecture-p1-overview.png)
 

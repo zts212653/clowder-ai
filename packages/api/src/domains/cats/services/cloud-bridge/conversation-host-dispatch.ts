@@ -66,6 +66,23 @@ export async function dispatchBoundConversationThroughHost(args: {
       typeof error === 'object' &&
       error !== null &&
       'code' in error &&
+      (error as { code?: unknown }).code === 'NEEDS_BINDING'
+    ) {
+      const detail = `Host append_message requires a current authorized thread binding: ${shortMessage(error)}`;
+      return {
+        outcome: {
+          kind: 'fallback',
+          reason: 'needs-binding',
+          detail,
+          ...(replayTruth(error) === undefined ? {} : { idempotentReplay: replayTruth(error) }),
+        },
+        fallback: { reason: 'needs-binding', detail },
+      };
+    }
+    if (
+      typeof error === 'object' &&
+      error !== null &&
+      'code' in error &&
       (error as { code?: unknown }).code === 'HOST_UNAVAILABLE'
     ) {
       return null;

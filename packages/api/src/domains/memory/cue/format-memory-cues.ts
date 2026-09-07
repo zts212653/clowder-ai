@@ -1,5 +1,7 @@
 import type { CueEnvelopeV1 } from '@cat-cafe/shared';
 import { estimateTokens } from '../../../utils/token-counter.js';
+import { EXPLICIT_APPROVED_TASTE_SOURCE_ANCHOR_PREFIX } from './ExplicitApprovedTasteTriggerCatalog.js';
+import { TASTE_TASK_BUNDLE_SOURCE_ANCHOR_PREFIX } from './TasteTaskBundleCatalog.js';
 
 export interface FormattedMemoryCues {
   cues: CueEnvelopeV1[];
@@ -8,7 +10,13 @@ export interface FormattedMemoryCues {
 }
 
 function explicitTasteAction(cue: CueEnvelopeV1): string[] {
-  return cue.resolverFamily === 'taste' && cue.source.anchor.startsWith('taste-vignette:')
+  if (cue.resolverFamily !== 'taste') return [];
+  if (cue.source.anchor.startsWith(TASTE_TASK_BUNDLE_SOURCE_ANCHOR_PREFIX)) {
+    return [
+      'Action: Drill this exact approved source; record applied/dismissed, or preserve an explicit unconfirmed row in task evidence.',
+    ];
+  }
+  return cue.source.anchor.startsWith(EXPLICIT_APPROVED_TASTE_SOURCE_ANCHOR_PREFIX)
     ? ['Action: Drill before responding; record applied only after satisfying the typed application contract.']
     : [];
 }
@@ -29,6 +37,28 @@ function eventAction(cue: CueEnvelopeV1): string[] {
     : [];
 }
 
+function operationalKnowledgeAction(cue: CueEnvelopeV1): string[] {
+  if (cue.resolverFamily === 'decision') {
+    return [
+      'Action: Drill before responding; record applied only if this accepted decision constrains the current response or action, otherwise dismissed.',
+    ];
+  }
+  if (cue.resolverFamily === 'project_knowledge') {
+    return [
+      'Action: Drill before responding; record applied only if this exact feature source grounds the current task response, otherwise dismissed.',
+    ];
+  }
+  return [];
+}
+
+function catOwnedSeedAction(cue: CueEnvelopeV1): string[] {
+  return cue.resolverFamily === 'cat_owned_seed'
+    ? [
+        'Action: Drill only in this private Present Loop; record applied only after creating a same-invocation intent for this seed, otherwise dismissed.',
+      ]
+    : [];
+}
+
 export function renderMemoryCue(cue: CueEnvelopeV1): string {
   return [
     `<memory-cue v="1" cue-id="${cue.cueId}" why-now="${cue.whyNow}">`,
@@ -41,6 +71,8 @@ export function renderMemoryCue(cue: CueEnvelopeV1): string {
     ...explicitTasteAction(cue),
     ...profileAction(cue),
     ...eventAction(cue),
+    ...operationalKnowledgeAction(cue),
+    ...catOwnedSeedAction(cue),
     '</memory-cue>',
   ].join('\n');
 }
@@ -53,6 +85,8 @@ export function renderMemoryCuePointer(cue: CueEnvelopeV1): string {
     ...explicitTasteAction(cue),
     ...profileAction(cue),
     ...eventAction(cue),
+    ...operationalKnowledgeAction(cue),
+    ...catOwnedSeedAction(cue),
     '</recall-opportunity-pointer>',
   ].join('\n');
 }

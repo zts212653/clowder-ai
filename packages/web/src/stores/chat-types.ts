@@ -9,6 +9,7 @@ import type {
   ProviderSemanticEvent,
   PublishedFreshnessAnnotation,
   QueueMessageReceipt,
+  QueueRecoveryAction,
   ReplyPreview,
   SchedulerMessageExtra,
   TurnExecutionMessageProjection,
@@ -22,7 +23,7 @@ export type { A2ARoutingMode, A2ARoutingProjection, CliDiagnostics } from '@cat-
 
 import type { A2ARoutingProjection } from '@cat-cafe/shared';
 
-export type ThreadSystemKind = 'connector_hub' | 'eval_domain' | 'cat_bedroom';
+export type ThreadSystemKind = 'connector_hub' | 'eval_domain' | 'cat_bedroom' | 'memory_ops';
 
 export type { FileContent, ImageContent, MessageContent, TextContent } from '@cat-cafe/shared';
 
@@ -375,26 +376,13 @@ export interface ChatMessage {
       recalledAt: number;
       exposures?: ReadonlyArray<{ targetCatId: string; invocationId: string; seenAt: number }>;
     };
-    /** F167: exact lifecycle projection used by message-local review recovery. */
+    /** F167: optional coordination projection retained independently from review delivery. */
     coordination?: CrossThreadCoordination;
     /** #1371: reviewer-authored typed verdict; prose is never parsed for authority. */
     localReviewVerdict?: {
       verdict: 'approved' | 'changes_requested' | 'commented';
       clientMessageId: string;
       reviewedHeadSha?: string;
-      carrierlessLeaseFence?: { leaseId: string; generation: number };
-    };
-    /** #1371: operator-authored typed settlement for one legacy prose-only terminal. */
-    legacyLocalReviewDisposition?: {
-      sourceMessageId: string;
-      leaseId: string;
-      generation: number;
-      subjectRef: string;
-      reviewerCatId: string;
-      predecessorCatId: string;
-      reviewedHeadSha: string;
-      verdict: 'approved' | 'changes_requested';
-      decisionId: string;
     };
     /**
      * F173 a2a-handoff bug fix: marker for system messages that must be
@@ -831,6 +819,8 @@ export interface QueueEntry {
   };
   /** F264: same durable receipt projection used by the terminal timeline bubble. */
   queueReceipt?: QueueMessageReceipt;
+  /** Server-owned executable recovery projection; absent only on legacy cached snapshots. */
+  recoveryActions?: QueueRecoveryAction[];
 }
 
 /** #706: Typed composer draft for recall-edit and cross-feature insert.

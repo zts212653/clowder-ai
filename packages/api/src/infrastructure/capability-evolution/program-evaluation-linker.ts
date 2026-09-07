@@ -6,7 +6,7 @@ import {
   type OwnerTruthRefV1,
   refIdentity,
 } from '@cat-cafe/shared';
-import { evaluateInterventionGate } from './intervention-gate.js';
+import { evaluateInterventionGate } from './change/intervention-gate.js';
 import type { EvolutionProgramServiceResult } from './program-command-contract.js';
 import { guardedAppend } from './program-command-identity.js';
 import {
@@ -238,6 +238,7 @@ export function linkEvolutionProgramIntervention(
     const bundle = await requireOwnerBundle({ ...input, evidenceProofRef: input.decisionProofRef }, deps, projection);
     const verdict = evaluateInterventionGate({
       attribution: input.attribution,
+      proposedAction: bundle.proposedAction,
       ...(bundle.interventionCard === undefined ? {} : { card: bundle.interventionCard }),
       // What is being changed is what this Program is about — its own target, not a caller's choice.
       interventionLayerRef: projection.program.objectRef,

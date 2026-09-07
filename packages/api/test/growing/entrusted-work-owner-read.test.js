@@ -66,6 +66,15 @@ function catalogWith(primary) {
   return new NeedsMeProducerCatalog(Object.values(byId));
 }
 
+function catalogWithMany(...adapters) {
+  const producerIds = ['f246.approval', 'f292.repair', 'f306.runtime_interaction'];
+  const provided = new Set(adapters.map((adapter) => adapter.producerId));
+  return new NeedsMeProducerCatalog([
+    ...adapters,
+    ...producerIds.filter((producerId) => !provided.has(producerId)).map(ineligibleAdapter),
+  ]);
+}
+
 function artifactReader() {
   return {
     async readPreparedArtifact({ artifactRef, taskRevision }) {
@@ -185,6 +194,22 @@ describe('F310 entrusted-work owner-read backbone', () => {
       response.json().ownerReads[0].preparedArtifact.openInWorkspaceRef,
       'workspace:artifact:ppt:tomorrows-ppt:1',
     );
+    assert.deepEqual(response.json().ownerReads[0].brief, {
+      outcome: {
+        state: 'known',
+        value: 'A reviewable presentation is ready',
+        ownerRef: quiet.ownerRef,
+        revision: 1,
+      },
+      current: { state: 'todo', ownerRef: quiet.ownerRef, revision: 1 },
+      verifiedMilestone: {
+        kind: 'artifact_ready',
+        evidenceRef: 'artifact:ppt:tomorrows-ppt#completeness:7',
+        revision: '7',
+      },
+      nextOwner: { kind: 'cat', ownerRef: 'cat:codex-sol', evidenceRef: quiet.ownerRef, revision: 1 },
+      needsMe: { state: 'not_needed', evidenceRef: quiet.ownerRef, revision: 1 },
+    });
   });
 
   test('Web JSON and cat callback return the same owner refs, Artifact, and time semantics', async () => {
@@ -235,8 +260,64 @@ describe('F310 entrusted-work owner-read backbone', () => {
       ['business_deadline', 'review_by'],
     );
     assert.equal(web.json().ownerRead.preparedArtifact.artifactRevision, '7');
+    assert.equal(web.json().ownerRead.brief.outcome.value, 'A reviewable presentation is ready');
+    assert.equal(web.json().ownerRead.brief.nextOwner.ownerRef, 'cat:codex-sol');
+    assert.equal(web.json().ownerRead.brief.needsMe.state, 'not_needed');
     assert.equal(taskReads, 2);
     assert.deepEqual(await taskStore.get(taskId), canonicalBefore, 'owner-read must not write Task truth');
+  });
+
+  test('missing outcome and Task assignee remain explicit unknowns instead of invented idle state', async () => {
+    const task = {
+      id: 'unknown-owner',
+      threadId: 'thread-f310',
+      title: 'Legacy admitted responsibility',
+      why: '',
+      status: 'doing',
+      createdBy: 'codex-sol',
+      ownerCatId: null,
+      userId: 'owner-1',
+      kind: 'work',
+      subjectKey: 'entrusted:unknown-owner',
+      createdAt: now,
+      updatedAt: now,
+      entrustedWork: {
+        revision: 4,
+        admission: {
+          basis: 'explicit_entrustment',
+          sourceRefs: ['message:source-legacy'],
+          idempotencyKey: 'entrusted:unknown-owner',
+          receiptRef: 'task:receipt:legacy',
+          admittedAt: now,
+        },
+        time: { reviewBy: { value: now + 43_200_000, sourceRef: 'message:source-legacy' } },
+        artifactRefs: [],
+        closure: {
+          condition: 'The delivered work is accepted',
+          expectedSignal: 'owner_acceptance',
+          state: 'open',
+          evidenceRefs: [],
+        },
+      },
+    };
+    const service = new EntrustedWorkOwnerReadService({
+      tasks: {
+        async get() {
+          return structuredClone(task);
+        },
+      },
+      producerCatalog: catalogWith(ineligibleAdapter('f246.approval')),
+    });
+    const read = await service.read({
+      taskId: task.id,
+      viewer: { surface: 'human', userId: 'owner-1' },
+    });
+
+    assert.deepEqual(read.brief.outcome, { state: 'unknown' });
+    assert.deepEqual(read.brief.nextOwner, { kind: 'unknown' });
+    assert.equal(read.brief.current.state, 'doing');
+    assert.equal(read.brief.verifiedMilestone.kind, 'time_committed');
+    assert.equal(read.preparedArtifact, undefined);
   });
 
   test('a typed Artifact attachment refreshes the same owner read with the F232 Workspace coordinate', async () => {
@@ -282,6 +363,7 @@ describe('F310 entrusted-work owner-read backbone', () => {
 
     const before = await service.read({ taskId, viewer: { surface: 'human', userId: 'owner-1' } });
     assert.equal(before.preparedArtifact, undefined);
+    assert.equal(before.brief.verifiedMilestone.kind, 'time_committed');
 
     await lifecycle.update({
       taskId,
@@ -292,6 +374,11 @@ describe('F310 entrusted-work owner-read backbone', () => {
     assert.equal(after.envelope.ownerRef, before.envelope.ownerRef);
     assert.equal(after.envelope.revision, 2);
     assert.equal(after.preparedArtifact.artifactRef, 'artifact:ppt:tomorrows-ppt');
+    assert.deepEqual(after.brief.verifiedMilestone, {
+      kind: 'artifact_ready',
+      evidenceRef: `artifact:ppt:tomorrows-ppt#available:${now + 7}`,
+      revision: String(now + 7),
+    });
     assert.equal(
       after.preparedArtifact.openInWorkspaceRef,
       `workspace:artifact:thread-f310:${now + 7}:artifact:ppt:tomorrows-ppt`,
@@ -375,6 +462,9 @@ describe('F310 entrusted-work owner-read backbone', () => {
     });
     assert.equal(stale.envelope.freshness.state, 'stale');
     assert.deepEqual(stale.attentionReceipts, []);
+    assert.deepEqual(stale.brief.needsMe, { state: 'unknown', reason: 'stale_owner_read' });
+    assert.deepEqual(stale.brief.nextOwner, { kind: 'unknown' });
+    assert.deepEqual(stale.brief.verifiedMilestone, { kind: 'unknown', reason: 'stale_owner_read' });
 
     const mismatched = {
       ...actionable,
@@ -389,6 +479,110 @@ describe('F310 entrusted-work owner-read backbone', () => {
       viewer: { surface: 'human', userId: 'owner-1' },
     });
     assert.deepEqual(withoutMismatchedAction.attentionReceipts, []);
+    assert.equal(withoutMismatchedAction.brief.needsMe.state, 'not_needed');
+
+    const current = await service.read({
+      taskId: task.id,
+      viewer: { surface: 'human', userId: 'owner-1' },
+    });
+    assert.deepEqual(current.brief.verifiedMilestone, {
+      kind: 'needs_judgment',
+      evidenceRef: 'approval:F246:ppt-direction',
+      revision: 12,
+    });
+    assert.deepEqual(current.brief.nextOwner, {
+      kind: 'human',
+      ownerRef: 'user:owner-1',
+      evidence: [
+        {
+          producerId: 'f246.approval',
+          ownerRef: 'approval:F246:ppt-direction',
+          revision: 12,
+        },
+      ],
+    });
+  });
+
+  test('multiple eligible producer receipts never make Brief truth depend on catalog order', async () => {
+    const receipt = (producerId, ownerRef, revision) => ({
+      eligible: true,
+      producer: { producerId, ownerRef, subjectRef: ownerRef, revision },
+      taskRef: { subjectRef: 'task:work:task-7', observedRevision: 7 },
+      kind: 'judgment',
+      reasonCode: 'owner_judgment',
+      recommendation: `Resolve ${ownerRef}`,
+      salience: 'normal',
+      action: { actionRef: `${ownerRef}#decide`, expectedProducerRevision: revision },
+      reEvaluateActionRef: `${ownerRef}#reevaluate`,
+    });
+    const adapter = (producerId, currentReceipt) => ({
+      producerId,
+      async listCurrentReceipts() {
+        return [currentReceipt];
+      },
+      async readCurrentReceipt() {
+        return currentReceipt;
+      },
+    });
+    const approval = adapter('f246.approval', receipt('f246.approval', 'approval:a', 10));
+    const repair = adapter('f292.repair', receipt('f292.repair', 'repair:b', 20));
+    const task = {
+      id: 'task-7',
+      threadId: 'thread-f310',
+      title: 'Prepare tomorrow presentation',
+      why: '',
+      status: 'doing',
+      createdBy: 'codex-sol',
+      ownerCatId: 'codex-sol',
+      userId: 'owner-1',
+      kind: 'work',
+      subjectKey: 'entrusted:fixture',
+      createdAt: now,
+      updatedAt: now,
+      entrustedWork: {
+        revision: 7,
+        admission: {
+          basis: 'explicit_entrustment',
+          sourceRefs: ['message:source-1'],
+          idempotencyKey: 'entrusted:fixture',
+          receiptRef: 'task:receipt:fixture',
+          admittedAt: now,
+        },
+        intendedOutcome: 'A reviewable presentation is ready',
+        time: {},
+        artifactRefs: [],
+        closure: {
+          condition: 'The final presentation is reviewable',
+          expectedSignal: 'artifact:final-presentation',
+          state: 'open',
+          evidenceRefs: [],
+        },
+      },
+    };
+    const readWith = async (...adapters) =>
+      new EntrustedWorkOwnerReadService({
+        tasks: {
+          async get() {
+            return structuredClone(task);
+          },
+        },
+        producerCatalog: catalogWithMany(...adapters),
+      }).read({ taskId: task.id, viewer: { surface: 'human', userId: 'owner-1' } });
+
+    const forward = await readWith(approval, repair);
+    const reversed = await readWith(repair, approval);
+
+    assert.deepEqual(forward.brief, reversed.brief);
+    assert.deepEqual(forward.brief.verifiedMilestone, {
+      kind: 'unknown',
+      reason: 'multiple_current_milestones',
+    });
+    assert.deepEqual(forward.brief.needsMe.evidence, [
+      { producerId: 'f246.approval', ownerRef: 'approval:a', revision: 10 },
+      { producerId: 'f292.repair', ownerRef: 'repair:b', revision: 20 },
+    ]);
+    assert.equal(forward.brief.needsMe.state, 'needed');
+    assert.equal(forward.brief.nextOwner.kind, 'human');
   });
 
   test('closed producer adapters preserve owner identity, revision, and exact action coordinates', async () => {

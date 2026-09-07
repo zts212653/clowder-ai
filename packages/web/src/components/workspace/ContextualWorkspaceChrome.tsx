@@ -8,6 +8,7 @@ interface ContextualWorkspaceChromeProps {
   mode: WorkspaceHostMode;
   onFold: () => void;
   onNavigateHome?: () => void;
+  showFold?: boolean;
   actions?: ReactNode;
   children: ReactNode;
 }
@@ -22,6 +23,7 @@ export function ContextualWorkspaceChrome({
   mode,
   onFold,
   onNavigateHome,
+  showFold = false,
   actions,
   children,
 }: ContextualWorkspaceChromeProps) {
@@ -70,13 +72,13 @@ export function ContextualWorkspaceChrome({
           </div>
         )}
 
-        {mode !== 'workspace' && (
+        {(mode !== 'workspace' || showFold) && (
           <button
             type="button"
             onClick={onFold}
             className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-cafe-secondary transition-colors hover:bg-cafe-surface-sunken hover:text-cafe-black"
-            title="收起侧栏"
-            aria-label="收起侧栏"
+            title={mode === 'workspace' ? '收起 Workspace' : '收起侧栏'}
+            aria-label={mode === 'workspace' ? '收起 Workspace' : '收起侧栏'}
             data-testid="workspace-shell-fold"
           >
             <svg
