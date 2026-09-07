@@ -196,7 +196,22 @@ export function matchGitHubWaitPredicates(
         if (!('headSha' in baseline) || !current.headSha) break;
         const before = baseline.review;
         const after = current.review;
-        if (before && after && current.headSha === baseline.headSha && after.decisionCursor > before.decisionCursor) {
+        // A plain COMMENTED submission is not a decision. The predicate used to compare only
+        // decisionCursor, so every review record — including an ordinary COMMENTED — was
+        // reported as approve/request-changes/dismiss. Observed live on #1394 as
+        // "review CHANGES_REQUESTED → COMMENTED". Its body and inline findings still reach the
+        // owner through the comment surfaces, which is where they belong.
+        //
+        // Only an explicit COMMENTED is skipped: an absent decision means "not known", and
+        // A26 is explicit that muting a real signal is worse than one extra notification.
+        const isPlainComment = after?.decision === 'COMMENTED';
+        if (
+          before &&
+          after &&
+          !isPlainComment &&
+          current.headSha === baseline.headSha &&
+          after.decisionCursor > before.decisionCursor
+        ) {
           const verdict = after.decision ?? 'RESULT_AVAILABLE';
           matches.push({
             kind: predicate.kind,
