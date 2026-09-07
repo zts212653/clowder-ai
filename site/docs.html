@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <link rel="icon" type="image/png" href="assets/logo-transparent.png">
-  <title>Docs — Clowder AI</title>
+  <title data-i18n="meta.docs.title">Docs — Clowder AI</title>
   <meta name="description" content="Documentation, setup guides, and architecture references for Clowder AI.">
 
   <!-- Tailwind CSS (pre-built v3.4.17 + typography plugin, custom theme) -->
@@ -16,11 +16,16 @@
   <script src="https://cdn.jsdelivr.net/npm/dompurify@3.2.4/dist/purify.min.js"></script>
   <!-- Shared modules — single source of truth, tested by site-integrity.test.mjs -->
   <script type="module">
-    import { resolveDocLink, resolveImageSrc } from './lib/doc-links.mjs';
+    import { assignDocHeadingIds, resolveDocLink, resolveImageSrc } from './lib/doc-links.mjs';
+    import { fetchLocalizedMarkdown } from './lib/doc-locale.mjs';
+    import { selectFeatureIndexView } from './lib/feature-index-state.mjs';
     import { sanitizeMarkdown } from './lib/sanitize-md.mjs';
 
+    window._assignDocHeadingIds = assignDocHeadingIds;
     window._resolveDocLink = resolveDocLink;
     window._resolveImageSrc = resolveImageSrc;
+    window._fetchLocalizedMarkdown = fetchLocalizedMarkdown;
+    window._selectFeatureIndexView = selectFeatureIndexView;
     window._sanitizeMarkdown = sanitizeMarkdown;
   </script>
 </head>
@@ -34,13 +39,13 @@
         <span class="font-bold text-lg text-stone-900 dark:text-white">Clowder AI</span>
       </a>
       <div class="hidden md:flex items-center gap-6 text-sm font-medium">
-        <a href="docs.html" class="text-terracotta font-semibold">Docs</a>
-        <a href="community.html" class="text-stone-600 dark:text-slate-400 hover:text-terracotta dark:hover:text-terracotta-light transition">Community</a>
-        <a href="https://github.com/zts212653/clowder-ai/releases" target="_blank" rel="noopener" class="text-stone-600 dark:text-slate-400 hover:text-terracotta dark:hover:text-terracotta-light transition inline-flex items-center gap-1">Releases <svg class="w-3 h-3" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"/></svg></a>
+        <a href="docs.html" class="text-terracotta font-semibold" data-i18n="nav.docs">Docs</a>
+        <a href="community.html" class="text-stone-600 dark:text-slate-400 hover:text-terracotta dark:hover:text-terracotta-light transition" data-i18n="nav.community">Community</a>
+        <a href="https://github.com/zts212653/clowder-ai/releases" target="_blank" rel="noopener" class="text-stone-600 dark:text-slate-400 hover:text-terracotta dark:hover:text-terracotta-light transition inline-flex items-center gap-1"><span data-i18n="nav.releases">Releases</span> <svg class="w-3 h-3" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"/></svg></a>
       </div>
       <div class="flex items-center gap-3">
-        <!-- lang toggle omitted: only index.html hero has translations -->
-        <button id="theme-toggle" onclick="toggleTheme()" class="w-8 h-8 flex items-center justify-center rounded-lg hover:bg-stone-200/60 dark:hover:bg-slate-700/60 transition text-sm" aria-label="Toggle theme">
+        <button id="lang-toggle" onclick="toggleLang()" class="w-8 h-8 flex items-center justify-center rounded-lg hover:bg-stone-200/60 dark:hover:bg-slate-700/60 transition text-xs font-semibold" aria-label="Switch language" data-i18n-aria-label="a11y.language">EN</button>
+        <button id="theme-toggle" onclick="toggleTheme()" class="w-8 h-8 flex items-center justify-center rounded-lg hover:bg-stone-200/60 dark:hover:bg-slate-700/60 transition text-sm" aria-label="Toggle theme" data-i18n-aria-label="a11y.theme">
           <svg id="theme-icon" class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path></svg>
         </button>
         <a href="https://github.com/zts212653/clowder-ai" target="_blank" rel="noopener"
@@ -48,15 +53,15 @@
           <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 24 24"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/></svg>
           <span>GitHub</span>
         </a>
-        <button onclick="toggleMobileMenu()" class="md:hidden w-8 h-8 flex items-center justify-center" aria-label="Menu">
+        <button onclick="toggleMobileMenu()" class="md:hidden w-8 h-8 flex items-center justify-center" aria-label="Menu" data-i18n-aria-label="a11y.menu">
           <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16"/></svg>
         </button>
       </div>
     </div>
     <div id="mobile-menu" class="hidden md:hidden border-t border-stone-200 dark:border-slate-700 px-4 py-3 space-y-2">
-      <a href="docs.html" class="block py-1.5 text-sm text-terracotta font-semibold">Docs</a>
-      <a href="community.html" class="block py-1.5 text-sm text-stone-600 dark:text-slate-400">Community</a>
-      <a href="https://github.com/zts212653/clowder-ai/releases" target="_blank" rel="noopener" class="block py-1.5 text-sm text-stone-600 dark:text-slate-400">Releases</a>
+      <a href="docs.html" class="block py-1.5 text-sm text-terracotta font-semibold" data-i18n="nav.docs">Docs</a>
+      <a href="community.html" class="block py-1.5 text-sm text-stone-600 dark:text-slate-400" data-i18n="nav.community">Community</a>
+      <a href="https://github.com/zts212653/clowder-ai/releases" target="_blank" rel="noopener" class="block py-1.5 text-sm text-stone-600 dark:text-slate-400" data-i18n="nav.releases">Releases</a>
     </div>
   </nav>
 
@@ -68,52 +73,53 @@
       <div class="p-4">
         <!-- Category: Getting Started -->
         <div class="doc-category mb-4">
-          <h3 class="text-xs font-bold uppercase tracking-wider text-stone-400 dark:text-slate-500 mb-2 px-2">Getting Started</h3>
+          <h3 class="text-xs font-bold uppercase tracking-wider text-stone-400 dark:text-slate-500 mb-2 px-2" data-i18n="docs.category.gettingstarted">Getting Started</h3>
           <ul class="space-y-0.5">
-            <li><button class="doc-nav-item w-full text-left px-2 py-1.5 rounded-md text-sm hover:bg-stone-100 dark:hover:bg-slate-800 transition" data-doc="README.md" onclick="loadDoc('README.md')">Quick Start</button></li>
-            <li><button class="doc-nav-item w-full text-left px-2 py-1.5 rounded-md text-sm hover:bg-stone-100 dark:hover:bg-slate-800 transition" data-doc="docs/faq.md" onclick="loadDoc('docs/faq.md')">FAQ</button></li>
+            <li><button class="doc-nav-item w-full text-left px-2 py-1.5 rounded-md text-sm hover:bg-stone-100 dark:hover:bg-slate-800 transition" data-doc="README.md" onclick="loadDoc('README.md')" data-i18n="docs.quickstart">Quick Start</button></li>
+            <li><button class="doc-nav-item w-full text-left px-2 py-1.5 rounded-md text-sm hover:bg-stone-100 dark:hover:bg-slate-800 transition" data-doc="SETUP.md" onclick="loadDoc('SETUP.md')" data-i18n="docs.setup">Setup Guide</button></li>
+            <li><button class="doc-nav-item w-full text-left px-2 py-1.5 rounded-md text-sm hover:bg-stone-100 dark:hover:bg-slate-800 transition" data-doc="docs/faq.md" onclick="loadDoc('docs/faq.md')" data-i18n="docs.faq">FAQ</button></li>
           </ul>
         </div>
 
         <!-- Category: Configuration -->
         <div class="doc-category mb-4">
-          <h3 class="text-xs font-bold uppercase tracking-wider text-stone-400 dark:text-slate-500 mb-2 px-2">Configuration</h3>
+          <h3 class="text-xs font-bold uppercase tracking-wider text-stone-400 dark:text-slate-500 mb-2 px-2" data-i18n="docs.category.configuration">Configuration</h3>
           <ul class="space-y-0.5">
-            <li><button class="doc-nav-item w-full text-left px-2 py-1.5 rounded-md text-sm hover:bg-stone-100 dark:hover:bg-slate-800 transition" data-doc="docs/configuration/startup.md" onclick="loadDoc('docs/configuration/startup.md')">Startup &amp; Commands</button></li>
-            <li><button class="doc-nav-item w-full text-left px-2 py-1.5 rounded-md text-sm hover:bg-stone-100 dark:hover:bg-slate-800 transition" data-doc="docs/configuration/environment.md" onclick="loadDoc('docs/configuration/environment.md')">Environment</button></li>
+            <li><button class="doc-nav-item w-full text-left px-2 py-1.5 rounded-md text-sm hover:bg-stone-100 dark:hover:bg-slate-800 transition" data-doc="docs/configuration/startup.md" onclick="loadDoc('docs/configuration/startup.md')" data-i18n="docs.startup">Startup &amp; Commands</button></li>
+            <li><button class="doc-nav-item w-full text-left px-2 py-1.5 rounded-md text-sm hover:bg-stone-100 dark:hover:bg-slate-800 transition" data-doc="docs/configuration/environment.md" onclick="loadDoc('docs/configuration/environment.md')" data-i18n="docs.environment">Environment</button></li>
           </ul>
         </div>
 
         <!-- Category: Architecture -->
         <div class="doc-category mb-4">
-          <h3 class="text-xs font-bold uppercase tracking-wider text-stone-400 dark:text-slate-500 mb-2 px-2">Architecture</h3>
+          <h3 class="text-xs font-bold uppercase tracking-wider text-stone-400 dark:text-slate-500 mb-2 px-2" data-i18n="docs.category.architecture">Architecture</h3>
           <ul class="space-y-0.5">
-            <li><button class="doc-nav-item w-full text-left px-2 py-1.5 rounded-md text-sm hover:bg-stone-100 dark:hover:bg-slate-800 transition" data-doc="docs/architecture/overview.md" onclick="loadDoc('docs/architecture/overview.md')">System Overview</button></li>
-            <li><button class="doc-nav-item w-full text-left px-2 py-1.5 rounded-md text-sm hover:bg-stone-100 dark:hover:bg-slate-800 transition" data-doc="docs/architecture/a2a-protocol.md" onclick="loadDoc('docs/architecture/a2a-protocol.md')">A2A Protocol</button></li>
-            <li><button class="doc-nav-item w-full text-left px-2 py-1.5 rounded-md text-sm hover:bg-stone-100 dark:hover:bg-slate-800 transition" data-doc="docs/architecture/memory/README.md" onclick="loadDoc('docs/architecture/memory/README.md')">Memory Architecture</button></li>
-            <li><button class="doc-nav-item w-full text-left px-2 py-1.5 rounded-md text-sm hover:bg-stone-100 dark:hover:bg-slate-800 transition" data-doc="docs/architecture/plugin-architecture.md" onclick="loadDoc('docs/architecture/plugin-architecture.md')">Plugin Architecture</button></li>
+            <li><button class="doc-nav-item w-full text-left px-2 py-1.5 rounded-md text-sm hover:bg-stone-100 dark:hover:bg-slate-800 transition" data-doc="docs/architecture/overview.md" onclick="loadDoc('docs/architecture/overview.md')" data-i18n="docs.overview">System Overview</button></li>
+            <li><button class="doc-nav-item w-full text-left px-2 py-1.5 rounded-md text-sm hover:bg-stone-100 dark:hover:bg-slate-800 transition" data-doc="docs/architecture/a2a-protocol.md" onclick="loadDoc('docs/architecture/a2a-protocol.md')" data-i18n="docs.a2a">A2A Protocol</button></li>
+            <li><button class="doc-nav-item w-full text-left px-2 py-1.5 rounded-md text-sm hover:bg-stone-100 dark:hover:bg-slate-800 transition" data-doc="docs/architecture/memory/README.md" onclick="loadDoc('docs/architecture/memory/README.md')" data-i18n="docs.memory">Memory Architecture</button></li>
+            <li><button class="doc-nav-item w-full text-left px-2 py-1.5 rounded-md text-sm hover:bg-stone-100 dark:hover:bg-slate-800 transition" data-doc="docs/architecture/plugin-architecture.md" onclick="loadDoc('docs/architecture/plugin-architecture.md')" data-i18n="docs.plugin">Plugin Architecture</button></li>
           </ul>
         </div>
 
         <!-- Category: Features (dynamic from index.json) -->
         <div class="doc-category mb-4" id="features-category">
           <h3 class="text-xs font-bold uppercase tracking-wider text-stone-400 dark:text-slate-500 mb-2 px-2 flex items-center justify-between">
-            <span>Features</span>
+            <span data-i18n="docs.category.features">Features</span>
             <span id="feat-count" class="text-[10px] font-normal text-stone-300 dark:text-slate-600"></span>
           </h3>
           <div class="relative mb-2">
             <svg class="absolute left-2 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-stone-400 dark:text-slate-500" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
-            <input id="feat-search" type="text" placeholder="Search features..."
+            <input id="feat-search" type="text" placeholder="Search features..." data-i18n-placeholder="docs.features.search"
                    class="w-full pl-7 pr-2 py-1.5 rounded-md border border-stone-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-xs text-stone-700 dark:text-slate-300 placeholder:text-stone-400 dark:placeholder:text-slate-500 focus:outline-none focus:border-terracotta/50 transition"
                    oninput="filterFeatures(this.value)">
           </div>
           <div class="flex gap-1 mb-2 px-1">
-            <button onclick="filterFeaturesByStatus('all')" class="feat-status-btn text-[10px] px-1.5 py-0.5 rounded bg-terracotta/10 text-terracotta font-medium" data-status="all">All</button>
-            <button onclick="filterFeaturesByStatus('done')" class="feat-status-btn text-[10px] px-1.5 py-0.5 rounded text-stone-500 dark:text-slate-500 hover:bg-stone-100 dark:hover:bg-slate-700" data-status="done">Done</button>
-            <button onclick="filterFeaturesByStatus('in-progress')" class="feat-status-btn text-[10px] px-1.5 py-0.5 rounded text-stone-500 dark:text-slate-500 hover:bg-stone-100 dark:hover:bg-slate-700" data-status="in-progress">Active</button>
+            <button onclick="filterFeaturesByStatus('all')" class="feat-status-btn text-[10px] px-1.5 py-0.5 rounded bg-terracotta/10 text-terracotta font-medium" data-status="all" data-i18n="docs.filter.all">All</button>
+            <button onclick="filterFeaturesByStatus('done')" class="feat-status-btn text-[10px] px-1.5 py-0.5 rounded text-stone-500 dark:text-slate-500 hover:bg-stone-100 dark:hover:bg-slate-700" data-status="done" data-i18n="docs.filter.done">Done</button>
+            <button onclick="filterFeaturesByStatus('in-progress')" class="feat-status-btn text-[10px] px-1.5 py-0.5 rounded text-stone-500 dark:text-slate-500 hover:bg-stone-100 dark:hover:bg-slate-700" data-status="in-progress" data-i18n="docs.filter.active">Active</button>
           </div>
           <ul id="feat-list" class="space-y-0.5 max-h-64 overflow-y-auto">
-            <li class="px-2 py-2 text-xs text-stone-400 dark:text-slate-600">Loading...</li>
+            <li class="px-2 py-2 text-xs text-stone-400 dark:text-slate-600" data-i18n="docs.loading.features">Loading...</li>
           </ul>
         </div>
       </div>
@@ -124,22 +130,23 @@
       <div class="flex items-center gap-2">
         <select id="mobile-doc-select" onchange="loadDoc(this.value)"
                 class="flex-1 px-3 py-2 rounded-lg border border-stone-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-sm">
-          <optgroup label="Getting Started">
-            <option value="README.md">Quick Start</option>
-            <option value="docs/faq.md">FAQ</option>
+          <optgroup label="Getting Started" data-i18n-label="docs.category.gettingstarted">
+            <option value="README.md" data-i18n="docs.quickstart">Quick Start</option>
+            <option value="SETUP.md" data-i18n="docs.setup">Setup Guide</option>
+            <option value="docs/faq.md" data-i18n="docs.faq">FAQ</option>
           </optgroup>
-          <optgroup label="Configuration">
-            <option value="docs/configuration/startup.md">Startup &amp; Commands</option>
-            <option value="docs/configuration/environment.md">Environment</option>
+          <optgroup label="Configuration" data-i18n-label="docs.category.configuration">
+            <option value="docs/configuration/startup.md" data-i18n="docs.startup">Startup &amp; Commands</option>
+            <option value="docs/configuration/environment.md" data-i18n="docs.environment">Environment</option>
           </optgroup>
-          <optgroup label="Architecture">
-            <option value="docs/architecture/overview.md">System Overview</option>
-            <option value="docs/architecture/a2a-protocol.md">A2A Protocol</option>
-            <option value="docs/architecture/memory/README.md">Memory Architecture</option>
-            <option value="docs/architecture/plugin-architecture.md">Plugin Architecture</option>
+          <optgroup label="Architecture" data-i18n-label="docs.category.architecture">
+            <option value="docs/architecture/overview.md" data-i18n="docs.overview">System Overview</option>
+            <option value="docs/architecture/a2a-protocol.md" data-i18n="docs.a2a">A2A Protocol</option>
+            <option value="docs/architecture/memory/README.md" data-i18n="docs.memory">Memory Architecture</option>
+            <option value="docs/architecture/plugin-architecture.md" data-i18n="docs.plugin">Plugin Architecture</option>
           </optgroup>
-          <optgroup id="mobile-feat-group" label="Features">
-            <option disabled>Loading features...</option>
+          <optgroup id="mobile-feat-group" label="Features" data-i18n-label="docs.category.features">
+            <option disabled data-i18n="docs.loading.features">Loading features...</option>
           </optgroup>
         </select>
       </div>
@@ -151,13 +158,13 @@
         <!-- Breadcrumb + GitHub link -->
         <div id="doc-breadcrumb" class="flex items-center justify-between mb-6">
           <div class="text-sm text-stone-500 dark:text-slate-500">
-            <span>Docs</span>
+            <span data-i18n="nav.docs">Docs</span>
             <span class="mx-1">/</span>
             <span id="doc-current-name" class="text-stone-700 dark:text-slate-300 font-medium">README</span>
           </div>
           <a id="doc-github-link" href="https://github.com/zts212653/clowder-ai/blob/main/README.md" target="_blank" rel="noopener"
              class="inline-flex items-center gap-1.5 text-xs text-stone-400 dark:text-slate-500 hover:text-terracotta transition">
-            Edit on GitHub
+            <span data-i18n="docs.edit">Edit on GitHub</span>
             <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"/></svg>
           </a>
         </div>
@@ -166,26 +173,28 @@
         <article id="doc-content" class="prose prose-stone dark:prose-invert prose-headings:font-bold prose-a:text-terracotta prose-code:text-sm max-w-none">
           <div class="text-center py-20 text-stone-500 dark:text-slate-500">
             <svg class="w-6 h-6 mx-auto mb-3 animate-spin" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
-            Loading document...
+            <span data-i18n="docs.loading.document">Loading document...</span>
           </div>
         </article>
 
         <!-- Related docs -->
         <div id="doc-related" class="mt-12 pt-8 border-t border-stone-200/60 dark:border-slate-700/60 hidden">
-          <h3 class="text-sm font-bold text-stone-500 dark:text-slate-500 uppercase tracking-wider mb-4">Related Documents</h3>
+          <h3 class="text-sm font-bold text-stone-500 dark:text-slate-500 uppercase tracking-wider mb-4" data-i18n="docs.related">Related Documents</h3>
           <div id="doc-related-links" class="flex flex-wrap gap-2"></div>
         </div>
       </div>
     </main>
   </div>
 
+  <script src="i18n.js"></script>
   <script src="main.js"></script>
   <script>
-    /* Docs page logic — skeleton for kimi to implement */
+    /* Docs page logic */
     const REPO = 'zts212653/clowder-ai';
     const BRANCH = 'main';
     const IS_LOCAL = location.hostname === 'localhost' || location.hostname === '127.0.0.1';
     let currentDoc = 'README.md';
+    let docLoadGeneration = 0;
 
     // Document relationships map
     const DOC_RELATIONS = {
@@ -202,7 +211,21 @@
       return IS_LOCAL ? `../${path}` : `https://raw.githubusercontent.com/${REPO}/${BRANCH}/${path}`;
     }
 
-    async function loadDoc(path) {
+    function currentLang() {
+      return document.documentElement.lang === 'zh' ? 'zh' : 'en';
+    }
+
+    function t(key) {
+      return window.I18N?.[currentLang()]?.[key] || window.I18N?.en?.[key] || key;
+    }
+
+    async function loadDoc(path, langOverride) {
+      if (langOverride) {
+        setLang(langOverride, { notify: false });
+        filterFeatures(document.getElementById('feat-search').value);
+      }
+      const requestedLang = langOverride || currentLang();
+      const requestGeneration = ++docLoadGeneration;
       currentDoc = path;
       const content = document.getElementById('doc-content');
       const nameEl = document.getElementById('doc-current-name');
@@ -222,17 +245,20 @@
       });
 
       // Loading state
-      content.innerHTML = '<div class="text-center py-20 text-stone-500 dark:text-slate-500"><svg class="w-6 h-6 mx-auto mb-3 animate-spin" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>Loading...</div>';
+      content.innerHTML = `<div class="text-center py-20 text-stone-500 dark:text-slate-500"><svg class="w-6 h-6 mx-auto mb-3 animate-spin" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>${escapeHtml(t('docs.loading.document'))}</div>`;
 
       try {
-        const res = await fetch(docUrl(path));
-        if (!res.ok) throw new Error(`${res.status}`);
-        const md = await res.text();
+        const result = await window._fetchLocalizedMarkdown(path, requestedLang, candidate => fetch(docUrl(candidate)));
+        if (requestGeneration !== docLoadGeneration) return;
+        const { path: resolvedPath, markdown: md } = result;
+        linkEl.href = `https://github.com/${REPO}/blob/${BRANCH}/${resolvedPath}`;
         content.innerHTML = window._sanitizeMarkdown(md, { DOMPurify, marked });
+        window._assignDocHeadingIds(content);
         // Rewrite relative links to point at GitHub or load in-viewer
-        rewriteDocLinks(content, path);
+        rewriteDocLinks(content, resolvedPath);
       } catch (err) {
-        content.innerHTML = `<div class="text-center py-20"><p class="text-stone-500 dark:text-slate-500 mb-3">Could not load document.</p><a href="https://github.com/${REPO}/blob/${BRANCH}/${path}" target="_blank" class="text-terracotta hover:underline text-sm">View on GitHub &rarr;</a></div>`;
+        if (requestGeneration !== docLoadGeneration) return;
+        content.innerHTML = `<div class="text-center py-20"><p class="text-stone-500 dark:text-slate-500 mb-3">${escapeHtml(t('docs.error.document'))}</p><a href="https://github.com/${REPO}/blob/${BRANCH}/${path}" target="_blank" class="text-terracotta hover:underline text-sm">${t('docs.viewongithub')}</a></div>`;
       }
 
       // Show related docs
@@ -258,7 +284,7 @@
           a.href = '#';
           a.addEventListener('click', e => {
             e.preventDefault();
-            loadDoc(result.path).then(() => {
+            loadDoc(result.path, result.lang).then(() => {
               if (result.hash) {
                 const anchor = document.getElementById(result.hash.slice(1));
                 if (anchor) anchor.scrollIntoView({ behavior: 'smooth', block: 'start' });
@@ -309,8 +335,11 @@
     // ===== Dynamic Feature Index =====
     let allFeatures = [];
     let featStatusFilter = 'all';
+    let featureIndexState = 'loading';
 
     async function loadFeatureIndex() {
+      featureIndexState = 'loading';
+      filterFeatures(document.getElementById('feat-search').value);
       try {
         const res = await fetch(docUrl('docs/features/index.json'));
         if (!res.ok) throw new Error(`${res.status}`);
@@ -320,12 +349,13 @@
           normalizedStatus: normalizeStatus(f.status || ''),
           path: `docs/features/${f.file}`,
         }));
+        featureIndexState = 'ready';
         document.getElementById('feat-count').textContent = allFeatures.length;
-        renderFeatureList(allFeatures);
+        filterFeatures(document.getElementById('feat-search').value);
         populateMobileFeatures(allFeatures);
       } catch (err) {
-        document.getElementById('feat-list').innerHTML =
-          '<li class="px-2 py-2 text-xs text-stone-400">Could not load feature index.</li>';
+        featureIndexState = 'error';
+        filterFeatures(document.getElementById('feat-search').value);
       }
     }
 
@@ -342,11 +372,11 @@
     function renderFeatureList(features) {
       const list = document.getElementById('feat-list');
       if (!features.length) {
-        list.innerHTML = '<li class="px-2 py-2 text-xs text-stone-400 dark:text-slate-600">No features match.</li>';
+        list.innerHTML = `<li class="px-2 py-2 text-xs text-stone-400 dark:text-slate-600">${escapeHtml(t('docs.no.features'))}</li>`;
         return;
       }
       list.innerHTML = features.map(f => {
-        return `<li><button class="doc-nav-item feat-nav-item w-full text-left px-2 py-1.5 rounded-md text-sm hover:bg-stone-100 dark:hover:bg-slate-800 transition truncate" data-doc="${f.path}" onclick="loadDoc('${f.path}')">${escapeHtml(f.name)}</button></li>`;
+        return `<li><button class="doc-nav-item feat-nav-item w-full text-left px-2 py-1.5 rounded-md text-sm hover:bg-stone-100 dark:hover:bg-slate-800 transition truncate" data-doc="${f.path}" onclick="loadDoc('${f.path}')"><span class="text-stone-400 dark:text-slate-500">${escapeHtml(f.id)}</span> ${escapeHtml(f.name)}</button></li>`;
       }).join('');
     }
 
@@ -358,14 +388,26 @@
       ).join('');
     }
 
+    function renderFeatureMessage(key) {
+      const message = escapeHtml(t(key));
+      document.getElementById('feat-list').innerHTML =
+        `<li class="px-2 py-2 text-xs text-stone-400 dark:text-slate-600">${message}</li>`;
+      const group = document.getElementById('mobile-feat-group');
+      if (group) group.innerHTML = `<option disabled>${message}</option>`;
+    }
+
     function filterFeatures(query) {
-      const q = query.toLowerCase();
-      const filtered = allFeatures.filter(f => {
-        const matchStatus = featStatusFilter === 'all' || f.normalizedStatus === featStatusFilter;
-        const matchQuery = !q || f.id.toLowerCase().includes(q) || f.name.toLowerCase().includes(q);
-        return matchStatus && matchQuery;
-      });
-      renderFeatureList(filtered);
+      const view = window._selectFeatureIndexView(
+        featureIndexState,
+        allFeatures,
+        query,
+        featStatusFilter,
+      );
+      if (view.kind === 'message') {
+        renderFeatureMessage(view.key);
+        return;
+      }
+      renderFeatureList(view.features);
     }
 
     function filterFeaturesByStatus(status) {
@@ -384,6 +426,11 @@
       d.textContent = text;
       return d.innerHTML;
     }
+
+    window.addEventListener('clowder:languagechange', () => {
+      loadDoc(currentDoc);
+      filterFeatures(document.getElementById('feat-search').value);
+    });
 
     // Load default doc + feature index on page load
     document.addEventListener('DOMContentLoaded', () => {

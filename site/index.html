@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <link rel="icon" type="image/png" href="assets/logo-transparent.png">
-  <title>Clowder AI — AI Teams That Grow With You</title>
+  <title data-i18n="meta.home.title">Clowder AI — AI Teams That Grow With You</title>
   <meta name="description" content="Multi-model AI team platform where agents and humans grow together. Persistent identity, shared memory, self-evolution, collaborative discipline.">
   <meta property="og:title" content="Clowder AI">
   <meta property="og:description" content="AI teams that grow with you. Multi-model collaboration with persistent identity, self-evolution, and shared memory.">
@@ -27,14 +27,14 @@
       </a>
       <!-- Desktop links (minimal, like Continue.dev) -->
       <div class="hidden md:flex items-center gap-6 text-sm font-medium">
-        <a href="docs.html" class="text-stone-600 dark:text-slate-400 hover:text-terracotta dark:hover:text-terracotta-light transition">Docs</a>
-        <a href="community.html" class="text-stone-600 dark:text-slate-400 hover:text-terracotta dark:hover:text-terracotta-light transition">Community</a>
-        <a href="https://github.com/zts212653/clowder-ai/releases" target="_blank" rel="noopener" class="text-stone-600 dark:text-slate-400 hover:text-terracotta dark:hover:text-terracotta-light transition inline-flex items-center gap-1">Releases <svg class="w-3 h-3" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"/></svg></a>
+        <a href="docs.html" class="text-stone-600 dark:text-slate-400 hover:text-terracotta dark:hover:text-terracotta-light transition" data-i18n="nav.docs">Docs</a>
+        <a href="community.html" class="text-stone-600 dark:text-slate-400 hover:text-terracotta dark:hover:text-terracotta-light transition" data-i18n="nav.community">Community</a>
+        <a href="https://github.com/zts212653/clowder-ai/releases" target="_blank" rel="noopener" class="text-stone-600 dark:text-slate-400 hover:text-terracotta dark:hover:text-terracotta-light transition inline-flex items-center gap-1"><span data-i18n="nav.releases">Releases</span> <svg class="w-3 h-3" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"/></svg></a>
       </div>
       <!-- Right side -->
       <div class="flex items-center gap-3">
-        <button id="lang-toggle" onclick="toggleLang()" class="w-8 h-8 flex items-center justify-center rounded-lg hover:bg-stone-200/60 dark:hover:bg-slate-700/60 transition text-xs font-bold text-stone-500 dark:text-slate-400" aria-label="Toggle language">EN</button>
-        <button id="theme-toggle" onclick="toggleTheme()" class="w-8 h-8 flex items-center justify-center rounded-lg hover:bg-stone-200/60 dark:hover:bg-slate-700/60 transition text-sm" aria-label="Toggle theme">
+        <button id="lang-toggle" onclick="toggleLang()" class="w-8 h-8 flex items-center justify-center rounded-lg hover:bg-stone-200/60 dark:hover:bg-slate-700/60 transition text-xs font-bold text-stone-500 dark:text-slate-400" aria-label="Switch language" data-i18n-aria-label="a11y.language">EN</button>
+        <button id="theme-toggle" onclick="toggleTheme()" class="w-8 h-8 flex items-center justify-center rounded-lg hover:bg-stone-200/60 dark:hover:bg-slate-700/60 transition text-sm" aria-label="Toggle theme" data-i18n-aria-label="a11y.theme">
           <svg id="theme-icon" class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path></svg>
         </button>
         <a href="https://github.com/zts212653/clowder-ai" target="_blank" rel="noopener"
@@ -42,22 +42,22 @@
           <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 24 24"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/></svg>
           <span>GitHub</span>
         </a>
-        <button onclick="toggleMobileMenu()" class="md:hidden w-8 h-8 flex items-center justify-center" aria-label="Menu">
+        <button onclick="toggleMobileMenu()" class="md:hidden w-8 h-8 flex items-center justify-center" aria-label="Menu" data-i18n-aria-label="a11y.menu">
           <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16"/></svg>
         </button>
       </div>
     </div>
     <!-- Mobile menu -->
     <div id="mobile-menu" class="hidden md:hidden border-t border-stone-200 dark:border-slate-700 px-4 py-3 space-y-2">
-      <a href="docs.html" class="block py-1.5 text-sm text-stone-600 dark:text-slate-400">Docs</a>
-      <a href="community.html" class="block py-1.5 text-sm text-stone-600 dark:text-slate-400">Community</a>
-      <a href="https://github.com/zts212653/clowder-ai/releases" target="_blank" rel="noopener" class="block py-1.5 text-sm text-stone-600 dark:text-slate-400">Releases</a>
+      <a href="docs.html" class="block py-1.5 text-sm text-stone-600 dark:text-slate-400" data-i18n="nav.docs">Docs</a>
+      <a href="community.html" class="block py-1.5 text-sm text-stone-600 dark:text-slate-400" data-i18n="nav.community">Community</a>
+      <a href="https://github.com/zts212653/clowder-ai/releases" target="_blank" rel="noopener" class="block py-1.5 text-sm text-stone-600 dark:text-slate-400" data-i18n="nav.releases">Releases</a>
       <hr class="border-stone-200 dark:border-slate-700">
-      <a href="#features" class="block py-1.5 text-sm text-stone-500 dark:text-slate-500">Features</a>
-      <a href="#scenarios" class="block py-1.5 text-sm text-stone-500 dark:text-slate-500">Scenarios</a>
-      <a href="#quickstart" class="block py-1.5 text-sm text-stone-500 dark:text-slate-500">Quick Start</a>
-      <a href="#first-steps" class="block py-1.5 text-sm text-stone-500 dark:text-slate-500">First Steps</a>
-      <a href="#roadmap" class="block py-1.5 text-sm text-stone-500 dark:text-slate-500">Journey</a>
+      <a href="#features" class="block py-1.5 text-sm text-stone-500 dark:text-slate-500" data-i18n="nav.features">Features</a>
+      <a href="#scenarios" class="block py-1.5 text-sm text-stone-500 dark:text-slate-500" data-i18n="nav.scenarios">Scenarios</a>
+      <a href="#quickstart" class="block py-1.5 text-sm text-stone-500 dark:text-slate-500" data-i18n="nav.quickstart">Quick Start</a>
+      <a href="#first-steps" class="block py-1.5 text-sm text-stone-500 dark:text-slate-500" data-i18n="nav.firststeps">First Steps</a>
+      <a href="#roadmap" class="block py-1.5 text-sm text-stone-500 dark:text-slate-500" data-i18n="nav.journey">Journey</a>
     </div>
   </nav>
 
@@ -76,13 +76,13 @@
         Grow Together. Build Forever.
       </p>
       <div class="flex flex-col sm:flex-row gap-3 justify-center">
-        <a href="#quickstart" class="inline-flex items-center justify-center px-6 py-3 rounded-xl bg-terracotta text-white font-semibold hover:bg-terracotta-light transition shadow-lg shadow-terracotta/20">
+        <a href="#quickstart" class="inline-flex items-center justify-center px-6 py-3 rounded-xl bg-terracotta text-white font-semibold hover:bg-terracotta-light transition shadow-lg shadow-terracotta/20" data-i18n="hero.cta.quickstart">
           Quick Start
         </a>
         <a href="https://github.com/zts212653/clowder-ai" target="_blank" rel="noopener"
            class="inline-flex items-center justify-center gap-2 px-6 py-3 rounded-xl border-2 border-stone-300 dark:border-slate-600 font-semibold hover:bg-stone-100 dark:hover:bg-slate-800 transition">
           <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 24 24"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/></svg>
-          View on GitHub
+          <span data-i18n="hero.cta.github">View on GitHub</span>
         </a>
       </div>
     </div>
@@ -96,19 +96,19 @@
     <div class="max-w-4xl mx-auto px-4 flex flex-wrap justify-center gap-8 sm:gap-16 text-center">
       <div>
         <div class="text-2xl font-bold text-stone-900 dark:text-white">6</div>
-        <div class="text-xs text-stone-500 dark:text-slate-500 mt-0.5">Agent CLIs</div>
+        <div class="text-xs text-stone-500 dark:text-slate-500 mt-0.5" data-i18n="stats.agentclis">Agent CLIs</div>
       </div>
       <div>
         <div class="text-2xl font-bold text-stone-900 dark:text-white">60+</div>
-        <div class="text-xs text-stone-500 dark:text-slate-500 mt-0.5">Built-in Skills</div>
+        <div class="text-xs text-stone-500 dark:text-slate-500 mt-0.5" data-i18n="stats.skills">Built-in Skills</div>
       </div>
       <div>
         <div class="text-2xl font-bold text-stone-900 dark:text-white">3</div>
-        <div class="text-xs text-stone-500 dark:text-slate-500 mt-0.5">Languages</div>
+        <div class="text-xs text-stone-500 dark:text-slate-500 mt-0.5" data-i18n="stats.languages">Languages</div>
       </div>
       <div>
         <div class="text-2xl font-bold text-stone-900 dark:text-white">MIT</div>
-        <div class="text-xs text-stone-500 dark:text-slate-500 mt-0.5">License</div>
+        <div class="text-xs text-stone-500 dark:text-slate-500 mt-0.5" data-i18n="stats.license">License</div>
       </div>
     </div>
   </section>
@@ -117,17 +117,17 @@
   <section class="py-20 px-4">
     <div class="max-w-4xl mx-auto">
       <div class="max-w-2xl">
-        <h2 class="text-3xl font-bold text-stone-900 dark:text-white mb-6">Why Clowder?</h2>
-        <blockquote class="border-l-4 border-terracotta pl-4 mb-6 text-lg italic text-stone-600 dark:text-slate-400">
+        <h2 class="text-3xl font-bold text-stone-900 dark:text-white mb-6" data-i18n="why.title">Why Clowder?</h2>
+        <blockquote class="border-l-4 border-terracotta pl-4 mb-6 text-lg italic text-stone-600 dark:text-slate-400" data-i18n="why.quote">
           "I don't want to be a router anymore."
         </blockquote>
-        <p class="text-stone-600 dark:text-slate-400 leading-relaxed mb-4">
+        <p class="text-stone-600 dark:text-slate-400 leading-relaxed mb-4" data-i18n="why.p1">
           You have Claude, GPT, Gemini — but using them together means <strong class="text-stone-800 dark:text-slate-200">you</strong> become the router: copy-pasting context, tracking conversations, losing hours to middle management.
         </p>
-        <p class="text-stone-600 dark:text-slate-400 leading-relaxed mb-4">
+        <p class="text-stone-600 dark:text-slate-400 leading-relaxed mb-4" data-i18n="why.p2">
           Most frameworks help you <em>call</em> agents. Clowder helps them <em>work together</em> — with persistent identity, shared memory, cross-model review, and collaborative discipline.
         </p>
-        <p class="text-stone-800 dark:text-slate-200 font-medium">
+        <p class="text-stone-800 dark:text-slate-200 font-medium" data-i18n="why.p3">
           Not a framework. Not a wrapper. A platform layer that turns isolated AI agents into a team.
         </p>
       </div>
@@ -137,29 +137,29 @@
   <!-- ============ FEATURES ============ -->
   <section id="features" class="py-20 px-4 bg-white/60 dark:bg-slate-800/20">
     <div class="max-w-5xl mx-auto">
-      <h2 class="text-3xl font-bold text-stone-900 dark:text-white mb-2 text-center">What It Does</h2>
-      <p class="text-center text-stone-500 dark:text-slate-500 mb-10">Click a capability to explore</p>
+      <h2 class="text-3xl font-bold text-stone-900 dark:text-white mb-2 text-center" data-i18n="feat.title">What It Does</h2>
+      <p class="text-center text-stone-500 dark:text-slate-500 mb-10" data-i18n="feat.subtitle">Click a capability to explore</p>
 
       <!-- Tabs -->
       <div class="flex flex-wrap justify-center gap-2 mb-8">
-        <button class="feature-tab active" data-tab="orchestration" onclick="switchFeature('orchestration')">Multi-Agent</button>
-        <button class="feature-tab" data-tab="memory" onclick="switchFeature('memory')">Shared Memory</button>
-        <button class="feature-tab" data-tab="review" onclick="switchFeature('review')">Cross-Model Review</button>
-        <button class="feature-tab" data-tab="skills" onclick="switchFeature('skills')">Skills Framework</button>
-        <button class="feature-tab" data-tab="a2a" onclick="switchFeature('a2a')">A2A Messaging</button>
-        <button class="feature-tab" data-tab="mcp" onclick="switchFeature('mcp')">MCP Integration</button>
+        <button class="feature-tab active" data-tab="orchestration" onclick="switchFeature('orchestration')" data-i18n="feat.tab.orchestration">Multi-Agent</button>
+        <button class="feature-tab" data-tab="memory" onclick="switchFeature('memory')" data-i18n="feat.tab.memory">Shared Memory</button>
+        <button class="feature-tab" data-tab="review" onclick="switchFeature('review')" data-i18n="feat.tab.review">Cross-Model Review</button>
+        <button class="feature-tab" data-tab="skills" onclick="switchFeature('skills')" data-i18n="feat.tab.skills">Skills Framework</button>
+        <button class="feature-tab" data-tab="a2a" onclick="switchFeature('a2a')" data-i18n="feat.tab.a2a">A2A Messaging</button>
+        <button class="feature-tab" data-tab="mcp" onclick="switchFeature('mcp')" data-i18n="feat.tab.mcp">MCP Integration</button>
       </div>
 
       <!-- Panels -->
       <div class="feature-panel active" id="feature-orchestration">
         <div class="grid md:grid-cols-2 gap-8 items-start">
           <div>
-            <h3 class="text-xl font-bold text-stone-900 dark:text-white mb-3">Multi-Agent Orchestration</h3>
-            <p class="text-stone-600 dark:text-slate-400 mb-4">Route tasks to the right agent — Claude for architecture, GPT for review, Gemini for design — in one conversation. Each agent keeps its role, personality, and memory across sessions.</p>
+            <h3 class="text-xl font-bold text-stone-900 dark:text-white mb-3" data-i18n="feat.orch.title">Multi-Agent Orchestration</h3>
+            <p class="text-stone-600 dark:text-slate-400 mb-4" data-i18n="feat.orch.desc">Route tasks to the right agent — Claude for architecture, GPT for review, Gemini for design — in one conversation. Each agent keeps its role, personality, and memory across sessions.</p>
             <ul class="space-y-2 text-sm text-stone-600 dark:text-slate-400">
-              <li class="flex items-start gap-2"><span class="text-codex mt-0.5">&#10003;</span> 6 Agent CLIs supported (Claude Code, Codex, Gemini CLI, Antigravity, opencode, Kimi)</li>
-              <li class="flex items-start gap-2"><span class="text-codex mt-0.5">&#10003;</span> @mention routing — messages go to the right agent automatically</li>
-              <li class="flex items-start gap-2"><span class="text-codex mt-0.5">&#10003;</span> Thread isolation — context stays clean across features</li>
+              <li class="flex items-start gap-2"><span class="text-codex mt-0.5">&#10003;</span> <span data-i18n="feat.orch.li1">6 Agent CLIs supported (Claude Code, Codex, Gemini CLI, Antigravity, opencode, Kimi)</span></li>
+              <li class="flex items-start gap-2"><span class="text-codex mt-0.5">&#10003;</span> <span data-i18n="feat.orch.li2">@mention routing — messages go to the right agent automatically</span></li>
+              <li class="flex items-start gap-2"><span class="text-codex mt-0.5">&#10003;</span> <span data-i18n="feat.orch.li3">Thread isolation — context stays clean across features</span></li>
             </ul>
           </div>
           <div class="rounded-xl overflow-hidden border border-stone-200 dark:border-slate-700 shadow-lg max-h-80">
@@ -171,12 +171,12 @@
       <div class="feature-panel" id="feature-memory">
         <div class="grid md:grid-cols-2 gap-8 items-start">
           <div>
-            <h3 class="text-xl font-bold text-stone-900 dark:text-white mb-3">Shared Memory & Evidence</h3>
-            <p class="text-stone-600 dark:text-slate-400 mb-4">Evidence store, lessons learned, decision logs — institutional knowledge that persists across sessions, context compressions, and model switches.</p>
+            <h3 class="text-xl font-bold text-stone-900 dark:text-white mb-3" data-i18n="feat.mem.title">Shared Memory & Evidence</h3>
+            <p class="text-stone-600 dark:text-slate-400 mb-4" data-i18n="feat.mem.desc">Evidence store, lessons learned, decision logs — institutional knowledge that persists across sessions, context compressions, and model switches.</p>
             <ul class="space-y-2 text-sm text-stone-600 dark:text-slate-400">
-              <li class="flex items-start gap-2"><span class="text-codex mt-0.5">&#10003;</span> Graph-based evidence store with semantic search</li>
-              <li class="flex items-start gap-2"><span class="text-codex mt-0.5">&#10003;</span> Anti-compression identity — agents survive context resets</li>
-              <li class="flex items-start gap-2"><span class="text-codex mt-0.5">&#10003;</span> Lessons learned auto-extraction and retrieval</li>
+              <li class="flex items-start gap-2"><span class="text-codex mt-0.5">&#10003;</span> <span data-i18n="feat.mem.li1">Graph-based evidence store with semantic search</span></li>
+              <li class="flex items-start gap-2"><span class="text-codex mt-0.5">&#10003;</span> <span data-i18n="feat.mem.li2">Anti-compression identity — agents survive context resets</span></li>
+              <li class="flex items-start gap-2"><span class="text-codex mt-0.5">&#10003;</span> <span data-i18n="feat.mem.li3">Lessons learned auto-extraction and retrieval</span></li>
             </ul>
           </div>
           <div class="rounded-xl overflow-hidden border border-stone-200 dark:border-slate-700 shadow-lg max-h-80">
@@ -188,12 +188,12 @@
       <div class="feature-panel" id="feature-review">
         <div class="grid md:grid-cols-2 gap-8 items-start">
           <div>
-            <h3 class="text-xl font-bold text-stone-900 dark:text-white mb-3">Cross-Model Review</h3>
-            <p class="text-stone-600 dark:text-slate-400 mb-4">Claude writes code, GPT reviews it. Different cognitive styles catch different bugs. Built-in, not bolted on.</p>
+            <h3 class="text-xl font-bold text-stone-900 dark:text-white mb-3" data-i18n="feat.review.title">Cross-Model Review</h3>
+            <p class="text-stone-600 dark:text-slate-400 mb-4" data-i18n="feat.review.desc">Claude writes code, GPT reviews it. Different cognitive styles catch different bugs. Built-in, not bolted on.</p>
             <ul class="space-y-2 text-sm text-stone-600 dark:text-slate-400">
-              <li class="flex items-start gap-2"><span class="text-codex mt-0.5">&#10003;</span> Automated SOP: quality gate &rarr; request review &rarr; merge gate</li>
-              <li class="flex items-start gap-2"><span class="text-codex mt-0.5">&#10003;</span> No self-review — cross-family review is enforced</li>
-              <li class="flex items-start gap-2"><span class="text-codex mt-0.5">&#10003;</span> Vision guardian checks against original requirements</li>
+              <li class="flex items-start gap-2"><span class="text-codex mt-0.5">&#10003;</span> <span data-i18n="feat.review.li1">Automated SOP: quality gate &rarr; request review &rarr; merge gate</span></li>
+              <li class="flex items-start gap-2"><span class="text-codex mt-0.5">&#10003;</span> <span data-i18n="feat.review.li2">No self-review — cross-family review is enforced</span></li>
+              <li class="flex items-start gap-2"><span class="text-codex mt-0.5">&#10003;</span> <span data-i18n="feat.review.li3">Vision guardian checks against original requirements</span></li>
             </ul>
           </div>
           <div class="rounded-xl overflow-hidden border border-stone-200 dark:border-slate-700 shadow-lg max-h-80">
@@ -205,12 +205,12 @@
       <div class="feature-panel" id="feature-skills">
         <div class="grid md:grid-cols-2 gap-8 items-start">
           <div>
-            <h3 class="text-xl font-bold text-stone-900 dark:text-white mb-3">Skills Framework</h3>
-            <p class="text-stone-600 dark:text-slate-400 mb-4">On-demand prompt loading. Agents load specialized skills (TDD, debugging, review, security) only when needed — keeping context clean and responses focused.</p>
+            <h3 class="text-xl font-bold text-stone-900 dark:text-white mb-3" data-i18n="feat.skills.title">Skills Framework</h3>
+            <p class="text-stone-600 dark:text-slate-400 mb-4" data-i18n="feat.skills.desc">On-demand prompt loading. Agents load specialized skills (TDD, debugging, review, security) only when needed — keeping context clean and responses focused.</p>
             <ul class="space-y-2 text-sm text-stone-600 dark:text-slate-400">
-              <li class="flex items-start gap-2"><span class="text-codex mt-0.5">&#10003;</span> 60+ built-in skills covering development lifecycle</li>
-              <li class="flex items-start gap-2"><span class="text-codex mt-0.5">&#10003;</span> Skills loaded on-demand, not stuffed into system prompt</li>
-              <li class="flex items-start gap-2"><span class="text-codex mt-0.5">&#10003;</span> Custom skill creation with manifest registration</li>
+              <li class="flex items-start gap-2"><span class="text-codex mt-0.5">&#10003;</span> <span data-i18n="feat.skills.li1">60+ built-in skills covering development lifecycle</span></li>
+              <li class="flex items-start gap-2"><span class="text-codex mt-0.5">&#10003;</span> <span data-i18n="feat.skills.li2">Skills loaded on-demand, not stuffed into system prompt</span></li>
+              <li class="flex items-start gap-2"><span class="text-codex mt-0.5">&#10003;</span> <span data-i18n="feat.skills.li3">Custom skill creation with manifest registration</span></li>
             </ul>
           </div>
           <div class="rounded-xl overflow-hidden border border-stone-200 dark:border-slate-700 shadow-lg max-h-80">
@@ -222,12 +222,12 @@
       <div class="feature-panel" id="feature-a2a">
         <div class="grid md:grid-cols-2 gap-8 items-start">
           <div>
-            <h3 class="text-xl font-bold text-stone-900 dark:text-white mb-3">Agent-to-Agent Communication</h3>
-            <p class="text-stone-600 dark:text-slate-400 mb-4">Async messaging with @mention routing, thread isolation, and structured handoff — agents coordinate directly, not through you.</p>
+            <h3 class="text-xl font-bold text-stone-900 dark:text-white mb-3" data-i18n="feat.a2a.title">Agent-to-Agent Communication</h3>
+            <p class="text-stone-600 dark:text-slate-400 mb-4" data-i18n="feat.a2a.desc">Async messaging with @mention routing, thread isolation, and structured handoff — agents coordinate directly, not through you.</p>
             <ul class="space-y-2 text-sm text-stone-600 dark:text-slate-400">
-              <li class="flex items-start gap-2"><span class="text-codex mt-0.5">&#10003;</span> Five-tuple handoff protocol: What / Why / Tradeoff / Open Questions / Next Action</li>
-              <li class="flex items-start gap-2"><span class="text-codex mt-0.5">&#10003;</span> Cross-thread messaging with coordination lifecycle</li>
-              <li class="flex items-start gap-2"><span class="text-codex mt-0.5">&#10003;</span> Ball-passing discipline with hold/wake patterns</li>
+              <li class="flex items-start gap-2"><span class="text-codex mt-0.5">&#10003;</span> <span data-i18n="feat.a2a.li1">Five-tuple handoff protocol: What / Why / Tradeoff / Open Questions / Next Action</span></li>
+              <li class="flex items-start gap-2"><span class="text-codex mt-0.5">&#10003;</span> <span data-i18n="feat.a2a.li2">Cross-thread messaging with coordination lifecycle</span></li>
+              <li class="flex items-start gap-2"><span class="text-codex mt-0.5">&#10003;</span> <span data-i18n="feat.a2a.li3">Ball-passing discipline with hold/wake patterns</span></li>
             </ul>
           </div>
           <div class="rounded-xl overflow-hidden border border-stone-200 dark:border-slate-700 shadow-lg max-h-80">
@@ -239,12 +239,12 @@
       <div class="feature-panel" id="feature-mcp">
         <div class="grid md:grid-cols-2 gap-8 items-start">
           <div>
-            <h3 class="text-xl font-bold text-stone-900 dark:text-white mb-3">MCP Integration</h3>
-            <p class="text-stone-600 dark:text-slate-400 mb-4">Model Context Protocol for tool sharing across agents, including non-Claude models via callback bridge. Shared tools, shared context.</p>
+            <h3 class="text-xl font-bold text-stone-900 dark:text-white mb-3" data-i18n="feat.mcp.title">MCP Integration</h3>
+            <p class="text-stone-600 dark:text-slate-400 mb-4" data-i18n="feat.mcp.desc">Model Context Protocol for tool sharing across agents, including non-Claude models via callback bridge. Shared tools, shared context.</p>
             <ul class="space-y-2 text-sm text-stone-600 dark:text-slate-400">
-              <li class="flex items-start gap-2"><span class="text-codex mt-0.5">&#10003;</span> MCP servers shared across all agent CLIs</li>
-              <li class="flex items-start gap-2"><span class="text-codex mt-0.5">&#10003;</span> Callback bridge for non-MCP-native agents</li>
-              <li class="flex items-start gap-2"><span class="text-codex mt-0.5">&#10003;</span> Limb system for external service integration</li>
+              <li class="flex items-start gap-2"><span class="text-codex mt-0.5">&#10003;</span> <span data-i18n="feat.mcp.li1">MCP servers shared across all agent CLIs</span></li>
+              <li class="flex items-start gap-2"><span class="text-codex mt-0.5">&#10003;</span> <span data-i18n="feat.mcp.li2">Callback bridge for non-MCP-native agents</span></li>
+              <li class="flex items-start gap-2"><span class="text-codex mt-0.5">&#10003;</span> <span data-i18n="feat.mcp.li3">Limb system for external service integration</span></li>
             </ul>
           </div>
           <div class="rounded-xl overflow-hidden border border-stone-200 dark:border-slate-700 shadow-lg max-h-80">
@@ -258,8 +258,8 @@
   <!-- ============ SCENARIOS ============ -->
   <section id="scenarios" class="py-20 px-4">
     <div class="max-w-5xl mx-auto">
-      <h2 class="text-3xl font-bold text-stone-900 dark:text-white mb-2 text-center">More Than Coding</h2>
-      <p class="text-center text-stone-500 dark:text-slate-500 mb-12">Your AI team can do a lot more than write code</p>
+      <h2 class="text-3xl font-bold text-stone-900 dark:text-white mb-2 text-center" data-i18n="scen.title">More Than Coding</h2>
+      <p class="text-center text-stone-500 dark:text-slate-500 mb-12" data-i18n="scen.subtitle">Your AI team can do a lot more than write code</p>
 
       <div class="grid sm:grid-cols-2 lg:grid-cols-3 gap-6">
         <!-- Scenario cards -->
@@ -267,43 +267,43 @@
           <div class="w-10 h-10 mb-3 text-terracotta">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>
           </div>
-          <h3 class="font-bold text-stone-900 dark:text-white mb-2">Collaborative Coding</h3>
-          <p class="text-sm text-stone-600 dark:text-slate-400">TDD workflows, cross-model review, automated SOP. From idea to shipped code with real governance.</p>
+          <h3 class="font-bold text-stone-900 dark:text-white mb-2" data-i18n="scen.coding.title">Collaborative Coding</h3>
+          <p class="text-sm text-stone-600 dark:text-slate-400" data-i18n="scen.coding.desc">TDD workflows, cross-model review, automated SOP. From idea to shipped code with real governance.</p>
         </div>
         <div class="scenario-card rounded-xl p-6 bg-white dark:bg-slate-800/60 border border-stone-200 dark:border-slate-700">
           <div class="w-10 h-10 mb-3 text-terracotta">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></svg>
           </div>
-          <h3 class="font-bold text-stone-900 dark:text-white mb-2">Voice Companion</h3>
-          <p class="text-sm text-stone-600 dark:text-slate-400">Hands-free mode with per-agent voice. Talk to your team while running, commuting, or just thinking out loud.</p>
+          <h3 class="font-bold text-stone-900 dark:text-white mb-2" data-i18n="scen.voice.title">Voice Companion</h3>
+          <p class="text-sm text-stone-600 dark:text-slate-400" data-i18n="scen.voice.desc">Hands-free mode with per-agent voice. Talk to your team while running, commuting, or just thinking out loud.</p>
         </div>
         <div class="scenario-card rounded-xl p-6 bg-white dark:bg-slate-800/60 border border-stone-200 dark:border-slate-700">
           <div class="w-10 h-10 mb-3 text-terracotta">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><line x1="6" y1="12" x2="10" y2="12"/><line x1="8" y1="10" x2="8" y2="14"/><circle cx="15" cy="13" r="1"/><circle cx="18" cy="11" r="1"/><rect x="2" y="6" width="20" height="12" rx="3"/></svg>
           </div>
-          <h3 class="font-bold text-stone-900 dark:text-white mb-2">Game Night</h3>
-          <p class="text-sm text-stone-600 dark:text-slate-400">Werewolf, Pixel Cat Brawl — real games with your AI teammates. Stress-tests the same A2A messaging that powers work.</p>
+          <h3 class="font-bold text-stone-900 dark:text-white mb-2" data-i18n="scen.game.title">Game Night</h3>
+          <p class="text-sm text-stone-600 dark:text-slate-400" data-i18n="scen.game.desc">Werewolf, Pixel Cat Brawl — real games with your AI teammates. Stress-tests the same A2A messaging that powers work.</p>
         </div>
         <div class="scenario-card rounded-xl p-6 bg-white dark:bg-slate-800/60 border border-stone-200 dark:border-slate-700">
           <div class="w-10 h-10 mb-3 text-terracotta">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2 20h.01"/><path d="M7 20v-4"/><path d="M12 20v-8"/><path d="M17 20V8"/><path d="M22 4v16"/></svg>
           </div>
-          <h3 class="font-bold text-stone-900 dark:text-white mb-2">Signals Research</h3>
-          <p class="text-sm text-stone-600 dark:text-slate-400">Curated AI research feed with multi-cat analysis. Your team reads papers and generates podcast-style discussions.</p>
+          <h3 class="font-bold text-stone-900 dark:text-white mb-2" data-i18n="scen.signals.title">Signals Research</h3>
+          <p class="text-sm text-stone-600 dark:text-slate-400" data-i18n="scen.signals.desc">Curated AI research feed with multi-cat analysis. Your team reads papers and generates podcast-style discussions.</p>
         </div>
         <div class="scenario-card rounded-xl p-6 bg-white dark:bg-slate-800/60 border border-stone-200 dark:border-slate-700">
           <div class="w-10 h-10 mb-3 text-terracotta">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
           </div>
-          <h3 class="font-bold text-stone-900 dark:text-white mb-2">Multi-Platform</h3>
-          <p class="text-sm text-stone-600 dark:text-slate-400">Chat from Feishu (Lark), Telegram (coming soon), or GitHub PR comments. Each cat replies as a distinct card.</p>
+          <h3 class="font-bold text-stone-900 dark:text-white mb-2" data-i18n="scen.platform.title">Multi-Platform</h3>
+          <p class="text-sm text-stone-600 dark:text-slate-400" data-i18n="scen.platform.desc">Chat from Feishu (Lark), Telegram (coming soon), or GitHub PR comments. Each cat replies as a distinct card.</p>
         </div>
         <div class="scenario-card rounded-xl p-6 bg-white dark:bg-slate-800/60 border border-stone-200 dark:border-slate-700">
           <div class="w-10 h-10 mb-3 text-terracotta">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M7 20h10"/><path d="M10 20c5.5-2.5 5-9.5 1-13.5"/><path d="M9.5 9.4c1.1.8 1.8 2.2 2.3 3.7-2 .4-3.5.4-4.8-.3"/><path d="M14.5 4c-1.4 2-2.6 4.5-1.7 8.5 2.3-.8 3.7-2.5 4.7-4.8"/></svg>
           </div>
-          <h3 class="font-bold text-stone-900 dark:text-white mb-2">Self-Evolution</h3>
-          <p class="text-sm text-stone-600 dark:text-slate-400">The team reflects on its own processes, learns from mistakes, and improves — without being told. Lessons compound.</p>
+          <h3 class="font-bold text-stone-900 dark:text-white mb-2" data-i18n="scen.evolution.title">Self-Evolution</h3>
+          <p class="text-sm text-stone-600 dark:text-slate-400" data-i18n="scen.evolution.desc">The team reflects on its own processes, learns from mistakes, and improves — without being told. Lessons compound.</p>
         </div>
       </div>
     </div>
@@ -312,28 +312,28 @@
   <!-- ============ ARCHITECTURE ============ -->
   <section class="py-20 px-4 bg-white/60 dark:bg-slate-800/20">
     <div class="max-w-4xl mx-auto">
-      <h2 class="text-3xl font-bold text-stone-900 dark:text-white mb-2 text-center">Architecture</h2>
-      <p class="text-center text-stone-500 dark:text-slate-500 mb-12">Three layers, each a multiplier</p>
+      <h2 class="text-3xl font-bold text-stone-900 dark:text-white mb-2 text-center" data-i18n="arch.title">Architecture</h2>
+      <p class="text-center text-stone-500 dark:text-slate-500 mb-12" data-i18n="arch.subtitle">Three layers, each a multiplier</p>
 
       <div class="grid sm:grid-cols-3 gap-4 mb-10">
         <div class="rounded-xl p-6 bg-opus/10 dark:bg-opus/5 border border-opus/20 text-center">
-          <div class="text-sm font-bold text-opus uppercase tracking-wider mb-2">Model Layer</div>
-          <p class="text-xs text-stone-600 dark:text-slate-400">Reasoning, generation, understanding</p>
-          <div class="mt-3 text-xs text-stone-500 dark:text-slate-500">Claude &middot; GPT &middot; Gemini &middot; Any LLM</div>
+          <div class="text-sm font-bold text-opus uppercase tracking-wider mb-2" data-i18n="arch.model.layer">Model Layer</div>
+          <p class="text-xs text-stone-600 dark:text-slate-400" data-i18n="arch.model.desc">Reasoning, generation, understanding</p>
+          <div class="mt-3 text-xs text-stone-500 dark:text-slate-500" data-i18n="arch.model.eg">Claude &middot; GPT &middot; Gemini &middot; Any LLM</div>
         </div>
         <div class="rounded-xl p-6 bg-codex/10 dark:bg-codex/5 border border-codex/20 text-center">
-          <div class="text-sm font-bold text-codex uppercase tracking-wider mb-2">Agent CLI Layer</div>
-          <p class="text-xs text-stone-600 dark:text-slate-400">Tool use, file ops, commands</p>
-          <div class="mt-3 text-xs text-stone-500 dark:text-slate-500">Claude Code &middot; Codex &middot; opencode &middot; ...</div>
+          <div class="text-sm font-bold text-codex uppercase tracking-wider mb-2" data-i18n="arch.cli.layer">Agent CLI Layer</div>
+          <p class="text-xs text-stone-600 dark:text-slate-400" data-i18n="arch.cli.desc">Tool use, file ops, commands</p>
+          <div class="mt-3 text-xs text-stone-500 dark:text-slate-500" data-i18n="arch.cli.eg">Claude Code &middot; Codex &middot; opencode &middot; ...</div>
         </div>
         <div class="rounded-xl p-6 bg-terracotta/10 dark:bg-terracotta/5 border border-terracotta/20 text-center">
-          <div class="text-sm font-bold text-terracotta uppercase tracking-wider mb-2">Platform Layer</div>
-          <p class="text-xs text-stone-600 dark:text-slate-400">Identity, collaboration, discipline, audit</p>
+          <div class="text-sm font-bold text-terracotta uppercase tracking-wider mb-2" data-i18n="arch.platform.layer">Platform Layer</div>
+          <p class="text-xs text-stone-600 dark:text-slate-400" data-i18n="arch.platform.desc">Identity, collaboration, discipline, audit</p>
           <div class="mt-3 text-xs text-stone-500 dark:text-slate-500 font-medium">Clowder AI</div>
         </div>
       </div>
 
-      <p class="text-center text-sm text-stone-500 dark:text-slate-500 italic">
+      <p class="text-center text-sm text-stone-500 dark:text-slate-500 italic" data-i18n="arch.footnote">
         Models set the ceiling. The platform sets the floor. Each layer is a <strong>multiplier</strong>, not addition.
       </p>
     </div>
@@ -342,12 +342,12 @@
   <!-- ============ QUICK START ============ -->
   <section id="quickstart" class="py-20 px-4">
     <div class="max-w-3xl mx-auto">
-      <h2 class="text-3xl font-bold text-stone-900 dark:text-white mb-2 text-center">Quick Start</h2>
-      <p class="text-center text-stone-500 dark:text-slate-500 mb-10">Up and running in minutes</p>
+      <h2 class="text-3xl font-bold text-stone-900 dark:text-white mb-2 text-center" data-i18n="quickstart.title">Quick Start</h2>
+      <p class="text-center text-stone-500 dark:text-slate-500 mb-10" data-i18n="quickstart.subtitle">Up and running in minutes</p>
 
       <!-- Install tabs -->
       <div class="flex justify-center gap-2 mb-6">
-        <button class="install-tab active" data-install="source" onclick="switchInstall('source')">From Source</button>
+        <button class="install-tab active" data-install="source" onclick="switchInstall('source')" data-i18n="quickstart.tab.source">From Source</button>
         <button class="install-tab" data-install="windows" onclick="switchInstall('windows')">Windows</button>
         <button class="install-tab" data-install="mac" onclick="switchInstall('mac')">macOS</button>
       </div>
@@ -356,17 +356,17 @@
       <div class="install-panel active" id="install-source">
         <div class="rounded-xl bg-stone-900 dark:bg-slate-900 p-6 code-container">
           <div class="flex justify-between items-center mb-4">
-            <span class="text-xs text-slate-500">Terminal</span>
-            <button onclick="copyCode(this)" class="text-xs text-slate-500 hover:text-slate-300 transition">Copy</button>
+            <span class="text-xs text-slate-500" data-i18n="quickstart.terminal">Terminal</span>
+            <button onclick="copyCode(this)" class="text-xs text-slate-500 hover:text-slate-300 transition" data-i18n="quickstart.copy">Copy</button>
           </div>
           <code class="code-block text-slate-300 whitespace-pre-wrap break-all sm:break-normal">git clone https://github.com/zts212653/clowder-ai.git
 cd clowder-ai
 pnpm install
 pnpm start</code>
-          <p class="text-slate-500 mt-4 text-xs">Requires Node.js 20+, pnpm 9+. Redis 7+ optional (use <span class="text-slate-400">--memory</span> to skip).</p>
+          <p class="text-slate-500 mt-4 text-xs" data-i18n="quickstart.requires">Requires Node.js 20+, pnpm 9+. Redis 7+ optional (use <span class="text-slate-400">--memory</span> to skip).</p>
           <div class="mt-3 flex flex-wrap gap-3 text-xs text-slate-400">
-            <span class="flex items-center gap-1"><span class="text-codex">&#9889;</span> Slow? Use <code class="text-slate-300">pnpm start --quick</code></span>
-            <span class="flex items-center gap-1"><span class="text-opus">&#128268;</span> No pnpm? <code class="text-slate-300">bash &lt;(curl -fsSL .../install.sh) --start</code></span>
+            <span class="flex items-center gap-1" data-i18n="quickstart.hint.slow"><span class="text-codex">&#9889;</span> Slow? Use <code class="text-slate-300">pnpm start --quick</code></span>
+            <span class="flex items-center gap-1" data-i18n="quickstart.hint.nopnpm"><span class="text-opus">&#128268;</span> No pnpm? <code class="text-slate-300">bash &lt;(curl -fsSL .../install.sh) --start</code></span>
           </div>
         </div>
       </div>
@@ -377,10 +377,10 @@ pnpm start</code>
           <svg class="w-10 h-10 mx-auto mb-4 text-opus" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5M16.5 12L12 16.5m0 0L7.5 12m4.5 4.5V3"/></svg>
           <a id="dl-windows" href="https://github.com/zts212653/clowder-ai/releases/latest" target="_blank" rel="noopener"
              class="inline-flex items-center gap-2 px-6 py-3 rounded-lg bg-terracotta text-white font-medium hover:bg-terracotta-light transition text-sm">
-            Download for Windows
+            <span data-i18n="quickstart.win.download">Download for Windows</span>
           </a>
-          <p id="dl-windows-version" class="text-stone-500 dark:text-slate-400 mt-3 text-xs">Loading latest version...</p>
-          <p class="text-stone-500 dark:text-slate-500 mt-2 text-xs">Run the .exe installer, then launch Clowder AI from Start menu.</p>
+          <p id="dl-windows-version" class="text-stone-500 dark:text-slate-400 mt-3 text-xs" data-i18n="quickstart.loadingversion">Loading latest version...</p>
+          <p class="text-stone-500 dark:text-slate-500 mt-2 text-xs" data-i18n="quickstart.win.note">Run the .exe installer, then launch Clowder AI from Start menu.</p>
         </div>
       </div>
 
@@ -398,12 +398,12 @@ pnpm start</code>
               Intel
             </a>
           </div>
-          <p id="dl-mac-version" class="text-stone-500 dark:text-slate-400 mt-3 text-xs">Loading latest version...</p>
-          <p class="text-stone-500 dark:text-slate-500 mt-2 text-xs">Unsure? The Apple menu → About This Mac shows your chip. Open the .dmg, drag to Applications, and launch.</p>
+          <p id="dl-mac-version" class="text-stone-500 dark:text-slate-400 mt-3 text-xs" data-i18n="quickstart.loadingversion">Loading latest version...</p>
+          <p class="text-stone-500 dark:text-slate-500 mt-2 text-xs" data-i18n="quickstart.mac.note">Unsure? The Apple menu → About This Mac shows your chip. Open the .dmg, drag to Applications, and launch.</p>
         </div>
       </div>
 
-      <p class="text-center mt-6 text-sm text-stone-500 dark:text-slate-500">
+      <p class="text-center mt-6 text-sm text-stone-500 dark:text-slate-500" data-i18n="quickstart.fullguide">
         Full setup guide: <a href="docs.html" class="text-terracotta hover:underline">Docs → Quick Start</a>
       </p>
     </div>
@@ -412,22 +412,22 @@ pnpm start</code>
   <!-- ============ FIRST STEPS ============ -->
   <section id="first-steps" class="py-20 px-4 bg-white/60 dark:bg-slate-800/20">
     <div class="max-w-5xl mx-auto">
-      <h2 class="text-3xl font-bold text-stone-900 dark:text-white mb-2 text-center">Get Started in 3 Steps</h2>
-      <p class="text-center text-stone-500 dark:text-slate-500 mb-12">Configure credentials, invite your team, and start collaborating.</p>
+      <h2 class="text-3xl font-bold text-stone-900 dark:text-white mb-2 text-center" data-i18n="firststeps.title">Get Started in 3 Steps</h2>
+      <p class="text-center text-stone-500 dark:text-slate-500 mb-12" data-i18n="firststeps.subtitle">Configure credentials, invite your team, and start collaborating.</p>
 
       <div class="space-y-16">
         <article class="flex flex-col md:flex-row items-center gap-8">
           <div class="md:w-2/5 text-center md:text-left">
             <div class="inline-flex items-center gap-2 mb-3">
               <span class="w-8 h-8 rounded-full bg-terracotta text-white flex items-center justify-center text-sm font-bold">1</span>
-              <h3 class="text-xl font-bold text-stone-900 dark:text-white">Add Your Accounts</h3>
+              <h3 class="text-xl font-bold text-stone-900 dark:text-white" data-i18n="firststeps.s1.title">Add Your Accounts</h3>
             </div>
-            <p class="text-stone-600 dark:text-slate-400 text-sm leading-relaxed">Open Settings and add your AI provider credentials. Each cat gets its own account.</p>
+            <p class="text-stone-600 dark:text-slate-400 text-sm leading-relaxed" data-i18n="firststeps.s1.desc">Open Settings and add your AI provider credentials. Each cat gets its own account.</p>
           </div>
           <div class="md:w-3/5">
             <div class="rounded-xl overflow-hidden shadow-lg border border-stone-200 dark:border-slate-700">
               <video src="assets/guides/step1-add-account.mp4" autoplay muted loop playsinline preload="metadata"
-                     class="w-full h-auto" aria-label="Add a model account in Clowder AI"></video>
+                     class="w-full h-auto" aria-label="Add a model account in Clowder AI" data-i18n-aria-label="home.a11y.addaccount"></video>
             </div>
           </div>
         </article>
@@ -436,14 +436,14 @@ pnpm start</code>
           <div class="md:w-2/5 text-center md:text-left">
             <div class="inline-flex items-center gap-2 mb-3">
               <span class="w-8 h-8 rounded-full bg-terracotta text-white flex items-center justify-center text-sm font-bold">2</span>
-              <h3 class="text-xl font-bold text-stone-900 dark:text-white">Invite Your Cats</h3>
+              <h3 class="text-xl font-bold text-stone-900 dark:text-white" data-i18n="firststeps.s2.title">Invite Your Cats</h3>
             </div>
-            <p class="text-stone-600 dark:text-slate-400 text-sm leading-relaxed">Add team members with their own model, identity, and personality. They'll share context and collaborate.</p>
+            <p class="text-stone-600 dark:text-slate-400 text-sm leading-relaxed" data-i18n="firststeps.s2.desc">Add team members with their own model, identity, and personality. They'll share context and collaborate.</p>
           </div>
           <div class="md:w-3/5">
             <div class="rounded-xl overflow-hidden shadow-lg border border-stone-200 dark:border-slate-700">
               <video src="assets/guides/step2-add-member.mp4" autoplay muted loop playsinline preload="metadata"
-                     class="w-full h-auto" aria-label="Add an AI team member in Clowder AI"></video>
+                     class="w-full h-auto" aria-label="Add an AI team member in Clowder AI" data-i18n-aria-label="home.a11y.addmember"></video>
             </div>
           </div>
         </article>
@@ -452,14 +452,14 @@ pnpm start</code>
           <div class="md:w-2/5 text-center md:text-left">
             <div class="inline-flex items-center gap-2 mb-3">
               <span class="w-8 h-8 rounded-full bg-terracotta text-white flex items-center justify-center text-sm font-bold">3</span>
-              <h3 class="text-xl font-bold text-stone-900 dark:text-white">Say Hi</h3>
+              <h3 class="text-xl font-bold text-stone-900 dark:text-white" data-i18n="firststeps.s3.title">Say Hi</h3>
             </div>
-            <p class="text-stone-600 dark:text-slate-400 text-sm leading-relaxed">Open a thread and send your first message. Watch your AI team come alive and start working together.</p>
+            <p class="text-stone-600 dark:text-slate-400 text-sm leading-relaxed" data-i18n="firststeps.s3.desc">Open a thread and send your first message. Watch your AI team come alive and start working together.</p>
           </div>
           <div class="md:w-3/5">
             <div class="rounded-xl overflow-hidden shadow-lg border border-stone-200 dark:border-slate-700">
               <video src="assets/guides/step3-say-hi.mp4" autoplay muted loop playsinline preload="metadata"
-                     class="w-full h-auto" aria-label="Start a conversation with the AI team"></video>
+                     class="w-full h-auto" aria-label="Start a conversation with the AI team" data-i18n-aria-label="home.a11y.startconversation"></video>
             </div>
           </div>
         </article>
@@ -470,14 +470,14 @@ pnpm start</code>
   <!-- ============ ROADMAP (Gantt) ============ -->
   <section id="roadmap" class="py-20 px-4">
     <div class="max-w-6xl mx-auto">
-      <h2 class="text-3xl font-bold text-stone-900 dark:text-white mb-2 text-center">Roadmap</h2>
-      <p class="text-center text-stone-500 dark:text-slate-500 mb-4">Growing in the open. Real dates, real PRs.</p>
+      <h2 class="text-3xl font-bold text-stone-900 dark:text-white mb-2 text-center" data-i18n="roadmap.title">Roadmap</h2>
+      <p class="text-center text-stone-500 dark:text-slate-500 mb-4" data-i18n="roadmap.subtitle">Growing in the open. Real dates, real PRs.</p>
 
       <!-- Legend -->
       <div class="flex justify-center gap-6 mb-8 text-xs">
-        <span class="flex items-center gap-1.5"><span class="w-6 h-3 rounded bg-codex inline-block"></span> Shipped</span>
-        <span class="flex items-center gap-1.5"><span class="w-6 h-3 rounded bg-gemini inline-block" style="box-shadow:0 0 0 2px rgba(251,191,36,0.3)"></span> In Progress</span>
-        <span class="flex items-center gap-1.5"><span class="w-6 h-3 rounded border-[1.5px] border-dashed border-slate-400 inline-block"></span> Planned</span>
+        <span class="flex items-center gap-1.5"><span class="w-6 h-3 rounded bg-codex inline-block"></span> <span data-i18n="roadmap.legend.shipped">Shipped</span></span>
+        <span class="flex items-center gap-1.5"><span class="w-6 h-3 rounded bg-gemini inline-block" style="box-shadow:0 0 0 2px rgba(251,191,36,0.3)"></span> <span data-i18n="roadmap.legend.progress">In Progress</span></span>
+        <span class="flex items-center gap-1.5"><span class="w-6 h-3 rounded border-[1.5px] border-dashed border-slate-400 inline-block"></span> <span data-i18n="roadmap.legend.planned">Planned</span></span>
       </div>
 
       <!-- Gantt Chart -->
@@ -487,21 +487,21 @@ pnpm start</code>
         <div class="flex mb-1">
           <div class="w-24 md:w-28 shrink-0"></div>
           <div class="flex-1 flex text-[0.625rem] font-semibold uppercase tracking-wider text-stone-400 dark:text-slate-500">
-            <span class="flex-1 text-center">Mar</span>
-            <span class="flex-1 text-center">Apr</span>
-            <span class="flex-1 text-center">May</span>
-            <span class="flex-1 text-center">Jun</span>
-            <span class="flex-1 text-center">Jul</span>
-            <span class="flex-1 text-center">Aug</span>
-            <span class="flex-1 text-center text-gemini">Sep →</span>
+            <span class="flex-1 text-center" data-i18n="roadmap.month.mar">Mar</span>
+            <span class="flex-1 text-center" data-i18n="roadmap.month.apr">Apr</span>
+            <span class="flex-1 text-center" data-i18n="roadmap.month.may">May</span>
+            <span class="flex-1 text-center" data-i18n="roadmap.month.jun">Jun</span>
+            <span class="flex-1 text-center" data-i18n="roadmap.month.jul">Jul</span>
+            <span class="flex-1 text-center" data-i18n="roadmap.month.aug">Aug</span>
+            <span class="flex-1 text-center text-gemini" data-i18n="roadmap.month.sep">Sep →</span>
           </div>
         </div>
 
         <!-- Platform lane -->
         <div class="flex items-start border-b border-stone-100 dark:border-slate-700/50 py-2">
           <div class="w-24 md:w-28 shrink-0 pr-2 pt-1">
-            <div class="text-xs font-bold text-stone-700 dark:text-slate-300">Platform</div>
-            <div class="text-[0.5rem] text-stone-400 dark:text-slate-600">Infrastructure</div>
+            <div class="text-xs font-bold text-stone-700 dark:text-slate-300" data-i18n="roadmap.lane.platform">Platform</div>
+            <div class="text-[0.5rem] text-stone-400 dark:text-slate-600" data-i18n="roadmap.lane.platform.sub">Infrastructure</div>
           </div>
           <div class="flex-1 gantt-track" style="min-height:64px;">
             <!-- Grid lines at each month boundary -->
@@ -512,19 +512,19 @@ pnpm start</code>
             <div class="gantt-gridline" style="left:71.43%"></div>
             <div class="gantt-gridline" style="left:85.71%"></div>
             <!-- Bars: row 1 (top:4px) -->
-            <div class="gantt-bar gantt-shipped" style="left:0%;width:13%;top:4px;" title="Mar 12 — Project extracted from Cat Cafe">Foundation</div>
-            <div class="gantt-bar gantt-shipped" style="left:14%;width:27%;top:4px;" title="Apr — May: MCP capabilities, Skills, Queue">Skills &amp; MCP</div>
-            <div class="gantt-bar gantt-progress" style="left:72%;width:16%;top:4px;" title="Aug — now: A2A message delivery contract">A2A Contract</div>
+            <div class="gantt-bar gantt-shipped" style="left:0%;width:13%;top:4px;" title="Mar 12 — Project extracted from Cat Cafe" data-i18n-title="roadmap.item.foundation.title" data-i18n="roadmap.item.foundation">Foundation</div>
+            <div class="gantt-bar gantt-shipped" style="left:14%;width:27%;top:4px;" title="Apr — May: MCP capabilities, Skills, Queue" data-i18n-title="roadmap.item.skills.title" data-i18n="roadmap.item.skills">Skills &amp; MCP</div>
+            <div class="gantt-bar gantt-progress" style="left:72%;width:16%;top:4px;" title="Aug — now: A2A message delivery contract" data-i18n-title="roadmap.item.a2a.title" data-i18n="roadmap.item.a2a">A2A Contract</div>
             <!-- Bars: row 2 (top:34px) -->
-            <div class="gantt-bar gantt-shipped" style="left:28%;width:56%;top:34px;" title="May 31 — Aug 25: Plugin discovery, config, messaging">Plugin Framework</div>
+            <div class="gantt-bar gantt-shipped" style="left:28%;width:56%;top:34px;" title="May 31 — Aug 25: Plugin discovery, config, messaging" data-i18n-title="roadmap.item.plugins.title" data-i18n="roadmap.item.plugins">Plugin Framework</div>
           </div>
         </div>
 
         <!-- Intelligence lane -->
         <div class="flex items-start border-b border-stone-100 dark:border-slate-700/50 py-2">
           <div class="w-24 md:w-28 shrink-0 pr-2 pt-1">
-            <div class="text-xs font-bold text-stone-700 dark:text-slate-300">Intelligence</div>
-            <div class="text-[0.5rem] text-stone-400 dark:text-slate-600">Memory &amp; AI</div>
+            <div class="text-xs font-bold text-stone-700 dark:text-slate-300" data-i18n="roadmap.lane.intelligence">Intelligence</div>
+            <div class="text-[0.5rem] text-stone-400 dark:text-slate-600" data-i18n="roadmap.lane.intelligence.sub">Memory &amp; AI</div>
           </div>
           <div class="flex-1 gantt-track" style="min-height:64px;">
             <div class="gantt-gridline" style="left:14.28%"></div>
@@ -533,19 +533,19 @@ pnpm start</code>
             <div class="gantt-gridline" style="left:57.14%"></div>
             <div class="gantt-gridline" style="left:71.43%"></div>
             <div class="gantt-gridline" style="left:85.71%"></div>
-            <div class="gantt-bar gantt-shipped" style="left:14%;width:41%;top:4px;" title="Apr 11 — Jun 22: OTel tracing, Prompt X-Ray, telemetry">Observability</div>
-            <div class="gantt-bar gantt-shipped" style="left:72%;width:13%;top:4px;" title="Aug: Memory architecture v2, write-side contracts">Memory v2</div>
-            <div class="gantt-bar gantt-planned" style="left:86%;width:12%;top:4px;">Perception</div>
-            <div class="gantt-bar gantt-shipped" style="left:0%;width:27%;top:34px;" title="Mar — Apr: Shared evidence store, search pipeline">Shared Memory</div>
-            <div class="gantt-bar gantt-planned" style="left:86%;width:12%;top:34px;">Cold-Start</div>
+            <div class="gantt-bar gantt-shipped" style="left:14%;width:41%;top:4px;" title="Apr 11 — Jun 22: OTel tracing, Prompt X-Ray, telemetry" data-i18n-title="roadmap.item.observability.title" data-i18n="roadmap.item.observability">Observability</div>
+            <div class="gantt-bar gantt-shipped" style="left:72%;width:13%;top:4px;" title="Aug: Memory architecture v2, write-side contracts" data-i18n-title="roadmap.item.memoryv2.title" data-i18n="roadmap.item.memoryv2">Memory v2</div>
+            <div class="gantt-bar gantt-planned" style="left:86%;width:12%;top:4px;" data-i18n="roadmap.item.perception">Perception</div>
+            <div class="gantt-bar gantt-shipped" style="left:0%;width:27%;top:34px;" title="Mar — Apr: Shared evidence store, search pipeline" data-i18n-title="roadmap.item.sharedmemory.title" data-i18n="roadmap.item.sharedmemory">Shared Memory</div>
+            <div class="gantt-bar gantt-planned" style="left:86%;width:12%;top:34px;" data-i18n="roadmap.item.coldstart">Cold-Start</div>
           </div>
         </div>
 
         <!-- Experience lane -->
         <div class="flex items-start py-2">
           <div class="w-24 md:w-28 shrink-0 pr-2 pt-1">
-            <div class="text-xs font-bold text-stone-700 dark:text-slate-300">Experience</div>
-            <div class="text-[0.5rem] text-stone-400 dark:text-slate-600">UI &amp; Surface</div>
+            <div class="text-xs font-bold text-stone-700 dark:text-slate-300" data-i18n="roadmap.lane.experience">Experience</div>
+            <div class="text-[0.5rem] text-stone-400 dark:text-slate-600" data-i18n="roadmap.lane.experience.sub">UI &amp; Surface</div>
           </div>
           <div class="flex-1 gantt-track" style="min-height:64px;">
             <div class="gantt-gridline" style="left:14.28%"></div>
@@ -554,11 +554,11 @@ pnpm start</code>
             <div class="gantt-gridline" style="left:57.14%"></div>
             <div class="gantt-gridline" style="left:71.43%"></div>
             <div class="gantt-gridline" style="left:85.71%"></div>
-            <div class="gantt-bar gantt-shipped" style="left:14%;width:55%;top:4px;" title="Apr 23 — Jul 26: Electron, installers, in-app update">Desktop App</div>
-            <div class="gantt-bar gantt-progress" style="left:72%;width:16%;top:4px;" title="Aug — now: Project homepage &amp; docs">Homepage</div>
-            <div class="gantt-bar gantt-shipped" style="left:7%;width:48%;top:34px;" title="Apr 6 — Jun 19: XiaoYi gateway, IM connector plugins">IM Connectors</div>
-            <div class="gantt-bar gantt-shipped" style="left:57%;width:14%;top:34px;" title="Jul: Console redesign, thread navigation">Console v2</div>
-            <div class="gantt-bar gantt-planned" style="left:86%;width:12%;top:34px;">Telegram</div>
+            <div class="gantt-bar gantt-shipped" style="left:14%;width:55%;top:4px;" title="Apr 23 — Jul 26: Electron, installers, in-app update" data-i18n-title="roadmap.item.desktop.title" data-i18n="roadmap.item.desktop">Desktop App</div>
+            <div class="gantt-bar gantt-progress" style="left:72%;width:16%;top:4px;" title="Aug — now: Project homepage &amp; docs" data-i18n-title="roadmap.item.homepage.title" data-i18n="roadmap.item.homepage">Homepage</div>
+            <div class="gantt-bar gantt-shipped" style="left:7%;width:48%;top:34px;" title="Apr 6 — Jun 19: XiaoYi gateway, IM connector plugins" data-i18n-title="roadmap.item.im.title" data-i18n="roadmap.item.im">IM Connectors</div>
+            <div class="gantt-bar gantt-shipped" style="left:57%;width:14%;top:34px;" title="Jul: Console redesign, thread navigation" data-i18n-title="roadmap.item.consolev2.title" data-i18n="roadmap.item.consolev2">Console v2</div>
+            <div class="gantt-bar gantt-planned" style="left:86%;width:12%;top:34px;" data-i18n="roadmap.item.telegram">Telegram</div>
           </div>
         </div>
 
@@ -566,7 +566,7 @@ pnpm start</code>
 
       <div class="text-center mt-8">
         <a href="https://github.com/zts212653/clowder-ai/issues/new?template=feature_request.md" target="_blank" rel="noopener"
-           class="inline-flex items-center gap-2 px-5 py-2.5 rounded-lg border-2 border-terracotta text-terracotta font-semibold hover:bg-terracotta hover:text-white transition text-sm">
+           class="inline-flex items-center gap-2 px-5 py-2.5 rounded-lg border-2 border-terracotta text-terracotta font-semibold hover:bg-terracotta hover:text-white transition text-sm" data-i18n="roadmap.cta">
           Request a Feature &rarr;
         </a>
       </div>
@@ -576,14 +576,14 @@ pnpm start</code>
   <!-- ============ ORIGIN STORY (compact) ============ -->
   <section class="py-20 px-4">
     <div class="max-w-3xl mx-auto text-center">
-      <h2 class="text-3xl font-bold text-stone-900 dark:text-white mb-6">Cats &amp; U</h2>
-      <p class="text-stone-600 dark:text-slate-400 leading-relaxed mb-4">
+      <h2 class="text-3xl font-bold text-stone-900 dark:text-white mb-6" data-i18n="cats.title">Cats &amp; U</h2>
+      <p class="text-stone-600 dark:text-slate-400 leading-relaxed mb-4" data-i18n="cats.p1">
         Clowder AI is extracted from <strong class="text-stone-800 dark:text-slate-200">Cat Cafe</strong> — a production workspace where four AI cats collaborate daily on real software. Every feature has been battle-tested.
       </p>
-      <p class="text-stone-600 dark:text-slate-400 leading-relaxed mb-6">
+      <p class="text-stone-600 dark:text-slate-400 leading-relaxed mb-6" data-i18n="cats.p2">
         The name <em>clowder</em> is the English collective noun for a group of cats — like "a murder of crows" or "a pride of lions." It also hides a small easter egg: <em>clowder</em> sounds a lot like <em>cloud</em>.
       </p>
-      <blockquote class="text-lg italic text-stone-500 dark:text-slate-400">
+      <blockquote class="text-lg italic text-stone-500 dark:text-slate-400" data-i18n="cats.quote">
         "Every idea deserves a team of souls who take it seriously."
       </blockquote>
     </div>
@@ -592,11 +592,11 @@ pnpm start</code>
   <!-- ============ FLOATING TOC (desktop only) ============ -->
   <aside id="floating-toc" class="hidden lg:block fixed left-6 top-1/2 -translate-y-1/2 z-40 opacity-0 transition-opacity duration-300 pointer-events-none">
     <nav class="flex flex-col gap-1.5 py-3 px-2 rounded-xl bg-white/80 dark:bg-slate-800/80 backdrop-blur-sm border border-stone-200/60 dark:border-slate-700/60 shadow-lg">
-      <a href="#features" class="toc-link px-2.5 py-1 rounded-md text-xs text-stone-500 dark:text-slate-500 hover:text-terracotta hover:bg-terracotta/5 transition" data-section="features">Features</a>
-      <a href="#scenarios" class="toc-link px-2.5 py-1 rounded-md text-xs text-stone-500 dark:text-slate-500 hover:text-terracotta hover:bg-terracotta/5 transition" data-section="scenarios">Scenarios</a>
-      <a href="#quickstart" class="toc-link px-2.5 py-1 rounded-md text-xs text-stone-500 dark:text-slate-500 hover:text-terracotta hover:bg-terracotta/5 transition" data-section="quickstart">Quick Start</a>
-      <a href="#first-steps" class="toc-link px-2.5 py-1 rounded-md text-xs text-stone-500 dark:text-slate-500 hover:text-terracotta hover:bg-terracotta/5 transition" data-section="first-steps">First Steps</a>
-      <a href="#roadmap" class="toc-link px-2.5 py-1 rounded-md text-xs text-stone-500 dark:text-slate-500 hover:text-terracotta hover:bg-terracotta/5 transition" data-section="roadmap">Roadmap</a>
+      <a href="#features" class="toc-link px-2.5 py-1 rounded-md text-xs text-stone-500 dark:text-slate-500 hover:text-terracotta hover:bg-terracotta/5 transition" data-section="features" data-i18n="nav.features">Features</a>
+      <a href="#scenarios" class="toc-link px-2.5 py-1 rounded-md text-xs text-stone-500 dark:text-slate-500 hover:text-terracotta hover:bg-terracotta/5 transition" data-section="scenarios" data-i18n="nav.scenarios">Scenarios</a>
+      <a href="#quickstart" class="toc-link px-2.5 py-1 rounded-md text-xs text-stone-500 dark:text-slate-500 hover:text-terracotta hover:bg-terracotta/5 transition" data-section="quickstart" data-i18n="nav.quickstart">Quick Start</a>
+      <a href="#first-steps" class="toc-link px-2.5 py-1 rounded-md text-xs text-stone-500 dark:text-slate-500 hover:text-terracotta hover:bg-terracotta/5 transition" data-section="first-steps" data-i18n="nav.firststeps">First Steps</a>
+      <a href="#roadmap" class="toc-link px-2.5 py-1 rounded-md text-xs text-stone-500 dark:text-slate-500 hover:text-terracotta hover:bg-terracotta/5 transition" data-section="roadmap" data-i18n="nav.roadmap">Roadmap</a>
     </nav>
   </aside>
 
@@ -610,47 +610,48 @@ pnpm start</code>
             <img src="assets/logo-transparent.png" alt="Clowder AI" class="h-8 w-8 rounded-lg">
             <span class="font-bold text-stone-900 dark:text-white">Clowder AI</span>
           </div>
-          <p class="text-xs text-stone-500 dark:text-slate-500 leading-relaxed">Build AI teams, not just agents.</p>
+          <p class="text-xs text-stone-500 dark:text-slate-500 leading-relaxed" data-i18n="footer.tagline">Build AI teams, not just agents.</p>
         </div>
         <!-- Pages -->
         <div>
-          <h4 class="text-xs font-bold uppercase tracking-wider text-stone-400 dark:text-slate-500 mb-3">Pages</h4>
+          <h4 class="text-xs font-bold uppercase tracking-wider text-stone-400 dark:text-slate-500 mb-3" data-i18n="footer.pages">Pages</h4>
           <ul class="space-y-1.5 text-sm">
-            <li><a href="docs.html" class="text-stone-600 dark:text-slate-400 hover:text-terracotta transition">Docs</a></li>
-            <li><a href="community.html" class="text-stone-600 dark:text-slate-400 hover:text-terracotta transition">Community</a></li>
-            <li><a href="https://github.com/zts212653/clowder-ai/releases" target="_blank" rel="noopener" class="text-stone-600 dark:text-slate-400 hover:text-terracotta transition">Releases</a></li>
+            <li><a href="docs.html" class="text-stone-600 dark:text-slate-400 hover:text-terracotta transition" data-i18n="nav.docs">Docs</a></li>
+            <li><a href="community.html" class="text-stone-600 dark:text-slate-400 hover:text-terracotta transition" data-i18n="nav.community">Community</a></li>
+            <li><a href="https://github.com/zts212653/clowder-ai/releases" target="_blank" rel="noopener" class="text-stone-600 dark:text-slate-400 hover:text-terracotta transition" data-i18n="nav.releases">Releases</a></li>
           </ul>
         </div>
         <!-- Sections -->
         <div>
-          <h4 class="text-xs font-bold uppercase tracking-wider text-stone-400 dark:text-slate-500 mb-3">On This Page</h4>
+          <h4 class="text-xs font-bold uppercase tracking-wider text-stone-400 dark:text-slate-500 mb-3" data-i18n="footer.onthispage">On This Page</h4>
           <ul class="space-y-1.5 text-sm">
-            <li><a href="#features" class="text-stone-600 dark:text-slate-400 hover:text-terracotta transition">Features</a></li>
-            <li><a href="#scenarios" class="text-stone-600 dark:text-slate-400 hover:text-terracotta transition">Scenarios</a></li>
-            <li><a href="#quickstart" class="text-stone-600 dark:text-slate-400 hover:text-terracotta transition">Quick Start</a></li>
-            <li><a href="#first-steps" class="text-stone-600 dark:text-slate-400 hover:text-terracotta transition">First Steps</a></li>
-            <li><a href="#roadmap" class="text-stone-600 dark:text-slate-400 hover:text-terracotta transition">Roadmap</a></li>
+            <li><a href="#features" class="text-stone-600 dark:text-slate-400 hover:text-terracotta transition" data-i18n="nav.features">Features</a></li>
+            <li><a href="#scenarios" class="text-stone-600 dark:text-slate-400 hover:text-terracotta transition" data-i18n="nav.scenarios">Scenarios</a></li>
+            <li><a href="#quickstart" class="text-stone-600 dark:text-slate-400 hover:text-terracotta transition" data-i18n="nav.quickstart">Quick Start</a></li>
+            <li><a href="#first-steps" class="text-stone-600 dark:text-slate-400 hover:text-terracotta transition" data-i18n="nav.firststeps">First Steps</a></li>
+            <li><a href="#roadmap" class="text-stone-600 dark:text-slate-400 hover:text-terracotta transition" data-i18n="nav.roadmap">Roadmap</a></li>
           </ul>
         </div>
         <!-- Community -->
         <div>
-          <h4 class="text-xs font-bold uppercase tracking-wider text-stone-400 dark:text-slate-500 mb-3">Community</h4>
+          <h4 class="text-xs font-bold uppercase tracking-wider text-stone-400 dark:text-slate-500 mb-3" data-i18n="nav.community">Community</h4>
           <ul class="space-y-1.5 text-sm">
             <li><a href="https://github.com/zts212653/clowder-ai" target="_blank" class="text-stone-600 dark:text-slate-400 hover:text-terracotta transition">GitHub</a></li>
             <li><a href="https://github.com/zts212653/clowder-ai/issues" target="_blank" class="text-stone-600 dark:text-slate-400 hover:text-terracotta transition">Issues</a></li>
             <li><a href="https://linux.do/t/topic/1900303" target="_blank" class="text-stone-600 dark:text-slate-400 hover:text-terracotta transition">LINUX DO</a></li>
-            <li><a href="community.html" class="text-stone-600 dark:text-slate-400 hover:text-terracotta transition">Community</a></li>
+            <li><a href="community.html" class="text-stone-600 dark:text-slate-400 hover:text-terracotta transition" data-i18n="nav.community">Community</a></li>
           </ul>
         </div>
       </div>
       <div class="border-t border-stone-200/60 dark:border-slate-700/60 pt-6 flex flex-col sm:flex-row justify-between items-center gap-3">
-        <p class="text-xs text-stone-400 dark:text-slate-500">MIT License &middot; &copy; 2026 Clowder AI Contributors</p>
-        <p class="text-xs text-stone-400 dark:text-slate-500 italic">Hard Rails. Soft Power. Shared Mission.</p>
+        <p class="text-xs text-stone-400 dark:text-slate-500" data-i18n="footer.copyright">MIT License &middot; &copy; 2026 Clowder AI Contributors</p>
+        <p class="text-xs text-stone-400 dark:text-slate-500 italic" data-i18n="footer.motto">Hard Rails. Soft Power. Shared Mission.</p>
       </div>
     </div>
   </footer>
 
   <script src="lib/release-assets.js"></script>
+  <script src="i18n.js"></script>
   <script src="main.js"></script>
 </body>
 </html>

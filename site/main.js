@@ -32,42 +32,37 @@ function updateThemeIcon() {
 }
 
 // Language toggle (EN / 中文)
-const I18N = {
-  en: {
-    'hero.tagline': 'Open Source Multi-Model AI Platform',
-    'hero.title': 'AI Teams That<br>Grow With You',
-    'hero.subtitle':
-      'Not just agents — a team that learns, evolves, and grows alongside you.<br class="hidden sm:block">Plugins, self-awareness, self-evolution. All in the open.',
-    'hero.slogan': 'Grow Together. Build Forever.',
-  },
-  zh: {
-    'hero.tagline': '开源多模型 AI 团队平台',
-    'hero.title': '与你一同成长的<br>AI 团队',
-    'hero.subtitle':
-      '不只是 Agent — 一支能学习、进化、与你共同成长的团队。<br class="hidden sm:block">插件系统、自感知、自进化。全部开源。',
-    'hero.slogan': '共同成长，持续构建。',
-  },
-};
+// The dictionary lives in the classic site/i18n.js (window.I18N), loaded before
+// this script. Fall back to an empty dict so a missing/blocked i18n.js degrades
+// to the static English DOM instead of throwing.
+const I18N = (typeof window !== 'undefined' && window.I18N) || { en: {}, zh: {} };
 
 function initLang() {
-  // Only apply language state on pages with the lang-toggle button
-  // (only index.html has actual translations; other pages are English-only)
+  // Only apply language state on translated pages with the lang-toggle button.
   const btn = document.getElementById('lang-toggle');
   if (!btn) return;
   const saved = localStorage.getItem('clowder-lang') || 'en';
-  document.documentElement.lang = saved;
-  btn.textContent = saved === 'en' ? 'EN' : '中';
-  applyLang(saved);
+  renderLangState(saved === 'zh' ? 'zh' : 'en');
+}
+
+function renderLangState(lang) {
+  document.documentElement.lang = lang;
+  const btn = document.getElementById('lang-toggle');
+  if (btn) btn.textContent = lang === 'en' ? 'EN' : '中';
+  applyLang(lang);
+}
+
+function setLang(lang, { notify = true } = {}) {
+  if (lang !== 'en' && lang !== 'zh') return;
+  localStorage.setItem('clowder-lang', lang);
+  renderLangState(lang);
+  if (notify) window.dispatchEvent(new CustomEvent('clowder:languagechange', { detail: { lang } }));
 }
 
 function toggleLang() {
   const current = document.documentElement.lang || 'en';
   const next = current === 'en' ? 'zh' : 'en';
-  document.documentElement.lang = next;
-  localStorage.setItem('clowder-lang', next);
-  const btn = document.getElementById('lang-toggle');
-  if (btn) btn.textContent = next === 'en' ? 'EN' : '中';
-  applyLang(next);
+  setLang(next);
 }
 
 function applyLang(lang) {
@@ -76,6 +71,21 @@ function applyLang(lang) {
     const key = el.getAttribute('data-i18n');
     if (dict[key]) el.innerHTML = dict[key];
   });
+  for (const [keyAttr, targetAttr] of [
+    ['data-i18n-placeholder', 'placeholder'],
+    ['data-i18n-label', 'label'],
+    ['data-i18n-aria-label', 'aria-label'],
+    ['data-i18n-title', 'title'],
+  ]) {
+    document.querySelectorAll(`[${keyAttr}]`).forEach((el) => {
+      const key = el.getAttribute(keyAttr);
+      if (dict[key]) el.setAttribute(targetAttr, dict[key]);
+    });
+  }
+  // Re-localize download buttons whose label was replaced with textContent at
+  // fetch time (their [data-i18n] span no longer exists to translate).
+  document.querySelectorAll('[data-dl-fallback]').forEach(renderDownloadLabel);
+  document.querySelectorAll('[data-ver]').forEach(renderVersionText);
 }
 
 // Feature tabs
@@ -104,9 +114,11 @@ function copyCode(btn) {
   if (!code) return;
   navigator.clipboard.writeText(code.textContent.trim()).then(() => {
     const orig = btn.textContent;
-    btn.textContent = 'Copied!';
+    btn.textContent = (I18N[document.documentElement.lang] || I18N.en)['quickstart.copied'] || 'Copied!';
     setTimeout(() => {
-      btn.textContent = orig;
+      // Restore in whatever language is active now (it may have changed during the delay).
+      const dict = I18N[document.documentElement.lang] || I18N.en;
+      btn.textContent = dict['quickstart.copy'] || orig;
     }, 1500);
   });
 }
@@ -219,11 +231,34 @@ function initWalkthroughVideos() {
 // Point a button at a resolved asset; when the asset is absent, leave the
 // static /releases/latest fallback href untouched so we never hand a visitor a
 // known-wrong artifact.
-function wireDownload(btn, asset, label) {
+// The download label is set at fetch time via textContent, which would drop a
+// plain [data-i18n] span. Remember the i18n key + asset on the element so
+// applyLang() can re-localize the label on a language toggle.
+function renderDownloadLabel(btn) {
+  const dict = I18N[document.documentElement.lang] || I18N.en;
+  const key = btn.dataset.dlKey;
+  const label = (key && (dict[key] || I18N.en[key])) || btn.dataset.dlFallback || '';
+  const name = btn.dataset.dlName;
+  btn.textContent = name ? `${label} (${name})` : label;
+}
+
+// The "Latest: <ver>" line is set after the release fetch; store the version so
+// applyLang() can re-localize the "Latest:" prefix on a language toggle.
+function renderVersionText(el) {
+  const dict = I18N[document.documentElement.lang] || I18N.en;
+  el.textContent = el.dataset.ver
+    ? `${dict['quickstart.latest'] || I18N.en['quickstart.latest']} ${el.dataset.ver}`
+    : '';
+}
+
+function wireDownload(btn, asset, key, fallback) {
   if (!btn) return;
   if (asset?.browser_download_url) {
     btn.href = asset.browser_download_url;
-    btn.textContent = `${label} (${asset.name})`;
+    btn.dataset.dlKey = key || '';
+    btn.dataset.dlName = asset.name || '';
+    btn.dataset.dlFallback = fallback;
+    renderDownloadLabel(btn);
   }
 }
 
@@ -239,16 +274,20 @@ async function initReleaseLinks() {
     if (!releaseAssets || typeof releaseAssets.selectReleaseAssets !== 'function') return;
     const { windows, macArm, macIntel } = releaseAssets.selectReleaseAssets(release.assets || []);
 
-    wireDownload(document.getElementById('dl-windows'), windows, 'Download for Windows');
+    wireDownload(document.getElementById('dl-windows'), windows, 'quickstart.win.download', 'Download for Windows');
     // macOS ships separate arm64 + x64 DMGs — expose both so Intel and Apple
-    // Silicon users each get a build they can actually run.
-    wireDownload(document.getElementById('dl-mac-arm'), macArm, 'Apple Silicon');
-    wireDownload(document.getElementById('dl-mac-intel'), macIntel, 'Intel');
+    // Silicon users each get a build they can actually run. Apple Silicon / Intel
+    // are proper nouns kept in English, so they carry no i18n key.
+    wireDownload(document.getElementById('dl-mac-arm'), macArm, '', 'Apple Silicon');
+    wireDownload(document.getElementById('dl-mac-intel'), macIntel, '', 'Intel');
 
-    const verText = ver ? `Latest: ${ver}` : '';
     for (const id of ['dl-windows-version', 'dl-mac-version']) {
       const el = document.getElementById(id);
-      if (el) el.textContent = verText;
+      if (el) {
+        el.removeAttribute('data-i18n'); // now locale-managed via data-ver
+        el.dataset.ver = ver || '';
+        renderVersionText(el);
+      }
     }
   } catch (_) {
     // Silently fall back to /releases/latest links
