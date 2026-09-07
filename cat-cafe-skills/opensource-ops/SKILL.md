@@ -163,10 +163,10 @@ triggers:
 
 ### Tracking
 
-- **不要为每个 PR/issue 自动注册 tracking**。只有以下两类情况才注册显式 typed predicate：
+- **不要为每个 PR/issue 自动注册 tracking**。只有以下两类情况才注册 PR / issue 追踪：
   1. 工作真实阻塞在外部条件（等作者回复、等 CI、等 maintainer review）。
   2. 计划做 formal external review 时，需要先用 `cat_cafe_register_pr_tracking` seed projection，才能在终端态记录 `cat_cafe_record_external_review_verdict`。
-- 注册时必须写明 `when`、阻塞解除后的 `nextStep` 和 `expiresAt`。
+- 注册只需 `repoFullName` + `prNumber`；`nextStep` 可选且仅供展示。**不接受任何条件表达式或过期时间**——追踪永不过期，通知后自动续订。需要增删事件用 `include` / `exclude`（按事件名）。
 - Advisory / triage / 纯审计不需要注册 tracking。
 
 ### Merge / closure
@@ -202,7 +202,7 @@ triggers:
 | 从 title/reason 直接推 PR identity 而不跑 provider adapter | 先 grounding，再判断 |
 | 把 `projectPath` 当成外部目标仓 | `projectPath` 是工作区归属；外部目标仓是独立的 `providerSubject` |
 | 服务端应该自动注入五问 | 服务端不注入；子 thread 自己加载本 skill 执行 |
-| 看到 PR 就自动注册 tracking | 只在真实阻塞时注册显式 typed predicate |
+| 看到 PR 就自动注册 tracking | 只在真实阻塞时注册追踪 |
 | 本地猫直接替外部作者修 PR | 需要显式授权 + provenance |
 | 把 proposal source 当 origin 证据 | origin 必须来自内部显式 anchor + provider 验证 |
 | 用实例私有品牌/成员关系描述 portable workflow | 本 skill 是仓库中立的；实例成员关系只在明确知道当前 deployment 时才使用 |

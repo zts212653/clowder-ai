@@ -5,13 +5,13 @@
 
 ## 模型
 
-CI poller 始终采集 `headSha / aggregate bucket / fingerprint`，但采集不等于唤醒。只有 active wait 明确包含 `pr_ci_terminal`，且 CI 相对注册 baseline 进入终态，才消费该 generation 并投递 compact delta。
+CI poller 始终采集 `headSha / aggregate bucket / fingerprint`，但采集不等于唤醒。只有订阅里含 `ci_terminal`（默认开启），且 CI 相对注册 baseline 进入终态，才消费该 generation 并投递 compact delta。
 
 ```text
 GitHub checks
   → collector state (always)
   → compare with server-captured baseline
-  → pr_ci_terminal matched?
+  → ci_terminal 命中?
        no  → state-only
        yes → one compact wake + generation consumed
 ```
@@ -24,20 +24,18 @@ GitHub checks
 cat_cafe_register_pr_tracking(
   repoFullName="<owner>/repo",
   prNumber=<N>,
-  when=[
-    { kind: "pr_ci_terminal" },
-    { kind: "pr_became_conflicting" }
-  ],
-  nextStep="Re-check checks and mergeability, then continue merge-gate.",
-  expiresAt=<future unix ms>
+  nextStep="Re-check checks and mergeability, then continue merge-gate."
 )
+# ci_terminal 与 conflict 默认开启，注册不接受别的参数。
+# 真的只想收这两类，六个默认项要全排掉——PR 作者还默认开着 bot_interaction：
+#   exclude=["review_decision","conversation_comment","inline_comment","base_behind","bot_interaction"]
 ```
 
 服务端在注册时读取 live CI baseline：
 
 - 当时 pending → 后续 pass/fail 可匹配；
 - 当时已经 pass/fail → 历史终态被 baseline 吸收，不补发；直接查 `gh pr checks` 并继续；
-- 新 HEAD 需要新的责任判断；若也想被 HEAD 变化叫醒，显式加入 `pr_head_changed`。
+- 新 HEAD 需要新的责任判断；若也想被 HEAD 变化叫醒，用 `include=["head_changed"]`。
 
 ## Bucket 与去重
 
@@ -46,9 +44,9 @@ collector fingerprint 为 `headSha:aggregateBucket`：
 | 观察 | collector | wait |
 |---|---|---|
 | 同 HEAD + 同 bucket | 幂等 | 不匹配 |
-| pending → pass/fail | 更新 | `pr_ci_terminal` 匹配 |
+| pending → pass/fail | 更新 | `ci_terminal` 命中 |
 | fail → pass | 更新 | 若 generation 尚 active，可匹配 |
-| 新 HEAD | 重建当前事实 | 只有声明 `pr_head_changed` 才唤醒 |
+| 新 HEAD | 重建当前事实 | 只有 include `head_changed` 才唤醒 |
 | pending | 更新 | 不唤醒 |
 
 一个 generation 最多一次 outcome。重复轮询、scheduler 竞速和重启 recovery 使用同一 outcome/message id。
@@ -61,7 +59,7 @@ GitHub Actions job 同时满足：
 - `steps=[]`
 - annotation 指向 billing/payment/spending
 
-则归类 `external_infrastructure`。它不是代码失败，也不满足可执行的 `pr_ci_terminal`；记录状态后不把已知月底额度边界升级成 maintainer/operator 的付费、修账单或关 workflow 待办。若 claim 已有风险匹配的本地 gate 与独立 review 证据，结束这条不可执行的 CI 等待并继续 merge-gate；否则只写清真正缺失的行为证据。
+则归类 `external_infrastructure`。它不是代码失败，也不构成可执行的 CI 终态；记录状态后不把已知月底额度边界升级成 maintainer/operator 的付费、修账单或关 workflow 待办。若 claim 已有风险匹配的本地 gate 与独立 review 证据，结束这条不可执行的 CI 等待并继续 merge-gate；否则只写清真正缺失的行为证据。
 
 ## 收到唤醒
 

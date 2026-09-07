@@ -5,7 +5,7 @@ topics: [governance, harness-engineering, quality, close-gate, magic-words, cat-
 doc_kind: spec
 created: 2026-04-27
 user_journey_exempt: pure harness governance (close-gate structure, magic-words, cat-mind guard) — no user-perceivable surface changes
-tips_exempt: harness governance internals (close-gate, magic-words, cat-mind guard) — no user-visible capability change
+tips_exempt: harness governance internals (close-gate, magic-words, cat-mind guard; #1394 sealed the Phase J event-backed exit) — still no user-visible capability change: operators never saw this exit, and the cat-facing guidance lives in cat-cafe-skills (shared-rules / pr-signals / merge-gate), not in the operator tips inventory
 ---
 
 # F177: Harness Update — Close Gate 结构化判据 + 四心智专属护栏
@@ -431,20 +431,48 @@ Map delta: completed — `dispatch` 登记 durable child lifecycle owner，`bubb
 - [x] AC-I5: F245 friction corpus 纳入 command-drift + shared-state false-positive 两类真实 fixture；`extractPawFeelMarkers` → `FrictionAggregator` → `FrictionClusterer` → `buildFrictionRollupInput` focused suite 9/9 绿，两条 signal / rawRef 均进入 verdict input
 - [x] AC-I6: latest-main full gate 在 `48fa7498` 全绿（361s）；reviewed HEAD `1722bc192` 经 stable combined patch-id `180dad6f755fcf555ca4c1e1a6fb037b6f1e8fd7` 与空路径交集 continuity 桥接到 merge HEAD `763f5d7df`，final-head focused bundle 273/273、shared-state shell suite 6/6、`pnpm check`、`git diff --check` 与 CI 全绿；PR #3001 squash `7ffb301cb`
 
-### Phase J（event-backed PR tracking clean stop）✅
+### Phase J（event-backed PR tracking clean stop）✅ → 出口部分 **SUPERSEDED**（#1394 / F280 §4b，2026-09-07）
 
 > **触发（2026-07-10 dogfood）**：merge-gate 已注册 PR tracking，remote review trigger 已有 EYES，F167 KD-27 要求停止轮询、只等结构化 Review Feedback callback；但 Phase H guard 只认行首 `@` / `hold_ball` / `targetCats` / `multi_mention`，仍把正确的纯事件驱动停止判成掉球并强制 remedial。
 
-**边界**：不是“thread 里有任意 tracker 就放行”。合法出口必须由 server 验证同 PR 的 exact `@codex review` comment 已有 `chatgpt-codex-connector[bot]` 的 EYES，且该 trigger 之后尚无 connector review object / inline comment / conversation comment（EYES 只证明接单，不单独证明仍 pending），再把 grant 绑定到当前 invocation/thread/cat/subject；route-serial 在 remedial 副作用前复核 live task + grant。任何缺项、stale/done、other owner/thread/subject、connector EYES=0、反馈已投递、GitHub/TaskStore 查询失败都 fail closed。
+**当前边界（#1394 / F280 §4b 之后，2026-09-07）：这个出口恒 fail closed，没有附加条件。**
+`resolveEventBackedRoutingExit` 一律返回 reject，`isEventBackedRoutingBypassProofValid` 已封死为恒
+`false`。**任何** tracking 状态都不是出口——不只是"任意 tracker 不算"，而是连 owner 自己那一份
+也不算，因为回合归 tracker owner、不归某一次 invocation。要在本轮停下，走 F177 自己的
+coordination 动作（`cat_cafe_complete_managed_hold` 等），不从 tracking 借凭据。
+解封需要 F177 拥有一份自己签发、指名 invocation 的 credential，届时校验属于那份凭据。
 
-- [x] AC-J1: `register_pr_tracking.eventWait` 只接受 `intent='review'` + numeric trigger comment ID；server 独立验证 comment repo/PR、exact body 与 Codex connector bot 的 `eyes > 0`，调用方/其他 reaction actor 不能自报 coverage
-- [x] AC-J2: coverage state 写入既有 PR tracking `AutomationState.eventWait`，身份取 callback-auth invocation/thread/cat；EYES=0 或 exact trigger 后三类 connector feedback 任一已投递均写 uncovered，verifier 失败 503 且不写新 tracker/grant
-- [x] AC-J3: resolver 逐字段核对 active `pr_tracking` task 的 owner/thread/subject/status/intent 与 eventWait invocation/coverage；done/stale、other cat、unrelated PR、old invocation、缺 store/query failure 全部 reject
-- [x] AC-J4: route-serial text/no-text 两个 remedial branch 共用一次惰性 resolver；只在 Phase H 原 predicate 命中后查询，并在任何 re-invoke/hold/persistence replacement 前完成。consumer 再核一份 live-source proof，proof 不一致继续 remedial
-- [x] AC-J5: MCP description、shared rules、merge-gate Step 6.1 明确 EYES>0 后 re-register eventWait；只有 `covered=true` 可 clean stop，tracker existence / 自然语言声明都不是出口
+> **原边界（2026-07-10，已 SUPERSEDED，仅存历史）**：~~合法出口必须由 server 验证同 PR 的 exact
+> `@codex review` comment 已有 `chatgpt-codex-connector[bot]` 的 EYES，且该 trigger 之后尚无
+> connector review object / inline comment / conversation comment，再把 grant 绑定到当前
+> invocation/thread/cat/subject；route-serial 在 remedial 副作用前复核 live task + grant。~~
+> EYES 验证器、`eventWait` 注册面与 `grantInvocationId` 均已在 #1394 删除。
+
+- [ ] AC-J1: **SUPERSEDED（#1394 / F280 §4b）** — ~~`register_pr_tracking.eventWait` 只接受 `intent='review'` + numeric trigger comment ID；server 独立验证 comment repo/PR、exact body 与 Codex connector bot 的 `eyes > 0`~~ —— `eventWait` / `when` 已从注册面退役，EYES 覆盖验证器（`pr-review-event-wait-coverage.ts`）连同注册探测一并删除。EYES 是瞬态 reaction，两次轮询之间可能整个错过，不得作为正确性门槛
+- [ ] AC-J2: **SUPERSEDED（#1394 / F280 §4b）** — ~~coverage state 写入既有 PR tracking `AutomationState.eventWait`，身份取 callback-auth invocation/thread/cat；verifier 失败 503 且不写新 tracker/grant~~ —— tracking 不再存 coverage state，也不再从 F177 取 invocation 身份。回合只由归一化流里、游标之后、owner 自己的召唤评论开启
+- [x] AC-J3: **#1394 重写为真实剩余能力** — resolver 仍逐字段核对 active `pr_tracking` task 的 kind/status/owner/thread/subject 与 owner fence generation，并给出 bounded reject reason；done/stale、other cat、other thread、subject mismatch、缺 invocation、缺 store、query failure 各自可区分。~~intent 与 eventWait invocation/coverage 这两维~~ 已随 #1394 删除，**且不再存在任何 accept 分支**——所有路径终点都是 reject，字段核对只用于让「根本没有候选」和「候选属于别的猫」在 telemetry 里保持可分
+- [x] AC-J4: **#1394 重写为真实剩余能力** — route-serial text/no-text 两个 remedial branch 仍共用一次惰性 resolver；只在 Phase H 原 predicate 命中后查询，并在任何 re-invoke/hold/persistence replacement 前完成。consumer 侧复核仍在调用链上，但 ~~live-source proof 比对~~ 现在是一个**恒 false 的封死校验**：resolver 不产出 bypass，即使产出也过不了校验，两个 branch 一律继续 remedial
+- [ ] AC-J5: **SUPERSEDED（#1394 / F280 §4b）** — ~~MCP description、shared rules、merge-gate Step 6.1 明确 EYES>0 后 re-register eventWait；只有 `covered=true` 可 clean stop~~ —— 三处 skill 面已改为「注册只切换投递通道，不是出口凭据；要停就 `cat_cafe_complete_managed_hold` 结清自己的 hold」。原文后半句「tracker existence / 自然语言声明都不是出口」仍然成立，而且更强了——现在**任何** tracking 状态都不是出口
 - [x] AC-J6: OTel 分记 bypass、bounded-reason rejection、redundant wait prevented、zero-tolerance false bypass；F192/F167 snapshot 新增 `event-backed-routing-exit` component，任一 false bypass 直接 high-severity finding
-- [x] AC-J7: fixture matrix覆盖 covered、connector EYES=0/other actor、review-already-posted、done、other cat/thread、subject mismatch、old invocation、review→merge intent transition、GitHub/TaskStore failure、全字段 forged proof/no-candidate；PR #2850 content preservation、Phase Q、OQ-H3 pure ACK 路径保持原行为
+- [x] AC-J7: **#1394 重写为真实剩余能力** — fixture matrix 覆盖「最有利状态仍不放行」（live tracker + 本猫 + 本 thread + 本 subject + 已订阅 `bot_interaction` + 回合真开着 ⇒ `predicate_missing`）、封死校验对两个不同 invocation 与缺 invocation/reject 形状**一律 false**、done/other cat/other thread/subject mismatch/stale generation/空列表/缺 store/query failure 各自的 bounded reason，以及 route 层「开着的回合不释放 managed hold」「live tracker 不再抑制 remedial child」。~~covered、connector EYES=0/other actor、review-already-posted、old invocation、review→merge intent transition、全字段 forged proof~~ 这些 fixture 随对应机制一并删除。PR #2850 content preservation、Phase Q、OQ-H3 pure ACK 路径保持原行为
 - [x] AC-J8: full gate + 跨个体 review + cloud review + merge-gate + post-merge alpha 验收
+
+> **状态更新（#1394 / F280 §4b，2026-09-07）：Phase J 的出口现已 fail closed。**
+> Phase J 的凭据是注册方亲手声明的 `pr_review_result_available` + `triggerCommentId`，
+> 由注册路由用 EYES coverage verifier 当场验证——那是**发起方自己的动作**，所以能回答
+> "事件会回到这一次 invocation 吗"。#1394 把 `when` / `expiresAt` 从注册面退役后，
+> 没有调用方还能声明它。tracking 的 bot 回合**不是同一个事实**：回合归 tracking owner，
+> 不归某一次 invocation，把注册 invocation 盖上去只是把谎言下移一层（注册探测读的是历史，
+> 盖章落在更早那一轮写的召唤上）。F280 §4b 因此规定 F177 不得从 tracking 取凭据。
+>
+> 所以 `resolveEventBackedRoutingExit` 现在一律返回 `predicate_missing`，猫改为持球，
+> 且 `isEventBackedRoutingBypassProofValid` 已**封死为恒 `false`**。
+>
+> **将来解封时可以复用的是 route seam 与 telemetry**（`bypass` 分支、`false_bypass`
+> 零容忍计数、F192 component），**不是现在这个 proof shape**——它没有 invocation 字段，
+> 校验不了归属，正是因此才被封死。新凭据必须带自己的 validator 来校验自己，
+> 不是"从同一道证明检查进来"。eval 读数：`event_wait.bypass_total = 0`、
+> `false_bypass_total = 0`，AC-J1/J2/J5 描述的 EYES 注册面已随 #1394 一并删除。
 
 ### Phase K（production seam + terminal Release hardening）✅
 
@@ -509,8 +537,8 @@ Why: Phase I 复用 F245/F192 friction ingestion 与 verdict contract，其他�
 | Ragdoll家族把 Phase F 理解为"被针对" | 在 Phase F 文档明示——这条护栏照顾的是家族病而非个体；同样适用未来加入的同族个体；类比 Phase D 治Maine Coon、Phase C 治Siamese |
 | Phase G hook 误判"已有路由"（行首 @ 是引用不是路由）| 行首 @ 的解析逻辑已经成熟（parseA2AMentions 包含 token boundary check），误判率极低；parallel mode 豁免 |
 | Phase G 提醒后 47 仍然写叙事而不是补行首 @ | 提醒文本极其具体（"请在末尾补一行行首 @句柄"），受限上下文下 47 大概率执行；如仍失败，二次提醒后降级为operator手动路由 |
-| 任意 tracker existence 被误当 event exit | grant 必须同 invocation/owner/thread/subject + server-verified Codex connector EYES；route consumer 复核 raw live-source proof，任何不一致 fail closed 并记 false-bypass invariant |
-| GitHub/Redis 抖动让 coverage 不可证明 | verifier 失败不写 grant；resolver 查询失败继续 Phase H remedial。可用性让位于零错误豁免 |
+| 任意 tracker existence 被误当 event exit | ~~grant 必须同 invocation/owner/thread/subject + server-verified Codex connector EYES~~ **（#1394 起）** 出口不再从 tracking 取任何凭据：resolver 一律 fail closed，proof validator 已封死为恒 false。任何被合成出来的 bypass 都会被拒并记 false-bypass invariant |
+| GitHub/Redis 抖动让 coverage 不可证明 | ~~verifier 失败不写 grant~~ **（#1394 起）** 已无 verifier 与 grant；resolver 查询失败继续 Phase H remedial。可用性让位于零错误豁免 |
 | terminal Release 被伪造文本绕过 guard | route 只消费 hydrated trigger 的 structured `crossPost.coordination.phase=terminal`，不扫描模型输出或自然语言 ACK |
 | scanner 对 rename/delete 降级静默假绿 | status-aware path selection + NUL-delimited fixture；存在侧读取异常直接非零退出 |
 | shared-state carry-in 放行误吞 authored delta | 只认 index tree 与 `origin/main` byte-identical；missing ref、unmerged、比较异常全部 fail-closed |
@@ -540,7 +568,7 @@ Why: Phase I 复用 F245/F192 friction ingestion 与 verdict contract，其他�
 | KD-15 | Phase I 收三条 organic friction，不另开 F 号 | 三条都属于 harness 执行契约漂移，当前 F177 thread 是归口；operator 明确要求 spec-first 后闭环三单 | 2026-07-10 |
 | KD-16 | shared-state guard 从“非 main 出现文件名”改为“相对 upstream 是否存在内容 delta” | 文件名不说明 delta 归属；Git tree 等价直接回答 feature 是否携带 shared-state 变化，并保留 fail-closed | 2026-07-10 |
 | KD-17 | formatting 修 command provenance，不新增 formatter | 仓库已有 Biome canonical；新增 Prettier/script 会制造第二真相源，根因是 plan 未写可执行命令 | 2026-07-10 |
-| KD-J1 | event wait 用 invocation-bound signed state，不扫任意 active tracker | tracker existence 只能证明某 PR 被监控，不能证明当前 invocation 正在等该 subject 或 callback 已覆盖；authenticated registration + exact trigger/EYES verification 才有机械坐标 | 2026-07-10 |
+| KD-J1 | ~~event wait 用 invocation-bound signed state，不扫任意 active tracker~~ **SUPERSEDED（#1394，2026-09-07）**：F177 在拥有自己的 server-issued、invocation-bound coordination credential 之前，出口一律 fail closed | 前半句判断没错，错的是它假设 tracking 能产出 invocation-bound state——回合归 tracker owner、不归某一次 invocation，`grantInvocationId` 只是把这个缺口写成了字段 | 2026-07-10 → 2026-09-07 |
 | KD-J2 | coverage validation 与 consumer proof 都在 remedial 副作用前 fail closed | callback writer 防伪造，route consumer 防 resolver 回归；query/proof 失败宁可保留一次 remedial，也不能错误裸停掉球 | 2026-07-10 |
 | KD-J3 | Phase J 扩 F177 guard，不重开 F167 或改 OQ-H3 | KD-27 提供“何时不该 hold”的等待语义，Phase J 修的是 F177 guard 不认识已证明 event exit；纯 ACK 是另一类无等待对象的终止协议，仍保持 OQ-H3 pending | 2026-07-10 |
 | KD-K1 | OQ-H3 用 structured terminal projection 关闭，不做连续 N 轮 ACK 文本识别 | coordination state 已由 server 生成并随 hydrated trigger 进入 route；复用可信结构比 NLU/正则猜“结束了”更窄、更可证 | 2026-07-15 |

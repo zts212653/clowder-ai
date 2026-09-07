@@ -1,10 +1,16 @@
 import assert from 'node:assert/strict';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, it } from 'node:test';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
 import { loadAllowlist, scanSkillSurfaceText } from './check-skill-first-party-surfaces.mjs';
+import {
+  discoverTrackingRunbookSurfaces,
+  scanTrackingRunbooks,
+  scanTrackingRunbookText,
+} from './tracking-runbook-contract.mjs';
 
 const REL_PATH = 'cat-cafe-skills/workspace-navigator/SKILL.md';
 const INBOUND_RUNBOOK_URL = new URL('../cat-cafe-skills/refs/opensource-ops-inbound-pr.md', import.meta.url);
@@ -16,6 +22,87 @@ const TECHNICAL_NARRATIVE_METHOD_URL = new URL(
 function scan(content, allowlist = []) {
   return scanSkillSurfaceText(content, REL_PATH, allowlist);
 }
+
+/*
+ * F280: the runbooks a cat follows literally when registering GitHub tracking. The public
+ * contract dropped `when` / `expiresAt` and three typed predicates, every runbook kept
+ * prescribing them, and nothing turned red — because nothing read those files. This lives in an
+ * executed gate for exactly that reason: a guard nobody runs is documentation with a shebang.
+ */
+describe('tracking runbook contract', () => {
+  it('no execution surface teaches a parameter the server rejects', () => {
+    assert.deepEqual(scanTrackingRunbooks(new URL('../', import.meta.url)), []);
+  });
+
+  it('rejects a `when` array even when it names only PUBLIC events', () => {
+    // The earlier version of this guard passed this line: it only caught internal predicate
+    // kinds, so it proved the old files happened to contain a co-occurring word — not that the
+    // actual accident was locked out.
+    const found = scanTrackingRunbookText(
+      'cat_cafe_register_pr_tracking(repo, pr, when=[{kind:"review_decision"}])',
+      'x.md',
+    );
+    assert.equal(found.length, 1, 'a when= parameter must be rejected on its own');
+  });
+
+  it('rejects a deadline parameter', () => {
+    assert.equal(scanTrackingRunbookText('  expiresAt=<future unix ms>', 'x.md').length, 1);
+  });
+
+  it('leaves ordinary English alone', () => {
+    const prose = [
+      'Use when: quality-gate 通过、PR 非 trivial。',
+      'Notify the owner when someone replies, and not before.',
+      'when the bot answers, the round closes',
+    ].join('\n');
+    assert.deepEqual(scanTrackingRunbookText(prose, 'x.md'), []);
+  });
+
+  // The first version of this guard carried a hardcoded six-file list and printed
+  // `6 surfaces clean` while refs/mcp-callbacks.md taught the complete retired protocol.
+  // Scope must come from the repo, not from what the author remembered migrating.
+  it('discovers a runbook that did not exist when this guard was written', () => {
+    const root = mkdtempSync(join(tmpdir(), 'tracking-runbook-'));
+    mkdirSync(join(root, 'cat-cafe-skills', 'refs'), { recursive: true });
+    writeFileSync(
+      join(root, 'cat-cafe-skills', 'refs', 'a-brand-new-runbook.md'),
+      ['Call cat_cafe_register_pr_tracking(repo, pr, when=[{ kind: 1 }])', 'expiresAt=123'].join('\n'),
+    );
+    const rootUrl = pathToFileURL(join(root, '/'));
+
+    assert.deepEqual(discoverTrackingRunbookSurfaces(rootUrl), ['cat-cafe-skills/refs/a-brand-new-runbook.md']);
+    assert.ok(scanTrackingRunbooks(rootUrl).length >= 2, 'an eighth old-protocol runbook must go red');
+  });
+
+  it('refuses a vacuous PASS when the skill tree yields no surface', () => {
+    const root = mkdtempSync(join(tmpdir(), 'tracking-runbook-empty-'));
+    mkdirSync(join(root, 'cat-cafe-skills'), { recursive: true });
+    writeFileSync(join(root, 'cat-cafe-skills', 'unrelated.md'), 'no registration tool here');
+    assert.throws(() => scanTrackingRunbooks(pathToFileURL(join(root, '/'))), /discovered 0 surfaces/);
+  });
+
+  // JSON and single-quoted keys are the shapes an MCP caller actually copies; the bare-word
+  // regex passed them silently.
+  it('rejects a quoted when key in every copyable shape', () => {
+    const shapes = [String.raw`"when": [{}]`, String.raw`'when': [1]`, 'when: [a]', 'when=[b]'];
+    for (const line of shapes) {
+      assert.ok(scanTrackingRunbookText(line, 'x.md').length >= 1, `must reject: ${line}`);
+    }
+  });
+
+  it('reports each execution surface once despite the symlinked shared-refs mirror', () => {
+    const root = new URL('../', import.meta.url);
+    const surfaces = discoverTrackingRunbookSurfaces(root);
+    // Deduping by PATH STRING proves nothing: the mirror exposes the same inode under a
+    // DIFFERENT path, so a Set of strings keeps both. Resolve to real files and compare.
+    const realPaths = surfaces.map((s) => realpathSync(fileURLToPath(new URL(s, root))));
+    assert.deepEqual([...new Set(realPaths)], realPaths, 'two discovered paths must not resolve to the same file');
+    assert.ok(
+      surfaces.includes('cat-cafe-skills/refs/mcp-callbacks.md'),
+      'the surface this guard originally missed must be in scope',
+    );
+  });
+});
 
 describe('check-skill-first-party-surfaces', () => {
   it('keeps routine harness validation claim-routed and single-owner', () => {
