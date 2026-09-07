@@ -1,3 +1,4 @@
+import { resolveSummonedKnownBot } from '../../domains/github-signals/GitHubBotTurn.js';
 import { buildGhCliEnv, withHiddenGhCliWindow } from './gh-cli-env.js';
 
 export type PrReviewEventWaitUncoveredReason =
@@ -68,8 +69,12 @@ function uncovered(
   };
 }
 
+/**
+ * "What is a trigger" has exactly one definition, in the bot identity table. Keeping a second
+ * regex here is how registration-time coverage and poll-time round opening drift apart.
+ */
 function isCodexReviewTrigger(body: string): boolean {
-  return /^@codex\s+review(?:\s|$)/i.test(body.trimStart());
+  return resolveSummonedKnownBot(body) !== null;
 }
 
 /**

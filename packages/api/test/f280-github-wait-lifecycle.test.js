@@ -157,7 +157,7 @@ describe('F280 GitHub wait lifecycle integration', () => {
       { taskId: task.id },
     );
     assert.equal(newHead.kind, 'notified');
-    assert.match(newHead.content, /HEAD aaaa111 → bbbb222/);
+    assert.match(newHead.content, /HEAD changed to bbbb222/);
     assert.doesNotMatch(newHead.content, /mindfn|UNTRUSTED_REVIEW_BODY/);
     assert.equal(messageStore.getByThread('thread_1').length, 1);
   });
@@ -537,5 +537,51 @@ describe('F280 legacy PR state migration', () => {
         assert.equal(Object.hasOwn(task.automationState, key), false, `${task.id} retained ${key}`);
       }
     }
+  });
+
+  // F280 section 4 / A18: PR merged -> notify AND end. The documented failure mode is
+  // "永久空转" (tracking keeps polling a merged PR forever), so asserting the
+  // notification alone would pass on the broken behaviour. The third assertion -- a later
+  // observation produces nothing new -- is the one that actually catches it.
+  it('A18: a merged PR notifies once and then stops tracking instead of spinning forever', async () => {
+    const { lifecycle, messageStore, taskStore, task } = await harness([{ kind: 'pr_conversation_comment_added' }]);
+
+    const merged = await lifecycle.observe({
+      taskId: task.id,
+      subjectState: 'merged',
+      facts: { headSha: 'aaaa1111' },
+    });
+
+    // 1. it notified
+    assert.equal(merged.kind, 'notified', `expected a notification, got ${JSON.stringify(merged)}`);
+    const delivered = messageStore.getByThread('thread_1');
+    assert.equal(delivered.length, 1, 'merged PR must wake the registering thread exactly once');
+    assert.match(delivered[0].content, /merged/i, 'the notification must say the PR merged');
+
+    // 2. it ended: no active wait survives a terminal subject state
+    const after = await taskStore.get(task.id);
+    assert.equal(after.automationState.await, undefined, 'a merged PR must not keep an active wait');
+    assert.equal(after.status, 'done', 'a merged PR must close its tracking task');
+
+    // 3. it does not spin: further activity on a merged PR produces nothing at all
+    const afterMerge = await lifecycle.observe({
+      taskId: task.id,
+      facts: { headSha: 'aaaa1111', review: { conversationCommentCursor: 999 } },
+      events: [
+        {
+          type: 'pr_conversation_comment_added',
+          id: 999,
+          source: 'conversation',
+          at: 600,
+          author: 'someone-else',
+        },
+      ],
+    });
+    assert.notEqual(afterMerge.kind, 'notified', 'a merged PR must never notify again');
+    assert.equal(
+      messageStore.getByThread('thread_1').length,
+      1,
+      'no further wake may arrive after the terminal notification',
+    );
   });
 });

@@ -261,18 +261,18 @@ gh pr create --title "feat(xxx): ..." --body "$(cat <<'EOF'
 EOF
 )"
 
-# 3. 只注册当前真正阻塞你的显式等待（F280；不是订阅所有 PR 事件）
-# → 调用 MCP: cat_cafe_register_pr_tracking(
-#      repoFullName, prNumber,
-#      when=[1–4 个 typed predicate],
-#      nextStep="条件满足后的具体动作",
-#      expiresAt=<future unix ms>
-#    )
-# 例：当前下一步是“CI 到终态后继续 merge-gate”：
-#    when=[{kind:'pr_ci_terminal'}, {kind:'pr_became_conflicting'}]
-# 若注册时 CI 已经终态，live baseline 会吸收历史，不补发；立即 `gh pr checks {PR}` 并继续。
-# 等待目标变化时显式 re-register；新 generation 原子替换旧 generation，不叠加 tracker/hold。
-# predicate catalog、compact wake 与 terminal 语义见 ../.cat-cafe-shared-refs/pr-signals.md。
+# 3. 注册 PR 追踪（F280：两个必填参数，没有第三个）
+# → 调用 MCP: cat_cafe_register_pr_tracking(repoFullName, prNumber)
+#    可选：nextStep（纯展示，永不被解析）、include / exclude（按**事件名**增删，不是 predicate）
+#
+# ⚠️ 不接受条件表达式、过期时间、续订开关、游标或受众白名单。传了会被 schema 拒绝。
+#    让调用方挑内部条件正是 #1392 要消灭的病：挑错的表现是**静默不通知**而不是报错。
+# 默认武装六项：review_decision / conversation_comment / inline_comment /
+#    ci_terminal / conflict / base_behind；head_changed 默认关，按需 include。
+#    第七项 bot_interaction 由**角色**决定：你是 PR 作者就默认开，不是作者就默认关。
+# 追踪**永不过期**，通知一次后自动续订；结束条件只有 merged / closed / unregister_tracking。
+# 只想关掉某一类：exclude=['ci_terminal']。未知名字会**报错**，不会静默忽略。
+# 完整词表与语义见 ../.cat-cafe-shared-refs/pr-signals.md。
 #
 # 收到冲突通知时（F140 Phase B）：
 # - 暂停当前工作，处理冲突优先（冲突是 merge blocker）
@@ -297,8 +297,34 @@ printf '%s\n' "$PR_BODY" | rg -q '@(codex|chatgpt-codex-connector|gpt52|opus|son
 # 触发前按 pr-signals.md 读取同一 PR 的 exact trigger，避免重复 comment。
 gh pr comment {PR_NUMBER} --body '@codex review'
 
-# 6. 已选 cloud 时按 ../.cat-cafe-shared-refs/pr-signals.md 的 exact trigger contract 等结果：
-# EYES=0 才能 bounded hold/re-trigger；EYES>0 后只注册 pr_review_result_available typed wait，停止轮询。
+# 6. 已选 cloud 时等remote review（事件驱动，不轮询）
+#
+# 6.1 👀 接单检测（触发后 5 分钟查一次）
+TRIGGER_COMMENT_ID=”$(gh api repos/{OWNER}/{REPO}/issues/{PR_NUMBER}/comments \
+  --jq '[.[] | select(.body | test(“^@codex\\s+review”; “m”))] | last | .id')”
+EYES=”$(gh api repos/{OWNER}/{REPO}/issues/comments/${TRIGGER_COMMENT_ID}/reactions \
+  --jq '[.[] | select(.content == “eyes” and .user.login == “chatgpt-codex-connector[bot]” and .user.type == “Bot”)] | length')”
+#   - Codex connector EYES > 0 → 云端已接单 → 停止监控，注册 PR 追踪。
+#     ⚠️ KD-27：此时必须释放 hold_ball，禁止续约轮询。追踪回调是唯一通知渠道。
+#     如果你之前 hold_ball 轮询等接单，现在 connector EYES > 0 = 切换到事件驱动模式，不再 hold。
+#     为让 routing guard 机械证明本 invocation 的 clean stop，注册一次即可——**不用传 trigger id**：
+#       cat_cafe_register_pr_tracking(
+#         repoFullName={OWNER}/{REPO}, prNumber={PR_NUMBER},
+#         nextStep='Consume the exact-HEAD cloud review verdict.'
+#       )
+#     服务端自己去找你刚发的那条召唤评论，独立验证 subject / 命令体 / connector EYES 接单 /
+#     尚未回答，通过才开一个 bot 回合，并把它绑定到**本次 invocation + 当前 HEAD**。
+#     routing guard 只认这个绑定：别人的 invocation、别的 HEAD、别人发的召唤都不是你的出口。
+#     没开成回合（未接单 / 验证失败 / GitHub 不可用）⇒ fail closed，继续 hold_ball，
+#     禁止把任意 active tracker 或一句“PR tracking 会叫我”当合法出口。
+#     回合开了而 bot 最终没回来，也会主动通知你（不再是石沉大海）。
+#   - connector EYES == 0 → 云端没接到 → 允许 re-trigger（进 6.2），可以 hold_ball 轮询等 EYES
+#
+# 6.2 允许再次触发的条件（满足任一即可）：
+#     a. HEAD SHA 变化（有新 commit）
+#     b. 触发 comment 存在但 5 分钟后仍无 👀 reaction
+#     c. 首次触发收到 “create an environment” 回复（= Codex 没接单）
+#     其它情况一律禁止二次触发
 
 # 6.5 Guardian Sign-Off Gate (F168 Phase D — community intake PRs only)
 #

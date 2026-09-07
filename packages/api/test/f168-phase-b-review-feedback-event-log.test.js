@@ -767,11 +767,10 @@ describe('ReviewFeedbackTaskSpec: safe cursor on projection failure (R4-P1-B)', 
     }
   });
 
-  it('delivery excludes reviews after the break point — no duplicate notification next poll (R5-P2)', async () => {
-    // R5-P2: when review 902 succeeds but review 903 fails, this poll must only deliver
-    // review 902. Review 903 must NOT be notified — it will be retried next poll.
-    // Without this fix, items after the break are still in newDecisions (built from full
-    // freshNewReviews), causing duplicate notifications on the next poll.
+  it('tracking does not hide a GitHub response when community projection fails', async () => {
+    // Tracking and community projection have independent frontiers. A projection
+    // failure keeps the community cursor retryable, but must not remove the GitHub
+    // response from the tracking event stream.
     assert.ok(createReviewFeedbackTaskSpec);
 
     const routerCalls = [];
@@ -825,10 +824,10 @@ describe('ReviewFeedbackTaskSpec: safe cursor on projection failure (R4-P1-B)', 
     // Gate should run (review 902 is deliverable)
     assert.ok(gate.run, 'gate should run — review 902 succeeded');
 
-    // Only review 902 should have been delivered; review 903 must be excluded
+    // Both upstream responses remain visible to tracking.
     const deliveredReviewIds = gate.workItems.flatMap((wi) => wi.signal.newDecisions.map((d) => d.id));
     assert.ok(deliveredReviewIds.includes(902), 'review 902 must be delivered (succeeded)');
-    assert.ok(!deliveredReviewIds.includes(903), 'review 903 must NOT be delivered — it failed, will retry next poll');
+    assert.ok(deliveredReviewIds.includes(903), 'review 903 must remain visible to tracking');
   });
 });
 

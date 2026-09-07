@@ -105,10 +105,20 @@ function createEventWaitTaskStore(threadId) {
               baseline: {
                 capturedAt: 1_783_700_000_000,
                 headSha: 'head-1',
-                review: { resultTriggerCommentId: 4_936_000_000 },
+                botTurns: {
+                  'chatgpt-codex-connector[bot]': {
+                    triggerId: 4_936_000_000,
+                    openedAt: 1_783_700_000_000,
+                    headSha: 'head-1',
+                    // The guard sees the ROUTE's authenticated invocation (`outer-inv-1` here),
+                    // not the provider's inner one — the round is granted to the invocation that
+                    // called register_pr_tracking.
+                    grantInvocationId: 'outer-inv-1',
+                  },
+                },
               },
               continuation: {
-                when: [{ kind: 'pr_review_result_available', triggerCommentId: 4_936_000_000 }],
+                when: [{ kind: 'pr_bot_interaction' }],
                 // biome-ignore lint/suspicious/noThenProperty: F280's frozen wait contract field.
                 then: 'Consume the exact-HEAD review result.',
               },

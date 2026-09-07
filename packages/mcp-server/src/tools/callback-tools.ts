@@ -47,6 +47,7 @@ import {
   localReviewVerdictSchema,
   normalizeRichBlock,
   reviewSubjectRefSchema,
+  PR_TRACKING_EVENT_NAMES,
   SOP_DEFINITION_IDS,
 } from '@cat-cafe/shared';
 import { z } from 'zod';
@@ -1943,63 +1944,46 @@ export async function handleGenerateDocument(input: {
   return result;
 }
 
-const githubWaitPredicateInputSchema = z.discriminatedUnion('kind', [
-  z.object({ kind: z.literal('pr_head_changed') }).strict(),
-  z
-    .object({
-      kind: z.literal('pr_review_result_available'),
-      triggerCommentId: z.number().int().positive().optional(),
-    })
-    .strict(),
-  z.object({ kind: z.literal('pr_review_decision_changed') }).strict(),
-  z
-    .object({
-      kind: z.literal('pr_review_thread_changed'),
-      reviewThreadIds: z.array(z.string().min(1)).min(1).max(20),
-    })
-    .strict(),
-  z.object({ kind: z.literal('pr_ci_terminal') }).strict(),
-  z.object({ kind: z.literal('pr_became_conflicting') }).strict(),
-]);
+// #1394: the public surface is the ISSUE's design — one call, event NAMES, no cursors.
+// `when` / `expiresAt` / `autoRenew` are gone from the tool: making a cat choose typed
+// predicates is what produced silently-wrong subscriptions, and a required `expiresAt`
+// is what silently dropped tracking on a live PR.
+const prTrackingEventNamesSchema = z.array(z.enum(PR_TRACKING_EVENT_NAMES)).min(1).max(PR_TRACKING_EVENT_NAMES.length);
 
-// F280: server-bound typed wait registration — baseline and owner are never caller input.
 export const registerPrTrackingInputSchema = {
   repoFullName: z.string().min(1).describe('Repository full name in owner/repo format (e.g. "zts212653/cat-cafe")'),
   prNumber: z.number().int().positive().describe('PR number'),
-  when: z
-    .array(githubWaitPredicateInputSchema)
-    .min(1)
-    .max(4)
-    .describe('One to four typed conditions, evaluated as flat any-of against a server-frozen live baseline.'),
   nextStep: z
     .string()
     .min(1)
     .max(500)
-    .describe('What to do after a match. Display-only text; never parsed as wake policy.'),
-  expiresAt: z
-    .number()
-    .int()
-    .positive()
-    .describe('Unix timestamp in milliseconds when responsibility expires without deleting history.'),
+    .optional()
+    .describe('Optional display-only reminder of what you will do when someone responds. Never parsed as wake policy.'),
+  include: prTrackingEventNamesSchema
+    .optional()
+    .describe(
+      'Add an event that is off by default for you. `head_changed` is always off; ' +
+        '`bot_interaction` (a bot round: your @-mention of a known bot and its answer) is on ' +
+        'for the PR author and off for everyone else, so a maintainer adds it here to watch ' +
+        "someone else's bot round. Unknown names are rejected loudly — never silently dropped.",
+    ),
+  exclude: prTrackingEventNamesSchema
+    .optional()
+    .describe(
+      'Turn OFF a default event you do not want (e.g. ["ci_terminal"]). ' +
+        'Omit to keep the full default set. Unknown names are rejected loudly.',
+    ),
 };
 
 export async function handleRegisterPrTracking(input: {
   repoFullName: string;
   prNumber: number;
-  when: Array<
-    | { kind: 'pr_head_changed' }
-    | { kind: 'pr_review_result_available'; triggerCommentId?: number }
-    | { kind: 'pr_review_decision_changed' }
-    | { kind: 'pr_review_thread_changed'; reviewThreadIds: string[] }
-    | { kind: 'pr_ci_terminal' }
-    | { kind: 'pr_became_conflicting' }
-  >;
-  nextStep: string;
-  expiresAt: number;
+  nextStep?: string;
+  include?: Array<(typeof PR_TRACKING_EVENT_NAMES)[number]>;
+  exclude?: Array<(typeof PR_TRACKING_EVENT_NAMES)[number]>;
   agentKeyCatId?: string | undefined;
 }): Promise<ToolResult> {
-  // F174 Phase E (AC-E2/E5): explicit kind:'none'. PR tracking is one-shot
-  // registration, no useful local fallback. Surface `[degrade]` hint.
+  // Registration has no useful local fallback. Surface `[degrade]` hint.
   return withDegradation({
     toolName: 'register_pr_tracking',
     primary: () =>
@@ -2008,9 +1992,9 @@ export async function handleRegisterPrTracking(input: {
         {
           repoFullName: input.repoFullName,
           prNumber: input.prNumber,
-          when: input.when,
-          nextStep: input.nextStep,
-          expiresAt: input.expiresAt,
+          ...(input.nextStep !== undefined ? { nextStep: input.nextStep } : {}),
+          ...(input.include !== undefined ? { include: input.include } : {}),
+          ...(input.exclude !== undefined ? { exclude: input.exclude } : {}),
         },
         agentKeyOptions(input),
       ),
@@ -2022,30 +2006,18 @@ export async function handleRegisterPrTracking(input: {
 export const registerIssueTrackingInputSchema = {
   repoFullName: z.string().min(1).describe('Repository full name in owner/repo format (e.g. "zts212653/cat-cafe")'),
   issueNumber: z.number().int().positive().describe('Issue number'),
-  when: z
-    .array(
-      z.discriminatedUnion('kind', [
-        z.object({ kind: z.literal('issue_comment_added') }).strict(),
-        z.object({ kind: z.literal('issue_author_commented') }).strict(),
-      ]),
-    )
-    .min(1)
-    .max(4)
-    .describe('One to four typed issue conditions, evaluated as flat any-of against a server-frozen baseline.'),
   nextStep: z
     .string()
     .min(1)
     .max(500)
-    .describe('What to do after a match. Display-only text; never parsed as wake policy.'),
-  expiresAt: z.number().int().positive().describe('Unix timestamp in milliseconds when responsibility expires.'),
+    .optional()
+    .describe('Optional display-only reminder of what you will do when someone comments. Never parsed as wake policy.'),
 };
 
 export async function handleRegisterIssueTracking(input: {
   repoFullName: string;
   issueNumber: number;
-  when: Array<{ kind: 'issue_comment_added' } | { kind: 'issue_author_commented' }>;
-  nextStep: string;
-  expiresAt: number;
+  nextStep?: string;
   agentKeyCatId?: string | undefined;
 }): Promise<ToolResult> {
   return withDegradation({
@@ -2056,9 +2028,7 @@ export async function handleRegisterIssueTracking(input: {
         {
           repoFullName: input.repoFullName,
           issueNumber: input.issueNumber,
-          when: input.when,
-          nextStep: input.nextStep,
-          expiresAt: input.expiresAt,
+          ...(input.nextStep !== undefined ? { nextStep: input.nextStep } : {}),
         },
         agentKeyOptions(input),
       ),
@@ -3766,12 +3736,10 @@ export const callbackTools = [
   defineCanonicalTool({
     name: 'cat_cafe_register_pr_tracking',
     description:
-      'Register one explicit, bounded PR wait for the current task owner. ' +
-      'Use when: you can name the exact typed GitHub condition that changes your next action, such as a new HEAD, review result, terminal executable CI, anchored review thread change, or new conflict. ' +
-      'NOT for: generic PR activity, bare @codex review chatter, arbitrary comments, another cat’s responsibility, or a different PR subject. ' +
-      'Output: validates subject/owner, freezes a live GitHub baseline, and atomically installs the next generation. Registration history is baseline, never a wake. ' +
-      'GOTCHA: For exact-HEAD external PR review, run the Review Entry Mode Classifier before registration: formal instructions containing a no-comment / do-not-comment-on-GitHub directive fail closed; only explicit advisory_read_only may stay private, and advisory must never claim review-complete. ' +
-      'GOTCHA: `when` is 1–4 flat any-of typed predicates. `nextStep` is display-only and never parsed. `expiresAt` is required and does not delete task history.',
+      'Track GitHub activity for one PR and route every selected new event back to this registration thread. ' +
+      'Use when: this thread owns follow-up for the PR. ' +
+      'Output: validates the PR, freezes current source frontiers, and registers durable tracking. Existing history is never replayed. ' +
+      "GOTCHA: six events are on for everyone (formal review, conversation comment, inline comment, CI terminal, conflict, base-behind), plus a seventh that depends on your role: `bot_interaction` (a bot round — your `@codex review` and the answer it gets) is on when you are the PR author and off when you are not, so a maintainer is not spammed by someone else's bot round and adds it with `include`. `head_changed` is off unless included. Use `exclude` only to disable an event explicitly. Your own activity never wakes you, but it still opens a bot round, so an unanswered round is reported to you. Tracking does not expire.",
     inputSchema: registerPrTrackingInputSchema,
     handler: handleRegisterPrTracking,
     governance: {
@@ -3786,11 +3754,10 @@ export const callbackTools = [
   defineCanonicalTool({
     name: 'cat_cafe_register_issue_tracking',
     description:
-      'Register one explicit, bounded GitHub issue wait for the current task owner. ' +
-      'Use when: you can name the exact typed issue condition that changes your next action: any new comment, or a comment by the exact issue author. ' +
-      'NOT for: generic issue activity, actor-type guessing, source prose, another cat’s responsibility, or a different issue subject. ' +
-      'Output: validates subject/owner, freezes a live issue baseline, and atomically installs the next generation. Registration history is baseline, never a wake. ' +
-      'GOTCHA: `when` is a bounded typed predicate set. `nextStep` is display-only and never parsed. `expiresAt` is required and does not delete task history.',
+      'Track one GitHub issue and route every new external comment back to this registration thread. ' +
+      'Use when: this thread owns follow-up for the issue. ' +
+      'Output: validates the issue, freezes the current comment frontier, and registers durable tracking. Existing history is never replayed. ' +
+      'GOTCHA: give only the repo and number (plus an optional next-step reminder). Human and bot comments both notify; your own comments do not. Tracking does not expire.',
     inputSchema: registerIssueTrackingInputSchema,
     handler: handleRegisterIssueTracking,
     governance: {

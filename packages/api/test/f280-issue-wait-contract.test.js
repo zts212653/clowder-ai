@@ -10,7 +10,7 @@ const { canonicalizeGitHubIssueWaitPredicates, matchGitHubWaitPredicates } = awa
   '../dist/domains/github-signals/GitHubWaitPredicateCatalog.js'
 );
 
-function issueAwaitState(when = [{ kind: 'issue_author_commented' }]) {
+function issueAwaitState(when = [{ kind: 'issue_comment_added' }]) {
   return {
     issue: {
       lastCommentCursor: 40,
@@ -47,9 +47,9 @@ describe('F280 Phase C issue predicate contract', () => {
     assert.deepEqual(canonicalizeGitHubIssueWaitPredicates([{ kind: 'issue_comment_added' }]), [
       { kind: 'issue_comment_added' },
     ]);
-    assert.deepEqual(canonicalizeGitHubIssueWaitPredicates([{ kind: 'issue_author_commented' }]), [
-      { kind: 'issue_author_commented' },
-    ]);
+    // F280 section 4b removed issue_author_commented: prose/role-shaped issue predicates were
+    // the second pipeline that let a body classifier short-circuit ahead of the echo check.
+    assert.throws(() => canonicalizeGitHubIssueWaitPredicates([{ kind: 'issue_author_commented' }]));
     assert.throws(() => canonicalizeGitHubIssueWaitPredicates([{ kind: 'issue_closed' }]));
     assert.throws(() => canonicalizeGitHubIssueWaitPredicates([{ kind: 'pr_head_changed' }]));
   });
@@ -69,27 +69,18 @@ describe('F280 Phase C issue predicate contract', () => {
       },
     };
 
-    const authorOnly = matchGitHubWaitPredicates([{ kind: 'issue_author_commented' }], baseline, facts);
-    assert.deepEqual(authorOnly, [
-      {
-        kind: 'issue_author_commented',
-        delta: 'issue author issue-author commented (#42)',
-        sourceRef: 'github:issue-comment:42',
-      },
-    ]);
-    assert.equal(JSON.stringify(authorOnly).includes('comment body'), false);
-
     const anyComment = matchGitHubWaitPredicates([{ kind: 'issue_comment_added' }], baseline, facts);
     assert.equal(anyComment.length, 2);
     assert.deepEqual(
       anyComment.map((match) => match.kind),
       ['issue_comment_added', 'issue_comment_added'],
     );
+    assert.equal(JSON.stringify(anyComment).includes('comment body'), false);
   });
 });
 
 describe('F280 Phase C issue wait lifecycle', () => {
-  it('keeps unrelated issue comments state-only, then consumes once for the explicit predicate', async () => {
+  it('keeps already-seen issue comments state-only, then consumes a new one exactly once', async () => {
     const taskStore = new TaskStore();
     const messageStore = new MessageStore();
     const eventLog = new MemoryWaitLifecycleEventLog();
@@ -112,21 +103,22 @@ describe('F280 Phase C issue wait lifecycle', () => {
       log: { info() {}, warn() {}, error() {} },
     });
 
-    const unrelated = await lifecycle.observe({
+    // The frozen baseline is the ONLY thing that decides "already seen" — not who wrote it.
+    const alreadySeen = await lifecycle.observe({
       taskId: task.id,
       facts: {
         issue: {
           state: 'open',
-          comments: [{ id: 41, author: 'automation-bot', sourceRef: 'github:issue-comment:41' }],
+          comments: [{ id: 40, author: 'automation-bot', sourceRef: 'github:issue-comment:40' }],
         },
       },
       collectorPatch: {
-        issue: { lastCommentCursor: 41, lastDeliveredCursor: 41, issueState: 'open' },
+        issue: { lastCommentCursor: 40, lastDeliveredCursor: 40, issueState: 'open' },
       },
     });
-    assert.equal(unrelated.kind, 'state_only');
+    assert.equal(alreadySeen.kind, 'state_only');
     assert.equal(messageStore.getByThread('thread_issue').length, 0);
-    assert.equal((await taskStore.get(task.id)).automationState.issue.lastCommentCursor, 41);
+    assert.equal((await taskStore.get(task.id)).automationState.issue.lastCommentCursor, 40);
 
     const matched = await lifecycle.observe({
       taskId: task.id,
@@ -153,7 +145,7 @@ describe('F280 Phase C issue wait lifecycle', () => {
     assert.equal(matched.kind, 'notified');
     assert.notEqual(replay.kind, 'notified');
     assert.match(matched.content, /Issue wait satisfied/);
-    assert.match(matched.content, /issue author issue-author commented \(#42\)/);
+    assert.match(matched.content, /issue comment #42 added by issue-author/);
     assert.doesNotMatch(matched.content, /UNTRUSTED EXTERNAL CONTENT/);
     assert.deepEqual(messageStore.getByThread('thread_issue')[0].source?.meta?.waitContinuationCarrier, {
       v: 1,
