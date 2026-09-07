@@ -16,6 +16,7 @@ import {
   buildCodexConfigPatches,
   buildStrategyPayload,
   builtinAccountIdForClient,
+  type ClientId,
   type CodexRuntimeSettings,
   DEFAULT_ANTIGRAVITY_COMMAND_ARGS,
   filterAccounts,
@@ -354,7 +355,7 @@ export function HubCatEditor({ cat, draft, existingCats, hasDossier, open, onClo
       }
       return normalized; // fallback — backend will catch it
     });
-    patchForm({
+    const patch: Parameters<typeof patchForm>[0] = {
       name,
       displayName: name,
       nickname: t.nickname ?? '',
@@ -366,7 +367,13 @@ export function HubCatEditor({ cat, draft, existingCats, hasDossier, open, onClo
       teamStrengths: t.teamStrengths ?? '',
       catId,
       mentionPatterns: joinTags(deduped),
-    });
+    };
+    // #768: auto-set client from template's defaultClient
+    if (t.defaultClient) {
+      patch.clientId = t.defaultClient as ClientId;
+      patch.defaultModel = '';
+    }
+    patchForm(patch);
   };
 
   const requestClose = async () => {
