@@ -570,7 +570,13 @@ export function SessionChainPanel({
                 )}
                 {/* Context health bar (already shows % internally, no duplicate text) */}
                 {health && <ContextHealthBar catId={session.catId} health={health} />}
-                <div className="mt-1 flex flex-wrap items-center gap-1.5">
+                {/* Lifecycle actions act on this session's own state. Linkage (bind) is a
+                    separate row below because it changes WHICH runtime session this card
+                    points at, not this session's state. */}
+                <div
+                  data-testid={`session-lifecycle-actions-${session.id}`}
+                  className="mt-1 flex flex-wrap items-center gap-1.5"
+                >
                   {session.cliSessionId && (
                     <button
                       type="button"
@@ -582,7 +588,7 @@ export function SessionChainPanel({
                           ? '请先停止该 Agent，再压缩原生上下文'
                           : '请求 provider 原生压缩并保留 Clowder AI continuity'
                       }
-                      className="rounded border border-cafe-subtle px-2 py-0.5 text-micro text-cafe-secondary hover:bg-cafe-surface-elevated disabled:cursor-not-allowed disabled:opacity-50"
+                      className="rounded border border-cafe-subtle px-2 py-0.5 text-micro text-cafe-secondary hover:bg-[var(--console-hover-bg)] disabled:cursor-not-allowed disabled:opacity-50"
                     >
                       {compactingSessionId === session.id ? '压缩中…' : '原生压缩'}
                     </button>
@@ -590,13 +596,7 @@ export function SessionChainPanel({
                   <button
                     type="button"
                     data-testid={`seal-session-${session.id}`}
-                    className="rounded border border-[var(--_accent-20)] px-2 py-0.5 text-micro text-[var(--color-cafe-accent)] hover:bg-[var(--_accent-5)] disabled:cursor-not-allowed disabled:opacity-50"
-                    style={
-                      {
-                        '--_accent-20': 'color-mix(in oklch, var(--color-cafe-accent) 20%, transparent)',
-                        '--_accent-5': 'color-mix(in oklch, var(--color-cafe-accent) 5%, transparent)',
-                      } as React.CSSProperties
-                    }
+                    className="rounded border border-cafe-subtle px-2 py-0.5 text-micro text-cafe-secondary hover:bg-[var(--console-hover-bg)] disabled:cursor-not-allowed disabled:opacity-50"
                     onClick={() => void handleSeal(session.id)}
                     disabled={sealingSessionId !== null || isStale || invocationIsActive}
                     title={invocationIsActive ? '请先停止该 Agent，再封存会话' : '封存当前会话；下次激活将使用新会话'}
