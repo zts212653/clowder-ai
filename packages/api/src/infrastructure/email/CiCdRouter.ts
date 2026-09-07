@@ -14,11 +14,10 @@ import type {
   GitHubWaitLifecycleResult,
   GitHubWaitLifecycleService,
 } from '../../domains/github-signals/GitHubWaitLifecycleService.js';
+import { projectWaitWakeDisposition } from '../../domains/github-signals/WaitWakeDisposition.js';
 import type { CiBucket, CiPollResult, CiRouteResult } from './ci-cd-contract.js';
-import { buildCiMessageContent, buildLifecycleMessageContent } from './ci-message-content.js';
 import type { ConnectorDeliveryDeps } from './deliver-connector-message.js';
 
-export { buildCiMessageContent, buildLifecycleMessageContent };
 export type {
   CiBucket,
   CiCheckDetail,
@@ -142,20 +141,37 @@ export function settleEmptyCheckRollup(
   };
 }
 
-function routeFromLifecycle(
-  result: GitHubWaitLifecycleResult,
-  bucket: CiBucket,
-  prState?: 'merged' | 'closed',
-): CiRouteResult {
+/**
+ * sol R34: the route shape describes the OUTCOME BEING DELIVERED, never the poll that happened to
+ * deliver it.
+ *
+ * The terminal state used to arrive as a parameter, read off the CURRENT poll. So an unevaluated
+ * re-publish — a review outcome an earlier connector failure left pending — was dressed as a
+ * lifecycle result the moment any later poll saw the PR merged: the delivered content was a
+ * review comment while the wake claimed `github_pr_merged`, and when that merge was our own
+ * identity the TaskSpec's self-merge skip swallowed the wake entirely. The comment reached the
+ * thread and its owner was never admitted, which is the silent-mute class A26 ranks worst.
+ *
+ * Reading `outcome.terminalSubjectState` is not a guard added in front of the old parameter — the
+ * parameter is GONE, so this poll's own state can no longer reach the decision at all. The
+ * terminal observation is not lost either: `recoverTerminalSideEffects` still records world truth
+ * from it, and the round that actually evaluates it produces an outcome that carries it.
+ * ReviewFeedbackRouter has classified from the outcome all along; this is the sibling that did not.
+ */
+function routeFromLifecycle(result: GitHubWaitLifecycleResult, bucket: CiBucket): CiRouteResult {
   if (result.kind === 'notified') {
-    if (prState) {
+    const terminalState = result.outcome.terminalSubjectState;
+    if (terminalState) {
       return {
         kind: 'lifecycle',
         threadId: result.task.threadId,
         catId: result.task.ownerCatId ?? '',
         messageId: result.messageId,
-        prState,
+        prState: terminalState,
         content: result.content,
+        // The same shared outcome reaches this shape too: a suppressed one must not be woken
+        // just because a terminal PR state routed it down the lifecycle arm.
+        ...projectWaitWakeDisposition(result),
       };
     }
     return {
@@ -166,6 +182,9 @@ function routeFromLifecycle(
       bucket,
       content: result.content,
       headSha: result.outcome.subjectRef,
+      // sol R33: this poll may be re-publishing an outcome REVIEW created. Its wake decision
+      // rides with it; the CI bucket above describes a different observation.
+      ...projectWaitWakeDisposition(result),
     };
   }
   return {
@@ -220,7 +239,7 @@ export class CiCdRouter {
         await this.opts.taskStore.update(task.id, { status: 'done' });
       }
     }
-    return routeFromLifecycle(lifecycle, waitBucket, terminal);
+    return routeFromLifecycle(lifecycle, waitBucket);
   }
 
   private async skipDisabledCi(task: TaskItem): Promise<CiRouteResult | null> {
@@ -256,6 +275,24 @@ export class CiCdRouter {
   ): Promise<GitHubWaitLifecycleResult> {
     return this.opts.waitLifecycle.observe({
       taskId: task.id,
+      events: [
+        {
+          type: 'pr_head_changed',
+          source: 'pr_head',
+          id: poll.headSha,
+          summary: `HEAD changed to ${poll.headSha.slice(0, 7)}`,
+        },
+        ...(waitBucket === 'pass' || waitBucket === 'fail'
+          ? [
+              {
+                type: 'pr_ci_terminal' as const,
+                source: 'pr_ci' as const,
+                id: fingerprint,
+                summary: `CI reached ${waitBucket} (${poll.checks.filter((check) => check.bucket === 'fail').length} blockers)`,
+              },
+            ]
+          : []),
+      ],
       facts: {
         headSha: poll.headSha,
         ci: {

@@ -4,9 +4,7 @@ import { describe, test } from 'node:test';
 const { TaskStore } = await import('../dist/domains/cats/services/stores/ports/TaskStore.js');
 const { MessageStore } = await import('../dist/domains/cats/services/stores/ports/MessageStore.js');
 const { GitHubWaitLifecycleService } = await import('../dist/domains/github-signals/GitHubWaitLifecycleService.js');
-const { ReviewFeedbackRouter, buildReviewFeedbackContent } = await import(
-  '../dist/infrastructure/email/ReviewFeedbackRouter.js'
-);
+const { ReviewFeedbackRouter } = await import('../dist/infrastructure/email/ReviewFeedbackRouter.js');
 
 async function setup(when) {
   const taskStore = new TaskStore();
@@ -84,8 +82,8 @@ describe('ReviewFeedbackRouter F280 typed waits', () => {
     const { router, task, messageStore } = await setup([{ kind: 'pr_review_decision_changed' }]);
     const result = await router.route(signal(), { taskId: task.id });
     assert.equal(result.kind, 'notified');
-    assert.match(result.content, /review pending → CHANGES_REQUESTED/);
-    assert.equal(result.content.includes('SOURCE_BODY_SHOULD_NEVER_RENDER'), false);
+    assert.match(result.content, /formal review CHANGES_REQUESTED #31 by reviewer/);
+    assert.match(result.content, /\[UNTRUSTED EXTERNAL CONTENT\] SOURCE_BODY_SHOULD_NEVER_RENDER/);
     assert.equal(messageStore.getByThread('thread_1').length, 1);
   });
 
@@ -113,20 +111,29 @@ describe('ReviewFeedbackRouter F280 typed waits', () => {
     assert.equal((await taskStore.get(task.id)).automationState.review.lastConversationCommentCursor, 21);
   });
 
-  test('conversation-only clean result consumes the exact wait once without a review decision cursor', async () => {
-    const { router, task, messageStore } = await setup([{ kind: 'pr_review_result_available' }]);
+  // F280 A29: the bot's own answer closes the turn and wakes the subscriber exactly once.
+  // This replaces the retired pr_review_result_available channel, where the caller had to
+  // register a triggerCommentId by hand and guessing wrong produced silence.
+  test('a bot answer consumes the bot_interaction wait once, without any review decision cursor', async () => {
+    const { router, task, messageStore } = await setup([{ kind: 'pr_bot_interaction' }]);
     const clean = signal({
-      newComments: [],
+      newComments: [
+        {
+          id: 21,
+          author: 'chatgpt-codex-connector[bot]',
+          body: "Codex Review: Didn't find any major issues.",
+          createdAt: '2026-07-30T00:10:00Z',
+          commentType: 'conversation',
+        },
+      ],
       newDecisions: [],
       conversationCommentCursor: 21,
       decisionCursor: 30,
-      resultSourceRef: 'conversation:21',
-      resultConversationCommentCursor: 21,
     });
 
     const first = await router.route(clean, { taskId: task.id });
     assert.equal(first.kind, 'notified');
-    assert.match(first.content, /RESULT_AVAILABLE/);
+    assert.match(first.content, /Didn't find any major issues/);
     assert.equal(messageStore.getByThread('thread_1').length, 1);
 
     const replay = await router.route(clean, { taskId: task.id });
@@ -135,7 +142,7 @@ describe('ReviewFeedbackRouter F280 typed waits', () => {
   });
 
   test('terminal PR truth observed by the review collector consumes an active wait', async () => {
-    const { router, task, messageStore, taskStore } = await setup([{ kind: 'pr_review_result_available' }]);
+    const { router, task, messageStore, taskStore } = await setup([{ kind: 'pr_bot_interaction' }]);
     const result = await router.route(
       signal({
         newComments: [],
@@ -157,23 +164,51 @@ describe('ReviewFeedbackRouter F280 typed waits', () => {
   });
 });
 
-describe('review preview renderer', () => {
-  test('does not include review/comment bodies or caller instructions', () => {
-    const content = buildReviewFeedbackContent(
+describe('ReviewFeedbackRouter external comment wiring', () => {
+  test('a conversation comment wakes the owner exactly once', async () => {
+    const { router, task, messageStore } = await setup([{ kind: 'pr_conversation_comment_added' }]);
+    const result = await router.route(
       signal({
         newComments: [
           {
             id: 21,
-            author: 'human',
-            body: 'SOURCE_SENTINEL',
+            author: 'Maintainer',
+            body: 'please rebase',
             createdAt: '2026-07-30T00:00:00Z',
             commentType: 'conversation',
           },
         ],
+        newDecisions: [],
+        conversationCommentCursor: 21,
+        decisionCursor: 30,
       }),
-      'LEGACY_SENTINEL',
+      { taskId: task.id },
     );
-    assert.equal(content.includes('SOURCE_SENTINEL'), false);
-    assert.equal(content.includes('LEGACY_SENTINEL'), false);
+    assert.equal(result.kind, 'notified');
+    assert.match(result.content, /conversation comment #21 by Maintainer/);
+    assert.equal(messageStore.getByThread('thread_1').length, 1);
+  });
+
+  test('a conversation comment by any external author wakes without an audience allowlist', async () => {
+    const { router, task, messageStore } = await setup([{ kind: 'pr_conversation_comment_added' }]);
+    const result = await router.route(
+      signal({
+        newComments: [
+          {
+            id: 21,
+            author: 'random-drive-by',
+            body: 'noise',
+            createdAt: '2026-07-30T00:00:00Z',
+            commentType: 'conversation',
+          },
+        ],
+        newDecisions: [],
+        conversationCommentCursor: 21,
+        decisionCursor: 30,
+      }),
+      { taskId: task.id },
+    );
+    assert.equal(result.kind, 'notified');
+    assert.equal(messageStore.getByThread('thread_1').length, 1);
   });
 });

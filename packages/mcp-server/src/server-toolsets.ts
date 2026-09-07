@@ -209,6 +209,17 @@ function registerTools(server: McpServer, tools: readonly ToolDef[], env: Toolse
       typeof schema.type === 'string' && typeof schema.properties === 'object' && schema.properties !== null
         ? jsonSchemaToZod(schema)
         : z.object(schema as z.ZodRawShape);
+    // #1392 AC: the registration tools must REJECT a retired parameter, never strip it.
+    // A default Zod object drops unknown keys, so a caller passing `when` / `expiresAt` got
+    // success back while the server quietly registered something else — the exact
+    // "you asked for X, you silently get no notification" failure #1392 exists to remove.
+    // The contract tests missed it because they wrapped the raw shape in `.strict()`
+    // themselves and so asserted a strictness the server never applied.
+    // Scoped to these two deliberately: widening silent-drop rejection to every tool is a
+    // separate blast radius and a separate decision.
+    if (tool.name === 'cat_cafe_register_pr_tracking' || tool.name === 'cat_cafe_register_issue_tracking') {
+      zodSchema = zodSchema.strict();
+    }
     if (postMessagePrincipal === 'invocation') {
       // Omitting threadId from tools/list is not enough: a default Zod object
       // strips unknown keys, which would erase the evidence before the handler's

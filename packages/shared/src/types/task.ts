@@ -73,6 +73,7 @@ export interface CiAutomationState {
 /** Conflict detection automation state for pr_tracking tasks */
 export interface ConflictAutomationState {
   readonly mergeState?: string;
+  readonly mergeStateStatus?: string;
   readonly lastFingerprint?: string;
   readonly lastNotifiedAt?: number;
 }

@@ -135,7 +135,16 @@ describe('ConflictCheckTaskSpec + AutoExecutor integration', () => {
       checkMergeable: async () => ({ mergeState: 'CONFLICTING', headSha: 'sha1' }),
       conflictRouter: {
         async route() {
-          return { kind: 'notified', threadId: 't1', catId: 'opus', messageId: 'm1', content: 'conflict!' };
+          // These cases are ABOUT the conflict path, so the stub must say the conflict matched;
+          // without it the gate correctly refuses to rewrite the branch.
+          return {
+            kind: 'notified',
+            threadId: 't1',
+            catId: 'opus',
+            messageId: 'm1',
+            content: 'conflict!',
+            matchedKinds: ['pr_became_conflicting'],
+          };
         },
       },
       autoExecutor: {
@@ -154,6 +163,57 @@ describe('ConflictCheckTaskSpec + AutoExecutor integration', () => {
     assert.equal(receivedSignal, controller.signal);
   });
 
+  /*
+   * codex R28, at the layer where the damage happens.
+   *
+   * The router emits `pr_head_changed` on every poll, so a tracker that subscribed to
+   * head_changed and EXCLUDED conflict still gets `notified` on a conflicting poll. Reading that
+   * as authorization ran F140 auto-resolve, which rebases and force-pushes the branch — a write
+   * the owner never subscribed to, which then swallowed the head wake they did.
+   *
+   * Both halves are asserted: the rewrite must NOT run, and the wake must still fire. Gating the
+   * wake too would trade a write bug for a silent-mute bug, which A26 ranks as the worse one.
+   */
+  it('a head-only match neither rewrites the branch nor loses the wake', async () => {
+    const { createConflictCheckTaskSpec } = await import('../../dist/infrastructure/email/ConflictCheckTaskSpec.js');
+    let resolveCalls = 0;
+    const triggered = [];
+    const spec = createConflictCheckTaskSpec({
+      taskStore: mockTaskStore([
+        mockTask({ repoFullName: 'a/b', prNumber: 1, threadId: 't1', catId: 'opus', userId: 'u1' }),
+      ]),
+      checkMergeable: async () => ({ mergeState: 'CONFLICTING', headSha: 'sha1' }),
+      conflictRouter: {
+        async route() {
+          return {
+            kind: 'notified',
+            threadId: 't1',
+            catId: 'opus',
+            messageId: 'm1',
+            content: 'HEAD changed',
+            matchedKinds: ['pr_head_changed'],
+          };
+        },
+      },
+      autoExecutor: {
+        async resolve() {
+          resolveCalls += 1;
+          return { kind: 'resolved', method: 'clean-rebase', branch: 'feat/test' };
+        },
+      },
+      invokeTrigger: {
+        trigger: async (...args) => {
+          triggered.push(args);
+        },
+      },
+      log: noopLog,
+    });
+    const gateResult = await spec.admission.gate({ taskId: spec.id, lastRunAt: null, tickCount: 1 });
+    await spec.run.execute(gateResult.workItems[0].signal, 'pr:a/b#1', { assignedCatId: null });
+    assert.equal(resolveCalls, 0, 'a head-only match must not authorize a rebase/push');
+    assert.equal(triggered.length, 1, 'but the head wake it did subscribe to must still fire');
+  });
+
   it('auto-resolved conflict does NOT trigger cat (Phase C AC-C1)', async () => {
     const { createConflictCheckTaskSpec } = await import('../../dist/infrastructure/email/ConflictCheckTaskSpec.js');
     const triggered = [];
@@ -168,7 +228,16 @@ describe('ConflictCheckTaskSpec + AutoExecutor integration', () => {
       checkMergeable: async () => ({ mergeState: 'CONFLICTING', headSha: 'sha1' }),
       conflictRouter: {
         async route() {
-          return { kind: 'notified', threadId: 't1', catId: 'opus', messageId: 'm1', content: 'conflict!' };
+          // These cases are ABOUT the conflict path, so the stub must say the conflict matched;
+          // without it the gate correctly refuses to rewrite the branch.
+          return {
+            kind: 'notified',
+            threadId: 't1',
+            catId: 'opus',
+            messageId: 'm1',
+            content: 'conflict!',
+            matchedKinds: ['pr_became_conflicting'],
+          };
         },
       },
       invokeTrigger: {
@@ -200,7 +269,16 @@ describe('ConflictCheckTaskSpec + AutoExecutor integration', () => {
       checkMergeable: async () => ({ mergeState: 'CONFLICTING', headSha: 'sha1' }),
       conflictRouter: {
         async route() {
-          return { kind: 'notified', threadId: 't1', catId: 'opus', messageId: 'm1', content: 'conflict!' };
+          // These cases are ABOUT the conflict path, so the stub must say the conflict matched;
+          // without it the gate correctly refuses to rewrite the branch.
+          return {
+            kind: 'notified',
+            threadId: 't1',
+            catId: 'opus',
+            messageId: 'm1',
+            content: 'conflict!',
+            matchedKinds: ['pr_became_conflicting'],
+          };
         },
       },
       invokeTrigger: {
@@ -232,7 +310,16 @@ describe('ConflictCheckTaskSpec + AutoExecutor integration', () => {
       checkMergeable: async () => ({ mergeState: 'CONFLICTING', headSha: 'sha1' }),
       conflictRouter: {
         async route() {
-          return { kind: 'notified', threadId: 't1', catId: 'opus', messageId: 'm1', content: 'conflict!' };
+          // These cases are ABOUT the conflict path, so the stub must say the conflict matched;
+          // without it the gate correctly refuses to rewrite the branch.
+          return {
+            kind: 'notified',
+            threadId: 't1',
+            catId: 'opus',
+            messageId: 'm1',
+            content: 'conflict!',
+            matchedKinds: ['pr_became_conflicting'],
+          };
         },
       },
       invokeTrigger: {
@@ -262,7 +349,16 @@ describe('ConflictCheckTaskSpec + AutoExecutor integration', () => {
       checkMergeable: async () => ({ mergeState: 'CONFLICTING', headSha: 'abc123' }),
       conflictRouter: {
         async route() {
-          return { kind: 'notified', threadId: 't1', catId: 'opus', messageId: 'm1', content: 'conflict!' };
+          // These cases are ABOUT the conflict path, so the stub must say the conflict matched;
+          // without it the gate correctly refuses to rewrite the branch.
+          return {
+            kind: 'notified',
+            threadId: 't1',
+            catId: 'opus',
+            messageId: 'm1',
+            content: 'conflict!',
+            matchedKinds: ['pr_became_conflicting'],
+          };
         },
       },
       invokeTrigger: { trigger: () => Promise.resolve() },
@@ -284,7 +380,16 @@ describe('ConflictCheckTaskSpec + AutoExecutor integration', () => {
       checkMergeable: async () => ({ mergeState: 'CONFLICTING', headSha: 'sha1' }),
       conflictRouter: {
         async route() {
-          return { kind: 'notified', threadId: 't1', catId: 'opus', messageId: 'm1', content: 'conflict!' };
+          // These cases are ABOUT the conflict path, so the stub must say the conflict matched;
+          // without it the gate correctly refuses to rewrite the branch.
+          return {
+            kind: 'notified',
+            threadId: 't1',
+            catId: 'opus',
+            messageId: 'm1',
+            content: 'conflict!',
+            matchedKinds: ['pr_became_conflicting'],
+          };
         },
       },
       invokeTrigger: {

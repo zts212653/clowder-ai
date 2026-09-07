@@ -26,6 +26,12 @@ export interface CiPollResult {
   readonly mergedByLogin?: string;
 }
 
+/**
+ * sol R33: the wait outcome a CI poll delivers may have been created by REVIEW. Its wake
+ * decision travels with it, so both delivering shapes must carry it — required, because an
+ * object spread bypasses TypeScript's excess-property check and a silently dropped field is
+ * exactly how this rule went missing from the CI path in the first place.
+ */
 export type CiRouteResult =
   | {
       kind: 'notified';
@@ -35,6 +41,8 @@ export type CiRouteResult =
       bucket: CiBucket;
       content: string;
       headSha?: string;
+      autoWakeSuppressed: boolean;
+      observationEvaluated: boolean;
     }
   | {
       kind: 'lifecycle';
@@ -43,6 +51,8 @@ export type CiRouteResult =
       messageId: string;
       prState: 'merged' | 'closed';
       content: string;
+      autoWakeSuppressed: boolean;
+      observationEvaluated: boolean;
     }
   | { kind: 'deduped'; reason: string }
   | { kind: 'skipped'; reason: string };

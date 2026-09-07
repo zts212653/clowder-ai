@@ -145,9 +145,9 @@ import type { InitialIssueWaitSnapshot } from '../domains/github-signals/GitHubI
 import type { InitialPrWaitSnapshot } from '../domains/github-signals/GitHubWaitBaselineReader.js';
 import type { GitHubWaitLifecycleService } from '../domains/github-signals/GitHubWaitLifecycleService.js';
 import {
-  githubIssueWaitPredicatesSchema,
-  githubWaitPredicatesSchema,
-} from '../domains/github-signals/GitHubWaitPredicateCatalog.js';
+  assertPrTrackingEventNames,
+  buildPrTrackingPredicates,
+} from '../domains/github-signals/PrTrackingDefaultSet.js';
 import type { IEvidenceStore, IMarkerQueue, IReflectionService } from '../domains/memory/interfaces.js';
 import { buildThreadDeepLink } from '../infrastructure/connectors/connector-command-helpers.js';
 import { extractIssueTrackingClaims, extractPrTrackingClaims } from '../infrastructure/grounding/claim-extractors.js';
@@ -879,27 +879,19 @@ export interface CallbackRoutesOptions {
   /** F202 Phase 2 follow-up: validates specific issue exists (number-level validation) */
   validateIssue?: (repoFullName: string, issueNumber: number) => Promise<boolean>;
   /** F280: server-owned baseline and collector frontier for a typed PR wait. */
-  fetchPrWaitBaseline?: (
-    repoFullName: string,
-    prNumber: number,
-    when: readonly GitHubPrWaitPredicate[],
-  ) => Promise<InitialPrWaitSnapshot>;
-  /** F177 Phase J: server-side proof that the cloud review callback owns the current wait. */
-  verifyPrReviewEventWaitCoverage?: (input: {
-    repoFullName: string;
-    prNumber: number;
-    triggerCommentId: number;
-  }) => Promise<
-    | { covered: true; triggerCommentId: number; observedAt: number }
-    | {
-        covered: false;
-        reason: 'subject_mismatch' | 'not_review_trigger' | 'review_not_accepted' | 'feedback_already_posted';
-        triggerCommentId: number;
-        observedAt: number;
-      }
-  >;
+  fetchPrWaitBaseline?: (repoFullName: string, prNumber: number) => Promise<InitialPrWaitSnapshot>;
   /** Late-bound so callback registration and boot migration share the lifecycle owner. */
   waitLifecycleHolder?: { current?: Pick<GitHubWaitLifecycleService, 'recordOutcomeEvent'> };
+  /**
+   * F280 section 2.4b: late-bound "is this login us?" check, resolved from the SAME GitHub
+   * identity the poller filters with.
+   *
+   * THREE-STATE ON PURPOSE. The echo filter answers `false` both for "definitely not you" and
+   * for "I could not resolve who you are", and collapsing those two here silently turned an
+   * unknown identity into "not the author" — which switched `bot_interaction` OFF, the exact
+   * opposite of what section 2.4b promises for an unresolvable role.
+   */
+  githubSelfIdentity?: { resolveIsSelf?: (login: string) => boolean | undefined };
   /** F168 F-Step3: invocation-bound atomic verdict + delivery-custody recorder. */
   externalReviewVerdictService?: Pick<ExternalReviewVerdictService, 'record'>;
   /** F167: settle stale external-review lease when GitHub HEAD has advanced. */
@@ -5356,9 +5348,9 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
         .min(1)
         .regex(/^[^/]+\/[^/]+$/, 'Must be owner/repo format'),
       prNumber: z.number().int().positive(),
-      when: githubWaitPredicatesSchema,
-      nextStep: z.string().trim().min(1).max(500),
-      expiresAt: z.number().int().positive(),
+      include: z.array(z.string().trim().min(1)).max(9).optional(),
+      exclude: z.array(z.string().trim().min(1)).max(9).optional(),
+      nextStep: z.string().trim().min(1).max(500).optional(),
     })
     .strict();
 
@@ -5384,11 +5376,16 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
       return deletedThreadGuard.body;
     }
 
-    const { repoFullName, prNumber, when, nextStep, expiresAt } = parsed.data;
-    if (expiresAt <= Date.now()) {
+    const { repoFullName, prNumber, include, exclude, nextStep: nextStepInput } = parsed.data;
+    // Names are checked BEFORE any GitHub round-trip: a typo is the caller's mistake and must
+    // come back as 400, never as "GitHub was slow, try again".
+    try {
+      assertPrTrackingEventNames({ include, exclude });
+    } catch (e) {
       reply.status(400);
-      return { error: 'expiresAt must be in the future' };
+      return { error: e instanceof Error ? e.message : 'invalid include/exclude event names' };
     }
+    const nextStep = nextStepInput ?? 'Handle the PR tracking update';
 
     // Use authoritative catId from invocation record, not caller payload.
     const catId = record.catId;
@@ -5471,39 +5468,21 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
       }
       let snapshot: InitialPrWaitSnapshot;
       try {
-        snapshot = await fetchPrWaitBaseline(repoFullName, prNumber, when);
+        snapshot = await fetchPrWaitBaseline(repoFullName, prNumber);
       } catch {
         reply.status(503);
         return { error: 'PR wait baseline unavailable — try again later' };
       }
-
-      const triggerCommentIds = when.flatMap((predicate) =>
-        predicate.kind === 'pr_review_result_available' && predicate.triggerCommentId !== undefined
-          ? [predicate.triggerCommentId]
-          : [],
-      );
-      if (triggerCommentIds.length > 0) {
-        if (!record.invocationId || !opts.verifyPrReviewEventWaitCoverage) {
-          reply.status(503);
-          return { error: 'Exact review-result coverage verifier not configured' };
-        }
-        try {
-          for (const triggerCommentId of triggerCommentIds) {
-            const coverage = await opts.verifyPrReviewEventWaitCoverage({
-              repoFullName,
-              prNumber,
-              triggerCommentId,
-            });
-            if (!coverage.covered) {
-              reply.status(422);
-              return { error: 'Review-result trigger is not covered', reason: coverage.reason };
-            }
-          }
-        } catch {
-          reply.status(503);
-          return { error: 'Review-result coverage unavailable — try again later' };
-        }
-      }
+      // F280 section 2.4b: role picks the default, the caller never names it. `undefined`
+      // (author or our own identity unknown) arms the role-defaulted events — see A26.
+      const resolveIsSelf = opts.githubSelfIdentity?.resolveIsSelf;
+      const registrantIsPrAuthor =
+        snapshot.authorLogin && resolveIsSelf ? resolveIsSelf(snapshot.authorLogin) : undefined;
+      const when: readonly GitHubPrWaitPredicate[] = buildPrTrackingPredicates({
+        include,
+        exclude,
+        ...(registrantIsPrAuthor === undefined ? {} : { registrantIsPrAuthor }),
+      });
 
       const taskInput = {
         kind: 'pr_tracking',
@@ -5511,10 +5490,17 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
         threadId: record.threadId,
         title: `PR tracking: ${repoFullName}#${prNumber}`,
         ownerCatId: catId,
-        why: `Waiting on typed GitHub predicates for ${repoFullName}#${prNumber}.`,
+        why: `Notify this thread about external GitHub activity on ${repoFullName}#${prNumber}.`,
         createdBy: catId,
         userId: record.userId,
       } as const;
+      // #1394 section 2.5b: only a STILL-LIVE wait holds its frontier. A tracker whose
+      // lifecycle already ended (merged / closed / unregistered -> status done) is a fresh
+      // start when re-registered, so it must re-freeze at now exactly like a first
+      // registration. Read the status BEFORE the upsert: upsertBySubject resets a done
+      // tracking task back to 'todo'.
+      const priorTask = await taskStore.getBySubject(subjectKey);
+      const priorWaitIsLive = Boolean(priorTask) && priorTask?.status !== 'done';
       const task = record.managedWorkBinding
         ? await taskStore.upsertBySubjectWithManagedWorkBinding(taskInput, record.managedWorkBinding)
         : await taskStore.upsertBySubject(taskInput);
@@ -5526,13 +5512,17 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
         generation,
         subjectRef: subjectKey,
         ownerFence: { kind: 'containing_task', generation },
-        baseline: snapshot.baseline,
+        // F280 section 2.5b: re-registration may hold or rewind a frontier, never advance it,
+        // so a still-live tracker keeps its whole baseline — open bot rounds included. Rounds
+        // now come only from the poll stream, so the live state is the only place they exist;
+        // overwriting the baseline here is how a cat lost the round it had just opened.
+        baseline: (priorWaitIsLive ? previousState?.await?.baseline : undefined) ?? snapshot.baseline,
         continuation: {
           when,
           // biome-ignore lint/suspicious/noThenProperty: F280's frozen wait contract names this field `then`.
           then: nextStep,
         },
-        expiresAt,
+        autoRenew: true,
         createdAt: Date.now(),
         provenance: 'explicit_registration',
       };
@@ -5545,11 +5535,16 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
         : undefined;
       const supersededOutcome =
         superseded?.applied === true ? (superseded.state as PrAutomationState).waitOutcome : undefined;
+      // #1394 §2.5b: re-registration may hold or rewind the frontier, never advance it.
+      // Re-freezing at the live snapshot silently drops everything that arrived between
+      // the old frontier and now (cat woken for #100 -> works -> #101/#102 arrive -> cat
+      // re-registers -> #101/#102 are never delivered). First registration still freezes
+      // at now, so section 4 A12 (pre-registration history never fires) is unaffected.
       const replacement: PrAutomationState = {
-        ...(previousState?.review ? { review: previousState.review } : {}),
-        ...(previousState?.ci ? { ci: previousState.ci } : {}),
-        ...(previousState?.conflict ? { conflict: previousState.conflict } : {}),
         ...snapshot.collectorState,
+        ...(priorWaitIsLive && previousState?.review ? { review: previousState.review } : {}),
+        ...(priorWaitIsLive && previousState?.ci ? { ci: previousState.ci } : {}),
+        ...(priorWaitIsLive && previousState?.conflict ? { conflict: previousState.conflict } : {}),
         await: awaitState,
         ...(supersededOutcome ? { waitOutcome: supersededOutcome } : {}),
       };
@@ -5585,7 +5580,7 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
     }
   });
 
-  // F280 Phase C: typed, one-shot issue wait registration.
+  // Issue tracking has one public shape: repo + number + optional next step.
   const registerIssueTrackingSchema = z
     .object({
       repoFullName: z
@@ -5593,9 +5588,7 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
         .min(1)
         .regex(/^[^/]+\/[^/]+$/, 'Must be owner/repo format'),
       issueNumber: z.number().int().positive(),
-      when: githubIssueWaitPredicatesSchema,
-      nextStep: z.string().min(1).max(500),
-      expiresAt: z.number().int().positive(),
+      nextStep: z.string().min(1).max(500).optional(),
     })
     .strict();
 
@@ -5620,11 +5613,9 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
       return deletedThreadGuard.body;
     }
 
-    const { repoFullName, issueNumber, when, nextStep, expiresAt } = parsed.data;
-    if (expiresAt <= Date.now()) {
-      reply.status(400);
-      return { error: 'expiresAt must be in the future' };
-    }
+    const { repoFullName, issueNumber, nextStep: nextStepInput } = parsed.data;
+    const when = [{ kind: 'issue_comment_added' as const }];
+    const nextStep = nextStepInput ?? 'Handle the issue tracking update';
     const catId = record.catId;
 
     // F167 Phase O PR-O2b: shadow grounding telemetry with real claim extraction.
@@ -5724,10 +5715,17 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
         threadId: record.threadId,
         title: `Issue tracking: ${repoFullName}#${issueNumber}`,
         ownerCatId: catId,
-        why: `Waiting on typed GitHub issue predicates for ${repoFullName}#${issueNumber}.`,
+        why: `Notify this thread about external GitHub comments on ${repoFullName}#${issueNumber}.`,
         createdBy: catId,
         userId: record.userId,
       } as const;
+      // #1394 section 2.5b: only a STILL-LIVE wait holds its frontier. A tracker whose
+      // lifecycle already ended (merged / closed / unregistered -> status done) is a fresh
+      // start when re-registered, so it must re-freeze at now exactly like a first
+      // registration. Read the status BEFORE the upsert: upsertBySubject resets a done
+      // tracking task back to 'todo'.
+      const priorTask = await taskStore.getBySubject(subjectKey);
+      const priorWaitIsLive = Boolean(priorTask) && priorTask?.status !== 'done';
       const task = record.managedWorkBinding
         ? await taskStore.upsertBySubjectWithManagedWorkBinding(taskInput, record.managedWorkBinding)
         : await taskStore.upsertBySubject(taskInput);
@@ -5739,13 +5737,13 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
         generation,
         subjectRef: subjectKey,
         ownerFence: { kind: 'containing_task', generation },
-        baseline: snapshot.baseline,
+        baseline: (priorWaitIsLive ? previousState?.await?.baseline : undefined) ?? snapshot.baseline,
         continuation: {
           when,
           // biome-ignore lint/suspicious/noThenProperty: F280's frozen wait contract names this field `then`.
           then: nextStep,
         },
-        expiresAt,
+        autoRenew: true,
         createdAt: Date.now(),
         provenance: 'explicit_registration',
       };
@@ -5758,8 +5756,14 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
         : undefined;
       const supersededOutcome =
         superseded?.applied === true ? (superseded.state as IssueWaitAutomationState).waitOutcome : undefined;
+      // #1394 §2.5b: re-registration may hold or rewind the frontier, never advance it.
+      // Re-freezing at the live snapshot silently drops everything that arrived between
+      // the old frontier and now (cat woken for #100 -> works -> #101/#102 arrive -> cat
+      // re-registers -> #101/#102 are never delivered). First registration still freezes
+      // at now, so section 4 A12 (pre-registration history never fires) is unaffected.
       const replacement: IssueWaitAutomationState = {
         ...snapshot.collectorState,
+        ...(priorWaitIsLive && previousState?.issue ? { issue: previousState.issue } : {}),
         await: awaitState,
         ...(supersededOutcome ? { waitOutcome: supersededOutcome } : {}),
       };

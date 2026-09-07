@@ -67,7 +67,7 @@ describe('F280 wait state machine', () => {
     assert.deepEqual(replay, { applied: false, reason: 'generation_inactive', state: matched.state });
   });
 
-  it('expiry wins over a late predicate result and never requests a wake', async () => {
+  it('expiry wins over a late predicate result and terminates loudly without a match continuation', async () => {
     const { transitionWaitState } = await import(MODULE_URL.href);
     const current = { await: activeAwait({ expiresAt: 500 }) };
 
@@ -80,7 +80,11 @@ describe('F280 wait state machine', () => {
 
     assert.equal(result.applied, true);
     assert.equal(result.state.waitOutcome?.reason, 'expired');
-    assert.equal(result.state.waitOutcome?.delivery, 'not_applicable');
+    // #1392 AC-2: a caller-supplied deadline is a LOUD terminal — publishable, not silently dropped.
+    assert.equal(result.state.waitOutcome?.delivery, 'pending');
+    // ...but it carries no match continuation: the late CI match is dropped and there is no next step.
+    assert.equal(result.state.waitOutcome?.matched, undefined);
+    assert.equal(result.state.waitOutcome?.nextStep, undefined);
   });
 
   it('owner change terminalizes the old generation silently', async () => {

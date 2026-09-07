@@ -61,8 +61,41 @@ describe('ConflictRouter F280 typed waits', () => {
       mergeState: 'CONFLICTING',
     });
     assert.equal(result.kind, 'notified');
-    assert.match(result.content, /mergeable → conflicting/);
+    assert.match(result.content, /PR became conflicting/);
     assert.equal(messageStore.getByThread('thread_1').length, 1);
+  });
+
+  /*
+   * codex R28: "notified" is not authorization to rewrite the branch.
+   *
+   * This router emits `pr_head_changed` on EVERY poll, so a tracker that subscribed to
+   * head_changed and excluded conflict still returns `notified` on a conflicting poll. The
+   * caller read that as permission to run F140 auto-resolve, which rebases and pushes. The
+   * matched kinds are what authorize a write, so they have to reach the caller.
+   */
+  test('a head-only match reports its kinds, so no caller can read it as a conflict', async () => {
+    const { router } = await setup([{ kind: 'pr_head_changed' }]);
+    const result = await router.route({
+      repoFullName: 'owner/repo',
+      prNumber: 7,
+      headSha: 'bbb2222',
+      mergeState: 'CONFLICTING',
+    });
+    assert.equal(result.kind, 'notified', 'the head wake it DID subscribe to must still fire');
+    assert.deepEqual(result.matchedKinds, ['pr_head_changed']);
+    assert.ok(!result.matchedKinds.includes('pr_became_conflicting'), 'the branch rewrite is not authorized');
+  });
+
+  test('a conflict subscriber does authorize the rewrite', async () => {
+    const { router } = await setup([{ kind: 'pr_became_conflicting' }, { kind: 'pr_head_changed' }]);
+    const result = await router.route({
+      repoFullName: 'owner/repo',
+      prNumber: 7,
+      headSha: 'ccc3333',
+      mergeState: 'CONFLICTING',
+    });
+    assert.equal(result.kind, 'notified');
+    assert.ok(result.matchedKinds.includes('pr_became_conflicting'));
   });
 
   test('conflict remains state-only for a new-HEAD waiter', async () => {

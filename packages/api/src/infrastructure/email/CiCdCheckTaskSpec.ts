@@ -10,6 +10,7 @@
 import type { CatId, TaskItem } from '@cat-cafe/shared';
 import { parsePrSubjectKey } from '@cat-cafe/shared';
 import type { ITaskStore } from '../../domains/cats/services/stores/ports/TaskStore.js';
+import { mayAutoWakeOwner } from '../../domains/github-signals/WaitWakeDisposition.js';
 import type { ExecuteContext, TaskSpec_P1 } from '../scheduler/types.js';
 import type { CiCdRouter, CiPollResult, CiRouteResult } from './CiCdRouter.js';
 import type { ConnectorInvokeTrigger, ConnectorTriggerPolicy } from './ConnectorInvokeTrigger.js';
@@ -187,18 +188,35 @@ export function createCiCdCheckTaskSpec(opts: CiCdCheckTaskSpecOptions): TaskSpe
           // Skip wake when the merge was performed by our own GitHub identity —
           // the merger already knows the PR state; waking them wastes tokens.
           // Message delivery already happened inside CiCdRouter.closeLifecycle.
-          if (pollResult.mergedByLogin && opts.isSelfMerge?.(pollResult.mergedByLogin)) {
+          //
+          // sol R34, found by auditing the same axis rather than only the case reported:
+          // `mergedByLogin` is THIS poll's fact, while `routeResult` describes the outcome being
+          // delivered — which R34 decoupled from this poll. A reopened-then-merged PR can hand a
+          // self-merge to a still-pending CLOSED outcome nobody has been told about, and the skip
+          // would mute it. The skip belongs to the state it explains, so it asks the route.
+          if (
+            routeResult.prState === 'merged' &&
+            pollResult.mergedByLogin &&
+            opts.isSelfMerge?.(pollResult.mergedByLogin)
+          ) {
             opts.log.info(`[cicd-check] PR ${routeResult.prState} by self (${pollResult.mergedByLogin}) -> skip wake`);
             return;
           }
-          await triggerLifecycleWake(opts, opts.invokeTrigger, signal, routeResult);
+          // sol R33: the delivered outcome may be one REVIEW created with the R4 pause on it.
+          if (mayAutoWakeOwner(routeResult)) {
+            await triggerLifecycleWake(opts, opts.invokeTrigger, signal, routeResult);
+          }
           return;
         }
 
         if (routeResult.kind !== 'notified') return;
+        // The outcome's own decision, not this poll's. A CI poll that re-published someone
+        // else's pending outcome has established nothing about whether its owner may be woken.
+        if (!mayAutoWakeOwner(routeResult)) return;
 
         const policy: ConnectorTriggerPolicy = {
-          priority: routeResult.bucket === 'fail' ? 'urgent' : 'normal',
+          // ...and an unevaluated re-publish must not borrow THIS poll's bucket for urgency.
+          priority: routeResult.observationEvaluated && routeResult.bucket === 'fail' ? 'urgent' : 'normal',
           reason: 'github_wait_satisfied',
           sourceCategory: 'ci',
         };

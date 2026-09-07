@@ -1,9 +1,4 @@
-import type {
-  GitHubPrWaitBaseline,
-  GitHubPrWaitPredicate,
-  GitHubReviewThreadBaseline,
-  PrAutomationState,
-} from '@cat-cafe/shared';
+import type { GitHubPrWaitBaseline, PrAutomationState } from '@cat-cafe/shared';
 
 interface GithubIdItem {
   readonly id?: unknown;
@@ -21,18 +16,20 @@ export interface GitHubWaitBaselineReaderDeps {
   readonly fetchInlineComments: (repoFullName: string, prNumber: number) => Promise<readonly GithubIdItem[]>;
   readonly fetchConversationComments: (repoFullName: string, prNumber: number) => Promise<readonly GithubIdItem[]>;
   readonly fetchReviews: (repoFullName: string, prNumber: number) => Promise<readonly GithubReviewItem[]>;
-  readonly fetchMergeState: (repoFullName: string, prNumber: number) => Promise<string>;
-  readonly fetchReviewThreads: (
+  readonly fetchMergeState: (
     repoFullName: string,
     prNumber: number,
-    reviewThreadIds: readonly string[],
-  ) => Promise<readonly GitHubReviewThreadBaseline[]>;
+  ) => Promise<{ readonly mergeState: string; readonly mergeStateStatus: string }>;
+  /** F280 section 2.4b: the PR's author login, used only to pick role defaults. */
+  readonly fetchAuthorLogin?: (repoFullName: string, prNumber: number) => Promise<string | null>;
   readonly now?: () => number;
 }
 
 export interface InitialPrWaitSnapshot {
   readonly baseline: GitHubPrWaitBaseline;
   readonly collectorState: PrAutomationState;
+  /** Absent when GitHub could not tell us; the caller then defaults toward notifying. */
+  readonly authorLogin?: string;
 }
 
 function maxGithubId(items: readonly GithubIdItem[]): number {
@@ -43,15 +40,26 @@ function maxGithubId(items: readonly GithubIdItem[]): number {
   return max;
 }
 
-function hasPredicate(when: readonly GitHubPrWaitPredicate[], ...kinds: GitHubPrWaitPredicate['kind'][]): boolean {
-  return when.some((predicate) => kinds.includes(predicate.kind));
-}
-
+/**
+ * Registration freezes frontiers. It does not look for open bot rounds.
+ *
+ * It used to: it scanned conversation history for a summon that looked like ours, asked a
+ * coverage verifier whether the bot had reacted, and stamped the round with the registering
+ * `invocationId` so F177 could clean-stop on it the same turn. Every part of that was a
+ * different way of being wrong. The scan reads HISTORY, so the stamp landed on a summon some
+ * EARLIER turn wrote, and a brand-new invocation inherited an exit it never earned. The
+ * verifier reads an `EYES` reaction, which is transient and can vanish between two polls. And
+ * the whole branch was reachable only through the MCP registration path, so production
+ * behaviour was decided by code the poll path never executes.
+ *
+ * Rounds now have exactly one origin — F280 section 4b — the normalized stream, after the
+ * cursor, from the owner's own summon. A cat that summons a bot and stops in the same turn
+ * waits one poll interval to learn the round is open. That is the entire cost.
+ */
 export async function readGitHubWaitBaseline(
   input: {
     readonly repoFullName: string;
     readonly prNumber: number;
-    readonly when: readonly GitHubPrWaitPredicate[];
   },
   deps: GitHubWaitBaselineReaderDeps,
 ): Promise<InitialPrWaitSnapshot> {
@@ -60,26 +68,14 @@ export async function readGitHubWaitBaseline(
     throw new Error(`Current PR HEAD unavailable for ${input.repoFullName}#${input.prNumber}`);
   }
 
-  const needsReview = hasPredicate(
-    input.when,
-    'pr_review_result_available',
-    'pr_review_decision_changed',
-    'pr_review_thread_changed',
-  );
-  const needsCi = hasPredicate(input.when, 'pr_ci_terminal');
-  const needsConflict = hasPredicate(input.when, 'pr_became_conflicting');
-  const reviewThreadIds = input.when.flatMap((predicate) =>
-    predicate.kind === 'pr_review_thread_changed' ? predicate.reviewThreadIds : [],
-  );
-
-  const [inlineComments, conversationComments, reviews, mergeState, threads] = await Promise.all([
-    needsReview ? deps.fetchInlineComments(input.repoFullName, input.prNumber) : [],
-    needsReview ? deps.fetchConversationComments(input.repoFullName, input.prNumber) : [],
-    needsReview ? deps.fetchReviews(input.repoFullName, input.prNumber) : [],
-    needsConflict ? deps.fetchMergeState(input.repoFullName, input.prNumber) : undefined,
-    reviewThreadIds.length > 0
-      ? deps.fetchReviewThreads(input.repoFullName, input.prNumber, reviewThreadIds)
-      : Promise.resolve([]),
+  // Registration freezes every source frontier. Conditional seeding previously
+  // replayed history and made valid surfaces unmatchable after subscription changes.
+  const [inlineComments, conversationComments, reviews, merge, authorLogin] = await Promise.all([
+    deps.fetchInlineComments(input.repoFullName, input.prNumber),
+    deps.fetchConversationComments(input.repoFullName, input.prNumber),
+    deps.fetchReviews(input.repoFullName, input.prNumber),
+    deps.fetchMergeState(input.repoFullName, input.prNumber),
+    deps.fetchAuthorLogin?.(input.repoFullName, input.prNumber).catch(() => null) ?? Promise.resolve(null),
   ]);
 
   const inlineCommentCursor = maxGithubId(inlineComments);
@@ -94,54 +90,41 @@ export async function readGitHubWaitBaseline(
       ? ci.aggregateBucket
       : 'external_infrastructure';
   const capturedAt = (deps.now ?? Date.now)();
-  const resultTriggerCommentId = input.when.find(
-    (predicate): predicate is Extract<GitHubPrWaitPredicate, { kind: 'pr_review_result_available' }> =>
-      predicate.kind === 'pr_review_result_available' && predicate.triggerCommentId !== undefined,
-  )?.triggerCommentId;
 
-  const reviewState = needsReview
-    ? {
-        inlineCommentCursor,
-        conversationCommentCursor,
-        decisionCursor,
-        ...(latestReview?.state ? { decision: latestReview.state } : {}),
-        ...(resultTriggerCommentId !== undefined ? { resultTriggerCommentId, resultTriggerHeadSha: ci.headSha } : {}),
-        ...(threads.length > 0 ? { threads } : {}),
-      }
-    : undefined;
+  const reviewState = {
+    inlineCommentCursor,
+    conversationCommentCursor,
+    decisionCursor,
+    ...(latestReview?.state ? { decision: latestReview.state } : {}),
+  };
 
   return {
+    ...(authorLogin ? { authorLogin } : {}),
     baseline: {
       capturedAt,
       headSha: ci.headSha,
-      ...(reviewState ? { review: reviewState } : {}),
-      ...(needsCi
-        ? {
-            ci: {
-              bucket: ciBucket,
-              fingerprint: `${ci.headSha}:${ciBucket}`,
-            },
-          }
-        : {}),
-      ...(mergeState !== undefined ? { conflict: { mergeState } } : {}),
+      ...(authorLogin ? { prAuthorLogin: authorLogin } : {}),
+      review: reviewState,
+      ci: {
+        bucket: ciBucket,
+        fingerprint: `${ci.headSha}:${ciBucket}`,
+      },
+      conflict: { mergeState: merge.mergeState },
+      base: { isBehind: merge.mergeStateStatus === 'BEHIND' },
     },
     collectorState: {
-      ...(needsReview
-        ? {
-            review: {
-              lastCommentCursor: Math.max(inlineCommentCursor, conversationCommentCursor),
-              lastInlineCommentCursor: inlineCommentCursor,
-              lastConversationCommentCursor: conversationCommentCursor,
-              lastDecisionCursor: decisionCursor,
-            },
-          }
-        : {}),
+      review: {
+        lastCommentCursor: Math.max(inlineCommentCursor, conversationCommentCursor),
+        lastInlineCommentCursor: inlineCommentCursor,
+        lastConversationCommentCursor: conversationCommentCursor,
+        lastDecisionCursor: decisionCursor,
+      },
       ci: {
         headSha: ci.headSha,
         lastFingerprint: `${ci.headSha}:${ciBucket}`,
         lastBucket: ciBucket,
       },
-      ...(mergeState !== undefined ? { conflict: { mergeState } } : {}),
+      conflict: { mergeState: merge.mergeState, mergeStateStatus: merge.mergeStateStatus },
     },
   };
 }

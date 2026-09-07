@@ -29,6 +29,9 @@ describe('F167 Phase Q: event-source hold retirement wiring', () => {
         async route() {
           return {
             kind: 'notified',
+            // This case is a real evaluated observation — the cursor commit it asserts is only
+            // earned by one. A re-published pending outcome would wake without committing.
+            observationEvaluated: true,
             threadId: 'thread-Q',
             catId: 'codex',
             messageId: 'msg-review-1',

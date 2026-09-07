@@ -25,9 +25,7 @@ describe('F167 gate-keeping guard: POST /api/callbacks/register-issue-tracking',
     return {
       repoFullName: 'owner/repo',
       issueNumber,
-      when: [{ kind: 'issue_comment_added' }],
       nextStep: 'Inspect the matched issue comment.',
-      expiresAt: Date.now() + 60_000,
       ...overrides,
     };
   }
@@ -220,9 +218,7 @@ describe('F167 gate-keeping guard: POST /api/callbacks/register-issue-tracking',
       payload: {
         repoFullName: 'owner/repo',
         prNumber: 100,
-        when: [{ kind: 'pr_head_changed' }],
         nextStep: 'Re-lock the exact HEAD.',
-        expiresAt: Date.now() + 60_000,
       },
     });
 

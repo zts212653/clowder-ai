@@ -28,7 +28,21 @@ export function classifyGitHubReviewLoopBrake(
 export function renderGitHubWaitOutcome(outcome: WaitOutcomeV1): string {
   const isIssue = outcome.subjectRef.startsWith('issue:');
   const subject = outcome.subjectRef.slice(isIssue ? 'issue:'.length : 'pr:'.length);
-  const lines = [`🔔 **${isIssue ? 'Issue' : 'PR'} wait satisfied** — ${subject}`, ''];
+  const kind = isIssue ? 'Issue' : 'PR';
+
+  // #1392 AC-2: an expired outcome is a LOUD terminal, not a satisfied match. Say so plainly so
+  // the owner knows tracking is over and nothing is armed — never render it as "wait satisfied".
+  if (outcome.reason === 'expired') {
+    return [
+      `⏰ **${kind} tracking expired** — ${subject}`,
+      '',
+      '- Tracking window elapsed; no longer armed.',
+      '',
+      'Reason: `expired`',
+    ].join('\n');
+  }
+
+  const lines = [`🔔 **${kind} wait satisfied** — ${subject}`, ''];
 
   if (outcome.reason === 'subject_terminal') {
     lines.push(`- ${isIssue ? 'Issue' : 'PR'} state: ${outcome.terminalSubjectState ?? 'closed'}`);
@@ -49,6 +63,11 @@ export function renderGitHubWaitOutcome(outcome: WaitOutcomeV1): string {
     lines.push(`Next: ${outcome.nextStep.slice(REVIEW_LOOP_HISTORY_WARN_NEXT_STEP.length)}`);
   } else if (outcome.nextStep) {
     lines.push(`Next: ${outcome.nextStep}`);
+  }
+  // #1392 AC-1: truthful rearm signal — tell the owner whether tracking continues after this
+  // wake. Only a matched wake can auto-renew; subject_terminal is terminal (nothing to re-arm).
+  if (outcome.reason === 'matched') {
+    lines.push(outcome.autoRenewed ? '_Tracking re-armed for the next event._' : '_Tracking closed (single-fire)._');
   }
   return lines.join('\n');
 }

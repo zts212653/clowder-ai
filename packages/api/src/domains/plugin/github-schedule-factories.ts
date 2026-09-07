@@ -85,14 +85,16 @@ export interface GitHubScheduleDeps extends ScheduleFactoryDeps {
   invokeTrigger: ConnectorInvokeTrigger;
   // Repo-scan connector delivery deps. Review-feedback delivery stays encapsulated
   // in ReviewFeedbackRouter; no rotation/backlink delivery path exists post-#2394.
-  checkMergeable: (repo: string, pr: number) => Promise<{ mergeState: string; headSha: string }>;
+  checkMergeable: (
+    repo: string,
+    pr: number,
+  ) => Promise<{ mergeState: string; mergeStateStatus?: string; headSha: string }>;
   autoExecutor: ConflictAutoExecutor;
   fetchPrMetadata: (repo: string, pr: number) => Promise<ReviewFeedbackPrMetadata | null>;
   fetchComments: (repo: string, pr: number, cursors: PrFeedbackCommentCursors) => Promise<PrFeedbackComment[]>;
   fetchReviews: (repo: string, pr: number, sinceId?: number) => Promise<PrReviewDecision[]>;
   isEchoComment: (c: PrFeedbackComment) => boolean;
   isEchoReview: (r: PrReviewDecision) => boolean;
-  isNoiseComment: (c: PrFeedbackComment) => boolean;
   externalReviewCoordinator?: Pick<ExternalReviewCoordinator, 'recordCloud' | 'shouldContinueTracking'>;
   /** Self-merge filter: returns true if the given GitHub login is our own authenticated identity. */
   isSelfMerge?: (mergedByLogin: string) => boolean;
@@ -227,7 +229,6 @@ const reviewFeedbackFactory: ScheduleFactory = {
       log: d.log,
       isEchoComment: d.isEchoComment,
       isEchoReview: d.isEchoReview,
-      isNoiseComment: d.isNoiseComment,
       externalReviewCoordinator: d.externalReviewCoordinator,
       // F168 Phase A P1-1: thread community event services to spec
       eventLog: d.eventLog,

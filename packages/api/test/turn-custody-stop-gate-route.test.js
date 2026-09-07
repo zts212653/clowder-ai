@@ -105,10 +105,16 @@ function createEventWaitTaskStore(threadId) {
               baseline: {
                 capturedAt: 1_783_700_000_000,
                 headSha: 'head-1',
-                review: { resultTriggerCommentId: 4_936_000_000 },
+                botTurns: {
+                  'chatgpt-codex-connector[bot]': {
+                    triggerId: 4_936_000_000,
+                    openedAt: 1_783_700_000_000,
+                    headSha: 'head-1',
+                  },
+                },
               },
               continuation: {
-                when: [{ kind: 'pr_review_result_available', triggerCommentId: 4_936_000_000 }],
+                when: [{ kind: 'pr_bot_interaction' }],
                 // biome-ignore lint/suspicious/noThenProperty: F280's frozen wait contract field.
                 then: 'Consume the exact-HEAD review result.',
               },
@@ -1014,7 +1020,13 @@ describe('F167 Phase T route custody stop gate', () => {
     );
   });
 
-  test('managed eventWait emits exact continuation receipt proof', async () => {
+  /*
+   * F280 section 4b: F177 does not take its exit credential out of tracking. A bot round belongs
+   * to the tracking OWNER, so "a round is open on this PR" cannot say that THIS invocation is
+   * the one an event will come back to — every later invocation of the same cat would inherit an
+   * exit it never opened. Until F177 carries a credential of its own, the gate fails closed.
+   */
+  test('an open bot round in tracking does not release the managed hold', async () => {
     const threadId = 'thread-managed-hold-event-wait';
     const projection = createProjectionService({
       state: 'covered_active',
@@ -1038,8 +1050,9 @@ describe('F167 Phase T route custody stop gate', () => {
     });
 
     assert.equal(
-      yielded.find((message) => message.type === 'done')?.turnCustodyTerminalWitness?.transition,
-      'event_wait',
+      yielded.find((message) => message.type === 'done')?.turnCustodyTerminalWitness,
+      undefined,
+      'a tracking round is not a continuation receipt; the hold stays held',
     );
   });
 
@@ -1247,7 +1260,8 @@ describe('F167 Phase T route custody stop gate', () => {
     assert.match(prompts[1], /F167 球权停止门/);
   });
 
-  test('verified typed PR wait is a structured transition and suppresses the remedial child', async () => {
+  /* Same boundary from the other side: the tracker exists, and the cat still owes a turn. */
+  test('a live typed PR wait no longer suppresses the remedial child', async () => {
     const threadId = 'thread-event-wait';
     const projection = createProjectionService({
       state: 'covered_active',
@@ -1268,8 +1282,8 @@ describe('F167 Phase T route custody stop gate', () => {
       },
     });
 
-    assert.equal(service.calls.length, 1);
-    assert.equal(projection.closes.length, 1);
+    assert.equal(service.calls.length, 2, 'the fail-closed gate still asks the cat to disposition the ball');
+    assert.equal(projection.closes.length, 2, 'the remedial turn closes the projection again');
   });
 
   test('terminal coordination release remains obligation-free', async () => {

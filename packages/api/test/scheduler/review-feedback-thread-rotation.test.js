@@ -141,6 +141,9 @@ function stubRouter(kind = 'notified') {
             catId: tracking.catId,
             messageId: 'msg-1',
             content: 'feedback msg',
+            // Rotation is about WHICH thread hears an evaluated observation, not about a
+            // re-published pending outcome.
+            observationEvaluated: true,
           };
         }
         return { kind: 'skipped', reason: 'stub skip' };
