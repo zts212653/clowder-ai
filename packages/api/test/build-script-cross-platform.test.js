@@ -21,6 +21,7 @@ test('api build uses the public native command without the prepared-artifact wra
   assert.equal(typeof buildScript, 'string');
   assert.doesNotMatch(buildScript, /gate-prepared-artifacts/);
   assert.match(buildScript, /pnpm --dir \.\.\/shared build/);
+  assert.match(buildScript, /pnpm --dir \.\.\/collective-service build/);
   assert.match(buildScript, /node \.\/scripts\/copy-marketplace-catalog-data\.mjs/);
   assert.doesNotMatch(buildScript, /\bmkdir -p\b/);
   assert.doesNotMatch(buildScript, /\bcp\s+src\/marketplace\/catalog-data/);
