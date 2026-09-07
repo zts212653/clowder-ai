@@ -12,7 +12,7 @@
 import type { CatId, TaskItem } from '@cat-cafe/shared';
 import { parsePrSubjectKey } from '@cat-cafe/shared';
 import type { ITaskStore } from '../../domains/cats/services/stores/ports/TaskStore.js';
-import { mayAutoWakeOwner } from '../../domains/github-signals/WaitWakeDisposition.js';
+import { claimableSourceCategory, mayAutoWakeOwner } from '../../domains/github-signals/WaitWakeDisposition.js';
 import type { ExecuteContext, TaskSpec_P1 } from '../scheduler/types.js';
 import type { AutoResolveResult, ConflictAutoExecutor } from './ConflictAutoExecutor.js';
 import type { ConflictRouter, ConflictSignal } from './ConflictRouter.js';
@@ -146,7 +146,7 @@ export function createConflictCheckTaskSpec(opts: ConflictCheckTaskSpecOptions):
           const policy: ConnectorTriggerPolicy = {
             priority: evaluated ? 'urgent' : 'normal',
             reason: evaluated ? 'github_pr_conflict' : 'github_wait_satisfied',
-            sourceCategory: 'conflict',
+            sourceCategory: claimableSourceCategory(routeResult, 'conflict'),
           };
           await opts.invokeTrigger
             .trigger(

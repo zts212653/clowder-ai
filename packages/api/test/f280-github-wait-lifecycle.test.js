@@ -10,6 +10,7 @@ const { PrWaitMigrationService } = await import('../dist/domains/ball-custody/Pr
 const { CiCdRouter, classifyCiWaitBucket } = await import('../dist/infrastructure/email/CiCdRouter.js');
 const { ReviewFeedbackRouter } = await import('../dist/infrastructure/email/ReviewFeedbackRouter.js');
 const { ConflictRouter } = await import('../dist/infrastructure/email/ConflictRouter.js');
+const { createReviewFeedbackTaskSpec } = await import('../dist/infrastructure/email/ReviewFeedbackTaskSpec.js');
 const { createCiCdCheckTaskSpec } = await import('../dist/infrastructure/email/CiCdCheckTaskSpec.js');
 const { createConflictCheckTaskSpec } = await import('../dist/infrastructure/email/ConflictCheckTaskSpec.js');
 const { REVIEW_LOOP_BRAKE_NEXT_STEP } = await import('../dist/domains/github-signals/github-wait-renderer.js');
@@ -581,6 +582,9 @@ describe('F280 — the delivered outcome owns the route shape', () => {
       'a re-published review comment is not a merge announcement',
     );
     assert.equal(calls[0].policy.priority, 'normal', 'and this poll evaluated nothing to be urgent about');
+    // sol R35: freshness renders `ci` as "CI", so signing this delivery as CI would tell the owner
+    // a review comment came from CI. Absent groups as the generic "Connector", which is the truth.
+    assert.equal(calls[0].policy.sourceCategory, undefined, 'and it does not sign the outcome as CI');
   });
 
   it('control: a terminal state this poll DID evaluate still wakes as a merge', async () => {
@@ -589,6 +593,7 @@ describe('F280 — the delivered outcome owns the route shape', () => {
 
     assert.equal(calls.length, 1);
     assert.equal(calls[0].policy.reason, 'github_pr_merged', 'the lifecycle arm is intact for a real terminal');
+    assert.equal(calls[0].policy.sourceCategory, 'ci', 'an observation that DID evaluate may name its source');
   });
 
   it('control: the self-merge skip still applies to a terminal this poll evaluated', async () => {
@@ -666,6 +671,7 @@ describe('F280 — the delivered outcome owns the route shape', () => {
 
     assert.equal(calls.length, 1, 'the pending closure still reaches its owner');
     assert.equal(calls[0].policy.reason, 'github_pr_closed', 'as the closure it is, not as this merge');
+    assert.equal(calls[0].policy.sourceCategory, undefined, 'and unevaluated provenance stays unclaimed');
   });
 
   it('a conflict poll re-publishing an unevaluated outcome claims no conflict', async () => {
@@ -702,6 +708,95 @@ describe('F280 — the delivered outcome owns the route shape', () => {
       'but this poll established no conflict, so it announces none',
     );
     assert.equal(invokeTrigger.calls[0].policy.priority, 'normal', 'urgency is a claim, not a default');
+    assert.equal(
+      invokeTrigger.calls[0].policy.sourceCategory,
+      undefined,
+      'nor does it sign a review comment as conflict provenance',
+    );
+  });
+
+  it('reverse direction: a CI-created outcome re-published by Review claims no review provenance', async () => {
+    // sol R35 asked for the mirror case explicitly. The rule is symmetric or it is not a rule.
+    const { taskStore, task } = await harness([{ kind: 'pr_ci_terminal' }]);
+    const live = (await taskStore.get(task.id)).automationState;
+    await taskStore.replaceAutomationStateIfGeneration(task.id, {
+      expectedGeneration: live.await.generation,
+      expectedUpdatedAt: (await taskStore.get(task.id)).updatedAt,
+      automationState: { ...live, await: { ...live.await, autoRenew: true } },
+    });
+    let failNextDelivery = true;
+    const messageStore = new MessageStore();
+    const flaky = {
+      ...messageStore,
+      append: async (message) => {
+        if (failNextDelivery) {
+          failNextDelivery = false;
+          throw new Error('connector unavailable');
+        }
+        return messageStore.append(message);
+      },
+      getByThread: (threadId) => messageStore.getByThread(threadId),
+    };
+    const lifecycle = new GitHubWaitLifecycleService({
+      taskStore,
+      deliveryDeps: { messageStore: flaky },
+      now: () => 500,
+      log,
+    });
+
+    // A CI observation creates outcome N, and its first delivery fails.
+    await assert.rejects(
+      () =>
+        lifecycle.observe({
+          taskId: task.id,
+          facts: { headSha: 'aaaa1111', ci: { bucket: 'fail', fingerprint: 'aaaa1111:fail', blockerCount: 1 } },
+          events: [
+            { type: 'pr_ci_terminal', source: 'pr_ci', id: 'aaaa1111:fail', summary: 'CI reached fail (1 blockers)' },
+          ],
+        }),
+      /connector unavailable/,
+    );
+
+    const router = new ReviewFeedbackRouter({
+      deliveryDeps: { messageStore: flaky },
+      waitLifecycle: lifecycle,
+      log,
+    });
+    const invokeTrigger = recordingTrigger();
+    const spec = createReviewFeedbackTaskSpec({
+      taskStore,
+      fetchPrMetadata: async () => ({ headSha: 'aaaa1111', prState: 'open' }),
+      fetchComments: async () => [],
+      fetchReviews: async () => [],
+      reviewFeedbackRouter: router,
+      invokeTrigger,
+      log,
+    });
+
+    await spec.run.execute(
+      {
+        repairedTask: await taskStore.get(task.id),
+        task: await taskStore.get(task.id),
+        repoFullName: 'owner/repo',
+        prNumber: 7,
+        newComments: [],
+        newDecisions: [],
+        headSha: 'aaaa1111',
+        inlineCommentCursor: 20,
+        conversationCommentCursor: 30,
+        decisionCursor: 40,
+        commitCursor: async () => {},
+      },
+      'pr:owner/repo#7',
+      { assignedCatId: null },
+    );
+
+    assert.equal(invokeTrigger.calls.length, 1, 'the CI-created outcome still reaches its owner');
+    assert.equal(
+      invokeTrigger.calls[0].policy.sourceCategory,
+      undefined,
+      'but the review adapter drawing the delivery does not make it review provenance',
+    );
   });
 });
 

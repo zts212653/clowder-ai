@@ -54,3 +54,27 @@ export function projectWaitWakeDisposition(result: GitHubWaitLifecycleResult): W
 export function mayAutoWakeOwner(disposition: WaitWakeDisposition): boolean {
   return disposition.autoWakeSuppressed !== true;
 }
+
+/**
+ * The origin category a delivery is ALLOWED to claim about itself.
+ *
+ * sol R35, and the eighth time this shape has surfaced — this one contradicted the sentence this
+ * PR had just written into its own contract. `sourceCategory` is not an internal tag: freshness
+ * renders `ci` as "CI" and `review` as "Review", so an unevaluated re-publish stamping whichever
+ * adapter happened to pick the outcome up tells the owner a review comment came from CI.
+ *
+ * Absence is the HONEST answer here, not a degraded one. A missing category groups as the generic
+ * "Connector", which is precisely what "some adapter delivered an outcome it never evaluated"
+ * means. Only the observation that actually read its own events has standing to name the source,
+ * so the claim is derived from the disposition rather than hardcoded per adapter.
+ *
+ * This cannot be made a compile error: `sourceCategory` is optional on a policy type shared with
+ * many non-wait callers, so a hardcoded literal still typechecks. The carriers are therefore
+ * enumerated instead — CI notified, CI lifecycle, conflict, review — and each is asserted.
+ */
+export function claimableSourceCategory<Category extends string>(
+  disposition: WaitWakeDisposition,
+  observedCategory: Category,
+): Category | undefined {
+  return disposition.observationEvaluated ? observedCategory : undefined;
+}

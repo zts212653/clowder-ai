@@ -10,7 +10,7 @@
 import type { CatId, TaskItem } from '@cat-cafe/shared';
 import { parsePrSubjectKey } from '@cat-cafe/shared';
 import type { ITaskStore } from '../../domains/cats/services/stores/ports/TaskStore.js';
-import { mayAutoWakeOwner } from '../../domains/github-signals/WaitWakeDisposition.js';
+import { claimableSourceCategory, mayAutoWakeOwner } from '../../domains/github-signals/WaitWakeDisposition.js';
 import type { ExecuteContext, TaskSpec_P1 } from '../scheduler/types.js';
 import type { CiCdRouter, CiPollResult, CiRouteResult } from './CiCdRouter.js';
 import type { ConnectorInvokeTrigger, ConnectorTriggerPolicy } from './ConnectorInvokeTrigger.js';
@@ -74,7 +74,9 @@ async function triggerLifecycleWake(
   const policy: ConnectorTriggerPolicy = {
     priority: 'normal',
     reason: routeResult.prState === 'merged' ? 'github_pr_merged' : 'github_pr_closed',
-    sourceCategory: 'ci',
+    // A terminal outcome REVIEW created can reach this arm when CI re-publishes it; the state is
+    // the outcome's, but the source is not this poll's to name.
+    sourceCategory: claimableSourceCategory(routeResult, 'ci'),
   };
   await invokeTrigger
     .trigger(
@@ -218,7 +220,8 @@ export function createCiCdCheckTaskSpec(opts: CiCdCheckTaskSpecOptions): TaskSpe
           // ...and an unevaluated re-publish must not borrow THIS poll's bucket for urgency.
           priority: routeResult.observationEvaluated && routeResult.bucket === 'fail' ? 'urgent' : 'normal',
           reason: 'github_wait_satisfied',
-          sourceCategory: 'ci',
+          // ...and it must not sign someone else's outcome as CI either.
+          sourceCategory: claimableSourceCategory(routeResult, 'ci'),
         };
         await opts.invokeTrigger
           .trigger(

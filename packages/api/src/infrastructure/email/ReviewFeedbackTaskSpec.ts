@@ -28,7 +28,7 @@ import {
   classifyGitHubReviewLoopBrake,
   type GitHubReviewLoopBrake,
 } from '../../domains/github-signals/github-wait-renderer.js';
-import { mayAutoWakeOwner } from '../../domains/github-signals/WaitWakeDisposition.js';
+import { claimableSourceCategory, mayAutoWakeOwner } from '../../domains/github-signals/WaitWakeDisposition.js';
 import type { DistillationCheckpoint } from '../distillation/DistillationCheckpoint.js';
 import type { ExecuteContext, TaskSpec_P1 } from '../scheduler/types.js';
 import type { ConnectorInvokeTrigger, ConnectorTriggerPolicy } from './ConnectorInvokeTrigger.js';
@@ -892,7 +892,9 @@ export function createReviewFeedbackTaskSpec(opts: ReviewFeedbackTaskSpecOptions
                 : terminalState === 'closed'
                   ? 'github_pr_closed'
                   : 'github_wait_satisfied',
-            sourceCategory: 'review',
+            // Symmetric to the CI and conflict paths: a CI-created outcome re-published here is
+            // not review provenance just because the review adapter drew the delivery.
+            sourceCategory: claimableSourceCategory(routeResult, 'review'),
             coalesceKey: `${subjectKey}:wait:${routeResult.catId || 'unassigned'}`,
           };
           try {
