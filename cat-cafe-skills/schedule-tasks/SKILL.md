@@ -6,7 +6,7 @@ description: >
   不要用另一个叫 `schedule` 的 skill（那是云端 remote-agent，用途不同）。
   Use when: 用户想设定时任务、定期提醒、周期巡检、定时发送内容、延迟执行一次性操作。
   Not for: 已有 builtin 任务的手动触发。
-  Output: 注册/管理定时任务，任务到点唤醒猫执行。
+  Output: 注册或删除的 Approval Hub 提案；批准并核对后才报告任务生效或删除。
 triggers:
   - "定时"
   - "每天"
@@ -51,10 +51,10 @@ triggers:
 | **发卡片** | card rich block（状态报告、新闻摘要） |
 | **发 HTML 面板** | html_widget rich block（数据可视化、图表） |
 | **搜索** | WebSearch / WebFetch / search_evidence |
-| **生成图片** | image-generation skill（Chrome MCP → Gemini） |
+| **生成图片** | image-generation skill（按当前可用原生能力或授权后端） |
 | **交互选择** | interactive rich block（让用户确认/选择） |
 
-**重要**：不要只发纯文本！被唤醒后主动用 rich block 让输出更丰富。
+按提醒目标选择清晰、低打扰的输出；简单提醒可直接文字。用户要求语音或内容确实需要图/卡片时再选择相应媒介。
 
 ## 注册流程（对话式，4 步）
 
@@ -74,7 +74,7 @@ triggers:
 
 ### 3. 预览确认
 
-调用 `cat_cafe_preview_scheduled_task` 生成 draft，展示给用户确认：
+调用 `cat_cafe_preview_scheduled_task` 生成 draft 并核对时间、时区、目标与内容。参数已由用户指定/确认时直接复用，随后进入工具规定的审批流程：
 
 ```
 模板: reminder
@@ -85,7 +85,7 @@ triggers:
 
 ### 4. 注册
 
-用户确认后调用 `cat_cafe_register_scheduled_task` 持久化任务。
+调用 `cat_cafe_register_scheduled_task` 提交 Approval Hub 提案。工具返回 proposed/待审批时，只报告“已提交审批”，不能说任务已启用；审批通过并核对实际任务状态后才报告生效。
 
 ## Trigger 语法速查
 
@@ -123,17 +123,17 @@ triggers:
 
 用户说"删除/清理/取消定时任务"时：
 
-1. **确认目标** — 调用 `cat_cafe_list_tasks` 或让用户在 SchedulePanel 中查看，确认要删除的任务 `taskId`
-2. **用户确认** — 展示任务详情（名称、触发规则、上次执行），让用户确认删除
-3. **执行删除** — 调用 `cat_cafe_remove_scheduled_task`（参数：`taskId`），删除后告知用户结果
+1. **确认目标** — 通过 SchedulePanel 或已确认的调度回执核对 scheduled task 的 `taskId`。`cat_cafe_list_tasks` 返回 thread 工作任务，不能用它的 ID 替代调度任务 ID；确实无法消歧时再询问必要信息
+2. **核对范围** — 展示目标名称和触发规则，复用用户已有取消指令；目标不明确时先澄清
+3. **提交删除提案** — 调用 `cat_cafe_remove_scheduled_task`（参数：`taskId`）。待审批时任务仍可能运行；只报告真实提案状态，审批和删除结果确认后才说已取消
 
 ## 常见错误
 
 | 错误 | 正确做法 |
 |------|----------|
 | 不知道能注册定时任务 | 用户说"每天/定期/提醒"→ 匹配本 skill |
-| 被唤醒后只发纯文本 | 主动用 rich block（图片、语音、卡片、HTML） |
-| 跳过 preview 直接注册 | **必须** preview → 用户确认 → 注册 |
+| 为简单提醒堆叠媒介 | 按任务和用户偏好选择输出，文字即可完成时直接文字 |
+| 把提案提交当作启用/删除完成 | preview → 提案 → Approval Hub 审批 → 核对实际状态；复用已明确的用户意图 |
 | 发图只想到 image-generation | 先看 `/avatars/`、`/uploads/` 有没有现成图 |
 
 ## 和其他 skill 的区别

@@ -1,0 +1,1112 @@
+{
+  "schemaVersion": 1,
+  "issue": "https://github.com/zts212653/clowder-ai/issues/1442",
+  "sourceCommit": "730c37b08fa49478a0cc1eed7240064cbaaccc71",
+  "scope": "first-party SKILL.md source inventory; not the current host catalog or delivered input",
+  "count": 58,
+  "skills": [
+    {
+      "skill": "agent-product-promo-director",
+      "source": "cat-cafe-skills/agent-product-promo-director/SKILL.md",
+      "sha256": "5c0052048ad5b262190773f3bc213106253adcdbec7e8cd6d840a0bbcf7eb584",
+      "lines": 177,
+      "bytes": 10199,
+      "frontmatter": "name: agent-product-promo-director\ntips_exempt: internal creative-direction discipline; produces a brief, not a new user-facing capability\ndescription: >\n  Agent/AI 产品宣传片的创意导演层：先锁产品主角、观众信念变化与影片格式，再把不可见的 Agent\n  协作翻译成可拍的故事、镜头、运动、声音和 provenance contract。Use when: 用户问 Agent 产品宣传片\n  如何导演/剪辑/叙事/配声音、要拆参考片、写 creative brief/beat sheet，或 video-forge 开机前仍未锁定\n  主语与镜头语法。Not for: brief 已冻结后的录制/TTS/对齐/渲染（用 video-forge）、教程/功能 walkthrough、\n  纯动画生产（用 anime-forge）、只找时效性竞品（先用 deep-research）。Output: product-hero sentence +\n  audience belief change + format decision + claim/proof beat sheet + shot/motion/sound maps + provenance ledger +\n  operator acceptance questions。GOTCHA: 用户举的页面、thread 或成果只是候选证据，不自动成为影片主题；内部静态分镜不能冒充成片。",
+      "reviewStatus": "full_text_reviewed",
+      "usageFrequency": null,
+      "effectVerdict": "unmeasured",
+      "sourceReview": {
+        "commit": "2b6a1252bc2a29818c848e42eae574b1e8dfce6a",
+        "sha256": "5c0052048ad5b262190773f3bc213106253adcdbec7e8cd6d840a0bbcf7eb584",
+        "value": "保留真实失败史驱动的意图路由、产品主语替换测试、可观察 Agent 行为、镜头与声音因果、四类 provenance，以及昂贵生产前的创意验收。",
+        "staticRecommendation": "retain",
+        "reason": "全文与 director brief 交付边界明确区分研究、创意、生产和 review；已锁 brief 可直接转生产，不重复导演流程。时长与七拍均明确不是固定配额。operator 验收保护的是主语、关系、情绪与生产成本，不能仅因模型升级取消。未发现需要静态退回的内容。",
+        "evidenceKind": "source reading and static scenario reasoning; not a behavioral benchmark"
+      }
+    },
+    {
+      "skill": "anime-forge",
+      "source": "cat-cafe-skills/anime-forge/SKILL.md",
+      "sha256": "7a600e492c9b324e3f93add44429e16a3a9931f2e024626175f18bdd048dd576",
+      "lines": 82,
+      "bytes": 6817,
+      "frontmatter": "name: anime-forge\ntips_exempt: delivery error row only — no new user-facing capability; continuity commit will reference video-forge SOT\ndescription: >\n  AI 生成动画短片生产线：图（关键帧锁确定性）→ 视频（i2v 给活气）→ 后期（剪辑做节奏）。\n  Use when: 做动画短剧/角色 IP 短片、猫咖日记系列新集、图生视频管线、剧情类 AI 视频。\n  Not for: 录屏/教程/showcase 视频（用 video-forge）、单张图生成（用 image-generation）、PPT（用 ppt-forge）。\n  Output: charter+分镜+prompt book+素材账本+EDL 驱动的成片，全程可复现可重渲。",
+      "reviewStatus": "full_text_reviewed",
+      "usageFrequency": null,
+      "effectVerdict": "unmeasured",
+      "sourceReview": {
+        "commit": "2b6a1252bc2a29818c848e42eae574b1e8dfce6a",
+        "sha256": "7a600e492c9b324e3f93add44429e16a3a9931f2e024626175f18bdd048dd576",
+        "value": "保留图/视频/后期的确定性分层、先粗剪再烧素材、素材 hash 与 EDL 真相源、roll 预算及失败降级、真实母图和 prompt 修正版的复用价值。",
+        "staticRecommendation": "revise",
+        "reason": "不应删除成本与连续性约束；需把 n=1 的供应商表现改成带版本的已验证默认，并修复当前 source package 中不可解析的必读配方。未判断新模型是否已经优于历史路线。",
+        "evidenceKind": "source reading and static scenario reasoning; not a behavioral benchmark"
+      }
+    },
+    {
+      "skill": "bootcamp-guide",
+      "source": "cat-cafe-skills/bootcamp-guide/SKILL.md",
+      "sha256": "e48fc8adf84a1cbd1513e5a77928455b66e5ee2b06895702eb343233830fde42",
+      "lines": 246,
+      "bytes": 11930,
+      "frontmatter": "name: bootcamp-guide\ndescription: >\n  operator 新手训练营引导模式。\n  Use when: thread 有 bootcampState（系统自动注入，不需要手动加载）。\n  Not for: 非训练营线程、老用户。\ntriggers:\n  - \"bootcamp\"\n  - \"训练营\"\n  - \"我是新手\"",
+      "reviewStatus": "full_text_reviewed",
+      "usageFrequency": null,
+      "effectVerdict": "unmeasured",
+      "sourceReview": {
+        "commit": "2b6a1252bc2a29818c848e42eae574b1e8dfce6a",
+        "sha256": "e48fc8adf84a1cbd1513e5a77928455b66e5ee2b06895702eb343233830fde42",
+        "value": "保留精确 phase 名、leadCat/队友角色、前端接管 STOP、合法状态迁移及避免把实现细节暴露给新用户的行为边界。",
+        "staticRecommendation": "revise",
+        "reason": "存在直接执行矛盾，不能靠模型自行猜哪条 Iron Rule 作废。修复白名单和 phase 例外即可保留训练营状态协议。",
+        "evidenceKind": "source reading and static scenario reasoning; not a behavioral benchmark"
+      }
+    },
+    {
+      "skill": "browser-automation",
+      "source": "cat-cafe-skills/browser-automation/SKILL.md",
+      "sha256": "a77fd62b4292c618438a7f385d49b745a1b662a5789634aa491f573ccfc650d7",
+      "lines": 149,
+      "bytes": 7420,
+      "frontmatter": "name: browser-automation\ndescription: >\n  浏览器工作流总路由：为外部网站浏览、登录态流程、浏览器自动化、证据采集选择合适后端。\n  Use when: 需要操作外部网站、登录页、JS 重页面、没有 webfetch/VL 但需要浏览器、或需要在多种浏览器工具之间路由。\n  Not for: localhost 页面预览（用 browser-preview）、本地 WebApp 确定性测试（用 webapp-testing）、简单网页抓取/搜索。\n  Output: 选定浏览器后端 + 执行路径 + 证据/结果。\ntriggers:\n  - \"浏览器自动化\"\n  - \"browser mcp\"\n  - \"用浏览器\"\n  - \"登录网站\"\n  - \"登录态\"\n  - \"agent-browser\"\n  - \"pinchtab\"\n  - \"playwriter\"\n  - \"playwright mcp\"\n  - \"没有 webfetch\"\n  - \"无 webfetch\"\n  - \"没有 vl\"",
+      "reviewStatus": "full_text_reviewed",
+      "usageFrequency": null,
+      "effectVerdict": "unmeasured",
+      "sourceReview": {
+        "commit": "2b6a1252bc2a29818c848e42eae574b1e8dfce6a",
+        "sha256": "a77fd62b4292c618438a7f385d49b745a1b662a5789634aa491f573ccfc650d7",
+        "value": "保留按任务/客户端/session 归属路由，轻量读取优先，localhost 预览与测试区分，以及登录会话责任和可复现证据要求。",
+        "staticRecommendation": "revise",
+        "reason": "应修正按可用后端提前短路的顺序，并收回将安全预检绕过泛化成外网默认路线的指令。后者是需要恢复的安全边界，不是因新模型变强而删除安全约束。",
+        "evidenceKind": "source reading and static scenario reasoning; not a behavioral benchmark"
+      }
+    },
+    {
+      "skill": "browser-preview",
+      "source": "cat-cafe-skills/browser-preview/SKILL.md",
+      "sha256": "779960de2e78b84442a55ff42155502aab33707460a909062bb39dc58d2803a8",
+      "lines": 159,
+      "bytes": 10680,
+      "frontmatter": "name: browser-preview\ntips_exempt: Managed preview expiry is an internal lifecycle safety boundary; the existing browser-preview skill and status output already expose the operator-visible behavior.\ndescription: >\n  Hub 内嵌浏览器预览 localhost 应用。\n  Use when: 写前端代码、跑 dev server、需要看页面效果、调 UI、operator说\"看看效果\"。\n  Not for: 后端纯 API 开发、不涉及页面的工作。\n  Output: 前端页面在 Hub browser panel 中实时预览。\ntriggers:\n  - \"看效果\"\n  - \"看看页面\"\n  - \"preview\"\n  - \"浏览器预览\"\n  - \"打开浏览器\"\n  - \"pnpm dev\"\n  - \"dev server\"\n  - \"localhost\"\n  - \"前端效果\"\n  - \"看看 UI\"\n  - \"HMR\"\n  - \"热更新\"",
+      "reviewStatus": "full_text_reviewed",
+      "usageFrequency": null,
+      "effectVerdict": "unmeasured",
+      "sourceReview": {
+        "commit": "2b6a1252bc2a29818c848e42eae574b1e8dfce6a",
+        "sha256": "779960de2e78b84442a55ff42155502aab33707460a909062bb39dc58d2803a8",
+        "value": "保留 managed launcher/租约、invocation 与 launchd 生命周期区分、exact-thread 送达、applied/queued/blocked/unconfirmed 判读和自身服务端口排除。",
+        "staticRecommendation": "retain",
+        "reason": "这是项目专有生命周期与送达 verifier，规则指向可执行工具、status 字段及已发生故障；“running 不等于 durable”和“allowed 不等于 visible”不能被模型信心替代。静态核对 package.json 与 preview-process 源码可找到对应命令及 expiresAt/origin，无需执行预览判断其文本保留价值。",
+        "evidenceKind": "source reading and static scenario reasoning; not a behavioral benchmark"
+      }
+    },
+    {
+      "skill": "capability-evolution",
+      "source": "cat-cafe-skills/capability-evolution/SKILL.md",
+      "sha256": "0d46248b982b6fa5c1353432fff4fc19c42a559d9da1f84c3ffdd612370d84be",
+      "lines": 63,
+      "bytes": 5466,
+      "frontmatter": "name: capability-evolution\ndescription: >\n  “我们来进化 X” / “能进化什么” → F311 Capability Evolution 产品入口，不是事后复盘。\n  Use when: 用户询问可进化对象或边界，或要求进化一个具体能力、Agent、Skill、工作流、代码仓或外部系统。\n  Not for: 复盘已经发生的重复错误、SOP 缺口或知识沉淀（用 self-evolution）；确定性 bug（直接修并加 test/guard）；只有运行健康问题（走 F153 logs/metrics/traces）。\n  Output: 信息问题只解释且不创建；具体目标解析 canonical targetRef，并用 sourceMessageId 作为 clientMessageId 调用 cat_cafe_start_evolution_program，返回 durable Program 与 Workspace 入口。",
+      "reviewStatus": "full_text_reviewed",
+      "usageFrequency": null,
+      "effectVerdict": "unmeasured",
+      "sourceReview": {
+        "commit": "2b6a1252bc2a29818c848e42eae574b1e8dfce6a",
+        "sha256": "0d46248b982b6fa5c1353432fff4fc19c42a559d9da1f84c3ffdd612370d84be",
+        "value": "提供 F311 产品入口、信息问答与持久创建分流、exact source 幂等身份及 owner 真相边界。",
+        "staticRecommendation": "retain",
+        "reason": "正文信息型零写入、具体目标才 start、不得猜 owner/source id 的约束一致；已核 MCP capability-evolution-tools.ts 的 canonical start 接口。没有把新程序创建等同于后续权限批准。",
+        "evidenceKind": "source reading and static scenario reasoning; not a behavioral benchmark"
+      }
+    },
+    {
+      "skill": "co-creation-docs",
+      "source": "cat-cafe-skills/co-creation-docs/SKILL.md",
+      "sha256": "07841f5ac9f7e63ec2ba69961ce408da12993c368c3d41eedbe08823638ea2c5",
+      "lines": 124,
+      "bytes": 7216,
+      "frontmatter": "name: co-creation-docs\ntips_exempt: Developer delivery routing is triggered by explicit co-creation intent and repository state; no end-user discovery moment.\ndescription: 共创型 docs-only 交付：区分只审阅与授权落盘，再按冲突、治理风险、可逆性决定 direct push、PR、cloud 与 full gate。\ntriggers:\n  - \"共创文档\"\n  - \"改 MD\"\n  - \"思想纲领\"\n  - \"架构文档\"\n  - \"docs-only\"\n  - \"co-creation docs\"\nnot_for:\n  - \"只 review 不落盘\"\n  - \"代码或脚本改动\"\n  - \"SOP 或 skill 实现改动\"\noutput: \"Risk-matched docs validation + optional content review + commit/push or PR evidence\"",
+      "reviewStatus": "full_text_reviewed",
+      "usageFrequency": null,
+      "effectVerdict": "unmeasured",
+      "sourceReview": {
+        "commit": "2b6a1252bc2a29818c848e42eae574b1e8dfce6a",
+        "sha256": "07841f5ac9f7e63ec2ba69961ce408da12993c368c3d41eedbe08823638ea2c5",
+        "value": "把 review-only、授权落盘、内容判断和代码门禁分开，避免 Markdown diff 自动叠全套流程。",
+        "staticRecommendation": "retain",
+        "reason": "显然轻量可直接自判；未知冲突或治理风险才查 classifier；review-only 不写、授权后不重复确认，与 docs/SOP.md 风险车道一致。保存有选择的独立内容 review 和定向校验。",
+        "evidenceKind": "source reading and static scenario reasoning; not a behavioral benchmark"
+      }
+    },
+    {
+      "skill": "code-as-harness",
+      "source": "cat-cafe-skills/code-as-harness/SKILL.md",
+      "sha256": "f84a8422f5a781c7fecd52c609f46dea158cd4e322ca8bb6ee83801b1110d3ea",
+      "lines": 337,
+      "bytes": 20097,
+      "frontmatter": "name: code-as-harness\ntips_exempt: internal harness diagnostic skill; no distinct end-user capability surface\ndescription: \"证据确认重复摩擦后修 harness。Use: 历史重复已确认。Not: 未确认重复、首次 bug、review 反馈。Output: 未确认不强制 block；需 operator 决策发 interactive，否则行动后发 card（均含根因、证据、处置）。\"\ntriggers:\n  - \"又忘了\"\n  - \"多少次了\"\n  - \"每次都\"\n  - \"怎么还\"\n  - \"总是忘\"\n  - \"又失忆\"\n  - \"反复出现的新任务\"",
+      "reviewStatus": "full_text_reviewed",
+      "usageFrequency": null,
+      "effectVerdict": "unmeasured",
+      "sourceReview": {
+        "commit": "2b6a1252bc2a29818c848e42eae574b1e8dfce6a",
+        "sha256": "f84a8422f5a781c7fecd52c609f46dea158cd4e322ca8bb6ee83801b1110d3ea",
+        "value": "用可查重复证据区分一次性错误、真正 harness 摩擦和 taste；保留原任务与准确 owner。",
+        "staticRecommendation": "revise",
+        "reason": "主要路由已按已有授权自治，但 Build 与后续分流重新要求无条件确认/F128，和前文形成可执行冲突。",
+        "evidenceKind": "source reading and static scenario reasoning; not a behavioral benchmark"
+      }
+    },
+    {
+      "skill": "collaborative-thinking",
+      "source": "cat-cafe-skills/collaborative-thinking/SKILL.md",
+      "sha256": "0d00707fd376b0d0672c9db01b2f7dfca98c6c4a844dada7742e37acda39dce0",
+      "lines": 151,
+      "bytes": 8777,
+      "frontmatter": "name: collaborative-thinking\ntips_exempt: internal shared-reference coordinate repair; no user-visible capability change\ndescription: >\n  单人或多猫的创意探索、独立思考、讨论收敛。\n  Use when: brainstorm、多猫独立思考、讨论结束需要收敛、方向性问题需要多视角。\n  Not for: 已有明确 spec 直接写代码、单猫执行已定方案。\n  Output: 收敛报告（共识/分歧/行动项）+ 三件套沉淀检查。\ntriggers:\n  - \"brainstorm\"\n  - \"讨论\"\n  - \"多猫独立思考\"\n  - \"收敛\"\n  - \"讨论结束\"\n  - \"总结一下\"",
+      "reviewStatus": "full_text_reviewed",
+      "usageFrequency": null,
+      "effectVerdict": "unmeasured",
+      "sourceReview": {
+        "commit": "2b6a1252bc2a29818c848e42eae574b1e8dfce6a",
+        "sha256": "0d00707fd376b0d0672c9db01b2f7dfca98c6c4a844dada7742e37acda39dce0",
+        "value": "保留独立分析、防锚定、分歧与证据，以及技术 OQ/价值 OQ 分流。",
+        "staticRecommendation": "revise",
+        "reason": "主流程含固定字数、反复方向确认、默认 operator 扇入/最终确认，与同文可逆技术自治及按需车道冲突；沉淀出口没有先判写入授权。",
+        "evidenceKind": "source reading and static scenario reasoning; not a behavioral benchmark"
+      }
+    },
+    {
+      "skill": "concept-demo-design",
+      "source": "cat-cafe-skills/concept-demo-design/SKILL.md",
+      "sha256": "4667b7c09ebaa6df51c754d5e6e06505601bb8a4c9ef28b9076d22a3de44c381",
+      "lines": 293,
+      "bytes": 25921,
+      "frontmatter": "name: concept-demo-design\ntips_exempt: Existing concept-demo authoring workflow refinement; no new end-user Hub capability surface.\ntriggers:\n  - 可证伪技术剖面\n  - 证伪实验台\n  - 技术架构 demo\ndescription: \"把抽象理念、家内 UI/UX 可点稿或端到端用户旅程变成可讲解、可验证的交互 Demo。Use: 做个 demo 让人 get 到、做 F284 式体验 Gate、验证完整用户旅程。Not: 已签字的正式产品前端、已有素材剪辑、PPT、纯视觉探索。Output: 双轴 Demo Contract（判题类型 × 交付车道）+ 确定性交互原型 + 验证记录。\"",
+      "reviewStatus": "full_text_reviewed",
+      "usageFrequency": null,
+      "effectVerdict": "unmeasured",
+      "sourceReview": {
+        "commit": "2b6a1252bc2a29818c848e42eae574b1e8dfce6a",
+        "sha256": "4667b7c09ebaa6df51c754d5e6e06505601bb8a4c9ef28b9076d22a3de44c381",
+        "value": "保留 demo_kind × delivery_lane、原生产品真相、诚实边界、sentinel 因果/恢复 proof、条件化 Claim Bench、真实宿主挂载和 Workspace 连续性合同。",
+        "staticRecommendation": "revise",
+        "reason": "大多数证据要求已经按 claim 条件化，值得保留；但讲者时间轴控件仍无条件施加给所有 demo_kind，和“产品体验可点稿”入口不匹配。",
+        "evidenceKind": "source reading and static scenario reasoning; not a behavioral benchmark"
+      }
+    },
+    {
+      "skill": "console-dev",
+      "source": "cat-cafe-skills/console-dev/SKILL.md",
+      "sha256": "5a0d419e9d7d76657c1fc628315973dc366c0f1dbf3e065d644081a247fb7444",
+      "lines": 73,
+      "bytes": 3490,
+      "frontmatter": "name: console-dev\ntips_exempt: internal shared-reference coordinate repair; no user-visible capability change\ndescription: >\n  Console 前端交付范式：4 道门禁驱动的前端开发流程。Use when:\n  新增前端能力、settings section 迁移、新增页面、重构布局、或 F190/Console 级前端流程需要 Product/Design/Implementation/Verification gate。\n  Not for: 小样式点改、纯后端 API、纯计算逻辑、独立 Design System token 定义。\n  Output: 通过 Product / Design-System / Implementation / Verification gate 的前端代码与证据。",
+      "reviewStatus": "full_text_reviewed",
+      "usageFrequency": null,
+      "effectVerdict": "unmeasured",
+      "sourceReview": {
+        "commit": "2b6a1252bc2a29818c848e42eae574b1e8dfce6a",
+        "sha256": "5a0d419e9d7d76657c1fc628315973dc366c0f1dbf3e065d644081a247fb7444",
+        "value": "保留 Console 入口稀缺性、原生 token/primitive、展示值与提交值分离、settings migration 多真相合同及 UI 非 happy path/兄弟页面 proof。",
+        "staticRecommendation": "retain",
+        "reason": "正文短且项目约束集中；小样式点改已明确排除，暗色/移动/共享 primitive 检查按影响触发。200/350 行是拆分审查与可说明例外，并非不可豁免的机械删除线；F190 ref 保留了真实迁移和 secret-placeholder 失败根因。",
+        "evidenceKind": "source reading and static scenario reasoning; not a behavioral benchmark"
+      }
+    },
+    {
+      "skill": "context-self-management",
+      "source": "cat-cafe-skills/context-self-management/SKILL.md",
+      "sha256": "4e57e24b5ba755d6a93c5b9f152d2c644c410f2d12a27ac69bbca24438f6b938",
+      "lines": 42,
+      "bytes": 2922,
+      "frontmatter": "name: context-self-management\ndescription: \"Use when: context_management_hint 或长 session repo/projectPath 混淆。Not for: 普通 context 焦虑/跨猫交接。Output: handoff/续/冲刺判断。\"\ntips_exempt: harness-internal session boundary guidance; no end-user capability surface\ntriggers:\n  - \"context_management_hint\"\n  - \"context 自管理\"\n  - \"要不要 handoff\"\n  - \"我脏了\"\n  - \"话题漂移\"\n  - \"repo/projectPath 混淆\"",
+      "reviewStatus": "full_text_reviewed",
+      "usageFrequency": null,
+      "effectVerdict": "unmeasured",
+      "sourceReview": {
+        "commit": "2b6a1252bc2a29818c848e42eae574b1e8dfce6a",
+        "sha256": "4e57e24b5ba755d6a93c5b9f152d2c644c410f2d12a27ac69bbca24438f6b938",
+        "value": "把 context hint 的可信度、任务连贯性与干净断点结合，避免一见 warn 就丢掉进行中工作。",
+        "staticRecommendation": "retain",
+        "reason": "在当前源码审读范围未发现需要本轮修改的阻断性矛盾；不代表真实效用已证明。",
+        "evidenceKind": "source reading and static scenario reasoning; not a behavioral benchmark"
+      }
+    },
+    {
+      "skill": "convention-graph-discovery",
+      "source": "cat-cafe-skills/convention-graph-discovery/SKILL.md",
+      "sha256": "165bcd35d5cd2526d9ac3e779ff672d24e1a0994c1d8be4c44492c41dc1f07d8",
+      "lines": 116,
+      "bytes": 6126,
+      "frontmatter": "name: convention-graph-discovery\ndescription: >\n  约定图发现方法论：进一个 repo 先识别 repo-specific conventions，再定义 domain/extractor 接\n  Convention Graph 引擎。Use when: 进入陌生 repo、要画约定图、要找“改 X 影响谁”的约定层关联、\n  F242/Convention Graph Layer 工作。Not for: 普通符号跳转/LSP、文档索引检索、记忆图谱、直接使用\n  codegraph/GitNexus。Output: domain 定义 + extractor 计划 + gap/freshness/provenance 报告。\n  GOTCHA: 沉淀的是“怎么画图”的方法，不是把 cat-cafe 的 extractor 硬搬到所有 repo。\ntriggers:\n  - \"约定图\"\n  - \"convention graph\"\n  - \"进陌生 repo\"\n  - \"画规矩地图\"\n  - \"改 X 影响谁\"\n  - \"顺藤摸瓜\"\n  - \"F242\"",
+      "reviewStatus": "full_text_reviewed",
+      "usageFrequency": null,
+      "effectVerdict": "unmeasured",
+      "sourceReview": {
+        "commit": "2b6a1252bc2a29818c848e42eae574b1e8dfce6a",
+        "sha256": "165bcd35d5cd2526d9ac3e779ff672d24e1a0994c1d8be4c44492c41dc1f07d8",
+        "value": "用 source span、稳定身份、freshness 和 negative fixtures 保护约定层影响分析，避免同名误连及静默漏报。",
+        "staticRecommendation": "revise",
+        "reason": "读取陌生 repo 或查询消费方的入口直接串到编写 extractor 和接引擎，超出 Output 中 extractor 计划及只读查询任务；应区分查询、发现与实现。",
+        "evidenceKind": "source reading and static scenario reasoning; not a behavioral benchmark"
+      }
+    },
+    {
+      "skill": "cross-cat-handoff",
+      "source": "cat-cafe-skills/cross-cat-handoff/SKILL.md",
+      "sha256": "2e909d70cb8cf2c25f7de6db03ee510c467c93507b2028ac5ed4265989bff8e9",
+      "lines": 306,
+      "bytes": 14927,
+      "frontmatter": "name: cross-cat-handoff\ntips_exempt: F167/F314 keep local-review custody and accepted-source provenance inside harness routing; no distinct end-user-invocable capability surface\ndescription: \"跨猫交接与 review 双路由。Use when: 交接、exact-HEAD external PR review task 或 PR tracking。Not for: 自己任务。Output: 五件套 + formal/advisory 分类 + provenance 路由。\"\ntriggers:\n  - \"交接\"\n  - \"传话\"\n  - \"handoff\"\n  - \"fallback\"\n  - \"下一棒\"\n  - \"exact-HEAD review\"\n  - \"PR tracking\"\n  - \"advisory_read_only\"",
+      "reviewStatus": "full_text_reviewed",
+      "usageFrequency": null,
+      "effectVerdict": "unmeasured",
+      "sourceReview": {
+        "commit": "2b6a1252bc2a29818c848e42eae574b1e8dfce6a",
+        "sha256": "2e909d70cb8cf2c25f7de6db03ee510c467c93507b2028ac5ed4265989bff8e9",
+        "value": "区分 external/local review、正式与 advisory、exact HEAD 与 accepted source，防送达和责任假闭环。",
+        "staticRecommendation": "revise",
+        "reason": "local review 新约定与旧表格冲突；review 请求的下一步误导到处理反馈的 receive-review；固定五件套可按交接内容复用。",
+        "evidenceKind": "source reading and static scenario reasoning; not a behavioral benchmark"
+      }
+    },
+    {
+      "skill": "cross-thread-sync",
+      "source": "cat-cafe-skills/cross-thread-sync/SKILL.md",
+      "sha256": "581b723dc071cc40342869350b736ca2a1f2f5b2d7dace5f8eab632c6691845f",
+      "lines": 240,
+      "bytes": 14044,
+      "frontmatter": "name: cross-thread-sync\ntips_exempt: harness-internal coordination convention; no distinct user-facing capability surface\ndescription: \"跨 thread 协同：通知、归属核验、争用与责任处置。Use when: 平行 session 通知或共享文件争用。Not for: 跨猫交接或新建 thread。Output: routed cross-post + disposition。GOTCHA: ACTION/BLOCKING 不转移球权。\"\ntriggers:\n  - \"通知另一个 session\"\n  - \"跨 thread\"\n  - \"跨线程消息\"\n  - \"平行世界\"\n  - \"parallel session sync\"\n  - \"另一只Ragdoll\"\n  - \"cross-thread\"",
+      "reviewStatus": "full_text_reviewed",
+      "usageFrequency": null,
+      "effectVerdict": "unmeasured",
+      "sourceReview": {
+        "commit": "2b6a1252bc2a29818c848e42eae574b1e8dfce6a",
+        "sha256": "581b723dc071cc40342869350b736ca2a1f2f5b2d7dace5f8eab632c6691845f",
+        "value": "明确消息不是授权/球权真相，阻塞依赖双写、终结谓词、准确 owner 和零 ACK 循环。",
+        "staticRecommendation": "revise",
+        "reason": "责任核验与等待边界应保留；按目录强制全活跃 session 广播、OR/AND 路由矛盾及失联的旧 bug 状态应修订。",
+        "evidenceKind": "source reading and static scenario reasoning; not a behavioral benchmark"
+      }
+    },
+    {
+      "skill": "custody-recognition",
+      "source": "cat-cafe-skills/custody-recognition/SKILL.md",
+      "sha256": "aaf10eb0cb5157e6619201bf45a29458bc443727644b2e604c5e78d650f25016",
+      "lines": 93,
+      "bytes": 4418,
+      "frontmatter": "name: custody-recognition\ntips_exempt: \"F310 Phase B soft-entry 仍在 pre-merge review；待本次自然语言触发合入并完成 source-linked Alpha dogfood 后，再从已验证的稳定用户入口贡献 capability tip。\"\ndescription: \"Use when a source may entrust work. Not for casual mentions, terminal offers, generic planning, or Schedule/Needs Me. Output: abstain, admit, offer, or retry.\"\ntriggers:\n  - \"帮我接住\"\n  - \"帮我跟踪\"\n  - \"之后要做\"\n  - \"别忘了\"\n  - \"custody offer\"\n  - \"needs_clarification\"",
+      "reviewStatus": "full_text_reviewed",
+      "usageFrequency": null,
+      "effectVerdict": "unmeasured",
+      "sourceReview": {
+        "commit": "2b6a1252bc2a29818c848e42eae574b1e8dfce6a",
+        "sha256": "aaf10eb0cb5157e6619201bf45a29458bc443727644b2e604c5e78d650f25016",
+        "value": "区分明确委托、受控来源授权、隐含机会和闲聊；source-bound 幂等与 typed admitted/resumed 防虚假接活。",
+        "staticRecommendation": "retain",
+        "reason": "疑问仅限改变结果/权限/成本/终结信号；已明确委托立即 admission、不再 offer；旧 pending/declined 不重复出生。已核 callback-tools.ts 的 canonical admit 描述与授权来源 fail-closed。",
+        "evidenceKind": "source reading and static scenario reasoning; not a behavioral benchmark"
+      }
+    },
+    {
+      "skill": "debugging",
+      "source": "cat-cafe-skills/debugging/SKILL.md",
+      "sha256": "7291c4399259bdb4efeeb6f438f4ebe00a880315e5bbe89f77b2630c282e23a8",
+      "lines": 216,
+      "bytes": 9254,
+      "frontmatter": "name: debugging\ntips_exempt: existing workspace-navigator execution guidance correction; no new capability or discovery moment\ndescription: >\n  系统化 bug 定位：根因调查 → 模式分析 → 假设验证 → 修复。\n  Use when: 遇到 bug、测试失败、unexpected behavior。\n  Not for: 新功能开发、重构、已知原因的简单修复。\n  Output: Bug report（5件套）+ 根因 + 修复（含回归测试）。\ntriggers:\n  - \"bug\"\n  - \"报错\"\n  - \"test failure\"\n  - \"unexpected behavior\"",
+      "reviewStatus": "full_text_reviewed",
+      "usageFrequency": null,
+      "effectVerdict": "unmeasured",
+      "sourceReview": {
+        "commit": "2b6a1252bc2a29818c848e42eae574b1e8dfce6a",
+        "sha256": "9e78318a0012b602636181293fc495215d976e1ab8cb667b02730a09a651f3f3",
+        "value": "项目特有的运行版本证据、根因调查与恢复记录；当前候选已解除无关 preflight 阻塞。",
+        "staticRecommendation": "revise",
+        "reason": "修正具体内部契约矛盾，保留有效内容；效用尚未实测。",
+        "evidenceKind": "source reading and static scenario reasoning; not a behavioral benchmark"
+      }
+    },
+    {
+      "skill": "deep-research",
+      "source": "cat-cafe-skills/deep-research/SKILL.md",
+      "sha256": "47e6151e501005539f521c2537c71cc986fb11d49b339848e97626fe751d92cc",
+      "lines": 315,
+      "bytes": 12784,
+      "frontmatter": "name: deep-research\ntips_exempt: internal shared-reference coordinate repair; no user-visible capability change\ndescription: >\n  多源深度调研管道（Web Deep Research + Coder 合成 + 云端模型咨询）。\n  Use when: 技术问题需要多源调查、设计决策需要证据、operator说\"调研\"/\"research\"、需要咨询云端模型。\n  Not for: 简单搜索（直接用 WebSearch）、已有结论的确认。\n  Output: 调研报告 + 证据合成 或 咨询文档（含回填区）。\ntriggers:\n  - \"调研\"\n  - \"research\"\n  - \"深度研究\"\n  - \"问一下 GPT Pro\"\n  - \"咨询云端\"\nrenamed-from: deep-research-pipeline",
+      "reviewStatus": "full_text_reviewed",
+      "usageFrequency": null,
+      "effectVerdict": "unmeasured",
+      "sourceReview": {
+        "commit": "2b6a1252bc2a29818c848e42eae574b1e8dfce6a",
+        "sha256": "8033425116a5d920834168996a7f4d42e882fc60b5199d9e990a7ba3eb21c1f9",
+        "value": "来源/反例/本地代码核验与研究产物追溯，独立视角按证据缺口选择。",
+        "staticRecommendation": "retain",
+        "reason": "在当前源码审读范围未发现需要本轮修改的阻断性矛盾；不代表真实效用已证明。",
+        "evidenceKind": "source reading and static scenario reasoning; not a behavioral benchmark"
+      }
+    },
+    {
+      "skill": "enterprise-workflow",
+      "source": "cat-cafe-skills/enterprise-workflow/SKILL.md",
+      "sha256": "4d9d8ec2112e8b5195a249aead3503572db6c94333e46507fbb69ef38deef181",
+      "lines": 228,
+      "bytes": 7177,
+      "frontmatter": "name: enterprise-workflow\ndescription: >\n  企业 IM 工作流自动化：文档、表格、待办/任务、会议/日程一键创建。\n  Use when: operator要求创建企微/飞书的文档/表格/待办/会议/日程/幻灯片，或\"一句话生成完整工作流\"。\n  Not for: 普通聊天、消息收发（那是 F088 Transport Plane 的活）。\n  Output: 资源链接（文档 URL、企微会议链接、日程 summary 等）通过 callback 返回。\ntriggers:\n  - \"创建文档\"\n  - \"写个文档\"\n  - \"create doc\"\n  - \"建个表格\"\n  - \"创建表格\"\n  - \"smart table\"\n  - \"多维表\"\n  - \"bitable\"\n  - \"建个待办\"\n  - \"创建待办\"\n  - \"todo\"\n  - \"创建任务\"\n  - \"task\"\n  - \"约个会\"\n  - \"创建会议\"\n  - \"create meeting\"\n  - \"创建日程\"\n  - \"calendar event\"\n  - \"幻灯片\"\n  - \"slides\"\n  - \"deck\"\n  - \"整理成文档\"\n  - \"拆成任务\"\n  - \"golden chain\"\n  - \"黄金链路\"\n  - \"工作流\"\n  - \"enterprise workflow\"\n  - \"飞书\"\n  - \"feishu\"\n  - \"lark\"\n  - \"企微\"\n  - \"wecom\"\n  - \"企业微信\"",
+      "reviewStatus": "full_text_reviewed",
+      "usageFrequency": null,
+      "effectVerdict": "unmeasured",
+      "sourceReview": {
+        "commit": "2b6a1252bc2a29818c848e42eae574b1e8dfce6a",
+        "sha256": "4d9d8ec2112e8b5195a249aead3503572db6c94333e46507fbb69ef38deef181",
+        "value": "以统一 callback 认证和厂商能力映射完成用户明确指定的企业资源创建，保留审计链及返回链接。",
+        "staticRecommendation": "revise",
+        "reason": "平台与能力说明大体清楚，callback 鉴权可由源码确认；目录权限不足时默认替换收件/负责人身份会改变用户授权的动作对象。",
+        "evidenceKind": "source reading and static scenario reasoning; not a behavioral benchmark"
+      }
+    },
+    {
+      "skill": "eval-design",
+      "source": "cat-cafe-skills/eval-design/SKILL.md",
+      "sha256": "00a8dbaf3441a91308c413b435cbacd8595723c67005c08b8595bef47ec23862",
+      "lines": 210,
+      "bytes": 16308,
+      "frontmatter": "name: eval-design\ntips_exempt: \"v0.3 adds internal eval role separation plus longitudinal trigger, maturity, and actionability governance; it changes no user-invocable capability or product surface.\"\ndescription: \"E0资格门+指标出生证+纵向运行拓扑+七公理+五病体检。Use when: 设计、修改或审计eval。Not for: 单次交付(quality-gate)、外部claim(source-audit)、摩擦诊断(code-as-harness)。Output: 指标出生证（纵向eval含触发契约）或病名+处置。\"",
+      "reviewStatus": "full_text_reviewed",
+      "usageFrequency": null,
+      "effectVerdict": "unmeasured",
+      "sourceReview": {
+        "commit": "2b6a1252bc2a29818c848e42eae574b1e8dfce6a",
+        "sha256": "00a8dbaf3441a91308c413b435cbacd8595723c67005c08b8595bef47ec23862",
+        "value": "项目 E0-E6、测量有效性、角色分离和评测退役规范，不属于模型通用知识替代品。",
+        "staticRecommendation": "retain",
+        "reason": "在当前源码审读范围未发现需要本轮修改的阻断性矛盾；不代表真实效用已证明。",
+        "evidenceKind": "source reading and static scenario reasoning; not a behavioral benchmark"
+      }
+    },
+    {
+      "skill": "expert-panel",
+      "source": "cat-cafe-skills/expert-panel/SKILL.md",
+      "sha256": "a84dd760625aa237e9b2e67b2b6cf7fc2a3b06e7cc8b2c2e75d1429fb59bef7c",
+      "lines": 208,
+      "bytes": 7878,
+      "frontmatter": "name: expert-panel\ndisable-model-invocation: true\ndescription: >\n  多猫专家辩论团：在现有协作习惯上加一层轻量编排 + WHY 链标准 + 交付链。\n  Use when: 用户明确要求 expert panel、专家辩论、多猫分析或三猫讨论。\n  Not for: 普通“帮我分析一下”、单猫能搞定的问题、代码实现、bug fix、日常聊天。\n  Output: 洞察卡片(rich block) + 语音总结 + 正式报告(DOCX/PDF)。\ntriggers:\n  - \"专家辩论\"\n  - \"expert panel\"\n  - \"技术参谋\"\n  - \"竞品分析\"\n  - \"行业分析\"\n  - \"趋势判断\"\n  - \"多猫分析\"\n  - \"三猫讨论\"\n  - \"showcase\"",
+      "reviewStatus": "full_text_reviewed",
+      "usageFrequency": null,
+      "effectVerdict": "unmeasured",
+      "sourceReview": {
+        "commit": "2b6a1252bc2a29818c848e42eae574b1e8dfce6a",
+        "sha256": "a84dd760625aa237e9b2e67b2b6cf7fc2a3b06e7cc8b2c2e75d1429fb59bef7c",
+        "value": "显式启用高成本多视角，保护独立观点、来源与推断区分、分歧和适用边界；manual-only 两个 provider adapter 均存在。",
+        "staticRecommendation": "revise",
+        "reason": "不应撤掉独立/证据纪律；OQ 默认全部上交 operator、固定多媒体包及超时与 contributor-check 的关系仍需按任务声明收口。",
+        "evidenceKind": "source reading and static scenario reasoning; not a behavioral benchmark"
+      }
+    },
+    {
+      "skill": "feat-lifecycle",
+      "source": "cat-cafe-skills/feat-lifecycle/SKILL.md",
+      "sha256": "06054860d99066174b00dac93fe85c8a5b765c9a0da08f9a1cc7345470116083",
+      "lines": 577,
+      "bytes": 38359,
+      "frontmatter": "name: feat-lifecycle\ndescription: >\n  Feature 立项、讨论、完成的全生命周期管理。\n  Use when: 开个新功能、new feature、F0xx、立项、feature 完成、验收通过、讨论新功能需求，或operator说“先看真页面”要求恢复既有 F083 Design Gate。\n  Not for: 不涉及 Feature/Design Gate 真相更新的纯代码实现、review、merge（那些有专门的 skill）。\n  Output: Feature 聚合文件 + BACKLOG 索引 + 真相源同步。\ntriggers:\n  - \"开个新功能\"\n  - \"new feature\"\n  - \"F0xx\"\n  - \"立项\"\n  - \"feature 完成\"\n  - \"F0xx done\"\n  - \"验收通过\"\n  - \"讨论新功能需求\"\n  - \"先看真页面\"\nargument-hint: \"[阶段: kickoff|discussion|completion] [F0xx 或主题]\"",
+      "reviewStatus": "full_text_reviewed",
+      "usageFrequency": null,
+      "effectVerdict": "unmeasured",
+      "sourceReview": {
+        "commit": "2b6a1252bc2a29818c848e42eae574b1e8dfce6a",
+        "sha256": "06054860d99066174b00dac93fe85c8a5b765c9a0da08f9a1cc7345470116083",
+        "value": "以原始需求、用户旅程、AC 证据和持久 feature truth 管理立项/完成；安全、权限及真实交互 claim 门槛应保留。",
+        "staticRecommendation": "revise",
+        "reason": "完成入口仍强制 remote review；架构/Phase 无条件确认、delete AC 的授权边界和缺失强制模板均会与当前风险路由或原始目标冲突。",
+        "evidenceKind": "source reading and static scenario reasoning; not a behavioral benchmark"
+      }
+    },
+    {
+      "skill": "fresh-context-review",
+      "source": "cat-cafe-skills/fresh-context-review/SKILL.md",
+      "sha256": "e615344861131bb3bbee014da92dc771276806a7763e198057765dcba25a30c6",
+      "lines": 183,
+      "bytes": 7873,
+      "frontmatter": "name: fresh-context-review\ntips_exempt: internal shared-reference coordinate repair; no user-visible capability change\ndescription: >\n  Author-triggered fresh-context scan of PR diff before formal review.\n  Finding generator, NOT approval authority.\n  Use when: quality-gate 通过、PR 非 trivial、想降低正式 reviewer 认知负荷。\n  Not for: 正式 review verdict、approval、merge decision。\n  Output: Finding list（附在 review request 中）。\ntriggers:\n  - \"fresh context\"\n  - \"pre-review scan\"\n  - \"找新眼看看\"",
+      "reviewStatus": "full_text_reviewed",
+      "usageFrequency": null,
+      "effectVerdict": "unmeasured",
+      "sourceReview": {
+        "commit": "2b6a1252bc2a29818c848e42eae574b1e8dfce6a",
+        "sha256": "e615344861131bb3bbee014da92dc771276806a7763e198057765dcba25a30c6",
+        "value": "把可选 fresh-context finding generation 与正式 approval 严格分离，作者可以判定误报且不能用预扫代替已选 review。",
+        "staticRecommendation": "experiment",
+        "reason": "权限边界清楚、启用表明确只是建议，应保留；额外扫描的收益和所谓模型正交性尚不能由静态文本证明，适合有 consumer 的定向实验，不能当既定 benchmark。",
+        "evidenceKind": "source reading and static scenario reasoning; not a behavioral benchmark"
+      }
+    },
+    {
+      "skill": "guide-authoring",
+      "source": "cat-cafe-skills/guide-authoring/SKILL.md",
+      "sha256": "4d59f76d46cf90dd4686fff5238884124eba98ad617ab4011d386e2802f530f9",
+      "lines": 193,
+      "bytes": 6670,
+      "frontmatter": "name: guide-authoring\ndescription: >\n  标准引导流程设计 SOP：场景识别 → YAML 编排 → 标签标注 → 注册发现 → 测试验证。\n  Use when: 新建引导流程、添加场景引导、维护 Guide Catalog、编写引导 YAML。\n  Not for: 使用引导（用户侧）、Guide Engine 代码实现（用 tdd）、视觉设计（用 pencil-design）。\n  Output: Flow YAML + tag-manifest 更新 + registry 注册 + CI 校验通过。\ntriggers:\n  - \"新建引导\"\n  - \"添加场景引导\"\n  - \"写引导流程\"\n  - \"guide authoring\"\n  - \"引导 YAML\"",
+      "reviewStatus": "full_text_reviewed",
+      "usageFrequency": null,
+      "effectVerdict": "unmeasured",
+      "sourceReview": {
+        "commit": "2b6a1252bc2a29818c848e42eae574b1e8dfce6a",
+        "sha256": "4d59f76d46cf90dd4686fff5238884124eba98ad617ab4011d386e2802f530f9",
+        "value": "保留语义 data-guide-id、flow/manifest/registry 单一契约、退出路径、保存成功后 confirm、完整异常旅程验证。",
+        "staticRecommendation": "revise",
+        "reason": "引导编排本身是项目领域知识；需要把旧关键词触发的 E2E 写法同步到目前 catalog judgment → offer → start 的正式入口。",
+        "evidenceKind": "source reading and static scenario reasoning; not a behavioral benchmark"
+      }
+    },
+    {
+      "skill": "guide-interaction",
+      "source": "cat-cafe-skills/guide-interaction/SKILL.md",
+      "sha256": "22c9c24732074319c68ee3cce895fb8d9316385dc5895c5c47f8835930f6255b",
+      "lines": 100,
+      "bytes": 4223,
+      "frontmatter": "name: guide-interaction\ndescription: >\n  场景引导交互模式：当用户在询问某项功能的使用/配置流程时，\n  先判断该直接解释还是进入交互引导；当系统已注入 Guide Matched /\n  Guide Pending / Guide Selection / Guide Active / Guide Completed 时，\n  按状态驱动回复并使用对应 guide MCP 工具。\n  Use when: 系统注入了 Guide Matched / Guide Pending / Guide Selection /\n  Guide Active / Guide Completed，或用户明确在问某项功能怎么操作。\n  Not for: 普通闲聊、代码实现、没有流程诉求的概念讨论。\ntriggers:\n  - \"引导流程\"\n  - \"怎么配置\"\n  - \"怎么操作\"",
+      "reviewStatus": "full_text_reviewed",
+      "usageFrequency": null,
+      "effectVerdict": "unmeasured",
+      "sourceReview": {
+        "commit": "2b6a1252bc2a29818c848e42eae574b1e8dfce6a",
+        "sha256": "22c9c24732074319c68ee3cce895fb8d9316385dc5895c5c47f8835930f6255b",
+        "value": "保留先判断说明还是交互引导、基于可用目录而非关键词猜 guide、状态恢复、取消后不追问以及工具驱动 overlay。",
+        "staticRecommendation": "revise",
+        "reason": "待选择分支未消费用户已经给出的开始指令，会把必要的一次选择扩展为重复确认。应补显式确认后的动作优先级，并同步生成相同提示的 runtime 源码。",
+        "evidenceKind": "source reading and static scenario reasoning; not a behavioral benchmark"
+      }
+    },
+    {
+      "skill": "hyperfocus-brake",
+      "source": "cat-cafe-skills/hyperfocus-brake/SKILL.md",
+      "sha256": "9b48f92b733de1b517acd7377ba08d38a591d23d51934ae7e0e8cd07ea63068f",
+      "lines": 170,
+      "bytes": 5529,
+      "frontmatter": "name: hyperfocus-brake\ndescription: >\n  operator健康提醒：三猫撒娇打断 hyperfocus。\n  Use when: hook 触发提醒、用户输入 /hyperfocus-brake。\n  Not for: 正常工作流程、非operator用户。\n  Output: 三猫温柔提醒 + typed check-in。\ntriggers:\n  - \"hyperfocus\"\n  - \"休息提醒\"\n  - \"健康检查\"\n  - \"/hyperfocus-brake\"",
+      "reviewStatus": "full_text_reviewed",
+      "usageFrequency": null,
+      "effectVerdict": "unmeasured",
+      "sourceReview": {
+        "commit": "2b6a1252bc2a29818c848e42eae574b1e8dfce6a",
+        "sha256": "9b48f92b733de1b517acd7377ba08d38a591d23d51934ae7e0e8cd07ea63068f",
+        "value": "在已启用提醒场景中给用户可识别的休息 check-in，并转义动态上下文防伪造 mention/富块。",
+        "staticRecommendation": "revise",
+        "reason": "提醒策略与实际四小时窗口存在确定性漂移；健康/效率事实和强制持续提醒混在 shared skill，需明确事实来源与用户对提醒强度的控制，而不是由静态 persona 文案推断。",
+        "evidenceKind": "source reading and static scenario reasoning; not a behavioral benchmark"
+      }
+    },
+    {
+      "skill": "image-generation",
+      "source": "cat-cafe-skills/image-generation/SKILL.md",
+      "sha256": "87e1c0d9ed07cafccdea8f6cd4ceda21cf6ea0e4d2523163644269c4a6d2f6ed",
+      "lines": 244,
+      "bytes": 12536,
+      "frontmatter": "name: image-generation\ndescription: >\n  AI 图片生成：原生 tool call（Codex/Antigravity）或浏览器自动化（Gemini/ChatGPT）。\n  Use when: 需要 AI 生成概念图、UI 参考、像素画素材、完整 PPT 页面、复杂架构图、信息图或视觉 mock。\n  Not for: 已有图片的展示（用 media_gallery rich block）、硬要求可编辑/native text 的 PPT/图表（用 PPT/HTML 管线）。\n  Output: 生成图片自动发布，或作为完整视觉 mock / 图像素材进入后续交付。",
+      "reviewStatus": "full_text_reviewed",
+      "usageFrequency": null,
+      "effectVerdict": "unmeasured",
+      "sourceReview": {
+        "commit": "2b6a1252bc2a29818c848e42eae574b1e8dfce6a",
+        "sha256": "87e1c0d9ed07cafccdea8f6cd4ceda21cf6ea0e4d2523163644269c4a6d2f6ed",
+        "value": "保留原生 imagegen 的能力发现、完整 raster mock 支持、参考图/当前 session 绑定和不以 nested codex exec 冒充 native tool 的历史刹车。",
+        "staticRecommendation": "revise",
+        "reason": "应统一入口与正文，并把 raster-first 适用范围与精确文本/资产维护例外写在同一个优先级上；不需要因此贬低原生生图，也未评估新模型图像效用。",
+        "evidenceKind": "source reading and static scenario reasoning; not a behavioral benchmark"
+      }
+    },
+    {
+      "skill": "incident-response",
+      "source": "cat-cafe-skills/incident-response/SKILL.md",
+      "sha256": "008e17d2ec7c2791581ccf6523698c916128427e18bcb97507c5bb007c1e6863",
+      "lines": 248,
+      "bytes": 8897,
+      "frontmatter": "name: incident-response\ntips_exempt: internal shared-reference coordinate repair; no user-visible capability change\ndescription: >\n  不可逆事故发生后的应急响应：情绪急救 → 止损 → 补偿性劳动 → 教训沉淀。\n  Use when: 犯了不可挽回的错误、造成了人类伙伴的情绪波动、需要危机处理。\n  Not for: 可撤销的小失误、日常 bug fix（用 debugging）、预防性确认（用 shared-rules 铁律）。\n  Output: 情绪修复 + 止损行动 + 教训沉淀（lessons-learned / shared-rules）。\ntriggers:\n  - \"闯祸了\"\n  - \"搞砸了\"\n  - \"不可挽回\"\n  - \"犯了大错\"\n  - \"incident\"\n  - \"对不起\"\n  - \"怎么补救\"\n  - \"人很难过\"",
+      "reviewStatus": "full_text_reviewed",
+      "usageFrequency": null,
+      "effectVerdict": "unmeasured",
+      "sourceReview": {
+        "commit": "2b6a1252bc2a29818c848e42eae574b1e8dfce6a",
+        "sha256": "008e17d2ec7c2791581ccf6523698c916128427e18bcb97507c5bb007c1e6863",
+        "value": "真实事故后的责任承担、证据整理、避免找借口及尊重用户情绪具有保留价值；这些不能替代及时止损与行动授权。",
+        "staticRecommendation": "revise",
+        "reason": "固定‘情绪稳定后止损’顺序可扩大仍在发生的损害；后台补偿性劳动又包括未独立授权的外部发送。",
+        "evidenceKind": "source reading and static scenario reasoning; not a behavioral benchmark"
+      }
+    },
+    {
+      "skill": "knowledge-engineering",
+      "source": "cat-cafe-skills/knowledge-engineering/SKILL.md",
+      "sha256": "51fe661fef05e4e5c8d242a9cf288bac3a128bd23c3f859469bdc601f08c9bd7",
+      "lines": 289,
+      "bytes": 12115,
+      "frontmatter": "name: knowledge-engineering\ndescription: >\n  猫猫指导外部项目文档重构 — AI FDE 知识工程方法论。\n  Use when: 猫猫部署到外部项目、用户项目缺少结构化文档、需要知识工程指导、冷启动理解业务。\n  Not for: cat-cafe 项目自身开发、已有完善 docs/ 结构的项目（直接用 CatCafeScanner）。\n  Output: 文档现状诊断 + 路径选择 + 三层知识注入建议 + 文档骨架模板。\ntriggers:\n  - \"知识工程\"\n  - \"文档重构\"\n  - \"外部项目\"\n  - \"knowledge engineering\"\n  - \"冷启动\"\n  - \"AI FDE\"\n  - \"帮我整理文档\"",
+      "reviewStatus": "full_text_reviewed",
+      "usageFrequency": null,
+      "effectVerdict": "unmeasured",
+      "sourceReview": {
+        "commit": "2b6a1252bc2a29818c848e42eae574b1e8dfce6a",
+        "sha256": "51fe661fef05e4e5c8d242a9cf288bac3a128bd23c3f859469bdc601f08c9bd7",
+        "value": "为无文档的业务项目提供概念、规则、操作路径和模式的结构化骨架，区分可由代码推导的信息与人类隐性知识。",
+        "staticRecommendation": "revise",
+        "reason": "固定等待用户选路径和必须迁移外部文档可能扩张任务/数据边界；业务文档内容真相与可追溯格式应保留。",
+        "evidenceKind": "source reading and static scenario reasoning; not a behavioral benchmark"
+      }
+    },
+    {
+      "skill": "memory-navigation",
+      "source": "cat-cafe-skills/memory-navigation/SKILL.md",
+      "sha256": "949d569085ec5bc0a1db50eadf08c5fc282bd273d6b884c845834e4275fe759b",
+      "lines": 127,
+      "bytes": 4855,
+      "frontmatter": "name: memory-navigation\ntips_exempt: internal shared-reference coordinate repair; no user-visible capability change\ndescription: >\n  记忆系统三入口路由（search_evidence / graph_resolve / list_recent）决策树 + 噪音控制 + 加载时机。F188 Phase F (AC-F6) 配套 skill。\n  Use when: 没先验、压缩后回顾、\"我记得最近讨论过 X\"、search_evidence 反复 low-hit。\n  Not for: 已有精确 anchor 直接 Read；代码符号查 Grep/LSP。\n  Output: 选定入口 + 噪音控制参数 + 进入对应 MCP 工具。\ntriggers:\n  - \"没先验\"\n  - \"压缩后\"\n  - \"我记得讨论过\"\n  - \"最近讨论\"\n  - \"找不到 anchor\"\n  - \"cold start\"\n  - \"扫一眼最近\"\n  - \"memory navigation\"\nnot_for:\n  - \"已有精确 anchor\"\n  - \"代码符号查找\"\noutput: \"Entry choice + noise control params + downstream tool call\"",
+      "reviewStatus": "full_text_reviewed",
+      "usageFrequency": null,
+      "effectVerdict": "unmeasured",
+      "sourceReview": {
+        "commit": "2b6a1252bc2a29818c848e42eae574b1e8dfce6a",
+        "sha256": "949d569085ec5bc0a1db50eadf08c5fc282bd273d6b884c845834e4275fe759b",
+        "value": "在三个私有记忆入口之间选择并控制图展开；包含项目工具参数和可见性边界。",
+        "staticRecommendation": "revise",
+        "reason": "修正具体内部契约矛盾，保留有效内容；效用尚未实测。",
+        "evidenceKind": "source reading and static scenario reasoning; not a behavioral benchmark"
+      }
+    },
+    {
+      "skill": "memory-search-best-practices",
+      "source": "cat-cafe-skills/memory-search-best-practices/SKILL.md",
+      "sha256": "918174ef29dd4649530921a9ecf161b3115b294e791ca1d52211f5bb860a62f3",
+      "lines": 157,
+      "bytes": 11243,
+      "frontmatter": "name: memory-search-best-practices\ndescription: >\n  记忆系统多刀检索 + recall coverage 策略（8 类题型 recipe）。\n  Use when: 任务是 \"哪些地方提过 X\" / \"X 的来源 / source map\" / \"有没有提过 Y / absence check\" / \"上次到现在变了什么 / delta\" / 冷启动 onboard 复杂主题 / 任何召回任务搜了一刀觉得不够。\n  Not for: 只是选哪个入口走第一刀（用 memory-navigation）/ 已知精确 anchor 单 Read（直接 Read）/ 代码符号查（Grep/LSP）/ 新功能开发（不是 recall 任务）。\n  Output: 单一 owner 在一条任务链内完成多 query / 多 scope union + coverage matrix（item/source/谁提到/直接 vs 间接）+ 一次终局交付。\n  GOTCHA: 和 memory-navigation 互补不重叠 — memory-navigation 决定**第一刀走哪个工具**（search vs graph vs list_recent），本 skill 决定**要不要补刀 + 题型对应几刀几路 + 何时停**。Ragdoll家族必加载：opus 系治\"我能猜出来 / 碎片够了\"停太早病，fable 系治\"再确认一轮\"停太晚病（双向校准见正文）。\ntriggers:\n  - \"哪些 thread\"\n  - \"哪些 md\"\n  - \"哪些地方提过\"\n  - \"所有\"\n  - \"历史上\"\n  - \"沉淀过\"\n  - \"source map\"\n  - \"provenance\"\n  - \"有没有提过\"\n  - \"absence check\"\n  - \"delta\"\n  - \"上次和现在\"\n  - \"新猫冷启动\"\n  - \"coverage\"\n  - \"全集\"",
+      "reviewStatus": "full_text_reviewed",
+      "usageFrequency": null,
+      "effectVerdict": "unmeasured",
+      "sourceReview": {
+        "commit": "2b6a1252bc2a29818c848e42eae574b1e8dfce6a",
+        "sha256": "918174ef29dd4649530921a9ecf161b3115b294e791ca1d52211f5bb860a62f3",
+        "value": "coverage/source-map/absence 的项目检索方法、原文核验和统一收敛；需要解决内部配额冲突。",
+        "staticRecommendation": "revise",
+        "reason": "修正具体内部契约矛盾，保留有效内容；效用尚未实测。",
+        "evidenceKind": "source reading and static scenario reasoning; not a behavioral benchmark"
+      }
+    },
+    {
+      "skill": "merge-gate",
+      "source": "cat-cafe-skills/merge-gate/SKILL.md",
+      "sha256": "07c5a3fe36382e0b60c62f097ce421143adfefe563e4fbff93ecd93748be7e33",
+      "lines": 707,
+      "bytes": 54553,
+      "frontmatter": "name: merge-gate\ndescription: 合入 main：按行为 / 数据 / 安全 / 契约 / 不可逆风险选择 targeted 或 full gate，并消费一个或多个有客观触发理由的独立 review source。\ntips_exempt: F314 extends harness-internal review/source provenance policy; no distinct end-user-invocable capability surface\ntriggers:\n  - \"合入 main\"\n  - \"merge\"\n  - \"准备合入\"\n  - \"开 PR\"\n  - \"cloud review\"\n  - \"gh pr create\"",
+      "reviewStatus": "full_text_reviewed",
+      "usageFrequency": null,
+      "effectVerdict": "unmeasured",
+      "sourceReview": {
+        "commit": "2b6a1252bc2a29818c848e42eae574b1e8dfce6a",
+        "sha256": "07c5a3fe36382e0b60c62f097ce421143adfefe563e4fbff93ecd93748be7e33",
+        "value": "最终合入核对 exact HEAD、独立 reviewer、accepted source、目标覆盖、真实风险验证及 PR terminal；这些是必须保留的结果与权限边界。",
+        "staticRecommendation": "revise",
+        "reason": "新的风险/continuity 主干有价值，但历史 shell 与 QA 段包含可丢 WIP 的清理、自动压低 finding 等级、GitHub login 误作猫身份，以及旧模型/路由和显式等待冲突。",
+        "evidenceKind": "source reading and static scenario reasoning; not a behavioral benchmark"
+      }
+    },
+    {
+      "skill": "open-source-teardown",
+      "source": "cat-cafe-skills/open-source-teardown/SKILL.md",
+      "sha256": "a34af582f8e6831ec705bd2a3e1fb6957b3d54731261bb10ab619cf36444a079",
+      "lines": 212,
+      "bytes": 13269,
+      "frontmatter": "name: open-source-teardown\ndescription: >\n  明星开源项目拆解：从宣传/PPT/README 进入源码，验证真实架构、明星特性、算法含量、营销水分、可学习点和不 follow 的 tradeoff。\n  Use when: operator要求拆解热门 GitHub 项目、竞品 agent/runtime、外部 skill/tool 框架，或问“它到底有什么真本事/我们能学什么”。\n  Not for: 普通资料搜索（用 deep-research）、社区 issue/PR 运营（用 opensource-ops）、只需要架构头脑风暴（用 collaborative-thinking）。\n  Output: feature-discussions/YYYY-MM-DD-{project}-deep-dive/ 下的代码证据报告 + 对比结论 + 候选 lesson/skill。\n  GOTCHA: 不许只看 README 下判断；每个明星特性必须追到代码路径、状态突变点、反馈闭环和算法输入输出。\ntips_exempt: Existing teardown quality contract refinement; no new user-facing capability or discovery moment.\ntriggers:\n  - \"拆解明星开源项目\"\n  - \"拆解开源项目\"\n  - \"竞品拆解\"\n  - \"热门 GitHub 项目\"\n  - \"它有什么真本事\"\n  - \"我们能学什么\"\n  - \"marketing vs reality\"\n  - \"算法含量\"\n  - \"拆解 hermes\"\n  - \"看看 letta 怎么做的\"\n  - \"codex cli 源码\"\n  - \"agent runtime 拆解\"",
+      "reviewStatus": "full_text_reviewed",
+      "usageFrequency": null,
+      "effectVerdict": "unmeasured",
+      "sourceReview": {
+        "commit": "2b6a1252bc2a29818c848e42eae574b1e8dfce6a",
+        "sha256": "a34af582f8e6831ec705bd2a3e1fb6957b3d54731261bb10ab619cf36444a079",
+        "value": "把宣传 claim 追到源码、状态突变、反馈与运行证据；区分 source validity、适用性与成本边界，具有明确证据治理价值。",
+        "staticRecommendation": "revise",
+        "reason": "保留证据主干；修订固定交接配额、未声明发布副作用和会预先限定结论的参考材料。此建议不代表已测得净效用。",
+        "evidenceKind": "source reading and static scenario reasoning; not a behavioral benchmark"
+      }
+    },
+    {
+      "skill": "opensource-ops",
+      "source": "cat-cafe-skills/opensource-ops/SKILL.md",
+      "sha256": "e16f7572266cf2072fc9dff43ddebcb459512f2d1823ed83daf7071aceac25b8",
+      "lines": 208,
+      "bytes": 14904,
+      "frontmatter": "name: opensource-ops\ndescription: >\n  Portable workflow for external PR / issue operations and source-to-public publishing.\n  Use when: a thread is reviewing, triaging, intaking, or advising on an external artifact, or must distinguish outbound sync from a public release.\n  Not for: internal feature work with no external artifact, generic thread orchestration, replacing the external maintainer's own decision, or inventing deployment-specific export commands.\n  Output: grounded provider-neutral subject + verified author/authenticated-identity comparison + adoption five-question answer + correctly separated sync/release custody.\ntriggers:\n  - \"opensource-ops\"\n  - \"社区 PR\"\n  - \"external PR review\"\n  - \"GitHub PR review\"\n  - \"PR intake\"\n  - \"issue triage\"\n  - \"outbound sync\"\n  - \"public release\"",
+      "reviewStatus": "full_text_reviewed",
+      "usageFrequency": null,
+      "effectVerdict": "unmeasured",
+      "sourceReview": {
+        "commit": "2b6a1252bc2a29818c848e42eae574b1e8dfce6a",
+        "sha256": "e16f7572266cf2072fc9dff43ddebcb459512f2d1823ed83daf7071aceac25b8",
+        "value": "provider subject、作者/认证身份比较、外部作者修复优先、reverse provenance 和 sync/release custody 是项目特有且重要的授权边界。",
+        "staticRecommendation": "revise",
+        "reason": "保留外部操作权限和 provenance；统一 reportingMode 真相源，并让内部 provenance 不足只阻止依赖该证据的动作。",
+        "evidenceKind": "source reading and static scenario reasoning; not a behavioral benchmark"
+      }
+    },
+    {
+      "skill": "organize-threads",
+      "source": "cat-cafe-skills/organize-threads/SKILL.md",
+      "sha256": "0a59a51770bdcd9440c0f88686d1a20056da2037d90e587bce5129f99faa785d",
+      "lines": 86,
+      "bytes": 2722,
+      "frontmatter": "name: organize-threads\ndescription: >\n  猫猫辅助整理未分类 thread，分析标题和元数据，建议合适的标签。\n  Use when: 用户说\"帮我整理\"、\"分类 thread\"、点击整理按钮。\n  Not for: 删除/编辑标签本身。\n  Output: 按 thread 的标签建议列表。\ntriggers:\n  - \"帮我整理\"\n  - \"整理 thread\"\n  - \"organize threads\"\n  - \"分类建议\"",
+      "reviewStatus": "full_text_reviewed",
+      "usageFrequency": null,
+      "effectVerdict": "unmeasured",
+      "sourceReview": {
+        "commit": "2b6a1252bc2a29818c848e42eae574b1e8dfce6a",
+        "sha256": "0a59a51770bdcd9440c0f88686d1a20056da2037d90e587bce5129f99faa785d",
+        "value": "明确前端 modal 的 SUGGESTIONS_JSON 协议、已有标签用 ID/新标签用名称、信息不足不硬猜，都是不能靠通用模型知识替代的接口约定。",
+        "staticRecommendation": "retain",
+        "reason": "输出是分类建议，modal 确认是用户状态变更的产品边界；50 条上限与消息体限制相关，静态材料不足以证明它应被移除。",
+        "evidenceKind": "source reading and static scenario reasoning; not a behavioral benchmark"
+      }
+    },
+    {
+      "skill": "owner-friendly-plugin-development",
+      "source": "cat-cafe-skills/owner-friendly-plugin-development/SKILL.md",
+      "sha256": "cce48d180dd3916276f50d43b6660c579f412b7dc241f179282cca645ca7d75d",
+      "lines": 160,
+      "bytes": 9685,
+      "frontmatter": "name: owner-friendly-plugin-development\ndescription: >\n  把真实用户旅程转成可安装、可授权、状态诚实、可恢复的 Clowder AI 插件产品边界。\n  Use when: 设计或开发需要 Settings 安装/授权、后台 runtime、事件或数据入站、Needs Me、Host 路由的插件。\n  Not for: 只搭 Codex 插件目录（用 plugin-creator）、纯 skill/MCP、无宿主生命周期的一次性 API 脚本、只修插件内部实现 bug。\n  Output: 用户旅程契约 + ownership/authority map + 生命周期/恢复/发布方案 + fresh-consumer 与真实 dogfood 证据。\ntriggers:\n  - \"开发插件\"\n  - \"设计插件\"\n  - \"operator友好的 plugin\"\n  - \"owner-friendly plugin\"\n  - \"设计插件授权流\"\n  - \"插件生命周期设计\"\n  - \"插件发布闭包\"\n  - \"插件 dogfood\"\nnot_for:\n  - \"搭 Codex 插件目录\"\n  - \"纯 skill 或 MCP\"\n  - \"一次性 API 脚本\"\n  - \"插件内部 bug fix\"\noutput: \"Journey contract + ownership/authority map + lifecycle/recovery/release plan + fresh-consumer and real-dogfood evidence\"",
+      "reviewStatus": "full_text_reviewed",
+      "usageFrequency": null,
+      "effectVerdict": "unmeasured",
+      "sourceReview": {
+        "commit": "2b6a1252bc2a29818c848e42eae574b1e8dfce6a",
+        "sha256": "cce48d180dd3916276f50d43b6660c579f412b7dc241f179282cca645ca7d75d",
+        "value": "F292 来源可回链；truth/authority/custody、intent/live 分离、产品内授权恢复、fresh-consumer 发布闭包和按 claim 选择证据共同保护真实用户旅程。",
+        "staticRecommendation": "retain",
+        "reason": "与本地插件宿主的历史失败和安全契约紧密相关；dogfood 用于证明省事 claim，没有把代码测试冒充效用，不因存在检查清单就视为无用。",
+        "evidenceKind": "source reading and static scenario reasoning; not a behavioral benchmark"
+      }
+    },
+    {
+      "skill": "pencil-design",
+      "source": "cat-cafe-skills/pencil-design/SKILL.md",
+      "sha256": "073d4c939fcb5b2a4f95ac66fe911d16de6f3d04df006cee2045281450e4df0a",
+      "lines": 159,
+      "bytes": 7731,
+      "frontmatter": "name: pencil-design\ntips_exempt: 2026-09-05 correct existing Pencil IDE host identifiers; no new user-visible capability\ndescription: >\n  使用 Pencil MCP 创建/编辑 .pen 设计文件，或导出为 React 代码。\n  Use when: 设计 UI、编辑 .pen 文件、从设计稿生成代码。\n  Not for: 纯代码实现（无设计稿）、非 Pencil 工具的设计工作。\n  Output: .pen 设计文件 或 React/Tailwind 组件代码。\ntriggers:\n  - \"pencil\"\n  - \".pen 文件\"\n  - \"设计稿\"",
+      "reviewStatus": "full_text_reviewed",
+      "usageFrequency": null,
+      "effectVerdict": "unmeasured",
+      "sourceReview": {
+        "commit": "2b6a1252bc2a29818c848e42eae574b1e8dfce6a",
+        "sha256": "073d4c939fcb5b2a4f95ac66fe911d16de6f3d04df006cee2045281450e4df0a",
+        "value": "保留家内原生视觉与设计稿对照、Pencil 工具限制、动态根路径、不能误改别人稿件及尚未落盘的保存验证。",
+        "staticRecommendation": "revise",
+        "reason": "Pencil 的现场保存限制与风格门禁不是过时确认；但本地设计能力默认追加 main commit/push 的副作用未在入口承诺，应显式分出共享发布边界。",
+        "evidenceKind": "source reading and static scenario reasoning; not a behavioral benchmark"
+      }
+    },
+    {
+      "skill": "ppt-forge",
+      "source": "cat-cafe-skills/ppt-forge/SKILL.md",
+      "sha256": "8d66cc4b71ba03a0d7df3057d3324ec01604ccebb169d81810a5614020be8a82",
+      "lines": 155,
+      "bytes": 5974,
+      "frontmatter": "name: ppt-forge\ntips_exempt: internal shared-reference coordinate repair; no user-visible capability change\ndescription: >\n  PPT 制作全链路：内容分析 → 分页规划 → 低保真 MD → imagegen 精美图。\n  架构猫写低保真 MD（ASCII art 结构图 + 视觉指引），imagegen 猫逐页出精美图。\n  Use when: 做 PPT、做演示文稿、做 slide、帮朋友做 PPT、画架构图、画技术蓝图。\n  Not for: 纯代码开发（用 worktree/tdd）、纯文档写作（直接写）。\n  Output: 低保真 MD + AI 原生精美图（raster PNG）。",
+      "reviewStatus": "full_text_reviewed",
+      "usageFrequency": null,
+      "effectVerdict": "unmeasured",
+      "sourceReview": {
+        "commit": "2b6a1252bc2a29818c848e42eae574b1e8dfce6a",
+        "sha256": "8d66cc4b71ba03a0d7df3057d3324ec01604ccebb169d81810a5614020be8a82",
+        "value": "保留内容读全、信息设计、分页与受众/风格合同、逐页视觉指引及完整 raster mock 制作经验。",
+        "staticRecommendation": "revise",
+        "reason": "入口/正文存在格式冲突，可编辑交付没有路由，已给全 brief 的任务仍被分割成多个人工检查点。保留昂贵批量出图前对 scope/路线的真实确认，收缩重复流程确认。",
+        "evidenceKind": "source reading and static scenario reasoning; not a behavioral benchmark"
+      }
+    },
+    {
+      "skill": "proactive-memory-judgment",
+      "source": "cat-cafe-skills/proactive-memory-judgment/SKILL.md",
+      "sha256": "0e3f93b6957ebe9c353aaf867e0301ef56d8b6bf97a5e16bac7ef2efad470ab5",
+      "lines": 118,
+      "bytes": 5639,
+      "frontmatter": "name: proactive-memory-judgment\ntips_exempt: internal cat judgment policy; owner-facing behavior remains the existing F276 approval card\ndescription: \"Use when 人物线索需在 F276 即时提案、known-person defer、abstention 间判断。Not for 裸人名、taste、后台扫描或 workspace alias。Output: 可拒绝 proposal、无正文 receipt 或 abstention；永不静默物化。\"\ntriggers:\n  - \"continuity-valued 人物线索\"\n  - \"proactive-memory-candidate\"\n  - \"人物记忆机会\"\n  - \"主动记忆判断\"\n  - \"person memory opportunity\"\nnot_for:\n  - \"裸人名\"\n  - \"taste\"\n  - \"后台语料扫描\"\n  - \"重复即重要\"\n  - \"workspace alias 单独登记\"\noutput: \"One rejectable F276 proposal, one content-free known-person deferred receipt, or one enum-only abstention\"",
+      "reviewStatus": "full_text_reviewed",
+      "usageFrequency": null,
+      "effectVerdict": "unmeasured",
+      "sourceReview": {
+        "commit": "2b6a1252bc2a29818c848e42eae574b1e8dfce6a",
+        "sha256": "0e3f93b6957ebe9c353aaf867e0301ef56d8b6bf97a5e16bac7ef2efad470ab5",
+        "value": "人物线索的证据、时机、隐私与审批契约，明确不按词频推定重要性。",
+        "staticRecommendation": "retain",
+        "reason": "在当前源码审读范围未发现需要本轮修改的阻断性矛盾；不代表真实效用已证明。",
+        "evidenceKind": "source reading and static scenario reasoning; not a behavioral benchmark"
+      }
+    },
+    {
+      "skill": "quality-gate",
+      "source": "cat-cafe-skills/quality-gate/SKILL.md",
+      "sha256": "0717b434ed74dc6affd9ae12647e3f8e4e42a0de274869f501d2d565fa3bd68e",
+      "lines": 296,
+      "bytes": 20122,
+      "frontmatter": "name: quality-gate\ndescription: >\n  开发完成后的自检门禁：愿景对照 + spec 合规 + 验证。\n  Use when: 准备对交付作完成声明、需要整理风险匹配的自证。\n  Not for: 收到 review 反馈（用 receive-review）、merge（用 merge-gate）。\n  Output: Spec 合规报告（含愿景覆盖度）。\ntriggers:\n  - \"开发完了\"\n  - \"准备 review\"\n  - \"自检\"\n  - \"声称完成\"",
+      "reviewStatus": "full_text_reviewed",
+      "usageFrequency": null,
+      "effectVerdict": "unmeasured",
+      "sourceReview": {
+        "commit": "2b6a1252bc2a29818c848e42eae574b1e8dfce6a",
+        "sha256": "22b1e3e359d0587b3b4a3d41ab5343fc9868cfecca0ad97841145b76214a4615",
+        "value": "将原始需求、实际验证与风险匹配，保留授权范围与非作者审查边界。",
+        "staticRecommendation": "revise",
+        "reason": "修正具体内部契约矛盾，保留有效内容；效用尚未实测。",
+        "evidenceKind": "source reading and static scenario reasoning; not a behavioral benchmark"
+      }
+    },
+    {
+      "skill": "receive-handoff-grounding",
+      "source": "cat-cafe-skills/receive-handoff-grounding/SKILL.md",
+      "sha256": "729ee234e31b90f5fd3760a7e1b14a02658ed839e4dbf9fbfcfe4edcdc19c7d6",
+      "lines": 339,
+      "bytes": 17540,
+      "frontmatter": "name: receive-handoff-grounding\ntips_exempt: true  # F244 exempt renewed 2026-08-31: 行为反射 skill (claim grounding 三问)，非用户级 capability tip。#4164 sync delta 仅术语规范化 (operator→operator, you→operator)，无行为变化\ndescription: >\n  接球前真相核验三问：claim → resolver → verdict (sourceTier T0/T1/T2 + actionFamily)，\n  防止把传球者当无审视真相源（F167 Phase O 第一性原理）。\n  Use when: 即将调 hold_ball / register_pr_tracking / register_issue_tracking / merge /\n  takeover / 改 owner / 任何 irreversible action / 基于 \"operator signoff\" 或 \"你是 owner\"\n  类 claim 行动之前。\n  Not for: 纯阅读 cross_post（无 actionFamily 后续）；本 thread 日常 @mention 无副作用；\n  implementation continuation（自检通过的下一步）。\n  Output: claim grounding verdict (verified/mismatch/insufficient) + 接球决策\n  (proceed / block / push back to source thread)。\ntriggers:\n  - \"hold_ball\"\n  - \"register_pr_tracking\"\n  - \"register_issue_tracking\"\n  - \"merge approval\"\n  - \"operator signoff\"\n  - \"takeover\"\n  - \"irreversible\"\n  - \"owner reassignment\"\n  - \"这是你的\"\n  - \"应该是你接\"\n  - \"operator 同意\"\n  - \"等 X\"\n  - \"PR 在\"",
+      "reviewStatus": "full_text_reviewed",
+      "usageFrequency": null,
+      "effectVerdict": "unmeasured",
+      "sourceReview": {
+        "commit": "2b6a1252bc2a29818c848e42eae574b1e8dfce6a",
+        "sha256": "729ee234e31b90f5fd3760a7e1b14a02658ed839e4dbf9fbfcfe4edcdc19c7d6",
+        "value": "把转述授权与独立事实分开，维持 PR-scoped 授权续存，阻止伪 owner、重复等待和 T2-only 高风险接管；resolver 与等待边界应保留。",
+        "staticRecommendation": "revise",
+        "reason": "修实际工具字段和 runtime 状态的描述，不削弱身份验证、原始授权或 hold 的硬约束；15 calls 已在代码定义，不仅凭数字就判为无用配额。",
+        "evidenceKind": "source reading and static scenario reasoning; not a behavioral benchmark"
+      }
+    },
+    {
+      "skill": "receive-review",
+      "source": "cat-cafe-skills/receive-review/SKILL.md",
+      "sha256": "a0a7178a9fb01a08ed3df667fdc7c96ee0128e4f01448b3bd06359ac7255eea6",
+      "lines": 299,
+      "bytes": 15734,
+      "frontmatter": "name: receive-review\ntips_exempt: F167/F314 keep local review handback and accepted-source provenance internal to the harness; no distinct end-user-invocable capability surface\ndescription: \"处理 reviewer 反馈：Red→Green 修复 + 按 engagement mode 收口。Use when: 收到 review 结果或 P1/P2。Not for: 发 review 请求、自检。Output: 按 iterative / one-shot 契约闭环。\"\ntriggers:\n  - \"review 结果\"\n  - \"review 意见\"\n  - \"reviewer 说\"\n  - \"fix these\"\n  - \"github-review-feedback\"",
+      "reviewStatus": "full_text_reviewed",
+      "usageFrequency": null,
+      "effectVerdict": "unmeasured",
+      "sourceReview": {
+        "commit": "2b6a1252bc2a29818c848e42eae574b1e8dfce6a",
+        "sha256": "a0a7178a9fb01a08ed3df667fdc7c96ee0128e4f01448b3bd06359ac7255eea6",
+        "value": "反表演性接受、Spec/Mechanism/Feature 验证、同型 failure-mode sweep、按 active source 和 engagement 闭环，有明确历史质量价值。",
+        "staticRecommendation": "revise",
+        "reason": "保留独立 review 和红绿证据；删去制造分歧、无关全停、重复任务/全量测试及模糊 verdict 发送者的旧规则。",
+        "evidenceKind": "source reading and static scenario reasoning; not a behavioral benchmark"
+      }
+    },
+    {
+      "skill": "request-review",
+      "source": "cat-cafe-skills/request-review/SKILL.md",
+      "sha256": "6c5c2d2e77c24eb773b14f1d938b7c9ca2eb8b8f04c9dddcc8678dd8f2156bea",
+      "lines": 230,
+      "bytes": 15435,
+      "frontmatter": "name: request-review\ntips_exempt: F167/F314 keep local review as an internal durable handoff and add provenance guards; no distinct end-user-invocable capability surface\ndescription: >\n  Route a change to a non-author local peer when local review is the selected independent validation source.\n  Use when: risk routing chooses a stateful local reviewer for implementation, governance, or semantic context.\n  Not for: cloud as the selected source, vision-guardian acceptance, self-check, or review feedback handling.\n  Output: risk-matched review packet in the current thread/PR; mailbox archive only when the change needs the full packet.\ntriggers:\n  - \"请 review\"\n  - \"帮我看看\"\n  - \"request review\"",
+      "reviewStatus": "full_text_reviewed",
+      "usageFrequency": null,
+      "effectVerdict": "unmeasured",
+      "sourceReview": {
+        "commit": "2b6a1252bc2a29818c848e42eae574b1e8dfce6a",
+        "sha256": "6c5c2d2e77c24eb773b14f1d938b7c9ca2eb8b8f04c9dddcc8678dd8f2156bea",
+        "value": "风险匹配的验证源、light/full packet、continuityProof、direct review carrier、授权与 accepted-source revision 分离，能减少重复评审且保留 durable authority。",
+        "staticRecommendation": "revise",
+        "reason": "主体值得保留；external mode 的显式要求应接受清楚的自然语言只读约束，不强迫用户提供内部枚举或改写已经清楚的任务。",
+        "evidenceKind": "source reading and static scenario reasoning; not a behavioral benchmark"
+      }
+    },
+    {
+      "skill": "rich-messaging",
+      "source": "cat-cafe-skills/rich-messaging/SKILL.md",
+      "sha256": "022db7e41a48c9583f3fdbb0a0b8a5f17d949425efe75eff2b7cd495f48d8bbf",
+      "lines": 204,
+      "bytes": 9756,
+      "frontmatter": "name: rich-messaging\ntips_exempt: Chat-visible delivery routing extends the existing capability-rich-messaging tip; sourceRef stays at wakeup-index\ndescription: 在当前 Chat 直接交付可看、可听或可操作产物（语音、图片、截图、HTML/demo、卡片、清单、diff、交互选择），无需用户说“富文本”；纯文字与讨论/修改 HTML 源码不使用，复杂 localhost 应用用 browser-preview。\ntriggers:\n  - \"发语音\"\n  - \"说一句\"\n  - \"录一段\"\n  - \"用语音说\"\n  - \"voice\"\n  - \"audio\"\n  - \"发图\"\n  - \"发张图\"\n  - \"看图\"\n  - \"截图给我看\"\n  - \"screenshot\"\n  - \"画个 HTML 展示\"\n  - \"做个 demo 给我看\"\n  - \"在 Chat 里展示\"\n  - \"发个卡片\"\n  - \"rich block\"\n  - \"checklist\"\n  - \"发个清单\"\n  - \"想发一堆文字\"\n  - \"发日志\"\n  - \"发步骤\"\n  - \"长结构化汇报\"\n  - \"结构化汇报\"\n  - \"庆祝一下\"\n  - \"展示一下\"\n  - \"给我听听\"\n  - \"给我看看\"\n  - \"show me\"\n  - \"让我选\"\n  - \"选一个\"\n  - \"确认一下\"\n  - \"interactive\"",
+      "reviewStatus": "full_text_reviewed",
+      "usageFrequency": null,
+      "effectVerdict": "unmeasured",
+      "sourceReview": {
+        "commit": "2b6a1252bc2a29818c848e42eae574b1e8dfce6a",
+        "sha256": "022db7e41a48c9583f3fdbb0a0b8a5f17d949425efe75eff2b7cd495f48d8bbf",
+        "value": "保留 Chat 内可见交付、正确 block kind/schema、首次查规则、html_widget 事件绑定与 sandbox 边界、视频文件的可访问 URL 和播放形态。",
+        "staticRecommendation": "revise",
+        "reason": "应保留可见产物交付要求，但不能用结构化信号计数覆盖纯文字排除；其他来源的图片发布说明也把内部函数误写成了完整的 agent 执行/投递入口。",
+        "evidenceKind": "source reading and static scenario reasoning; not a behavioral benchmark"
+      }
+    },
+    {
+      "skill": "schedule-tasks",
+      "source": "cat-cafe-skills/schedule-tasks/SKILL.md",
+      "sha256": "895c78c236defa8a5d3392e61dadaf25b58f58450a699e7dcc7b3f1d4f231ec4",
+      "lines": 142,
+      "bytes": 5357,
+      "frontmatter": "name: schedule-tasks\ndescription: >\n  定时任务注册、管理、能力指南。支持周期任务和一次性延迟任务。\n  ⚠️ ROUTING: 定时/schedule/cron 需求优先用本 skill（Clowder AI 本地定时任务），\n  不要用另一个叫 `schedule` 的 skill（那是云端 remote-agent，用途不同）。\n  Use when: 用户想设定时任务、定期提醒、周期巡检、定时发送内容、延迟执行一次性操作。\n  Not for: 已有 builtin 任务的手动触发。\n  Output: 注册/管理定时任务，任务到点唤醒猫执行。\ntriggers:\n  - \"定时\"\n  - \"每天\"\n  - \"每小时\"\n  - \"每隔\"\n  - \"提醒我\"\n  - \"remind me\"\n  - \"schedule\"\n  - \"cron\"\n  - \"定期\"\n  - \"周期\"\n  - \"定时任务\"\n  - \"分钟后\"\n  - \"小时后\"\n  - \"之后\"\n  - \"later\"\n  - \"in 5 minutes\"\n  - \"once\"\n  - \"删除\"\n  - \"清理\"\n  - \"移除\"\n  - \"取消\"\n  - \"停掉\"\n  - \"remove\"\n  - \"cancel\"\n  - \"delete\"\n  - \"stop task\"",
+      "reviewStatus": "full_text_reviewed",
+      "usageFrequency": null,
+      "effectVerdict": "unmeasured",
+      "sourceReview": {
+        "commit": "2b6a1252bc2a29818c848e42eae574b1e8dfce6a",
+        "sha256": "895c78c236defa8a5d3392e61dadaf25b58f58450a699e7dcc7b3f1d4f231ec4",
+        "value": "本地 scheduler 与云端 schedule 的路由、模板和 trigger 格式、调用者身份/投递目标都是有价值的产品专用知识。",
+        "staticRecommendation": "revise",
+        "reason": "必须同步当前 proposal/Approval Hub 真实生命周期；不能把必要的 Hub 审批删除来追求无确认。是否省略已有授权下的聊天预览确认可另行做行为实验，本次未判断净效用。",
+        "evidenceKind": "source reading and static scenario reasoning; not a behavioral benchmark"
+      }
+    },
+    {
+      "skill": "self-evolution",
+      "source": "cat-cafe-skills/self-evolution/SKILL.md",
+      "sha256": "749b2158f9544072acb8c13b62fcdebf81884a1d5523dc73086ce0721e1a78bb",
+      "lines": 289,
+      "bytes": 12789,
+      "frontmatter": "name: self-evolution\ndescription: >\n  复盘已经发生的工作并沉淀改进，不是“我们来进化 X”的产品入口。\n  Use when: operator scope 发散偏离愿景、同类错误反复出现、SOP 流程缺口、有价值的知识/方法论值得沉淀。\n  Not for: 用户询问“能进化什么”、能力进化边界，或要求“我们来进化 X”（用 capability-evolution）；日常 SOP 推进（正常执行）；一次性个案 bug fix。\n  Output: Scope Guard Log 记录 / Evolution Proposal 提案 / Episode Card → Method/Skill 蒸馏 → Eval 验证。",
+      "reviewStatus": "full_text_reviewed",
+      "usageFrequency": null,
+      "effectVerdict": "unmeasured",
+      "sourceReview": {
+        "commit": "2b6a1252bc2a29818c848e42eae574b1e8dfce6a",
+        "sha256": "749b2158f9544072acb8c13b62fcdebf81884a1d5523dc73086ce0721e1a78bb",
+        "value": "先完成当前任务、按重复机制而非语气归档、限定同类扫描 scope、区分可迁移方法与场景事实，能防止复盘替代做事和知识污染。",
+        "staticRecommendation": "revise",
+        "reason": "保留经验治理；修订失效模板入口和无 estimator 的硬阈值。成熟度数字来自 ADR-015，不建议仅凭静态观感删掉，需要与 consumer 一起校准。",
+        "evidenceKind": "source reading and static scenario reasoning; not a behavioral benchmark"
+      }
+    },
+    {
+      "skill": "source-audit",
+      "source": "cat-cafe-skills/source-audit/SKILL.md",
+      "sha256": "be69b98d0c2a030d4e99631bc0b360b95d395f0b395376d474abce45e9974641",
+      "lines": 218,
+      "bytes": 15182,
+      "frontmatter": "name: source-audit\ndescription: >\n  外部高风险 claim 与研究贡献审计。Use when: 数字、benchmark、因果、趋势、模型能力、\n  外部论文或会进入 docs/ADR/PPT 的结论。Not for: 低风险常识、只读官方原文且不外推、\n  已进入 deep-research 的重调研。Output: claim ledger + source / non-triviality /\n  decision-fit 三轴 verdict + provenance。\ntips_exempt: Existing audit quality contract refinement; no new user-facing capability or discovery moment.",
+      "reviewStatus": "full_text_reviewed",
+      "usageFrequency": null,
+      "effectVerdict": "unmeasured",
+      "sourceReview": {
+        "commit": "2b6a1252bc2a29818c848e42eae574b1e8dfce6a",
+        "sha256": "be69b98d0c2a030d4e99631bc0b360b95d395f0b395376d474abce45e9974641",
+        "value": "来源链防回声室、source/non-triviality/decision-fit 三轴、scoped ledger、输入/输出谱系、unknown 与 claim ceiling 提供明确的外部证据标准。",
+        "staticRecommendation": "retain",
+        "reason": "八问已明确为按 claim 取用的 menu，复现有成本授权边界，未把缺数据自动判造假；主干属于证据治理与 verifier，不因强模型出现便推定可退役。",
+        "evidenceKind": "source reading and static scenario reasoning; not a behavioral benchmark"
+      }
+    },
+    {
+      "skill": "sprite-forge",
+      "source": "cat-cafe-skills/sprite-forge/SKILL.md",
+      "sha256": "fa5f3dbb71dddc4c9f23790726dd0a3eaeb45c8efa9f54960d39bbfa35390d54",
+      "lines": 80,
+      "bytes": 7096,
+      "frontmatter": "name: sprite-forge\ndescription: >\n  角色动态 sprite / 桌宠皮肤 / atlas 状态行生产线：母图锚身份 → Frame A 首帧 →\n  AI 视频生成（人工环节）→ 截帧确定性加工 → atlas row + 三道闸。\n  Use when: 做桌宠皮肤、给猫补新状态动画行、visible-cafe/F258 猫形象素材、\n  角色小循环动画（呼吸/走路/睡觉/挥手级）、把静态角色\"做成动态的\"。\n  Not for: 动画短片成片（用 anime-forge）、录屏/教程视频（用 video-forge）、\n  单张静态图/头像（用 image-generation）、UI 图标。\n  Output: 192×208 atlas row strip + QA 包（contact/GIF/provenance）→ 过三道闸 + operator identity veto 后接 pet.json。",
+      "reviewStatus": "full_text_reviewed",
+      "usageFrequency": null,
+      "effectVerdict": "unmeasured",
+      "sourceReview": {
+        "commit": "2b6a1252bc2a29818c848e42eae574b1e8dfce6a",
+        "sha256": "fa5f3dbb71dddc4c9f23790726dd0a3eaeb45c8efa9f54960d39bbfa35390d54",
+        "value": "保留视频时序一致性、角色母图 canon、低运动、实际显示尺寸目检、身份 veto、提示词修正版 provenance 和渲染层状态表达的真实失败史。",
+        "staticRecommendation": "revise",
+        "reason": "不因 sonnet 级是历史成本示例或存在人工视频步骤就认定过时；当前确定问题是包内缺少被强制要求的工艺真相源，以及抠白背景的速查命令会破坏白毛主体。",
+        "evidenceKind": "source reading and static scenario reasoning; not a behavioral benchmark"
+      }
+    },
+    {
+      "skill": "tdd",
+      "source": "cat-cafe-skills/tdd/SKILL.md",
+      "sha256": "17a8098a9bf484b0c9dff36739398992496523a21aff3be2d66986660b308c39",
+      "lines": 91,
+      "bytes": 4849,
+      "frontmatter": "name: tdd\ntips_exempt: internal shared-reference coordinate repair; no user-visible capability change\ndescription: >\n  Red-Green-Refactor for changes with behavior or regression risk.\n  Use when: adding observable behavior, fixing a bug, or changing logic not already covered by a precise executable check.\n  Not for: pure docs/research, deterministic generated-artifact refreshes, or mechanical changes already covered by an existing checker.\n  Output: observed RED (new test or existing failing check) → minimal GREEN → refactor under protection.\ntriggers:\n  - \"写代码\"\n  - \"test first\"\n  - \"TDD\"\n  - \"红绿重构\"",
+      "reviewStatus": "full_text_reviewed",
+      "usageFrequency": null,
+      "effectVerdict": "unmeasured",
+      "sourceReview": {
+        "commit": "2b6a1252bc2a29818c848e42eae574b1e8dfce6a",
+        "sha256": "17a8098a9bf484b0c9dff36739398992496523a21aff3be2d66986660b308c39",
+        "value": "复用现有精准 RED，按行为风险选择测试，不要求为纯文档/机械改动新增测试。",
+        "staticRecommendation": "retain",
+        "reason": "在当前源码审读范围未发现需要本轮修改的阻断性矛盾；不代表真实效用已证明。",
+        "evidenceKind": "source reading and static scenario reasoning; not a behavioral benchmark"
+      }
+    },
+    {
+      "skill": "tech-writing",
+      "source": "cat-cafe-skills/tech-writing/SKILL.md",
+      "sha256": "68bc1c87ca93a2c2a29d2bb2727c0fcf0b7820c9a60457ce3843031371e2324f",
+      "lines": 159,
+      "bytes": 10576,
+      "frontmatter": "name: tech-writing\ndescription: >\n  技术文章对外写作：把内部实践变成读者能代入、证据可见的文字与页面叙事。\n  Use when: 写技术博客、公众号文章、社区分享、对外 longform、技术文章 review、文章配图与推广语。\n  Not for: 内部文档/spec（直接写）、PPT（用 ppt-forge）、单独生成图片（用 image-generation）、纯调研报告（用 deep-research）。\n  Output: 文章叙事弧 + claim/证据边界 + 视觉叙事图谱 + 页面级自检。\ntriggers:\n  - 技术叙事\n  - 技术竞争力\n  - 讲清技术含量\n  - 算法怎么讲\n  - \"写文章\"\n  - \"技术分享\"\n  - \"博客\"\n  - \"longform\"\n  - \"公众号\"\n  - \"对外发布\"\n  - \"社区分享\"\n  - \"推广语\"\n  - \"文章配图\"\n  - \"视觉叙事\"",
+      "reviewStatus": "full_text_reviewed",
+      "usageFrequency": null,
+      "effectVerdict": "unmeasured",
+      "sourceReview": {
+        "commit": "2b6a1252bc2a29818c848e42eae574b1e8dfce6a",
+        "sha256": "68bc1c87ca93a2c2a29d2bb2727c0fcf0b7820c9a60457ce3843031371e2324f",
+        "value": "保留内部术语翻译、真实场景与证据锚点、条件式7P×5E、Figure Contract、外部claim审计以及真实/重建/生成视觉的标注边界。",
+        "staticRecommendation": "experiment",
+        "reason": "核心方法有明确本地写作案例和证据价值；“每篇进化链”和句长/加粗配额属于风格代偿，是否优于更少限制不能靠内容审计断言。建议只对这些机械约束做窄范围对照，不移除真实性/source-audit。",
+        "evidenceKind": "source reading and static scenario reasoning; not a behavioral benchmark"
+      }
+    },
+    {
+      "skill": "thread-orchestration",
+      "source": "cat-cafe-skills/thread-orchestration/SKILL.md",
+      "sha256": "e2f46b01fd9c4d14b2c659e615dbd7410fb4494b3ded860ef16391252ba4a4f1",
+      "lines": 264,
+      "bytes": 17012,
+      "frontmatter": "name: thread-orchestration\ndescription: >\n  大任务的主动拆解与多 thread 并行编排。\n  Use when: 任务涉及 2+ 个独立可交付子任务，需要不同猫参与、不同 thread 并行推进。\n  Not for: 单一任务（直接做）、已有 thread 之间的被动协调（用 cross-thread-sync）、单 session 内 subagent 并行（CLI 内置能力）、发现跨 scope 问题但已有归属 thread（用 cross_post_message，不要新建 thread）。\n  Output: 子 thread 创建 + 选猫 + 各 thread 交付 + 主 thread 汇聚报告。\n  GOTCHA: projectPath 是子 thread 的工作区/真相源归属，不是外部目标仓；社区 PR review 目标可以是 clowder-ai，但工作区仍可能应继承 cat-cafe。\ntips_exempt: \"F128 portable policy (2026-08): remove server-side PR inference; child thread loads opensource-ops skill\"\ntriggers:\n  - \"拆任务\"\n  - \"分 thread\"\n  - \"并行推进\"\n  - \"开多个 thread\"\n  - \"thread orchestration\"\n  - \"任务分解\"",
+      "reviewStatus": "full_text_reviewed",
+      "usageFrequency": null,
+      "effectVerdict": "unmeasured",
+      "sourceReview": {
+        "commit": "2b6a1252bc2a29818c848e42eae574b1e8dfce6a",
+        "sha256": "e2f46b01fd9c4d14b2c659e615dbd7410fb4494b3ded860ef16391252ba4a4f1",
+        "value": "已有 thread 优先、projectPath 与外部 subject 分离、proposal 与实际 threadId 区分、按 reportingMode 控制回报和 worktree 隔离，均有具体协作价值。",
+        "staticRecommendation": "revise",
+        "reason": "保留真正的 proposal 审批和责任边界；修 canonical mode 冲突、无 blocker 也要求确认的流程以及过时模型路由。",
+        "evidenceKind": "source reading and static scenario reasoning; not a behavioral benchmark"
+      }
+    },
+    {
+      "skill": "ttfund-skills",
+      "source": "cat-cafe-skills/ttfund-skills/SKILL.md",
+      "sha256": "6ae9c4c591be3419f0ffa5f501a2e9cefe7fd92eb6ae4f978e35312087b6d42e",
+      "lines": 97,
+      "bytes": 4118,
+      "frontmatter": "name: ttfund-skills\ndescription: >\n  天天基金官方 Skills 网关调用封装。\n  Use when: 查询天天基金/天天财富基金数据、基金搜索、基金净值、基金持仓、基金经理、指数、黄金、债市、活期宝或官方 ttfund skills。\n  Not for: 交易执行、券商/银行账户操作、FRED/Tushare/yfinance/AKShare 结构化数据源、投资建议。\n  Output: 通过官方网关返回的结构化 JSON 事实数据，带 source/asOf 后再进入 F207 数据层。\n  GOTCHA: 必须有本机 `TTFUND_APIKEY`，且 key 只放环境变量或 gitignored `.env`，绝不写入 git 或回复全文。\ntriggers:\n  - \"天天基金 skills\"\n  - \"ttfund\"\n  - \"TTFUND_APIKEY\"\n  - \"天天基金净值\"\n  - \"天天基金搜索\"\n  - \"天天基金经理\"\n  - \"天天基金持仓\"\n  - \"天天黄金\"\n  - \"天天债市\"",
+      "reviewStatus": "full_text_reviewed",
+      "usageFrequency": null,
+      "effectVerdict": "unmeasured",
+      "sourceReview": {
+        "commit": "2b6a1252bc2a29818c848e42eae574b1e8dfce6a",
+        "sha256": "6ae9c4c591be3419f0ffa5f501a2e9cefe7fd92eb6ae4f978e35312087b6d42e",
+        "value": "供应商专属网关、skill_id/version、环境凭据路径和基金事实/真实交易边界属于领域参考与安全知识；脚本封装减少裸调用错误。",
+        "staticRecommendation": "retain",
+        "reason": "完整读取 SKILL.md 和调用脚本；没有执行网关或读取本机密钥。当前版本清单的外部时效未复核，因此不把本次静态 retain 当供应商 API 可用性验证；重复 .env 条目属轻微文字冗余。",
+        "evidenceKind": "source reading and static scenario reasoning; not a behavioral benchmark"
+      }
+    },
+    {
+      "skill": "video-forge",
+      "source": "cat-cafe-skills/video-forge/SKILL.md",
+      "sha256": "ca47a674a12eb85779e3c645c47bc924b3174c3599bfb67f2cd07a6f832c6b1f",
+      "lines": 312,
+      "bytes": 17632,
+      "frontmatter": "name: video-forge\ntips_exempt: renewed 2026-09-04 for the current F308 public-link projection of agent-product-promo-director routing and risk-matched review guidance; this changes cat production discipline, not a user-invokable product capability\ndescription: >\n  视频制作全链路：素材入库 → 剧本冻结 → 全局配音 → 对齐 → 渲染 → 审查 → 交付。\n  Use when: 已明确要制作视频、做 showcase、做教程视频、录屏剪辑、video review、节奏审查。\n  Not for: Agent 产品宣传片仍未锁定主角、观众信念与导演语法（先用 agent-product-promo-director）；\n  只找时效性外部参考（用 deep-research）；纯代码开发（用 worktree/tdd）、纯文档写作（直接写）、PPT（用 ppt-forge）。\n  Output: schema 驱动的视频成片 + operator 创意验收 + 风险匹配的技术审查 + 可发布。",
+      "reviewStatus": "full_text_reviewed",
+      "usageFrequency": null,
+      "effectVerdict": "unmeasured",
+      "sourceReview": {
+        "commit": "2b6a1252bc2a29818c848e42eae574b1e8dfce6a",
+        "sha256": "ca47a674a12eb85779e3c645c47bc924b3174c3599bfb67f2cd07a6f832c6b1f",
+        "value": "保留研究/制作/review 意图区分、产品片主语、schema 与 renderer 解耦、音画对齐、motion 与 seam proof、预算化降级及 Console 内联终稿交付。",
+        "staticRecommendation": "revise",
+        "reason": "正文已主动按风险削减多猫开销，但尾部无条件 review 链复活旧流程；此外把内部 video-spec 冻结也作为人工批准点，且通用教程入口被产品 hero 合同覆盖。",
+        "evidenceKind": "source reading and static scenario reasoning; not a behavioral benchmark"
+      }
+    },
+    {
+      "skill": "vision-rescue",
+      "source": "cat-cafe-skills/vision-rescue/SKILL.md",
+      "sha256": "c45f3b637ee52278a5283124a487f8fb399ffc68448b209d9bad72796dbd9bfe",
+      "lines": 146,
+      "bytes": 6255,
+      "frontmatter": "name: vision-rescue\ndescription: >\n  绝境反转方法论：当任务似乎没有希望、反复摆动、准备放弃愿景时的五步突破框架。\n  Use when: 任务看起来无解、多次尝试失败后想放弃、输出投降修辞（\"现状最优\"/\"没救了\"/\"接受现实\"）、连续 3+ 轮在希望与绝望间摆动。\n  Not for: 未出现绝境信号的常规 debugging（用 debugging）、常规探索/调研（用 deep-research）、operator 已签字降级的目标、trivial 任务。\n  Output: Desperation Packet（六问证据评估）+ 新方向行动计划 / operator 升级请求。\ntriggers:\n  - \"没希望\"\n  - \"没救了\"\n  - \"无解\"\n  - \"死胡同\"\n  - \"不可能\"\n  - \"接受现实\"\n  - \"放弃\"\n  - \"走投无路\"\n  - \"都试过了\"\n  - \"现状最优\"\n  - \"不值得继续\"\n  - \"保守路径\"\n  - \"实际价值变了\"\n  - \"收口\"\n  - \"vision rescue\"",
+      "reviewStatus": "full_text_reviewed",
+      "usageFrequency": null,
+      "effectVerdict": "unmeasured",
+      "sourceReview": {
+        "commit": "2b6a1252bc2a29818c848e42eae574b1e8dfce6a",
+        "sha256": "c45f3b637ee52278a5283124a487f8fb399ffc68448b209d9bad72796dbd9bfe",
+        "value": "防止把没找到方法当成无方法、分离观察与推断、引入不同视角、放弃愿景需 operator 决策，都是针对真实历史失败的有价值反射。",
+        "staticRecommendation": "revise",
+        "reason": "保留证据和愿景处置权，改成按问题选第一手源与有界停止条件；不把某一次 binary 成功经历推广成所有难题的强制路线。",
+        "evidenceKind": "source reading and static scenario reasoning; not a behavioral benchmark"
+      }
+    },
+    {
+      "skill": "workspace-navigator",
+      "source": "cat-cafe-skills/workspace-navigator/SKILL.md",
+      "sha256": "713252cb03e6a86c04ba2e17dbffa4a2806eee6b6bf6015eaf181a180b64f9a0",
+      "lines": 203,
+      "bytes": 10582,
+      "frontmatter": "name: workspace-navigator\ndescription: 猫猫把“打开文档、代码或日志”等模糊意图解析成本地绝对路径或 worktree 相对路径，并返回 applied、queued、blocked 或 unconfirmed 的真实 Workspace 投递状态。\ntriggers:\n  - \"打开文件\"\n  - \"看看代码\"\n  - \"看日志\"\n  - \"帮我打开\"\n  - \"一起看看\"\n  - \"打开设计图\"\n  - \"看看这个文档\"\n  - \"打开 discussion\"\n  - \"看看 feature\"\n  - \"打开审计日志\"\n  - \"看看 spec\"\n  - \"帮我找到\"\n  - \"打开那个\"",
+      "reviewStatus": "full_text_reviewed",
+      "usageFrequency": null,
+      "effectVerdict": "unmeasured",
+      "sourceReview": {
+        "commit": "2b6a1252bc2a29818c848e42eae574b1e8dfce6a",
+        "sha256": "713252cb03e6a86c04ba2e17dbffa4a2806eee6b6bf6015eaf181a180b64f9a0",
+        "value": "保留模糊意图到真实路径的 resolver、absolute/repo-relative 路径合同、exact thread 送达四态，以及 revision-bound receipt 不可伪称因果效用的明示边界。",
+        "staticRecommendation": "retain",
+        "reason": "导航是一项项目私有能力发现与真实送达验证，不是通用文件搜索教程。receipt 部分明确为 pilot、缺工具可照常导航且不得假绿；正文保留直接消费与原生快捷入口，未强制用户重复授权。本轮不据静态阅读推断 receipt 的实际成本或效用，应由既有 pilot 另行评价。",
+        "evidenceKind": "source reading and static scenario reasoning; not a behavioral benchmark"
+      }
+    },
+    {
+      "skill": "worktree",
+      "source": "cat-cafe-skills/worktree/SKILL.md",
+      "sha256": "30674865417725aa9edf10318fc39d8c7134778d07d2dffdec5be7f2c12e6036",
+      "lines": 264,
+      "bytes": 12452,
+      "frontmatter": "name: worktree\ntips_exempt: \"Renewed 2026-09-04 for the current F308 public-link projection only; the developer isolation workflow adds no end-user capability or useful Hub discovery moment.\"\ndescription: 为代码、脚本、API 与第一方执行面创建隔离 Git worktree，并配置 Redis 6398；classifier 放行的 co-creation docs direct push 不进入本流程。\ntriggers:\n  - \"开始开发\"\n  - \"新 worktree\"\n  - \"开 worktree\"\nrenamed-from: using-git-worktrees",
+      "reviewStatus": "full_text_reviewed",
+      "usageFrequency": null,
+      "effectVerdict": "unmeasured",
+      "sourceReview": {
+        "commit": "2b6a1252bc2a29818c848e42eae574b1e8dfce6a",
+        "sha256": "30674865417725aa9edf10318fc39d8c7134778d07d2dffdec5be7f2c12e6036",
+        "value": "生产数据/端口隔离、NODE_ENV 安装陷阱、OFFSET preflight、当前 worktree 与验证 URL 绑定、apply_patch cwd 风险有明确保留价值。",
+        "staticRecommendation": "revise",
+        "reason": "保留运行和数据边界；修复把无关主分支状态同步扩成提交/发布权限的要求，并避免无必要路径确认和无效环境验证。",
+        "evidenceKind": "source reading and static scenario reasoning; not a behavioral benchmark"
+      }
+    },
+    {
+      "skill": "writing-plans",
+      "source": "cat-cafe-skills/writing-plans/SKILL.md",
+      "sha256": "035e4d66932ad3e2e11e04aae6fc34b19c305080df3fc31318e4af8a1e67802e",
+      "lines": 160,
+      "bytes": 7077,
+      "frontmatter": "name: writing-plans\ntips_exempt: internal plan-authoring command-provenance guard; no new end-user capability or discovery surface\ndescription: >\n  将 spec/需求拆分为可执行的分步实施计划。\n  Use when: 有 spec 或需求，准备动手前需要拆分步骤。\n  Not for: trivial 改动（≤5 行）、已有详细计划。\n  Output: 分步实施计划（含 TDD 步骤和检查点）。\ntriggers:\n  - \"写计划\"\n  - \"implementation plan\"\n  - \"拆分步骤\"",
+      "reviewStatus": "full_text_reviewed",
+      "usageFrequency": null,
+      "effectVerdict": "unmeasured",
+      "sourceReview": {
+        "commit": "2b6a1252bc2a29818c848e42eae574b1e8dfce6a",
+        "sha256": "04614a8b9c5a5a34f0dfc5e99bd942659db9b0c2b3eff4a6ec16d8e396019674",
+        "value": "将目标、状态不变量、依赖和验收联系起来，当前候选已移除固定时间粒度和预写全部代码。",
+        "staticRecommendation": "retain",
+        "reason": "在当前源码审读范围未发现需要本轮修改的阻断性矛盾；不代表真实效用已证明。",
+        "evidenceKind": "source reading and static scenario reasoning; not a behavioral benchmark"
+      }
+    },
+    {
+      "skill": "writing-skills",
+      "source": "cat-cafe-skills/writing-skills/SKILL.md",
+      "sha256": "14d6e836e040fba562daf5c263075e52a5972c198efb142d288e0870075be0c4",
+      "lines": 226,
+      "bytes": 13946,
+      "frontmatter": "name: writing-skills\ndescription: >\n  创建或修改 Clowder AI skill / MCP tool description 的元技能（含质量标准、范本、发布）。\n  Use when: 写新 skill、修改现有 skill、写/改 MCP tool description、验证 skill 质量；\n  或者功能实现中产出了 SKILL.md / cat-cafe-skills/ 新目录 / manifest.yaml skill 条目。\n  Not for: 使用 skill（直接触发对应 skill）。\n  Output: 新/更新的 SKILL.md + manifest 条目 + symlinks。\n  GOTCHA: 软硬同重——skill/MCP 质量 = 代码质量；不要写模型已知的通用教程，先过价值门禁。\ntriggers:\n  - \"写 skill\"\n  - \"新 skill\"\n  - \"修改 skill\"\n  - \"SKILL.md\"\n  - \"cat-cafe-skills/\"\n  - \"manifest.yaml skill\"\n  - \"创建 hook\"\n  - \"新增 hook\"\n  - \"写 MCP\"\n  - \"MCP description\"\n  - \"tool description\"",
+      "reviewStatus": "full_text_reviewed",
+      "usageFrequency": null,
+      "effectVerdict": "unmeasured",
+      "sourceReview": {
+        "commit": "2b6a1252bc2a29818c848e42eae574b1e8dfce6a",
+        "sha256": "14d6e836e040fba562daf5c263075e52a5972c198efb142d288e0870075be0c4",
+        "value": "价值门禁、正确载体、description 路由契约、provider adapter、source/ref/surface 验证和真实失败驱动比通用教程更有保留价值。",
+        "staticRecommendation": "revise",
+        "reason": "正文已经反对配额化与 rigid debate；测试参考仍把无条件遵从当正确性，需让测试保护真实目标与适用边界。此次仅做静态审查，未运行 RED/GREEN、效用 benchmark 或正式 approval。",
+        "evidenceKind": "source reading and static scenario reasoning; not a behavioral benchmark"
+      }
+    }
+  ],
+  "reviewCoverage": "58/58 source texts read; static suggestions require author triage and validation"
+}

@@ -82,7 +82,7 @@ description: >
 | 受众 | 谁看这个视频 | linux.do 社区 / B 站观众 / 内部 |
 | 配音方案 | 猫猫配音 / 纯字幕 / 原声 | 单猫旁白 / 多猫声线 / 无配音 |
 
-**没有开局参数 = 审查没有标准。开工前必须和operator确认。**
+**先核对开局参数与已有 brief。** 已确认的内容直接复用；缺少会改变内容/预算/发布边界的关键参数时才询问。
 
 ## 场景路由（路径 B）
 
@@ -90,7 +90,7 @@ description: >
 |------|------|------|------|
 | operator说"做个视频" | **A: Brief + 素材盘点** | 主执行猫 | 确认开局参数 + 分镜表 + 素材需求清单 |
 | operator确认分镜 | **B: 素材入库** | operator录 + 主执行猫压缩归档 | 素材放 `docs/videos/{project}/assets/`，粗标写 `asset-markers.md` |
-| 素材到齐 | **C: video-spec 冻结** | 主执行猫 | 写 video-spec JSON（4 层 segment contract），operator确认 |
+| 素材到齐 | **C: video-spec 冻结** | 主执行猫 | 写 video-spec JSON 并校验；只有改变已确认创意、scope、预算或发布权限时再确认 |
 | spec 确认 | **D: 全局配音 + 对齐** | 主执行猫 | CosyVoice 全局配音 → Qwen3-ForcedAligner → word_timestamps |
 | 对齐完成 | **E: Remotion 渲染** | 主执行猫 | schema → inputProps → preview render |
 | 预览版出来 | **F: 审查 Gate** | 主执行猫自证 + operator；风险命中时再加独立验证者 | 见下方审查标准 |
@@ -309,4 +309,4 @@ cat_cafe_create_rich_block({
 
 ## Next Step
 
-路径 B 完整流程跑通后 → `quality-gate`（自检）→ `request-review`（QA/审查猫审音画，视觉把关猫审节奏）
+完成当前授权交付单元后按正文风险路由验证；需要事实/权限/发布或专长判断时选对应独立 reviewer，不默认叠加双审。已选择正式 review 时不得自审。

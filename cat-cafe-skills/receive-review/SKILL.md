@@ -106,7 +106,7 @@ Review 代码时，自动执行 `node scripts/check-fallback-layers.mjs` 检测 
 
 review 报告中必须包含 fallback 层数分析结果。
 
-**Review 有零分歧 = 走过场**（反顺从规则）。真正的 review 需要技术争论。
+**独立判断以证据为准**：核查后可以没有分歧；不为表现独立而制造反对，也不因 reviewer 身份就照单全收。
 
 ## 流程
 
@@ -115,7 +115,7 @@ WHEN 收到 review 反馈:
 
 1. READ  — 完整读完，不要边读边反应。**R2+ 时额外动作**：回看上轮 finding 列表，标注每个 finding 的 failure-mode 类型，用于 AUDIT 步骤的同型判别
 2. CLASSIFY — 区分愿景级 vs 代码级；按 P1/P2/P3 分优先级
-3. CLARIFY — 有不清晰的问题先全部问清，再动手
+3. CLARIFY — 澄清影响当前修复的缺口；不依赖该缺口的已确认问题可继续
 4. VERIFY — reviewer 说的问题真的存在吗？（见下方三道门）
 5. AUDIT — failure-mode sweep（见下方 §16e 判别）
 6. FIX — 通过验证的问题 + audit 发现的同类问题 Red→Green 修复
@@ -136,11 +136,11 @@ WHEN 收到 review 反馈:
    - 改完跑一遍最关键的用户路径（不是只跑测试）
    - 功能死了 → 回滚，review 建议作废，不管它理论上多优雅
 
-**特别注意**：remote reviewer（Codex cloud）没有运行环境，判断基于静态分析和理论推理。你有本地环境 → **你的实测证据 > 他的理论推理**。
+**证据权重**：核查失败路径、适用环境与复现覆盖，不按 reviewer 所在位置或模型排序。通过几个本地用例不能证伪静态可证的权限、竞态或数据风险。
 
 **修复顺序**：P1（blocking）→ P2（必须修）→ P3（讨论后当场修或放下，不记 BACKLOG）
 
-**澄清原则**：有任何问题不清晰，先 STOP，全部问清再动手。部分理解 = 错误实现。
+**澄清原则**：只暂停依赖未明信息的动作；明确缺什么证据并继续独立工作。未解决的 P1/P2 仍阻止最终放行。
 
 ### AUDIT — Failure-Mode Sweep（shared-rules §16e）
 
@@ -163,10 +163,10 @@ VERIFY 完所有 findings 之后、动手修之前，做一次 failure-mode 判�
 
 ## Red→Green 修复流程
 
-对每个 P1/P2 问题：
+按根因与依赖组织 P1/P2 修复：
 
-**Step 0: 创建修复任务**（F160 Phase C — 在动手修之前）
-调用 `cat_cafe_create_task` 为每个 P1/P2 创建独立跟踪任务：
+**Step 0: 确认修复跟踪**
+先复用已有 PR/thread finding 列表。需要跨 session 独立跟踪且尚无等价记录时，才调用 `cat_cafe_create_task`；同根因问题可以共同跟踪：
 - title: `[P{N}] {问题摘要}`（如 `[P2] TaskComposer HTTP 错误时丢失输入`）
 - why: reviewer 的原始描述（≤120 字）
 - 修复完成后 `cat_cafe_update_task` 状态改为 `done`
@@ -175,11 +175,11 @@ VERIFY 完所有 findings 之后、动手修之前，做一次 failure-mode 判�
 
 ```
 1. 理解问题
-2. 写失败测试（Red）
+2. 新增或复用精准失败检查（Red）
 3. 运行测试，确认红灯
 4. 修复代码
 5. 运行测试，确认绿灯（Green）
-6. 运行完整测试套件，确认无 regression
+6. 按修复风险运行相关回归；需要跨包/安全/数据/契约覆盖时才选完整 gate，不按 finding 逐条重复全测
 ```
 
 **例外**：如果无法稳定自动化复现，提供最小手工复现步骤 + 说明原因，但不能跳过验证结论。
@@ -196,19 +196,19 @@ VERIFY 完所有 findings 之后、动手修之前，做一次 failure-mode 判�
 
 ### 本地 reviewer 复入载体（terminal 之后的新工作）
 
-只有 mode 判定确实需要复入时，P1/P2 修复产生的新 exact HEAD 才是一轮新的 review work。发送前重新加载 `request-review`，并严格消费其中唯一的 direct-carrier、ordinary durable A2A、accepted-source anchor 与 verdict-field 契约；本 skill 只保留守卫锚点：**普通 durable A2A** 必须携带 typed `localReviewVerdict` 与 `reviewedHeadSha`，其余字段和状态机不在这里复制。exact-HEAD 变化本身不能越过稀缺席位的 one-shot 退出条件。
+只有 mode 判定确实需要复入时，P1/P2 修复产生的新 exact HEAD 才是一轮新的 review work。发送前重新加载 `request-review`，并严格消费其中唯一的 direct-carrier、ordinary durable A2A、accepted-source anchor 与 verdict-field 契约；本 skill 只保留守卫锚点：reviewer 的 **普通 durable A2A 结论** 必须携带 typed `localReviewVerdict` 与 `reviewedHeadSha`；作者复审请求提供修复证据，不替 reviewer 填 verdict，其余字段和状态机不在这里复制。exact-HEAD 变化本身不能越过稀缺席位的 one-shot 退出条件。
 
 | Feedback source | 修复后动作 |
 |-----------------|------------|
 | 本地 `iterative` reviewer | 在 direct review carrier 向 `@reviewer` 发送普通 durable 修复确认请求；等 reviewer 明确放行当前 SHA |
 | 稀缺 `one_shot_calibration` / `final_seal` reviewer | 作者修复 + 测试/gate；仍需独立确认则转日常 reviewer，不因普通 finding 或 SHA 变化召回原猫 |
-| cloud / GitHub review | 在 GitHub 回复或标注修复证据，push 新 SHA 后**只重新触发 cloud review**，等 PR tracking / review feedback；不要 @ 本地旧 reviewer |
+| cloud / GitHub review | 在 GitHub 回复或标注修复证据，push 新 SHA 后按 merge-gate 的 active source / budget 继续；cloud 未封板时重触发并等 PR truth，已封板时走指定 final review；不召回无新任务的旧 reviewer |
 | CI / PR check | 修复后 rerun/check gate；若只是外部 check gate，不需要本地 reviewer 续签 |
 | operator / 愿景级 feedback | 回读原始需求；需要价值取舍时带 Decision Packet 给operator |
 
 ```
 ❌ 错误：cloud P2 修复 → @ 本地旧 reviewer 续签 → 等 cloud → 再 @ 本地 reviewer
-✅ 正确：cloud P2 修复 → re-trigger cloud review → 等 PR truth source；local peer 只在非 cloud 行为 delta / scope 扩大时介入
+✅ 正确：cloud finding 修复 → 核对 active source / budget；未封板时重触发并等 PR truth，已封板时走指定独立 final review，不恢复旧循环
 ```
 
 确认信格式（简要，详细版见 `refs/` 如有需要）：
@@ -229,10 +229,10 @@ Fresh-Context Delta: {N} FC:covered, {M} FC:new, {K} FC:N/A <!-- 仅 review requ
 ```
 
 修复完成后（F160 Phase C）：
-- 每个 P1/P2 修复任务 → `cat_cafe_update_task` 状态改为 `done`
+- 已有独立修复任务的，验证完成后更新对应状态；PR/thread 已有等价记录时直接更新该记录
 - 按上述 Engagement 闭环；只有 `iterative` 本地 review 回 direct review carrier
 
-**remote review 修了 P1/P2 → 必须 re-trigger remote review，不能自判通过直接合入，也不能把 cloud gate 投射成本地旧 reviewer。**
+**remote review 修复后按 active source 与 merge-gate 的预算/封板契约收口。** cloud 仍是 active source 且尚未封板时重新触发；已进入本地 final seal 时由该独立 reviewer 覆盖修复。作者不能自判合入，也不为续签召回无新任务的旧 reviewer。
 
 ## Reviewer 验证 UX/前端改动（硬规则）
 
@@ -265,12 +265,12 @@ Reviewer 在 review 过程中发现 author 触发以下任一条件，可直接�
 | 错误 | 正确做法 |
 |------|----------|
 | 边读边改，没读完 | 读完整反馈，分类后再动手 |
-| 有不清晰的问题但先改清晰的 | 全部澄清后再统一动手 |
-| 没写 Red 测试直接改代码 | 先写失败测试，确认红灯，再修 |
+| 缺口不明仍执行依赖它的动作 | 只暂停依赖该缺口的动作，独立已确认修复继续 |
+| 没有可信失败信号就修 | 新增或复用精准 RED，再修复并验证 |
 | 修完自判"对了"直接合入 | 必须回给 reviewer 确认 |
 | 全盘接受，零 push back | 有技术理由必须说出来 |
 | 愿景级问题用代码 patch | STOP，升级operator，不要硬修 |
-| 云端 P1 修完不 re-trigger | 必须重新触发remote review |
+| 云端 finding 修复后自判通过 | 按 active source 与预算封板契约取得独立结论 |
 | 前端改动只看代码不开浏览器 | 涉及 UX 必须打开浏览器实操验证 |
 | 只修 reviewer 指的那一个点（补锅匠） | 先判 failure mode 是否同类，是则 audit 本 PR diff 全扫再修 |
 | 同型 finding 打到 R5+ 还在逐轮修 | **第 3 轮就停**，升级 plan/spec 作者补状态机（≥3 轮升级规则）——代码层修不掉 spec 层的洞 |

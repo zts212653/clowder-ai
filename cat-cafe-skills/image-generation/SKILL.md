@@ -31,22 +31,11 @@ Codex `image_gen` 不只是“概念图/素材生成器”。当前实测能力�
 
 **默认判断**：当用户要的是“好看、完整、像最终稿”的视觉 mock，且不要求可编辑，先走整页 imagegen。不要先手写 SVG/HTML 去拼格子、排文字、合成素材。
 
-### Codex SVG 复发熔断闸
+### 按成品要求选择执行面
 
-对 Codex / Maine Coon尤其重要：命中以下任一条件时，**禁止**先写 SVG/HTML/Canvas/脚本合成：
+用户明确要求整页 raster、精美视觉 mock 且不需要原生编辑时，优先原生 imagegen。用户要求可编辑文字、精确数据图表、真实 logo/精确文本、代码组件，或修改已有 SVG/图标体系时，选择对应原生/矢量工具。
 
-- 用户要“架构设计图 / 架构图 / PPT 页面 / 华为风 / 白底红黑 / 精美图 / 最终稿”
-- 已有低保真草图、ASCII 蓝图或设计规格，用户要生成“精美版 / 设计图 / 图片”
-- 用户没有明确要求“可编辑文字 / native PPT 元素 / SVG 源文件 / HTML 文件”
-
-执行顺序：
-
-1. 先调用原生 imagegen 生成整页 raster。
-2. 只用 prompt 迭代 1-2 次修风格、层级、文字密度。
-3. 只有 imagegen 已失败，或用户明确要求可编辑 / native text / SVG 源文件，才允许降级 SVG/HTML/PPT。
-4. 若准备写 SVG/HTML，必须先写出 `SVG override reason`：指向已失败的 imagegen 产物，或引用用户的显式可编辑要求。
-
-以下理由不合格，不能覆盖 imagegen-first：中文文字更可控 / 布局更可控 / 先画 SVG 再转 PNG / 架构图需要精确。
+仅仅“没有说可编辑”不足以禁止 SVG/HTML。先按交付用途和可验证要求选工具；不要为符合固定顺序强造一次失败的生图。已选择 imagegen 的任务用小样验证结构、文字与身份是否满足目标，再决定迭代或改路线。
 
 ### Full-page raster first
 
@@ -77,8 +66,8 @@ Codex `image_gen` 不只是“概念图/素材生成器”。当前实测能力�
 │   ├─ 是 → 借用（§ 跨引擎借用）
 │   └─ 否 → 浏览器自动化（§ 浏览器路径）
 │
-└─ 需要特定风格控制 / inpainting / 局部编辑？
-    └─ 是 → 即使有原生能力也走浏览器路径
+└─ 需要参考图 / inpainting / 局部编辑？
+    └─ 原生工具支持该编辑能力时优先原生；缺少所需能力时才选择已授权的其他路径
 ```
 
 ## 支持平台
@@ -231,7 +220,7 @@ codex exec "生成一张猫咖全景图，手绘水彩风格"
 
 ### 通用
 
-1. **优先原生 tool call**：有内置 `image_gen` / `generate_image` 的猫，必须用原生路径。浏览器路径只在需要风格选择器、inpainting、局部编辑时使用
+1. **优先原生 tool call**：有内置 `image_gen` / `generate_image` 的猫，必须用原生路径。原生工具不支持所需编辑/风格能力时才选择已授权的浏览器路径
 2. **F172 自动发布**：原生路径产物由 scanner 自动拾取 → `publishGeneratedImage()` → `/uploads/` 稳定 URL + `media_gallery` 富块。零手动操作
 3. **禁止 CLI 命令替代 tool call**：`codex exec --image` 不等于内置 `image_gen` tool call。`--image` 是 nested CLI 的输入附件，不是当前 invocation 的 native reference-image 通道；前者的产物不会被当前气泡的 F172 scanner 自动发布
 

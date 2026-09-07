@@ -18,7 +18,7 @@ renamed-from: deep-research-pipeline
 # Deep Research
 
 两种模式：
-- **Mode A: 多源调研**：Web 猫（网络搜索）+ Coder 猫（代码判断）+ GPT-5.2 Pro（审阅）= 三角验证
+- **Mode A: 多源调研**：一手来源查证 + 本地代码综合；存在重要盲区或分歧时增加独立研究/审阅视角
 - **Mode B: 云端模型咨询**：本地猫总结背景 → operator发给云端模型 → 回填结果 → 本地猫综合
 
 ## 两种猫，各有分工
@@ -43,7 +43,7 @@ project-research/YYYY-MM-DD-{topic}/
 ├── prompt.md                          # Step 1 研究提示词（同时保留到 docs/prompts/ 的副本）
 ├── {provider}-response.md             # Step 2 云端 deep research 原文
 │   例：claude-response.md / gemini-response.md / gpt-response.md
-├── gpt-pro-review.md                  # Step 3 GPT Pro 审阅（可选）
+├── {reviewer}-review.md               # Step 3 独立审阅（按需，记录实际模型）
 ├── {cat}-synthesis.md                 # Step 4 猫猫独立综合分析
 │   例：opus-synthesis.md / codex-synthesis.md / opus47-synthesis.md
 ├── {cat}-点评.md                      # 非代码猫的风格点评（如Siamese）
@@ -67,21 +67,19 @@ project-research/YYYY-MM-DD-{topic}/prompt.md
 ```
 模板见下方。写完再发，不要边写边发。
 
-**Step 2 — 三路并行 Web 调研**
+**Step 2 — 按问题选择研究路径**
 ```
-同一个 prompt →
-  Claude.ai Deep Research
-  Gemini Deep Research
-  ChatGPT Deep Research  ← 可能先问澄清问题，答完后把 Q&A 追加到另外两路的 prompt
+先使用与问题匹配的一手来源。复杂度、来源分歧或验证盲区需要时，
+再将同一基础 prompt 交给已选择的独立研究路径；记录各路追加上下文。
 ```
 结果存：`project-research/YYYY-MM-DD-{topic}/{provider}-response.md`
 
-**Step 3 — GPT-5.2 Pro 审阅**
-输入三份报告 → 找逻辑漏洞、弱证据、三方分歧
-存：`project-research/YYYY-MM-DD-{topic}/gpt-pro-review.md`（注意：Pro 是审阅者，不是调研者，不要让他搜索）
+**Step 3 — 独立审阅（按需）**
+重要决策、弱证据或来源分歧需要独立判断时，选择当前可用且合适的审阅者；输入实际取得的报告，找逻辑漏洞、弱证据与竞争解释
+选用独立审阅时，存为 `project-research/YYYY-MM-DD-{topic}/{reviewer}-review.md` 并注明实际模型与版本。新增查证必须附来源，不能把审阅者意见当作外部事实。
 
 **Step 4 — Coder 猫综合 + 决策**
-读全部四份文档 → 对照实际 codebase 验证 → 标注"直接可用/需验证/项目特殊约束"
+读本次取得的证据与审阅结果 → 对照实际 codebase 验证 → 标注"直接可用/需验证/项目特殊约束"
 如果多只猫并行综合，每只猫存自己的：`{cat}-synthesis.md`
 最终合并版：`synthesis.md` → 和operator讨论 → 落到 ADR
 
@@ -111,9 +109,9 @@ project-research/YYYY-MM-DD-{topic}/prompt.md
 |------|------|
 | ChatGPT Deep Research | 30 天滚动上限，发前确认值得用 |
 | Claude / Gemini Deep Research | Plan-dependent，同上 |
-| GPT-5.2 Pro | 仅用于 Step 3 审阅，不用于普通对话 |
+| 独立模型审阅 | 按问题风险与盲区选择模型，不默认绑定某个旧型号 |
 
-**三个视角的必要性：** Claude / Gemini / GPT 各家族有不同的训练偏差。分歧处往往是最有价值的信号。
+**独立视角的适用性：** 当单路证据不足或分歧会改变决策时增加独立视角；记录贡献和剩余盲区，不把固定路数当质量证明。用户要求独立回答时遵守该边界。外部发送与显著成本仍受当前授权约束。
 
 ## Chrome MCP 自动化（Step 2）
 
@@ -178,9 +176,9 @@ project-research/YYYY-MM-DD-{topic}/prompt.md
 | 错误 | 修正 |
 |------|------|
 | 没落盘 prompt 就发 | prompt 文件 = 可追溯性，必须先写 |
-| 三路发了不同的 prompt | 基础 prompt 相同；只有 GPT Q&A 是追加的 |
-| 让 GPT Pro 去搜索 | Pro 是审阅者，不是调研者 |
-| 忽略三方分歧 | 分歧 = 最有价值的信号，必须分析 |
+| 多路比较却未记录输入差异 | 共享基础问题，并记录每路新增上下文和来源 |
+| 角色固定绑定旧型号 | 按当前可用能力选择研究者与审阅者，保留各自来源 |
+| 忽略来源或审阅分歧 | 记录竞争解释，判断是否需要进一步查证 |
 | Coder 猫盲信 web 报告 | 必须对照实际 codebase 验证 |
 
 ## Step 5 — 在交接前持久化调研产出
