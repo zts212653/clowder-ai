@@ -985,7 +985,7 @@ export class SqliteEvidenceStore implements IEvidenceStore {
     options?: SearchOptions,
   ): Promise<PassageResult[]> {
     await coverageSearchCheckpoint(options);
-    const queryVec = await this.embedDeps!.embedding.embed([query], options?.signal);
+    const queryVec = await this.embedDeps!.embedding.embed([query], { signal: options?.signal });
     await coverageSearchCheckpoint(options);
     const nnResults = this.embedDeps!.passageVectorStore!.search(queryVec[0], limit);
     await coverageSearchCheckpoint(options);
@@ -1376,7 +1376,7 @@ export class SqliteEvidenceStore implements IEvidenceStore {
   ): Promise<EvidenceItem[]> {
     const pool = Math.min(Math.max(limit * 4, 20), 100); // 砚砚: generous pool, cap 100
     await coverageSearchCheckpoint(options);
-    const queryVec = await this.embedDeps!.embedding.embed([query], options?.signal);
+    const queryVec = await this.embedDeps!.embedding.embed([query], { signal: options?.signal });
     await coverageSearchCheckpoint(options);
     const nnResults = this.embedDeps!.vectorStore.search(queryVec[0], pool);
     await coverageSearchCheckpoint(options);
@@ -1414,7 +1414,7 @@ export class SqliteEvidenceStore implements IEvidenceStore {
   ): Promise<EvidenceItem[]> {
     const pool = Math.min(Math.max(limit * 4, 20), 100);
     await coverageSearchCheckpoint(options);
-    const queryVec = await this.embedDeps!.embedding.embed([query], options?.signal);
+    const queryVec = await this.embedDeps!.embedding.embed([query], { signal: options?.signal });
     await coverageSearchCheckpoint(options);
     const nnResults = this.embedDeps!.vectorStore.search(queryVec[0], pool);
     await coverageSearchCheckpoint(options);

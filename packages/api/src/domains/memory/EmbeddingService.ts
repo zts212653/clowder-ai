@@ -7,7 +7,7 @@
 import { normalizeLoopbackUrl } from '../services/loopback-url.js';
 import { getServiceConfig } from '../services/service-config.js';
 import { getServiceManifest, resolveServiceEndpoint } from '../services/service-manifest.js';
-import type { EmbedModelInfo, IEmbeddingService } from './interfaces.js';
+import type { EmbedModelInfo, EmbedRequestOptions, IEmbeddingService } from './interfaces.js';
 
 interface EmbeddingServiceConfig {
   embedModel: string;
@@ -111,15 +111,15 @@ export class EmbeddingService implements IEmbeddingService {
     };
   }
 
-  async embed(texts: string[], signal?: AbortSignal): Promise<Float32Array[]> {
+  async embed(texts: string[], options?: EmbedRequestOptions): Promise<Float32Array[]> {
     if (!this.ready) throw new Error('EmbeddingService not ready — embed-api server not available');
     if (texts.length === 0) return [];
 
     const results: Float32Array[] = new Array(texts.length);
     for (let offset = 0; offset < texts.length; offset += EMBED_BATCH_SIZE) {
-      signal?.throwIfAborted();
+      options?.signal?.throwIfAborted();
       const batch = texts.slice(offset, offset + EMBED_BATCH_SIZE);
-      const vectors = await this.embedBatch(batch, signal);
+      const vectors = await this.embedBatch(batch, options);
       for (let i = 0; i < vectors.length; i++) {
         const vector = vectors[i];
         if (!vector) throw new Error(`Embed API omitted vector ${i} from batch`);
@@ -129,10 +129,10 @@ export class EmbeddingService implements IEmbeddingService {
     return results;
   }
 
-  private async embedBatch(texts: string[], parentSignal?: AbortSignal): Promise<Float32Array[]> {
-    const timeoutMs = this.config.embedTimeoutMs;
+  private async embedBatch(texts: string[], options?: EmbedRequestOptions): Promise<Float32Array[]> {
+    const timeoutMs = options?.timeoutMs ?? this.config.embedTimeoutMs;
     const timeoutSignal = AbortSignal.timeout(timeoutMs);
-    const signal = parentSignal ? AbortSignal.any([parentSignal, timeoutSignal]) : timeoutSignal;
+    const signal = options?.signal ? AbortSignal.any([options.signal, timeoutSignal]) : timeoutSignal;
     const deadlineMs = Date.now() + timeoutMs;
     const res = await fetch(`${this.resolveBaseUrl()}/v1/embeddings`, {
       method: 'POST',

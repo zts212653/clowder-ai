@@ -6,11 +6,13 @@ describe('embedIndexedItems (shared utility with batch splitting + consistency c
     const { embedIndexedItems } = await import('../../dist/domains/memory/embed-utils.js');
 
     const batchSizes = [];
+    const timeoutOverrides = [];
     const mockEmbedding = {
       isReady: () => true,
       reprobeIfNeeded: async () => {},
-      embed: async (texts) => {
+      embed: async (texts, options) => {
         batchSizes.push(texts.length);
+        timeoutOverrides.push(options?.timeoutMs);
         return texts.map(() => new Float32Array([0.1, 0.2]));
       },
       getModelInfo: () => ({ modelId: 'test', modelRev: 'v1', dim: 2 }),
@@ -38,6 +40,7 @@ describe('embedIndexedItems (shared utility with batch splitting + consistency c
       `no batch should exceed 64, got: ${batchSizes}`,
     );
     assert.equal(batchSizes.length, 3, 'should split 150 into 3 batches (64+64+22)');
+    assert.deepEqual(timeoutOverrides, [120_000, 120_000, 120_000]);
   });
 
   it('handles exactly 64 items in single batch', async () => {
@@ -228,11 +231,13 @@ describe('embedPassages', () => {
     const { embedPassages } = await import('../../dist/domains/memory/embed-utils.js');
 
     const batchSizes = [];
+    const timeoutOverrides = [];
     const mockEmbedding = {
       isReady: () => true,
       reprobeIfNeeded: async () => {},
-      embed: async (texts) => {
+      embed: async (texts, options) => {
         batchSizes.push(texts.length);
+        timeoutOverrides.push(options?.timeoutMs);
         return texts.map(() => new Float32Array([0.1, 0.2]));
       },
       getModelInfo: () => ({ modelId: 'test', modelRev: 'v1', dim: 2 }),
@@ -255,7 +260,8 @@ describe('embedPassages', () => {
       passageVectorStore: mockPassageVectorStore,
     });
 
-    assert.deepEqual(batchSizes, [8, 8, 8, 8, 8], 'passage warmup should avoid bulk requests that hit 3s timeout');
+    assert.deepEqual(batchSizes, [8, 8, 8, 8, 8], 'passage warmup should use bounded batches');
+    assert.deepEqual(timeoutOverrides, [120_000, 120_000, 120_000, 120_000, 120_000]);
     assert.equal(upserted.length, 40, 'all passage vectors should still be written');
   });
 });

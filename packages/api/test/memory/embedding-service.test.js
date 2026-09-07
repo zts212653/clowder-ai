@@ -111,12 +111,45 @@ describe('EmbeddingService (HTTP client to embed-api.py)', () => {
     const controller = new AbortController();
     const startedAt = Date.now();
     try {
-      const embedding = svc.embed(['abort me'], controller.signal);
+      const embedding = svc.embed(['abort me'], { signal: controller.signal });
       setTimeout(() => controller.abort(new DOMException('coverage deadline', 'AbortError')), 5);
       await assert.rejects(embedding, /coverage deadline|aborted/i);
       assert.ok(Date.now() - startedAt < 100, 'parent deadline should win over the embedding client timeout');
     } finally {
       globalThis.fetch = originalFetch;
+    }
+  });
+
+  it('keeps online timeout short while allowing a per-call background override', async () => {
+    const { EmbeddingService } = await import('../../dist/domains/memory/EmbeddingService.js');
+    const svc = new EmbeddingService({
+      embedModel: 'qwen3-embedding-0.6b',
+      embedDim: 2,
+      embedTimeoutMs: 3000,
+      maxModelMemMb: 800,
+    });
+    svc.markReady();
+
+    const originalFetch = globalThis.fetch;
+    const originalTimeout = AbortSignal.timeout;
+    const timeoutCalls = [];
+    AbortSignal.timeout = (timeoutMs) => {
+      timeoutCalls.push(timeoutMs);
+      return new AbortController().signal;
+    };
+    globalThis.fetch = async () =>
+      new Response(JSON.stringify({ data: [{ index: 0, embedding: [0.1, 0.2] }], model: 'mock' }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
+
+    try {
+      await svc.embed(['online query']);
+      await svc.embed(['background passage'], { timeoutMs: 120_000 });
+      assert.deepEqual(timeoutCalls, [3000, 120_000]);
+    } finally {
+      globalThis.fetch = originalFetch;
+      AbortSignal.timeout = originalTimeout;
     }
   });
 
