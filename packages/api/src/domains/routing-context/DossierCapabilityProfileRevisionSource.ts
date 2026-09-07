@@ -1,11 +1,12 @@
 import { createHash } from 'node:crypto';
 import { capabilityProfileRevisionRefV1Schema, catRegistry } from '@cat-cafe/shared';
 import { type DossierProfile, loadDossierSnapshot } from '@cat-cafe/shared/dossier';
-import type {
-  CapabilityPendingProposalReader,
-  CapabilityProfileRevisionLoadInput,
-  CapabilityProfileRevisionLoadResult,
-  CapabilityProfileRevisionSource,
+import {
+  CAPABILITY_PROFILE_INVALID_REASON,
+  type CapabilityPendingProposalReader,
+  type CapabilityProfileRevisionLoadInput,
+  type CapabilityProfileRevisionLoadResult,
+  type CapabilityProfileRevisionSource,
 } from './CapabilityProfileRevisionSource.js';
 
 interface DossierCapabilityProfileRevisionSourceOptions {
@@ -133,6 +134,25 @@ export class DossierCapabilityProfileRevisionSource implements CapabilityProfile
       }),
     );
 
-    return { status: 'fresh', profiles: appliedProfiles, absentCatIds };
+    const diagnostics = candidateIds.flatMap((catId) => {
+      const issues = dossier.diagnostics.filter((diagnostic) => diagnostic.catId === catId);
+      if (issues.length === 0) return [];
+      return [
+        {
+          catId,
+          reason: {
+            code: CAPABILITY_PROFILE_INVALID_REASON,
+            summary: `Capability profile for ${catId} has parse diagnostics (${[...new Set(issues.map((issue) => issue.reason))].join(', ')})`,
+            sourceRefs: issues.slice(0, 32).map((issue) => `docs/team/cat-dossier.md#L${issue.line}`),
+          },
+        },
+      ];
+    });
+    return {
+      status: 'fresh',
+      profiles: appliedProfiles,
+      absentCatIds,
+      ...(diagnostics.length > 0 ? { diagnostics } : {}),
+    };
   }
 }

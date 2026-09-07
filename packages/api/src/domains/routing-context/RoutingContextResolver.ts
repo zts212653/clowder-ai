@@ -120,10 +120,12 @@ export class RoutingContextResolver {
       (left, right) =>
         left.catId.localeCompare(right.catId) || left.dossierRevision.localeCompare(right.dossierRevision),
     );
+    const profileDiagnostics = profileResult.diagnostics ?? [];
     const snapshot = reduceRoutingContext({
       ...input,
       candidates,
       profiles,
+      profileDiagnostics,
       signalEvents: signals,
       preferenceRevisions: preferences,
     });
@@ -134,6 +136,7 @@ export class RoutingContextResolver {
       intent: input.intent ?? null,
       candidates,
       profiles,
+      ...(profileDiagnostics.length > 0 ? { profileDiagnostics } : {}),
       signalEvents: signals,
       preferenceRevisions: preferences,
     });

@@ -68,7 +68,11 @@ describe('canonical parser diagnostic projection', () => {
     ['duplicate_profile', valid + valid],
   ])('%s is observable beside surviving valid profiles', (reason, broken) => {
     const parsed = parseDossierProfilesWithDiagnostics(broken);
-    expect(parsed.diagnostics).toContainEqual({ catId: 'fixture', reason });
+    expect(parsed.diagnostics).toContainEqual({
+      catId: 'fixture',
+      reason,
+      line: reason === 'duplicate_profile' ? 7 : 2,
+    });
   });
 
   test('supports CRLF blocks without changing the canonical field projection', () => {
