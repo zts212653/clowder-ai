@@ -1,0 +1,36 @@
+{
+  "verdictId": "2026-08-15-eval-friction-c1-mixed-actionable-singletons",
+  "featureId": "F245",
+  "evalSnapshotId": "eval-F245-2026-08-15",
+  "generatedAt": "2026-08-15T03:09:02.052Z",
+  "findings": [
+    {
+      "id": "FR-2026-08-15-c03def938f44",
+      "relatedFeature": "F245",
+      "frictionSignal": {
+        "type": "friction.cluster_c03def938f44",
+        "severity": "high",
+        "confidence": 0.7,
+        "detectedAt": "2026-08-15T03:09:02.052Z"
+      },
+      "attribution": {
+        "primaryLayer": "needs_investigation",
+        "evidence": [
+          {
+            "type": "counter",
+            "anchor": "friction-rollup/cluster_c03def938f44",
+            "excerpt": "cluster 'a2a_timeout: opus' count=1 severity=high sensorForms=[reason]"
+          }
+        ]
+      },
+      "proposedAction": [
+        {
+          "action": "triage-top-friction-cluster",
+          "target": "F245/friction-rollup",
+          "rationale": "Highest-ranked friction cluster in the window — eval cat assigns the 7-class root cause in the verdict before handoff."
+        }
+      ],
+      "status": "open"
+    }
+  ]
+}
