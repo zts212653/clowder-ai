@@ -1,3 +1,4 @@
+import type { DeliveryDecisionCueCarrierV1 } from './memory-cue.js';
 import type { WaitTerminationActor, WaitTerminationReason } from './wait-termination.js';
 
 export const GITHUB_WAIT_PREDICATE_KINDS = [
@@ -224,6 +225,19 @@ export interface GitHubWaitMatchedDelta {
 
 export type WaitOutcomeDelivery = 'pending' | 'delivered' | 'not_applicable' | 'legacy_unfenced';
 
+/**
+ * Source-owned connector metadata that must travel with the wait outcome which produced it.
+ *
+ * A later collector may re-publish an earlier pending outcome. Keeping this on the observation
+ * would let that unrelated collector lend its own cue to the old message (or erase the old cue
+ * when it has none), so the persisted outcome is the only safe replay boundary.
+ */
+export interface GitHubWaitDeliveryExtraV1 {
+  readonly memoryCue: {
+    readonly deliveryDecision: DeliveryDecisionCueCarrierV1;
+  };
+}
+
 export interface WaitOutcomeV1 {
   readonly v: 1;
   readonly outcomeId: string;
@@ -238,6 +252,8 @@ export interface WaitOutcomeV1 {
   readonly nextStep?: string;
   readonly terminalSubjectState?: 'merged' | 'closed';
   readonly actor?: WaitTerminationActor;
+  /** Exact connector metadata produced by this outcome's observation; replay never substitutes it. */
+  readonly deliveryExtra?: GitHubWaitDeliveryExtraV1;
   /** #1392 AC-1: true when the system auto-renewed tracking after this outcome; false/absent when it did not (truthful rearm signal). */
   readonly autoRenewed?: boolean;
   /**

@@ -1,6 +1,7 @@
 import type {
   AutomationState,
   AwaitStateV1,
+  GitHubWaitDeliveryExtraV1,
   IssueWaitAutomationState,
   PrAutomationState,
   TaskItem,
@@ -9,10 +10,7 @@ import type {
   WaitTerminationEventV1,
 } from '@cat-cafe/shared';
 import { createWaitContinuationCarrier, parseWaitOwnerFence } from '@cat-cafe/shared';
-import type {
-  ConnectorDeliveryDeps,
-  ConnectorDeliveryInput,
-} from '../../infrastructure/email/deliver-connector-message.js';
+import type { ConnectorDeliveryDeps } from '../../infrastructure/email/deliver-connector-message.js';
 import { deliverConnectorMessage } from '../../infrastructure/email/deliver-connector-message.js';
 import type { IWaitLifecycleEventLog } from '../ball-custody/WaitLifecycleEventLog.js';
 import {
@@ -60,7 +58,7 @@ export interface GitHubWaitObservation {
   readonly subjectState?: 'merged' | 'closed';
   readonly at?: number;
   /** Source-owned, typed metadata for the connector message created by this observation. */
-  readonly deliveryExtra?: ConnectorDeliveryInput['extra'];
+  readonly deliveryExtra?: GitHubWaitDeliveryExtraV1;
   /**
    * Action-time review-history observation.
    *
@@ -204,7 +202,18 @@ export class GitHubWaitLifecycleService {
       // auto-renew installs outcome N and await N+1 atomically, "pending N while N+1 is live" is
       // an ordinary long-lived state rather than a rare race — so this branch is on the main path
       // and must tell the caller its cursor has earned nothing.
-      if (existingPending) return this.publishPending(task, existingPending, false, input.deliveryExtra);
+      if (existingPending) {
+        // The persisted outcome is the recovery outbox. Do not let a later observation evaluate
+        // or overwrite it until its lifecycle event is durable, and never borrow that later
+        // observation's delivery metadata while replaying the old outcome.
+        if (parseWaitOwnerFence(existingPending.ownerFence)) {
+          const appended = await this.appendLifecycleEvent(task, existingPending);
+          if (!appended) {
+            return { kind: 'state_only', reason: 'lifecycle_event_pending', observationEvaluated: false };
+          }
+        }
+        return this.publishPending(task, existingPending, false);
+      }
 
       const state = task.automationState;
       const active = state?.await;
@@ -319,7 +328,8 @@ export class GitHubWaitLifecycleService {
       // #1392 AC-1: on a predicate MATCH with autoRenew, atomically install gen N+1
       // (fresh baseline, same when/then/expiresAt) in the SAME CAS as the delivered
       // outcome — a TaskStore-only generation transition. Never renew on expiry,
-      // terminal, cancel, or subject-terminal. Delivery reliability stays with #1356/#1398.
+      // terminal, cancel, or subject-terminal. The installed outcome is also the recovery
+      // outbox: its lifecycle event must be durable before connector delivery can begin.
       const renewing =
         outcome.delivery === 'pending' &&
         outcome.reason === 'matched' &&
@@ -331,8 +341,12 @@ export class GitHubWaitLifecycleService {
       // sol R32: the R4 pause belongs to THIS outcome, not to whichever signal a later caller
       // happens to hold. Stamped here so a re-published N keeps its own suppression instead of
       // being auto-woken because a connector hiccup made someone re-deliver it.
-      let deliverOutcome: WaitOutcomeV1 =
-        input.reviewLoopBrake?.kind === 'pause_once' ? { ...outcome, autoWakeSuppressed: true } : outcome;
+      let deliverOutcome: WaitOutcomeV1 = {
+        ...outcome,
+        ...(input.reviewLoopBrake?.kind === 'pause_once' ? { autoWakeSuppressed: true } : {}),
+        ...(input.deliveryExtra ? { deliveryExtra: input.deliveryExtra } : {}),
+      };
+      installState = { ...replacement, waitOutcome: deliverOutcome } as AutomationState;
       if (renewing) {
         const newGeneration = active.generation + 1;
         const awaitState = {
@@ -369,7 +383,10 @@ export class GitHubWaitLifecycleService {
       });
       if (!installed) continue;
       const installedOutcome = installed.automationState?.waitOutcome ?? deliverOutcome;
-      await this.appendLifecycleEvent(installed, installedOutcome);
+      const eventAppended = await this.appendLifecycleEvent(installed, installedOutcome);
+      if (!eventAppended) {
+        return { kind: 'state_only', reason: 'lifecycle_event_pending', observationEvaluated: true };
+      }
       if (installedOutcome.delivery !== 'pending') {
         return { kind: 'state_only', reason: installedOutcome.reason, observationEvaluated: true };
       }
@@ -379,7 +396,7 @@ export class GitHubWaitLifecycleService {
           '[#1392] auto-renewed wait tracking with a fresh baseline',
         );
       }
-      return this.publishPending(installed, installedOutcome, true, input.deliveryExtra);
+      return this.publishPending(installed, installedOutcome, true);
     }
     return { kind: 'deduped', reason: 'generation_changed_concurrently', observationEvaluated: false };
   }
@@ -412,7 +429,10 @@ export class GitHubWaitLifecycleService {
     }
     const outcome = task.automationState?.waitOutcome;
     if (!outcome) return { kind: 'state_only', reason: 'nothing_to_recover', observationEvaluated: false };
-    await this.appendLifecycleEvent(task, outcome);
+    const eventAppended = await this.appendLifecycleEvent(task, outcome);
+    if (!eventAppended) {
+      return { kind: 'state_only', reason: 'lifecycle_event_pending', observationEvaluated: false };
+    }
     // Recovery carries no observation, so it can never authorize a cursor advance.
     if (outcome.delivery === 'pending') return this.publishPending(task, outcome, false);
     return { kind: 'state_only', reason: outcome.reason, observationEvaluated: false };
@@ -544,12 +564,14 @@ export class GitHubWaitLifecycleService {
     };
   }
 
-  private async appendLifecycleEvent(task: TaskItem, outcome: WaitOutcomeV1): Promise<void> {
-    if (!this.opts.eventLog) return;
+  private async appendLifecycleEvent(task: TaskItem, outcome: WaitOutcomeV1): Promise<boolean> {
+    if (!this.opts.eventLog) return true;
     try {
       await this.opts.eventLog.append(lifecycleEvent(task, outcome));
+      return true;
     } catch (error) {
       this.opts.log.warn({ error, taskId: task.id, outcomeId: outcome.outcomeId }, '[F280] wait event append deferred');
+      return false;
     }
   }
 
@@ -562,7 +584,6 @@ export class GitHubWaitLifecycleService {
     task: TaskItem,
     outcome: WaitOutcomeV1,
     observationEvaluated: boolean,
-    deliveryExtra?: ConnectorDeliveryInput['extra'],
   ): Promise<GitHubWaitLifecycleResult> {
     if (!parseWaitOwnerFence(outcome.ownerFence)) {
       return this.quarantineLegacyUnfencedOutcome(task, outcome);
@@ -584,7 +605,7 @@ export class GitHubWaitLifecycleService {
           : `https://github.com/${outcome.subjectRef.slice('issue:'.length).replace('#', '/issues/')}`,
         meta: { waitContinuationCarrier },
       },
-      ...(deliveryExtra ? { extra: deliveryExtra } : {}),
+      ...(outcome.deliveryExtra ? { extra: outcome.deliveryExtra } : {}),
     });
 
     const current = await this.opts.taskStore.get(task.id);
@@ -628,6 +649,13 @@ export class GitHubWaitLifecycleService {
         return { kind: 'state_only', reason: currentOutcome.reason, observationEvaluated: false };
       }
       if (parseWaitOwnerFence(currentOutcome.ownerFence)) {
+        // A concurrent migration may fence the same outcome after this observation entered the
+        // legacy quarantine path. It has become publishable, but it has not passed the caller's
+        // append gate; enforce the same recovery-outbox ordering before releasing it.
+        const eventAppended = await this.appendLifecycleEvent(current, currentOutcome);
+        if (!eventAppended) {
+          return { kind: 'state_only', reason: 'lifecycle_event_pending', observationEvaluated: false };
+        }
         return this.publishPending(current, currentOutcome, false);
       }
       const marked = markWaitOutcomeLegacyUnfenced(current.automationState as PrAutomationState, outcome.outcomeId);

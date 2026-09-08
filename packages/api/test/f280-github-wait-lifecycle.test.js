@@ -189,6 +189,244 @@ describe('F280 — a pending re-publish never authorizes a cursor advance', () =
   });
 });
 
+describe('F280 — pending outcomes own delivery metadata and lifecycle ordering', () => {
+  const comment = (id) => ({
+    type: 'pr_conversation_comment_added',
+    id,
+    source: 'pr_conversation_comment',
+    author: 'Maintainer',
+    summary: `conversation comment #${id} by Maintainer`,
+  });
+  const deliveryExtra = (occurredAt) => ({
+    memoryCue: {
+      deliveryDecision: {
+        v: 1,
+        producer: 'github_ci',
+        producerProvenance: 'server_github_ci',
+        repoFullName: 'owner/repo',
+        prNumber: 7,
+        headSha: 'a'.repeat(40),
+        phase: 'merge_gate',
+        gateOutcome: 'source_evidence_complete',
+        externalCondition: 'billing_spending_limit_zero_step',
+        candidateAction: 'merge',
+        occurredAt,
+      },
+    },
+  });
+
+  it('replays the persisted outcome extra instead of borrowing it from the retrying poll', async () => {
+    const taskStore = new TaskStore();
+    const base = activeState([{ kind: 'pr_conversation_comment_added' }]);
+    const task = await taskStore.create({
+      kind: 'pr_tracking',
+      subjectKey: 'pr:owner/repo#7',
+      threadId: 'thread_1',
+      title: 'PR tracking: owner/repo#7',
+      ownerCatId: 'codex-sol',
+      why: 'test',
+      createdBy: 'codex-sol',
+      userId: 'user_1',
+      automationState: { ...base, await: { ...base.await, autoRenew: true } },
+    });
+    let failNextDelivery = true;
+    const messageStore = new MessageStore();
+    const flaky = {
+      ...messageStore,
+      append: async (message) => {
+        if (failNextDelivery) {
+          failNextDelivery = false;
+          throw new Error('connector unavailable');
+        }
+        return messageStore.append(message);
+      },
+      getByThread: (threadId) => messageStore.getByThread(threadId),
+    };
+    const lifecycle = new GitHubWaitLifecycleService({
+      taskStore,
+      deliveryDeps: { messageStore: flaky },
+      now: () => 500,
+      log: { info() {}, warn() {}, error() {} },
+    });
+    const originalExtra = deliveryExtra(100);
+    const unrelatedRetryExtra = deliveryExtra(200);
+
+    await assert.rejects(
+      () =>
+        lifecycle.observe({
+          taskId: task.id,
+          facts: { headSha: 'aaaa1111' },
+          events: [comment(31)],
+          deliveryExtra: originalExtra,
+        }),
+      /connector unavailable/,
+    );
+    assert.deepEqual(
+      (await taskStore.get(task.id)).automationState.waitOutcome.deliveryExtra,
+      originalExtra,
+      'the producing observation must persist its delivery metadata with the outcome',
+    );
+
+    const republished = await lifecycle.observe({
+      taskId: task.id,
+      facts: { headSha: 'aaaa1111' },
+      events: [comment(32)],
+      deliveryExtra: unrelatedRetryExtra,
+    });
+
+    assert.equal(republished.kind, 'notified');
+    assert.equal(republished.observationEvaluated, false);
+    assert.deepEqual(messageStore.getByThread('thread_1')[0].extra, originalExtra);
+  });
+
+  it('does not deliver or overwrite an outcome until its lifecycle event is durable', async () => {
+    const taskStore = new TaskStore();
+    const messageStore = new MessageStore();
+    const durableEventLog = new MemoryWaitLifecycleEventLog();
+    let failNextEventAppend = true;
+    const eventLog = {
+      append: async (event) => {
+        if (failNextEventAppend) {
+          failNextEventAppend = false;
+          throw new Error('event log unavailable');
+        }
+        return durableEventLog.append(event);
+      },
+      read: (waitId, fromSequence) => durableEventLog.read(waitId, fromSequence),
+    };
+    const base = activeState([{ kind: 'pr_conversation_comment_added' }]);
+    const task = await taskStore.create({
+      kind: 'pr_tracking',
+      subjectKey: 'pr:owner/repo#7',
+      threadId: 'thread_1',
+      title: 'PR tracking: owner/repo#7',
+      ownerCatId: 'codex-sol',
+      why: 'test',
+      createdBy: 'codex-sol',
+      userId: 'user_1',
+      automationState: { ...base, await: { ...base.await, autoRenew: true } },
+    });
+    const lifecycle = new GitHubWaitLifecycleService({
+      taskStore,
+      deliveryDeps: { messageStore },
+      eventLog,
+      now: () => 500,
+      log: { info() {}, warn() {}, error() {} },
+    });
+
+    const deferred = await lifecycle.observe({
+      taskId: task.id,
+      facts: { headSha: 'aaaa1111' },
+      events: [comment(31)],
+    });
+    assert.deepEqual(deferred, {
+      kind: 'state_only',
+      reason: 'lifecycle_event_pending',
+      observationEvaluated: true,
+    });
+    assert.equal(messageStore.getByThread('thread_1').length, 0, 'delivery must wait for the audit event');
+    const pending = (await taskStore.get(task.id)).automationState;
+    assert.equal(pending.waitOutcome.delivery, 'pending');
+    assert.equal(pending.waitOutcome.generation, 3);
+    assert.equal(pending.await.generation, 4);
+
+    const replayed = await lifecycle.recoverOutcome(task.id);
+    assert.equal(replayed.kind, 'notified');
+    assert.equal(replayed.observationEvaluated, false, 'recovery only finishes generation N');
+    assert.match(replayed.content, /#31/);
+    assert.deepEqual(
+      (await durableEventLog.read(task.id)).map((event) => event.generation),
+      [3],
+    );
+
+    const next = await lifecycle.observe({
+      taskId: task.id,
+      facts: { headSha: 'aaaa1111' },
+      events: [comment(32)],
+    });
+    assert.equal(next.kind, 'notified');
+    assert.equal(next.observationEvaluated, true);
+    assert.match(next.content, /#32/);
+    assert.deepEqual(
+      (await durableEventLog.read(task.id)).map((event) => event.generation),
+      [3, 4],
+      'generation N+1 cannot overwrite the sole recovery record for generation N',
+    );
+  });
+
+  it('appends before a concurrent fence releases an outcome from legacy quarantine', async () => {
+    const taskStore = new TaskStore();
+    const messageStore = new MessageStore();
+    const eventLog = new MemoryWaitLifecycleEventLog();
+    const task = await taskStore.create({
+      kind: 'pr_tracking',
+      subjectKey: 'pr:owner/repo#7',
+      threadId: 'thread_1',
+      title: 'PR tracking: owner/repo#7',
+      ownerCatId: 'codex-sol',
+      why: 'test',
+      createdBy: 'codex-sol',
+      userId: 'user_1',
+      automationState: {
+        waitOutcome: {
+          v: 1,
+          outcomeId: 'wait:pr:owner/repo#7:g3:matched',
+          generation: 3,
+          subjectRef: 'pr:owner/repo#7',
+          reason: 'matched',
+          at: 500,
+          delivery: 'pending',
+          actor: { kind: 'system' },
+          matched: [{ kind: 'pr_conversation_comment_added', delta: 'conversation comment #31 by Maintainer' }],
+        },
+      },
+    });
+    let fenceOnFirstReplace = true;
+    const concurrentlyFencedStore = {
+      ...taskStore,
+      get: (id) => taskStore.get(id),
+      replaceAutomationStateIfGeneration: async (id, input) => {
+        if (fenceOnFirstReplace) {
+          fenceOnFirstReplace = false;
+          const current = await taskStore.get(id);
+          const outcome = current.automationState.waitOutcome;
+          await taskStore.replaceAutomationStateIfGeneration(id, {
+            expectedGeneration: outcome.generation,
+            expectedUpdatedAt: current.updatedAt,
+            automationState: {
+              ...current.automationState,
+              waitOutcome: {
+                ...outcome,
+                ownerFence: { kind: 'containing_task', generation: outcome.generation },
+              },
+            },
+          });
+          return null;
+        }
+        return taskStore.replaceAutomationStateIfGeneration(id, input);
+      },
+    };
+    const lifecycle = new GitHubWaitLifecycleService({
+      taskStore: concurrentlyFencedStore,
+      deliveryDeps: { messageStore },
+      eventLog,
+      now: () => 500,
+      log: { info() {}, warn() {}, error() {} },
+    });
+
+    const result = await lifecycle.observe({
+      taskId: task.id,
+      facts: { headSha: 'aaaa1111' },
+      events: [],
+    });
+
+    assert.equal(result.kind, 'notified');
+    assert.equal(result.observationEvaluated, false);
+    assert.equal(messageStore.getByThread('thread_1').length, 1);
+    assert.equal((await eventLog.read(task.id)).length, 1, 'the concurrent fence must not bypass the append gate');
+  });
+});
+
 /*
  * sol R32: two same-root boundaries the R31 fix left open.
  *

@@ -662,6 +662,7 @@ export {
   type GitHubPrWaitBaseline,
   type GitHubPrWaitPredicate,
   type GitHubWaitBaseline,
+  type GitHubWaitDeliveryExtraV1,
   type GitHubWaitMatchedDelta,
   type GitHubWaitPredicate,
   type GitHubWaitPredicateKind,

@@ -6,7 +6,7 @@ doc_kind: spec
 created: 2026-09-02
 updated: 2026-09-08
 tips_exempt:
-  reason: Contract truth correction only — feedback delivery is bounded by durable source prefixes, and base-behind notifications require same-HEAD causality; no user-facing capability or registration surface changes.
+  reason: Contract truth correction only — verdicts, replay metadata, lifecycle ordering, durable feedback prefixes, and same-HEAD base causality are documented without changing the public registration surface.
 ---
 
 # GitHub Tracking — 用户契约（#1392 / #1394 唯一真相源）
@@ -249,6 +249,10 @@ bot_interaction = { @ 了已知 bot 账号的评论 }  ∪  { 已知 bot 发的�
 
 **F168 只读，不写。** 它单向读取同一份归一化事实来判断云端 review 是否就绪。
 它失败、超时或不可用**不得**影响 tracking 的任何投递，也**不得**修改任何回合状态。
+formal review 的 `COMMENTED` 只是 GitHub 运输状态，不是 clean 裁决：只有显式 `APPROVED`
+或正文同时满足规范化 clean 文案与当前 commit 证据时才是 clean；带 inline finding 的 review
+仍是 blocking。无开放回合的普通 `COMMENTED` 不产出 F168 裁决；若它结束了一个开放回合，
+则记为 `failed_or_timeout`，绝不因带着当前 `commitId` 就放行 release readiness。
 **F177 使用它自己的 coordination 状态**，不从 tracking 取出口凭据——
 "thread 里存在任意 tracker"本来就不是出口，从这里借凭据只会把它变回来。
 
@@ -293,6 +297,15 @@ A26 已经写明，静音一条真信号比多一条噪音严重得多。
 - PR 与 issue 的终态都不得越过反馈持久化：每个评论 / review 来源只把成功进入 durable
   history 的前缀交给 lifecycle；任一来源仍有失败尾部时，merged / closed 暂缓，下一轮
   从未推进的来源游标重试，完整后再把最后反馈与终态合并投递。
+- `waitOutcome` 是该 generation 的恢复 outbox。生命周期事件必须先成功追加（重复追加按
+  idempotency key 视为成功），connector 消息才能投递；追加失败时 outcome 保持 pending，
+  后续观察先重试它，既不求值新事件，也不允许 N+1 覆盖 N。这样“通知已发、审计事件丢失”
+  的半提交状态不可构造。所有 lifecycle event-log backend 都必须按稳定 `eventId` 幂等；若
+  event log 持续不可用，系统有意停止该 outcome 的通知而不是让账本与现实分叉，且 pending
+  outcome 必须保留供恢复。
+- 投递附加元数据属于**产出它的 outcome**，与 outcome 一起持久化、一起重放。后续 CI / review /
+  conflict 轮询即使恰好负责 retry，也不得把自己的 metadata 借给旧 outcome，亦不得因自己没有
+  metadata 而擦除旧值。
 - 每次通知投递到**注册时所在的那个 thread**
 
 ### 2.5b 重复注册不得前进游标
@@ -435,6 +448,9 @@ baseline: snapshot.baseline,        // 当前最大值
 | A35 | merge readiness 为 `DIRTY` 但 compare `behind_by > 0`；或 readiness 为 `BLOCKED` 但 `behind_by = 0` | 前者通知 behind，后者清除 behind 基线；之后再次落后仍可通知 | 用互斥 merge-readiness 枚举猜祖先关系，造成重复通知或静默漏报 |
 | A36 | PR 评论 / review 只持久化成功一个来源前缀 | 只投递成功前缀（含 owner 自己的回合事实），失败尾部不推进游标并重试 | 投递与 baseline 越过 durable history；终态到达后反馈永久丢失 |
 | A37 | 换入一个本来就落后 base 的新 HEAD | 记录新 HEAD 的 behind 基线，但不通知“base branch advanced” | 把作者 push 冒充成 base 推进，发出错误因果通知 |
+| A38 | 当前 HEAD 上出现无 finding、无 canonical clean 正文的 bot `COMMENTED` review | 无开放回合时不产出裁决；有开放回合时记为 `failed_or_timeout` | 普通说明或失败文案被当成 clean，错误满足 required cloud review |
+| A39 | outcome N 首投失败，另一个带不同 delivery metadata 的观察重投 N | 使用 N 持久化的原 metadata；本轮 metadata 不参与 | 跨 adapter 借错或擦除可信 memory cue |
+| A40 | outcome N 已安装但 lifecycle event 首次追加失败，且 N+1 已续订 | 不投递 N；下一轮先补 N 的 event，再投递 N，之后才求值 N+1 | 已通知但审计事件永久丢失，N+1 覆盖唯一恢复记录 |
 
 **A3 / A6 / A17 是历史事故的直接复现，必须有独立测试。**
 **A22 是"静默丢真信号"，优先级高于任何降噪诉求。**
@@ -456,6 +472,8 @@ baseline: snapshot.baseline,        // 当前最大值
 | 状态事实采集 | **A35** — compare 祖先关系独立于 merge readiness |
 | 状态因果过滤 | **A37** — `base_behind` 只认同一个 HEAD 的 false→true；换 HEAD 只更新下一轮基线 |
 | 注册时的基线安装（不得前进） | A22 |
+| F168 裁决分类 | **A38** — `COMMENTED` 不是 verdict；显式 approval 或 canonical current-commit clean 才能放行 |
+| outcome 持久化与重放 | **A39 A40** — metadata 跟 outcome；lifecycle event 先于 connector delivery，旧 outcome 清账前不得求值或覆盖 |
 | **链子里没有的东西** | A15（无 `headSha` 门）· A17（追踪本身无期限）· A10（无正文判断）· A6（bot 不是噪音身份） |
 
 > **A17 与 A28 不矛盾**：追踪本身没有任何过期时间（A17）。唯一的时钟长在**一个回合**上，
@@ -495,7 +513,7 @@ baseline: snapshot.baseline,        // 当前最大值
 
 | 不做 | 归属 |
 |---|---|
-| 投递可靠性、崩溃恢复、pendingWake 重试、single-flight admission、CAS 竞争载体 | #1356 / #1398 |
+| connector 以下的通用投递可靠性、pendingWake 重试、single-flight admission、CAS 竞争载体 | #1356 / #1398；本契约只负责 outcome→lifecycle event→connector 的顺序与 outcome 自身重放 |
 | `preview → register` 两步注册 | 已废弃，注册不需要前置检查 |
 | 调用方可传的受众参数 / exact audience | 已从产品面移除 |
 | MCP 侧的 bot-turn 工具、回合探测、`preview` | 不存在。回合只从 GitHub 事件推导（§2.4b） |

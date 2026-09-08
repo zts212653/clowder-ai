@@ -519,6 +519,59 @@ describe('F280 4b — bot interaction turns', () => {
       assert.equal(seen.at(-1)?.status, 'clean');
     });
 
+    test('a plain COMMENTED review is not a clean verdict with or without an open round', () => {
+      const review = {
+        id: 31,
+        author: BOT,
+        actorType: 'Bot',
+        state: 'COMMENTED',
+        body: 'Setting up the review environment. No verdict was produced.',
+        submittedAt: '2026-09-02T09:41:00Z',
+        commitId: HEAD,
+      };
+      const withoutRound = deriveCloudReviewObservation({
+        headSha: HEAD,
+        comments: [],
+        decisions: [review],
+      });
+      assert.equal(withoutRound, null, 'commit affinity alone must not turn advisory prose into clean');
+
+      const withRound = deriveCloudReviewObservation({
+        headSha: HEAD,
+        comments: [],
+        decisions: [review],
+        events: normalizePrFeedbackBatch({ headSha: HEAD, comments: [], decisions: [review] }),
+        openTurns: { [BOT]: { triggerId: 21, openedAt: TRIGGER_MS, headSha: HEAD } },
+      });
+      assert.equal(withRound?.status, 'failed_or_timeout', 'an unreadable answer closes the round without approval');
+    });
+
+    test('only explicit approval or the canonical commit-evidenced response is clean', () => {
+      const approved = {
+        id: 31,
+        author: BOT,
+        actorType: 'Bot',
+        state: 'APPROVED',
+        body: 'Approved.',
+        submittedAt: '2026-09-02T09:41:00Z',
+        commitId: HEAD,
+      };
+      const canonical = {
+        ...approved,
+        id: 32,
+        state: 'COMMENTED',
+        body: `Codex Review: Didn't find any major issues.\n\n**Reviewed commit:** \`${HEAD}\`\n`,
+      };
+      assert.equal(
+        deriveCloudReviewObservation({ headSha: HEAD, comments: [], decisions: [approved] })?.status,
+        'clean',
+      );
+      assert.equal(
+        deriveCloudReviewObservation({ headSha: HEAD, comments: [], decisions: [canonical] })?.status,
+        'clean',
+      );
+    });
+
     test('a review of an older commit is not a verdict on the current HEAD', async () => {
       const { seen, coordinator } = collectObservations();
       const harness = await createHarness({ when: AUTHOR_SUBSCRIPTION, externalReviewCoordinator: coordinator });

@@ -151,18 +151,26 @@ function reviewVerdict(
   // DISMISSED is how the connector reports its own failure; it is not a verdict on the diff.
   if (review.state === 'DISMISSED') return { status: 'failed_or_timeout' };
   if (review.state === 'CHANGES_REQUESTED' || findings.length > 0) return { status: 'blocking' };
-  return { status: 'clean' };
+  if (review.state === 'APPROVED') return { status: 'clean' };
+  if (reviewedCommitOfCleanVerdict(review.body, input.headSha)) return { status: 'clean' };
+  // COMMENTED is a transport state, not a verdict. Setup chatter, advisory prose, and connector
+  // failure explanations all arrive under it; commit affinity alone cannot turn them into clean.
+  return { status: 'failed_or_timeout' };
 }
 
 function commitEvidencedVerdict(
   input: CloudReviewObservationInput,
   known: readonly KnownBot[],
 ): DerivedCloudReviewObservation | null {
-  const botReview = [...input.decisions]
+  const botReview = input.decisions
     .filter((decision) => resolveKnownBotAuthor(decision.author, known) !== null && decision.commitId === input.headSha)
-    .sort((left, right) => left.id - right.id)
+    .map((review) => ({ review, verdict: reviewVerdict(review, input, known) }))
+    // A plain COMMENTED record carries commit affinity but no verdict. It is a failure only when
+    // it answers a round we can point at; in this no-round fallback it establishes nothing.
+    .filter(({ review, verdict }) => review.state !== 'COMMENTED' || verdict.status !== 'failed_or_timeout')
+    .sort((left, right) => left.review.id - right.review.id)
     .at(-1);
-  if (botReview) return { ...reviewVerdict(botReview, input, known), reviewId: botReview.id };
+  if (botReview) return { ...botReview.verdict, reviewId: botReview.review.id };
   const clean = input.comments.find(
     (comment) =>
       comment.commentType === 'conversation' &&
