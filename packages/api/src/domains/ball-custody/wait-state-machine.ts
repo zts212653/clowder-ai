@@ -24,6 +24,7 @@ export type WaitTransitionEvent =
       readonly generation: number;
       readonly at: number;
       readonly subjectState: 'merged' | 'closed';
+      readonly matched?: readonly GitHubWaitMatchedDelta[];
     }
   | {
       readonly type: 'expired' | 'owner_changed' | 'superseded';
@@ -117,6 +118,7 @@ export function transitionWaitState(current: WaitRuntimeState, event: WaitTransi
       return terminalize(current, active, {
         reason: 'subject_terminal',
         at: event.at,
+        matched: event.matched,
         subjectState: event.subjectState,
       });
     case 'user_cancel':

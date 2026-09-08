@@ -96,6 +96,26 @@ describe('F280 wait state machine', () => {
     assert.equal(result.state.waitOutcome?.delivery, 'not_applicable');
   });
 
+  it('keeps same-observation matches on a terminal subject outcome', async () => {
+    const { transitionWaitState } = await import(MODULE_URL.href);
+    const matched = [{ kind: 'pr_conversation_comment_added', delta: 'conversation comment #31 by maintainer' }];
+    const result = transitionWaitState(
+      { await: activeAwait() },
+      {
+        type: 'subject_terminal',
+        generation: 4,
+        at: 600,
+        subjectState: 'closed',
+        matched,
+      },
+    );
+
+    assert.equal(result.applied, true);
+    assert.equal(result.state.waitOutcome?.reason, 'subject_terminal');
+    assert.equal(result.state.waitOutcome?.terminalSubjectState, 'closed');
+    assert.deepEqual(result.state.waitOutcome?.matched, matched);
+  });
+
   it('retains an action-successor owner fence without promoting it to action authority', async () => {
     const { transitionWaitState } = await import(MODULE_URL.href);
     const ownerFence = { kind: 'action_successor', leaseId: 'lease-review-7', generation: 9 };

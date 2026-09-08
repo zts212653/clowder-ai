@@ -46,10 +46,9 @@ export function renderGitHubWaitOutcome(outcome: WaitOutcomeV1): string {
 
   if (outcome.reason === 'subject_terminal') {
     lines.push(`- ${isIssue ? 'Issue' : 'PR'} state: ${outcome.terminalSubjectState ?? 'closed'}`);
-  } else {
-    for (const match of outcome.matched ?? []) {
-      lines.push(`- ${match.delta}`);
-    }
+  }
+  for (const match of outcome.matched ?? []) {
+    lines.push(`- ${match.delta}`);
   }
 
   lines.push('', `Matched reason: \`${outcome.reason}\``);

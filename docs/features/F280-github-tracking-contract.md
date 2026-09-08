@@ -410,7 +410,7 @@ baseline: snapshot.baseline,        // 当前最大值
 | A28 | 触发 bot 后超时无回应 | 通知"这轮没回来"，且只通知一次 | 静默——点了 review 石沉大海 |
 | A29 | 触发 bot 后正常回应 | 通知结果，回合闭合 | 回合永远挂着，之后误报超时 |
 | A30 | **非作者**注册：第三方（既非作者也非自己）发评论 | **不通知** | maintainer 被无关的人刷屏，他等的是作者回应 |
-| A31 | issue **closed** | 通知并终止 | 只终止不通知，或终止后仍空转 |
+| A31 | issue **closed** | 终态通知合并同轮命中的最后评论，然后终止 | 只终止不通知、吞掉同轮最后评论，或终止后仍空转 |
 | A32 | 非作者注册：**别的 maintainer** 提交 formal review | 通知 | 静音了同行的决策 |
 | A33 | 当前 HEAD 的 statuses / check-runs 都为空，跨过多个轮询周期 | 保持 pending，不通知 CI 通过 | 把空集合写成 `pass (0 blockers)` |
 

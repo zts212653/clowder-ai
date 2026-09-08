@@ -6,6 +6,7 @@ const { MessageStore } = await import('../dist/domains/cats/services/stores/port
 const { MemoryWaitLifecycleEventLog } = await import('../dist/domains/ball-custody/WaitLifecycleEventLog.js');
 const { IssueWaitMigrationService } = await import('../dist/domains/ball-custody/IssueWaitMigrationService.js');
 const { GitHubWaitLifecycleService } = await import('../dist/domains/github-signals/GitHubWaitLifecycleService.js');
+const { createIssueCommentTaskSpec } = await import('../dist/infrastructure/email/IssueCommentTaskSpec.js');
 const { canonicalizeGitHubIssueWaitPredicates, matchGitHubWaitPredicates } = await import(
   '../dist/domains/github-signals/GitHubWaitPredicateCatalog.js'
 );
@@ -154,6 +155,66 @@ describe('F280 Phase C issue wait lifecycle', () => {
       ownerFence: { kind: 'containing_task', generation: 2 },
     });
     assert.equal((await eventLog.read(task.id))[0].waitKind, 'github_issue');
+  });
+
+  it('delivers a final same-poll comment together with the closed issue state', async () => {
+    const taskStore = new TaskStore();
+    const messageStore = new MessageStore();
+    const waitEventLog = new MemoryWaitLifecycleEventLog();
+    const task = await taskStore.create({
+      kind: 'issue_tracking',
+      subjectKey: 'issue:owner/repo#17',
+      threadId: 'thread_issue_final_comment',
+      title: 'Issue tracking: owner/repo#17',
+      ownerCatId: 'codex-sol',
+      why: 'deliver the final comment before tracking terminates',
+      createdBy: 'codex-sol',
+      userId: 'user_1',
+      automationState: issueAwaitState(),
+    });
+    const lifecycle = new GitHubWaitLifecycleService({
+      taskStore,
+      deliveryDeps: { messageStore },
+      eventLog: waitEventLog,
+      now: () => 500,
+      log: { info() {}, warn() {}, error() {} },
+    });
+    const triggered = [];
+    const spec = createIssueCommentTaskSpec({
+      taskStore,
+      issueCommentRouter: { route: async () => ({ kind: 'skipped', reason: 'legacy path unused' }) },
+      waitLifecycle: lifecycle,
+      fetchComments: async () => [
+        {
+          id: 42,
+          author: 'issue-author',
+          body: 'One last important detail.',
+          createdAt: '2026-09-08T00:00:00Z',
+        },
+      ],
+      fetchIssueState: async () => 'closed',
+      eventLog: {
+        append: async () => ({ appended: true, sequence: 1 }),
+      },
+      invokeTrigger: {
+        trigger: async (_threadId, _catId, _userId, content) => {
+          triggered.push(content);
+          return 'dispatched';
+        },
+      },
+      log: { info() {}, warn() {}, error() {} },
+    });
+
+    const gate = await spec.admission.gate();
+    assert.equal(gate.run, true);
+    assert.equal(gate.workItems.length, 1);
+    await spec.run.execute(gate.workItems[0].signal, gate.workItems[0].subjectKey, {});
+
+    assert.equal(triggered.length, 1);
+    assert.match(triggered[0], /Issue state: closed/);
+    assert.match(triggered[0], /issue comment #42 by issue-author/);
+    assert.equal((await taskStore.get(task.id)).status, 'done');
+    assert.equal((await taskStore.get(task.id)).automationState.issue.lastDeliveredCursor, 42);
   });
 
   it('stops a collector-only issue task when the GitHub subject becomes terminal', async () => {

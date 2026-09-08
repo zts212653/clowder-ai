@@ -243,30 +243,33 @@ export class GitHubWaitLifecycleService {
       // advance the clock would retire an open turn that nobody reported — the A28 signal
       // would be deleted between two polls instead of delivered.
       const turnClock = input.events ? { now: at } : undefined;
+      const eventMatches = input.events
+        ? matchGitHubTrackingEvents(active.continuation.when, active.baseline, input.events, {
+            ...turnClock,
+            audience: {
+              ...(this.opts.selfGitHubLogin?.() ? { selfLogin: this.opts.selfGitHubLogin() } : {}),
+              ...('prAuthorLogin' in active.baseline && active.baseline.prAuthorLogin
+                ? { prAuthorLogin: active.baseline.prAuthorLogin }
+                : {}),
+            },
+          })
+        : [];
+      const typedPredicates = input.events
+        ? active.continuation.when.filter((predicate) => !GITHUB_TRACKING_EVENT_KINDS.has(predicate.kind))
+        : active.continuation.when;
+      const matched = [...eventMatches, ...matchGitHubWaitPredicates(typedPredicates, active.baseline, input.facts)];
       let transition: WaitTransitionEvent;
       if (input.subjectState) {
+        // Terminal truth ends the wait, but it must not erase events collected in the same
+        // observation. The terminal outcome is the last delivery opportunity for those events.
         transition = {
           type: 'subject_terminal',
           generation: active.generation,
           at,
           subjectState: input.subjectState,
+          matched,
         };
       } else {
-        const eventMatches = input.events
-          ? matchGitHubTrackingEvents(active.continuation.when, active.baseline, input.events, {
-              ...turnClock,
-              audience: {
-                ...(this.opts.selfGitHubLogin?.() ? { selfLogin: this.opts.selfGitHubLogin() } : {}),
-                ...('prAuthorLogin' in active.baseline && active.baseline.prAuthorLogin
-                  ? { prAuthorLogin: active.baseline.prAuthorLogin }
-                  : {}),
-              },
-            })
-          : [];
-        const typedPredicates = input.events
-          ? active.continuation.when.filter((predicate) => !GITHUB_TRACKING_EVENT_KINDS.has(predicate.kind))
-          : active.continuation.when;
-        const matched = [...eventMatches, ...matchGitHubWaitPredicates(typedPredicates, active.baseline, input.facts)];
         // #1392 AC-2: no deadline (expiresAt undefined) ⇒ never time-out; stay pending until a match.
         if (matched.length === 0 && (active.expiresAt === undefined || at < active.expiresAt)) {
           const advancedState = {
