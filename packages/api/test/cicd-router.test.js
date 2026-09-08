@@ -86,7 +86,7 @@ function poll(overrides = {}) {
 }
 
 describe('CiCdRouter F280 typed waits', () => {
-  test('requires a same-HEAD empty rollup to stay empty for one poll interval before passing', async () => {
+  test('keeps an empty rollup pending even after repeated same-HEAD polls', async () => {
     let now = 1_000;
     const projected = [];
     const { router, taskStore, task } = await setup([{ kind: 'pr_ci_terminal' }], {
@@ -111,11 +111,16 @@ describe('CiCdRouter F280 typed waits', () => {
 
     now = 61_000;
     const settled = await router.route(empty);
-    assert.equal(settled.kind, 'notified');
-    assert.equal(projected.at(-1).aggregateBucket, 'pass');
+    assert.equal(settled.kind, 'skipped');
+    assert.equal(projected.at(-1).aggregateBucket, 'pending');
+    assert.equal(
+      (await taskStore.get(task.id)).automationState.ci.lastBucket,
+      'pending',
+      'zero statuses/check-runs are absence of CI evidence, never a terminal pass',
+    );
   });
 
-  test('a non-empty observation resets the empty-rollup stability window', async () => {
+  test('a non-empty observation starts a new empty diagnostic streak', async () => {
     let now = 1_000;
     const projected = [];
     const { router, taskStore, task } = await setup([{ kind: 'pr_ci_terminal' }], {

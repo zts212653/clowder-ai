@@ -110,15 +110,15 @@ export interface CiCdRouterOptions {
   readonly now?: () => number;
 }
 
-export const EMPTY_ROLLUP_STABILITY_MS = 60_000;
-
 type RollupObservation = NonNullable<CiAutomationState['rollupObservation']>;
 
 /**
  * GitHub reports [] both when a repository has no checks and during the brief
- * window before checks appear for a fresh HEAD. Require the exact same HEAD to
- * remain empty for a full poll interval; any non-empty observation resets the
- * streak. The observation is persisted with the PR tracking collector state.
+ * window before checks appear for a fresh HEAD. Neither case is evidence that CI
+ * passed: an empty set has no successful check to support a terminal verdict.
+ * Keep it pending until GitHub returns a non-empty rollup. The observation is
+ * still persisted per exact HEAD so diagnostics can distinguish a fresh gap from
+ * a repository that has remained without check evidence.
  */
 export function settleEmptyCheckRollup(
   poll: CiPollResult,
@@ -134,9 +134,8 @@ export function settleEmptyCheckRollup(
 
   const streakStartedAt =
     previous?.headSha === poll.headSha && previous.state === 'empty' ? previous.streakStartedAt : now;
-  const aggregateBucket = now - streakStartedAt >= EMPTY_ROLLUP_STABILITY_MS ? 'pass' : 'pending';
   return {
-    poll: { ...poll, aggregateBucket },
+    poll: { ...poll, aggregateBucket: 'pending' },
     observation: { headSha: poll.headSha, state: 'empty', streakStartedAt },
   };
 }

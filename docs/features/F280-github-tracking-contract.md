@@ -89,7 +89,7 @@ register_issue_tracking(repoFullName, issueNumber)
 | `conversation_comment` | ✅ | PR 顶层评论 |
 | `inline_comment` | ✅ | 代码行内 review 评论 |
 | `bot_interaction` | 按角色 | 一个 bot 交互回合（见 §2.4b）。作者默认 ✅，非作者默认 ❌ |
-| `ci_terminal` | ✅ | CI 通过 / 失败 |
+| `ci_terminal` | ✅ | CI 通过 / 失败。**至少一条当前 HEAD 的 check/status 才构成证据**；空 rollup 永远是 pending，不把 `0 blockers` 当成通过 |
 | `conflict` | ✅ | PR 变为冲突 |
 | `base_behind` | ✅ | base 分支有新提交（**仅通知**，见 §7） |
 | `head_changed` | ❌ | 作者推了新 commit。#1392：**只对 maintainer 视角有用**，需 `include` |
@@ -412,6 +412,7 @@ baseline: snapshot.baseline,        // 当前最大值
 | A30 | **非作者**注册：第三方（既非作者也非自己）发评论 | **不通知** | maintainer 被无关的人刷屏，他等的是作者回应 |
 | A31 | issue **closed** | 通知并终止 | 只终止不通知，或终止后仍空转 |
 | A32 | 非作者注册：**别的 maintainer** 提交 formal review | 通知 | 静音了同行的决策 |
+| A33 | 当前 HEAD 的 statuses / check-runs 都为空，跨过多个轮询周期 | 保持 pending，不通知 CI 通过 | 把空集合写成 `pass (0 blockers)` |
 
 **A3 / A6 / A17 是历史事故的直接复现，必须有独立测试。**
 **A22 是"静默丢真信号"，优先级高于任何降噪诉求。**
