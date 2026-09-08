@@ -767,10 +767,7 @@ describe('ReviewFeedbackTaskSpec: safe cursor on projection failure (R4-P1-B)', 
     }
   });
 
-  it('tracking does not hide a GitHub response when community projection fails', async () => {
-    // Tracking and community projection have independent frontiers. A projection
-    // failure keeps the community cursor retryable, but must not remove the GitHub
-    // response from the tracking event stream.
+  it('routes only the durably processed review prefix when community projection fails', async () => {
     assert.ok(createReviewFeedbackTaskSpec);
 
     const routerCalls = [];
@@ -824,10 +821,108 @@ describe('ReviewFeedbackTaskSpec: safe cursor on projection failure (R4-P1-B)', 
     // Gate should run (review 902 is deliverable)
     assert.ok(gate.run, 'gate should run — review 902 succeeded');
 
-    // Both upstream responses remain visible to tracking.
+    // Only the prefix that reached durable history may enter the tracking lifecycle.
+    // The failed tail stays behind the source cursor and will be retried.
     const deliveredReviewIds = gate.workItems.flatMap((wi) => wi.signal.newDecisions.map((d) => d.id));
     assert.ok(deliveredReviewIds.includes(902), 'review 902 must be delivered (succeeded)');
-    assert.ok(deliveredReviewIds.includes(903), 'review 903 must remain visible to tracking');
+    assert.ok(!deliveredReviewIds.includes(903), 'review 903 must stay out of delivery until persistence succeeds');
+  });
+
+  it('keeps self-authored feedback inside the durably processed comment prefix', async () => {
+    assert.ok(createReviewFeedbackTaskSpec);
+
+    const comments = [
+      {
+        id: 10,
+        author: 'tracking-owner',
+        body: '@codex review',
+        createdAt: '2026-01-01T00:00:00Z',
+        commentType: 'conversation',
+      },
+      {
+        id: 11,
+        author: 'external-reviewer',
+        body: 'not persisted yet',
+        createdAt: '2026-01-01T01:00:00Z',
+        commentType: 'conversation',
+      },
+    ];
+    const eventLog = {
+      async read() {
+        return [];
+      },
+      async append(event) {
+        if (event.payload?.commentId === 11) throw new Error('temporary append failure');
+        return { appended: true };
+      },
+    };
+    const spec = createReviewFeedbackTaskSpec({
+      id: 'durable-self-comment-prefix',
+      taskStore: makeTaskStore(makeActivePrWaitTask()),
+      reviewFeedbackRouter: makeRouter(),
+      fetchPrMetadata: async () => ({ headSha: 'head-0', prState: 'open' }),
+      fetchComments: async () => comments,
+      fetchReviews: async () => [],
+      eventLog,
+      isEchoComment: (comment) => comment.author === 'tracking-owner',
+      log,
+    });
+
+    const gate = await runGate(spec);
+    assert.equal(gate.run, true);
+    assert.deepEqual(
+      gate.workItems[0].signal.newComments.map((comment) => comment.id),
+      [10],
+      'self-authored items stay in the safe prefix, while the failed tail stays retryable',
+    );
+  });
+
+  it('holds PR terminalization until final feedback reaches durable history', async () => {
+    assert.ok(createReviewFeedbackTaskSpec);
+
+    let persistenceAvailable = false;
+    const finalComment = {
+      id: 42,
+      author: 'external-reviewer',
+      body: 'final note before close',
+      createdAt: '2026-01-01T00:00:00Z',
+      commentType: 'conversation',
+    };
+    const eventLog = {
+      async read() {
+        return [];
+      },
+      async append(event) {
+        if (event.payload?.commentId === 42 && !persistenceAvailable) {
+          throw new Error('temporary append failure');
+        }
+        return { appended: true };
+      },
+    };
+    const spec = createReviewFeedbackTaskSpec({
+      id: 'terminal-waits-for-durable-feedback',
+      taskStore: makeTaskStore(makeActivePrWaitTask()),
+      reviewFeedbackRouter: makeRouter(),
+      fetchPrMetadata: async () => ({ headSha: 'head-0', prState: 'closed' }),
+      fetchComments: async () => [finalComment],
+      fetchReviews: async () => [],
+      eventLog,
+      log,
+    });
+
+    const blocked = await runGate(spec);
+    assert.equal(blocked.run, true);
+    assert.equal(blocked.workItems[0].signal.subjectState, undefined, 'failed feedback must postpone terminalization');
+    assert.deepEqual(blocked.workItems[0].signal.newComments, []);
+
+    persistenceAvailable = true;
+    const recovered = await runGate(spec);
+    assert.equal(recovered.run, true);
+    assert.equal(recovered.workItems[0].signal.subjectState, 'closed');
+    assert.deepEqual(
+      recovered.workItems[0].signal.newComments.map((comment) => comment.id),
+      [42],
+    );
   });
 });
 

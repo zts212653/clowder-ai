@@ -4,9 +4,9 @@ related_features: [F140, F168, F1392]
 topics: [github, pr-tracking, issue-tracking, notifications, wait-contract]
 doc_kind: spec
 created: 2026-09-02
-updated: 2026-09-07
+updated: 2026-09-08
 tips_exempt:
-  reason: Contract corrections only — this revision narrows the yardstick back to #1392 (issue closed terminates; head_changed stays default-off) and adds no capability a user could discover or act on.
+  reason: Contract truth correction only — feedback delivery is bounded by durable source prefixes, and base-behind notifications require same-HEAD causality; no user-facing capability or registration surface changes.
 ---
 
 # GitHub Tracking — 用户契约（#1392 / #1394 唯一真相源）
@@ -91,7 +91,7 @@ register_issue_tracking(repoFullName, issueNumber)
 | `bot_interaction` | 按角色 | 一个 bot 交互回合（见 §2.4b）。作者默认 ✅，非作者默认 ❌ |
 | `ci_terminal` | ✅ | CI 通过 / 失败。**至少一条当前 HEAD 的 check/status 才构成证据**；空 rollup 永远是 pending，不把 `0 blockers` 当成通过 |
 | `conflict` | ✅ | PR 变为冲突 |
-| `base_behind` | ✅ | base 分支有新提交（**仅通知**，见 §7） |
+| `base_behind` | ✅ | 同一个 HEAD 从已追上变为落后，证明 base 分支有新提交（**仅通知**，见 §7） |
 | `head_changed` | ❌ | 作者推了新 commit。#1392：**只对 maintainer 视角有用**，需 `include` |
 
 > **为什么它必须默认关，而不是"默认开 + 自过滤兜住"。**
@@ -105,6 +105,8 @@ register_issue_tracking(repoFullName, issueNumber)
 返回的 `behind_by`：大于 0 写入 true，等于 0 写入 false。`mergeStateStatus` 只表示
 合并就绪度，不能兼任祖先关系：`DIRTY` 可能仍然落后，`BLOCKED` / `UNSTABLE`
 也可能已经追上。compare 不可用时本轮采集失败并重试，不得从该枚举猜测。
+通知还要求前后是**同一个 HEAD**：换入一个本来就基于旧 base 的新 HEAD，会把它的
+`isBehind: true` 写进下一轮基线，但不能渲染成“base branch advanced”。
 
 **默认监听全部两侧都同意的事件**；`include` 用来打开**对当前角色默认关闭**的事件，
 `exclude` 用来关掉不想要的。两者传入未知名字 → **报错**，不静默忽略。
@@ -288,6 +290,9 @@ A26 已经写明，静音一条真信号比多一条噪音严重得多。
 - **没有 `expiresAt`，永不过期**
 - 结束条件：PR merged / PR closed / **issue closed** → 通知并终止；或显式 `unregister_tracking`。
   issue 被 reopen 时重新注册即可（§2.3）
+- PR 与 issue 的终态都不得越过反馈持久化：每个评论 / review 来源只把成功进入 durable
+  history 的前缀交给 lifecycle；任一来源仍有失败尾部时，merged / closed 暂缓，下一轮
+  从未推进的来源游标重试，完整后再把最后反馈与终态合并投递。
 - 每次通知投递到**注册时所在的那个 thread**
 
 ### 2.5b 重复注册不得前进游标
@@ -428,6 +433,8 @@ baseline: snapshot.baseline,        // 当前最大值
 | A33 | 当前 HEAD 的 statuses / check-runs 都为空，跨过多个轮询周期 | 保持 pending，不通知 CI 通过 | 把空集合写成 `pass (0 blockers)` |
 | A34 | issue 最后一批评论只持久化成功一部分，同时 closed | 不投递未持久化评论、不终止；下一轮重试完整后再终态通知 | 终态携带失败评论并把任务做完，永久跳过修复 |
 | A35 | merge readiness 为 `DIRTY` 但 compare `behind_by > 0`；或 readiness 为 `BLOCKED` 但 `behind_by = 0` | 前者通知 behind，后者清除 behind 基线；之后再次落后仍可通知 | 用互斥 merge-readiness 枚举猜祖先关系，造成重复通知或静默漏报 |
+| A36 | PR 评论 / review 只持久化成功一个来源前缀 | 只投递成功前缀（含 owner 自己的回合事实），失败尾部不推进游标并重试 | 投递与 baseline 越过 durable history；终态到达后反馈永久丢失 |
+| A37 | 换入一个本来就落后 base 的新 HEAD | 记录新 HEAD 的 behind 基线，但不通知“base branch advanced” | 把作者 push 冒充成 base 推进，发出错误因果通知 |
 
 **A3 / A6 / A17 是历史事故的直接复现，必须有独立测试。**
 **A22 是"静默丢真信号"，优先级高于任何降噪诉求。**
@@ -441,12 +448,13 @@ baseline: snapshot.baseline,        // 当前最大值
 | 归一化（回合识别：mention + 已知 bot 身份） | A23 A24 A25 A26 A29 — bot 回合是**改事件的名字**，不是加一路事件 |
 | 归一化（回合状态：开 / 闭 / 超时未闭） | A28 A29 — 仅 review-feedback 观察拥有回合时钟；CI / conflict 即使携带 events 也不得消费。回合随 frontier 同批推进，报了必然同时退休 |
 | 订阅过滤 | A1 A19 A20 A23 A24 A25 A27 |
-| 已见过滤（per-source frontier） | A12 A14 A16 |
+| 已见过滤（per-source frontier + durable prefix） | A12 A14 A16 **A36** |
 | 受众过滤（唯一一处，只挡投递） | A6 A7 A8 A9 A10 A11 A26 **A30 A32** — 自己写的仍进流：它要开回合、要推 frontier。角色决定"这个作者的话我要不要听" |
 | 投递到注册 thread | A21 |
 | 推进 frontier | A13 A14 |
-| 终态短路 | A18 **A31 A34** — PR merged/closed 与 issue closed 走同一条终态短路；issue 评论必须先完整持久化 |
-| 状态事实缺席 | **A35** — `UNKNOWN` 不覆盖最后一次可信的 base baseline |
+| 终态门 | A18 **A31 A34 A36** — PR merged/closed 与 issue closed 只有在各反馈来源到达 durable frontier 后才终止 |
+| 状态事实采集 | **A35** — compare 祖先关系独立于 merge readiness |
+| 状态因果过滤 | **A37** — `base_behind` 只认同一个 HEAD 的 false→true；换 HEAD 只更新下一轮基线 |
 | 注册时的基线安装（不得前进） | A22 |
 | **链子里没有的东西** | A15（无 `headSha` 门）· A17（追踪本身无期限）· A10（无正文判断）· A6（bot 不是噪音身份） |
 

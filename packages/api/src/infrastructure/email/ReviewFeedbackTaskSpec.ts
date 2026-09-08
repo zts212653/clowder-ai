@@ -406,40 +406,8 @@ export function createReviewFeedbackTaskSpec(opts: ReviewFeedbackTaskSpecOptions
             if (!trackingSubjectKey) continue;
 
             const prMetadata = opts.fetchPrMetadata ? await opts.fetchPrMetadata(repoFullName, prNumber) : null;
-            if (prMetadata?.prState === 'merged' || prMetadata?.prState === 'closed') {
-              opts.log.info(`[review-feedback] PR ${prKey} ${prMetadata.prState} — routing typed terminal lifecycle`);
-              await projectReviewFeedbackTerminalEffects({
-                opts,
-                task: trackingTask,
-                subjectKey: trackingSubjectKey,
-                repoFullName,
-                prNumber,
-                terminalState: prMetadata.prState,
-                prTitle: prMetadata.prTitle,
-              });
-              const reviewState = trackingTask.automationState?.review;
-              const legacyCommentCursor = reviewState?.lastCommentCursor ?? 0;
-              workItems.push({
-                signal: {
-                  repairedTask: trackingTask,
-                  repoFullName,
-                  prNumber,
-                  routingAudit: repairResult.routingAudit,
-                  newComments: [],
-                  newDecisions: [],
-                  headSha: prMetadata.headSha,
-                  inlineCommentCursor: reviewState?.lastInlineCommentCursor ?? legacyCommentCursor,
-                  conversationCommentCursor: reviewState?.lastConversationCommentCursor ?? legacyCommentCursor,
-                  decisionCursor: reviewState?.lastDecisionCursor ?? 0,
-                  subjectState: prMetadata.prState,
-                  validateRoutingRepairFresh: repairResult.validateRoutingRepairFresh,
-                  commitRoutingRepair: repairResult.commitRoutingRepair,
-                  commitCursor: async () => {},
-                },
-                subjectKey: trackingSubjectKey,
-              });
-              continue;
-            }
+            const terminalState =
+              prMetadata?.prState === 'merged' || prMetadata?.prState === 'closed' ? prMetadata.prState : undefined;
 
             // Schema v2: each comments endpoint owns its cursor. A task with only the
             // legacy combined cursor replays each source from zero. That backfill is
@@ -512,19 +480,18 @@ export function createReviewFeedbackTaskSpec(opts: ReviewFeedbackTaskSpecOptions
             );
             const freshNewReviews = allNewReviews.filter((r) => !isStaleCommitFeedback(r, prMetadata?.headSha));
 
-            // F168 Phase B (R3-P1, R4-P1-A/B, R5-P1/P2): append ALL fresh activity plus
-            // legacy migration backfill to the event log BEFORE delivery filtering. Stale
-            // current-HEAD feedback stays non-deliverable, while migration history still
-            // keeps the durable truth/provenance required by the schema transition.
+            // F168 Phase B (R3-P1, R4-P1-A/B, R5-P1/P2): append all current-HEAD activity plus
+            // legacy migration backfill to the event log BEFORE delivery filtering. Feedback
+            // written against an older HEAD stays outside community projection, but tracking
+            // still delivers it with an explicit stale-HEAD label; its source cursor advances.
             //
             // Safe cursor tracking (R4-P1-B): track max ID of successfully processed items.
             // Break on first append/projector failure so cursor stays before the failing item,
             // ensuring it is retried on the next poll (never permanently lost).
             //
-            // Repair path (R5-P1, matches GitHubRepoWebhookHandler.ts:469): when appended=false
-            // (prior round: append succeeded but projector threw), call projector.apply best-effort
-            // so the projection is repaired. Event log is source of truth; projector is eventual
-            // consistency — a failed repair is swallowed; the projection rebuilds from the log.
+            // Temporal ordering (Cloud R8 P1): appended=false means the event already has a
+            // position in the log. Do not apply it out of order from this poller; reconciliation
+            // rebuilds eventual projections from the event-log truth.
             //
             // sourceEventId alignment (R4-P1-A): reviews use `review:{repo}#{pr}:{id}` to match
             // the webhook handler (GitHubRepoWebhookHandler.ts:445). Comments use `prcomment:...`
@@ -621,11 +588,10 @@ export function createReviewFeedbackTaskSpec(opts: ReviewFeedbackTaskSpecOptions
                   break;
                 }
               }
-              // Cloud R16 P2: advance cursor past stale items (those filtered by isStaleCommitFeedback).
-              // Staleness is a delivery policy filter — a comment on an old commit is recognized and
-              // deliberately not delivered, but it must still advance the cursor. Without this, when
-              // ALL new comments are stale, the source cursor otherwise stays unchanged and advanceCursor
-              // is called with the same value → cursor never moves → infinite polling churn.
+              // Cloud R16 P2: advance cursor past stale items (those filtered from community
+              // projection by isStaleCommitFeedback). Tracking still delivers them with a stale-HEAD
+              // label, but without this accounting an all-stale batch leaves the source cursor
+              // unchanged and replays forever.
               //
               // Cloud R18 P1: gate stale advancement by the fresh-loop break boundary. If the fresh
               // loop broke at id=X (append/projector failure), stale items with id >= X must NOT
@@ -648,24 +614,11 @@ export function createReviewFeedbackTaskSpec(opts: ReviewFeedbackTaskSpecOptions
               }
             }
 
-            // Tracking carries the WHOLE stream. Self-authored items are not dropped here:
-            // they advance frontiers and they open bot turns (F280 A28, "asked the bot and
-            // heard nothing"). The chain's single identity row decides who gets woken —
-            // community/noise classification, current HEAD, actor type and prose never do.
-            const newComments = allNewComments.filter((comment) => !isCommentMigrationBackfill(comment));
-            const newDecisions = allNewReviews;
-
-            const reviewLoopBrake = await resolveReviewLoopBrake({
-              opts,
-              repoFullName,
-              prNumber,
-              prAuthorLogin: prMetadata?.authorLogin,
-              newDecisions,
-            });
-
             // R4-P1-B: when eventLog is configured, cap cursor advancement at the last
             // successfully projected item (maxSafeXxxCursor). Items beyond a projection
-            // failure are excluded, ensuring they are retried on the next poll.
+            // failure are excluded from BOTH delivery and cursor advancement, ensuring they
+            // are retried on the next poll. Advancing only the cursor while routing the whole
+            // fetched batch let lifecycle state outrun durable history.
             // Without eventLog, fall back to the original all-new-items max (no change).
             const maxInlineCommentId =
               opts.eventLog && trackingTask.subjectKey
@@ -690,11 +643,43 @@ export function createReviewFeedbackTaskSpec(opts: ReviewFeedbackTaskSpecOptions
               (maxInlineCommentId < commentCursorMigrationTargets.inline ||
                 maxConversationCommentId < commentCursorMigrationTargets.conversation);
 
+            // Tracking carries the whole DURABLE source prefix. Self-authored items are not
+            // dropped: they advance frontiers and open bot turns (F280 A28, "asked the bot and
+            // heard nothing"). Only append/projection failures bound the per-source prefix;
+            // the chain's identity row still decides who gets woken.
+            const newComments = allNewComments.filter(
+              (comment) =>
+                !isCommentMigrationBackfill(comment) &&
+                (comment.commentType === 'inline'
+                  ? comment.id <= maxInlineCommentId
+                  : comment.id <= maxConversationCommentId),
+            );
+            const newDecisions = allNewReviews.filter((review) => review.id <= maxReviewId);
+            const reviewFrontier =
+              allNewReviews.length > 0 ? Math.max(...allNewReviews.map((review) => review.id)) : reviewCursor;
+            const feedbackCollectionComplete =
+              !commentCursorMigrationPending &&
+              maxInlineCommentId >= inlineCommentFrontier &&
+              maxConversationCommentId >= conversationCommentFrontier &&
+              maxReviewId >= reviewFrontier;
+            // A terminal lifecycle is allowed to end the task only after every feedback source
+            // reached its observed frontier. Otherwise a same-poll append failure would mark the
+            // task done and make the missing final feedback impossible to repair.
+            const deliverTerminal = terminalState !== undefined && feedbackCollectionComplete;
+
+            const reviewLoopBrake = await resolveReviewLoopBrake({
+              opts,
+              repoFullName,
+              prNumber,
+              prAuthorLogin: prMetadata?.authorLogin,
+              newDecisions,
+            });
+
             const hadNewItems = allNewComments.length > 0 || allNewReviews.length > 0;
             const activeAwait = trackingTask.automationState?.await;
             const activePrBaseline =
               activeAwait && 'headSha' in activeAwait.baseline ? activeAwait.baseline : undefined;
-            if (!activeAwait && !repairResult.routingAudit) {
+            if (!activeAwait && !repairResult.routingAudit && !deliverTerminal) {
               if (hadNewItems || commentCursorMigrationActive) {
                 await advanceCursor(
                   trackingTask.id,
@@ -714,6 +699,19 @@ export function createReviewFeedbackTaskSpec(opts: ReviewFeedbackTaskSpecOptions
                 );
               }
               continue;
+            }
+
+            if (deliverTerminal) {
+              opts.log.info(`[review-feedback] PR ${prKey} ${terminalState} — routing typed terminal lifecycle`);
+              await projectReviewFeedbackTerminalEffects({
+                opts,
+                task: trackingTask,
+                subjectKey: trackingSubjectKey,
+                repoFullName,
+                prNumber,
+                terminalState,
+                prTitle: prMetadata?.prTitle,
+              });
             }
 
             // F168: report cloud-review readiness from the same normalized facts that drive the
@@ -766,6 +764,7 @@ export function createReviewFeedbackTaskSpec(opts: ReviewFeedbackTaskSpecOptions
                 inlineCommentCursor: maxInlineCommentId,
                 conversationCommentCursor: maxConversationCommentId,
                 decisionCursor: maxReviewId,
+                ...(deliverTerminal ? { subjectState: terminalState } : {}),
                 ...(reviewLoopBrake ? { reviewLoopBrake } : {}),
                 validateRoutingRepairFresh: repairResult.validateRoutingRepairFresh,
                 commitRoutingRepair: repairResult.commitRoutingRepair,

@@ -281,7 +281,7 @@ describe('#1394 GitHub tracking main flow', () => {
     assert.match(messages[1].content, /Second inline response/);
   });
 
-  test('a community projection failure neither hides nor repeats an external review', async () => {
+  test('a community history failure delivers only the safe prefix, then retries the tail once', async () => {
     const reviews = [
       {
         id: 31,
@@ -303,7 +303,7 @@ describe('#1394 GitHub tracking main flow', () => {
       async append(event) {
         if (event.sourceEventId.endsWith(':32') && failSecondOnce) {
           failSecondOnce = false;
-          throw new Error('community projection unavailable');
+          throw new Error('community event log unavailable');
         }
         return { appended: true };
       },
@@ -317,9 +317,11 @@ describe('#1394 GitHub tracking main flow', () => {
     await runOnePoll(spec);
 
     const messages = messageStore.getByThread('thread-registration');
-    assert.equal(messages.length, 1);
+    assert.equal(messages.length, 2);
     assert.match(messages[0].content, /First review in the batch/);
-    assert.match(messages[0].content, /Second review in the batch/);
+    assert.doesNotMatch(messages[0].content, /Second review in the batch/);
+    assert.doesNotMatch(messages[1].content, /First review in the batch/);
+    assert.match(messages[1].content, /Second review in the batch/);
     assert.equal((await taskStore.get(task.id)).automationState.review.lastDecisionCursor, 32);
   });
 

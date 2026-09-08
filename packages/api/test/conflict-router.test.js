@@ -199,4 +199,24 @@ describe('ConflictRouter F280 typed waits', () => {
     assert.equal(behindAgain.kind, 'notified', 'a real caught-up transition must permit a later behind wake');
     assert.equal(messageStore.getByThread('thread_1').length, 1);
   });
+
+  test('a replacement HEAD that is already behind does not impersonate a base-advance event', async () => {
+    const { router, taskStore, task, messageStore } = await setup([{ kind: 'pr_base_behind' }], {
+      base: { isBehind: false },
+    });
+
+    const replaced = await router.route({
+      repoFullName: 'owner/repo',
+      prNumber: 7,
+      headSha: 'bbb2222',
+      mergeState: 'MERGEABLE',
+      mergeStateStatus: 'BEHIND',
+      isBehind: true,
+    });
+    assert.equal(replaced.kind, 'skipped');
+    assert.equal(messageStore.getByThread('thread_1').length, 0);
+    const baseline = (await taskStore.get(task.id)).automationState.await.baseline;
+    assert.equal(baseline.headSha, 'bbb2222');
+    assert.equal(baseline.base.isBehind, true, 'the new HEAD ancestry is still retained as the next baseline');
+  });
 });

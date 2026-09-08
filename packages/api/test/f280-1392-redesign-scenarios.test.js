@@ -163,6 +163,14 @@ describe('F280 #1392 redesign — converged contract', () => {
       assert.equal(matchGitHubWaitPredicates(when, baseline, facts).length, 0);
     });
 
+    it('does not call a replacement HEAD a base-branch advance', async () => {
+      const { matchGitHubWaitPredicates } = await import(CATALOG_URL.href);
+      const baseline = { capturedAt: 100, headSha: 'old-head', base: { isBehind: false } };
+      const facts = { headSha: 'new-head', base: { isBehind: true } };
+      const when = [{ kind: 'pr_base_behind' }];
+      assert.equal(matchGitHubWaitPredicates(when, baseline, facts).length, 0);
+    });
+
     it('schema accepts pr_base_behind', async () => {
       const { canonicalizeGitHubWaitPredicates } = await import(CATALOG_URL.href);
       const parsed = canonicalizeGitHubWaitPredicates([{ kind: 'pr_base_behind' }]);

@@ -400,6 +400,10 @@ export function matchGitHubTrackingEvents(
   const matches = events.flatMap((event) => {
     const allowlists = subscribed.get(event.type);
     if (!allowlists) return [];
+    // `pr_base_behind` means the BASE moved relative to the same PR head. A replacement
+    // head may itself be based on an older base; retaining that fact in the renewed
+    // baseline is correct, but announcing it as "base branch advanced" is not.
+    if (event.type === 'pr_base_behind' && 'headSha' in baseline && head !== baseline.headSha) return [];
     if (!isAfterFrontier(event.id, sourceFrontier(baseline, event.source))) return [];
     if (!allowlists.some((allowlist) => passesAudience(event, allowlist, options?.audience))) return [];
     return [

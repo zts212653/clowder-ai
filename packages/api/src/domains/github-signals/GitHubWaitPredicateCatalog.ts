@@ -300,12 +300,14 @@ export function matchGitHubWaitPredicates(
       }
       case 'pr_base_behind': {
         if (!('headSha' in baseline) || !current.headSha) break;
-        // #1392: fire on transition into behind-base (mirrors conflict). The
-        // poller resolves it via an update-branch action; if it falls behind
-        // again later, this fires again.
+        // #1392: fire on a same-HEAD transition into behind-base (mirrors
+        // conflict). A changed HEAD can itself be based on an older base; that
+        // ancestry belongs in the renewed baseline, but it does not prove the
+        // base branch advanced. If the same HEAD falls behind again later,
+        // this fires again.
         const before = baseline.base;
         const after = current.base;
-        if (before && after && !before.isBehind && after.isBehind) {
+        if (before && after && current.headSha === baseline.headSha && !before.isBehind && after.isBehind) {
           matches.push({
             kind: predicate.kind,
             delta: 'base branch advanced → PR is behind base',
