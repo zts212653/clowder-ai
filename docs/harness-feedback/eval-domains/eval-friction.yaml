@@ -4,13 +4,14 @@ displayName: Friction Signal Eval
 descriptionForHuman: 工具/流程让猫难受没——哪个工具老报错、哪个流程老卡壳
 metricGlossaryRef: eval-friction.metrics.yaml
 systemThreadId: thread_eval_friction
-# evalCat: F245 owner default — gpt52 (Maine Coon GPT-5.4) for cost (codex is ~2x) +
-# cross-family separation (Ragdoll authors/owns F245 → Maine Coon evaluates the friction
-# its own family reports). Adjustable config — flagged for review/operator.
+# evalCat: cross-family separation (Ragdoll authors/owns F245 → Maine Coon evaluates).
+# Was gpt52 (GPT-5.4, retired) → codex (notRoutable, R1 review catch) → gpt55.
+# gpt55 routable evidence: cat_cafe_get_thread_cats live check 2026-08-29.
+# Migration: 2026-08-29, fix/eval-domain-gpt52-to-codex.
 evalCat:
-  catId: gpt52
-  handle: "@gpt52"
-  model: gpt-5.4
+  catId: gpt55
+  handle: "@gpt55"
+  model: gpt-5.5
 # F245 PR2: 本家 3-day cadence — N-day infra landed.
 # Community default remains `weekly` in community eval-domains/ copies.
 frequency: every-3d
