@@ -88,7 +88,7 @@ export interface GitHubScheduleDeps extends ScheduleFactoryDeps {
   checkMergeable: (
     repo: string,
     pr: number,
-  ) => Promise<{ mergeState: string; mergeStateStatus?: string; headSha: string }>;
+  ) => Promise<{ mergeState: string; mergeStateStatus?: string; headSha: string; isBehind: boolean }>;
   autoExecutor: ConflictAutoExecutor;
   fetchPrMetadata: (repo: string, pr: number) => Promise<ReviewFeedbackPrMetadata | null>;
   fetchComments: (repo: string, pr: number, cursors: PrFeedbackCommentCursors) => Promise<PrFeedbackComment[]>;

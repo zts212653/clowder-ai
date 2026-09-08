@@ -687,7 +687,7 @@ describe('F280 — the delivered outcome owns the route shape', () => {
       taskStore,
       conflictRouter,
       invokeTrigger,
-      checkMergeable: async () => ({ mergeState: 'CONFLICTING', headSha: 'aaaa1111' }),
+      checkMergeable: async () => ({ mergeState: 'CONFLICTING', headSha: 'aaaa1111', isBehind: false }),
       log,
     });
 

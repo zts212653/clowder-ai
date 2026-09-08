@@ -107,8 +107,8 @@ export interface GitHubPrWaitBaseline {
   };
   /**
    * #1392 base_behind: whether the PR is behind its base branch at capture.
-   * Derived from GitHub mergeStateStatus === 'BEHIND'. Registration freezes it
-   * with every other source frontier, regardless of event selection.
+   * Derived from GitHub compare `behind_by`, independently of merge readiness.
+   * Registration freezes it with every other source frontier, regardless of event selection.
    */
   readonly base?: {
     readonly isBehind: boolean;

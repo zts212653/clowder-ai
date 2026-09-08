@@ -19,7 +19,7 @@ describe('conflict scheduler F280 adapter', () => {
     });
     const spec = createConflictCheckTaskSpec({
       taskStore,
-      checkMergeable: async () => ({ mergeState: 'MERGEABLE', headSha: 'aaa' }),
+      checkMergeable: async () => ({ mergeState: 'MERGEABLE', headSha: 'aaa', isBehind: false }),
       conflictRouter: { route: async () => ({ kind: 'skipped', reason: 'state-only' }) },
       log: { info() {}, warn() {}, error() {} },
     });
@@ -32,7 +32,7 @@ describe('conflict scheduler F280 adapter', () => {
     const calls = [];
     const spec = createConflictCheckTaskSpec({
       taskStore: new TaskStore(),
-      checkMergeable: async () => ({ mergeState: 'CONFLICTING', headSha: 'aaa' }),
+      checkMergeable: async () => ({ mergeState: 'CONFLICTING', headSha: 'aaa', isBehind: false }),
       conflictRouter: { route: async () => ({ kind: 'skipped', reason: 'predicates_not_matched' }) },
       invokeTrigger: { trigger: async (...args) => calls.push(args) },
       log: { info() {}, warn() {}, error() {} },
@@ -53,7 +53,7 @@ describe('conflict scheduler F280 adapter', () => {
     const calls = [];
     const spec = createConflictCheckTaskSpec({
       taskStore: new TaskStore(),
-      checkMergeable: async () => ({ mergeState: 'CONFLICTING', headSha: 'aaa' }),
+      checkMergeable: async () => ({ mergeState: 'CONFLICTING', headSha: 'aaa', isBehind: false }),
       conflictRouter: {
         route: async () => {
           controller.abort(new DOMException('scheduler timeout', 'AbortError'));
@@ -89,7 +89,7 @@ describe('conflict scheduler F280 adapter', () => {
     const calls = [];
     const spec = createConflictCheckTaskSpec({
       taskStore: new TaskStore(),
-      checkMergeable: async () => ({ mergeState: 'CONFLICTING', headSha: 'aaa' }),
+      checkMergeable: async () => ({ mergeState: 'CONFLICTING', headSha: 'aaa', isBehind: false }),
       conflictRouter: {
         route: async () => ({
           kind: 'notified',

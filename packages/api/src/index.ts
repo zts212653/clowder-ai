@@ -271,6 +271,7 @@ import {
 import { fetchLatestIssueCommentCursor } from './infrastructure/github/comment-cursors.js';
 import { buildGhCliEnv, resolveGhCliToken, withHiddenGhCliWindow } from './infrastructure/github/gh-cli-env.js';
 import { readGitHubApiResource, validateGitHubApiResource } from './infrastructure/github/github-object-validator.js';
+import { fetchPrMergeFacts } from './infrastructure/github/pr-merge-facts-fetcher.js';
 import type { EvalDomainId } from './infrastructure/harness-eval/domain/eval-domain-registry.js';
 import { EvalRepairCaseActionResolver } from './infrastructure/harness-eval/eval-repair-case-action-resolver.js';
 import type { EvalRepairOutcomeService } from './infrastructure/harness-eval/eval-repair-outcome.js';
@@ -3865,9 +3866,6 @@ async function main(): Promise<void> {
       import('./domains/github-signals/GitHubWaitBaselineReader.js'),
       import('./infrastructure/github/fetch-paginated.js'),
     ]);
-    const { execFile } = await import('node:child_process');
-    const { promisify } = await import('node:util');
-    const execFileAsync = promisify(execFile);
     return readGitHubWaitBaseline(
       { repoFullName, prNumber },
       {
@@ -3877,18 +3875,7 @@ async function main(): Promise<void> {
         fetchConversationComments: (repo, pr) =>
           fetchPaginated(`/repos/${repo}/issues/${pr}/comments`, { ghToken: getGitHubToken() }),
         fetchReviews: (repo, pr) => fetchPaginated(`/repos/${repo}/pulls/${pr}/reviews`, { ghToken: getGitHubToken() }),
-        fetchMergeState: async (repo, pr) => {
-          const { stdout } = await execFileAsync(
-            'gh',
-            ['pr', 'view', String(pr), '-R', repo, '--json', 'mergeable,mergeStateStatus'],
-            getGitHubExecOptions(15_000),
-          );
-          const data = JSON.parse(stdout) as { mergeable?: string; mergeStateStatus?: string };
-          return {
-            mergeState: data.mergeable ?? 'UNKNOWN',
-            mergeStateStatus: data.mergeStateStatus ?? 'UNKNOWN',
-          };
-        },
+        fetchMergeState: (repo, pr) => fetchPrMergeFacts(repo, pr, { ghToken: getGitHubToken() }),
         fetchAuthorLogin: fetchPrAuthorLogin,
       },
     );
@@ -6448,22 +6435,7 @@ async function main(): Promise<void> {
     });
 
     // F140: conflict-check with ConflictRouter + urgent trigger
-    const checkMergeable = async (repo: string, pr: number) => {
-      const { execFile } = await import('node:child_process');
-      const { promisify } = await import('node:util');
-      const execFileAsync = promisify(execFile);
-      const { stdout } = await execFileAsync(
-        'gh',
-        ['pr', 'view', String(pr), '-R', repo, '--json', 'mergeable,mergeStateStatus,headRefOid'],
-        getGitHubExecOptions(15_000),
-      );
-      const data = JSON.parse(stdout);
-      return {
-        mergeState: data.mergeable ?? 'UNKNOWN',
-        mergeStateStatus: data.mergeStateStatus ?? 'UNKNOWN',
-        headSha: data.headRefOid ?? '',
-      };
-    };
+    const checkMergeable = (repo: string, pr: number) => fetchPrMergeFacts(repo, pr, { ghToken: getGitHubToken() });
 
     const { ConflictAutoExecutor } = await import('./infrastructure/email/ConflictAutoExecutor.js');
     const autoExecutor = new ConflictAutoExecutor({ log: app.log });

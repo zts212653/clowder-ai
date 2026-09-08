@@ -101,9 +101,10 @@ register_issue_tracking(repoFullName, issueNumber)
 > 想给它加自过滤就得为每轮轮询额外拉一次 commit 作者，代价与收益不成比例。
 > 默认关掉，让明确想要它的 maintainer 自己 `include`，是这条事实唯一诚实的处理。
 
-`base_behind` 只接受 GitHub 的**肯定状态**。`UNKNOWN` 是一次缺失观察，不是
-`not behind`；它不得覆盖上一轮可信的 `base.isBehind`，否则 `BEHIND → UNKNOWN → BEHIND`
-会把同一段落后状态重复通知两次。
+`base_behind` 的唯一真相源是 GitHub compare API 对当前 `baseRefOid...headRefOid`
+返回的 `behind_by`：大于 0 写入 true，等于 0 写入 false。`mergeStateStatus` 只表示
+合并就绪度，不能兼任祖先关系：`DIRTY` 可能仍然落后，`BLOCKED` / `UNSTABLE`
+也可能已经追上。compare 不可用时本轮采集失败并重试，不得从该枚举猜测。
 
 **默认监听全部两侧都同意的事件**；`include` 用来打开**对当前角色默认关闭**的事件，
 `exclude` 用来关掉不想要的。两者传入未知名字 → **报错**，不静默忽略。
@@ -426,7 +427,7 @@ baseline: snapshot.baseline,        // 当前最大值
 | A32 | 非作者注册：**别的 maintainer** 提交 formal review | 通知 | 静音了同行的决策 |
 | A33 | 当前 HEAD 的 statuses / check-runs 都为空，跨过多个轮询周期 | 保持 pending，不通知 CI 通过 | 把空集合写成 `pass (0 blockers)` |
 | A34 | issue 最后一批评论只持久化成功一部分，同时 closed | 不投递未持久化评论、不终止；下一轮重试完整后再终态通知 | 终态携带失败评论并把任务做完，永久跳过修复 |
-| A35 | 已处于 behind，GitHub 短暂返回 `UNKNOWN`，随后仍为 behind | 不重复通知；保留上一轮可信基线 | 把 UNKNOWN 写成 not-behind，下一轮制造假转换 |
+| A35 | merge readiness 为 `DIRTY` 但 compare `behind_by > 0`；或 readiness 为 `BLOCKED` 但 `behind_by = 0` | 前者通知 behind，后者清除 behind 基线；之后再次落后仍可通知 | 用互斥 merge-readiness 枚举猜祖先关系，造成重复通知或静默漏报 |
 
 **A3 / A6 / A17 是历史事故的直接复现，必须有独立测试。**
 **A22 是"静默丢真信号"，优先级高于任何降噪诉求。**

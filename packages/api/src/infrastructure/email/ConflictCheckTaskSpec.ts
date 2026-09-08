@@ -23,7 +23,7 @@ export interface ConflictCheckTaskSpecOptions {
   readonly checkMergeable: (
     repoFullName: string,
     prNumber: number,
-  ) => Promise<{ mergeState: string; mergeStateStatus?: string; headSha: string }>;
+  ) => Promise<{ mergeState: string; mergeStateStatus?: string; headSha: string; isBehind: boolean }>;
   readonly conflictRouter: ConflictRouter;
   readonly invokeTrigger?: ConnectorInvokeTrigger;
   readonly autoExecutor?: ConflictAutoExecutor;
@@ -77,7 +77,10 @@ export function createConflictCheckTaskSpec(opts: ConflictCheckTaskSpecOptions):
             if (!parsed) continue;
             const { repoFullName, prNumber } = parsed;
 
-            const { mergeState, mergeStateStatus, headSha } = await opts.checkMergeable(repoFullName, prNumber);
+            const { mergeState, mergeStateStatus, headSha, isBehind } = await opts.checkMergeable(
+              repoFullName,
+              prNumber,
+            );
             workItems.push({
               signal: {
                 signal: {
@@ -86,6 +89,7 @@ export function createConflictCheckTaskSpec(opts: ConflictCheckTaskSpecOptions):
                   headSha,
                   mergeState,
                   ...(mergeStateStatus ? { mergeStateStatus } : {}),
+                  isBehind,
                 },
                 task,
               },

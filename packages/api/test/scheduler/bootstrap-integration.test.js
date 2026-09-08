@@ -43,7 +43,7 @@ describe('TaskRunnerV2 bootstrap integration', () => {
 
     const conflictSpec = createConflictCheckTaskSpec({
       prTrackingStore: { listAll: async () => [] },
-      checkMergeable: async () => ({ mergeState: 'MERGEABLE', headSha: 'sha0' }),
+      checkMergeable: async () => ({ mergeState: 'MERGEABLE', headSha: 'sha0', isBehind: false }),
       conflictRouter: { route: async () => ({ kind: 'skipped', reason: 'stub' }) },
       log: { info: () => {}, error: () => {}, warn: () => {} },
     });

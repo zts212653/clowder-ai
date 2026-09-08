@@ -32,7 +32,8 @@ function makeDeps(overrides = {}) {
         calls.fetchReviews++;
         return overrides.reviews ?? [];
       },
-      fetchMergeState: async () => ({ mergeState: 'MERGEABLE', mergeStateStatus: 'CLEAN' }),
+      fetchMergeState: async () =>
+        overrides.merge ?? { mergeState: 'MERGEABLE', mergeStateStatus: 'CLEAN', isBehind: false },
       fetchReviewThreads: async () => [],
       now: () => 1_700_000_000_000,
     },
@@ -67,5 +68,15 @@ describe('#1392 AC-6b — baseline reader seeds the conversation frontier for a 
     assert.equal(calls.fetchConversationComments, 1);
     assert.equal(snap.baseline.review.conversationCommentCursor, 250);
     assert.equal(snap.baseline.base.isBehind, false);
+  });
+
+  test('registration freezes compare ancestry rather than deriving it from merge readiness', async () => {
+    const { deps } = makeDeps({
+      merge: { mergeState: 'CONFLICTING', mergeStateStatus: 'DIRTY', isBehind: true },
+    });
+    const snap = await readGitHubWaitBaseline({ repoFullName: 'owner/repo', prNumber: 7 }, deps);
+
+    assert.equal(snap.baseline.base.isBehind, true);
+    assert.equal(snap.collectorState.conflict.mergeStateStatus, 'DIRTY');
   });
 });

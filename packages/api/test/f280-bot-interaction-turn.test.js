@@ -394,7 +394,7 @@ describe('F280 4b — bot interaction turns', () => {
       fetchInlineComments: async () => [],
       fetchConversationComments: async () => [triggerComment()],
       fetchReviews: async () => [],
-      fetchMergeState: async () => ({ mergeState: 'MERGEABLE', mergeStateStatus: 'CLEAN' }),
+      fetchMergeState: async () => ({ mergeState: 'MERGEABLE', mergeStateStatus: 'CLEAN', isBehind: false }),
       now: () => TRIGGER_MS + 1_000,
     };
 

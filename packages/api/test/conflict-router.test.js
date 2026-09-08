@@ -148,12 +148,31 @@ describe('ConflictRouter F280 typed waits', () => {
       headSha: 'aaa1111',
       mergeState: 'UNKNOWN',
       mergeStateStatus: 'BEHIND',
+      isBehind: true,
     });
     assert.equal(stillBehind.kind, 'skipped', 'an UNKNOWN poll must not manufacture a second behind transition');
     assert.equal(messageStore.getByThread('thread_1').length, 0);
   });
 
-  test('an authoritative non-behind status still clears the behind baseline', async () => {
+  test('compare ancestry reports behind even when merge readiness is DIRTY', async () => {
+    const { router, messageStore } = await setup([{ kind: 'pr_base_behind' }], {
+      base: { isBehind: false },
+    });
+
+    const result = await router.route({
+      repoFullName: 'owner/repo',
+      prNumber: 7,
+      headSha: 'aaa1111',
+      mergeState: 'CONFLICTING',
+      mergeStateStatus: 'DIRTY',
+      isBehind: true,
+    });
+    assert.equal(result.kind, 'notified');
+    assert.match(result.content, /base branch advanced/);
+    assert.equal(messageStore.getByThread('thread_1').length, 1);
+  });
+
+  test('compare ancestry clears behind even when merge readiness is BLOCKED', async () => {
     const { router, taskStore, task, messageStore } = await setup([{ kind: 'pr_base_behind' }], {
       base: { isBehind: true },
     });
@@ -163,7 +182,8 @@ describe('ConflictRouter F280 typed waits', () => {
       prNumber: 7,
       headSha: 'aaa1111',
       mergeState: 'UNKNOWN',
-      mergeStateStatus: 'CLEAN',
+      mergeStateStatus: 'BLOCKED',
+      isBehind: false,
     });
     assert.equal(caughtUp.kind, 'skipped');
     assert.equal((await taskStore.get(task.id)).automationState.await.baseline.base.isBehind, false);
@@ -173,7 +193,8 @@ describe('ConflictRouter F280 typed waits', () => {
       prNumber: 7,
       headSha: 'aaa1111',
       mergeState: 'UNKNOWN',
-      mergeStateStatus: 'BEHIND',
+      mergeStateStatus: 'DIRTY',
+      isBehind: true,
     });
     assert.equal(behindAgain.kind, 'notified', 'a real caught-up transition must permit a later behind wake');
     assert.equal(messageStore.getByThread('thread_1').length, 1);

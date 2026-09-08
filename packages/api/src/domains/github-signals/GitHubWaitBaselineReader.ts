@@ -19,7 +19,7 @@ export interface GitHubWaitBaselineReaderDeps {
   readonly fetchMergeState: (
     repoFullName: string,
     prNumber: number,
-  ) => Promise<{ readonly mergeState: string; readonly mergeStateStatus: string }>;
+  ) => Promise<{ readonly mergeState: string; readonly mergeStateStatus: string; readonly isBehind: boolean }>;
   /** F280 section 2.4b: the PR's author login, used only to pick role defaults. */
   readonly fetchAuthorLogin?: (repoFullName: string, prNumber: number) => Promise<string | null>;
   readonly now?: () => number;
@@ -110,7 +110,7 @@ export async function readGitHubWaitBaseline(
         fingerprint: `${ci.headSha}:${ciBucket}`,
       },
       conflict: { mergeState: merge.mergeState },
-      base: { isBehind: merge.mergeStateStatus === 'BEHIND' },
+      base: { isBehind: merge.isBehind },
     },
     collectorState: {
       review: {

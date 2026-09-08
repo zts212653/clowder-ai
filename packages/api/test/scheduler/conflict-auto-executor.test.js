@@ -132,7 +132,7 @@ describe('ConflictCheckTaskSpec + AutoExecutor integration', () => {
       taskStore: mockTaskStore([
         mockTask({ repoFullName: 'a/b', prNumber: 1, threadId: 't1', catId: 'opus', userId: 'u1' }),
       ]),
-      checkMergeable: async () => ({ mergeState: 'CONFLICTING', headSha: 'sha1' }),
+      checkMergeable: async () => ({ mergeState: 'CONFLICTING', headSha: 'sha1', isBehind: false }),
       conflictRouter: {
         async route() {
           // These cases are ABOUT the conflict path, so the stub must say the conflict matched;
@@ -182,7 +182,7 @@ describe('ConflictCheckTaskSpec + AutoExecutor integration', () => {
       taskStore: mockTaskStore([
         mockTask({ repoFullName: 'a/b', prNumber: 1, threadId: 't1', catId: 'opus', userId: 'u1' }),
       ]),
-      checkMergeable: async () => ({ mergeState: 'CONFLICTING', headSha: 'sha1' }),
+      checkMergeable: async () => ({ mergeState: 'CONFLICTING', headSha: 'sha1', isBehind: false }),
       conflictRouter: {
         async route() {
           return {
@@ -225,7 +225,7 @@ describe('ConflictCheckTaskSpec + AutoExecutor integration', () => {
     const tasks = [mockTask({ repoFullName: 'a/b', prNumber: 1, threadId: 't1', catId: 'opus', userId: 'u1' })];
     const spec = createConflictCheckTaskSpec({
       taskStore: mockTaskStore(tasks),
-      checkMergeable: async () => ({ mergeState: 'CONFLICTING', headSha: 'sha1' }),
+      checkMergeable: async () => ({ mergeState: 'CONFLICTING', headSha: 'sha1', isBehind: false }),
       conflictRouter: {
         async route() {
           // These cases are ABOUT the conflict path, so the stub must say the conflict matched;
@@ -266,7 +266,7 @@ describe('ConflictCheckTaskSpec + AutoExecutor integration', () => {
     const tasks = [mockTask({ repoFullName: 'a/b', prNumber: 1, threadId: 't1', catId: 'opus', userId: 'u1' })];
     const spec = createConflictCheckTaskSpec({
       taskStore: mockTaskStore(tasks),
-      checkMergeable: async () => ({ mergeState: 'CONFLICTING', headSha: 'sha1' }),
+      checkMergeable: async () => ({ mergeState: 'CONFLICTING', headSha: 'sha1', isBehind: false }),
       conflictRouter: {
         async route() {
           // These cases are ABOUT the conflict path, so the stub must say the conflict matched;
@@ -307,7 +307,7 @@ describe('ConflictCheckTaskSpec + AutoExecutor integration', () => {
     const spec = createConflictCheckTaskSpec({
       taskStore: mockTaskStore(tasks),
       // Simulate what production checkMergeable returns — must use CONFLICTING not DIRTY
-      checkMergeable: async () => ({ mergeState: 'CONFLICTING', headSha: 'sha1' }),
+      checkMergeable: async () => ({ mergeState: 'CONFLICTING', headSha: 'sha1', isBehind: false }),
       conflictRouter: {
         async route() {
           // These cases are ABOUT the conflict path, so the stub must say the conflict matched;
@@ -346,7 +346,7 @@ describe('ConflictCheckTaskSpec + AutoExecutor integration', () => {
     const tasks = [mockTask({ repoFullName: 'a/b', prNumber: 1, threadId: 't1', catId: 'opus', userId: 'u1' })];
     const spec = createConflictCheckTaskSpec({
       taskStore: mockTaskStore(tasks),
-      checkMergeable: async () => ({ mergeState: 'CONFLICTING', headSha: 'abc123' }),
+      checkMergeable: async () => ({ mergeState: 'CONFLICTING', headSha: 'abc123', isBehind: false }),
       conflictRouter: {
         async route() {
           // These cases are ABOUT the conflict path, so the stub must say the conflict matched;
@@ -377,7 +377,7 @@ describe('ConflictCheckTaskSpec + AutoExecutor integration', () => {
     const tasks = [mockTask({ repoFullName: 'a/b', prNumber: 1, threadId: 't1', catId: 'opus', userId: 'u1' })];
     const spec = createConflictCheckTaskSpec({
       taskStore: mockTaskStore(tasks),
-      checkMergeable: async () => ({ mergeState: 'CONFLICTING', headSha: 'sha1' }),
+      checkMergeable: async () => ({ mergeState: 'CONFLICTING', headSha: 'sha1', isBehind: false }),
       conflictRouter: {
         async route() {
           // These cases are ABOUT the conflict path, so the stub must say the conflict matched;

@@ -11,6 +11,8 @@ export interface ConflictSignal {
   readonly headSha: string;
   readonly mergeState: string;
   readonly mergeStateStatus?: string;
+  /** Exact base/head ancestry from GitHub's compare API. */
+  readonly isBehind: boolean;
 }
 
 export type ConflictRouteResult =
@@ -44,9 +46,8 @@ export interface ConflictRouterOptions {
   readonly log: FastifyBaseLogger;
 }
 
-function authoritativeBaseFact(mergeStateStatus: string | undefined): { base?: { isBehind: boolean } } {
-  if (!mergeStateStatus || mergeStateStatus === 'UNKNOWN') return {};
-  return { base: { isBehind: mergeStateStatus === 'BEHIND' } };
+function authoritativeBaseFact(isBehind: boolean | undefined): { base?: { isBehind: boolean } } {
+  return isBehind === undefined ? {} : { base: { isBehind } };
 }
 
 export class ConflictRouter {
@@ -79,7 +80,7 @@ export class ConflictRouter {
               },
             ]
           : []),
-        ...(signal.mergeStateStatus === 'BEHIND'
+        ...(signal.isBehind === true
           ? [
               {
                 type: 'pr_base_behind' as const,
@@ -93,7 +94,7 @@ export class ConflictRouter {
       facts: {
         headSha: signal.headSha,
         ...(signal.mergeState !== 'UNKNOWN' ? { conflict: { mergeState: signal.mergeState } } : {}),
-        ...authoritativeBaseFact(signal.mergeStateStatus),
+        ...authoritativeBaseFact(signal.isBehind),
       },
       collectorPatch: {
         conflict: {

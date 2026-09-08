@@ -378,6 +378,7 @@ describe('#1394 GitHub tracking main flow', () => {
         headSha: 'same-head',
         mergeState: 'UNKNOWN',
         mergeStateStatus: 'BEHIND',
+        isBehind: true,
       }),
       log: logger,
     });
