@@ -376,6 +376,18 @@ describe('buildProbeEnv (unit)', () => {
     assert.equal(env.OPENAI_API_BASE, 'https://api.openai.com');
   });
 
+  test('openai: adds Atlas Cloud aliases for Atlas base URL', async () => {
+    const { buildProbeEnv } = await import('../dist/routes/first-run-quest.js');
+    const env = buildProbeEnv('openai', 'sk-atlas', 'https://api.atlascloud.ai/v1');
+    assert.equal(env.OPENAI_API_KEY, 'sk-atlas');
+    assert.equal(env.OPENAI_BASE_URL, 'https://api.atlascloud.ai/v1');
+    assert.equal(env.OPENAI_API_BASE, 'https://api.atlascloud.ai/v1');
+    assert.equal(env.ATLASCLOUD_API_KEY, 'sk-atlas');
+    assert.equal(env.ATLAS_CLOUD_API_KEY, 'sk-atlas');
+    assert.equal(env.ATLASCLOUD_BASE_URL, 'https://api.atlascloud.ai/v1');
+    assert.equal(env.ATLAS_CLOUD_BASE_URL, 'https://api.atlascloud.ai/v1');
+  });
+
   test('google: sets GEMINI_API_KEY and GOOGLE_API_KEY', async () => {
     const { buildProbeEnv } = await import('../dist/routes/first-run-quest.js');
     const env = buildProbeEnv('google', 'goog-key', 'https://generativelanguage.googleapis.com');

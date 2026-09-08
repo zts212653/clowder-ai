@@ -12,6 +12,7 @@ import { builtinAccountIdForClient, type ClientId, protocolForClient } from '@ca
 import type { FastifyPluginAsync } from 'fastify';
 import { z } from 'zod';
 import { resolveByAccountRef } from '../config/account-resolver.js';
+import { isAtlasCloudBaseUrl } from '../domains/cats/services/agents/providers/env-map.js';
 import { detectAvailableClients } from '../domains/cats/services/first-run-quest/client-detection.js';
 import type { FirstRunQuestStateV1, IThreadStore } from '../domains/cats/services/stores/ports/ThreadStore.js';
 import { resolveActiveProjectRoot } from '../utils/active-project-root.js';
@@ -446,6 +447,12 @@ function buildProbeEnv(clientId: string, apiKey: string, baseUrl?: string): Reco
       if (baseUrl) {
         env.OPENAI_BASE_URL = baseUrl;
         env.OPENAI_API_BASE = baseUrl;
+        if (isAtlasCloudBaseUrl(baseUrl)) {
+          env.ATLASCLOUD_API_KEY = apiKey;
+          env.ATLAS_CLOUD_API_KEY = apiKey;
+          env.ATLASCLOUD_BASE_URL = baseUrl;
+          env.ATLAS_CLOUD_BASE_URL = baseUrl;
+        }
       }
       break;
     case 'google':

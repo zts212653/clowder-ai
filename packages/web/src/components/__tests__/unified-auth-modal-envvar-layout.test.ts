@@ -48,5 +48,12 @@ describe('UnifiedAuthModal env-var layout (#862)', () => {
     const templateModels = catTemplate.clientDefaults.gemini.models;
     expect(templateModels).toContain('Gemini 3.6 Flash (High)');
     expect(extractGoogleModelSuggestions()).toEqual(templateModels);
+
+  it('includes an Atlas Cloud API key preset that stores the account as OpenAI-compatible', () => {
+    expect(source).toContain("const ATLAS_CLOUD_BASE_URL = 'https://api.atlascloud.ai/v1'");
+    expect(source).toContain("'qwen/qwen3.5-flash'");
+    expect(source).toContain("'deepseek-ai/deepseek-v4-pro'");
+    expect(source).toContain("setClientId('openai')");
+    expect(source).toContain("isAtlasCloudPresetBaseUrl(baseUrl) ? 'openai' : undefined");
   });
 });
