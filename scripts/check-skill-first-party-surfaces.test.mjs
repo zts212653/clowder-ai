@@ -151,6 +151,18 @@ describe('check-skill-first-party-surfaces', () => {
     assert.match(mergeGate, /禁止[^。\n]*(?:重跑|重新运行)[^。\n]*full gate/i);
   });
 
+  it('keeps the executable Codex review probe in ASCII shell syntax', () => {
+    const mergeGate = readFileSync(new URL('../cat-cafe-skills/merge-gate/SKILL.md', import.meta.url), 'utf8');
+    const start = mergeGate.indexOf('TRIGGER_COMMENT_ID=');
+    const end = mergeGate.indexOf('#   - Codex connector EYES', start);
+    assert.ok(start >= 0 && end > start, 'the executable review probe must remain discoverable');
+    const probe = mergeGate.slice(start, end);
+
+    assert.doesNotMatch(probe, /[“”]/u, 'smart quotes are literal bytes in shell and invalid jq delimiters');
+    assert.match(probe, /TRIGGER_COMMENT_ID="\$\(gh api/);
+    assert.match(probe, /EYES="\$\(gh api/);
+  });
+
   it('routes belief-testing explainers through an optional falsifiable technical cutaway', () => {
     const conceptDemo = readFileSync(
       new URL('../cat-cafe-skills/concept-demo-design/SKILL.md', import.meta.url),

@@ -300,10 +300,10 @@ gh pr comment {PR_NUMBER} --body '@codex review'
 # 6. 已选 cloud 时等remote review（事件驱动，不轮询）
 #
 # 6.1 👀 接单检测（触发后 5 分钟查一次）
-TRIGGER_COMMENT_ID=”$(gh api repos/{OWNER}/{REPO}/issues/{PR_NUMBER}/comments \
-  --jq '[.[] | select(.body | test(“^@codex\\s+review”; “m”))] | last | .id')”
-EYES=”$(gh api repos/{OWNER}/{REPO}/issues/comments/${TRIGGER_COMMENT_ID}/reactions \
-  --jq '[.[] | select(.content == “eyes” and .user.login == “chatgpt-codex-connector[bot]” and .user.type == “Bot”)] | length')”
+TRIGGER_COMMENT_ID="$(gh api repos/{OWNER}/{REPO}/issues/{PR_NUMBER}/comments \
+  --jq '[.[] | select(.body | test("^@codex\\s+review"; "m"))] | last | .id')"
+EYES="$(gh api repos/{OWNER}/{REPO}/issues/comments/${TRIGGER_COMMENT_ID}/reactions \
+  --jq '[.[] | select(.content == "eyes" and .user.login == "chatgpt-codex-connector[bot]" and .user.type == "Bot")] | length')"
 #   - Codex connector EYES > 0 → 云端已接单 → 停止监控，注册 PR 追踪。
 #     ⚠️ KD-27：此时必须释放 hold_ball，禁止续约轮询。追踪回调是唯一通知渠道。
 #     如果你之前 hold_ball 轮询等接单，现在 connector EYES > 0 = 切换到事件驱动模式，不再 hold。
