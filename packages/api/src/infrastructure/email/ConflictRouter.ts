@@ -44,6 +44,11 @@ export interface ConflictRouterOptions {
   readonly log: FastifyBaseLogger;
 }
 
+function authoritativeBaseFact(mergeStateStatus: string | undefined): { base?: { isBehind: boolean } } {
+  if (!mergeStateStatus || mergeStateStatus === 'UNKNOWN') return {};
+  return { base: { isBehind: mergeStateStatus === 'BEHIND' } };
+}
+
 export class ConflictRouter {
   constructor(private readonly opts: ConflictRouterOptions) {}
 
@@ -88,7 +93,7 @@ export class ConflictRouter {
       facts: {
         headSha: signal.headSha,
         ...(signal.mergeState !== 'UNKNOWN' ? { conflict: { mergeState: signal.mergeState } } : {}),
-        ...(signal.mergeStateStatus ? { base: { isBehind: signal.mergeStateStatus === 'BEHIND' } } : {}),
+        ...authoritativeBaseFact(signal.mergeStateStatus),
       },
       collectorPatch: {
         conflict: {

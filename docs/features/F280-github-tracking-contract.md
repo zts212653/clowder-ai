@@ -101,6 +101,10 @@ register_issue_tracking(repoFullName, issueNumber)
 > 想给它加自过滤就得为每轮轮询额外拉一次 commit 作者，代价与收益不成比例。
 > 默认关掉，让明确想要它的 maintainer 自己 `include`，是这条事实唯一诚实的处理。
 
+`base_behind` 只接受 GitHub 的**肯定状态**。`UNKNOWN` 是一次缺失观察，不是
+`not behind`；它不得覆盖上一轮可信的 `base.isBehind`，否则 `BEHIND → UNKNOWN → BEHIND`
+会把同一段落后状态重复通知两次。
+
 **默认监听全部两侧都同意的事件**；`include` 用来打开**对当前角色默认关闭**的事件，
 `exclude` 用来关掉不想要的。两者传入未知名字 → **报错**，不静默忽略。
 
@@ -133,6 +137,10 @@ issue 有两个面：**评论**与**关闭**。没有 `include` / `exclude`。
 |---|:--:|---|
 | `issue_comment` | ✅ | 任何非自己的评论都通知 |
 | closed | ✅ | 投递一条终态通知，然后**终止追踪** |
+
+终态通知只能携带已经成功进入 event log / projection 的评论。若同轮评论只持久化了一部分，
+整批终态投递暂缓、任务保持 active；下一轮从未推进的 delivery cursor 重试，全部成功后再把
+最后评论与 closed 合成一条终态通知。不能用“GitHub 已返回”冒充“本地已持久化”。
 
 **reopen 不在范围内**（operator 2026-09-07）。issue 被重开是罕见事件，
 用**重新注册**解决即可——为它让整条监听永久挂着，代价远大于收益。
@@ -417,6 +425,8 @@ baseline: snapshot.baseline,        // 当前最大值
 | A31 | issue **closed** | 终态通知合并同轮命中的最后评论，然后终止 | 只终止不通知、吞掉同轮最后评论，或终止后仍空转 |
 | A32 | 非作者注册：**别的 maintainer** 提交 formal review | 通知 | 静音了同行的决策 |
 | A33 | 当前 HEAD 的 statuses / check-runs 都为空，跨过多个轮询周期 | 保持 pending，不通知 CI 通过 | 把空集合写成 `pass (0 blockers)` |
+| A34 | issue 最后一批评论只持久化成功一部分，同时 closed | 不投递未持久化评论、不终止；下一轮重试完整后再终态通知 | 终态携带失败评论并把任务做完，永久跳过修复 |
+| A35 | 已处于 behind，GitHub 短暂返回 `UNKNOWN`，随后仍为 behind | 不重复通知；保留上一轮可信基线 | 把 UNKNOWN 写成 not-behind，下一轮制造假转换 |
 
 **A3 / A6 / A17 是历史事故的直接复现，必须有独立测试。**
 **A22 是"静默丢真信号"，优先级高于任何降噪诉求。**
@@ -434,7 +444,8 @@ baseline: snapshot.baseline,        // 当前最大值
 | 受众过滤（唯一一处，只挡投递） | A6 A7 A8 A9 A10 A11 A26 **A30 A32** — 自己写的仍进流：它要开回合、要推 frontier。角色决定"这个作者的话我要不要听" |
 | 投递到注册 thread | A21 |
 | 推进 frontier | A13 A14 |
-| 终态短路 | A18 **A31** — PR merged/closed 与 issue closed 走同一条终态短路 |
+| 终态短路 | A18 **A31 A34** — PR merged/closed 与 issue closed 走同一条终态短路；issue 评论必须先完整持久化 |
+| 状态事实缺席 | **A35** — `UNKNOWN` 不覆盖最后一次可信的 base baseline |
 | 注册时的基线安装（不得前进） | A22 |
 | **链子里没有的东西** | A15（无 `headSha` 门）· A17（追踪本身无期限）· A10（无正文判断）· A6（bot 不是噪音身份） |
 

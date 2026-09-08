@@ -367,8 +367,7 @@ export function createIssueCommentTaskSpec(opts: IssueCommentTaskSpecOptions): T
               // not allPending. This prevents delivering notifications for comments whose
               // events were not appended to the event log (failed collection).
               const trackingOwnsDelivery = task.automationState?.await !== undefined;
-              const deliveryCandidates = trackingOwnsDelivery ? allPending : processedComments;
-              const pendingDelivery = deliveryCandidates.filter((c) => {
+              const pendingDelivery = processedComments.filter((c) => {
                 if (c.id <= deliveryCursor) return false;
                 return trackingOwnsDelivery
                   ? !opts.isEchoComment?.(c)
@@ -380,8 +379,18 @@ export function createIssueCommentTaskSpec(opts: IssueCommentTaskSpecOptions): T
                   : deliveryCursor;
 
               if (issueState === 'closed') {
-                // Issue closed: deliver final pending batch (if any), then mark done
-                if (pendingDelivery.length > 0) {
+                // Collection completeness outranks terminal delivery. A partial successful prefix
+                // is deliberately held until the failed suffix lands: otherwise the lifecycle
+                // terminalizes the task after delivering the prefix and the suffix can never be
+                // retried. Because the delivery cursor stays behind, the next poll safely replays
+                // the successful prefix through the idempotent event log and then retries the
+                // failure.
+                if (processedComments.length < allPending.length) {
+                  opts.log.info(
+                    `[issue-comment] Issue ${issueKey} closed but collection incomplete (${processedComments.length}/${allPending.length}) — will retry`,
+                  );
+                } else if (pendingDelivery.length > 0) {
+                  // Issue closed: deliver the fully persisted final batch, then mark done.
                   workItems.push({
                     signal: {
                       task,
@@ -395,14 +404,6 @@ export function createIssueCommentTaskSpec(opts: IssueCommentTaskSpecOptions): T
                     },
                     subjectKey: task.subjectKey!,
                   });
-                } else if (processedComments.length < allPending.length) {
-                  // Cloud R6 P1-2: Collection failed midway — processedComments is shorter than
-                  // allPending because the loop broke on an append/projector error. Do NOT mark
-                  // done: the cursor is still before the failed comment so the next poll can retry.
-                  // Marking done here would permanently stop retries on a transient failure.
-                  opts.log.info(
-                    `[issue-comment] Issue ${issueKey} closed but collection incomplete (${processedComments.length}/${allPending.length}) — will retry`,
-                  );
                 } else {
                   // No pending delivery AND all fetched comments were successfully collected
                   // (or no new comments at all) → safe to close the tracking task.

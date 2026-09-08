@@ -217,6 +217,89 @@ describe('F280 Phase C issue wait lifecycle', () => {
     assert.equal((await taskStore.get(task.id)).automationState.issue.lastDeliveredCursor, 42);
   });
 
+  it('keeps a closed issue active when its final comment was not persisted', async () => {
+    const taskStore = new TaskStore();
+    const messageStore = new MessageStore();
+    const task = await taskStore.create({
+      kind: 'issue_tracking',
+      subjectKey: 'issue:owner/repo#17',
+      threadId: 'thread_issue_failed_final_comment',
+      title: 'Issue tracking: owner/repo#17',
+      ownerCatId: 'codex-sol',
+      why: 'retry the final comment before tracking terminates',
+      createdBy: 'codex-sol',
+      userId: 'user_1',
+      automationState: issueAwaitState(),
+    });
+    const lifecycle = new GitHubWaitLifecycleService({
+      taskStore,
+      deliveryDeps: { messageStore },
+      now: () => 500,
+      log: { info() {}, warn() {}, error() {} },
+    });
+    const triggered = [];
+    const persistedCommentIds = new Set();
+    let failFinalCommentOnce = true;
+    const spec = createIssueCommentTaskSpec({
+      taskStore,
+      issueCommentRouter: { route: async () => ({ kind: 'skipped', reason: 'legacy path unused' }) },
+      waitLifecycle: lifecycle,
+      fetchComments: async () => [
+        {
+          id: 41,
+          author: 'issue-author',
+          body: 'This comment persisted successfully.',
+          createdAt: '2026-09-08T00:00:00Z',
+        },
+        {
+          id: 42,
+          author: 'issue-author',
+          body: 'This comment must land before the terminal notification.',
+          createdAt: '2026-09-08T00:01:00Z',
+        },
+      ],
+      fetchIssueState: async () => 'closed',
+      eventLog: {
+        append: async (event) => {
+          const commentId = event.payload.commentId;
+          if (commentId === 42 && failFinalCommentOnce) {
+            failFinalCommentOnce = false;
+            throw new Error('transient event-log failure');
+          }
+          const appended = !persistedCommentIds.has(commentId);
+          persistedCommentIds.add(commentId);
+          return { appended, sequence: persistedCommentIds.size };
+        },
+      },
+      invokeTrigger: {
+        trigger: async (_threadId, _catId, _userId, content) => {
+          triggered.push(content);
+          return 'dispatched';
+        },
+      },
+      log: { info() {}, warn() {}, error() {} },
+    });
+
+    const gate = await spec.admission.gate();
+
+    assert.equal(gate.run, false, 'an unpersisted comment must not enter terminal delivery');
+    assert.equal(triggered.length, 0);
+    assert.notEqual((await taskStore.get(task.id)).status, 'done', 'the next poll must be allowed to retry');
+    assert.equal((await taskStore.get(task.id)).automationState.issue.lastCommentCursor, 41);
+
+    const retryGate = await spec.admission.gate();
+    assert.equal(retryGate.run, true);
+    assert.equal(retryGate.workItems.length, 1, 'the complete persisted batch must become terminal delivery');
+    await spec.run.execute(retryGate.workItems[0].signal, retryGate.workItems[0].subjectKey, {});
+
+    assert.equal(triggered.length, 1);
+    assert.match(triggered[0], /Issue state: closed/);
+    assert.match(triggered[0], /issue comment #41 by issue-author/);
+    assert.match(triggered[0], /issue comment #42 by issue-author/);
+    assert.equal((await taskStore.get(task.id)).status, 'done');
+    assert.equal((await taskStore.get(task.id)).automationState.issue.lastDeliveredCursor, 42);
+  });
+
   it('stops a collector-only issue task when the GitHub subject becomes terminal', async () => {
     const taskStore = new TaskStore();
     const messageStore = new MessageStore();

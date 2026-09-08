@@ -502,9 +502,11 @@ describe('#1394 issue tracking main flow', () => {
     await runOnePoll(spec);
 
     const messages = messageStore.getByThread('thread-issue-registration');
-    assert.equal(messages.length, 1);
+    assert.equal(messages.length, 2);
     assert.match(messages[0].content, /First issue response/);
-    assert.match(messages[0].content, /Second issue response/);
+    assert.doesNotMatch(messages[0].content, /Second issue response/);
+    assert.match(messages[1].content, /Second issue response/);
+    assert.doesNotMatch(messages[1].content, /First issue response/);
     assert.equal((await taskStore.get(task.id)).automationState.issue.lastCommentCursor, 102);
   });
 });

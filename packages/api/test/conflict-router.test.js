@@ -6,7 +6,7 @@ const { MessageStore } = await import('../dist/domains/cats/services/stores/port
 const { GitHubWaitLifecycleService } = await import('../dist/domains/github-signals/GitHubWaitLifecycleService.js');
 const { ConflictRouter } = await import('../dist/infrastructure/email/ConflictRouter.js');
 
-async function setup(when) {
+async function setup(when, baseline = {}) {
   const taskStore = new TaskStore();
   const messageStore = new MessageStore();
   const task = await taskStore.create({
@@ -25,7 +25,7 @@ async function setup(when) {
         generation: 1,
         subjectRef: 'pr:owner/repo#7',
         ownerFence: { kind: 'containing_task', generation: 1 },
-        baseline: { capturedAt: 100, headSha: 'aaa1111', conflict: { mergeState: 'MERGEABLE' } },
+        baseline: { capturedAt: 100, headSha: 'aaa1111', conflict: { mergeState: 'MERGEABLE' }, ...baseline },
         continuation: {
           when,
           // biome-ignore lint/suspicious/noThenProperty: F280's frozen wait contract field.
@@ -125,5 +125,57 @@ describe('ConflictRouter F280 typed waits', () => {
       'skipped',
     );
     assert.equal((await taskStore.get(task.id)).automationState.await.generation, 1);
+  });
+
+  test('UNKNOWN base status preserves the last authoritative behind baseline', async () => {
+    const { router, taskStore, task, messageStore } = await setup([{ kind: 'pr_base_behind' }], {
+      base: { isBehind: true },
+    });
+
+    const unknown = await router.route({
+      repoFullName: 'owner/repo',
+      prNumber: 7,
+      headSha: 'aaa1111',
+      mergeState: 'UNKNOWN',
+      mergeStateStatus: 'UNKNOWN',
+    });
+    assert.equal(unknown.kind, 'skipped');
+    assert.equal((await taskStore.get(task.id)).automationState.await.baseline.base.isBehind, true);
+
+    const stillBehind = await router.route({
+      repoFullName: 'owner/repo',
+      prNumber: 7,
+      headSha: 'aaa1111',
+      mergeState: 'UNKNOWN',
+      mergeStateStatus: 'BEHIND',
+    });
+    assert.equal(stillBehind.kind, 'skipped', 'an UNKNOWN poll must not manufacture a second behind transition');
+    assert.equal(messageStore.getByThread('thread_1').length, 0);
+  });
+
+  test('an authoritative non-behind status still clears the behind baseline', async () => {
+    const { router, taskStore, task, messageStore } = await setup([{ kind: 'pr_base_behind' }], {
+      base: { isBehind: true },
+    });
+
+    const caughtUp = await router.route({
+      repoFullName: 'owner/repo',
+      prNumber: 7,
+      headSha: 'aaa1111',
+      mergeState: 'UNKNOWN',
+      mergeStateStatus: 'CLEAN',
+    });
+    assert.equal(caughtUp.kind, 'skipped');
+    assert.equal((await taskStore.get(task.id)).automationState.await.baseline.base.isBehind, false);
+
+    const behindAgain = await router.route({
+      repoFullName: 'owner/repo',
+      prNumber: 7,
+      headSha: 'aaa1111',
+      mergeState: 'UNKNOWN',
+      mergeStateStatus: 'BEHIND',
+    });
+    assert.equal(behindAgain.kind, 'notified', 'a real caught-up transition must permit a later behind wake');
+    assert.equal(messageStore.getByThread('thread_1').length, 1);
   });
 });
