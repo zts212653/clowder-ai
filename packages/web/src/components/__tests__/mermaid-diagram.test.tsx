@@ -1,7 +1,7 @@
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { MermaidDiagram } from '@/components/MermaidDiagram';
+import { __resetMermaidInitForTests, MermaidDiagram } from '@/components/MermaidDiagram';
 
 Object.assign(globalThis as Record<string, unknown>, { React, IS_REACT_ACT_ENVIRONMENT: true });
 
@@ -19,6 +19,7 @@ describe('MermaidDiagram', () => {
   let root: Root;
 
   beforeEach(() => {
+    __resetMermaidInitForTests();
     mermaidMock.initialize.mockReset();
     mermaidMock.render.mockReset();
     mermaidMock.render.mockResolvedValue({
@@ -64,5 +65,14 @@ describe('MermaidDiagram', () => {
         }),
       }),
     );
+  });
+
+  it('decodes HTML entities in source before rendering', async () => {
+    await act(async () => {
+      root.render(<MermaidDiagram source={'flowchart TD\n  A --&gt; B'} />);
+    });
+
+    await vi.waitFor(() => expect(mermaidMock.render).toHaveBeenCalled());
+    expect(mermaidMock.render).toHaveBeenCalledWith(expect.stringMatching(/^mermaid-/), 'flowchart TD\n  A --> B');
   });
 });

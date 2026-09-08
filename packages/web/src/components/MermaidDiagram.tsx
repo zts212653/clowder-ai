@@ -8,6 +8,38 @@ type RenderState =
   | { status: 'ready'; svg: string; error?: undefined }
   | { status: 'error'; svg?: undefined; error: string };
 
+let mermaidInitialized = false;
+
+/** Test-only hook to reset module-level init state between tests. */
+export function __resetMermaidInitForTests() {
+  mermaidInitialized = false;
+}
+
+function ensureMermaidInitialized(mermaid: typeof import('mermaid').default) {
+  if (mermaidInitialized) return;
+  mermaid.initialize({
+    startOnLoad: false,
+    securityLevel: 'strict',
+    theme: 'neutral',
+    flowchart: {
+      htmlLabels: false,
+    },
+  });
+  mermaidInitialized = true;
+}
+
+/**
+ * Decode HTML entities (e.g. `&gt;` → `>`). SSR falls back to the encoded
+ * string because Mermaid rendering only runs in `useEffect` on the client.
+ * The decoded source is used only for `mermaid.render`, not for SSR output.
+ */
+function decodeHtmlEntities(encoded: string): string {
+  if (typeof document === 'undefined') return encoded;
+  const textarea = document.createElement('textarea');
+  textarea.innerHTML = encoded;
+  return textarea.value;
+}
+
 function hashSource(source: string): string {
   let hash = 0;
   for (let i = 0; i < source.length; i += 1) {
@@ -23,7 +55,7 @@ function toMermaidId(id: string, source: string): string {
 
 export function MermaidDiagram({ source }: { source: string }) {
   const reactId = useId();
-  const normalizedSource = source.trim();
+  const normalizedSource = useMemo(() => decodeHtmlEntities(source.trim()), [source]);
   const diagramId = useMemo(() => toMermaidId(reactId, normalizedSource), [reactId, normalizedSource]);
   const [renderState, setRenderState] = useState<RenderState>({ status: 'loading' });
 
@@ -35,14 +67,7 @@ export function MermaidDiagram({ source }: { source: string }) {
 
       try {
         const mermaid = (await import('mermaid')).default;
-        mermaid.initialize({
-          startOnLoad: false,
-          securityLevel: 'strict',
-          theme: 'neutral',
-          flowchart: {
-            htmlLabels: false,
-          },
-        });
+        ensureMermaidInitialized(mermaid);
 
         const { svg } = await mermaid.render(diagramId, normalizedSource);
         const safeSvg = DOMPurify.sanitize(svg, {
