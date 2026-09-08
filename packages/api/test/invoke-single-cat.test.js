@@ -4311,6 +4311,12 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
     // isTransientCliExitCode1 (line 1393), so missing_session takes priority → shouldRetryWithoutSession
     assert.equal(classifyResumeFailure('Gemini CLI: CLI 异常退出 (code: 1, signal: none)'), 'cli_exit');
     assert.equal(classifyResumeFailure('Gemini CLI: CLI 异常退出 (code: null, signal: SIGTERM)'), 'cli_exit');
+    // #300: Gemini exit code 42 = missing session, must trigger retry-without-session
+    assert.equal(
+      classifyResumeFailure('Gemini CLI: CLI 异常退出 (code: 42, signal: none)'),
+      'missing_session',
+      '#300: Gemini exit code 42 must be classified as missing_session, not cli_exit',
+    );
     assert.equal(classifyResumeFailure('authentication failed: login required'), 'auth');
     assert.equal(
       classifyResumeFailure(
@@ -5918,6 +5924,67 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
 
     assert.equal(invokeCount, 1);
     assert.equal(optionsSeen[0].sessionId, undefined, 'getChain() failure must discard sessionId (fail-closed, R9 P1)');
+  });
+
+  it('#300: Gemini exit code 42 triggers self-heal retry without session', async () => {
+    // Scenario: after restart, stale sessionId causes Gemini CLI to exit with code 42
+    // ("no conversation found"). classifyResumeFailure must map this to missing_session,
+    // triggering retry-without-session to recover automatically.
+    let invokeCount = 0;
+    const sessionDeletes = [];
+    const optionsSeen = [];
+    const service = {
+      async *invoke(_prompt, options) {
+        optionsSeen.push({ ...options });
+        invokeCount++;
+        if (invokeCount === 1) {
+          yield {
+            type: 'error',
+            catId: 'gemini25',
+            error: 'Gemini CLI: CLI 异常退出 (code: 42, signal: none)',
+            timestamp: Date.now(),
+          };
+          yield { type: 'done', catId: 'gemini25', timestamp: Date.now() };
+          return;
+        }
+        yield { type: 'session_init', catId: 'gemini25', sessionId: 'fresh-sess', timestamp: Date.now() };
+        yield { type: 'text', catId: 'gemini25', content: 'recovered', timestamp: Date.now() };
+        yield { type: 'done', catId: 'gemini25', timestamp: Date.now() };
+      },
+    };
+
+    const deps = makeDeps();
+    deps.sessionManager = {
+      get: async () => 'stale-session-from-redis',
+      store: async () => {},
+      delete: async (u, c, t) => {
+        sessionDeletes.push(`${u}:${c}:${t}`);
+      },
+    };
+
+    const msgs = await collect(
+      invokeSingleCat(deps, {
+        catId: 'gemini25',
+        service,
+        prompt: 'test',
+        userId: 'u1',
+        threadId: 'thread-gemini-code42',
+        isLastCat: true,
+      }),
+    );
+
+    assert.equal(invokeCount, 2, '#300: should retry once after Gemini exit code 42');
+    assert.equal(optionsSeen[0].sessionId, 'stale-session-from-redis', 'first attempt uses stale session');
+    assert.equal(optionsSeen[1].sessionId, undefined, 'retry attempt drops --resume session');
+    assert.deepEqual(
+      sessionDeletes,
+      ['u1:gemini25:thread-gemini-code42'],
+      '#300: stale session must be deleted from persistent store before retry',
+    );
+    assert.ok(
+      msgs.some((m) => m.type === 'text' && m.content === 'recovered'),
+      '#300: should recover via retry without session',
+    );
   });
 
   it('R11 P1-1: uses active record cliSessionId when it differs from sessionManager (RED)', async () => {
