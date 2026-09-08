@@ -362,6 +362,10 @@ baseline: snapshot.baseline,        // 当前最大值
 也就不会像旧 classifier 那样反复播报同一轮。除此之外链子里仍然没有时间、没有 `headSha` 门、
 没有正文启发式。
 
+**但 events 不是推进这只时钟的授权。** CI / conflict 观察同样携带归一化 events，只为匹配
+它们自己的订阅面；只有 review-feedback 观察可以评估 / 退休 bot 回合，因为只有这条生产链会把
+超时结果同步记录进 F168。否则先到的 CI 轮询会消费回合，后到的 review 轮询便永远看不到失败。
+
 一旦有人在受众过滤里写 `if (isBot)`，就是回到了 §3.1 那个错误坐标系。
 
 **受众过滤是一个函数，不是两处判断。** 曾经的实现把角色差异只表达成
@@ -424,7 +428,7 @@ baseline: snapshot.baseline,        // 当前最大值
 |---|---|
 | 归一化（同一形状） | A2 A3 A4 A5 — 三个来源走同一条路，`review` 按 event id 判新而非文本 diff |
 | 归一化（回合识别：mention + 已知 bot 身份） | A23 A24 A25 A26 A29 — bot 回合是**改事件的名字**，不是加一路事件 |
-| 归一化（回合状态：开 / 闭 / 超时未闭） | A28 A29 — 回合状态随 frontier 同批推进，报了必然同时退休 |
+| 归一化（回合状态：开 / 闭 / 超时未闭） | A28 A29 — 仅 review-feedback 观察拥有回合时钟；CI / conflict 即使携带 events 也不得消费。回合随 frontier 同批推进，报了必然同时退休 |
 | 订阅过滤 | A1 A19 A20 A23 A24 A25 A27 |
 | 已见过滤（per-source frontier） | A12 A14 A16 |
 | 受众过滤（唯一一处，只挡投递） | A6 A7 A8 A9 A10 A11 A26 **A30 A32** — 自己写的仍进流：它要开回合、要推 frontier。角色决定"这个作者的话我要不要听" |

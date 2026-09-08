@@ -18,6 +18,8 @@ const { normalizePrFeedbackComments, normalizePrReviewDecisions } = await import
 );
 const { ReviewFeedbackRouter } = await import('../dist/infrastructure/email/ReviewFeedbackRouter.js');
 const { createReviewFeedbackTaskSpec } = await import('../dist/infrastructure/email/ReviewFeedbackTaskSpec.js');
+const { CiCdRouter } = await import('../dist/infrastructure/email/CiCdRouter.js');
+const { ConflictRouter } = await import('../dist/infrastructure/email/ConflictRouter.js');
 const { buildPrTrackingPredicates } = await import('../dist/domains/github-signals/PrTrackingDefaultSet.js');
 const { deriveCloudReviewObservation } = await import('../dist/domains/github-signals/CloudReviewObservation.js');
 const { ExternalReviewCoordinator } = await import(
@@ -144,7 +146,7 @@ async function createHarness({ when, now = () => TRIGGER_MS + 1_000, externalRev
     }
   };
   const delivered = () => messageStore.getByThread('thread-registration').map((message) => message.content);
-  return { taskStore, task, poll, delivered };
+  return { taskStore, messageStore, task, lifecycle, poll, delivered };
 }
 
 describe('F280 4b — bot interaction turns', () => {
@@ -273,10 +275,10 @@ describe('F280 4b — bot interaction turns', () => {
     );
   });
 
-  // A28 guard: the CI and conflict pollers observe the SAME wait with facts and no events.
-  // They never evaluate turns, so they must not retire one either — otherwise an unanswered
-  // round is deleted between two review polls and the "never came back" notice never fires.
-  test('A28: an eventless CI/conflict observation cannot retire an open round', async () => {
+  // A28 lower-level control: an observation without review-turn authority cannot retire an open
+  // round. The production CI-with-events regression below proves that authority is not inferred
+  // merely from the presence of an events array.
+  test('A28: an observation without review-turn authority cannot retire an open round', async () => {
     let now = TRIGGER_MS + 1_000;
     const harness = await createHarness({ when: AUTHOR_SUBSCRIPTION, now: () => now });
     await harness.poll({ conversation: [triggerComment()] });
@@ -642,6 +644,57 @@ describe('F280 4b — bot interaction turns', () => {
         'failed_or_timeout',
         'a silent bot must release cloudReviewPolicy=required, not strand it on running',
       );
+    });
+
+    test('non-review polls cannot consume a bot timeout before the review poll records it', async () => {
+      const { seen, coordinator } = collectObservations();
+      let now = TRIGGER_MS + 1_000;
+      const harness = await createHarness({
+        when: AUTHOR_SUBSCRIPTION,
+        now: () => now,
+        externalReviewCoordinator: coordinator,
+      });
+      await harness.poll({ conversation: [triggerComment()] });
+      assert.equal(seen.at(-1)?.status, 'running');
+
+      now = TRIGGER_MS + BOT_TURN_TIMEOUT_MS;
+      const ci = new CiCdRouter({
+        taskStore: harness.taskStore,
+        deliveryDeps: { messageStore: harness.messageStore },
+        waitLifecycle: harness.lifecycle,
+        log: logger,
+      });
+      const ciResult = await ci.route({
+        repoFullName: 'owner/repo',
+        prNumber: 1394,
+        headSha: HEAD,
+        prState: 'open',
+        aggregateBucket: 'pending',
+        checks: [],
+      });
+      assert.notEqual(ciResult.kind, 'notified', 'CI has no authority to consume review-turn timeouts');
+
+      const conflict = new ConflictRouter({
+        taskStore: harness.taskStore,
+        deliveryDeps: { messageStore: harness.messageStore },
+        waitLifecycle: harness.lifecycle,
+        log: logger,
+      });
+      const conflictResult = await conflict.route({
+        repoFullName: 'owner/repo',
+        prNumber: 1394,
+        headSha: HEAD,
+        mergeState: 'MERGEABLE',
+      });
+      assert.notEqual(conflictResult.kind, 'notified', 'conflict has no authority to consume review-turn timeouts');
+      assert.equal(
+        (await harness.taskStore.get(harness.task.id)).automationState.await.baseline.botTurns[BOT].triggerId,
+        21,
+        'the round remains available to the review-feedback owner',
+      );
+
+      await harness.poll();
+      assert.equal(seen.at(-1)?.status, 'failed_or_timeout');
     });
 
     test('a poll with no bot activity and no open round says nothing', async () => {

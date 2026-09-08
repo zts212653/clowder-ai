@@ -134,6 +134,7 @@ export class ReviewFeedbackRouter {
     const result = await this.opts.waitLifecycle.observe({
       taskId: tracking.taskId,
       events,
+      botTurnEvaluation: 'review_feedback',
       facts: {
         headSha: signal.headSha,
         review: {

@@ -48,6 +48,14 @@ export interface GitHubWaitObservation {
   readonly taskId: string;
   readonly facts: GitHubWaitFacts;
   readonly events?: readonly GitHubTrackingEvent[];
+  /**
+   * Grants this observation ownership of bot-turn timeout evaluation.
+   *
+   * Only review-feedback observations may set this: that pipeline also records the resulting
+   * F168 cloud-review status. CI and conflict observations carry normalized events too, but
+   * allowing either to advance this clock would consume a timeout before F168 can observe it.
+   */
+  readonly botTurnEvaluation?: 'review_feedback';
   readonly collectorPatch?: GitHubCollectorPatch;
   readonly subjectState?: 'merged' | 'closed';
   readonly at?: number;
@@ -238,11 +246,10 @@ export class GitHubWaitLifecycleService {
             },
           } as AutomationState)
         : collectorState;
-      // The turn clock is only meaningful on a pass that also RAN the turn-aware matcher.
-      // A CI or conflict observation carries no events and never evaluates turns; letting it
-      // advance the clock would retire an open turn that nobody reported — the A28 signal
-      // would be deleted between two polls instead of delivered.
-      const turnClock = input.events ? { now: at } : undefined;
+      // Events are not authority to consume a bot timeout: CI and conflict observations carry
+      // events for their own predicates. The review-feedback pipeline alone owns this clock
+      // because it also records the timeout in F168 before the renewed baseline retires it.
+      const turnClock = input.botTurnEvaluation === 'review_feedback' ? { now: at } : undefined;
       const eventMatches = input.events
         ? matchGitHubTrackingEvents(active.continuation.when, active.baseline, input.events, {
             ...turnClock,
