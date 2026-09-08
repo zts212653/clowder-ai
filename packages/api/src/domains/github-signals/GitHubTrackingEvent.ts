@@ -12,6 +12,7 @@ import {
   foldBotTurns,
   type GitHubBotTurnTransition,
   type KnownBot,
+  resolveKnownBotAuthor,
   resolveMentionedKnownBot,
 } from './GitHubBotTurn.js';
 
@@ -509,10 +510,121 @@ export function externalResponseSummary(input: {
   readonly author: string;
   readonly body: string;
 }): string {
-  const body =
-    input.body
-      .replace(/[\r\n\t ]+/g, ' ')
-      .trim()
-      .slice(0, 500) || '(no text)';
-  return `${input.surface} #${input.id} by ${input.author} — [UNTRUSTED EXTERNAL CONTENT] ${body}`;
+  const normalizedBody = normalizeExternalResponseBody(input.body, resolveKnownBotAuthor(input.author) !== null);
+  const body = normalizedBody.trim().length > 0 ? normalizedBody : '(no text)';
+  const quotedBody = body
+    .split('\n')
+    .map((line) => (line ? `> ${line}` : '>'))
+    .join('\n');
+  return `${input.surface} #${input.id} by ${input.author} — [UNTRUSTED EXTERNAL CONTENT]\n${quotedBody}`;
+}
+
+const GITHUB_MARKDOWN_BLOCK_BREAK =
+  /<\s*(?:br\s*\/?|\/(?:blockquote|details|div|h[1-6]|li|ol|p|pre|summary|table|tbody|td|th|thead|tr|ul))\s*>/gi;
+const GITHUB_MARKDOWN_HTML_TAG =
+  /<\/?(?:a|abbr|b|blockquote|br|code|dd|del|details|div|dl|dt|em|figcaption|figure|h[1-6]|hr|i|iframe|img|kbd|li|mark|ol|p|pre|s|script|span|strong|style|sub|summary|sup|svg|table|tbody|td|th|thead|tr|ul)\b[^>]*>/gi;
+const GITHUB_DETAILS_BLOCK = /<details\b[^>]*>[\s\S]*?<\/details\s*>/gi;
+const CODEX_GITHUB_HELP_SUMMARY = /<summary\b[^>]*>[\s\S]*?About\s+Codex\s+in\s+GitHub[\s\S]*?<\/summary\s*>/i;
+const MARKDOWN_FENCE = /^[ \t]{0,3}(`{3,}|~{3,})/;
+const MAX_EXTERNAL_RESPONSE_SOURCE_CHARS = 8_192;
+
+/**
+ * GitHub returns comment bodies as source Markdown. That source is safe to persist, but it is
+ * not a ready-made chat fragment: raw HTML controls render literally and flattening Markdown
+ * destroys both lists and the trust boundary. Keep meaningful content up to a generous explicit
+ * bound, remove the Codex connector's known help disclosure only for a known bot identity, and
+ * strip presentation-only HTML while retaining its text. Code examples stay byte-for-byte intact.
+ * The caller quotes every resulting line so external Markdown cannot impersonate the surrounding
+ * wait outcome fields.
+ */
+function normalizeExternalResponseBody(source: string, stripCodexHelp: boolean): string {
+  let end = Math.min(source.length, MAX_EXTERNAL_RESPONSE_SOURCE_CHARS);
+  if (end < source.length && /[\uD800-\uDBFF]/.test(source[end - 1] ?? '')) end -= 1;
+  const omittedCharacters = source.length - end;
+  const normalized = source.slice(0, end).replace(/\r\n?/g, '\n');
+  const cleaned = transformOutsideFencedCode(normalized, (markdown) =>
+    transformOutsideInlineCode(markdown, (prose) =>
+      prose
+        .replace(/<!--[\s\S]*?-->/g, '')
+        .replace(GITHUB_DETAILS_BLOCK, (block) =>
+          stripCodexHelp && CODEX_GITHUB_HELP_SUMMARY.test(block) ? '' : block,
+        )
+        .replace(GITHUB_MARKDOWN_BLOCK_BREAK, '\n')
+        .replace(GITHUB_MARKDOWN_HTML_TAG, ''),
+    ),
+  );
+
+  const meaningful = cleaned.replace(/^(?:[ \t]*\n)+/, '').replace(/(?:\n[ \t]*)+$/, '');
+  if (omittedCharacters === 0) return meaningful;
+
+  const closingFence = closingFenceForTruncatedMarkdown(meaningful);
+  const marker = `… [truncated ${omittedCharacters} characters from original GitHub body]`;
+  return meaningful ? `${meaningful}${closingFence}\n\n${marker}` : marker;
+}
+
+function closingFenceForTruncatedMarkdown(markdown: string): string {
+  let fence: { character: string; length: number } | undefined;
+  for (const line of markdown.split('\n')) {
+    if (!fence) {
+      const opening = line.match(MARKDOWN_FENCE)?.[1];
+      if (opening) fence = { character: opening[0], length: opening.length };
+      continue;
+    }
+
+    const closing = line.match(/^[ \t]{0,3}(`+|~+)[ \t]*$/)?.[1];
+    if (closing?.startsWith(fence.character) && closing.length >= fence.length) fence = undefined;
+  }
+  return fence ? `\n${fence.character.repeat(fence.length)}` : '';
+}
+
+function transformOutsideFencedCode(source: string, transform: (markdown: string) => string): string {
+  const output: string[] = [];
+  let prose: string[] = [];
+  let fence: { character: string; length: number } | undefined;
+
+  const flushProse = () => {
+    if (prose.length === 0) return;
+    output.push(transform(prose.join('\n')));
+    prose = [];
+  };
+
+  for (const line of source.split('\n')) {
+    if (fence) {
+      output.push(line);
+      const marker = line.match(/^[ \t]{0,3}(`+|~+)[ \t]*$/)?.[1];
+      if (marker?.startsWith(fence.character) && marker.length >= fence.length) {
+        fence = undefined;
+      }
+      continue;
+    }
+
+    const opening = line.match(MARKDOWN_FENCE)?.[1];
+    if (!opening) {
+      prose.push(line);
+      continue;
+    }
+
+    flushProse();
+    output.push(line);
+    fence = { character: opening[0], length: opening.length };
+  }
+
+  flushProse();
+  return output.join('\n');
+}
+
+function transformOutsideInlineCode(source: string, transform: (markdown: string) => string): string {
+  let sentinel = '\0';
+  while (source.includes(sentinel)) sentinel += '\0';
+
+  const codeSpans: string[] = [];
+  const masked = source.replace(/(`+)[\s\S]*?\1/g, (code) => {
+    const index = codeSpans.push(code) - 1;
+    return `${sentinel}${index}${sentinel}`;
+  });
+  let transformed = transform(masked);
+  for (const [index, code] of codeSpans.entries()) {
+    transformed = transformed.replace(`${sentinel}${index}${sentinel}`, () => code);
+  }
+  return transformed;
 }

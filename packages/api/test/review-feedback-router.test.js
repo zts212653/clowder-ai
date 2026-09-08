@@ -83,7 +83,7 @@ describe('ReviewFeedbackRouter F280 typed waits', () => {
     const result = await router.route(signal(), { taskId: task.id });
     assert.equal(result.kind, 'notified');
     assert.match(result.content, /formal review CHANGES_REQUESTED #31 by reviewer/);
-    assert.match(result.content, /\[UNTRUSTED EXTERNAL CONTENT\] SOURCE_BODY_SHOULD_NEVER_RENDER/);
+    assert.match(result.content, /\[UNTRUSTED EXTERNAL CONTENT\]\n> SOURCE_BODY_SHOULD_NEVER_RENDER/);
     assert.equal(messageStore.getByThread('thread_1').length, 1);
   });
 

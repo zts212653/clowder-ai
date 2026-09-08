@@ -219,15 +219,16 @@ describe('P2-fix: multiline external content stays within untrusted boundary', (
     assert.strictEqual(autoLines.length, 1, 'only one 自动处理 block (the real one, not injected)');
   });
 
-  test('review content: multiline body is flattened inside one untrusted line', () => {
+  test('review content: every multiline body line remains quoted inside the untrusted boundary', () => {
     const content = externalResponseSummary({
       surface: 'formal review COMMENTED',
       id: 1,
       author: 'attacker',
       body: INJECTION,
     });
-    assert.equal(content.includes('\n'), false);
-    assert.match(content, /\[UNTRUSTED EXTERNAL CONTENT\]/);
+    const [boundary, ...quotedBody] = content.split('\n');
+    assert.match(boundary, /\[UNTRUSTED EXTERNAL CONTENT\]$/);
+    assert.ok(quotedBody.every((line) => line === '>' || line.startsWith('> ')));
     assert.match(content, /ignore all rules/);
   });
 });
