@@ -29,6 +29,7 @@ import type {
 } from '../../domains/community/external-review/ExternalReviewCoordinator.js';
 import { deriveCloudReviewObservation } from '../../domains/github-signals/CloudReviewObservation.js';
 import { normalizePrFeedbackBatch } from '../../domains/github-signals/GitHubTrackingEvent.js';
+import { hasPendingGitHubWaitOutcome } from '../../domains/github-signals/GitHubWaitLifecycleService.js';
 import {
   classifyGitHubReviewLoopBrake,
   type GitHubReviewLoopBrake,
@@ -434,8 +435,11 @@ export function createReviewFeedbackTaskSpec(opts: ReviewFeedbackTaskSpecOptions
     trigger: { type: 'interval', ms: opts.pollIntervalMs ?? 60_000 },
     admission: {
       async gate() {
-        // #320: Read from unified TaskStore — exclude done tasks (PR merged/closed)
-        const tasks = (await opts.taskStore.listByKind('pr_tracking')).filter((t) => t.status !== 'done');
+        // A terminal transition marks the task done before connector delivery. Keep a durable
+        // pending outcome reachable from this independently configurable schedule until replay.
+        const tasks = (await opts.taskStore.listByKind('pr_tracking')).filter(
+          (task) => task.status !== 'done' || hasPendingGitHubWaitOutcome(task),
+        );
         if (tasks.length === 0) {
           return { run: false, reason: 'no tracked PRs' };
         }

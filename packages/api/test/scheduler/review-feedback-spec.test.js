@@ -223,6 +223,34 @@ describe('review scheduler F280 adapter', () => {
     assert.equal(gate.workItems.length, 1);
   });
 
+  test('a done task remains collectable while its durable outcome awaits delivery', async () => {
+    const taskStore = new TaskStore();
+    const task = await createTracked(taskStore);
+    await taskStore.update(task.id, { status: 'done' });
+    await taskStore.patchAutomationState(task.id, {
+      waitOutcome: {
+        v: 1,
+        outcomeId: 'review-terminal-pending',
+        generation: 1,
+        subjectRef: 'pr:owner/repo#7',
+        ownerFence: { kind: 'containing_task', generation: 1 },
+        reason: 'subject_terminal',
+        at: 500,
+        delivery: 'pending',
+        terminalSubjectState: 'merged',
+      },
+    });
+    const spec = createReviewFeedbackTaskSpec(
+      options(taskStore, {
+        route: async () => ({ kind: 'skipped', reason: 'state-only', observationEvaluated: false }),
+      }),
+    );
+
+    const gate = await spec.admission.gate();
+    assert.equal(gate.run, true);
+    assert.equal(gate.workItems.length, 1);
+  });
+
   test('only router-confirmed typed outcome invokes with the unified reason', async () => {
     const taskStore = new TaskStore();
     await createTracked(taskStore);

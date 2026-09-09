@@ -12,6 +12,7 @@
 import type { CatId, TaskItem } from '@cat-cafe/shared';
 import { parsePrSubjectKey } from '@cat-cafe/shared';
 import type { ITaskStore } from '../../domains/cats/services/stores/ports/TaskStore.js';
+import { hasPendingGitHubWaitOutcome } from '../../domains/github-signals/GitHubWaitLifecycleService.js';
 import { claimableSourceCategory, mayAutoWakeOwner } from '../../domains/github-signals/WaitWakeDisposition.js';
 import type { ExecuteContext, TaskSpec_P1 } from '../scheduler/types.js';
 import type { AutoResolveResult, ConflictAutoExecutor } from './ConflictAutoExecutor.js';
@@ -69,8 +70,11 @@ export function createConflictCheckTaskSpec(opts: ConflictCheckTaskSpecOptions):
     trigger: { type: 'interval', ms: opts.pollIntervalMs ?? 5 * 60 * 1000 },
     admission: {
       async gate() {
-        // #320: Read from unified TaskStore — exclude done tasks (PR merged/closed)
-        const tasks = (await opts.taskStore.listByKind('pr_tracking')).filter((t) => t.status !== 'done');
+        // A terminal transition marks the task done before connector delivery. Keep a durable
+        // pending outcome reachable from this independently configurable schedule until replay.
+        const tasks = (await opts.taskStore.listByKind('pr_tracking')).filter(
+          (task) => task.status !== 'done' || hasPendingGitHubWaitOutcome(task),
+        );
         if (tasks.length === 0) {
           return { run: false, reason: 'no tracked PRs' };
         }

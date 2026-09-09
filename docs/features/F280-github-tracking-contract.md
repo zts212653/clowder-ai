@@ -134,7 +134,10 @@ poll 可能重叠并倒序完成：较新的 poll 已删除被 dismiss 的 verdi
 写回旧快照，会让下一轮把同一次 dismissal 通知第二遍。普通 poll 只携带逐 review ID 的
 `expectedState → nextState`，在 lifecycle CAS 与 source-cursor commit 两个写入口都对**当时最新**
 的持久状态条件应用；旧任务的首次完整快照也只在该字段仍缺席时初始化。游标保持单调，但不
-因此取得覆盖较新 verdict 状态的权限。
+因此取得覆盖较新 verdict 状态的权限。条件更新还必须返回本次真正应用的 transition receipt；
+原地 dismissal 只有出现在 receipt 中，才有权越过数字 review frontier 参与匹配。两个 poll
+都从同一旧快照读到 dismissal 时，后执行者的 transition 被拒绝，其事件也必须同时失效，不能
+借 `inPlaceReviewDismissal` 标记再次通知下一代。
 
 > 这里曾写成"默认关闭的那一个（`head_changed`）"。那句话只在作者视角下成立，
 > 和 A27「非作者 `include: ["bot_interaction"]` ⇒ bot 回合恢复通知」直接冲突。
@@ -321,6 +324,9 @@ A26 已经写明，静音一条真信号比多一条噪音严重得多。
   的半提交状态不可构造。所有 lifecycle event-log backend 都必须按稳定 `eventId` 幂等；若
   event log 持续不可用，系统有意停止该 outcome 的通知而不是让账本与现实分叉，且 pending
   outcome 必须保留供恢复。
+- PR 的 CI、review-feedback、conflict poller 是独立可配置的 schedule；任一 poller 运行时都必须
+  把 `done + waitOutcome.delivery=pending` 视为可收集，并优先重放该 outcome。恢复资格不能只挂在
+  CI schedule 上，否则关掉 CI poller 会让 review / conflict 产生的终态通知债只能等进程重启。
 - 投递附加元数据属于**产出它的 outcome**，与 outcome 一起持久化、一起重放。后续 CI / review /
   conflict 轮询即使恰好负责 retry，也不得把自己的 metadata 借给旧 outcome，亦不得因自己没有
   metadata 而擦除旧值。
@@ -476,6 +482,8 @@ baseline: snapshot.baseline,        // 当前最大值
 | A40 | outcome N 已安装但 lifecycle event 首次追加失败，且 N+1 已续订 | 不投递 N；下一轮先补 N 的 event，再投递 N，之后才求值 N+1 | 已通知但审计事件永久丢失，N+1 覆盖唯一恢复记录 |
 | A41 | 已见的 `APPROVED` / `CHANGES_REQUESTED` 在**同一 review ID**上变成 `DISMISSED` | 投递一次撤销；状态快照在 durable processing 后删除该 active verdict；重复轮询不重放 | 只看 `id > cursor`，继续把已撤销的 approval / changes-request 当成当前事实 |
 | A42 | 两个 review-feedback poll 重叠，较新的 dismissal 先落盘，较旧的静默 poll 后执行 | 旧 poll 不恢复已删除 verdict；下一轮不重复合成 dismissal | 用 admission 时重建的整张 map 覆盖较新的 collector 状态 |
+| A43 | 两个 review-feedback poll 都从同一旧快照读到同一个 dismissal，再依次执行 | 只有 conditional transition 真正应用的第一个 poll 通知；第二个 transition 与事件一起失效 | 状态 CAS 拒绝旧写，但 dismissal 仍无条件越过 review frontier，向下一代重复通知 |
+| A44 | review 或 conflict poll 终态化后投递失败，同时 CI schedule 未注册 | 任一仍运行的 PR poller 都可重放 durable pending outcome；不依赖重启 | 恢复资格只在 CI gate，独立 schedule 配置把通知债永久留到重启 |
 
 **A3 / A6 / A17 是历史事故的直接复现，必须有独立测试。**
 **A22 是"静默丢真信号"，优先级高于任何降噪诉求。**
@@ -489,7 +497,7 @@ baseline: snapshot.baseline,        // 当前最大值
 | 归一化（回合识别：mention + 已知 bot 身份） | A23 A24 A25 A26 A29 — bot 回合是**改事件的名字**，不是加一路事件 |
 | 归一化（回合状态：开 / 闭 / 超时未闭） | A28 A29 — 仅 review-feedback 观察拥有回合时钟；CI / conflict 即使携带 events 也不得消费。回合随 frontier 同批推进，报了必然同时退休 |
 | 订阅过滤 | A1 A19 A20 A23 A24 A25 A27 |
-| 已见过滤（per-source frontier + durable prefix + conditional verdict transition） | A12 A14 A16 **A36 A42** |
+| 已见过滤（per-source frontier + durable prefix + conditional verdict transition receipt） | A12 A14 A16 **A36 A42 A43** |
 | 受众过滤（唯一一处，只挡投递） | A6 A7 A8 A9 A10 A11 A26 **A30 A32** — 自己写的仍进流：它要开回合、要推 frontier。角色决定"这个作者的话我要不要听" |
 | 投递到注册 thread | A21 |
 | 推进 frontier | A13 A14 |
@@ -498,7 +506,7 @@ baseline: snapshot.baseline,        // 当前最大值
 | 状态因果过滤 | **A37** — `base_behind` 只认同一个 HEAD 的 false→true；换 HEAD 只更新下一轮基线 |
 | 注册时的基线安装（不得前进） | A22 |
 | F168 裁决分类 | **A38** — `COMMENTED` 不是 verdict；显式 approval 或 canonical current-commit clean 才能放行 |
-| outcome 持久化与重放 | **A39 A40** — metadata 跟 outcome；lifecycle event 先于 connector delivery，旧 outcome 清账前不得求值或覆盖 |
+| outcome 持久化与重放 | **A39 A40 A44** — metadata 跟 outcome；lifecycle event 先于 connector delivery，旧 outcome 清账前不得求值或覆盖；每个独立 PR poller 都保留恢复资格 |
 | **链子里没有的东西** | A15（无 `headSha` 门）· A17（追踪本身无期限）· A10（无正文判断）· A6（bot 不是噪音身份） |
 
 > **A17 与 A28 不矛盾**：追踪本身没有任何过期时间（A17）。唯一的时钟长在**一个回合**上，

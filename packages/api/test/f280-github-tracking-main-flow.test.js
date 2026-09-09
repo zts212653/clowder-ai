@@ -235,6 +235,34 @@ describe('#1394 GitHub tracking main flow', () => {
     assert.deepEqual(nextGate.workItems[0].signal.newDecisions, [], 'the dismissal is not synthesized a second time');
   });
 
+  test('overlapping dismissal observations notify only when their state transition wins', async () => {
+    const review = {
+      id: 31,
+      body: 'The current revision is ready.',
+      submitted_at: '2026-09-02T09:32:00Z',
+      user: { login: 'FormalReviewer', type: 'User' },
+      state: 'APPROVED',
+    };
+    const reviews = [review];
+    const { messageStore, taskStore, task, spec } = await createReviewHarness({ reviews });
+
+    await runOnePoll(spec);
+    review.state = 'DISMISSED';
+
+    const firstGate = await spec.admission.gate();
+    const overlappingGate = await spec.admission.gate();
+    assert.equal(firstGate.workItems[0].signal.newDecisions[0].previousState, 'APPROVED');
+    assert.equal(overlappingGate.workItems[0].signal.newDecisions[0].previousState, 'APPROVED');
+
+    for (const item of firstGate.workItems) await spec.run.execute(item.signal, item.subjectKey, {});
+    for (const item of overlappingGate.workItems) await spec.run.execute(item.signal, item.subjectKey, {});
+
+    const delivered = messageStore.getByThread('thread-registration');
+    assert.equal(delivered.length, 2, 'the stale dismissal snapshot must not notify generation N+1');
+    assert.match(delivered[1].content, /formal review DISMISSED #31 by FormalReviewer/);
+    assert.deepEqual((await taskStore.get(task.id)).automationState.review.activeDecisionStatesByReviewId, {});
+  });
+
   test('all three self-authored surfaces are consumed without notifying, case-insensitively', async () => {
     const { messageStore, taskStore, task, spec } = await createReviewHarness({
       inline: [

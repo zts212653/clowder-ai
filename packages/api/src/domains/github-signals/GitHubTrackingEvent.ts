@@ -48,7 +48,8 @@ export interface GitHubTrackingEvent {
   readonly botTurn?: GitHubBotTurnTransition;
   /**
    * GitHub changed an already-seen verdict review to DISMISSED without changing its numeric id.
-   * This is the only review revision allowed to cross an already-advanced numeric source frontier.
+   * This is the only review revision eligible to cross an already-advanced numeric source
+   * frontier; lifecycle grants that eligibility only when its conditional state transition wins.
    */
   readonly inPlaceReviewDismissal?: true;
 }

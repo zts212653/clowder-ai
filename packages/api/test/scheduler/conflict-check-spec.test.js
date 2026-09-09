@@ -28,6 +28,46 @@ describe('conflict scheduler F280 adapter', () => {
     assert.equal(gate.workItems[0].signal.signal.mergeState, 'MERGEABLE');
   });
 
+  test('a done task remains collectable while its durable outcome awaits delivery', async () => {
+    const taskStore = new TaskStore();
+    const task = await taskStore.create({
+      kind: 'pr_tracking',
+      subjectKey: 'pr:owner/repo#7',
+      threadId: 'thread_1',
+      title: 'PR wait',
+      ownerCatId: 'codex-sol',
+      why: 'test',
+      createdBy: 'codex-sol',
+      userId: 'user_1',
+    });
+    await taskStore.update(task.id, {
+      status: 'done',
+      automationState: {
+        waitOutcome: {
+          v: 1,
+          outcomeId: 'conflict-terminal-pending',
+          generation: 1,
+          subjectRef: 'pr:owner/repo#7',
+          ownerFence: { kind: 'containing_task', generation: 1 },
+          reason: 'subject_terminal',
+          at: 500,
+          delivery: 'pending',
+          terminalSubjectState: 'closed',
+        },
+      },
+    });
+    const spec = createConflictCheckTaskSpec({
+      taskStore,
+      checkMergeable: async () => ({ mergeState: 'MERGEABLE', headSha: 'aaa', isBehind: false }),
+      conflictRouter: { route: async () => ({ kind: 'skipped', reason: 'state-only' }) },
+      log: { info() {}, warn() {}, error() {} },
+    });
+
+    const gate = await spec.admission.gate();
+    assert.equal(gate.run, true);
+    assert.equal(gate.workItems.length, 1);
+  });
+
   test('does not invoke when typed wait remains state-only', async () => {
     const calls = [];
     const spec = createConflictCheckTaskSpec({

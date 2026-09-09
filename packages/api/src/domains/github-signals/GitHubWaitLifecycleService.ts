@@ -35,7 +35,10 @@ import {
   REVIEW_LOOP_HISTORY_WARN_NEXT_STEP,
   renderGitHubWaitOutcome,
 } from './github-wait-renderer.js';
-import { applyReviewDecisionStateUpdate, type ReviewDecisionStateUpdate } from './ReviewDecisionStateUpdate.js';
+import {
+  applyReviewDecisionStateUpdateWithReceipt,
+  type ReviewDecisionStateUpdate,
+} from './ReviewDecisionStateUpdate.js';
 
 export interface GitHubCollectorPatch {
   readonly review?: NonNullable<PrAutomationState['review']>;
@@ -127,9 +130,16 @@ function mergeCollectorState(
   state: AutomationState | undefined,
   patch: GitHubCollectorPatch | undefined,
   reviewDecisionStateUpdate: ReviewDecisionStateUpdate | undefined,
-): AutomationState {
+): {
+  readonly state: AutomationState;
+  readonly appliedReviewDecisionTransitions: ReadonlySet<string>;
+} {
   const merged = mergeTaskAutomationState(state, (patch ?? {}) as Partial<AutomationState>);
-  return applyReviewDecisionStateUpdate(merged, reviewDecisionStateUpdate) ?? {};
+  const applied = applyReviewDecisionStateUpdateWithReceipt(merged, reviewDecisionStateUpdate);
+  return {
+    state: applied.state ?? {},
+    appliedReviewDecisionTransitions: applied.appliedTransitionReviewIds,
+  };
 }
 
 function lifecycleEvent(task: TaskItem, outcome: WaitOutcomeV1): WaitTerminationEventV1 {
@@ -209,7 +219,17 @@ export class GitHubWaitLifecycleService {
 
       const state = task.automationState;
       const active = state?.await;
-      const collectorState = mergeCollectorState(state, input.collectorPatch, input.reviewDecisionStateUpdate);
+      const collectorMerge = mergeCollectorState(state, input.collectorPatch, input.reviewDecisionStateUpdate);
+      const collectorState = collectorMerge.state;
+      // A GitHub dismissal mutates an existing review without advancing its numeric id. That
+      // revision may bypass the numeric frontier only when its expected-state transition won
+      // against this exact CAS candidate. A delayed overlapping collector whose transition was
+      // rejected has no new event to match, notify, or fold into the renewed baseline.
+      const effectiveEvents = input.events?.filter(
+        (event) =>
+          event.inPlaceReviewDismissal !== true ||
+          collectorMerge.appliedReviewDecisionTransitions.has(String(event.id)),
+      );
       if (!active) {
         if (input.subjectState) {
           const installed = await this.opts.taskStore.replaceAutomationStateIfGeneration(task.id, {
@@ -257,8 +277,8 @@ export class GitHubWaitLifecycleService {
       // events for their own predicates. The review-feedback pipeline alone owns this clock
       // because it also records the timeout in F168 before the renewed baseline retires it.
       const turnClock = input.botTurnEvaluation === 'review_feedback' ? { now: at } : undefined;
-      const eventMatches = input.events
-        ? matchGitHubTrackingEvents(active.continuation.when, active.baseline, input.events, {
+      const eventMatches = effectiveEvents
+        ? matchGitHubTrackingEvents(active.continuation.when, active.baseline, effectiveEvents, {
             ...turnClock,
             audience: {
               ...(this.opts.selfGitHubLogin?.() ? { selfLogin: this.opts.selfGitHubLogin() } : {}),
@@ -268,7 +288,7 @@ export class GitHubWaitLifecycleService {
             },
           })
         : [];
-      const typedPredicates = input.events
+      const typedPredicates = effectiveEvents
         ? active.continuation.when.filter((predicate) => !GITHUB_TRACKING_EVENT_KINDS.has(predicate.kind))
         : active.continuation.when;
       const matched = [...eventMatches, ...matchGitHubWaitPredicates(typedPredicates, active.baseline, input.facts)];
@@ -292,7 +312,7 @@ export class GitHubWaitLifecycleService {
               ...active,
               baseline: advanceGitHubTrackingBaseline(
                 this.buildRenewalBaseline(active, input.facts, collectorState),
-                input.events ?? [],
+                effectiveEvents ?? [],
                 turnClock,
               ),
             },
@@ -354,7 +374,7 @@ export class GitHubWaitLifecycleService {
           ownerFence: { kind: 'containing_task' as const, generation: newGeneration },
           baseline: advanceGitHubTrackingBaseline(
             this.buildRenewalBaseline(active, input.facts, collectorState),
-            input.events ?? [],
+            effectiveEvents ?? [],
             turnClock,
           ),
           continuation: {
