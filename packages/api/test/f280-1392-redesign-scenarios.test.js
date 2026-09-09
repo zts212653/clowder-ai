@@ -4,6 +4,7 @@ import { describe, it } from 'node:test';
 
 const CATALOG_URL = new URL('../dist/domains/github-signals/GitHubWaitPredicateCatalog.js', import.meta.url);
 const DEFAULTSET_URL = new URL('../dist/domains/github-signals/PrTrackingDefaultSet.js', import.meta.url);
+const TRACKING_EVENT_URL = new URL('../dist/domains/github-signals/GitHubTrackingEvent.js', import.meta.url);
 const STATE_MACHINE_URL = new URL('../dist/domains/ball-custody/wait-state-machine.js', import.meta.url);
 const SHARED_URL = new URL('../../shared/dist/types/github-wait.js', import.meta.url);
 
@@ -169,6 +170,23 @@ describe('F280 #1392 redesign — converged contract', () => {
       const facts = { headSha: 'new-head', base: { isBehind: true } };
       const when = [{ kind: 'pr_base_behind' }];
       assert.equal(matchGitHubWaitPredicates(when, baseline, facts).length, 0);
+    });
+
+    it('drops the previous HEAD base fact when an event-only batch advances HEAD', async () => {
+      const { advanceGitHubTrackingBaseline } = await import(TRACKING_EVENT_URL.href);
+      const advanced = advanceGitHubTrackingBaseline(
+        { capturedAt: 100, headSha: 'old-head', base: { isBehind: false } },
+        [
+          {
+            type: 'pr_head_changed',
+            source: 'pr_head',
+            id: 'new-head',
+            summary: 'HEAD changed to new-head',
+          },
+        ],
+      );
+      assert.equal(advanced.headSha, 'new-head');
+      assert.equal(advanced.base, undefined, 'an event producer cannot retain ancestry for a replaced HEAD');
     });
 
     it('schema accepts pr_base_behind', async () => {

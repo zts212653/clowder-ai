@@ -461,10 +461,35 @@ function latestStringFrontier(
   source: GitHubTrackingSource,
   current: string,
 ): string {
+  return latestStringObservation(events, source) ?? current;
+}
+
+function latestStringObservation(
+  events: readonly GitHubTrackingEvent[],
+  source: GitHubTrackingSource,
+): string | undefined {
   return events.reduce(
-    (latest, event) => (event.source === source && typeof event.id === 'string' ? event.id : latest),
-    current,
+    (latest: string | undefined, event) =>
+      event.source === source && typeof event.id === 'string' ? event.id : latest,
+    undefined,
   );
+}
+
+/**
+ * HEAD and base ancestry describe one PR snapshot. A base fact may survive an observation that
+ * leaves HEAD unchanged, but it must never cross a HEAD replacement unless that same observation
+ * supplies the replacement HEAD's base fact.
+ */
+export function mergePrHeadBaseSnapshot(
+  baseline: Pick<GitHubPrWaitBaseline, 'headSha' | 'base'>,
+  observation: { readonly headSha?: string; readonly base?: { readonly isBehind: boolean } },
+): Pick<GitHubPrWaitBaseline, 'headSha' | 'base'> {
+  const headSha = observation.headSha ?? baseline.headSha;
+  const base = observation.base ?? (headSha === baseline.headSha ? baseline.base : undefined);
+  return {
+    headSha,
+    ...(base ? { base: { ...base } } : {}),
+  };
 }
 
 function advancePrBaseline(
@@ -488,19 +513,22 @@ function advancePrBaseline(
   const headSha = observedHeadSha(baseline.headSha, events);
   const ciFingerprint = latestStringFrontier(events, 'pr_ci', baseline.ci?.fingerprint ?? '');
   const conflictState = latestStringFrontier(events, 'pr_conflict', baseline.conflict?.mergeState ?? '');
-  const baseState = latestStringFrontier(events, 'pr_base', baseline.base ? String(baseline.base.isBehind) : '');
+  const baseState = latestStringObservation(events, 'pr_base');
+  const headBase = mergePrHeadBaseSnapshot(baseline, {
+    headSha,
+    ...(baseState !== undefined ? { base: { isBehind: baseState === 'true' } } : {}),
+  });
   // A28/A29: opening, closing and expiring a turn happen on the same pass that advances every
   // other frontier, so a turn can never be reported without also being retired.
   const openTurns = foldBotTurns(baseline.botTurns, events, headSha);
   for (const expired of expiredBotTurns(openTurns, options)) delete openTurns[expired.bot];
-  const { botTurns: _retired, ...withoutTurns } = baseline;
+  const { botTurns: _retired, headSha: _previousHead, base: _previousBase, ...withoutTurns } = baseline;
   return {
     ...withoutTurns,
-    headSha,
+    ...headBase,
     review,
     ...(baseline.ci && ciFingerprint ? { ci: { ...baseline.ci, fingerprint: ciFingerprint } } : {}),
     ...(conflictState ? { conflict: { mergeState: conflictState } } : {}),
-    ...(baseState ? { base: { isBehind: baseState === 'true' } } : {}),
     ...(Object.keys(openTurns).length > 0 ? { botTurns: openTurns } : {}),
   };
 }

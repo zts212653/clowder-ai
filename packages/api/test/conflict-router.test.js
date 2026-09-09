@@ -5,6 +5,7 @@ const { TaskStore } = await import('../dist/domains/cats/services/stores/ports/T
 const { MessageStore } = await import('../dist/domains/cats/services/stores/ports/MessageStore.js');
 const { GitHubWaitLifecycleService } = await import('../dist/domains/github-signals/GitHubWaitLifecycleService.js');
 const { ConflictRouter } = await import('../dist/infrastructure/email/ConflictRouter.js');
+const { ReviewFeedbackRouter } = await import('../dist/infrastructure/email/ReviewFeedbackRouter.js');
 
 async function setup(when, baseline = {}) {
   const taskStore = new TaskStore();
@@ -48,7 +49,7 @@ async function setup(when, baseline = {}) {
     waitLifecycle,
     log: { info() {}, warn() {}, error() {} },
   });
-  return { router, messageStore, taskStore, task };
+  return { router, messageStore, taskStore, task, waitLifecycle };
 }
 
 describe('ConflictRouter F280 typed waits', () => {
@@ -218,5 +219,46 @@ describe('ConflictRouter F280 typed waits', () => {
     const baseline = (await taskStore.get(task.id)).automationState.await.baseline;
     assert.equal(baseline.headSha, 'bbb2222');
     assert.equal(baseline.base.isBehind, true, 'the new HEAD ancestry is still retained as the next baseline');
+  });
+
+  test('a faster review poll cannot pair a replacement HEAD with the previous HEAD base fact', async () => {
+    const { router, taskStore, task, messageStore, waitLifecycle } = await setup([{ kind: 'pr_base_behind' }], {
+      base: { isBehind: false },
+    });
+    const review = new ReviewFeedbackRouter({
+      deliveryDeps: { messageStore },
+      waitLifecycle,
+      log: { info() {}, warn() {}, error() {} },
+    });
+
+    const reviewResult = await review.route(
+      {
+        repoFullName: 'owner/repo',
+        prNumber: 7,
+        headSha: 'bbb2222',
+        newComments: [],
+        newDecisions: [],
+        inlineCommentCursor: 0,
+        conversationCommentCursor: 0,
+        decisionCursor: 0,
+      },
+      { taskId: task.id },
+    );
+    assert.equal(reviewResult.kind, 'skipped');
+    const afterReview = (await taskStore.get(task.id)).automationState.await.baseline;
+    assert.equal(afterReview.headSha, 'bbb2222');
+    assert.equal(afterReview.base, undefined, 'a base fact cannot survive the HEAD it described');
+
+    const conflictResult = await router.route({
+      repoFullName: 'owner/repo',
+      prNumber: 7,
+      headSha: 'bbb2222',
+      mergeState: 'MERGEABLE',
+      mergeStateStatus: 'BEHIND',
+      isBehind: true,
+    });
+    assert.equal(conflictResult.kind, 'skipped', 'the later ancestry read establishes a baseline, not a base advance');
+    assert.equal(messageStore.getByThread('thread_1').length, 0);
+    assert.equal((await taskStore.get(task.id)).automationState.await.baseline.base.isBehind, true);
   });
 });

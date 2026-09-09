@@ -348,6 +348,11 @@ baseline: snapshot.baseline,        // 当前最大值
 > `headSha` / `ci.fingerprint` / `conflict.mergeState` / `base.isBehind` 是**状态比较**型
 > 基线而非单调游标。保留旧值意味着间隙期发生的 HEAD 变更会补触发——**这是对的**，
 > 那确实是真实发生过的事件。
+>
+> `headSha` 与 `base.isBehind` 共同描述同一个 PR 快照：观察未改变 HEAD 时可以保留既有
+> base 事实；一旦观察把 HEAD 从 A 推进到 B，就必须同时给出 B 的 base 事实，否则旧事实
+> 必须缺席。不得把 A 的 ancestry 与 B 的 HEAD 拼接，否则后续 poll 会把一次换 HEAD 误报成
+> “base branch advanced”。typed facts 与 normalized events 两条基线入口共用同一条合并规则。
 
 ---
 

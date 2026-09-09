@@ -26,6 +26,7 @@ import {
   GITHUB_TRACKING_EVENT_KINDS,
   type GitHubTrackingEvent,
   matchGitHubTrackingEvents,
+  mergePrHeadBaseSnapshot,
 } from './GitHubTrackingEvent.js';
 import { type GitHubWaitFacts, matchGitHubWaitPredicates } from './GitHubWaitPredicateCatalog.js';
 import {
@@ -514,9 +515,13 @@ export class GitHubWaitLifecycleService {
                   : {}),
             }
           : undefined;
+      const headBase = mergePrHeadBaseSnapshot(prev, {
+        ...(facts.headSha !== undefined ? { headSha: facts.headSha } : {}),
+        ...(facts.base ? { base: facts.base } : {}),
+      });
       return {
         capturedAt: this.now(),
-        headSha: facts.headSha ?? prev.headSha,
+        ...headBase,
         // A30: the PR author is FROZEN at registration and must survive every renewal. It is
         // not a frontier that an observation can refresh — nothing in `facts` carries it — so
         // rebuilding the baseline without it silently deletes the tracker's role. The audience
@@ -532,7 +537,6 @@ export class GitHubWaitLifecycleService {
             ? { ci: { ...prev.ci } }
             : {}),
         ...(facts.conflict ? { conflict: facts.conflict } : prev.conflict ? { conflict: { ...prev.conflict } } : {}),
-        ...(facts.base ? { base: facts.base } : prev.base ? { base: { ...prev.base } } : {}),
         // F280 section 4b: a renewal must carry OPEN bot turns forward. Dropping them here
         // would make every renewal silently forget that a bot was asked and never answered —
         // A28 would then be a capability that exists in code and never fires in production.
