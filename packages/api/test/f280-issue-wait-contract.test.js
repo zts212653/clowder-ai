@@ -249,19 +249,29 @@ describe('F280 Phase C issue wait lifecycle', () => {
       log: { info() {}, warn() {}, error() {} },
     });
     const triggered = [];
+    let metadataReads = 0;
+    let commentReads = 0;
     const spec = createIssueCommentTaskSpec({
       taskStore,
       issueCommentRouter: { route: async () => ({ kind: 'skipped', reason: 'legacy path unused' }) },
       waitLifecycle: lifecycle,
-      fetchComments: async () => [
-        {
-          id: 42,
-          author: 'issue-author',
-          body: 'The final comment must survive a connector outage.',
-          createdAt: '2026-09-08T00:00:00Z',
-        },
-      ],
-      fetchIssueState: async () => 'closed',
+      fetchComments: async () => {
+        commentReads += 1;
+        if (commentReads > 1) throw new Error('GitHub comments unavailable during local recovery');
+        return [
+          {
+            id: 42,
+            author: 'issue-author',
+            body: 'The final comment must survive a connector outage.',
+            createdAt: '2026-09-08T00:00:00Z',
+          },
+        ];
+      },
+      fetchIssueState: async () => {
+        metadataReads += 1;
+        if (metadataReads > 1) throw new Error('GitHub issue state unavailable during local recovery');
+        return 'closed';
+      },
       invokeTrigger: {
         trigger: async (_threadId, _catId, _userId, content) => {
           triggered.push(content);
@@ -287,6 +297,8 @@ describe('F280 Phase C issue wait lifecycle', () => {
 
     assert.equal(triggered.length, 1);
     assert.match(triggered[0], /Issue state: closed/);
+    assert.equal(metadataReads, 1, 'recovery must not re-read issue metadata');
+    assert.equal(commentReads, 1, 'recovery must not re-read issue comments');
     assert.equal((await taskStore.get(task.id)).automationState.waitOutcome.delivery, 'delivered');
   });
 

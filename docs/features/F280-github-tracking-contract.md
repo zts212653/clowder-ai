@@ -4,9 +4,9 @@ related_features: [F140, F168, F1392]
 topics: [github, pr-tracking, issue-tracking, notifications, wait-contract]
 doc_kind: spec
 created: 2026-09-02
-updated: 2026-09-08
+updated: 2026-09-09
 tips_exempt:
-  reason: Contract truth correction only — verdicts, replay metadata, lifecycle ordering, durable feedback prefixes, and same-HEAD base causality are documented without changing the public registration surface.
+  reason: Contract truth correction only — atomic re-registration and local issue recovery are documented without changing the public registration surface.
 ---
 
 # GitHub Tracking — 用户契约（#1392 / #1394 唯一真相源）
@@ -73,6 +73,12 @@ register_issue_tracking(repoFullName, issueNumber)
 
 `register_issue_tracking` 只有 `nextStep`：issue 的两个面（评论 / 关闭）都默认开，
 没有可调项——见 §2.3。
+
+重复注册的安装是一个 store 原子操作：以读取到的完整 tracking task revision 为前提，
+同时提交新的 thread / owner 路由、managed-work binding 与 wait 状态。若期间 collector 已经
+推进状态或安装 `waitOutcome.delivery=pending`，整笔注册返回冲突，**任何路由字段都不得先行
+改变**；否则旧 outcome 的重放会被投到新注册者的 thread。活跃 wait 的判断也必须来自这份
+被原子替换的当前 revision，不能沿用拉取 GitHub baseline 之前读到的旧 task。
 
 **调用方永远不接触**：GitHub 游标名、predicate 类型、`when`、`expiresAt`、
 `autoRenew`、受众白名单（`authorLogins`）。这些是服务端内部实现。
@@ -327,6 +333,8 @@ A26 已经写明，静音一条真信号比多一条噪音严重得多。
 - PR 的 CI、review-feedback、conflict poller 是独立可配置的 schedule；任一 poller 运行时都必须
   把 `done + waitOutcome.delivery=pending` 视为可收集，并优先重放该 outcome。恢复资格不能只挂在
   CI schedule 上，否则关掉 CI poller 会让 review / conflict 产生的终态通知债只能等进程重启。
+- issue poller 遇到 `waitOutcome.delivery=pending` 时同样先构造纯本地 recovery work item，不能先读
+  issue metadata / comments；已经持久化的通知债不应被 GitHub 宕机或 rate limit 阻塞。
 - 投递附加元数据属于**产出它的 outcome**，与 outcome 一起持久化、一起重放。后续 CI / review /
   conflict 轮询即使恰好负责 retry，也不得把自己的 metadata 借给旧 outcome，亦不得因自己没有
   metadata 而擦除旧值。
@@ -484,6 +492,8 @@ baseline: snapshot.baseline,        // 当前最大值
 | A42 | 两个 review-feedback poll 重叠，较新的 dismissal 先落盘，较旧的静默 poll 后执行 | 旧 poll 不恢复已删除 verdict；下一轮不重复合成 dismissal | 用 admission 时重建的整张 map 覆盖较新的 collector 状态 |
 | A43 | 两个 review-feedback poll 都从同一旧快照读到同一个 dismissal，再依次执行 | 只有 conditional transition 真正应用的第一个 poll 通知；第二个 transition 与事件一起失效 | 状态 CAS 拒绝旧写，但 dismissal 仍无条件越过 review frontier，向下一代重复通知 |
 | A44 | review 或 conflict poll 终态化后投递失败，同时 CI schedule 未注册 | 任一仍运行的 PR poller 都可重放 durable pending outcome；不依赖重启 | 恢复资格只在 CI gate，独立 schedule 配置把通知债永久留到重启 |
+| A45 | 重复注册读 baseline 期间，collector 安装 pending outcome 或另一注册先激活 wait | 原子拒绝旧 revision；原 thread / owner / binding / outcome 全部保持，重试时从最新活跃 frontier 推导 | 先 upsert 路由再检查 debt，或从 pre-fetch task 判断 liveness，导致旧通知串线或吞掉间隙反馈 |
+| A46 | issue outcome 已持久化待重投，但 GitHub 随后不可用 | 不读 GitHub，直接从本地 outcome 恢复投递 | durable 本地通知债被无关的 metadata/comment 请求卡住 |
 
 **A3 / A6 / A17 是历史事故的直接复现，必须有独立测试。**
 **A22 是"静默丢真信号"，优先级高于任何降噪诉求。**
