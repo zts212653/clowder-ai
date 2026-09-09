@@ -15,11 +15,7 @@ export interface PrWaitMigrationReport {
 
 export interface PrWaitMigrationServiceOptions {
   readonly taskStore: ITaskStore;
-  readonly readBaseline: (
-    repoFullName: string,
-    prNumber: number,
-    when: readonly GitHubPrWaitPredicate[],
-  ) => Promise<InitialPrWaitSnapshot>;
+  readonly readBaseline: (repoFullName: string, prNumber: number) => Promise<InitialPrWaitSnapshot>;
   readonly now?: () => number;
   readonly log: {
     info: (...args: unknown[]) => void;
@@ -56,7 +52,11 @@ function legacyEventWaitTrigger(state: LegacyState): number | undefined {
 
 function migrationPredicates(state: LegacyState): readonly GitHubPrWaitPredicate[] {
   const triggerCommentId = legacyEventWaitTrigger(state);
-  if (triggerCommentId) return [{ kind: 'pr_review_result_available', triggerCommentId }];
+  // F280 section 4b: the legacy "I triggered a cloud review and am waiting for it" coverage is
+  // one bot interaction turn. The legacy state never recorded WHICH bot, so we subscribe to the
+  // turn without fabricating an open one — a made-up turn would later report a timeout that
+  // never happened.
+  if (triggerCommentId) return [{ kind: 'pr_bot_interaction' }];
   if (state.intent === 'merge') {
     return [{ kind: 'pr_head_changed' }, { kind: 'pr_ci_terminal' }, { kind: 'pr_became_conflicting' }];
   }
@@ -67,8 +67,8 @@ function migrationPredicates(state: LegacyState): readonly GitHubPrWaitPredicate
 }
 
 function migrationNextStep(when: readonly GitHubPrWaitPredicate[]): string {
-  if (when.some((predicate) => predicate.kind === 'pr_review_result_available')) {
-    return 'Inspect the verified exact-HEAD review result.';
+  if (when.some((predicate) => predicate.kind === 'pr_bot_interaction')) {
+    return 'Inspect the bot review result.';
   }
   if (when.some((predicate) => predicate.kind === 'pr_ci_terminal')) {
     return 'Re-lock the exact HEAD and continue merge-gate.';
@@ -135,7 +135,7 @@ export class PrWaitMigrationService {
       const subject = parseSubject(task);
       if (!subject) throw new Error(`Invalid PR tracking subject key: ${task.subjectKey ?? task.id}`);
       const when = migrationPredicates(raw);
-      const snapshot = await this.opts.readBaseline(subject.repoFullName, subject.prNumber, when);
+      const snapshot = await this.opts.readBaseline(subject.repoFullName, subject.prNumber);
       const now = this.now();
       const awaitState: GitHubPrAwaitStateV1 = {
         v: 1,

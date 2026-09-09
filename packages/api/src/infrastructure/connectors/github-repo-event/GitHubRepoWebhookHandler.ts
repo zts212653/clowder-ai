@@ -5,7 +5,7 @@
  */
 import type { CatId, CommunityEvent, CommunityEventKind, ConnectorSource } from '@cat-cafe/shared';
 import type { ICommunityEventLog } from '../../../domains/community/CommunityEventLog.js';
-import { issueCommentEventId } from '../../../domains/community/community-keys.js';
+import { issueCommentEventId, pullRequestReviewEventId } from '../../../domains/community/community-keys.js';
 import {
   classifyIssueComment as classifyIssueCommentActivity,
   type IssueCommentClassification,
@@ -462,7 +462,9 @@ export class GitHubRepoWebhookHandler {
       kind = 'pr.review_submitted';
       subjectKey = `pr:${repo}#${pr.number}`;
       // P1-4b: stable sourceEventId for dedup with future polling path
-      sourceEventId = `review:${repo}#${pr.number}:${review?.id ?? deliveryId}`;
+      sourceEventId = review?.id
+        ? pullRequestReviewEventId(repo, pr.number, review.id)
+        : `review:${repo}#${pr.number}:${deliveryId}`;
       eventPayload = {
         reviewId: review?.id,
         reviewerLogin: review?.user?.login ?? '',

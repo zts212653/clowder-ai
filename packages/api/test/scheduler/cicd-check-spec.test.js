@@ -184,6 +184,94 @@ describe('CI scheduler F280 adapter', () => {
     assert.equal((await spec.admission.gate()).run, false);
   });
 
+  test('gate keeps a done terminal task reachable while its durable outcome still awaits delivery', async () => {
+    const taskStore = new TaskStore();
+    const task = await trackedTask(taskStore);
+    await taskStore.update(task.id, { status: 'done' });
+    await taskStore.patchAutomationState(task.id, {
+      ci: {
+        enabled: false,
+        prState: 'merged',
+        terminalEffects: { prState: 'merged', completedAt: 500 },
+      },
+      waitOutcome: {
+        v: 1,
+        outcomeId: 'outcome-terminal-pending',
+        generation: 1,
+        subjectRef: 'pr:owner/repo#7',
+        ownerFence: { kind: 'containing_task', generation: 1 },
+        reason: 'subject_terminal',
+        at: 500,
+        delivery: 'pending',
+        terminalSubjectState: 'merged',
+      },
+    });
+    let githubReads = 0;
+    const recoveries = [];
+    const spec = createCiCdCheckTaskSpec({
+      taskStore,
+      cicdRouter: {
+        route: async () => ({ kind: 'skipped', reason: 'state-only' }),
+        recoverPending: async (taskId) => {
+          recoveries.push(taskId);
+          return { kind: 'skipped', reason: 'recovered' };
+        },
+      },
+      fetchPrStatus: async () => {
+        githubReads += 1;
+        throw new Error('GitHub unavailable');
+      },
+      log: { info() {}, warn() {}, error() {} },
+    });
+
+    const gate = await spec.admission.gate();
+    assert.equal(gate.run, true);
+    assert.equal(gate.workItems.length, 1);
+    await spec.run.execute(gate.workItems[0].signal, gate.workItems[0].subjectKey, {});
+    assert.equal(githubReads, 0, 'durable local delivery debt must not depend on a fresh CI read');
+    assert.deepEqual(recoveries, [task.id]);
+  });
+
+  test('CI-disabled tracking still replays a pending outcome created by another adapter', async () => {
+    const taskStore = new TaskStore();
+    const task = await trackedTask(taskStore);
+    await taskStore.patchAutomationState(task.id, {
+      ci: { enabled: false },
+      waitOutcome: {
+        v: 1,
+        outcomeId: 'review-outcome-pending',
+        generation: 1,
+        subjectRef: 'pr:owner/repo#7',
+        ownerFence: { kind: 'containing_task', generation: 1 },
+        reason: 'matched',
+        at: 500,
+        delivery: 'pending',
+      },
+    });
+    const recoveries = [];
+    const spec = createCiCdCheckTaskSpec({
+      taskStore,
+      cicdRouter: {
+        route: async () => {
+          throw new Error('recovery must not route a new CI observation');
+        },
+        recoverPending: async (taskId) => {
+          recoveries.push(taskId);
+          return { kind: 'skipped', reason: 'recovered' };
+        },
+      },
+      fetchPrStatus: async () => {
+        throw new Error('recovery must not query GitHub');
+      },
+      log: { info() {}, warn() {}, error() {} },
+    });
+
+    const gate = await spec.admission.gate();
+    assert.equal(gate.run, true);
+    await spec.run.execute(gate.workItems[0].signal, gate.workItems[0].subjectKey, {});
+    assert.deepEqual(recoveries, [task.id]);
+  });
+
   test('gate keeps a completed wait collectable while a configured external case is still open', async () => {
     const taskStore = new TaskStore();
     const task = await trackedTask(taskStore);

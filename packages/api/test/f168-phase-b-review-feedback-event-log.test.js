@@ -31,9 +31,14 @@ try {
 
 function makeTaskStore(task) {
   const tasks = new Map([[task.id, task]]);
+  const replaceCalls = [];
   return {
+    replaceCalls,
     async listByKind(kind) {
       return [...tasks.values()].filter((t) => t.kind === kind && t.status !== 'done');
+    },
+    async get(id) {
+      return tasks.get(id) ?? null;
     },
     async update(id, patch) {
       const t = tasks.get(id);
@@ -48,6 +53,20 @@ function makeTaskStore(task) {
         }
         tasks.set(id, { ...t, automationState: merged });
       }
+    },
+    async replaceAutomationStateIfGeneration(id, input) {
+      const current = tasks.get(id);
+      if (!current) return null;
+      if (input.expectedUpdatedAt !== undefined && input.expectedUpdatedAt !== current.updatedAt) return null;
+      const updated = {
+        ...current,
+        automationState: input.automationState,
+        ...(input.status !== undefined ? { status: input.status } : {}),
+        updatedAt: (current.updatedAt ?? 0) + 1,
+      };
+      replaceCalls.push({ id, patch: input.automationState });
+      tasks.set(id, updated);
+      return updated;
     },
   };
 }
@@ -185,8 +204,94 @@ describe('ReviewFeedbackTaskSpec: event log append — polling fallback (R3-P1)'
     assert.strictEqual(reviewAppend.classification, 'informational');
     assert.strictEqual(reviewAppend.payload.authorAssociation, 'CONTRIBUTOR');
     assert.strictEqual(reviewAppend.subjectKey, 'pr:owner/repo#10');
+    assert.strictEqual(reviewAppend.at, Date.parse('2026-01-01T00:00:00Z'));
     // R4-P1-A: must match webhook handler format review:{repo}#{pr}:{reviewId}
     assert.strictEqual(reviewAppend.sourceEventId, 'review:owner/repo#10:101');
+  });
+
+  it('gives an in-place dismissal its own durable event identity', async () => {
+    assert.ok(createReviewFeedbackTaskSpec);
+    const task = makeActivePrWaitTask();
+    task.automationState.review.lastDecisionCursor = 101;
+    task.automationState.review.activeDecisionStatesByReviewId = { 101: 'APPROVED' };
+    const taskStore = makeTaskStore(task);
+    const eventLog = makeEventLog({ appended: true });
+    const projector = makeProjector();
+    const detectedAt = Date.parse('2026-02-03T04:05:06Z');
+    const spec = createReviewFeedbackTaskSpec({
+      id: 'dismissed-review-event-log',
+      taskStore,
+      reviewFeedbackRouter: makeRouter(),
+      fetchComments: async () => [],
+      fetchReviews: async () => [
+        {
+          id: 101,
+          author: 'maintainer',
+          state: 'DISMISSED',
+          body: 'Approval withdrawn',
+          submittedAt: '2026-01-02T00:00:00Z',
+          commitId: 'head-0',
+          authorAssociation: 'MEMBER',
+        },
+      ],
+      fetchPrMetadata: async () => ({ headSha: 'head-0', prState: 'open' }),
+      eventLog,
+      projector,
+      log,
+      now: () => detectedAt,
+    });
+
+    const gate = await runGate(spec);
+    assert.equal(gate.workItems[0].signal.newDecisions[0].previousState, 'APPROVED');
+    assert.equal(eventLog.appendCalls[0].sourceEventId, 'review:owner/repo#10:101:DISMISSED');
+    assert.equal(
+      eventLog.appendCalls[0].at,
+      detectedAt,
+      'a same-ID dismissal revision is timestamped when the poller detects it, not when the original review was submitted',
+    );
+    assert.equal(projector.applyCalls.length, 1);
+  });
+
+  it('does not acknowledge or terminalize a dismissal whose durable event append failed', async () => {
+    assert.ok(createReviewFeedbackTaskSpec);
+    const task = makeActivePrWaitTask();
+    task.automationState.review.lastDecisionCursor = 101;
+    task.automationState.review.activeDecisionStatesByReviewId = { 101: 'CHANGES_REQUESTED' };
+    const taskStore = makeTaskStore(task);
+    const eventLog = makeEventLog();
+    eventLog.append = async (event) => {
+      eventLog.appendCalls.push(event);
+      throw new Error('event log unavailable');
+    };
+    const spec = createReviewFeedbackTaskSpec({
+      id: 'dismissed-review-append-failure',
+      taskStore,
+      reviewFeedbackRouter: makeRouter(),
+      fetchComments: async () => [],
+      fetchReviews: async () => [
+        {
+          id: 101,
+          author: 'maintainer',
+          state: 'DISMISSED',
+          body: 'Changes request withdrawn',
+          submittedAt: '2026-01-02T00:00:00Z',
+          commitId: 'head-0',
+        },
+      ],
+      fetchPrMetadata: async () => ({ headSha: 'head-0', prState: 'closed' }),
+      eventLog,
+      projector: makeProjector(),
+      log,
+    });
+
+    const gate = await runGate(spec);
+    assert.equal(gate.workItems[0].signal.subjectState, undefined, 'terminal delivery waits for the failed revision');
+    assert.deepEqual(gate.workItems[0].signal.newDecisions, []);
+    assert.equal(
+      gate.workItems[0].signal.reviewDecisionStateUpdate,
+      undefined,
+      'an unpersisted dismissal earns no state transition',
+    );
   });
 
   it('appends pr.review_submitted informational event for each new comment', async () => {
@@ -601,16 +706,7 @@ describe('ReviewFeedbackTaskSpec: safe cursor on projection failure (R4-P1-B)', 
 
   it('cursor advances normally when no projection failures occur', async () => {
     assert.ok(createReviewFeedbackTaskSpec);
-    const patchCalls = [];
-    const taskStore = {
-      async listByKind(kind) {
-        return kind === 'pr_tracking' ? [makePrTask()] : [];
-      },
-      async update() {},
-      async patchAutomationState(id, patch) {
-        patchCalls.push({ id, patch });
-      },
-    };
+    const taskStore = makeTaskStore(makePrTask());
     const eventLog = makeEventLog({ appended: true });
     const projector = makeProjector();
 
@@ -638,7 +734,7 @@ describe('ReviewFeedbackTaskSpec: safe cursor on projection failure (R4-P1-B)', 
 
     const gate = await runGate(spec);
     assert.equal(gate.run, false, 'without an explicit wait collection advances state but does not route');
-    const lastPatch = patchCalls[patchCalls.length - 1];
+    const lastPatch = taskStore.replaceCalls[taskStore.replaceCalls.length - 1];
     assert.strictEqual(
       lastPatch?.patch?.review?.lastDecisionCursor,
       800,
@@ -767,11 +863,7 @@ describe('ReviewFeedbackTaskSpec: safe cursor on projection failure (R4-P1-B)', 
     }
   });
 
-  it('delivery excludes reviews after the break point — no duplicate notification next poll (R5-P2)', async () => {
-    // R5-P2: when review 902 succeeds but review 903 fails, this poll must only deliver
-    // review 902. Review 903 must NOT be notified — it will be retried next poll.
-    // Without this fix, items after the break are still in newDecisions (built from full
-    // freshNewReviews), causing duplicate notifications on the next poll.
+  it('routes only the durably processed review prefix when community projection fails', async () => {
     assert.ok(createReviewFeedbackTaskSpec);
 
     const routerCalls = [];
@@ -825,10 +917,108 @@ describe('ReviewFeedbackTaskSpec: safe cursor on projection failure (R4-P1-B)', 
     // Gate should run (review 902 is deliverable)
     assert.ok(gate.run, 'gate should run — review 902 succeeded');
 
-    // Only review 902 should have been delivered; review 903 must be excluded
+    // Only the prefix that reached durable history may enter the tracking lifecycle.
+    // The failed tail stays behind the source cursor and will be retried.
     const deliveredReviewIds = gate.workItems.flatMap((wi) => wi.signal.newDecisions.map((d) => d.id));
     assert.ok(deliveredReviewIds.includes(902), 'review 902 must be delivered (succeeded)');
-    assert.ok(!deliveredReviewIds.includes(903), 'review 903 must NOT be delivered — it failed, will retry next poll');
+    assert.ok(!deliveredReviewIds.includes(903), 'review 903 must stay out of delivery until persistence succeeds');
+  });
+
+  it('keeps self-authored feedback inside the durably processed comment prefix', async () => {
+    assert.ok(createReviewFeedbackTaskSpec);
+
+    const comments = [
+      {
+        id: 10,
+        author: 'tracking-owner',
+        body: '@codex review',
+        createdAt: '2026-01-01T00:00:00Z',
+        commentType: 'conversation',
+      },
+      {
+        id: 11,
+        author: 'external-reviewer',
+        body: 'not persisted yet',
+        createdAt: '2026-01-01T01:00:00Z',
+        commentType: 'conversation',
+      },
+    ];
+    const eventLog = {
+      async read() {
+        return [];
+      },
+      async append(event) {
+        if (event.payload?.commentId === 11) throw new Error('temporary append failure');
+        return { appended: true };
+      },
+    };
+    const spec = createReviewFeedbackTaskSpec({
+      id: 'durable-self-comment-prefix',
+      taskStore: makeTaskStore(makeActivePrWaitTask()),
+      reviewFeedbackRouter: makeRouter(),
+      fetchPrMetadata: async () => ({ headSha: 'head-0', prState: 'open' }),
+      fetchComments: async () => comments,
+      fetchReviews: async () => [],
+      eventLog,
+      isEchoComment: (comment) => comment.author === 'tracking-owner',
+      log,
+    });
+
+    const gate = await runGate(spec);
+    assert.equal(gate.run, true);
+    assert.deepEqual(
+      gate.workItems[0].signal.newComments.map((comment) => comment.id),
+      [10],
+      'self-authored items stay in the safe prefix, while the failed tail stays retryable',
+    );
+  });
+
+  it('holds PR terminalization until final feedback reaches durable history', async () => {
+    assert.ok(createReviewFeedbackTaskSpec);
+
+    let persistenceAvailable = false;
+    const finalComment = {
+      id: 42,
+      author: 'external-reviewer',
+      body: 'final note before close',
+      createdAt: '2026-01-01T00:00:00Z',
+      commentType: 'conversation',
+    };
+    const eventLog = {
+      async read() {
+        return [];
+      },
+      async append(event) {
+        if (event.payload?.commentId === 42 && !persistenceAvailable) {
+          throw new Error('temporary append failure');
+        }
+        return { appended: true };
+      },
+    };
+    const spec = createReviewFeedbackTaskSpec({
+      id: 'terminal-waits-for-durable-feedback',
+      taskStore: makeTaskStore(makeActivePrWaitTask()),
+      reviewFeedbackRouter: makeRouter(),
+      fetchPrMetadata: async () => ({ headSha: 'head-0', prState: 'closed' }),
+      fetchComments: async () => [finalComment],
+      fetchReviews: async () => [],
+      eventLog,
+      log,
+    });
+
+    const blocked = await runGate(spec);
+    assert.equal(blocked.run, true);
+    assert.equal(blocked.workItems[0].signal.subjectState, undefined, 'failed feedback must postpone terminalization');
+    assert.deepEqual(blocked.workItems[0].signal.newComments, []);
+
+    persistenceAvailable = true;
+    const recovered = await runGate(spec);
+    assert.equal(recovered.run, true);
+    assert.equal(recovered.workItems[0].signal.subjectState, 'closed');
+    assert.deepEqual(
+      recovered.workItems[0].signal.newComments.map((comment) => comment.id),
+      [42],
+    );
   });
 });
 
@@ -875,6 +1065,9 @@ describe('ReviewFeedbackTaskSpec: stale cursor advancement (Cloud R16 P2)', () =
         const t = tasks.get(id);
         if (t) tasks.set(id, { ...t, ...patch });
       },
+      async get(id) {
+        return tasks.get(id) ?? null;
+      },
       async patchAutomationState(id, patch) {
         const t = tasks.get(id);
         if (t) {
@@ -888,6 +1081,20 @@ describe('ReviewFeedbackTaskSpec: stale cursor advancement (Cloud R16 P2)', () =
             persistedCommentCursors.push(patch.review.lastCommentCursor);
           }
         }
+      },
+      async replaceAutomationStateIfGeneration(id, input) {
+        const current = tasks.get(id);
+        if (!current) return null;
+        if (input.expectedUpdatedAt !== undefined && input.expectedUpdatedAt !== current.updatedAt) return null;
+        const updated = {
+          ...current,
+          automationState: input.automationState,
+          updatedAt: (current.updatedAt ?? 0) + 1,
+        };
+        tasks.set(id, updated);
+        const cursor = input.automationState?.review?.lastCommentCursor;
+        if (cursor !== undefined) persistedCommentCursors.push(cursor);
+        return updated;
       },
     };
 

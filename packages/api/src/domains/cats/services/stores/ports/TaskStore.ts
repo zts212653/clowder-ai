@@ -34,10 +34,12 @@ import {
   type ITaskStore,
   isEntrustedWorkSubjectKey,
   type ReplaceAutomationStateIfGenerationInput,
+  type ReplaceTrackingRegistrationIfUnchangedInput,
   type UpdateEntrustedWorkStoreInput,
   type UpdateEntrustedWorkStoreResult,
 } from './TaskStoreContract.js';
 import { assertSubjectUpdateOwnership } from './TaskSubjectOwnership.js';
+import { TaskTrackingRegistrationStore } from './TaskTrackingRegistrationStore.js';
 
 export type { ITaskStore } from './TaskStoreContract.js';
 export {
@@ -58,6 +60,7 @@ export class TaskStore implements ITaskStore {
   /** subject_key → taskId reverse index */
   private subjectIndex: Map<string, string> = new Map();
   private readonly managedWorkRegistration: TaskManagedWorkRegistrationStore;
+  private readonly trackingRegistration: TaskTrackingRegistrationStore;
   private readonly entrustedWorkMutations: TaskEntrustedWorkMutationStore;
   private readonly maxTasks: number;
 
@@ -67,6 +70,12 @@ export class TaskStore implements ITaskStore {
       getBySubject: (subjectKey) => this.getBySubject(subjectKey),
       getById: (taskId) => this.tasks.get(taskId),
       upsertBySubject: (input) => this.upsertBySubject(input),
+    });
+    this.trackingRegistration = new TaskTrackingRegistrationStore({
+      tasks: this.tasks,
+      subjectIndex: this.subjectIndex,
+      managedWorkRegistration: this.managedWorkRegistration,
+      evictDoneIfNeeded: () => this.evictDoneIfNeeded(),
     });
     this.entrustedWorkMutations = new TaskEntrustedWorkMutationStore(this.tasks);
   }
@@ -230,6 +239,10 @@ export class TaskStore implements ITaskStore {
     };
     this.tasks.set(taskId, updated);
     return updated;
+  }
+
+  replaceTrackingRegistrationIfUnchanged(input: ReplaceTrackingRegistrationIfUnchangedInput): TaskItem | null {
+    return this.trackingRegistration.replace(input);
   }
 
   update(taskId: string, input: UpdateTaskInput): TaskItem | null {

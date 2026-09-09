@@ -222,7 +222,7 @@ describe('Task 7b — RepoScan emits community events', () => {
       conflictRouter: {},
       reviewFeedbackRouter: {},
       invokeTrigger: { trigger: () => {} },
-      checkMergeable: async () => ({ mergeState: 'clean', headSha: 'abc' }),
+      checkMergeable: async () => ({ mergeState: 'clean', headSha: 'abc', isBehind: false }),
       autoExecutor: {},
       fetchPrMetadata: async () => null,
       fetchComments: async () => [],

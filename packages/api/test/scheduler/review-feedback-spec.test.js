@@ -32,7 +32,7 @@ async function createTracked(store) {
           // biome-ignore lint/suspicious/noThenProperty: F280's frozen wait contract field.
           then: 'continue',
         },
-        expiresAt: Date.now() + 60_000,
+        autoRenew: true,
         createdAt: 100,
       },
     },
@@ -52,7 +52,7 @@ function options(taskStore, router, overrides = {}) {
 }
 
 describe('review scheduler F280 adapter', () => {
-  test('finishes routing after a persisted cursor even when cancellation arrives at the commit boundary', async () => {
+  test('routes before persisting the source cursor so a route failure remains retryable', async () => {
     const taskStore = new TaskStore();
     const task = await createTracked(taskStore);
     const controller = new AbortController();
@@ -61,7 +61,9 @@ describe('review scheduler F280 adapter', () => {
       options(taskStore, {
         route: async () => {
           events.push('routed');
-          return { kind: 'skipped', reason: 'test' };
+          // An ordinary "did not match" skip DID evaluate the events; it is CAS exhaustion that
+          // has not, and that is now the distinction the caller reads.
+          return { kind: 'skipped', reason: 'test', observationEvaluated: true };
         },
       }),
     );
@@ -88,18 +90,191 @@ describe('review scheduler F280 adapter', () => {
       )
       .catch(() => {});
 
-    assert.deepEqual(events, ['cursor-persisted', 'routed']);
+    assert.deepEqual(events, ['routed', 'cursor-persisted']);
+  });
+
+  /*
+   * sol R30, at the layer where the loss actually happens.
+   *
+   * When outcome N is still undelivered, the wait re-publishes it and never reads the items in
+   * THIS signal. `kind === 'notified'` therefore said "delivered" while nothing had been
+   * evaluated, and the cursor moved past feedback no one looked at — permanently. Leaving the
+   * cursor put costs one poll cycle; advancing it costs the comment.
+   */
+  test('a re-published pending outcome wakes its owner without advancing the source cursor', async () => {
+    const taskStore = new TaskStore();
+    const task = await createTracked(taskStore);
+    const events = [];
+    const policies = [];
+    const spec = createReviewFeedbackTaskSpec(
+      options(
+        taskStore,
+        {
+          route: async () => {
+            events.push('routed');
+            return {
+              kind: 'notified',
+              threadId: 't1',
+              catId: 'opus',
+              messageId: 'm1',
+              content: 'generation N, re-delivered',
+              observationEvaluated: false,
+              // What generation N itself terminated on — the signal in hand describes N+1.
+              terminalSubjectState: 'merged',
+            };
+          },
+        },
+        {
+          invokeTrigger: {
+            trigger: async (_thread, _cat, _user, _content, _msg, _extra, policy) => {
+              events.push('triggered');
+              policies.push(policy);
+            },
+          },
+        },
+      ),
+    );
+
+    await spec.run.execute(
+      {
+        repairedTask: task,
+        repoFullName: 'owner/repo',
+        prNumber: 7,
+        newComments: [],
+        newDecisions: [],
+        headSha: 'aaa',
+        inlineCommentCursor: 10,
+        conversationCommentCursor: 20,
+        decisionCursor: 31,
+        commitCursor: async () => {
+          events.push('cursor-persisted');
+        },
+      },
+      task.subjectKey,
+      { assignedCatId: null },
+    );
+
+    // sol R31: BOTH halves. Skipping the cursor was right; skipping the wake with it swapped one
+    // silent loss for another — the re-published outcome reached the connector while its owner
+    // was never Queue-admitted, and the next round folded it into the renewed baseline where it
+    // could never match again.
+    assert.deepEqual(
+      events,
+      ['routed', 'triggered'],
+      'an unevaluated observation earns no cursor advance, but a delivered outcome still wakes its owner',
+    );
+    assert.equal(policies.length, 1);
+    assert.equal(policies[0].priority, 'normal', 'urgency may not be inferred from the unevaluated signal');
+    assert.equal(policies[0].reason, 'github_pr_merged', "the re-published outcome's OWN terminal state shapes it");
+  });
+
+  test('an evaluated observation still advances the source cursor', async () => {
+    const taskStore = new TaskStore();
+    const task = await createTracked(taskStore);
+    const events = [];
+    const spec = createReviewFeedbackTaskSpec(
+      options(taskStore, {
+        route: async () => {
+          events.push('routed');
+          return {
+            kind: 'notified',
+            threadId: 't1',
+            catId: 'opus',
+            messageId: 'm1',
+            content: 'evaluated',
+            observationEvaluated: true,
+          };
+        },
+      }),
+    );
+
+    await spec.run.execute(
+      {
+        repairedTask: task,
+        repoFullName: 'owner/repo',
+        prNumber: 7,
+        newComments: [],
+        newDecisions: [],
+        headSha: 'aaa',
+        inlineCommentCursor: 10,
+        conversationCommentCursor: 20,
+        decisionCursor: 31,
+        commitCursor: async () => {
+          events.push('cursor-persisted');
+        },
+      },
+      task.subjectKey,
+      { assignedCatId: null },
+    );
+
+    assert.deepEqual(events, ['routed', 'cursor-persisted']);
   });
 
   test('current facts are evaluated even when no raw source body is deliverable', async () => {
     const taskStore = new TaskStore();
     await createTracked(taskStore);
     const spec = createReviewFeedbackTaskSpec(
-      options(taskStore, { route: async () => ({ kind: 'skipped', reason: 'not matched' }) }),
+      options(taskStore, {
+        route: async () => ({ kind: 'skipped', reason: 'not matched', observationEvaluated: true }),
+      }),
     );
     const gate = await spec.admission.gate();
     assert.equal(gate.run, true);
     assert.equal(gate.workItems.length, 1);
+  });
+
+  test('a done task remains collectable while its durable outcome awaits delivery', async () => {
+    const taskStore = new TaskStore();
+    const task = await createTracked(taskStore);
+    await taskStore.update(task.id, { status: 'done' });
+    await taskStore.patchAutomationState(task.id, {
+      waitOutcome: {
+        v: 1,
+        outcomeId: 'review-terminal-pending',
+        generation: 1,
+        subjectRef: 'pr:owner/repo#7',
+        ownerFence: { kind: 'containing_task', generation: 1 },
+        reason: 'subject_terminal',
+        at: 500,
+        delivery: 'pending',
+        terminalSubjectState: 'merged',
+      },
+    });
+    const githubReads = [];
+    const recoveries = [];
+    const spec = createReviewFeedbackTaskSpec(
+      options(
+        taskStore,
+        {
+          route: async () => ({ kind: 'skipped', reason: 'state-only', observationEvaluated: false }),
+          recoverPending: async (taskId) => {
+            recoveries.push(taskId);
+            return { kind: 'skipped', reason: 'recovered', observationEvaluated: false };
+          },
+        },
+        {
+          fetchPrMetadata: async () => {
+            githubReads.push('metadata');
+            throw new Error('GitHub unavailable');
+          },
+          fetchComments: async () => {
+            githubReads.push('comments');
+            throw new Error('GitHub unavailable');
+          },
+          fetchReviews: async () => {
+            githubReads.push('reviews');
+            throw new Error('GitHub unavailable');
+          },
+        },
+      ),
+    );
+
+    const gate = await spec.admission.gate();
+    assert.equal(gate.run, true);
+    assert.equal(gate.workItems.length, 1);
+    assert.deepEqual(githubReads, [], 'durable local delivery debt must not depend on fresh review reads');
+    await spec.run.execute(gate.workItems[0].signal, gate.workItems[0].subjectKey, {});
+    assert.deepEqual(recoveries, [task.id]);
   });
 
   test('only router-confirmed typed outcome invokes with the unified reason', async () => {
@@ -112,6 +287,8 @@ describe('review scheduler F280 adapter', () => {
         {
           route: async () => ({
             kind: 'notified',
+            // This case is about a real evaluated observation; say so rather than inherit a default.
+            observationEvaluated: true,
             threadId: 'thread_1',
             catId: 'codex-sol',
             messageId: 'msg_1',
@@ -141,6 +318,103 @@ describe('review scheduler F280 adapter', () => {
     assert.equal(calls[0][6].suggestedSkill, undefined);
   });
 
+  test('a known formal review dismissal is routed once even though its review id does not change', async () => {
+    const taskStore = new TaskStore();
+    const task = await createTracked(taskStore);
+    await taskStore.patchAutomationState(task.id, {
+      review: { activeDecisionStatesByReviewId: { 30: 'APPROVED' } },
+    });
+    const routed = [];
+    const fetchArgs = [];
+    const dismissed = {
+      id: 30,
+      author: 'maintainer',
+      state: 'DISMISSED',
+      body: 'The approval no longer applies.',
+      submittedAt: '2026-09-08T00:00:00Z',
+      commitId: 'aaa',
+    };
+    const spec = createReviewFeedbackTaskSpec(
+      options(
+        taskStore,
+        {
+          route: async (signal) => {
+            routed.push(signal.newDecisions);
+            return { kind: 'skipped', reason: 'test', observationEvaluated: true };
+          },
+        },
+        {
+          fetchReviews: async (...args) => {
+            fetchArgs.push(args);
+            return [dismissed];
+          },
+        },
+      ),
+    );
+
+    const first = await spec.admission.gate();
+    assert.equal(
+      fetchArgs[0][2],
+      undefined,
+      'review collection must fetch current states, not only ids above the cursor',
+    );
+    assert.equal(first.workItems[0].signal.newDecisions.length, 1);
+    assert.deepEqual(first.workItems[0].signal.newDecisions[0], {
+      ...dismissed,
+      previousState: 'APPROVED',
+    });
+    await spec.run.execute(first.workItems[0].signal, first.workItems[0].subjectKey, {});
+    assert.deepEqual((await taskStore.get(task.id)).automationState.review.activeDecisionStatesByReviewId, {});
+
+    const second = await spec.admission.gate();
+    assert.deepEqual(second.workItems[0].signal.newDecisions, [], 'the persisted dismissal receipt prevents replay');
+  });
+
+  test('an upgraded task seeds old review states without replaying a historical dismissal', async () => {
+    const taskStore = new TaskStore();
+    const task = await createTracked(taskStore);
+    const routed = [];
+    const spec = createReviewFeedbackTaskSpec(
+      options(
+        taskStore,
+        {
+          route: async (signal) => {
+            routed.push(signal.newDecisions);
+            return { kind: 'skipped', reason: 'test', observationEvaluated: true };
+          },
+        },
+        {
+          fetchReviews: async () => [
+            {
+              id: 29,
+              author: 'maintainer',
+              state: 'DISMISSED',
+              body: 'Historical dismissal',
+              submittedAt: '2026-09-01T00:00:00Z',
+              commitId: 'aaa',
+            },
+            {
+              id: 30,
+              author: 'maintainer',
+              state: 'APPROVED',
+              body: 'Still active',
+              submittedAt: '2026-09-02T00:00:00Z',
+              commitId: 'aaa',
+            },
+          ],
+        },
+      ),
+    );
+
+    const gate = await spec.admission.gate();
+    assert.deepEqual(gate.workItems[0].signal.newDecisions, []);
+    await spec.run.execute(gate.workItems[0].signal, gate.workItems[0].subjectKey, {});
+    assert.deepEqual(routed, [[]]);
+    assert.deepEqual((await taskStore.get(task.id)).automationState.review.activeDecisionStatesByReviewId, {
+      30: 'APPROVED',
+    });
+  });
+
   test('plain @codex review advances the source frontier without forcing invocation', async () => {
     const taskStore = new TaskStore();
     const task = await createTracked(taskStore);
@@ -148,7 +422,11 @@ describe('review scheduler F280 adapter', () => {
     const spec = createReviewFeedbackTaskSpec(
       options(
         taskStore,
-        { route: async () => ({ kind: 'skipped', reason: 'predicates_not_matched' }) },
+        {
+          // `predicates_not_matched` is precisely the shape that DID evaluate: the lifecycle
+          // installs the advanced baseline built from these events before returning it.
+          route: async () => ({ kind: 'skipped', reason: 'predicates_not_matched', observationEvaluated: true }),
+        },
         {
           fetchComments: async () => [
             {
@@ -182,6 +460,8 @@ describe('review scheduler F280 adapter', () => {
             routerCalls.push(signal);
             return {
               kind: 'notified',
+              // This case is about a real evaluated observation; say so rather than inherit a default.
+              observationEvaluated: true,
               threadId: 'thread_1',
               catId: 'codex-sol',
               messageId: 'terminal_msg',
@@ -228,6 +508,11 @@ describe('review scheduler F280 adapter', () => {
             catId: 'codex-sol',
             messageId: 'msg_1',
             content: signal.reviewLoopBrake?.kind ?? 'none',
+            observationEvaluated: true,
+            // Production stamps the pause onto the OUTCOME; this stub mirrors that rather than
+            // letting the caller read it back off the signal. The end-to-end proof that the
+            // lifecycle really stamps it lives in the wait-lifecycle suite.
+            ...(signal.reviewLoopBrake?.kind === 'pause_once' ? { autoWakeSuppressed: true } : {}),
           }),
         },
         {
@@ -248,10 +533,11 @@ describe('review scheduler F280 adapter', () => {
     assert.equal(continued.kind, 'continue');
   });
 
-  test('review-history failure warns open and preserves automatic owner wake', async () => {
+  test('the full review observation is reused as brake history without a second fetch', async () => {
     const taskStore = new TaskStore();
     await createTracked(taskStore);
     const calls = [];
+    let fetchCalls = 0;
     const fresh = {
       id: 31,
       author: 'reviewer-4',
@@ -270,12 +556,15 @@ describe('review scheduler F280 adapter', () => {
             catId: 'codex-sol',
             messageId: 'msg_1',
             content: 'warn-open',
+            // A real evaluated observation; the warn-open path is about review history, not about
+            // a re-published pending outcome.
+            observationEvaluated: true,
           }),
         },
         {
           fetchPrMetadata: async () => ({ headSha: 'aaa', prState: 'open', authorLogin: 'pr-author' }),
-          fetchReviews: async (_repo, _pr, sinceId) => {
-            if (sinceId === undefined) throw new Error('history unavailable');
+          fetchReviews: async () => {
+            fetchCalls++;
             return [fresh];
           },
           invokeTrigger: { trigger: async (...args) => calls.push(args) },
@@ -283,7 +572,8 @@ describe('review scheduler F280 adapter', () => {
       ),
     );
     const gate = await spec.admission.gate();
-    assert.equal(gate.workItems[0].signal.reviewLoopBrake.kind, 'warn_open');
+    assert.equal(gate.workItems[0].signal.reviewLoopBrake.kind, 'continue');
+    assert.equal(fetchCalls, 1);
     await spec.run.execute(gate.workItems[0].signal, gate.workItems[0].subjectKey, {});
     assert.equal(calls.length, 1);
   });

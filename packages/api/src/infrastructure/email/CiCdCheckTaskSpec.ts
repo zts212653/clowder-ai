@@ -10,6 +10,8 @@
 import type { CatId, TaskItem } from '@cat-cafe/shared';
 import { parsePrSubjectKey } from '@cat-cafe/shared';
 import type { ITaskStore } from '../../domains/cats/services/stores/ports/TaskStore.js';
+import { hasPendingGitHubWaitOutcome } from '../../domains/github-signals/GitHubWaitLifecycleService.js';
+import { claimableSourceCategory, mayAutoWakeOwner } from '../../domains/github-signals/WaitWakeDisposition.js';
 import type { ExecuteContext, TaskSpec_P1 } from '../scheduler/types.js';
 import type { CiCdRouter, CiPollResult, CiRouteResult } from './CiCdRouter.js';
 import type { ConnectorInvokeTrigger, ConnectorTriggerPolicy } from './ConnectorInvokeTrigger.js';
@@ -20,6 +22,8 @@ export interface CiCdCheckSignal {
   task: TaskItem;
   repoFullName: string;
   prNumber: number;
+  /** Replay a durable local outbox without requiring another GitHub observation. */
+  recoveryOnly?: true;
   /** Tick-level batch snapshot; production reads it once in admission.gate. */
   pollResult?: CiPollResult | null;
 }
@@ -73,7 +77,9 @@ async function triggerLifecycleWake(
   const policy: ConnectorTriggerPolicy = {
     priority: 'normal',
     reason: routeResult.prState === 'merged' ? 'github_pr_merged' : 'github_pr_closed',
-    sourceCategory: 'ci',
+    // A terminal outcome REVIEW created can reach this arm when CI re-publishes it; the state is
+    // the outcome's, but the source is not this poll's to name.
+    sourceCategory: claimableSourceCategory(routeResult, 'ci'),
   };
   await invokeTrigger
     .trigger(
@@ -109,6 +115,10 @@ async function shouldCollectTask(
   prNumber: number,
   subjectKey: string,
 ): Promise<boolean> {
+  // Task completion and a disabled CI subscription stop new observations; neither erases a
+  // connector delivery debt. This check must outrank both because the pending outcome may have
+  // been produced by review feedback rather than by the CI adapter.
+  if (hasPendingGitHubWaitOutcome(task)) return true;
   if (task.automationState?.ci?.enabled === false) return false;
   if (task.status !== 'done' || needsCiLifecycleRecovery(task)) return true;
   if (!opts.continueDoneTracking) return false;
@@ -143,7 +153,12 @@ export function createCiCdCheckTaskSpec(opts: CiCdCheckTaskSpecOptions): TaskSpe
           if (!parsed) continue;
           if (!(await shouldCollectTask(opts, task, parsed.repoFullName, parsed.prNumber, subjectKey))) continue;
           workItems.push({
-            signal: { task, repoFullName: parsed.repoFullName, prNumber: parsed.prNumber },
+            signal: {
+              task,
+              repoFullName: parsed.repoFullName,
+              prNumber: parsed.prNumber,
+              ...(hasPendingGitHubWaitOutcome(task) ? { recoveryOnly: true as const } : {}),
+            },
             subjectKey,
           });
         }
@@ -155,14 +170,17 @@ export function createCiCdCheckTaskSpec(opts: CiCdCheckTaskSpecOptions): TaskSpe
         if (!opts.fetchPrStatus) {
           // This is one tick-level read, not work owned by the first item. Per-item
           // timeout signals must never cancel facts consumed by sibling work items.
-          const targets = workItems.map(({ signal }) => ({
-            repoFullName: signal.repoFullName,
-            prNumber: signal.prNumber,
-          }));
-          const results = await fetchPrStatuses(targets);
-          for (const workItem of workItems) {
-            workItem.signal.pollResult =
-              results.get(ciStatusTargetKey(workItem.signal.repoFullName, workItem.signal.prNumber)) ?? null;
+          const observedWorkItems = workItems.filter(({ signal }) => signal.recoveryOnly !== true);
+          if (observedWorkItems.length > 0) {
+            const targets = observedWorkItems.map(({ signal }) => ({
+              repoFullName: signal.repoFullName,
+              prNumber: signal.prNumber,
+            }));
+            const results = await fetchPrStatuses(targets);
+            for (const workItem of observedWorkItems) {
+              workItem.signal.pollResult =
+                results.get(ciStatusTargetKey(workItem.signal.repoFullName, workItem.signal.prNumber)) ?? null;
+            }
           }
         }
 
@@ -174,33 +192,57 @@ export function createCiCdCheckTaskSpec(opts: CiCdCheckTaskSpecOptions): TaskSpe
       timeoutMs: 30_000,
       async execute(signal: CiCdCheckSignal, _subjectKey: string, ctx: ExecuteContext) {
         ctx.signal?.throwIfAborted();
-        const pollResult = opts.fetchPrStatus
-          ? await opts.fetchPrStatus(signal.repoFullName, signal.prNumber, ctx.signal)
-          : signal.pollResult;
-        ctx.signal?.throwIfAborted();
-        if (!pollResult) return;
+        const pollResult =
+          signal.recoveryOnly === true
+            ? undefined
+            : opts.fetchPrStatus
+              ? await opts.fetchPrStatus(signal.repoFullName, signal.prNumber, ctx.signal)
+              : signal.pollResult;
+        if (signal.recoveryOnly !== true) ctx.signal?.throwIfAborted();
+        if (signal.recoveryOnly !== true && !pollResult) return;
 
-        const routeResult = await opts.cicdRouter.route(pollResult);
+        const routeResult =
+          signal.recoveryOnly === true
+            ? await opts.cicdRouter.recoverPending(signal.task.id)
+            : await opts.cicdRouter.route(pollResult!);
         if (!opts.invokeTrigger) return;
 
         if (routeResult.kind === 'lifecycle') {
           // Skip wake when the merge was performed by our own GitHub identity —
           // the merger already knows the PR state; waking them wastes tokens.
           // Message delivery already happened inside CiCdRouter.closeLifecycle.
-          if (pollResult.mergedByLogin && opts.isSelfMerge?.(pollResult.mergedByLogin)) {
+          //
+          // sol R34, found by auditing the same axis rather than only the case reported:
+          // `mergedByLogin` is THIS poll's fact, while `routeResult` describes the outcome being
+          // delivered — which R34 decoupled from this poll. A reopened-then-merged PR can hand a
+          // self-merge to a still-pending CLOSED outcome nobody has been told about, and the skip
+          // would mute it. The skip belongs to the state it explains, so it asks the route.
+          if (
+            routeResult.prState === 'merged' &&
+            pollResult?.mergedByLogin &&
+            opts.isSelfMerge?.(pollResult.mergedByLogin)
+          ) {
             opts.log.info(`[cicd-check] PR ${routeResult.prState} by self (${pollResult.mergedByLogin}) -> skip wake`);
             return;
           }
-          await triggerLifecycleWake(opts, opts.invokeTrigger, signal, routeResult);
+          // sol R33: the delivered outcome may be one REVIEW created with the R4 pause on it.
+          if (mayAutoWakeOwner(routeResult)) {
+            await triggerLifecycleWake(opts, opts.invokeTrigger, signal, routeResult);
+          }
           return;
         }
 
         if (routeResult.kind !== 'notified') return;
+        // The outcome's own decision, not this poll's. A CI poll that re-published someone
+        // else's pending outcome has established nothing about whether its owner may be woken.
+        if (!mayAutoWakeOwner(routeResult)) return;
 
         const policy: ConnectorTriggerPolicy = {
-          priority: routeResult.bucket === 'fail' ? 'urgent' : 'normal',
+          // ...and an unevaluated re-publish must not borrow THIS poll's bucket for urgency.
+          priority: routeResult.observationEvaluated && routeResult.bucket === 'fail' ? 'urgent' : 'normal',
           reason: 'github_wait_satisfied',
-          sourceCategory: 'ci',
+          // ...and it must not sign someone else's outcome as CI either.
+          sourceCategory: claimableSourceCategory(routeResult, 'ci'),
         };
         await opts.invokeTrigger
           .trigger(

@@ -51,3 +51,20 @@ export const CommunityKeys = {
 export function issueCommentEventId(repoFullName: string, issueNumber: number, commentId: number): string {
   return `comment:${repoFullName}#${issueNumber}:${commentId}`;
 }
+
+/**
+ * Stable identity for one durable state of a GitHub pull-request review.
+ *
+ * The submitted state keeps the historical id shared by webhook and polling. GitHub mutates an
+ * existing verdict review to DISMISSED without allocating a new review id, so that revision needs
+ * a distinct key or the event log would mistake the revocation for the already-seen submission.
+ */
+export function pullRequestReviewEventId(
+  repoFullName: string,
+  prNumber: number,
+  reviewId: number,
+  revision?: 'DISMISSED',
+): string {
+  const base = `review:${repoFullName}#${prNumber}:${reviewId}`;
+  return revision ? `${base}:${revision}` : base;
+}

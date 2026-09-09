@@ -12,6 +12,8 @@
 import type { CatId, TaskItem } from '@cat-cafe/shared';
 import { parsePrSubjectKey } from '@cat-cafe/shared';
 import type { ITaskStore } from '../../domains/cats/services/stores/ports/TaskStore.js';
+import { hasPendingGitHubWaitOutcome } from '../../domains/github-signals/GitHubWaitLifecycleService.js';
+import { claimableSourceCategory, mayAutoWakeOwner } from '../../domains/github-signals/WaitWakeDisposition.js';
 import type { ExecuteContext, TaskSpec_P1 } from '../scheduler/types.js';
 import type { AutoResolveResult, ConflictAutoExecutor } from './ConflictAutoExecutor.js';
 import type { ConflictRouter, ConflictSignal } from './ConflictRouter.js';
@@ -19,7 +21,10 @@ import type { ConnectorInvokeTrigger, ConnectorTriggerPolicy } from './Connector
 
 export interface ConflictCheckTaskSpecOptions {
   readonly taskStore: ITaskStore;
-  readonly checkMergeable: (repoFullName: string, prNumber: number) => Promise<{ mergeState: string; headSha: string }>;
+  readonly checkMergeable: (
+    repoFullName: string,
+    prNumber: number,
+  ) => Promise<{ mergeState: string; mergeStateStatus?: string; headSha: string; isBehind: boolean }>;
   readonly conflictRouter: ConflictRouter;
   readonly invokeTrigger?: ConnectorInvokeTrigger;
   readonly autoExecutor?: ConflictAutoExecutor;
@@ -33,19 +38,27 @@ export interface ConflictCheckTaskSpecOptions {
   readonly id?: string;
 }
 
-interface ConflictWorkItem {
-  signal: ConflictSignal;
-  task: TaskItem;
-}
+type ConflictWorkItem = { signal: ConflictSignal; task: TaskItem } | { recoveryOnly: true; task: TaskItem };
 
 async function tryAutoResolveBeforeWake(
   opts: ConflictCheckTaskSpecOptions,
   workItem: ConflictWorkItem,
   signal?: AbortSignal,
 ): Promise<AutoResolveResult | null> {
-  if (!opts.autoExecutor || workItem.signal.mergeState !== 'CONFLICTING' || signal?.aborted) return null;
+  if (
+    'recoveryOnly' in workItem ||
+    !opts.autoExecutor ||
+    workItem.signal.mergeState !== 'CONFLICTING' ||
+    signal?.aborted
+  )
+    return null;
   try {
-    return await opts.autoExecutor.resolve(workItem.signal.repoFullName, workItem.signal.prNumber, signal);
+    return await opts.autoExecutor.resolve(
+      workItem.signal.repoFullName,
+      workItem.signal.prNumber,
+      workItem.signal.headSha,
+      signal,
+    );
   } catch (error) {
     if (!signal?.aborted) throw error;
     opts.log.warn({ error }, '[conflict-check] cancellation interrupted optional auto-resolution; waking owner');
@@ -60,8 +73,11 @@ export function createConflictCheckTaskSpec(opts: ConflictCheckTaskSpecOptions):
     trigger: { type: 'interval', ms: opts.pollIntervalMs ?? 5 * 60 * 1000 },
     admission: {
       async gate() {
-        // #320: Read from unified TaskStore — exclude done tasks (PR merged/closed)
-        const tasks = (await opts.taskStore.listByKind('pr_tracking')).filter((t) => t.status !== 'done');
+        // A terminal transition marks the task done before connector delivery. Keep a durable
+        // pending outcome reachable from this independently configurable schedule until replay.
+        const tasks = (await opts.taskStore.listByKind('pr_tracking')).filter(
+          (task) => task.status !== 'done' || hasPendingGitHubWaitOutcome(task),
+        );
         if (tasks.length === 0) {
           return { run: false, reason: 'no tracked PRs' };
         }
@@ -73,10 +89,25 @@ export function createConflictCheckTaskSpec(opts: ConflictCheckTaskSpecOptions):
             if (!parsed) continue;
             const { repoFullName, prNumber } = parsed;
 
-            const { mergeState, headSha } = await opts.checkMergeable(repoFullName, prNumber);
+            if (hasPendingGitHubWaitOutcome(task)) {
+              workItems.push({ signal: { recoveryOnly: true, task }, subjectKey: task.subjectKey! });
+              continue;
+            }
+
+            const { mergeState, mergeStateStatus, headSha, isBehind } = await opts.checkMergeable(
+              repoFullName,
+              prNumber,
+            );
             workItems.push({
               signal: {
-                signal: { repoFullName, prNumber, headSha, mergeState },
+                signal: {
+                  repoFullName,
+                  prNumber,
+                  headSha,
+                  mergeState,
+                  ...(mergeStateStatus ? { mergeStateStatus } : {}),
+                  isBehind,
+                },
                 task,
               },
               subjectKey: task.subjectKey!,
@@ -101,24 +132,45 @@ export function createConflictCheckTaskSpec(opts: ConflictCheckTaskSpecOptions):
       timeoutMs: 30_000,
       async execute(workItem: ConflictWorkItem, _subjectKey: string, ctx: ExecuteContext) {
         ctx.signal?.throwIfAborted();
-        const routeResult = await opts.conflictRouter.route(workItem.signal);
+        const routeResult =
+          'recoveryOnly' in workItem
+            ? await opts.conflictRouter.recoverPending(workItem.task.id)
+            : await opts.conflictRouter.route(workItem.signal);
         if (routeResult.kind !== 'notified') return;
 
-        // F140 Phase C: try auto-resolve before waking cat
-        const result = await tryAutoResolveBeforeWake(opts, workItem, ctx.signal);
-        if (result?.kind === 'resolved') {
-          opts.log.info(`[conflict-check] Auto-resolved conflict for ${result.branch} (${result.method})`);
-          return;
-        }
-        if (result?.kind === 'escalated') {
-          opts.log.info(`[conflict-check] Escalating: ${result.files.length} conflict file(s) in ${result.branch}`);
+        // F140 Phase C auto-resolve REWRITES the branch (rebase + push). Only the conflict event
+        // authorizes that. This router emits `pr_head_changed` on every poll, so "notified" alone
+        // let a tracker that had explicitly EXCLUDED `conflict` trigger a branch rewrite.
+        //
+        // Gate the REWRITE, never the wake: a head-only match is still a match the owner
+        // subscribed to, and returning early here would suppress the notification it earned —
+        // trading a write bug for a silent-mute bug, which A26 ranks as the worse one.
+        // `?? []` denies rather than permits: an absent kind list must never authorize a branch
+        // rewrite. This is the one direction in which a permissive default is not acceptable.
+        if (!('recoveryOnly' in workItem) && (routeResult.matchedKinds ?? []).includes('pr_became_conflicting')) {
+          const result = await tryAutoResolveBeforeWake(opts, workItem, ctx.signal);
+          if (result?.kind === 'resolved') {
+            opts.log.info(`[conflict-check] Auto-resolved conflict for ${result.branch} (${result.method})`);
+            return;
+          }
+          if (result?.kind === 'escalated') {
+            opts.log.info(`[conflict-check] Escalating: ${result.files.length} conflict file(s) in ${result.branch}`);
+          }
         }
 
-        if (opts.invokeTrigger) {
+        // sol R33: same shared outcome, same rule — a conflict poll that re-published a
+        // suppressed Review outcome must deliver it and stop there.
+        if (opts.invokeTrigger && mayAutoWakeOwner(routeResult)) {
+          // sol R34: ...and an unevaluated re-publish must not borrow THIS signal's conflict
+          // either. `urgent` + `github_pr_conflict` is a claim about the subject's state; when the
+          // outcome being delivered was created by another adapter, this poll evaluated nothing
+          // and has no such claim to make. It still wakes — the owner is owed the delivery — just
+          // without a verdict this observation never established.
+          const evaluated = routeResult.observationEvaluated;
           const policy: ConnectorTriggerPolicy = {
-            priority: 'urgent',
-            reason: 'github_pr_conflict',
-            sourceCategory: 'conflict',
+            priority: evaluated ? 'urgent' : 'normal',
+            reason: evaluated ? 'github_pr_conflict' : 'github_wait_satisfied',
+            sourceCategory: claimableSourceCategory(routeResult, 'conflict'),
           };
           await opts.invokeTrigger
             .trigger(

@@ -13,6 +13,7 @@ import type {
   CloseEntrustedWorkStoreInput,
   CloseEntrustedWorkStoreResult,
   ReplaceAutomationStateIfGenerationInput,
+  ReplaceTrackingRegistrationIfUnchangedInput,
   UpdateEntrustedWorkStoreInput,
   UpdateEntrustedWorkStoreResult,
 } from '../cats/services/stores/ports/TaskStoreContract.js';
@@ -173,6 +174,12 @@ class BallCustodyTaskStore implements ITaskStore {
     input: ReplaceAutomationStateIfGenerationInput,
   ): MaybePromise<TaskItem | null> {
     return this.inner.replaceAutomationStateIfGeneration(taskId, input);
+  }
+
+  replaceTrackingRegistrationIfUnchanged(
+    input: ReplaceTrackingRegistrationIfUnchangedInput,
+  ): MaybePromise<TaskItem | null> {
+    return this.inner.replaceTrackingRegistrationIfUnchanged(input);
   }
 
   private recordStatusTransition(before: TaskItem, updated: TaskItem): void {

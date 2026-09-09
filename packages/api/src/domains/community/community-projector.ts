@@ -102,6 +102,10 @@ function createProjection(
   };
 }
 
+function advanceTimestamp(current: number | null, candidate: number): number {
+  return current === null ? candidate : Math.max(current, candidate);
+}
+
 // ---------------------------------------------------------------------------
 // Projector
 // ---------------------------------------------------------------------------
@@ -129,6 +133,10 @@ export class CommunityProjector {
     const now = event.at;
     const existing = await this.objectStore.get(event.subjectKey);
     const proj: CommunityObjectProjection = existing ?? createProjection(event.subjectKey, 'new', now);
+    // Events are replayed in durable append order, which need not match their source
+    // timestamps (polling repair and webhook retries can append older facts later).
+    // Projection clocks describe the latest known activity and must never run backward.
+    const monotonicUpdatedAt = Math.max(proj.updatedAt, now);
 
     // F168 Phase F-Step3: external review lifecycle is an orthogonal aggregate
     // on the same rebuildable projection. It does not mutate the generic case
@@ -141,7 +149,7 @@ export class CommunityProjector {
         externalReview: result.value,
         appliedEventCount: proj.appliedEventCount + 1,
         lastRejectedEvent: null,
-        updatedAt: now,
+        updatedAt: monotonicUpdatedAt,
       });
       return followUps;
     }
@@ -167,9 +175,9 @@ export class CommunityProjector {
         // lastExternalActivityAt so the community board can surface the latest activity time.
         const updated: CommunityObjectProjection = {
           ...proj,
-          lastExternalActivityAt: event.at,
+          lastExternalActivityAt: advanceTimestamp(proj.lastExternalActivityAt, event.at),
           issueFixEvidence: issueFixEvidenceFromEvent(event) ?? proj.issueFixEvidence,
-          updatedAt: now,
+          updatedAt: monotonicUpdatedAt,
         };
         await this.objectStore.save(updated);
         return followUps;
@@ -178,7 +186,7 @@ export class CommunityProjector {
       const updated: CommunityObjectProjection = {
         ...proj,
         lastRejectedEvent: event,
-        updatedAt: now,
+        updatedAt: monotonicUpdatedAt,
       };
       await this.objectStore.save(updated);
       return followUps;
@@ -190,7 +198,7 @@ export class CommunityProjector {
       state: result.next,
       appliedEventCount: proj.appliedEventCount + 1,
       lastRejectedEvent: null,
-      updatedAt: now,
+      updatedAt: monotonicUpdatedAt,
     };
     if (proj.externalReview && isExternalReviewTerminalEventKind(event.kind)) {
       const externalReviewResult = applyExternalReviewProjectionEvent(proj.externalReview, event);
@@ -204,7 +212,7 @@ export class CommunityProjector {
     // always update lastExternalActivityAt, even when they cause a state transition
     // (e.g. awaiting_external → in_progress restore on external actor comment).
     if (event.classification === 'informational' && !exactSuppressed) {
-      updated.lastExternalActivityAt = event.at;
+      updated.lastExternalActivityAt = advanceTimestamp(updated.lastExternalActivityAt, event.at);
     }
 
     // Side-effect: case.reported → set lastPublicCommentAt

@@ -73,6 +73,7 @@ export interface CiAutomationState {
 /** Conflict detection automation state for pr_tracking tasks */
 export interface ConflictAutomationState {
   readonly mergeState?: string;
+  readonly mergeStateStatus?: string;
   readonly lastFingerprint?: string;
   readonly lastNotifiedAt?: number;
 }
@@ -94,6 +95,14 @@ export interface ReviewAutomationState {
     readonly conversation: number;
   };
   readonly lastDecisionCursor?: number;
+  /**
+   * Formal verdict reviews whose GitHub record can still be changed in place by dismissal.
+   *
+   * GitHub keeps the same review id when APPROVED / CHANGES_REQUESTED becomes DISMISSED, so
+   * the monotonic decision cursor alone cannot detect that revocation. An absent map is the
+   * migration state: the next full review observation seeds it without replaying history.
+   */
+  readonly activeDecisionStatesByReviewId?: Readonly<Record<string, 'APPROVED' | 'CHANGES_REQUESTED'>>;
   readonly lastNotifiedAt?: number;
   /** Terminal PR state observed by ReviewFeedbackTaskSpec before CI lifecycle delivery. */
   readonly prState?: 'merged' | 'closed';

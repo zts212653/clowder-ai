@@ -55,7 +55,7 @@ function makeGitHubDeps(overrides = {}) {
     conflictRouter: stubRouter,
     reviewFeedbackRouter: stubRouter,
     invokeTrigger: { trigger: () => 'dispatched' },
-    checkMergeable: async () => ({ mergeState: 'MERGEABLE', headSha: 'abc123' }),
+    checkMergeable: async () => ({ mergeState: 'MERGEABLE', headSha: 'abc123', isBehind: false }),
     autoExecutor: { execute: async () => {} },
     fetchPrMetadata: async () => ({ headSha: 'abc', prState: 'open' }),
     fetchComments: async () => [],
@@ -140,7 +140,7 @@ describe('TaskSpec factory custom id (F202-2B Task 1)', () => {
   test('createConflictCheckTaskSpec uses custom id when provided', () => {
     const spec = createConflictCheckTaskSpec({
       taskStore: stubTaskStore,
-      checkMergeable: async () => ({ mergeState: 'MERGEABLE', headSha: 'abc' }),
+      checkMergeable: async () => ({ mergeState: 'MERGEABLE', headSha: 'abc', isBehind: false }),
       conflictRouter: stubRouter,
       log: stubLog,
       id: 'schedule:github:conflict-check',

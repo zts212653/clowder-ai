@@ -191,6 +191,14 @@ export interface ITaskStore {
     taskId: string,
     input: ReplaceAutomationStateIfGenerationInput,
   ): TaskItem | null | Promise<TaskItem | null>;
+  /**
+   * Install a complete tracking registration only while the observed subject anchor is
+   * unchanged. The pending-outcome guard and routing metadata update belong to this same
+   * transaction so rejected re-registration cannot move an older delivery debt.
+   */
+  replaceTrackingRegistrationIfUnchanged(
+    input: ReplaceTrackingRegistrationIfUnchangedInput,
+  ): TaskItem | null | Promise<TaskItem | null>;
 }
 
 export interface ReplaceAutomationStateIfGenerationInput {
@@ -199,4 +207,11 @@ export interface ReplaceAutomationStateIfGenerationInput {
   readonly automationState: AutomationState | undefined;
   readonly why?: string;
   readonly status?: TaskItem['status'];
+}
+
+export interface ReplaceTrackingRegistrationIfUnchangedInput {
+  readonly expectedTask: TaskItem | null;
+  readonly task: CreateTaskInput;
+  readonly automationState: AutomationState;
+  readonly managedWorkBinding?: ManagedWorkBinding;
 }

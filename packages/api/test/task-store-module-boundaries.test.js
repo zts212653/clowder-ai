@@ -24,6 +24,11 @@ const moduleBudgets = [
     reason: 'keep entrusted-work owner mutations separate from generic Task storage',
   },
   {
+    path: '../src/domains/cats/services/stores/ports/TaskTrackingRegistrationStore.ts',
+    maxLines: 350,
+    reason: 'keep conditional tracking registration separate from generic Task storage',
+  },
+  {
     path: '../src/domains/cats/services/stores/redis/RedisTaskStore.ts',
     maxLines: 659,
     reason: 'do not grow the pre-existing oversized Redis task store; extract new responsibilities',
@@ -52,6 +57,11 @@ const moduleBudgets = [
     path: '../src/domains/cats/services/stores/redis/RedisTaskSubjectTransactions.ts',
     maxLines: 350,
     reason: 'keep atomic Task subject ownership transitions focused',
+  },
+  {
+    path: '../src/domains/cats/services/stores/redis/RedisTaskTrackingRegistrationStore.ts',
+    maxLines: 350,
+    reason: 'keep Redis tracking registration CAS transitions focused',
   },
   {
     path: '../src/domains/cats/services/stores/redis/RedisWatchSession.ts',

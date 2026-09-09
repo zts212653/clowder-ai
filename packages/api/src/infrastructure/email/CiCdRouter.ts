@@ -10,15 +10,15 @@ import type { FastifyBaseLogger } from 'fastify';
 import type { ITaskStore } from '../../domains/cats/services/stores/ports/TaskStore.js';
 import type { ICommunityEventLog } from '../../domains/community/CommunityEventLog.js';
 import type { ExternalReviewCoordinator } from '../../domains/community/external-review/ExternalReviewCoordinator.js';
-import type {
-  GitHubWaitLifecycleResult,
-  GitHubWaitLifecycleService,
+import {
+  type GitHubWaitLifecycleResult,
+  type GitHubWaitLifecycleService,
+  hasPendingGitHubWaitOutcome,
 } from '../../domains/github-signals/GitHubWaitLifecycleService.js';
+import { projectWaitWakeDisposition } from '../../domains/github-signals/WaitWakeDisposition.js';
 import type { CiBucket, CiPollResult, CiRouteResult } from './ci-cd-contract.js';
-import { buildCiMessageContent, buildLifecycleMessageContent } from './ci-message-content.js';
 import type { ConnectorDeliveryDeps } from './deliver-connector-message.js';
 
-export { buildCiMessageContent, buildLifecycleMessageContent };
 export type {
   CiBucket,
   CiCheckDetail,
@@ -111,15 +111,15 @@ export interface CiCdRouterOptions {
   readonly now?: () => number;
 }
 
-export const EMPTY_ROLLUP_STABILITY_MS = 60_000;
-
 type RollupObservation = NonNullable<CiAutomationState['rollupObservation']>;
 
 /**
  * GitHub reports [] both when a repository has no checks and during the brief
- * window before checks appear for a fresh HEAD. Require the exact same HEAD to
- * remain empty for a full poll interval; any non-empty observation resets the
- * streak. The observation is persisted with the PR tracking collector state.
+ * window before checks appear for a fresh HEAD. Neither case is evidence that CI
+ * passed: an empty set has no successful check to support a terminal verdict.
+ * Keep it pending until GitHub returns a non-empty rollup. The observation is
+ * still persisted per exact HEAD so diagnostics can distinguish a fresh gap from
+ * a repository that has remained without check evidence.
  */
 export function settleEmptyCheckRollup(
   poll: CiPollResult,
@@ -135,27 +135,43 @@ export function settleEmptyCheckRollup(
 
   const streakStartedAt =
     previous?.headSha === poll.headSha && previous.state === 'empty' ? previous.streakStartedAt : now;
-  const aggregateBucket = now - streakStartedAt >= EMPTY_ROLLUP_STABILITY_MS ? 'pass' : 'pending';
   return {
-    poll: { ...poll, aggregateBucket },
+    poll: { ...poll, aggregateBucket: 'pending' },
     observation: { headSha: poll.headSha, state: 'empty', streakStartedAt },
   };
 }
 
-function routeFromLifecycle(
-  result: GitHubWaitLifecycleResult,
-  bucket: CiBucket,
-  prState?: 'merged' | 'closed',
-): CiRouteResult {
+/**
+ * sol R34: the route shape describes the OUTCOME BEING DELIVERED, never the poll that happened to
+ * deliver it.
+ *
+ * The terminal state used to arrive as a parameter, read off the CURRENT poll. So an unevaluated
+ * re-publish — a review outcome an earlier connector failure left pending — was dressed as a
+ * lifecycle result the moment any later poll saw the PR merged: the delivered content was a
+ * review comment while the wake claimed `github_pr_merged`, and when that merge was our own
+ * identity the TaskSpec's self-merge skip swallowed the wake entirely. The comment reached the
+ * thread and its owner was never admitted, which is the silent-mute class A26 ranks worst.
+ *
+ * Reading `outcome.terminalSubjectState` is not a guard added in front of the old parameter — the
+ * parameter is GONE, so this poll's own state can no longer reach the decision at all. The
+ * terminal observation is not lost either: `recoverTerminalSideEffects` still records world truth
+ * from it, and the round that actually evaluates it produces an outcome that carries it.
+ * ReviewFeedbackRouter has classified from the outcome all along; this is the sibling that did not.
+ */
+function routeFromLifecycle(result: GitHubWaitLifecycleResult, bucket: CiBucket): CiRouteResult {
   if (result.kind === 'notified') {
-    if (prState) {
+    const terminalState = result.outcome.terminalSubjectState;
+    if (terminalState) {
       return {
         kind: 'lifecycle',
         threadId: result.task.threadId,
         catId: result.task.ownerCatId ?? '',
         messageId: result.messageId,
-        prState,
+        prState: terminalState,
         content: result.content,
+        // The same shared outcome reaches this shape too: a suppressed one must not be woken
+        // just because a terminal PR state routed it down the lifecycle arm.
+        ...projectWaitWakeDisposition(result),
       };
     }
     return {
@@ -166,6 +182,9 @@ function routeFromLifecycle(
       bucket,
       content: result.content,
       headSha: result.outcome.subjectRef,
+      // sol R33: this poll may be re-publishing an outcome REVIEW created. Its wake decision
+      // rides with it; the CI bucket above describes a different observation.
+      ...projectWaitWakeDisposition(result),
     };
   }
   return {
@@ -181,10 +200,21 @@ export class CiCdRouter {
     this.now = opts.now ?? Date.now;
   }
 
+  async recoverPending(taskId: string): Promise<CiRouteResult> {
+    return routeFromLifecycle(await this.opts.waitLifecycle.recoverOutcome(taskId), 'pending');
+  }
+
   async route(poll: CiPollResult): Promise<CiRouteResult> {
     const sk = prSubjectKey(poll.repoFullName, poll.prNumber);
     const task = await this.opts.taskStore.getBySubject(sk);
     if (!task) return { kind: 'skipped', reason: `No tracking task for ${poll.repoFullName}#${poll.prNumber}` };
+
+    // A terminal transition marks the task done before connector delivery. If that delivery
+    // fails, the durable outcome remains the recovery outbox and must be replayed before this
+    // adapter applies current-poll policy (including CI disabled) to an unrelated observation.
+    if (task.status === 'done' && hasPendingGitHubWaitOutcome(task)) {
+      return this.recoverPending(task.id);
+    }
 
     const settled = settleEmptyCheckRollup(poll, task.automationState?.ci?.rollupObservation, this.now());
     const observedPoll = settled.poll;
@@ -220,7 +250,7 @@ export class CiCdRouter {
         await this.opts.taskStore.update(task.id, { status: 'done' });
       }
     }
-    return routeFromLifecycle(lifecycle, waitBucket, terminal);
+    return routeFromLifecycle(lifecycle, waitBucket);
   }
 
   private async skipDisabledCi(task: TaskItem): Promise<CiRouteResult | null> {
@@ -256,6 +286,24 @@ export class CiCdRouter {
   ): Promise<GitHubWaitLifecycleResult> {
     return this.opts.waitLifecycle.observe({
       taskId: task.id,
+      events: [
+        {
+          type: 'pr_head_changed',
+          source: 'pr_head',
+          id: poll.headSha,
+          summary: `HEAD changed to ${poll.headSha.slice(0, 7)}`,
+        },
+        ...(waitBucket === 'pass' || waitBucket === 'fail'
+          ? [
+              {
+                type: 'pr_ci_terminal' as const,
+                source: 'pr_ci' as const,
+                id: fingerprint,
+                summary: `CI reached ${waitBucket} (${poll.checks.filter((check) => check.bucket === 'fail').length} blockers)`,
+              },
+            ]
+          : []),
+      ],
       facts: {
         headSha: poll.headSha,
         ci: {

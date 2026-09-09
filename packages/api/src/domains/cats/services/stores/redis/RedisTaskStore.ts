@@ -40,6 +40,7 @@ import {
   createTaskSubjectAlreadyExistsError,
   isEntrustedWorkSubjectKey,
   type ReplaceAutomationStateIfGenerationInput,
+  type ReplaceTrackingRegistrationIfUnchangedInput,
   type UpdateEntrustedWorkStoreInput,
   type UpdateEntrustedWorkStoreResult,
 } from '../ports/TaskStoreContract.js';
@@ -54,6 +55,7 @@ import {
   tryCreateTaskWithAtomicSubject,
   writeTaskForSubjectOwner,
 } from './RedisTaskSubjectTransactions.js';
+import { RedisTaskTrackingRegistrationStore } from './RedisTaskTrackingRegistrationStore.js';
 import { runWithExclusiveRedisWatchSession } from './RedisWatchSession.js';
 
 const DEFAULT_TTL = 0; // persistent — set >0 via env to enable expiry
@@ -69,6 +71,7 @@ export class RedisTaskStore implements ITaskStore {
   private readonly ttlSeconds: number | null;
   private readonly managedWorkBindings: RedisTaskManagedWorkBindingStore;
   private readonly managedWorkRegistration: RedisTaskManagedWorkRegistrationStore;
+  private readonly trackingRegistration: RedisTaskTrackingRegistrationStore;
   private readonly entrustedWorkMutations: RedisTaskEntrustedWorkMutationStore;
 
   constructor(redis: RedisClient, options?: { ttlSeconds?: number }) {
@@ -78,6 +81,11 @@ export class RedisTaskStore implements ITaskStore {
       mergeAutomationState: mergeTaskAutomationState,
       applyThreadTtl: (threadId) => this.applyThreadTtl(threadId),
       compareAndDeleteSubject: (subjectKey, staleTaskId) => this.compareAndDeleteSubject(subjectKey, staleTaskId),
+      waitForInFlightTaskWrite: () => this.waitForInFlightTaskWrite(),
+    });
+    this.trackingRegistration = new RedisTaskTrackingRegistrationStore(redis, {
+      applyTtl: (task) => this.applyTtl(task),
+      applyThreadTtl: (threadId) => this.applyThreadTtl(threadId),
       waitForInFlightTaskWrite: () => this.waitForInFlightTaskWrite(),
     });
     this.entrustedWorkMutations = new RedisTaskEntrustedWorkMutationStore(
@@ -367,6 +375,12 @@ export class RedisTaskStore implements ITaskStore {
       await this.waitForInFlightTaskWrite();
     }
     throw new Error(`RedisTaskStore replaceAutomationStateIfGeneration: CAS exhausted for ${taskId}`);
+  }
+
+  async replaceTrackingRegistrationIfUnchanged(
+    input: ReplaceTrackingRegistrationIfUnchangedInput,
+  ): Promise<TaskItem | null> {
+    return this.trackingRegistration.replace(input);
   }
 
   async update(taskId: string, input: UpdateTaskInput): Promise<TaskItem | null> {

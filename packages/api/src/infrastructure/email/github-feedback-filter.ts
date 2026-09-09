@@ -42,7 +42,11 @@ export function createGitHubFeedbackFilter(opts: GitHubFeedbackFilterOptions): G
     opts.getSelfGitHubLogin ? opts.getSelfGitHubLogin() : opts.selfGitHubLogin;
   const isSelfAuthored = (author: string): boolean => {
     const selfGitHubLogin = getSelfGitHubLogin();
-    return selfGitHubLogin != null && author === selfGitHubLogin;
+    // #1394: GitHub logins are case-insensitive. An exact-case compare made the whole
+    // self filter silently fail whenever the configured credential casing differed from
+    // the casing GitHub returns on the payload — the cat then woke itself on its own
+    // comment, and every downstream "ignore self" guarantee was void.
+    return selfGitHubLogin != null && author.toLowerCase() === selfGitHubLogin.toLowerCase();
   };
 
   return {

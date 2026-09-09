@@ -33,7 +33,7 @@ export interface EventBackedRoutingExitProof {
     generation: number;
   };
   predicate: {
-    kind: 'pr_review_result_available';
+    kind: 'pr_bot_interaction';
     triggerCommentId: number;
   };
 }
@@ -47,33 +47,59 @@ interface ResolveEventBackedRoutingExitInput {
 
 type EventBackedRoutingExitIdentity = Omit<ResolveEventBackedRoutingExitInput, 'taskStore'>;
 
-function reviewResultPredicate(active: AwaitStateV1) {
-  return active.continuation.when.find(
-    (
-      predicate,
-    ): predicate is Extract<AwaitStateV1['continuation']['when'][number], { kind: 'pr_review_result_available' }> & {
-      triggerCommentId: number;
-    } => predicate.kind === 'pr_review_result_available' && predicate.triggerCommentId !== undefined,
-  );
-}
+/**
+ * F280 section 4b closed this exit, and this is the honest shape of that.
+ *
+ * The proof used to be a `pr_review_result_available` predicate the registering invocation
+ * declared by hand — "I asked codex in comment N" — coverage-verified at the registration
+ * route before it was stored. Whatever else that was, it was the invocation's OWN act.
+ * #1394 retired `when` from the registration surface, so no caller can declare it any more.
+ *
+ * The replacement tried here was an open bot round in the tracking baseline. It does not carry
+ * the same fact. A round belongs to the tracking OWNER, not to an invocation, so any later
+ * invocation of the same cat could clean-stop on a round it never opened. Stamping the
+ * registering invocation onto the round only moved the lie one level down: registration probed
+ * HISTORY, so the stamp landed on a summon written by an earlier turn.
+ *
+ * F280 section 4b therefore forbids F177 from taking its exit credential out of tracking at
+ * all — "a tracker exists in this thread" was never an exit, and borrowing from tracking is
+ * how it becomes one again. Until F177 carries an invocation-owned credential of its own,
+ * there is no proof to find and this resolver fails closed: the cat holds the ball instead of
+ * clean-stopping. One held ball is the cheap side of this trade; a false bypass is a turn that
+ * ends with nobody holding anything.
+ *
+ * `bypass` and `isEventBackedRoutingBypassProofValid` are not deleted, but they are not a
+ * standing safeguard either — see the seal on the validator itself. This exit is closed with no
+ * conditions attached: `bypass_total` and `false_bypass_total` both read zero, and the second
+ * one is what would break if any path ever synthesized a bypass anyway.
+ */
 
+/**
+ * SEALED. Every bypass is invalid, and it has to be this function that says so.
+ *
+ * sol R25 executed the counterexample the previous version of this file only claimed to guard:
+ * one hand-built proof, two different `invocationId`s, both `true`. That is not a bug in the
+ * field list — the proof has no invocation field at all, so no amount of checking task, thread,
+ * cat or subject can answer "does an event come back to THIS invocation". Invocation binding was
+ * exactly what `grantInvocationId` pretended to supply, and #1394 deleted it for lying.
+ *
+ * So "the false-bypass invariant stays armed" was the wrong reading of my own code: a validator
+ * that accepts an unbindable proof does not arm anything, it pre-approves the next reintroduction
+ * of the same hole. Sealing it inverts that. `resolveEventBackedRoutingExit` already rejects
+ * everything, so nothing reaches here today; if some future path ever synthesizes a `bypass`,
+ * this returns false, `event_wait.false_bypass_total` fires, and F192 raises it as the
+ * zero-tolerance regression it would be.
+ *
+ * Unsealing is not "restore the field list". It requires a server-issued coordination credential
+ * that F177 owns and that names the invocation it was issued to — and the checks then belong to
+ * THAT credential, not to this shape. The parameters stay so the seam and its call site keep
+ * their types while the door is shut.
+ */
 export function isEventBackedRoutingBypassProofValid(
-  resolution: EventBackedRoutingExitResolution,
-  identity: EventBackedRoutingExitIdentity,
+  _resolution: EventBackedRoutingExitResolution,
+  _identity: EventBackedRoutingExitIdentity,
 ): boolean {
-  if (resolution.kind !== 'bypass' || !identity.invocationId) return false;
-  const { task, predicate } = resolution.proof;
-  return (
-    task.kind === 'pr_tracking' &&
-    task.status !== 'done' &&
-    task.ownerCatId === identity.catId &&
-    task.threadId === identity.threadId &&
-    task.subjectKey === resolution.subjectKey &&
-    task.generation > 0 &&
-    predicate.kind === 'pr_review_result_available' &&
-    Number.isSafeInteger(predicate.triggerCommentId) &&
-    predicate.triggerCommentId > 0
-  );
+  return false;
 }
 
 function rejectCandidate(
@@ -89,16 +115,16 @@ function rejectCandidate(
   if (active.ownerFence.kind !== 'containing_task' || active.ownerFence.generation !== active.generation) {
     return 'generation_mismatch';
   }
-  if (!reviewResultPredicate(active)) return 'predicate_missing';
-  return null;
+  return 'predicate_missing';
 }
 
 /**
- * Resolve an invocation exit from the live typed wait.
+ * Resolve an invocation exit from the live typed wait — which, since F280 section 4b, is always
+ * a rejection.
  *
- * Coverage is verified by the registration route before this state exists. The
- * wait never copies invocation/cat/thread identity; this resolver binds the
- * authenticated invocation to the containing task at read time.
+ * Registration no longer verifies coverage of anything: the EYES verifier and the whole typed
+ * `when` surface are gone. What survives here is ownership accounting, so the bounded reject
+ * reason still distinguishes "no candidate at all" from "the candidate belonged to another cat".
  */
 export async function resolveEventBackedRoutingExit(
   input: ResolveEventBackedRoutingExitInput,
@@ -113,39 +139,18 @@ export async function resolveEventBackedRoutingExit(
     return { kind: 'reject', reason: 'query_failed' };
   }
 
+  // The ownership checks still run and still report which one failed: "there was no candidate
+  // at all" and "the candidate belonged to another cat" are different operational facts, and
+  // collapsing them would hide a real misrouting behind the closed exit.
   let firstReject: EventBackedRoutingExitRejectReason | null = null;
   for (const task of tasks) {
     const active = task.automationState?.await;
     if (!active) continue;
-    const reason = rejectCandidate(task, active, {
+    firstReject ??= rejectCandidate(task, active, {
       threadId: input.threadId,
       catId: input.catId,
       invocationId: input.invocationId,
     });
-    const predicate = reviewResultPredicate(active);
-    if (!reason && predicate) {
-      return {
-        kind: 'bypass',
-        taskId: task.id,
-        subjectKey: active.subjectRef,
-        expectedSignal: 'review_posted',
-        proof: {
-          task: {
-            kind: task.kind,
-            status: task.status,
-            ownerCatId: task.ownerCatId,
-            threadId: task.threadId,
-            subjectKey: task.subjectKey,
-            generation: active.generation,
-          },
-          predicate: {
-            kind: predicate.kind,
-            triggerCommentId: predicate.triggerCommentId,
-          },
-        },
-      };
-    }
-    firstReject ??= reason;
   }
 
   return { kind: 'reject', reason: firstReject ?? 'no_candidate' };
