@@ -194,6 +194,47 @@ describe('#1394 GitHub tracking main flow', () => {
     assert.equal(messageStore.getByThread('thread-registration').length, 2);
   });
 
+  test('an older overlapping poll cannot restore a review state removed by a newer dismissal', async () => {
+    const review = {
+      id: 31,
+      body: 'The current revision is ready.',
+      submitted_at: '2026-09-02T09:32:00Z',
+      user: { login: 'FormalReviewer', type: 'User' },
+      state: 'APPROVED',
+    };
+    const reviews = [review];
+    const { taskStore, task, spec } = await createReviewHarness({ reviews });
+
+    await runOnePoll(spec);
+    assert.deepEqual((await taskStore.get(task.id)).automationState.review.activeDecisionStatesByReviewId, {
+      31: 'APPROVED',
+    });
+
+    const olderGate = await spec.admission.gate();
+    assert.equal(olderGate.run, true);
+    assert.deepEqual(olderGate.workItems[0].signal.newDecisions, []);
+
+    review.state = 'DISMISSED';
+    const newerGate = await spec.admission.gate();
+    assert.equal(newerGate.run, true);
+    assert.equal(newerGate.workItems[0].signal.newDecisions[0].previousState, 'APPROVED');
+
+    for (const item of newerGate.workItems) {
+      await spec.run.execute(item.signal, item.subjectKey, {});
+    }
+    for (const item of olderGate.workItems) {
+      await spec.run.execute(item.signal, item.subjectKey, {});
+    }
+
+    assert.deepEqual(
+      (await taskStore.get(task.id)).automationState.review.activeDecisionStatesByReviewId,
+      {},
+      'the delayed older signal must not replace the newer collector snapshot',
+    );
+    const nextGate = await spec.admission.gate();
+    assert.deepEqual(nextGate.workItems[0].signal.newDecisions, [], 'the dismissal is not synthesized a second time');
+  });
+
   test('all three self-authored surfaces are consumed without notifying, case-insensitively', async () => {
     const { messageStore, taskStore, task, spec } = await createReviewHarness({
       inline: [

@@ -31,9 +31,14 @@ try {
 
 function makeTaskStore(task) {
   const tasks = new Map([[task.id, task]]);
+  const replaceCalls = [];
   return {
+    replaceCalls,
     async listByKind(kind) {
       return [...tasks.values()].filter((t) => t.kind === kind && t.status !== 'done');
+    },
+    async get(id) {
+      return tasks.get(id) ?? null;
     },
     async update(id, patch) {
       const t = tasks.get(id);
@@ -48,6 +53,20 @@ function makeTaskStore(task) {
         }
         tasks.set(id, { ...t, automationState: merged });
       }
+    },
+    async replaceAutomationStateIfGeneration(id, input) {
+      const current = tasks.get(id);
+      if (!current) return null;
+      if (input.expectedUpdatedAt !== undefined && input.expectedUpdatedAt !== current.updatedAt) return null;
+      const updated = {
+        ...current,
+        automationState: input.automationState,
+        ...(input.status !== undefined ? { status: input.status } : {}),
+        updatedAt: (current.updatedAt ?? 0) + 1,
+      };
+      replaceCalls.push({ id, patch: input.automationState });
+      tasks.set(id, updated);
+      return updated;
     },
   };
 }
@@ -268,7 +287,11 @@ describe('ReviewFeedbackTaskSpec: event log append — polling fallback (R3-P1)'
     const gate = await runGate(spec);
     assert.equal(gate.workItems[0].signal.subjectState, undefined, 'terminal delivery waits for the failed revision');
     assert.deepEqual(gate.workItems[0].signal.newDecisions, []);
-    assert.deepEqual(gate.workItems[0].signal.activeDecisionStatesByReviewId, { 101: 'CHANGES_REQUESTED' });
+    assert.equal(
+      gate.workItems[0].signal.reviewDecisionStateUpdate,
+      undefined,
+      'an unpersisted dismissal earns no state transition',
+    );
   });
 
   it('appends pr.review_submitted informational event for each new comment', async () => {
@@ -683,16 +706,7 @@ describe('ReviewFeedbackTaskSpec: safe cursor on projection failure (R4-P1-B)', 
 
   it('cursor advances normally when no projection failures occur', async () => {
     assert.ok(createReviewFeedbackTaskSpec);
-    const patchCalls = [];
-    const taskStore = {
-      async listByKind(kind) {
-        return kind === 'pr_tracking' ? [makePrTask()] : [];
-      },
-      async update() {},
-      async patchAutomationState(id, patch) {
-        patchCalls.push({ id, patch });
-      },
-    };
+    const taskStore = makeTaskStore(makePrTask());
     const eventLog = makeEventLog({ appended: true });
     const projector = makeProjector();
 
@@ -720,7 +734,7 @@ describe('ReviewFeedbackTaskSpec: safe cursor on projection failure (R4-P1-B)', 
 
     const gate = await runGate(spec);
     assert.equal(gate.run, false, 'without an explicit wait collection advances state but does not route');
-    const lastPatch = patchCalls[patchCalls.length - 1];
+    const lastPatch = taskStore.replaceCalls[taskStore.replaceCalls.length - 1];
     assert.strictEqual(
       lastPatch?.patch?.review?.lastDecisionCursor,
       800,
@@ -1051,6 +1065,9 @@ describe('ReviewFeedbackTaskSpec: stale cursor advancement (Cloud R16 P2)', () =
         const t = tasks.get(id);
         if (t) tasks.set(id, { ...t, ...patch });
       },
+      async get(id) {
+        return tasks.get(id) ?? null;
+      },
       async patchAutomationState(id, patch) {
         const t = tasks.get(id);
         if (t) {
@@ -1064,6 +1081,20 @@ describe('ReviewFeedbackTaskSpec: stale cursor advancement (Cloud R16 P2)', () =
             persistedCommentCursors.push(patch.review.lastCommentCursor);
           }
         }
+      },
+      async replaceAutomationStateIfGeneration(id, input) {
+        const current = tasks.get(id);
+        if (!current) return null;
+        if (input.expectedUpdatedAt !== undefined && input.expectedUpdatedAt !== current.updatedAt) return null;
+        const updated = {
+          ...current,
+          automationState: input.automationState,
+          updatedAt: (current.updatedAt ?? 0) + 1,
+        };
+        tasks.set(id, updated);
+        const cursor = input.automationState?.review?.lastCommentCursor;
+        if (cursor !== undefined) persistedCommentCursors.push(cursor);
+        return updated;
       },
     };
 

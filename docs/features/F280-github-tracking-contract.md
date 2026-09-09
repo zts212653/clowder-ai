@@ -129,6 +129,13 @@ decision cursor 只能发现新记录，不能发现撤销。注册时还要冻�
 继续重试。Community projection 按 durable append order 重放；补偿写入可能晚到，因此
 `lastExternalActivityAt` 与 projection `updatedAt` 都保持时间单调，不被旧事件倒拨。
 
+review verdict 状态**不能以 collector 在 admission 时重建的整张 map 覆盖**。同一任务的两个
+poll 可能重叠并倒序完成：较新的 poll 已删除被 dismiss 的 verdict 后，较旧的静默 poll 若再
+写回旧快照，会让下一轮把同一次 dismissal 通知第二遍。普通 poll 只携带逐 review ID 的
+`expectedState → nextState`，在 lifecycle CAS 与 source-cursor commit 两个写入口都对**当时最新**
+的持久状态条件应用；旧任务的首次完整快照也只在该字段仍缺席时初始化。游标保持单调，但不
+因此取得覆盖较新 verdict 状态的权限。
+
 > 这里曾写成"默认关闭的那一个（`head_changed`）"。那句话只在作者视角下成立，
 > 和 A27「非作者 `include: ["bot_interaction"]` ⇒ bot 回合恢复通知」直接冲突。
 > 生产语义是 `bot_interaction` 的默认值为 `'author'`（作者与角色未知时开、非作者关），
@@ -463,6 +470,7 @@ baseline: snapshot.baseline,        // 当前最大值
 | A39 | outcome N 首投失败，另一个带不同 delivery metadata 的观察重投 N | 使用 N 持久化的原 metadata；本轮 metadata 不参与 | 跨 adapter 借错或擦除可信 memory cue |
 | A40 | outcome N 已安装但 lifecycle event 首次追加失败，且 N+1 已续订 | 不投递 N；下一轮先补 N 的 event，再投递 N，之后才求值 N+1 | 已通知但审计事件永久丢失，N+1 覆盖唯一恢复记录 |
 | A41 | 已见的 `APPROVED` / `CHANGES_REQUESTED` 在**同一 review ID**上变成 `DISMISSED` | 投递一次撤销；状态快照在 durable processing 后删除该 active verdict；重复轮询不重放 | 只看 `id > cursor`，继续把已撤销的 approval / changes-request 当成当前事实 |
+| A42 | 两个 review-feedback poll 重叠，较新的 dismissal 先落盘，较旧的静默 poll 后执行 | 旧 poll 不恢复已删除 verdict；下一轮不重复合成 dismissal | 用 admission 时重建的整张 map 覆盖较新的 collector 状态 |
 
 **A3 / A6 / A17 是历史事故的直接复现，必须有独立测试。**
 **A22 是"静默丢真信号"，优先级高于任何降噪诉求。**
@@ -476,7 +484,7 @@ baseline: snapshot.baseline,        // 当前最大值
 | 归一化（回合识别：mention + 已知 bot 身份） | A23 A24 A25 A26 A29 — bot 回合是**改事件的名字**，不是加一路事件 |
 | 归一化（回合状态：开 / 闭 / 超时未闭） | A28 A29 — 仅 review-feedback 观察拥有回合时钟；CI / conflict 即使携带 events 也不得消费。回合随 frontier 同批推进，报了必然同时退休 |
 | 订阅过滤 | A1 A19 A20 A23 A24 A25 A27 |
-| 已见过滤（per-source frontier + durable prefix） | A12 A14 A16 **A36** |
+| 已见过滤（per-source frontier + durable prefix + conditional verdict transition） | A12 A14 A16 **A36 A42** |
 | 受众过滤（唯一一处，只挡投递） | A6 A7 A8 A9 A10 A11 A26 **A30 A32** — 自己写的仍进流：它要开回合、要推 frontier。角色决定"这个作者的话我要不要听" |
 | 投递到注册 thread | A21 |
 | 推进 frontier | A13 A14 |

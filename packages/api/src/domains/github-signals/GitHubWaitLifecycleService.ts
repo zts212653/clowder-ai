@@ -19,7 +19,7 @@ import {
   transitionWaitState,
   type WaitTransitionEvent,
 } from '../ball-custody/wait-state-machine.js';
-import { automationGeneration } from '../cats/services/stores/ports/TaskAutomationState.js';
+import { automationGeneration, mergeTaskAutomationState } from '../cats/services/stores/ports/TaskAutomationState.js';
 import type { ITaskStore } from '../cats/services/stores/ports/TaskStore.js';
 import {
   advanceGitHubTrackingBaseline,
@@ -34,6 +34,7 @@ import {
   REVIEW_LOOP_HISTORY_WARN_NEXT_STEP,
   renderGitHubWaitOutcome,
 } from './github-wait-renderer.js';
+import { applyReviewDecisionStateUpdate, type ReviewDecisionStateUpdate } from './ReviewDecisionStateUpdate.js';
 
 export interface GitHubCollectorPatch {
   readonly review?: NonNullable<PrAutomationState['review']>;
@@ -55,6 +56,8 @@ export interface GitHubWaitObservation {
    */
   readonly botTurnEvaluation?: 'review_feedback';
   readonly collectorPatch?: GitHubCollectorPatch;
+  /** Per-review compare-and-set transitions derived from the collector's admission snapshot. */
+  readonly reviewDecisionStateUpdate?: ReviewDecisionStateUpdate;
   readonly subjectState?: 'merged' | 'closed';
   readonly at?: number;
   /** Source-owned, typed metadata for the connector message created by this observation. */
@@ -120,28 +123,12 @@ export interface GitHubWaitLifecycleServiceOptions {
 }
 
 function mergeCollectorState(
-  taskKind: TaskItem['kind'],
   state: AutomationState | undefined,
   patch: GitHubCollectorPatch | undefined,
+  reviewDecisionStateUpdate: ReviewDecisionStateUpdate | undefined,
 ): AutomationState {
-  if (taskKind === 'issue_tracking') {
-    const issueState = state as IssueWaitAutomationState | undefined;
-    return {
-      ...(issueState?.issue || patch?.issue ? { issue: { ...issueState?.issue, ...patch?.issue } } : {}),
-      ...(issueState?.closedAt !== undefined ? { closedAt: issueState.closedAt } : {}),
-      ...(issueState?.await ? { await: issueState.await } : {}),
-      ...(issueState?.waitOutcome ? { waitOutcome: issueState.waitOutcome } : {}),
-    };
-  }
-  const prState = state as PrAutomationState | undefined;
-  return {
-    ...(prState?.review || patch?.review ? { review: { ...prState?.review, ...patch?.review } } : {}),
-    ...(prState?.ci || patch?.ci ? { ci: { ...prState?.ci, ...patch?.ci } } : {}),
-    ...(prState?.conflict || patch?.conflict ? { conflict: { ...prState?.conflict, ...patch?.conflict } } : {}),
-    ...(prState?.closedAt !== undefined ? { closedAt: prState.closedAt } : {}),
-    ...(prState?.await ? { await: prState.await } : {}),
-    ...(prState?.waitOutcome ? { waitOutcome: prState.waitOutcome } : {}),
-  };
+  const merged = mergeTaskAutomationState(state, (patch ?? {}) as Partial<AutomationState>);
+  return applyReviewDecisionStateUpdate(merged, reviewDecisionStateUpdate) ?? {};
 }
 
 function lifecycleEvent(task: TaskItem, outcome: WaitOutcomeV1): WaitTerminationEventV1 {
@@ -217,7 +204,7 @@ export class GitHubWaitLifecycleService {
 
       const state = task.automationState;
       const active = state?.await;
-      const collectorState = mergeCollectorState(task.kind, state, input.collectorPatch);
+      const collectorState = mergeCollectorState(state, input.collectorPatch, input.reviewDecisionStateUpdate);
       if (!active) {
         if (input.subjectState) {
           const installed = await this.opts.taskStore.replaceAutomationStateIfGeneration(task.id, {
@@ -230,8 +217,14 @@ export class GitHubWaitLifecycleService {
           // The collector state — cursors included — was installed immediately above.
           return { kind: 'state_only', reason: 'subject_terminal_without_active_wait', observationEvaluated: true };
         }
-        if (input.collectorPatch) {
-          await this.opts.taskStore.patchAutomationState(task.id, input.collectorPatch as Partial<AutomationState>);
+        if (input.collectorPatch || input.reviewDecisionStateUpdate) {
+          const installed = await this.opts.taskStore.replaceAutomationStateIfGeneration(task.id, {
+            expectedGeneration: automationGeneration(state),
+            expectedUpdatedAt: task.updatedAt,
+            automationState: collectorState,
+            status: task.status,
+          });
+          if (!installed) continue;
         }
         // No wait exists, so nothing will ever match these events. Consumed by decision —
         // holding the caller's cursor here would loop it forever on the same items.

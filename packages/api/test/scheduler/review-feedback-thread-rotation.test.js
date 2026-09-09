@@ -78,6 +78,16 @@ function mockTaskStore(tasks, options = {}) {
       };
       return { ...task };
     },
+    replaceAutomationStateIfGeneration: async (taskId, input) => {
+      const task = tasks.find((t) => t.id === taskId);
+      if (!task) return null;
+      if (input.expectedUpdatedAt !== undefined && task.updatedAt !== input.expectedUpdatedAt) return null;
+      patchCalls.push({ taskId, patch: input.automationState });
+      task.automationState = input.automationState;
+      if (input.status !== undefined) task.status = input.status;
+      task.updatedAt += 1;
+      return { ...task };
+    },
     _patchCalls: patchCalls,
     _updateCalls: updateCalls,
   };

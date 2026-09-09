@@ -5,6 +5,7 @@ import {
 } from '../../domains/github-signals/GitHubTrackingEvent.js';
 import type { GitHubWaitLifecycleService } from '../../domains/github-signals/GitHubWaitLifecycleService.js';
 import type { GitHubReviewLoopBrake } from '../../domains/github-signals/github-wait-renderer.js';
+import type { ReviewDecisionStateUpdate } from '../../domains/github-signals/ReviewDecisionStateUpdate.js';
 import { projectWaitWakeDisposition } from '../../domains/github-signals/WaitWakeDisposition.js';
 import type { ConnectorDeliveryDeps } from './deliver-connector-message.js';
 
@@ -51,7 +52,7 @@ export interface ReviewFeedbackSignal {
   readonly inlineCommentCursor: number;
   readonly conversationCommentCursor: number;
   readonly decisionCursor: number;
-  readonly activeDecisionStatesByReviewId: Readonly<Record<string, 'APPROVED' | 'CHANGES_REQUESTED'>>;
+  readonly reviewDecisionStateUpdate?: ReviewDecisionStateUpdate;
   readonly subjectState?: 'merged' | 'closed';
   readonly reviewLoopBrake?: GitHubReviewLoopBrake;
   /**
@@ -154,10 +155,10 @@ export class ReviewFeedbackRouter {
           lastInlineCommentCursor: signal.inlineCommentCursor,
           lastConversationCommentCursor: signal.conversationCommentCursor,
           lastDecisionCursor: signal.decisionCursor,
-          activeDecisionStatesByReviewId: signal.activeDecisionStatesByReviewId,
           ...(signal.subjectState ? { prState: signal.subjectState } : {}),
         },
       },
+      ...(signal.reviewDecisionStateUpdate ? { reviewDecisionStateUpdate: signal.reviewDecisionStateUpdate } : {}),
       ...(signal.subjectState ? { subjectState: signal.subjectState } : {}),
       ...(signal.reviewLoopBrake ? { reviewLoopBrake: signal.reviewLoopBrake } : {}),
     });

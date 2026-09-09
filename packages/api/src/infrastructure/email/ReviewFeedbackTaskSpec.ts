@@ -8,8 +8,12 @@
  * Gate: list pr_tracking tasks → fetch comments + reviews → filter by cursor → workItems.
  * Execute: ReviewFeedbackRouter → ConnectorInvokeTrigger → commitCursor.
  */
-import type { CatId, CommunityEvent, TaskItem } from '@cat-cafe/shared';
+import type { AutomationState, CatId, CommunityEvent, TaskItem } from '@cat-cafe/shared';
 import { parsePrSubjectKey } from '@cat-cafe/shared';
+import {
+  automationGeneration,
+  mergeTaskAutomationState,
+} from '../../domains/cats/services/stores/ports/TaskAutomationState.js';
 import type { ITaskStore } from '../../domains/cats/services/stores/ports/TaskStore.js';
 import {
   DEFAULT_THREAD_ID,
@@ -29,6 +33,12 @@ import {
   classifyGitHubReviewLoopBrake,
   type GitHubReviewLoopBrake,
 } from '../../domains/github-signals/github-wait-renderer.js';
+import {
+  type ActiveReviewDecisionState,
+  applyReviewDecisionStateUpdate,
+  type ReviewDecisionStateTransition,
+  type ReviewDecisionStateUpdate,
+} from '../../domains/github-signals/ReviewDecisionStateUpdate.js';
 import { claimableSourceCategory, mayAutoWakeOwner } from '../../domains/github-signals/WaitWakeDisposition.js';
 import type { DistillationCheckpoint } from '../distillation/DistillationCheckpoint.js';
 import type { ExecuteContext, TaskSpec_P1 } from '../scheduler/types.js';
@@ -52,7 +62,7 @@ export interface ReviewFeedbackSignal {
   inlineCommentCursor: number;
   conversationCommentCursor: number;
   decisionCursor: number;
-  activeDecisionStatesByReviewId: Readonly<Record<string, 'APPROVED' | 'CHANGES_REQUESTED'>>;
+  reviewDecisionStateUpdate?: ReviewDecisionStateUpdate;
   subjectState?: 'merged' | 'closed';
   reviewLoopBrake?: GitHubReviewLoopBrake;
   validateRoutingRepairFresh?: () => Promise<boolean>;
@@ -332,6 +342,45 @@ export function createReviewFeedbackTaskSpec(opts: ReviewFeedbackTaskSpecOptions
    * - persistFirst (echo-skip): no delivery happened → persist first, skip memory on failure → safe retry
    * - memoryFirst  (post-delivery): notification sent → advance memory first → prevent duplicate spam
    */
+  async function persistCursorState(
+    taskId: string,
+    patch: Partial<AutomationState>,
+    reviewDecisionStateUpdate: ReviewDecisionStateUpdate | undefined,
+  ): Promise<boolean> {
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      const current = await opts.taskStore.get(taskId);
+      if (!current) return false;
+      const merged = mergeTaskAutomationState(current.automationState, patch);
+      const automationState = applyReviewDecisionStateUpdate(merged, reviewDecisionStateUpdate);
+      const installed = await opts.taskStore.replaceAutomationStateIfGeneration(taskId, {
+        expectedGeneration: automationGeneration(current.automationState),
+        expectedUpdatedAt: current.updatedAt,
+        automationState,
+        status: current.status,
+      });
+      if (installed) return true;
+    }
+    return false;
+  }
+
+  async function persistCursorStateWithWarning(
+    taskId: string,
+    prKey: string,
+    patch: Partial<AutomationState>,
+    reviewDecisionStateUpdate: ReviewDecisionStateUpdate | undefined,
+    warning: string,
+  ): Promise<boolean> {
+    try {
+      if (!(await persistCursorState(taskId, patch, reviewDecisionStateUpdate))) {
+        throw new Error('conditional cursor update lost its CAS race');
+      }
+      return true;
+    } catch (error) {
+      opts.log.warn(`[review-feedback] ${warning} for ${prKey}`, error);
+      return false;
+    }
+  }
+
   async function advanceCursor(
     taskId: string,
     prKey: string,
@@ -339,7 +388,7 @@ export function createReviewFeedbackTaskSpec(opts: ReviewFeedbackTaskSpecOptions
       inline: number;
       conversation: number;
       decision: number;
-      activeDecisionStatesByReviewId: Readonly<Record<string, 'APPROVED' | 'CHANGES_REQUESTED'>>;
+      reviewDecisionStateUpdate?: ReviewDecisionStateUpdate;
       commentMigrationPending?: boolean;
       commentMigrationTargets?: PrFeedbackCommentCursors;
     },
@@ -357,7 +406,6 @@ export function createReviewFeedbackTaskSpec(opts: ReviewFeedbackTaskSpecOptions
           : {}),
         ...(cursors.commentMigrationTargets ? { commentCursorMigrationTargets: cursors.commentMigrationTargets } : {}),
         lastDecisionCursor: cursors.decision,
-        activeDecisionStatesByReviewId: cursors.activeDecisionStatesByReviewId,
         ...(policy === 'memoryFirst' ? { lastNotifiedAt: Date.now() } : {}),
       },
     };
@@ -367,21 +415,17 @@ export function createReviewFeedbackTaskSpec(opts: ReviewFeedbackTaskSpecOptions
       reviewCursors.set(prKey, cursors.decision);
     };
 
-    if (policy === 'memoryFirst') {
-      setMemory();
-      try {
-        await opts.taskStore.patchAutomationState(taskId, patch);
-      } catch (e) {
-        opts.log.warn(`[review-feedback] cursor persist failed for ${prKey}, restart may replay`, e);
-      }
-    } else {
-      try {
-        await opts.taskStore.patchAutomationState(taskId, patch);
-        setMemory();
-      } catch (e) {
-        opts.log.warn(`[review-feedback] echo-skip persist failed for ${prKey}, will retry next tick`, e);
-      }
-    }
+    if (policy === 'memoryFirst') setMemory();
+    const persisted = await persistCursorStateWithWarning(
+      taskId,
+      prKey,
+      patch,
+      cursors.reviewDecisionStateUpdate,
+      policy === 'memoryFirst'
+        ? 'cursor persist failed, restart may replay'
+        : 'echo-skip persist failed, will retry next tick',
+    );
+    if (policy === 'persistFirst' && persisted) setMemory();
   }
 
   return {
@@ -493,7 +537,6 @@ export function createReviewFeedbackTaskSpec(opts: ReviewFeedbackTaskSpecOptions
                 return [];
               })
               .sort((left, right) => left.id - right.id);
-            const freshNewComments = allNewComments.filter((c) => !isStaleCommitFeedback(c, prMetadata?.headSha));
             const durableNewComments = allNewComments.filter(
               (comment) => isCommentMigrationBackfill(comment) || !isStaleCommitFeedback(comment, prMetadata?.headSha),
             );
@@ -679,7 +722,7 @@ export function createReviewFeedbackTaskSpec(opts: ReviewFeedbackTaskSpecOptions
                         processedReviewKeys.has(reviewProcessingKey(review))),
                   )
                 : allNewReviews;
-            const activeDecisionStatesByReviewId: Record<string, 'APPROVED' | 'CHANGES_REQUESTED'> = {
+            const activeDecisionStatesByReviewId: Record<string, ActiveReviewDecisionState> = {
               ...(previousActiveDecisionStates ?? {}),
             };
             // Existing tasks have no state snapshot. Seed only already-consumed reviews so a
@@ -696,6 +739,19 @@ export function createReviewFeedbackTaskSpec(opts: ReviewFeedbackTaskSpecOptions
               if (state) activeDecisionStatesByReviewId[String(review.id)] = state;
               else if (review.state === 'DISMISSED') delete activeDecisionStatesByReviewId[String(review.id)];
             }
+            const reviewDecisionStateTransitions: ReviewDecisionStateTransition[] = reviewDecisionStateMigration
+              ? []
+              : durableNewReviews.flatMap((review) => {
+                  const reviewId = String(review.id);
+                  const expectedState = previousActiveDecisionStates?.[reviewId] ?? null;
+                  const nextState = activeReviewDecisionState(review) ?? null;
+                  return expectedState === nextState ? [] : [{ reviewId, expectedState, nextState }];
+                });
+            const reviewDecisionStateUpdate: ReviewDecisionStateUpdate | undefined = reviewDecisionStateMigration
+              ? { kind: 'initialize_if_absent', states: activeDecisionStatesByReviewId }
+              : reviewDecisionStateTransitions.length > 0
+                ? { kind: 'transitions', transitions: reviewDecisionStateTransitions }
+                : undefined;
             const commentCursorMigrationPending =
               commentCursorMigrationActive &&
               (maxInlineCommentId < commentCursorMigrationTargets.inline ||
@@ -745,7 +801,7 @@ export function createReviewFeedbackTaskSpec(opts: ReviewFeedbackTaskSpecOptions
                     inline: maxInlineCommentId,
                     conversation: maxConversationCommentId,
                     decision: maxReviewId,
-                    activeDecisionStatesByReviewId,
+                    ...(reviewDecisionStateUpdate ? { reviewDecisionStateUpdate } : {}),
                     ...(commentCursorMigrationActive
                       ? {
                           commentMigrationPending: commentCursorMigrationPending,
@@ -822,7 +878,7 @@ export function createReviewFeedbackTaskSpec(opts: ReviewFeedbackTaskSpecOptions
                 inlineCommentCursor: maxInlineCommentId,
                 conversationCommentCursor: maxConversationCommentId,
                 decisionCursor: maxReviewId,
-                activeDecisionStatesByReviewId,
+                ...(reviewDecisionStateUpdate ? { reviewDecisionStateUpdate } : {}),
                 ...(deliverTerminal ? { subjectState: terminalState } : {}),
                 ...(reviewLoopBrake ? { reviewLoopBrake } : {}),
                 validateRoutingRepairFresh: repairResult.validateRoutingRepairFresh,
@@ -835,7 +891,7 @@ export function createReviewFeedbackTaskSpec(opts: ReviewFeedbackTaskSpecOptions
                       inline: maxInlineCommentId,
                       conversation: maxConversationCommentId,
                       decision: maxReviewId,
-                      activeDecisionStatesByReviewId,
+                      ...(reviewDecisionStateUpdate ? { reviewDecisionStateUpdate } : {}),
                       ...(commentCursorMigrationActive
                         ? {
                             commentMigrationPending: commentCursorMigrationPending,
@@ -890,7 +946,9 @@ export function createReviewFeedbackTaskSpec(opts: ReviewFeedbackTaskSpecOptions
             inlineCommentCursor: signal.inlineCommentCursor,
             conversationCommentCursor: signal.conversationCommentCursor,
             decisionCursor: signal.decisionCursor,
-            activeDecisionStatesByReviewId: signal.activeDecisionStatesByReviewId,
+            ...(signal.reviewDecisionStateUpdate
+              ? { reviewDecisionStateUpdate: signal.reviewDecisionStateUpdate }
+              : {}),
             ...(signal.subjectState ? { subjectState: signal.subjectState } : {}),
             ...(opts.isEchoComment ? { isSelfComment: opts.isEchoComment } : {}),
             ...(opts.isEchoReview ? { isSelfReview: opts.isEchoReview } : {}),
