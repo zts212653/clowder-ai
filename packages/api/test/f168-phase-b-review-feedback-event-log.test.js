@@ -185,6 +185,7 @@ describe('ReviewFeedbackTaskSpec: event log append — polling fallback (R3-P1)'
     assert.strictEqual(reviewAppend.classification, 'informational');
     assert.strictEqual(reviewAppend.payload.authorAssociation, 'CONTRIBUTOR');
     assert.strictEqual(reviewAppend.subjectKey, 'pr:owner/repo#10');
+    assert.strictEqual(reviewAppend.at, Date.parse('2026-01-01T00:00:00Z'));
     // R4-P1-A: must match webhook handler format review:{repo}#{pr}:{reviewId}
     assert.strictEqual(reviewAppend.sourceEventId, 'review:owner/repo#10:101');
   });
@@ -197,6 +198,7 @@ describe('ReviewFeedbackTaskSpec: event log append — polling fallback (R3-P1)'
     const taskStore = makeTaskStore(task);
     const eventLog = makeEventLog({ appended: true });
     const projector = makeProjector();
+    const detectedAt = Date.parse('2026-02-03T04:05:06Z');
     const spec = createReviewFeedbackTaskSpec({
       id: 'dismissed-review-event-log',
       taskStore,
@@ -217,11 +219,17 @@ describe('ReviewFeedbackTaskSpec: event log append — polling fallback (R3-P1)'
       eventLog,
       projector,
       log,
+      now: () => detectedAt,
     });
 
     const gate = await runGate(spec);
     assert.equal(gate.workItems[0].signal.newDecisions[0].previousState, 'APPROVED');
     assert.equal(eventLog.appendCalls[0].sourceEventId, 'review:owner/repo#10:101:DISMISSED');
+    assert.equal(
+      eventLog.appendCalls[0].at,
+      detectedAt,
+      'a same-ID dismissal revision is timestamped when the poller detects it, not when the original review was submitted',
+    );
     assert.equal(projector.applyCalls.length, 1);
   });
 

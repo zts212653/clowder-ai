@@ -123,8 +123,11 @@ formal review 的 GitHub `id` 只标识记录，**不标识记录版本**。管�
 decision cursor 只能发现新记录，不能发现撤销。注册时还要冻结仍可被 dismiss 的 verdict
 状态，轮询读取完整 review 集并与这份持久快照比较。旧任务首次没有快照时只基线化，
 不得把部署前的 dismissal 当成新通知回放；已知 verdict 的原地 dismissal 则是新的
-`review_decision`，拥有独立的 durable event identity。若该修订写不进 event log，既不投递、
-也不终态，下一轮继续重试。
+`review_decision`，拥有独立的 durable event identity。GitHub 在这份原地变更的记录上仍保留
+原 verdict 的 `submittedAt`，所以 dismissal 修订以轮询**检测到状态变化的时刻**作为事件时间，
+不能借旧提交时间把撤销倒写进历史。若该修订写不进 event log，既不投递、也不终态，下一轮
+继续重试。Community projection 按 durable append order 重放；补偿写入可能晚到，因此
+`lastExternalActivityAt` 与 projection `updatedAt` 都保持时间单调，不被旧事件倒拨。
 
 > 这里曾写成"默认关闭的那一个（`head_changed`）"。那句话只在作者视角下成立，
 > 和 A27「非作者 `include: ["bot_interaction"]` ⇒ bot 回合恢复通知」直接冲突。

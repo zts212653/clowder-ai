@@ -602,7 +602,10 @@ export function createReviewFeedbackTaskSpec(opts: ReviewFeedbackTaskSpecOptions
                       reviewState: review.state,
                       ...(review.previousState ? { previousReviewState: review.previousState } : {}),
                     },
-                    at: new Date(review.submittedAt).getTime(),
+                    // GitHub mutates a dismissed review in place, so submittedAt still names
+                    // the original verdict. This revision is new when this poll detects the
+                    // state change; using the old submission time would backdate the revocation.
+                    at: review.previousState ? (opts.now ?? Date.now)() : new Date(review.submittedAt).getTime(),
                   };
                   const { appended: reviewAppended } = await opts.eventLog.append(communityEvent);
                   // Cloud R8 P1-2: only project newly appended events (appended:true).

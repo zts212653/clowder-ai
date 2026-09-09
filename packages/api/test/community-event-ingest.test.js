@@ -1161,6 +1161,53 @@ describe('Cloud R2 — P2b: informational activity events update lastExternalAct
     );
     assert.strictEqual(proj.state, 'new', 'state must remain "new" — informational events do not change state');
   });
+
+  it('does not let a late informational event move projection activity timestamps backward', async () => {
+    const objectStore = makeInMemoryCommunityObjectStore();
+    const eventLog = makeInMemoryEventLog();
+    const projector = new CommunityProjector(eventLog, objectStore);
+    const subjectKey = 'issue:owner/repo#21';
+    const events = [
+      {
+        sourceEventId: 'seed-monotonic-opened',
+        subjectKey,
+        kind: 'issue.opened',
+        classification: 'state-changing',
+        payload: { title: 'Test issue', authorLogin: 'user' },
+        at: 100,
+      },
+      {
+        sourceEventId: 'newer-monotonic-comment',
+        subjectKey,
+        kind: 'issue.commented',
+        classification: 'informational',
+        payload: { commentId: 43, commenterLogin: 'contributor', authorAssociation: 'CONTRIBUTOR' },
+        at: 300,
+      },
+      {
+        sourceEventId: 'late-monotonic-review',
+        subjectKey,
+        kind: 'pr.review_submitted',
+        classification: 'informational',
+        payload: { reviewId: 44, authorAssociation: 'CONTRIBUTOR' },
+        at: 200,
+      },
+    ];
+
+    for (const event of events) {
+      await eventLog.append(event);
+      await projector.apply(event);
+    }
+
+    let projection = await objectStore.get(subjectKey);
+    assert.equal(projection.lastExternalActivityAt, 300);
+    assert.equal(projection.updatedAt, 300);
+
+    await projector.rebuild(subjectKey);
+    projection = await objectStore.get(subjectKey);
+    assert.equal(projection.lastExternalActivityAt, 300, 'event-log rebuild preserves the latest activity time');
+    assert.equal(projection.updatedAt, 300, 'event-log rebuild preserves monotonic projection time');
+  });
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
