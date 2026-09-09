@@ -18,7 +18,6 @@ import { isTrackingKind } from '@cat-cafe/shared';
 import { automationGeneration, mergeTaskAutomationState } from './TaskAutomationState.js';
 import { TaskEntrustedWorkMutationStore } from './TaskEntrustedWorkMutationStore.js';
 import { createEntrustedTaskItem, createGenericTaskItem } from './TaskItemFactory.js';
-import { createManagedWorkBindingConflict } from './TaskManagedWorkBinding.js';
 import { TaskManagedWorkRegistrationStore } from './TaskManagedWorkRegistrationStore.js';
 import {
   type AdmitEntrustedWorkStoreInput,
@@ -40,6 +39,7 @@ import {
   type UpdateEntrustedWorkStoreResult,
 } from './TaskStoreContract.js';
 import { assertSubjectUpdateOwnership } from './TaskSubjectOwnership.js';
+import { TaskTrackingRegistrationStore } from './TaskTrackingRegistrationStore.js';
 
 export type { ITaskStore } from './TaskStoreContract.js';
 export {
@@ -51,72 +51,6 @@ export {
 
 const MAX_TASKS = 500;
 
-export function assertTrackingRegistrationInput(input: ReplaceTrackingRegistrationIfUnchangedInput): string {
-  const subjectKey = input.task.subjectKey;
-  if (!subjectKey || !isTrackingKind(input.task.kind ?? 'work')) {
-    throw new Error('Conditional tracking registration requires a tracking subject anchor');
-  }
-  if (
-    input.managedWorkBinding &&
-    (input.task.kind !== 'pr_tracking' || !input.managedWorkBinding.workId || !input.managedWorkBinding.attemptId)
-  ) {
-    throw new Error('Managed-work registration requires a complete pr_tracking binding');
-  }
-  assertGenericTaskSubjectNamespaceAllowed(subjectKey);
-  return subjectKey;
-}
-
-export function matchesTrackingRegistrationExpectation(current: TaskItem | null, expected: TaskItem | null): boolean {
-  if (!current || !expected) return current === expected;
-  return (
-    current.id === expected.id &&
-    current.updatedAt === expected.updatedAt &&
-    current.status === expected.status &&
-    current.threadId === expected.threadId &&
-    current.ownerCatId === expected.ownerCatId &&
-    current.userId === expected.userId &&
-    JSON.stringify(current.automationState) === JSON.stringify(expected.automationState)
-  );
-}
-
-export function assertTrackingRegistrationCurrentCompatible(
-  subjectKey: string,
-  current: TaskItem,
-  input: ReplaceTrackingRegistrationIfUnchangedInput,
-): void {
-  assertSubjectUpdateOwnership(subjectKey, current, input.task);
-  assertEntrustedWorkGenericUpsertAllowed(current);
-}
-
-export function assertTrackingRegistrationBindingCompatible(
-  taskId: string,
-  current: ManagedWorkBinding | null,
-  requested: ManagedWorkBinding | undefined,
-): void {
-  if (current && requested && (current.workId !== requested.workId || current.attemptId !== requested.attemptId)) {
-    throw createManagedWorkBindingConflict(taskId);
-  }
-}
-
-export function trackingRegistrationUpdate(
-  current: TaskItem,
-  input: ReplaceTrackingRegistrationIfUnchangedInput,
-): TaskItem {
-  return {
-    ...current,
-    threadId: input.task.threadId,
-    title: input.task.title,
-    ownerCatId: input.task.ownerCatId ?? current.ownerCatId,
-    status: current.status === 'done' ? 'todo' : current.status,
-    why: input.task.why,
-    userId: input.task.userId ?? current.userId,
-    probe: input.task.probe !== undefined ? input.task.probe : current.probe,
-    resolveMode: input.task.resolveMode !== undefined ? input.task.resolveMode : current.resolveMode,
-    automationState: input.automationState,
-    updatedAt: Date.now(),
-  };
-}
-
 /**
  * In-memory task store with bounded capacity.
  * #320: Extended with kind/subject indexes.
@@ -126,6 +60,7 @@ export class TaskStore implements ITaskStore {
   /** subject_key → taskId reverse index */
   private subjectIndex: Map<string, string> = new Map();
   private readonly managedWorkRegistration: TaskManagedWorkRegistrationStore;
+  private readonly trackingRegistration: TaskTrackingRegistrationStore;
   private readonly entrustedWorkMutations: TaskEntrustedWorkMutationStore;
   private readonly maxTasks: number;
 
@@ -135,6 +70,12 @@ export class TaskStore implements ITaskStore {
       getBySubject: (subjectKey) => this.getBySubject(subjectKey),
       getById: (taskId) => this.tasks.get(taskId),
       upsertBySubject: (input) => this.upsertBySubject(input),
+    });
+    this.trackingRegistration = new TaskTrackingRegistrationStore({
+      tasks: this.tasks,
+      subjectIndex: this.subjectIndex,
+      managedWorkRegistration: this.managedWorkRegistration,
+      evictDoneIfNeeded: () => this.evictDoneIfNeeded(),
     });
     this.entrustedWorkMutations = new TaskEntrustedWorkMutationStore(this.tasks);
   }
@@ -301,34 +242,7 @@ export class TaskStore implements ITaskStore {
   }
 
   replaceTrackingRegistrationIfUnchanged(input: ReplaceTrackingRegistrationIfUnchangedInput): TaskItem | null {
-    const subjectKey = assertTrackingRegistrationInput(input);
-
-    const current = this.getBySubject(subjectKey);
-    if (!matchesTrackingRegistrationExpectation(current, input.expectedTask)) return null;
-    if (current?.automationState?.waitOutcome?.delivery === 'pending') return null;
-
-    if (!current) {
-      this.evictDoneIfNeeded();
-      const created = createGenericTaskItem({ ...input.task, automationState: input.automationState });
-      this.tasks.set(created.id, created);
-      this.subjectIndex.set(subjectKey, created.id);
-      if (input.managedWorkBinding && !this.managedWorkRegistration.bind(created.id, input.managedWorkBinding)) {
-        throw new Error('Managed-work PR tracking binding failed closed: live anchor unavailable');
-      }
-      return created;
-    }
-
-    assertTrackingRegistrationCurrentCompatible(subjectKey, current, input);
-    if (current.kind !== input.task.kind) return null;
-    const currentBinding = this.managedWorkRegistration.get(current.id);
-    assertTrackingRegistrationBindingCompatible(current.id, currentBinding, input.managedWorkBinding);
-
-    const updated = trackingRegistrationUpdate(current, input);
-    this.tasks.set(current.id, updated);
-    if (input.managedWorkBinding && !this.managedWorkRegistration.bind(updated.id, input.managedWorkBinding)) {
-      throw new Error('Managed-work PR tracking binding failed closed: live anchor unavailable');
-    }
-    return updated;
+    return this.trackingRegistration.replace(input);
   }
 
   update(taskId: string, input: UpdateTaskInput): TaskItem | null {

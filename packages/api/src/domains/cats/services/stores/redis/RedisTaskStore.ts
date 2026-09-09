@@ -25,15 +25,7 @@ import { isTrackingKind } from '@cat-cafe/shared';
 import type { RedisClient } from '@cat-cafe/shared/utils';
 import { automationGeneration, mergeTaskAutomationState } from '../ports/TaskAutomationState.js';
 import { createEntrustedTaskItem, createGenericTaskItem } from '../ports/TaskItemFactory.js';
-import {
-  assertSubjectUpdateOwnership,
-  assertTrackingRegistrationBindingCompatible,
-  assertTrackingRegistrationCurrentCompatible,
-  assertTrackingRegistrationInput,
-  type ITaskStore,
-  matchesTrackingRegistrationExpectation,
-  trackingRegistrationUpdate,
-} from '../ports/TaskStore.js';
+import { assertSubjectUpdateOwnership, type ITaskStore } from '../ports/TaskStore.js';
 import {
   type AdmitEntrustedWorkStoreInput,
   type AdmitEntrustedWorkStoreResult,
@@ -63,6 +55,7 @@ import {
   tryCreateTaskWithAtomicSubject,
   writeTaskForSubjectOwner,
 } from './RedisTaskSubjectTransactions.js';
+import { RedisTaskTrackingRegistrationStore } from './RedisTaskTrackingRegistrationStore.js';
 import { runWithExclusiveRedisWatchSession } from './RedisWatchSession.js';
 
 const DEFAULT_TTL = 0; // persistent — set >0 via env to enable expiry
@@ -73,13 +66,12 @@ const MAX_CONDITIONAL_TASK_UPDATE_RETRIES = 5;
 const MAX_ANCHOR_LIFETIME_RECONCILIATION_RETRIES = 5;
 const MAX_UNIQUE_SUBJECT_CREATE_RETRIES = 8;
 
-type TrackingRegistrationWatchOutcome = { task: TaskItem; previousThreadId?: string } | null | undefined;
-
 export class RedisTaskStore implements ITaskStore {
   private readonly redis: RedisClient;
   private readonly ttlSeconds: number | null;
   private readonly managedWorkBindings: RedisTaskManagedWorkBindingStore;
   private readonly managedWorkRegistration: RedisTaskManagedWorkRegistrationStore;
+  private readonly trackingRegistration: RedisTaskTrackingRegistrationStore;
   private readonly entrustedWorkMutations: RedisTaskEntrustedWorkMutationStore;
 
   constructor(redis: RedisClient, options?: { ttlSeconds?: number }) {
@@ -89,6 +81,11 @@ export class RedisTaskStore implements ITaskStore {
       mergeAutomationState: mergeTaskAutomationState,
       applyThreadTtl: (threadId) => this.applyThreadTtl(threadId),
       compareAndDeleteSubject: (subjectKey, staleTaskId) => this.compareAndDeleteSubject(subjectKey, staleTaskId),
+      waitForInFlightTaskWrite: () => this.waitForInFlightTaskWrite(),
+    });
+    this.trackingRegistration = new RedisTaskTrackingRegistrationStore(redis, {
+      applyTtl: (task) => this.applyTtl(task),
+      applyThreadTtl: (threadId) => this.applyThreadTtl(threadId),
       waitForInFlightTaskWrite: () => this.waitForInFlightTaskWrite(),
     });
     this.entrustedWorkMutations = new RedisTaskEntrustedWorkMutationStore(
@@ -383,125 +380,7 @@ export class RedisTaskStore implements ITaskStore {
   async replaceTrackingRegistrationIfUnchanged(
     input: ReplaceTrackingRegistrationIfUnchangedInput,
   ): Promise<TaskItem | null> {
-    const subjectKey = assertTrackingRegistrationInput(input);
-    const subjectIndexKey = TaskKeys.subject(subjectKey);
-    const created =
-      input.expectedTask === null
-        ? createGenericTaskItem({ ...input.task, automationState: input.automationState })
-        : null;
-    const targetId = input.expectedTask?.id ?? created?.id;
-    if (!targetId) throw new Error('Conditional tracking registration could not resolve a task id');
-    const detailKey = TaskKeys.detail(targetId);
-    const bindingKey = TaskKeys.managedWorkBinding(targetId);
-
-    for (let attempt = 0; attempt < MAX_CONDITIONAL_TASK_UPDATE_RETRIES; attempt += 1) {
-      const outcome = await this.tryReplaceTrackingRegistration({
-        input,
-        subjectKey,
-        subjectIndexKey,
-        detailKey,
-        bindingKey,
-        created,
-      });
-      if (outcome !== undefined) {
-        if (!outcome) return null;
-        await this.applyTtl(outcome.task);
-        if (outcome.previousThreadId && outcome.previousThreadId !== outcome.task.threadId) {
-          await this.applyThreadTtl(outcome.previousThreadId);
-        }
-        return outcome.task;
-      }
-      await this.waitForInFlightTaskWrite();
-    }
-
-    throw new Error(`RedisTaskStore conditional tracking registration kept racing for ${subjectKey}`);
-  }
-
-  private tryReplaceTrackingRegistration(input: {
-    input: ReplaceTrackingRegistrationIfUnchangedInput;
-    subjectKey: string;
-    subjectIndexKey: string;
-    detailKey: string;
-    bindingKey: string;
-    created: TaskItem | null;
-  }): Promise<TrackingRegistrationWatchOutcome> {
-    return runWithExclusiveRedisWatchSession(
-      this.redis,
-      [input.subjectIndexKey, input.detailKey, input.bindingKey],
-      async (session) => {
-        const currentId = await session.get(input.subjectIndexKey);
-        if (input.input.expectedTask === null) {
-          return this.createTrackingRegistrationInSession(session, currentId, input);
-        }
-        return this.updateTrackingRegistrationInSession(session, currentId, input);
-      },
-    );
-  }
-
-  private async createTrackingRegistrationInSession(
-    session: RedisClient,
-    currentId: string | null,
-    input: {
-      input: ReplaceTrackingRegistrationIfUnchangedInput;
-      subjectIndexKey: string;
-      detailKey: string;
-      bindingKey: string;
-      created: TaskItem | null;
-    },
-  ): Promise<TrackingRegistrationWatchOutcome> {
-    if (currentId) return null;
-    if (!input.created) return undefined;
-    const existingDetail = await session.hgetall(input.detailKey);
-    if (existingDetail?.id) return undefined;
-
-    const pipeline = session.multi();
-    pipeline.set(input.subjectIndexKey, input.created.id);
-    pipeline.hset(input.detailKey, serializeTask(input.created));
-    pipeline.zadd(TaskKeys.thread(input.created.threadId), String(input.created.createdAt), input.created.id);
-    pipeline.zadd(TaskKeys.kind(input.created.kind), String(input.created.createdAt), input.created.id);
-    if (input.input.managedWorkBinding) {
-      pipeline.set(input.bindingKey, JSON.stringify(input.input.managedWorkBinding));
-    }
-    const result = await pipeline.exec();
-    return result ? { task: input.created } : undefined;
-  }
-
-  private async updateTrackingRegistrationInSession(
-    session: RedisClient,
-    currentId: string | null,
-    input: {
-      input: ReplaceTrackingRegistrationIfUnchangedInput;
-      subjectKey: string;
-      detailKey: string;
-      bindingKey: string;
-    },
-  ): Promise<TrackingRegistrationWatchOutcome> {
-    const expected = input.input.expectedTask;
-    if (!expected || currentId !== expected.id) return null;
-    const data = await session.hgetall(input.detailKey);
-    if (!data?.id) return null;
-    const current = hydrateTask(data);
-    if (!matchesTrackingRegistrationExpectation(current, expected)) return null;
-    if (current.automationState?.waitOutcome?.delivery === 'pending') return null;
-    assertTrackingRegistrationCurrentCompatible(input.subjectKey, current, input.input);
-    if (current.kind !== input.input.task.kind) return null;
-
-    const encodedBinding = await session.get(input.bindingKey);
-    const currentBinding = encodedBinding ? (JSON.parse(encodedBinding) as ManagedWorkBinding) : null;
-    assertTrackingRegistrationBindingCompatible(current.id, currentBinding, input.input.managedWorkBinding);
-
-    const updated = trackingRegistrationUpdate(current, input.input);
-    const pipeline = session.multi();
-    pipeline.hset(input.detailKey, serializeTask(updated));
-    if (updated.threadId !== current.threadId) {
-      pipeline.zrem(TaskKeys.thread(current.threadId), current.id);
-      pipeline.zadd(TaskKeys.thread(updated.threadId), String(updated.createdAt), updated.id);
-    }
-    if (input.input.managedWorkBinding && !encodedBinding) {
-      pipeline.set(input.bindingKey, JSON.stringify(input.input.managedWorkBinding));
-    }
-    const result = await pipeline.exec();
-    return result ? { task: updated, previousThreadId: current.threadId } : undefined;
+    return this.trackingRegistration.replace(input);
   }
 
   async update(taskId: string, input: UpdateTaskInput): Promise<TaskItem | null> {
