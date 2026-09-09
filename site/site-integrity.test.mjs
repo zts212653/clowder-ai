@@ -15,7 +15,8 @@ import { createRequire } from 'node:module';
 import { dirname, resolve } from 'node:path';
 import { describe, it } from 'node:test';
 import vm from 'node:vm';
-import { resolveDocLink, resolveImageSrc } from './lib/doc-links.mjs';
+import { assignDocHeadingIds, resolveDocLink, resolveImageSrc } from './lib/doc-links.mjs';
+import { fetchLocalizedMarkdown, localizedDocCandidates } from './lib/doc-locale.mjs';
 import { sanitizeMarkdown } from './lib/sanitize-md.mjs';
 
 const require = createRequire(import.meta.url);
@@ -136,6 +137,313 @@ describe('community.html XSS invariants', () => {
   });
 });
 
+describe('localized accessible names', () => {
+  for (const page of ['index.html', 'community.html', 'docs.html']) {
+    it(`${page} localizes every static aria-label`, () => {
+      const dom = new JSDOM(readSite(page));
+      const missingKeys = [...dom.window.document.querySelectorAll('[aria-label]')]
+        .filter((element) => !element.hasAttribute('data-i18n-aria-label'))
+        .map((element) => element.outerHTML);
+      assert.deepStrictEqual(missingKeys, [], `${page} has untranslated accessible names`);
+    });
+  }
+
+  it('does not use a translated accessible name as a JavaScript selector', () => {
+    const html = readSite('community.html');
+    assert.doesNotMatch(html, /querySelector\([^)]*aria-label/);
+    assert.match(html, /getElementById\(['"]issue-detail-close['"]\)/);
+  });
+
+  it('localizes the accessible name of dynamically rendered issue rows', () => {
+    const html = readSite('community.html');
+    assert.match(html, /row\.setAttribute\(['"]aria-label['"],\s*`\$\{t\(['"]community\.a11y\.issue['"]\)\}/);
+  });
+
+  it('restores focus to the replacement issue row after a translation rerender', () => {
+    const html = readSite('community.html');
+    const inlineScript = html.match(/<script>\s*(const REPO[\s\S]*?)<\/script>/)?.[1];
+    assert.ok(inlineScript, 'community inline script must be present');
+
+    const dom = new JSDOM(html, {
+      runScripts: 'outside-only',
+      url: 'https://example.test/site/community.html',
+    });
+    dom.window.I18N = I18N;
+    dom.window.HTMLElement.prototype.scrollIntoView = () => {};
+    dom.window.eval(inlineScript);
+
+    const issue = {
+      number: 42,
+      title: 'Focus regression',
+      body: null,
+      labels: [],
+      comments: 0,
+      created_at: '2026-09-03T00:00:00Z',
+      html_url: 'https://github.com/zts212653/clowder-ai/issues/42',
+    };
+    dom.window.renderIssues([issue]);
+    const originalRow = dom.window.document.querySelector('[data-issue-number="42"]');
+    originalRow.focus();
+    dom.window.showIssueDetail(42);
+
+    dom.window.renderIssues([issue]);
+    const replacementRow = dom.window.document.querySelector('[data-issue-number="42"]');
+    assert.notStrictEqual(replacementRow, originalRow);
+    assert.equal(originalRow.isConnected, false);
+
+    dom.window.closeIssueDetail();
+    assert.strictEqual(dom.window.document.activeElement, replacementRow);
+  });
+});
+
+describe('localized community request states', () => {
+  async function createCommunityDom() {
+    const html = readSite('community.html');
+    const inlineScript = html.match(/<script>\s*(const REPO[\s\S]*?)<\/script>/)?.[1];
+    assert.ok(inlineScript, 'community inline script must be present');
+
+    const dom = new JSDOM(html, {
+      runScripts: 'outside-only',
+      url: 'https://example.test/site/community.html',
+    });
+    await new Promise((resolve) => {
+      if (dom.window.document.readyState === 'loading') {
+        dom.window.document.addEventListener('DOMContentLoaded', resolve, { once: true });
+      } else {
+        resolve();
+      }
+    });
+    dom.window.I18N = I18N;
+    dom.window.HTMLElement.prototype.scrollIntoView = () => {};
+    dom.window.eval(inlineScript);
+    return dom;
+  }
+
+  it('keeps loading and error views through language changes instead of showing stale cached rows', async () => {
+    const dom = await createCommunityDom();
+    const previousIssue = {
+      number: 42,
+      title: 'Previous filter result',
+      body: null,
+      labels: [],
+      comments: 0,
+      created_at: '2026-09-03T00:00:00Z',
+      html_url: 'https://github.com/zts212653/clowder-ai/issues/42',
+    };
+    dom.window.fetch = async () => ({ ok: true, json: async () => [previousIssue] });
+    await dom.window.loadIssues('all');
+
+    let resolvePending;
+    dom.window.fetch = () =>
+      new Promise((resolve) => {
+        resolvePending = resolve;
+      });
+    const pendingLoad = dom.window.loadIssues('bug');
+    dom.window.dispatchEvent(new dom.window.CustomEvent('clowder:languagechange'));
+
+    const container = dom.window.document.getElementById('issues-container');
+    assert.match(container.textContent, /Loading issues/);
+    assert.equal(
+      container.querySelector('.issue-row'),
+      null,
+      'language changes must not reveal cached rows while loading',
+    );
+
+    resolvePending({ ok: true, json: async () => [] });
+    await pendingLoad;
+
+    dom.window.fetch = async () => {
+      throw new Error('offline');
+    };
+    await dom.window.loadIssues('enhancement');
+    dom.window.dispatchEvent(new dom.window.CustomEvent('clowder:languagechange'));
+    assert.match(container.textContent, /Could not load issues/);
+    assert.equal(
+      container.querySelector('.issue-row'),
+      null,
+      'language changes must not reveal cached rows after an error',
+    );
+  });
+
+  it('ignores a superseded filter response that resolves after the active request', async () => {
+    const dom = await createCommunityDom();
+    const issue = (number, title) => ({
+      number,
+      title,
+      body: null,
+      labels: [],
+      comments: 0,
+      created_at: '2026-09-03T00:00:00Z',
+      html_url: `https://github.com/zts212653/clowder-ai/issues/${number}`,
+    });
+
+    let resolveSuperseded;
+    dom.window.fetch = (url) => {
+      if (url.includes('labels=bug')) {
+        return Promise.resolve({ ok: true, json: async () => [issue(2, 'Active result')] });
+      }
+      return new Promise((resolve) => {
+        resolveSuperseded = resolve;
+      });
+    };
+
+    const supersededLoad = dom.window.loadIssues('all');
+    await dom.window.loadIssues('bug');
+    resolveSuperseded({ ok: true, json: async () => [issue(1, 'Superseded result')] });
+    await supersededLoad;
+
+    const container = dom.window.document.getElementById('issues-container');
+    assert.match(container.textContent, /Active result/);
+    assert.doesNotMatch(container.textContent, /Superseded result/);
+  });
+});
+
+describe('localized roadmap bars', () => {
+  const dom = new JSDOM(readSite('index.html'));
+  const bars = [...dom.window.document.querySelectorAll('#roadmap .gantt-bar')];
+
+  it('localizes every bar label and hover description', () => {
+    assert.ok(bars.length > 0, 'roadmap should contain bars');
+    assert.deepStrictEqual(
+      bars.filter((bar) => !bar.hasAttribute('data-i18n')).map((bar) => bar.textContent.trim()),
+      [],
+      'every roadmap bar label needs an i18n key',
+    );
+    assert.deepStrictEqual(
+      bars
+        .filter((bar) => bar.hasAttribute('title') && !bar.hasAttribute('data-i18n-title'))
+        .map((bar) => bar.getAttribute('title')),
+      [],
+      'every roadmap hover description needs an i18n key',
+    );
+  });
+});
+
+describe('localized document titles', () => {
+  const pages = [
+    ['index.html', 'meta.home.title'],
+    ['community.html', 'meta.community.title'],
+    ['docs.html', 'meta.docs.title'],
+  ];
+
+  for (const [page, key] of pages) {
+    it(`${page} updates the browser title when Chinese is applied`, async () => {
+      const dom = new JSDOM(readSite(page), {
+        runScripts: 'outside-only',
+        url: `https://example.test/site/${page}`,
+      });
+      await new Promise((resolve) => {
+        if (dom.window.document.readyState === 'loading') {
+          dom.window.document.addEventListener('DOMContentLoaded', resolve, { once: true });
+        } else {
+          resolve();
+        }
+      });
+      dom.window.I18N = I18N;
+      dom.window.eval(readSite('main.js'));
+
+      const title = dom.window.document.querySelector('title');
+      assert.equal(title?.getAttribute('data-i18n'), key);
+      dom.window.applyLang('zh');
+      assert.equal(dom.window.document.title, I18N.zh[key]);
+      assert.notEqual(I18N.zh[key], I18N.en[key]);
+    });
+  }
+});
+
+// ─── P1: Locale-aware Markdown fallback — behavioral tests ───────────
+describe('localized docs loader (behavioral)', () => {
+  it('tries the zh-CN sibling before the canonical path for Chinese', () => {
+    assert.deepStrictEqual(localizedDocCandidates('README.md', 'zh'), ['README.zh-CN.md', 'README.md']);
+    assert.deepStrictEqual(localizedDocCandidates('docs/faq.md', 'zh'), ['docs/faq.zh-CN.md', 'docs/faq.md']);
+    assert.deepStrictEqual(localizedDocCandidates('docs/faq.md', 'en'), ['docs/faq.md']);
+  });
+
+  it('does not append the locale suffix twice', () => {
+    assert.deepStrictEqual(localizedDocCandidates('docs/faq.zh-CN.md', 'zh'), ['docs/faq.zh-CN.md']);
+  });
+
+  it('loads an available Chinese sibling', async () => {
+    const requested = [];
+    const result = await fetchLocalizedMarkdown('docs/faq.md', 'zh', async (path) => {
+      requested.push(path);
+      return { ok: true, text: async () => '# 中文 FAQ' };
+    });
+    assert.deepStrictEqual(requested, ['docs/faq.zh-CN.md']);
+    assert.deepStrictEqual(result, { path: 'docs/faq.zh-CN.md', markdown: '# 中文 FAQ' });
+  });
+
+  it('falls back to the canonical document when the Chinese sibling is missing', async () => {
+    const requested = [];
+    const result = await fetchLocalizedMarkdown('docs/architecture/memory/README.md', 'zh', async (path) => {
+      requested.push(path);
+      if (path.endsWith('.zh-CN.md')) return { ok: false, status: 404 };
+      return { ok: true, text: async () => '# 记忆系统' };
+    });
+    assert.deepStrictEqual(requested, [
+      'docs/architecture/memory/README.zh-CN.md',
+      'docs/architecture/memory/README.md',
+    ]);
+    assert.equal(result.path, 'docs/architecture/memory/README.md');
+    assert.equal(result.markdown, '# 记忆系统');
+  });
+
+  it('falls back to the canonical document when the localized request fails', async () => {
+    const requested = [];
+    const result = await fetchLocalizedMarkdown('docs/faq.md', 'zh', async (path) => {
+      requested.push(path);
+      if (path.endsWith('.zh-CN.md')) throw new TypeError('network error');
+      return { ok: true, text: async () => '# FAQ' };
+    });
+
+    assert.deepStrictEqual(result, { path: 'docs/faq.md', markdown: '# FAQ' });
+    assert.deepStrictEqual(requested, ['docs/faq.zh-CN.md', 'docs/faq.md']);
+  });
+
+  it('ships the translated siblings while keeping memory on canonical fallback', () => {
+    for (const path of [
+      'README.zh-CN.md',
+      'SETUP.zh-CN.md',
+      'docs/faq.zh-CN.md',
+      'docs/configuration/startup.zh-CN.md',
+      'docs/configuration/environment.zh-CN.md',
+      'docs/architecture/overview.zh-CN.md',
+      'docs/architecture/a2a-protocol.zh-CN.md',
+      'docs/architecture/plugin-architecture.zh-CN.md',
+    ]) {
+      assert.ok(existsSync(resolve(ROOT, path)), `${path} must exist`);
+    }
+    assert.ok(existsSync(resolve(ROOT, 'docs/architecture/memory/README.md')));
+    assert.ok(!existsSync(resolve(ROOT, 'docs/architecture/memory/README.zh-CN.md')));
+  });
+});
+
+describe('feature index view states (behavioral)', () => {
+  it('preserves loading and error states instead of treating them as empty results', async () => {
+    const { selectFeatureIndexView } = await import('./lib/feature-index-state.mjs');
+    assert.deepStrictEqual(selectFeatureIndexView('loading', [], '', 'all'), {
+      kind: 'message',
+      key: 'docs.loading.features',
+    });
+    assert.deepStrictEqual(selectFeatureIndexView('error', [], '', 'all'), {
+      kind: 'message',
+      key: 'docs.error.features',
+    });
+  });
+
+  it('filters only after the feature index is ready', async () => {
+    const { selectFeatureIndexView } = await import('./lib/feature-index-state.mjs');
+    const features = [
+      { id: 'F001', name: 'First', normalizedStatus: 'done' },
+      { id: 'F002', name: 'Second', normalizedStatus: 'in-progress' },
+    ];
+    assert.deepStrictEqual(selectFeatureIndexView('ready', features, 'second', 'in-progress'), {
+      kind: 'features',
+      features: [features[1]],
+    });
+  });
+});
+
 // ─── P1: docs.html uses doc-links.mjs (production = test code path) ─
 describe('docs.html link rewriting implementation', () => {
   const html = readSite('docs.html');
@@ -177,6 +485,37 @@ describe('docs.html link rewriting implementation', () => {
       'inline script must not bypass sanitize-md.mjs',
     );
   });
+
+  it('imports and calls the shared locale-aware Markdown loader', () => {
+    assert.match(
+      html,
+      /import\s*\{[^}]*fetchLocalizedMarkdown[^}]*\}\s*from\s*['"]\.\/lib\/doc-locale\.mjs['"]/,
+      'docs.html must import locale loading from lib/doc-locale.mjs',
+    );
+    assert.match(
+      html,
+      /window\._fetchLocalizedMarkdown\(/,
+      'loadDoc must delegate locale fallback to the shared module',
+    );
+    assert.match(html, /clowder:languagechange/, 'docs.html must reload the current document after a language change');
+  });
+
+  it('assigns stable ids to rendered Markdown headings before link navigation', () => {
+    assert.match(
+      html,
+      /window\._assignDocHeadingIds\(content\)/,
+      'docs.html must make rendered headings addressable before rewriting links',
+    );
+  });
+
+  it('passes an explicit document-link language through to the loader', () => {
+    assert.match(html, /loadDoc\(result\.path,\s*result\.lang\)/);
+  });
+
+  it('tracks feature-index loading and error states through a shared selector', () => {
+    assert.match(html, /featureIndexState/);
+    assert.match(html, /window\._selectFeatureIndexView\(/);
+  });
 });
 
 // ─── P1: Test dep versions match production CDN ─────────────────────
@@ -214,6 +553,57 @@ describe('resolveDocLink (behavioral)', () => {
     const result = resolveDocLink('../faq.md', 'docs/configuration/environment.md', loadable);
     assert.equal(result.type, 'viewer');
     assert.equal(result.path, 'docs/faq.md');
+  });
+
+  it('normalizes a localized sibling link back to the canonical viewer route', () => {
+    const result = resolveDocLink('SETUP.zh-CN.md', 'README.zh-CN.md', loadable);
+    assert.deepStrictEqual(result, { type: 'viewer', path: 'SETUP.md', hash: '', lang: 'zh' });
+  });
+
+  it('honors same-document language selectors without changing ordinary cross-document links', () => {
+    assert.match(readFileSync(resolve(ROOT, 'README.zh-CN.md'), 'utf8'), /\[English\]\(README\.md\)/);
+    assert.match(readFileSync(resolve(ROOT, 'README.md'), 'utf8'), /\[中文\]\(README\.zh-CN\.md\)/);
+
+    assert.deepStrictEqual(resolveDocLink('README.md', 'README.zh-CN.md', loadable), {
+      type: 'viewer',
+      path: 'README.md',
+      hash: '',
+      lang: 'en',
+    });
+    assert.deepStrictEqual(resolveDocLink('README.zh-CN.md', 'README.md', loadable), {
+      type: 'viewer',
+      path: 'README.md',
+      hash: '',
+      lang: 'zh',
+    });
+    assert.deepStrictEqual(resolveDocLink('../faq.md', 'docs/configuration/environment.zh-CN.md', loadable), {
+      type: 'viewer',
+      path: 'docs/faq.md',
+      hash: '',
+    });
+  });
+
+  it('keeps translated cross-document fragments aligned with translated headings', () => {
+    const environmentZh = readFileSync(resolve(ROOT, 'docs/configuration/environment.zh-CN.md'), 'utf8');
+    assert.match(environmentZh, /\.\.\/faq\.md#在哪里添加-api-密钥/);
+
+    const result = resolveDocLink(
+      '../faq.md#%E5%9C%A8%E5%93%AA%E9%87%8C%E6%B7%BB%E5%8A%A0-api-%E5%AF%86%E9%92%A5',
+      'docs/configuration/environment.zh-CN.md',
+      loadable,
+    );
+    assert.deepStrictEqual(result, {
+      type: 'viewer',
+      path: 'docs/faq.md',
+      hash: '#在哪里添加-api-密钥',
+    });
+
+    const faqZh = readFileSync(resolve(ROOT, 'docs/faq.zh-CN.md'), 'utf8');
+    const DOMPurify = createDOMPurify(new JSDOM('').window);
+    const rendered = new JSDOM(`<article>${sanitizeMarkdown(faqZh, { DOMPurify, marked })}</article>`);
+    const article = rendered.window.document.querySelector('article');
+    assignDocHeadingIds(article);
+    assert.ok(rendered.window.document.getElementById(result.hash.slice(1)));
   });
 
   it('preserves hash fragment for in-viewer navigation', () => {
@@ -260,6 +650,22 @@ describe('resolveDocLink (behavioral)', () => {
   it('skips null/empty href', () => {
     assert.deepEqual(resolveDocLink('', 'README.md', loadable), { type: 'skip' });
     assert.deepEqual(resolveDocLink(null, 'README.md', loadable), { type: 'skip' });
+  });
+});
+
+describe('assignDocHeadingIds (behavioral)', () => {
+  it('creates readable Unicode ids and de-duplicates repeated headings', () => {
+    const dom = new JSDOM(
+      '<article><h2>在哪里添加 API 密钥？</h2><h2>Repeat</h2><h3>Repeat</h3><h2 id="kept">Kept</h2></article>',
+    );
+    const article = dom.window.document.querySelector('article');
+
+    assignDocHeadingIds(article);
+
+    assert.deepStrictEqual(
+      [...article.querySelectorAll('h2, h3')].map((heading) => heading.id),
+      ['在哪里添加-api-密钥', 'repeat', 'repeat-1', 'kept'],
+    );
   });
 });
 
@@ -409,17 +815,68 @@ describe('lang toggle only on translated pages', () => {
     assert.match(js, /if\s*\(\s*!btn\s*\)\s*return/, 'initLang should bail without lang-toggle');
   });
 
-  for (const page of ['docs.html', 'community.html']) {
-    it(`${page} does not have a lang-toggle button`, () => {
+  for (const page of ['index.html', 'community.html', 'docs.html']) {
+    it(`${page} has a lang-toggle button (translated page)`, () => {
       const html = readSite(page);
-      assert.doesNotMatch(html, /id\s*=\s*["']lang-toggle["']/);
+      assert.match(html, /id\s*=\s*["']lang-toggle["']/);
+      assert.ok(html.indexOf('src="i18n.js"') < html.indexOf('src="main.js"'), `${page} must load i18n.js first`);
     });
   }
+
+  it('main.js emits a language-change event and translates supported attributes', () => {
+    const js = readSite('main.js');
+    assert.match(js, /function setLang\(/);
+    assert.match(js, /clowder:languagechange/);
+    assert.match(js, /data-i18n-placeholder/);
+    assert.match(js, /data-i18n-label/);
+    assert.match(js, /data-i18n-aria-label/);
+    assert.match(js, /data-i18n-title/);
+  });
+});
+
+// ─── i18n dictionary integrity ───────────────────────────────────────
+// Load the classic site/i18n.js exactly as the browser does (it installs
+// window.I18N), then assert every data-i18n key used in index.html resolves
+// in BOTH locales and the two locales stay at key parity. Guards against
+// orphan keys / typos whenever the homepage or the dictionary changes.
+const I18N = (() => {
+  const sandbox = { window: {} };
+  vm.createContext(sandbox);
+  vm.runInContext(readSite('i18n.js'), sandbox);
+  return sandbox.window.I18N;
+})();
+
+describe('i18n dictionary integrity', () => {
+  it('i18n.js installs window.I18N with en and zh locales', () => {
+    assert.ok(I18N?.en && I18N?.zh, 'i18n.js must install window.I18N.en and window.I18N.zh');
+  });
+
+  for (const page of ['index.html', 'community.html', 'docs.html']) {
+    it(`${page} uses i18n keys and every key (attrs + t()) resolves in both locales`, () => {
+      const html = readSite(page);
+      const keys = [
+        ...new Set([
+          ...[...html.matchAll(/data-i18n(?:-(?:placeholder|label|aria-label|title))?="([^"]+)"/g)].map((m) => m[1]),
+          // JS helper calls: t('key') / t("key") in the inline page scripts.
+          ...[...html.matchAll(/\bt\((['"])([^'"]+)\1\)/g)].map((m) => m[2]),
+        ]),
+      ];
+      assert.ok(keys.length > 0, `${page} should carry i18n keys`);
+      const missing = keys.filter((k) => !(k in I18N.en) || !(k in I18N.zh));
+      assert.deepStrictEqual(missing, [], `${page} unresolved data-i18n keys: ${missing.join(', ')}`);
+    });
+  }
+
+  it('en and zh dictionaries are at key parity', () => {
+    const enOnly = Object.keys(I18N.en).filter((k) => !(k in I18N.zh));
+    const zhOnly = Object.keys(I18N.zh).filter((k) => !(k in I18N.en));
+    assert.deepStrictEqual([enOnly, zhOnly], [[], []], `en-only: ${enOnly} | zh-only: ${zhOnly}`);
+  });
 });
 
 // ─── Local asset existence ───────────────────────────────────────────
 describe('HTML-referenced local assets exist', () => {
-  const assetRe = /(?:src|href)\s*=\s*["']((?:assets|styles|main|tailwind|input)[^"']*?)["']/g;
+  const assetRe = /(?:src|href)\s*=\s*["']((?:assets|styles|main|tailwind|input|i18n)[^"']*?)["']/g;
 
   for (const page of ['index.html', 'docs.html', 'community.html']) {
     it(`${page} — all local asset paths resolve`, () => {

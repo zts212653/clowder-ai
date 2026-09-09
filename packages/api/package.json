@@ -7,7 +7,7 @@
   "scripts": {
     "dev": "while true; do NODE_OPTIONS=\"--import $PWD/scripts/sigusr1-guard.mjs${NODE_OPTIONS:+ $NODE_OPTIONS}\" tsx watch --exclude \"dist/**\" --exclude \"../shared/dist/**\" src/index.ts; ec=$?; if [ $ec -eq 0 ] || [ $ec -eq 130 ]; then break; fi; echo \"[api] dev exited ($ec) — auto-restarting in 1s\"; sleep 1; done",
     "verify:sigusr1": "node scripts/verify-sigusr1-guard.mjs",
-    "build": "pnpm --dir ../shared build && pnpm --dir ../collective-connector build && pnpm run build:f247-extension && tsc && node ./scripts/copy-marketplace-catalog-data.mjs && node ../../scripts/check-provider-request-recorder.mjs",
+    "build": "pnpm --dir ../shared build && pnpm --dir ../collective-connector build && pnpm --dir ../collective-service build && pnpm run build:f247-extension && tsc && node ./scripts/copy-marketplace-catalog-data.mjs && node ../../scripts/check-provider-request-recorder.mjs",
     "build:f247-extension": "node scripts/build-f247-personal-chrome-extension.mjs",
     "build:f247-extension:write": "node scripts/build-f247-personal-chrome-extension.mjs --write",
     "audit:codex-protocol": "node ./scripts/audit-codex-app-server-protocol.mjs",
