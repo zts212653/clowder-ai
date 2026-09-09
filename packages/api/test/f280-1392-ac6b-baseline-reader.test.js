@@ -79,4 +79,21 @@ describe('#1392 AC-6b — baseline reader seeds the conversation frontier for a 
     assert.equal(snap.baseline.base.isBehind, true);
     assert.equal(snap.collectorState.conflict.mergeStateStatus, 'DIRTY');
   });
+
+  test('registration freezes the formal reviews whose state can later be dismissed in place', async () => {
+    const { deps } = makeDeps({
+      reviews: [
+        { id: 41, state: 'APPROVED' },
+        { id: 42, state: 'COMMENTED' },
+        { id: 43, state: 'CHANGES_REQUESTED' },
+        { id: 44, state: 'DISMISSED' },
+      ],
+    });
+    const snap = await readGitHubWaitBaseline({ repoFullName: 'owner/repo', prNumber: 7 }, deps);
+
+    assert.deepEqual(snap.collectorState.review.activeDecisionStatesByReviewId, {
+      41: 'APPROVED',
+      43: 'CHANGES_REQUESTED',
+    });
+  });
 });

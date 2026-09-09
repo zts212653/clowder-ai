@@ -97,6 +97,13 @@ export async function readGitHubWaitBaseline(
     decisionCursor,
     ...(latestReview?.state ? { decision: latestReview.state } : {}),
   };
+  const activeDecisionStatesByReviewId = Object.fromEntries(
+    reviews.flatMap((review) =>
+      typeof review.id === 'number' && (review.state === 'APPROVED' || review.state === 'CHANGES_REQUESTED')
+        ? [[String(review.id), review.state] as const]
+        : [],
+    ),
+  );
 
   return {
     ...(authorLogin ? { authorLogin } : {}),
@@ -118,6 +125,7 @@ export async function readGitHubWaitBaseline(
         lastInlineCommentCursor: inlineCommentCursor,
         lastConversationCommentCursor: conversationCommentCursor,
         lastDecisionCursor: decisionCursor,
+        activeDecisionStatesByReviewId,
       },
       ci: {
         headSha: ci.headSha,

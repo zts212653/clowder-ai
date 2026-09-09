@@ -118,6 +118,14 @@ register_issue_tracking(repoFullName, issueNumber)
 | PR 作者 | `head_changed`（对所有角色都默认关，见上） |
 | 非作者 | `head_changed` **和** `bot_interaction`（后者对非作者才默认关，见 §2.4b / A27） |
 
+formal review 的 GitHub `id` 只标识记录，**不标识记录版本**。管理员 dismiss 已存在的
+`APPROVED` / `CHANGES_REQUESTED` 时，GitHub 在原 ID 上把 state 改成 `DISMISSED`；因此
+decision cursor 只能发现新记录，不能发现撤销。注册时还要冻结仍可被 dismiss 的 verdict
+状态，轮询读取完整 review 集并与这份持久快照比较。旧任务首次没有快照时只基线化，
+不得把部署前的 dismissal 当成新通知回放；已知 verdict 的原地 dismissal 则是新的
+`review_decision`，拥有独立的 durable event identity。若该修订写不进 event log，既不投递、
+也不终态，下一轮继续重试。
+
 > 这里曾写成"默认关闭的那一个（`head_changed`）"。那句话只在作者视角下成立，
 > 和 A27「非作者 `include: ["bot_interaction"]` ⇒ bot 回合恢复通知」直接冲突。
 > 生产语义是 `bot_interaction` 的默认值为 `'author'`（作者与角色未知时开、非作者关），
@@ -451,6 +459,7 @@ baseline: snapshot.baseline,        // 当前最大值
 | A38 | 当前 HEAD 上出现无 finding、无 canonical clean 正文的 bot `COMMENTED` review | 无开放回合时不产出裁决；有开放回合时记为 `failed_or_timeout` | 普通说明或失败文案被当成 clean，错误满足 required cloud review |
 | A39 | outcome N 首投失败，另一个带不同 delivery metadata 的观察重投 N | 使用 N 持久化的原 metadata；本轮 metadata 不参与 | 跨 adapter 借错或擦除可信 memory cue |
 | A40 | outcome N 已安装但 lifecycle event 首次追加失败，且 N+1 已续订 | 不投递 N；下一轮先补 N 的 event，再投递 N，之后才求值 N+1 | 已通知但审计事件永久丢失，N+1 覆盖唯一恢复记录 |
+| A41 | 已见的 `APPROVED` / `CHANGES_REQUESTED` 在**同一 review ID**上变成 `DISMISSED` | 投递一次撤销；状态快照在 durable processing 后删除该 active verdict；重复轮询不重放 | 只看 `id > cursor`，继续把已撤销的 approval / changes-request 当成当前事实 |
 
 **A3 / A6 / A17 是历史事故的直接复现，必须有独立测试。**
 **A22 是"静默丢真信号"，优先级高于任何降噪诉求。**
@@ -460,7 +469,7 @@ baseline: snapshot.baseline,        // 当前最大值
 
 | 链子上的一行 | 覆盖的场景 |
 |---|---|
-| 归一化（同一形状） | A2 A3 A4 A5 — 三个来源走同一条路，`review` 按 event id 判新而非文本 diff |
+| 归一化（同一形状） | A2 A3 A4 A5 A41 — 三个来源走同一条路；review 新记录按 ID，已知 verdict 的 dismissal 按持久状态修订判新 |
 | 归一化（回合识别：mention + 已知 bot 身份） | A23 A24 A25 A26 A29 — bot 回合是**改事件的名字**，不是加一路事件 |
 | 归一化（回合状态：开 / 闭 / 超时未闭） | A28 A29 — 仅 review-feedback 观察拥有回合时钟；CI / conflict 即使携带 events 也不得消费。回合随 frontier 同批推进，报了必然同时退休 |
 | 订阅过滤 | A1 A19 A20 A23 A24 A25 A27 |

@@ -17,6 +17,7 @@ import {
   type Thread,
 } from '../../domains/cats/services/stores/ports/ThreadStore.js';
 import type { ICommunityEventLog } from '../../domains/community/CommunityEventLog.js';
+import { pullRequestReviewEventId } from '../../domains/community/community-keys.js';
 import type {
   ExternalCloudObservation,
   ExternalReviewCoordinatorResult,
@@ -51,6 +52,7 @@ export interface ReviewFeedbackSignal {
   inlineCommentCursor: number;
   conversationCommentCursor: number;
   decisionCursor: number;
+  activeDecisionStatesByReviewId: Readonly<Record<string, 'APPROVED' | 'CHANGES_REQUESTED'>>;
   subjectState?: 'merged' | 'closed';
   reviewLoopBrake?: GitHubReviewLoopBrake;
   validateRoutingRepairFresh?: () => Promise<boolean>;
@@ -82,8 +84,11 @@ export interface ReviewFeedbackTaskSpecOptions {
     prNumber: number,
     cursors: PrFeedbackCommentCursors,
   ) => Promise<PrFeedbackComment[]>;
-  /** @param sinceId — when provided, only fetch items with id > sinceId (enables per-page early termination). */
-  readonly fetchReviews: (repoFullName: string, prNumber: number, sinceId?: number) => Promise<PrReviewDecision[]>;
+  /**
+   * Return the complete current review set. GitHub mutates a dismissed verdict in place without
+   * assigning a new review id, so cursor-filtered collection cannot observe revocation.
+   */
+  readonly fetchReviews: (repoFullName: string, prNumber: number) => Promise<PrReviewDecision[]>;
   readonly reviewFeedbackRouter: ReviewFeedbackRouter;
   /**
    * Legacy #949 repair only: read thread metadata to detect already-created
@@ -131,6 +136,14 @@ function compareFeedbackChronology(a: PrFeedbackComment, b: PrFeedbackComment): 
     return aTime - bTime;
   }
   return 0;
+}
+
+function activeReviewDecisionState(review: PrReviewDecision): 'APPROVED' | 'CHANGES_REQUESTED' | undefined {
+  return review.state === 'APPROVED' || review.state === 'CHANGES_REQUESTED' ? review.state : undefined;
+}
+
+function reviewProcessingKey(review: PrReviewDecision): string {
+  return `${review.id}:${review.state}`;
 }
 
 function collectLegacyPrCommentProjectionKeys(
@@ -188,29 +201,18 @@ interface LegacyRotatedTaskRepairResult {
   readonly commitRoutingRepair?: () => Promise<boolean>;
 }
 
-async function resolveReviewLoopBrake(input: {
-  opts: ReviewFeedbackTaskSpecOptions;
-  repoFullName: string;
-  prNumber: number;
+function resolveReviewLoopBrake(input: {
+  history: readonly PrReviewDecision[];
   prAuthorLogin?: string;
   newDecisions: readonly PrReviewDecision[];
-}): Promise<GitHubReviewLoopBrake | undefined> {
+}): GitHubReviewLoopBrake | undefined {
   const changesRequested = input.newDecisions.filter((review) => review.state === 'CHANGES_REQUESTED');
   if (changesRequested.length === 0) return undefined;
-  try {
-    const history = await input.opts.fetchReviews(input.repoFullName, input.prNumber);
-    return classifyGitHubReviewLoopBrake(
-      history,
-      changesRequested.map((review) => review.id),
-      input.prAuthorLogin,
-    );
-  } catch (error) {
-    input.opts.log.warn(
-      { error, repoFullName: input.repoFullName, prNumber: input.prNumber },
-      '[review-feedback] review-loop history unavailable; R4 brake is warn-open',
-    );
-    return { kind: 'warn_open', reason: 'github_review_history_unavailable' };
-  }
+  return classifyGitHubReviewLoopBrake(
+    input.history,
+    changesRequested.map((review) => review.id),
+    input.prAuthorLogin,
+  );
 }
 
 export function createReviewFeedbackTaskSpec(opts: ReviewFeedbackTaskSpecOptions): TaskSpec_P1<ReviewFeedbackSignal> {
@@ -337,6 +339,7 @@ export function createReviewFeedbackTaskSpec(opts: ReviewFeedbackTaskSpecOptions
       inline: number;
       conversation: number;
       decision: number;
+      activeDecisionStatesByReviewId: Readonly<Record<string, 'APPROVED' | 'CHANGES_REQUESTED'>>;
       commentMigrationPending?: boolean;
       commentMigrationTargets?: PrFeedbackCommentCursors;
     },
@@ -354,6 +357,7 @@ export function createReviewFeedbackTaskSpec(opts: ReviewFeedbackTaskSpecOptions
           : {}),
         ...(cursors.commentMigrationTargets ? { commentCursorMigrationTargets: cursors.commentMigrationTargets } : {}),
         lastDecisionCursor: cursors.decision,
+        activeDecisionStatesByReviewId: cursors.activeDecisionStatesByReviewId,
         ...(policy === 'memoryFirst' ? { lastNotifiedAt: Date.now() } : {}),
       },
     };
@@ -430,14 +434,22 @@ export function createReviewFeedbackTaskSpec(opts: ReviewFeedbackTaskSpecOptions
               reviewState?.lastConversationCommentCursor,
             );
             const reviewCursor = resolveCursor(reviewCursors.get(prKey), reviewState?.lastDecisionCursor);
+            const previousActiveDecisionStates = reviewState?.activeDecisionStatesByReviewId;
+            const reviewDecisionStateMigration = previousActiveDecisionStates === undefined;
 
-            // #798: Pass cursor to fetch for per-page client-side filtering (eliminates maxBuffer crash)
+            // #798 keeps each endpoint page bounded. Comment records are immutable and may be
+            // cursor-filtered; formal reviews must remain visible because GitHub mutates a
+            // dismissal in place under the original id.
             const [comments, reviews] = await Promise.all([
               opts.fetchComments(repoFullName, prNumber, {
                 inline: inlineCommentCursor,
                 conversation: conversationCommentCursor,
               }),
-              opts.fetchReviews(repoFullName, prNumber, reviewCursor),
+              // Unlike comments, reviews are mutable records: dismissal changes an old review's
+              // state while preserving its id. fetchPaginated already visits every page because
+              // GitHub serves this endpoint oldest-first, so returning the full normalized set
+              // adds no API calls and makes the state comparison possible.
+              opts.fetchReviews(repoFullName, prNumber),
             ]);
 
             // The two endpoints have independent cursor spaces, but their feedback still
@@ -473,7 +485,14 @@ export function createReviewFeedbackTaskSpec(opts: ReviewFeedbackTaskSpecOptions
               (comment.commentType === 'inline'
                 ? comment.id <= commentCursorMigrationTargets.inline
                 : comment.id <= commentCursorMigrationTargets.conversation);
-            const allNewReviews = reviews.filter((r) => r.id > reviewCursor);
+            const allNewReviews = reviews
+              .flatMap((review) => {
+                const previousState = previousActiveDecisionStates?.[String(review.id)];
+                if (review.id > reviewCursor) return [review];
+                if (review.state === 'DISMISSED' && previousState) return [{ ...review, previousState }];
+                return [];
+              })
+              .sort((left, right) => left.id - right.id);
             const freshNewComments = allNewComments.filter((c) => !isStaleCommitFeedback(c, prMetadata?.headSha));
             const durableNewComments = allNewComments.filter(
               (comment) => isCommentMigrationBackfill(comment) || !isStaleCommitFeedback(comment, prMetadata?.headSha),
@@ -493,12 +512,15 @@ export function createReviewFeedbackTaskSpec(opts: ReviewFeedbackTaskSpecOptions
             // position in the log. Do not apply it out of order from this poller; reconciliation
             // rebuilds eventual projections from the event-log truth.
             //
-            // sourceEventId alignment (R4-P1-A): reviews use `review:{repo}#{pr}:{id}` to match
-            // the webhook handler (GitHubRepoWebhookHandler.ts:445). Comments use `prcomment:...`
-            // (unique to polling — PR conversation/inline comments are skipped by the webhook).
+            // sourceEventId alignment (R4-P1-A): an initial review uses
+            // `review:{repo}#{pr}:{id}` to match the submitted webhook. A later in-place
+            // dismissal uses the same base plus `:DISMISSED`, because it is a distinct durable
+            // revision of that record. Comments use `prcomment:...` (unique to polling — PR
+            // conversation/inline comments are skipped by the webhook).
             let maxSafeInlineCommentCursor = inlineCommentCursor;
             let maxSafeConversationCommentCursor = conversationCommentCursor;
             let maxSafeReviewCursor = reviewCursor;
+            const processedReviewKeys = new Set<string>();
             if (opts.eventLog && trackingTask.subjectKey) {
               const subjectKey = trackingTask.subjectKey;
               // A task may replay comment history either while migrating its legacy
@@ -563,7 +585,12 @@ export function createReviewFeedbackTaskSpec(opts: ReviewFeedbackTaskSpecOptions
                 try {
                   const communityEvent: CommunityEvent = {
                     // R4-P1-A: matches webhook handler format for idempotent dual-path convergence
-                    sourceEventId: `review:${repoFullName}#${prNumber}:${review.id}`,
+                    sourceEventId: pullRequestReviewEventId(
+                      repoFullName,
+                      prNumber,
+                      review.id,
+                      review.previousState ? 'DISMISSED' : undefined,
+                    ),
                     subjectKey,
                     kind: 'pr.review_submitted',
                     classification: 'informational',
@@ -573,6 +600,7 @@ export function createReviewFeedbackTaskSpec(opts: ReviewFeedbackTaskSpecOptions
                       actorType: review.actorType,
                       authorAssociation: review.authorAssociation,
                       reviewState: review.state,
+                      ...(review.previousState ? { previousReviewState: review.previousState } : {}),
                     },
                     at: new Date(review.submittedAt).getTime(),
                   };
@@ -582,6 +610,7 @@ export function createReviewFeedbackTaskSpec(opts: ReviewFeedbackTaskSpecOptions
                     await opts.projector.apply(communityEvent);
                   }
                   maxSafeReviewCursor = Math.max(maxSafeReviewCursor, review.id);
+                  processedReviewKeys.add(reviewProcessingKey(review));
                 } catch {
                   reviewBreakBeforeId = review.id; // R18 P1: record break boundary
                   opts.log.warn(`[review-feedback] processing failed for review ${review.id} on ${prKey} — will retry`);
@@ -638,6 +667,32 @@ export function createReviewFeedbackTaskSpec(opts: ReviewFeedbackTaskSpecOptions
                 : allNewReviews.length > 0
                   ? Math.max(...allNewReviews.map((r) => r.id))
                   : reviewCursor;
+            const durableNewReviews =
+              opts.eventLog && trackingTask.subjectKey
+                ? allNewReviews.filter(
+                    (review) =>
+                      review.id <= maxReviewId &&
+                      (isStaleCommitFeedback(review, prMetadata?.headSha) ||
+                        processedReviewKeys.has(reviewProcessingKey(review))),
+                  )
+                : allNewReviews;
+            const activeDecisionStatesByReviewId: Record<string, 'APPROVED' | 'CHANGES_REQUESTED'> = {
+              ...(previousActiveDecisionStates ?? {}),
+            };
+            // Existing tasks have no state snapshot. Seed only already-consumed reviews so a
+            // deployment does not replay historical dismissals; registrations created by this
+            // version arrive with the snapshot already frozen by GitHubWaitBaselineReader.
+            if (reviewDecisionStateMigration) {
+              for (const review of reviews) {
+                const state = activeReviewDecisionState(review);
+                if (review.id <= reviewCursor && state) activeDecisionStatesByReviewId[String(review.id)] = state;
+              }
+            }
+            for (const review of durableNewReviews) {
+              const state = activeReviewDecisionState(review);
+              if (state) activeDecisionStatesByReviewId[String(review.id)] = state;
+              else if (review.state === 'DISMISSED') delete activeDecisionStatesByReviewId[String(review.id)];
+            }
             const commentCursorMigrationPending =
               commentCursorMigrationActive &&
               (maxInlineCommentId < commentCursorMigrationTargets.inline ||
@@ -654,23 +709,22 @@ export function createReviewFeedbackTaskSpec(opts: ReviewFeedbackTaskSpecOptions
                   ? comment.id <= maxInlineCommentId
                   : comment.id <= maxConversationCommentId),
             );
-            const newDecisions = allNewReviews.filter((review) => review.id <= maxReviewId);
+            const newDecisions = durableNewReviews;
             const reviewFrontier =
               allNewReviews.length > 0 ? Math.max(...allNewReviews.map((review) => review.id)) : reviewCursor;
             const feedbackCollectionComplete =
               !commentCursorMigrationPending &&
               maxInlineCommentId >= inlineCommentFrontier &&
               maxConversationCommentId >= conversationCommentFrontier &&
-              maxReviewId >= reviewFrontier;
+              maxReviewId >= reviewFrontier &&
+              durableNewReviews.length === allNewReviews.length;
             // A terminal lifecycle is allowed to end the task only after every feedback source
             // reached its observed frontier. Otherwise a same-poll append failure would mark the
             // task done and make the missing final feedback impossible to repair.
             const deliverTerminal = terminalState !== undefined && feedbackCollectionComplete;
 
-            const reviewLoopBrake = await resolveReviewLoopBrake({
-              opts,
-              repoFullName,
-              prNumber,
+            const reviewLoopBrake = resolveReviewLoopBrake({
+              history: reviews,
               prAuthorLogin: prMetadata?.authorLogin,
               newDecisions,
             });
@@ -680,7 +734,7 @@ export function createReviewFeedbackTaskSpec(opts: ReviewFeedbackTaskSpecOptions
             const activePrBaseline =
               activeAwait && 'headSha' in activeAwait.baseline ? activeAwait.baseline : undefined;
             if (!activeAwait && !repairResult.routingAudit && !deliverTerminal) {
-              if (hadNewItems || commentCursorMigrationActive) {
+              if (hadNewItems || commentCursorMigrationActive || reviewDecisionStateMigration) {
                 await advanceCursor(
                   trackingTask.id,
                   prKey,
@@ -688,6 +742,7 @@ export function createReviewFeedbackTaskSpec(opts: ReviewFeedbackTaskSpecOptions
                     inline: maxInlineCommentId,
                     conversation: maxConversationCommentId,
                     decision: maxReviewId,
+                    activeDecisionStatesByReviewId,
                     ...(commentCursorMigrationActive
                       ? {
                           commentMigrationPending: commentCursorMigrationPending,
@@ -764,6 +819,7 @@ export function createReviewFeedbackTaskSpec(opts: ReviewFeedbackTaskSpecOptions
                 inlineCommentCursor: maxInlineCommentId,
                 conversationCommentCursor: maxConversationCommentId,
                 decisionCursor: maxReviewId,
+                activeDecisionStatesByReviewId,
                 ...(deliverTerminal ? { subjectState: terminalState } : {}),
                 ...(reviewLoopBrake ? { reviewLoopBrake } : {}),
                 validateRoutingRepairFresh: repairResult.validateRoutingRepairFresh,
@@ -776,6 +832,7 @@ export function createReviewFeedbackTaskSpec(opts: ReviewFeedbackTaskSpecOptions
                       inline: maxInlineCommentId,
                       conversation: maxConversationCommentId,
                       decision: maxReviewId,
+                      activeDecisionStatesByReviewId,
                       ...(commentCursorMigrationActive
                         ? {
                             commentMigrationPending: commentCursorMigrationPending,
@@ -830,6 +887,7 @@ export function createReviewFeedbackTaskSpec(opts: ReviewFeedbackTaskSpecOptions
             inlineCommentCursor: signal.inlineCommentCursor,
             conversationCommentCursor: signal.conversationCommentCursor,
             decisionCursor: signal.decisionCursor,
+            activeDecisionStatesByReviewId: signal.activeDecisionStatesByReviewId,
             ...(signal.subjectState ? { subjectState: signal.subjectState } : {}),
             ...(opts.isEchoComment ? { isSelfComment: opts.isEchoComment } : {}),
             ...(opts.isEchoReview ? { isSelfReview: opts.isEchoReview } : {}),

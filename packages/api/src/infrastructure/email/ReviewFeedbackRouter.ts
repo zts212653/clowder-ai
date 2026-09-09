@@ -31,6 +31,8 @@ export interface PrReviewDecision {
   readonly submittedAt: string;
   readonly commitId?: string;
   readonly authorAssociation?: string;
+  /** Previous durable verdict when GitHub changed this same review id to DISMISSED in place. */
+  readonly previousState?: 'APPROVED' | 'CHANGES_REQUESTED';
 }
 
 export interface ReviewFeedbackRoutingAudit {
@@ -49,6 +51,7 @@ export interface ReviewFeedbackSignal {
   readonly inlineCommentCursor: number;
   readonly conversationCommentCursor: number;
   readonly decisionCursor: number;
+  readonly activeDecisionStatesByReviewId: Readonly<Record<string, 'APPROVED' | 'CHANGES_REQUESTED'>>;
   readonly subjectState?: 'merged' | 'closed';
   readonly reviewLoopBrake?: GitHubReviewLoopBrake;
   /**
@@ -151,6 +154,7 @@ export class ReviewFeedbackRouter {
           lastInlineCommentCursor: signal.inlineCommentCursor,
           lastConversationCommentCursor: signal.conversationCommentCursor,
           lastDecisionCursor: signal.decisionCursor,
+          activeDecisionStatesByReviewId: signal.activeDecisionStatesByReviewId,
           ...(signal.subjectState ? { prState: signal.subjectState } : {}),
         },
       },

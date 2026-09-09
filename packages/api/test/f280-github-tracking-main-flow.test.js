@@ -164,6 +164,36 @@ describe('#1394 GitHub tracking main flow', () => {
     assert.match(message.content, /One more thing before approval/);
   });
 
+  test('an in-place dismissal crosses the persisted review frontier exactly once', async () => {
+    const review = {
+      id: 31,
+      body: 'The current revision is ready.',
+      submitted_at: '2026-09-02T09:32:00Z',
+      user: { login: 'FormalReviewer', type: 'User' },
+      state: 'APPROVED',
+    };
+    const reviews = [review];
+    const { messageStore, taskStore, task, spec } = await createReviewHarness({ reviews });
+
+    await runOnePoll(spec);
+    assert.deepEqual((await taskStore.get(task.id)).automationState.review.activeDecisionStatesByReviewId, {
+      31: 'APPROVED',
+    });
+
+    review.state = 'DISMISSED';
+    await runOnePoll(spec);
+
+    const delivered = messageStore.getByThread('thread-registration');
+    assert.equal(delivered.length, 2);
+    assert.match(delivered[1].content, /formal review DISMISSED #31 by FormalReviewer/);
+    assert.deepEqual((await taskStore.get(task.id)).automationState.review.activeDecisionStatesByReviewId, {});
+
+    // Active typed waits still evaluate current facts on a quiet poll. Running that pass must
+    // not reinterpret the already-consumed review revision as another source event.
+    await runOnePoll(spec);
+    assert.equal(messageStore.getByThread('thread-registration').length, 2);
+  });
+
   test('all three self-authored surfaces are consumed without notifying, case-insensitively', async () => {
     const { messageStore, taskStore, task, spec } = await createReviewHarness({
       inline: [

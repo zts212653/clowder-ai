@@ -264,6 +264,103 @@ describe('review scheduler F280 adapter', () => {
     assert.equal(calls[0][6].suggestedSkill, undefined);
   });
 
+  test('a known formal review dismissal is routed once even though its review id does not change', async () => {
+    const taskStore = new TaskStore();
+    const task = await createTracked(taskStore);
+    await taskStore.patchAutomationState(task.id, {
+      review: { activeDecisionStatesByReviewId: { 30: 'APPROVED' } },
+    });
+    const routed = [];
+    const fetchArgs = [];
+    const dismissed = {
+      id: 30,
+      author: 'maintainer',
+      state: 'DISMISSED',
+      body: 'The approval no longer applies.',
+      submittedAt: '2026-09-08T00:00:00Z',
+      commitId: 'aaa',
+    };
+    const spec = createReviewFeedbackTaskSpec(
+      options(
+        taskStore,
+        {
+          route: async (signal) => {
+            routed.push(signal.newDecisions);
+            return { kind: 'skipped', reason: 'test', observationEvaluated: true };
+          },
+        },
+        {
+          fetchReviews: async (...args) => {
+            fetchArgs.push(args);
+            return [dismissed];
+          },
+        },
+      ),
+    );
+
+    const first = await spec.admission.gate();
+    assert.equal(
+      fetchArgs[0][2],
+      undefined,
+      'review collection must fetch current states, not only ids above the cursor',
+    );
+    assert.equal(first.workItems[0].signal.newDecisions.length, 1);
+    assert.deepEqual(first.workItems[0].signal.newDecisions[0], {
+      ...dismissed,
+      previousState: 'APPROVED',
+    });
+    await spec.run.execute(first.workItems[0].signal, first.workItems[0].subjectKey, {});
+    assert.deepEqual((await taskStore.get(task.id)).automationState.review.activeDecisionStatesByReviewId, {});
+
+    const second = await spec.admission.gate();
+    assert.deepEqual(second.workItems[0].signal.newDecisions, [], 'the persisted dismissal receipt prevents replay');
+  });
+
+  test('an upgraded task seeds old review states without replaying a historical dismissal', async () => {
+    const taskStore = new TaskStore();
+    const task = await createTracked(taskStore);
+    const routed = [];
+    const spec = createReviewFeedbackTaskSpec(
+      options(
+        taskStore,
+        {
+          route: async (signal) => {
+            routed.push(signal.newDecisions);
+            return { kind: 'skipped', reason: 'test', observationEvaluated: true };
+          },
+        },
+        {
+          fetchReviews: async () => [
+            {
+              id: 29,
+              author: 'maintainer',
+              state: 'DISMISSED',
+              body: 'Historical dismissal',
+              submittedAt: '2026-09-01T00:00:00Z',
+              commitId: 'aaa',
+            },
+            {
+              id: 30,
+              author: 'maintainer',
+              state: 'APPROVED',
+              body: 'Still active',
+              submittedAt: '2026-09-02T00:00:00Z',
+              commitId: 'aaa',
+            },
+          ],
+        },
+      ),
+    );
+
+    const gate = await spec.admission.gate();
+    assert.deepEqual(gate.workItems[0].signal.newDecisions, []);
+    await spec.run.execute(gate.workItems[0].signal, gate.workItems[0].subjectKey, {});
+    assert.deepEqual(routed, [[]]);
+    assert.deepEqual((await taskStore.get(task.id)).automationState.review.activeDecisionStatesByReviewId, {
+      30: 'APPROVED',
+    });
+  });
+
   test('plain @codex review advances the source frontier without forcing invocation', async () => {
     const taskStore = new TaskStore();
     const task = await createTracked(taskStore);
@@ -382,10 +479,11 @@ describe('review scheduler F280 adapter', () => {
     assert.equal(continued.kind, 'continue');
   });
 
-  test('review-history failure warns open and preserves automatic owner wake', async () => {
+  test('the full review observation is reused as brake history without a second fetch', async () => {
     const taskStore = new TaskStore();
     await createTracked(taskStore);
     const calls = [];
+    let fetchCalls = 0;
     const fresh = {
       id: 31,
       author: 'reviewer-4',
@@ -411,8 +509,8 @@ describe('review scheduler F280 adapter', () => {
         },
         {
           fetchPrMetadata: async () => ({ headSha: 'aaa', prState: 'open', authorLogin: 'pr-author' }),
-          fetchReviews: async (_repo, _pr, sinceId) => {
-            if (sinceId === undefined) throw new Error('history unavailable');
+          fetchReviews: async () => {
+            fetchCalls++;
             return [fresh];
           },
           invokeTrigger: { trigger: async (...args) => calls.push(args) },
@@ -420,7 +518,8 @@ describe('review scheduler F280 adapter', () => {
       ),
     );
     const gate = await spec.admission.gate();
-    assert.equal(gate.workItems[0].signal.reviewLoopBrake.kind, 'warn_open');
+    assert.equal(gate.workItems[0].signal.reviewLoopBrake.kind, 'continue');
+    assert.equal(fetchCalls, 1);
     await spec.run.execute(gate.workItems[0].signal, gate.workItems[0].subjectKey, {});
     assert.equal(calls.length, 1);
   });

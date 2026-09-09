@@ -6491,9 +6491,11 @@ async function main(): Promise<void> {
       return normalizePrFeedbackComments(reviewComments, issueComments);
     };
 
-    const fetchReviews = async (repo: string, pr: number, sinceId?: number) => {
+    const fetchReviews = async (repo: string, pr: number) => {
       await refreshGitHubSelfLogin();
-      const reviews = await fetchPaginated(`/repos/${repo}/pulls/${pr}/reviews`, sinceId);
+      // Review records are mutable: dismissal preserves the original id. The poller compares
+      // the full current state against its durable snapshot instead of treating id as a version.
+      const reviews = await fetchPaginated(`/repos/${repo}/pulls/${pr}/reviews`);
       return normalizePrReviewDecisions(reviews);
     };
 

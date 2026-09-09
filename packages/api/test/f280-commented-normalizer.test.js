@@ -1,7 +1,9 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
-const { normalizePrReviewEvent } = await import('../dist/domains/github-signals/GitHubTrackingEvent.js');
+const { matchGitHubTrackingEvents, normalizePrReviewEvent } = await import(
+  '../dist/domains/github-signals/GitHubTrackingEvent.js'
+);
 
 const review = (state, author = 'SomeMaintainer') => ({
   id: 501,
@@ -69,4 +71,28 @@ describe('F280 — the review normalizer honours the decision states', () => {
       assert.equal(normalizePrReviewEvent(review(state)).type, 'pr_review_decision_changed');
     });
   }
+});
+
+describe('F280 — an in-place dismissal is a new decision version, not a new review id', () => {
+  const baseline = {
+    capturedAt: 1,
+    headSha: 'head-1',
+    review: { inlineCommentCursor: 0, conversationCommentCursor: 0, decisionCursor: 501 },
+  };
+  const when = [{ kind: 'pr_review_decision_changed' }];
+
+  it('matches a dismissal whose already-seen review id stayed unchanged', () => {
+    const event = normalizePrReviewEvent({
+      ...review('DISMISSED'),
+      previousState: 'APPROVED',
+    });
+    const matches = matchGitHubTrackingEvents(when, baseline, [event]);
+    assert.equal(matches.length, 1);
+    assert.match(matches[0].delta, /formal review DISMISSED #501/);
+  });
+
+  it('does not replay an old dismissed review without a known state transition', () => {
+    const event = normalizePrReviewEvent(review('DISMISSED'));
+    assert.deepEqual(matchGitHubTrackingEvents(when, baseline, [event]), []);
+  });
 });

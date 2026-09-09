@@ -92,7 +92,7 @@ export interface GitHubScheduleDeps extends ScheduleFactoryDeps {
   autoExecutor: ConflictAutoExecutor;
   fetchPrMetadata: (repo: string, pr: number) => Promise<ReviewFeedbackPrMetadata | null>;
   fetchComments: (repo: string, pr: number, cursors: PrFeedbackCommentCursors) => Promise<PrFeedbackComment[]>;
-  fetchReviews: (repo: string, pr: number, sinceId?: number) => Promise<PrReviewDecision[]>;
+  fetchReviews: (repo: string, pr: number) => Promise<PrReviewDecision[]>;
   isEchoComment: (c: PrFeedbackComment) => boolean;
   isEchoReview: (r: PrReviewDecision) => boolean;
   externalReviewCoordinator?: Pick<ExternalReviewCoordinator, 'recordCloud' | 'shouldContinueTracking'>;

@@ -46,6 +46,11 @@ export interface GitHubTrackingEvent {
   /** True for review artifacts, whose commit must be established before they can end a round. */
   readonly commitBearing?: boolean;
   readonly botTurn?: GitHubBotTurnTransition;
+  /**
+   * GitHub changed an already-seen verdict review to DISMISSED without changing its numeric id.
+   * This is the only review revision allowed to cross an already-advanced numeric source frontier.
+   */
+  readonly inPlaceReviewDismissal?: true;
 }
 
 export const GITHUB_TRACKING_EVENT_KINDS = new Set<GitHubWaitPredicateKind>([
@@ -128,6 +133,7 @@ export interface NormalizePrReviewInput {
   readonly commitId?: string;
   readonly self?: boolean;
   readonly knownBots?: readonly KnownBot[];
+  readonly previousState?: 'APPROVED' | 'CHANGES_REQUESTED';
 }
 
 export function normalizePrReviewEvent(input: NormalizePrReviewInput): GitHubTrackingEvent {
@@ -179,6 +185,7 @@ export function normalizePrReviewEvent(input: NormalizePrReviewInput): GitHubTra
     commitBearing: true,
     ...(input.self ? { self: true } : {}),
     ...(botTurn ? { botTurn } : {}),
+    ...(input.state === 'DISMISSED' && input.previousState ? { inPlaceReviewDismissal: true } : {}),
   };
 }
 
@@ -199,6 +206,7 @@ export interface PrBatchReview {
   readonly body: string;
   readonly submittedAt: string;
   readonly commitId?: string;
+  readonly previousState?: 'APPROVED' | 'CHANGES_REQUESTED';
 }
 
 export interface PrFeedbackBatchInput<C extends PrBatchComment, D extends PrBatchReview> {
@@ -258,6 +266,7 @@ export function normalizePrFeedbackBatch<C extends PrBatchComment, D extends PrB
         ...(review.commitId ? { commitId: review.commitId } : {}),
         self: input.isSelfReview?.(review) ?? false,
         ...(input.knownBots ? { knownBots: input.knownBots } : {}),
+        ...(review.previousState ? { previousState: review.previousState } : {}),
       }),
     ),
   ];
@@ -404,7 +413,10 @@ export function matchGitHubTrackingEvents(
     // head may itself be based on an older base; retaining that fact in the renewed
     // baseline is correct, but announcing it as "base branch advanced" is not.
     if (event.type === 'pr_base_behind' && 'headSha' in baseline && head !== baseline.headSha) return [];
-    if (!isAfterFrontier(event.id, sourceFrontier(baseline, event.source))) return [];
+    const crossesFrontier = isAfterFrontier(event.id, sourceFrontier(baseline, event.source));
+    const isKnownDismissalRevision =
+      event.type === 'pr_review_decision_changed' && event.inPlaceReviewDismissal === true;
+    if (!crossesFrontier && !isKnownDismissalRevision) return [];
     if (!allowlists.some((allowlist) => passesAudience(event, allowlist, options?.audience))) return [];
     return [
       {

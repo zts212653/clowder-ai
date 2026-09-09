@@ -189,6 +189,80 @@ describe('ReviewFeedbackTaskSpec: event log append — polling fallback (R3-P1)'
     assert.strictEqual(reviewAppend.sourceEventId, 'review:owner/repo#10:101');
   });
 
+  it('gives an in-place dismissal its own durable event identity', async () => {
+    assert.ok(createReviewFeedbackTaskSpec);
+    const task = makeActivePrWaitTask();
+    task.automationState.review.lastDecisionCursor = 101;
+    task.automationState.review.activeDecisionStatesByReviewId = { 101: 'APPROVED' };
+    const taskStore = makeTaskStore(task);
+    const eventLog = makeEventLog({ appended: true });
+    const projector = makeProjector();
+    const spec = createReviewFeedbackTaskSpec({
+      id: 'dismissed-review-event-log',
+      taskStore,
+      reviewFeedbackRouter: makeRouter(),
+      fetchComments: async () => [],
+      fetchReviews: async () => [
+        {
+          id: 101,
+          author: 'maintainer',
+          state: 'DISMISSED',
+          body: 'Approval withdrawn',
+          submittedAt: '2026-01-02T00:00:00Z',
+          commitId: 'head-0',
+          authorAssociation: 'MEMBER',
+        },
+      ],
+      fetchPrMetadata: async () => ({ headSha: 'head-0', prState: 'open' }),
+      eventLog,
+      projector,
+      log,
+    });
+
+    const gate = await runGate(spec);
+    assert.equal(gate.workItems[0].signal.newDecisions[0].previousState, 'APPROVED');
+    assert.equal(eventLog.appendCalls[0].sourceEventId, 'review:owner/repo#10:101:DISMISSED');
+    assert.equal(projector.applyCalls.length, 1);
+  });
+
+  it('does not acknowledge or terminalize a dismissal whose durable event append failed', async () => {
+    assert.ok(createReviewFeedbackTaskSpec);
+    const task = makeActivePrWaitTask();
+    task.automationState.review.lastDecisionCursor = 101;
+    task.automationState.review.activeDecisionStatesByReviewId = { 101: 'CHANGES_REQUESTED' };
+    const taskStore = makeTaskStore(task);
+    const eventLog = makeEventLog();
+    eventLog.append = async (event) => {
+      eventLog.appendCalls.push(event);
+      throw new Error('event log unavailable');
+    };
+    const spec = createReviewFeedbackTaskSpec({
+      id: 'dismissed-review-append-failure',
+      taskStore,
+      reviewFeedbackRouter: makeRouter(),
+      fetchComments: async () => [],
+      fetchReviews: async () => [
+        {
+          id: 101,
+          author: 'maintainer',
+          state: 'DISMISSED',
+          body: 'Changes request withdrawn',
+          submittedAt: '2026-01-02T00:00:00Z',
+          commitId: 'head-0',
+        },
+      ],
+      fetchPrMetadata: async () => ({ headSha: 'head-0', prState: 'closed' }),
+      eventLog,
+      projector: makeProjector(),
+      log,
+    });
+
+    const gate = await runGate(spec);
+    assert.equal(gate.workItems[0].signal.subjectState, undefined, 'terminal delivery waits for the failed revision');
+    assert.deepEqual(gate.workItems[0].signal.newDecisions, []);
+    assert.deepEqual(gate.workItems[0].signal.activeDecisionStatesByReviewId, { 101: 'CHANGES_REQUESTED' });
+  });
+
   it('appends pr.review_submitted informational event for each new comment', async () => {
     assert.ok(createReviewFeedbackTaskSpec);
     const taskStore = makeTaskStore(makePrTask());
