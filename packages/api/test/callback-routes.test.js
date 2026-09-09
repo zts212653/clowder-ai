@@ -5956,34 +5956,148 @@ describe('Callback Routes', () => {
         };
       },
     });
-    const { invocationId, callbackToken } = await registry.create(
-      'user-1',
-      'codex-sol',
-      'thread-pr-concurrent-pending-reregister',
-    );
-    const headers = { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken };
+    const initialInvocation = await registry.create('user-1', 'codex-sol', 'thread-pr-pending-original');
+    const initialHeaders = {
+      'x-invocation-id': initialInvocation.invocationId,
+      'x-callback-token': initialInvocation.callbackToken,
+    };
 
     const initial = await app.inject({
       method: 'POST',
       url: '/api/callbacks/register-pr-tracking',
-      headers,
+      headers: initialHeaders,
       payload: prWaitPayload({ prNumber: 2862 }),
     });
     assert.equal(initial.statusCode, 200);
 
+    const replacementInvocation = await registry.create('user-1', 'codex-sol', 'thread-pr-pending-replacement');
+
     const response = await app.inject({
       method: 'POST',
       url: '/api/callbacks/register-pr-tracking',
-      headers,
+      headers: {
+        'x-invocation-id': replacementInvocation.invocationId,
+        'x-callback-token': replacementInvocation.callbackToken,
+      },
       payload: prWaitPayload({ prNumber: 2862, include: ['head_changed'] }),
     });
 
     assert.equal(response.statusCode, 409);
     assert.match(JSON.parse(response.body).error, /pending outcome/i);
     const preserved = taskStore.getBySubject(subjectKey);
+    assert.equal(
+      preserved.threadId,
+      'thread-pr-pending-original',
+      'rejecting a concurrent pending outcome must not move its delivery destination',
+    );
+    assert.equal(preserved.ownerCatId, 'codex-sol');
     assert.equal(preserved.automationState.await.generation, 1);
     assert.equal(preserved.automationState.waitOutcome.outcomeId, 'pr-outcome-installed-during-fetch');
     assert.equal(preserved.automationState.waitOutcome.delivery, 'pending');
+  });
+
+  test('concurrent PR re-registration derives liveness from the task revision it replaces', async () => {
+    let baselineCall = 0;
+    let releaseFirstFetch;
+    let releaseSecondFetch;
+    let firstFetchStartedResolve;
+    let secondFetchStartedResolve;
+    const firstFetchStarted = new Promise((resolve) => {
+      firstFetchStartedResolve = resolve;
+    });
+    const secondFetchStarted = new Promise((resolve) => {
+      secondFetchStartedResolve = resolve;
+    });
+    const firstFetchGate = new Promise((resolve) => {
+      releaseFirstFetch = resolve;
+    });
+    const secondFetchGate = new Promise((resolve) => {
+      releaseSecondFetch = resolve;
+    });
+    const snapshot = (cursor, capturedAt) => ({
+      baseline: {
+        capturedAt,
+        headSha: 'head-racing-registration',
+        review: {
+          inlineCommentCursor: cursor,
+          conversationCommentCursor: cursor,
+          decisionCursor: cursor,
+        },
+      },
+      collectorState: {
+        review: {
+          lastInlineCommentCursor: cursor,
+          lastConversationCommentCursor: cursor,
+          lastDecisionCursor: cursor,
+        },
+      },
+    });
+    const app = await createApp({
+      fetchPrWaitBaseline: async () => {
+        baselineCall += 1;
+        if (baselineCall === 1) return snapshot(10, 100);
+        if (baselineCall === 2) {
+          firstFetchStartedResolve();
+          await firstFetchGate;
+          return snapshot(20, 200);
+        }
+        secondFetchStartedResolve();
+        await secondFetchGate;
+        return snapshot(30, 300);
+      },
+    });
+    const initialInvocation = await registry.create('user-1', 'codex-sol', 'thread-pr-race-initial');
+    const initial = await app.inject({
+      method: 'POST',
+      url: '/api/callbacks/register-pr-tracking',
+      headers: {
+        'x-invocation-id': initialInvocation.invocationId,
+        'x-callback-token': initialInvocation.callbackToken,
+      },
+      payload: prWaitPayload({ prNumber: 2863 }),
+    });
+    assert.equal(initial.statusCode, 200);
+    const original = taskStore.getBySubject('pr:zts212653/cat-cafe#2863');
+    await taskStore.update(original.id, { status: 'done' });
+
+    const firstInvocation = await registry.create('user-1', 'codex-sol', 'thread-pr-race-first');
+    const secondInvocation = await registry.create('user-1', 'codex-sol', 'thread-pr-race-second');
+    const firstRegistration = app.inject({
+      method: 'POST',
+      url: '/api/callbacks/register-pr-tracking',
+      headers: {
+        'x-invocation-id': firstInvocation.invocationId,
+        'x-callback-token': firstInvocation.callbackToken,
+      },
+      payload: prWaitPayload({ prNumber: 2863 }),
+    });
+    await firstFetchStarted;
+    const secondRegistration = app.inject({
+      method: 'POST',
+      url: '/api/callbacks/register-pr-tracking',
+      headers: {
+        'x-invocation-id': secondInvocation.invocationId,
+        'x-callback-token': secondInvocation.callbackToken,
+      },
+      payload: prWaitPayload({ prNumber: 2863 }),
+    });
+    await secondFetchStarted;
+
+    releaseFirstFetch();
+    const first = await firstRegistration;
+    assert.equal(first.statusCode, 200);
+    releaseSecondFetch();
+    const second = await secondRegistration;
+    assert.equal(second.statusCode, 200);
+
+    const current = taskStore.getBySubject('pr:zts212653/cat-cafe#2863');
+    assert.equal(current.threadId, 'thread-pr-race-second');
+    assert.equal(
+      current.automationState.await.baseline.review.inlineCommentCursor,
+      20,
+      'the second request must preserve the live frontier installed by the first request',
+    );
+    await app.close();
   });
 
   test('POST register-pr-tracking rejects internal predicates before reading a baseline', async () => {
@@ -6777,8 +6891,8 @@ describe('Callback Routes', () => {
       getBySubject() {
         return null;
       },
-      async upsertBySubject(input) {
-        if (input.userId === 'user-A') {
+      async replaceTrackingRegistrationIfUnchanged(input) {
+        if (input.task.userId === 'user-A') {
           return {
             id: 'task-user-a',
             kind: 'pr_tracking',
@@ -6792,29 +6906,12 @@ describe('Callback Routes', () => {
             createdAt: 1,
             updatedAt: 1,
             userId: 'user-A',
-            automationState: undefined,
+            automationState: input.automationState,
           };
         }
         const error = new Error('subject ownership conflict');
         error.code = 'TASK_SUBJECT_OWNERSHIP_CONFLICT';
         throw error;
-      },
-      async replaceAutomationStateIfGeneration(_taskId, input) {
-        return {
-          id: 'task-user-a',
-          kind: 'pr_tracking',
-          subjectKey: 'pr:zts212653/cat-cafe#77',
-          threadId: 'thread-A',
-          title: 'PR tracking: zts212653/cat-cafe#77',
-          ownerCatId: 'opus',
-          status: 'todo',
-          why: 'track pr',
-          createdBy: 'opus',
-          createdAt: 1,
-          updatedAt: 2,
-          userId: 'user-A',
-          automationState: input.automationState,
-        };
       },
     };
 
@@ -7156,31 +7253,41 @@ describe('Callback Routes', () => {
         };
       },
     });
-    const { invocationId, callbackToken } = await registry.create(
-      'user-1',
-      'codex-sol',
-      'thread-issue-concurrent-pending-reregister',
-    );
-    const headers = { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken };
+    const initialInvocation = await registry.create('user-1', 'codex-sol', 'thread-issue-pending-original');
+    const initialHeaders = {
+      'x-invocation-id': initialInvocation.invocationId,
+      'x-callback-token': initialInvocation.callbackToken,
+    };
 
     const initial = await app.inject({
       method: 'POST',
       url: '/api/callbacks/register-issue-tracking',
-      headers,
+      headers: initialHeaders,
       payload: issueWaitPayload({ issueNumber: 867 }),
     });
     assert.equal(initial.statusCode, 200);
 
+    const replacementInvocation = await registry.create('user-1', 'codex-sol', 'thread-issue-pending-replacement');
+
     const response = await app.inject({
       method: 'POST',
       url: '/api/callbacks/register-issue-tracking',
-      headers,
+      headers: {
+        'x-invocation-id': replacementInvocation.invocationId,
+        'x-callback-token': replacementInvocation.callbackToken,
+      },
       payload: issueWaitPayload({ issueNumber: 867 }),
     });
 
     assert.equal(response.statusCode, 409);
     assert.match(JSON.parse(response.body).error, /pending outcome/i);
     const preserved = taskStore.getBySubject(subjectKey);
+    assert.equal(
+      preserved.threadId,
+      'thread-issue-pending-original',
+      'rejecting a concurrent pending outcome must not move its delivery destination',
+    );
+    assert.equal(preserved.ownerCatId, 'codex-sol');
     assert.equal(preserved.automationState.await.generation, 1);
     assert.equal(preserved.automationState.waitOutcome.outcomeId, 'issue-outcome-installed-during-fetch');
     assert.equal(preserved.automationState.waitOutcome.delivery, 'pending');

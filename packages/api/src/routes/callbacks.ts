@@ -5504,23 +5504,19 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
         createdBy: catId,
         userId: record.userId,
       } as const;
-      // #1394 section 2.5b: only a STILL-LIVE wait holds its frontier. A tracker whose
-      // lifecycle already ended (merged / closed / unregistered -> status done) is a fresh
-      // start when re-registered, so it must re-freeze at now exactly like a first
-      // registration. Read the status BEFORE the upsert: upsertBySubject resets a done
-      // tracking task back to 'todo'.
-      const priorWaitIsLive = Boolean(priorTask) && priorTask?.status !== 'done';
-      const task = record.managedWorkBinding
-        ? await taskStore.upsertBySubjectWithManagedWorkBinding(taskInput, record.managedWorkBinding)
-        : await taskStore.upsertBySubject(taskInput);
-      const previousState = task.automationState as PrAutomationState | undefined;
-      // The baseline read above may overlap a collector that installs a pending outcome.
-      // Re-check the state returned by the upsert so that outcome cannot be superseded in the
-      // gap between the first local read and the generation-fenced replacement below.
+      // Re-read after the external snapshot. This revision, not the pre-fetch hint above,
+      // decides whether a live frontier must be preserved. The store then checks this exact
+      // revision and installs routing metadata + the complete wait state atomically.
+      const currentTask = await taskStore.getBySubject(subjectKey);
+      const previousState = currentTask?.automationState as PrAutomationState | undefined;
       if (previousState?.waitOutcome?.delivery === 'pending') {
         reply.status(409);
         return { error: 'PR tracking has a pending outcome — retry registration after delivery' };
       }
+      // #1394 section 2.5b: only a STILL-LIVE wait holds its frontier. A tracker whose
+      // lifecycle already ended (merged / closed / unregistered -> status done) is a fresh
+      // start when re-registered, so it must re-freeze at now exactly like a first registration.
+      const currentWaitIsLive = Boolean(currentTask) && currentTask?.status !== 'done';
       const previousGeneration = previousState?.await?.generation ?? previousState?.waitOutcome?.generation ?? 0;
       const generation = previousGeneration + 1;
       const awaitState: GitHubPrAwaitStateV1 = {
@@ -5532,7 +5528,7 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
         // so a still-live tracker keeps its whole baseline — open bot rounds included. Rounds
         // now come only from the poll stream, so the live state is the only place they exist;
         // overwriting the baseline here is how a cat lost the round it had just opened.
-        baseline: (priorWaitIsLive ? previousState?.await?.baseline : undefined) ?? snapshot.baseline,
+        baseline: (currentWaitIsLive ? previousState?.await?.baseline : undefined) ?? snapshot.baseline,
         continuation: {
           when,
           // biome-ignore lint/suspicious/noThenProperty: F280's frozen wait contract names this field `then`.
@@ -5558,16 +5554,17 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
       // at now, so section 4 A12 (pre-registration history never fires) is unaffected.
       const replacement: PrAutomationState = {
         ...snapshot.collectorState,
-        ...(priorWaitIsLive && previousState?.review ? { review: previousState.review } : {}),
-        ...(priorWaitIsLive && previousState?.ci ? { ci: previousState.ci } : {}),
-        ...(priorWaitIsLive && previousState?.conflict ? { conflict: previousState.conflict } : {}),
+        ...(currentWaitIsLive && previousState?.review ? { review: previousState.review } : {}),
+        ...(currentWaitIsLive && previousState?.ci ? { ci: previousState.ci } : {}),
+        ...(currentWaitIsLive && previousState?.conflict ? { conflict: previousState.conflict } : {}),
         await: awaitState,
         ...(supersededOutcome ? { waitOutcome: supersededOutcome } : {}),
       };
-      const installed = await taskStore.replaceAutomationStateIfGeneration(task.id, {
-        expectedGeneration: previousGeneration === 0 ? null : previousGeneration,
-        expectedUpdatedAt: task.updatedAt,
+      const installed = await taskStore.replaceTrackingRegistrationIfUnchanged({
+        expectedTask: currentTask,
+        task: taskInput,
         automationState: replacement,
+        ...(record.managedWorkBinding ? { managedWorkBinding: record.managedWorkBinding } : {}),
       });
       if (!installed) {
         reply.status(409);
@@ -5742,22 +5739,15 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
         createdBy: catId,
         userId: record.userId,
       } as const;
-      // #1394 section 2.5b: only a STILL-LIVE wait holds its frontier. A tracker whose
-      // lifecycle already ended (merged / closed / unregistered -> status done) is a fresh
-      // start when re-registered, so it must re-freeze at now exactly like a first
-      // registration. Read the status BEFORE the upsert: upsertBySubject resets a done
-      // tracking task back to 'todo'.
-      const priorWaitIsLive = Boolean(priorTask) && priorTask?.status !== 'done';
-      const task = record.managedWorkBinding
-        ? await taskStore.upsertBySubjectWithManagedWorkBinding(taskInput, record.managedWorkBinding)
-        : await taskStore.upsertBySubject(taskInput);
-      const previousState = task.automationState as IssueWaitAutomationState | undefined;
-      // Match the PR path's second guard: a collector may install delivery debt while the
-      // external baseline is being fetched, and re-registration must not replace it.
+      // Match the PR path's transaction boundary: after the external snapshot, derive the
+      // replacement from one current revision and let the store atomically reject or install it.
+      const currentTask = await taskStore.getBySubject(subjectKey);
+      const previousState = currentTask?.automationState as IssueWaitAutomationState | undefined;
       if (previousState?.waitOutcome?.delivery === 'pending') {
         reply.status(409);
         return { error: 'Issue tracking has a pending outcome — retry registration after delivery' };
       }
+      const currentWaitIsLive = Boolean(currentTask) && currentTask?.status !== 'done';
       const previousGeneration = previousState?.await?.generation ?? previousState?.waitOutcome?.generation ?? 0;
       const generation = previousGeneration + 1;
       const awaitState: GitHubIssueAwaitStateV1 = {
@@ -5765,7 +5755,7 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
         generation,
         subjectRef: subjectKey,
         ownerFence: { kind: 'containing_task', generation },
-        baseline: (priorWaitIsLive ? previousState?.await?.baseline : undefined) ?? snapshot.baseline,
+        baseline: (currentWaitIsLive ? previousState?.await?.baseline : undefined) ?? snapshot.baseline,
         continuation: {
           when,
           // biome-ignore lint/suspicious/noThenProperty: F280's frozen wait contract names this field `then`.
@@ -5791,14 +5781,15 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
       // at now, so section 4 A12 (pre-registration history never fires) is unaffected.
       const replacement: IssueWaitAutomationState = {
         ...snapshot.collectorState,
-        ...(priorWaitIsLive && previousState?.issue ? { issue: previousState.issue } : {}),
+        ...(currentWaitIsLive && previousState?.issue ? { issue: previousState.issue } : {}),
         await: awaitState,
         ...(supersededOutcome ? { waitOutcome: supersededOutcome } : {}),
       };
-      const installed = await taskStore.replaceAutomationStateIfGeneration(task.id, {
-        expectedGeneration: previousGeneration === 0 ? null : previousGeneration,
-        expectedUpdatedAt: task.updatedAt,
+      const installed = await taskStore.replaceTrackingRegistrationIfUnchanged({
+        expectedTask: currentTask,
+        task: taskInput,
         automationState: replacement,
+        ...(record.managedWorkBinding ? { managedWorkBinding: record.managedWorkBinding } : {}),
       });
       if (!installed) {
         reply.status(409);

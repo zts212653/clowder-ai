@@ -292,6 +292,37 @@ describe('TaskStore', () => {
     });
   });
 
+  describe('conditional tracking registration', () => {
+    it('rejects a stale revision without moving routing metadata', () => {
+      const input = makeInput({
+        kind: 'pr_tracking',
+        subjectKey: 'pr:owner/repo#2800',
+        threadId: 'thread-original',
+        title: 'PR tracking: owner/repo#2800',
+        ownerCatId: 'codex-sol',
+        userId: 'user-1',
+      });
+      const created = store.replaceTrackingRegistrationIfUnchanged({
+        expectedTask: null,
+        task: input,
+        automationState: { ci: { lastFingerprint: 'initial' } },
+      });
+      const observed = structuredClone(created);
+      store.patchAutomationState(created.id, { ci: { lastFingerprint: 'collector-won' } });
+
+      const rejected = store.replaceTrackingRegistrationIfUnchanged({
+        expectedTask: observed,
+        task: { ...input, threadId: 'thread-replacement' },
+        automationState: { ci: { lastFingerprint: 'registration-won' } },
+      });
+
+      assert.equal(rejected, null);
+      const current = store.get(created.id);
+      assert.equal(current.threadId, 'thread-original');
+      assert.equal(current.automationState.ci.lastFingerprint, 'collector-won');
+    });
+  });
+
   describe('delete', () => {
     it('deletes an existing task', () => {
       const task = store.create(makeInput());

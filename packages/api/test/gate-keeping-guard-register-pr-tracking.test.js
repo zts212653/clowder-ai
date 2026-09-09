@@ -284,12 +284,8 @@ describe('F167 gate-keeping guard: POST /api/callbacks/register-pr-tracking', ()
         }
         return existing;
       },
-      upsertBySubject: taskStore.upsertBySubject.bind(taskStore),
-      upsertBySubjectWithManagedWorkBinding: (...args) => taskStore.upsertBySubjectWithManagedWorkBinding(...args),
-      bindManagedWorkBinding: taskStore.bindManagedWorkBinding.bind(taskStore),
+      replaceTrackingRegistrationIfUnchanged: (...args) => taskStore.replaceTrackingRegistrationIfUnchanged(...args),
       getManagedWorkBinding: taskStore.getManagedWorkBinding.bind(taskStore),
-      patchAutomationState: taskStore.patchAutomationState.bind(taskStore),
-      replaceAutomationStateIfGeneration: taskStore.replaceAutomationStateIfGeneration.bind(taskStore),
     };
     const app = await createApp({ taskStore: racingTaskStore });
 
@@ -317,7 +313,7 @@ describe('F167 gate-keeping guard: POST /api/callbacks/register-pr-tracking', ()
     assert.deepEqual(taskStore.getManagedWorkBinding(stored.id), winner.binding);
   });
 
-  test('F275: binds the TaskItem returned by upsert when a stale anchor is replaced', async () => {
+  test('F275: rejects registration when a stale anchor is replaced before the atomic install', async () => {
     const thread = await threadStore.create('user-1', 'managed-pr-tracking-replacement');
     const binding = { workId: 'work-replacement', attemptId: 'attempt-replacement' };
     const invocation = await createInvocation(thread.id, binding);
@@ -332,33 +328,13 @@ describe('F167 gate-keeping guard: POST /api/callbacks/register-pr-tracking', ()
       userId: 'user-1',
     });
     taskStore.update(stale.id, { status: 'done' });
-    const replacement = {
-      ...stale,
-      id: 'task-replacement',
-      status: 'todo',
-      updatedAt: stale.updatedAt + 1,
-    };
     const calls = [];
     const racingTaskStore = {
       getBySubject: () => stale,
-      upsertBySubject: () => {
-        calls.push(`upsert:${replacement.id}`);
-        return replacement;
-      },
-      upsertBySubjectWithManagedWorkBinding: (_input, nextBinding) => {
-        calls.push(`managed-upsert:${replacement.id}:${nextBinding.workId}`);
-        return replacement;
-      },
-      bindManagedWorkBinding: (taskId, nextBinding) => {
-        calls.push(`bind:${taskId}`);
-        return nextBinding;
-      },
       getManagedWorkBinding: () => null,
-      patchAutomationState: () => replacement,
-      replaceAutomationStateIfGeneration: (_taskId, input) => {
-        calls.push(`replace:${replacement.id}`);
-        replacement.automationState = input.automationState;
-        return replacement;
+      replaceTrackingRegistrationIfUnchanged: (input) => {
+        calls.push(`replace:${input.expectedTask.id}:${input.managedWorkBinding.workId}`);
+        return null;
       },
     };
     const app = await createApp({ taskStore: racingTaskStore });
@@ -373,8 +349,9 @@ describe('F167 gate-keeping guard: POST /api/callbacks/register-pr-tracking', ()
       payload: prWaitPayload(505),
     });
 
-    assert.equal(response.statusCode, 200);
-    assert.deepEqual(calls, [`managed-upsert:${replacement.id}:${binding.workId}`, `replace:${replacement.id}`]);
+    assert.equal(response.statusCode, 409);
+    assert.deepEqual(calls, [`replace:${stale.id}:${binding.workId}`]);
+    assert.equal(taskStore.getManagedWorkBinding(stale.id), null);
   });
 
   test('INV-G2: gate-keeping thread + no override → 400 gate_keeping_thread_default_blocked', async () => {

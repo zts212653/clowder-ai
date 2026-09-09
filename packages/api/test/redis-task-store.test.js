@@ -526,6 +526,40 @@ describe('TaskStoreFactory', () => {
 });
 
 describe('RedisTaskStore unit behavior', () => {
+  it('conditionally installs tracking state without mutating a stale observed revision', async () => {
+    const { RedisTaskStore } = await import('../dist/domains/cats/services/stores/redis/RedisTaskStore.js');
+    const redis = new FakeRedisForTaskStore();
+    const store = new RedisTaskStore(redis, { ttlSeconds: 60 });
+    const input = {
+      kind: 'pr_tracking',
+      subjectKey: 'pr:owner/repo#2800',
+      threadId: 'thread-original',
+      title: 'PR tracking: owner/repo#2800',
+      why: 'verify conditional tracking registration',
+      createdBy: 'codex-sol',
+      ownerCatId: 'codex-sol',
+      userId: 'user-1',
+    };
+    const created = await store.replaceTrackingRegistrationIfUnchanged({
+      expectedTask: null,
+      task: input,
+      automationState: { ci: { lastFingerprint: 'initial' } },
+    });
+    const observed = structuredClone(created);
+    await store.patchAutomationState(created.id, { ci: { lastFingerprint: 'collector-won' } });
+
+    const rejected = await store.replaceTrackingRegistrationIfUnchanged({
+      expectedTask: observed,
+      task: { ...input, threadId: 'thread-replacement' },
+      automationState: { ci: { lastFingerprint: 'registration-won' } },
+    });
+
+    assert.equal(rejected, null);
+    const current = await store.get(created.id);
+    assert.equal(current.threadId, 'thread-original');
+    assert.equal(current.automationState.ci.lastFingerprint, 'collector-won');
+  });
+
   it('binds managed-work identity atomically, idempotently, and outside the public task hash', async () => {
     const { RedisTaskStore } = await import('../dist/domains/cats/services/stores/redis/RedisTaskStore.js');
     const { TaskKeys } = await import('../dist/domains/cats/services/stores/redis-keys/task-keys.js');
