@@ -53,6 +53,10 @@ function authoritativeBaseFact(isBehind: boolean | undefined): { base?: { isBehi
 export class ConflictRouter {
   constructor(private readonly opts: ConflictRouterOptions) {}
 
+  async recoverPending(taskId: string): Promise<ConflictRouteResult> {
+    return this.projectLifecycleResult(await this.opts.waitLifecycle.recoverOutcome(taskId));
+  }
+
   async route(signal: ConflictSignal): Promise<ConflictRouteResult> {
     const sk = prSubjectKey(signal.repoFullName, signal.prNumber);
     const task = await this.opts.taskStore.getBySubject(sk);
@@ -104,6 +108,12 @@ export class ConflictRouter {
         },
       },
     });
+    return this.projectLifecycleResult(result);
+  }
+
+  private projectLifecycleResult(
+    result: Awaited<ReturnType<GitHubWaitLifecycleService['recoverOutcome']>>,
+  ): ConflictRouteResult {
     if (result.kind !== 'notified') {
       return {
         kind: result.kind === 'deduped' ? 'deduped' : 'skipped',

@@ -266,6 +266,86 @@ describe('#949 / F140: review feedback returns to the registered thread', () => 
     assert.equal(threadStore._createCalls.length, 0, 'legacy repair must not create another thread');
   });
 
+  it('repairs a legacy rotated thread before replaying a pending outcome without GitHub', async () => {
+    const { createReviewFeedbackTaskSpec } = await import('../../dist/infrastructure/email/ReviewFeedbackTaskSpec.js');
+    const subjectRef = 'pr:owner/repo#45';
+    const task = mockTask(
+      { repoFullName: 'owner/repo', prNumber: 45, catId: 'opus', threadId: 'thread_rotated_1', userId: 'u-1' },
+      {
+        status: 'done',
+        automationState: {
+          review: mockReviewState(1),
+          waitOutcome: {
+            v: 1,
+            outcomeId: 'pending-from-rotated-thread',
+            generation: 1,
+            subjectRef,
+            ownerFence: { kind: 'containing_task', generation: 1 },
+            reason: 'subject_terminal',
+            at: 500,
+            delivery: 'pending',
+            terminalSubjectState: 'merged',
+          },
+        },
+      },
+    );
+    const store = mockTaskStore([task]);
+    const threadStore = mockThreadStore({
+      thread_rotated_1: {
+        id: 'thread_rotated_1',
+        title: 'MR review (auto-rotated from th-original)',
+        createdBy: 'u-1',
+        createdAt: task.createdAt + 1000,
+        participants: ['opus'],
+        projectPath: '/projects/cat-cafe',
+      },
+      'th-original': {
+        id: 'th-original',
+        title: 'Original source thread',
+        createdBy: 'u-1',
+        createdAt: task.createdAt - 1000,
+        participants: ['opus'],
+        projectPath: '/projects/cat-cafe',
+      },
+    });
+    const githubReads = [];
+    const recoveries = [];
+    const spec = createReviewFeedbackTaskSpec({
+      taskStore: store,
+      fetchPrMetadata: async () => {
+        githubReads.push('metadata');
+        throw new Error('GitHub unavailable');
+      },
+      fetchComments: async () => {
+        githubReads.push('comments');
+        throw new Error('GitHub unavailable');
+      },
+      fetchReviews: async () => {
+        githubReads.push('reviews');
+        throw new Error('GitHub unavailable');
+      },
+      reviewFeedbackRouter: {
+        route: async () => {
+          throw new Error('recovery must not route a new observation');
+        },
+        recoverPending: async (taskId) => {
+          recoveries.push({ taskId, threadId: task.threadId });
+          return { kind: 'skipped', reason: 'recovered', observationEvaluated: false };
+        },
+      },
+      threadStore,
+      log: noopLog,
+    });
+
+    const gateResult = await spec.admission.gate({ taskId: spec.id, lastRunAt: null, tickCount: 1 });
+    assert.equal(gateResult.run, true);
+    assert.deepEqual(githubReads, []);
+    await spec.run.execute(gateResult.workItems[0].signal, subjectRef, {});
+
+    assert.equal(task.threadId, 'th-original');
+    assert.deepEqual(recoveries, [{ taskId: task.id, threadId: 'th-original' }]);
+  });
+
   it('delivers routing audit alongside OWNER feedback (#1002: no longer filtered)', async () => {
     const { createReviewFeedbackTaskSpec } = await import('../../dist/infrastructure/email/ReviewFeedbackTaskSpec.js');
     const task = mockTask(

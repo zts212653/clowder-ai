@@ -589,13 +589,15 @@ function normalizeExternalResponseBody(source: string, stripCodexHelp: boolean):
   const normalized = source.slice(0, end).replace(/\r\n?/g, '\n');
   const cleaned = transformOutsideFencedCode(normalized, (markdown) =>
     transformOutsideInlineCode(markdown, (prose) =>
-      prose
-        .replace(/<!--[\s\S]*?-->/g, '')
-        .replace(GITHUB_DETAILS_BLOCK, (block) =>
-          stripCodexHelp && CODEX_GITHUB_HELP_SUMMARY.test(block) ? '' : block,
-        )
-        .replace(GITHUB_MARKDOWN_BLOCK_BREAK, '\n')
-        .replace(GITHUB_MARKDOWN_HTML_TAG, ''),
+      neutralizeMarkdownImages(
+        prose
+          .replace(/<!--[\s\S]*?-->/g, '')
+          .replace(GITHUB_DETAILS_BLOCK, (block) =>
+            stripCodexHelp && CODEX_GITHUB_HELP_SUMMARY.test(block) ? '' : block,
+          )
+          .replace(GITHUB_MARKDOWN_BLOCK_BREAK, '\n')
+          .replace(GITHUB_MARKDOWN_HTML_TAG, ''),
+      ),
     ),
   );
 
@@ -605,6 +607,27 @@ function normalizeExternalResponseBody(source: string, stripCodexHelp: boolean):
   const closingFence = closingFenceForTruncatedMarkdown(meaningful);
   const marker = `… [truncated ${omittedCharacters} characters from original GitHub body]`;
   return meaningful ? `${meaningful}${closingFence}\n\n${marker}` : marker;
+}
+
+/**
+ * Markdown images always begin with an unescaped `![`, including reference-style images.
+ * Escape that marker in untrusted prose so ReactMarkdown renders text/link syntax without
+ * causing the browser to contact a commenter-controlled origin. Existing odd backslash runs
+ * already escape the marker; even runs need one more slash. Fenced and inline code never enter
+ * this transform, so executable examples remain byte-for-byte intact.
+ */
+function neutralizeMarkdownImages(markdown: string): string {
+  let output = '';
+  let consecutiveBackslashes = 0;
+  for (let index = 0; index < markdown.length; index += 1) {
+    const character = markdown[index];
+    if (character === '!' && markdown[index + 1] === '[' && consecutiveBackslashes % 2 === 0) {
+      output += '\\';
+    }
+    output += character;
+    consecutiveBackslashes = character === '\\' ? consecutiveBackslashes + 1 : 0;
+  }
+  return output;
 }
 
 function closingFenceForTruncatedMarkdown(markdown: string): string {

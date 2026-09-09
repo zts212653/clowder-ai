@@ -5462,6 +5462,16 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
     // PR-O4 R5: normalize repo to lowercase (GitHub repos are case-insensitive)
     const subjectKey = `pr:${repoFullName.toLowerCase()}#${prNumber}` as const;
     try {
+      // A pending outcome is the durable outbox for a notification that has not reached its
+      // owner yet. Re-registration may supersede a live await generation, but it must never
+      // replace that delivery debt with the new superseded outcome. Reject before reading a
+      // fresh GitHub baseline: local recovery does not depend on external availability, and the
+      // caller can retry after the owning poller has replayed the pending outcome.
+      const priorTask = await taskStore.getBySubject(subjectKey);
+      if (priorTask?.automationState?.waitOutcome?.delivery === 'pending') {
+        reply.status(409);
+        return { error: 'PR tracking has a pending outcome — retry registration after delivery' };
+      }
       if (!fetchPrWaitBaseline) {
         reply.status(503);
         return { error: 'PR wait baseline reader not configured' };
@@ -5499,12 +5509,18 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
       // start when re-registered, so it must re-freeze at now exactly like a first
       // registration. Read the status BEFORE the upsert: upsertBySubject resets a done
       // tracking task back to 'todo'.
-      const priorTask = await taskStore.getBySubject(subjectKey);
       const priorWaitIsLive = Boolean(priorTask) && priorTask?.status !== 'done';
       const task = record.managedWorkBinding
         ? await taskStore.upsertBySubjectWithManagedWorkBinding(taskInput, record.managedWorkBinding)
         : await taskStore.upsertBySubject(taskInput);
       const previousState = task.automationState as PrAutomationState | undefined;
+      // The baseline read above may overlap a collector that installs a pending outcome.
+      // Re-check the state returned by the upsert so that outcome cannot be superseded in the
+      // gap between the first local read and the generation-fenced replacement below.
+      if (previousState?.waitOutcome?.delivery === 'pending') {
+        reply.status(409);
+        return { error: 'PR tracking has a pending outcome — retry registration after delivery' };
+      }
       const previousGeneration = previousState?.await?.generation ?? previousState?.waitOutcome?.generation ?? 0;
       const generation = previousGeneration + 1;
       const awaitState: GitHubPrAwaitStateV1 = {
@@ -5697,6 +5713,13 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
 
     const subjectKey = `issue:${repoFullName.toLowerCase()}#${issueNumber}` as const;
     try {
+      // Same outbox invariant as PR tracking: replacing the wait while its previous outcome is
+      // still pending would erase the only recovery record for that notification.
+      const priorTask = await taskStore.getBySubject(subjectKey);
+      if (priorTask?.automationState?.waitOutcome?.delivery === 'pending') {
+        reply.status(409);
+        return { error: 'Issue tracking has a pending outcome — retry registration after delivery' };
+      }
       if (!fetchIssueWaitBaseline) {
         reply.status(503);
         return { error: 'Issue wait baseline reader not configured' };
@@ -5724,12 +5747,17 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
       // start when re-registered, so it must re-freeze at now exactly like a first
       // registration. Read the status BEFORE the upsert: upsertBySubject resets a done
       // tracking task back to 'todo'.
-      const priorTask = await taskStore.getBySubject(subjectKey);
       const priorWaitIsLive = Boolean(priorTask) && priorTask?.status !== 'done';
       const task = record.managedWorkBinding
         ? await taskStore.upsertBySubjectWithManagedWorkBinding(taskInput, record.managedWorkBinding)
         : await taskStore.upsertBySubject(taskInput);
       const previousState = task.automationState as IssueWaitAutomationState | undefined;
+      // Match the PR path's second guard: a collector may install delivery debt while the
+      // external baseline is being fetched, and re-registration must not replace it.
+      if (previousState?.waitOutcome?.delivery === 'pending') {
+        reply.status(409);
+        return { error: 'Issue tracking has a pending outcome — retry registration after delivery' };
+      }
       const previousGeneration = previousState?.await?.generation ?? previousState?.waitOutcome?.generation ?? 0;
       const generation = previousGeneration + 1;
       const awaitState: GitHubIssueAwaitStateV1 = {

@@ -200,6 +200,10 @@ export class CiCdRouter {
     this.now = opts.now ?? Date.now;
   }
 
+  async recoverPending(taskId: string): Promise<CiRouteResult> {
+    return routeFromLifecycle(await this.opts.waitLifecycle.recoverOutcome(taskId), 'pending');
+  }
+
   async route(poll: CiPollResult): Promise<CiRouteResult> {
     const sk = prSubjectKey(poll.repoFullName, poll.prNumber);
     const task = await this.opts.taskStore.getBySubject(sk);
@@ -209,7 +213,7 @@ export class CiCdRouter {
     // fails, the durable outcome remains the recovery outbox and must be replayed before this
     // adapter applies current-poll policy (including CI disabled) to an unrelated observation.
     if (task.status === 'done' && hasPendingGitHubWaitOutcome(task)) {
-      return routeFromLifecycle(await this.opts.waitLifecycle.recoverOutcome(task.id), 'pending');
+      return this.recoverPending(task.id);
     }
 
     const settled = settleEmptyCheckRollup(poll, task.automationState?.ci?.rollupObservation, this.now());

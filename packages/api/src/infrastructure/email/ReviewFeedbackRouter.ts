@@ -108,6 +108,10 @@ export interface ReviewFeedbackRouterOptions {
 export class ReviewFeedbackRouter {
   constructor(private readonly opts: ReviewFeedbackRouterOptions) {}
 
+  async recoverPending(taskId: string): Promise<ReviewFeedbackRouteResult> {
+    return this.projectLifecycleResult(await this.opts.waitLifecycle.recoverOutcome(taskId));
+  }
+
   async route(signal: ReviewFeedbackSignal, tracking: { taskId: string }): Promise<ReviewFeedbackRouteResult> {
     const externalDecisions = signal.newDecisions.filter((review) => !signal.isSelfReview?.(review));
     const latestDecision = [...externalDecisions].sort((left, right) => left.id - right.id).at(-1);
@@ -162,6 +166,12 @@ export class ReviewFeedbackRouter {
       ...(signal.subjectState ? { subjectState: signal.subjectState } : {}),
       ...(signal.reviewLoopBrake ? { reviewLoopBrake: signal.reviewLoopBrake } : {}),
     });
+    return this.projectLifecycleResult(result);
+  }
+
+  private projectLifecycleResult(
+    result: Awaited<ReturnType<GitHubWaitLifecycleService['recoverOutcome']>>,
+  ): ReviewFeedbackRouteResult {
     if (result.kind !== 'notified')
       return { kind: 'skipped', reason: result.reason, observationEvaluated: result.observationEvaluated };
     return {

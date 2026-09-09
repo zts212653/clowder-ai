@@ -38,17 +38,20 @@ export interface ConflictCheckTaskSpecOptions {
   readonly id?: string;
 }
 
-interface ConflictWorkItem {
-  signal: ConflictSignal;
-  task: TaskItem;
-}
+type ConflictWorkItem = { signal: ConflictSignal; task: TaskItem } | { recoveryOnly: true; task: TaskItem };
 
 async function tryAutoResolveBeforeWake(
   opts: ConflictCheckTaskSpecOptions,
   workItem: ConflictWorkItem,
   signal?: AbortSignal,
 ): Promise<AutoResolveResult | null> {
-  if (!opts.autoExecutor || workItem.signal.mergeState !== 'CONFLICTING' || signal?.aborted) return null;
+  if (
+    'recoveryOnly' in workItem ||
+    !opts.autoExecutor ||
+    workItem.signal.mergeState !== 'CONFLICTING' ||
+    signal?.aborted
+  )
+    return null;
   try {
     return await opts.autoExecutor.resolve(
       workItem.signal.repoFullName,
@@ -85,6 +88,11 @@ export function createConflictCheckTaskSpec(opts: ConflictCheckTaskSpecOptions):
             const parsed = task.subjectKey ? parsePrSubjectKey(task.subjectKey) : null;
             if (!parsed) continue;
             const { repoFullName, prNumber } = parsed;
+
+            if (hasPendingGitHubWaitOutcome(task)) {
+              workItems.push({ signal: { recoveryOnly: true, task }, subjectKey: task.subjectKey! });
+              continue;
+            }
 
             const { mergeState, mergeStateStatus, headSha, isBehind } = await opts.checkMergeable(
               repoFullName,
@@ -124,7 +132,10 @@ export function createConflictCheckTaskSpec(opts: ConflictCheckTaskSpecOptions):
       timeoutMs: 30_000,
       async execute(workItem: ConflictWorkItem, _subjectKey: string, ctx: ExecuteContext) {
         ctx.signal?.throwIfAborted();
-        const routeResult = await opts.conflictRouter.route(workItem.signal);
+        const routeResult =
+          'recoveryOnly' in workItem
+            ? await opts.conflictRouter.recoverPending(workItem.task.id)
+            : await opts.conflictRouter.route(workItem.signal);
         if (routeResult.kind !== 'notified') return;
 
         // F140 Phase C auto-resolve REWRITES the branch (rebase + push). Only the conflict event
@@ -136,7 +147,7 @@ export function createConflictCheckTaskSpec(opts: ConflictCheckTaskSpecOptions):
         // trading a write bug for a silent-mute bug, which A26 ranks as the worse one.
         // `?? []` denies rather than permits: an absent kind list must never authorize a branch
         // rewrite. This is the one direction in which a permissive default is not acceptable.
-        if ((routeResult.matchedKinds ?? []).includes('pr_became_conflicting')) {
+        if (!('recoveryOnly' in workItem) && (routeResult.matchedKinds ?? []).includes('pr_became_conflicting')) {
           const result = await tryAutoResolveBeforeWake(opts, workItem, ctx.signal);
           if (result?.kind === 'resolved') {
             opts.log.info(`[conflict-check] Auto-resolved conflict for ${result.branch} (${result.method})`);

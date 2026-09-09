@@ -240,15 +240,41 @@ describe('review scheduler F280 adapter', () => {
         terminalSubjectState: 'merged',
       },
     });
+    const githubReads = [];
+    const recoveries = [];
     const spec = createReviewFeedbackTaskSpec(
-      options(taskStore, {
-        route: async () => ({ kind: 'skipped', reason: 'state-only', observationEvaluated: false }),
-      }),
+      options(
+        taskStore,
+        {
+          route: async () => ({ kind: 'skipped', reason: 'state-only', observationEvaluated: false }),
+          recoverPending: async (taskId) => {
+            recoveries.push(taskId);
+            return { kind: 'skipped', reason: 'recovered', observationEvaluated: false };
+          },
+        },
+        {
+          fetchPrMetadata: async () => {
+            githubReads.push('metadata');
+            throw new Error('GitHub unavailable');
+          },
+          fetchComments: async () => {
+            githubReads.push('comments');
+            throw new Error('GitHub unavailable');
+          },
+          fetchReviews: async () => {
+            githubReads.push('reviews');
+            throw new Error('GitHub unavailable');
+          },
+        },
+      ),
     );
 
     const gate = await spec.admission.gate();
     assert.equal(gate.run, true);
     assert.equal(gate.workItems.length, 1);
+    assert.deepEqual(githubReads, [], 'durable local delivery debt must not depend on fresh review reads');
+    await spec.run.execute(gate.workItems[0].signal, gate.workItems[0].subjectKey, {});
+    assert.deepEqual(recoveries, [task.id]);
   });
 
   test('only router-confirmed typed outcome invokes with the unified reason', async () => {

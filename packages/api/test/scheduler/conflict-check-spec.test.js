@@ -56,16 +56,30 @@ describe('conflict scheduler F280 adapter', () => {
         },
       },
     });
+    let githubReads = 0;
+    const recoveries = [];
     const spec = createConflictCheckTaskSpec({
       taskStore,
-      checkMergeable: async () => ({ mergeState: 'MERGEABLE', headSha: 'aaa', isBehind: false }),
-      conflictRouter: { route: async () => ({ kind: 'skipped', reason: 'state-only' }) },
+      checkMergeable: async () => {
+        githubReads += 1;
+        throw new Error('GitHub unavailable');
+      },
+      conflictRouter: {
+        route: async () => ({ kind: 'skipped', reason: 'state-only' }),
+        recoverPending: async (taskId) => {
+          recoveries.push(taskId);
+          return { kind: 'skipped', reason: 'recovered' };
+        },
+      },
       log: { info() {}, warn() {}, error() {} },
     });
 
     const gate = await spec.admission.gate();
     assert.equal(gate.run, true);
     assert.equal(gate.workItems.length, 1);
+    assert.equal(githubReads, 0, 'durable local delivery debt must not depend on a fresh GitHub read');
+    await spec.run.execute(gate.workItems[0].signal, gate.workItems[0].subjectKey, {});
+    assert.deepEqual(recoveries, [task.id]);
   });
 
   test('does not invoke when typed wait remains state-only', async () => {

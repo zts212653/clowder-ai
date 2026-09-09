@@ -194,6 +194,32 @@ describe('F280 PR wait cutover guards', () => {
     assert.match(review, /> ```html\n> {3}<details>\n> \t<summary>label<\/summary>\n> {3}<\/details>\n> ```/);
   });
 
+  it('neutralizes Markdown images in external prose without rewriting code examples', async () => {
+    const { externalResponseSummary } = await import('../dist/domains/github-signals/GitHubTrackingEvent.js');
+    const review = externalResponseSummary({
+      surface: 'issue comment',
+      id: 10,
+      author: 'attacker',
+      body: [
+        '![pixel](https://attacker.example/pixel)',
+        '![reference pixel][tracking-image]',
+        '',
+        '[tracking-image]: https://attacker.example/reference-pixel',
+        '',
+        '`![inline-code](https://example.test/kept)`',
+        '',
+        '```md',
+        '![fenced-code](https://example.test/kept)',
+        '```',
+      ].join('\n'),
+    });
+
+    assert.match(review, /> \\!\[pixel\]\(https:\/\/attacker\.example\/pixel\)/);
+    assert.match(review, /> \\!\[reference pixel\]\[tracking-image\]/);
+    assert.match(review, /`!\[inline-code\]\(https:\/\/example\.test\/kept\)`/);
+    assert.match(review, /> !\[fenced-code\]\(https:\/\/example\.test\/kept\)/);
+  });
+
   it('restores dollar replacement patterns inside inline code byte-for-byte', async () => {
     const { externalResponseSummary } = await import('../dist/domains/github-signals/GitHubTrackingEvent.js');
     const body = "replacement tokens: ``$& $` $' $$``";

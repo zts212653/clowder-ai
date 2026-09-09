@@ -5874,6 +5874,118 @@ describe('Callback Routes', () => {
     assert.equal(lifecycleEvents[0].outcome.reason, 'superseded');
   });
 
+  test('POST register-pr-tracking refuses to overwrite an undelivered outcome', async () => {
+    let baselineCalls = 0;
+    const app = await createApp({
+      fetchPrWaitBaseline: async () => {
+        baselineCalls += 1;
+        return {
+          baseline: { capturedAt: 100, headSha: 'head-before-delivery' },
+          collectorState: { ci: { headSha: 'head-before-delivery' } },
+        };
+      },
+    });
+    const { invocationId, callbackToken } = await registry.create(
+      'user-1',
+      'codex-sol',
+      'thread-pr-pending-reregister',
+    );
+    const headers = { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken };
+
+    const initial = await app.inject({
+      method: 'POST',
+      url: '/api/callbacks/register-pr-tracking',
+      headers,
+      payload: prWaitPayload({ prNumber: 2861 }),
+    });
+    assert.equal(initial.statusCode, 200);
+    const tracked = taskStore.getBySubject('pr:zts212653/cat-cafe#2861');
+    await taskStore.patchAutomationState(tracked.id, {
+      waitOutcome: {
+        v: 1,
+        outcomeId: 'pr-outcome-awaiting-delivery',
+        generation: 1,
+        subjectRef: 'pr:zts212653/cat-cafe#2861',
+        ownerFence: { kind: 'containing_task', generation: 1 },
+        reason: 'matched',
+        at: 200,
+        delivery: 'pending',
+      },
+    });
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/callbacks/register-pr-tracking',
+      headers,
+      payload: prWaitPayload({ prNumber: 2861, include: ['head_changed'] }),
+    });
+
+    assert.equal(response.statusCode, 409);
+    assert.match(JSON.parse(response.body).error, /pending outcome/i);
+    assert.equal(baselineCalls, 1, 'local delivery debt must be checked before another GitHub baseline read');
+    const unchanged = taskStore.getBySubject('pr:zts212653/cat-cafe#2861');
+    assert.equal(unchanged.automationState.await.generation, 1);
+    assert.equal(unchanged.automationState.waitOutcome.outcomeId, 'pr-outcome-awaiting-delivery');
+    assert.equal(unchanged.automationState.waitOutcome.delivery, 'pending');
+  });
+
+  test('POST register-pr-tracking preserves an outcome installed during the baseline read', async () => {
+    let baselineCalls = 0;
+    const subjectKey = 'pr:zts212653/cat-cafe#2862';
+    const app = await createApp({
+      fetchPrWaitBaseline: async () => {
+        baselineCalls += 1;
+        if (baselineCalls === 2) {
+          const tracked = taskStore.getBySubject(subjectKey);
+          await taskStore.patchAutomationState(tracked.id, {
+            waitOutcome: {
+              v: 1,
+              outcomeId: 'pr-outcome-installed-during-fetch',
+              generation: 1,
+              subjectRef: subjectKey,
+              ownerFence: { kind: 'containing_task', generation: 1 },
+              reason: 'matched',
+              at: 300,
+              delivery: 'pending',
+            },
+          });
+        }
+        return {
+          baseline: { capturedAt: 100, headSha: 'head-during-fetch' },
+          collectorState: { ci: { headSha: 'head-during-fetch' } },
+        };
+      },
+    });
+    const { invocationId, callbackToken } = await registry.create(
+      'user-1',
+      'codex-sol',
+      'thread-pr-concurrent-pending-reregister',
+    );
+    const headers = { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken };
+
+    const initial = await app.inject({
+      method: 'POST',
+      url: '/api/callbacks/register-pr-tracking',
+      headers,
+      payload: prWaitPayload({ prNumber: 2862 }),
+    });
+    assert.equal(initial.statusCode, 200);
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/callbacks/register-pr-tracking',
+      headers,
+      payload: prWaitPayload({ prNumber: 2862, include: ['head_changed'] }),
+    });
+
+    assert.equal(response.statusCode, 409);
+    assert.match(JSON.parse(response.body).error, /pending outcome/i);
+    const preserved = taskStore.getBySubject(subjectKey);
+    assert.equal(preserved.automationState.await.generation, 1);
+    assert.equal(preserved.automationState.waitOutcome.outcomeId, 'pr-outcome-installed-during-fetch');
+    assert.equal(preserved.automationState.waitOutcome.delivery, 'pending');
+  });
+
   test('POST register-pr-tracking rejects internal predicates before reading a baseline', async () => {
     let baselineCalled = false;
     const app = await createApp({
@@ -6960,6 +7072,118 @@ describe('Callback Routes', () => {
     assert.equal(updated.automationState.await.baseline.issue.lastCommentCursor, 9999);
     assert.equal(updated.automationState.waitOutcome.generation, 1);
     assert.equal(updated.automationState.waitOutcome.reason, 'superseded');
+  });
+
+  test('POST register-issue-tracking refuses to overwrite an undelivered outcome', async () => {
+    let baselineCalls = 0;
+    const app = await createApp({
+      fetchIssueWaitBaseline: async () => {
+        baselineCalls += 1;
+        return {
+          baseline: { capturedAt: 100, issue: { lastCommentCursor: 40, state: 'open' } },
+          collectorState: { issue: { lastCommentCursor: 40, lastDeliveredCursor: 40, issueState: 'open' } },
+        };
+      },
+    });
+    const { invocationId, callbackToken } = await registry.create(
+      'user-1',
+      'codex-sol',
+      'thread-issue-pending-reregister',
+    );
+    const headers = { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken };
+
+    const initial = await app.inject({
+      method: 'POST',
+      url: '/api/callbacks/register-issue-tracking',
+      headers,
+      payload: issueWaitPayload({ issueNumber: 866 }),
+    });
+    assert.equal(initial.statusCode, 200);
+    const tracked = taskStore.getBySubject('issue:zts212653/cat-cafe#866');
+    await taskStore.patchAutomationState(tracked.id, {
+      waitOutcome: {
+        v: 1,
+        outcomeId: 'issue-outcome-awaiting-delivery',
+        generation: 1,
+        subjectRef: 'issue:zts212653/cat-cafe#866',
+        ownerFence: { kind: 'containing_task', generation: 1 },
+        reason: 'matched',
+        at: 200,
+        delivery: 'pending',
+      },
+    });
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/callbacks/register-issue-tracking',
+      headers,
+      payload: issueWaitPayload({ issueNumber: 866 }),
+    });
+
+    assert.equal(response.statusCode, 409);
+    assert.match(JSON.parse(response.body).error, /pending outcome/i);
+    assert.equal(baselineCalls, 1, 'local delivery debt must be checked before another GitHub cursor read');
+    const unchanged = taskStore.getBySubject('issue:zts212653/cat-cafe#866');
+    assert.equal(unchanged.automationState.await.generation, 1);
+    assert.equal(unchanged.automationState.waitOutcome.outcomeId, 'issue-outcome-awaiting-delivery');
+    assert.equal(unchanged.automationState.waitOutcome.delivery, 'pending');
+  });
+
+  test('POST register-issue-tracking preserves an outcome installed during the baseline read', async () => {
+    let baselineCalls = 0;
+    const subjectKey = 'issue:zts212653/cat-cafe#867';
+    const app = await createApp({
+      fetchIssueWaitBaseline: async () => {
+        baselineCalls += 1;
+        if (baselineCalls === 2) {
+          const tracked = taskStore.getBySubject(subjectKey);
+          await taskStore.patchAutomationState(tracked.id, {
+            waitOutcome: {
+              v: 1,
+              outcomeId: 'issue-outcome-installed-during-fetch',
+              generation: 1,
+              subjectRef: subjectKey,
+              ownerFence: { kind: 'containing_task', generation: 1 },
+              reason: 'matched',
+              at: 300,
+              delivery: 'pending',
+            },
+          });
+        }
+        return {
+          baseline: { capturedAt: 100, issue: { lastCommentCursor: 41, state: 'open' } },
+          collectorState: { issue: { lastCommentCursor: 41, lastDeliveredCursor: 41, issueState: 'open' } },
+        };
+      },
+    });
+    const { invocationId, callbackToken } = await registry.create(
+      'user-1',
+      'codex-sol',
+      'thread-issue-concurrent-pending-reregister',
+    );
+    const headers = { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken };
+
+    const initial = await app.inject({
+      method: 'POST',
+      url: '/api/callbacks/register-issue-tracking',
+      headers,
+      payload: issueWaitPayload({ issueNumber: 867 }),
+    });
+    assert.equal(initial.statusCode, 200);
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/callbacks/register-issue-tracking',
+      headers,
+      payload: issueWaitPayload({ issueNumber: 867 }),
+    });
+
+    assert.equal(response.statusCode, 409);
+    assert.match(JSON.parse(response.body).error, /pending outcome/i);
+    const preserved = taskStore.getBySubject(subjectKey);
+    assert.equal(preserved.automationState.await.generation, 1);
+    assert.equal(preserved.automationState.waitOutcome.outcomeId, 'issue-outcome-installed-during-fetch');
+    assert.equal(preserved.automationState.waitOutcome.delivery, 'pending');
   });
 
   test('POST register-issue-tracking rejects the legacy actor wake policy', async () => {

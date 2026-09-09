@@ -22,6 +22,8 @@ export interface CiCdCheckSignal {
   task: TaskItem;
   repoFullName: string;
   prNumber: number;
+  /** Replay a durable local outbox without requiring another GitHub observation. */
+  recoveryOnly?: true;
   /** Tick-level batch snapshot; production reads it once in admission.gate. */
   pollResult?: CiPollResult | null;
 }
@@ -113,10 +115,10 @@ async function shouldCollectTask(
   prNumber: number,
   subjectKey: string,
 ): Promise<boolean> {
-  // `done` stops new observations; it does not erase a connector delivery debt.
-  // This check must outrank the CI enablement flag because the pending outcome may
-  // have been produced by review feedback rather than by the CI adapter.
-  if (task.status === 'done' && hasPendingGitHubWaitOutcome(task)) return true;
+  // Task completion and a disabled CI subscription stop new observations; neither erases a
+  // connector delivery debt. This check must outrank both because the pending outcome may have
+  // been produced by review feedback rather than by the CI adapter.
+  if (hasPendingGitHubWaitOutcome(task)) return true;
   if (task.automationState?.ci?.enabled === false) return false;
   if (task.status !== 'done' || needsCiLifecycleRecovery(task)) return true;
   if (!opts.continueDoneTracking) return false;
@@ -151,7 +153,12 @@ export function createCiCdCheckTaskSpec(opts: CiCdCheckTaskSpecOptions): TaskSpe
           if (!parsed) continue;
           if (!(await shouldCollectTask(opts, task, parsed.repoFullName, parsed.prNumber, subjectKey))) continue;
           workItems.push({
-            signal: { task, repoFullName: parsed.repoFullName, prNumber: parsed.prNumber },
+            signal: {
+              task,
+              repoFullName: parsed.repoFullName,
+              prNumber: parsed.prNumber,
+              ...(hasPendingGitHubWaitOutcome(task) ? { recoveryOnly: true as const } : {}),
+            },
             subjectKey,
           });
         }
@@ -163,14 +170,17 @@ export function createCiCdCheckTaskSpec(opts: CiCdCheckTaskSpecOptions): TaskSpe
         if (!opts.fetchPrStatus) {
           // This is one tick-level read, not work owned by the first item. Per-item
           // timeout signals must never cancel facts consumed by sibling work items.
-          const targets = workItems.map(({ signal }) => ({
-            repoFullName: signal.repoFullName,
-            prNumber: signal.prNumber,
-          }));
-          const results = await fetchPrStatuses(targets);
-          for (const workItem of workItems) {
-            workItem.signal.pollResult =
-              results.get(ciStatusTargetKey(workItem.signal.repoFullName, workItem.signal.prNumber)) ?? null;
+          const observedWorkItems = workItems.filter(({ signal }) => signal.recoveryOnly !== true);
+          if (observedWorkItems.length > 0) {
+            const targets = observedWorkItems.map(({ signal }) => ({
+              repoFullName: signal.repoFullName,
+              prNumber: signal.prNumber,
+            }));
+            const results = await fetchPrStatuses(targets);
+            for (const workItem of observedWorkItems) {
+              workItem.signal.pollResult =
+                results.get(ciStatusTargetKey(workItem.signal.repoFullName, workItem.signal.prNumber)) ?? null;
+            }
           }
         }
 
@@ -182,13 +192,19 @@ export function createCiCdCheckTaskSpec(opts: CiCdCheckTaskSpecOptions): TaskSpe
       timeoutMs: 30_000,
       async execute(signal: CiCdCheckSignal, _subjectKey: string, ctx: ExecuteContext) {
         ctx.signal?.throwIfAborted();
-        const pollResult = opts.fetchPrStatus
-          ? await opts.fetchPrStatus(signal.repoFullName, signal.prNumber, ctx.signal)
-          : signal.pollResult;
-        ctx.signal?.throwIfAborted();
-        if (!pollResult) return;
+        const pollResult =
+          signal.recoveryOnly === true
+            ? undefined
+            : opts.fetchPrStatus
+              ? await opts.fetchPrStatus(signal.repoFullName, signal.prNumber, ctx.signal)
+              : signal.pollResult;
+        if (signal.recoveryOnly !== true) ctx.signal?.throwIfAborted();
+        if (signal.recoveryOnly !== true && !pollResult) return;
 
-        const routeResult = await opts.cicdRouter.route(pollResult);
+        const routeResult =
+          signal.recoveryOnly === true
+            ? await opts.cicdRouter.recoverPending(signal.task.id)
+            : await opts.cicdRouter.route(pollResult!);
         if (!opts.invokeTrigger) return;
 
         if (routeResult.kind === 'lifecycle') {
@@ -203,7 +219,7 @@ export function createCiCdCheckTaskSpec(opts: CiCdCheckTaskSpecOptions): TaskSpe
           // would mute it. The skip belongs to the state it explains, so it asks the route.
           if (
             routeResult.prState === 'merged' &&
-            pollResult.mergedByLogin &&
+            pollResult?.mergedByLogin &&
             opts.isSelfMerge?.(pollResult.mergedByLogin)
           ) {
             opts.log.info(`[cicd-check] PR ${routeResult.prState} by self (${pollResult.mergedByLogin}) -> skip wake`);

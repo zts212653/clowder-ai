@@ -71,6 +71,17 @@ export interface ReviewFeedbackSignal {
   commitCursor: () => Promise<void>;
 }
 
+interface ReviewFeedbackRecoverySignal {
+  readonly recoveryOnly: true;
+  readonly repairedTask: TaskItem;
+  readonly repoFullName: string;
+  readonly prNumber: number;
+  readonly validateRoutingRepairFresh?: () => Promise<boolean>;
+  readonly commitRoutingRepair?: () => Promise<boolean>;
+}
+
+type ReviewFeedbackWorkItem = ReviewFeedbackSignal | ReviewFeedbackRecoverySignal;
+
 export interface ReviewFeedbackPrMetadata {
   readonly headSha: string;
   readonly prState: 'open' | 'merged' | 'closed';
@@ -226,7 +237,7 @@ function resolveReviewLoopBrake(input: {
   );
 }
 
-export function createReviewFeedbackTaskSpec(opts: ReviewFeedbackTaskSpecOptions): TaskSpec_P1<ReviewFeedbackSignal> {
+export function createReviewFeedbackTaskSpec(opts: ReviewFeedbackTaskSpecOptions): TaskSpec_P1<ReviewFeedbackWorkItem> {
   // GitHub inline review comments and PR conversation comments use independent ID spaces.
   const inlineCommentCursors = new Map<string, number>();
   const conversationCommentCursors = new Map<string, number>();
@@ -444,18 +455,39 @@ export function createReviewFeedbackTaskSpec(opts: ReviewFeedbackTaskSpecOptions
           return { run: false, reason: 'no tracked PRs' };
         }
 
-        const workItems: { signal: ReviewFeedbackSignal; subjectKey: string }[] = [];
+        const workItems: { signal: ReviewFeedbackWorkItem; subjectKey: string }[] = [];
 
         for (const task of tasks) {
           try {
             const parsed = task.subjectKey ? parsePrSubjectKey(task.subjectKey) : null;
             if (!parsed) continue;
             const { repoFullName, prNumber } = parsed;
-            const prKey = `${repoFullName}#${prNumber}`;
+            // Legacy thread repair is local task metadata, not a GitHub observation. Keep it in
+            // front of both collection and outbox recovery so a pending outcome is not replayed
+            // into the stale auto-rotated thread merely because GitHub is unavailable.
             const repairResult = await repairLegacyRotatedTask(task);
             const trackingTask = repairResult.task;
             const trackingSubjectKey = trackingTask.subjectKey ?? task.subjectKey;
             if (!trackingSubjectKey) continue;
+            if (hasPendingGitHubWaitOutcome(task)) {
+              workItems.push({
+                signal: {
+                  recoveryOnly: true,
+                  repairedTask: trackingTask,
+                  repoFullName,
+                  prNumber,
+                  ...(repairResult.validateRoutingRepairFresh
+                    ? { validateRoutingRepairFresh: repairResult.validateRoutingRepairFresh }
+                    : {}),
+                  ...(repairResult.commitRoutingRepair
+                    ? { commitRoutingRepair: repairResult.commitRoutingRepair }
+                    : {}),
+                },
+                subjectKey: trackingSubjectKey,
+              });
+              continue;
+            }
+            const prKey = `${repoFullName}#${prNumber}`;
 
             const prMetadata = opts.fetchPrMetadata ? await opts.fetchPrMetadata(repoFullName, prNumber) : null;
             const terminalState =
@@ -927,9 +959,10 @@ export function createReviewFeedbackTaskSpec(opts: ReviewFeedbackTaskSpecOptions
     run: {
       overlap: 'skip',
       timeoutMs: 30_000,
-      async execute(signal: ReviewFeedbackSignal, subjectKey: string, ctx: ExecuteContext) {
+      async execute(signal: ReviewFeedbackWorkItem, subjectKey: string, ctx: ExecuteContext) {
         ctx.signal?.throwIfAborted();
         const { repairedTask } = signal;
+        const recoveryOnly = 'recoveryOnly' in signal;
 
         if (signal.validateRoutingRepairFresh && !(await signal.validateRoutingRepairFresh())) {
           return;
@@ -939,27 +972,29 @@ export function createReviewFeedbackTaskSpec(opts: ReviewFeedbackTaskSpecOptions
         const repairCommitted = await signal.commitRoutingRepair?.();
         if (repairCommitted === false) return;
         ctx.signal?.throwIfAborted();
-        const routeResult = await opts.reviewFeedbackRouter.route(
-          {
-            repoFullName: signal.repoFullName,
-            prNumber: signal.prNumber,
-            headSha: signal.headSha,
-            routingAudit: signal.routingAudit,
-            newComments: signal.newComments,
-            newDecisions: signal.newDecisions,
-            inlineCommentCursor: signal.inlineCommentCursor,
-            conversationCommentCursor: signal.conversationCommentCursor,
-            decisionCursor: signal.decisionCursor,
-            ...(signal.reviewDecisionStateUpdate
-              ? { reviewDecisionStateUpdate: signal.reviewDecisionStateUpdate }
-              : {}),
-            ...(signal.subjectState ? { subjectState: signal.subjectState } : {}),
-            ...(opts.isEchoComment ? { isSelfComment: opts.isEchoComment } : {}),
-            ...(opts.isEchoReview ? { isSelfReview: opts.isEchoReview } : {}),
-            ...(signal.reviewLoopBrake ? { reviewLoopBrake: signal.reviewLoopBrake } : {}),
-          },
-          { taskId: repairedTask.id },
-        );
+        const routeResult = recoveryOnly
+          ? await opts.reviewFeedbackRouter.recoverPending(repairedTask.id)
+          : await opts.reviewFeedbackRouter.route(
+              {
+                repoFullName: signal.repoFullName,
+                prNumber: signal.prNumber,
+                headSha: signal.headSha,
+                routingAudit: signal.routingAudit,
+                newComments: signal.newComments,
+                newDecisions: signal.newDecisions,
+                inlineCommentCursor: signal.inlineCommentCursor,
+                conversationCommentCursor: signal.conversationCommentCursor,
+                decisionCursor: signal.decisionCursor,
+                ...(signal.reviewDecisionStateUpdate
+                  ? { reviewDecisionStateUpdate: signal.reviewDecisionStateUpdate }
+                  : {}),
+                ...(signal.subjectState ? { subjectState: signal.subjectState } : {}),
+                ...(opts.isEchoComment ? { isSelfComment: opts.isEchoComment } : {}),
+                ...(opts.isEchoReview ? { isSelfReview: opts.isEchoReview } : {}),
+                ...(signal.reviewLoopBrake ? { reviewLoopBrake: signal.reviewLoopBrake } : {}),
+              },
+              { taskId: repairedTask.id },
+            );
         // The source cursor and the lifecycle frontier move only after routing has
         // durably admitted (or deliberately ignored) the observation. A router error
         // therefore retries the same upstream event instead of losing it forever.
@@ -987,7 +1022,7 @@ export function createReviewFeedbackTaskSpec(opts: ReviewFeedbackTaskSpecOptions
         // feedback nothing had ever seen — the same loss, one shape over. Every result now
         // carries its own answer and this reads it uniformly.
         const evaluated = routeResult.observationEvaluated;
-        if (evaluated) await signal.commitCursor();
+        if (!recoveryOnly && evaluated) await signal.commitCursor();
         if (routeResult.kind !== 'notified') return;
 
         // R4 brake (upstream main): after four formal changes-requested reviews, pause the
@@ -1004,8 +1039,10 @@ export function createReviewFeedbackTaskSpec(opts: ReviewFeedbackTaskSpecOptions
           // carries no structured verdict, and reading its prose is what section 2.4 forbids.
           // Under-claiming priority delays a wake; inventing one asserts a verdict we never saw.
           const hasChangesRequested =
-            evaluated && signal.newDecisions.some((d) => d.state === 'CHANGES_REQUESTED' && !opts.isEchoReview?.(d));
-          const terminalState = evaluated ? signal.subjectState : routeResult.terminalSubjectState;
+            !recoveryOnly &&
+            evaluated &&
+            signal.newDecisions.some((d) => d.state === 'CHANGES_REQUESTED' && !opts.isEchoReview?.(d));
+          const terminalState = !recoveryOnly && evaluated ? signal.subjectState : routeResult.terminalSubjectState;
           const policy: ConnectorTriggerPolicy = {
             priority: hasChangesRequested ? 'urgent' : 'normal',
             reason:
@@ -1038,7 +1075,7 @@ export function createReviewFeedbackTaskSpec(opts: ReviewFeedbackTaskSpecOptions
         }
 
         // F208 AC-E2: distillation checkpoint on review-complete (best-effort, all approvals)
-        if (opts.distillationCheckpoint) {
+        if (!('recoveryOnly' in signal) && opts.distillationCheckpoint) {
           const approvals = signal.newDecisions.filter((d) => d.state === 'APPROVED' && !opts.isEchoReview?.(d));
           for (const approver of approvals) {
             ctx.signal?.throwIfAborted();
