@@ -184,6 +184,40 @@ describe('CI scheduler F280 adapter', () => {
     assert.equal((await spec.admission.gate()).run, false);
   });
 
+  test('gate keeps a done terminal task reachable while its durable outcome still awaits delivery', async () => {
+    const taskStore = new TaskStore();
+    const task = await trackedTask(taskStore);
+    await taskStore.update(task.id, { status: 'done' });
+    await taskStore.patchAutomationState(task.id, {
+      ci: {
+        enabled: false,
+        prState: 'merged',
+        terminalEffects: { prState: 'merged', completedAt: 500 },
+      },
+      waitOutcome: {
+        v: 1,
+        outcomeId: 'outcome-terminal-pending',
+        generation: 1,
+        subjectRef: 'pr:owner/repo#7',
+        ownerFence: { kind: 'containing_task', generation: 1 },
+        reason: 'subject_terminal',
+        at: 500,
+        delivery: 'pending',
+        terminalSubjectState: 'merged',
+      },
+    });
+    const spec = createCiCdCheckTaskSpec({
+      taskStore,
+      cicdRouter: { route: async () => ({ kind: 'skipped', reason: 'state-only' }) },
+      fetchPrStatus: async () => null,
+      log: { info() {}, warn() {}, error() {} },
+    });
+
+    const gate = await spec.admission.gate();
+    assert.equal(gate.run, true);
+    assert.equal(gate.workItems.length, 1);
+  });
+
   test('gate keeps a completed wait collectable while a configured external case is still open', async () => {
     const taskStore = new TaskStore();
     const task = await trackedTask(taskStore);

@@ -23,7 +23,10 @@ import {
   type IssueCommentClassification,
 } from '../../domains/community/issue-analysis/issue-comment-classifier.js';
 import { externalResponseSummary } from '../../domains/github-signals/GitHubTrackingEvent.js';
-import type { GitHubWaitLifecycleService } from '../../domains/github-signals/GitHubWaitLifecycleService.js';
+import {
+  type GitHubWaitLifecycleService,
+  hasPendingGitHubWaitOutcome,
+} from '../../domains/github-signals/GitHubWaitLifecycleService.js';
 import type { ExecuteContext, TaskSpec_P1 } from '../../infrastructure/scheduler/types.js';
 import type { ConnectorInvokeTrigger, ConnectorTriggerPolicy } from './ConnectorInvokeTrigger.js';
 import type { IssueComment, IssueCommentRouter } from './IssueCommentRouter.js';
@@ -207,7 +210,9 @@ export function createIssueCommentTaskSpec(opts: IssueCommentTaskSpecOptions): T
     trigger: { type: 'interval', ms: opts.pollIntervalMs ?? 60_000 },
     admission: {
       async gate() {
-        const tasks = (await opts.taskStore.listByKind('issue_tracking')).filter((t) => t.status !== 'done');
+        const tasks = (await opts.taskStore.listByKind('issue_tracking')).filter(
+          (task) => task.status !== 'done' || hasPendingGitHubWaitOutcome(task),
+        );
         if (tasks.length === 0) {
           return { run: false, reason: 'no tracked issues' };
         }

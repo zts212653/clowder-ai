@@ -153,9 +153,13 @@ function lifecycleEvent(task: TaskItem, outcome: WaitOutcomeV1): WaitTermination
   };
 }
 
+export function hasPendingGitHubWaitOutcome(task: Pick<TaskItem, 'automationState'>): boolean {
+  return task.automationState?.waitOutcome?.delivery === 'pending';
+}
+
 function pendingOutcome(task: TaskItem): WaitOutcomeV1 | null {
   const outcome = task.automationState?.waitOutcome;
-  return outcome?.delivery === 'pending' ? outcome : null;
+  return hasPendingGitHubWaitOutcome(task) && outcome ? outcome : null;
 }
 
 /** #1392: conversation-comment frontier used when building a renewal baseline. */

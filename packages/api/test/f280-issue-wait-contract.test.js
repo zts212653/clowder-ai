@@ -217,6 +217,79 @@ describe('F280 Phase C issue wait lifecycle', () => {
     assert.equal((await taskStore.get(task.id)).automationState.issue.lastDeliveredCursor, 42);
   });
 
+  it('retries a durable terminal issue outcome after its first connector delivery fails', async () => {
+    const taskStore = new TaskStore();
+    const storedMessages = new MessageStore();
+    let failDelivery = true;
+    const messageStore = {
+      append: async (input) => {
+        if (failDelivery) {
+          failDelivery = false;
+          throw new Error('connector unavailable');
+        }
+        return storedMessages.append(input);
+      },
+    };
+    const task = await taskStore.create({
+      kind: 'issue_tracking',
+      subjectKey: 'issue:owner/repo#17',
+      threadId: 'thread_issue_terminal_retry',
+      title: 'Issue tracking: owner/repo#17',
+      ownerCatId: 'codex-sol',
+      why: 'retry a durable terminal issue outcome',
+      createdBy: 'codex-sol',
+      userId: 'user_1',
+      automationState: issueAwaitState(),
+    });
+    const lifecycle = new GitHubWaitLifecycleService({
+      taskStore,
+      deliveryDeps: { messageStore },
+      eventLog: new MemoryWaitLifecycleEventLog(),
+      now: () => 500,
+      log: { info() {}, warn() {}, error() {} },
+    });
+    const triggered = [];
+    const spec = createIssueCommentTaskSpec({
+      taskStore,
+      issueCommentRouter: { route: async () => ({ kind: 'skipped', reason: 'legacy path unused' }) },
+      waitLifecycle: lifecycle,
+      fetchComments: async () => [
+        {
+          id: 42,
+          author: 'issue-author',
+          body: 'The final comment must survive a connector outage.',
+          createdAt: '2026-09-08T00:00:00Z',
+        },
+      ],
+      fetchIssueState: async () => 'closed',
+      invokeTrigger: {
+        trigger: async (_threadId, _catId, _userId, content) => {
+          triggered.push(content);
+          return 'dispatched';
+        },
+      },
+      log: { info() {}, warn() {}, error() {} },
+    });
+
+    const firstGate = await spec.admission.gate();
+    await assert.rejects(
+      spec.run.execute(firstGate.workItems[0].signal, firstGate.workItems[0].subjectKey, {}),
+      /connector unavailable/,
+    );
+    const failed = await taskStore.get(task.id);
+    assert.equal(failed.status, 'done');
+    assert.equal(failed.automationState.waitOutcome.delivery, 'pending');
+
+    const retryGate = await spec.admission.gate();
+    assert.equal(retryGate.run, true);
+    assert.equal(retryGate.workItems.length, 1);
+    await spec.run.execute(retryGate.workItems[0].signal, retryGate.workItems[0].subjectKey, {});
+
+    assert.equal(triggered.length, 1);
+    assert.match(triggered[0], /Issue state: closed/);
+    assert.equal((await taskStore.get(task.id)).automationState.waitOutcome.delivery, 'delivered');
+  });
+
   it('keeps a closed issue active when its final comment was not persisted', async () => {
     const taskStore = new TaskStore();
     const messageStore = new MessageStore();

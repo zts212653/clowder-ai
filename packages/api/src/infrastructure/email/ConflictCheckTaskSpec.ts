@@ -49,7 +49,12 @@ async function tryAutoResolveBeforeWake(
 ): Promise<AutoResolveResult | null> {
   if (!opts.autoExecutor || workItem.signal.mergeState !== 'CONFLICTING' || signal?.aborted) return null;
   try {
-    return await opts.autoExecutor.resolve(workItem.signal.repoFullName, workItem.signal.prNumber, signal);
+    return await opts.autoExecutor.resolve(
+      workItem.signal.repoFullName,
+      workItem.signal.prNumber,
+      workItem.signal.headSha,
+      signal,
+    );
   } catch (error) {
     if (!signal?.aborted) throw error;
     opts.log.warn({ error }, '[conflict-check] cancellation interrupted optional auto-resolution; waking owner');

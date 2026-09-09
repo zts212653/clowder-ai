@@ -9,6 +9,7 @@ const { DistillationCheckpoint, InMemoryOpportunityStore } = await import(
   '../dist/infrastructure/distillation/DistillationCheckpoint.js'
 );
 const { CiCdRouter } = await import('../dist/infrastructure/email/CiCdRouter.js');
+const { createCiCdCheckTaskSpec } = await import('../dist/infrastructure/email/CiCdCheckTaskSpec.js');
 
 function awaitState(when) {
   return {
@@ -243,7 +244,7 @@ describe('CiCdRouter F280 typed waits', () => {
     });
   });
 
-  test('terminal delivery failure recovers every merge world-truth effect exactly once after restart', async () => {
+  test('the scheduler retries a failed terminal delivery without a process restart', async () => {
     const taskStore = new TaskStore();
     const storedMessages = new MessageStore();
     let failDelivery = true;
@@ -282,13 +283,14 @@ describe('CiCdRouter F280 typed waits', () => {
       read: async (subjectKey) => communityEvents.filter((event) => event.subjectKey === subjectKey),
       listSubjects: async () => [...new Set(communityEvents.map((event) => event.subjectKey))],
     };
-    const options = () => ({
+    const waitEventLog = new MemoryWaitLifecycleEventLog();
+    const options = {
       taskStore,
       deliveryDeps: { messageStore },
       waitLifecycle: new GitHubWaitLifecycleService({
         taskStore,
         deliveryDeps: { messageStore },
-        eventLog: new MemoryWaitLifecycleEventLog(),
+        eventLog: waitEventLog,
         now: () => 500,
         log: { info() {}, warn() {}, error() {} },
       }),
@@ -309,19 +311,30 @@ describe('CiCdRouter F280 typed waits', () => {
           projectedEvents.splice(0, projectedEvents.length, ...(await eventLog.read(subjectKey)));
         },
       },
-    });
+    };
     const terminalPoll = poll({ prState: 'merged', aggregateBucket: 'pending' });
+    const router = new CiCdRouter(options);
 
-    await assert.rejects(() => new CiCdRouter(options()).route(terminalPoll), /connector unavailable/);
+    await assert.rejects(() => router.route(terminalPoll), /connector unavailable/);
     assert.equal((await taskStore.get(task.id)).automationState.waitOutcome.delivery, 'pending');
+    await taskStore.patchAutomationState(task.id, { ci: { enabled: false } });
 
-    await new CiCdRouter(options()).route(terminalPoll);
-    await new CiCdRouter(options()).route(terminalPoll);
+    const spec = createCiCdCheckTaskSpec({
+      taskStore,
+      cicdRouter: router,
+      fetchPrStatus: async () => terminalPoll,
+      log: { info() {}, warn() {}, error() {} },
+    });
+    const retryGate = await spec.admission.gate();
+    assert.equal(retryGate.run, true);
+    await spec.run.execute(retryGate.workItems[0].signal, retryGate.workItems[0].subjectKey, {});
+    await router.route(terminalPoll);
 
     assert.equal(lifecycleEvents.length, 1);
     assert.equal(distillationEvents.length, 1);
     assert.equal(communityEvents.length, 1);
     assert.equal(projectedEvents.length, 1);
+    assert.equal((await taskStore.get(task.id)).automationState.waitOutcome.delivery, 'delivered');
   });
 
   test('concurrent recovery and a lost receipt still commit each terminal effect exactly once', async () => {

@@ -10,6 +10,7 @@
 import type { CatId, TaskItem } from '@cat-cafe/shared';
 import { parsePrSubjectKey } from '@cat-cafe/shared';
 import type { ITaskStore } from '../../domains/cats/services/stores/ports/TaskStore.js';
+import { hasPendingGitHubWaitOutcome } from '../../domains/github-signals/GitHubWaitLifecycleService.js';
 import { claimableSourceCategory, mayAutoWakeOwner } from '../../domains/github-signals/WaitWakeDisposition.js';
 import type { ExecuteContext, TaskSpec_P1 } from '../scheduler/types.js';
 import type { CiCdRouter, CiPollResult, CiRouteResult } from './CiCdRouter.js';
@@ -112,6 +113,10 @@ async function shouldCollectTask(
   prNumber: number,
   subjectKey: string,
 ): Promise<boolean> {
+  // `done` stops new observations; it does not erase a connector delivery debt.
+  // This check must outrank the CI enablement flag because the pending outcome may
+  // have been produced by review feedback rather than by the CI adapter.
+  if (task.status === 'done' && hasPendingGitHubWaitOutcome(task)) return true;
   if (task.automationState?.ci?.enabled === false) return false;
   if (task.status !== 'done' || needsCiLifecycleRecovery(task)) return true;
   if (!opts.continueDoneTracking) return false;

@@ -10,9 +10,10 @@ import type { FastifyBaseLogger } from 'fastify';
 import type { ITaskStore } from '../../domains/cats/services/stores/ports/TaskStore.js';
 import type { ICommunityEventLog } from '../../domains/community/CommunityEventLog.js';
 import type { ExternalReviewCoordinator } from '../../domains/community/external-review/ExternalReviewCoordinator.js';
-import type {
-  GitHubWaitLifecycleResult,
-  GitHubWaitLifecycleService,
+import {
+  type GitHubWaitLifecycleResult,
+  type GitHubWaitLifecycleService,
+  hasPendingGitHubWaitOutcome,
 } from '../../domains/github-signals/GitHubWaitLifecycleService.js';
 import { projectWaitWakeDisposition } from '../../domains/github-signals/WaitWakeDisposition.js';
 import type { CiBucket, CiPollResult, CiRouteResult } from './ci-cd-contract.js';
@@ -203,6 +204,13 @@ export class CiCdRouter {
     const sk = prSubjectKey(poll.repoFullName, poll.prNumber);
     const task = await this.opts.taskStore.getBySubject(sk);
     if (!task) return { kind: 'skipped', reason: `No tracking task for ${poll.repoFullName}#${poll.prNumber}` };
+
+    // A terminal transition marks the task done before connector delivery. If that delivery
+    // fails, the durable outcome remains the recovery outbox and must be replayed before this
+    // adapter applies current-poll policy (including CI disabled) to an unrelated observation.
+    if (task.status === 'done' && hasPendingGitHubWaitOutcome(task)) {
+      return routeFromLifecycle(await this.opts.waitLifecycle.recoverOutcome(task.id), 'pending');
+    }
 
     const settled = settleEmptyCheckRollup(poll, task.automationState?.ci?.rollupObservation, this.now());
     const observedPoll = settled.poll;
