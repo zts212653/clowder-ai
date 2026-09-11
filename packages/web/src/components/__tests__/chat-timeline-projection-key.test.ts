@@ -28,23 +28,27 @@ describe('buildChatTimelineProjectionKey', () => {
     expect(buildChatTimelineProjectionKey([after])).toBe(buildChatTimelineProjectionKey([before]));
   });
 
-  it('changes when terminal or receipt topology changes', () => {
+  it('changes when terminal or delivery topology changes', () => {
     const streaming = message();
     const terminal = message({ isStreaming: false });
-    const receipt = message({
+    const delivered = message({
       type: 'user',
       catId: undefined,
-      extra: {
-        queueReceipt: {
-          version: 1,
-          entryId: 'entry-1',
-          targets: [],
-          reminderAttempts: [],
-        },
+      lifecycle: {
+        version: 1,
+        dispatchRefs: [
+          {
+            targetId: 'codex-sol',
+            invocationId: 'inv-delivered',
+            statusMessageId: 'response-1',
+            dispatchedAt: 2,
+            phase: 'dispatched',
+          },
+        ],
       },
     });
 
     expect(buildChatTimelineProjectionKey([terminal])).not.toBe(buildChatTimelineProjectionKey([streaming]));
-    expect(buildChatTimelineProjectionKey([receipt])).not.toBe(buildChatTimelineProjectionKey([streaming]));
+    expect(buildChatTimelineProjectionKey([delivered])).not.toBe(buildChatTimelineProjectionKey([streaming]));
   });
 });

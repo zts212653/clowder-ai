@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
+import { canonicalTestMessageInput } from './helpers/message-from-fixtures.js';
 
 const { digestMessageBundleQuoteProjection } = await import(
   '../dist/domains/cats/services/context/MessageSelectionResolver.js'
@@ -23,7 +24,7 @@ function buildDeps(messages, sourceThread = { id: 'source-thread', title: 'Sourc
 }
 
 function sourceMessage(overrides = {}) {
-  return {
+  return canonicalTestMessageInput({
     id: 'source-1',
     threadId: 'source-thread',
     userId: 'user-1',
@@ -32,7 +33,7 @@ function sourceMessage(overrides = {}) {
     mentions: [],
     timestamp: Date.parse('2026-08-12T10:00:00.000Z'),
     ...overrides,
-  };
+  });
 }
 
 describe('Message Bundle prompt projection', () => {

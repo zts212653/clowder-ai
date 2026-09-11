@@ -932,6 +932,47 @@ test('#1272: one already-canonical Codex turn is byte-stable after finalization'
   assert.equal(`${body?.content}${done?.content}`, original);
 });
 
+test('#1398: an identity-annotated own signature is normalized instead of duplicated', () => {
+  const state = {
+    hadPriorTextTurn: false,
+    signatureIdentity: '砚砚',
+    canonicalSignature: '[砚砚/gpt-5.3-codex-spark🐾]',
+  };
+  const original = ['收到，明白。已直接 @小狸花 打招呼。', '', '[砚砚/缅因猫 gpt-5.3-codex-spark🐾@cat-gmwmct57]'].join(
+    '\n',
+  );
+  const body = transformCodexEvent(
+    { type: 'item.completed', item: { type: 'agent_message', text: original } },
+    'cat-gmwmct57',
+    state,
+  );
+  transformCodexEvent({ type: 'turn.completed', usage: {} }, 'cat-gmwmct57', state);
+  const done = finalizeCodexStream(state, 'cat-gmwmct57');
+
+  assert.equal(
+    `${body?.content}${done?.content}`,
+    '收到，明白。已直接 @小狸花 打招呼。\n\n[砚砚/gpt-5.3-codex-spark🐾]',
+  );
+});
+
+test('#1398 negative control: a mismatched identity annotation remains user content', () => {
+  const state = {
+    hadPriorTextTurn: false,
+    signatureIdentity: '砚砚',
+    canonicalSignature: '[砚砚/gpt-5.3-codex-spark🐾]',
+  };
+  const sample = '引用：[砚砚/缅因猫 gpt-5.3-codex-spark🐾@cat-someone-else]';
+  const body = transformCodexEvent(
+    { type: 'item.completed', item: { type: 'agent_message', text: sample } },
+    'cat-gmwmct57',
+    state,
+  );
+  transformCodexEvent({ type: 'turn.completed', usage: {} }, 'cat-gmwmct57', state);
+  const done = finalizeCodexStream(state, 'cat-gmwmct57');
+
+  assert.equal(`${body?.content}${done?.content}`, `${sample}\n\n[砚砚/gpt-5.3-codex-spark🐾]`);
+});
+
 test('#1272: terminal teammate and legacy signatures remain content beside one canonical signature', () => {
   const state = {
     hadPriorTextTurn: false,

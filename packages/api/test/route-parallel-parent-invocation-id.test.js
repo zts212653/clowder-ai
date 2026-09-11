@@ -201,7 +201,9 @@ describe('F194 Phase Z2: route-parallel must propagate parentInvocationId to inv
       yielded.push(message);
     }
 
-    const agentAppends = appendCalls.filter((call) => call.catId && call.origin === 'stream');
+    // F117: agent sender identity is persisted as `from: { kind: 'agent', catId }`
+    // (MessageFrom contract), not a top-level catId field.
+    const agentAppends = appendCalls.filter((call) => call.from?.kind === 'agent' && call.origin === 'stream');
     assert.equal(agentAppends.length, 2, 'one persisted message per cat');
     for (const call of agentAppends) {
       assert.equal(

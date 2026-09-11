@@ -214,11 +214,7 @@ function createMockDeps(services, appendCalls, feedbackWrites, broadcasts) {
 }
 
 describe('route-serial notice contract', () => {
-  it('emits routing-syntax-hint with explicit system_notice presentation metadata', async () => {
-    // F167 Phase H AC-H5 (2026-04-24): Phase H `routing-syntax-hint` is now the
-    // primary emission for slot-internal inline @handles. It suppresses the
-    // legacy `inline-mention-hint` (#417) on the same turn. The legacy
-    // setMentionRoutingFeedback path remains — cats get next-turn correction.
+  it('keeps an inline action @handle as text while persisting routing feedback', async () => {
     const { routeSerial } = await import('../dist/domains/cats/services/agents/routing/route-serial.js');
     const appendCalls = [];
     const feedbackWrites = [];
@@ -228,26 +224,20 @@ describe('route-serial notice contract', () => {
     for await (const _msg of routeSerial(deps, ['opus'], 'review this', 'user1', 'thread-1')) {
     }
 
-    assert.equal(feedbackWrites.length, 1, 'should still write routing feedback (next-turn correction preserved)');
-
-    const hintAppend = appendCalls.find((msg) => msg.source?.connector === 'routing-syntax-hint');
-    assert.ok(hintAppend, 'should append a routing-syntax-hint (Phase H primary)');
-    assert.equal(hintAppend.userId, 'system');
-    assert.equal(hintAppend.catId, null);
-    assert.equal(hintAppend.source.meta.presentation, 'system_notice');
-    assert.equal(hintAppend.source.meta.noticeTone, 'warning');
-
-    // AC-H5: legacy inline-mention-hint is suppressed when Phase H hits
-    const legacyHint = appendCalls.find((msg) => msg.source?.connector === 'inline-mention-hint');
-    assert.equal(legacyHint, undefined, 'AC-H5: legacy inline-mention-hint must be suppressed when Phase H hits');
-
-    const hintBroadcast = broadcasts.find(
-      (entry) =>
-        entry.event === 'connector_message' && entry.payload.message.source?.connector === 'routing-syntax-hint',
+    assert.equal(feedbackWrites.length, 1);
+    assert.deepEqual(feedbackWrites[0].payload.items, [{ targetCatId: 'codex', reason: 'inline_action' }]);
+    assert.equal(
+      appendCalls.some((msg) => ['routing-syntax-hint', 'inline-mention-hint'].includes(msg.source?.connector)),
+      true,
     );
-    assert.ok(hintBroadcast, 'should broadcast the routing-syntax-hint in real-time');
-    assert.equal(hintBroadcast.payload.message.source.meta.presentation, 'system_notice');
-    assert.equal(hintBroadcast.payload.message.source.meta.noticeTone, 'warning');
+    assert.equal(
+      broadcasts.some(
+        (entry) =>
+          entry.event === 'connector_message' &&
+          ['routing-syntax-hint', 'inline-mention-hint'].includes(entry.payload.message.source?.connector),
+      ),
+      true,
+    );
   });
 
   it('issue #1208 P2: persists user-facing warning system_info to messageStore', async () => {
@@ -274,7 +264,7 @@ describe('route-serial notice contract', () => {
     const warningAppend = appendCalls.find((msg) => msg.source?.connector === 'system-warning');
     assert.ok(warningAppend, 'warning system_info must be persisted to messageStore');
     assert.equal(warningAppend.userId, 'system');
-    assert.equal(warningAppend.catId, null);
+    assert.deepEqual(warningAppend.from, { kind: 'system', service: 'system-info-warning' });
     assert.ok(
       warningAppend.content.includes('未返回 token 用量'),
       'persisted warning content should include the original warning message',
@@ -306,7 +296,11 @@ describe('route-serial notice contract', () => {
       // consume
     }
 
-    assert.ok(appendCalls.some((msg) => msg.catId === 'opus' && msg.content === 'Here is the result.'));
+    assert.ok(
+      appendCalls.some(
+        (msg) => msg.from?.kind === 'agent' && msg.from.catId === 'opus' && msg.content === 'Here is the result.',
+      ),
+    );
     assert.ok(
       appendCalls.some((msg) => msg.source?.connector === 'system-warning'),
       'warning must survive refresh when the same turn also produced text',

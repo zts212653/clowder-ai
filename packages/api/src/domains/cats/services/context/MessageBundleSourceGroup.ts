@@ -1,5 +1,5 @@
+import { messageFrom } from '../stores/message-from.js';
 import type { IMessageStore, StoredMessage } from '../stores/ports/MessageStore.js';
-import { isSystemUserMessage } from '../stores/visibility.js';
 import { isAccessibleSourceRecord, isSourceGroupTerminal, sortSourceRecords } from './MessageBundleSourceProjection.js';
 import type { MessageSelectionAuth } from './message-selection-types.js';
 
@@ -29,7 +29,7 @@ function compareRecords(left: StoredMessage, right: StoredMessage): number {
 }
 
 function isBrowserUserRecord(message: StoredMessage): boolean {
-  return message.catId === null && message.source === undefined && !isSystemUserMessage(message);
+  return messageFrom(message).kind === 'user';
 }
 
 function bubbleInvocationId(message: StoredMessage): string | null {
@@ -38,9 +38,10 @@ function bubbleInvocationId(message: StoredMessage): string | null {
 }
 
 function assistantBaseKey(message: StoredMessage): string | null {
-  if (message.catId === null || isSystemUserMessage(message)) return null;
+  const from = messageFrom(message);
+  if (from.kind !== 'agent') return null;
   const invocationId = bubbleInvocationId(message);
-  return invocationId ? `${message.catId}::${invocationId}` : null;
+  return invocationId ? `${from.catId}::${invocationId}` : null;
 }
 
 function buildTurnSegments(records: readonly StoredMessage[]): Map<StoredMessage, number> {

@@ -7,7 +7,6 @@ import { catColorVar } from '@/lib/cat-slug';
 import { CAT_COLORS } from '@/lib/color-defaults';
 import type { ChatMessage as ChatMessageData } from '@/stores/chatStore';
 import { scrollToMessage } from '@/utils/scrollToMessage';
-import { foldedSourceInvocationIdInTimeline } from './turn-absorption-summary';
 
 /** Maximum dots rendered on the track — prevents clutter in long conversations */
 const MAX_DOTS = 18;
@@ -78,7 +77,8 @@ export function messageNavigatorPreviewText(
   message: ChatMessageData,
   messages: readonly ChatMessageData[],
 ): string | null {
-  return foldedSourceInvocationIdInTimeline(message, messages) ? null : truncateContent(message.content, 40);
+  void messages;
+  return truncateContent(message.content, 40);
 }
 
 interface MessageNavigatorProps {

@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
+import { canonicalTestMessageInput } from './helpers/message-from-fixtures.js';
 
 const { routeSerial } = await import('../dist/domains/cats/services/agents/routing/route-serial.js');
 const { MessageStore } = await import('../dist/domains/cats/services/stores/ports/MessageStore.js');
@@ -141,23 +142,27 @@ describe('F254 ADR-042 — route-serial publish then supplement', () => {
 
   it('publishes a stale serial answer and enqueues a distinct read-only supplement carrier', async () => {
     const messageStore = new MessageStore();
-    const seen = await messageStore.append({
-      userId: 'user1',
-      catId: null,
-      content: 'question',
-      mentions: ['opus'],
-      timestamp: 100,
-      threadId: 'thread-1',
-    });
-    const unseen = await messageStore.append({
-      userId: 'user1',
-      catId: 'codex-sol',
-      content: 'late visible cat analysis',
-      mentions: [],
-      origin: 'stream',
-      timestamp: 150,
-      threadId: 'thread-1',
-    });
+    const seen = await messageStore.append(
+      canonicalTestMessageInput({
+        userId: 'user1',
+        catId: null,
+        content: 'question',
+        mentions: ['opus'],
+        timestamp: 100,
+        threadId: 'thread-1',
+      }),
+    );
+    const unseen = await messageStore.append(
+      canonicalTestMessageInput({
+        userId: 'user1',
+        catId: 'codex-sol',
+        content: 'late visible cat analysis',
+        mentions: [],
+        origin: 'stream',
+        timestamp: 150,
+        threadId: 'thread-1',
+      }),
+    );
     const harness = createDeps({ opus: textService('opus', 'completed answer') }, messageStore);
     enableFreshness(harness, seen.id);
     const enqueued = [];
@@ -185,22 +190,26 @@ describe('F254 ADR-042 — route-serial publish then supplement', () => {
 
   it('keeps the original and persists queue_full when the supplement carrier cannot enqueue', async () => {
     const messageStore = new MessageStore();
-    const seen = await messageStore.append({
-      userId: 'user1',
-      catId: null,
-      content: 'question',
-      mentions: ['opus'],
-      timestamp: 100,
-      threadId: 'thread-1',
-    });
-    await messageStore.append({
-      userId: 'user1',
-      catId: null,
-      content: 'late correction',
-      mentions: ['opus'],
-      timestamp: 150,
-      threadId: 'thread-1',
-    });
+    const seen = await messageStore.append(
+      canonicalTestMessageInput({
+        userId: 'user1',
+        catId: null,
+        content: 'question',
+        mentions: ['opus'],
+        timestamp: 100,
+        threadId: 'thread-1',
+      }),
+    );
+    await messageStore.append(
+      canonicalTestMessageInput({
+        userId: 'user1',
+        catId: null,
+        content: 'late correction',
+        mentions: ['opus'],
+        timestamp: 150,
+        threadId: 'thread-1',
+      }),
+    );
     const harness = createDeps({ opus: textService('opus', 'completed answer') }, messageStore);
     enableFreshness(harness, seen.id);
 
@@ -220,22 +229,26 @@ describe('F254 ADR-042 — route-serial publish then supplement', () => {
 
   it('keeps the original and persists scheduler_unavailable when no supplement scheduler is wired', async () => {
     const messageStore = new MessageStore();
-    const seen = await messageStore.append({
-      userId: 'user1',
-      catId: null,
-      content: 'question',
-      mentions: ['opus'],
-      timestamp: 100,
-      threadId: 'thread-1',
-    });
-    await messageStore.append({
-      userId: 'user1',
-      catId: null,
-      content: 'late correction',
-      mentions: ['opus'],
-      timestamp: 150,
-      threadId: 'thread-1',
-    });
+    const seen = await messageStore.append(
+      canonicalTestMessageInput({
+        userId: 'user1',
+        catId: null,
+        content: 'question',
+        mentions: ['opus'],
+        timestamp: 100,
+        threadId: 'thread-1',
+      }),
+    );
+    await messageStore.append(
+      canonicalTestMessageInput({
+        userId: 'user1',
+        catId: null,
+        content: 'late correction',
+        mentions: ['opus'],
+        timestamp: 150,
+        threadId: 'thread-1',
+      }),
+    );
     const harness = createDeps({ opus: textService('opus', 'completed answer') }, messageStore);
     enableFreshness(harness, seen.id);
 
@@ -254,22 +267,26 @@ describe('F254 ADR-042 — route-serial publish then supplement', () => {
 
   it('publishes an answer-bearing thinking-only completion instead of replacing it with a placeholder', async () => {
     const messageStore = new MessageStore();
-    const seen = await messageStore.append({
-      userId: 'user1',
-      catId: null,
-      content: 'question',
-      mentions: ['opus'],
-      timestamp: 100,
-      threadId: 'thread-1',
-    });
-    await messageStore.append({
-      userId: 'user1',
-      catId: null,
-      content: 'late correction',
-      mentions: ['opus'],
-      timestamp: 150,
-      threadId: 'thread-1',
-    });
+    const seen = await messageStore.append(
+      canonicalTestMessageInput({
+        userId: 'user1',
+        catId: null,
+        content: 'question',
+        mentions: ['opus'],
+        timestamp: 100,
+        threadId: 'thread-1',
+      }),
+    );
+    await messageStore.append(
+      canonicalTestMessageInput({
+        userId: 'user1',
+        catId: null,
+        content: 'late correction',
+        mentions: ['opus'],
+        timestamp: 150,
+        threadId: 'thread-1',
+      }),
+    );
     const harness = createDeps({ opus: thinkingService('opus', 'visible reasoning result') }, messageStore);
     enableFreshness(harness, seen.id);
     const enqueued = [];
@@ -290,22 +307,26 @@ describe('F254 ADR-042 — route-serial publish then supplement', () => {
 
   it('publishes a side-effecting answer and carries replay-unsafe names into the hard supplement policy', async () => {
     const messageStore = new MessageStore();
-    const seen = await messageStore.append({
-      userId: 'user1',
-      catId: null,
-      content: 'question',
-      mentions: ['opus'],
-      timestamp: 100,
-      threadId: 'thread-1',
-    });
-    await messageStore.append({
-      userId: 'user1',
-      catId: null,
-      content: 'late correction',
-      mentions: ['opus'],
-      timestamp: 150,
-      threadId: 'thread-1',
-    });
+    const seen = await messageStore.append(
+      canonicalTestMessageInput({
+        userId: 'user1',
+        catId: null,
+        content: 'question',
+        mentions: ['opus'],
+        timestamp: 100,
+        threadId: 'thread-1',
+      }),
+    );
+    await messageStore.append(
+      canonicalTestMessageInput({
+        userId: 'user1',
+        catId: null,
+        content: 'late correction',
+        mentions: ['opus'],
+        timestamp: 150,
+        threadId: 'thread-1',
+      }),
+    );
     const toolName = 'mcp__cat-cafe-collab__cat_cafe_hold_ball';
     const harness = createDeps({ opus: textService('opus', 'action completed', { toolName }) }, messageStore);
     enableFreshness(harness, seen.id);
@@ -325,23 +346,27 @@ describe('F254 ADR-042 — route-serial publish then supplement', () => {
 
   it('persists a supplement decline without creating an empty or marker bubble', async () => {
     const messageStore = new MessageStore();
-    const original = await messageStore.append({
-      userId: 'user1',
-      catId: 'opus',
-      content: 'published original',
-      mentions: [],
-      timestamp: 100,
-      threadId: 'thread-1',
-      extra: { freshness: { kind: 'fresh', priorFrontierMessageId: null } },
-    });
-    const update = await messageStore.append({
-      userId: 'user1',
-      catId: null,
-      content: 'thanks',
-      mentions: [],
-      timestamp: 150,
-      threadId: 'thread-1',
-    });
+    const original = await messageStore.append(
+      canonicalTestMessageInput({
+        userId: 'user1',
+        catId: 'opus',
+        content: 'published original',
+        mentions: [],
+        timestamp: 100,
+        threadId: 'thread-1',
+        extra: { freshness: { kind: 'fresh', priorFrontierMessageId: null } },
+      }),
+    );
+    const update = await messageStore.append(
+      canonicalTestMessageInput({
+        userId: 'user1',
+        catId: null,
+        content: 'thanks',
+        mentions: [],
+        timestamp: 150,
+        threadId: 'thread-1',
+      }),
+    );
     const harness = createDeps({ opus: textService('opus', SUPPLEMENT_DECLINE_MARKER) }, messageStore);
     const offered = await harness.closureStore.offerSupplement({
       lineageId: original.id,
@@ -378,23 +403,27 @@ describe('F254 ADR-042 — route-serial publish then supplement', () => {
 
   it('stores supplement text as a reply but never dispatches route-like output', async () => {
     const messageStore = new MessageStore();
-    const original = await messageStore.append({
-      userId: 'user1',
-      catId: 'opus',
-      content: 'published original',
-      mentions: [],
-      timestamp: 100,
-      threadId: 'thread-1',
-      extra: { freshness: { kind: 'fresh', priorFrontierMessageId: null } },
-    });
-    const update = await messageStore.append({
-      userId: 'user1',
-      catId: null,
-      content: 'late correction',
-      mentions: [],
-      timestamp: 150,
-      threadId: 'thread-1',
-    });
+    const original = await messageStore.append(
+      canonicalTestMessageInput({
+        userId: 'user1',
+        catId: 'opus',
+        content: 'published original',
+        mentions: [],
+        timestamp: 100,
+        threadId: 'thread-1',
+        extra: { freshness: { kind: 'fresh', priorFrontierMessageId: null } },
+      }),
+    );
+    const update = await messageStore.append(
+      canonicalTestMessageInput({
+        userId: 'user1',
+        catId: null,
+        content: 'late correction',
+        mentions: [],
+        timestamp: 150,
+        threadId: 'thread-1',
+      }),
+    );
     let codexInvocations = 0;
     const harness = createDeps(
       {

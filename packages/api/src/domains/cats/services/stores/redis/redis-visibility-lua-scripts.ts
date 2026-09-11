@@ -34,6 +34,9 @@ export const MAX_BACKFILL_MEMBERS = 50_000;
  * allocation is deferred to DELIVER_WITH_VISIBILITY_LUA.
  *
  * KEYS[1] = hash key (auto-prefixed by ioredis)
+ * KEYS[2] = ADR-043 Queue row hash (combined admission only)
+ * KEYS[3] = ADR-043 Queue order list (combined admission only)
+ * KEYS[4] = ADR-043 Queue message-to-row index (combined admission only)
  *
  * ARGV layout (1-indexed):
  *   [1]  keyPrefix
@@ -48,6 +51,7 @@ export const MAX_BACKFILL_MEMBERS = 50_000;
  *   [10 .. 9+N]  mention catIds (N = mentionCount)
  *   [10+N]  hashFieldPairCount (string number, M pairs = 2*M values)
  *   [11+N .. 11+N+2*M-1]  hash fields as key1, val1, key2, val2, ...
+ *   [tail] queueMaxUserSources, queueRowCount, ...serializedQueueRows
  *
  * Returns:
  *   - string (existing msgId) → idempotency replay, concurrent winner
@@ -79,6 +83,17 @@ local hsetArgs = {}
 for i = 0, hfPairCount * 2 - 1 do
   hsetArgs[i + 1] = ARGV[hfStart + i]
 end
+local queueMaxIdx = hfStart + hfPairCount * 2
+local queueMaxUserSources = tonumber(ARGV[queueMaxIdx] or '-1')
+local queueRowCount = tonumber(ARGV[queueMaxIdx + 1] or '0')
+local queueRows = {}
+local queueEntryIds = {}
+for i = 1, queueRowCount do
+  local raw = ARGV[queueMaxIdx + 1 + i]
+  local row = cjson.decode(raw)
+  queueRows[i] = { id = row.id, raw = raw, row = row }
+  queueEntryIds[i] = row.id
+end
 
 -- #1210 idempotency: if key points to a live hash, replay (return winner ID).
 -- If key exists but hash vanished, fall through to reclaim atomically.
@@ -87,8 +102,48 @@ if idemKey then
   local existingId = redis.call('GET', idemKey)
   if existingId then
     if redis.call('EXISTS', kp .. 'msg:' .. existingId) == 1 then
+      if queueRowCount > 0 then return {2, existingId} end
       return existingId
     end
+  end
+end
+
+-- ADR-043 Queue preflight. Every rejection happens before the first message
+-- or queue write so Queue-full and identity conflicts cannot create ghosts.
+if queueRowCount > 0 then
+  if #KEYS < 4 or not KEYS[2] or not KEYS[3] or not KEYS[4] then
+    return redis.error_reply('QUEUE_ADMISSION_KEYS_MISSING')
+  end
+  local incomingIds = {}
+  local incomingUserSources = {}
+  for i = 1, queueRowCount do
+    local item = queueRows[i]
+    local row = item.row
+    if not row.id or not row.threadId or row.threadId ~= threadId or row.status ~= 'queued' or
+       not row.payload or row.payload.sourceRecordId ~= msgId or row.payload.messageId ~= msgId then
+      return redis.error_reply('QUEUE_ENQUEUE_INVALID_ROW')
+    end
+    if incomingIds[row.id] then return redis.error_reply('QUEUE_ENQUEUE_DUPLICATE_ID') end
+    incomingIds[row.id] = true
+    if redis.call('HEXISTS', KEYS[2], row.id) == 1 then return {-1, ''} end
+    if row.from and row.from.kind == 'user' then incomingUserSources[row.payload.sourceRecordId] = true end
+  end
+  if redis.call('HEXISTS', KEYS[4], msgId) == 1 then return {-1, ''} end
+  if queueMaxUserSources and queueMaxUserSources >= 0 then
+    local queuedUserSources = {}
+    local activeIds = redis.call('LRANGE', KEYS[3], 0, -1)
+    for i = 1, #activeIds do
+      local currentRaw = redis.call('HGET', KEYS[2], activeIds[i])
+      if not currentRaw then return redis.error_reply('QUEUE_ORDER_ROW_MISSING') end
+      local row = cjson.decode(currentRaw)
+      if row.status == 'queued' and row.from and row.from.kind == 'user' then
+        queuedUserSources[row.payload.sourceRecordId] = true
+      end
+    end
+    for sourceId, _ in pairs(incomingUserSources) do queuedUserSources[sourceId] = true end
+    local queuedUserCount = 0
+    for _, _ in pairs(queuedUserSources) do queuedUserCount = queuedUserCount + 1 end
+    if queuedUserCount > queueMaxUserSources then return {0, ''} end
   end
 end
 
@@ -158,7 +213,16 @@ if idemKey then
   end
 end
 
--- 7. TTL management (does NOT apply to visibility index or meta)
+-- 7. Queue fan-out commits at the same linearization point as Message.
+for i = 1, queueRowCount do
+  redis.call('HSET', KEYS[2], queueRows[i].id, queueRows[i].raw)
+  redis.call('RPUSH', KEYS[3], queueRows[i].id)
+end
+if queueRowCount > 0 then
+  redis.call('HSET', KEYS[4], msgId, cjson.encode(queueEntryIds))
+end
+
+-- 8. TTL management (does NOT apply to visibility index, meta, or Queue)
 if ttlSec > 0 then
   -- EXPIRE on hash
   redis.call('EXPIRE', hash, ttlSec)
@@ -183,6 +247,7 @@ if ttlSec > 0 then
   end
 end
 
+if queueRowCount > 0 then return {1, tostring(seq)} end
 return seq
 `;
 
@@ -191,7 +256,6 @@ return seq
  *
  * This is the FULL replacement DELIVER_LUA — not a fragment. Integrates:
  *   - CAS guard (queued → delivered only)
- *   - F254 custody guard (non-terminal custody → no-op)
  *   - Publication-order preservation (real-cat speech / user receipts keep authored timestamp)
  *   - Visibility position guard: already-positioned messages (timeline-published at append)
  *     preserve their immutable canonical position — only allocate when no position exists
@@ -217,39 +281,18 @@ if status ~= 'queued' then
 end
 
 
--- Pre-CAS fan-out admission is durable pending execution and must never be
--- converted into delivered-only visibility by legacy orphan recovery.
-local admission = redis.call('HGET', hash, 'queueCustodyAdmission')
-if admission and admission ~= '' then
-  return 0
-end
-
--- F254: custody guard — non-terminal custody blocks legacy markDelivered
-local custody = redis.call('HGET', hash, 'queueCustody')
-if custody and custody ~= '' then
-  local custodyProjection = cjson.decode(custody)
-  if custodyProjection.status ~= 'terminal' then
-    return 0
-  end
-end
-
 local userId = redis.call('HGET', hash, 'userId')
 local threadId = redis.call('HGET', hash, 'threadId')
 local timestamp = redis.call('HGET', hash, 'timestamp')
 local catId = redis.call('HGET', hash, 'catId')
 local origin = redis.call('HGET', hash, 'origin')
-local source = redis.call('HGET', hash, 'source')
 
--- Publication order: already-published real-cat speech and owner-visible
--- queued user receipts keep their authored timestamp; private queued work
--- enters the timeline at delivery. (Ported from original DELIVER_LUA.)
+-- Publication order: already-published real-cat speech keeps its authored
+-- timestamp. Undelivered owner work enters History only at actual delivery.
 local isRealCatSpeech = catId and catId ~= '' and catId ~= 'system'
   and userId ~= 'system' and userId ~= 'scheduler' and origin ~= 'briefing'
-local isQueuedUserReceipt = (not catId or catId == '') and (not source or source == '')
-  and userId ~= 'system' and userId ~= 'scheduler' and origin ~= 'briefing'
-  and custody and custody ~= ''
 local timelineScore = deliveredAt
-if isRealCatSpeech or isQueuedUserReceipt then
+if isRealCatSpeech then
   timelineScore = timestamp
 end
 
@@ -329,14 +372,18 @@ end
 
 local threadId = redis.call('HGET', hash, 'threadId')
 local msgId = redis.call('HGET', hash, 'id')
+local lifecycleRaw = redis.call('HGET', hash, 'lifecycle')
+local keepVisible = false
+if lifecycleRaw and lifecycleRaw ~= '' then
+  local decoded, lifecycle = pcall(cjson.decode, lifecycleRaw)
+  keepVisible = decoded and lifecycle and lifecycle.kind == 'response'
+end
 
 redis.call('HSET', hash, 'deliveryStatus', 'canceled')
--- #1269 R8 P1-2: clear custody fields so restart/reconciliation cannot treat
--- canceled work as still owned. Parity with CANCEL_LUA in delivery scripts.
-redis.call('HDEL', hash, 'queueCustody', 'queueCustodyRevision', 'queueCustodyAdmission')
 
--- #1200: Remove from visibility index if present (backfilled legacy queued)
-if threadId and msgId then
+-- Canceled response rows remain visible as the member-owned terminal surface.
+-- Other queued work is withdrawn from History visibility as before.
+if not keepVisible and threadId and msgId then
   local visKey = kp .. 'msg:visibility:' .. threadId
   redis.call('ZREM', visKey, msgId)
 end
@@ -371,10 +418,77 @@ local maxMembers = tonumber(ARGV[3])
 local metaKey = kp .. 'msg:visibility-meta:' .. threadId
 local visKey = kp .. 'msg:visibility:' .. threadId
 
--- Guard: already migrated → no-op
+-- ADR-043 follow-up: the first single-ledger build terminalized processing
+-- response placeholders without publishing them to the visibility index. Run
+-- this bounded, one-shot repair even for threads that already completed the
+-- original #1200 migration. Repaired responses are appended after the current
+-- HWM so no previously issued cursor changes meaning.
 local migrated = redis.call('HGET', metaKey, 'migrated')
+local terminalRepair = redis.call('HGET', metaKey, 'terminalResponseRepair')
+if migrated and terminalRepair then return 0 end
+
 if migrated then
-  return 0
+  local count = redis.call('ZCARD', threadKey)
+  if count > maxMembers then
+    return redis.error_reply(
+      'VISIBILITY_REPAIR_TOO_LARGE: threadId=' .. threadId ..
+      ' members=' .. tostring(count) ..
+      ' max=' .. tostring(maxMembers)
+    )
+  end
+
+  local hwmRaw = redis.call('HGET', metaKey, 'hwm')
+  local hwm = 0
+  if hwmRaw ~= false then
+    hwm = tonumber(hwmRaw)
+    if hwm == nil or hwm ~= hwm or hwm ~= math.floor(hwm) or hwm < 0 then
+      return redis.error_reply('VISIBILITY_HWM_INVALID: raw=' .. tostring(hwmRaw) .. ' metaKey=' .. metaKey)
+    end
+  end
+
+  local repairIds = {}
+  local members = redis.call('ZRANGE', threadKey, 0, -1)
+  for i = 1, #members do
+    local messageId = members[i]
+    local messageKey = kp .. 'msg:' .. messageId
+    local existingSeq = redis.call('HGET', messageKey, 'visibilitySeq')
+    local lifecycleRaw = redis.call('HGET', messageKey, 'lifecycle')
+    local lifecycle = nil
+    if lifecycleRaw and lifecycleRaw ~= '' then
+      local okLifecycle, decodedLifecycle = pcall(cjson.decode, lifecycleRaw)
+      if okLifecycle and type(decodedLifecycle) == 'table' then lifecycle = decodedLifecycle end
+    end
+    local deliveryStatus = redis.call('HGET', messageKey, 'deliveryStatus')
+    local publishableDelivery = not deliveryStatus or deliveryStatus == '' or
+      deliveryStatus == 'delivered' or deliveryStatus == 'canceled'
+    if (not existingSeq or existingSeq == '') and
+       not redis.call('HGET', messageKey, 'recall') and
+       not redis.call('HGET', messageKey, '_tombstone') and
+       lifecycle and lifecycle.kind == 'response' and lifecycle.status ~= 'processing' and
+       publishableDelivery then
+      table.insert(repairIds, messageId)
+    end
+  end
+
+  local firstSeq = nil
+  if #repairIds > 0 then
+    local timeArr = redis.call('TIME')
+    local nowMs = tonumber(timeArr[1]) * 1000 + math.floor(tonumber(timeArr[2]) / 1000)
+    firstSeq = math.max(hwm + 1, nowMs)
+    local lastSeq = firstSeq + #repairIds - 1
+    if lastSeq > 9007199254730991 then
+      return redis.error_reply('VISIBILITY_SEQ_EXHAUSTED: seq=' .. tostring(lastSeq))
+    end
+  end
+
+  for i = 1, #repairIds do
+    local seq = firstSeq + i - 1
+    redis.call('ZADD', visKey, seq, repairIds[i])
+    redis.call('HSET', kp .. 'msg:' .. repairIds[i], 'visibilitySeq', tostring(seq))
+    hwm = seq
+  end
+  redis.call('HSET', metaKey, 'hwm', tostring(hwm), 'terminalResponseRepair', '1')
+  return #repairIds
 end
 
 -- #1200 Sol R1 P2: ZCARD first to avoid materializing huge thread in Lua memory
@@ -382,7 +496,7 @@ local count = redis.call('ZCARD', threadKey)
 
 -- Empty thread → mark migrated, no backfill needed
 if count == 0 then
-  redis.call('HSET', metaKey, 'migrated', '1', 'hwm', '0')
+  redis.call('HSET', metaKey, 'migrated', '1', 'hwm', '0', 'terminalResponseRepair', '1')
   return 0
 end
 
@@ -407,7 +521,7 @@ end
 
 -- Set meta atomically: migrated + hwm = last assigned seq
 local hwm = BASE + count - 1
-redis.call('HSET', metaKey, 'migrated', '1', 'hwm', tostring(hwm))
+redis.call('HSET', metaKey, 'migrated', '1', 'hwm', tostring(hwm), 'terminalResponseRepair', '1')
 
 -- Log-friendly return: count of backfilled members
 return count

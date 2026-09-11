@@ -53,7 +53,7 @@ export const webDigestTemplate: TaskTemplate = {
             const messageId = await ctx.deliver({
               threadId: tid,
               content: triggerContent,
-              userId: 'scheduler',
+              userId: triggerUserId,
             });
             try {
               void Promise.resolve(

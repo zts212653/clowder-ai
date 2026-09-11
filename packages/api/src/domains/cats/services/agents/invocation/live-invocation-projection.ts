@@ -11,9 +11,11 @@
  * 从 `routes/queue.ts` 原样迁移的既有兼容逻辑，不是本 PR 新增的代偿层。
  */
 
+import type { LifecycleActiveRun } from '@cat-cafe/shared';
 import type { IDraftStore } from '../../stores/ports/DraftStore.js';
 import type { IInvocationRecordStore } from '../../stores/ports/InvocationRecordStore.js';
 import type { ITurnExecutionStore } from '../../stores/ports/TurnExecutionStore.js';
+import type { AgentClientActiveRunDispatcher } from '../../types.js';
 import type { CodexAppServerLifecycleSnapshot } from '../providers/CodexAppServerLifecycle.js';
 import { getCodexAppServerLifecycle } from '../providers/CodexAppServerLifecycleRegistry.js';
 import { getThreadLiveInvocations } from './getThreadLiveInvocations.js';
@@ -23,6 +25,8 @@ export interface InvocationTrackerLike {
   has(threadId: string, catId?: string): boolean;
   getUserId(threadId: string, catId: string): string | null;
   getExecutionId?(threadId: string, catId: string): string | undefined;
+  /** Canceled tombstones remain observable while provider teardown commits its durable terminal. */
+  getSlotState(threadId: string, catId: string): 'active' | 'canceled' | 'absent';
   cancel(
     threadId: string,
     catId: string,
@@ -30,7 +34,9 @@ export interface InvocationTrackerLike {
     abortReason?: string,
   ): { cancelled: boolean; catIds: string[]; executionIds?: string[] };
   /** Issue #83: Get all active slots for a thread (F5 refresh recovery) */
-  getActiveSlots(threadId: string): Array<{ catId: string; startedAt: number }>;
+  getActiveSlots(threadId: string): Array<{ catId: string; startedAt: number; activeRun?: LifecycleActiveRun }>;
+  /** Exact live provider seam; absence means explicit Append is unsupported now. */
+  getAgentClientActiveRunDispatcher?(threadId: string, catId: string): AgentClientActiveRunDispatcher | undefined;
   /** 稀疏候选索引：本进程持有 slot 的 thread。 */
   listActiveThreadIds?(): string[];
   /** F-invocation-stale-recovery: Cancel ALL active slots for a thread (abort controllers + delete slots). */
@@ -67,6 +73,7 @@ export interface ActiveInvocationProjection {
   turnInvocationId?: string;
   appServerLifecycle?: CodexAppServerLifecycleSnapshot;
   freshnessCarrierCapability?: import('@cat-cafe/shared').FreshnessCarrierCapability;
+  activeRun?: LifecycleActiveRun;
 }
 
 export interface LifecycleProjectionCandidate {
@@ -74,6 +81,7 @@ export interface LifecycleProjectionCandidate {
   startedAt: number;
   lifecycleOwnerId?: string;
   turnInvocationId?: string;
+  activeRun?: LifecycleActiveRun;
 }
 
 export function getRequestOwnedTrackerExecutionId(
@@ -182,6 +190,17 @@ export async function resolveActiveInvocationsStrict(
       // losing the most diagnostic field. Use `feature` for the F194 marker instead.
       onLog: (event) => log.info({ ...event, feature: 'F194' }, 'F194 liveness event'),
     });
+    // Read the dynamic Active Run only after the asynchronous canonical liveness
+    // snapshot. Child admission can bind the run while record/draft/child stores
+    // are being read; taking this map before the await returns a torn `/queue`
+    // projection (new child identity + missing run), which then erases the newer
+    // websocket run during authoritative frontend hydration.
+    const trackerActiveRunByCatId = new Map(
+      invocationTracker
+        .getActiveSlots(threadId)
+        .filter((slot): slot is typeof slot & { activeRun: LifecycleActiveRun } => Boolean(slot.activeRun))
+        .map((slot) => [slot.catId, slot.activeRun]),
+    );
     // Zombie candidates are diagnostic output only. The explicit owner reaper owns
     // all terminal writes; GET /queue remains observational.
     // 砚砚 R5 P2: filter null catId — frontend turns queue.activeInvocations[].catId into a
@@ -201,11 +220,17 @@ export async function resolveActiveInvocationsStrict(
         const lifecycleOwnerId = resolveLifecycleOwnerId(threadId, userId, s.catId, s.executionId, invocationTracker);
         const turnInvocationId =
           s.invocationId !== s.executionId && lifecycleOwnerId === s.executionId ? s.invocationId : undefined;
+        const activeRun = trackerActiveRunByCatId.get(s.catId);
+        const exactActiveRun =
+          activeRun && (activeRun.invocationId === s.invocationId || activeRun.invocationId === turnInvocationId)
+            ? activeRun
+            : undefined;
         byCatId.set(s.catId, {
           catId: s.catId,
           startedAt: s.startedAt,
           lifecycleOwnerId,
           ...(turnInvocationId ? { turnInvocationId } : {}),
+          ...(exactActiveRun ? { activeRun: exactActiveRun } : {}),
         });
       }
     }

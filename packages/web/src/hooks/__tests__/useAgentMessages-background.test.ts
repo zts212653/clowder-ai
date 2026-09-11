@@ -1377,7 +1377,7 @@ describe('background thread socket handling', () => {
       expect(testBgStreamRefs.get('thread-bg::codex')?.id).toBe('existing-stream-msg');
     });
 
-    it('preserves system_info and a2a_handoff messages with info variant', () => {
+    it('preserves system_info while ignoring retired a2a_handoff projections', () => {
       const now = Date.now();
 
       simulateBackgroundMessage({
@@ -1397,11 +1397,10 @@ describe('background thread socket handling', () => {
       });
 
       const ts = useChatStore.getState().getThreadState('thread-bg');
-      expect(ts.messages).toHaveLength(2);
+      expect(ts.messages).toHaveLength(1);
       expect(ts.messages[0]?.content).toContain('system hint');
-      expect(ts.messages[1]?.content).toContain('handoff info');
       expect(ts.messages[0]?.variant).toBe('info');
-      expect(ts.messages[1]?.variant).toBe('info');
+      expect(ts.messages.some((message) => message.content.includes('handoff info'))).toBe(false);
     });
 
     it('applies correct variant for parsed visible system_info events', () => {

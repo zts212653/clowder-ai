@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import Fastify from 'fastify';
+import { adaptMessageStore } from '../helpers/message-from-fixtures.js';
 
 describe('F276 defer route requires durable disposition authority', () => {
   it('rejects an attributed defer before staging when either authority store is absent', async () => {
@@ -11,7 +12,7 @@ describe('F276 defer route requires durable disposition authority', () => {
       import('../../dist/routes/callback-auth-prehandler.js'),
     ]);
     const registry = new registryMod.InvocationRegistry();
-    const messageStore = new messageMod.MessageStore();
+    const messageStore = adaptMessageStore(new messageMod.MessageStore());
     let stageCalls = 0;
     const app = Fastify();
     authMod.registerCallbackAuthHook(app, registry);

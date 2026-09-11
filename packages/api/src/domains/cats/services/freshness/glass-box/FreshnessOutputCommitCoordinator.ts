@@ -6,7 +6,8 @@ import type {
   FreshnessSupplementProjection,
   OutputCommitDecision,
 } from '@cat-cafe/shared';
-import type { IMessageStore, StoredMessage } from '../../stores/ports/MessageStore.js';
+import type { AppendMessageInput, IMessageStore, StoredMessage } from '../../stores/ports/MessageStore.js';
+import { commitLifecycleResponseFromAppendInput } from '../../stores/ports/MessageStore.js';
 import type { FreshnessClosureStore } from '../closure/FreshnessClosureStore.js';
 import { FreshnessOutputRefiner } from './FreshnessOutputRefiner.js';
 import { recordFreshnessGlassBoxTransition } from './freshness-glass-box-telemetry.js';
@@ -106,10 +107,15 @@ export class FreshnessOutputCommitCoordinator {
   }
 
   private async commitOriginal(input: FreshnessOutputCommitInput): Promise<OutputCommitDecision> {
-    const observed = await this.deps.messageStore.appendAndObservePriorFrontier({
-      ...input.message,
-      idempotencyKey: input.message.idempotencyKey ?? publishedOriginalIdempotencyKey(input),
-    });
+    const observed = input.lifecycleResponse
+      ? {
+          message: await this.terminalizeLifecycleResponse(input, input.message),
+          priorFrontierMessageId: input.lifecycleResponse.priorFrontierMessageId,
+        }
+      : await this.deps.messageStore.appendAndObservePriorFrontier({
+          ...input.message,
+          idempotencyKey: input.message.idempotencyKey ?? publishedOriginalIdempotencyKey(input),
+        });
     try {
       await this.finalizeLegacyClosure(input, observed.message, observed.priorFrontierMessageId);
     } catch {
@@ -157,6 +163,15 @@ export class FreshnessOutputCommitCoordinator {
     supplement: FreshnessSupplementAggregate,
   ): Promise<OutputCommitDecision> {
     if (supplement.status === 'declined') return supplementDeclinedDecision(input, supplement);
+    if (input.lifecycleResponse) {
+      const { contentBlocks: _contentBlocks, toolEvents: _toolEvents, ...declineMessage } = input.message;
+      void _contentBlocks;
+      void _toolEvents;
+      await this.terminalizeLifecycleResponse(input, {
+        ...declineMessage,
+        content: '',
+      });
+    }
     const declined = await this.deps.closureStore.declineSupplement(supplement.id, {
       invocationId: input.invocationId,
       now: Date.now(),
@@ -182,7 +197,7 @@ export class FreshnessOutputCommitCoordinator {
     if (supplement.status !== 'running' || supplement.runningInvocationId !== input.invocationId) {
       throw new Error('only the claimed invocation may publish a freshness supplement');
     }
-    const observed = await this.deps.messageStore.appendAndObservePriorFrontier({
+    const supplementMessage: AppendMessageInput = {
       ...input.message,
       timestamp: Date.now(),
       replyTo: supplement.originalMessageId,
@@ -196,7 +211,13 @@ export class FreshnessOutputCommitCoordinator {
           originalMessageId: supplement.originalMessageId,
         },
       },
-    });
+    };
+    const observed = input.lifecycleResponse
+      ? {
+          message: await this.terminalizeLifecycleResponse(input, supplementMessage),
+          priorFrontierMessageId: input.lifecycleResponse.priorFrontierMessageId,
+        }
+      : await this.deps.messageStore.appendAndObservePriorFrontier(supplementMessage);
     const committed = await this.commitSupplementState(supplement, input.invocationId, observed.message.id);
     if (!committed) {
       return {
@@ -226,6 +247,22 @@ export class FreshnessOutputCommitCoordinator {
       }
     }
     return null;
+  }
+
+  private async terminalizeLifecycleResponse(
+    input: FreshnessOutputCommitInput,
+    message: AppendMessageInput,
+  ): Promise<StoredMessage> {
+    const lifecycle = input.lifecycleResponse;
+    if (!lifecycle) throw new Error('lifecycle response identity is required');
+    if (input.commitLifecycleResponse) return input.commitLifecycleResponse(message);
+    return commitLifecycleResponseFromAppendInput(
+      this.deps.messageStore,
+      lifecycle.messageId,
+      input.turnInvocationId ?? input.invocationId,
+      lifecycle,
+      message,
+    );
   }
 
   private async finalizeLegacyClosure(

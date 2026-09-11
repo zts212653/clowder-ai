@@ -40,9 +40,15 @@ describe('F299 legacy retirement and F252 compatibility', () => {
     ).toBe(false);
   });
 
-  it('keeps invocation trajectory reachable from the message action surface', () => {
+  it('keeps one invocation trajectory anchor in the message header after any reply reference', () => {
     const actions = source('packages/web/src/components/MessageActions.tsx');
-    expect(actions).toContain('message-action-invocation-trajectory');
-    expect(actions).toContain('openMessageInvocationTrajectory');
+    const message = source('packages/web/src/components/ChatMessage.tsx');
+    expect(actions).not.toContain('message-action-invocation-trajectory');
+    const reply = message.lastIndexOf('<ReplyPill');
+    const trajectory = message.lastIndexOf('<InvocationTrajectoryAnchor');
+    const actionSlot = message.lastIndexOf('<MessageActionSlot');
+    expect(reply).toBeGreaterThan(-1);
+    expect(trajectory).toBeGreaterThan(reply);
+    expect(actionSlot).toBeGreaterThan(trajectory);
   });
 });

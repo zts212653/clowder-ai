@@ -1,7 +1,7 @@
 ---
 cell_id: ball-custody
 title: Ball Custody Engine
-summary: 球权与等待责任边界：BallCustodyProjection、Queue 普通 queued message、F254 closure/supplement、F167 action-successor 单账本与 hold rescue authorization，以及 F280 typed AwaitState lifecycle / owner fence / expiry / one-shot consume / canonical user-cancel termination event / immutable continuation carrier。责任对象各自持久化 origin/frontier/holder/generation/final；attention、carrier success、feedback why 与 source collection 都不裁决 action success 或 wake。
+summary: 球权与等待责任边界：BallCustodyProjection 的历史审计、F254 closure/supplement、F167 action-successor 单账本与 hold task rescue authorization，以及 F280 typed AwaitState lifecycle / owner fence / expiry / one-shot consume / canonical user-cancel termination event / immutable continuation carrier。ordinary A2A/managed-hold message completion 由 F117 History/Queue/response lifecycle 拥有，不在本 cell 形成第二套 disposition。
 canonical_features: [F167, F233, F254, F280]
 code_anchors:
   - packages/shared/src/types/action-successor.ts
@@ -25,7 +25,6 @@ code_anchors:
   - packages/api/src/domains/ball-custody/turn-custody-wake-provenance.ts
   - packages/api/src/domains/ball-custody/wait-state-machine.ts
   - packages/api/src/domains/ball-custody/wait-continuation-carrier.ts
-  - packages/api/src/domains/ball-custody/WaitContinuationRetryPreflight.ts
   - packages/api/src/domains/github-signals/GitHubWaitLifecycleService.ts
   - packages/shared/src/types/github-wait.ts
   - packages/shared/src/types/wait-termination.ts
@@ -41,7 +40,6 @@ code_anchors:
   - packages/api/src/domains/ball-custody/BallCustodyProjectionStore.ts
   - packages/api/src/domains/ball-custody/ball-custody-keys.ts
   - packages/api/src/domains/ball-custody/BallCustodyIngest.ts
-  - packages/api/src/domains/ball-custody/CoordinationTerminalRetirement.ts
   - packages/api/src/domains/ball-custody/ball-custody-events.ts
   - packages/api/src/domains/cats/services/freshness/FreshnessAttentionEventLog.ts
   - packages/api/src/domains/cats/services/freshness/FreshnessInvocationStateStore.ts
@@ -68,7 +66,6 @@ doc_anchors:
   - docs/features/F233-ball-custody-observability.md
   - docs/features/F254-side-effect-freshness-gate.md
   - docs/features/F280-unified-wait-contract.md
-  - feature-specs/2026-08-12-1291-gate5-retry-revalidation.md
   - feature-discussions/2026-07-29-f280-unified-wait-contract/README.md
   - docs/decisions/041-freshness-catch-closure-output-commit.md
   - docs/decisions/042-glass-box-delivery-semantics.md
@@ -77,11 +74,11 @@ doc_anchors:
   - feature-specs/2026-07-09-f254-phase-e-catch-closure.md
   - feature-specs/2026-06-14-f233-phase-b-ball-custody-event-stream.md
   - feature-specs/2026-07-16-f177-f254-f264-child-execution-truth.md
-static_scan_hints: [ActionSuccessorLease, ActionSuccessorLeaseStore, ActionSuccessorAdmissionService, ActionSubjectTruthResolver, ActionTerminalPredicateCatalog, ActionSuccessorCompletionService, terminalPredicate, completionCandidate, completionCandidates, preflightOutput, continueFreshRevision, claimOrigin, predecessorCatId, returnToPredecessor, returnDeliveryState, actionGeneration, HoldAccessRole, resolveHoldAccess, scheduleMutationAuditStore, AwaitState, WaitOwnerFence, WaitOutcomeV1, WaitContinuationCarrierV1, WaitContinuationRetryPreflight, RetryAuthorityDecision, waitContinuationCarrier, awaitGeneration, expiresAt, matchedPredicate, BallCustodyEvent, BallCustodyProjection, BallCustodyEventLog, BallCustodyIngest, ball-custody-events, buildHandedEvent, ball.dispatch_dispositioned, dispatch_handled_continuation, ball-custody-state-machine, ball-custody-projector, ballcustody:events, ballcustody:projection, blockedSinceAt, ProbeScheduler, WakeSender, FreshnessAttentionEventLog, FreshnessInvocationStateStore, FreshnessNoticeService, FreshnessReinvokeDecider, FreshnessClosureAggregate, FreshnessSupplementAggregate, FreshnessSupplementStateMachine, FreshnessClosureStore, FreshnessClosureLegacyMigrationState, MigrateLegacyFreshnessClosureInput, legacy_migrated, FreshnessOutputCommitCoordinator, FreshnessRelevancePolicy, same_user_wave_sibling_reply, coveredTriggerMessageIds, causal, triggerMessageId, freshnessClosureId, freshnessSupplementId, seenCursor]
+static_scan_hints: [ActionSuccessorLease, ActionSuccessorLeaseStore, ActionSuccessorAdmissionService, ActionSubjectTruthResolver, ActionTerminalPredicateCatalog, ActionSuccessorCompletionService, terminalPredicate, completionCandidate, completionCandidates, preflightOutput, continueFreshRevision, claimOrigin, predecessorCatId, returnToPredecessor, returnDeliveryState, actionGeneration, HoldAccessRole, resolveHoldAccess, scheduleMutationAuditStore, managedHold, AwaitState, WaitOwnerFence, WaitOutcomeV1, WaitContinuationCarrierV1, waitContinuationCarrier, awaitGeneration, expiresAt, matchedPredicate, BallCustodyEvent, BallCustodyProjection, BallCustodyEventLog, BallCustodyIngest, ball-custody-events, ball-custody-state-machine, ball-custody-projector, ballcustody:events, ballcustody:projection, blockedSinceAt, ProbeScheduler, WakeSender, FreshnessAttentionEventLog, FreshnessInvocationStateStore, FreshnessNoticeService, FreshnessReinvokeDecider, FreshnessClosureAggregate, FreshnessSupplementAggregate, FreshnessSupplementStateMachine, FreshnessClosureStore, FreshnessClosureLegacyMigrationState, MigrateLegacyFreshnessClosureInput, legacy_migrated, FreshnessOutputCommitCoordinator, FreshnessRelevancePolicy, same_user_wave_sibling_reply, coveredTriggerMessageIds, causal, triggerMessageId, freshnessClosureId, freshnessSupplementId, seenCursor]
 cited_by:
+  - {feature: F117-Phase-G, date: 2026-09-10, delta: ordinary A2A and managed-hold completion leave Ball custody; exact waiting/wake source plus Queue admission and one response terminal become the shared human/cat lifecycle, while action-successor predicate custody remains}
   - {feature: F167-hold-rescue-authorization, date: 2026-08-18, delta: verified trigger principal, exact-thread collaborator, and configured operator become distinct hold access roles; collaborators retain rescue cancel but receive only a safe lifecycle summary, while exact task deletion and actor/owner audit commit atomically through the existing scheduler store}
   - {feature: F295, date: 2026-08-13, delta: active managed-command receipts are projected as cancelable executions without becoming a new lifecycle ledger; DELETE is fenced by exact taskId so an old hold bubble cannot cancel its replacement}
-  - {feature: F280-Gate-5, date: 2026-08-12, delta: explicit retry reads the stored wait carrier for UX preflight, then atomically compares the raw Task/action-lease witness and Message custody revisions in the same commit that appends the attempt; stale witnesses and legacy unattributed agent work fail closed}
   - {feature: F280-Gate-4, date: 2026-08-12, delta: a consumed wait outcome retains its exact owner fence and publishes one immutable wait/outcome/fence carrier in the server-authored github-wait message; Queue and Invocation are projections, not new authority}
   - {feature: F167-post-disposition-continuation, date: 2026-08-11, delta: the wake-scoped stop decision preserves handled vs completed plus exact event identity; handled may expose a bounded continuation witness only when the disposition tool settled and the provider ended without post-tool progress}
   - {feature: F167-Phase-T-readiness, date: 2026-07-23, delta: first live shadow disagreements bind explicit A2A wakes to the existing thread-ball dispatch only after durable ball.handed evidence, preserve exact hold-ball identity, and retain generic or missing provenance as unknown_legacy}
@@ -110,7 +107,11 @@ Architecture cell: ball-custody
 
 ## Canonical Owner
 
-F233 owns the ball-custody event-sourcing infrastructure: append-only Event Log as the single internal-canonical truth for ball custody（谁该对一个责任单元行动）, BallCustodyProjection as a rebuildable projection, and the 7-state ball lifecycle (active/blocked/parked/dead/void/zombie/resolved，加 `new` 初始态) enforced by a pure-function state machine. F254 extends the same responsibility boundary in two layers: independent `seenCursor` / `FreshnessAttentionEventLog` provide attention evidence; ADR-041 `FreshnessClosureAggregate` remains canonical only for unfinished/legacy work, while ADR-042 `FreshnessSupplementAggregate` owns bounded additive follow-up responsibility after a completed answer is already MessageStore truth. `FreshnessRelevancePolicy` decides whether a late message creates responsibility from typed provenance only: a cat reply whose `causal.triggerMessageId` was already covered by this invocation's prompt is a same-user-wave sibling and does not create a supplement unless it explicitly targets the current cat. Independent triggers remain relevant. Time windows, prose classification and NLU do not participate. A blocked legacy closure remains active responsibility until every attached withheld invocation has an exact evidence-backed outcome; full accounting terminalizes through `legacy_migrated`, which is distinct from user `dismissed`. F167 Phase S adds a separate TTL=0 `ActionSuccessorLease` responsibility object keyed by tenant + canonical subject + action family + server-authorized slot. S.1-a keeps structured transfer and grounded existing standing on that same CAS: every structured generation persists its authenticated predecessor route; a single-holder ownership rejection increments generation and moves custody back atomically, while a parallel rejection terminates only the rejecting holder and leaves the shared generation in place. S.1-b freezes a server-owned typed terminal predicate in each generation: machine-checkable evidence first creates a non-terminal candidate, and only `ActionSubjectTruthResolver` verified truth can CAS a holder to succeeded. Production admission requires both a server verifier and an end-to-end completion producer; the registry opens `review/review_delivered` and task-backed `implement/task_done`. The task capability binds tenant, named owner and task thread from TaskStore before claim, then uses the same task's persisted `done` revision as completion evidence; boot/periodic recovery enumerates active task leases and replays the idempotent completion CAS without another ledger. Canonical `pr_merged` / `ci_passed` resolvers and reserved `test_passed` / `durable_verdict` shapes remain fail-closed until their production completion producers are wired, rather than opening a lease that can never complete. HEAD-fenced predicates accept only canonical full Git OIDs (40/64 lowercase hex). A delivered review coupled to an action lease commits the exact generation/holder/predicate completion before appending the community verdict event; already-verified same-fence retries remain idempotent if event append or projection previously failed. Provider exit 0, response text and Queue delivery remain carrier facts. A server-observed new review HEAD continues the same completed lease at generation+1, rebuilds claim origin/predecessor provenance from the incoming claim, clears prior candidate/outcomes, and leaves the canonical action key unchanged. `returnDeliveryState` only tracks carrier delivery and never adjudicates custody. S.1-c keeps managed-command terminal results and pending return delivery durable until a positive execution carrier exists, then uses boot/periodic recovery sweeps to retry idempotently. Phase T reads only the protocol ball selected by the invocation wake carrier, snapshots its transition truth, and enforces the three-state structured stop decision; it never creates custody or scans unrelated open work. Explicit A2A wake provenance selects the existing `ball:thread:*` dispatch only after its `ball.handed` transition is durably recorded for the target holder；exact managed-command wake provenance selects the existing hold subject。Generic or missing provenance remains `unknown_legacy` and fails closed. For `covered_empty + non_obligation:coordination_terminal`, Phase T may expose a bounded typed `terminal_silent` witness to the existing Queue receipt consumer. For an exact `ball.dispatch_dispositioned`, the stop decision also preserves the canonical `handled | completed` discriminator and event identity. `completed` is terminal-only; `handled` may expose one bounded `dispatch_handled_continuation` witness only after the disposition tool settled and the provider ended without substantive post-tool progress. The witness does not establish or complete owner work and does not reopen the settled carrier. Phase T does not own the durable receipt, parse empty model text, or turn a non-Queue invocation into message custody. The retired legacy comparison is telemetry only. Each responsibility object owns its lifecycle without entering the F233 `BallCustodyEvent` union.
+F233 owns the historical ball-custody event-sourcing infrastructure: append-only Event Log, rebuildable BallCustodyProjection, and the 7-state lifecycle for responsibility objects that still use that ledger. F254 owns independent attention/closure/supplement responsibility; those objects never infer action success from message delivery.
+
+F167 Phase S owns a separate TTL=0 `ActionSuccessorLease` keyed by tenant + canonical subject + action family + server-authorized slot. Each generation persists authenticated predecessor routing, exact holders and a server-owned terminal predicate. Machine evidence creates only a candidate; `ActionSubjectTruthResolver`-verified truth is required to commit success. Review and task completion producers use the same lease CAS, including boot recovery and fresh-HEAD continuation. Provider exit, response text and Queue delivery remain carrier facts, not proof of the external action predicate. The turn stop gate therefore remains only for an exact active action-successor lease and observes its holder/generation/predicate transition.
+
+F117 Phase G supersedes the ordinary-message branch of F167 Phase T. A2A and managed-hold wakes do not create or disposition a protocol Ball: their exact source enters Queue, actual admission materializes History and one response identity, and that response owns processing plus every terminal outcome. Waiting status, admitted wake and response terminal are the same persistent History facts for operator and all thread members. The retired completion tools and `handled | completed` witness path have no new writers; historical Ball events remain audit-readable only. Generic legacy telemetry may remain fail-closed during migration but cannot manufacture message completion or authorize replay. Each responsibility object owns its lifecycle without entering another ledger.
 
 F280 adds `AwaitState` as another responsibility object: the caller supplies a bounded typed any-of
 continuation, the containing task or action lease supplies a generation fence, source adapters supply
@@ -149,14 +150,10 @@ liability, not an invitation to reconstruct authority. Lifecycle recovery CAS-di
 outcome as `legacy_unfenced`, publishes no connector message, and continues the task sweep. Mutable task
 fields cannot supply or mint the missing fence.
 
-Gate 5 retry authority is a read-only preflight over that immutable carrier and current canonical
-owners. A containing-task wait must still match its exact task, outcome, generation, thread, user, and
-holder; an action-successor wait must additionally pass the existing lease `preflightOutput` for the
-same generation and holder. The route check is advisory for an early 409: the same read is repeated
-inside the custody entry lock immediately before the attempt CAS, and only that mutation-boundary
-decision may authorize the retry. Neither decision revives the wait, mints a lease, persists
-retryability, or lets Queue state substitute for authority. Historical agent/connector messages without
-attributable canonical provenance remain non-executable.
+ADR-043 retired the Gate 5 Message-custody retry bridge. A consumed wait carrier is immutable terminal
+provenance, not a retry token; a terminal Queue row never returns to active order. If a user wants the
+work performed again, a new explicit intent must create a new producer source and Queue row. Historical
+agent/connector messages without attributable canonical provenance remain non-executable.
 
 ## Use This When
 
@@ -173,7 +170,7 @@ attributable canonical provenance remain non-executable.
 - 改 F280 canonical wait cancellation、termination replay/conflict、execution-projection recovery，
   或 owner-authenticated cancel route。
 - 改 F280 wait outcome 到 connector message / Queue / Invocation 的 exact carrier 投影。
-- 改 F280 wait/action-backed explicit retry 的 current-authority preflight 或 fail-closed reason。
+- 改 F280 terminal wait carrier 与新用户意图之间的边界；旧 carrier 不得复活 wait 或 Queue attempt。
 - 值班简报 / feat 轨迹消费球权 projection。
 - 接入 ProbeScheduler / WakeSender（Phase B 后续 Task：blocked task 探针 + best-effort 唤醒）。
 
@@ -188,7 +185,10 @@ attributable canonical provenance remain non-executable.
 - Legacy migration 必须以全部 active closure 为根集合，再逐 attached invocation 分类。只有每项都有 exact message/evidence 或审计化 no-text 归宿时，才能通过 revision-fenced `MigrateLegacyFreshnessClosureInput` 写入 `legacy_migrated` disposition；恢复 append 必须幂等且零路由副作用。
 - Completed output 必须先成为 MessageStore truth。普通 queued user message 继续由 Queue exact ACK 生命周期单一拥有，禁止复制到 supplement；只有 non-Queue relevant unseen 才能通过 distinct `FreshnessSupplementAggregate` 追加责任，且不能复用 closure final key、删除原文或把 supplement 当 replacement。
 - Late cat replies must carry typed `invocation_reply -> triggerMessageId` provenance. Compare that trigger only with exact message IDs already present in this invocation's prompt; explicit current-cat targets override sibling suppression, while independent causal roots remain relevant.
-- Queue restart 只能用 immutable per-target invocation success witness 核销 exact `(messageId, catId, invocationId)` custody；aggregate parent `succeeded`、`targetCats` membership 或缺失 witness 都不是 handled 证据。缺失证据必须 fail-closed 回 `failed/queued`。
+- Queue restart 只从 ADR-043 QueueLedger 恢复 exact source×target custody；aggregate parent `succeeded`、
+  `targetCats` membership 或 prose 都不是 handled 证据。完整正文只有在 exact running child + response
+  lifecycle adoption 成功时才立即终局该 target row；缺失证据 fail closed，遗留 claimed restore，遗留
+  processing 终局为 `interrupted/runtime_restart`，sibling target 不受影响。
 - 删除/隐藏任何 draft 前必须拿到 typed custody proof（message / exact closure / retained）；blocked old lineage 不得吸收独立新 draft。
 - 新 freshness cursor 复用 `DeliveryCursorStore` 的 CAS 基础设施时必须使用独立 key prefix，不能推进 `deliveryCursor`。
 - Action successor 必须通过 `ActionSuccessorLeaseStore` claim/recordOutcome/returnToPredecessor/replace/preflight；structured generation 的 predecessor 只能从认证 actor/source thread 派生，existing-standing 只允许 grounded self-claim。single return 必须由该 generation 持久化的 holder cat + holder thread 发起，先以 expected generation 原子移交 custody，再由 carrier 确认 delivery；parallel rejection 只 CAS 写入 rejecting holder 的 terminal outcome，不增 generation、不唤醒整租约 predecessor。同一 immutable single dispatch 重试只 replay 已完成的 transition，delivery 失败保持 pending，不得反向改成 unavailable。
@@ -200,11 +200,9 @@ attributable canonical provenance remain non-executable.
 - Wait continuation carrier 只能从已消费 outcome 的 exact owner fence 派生，并由
   server-authored `github-wait` message 单点持久化。Queue、Invocation 与 stop-gate 只复制和核对
   `(waitId, outcomeId, ownerFence)`；畸形或分叉 projection 必须在 provider start 前失败。
-- Explicit retry 必须先从 stored message 解析 carrier，再对 TaskStore / ActionSuccessorLeaseStore
-  做 read-only current-authority preflight；custody mutation 必须由 ball-custody committer 在同一个
-  Redis Lua 中比较 Task/action-lease raw witness、subject-terminal truth 与全部 Message custody revision，
-  并追加 attempt。只有 durable winner 才能 reopen Queue；拒绝结果不能写 Queue/custody，也不能
-  回退到 generic connector。
+- Terminal wait carrier 只能作为历史 provenance。重做必须来自新的用户意图并获得新的 producer
+  source；不得从 stored message、mutable task 或旧 action lease 推导 retry authority，也不得让
+  terminal Queue row 重回 active order。
 - User cancel 必须先在 Redis 原子提交 canonical termination event + producer entry +
   content-free F281 receipt/index，成功后才清理 SQLite runner projection；public body 不得提供
   owner/cat/subject/source。event 不保存 feedback why，changed feedback replay 必须冲突。

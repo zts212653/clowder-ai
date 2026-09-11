@@ -111,36 +111,34 @@ describe('split-pane canonical execution projection', () => {
     );
   }
 
-  it('lets a same-project ready snapshot clear stale liveness for selected thread B', () => {
+  it('does not let another thread snapshot clear selected-thread liveness', () => {
     renderScenario({ snapshotProject: '/same-project', selectedProject: '/same-project', hydration: 'ready' });
 
     expect(container.querySelector('[data-testid="active-invocation-banner"]')).toBeNull();
     const textarea = container.querySelector('textarea');
     if (!textarea) throw new Error('textarea missing');
     act(() => setTextareaValue(textarea, 'new work'));
-    expect(container.querySelector('[aria-label="排队发送"]')).toBeNull();
-    expect(container.querySelector('[aria-label="Send message"]')).not.toBeNull();
+    expect(container.querySelector('[aria-label="排队等待"]')).not.toBeNull();
+    expect((container.querySelector('[aria-label="Stop generation"]') as HTMLButtonElement | null)?.disabled).toBe(
+      false,
+    );
   });
 
-  it('keeps stale liveness fail-closed outside the hydrated project', () => {
+  it('keeps selected-thread Stop available across project boundaries', () => {
     renderScenario({ snapshotProject: '/project-a', selectedProject: '/project-b', hydration: 'ready' });
 
-    expect(container.querySelector('[data-testid="active-invocation-banner"]')?.textContent).toContain(
-      '正在确认运行状态',
-    );
+    expect(container.querySelector('[data-testid="active-invocation-banner"]')).toBeNull();
     expect((container.querySelector('[aria-label="Stop generation"]') as HTMLButtonElement | null)?.disabled).toBe(
-      true,
+      false,
     );
   });
 
-  it('marks same-project stale liveness unverifiable when hydration fails', () => {
+  it('keeps selected-thread Stop available while canonical hydration retries', () => {
     renderScenario({ snapshotProject: '/same-project', selectedProject: '/same-project', hydration: 'error' });
 
-    expect(container.querySelector('[data-testid="active-invocation-banner"]')?.textContent).toContain(
-      '运行状态暂不可核对',
-    );
+    expect(container.querySelector('[data-testid="active-invocation-banner"]')).toBeNull();
     expect((container.querySelector('[aria-label="Stop generation"]') as HTMLButtonElement | null)?.disabled).toBe(
-      true,
+      false,
     );
   });
 });

@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { canonicalTestMessageInput } from '../helpers/message-from-fixtures.js';
 
 export const OWNER = 'user-1';
 export const CAT = 'opus';
@@ -11,17 +12,19 @@ export const socket = () => ({ emitToUser() {}, broadcastToRoom() {}, broadcastA
  * authored by the `scheduler` pseudo-user with a null catId, never by the session owner.
  */
 export async function appendSchedulerWakeRow(messageStore, threadId) {
-  const row = await messageStore.append({
-    userId: 'scheduler',
-    catId: null,
-    content: '[hold-ball] the condition you were waiting on expired',
-    mentions: [],
-    origin: 'callback',
-    timestamp: Date.now(),
-    threadId,
-    source: { connector: 'scheduler', label: '定时任务', icon: 'scheduler' },
-    extra: { scheduler: { hiddenTrigger: true } },
-  });
+  const row = await messageStore.append(
+    canonicalTestMessageInput({
+      userId: 'scheduler',
+      catId: null,
+      content: '[hold-ball] the condition you were waiting on expired',
+      mentions: [],
+      origin: 'callback',
+      timestamp: Date.now(),
+      threadId,
+      source: { connector: 'scheduler', label: '定时任务', icon: 'scheduler' },
+      extra: { scheduler: { hiddenTrigger: true } },
+    }),
+  );
   // Fixture self-check. If this ever drifts back to an owner-authored row, every positive
   // case below keeps passing with the exemption deleted — the file would assert nothing.
   assert.equal(row.userId, 'scheduler', 'the wake row must be scheduler-authored');

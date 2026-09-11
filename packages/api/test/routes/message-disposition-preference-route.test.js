@@ -29,7 +29,7 @@ describe('GET/PUT /api/config/message-disposition (F264)', () => {
     await rm(join(projectRoot, '.cat-cafe'), { recursive: true, force: true });
   });
 
-  it('defaults to next-work and reports the product source', async () => {
+  it('defaults to queued work and reports the product source', async () => {
     const res = await app.inject({
       method: 'GET',
       url: '/api/config/message-disposition?threadId=thread-a',

@@ -67,8 +67,8 @@ async function seedMessage(owner, behaviorCase, fixtureMessage, fixtureOwnerId, 
   const revision = fixtureMessage.revision ?? 1;
   const { elements, appendOps } = fixtureElements(fixtureMessage, revision);
   const stored = owner.messageStore.append({
+    from: { kind: 'plugin', instanceId: pluginInstanceId },
     userId: 'fixture-user',
-    catId: null,
     content: 'fixture plugin message',
     mentions: [],
     timestamp: Date.now(),
@@ -255,8 +255,8 @@ export async function prepareFixture(owner, behaviorCase, retentionCount) {
     threadIds.add(message.threadId);
     if (!messageIdMap.has(message.messageId)) {
       const stored = owner.messageStore.append({
+        from: { kind: 'user', userId: 'fixture-user' },
         userId: 'fixture-user',
-        catId: null,
         content: message.text ?? 'fixture host message',
         mentions: [],
         timestamp: Date.now(),

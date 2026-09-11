@@ -266,10 +266,11 @@ describe('SplitPaneView thread-state subscription', () => {
         },
       }));
     });
-    expect(container.querySelector('[data-testid="active-invocation-banner"]')).not.toBeNull();
+    expect(container.querySelector('[data-testid="active-invocation-banner"]')).toBeNull();
+    expect(container.querySelector('[aria-label="Stop generation"]')).not.toBeNull();
   });
 
-  it('uses terminal-projected liveness for the split-pane banner and Stop control', () => {
+  it('uses terminal-projected liveness for the split-pane Stop control without a duplicate banner', () => {
     const threadId = 'split-terminal-projection-thread';
     const backgroundState = useChatStore.getState().getThreadState(threadId);
 
@@ -335,7 +336,7 @@ describe('SplitPaneView thread-state subscription', () => {
     });
 
     expect(useChatStore.getState().threadStates[threadId]?.activeInvocations).toEqual({});
-    expect(container.querySelector('[data-testid="active-invocation-banner"]')).not.toBeNull();
+    expect(container.querySelector('[data-testid="active-invocation-banner"]')).toBeNull();
     expect(container.querySelector('[aria-label="Stop generation"]')).not.toBeNull();
 
     act(() => {
@@ -350,11 +351,11 @@ describe('SplitPaneView thread-state subscription', () => {
       }));
     });
 
-    expect(container.querySelector('[data-testid="active-invocation-banner"]')).not.toBeNull();
+    expect(container.querySelector('[data-testid="active-invocation-banner"]')).toBeNull();
     expect(container.querySelector('[aria-label="Stop generation"]')).not.toBeNull();
   });
 
-  it('does not expose an actionable legacy Stop while an exact execution target is unavailable', () => {
+  it('keeps legacy Stop actionable through the exact reconciliation endpoint', () => {
     const threadId = 'split-disconnected-thread';
     const backgroundState = useChatStore.getState().getThreadState(threadId);
     useChatStore.setState({
@@ -393,11 +394,9 @@ describe('SplitPaneView thread-state subscription', () => {
       ),
     );
 
-    expect(container.querySelector('[data-testid="active-invocation-banner"]')?.textContent).toContain(
-      '正在确认运行状态',
-    );
+    expect(container.querySelector('[data-testid="active-invocation-banner"]')).toBeNull();
     const stop = container.querySelector('[aria-label="Stop generation"]') as HTMLButtonElement | null;
-    expect(stop?.disabled).toBe(true);
+    expect(stop?.disabled).toBe(false);
   });
 
   it('cancels the exact canonical execution over REST instead of the legacy socket callback', async () => {
@@ -474,17 +473,11 @@ describe('SplitPaneView thread-state subscription', () => {
       ),
     );
 
-    const cancel = container.querySelector('[data-testid="banner-cancel-btn"]') as HTMLButtonElement | null;
-    const actionCancel = Array.from(container.querySelectorAll('[aria-label="Stop generation"]')).find(
-      (button) => button !== cancel,
-    ) as HTMLButtonElement | undefined;
-    expect(cancel).not.toBeNull();
+    const actionCancel = container.querySelector('[aria-label="Stop generation"]') as HTMLButtonElement | null;
+    expect(container.querySelector('[data-testid="banner-cancel-btn"]')).toBeNull();
     expect(actionCancel).toBeTruthy();
-    expect(container.querySelector('[data-testid="active-invocation-banner"]')?.textContent).toContain(
-      '状态暂不可核对',
-    );
+    expect(container.querySelector('[data-testid="active-invocation-banner"]')).toBeNull();
     await act(async () => {
-      cancel?.click();
       actionCancel?.click();
       await Promise.resolve();
     });

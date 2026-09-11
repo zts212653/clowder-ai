@@ -1,7 +1,10 @@
 /** F264: resolve scoped author preference and bind current-work intent to an exact live parent. */
 
 import type { CatId, FreshnessCarrierCapability, MessageWorkDisposition, QueueAuthorIntent } from '@cat-cafe/shared';
-import { resolveMessageDispositionPreference } from '../config/user-preferences-store.js';
+import {
+  MESSAGE_DISPOSITION_PRODUCT_DEFAULT,
+  resolveMessageDispositionPreference,
+} from '../config/user-preferences-store.js';
 import type { InvocationTracker } from '../domains/cats/services/agents/invocation/InvocationTracker.js';
 
 type ExactParentTracker = Pick<InvocationTracker, 'has' | 'getUserId' | 'getExecutionId'>;
@@ -31,7 +34,7 @@ export function resolveMessageDispositionForAdmission(input: {
   threadId: string;
 }): MessageWorkDisposition {
   if (input.explicit) return input.explicit;
-  if (!input.projectRoot) return 'next_work';
+  if (!input.projectRoot) return MESSAGE_DISPOSITION_PRODUCT_DEFAULT;
   return resolveMessageDispositionPreference(input.projectRoot, input.threadId).effective;
 }
 

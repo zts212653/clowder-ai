@@ -1,6 +1,11 @@
 'use client';
 
-import type { ProviderSemanticEvent } from '@cat-cafe/shared';
+import {
+  isLifecycleStoredMessageMetadata,
+  isMessageFrom,
+  type MessageFrom,
+  type ProviderSemanticEvent,
+} from '@cat-cafe/shared';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { io, Socket } from 'socket.io-client';
 import {
@@ -28,7 +33,7 @@ import {
   hasStaleActiveThreadPresentation,
   reconcileQueueActiveInvocationProjection,
 } from './queue-active-invocation-reconciliation';
-import { normalizeQueueMessageReceiptProjections } from './queue-message-receipt-normalizer';
+import { refreshActiveExecutionProjection } from './useActiveExecutionProjection';
 // F173 Phase E: isInvocationReplaced 检查已下沉到 useAgentMessages.handleAgentMessage
 // dispatch entry，useSocket 不再做 active path drop guard。
 import { reconnectGame } from './useGameReconnect';
@@ -60,6 +65,9 @@ interface AgentMessage {
   replyPreview?: { senderCatId: string | null; content: string; deleted?: true };
   /** F108: Invocation ID — distinguishes messages from concurrent invocations */
   invocationId?: string;
+  turnInvocationId?: string;
+  lifecycleResponseMessageId?: string;
+  activeRun?: import('@cat-cafe/shared').LifecycleActiveRun;
   /**
    * F183 Phase C — thread-scoped monotonic sequence number (KD-9).
    * Set by `SocketManager.broadcastAgentMessage` from `ThreadSequencer.next()`
@@ -218,22 +226,47 @@ async function hydrateFreshnessClosureProjections(
  *
  * Exported for tests (F173 PR-C Task 10 — fixture asserts mirror invariant).
  */
+interface QueueReconciliationSnapshot {
+  queue?: import('../stores/chat-types').QueueEntry[];
+  activeInvocations?: QueueActiveInvocationSlot[];
+}
+
+async function fetchQueueReconciliationSnapshot(threadId: string): Promise<QueueReconciliationSnapshot | null> {
+  try {
+    const response = await apiFetch(`/api/threads/${threadId}/queue`);
+    if (!response.ok) return null;
+    return (await response.json()) as QueueReconciliationSnapshot;
+  } catch {
+    return null;
+  }
+}
+
 export async function reconcileThreadWithServer(
   threadId: string,
   shouldAbort: () => boolean,
   source: string,
+  socketFallback?: {
+    queue: import('../stores/chat-types').QueueEntry[];
+  },
 ): Promise<void> {
+  const data = await fetchQueueReconciliationSnapshot(threadId);
+  if (shouldAbort()) return;
+  const queue = Array.isArray(data?.queue) ? data.queue : socketFallback?.queue;
+  const store = useChatStore.getState();
+  if (queue) {
+    store.setQueue(threadId, queue);
+  }
+  if (!data) return;
+
   try {
-    const res = await apiFetch(`/api/threads/${threadId}/queue`);
-    if (shouldAbort()) return;
-    if (!res.ok) return;
-    const data = (await res.json()) as {
-      activeInvocations?: QueueActiveInvocationSlot[];
-    };
-    if (shouldAbort()) return;
-    reconcileQueueActiveInvocationProjection({ threadId, slots: data.activeInvocations, source });
+    reconcileQueueActiveInvocationProjection({
+      threadId,
+      slots: data.activeInvocations,
+      source,
+    });
   } catch {
-    // Non-critical — don't break the caller
+    // Queue replacement is already settled above. Liveness reconciliation is
+    // recoverable from the next event/watchdog and must not reject its caller.
   }
 }
 
@@ -419,7 +452,6 @@ export function useSocket(callbacks: SocketCallbacks, threadId?: string, foregro
         timestamp: event.timestamp ?? Date.now(),
         routeThreadId: event.routeThreadId ?? threadIdRef.current,
         storeThreadId: event.storeThreadId ?? store.currentThreadId,
-        queuePaused: event.queuePaused ?? threadState?.queuePaused,
         hasActiveInvocation: event.hasActiveInvocation ?? threadState?.hasActiveInvocation,
       });
     };
@@ -752,6 +784,7 @@ export function useSocket(callbacks: SocketCallbacks, threadId?: string, foregro
     // F118 D2: spawn_started — earliest per-cat spawning signal (fires before intent_mode).
     socket.on('spawn_started', (data: { threadId: string; targetCats: string[]; invocationId: string }) => {
       void invalidateSidebarProjection();
+      if (data.threadId) void refreshActiveExecutionProjection(data.threadId);
       const storeThread = useChatStore.getState().currentThreadId;
 
       // F173 KD-4 — single-pointer routing (store as truth source). See agent_message comment.
@@ -759,7 +792,7 @@ export function useSocket(callbacks: SocketCallbacks, threadId?: string, foregro
 
       if (isActiveThread) {
         callbacksRef.current.onSpawnStarted?.(data);
-        // Set per-cat spawning status for ThinkingIndicator
+        // Preserve per-cat spawning liveness for execution controls and diagnostics.
         const cats = data.targetCats ?? [];
         for (const catId of cats) {
           useChatStore.getState().setCatStatus(catId, 'spawning');
@@ -849,7 +882,10 @@ export function useSocket(callbacks: SocketCallbacks, threadId?: string, foregro
 
     const normalizeQueueForDebug = (queue: unknown): unknown[] => (Array.isArray(queue) ? queue : []);
     const isQueueEntryObject = (entry: unknown): entry is import('../stores/chat-types').QueueEntry =>
-      entry !== null && typeof entry === 'object' && !Array.isArray(entry);
+      entry !== null &&
+      typeof entry === 'object' &&
+      !Array.isArray(entry) &&
+      isMessageFrom((entry as { from?: unknown }).from);
     const normalizeQueueEntries = (queue: unknown): import('../stores/chat-types').QueueEntry[] =>
       Array.isArray(queue) ? queue.filter(isQueueEntryObject) : [];
     const getQueueStatusesForDebug = (queue: unknown) =>
@@ -858,117 +894,48 @@ export function useSocket(callbacks: SocketCallbacks, threadId?: string, foregro
         const status = (entry as { status?: unknown }).status;
         return typeof status === 'string' ? status : 'unknown';
       });
-    const hasReceiptAwaitingExactLiveness = (queue: import('../stores/chat-types').QueueEntry[]) =>
-      queue.some((entry) =>
-        entry.queueReceipt?.targets.some(
-          (target) =>
-            (target.state === 'seen' || target.state === 'awakened') &&
-            typeof target.invocationId === 'string' &&
-            target.invocationId.length > 0,
-        ),
+    // F39: Queue events — reconcile the full canonical projection before
+    // replacing the thread-scoped Queue. Socket rows intentionally omit some
+    // server-only actions (for example exact active-run Append), so committing
+    // them first would create a false-negative action surface.
+    socket.on('queue_updated', (data: { threadId: string; queue: unknown[]; action: string }) => {
+      void invalidateSidebarProjection();
+      const store = useChatStore.getState();
+      const queue = normalizeQueueEntries(data.queue);
+      const epoch = bumpLiveQueueHydrateEpoch(data.threadId);
+      void reconcileThreadWithServer(
+        data.threadId,
+        () => getLiveQueueHydrateEpoch(data.threadId) !== epoch,
+        'QueueUpdated',
+        { queue },
       );
-
-    // F39: Queue events — always write via store (no dual-pointer guard needed, queue is thread-scoped)
-    socket.on(
-      'queue_updated',
-      (data: { threadId: string; queue: unknown[]; action: string; messageReceipts?: unknown }) => {
-        void invalidateSidebarProjection();
-        const store = useChatStore.getState();
-        const queue = normalizeQueueEntries(data.queue);
-        const messageReceipts = normalizeQueueMessageReceiptProjections(data.messageReceipts);
-        const receiptNeedsExactLiveness = hasReceiptAwaitingExactLiveness(queue);
-        if (messageReceipts.length > 0) {
-          store.setQueue(data.threadId, queue, messageReceipts);
-        } else {
-          store.setQueue(data.threadId, queue);
-        }
-        // F264/F292: every durable user or Host-connector queue entry is
-        // owner-visible from admission.
-        // Hydrate the authoritative message so its receipt stays live and the
-        // same projection is recovered after F5. Agent work remains queue-only;
-        // the server visibility gate filters internal system connectors.
-        if (
-          queue.some(
-            (entry) => (entry.source === 'user' || entry.source === 'connector') && typeof entry.messageId === 'string',
-          )
-        ) {
-          store.requestStreamCatchUp(data.threadId);
-        }
-        // Queue processor started executing an entry: restore the coarse "active"
-        // marker immediately, then hydrate current-thread slot truth from /queue.
-        // This covers the gap where processing resumes before intent_mode lands:
-        // without slot hydration, the top single-cat cancel can stay hidden even
-        // though the server is already executing this thread.
-        if (data.action === 'processing') {
-          // A processing event is causally newer than any identity-matched
-          // terminal slot still cached for this thread. Retire only those proven
-          // stale slots before raising the coarse marker; preserve uncorrelated
-          // slots until canonical `/queue` supplies the new exact identity.
-          store.setThreadHasActiveInvocation(data.threadId, true);
-          const epoch = bumpLiveQueueHydrateEpoch(data.threadId);
-          if (data.threadId === store.currentThreadId) {
-            void reconcileThreadWithServer(
-              data.threadId,
-              () =>
-                useChatStore.getState().currentThreadId !== data.threadId ||
-                getLiveQueueHydrateEpoch(data.threadId) !== epoch,
-              'QueueProcessing',
-            );
-          }
-        }
-        // A receipt can advance to seen/awakened after the processing event that
-        // originally hydrated its parent control slot. Re-read the canonical
-        // `/queue` liveness pair for that same event so QueuePanel can bridge
-        // receipt.child -> active.parent without treating the already-live turn
-        // as an orphan recoverable entry. If the child ended meanwhile, the
-        // canonical response leaves the receipt actionable (fail-closed).
-        //
-        // Unlike a bare processing marker, an exact receipt is user-actionable
-        // on background threads too, so reconcile it in-place rather than
-        // waiting for that thread to be revisited or refreshed.
-        if ((data.action === 'queued_seen' || data.action === 'queued_awakened') && receiptNeedsExactLiveness) {
-          const epoch = bumpLiveQueueHydrateEpoch(data.threadId);
-          void reconcileThreadWithServer(
-            data.threadId,
-            () => getLiveQueueHydrateEpoch(data.threadId) !== epoch,
-            'QueueReceiptLiveness',
-          );
-        }
-        if (data.action === 'completed') {
-          const epoch = bumpLiveQueueHydrateEpoch(data.threadId);
-          // Queue `completed` is terminal for the event's own thread regardless
-          // of which thread is currently visible. Reconcile that thread in place;
-          // a later processing/completed event advances the epoch and invalidates
-          // this request without coupling correctness to navigation timing.
-          void reconcileThreadWithServer(
-            data.threadId,
-            () => getLiveQueueHydrateEpoch(data.threadId) !== epoch,
-            'QueueCompleted',
-          );
-        }
-        // P1 fix: 'processing' means continue/auto-dequeue resumed the queue — clear paused state
-        if (data.action === 'processing' || data.action === 'cleared') {
-          store.setQueuePaused(data.threadId, false);
-        }
-        if (isDebugEnabled()) {
-          const stateAfterUpdate = store.getThreadState(data.threadId);
-          recordInvocationEvent({
-            event: 'queue_updated',
-            threadId: data.threadId,
-            action: data.action,
-            queueLength: normalizeQueueForDebug(data.queue).length,
-            queueStatuses: getQueueStatusesForDebug(data.queue),
-            hasActiveInvocation: data.action === 'processing' ? true : stateAfterUpdate?.hasActiveInvocation,
-            queuePaused:
-              data.action === 'processing' || data.action === 'cleared' ? false : stateAfterUpdate?.queuePaused,
-          });
-        }
-      },
-    );
-    // F264: a cross-thread Queue carrier is visible as soon as durable custody
-    // accepts it. This does not mark the backend message delivered; it only
-    // installs the original source message so live queueReceipt updates have a
-    // stable timeline anchor before terminal completion.
+      // Queue processor started executing an entry: restore the coarse "active"
+      // marker immediately, then hydrate current-thread slot truth from /queue.
+      // This covers the gap where processing resumes before intent_mode lands:
+      // without slot hydration, the top single-cat cancel can stay hidden even
+      // though the server is already executing this thread.
+      if (data.action === 'processing') {
+        // A processing event is causally newer than any identity-matched
+        // terminal slot still cached for this thread. Retire only those proven
+        // stale slots before raising the coarse marker; preserve uncorrelated
+        // slots until canonical `/queue` supplies the new exact identity.
+        store.setThreadHasActiveInvocation(data.threadId, true);
+      }
+      if (isDebugEnabled()) {
+        const stateAfterUpdate = store.getThreadState(data.threadId);
+        recordInvocationEvent({
+          event: 'queue_updated',
+          threadId: data.threadId,
+          action: data.action,
+          queueLength: normalizeQueueForDebug(data.queue).length,
+          queueStatuses: getQueueStatusesForDebug(data.queue),
+          hasActiveInvocation: data.action === 'processing' ? true : stateAfterUpdate?.hasActiveInvocation,
+        });
+      }
+    });
+    // F264: a cross-thread Queue carrier is visible as soon as durable admission
+    // accepts it. This does not mark the message delivered; it only installs the
+    // source bubble before exact execution liveness is projected.
     socket.on(
       'messages_queued',
       (data: {
@@ -981,8 +948,8 @@ export function useSocket(callbacks: SocketCallbacks, threadId?: string, foregro
           timestamp: number;
           contentBlocks?: readonly unknown[];
           extra?: Record<string, unknown>;
-          source?: import('../stores/chat-types').ConnectorSourceData;
           origin?: 'stream' | 'callback' | 'briefing';
+          source?: import('../stores/chat-types').ConnectorSourceData;
           replyTo?: string;
           replyPreview?: { senderCatId: string | null; content: string; deleted?: boolean; kind?: string };
           mentionsUser?: boolean;
@@ -1021,7 +988,9 @@ export function useSocket(callbacks: SocketCallbacks, threadId?: string, foregro
         deliveredAt: number;
         messages?: Array<{
           id: string;
+          from?: MessageFrom;
           content: string;
+          lifecycle?: import('@cat-cafe/shared').LifecycleStoredMessageMetadata;
           catId: string | null;
           timestamp: number;
           timelineOrderAt?: number;
@@ -1039,23 +1008,80 @@ export function useSocket(callbacks: SocketCallbacks, threadId?: string, foregro
         useChatStore.getState().markMessagesDelivered(data.threadId, data.messageIds, data.deliveredAt, data.messages);
       },
     );
-
-    socket.on('queue_paused', (data: { threadId: string; reason: 'canceled' | 'failed'; queue: unknown[] }) => {
-      void invalidateSidebarProjection();
-      const store = useChatStore.getState();
-      store.setQueue(data.threadId, data.queue as import('../stores/chat-types').QueueEntry[]);
-      store.setQueuePaused(data.threadId, true, data.reason);
-      bumpLiveQueueHydrateEpoch(data.threadId);
-      if (isDebugEnabled()) {
-        recordInvocationEvent({
-          event: 'queue_paused',
-          threadId: data.threadId,
-          reason: data.reason,
-          queueLength: normalizeQueueForDebug(data.queue).length,
-          queueStatuses: getQueueStatusesForDebug(data.queue),
+    socket.on(
+      'message_lifecycle_updated',
+      (data: {
+        threadId: string;
+        message: {
+          id: string;
+          from?: MessageFrom;
+          catId: string | null;
+          content: string;
+          lifecycle: unknown;
+          timestamp: number;
+          timelineOrderAt?: number;
+          contentBlocks?: readonly unknown[];
+          extra?: Record<string, unknown>;
+          origin?: 'stream' | 'callback' | 'briefing';
+          replyTo?: string;
+        };
+      }) => {
+        if (!isLifecycleStoredMessageMetadata(data.message.lifecycle)) return;
+        const lifecycle = data.message.lifecycle;
+        const isDeliveryFailure = lifecycle.kind === 'delivery_failure';
+        const store = useChatStore.getState();
+        if (lifecycle.kind === 'response') {
+          const threadState = store.getThreadState(data.threadId);
+          const exactRun = threadState.catInvocations[lifecycle.targetId]?.activeRun;
+          if (exactRun?.responseMessageId === data.message.id && exactRun.invocationId === lifecycle.invocationId) {
+            const liveBubble = threadState.messages.find(
+              (candidate) =>
+                candidate.id !== data.message.id &&
+                candidate.type === 'assistant' &&
+                candidate.catId === lifecycle.targetId &&
+                candidate.extra?.stream?.turnInvocationId === lifecycle.invocationId,
+            );
+            if (liveBubble) store.replaceThreadMessageId(data.threadId, liveBubble.id, data.message.id);
+          }
+        }
+        store.upsertLifecycleMessage(data.threadId, {
+          id: data.message.id,
+          type: isDeliveryFailure
+            ? 'system'
+            : data.message.from?.kind === 'agent'
+              ? 'assistant'
+              : data.message.from?.kind === 'external' || data.message.from?.kind === 'plugin'
+                ? 'connector'
+                : data.message.from?.kind === 'system'
+                  ? 'system'
+                  : data.message.from?.kind === 'user'
+                    ? 'user'
+                    : data.message.catId
+                      ? 'assistant'
+                      : 'user',
+          ...(data.message.from ? { from: data.message.from } : {}),
+          ...(isDeliveryFailure ? { variant: 'error' as const } : {}),
+          ...(data.message.catId && !isDeliveryFailure ? { catId: data.message.catId } : {}),
+          content: data.message.content,
+          lifecycle,
+          timestamp: data.message.timestamp,
+          ...(data.message.timelineOrderAt !== undefined ? { timelineOrderAt: data.message.timelineOrderAt } : {}),
+          ...(data.message.contentBlocks
+            ? {
+                contentBlocks: data.message
+                  .contentBlocks as import('../stores/chat-types').ChatMessage['contentBlocks'],
+              }
+            : {}),
+          ...(data.message.extra
+            ? { extra: data.message.extra as import('../stores/chat-types').ChatMessage['extra'] }
+            : {}),
+          ...(data.message.origin ? { origin: data.message.origin } : {}),
+          ...(data.message.replyTo ? { replyTo: data.message.replyTo } : {}),
         });
-      }
-    });
+        if (lifecycle.kind === 'response') void refreshActiveExecutionProjection(data.threadId);
+      },
+    );
+
     socket.on('queue_full_warning', (data: { threadId: string; source: 'user' | 'connector'; queue: unknown[] }) => {
       const store = useChatStore.getState();
       store.setQueue(data.threadId, data.queue as import('../stores/chat-types').QueueEntry[]);

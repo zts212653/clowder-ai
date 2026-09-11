@@ -1,4 +1,9 @@
-import type { SchedulerLifecycleEvent, SchedulerMessageExtra, SchedulerToastPayload } from '@cat-cafe/shared';
+import type {
+  ConnectorSource,
+  SchedulerLifecycleEvent,
+  SchedulerMessageExtra,
+  SchedulerToastPayload,
+} from '@cat-cafe/shared';
 import type { IBallCustodyIngest } from '../../domains/ball-custody/BallCustodyIngest.js';
 
 export type { SchedulerLifecycleEvent, SchedulerMessageExtra, SchedulerToastPayload } from '@cat-cafe/shared';
@@ -85,6 +90,10 @@ export interface DeliverOpts {
   /** Stable producer identity for retrying one exact persisted scheduler item. */
   idempotencyKey?: string;
   extra?: SchedulerMessageExtra;
+  /** Queued sources remain off the timeline until Queue admission marks them delivered. */
+  deliveryStatus?: 'queued';
+  /** Optional canonical source identity for scheduler-backed continuation producers. */
+  source?: ConnectorSource;
 }
 
 /** Phase 4: result of fetching web content */
@@ -112,7 +121,7 @@ export interface ScheduleLifecycleNotice {
 
 export type ScheduleLifecycleNotifier = (notice: ScheduleLifecycleNotice) => void;
 
-export type ScheduleInvokeTriggerOutcome = 'dispatched' | 'enqueued' | 'full';
+export type ScheduleInvokeTriggerOutcome = 'enqueued' | 'full';
 
 /** Async cat invocation trigger — callers may detach it, but resolution means durable wake acceptance. */
 export interface ScheduleInvokeTrigger {
@@ -139,6 +148,8 @@ export interface ExecuteContext {
   schedule?: ScheduleRunTiming;
   /** Phase 4: deliver message to a thread */
   deliver?: (opts: DeliverOpts) => Promise<string>;
+  /** Cancel a scheduler-owned queued message that failed before Queue admission. */
+  cancelQueuedDelivery?: (messageId: string) => Promise<boolean>;
   /** Phase 4: fetch web content with browser-automation routing */
   fetchContent?: (url: string) => Promise<FetchResult>;
   /** Phase 4b: invoke a cat to handle a scheduled task (fire-and-forget) */

@@ -7,6 +7,7 @@ import { dispatchBoundConversationThroughHost } from '../dist/domains/cats/servi
 import { MessageStore } from '../dist/domains/cats/services/stores/ports/MessageStore.js';
 import { safeAdapterDiagnostic } from '../src/plugins/cloud-cat-personal-host/native-host/native-results.mjs';
 import { createUnsupportedNodeHarness } from './helpers/f247-unsupported-node-harness.js';
+import { canonicalTestMessageInput } from './helpers/message-from-fixtures.js';
 
 const BOUNDARY_FIXTURES = [
   {
@@ -34,15 +35,17 @@ describe('F247 DOM fingerprint producer bounds', () => {
     for (const fixture of BOUNDARY_FIXTURES) {
       const threadId = `thread-failed-dispatch-${fixture.id}`;
       const messageStore = new MessageStore();
-      const source = messageStore.append({
-        userId: 'alice',
-        catId: 'codex-sol',
-        threadId,
-        content: '@gpt-pro private source body',
-        mentions: ['gpt-pro'],
-        timestamp: 1_000,
-        extra: { stream: { invocationId: 'inv-source', turnInvocationId: 'inv-source' } },
-      });
+      const source = messageStore.append(
+        canonicalTestMessageInput({
+          userId: 'alice',
+          catId: 'codex-sol',
+          threadId,
+          content: '@gpt-pro private source body',
+          mentions: ['gpt-pro'],
+          timestamp: 1_000,
+          extra: { stream: { invocationId: 'inv-source', turnInvocationId: 'inv-source' } },
+        }),
+      );
       const harness = createUnsupportedNodeHarness({ mutateAfterInsert: fixture.mutateAfterInsert });
       let pageDiagnostic;
       await assert.rejects(

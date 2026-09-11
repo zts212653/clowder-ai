@@ -136,50 +136,6 @@ export function projectSchemaDeliveryMeta(definition: Pick<ToolDef, 'policy'>): 
   return definition.policy.schemaDelivery.policy === 'always-visible' ? { 'anthropic/alwaysLoad': true } : undefined;
 }
 
-// ── F254 Phase B1: In-memory freshness notice state (per MCP server process = per invocation) ──
-const freshnessNoticeState = { toolCallCount: 0, noticeDeliveredCount: 0, lastNoticeToolCallNum: 0 };
-const FRESHNESS_NOTICE_INTERVAL = 5;
-const FRESHNESS_MAX_NOTICES = 3;
-
-/**
- * F254 B1: Check if a freshness notice should be piggybacked on this tool result.
- * Frequency-gated in-memory (every 5 read-only calls, max 3 per invocation).
- * Only calls the API when the gate passes — minimizes HTTP overhead.
- */
-async function maybeFreshnessNotice(toolName: string, isReadOnly: boolean): Promise<string | null> {
-  freshnessNoticeState.toolCallCount++;
-
-  if (!isReadOnly) return null;
-  if (freshnessNoticeState.noticeDeliveredCount >= FRESHNESS_MAX_NOTICES) return null;
-  if (freshnessNoticeState.toolCallCount - freshnessNoticeState.lastNoticeToolCallNum < FRESHNESS_NOTICE_INTERVAL) {
-    return null;
-  }
-
-  // Gate passed — call API to check for unseen messages
-  if (!getCallbackConfig()) return null;
-
-  try {
-    const result = await callbackPost('/api/callbacks/freshness-notice-check', {
-      toolName,
-      isReadOnly: true,
-    });
-    if (result.isError) return null;
-
-    const data = JSON.parse((result.content[0] as { text: string }).text);
-    // Advance interval counter after ANY API call, not just successful delivery.
-    // Otherwise quiet threads (no unseen) bypass the interval gate on every call.
-    // (Cloud review R2 P2-R2-2)
-    freshnessNoticeState.lastNoticeToolCallNum = freshnessNoticeState.toolCallCount;
-    if (data?.notice?.text) {
-      freshnessNoticeState.noticeDeliveredCount++;
-      return data.notice.text;
-    }
-  } catch {
-    // Fail-open: notice errors never block tool execution
-  }
-  return null;
-}
-
 function resolvePostMessageRegistrationPrincipal(env: ToolsetEnv): PostMessageRegistrationPrincipal {
   if (getInvocationAuthSignal().hasFullCredentials) return 'invocation';
   if (env.hasAgentKey) return 'agent-key';
@@ -224,24 +180,11 @@ function registerTools(server: McpServer, tools: readonly ToolDef[], env: Toolse
         ...(deliveryMeta ? { _meta: deliveryMeta } : {}),
       },
       async (args: never) => {
-        const result = await tool.handler(args);
-        const typed = {
-          ...(result as Record<string, unknown>),
-        } as {
+        return (await tool.handler(args)) as {
           content: Array<{ type: 'text'; text: string }>;
           isError?: boolean;
           [key: string]: unknown;
         };
-
-        // F254 B1: Piggyback freshness notice on successful read-only tool results
-        if (!typed.isError && annotations.readOnlyHint) {
-          const noticeText = await maybeFreshnessNotice(tool.name, annotations.readOnlyHint);
-          if (noticeText) {
-            typed.content = [...typed.content, { type: 'text', text: `\n\n${noticeText}` }];
-          }
-        }
-
-        return typed;
       },
     );
   }

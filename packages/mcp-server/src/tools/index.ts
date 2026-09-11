@@ -48,8 +48,6 @@ export {
   handleAckMentions,
   handleAdmitEntrustedWork,
   handleCloseEntrustedWork,
-  handleCompleteA2ADispatch,
-  handleCompleteManagedHold,
   handleCrossPostMessage,
   handleDrillMemoryCue,
   handleFeatIndex,

@@ -2,13 +2,14 @@
  * F075 — Mention stats computation
  * Pure functions: input messages → output ranked stats
  */
-import type { MentionStats, RankedCat, StreakCat } from '@cat-cafe/shared';
+import type { MentionStats, MessageFrom, RankedCat, StreakCat } from '@cat-cafe/shared';
 
 export interface MessageLike {
   id: string;
   mentions: readonly string[];
   timestamp: number;
   catId: string | null;
+  from?: MessageFrom;
   content: string;
   source?: { connector?: string };
 }
@@ -106,7 +107,7 @@ export function computeMentionStats(
   for (const msg of messages) {
     // Mention-based rankings should reflect co-creator/owner mentions only.
     // Exclude cat-authored messages AND connector-sourced messages (catId is also null).
-    if (!msg.catId && !msg.source?.connector) {
+    if (msg.from ? msg.from.kind === 'user' : !msg.catId && !msg.source?.connector) {
       for (const catId of msg.mentions) {
         mentionCount.set(catId, (mentionCount.get(catId) ?? 0) + 1);
 

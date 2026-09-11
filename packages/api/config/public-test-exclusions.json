@@ -18,12 +18,12 @@
         "matchedFilesHash": "613776cced1400d311fd529f4b000a0c76c0306cd7e55fc9061b4115d8435a57"
       },
       "publicAudit": {
-        "reviewedOn": "2026-09-05",
+        "reviewedOn": "2026-09-07",
         "sourceHead": "c5633cf643447e040af125d361d2156e38fdb081",
-        "publicHead": "f3dba7a1abb9474a88764f21283297cbe9935e2b",
+        "publicHead": "94d9d7784ea58d4f21c42204741f545844c835fc",
         "status": "resource_contract",
-        "matchedFileCount": 64,
-        "matchedFilesHash": "5e21c0b349928349fbe2de8cb929538c801b354db1f1eedb07420658fbd508c6"
+        "matchedFileCount": 65,
+        "matchedFilesHash": "5a174c93449f295484aae4791dd0109130b906a30e3c7c0b35333f79db4c180e"
       }
     },
     {
@@ -109,6 +109,14 @@
         "status": "source_dependency_failure",
         "matchedFileCount": 256,
         "matchedFilesHash": "ce05e5d09e8db161d0cf131380ae0fcbb82e9838bbc2e14c2588a3f2341d538d"
+      },
+      "publicAudit": {
+        "reviewedOn": "2026-09-07",
+        "sourceHead": "5a0b3a6bb96fa0ecefd4081ecd8cd739a991bd97",
+        "publicHead": "94d9d7784ea58d4f21c42204741f545844c835fc",
+        "status": "source_dependency_failure",
+        "matchedFileCount": 255,
+        "matchedFilesHash": "f588ebf2bd81d8e579252dcb9be3fe98a484fe25388680b8881a5e90677f88ad"
       }
     },
     {

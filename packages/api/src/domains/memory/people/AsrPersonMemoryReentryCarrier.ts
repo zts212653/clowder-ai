@@ -4,6 +4,7 @@ import {
   writeOpportunityPresentationRetryCarrierV1Schema,
   writeOpportunityReentryCarrierV1Schema,
 } from '@cat-cafe/shared';
+import { messageFrom } from '../../cats/services/stores/message-from.js';
 import type { IMessageStore, StoredMessage } from '../../cats/services/stores/ports/MessageStore.js';
 import type { BoundAsrPersonMemoryScene } from './AsrPersonMemoryOpportunityPromptService.js';
 import { eligibleOwnerMessage } from './PersonMemorySourceBundleResolver.js';
@@ -57,7 +58,7 @@ export async function bindAsrPersonMemoryReentryFromSchedulerMessage(input: {
   if (
     carriers.length === 0 ||
     input.triggerMessage.userId !== 'scheduler' ||
-    input.triggerMessage.catId !== null ||
+    messageFrom(input.triggerMessage).kind !== 'system' ||
     input.triggerMessage.threadId !== input.threadId ||
     input.triggerMessage.deletedAt !== undefined ||
     input.triggerMessage._tombstone ||
@@ -140,8 +141,7 @@ export async function bindAsrPersonMemoryPresentationRetryFromSchedulerMessage(i
   );
   if (
     !carrier.success ||
-    input.triggerMessage.userId !== 'scheduler' ||
-    input.triggerMessage.catId !== null ||
+    messageFrom(input.triggerMessage).kind !== 'system' ||
     input.triggerMessage.threadId !== input.threadId ||
     input.triggerMessage.deletedAt !== undefined ||
     input.triggerMessage._tombstone ||

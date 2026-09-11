@@ -4,6 +4,7 @@ import {
   ApprovalPublicationNotAnchoredError,
   requireAnchoredPublication,
 } from '../../dist/domains/approval-hub/requireAnchoredPublication.js';
+import { canonicalTestMessageInput } from '../helpers/message-from-fixtures.js';
 import {
   FakePublicationStore,
   findApprovalCard,
@@ -208,14 +209,16 @@ describe('ApprovalIngress', () => {
       /origin message thread mismatch/,
     );
 
-    const otherOwnerOrigin = harness.messageStore.append({
-      userId: 'user-2',
-      catId: null,
-      content: 'private',
-      mentions: [],
-      timestamp: 1_721_111_110_001,
-      threadId: 'source-thread',
-    });
+    const otherOwnerOrigin = harness.messageStore.append(
+      canonicalTestMessageInput({
+        userId: 'user-2',
+        catId: null,
+        content: 'private',
+        mentions: [],
+        timestamp: 1_721_111_110_001,
+        threadId: 'source-thread',
+      }),
+    );
     await assert.rejects(
       () =>
         harness.ingress.publish(

@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
+import { canonicalTestMessageInput } from './helpers/message-from-fixtures.js';
 
 const { routeParallel } = await import('../dist/domains/cats/services/agents/routing/route-parallel.js');
 const { MessageStore } = await import('../dist/domains/cats/services/stores/ports/MessageStore.js');
@@ -66,27 +67,31 @@ describe('F254 Phase E — route-parallel output commit', () => {
     const deliveryCursorStore = new DeliveryCursorStore();
     const prompts = [];
     let invocationSequence = 0;
-    const source = await messageStore.append({
-      userId: 'user-1',
-      catId: null,
-      content: '@codex-sol @fable-5 think independently',
-      mentions: ['codex-sol', 'fable-5'],
-      timestamp: 100,
-      threadId: 'thread-1',
-    });
-    const sibling = await messageStore.append({
-      userId: 'user-1',
-      catId: 'codex-sol',
-      content: 'SOL COMPLETE PARALLEL BODY sentinel-tail',
-      mentions: [],
-      origin: 'stream',
-      timestamp: 150,
-      threadId: 'thread-1',
-      extra: {
-        stream: { parallelBatchId: 'original-parallel-batch' },
-        causal: { kind: 'invocation_reply', triggerMessageId: source.id },
-      },
-    });
+    const source = await messageStore.append(
+      canonicalTestMessageInput({
+        userId: 'user-1',
+        catId: null,
+        content: '@codex-sol @fable-5 think independently',
+        mentions: ['codex-sol', 'fable-5'],
+        timestamp: 100,
+        threadId: 'thread-1',
+      }),
+    );
+    const sibling = await messageStore.append(
+      canonicalTestMessageInput({
+        userId: 'user-1',
+        catId: 'codex-sol',
+        content: 'SOL COMPLETE PARALLEL BODY sentinel-tail',
+        mentions: [],
+        origin: 'stream',
+        timestamp: 150,
+        threadId: 'thread-1',
+        extra: {
+          stream: { parallelBatchId: 'original-parallel-batch' },
+          causal: { kind: 'invocation_reply', triggerMessageId: source.id },
+        },
+      }),
+    );
     const deps = {
       services: {
         'fable-5': {
@@ -130,14 +135,16 @@ describe('F254 Phase E — route-parallel output commit', () => {
     }
     assert.ok(!prompts[0].includes(sibling.content));
 
-    const synthesis = await messageStore.append({
-      userId: 'user-1',
-      catId: null,
-      content: '@fable-5 synthesize the two parallel answers',
-      mentions: ['fable-5'],
-      timestamp: 200,
-      threadId: 'thread-1',
-    });
+    const synthesis = await messageStore.append(
+      canonicalTestMessageInput({
+        userId: 'user-1',
+        catId: null,
+        content: '@fable-5 synthesize the two parallel answers',
+        mentions: ['fable-5'],
+        timestamp: 200,
+        threadId: 'thread-1',
+      }),
+    );
     for await (const _event of routeParallel(deps, ['fable-5'], synthesis.content, 'user-1', 'thread-1', {
       currentUserMessageId: synthesis.id,
       thinkingMode: 'play',
@@ -151,23 +158,27 @@ describe('F254 Phase E — route-parallel output commit', () => {
 
   it('publishes a known-stale parallel answer and queues one typed supplement', async () => {
     const messageStore = new MessageStore();
-    const seen = await messageStore.append({
-      userId: 'user-1',
-      catId: null,
-      content: 'question',
-      mentions: ['opus'],
-      timestamp: 100,
-      threadId: 'thread-1',
-    });
-    const unseen = await messageStore.append({
-      userId: 'user-1',
-      catId: 'codex-sol',
-      content: 'late visible cat analysis',
-      mentions: [],
-      origin: 'stream',
-      timestamp: 150,
-      threadId: 'thread-1',
-    });
+    const seen = await messageStore.append(
+      canonicalTestMessageInput({
+        userId: 'user-1',
+        catId: null,
+        content: 'question',
+        mentions: ['opus'],
+        timestamp: 100,
+        threadId: 'thread-1',
+      }),
+    );
+    const unseen = await messageStore.append(
+      canonicalTestMessageInput({
+        userId: 'user-1',
+        catId: 'codex-sol',
+        content: 'late visible cat analysis',
+        mentions: [],
+        origin: 'stream',
+        timestamp: 150,
+        threadId: 'thread-1',
+      }),
+    );
     const closureStore = new InMemoryFreshnessClosureStore();
     const enqueued = [];
     const deps = {
@@ -223,22 +234,26 @@ describe('F254 Phase E — route-parallel output commit', () => {
 
   it('keeps a stale parallel answer published when the supplement queue is full', async () => {
     const messageStore = new MessageStore();
-    const seen = await messageStore.append({
-      userId: 'user-1',
-      catId: null,
-      content: 'question',
-      mentions: ['opus'],
-      timestamp: 100,
-      threadId: 'thread-1',
-    });
-    await messageStore.append({
-      userId: 'user-1',
-      catId: null,
-      content: 'late correction',
-      mentions: ['opus'],
-      timestamp: 150,
-      threadId: 'thread-1',
-    });
+    const seen = await messageStore.append(
+      canonicalTestMessageInput({
+        userId: 'user-1',
+        catId: null,
+        content: 'question',
+        mentions: ['opus'],
+        timestamp: 100,
+        threadId: 'thread-1',
+      }),
+    );
+    await messageStore.append(
+      canonicalTestMessageInput({
+        userId: 'user-1',
+        catId: null,
+        content: 'late correction',
+        mentions: ['opus'],
+        timestamp: 150,
+        threadId: 'thread-1',
+      }),
+    );
     const closureStore = new InMemoryFreshnessClosureStore();
     const deps = {
       services: { opus: service('opus', 'stale parallel answer') },
@@ -286,23 +301,27 @@ describe('F254 Phase E — route-parallel output commit', () => {
 
   it('commits an adopted parallel supplement as a reply in its exact lineage', async () => {
     const messageStore = new MessageStore();
-    const original = await messageStore.append({
-      userId: 'user-1',
-      catId: 'opus',
-      content: 'published original',
-      mentions: [],
-      timestamp: 100,
-      threadId: 'thread-1',
-      extra: { freshness: { kind: 'fresh', priorFrontierMessageId: null } },
-    });
-    const required = await messageStore.append({
-      userId: 'user-1',
-      catId: null,
-      content: 'late correction',
-      mentions: ['opus'],
-      timestamp: 150,
-      threadId: 'thread-1',
-    });
+    const original = await messageStore.append(
+      canonicalTestMessageInput({
+        userId: 'user-1',
+        catId: 'opus',
+        content: 'published original',
+        mentions: [],
+        timestamp: 100,
+        threadId: 'thread-1',
+        extra: { freshness: { kind: 'fresh', priorFrontierMessageId: null } },
+      }),
+    );
+    const required = await messageStore.append(
+      canonicalTestMessageInput({
+        userId: 'user-1',
+        catId: null,
+        content: 'late correction',
+        mentions: ['opus'],
+        timestamp: 150,
+        threadId: 'thread-1',
+      }),
+    );
     const closureStore = new InMemoryFreshnessClosureStore();
     const offered = await closureStore.offerSupplement({
       lineageId: original.id,
@@ -368,22 +387,26 @@ describe('F254 Phase E — route-parallel output commit', () => {
 
   it('publishes a side-effecting parallel answer and carries its replay fence into the supplement', async () => {
     const messageStore = new MessageStore();
-    const seen = await messageStore.append({
-      userId: 'user-1',
-      catId: null,
-      content: 'question',
-      mentions: ['opus'],
-      timestamp: 100,
-      threadId: 'thread-1',
-    });
-    await messageStore.append({
-      userId: 'user-1',
-      catId: null,
-      content: 'late correction',
-      mentions: ['opus'],
-      timestamp: 150,
-      threadId: 'thread-1',
-    });
+    const seen = await messageStore.append(
+      canonicalTestMessageInput({
+        userId: 'user-1',
+        catId: null,
+        content: 'question',
+        mentions: ['opus'],
+        timestamp: 100,
+        threadId: 'thread-1',
+      }),
+    );
+    await messageStore.append(
+      canonicalTestMessageInput({
+        userId: 'user-1',
+        catId: null,
+        content: 'late correction',
+        mentions: ['opus'],
+        timestamp: 150,
+        threadId: 'thread-1',
+      }),
+    );
     const closureStore = new InMemoryFreshnessClosureStore();
     const enqueued = [];
     const deps = {
@@ -448,22 +471,26 @@ describe('F254 Phase E — route-parallel output commit', () => {
 
   it('publishes a tool-only audit record and offers a read-only supplement', async () => {
     const messageStore = new MessageStore();
-    const seen = await messageStore.append({
-      userId: 'user-1',
-      catId: null,
-      content: 'question',
-      mentions: ['opus'],
-      timestamp: 100,
-      threadId: 'thread-1',
-    });
-    await messageStore.append({
-      userId: 'user-1',
-      catId: null,
-      content: 'late correction',
-      mentions: ['opus'],
-      timestamp: 150,
-      threadId: 'thread-1',
-    });
+    const seen = await messageStore.append(
+      canonicalTestMessageInput({
+        userId: 'user-1',
+        catId: null,
+        content: 'question',
+        mentions: ['opus'],
+        timestamp: 100,
+        threadId: 'thread-1',
+      }),
+    );
+    await messageStore.append(
+      canonicalTestMessageInput({
+        userId: 'user-1',
+        catId: null,
+        content: 'late correction',
+        mentions: ['opus'],
+        timestamp: 150,
+        threadId: 'thread-1',
+      }),
+    );
     const closureStore = new InMemoryFreshnessClosureStore();
     const enqueued = [];
     const deps = {

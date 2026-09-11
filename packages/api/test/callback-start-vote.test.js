@@ -7,6 +7,7 @@ import assert from 'node:assert/strict';
 import { beforeEach, describe, test } from 'node:test';
 import Fastify from 'fastify';
 import './helpers/setup-cat-registry.js';
+import { adaptInvocationQueue } from './helpers/message-from-fixtures.js';
 
 describe('POST /api/callbacks/start-vote', () => {
   let registry;
@@ -125,8 +126,9 @@ describe('POST /api/callbacks/start-vote', () => {
       },
     });
 
-    assert.equal(persistedMessages.length, 1, 'should persist 1 notification message');
-    const msg = persistedMessages[0];
+    const persisted = messageStore.getByThread(thread.id, 10, 'user-1');
+    assert.equal(persisted.length, 1, 'should persist 1 notification message');
+    const msg = persisted[0];
     assert.ok(msg.content.includes('投票请求'), 'notification should contain vote prompt');
     assert.ok(msg.content.includes('[VOTE:'), 'notification should contain VOTE example');
     assert.equal(msg.catId, 'opus', 'catId should be the initiating cat');
@@ -276,7 +278,7 @@ describe('POST /api/callbacks/start-vote', () => {
     const { InvocationQueue } = await import('../dist/domains/cats/services/agents/invocation/InvocationQueue.js');
 
     const invocationRecords = [];
-    const invocationQueue = new InvocationQueue();
+    const invocationQueue = adaptInvocationQueue(new InvocationQueue());
     const app = Fastify();
     await app.register(callbacksRoutes, {
       registry,
@@ -307,7 +309,7 @@ describe('POST /api/callbacks/start-vote', () => {
       invocationQueue,
       queueProcessor: {
         onInvocationComplete: async () => {},
-        tryAutoExecute: async () => {},
+        requestDrain: async () => {},
         registerEntryCompleteHook: () => {},
         unregisterEntryCompleteHook: () => {},
       },
@@ -366,7 +368,7 @@ describe('POST /api/callbacks/start-vote', () => {
     const { InvocationQueue } = await import('../dist/domains/cats/services/agents/invocation/InvocationQueue.js');
 
     const dispatchedCats = [];
-    const invocationQueue = new InvocationQueue();
+    const invocationQueue = adaptInvocationQueue(new InvocationQueue());
     const app = Fastify();
     await app.register(callbacksRoutes, {
       registry,
@@ -397,7 +399,7 @@ describe('POST /api/callbacks/start-vote', () => {
       invocationQueue,
       queueProcessor: {
         onInvocationComplete: async () => {},
-        tryAutoExecute: async () => {},
+        requestDrain: async () => {},
         registerEntryCompleteHook: () => {},
         unregisterEntryCompleteHook: () => {},
       },
@@ -423,6 +425,14 @@ describe('POST /api/callbacks/start-vote', () => {
     // At least the queue should have been populated or fallback dispatch triggered
     const dispatched = queueEntries.length > 0 || dispatchedCats.length > 0;
     assert.ok(dispatched, 'voter cats should be dispatched after start-vote');
+    const [notification] = messageStore.getByThread(thread.id, 10, 'user-1');
+    assert.ok(notification, 'vote notification must be durable');
+    assert.equal(notification.deliveryStatus, undefined, 'Agent speech remains ordinary published History');
+    assert.deepEqual(notification.lifecycle.dispatchRefs, []);
+    assert.ok(
+      queueEntries.every((entry) => entry.payload.messageId === notification.id),
+      'every voter row must bind the exact atomically-published notification',
+    );
   });
 
   test('voters > MAX_QUEUE_DEPTH: all enqueued (F175: agent source bypasses depth limit)', async () => {
@@ -430,7 +440,7 @@ describe('POST /api/callbacks/start-vote', () => {
     const { InvocationQueue } = await import('../dist/domains/cats/services/agents/invocation/InvocationQueue.js');
 
     const fallbackTargets = [];
-    const invocationQueue = new InvocationQueue();
+    const invocationQueue = adaptInvocationQueue(new InvocationQueue());
     const app = Fastify();
     await app.register(callbacksRoutes, {
       registry,
@@ -462,7 +472,7 @@ describe('POST /api/callbacks/start-vote', () => {
       invocationQueue,
       queueProcessor: {
         onInvocationComplete: async () => {},
-        tryAutoExecute: async () => {},
+        requestDrain: async () => {},
         registerEntryCompleteHook: () => {},
         unregisterEntryCompleteHook: () => {},
       },
@@ -485,102 +495,12 @@ describe('POST /api/callbacks/start-vote', () => {
 
     assert.equal(res.statusCode, 200);
 
-    // F175: agent source bypasses MAX_QUEUE_DEPTH — all 6 voters should be enqueued
+    // F175: agent source bypasses MAX_QUEUE_DEPTH — all voters share one source row.
     const queueEntries = invocationQueue.listAutoExecute?.(thread.id) ?? [];
-    assert.equal(queueEntries.length, 6, 'all 6 voters should be enqueued (agent bypasses depth limit)');
+    assert.equal(queueEntries.length, 1, 'all voters should share one source Queue row');
+    assert.deepEqual(queueEntries[0].targets, ['codex', 'gemini', 'sonnet', 'gpt52', 'spark', 'antig-opus']);
 
     // No fallback needed — all fit in queue
     assert.equal(fallbackTargets.length, 0, 'no fallback needed when agent source bypasses depth limit');
-  });
-
-  // F216 AC-D5: coalesced voters must NOT be counted as missed → no direct dispatch fallback.
-  test('coalesced voter does NOT trigger direct dispatch fallback (F216 AC-D5)', async () => {
-    const { callbacksRoutes } = await import('../dist/routes/callbacks.js');
-    const { InvocationQueue } = await import('../dist/domains/cats/services/agents/invocation/InvocationQueue.js');
-
-    const fallbackTargets = [];
-    const invocationQueue = new InvocationQueue();
-
-    // Pre-enqueue an entry for 'codex' from caller 'opus' — second handoff will coalesce.
-    invocationQueue.enqueue({
-      ownerAuthProvenance: 'unknown',
-      threadId: '', // placeholder — will be set by the real thread below
-      userId: 'user-1',
-      content: 'pre-existing task for codex',
-      source: 'agent',
-      targetCats: ['codex'],
-      intent: 'execute',
-      autoExecute: true,
-      callerCatId: 'opus',
-    });
-
-    const app = Fastify();
-    await app.register(callbacksRoutes, {
-      registry,
-      messageStore,
-      socketManager,
-      threadStore,
-      router: {
-        routeExecution: async function* () {
-          yield { type: 'done', catId: 'opus', timestamp: Date.now() };
-        },
-      },
-      invocationRecordStore: {
-        create: async (opts) => {
-          fallbackTargets.push(...opts.targetCats);
-          return { outcome: 'created', invocationId: `inv-${Date.now()}` };
-        },
-        update: async () => {},
-      },
-      invocationTracker: {
-        start: () => new AbortController(),
-        startAll: () => new AbortController(),
-        tryStartThreadAll: () => new AbortController(),
-        complete: () => {},
-        completeAll: () => {},
-        has: () => false,
-        getActiveSlots: () => [],
-      },
-      invocationQueue,
-      queueProcessor: {
-        onInvocationComplete: async () => {},
-        tryAutoExecute: async () => {},
-        registerEntryCompleteHook: () => {},
-        unregisterEntryCompleteHook: () => {},
-      },
-    });
-
-    const thread = threadStore.create('user-1', 'Test');
-
-    // Now enqueue with the real threadId so coalesce can find it
-    invocationQueue.enqueue({
-      ownerAuthProvenance: 'unknown',
-      threadId: thread.id,
-      userId: 'user-1',
-      content: 'pre-existing task for codex',
-      source: 'agent',
-      targetCats: ['codex'],
-      intent: 'execute',
-      autoExecute: true,
-      callerCatId: 'opus',
-    });
-
-    const { invocationId, callbackToken } = await registry.create('user-1', 'opus', thread.id);
-
-    const res = await app.inject({
-      method: 'POST',
-      url: '/api/callbacks/start-vote',
-      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
-      payload: {
-        question: 'Coalesce test?',
-        options: ['A', 'B'],
-        voters: ['codex', 'gemini'], // codex will coalesce, gemini will enqueue
-      },
-    });
-
-    assert.equal(res.statusCode, 200);
-    // 'codex' should have coalesced (not missed), 'gemini' should have enqueued (not missed).
-    // Neither should have triggered direct dispatch fallback.
-    assert.equal(fallbackTargets.length, 0, 'coalesced voter must NOT trigger direct fallback (AC-D5)');
   });
 });

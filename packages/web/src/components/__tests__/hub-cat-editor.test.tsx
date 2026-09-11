@@ -20,14 +20,13 @@ import {
   buildCatPayload,
   buildStrategyPayload,
   builtinAccountIdForClient,
+  carrierOptionsForClient,
   DEFAULT_ANTIGRAVITY_COMMAND_ARGS,
   filterProfiles,
   getAcpWarning,
   getCliEffortOptionsForClient,
   type HubCatEditorFormState,
   initialState,
-  isAcpOnlyClient,
-  showTransportSelector,
   splitCommandArgs,
   validateModelFormatForClient,
 } from '@/components/hub-cat-editor.model';
@@ -47,7 +46,6 @@ const emptyVoiceFields = {
 };
 
 const emptyAcpFields = {
-  acpEnabled: false,
   acpTransport: 'stdio' as const,
   acpCommand: '',
   acpStartupArgs: '',
@@ -186,7 +184,7 @@ describe('HubCatEditor', () => {
       cliConfigArgs: [],
       cliEffort: '',
       codexSpeed: '',
-      codexCarrier: '',
+      carrier: 'cli',
       provider: '',
       sessionChain: 'true',
       contextWindow: '',
@@ -261,6 +259,7 @@ describe('HubCatEditor', () => {
       id: 'runtime-antigravity',
       displayName: 'Runtime antigravity',
       clientId: 'antigravity',
+      carrier: 'cli',
       defaultModel: 'test-model',
       color: { primary: '#16a34a', secondary: '#bbf7d0' },
       mentionPatterns: ['@runtime-antigravity'],
@@ -419,10 +418,10 @@ describe('HubCatEditor', () => {
     );
     expect(document.body.textContent).toContain('当前 Client 无法自动探测上下文窗口');
 
-    await renderAdvancedRuntimeSection('openai', 'gpt-5.6-sol', { codexCarrier: 'app_server' });
+    await renderAdvancedRuntimeSection('openai', 'gpt-5.6-sol', { carrier: 'app_server' });
     expect(document.body.textContent).toContain('当前 Client 无法自动探测上下文窗口');
 
-    await renderAdvancedRuntimeSection('openai', 'gpt-5.6-sol', { codexCarrier: 'exec_json' });
+    await renderAdvancedRuntimeSection('openai', 'gpt-5.6-sol', { carrier: 'cli' });
     expect(document.body.textContent).not.toContain('当前 Client 无法自动探测上下文窗口');
   });
 
@@ -442,7 +441,7 @@ describe('HubCatEditor', () => {
     expect(document.body.textContent).toContain('当前 Client 无法自动探测上下文窗口；请填写正整数使用 Manual 模式。');
 
     // ACP bypasses the carrier entirely — no warning regardless of model
-    await renderAdvancedRuntimeSection('google', 'gemini-unknown-custom', { acpEnabled: true });
+    await renderAdvancedRuntimeSection('google', 'gemini-unknown-custom', { carrier: 'acp' });
     expect(document.body.textContent).not.toContain('当前 Client 无法自动探测上下文窗口');
   });
 
@@ -571,7 +570,7 @@ describe('HubCatEditor', () => {
       commandArgs: '',
       cliConfigArgs: [],
       cliEffort: '',
-      codexCarrier: '',
+      carrier: 'cli',
       provider: '',
       sessionChain: 'true',
       contextWindow: '',
@@ -617,7 +616,7 @@ describe('HubCatEditor', () => {
       commandArgs: '',
       cliConfigArgs: [],
       cliEffort: '',
-      codexCarrier: '',
+      carrier: 'cli',
       provider: '',
       sessionChain: 'true',
       contextWindow: '',
@@ -645,7 +644,7 @@ describe('HubCatEditor', () => {
         clientId: 'acp',
         accountRef: 'claude',
         defaultModel: 'acp-model',
-        acpEnabled: true,
+        carrier: 'acp',
         acpCommand: 'custom-acp-agent',
         acpStartupArgs: '--acp',
       },
@@ -676,7 +675,7 @@ describe('HubCatEditor', () => {
       commandArgs: '',
       cliConfigArgs: [],
       cliEffort: '',
-      codexCarrier: '',
+      carrier: 'cli',
       provider: '',
       sessionChain: 'true',
       contextWindow: '',
@@ -739,7 +738,7 @@ describe('HubCatEditor', () => {
   });
 
   it('hides CLI-only extensions when the effective transport is ACP', async () => {
-    await renderAdvancedRuntimeSection('openai', 'gpt-5.6-sol', { acpEnabled: true });
+    await renderAdvancedRuntimeSection('openai', 'gpt-5.6-sol', { carrier: 'acp' });
     expect(container.querySelector('input[aria-label="CLI Effort"]')).toBeNull();
     expect(container.textContent).not.toContain('额外 CLI 参数');
   });
@@ -845,14 +844,15 @@ describe('HubCatEditor', () => {
       avatar: '/avatars/codex.png',
       roleDescription: 'review',
       personality: 'rigorous',
-      clientId: 'openai',
-      defaultModel: 'gpt-5.6-sol',
-      cli: { command: 'codex', outputFormat: 'json', effort: 'ultra', carrier: 'exec_json' },
+      clientId: 'opencode',
+      carrier: 'cli',
+      defaultModel: 'openai/gpt-5.6-sol',
+      cli: { command: 'opencode', outputFormat: 'json', effort: 'ultra' },
       cliConfigArgs: ['--config stale=true'],
     } as CatData;
     const form = {
       ...initialState(cat),
-      acpEnabled: true,
+      carrier: 'acp',
       acpCommand: 'codex-acp',
       acpStartupArgs: 'acp',
       cliEffort: 'ultra',
@@ -860,11 +860,12 @@ describe('HubCatEditor', () => {
     } as HubCatEditorFormState;
 
     const payload = buildCatPatchPayload(form, cat) as Record<string, unknown>;
-    expect(payload.cli).toEqual({ effort: null, carrier: null });
+    expect(payload.cli).toEqual({ effort: null });
     expect(payload.cliConfigArgs).toEqual([]);
+    expect(payload.carrier).toBe('acp');
   });
 
-  it('includes codexCarrier in the cli payload for openai cats', () => {
+  it('writes the canonical carrier at the top level', () => {
     const form = {
       catId: 'runtime-sol',
       name: 'Sol',
@@ -886,7 +887,7 @@ describe('HubCatEditor', () => {
       commandArgs: '',
       cliConfigArgs: [],
       cliEffort: '',
-      codexCarrier: 'app_server',
+      carrier: 'app_server',
       provider: '',
       sessionChain: 'true',
       contextWindow: '',
@@ -895,10 +896,11 @@ describe('HubCatEditor', () => {
     } as HubCatEditorFormState;
 
     const payload = buildCatPayload(form, null) as Record<string, unknown>;
-    expect(payload.cli).toEqual({ carrier: 'app_server' });
+    expect(payload.carrier).toBe('app_server');
+    expect(payload.cli).toBeUndefined();
   });
 
-  it('clears a stored carrier override when the form selects the env default', () => {
+  it('does not emit the legacy cli.carrier field', () => {
     const form = {
       catId: 'runtime-sol',
       name: 'Sol',
@@ -920,7 +922,7 @@ describe('HubCatEditor', () => {
       commandArgs: '',
       cliConfigArgs: [],
       cliEffort: '',
-      codexCarrier: '',
+      carrier: 'cli',
       provider: '',
       sessionChain: 'true',
       contextWindow: '',
@@ -937,48 +939,15 @@ describe('HubCatEditor', () => {
       avatar: '/avatars/sol.png',
       roleDescription: '旗舰推理与编码',
       personality: '',
-      cli: { command: 'codex', outputFormat: 'json', carrier: 'app_server' },
+      cli: { command: 'codex', outputFormat: 'json' },
     } as CatData;
 
     const payload = buildCatPayload(form, cat) as Record<string, unknown>;
-    expect(payload.cli).toEqual({ carrier: null });
-  });
-
-  it('ignores codexCarrier for non-openai clients', () => {
-    const form = {
-      catId: 'runtime-kimi',
-      name: 'Kimi',
-      displayName: 'Kimi',
-      variantLabel: '',
-      nickname: '',
-      avatar: '/avatars/kimi.png',
-      colorPrimary: '#7c3aed',
-      colorSecondary: '#7c3aed',
-      mentionPatterns: '@runtime-kimi',
-      roleDescription: '中文代码助手',
-      personality: '',
-      teamStrengths: '',
-      caution: '',
-      strengths: '',
-      clientId: 'kimi',
-      accountRef: 'kimi',
-      defaultModel: 'kimi-k2.5',
-      commandArgs: '',
-      cliConfigArgs: [],
-      cliEffort: '',
-      codexCarrier: 'app_server',
-      provider: '',
-      sessionChain: 'true',
-      contextWindow: '',
-      ...emptyAcpFields,
-      ...emptyVoiceFields,
-    } as HubCatEditorFormState;
-
-    const payload = buildCatPayload(form, null) as Record<string, unknown>;
+    expect(payload.carrier).toBe('cli');
     expect(payload.cli).toBeUndefined();
   });
 
-  it('shows the server-resolved effective carrier for openai cats', async () => {
+  it('shows the canonical carrier selector for openai cats', async () => {
     const form: HubCatEditorFormState = {
       catId: 'runtime-codex',
       name: '运行时缅因猫',
@@ -1000,7 +969,7 @@ describe('HubCatEditor', () => {
       commandArgs: '',
       cliConfigArgs: [],
       cliEffort: '',
-      codexCarrier: '',
+      carrier: 'cli',
       provider: '',
       sessionChain: 'true',
       contextWindow: '',
@@ -1015,18 +984,17 @@ describe('HubCatEditor', () => {
           modelOptions: [],
           availableProfiles: [],
           loadingProfiles: false,
-          effectiveCodexCarrier: { effective: 'app_server', source: 'env' },
           onChange: vi.fn(),
         }),
       );
     });
 
-    const effective = document.body.querySelector('[data-testid="codex-carrier-effective"]');
-    expect(effective?.textContent).toContain('App Server');
-    expect(effective?.textContent).toContain('全局环境变量');
+    const selector = document.body.querySelector('[aria-label="接入方式"]') as HTMLSelectElement | null;
+    expect(selector).not.toBeNull();
+    expect(Array.from(selector?.options ?? []).map((option) => option.textContent)).toEqual(['CLI', 'App Server']);
   });
 
-  it('does not persist codexCarrier when the ACP transport is enabled', () => {
+  it('persists ACP as the canonical carrier', () => {
     const form = {
       catId: 'runtime-codex-acp',
       name: 'ACP 缅因猫',
@@ -1042,29 +1010,29 @@ describe('HubCatEditor', () => {
       teamStrengths: '',
       caution: '',
       strengths: '',
-      clientId: 'openai',
-      accountRef: 'codex',
-      defaultModel: 'gpt-5.4',
+      clientId: 'opencode',
+      accountRef: 'opencode',
+      defaultModel: 'openai/gpt-5.4',
       commandArgs: '',
       cliConfigArgs: [],
       cliEffort: '',
-      codexCarrier: 'app_server',
+      carrier: 'acp',
       provider: '',
       sessionChain: 'true',
       contextWindow: '',
       ...emptyAcpFields,
       ...emptyVoiceFields,
-      acpEnabled: true,
-      acpCommand: 'codex',
+      acpCommand: 'opencode',
       acpStartupArgs: 'acp',
     } as HubCatEditorFormState;
 
     const payload = buildCatPayload(form, null) as Record<string, unknown>;
     expect(payload.acp).toBeDefined();
+    expect(payload.carrier).toBe('acp');
     expect(payload.cli).toBeUndefined();
   });
 
-  it('hides the carrier selector under ACP or cloud-only dispatch', async () => {
+  it('keeps the carrier selector visible as the single access-mode truth', async () => {
     const form: HubCatEditorFormState = {
       catId: 'runtime-codex',
       name: '运行时缅因猫',
@@ -1086,7 +1054,7 @@ describe('HubCatEditor', () => {
       commandArgs: '',
       cliConfigArgs: [],
       cliEffort: '',
-      codexCarrier: '',
+      carrier: 'cli',
       provider: '',
       sessionChain: 'true',
       contextWindow: '',
@@ -1094,21 +1062,6 @@ describe('HubCatEditor', () => {
       ...emptyVoiceFields,
     };
 
-    // ACP enabled → AcpAgentService wins in the assembly; carrier is a lie.
-    await act(async () => {
-      root.render(
-        React.createElement(AccountSection, {
-          form: { ...form, acpEnabled: true },
-          modelOptions: [],
-          availableProfiles: [],
-          loadingProfiles: false,
-          onChange: vi.fn(),
-        }),
-      );
-    });
-    expect(document.body.textContent).not.toContain('接入方式（Carrier）');
-
-    // Cloud-only (cli removed) → no local Codex dispatch at all.
     await act(async () => {
       root.render(
         React.createElement(AccountSection, {
@@ -1116,12 +1069,11 @@ describe('HubCatEditor', () => {
           modelOptions: [],
           availableProfiles: [],
           loadingProfiles: false,
-          codexLocalCapable: false,
           onChange: vi.fn(),
         }),
       );
     });
-    expect(document.body.textContent).not.toContain('接入方式（Carrier）');
+    expect(document.body.querySelector('[aria-label="接入方式"]')).not.toBeNull();
   });
 
   it('preserves a provider-native effort when patching an older OpenAI model', () => {
@@ -1146,7 +1098,7 @@ describe('HubCatEditor', () => {
       commandArgs: '',
       cliConfigArgs: [],
       cliEffort: 'ultra',
-      codexCarrier: '',
+      carrier: 'cli',
       provider: '',
       sessionChain: 'true',
       contextWindow: '',
@@ -1207,12 +1159,11 @@ describe('HubCatEditor', () => {
       commandArgs: '',
       cliConfigArgs: [],
       cliEffort: '',
-      codexCarrier: '',
       provider: 'anthropic',
       sessionChain: 'true',
       contextWindow: '',
       ...emptyVoiceFields,
-      acpEnabled: true,
+      carrier: 'acp',
       mcpSupport: true,
       acpTransport: 'stdio',
       acpCommand: 'opencode',
@@ -1251,12 +1202,11 @@ describe('HubCatEditor', () => {
       commandArgs: '',
       cliConfigArgs: [],
       cliEffort: '',
-      codexCarrier: '',
       provider: 'anthropic',
       sessionChain: 'true',
       contextWindow: '',
       ...emptyVoiceFields,
-      acpEnabled: true,
+      carrier: 'acp',
       mcpSupport: true,
       acpTransport: 'stdio',
       acpCommand: 'opencode',
@@ -1287,36 +1237,32 @@ describe('HubCatEditor', () => {
     });
   });
 
-  it('showTransportSelector for dual-transport clients (opencode, google, kimi)', () => {
-    expect(showTransportSelector('opencode')).toBe(true);
-    expect(showTransportSelector('google')).toBe(true);
-    expect(showTransportSelector('kimi')).toBe(true);
-    expect(showTransportSelector('acp')).toBe(false);
-    expect(showTransportSelector('anthropic')).toBe(false);
-    expect(showTransportSelector('openai')).toBe(false);
-    expect(showTransportSelector('antigravity')).toBe(false);
+  it('exposes the canonical carrier matrix per client', () => {
+    expect(carrierOptionsForClient('anthropic').map((option) => option.value)).toEqual(['cli', 'sdk']);
+    expect(carrierOptionsForClient('openai').map((option) => option.value)).toEqual(['cli', 'app_server']);
+    expect(carrierOptionsForClient('opencode').map((option) => option.value)).toEqual(['cli', 'acp']);
+    expect(carrierOptionsForClient('acp').map((option) => option.value)).toEqual(['acp']);
   });
 
-  it('isAcpOnlyClient identifies generic ACP client', () => {
-    expect(isAcpOnlyClient('acp')).toBe(true);
-    expect(isAcpOnlyClient('opencode')).toBe(false);
-    expect(isAcpOnlyClient('anthropic')).toBe(false);
+  it('seeds a create draft with the first carrier supported by its client', () => {
+    expect(initialState(null, { clientId: 'acp' }).carrier).toBe('acp');
+    expect(initialState(null, { clientId: 'openai' }).carrier).toBe('cli');
   });
 
   it('getAcpWarning returns kimi login warning when kimi + ACP', () => {
-    const warning = getAcpWarning('kimi', true);
+    const warning = getAcpWarning('kimi', 'acp');
     expect(warning).toBeTruthy();
     expect(warning).toContain('kimi login');
   });
 
   it('getAcpWarning returns null for kimi when ACP disabled', () => {
-    expect(getAcpWarning('kimi', false)).toBeNull();
+    expect(getAcpWarning('kimi', 'cli')).toBeNull();
   });
 
   it('getAcpWarning returns null for non-kimi clients', () => {
-    expect(getAcpWarning('opencode', true)).toBeNull();
-    expect(getAcpWarning('google', true)).toBeNull();
-    expect(getAcpWarning('anthropic', true)).toBeNull();
+    expect(getAcpWarning('opencode', 'acp')).toBeNull();
+    expect(getAcpWarning('google', 'acp')).toBeNull();
+    expect(getAcpWarning('anthropic', 'sdk')).toBeNull();
   });
 
   it('buildCatPayload forces ACP transport for generic acp client', () => {
@@ -1341,12 +1287,11 @@ describe('HubCatEditor', () => {
       commandArgs: '',
       cliConfigArgs: [],
       cliEffort: '',
-      codexCarrier: '',
       provider: '',
       sessionChain: 'true',
       contextWindow: '',
       ...emptyVoiceFields,
-      acpEnabled: true,
+      carrier: 'acp',
       mcpSupport: true,
       acpTransport: 'stdio',
       acpCommand: 'deepseek-cli',
@@ -1393,12 +1338,11 @@ describe('HubCatEditor', () => {
       commandArgs: '',
       cliConfigArgs: [],
       cliEffort: '',
-      codexCarrier: '',
       provider: '',
       sessionChain: 'true',
       contextWindow: '',
       ...emptyVoiceFields,
-      acpEnabled: true,
+      carrier: 'acp',
       mcpSupport: true,
       acpTransport: 'stdio',
       acpCommand: 'opencode',
@@ -1452,12 +1396,11 @@ describe('HubCatEditor', () => {
       commandArgs: '',
       cliConfigArgs: [],
       cliEffort: '',
-      codexCarrier: '',
       provider: '',
       sessionChain: 'true',
       contextWindow: '',
       ...emptyVoiceFields,
-      acpEnabled: true,
+      carrier: 'acp',
       mcpSupport: true,
       acpTransport: 'stdio',
       acpCommand: 'kimi',
@@ -1509,12 +1452,11 @@ describe('HubCatEditor', () => {
       commandArgs: '',
       cliConfigArgs: [],
       cliEffort: '',
-      codexCarrier: '',
       provider: '',
       sessionChain: 'true',
       contextWindow: '',
       ...emptyVoiceFields,
-      acpEnabled: true,
+      carrier: 'acp',
       mcpSupport: true,
       acpTransport: 'stdio',
       acpCommand: 'some-acp-agent',
@@ -2044,8 +1986,8 @@ describe('HubCatEditor', () => {
     });
     await flushEffects();
 
-    expect(document.body.textContent).toContain('Transport');
-    await changeField(queryField(container, 'select[aria-label="Transport"]'), 'acp', 'change');
+    expect(document.body.textContent).toContain('接入方式');
+    await changeField(queryField(container, 'select[aria-label="接入方式"]'), 'acp', 'change');
     expect(document.body.textContent).toContain('ACP Command');
 
     await changeField(queryField(container, 'input[aria-label="Name"]'), 'OpenCode ACP');
@@ -2074,6 +2016,7 @@ describe('HubCatEditor', () => {
       name: 'opencode-acp',
       displayName: 'OpenCode ACP',
       clientId: 'opencode',
+      carrier: 'acp',
       accountRef: 'claude-key',
       provider: 'anthropic',
       defaultModel: 'claude-opus-4-6',
@@ -2133,9 +2076,9 @@ describe('HubCatEditor', () => {
     });
     await flushEffects();
 
-    expect(queryField<HTMLSelectElement>(container, 'select[aria-label="Transport"]').value).toBe('acp');
+    expect(queryField<HTMLSelectElement>(container, 'select[aria-label="接入方式"]').value).toBe('acp');
     await changeField(queryField<HTMLSelectElement>(container, 'select[aria-label="Client"]'), 'anthropic', 'change');
-    expect(document.body.querySelector('select[aria-label="Transport"]')).toBeNull();
+    expect(queryField<HTMLSelectElement>(container, 'select[aria-label="接入方式"]').value).toBe('cli');
 
     const saveButton = Array.from(document.body.querySelectorAll('button')).find(
       (button) => button.textContent === '保存',
@@ -2151,7 +2094,8 @@ describe('HubCatEditor', () => {
     expect(patchCall).toBeTruthy();
     const payload = JSON.parse(String(patchCall?.[1]?.body));
     expect(payload.clientId).toBe('anthropic');
-    expect(payload.acp).toBeNull();
+    expect(payload.carrier).toBe('cli');
+    expect(payload.acp).toBeUndefined();
   });
 
   it('resets default ACP command and args when switching between dual-transport clients', async () => {
@@ -2160,6 +2104,7 @@ describe('HubCatEditor', () => {
       name: 'opencode-acp',
       displayName: 'OpenCode ACP',
       clientId: 'opencode',
+      carrier: 'acp',
       accountRef: 'claude-key',
       provider: 'anthropic',
       defaultModel: 'claude-opus-4-6',
@@ -2233,9 +2178,11 @@ describe('HubCatEditor', () => {
     });
     await flushEffects();
 
-    expect(queryField<HTMLSelectElement>(container, 'select[aria-label="Transport"]').value).toBe('acp');
+    expect(queryField<HTMLSelectElement>(container, 'select[aria-label="接入方式"]').value).toBe('acp');
     await changeField(queryField<HTMLSelectElement>(container, 'select[aria-label="Client"]'), 'google', 'change');
     await flushEffects();
+    expect(queryField<HTMLSelectElement>(container, 'select[aria-label="接入方式"]').value).toBe('cli');
+    await changeField(queryField<HTMLSelectElement>(container, 'select[aria-label="接入方式"]'), 'acp', 'change');
     await changeField(
       queryField<HTMLSelectElement>(container, 'select[aria-label="认证信息"]'),
       'gemini-oauth',

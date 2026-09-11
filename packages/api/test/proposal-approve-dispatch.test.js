@@ -89,12 +89,18 @@ describe('F128 approve dispatch — initialMessage routing', () => {
 
     const entries = invocationQueue.list(body.threadId, 'alice');
     assert.equal(entries.length, 1);
-    assert.ok(entries[0].content.startsWith('Kick this off'), 'enqueued content should start with user-typed content');
-    assert.deepEqual(entries[0].targetCats, ['opus']);
-    assert.equal(entries[0].intent, 'execute');
-    assert.equal(entries[0].ownerAuthProvenance, 'strict');
-    assert.ok(entries[0].messageId);
-    const stored = await ctx.messageStore.getById(entries[0].messageId);
+    assert.ok(
+      entries[0].payload.content.startsWith('Kick this off'),
+      'enqueued content should start with user-typed content',
+    );
+    assert.deepEqual(
+      entries.flatMap((entry) => entry.targets),
+      ['opus'],
+    );
+    assert.equal(entries[0].execution.intent, 'execute');
+    assert.equal(entries[0].execution.ownerAuthProvenance, 'strict');
+    assert.ok(entries[0].payload.messageId);
+    const stored = await ctx.messageStore.getById(entries[0].payload.messageId);
     assert.equal(stored.deliveryStatus, 'queued');
     assert.deepEqual(stored.mentions, ['opus']);
     const timeline = await ctx.messageStore.getByThread(body.threadId, 20, 'alice', {
@@ -151,12 +157,12 @@ describe('F128 approve dispatch — initialMessage routing', () => {
     const entries = invocationQueue.list(body.threadId, 'alice');
     assert.equal(entries.length, 1);
     assert.deepEqual(
-      entries[0].targetCats,
+      entries.flatMap((entry) => entry.targets),
       ['kimi'],
       'dispatch wakes ONLY preferredCats[0] (first cat); subsequent cats are driven by cat-side @-mentions ("他们自己决定下一个要把谁叫出来" — owner spec 2026-05-27)',
     );
-    assert.equal(entries[0].intent, 'execute', 'first-cat dispatch is always serial (intent execute)');
-    const stored = await ctx.messageStore.getById(entries[0].messageId);
+    assert.equal(entries[0].execution.intent, 'execute', 'first-cat dispatch is always serial (intent execute)');
+    const stored = await ctx.messageStore.getById(entries[0].payload.messageId);
     assert.deepEqual(
       stored.mentions,
       ['kimi'],
@@ -203,7 +209,11 @@ describe('F128 approve dispatch — initialMessage routing', () => {
     assert.equal(res.statusCode, 200);
     const body = JSON.parse(res.body);
     const entries = invocationQueue.list(body.threadId, 'alice');
-    assert.equal(entries[0].intent, 'ideate', 'explicit #ideate must override the proposal-card serial default');
+    assert.equal(
+      entries[0].execution.intent,
+      'ideate',
+      'explicit #ideate must override the proposal-card serial default',
+    );
   });
 
   test('approve injects "## 主 Thread" header into sub-thread first message (fork-and-return loop)', async () => {
@@ -244,7 +254,7 @@ describe('F128 approve dispatch — initialMessage routing', () => {
     const body = JSON.parse(res.body);
     const entries = invocationQueue.list(body.threadId, 'alice');
     assert.equal(entries.length, 1);
-    const enqueued = entries[0].content;
+    const enqueued = entries[0].payload.content;
     assert.ok(
       enqueued.includes('## 主 Thread'),
       `enqueued content must include "## 主 Thread" header; got:\n${enqueued}`,
@@ -326,10 +336,10 @@ describe('F128 approve dispatch — initialMessage routing', () => {
     const body = JSON.parse(res.body);
     const entries = invocationQueue.list(body.threadId, 'alice');
     assert.deepEqual(
-      entries[0].targetCats,
+      entries.flatMap((entry) => entry.targets),
       ['kimi'],
       'preferredCats[0]=kimi wakes first, even though message body @s @codex — message @s are prompt-level narrative, dispatch follows card order',
     );
-    assert.equal(entries[0].intent, 'execute', 'first-cat dispatch is always serial');
+    assert.equal(entries[0].execution.intent, 'execute', 'first-cat dispatch is always serial');
   });
 });

@@ -8,7 +8,11 @@
 import assert from 'node:assert/strict';
 import { beforeEach, describe, test } from 'node:test';
 import Fastify from 'fastify';
-import { makeQueuedMessageCustody } from './helpers/queued-message-custody.js';
+import {
+  adaptInvocationQueue,
+  adaptMessageStore,
+  appendTestLifecycleResponseSource,
+} from './helpers/message-from-fixtures.js';
 import './helpers/setup-cat-registry.js';
 
 // Mock SocketManager
@@ -73,7 +77,6 @@ describe('Callback Routes', () => {
   let featIndexProvider;
   let labelStore;
   let invocationQueue;
-  let queueCustodyCoordinator;
 
   beforeEach(async () => {
     const { InvocationRegistry } = await import(
@@ -85,12 +88,11 @@ describe('Callback Routes', () => {
     const { BacklogStore } = await import('../dist/domains/cats/services/stores/ports/BacklogStore.js');
 
     registry = new InvocationRegistry();
-    messageStore = new MessageStore();
+    messageStore = adaptMessageStore(new MessageStore());
     threadStore = new ThreadStore();
     taskStore = new TaskStore();
     backlogStore = new BacklogStore();
     invocationQueue = undefined;
-    queueCustodyCoordinator = undefined;
     const { createLabelStore } = await import('../dist/domains/cats/services/stores/factories/LabelStoreFactory.js');
     labelStore = createLabelStore();
     socketManager = createMockSocketManager();
@@ -172,11 +174,54 @@ describe('Callback Routes', () => {
     if (invocationQueue !== undefined) {
       options.invocationQueue = invocationQueue;
     }
-    if (queueCustodyCoordinator !== undefined) {
-      options.queueCustodyCoordinator = queueCustodyCoordinator;
-    }
     await app.register(callbacksRoutes, options);
     return app;
+  }
+
+  async function createQueuedReadProcessor({
+    threadId,
+    invocationId,
+    parentInvocationId = invocationId,
+    catId = 'opus',
+    userId = 'user-1',
+  }) {
+    const { QueueProcessor } = await import('../dist/domains/cats/services/agents/invocation/QueueProcessor.js');
+    const { InvocationTracker } = await import('../dist/domains/cats/services/agents/invocation/InvocationTracker.js');
+    const invocationTracker = new InvocationTracker();
+    invocationTracker.start(threadId, catId, userId, [catId], parentInvocationId);
+    const response = appendTestLifecycleResponseSource(messageStore, {
+      invocationId,
+      catId,
+      threadId,
+      userId,
+      timestamp: 101,
+    });
+    assert.equal(
+      invocationTracker.bindLifecycleActiveRun(
+        {
+          threadId,
+          targetId: catId,
+          invocationId,
+          responseMessageId: response.id,
+          inputEntryIds: [],
+          inputMessageIds: [],
+          privateInputEntryIds: [],
+          startedAt: 101,
+        },
+        parentInvocationId,
+      ),
+      true,
+    );
+    const processor = new QueueProcessor({
+      queue: invocationQueue,
+      invocationTracker,
+      invocationRecordStore: {},
+      router: {},
+      socketManager,
+      messageStore,
+      log: { info() {}, warn() {}, error() {} },
+    });
+    return { processor, response, invocationTracker };
   }
 
   // ---- POST /api/callbacks/post-message ----
@@ -475,7 +520,7 @@ describe('Callback Routes', () => {
     });
   });
 
-  test('POST post-message checks queued continue-current work against the callback outer parent', async () => {
+  test('POST post-message does not turn queued continue-current work into a hidden send veto', async () => {
     const { DeliveryCursorStore } = await import('../dist/domains/cats/services/stores/ports/DeliveryCursorStore.js');
     const { InvocationQueue } = await import('../dist/domains/cats/services/agents/invocation/InvocationQueue.js');
     const deliveryCursorStore = new DeliveryCursorStore();
@@ -490,8 +535,9 @@ describe('Callback Routes', () => {
       threadId,
     });
     await deliveryCursorStore.ackSeenCursor('user-1', 'opus', threadId, baseline.id);
-    invocationQueue = new InvocationQueue();
+    invocationQueue = adaptInvocationQueue(new InvocationQueue());
     invocationQueue.enqueue({
+      kind: 'conversation_input',
       ownerAuthProvenance: 'strict',
       threadId,
       userId: 'user-1',
@@ -510,19 +556,20 @@ describe('Callback Routes', () => {
       method: 'POST',
       url: '/api/callbacks/post-message',
       headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
-      payload: { content: 'do not publish before reading current work' },
+      payload: { content: 'publish independently of unread work' },
     });
 
     assert.equal(response.statusCode, 200);
-    assert.equal(JSON.parse(response.body).status, 'held');
-    assert.equal(JSON.parse(response.body).reason, 'newer_messages_available');
+    assert.equal(JSON.parse(response.body).status, 'ok');
     assert.equal(
-      messageStore.getByThread(threadId, 10, 'user-1').some((message) => message.content.includes('do not publish')),
-      false,
+      messageStore
+        .getByThread(threadId, 10, 'user-1')
+        .some((message) => message.content.includes('publish independently')),
+      true,
     );
   });
 
-  test('POST post-message holds on unread visible other-cat stream-origin speech in play mode', async () => {
+  test('POST post-message remains a send primitive when other-cat speech is unread', async () => {
     const { DeliveryCursorStore } = await import('../dist/domains/cats/services/stores/ports/DeliveryCursorStore.js');
     const deliveryCursorStore = new DeliveryCursorStore();
     const thread = threadStore.create('user-1', 'Persisted cat freshness');
@@ -552,12 +599,17 @@ describe('Callback Routes', () => {
       method: 'POST',
       url: '/api/callbacks/post-message',
       headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
-      payload: { content: 'must read the cat answer first' },
+      payload: { content: 'send without an inbox side effect' },
     });
 
     assert.equal(response.statusCode, 200);
-    assert.equal(JSON.parse(response.body).status, 'held');
-    assert.equal(JSON.parse(response.body).reason, 'newer_messages_available');
+    assert.equal(JSON.parse(response.body).status, 'ok');
+    assert.equal(
+      messageStore
+        .getByThread(thread.id, 10, 'user-1')
+        .some((message) => message.content === 'send without an inbox side effect'),
+      true,
+    );
   });
 
   test('POST post-message rejects auth and durable child scope mismatch', async () => {
@@ -1080,7 +1132,7 @@ describe('Callback Routes', () => {
     );
   });
 
-  test('POST post-message single content @mention ignores extra explicit targetCats (A2A fail-closed)', async () => {
+  test('POST post-message content @mention outside declared targetCats → HELD (routing mismatch)', async () => {
     const app = await createApp();
     const { invocationId, callbackToken } = await registry.create('user-1', 'opus');
 
@@ -1095,17 +1147,14 @@ describe('Callback Routes', () => {
     });
 
     assert.equal(response.statusCode, 200);
-
-    const recent = messageStore.getRecent(10);
-    assert.equal(recent.length, 1);
-    // Single content mention should win; extras from explicit targetCats are pruned.
-    const mentions = recent[0].mentions;
-    assert.ok(mentions.includes('codex'), 'content @mention should be included');
-    assert.equal(mentions.includes('gpt52'), false, 'extra explicit targetCats should be pruned');
-    assert.deepEqual(recent[0].extra?.targetCats, ['gpt52']);
+    const body = JSON.parse(response.body);
+    assert.equal(body.status, 'held', 'declared/parsed mismatch must be HELD, not silently arbitrated');
+    assert.equal(body.reason, 'routing_mismatch');
+    assert.deepEqual(body.unexpectedTargets, ['codex']);
+    assert.equal(messageStore.getRecent(10).length, 0, 'held message must not be stored');
   });
 
-  test('POST post-message keeps merged targets when content has multiple @mentions', async () => {
+  test('POST post-message multi-mention content outside declared targetCats → HELD (routing mismatch)', async () => {
     const app = await createApp();
     const { invocationId, callbackToken } = await registry.create('user-1', 'opus');
 
@@ -1120,12 +1169,33 @@ describe('Callback Routes', () => {
     });
 
     assert.equal(response.statusCode, 200);
+    const body = JSON.parse(response.body);
+    assert.equal(body.status, 'held');
+    assert.equal(body.reason, 'routing_mismatch');
+    assert.deepEqual([...body.unexpectedTargets].sort(), ['codex', 'gpt52']);
+    assert.equal(messageStore.getRecent(10).length, 0);
+  });
+
+  test('POST post-message content @mention within declared targetCats narrows normally', async () => {
+    const app = await createApp();
+    const { invocationId, callbackToken } = await registry.create('user-1', 'opus');
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/callbacks/post-message',
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
+      payload: {
+        content: '同步一下\n@codex',
+        targetCats: ['codex', 'gpt52'],
+      },
+    });
+
+    assert.equal(response.statusCode, 200);
     const recent = messageStore.getRecent(10);
     assert.equal(recent.length, 1);
     const mentions = recent[0].mentions;
-    assert.ok(mentions.includes('codex'));
-    assert.ok(mentions.includes('gpt52'));
-    assert.ok(mentions.includes('gemini'), 'multi-mention content should still merge explicit targetCats');
+    assert.ok(mentions.includes('codex'), 'content @mention should be included');
+    assert.equal(mentions.includes('gpt52'), false, 'declared superset narrows to the single content mention');
   });
 
   test('POST post-message rejects cross-thread send to another user thread', async () => {
@@ -4300,7 +4370,7 @@ describe('Callback Routes', () => {
     const { InMemoryTurnExecutionStore } = await import(
       '../dist/domains/cats/services/stores/memory/InMemoryTurnExecutionStore.js'
     );
-    invocationQueue = new InvocationQueue();
+    invocationQueue = adaptInvocationQueue(new InvocationQueue());
     const callerThreadId = 'thread-cross-read-caller';
     const targetThreadId = 'thread-cross-read-target';
     const { invocationId, callbackToken } = await registry.create('user-1', 'opus', callerThreadId);
@@ -4332,6 +4402,7 @@ describe('Callback Routes', () => {
       deliveryStatus: 'queued',
     });
     const queued = invocationQueue.enqueue({
+      kind: 'conversation_input',
       ownerAuthProvenance: 'unknown',
       threadId: targetThreadId,
       userId: 'user-1',
@@ -4368,8 +4439,8 @@ describe('Callback Routes', () => {
       false,
     );
     const queuedSnapshot = invocationQueue.getEntrySnapshot(targetThreadId, 'user-1', queued.entry.id);
-    assert.deepEqual(queuedSnapshot.queuedSeenByCatIds, undefined);
-    assert.deepEqual(queuedSnapshot.queuedBodyExposures, undefined);
+    assert.equal(queuedSnapshot.delivery.seenAt, undefined);
+    assert.equal('bodyExposures' in queuedSnapshot.delivery, false);
     assert.equal(
       socketManager.getUserEvents().some((event) => event.event === 'queue_updated'),
       false,
@@ -4377,117 +4448,97 @@ describe('Callback Routes', () => {
     );
   });
 
-  test('durable queue exposure remains exact-readable after child seal/runtime replacement without cross-cat or cross-thread leakage', async () => {
-    const sourceThreadId = 'thread-durable-exposure-source';
-    const callerThreadId = 'thread-durable-exposure-caller';
-    const otherThreadId = 'thread-durable-exposure-other';
-    const opus = await registry.create('user-1', 'opus', callerThreadId);
-    const codex = await registry.create('user-1', 'codex', callerThreadId);
-    const before = messageStore.append({
+  test('full context keeps message-less typed custody readable and pending without manufacturing delivery evidence', async () => {
+    const { InvocationQueue } = await import('../dist/domains/cats/services/agents/invocation/InvocationQueue.js');
+    invocationQueue = adaptInvocationQueue(new InvocationQueue());
+    const threadId = 'thread-message-less-custody';
+    const queued = invocationQueue.enqueue({
+      kind: 'private_input',
+      ownerAuthProvenance: 'unknown',
+      threadId,
       userId: 'user-1',
-      catId: null,
-      content: 'published before',
-      mentions: [],
-      timestamp: 1000,
-      threadId: sourceThreadId,
+      content: 'structured A2A custody without a Message row',
+      source: 'agent',
+      callerCatId: 'codex',
+      sourceCategory: 'a2a',
+      targetCats: ['opus'],
+      intent: 'execute',
     });
-    const exposed = messageStore.append({
-      userId: 'user-1',
-      catId: null,
-      content: 'durably exposed queued body',
-      mentions: ['opus'],
-      timestamp: 2000,
-      threadId: sourceThreadId,
-      deliveryStatus: 'queued',
-      queueCustody: makeQueuedMessageCustody({
-        entryId: 'entry-durable-exposure',
-        allTargetCats: ['opus', 'codex'],
-        pendingTargetCats: ['opus', 'codex'],
-        seenByCatIds: ['opus'],
-        seenInvocationIdByCatId: { opus: 'sealed-child-opus' },
-        bodyExposures: [{ targetCatId: 'opus', invocationId: 'sealed-child-opus', seenAt: 2100 }],
-      }),
-    });
-    const after = messageStore.append({
-      userId: 'user-1',
-      catId: 'codex',
-      content: 'published after',
-      mentions: [],
-      timestamp: 3000,
-      threadId: sourceThreadId,
-    });
-    const foreign = messageStore.append({
-      userId: 'user-1',
-      catId: null,
-      content: 'other-thread exposed body',
-      mentions: ['opus'],
-      timestamp: 2500,
-      threadId: otherThreadId,
-      deliveryStatus: 'queued',
-      queueCustody: makeQueuedMessageCustody({
-        entryId: 'entry-other-thread',
-        allTargetCats: ['opus'],
-        pendingTargetCats: ['opus'],
-        seenByCatIds: ['opus'],
-        seenInvocationIdByCatId: { opus: 'sealed-child-other' },
-        bodyExposures: [{ targetCatId: 'opus', invocationId: 'sealed-child-other', seenAt: 2550 }],
-      }),
-    });
-    const custodyBefore = structuredClone(messageStore.getById(exposed.id).queueCustody);
+    const { invocationId, callbackToken } = await registry.create('user-1', 'opus', threadId);
     const app = await createApp();
 
-    for (let attempt = 0; attempt < 2; attempt += 1) {
-      const full = await app.inject({
-        method: 'GET',
-        url: `/api/callbacks/thread-context?threadId=${sourceThreadId}&responseMode=full&limit=20`,
-        headers: { 'x-invocation-id': opus.invocationId, 'x-callback-token': opus.callbackToken },
-      });
-      assert.equal(full.statusCode, 200, full.body);
-      const messages = JSON.parse(full.body).messages;
-      assert.deepEqual(
-        messages.map((message) => message.id),
-        [before.id, exposed.id, after.id],
-        'full history must preserve chronological position and exclude another thread',
-      );
-      const projected = messages.find((message) => message.id === exposed.id);
-      assert.equal(projected.speaker, 'co-creator');
-      assert.equal(projected.content, exposed.content);
-      assert.ok(!messages.some((message) => message.id === foreign.id));
-    }
+    const response = await app.inject({
+      method: 'GET',
+      url: '/api/callbacks/thread-context?responseMode=full',
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
+    });
+
+    assert.equal(response.statusCode, 200, response.body);
     assert.deepEqual(
-      messageStore.getById(exposed.id).queueCustody,
-      custodyBefore,
-      'historical repeat reads must not mutate or re-ack queue custody',
+      JSON.parse(response.body).messages.map((message) => message.id),
+      [`queued:${queued.entry.id}`],
     );
-
-    const windowed = await app.inject({
-      method: 'GET',
-      url: `/api/callbacks/thread-context?threadId=${sourceThreadId}&messageId=${exposed.id}&before=1&after=1&responseMode=full`,
-      headers: { 'x-invocation-id': opus.invocationId, 'x-callback-token': opus.callbackToken },
-    });
-    assert.equal(windowed.statusCode, 200, windowed.body);
-    assert.deepEqual(
-      JSON.parse(windowed.body).messages.map((message) => message.id),
-      [before.id, exposed.id, after.id],
-    );
-
-    const otherCatFull = await app.inject({
-      method: 'GET',
-      url: `/api/callbacks/thread-context?threadId=${sourceThreadId}&responseMode=full&limit=20`,
-      headers: { 'x-invocation-id': codex.invocationId, 'x-callback-token': codex.callbackToken },
-    });
-    assert.equal(otherCatFull.statusCode, 200, otherCatFull.body);
-    assert.ok(!JSON.parse(otherCatFull.body).messages.some((message) => message.id === exposed.id));
-
-    const otherCatWindow = await app.inject({
-      method: 'GET',
-      url: `/api/callbacks/thread-context?threadId=${sourceThreadId}&messageId=${exposed.id}&responseMode=full`,
-      headers: { 'x-invocation-id': codex.invocationId, 'x-callback-token': codex.callbackToken },
-    });
-    assert.equal(otherCatWindow.statusCode, 404);
+    const snapshot = invocationQueue.getEntrySnapshot(threadId, 'user-1', queued.entry.id);
+    assert.equal(snapshot.status, 'queued');
+    assert.equal(snapshot.delivery.seenInvocationId, undefined);
+    assert.equal(snapshot.delivery.seenAt, undefined);
   });
 
-  // ---- F236 Track-1: responseMode=anchor|full on thread-context ----
+  test('full context omits an unadoptable conversation body without hiding readable History', async () => {
+    const { InvocationQueue } = await import('../dist/domains/cats/services/agents/invocation/InvocationQueue.js');
+    invocationQueue = adaptInvocationQueue(new InvocationQueue());
+    const threadId = 'thread-benign-adoption-race';
+    const { invocationId, callbackToken } = await registry.create('user-1', 'opus', threadId);
+    const before = messageStore.append({
+      userId: 'user-1',
+      catId: 'codex',
+      content: 'readable history before queued work',
+      mentions: [],
+      timestamp: 100,
+      threadId,
+    });
+    const admission = await invocationQueue.appendAndEnqueueDurable(
+      messageStore,
+      {
+        userId: 'user-1',
+        from: { kind: 'user', userId: 'user-1' },
+        content: 'queued body whose live run already changed',
+        mentions: ['opus'],
+        timestamp: 200,
+        threadId,
+        deliveryStatus: 'queued',
+      },
+      {
+        kind: 'conversation_input',
+        ownerAuthProvenance: 'strict',
+        threadId,
+        userId: 'user-1',
+        content: 'queued body whose live run already changed',
+        from: { kind: 'user', userId: 'user-1' },
+        targetCats: ['opus'],
+        authorIntentByCatId: {
+          opus: { requested: 'continue_current', boundParentInvocationId: invocationId },
+        },
+        intent: 'execute',
+      },
+    );
+    assert.equal(admission.outcome, 'enqueued');
+    const app = await createApp();
+
+    const response = await app.inject({
+      method: 'GET',
+      url: '/api/callbacks/thread-context?responseMode=full',
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
+    });
+
+    assert.equal(response.statusCode, 200, response.body);
+    assert.deepEqual(
+      JSON.parse(response.body).messages.map((message) => message.id),
+      [before.id],
+    );
+    assert.equal(invocationQueue.getEntrySnapshot(threadId, 'user-1', admission.entry.id)?.status, 'queued');
+    assert.equal(messageStore.getById(admission.message.id).deliveryStatus, 'queued');
+  });
 
   test('GET thread-context responseMode=full returns full content instead of preview (F236 Track-1)', async () => {
     const app = await createApp();
@@ -4622,17 +4673,17 @@ describe('Callback Routes', () => {
     invocationQueue = new InvocationQueue();
     const threadId = 'thread-f236-oversized-queued';
     const { invocationId, callbackToken } = await registry.create('user-1', 'opus', threadId);
-    const queued = invocationQueue.enqueue({
+    const queued = invocationQueue.enqueueDurableNow({
+      kind: 'conversation_input',
       ownerAuthProvenance: 'strict',
       threadId,
       userId: 'user-1',
       content: `queued-oversized-${'q'.repeat(80_000)}`,
-      source: 'user',
+      from: { kind: 'user', userId: 'user-1' },
       targetCats: ['opus'],
-      authorIntentByCatId: {
-        opus: { requested: 'continue_current', boundParentInvocationId: invocationId },
-      },
+      authorIntentByCatId: { opus: { requested: 'continue_current', boundParentInvocationId: invocationId } },
       intent: 'execute',
+      sourceId: 'unpersisted-oversized-work',
     });
     const app = await createApp();
 
@@ -4651,9 +4702,9 @@ describe('Callback Routes', () => {
     assert.equal('content' in body.messages[0], false);
     assert.equal('drillDown' in body.messages[0], false);
     assert.match(body.messages[0].drillUnavailableReason, /no persisted message anchor/);
-    assert.deepEqual(
-      invocationQueue.getEntrySnapshot(threadId, 'user-1', queued.entry.id).queuedSeenByCatIds ?? [],
-      [],
+    assert.equal(
+      'bodyExposures' in invocationQueue.getEntrySnapshot(threadId, 'user-1', queued.entry.id).delivery,
+      false,
     );
   });
 
@@ -4780,9 +4831,9 @@ describe('Callback Routes', () => {
     assert.ok(finalSeenCursor.includes(unread.at(-1).id));
   });
 
-  test('full thread-context projects published queued cat speech only once while recording queue read evidence', async () => {
+  test('full thread-context adopts published A2A custody and removes the delivered target from Queue', async () => {
     const { InvocationQueue } = await import('../dist/domains/cats/services/agents/invocation/InvocationQueue.js');
-    invocationQueue = new InvocationQueue();
+    invocationQueue = adaptInvocationQueue(new InvocationQueue());
     const threadId = 'thread-queued-cat-dedup';
     const stored = messageStore.append({
       userId: 'user-1',
@@ -4794,6 +4845,7 @@ describe('Callback Routes', () => {
       deliveryStatus: 'queued',
     });
     const queued = invocationQueue.enqueue({
+      kind: 'message_wake',
       ownerAuthProvenance: 'unknown',
       threadId,
       userId: 'user-1',
@@ -4805,8 +4857,9 @@ describe('Callback Routes', () => {
       intent: 'execute',
       callerCatId: 'codex',
     });
-    const app = await createApp();
     const { invocationId, callbackToken } = await registry.create('user-1', 'opus', threadId);
+    const { processor } = await createQueuedReadProcessor({ threadId, invocationId });
+    const app = await createApp({ queueProcessor: processor });
 
     const response = await app.inject({
       method: 'GET',
@@ -4818,27 +4871,38 @@ describe('Callback Routes', () => {
     const body = JSON.parse(response.body);
     assert.equal(body.messages.filter((message) => message.id === stored.id).length, 1);
     assert.equal(body.messages.find((message) => message.id === stored.id).content, stored.content);
-    assert.deepEqual(invocationQueue.getEntrySnapshot(threadId, 'user-1', queued.entry.id).queuedSeenByCatIds, [
-      'opus',
-    ]);
+    assert.equal(invocationQueue.getEntrySnapshot(threadId, 'user-1', queued.entry.id), null);
+    assert.equal(await invocationQueue.getDurableEntry(threadId, queued.entry.id), null);
+    const source = messageStore.getById(stored.id);
+    assert.equal(source.lifecycle.dispatchRefs.length, 1);
+    assert.equal(source.lifecycle.dispatchRefs[0].targetId, 'opus');
+    assert.equal(source.lifecycle.dispatchRefs[0].phase, 'dispatched');
+    assert.equal(typeof source.lifecycle.dispatchRefs[0].dispatchedAt, 'number');
   });
 
-  test('F254/F264: queued freshness reaches current full read while an unread sibling becomes successor work', async () => {
+  test('F254/F264: full queued read adopts only this target into the existing response', async () => {
     const { InvocationQueue } = await import('../dist/domains/cats/services/agents/invocation/InvocationQueue.js');
     const { checkFreshnessForPostMessage, createQueueChecker } = await import(
       '../dist/domains/cats/services/freshness/checkFreshnessForPostMessage.js'
-    );
-    const { QueuedMessageCustodyCoordinator, createInitialQueuedMessageCustody } = await import(
-      '../dist/domains/cats/services/agents/invocation/QueuedMessageCustodyCoordinator.js'
     );
     const { InMemoryTurnExecutionStore } = await import(
       '../dist/domains/cats/services/stores/memory/InMemoryTurnExecutionStore.js'
     );
     const queuedTelemetry = await import('../dist/domains/cats/services/freshness/freshness-queue-telemetry.js');
     queuedTelemetry.resetFreshnessQueueTelemetryForTest();
-    invocationQueue = new InvocationQueue();
+    invocationQueue = adaptInvocationQueue(new InvocationQueue());
     const { invocationId, callbackToken } = await registry.create('user-1', 'opus', 'thread-queued-d12a');
+    const storedQueuedMessage = messageStore.append({
+      userId: 'user-1',
+      catId: null,
+      content: 'queued body visible only in full read',
+      mentions: [],
+      timestamp: 100,
+      threadId: 'thread-queued-d12a',
+      deliveryStatus: 'queued',
+    });
     const queued = invocationQueue.enqueue({
+      kind: 'conversation_input',
       ownerAuthProvenance: 'unknown',
       threadId: 'thread-queued-d12a',
       userId: 'user-1',
@@ -4849,21 +4913,14 @@ describe('Callback Routes', () => {
         opus: { requested: 'continue_current', boundParentInvocationId: invocationId },
       },
       intent: 'execute',
+      messageId: storedQueuedMessage.id,
     });
-    const storedQueuedMessage = messageStore.append({
-      userId: 'user-1',
-      catId: null,
-      content: 'queued body visible only in full read',
-      mentions: [],
-      timestamp: 100,
-      threadId: 'thread-queued-d12a',
-      deliveryStatus: 'queued',
-      queueCustody: createInitialQueuedMessageCustody(queued.entry),
-    });
-    invocationQueue.backfillMessageId('thread-queued-d12a', 'user-1', queued.entry.id, storedQueuedMessage.id);
-    queueCustodyCoordinator = new QueuedMessageCustodyCoordinator({ messageStore });
     const turnExecutionStore = new InMemoryTurnExecutionStore();
-    const app = await createApp({ turnExecutionStore });
+    const { processor, response: lifecycleResponse } = await createQueuedReadProcessor({
+      threadId: 'thread-queued-d12a',
+      invocationId,
+    });
+    const app = await createApp({ turnExecutionStore, queueProcessor: processor });
     const freshnessDecision = await checkFreshnessForPostMessage({
       userId: 'user-1',
       catId: 'opus',
@@ -4876,17 +4933,33 @@ describe('Callback Routes', () => {
     });
     assert.equal(freshnessDecision.decision, 'held', 'queued current work must first surface as freshness');
     assert.equal(freshnessDecision.reason, 'queued_messages_pending');
-    const activeEntry = invocationQueue.getEntrySnapshot('thread-queued-d12a', 'user-1', queued.entry.id);
-    await queueCustodyCoordinator.requestReminder(activeEntry, 'opus', invocationId, 'reminder-read-boundary');
+    await invocationQueue.requestReminderDurable(
+      'thread-queued-d12a',
+      'user-1',
+      queued.entry.id,
+      'opus',
+      invocationId,
+      'reminder-read-boundary',
+    );
 
-    const missingLedgerResponse = await app.inject({
+    const changedRunResponse = await app.inject({
       method: 'GET',
       url: '/api/callbacks/thread-context?responseMode=full',
       headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
     });
-    assert.equal(missingLedgerResponse.statusCode, 409);
-    assert.equal(JSON.parse(missingLedgerResponse.body).code, 'TURN_EXECUTION_NOT_FOUND');
-    assert.deepEqual(messageStore.getById(storedQueuedMessage.id).queueCustody.bodyExposures, undefined);
+    assert.equal(changedRunResponse.statusCode, 200, changedRunResponse.body);
+    assert.equal(
+      JSON.parse(changedRunResponse.body).messages.some(
+        (message) => message.id === storedQueuedMessage.id || message.queueEntryId === queued.entry.id,
+      ),
+      false,
+      'a benign Active Run race omits only the queued body',
+    );
+    assert.equal(invocationQueue.getEntrySnapshot('thread-queued-d12a', 'user-1', queued.entry.id)?.status, 'queued');
+    assert.equal(
+      'bodyExposures' in invocationQueue.getEntrySnapshot('thread-queued-d12a', 'user-1', queued.entry.id).delivery,
+      false,
+    );
 
     await turnExecutionStore.createRunning({
       invocationId,
@@ -4897,6 +4970,21 @@ describe('Callback Routes', () => {
       executionKind: 'ordinary',
       startedAt: 101,
     });
+    const realAdoptExposedQueuedEntries = processor.adoptExposedQueuedEntries.bind(processor);
+    processor.adoptExposedQueuedEntries = async () => ({
+      outcome: 'rejected',
+      reason: 'persistence_unavailable',
+    });
+    const unavailableResponse = await app.inject({
+      method: 'GET',
+      url: '/api/callbacks/thread-context?responseMode=full',
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
+    });
+    assert.equal(unavailableResponse.statusCode, 503, unavailableResponse.body);
+    assert.equal(JSON.parse(unavailableResponse.body).code, 'QUEUE_ADOPTION_UNAVAILABLE');
+    assert.equal(invocationQueue.getEntrySnapshot('thread-queued-d12a', 'user-1', queued.entry.id)?.status, 'queued');
+    processor.adoptExposedQueuedEntries = realAdoptExposedQueuedEntries;
+
     const response = await app.inject({
       method: 'GET',
       url: '/api/callbacks/thread-context?responseMode=full',
@@ -4912,13 +5000,13 @@ describe('Callback Routes', () => {
     assert.equal(queuedMessage.id, storedQueuedMessage.id);
     assert.equal(
       messageStore.getById(storedQueuedMessage.id).deliveryStatus,
-      'queued',
-      'read must not mark queued messages delivered',
+      'delivered',
+      'the exact active child now owns the delivered input',
     );
     assert.equal(
       invocationQueue.list('thread-queued-d12a', 'user-1').some((entry) => entry.id === queued.entry.id),
-      true,
-      'read must not consume the queued work item',
+      false,
+      'the consumed target must leave the active Queue immediately',
     );
     assert.equal(
       invocationQueue.getQueuedFreshnessMessagesForCat('thread-queued-d12a', 'user-1', 'opus', {
@@ -4932,29 +5020,19 @@ describe('Callback Routes', () => {
       1,
       'first full contiguous read should count one queued_seen transition',
     );
-    assert.deepEqual(messageStore.getById(storedQueuedMessage.id).queueCustody.seenByCatIds, ['opus']);
+    assert.equal(queuedTelemetry.getFreshnessQueueTelemetrySnapshot().queuedHandledTotal, 1);
+    assert.equal(queuedTelemetry.getFreshnessQueueTelemetrySnapshot().queuedHandledFullyConsumedTotal, 1);
     assert.equal(
-      messageStore.getById(storedQueuedMessage.id).queueCustody.seenInvocationIdByCatId.opus,
-      invocationId,
-      'thread-context must persist exact read evidence before returning it',
+      await invocationQueue.getDurableEntry('thread-queued-d12a', queued.entry.id),
+      null,
+      'actual delivery removes the final pending target instead of leaving a Queue receipt tombstone',
     );
-    const firstExposure = messageStore.getById(storedQueuedMessage.id).queueCustody.bodyExposures?.[0];
-    assert.equal(firstExposure?.targetCatId, 'opus');
-    assert.equal(firstExposure?.invocationId, invocationId);
-    assert.equal(Number.isFinite(firstExposure?.seenAt), true);
-    assert.equal(
-      messageStore.getById(storedQueuedMessage.id).queueCustody.reminderAttempts[0].state,
-      'seen',
-      'exact body exposure must close the matching reminder attempt as seen',
-    );
-    const receiptUpdate = socketManager
-      .getUserEvents()
-      .find((event) => event.event === 'queue_updated' && event.data.action === 'queued_seen');
-    assert.ok(receiptUpdate, 'full body read must update the original timeline receipt without waiting for completion');
-    assert.equal(receiptUpdate.data.queue[0].queueReceipt.targets[0].state, 'seen');
-    assert.equal(receiptUpdate.data.queue[0].queueReceipt.targets[0].invocationId, invocationId);
-    assert.equal(receiptUpdate.data.queue[0].queueReceipt.targets[0].seenAt, firstExposure.seenAt);
-    assert.equal(receiptUpdate.data.queue[0].queueReceipt.reminderAttempts[0].state, 'seen');
+    assert.deepEqual(messageStore.getById(lifecycleResponse.id).lifecycle.inputMessageIds, [storedQueuedMessage.id]);
+    const [dispatchRef] = messageStore.getById(storedQueuedMessage.id).lifecycle.dispatchRefs;
+    assert.equal(dispatchRef.targetId, 'opus');
+    assert.equal(dispatchRef.phase, 'dispatched');
+    assert.equal(dispatchRef.statusMessageId, lifecycleResponse.id);
+    assert.equal(typeof dispatchRef.dispatchedAt, 'number');
 
     const secondResponse = await app.inject({
       method: 'GET',
@@ -4965,157 +5043,25 @@ describe('Callback Routes', () => {
     assert.equal(secondResponse.statusCode, 200);
     const secondBody = JSON.parse(secondResponse.body);
     const secondQueuedMessage = secondBody.messages.find((message) => message.queueEntryId === queued.entry.id);
-    assert.ok(secondQueuedMessage, 'queued_seen must not make unresolved queued body unreadable');
-    assert.equal(secondQueuedMessage.content, 'queued body visible only in full read');
+    assert.equal(secondQueuedMessage, undefined, 'an adopted target must not remain projected as Queue work');
+    assert.ok(
+      secondBody.messages.some(
+        (message) =>
+          message.id === storedQueuedMessage.id && message.content === 'queued body visible only in full read',
+      ),
+      'the original message remains readable from durable History',
+    );
     assert.equal(
       queuedTelemetry.getFreshnessQueueTelemetrySnapshot().queuedSeenTotal,
       1,
       'repeat full read should refresh evidence if needed but not double-count queued_seen',
     );
-    assert.deepEqual(
-      messageStore.getById(storedQueuedMessage.id).queueCustody.bodyExposures,
-      [firstExposure],
-      'repeat exposure by the same child must preserve the first exact seenAt',
-    );
-
-    const handled = invocationQueue.markQueuedHandledForCatAcrossUsers('thread-queued-d12a', 'opus', invocationId);
-    assert.equal(handled.length, 1, 'the exact reading invocation closes current-read custody');
-    assert.equal(invocationQueue.peekNextQueued('thread-queued-d12a', 'user-1'), null);
-
-    const unread = invocationQueue.enqueue({
-      ownerAuthProvenance: 'strict',
-      threadId: 'thread-queued-d12a',
-      userId: 'user-1',
-      content: 'unread before the parent ended',
-      source: 'user',
-      targetCats: ['opus'],
-      authorIntentByCatId: {
-        opus: { requested: 'continue_current', boundParentInvocationId: invocationId },
-      },
-      intent: 'execute',
-    });
-    invocationQueue.fallbackAuthorIntentsForParentAcrossUsers('thread-queued-d12a', 'opus', invocationId, 200);
-    assert.deepEqual(
-      invocationQueue.getQueuedBodyMessagesForCat('thread-queued-d12a', 'user-1', 'opus', invocationId),
-      [],
-      'an unread message must not leak back into its closed parent',
-    );
-    assert.equal(invocationQueue.peekNextQueued('thread-queued-d12a', 'user-1')?.id, unread.entry.id);
-    assert.equal(
-      invocationQueue.markProcessing('thread-queued-d12a', 'user-1')?.id,
-      unread.entry.id,
-      'the unread entry remains eligible for the typed successor path',
-    );
+    assert.equal(await invocationQueue.getDurableEntry('thread-queued-d12a', queued.entry.id), null);
   });
 
-  test('F167: full-context read binds an adopted managed hold to the active route before returning its body', async () => {
+  test('F254/F264: queued body adoption binds the exact child response in History', async () => {
     const { InvocationQueue } = await import('../dist/domains/cats/services/agents/invocation/InvocationQueue.js');
-    const { QueuedMessageCustodyCoordinator, createInitialQueuedMessageCustody } = await import(
-      '../dist/domains/cats/services/agents/invocation/QueuedMessageCustodyCoordinator.js'
-    );
-    const { InMemoryTurnExecutionStore } = await import(
-      '../dist/domains/cats/services/stores/memory/InMemoryTurnExecutionStore.js'
-    );
-    const { turnCustodyAdoptionRegistry } = await import('../dist/domains/ball-custody/TurnCustodyAdoptionRegistry.js');
-    turnCustodyAdoptionRegistry.resetForTest();
-    invocationQueue = new InvocationQueue();
-    const threadId = 'thread-adopt-managed-hold';
-    const { invocationId, callbackToken } = await registry.create('user-1', 'opus', threadId);
-    const queued = invocationQueue.enqueue({
-      ownerAuthProvenance: 'unknown',
-      threadId,
-      userId: 'user-1',
-      content: 'managed command completed',
-      source: 'connector',
-      sourceCategory: 'scheduled',
-      targetCats: ['opus'],
-      intent: 'execute',
-    });
-    const stored = messageStore.append({
-      userId: 'user-1',
-      catId: null,
-      content: queued.entry.content,
-      mentions: ['opus'],
-      timestamp: 100,
-      threadId,
-      deliveryStatus: 'queued',
-      source: {
-        connector: 'hold-ball',
-        label: '持球通知',
-        meta: { taskId: 'task-full-read-adopted', threadId, catId: 'opus', wakeWhen: true },
-      },
-      queueCustody: createInitialQueuedMessageCustody(queued.entry),
-    });
-    invocationQueue.backfillMessageId(threadId, 'user-1', queued.entry.id, stored.id);
-    queueCustodyCoordinator = new QueuedMessageCustodyCoordinator({ messageStore });
-    const turnExecutionStore = new InMemoryTurnExecutionStore();
-    await turnExecutionStore.createRunning({
-      invocationId,
-      parentInvocationId: invocationId,
-      threadId,
-      userId: 'user-1',
-      catId: 'opus',
-      executionKind: 'ordinary',
-      startedAt: 101,
-    });
-    const wake = {
-      kind: 'structured',
-      protocol: 'hold',
-      subjectKey: `ball:thread:${threadId}`,
-      holderCatId: 'opus',
-      sourceMessageId: stored.id,
-      taskId: 'task-full-read-adopted',
-    };
-    const queueProcessor = {
-      onInvocationComplete: async () => {},
-      tryAutoExecute: async () => {},
-      registerEntryCompleteHook: () => {},
-      unregisterEntryCompleteHook: () => {},
-      resolvePromptMessageCustodyWakes: async () => [wake],
-    };
-    const app = await createApp({ turnExecutionStore, queueProcessor });
-
-    const unbound = await app.inject({
-      method: 'GET',
-      url: '/api/callbacks/thread-context?responseMode=full',
-      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
-    });
-    assert.equal(unbound.statusCode, 409);
-    assert.equal(JSON.parse(unbound.body).code, 'TURN_CUSTODY_ADOPTION_UNAVAILABLE');
-
-    const adopted = [];
-    const unregister = turnCustodyAdoptionRegistry.register(invocationId, async (wakes) => adopted.push(...wakes));
-    let released = false;
-    try {
-      const response = await app.inject({
-        method: 'GET',
-        url: '/api/callbacks/thread-context?responseMode=full',
-        headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
-      });
-      assert.equal(response.statusCode, 200, response.body);
-      assert.ok(JSON.parse(response.body).messages.some((message) => message.id === stored.id));
-      assert.deepEqual(adopted, [wake]);
-
-      await unregister();
-      released = true;
-      const afterRelease = await app.inject({
-        method: 'GET',
-        url: '/api/callbacks/thread-context?responseMode=full',
-        headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
-      });
-      assert.equal(afterRelease.statusCode, 409);
-      assert.equal(JSON.parse(afterRelease.body).code, 'TURN_CUSTODY_ADOPTION_UNAVAILABLE');
-      assert.deepEqual(adopted, [wake], 'released route ownership must reject later adoption');
-    } finally {
-      if (!released) await unregister();
-      turnCustodyAdoptionRegistry.resetForTest();
-    }
-  });
-
-  test('F254/F264: queued body exposure and handled closure use the exact child invocation id', async () => {
-    const { InvocationQueue } = await import('../dist/domains/cats/services/agents/invocation/InvocationQueue.js');
-    invocationQueue = new InvocationQueue();
-    const app = await createApp();
+    invocationQueue = adaptInvocationQueue(new InvocationQueue());
     const outerParentInv = 'outer-parent-d12b-token';
     const { invocationId: innerInv, callbackToken } = await registry.create(
       'user-1',
@@ -5134,6 +5080,7 @@ describe('Callback Routes', () => {
     });
 
     const queued = invocationQueue.enqueue({
+      kind: 'conversation_input',
       ownerAuthProvenance: 'unknown',
       threadId: 'thread-queued-d12b-token',
       userId: 'user-1',
@@ -5146,6 +5093,12 @@ describe('Callback Routes', () => {
       intent: 'execute',
       messageId: storedQueuedMessage.id,
     });
+    const { processor, response: lifecycleResponse } = await createQueuedReadProcessor({
+      threadId: 'thread-queued-d12b-token',
+      invocationId: innerInv,
+      parentInvocationId: outerParentInv,
+    });
+    const app = await createApp({ queueProcessor: processor });
 
     const response = await app.inject({
       method: 'GET',
@@ -5160,31 +5113,24 @@ describe('Callback Routes', () => {
       'full read must include the queued body before marking seen',
     );
 
-    const parentHandled = invocationQueue.markQueuedHandledForCatAcrossUsers(
-      'thread-queued-d12b-token',
-      'opus',
-      outerParentInv,
-    );
-    assert.deepEqual(parentHandled, [], 'parent aggregate identity must not impersonate the child that read the body');
-    const handled = invocationQueue.markQueuedHandledForCatAcrossUsers('thread-queued-d12b-token', 'opus', innerInv);
-    assert.equal(handled.length, 1, 'exact child completion must close its queued_seen evidence');
-    assert.equal(handled[0].fullyConsumed, true);
-    assert.equal(
-      invocationQueue.list('thread-queued-d12b-token', 'user-1').some((entry) => entry.id === queued.entry.id),
-      false,
-      'handled closure should consume the queued entry when completion evidence uses the exact child id',
-    );
+    assert.equal(await invocationQueue.getDurableEntry('thread-queued-d12b-token', queued.entry.id), null);
+    const responseLifecycle = messageStore.getById(lifecycleResponse.id).lifecycle;
+    assert.equal(responseLifecycle.invocationId, innerInv);
+    assert.notEqual(responseLifecycle.invocationId, outerParentInv);
+    assert.deepEqual(responseLifecycle.inputEntryIds, [queued.entry.id]);
+    assert.deepEqual(responseLifecycle.inputMessageIds, [storedQueuedMessage.id]);
   });
 
   test('F254 D1.2a: sparse thread-context read does not include queued body or mark queued_seen', async () => {
     const { InvocationQueue } = await import('../dist/domains/cats/services/agents/invocation/InvocationQueue.js');
     const queuedTelemetry = await import('../dist/domains/cats/services/freshness/freshness-queue-telemetry.js');
     queuedTelemetry.resetFreshnessQueueTelemetryForTest();
-    invocationQueue = new InvocationQueue();
+    invocationQueue = adaptInvocationQueue(new InvocationQueue());
     const app = await createApp();
     const { invocationId, callbackToken } = await registry.create('user-1', 'opus', 'thread-queued-sparse');
 
     invocationQueue.enqueue({
+      kind: 'conversation_input',
       ownerAuthProvenance: 'unknown',
       threadId: 'thread-queued-sparse',
       userId: 'user-1',

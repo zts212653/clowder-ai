@@ -36,6 +36,8 @@ export interface PipelineContext {
   schedule?: ScheduleRunTiming;
   /** Phase 4 (AC-H1): deliver message to a thread */
   deliver?: (opts: DeliverOpts) => Promise<string>;
+  /** Cancel a scheduler-owned queued message that failed before Queue admission. */
+  cancelQueuedDelivery?: (messageId: string) => Promise<boolean>;
   /** Phase 4 (AC-H2): fetch web content with browser-automation routing */
   fetchContent?: (url: string, signal?: AbortSignal) => Promise<FetchResult>;
   /** Phase 4b: invoke a cat to handle a scheduled task (fire-and-forget) */
@@ -111,6 +113,7 @@ export async function executeTaskPipeline(ctx: PipelineContext): Promise<void> {
     isManualTrigger,
     schedule,
     deliver,
+    cancelQueuedDelivery,
     fetchContent,
     invokeTrigger,
     ballCustody,
@@ -249,6 +252,12 @@ export async function executeTaskPipeline(ctx: PipelineContext): Promise<void> {
             return result;
           }
         : undefined;
+      const cancellationAwareCancelQueuedDelivery = cancelQueuedDelivery
+        ? async (messageId: string): Promise<boolean> => {
+            if (!deliveredMessageIds.has(messageId)) executeController.signal.throwIfAborted();
+            return cancelQueuedDelivery(messageId);
+          }
+        : undefined;
       const cancellationAwareInvokeTrigger: ScheduleInvokeTrigger | undefined = invokeTrigger
         ? {
             trigger(...args: Parameters<ScheduleInvokeTrigger['trigger']>) {
@@ -283,6 +292,7 @@ export async function executeTaskPipeline(ctx: PipelineContext): Promise<void> {
             context: task.context,
             schedule,
             deliver: cancellationAwareDeliver,
+            cancelQueuedDelivery: cancellationAwareCancelQueuedDelivery,
             fetchContent: cancellationAwareFetch,
             invokeTrigger: cancellationAwareInvokeTrigger,
             ballCustody,

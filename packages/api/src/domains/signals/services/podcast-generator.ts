@@ -1,19 +1,10 @@
+import { randomUUID } from 'node:crypto';
 import { unlink, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import type { CatId, StudyArtifact } from '@cat-cafe/shared';
+import type { StudyArtifact } from '@cat-cafe/shared';
 import { createModuleLogger } from '../../../infrastructure/logger.js';
-import {
-  isTerminalDispositionEvent,
-  PerCatTerminalDispositionCollector,
-} from '../../cats/services/agents/invocation/PerCatTerminalDispositionCollector.js';
+import type { InvocationQueue } from '../../cats/services/agents/invocation/InvocationQueue.js';
 import type { QueueProcessor } from '../../cats/services/agents/invocation/QueueProcessor.js';
-import { requireInvocationRecordUpdate } from '../../cats/services/agents/invocation/require-invocation-record-update.js';
-import { ClaudeAgentService } from '../../cats/services/agents/providers/ClaudeAgentService.js';
-import type { AgentRouter } from '../../cats/services/agents/routing/AgentRouter.js';
-import { createA2ASlotTrackingBridge } from '../../cats/services/agents/routing/route-helpers.js';
-import type { InvocationTracker } from '../../cats/services/index.js';
-import type { AnyMessageStore } from '../../cats/services/stores/factories/MessageStoreFactory.js';
-import type { IInvocationRecordStore } from '../../cats/services/stores/ports/InvocationRecordStore.js';
 import { getVoiceBlockSynthesizer } from '../../cats/services/tts/VoiceBlockSynthesizer.js';
 import { StudyMetaService } from './study-meta-service.js';
 
@@ -32,15 +23,13 @@ export interface PodcastScript {
   readonly totalDuration: number;
 }
 
-/** Dependencies for invoking a cat via the existing message pipeline. */
+/** Queue-only dependency boundary for one private system input. */
 export interface ThreadInvokeDeps {
-  readonly messageStore: AnyMessageStore;
-  readonly router: AgentRouter;
-  readonly invocationRecordStore: IInvocationRecordStore;
-  readonly invocationTracker: InvocationTracker;
-  readonly queueProcessor?: Pick<QueueProcessor, 'markPromptMessagesSeen'> & {
-    enqueueRaw?: QueueProcessor['enqueueRaw'];
-  };
+  readonly invocationQueue: InvocationQueue;
+  readonly queueProcessor: Pick<
+    QueueProcessor,
+    'registerEntryCompleteHook' | 'unregisterEntryCompleteHook' | 'requestDrain'
+  >;
 }
 
 export interface PodcastRequest {
@@ -52,8 +41,8 @@ export interface PodcastRequest {
   readonly requestedBy: string;
   readonly threadContext?: string | undefined;
   /** AC-P6-1/P6-2: Thread-based generation (reuses existing study thread). */
-  readonly threadId?: string;
-  readonly threadDeps?: ThreadInvokeDeps;
+  readonly threadId: string;
+  readonly threadDeps: ThreadInvokeDeps;
 }
 
 /**
@@ -140,66 +129,10 @@ function parseScriptResponse(raw: string, mode: PodcastRequest['mode']): Podcast
   };
 }
 
-async function prepareThreadPodcastInvocation(
-  request: PodcastRequest,
-  threadId: string,
-  deps: ThreadInvokeDeps,
-  prompt: string,
-  targetCats: CatId[],
-) {
-  const admission = await deps.invocationTracker.acquireExecutionAdmission(threadId, targetCats);
-  if (!admission) {
-    throw new Error('Podcast invocation admission rejected: thread is being deleted');
-  }
-
-  const primaryCat = targetCats[0] ?? 'opus';
-  try {
-    // Write the user message only after any in-process seal activates the replacement
-    // session. The admission lease also keeps a new seal/delete out until tracker
-    // ownership is published below.
-    const userMsg = await deps.messageStore.append({
-      threadId,
-      catId: null,
-      content: prompt,
-      userId: request.requestedBy,
-      mentions: ['opus' as CatId],
-      timestamp: Date.now(),
-    });
-
-    const createResult = await deps.invocationRecordStore.create({
-      threadId,
-      userId: request.requestedBy,
-      targetCats,
-      intent: 'execute',
-      idempotencyKey: `podcast-${request.articleId}-${Date.now()}`,
-      actionLeaseCarrier: { kind: 'none' },
-    });
-
-    // Backfill userMessageId so retry endpoint can find the trigger message.
-    await deps.invocationRecordStore.update(createResult.invocationId, {
-      userMessageId: userMsg.id,
-    });
-
-    const controller = deps.invocationTracker.start(
-      threadId,
-      primaryCat,
-      request.requestedBy,
-      targetCats,
-      createResult.invocationId,
-    );
-    if (controller.signal.aborted) {
-      await deps.invocationRecordStore.update(createResult.invocationId, { status: 'canceled' });
-      throw new Error('Podcast invocation admission was lost before tracker publication');
-    }
-    return { userMsg, createResult, controller, primaryCat };
-  } finally {
-    admission.release();
-  }
-}
-
 /**
- * AC-P6: Generate script by posting a prompt into the study thread.
- * Reuses the existing message pipeline (same as GitHub/connector triggers).
+ * AC-P6 / RFC #1356: Generate through the sole Queue admission path.
+ * The prompt is a private system input: it has execution custody but no History
+ * source record and no user-visible Queue row.
  */
 export async function generateScriptViaThread(
   request: PodcastRequest,
@@ -207,97 +140,43 @@ export async function generateScriptViaThread(
   deps: ThreadInvokeDeps,
 ): Promise<PodcastScript> {
   const prompt = buildScriptPrompt(request);
-  const targetCats: CatId[] = ['opus' as CatId];
-  const { userMsg, createResult, controller, primaryCat } = await prepareThreadPodcastInvocation(
-    request,
+  const enqueue = await deps.invocationQueue.enqueueDurable({
+    from: { kind: 'system', service: 'podcast-generator' },
     threadId,
-    deps,
-    prompt,
-    targetCats,
-  );
+    userId: request.requestedBy,
+    kind: 'private_input',
+    ownerAuthProvenance: 'strict',
+    content: prompt,
+    targetCats: ['opus'],
+    intent: 'execute',
+    autoExecute: true,
+    priority: 'normal',
+    idempotencyKey: `podcast:${request.articleId}:${request.mode}:${randomUUID()}`,
+  });
+  if (enqueue.outcome !== 'enqueued' || !enqueue.entry) {
+    throw new Error('Podcast Queue admission failed');
+  }
 
-  // ④ Route execution and collect text response
-  const intent = { intent: 'execute' as const, explicit: false, promptTags: [] as string[] };
-  let fullText = '';
-  const terminalDispositions = new PerCatTerminalDispositionCollector({
-    targetCatIds: targetCats,
-    isCanceled: (catId) => deps.invocationTracker.getSlotState?.(threadId, catId) === 'canceled',
+  const entryId = enqueue.entry.id;
+  const completion = new Promise<string>((resolve, reject) => {
+    deps.queueProcessor.registerEntryCompleteHook(entryId, (_completedEntryId, status, responseText) => {
+      if (status === 'succeeded') resolve(responseText);
+      else reject(new Error(`Podcast Queue execution ${status}`));
+    });
   });
 
   try {
-    await deps.invocationRecordStore.update(createResult.invocationId, { status: 'running' });
-    const enqueueA2A = deps.queueProcessor?.enqueueRaw?.bind(deps.queueProcessor);
-
-    for await (const msg of deps.router.routeExecution(
-      request.requestedBy,
-      prompt,
-      threadId,
-      userMsg.id,
-      targetCats,
-      intent,
-      {
-        ownerAuthProvenance: 'unknown',
-        humanDispositionInvocationOrigin: 'system',
-        signal: controller.signal,
-        ...createA2ASlotTrackingBridge(deps.invocationTracker, controller, createResult.invocationId),
-        ...(enqueueA2A
-          ? { deferA2AEnqueue: (entry: Parameters<QueueProcessor['enqueueRaw']>[0]) => enqueueA2A(entry) }
-          : {}),
-        parentInvocationId: createResult.invocationId,
-        onPromptMessagesExposed: (input) => deps.queueProcessor?.markPromptMessagesSeen(input) ?? Promise.resolve(),
-        // F222 P1: System-internal podcast generation is not user-origin
-        frustrationAutoIssueEligible: false,
-        // #949 P2-1: No ball-pass expectation in system-internal podcast generation
-        verdictPassWarningEnabled: false,
-      },
-    )) {
-      terminalDispositions.observe(msg);
-      if (isTerminalDispositionEvent(msg) && msg.catId) {
-        deps.invocationTracker.completeSlot?.(threadId, msg.catId, controller);
-      }
-      if (msg.type === 'text' && msg.content) {
-        fullText += msg.content;
-      }
+    await deps.queueProcessor.requestDrain(threadId);
+    return parseScriptResponse(await completion, request.mode);
+  } catch (error) {
+    deps.queueProcessor.unregisterEntryCompleteHook(entryId);
+    const queued = deps.invocationQueue.getEntrySnapshot(threadId, request.requestedBy, entryId);
+    if (queued?.status === 'queued') {
+      const claimed = await deps.invocationQueue.claimQueuedEntryForWithdrawal(threadId, request.requestedBy, entryId);
+      if (claimed) await deps.invocationQueue.commitClaimedWithdrawal(threadId, entryId);
     }
-
-    await requireInvocationRecordUpdate({
-      store: deps.invocationRecordStore,
-      invocationId: createResult.invocationId,
-      update: {
-        status: 'succeeded',
-        successfulCatIds: terminalDispositions.getSuccessfulCatIds() as CatId[],
-      },
-      writer: 'podcast generator',
-    });
-  } catch (err) {
-    await deps.invocationRecordStore.update(createResult.invocationId, {
-      status: 'failed',
-      error: err instanceof Error ? err.message : String(err),
-    });
-    throw err;
-  } finally {
-    deps.invocationTracker.complete(threadId, primaryCat, controller);
+    throw error;
   }
-
-  return parseScriptResponse(fullText, request.mode);
-}
-
-async function generateScriptViaLLM(request: PodcastRequest): Promise<PodcastScript> {
-  const agent = new ClaudeAgentService({
-    model: 'claude-opus-4-5-20250514',
-    mcpServerPath: '', // No MCP needed for script generation
-  });
-
-  const prompt = buildScriptPrompt(request);
-  let fullText = '';
-
-  for await (const msg of agent.invoke(prompt)) {
-    if (msg.type === 'text' && msg.content) {
-      fullText += msg.content;
-    }
-  }
-
-  return parseScriptResponse(fullText, request.mode);
 }
 
 const SPEAKER_TO_CAT: Record<string, string> = {
@@ -397,11 +276,7 @@ export async function generatePodcastScript(request: PodcastRequest): Promise<St
     // Update to running
     await studyMeta.updateArtifactState(request.articleId, request.articleFilePath, artifactId, 'running');
 
-    // Generate script: thread-based (P6) or standalone LLM fallback
-    const script =
-      request.threadId && request.threadDeps
-        ? await generateScriptViaThread(request, request.threadId, request.threadDeps)
-        : await generateScriptViaLLM(request);
+    const script = await generateScriptViaThread(request, request.threadId, request.threadDeps);
 
     // Synthesize audio for each segment
     const segmentsWithAudio = await synthesizeSegments(script.segments);

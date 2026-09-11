@@ -63,4 +63,20 @@ describe('PerCatTerminalDispositionCollector', () => {
 
     assert.deepEqual(collector.getSuccessfulCatIds(), ['opus']);
   });
+
+  it('projects independent terminal status for every target', () => {
+    const collector = new PerCatTerminalDispositionCollector({
+      targetCatIds: ['opus', 'codex', 'gemini'],
+      isCanceled: (catId) => catId === 'gemini',
+    });
+
+    collector.observe({ type: 'done', catId: 'opus' });
+    collector.observe({ type: 'error', catId: 'codex', error: 'provider failed' });
+    collector.observe({ type: 'done', catId: 'gemini' });
+
+    assert.equal(collector.getTerminalStatus('opus'), 'succeeded');
+    assert.equal(collector.getTerminalStatus('codex'), 'failed');
+    assert.equal(collector.getTerminalStatus('gemini'), 'canceled');
+    assert.equal(collector.getTerminalStatus('unknown'), undefined);
+  });
 });

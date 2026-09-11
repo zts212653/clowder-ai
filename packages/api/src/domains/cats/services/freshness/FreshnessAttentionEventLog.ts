@@ -99,7 +99,7 @@ interface StreamFreshEvent extends FreshnessEventBase {
   relevanceSuppressions?: Partial<Record<FreshnessRelevanceReason, number>>;
 }
 
-/** F254 D1.2b: queued message was handled by one target cat after a successful invocation */
+/** F254/ADR-043 D8: one target cat durably adopted an exact queued source. */
 interface QueuedHandledEvent extends FreshnessEventBase {
   kind: 'queued_handled';
   queueEntryId: string;

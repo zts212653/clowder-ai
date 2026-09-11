@@ -11,6 +11,7 @@ import { mkdtemp, realpath, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, it } from 'node:test';
 import Fastify from 'fastify';
+import { canonicalTestMessageInput } from './helpers/message-from-fixtures.js';
 
 describe('Thread API', () => {
   let app;
@@ -1088,22 +1089,26 @@ describe('Thread soft-delete preserves data (Phase D)', () => {
     const threadId = thread.id;
 
     // Add some messages
-    messageStore.append({
-      userId: 'alice',
-      catId: null,
-      content: 'test message 1',
-      mentions: [],
-      timestamp: Date.now(),
-      threadId,
-    });
-    messageStore.append({
-      userId: 'alice',
-      catId: null,
-      content: 'test message 2',
-      mentions: [],
-      timestamp: Date.now() + 1,
-      threadId,
-    });
+    messageStore.append(
+      canonicalTestMessageInput({
+        userId: 'alice',
+        catId: null,
+        content: 'test message 1',
+        mentions: [],
+        timestamp: Date.now(),
+        threadId,
+      }),
+    );
+    messageStore.append(
+      canonicalTestMessageInput({
+        userId: 'alice',
+        catId: null,
+        content: 'test message 2',
+        mentions: [],
+        timestamp: Date.now() + 1,
+        threadId,
+      }),
+    );
 
     // Add a task
     taskStore.create({
@@ -1540,22 +1545,26 @@ describe('GET /api/messages with threadId', () => {
   });
 
   it('returns only messages for the specified thread', async () => {
-    messageStore.append({
-      userId: 'default-user',
-      catId: null,
-      content: 'thread-a msg',
-      mentions: [],
-      timestamp: 1000,
-      threadId: 'thread-a',
-    });
-    messageStore.append({
-      userId: 'default-user',
-      catId: null,
-      content: 'thread-b msg',
-      mentions: [],
-      timestamp: 2000,
-      threadId: 'thread-b',
-    });
+    messageStore.append(
+      canonicalTestMessageInput({
+        userId: 'default-user',
+        catId: null,
+        content: 'thread-a msg',
+        mentions: [],
+        timestamp: 1000,
+        threadId: 'thread-a',
+      }),
+    );
+    messageStore.append(
+      canonicalTestMessageInput({
+        userId: 'default-user',
+        catId: null,
+        content: 'thread-b msg',
+        mentions: [],
+        timestamp: 2000,
+        threadId: 'thread-b',
+      }),
+    );
 
     const res = await app.inject({
       method: 'GET',
@@ -1567,22 +1576,26 @@ describe('GET /api/messages with threadId', () => {
   });
 
   it('thread query filters by userId (regression: cross-user leak)', async () => {
-    messageStore.append({
-      userId: 'alice',
-      catId: null,
-      content: 'alice in thread',
-      mentions: [],
-      timestamp: 1000,
-      threadId: 'shared-thread',
-    });
-    messageStore.append({
-      userId: 'bob',
-      catId: null,
-      content: 'bob in thread',
-      mentions: [],
-      timestamp: 2000,
-      threadId: 'shared-thread',
-    });
+    messageStore.append(
+      canonicalTestMessageInput({
+        userId: 'alice',
+        catId: null,
+        content: 'alice in thread',
+        mentions: [],
+        timestamp: 1000,
+        threadId: 'shared-thread',
+      }),
+    );
+    messageStore.append(
+      canonicalTestMessageInput({
+        userId: 'bob',
+        catId: null,
+        content: 'bob in thread',
+        mentions: [],
+        timestamp: 2000,
+        threadId: 'shared-thread',
+      }),
+    );
 
     const res = await app.inject({
       method: 'GET',
@@ -1596,14 +1609,16 @@ describe('GET /api/messages with threadId', () => {
 
   it('thread-scoped pagination with before cursor', async () => {
     for (let i = 0; i < 5; i++) {
-      messageStore.append({
-        userId: 'default-user',
-        catId: null,
-        content: `t-msg ${i}`,
-        mentions: [],
-        timestamp: 1000 + i * 100,
-        threadId: 'paginated-thread',
-      });
+      messageStore.append(
+        canonicalTestMessageInput({
+          userId: 'default-user',
+          catId: null,
+          content: `t-msg ${i}`,
+          mentions: [],
+          timestamp: 1000 + i * 100,
+          threadId: 'paginated-thread',
+        }),
+      );
     }
 
     const res = await app.inject({

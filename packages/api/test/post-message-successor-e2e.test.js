@@ -35,14 +35,14 @@ async function createHarness({ failEnqueueAttempts = 0 } = {}) {
 
   const registry = new InvocationRegistry();
   const invocationQueue = new InvocationQueue();
-  const originalEnqueue = invocationQueue.enqueue.bind(invocationQueue);
+  const originalEnqueue = invocationQueue.appendAndEnqueueDurable.bind(invocationQueue);
   let remainingEnqueueFailures = failEnqueueAttempts;
-  invocationQueue.enqueue = (input) => {
+  invocationQueue.appendAndEnqueueDurable = async (...args) => {
     if (remainingEnqueueFailures > 0) {
       remainingEnqueueFailures -= 1;
-      throw new Error('simulated Queue admission failure');
+      return { outcome: 'full' };
     }
-    return originalEnqueue(input);
+    return originalEnqueue(...args);
   };
   const messageStore = new MessageStore();
   const threadStore = new ThreadStore();
@@ -74,9 +74,11 @@ async function createHarness({ failEnqueueAttempts = 0 } = {}) {
       },
     },
     queueProcessor: {
-      async tryAutoExecute(...args) {
+      async tryAutoAppendExactEntry(...args) {
         autoExecuteCalls.push(args);
+        return { outcome: 'rejected' };
       },
+      async requestDrain() {},
       async onInvocationComplete() {},
     },
     actionSuccessorAdmissionService: {
@@ -130,8 +132,12 @@ test('typed local review fact needs no action lease or inherited coordination to
     ...REVIEW_ANCHOR,
   });
   assert.deepEqual(visible[0].mentions, ['codex']);
-  assert.equal(visible[0].deliveryStatus, 'queued');
-  assert.deepEqual(harness.invocationQueue.list(harness.thread.id, 'user-1')[0].targetCats, ['codex']);
+  assert.equal(
+    visible[0].deliveryStatus,
+    undefined,
+    'published Agent review remains visible while Queue owns wake admission in lifecycle metadata',
+  );
+  assert.deepEqual(harness.invocationQueue.list(harness.thread.id, 'user-1')[0].targets, ['codex']);
   assert.equal(harness.autoExecuteCalls.length, 1);
 
   const replay = toolJson(await harness.handlePostMessage(input));
@@ -243,14 +249,12 @@ test('a durable review fact recovers one author wake after transient Queue failu
   assert.equal(first.statusCode, 503);
   assert.equal(first.json().kind, 'review_delivery_pending');
   const durable = harness.messageStore.getByThreadIncludingQueued(harness.thread.id, 20, 'user-1');
-  assert.equal(durable.length, 1);
-  assert.equal(durable[0].deliveryStatus, 'queued');
+  assert.equal(durable.length, 0, 'atomic Queue rejection must not publish a source without its wake');
   assert.equal(harness.invocationQueue.list(harness.thread.id, 'user-1').length, 0);
 
   const replay = await app.inject({ method: 'POST', url: '/api/callbacks/post-message', headers, payload });
   assert.equal(replay.statusCode, 200);
-  assert.equal(replay.json().status, 'duplicate');
-  assert.equal(replay.json().messageId, durable[0].id);
+  assert.equal(replay.json().status, 'ok');
   assert.equal(harness.messageStore.getByThreadIncludingQueued(harness.thread.id, 20, 'user-1').length, 1);
   assert.equal(harness.invocationQueue.list(harness.thread.id, 'user-1').length, 1);
   assert.equal(harness.autoExecuteCalls.length, 1);

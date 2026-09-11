@@ -37,6 +37,7 @@ export interface ThreadContextEnvelopeCandidate<TProjection extends Record<strin
 
 interface ThreadContextEnvelopeBase {
   readonly threadId: string;
+  readonly situation?: unknown;
   readonly scanCapped?: boolean;
   readonly workflowSop?: Record<string, unknown>;
 }
@@ -112,6 +113,7 @@ function buildPayload<TProjection extends Record<string, unknown>>(
     messages,
     hasMore,
     ...(nextCursor ? { nextCursor } : {}),
+    ...(base.situation ? { situation: base.situation } : {}),
     ...(base.scanCapped === undefined ? {} : { scanCapped: base.scanCapped }),
     ...(base.workflowSop ? { workflowSop: base.workflowSop } : {}),
   };

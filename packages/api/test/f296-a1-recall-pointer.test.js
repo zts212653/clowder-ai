@@ -5,6 +5,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { describe, test } from 'node:test';
 import { fileURLToPath } from 'node:url';
+import { canonicalTestMessageInput } from './helpers/message-from-fixtures.js';
 
 const { assembleIncrementalContext: assembleRaw } = await import(
   '../dist/domains/cats/services/agents/routing/route-helpers.js'
@@ -20,14 +21,14 @@ const CANDIDATE_TITLE = 'F091 Secret Sauce Distillation';
 const CANDIDATE_SNIPPET = 'Phase C shipped the distillation queue with a nightly rebuild job';
 
 function mockMsg(overrides) {
-  return {
+  return canonicalTestMessageInput({
     threadId: overrides.threadId ?? 'thread-1',
     userId: overrides.userId ?? 'user-1',
     catId: overrides.catId ?? null,
     content: overrides.content ?? 'test message',
     mentions: [],
     timestamp: overrides.timestamp ?? Date.now(),
-  };
+  });
 }
 
 function seedMessages(messageStore, count) {

@@ -1,6 +1,5 @@
 import type { FastifyPluginAsync } from 'fastify';
 import type { InvocationQueue } from '../domains/cats/services/agents/invocation/InvocationQueue.js';
-import type { QueuedMessageCustodyCoordinator } from '../domains/cats/services/agents/invocation/QueuedMessageCustodyCoordinator.js';
 import type { QueueProcessor } from '../domains/cats/services/agents/invocation/QueueProcessor.js';
 import type { IMessageStore } from '../domains/cats/services/stores/ports/MessageStore.js';
 import type { IThreadStore } from '../domains/cats/services/stores/ports/ThreadStore.js';
@@ -15,7 +14,6 @@ export interface ComposerDraftRecallRoutesOptions {
   threadStore?: Pick<IThreadStore, 'get' | 'compareAndSetTitle'>;
   socketManager: SocketManager;
   invocationQueue?: InvocationQueue;
-  queueCustodyCoordinator?: Pick<QueuedMessageCustodyCoordinator, 'recallMessageToComposerDraft'>;
   queueProcessor?: Pick<QueueProcessor, 'unregisterEntryCompleteHook' | 'finalizeRemovedEntry'>;
   indexBuilder?: Pick<
     IIndexBuilder,
@@ -81,14 +79,13 @@ export const composerDraftRecallRoutes: FastifyPluginAsync<ComposerDraftRecallRo
     return { cleared: true, revision: result.revision };
   });
 
-  if (opts.invocationQueue && opts.queueCustodyCoordinator && opts.indexBuilder && opts.threadStore) {
+  if (opts.invocationQueue && opts.indexBuilder && opts.threadStore) {
     app.post<{ Params: { id: string } }>(
       '/api/messages/:id/recall',
       createRecallMessageHandler(
         {
           ...opts,
           invocationQueue: opts.invocationQueue,
-          queueCustodyCoordinator: opts.queueCustodyCoordinator,
           indexBuilder: opts.indexBuilder,
           threadStore: opts.threadStore,
         },

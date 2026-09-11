@@ -166,8 +166,8 @@ describe('F128 proposal card realtime socket journey', () => {
 
   async function publishProposal(): Promise<string> {
     const origin = messageStore.append({
+      from: { kind: 'user', userId: 'default-user' },
       userId: 'default-user',
-      catId: null,
       content: '请开一个新 thread',
       mentions: [],
       timestamp: Date.now() - 500,

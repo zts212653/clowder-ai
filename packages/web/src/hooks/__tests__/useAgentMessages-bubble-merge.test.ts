@@ -162,10 +162,7 @@ describe('useAgentMessages bubble merge prevention (Bug B)', () => {
     container.remove();
   });
 
-  it('R2 P1-2: a2a_handoff handler propagates server timestamp + injects systemKind marker (砚砚 R1 P1)', () => {
-    // Cloud Codex P2-1 + P2-2 + 砚砚 R1 P1: handler-level coverage. Without this,
-    // store-only tests can't detect a regression where useAgentMessages handler
-    // reverts to Date.now() or drops the systemKind marker.
+  it('ignores retired a2a_handoff projection events', () => {
     mockAddMessage.mockImplementation((msg) => {
       storeState.messages.push(msg);
     });
@@ -174,74 +171,16 @@ describe('useAgentMessages bubble merge prevention (Bug B)', () => {
       root.render(React.createElement(Harness));
     });
 
-    const SERVER_TS = 1700000000123;
-    const LATER_CLIENT_TS = SERVER_TS + 5000;
-    const realDateNow = Date.now;
-    Date.now = () => LATER_CLIENT_TS; // simulate "client time is later than server time"
-
-    try {
-      act(() => {
-        captured?.handleAgentMessage({
-          type: 'a2a_handoff',
-          catId: 'codex',
-          content: '布偶猫 → 缅因猫',
-          invocationId: 'inv-handoff',
-          targetCatId: 'opus-47',
-          timestamp: SERVER_TS,
-        });
-      });
-    } finally {
-      Date.now = realDateNow;
-    }
-
-    // Find the synthesized system message
-    const sysMsg = storeState.messages.find((m) => m.type === 'system' && m.content === '布偶猫 → 缅因猫');
-    expect(sysMsg, 'a2a_handoff must produce a system message via addMessage').toBeTruthy();
-    expect(sysMsg!.timestamp, 'message timestamp must equal SERVER timestamp, not Date.now()').toBe(SERVER_TS);
-    expect(sysMsg!.extra?.systemKind, 'systemKind=a2a_routing marker must be present').toBe('a2a_routing');
-    expect(sysMsg!.extra?.a2aRouting, 'structured handoff ids must survive the live handler').toEqual({
-      fromCatId: 'codex',
-      targetCatId: 'opus-47',
-      invocationId: 'inv-handoff',
-    });
-    expect(sysMsg!.id, 'id must include monotonic suffix to avoid same-ms collision').toMatch(
-      /^a2a-1700000000123-codex-\d+$/,
-    );
-  });
-
-  it('R2 P1-1: multi-target a2a_handoff at same ms produces unique IDs (no dedup loss)', () => {
-    // 砚砚 R1 P1: backend can emit multiple handoffs in same ms (one per A2A target).
-    // Without monotonic suffix, `a2a-${ts}-${catId}` collides → second dropped by addMessage dedup.
-    mockAddMessage.mockImplementation((msg) => {
-      // Simulate addMessage dedup: skip if id already in store
-      if (storeState.messages.some((m) => m.id === msg.id)) return;
-      storeState.messages.push(msg);
-    });
-
-    act(() => {
-      root.render(React.createElement(Harness));
-    });
-
-    const SAME_MS = 1700000000999;
     act(() => {
       captured?.handleAgentMessage({
         type: 'a2a_handoff',
         catId: 'codex',
         content: '布偶猫 → 缅因猫',
-        timestamp: SAME_MS,
-      });
-      captured?.handleAgentMessage({
-        type: 'a2a_handoff',
-        catId: 'codex',
-        content: '布偶猫 → 暹罗猫',
-        timestamp: SAME_MS,
+        timestamp: 1700000000123,
       });
     });
-
-    const handoffMsgs = storeState.messages.filter((m) => m.type === 'system' && m.extra?.systemKind === 'a2a_routing');
-    expect(handoffMsgs.length, 'both same-ms handoffs must survive dedup').toBe(2);
-    const ids = handoffMsgs.map((m) => m.id);
-    expect(new Set(ids).size, 'IDs must be unique').toBe(2);
+    expect(mockAddMessage).not.toHaveBeenCalled();
+    expect(storeState.messages).toHaveLength(0);
   });
 
   it('done event clears invocationId to prevent stale recovery of finalized messages', () => {

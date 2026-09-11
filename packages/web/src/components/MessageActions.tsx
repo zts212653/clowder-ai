@@ -8,22 +8,22 @@ import {
 } from '@cat-cafe/shared';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { useIsDesktop } from '@/hooks/useIsDesktop';
 import { type TextSelectionAction, useTextSelectionAction } from '@/hooks/useTextSelectionAction';
+import { useTts } from '@/hooks/useTts';
 import type { ChatMessage } from '@/stores/chatStore';
 import { useChatStore } from '@/stores/chatStore';
 import { useToastStore } from '@/stores/toastStore';
 import { apiFetch } from '@/utils/api-client';
 import { getUserId } from '@/utils/userId';
 import { ConfirmDialog } from './ConfirmDialog';
+import { CopyIdButton } from './CopyIdButton';
 import { createQuoteContextAttachment } from './chat-context-reference';
-import { describeMessageInvocationTrajectory, openMessageInvocationTrajectory } from './InvocationTrajectoryAnchor';
 import { LiveSelectionAnnotationAction } from './LiveSelectionAnnotationAction';
 import { MessageActionSlotProvider } from './MessageActionSlot';
 import { SelectionAnnotationAction } from './SelectionAnnotationAction';
 import { pushThreadRouteWithHistory } from './ThreadSidebar/thread-navigation';
 import { TransferTargetPicker } from './TransferTargetPicker';
-import { TrueRecallActionButton } from './TrueRecallActionButton';
+import { TtsPlayButton } from './TtsPlayButton';
 import { useMessageAnnotationMarkers } from './useMessageAnnotationMarkers';
 
 function showErrorToast(title: string, body?: Record<string, unknown>) {
@@ -35,13 +35,7 @@ function showErrorToast(title: string, body?: Record<string, unknown>) {
   });
 }
 
-type DialogState =
-  | { type: 'none' }
-  | { type: 'soft-delete' }
-  | { type: 'hard-delete'; threadTitle: string | null }
-  | { type: 'edit'; editedContent: string }
-  | { type: 'branch-confirm'; editedContent: string }
-  | { type: 'branch-direct' };
+type DialogState = { type: 'none' } | { type: 'soft-delete' } | { type: 'branch-edit'; editedContent: string };
 
 interface MessageActionsProps {
   message: ChatMessage;
@@ -165,7 +159,6 @@ export function MessageActions({
   forwardingDisabled = false,
 }: MessageActionsProps) {
   const [dialog, setDialog] = useState<DialogState>({ type: 'none' });
-  const [overflowOpen, setOverflowOpen] = useState(false);
   const [compactOpen, setCompactOpen] = useState(false);
   const [actionSlot, setActionSlot] = useState<HTMLDivElement | null>(null);
   const [forwardSelection, setForwardSelection] = useState<{
@@ -175,13 +168,12 @@ export function MessageActions({
   const selectionAction = useTextSelectionAction(messageRef, !message.isStreaming, message.id, 'viewport');
   const annotationMarkers = useMessageAnnotationMarkers(messageRef, threadId, message.id);
   const removeThreadMessage = useChatStore((s) => s.removeThreadMessage);
-  const isDesktop = useIsDesktop();
   const compactActions = useCompactMessageActions();
+  const { state: ttsState, synthesize: ttsSynthesize, activeMessageId } = useTts();
 
   const isUser = message.type === 'user' && !message.catId;
   const isAssistant = message.type === 'assistant' || (message.type === 'user' && !!message.catId);
   const isRecalled = Boolean(message.extra?.recall);
-  const invocationTrajectory = describeMessageInvocationTrajectory(message);
   const canAct = (isUser || isAssistant) && !message.isStreaming && !isRecalled;
   // #699: Reply is available on all message types (not just user/assistant)
   const canReply = !message.isStreaming && !isRecalled;
@@ -194,49 +186,25 @@ export function MessageActions({
   const actionSlotPositionClass = isUser
     ? 'absolute right-0 top-1/2 -translate-y-1/2'
     : 'absolute left-0 top-1/2 -translate-y-1/2';
-  const actionsExpanded = compactOpen ? true : overflowOpen;
-  const desktopOverflowOpen = overflowOpen && isDesktop && !compactActions;
-  const useOverflowSheet = !(isDesktop && !compactActions);
-  const toolbarVisibilityClass = actionsExpanded
+  const toolbarVisibilityClass = compactOpen
     ? 'pointer-events-auto opacity-100'
     : 'pointer-events-none opacity-0 group-hover:pointer-events-auto group-hover:opacity-100 focus-within:pointer-events-auto focus-within:opacity-100';
 
   useEffect(() => {
-    if (!overflowOpen && !compactOpen) return;
+    if (!compactOpen) return;
     const closeOnEscape = (event: KeyboardEvent) => {
       if (event.key !== 'Escape') return;
-      setOverflowOpen(false);
       setCompactOpen(false);
     };
     window.addEventListener('keydown', closeOnEscape);
     return () => window.removeEventListener('keydown', closeOnEscape);
-  }, [compactOpen, overflowOpen]);
-  useEffect(() => {
-    if (!desktopOverflowOpen) return;
-    const closeOnOutsidePointer = (event: PointerEvent) => {
-      if (!messageRef.current?.contains(event.target as Node)) setOverflowOpen(false);
-    };
-    document.addEventListener('pointerdown', closeOnOutsidePointer);
-    return () => document.removeEventListener('pointerdown', closeOnOutsidePointer);
-  }, [desktopOverflowOpen]);
+  }, [compactOpen]);
 
   const handleSoftDelete = useCallback(() => setDialog({ type: 'soft-delete' }), []);
 
-  const handleHardDelete = useCallback(async () => {
-    try {
-      const res = await apiFetch(`/api/threads/${threadId}`, { method: 'GET' });
-      const thread = res.ok ? await res.json() : null;
-      setDialog({ type: 'hard-delete', threadTitle: thread?.title ?? null });
-    } catch {
-      setDialog({ type: 'hard-delete', threadTitle: null });
-    }
-  }, [threadId]);
-
-  const handleEdit = useCallback(() => {
-    setDialog({ type: 'edit', editedContent: message.content });
+  const handleBranch = useCallback(() => {
+    setDialog({ type: 'branch-edit', editedContent: message.content });
   }, [message.content]);
-
-  const handleBranchDirect = useCallback(() => setDialog({ type: 'branch-direct' }), []);
 
   const confirmSoftDelete = useCallback(async () => {
     setDialog({ type: 'none' });
@@ -257,34 +225,10 @@ export function MessageActions({
     }
   }, [message.id, threadId, removeThreadMessage]);
 
-  const confirmHardDelete = useCallback(async () => {
-    if (dialog.type !== 'hard-delete') return;
-    const confirmTitle = dialog.threadTitle ?? '确认删除';
-    setDialog({ type: 'none' });
-    try {
-      const res = await apiFetch(`/api/messages/${message.id}`, {
-        method: 'DELETE',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ userId: getUserId(), mode: 'hard', confirmTitle }),
-      });
-      if (res.ok) {
-        removeThreadMessage(threadId, message.id);
-      } else {
-        const body = await res.json().catch(() => ({}));
-        showErrorToast('删除失败', body);
-      }
-    } catch {
-      showErrorToast('删除失败');
-    }
-  }, [dialog, message.id, threadId, removeThreadMessage]);
-
-  const handleBranchConfirm = useCallback(() => {
-    if (dialog.type !== 'edit') return;
-    setDialog({ type: 'branch-confirm', editedContent: dialog.editedContent });
-  }, [dialog]);
-
+  const branchingRef = useRef(false);
   const confirmBranch = useCallback(async () => {
-    if (dialog.type !== 'branch-confirm') return;
+    if (dialog.type !== 'branch-edit' || branchingRef.current) return;
+    branchingRef.current = true;
     const { editedContent } = dialog;
     setDialog({ type: 'none' });
     try {
@@ -306,33 +250,10 @@ export function MessageActions({
       }
     } catch {
       showErrorToast('分支创建失败');
-    }
-  }, [dialog, message.id, message.content, threadId]);
-
-  const branchingRef = useRef(false);
-  const confirmBranchDirect = useCallback(async () => {
-    if (branchingRef.current) return;
-    branchingRef.current = true;
-    setDialog({ type: 'none' });
-    try {
-      const res = await apiFetch(`/api/threads/${threadId}/branch`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ fromMessageId: message.id, userId: getUserId() }),
-      });
-      if (res.ok) {
-        const { threadId: newThreadId } = await res.json();
-        pushThreadRouteWithHistory(newThreadId, typeof window !== 'undefined' ? window : undefined);
-      } else {
-        const body = await res.json().catch(() => ({}));
-        showErrorToast('分支创建失败', body);
-      }
-    } catch {
-      showErrorToast('分支创建失败');
     } finally {
       branchingRef.current = false;
     }
-  }, [message.id, threadId]);
+  }, [dialog, message.id, message.content, threadId]);
 
   const close = useCallback(() => setDialog({ type: 'none' }), []);
 
@@ -391,33 +312,6 @@ export function MessageActions({
     [threadId],
   );
 
-  const overflowMenuItems = (
-    <>
-      <button
-        type="button"
-        role="menuitem"
-        className="min-h-11 w-full px-3 py-2 text-left text-sm text-cafe-secondary transition-colors hover:bg-cafe-surface-elevated hover:text-cafe-primary"
-        onClick={() => {
-          setOverflowOpen(false);
-          handleBranchDirect();
-        }}
-      >
-        从这里分支
-      </button>
-      <button
-        type="button"
-        role="menuitem"
-        className="min-h-11 w-full px-3 py-2 text-left text-sm text-conn-red-text transition-colors hover:bg-cafe-surface-elevated"
-        onClick={() => {
-          setOverflowOpen(false);
-          handleHardDelete();
-        }}
-      >
-        永久删除
-      </button>
-    </>
-  );
-
   const actionToolbar = (compactPresentation: boolean) => (
     <div
       data-quote-exclude
@@ -438,25 +332,18 @@ export function MessageActions({
           : undefined
       }
     >
-      {hasSelectionShortcut && (
-        <button
-          type="button"
-          onClick={() => onEnterSelection?.(message.id)}
-          className={`rounded p-1 text-cafe-muted transition-colors hover:bg-cafe-surface-elevated hover:text-cafe-primary ${
-            isUser ? 'order-2' : ''
-          }`}
-          title="多选消息"
-          aria-label="多选消息"
-        >
-          <svg aria-hidden="true" className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <rect x="3" y="4" width="6" height="6" rx="1" strokeWidth={2} />
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="m4.5 7 1.25 1.25L8 6" />
-            <rect x="3" y="14" width="6" height="6" rx="1" strokeWidth={2} />
-            <path strokeLinecap="round" strokeWidth={2} d="M13 7h8M13 17h8" />
-          </svg>
-        </button>
-      )}
-      <div data-testid="message-secondary-actions" className={`${isUser ? 'order-1' : ''} flex gap-0.5`.trim()}>
+      <div data-testid="message-secondary-actions" className="flex gap-0.5">
+        {isAssistant && canAct && message.catId && message.content.trim() && (
+          <TtsPlayButton
+            messageId={message.id}
+            text={message.content}
+            catId={message.catId}
+            ttsState={ttsState}
+            activeMessageId={activeMessageId}
+            onSynthesize={ttsSynthesize}
+          />
+        )}
+        <CopyIdButton messageId={message.id} />
         <button
           type="button"
           onClick={() => {
@@ -480,31 +367,43 @@ export function MessageActions({
             />
           </svg>
         </button>
-        {invocationTrajectory && (
+        {hasSelectionShortcut && (
           <button
             type="button"
-            onClick={() => openMessageInvocationTrajectory(message, threadId)}
-            className="rounded p-1 text-cafe-muted transition-colors hover:bg-cafe-surface-elevated hover:text-cafe-accent"
-            title="查看这轮轨迹"
-            aria-label="查看这轮 invocation 轨迹"
-            data-testid="message-action-invocation-trajectory"
+            onClick={() => onEnterSelection?.(message.id)}
+            className="rounded p-1 text-cafe-muted transition-colors hover:bg-cafe-surface-elevated hover:text-cafe-primary"
+            title="多选消息"
+            aria-label="多选消息"
           >
-            <svg
-              aria-hidden="true"
-              className="h-3.5 w-3.5"
-              viewBox="0 0 16 16"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="1.5"
-            >
-              <circle cx="4" cy="4" r="1.5" />
-              <circle cx="12" cy="12" r="1.5" />
-              <path d="M4 5.5v3A3.5 3.5 0 0 0 7.5 12h3" />
+            <svg aria-hidden="true" className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <rect x="3" y="4" width="6" height="6" rx="1" strokeWidth={2} />
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="m4.5 7 1.25 1.25L8 6" />
+              <rect x="3" y="14" width="6" height="6" rx="1" strokeWidth={2} />
+              <path strokeLinecap="round" strokeWidth={2} d="M13 7h8M13 17h8" />
             </svg>
           </button>
         )}
         {canAct && (
           <>
+            <button
+              type="button"
+              onClick={handleBranch}
+              className="rounded p-1 text-cafe-muted transition-colors hover:bg-cafe-surface-elevated hover:text-cafe-accent"
+              title="创建分支"
+              aria-label="创建分支"
+            >
+              <svg aria-hidden="true" className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                <circle cx="6" cy="5" r="2" strokeWidth={2} />
+                <circle cx="18" cy="6" r="2" strokeWidth={2} />
+                <circle cx="18" cy="18" r="2" strokeWidth={2} />
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M6 7v7a4 4 0 004 4h6M8 7a5 5 0 005 5h3"
+                />
+              </svg>
+            </button>
             <button
               type="button"
               onClick={handleSoftDelete}
@@ -521,55 +420,6 @@ export function MessageActions({
                 />
               </svg>
             </button>
-            {isUser && (
-              <>
-                <TrueRecallActionButton message={message} threadId={threadId} />
-                <button
-                  type="button"
-                  onClick={handleEdit}
-                  className="p-1 rounded hover:bg-cafe-surface-elevated text-cafe-muted hover:text-conn-blue-text transition-colors"
-                  title="编辑 (创建分支)"
-                  aria-label="编辑并创建分支"
-                >
-                  <svg aria-hidden="true" className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      strokeWidth={2}
-                      d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"
-                    />
-                  </svg>
-                </button>
-              </>
-            )}
-            <div className="relative">
-              <button
-                type="button"
-                onClick={() => setOverflowOpen((open) => !open)}
-                className="rounded p-1 text-cafe-muted transition-colors hover:bg-cafe-surface-elevated hover:text-cafe-primary"
-                title="更多消息操作"
-                aria-label="更多消息操作"
-                aria-haspopup="menu"
-                aria-expanded={overflowOpen}
-              >
-                <svg className="h-3.5 w-3.5" fill="currentColor" viewBox="0 0 24 24" aria-hidden="true">
-                  <circle cx="5" cy="12" r="1.8" />
-                  <circle cx="12" cy="12" r="1.8" />
-                  <circle cx="19" cy="12" r="1.8" />
-                </svg>
-              </button>
-              {overflowOpen && isDesktop && !compactActions && (
-                <div
-                  role="menu"
-                  aria-label="更多消息操作"
-                  className={`absolute top-full z-40 mt-1 w-40 rounded-lg border border-cafe bg-cafe-surface py-1 shadow-lg ${
-                    isUser ? 'right-0' : 'left-0'
-                  }`}
-                >
-                  {overflowMenuItems}
-                </div>
-              )}
-            </div>
           </>
         )}
       </div>
@@ -681,29 +531,6 @@ export function MessageActions({
           document.body,
         )}
 
-      {overflowOpen &&
-        useOverflowSheet &&
-        typeof document !== 'undefined' &&
-        createPortal(
-          <div className="fixed inset-0 z-[80] flex items-end" role="presentation">
-            <button
-              type="button"
-              className="absolute inset-0 bg-[var(--console-overlay-backdrop)] backdrop-blur-sm"
-              aria-label="关闭更多消息操作"
-              onClick={() => setOverflowOpen(false)}
-            />
-            <div
-              role="menu"
-              aria-label="更多消息操作"
-              className="relative m-2 w-[calc(100%-1rem)] rounded-2xl border border-cafe bg-cafe-surface p-2 shadow-2xl"
-            >
-              <p className="px-3 pb-2 pt-1 text-xs font-semibold text-cafe-muted">消息操作</p>
-              {overflowMenuItems}
-            </div>
-          </div>,
-          document.body,
-        )}
-
       {forwardSelection !== null && !forwardingDisabled && (
         <TransferTargetPicker
           open
@@ -729,30 +556,17 @@ export function MessageActions({
         onCancel={close}
       />
 
-      {/* Hard delete confirmation — requires title input */}
-      <ConfirmDialog
-        open={dialog.type === 'hard-delete'}
-        title="永久删除"
-        message="此操作不可恢复。请输入对话标题以确认。"
-        requireInput={dialog.type === 'hard-delete' ? (dialog.threadTitle ?? '确认删除') : undefined}
-        inputPlaceholder={dialog.type === 'hard-delete' && dialog.threadTitle ? '输入对话标题' : '输入 "确认删除"'}
-        confirmLabel="永久删除"
-        variant="danger"
-        onConfirm={confirmHardDelete}
-        onCancel={close}
-      />
-
-      {/* Edit: inline textarea */}
-      {dialog.type === 'edit' && (
-        <div
-          className="fixed inset-0 bg-[var(--console-overlay-backdrop)] backdrop-blur-sm flex items-center justify-center z-50"
-          onClick={close}
-        >
-          <div
-            className="bg-cafe-surface rounded-xl shadow-xl p-6 max-w-lg w-full mx-4"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <h3 className="text-base font-semibold mb-2">编辑消息</h3>
+      {/* One branch action: optionally edit the copied message before creating. */}
+      {dialog.type === 'branch-edit' && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center">
+          <button
+            type="button"
+            aria-label="关闭创建分支"
+            className="absolute inset-0 bg-[var(--console-overlay-backdrop)] backdrop-blur-sm"
+            onClick={close}
+          />
+          <div className="relative bg-cafe-surface rounded-xl shadow-xl p-6 max-w-lg w-full mx-4">
+            <h3 className="text-base font-semibold mb-2">创建分支</h3>
             <textarea
               value={dialog.editedContent}
               onChange={(e) => setDialog({ ...dialog, editedContent: e.target.value })}
@@ -760,42 +574,24 @@ export function MessageActions({
             />
             <div className="flex justify-end gap-2">
               <button
+                type="button"
                 onClick={close}
                 className="px-4 py-2 text-sm text-cafe-secondary hover:bg-cafe-surface-elevated rounded-lg"
               >
                 取消
               </button>
               <button
-                onClick={handleBranchConfirm}
+                type="button"
+                onClick={confirmBranch}
                 disabled={!dialog.editedContent.trim()}
                 className="px-4 py-2 text-sm text-[var(--cafe-surface)] bg-conn-blue-text hover:bg-conn-blue-hover rounded-lg disabled:opacity-40"
               >
-                保存
+                创建分支
               </button>
             </div>
           </div>
         </div>
       )}
-
-      {/* Branch confirmation (from edit) */}
-      <ConfirmDialog
-        open={dialog.type === 'branch-confirm'}
-        title="创建分支"
-        message="编辑将从此消息创建一个新的对话分支。原对话保留不变。是否继续？"
-        confirmLabel="创建分支"
-        onConfirm={confirmBranch}
-        onCancel={close}
-      />
-
-      {/* Direct branch confirmation (no edit) */}
-      <ConfirmDialog
-        open={dialog.type === 'branch-direct'}
-        title="从这里分支"
-        message="将从此消息创建一个新的对话分支，复制到这条消息为止的所有历史。原对话保留不变。"
-        confirmLabel="创建分支"
-        onConfirm={confirmBranchDirect}
-        onCancel={close}
-      />
     </div>
   );
 }

@@ -22,22 +22,24 @@ export function TtsPlayButton({
 
   return (
     <button
+      type="button"
       onClick={() => onSynthesize(messageId, text, catId)}
       disabled={isLoading}
-      className="opacity-0 group-hover:opacity-100 transition-opacity ml-1 p-0.5 rounded hover:bg-[var(--console-hover-bg)] text-cafe-muted hover:text-cafe-secondary"
+      className="rounded p-1 text-cafe-muted transition-colors hover:bg-cafe-surface-elevated hover:text-cafe-secondary"
       title={isPlaying ? '停止' : '播放语音'}
+      aria-label={isPlaying ? '停止语音' : '播放语音'}
     >
       {isLoading ? (
-        <svg width="12" height="12" viewBox="0 0 12 12" className="animate-spin">
+        <svg aria-hidden="true" width="12" height="12" viewBox="0 0 12 12" className="animate-spin">
           <circle cx="6" cy="6" r="5" fill="none" stroke="currentColor" strokeWidth="2" strokeDasharray="20 10" />
         </svg>
       ) : isPlaying ? (
-        <svg width="12" height="12" viewBox="0 0 12 12" fill="currentColor">
+        <svg aria-hidden="true" width="12" height="12" viewBox="0 0 12 12" fill="currentColor">
           <rect x="2" y="1" width="3" height="10" rx="0.5" />
           <rect x="7" y="1" width="3" height="10" rx="0.5" />
         </svg>
       ) : (
-        <svg width="12" height="12" viewBox="0 0 12 12" fill="currentColor">
+        <svg aria-hidden="true" width="12" height="12" viewBox="0 0 12 12" fill="currentColor">
           <path d="M2.5 1L10.5 6L2.5 11V1Z" />
         </svg>
       )}

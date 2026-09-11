@@ -120,3 +120,10 @@ export function routingDispatchPreflightReceipt(decision: RoutingPreflightDecisi
     target,
   };
 }
+
+/** Only a rejection changes the requested delivery and belongs in chat. */
+export function isUserVisibleRoutingPreflightReceipt(
+  receipt: ReturnType<typeof routingDispatchPreflightReceipt>,
+): boolean {
+  return receipt.target.disposition === 'rejected';
+}

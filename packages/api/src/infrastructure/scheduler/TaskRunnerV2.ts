@@ -1,5 +1,4 @@
 import type { IBallCustodyIngest } from '../../domains/ball-custody/BallCustodyIngest.js';
-import { buildHoldExpiredEvent } from '../../domains/ball-custody/ball-custody-events.js';
 import { holdStaleWakeSuppressedTotal } from '../telemetry/instruments.js';
 import { computeNextCronSlot, countAdditionalDueCronSlots } from './cron-utils.js';
 import type { DynamicTaskDef, DynamicTaskStore } from './DynamicTaskStore.js';
@@ -34,6 +33,8 @@ export interface TaskRunnerV2Options {
   emissionStore?: import('./EmissionStore.js').EmissionStore;
   /** Phase 4 (AC-H1): deliver message to a thread */
   deliver?: (opts: DeliverOpts) => Promise<string>;
+  /** Cancel a scheduler-owned queued message that failed before Queue admission. */
+  cancelQueuedDelivery?: (messageId: string) => Promise<boolean>;
   /** Phase 4 (AC-H2): fetch web content with browser-automation routing */
   fetchContent?: (url: string, signal?: AbortSignal) => Promise<FetchResult>;
   /** Phase 4b: invoke a cat to handle a scheduled task (fire-and-forget) */
@@ -171,6 +172,7 @@ export class TaskRunnerV2 {
   private globalControlStore: TaskRunnerV2Options['globalControlStore'];
   private emissionStore: TaskRunnerV2Options['emissionStore'];
   private deliver: TaskRunnerV2Options['deliver'];
+  private cancelQueuedDelivery: TaskRunnerV2Options['cancelQueuedDelivery'];
   private fetchContent: TaskRunnerV2Options['fetchContent'];
   private invokeTrigger: TaskRunnerV2Options['invokeTrigger'];
   private ballCustody: TaskRunnerV2Options['ballCustody'];
@@ -197,6 +199,7 @@ export class TaskRunnerV2 {
     this.globalControlStore = opts.globalControlStore;
     this.emissionStore = opts.emissionStore;
     this.deliver = opts.deliver;
+    this.cancelQueuedDelivery = opts.cancelQueuedDelivery;
     this.fetchContent = opts.fetchContent;
     this.invokeTrigger = opts.invokeTrigger;
     this.ballCustody = opts.ballCustody;
@@ -623,12 +626,28 @@ export class TaskRunnerV2 {
       error_summary: null,
     });
 
-    if (def.deliveryThreadId && isHoldBallReminderDef(def)) {
+    if (def.deliveryThreadId && isHoldBallReminderDef(def) && this.deliver) {
       const catId = readHoldBallCatId(def);
       if (catId) {
-        this.ballCustody
-          ?.record(buildHoldExpiredEvent({ threadId: def.deliveryThreadId, catId, fireAt, at: Date.now() }))
-          .catch((err) => this.logger.error(`[scheduler] ${def.id}: failed to record missed hold expiry`, err));
+        const triggerUserId = ((def.params as Record<string, unknown>).triggerUserId as string) || 'default-user';
+        void this.deliver({
+          threadId: def.deliveryThreadId,
+          userId: triggerUserId,
+          content: `等待已结束：原定 ${fireAtIso} 的唤醒因服务未运行而错过，任务已取消。`,
+          idempotencyKey: `hold-ball-missed:${def.id}`,
+          source: {
+            connector: 'hold-ball',
+            label: '持球状态',
+            icon: '🏓',
+            meta: {
+              managedHold: true,
+              phase: 'status',
+              taskId: def.id,
+              threadId: def.deliveryThreadId,
+              catId,
+            },
+          },
+        }).catch((err) => this.logger.error(`[scheduler] ${def.id}: failed to persist missed hold status`, err));
       }
     }
 
@@ -755,6 +774,7 @@ export class TaskRunnerV2 {
       isManualTrigger,
       schedule,
       deliver: this.deliver,
+      cancelQueuedDelivery: this.cancelQueuedDelivery,
       fetchContent: this.fetchContent,
       invokeTrigger: this.invokeTrigger,
       ballCustody: this.ballCustody,

@@ -1,158 +1,94 @@
 /**
- * F220 intake — ordered, frozen, bounded queue_updated publication.
+ * F220 intake — ordered, frozen, bounded Queue publication.
+ *
+ * The public Queue projection contains pending source rows only. Delivery and
+ * terminal truth belongs to History lifecycle dispatchRefs/response messages.
  */
 
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
-const { emitQueueUpdated, enrichQueueEntries, projectPublicQueueEntry } = await import(
-  '../dist/utils/queue-enrichment.js'
-);
+const { emitQueueUpdated, projectPublicQueueEntry } = await import('../dist/utils/queue-enrichment.js');
 
 describe('F220 intake: queue snapshot publication ordering', () => {
   const makeEntry = (overrides = {}) => ({
+    version: 2,
     id: 'queue-entry',
     threadId: 't1',
-    userId: 'u1',
-    content: 'queued work',
-    messageId: 'msg-entry',
-    mergedMessageIds: [],
-    source: 'user',
-    targetCats: ['opus'],
-    intent: 'execute',
+    owner: { kind: 'user', userId: 'u1' },
+    kind: 'conversation_input',
+    from: { kind: 'user', userId: 'user-1' },
+    targets: ['opus'],
+    payload: { sourceRecordId: 'msg-entry', content: 'queued work', messageId: 'msg-entry' },
+    execution: { intent: 'execute', ownerAuthProvenance: 'strict', autoExecute: false },
+    delivery: {},
     status: 'queued',
-    createdAt: 1,
-    autoExecute: false,
+    enqueuedAt: 1,
     priority: 'normal',
     ...overrides,
   });
 
-  const makeWithdrawnCustody = (overrides = {}) => ({
-    version: 1,
-    entryId: 'withdrawn-entry',
-    revision: 2,
-    ownerAuthProvenance: 'strict',
-    intent: 'execute',
-    status: 'terminal',
-    allTargetCats: ['opus'],
-    pendingTargetCats: [],
-    notifiedByCatIds: [],
-    seenByCatIds: [],
-    seenInvocationIdByCatId: {},
-    failedByCatIds: [],
-    handledByCatIds: [],
-    withdrawnByCatIds: ['opus'],
-    withdrawnAtByCatId: { opus: 20 },
-    priority: 'normal',
-    createdAt: 1,
-    updatedAt: 20,
-    ...overrides,
-  });
-
-  it('keeps recovery action identity stable across an unchanged serialized Queue snapshot', () => {
-    const beforeRestart = makeEntry({
-      source: 'agent',
-      messageId: null,
-      queuedFailedByCatIds: ['opus'],
-      queuedFailureAtByCatId: { opus: 1234 },
-      queuedFailureReasonByCatId: { opus: 'invocation_failed' },
-    });
-    const afterRestart = structuredClone(beforeRestart);
-
-    assert.deepEqual(
-      projectPublicQueueEntry(afterRestart).recoveryActions,
-      projectPublicQueueEntry(beforeRestart).recoveryActions,
+  it('never publishes private system input content', async () => {
+    const emitted = [];
+    await emitQueueUpdated(
+      { emitToUser: (_userId, _event, data) => emitted.push(data) },
+      'u1',
+      't1',
+      [
+        makeEntry({
+          kind: 'private_input',
+          from: { kind: 'system', service: 'podcast' },
+          payload: { sourceRecordId: 'private-prompt', content: 'secret podcast prompt' },
+        }),
+      ],
+      null,
+      'private',
     );
-    assert.equal(projectPublicQueueEntry(afterRestart).recoveryActions[0]?.kind, 'retry_target');
+    assert.deepEqual(emitted[0].queue, []);
   });
 
-  it('does not project Retry when durable receipt truth says the failed target has no carrier', async () => {
-    const entry = makeEntry({
-      queuedFailedByCatIds: ['opus'],
-      queuedFailureAtByCatId: { opus: 1234 },
-    });
-    const messageStore = {
-      getById: async () => ({
-        queueCustody: {
-          version: 1,
-          entryId: entry.id,
-          revision: 1,
-          intent: 'execute',
-          status: 'queued',
-          allTargetCats: ['opus'],
-          pendingTargetCats: ['opus'],
-          notifiedByCatIds: [],
-          seenByCatIds: [],
-          seenInvocationIdByCatId: {},
-          failedByCatIds: ['opus'],
-          handledByCatIds: [],
-          carrierByTargetCatId: { codex: { entryId: 'other-carrier' } },
-          targetAttempts: [
+  it('projects one pending source row without Queue-owned processing or terminal state', () => {
+    const projected = projectPublicQueueEntry(
+      makeEntry({
+        targets: ['opus', 'codex'],
+        delivery: {
+          authorIntentByTarget: {
+            opus: {
+              requested: 'continue_current',
+              fallbackAt: 12,
+              fallbackReason: 'no_active_parent',
+            },
+            removed: { requested: 'next_work' },
+          },
+          reminderAttempts: [
             {
-              id: 'attempt-1',
+              id: 'reminder-opus',
               targetCatId: 'opus',
-              sequence: 1,
-              state: 'failed',
-              createdAt: 1000,
-              updatedAt: 1234,
-              terminalReason: 'invocation_failed',
+              invocationId: 'inv-opus',
+              state: 'requested',
+              requestedAt: 10,
+            },
+            {
+              id: 'reminder-removed',
+              targetCatId: 'removed',
+              invocationId: 'inv-removed',
+              state: 'requested',
+              requestedAt: 11,
             },
           ],
-          priority: 'normal',
-          createdAt: 1000,
-          updatedAt: 1234,
         },
       }),
-    };
-
-    const [projected] = await enrichQueueEntries([entry], messageStore);
-
-    assert.deepEqual(
-      projected.recoveryActions.map((action) => action.kind),
-      ['withdraw'],
     );
-  });
 
-  it('fails message-backed Retry closed when durable enrichment throws', async () => {
-    const entry = makeEntry({
-      queuedFailedByCatIds: ['opus'],
-      queuedFailureAtByCatId: { opus: 1234 },
-    });
-    const messageStore = {
-      getById: async () => {
-        throw new Error('synthetic message-store failure');
-      },
-    };
-
-    const [projected] = await enrichQueueEntries([entry], messageStore);
-
+    assert.deepEqual(projected.targetCats, ['opus', 'codex']);
+    assert.equal(projected.status, 'queued');
+    assert.equal(projected.authorIntentByTarget.opus.effective, 'next_work');
     assert.deepEqual(
-      projected.recoveryActions.map((action) => action.kind),
-      ['withdraw'],
+      projected.reminderAttempts.map((attempt) => attempt.id),
+      ['reminder-opus'],
     );
-  });
-
-  it('fails message-backed Retry closed when the referenced message has no custody', async () => {
-    const entry = makeEntry({
-      queuedFailedByCatIds: ['opus'],
-      queuedFailureAtByCatId: { opus: 1234 },
-    });
-    const messageStore = {
-      getById: async (messageId) => ({
-        id: messageId,
-        threadId: entry.threadId,
-        userId: entry.userId,
-        catId: null,
-        content: entry.content,
-      }),
-    };
-
-    const [projected] = await enrichQueueEntries([entry], messageStore);
-
-    assert.deepEqual(
-      projected.recoveryActions.map((action) => action.kind),
-      ['withdraw'],
-    );
+    assert.equal('queueReceipt' in projected, false);
+    assert.equal('targetStates' in projected, false);
   });
 
   it('serializes same-scope snapshots while a different user remains independent', async () => {
@@ -170,31 +106,23 @@ describe('F220 intake: queue snapshot publication ordering', () => {
             releaseOlder = resolve;
           });
         }
-        return messageId === 'msg-terminal' ? { id: messageId, queueCustody: makeWithdrawnCustody() } : null;
+        return null;
       },
     };
     const socketManager = {
-      emitToUser: (userId, _event, data) =>
-        emitted.push({
-          userId,
-          action: data.action,
-          queue: data.queue,
-          messageReceipts: data.messageReceipts,
-        }),
+      emitToUser: (userId, _event, data) => emitted.push({ userId, ...data }),
     };
 
     const older = emitQueueUpdated(
       socketManager,
       'u1',
       't1',
-      [makeEntry({ id: 'older', messageId: 'msg-older' })],
+      [makeEntry({ payload: { sourceRecordId: 'msg-older', content: 'older', messageId: 'msg-older' } })],
       messageStore,
       'older',
     );
     await olderStartedPromise;
-    const newer = emitQueueUpdated(socketManager, 'u1', 't1', [], messageStore, 'newer', {
-      receiptMessageIds: ['msg-terminal'],
-    });
+    const newer = emitQueueUpdated(socketManager, 'u1', 't1', [], messageStore, 'newer');
     const independent = emitQueueUpdated(socketManager, 'u2', 't1', [], messageStore, 'independent');
 
     try {
@@ -203,12 +131,10 @@ describe('F220 intake: queue snapshot publication ordering', () => {
       assert.deepEqual(
         emitted.filter((event) => event.userId === 'u1'),
         [],
-        'newer same-scope snapshot must wait behind the older enrichment',
       );
       assert.deepEqual(
         emitted.filter((event) => event.userId === 'u2').map((event) => event.action),
         ['independent'],
-        'different user scope must not share the tail',
       );
     } finally {
       releaseOlder?.();
@@ -219,17 +145,10 @@ describe('F220 intake: queue snapshot publication ordering', () => {
       emitted.filter((event) => event.userId === 'u1').map((event) => event.action),
       ['older', 'newer'],
     );
-    assert.deepEqual(emitted.find((event) => event.action === 'newer')?.messageReceipts, [
-      {
-        messageId: 'msg-terminal',
-        queueReceipt: {
-          version: 1,
-          entryId: 'withdrawn-entry',
-          targets: [{ catId: 'opus', state: 'withdrawn', withdrawnAt: 20 }],
-          reminderAttempts: [],
-        },
-      },
-    ]);
+    assert.equal(
+      emitted.some((event) => 'messageReceipts' in event),
+      false,
+    );
   });
 
   it('freezes mutable queue entries at publication call time', async () => {
@@ -248,24 +167,24 @@ describe('F220 intake: queue snapshot publication ordering', () => {
         return null;
       },
     };
-    const socketManager = {
-      emitToUser: (_userId, _event, data) => emitted.push(data),
-    };
-    const entry = makeEntry({ queuedNotifiedByCatIds: ['opus'] });
-
-    const publication = emitQueueUpdated(socketManager, 'u1', 't1', [entry], messageStore, 'frozen');
+    const entry = makeEntry();
+    const publication = emitQueueUpdated(
+      { emitToUser: (_userId, _event, data) => emitted.push(data) },
+      'u1',
+      't1',
+      [entry],
+      messageStore,
+      'frozen',
+    );
     await lookupStartedPromise;
-    entry.targetCats.push('codex');
-    entry.queuedNotifiedByCatIds.push('codex');
+    entry.targets = ['codex'];
     releaseLookup();
     await publication;
 
     assert.deepEqual(emitted[0].queue[0].targetCats, ['opus']);
-    assert.deepEqual(emitted[0].queue[0].queuedNotifiedByCatIds, ['opus']);
-    assert.deepEqual(emitted[0].queue[0].targetStates, { opus: 'notified' });
   });
 
-  it('falls back to a projected raw snapshot after the enrichment deadline and releases the tail', async (t) => {
+  it('releases the publication tail with the pending projection after the enrichment deadline', async (t) => {
     t.mock.timers.enable({ apis: ['setTimeout'] });
     const emitted = [];
     let lookupStarted;
@@ -278,47 +197,25 @@ describe('F220 intake: queue snapshot publication ordering', () => {
         return new Promise(() => {});
       },
     };
-    const socketManager = {
-      emitToUser: (_userId, _event, data) => emitted.push(data),
-    };
-    const stalledEntry = makeEntry({
-      id: 'stalled',
-      messageId: 'msg-stalled',
-      queuedFailedByCatIds: ['opus'],
-      queuedFailureAtByCatId: { opus: 1234 },
-    });
-    let stalledSettled = false;
-    let followingSettled = false;
+    const socketManager = { emitToUser: (_userId, _event, data) => emitted.push(data) };
 
-    const stalled = emitQueueUpdated(socketManager, 'u1', 't1', [stalledEntry], messageStore, 'stalled').then(() => {
-      stalledSettled = true;
-    });
+    const stalled = emitQueueUpdated(socketManager, 'u1', 't1', [makeEntry()], messageStore, 'stalled');
     await lookupStartedPromise;
-    const following = emitQueueUpdated(socketManager, 'u1', 't1', [], messageStore, 'following').then(() => {
-      followingSettled = true;
-    });
-
+    const following = emitQueueUpdated(socketManager, 'u1', 't1', [], messageStore, 'following');
     t.mock.timers.tick(2_000);
     await new Promise((resolve) => setImmediate(resolve));
-
-    assert.equal(stalledSettled, true, 'deadline must settle the stalled head publication');
-    assert.equal(followingSettled, true, 'deadline must release the next same-scope publication');
     await Promise.all([stalled, following]);
+
     assert.deepEqual(
-      emitted.map((event) => ({ action: event.action, targetStates: event.queue[0]?.targetStates })),
+      emitted.map((event) => ({ action: event.action, targetCats: event.queue[0]?.targetCats })),
       [
-        { action: 'stalled', targetStates: { opus: 'failed' } },
-        { action: 'following', targetStates: undefined },
+        { action: 'stalled', targetCats: ['opus'] },
+        { action: 'following', targetCats: undefined },
       ],
-    );
-    assert.deepEqual(
-      emitted[0].queue[0].recoveryActions.map((action) => action.kind),
-      ['withdraw'],
-      'deadline fallback must never advertise a custody-dependent Retry',
     );
   });
 
-  it('keeps timely message enrichment and legacy optional queue fields compatible', async () => {
+  it('enriches a targetless pending source row without inventing a delivery target', async () => {
     const emitted = [];
     const messageStore = {
       getById: async (id) => ({
@@ -329,58 +226,21 @@ describe('F220 intake: queue snapshot publication ordering', () => {
         replyTo: 'msg-parent',
       }),
     };
-    const socketManager = {
-      emitToUser: (_userId, _event, data) => emitted.push(data),
-    };
-    const legacyEntry = makeEntry({
-      targetCats: undefined,
-      mergedMessageIds: undefined,
-      queuedNotifiedByCatIds: undefined,
-      allTargetCats: undefined,
-    });
 
-    await emitQueueUpdated(socketManager, 'u1', 't1', [legacyEntry], messageStore, 'enriched');
+    await emitQueueUpdated(
+      { emitToUser: (_userId, _event, data) => emitted.push(data) },
+      'u1',
+      't1',
+      [makeEntry({ targets: [] })],
+      messageStore,
+      'enriched',
+    );
 
     assert.deepEqual(emitted[0].queue[0].messagePreview, {
       contentBlocks: [{ kind: 'text', text: 'preview text' }],
       replyTo: 'msg-parent',
     });
-    assert.deepEqual(emitted[0].queue[0].targetStates, {});
-  });
-
-  it('publishes message-bound terminal receipts after withdrawal empties the Queue', async () => {
-    const emitted = [];
-    const terminalCustody = makeWithdrawnCustody();
-    const messageStore = {
-      getById: async (messageId) =>
-        messageId === 'msg-withdrawn' ? { id: messageId, queueCustody: terminalCustody } : null,
-    };
-    const socketManager = {
-      emitToUser: (_userId, _event, data) => emitted.push(data),
-    };
-
-    await emitQueueUpdated(socketManager, 'u1', 't1', [], messageStore, 'removed', {
-      receiptMessageIds: ['msg-withdrawn', 'msg-withdrawn', 'msg-missing'],
-    });
-
-    assert.deepEqual(emitted, [
-      {
-        threadId: 't1',
-        queue: [],
-        action: 'removed',
-        messageReceipts: [
-          {
-            messageId: 'msg-withdrawn',
-            queueReceipt: {
-              version: 1,
-              entryId: 'withdrawn-entry',
-              targets: [{ catId: 'opus', state: 'withdrawn', withdrawnAt: 20 }],
-              reminderAttempts: [],
-            },
-          },
-        ],
-      },
-    ]);
+    assert.deepEqual(emitted[0].queue[0].targetCats, []);
   });
 
   it('does not poison a same-scope successor when the previous emitter throws', async () => {
@@ -398,7 +258,6 @@ describe('F220 intake: queue snapshot publication ordering', () => {
 
     const failed = emitQueueUpdated(socketManager, 'u1', 't1', [], null, 'first');
     const following = emitQueueUpdated(socketManager, 'u1', 't1', [], null, 'second');
-
     await assert.rejects(failed, /synthetic emit failure/);
     await following;
     assert.deepEqual(emitted, ['second']);

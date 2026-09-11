@@ -163,6 +163,58 @@ describe('assembleContext', () => {
     assert.ok(!result.contextText.includes('co-creator] Error:'), 'system error must not appear as co-creator');
   });
 
+  test('includes delivered owner-bound managed hold facts for the shared user/cat view', async () => {
+    const { assembleContext } = await import('../dist/domains/cats/services/context/ContextAssembler.js');
+    const hold = mockMsg({
+      from: { kind: 'system', service: 'hold-ball' },
+      userId: 'user-1',
+      content: '持球中：等待 CI 完成；完成后复核结果',
+      timestamp: 2_000,
+      source: {
+        connector: 'hold-ball',
+        label: '等待状态',
+        icon: '🏓',
+        meta: {
+          managedHold: true,
+          phase: 'waiting',
+          taskId: 'hold-ball-1',
+          threadId: 'thread-1',
+          catId: 'codex',
+        },
+      },
+    });
+
+    const result = assembleContext([hold]);
+    assert.equal(result.messageCount, 1);
+    assert.match(result.contextText, /等待 CI 完成/);
+    assert.match(result.contextText, /等待状态/);
+  });
+
+  test('keeps managed-hold wake sources out of cat context until Queue admission', async () => {
+    const { assembleContext } = await import('../dist/domains/cats/services/context/ContextAssembler.js');
+    const wake = mockMsg({
+      from: { kind: 'system', service: 'managed-command-wake' },
+      userId: 'user-1',
+      content: '门禁已结束，请检查结果',
+      deliveryStatus: 'queued',
+      source: {
+        connector: 'hold-ball',
+        label: '持球唤醒',
+        icon: '🏓',
+        meta: {
+          managedHold: true,
+          phase: 'wake',
+          taskId: 'hold-ball-2',
+          threadId: 'thread-1',
+          catId: 'codex',
+        },
+      },
+    });
+
+    assert.equal(assembleContext([wake]).messageCount, 0);
+    assert.match(assembleContext([{ ...wake, deliveryStatus: 'delivered' }]).contextText, /门禁已结束/);
+  });
+
   test('default token ceiling does not reintroduce a message-count cap', async () => {
     const { assembleContext } = await import('../dist/domains/cats/services/context/ContextAssembler.js');
     const msgs = Array.from({ length: 25 }, (_, i) => mockMsg({ content: `m${i}`, timestamp: i * 1000 }));

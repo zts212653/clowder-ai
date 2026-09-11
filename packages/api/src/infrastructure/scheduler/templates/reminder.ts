@@ -1,5 +1,4 @@
 import { SCHEDULER_TRIGGER_PREFIX } from '@cat-cafe/shared';
-import { buildHoldExpiredEvent } from '../../../domains/ball-custody/ball-custody-events.js';
 import type { ScheduleRunTiming, TaskSpec_P1 } from '../types.js';
 import type { DynamicTaskParams, TaskTemplate } from './types.js';
 
@@ -29,6 +28,18 @@ function isManagedCommandWake(params: Record<string, unknown>): boolean {
   );
 }
 
+function isManagedHoldWake(instanceId: string, params: Record<string, unknown>): boolean {
+  const lifecycle = params.holdLifecycle;
+  return Boolean(
+    instanceId.startsWith('hold-ball-') &&
+      typeof lifecycle === 'object' &&
+      lifecycle !== null &&
+      !Array.isArray(lifecycle) &&
+      ((lifecycle as Record<string, unknown>).mode === 'timer' ||
+        (lifecycle as Record<string, unknown>).mode === 'wake_when'),
+  );
+}
+
 /** Reminder template — fires on schedule, wakes a cat to handle the reminder in-thread */
 export const reminderTemplate: TaskTemplate = {
   templateId: 'reminder',
@@ -47,6 +58,7 @@ export const reminderTemplate: TaskTemplate = {
     const triggerUserId = (p.params.triggerUserId as string) || 'default-user';
     const threadId = p.deliveryThreadId;
     const managedCommandWake = instanceId.startsWith('hold-ball-') && isManagedCommandWake(p.params);
+    const managedHoldWake = isManagedHoldWake(instanceId, p.params);
     // F167 Phase M (codex P1): pre-fire defer activation is hold_ball-specific.
     // Gate on the `hold-ball-` instanceId prefix — callback-hold-ball-routes mints those
     // ids, while public /api/schedule/tasks only mints `dyn-*` (schedule.ts:417), so a
@@ -80,22 +92,79 @@ export const reminderTemplate: TaskTemplate = {
           const catId = targetCatId ?? ctx.assignedCatId ?? 'opus';
           const content = `${SCHEDULER_TRIGGER_PREFIX} ${formatScheduleTiming(ctx.schedule)}${message}`;
 
-          if (instanceId.startsWith('hold-ball-') && p.trigger.type === 'once' && threadId) {
-            ctx.ballCustody
-              ?.record(buildHoldExpiredEvent({ threadId: tid, catId, fireAt: p.trigger.fireAt, at: Date.now() }))
-              .catch(() => {});
-          }
-
           // Store trigger message first → real messageId for InvocationRecord + retry
           const messageId = await ctx.deliver({
             threadId: tid,
             content,
-            userId: 'scheduler',
-            ...(ctx.invokeTrigger ? { extra: { scheduler: { hiddenTrigger: true } } } : {}),
+            // F117 ADR-043 D.4: stored userId is the verified trigger owner (tenant),
+            // not the author — scheduler authorship is expressed via from: system:scheduler.
+            // Must equal the triggerUserId passed to invokeTrigger below, otherwise the
+            // canonical ingress fence (source owner vs queue owner) rejects the enqueue.
+            userId: triggerUserId,
+            ...(ctx.invokeTrigger && !managedHoldWake ? { extra: { scheduler: { hiddenTrigger: true } } } : {}),
+            ...(managedHoldWake
+              ? {
+                  deliveryStatus: 'queued' as const,
+                  idempotencyKey: `hold-ball-wake:${instanceId}`,
+                  source: {
+                    connector: 'hold-ball',
+                    label: '持球唤醒',
+                    icon: '🏓',
+                    meta: {
+                      managedHold: true,
+                      phase: 'wake',
+                      taskId: instanceId,
+                      threadId: tid,
+                      catId,
+                    },
+                  },
+                }
+              : {}),
           });
 
           // Wake a cat to act on the trigger message
-          if (ctx.invokeTrigger) {
+          if (managedHoldWake) {
+            try {
+              if (!ctx.invokeTrigger) throw new Error('invoke trigger is unavailable');
+              const outcome = await ctx.invokeTrigger.trigger(
+                tid,
+                catId,
+                triggerUserId,
+                content,
+                messageId,
+                undefined,
+                {
+                  sourceCategory: 'scheduled',
+                  priority: 'urgent',
+                },
+              );
+              if (outcome !== 'enqueued') throw new Error(`queue admission returned ${outcome}`);
+            } catch (err) {
+              if (!ctx.cancelQueuedDelivery)
+                throw new Error('queued delivery cancellation is unavailable', { cause: err });
+              const canceled = await ctx.cancelQueuedDelivery(messageId);
+              if (!canceled) throw new Error('failed to cancel unadmitted managed-hold wake', { cause: err });
+              const detail = err instanceof Error ? err.message.slice(0, 500) : String(err).slice(0, 500);
+              await ctx.deliver({
+                threadId: tid,
+                userId: triggerUserId,
+                content: `等待已结束：唤醒入队失败（${detail}）`,
+                idempotencyKey: `hold-ball-wake-failed:${instanceId}`,
+                source: {
+                  connector: 'hold-ball',
+                  label: '持球状态',
+                  icon: '🏓',
+                  meta: {
+                    managedHold: true,
+                    phase: 'status',
+                    taskId: instanceId,
+                    threadId: tid,
+                    catId,
+                  },
+                },
+              });
+            }
+          } else if (ctx.invokeTrigger) {
             try {
               void Promise.resolve(
                 ctx.invokeTrigger.trigger(tid, catId, triggerUserId, content, messageId, undefined, {
@@ -103,7 +172,7 @@ export const reminderTemplate: TaskTemplate = {
                 }),
               ).catch(() => {});
             } catch {
-              // Best-effort: sync trigger throw should not fail the reminder
+              // Best-effort: sync trigger throw should not fail ordinary reminders.
             }
           }
         },

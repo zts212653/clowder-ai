@@ -20,7 +20,7 @@ import {
 export { enrichWithParentThreadHeader } from './proposal-enrich-header.js';
 
 type ProposalRouter = Pick<AgentRouter, 'resolveTargetsAndIntent'>;
-type ProposalInvocationQueue = Pick<InvocationQueue, 'enqueue' | 'backfillMessageId' | 'rollbackEnqueue'>;
+type ProposalInvocationQueue = Pick<InvocationQueue, 'appendAndEnqueueDurable' | 'enqueueExistingMessageDurable'>;
 type ProposalQueueProcessor = Pick<QueueProcessor, 'processNext'>;
 
 export interface ProposalInitialMessageDispatchDeps {
@@ -230,8 +230,8 @@ export async function appendApprovedInitialMessage({
       declaredWorkMode,
     );
     const stored = await messageStore.append({
+      from: sourceCatId ? { kind: 'agent', catId: sourceCatId } : { kind: 'user', userId },
       userId,
-      catId: sourceCatId ?? null, // AC-AA4: source cat is the message author
       content: enrichedFallback,
       mentions: [],
       timestamp: Date.now(),
@@ -285,8 +285,8 @@ export async function appendApprovedInitialMessage({
       return cancelExistingSeed(existingSeed, messageStore, 'no target cats resolved');
     }
     const stored = await messageStore.append({
+      from: sourceCatId ? { kind: 'agent', catId: sourceCatId } : { kind: 'user', userId },
       userId,
-      catId: sourceCatId ?? null, // AC-AA4
       content,
       mentions: [],
       timestamp: Date.now(),
@@ -322,6 +322,6 @@ export async function appendApprovedInitialMessage({
     socketManager,
     invocationQueue,
     queueProcessor,
-    existingSeed,
+    ...(existingSeed ? { existingSeed } : {}),
   });
 }

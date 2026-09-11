@@ -69,7 +69,7 @@ describe('CallbackAuthSystemMessageNotifier (F174-D2b-1)', () => {
     assert.equal(messageStore.appended.length, 1, 'one message appended');
     const msg = messageStore.appended[0];
     assert.equal(msg.threadId, 't1');
-    assert.equal(msg.catId, null, 'system message uses catId=null');
+    assert.deepEqual(msg.from, { kind: 'system', service: 'callback-auth' });
     assert.equal(msg.userId, 'u1');
     assert.equal(msg.timestamp, now);
     assert.deepEqual(msg.mentions, []);

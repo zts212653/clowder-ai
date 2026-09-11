@@ -89,7 +89,6 @@ export const CONTEXT_PROJECTION_LEDGER_OUTCOME = 'context_projection.ledger_outc
 // --- Route aggregate attributes (set at route completion) ---
 export const ROUTE_TOTAL_CATS_INVOKED = 'route.total_cats_invoked';
 export const ROUTE_TOTAL_TOKENS = 'route.total_tokens';
-export const ROUTE_HAS_A2A_HANDOFF = 'route.has_a2a_handoff';
 
 /**
  * F153: Caller trace context for cross-route A2A propagation.

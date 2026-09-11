@@ -33,7 +33,7 @@ const EMPTY_CAT_INVOCATIONS: Readonly<Record<string, CatInvocationInfo>> = Objec
 export interface ThreadLiveness {
   hasActive: boolean;
   catStatuses: Record<string, CatStatusType>;
-  /** F210 H3: per-cat agy 进度文案（折叠单行 "AGY working · N steps · latest"），ThinkingIndicator 显示。 */
+  /** F210 H3: per-cat agy progress retained for structured execution diagnostics. */
   catStatusDetails: Record<string, string>;
   activeInvocations: Record<string, { catId: string; mode: string; startedAt?: number }>;
   catInvocations: Record<string, CatInvocationInfo>;

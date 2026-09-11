@@ -1,10 +1,11 @@
 'use client';
 
-import type { FreshnessCarrierCapability, QueueRecoveryAction } from '@cat-cafe/shared';
+import type { ActiveExecutionListResponse, FreshnessCarrierCapability } from '@cat-cafe/shared';
 import { type QueueReminderAttemptState, SCHEDULER_TRIGGER_PREFIX } from '@cat-cafe/shared';
 import { closestCenter, DndContext, type DragEndEvent, PointerSensor, useSensor, useSensors } from '@dnd-kit/core';
 import { arrayMove, SortableContext, verticalListSortingStrategy } from '@dnd-kit/sortable';
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCatData } from '@/hooks/useCatData';
 import { useCatNameResolver } from '@/hooks/useCatNameResolver';
 import { useCoCreatorConfig } from '@/hooks/useCoCreatorConfig';
 import { useThreadLiveness } from '@/hooks/useThreadScopedSelectors';
@@ -12,15 +13,15 @@ import { useChatStore } from '@/stores/chatStore';
 import { useToastStore } from '@/stores/toastStore';
 import { apiFetch } from '@/utils/api-client';
 import { composerInsertFromRecall, requestTrueRecall, TrueRecallRequestError } from '@/utils/true-recall';
-import { ForceResetDialog } from './ForceResetDialog';
 import { SortableQueueEntryRow } from './QueueEntryRow';
-import {
-  collectExactLiveInvocationIds,
-  projectQueueEntryForActions,
-  queueEntryNeedsRecovery,
-  queueTargetStateEntries,
-} from './queue-receipt-projection';
 import { SteerQueuedEntryModal } from './SteerQueuedEntryModal';
+import {
+  parseSteerSourceRecordId,
+  parseSteerSourceTargetStates,
+  parseSteerThreadCatProjection,
+  type SteerSourceTargetState,
+  type SteerThreadCatProjection,
+} from './steer-target-selection';
 import { useQueueActionConvergence } from './useQueueActionConvergence';
 
 const COLLAPSE_THRESHOLD = 4;
@@ -47,21 +48,11 @@ function reminderResultCopy(state: unknown) {
     : REMINDER_RESULT_COPY.requested;
 }
 
-function recoveryNoStartCopy(refreshed: boolean, error: unknown) {
-  if (typeof error === 'string') {
-    return { type: refreshed ? ('info' as const) : ('error' as const), title: '队列未启动', message: error };
-  }
-  if (refreshed) {
-    return {
-      type: 'info' as const,
-      title: '队列状态已刷新',
-      message: '系统没有启动新的处理；请按当前条目显示的可用操作继续。',
-    };
-  }
+function queueClearFailureCopy(data: { code?: unknown; error?: unknown }) {
+  const partial = data.code === 'QUEUE_WITHDRAWAL_PARTIAL';
   return {
-    type: 'error' as const,
-    title: '队列未启动',
-    message: '系统没有启动新的处理，刷新也未完成；请稍后重试。',
+    title: partial ? '已停止部分消息' : '停止失败',
+    message: typeof data.error === 'string' ? `执行已停止；${data.error}` : '执行已停止，但待处理队列未能清空，请重试',
   };
 }
 
@@ -135,60 +126,109 @@ interface QueuePanelProps {
 
 export function QueuePanel({ threadId }: QueuePanelProps) {
   const coCreator = useCoCreatorConfig();
+  const { cats } = useCatData();
   const resolveCatName = useCatNameResolver();
   const rawQueue = useChatStore((s) => s.queue);
   const queue = useMemo(() => rawQueue ?? [], [rawQueue]);
-  const queuePaused = useChatStore((s) => s.queuePaused) ?? false;
-  const queuePauseReason = useChatStore((s) => s.queuePauseReason);
   const setQueue = useChatStore((s) => s.setQueue);
   const { activeInvocations, catInvocations } = useThreadLiveness(threadId);
   const setPendingChatInsert = useChatStore((s) => s.setPendingChatInsert);
   const addToast = useToastStore((s) => s.addToast);
 
-  const {
-    steerEntryId,
-    forceResetAction,
-    retryingAttemptIds,
-    resettingActionIds,
-    handleRetry,
-    refreshQueue,
-    handleSteerConfirm,
-    handleSteerOpen,
-    handleSteerCancel,
-    handleForceResetConfirm,
-    handleForceResetOpen,
-    handleForceResetCancel,
-  } = useQueueActionConvergence(threadId);
+  const { steerEntryId, handleSteerConfirm, handleSteerOpen, handleSteerCancel } = useQueueActionConvergence(threadId);
   const [remindingTargetKeys, setRemindingTargetKeys] = useState<Set<string>>(() => new Set());
+  const [appendingEntryIds, setAppendingEntryIds] = useState<Set<string>>(() => new Set());
   const [collapsed, setCollapsed] = useState<boolean | null>(null);
+  const [steerContext, setSteerContext] = useState<
+    SteerThreadCatProjection & {
+      threadId: string | null;
+      entryId: string | null;
+      sourceTargets: SteerSourceTargetState[];
+      sourceRecordId: string | null;
+      state: 'loading' | 'ready' | 'unavailable';
+    }
+  >({
+    threadId: null,
+    entryId: null,
+    participantActivity: [],
+    fallbackTargetCatId: null,
+    sourceTargets: [],
+    sourceRecordId: null,
+    state: 'loading',
+  });
+
+  useEffect(() => {
+    if (!steerEntryId) {
+      setSteerContext({
+        threadId: null,
+        entryId: null,
+        participantActivity: [],
+        fallbackTargetCatId: null,
+        sourceTargets: [],
+        sourceRecordId: null,
+        state: 'loading',
+      });
+      return;
+    }
+    let current = true;
+    setSteerContext({
+      threadId,
+      entryId: steerEntryId,
+      participantActivity: [],
+      fallbackTargetCatId: null,
+      sourceTargets: [],
+      sourceRecordId: null,
+      state: 'loading',
+    });
+    void Promise.all([
+      apiFetch(`/api/threads/${encodeURIComponent(threadId)}/cats`),
+      apiFetch(`/api/threads/${encodeURIComponent(threadId)}/queue/${encodeURIComponent(steerEntryId)}/targets`),
+    ])
+      .then(async ([catsResponse, targetsResponse]) => {
+        if (!catsResponse.ok || !targetsResponse.ok) throw new Error('Steer context unavailable');
+        return Promise.all([catsResponse.json(), targetsResponse.json()]);
+      })
+      .then(([catsBody, targetsBody]) => {
+        if (!current) return;
+        setSteerContext({
+          threadId,
+          entryId: steerEntryId,
+          ...parseSteerThreadCatProjection(catsBody),
+          sourceTargets: parseSteerSourceTargetStates(targetsBody),
+          sourceRecordId: parseSteerSourceRecordId(targetsBody),
+          state: 'ready',
+        });
+      })
+      .catch(() => {
+        if (current) {
+          setSteerContext({
+            threadId,
+            entryId: steerEntryId,
+            participantActivity: [],
+            fallbackTargetCatId: null,
+            sourceTargets: [],
+            sourceRecordId: null,
+            state: 'unavailable',
+          });
+        }
+      });
+    return () => {
+      current = false;
+    };
+  }, [steerEntryId, threadId]);
 
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }));
 
-  const activeInvocationIds = useMemo(
-    () => collectExactLiveInvocationIds(activeInvocations, catInvocations),
-    [activeInvocations, catInvocations],
-  );
-  const activeCatIds = useMemo(
-    () => new Set(Object.values(activeInvocations).map((invocation) => invocation.catId)),
-    [activeInvocations],
-  );
   const visibleEntries = useMemo(
     () =>
       queue
-        .filter((entry) => {
-          if (entry.source === 'connector' && entry.content.startsWith(SCHEDULER_TRIGGER_PREFIX)) return false;
-          if (entry.status === 'queued') return true;
-          const hasProjectedReset = entry.recoveryActions?.some((action) => action.kind === 'force_reset') ?? false;
-          const hasActiveTarget =
-            entry.targetCats.length === 0
-              ? activeInvocationIds.size > 0
-              : entry.targetCats.some((catId) => activeCatIds.has(catId));
-          return hasProjectedReset && !hasActiveTarget;
-        })
-        .map((entry) => projectQueueEntryForActions(entry, activeInvocationIds))
-        .filter((entry): entry is NonNullable<typeof entry> => entry !== null)
+        .filter(
+          (e) =>
+            e.status === 'queued' &&
+            !(e.sourceCategory === 'scheduled' && e.content.startsWith(SCHEDULER_TRIGGER_PREFIX)),
+        )
         .sort(compareQueueEntries),
-    [activeCatIds, activeInvocationIds, queue],
+    [queue],
   );
 
   // A2A queue visibility: explain WHY entries are queued (waiting behind the active turn) so the
@@ -197,26 +237,11 @@ export function QueuePanel({ threadId }: QueuePanelProps) {
   // oldest active turn. Recomputed when activeInvocations/visibleEntries change; elapsed reflects
   // the last store update (acceptable for v1 — no per-second tick).
   const waitInfo = useMemo(() => {
-    const waitingEntries = visibleEntries.filter((entry) => entry.status === 'queued');
-    const dispatchTargetCatIds = waitingEntries.flatMap((entry) => {
-      const targetStates = queueTargetStateEntries(entry);
-      return targetStates.length > 0
-        ? targetStates
-            .filter(([, state]) => state !== 'seen' && state !== 'awakened' && state !== 'failed')
-            .map(([catId]) => catId)
-        : entry.targetCats;
-    });
-    const hasBroadcastEntry = waitingEntries.some(
-      (entry) => queueTargetStateEntries(entry).length === 0 && entry.targetCats.length === 0,
-    );
+    const dispatchTargetCatIds = visibleEntries.flatMap((entry) => entry.targetCats);
+    const hasBroadcastEntry = visibleEntries.some((entry) => entry.targetCats.length === 0);
     if (dispatchTargetCatIds.length === 0 && !hasBroadcastEntry) return null;
     return computeQueueWaitInfo(activeInvocations, dispatchTargetCatIds);
   }, [activeInvocations, visibleEntries]);
-  const canRecoverOrphanedQueue =
-    !queuePaused &&
-    visibleEntries.some(
-      (entry) => entry.status === 'queued' && queueEntryNeedsRecovery(entry, activeInvocationIds, activeCatIds),
-    );
   const activeInvocationIdByCatId = useMemo(
     () =>
       Object.fromEntries(
@@ -236,14 +261,14 @@ export function QueuePanel({ threadId }: QueuePanelProps) {
   );
 
   const handleRemove = useCallback(
-    async (action: Extract<QueueRecoveryAction, { kind: 'withdraw' }>) => {
+    async (entryId: string) => {
       const prevQueue = queue;
       setQueue(
         threadId,
-        prevQueue.filter((e) => e.id !== action.entryId),
+        prevQueue.filter((e) => e.id !== entryId),
       );
       try {
-        const res = await apiFetch(action.request.path, { method: action.request.method });
+        const res = await apiFetch(`/api/threads/${threadId}/queue/${entryId}`, { method: 'DELETE' });
         if (!res.ok) {
           const data = await res.json().catch(() => ({}));
           setQueue(threadId, prevQueue);
@@ -326,49 +351,49 @@ export function QueuePanel({ threadId }: QueuePanelProps) {
     [addToast, queue, setPendingChatInsert, setQueue, threadId],
   );
 
-  const handleContinue = useCallback(async () => {
-    try {
-      const res = await apiFetch(`/api/threads/${threadId}/queue/next`, { method: 'POST' });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok || data.started !== true) {
-        const refreshed = await refreshQueue();
-        const feedback = recoveryNoStartCopy(refreshed, data?.error);
-        addToast({
-          ...feedback,
-          threadId,
-          duration: 5000,
-        });
-      }
-    } catch {
-      addToast({
-        type: 'error',
-        title: '队列恢复失败',
-        message: '请求没有完成，请重试。',
-        threadId,
-        duration: 5000,
-      });
-    }
-  }, [addToast, refreshQueue, threadId]);
-
   const handleClear = useCallback(async () => {
     try {
+      const activeResponse = await apiFetch(`/api/threads/${threadId}/executions/active`);
+      if (!activeResponse.ok) throw new Error('active execution projection unavailable');
+      const active = (await activeResponse.json()) as ActiveExecutionListResponse;
+      const stopTargets = active.executions.filter(
+        (execution) =>
+          execution.threadId === threadId &&
+          execution.kind === 'live_invocation' &&
+          execution.cancelability.state === 'cancelable',
+      );
+      for (const execution of stopTargets) {
+        const target = execution.cancelability.state === 'cancelable' ? execution.cancelability.target : undefined;
+        if (!target || target.kind !== 'live_invocation') continue;
+        const stopped = await apiFetch(
+          `/api/threads/${threadId}/executions/live/${encodeURIComponent(target.executionId)}/cancel`,
+          {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ catId: target.catId }),
+          },
+        );
+        if (!stopped.ok) throw new Error('active execution stop failed');
+      }
       const res = await apiFetch(`/api/threads/${threadId}/queue`, { method: 'DELETE' });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
         if (Array.isArray(data?.queue)) setQueue(threadId, data.queue);
+        const failure = queueClearFailureCopy(data);
         addToast({
           type: 'error',
-          title: data?.code === 'QUEUE_WITHDRAWAL_PARTIAL' ? '已停止部分消息' : '停止失败',
-          message: data?.error ?? '停止后续处理失败，请重试',
+          title: failure.title,
+          message: failure.message,
           threadId,
           duration: 5000,
         });
         return;
       }
+      setQueue(threadId, []);
       addToast({
         type: 'success',
-        title: '已全部停止后续处理',
-        message: '原消息与已经发生的读取事实仍保留在历史中',
+        title: '已全部停止',
+        message: '运行中的执行已停止，待处理队列已清空；原消息与读取事实仍保留',
         threadId,
         duration: 3000,
       });
@@ -383,6 +408,66 @@ export function QueuePanel({ threadId }: QueuePanelProps) {
     }
   }, [addToast, setQueue, threadId]);
 
+  const handleAppend = useCallback(
+    async (entry: (typeof queue)[number]) => {
+      const action = entry.lifecycleActions?.append;
+      if (!action) return;
+      setAppendingEntryIds((current) => new Set(current).add(entry.id));
+      try {
+        const res = await apiFetch(`/api/threads/${threadId}/queue/${entry.id}/append`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            expectedQueueRevision: action.expectedQueueRevision,
+            expectedRuns: action.expectedRuns,
+          }),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          addToast({
+            type: 'error',
+            title:
+              data?.code === 'STATE_CHANGED' || data?.code === 'APPEND_UNAVAILABLE'
+                ? 'Append 状态已变化'
+                : 'Append 失败',
+            message: data?.error ?? '消息没有追加到当前回合，请刷新后重试。',
+            threadId,
+            duration: 5000,
+          });
+          return;
+        }
+        const current = useChatStore.getState();
+        const currentQueue =
+          current.currentThreadId === threadId ? current.queue : current.threadStates[threadId]?.queue;
+        setQueue(
+          threadId,
+          (currentQueue ?? []).filter((candidate) => candidate.id !== entry.id),
+        );
+        addToast({
+          type: 'success',
+          title: '已追加到当前回合',
+          message: '没有启动新回合；消息已关联到现有回复。',
+          threadId,
+          duration: 3000,
+        });
+      } catch {
+        addToast({
+          type: 'error',
+          title: 'Append 失败',
+          message: '消息没有追加到当前回合，请刷新后重试。',
+          threadId,
+          duration: 5000,
+        });
+      } finally {
+        setAppendingEntryIds((current) => {
+          const next = new Set(current);
+          next.delete(entry.id);
+          return next;
+        });
+      }
+    },
+    [addToast, setQueue, threadId],
+  );
   const handleRemind = useCallback(
     async (entryId: string, targetCatId: string) => {
       const key = `${entryId}:${targetCatId}`;
@@ -462,69 +547,98 @@ export function QueuePanel({ threadId }: QueuePanelProps) {
   );
 
   if (queue.length === 0) return null;
-  if (visibleEntries.length === 0 && !queuePaused) return null;
+  if (visibleEntries.length === 0) return null;
 
   const isCollapsed = collapsed ?? visibleEntries.length >= COLLAPSE_THRESHOLD;
-  const pauseLabel = queuePauseReason === 'canceled' ? '当前调用已取消' : '当前调用失败';
-  const entryIds = visibleEntries.filter((entry) => entry.status === 'queued').map((entry) => entry.id);
+  const entryIds = visibleEntries.map((e) => e.id);
 
   const selectedSteerEntry = steerEntryId ? (queue.find((e) => e.id === steerEntryId) ?? null) : null;
+  const selectedSteerTargets = (() => {
+    if (!selectedSteerEntry) return [];
+    const currentContext =
+      steerContext.threadId === threadId &&
+      steerContext.entryId === selectedSteerEntry.id &&
+      steerContext.state === 'ready'
+        ? steerContext
+        : null;
+    if (!currentContext) return [];
+    const catById = new Map(cats.map((cat) => [cat.id, cat]));
+    const siblingEntries = queue.filter(
+      (candidate) =>
+        candidate.status === 'queued' &&
+        selectedSteerEntry.messageId &&
+        candidate.messageId === selectedSteerEntry.messageId,
+    );
+    const rowByTarget = new Map(
+      siblingEntries.flatMap((entry) => entry.targetCats.map((targetCatId) => [targetCatId, entry] as const)),
+    );
+    const participantActivity = currentContext.participantActivity;
+    const participantIds = new Set(participantActivity.map((participant) => participant.catId));
+    const candidateIds = new Set<string>();
+    for (const participant of participantActivity) candidateIds.add(participant.catId);
+    for (const target of currentContext.sourceTargets) candidateIds.add(target.targetCatId);
+    for (const targetId of Object.keys(selectedSteerEntry.authorIntentByTarget ?? {})) candidateIds.add(targetId);
+    for (const targetCatId of selectedSteerEntry.targetCats) candidateIds.add(targetCatId);
+    const fallbackId = currentContext.fallbackTargetCatId ?? undefined;
+    if (fallbackId) candidateIds.add(fallbackId);
+    const pendingTargetIds = new Set(siblingEntries.flatMap((entry) => entry.targetCats));
+    if (selectedSteerEntry.targetCats.length === 0 && fallbackId) pendingTargetIds.add(fallbackId);
+    return [...candidateIds].flatMap((targetId) => {
+      const cat = catById.get(targetId);
+      if (!cat) return [];
+      const sourceTarget = currentContext.sourceTargets.find((target) => target.targetCatId === targetId);
+      const delivered = sourceTarget ? sourceTarget.state !== 'pending' : false;
+      const row = rowByTarget.get(targetId);
+      const hasCurrentReply = Boolean(
+        activeInvocationIdByCatId[targetId] &&
+          (!row || row.lifecycleActions?.append?.expectedRuns.some((run) => run.targetId === targetId)),
+      );
+      return [
+        {
+          id: targetId,
+          label: resolveCatName(targetId),
+          ...(cat.avatar ? { avatar: cat.avatar } : {}),
+          canGuideReply: cat.messageDeliveryCapabilities?.guideReply === true,
+          hasCurrentReply,
+          defaultSelected: pendingTargetIds.has(targetId) && !delivered,
+          pending: sourceTarget?.state === 'pending' && sourceTarget.actionable,
+          delivered,
+          unavailable: cat.roster?.available === false,
+          disposition: row?.authorIntentByTarget?.[targetId]?.requested ?? 'next_work',
+          membershipAtOpen: participantIds.has(targetId) ? ('member' as const) : ('admit' as const),
+        },
+      ];
+    });
+  })();
 
   return (
     <div
-      className={`border-t mx-4 mb-1 rounded-xl overflow-hidden ${
-        queuePaused ? 'border-conn-amber-ring bg-conn-amber-bg/50' : ''
-      }`}
-      style={
-        queuePaused
-          ? undefined
-          : {
-              borderColor: 'color-mix(in oklch, var(--color-cocreator-primary) 20%, transparent)',
-              backgroundColor: 'color-mix(in oklch, var(--color-cocreator-primary) 5%, transparent)',
-            }
-      }
+      className="border-t mx-4 mb-1 rounded-xl overflow-hidden"
+      style={{
+        borderColor: 'color-mix(in oklch, var(--color-cocreator-primary) 20%, transparent)',
+        backgroundColor: 'color-mix(in oklch, var(--color-cocreator-primary) 5%, transparent)',
+      }}
     >
       {/* Header */}
       <div
-        className={`flex items-center justify-between px-3 py-2 ${queuePaused ? 'bg-conn-amber-bg/60' : ''}`}
-        style={
-          queuePaused
-            ? undefined
-            : { backgroundColor: 'color-mix(in oklch, var(--color-cocreator-primary) 10%, transparent)' }
-        }
+        className="flex items-center justify-between px-3 py-2"
+        style={{ backgroundColor: 'color-mix(in oklch, var(--color-cocreator-primary) 10%, transparent)' }}
       >
         <div className="flex items-center gap-2">
-          <svg className="w-4 h-4 text-cafe-secondary" viewBox="0 0 20 20" fill="currentColor">
+          <svg aria-hidden="true" className="w-4 h-4 text-cafe-secondary" viewBox="0 0 20 20" fill="currentColor">
             <path d="M3 4a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zm0 4a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zm0 4a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1z" />
           </svg>
-          <span className="text-xs font-medium text-cafe-secondary">{queuePaused ? '队列已暂停' : '待处理'}</span>
+          <span className="text-xs font-medium text-cafe-secondary">待处理</span>
           <span
-            className={`text-xs px-1.5 py-0.5 rounded-full font-medium ${
-              queuePaused
-                ? 'bg-[var(--semantic-warning-surface)] text-conn-amber-text'
-                : 'text-[var(--color-cocreator-primary)]'
-            }`}
-            style={
-              queuePaused
-                ? undefined
-                : { backgroundColor: 'color-mix(in oklch, var(--color-cocreator-primary) 20%, transparent)' }
-            }
+            className="text-xs px-1.5 py-0.5 rounded-full font-medium text-[var(--color-cocreator-primary)]"
+            style={{ backgroundColor: 'color-mix(in oklch, var(--color-cocreator-primary) 20%, transparent)' }}
           >
             {visibleEntries.length}
           </span>
         </div>
         <div className="flex items-center gap-2">
-          {(queuePaused || canRecoverOrphanedQueue) && (
-            <button
-              type="button"
-              data-testid={canRecoverOrphanedQueue ? 'queue-recover' : undefined}
-              onClick={handleContinue}
-              className="text-xs px-2 py-1 rounded-md bg-[var(--semantic-success)] text-[var(--cafe-surface)] hover:opacity-90 transition-colors"
-            >
-              {queuePaused ? '继续' : '恢复'}
-            </button>
-          )}
           <button
+            type="button"
             onClick={() => setCollapsed(!isCollapsed)}
             className="text-xs text-cafe-muted hover:text-cafe-secondary transition-colors"
           >
@@ -541,29 +655,16 @@ export function QueuePanel({ threadId }: QueuePanelProps) {
         </div>
       </div>
 
-      {queuePaused && (
-        <div className="px-3 py-1.5 text-xs text-conn-amber-text border-b border-conn-amber-ring/60">{pauseLabel}</div>
-      )}
-
-      {!queuePaused && waitInfo && visibleEntries.length > 0 && (
+      {waitInfo?.kind === 'target_dispatch' && visibleEntries.length > 0 && (
         <div
           className="px-3 py-1.5 text-xs text-cafe-muted border-b"
           style={{ borderColor: 'color-mix(in oklch, var(--color-cocreator-primary) 10%, transparent)' }}
         >
-          {waitInfo.kind === 'active_turn' ? (
-            <>
-              等待 <span className="font-medium text-cafe-secondary">{resolveCatName(waitInfo.catId)}</span> 当前回合
-              {waitInfo.elapsedLabel ? `（已运行 ${waitInfo.elapsedLabel}）` : ''}
-            </>
-          ) : (
-            <>
-              等待{' '}
-              <span className="font-medium text-cafe-secondary">
-                {waitInfo.catIds.map((catId) => resolveCatName(catId)).join('、')}
-              </span>{' '}
-              调度
-            </>
-          )}
+          等待{' '}
+          <span className="font-medium text-cafe-secondary">
+            {waitInfo.catIds.map((catId) => resolveCatName(catId)).join('、')}
+          </span>{' '}
+          调度
         </div>
       )}
 
@@ -579,21 +680,18 @@ export function QueuePanel({ threadId }: QueuePanelProps) {
                     key={entry.id}
                     entry={entry}
                     index={idx}
-                    isPaused={queuePaused}
                     imageCount={imageCount}
                     ownerName={coCreator.name}
                     resolveCatName={resolveCatName}
                     onRemove={handleRemove}
                     onRecallEdit={handleRecallEdit}
                     onSteer={handleSteerOpen}
-                    onRetry={handleRetry}
-                    onForceReset={handleForceResetOpen}
+                    onAppend={handleAppend}
                     onRemind={handleRemind}
                     activeInvocationIdByCatId={activeInvocationIdByCatId}
                     activeCarrierCapabilityByCatId={activeCarrierCapabilityByCatId}
                     remindingTargetKeys={remindingTargetKeys}
-                    retryingAttemptIds={retryingAttemptIds}
-                    resettingActionIds={resettingActionIds}
+                    appendingEntryIds={appendingEntryIds}
                   />
                 );
               })}
@@ -603,14 +701,18 @@ export function QueuePanel({ threadId }: QueuePanelProps) {
       )}
 
       {selectedSteerEntry && selectedSteerEntry.status === 'queued' && (
-        <SteerQueuedEntryModal onCancel={handleSteerCancel} onConfirm={handleSteerConfirm} />
+        <SteerQueuedEntryModal
+          sourceRecordId={steerContext.sourceRecordId ?? selectedSteerEntry.messageId ?? ''}
+          targets={selectedSteerTargets}
+          contextState={
+            steerContext.threadId === threadId && steerContext.entryId === selectedSteerEntry.id
+              ? steerContext.state
+              : 'loading'
+          }
+          onCancel={handleSteerCancel}
+          onConfirm={handleSteerConfirm}
+        />
       )}
-      <ForceResetDialog
-        open={forceResetAction !== null}
-        busy={forceResetAction !== null && resettingActionIds.has(forceResetAction.id)}
-        onCancel={handleForceResetCancel}
-        onConfirm={handleForceResetConfirm}
-      />
     </div>
   );
 }

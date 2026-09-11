@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { after, before, beforeEach, describe, it } from 'node:test';
+import { canonicalTestMessageInput } from './helpers/message-from-fixtures.js';
 import {
   assertRedisIsolationOrThrow,
   cleanupPrefixedRedisKeys,
@@ -8,41 +9,17 @@ import {
 
 const REDIS_URL = process.env.REDIS_URL;
 
-function custody(overrides = {}) {
-  return {
-    version: 1,
-    entryId: 'entry-redis',
-    revision: 1,
-    intent: 'user_message',
-    status: 'queued',
-    allTargetCats: ['codex', 'fable5'],
-    pendingTargetCats: ['codex', 'fable5'],
-    notifiedByCatIds: [],
-    seenByCatIds: [],
-    seenInvocationIdByCatId: {},
-    failedByCatIds: [],
-    handledByCatIds: [],
-    priority: 'normal',
-    createdAt: 100,
-    updatedAt: 100,
-    ...overrides,
-  };
-}
-
 describe('F264 Gap F true recall contract (Redis store)', { skip: redisIsolationSkipReason(REDIS_URL) }, () => {
   let redis;
   let store;
-  let QueuedMessageCustodyCoordinator;
   let connected = false;
 
   before(async () => {
     assertRedisIsolationOrThrow(REDIS_URL, 'F264 true recall Redis');
-    const [{ RedisMessageStore }, { createRedisClient }, custodyModule] = await Promise.all([
+    const [{ RedisMessageStore }, { createRedisClient }] = await Promise.all([
       import('../dist/domains/cats/services/stores/redis/RedisMessageStore.js'),
       import('@cat-cafe/shared/utils'),
-      import('../dist/domains/cats/services/agents/invocation/QueuedMessageCustodyCoordinator.js'),
     ]);
-    QueuedMessageCustodyCoordinator = custodyModule.QueuedMessageCustodyCoordinator;
     redis = createRedisClient({ url: REDIS_URL });
     try {
       await redis.ping();
@@ -65,19 +42,20 @@ describe('F264 Gap F true recall contract (Redis store)', { skip: redisIsolation
     await cleanupPrefixedRedisKeys(redis, ['msg:*']);
   });
 
-  async function appendQueued(queueCustody = custody()) {
-    return store.append({
-      threadId: 'thread-f264-gap-f-redis',
-      userId: 'owner-redis',
-      catId: null,
-      content: '修正后的正文',
-      contentBlocks: [{ type: 'image', url: '/uploads/proof.png' }],
-      mentions: ['codex', 'fable5'],
-      timestamp: 1_000,
-      deliveryStatus: 'queued',
-      queueCustody,
-      replyTo: 'parent-message',
-    });
+  async function appendQueued() {
+    return store.append(
+      canonicalTestMessageInput({
+        threadId: 'thread-f264-gap-f-redis',
+        userId: 'owner-redis',
+        catId: null,
+        content: '修正后的正文',
+        contentBlocks: [{ type: 'image', url: '/uploads/proof.png' }],
+        mentions: ['codex', 'fable5'],
+        timestamp: 1_000,
+        deliveryStatus: 'queued',
+        replyTo: 'parent-message',
+      }),
+    );
   }
 
   it('rejects foreign owner and thread without mutating either Redis hash', async () => {
@@ -129,57 +107,8 @@ describe('F264 Gap F true recall contract (Redis store)', { skip: redisIsolation
     );
   });
 
-  it('persists the same valid terminal reminder settlement as the memory store', async () => {
-    const message = await appendQueued(
-      custody({
-        reminderAttempts: [
-          {
-            id: 'reminder-redis-delivered',
-            targetCatId: 'codex',
-            invocationId: 'child-redis',
-            state: 'delivered',
-            requestedAt: 120,
-            deliveredAt: 140,
-          },
-        ],
-      }),
-    );
-
-    const result = await store.recallMessageToComposerDraft(message.id, {
-      ownerUserId: 'owner-redis',
-      threadId: 'thread-f264-gap-f-redis',
-      expectedDraftRevision: 0,
-      merge: 'replace',
-      recalledAt: 2_000,
-    });
-
-    assert.equal(result.kind, 'recalled');
-    assert.deepEqual(result.message.queueCustody.reminderAttempts, [
-      {
-        id: 'reminder-redis-delivered',
-        targetCatId: 'codex',
-        invocationId: 'child-redis',
-        state: 'missed',
-        requestedAt: 120,
-        deliveredAt: 140,
-        missedAt: 2_000,
-        missedReason: 'source_withdrawn',
-      },
-    ]);
-    assert.deepEqual(
-      (await store.getById(message.id)).queueCustody.reminderAttempts,
-      result.message.queueCustody.reminderAttempts,
-    );
-  });
-
-  it('preserves exact exposure lineage while hiding the body from default reads', async () => {
-    const message = await appendQueued(
-      custody({
-        seenByCatIds: ['codex'],
-        seenInvocationIdByCatId: { codex: 'child-codex' },
-        bodyExposures: [{ targetCatId: 'codex', invocationId: 'child-codex', seenAt: 1_500 }],
-      }),
-    );
+  it('removes a stale legacy visibility member when recalling still-pending work', async () => {
+    const message = await appendQueued();
     const visibilityKey = 'msg:visibility:thread-f264-gap-f-redis';
     await redis
       .multi()
@@ -197,75 +126,17 @@ describe('F264 Gap F true recall contract (Redis store)', { skip: redisIsolation
     });
 
     assert.equal(result.kind, 'recalled');
-    assert.equal(result.verdict, 'exposed');
-    assert.deepEqual(result.message.recall.exposures, [
-      { targetCatId: 'codex', invocationId: 'child-codex', seenAt: 1_500 },
-    ]);
-    const indexed = await store.getByQueueExposure('thread-f264-gap-f-redis', 'codex', 'child-codex');
-    assert.deepEqual(
-      indexed.map((candidate) => candidate.id),
-      [message.id],
-    );
+    assert.equal(result.verdict, 'zero_exposure');
+    assert.equal(result.message.recall.exposures, undefined);
+    const persisted = await store.getById(message.id);
+    assert.equal(persisted.recall.exposures, undefined);
     assert.equal((await store.getByThread('thread-f264-gap-f-redis')).length, 0);
     assert.equal(
-      (
-        await store.getByThread('thread-f264-gap-f-redis', 20, 'owner-redis', {
-          includeRecalledUserMessages: true,
-        })
-      ).length,
-      1,
+      (await store.getByThread('thread-f264-gap-f-redis', 20, 'owner-redis', { includeRecalledUserMessages: true }))
+        .length,
+      0,
     );
-    assert.equal(await redis.zscore(visibilityKey, message.id), publishedScore, 'recall retains the published cursor');
-    const [incrementalTombstone] = await store.getByThreadAfter(
-      'thread-f264-gap-f-redis',
-      undefined,
-      20,
-      'owner-redis',
-      { includeRecalledUserMessages: true },
-    );
-    assert.equal(incrementalTombstone.id, message.id);
-    assert.equal(incrementalTombstone.content, '');
-  });
-
-  it('appends a late exact handling witness to an exposed tombstone without delivering or restoring it', async () => {
-    const message = await appendQueued(
-      custody({
-        seenByCatIds: ['codex'],
-        seenInvocationIdByCatId: { codex: 'child-codex-late' },
-        bodyExposures: [{ targetCatId: 'codex', invocationId: 'child-codex-late', seenAt: 1_500 }],
-      }),
-    );
-    const recalled = await store.recallMessageToComposerDraft(message.id, {
-      ownerUserId: 'owner-redis',
-      threadId: 'thread-f264-gap-f-redis',
-      expectedDraftRevision: 0,
-      merge: 'replace',
-      recalledAt: 2_000,
-    });
-    assert.equal(recalled.kind, 'recalled');
-    const coordinator = new QueuedMessageCustodyCoordinator({ messageStore: store, now: () => 2_200 });
-
-    const settlement = await coordinator.commitSuccessfulTargetForMessage(
-      'entry-redis',
-      message.id,
-      'codex',
-      'child-codex-late',
-      2_200,
-      {
-        invocationId: 'child-codex-late',
-        disposition: 'completed_with_turn',
-        evidenceRef: { kind: 'invocation_lineage', invocationId: 'child-codex-late' },
-        handledAt: 2_200,
-      },
-    );
-
-    assert.deepEqual(settlement.handledTargetCats, ['codex']);
-    const terminal = await store.getById(message.id);
-    assert.equal(terminal.content, '');
-    assert.equal(terminal.deliveryStatus, 'canceled');
-    assert.deepEqual(terminal.queueCustody.handledByCatIds, ['codex']);
-    assert.deepEqual(terminal.queueCustody.withdrawnByCatIds, ['fable5']);
-    assert.equal(terminal.queueCustody.targetOutcomeByCatId.codex.invocationId, 'child-codex-late');
+    assert.equal(await redis.zscore(visibilityKey, message.id), null);
   });
 
   it('does not mutate either hash when the draft revision is stale', async () => {
@@ -323,17 +194,8 @@ describe('F264 Gap F true recall contract (Redis store)', { skip: redisIsolation
     );
   });
 
-  it('matches MemoryStore by recalling an already delivered handled source', async () => {
-    const message = await appendQueued(
-      custody({
-        status: 'terminal',
-        pendingTargetCats: [],
-        seenByCatIds: ['codex'],
-        seenInvocationIdByCatId: { codex: 'child-handled' },
-        bodyExposures: [{ targetCatId: 'codex', invocationId: 'child-handled', seenAt: 1_500 }],
-        handledByCatIds: ['codex', 'fable5'],
-      }),
-    );
+  it('refuses an already delivered source because dequeue is terminal', async () => {
+    const message = await appendQueued();
     assert.equal((await store.markDelivered(message.id, 1_800)).deliveryTransitioned, true);
 
     const result = await store.recallMessageToComposerDraft(message.id, {
@@ -343,11 +205,8 @@ describe('F264 Gap F true recall contract (Redis store)', { skip: redisIsolation
       merge: 'replace',
       recalledAt: 2_000,
     });
-    assert.equal(result.kind, 'recalled');
-    assert.equal(result.verdict, 'exposed');
-    assert.deepEqual(result.message.queueCustody.handledByCatIds, ['codex', 'fable5']);
-    assert.deepEqual(result.message.queueCustody.withdrawnByCatIds, []);
-    assert.equal(result.message.content, '');
+    assert.equal(result.kind, 'not_recallable');
+    assert.equal((await store.getById(message.id)).content, '修正后的正文');
   });
 
   it('keeps a content-free revision tombstone after clear to prevent revision ABA', async () => {

@@ -4,80 +4,50 @@ import { afterEach, describe, it } from 'node:test';
 import Fastify from 'fastify';
 
 import { InvocationQueue } from '../dist/domains/cats/services/agents/invocation/InvocationQueue.js';
-import { QueuedMessageCustodyCoordinator } from '../dist/domains/cats/services/agents/invocation/QueuedMessageCustodyCoordinator.js';
+import { InMemoryQueueLedgerStore } from '../dist/domains/cats/services/agents/invocation/queue-ledger/InMemoryQueueLedgerStore.js';
 import { MessageStore } from '../dist/domains/cats/services/stores/ports/MessageStore.js';
 import { ThreadStore } from '../dist/domains/cats/services/stores/ports/ThreadStore.js';
 import { messageActionsRoutes } from '../dist/routes/message-actions.js';
+import { canonicalTestMessageInput } from './helpers/message-from-fixtures.js';
 
 const THREAD_ID = 'thread-f264-gap-f-route';
 const OWNER_ID = 'owner-f264-gap-f';
 const AUTH_HEADERS = { 'x-cat-cafe-user': OWNER_ID };
 
-function queueCustody(entryId, overrides = {}) {
-  return {
-    version: 1,
-    entryId,
-    revision: 1,
-    ownerAuthProvenance: 'strict',
-    intent: 'user_message',
-    status: 'queued',
-    allTargetCats: ['codex', 'fable5'],
-    pendingTargetCats: ['codex', 'fable5'],
-    notifiedByCatIds: [],
-    seenByCatIds: [],
-    seenInvocationIdByCatId: {},
-    failedByCatIds: [],
-    handledByCatIds: [],
-    priority: 'normal',
-    createdAt: 100,
-    updatedAt: 100,
-    ...overrides,
-  };
-}
-
-function queueEntry(entryId, messages, overrides = {}) {
-  return {
-    id: entryId,
+async function appendQueued(harness, content, targetCats = ['codex', 'fable5']) {
+  const message = harness.messageStore.append(
+    canonicalTestMessageInput({
+      threadId: THREAD_ID,
+      userId: OWNER_ID,
+      catId: null,
+      content,
+      mentions: ['codex', 'fable5'],
+      timestamp: 1_000 + content.length,
+    }),
+  );
+  const admission = await harness.invocationQueue.enqueueExistingMessageDurable(harness.messageStore, message.id, {
     threadId: THREAD_ID,
     userId: OWNER_ID,
+    kind: 'conversation_input',
     ownerAuthProvenance: 'strict',
-    content: messages.map((message) => message.content).join('\n\n'),
-    messageId: messages[0]?.id ?? null,
-    mergedMessageIds: messages.slice(1).map((message) => message.id),
-    source: 'user',
-    targetCats: ['codex', 'fable5'],
-    allTargetCats: ['codex', 'fable5'],
+    content,
+    messageId: message.id,
+    from: { kind: 'user', userId: OWNER_ID },
+    targetCats,
     intent: 'user_message',
-    status: 'queued',
-    createdAt: 100,
     autoExecute: false,
     priority: 'normal',
-    ...overrides,
-  };
-}
-
-function appendQueued(messageStore, entryId, content, overrides = {}) {
-  return messageStore.append({
-    threadId: THREAD_ID,
-    userId: OWNER_ID,
-    catId: null,
-    content,
-    mentions: ['codex', 'fable5'],
-    timestamp: 1_000 + content.length,
-    deliveryStatus: 'queued',
-    queueCustody: queueCustody(entryId, overrides.custody),
-    ...overrides.message,
   });
+  assert.equal(admission.outcome, 'enqueued');
+  return { message: admission.message, entries: admission.entries };
 }
 
 function createHarness(overrides = {}) {
   const messageStore = new MessageStore();
   const threadStore = new ThreadStore();
   threadStore.ensureThread(THREAD_ID, 'Gap F route test');
-  const invocationQueue = new InvocationQueue();
-  const queueCustodyCoordinator =
-    overrides.queueCustodyCoordinatorFactory?.({ messageStore, invocationQueue }) ??
-    new QueuedMessageCustodyCoordinator({ messageStore });
+  const ledgerStore = overrides.ledgerStore ?? new InMemoryQueueLedgerStore();
+  const invocationQueue = new InvocationQueue(ledgerStore);
   const socketEvents = [];
   const finalizedEntries = [];
   const unregisteredEntries = [];
@@ -132,7 +102,6 @@ function createHarness(overrides = {}) {
     messageStore,
     threadStore,
     invocationQueue,
-    queueCustodyCoordinator,
     queueProcessor,
     indexBuilder,
     socketManager,
@@ -142,6 +111,7 @@ function createHarness(overrides = {}) {
     messageStore,
     threadStore,
     invocationQueue,
+    ledgerStore,
     socketEvents,
     finalizedEntries,
     unregisteredEntries,
@@ -160,9 +130,7 @@ describe('F264 Gap F true recall API', () => {
   it('rejects foreign-owner and foreign-thread recall before suppression or queue mutation', async () => {
     const harness = createHarness();
     apps.push(harness.app);
-    const message = appendQueued(harness.messageStore, 'entry-authorization', '只能由原 owner 在原 thread 撤回');
-    const entry = queueEntry('entry-authorization', [message]);
-    harness.invocationQueue.restoreDurableEntry(entry);
+    const { message, entries } = await appendQueued(harness, '只能由原 owner 在原 thread 撤回');
 
     const foreignOwner = await harness.app.inject({
       method: 'POST',
@@ -182,7 +150,13 @@ describe('F264 Gap F true recall API', () => {
     assert.deepEqual(harness.suppressedPassages, []);
     assert.deepEqual(harness.releasedPassages, []);
     assert.deepEqual(harness.finalizedPassages, []);
-    assert.deepEqual(harness.invocationQueue.getEntrySnapshot(THREAD_ID, OWNER_ID, entry.id), entry);
+    assert.deepEqual(
+      harness.invocationQueue
+        .list(THREAD_ID, OWNER_ID)
+        .map((entry) => entry.id)
+        .sort(),
+      entries.map((entry) => entry.id).sort(),
+    );
     assert.equal(harness.messageStore.getById(message.id).content, '只能由原 owner 在原 thread 撤回');
     assert.equal(harness.messageStore.getOwnerComposerDraft(OWNER_ID, THREAD_ID), null);
     assert.equal(harness.messageStore.getOwnerComposerDraft('foreign-owner', THREAD_ID), null);
@@ -192,8 +166,7 @@ describe('F264 Gap F true recall API', () => {
   it('atomically removes a zero-exposure carrier and returns the body only in the owner draft', async () => {
     const harness = createHarness();
     apps.push(harness.app);
-    const message = appendQueued(harness.messageStore, 'entry-one', '打错的正文');
-    harness.invocationQueue.restoreDurableEntry(queueEntry('entry-one', [message]));
+    const { message, entries } = await appendQueued(harness, '打错的正文');
 
     const response = await harness.app.inject({
       method: 'POST',
@@ -212,16 +185,21 @@ describe('F264 Gap F true recall API', () => {
     assert.equal(harness.messageStore.getById(message.id).content, '');
     assert.deepEqual(harness.suppressedPassages, [{ threadId: THREAD_ID, messageId: message.id }]);
     assert.deepEqual(harness.releasedPassages, []);
-    assert.deepEqual(harness.unregisteredEntries, ['entry-one']);
-    assert.deepEqual(harness.finalizedEntries, ['entry-one']);
+    assert.deepEqual(
+      harness.unregisteredEntries,
+      entries.map((entry) => entry.id),
+    );
+    assert.deepEqual(
+      harness.finalizedEntries,
+      entries.map((entry) => entry.id),
+    );
     assert.ok(harness.socketEvents.some((event) => event.event === 'message_recalled'));
   });
 
   it('replays an already committed recall without appending the body a second time', async () => {
     const harness = createHarness();
     apps.push(harness.app);
-    const message = appendQueued(harness.messageStore, 'entry-repeat', '只应回填一次');
-    harness.invocationQueue.restoreDurableEntry(queueEntry('entry-repeat', [message]));
+    const { message } = await appendQueued(harness, '只应回填一次');
 
     const first = await harness.app.inject({
       method: 'POST',
@@ -247,9 +225,7 @@ describe('F264 Gap F true recall API', () => {
   it('restores the exact Queue snapshot when the owner draft revision is stale', async () => {
     const harness = createHarness();
     apps.push(harness.app);
-    const message = appendQueued(harness.messageStore, 'entry-conflict', '不能丢的正文');
-    const entry = queueEntry('entry-conflict', [message], { position: 3 });
-    harness.invocationQueue.restoreDurableEntry(entry);
+    const { message, entries } = await appendQueued(harness, '不能丢的正文');
     harness.messageStore.putOwnerComposerDraft(OWNER_ID, THREAD_ID, {
       expectedRevision: 0,
       text: '并发编辑的新草稿',
@@ -265,7 +241,15 @@ describe('F264 Gap F true recall API', () => {
 
     assert.equal(response.statusCode, 409);
     assert.deepEqual(response.json(), { code: 'DRAFT_REVISION_MISMATCH', actualRevision: 1 });
-    assert.deepEqual(harness.invocationQueue.getEntrySnapshot(THREAD_ID, OWNER_ID, entry.id), entry);
+    assert.deepEqual(
+      harness.invocationQueue
+        .list(THREAD_ID, OWNER_ID)
+        .map((entry) => ({ id: entry.id, status: entry.status }))
+        .sort((left, right) => left.id.localeCompare(right.id)),
+      entries
+        .map((entry) => ({ id: entry.id, status: 'queued' }))
+        .sort((left, right) => left.id.localeCompare(right.id)),
+    );
     assert.equal(harness.messageStore.getById(message.id).content, '不能丢的正文');
     assert.deepEqual(harness.suppressedPassages, [{ threadId: THREAD_ID, messageId: message.id }]);
     assert.deepEqual(harness.releasedPassages, [{ threadId: THREAD_ID, messageId: message.id, leaseId: 'lease-1' }]);
@@ -274,9 +258,8 @@ describe('F264 Gap F true recall API', () => {
   it('scrubs an exact first-message-derived thread title when recall commits', async () => {
     const harness = createHarness();
     apps.push(harness.app);
-    const message = appendQueued(harness.messageStore, 'entry-derived-title', '打错且成为标题的正文');
+    const { message } = await appendQueued(harness, '打错且成为标题的正文');
     harness.threadStore.updateTitle(THREAD_ID, message.content);
-    harness.invocationQueue.restoreDurableEntry(queueEntry('entry-derived-title', [message]));
 
     const response = await harness.app.inject({
       method: 'POST',
@@ -292,9 +275,8 @@ describe('F264 Gap F true recall API', () => {
   it('preserves a custom thread title when recalling the first message', async () => {
     const harness = createHarness();
     apps.push(harness.app);
-    const message = appendQueued(harness.messageStore, 'entry-custom-title', '正文不是标题');
+    const { message } = await appendQueued(harness, '正文不是标题');
     harness.threadStore.updateTitle(THREAD_ID, '用户亲自改的标题');
-    harness.invocationQueue.restoreDurableEntry(queueEntry('entry-custom-title', [message]));
 
     const response = await harness.app.inject({
       method: 'POST',
@@ -310,10 +292,8 @@ describe('F264 Gap F true recall API', () => {
   it('restores a prepared derived title when canonical recall is rejected', async () => {
     const harness = createHarness();
     apps.push(harness.app);
-    const message = appendQueued(harness.messageStore, 'entry-title-rollback', '失败后仍是原标题');
+    const { message } = await appendQueued(harness, '失败后仍是原标题');
     harness.threadStore.updateTitle(THREAD_ID, message.content);
-    const entry = queueEntry('entry-title-rollback', [message]);
-    harness.invocationQueue.restoreDurableEntry(entry);
     harness.messageStore.putOwnerComposerDraft(OWNER_ID, THREAD_ID, {
       expectedRevision: 0,
       text: '并发草稿',
@@ -331,82 +311,17 @@ describe('F264 Gap F true recall API', () => {
     assert.equal(harness.threadStore.get(THREAD_ID).title, message.content);
   });
 
-  it('does not let a losing concurrent recall restore a title after the winning recall commits', async () => {
-    let firstCommitEntered;
-    let releaseFirstCommit;
-    const firstCommitReady = new Promise((resolve) => {
-      firstCommitEntered = resolve;
-    });
-    const firstCommitGate = new Promise((resolve) => {
-      releaseFirstCommit = resolve;
-    });
-    let commitCalls = 0;
-    const harness = createHarness({
-      queueCustodyCoordinatorFactory({ messageStore }) {
-        const canonical = new QueuedMessageCustodyCoordinator({ messageStore });
-        return {
-          async recallMessageToComposerDraft(...args) {
-            commitCalls += 1;
-            if (commitCalls === 1) {
-              firstCommitEntered();
-              await firstCommitGate;
-            }
-            return canonical.recallMessageToComposerDraft(...args);
-          },
-        };
-      },
-    });
+  it('rejects recall while the single pending Queue entry is claimed by another operation', async () => {
+    const harness = createHarness();
     apps.push(harness.app);
-    const message = appendQueued(harness.messageStore, 'entry-title-concurrent', '并发撤回后也不能回露的标题正文');
-    harness.threadStore.updateTitle(THREAD_ID, message.content);
-    harness.invocationQueue.restoreDurableEntry(queueEntry('entry-title-concurrent', [message]));
-
-    const losingRequest = harness.app.inject({
-      method: 'POST',
-      url: `/api/messages/${message.id}/recall`,
-      headers: AUTH_HEADERS,
-      payload: { threadId: THREAD_ID, expectedDraftRevision: 0, merge: 'replace' },
-    });
-    await firstCommitReady;
-    const winningResponse = await harness.app.inject({
-      method: 'POST',
-      url: `/api/messages/${message.id}/recall`,
-      headers: AUTH_HEADERS,
-      payload: { threadId: THREAD_ID, expectedDraftRevision: 0, merge: 'replace' },
-    });
-    releaseFirstCommit();
-    const losingResponse = await losingRequest;
-
-    assert.equal(winningResponse.statusCode, 200, winningResponse.body);
-    assert.equal(winningResponse.json().verdict, 'zero_exposure');
-    assert.equal(losingResponse.statusCode, 409, losingResponse.body);
-    assert.equal(losingResponse.json().code, 'QUEUE_CARRIER_CHANGED');
-    assert.equal(harness.messageStore.getById(message.id).content, '');
-    assert.equal(
-      harness.threadStore.get(THREAD_ID).title,
-      `Thread ${THREAD_ID.slice(0, 12)}`,
-      'a committed lease must fence the losing request from restoring the recalled body',
+    const { message, entries } = await appendQueued(harness, '已经出队的正文');
+    const claim = await harness.invocationQueue.claimMessageEntriesForWithdrawal(
+      THREAD_ID,
+      OWNER_ID,
+      message.id,
+      1_500,
     );
-  });
-
-  it('rejects a concurrently changed Queue carrier without rolling it back or moving the body', async () => {
-    let harness;
-    const changedEntry = { current: null };
-    harness = createHarness({
-      indexBuilder: {
-        async suppressMessagePassage(threadId, messageId) {
-          harness.suppressedPassages.push({ threadId, messageId });
-          const current = harness.invocationQueue.getEntrySnapshot(THREAD_ID, OWNER_ID, 'entry-carrier-race');
-          assert.ok(current);
-          changedEntry.current = { ...current, priority: 'urgent' };
-          assert.equal(harness.invocationQueue.restoreEntrySnapshotIfUnchanged(current, changedEntry.current), true);
-          return { threadId, messageId, leaseId: 'lease-carrier-race' };
-        },
-      },
-    });
-    apps.push(harness.app);
-    const message = appendQueued(harness.messageStore, 'entry-carrier-race', '并发期间不能搬走');
-    harness.invocationQueue.restoreDurableEntry(queueEntry('entry-carrier-race', [message]));
+    assert.equal(claim.outcome, 'claimed');
 
     const response = await harness.app.inject({
       method: 'POST',
@@ -416,17 +331,10 @@ describe('F264 Gap F true recall API', () => {
     });
 
     assert.equal(response.statusCode, 409, response.body);
-    assert.equal(response.json().code, 'QUEUE_CARRIER_CHANGED');
-    assert.deepEqual(
-      harness.invocationQueue.getEntrySnapshot(THREAD_ID, OWNER_ID, 'entry-carrier-race'),
-      changedEntry.current,
-      'the newer Queue snapshot must remain authoritative',
-    );
-    assert.equal(harness.messageStore.getById(message.id).content, '并发期间不能搬走');
+    assert.equal(response.json().code, 'ENTRY_PROCESSING');
+    assert.equal(harness.messageStore.getById(message.id).content, '已经出队的正文');
     assert.equal(harness.messageStore.getOwnerComposerDraft(OWNER_ID, THREAD_ID), null);
-    assert.deepEqual(harness.releasedPassages, [
-      { threadId: THREAD_ID, messageId: message.id, leaseId: 'lease-carrier-race' },
-    ]);
+    assert.equal(harness.invocationQueue.list(THREAD_ID, OWNER_ID).length, 1);
   });
 
   it('fails before the canonical CAS and restores Queue when index suppression cannot be prepared', async () => {
@@ -438,9 +346,7 @@ describe('F264 Gap F true recall API', () => {
       },
     });
     apps.push(harness.app);
-    const message = appendQueued(harness.messageStore, 'entry-index-fail', '必须原样保留');
-    const entry = queueEntry('entry-index-fail', [message]);
-    harness.invocationQueue.restoreDurableEntry(entry);
+    const { message, entries } = await appendQueued(harness, '必须原样保留');
 
     const response = await harness.app.inject({
       method: 'POST',
@@ -453,7 +359,13 @@ describe('F264 Gap F true recall API', () => {
     assert.equal(response.json().code, 'RECALL_INDEX_PREPARE_FAILED');
     assert.equal(harness.messageStore.getById(message.id).content, '必须原样保留');
     assert.equal(harness.messageStore.getOwnerComposerDraft(OWNER_ID, THREAD_ID), null);
-    assert.deepEqual(harness.invocationQueue.getEntrySnapshot(THREAD_ID, OWNER_ID, entry.id), entry);
+    assert.deepEqual(
+      harness.invocationQueue
+        .list(THREAD_ID, OWNER_ID)
+        .map((entry) => entry.id)
+        .sort(),
+      entries.map((entry) => entry.id).sort(),
+    );
     assert.deepEqual(harness.releasedPassages, []);
   });
 
@@ -466,8 +378,7 @@ describe('F264 Gap F true recall API', () => {
       },
     });
     apps.push(harness.app);
-    const message = appendQueued(harness.messageStore, 'entry-finalize-fail', '仍应回填');
-    harness.invocationQueue.restoreDurableEntry(queueEntry('entry-finalize-fail', [message]));
+    const { message } = await appendQueued(harness, '仍应回填');
 
     const response = await harness.app.inject({
       method: 'POST',
@@ -482,48 +393,67 @@ describe('F264 Gap F true recall API', () => {
     assert.equal(harness.invocationQueue.list(THREAD_ID, OWNER_ID).length, 0);
   });
 
-  it('removes only the recalled member from a coalesced carrier', async () => {
+  it('removes an interrupted recall claim from the recalled message on startup', async () => {
     const harness = createHarness();
     apps.push(harness.app);
-    const first = appendQueued(harness.messageStore, 'entry-merged', '第一条错字');
-    const second = appendQueued(harness.messageStore, 'entry-merged', '第二条保留');
-    harness.invocationQueue.restoreDurableEntry(queueEntry('entry-merged', [first, second]));
+    const { message, entries } = await appendQueued(harness, '消息已提交但进程还没提交 Queue');
+    const claim = await harness.invocationQueue.claimMessageEntriesForWithdrawal(
+      THREAD_ID,
+      OWNER_ID,
+      message.id,
+      1_500,
+    );
+    assert.equal(claim.outcome, 'claimed');
+    assert.equal(
+      harness.messageStore.recallMessageToComposerDraft(message.id, {
+        ownerUserId: OWNER_ID,
+        threadId: THREAD_ID,
+        expectedDraftRevision: 0,
+        merge: 'replace',
+        recalledAt: 1_600,
+      }).kind,
+      'recalled',
+    );
+
+    const restarted = new InvocationQueue(harness.ledgerStore);
+    assert.equal(await restarted.hydrateFromLedger(harness.messageStore), 0);
+    assert.deepEqual(restarted.list(THREAD_ID, OWNER_ID), []);
+    for (const entry of entries) {
+      assert.equal(await harness.ledgerStore.get(THREAD_ID, entry.id), null);
+    }
+  });
+
+  it('recalls one message without changing a later independent Queue item', async () => {
+    const harness = createHarness();
+    apps.push(harness.app);
+    const first = await appendQueued(harness, '第一条错字');
+    const second = await appendQueued(harness, '第二条保留');
 
     const response = await harness.app.inject({
       method: 'POST',
-      url: `/api/messages/${first.id}/recall`,
+      url: `/api/messages/${first.message.id}/recall`,
       headers: AUTH_HEADERS,
       payload: { threadId: THREAD_ID, expectedDraftRevision: 0, merge: 'replace' },
     });
 
     assert.equal(response.statusCode, 200, response.body);
-    const remaining = harness.invocationQueue.getEntrySnapshot(THREAD_ID, OWNER_ID, 'entry-merged');
-    assert.ok(remaining);
-    assert.equal(remaining.messageId, second.id);
-    assert.deepEqual(remaining.mergedMessageIds, []);
-    assert.equal(remaining.content, '第二条保留');
-    assert.deepEqual(harness.finalizedEntries, [], 'a surviving sibling still owns the carrier');
+    const remaining = harness.invocationQueue.list(THREAD_ID, OWNER_ID);
+    assert.deepEqual(remaining.map((entry) => entry.id).sort(), second.entries.map((entry) => entry.id).sort());
+    assert.ok(
+      remaining.every(
+        (entry) => entry.payload.messageId === second.message.id && entry.payload.content === '第二条保留',
+      ),
+    );
+    assert.deepEqual(
+      harness.finalizedEntries,
+      first.entries.map((entry) => entry.id),
+    );
   });
 
-  it('keeps an exposed recall content-free while returning exact exposure truth', async () => {
+  it('keeps a pending recall content-free with zero exposure', async () => {
     const harness = createHarness();
     apps.push(harness.app);
-    const message = appendQueued(harness.messageStore, 'entry-seen', '猫已经读过', {
-      custody: {
-        seenByCatIds: ['codex'],
-        seenInvocationIdByCatId: { codex: 'child-read' },
-        bodyExposures: [{ targetCatId: 'codex', invocationId: 'child-read', seenAt: 1_500 }],
-      },
-    });
-    harness.invocationQueue.restoreDurableEntry(
-      queueEntry('entry-seen', [message], {
-        status: 'processing',
-        processingStartedAt: 1_400,
-        queuedSeenByCatIds: ['codex'],
-        queuedSeenInvocationIdByCatId: { codex: 'child-read' },
-        queuedBodyExposures: [{ targetCatId: 'codex', invocationId: 'child-read', seenAt: 1_500 }],
-      }),
-    );
+    const { message } = await appendQueued(harness, '仍在等待投递', ['codex']);
 
     const response = await harness.app.inject({
       method: 'POST',
@@ -534,10 +464,8 @@ describe('F264 Gap F true recall API', () => {
 
     assert.equal(response.statusCode, 200, response.body);
     const body = response.json();
-    assert.equal(body.verdict, 'exposed');
-    assert.deepEqual(body.message.recall.exposures, [
-      { targetCatId: 'codex', invocationId: 'child-read', seenAt: 1_500 },
-    ]);
+    assert.equal(body.verdict, 'zero_exposure');
+    assert.equal(body.message.recall.exposures, undefined);
     assert.equal(body.message.content, undefined);
     assert.equal(harness.invocationQueue.list(THREAD_ID, OWNER_ID).length, 0);
   });

@@ -13,8 +13,7 @@ export function isMessageSelectableForBundle(message: ChatMessage): boolean {
   const managedHoldConnector =
     message.type === 'connector' &&
     isSelectableManagedHoldConnectorSource(message.source) &&
-    message.extra?.queueReceipt !== undefined &&
-    message.extra.scheduler?.hiddenTrigger !== true;
+    message.extra?.scheduler?.hiddenTrigger !== true;
   if (!authoredMessage && !managedHoldConnector) return false;
   if (message.isStreaming || message.extra?.recall || (!managedHoldConnector && message.extra?.scheduler)) return false;
 

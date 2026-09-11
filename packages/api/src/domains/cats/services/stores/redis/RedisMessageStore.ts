@@ -12,20 +12,42 @@
  * 消息 TTL 可配置 (默认 7 天)。
  */
 
-import type { CatId, CustodyOfferV1 } from '@cat-cafe/shared';
-import { custodyOfferV1Schema } from '@cat-cafe/shared';
+import { isDeepStrictEqual } from 'node:util';
+import type { CatId, CustodyOfferV1, LifecycleStoredMessageMetadata } from '@cat-cafe/shared';
+import { custodyOfferV1Schema, isLifecycleStoredMessageMetadata } from '@cat-cafe/shared';
 import type { RedisClient } from '@cat-cafe/shared/utils';
 import { createModuleLogger } from '../../../../../infrastructure/logger.js';
-import { normalizeJsonUnicode } from '../../../../../utils/json-unicode.js';
+import {
+  assertQueueLedgerEntry,
+  type QueueLedgerEntry,
+  type QueueLedgerStore,
+  queueLedgerAdmissionsMatch,
+} from '../../agents/invocation/queue-ledger/QueueLedger.js';
+import { QueueLedgerKeys } from '../../agents/invocation/queue-ledger/queue-ledger-keys.js';
+import {
+  hydrateQueueLedgerEntry,
+  RedisQueueLedgerStore,
+} from '../../agents/invocation/queue-ledger/RedisQueueLedgerStore.js';
 import { cursorFor, parseCursor } from '../cursor.js';
+import { messageFrom } from '../message-from.js';
 import type {
+  AdvanceLifecycleInputDispatchResult,
   AppendMessageInput,
   BoundedThreadMessagePage,
   ClearOwnerComposerDraftResult,
+  CommitLifecycleAppendAdmissionResult,
+  CommitLifecycleAppendRejectionResult,
+  CommitLifecyclePreAdmissionFailureResult,
+  CommitLifecycleResponseTerminalResult,
   CustodyOfferTransitionInput,
   CustodyOfferTransitionResult,
   HostMessageExtra,
   IdempotentAppendResult,
+  LifecycleAppendAdmissionInput,
+  LifecycleAppendRejectionInput,
+  LifecycleInputDispatchPatch,
+  LifecyclePreAdmissionFailureInput,
+  LifecycleResponseTerminalPatch,
   MarkCanceledResult,
   MarkDeliveredResult,
   MessageAppendListener,
@@ -35,12 +57,9 @@ import type {
   PutOwnerComposerDraftInput,
   PutOwnerComposerDraftResult,
   QueueAdmissionPrepareResult,
-  QueueCustodyAdmissionInitializeResult,
-  QueueCustodyAdmissionIntent,
-  QueueCustodyInitializeResult,
-  QueueCustodyTransitionInput,
-  QueueCustodyTransitionResult,
-  QueuedMessageCustody,
+  QueueLedgerAdmissionFactory,
+  QueueLedgerLifecycleAdmissionResult,
+  QueueLedgerMessageAdmissionResult,
   RecallMessageToComposerDraftInput,
   RecallMessageToComposerDraftResult,
   StoredMessage,
@@ -53,21 +72,28 @@ import type {
   ThreadUnreadProjectionCursor,
 } from '../ports/MessageStore.js';
 import {
+  advanceLifecycleInputDispatchMetadata,
   applyStreamMetadataAugment,
-  assertValidAppendMessageInput,
   assertValidStoredMessageTimestamp,
+  assignLifecycleDispatchTargetsMetadata,
   COORDINATION_TERMINAL_SCAN_PAGE_SIZE,
+  canonicalizeAppendMessageInput,
   DEFAULT_THREAD_ID,
   deriveGrowingSourceMessageRevision,
   generateSortableId,
   isDelivered,
   isValidCustodyOfferTransition,
+  lifecycleInputIdentityForStoredMessage,
+  matchesLifecyclePreAdmissionFailure,
+  preAdmissionFailureIdempotencyKey,
+  prepareLifecycleAppendAdmission,
+  prepareLifecycleAppendRejection,
+  prepareLifecycleResponseTerminalMessage,
+  prepareLifecycleResponseTerminalWithLedgerTargets,
+  prepareQueueLedgerMessageAdmission,
+  prepareQueueLedgerSourceLifecycle,
+  settleAssignedLifecycleDispatchFailureMetadata,
 } from '../ports/MessageStore.js';
-import {
-  assertQueueCustodyMessageBinding,
-  assertQueueCustodyTransition,
-  terminalizeRecalledQueueCustody,
-} from '../ports/queued-message-custody.js';
 import { MessageKeys } from '../redis-keys/message-keys.js';
 import {
   isDurableOwnerReadEvidence,
@@ -78,7 +104,7 @@ import {
   resolveThreadMessageVisibility,
 } from '../visibility.js';
 import { appendMessage } from './redis-message-append.js';
-import { CANCEL_LUA, DELIVER_LUA, REASSIGN_LUA } from './redis-message-delivery-lua-scripts.js';
+import { CANCEL_LUA, REASSIGN_LUA } from './redis-message-delivery-lua-scripts.js';
 import {
   appendMessageAndObservePriorFrontier,
   appendMessageIfThreadFrontier,
@@ -87,12 +113,13 @@ import {
   parseConnectorSourceField,
   safeParseContentBlocks,
   safeParseExtra,
+  safeParseLegacyLifecycleMessageFrom,
+  safeParseLifecycleMetadata,
   safeParseMentions,
+  safeParseMessageFrom,
   safeParseMessageRecall,
   safeParseMetadata,
   safeParsePluginMessage,
-  safeParseQueueCustody,
-  safeParseQueueCustodyAdmission,
   safeParseToolEvents,
   serializeExtra,
 } from './redis-message-parsers.js';
@@ -110,6 +137,126 @@ const log = createModuleLogger('redis-message-store');
 const DEFAULT_LIMIT = 50;
 const DEFAULT_TTL_SECONDS = 0; // persistent — set >0 via env to enable expiry
 
+type ReservedAppendResult =
+  | { outcome: 'stored'; message: StoredMessage; replayed: boolean }
+  | { outcome: 'queue_full' | 'queue_conflict' };
+
+interface QueueAppendOptions {
+  entries: readonly QueueLedgerEntry[];
+  maxQueuedUserEntries?: number;
+}
+
+const ENQUEUE_EXISTING_MESSAGE_WITH_LEDGER_LUA = `
+local messageKey = KEYS[1]
+local rowsKey = KEYS[2]
+local orderKey = KEYS[3]
+local messageIndexKey = KEYS[4]
+local messageId = ARGV[1]
+local maxUserSources = tonumber(ARGV[2])
+local count = tonumber(ARGV[3])
+if redis.call('HGET', messageKey, 'id') ~= messageId then return -2 end
+if not count or count < 1 then return redis.error_reply('QUEUE_ADMISSION_EMPTY') end
+
+local incoming = {}
+local entryIds = {}
+local existingCount = 0
+local incomingIds = {}
+local incomingTargets = {}
+local incomingUserSources = {}
+for i = 1, count do
+  local raw = ARGV[3 + i]
+  local row = cjson.decode(raw)
+  if row.status ~= 'queued' or row.payload.sourceRecordId ~= messageId or row.payload.messageId ~= messageId then
+    return redis.error_reply('QUEUE_ADMISSION_INVALID_ROW')
+  end
+  if incomingIds[row.id] then return redis.error_reply('QUEUE_ADMISSION_DUPLICATE_ID') end
+  incomingIds[row.id] = true
+  incoming[i] = { id = row.id, raw = raw, row = row }
+  entryIds[i] = row.id
+  for _, targetId in ipairs(row.targets or {}) do incomingTargets[targetId] = true end
+  if redis.call('HEXISTS', rowsKey, row.id) == 1 then existingCount = existingCount + 1 end
+  if row.from and row.from.kind == 'user' then incomingUserSources[row.payload.sourceRecordId] = true end
+end
+if existingCount > 0 and existingCount ~= count then return -1 end
+
+local incomingLifecycleRaw = ARGV[4 + count]
+local incomingLifecycleOk, incomingLifecycle = pcall(cjson.decode, incomingLifecycleRaw or '')
+if not incomingLifecycleOk or type(incomingLifecycle) ~= 'table' then
+  return redis.error_reply('QUEUE_ADMISSION_INVALID_LIFECYCLE')
+end
+local storedLifecycleRaw = redis.call('HGET', messageKey, 'lifecycle')
+local lifecycleNeedsSet = not storedLifecycleRaw or storedLifecycleRaw == ''
+if not lifecycleNeedsSet then
+  local storedLifecycleOk, storedLifecycle = pcall(cjson.decode, storedLifecycleRaw)
+  if
+    not storedLifecycleOk or
+    type(storedLifecycle) ~= 'table' or
+    storedLifecycle.kind == 'delivery_failure' or
+    storedLifecycle.orderKey ~= incomingLifecycle.orderKey or
+    storedLifecycle.producerInvocationId ~= incomingLifecycle.producerInvocationId
+  then
+    return -4
+  end
+  for _, dispatchRef in ipairs(storedLifecycle.dispatchRefs or {}) do
+    if incomingTargets[dispatchRef.targetId] then return -5 end
+  end
+end
+
+if existingCount == count then
+  if lifecycleNeedsSet then redis.call('HSET', messageKey, 'lifecycle', incomingLifecycleRaw) end
+  return 2
+end
+if redis.call('HEXISTS', messageIndexKey, messageId) == 1 then return -1 end
+
+local deliveryStatus = redis.call('HGET', messageKey, 'deliveryStatus')
+local preservePublishedAgent = false
+if not deliveryStatus or deliveryStatus == '' then
+  local rawFrom = redis.call('HGET', messageKey, 'from')
+  local decoded, storedFrom = pcall(cjson.decode, rawFrom or '')
+  if not decoded or type(storedFrom) ~= 'table' then return -3 end
+  preservePublishedAgent = storedFrom.kind == 'agent'
+elseif deliveryStatus ~= 'queued' then
+  return -3
+end
+
+if maxUserSources and maxUserSources >= 0 then
+  local queuedUserSources = {}
+  local activeIds = redis.call('LRANGE', orderKey, 0, -1)
+  for i = 1, #activeIds do
+    local currentRaw = redis.call('HGET', rowsKey, activeIds[i])
+    if not currentRaw then return redis.error_reply('QUEUE_ORDER_ROW_MISSING') end
+    local row = cjson.decode(currentRaw)
+    if row.status == 'queued' and row.from and row.from.kind == 'user' then
+      queuedUserSources[row.payload.sourceRecordId] = true
+    end
+  end
+  for sourceId, _ in pairs(incomingUserSources) do queuedUserSources[sourceId] = true end
+  local queuedUserCount = 0
+  for _, _ in pairs(queuedUserSources) do queuedUserCount = queuedUserCount + 1 end
+  if queuedUserCount > maxUserSources then return 0 end
+end
+
+if lifecycleNeedsSet then redis.call('HSET', messageKey, 'lifecycle', incomingLifecycleRaw) end
+if not preservePublishedAgent then redis.call('HSET', messageKey, 'deliveryStatus', 'queued') end
+for i = 1, count do
+  redis.call('HSET', rowsKey, incoming[i].id, incoming[i].raw)
+  redis.call('RPUSH', orderKey, incoming[i].id)
+end
+redis.call('HSET', messageIndexKey, messageId, cjson.encode(entryIds))
+return 1
+`;
+
+const HARD_DELETE_MESSAGE_LUA = `
+if redis.call('EXISTS', KEYS[1]) == 0 then return 0 end
+if redis.call('HGET', KEYS[1], '_tombstone') == '1' then return 2 end
+redis.call('HSET', KEYS[1],
+  'content', '', 'contentBlocks', '', 'toolEvents', '', 'metadata', '',
+  'extra', '', 'pluginMessage', '', 'lifecycle', '', 'thinking', '', 'mentions', '[]',
+  'deletedAt', ARGV[1], 'deletedBy', ARGV[2], '_tombstone', '1')
+redis.call('HDEL', KEYS[1], 'from', 'routingFact', 'provenance')
+return 1
+`;
+
 const REDIS_NUMBER_ALIASES = new Map<string, number>([
   ['', Number.NaN],
   ['inf', Number.POSITIVE_INFINITY],
@@ -126,45 +273,6 @@ function parseRedisNumber(raw: string): number {
 function parseStoredMessageTimestamp(raw: string | undefined): number {
   return parseRedisNumber(raw ?? '0');
 }
-const INITIALIZE_QUEUE_CUSTODY_LUA = `
-local messageId = redis.call('HGET', KEYS[1], 'id')
-if not messageId then
-  return -1
-end
-if redis.call('HGET', KEYS[1], 'deliveryStatus') ~= 'queued' then
-  return -2
-end
-local existing = redis.call('HGET', KEYS[1], 'queueCustody')
-if existing and existing ~= '' then
-  redis.call('HDEL', KEYS[1], 'queueCustodyAdmission')
-  return 0
-end
-redis.call('HSET', KEYS[1], 'queueCustody', ARGV[1], 'queueCustodyRevision', ARGV[2])
-redis.call('HDEL', KEYS[1], 'queueCustodyAdmission')
-return 1
-`;
-
-const INITIALIZE_QUEUE_CUSTODY_ADMISSION_LUA = `
-local messageId = redis.call('HGET', KEYS[1], 'id')
-if not messageId then
-  return -1
-end
-if redis.call('HGET', KEYS[1], 'deliveryStatus') ~= 'queued' then
-  return -2
-end
-local custody = redis.call('HGET', KEYS[1], 'queueCustody')
-if custody and custody ~= '' then
-  return -3
-end
-local existing = redis.call('HGET', KEYS[1], 'queueCustodyAdmission')
-if existing and existing ~= '' then
-  if existing == ARGV[1] then return 0 end
-  return -3
-end
-redis.call('HSET', KEYS[1], 'queueCustodyAdmission', ARGV[1])
-return 1
-`;
-
 const PREPARE_QUEUE_ADMISSION_LUA = `
 local messageId = redis.call('HGET', KEYS[1], 'id')
 if not messageId then
@@ -174,108 +282,11 @@ local deliveryStatus = redis.call('HGET', KEYS[1], 'deliveryStatus')
 if deliveryStatus == 'queued' then
   return 0
 end
-local custody = redis.call('HGET', KEYS[1], 'queueCustody')
-if deliveryStatus or (custody and custody ~= '') then
+if deliveryStatus then
   return -2
 end
 redis.call('HSET', KEYS[1], 'deliveryStatus', 'queued')
 return 1
-`;
-
-const TRANSITION_QUEUE_CUSTODY_LUA = `
-local messageId = redis.call('HGET', KEYS[1], 'id')
-local custody = redis.call('HGET', KEYS[1], 'queueCustody')
-if not messageId or not custody then
-  return {-1, -1}
-end
-local currentRevision = tonumber(redis.call('HGET', KEYS[1], 'queueCustodyRevision') or '0')
-if currentRevision ~= tonumber(ARGV[1]) then
-  return {0, currentRevision}
-end
-local deliveryStatus = redis.call('HGET', KEYS[1], 'deliveryStatus')
-local recallRaw = redis.call('HGET', KEYS[1], 'recall')
-local recallExposed = false
-if recallRaw and recallRaw ~= '' then
-  local okRecall, recall = pcall(cjson.decode, recallRaw)
-  recallExposed = okRecall and type(recall) == 'table' and recall.exposure == 'seen'
-end
-local exposedRecallSettlement = deliveryStatus == 'canceled' and recallExposed and ARGV[4] == ''
-if deliveryStatus ~= 'queued' and not exposedRecallSettlement then
-  return {-2, currentRevision}
-end
-local nextRevision = tonumber(ARGV[3])
-local okNextCustody, nextCustody = pcall(cjson.decode, ARGV[2])
-if not okNextCustody or type(nextCustody) ~= 'table' then return redis.error_reply('INVALID_NEXT_QUEUE_CUSTODY') end
-
--- #1269 R8 P1-3: pre-mutation guard — compute visibilitySeq BEFORE any HSET/ZADD.
--- redis.error_reply() does NOT rollback prior writes, so all validation must
--- precede all mutations. Previously custody HSET was before HWM validation,
--- meaning a corrupt HWM would leave custody already mutated.
-local seq = nil
-local kp = ARGV[6]
-local threadId = nil
-if ARGV[4] ~= '' then
-  threadId = redis.call('HGET', KEYS[1], 'threadId')
-  local existingVis = redis.call('HGET', KEYS[1], 'visibilitySeq')
-  if existingVis == false and threadId then
-    local metaKey = kp .. 'msg:visibility-meta:' .. threadId
-    local hwmRaw = redis.call('HGET', metaKey, 'hwm')
-    local hwm = 0
-    if hwmRaw ~= false then
-      hwm = tonumber(hwmRaw)
-      if hwm == nil then
-        return redis.error_reply('VISIBILITY_HWM_UNPARSEABLE: raw=' .. tostring(hwmRaw) .. ' metaKey=' .. metaKey)
-      end
-      if hwm ~= hwm then
-        return redis.error_reply('VISIBILITY_HWM_NAN: metaKey=' .. metaKey)
-      end
-      if hwm ~= math.floor(hwm) or hwm < 0 then
-        return redis.error_reply('VISIBILITY_HWM_INVALID: hwm=' .. tostring(hwm) .. ' metaKey=' .. metaKey)
-      end
-    end
-    local t = redis.call('TIME')
-    local now_ms = tonumber(t[1]) * 1000 + math.floor(tonumber(t[2]) / 1000)
-    seq = math.max(hwm + 1, now_ms)
-    if seq > 9007199254730991 then
-      return redis.error_reply('VISIBILITY_SEQ_EXHAUSTED: seq=' .. tostring(seq))
-    end
-  end
-end
-
--- All validation passed — write mutations atomically
-redis.call('HSET', KEYS[1], 'queueCustody', ARGV[2], 'queueCustodyRevision', ARGV[3])
-for _, exposure in ipairs(nextCustody.bodyExposures or cjson.decode('[]')) do
-  local field = tostring(exposure.targetCatId) .. string.char(0) .. tostring(exposure.invocationId)
-  local existingRaw = redis.call('HGET', KEYS[5], field)
-  local ids = cjson.decode('[]')
-  if existingRaw and existingRaw ~= '' then
-    local okExisting, existing = pcall(cjson.decode, existingRaw)
-    if okExisting and type(existing) == 'table' then ids = existing end
-  end
-  local found = false
-  for _, existingId in ipairs(ids) do if existingId == messageId then found = true end end
-  if not found then table.insert(ids, messageId) end
-  redis.call('HSET', KEYS[5], field, cjson.encode(ids))
-end
-
-if ARGV[4] ~= '' then
-  redis.call('HSET', KEYS[1], 'deliveredAt', ARGV[4], 'timelineOrderAt', ARGV[5], 'deliveryStatus', 'delivered')
-  redis.call('ZADD', KEYS[2], ARGV[5], messageId)
-  redis.call('ZADD', KEYS[3], ARGV[5], messageId)
-  redis.call('ZADD', KEYS[4], ARGV[5], messageId)
-
-  if seq then
-    local visKey = kp .. 'msg:visibility:' .. threadId
-    local metaKey = kp .. 'msg:visibility-meta:' .. threadId
-    redis.call('ZADD', visKey, seq, messageId)
-    redis.call('HSET', metaKey, 'hwm', tostring(seq))
-    redis.call('HSETNX', metaKey, 'migrated', '1')
-    redis.call('HSET', KEYS[1], 'visibilitySeq', tostring(seq))
-  end
-
-  return {2, nextRevision}
-end
-return {1, nextRevision}
 `;
 
 const UPDATE_PLUGIN_MESSAGE_LUA = `
@@ -294,6 +305,431 @@ else
 end
 if not current or tonumber(current.revision) ~= tonumber(ARGV[2]) then return -1 end
 redis.call('HSET', KEYS[1], 'pluginMessage', ARGV[1])
+return 1
+`;
+
+const COMMIT_LIFECYCLE_RESPONSE_TERMINAL_LUA = `
+local messageKey = KEYS[1]
+if redis.call('EXISTS', messageKey) == 0 then return -1 end
+if redis.call('HGET', messageKey, 'recall') or redis.call('HGET', messageKey, '_tombstone') then return -2 end
+local existingRaw = redis.call('HGET', messageKey, 'lifecycle')
+if not existingRaw or existingRaw == '' then return -2 end
+local ok, existing = pcall(cjson.decode, existingRaw)
+if not ok or type(existing) ~= 'table' or existing.kind ~= 'response' then return -2 end
+if existing.invocationId ~= ARGV[1] then return -3 end
+
+local function sameField(field, expected)
+  local actual = redis.call('HGET', messageKey, field)
+  if actual == false then actual = '' end
+  return actual == expected
+end
+
+local lifecycleNeedsWrite = false
+if existing.status == 'processing' then
+  -- A child dispatch can settle while its parent response is still processing.
+  -- Never replace that newer lifecycle snapshot with a terminal state prepared
+  -- from an older read; make the caller re-read and preserve the child transition.
+  if existingRaw ~= ARGV[14] then return 0 end
+  lifecycleNeedsWrite = true
+elseif not (existingRaw == ARGV[2] and
+     sameField('content', ARGV[3]) and
+     sameField('contentBlocks', ARGV[4]) and
+     sameField('toolEvents', ARGV[5]) and
+     sameField('metadata', ARGV[6]) and
+     sameField('extra', ARGV[7]) and
+     sameField('thinking', ARGV[8]) and
+     sameField('origin', ARGV[9]) and
+     sameField('mentions', ARGV[10]) and
+     sameField('mentionsUser', ARGV[11]) and
+     sameField('replyTo', ARGV[12]) and
+     sameField('pluginMessage', ARGV[13])) then
+  return -4
+end
+
+-- Validate the visibility allocator before the first mutation. The response
+-- placeholder is intentionally absent from cursor reads until its terminal body
+-- is durable, so lifecycle + publication share this one linearization point.
+local seq = nil
+local existingVis = redis.call('HGET', messageKey, 'visibilitySeq')
+if not existingVis or existingVis == '' then
+  local hwmRaw = redis.call('HGET', KEYS[3], 'hwm')
+  local hwm = 0
+  if hwmRaw ~= false then
+    hwm = tonumber(hwmRaw)
+    if hwm == nil or hwm ~= hwm or hwm ~= math.floor(hwm) or hwm < 0 then
+      return redis.error_reply('VISIBILITY_HWM_INVALID: raw=' .. tostring(hwmRaw))
+    end
+  end
+  local timeArr = redis.call('TIME')
+  local nowMs = tonumber(timeArr[1]) * 1000 + math.floor(tonumber(timeArr[2]) / 1000)
+  seq = math.max(hwm + 1, nowMs)
+  if seq > 9007199254730991 then
+    return redis.error_reply('VISIBILITY_SEQ_EXHAUSTED: seq=' .. tostring(seq))
+  end
+end
+
+local function replaceOptional(field, value)
+  if value == '' then redis.call('HDEL', messageKey, field)
+  else redis.call('HSET', messageKey, field, value) end
+end
+if lifecycleNeedsWrite then
+  redis.call('HSET', messageKey,
+    'lifecycle', ARGV[2],
+    'content', ARGV[3],
+    'mentions', ARGV[10])
+  replaceOptional('contentBlocks', ARGV[4])
+  replaceOptional('toolEvents', ARGV[5])
+  replaceOptional('metadata', ARGV[6])
+  replaceOptional('extra', ARGV[7])
+  replaceOptional('thinking', ARGV[8])
+  replaceOptional('origin', ARGV[9])
+  replaceOptional('mentionsUser', ARGV[11])
+  replaceOptional('replyTo', ARGV[12])
+  replaceOptional('pluginMessage', ARGV[13])
+end
+if seq then
+  local messageId = redis.call('HGET', messageKey, 'id')
+  redis.call('ZADD', KEYS[2], seq, messageId)
+  redis.call('HSET', KEYS[3], 'hwm', tostring(seq))
+  redis.call('HSET', messageKey, 'visibilitySeq', tostring(seq))
+end
+return lifecycleNeedsWrite and 1 or 2
+`;
+
+/**
+ * Atomically terminalize an existing response and admit its complete outbound
+ * Queue fan-out. The caller supplies an exact pre-read ledger snapshot; a
+ * concurrent claim/commit makes the script return -10 before either key moves.
+ */
+const COMMIT_LIFECYCLE_RESPONSE_WITH_LEDGER_LUA = `
+local messageKey = KEYS[1]
+local rowsKey = KEYS[2]
+local orderKey = KEYS[3]
+local messageIndexKey = KEYS[4]
+local messageId = redis.call('HGET', messageKey, 'id')
+if not messageId then return -1 end
+if redis.call('HGET', messageKey, 'recall') or redis.call('HGET', messageKey, '_tombstone') then return -2 end
+
+local existingLifecycleRaw = redis.call('HGET', messageKey, 'lifecycle')
+if not existingLifecycleRaw or existingLifecycleRaw == '' then return -2 end
+local lifecycleOk, existingLifecycle = pcall(cjson.decode, existingLifecycleRaw)
+if not lifecycleOk or type(existingLifecycle) ~= 'table' or existingLifecycle.kind ~= 'response' then return -2 end
+if existingLifecycle.invocationId ~= ARGV[1] then return -3 end
+
+local maxUserSources = tonumber(ARGV[15])
+local count = tonumber(ARGV[16])
+local expectedMode = ARGV[17]
+if not count or count < 1 then return redis.error_reply('QUEUE_ADMISSION_EMPTY') end
+
+local incoming = {}
+local entryIds = {}
+local incomingIds = {}
+local incomingUserSources = {}
+for i = 1, count do
+  local raw = ARGV[17 + i]
+  local row = cjson.decode(raw)
+  if row.status ~= 'queued' or not row.payload or row.payload.sourceRecordId ~= messageId or
+     row.payload.messageId ~= messageId then
+    return redis.error_reply('QUEUE_ADMISSION_INVALID_ROW')
+  end
+  if incomingIds[row.id] then return redis.error_reply('QUEUE_ADMISSION_DUPLICATE_ID') end
+  incomingIds[row.id] = true
+  incoming[i] = { id = row.id, raw = raw, row = row }
+  entryIds[i] = row.id
+  if row.from and row.from.kind == 'user' then incomingUserSources[row.payload.sourceRecordId] = true end
+end
+
+for i = 1, count do
+  local currentRaw = redis.call('HGET', rowsKey, incoming[i].id)
+  if expectedMode == 'absent' then
+    if currentRaw then return -10 end
+  elseif expectedMode == 'present' then
+    local expectedRaw = ARGV[17 + count + i]
+    if not currentRaw or currentRaw ~= expectedRaw then return -10 end
+  else
+    return redis.error_reply('QUEUE_ADMISSION_EXPECTATION_INVALID')
+  end
+end
+
+if expectedMode == 'absent' and redis.call('HEXISTS', messageIndexKey, messageId) == 1 then return -10 end
+
+if expectedMode == 'absent' and maxUserSources and maxUserSources >= 0 then
+  local queuedUserSources = {}
+  local activeIds = redis.call('LRANGE', orderKey, 0, -1)
+  for i = 1, #activeIds do
+    local currentRaw = redis.call('HGET', rowsKey, activeIds[i])
+    if not currentRaw then return redis.error_reply('QUEUE_ORDER_ROW_MISSING') end
+    local row = cjson.decode(currentRaw)
+    if row.status == 'queued' and row.from and row.from.kind == 'user' then
+      queuedUserSources[row.payload.sourceRecordId] = true
+    end
+  end
+  for sourceId, _ in pairs(incomingUserSources) do queuedUserSources[sourceId] = true end
+  local queuedUserCount = 0
+  for _, _ in pairs(queuedUserSources) do queuedUserCount = queuedUserCount + 1 end
+  if queuedUserCount > maxUserSources then return 0 end
+end
+
+local function sameField(field, expected)
+  local actual = redis.call('HGET', messageKey, field)
+  if actual == false then actual = '' end
+  return actual == expected
+end
+
+local lifecycleNeedsWrite = false
+if existingLifecycle.status == 'processing' then
+  if existingLifecycleRaw ~= ARGV[14] then return -10 end
+  lifecycleNeedsWrite = true
+elseif not (existingLifecycleRaw == ARGV[2] and
+     sameField('content', ARGV[3]) and
+     sameField('contentBlocks', ARGV[4]) and
+     sameField('toolEvents', ARGV[5]) and
+     sameField('metadata', ARGV[6]) and
+     sameField('extra', ARGV[7]) and
+     sameField('thinking', ARGV[8]) and
+     sameField('origin', ARGV[9]) and
+     sameField('mentions', ARGV[10]) and
+     sameField('mentionsUser', ARGV[11]) and
+     sameField('replyTo', ARGV[12]) and
+     sameField('pluginMessage', ARGV[13])) then
+  return -4
+end
+
+-- Validate terminal-response publication before the first Message or Queue
+-- mutation. Processing placeholders have no cursor position until this commit.
+local visibilitySeq = nil
+local existingVisibility = redis.call('HGET', messageKey, 'visibilitySeq')
+if not existingVisibility or existingVisibility == '' then
+  local hwmRaw = redis.call('HGET', KEYS[6], 'hwm')
+  local hwm = 0
+  if hwmRaw ~= false then
+    hwm = tonumber(hwmRaw)
+    if hwm == nil or hwm ~= hwm or hwm ~= math.floor(hwm) or hwm < 0 then
+      return redis.error_reply('VISIBILITY_HWM_INVALID: raw=' .. tostring(hwmRaw))
+    end
+  end
+  local timeArr = redis.call('TIME')
+  local nowMs = tonumber(timeArr[1]) * 1000 + math.floor(tonumber(timeArr[2]) / 1000)
+  visibilitySeq = math.max(hwm + 1, nowMs)
+  if visibilitySeq > 9007199254730991 then
+    return redis.error_reply('VISIBILITY_SEQ_EXHAUSTED: seq=' .. tostring(visibilitySeq))
+  end
+end
+
+if lifecycleNeedsWrite then
+  redis.call('HSET', messageKey, 'lifecycle', ARGV[2], 'content', ARGV[3], 'mentions', ARGV[10])
+  local function replaceOptional(field, value)
+    if value == '' then redis.call('HDEL', messageKey, field)
+    else redis.call('HSET', messageKey, field, value) end
+  end
+  replaceOptional('contentBlocks', ARGV[4])
+  replaceOptional('toolEvents', ARGV[5])
+  replaceOptional('metadata', ARGV[6])
+  replaceOptional('extra', ARGV[7])
+  replaceOptional('thinking', ARGV[8])
+  replaceOptional('origin', ARGV[9])
+  replaceOptional('mentionsUser', ARGV[11])
+  replaceOptional('replyTo', ARGV[12])
+  replaceOptional('pluginMessage', ARGV[13])
+end
+if visibilitySeq then
+  redis.call('ZADD', KEYS[5], visibilitySeq, messageId)
+  redis.call('HSET', KEYS[6], 'hwm', tostring(visibilitySeq))
+  redis.call('HSET', messageKey, 'visibilitySeq', tostring(visibilitySeq))
+end
+
+if expectedMode == 'absent' then
+  for i = 1, count do
+    redis.call('HSET', rowsKey, incoming[i].id, incoming[i].raw)
+    redis.call('RPUSH', orderKey, incoming[i].id)
+  end
+  redis.call('HSET', messageIndexKey, messageId, cjson.encode(entryIds))
+end
+
+if lifecycleNeedsWrite and expectedMode == 'absent' then return 1 end
+if not lifecycleNeedsWrite and expectedMode == 'present' then return 2 end
+if not lifecycleNeedsWrite and expectedMode == 'absent' then return 3 end
+return 4
+`;
+
+/**
+ * Atomically publishes a queued input and its adjacent pre-admission failure.
+ * Every fail-closed guard runs before the first mutation because Redis Lua
+ * errors do not roll back writes performed earlier in the script.
+ *
+ * KEYS[1] source message hash (ioredis applies keyPrefix)
+ * ARGV: keyPrefix, failureId, threadId, sourceUserId, expectedEntryId,
+ * failedAt, expectedSourceLifecycleJson, settledSourceLifecycleJson,
+ * failureLifecycleJson, failureContent,
+ * failureContentBlocksJson, idempotencyRawKey, ttlSeconds, sourceMode,
+ * failureFromJson
+ *
+ * Returns { 1, failureId } on apply, { 2, failureId } on replay, or
+ * { negativeReasonCode, '' } on a guarded conflict.
+ */
+const COMMIT_LIFECYCLE_PRE_ADMISSION_FAILURE_LUA = `
+local sourceHash = KEYS[1]
+local kp = ARGV[1]
+local failureId = ARGV[2]
+local threadId = ARGV[3]
+local sourceUserId = ARGV[4]
+local expectedEntryId = ARGV[5]
+local failedAt = ARGV[6]
+local expectedSourceLifecycleRaw = ARGV[7]
+local settledSourceLifecycleRaw = ARGV[8]
+local failureLifecycleRaw = ARGV[9]
+local failureContent = ARGV[10]
+local failureContentBlocksRaw = ARGV[11]
+local idempotencyKey = kp .. ARGV[12]
+local ttlSec = tonumber(ARGV[13])
+local sourceMode = ARGV[14]
+local failureFromRaw = ARGV[15]
+
+if redis.call('EXISTS', sourceHash) == 0 then return {-1, ''} end
+if redis.call('HGET', sourceHash, 'threadId') ~= threadId or
+   redis.call('HGET', sourceHash, 'userId') ~= sourceUserId then
+  return {-3, ''}
+end
+
+-- A live idempotency winner proves the full transaction committed. Check it
+-- before queued-state guards so retries after the source became delivered replay.
+local existingFailureId = redis.call('GET', idempotencyKey)
+if existingFailureId and redis.call('EXISTS', kp .. 'msg:' .. existingFailureId) == 1 then
+  return {2, existingFailureId}
+end
+
+local existingVisibility = redis.call('HGET', sourceHash, 'visibilitySeq')
+local existingLifecycle = redis.call('HGET', sourceHash, 'lifecycle')
+if existingLifecycle == false then existingLifecycle = '' end
+if sourceMode == 'queued_input' then
+  if redis.call('HGET', sourceHash, 'deliveryStatus') ~= 'queued' then return {-2, ''} end
+  if (existingVisibility and existingVisibility ~= '') or existingLifecycle ~= expectedSourceLifecycleRaw or
+     settledSourceLifecycleRaw == '' then
+    return {-4, ''}
+  end
+elseif sourceMode == 'public_wake' then
+  local deliveryStatus = redis.call('HGET', sourceHash, 'deliveryStatus')
+  local catId = redis.call('HGET', sourceHash, 'catId')
+  if (deliveryStatus and deliveryStatus ~= '') or
+     not existingVisibility or existingVisibility == '' or
+     not catId or catId == '' or catId == 'system' or
+     existingLifecycle ~= expectedSourceLifecycleRaw or settledSourceLifecycleRaw == '' then
+    return {-4, ''}
+  end
+else
+  return {-4, ''}
+end
+
+local failureHash = kp .. 'msg:' .. failureId
+if redis.call('EXISTS', failureHash) == 1 then return {-4, ''} end
+
+-- Validate both visibility positions before any write.
+local metaKey = kp .. 'msg:visibility-meta:' .. threadId
+local hwmRaw = redis.call('HGET', metaKey, 'hwm')
+local hwm = 0
+if hwmRaw ~= false then
+  hwm = tonumber(hwmRaw)
+  if hwm == nil or hwm ~= hwm or hwm ~= math.floor(hwm) or hwm < 0 then
+    return redis.error_reply('VISIBILITY_HWM_INVALID: raw=' .. tostring(hwmRaw) .. ' metaKey=' .. metaKey)
+  end
+end
+local timeArr = redis.call('TIME')
+local nowMs = tonumber(timeArr[1]) * 1000 + math.floor(tonumber(timeArr[2]) / 1000)
+local sourceSeq = nil
+local failureSeq = nil
+if sourceMode == 'queued_input' then
+  sourceSeq = math.max(hwm + 1, nowMs)
+  failureSeq = sourceSeq + 1
+else
+  failureSeq = math.max(hwm + 1, nowMs)
+end
+if failureSeq > 9007199254730991 then
+  return redis.error_reply('VISIBILITY_SEQ_EXHAUSTED: seq=' .. tostring(failureSeq))
+end
+
+-- All guards passed: publish a queued input, or settle an already-public wake.
+if sourceMode == 'queued_input' then
+  redis.call('HSET', sourceHash,
+    'deliveryStatus', 'delivered',
+    'deliveredAt', failedAt,
+    'timelineOrderAt', failedAt,
+    'lifecycle', settledSourceLifecycleRaw,
+    'visibilitySeq', tostring(sourceSeq))
+else
+  redis.call('HSET', sourceHash, 'lifecycle', settledSourceLifecycleRaw)
+end
+
+redis.call('HSET', failureHash,
+  'id', failureId,
+  'threadId', threadId,
+  'userId', 'system',
+  'from', failureFromRaw,
+  'catId', '',
+  'content', failureContent,
+  'lifecycle', failureLifecycleRaw,
+  'mentions', '[]',
+  'timestamp', failedAt,
+  'visibilitySeq', tostring(failureSeq))
+if failureContentBlocksRaw ~= '' then
+  redis.call('HSET', failureHash, 'contentBlocks', failureContentBlocksRaw)
+end
+
+local timelineKey = kp .. 'msg:timeline'
+local sourceUserKey = kp .. 'msg:user:' .. sourceUserId
+local systemUserKey = kp .. 'msg:user:system'
+local threadKey = kp .. 'msg:thread:' .. threadId
+local visibilityKey = kp .. 'msg:visibility:' .. threadId
+if sourceMode == 'queued_input' then
+  redis.call('ZADD', timelineKey, failedAt, redis.call('HGET', sourceHash, 'id'))
+  redis.call('ZADD', sourceUserKey, failedAt, redis.call('HGET', sourceHash, 'id'))
+  redis.call('ZADD', threadKey, failedAt, redis.call('HGET', sourceHash, 'id'))
+  redis.call('ZADD', visibilityKey, sourceSeq, redis.call('HGET', sourceHash, 'id'))
+end
+redis.call('ZADD', timelineKey, failedAt, failureId)
+redis.call('ZADD', systemUserKey, failedAt, failureId)
+redis.call('ZADD', threadKey, failedAt, failureId)
+redis.call('ZADD', visibilityKey, failureSeq, failureId)
+redis.call('HSET', metaKey, 'hwm', tostring(failureSeq), 'migrated', '1')
+redis.call('SET', idempotencyKey, failureId)
+
+if ttlSec > 0 then
+  redis.call('EXPIRE', failureHash, ttlSec)
+  redis.call('EXPIRE', idempotencyKey, ttlSec)
+  local cutoff = nowMs - ttlSec * 1000
+  redis.call('ZREMRANGEBYSCORE', timelineKey, '-inf', cutoff)
+  redis.call('ZREMRANGEBYSCORE', sourceUserKey, '-inf', cutoff)
+  redis.call('ZREMRANGEBYSCORE', systemUserKey, '-inf', cutoff)
+  redis.call('ZREMRANGEBYSCORE', threadKey, '-inf', cutoff)
+  redis.call('EXPIRE', timelineKey, ttlSec)
+  redis.call('EXPIRE', sourceUserKey, ttlSec)
+  redis.call('EXPIRE', systemUserKey, ttlSec)
+  redis.call('EXPIRE', threadKey, ttlSec)
+end
+
+return {1, failureId}
+`;
+
+const CAS_LIFECYCLE_METADATA_LUA = `
+if redis.call('EXISTS', KEYS[1]) == 0 then return -1 end
+if redis.call('HGET', KEYS[1], 'recall') or redis.call('HGET', KEYS[1], '_tombstone') then return -2 end
+local current = redis.call('HGET', KEYS[1], 'lifecycle')
+if current == false then current = '' end
+if current ~= ARGV[1] then return 0 end
+redis.call('HSET', KEYS[1], 'lifecycle', ARGV[2])
+return 1
+`;
+
+const CAS_LIFECYCLE_APPEND_ADMISSION_LUA = `
+for index = 1, #KEYS do
+  if redis.call('EXISTS', KEYS[index]) == 0 then return -1 end
+  if redis.call('HGET', KEYS[index], 'recall') or redis.call('HGET', KEYS[index], '_tombstone') then return -2 end
+  local current = redis.call('HGET', KEYS[index], 'lifecycle')
+  if current == false then current = '' end
+  if current ~= ARGV[(index - 1) * 2 + 1] then return 0 end
+end
+for index = 1, #KEYS do
+  redis.call('HSET', KEYS[index], 'lifecycle', ARGV[(index - 1) * 2 + 2])
+end
 return 1
 `;
 
@@ -349,25 +785,11 @@ if redis.call('HGET', KEYS[1], 'catId') ~= '' or redis.call('HGET', KEYS[1], '_t
   return {-3, 0}
 end
 local deliveryStatus = redis.call('HGET', KEYS[1], 'deliveryStatus')
-if deliveryStatus ~= 'queued' and deliveryStatus ~= 'delivered' then return {-3, 0} end
-local custodyRaw = redis.call('HGET', KEYS[1], 'queueCustody')
-if not custodyRaw or custodyRaw == '' then return {-3, 0} end
+if deliveryStatus ~= 'queued' then return {-3, 0} end
 
 local currentDraftRevision = tonumber(redis.call('HGET', KEYS[2], 'revision') or '0')
 if currentDraftRevision ~= tonumber(ARGV[3]) then return {0, currentDraftRevision} end
 
-local okCustody, custody = pcall(cjson.decode, custodyRaw)
-if not okCustody or type(custody) ~= 'table' then return redis.error_reply('INVALID_QUEUE_CUSTODY') end
-local currentCustodyRevision = tonumber(custody.revision or 0)
-if currentCustodyRevision ~= tonumber(ARGV[6]) then return {3, currentCustodyRevision} end
-local nextCustodyRaw = ARGV[7]
-local okNextCustody, nextCustody = pcall(cjson.decode, nextCustodyRaw)
-if not okNextCustody or type(nextCustody) ~= 'table' then return redis.error_reply('INVALID_NEXT_QUEUE_CUSTODY') end
-if tonumber(nextCustody.revision or 0) ~= currentCustodyRevision + 1 or
-   nextCustody.entryId ~= custody.entryId or nextCustody.status ~= 'terminal' or
-   #(nextCustody.pendingTargetCats or cjson.decode('[]')) ~= 0 then
-  return redis.error_reply('INVALID_NEXT_QUEUE_CUSTODY')
-end
 local sourceText = redis.call('HGET', KEYS[1], 'content') or ''
 local existingText = redis.call('HGET', KEYS[2], 'text') or ''
 local nextText = sourceText
@@ -392,11 +814,7 @@ local nextReplyTo = ''
 if ARGV[4] == 'append' then nextReplyTo = redis.call('HGET', KEYS[2], 'replyTo') or '' end
 if nextReplyTo == '' then nextReplyTo = redis.call('HGET', KEYS[1], 'replyTo') or '' end
 
-local exposures = custody.bodyExposures or cjson.decode('[]')
-local exposed = #exposures > 0 or #(custody.seenByCatIds or cjson.decode('[]')) > 0
-
-local recall = { version = 1, exposure = exposed and 'seen' or 'none', recalledAt = tonumber(ARGV[5]) }
-if #exposures > 0 then recall.exposures = exposures end
+local recall = { version = 1, exposure = 'none', recalledAt = tonumber(ARGV[5]) }
 local nextDraftRevision = currentDraftRevision + 1
 
 -- All validation/derivation passed. Mutations below form the single terminal CAS.
@@ -416,32 +834,15 @@ redis.call('HSET', KEYS[1],
   'mentions', '[]',
   'deliveryStatus', 'canceled',
   '_tombstone', '1',
-  'queueCustody', nextCustodyRaw,
-  'queueCustodyRevision', tostring(nextCustody.revision),
   'recall', cjson.encode(recall))
 local messageId = redis.call('HGET', KEYS[1], 'id')
-for keyIndex = 5, #KEYS do
+for keyIndex = 4, #KEYS do
   redis.call('ZREM', KEYS[keyIndex], messageId)
 end
-for _, exposure in ipairs(exposures) do
-  local field = tostring(exposure.targetCatId) .. string.char(0) .. tostring(exposure.invocationId)
-  local existingRaw = redis.call('HGET', KEYS[4], field)
-  local ids = cjson.decode('[]')
-  if existingRaw and existingRaw ~= '' then
-    local okExisting, existing = pcall(cjson.decode, existingRaw)
-    if okExisting and type(existing) == 'table' then ids = existing end
-  end
-  local found = false
-  for _, existingId in ipairs(ids) do if existingId == messageId then found = true end end
-  if not found then table.insert(ids, messageId) end
-  redis.call('HSET', KEYS[4], field, cjson.encode(ids))
-end
-redis.call('HDEL', KEYS[1], 'contentBlocks', 'toolEvents', 'metadata', 'extra', 'pluginMessage', 'custodyOfferV1', 'thinking', 'replyTo')
-if not exposed then
-  redis.call('ZREM', KEYS[3], redis.call('HGET', KEYS[1], 'id'))
-end
+redis.call('HDEL', KEYS[1], 'contentBlocks', 'toolEvents', 'metadata', 'extra', 'pluginMessage', 'lifecycle', 'thinking', 'replyTo')
+redis.call('ZREM', KEYS[3], redis.call('HGET', KEYS[1], 'id'))
 
-return {1, exposed and 1 or 0, sourceText, existingText, nextDraftRevision}
+return {1, 0, sourceText, existingText, nextDraftRevision}
 `;
 
 const UPDATE_EXTRA_IF_NOT_RECALLED_LUA = `
@@ -479,6 +880,79 @@ function splitMessageExtra(extra: StoredMessage['extra'] | undefined): {
 function serializeHostExtra(extra: StoredMessage['extra'] | undefined): string {
   const { hostExtra } = splitMessageExtra(extra);
   return Object.keys(hostExtra).length > 0 ? serializeExtra(hostExtra) : '';
+}
+
+type PreparedRedisLifecycleResponseTerminal =
+  | { kind: 'write'; nextMessage: StoredMessage }
+  | { kind: 'result'; result: CommitLifecycleResponseTerminalResult };
+
+function prepareRedisLifecycleResponseTerminal(
+  current: StoredMessage,
+  patch: LifecycleResponseTerminalPatch,
+): PreparedRedisLifecycleResponseTerminal {
+  if (current.lifecycle?.kind !== 'response') {
+    return { kind: 'result', result: { kind: 'conflict', reason: 'not_response', message: current } };
+  }
+  if (current.lifecycle.invocationId !== patch.invocationId) {
+    return { kind: 'result', result: { kind: 'conflict', reason: 'invocation_mismatch', message: current } };
+  }
+  if (
+    !Number.isFinite(patch.completedAt) ||
+    patch.completedAt < current.lifecycle.startedAt ||
+    (patch.reason !== undefined && patch.reason.length === 0)
+  ) {
+    return { kind: 'result', result: { kind: 'conflict', reason: 'invalid_terminal', message: current } };
+  }
+  const nextMessage = prepareLifecycleResponseTerminalMessage(current, patch);
+  if (current.lifecycle.status === 'processing') return { kind: 'write', nextMessage };
+  return {
+    kind: 'result',
+    result: isDeepStrictEqual(current, nextMessage)
+      ? { kind: 'replayed', message: current }
+      : { kind: 'conflict', reason: 'different_terminal', message: current },
+  };
+}
+
+function lifecycleResponseTerminalLuaArgs(
+  patch: LifecycleResponseTerminalPatch,
+  nextMessage: StoredMessage,
+  expectedLifecycleRaw: string,
+): string[] {
+  const { pluginMessage } = splitMessageExtra(patch.extra);
+  return [
+    patch.invocationId,
+    JSON.stringify(nextMessage.lifecycle),
+    patch.content,
+    patch.contentBlocks === undefined ? '' : JSON.stringify(patch.contentBlocks),
+    patch.toolEvents === undefined ? '' : JSON.stringify(patch.toolEvents),
+    patch.metadata === undefined ? '' : JSON.stringify(patch.metadata),
+    patch.extra === undefined ? '' : serializeHostExtra(patch.extra),
+    patch.thinking ?? '',
+    patch.origin ?? '',
+    JSON.stringify(patch.mentions),
+    patch.mentionsUser ? '1' : '',
+    patch.replyTo ?? '',
+    pluginMessage ? JSON.stringify(pluginMessage) : '',
+    expectedLifecycleRaw,
+  ];
+}
+
+function lifecycleResponseTerminalResultFromRedis(
+  outcome: number,
+  message: StoredMessage,
+): CommitLifecycleResponseTerminalResult {
+  switch (outcome) {
+    case 1:
+      return { kind: 'applied', message };
+    case 2:
+      return { kind: 'replayed', message };
+    case -2:
+      return { kind: 'conflict', reason: 'not_response', message };
+    case -3:
+      return { kind: 'conflict', reason: 'invocation_mismatch', message };
+    default:
+      throw new Error(`unexpected lifecycle response terminal outcome: ${outcome}`);
+  }
 }
 
 type ParsedCustodyOffer = { kind: 'absent' } | { kind: 'valid'; offer: CustodyOfferV1 } | { kind: 'invalid' };
@@ -603,6 +1077,7 @@ function parseCustodyOfferCasReceipt(result: unknown): CustodyOfferCasReceipt {
   };
 }
 
+/** Redis-backed canonical message and lifecycle store. */
 export class RedisMessageStore {
   private readonly redis: RedisClient;
   /** null means no expiration/pruning (persistent retention). */
@@ -639,12 +1114,259 @@ export class RedisMessageStore {
   }
 
   async append(input: AppendMessageInput): Promise<StoredMessage> {
-    return (await this.appendIdempotent(input)).message;
+    const result = await this.appendWithReservedId(input);
+    if (result.outcome !== 'stored') throw new Error('plain message append returned a Queue admission outcome');
+    return result.message;
   }
 
   async appendIdempotent(input: AppendMessageInput): Promise<IdempotentAppendResult> {
-    const msg = normalizeJsonUnicode(input);
-    assertValidAppendMessageInput(msg);
+    const result = await this.appendWithReservedId(input);
+    if (result.outcome !== 'stored') throw new Error('idempotent message append returned a Queue admission outcome');
+    return { message: result.message, idempotent: result.replayed };
+  }
+
+  async appendWithQueueLedgerAdmission(
+    input: AppendMessageInput,
+    buildAdmission: QueueLedgerAdmissionFactory,
+    ledgerStore: QueueLedgerStore,
+    maxQueuedUserEntries?: number,
+  ): Promise<QueueLedgerMessageAdmissionResult> {
+    if (!(ledgerStore instanceof RedisQueueLedgerStore) || !ledgerStore.usesRedisClient(this.redis)) {
+      throw new Error('Redis message admission requires the matching Redis Queue ledger');
+    }
+    const messageId = generateSortableId(input.timestamp);
+    const entries = [...buildAdmission(messageId)];
+    for (const entry of entries) {
+      assertQueueLedgerEntry(entry);
+      if (
+        entry.threadId !== (input.threadId ?? DEFAULT_THREAD_ID) ||
+        entry.payload.sourceRecordId !== messageId ||
+        entry.payload.messageId !== messageId
+      ) {
+        throw new Error('Queue admission row must be bound to its exact message identity');
+      }
+    }
+    const result = await this.appendWithReservedId(
+      prepareQueueLedgerMessageAdmission(input, messageId, entries),
+      messageId,
+      {
+        entries,
+        maxQueuedUserEntries,
+      },
+    );
+    if (result.outcome === 'queue_full') return { outcome: 'full' };
+    if (result.outcome === 'queue_conflict') {
+      throw new Error(`Queue admission identity conflict for message ${messageId}`);
+    }
+    if (result.outcome !== 'stored') throw new Error('unreachable Queue admission outcome');
+    if (!result.replayed) {
+      return { outcome: 'enqueued', message: result.message, entries, deduped: false };
+    }
+    const replayEntries = [...buildAdmission(result.message.id)];
+    const persisted = await Promise.all(replayEntries.map((entry) => ledgerStore.get(entry.threadId, entry.id)));
+    if (
+      persisted.some((entry) => entry === null) ||
+      !persisted.every((entry, index) => queueLedgerAdmissionsMatch(entry!, replayEntries[index]!))
+    ) {
+      throw new Error(`Queue admission identity conflict for replayed message ${result.message.id}`);
+    }
+    return {
+      outcome: 'enqueued',
+      message: result.message,
+      entries: persisted.filter((entry): entry is QueueLedgerEntry => entry !== null),
+      deduped: true,
+    };
+  }
+
+  async enqueueExistingMessageWithQueueLedgerAdmission(
+    messageId: string,
+    entries: readonly QueueLedgerEntry[],
+    ledgerStore: QueueLedgerStore,
+    maxQueuedUserEntries?: number,
+  ): Promise<QueueLedgerMessageAdmissionResult> {
+    if (!(ledgerStore instanceof RedisQueueLedgerStore) || !ledgerStore.usesRedisClient(this.redis)) {
+      throw new Error('Redis message admission requires the matching Redis Queue ledger');
+    }
+    if (entries.length === 0) throw new Error('Queue admission requires at least one row');
+    const threadId = entries[0]?.threadId;
+    for (const entry of entries) {
+      assertQueueLedgerEntry(entry);
+      if (
+        entry.threadId !== threadId ||
+        entry.payload.sourceRecordId !== messageId ||
+        entry.payload.messageId !== messageId
+      ) {
+        throw new Error('Queue admission row must be bound to its exact existing message identity');
+      }
+    }
+    const source = await this.getById(messageId);
+    if (!source) throw new Error(`Queue source message does not exist: ${messageId}`);
+    const sourceLifecycle = prepareQueueLedgerSourceLifecycle(source, entries);
+    const outcome = Number(
+      await this.redis.eval(
+        ENQUEUE_EXISTING_MESSAGE_WITH_LEDGER_LUA,
+        4,
+        MessageKeys.detail(messageId),
+        QueueLedgerKeys.entries(threadId!),
+        QueueLedgerKeys.order(threadId!),
+        QueueLedgerKeys.messageIndex(threadId!),
+        messageId,
+        maxQueuedUserEntries === undefined ? '-1' : String(maxQueuedUserEntries),
+        String(entries.length),
+        ...entries.map((entry) => JSON.stringify(entry)),
+        JSON.stringify(sourceLifecycle),
+      ),
+    );
+    if (outcome === 0) return { outcome: 'full' };
+    if (outcome === -2) throw new Error(`Queue source message does not exist: ${messageId}`);
+    if (outcome === -3) throw new Error(`Queue source message already has delivery ownership: ${messageId}`);
+    if (outcome === -4) throw new Error(`Queue source message has conflicting lifecycle identity: ${messageId}`);
+    if (outcome === -5) throw new Error(`Queue source target was already dispatched: ${messageId}`);
+    if (outcome === -1) throw new Error(`Queue admission identity conflict for existing message ${messageId}`);
+    if (outcome !== 1 && outcome !== 2)
+      throw new Error(`unexpected existing Message/Queue admission result: ${outcome}`);
+    const message = await this.getById(messageId);
+    if (!message) throw new Error(`Queue source message disappeared after admission: ${messageId}`);
+    const persisted =
+      outcome === 1
+        ? entries.map((entry) => structuredClone(entry))
+        : await Promise.all(entries.map((entry) => ledgerStore.get(entry.threadId, entry.id)));
+    if (
+      persisted.some((entry) => entry === null) ||
+      !persisted.every((entry, index) => queueLedgerAdmissionsMatch(entry!, entries[index]!))
+    ) {
+      throw new Error(`Queue admission identity conflict for replayed existing message ${messageId}`);
+    }
+    return {
+      outcome: 'enqueued',
+      message,
+      entries: persisted.filter((entry): entry is QueueLedgerEntry => entry !== null),
+      deduped: outcome === 2,
+    };
+  }
+
+  async commitLifecycleResponseTerminalWithQueueLedgerAdmission(
+    messageId: string,
+    patch: LifecycleResponseTerminalPatch,
+    entries: readonly QueueLedgerEntry[],
+    ledgerStore: QueueLedgerStore,
+    maxQueuedUserEntries?: number,
+  ): Promise<QueueLedgerLifecycleAdmissionResult> {
+    if (!(ledgerStore instanceof RedisQueueLedgerStore) || !ledgerStore.usesRedisClient(this.redis)) {
+      throw new Error('Redis lifecycle admission requires the matching Redis Queue ledger');
+    }
+    if (entries.length === 0) throw new Error('lifecycle Queue admission requires at least one row');
+    const threadId = entries[0]?.threadId;
+    for (const entry of entries) {
+      assertQueueLedgerEntry(entry);
+      if (
+        entry.threadId !== threadId ||
+        entry.payload.sourceRecordId !== messageId ||
+        entry.payload.messageId !== messageId
+      ) {
+        throw new Error('lifecycle Queue admission row must bind its exact response message');
+      }
+    }
+    await this.ensureVisibilityMigrated(threadId!);
+
+    for (let attempt = 0; attempt < 4; attempt += 1) {
+      const key = MessageKeys.detail(messageId);
+      const expectedLifecycleRaw = (await this.redis.hget(key, 'lifecycle')) ?? '';
+      const current = await this.getById(messageId);
+      if (!current) return { kind: 'not_found' };
+      const prepared = prepareLifecycleResponseTerminalWithLedgerTargets(current, patch, entries);
+      if (prepared.kind !== 'prepared') return prepared;
+
+      if (prepared.entries.length === 0) {
+        const activeRows = await Promise.all(entries.map((entry) => ledgerStore.get(entry.threadId, entry.id)));
+        if (activeRows.some((entry) => entry !== null)) {
+          return { kind: 'conflict', reason: 'different_terminal', message: current };
+        }
+        return {
+          kind: prepared.lifecycleReplayed ? 'replayed' : 'applied',
+          message: prepared.message,
+          entries: [],
+          ledgerReplayed: true,
+        };
+      }
+
+      const currentRaws = await this.redis.hmget(
+        QueueLedgerKeys.entries(threadId!),
+        ...prepared.entries.map((entry) => entry.id),
+      );
+      const presentCount = currentRaws.filter((raw) => typeof raw === 'string').length;
+      if (presentCount !== 0 && presentCount !== prepared.entries.length) {
+        return { kind: 'conflict', reason: 'different_terminal', message: current };
+      }
+      if (presentCount === prepared.entries.length) {
+        const existing = currentRaws.map((raw) => hydrateQueueLedgerEntry(raw as string));
+        if (!existing.every((entry, index) => queueLedgerAdmissionsMatch(entry, prepared.entries[index]!))) {
+          return { kind: 'conflict', reason: 'different_terminal', message: current };
+        }
+      }
+
+      const expectedMode = presentCount === 0 ? 'absent' : 'present';
+      // A terminal replay is semantically equal even when object-property order
+      // differs after hydrate -> prepare. Redis stores lifecycle JSON verbatim,
+      // so use the exact hydrated ordering for the replay byte comparison.
+      const terminalMessageForLua = prepared.lifecycleReplayed ? current : prepared.message;
+      const outcome = Number(
+        await this.redis.eval(
+          COMMIT_LIFECYCLE_RESPONSE_WITH_LEDGER_LUA,
+          6,
+          key,
+          QueueLedgerKeys.entries(threadId!),
+          QueueLedgerKeys.order(threadId!),
+          QueueLedgerKeys.messageIndex(threadId!),
+          MessageKeys.threadVisibility(threadId!),
+          MessageKeys.threadVisibilityMeta(threadId!),
+          ...lifecycleResponseTerminalLuaArgs(patch, terminalMessageForLua, expectedLifecycleRaw),
+          maxQueuedUserEntries === undefined ? '-1' : String(maxQueuedUserEntries),
+          String(prepared.entries.length),
+          expectedMode,
+          ...prepared.entries.map((entry) => JSON.stringify(entry)),
+          ...currentRaws.map((raw) => raw ?? ''),
+        ),
+      );
+      if (outcome === -10) continue;
+      if (outcome === 0) return { kind: 'full' };
+      if (outcome === -1) return { kind: 'not_found' };
+      if (outcome === -2) return { kind: 'conflict', reason: 'not_response', message: current };
+      if (outcome === -3) return { kind: 'conflict', reason: 'invocation_mismatch', message: current };
+      // A concurrent source→target dispatch changes only lifecycle.dispatchRefs.
+      // Re-read so the next pass can subtract that target from Queue admission;
+      // a genuinely different terminal is rejected by the pure prepare step.
+      if (outcome === -4) continue;
+      if (outcome === -5) {
+        return { kind: 'conflict', reason: 'different_terminal', message: current };
+      }
+      if (![1, 2, 3, 4].includes(outcome)) {
+        throw new Error(`unexpected lifecycle Message/Queue admission result: ${outcome}`);
+      }
+      const message = await this.getById(messageId);
+      if (!message) throw new Error(`lifecycle response disappeared after Queue admission: ${messageId}`);
+      const persisted = await Promise.all(prepared.entries.map((entry) => ledgerStore.get(entry.threadId, entry.id)));
+      if (persisted.some((entry) => entry === null)) {
+        throw new Error(`lifecycle Queue admission rows disappeared after commit: ${messageId}`);
+      }
+      return {
+        kind: outcome === 1 || outcome === 4 ? 'applied' : 'replayed',
+        message,
+        entries: persisted.filter((entry): entry is QueueLedgerEntry => entry !== null),
+        ledgerReplayed: outcome === 2 || outcome === 4,
+      };
+    }
+    const message = await this.getById(messageId);
+    if (!message) return { kind: 'not_found' };
+    return { kind: 'conflict', reason: 'different_terminal', message };
+  }
+
+  private async appendWithReservedId(
+    input: AppendMessageInput,
+    reservedId?: string,
+    queue?: QueueAppendOptions,
+  ): Promise<ReservedAppendResult> {
+    const msg = canonicalizeAppendMessageInput(input);
     const threadId = msg.threadId ?? DEFAULT_THREAD_ID;
     const idempotencyIndexKey = msg.idempotencyKey
       ? MessageKeys.idempotency(msg.userId, threadId, msg.idempotencyKey)
@@ -657,17 +1379,21 @@ export class RedisMessageStore {
       if (existingId) {
         const existingMessage = await this.getById(existingId);
         if (existingMessage) {
-          return { message: existingMessage, idempotent: true };
+          return { outcome: 'stored', message: existingMessage, replayed: true };
         }
       }
       // Stale reference: do NOT delete here (avoids a check-then-act race).
       // APPEND_WITH_VISIBILITY_LUA will reclaim it atomically (#1210).
     }
 
-    const id = generateSortableId(msg.timestamp);
+    const id = reservedId ?? generateSortableId(msg.timestamp);
     const { idempotencyKey, ...payload } = msg;
     void idempotencyKey;
-    const stored: StoredMessage = { ...payload, id, threadId };
+    const stored: StoredMessage = {
+      ...payload,
+      id,
+      threadId,
+    };
     const score = msg.timestamp;
     const hashKey = MessageKeys.detail(id);
     const { custodyOfferV1, ...appendExtra } = msg.extra ?? {};
@@ -680,10 +1406,14 @@ export class RedisMessageStore {
       threadId,
       'userId',
       msg.userId,
+      'from',
+      JSON.stringify(msg.from),
       'catId',
       msg.catId ?? '',
       'content',
       msg.content,
+      'lifecycle',
+      msg.lifecycle ? JSON.stringify(msg.lifecycle) : '',
       'contentBlocks',
       msg.contentBlocks ? JSON.stringify(msg.contentBlocks) : '',
       'toolEvents',
@@ -704,15 +1434,7 @@ export class RedisMessageStore {
     if (msg.source) hashFields.push('source', JSON.stringify(msg.source));
     if (msg.mentionsUser) hashFields.push('mentionsUser', '1');
     if (msg.deliveryStatus) hashFields.push('deliveryStatus', msg.deliveryStatus);
-    if (custodyOfferV1) hashFields.push('custodyOfferV1', JSON.stringify(custodyOfferV1));
-    // #1269 P1-1: restore queueCustody serialization that createStoredMessageData() provided.
-    // Without these, F254 custody CAS operations fail on messages appended with initial custody.
-    if (msg.queueCustody) {
-      hashFields.push('queueCustody', JSON.stringify(msg.queueCustody));
-      hashFields.push('queueCustodyRevision', String(msg.queueCustody.revision));
-    }
     if (msg.replyTo) hashFields.push('replyTo', msg.replyTo);
-
     // Mention catIds for ZADD into per-cat mention sets
     const mentionCatIds = msg.mentions as readonly string[];
     const ttlSec = this.ttlSeconds ?? 0;
@@ -737,6 +1459,9 @@ export class RedisMessageStore {
       ...mentionCatIds, // [10..9+N] mention catIds
       String(hashFields.length / 2), // [10+N] hashFieldPairCount
       ...hashFields, // [11+N..] hash field pairs
+      queue?.maxQueuedUserEntries === undefined ? '-1' : String(queue.maxQueuedUserEntries),
+      String(queue?.entries.length ?? 0),
+      ...(queue?.entries.map((entry) => JSON.stringify(entry)) ?? []),
     ];
 
     // #1200/#1269: ensure visibility migration is complete BEFORE the append.
@@ -750,13 +1475,33 @@ export class RedisMessageStore {
     // Lua returns:
     // - string (existing msgId) → idempotency replay, return existing message
     // - number (visibilitySeq) → new message created, seq > 0 for non-queued
-    const result = await this.redis.eval(APPEND_WITH_VISIBILITY_LUA, 1, hashKey, ...argv);
+    const queueKeys = queue
+      ? [QueueLedgerKeys.entries(threadId), QueueLedgerKeys.order(threadId), QueueLedgerKeys.messageIndex(threadId)]
+      : [];
+    const result = await this.redis.eval(APPEND_WITH_VISIBILITY_LUA, queue ? 4 : 1, hashKey, ...queueKeys, ...argv);
+
+    if (queue) {
+      if (!Array.isArray(result)) throw new Error('invalid combined message/Queue admission reply');
+      const outcome = Number(result[0]);
+      if (outcome === 0) return { outcome: 'queue_full' };
+      if (outcome === -1) return { outcome: 'queue_conflict' };
+      if ((outcome !== 1 && outcome !== 2) || typeof result[1] !== 'string') {
+        throw new Error('invalid combined message/Queue admission outcome');
+      }
+      if (outcome === 2) {
+        const existingMessage = await this.getById(result[1]);
+        if (!existingMessage) {
+          throw new Error(`Idempotency winner ${result[1]} vanished before Queue replay hydration`);
+        }
+        return { outcome: 'stored', message: existingMessage, replayed: true };
+      }
+    }
 
     // #1210 idempotency: if Lua returned a string, a concurrent caller won.
     if (typeof result === 'string' && result !== String(0)) {
       const existingMessage = await this.getById(result);
       if (existingMessage) {
-        return { message: existingMessage, idempotent: true };
+        return { outcome: 'stored', message: existingMessage, replayed: true };
       }
       // The concurrent winner's hash vanished (deleteByThread / TTL) between the
       // Lua claim and this hydration. Do not fall through to the created path,
@@ -766,7 +1511,8 @@ export class RedisMessageStore {
 
     // #1200 P2-6: Lua returns allocated visibilitySeq (number) or 0 for queued.
     // Inject into returned message so callers get canonical position without re-read.
-    const seq = typeof result === 'number' ? result : Number(result);
+    const seqValue = queue && Array.isArray(result) ? result[1] : result;
+    const seq = typeof seqValue === 'number' ? seqValue : Number(seqValue);
     if (seq > 0) {
       stored.visibilitySeq = seq;
     }
@@ -780,7 +1526,7 @@ export class RedisMessageStore {
       }
     }
 
-    return { message: stored, idempotent: false };
+    return { outcome: 'stored', message: stored, replayed: false };
   }
 
   async getLatestThreadMessageIdIncludingQueued(threadId: string): Promise<string | null> {
@@ -797,7 +1543,9 @@ export class RedisMessageStore {
     msg: AppendMessageInput,
     expectedLatestMessageId: string | null,
   ): Promise<ThreadFrontierAppendResult> {
-    return appendMessageIfThreadFrontier({
+    const canonical = canonicalizeAppendMessageInput(msg);
+    await this.ensureVisibilityMigrated(canonical.threadId ?? DEFAULT_THREAD_ID);
+    const result = await appendMessageIfThreadFrontier({
       redis: this.redis,
       message: msg,
       expectedLatestMessageId,
@@ -805,25 +1553,20 @@ export class RedisMessageStore {
       loadById: (messageId) => this.getById(messageId),
       ...(this.onAppend ? { onAppend: this.onAppend } : {}),
     });
+    return result;
   }
 
   async appendAndObservePriorFrontier(msg: AppendMessageInput): Promise<ThreadObservedAppendResult> {
-    const normalized = normalizeJsonUnicode(msg);
-    assertValidAppendMessageInput(normalized);
-    assertQueueCustodyMessageBinding(normalized);
-    const threadId = normalized.threadId ?? DEFAULT_THREAD_ID;
-    const timelinePublished = isTimelinePublished({ ...normalized, id: '', threadId });
-    if (timelinePublished) {
-      await this.ensureVisibilityMigrated(threadId);
-    }
-    return appendMessageAndObservePriorFrontier({
+    const canonical = canonicalizeAppendMessageInput(msg);
+    await this.ensureVisibilityMigrated(canonical.threadId ?? DEFAULT_THREAD_ID);
+    const result = await appendMessageAndObservePriorFrontier({
       redis: this.redis,
-      message: normalized,
-      timelinePublished,
+      message: msg,
       ttlSeconds: this.ttlSeconds,
       loadById: (messageId) => this.getById(messageId),
       ...(this.onAppend ? { onAppend: this.onAppend } : {}),
     });
+    return result;
   }
 
   async getById(id: string): Promise<StoredMessage | null> {
@@ -913,57 +1656,46 @@ export class RedisMessageStore {
     if (!Number.isInteger(input.expectedDraftRevision) || input.expectedDraftRevision < 0) {
       throw new RangeError('expected draft revision must be a non-negative integer');
     }
-    for (let attempt = 0; attempt < 3; attempt++) {
-      const beforeRecall = await this.getById(id);
-      const currentCustody = beforeRecall?.queueCustody;
-      const nextCustody = currentCustody
-        ? terminalizeRecalledQueueCustody(currentCustody, input.recalledAt)
-        : undefined;
-      const mentionKeys = [...new Set(beforeRecall?.mentions ?? [])].map((catId) => MessageKeys.mentions(catId));
-      const result = (await this.redis.eval(
-        RECALL_MESSAGE_TO_COMPOSER_DRAFT_LUA,
-        4 + mentionKeys.length,
-        MessageKeys.detail(id),
-        MessageKeys.ownerComposerDraft(input.ownerUserId, input.threadId),
-        MessageKeys.threadVisibility(input.threadId),
-        MessageKeys.queueExposureIndex(input.threadId),
-        ...mentionKeys,
-        input.ownerUserId,
-        input.threadId,
-        String(input.expectedDraftRevision),
-        input.merge,
-        String(input.recalledAt),
-        String(currentCustody?.revision ?? -1),
-        nextCustody ? JSON.stringify(nextCustody) : '',
-      )) as [number, number, string?, string?, number?];
-      const outcome = Number(result[0]);
-      if (outcome === 3) continue;
-      if (outcome === -1) return { kind: 'not_found' };
-      if (outcome === -2) return { kind: 'unauthorized' };
-      if (outcome === -3) return { kind: 'not_recallable' };
-      if (outcome === 0) return { kind: 'draft_revision_mismatch', actualRevision: Number(result[1]) };
-      if (outcome === 2) {
-        const message = await this.getById(id);
-        return message ? { kind: 'already_recalled', message } : { kind: 'not_found' };
-      }
-
-      const [message, draft] = await Promise.all([
-        this.getById(id),
-        this.getOwnerComposerDraft(input.ownerUserId, input.threadId),
-      ]);
-      if (!message || !draft) throw new Error('true recall CAS committed but terminal hydration failed');
-      const sourceText = result[2] ?? '';
-      const previousText = result[3] ?? '';
-      const insertedStart = input.merge === 'append' && previousText ? previousText.length + 2 : 0;
-      return {
-        kind: 'recalled',
-        verdict: Number(result[1]) === 1 ? 'exposed' : 'zero_exposure',
-        message,
-        draft,
-        insertedRange: { start: insertedStart, end: insertedStart + sourceText.length },
-      };
+    const beforeRecall = await this.getById(id);
+    const mentionKeys = [...new Set(beforeRecall?.mentions ?? [])].map((catId) => MessageKeys.mentions(catId));
+    const result = (await this.redis.eval(
+      RECALL_MESSAGE_TO_COMPOSER_DRAFT_LUA,
+      3 + mentionKeys.length,
+      MessageKeys.detail(id),
+      MessageKeys.ownerComposerDraft(input.ownerUserId, input.threadId),
+      MessageKeys.threadVisibility(input.threadId),
+      ...mentionKeys,
+      input.ownerUserId,
+      input.threadId,
+      String(input.expectedDraftRevision),
+      input.merge,
+      String(input.recalledAt),
+    )) as [number, number, string?, string?, number?];
+    const outcome = Number(result[0]);
+    if (outcome === -1) return { kind: 'not_found' };
+    if (outcome === -2) return { kind: 'unauthorized' };
+    if (outcome === -3) return { kind: 'not_recallable' };
+    if (outcome === 0) return { kind: 'draft_revision_mismatch', actualRevision: Number(result[1]) };
+    if (outcome === 2) {
+      const message = await this.getById(id);
+      return message ? { kind: 'already_recalled', message } : { kind: 'not_found' };
     }
-    throw new Error('true recall custody CAS retry exhausted');
+
+    const [message, draft] = await Promise.all([
+      this.getById(id),
+      this.getOwnerComposerDraft(input.ownerUserId, input.threadId),
+    ]);
+    if (!message || !draft) throw new Error('true recall CAS committed but terminal hydration failed');
+    const sourceText = result[2] ?? '';
+    const previousText = result[3] ?? '';
+    const insertedStart = input.merge === 'append' && previousText ? previousText.length + 2 : 0;
+    return {
+      kind: 'recalled',
+      verdict: 'zero_exposure',
+      message,
+      draft,
+      insertedRange: { start: insertedStart, end: insertedStart + sourceText.length },
+    };
   }
 
   /**
@@ -974,21 +1706,34 @@ export class RedisMessageStore {
     if (!data || !data.id) return null;
 
     const contentBlocks = safeParseContentBlocks(data.contentBlocks);
+    const lifecycle = safeParseLifecycleMetadata(data.lifecycle);
     const toolEvents = safeParseToolEvents(data.toolEvents);
     const parsedMetadata = safeParseMetadata(data.metadata);
     const extraHydration = hydrateExtra(data.extra, data.pluginMessage, data.custodyOfferV1);
     const sourceField = parseConnectorSourceField(data.source);
     const parsedSource = sourceField.kind === 'valid' ? sourceField.source : undefined;
-    const parsedQueueCustody = safeParseQueueCustody(data.queueCustody);
-    const parsedQueueCustodyAdmission = safeParseQueueCustodyAdmission(data.queueCustodyAdmission);
     const parsedRecall = safeParseMessageRecall(data.recall);
+    const from =
+      safeParseMessageFrom(data.from) ??
+      safeParseLegacyLifecycleMessageFrom(data.lifecycle) ??
+      messageFrom({
+        userId: data.userId ?? 'unknown',
+        catId: (data.catId || null) as CatId | null,
+        ...(parsedSource ? { source: parsedSource } : {}),
+        ...(sourceField.kind === 'invalid' ? { sourceParseFailure: true as const } : {}),
+        ...(data.origin === 'stream' || data.origin === 'callback' || data.origin === 'briefing'
+          ? { origin: data.origin }
+          : {}),
+      });
     const deletedAt = data.deletedAt ? parseInt(data.deletedAt, 10) : undefined;
     return {
       id: data.id,
       threadId: data.threadId || DEFAULT_THREAD_ID,
       userId: data.userId ?? 'unknown',
+      ...(from ? { from } : {}),
       catId: (data.catId || null) as CatId | null,
       content: data.content ?? '',
+      ...(lifecycle ? { lifecycle } : {}),
       ...(contentBlocks ? { contentBlocks } : {}),
       ...(toolEvents ? { toolEvents } : {}),
       ...(parsedMetadata ? { metadata: parsedMetadata } : {}),
@@ -1008,8 +1753,6 @@ export class RedisMessageStore {
       ...(data.deliveredAt ? { deliveredAt: parseRedisNumber(data.deliveredAt) } : {}),
       ...(data.timelineOrderAt !== undefined ? { timelineOrderAt: parseRedisNumber(data.timelineOrderAt) } : {}),
       ...(data.deliveryStatus ? { deliveryStatus: data.deliveryStatus as StoredMessage['deliveryStatus'] } : {}),
-      ...(parsedQueueCustody ? { queueCustody: parsedQueueCustody } : {}),
-      ...(parsedQueueCustodyAdmission ? { queueCustodyAdmission: parsedQueueCustodyAdmission } : {}),
       ...(parsedRecall ? { recall: parsedRecall } : {}),
       ...(parsedSource ? { source: parsedSource } : {}),
       ...(sourceField.kind === 'invalid' ? { sourceParseFailure: true as const } : {}),
@@ -1386,7 +2129,7 @@ export class RedisMessageStore {
       const messages = await this.hydrateMessages(ids);
       for (const msg of messages) {
         if (msg.deletedAt) continue;
-        if (msg.deliveryStatus === 'canceled') continue;
+        if (msg.deliveryStatus === 'canceled' && msg.lifecycle?.kind !== 'response') continue;
         if (!passesManagedHoldViewerBoundary(msg, userId)) {
           continue;
         }
@@ -1418,10 +2161,7 @@ export class RedisMessageStore {
     userId?: string,
     options?: ThreadMessageReadOptions,
   ): Promise<StoredMessage[]> {
-    if (
-      options?.includeQueuedUserMessages === true ||
-      options?.includeExposedQueuedUserMessagesForCatId !== undefined
-    ) {
+    if (options?.includeQueuedUserMessages === true) {
       return this.getByThreadAfterRawTimeline(threadId, afterId, limit, userId, options);
     }
 
@@ -1587,20 +2327,6 @@ export class RedisMessageStore {
     }
 
     return result;
-  }
-
-  async getByQueueExposure(threadId: string, targetCatId: string, invocationId: string): Promise<StoredMessage[]> {
-    const field = `${targetCatId}\0${invocationId}`;
-    const raw = await this.redis.hget(MessageKeys.queueExposureIndex(threadId), field);
-    if (!raw) return [];
-    let ids: string[];
-    try {
-      const parsed = JSON.parse(raw) as unknown;
-      ids = Array.isArray(parsed) ? parsed.filter((value): value is string => typeof value === 'string') : [];
-    } catch {
-      return [];
-    }
-    return this.hydrateMessages(ids);
   }
 
   async getUnreadSummaryProjection(
@@ -2103,10 +2829,8 @@ export class RedisMessageStore {
 
     const pipeline = this.redis.multi();
 
-    // Delete each message hash
-    for (const id of ids) {
-      pipeline.del(MessageKeys.detail(id));
-    }
+    // Delete each authority hash.
+    for (const id of ids) pipeline.del(MessageKeys.detail(id));
 
     // Delete the thread sorted set (even if empty — may still exist as empty key)
     pipeline.del(key);
@@ -2116,7 +2840,7 @@ export class RedisMessageStore {
     // but no messages (e.g. after all messages were individually deleted).
     pipeline.del(MessageKeys.threadVisibility(threadId));
     pipeline.del(MessageKeys.threadVisibilityMeta(threadId));
-    pipeline.del(MessageKeys.queueExposureIndex(threadId));
+    pipeline.del(MessageKeys.legacyQueueExposureIndex(threadId));
 
     // Note: We don't clean up global timeline, user timeline, or mention sets
     // as those will auto-expire via TTL. Cleaning them would be O(n) expensive.
@@ -2148,26 +2872,24 @@ export class RedisMessageStore {
     const msg = await this.getById(id);
     if (!msg) return null;
     const now = Date.now();
-    await this.redis.hset(MessageKeys.detail(id), {
-      content: '',
-      contentBlocks: '',
-      toolEvents: '',
-      metadata: '',
-      extra: '',
-      pluginMessage: '',
-      custodyOfferV1: '',
-      thinking: '',
-      mentions: '[]',
-      deletedAt: String(now),
-      deletedBy,
-      _tombstone: '1',
-    });
+    const transition = Number(
+      await this.redis.eval(HARD_DELETE_MESSAGE_LUA, 1, MessageKeys.detail(id), String(now), deletedBy),
+    );
+    if (transition !== 1) return null;
+    const pipeline = this.redis.multi();
+    for (const catId of msg.mentions) pipeline.zrem(MessageKeys.mentions(catId), id);
+    const cleanupResults = await pipeline.exec();
+    if (!cleanupResults) throw new Error('message hard delete: pipeline exec aborted');
+    for (const [error] of cleanupResults) {
+      if (error) throw error;
+    }
     msg.content = '';
     msg.mentions = [];
     delete msg.contentBlocks;
     delete msg.toolEvents;
     delete msg.metadata;
     delete msg.extra;
+    delete msg.lifecycle;
     delete msg.thinking;
     msg.deletedAt = now;
     msg.deletedBy = deletedBy;
@@ -2310,6 +3032,336 @@ export class RedisMessageStore {
     return (await this.getById(id)) ?? augmented;
   }
 
+  async commitLifecycleResponseTerminal(
+    id: string,
+    patch: LifecycleResponseTerminalPatch,
+  ): Promise<CommitLifecycleResponseTerminalResult> {
+    return this.commitLifecycleResponseTerminalInternal(id, patch);
+  }
+
+  private async commitLifecycleResponseTerminalInternal(
+    id: string,
+    patch: LifecycleResponseTerminalPatch,
+  ): Promise<CommitLifecycleResponseTerminalResult> {
+    const key = MessageKeys.detail(id);
+    for (let attempt = 0; attempt < 4; attempt += 1) {
+      // Read the expected lifecycle before hydrating the full message. If a child
+      // settles between these reads, the Lua comparison fails instead of blessing
+      // a terminal state derived from mismatched snapshots.
+      const expectedLifecycleRaw = (await this.redis.hget(key, 'lifecycle')) ?? '';
+      const current = await this.getById(id);
+      if (!current) return { kind: 'not_found' };
+      const prepared = prepareRedisLifecycleResponseTerminal(current, patch);
+      if (prepared.kind === 'result') {
+        if (prepared.result.kind !== 'replayed') return prepared.result;
+        await this.ensureVisibilityMigrated(current.threadId);
+        return {
+          kind: 'replayed',
+          message: (await this.getById(id)) ?? prepared.result.message,
+        };
+      }
+      await this.ensureVisibilityMigrated(current.threadId);
+      const outcome = Number(
+        await this.redis.eval(
+          COMMIT_LIFECYCLE_RESPONSE_TERMINAL_LUA,
+          3,
+          key,
+          MessageKeys.threadVisibility(current.threadId),
+          MessageKeys.threadVisibilityMeta(current.threadId),
+          ...lifecycleResponseTerminalLuaArgs(patch, prepared.nextMessage, expectedLifecycleRaw),
+        ),
+      );
+      // Both codes mean the snapshot changed after our read. Re-read even when
+      // another writer terminalized first: the next pass can distinguish an
+      // exact replay from a genuinely different terminal without stale data.
+      if (outcome === 0 || outcome === -4) continue;
+      if (outcome === -1) return { kind: 'not_found' };
+      const message = await this.getById(id);
+      if (!message) throw new Error(`lifecycle response terminal committed but message vanished: ${id}`);
+      return lifecycleResponseTerminalResultFromRedis(outcome, message);
+    }
+    const message = await this.getById(id);
+    if (!message) return { kind: 'not_found' };
+    return { kind: 'conflict', reason: 'different_terminal', message };
+  }
+
+  async commitLifecyclePreAdmissionFailure(
+    input: LifecyclePreAdmissionFailureInput,
+  ): Promise<CommitLifecyclePreAdmissionFailureResult> {
+    const source = await this.getById(input.sourceMessageId);
+    if (!source) return { kind: 'not_found' };
+    const idempotencyKey = preAdmissionFailureIdempotencyKey(input.expectedEntryId);
+    const existingFailure = await this.getByIdempotencyKey('system', source.threadId, idempotencyKey);
+    if (existingFailure) {
+      if (!matchesLifecyclePreAdmissionFailure(existingFailure, source, input)) {
+        return {
+          kind: 'conflict',
+          reason: 'different_failure',
+          inputMessage: source,
+          failureMessage: existingFailure,
+        };
+      }
+      const targetProjectionReplayed = input.requestedTargets.every((targetId) =>
+        source.lifecycle?.dispatchRefs?.some(
+          (ref) => ref.targetId === targetId && ref.phase === 'settled' && ref.statusMessageId === existingFailure.id,
+        ),
+      );
+      const queuedInputReplayed =
+        source.deliveryStatus === 'delivered' &&
+        source.lifecycle?.kind === 'input' &&
+        (input.requestedTargets.length === 0 || targetProjectionReplayed);
+      const publicWakeReplayed =
+        source.deliveryStatus === undefined && messageFrom(source).kind === 'agent' && targetProjectionReplayed;
+      if (!queuedInputReplayed && !publicWakeReplayed) {
+        return {
+          kind: 'conflict',
+          reason: 'invalid_failure',
+          inputMessage: source,
+          failureMessage: existingFailure,
+        };
+      }
+      return { kind: 'replayed', inputMessage: source, failureMessage: existingFailure };
+    }
+
+    const isQueuedInput = source.deliveryStatus === 'queued';
+    const isPublicAgentWake =
+      source.deliveryStatus === undefined &&
+      messageFrom(source).kind === 'agent' &&
+      source.visibility !== 'whisper' &&
+      source.lifecycle?.kind !== 'delivery_failure';
+
+    const uniqueTargets = new Set(input.requestedTargets);
+    if (
+      !Number.isInteger(input.failedAt) ||
+      input.failedAt < source.timestamp ||
+      input.requestedTargets.some((target) => typeof target !== 'string' || target.length === 0) ||
+      uniqueTargets.size !== input.requestedTargets.length ||
+      input.requestedTargets.length > 1 ||
+      (isPublicAgentWake && input.requestedTargets.length === 0) ||
+      (!isQueuedInput && !isPublicAgentWake)
+    ) {
+      return { kind: 'conflict', reason: 'invalid_failure', inputMessage: source };
+    }
+    const inputIdentity = lifecycleInputIdentityForStoredMessage(source);
+    const assigned = assignLifecycleDispatchTargetsMetadata(source.lifecycle, inputIdentity, input.requestedTargets);
+    if (assigned.kind === 'conflict') {
+      return { kind: 'conflict', reason: 'invalid_failure', inputMessage: source };
+    }
+    const failureId = generateSortableId(input.failedAt);
+    const settledSourceLifecycle =
+      input.requestedTargets.length === 0
+        ? assigned.lifecycle
+        : settleAssignedLifecycleDispatchFailureMetadata(
+            assigned.lifecycle,
+            input.requestedTargets,
+            failureId,
+            input.failedAt,
+          );
+    if (!settledSourceLifecycle) {
+      return { kind: 'conflict', reason: 'invalid_failure', inputMessage: source };
+    }
+    const failureLifecycle: LifecycleStoredMessageMetadata = {
+      kind: 'delivery_failure',
+      orderKey: `${input.failedAt}:${source.id}:failure`,
+      status: 'failed',
+      sourceEntryId: input.expectedEntryId,
+      inputMessageId: source.id,
+      requestedTargets: [...input.requestedTargets],
+      reason: input.reason,
+      createdAt: input.failedAt,
+    };
+    const failureInput = canonicalizeAppendMessageInput({
+      from: { kind: 'system', service: 'message_delivery' },
+      userId: 'system',
+      threadId: source.threadId,
+      content: input.content,
+      ...(input.contentBlocks ? { contentBlocks: input.contentBlocks } : {}),
+      mentions: [],
+      timestamp: input.failedAt,
+      lifecycle: failureLifecycle,
+      idempotencyKey,
+    });
+    if (
+      !isLifecycleStoredMessageMetadata(settledSourceLifecycle) ||
+      !isLifecycleStoredMessageMetadata(failureLifecycle)
+    ) {
+      return { kind: 'conflict', reason: 'invalid_failure', inputMessage: source };
+    }
+    await this.ensureVisibilityMigrated(source.threadId);
+    const result = (await this.redis.eval(
+      COMMIT_LIFECYCLE_PRE_ADMISSION_FAILURE_LUA,
+      1,
+      MessageKeys.detail(source.id),
+      this.keyPrefix,
+      failureId,
+      source.threadId,
+      source.userId,
+      input.expectedEntryId,
+      String(input.failedAt),
+      source.lifecycle === undefined ? '' : JSON.stringify(source.lifecycle),
+      JSON.stringify(settledSourceLifecycle),
+      JSON.stringify(failureLifecycle),
+      failureInput.content,
+      failureInput.contentBlocks === undefined ? '' : JSON.stringify(failureInput.contentBlocks),
+      MessageKeys.idempotency('system', source.threadId, idempotencyKey),
+      String(this.ttlSeconds ?? 0),
+      isPublicAgentWake ? 'public_wake' : 'queued_input',
+      JSON.stringify(failureInput.from),
+    )) as [number | string, string];
+    const outcome = Number(result[0]);
+    if (outcome === -1) return { kind: 'not_found' };
+
+    const inputMessage = await this.getById(source.id);
+    if (!inputMessage) {
+      throw new Error(`pre-admission failure transaction lost source message: ${source.id}`);
+    }
+    if (outcome < 0) {
+      const reason = outcome === -2 ? 'not_queued' : 'invalid_failure';
+      return { kind: 'conflict', reason, inputMessage };
+    }
+
+    const committedFailureId = result[1];
+    const failureMessage = await this.getById(committedFailureId);
+    if (!failureMessage) {
+      throw new Error(`pre-admission failure transaction lost failure message: ${committedFailureId}`);
+    }
+    if (!matchesLifecyclePreAdmissionFailure(failureMessage, inputMessage, input)) {
+      return {
+        kind: 'conflict',
+        reason: 'different_failure',
+        inputMessage,
+        failureMessage,
+      };
+    }
+    const targetProjectionCommitted = input.requestedTargets.every((targetId) =>
+      inputMessage.lifecycle?.dispatchRefs?.some(
+        (ref) => ref.targetId === targetId && ref.phase === 'settled' && ref.statusMessageId === failureMessage.id,
+      ),
+    );
+    const queuedInputCommitted =
+      inputMessage.deliveryStatus === 'delivered' &&
+      inputMessage.lifecycle?.kind === 'input' &&
+      (input.requestedTargets.length === 0 || targetProjectionCommitted);
+    const publicWakeCommitted =
+      inputMessage.deliveryStatus === undefined &&
+      messageFrom(inputMessage).kind === 'agent' &&
+      targetProjectionCommitted;
+    if (!queuedInputCommitted && !publicWakeCommitted) {
+      return {
+        kind: 'conflict',
+        reason: 'invalid_failure',
+        inputMessage,
+        failureMessage,
+      };
+    }
+    if (outcome === 1 && this.onAppend) {
+      try {
+        void Promise.resolve(this.onAppend(failureMessage)).catch(() => {});
+      } catch {
+        /* best-effort */
+      }
+    }
+    if (outcome === 1) return { kind: 'applied', inputMessage, failureMessage };
+    if (outcome === 2) return { kind: 'replayed', inputMessage, failureMessage };
+    throw new Error(`unexpected lifecycle pre-admission failure outcome: ${outcome}`);
+  }
+
+  async advanceLifecycleInputDispatch(
+    id: string,
+    patch: LifecycleInputDispatchPatch,
+  ): Promise<AdvanceLifecycleInputDispatchResult> {
+    const key = MessageKeys.detail(id);
+    for (let attempt = 0; attempt < 4; attempt++) {
+      const raw = await this.redis.hget(key, 'lifecycle');
+      const current = raw ? safeParseLifecycleMetadata(raw) : undefined;
+      const message = await this.getById(id);
+      if (!message) return { kind: 'not_found' };
+      if (raw && !current) return { kind: 'conflict', reason: 'not_input', message };
+      const transition = advanceLifecycleInputDispatchMetadata(current, patch);
+      if (transition.kind === 'conflict') return { ...transition, message };
+      if (transition.kind === 'replayed') return { kind: 'replayed', message };
+      const outcome = Number(
+        await this.redis.eval(CAS_LIFECYCLE_METADATA_LUA, 1, key, raw ?? '', JSON.stringify(transition.lifecycle)),
+      );
+      if (outcome === 0) continue;
+      if (outcome === -1) return { kind: 'not_found' };
+      if (outcome === -2) return { kind: 'conflict', reason: 'not_input', message };
+      if (outcome !== 1) throw new Error(`unexpected lifecycle input dispatch outcome: ${outcome}`);
+      const applied = await this.getById(id);
+      if (!applied) throw new Error(`lifecycle input dispatch committed but message vanished: ${id}`);
+      return { kind: 'applied', message: applied };
+    }
+    const message = await this.getById(id);
+    if (!message) return { kind: 'not_found' };
+    return { kind: 'conflict', reason: 'identity_mismatch', message };
+  }
+
+  async commitLifecycleAppendAdmission(
+    input: LifecycleAppendAdmissionInput,
+  ): Promise<CommitLifecycleAppendAdmissionResult> {
+    const ids = [...input.inputMessageIds, ...input.runs.map((run) => run.responseMessageId)];
+    const keys = ids.map((id) => MessageKeys.detail(id));
+    for (let attempt = 0; attempt < 4; attempt += 1) {
+      const [messages, rawLifecycles] = await Promise.all([
+        Promise.all(ids.map((id) => this.getById(id))),
+        Promise.all(keys.map((key) => this.redis.hget(key, 'lifecycle'))),
+      ]);
+      if (messages.some((message) => !message)) return { kind: 'not_found' };
+      const prepared = prepareLifecycleAppendAdmission(messages as StoredMessage[], input);
+      if (prepared.kind !== 'prepared') return prepared;
+      if (prepared.replayed) {
+        return { kind: 'replayed', messages: messages as StoredMessage[] };
+      }
+      const argv = prepared.lifecycles.flatMap((lifecycle, index) => [
+        rawLifecycles[index] ?? '',
+        JSON.stringify(lifecycle),
+      ]);
+      const outcome = Number(await this.redis.eval(CAS_LIFECYCLE_APPEND_ADMISSION_LUA, keys.length, ...keys, ...argv));
+      if (outcome === 0) continue;
+      if (outcome === -1) return { kind: 'not_found' };
+      if (outcome === -2) return { kind: 'conflict', reason: 'scope_mismatch' };
+      if (outcome !== 1) throw new Error(`unexpected lifecycle Append admission outcome: ${outcome}`);
+      const applied = await Promise.all(ids.map((id) => this.getById(id)));
+      if (applied.some((message) => !message)) {
+        throw new Error('lifecycle Append admission committed but a message vanished');
+      }
+      return { kind: 'applied', messages: applied as StoredMessage[] };
+    }
+    return { kind: 'conflict', reason: 'response_lifecycle_conflict' };
+  }
+
+  async commitLifecycleAppendRejection(
+    input: LifecycleAppendRejectionInput,
+  ): Promise<CommitLifecycleAppendRejectionResult> {
+    const ids = [...input.inputMessageIds, input.run.responseMessageId];
+    const keys = ids.map((id) => MessageKeys.detail(id));
+    for (let attempt = 0; attempt < 4; attempt += 1) {
+      const [messages, rawLifecycles] = await Promise.all([
+        Promise.all(ids.map((id) => this.getById(id))),
+        Promise.all(keys.map((key) => this.redis.hget(key, 'lifecycle'))),
+      ]);
+      if (messages.some((message) => !message)) return { kind: 'not_found' };
+      const prepared = prepareLifecycleAppendRejection(messages as StoredMessage[], input);
+      if (prepared.kind !== 'prepared') return prepared;
+      if (prepared.replayed) return { kind: 'replayed', messages: messages as StoredMessage[] };
+      const argv = prepared.lifecycles.flatMap((lifecycle, index) => [
+        rawLifecycles[index] ?? '',
+        JSON.stringify(lifecycle),
+      ]);
+      const outcome = Number(await this.redis.eval(CAS_LIFECYCLE_APPEND_ADMISSION_LUA, keys.length, ...keys, ...argv));
+      if (outcome === 0) continue;
+      if (outcome === -1) return { kind: 'not_found' };
+      if (outcome === -2) return { kind: 'conflict', reason: 'scope_mismatch' };
+      if (outcome !== 1) throw new Error(`unexpected lifecycle Append rejection outcome: ${outcome}`);
+      const applied = await Promise.all(ids.map((id) => this.getById(id)));
+      if (applied.some((message) => !message)) {
+        throw new Error('lifecycle Append rejection committed but a message vanished');
+      }
+      return { kind: 'applied', messages: applied as StoredMessage[] };
+    }
+    return { kind: 'conflict', reason: 'lifecycle_conflict' };
+  }
+
   /**
    * F098-D: Atomically mark a queued message delivered while preserving the
    * Clowder AI publication score and returning an applied/no-op receipt.
@@ -2360,111 +3412,11 @@ export class RedisMessageStore {
     return { kind: 'prepared', message };
   }
 
-  async initializeQueueCustodyAdmission(
-    id: string,
-    admission: QueueCustodyAdmissionIntent,
-  ): Promise<QueueCustodyAdmissionInitializeResult> {
-    assertQueueCustodyMessageBinding({ deliveryStatus: 'queued', queueCustodyAdmission: admission });
-    const outcome = Number(
-      await this.redis.eval(
-        INITIALIZE_QUEUE_CUSTODY_ADMISSION_LUA,
-        1,
-        MessageKeys.detail(id),
-        JSON.stringify(admission),
-      ),
-    );
-    if (outcome === -1) return { kind: 'not_found' };
-    if (outcome === -2) return { kind: 'not_queued' };
-    if (outcome === -3) return { kind: 'conflict' };
-    const message = await this.getById(id);
-    if (!message) return { kind: 'not_found' };
-    if (outcome === 0) return { kind: 'existing', message };
-    if (outcome !== 1) throw new Error(`unexpected queue custody admission initialize result: ${outcome}`);
-    return { kind: 'initialized', message };
-  }
-
-  async initializeQueueCustody(id: string, custody: QueuedMessageCustody): Promise<QueueCustodyInitializeResult> {
-    assertQueueCustodyMessageBinding({ deliveryStatus: 'queued', queueCustody: custody });
-    const outcome = Number(
-      await this.redis.eval(
-        INITIALIZE_QUEUE_CUSTODY_LUA,
-        1,
-        MessageKeys.detail(id),
-        JSON.stringify(custody),
-        String(custody.revision),
-      ),
-    );
-    if (outcome === -1) return { kind: 'not_found' };
-    if (outcome === -2) return { kind: 'not_queued' };
-    const message = await this.getById(id);
-    if (!message) return { kind: 'not_found' };
-    if (outcome === 0) return { kind: 'existing', message };
-    if (outcome !== 1) throw new Error(`unexpected queue custody initialize result: ${outcome}`);
-    return { kind: 'initialized', message };
-  }
-
-  async transitionQueueCustody(id: string, input: QueueCustodyTransitionInput): Promise<QueueCustodyTransitionResult> {
-    if (input.deliveredAt !== undefined) assertValidStoredMessageTimestamp(input.deliveredAt);
-    const current = await this.getById(id);
-    if (!current?.queueCustody) return { kind: 'not_found' };
-    if (current.queueCustody.revision !== input.expectedRevision) {
-      return { kind: 'revision_mismatch', actualRevision: current.queueCustody.revision };
-    }
-    const isExposedRecallSettlement =
-      current.deliveryStatus === 'canceled' &&
-      current.recall?.exposure === 'seen' &&
-      current.queueCustody.status === 'terminal' &&
-      input.next.status === 'terminal' &&
-      input.deliveredAt === undefined;
-    if (current.deliveryStatus !== 'queued' && !isExposedRecallSettlement) {
-      throw new Error('queue custody transition requires a queued message or exposed recall tombstone');
-    }
-    if (input.replacement && input.replacement.sourceMessageId !== id) {
-      throw new Error('queue custody replacement proof source message mismatch');
-    }
-    assertQueueCustodyTransition(current.queueCustody, input);
-    const timelineScore =
-      input.deliveredAt === undefined ? undefined : resolveDeliveryTimelineScore(current, input.deliveredAt);
-
-    // #1269 P1-2: ensure visibility migration before delivery (same as markDelivered).
-    // Custody transitions without delivery skip this (no visibility allocation needed).
-    if (input.deliveredAt !== undefined) {
-      await this.ensureVisibilityMigrated(current.threadId);
-    }
-
-    const rawResult = (await this.redis.eval(
-      TRANSITION_QUEUE_CUSTODY_LUA,
-      5,
-      MessageKeys.detail(id),
-      MessageKeys.thread(current.threadId),
-      MessageKeys.TIMELINE,
-      MessageKeys.user(current.userId),
-      MessageKeys.queueExposureIndex(current.threadId),
-      String(input.expectedRevision),
-      JSON.stringify(input.next),
-      String(input.next.revision),
-      input.deliveredAt === undefined ? '' : String(input.deliveredAt),
-      timelineScore === undefined ? '' : String(timelineScore),
-      this.keyPrefix, // [6] keyPrefix for visibility key construction inside Lua
-    )) as [number | string, number | string];
-    const outcome = Number(rawResult[0]);
-    const actualRevision = Number(rawResult[1]);
-    if (outcome === -1) return { kind: 'not_found' };
-    if (outcome === 0) return { kind: 'revision_mismatch', actualRevision };
-    if (outcome === -2) {
-      throw new Error('queue custody transition requires a queued message or exposed recall tombstone');
-    }
-    if (outcome !== 1 && outcome !== 2) throw new Error(`unexpected queue custody transition result: ${outcome}`);
-
-    const updated = await this.getById(id);
-    if (!updated) throw new Error(`queue custody transition lost stored message: ${id}`);
-    return { kind: 'updated', message: updated, deliveryTransitioned: outcome === 2 };
-  }
-
   /**
    * F117: Mark a queued message as canceled (withdraw/clear).
-   * #1200: CANCEL_WITH_VISIBILITY_LUA extends the original to ZREM from the
-   * visibility index (handles backfilled legacy queued members).
+   * #1200: canceled source work is removed from visibility. Lifecycle response
+   * rows retain their index position because cancellation is their visible
+   * member-owned terminal state.
    */
   async markCanceled(id: string): Promise<MarkCanceledResult | null> {
     const hashKey = MessageKeys.detail(id);
@@ -2562,57 +3514,12 @@ export class RedisMessageStore {
       const d = data as Record<string, string>;
       if (!d.id) continue;
 
-      const deletedAt = d.deletedAt ? parseInt(d.deletedAt, 10) : undefined;
+      const message = this.hydrateHash(d);
+      if (!message) continue;
 
       // ADR-008 D3: skip soft-deleted messages unless includeDeleted
-      if (deletedAt && !options?.includeDeleted) continue;
-
-      const contentBlocks = safeParseContentBlocks(d.contentBlocks);
-      const toolEvents = safeParseToolEvents(d.toolEvents);
-      const parsedMetadata = safeParseMetadata(d.metadata);
-      const extraHydration = hydrateExtra(d.extra, d.pluginMessage, d.custodyOfferV1);
-      const sourceField = parseConnectorSourceField(d.source);
-      const parsedSource = sourceField.kind === 'valid' ? sourceField.source : undefined;
-      const parsedQueueCustody = safeParseQueueCustody(d.queueCustody);
-      const parsedQueueCustodyAdmission = safeParseQueueCustodyAdmission(d.queueCustodyAdmission);
-      const parsedRecall = safeParseMessageRecall(d.recall);
-      messages.push({
-        id: d.id,
-        threadId: d.threadId || DEFAULT_THREAD_ID,
-        userId: d.userId ?? 'unknown',
-        catId: (d.catId || null) as CatId | null,
-        content: d.content ?? '',
-        ...(contentBlocks ? { contentBlocks } : {}),
-        ...(toolEvents ? { toolEvents } : {}),
-        ...(parsedMetadata ? { metadata: parsedMetadata } : {}),
-        ...(extraHydration.extra ? { extra: extraHydration.extra } : {}),
-        ...(extraHydration.custodyOfferParseFailure ? { custodyOfferParseFailure: true as const } : {}),
-        mentions: safeParseMentions(d.mentions),
-        timestamp: parseStoredMessageTimestamp(d.timestamp),
-        ...(deletedAt ? { deletedAt, deletedBy: d.deletedBy ?? '' } : {}),
-        ...(d._tombstone === '1' ? { _tombstone: true as const } : {}),
-        ...(d.thinking ? { thinking: d.thinking } : {}),
-        ...(d.origin === 'stream' || d.origin === 'callback' || d.origin === 'briefing'
-          ? { origin: d.origin as 'stream' | 'callback' | 'briefing' }
-          : {}),
-        ...(d.visibility === 'whisper' ? { visibility: 'whisper' as const } : {}),
-        ...(d.whisperTo ? { whisperTo: safeParseMentions(d.whisperTo) } : {}),
-        ...(d.revealedAt ? { revealedAt: parseInt(d.revealedAt, 10) } : {}),
-        ...(d.deliveredAt ? { deliveredAt: parseRedisNumber(d.deliveredAt) } : {}),
-        ...(d.timelineOrderAt !== undefined ? { timelineOrderAt: parseRedisNumber(d.timelineOrderAt) } : {}),
-        ...(d.deliveryStatus ? { deliveryStatus: d.deliveryStatus as StoredMessage['deliveryStatus'] } : {}),
-        ...(parsedQueueCustody ? { queueCustody: parsedQueueCustody } : {}),
-        ...(parsedQueueCustodyAdmission ? { queueCustodyAdmission: parsedQueueCustodyAdmission } : {}),
-        ...(parsedRecall ? { recall: parsedRecall } : {}),
-        ...(parsedSource ? { source: parsedSource } : {}),
-        ...(sourceField.kind === 'invalid' ? { sourceParseFailure: true as const } : {}),
-        ...(d.mentionsUser === '1' ? { mentionsUser: true } : {}),
-        ...(d.replyTo ? { replyTo: d.replyTo } : {}),
-        // #1200 Sol R6 P2-1: Inject visibilitySeq from hash (parity with hydrateHash).
-        // Without this, getRecentMentionsFor returns items without visibilitySeq,
-        // causing cursorFor to emit v1 while getter cursors are v2 → cross-format.
-        ...(d.visibilitySeq ? { visibilitySeq: parseInt(d.visibilitySeq, 10) } : {}),
-      });
+      if (message.deletedAt && !options?.includeDeleted) continue;
+      messages.push(message);
     }
     return messages;
   }

@@ -11,7 +11,7 @@ import {
   getCliEffortOptionsForClient,
   type HubCatEditorFormState,
   type StrategyFormState,
-  usesCliTransport,
+  usesCliCarrier,
 } from './hub-cat-editor.model';
 import { SectionCard, SelectField, TextField } from './hub-cat-editor-fields';
 import { TagEditor } from './hub-tag-editor';
@@ -57,7 +57,7 @@ export function AdvancedRuntimeSection({
     authMode: 'oauth' as const,
   };
   const cliEffortOptions = getCliEffortOptionsForClient(form.clientId, form.defaultModel);
-  const cliExtensionsAvailable = usesCliTransport(form);
+  const cliExtensionsAvailable = usesCliCarrier(form);
 
   return (
     <SectionCard
@@ -198,18 +198,14 @@ export function AdvancedRuntimeSection({
 }
 
 function selectionMatchesSavedContext(cat: CatData | null | undefined, form: HubCatEditorFormState): boolean {
-  if (!cat || cat.clientId !== form.clientId || Boolean(cat.acp) !== form.acpEnabled) return false;
-  if (form.clientId !== 'openai') return true;
-  return (cat.cli?.carrier ?? '') === form.codexCarrier;
+  return Boolean(cat && cat.clientId === form.clientId && cat.carrier === form.carrier);
 }
 
 function draftCannotResolveOrApplyContextWindow(form: HubCatEditorFormState): boolean | null {
-  if (form.acpEnabled) return false;
+  if (form.carrier === 'acp') return false;
   if (form.clientId === 'antigravity' || form.clientId === 'catagent' || form.clientId === 'google') return true;
   if (form.clientId !== 'openai') return false;
-  if (form.codexCarrier === 'app_server') return true;
-  if (form.codexCarrier === 'exec_json') return false;
-  return null;
+  return form.carrier === 'app_server';
 }
 
 function ContextWindowCompatibilityNotice({ cat, form }: { cat?: CatData | null; form: HubCatEditorFormState }) {

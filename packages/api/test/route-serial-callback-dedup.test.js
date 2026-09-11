@@ -432,8 +432,8 @@ describe('#573/#1332: explicit callback/final persistence semantics', () => {
       }
       assert.equal(
         duplicateTargetInvocations,
-        1,
-        'failed callback admission must leave the line-start target eligible for the serial carrier',
+        0,
+        'failed callback admission must not resurrect the removed recursive serial carrier',
       );
     } finally {
       catRegistry.reset();
@@ -451,7 +451,9 @@ describe('#573/#1332: explicit callback/final persistence semantics', () => {
       yielded.push(msg);
     }
 
-    const streamAppends = appendCalls.filter((m) => m.origin === 'stream' && m.catId === 'opus');
+    const streamAppends = appendCalls.filter(
+      (m) => m.origin === 'stream' && m.from?.kind === 'agent' && m.from.catId === 'opus',
+    );
     assert.equal(streamAppends.length, 0, 'replace_final should keep the callback as the sole durable response');
   });
 
@@ -465,7 +467,11 @@ describe('#573/#1332: explicit callback/final persistence semantics', () => {
       // drain
     }
 
-    const streamAppends = appendCalls.filter((message) => message.origin === 'stream' && message.catId === 'opus');
+    // F117: AppendMessageInput carries the sender as MessageFrom (`from`), not a
+    // top-level `catId` projection — ef94412a5 "make MessageFrom the sender truth".
+    const streamAppends = appendCalls.filter(
+      (message) => message.origin === 'stream' && message.from?.kind === 'agent' && message.from.catId === 'opus',
+    );
     assert.equal(streamAppends.length, 0, 'the persisted terminal ACK must remain the sole durable response');
     assert.deepEqual(
       persistenceContext.persistedOutputMessageIds,
@@ -483,7 +489,11 @@ describe('#573/#1332: explicit callback/final persistence semantics', () => {
       // drain
     }
 
-    const streamAppends = appendCalls.filter((message) => message.origin === 'stream' && message.catId === 'opus');
+    // F117: AppendMessageInput carries the sender as MessageFrom (`from`), not a
+    // top-level `catId` projection — ef94412a5 "make MessageFrom the sender truth".
+    const streamAppends = appendCalls.filter(
+      (message) => message.origin === 'stream' && message.from?.kind === 'agent' && message.from.catId === 'opus',
+    );
     assert.equal(streamAppends.length, 1, 'an unproven terminal ACK must fail open and preserve the provider final');
   });
 
@@ -498,7 +508,11 @@ describe('#573/#1332: explicit callback/final persistence semantics', () => {
       // drain
     }
 
-    const streamAppends = appendCalls.filter((message) => message.origin === 'stream' && message.catId === 'opus');
+    // F117: AppendMessageInput carries the sender as MessageFrom (`from`), not a
+    // top-level `catId` projection — ef94412a5 "make MessageFrom the sender truth".
+    const streamAppends = appendCalls.filter(
+      (message) => message.origin === 'stream' && message.from?.kind === 'agent' && message.from.catId === 'opus',
+    );
     assert.equal(streamAppends.length, 1, 'the callback must not suppress a later independent final answer');
     assert.equal(streamAppends[0].content, 'Detailed final answer that must remain durable after the callback.');
     assert.ok(
@@ -524,7 +538,11 @@ describe('#573/#1332: explicit callback/final persistence semantics', () => {
       yielded.push(msg);
     }
 
-    const streamAppends = appendCalls.filter((message) => message.origin === 'stream' && message.catId === 'opus');
+    // F117: AppendMessageInput carries the sender as MessageFrom (`from`), not a
+    // top-level `catId` projection — ef94412a5 "make MessageFrom the sender truth".
+    const streamAppends = appendCalls.filter(
+      (message) => message.origin === 'stream' && message.from?.kind === 'agent' && message.from.catId === 'opus',
+    );
     assert.equal(streamAppends.length, 0, 'replace_final must not persist an empty tool-only stream record');
     assert.equal(
       yielded.filter((message) => message.type === 'system_info' && message.content?.includes('silent_completion'))
@@ -573,7 +591,11 @@ describe('#573/#1332: explicit callback/final persistence semantics', () => {
       // drain
     }
 
-    const streamAppends = appendCalls.filter((message) => message.origin === 'stream' && message.catId === 'opus');
+    // F117: AppendMessageInput carries the sender as MessageFrom (`from`), not a
+    // top-level `catId` projection — ef94412a5 "make MessageFrom the sender truth".
+    const streamAppends = appendCalls.filter(
+      (message) => message.origin === 'stream' && message.from?.kind === 'agent' && message.from.catId === 'opus',
+    );
     assert.equal(streamAppends.length, 1, 'replacement without a durable callback id must fail open to the final');
     assert.equal(streamAppends[0].content, 'Provider fallback must remain durable.');
   });
@@ -610,7 +632,11 @@ describe('#573/#1332: explicit callback/final persistence semantics', () => {
       // drain
     }
 
-    const streamAppends = appendCalls.filter((message) => message.origin === 'stream' && message.catId === 'opus');
+    // F117: AppendMessageInput carries the sender as MessageFrom (`from`), not a
+    // top-level `catId` projection — ef94412a5 "make MessageFrom the sender truth".
+    const streamAppends = appendCalls.filter(
+      (message) => message.origin === 'stream' && message.from?.kind === 'agent' && message.from.catId === 'opus',
+    );
     assert.equal(streamAppends.length, 0, 'error finalization must not append a second empty stream record');
     assert.equal(augmentCalls.length, 1, 'error-path tool metadata should attach to the canonical callback');
     assert.equal(augmentCalls[0].id, 'callback-before-error');
@@ -629,7 +655,11 @@ describe('#573/#1332: explicit callback/final persistence semantics', () => {
       // drain
     }
 
-    const streamAppends = appendCalls.filter((message) => message.origin === 'stream' && message.catId === 'opus');
+    // F117: AppendMessageInput carries the sender as MessageFrom (`from`), not a
+    // top-level `catId` projection — ef94412a5 "make MessageFrom the sender truth".
+    const streamAppends = appendCalls.filter(
+      (message) => message.origin === 'stream' && message.from?.kind === 'agent' && message.from.catId === 'opus',
+    );
     assert.equal(streamAppends.length, 0, 'the later matched replace_final callback must suppress the provider final');
     assert.deepEqual(
       persistenceContext.persistedOutputMessageIds,
@@ -654,7 +684,9 @@ describe('#573/#1332: explicit callback/final persistence semantics', () => {
       // drain
     }
 
-    const streamAppends = appendCalls.filter((m) => m.origin === 'stream' && m.catId === 'opus');
+    const streamAppends = appendCalls.filter(
+      (m) => m.origin === 'stream' && m.from?.kind === 'agent' && m.from.catId === 'opus',
+    );
     assert.equal(streamAppends.length, 0, 'callback path must remain the only user-visible bubble');
     assert.equal(augmentCalls.length, 1, 'callback message should receive stream-only metadata');
 
@@ -698,7 +730,9 @@ describe('#573/#1332: explicit callback/final persistence semantics', () => {
       // drain
     }
 
-    const streamAppends = appendCalls.filter((m) => m.origin === 'stream' && m.catId === 'opus');
+    const streamAppends = appendCalls.filter(
+      (m) => m.origin === 'stream' && m.from?.kind === 'agent' && m.from.catId === 'opus',
+    );
     assert.equal(streamAppends.length, 0, 'prefixed callback success must not create a duplicate stream bubble');
     assert.equal(augmentCalls.length, 1, 'prefixed callback result should still augment callback message');
 
@@ -725,7 +759,9 @@ describe('#573/#1332: explicit callback/final persistence semantics', () => {
       // drain
     }
 
-    const streamAppends = appendCalls.filter((m) => m.origin === 'stream' && m.catId === 'opus');
+    const streamAppends = appendCalls.filter(
+      (m) => m.origin === 'stream' && m.from?.kind === 'agent' && m.from.catId === 'opus',
+    );
     assert.equal(
       streamAppends.length,
       0,
@@ -743,7 +779,9 @@ describe('#573/#1332: explicit callback/final persistence semantics', () => {
       yielded.push(msg);
     }
 
-    const streamAppends = appendCalls.filter((m) => m.origin === 'stream' && m.catId === 'opus');
+    const streamAppends = appendCalls.filter(
+      (m) => m.origin === 'stream' && m.from?.kind === 'agent' && m.from.catId === 'opus',
+    );
     assert.equal(streamAppends.length, 1, 'should persist stream output normally when no callback post');
     assert.ok(streamAppends[0].content.includes('Normal reply'), 'persisted content should match stream text');
   });
@@ -786,7 +824,9 @@ describe('#573/#1332: explicit callback/final persistence semantics', () => {
       // drain
     }
 
-    const streamAppends = appendCalls.filter((m) => m.origin === 'stream' && m.catId === 'opus');
+    const streamAppends = appendCalls.filter(
+      (m) => m.origin === 'stream' && m.from?.kind === 'agent' && m.from.catId === 'opus',
+    );
     assert.equal(streamAppends.length, 1, 'should persist stream output when callback failed');
   });
 
@@ -825,7 +865,9 @@ describe('#573/#1332: explicit callback/final persistence semantics', () => {
       // drain
     }
 
-    const streamAppends = appendCalls.filter((m) => m.origin === 'stream' && m.catId === 'opus');
+    const streamAppends = appendCalls.filter(
+      (m) => m.origin === 'stream' && m.from?.kind === 'agent' && m.from.catId === 'opus',
+    );
     assert.equal(streamAppends.length, 0, 'unrelated tool_result must not clear pending callback confirmation');
   });
 
@@ -871,7 +913,9 @@ describe('#573/#1332: explicit callback/final persistence semantics', () => {
       // drain
     }
 
-    const streamAppends = appendCalls.filter((m) => m.origin === 'stream' && m.catId === 'opus');
+    const streamAppends = appendCalls.filter(
+      (m) => m.origin === 'stream' && m.from?.kind === 'agent' && m.from.catId === 'opus',
+    );
     assert.equal(streamAppends.length, 1, 'unrelated ok tool_result must not suppress stream persistence');
   });
 
@@ -917,7 +961,9 @@ describe('#573/#1332: explicit callback/final persistence semantics', () => {
       // drain
     }
 
-    const streamAppends = appendCalls.filter((m) => m.origin === 'stream' && m.catId === 'opus');
+    const streamAppends = appendCalls.filter(
+      (m) => m.origin === 'stream' && m.from?.kind === 'agent' && m.from.catId === 'opus',
+    );
     assert.equal(streamAppends.length, 0, 'unlabeled callback result should suppress duplicate stream persistence');
   });
 
@@ -963,7 +1009,9 @@ describe('#573/#1332: explicit callback/final persistence semantics', () => {
       // drain
     }
 
-    const streamAppends = appendCalls.filter((m) => m.origin === 'stream' && m.catId === 'opus');
+    const streamAppends = appendCalls.filter(
+      (m) => m.origin === 'stream' && m.from?.kind === 'agent' && m.from.catId === 'opus',
+    );
     assert.equal(
       streamAppends.length,
       1,
@@ -1013,7 +1061,9 @@ describe('#573/#1332: explicit callback/final persistence semantics', () => {
       // drain
     }
 
-    const streamAppends = appendCalls.filter((m) => m.origin === 'stream' && m.catId === 'opus');
+    const streamAppends = appendCalls.filter(
+      (m) => m.origin === 'stream' && m.from?.kind === 'agent' && m.from.catId === 'opus',
+    );
     assert.equal(
       streamAppends.length,
       1,
@@ -1063,7 +1113,9 @@ describe('#573/#1332: explicit callback/final persistence semantics', () => {
       // drain
     }
 
-    const streamAppends = appendCalls.filter((m) => m.origin === 'stream' && m.catId === 'opus');
+    const streamAppends = appendCalls.filter(
+      (m) => m.origin === 'stream' && m.from?.kind === 'agent' && m.from.catId === 'opus',
+    );
     assert.equal(
       streamAppends.length,
       1,
@@ -1113,7 +1165,9 @@ describe('#573/#1332: explicit callback/final persistence semantics', () => {
       // drain
     }
 
-    const streamAppends = appendCalls.filter((m) => m.origin === 'stream' && m.catId === 'opus');
+    const streamAppends = appendCalls.filter(
+      (m) => m.origin === 'stream' && m.from?.kind === 'agent' && m.from.catId === 'opus',
+    );
     assert.equal(streamAppends.length, 1, 'ambiguous ok tool_result must not suppress stream persistence');
   });
 
@@ -1154,7 +1208,9 @@ describe('#573/#1332: explicit callback/final persistence semantics', () => {
       // drain
     }
 
-    const streamAppends = appendCalls.filter((m) => m.origin === 'stream' && m.catId === 'opus');
+    const streamAppends = appendCalls.filter(
+      (m) => m.origin === 'stream' && m.from?.kind === 'agent' && m.from.catId === 'opus',
+    );
     assert.equal(
       streamAppends.length,
       1,

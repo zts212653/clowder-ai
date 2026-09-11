@@ -405,9 +405,18 @@ test('message actions occupy no resting layout and stay unpainted until asked fo
     );
     assertStableMessageGeometry(resting, hovered, 'hover');
     assert.ok(hovered.actionAriaLabels.includes('多选消息'), 'hover must reveal the multi-select action');
+    assert.ok(
+      hovered.actionAriaLabels.some((label) => label.startsWith('复制消息 ID:')),
+      'hover must keep message identity in the same dock',
+    );
     assert.ok(hovered.actionTitles.includes('引用回复'), 'hover must preserve the reply action');
+    assert.ok(hovered.actionTitles.includes('创建分支'), 'hover must preserve the unified branch action');
     assert.ok(hovered.actionTitles.includes('删除'), 'hover must preserve the delete action');
-    assert.ok(hovered.actionAriaLabels.includes('更多消息操作'), 'hover must preserve the overflow action');
+    assert.equal(
+      hovered.actionAriaLabels.includes('更多消息操作'),
+      false,
+      'the unified dock must not duplicate branch/delete behind an overflow menu',
+    );
 
     // Moving the pointer away and focusing a hidden action must reveal the same local row for
     // keyboard users, without relying on hover to keep it painted.

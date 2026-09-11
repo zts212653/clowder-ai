@@ -72,19 +72,14 @@ export interface ConnectorSource {
   readonly sender?: { readonly id: string; readonly name?: string };
 }
 
-/**
- * F167 PR5: immutable identity for the user-visible managed-hold wake/result
- * rows that Message Bundle may offer. Runtime authorship and owner access are
- * additional server-side guards; this shared predicate keeps Web affordance
- * and API source classification on the same connector contract.
- */
-export function isSelectableManagedHoldConnectorSource(
+/** Exact identity shared by the visible waiting fact and the queued wake source. */
+export function isManagedHoldConnectorSource(
   source: Pick<ConnectorSource, 'connector' | 'meta'> | null | undefined,
 ): boolean {
   const meta = source?.meta;
   return Boolean(
     source?.connector === 'hold-ball' &&
-      meta?.wakeWhen === true &&
+      meta?.managedHold === true &&
       typeof meta.taskId === 'string' &&
       meta.taskId.trim().length > 0 &&
       typeof meta.threadId === 'string' &&
@@ -92,6 +87,13 @@ export function isSelectableManagedHoldConnectorSource(
       typeof meta.catId === 'string' &&
       meta.catId.trim().length > 0,
   );
+}
+
+/** Only the delivered wake/result is a quotable dispatch source; waiting status is context only. */
+export function isSelectableManagedHoldConnectorSource(
+  source: Pick<ConnectorSource, 'connector' | 'meta'> | null | undefined,
+): boolean {
+  return isManagedHoldConnectorSource(source) && source?.meta?.phase === 'wake';
 }
 
 // ── Connector Definition (registry entry) ──

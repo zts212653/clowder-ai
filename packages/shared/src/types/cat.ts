@@ -4,6 +4,7 @@
  */
 
 import type { CliConfig } from './cat-breed.js';
+import type { CatCarrier } from './cat-carrier.js';
 import type { CatId, SessionId } from './ids.js';
 import { createCatId } from './ids.js';
 import type { VoiceConfig } from './tts.js';
@@ -67,6 +68,8 @@ export interface CatConfig {
   readonly accountRef?: string;
   /** clowder-ai#340 P5: CLI client identity (renamed from `provider`). */
   readonly clientId: ClientId;
+  /** Canonical, config-resolved member access mode. */
+  readonly carrier: CatCarrier;
   readonly defaultModel: string;
   readonly mcpSupport: boolean;
   readonly cli?: CliConfig;

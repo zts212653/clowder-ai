@@ -60,14 +60,15 @@ export function createReconcileApprovedInitialMessage({
 
 /**
  * #1387 / #1406 B1: materialization and wake-completion are separate facts.
- * A seed is dispatch-complete only when it has reached a terminal delivery
- * state. Owning queue custody or merely being 'queued' does NOT mean the
- * queue processor successfully woke the target — processNext may throw or
- * return started:false, leaving the seed in an indistinguishable 'queued'
- * state that must be retried.
+ * A seed is dispatch-complete only when it has terminal owner-delivery state
+ * or every actually dispatched lifecycle target has settled. Merely owning
+ * Queue custody does NOT mean the processor woke the target — processNext may
+ * throw or return started:false before any dispatchRef exists.
  */
 function isDispatchComplete(message: StoredMessage): boolean {
-  return message.deliveryStatus === 'delivered' || message.deliveryStatus === 'canceled';
+  if (message.deliveryStatus === 'delivered' || message.deliveryStatus === 'canceled') return true;
+  const dispatchRefs = message.lifecycle?.kind === 'input' ? message.lifecycle.dispatchRefs : undefined;
+  return Boolean(dispatchRefs && dispatchRefs.length > 0 && dispatchRefs.every((ref) => ref.phase === 'settled'));
 }
 
 /**
@@ -216,6 +217,7 @@ export async function reconcileApprovedInitialMessage({
         router,
         invocationQueue,
         queueProcessor,
+        idempotentSeed,
       );
       return { warnings, wasPresent: true, redispatched: true };
     }

@@ -5,18 +5,22 @@ import {
   MessageStore,
 } from '../../dist/domains/cats/services/stores/ports/MessageStore.js';
 import { CustodyOfferService } from '../../dist/domains/growing/CustodyOfferService.js';
+import { canonicalTestMessageInput } from '../helpers/message-from-fixtures.js';
 
 function appendSource(store, overrides = {}) {
-  return store.append({
-    userId: 'owner-1',
-    catId: null,
-    content: 'Please hold tomorrow presentation.',
-    contentBlocks: [{ type: 'text', text: 'Please hold tomorrow presentation.' }],
-    mentions: [],
-    timestamp: 1_788_168_300_000,
-    threadId: 'thread-source',
-    ...overrides,
-  });
+  // F117: append requires MessageFrom sender identity
+  return store.append(
+    canonicalTestMessageInput({
+      userId: 'owner-1',
+      catId: null,
+      content: 'Please hold tomorrow presentation.',
+      contentBlocks: [{ type: 'text', text: 'Please hold tomorrow presentation.' }],
+      mentions: [],
+      timestamp: 1_788_168_300_000,
+      threadId: 'thread-source',
+      ...overrides,
+    }),
+  );
 }
 
 function pendingInput(message) {

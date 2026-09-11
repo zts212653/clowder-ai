@@ -44,7 +44,7 @@ test('appends transcript idempotently and invokes only the bound cat', async () 
         return {
           async trigger(...args) {
             triggered.push(args);
-            return 'dispatched';
+            return 'enqueued';
           },
         };
       },
@@ -57,6 +57,7 @@ test('appends transcript idempotently and invokes only the bound cat', async () 
   assert.equal(appended.length, 1);
   assert.equal(appended[0].idempotencyKey, 'limb:stackchan-home:observation-1');
   assert.equal(appended[0].content, '大猫猫，你在吗？');
+  assert.equal(appended[0].deliveryStatus, 'queued');
   assert.deepEqual(appended[0].mentions, ['codex-sol']);
   assert.equal(appended[0].source.meta.interactionId, 'interaction-1');
   assert.deepEqual(triggered, [['thread-stackchan', 'codex-sol', 'default-user', '大猫猫，你在吗？', 'message-1']]);
@@ -75,7 +76,7 @@ test('fails before persistence when binding cat or invocation runtime is unavail
   const unknownCat = new LimbTranscriptCatDelivery({
     ...base,
     isKnownCat: () => false,
-    invokeTriggerProvider: { get: () => ({ trigger: async () => 'dispatched' }) },
+    invokeTriggerProvider: { get: () => ({ trigger: async () => 'enqueued' }) },
   });
   await assert.rejects(unknownCat.deliverTranscript({ binding, observation }), /unknown bound cat/);
 

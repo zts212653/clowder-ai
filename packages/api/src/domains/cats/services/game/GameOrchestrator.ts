@@ -335,8 +335,8 @@ export class GameOrchestrator {
     const userId = runtime.config.observerUserId ?? 'system';
     Promise.resolve(
       this.messageStore.append({
+        from: { kind: 'agent', catId: catId as import('@cat-cafe/shared').CatId },
         userId,
-        catId: catId as import('@cat-cafe/shared').CatId,
         content,
         mentions: [],
         timestamp: Date.now(),

@@ -1,4 +1,5 @@
-import { normalizeCatId, parseCommand } from '@cat-cafe/shared';
+import { type MessageFrom, normalizeCatId, parseCommand } from '@cat-cafe/shared';
+import { messageFrom } from '../../domains/cats/services/stores/message-from.js';
 import type { CommandRegistry } from '../commands/CommandRegistry.js';
 import type { IConnectorPermissionStore } from './ConnectorPermissionStore.js';
 import type { IConnectorThreadBindingStore } from './ConnectorThreadBindingStore.js';
@@ -96,8 +97,10 @@ export interface ConnectorCommandLayerDeps {
       timestamp: number,
       limit?: number,
     ):
-      | Array<{ catId: string | null; userId?: string; content: string; timestamp: number }>
-      | Promise<Array<{ catId: string | null; userId?: string; content: string; timestamp: number }>>;
+      | Array<{ from?: MessageFrom; catId: string | null; userId?: string; content: string; timestamp: number }>
+      | Promise<
+          Array<{ from?: MessageFrom; catId: string | null; userId?: string; content: string; timestamp: number }>
+        >;
   };
 }
 
@@ -424,8 +427,7 @@ export class ConnectorCommandLayer {
     }
 
     type Msg = Awaited<ReturnType<NonNullable<typeof this.deps.messageStore>['getByThreadBefore']>>[number];
-    const SYSTEM_UIDS = new Set(['system', 'scheduler']);
-    const isUserMsg = (m: Msg): boolean => m.catId === null && !SYSTEM_UIDS.has(m.userId ?? '');
+    const isUserMsg = (m: Msg): boolean => messageFrom(m as Parameters<typeof messageFrom>[0]).kind === 'user';
     const splitRounds = (msgs: Msg[]): Msg[][] => {
       const result: Msg[][] = [];
       let cur: Msg[] = [];
@@ -459,11 +461,14 @@ export class ConnectorCommandLayer {
     const TOTAL_BUDGET = PLATFORM_BUDGET[connectorId] ?? 2000;
     const roster = this.deps.catRoster;
     const resolveSender = (msg: Msg): string => {
-      if (msg.catId) {
-        const display = roster?.[msg.catId]?.displayName;
-        return `🐱 ${display ?? msg.catId}`;
+      const from = messageFrom(msg as Parameters<typeof messageFrom>[0]);
+      if (from.kind === 'agent') {
+        const display = roster?.[from.catId]?.displayName;
+        return `🐱 ${display ?? from.catId}`;
       }
-      if (SYSTEM_UIDS.has(msg.userId ?? '')) return '🔔 系统';
+      if (from.kind === 'system') return '🔔 系统';
+      if (from.kind === 'external') return `🔗 ${from.sender?.name ?? from.sender?.id ?? from.connectorId}`;
+      if (from.kind === 'plugin') return `🔌 ${from.instanceId}`;
       return '👤 你';
     };
 

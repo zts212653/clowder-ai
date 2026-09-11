@@ -299,6 +299,7 @@ function mergeMessageExtra(
   const fields: RequiredMessageExtraFields = {
     custodyOfferV1: pick('custodyOfferV1'),
     semanticEvent: pick('semanticEvent'),
+    routingWarnings: pick('routingWarnings'),
     crossPost: pick('crossPost'),
     stream: pick('stream'),
     turnExecution: pick('turnExecution'),
@@ -315,7 +316,7 @@ function mergeMessageExtra(
     freshness: pick('freshness'),
     supplement: pick('supplement'),
     freshnessSupplement: pick('freshnessSupplement'),
-    queueReceipt: pick('queueReceipt'),
+    cloudBridgeRetry: pick('cloudBridgeRetry'),
     recall: pick('recall'),
     coordination: pick('coordination'),
     localReviewVerdict: pick('localReviewVerdict'),
@@ -861,7 +862,6 @@ export function useChatHistory(threadId: string) {
     replaceThreadTargetCats,
     updateThreadCatStatus,
     setQueue,
-    setQueuePaused,
     isOfflineSnapshot,
   } = useChatStore(
     useShallow((s) => ({
@@ -875,7 +875,6 @@ export function useChatHistory(threadId: string) {
       replaceThreadTargetCats: s.replaceThreadTargetCats,
       updateThreadCatStatus: s.updateThreadCatStatus,
       setQueue: s.setQueue,
-      setQueuePaused: s.setQueuePaused,
       isOfflineSnapshot: s.isOfflineSnapshot,
     })),
   );
@@ -1138,8 +1137,10 @@ export function useChatHistory(threadId: string) {
             (m: {
               id: string;
               type: string;
+              from?: import('@cat-cafe/shared').MessageFrom;
               catId?: string;
               content: string;
+              lifecycle?: import('@cat-cafe/shared').LifecycleStoredMessageMetadata;
               contentBlocks?: unknown[];
               toolEvents?: unknown[];
               metadata?: {
@@ -1172,7 +1173,6 @@ export function useChatHistory(threadId: string) {
                 freshness?: NonNullable<ChatMessageData['extra']>['freshness'];
                 supplement?: NonNullable<ChatMessageData['extra']>['supplement'];
                 freshnessSupplement?: NonNullable<ChatMessageData['extra']>['freshnessSupplement'];
-                queueReceipt?: NonNullable<ChatMessageData['extra']>['queueReceipt'];
                 messageBundle?: NonNullable<ChatMessageData['extra']>['messageBundle'];
                 semanticEvent?: ProviderSemanticEvent;
               };
@@ -1197,21 +1197,31 @@ export function useChatHistory(threadId: string) {
             }) =>
               ({
                 id: m.id,
-                type: (m.type === 'system'
-                  ? 'system'
-                  : m.summary
-                    ? 'summary'
-                    : m.source
-                      ? 'connector'
-                      : m.catId
-                        ? 'assistant'
-                        : 'user') as 'user' | 'assistant' | 'system' | 'summary' | 'connector',
+                type: (m.from?.kind === 'agent'
+                  ? 'assistant'
+                  : m.from?.kind === 'external' || m.from?.kind === 'plugin'
+                    ? 'connector'
+                    : m.from?.kind === 'system'
+                      ? 'system'
+                      : m.from?.kind === 'user'
+                        ? 'user'
+                        : m.type === 'system'
+                          ? 'system'
+                          : m.summary
+                            ? 'summary'
+                            : m.source
+                              ? 'connector'
+                              : m.catId
+                                ? 'assistant'
+                                : 'user') as 'user' | 'assistant' | 'system' | 'summary' | 'connector',
+                ...(m.from ? { from: m.from } : {}),
                 catId: m.catId,
                 content: (() => {
                   if (!m.extra?.semanticEvent) return m.content;
                   const semantic = resolveProviderSemanticMessage(m.extra.semanticEvent);
                   return semantic.action === 'replace' ? semantic.projection.content : m.content;
                 })(),
+                ...(m.lifecycle ? { lifecycle: m.lifecycle } : {}),
                 ...(m.contentBlocks ? { contentBlocks: m.contentBlocks } : {}),
                 ...(m.toolEvents ? { toolEvents: m.toolEvents as import('../stores/chat-types').ToolEvent[] } : {}),
                 ...(m.metadata ? { metadata: m.metadata } : {}),
@@ -1240,7 +1250,6 @@ export function useChatHistory(threadId: string) {
                     m.extra?.freshness ||
                     m.extra?.supplement ||
                     m.extra?.freshnessSupplement ||
-                    m.extra?.queueReceipt ||
                     m.extra?.messageBundle ||
                     m.extra?.semanticEvent ||
                     cliDiag;
@@ -1262,7 +1271,6 @@ export function useChatHistory(threadId: string) {
                       ...(m.extra?.freshness ? { freshness: m.extra.freshness } : {}),
                       ...(m.extra?.supplement ? { supplement: m.extra.supplement } : {}),
                       ...(m.extra?.freshnessSupplement ? { freshnessSupplement: m.extra.freshnessSupplement } : {}),
-                      ...(m.extra?.queueReceipt ? { queueReceipt: m.extra.queueReceipt } : {}),
                       ...(m.extra?.messageBundle ? { messageBundle: m.extra.messageBundle } : {}),
                       ...(m.extra?.semanticEvent ? { semanticEvent: m.extra.semanticEvent } : {}),
                       ...(cliDiag ? { cliDiagnostics: cliDiag } : {}),
@@ -1515,13 +1523,10 @@ export function useChatHistory(threadId: string) {
       if (threadIdRef.current !== fetchForThread) return false;
       const data = (await res.json()) as {
         queue: QueueEntry[];
-        paused: boolean;
-        pauseReason?: 'canceled' | 'failed';
         activeInvocations?: QueueActiveInvocationSlot[];
       };
       // Always sync server state — clears stale local data when server queue is empty
       setQueue(fetchForThread, data.queue);
-      setQueuePaused(fetchForThread, data.paused, data.pauseReason);
       // Issue #83: Reconcile processing state from server-side InvocationTracker.
       // Uses thread-scoped APIs so it works correctly for both active and background threads,
       // and always overwrites stale snapshots restored by setCurrentThread().
@@ -1583,7 +1588,7 @@ export function useChatHistory(threadId: string) {
       return false;
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [threadId, setQueue, setQueuePaused, updateThreadCatStatus]);
+  }, [threadId, setQueue, updateThreadCatStatus]);
 
   // Restore per-thread tasks before paint so revisiting a thread does not show
   // an empty secondary panel while revalidation is still in flight.

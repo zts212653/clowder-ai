@@ -11,6 +11,7 @@
 
 import assert from 'node:assert/strict';
 import { beforeEach, describe, test } from 'node:test';
+import { canonicalTestQueueInput } from './helpers/message-from-fixtures.js';
 
 // ── Fake InvocationRecordStore (simulates RedisInvocationRecordStore) ──
 
@@ -139,9 +140,15 @@ function makeTaskSnapshot(threadId, catId) {
 // ── Import StartupReconciler (lazy — file may not exist yet in RED phase) ──
 
 let StartupReconciler;
+let InvocationQueue;
+let InMemoryQueueLedgerStore;
 try {
   const mod = await import('../dist/domains/cats/services/agents/invocation/StartupReconciler.js');
   StartupReconciler = mod.StartupReconciler;
+  ({ InvocationQueue } = await import('../dist/domains/cats/services/agents/invocation/InvocationQueue.js'));
+  ({ InMemoryQueueLedgerStore } = await import(
+    '../dist/domains/cats/services/agents/invocation/queue-ledger/InMemoryQueueLedgerStore.js'
+  ));
 } catch {
   // RED phase: module doesn't exist yet — tests will fail with clear message
 }
@@ -452,14 +459,15 @@ describe('StartupReconciler', () => {
     assert.equal(appendedMessages.length, 2, 'should append 2 messages');
     assert.equal(broadcastedEvents.length, 2, 'should broadcast 2 messages');
 
-    // AC-A+2: Verify message uses source field (not catId: null)
+    // AC-A+2: Verify the system sender union owns identity; source owns presentation.
     const msgA = appendedMessages.find((m) => m.threadId === 'thread-a');
     assert.ok(msgA, 'thread-a should have a message');
-    assert.ok(msgA.source, 'message must have source field (not catId: null)');
+    assert.deepEqual(msgA.from, { kind: 'system', service: 'startup-reconciler' });
+    assert.ok(msgA.source, 'message must have source field');
     assert.equal(msgA.source.connector, 'startup-reconciler', 'source.connector must be startup-reconciler');
     assert.equal(msgA.source.meta.presentation, 'system_notice');
     assert.equal(msgA.source.meta.noticeTone, 'warning');
-    assert.equal(msgA.catId, null, 'catId should be null (connector message)');
+    assert.equal(msgA.catId, undefined, 'new writes must not carry the legacy naked catId');
     assert.ok(msgA.content.includes('opus'), 'message should mention affected cat');
     assert.ok(
       msgA.content.includes('restart') || msgA.content.includes('interrupted') || msgA.content.includes('重启'),
@@ -875,171 +883,62 @@ describe('StartupReconciler', () => {
     assert.equal(result.running, 1);
   });
 
-  // ── #697 + #805 review: recoverOrphanedQueuedMessages ──
-
-  test('#697: recovers orphaned queued messages when no InvocationRecord exists', async () => {
-    // No InvocationRecords — message is purely orphaned
-    const deliveredIds = [];
-    const messageStore = {
-      append(msg) {
-        return { ...msg, id: 'msg-x', threadId: msg.threadId ?? 'default' };
-      },
-      scanByDeliveryStatus(status) {
-        if (status === 'queued') return ['orphan-msg-1', 'orphan-msg-2'];
-        return [];
-      },
-      markDelivered(id, deliveredAt) {
-        deliveredIds.push(id);
-        return {
-          id,
-          threadId: 'thread-orphan',
-          userId: 'user-1',
-          mentions: ['opus'],
-          deliveryStatus: 'delivered',
-          deliveredAt,
-        };
-      },
-    };
-
-    const reconciler = new StartupReconciler({
-      invocationRecordStore: store,
-      taskProgressStore,
-      log,
-      messageStore,
-    });
-
-    const result = await reconciler.reconcileOrphans();
-
-    assert.equal(deliveredIds.length, 2, 'both orphaned messages should be recovered');
-    assert.ok(deliveredIds.includes('orphan-msg-1'));
-    assert.ok(deliveredIds.includes('orphan-msg-2'));
-    assert.equal(result.messagesRecovered, 2);
-    assert.equal(result.notifiedThreads, 1, 'owner-authored queued work still produces one thread notice');
-  });
-
-  test('#805 P2-1: InvocationRecord cleanup — queued record with matching userMessageId is marked failed', async () => {
-    // Fresh queued InvocationRecord (< 5min, NOT caught by sweepStaleQueued)
-    const freshRecord = makeRecord({
-      id: 'fresh-inv-1',
-      status: 'queued',
-      userMessageId: 'orphan-msg-1',
-      targetCats: ['opus'],
-      createdAt: Date.now() - 60_000, // 1 min ago (< 5min threshold)
-    });
-    store.seed(freshRecord);
-
-    const messageStore = {
-      append(msg) {
-        return { ...msg, id: 'msg-x', threadId: msg.threadId ?? 'default' };
-      },
-      scanByDeliveryStatus(status) {
-        if (status === 'queued') return ['orphan-msg-1'];
-        return [];
-      },
-      markDelivered(id) {
-        return {
-          id,
-          threadId: 'thread-p2-1',
-          userId: 'user-1',
-          mentions: ['opus'],
-          deliveryStatus: 'delivered',
-          deliveredAt: Date.now(),
-        };
-      },
-    };
-
-    const reconciler = new StartupReconciler({
-      invocationRecordStore: store,
-      taskProgressStore,
-      log,
-      messageStore,
-    });
-
-    const result = await reconciler.reconcileOrphans();
-
-    // Message recovered
-    assert.equal(result.messagesRecovered, 1);
-    // InvocationRecord should now be 'failed' (not left as 'queued' residue)
-    const record = await store.get('fresh-inv-1');
-    assert.equal(record.status, 'failed', 'InvocationRecord should be marked failed after message recovery');
-    assert.equal(record.error, 'process_restart');
-  });
-
-  test('#805 P2-1: InvocationRecord cleanup — unrelated queued records are NOT touched', async () => {
-    // Queued record whose userMessageId does NOT match any recovered message
-    const unrelatedRecord = makeRecord({
-      id: 'unrelated-inv',
-      status: 'queued',
-      userMessageId: 'different-msg',
-      targetCats: ['codex'],
-      createdAt: Date.now() - 60_000,
-    });
-    store.seed(unrelatedRecord);
-
-    const messageStore = {
-      append(msg) {
-        return { ...msg, id: 'msg-x', threadId: msg.threadId ?? 'default' };
-      },
-      scanByDeliveryStatus(status) {
-        if (status === 'queued') return ['orphan-msg-1'];
-        return [];
-      },
-      markDelivered(id) {
-        return {
-          id,
-          threadId: 'thread-keep',
-          userId: 'user-1',
-          mentions: ['opus'],
-        };
-      },
-    };
-
-    const reconciler = new StartupReconciler({
-      invocationRecordStore: store,
-      taskProgressStore,
-      log,
-      messageStore,
-    });
-
-    await reconciler.reconcileOrphans();
-
-    // Unrelated record should still be queued (not swept — only 1 min old)
-    const record = await store.get('unrelated-inv');
-    assert.equal(record.status, 'queued', 'unrelated queued record should NOT be touched');
-  });
-
-  test('#805 P3-2: log.warn emitted when recovered message has no mentions', async () => {
-    const messageStore = {
-      append(msg) {
-        return { ...msg, id: 'msg-x', threadId: msg.threadId ?? 'default' };
-      },
-      scanByDeliveryStatus(status) {
-        if (status === 'queued') return ['no-mention-msg'];
-        return [];
-      },
-      markDelivered(id) {
-        return {
-          id,
-          threadId: 'thread-no-mention',
-          userId: 'user-1',
-          // No mentions field
-        };
-      },
-    };
-
-    const reconciler = new StartupReconciler({
-      invocationRecordStore: store,
-      taskProgressStore,
-      log,
-      messageStore,
-    });
-
-    await reconciler.reconcileOrphans();
-
-    assert.ok(
-      log.messages.some((m) => m.level === 'warn' && m.msg.includes('unusual') && m.msg.includes('no mentions')),
-      'should log warning about message without mentions',
+  test('ADR-043: restart resumes pending Queue work without reconstructing already-claimed work', async () => {
+    const ledger = new InMemoryQueueLedgerStore();
+    const queue = new InvocationQueue(ledger);
+    const processingAdmission = queue.enqueueDurableNow(
+      canonicalTestQueueInput({
+        sourceId: 'processing-source',
+        threadId: 'thread-ledger-restart',
+        userId: 'user-1',
+        kind: 'conversation_input',
+        content: 'processing source',
+        targetCats: ['opus'],
+        messageId: 'processing-source',
+        intent: 'execute',
+      }),
     );
+    const claimed = await queue.markProcessingByIdDurable(
+      'thread-ledger-restart',
+      processingAdmission.entry.id,
+      'opus',
+    );
+    assert.ok(claimed);
+    assert.equal(await queue.commitClaimedProcessing('thread-ledger-restart', [claimed.id]), true);
+    assert.equal(
+      await ledger.get('thread-ledger-restart', claimed.id),
+      null,
+      'History owns processing/terminal truth after Queue releases its claim',
+    );
+
+    queue.enqueueDurableNow(
+      canonicalTestQueueInput({
+        sourceId: 'queued-source',
+        threadId: 'thread-ledger-restart',
+        userId: 'user-1',
+        kind: 'conversation_input',
+        content: 'queued source',
+        targetCats: ['opus'],
+        messageId: 'queued-source',
+        intent: 'execute',
+      }),
+    );
+
+    const reconciler = new StartupReconciler({
+      invocationRecordStore: store,
+      taskProgressStore,
+      log,
+      invocationQueue: queue,
+    });
+    const result = await reconciler.reconcileOrphans();
+
+    assert.equal(result.queueMessagesTerminalized, 0);
+    assert.deepEqual(result.queueResumeScopes, [{ threadId: 'thread-ledger-restart', userId: 'user-1' }]);
+    assert.deepEqual(
+      queue.list('thread-ledger-restart', 'user-1').map((entry) => entry.payload.messageId),
+      ['queued-source'],
+    );
+    assert.equal(await ledger.get('thread-ledger-restart', claimed.id), null);
   });
 
   // ── Phase A (original) tests continue ──

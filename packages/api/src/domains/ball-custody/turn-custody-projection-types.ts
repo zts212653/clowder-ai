@@ -71,38 +71,17 @@ export interface ActionTransitionBaseline {
   readonly fingerprint: string;
 }
 
-export interface StructuredTransitionBaseline {
-  readonly kind: 'structured';
-  readonly subjectKey: string;
-  readonly holderCatId: string;
-  readonly fromSequence: number;
-  readonly protocol: Extract<TurnCustodyWakeProvenance, { kind: 'structured' }>['protocol'];
-  readonly sourceMessageId?: string;
-  readonly taskId?: string;
-  readonly dispatchSourceMessageId?: string;
-  readonly dispatchFromCatId?: string;
-}
-
 export interface TurnCustodyProjection {
   readonly state: TurnCustodyProjectionState;
   readonly evidenceRefs: readonly string[];
-  readonly baseline?: ActionTransitionBaseline | StructuredTransitionBaseline;
+  readonly baseline?: ActionTransitionBaseline;
 }
 
 export interface TurnCustodyStopDecision {
   readonly state: TurnCustodyProjectionState;
   readonly shouldBlock: boolean;
   readonly transitionObserved: boolean;
-  readonly structuredTransitionKind?: 'hold_dispositioned' | 'dispatch_dispositioned' | 'held' | 'handed';
-  readonly dispatchDisposition?: 'handled' | 'completed';
-  readonly dispatchDispositionEventId?: string;
-  readonly dispatchDispositionAt?: number;
   readonly evidenceRefs: string[];
 }
-
-export type StructuredTransitionObservation = Pick<
-  TurnCustodyStopDecision,
-  'structuredTransitionKind' | 'dispatchDisposition' | 'dispatchDispositionEventId' | 'dispatchDispositionAt'
->;
 
 export type TurnCustodyShadowComparison = 'agree_allow' | 'agree_block' | 'old_only_block' | 'new_only_block';

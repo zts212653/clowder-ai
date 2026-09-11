@@ -86,7 +86,7 @@ describe('ReviewFeedbackRouter F280 typed waits', () => {
     assert.equal(result.kind, 'notified');
     assert.match(result.content, /review pending → CHANGES_REQUESTED/);
     assert.equal(result.content.includes('SOURCE_BODY_SHOULD_NEVER_RENDER'), false);
-    assert.equal(messageStore.getByThread('thread_1').length, 1);
+    assert.equal(messageStore.getByThreadIncludingQueued('thread_1').length, 1);
   });
 
   test('ordinary conversation activity advances facts but never wakes a head-only waiter', async () => {
@@ -109,7 +109,7 @@ describe('ReviewFeedbackRouter F280 typed waits', () => {
       { taskId: task.id },
     );
     assert.equal(result.kind, 'skipped');
-    assert.equal(messageStore.getByThread('thread_1').length, 0);
+    assert.equal(messageStore.getByThreadIncludingQueued('thread_1').length, 0);
     assert.equal((await taskStore.get(task.id)).automationState.review.lastConversationCommentCursor, 21);
   });
 
@@ -127,11 +127,11 @@ describe('ReviewFeedbackRouter F280 typed waits', () => {
     const first = await router.route(clean, { taskId: task.id });
     assert.equal(first.kind, 'notified');
     assert.match(first.content, /RESULT_AVAILABLE/);
-    assert.equal(messageStore.getByThread('thread_1').length, 1);
+    assert.equal(messageStore.getByThreadIncludingQueued('thread_1').length, 1);
 
     const replay = await router.route(clean, { taskId: task.id });
     assert.equal(replay.kind, 'skipped');
-    assert.equal(messageStore.getByThread('thread_1').length, 1);
+    assert.equal(messageStore.getByThreadIncludingQueued('thread_1').length, 1);
   });
 
   test('terminal PR truth observed by the review collector consumes an active wait', async () => {
@@ -148,7 +148,7 @@ describe('ReviewFeedbackRouter F280 typed waits', () => {
 
     assert.equal(result.kind, 'notified');
     assert.match(result.content, /PR state: merged/);
-    assert.equal(messageStore.getByThread('thread_1').length, 1);
+    assert.equal(messageStore.getByThreadIncludingQueued('thread_1').length, 1);
     const stored = await taskStore.get(task.id);
     assert.equal(stored.status, 'done');
     assert.equal(stored.automationState.await, undefined);

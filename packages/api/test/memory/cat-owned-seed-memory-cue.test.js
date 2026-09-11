@@ -156,6 +156,7 @@ describe('F312 Phase E cat-owned Seed Standing Reflex', () => {
       id: 'message-present-loop',
       threadId: SCOPE.threadId,
       userId: 'scheduler',
+      from: { kind: 'system', service: 'scheduler' },
       catId: null,
       content: '[scheduler] privateContext=invocation-only',
       source: { connector: 'scheduler', label: '定时任务' },

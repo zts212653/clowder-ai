@@ -9,10 +9,15 @@
  * F118 post-close: age only marks a lease as a reaper candidate. Read APIs are
  * observational and never abort or delete provider ownership.
  */
+
+import type { LifecycleActiveRun } from '@cat-cafe/shared';
 import { createModuleLogger } from '../../../../../infrastructure/logger.js';
+import type { AgentClientActiveRunDispatcher } from '../../types.js';
 
 const log = createModuleLogger('invocation-tracker');
 export const DEFAULT_INVOCATION_SLOT_TTL_MS = 75 * 60_000;
+/** A Queue claim may exist briefly before startAll publishes its tracker owner. */
+export const DEFAULT_PRESTART_RESERVATION_TTL_MS = 30_000;
 
 interface ActiveInvocation {
   controller: AbortController;
@@ -45,6 +50,10 @@ interface ActiveInvocation {
    * completes, the tombstone is kept for resolveFinalStatus() but no longer blocks seal.
    */
   teardownComplete?: boolean;
+  /** Exact conversation-delivery run, bound only after its durable processing bubble exists. */
+  activeRun?: LifecycleActiveRun;
+  /** Live provider adapter for the exact activeRun; never serialized or recovered. */
+  activeRunDispatcher?: AgentClientActiveRunDispatcher;
 }
 
 /** F-parallel-cancel: observable slot lifecycle state for callers that need to distinguish
@@ -54,6 +63,7 @@ export type SlotState = 'active' | 'canceled' | 'absent';
 export interface ActiveSlotInfo {
   catId: string;
   startedAt: number;
+  activeRun?: LifecycleActiveRun;
 }
 
 export interface StaleInvocationSlotInfo {
@@ -490,6 +500,149 @@ export class InvocationTracker {
     return inv.executionId;
   }
 
+  /**
+   * Publish the non-durable ActiveRun only after durable admission has created
+   * the exact response bubble and input dispatch refs. Parent execution
+   * matching prevents a late child callback from binding a replacement slot.
+   */
+  bindLifecycleActiveRun(run: LifecycleActiveRun, expectedExecutionId?: string): boolean {
+    const inv = this.active.get(this.slotKey(run.threadId, run.targetId));
+    if (!inv || inv.state !== 'active') return false;
+    if (expectedExecutionId !== undefined && inv.executionId !== expectedExecutionId) return false;
+    if (inv.activeRun) {
+      return (
+        inv.activeRun.invocationId === run.invocationId && inv.activeRun.responseMessageId === run.responseMessageId
+      );
+    }
+    inv.activeRun = structuredClone(run);
+    inv.startedAt = run.startedAt;
+    return true;
+  }
+
+  /**
+   * Bind the provider-native dispatcher only after both durable ActiveRun
+   * admission and provider turn acceptance. The returned release hook is
+   * identity-fenced so an old carrier cannot erase a replacement adapter.
+   */
+  bindAgentClientActiveRunDispatcher(
+    threadId: string,
+    catId: string,
+    dispatcher: AgentClientActiveRunDispatcher,
+    expectedExecutionId?: string,
+  ): (() => void) | null {
+    const inv = this.active.get(this.slotKey(threadId, catId));
+    if (!inv || inv.state !== 'active') return null;
+    if (expectedExecutionId !== undefined && inv.executionId !== expectedExecutionId) return null;
+    if (!inv.activeRun || inv.activeRun.invocationId !== dispatcher.invocationId) return null;
+    if (inv.activeRunDispatcher) return null;
+    inv.activeRunDispatcher = dispatcher;
+    return () => {
+      const current = this.active.get(this.slotKey(threadId, catId));
+      if (current?.activeRunDispatcher === dispatcher) delete current.activeRunDispatcher;
+    };
+  }
+
+  /** Exact live adapter snapshot; absence means Append/Steer is unsupported now. */
+  getAgentClientActiveRunDispatcher(threadId: string, catId: string): AgentClientActiveRunDispatcher | undefined {
+    const inv = this.active.get(this.slotKey(threadId, catId));
+    if (
+      !inv ||
+      inv.state !== 'active' ||
+      !inv.activeRun ||
+      inv.activeRun.invocationId !== inv.activeRunDispatcher?.invocationId
+    ) {
+      return undefined;
+    }
+    return inv.activeRunDispatcher;
+  }
+
+  /** Mirror a durably admitted Append onto the non-durable Active Run projection. */
+  appendLifecycleActiveRunInputs(
+    threadId: string,
+    catId: string,
+    expected: { invocationId: string; responseMessageId: string },
+    entryId: string,
+    messageIds: readonly string[],
+  ): boolean {
+    return this.extendLifecycleActiveRunInputs(threadId, catId, expected, entryId, messageIds, true);
+  }
+
+  /**
+   * Mirror an exact body that the current turn has already read. Unlike a
+   * provider Append, prompt adoption does not require a live dispatcher: the
+   * callback itself is the durable proof that this exact child received it.
+   */
+  adoptLifecycleActiveRunInputs(
+    threadId: string,
+    catId: string,
+    expected: { invocationId: string; responseMessageId: string },
+    entryId: string,
+    messageIds: readonly string[],
+  ): boolean {
+    return this.extendLifecycleActiveRunInputs(threadId, catId, expected, entryId, messageIds, false);
+  }
+
+  private extendLifecycleActiveRunInputs(
+    threadId: string,
+    catId: string,
+    expected: { invocationId: string; responseMessageId: string },
+    entryId: string,
+    messageIds: readonly string[],
+    requireDispatcher: boolean,
+  ): boolean {
+    const inv = this.active.get(this.slotKey(threadId, catId));
+    const run = inv?.activeRun;
+    if (
+      !inv ||
+      inv.state !== 'active' ||
+      !run ||
+      run.invocationId !== expected.invocationId ||
+      run.responseMessageId !== expected.responseMessageId ||
+      (requireDispatcher && inv.activeRunDispatcher?.invocationId !== expected.invocationId)
+    ) {
+      return false;
+    }
+    const hasEntry = run.inputEntryIds.includes(entryId);
+    const presentMessageIds = messageIds.filter((messageId) => run.inputMessageIds.includes(messageId));
+    if ((hasEntry && presentMessageIds.length !== messageIds.length) || (!hasEntry && presentMessageIds.length > 0)) {
+      return false;
+    }
+    if (hasEntry) return true;
+    inv.activeRun = {
+      ...run,
+      inputEntryIds: [...run.inputEntryIds, entryId],
+      inputMessageIds: [...run.inputMessageIds, ...messageIds],
+    };
+    return true;
+  }
+
+  /** Remove one rejected Append from the live projection after durable compensation. */
+  detachLifecycleActiveRunInputs(
+    threadId: string,
+    catId: string,
+    expected: { invocationId: string; responseMessageId: string },
+    entryId: string,
+    messageIds: readonly string[],
+  ): boolean {
+    const inv = this.active.get(this.slotKey(threadId, catId));
+    const run = inv?.activeRun;
+    if (
+      !inv ||
+      !run ||
+      run.invocationId !== expected.invocationId ||
+      run.responseMessageId !== expected.responseMessageId
+    ) {
+      return false;
+    }
+    const rejectedIds = new Set(messageIds);
+    inv.activeRun = {
+      ...run,
+      inputEntryIds: run.inputEntryIds.filter((candidate) => candidate !== entryId),
+      inputMessageIds: run.inputMessageIds.filter((candidate) => !rejectedIds.has(candidate)),
+    };
+    return true;
+  }
+
   /** Get target cat IDs of the active invocation for a specific slot. */
   getCatIds(threadId: string, catId: string): string[] {
     const key = this.slotKey(threadId, catId);
@@ -837,7 +990,11 @@ export class InvocationTracker {
     for (const [key, inv] of this.active) {
       // F-parallel-cancel: a canceled tombstone is not an active slot.
       if (key.startsWith(prefix) && inv.state !== 'canceled') {
-        result.push({ catId: inv.catId, startedAt: inv.startedAt });
+        result.push({
+          catId: inv.catId,
+          startedAt: inv.startedAt,
+          ...(inv.activeRun ? { activeRun: structuredClone(inv.activeRun) } : {}),
+        });
       }
     }
     return result;

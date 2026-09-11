@@ -58,7 +58,7 @@ const MARKDOWN_LEADING_CONTAINER_RE = /^[ \t]{0,3}(?:(?:(?:[-+*]|\d{1,9}[.)])[ \
 const FENCE_RUN_RE = /(`{3,}|~{3,})/u;
 
 const PAW_SIGNATURE_RE = /^\[([^[\]/\n]+)\/([^[\]\n]+)🐾\]$/u;
-const TRAILING_PAW_SIGNATURE_RE = /`?(\[([^[\]/\n]+)\/([^[\]\n]+)🐾\])`?[ \t]*$/u;
+const TRAILING_PAW_SIGNATURE_RE = /`?(\[([^[\]/\n]+)\/([^[\]\n]+)🐾(?:@([^[\]\n]+))?\])`?[ \t]*$/u;
 
 function isOwnSignatureIdentity(candidate: string, expected: string): boolean {
   const normalizedCandidate = candidate.trim();
@@ -77,8 +77,10 @@ function normalizeSignatureModel(model: string): string {
 function isCanonicalOwnSignature(
   candidateIdentity: string,
   candidateModel: string,
+  candidateCatId: string | undefined,
   expectedIdentity: string,
   canonicalSignature: string | undefined,
+  expectedCatId: CatId,
 ): boolean {
   if (!isOwnSignatureIdentity(candidateIdentity, expectedIdentity)) return false;
   if (!canonicalSignature) return false;
@@ -89,7 +91,12 @@ function isCanonicalOwnSignature(
   if (!canonicalIdentity || !canonicalModel || !isOwnSignatureIdentity(canonicalIdentity, expectedIdentity)) {
     return false;
   }
-  return normalizeSignatureModel(candidateModel) === normalizeSignatureModel(canonicalModel);
+  const normalizedCandidateModel = normalizeSignatureModel(candidateModel);
+  const normalizedCanonicalModel = normalizeSignatureModel(canonicalModel);
+  if (normalizedCandidateModel === normalizedCanonicalModel) {
+    return candidateCatId === undefined || candidateCatId.trim() === expectedCatId;
+  }
+  return candidateCatId?.trim() === expectedCatId && normalizedCandidateModel.endsWith(normalizedCanonicalModel);
 }
 
 interface MarkdownFence {
@@ -172,16 +179,25 @@ function stripOwnTrailingTurnSignature(
   text: string,
   signatureIdentity: string | undefined,
   canonicalSignature: string | undefined,
+  catId: CatId,
 ): StrippedTurnSignature {
   if (!signatureIdentity) return { content: text };
   const match = TRAILING_PAW_SIGNATURE_RE.exec(text);
   if (!match || match.index === undefined) return { content: text };
   const candidateIdentity = match[2];
   const candidateModel = match[3];
+  const candidateCatId = match[4];
   if (
     !candidateIdentity ||
     !candidateModel ||
-    !isCanonicalOwnSignature(candidateIdentity, candidateModel, signatureIdentity, canonicalSignature)
+    !isCanonicalOwnSignature(
+      candidateIdentity,
+      candidateModel,
+      candidateCatId,
+      signatureIdentity,
+      canonicalSignature,
+      catId,
+    )
   ) {
     return { content: text };
   }
@@ -486,7 +502,12 @@ export function transformCodexEvent(
   }
 
   if (item?.type === 'agent_message' && typeof item.text === 'string' && item.text.trim().length > 0) {
-    const stripped = stripOwnTrailingTurnSignature(item.text, state?.signatureIdentity, state?.canonicalSignature);
+    const stripped = stripOwnTrailingTurnSignature(
+      item.text,
+      state?.signatureIdentity,
+      state?.canonicalSignature,
+      catId,
+    );
     if (state && stripped.signature) state.observedSignature = stripped.signature;
     if (stripped.content.trim().length === 0) return null;
     const prefix = state?.hadPriorTextTurn ? '\n\n' : '';

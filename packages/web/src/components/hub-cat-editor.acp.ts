@@ -5,27 +5,6 @@
  * NOTE: Does NOT import from hub-cat-editor.model.ts to avoid circular dependency.
  */
 
-/** F161: transport options — cli (default) or acp (stdio). */
-export type AcpTransportValue = 'cli' | 'acp';
-
-export const ACP_TRANSPORT_OPTIONS: Array<{ value: AcpTransportValue; label: string }> = [
-  { value: 'cli', label: 'CLI' },
-  { value: 'acp', label: 'ACP' },
-];
-
-/** Clients that support both CLI and ACP transport — show transport selector for these. */
-const DUAL_TRANSPORT_CLIENTS: ReadonlySet<string> = new Set(['opencode', 'google', 'kimi']);
-
-/** Whether to show the transport selector for this client. */
-export function showTransportSelector(client: string): boolean {
-  return DUAL_TRANSPORT_CLIENTS.has(client);
-}
-
-/** Whether ACP is forced on (no choice) for this client. */
-export function isAcpOnlyClient(client: string): boolean {
-  return client === 'acp';
-}
-
 export function defaultAcpCommandForClient(client: string): string {
   switch (client) {
     case 'opencode':
@@ -78,8 +57,8 @@ export function acpStartupArgsPlaceholder(client: string): string {
  * Returns a warning message when the selected client + ACP combo has known limitations.
  * Currently: kimi ACP requires `kimi login` (managed auth); api_key config won't work.
  */
-export function getAcpWarning(client: string, acpEnabled: boolean): string | null {
-  if (!acpEnabled) return null;
+export function getAcpWarning(client: string, carrier: string): string | null {
+  if (carrier !== 'acp') return null;
   if (client === 'kimi') {
     return 'kimi 的 ACP 模式需要先运行 kimi login 登录，apikey 配置不可用';
   }

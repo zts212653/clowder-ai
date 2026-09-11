@@ -89,7 +89,7 @@ describe('F295 canonical execution hydration', () => {
     await act(async () => {
       root.render(<Harness threadId="thread-a" connected={false} />);
     });
-    expect(mocks.apiFetch).toHaveBeenLastCalledWith('/api/executions/active?projectPath=%2Fproject%2Fcafe', {
+    expect(mocks.apiFetch).toHaveBeenLastCalledWith('/api/threads/thread-a/executions/active', {
       signal: expect.any(AbortSignal),
     });
 
@@ -106,12 +106,12 @@ describe('F295 canonical execution hydration', () => {
     await act(async () => {
       root.render(<Harness threadId="thread-b" connected />);
     });
-    expect(mocks.apiFetch).toHaveBeenLastCalledWith('/api/executions/active?projectPath=%2Fproject%2Fcafe', {
+    expect(mocks.apiFetch).toHaveBeenLastCalledWith('/api/threads/thread-b/executions/active', {
       signal: expect.any(AbortSignal),
     });
   });
 
-  it('keeps one project resource identity across a slow same-project navigation and rejects the late generation', async () => {
+  it('switches exact thread resource identity and rejects the late generation', async () => {
     let resolveThreadA!: (response: Response) => void;
     let resolveThreadB!: (response: Response) => void;
     mocks.apiFetch
@@ -167,8 +167,8 @@ describe('F295 canonical execution hydration', () => {
 
     expect(mocks.apiFetch).toHaveBeenCalledTimes(2);
     expect(mocks.apiFetch.mock.calls.map(([url]) => url)).toEqual([
-      '/api/executions/active?projectPath=%2Fproject%2Fcafe',
-      '/api/executions/active?projectPath=%2Fproject%2Fcafe',
+      '/api/threads/thread-a/executions/active',
+      '/api/threads/thread-b/executions/active',
     ]);
     expect(useActiveExecutionStore.getState().anchorThreadId).toBe('thread-b');
     expect(useActiveExecutionStore.getState().executionsByKey).toEqual({

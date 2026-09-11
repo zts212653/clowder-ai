@@ -29,8 +29,8 @@ export const MessageKeys = {
   ownerComposerDraft: (ownerUserId: string, threadId: string) =>
     `msg:composer-draft:${encodeURIComponent(ownerUserId)}:${encodeURIComponent(threadId)}`,
 
-  /** F264 Gap F: content-free reverse index from exact child exposure to source message IDs. */
-  queueExposureIndex: (threadId: string) => `msg:queue-exposures:${threadId}`,
+  /** Legacy F264 index retained only so thread deletion removes pre-migration data. */
+  legacyQueueExposureIndex: (threadId: string) => `msg:queue-exposures:${threadId}`,
 
   /**
    * #1200 Visibility index: per-thread sorted set, member=messageId, score=visibilitySeq.

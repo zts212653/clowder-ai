@@ -1,21 +1,16 @@
 import type { FastifyReply, FastifyRequest } from 'fastify';
 import type { InvocationQueue, QueueEntry } from '../domains/cats/services/agents/invocation/InvocationQueue.js';
-import type {
-  QueuedMessageCustodyCoordinator,
-  RecallMessageToComposerDraftCoordinatorResult,
-} from '../domains/cats/services/agents/invocation/QueuedMessageCustodyCoordinator.js';
 import type { QueueProcessor } from '../domains/cats/services/agents/invocation/QueueProcessor.js';
-import type { IMessageStore, StoredMessage } from '../domains/cats/services/stores/ports/MessageStore.js';
+import type {
+  IMessageStore,
+  RecallMessageToComposerDraftResult,
+  StoredMessage,
+} from '../domains/cats/services/stores/ports/MessageStore.js';
 import type { IThreadStore } from '../domains/cats/services/stores/ports/ThreadStore.js';
 import type { IIndexBuilder, MessageRecallSuppressionLease } from '../domains/memory/interfaces.js';
 import type { SocketManager } from '../infrastructure/websocket/index.js';
 import { enrichQueueEntries } from '../utils/queue-enrichment.js';
-import {
-  projectRecallMessage,
-  queueEntryMessageIds,
-  rebuildCarrierWithout,
-  recallBodySchema,
-} from './composer-draft-recall-helpers.js';
+import { projectRecallMessage, recallBodySchema } from './composer-draft-recall-helpers.js';
 import { buildRecallSuccessResponse, emitRecallProjection } from './composer-draft-recall-projection.js';
 import {
   type DerivedTitleSuppression,
@@ -30,7 +25,6 @@ export interface RecallMessageRouteOptions {
   threadStore: Pick<IThreadStore, 'get' | 'compareAndSetTitle'>;
   socketManager: SocketManager;
   invocationQueue: InvocationQueue;
-  queueCustodyCoordinator: Pick<QueuedMessageCustodyCoordinator, 'recallMessageToComposerDraft'>;
   queueProcessor?: Pick<QueueProcessor, 'unregisterEntryCompleteHook' | 'finalizeRemovedEntry'>;
   indexBuilder: Pick<
     IIndexBuilder,
@@ -50,11 +44,10 @@ interface RecallContext {
 }
 
 interface CarrierContext {
-  entryId: string;
-  current: QueueEntry | null;
-  nextEntryId?: string;
-  storedMembers: ReadonlyMap<string, { id: string; content: string }>;
+  entries: QueueEntry[];
 }
+
+type RecallCommitResult = RecallMessageToComposerDraftResult | { kind: 'carrier_changed' };
 
 interface RecallPreparation {
   indexLease: MessageRecallSuppressionLease;
@@ -95,36 +88,21 @@ async function resolveRecallContext(
 }
 
 async function resolveCarrier(context: RecallContext, reply: FastifyReply): Promise<Resolution<CarrierContext>> {
-  const entryId = context.target.queueCustody?.entryId;
-  if (!entryId) return reject(reply, 409, { error: 'Message is not recallable', code: 'MESSAGE_NOT_RECALLABLE' });
-  const entries = context.opts.invocationQueue.list(context.threadId, context.ownerUserId);
-  const entryIndex = entries.findIndex((entry) => entry.id === entryId);
-  const current =
-    entryIndex >= 0
-      ? context.opts.invocationQueue.getEntrySnapshot(context.threadId, context.ownerUserId, entryId)
-      : null;
-  if (current && !queueEntryMessageIds(current).includes(context.messageId)) {
-    return reject(reply, 409, { error: 'Message carrier mismatch', code: 'QUEUE_CARRIER_MISMATCH' });
+  const claim = await context.opts.invocationQueue.claimMessageEntriesForWithdrawal(
+    context.threadId,
+    context.ownerUserId,
+    context.messageId,
+  );
+  if (claim.outcome === 'processing') {
+    return reject(reply, 409, { error: 'Message is already processing', code: 'ENTRY_PROCESSING' });
   }
-  const members = current
-    ? await Promise.all(queueEntryMessageIds(current).map((messageId) => context.opts.messageStore.getById(messageId)))
-    : [];
-  if (members.some((message) => !message)) {
-    return reject(reply, 503, { error: 'Queue carrier is incomplete', code: 'QUEUE_CARRIER_INCOMPLETE' });
+  if (claim.outcome === 'not_found') {
+    return reject(reply, 409, { error: 'Message is not recallable', code: 'MESSAGE_NOT_RECALLABLE' });
   }
-  return {
-    ok: true,
-    value: {
-      entryId,
-      current,
-      nextEntryId: entryIndex >= 0 ? entries[entryIndex + 1]?.id : undefined,
-      storedMembers: new Map(
-        members
-          .filter((message): message is StoredMessage => message !== null)
-          .map(({ id, content }) => [id, { id, content }]),
-      ),
-    },
-  };
+  if (claim.outcome !== 'claimed') {
+    return reject(reply, 409, { error: 'Queue carrier changed concurrently', code: 'QUEUE_CARRIER_CHANGED' });
+  }
+  return { ok: true, value: { entries: claim.entries } };
 }
 
 async function releasePreparation(
@@ -205,31 +183,30 @@ async function commitRecall(
   context: RecallContext,
   carrier: CarrierContext,
   preparation: RecallPreparation,
-): Promise<RecallMessageToComposerDraftCoordinatorResult> {
-  const restoreCurrent = () => {
-    if (carrier.current) {
-      context.opts.invocationQueue.restoreDurableEntry(carrier.current, { beforeEntryId: carrier.nextEntryId });
-    }
-  };
+): Promise<RecallCommitResult> {
+  const entryIds = carrier.entries.map((entry) => entry.id);
   try {
-    return await context.opts.queueCustodyCoordinator.recallMessageToComposerDraft(
-      carrier.entryId,
-      context.messageId,
-      {
-        ownerUserId: context.ownerUserId,
-        threadId: context.threadId,
-        expectedDraftRevision: context.expectedDraftRevision,
-        merge: context.merge,
-        recalledAt: Date.now(),
-      },
-      carrier.current
-        ? {
-            freeze: () => context.opts.invocationQueue.removeEntrySnapshotIfUnchanged(carrier.current as QueueEntry),
-            restore: restoreCurrent,
-          }
-        : undefined,
-    );
+    const result = await context.opts.messageStore.recallMessageToComposerDraft(context.messageId, {
+      ownerUserId: context.ownerUserId,
+      threadId: context.threadId,
+      expectedDraftRevision: context.expectedDraftRevision,
+      merge: context.merge,
+      recalledAt: Date.now(),
+    });
+    if (result.kind === 'recalled' || result.kind === 'already_recalled') {
+      if (!(await context.opts.invocationQueue.commitClaimedMessageWithdrawal(context.threadId, entryIds))) {
+        context.request.log.error(
+          { threadId: context.threadId, messageId: context.messageId, entryIds },
+          'true recall committed; claimed Queue withdrawal deferred to restart hydration',
+        );
+      }
+      return result;
+    }
+    return (await context.opts.invocationQueue.restoreClaimedEntries(context.threadId, entryIds))
+      ? result
+      : { kind: 'carrier_changed' };
   } catch (error) {
+    await context.opts.invocationQueue.restoreClaimedEntries(context.threadId, entryIds);
     await releasePreparation(context, preparation, 'canonical_recall_rejected');
     throw error;
   }
@@ -239,7 +216,7 @@ async function projectRecallFailure(
   context: RecallContext,
   preparation: RecallPreparation,
   reply: FastifyReply,
-  result: Exclude<RecallMessageToComposerDraftCoordinatorResult, { kind: 'recalled' } | { kind: 'already_recalled' }>,
+  result: Exclude<RecallCommitResult, { kind: 'recalled' } | { kind: 'already_recalled' }>,
 ): Promise<Record<string, unknown>> {
   await releasePreparation(context, preparation, 'canonical_recall_rejected');
   if (result.kind === 'draft_revision_mismatch') {
@@ -258,22 +235,16 @@ async function projectRecallFailure(
 }
 
 async function finalizeCarrier(context: RecallContext, carrier: CarrierContext): Promise<void> {
-  const replacement = carrier.current
-    ? rebuildCarrierWithout(carrier.current, context.messageId, carrier.storedMembers)
-    : null;
-  if (replacement) {
-    context.opts.invocationQueue.restoreDurableEntry(replacement, { beforeEntryId: carrier.nextEntryId });
-    return;
-  }
-  if (!carrier.current) return;
-  context.opts.queueProcessor?.unregisterEntryCompleteHook(carrier.entryId);
-  try {
-    await context.opts.queueProcessor?.finalizeRemovedEntry(carrier.current, 'user_cancel');
-  } catch (error) {
-    context.request.log.error(
-      { error, entryId: carrier.entryId },
-      'true recall committed; Queue record finalization deferred to recovery',
-    );
+  for (const entry of carrier.entries) {
+    context.opts.queueProcessor?.unregisterEntryCompleteHook(entry.id);
+    try {
+      await context.opts.queueProcessor?.finalizeRemovedEntry(entry, 'user_cancel');
+    } catch (error) {
+      context.request.log.error(
+        { error, entryId: entry.id },
+        'true recall committed; Queue record finalization deferred to recovery',
+      );
+    }
   }
 }
 
@@ -282,7 +253,7 @@ async function finalizeRecallResult(
   carrier: CarrierContext,
   preparation: RecallPreparation,
   reply: FastifyReply,
-  result: RecallMessageToComposerDraftCoordinatorResult,
+  result: RecallCommitResult,
 ) {
   if (result.kind === 'already_recalled') {
     return buildAlreadyRecalledResponse(context, result.message, preparation.indexLease);
@@ -326,11 +297,14 @@ export function createRecallMessageHandler(
     if (!resolved.ok) return resolved.body;
     const context = resolved.value;
     if (context.target.recall) return buildAlreadyRecalledResponse(context, context.target);
-    const carrier = await resolveCarrier(context, reply);
-    if (!carrier.ok) return carrier.body;
     const prepared = await prepareSuppression(context, reply);
     if (!prepared.ok) return prepared.body;
     const preparation = prepared.value;
+    const carrier = await resolveCarrier(context, reply);
+    if (!carrier.ok) {
+      await releasePreparation(context, preparation, 'queue_claim_rejected');
+      return carrier.body;
+    }
     const result = await commitRecall(context, carrier.value, preparation);
     return finalizeRecallResult(context, carrier.value, preparation, reply, result);
   };

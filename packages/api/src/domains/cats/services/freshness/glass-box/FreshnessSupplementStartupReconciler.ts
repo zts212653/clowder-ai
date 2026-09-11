@@ -1,4 +1,4 @@
-import type { FreshnessSupplementAggregate, FreshnessSupplementProjection } from '@cat-cafe/shared';
+import type { FreshnessSupplementAggregate, FreshnessSupplementProjection, MessageFrom } from '@cat-cafe/shared';
 import type { EnqueueResult } from '../../agents/invocation/InvocationQueue.js';
 import type { IMessageStore } from '../../stores/ports/MessageStore.js';
 import type { FreshnessClosureStore } from '../closure/FreshnessClosureStore.js';
@@ -13,11 +13,11 @@ interface StartupRecoveryLogger {
 interface SupplementQueueCarrier {
   threadId: string;
   userId: string;
+  kind: 'private_input';
   content: string;
-  source: 'agent';
+  from: MessageFrom;
   sourceCategory: 'freshness';
   targetCats: string[];
-  callerCatId: string;
   autoExecute: true;
   priority: 'normal';
   intent: 'execute';
@@ -34,7 +34,7 @@ interface SupplementQueueCarrier {
 export interface FreshnessSupplementStartupReconcilerDeps {
   closureStore: Pick<FreshnessClosureStore, 'listRecoverableSupplements' | 'commitSupplement' | 'failSupplement'>;
   messageStore: Pick<IMessageStore, 'getByIdempotencyKey'>;
-  enqueue(entry: SupplementQueueCarrier): EnqueueResult;
+  enqueue(entry: SupplementQueueCarrier): EnqueueResult | Promise<EnqueueResult>;
   executeThread(threadId: string): void | Promise<void>;
   onProjection?(projection: FreshnessSupplementProjection): void | Promise<void>;
   log: StartupRecoveryLogger;
@@ -53,11 +53,11 @@ function carrierFor(supplement: FreshnessSupplementAggregate): SupplementQueueCa
   return {
     threadId: supplement.threadId,
     userId: supplement.userId,
+    kind: 'private_input',
     content: `[Freshness Supplement ${supplement.id}] startup recovery`,
-    source: 'agent',
+    from: { kind: 'agent', catId: supplement.catId },
     sourceCategory: 'freshness',
     targetCats: [supplement.catId],
-    callerCatId: supplement.catId,
     autoExecute: true,
     priority: 'normal',
     intent: 'execute',
@@ -131,7 +131,7 @@ async function reconcileCandidate(
 
   let enqueueResult: EnqueueResult;
   try {
-    enqueueResult = deps.enqueue(carrierFor(candidate));
+    enqueueResult = await deps.enqueue(carrierFor(candidate));
   } catch {
     await failCandidate(deps, candidate, 'scheduler_unavailable', now);
     return { recoveredCommitted: 0, failed: 1, enqueued: 0 };

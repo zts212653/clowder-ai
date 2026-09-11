@@ -1,21 +1,16 @@
 'use client';
 
-import type { FreshnessCarrierCapability, MessageWorkDisposition } from '@cat-cafe/shared';
+import type { MessageWorkDisposition } from '@cat-cafe/shared';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type {
   MessageDispositionPreferenceController,
   MessageDispositionPreferenceScope,
 } from '@/hooks/useMessageDispositionPreference';
-import {
-  carrierCapabilityLabel,
-  type FreshnessCarrierSupport,
-  humanCarrierLabel,
-  unsupportedCarrierCopy,
-} from './message-disposition-presentation';
+import type { FreshnessCarrierSupport } from './message-disposition-presentation';
 
 const DISPOSITION_LABEL: Record<MessageWorkDisposition, string> = {
-  next_work: '下一件工作',
-  continue_current: '接着当前工作',
+  next_work: '排队等待',
+  continue_current: '立即发送，引导回复',
 };
 
 const SOURCE_LABEL: Record<MessageDispositionPreferenceController['source'], string> = {
@@ -34,14 +29,9 @@ const SCOPE_LABEL: Record<MessageDispositionPreferenceScope, string> = {
 interface MessageDispositionSelectorProps {
   controller: MessageDispositionPreferenceController;
   carrierSupport: FreshnessCarrierSupport;
-  carrierCapabilities: readonly (FreshnessCarrierCapability | undefined)[];
 }
 
-export function MessageDispositionSelector({
-  controller,
-  carrierSupport,
-  carrierCapabilities,
-}: MessageDispositionSelectorProps) {
+export function MessageDispositionSelector({ controller, carrierSupport }: MessageDispositionSelectorProps) {
   const [open, setOpen] = useState(false);
   const [scope, setScope] = useState<MessageDispositionPreferenceScope>('once');
   const [showOnboarding, setShowOnboarding] = useState(false);
@@ -60,9 +50,12 @@ export function MessageDispositionSelector({
     }
     return { disposition: controller.snapshot.productDefault, source: 'product' as const };
   }, [controller, scope]);
-  const displayedDisposition =
-    controller.effective === 'continue_current' && carrierSupport !== 'exact' ? 'next_work' : controller.effective;
-  const carrierCopy = unsupportedCarrierCopy(carrierSupport);
+  const carrierCopy =
+    carrierSupport === 'exact'
+      ? undefined
+      : carrierSupport === 'undeclared'
+        ? '能力未声明，发送时将按队列处理'
+        : '当前接入不支持引导当前回复，发送时将按队列处理';
 
   useEffect(() => {
     if (!open) return;
@@ -110,15 +103,15 @@ export function MessageDispositionSelector({
       <button
         type="button"
         data-testid="message-disposition-trigger"
+        data-disposition-source={controller.source}
         aria-haspopup="dialog"
         aria-expanded={open}
         onClick={toggle}
         className="inline-flex items-center gap-1.5 rounded-full border border-cafe bg-cafe-surface px-2.5 py-1 text-xs font-medium text-cafe-secondary transition-colors hover:bg-cafe-surface-elevated hover:text-cafe-primary"
-        title="选择这条消息进入当前工作，还是成为下一件工作"
+        title="选择默认消息分发方式"
       >
         <span className="h-1.5 w-1.5 rounded-full bg-[var(--color-cocreator-primary)]" aria-hidden />
-        <span>{DISPOSITION_LABEL[displayedDisposition]}</span>
-        <span className="text-cafe-muted">· {SOURCE_LABEL[controller.source]}</span>
+        <span>{DISPOSITION_LABEL[controller.effective]}</span>
         <span aria-hidden className="text-cafe-muted">
           {open ? '↑' : '↓'}
         </span>
@@ -128,34 +121,15 @@ export function MessageDispositionSelector({
         <div
           role="dialog"
           aria-label="选择消息去向"
-          className="absolute bottom-full left-4 z-50 mb-2 w-[min(24rem,calc(100vw-2rem))] rounded-2xl border border-cafe bg-cafe-surface p-3 shadow-lg"
+          className="absolute bottom-full left-4 z-50 mb-2 w-[min(20rem,calc(100vw-2rem))] rounded-xl border border-cafe bg-cafe-surface p-2.5 shadow-lg"
           data-testid="message-disposition-popover"
         >
-          <div className="mb-2">
-            <div className="text-sm font-semibold text-cafe-primary">这条消息要去哪？</div>
-            <p className="mt-1 text-micro text-cafe-muted" data-provider-carrier-capability>
-              {carrierCapabilities.length > 0
-                ? carrierCapabilities.map((c) => humanCarrierLabel(c)).join('；')
-                : humanCarrierLabel(undefined)}
-            </p>
-            {carrierCapabilities.length > 0 && carrierCapabilities.some((c) => c) && (
-              <details className="mt-0.5 text-micro text-cafe-muted">
-                <summary className="cursor-pointer select-none inline">接入详情</summary>
-                <span className="block ml-2 mt-0.5">{carrierCapabilities.map(carrierCapabilityLabel).join('；')}</span>
-              </details>
-            )}
-            {carrierCopy && <p className="mt-1 text-xs text-conn-amber-text">{carrierCopy}</p>}
-            {showOnboarding && (
-              <p
-                className="mt-1 text-xs leading-relaxed text-cafe-secondary"
-                data-testid="message-disposition-onboarding"
-              >
-                “下一件工作”会等当前轮结束；“接着当前工作”允许当前轮在安全断点读取，但不等于已经读到。
-              </p>
-            )}
+          <div className="mb-2 flex items-center justify-between gap-2 px-0.5">
+            <div className="text-sm font-medium text-cafe-primary">发送方式</div>
+            {controller.loading ? <span className="text-micro text-cafe-muted">同步中…</span> : null}
           </div>
 
-          <fieldset className="mb-2 flex rounded-xl bg-cafe-surface-sunken p-1" aria-label="偏好作用域">
+          <fieldset className="mb-2 flex rounded-lg bg-cafe-surface-sunken p-0.5" aria-label="偏好作用域">
             {(Object.keys(SCOPE_LABEL) as MessageDispositionPreferenceScope[]).map((candidate) => (
               <button
                 key={candidate}
@@ -163,7 +137,7 @@ export function MessageDispositionSelector({
                 data-disposition-scope={candidate}
                 aria-pressed={scope === candidate}
                 onClick={() => setScope(candidate)}
-                className={`flex-1 rounded-lg px-2 py-1.5 text-xs transition-colors ${
+                className={`flex-1 rounded-md px-2 py-1.5 text-xs transition-colors ${
                   scope === candidate
                     ? 'bg-cafe-surface-elevated font-medium text-cafe-primary shadow-sm'
                     : 'text-cafe-muted hover:text-cafe-secondary'
@@ -174,28 +148,24 @@ export function MessageDispositionSelector({
             ))}
           </fieldset>
 
-          <p className="mb-2 text-xs text-cafe-muted" data-testid="message-disposition-scope-state">
+          <p className="mb-2 px-0.5 text-micro text-cafe-muted" data-testid="message-disposition-scope-state">
             {scopeOverride
-              ? `本作用域已显式覆盖为「${DISPOSITION_LABEL[scopeOverride]}」`
-              : `本作用域未设置；继承当前有效值「${DISPOSITION_LABEL[inheritedEffective.disposition]}」（${SOURCE_LABEL[inheritedEffective.source]}）`}
+              ? `已设置 · ${DISPOSITION_LABEL[scopeOverride]}`
+              : `继承 ${SOURCE_LABEL[inheritedEffective.source]} · ${DISPOSITION_LABEL[inheritedEffective.disposition]}`}
           </p>
 
-          <div className="grid gap-2">
+          <div className="overflow-hidden rounded-lg border border-cafe">
             {(['next_work', 'continue_current'] as const).map((disposition) => (
               <button
                 key={disposition}
                 type="button"
                 data-disposition-option={disposition}
                 aria-pressed={scopeOverride === disposition}
-                disabled={controller.loading || (disposition === 'continue_current' && carrierSupport !== 'exact')}
+                disabled={controller.loading}
                 onClick={() => void choose(disposition)}
-                className={`flex items-start gap-2 rounded-xl border border-cafe px-3 py-2 text-left transition-colors hover:bg-cafe-surface-elevated disabled:opacity-60 ${
-                  controller.loading
-                    ? 'disabled:cursor-wait'
-                    : disposition === 'continue_current' && carrierSupport !== 'exact'
-                      ? 'disabled:cursor-not-allowed'
-                      : ''
-                }`}
+                className={`flex w-full items-center gap-2 px-3 py-2.5 text-left transition-colors first:border-b first:border-cafe hover:bg-cafe-surface-elevated disabled:opacity-60 ${
+                  scopeOverride === disposition ? 'bg-cafe-surface-sunken' : ''
+                } ${controller.loading ? 'disabled:cursor-wait' : ''}`}
               >
                 <span
                   className={`mt-1 h-2 w-2 flex-none rounded-full ${
@@ -205,24 +175,20 @@ export function MessageDispositionSelector({
                   }`}
                   aria-hidden
                 />
-                <span>
-                  <span className="block text-sm font-medium text-cafe-primary">{DISPOSITION_LABEL[disposition]}</span>
-                  <span className="mt-0.5 block text-xs leading-relaxed text-cafe-muted">
-                    {disposition === 'next_work'
-                      ? '当前轮不可见；当前轮结束后自然开始。'
-                      : carrierSupport === 'exact'
-                        ? '等待本轮在 provider safe-boundary 精确读取；未读到会自动转成下一件工作。'
-                        : carrierCopy}
-                  </span>
-                </span>
+                <span className="text-sm font-medium text-cafe-primary">{DISPOSITION_LABEL[disposition]}</span>
               </button>
             ))}
           </div>
 
-          <div className="mt-2 flex min-h-5 items-center justify-between gap-2">
-            <span className="text-micro text-cafe-muted">
-              {controller.loading ? '正在同步偏好…' : controller.error}
-            </span>
+          {carrierCopy ? <p className="mt-2 px-0.5 text-micro text-conn-amber-text">{carrierCopy}</p> : null}
+          {showOnboarding ? (
+            <p className="mt-1 px-0.5 text-micro text-cafe-muted" data-testid="message-disposition-onboarding">
+              选择可只用于本次，也可保存到 Thread 或全局。
+            </p>
+          ) : null}
+
+          <div className="mt-1 flex min-h-5 items-center justify-between gap-2 px-0.5">
+            <span className="text-micro text-conn-red-text">{controller.error}</span>
             {hasOverride && (
               <button
                 type="button"

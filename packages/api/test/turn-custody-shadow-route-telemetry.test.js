@@ -48,6 +48,36 @@ function assertRedactedIds(attributes, raw) {
 }
 
 describe('F167 Phase T route shadow telemetry', () => {
+  test('ordinary A2A dispatch bypasses the legacy turn-custody projection entirely', async () => {
+    const result = await runTurnCustodyRoute({
+      output: ['ordinary lifecycle-owned reply'],
+      triggerMessage: turnCustodyTriggerMessage('message-lifecycle-owned', 'thread-lifecycle-owned'),
+      wake: {
+        kind: 'structured',
+        protocol: 'dispatch',
+        subjectKey: 'ball:thread:thread-lifecycle-owned',
+        holderCatId: 'codex',
+        handoff: {
+          sourceEventId: 'route:message-lifecycle-owned:codex',
+          messageId: 'message-lifecycle-owned',
+          fromCatId: 'opus',
+        },
+      },
+      projection: {
+        state: 'covered_empty',
+        shouldBlock: false,
+        transitionObserved: false,
+        evidenceRefs: ['lifecycle:dispatch'],
+      },
+    });
+
+    assert.equal(result.projectionOpenCount, 0);
+    assert.equal(
+      exporter.getFinishedSpans().filter((span) => span.name === 'cat_cafe.a2a.turn_custody_shadow_sample').length,
+      0,
+    );
+  });
+
   test('emits a redacted bounded sample for unknown_legacy + agree_block', async () => {
     const threadId = 'raw-thread-agree-block';
     const messageId = 'raw-message-agree-block';

@@ -210,14 +210,6 @@ describe('markMessagesDelivered mentionsUser notification', () => {
           type: 'user',
           content: 'follow-up',
           timestamp: NOW,
-          extra: {
-            queueReceipt: {
-              version: 1,
-              entryId: 'entry-1',
-              targets: [{ catId: 'opus', state: 'queued' }],
-              reminderAttempts: [],
-            },
-          },
         },
         {
           id: 'later-reply',
@@ -237,26 +229,12 @@ describe('markMessagesDelivered mentionsUser notification', () => {
         catId: null,
         timestamp: NOW,
         timelineOrderAt: NOW,
-        extra: {
-          queueReceipt: {
-            version: 1,
-            entryId: 'entry-1',
-            targets: [
-              {
-                catId: 'opus',
-                state: 'handled',
-                invocationId: 'inv-1',
-                seenAt: NOW + 20,
-                outcome: {
-                  invocationId: 'inv-1',
-                  disposition: 'completed_with_turn',
-                  evidenceRef: { kind: 'invocation_lineage', invocationId: 'inv-1' },
-                  handledAt: NOW + 50,
-                },
-              },
-            ],
-            reminderAttempts: [],
-          },
+        lifecycle: {
+          kind: 'input',
+          orderKey: `${NOW}:queued-user`,
+          dispatchRefs: [
+            { targetId: 'opus', phase: 'settled', statusMessageId: 'response-inv-1', dispatchedAt: NOW + 20 },
+          ],
         },
       },
     ]);
@@ -264,9 +242,10 @@ describe('markMessagesDelivered mentionsUser notification', () => {
     const messages = useChatStore.getState().messages;
     expect(messages.map((message) => message.id)).toEqual(['queued-user', 'later-reply']);
     expect(messages[0]?.deliveredAt).toBe(NOW + 50);
-    expect(messages[0]?.extra?.queueReceipt?.targets[0]).toMatchObject({
-      state: 'handled',
-      seenAt: NOW + 20,
+    expect(messages[0]?.lifecycle?.dispatchRefs?.[0]).toMatchObject({
+      targetId: 'opus',
+      phase: 'settled',
+      dispatchedAt: NOW + 20,
     });
   });
 });

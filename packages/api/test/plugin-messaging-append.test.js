@@ -5,6 +5,7 @@
  */
 import assert from 'node:assert/strict';
 import { beforeEach, describe, test } from 'node:test';
+import { canonicalTestMessageInput } from './helpers/message-from-fixtures.js';
 
 let memory;
 let handlesMod;
@@ -297,14 +298,16 @@ describe('AppendService — validation and lock guards (§4d)', () => {
   });
 
   test('a raw non-plugin message id is not an issued message handle', async () => {
-    const user = messageStore.append({
-      userId: 'user-1',
-      catId: null,
-      content: 'human words',
-      mentions: [],
-      timestamp: Date.now(),
-      threadId: 'thread-1',
-    });
+    const user = messageStore.append(
+      canonicalTestMessageInput({
+        userId: 'user-1',
+        catId: null,
+        content: 'human words',
+        mentions: [],
+        timestamp: Date.now(),
+        threadId: 'thread-1',
+      }),
+    );
     await expectCode(service.appendElements(CTX, appendInput(user.id)), 'NOT_FOUND');
   });
 

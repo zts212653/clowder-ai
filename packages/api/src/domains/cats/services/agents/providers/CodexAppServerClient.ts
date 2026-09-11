@@ -6,6 +6,8 @@ import type {
 import type { CodexNativeResumeReplacementProvenance } from '../../runtime-session/CodexSessionReplacementProvenance.js';
 import type {
   AgentCarrierSession,
+  AgentClientActiveRunDispatchRegistration,
+  AgentClientActiveRunHandle,
   PreparedProviderRequestV1,
   ProviderCompactionObservation,
   ProviderContinuityEvidence,
@@ -108,6 +110,8 @@ export interface CodexAppServerRunInput {
       readonly developer_instructions?: string | null;
     };
   };
+  /** F306: one provider-neutral interaction surface bound to this exact invocation. */
+  runtimeInteraction?: Omit<CodexRuntimeInteractionContext, 'signal'>;
   imagePaths?: readonly string[];
   signal?: AbortSignal;
   /** Inactivity timeout. Zero keeps the F118 manual-cancel-only default. */
@@ -132,8 +136,8 @@ export interface CodexAppServerRunInput {
   /** F299: recovery has no user message, but its application context is still model-visible input. */
   prepareRecoveryRequest?: (recoveryInstruction: string) => PreparedProviderRequestV1;
   beforeProviderLaunch?: (request: PreparedProviderRequestV1) => Promise<ProviderRequestGenerationCommitV1>;
-  /** F306: one provider-neutral interaction surface bound to this exact invocation. */
-  runtimeInteraction?: Omit<CodexRuntimeInteractionContext, 'signal'>;
+  /** #1354: lifecycle-owned registration for this exact accepted provider turn. */
+  activeRunDispatch?: AgentClientActiveRunDispatchRegistration;
 }
 
 export interface CodexAppServerClientDeps {
@@ -214,6 +218,8 @@ export class CodexAppServerClient {
     let latestUsage: JsonObject | null = null;
     let activeThreadId: string | null = null;
     let activeTurnId: string | null = null;
+    let activeRunDispatchOpen = false;
+    let releaseActiveRunDispatch: (() => void) | undefined;
     let transportDisposition: 'release' | 'evict' = 'release';
     const timeoutMs = Math.max(0, input.timeoutMs ?? 0);
     const interruptGraceMs = Math.max(0, input.interruptGraceMs ?? DEFAULT_INTERRUPT_GRACE_MS);
@@ -248,7 +254,17 @@ export class CodexAppServerClient {
         startParams: buildCodexAppServerThreadParams(input),
         requireExactResume: Boolean(recoveryInstruction),
         ...(input.resumeReplacement ? { resumeReplacement: input.resumeReplacement } : {}),
-        localLiveLease: this.deps.wire.reusedSessionHost === true,
+        // A reused session-affinity host (`wire.reusedSessionHost`) is the owner
+        // host resolveHostEntry returned WITHOUT an active lease — the prior lease
+        // already released. The genuine live-lease case (owner.lease.sessionId ===
+        // sessionId) throws in resolveHostEntry and never reaches here, so an
+        // active-writer conflict on this path is never our own live lease; it is a
+        // zombie writer stranded on the warm host after the previous turn. Report
+        // no live lease so provenance remains honest and the writer classifies as
+        // native_active_turn_without_local_lease. Host retirement is a separate,
+        // still-deferred recovery decision; this signal correction alone does not
+        // move the retry onto a fresh host.
+        localLiveLease: false,
         request: (method, params) => this.request(method, params),
         now: this.deps.now ?? Date.now,
       });
@@ -345,6 +361,50 @@ export class CodexAppServerClient {
         this.lifecycle.transition('turn_accepted', { threadId, turnId: activeTurnId, turnAccepted: true }),
       );
       this.lifecycle.armInactivityTimeout(timeoutMs, timeoutHandler);
+      if (input.activeRunDispatch) {
+        const invocationId = input.activeRunDispatch.invocationId;
+        const handle: AgentClientActiveRunHandle = {
+          provider: 'openai_codex',
+          carrier: 'codex_app_server',
+          threadId,
+          turnId: activeTurnId,
+        };
+        activeRunDispatchOpen = true;
+        const release = input.activeRunDispatch.register({
+          invocationId,
+          capabilities: { append: true, steer: true },
+          handle,
+          dispatch: async (dispatchInput, options) => {
+            if (options.expectedInvocationId !== invocationId) {
+              return { accepted: false, reason: 'active_run_mismatch' };
+            }
+            if (!activeRunDispatchOpen || activeThreadId !== threadId || activeTurnId !== handle.turnId) {
+              return { accepted: false, reason: 'active_run_closed' };
+            }
+            const text = dispatchInput.text.trim();
+            const imagePaths = dispatchInput.imagePaths?.filter((path) => path.length > 0) ?? [];
+            if (!text && imagePaths.length === 0) return { accepted: false, reason: 'invalid_input' };
+            try {
+              const result = asCodexAppServerRecord(
+                await this.request('turn/steer', {
+                  threadId,
+                  expectedTurnId: handle.turnId,
+                  input: [
+                    ...(text ? [{ type: 'text', text: dispatchInput.text }] : []),
+                    ...imagePaths.map((path) => ({ type: 'localImage', path })),
+                  ],
+                }),
+              );
+              return result?.turnId === handle.turnId
+                ? { accepted: true, handle }
+                : { accepted: false, reason: 'active_run_mismatch' };
+            } catch {
+              return { accepted: false, reason: 'provider_rejected' };
+            }
+          },
+        });
+        if (typeof release === 'function') releaseActiveRunDispatch = release;
+      }
       if (input.signal?.aborted) {
         void this.lifecycle.interrupt(threadId, activeTurnId, 'user_cancel', interruptGraceMs);
       }
@@ -420,6 +480,11 @@ export class CodexAppServerClient {
         if (mapped?.type === 'turn.completed' && latestUsage) mapped.usage = latestUsage;
         if (mapped) yield mapped;
         if (record?.method === 'turn/completed') {
+          activeRunDispatchOpen = false;
+          // A provider-authored turn terminal is the normal lifetime boundary
+          // for any outstanding runtime interaction. Close it before transport
+          // teardown so a later EOF cannot relabel routine completion as an
+          // unexpected transport loss.
           runtimeInteraction?.close('provider_cancelled');
           try {
             await this.deps.freshnessController?.markTurnCompleted(activeTurnId);
@@ -465,6 +530,10 @@ export class CodexAppServerClient {
       if (failed) yield this.lifecycle.event(failed);
       throw failure;
     } finally {
+      activeRunDispatchOpen = false;
+      releaseActiveRunDispatch?.();
+      // Idempotent with the turn/completed and abort paths. This also settles
+      // interactions when setup exits before a provider turn can be bound.
       runtimeInteraction?.close('provider_cancelled');
       const { closing, closed } = await closeCodexAppServerTransport(
         this.deps.wire,

@@ -10,6 +10,7 @@ import { describe, it } from 'node:test';
 import Fastify from 'fastify';
 import { MessageStore } from '../dist/domains/cats/services/stores/ports/MessageStore.js';
 import { messageActionsRoutes } from '../dist/routes/message-actions.js';
+import { canonicalTestMessageInput } from './helpers/message-from-fixtures.js';
 
 function createMockSocketManager() {
   const events = [];
@@ -28,14 +29,16 @@ function seedMessages(store) {
   const msgs = [];
   for (let i = 0; i < 5; i++) {
     msgs.push(
-      store.append({
-        userId: 'user-1',
-        catId: null,
-        content: `message ${i}`,
-        mentions: ['opus'],
-        timestamp: 1000 + i,
-        threadId: 'thread-sd',
-      }),
+      store.append(
+        canonicalTestMessageInput({
+          userId: 'user-1',
+          catId: null,
+          content: `message ${i}`,
+          mentions: ['opus'],
+          timestamp: 1000 + i,
+          threadId: 'thread-sd',
+        }),
+      ),
     );
   }
   return msgs;
@@ -530,14 +533,16 @@ describe('Authorization: DELETE /api/messages/:id', () => {
     const messageStore = new MessageStore();
     const socketManager = createMockSocketManager();
     // Add a message from a different user
-    const catMsg = messageStore.append({
-      userId: 'cat-opus',
-      catId: 'opus',
-      content: 'cat reply',
-      mentions: [],
-      timestamp: 2000,
-      threadId: 'thread-sd',
-    });
+    const catMsg = messageStore.append(
+      canonicalTestMessageInput({
+        userId: 'cat-opus',
+        catId: 'opus',
+        content: 'cat reply',
+        mentions: [],
+        timestamp: 2000,
+        threadId: 'thread-sd',
+      }),
+    );
     const threadStore = createMockThreadStore({
       'thread-sd': { id: 'thread-sd', title: 'T', createdBy: 'user-1', participants: [] },
     });

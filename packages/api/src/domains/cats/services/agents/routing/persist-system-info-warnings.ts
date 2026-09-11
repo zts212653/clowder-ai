@@ -5,94 +5,12 @@ import {
   isCloudBridgeOutboundReceiptV1,
 } from '@cat-cafe/shared';
 import { createModuleLogger } from '../../../../../infrastructure/logger.js';
+import { messageFrom } from '../../stores/message-from.js';
 import type { IMessageStore } from '../../stores/ports/MessageStore.js';
 import { resolveVisibleReplyParent } from '../../stores/visibility.js';
 import type { PersistenceContext } from './route-helpers.js';
 
 const log = createModuleLogger('route-system-info-persistence');
-
-const SESSION_ROLLOVER_STATUSES = new Set(['pending', 'succeeded', 'failed']);
-const SESSION_ROLLOVER_REASONS = new Set(['oversized_retire', 'resume_rejected']);
-const SESSION_ROLLOVER_FAILURE_STAGES = new Set([
-  'seal_request',
-  'seal_finalize',
-  'replacement_create',
-  'replacement_bind',
-]);
-
-interface SessionRolloverNoticeMetadata {
-  readonly rolloverId: string;
-  readonly status: 'pending' | 'succeeded' | 'failed';
-  readonly reason: 'oversized_retire' | 'resume_rejected';
-  readonly failureStage?: 'seal_request' | 'seal_finalize' | 'replacement_create' | 'replacement_bind';
-}
-
-function parseSessionRolloverNotice(parsed: {
-  type?: unknown;
-  v?: unknown;
-  rolloverId?: unknown;
-  status?: unknown;
-  reason?: unknown;
-  failureStage?: unknown;
-}):
-  | {
-      content: string;
-      connector: string;
-      label: string;
-      icon: string;
-      tone: 'info' | 'warning';
-      idempotencyKey: string;
-      sessionRollover: SessionRolloverNoticeMetadata;
-    }
-  | undefined {
-  if (parsed.type !== 'session_rollover_lifecycle' || parsed.v !== 1) return undefined;
-  if (
-    typeof parsed.rolloverId !== 'string' ||
-    parsed.rolloverId.length === 0 ||
-    parsed.rolloverId.length > 160 ||
-    !/^[A-Za-z0-9][A-Za-z0-9._:-]*$/.test(parsed.rolloverId)
-  ) {
-    return undefined;
-  }
-  if (typeof parsed.status !== 'string' || !SESSION_ROLLOVER_STATUSES.has(parsed.status)) return undefined;
-  if (typeof parsed.reason !== 'string' || !SESSION_ROLLOVER_REASONS.has(parsed.reason)) return undefined;
-  if (parsed.status === 'failed') {
-    if (typeof parsed.failureStage !== 'string' || !SESSION_ROLLOVER_FAILURE_STAGES.has(parsed.failureStage)) {
-      return undefined;
-    }
-  } else if (parsed.failureStage !== undefined) {
-    return undefined;
-  }
-
-  const status = parsed.status as SessionRolloverNoticeMetadata['status'];
-  const reason = parsed.reason as SessionRolloverNoticeMetadata['reason'];
-  const failureStage = parsed.failureStage as SessionRolloverNoticeMetadata['failureStage'];
-  const content =
-    status === 'pending'
-      ? reason === 'oversized_retire'
-        ? '正在封存上下文载荷过大的原生会话，并准备冷启动替代会话…'
-        : '正在封存无法恢复的原生会话，并准备冷启动替代会话…'
-      : status === 'succeeded'
-        ? reason === 'oversized_retire'
-          ? '原生会话因上下文载荷过大已自动封存；已切换到新的冷启动会话。'
-          : '无法恢复的原生会话已自动封存；已切换到新的冷启动会话。'
-        : '原生会话自动封存与冷切换失败；本轮已在发送新 prompt 前停止。';
-
-  return {
-    content,
-    connector: 'session-rollover-lifecycle',
-    label: '会话冷切换',
-    icon: status === 'failed' ? '⚠️' : '♻️',
-    tone: status === 'failed' ? 'warning' : 'info',
-    idempotencyKey: `session-rollover:${parsed.rolloverId}:${status}`,
-    sessionRollover: {
-      rolloverId: parsed.rolloverId,
-      status,
-      reason,
-      ...(failureStage ? { failureStage } : {}),
-    },
-  };
-}
 
 function projectOutboundReceipt(value: unknown): CloudBridgeOutboundReceiptV1 | undefined {
   if (!isCloudBridgeOutboundReceiptV1(value)) return undefined;
@@ -131,7 +49,6 @@ function parseVisibleNotice(
       outboundReceipt?: CloudBridgeOutboundReceiptV1;
       needsBindingRecovery?: boolean;
       idempotencyKey?: string;
-      sessionRollover?: SessionRolloverNoticeMetadata;
     }
   | undefined {
   try {
@@ -145,9 +62,10 @@ function parseVisibleNotice(
       message?: unknown;
       outboundReceipt?: unknown;
     };
-    if (parsed.type === 'session_rollover_lifecycle') {
-      return parseSessionRolloverNotice(parsed);
-    }
+    // Session rollover is provider execution detail. The response lifecycle
+    // bubble owns its processing/terminal state, so never append a parallel
+    // system row for pending, success, or failure.
+    if (parsed.type === 'session_rollover_lifecycle') return undefined;
     if (typeof parsed.message !== 'string') return undefined;
     if (parsed.type === 'warning') {
       return {
@@ -199,6 +117,18 @@ export function userFacingSystemInfoNoticeContent(content: string, catId: string
   return parseVisibleNotice(content, catId)?.content;
 }
 
+function normalizedFailureText(value: string): string {
+  return value.replace(/^(?:⚠️\s*|Error:\s*)+/u, '').trim();
+}
+
+function duplicatesTerminalFailure(notice: VisibleNotice, terminalFailureText: string | undefined): boolean {
+  return (
+    notice.connector === 'system-warning' &&
+    typeof terminalFailureText === 'string' &&
+    normalizedFailureText(terminalFailureText).includes(normalizedFailureText(notice.content))
+  );
+}
+
 async function appendVisibleNotice(
   messageStore: IMessageStore,
   threadId: string,
@@ -231,8 +161,8 @@ async function appendVisibleNotice(
         }
       : undefined;
   await messageStore.append({
+    from: { kind: 'system', service: 'system-info-warning' },
     userId: 'system',
-    catId: null,
     threadId,
     content: notice.content,
     mentions: [],
@@ -246,7 +176,6 @@ async function appendVisibleNotice(
       meta: {
         presentation: 'system_notice',
         noticeTone: notice.tone,
-        ...(notice.sessionRollover ? { sessionRollover: notice.sessionRollover } : {}),
         ...(outboundReceipt ? { cloudBridgeOutboundReceipt: outboundReceipt } : {}),
         ...(cloudBridgeRecovery ? { cloudBridgeRecovery } : {}),
       },
@@ -288,10 +217,11 @@ async function validateOutboundReceipt(args: {
   });
   if (!source) return undefined;
 
+  const from = messageFrom(source);
   const senderMatches =
     receipt.sourceSender.kind === 'user'
-      ? source.catId === null && source.userId === receipt.sourceSender.id
-      : source.catId === createCatId(receipt.sourceSender.id);
+      ? from.kind === 'user' && from.userId === receipt.sourceSender.id
+      : from.kind === 'agent' && from.catId === createCatId(receipt.sourceSender.id);
   if (!senderMatches) return undefined;
   if (receipt.sourceSender.invocationId) {
     const storedInvocationIds = new Set(
@@ -325,6 +255,8 @@ export async function persistUserFacingSystemInfoNotices(options: {
   contents: readonly string[];
   expectedSourceMessageId?: string;
   expectedDispatchInvocationId?: string;
+  /** Exact provider failure already persisted in the lifecycle response body. */
+  terminalFailureText?: string;
   persistenceContext?: PersistenceContext;
 }): Promise<void> {
   const {
@@ -334,12 +266,14 @@ export async function persistUserFacingSystemInfoNotices(options: {
     contents,
     expectedSourceMessageId,
     expectedDispatchInvocationId,
+    terminalFailureText,
     persistenceContext,
   } = options;
 
   for (const content of contents) {
     const notice = parseVisibleNotice(content, catId);
     if (notice == null) continue;
+    if (duplicatesTerminalFailure(notice, terminalFailureText)) continue;
 
     try {
       await appendVisibleNotice(

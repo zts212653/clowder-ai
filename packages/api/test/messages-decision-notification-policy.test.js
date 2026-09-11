@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { shouldMarkDecisionNotification } from '../dist/routes/messages.js';
+import { shouldMarkDecisionNotification } from '../dist/domains/cats/services/push/decision-notification-policy.js';
 
 describe('messages decision notification policy', () => {
   it('marks review/merge contexts as decision-required', () => {

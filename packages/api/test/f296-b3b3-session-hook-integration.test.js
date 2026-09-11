@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
 import Fastify from 'fastify';
+import { canonicalTestMessageInput } from './helpers/message-from-fixtures.js';
 
 const { ContextEpochOwner, contextEpochScopeKey } = await import(
   '../dist/domains/cats/services/session/ContextEpochOwner.js'
@@ -97,22 +98,26 @@ describe('F296 B3b-3: authenticated PreCompact → epoch → post-compact packet
 
     const messageStore = new MessageStore();
     const deliveryCursorStore = new DeliveryCursorStore();
-    const alreadyRead = messageStore.append({
-      threadId: SCOPE.threadId,
-      userId: SCOPE.userId,
-      catId: null,
-      content: 'READ-HISTORY-MUST-NOT-REPLAY',
-      mentions: [],
-      timestamp: 1_000,
-    });
-    messageStore.append({
-      threadId: SCOPE.threadId,
-      userId: SCOPE.userId,
-      catId: null,
-      content: 'UNREAD-TAIL-MUST-RETURN',
-      mentions: [],
-      timestamp: 2_000,
-    });
+    const alreadyRead = messageStore.append(
+      canonicalTestMessageInput({
+        threadId: SCOPE.threadId,
+        userId: SCOPE.userId,
+        catId: null,
+        content: 'READ-HISTORY-MUST-NOT-REPLAY',
+        mentions: [],
+        timestamp: 1_000,
+      }),
+    );
+    messageStore.append(
+      canonicalTestMessageInput({
+        threadId: SCOPE.threadId,
+        userId: SCOPE.userId,
+        catId: null,
+        content: 'UNREAD-TAIL-MUST-RETURN',
+        mentions: [],
+        timestamp: 2_000,
+      }),
+    );
     const deliveryBoundary = cursorFor(alreadyRead);
     await deliveryCursorStore.ackCursor(SCOPE.userId, SCOPE.catId, SCOPE.threadId, deliveryBoundary);
     await deliveryCursorStore.ackSeenCursor(SCOPE.userId, SCOPE.catId, SCOPE.threadId, deliveryBoundary);

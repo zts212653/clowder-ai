@@ -37,7 +37,7 @@ export interface InvocationOwnerReaperOptions {
   /** Queue reservations whose tracker owner was installed but later disappeared. */
   listStaleProcessingLeases?: (now?: number) => StaleProcessingOwnerLease[];
   /** Pre-provider reservations are safe to recover without probing provider lifecycle. */
-  reapStalePrestartReservations?: (now?: number) => number;
+  reapStalePrestartReservations?: (now?: number) => number | Promise<number>;
   ownerLeaseTtlMs?: number;
   now?: () => number;
   log: InvocationOwnerReaperLog;
@@ -82,7 +82,7 @@ export class InvocationOwnerReaper {
   async runOnce(): Promise<InvocationOwnerReaperRunResult> {
     const now = this.now();
     const result = emptyResult();
-    result.prestartReaped = this.options.reapStalePrestartReservations?.(now) ?? 0;
+    result.prestartReaped = (await this.options.reapStalePrestartReservations?.(now)) ?? 0;
     const candidates = await this.collectCandidates(now, result);
     result.scanned = candidates.length;
 

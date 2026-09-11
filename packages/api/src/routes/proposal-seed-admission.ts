@@ -1,15 +1,15 @@
 import type { CatId, MessageContent } from '@cat-cafe/shared';
-import type { InvocationQueue, QueueEntry } from '../domains/cats/services/agents/invocation/InvocationQueue.js';
+import type { InvocationQueue } from '../domains/cats/services/agents/invocation/InvocationQueue.js';
 import type { OwnerAuthProvenance } from '../domains/cats/services/agents/invocation/owner-auth-provenance.js';
-import { createInitialQueuedMessageCustody } from '../domains/cats/services/agents/invocation/QueuedMessageCustodyCoordinator.js';
 import type { QueueProcessor } from '../domains/cats/services/agents/invocation/QueueProcessor.js';
+import { messageFrom } from '../domains/cats/services/stores/message-from.js';
 import type { IMessageStore, StoredMessage } from '../domains/cats/services/stores/ports/MessageStore.js';
 import type { IThreadStore } from '../domains/cats/services/stores/ports/ThreadStore.js';
 import type { SocketManager } from '../infrastructure/websocket/index.js';
 import type { AppendApprovedInitialMessageResult } from './proposal-approve-dispatch.js';
 import { admitThreadParticipants } from './thread-participant-admission.js';
 
-type ProposalInvocationQueue = Pick<InvocationQueue, 'enqueue' | 'backfillMessageId' | 'rollbackEnqueue'>;
+type ProposalInvocationQueue = Pick<InvocationQueue, 'appendAndEnqueueDurable' | 'enqueueExistingMessageDurable'>;
 type ProposalQueueProcessor = Pick<QueueProcessor, 'processNext'>;
 
 /**
@@ -51,64 +51,6 @@ export async function resolveSourceContentBlocks(
     // the dispatch. The text envelope is sufficient to wake the assigned cat.
   }
   return undefined;
-}
-
-export interface ExistingSeedAdmissionResult {
-  kind: 'complete' | 'admitted' | 'failed';
-  messageId: string;
-  warning?: string;
-}
-
-/**
- * #1406 B1 Part 2: a previously materialized seed (e.g. from a queue-full
- * fallback append, or a legacy row written before the idempotency-key index)
- * must be atomically admitted into the queue so it can be driven to a terminal
- * delivery state. Without this, the seed stays in the ambiguous
- * undefined-deliveryStatus state forever and every reconcile retries a brand-new
- * enqueue, risking duplicate invocations once the queue has space.
- */
-export async function ensureExistingSeedAdmitted(
-  existingSeed: StoredMessage,
-  entry: QueueEntry,
-  messageStore: IMessageStore,
-): Promise<ExistingSeedAdmissionResult> {
-  if (existingSeed.deliveryStatus === 'delivered' || existingSeed.deliveryStatus === 'canceled') {
-    return { kind: 'complete', messageId: existingSeed.id };
-  }
-
-  if (existingSeed.deliveryStatus === 'queued' && existingSeed.queueCustody) {
-    return { kind: 'admitted', messageId: existingSeed.id };
-  }
-
-  if (existingSeed.deliveryStatus !== 'queued') {
-    const prepared = await messageStore.prepareQueueAdmission(existingSeed.id);
-    if (prepared.kind === 'conflict') {
-      // A concurrent transition may have finished the seed; refresh once.
-      const refreshed = await messageStore.getById(existingSeed.id);
-      if (refreshed?.deliveryStatus === 'delivered' || refreshed?.deliveryStatus === 'canceled') {
-        return { kind: 'complete', messageId: refreshed.id };
-      }
-      return {
-        kind: 'failed',
-        messageId: existingSeed.id,
-        warning: 'existing seed could not be admitted to queue',
-      };
-    }
-  }
-
-  if (!existingSeed.queueCustody) {
-    const custody = createInitialQueuedMessageCustody(entry);
-    const initialized = await messageStore.initializeQueueCustody(existingSeed.id, custody);
-    if (initialized.kind !== 'initialized' && initialized.kind !== 'existing') {
-      return {
-        kind: 'failed',
-        messageId: existingSeed.id,
-        warning: 'existing seed custody initialization failed',
-      };
-    }
-  }
-
-  return { kind: 'admitted', messageId: existingSeed.id };
 }
 
 /**
@@ -195,16 +137,60 @@ export async function executeQueuedDispatch({
   existingSeed,
 }: ExecuteQueuedDispatchInput): Promise<AppendApprovedInitialMessageResult> {
   const idempotencyKey = `proposal-initial:${proposalId}`;
-  const enqueueResult = invocationQueue.enqueue({
-    threadId,
-    userId,
-    ownerAuthProvenance,
-    idempotencyKey,
-    content,
-    source: 'user',
-    targetCats: targetCats as CatId[],
-    intent: intentName,
-  });
+  const from = sourceCatId ? ({ kind: 'agent', catId: sourceCatId } as const) : ({ kind: 'user', userId } as const);
+  let enqueueResult: Awaited<ReturnType<ProposalInvocationQueue['appendAndEnqueueDurable']>>;
+  if (existingSeed) {
+    try {
+      enqueueResult = await invocationQueue.enqueueExistingMessageDurable(messageStore, existingSeed.id, {
+        from: messageFrom(existingSeed),
+        threadId,
+        userId,
+        kind: 'conversation_input',
+        ownerAuthProvenance,
+        content: existingSeed.content,
+        messageId: existingSeed.id,
+        sourceId: existingSeed.id,
+        targetCats: targetCats as CatId[],
+        intent: intentName,
+      });
+    } catch (error) {
+      // The ledger admission and Message transition are one CAS. If another
+      // worker terminalized the seed after our reconcile read, the losing
+      // admission leaves no orphan row and should converge as a clean replay.
+      const refreshed = await messageStore.getById(existingSeed.id);
+      if (refreshed?.deliveryStatus === 'delivered' || refreshed?.deliveryStatus === 'canceled') {
+        return { messageId: refreshed.id };
+      }
+      throw error;
+    }
+  } else {
+    enqueueResult = await invocationQueue.appendAndEnqueueDurable(
+      messageStore,
+      {
+        from,
+        userId,
+        content,
+        mentions: [...targetCats],
+        timestamp: Date.now(),
+        threadId,
+        idempotencyKey,
+        deliveryStatus: 'queued',
+        extra: crossPostExtra,
+        contentBlocks: sourceContentBlocks,
+      },
+      {
+        from,
+        threadId,
+        userId,
+        kind: 'conversation_input',
+        ownerAuthProvenance,
+        idempotencyKey,
+        content,
+        targetCats: targetCats as CatId[],
+        intent: intentName,
+      },
+    );
+  }
 
   if (enqueueResult.outcome === 'full' || !enqueueResult.entry) {
     // Queue-full: if we already have a materialized seed (legacy or prior
@@ -218,8 +204,8 @@ export async function executeQueuedDispatch({
       };
     }
     const stored = await messageStore.append({
+      from,
       userId,
-      catId: sourceCatId ?? null, // AC-AA4
       content,
       mentions: [...targetCats],
       timestamp: Date.now(),
@@ -234,48 +220,7 @@ export async function executeQueuedDispatch({
     };
   }
 
-  let storedMessageId = enqueueResult.entry.messageId ?? null;
-  if (!enqueueResult.deduped || !storedMessageId) {
-    // A prior queue-full or failed-persistence attempt may have already
-    // materialized the seed. Reuse it atomically instead of appending a second
-    // message.
-    const seedToAdmit = existingSeed ?? (await messageStore.getByIdempotencyKey(userId, threadId, idempotencyKey));
-    if (seedToAdmit) {
-      const admission = await ensureExistingSeedAdmitted(seedToAdmit, enqueueResult.entry, messageStore);
-      if (admission.kind === 'complete') {
-        // #1406 B1: the queue carrier was created but the seed is already terminal.
-        // Roll it back so we do not leave an orphan queue entry behind.
-        invocationQueue.rollbackEnqueue(threadId, userId, enqueueResult.entry.id);
-        return { messageId: admission.messageId };
-      }
-      if (admission.kind === 'failed') {
-        invocationQueue.rollbackEnqueue(threadId, userId, enqueueResult.entry.id);
-        return { messageId: admission.messageId, warning: admission.warning };
-      }
-      storedMessageId = admission.messageId;
-    } else {
-      try {
-        const stored = await messageStore.append({
-          userId,
-          catId: sourceCatId ?? null, // AC-AA4
-          content,
-          mentions: [...targetCats],
-          timestamp: Date.now(),
-          threadId,
-          idempotencyKey,
-          deliveryStatus: 'queued',
-          queueCustody: createInitialQueuedMessageCustody(enqueueResult.entry),
-          extra: crossPostExtra, // AC-AA5
-          contentBlocks: sourceContentBlocks,
-        });
-        storedMessageId = stored.id;
-      } catch (err) {
-        invocationQueue.rollbackEnqueue(threadId, userId, enqueueResult.entry.id);
-        throw err;
-      }
-    }
-    invocationQueue.backfillMessageId(threadId, userId, enqueueResult.entry.id, storedMessageId);
-  }
+  const storedMessageId = enqueueResult.message.id;
 
   // F128 owns the final dispatch plan: preferredCats ordering and explicit
   // parallel intent can differ from raw-message mentions. Admit only those

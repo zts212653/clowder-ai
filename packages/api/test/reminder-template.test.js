@@ -216,3 +216,47 @@ describe('reminderTemplate firePolicy activation guard (F167 Phase M — codex P
     assert.equal(spec.firePolicy, undefined);
   });
 });
+
+describe('reminderTemplate managed-hold terminal visibility', () => {
+  it('cancels the hidden timer wake and persists one visible status when urgent admission fails', async () => {
+    const delivered = [];
+    const cancelled = [];
+    const taskId = 'hold-ball-1748000000-trigger-failure';
+    const spec = reminderTemplate.createSpec(taskId, {
+      trigger: { type: 'once', fireAt: 9_999_999_999_000 },
+      params: {
+        message: 'continue after wait',
+        targetCatId: 'codex',
+        triggerUserId: 'user-1',
+        holdLifecycle: { mode: 'timer', status: 'active' },
+      },
+      deliveryThreadId: 'thread-1',
+    });
+
+    await spec.run.execute('continue after wait', 'thread-thread-1', {
+      assignedCatId: 'codex',
+      deliver: async (input) => {
+        delivered.push(input);
+        return delivered.length === 1 ? 'wake-message-1' : 'status-message-1';
+      },
+      cancelQueuedDelivery: async (messageId) => {
+        cancelled.push(messageId);
+        return true;
+      },
+      invokeTrigger: {
+        async trigger() {
+          throw new Error('queue admission rejected');
+        },
+      },
+    });
+
+    assert.deepEqual(cancelled, ['wake-message-1']);
+    assert.equal(delivered.length, 2);
+    assert.equal(delivered[0].deliveryStatus, 'queued');
+    assert.equal(delivered[0].idempotencyKey, `hold-ball-wake:${taskId}`);
+    assert.equal(delivered[1].idempotencyKey, `hold-ball-wake-failed:${taskId}`);
+    assert.equal(delivered[1].source.meta.phase, 'status');
+    assert.match(delivered[1].content, /唤醒入队失败/);
+    assert.match(delivered[1].content, /queue admission rejected/);
+  });
+});

@@ -6,11 +6,15 @@
 
 import { resolve } from 'node:path';
 import {
+  CAT_CARRIERS,
+  type CatCarrier,
   type CatConfig,
   type CatId,
   type CliConfig,
   type ClientId,
+  catClientSupportsCarrier,
   catRegistry,
+  type FreshnessCarrierCapability,
   getCliEffortOptionsForProvider,
   getDefaultCliEffortForProvider,
   normalizeCliEffortForProvider,
@@ -34,13 +38,13 @@ import { resolveBoundAccountRefForCat } from '../config/cat-account-binding.js';
 import { bootstrapCatCatalog } from '../config/cat-catalog-store.js';
 import {
   getAcpConfig,
+  getDefaultCatId,
   getRoster,
   loadCatConfig,
   loadResolvedCatConfig,
   toAllCatConfigs,
 } from '../config/cat-config-loader.js';
 import { getCatModel } from '../config/cat-models.js';
-import { resolveCodexCarrierTruth } from '../config/codex-cli.js';
 import { configEventBus, createChangeSetId } from '../config/config-event-bus.js';
 import { getConfiguredMemberWindowSetting, resolveContextCapacity } from '../config/context-capacity.js';
 import { inferOpenCodeProviderFromModelName } from '../config/opencode-model.js';
@@ -65,9 +69,8 @@ const cliSchema = z.object({
   effort: cliEffortSchema.nullable().optional(),
   /** F291: null clears the member default and restores Codex user-config inheritance. */
   serviceTier: z.enum(['standard', 'fast']).nullable().optional(),
-  /** F254 D2: Codex carrier override (openai only). null clears the per-cat override. */
-  carrier: z.enum(['exec_json', 'app_server']).nullable().optional(),
 });
+const catCarrierSchema = z.enum(CAT_CARRIERS);
 
 const clientSchema = z.enum(['anthropic', 'openai', 'google', 'kimi', 'antigravity', 'opencode', 'catagent', 'acp']);
 
@@ -122,6 +125,14 @@ function resolveGenericAcpMcpSupportForPatch(
   return isClientSwitchToGenericAcp ? true : undefined;
 }
 
+function resolveRequestedCarrier(clientId: ClientId, requested?: CatCarrier): CatCarrier {
+  const carrier = clientId === 'acp' ? 'acp' : (requested ?? 'cli');
+  if (!catClientSupportsCarrier(clientId, carrier)) {
+    throw new Error(`carrier "${carrier}" is not supported by clientId "${clientId}"`);
+  }
+  return carrier;
+}
+
 const catIdSchema = z
   .string()
   .min(1)
@@ -160,6 +171,7 @@ const baseCatSchema = z.object({
   caution: z.string().nullable().optional(),
   strengths: z.array(z.string().min(1)).optional(),
   sessionChain: z.boolean().optional(),
+  carrier: catCarrierSchema.optional(),
   voiceConfig: voiceConfigSchema.optional(),
 });
 
@@ -221,6 +233,7 @@ const updateCatSchema = z.object({
   sessionChain: z.boolean().optional(),
   available: z.boolean().optional(),
   clientId: clientSchema.optional(),
+  carrier: catCarrierSchema.optional(),
   defaultModel: modelSchema.optional(),
   mcpSupport: z.boolean().optional(),
   // F247 KD-17: nullable to allow removing cli (cloud-only Remote MCP cats skip local dispatch).
@@ -318,12 +331,6 @@ function buildResolvedCliConfig(
     throw new Error(`client "${client}" does not support cli.effort`);
   }
 
-  const carrierTouched = patch ? Object.hasOwn(patch, 'carrier') : false;
-  const nextCarrier = carrierTouched ? patch?.carrier : baseCli.carrier;
-  if (nextCarrier !== undefined && nextCarrier !== null && client !== 'openai') {
-    throw new Error(`client "${client}" does not support cli.carrier (codex-only)`);
-  }
-
   const serviceTierTouched = patch ? Object.hasOwn(patch, 'serviceTier') : false;
   const nextServiceTier = serviceTierTouched ? patch?.serviceTier : baseCli.serviceTier;
 
@@ -334,7 +341,6 @@ function buildResolvedCliConfig(
     outputFormat: patch?.outputFormat ?? baseCli.outputFormat,
     ...(defaultArgs ? { defaultArgs } : {}),
     ...(nextEffort !== undefined && nextEffort !== null ? { effort: nextEffort } : {}),
-    ...(nextCarrier !== undefined && nextCarrier !== null ? { carrier: nextCarrier } : {}),
     ...(nextServiceTier !== undefined && nextServiceTier !== null ? { serviceTier: nextServiceTier } : {}),
   };
 }
@@ -360,8 +366,6 @@ function buildCliForModelSwitch(client: ClientId, defaultModel: string, currentC
     outputFormat: currentCli.outputFormat,
     ...(currentCli.defaultArgs?.length ? { defaultArgs: [...currentCli.defaultArgs] } : {}),
     ...(normalizedEffort ? { effort: normalizedEffort } : {}),
-    // Carrier is model-independent — preserve the per-cat override across model switches.
-    ...(currentCli.carrier ? { carrier: currentCli.carrier } : {}),
     // Requested service tier is also model-independent intent. Runtime compatibility
     // decides whether it is active for the selected model/account.
     ...(currentCli.serviceTier ? { serviceTier: currentCli.serviceTier } : {}),
@@ -508,11 +512,13 @@ async function toCatResponse(
   metadata: CatResponseMetadata,
   resolveEffectiveAccountRef: (cat: CatConfig) => Promise<string | undefined>,
   resolveContextCapacitySnapshot?: (catId: CatId) => InvocationCapacitySnapshot | undefined,
+  resolveCarrierCapability?: (catId: CatId) => FreshnessCarrierCapability | undefined,
 ) {
   const acpConfig = getAcpConfig(cat.id as string, projectRoot);
   const contextSnapshot = resolveContextCapacitySnapshot?.(cat.id);
   const contextCapability = contextSnapshot?.capability;
   const effectiveAccountRef = await resolveEffectiveAccountRef(cat);
+  const carrierCapability = resolveCarrierCapability?.(cat.id);
   return {
     id: cat.id,
     name: cat.name,
@@ -524,14 +530,14 @@ async function toCatResponse(
     accountRef: effectiveAccountRef,
     clientId: cat.clientId,
     defaultModel: cat.defaultModel,
+    isDefaultResponder: cat.id === getDefaultCatId(),
+    messageDeliveryCapabilities: {
+      guideReply: carrierCapability?.deliverySemantics === 'exact_active_turn',
+    },
     cli: cat.cli,
-    // F254 D2: effective carrier truth — only for cats that actually dispatch
-    // through the local Codex CLI. Generic ACP (getAcpConfig wins in the
-    // assembly) and cloud-only cats (cli removed, F247 KD-17) never reach the
-    // Codex carrier, so exposing one would be a lie.
-    ...(cat.clientId === 'openai' && !acpConfig && cat.cli != null
-      ? { codexCarrier: resolveCodexCarrierTruth(cat.cli.carrier) }
-      : {}),
+    // Canonical access-mode truth resolved at the catalog boundary. The Hub
+    // receives the same carrier value that provider registration consumes.
+    carrier: cat.carrier,
     contextWindow: getConfiguredMemberWindowSetting(cat),
     // #1208 Items 4+6: resolved context window info + client capability for Hub display.
     resolvedContext: (() => {
@@ -587,8 +593,6 @@ async function toCatResponse(
           evaluation: metadata.roster.evaluation,
         }
       : null,
-    // F161: adapterMode is now provider-agnostic — any clientId can have ACP config
-    adapterMode: acpConfig ? 'acp' : 'cli',
   };
 }
 
@@ -672,6 +676,7 @@ async function cleanupBlockedMcpForAllProjects(projectRoot: string, deletedCatId
 interface CatsRoutesOptions {
   onCatalogChanged?: (cats: Record<string, CatConfig>) => Promise<void> | void;
   resolveContextCapacitySnapshot?: (catId: CatId) => InvocationCapacitySnapshot | undefined;
+  resolveCarrierCapability?: (catId: CatId) => FreshnessCarrierCapability | undefined;
 }
 
 export const catsRoutes: FastifyPluginAsync<CatsRoutesOptions> = async (app, opts) => {
@@ -733,6 +738,7 @@ export const catsRoutes: FastifyPluginAsync<CatsRoutesOptions> = async (app, opt
             resolveMetadata(cat.id),
             resolveEffectiveAccountRef,
             opts.resolveContextCapacitySnapshot,
+            opts.resolveCarrierCapability,
           ),
         ),
       ),
@@ -759,6 +765,16 @@ export const catsRoutes: FastifyPluginAsync<CatsRoutesOptions> = async (app, opt
     const projectRoot = resolveProjectRoot();
     const managedIdsBefore = getManagedCatalogIds(projectRoot);
     const body = parsed.data;
+    let requestedCarrier: CatCarrier;
+    try {
+      requestedCarrier = resolveRequestedCarrier(body.clientId, body.carrier);
+      if (requestedCarrier === 'acp' && !('acp' in body && body.acp)) {
+        throw new Error('carrier "acp" requires an acp config (command + startupArgs)');
+      }
+    } catch (err) {
+      reply.status(400);
+      return { error: err instanceof Error ? err.message : String(err) };
+    }
 
     // Validate alias uniqueness across all existing members
     if (body.mentionPatterns?.length) {
@@ -820,6 +836,7 @@ export const catsRoutes: FastifyPluginAsync<CatsRoutesOptions> = async (app, opt
           caution: body.caution,
           strengths: body.strengths,
           clientId: 'antigravity',
+          carrier: requestedCarrier,
           defaultModel: body.defaultModel,
           mcpSupport: body.mcpSupport ?? true,
           cli: {
@@ -848,6 +865,7 @@ export const catsRoutes: FastifyPluginAsync<CatsRoutesOptions> = async (app, opt
           caution: body.caution,
           strengths: body.strengths,
           clientId: 'acp',
+          carrier: 'acp',
           defaultModel: body.defaultModel,
           mcpSupport: resolveGenericAcpMcpSupport(body.mcpSupport, body.acp) ?? false,
           cli: defaultCliForClient('acp'),
@@ -860,7 +878,7 @@ export const catsRoutes: FastifyPluginAsync<CatsRoutesOptions> = async (app, opt
         // Caller signals cloud-only via provider="openai-chatgpt-pro" (future: more cloud markers).
         const explicitProviderForCloud = 'provider' in body ? body.provider : undefined;
         const isCloudOnlyProvider = explicitProviderForCloud === 'openai-chatgpt-pro';
-        const usesAcpTransport = body.acp != null;
+        const usesAcpTransport = requestedCarrier === 'acp';
         const resolvedCli = isCloudOnlyProvider
           ? undefined
           : (() => {
@@ -889,6 +907,7 @@ export const catsRoutes: FastifyPluginAsync<CatsRoutesOptions> = async (app, opt
           caution: body.caution,
           strengths: body.strengths,
           clientId: body.clientId,
+          carrier: requestedCarrier,
           defaultModel: body.defaultModel,
           mcpSupport:
             body.mcpSupport ??
@@ -985,6 +1004,16 @@ export const catsRoutes: FastifyPluginAsync<CatsRoutesOptions> = async (app, opt
       return { error: `Cat "${request.params.id}" not found` };
     }
     const effectiveClient = body.clientId ?? currentCat.clientId;
+    let effectiveCarrier: CatCarrier;
+    try {
+      effectiveCarrier = resolveRequestedCarrier(
+        effectiveClient,
+        body.carrier ?? (body.clientId !== undefined ? undefined : currentCat.carrier),
+      );
+    } catch (err) {
+      reply.status(400);
+      return { error: err instanceof Error ? err.message : String(err) };
+    }
     const currentEffectiveAccountRef = await resolveEffectiveAccountRef(currentCat);
     let targetAccountRef = resolveAccountRef(body);
     let effectiveAccountRef =
@@ -1072,11 +1101,12 @@ export const catsRoutes: FastifyPluginAsync<CatsRoutesOptions> = async (app, opt
       }
     }
 
-    const shouldClearAcpOnClientSwitch =
-      isClientSwitch && effectiveClient !== 'acp' && body.acp === undefined && currentAcpConfig !== undefined;
-    const effectiveAcpConfig =
-      body.acp !== undefined ? body.acp : shouldClearAcpOnClientSwitch ? null : currentAcpConfig;
-    const usesAcpTransport = effectiveClient === 'acp' || effectiveAcpConfig != null;
+    const effectiveAcpConfig = body.acp !== undefined ? body.acp : currentAcpConfig;
+    const usesAcpTransport = effectiveCarrier === 'acp';
+    if (usesAcpTransport && !effectiveAcpConfig) {
+      reply.status(400);
+      return { error: 'carrier "acp" requires an acp config (command + startupArgs)' };
+    }
 
     const managedIdsBefore = getManagedCatalogIds(projectRoot);
     try {
@@ -1096,6 +1126,8 @@ export const catsRoutes: FastifyPluginAsync<CatsRoutesOptions> = async (app, opt
           : body.mcpSupport;
       // #1208 P2: canonicalize legacy cli.contextWindow to top-level on every save.
       const canonicalContextWindow = canonicalizeContextWindow(currentCat, body.contextWindow);
+      const leavesGenericAcpClient =
+        body.acp === undefined && currentCat.clientId === 'acp' && effectiveClient !== 'acp';
 
       // #1208 Item 5 fix: force-strip legacy cli.contextWindow / cli.autoCompactTokenLimit
       // on every save. When nextCli is undefined (no cli patch), the old cli object persists
@@ -1132,6 +1164,9 @@ export const catsRoutes: FastifyPluginAsync<CatsRoutesOptions> = async (app, opt
         ...(body.caution !== undefined ? { caution: body.caution } : {}),
         ...(body.strengths !== undefined ? { strengths: body.strengths } : {}),
         ...(body.clientId !== undefined ? { clientId: body.clientId } : {}),
+        // Always write the resolved value so any legacy transport/cli.carrier
+        // selection converges to the canonical field on the next edit.
+        carrier: effectiveCarrier,
         ...(body.defaultModel !== undefined ? { defaultModel: body.defaultModel } : {}),
         ...(nextGenericAcpMcpSupport !== undefined ? { mcpSupport: nextGenericAcpMcpSupport } : {}),
         ...(hasCommandArgsPatch
@@ -1164,12 +1199,12 @@ export const catsRoutes: FastifyPluginAsync<CatsRoutesOptions> = async (app, opt
             ? { voiceConfig: null }
             : { voiceConfig: body.voiceConfig }
           : {}),
-        ...(body.acp !== undefined
-          ? body.acp === null
-            ? { acp: null }
-            : { acp: body.acp }
-          : shouldClearAcpOnClientSwitch
-            ? { acp: null }
+        ...(leavesGenericAcpClient
+          ? { acp: null }
+          : body.acp !== undefined
+            ? body.acp === null
+              ? { acp: null }
+              : { acp: body.acp }
             : {}),
       });
       const resolved = await reconcileCatRegistry(projectRoot, managedIdsBefore);

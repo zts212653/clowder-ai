@@ -5,6 +5,7 @@ import {
   projectMarkdownReadableText,
   type RichBlock,
 } from '@cat-cafe/shared';
+import { messageFrom } from '../stores/message-from.js';
 import type { StoredMessage, StoredToolEvent } from '../stores/ports/MessageStore.js';
 import type { Thread } from '../stores/ports/ThreadStore.js';
 import {
@@ -273,12 +274,11 @@ export function isAccessibleSourceRecord(
   sourceThreadId: string,
   auth: MessageSelectionAuth,
 ): message is StoredMessage {
+  const from = message ? messageFrom(message) : null;
   const ownerAuthored =
     message?.userId === auth.userId &&
-    message.userId !== 'system' &&
-    message.userId !== 'scheduler' &&
-    message.catId !== 'system' &&
-    message.source === undefined &&
+    from?.kind !== 'system' &&
+    from?.kind !== 'external' &&
     message.origin !== 'briefing';
   const managedHoldConnector = message ? isOwnerVisibleManagedHoldConnector(message, auth.userId) : false;
   return Boolean(

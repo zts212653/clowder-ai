@@ -383,7 +383,7 @@ describe('useAgentMessages system_info invocation_created', () => {
     expect(storeState.targetCats).toEqual(['opus']);
   });
 
-  it('migrates the active slot as soon as a2a_handoff announces the next cat', () => {
+  it('treats a2a_handoff as a projection without mutating invocation ownership', () => {
     storeState.activeInvocations = {
       'inv-root': { catId: 'codex', mode: 'execute', startedAt: 123456 },
     };
@@ -397,30 +397,26 @@ describe('useAgentMessages system_info invocation_created', () => {
       captured?.handleAgentMessage({
         type: 'a2a_handoff',
         catId: 'codex',
-        content: '缅因猫 → 布偶猫',
-        invocationId: 'inv-root',
+        content: '缅因猫 ⇉ 布偶猫',
         targetCatId: 'opus',
+        routing: { mode: 'parallel', index: 1, total: 2 },
         timestamp: 123999,
       } as never);
     });
 
-    expect(mockRemoveActiveInvocation).toHaveBeenCalledWith('inv-root');
-    expect(mockAddActiveInvocation).toHaveBeenCalledWith('inv-root', 'opus', 'execute', 123456);
-    expect(mockReplaceThreadTargetCats).toHaveBeenCalledWith('thread-1', ['opus']);
-    expect(mockSetCatStatus).toHaveBeenCalledWith('opus', 'spawning');
+    expect(mockRemoveActiveInvocation).not.toHaveBeenCalled();
+    expect(mockAddActiveInvocation).not.toHaveBeenCalled();
+    expect(mockReplaceThreadTargetCats).not.toHaveBeenCalled();
+    expect(mockSetCatStatus).not.toHaveBeenCalled();
     expect(storeState.activeInvocations['inv-root']).toEqual({
-      catId: 'opus',
+      catId: 'codex',
       mode: 'execute',
       startedAt: 123456,
     });
-    expect(storeState.targetCats).toEqual(['opus']);
-    expect(storeState.catStatuses.opus).toBe('spawning');
+    expect(storeState.targetCats).toEqual(['codex']);
   });
 
-  // F086/F216 (#1291): a serial dispatch announces EVERY queued leg up front, but only 第 1 棒
-  // actually starts. Migrating ownership on each announced leg made the UI show the LAST target
-  // as active while the runtime was still running the FIRST — two arrows, one invocation.
-  it('serial 第 1 棒 migrates the active slot', () => {
+  it('parallel routing projection never steals the active slot', () => {
     storeState.activeInvocations = {
       'inv-root': { catId: 'codex', mode: 'execute', startedAt: 123456 },
     };
@@ -434,36 +430,9 @@ describe('useAgentMessages system_info invocation_created', () => {
       captured?.handleAgentMessage({
         type: 'a2a_handoff',
         catId: 'codex',
-        content: '缅因猫 → 布偶猫（串行 1/2）',
-        invocationId: 'inv-root',
-        targetCatId: 'opus',
-        routing: { mode: 'serial', index: 1, total: 2 },
-        timestamp: 123999,
-      } as never);
-    });
-
-    expect(mockAddActiveInvocation).toHaveBeenCalledWith('inv-root', 'opus', 'execute', 123456);
-    expect(storeState.targetCats).toEqual(['opus']);
-  });
-
-  it('serial 第 2 棒 is announced but must NOT steal the active slot', () => {
-    storeState.activeInvocations = {
-      'inv-root': { catId: 'codex', mode: 'execute', startedAt: 123456 },
-    };
-    storeState.targetCats = ['codex'];
-
-    act(() => {
-      root.render(React.createElement(Harness));
-    });
-
-    act(() => {
-      captured?.handleAgentMessage({
-        type: 'a2a_handoff',
-        catId: 'codex',
-        content: '缅因猫 ⇢ 暹罗猫（串行 2/2·排队中）',
-        invocationId: 'inv-root',
+        content: '缅因猫 ⇉ 暹罗猫（并行 2/2）',
         targetCatId: 'gemini',
-        routing: { mode: 'serial', index: 2, total: 2 },
+        routing: { mode: 'parallel', index: 2, total: 2 },
         timestamp: 124000,
       } as never);
     });
@@ -476,66 +445,6 @@ describe('useAgentMessages system_info invocation_created', () => {
       startedAt: 123456,
     });
     expect(storeState.targetCats).toEqual(['codex']);
-  });
-
-  it('migrates legacy a2a_handoff without invocationId by resolving the current cat active slot', () => {
-    storeState.activeInvocations = {
-      'inv-root': { catId: 'codex', mode: 'execute', startedAt: 123456 },
-    };
-    storeState.targetCats = ['codex'];
-
-    act(() => {
-      root.render(React.createElement(Harness));
-    });
-
-    act(() => {
-      captured?.handleAgentMessage({
-        type: 'a2a_handoff',
-        catId: 'codex',
-        content: '缅因猫 → 布偶猫',
-        targetCatId: 'opus',
-        timestamp: 123999,
-      } as never);
-    });
-
-    expect(mockRemoveActiveInvocation).toHaveBeenCalledWith('inv-root');
-    expect(mockAddActiveInvocation).toHaveBeenCalledWith('inv-root', 'opus', 'execute', 123456);
-    expect(mockReplaceThreadTargetCats).toHaveBeenCalledWith('thread-1', ['opus']);
-    expect(storeState.activeInvocations['inv-root']).toEqual({
-      catId: 'opus',
-      mode: 'execute',
-      startedAt: 123456,
-    });
-    expect(storeState.targetCats).toEqual(['opus']);
-  });
-
-  it('keeps the cancel affordance during the handoff gap after the previous cat slot is cleared', () => {
-    storeState.activeInvocations = {};
-    storeState.targetCats = ['codex'];
-
-    act(() => {
-      root.render(React.createElement(Harness));
-    });
-
-    act(() => {
-      captured?.handleAgentMessage({
-        type: 'a2a_handoff',
-        catId: 'codex',
-        content: '缅因猫 → 布偶猫',
-        invocationId: 'inv-root',
-        targetCatId: 'opus',
-        timestamp: 123999,
-      } as never);
-    });
-
-    expect(mockRemoveActiveInvocation).not.toHaveBeenCalled();
-    expect(mockAddActiveInvocation).toHaveBeenCalledWith('inv-root', 'opus', 'execute');
-    expect(mockReplaceThreadTargetCats).toHaveBeenCalledWith('thread-1', ['opus']);
-    expect(storeState.activeInvocations['inv-root']).toEqual({
-      catId: 'opus',
-      mode: 'execute',
-    });
-    expect(storeState.targetCats).toEqual(['opus']);
   });
 
   it('does not rewrite slots for cats that already have an explicit parallel slot', () => {

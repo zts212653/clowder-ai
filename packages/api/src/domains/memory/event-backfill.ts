@@ -14,7 +14,7 @@
  * threads + messages in batches.
  */
 
-import type { EventConfidence, EventMemoryRecord } from '@cat-cafe/shared';
+import type { EventConfidence, EventMemoryRecord, MessageFrom } from '@cat-cafe/shared';
 import type { IEventMemoryStore } from './EventMemoryStore.js';
 import { detectGradedMagicWords } from './magic-word-confidence.js';
 
@@ -26,6 +26,7 @@ export interface StoredMessageLike {
   timestamp: number;
   /** null = user (co-creator) message; a CatId = cat message. */
   catId: string | null;
+  from?: MessageFrom;
   /**
    * Message author's userId. Backfill only marks the OWNER's own rows: getByThreadAfter
    * also returns globally-visible SYSTEM messages (isSystemUserMessage), which must NOT be
@@ -70,7 +71,7 @@ export function extractBackfillMessage(m: StoredMessageLike): BackfillMessage {
     threadId: m.threadId,
     content: m.content,
     timestamp: m.timestamp,
-    authoredByCocreator: m.catId === null,
+    authoredByCocreator: m.from ? m.from.kind === 'user' : m.catId === null,
     targetCat: m.extra?.targetCats?.[0] ?? m.mentions?.[0] ?? null,
   };
 }

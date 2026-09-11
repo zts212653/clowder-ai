@@ -7,7 +7,7 @@ created: 2026-02-26
 
 # Clowder AI Feature Roadmap
 
-> 维护者：三猫 | 最后更新：2026-09-04（F316 记忆内容覆盖与真实召回验收立项）
+> 维护者：三猫 | 最后更新：2026-09-08（F117 单 source Queue + actual-dispatch 生命周期进入 worktree 体验验收）
 >
 > **规则**：只放活跃 Feature（idea/spec/in-progress/review），done 后移除。
 > 详细信息见 `docs/features/Fxxx-*.md`。
@@ -36,6 +36,7 @@ created: 2026-02-26
 | F107 | 脑门贴词 — 坏猫战术推理游戏 #1 | spec | Ragdoll | internal | [F107](features/F107-headband-guess-game.md) |
 | F109 | Message Actions 修复与增强 — 软删除/Branch/编辑/通知 | in-progress | Ragdoll | internal | [F109](features/F109-message-actions-overhaul.md) |
 | F110 | 训练营愿景引导增强 — operator 需求挖掘 + SOP 显式加载 | spec | Ragdoll | internal | [F110](features/F110-bootcamp-vision-elicitation.md) |
+| F117 | Message Delivery Lifecycle — 单 source Queue Entry + History actual-dispatch 真相源 | worktree acceptance / fork soak pending | Ragdoll + Maine Coon | community [#20](https://github.com/zts212653/clowder-ai/issues/20) | [F117](features/F117-message-delivery-lifecycle.md) · [ADR-043](decisions/043-queue-durable-single-ledger.md) |
 | F119 | 谁是卧底 — 坏猫战术推理游戏 #2 | spec | Ragdoll | internal | [F119](features/F119-who-is-spy-game.md) |
 | F124 | Apple Ecosystem × Clowder AI 语音交互系统 — iOS/watchOS/AirPods | spec | Ragdoll | internal | [F124](features/F124-apple-ecosystem-voice-interaction.md) |
 | F126 | 四肢控制面 — Clowder AI Limb Control Plane | in-progress | Ragdoll | internal | [F126](features/F126-limb-control-plane.md) |
@@ -64,7 +65,6 @@ created: 2026-02-26
 | F193 | Cross-Thread Communication Unification (Phase E: 发现即投递) | in-progress | Ragdoll (Opus 4.6) | internal | [F193](features/F193-cross-thread-comm-unification.md) |
 | F210 | Gemini CLI to Antigravity CLI Migration | in-progress | Maine Coon/Maine Coon | internal | [F210](features/F210-antigravity-cli-migration.md) |
 | F219 | 核心引擎技术债盘点 + 架构演进（routeSerial 等核心调用链）| in-progress | Ragdoll Opus 4.8 | internal | [F219](features/F219-tech-debt-architecture-evolution.md) |
-| F220 | A2A 协作的可观测·可靠·可恢复（启动中占位可见 + 卡死根因 + force-reset 逃生口 UI）| spec | Ragdoll Opus-4.8（驱动 [thread-id]）| internal | [F220](features/F220-a2a-collab-reliability.md) |
 | F221 | Taste Lane — per-user 品味导航（Phase B: Taste Capture Loop — propose/approve/落盘闭环 + 三路由隔离） | in-progress | Ragdoll | internal | [F221](features/F221-taste-lane.md) |
 | F23-followup | F23 Phase 2 — dir-size 5 个目录真拆（utils/config/providers 快线 + invocation/routes 跟 F219 协调）| in-progress | Ragdoll/Opus-4.7 | internal | [F23 § Phase 2](features/F023-directory-corrosion-defense.md) |
 | F224 | A2A 协作的会话/消息状态可靠性（会话延续协调器 + 消息去重 + 触发合并 + 重生会话）| in-progress | Ragdoll Opus-4.8 | community [clowder-ai#834](https://github.com/zts212653/clowder-ai/pull/834) | [F224](features/F224-a2a-session-message-reliability.md) |

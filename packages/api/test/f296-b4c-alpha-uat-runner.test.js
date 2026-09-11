@@ -136,7 +136,7 @@ describe('F296 B4c Alpha UAT runner red contracts', () => {
       expectedRevision: revision,
       health: { deploymentRevision: revision },
       readiness: { status: 'ready' },
-      cats: { cats: [{ id: 'codex', clientId: 'openai', codexCarrier: { effective: 'app_server' } }] },
+      cats: { cats: [{ id: 'codex', clientId: 'openai', carrier: 'app_server' }] },
       catId: 'codex',
     };
     assert.doesNotThrow(() => assertAlphaSnapshot(base));
@@ -149,7 +149,7 @@ describe('F296 B4c Alpha UAT runner red contracts', () => {
       () =>
         assertAlphaSnapshot({
           ...base,
-          cats: { cats: [{ id: 'codex', clientId: 'openai', codexCarrier: { effective: 'exec_json' } }] },
+          cats: { cats: [{ id: 'codex', clientId: 'openai', carrier: 'cli' }] },
         }),
       'canary_not_app_server',
     );
@@ -200,7 +200,7 @@ describe('F296 B4c Alpha UAT runner red contracts', () => {
       if (url.pathname === '/ready') return Response.json({ status: 'ready' });
       if (url.pathname === '/api/cats') {
         return Response.json({
-          cats: [{ id: 'codex', clientId: 'openai', codexCarrier: { effective: 'app_server' } }],
+          cats: [{ id: 'codex', clientId: 'openai', carrier: 'app_server' }],
         });
       }
       if (url.pathname === '/api/threads') return Response.json({ id: 'canary-thread' });

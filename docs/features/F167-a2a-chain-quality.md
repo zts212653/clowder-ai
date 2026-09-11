@@ -4,22 +4,12 @@ related_features: [F064, F027, F055, F122, F168, F246, F280]
 topics: [a2a, collaboration, harness-engineering, agent-readiness]
 doc_kind: spec
 created: 2026-04-17
-updated: 2026-09-04
-tips_exempt: "Renewed 2026-09-04 for the Phase R terminal-lineage conflict repair: it makes the existing post_message and cross_post_message coordination surface fail loud instead of closing the wrong chain, without adding a user-invokable action or discovery workflow."
+updated: 2026-09-10
+tips_exempt: "Renewed 2026-09-10 for the Phase T lifecycle cutover: ordinary A2A and managed-hold completion tools/stop gates are removed in favor of the existing source/Queue/response lifecycle, without adding a user-invokable action or discovery workflow."
 user_journey_exempt: protocol behavior has no direct UI surface; end-to-end custody is dogfooded through the real MCP/task path
 mcp_admission_status: accepted
 mcp_admission_ref: "file:docs/features/F167-a2a-chain-quality.md"
 mcp_admission_claims:
-  - ref: "file:docs/features/F167-a2a-chain-quality.md"
-    toolName: cat_cafe_complete_managed_hold
-    resourceFamily: task-workflow
-    boundaryKind: authority-boundary
-    decision: accepted
-  - ref: "file:docs/features/F167-a2a-chain-quality.md"
-    toolName: cat_cafe_complete_a2a_dispatch
-    resourceFamily: task-workflow
-    boundaryKind: authority-boundary
-    decision: accepted
   - ref: "file:docs/features/F167-a2a-chain-quality.md"
     toolName: cat_cafe_recover_external_review_verdict
     resourceFamily: tracking-review
@@ -32,7 +22,7 @@ mcp_admission_claims:
 > **Status**: in-progress | **Owner**: Ragdoll | **Priority**: P0
 
 Architecture cell: `transport` + `harness-eval` + `ball-custody` + `dispatch`
-Map delta: updated — Phase R records structured cross-thread coordination in `transport`/`harness-eval`; Phase S keeps implement and approved external-review successors in `ball-custody`, while Phase S.2 returns local cat review to ordinary durable `dispatch` plus typed merge evidence; Phase T binds explicit A2A and exact hold wake provenance to those existing owners without creating another ledger.
+Map delta: updated — Phase R records structured cross-thread coordination in `transport`/`harness-eval`; Phase S keeps implement and approved external-review successors in `ball-custody`, while Phase S.2 returns local cat review to ordinary durable `dispatch` plus typed merge evidence. Phase T's ordinary A2A/managed-hold completion branch is superseded by F117 Phase G; only durable action-successor responsibility retains a turn stop gate.
 
 ## Why
 
@@ -62,35 +52,35 @@ operator experience：
 1. **路由可见性不退化**（operator拍板）：若猫通过 MCP `targetCats` 路由但响应文本无 @mention，系统须自动补可见路由指示，不可让协作"悄咪咪"发生。
 2. **Provider-agnostic**：护栏不依赖特定模型行为，对所有引擎生效。
 
-### Bounded repair: invocation-bound structured-wake dispositions (2026-08-10)
+### Superseded repair: structured-wake dispositions → message lifecycle (2026-09-10)
 
 Architecture cell: `ball-custody` + `dispatch` + `mcp-surface-governance`
 
-operator decision `[thread-id]#0001786347630932-000025-ab3cdda3` accepts narrow terminal producers for structured wakes already exposed to the current invocation. `cat_cafe_complete_managed_hold` closes an exact managed hold using callback-authenticated invocation identity plus server-derived source message/task/thread/holder coordinates. The live regression in `[thread-id]` extends the same accepted F167 boundary to ordinary A2A dispatch: `cat_cafe_complete_a2a_dispatch` derives source message, previous cat, thread, holder, and invocation from the current callback record and exact `ball.handed` event. The caller selects only `handled | completed`; stale, replaced, cross-thread, cross-holder, cross-source, or cross-task attempts fail closed. Read, command exit, tests, merge truth, ACK, unrelated task completion, and another coordination terminal remain non-terminal.
+The 2026-08-10 repair introduced `cat_cafe_complete_managed_hold` and
+`cat_cafe_complete_a2a_dispatch`, plus Ball disposition events and a turn-scoped stop gate, because the
+then-current Queue/History model had no single execution terminal. ADR-043 and F117 Phases C/D/G now
+provide that missing owner: exact source admission creates one response identity, and that response owns
+processing plus every terminal outcome.
 
-2026-08-14 same-cat clarification: `catId` identifies a persona, not one invocation. A same-cat
-cross-thread carrier may disposition only when the stored trigger has canonical distinct-thread
-`crossPost.sourceThreadId` provenance and the existing exact `ball.handed` event binds that message,
-source cat, target holder, target thread, and current invocation. Same-thread self mentions and missing
-or same-thread provenance remain fail-closed. Here “cross-thread attempt” means an auth/source thread
-mismatch, not a valid server-authored cross-post carrier stored in its target thread.
+The old repair is therefore retired as a whole, not preserved as a compatibility branch:
 
-2026-08-15 replacement-provenance clarification: an ordinary A2A Queue row is only a carrier for its
-exact persisted `ball.handed`. Queue admission reuses the disposition service's source/event fence and
-retires a carrier before provider start when a later state-changing event involving the target cat has
-already replaced that handoff. If replacement races after provider start, the disposition rejection
-includes the latest verified successor event plus same-thread `sourceMessageId` and coordination when
-available. Message metadata is exposed only after the event-derived message resolves back to the same
-thread, sender, and target; forged or foreign-thread metadata remains hidden. Durable Queue custody must
-terminalize before the stale row is consumed; failure retains the row and does not start an invocation.
-A coalesced Queue row carries multiple source messages and may retire only when every carried handoff is
-replaced; one live successor keeps the combined body executable. Successor message lookup is optional
-enrichment: store failure removes only the pointer/coordination fields and cannot erase the event-derived
-replacement verdict or reopen a stale provider invocation.
+- ordinary A2A and managed-hold wakes do not write Ball handoff/disposition events;
+- the two completion MCP tools and callback routes are absent from the callable surface;
+- read, provider exit and model prose do not need to manufacture a second `handled | completed` verdict;
+- exact `sourceRecordId × targetCatId` History dispatch prevents stale/replayed Queue admission;
+- managed-hold condition completion creates one urgent queued system source, hidden from History/context
+  until actual admission, then uses the same response lifecycle as every other message;
+- waiting status, admitted wake and terminal response are persistent shared History facts readable by the
+  operator and every thread member.
 
-This is a bounded F167/F254/F264 repair, not a new Feature or lifecycle owner. Managed holds write the existing F264 target receipt and both wake kinds write the F167 BallCustody event log. The repair does not add another Queue, receipt ledger, projection, or state machine.
+Action-successor leases remain distinct: they represent durable responsibility for an external action
+whose success cannot be inferred from message delivery, so their exact predicate/holder/generation stop
+gate remains. Historical Ball events stay readable for audit only and cannot authorize new execution.
 
-The same repair boundary also owns two dispatch invariants exposed by the post-merge A→B→A dogfood (`[thread-id]#0001786350407910-000095-8739ed4a`): a successful same-thread `post_message` callback is the one carrier for that source/target and must be suppressed from the later route-serial line-start scan; releasing the invocation slot must have a bounded path to `notifyQueueCompletion` even if F194/F224 terminal bookkeeping stalls. The normal ordering remains terminal truth and continuation commit before queue drain; a 5-second idempotent watchdog is only the liveness fallback. Ordinary inline dispatches now receive their completion producer on the first child and fail typed without spawning a stale `routing_guard` child when the producer is omitted.
+The same lifecycle boundary continues to own two dispatch invariants exposed by the post-merge A→B→A
+dogfood (`[thread-id]#0001786350407910-000095-8739ed4a`): a successful same-thread `post_message`
+callback is the one carrier for that source/target and must be suppressed from later line-start routing;
+releasing the invocation slot must still notify Queue completion after terminal bookkeeping settles.
 3. **Backward compatible**：不退化 4.6 等已正常工作模型的体验。
 4. **极简**：只加运行时刹车（压制坏直觉）和认知路径工程（对齐好直觉），不加认知脚手架（替模型思考）。
 
@@ -609,7 +599,7 @@ operator experience：
 | KD-26 | `@` 路由不做"意图提取"——保持行首=路由/其他=叙述的绝对规则。弱模型无法理解"句中 @ 有时路由有时不路由"的语义边界 | Maine Coon review 修正：K-1 不做 Slack 式宽容路由（违反 KD-24）；只做机械 repair（AC-H4 Step B）| 2026-04-25 |
 | KD-27 | hold_ball 轮询和结构化回调（PR tracking / scheduled task）覆盖同一等待对象时，轮询必须终止。传球决策树选项 2 拆分：2a 无回调覆盖→轮询，2b 有回调覆盖→纯事件驱动 | operator发现 PR tracking + hold_ball 轮询双通道重复唤醒——codex 接单后两条路同时触发，猫醒来发现前一次已经通过 PR tracking 消息处理过了。两个等待的对象不同（"有没有人接" vs "接了之后的结果"），不该重叠运行。2026-07-10 的机械 clean-stop 实现在 [F177 Phase J](F177-harness-update.md#phase-jevent-backed-pr-tracking-clean-stop)；它签发 invocation-bound callback coverage，不扫描/绑定 hold 自由文本 | 2026-05-07 |
 | KD-28 | 跨 thread 协调链用持久 message metadata 携带稳定 `coordination.id`，Release 显式 `phase=terminal`；terminal 的直接 ACK 只记录不路由。禁止用 Claim/Release/ACK 自由文本分类器 | 跨 thread 后 `threadId + parentInvocationId/worklist` 改变，same-pair streak 必然归零。稳定 identity 必须跨 hop 持久；terminal 必须是调用方显式状态。若有新实质工作，用 `phase=active` 开新 id，保留正经多轮协作 | 2026-07-10 |
-| KD-29 | Stop gate 判据从"文本出口三选一"切换到"turn-scoped 球权账本查询"（Phase T）：裁决对象仅为**本次唤醒对应的协议球**，不是猫名下全部 open work；覆盖判定器 = 唤醒来源（机械） | 三代 guard（F064 教说话 / F167 刹车 / F177 逼表态）都在语言层加压，语言层压力必然产生语言层症状（表演性 @ / 礼貌回环 / 假 hold）→ 军备竞赛。判据换到 ground truth（账本，封闭集）才终结竞赛。backlog 毛线球若参与拦截则漫游被杀死——turn-scoped 是"管球不管猫"的必要精确化。operator 猫爬架条款：`0001784213241082` | 2026-07-16 |
+| KD-29 | **2026-09-10 部分 supersede**：turn stop gate 只服务 durable action-successor lease；ordinary A2A、managed hold 与 event-wait 的完成由 F117 source/Queue/response lifecycle 直接收敛 | 旧 Phase T 把当时缺少终局 owner 的消息唤醒补成 Ball disposition；ADR-043 之后该补偿反而成为第二套账本。外部 action success 仍不能由消息终局推断，因此保留 exact predicate/holder/generation gate | 2026-07-16 / 2026-09-10 |
 | KD-30 | 迁移用三态判据（covered_active / covered_empty / unknown_legacy），unknown 走旧 guard fail-closed；不做 big-bang cutover | 二态（有球拦/没球放）隐含"账本 day one 完备"假设——记账覆盖渐进期"查不到=放行"会把未记账真实责任放生（重演 74 分钟）。Sol 三态方案胜出 fable 二态方案的并行裁决记录：`0001784211771626` | 2026-07-16 |
 | KD-31 | 减法红线：cutover 后 guard 总拦截次数不降反升 = 方案失败回滚；礼貌不产生新工作（terminal 后 ACK 不 re-enqueue）为服务端硬保证，不识别自然语言 | operator 反补锅条款（"我害怕你们一本正经补锅"）制度化——锅变少是验收标准本身，不是愿望。ACK 抑制不依赖猫行为改变，是机制兜底 | 2026-07-16 |
 

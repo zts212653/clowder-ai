@@ -684,7 +684,7 @@ export const ENV_VARS: EnvDefinition[] = [
     name: 'CAT_CAFE_RUNTIME_ROOT',
     defaultValue: '(未设置 → process.cwd())',
     description:
-      'F061: Clowder AI runtime 二进制根目录（runtime startup 自动 export 为 $RUNTIME_DIR），优先级高于 capability orchestrator 的 auto-detection，用于 Antigravity MCP config args 路径',
+      'F061: Cat Cafe runtime 二进制根目录（runtime startup 自动 export 为 $RUNTIME_DIR），优先级高于 capability orchestrator 的 auto-detection，用于 Antigravity MCP config args 路径',
     category: 'server',
     sensitive: false,
     runtimeEditable: false,
@@ -1383,16 +1383,6 @@ export const ENV_VARS: EnvDefinition[] = [
     sensitive: false,
   },
   {
-    name: 'CAT_CAFE_CODEX_CARRIER',
-    defaultValue: 'exec_json',
-    description:
-      'F254 Codex 双向 carrier（exec_json 默认；app_server 仅用于显式 canary）。支持 per-cat 覆盖：Hub 成员编辑器「接入方式（Carrier）」写入 cli.carrier，优先级高于本 env',
-    category: 'codex',
-    sensitive: false,
-    runtimeEditable: false,
-    allowedValues: ['exec_json', 'app_server'],
-  },
-  {
     name: 'CAT_CAFE_CODEX_OAUTH_TRANSPORT',
     defaultValue: 'builtin',
     description: 'Codex OAuth provider 传输策略（builtin 默认；HTTPS-only 故障回滚用 https）',
@@ -1576,7 +1566,7 @@ export const ENV_VARS: EnvDefinition[] = [
   {
     name: 'COLLECTIVE_SERVICE_PORT',
     defaultValue: '5201',
-    description: '独立 Collective Service 端口；不得使用 Clowder AI runtime 3003/3004',
+    description: '独立 Collective Service 端口；不得使用 Cat Cafe runtime 3003/3004',
     category: 'connector',
     sensitive: false,
     runtimeEditable: false,
@@ -1594,7 +1584,7 @@ export const ENV_VARS: EnvDefinition[] = [
   {
     name: 'COLLECTIVE_SERVICE_ALLOWED_HOST_ORIGINS',
     defaultValue: '(空)',
-    description: '允许嵌入并配对的 Clowder AI Web origin，多个用逗号分隔',
+    description: '允许嵌入并配对的 Cat Cafe Web origin，多个用逗号分隔',
     category: 'connector',
     sensitive: false,
     runtimeEditable: false,
@@ -1640,7 +1630,7 @@ export const ENV_VARS: EnvDefinition[] = [
   {
     name: 'NEXT_PUBLIC_COLLECTIVE_SERVICE_URL',
     defaultValue: 'http://localhost:5201',
-    description: 'Clowder AI「进入 Collective」默认打开的独立 Service 地址',
+    description: 'Cat Cafe「进入 Collective」默认打开的独立 Service 地址',
     category: 'frontend',
     sensitive: false,
     runtimeEditable: false,

@@ -28,7 +28,6 @@ function threadState(partial: Partial<ThreadState>): ThreadState {
     hasUserMention: false,
     lastActivity: 0,
     queue: [],
-    queuePaused: false,
     queueFull: false,
     workspaceWorktreeId: null,
     workspaceOpenTabs: [],

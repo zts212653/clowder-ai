@@ -1,4 +1,4 @@
-import type { FreshnessCarrierCapability } from '@cat-cafe/shared';
+import type { FreshnessCarrierCapability, LifecycleActiveRun } from '@cat-cafe/shared';
 import type { AppServerLifecycleSnapshot } from '@/stores/chat-types';
 import { useChatStore } from '@/stores/chatStore';
 import { resumeInvocationReconciliationAfterHydration } from './invocation-timeout-reconciliation';
@@ -9,6 +9,7 @@ export interface QueueActiveInvocationSlot {
   startedAt: number;
   executionId?: string;
   turnInvocationId?: string;
+  activeRun?: LifecycleActiveRun;
   appServerLifecycle?: AppServerLifecycleSnapshot;
   freshnessCarrierCapability?: FreshnessCarrierCapability;
 }
@@ -59,6 +60,7 @@ export function hydrateQueueActiveInvocationSlots({
       // Explicit undefined prevents a same-parent snapshot from certifying an old child.
       invocationId: slot.executionId,
       turnInvocationId: slot.turnInvocationId,
+      activeRun: slot.activeRun,
       freshnessCarrierCapability: slot.freshnessCarrierCapability ?? {
         provider: 'other',
         carrier: 'other',

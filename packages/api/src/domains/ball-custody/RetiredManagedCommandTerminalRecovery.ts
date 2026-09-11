@@ -156,12 +156,12 @@ async function publish(
   if (!claimed?.command.wakeContent) return false;
   const idempotencyKey = `${COMPLETION_MESSAGE_KEY_PREFIX}${claimed.task.id}`;
   try {
-    const existing = await deps.messageStore.getByIdempotencyKey('scheduler', claimed.threadId, idempotencyKey);
+    const existing = await deps.messageStore.getByIdempotencyKey(claimed.userId, claimed.threadId, idempotencyKey);
     const stored =
       existing ??
       (await deps.messageStore.append({
-        userId: 'scheduler',
-        catId: null,
+        from: { kind: 'system', service: 'managed-command-terminal-recovery' },
+        userId: claimed.userId,
         content: `[定时任务] ${claimed.command.wakeContent}`,
         mentions: [],
         timestamp: now(),
@@ -191,7 +191,11 @@ async function publish(
   } catch (err) {
     let committedAfterError: StoredWakeMessage | null;
     try {
-      committedAfterError = await deps.messageStore.getByIdempotencyKey('scheduler', claimed.threadId, idempotencyKey);
+      committedAfterError = await deps.messageStore.getByIdempotencyKey(
+        claimed.userId,
+        claimed.threadId,
+        idempotencyKey,
+      );
     } catch (lookupErr) {
       log.warn(
         { err: lookupErr, taskId: claimed.task.id, threadId: claimed.threadId },

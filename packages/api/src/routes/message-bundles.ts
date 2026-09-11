@@ -1,5 +1,6 @@
 import type { FastifyPluginAsync } from 'fastify';
 import { MessageSelectionResolver } from '../domains/cats/services/context/MessageSelectionResolver.js';
+import { messageFrom } from '../domains/cats/services/stores/message-from.js';
 import type { IMessageStore } from '../domains/cats/services/stores/ports/MessageStore.js';
 import type { IThreadStore } from '../domains/cats/services/stores/ports/ThreadStore.js';
 import { resolveStrictUserId } from '../utils/request-identity.js';
@@ -31,7 +32,7 @@ export const messageBundleRoutes: FastifyPluginAsync<MessageBundleRoutesOptions>
       targetMessage.deletedAt !== undefined ||
       targetMessage._tombstone === true ||
       targetMessage.deliveryStatus === 'canceled' ||
-      targetMessage.catId !== null ||
+      messageFrom(targetMessage).kind !== 'user' ||
       !targetMessage.extra?.messageBundle
     ) {
       reply.status(404);

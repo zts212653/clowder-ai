@@ -39,7 +39,18 @@ interface ResolveMessageBundlePromptInput {
 }
 
 function formatAuthor(item: ResolvedMessageSelectionItem): string {
-  return item.author.kind === 'cat' ? `cat:@${item.author.catId}` : `user:${item.author.userId}`;
+  switch (item.from.kind) {
+    case 'agent':
+      return `cat:@${item.from.catId}`;
+    case 'user':
+      return `user:${item.from.userId}`;
+    case 'external':
+      return `external:${item.from.connectorId}:${item.from.sender?.id ?? 'unknown'}`;
+    case 'plugin':
+      return `plugin:${item.from.instanceId}`;
+    case 'system':
+      return `system:${item.from.service}`;
+  }
 }
 
 function formatExactRef(item: MessageBundleCarrierV1['items'][number]): string {

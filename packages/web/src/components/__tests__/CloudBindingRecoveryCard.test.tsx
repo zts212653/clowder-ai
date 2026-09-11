@@ -92,7 +92,7 @@ describe('CloudBindingRecoveryCard', () => {
       if (path === '/api/threads/thread-one/cloud-bindings' && init?.method === 'PATCH') {
         return jsonResponse({ bindings: { 'gpt-pro': `https://chatgpt.com/c/${conversationId}` } });
       }
-      if (path === '/api/messages/source-one/queue-targets/gpt-pro/retry') {
+      if (path === '/api/messages/source-one/delivery-targets/gpt-pro/retry') {
         return jsonResponse({ status: 'retry_queued', attemptId: 'attempt-two' }, 202);
       }
       throw new Error(`unexpected ${String(path)}`);
@@ -116,7 +116,7 @@ describe('CloudBindingRecoveryCard', () => {
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ catId: 'gpt-pro', chatUrl: `https://chatgpt.com/c/${conversationId}` }),
     });
-    expect(mockApiFetch).toHaveBeenCalledWith('/api/messages/source-one/queue-targets/gpt-pro/retry', {
+    expect(mockApiFetch).toHaveBeenCalledWith('/api/messages/source-one/delivery-targets/gpt-pro/retry', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ attemptId: 'attempt-one' }),
@@ -150,7 +150,7 @@ describe('CloudBindingRecoveryCard', () => {
     expect(container.querySelector<HTMLButtonElement>('button[data-recovery-primary]')?.disabled).toBe(false);
   });
 
-  it('hydrates a missing retry fence and makes title-less candidates distinguishable and inspectable', async () => {
+  it('uses the notice-carried retry fence and makes title-less candidates distinguishable and inspectable', async () => {
     const olderId = '6a883fad-1111-2222-3333-444444444444';
     const newerId = '6a928d55-aaaa-bbbb-cccc-dddddddddddd';
     mockApiFetch.mockImplementation(async (path, init) => {
@@ -170,15 +170,11 @@ describe('CloudBindingRecoveryCard', () => {
         ],
         ['GET /api/threads/thread-one/cloud-bindings', jsonResponse({ bindings: {} })],
         [
-          'GET /api/messages/source-one/queue-targets/gpt-pro/retry-authority',
-          jsonResponse({ attemptId: 'attempt-hydrated' }),
-        ],
-        [
           'PATCH /api/threads/thread-one/cloud-bindings',
           jsonResponse({ bindings: { 'gpt-pro': `https://chatgpt.com/c/${newerId}` } }),
         ],
         [
-          'POST /api/messages/source-one/queue-targets/gpt-pro/retry',
+          'POST /api/messages/source-one/delivery-targets/gpt-pro/retry',
           jsonResponse({ status: 'retry_queued', attemptId: 'attempt-next' }, 202),
         ],
       ]);
@@ -187,7 +183,7 @@ describe('CloudBindingRecoveryCard', () => {
       return response;
     });
 
-    await renderCard({ attemptId: undefined });
+    await renderCard({ attemptId: 'attempt-hydrated' });
 
     await act(async () => {
       await vi.waitFor(() => {
@@ -214,7 +210,7 @@ describe('CloudBindingRecoveryCard', () => {
       await Promise.resolve();
       await Promise.resolve();
     });
-    expect(mockApiFetch).toHaveBeenCalledWith('/api/messages/source-one/queue-targets/gpt-pro/retry', {
+    expect(mockApiFetch).toHaveBeenCalledWith('/api/messages/source-one/delivery-targets/gpt-pro/retry', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ attemptId: 'attempt-hydrated' }),
@@ -272,7 +268,7 @@ describe('CloudBindingRecoveryCard', () => {
       if (path === '/api/threads/thread-one/cloud-bindings') {
         return jsonResponse({ bindings: { 'gpt-pro': `https://chatgpt.com/c/${conversationId}` } });
       }
-      if (path === '/api/messages/source-one/queue-targets/gpt-pro/retry') {
+      if (path === '/api/messages/source-one/delivery-targets/gpt-pro/retry') {
         return jsonResponse({ status: 'retry_queued' }, 202);
       }
       throw new Error(`unexpected ${String(path)} ${String(init?.method)}`);
@@ -291,7 +287,7 @@ describe('CloudBindingRecoveryCard', () => {
       mockApiFetch.mock.calls.filter(([path, init]) => path.includes('/cloud-bindings') && init?.method === 'PATCH'),
     ).toHaveLength(0);
     expect(mockApiFetch).toHaveBeenCalledWith(
-      '/api/messages/source-one/queue-targets/gpt-pro/retry',
+      '/api/messages/source-one/delivery-targets/gpt-pro/retry',
       expect.any(Object),
     );
   });
@@ -302,7 +298,9 @@ describe('CloudBindingRecoveryCard', () => {
       .mockResolvedValueOnce(jsonResponse(pluginState([{ conversationId }])))
       .mockResolvedValueOnce(jsonResponse({ bindings: {} }))
       .mockResolvedValueOnce(jsonResponse({ bindings: { 'gpt-pro': `https://chatgpt.com/c/${conversationId}` } }))
-      .mockResolvedValueOnce(jsonResponse({ error: 'temporarily unavailable', code: 'QUEUE_RETRY_UNAVAILABLE' }, 503))
+      .mockResolvedValueOnce(
+        jsonResponse({ error: 'temporarily unavailable', code: 'DELIVERY_RETRY_UNAVAILABLE' }, 503),
+      )
       .mockResolvedValueOnce(jsonResponse({ status: 'retry_queued' }, 202));
 
     await renderCard();
@@ -322,7 +320,7 @@ describe('CloudBindingRecoveryCard', () => {
       mockApiFetch.mock.calls.filter(([path, init]) => path.includes('/cloud-bindings') && init?.method === 'PATCH'),
     ).toHaveLength(1);
     expect(
-      mockApiFetch.mock.calls.filter(([path]) => path === '/api/messages/source-one/queue-targets/gpt-pro/retry'),
+      mockApiFetch.mock.calls.filter(([path]) => path === '/api/messages/source-one/delivery-targets/gpt-pro/retry'),
     ).toHaveLength(2);
   });
 });

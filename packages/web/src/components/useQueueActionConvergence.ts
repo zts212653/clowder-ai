@@ -2,18 +2,16 @@
 
 /*
 Architecture cell: dispatch
-Queue actions consume the existing per-target eligibility and authoritative Queue projection.
+Queue actions consume per-target eligibility joined onto the authoritative source-entry Queue projection.
 */
 
-import type { QueueRecoveryAction } from '@cat-cafe/shared';
 import { useCallback, useState } from 'react';
 import type { QueueActiveInvocationSlot } from '@/hooks/queue-active-invocation-hydration';
 import { reconcileQueueActiveInvocationProjection } from '@/hooks/queue-active-invocation-reconciliation';
 import { useChatStore } from '@/stores/chatStore';
 import { useToastStore } from '@/stores/toastStore';
 import { apiFetch } from '@/utils/api-client';
-
-type ForceResetAction = Extract<QueueRecoveryAction, { kind: 'force_reset' }>;
+import type { SteerSubmission } from './SteerQueuedEntryModal';
 
 function steerFailureMessage(status: number, code: unknown, error: unknown): string {
   if (code === 'ENTRY_PROCESSING') return '该消息正在处理，已刷新最新队列';
@@ -23,12 +21,8 @@ function steerFailureMessage(status: number, code: unknown, error: unknown): str
 
 export function useQueueActionConvergence(threadId: string) {
   const setQueue = useChatStore((state) => state.setQueue);
-  const setQueuePaused = useChatStore((state) => state.setQueuePaused);
   const addToast = useToastStore((state) => state.addToast);
-  const [steerAction, setSteerAction] = useState<Extract<QueueRecoveryAction, { kind: 'steer' }> | null>(null);
-  const [forceResetAction, setForceResetAction] = useState<ForceResetAction | null>(null);
-  const [retryingAttemptIds, setRetryingAttemptIds] = useState<Set<string>>(() => new Set());
-  const [resettingActionIds, setResettingActionIds] = useState<Set<string>>(() => new Set());
+  const [steerEntryId, setSteerEntryId] = useState<string | null>(null);
 
   const refreshQueue = useCallback(async () => {
     const response = await apiFetch(`/api/threads/${threadId}/queue`);
@@ -36,116 +30,88 @@ export function useQueueActionConvergence(threadId: string) {
     const data = await response.json().catch(() => ({}));
     if (!Array.isArray(data?.queue)) return false;
     setQueue(threadId, data.queue);
-    if (typeof data?.paused === 'boolean') setQueuePaused(threadId, data.paused, data.pauseReason);
     reconcileQueueActiveInvocationProjection({
       threadId,
       slots: data.activeInvocations as QueueActiveInvocationSlot[] | undefined,
       source: 'QueueActionRefresh',
     });
     return true;
-  }, [setQueue, setQueuePaused, threadId]);
+  }, [setQueue, threadId]);
 
-  const handleRetry = useCallback(
-    async (action: Extract<QueueRecoveryAction, { kind: 'retry_target' }>) => {
-      setRetryingAttemptIds((current) => new Set(current).add(action.id));
+  const handleSteerConfirm = useCallback(
+    async ({ sourceRecordId, observedPendingTargetIds, actions }: SteerSubmission) => {
+      if (!steerEntryId || !sourceRecordId || actions.length === 0) return;
       try {
-        const response = await apiFetch(action.request.path, {
-          method: action.request.method,
-          ...(action.request.body
-            ? { headers: { 'content-type': 'application/json' }, body: JSON.stringify(action.request.body) }
-            : {}),
+        const mappingResponse = await apiFetch(`/api/threads/${threadId}/queue/${steerEntryId}/targets`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            sourceRecordId,
+            observedPendingTargetIds,
+            targets: actions.map((action) => ({
+              targetCatId: action.targetId,
+              strategy: action.strategy,
+              membershipAtOpen: action.membershipAtOpen,
+            })),
+          }),
         });
-        if (!response.ok) {
-          const data = await response.json().catch(() => ({}));
+        const mapping = await mappingResponse.json().catch(() => ({}));
+        if (!mappingResponse.ok || !Array.isArray(mapping?.targets)) {
+          if (mappingResponse.status === 409) {
+            setSteerEntryId(null);
+            await refreshQueue();
+          }
           addToast({
             type: 'error',
-            title: '重试未成功',
-            message: data?.error ?? '重试未能排入队列',
+            title: 'Steer 失败',
+            message: steerFailureMessage(mappingResponse.status, mapping?.code, mapping?.error),
+            threadId,
+            duration: 5000,
+          });
+          return;
+        }
+
+        const failures: string[] = [];
+        for (const target of mapping.targets as Array<{
+          entryId: string;
+          targetCatId: string;
+          strategy: 'guide_reply' | 'interrupt_reply';
+        }>) {
+          const route = target.strategy === 'guide_reply' ? 'continue' : 'steer';
+          const response = await apiFetch(`/api/threads/${threadId}/queue/${target.entryId}/${route}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ targetCatId: target.targetCatId }),
+          });
+          if (response.ok) continue;
+          const data = await response.json().catch(() => ({}));
+          if (response.status === 404 || data?.code === 'ENTRY_PROCESSING' || data?.code === 'ENTRY_NOT_FOUND') {
+            continue;
+          }
+          failures.push(`${target.targetCatId}: ${steerFailureMessage(response.status, data?.code, data?.error)}`);
+        }
+        setSteerEntryId(null);
+        await refreshQueue();
+        if (failures.length > 0) {
+          addToast({
+            type: 'error',
+            title: '部分 Steer 未完成',
+            message: failures.join('；'),
             threadId,
             duration: 5000,
           });
         }
       } catch {
-        addToast({ type: 'error', title: '重试未成功', message: '重试请求没有完成', threadId, duration: 5000 });
-      } finally {
-        setRetryingAttemptIds((current) => {
-          const next = new Set(current);
-          next.delete(action.id);
-          return next;
-        });
+        addToast({ type: 'error', title: 'Steer 失败', message: 'Steer 失败，请重试', threadId, duration: 5000 });
       }
     },
-    [addToast, threadId],
+    [addToast, refreshQueue, steerEntryId, threadId],
   );
 
-  const handleSteerConfirm = useCallback(async () => {
-    if (!steerAction) return;
-    try {
-      const response = await apiFetch(steerAction.request.path, { method: steerAction.request.method });
-      if (response.ok) {
-        setSteerAction(null);
-        return;
-      }
-      const data = await response.json().catch(() => ({}));
-      if (response.status === 409) {
-        setSteerAction(null);
-        await refreshQueue();
-      }
-      addToast({
-        type: 'error',
-        title: 'Steer 失败',
-        message: steerFailureMessage(response.status, data?.code, data?.error),
-        threadId,
-        duration: 5000,
-      });
-    } catch {
-      addToast({ type: 'error', title: 'Steer 失败', message: 'Steer 失败，请重试', threadId, duration: 5000 });
-    }
-  }, [addToast, refreshQueue, steerAction, threadId]);
-
-  const handleForceResetConfirm = useCallback(async () => {
-    if (!forceResetAction) return;
-    const action = forceResetAction;
-    setResettingActionIds((current) => new Set(current).add(action.id));
-    try {
-      const response = await apiFetch(action.request.path, { method: action.request.method });
-      if (!response.ok) {
-        const data = await response.json().catch(() => ({}));
-        addToast({
-          type: 'error',
-          title: '恢复未成功',
-          message: data?.error ?? '卡住的处理仍未解除',
-          threadId,
-          duration: 5000,
-        });
-        return;
-      }
-      await refreshQueue();
-      addToast({ type: 'success', title: '已恢复', message: '卡住的处理已解除', threadId, duration: 3000 });
-      setForceResetAction(null);
-    } catch {
-      addToast({ type: 'error', title: '恢复未成功', message: '恢复请求没有完成', threadId, duration: 5000 });
-    } finally {
-      setResettingActionIds((current) => {
-        const next = new Set(current);
-        next.delete(action.id);
-        return next;
-      });
-    }
-  }, [addToast, forceResetAction, refreshQueue, threadId]);
-
   return {
-    steerEntryId: steerAction?.entryId ?? null,
-    forceResetAction,
-    retryingAttemptIds,
-    resettingActionIds,
-    handleRetry,
-    refreshQueue,
+    steerEntryId,
     handleSteerConfirm,
-    handleSteerOpen: setSteerAction,
-    handleSteerCancel: () => setSteerAction(null),
-    handleForceResetConfirm,
-    handleForceResetOpen: setForceResetAction,
-    handleForceResetCancel: () => setForceResetAction(null),
+    handleSteerOpen: setSteerEntryId,
+    handleSteerCancel: () => setSteerEntryId(null),
   };
 }

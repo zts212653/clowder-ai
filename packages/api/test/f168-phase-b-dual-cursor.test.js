@@ -285,7 +285,7 @@ describe('IssueCommentTaskSpec: with eventLog — dual-cursor', () => {
       taskStore,
       router,
       comments,
-      extra: { eventLog, invokeTrigger: { trigger: async () => 'dispatched' } },
+      extra: { eventLog, invokeTrigger: { trigger: async () => 'enqueued' } },
     });
 
     const gate = await runGate(spec);
@@ -1163,7 +1163,7 @@ describe('PR #1181 maintainer regressions: durable issue wake lifecycle', () => 
     taskStore.addTask(makeTask());
     const router = makeIssueCommentRouter();
     const eventLog = makeEventLog();
-    const outcomes = ['full', 'dispatched'];
+    const outcomes = ['full', 'enqueued'];
     const triggerCalls = [];
     const spec = createIssueCommentTaskSpec({
       taskStore,
@@ -1237,7 +1237,7 @@ describe('PR #1181 maintainer regressions: durable issue wake lifecycle', () => 
     taskStore.addTask(makeTask());
     const router = makeIssueCommentRouter();
     const comments = [{ id: 100, author: 'maintainer', body: 'closing note' }];
-    const outcomes = ['full', 'dispatched'];
+    const outcomes = ['full', 'enqueued'];
     let fetchCalls = 0;
     const spec = createIssueCommentTaskSpec({
       taskStore,
@@ -1276,7 +1276,7 @@ describe('PR #1181 maintainer regressions: durable issue wake lifecycle', () => 
     taskStore.addTask(makeTask());
     let issueState = 'closed';
     let stateFetches = 0;
-    const outcomes = ['full', 'dispatched'];
+    const outcomes = ['full', 'enqueued'];
     const spec = createIssueCommentTaskSpec({
       taskStore,
       issueCommentRouter: makeIssueCommentRouter(),
@@ -1317,7 +1317,7 @@ describe('PR #1181 maintainer regressions: durable issue wake lifecycle', () => 
       fetchComments: async (_repo, _issue, since) => comments.filter((comment) => comment.id > since),
       fetchIssueState: async () => 'closed',
       isEchoComment: (comment) => comment.author === 'self',
-      invokeTrigger: { trigger: async () => 'dispatched' },
+      invokeTrigger: { trigger: async () => 'enqueued' },
       eventLog: makeEventLog(),
       log: { info: () => {}, error: () => {}, warn: () => {} },
     });

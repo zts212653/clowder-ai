@@ -114,6 +114,7 @@ export const sendMessageSchema = z
     contextAttachments: requestContextAttachmentsSchema,
     /** Legacy fallback only; preferred identity source is X-Cat-Cafe-User header. */
     userId: z.string().min(1).max(100).optional(),
+    /** Explicit structured targets (for example the composer Steer member picker). */
     mentions: z.array(catIdSchema()).optional(),
     threadId: z.string().min(1).max(100).optional(),
     /** Client-provided idempotency key (UUID). Optional — server generates one if absent. */
@@ -122,15 +123,14 @@ export const sendMessageSchema = z
     visibility: z.enum(['public', 'whisper']).optional(),
     /** F35: Whisper recipients. Required when visibility='whisper'. */
     whisperTo: z.array(catIdSchema()).optional(),
-    /** F39: Delivery mode. undefined = smart default (queue when active, immediate otherwise). */
-    deliveryMode: z.enum(['immediate', 'queue', 'force']).optional(),
-    /** F264: author-declared work disposition. Missing is server-default next_work. */
+    /** F264: author-declared work disposition. Missing uses the server product default. */
     messageDisposition: z.enum(['continue_current', 'next_work']).optional(),
     /** #699: ID of message being replied to (quote). */
     replyTo: z.string().min(1).max(100).optional(),
     /** F294: transient selection plus exact cats; server persists only the canonical refs-only carrier. */
     messageBundle: messageBundleForwardSchema.optional(),
   })
+  .strict()
   .superRefine((data, ctx) => {
     if (
       data.content.trim().length === 0 &&

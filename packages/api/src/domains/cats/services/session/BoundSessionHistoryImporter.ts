@@ -94,9 +94,9 @@ function mapTranscriptEventToMessage(
   if (!content) return null;
 
   const base: AppendMessageInput = {
+    from: evtType === 'user' ? { kind: 'user', userId } : { kind: 'agent', catId: session.catId },
     userId,
     threadId: session.threadId,
-    catId: evtType === 'user' ? null : session.catId,
     content,
     mentions: [],
     timestamp: evt.t,

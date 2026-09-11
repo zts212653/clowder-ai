@@ -2,9 +2,11 @@
 
 import assert from 'node:assert';
 import { beforeEach, describe, it } from 'node:test';
+import { resolveManagedCommandWakeEventCarrier } from '../dist/domains/ball-custody/managed-command-wake-lifecycle.js';
 import { InvocationQueue } from '../dist/domains/cats/services/agents/invocation/InvocationQueue.js';
 import { QueueProcessor } from '../dist/domains/cats/services/agents/invocation/QueueProcessor.js';
 import { ConnectorInvokeTrigger } from '../dist/infrastructure/email/ConnectorInvokeTrigger.js';
+import { canonicalTestMessageInput, canonicalTestQueueInput } from './helpers/message-from-fixtures.js';
 
 // ─── Shared Mocks ───────────────────────────────────────────────
 
@@ -34,6 +36,12 @@ function mockRouter(opts = {}) {
     ackCalls,
     /** @type {any} */
     router: {
+      async resolveExplicitTargets(requestedCatIds) {
+        return [...requestedCatIds];
+      },
+      async resolveConversationTargetsAtAdmission(requestedCatIds) {
+        return requestedCatIds.length > 0 ? [...requestedCatIds] : ['opus'];
+      },
       async *routeExecution(userId, message, threadId, userMessageId, targetCats, intent, _options) {
         calls.push({ userId, message, threadId, userMessageId, targetCats, intent });
 
@@ -232,15 +240,19 @@ describe('Queue Integration (E2E scenarios)', () => {
     trackerMock.setActive('thread-1');
 
     // 2. Enqueue a user message (simulating what POST /api/messages does)
-    const result = queue.enqueue({
-      ownerAuthProvenance: 'unknown',
-      threadId: 'thread-1',
-      userId: 'user-1',
-      content: 'Fix the bug',
-      source: 'user',
-      targetCats: ['opus'],
-      intent: 'execute',
-    });
+    const result = await queue.enqueueDurable(
+      canonicalTestQueueInput({
+        ownerAuthProvenance: 'unknown',
+        threadId: 'thread-1',
+        userId: 'user-1',
+        kind: 'conversation_input',
+        sourceId: 'integration-fix-bug',
+        content: 'Fix the bug',
+        source: 'user',
+        targetCats: ['opus'],
+        intent: 'execute',
+      }),
+    );
     assert.strictEqual(result.outcome, 'enqueued');
 
     // 3. Previous invocation completes (succeeded → auto-dequeue)
@@ -271,16 +283,20 @@ describe('Queue Integration (E2E scenarios)', () => {
       messageStore: /** @type {any} */ ({ getById: async () => null }),
       log: noopLog(),
     });
-    queue.enqueue({
-      ownerAuthProvenance: 'unknown',
-      threadId: 'thread-1',
-      userId: 'user-1',
-      content: 'Run only after the old session pointer is cleared',
-      source: 'user',
-      targetCats: ['opus'],
-      intent: 'execute',
-      autoExecute: true,
-    });
+    await queue.enqueueDurable(
+      canonicalTestQueueInput({
+        ownerAuthProvenance: 'unknown',
+        threadId: 'thread-1',
+        userId: 'user-1',
+        kind: 'conversation_input',
+        sourceId: 'integration-session-seal',
+        content: 'Run only after the old session pointer is cleared',
+        source: 'user',
+        targetCats: ['opus'],
+        intent: 'execute',
+        autoExecute: true,
+      }),
+    );
 
     const start = await localProcessor.processNext('thread-1', 'user-1');
     assert.equal(start.started, true);
@@ -298,44 +314,63 @@ describe('Queue Integration (E2E scenarios)', () => {
     assert.equal(queue.list('thread-1', 'user-1').length, 0);
   });
 
-  it('E2E: cancel → queue paused → processNext → resumes', async () => {
+  it('E2E: terminal cancellation requests the next Queue drain', async () => {
     // 1. Enqueue a message
     trackerMock.setActive('thread-1');
-    queue.enqueue({
-      ownerAuthProvenance: 'unknown',
-      threadId: 'thread-1',
-      userId: 'user-1',
-      content: 'Continue working',
-      source: 'user',
-      targetCats: ['opus'],
-      intent: 'execute',
-    });
+    await queue.enqueueDurable(
+      canonicalTestQueueInput({
+        ownerAuthProvenance: 'unknown',
+        threadId: 'thread-1',
+        userId: 'user-1',
+        kind: 'conversation_input',
+        sourceId: 'integration-terminal-cancel',
+        content: 'Continue working',
+        source: 'user',
+        targetCats: ['opus'],
+        intent: 'execute',
+      }),
+    );
 
-    // 2. Cancel invocation → queue pauses
+    // 2. Terminal cancellation requests a drain.
     trackerMock.clearActive('thread-1');
     await processor.onInvocationComplete('thread-1', 'opus', 'canceled');
-
-    // 3. Verify queue_paused emitted
-    const pauseEmit = socketMock.userEmits.find((e) => e.event === 'queue_paused');
-    assert.ok(pauseEmit, 'Should emit queue_paused');
-    assert.strictEqual(pauseEmit.data.reason, 'canceled');
-    assert.ok(processor.isPaused('thread-1'), 'Thread should be paused');
-
-    // 4. No auto-dequeue should have happened
-    assert.strictEqual(routerMock.calls.length, 0, 'Should NOT auto-dequeue on cancel');
-
-    // 5. co-creator manually triggers processNext
-    const processResult = await processor.processNext('thread-1', 'user-1');
-    assert.strictEqual(processResult.started, true);
     await settle();
 
-    // 6. Verify message was processed
+    // 3. Verify the message was processed without a Continue transition.
     assert.strictEqual(routerMock.calls.length, 1);
     assert.strictEqual(routerMock.calls[0].message, 'Continue working');
-    assert.strictEqual(processor.isPaused('thread-1'), false, 'Thread should be unpaused');
+    assert.equal(
+      socketMock.userEmits.some((event) => event.event === 'queue_paused'),
+      false,
+    );
   });
 
   it('E2E: connector message arrives during active invocation → queued', async () => {
+    const { MessageStore } = await import('../dist/domains/cats/services/stores/ports/MessageStore.js');
+    const messageStore = new MessageStore();
+    const sourceMessage = messageStore.append(
+      canonicalTestMessageInput({
+        userId: 'user-1',
+        catId: null,
+        from: { kind: 'external', connectorId: 'email' },
+        content: 'Review email content',
+        mentions: ['opus'],
+        origin: 'connector',
+        timestamp: Date.now(),
+        threadId: 'thread-1',
+        deliveryStatus: 'queued',
+      }),
+    );
+    const localProcessor = new QueueProcessor({
+      queue,
+      invocationTracker: trackerMock.tracker,
+      invocationRecordStore: recordMock.store,
+      router: routerMock.router,
+      socketManager: socketMock.manager,
+      messageStore,
+      log: noopLog(),
+    });
+
     // 1. Simulate active invocation
     trackerMock.setActive('thread-1');
 
@@ -346,10 +381,12 @@ describe('Queue Integration (E2E scenarios)', () => {
       invocationRecordStore: recordMock.store,
       invocationTracker: trackerMock.tracker,
       invocationQueue: queue,
+      queueProcessor: localProcessor,
+      messageStore,
       log: noopLog(),
     });
 
-    trigger.trigger('thread-1', /** @type {any} */ ('opus'), 'user-1', 'Review email content', 'msg-connector-1');
+    trigger.trigger('thread-1', /** @type {any} */ ('opus'), 'user-1', sourceMessage.content, sourceMessage.id);
     await settle();
 
     // 3. Verify it was queued (NOT directly executed)
@@ -358,9 +395,9 @@ describe('Queue Integration (E2E scenarios)', () => {
 
     const entries = queue.list('thread-1', 'user-1');
     assert.strictEqual(entries.length, 1);
-    assert.strictEqual(entries[0].source, 'connector');
-    assert.strictEqual(entries[0].content, 'Review email content');
-    assert.strictEqual(entries[0].messageId, 'msg-connector-1');
+    assert.deepEqual(entries[0].from, { kind: 'external', connectorId: 'email' });
+    assert.strictEqual(entries[0].payload.content, 'Review email content');
+    assert.strictEqual(entries[0].payload.messageId, sourceMessage.id);
 
     // 4. queue_updated emitted
     const queueUpdate = socketMock.userEmits.find((e) => e.event === 'queue_updated');
@@ -368,142 +405,184 @@ describe('Queue Integration (E2E scenarios)', () => {
 
     // 5. Active invocation completes → auto-dequeue
     trackerMock.clearActive('thread-1');
-    await processor.onInvocationComplete('thread-1', 'opus', 'succeeded');
+    await localProcessor.onInvocationComplete('thread-1', 'opus', 'succeeded');
     await settle();
 
     assert.strictEqual(routerMock.calls.length, 1, 'Should auto-dequeue after completion');
     assert.strictEqual(routerMock.calls[0].message, 'Review email content');
   });
 
-  it('E2E: force mode aborts + executes immediately (queue unchanged)', async () => {
-    // Setup: active invocation + one queued message
-    trackerMock.setActive('thread-1');
-    queue.enqueue({
-      ownerAuthProvenance: 'unknown',
-      threadId: 'thread-1',
-      userId: 'user-1',
-      content: 'Queued msg',
-      source: 'user',
-      targetCats: ['opus'],
-      intent: 'execute',
-    });
-
-    // Force send simulates what POST /api/messages does with deliveryMode=force:
-    // 1. Cancel active invocation (InvocationTracker.cancel)
-    // 2. Direct execution (bypass queue)
-    // The force send itself is handled by messages.ts, not the queue.
-    // After force completes → onInvocationComplete('canceled') pauses queue.
-
-    trackerMock.clearActive('thread-1');
-    await processor.onInvocationComplete('thread-1', 'opus', 'canceled');
-
-    // Queue should be paused (canceled status)
-    assert.ok(processor.isPaused('thread-1'), 'Queue should pause after force-cancel');
-
-    // Queue message should still be there (not auto-dequeued)
-    const entries = queue.list('thread-1', 'user-1');
-    assert.strictEqual(entries.length, 1, 'Queued message should persist');
-    assert.strictEqual(entries[0].content, 'Queued msg');
-
-    // pause event emitted
-    const pauseEmit = socketMock.userEmits.find((e) => e.event === 'queue_paused');
-    assert.ok(pauseEmit, 'Should emit queue_paused');
-  });
-
-  // ── F39 bugfix: clearPause prevents state poisoning ──
-
-  it('bugfix: clearPause prevents stale pause from old invocation cleanup', async () => {
-    // Simulate force-send flow:
-    // 1. Active invocation running
-    trackerMock.setActive('thread-1');
-    queue.enqueue({
-      ownerAuthProvenance: 'unknown',
-      threadId: 'thread-1',
-      userId: 'user-1',
-      content: 'Queued msg',
-      source: 'user',
-      targetCats: ['opus'],
-      intent: 'execute',
-    });
-
-    // 2. Force cancel → clearPause (what messages.ts now does)
-    trackerMock.clearActive('thread-1');
-    processor.clearPause('thread-1');
-
-    // 3. Old invocation's async cleanup calls onInvocationComplete('canceled')
-    await processor.onInvocationComplete('thread-1', 'opus', 'canceled');
-
-    // Queue SHOULD be paused (the old cleanup still fires)
-    // But the force-send's new invocation will start() and run independently.
-    // The key: clearPause was called BEFORE the stale pause, so the pause
-    // wins. But a subsequent succeeded completion will clear it.
-    // For now verify clearPause itself works:
-    processor.clearPause('thread-1');
-    assert.ok(!processor.isPaused('thread-1'), 'clearPause should remove paused state');
-  });
-
-  it('bugfix: ConnectorInvokeTrigger abort mid-loop → should NOT ack or mark succeeded', async () => {
-    // Setup: no active invocation so trigger goes to direct execution
-    const controller = new AbortController();
-    trackerMock.tracker.tryStartThread = () => {
-      trackerMock.activeThreads.add('thread-1');
-      return controller;
-    };
-
-    // Router yields one msg, then aborts (simulating external cancel), then ends normally
-    const ackCalls = /** @type {any[]} */ ([]);
-    const customRouter = {
-      async *routeExecution(_userId, _message, _threadId, _userMessageId, _targetCats, _intent, options) {
+  it('E2E: a managed-command wake waits behind the active turn and settles from its response terminal', async () => {
+    const { MessageStore } = await import('../dist/domains/cats/services/stores/ports/MessageStore.js');
+    const messageStore = new MessageStore();
+    const wakeMessage = messageStore.append(
+      canonicalTestMessageInput({
+        userId: 'user-1',
+        catId: null,
+        from: { kind: 'system', service: 'managed-command-wake' },
+        content: '[定时任务] 持球唤醒（命令完成）：门禁已结束。',
+        mentions: ['opus'],
+        origin: 'connector',
+        timestamp: Date.now(),
+        threadId: 'thread-1',
+        deliveryStatus: 'queued',
+        idempotencyKey: 'hold-ball-completion:hold-ball-e2e',
+        source: {
+          connector: 'hold-ball',
+          label: '持球通知',
+          icon: '🏓',
+          meta: {
+            managedHold: true,
+            phase: 'wake',
+            taskId: 'hold-ball-e2e',
+            threadId: 'thread-1',
+            catId: 'opus',
+            wakeWhen: true,
+          },
+        },
+      }),
+    );
+    const routeCalls = [];
+    let responseMessageId;
+    const lifecycleRouter = {
+      async resolveExplicitTargets(requestedCatIds) {
+        return [...requestedCatIds];
+      },
+      async resolveConversationTargetsAtAdmission(requestedCatIds) {
+        return [...requestedCatIds];
+      },
+      async *routeExecution(userId, message, threadId, _messageId, targetCats, _intent, options) {
+        routeCalls.push({ userId, message, threadId, targetCats });
+        const invocationId = 'managed-wake-invocation';
         const startedAt = Date.now();
-        yield {
-          type: 'system_info',
-          catId: 'opus',
-          content: JSON.stringify({
-            type: 'invocation_created',
-            invocationId: 'child-abort-test',
-            parentInvocationId: options.parentInvocationId,
-            startedAt,
-          }),
-          timestamp: startedAt,
-        };
-        yield { type: 'text', catId: 'opus', content: 'partial', timestamp: Date.now() };
-        // External cancel while connector is streaming
-        controller.abort();
-        // Generator ends normally (no throw)
+        const admission = await options.onLifecycleInvocationStarted({
+          threadId,
+          userId,
+          catId: targetCats[0],
+          invocationId,
+          parentInvocationId: options.parentInvocationId,
+          startedAt,
+        });
+        responseMessageId = admission.responseMessageId;
+        const terminal = await messageStore.commitLifecycleResponseTerminal(responseMessageId, {
+          invocationId,
+          status: 'completed',
+          completedAt: startedAt + 1,
+          content: '门禁失败，已读取结果并完成处置。',
+          mentions: [],
+          origin: 'stream',
+        });
+        assert.equal(terminal.kind, 'applied');
+        yield { type: 'done', catId: targetCats[0], isFinal: true, timestamp: startedAt + 1 };
       },
-      async ackCollectedCursors(userId, threadId) {
-        ackCalls.push({ userId, threadId });
-      },
+      async ackCollectedCursors() {},
     };
-
+    const localProcessor = new QueueProcessor({
+      queue,
+      invocationTracker: trackerMock.tracker,
+      invocationRecordStore: recordMock.store,
+      router: lifecycleRouter,
+      socketManager: socketMock.manager,
+      messageStore,
+      log: noopLog(),
+    });
     const trigger = new ConnectorInvokeTrigger({
-      router: /** @type {any} */ (customRouter),
+      socketManager: socketMock.manager,
+      invocationQueue: queue,
+      queueProcessor: localProcessor,
+      messageStore,
+      log: noopLog(),
+    });
+
+    trackerMock.setActive('thread-1');
+    assert.equal(
+      await trigger.trigger(
+        'thread-1',
+        /** @type {any} */ ('opus'),
+        'user-1',
+        wakeMessage.content,
+        wakeMessage.id,
+        undefined,
+        { priority: 'urgent', sourceCategory: 'scheduled' },
+      ),
+      'enqueued',
+    );
+
+    assert.equal(routeCalls.length, 0, 'the wake must not join or preempt the active provider turn');
+    assert.equal(queue.findEntryWithMessageId('thread-1', wakeMessage.id)?.status, 'queued');
+    assert.equal((await messageStore.getById(wakeMessage.id)).deliveryStatus, 'queued');
+
+    trackerMock.clearActive('thread-1');
+    await localProcessor.onInvocationComplete('thread-1', 'opus', 'succeeded');
+    await settle(200);
+
+    assert.equal(routeCalls.length, 1, 'the wake must start as the next Queue-owned invocation');
+    assert.equal(queue.findEntryWithMessageId('thread-1', wakeMessage.id), undefined);
+    const settledWake = await messageStore.getById(wakeMessage.id);
+    assert.equal(settledWake.deliveryStatus, 'delivered');
+    assert.equal(settledWake.lifecycle.dispatchRefs.length, 1);
+    const response = await messageStore.getById(responseMessageId);
+    assert.deepEqual(
+      resolveManagedCommandWakeEventCarrier(settledWake, response, false, {
+        threadId: 'thread-1',
+        userId: 'user-1',
+        catId: 'opus',
+      }),
+      { state: 'handled', invocationId: 'managed-wake-invocation' },
+      'the canonical response terminal must retire the hold without a manual disposition tool',
+    );
+  });
+
+  it('E2E: connector admission honors an active cancel/reset suppression fence', async () => {
+    const { MessageStore } = await import('../dist/domains/cats/services/stores/ports/MessageStore.js');
+    const messageStore = new MessageStore();
+    const sourceMessage = messageStore.append(
+      canonicalTestMessageInput({
+        userId: 'user-1',
+        catId: null,
+        from: { kind: 'external', connectorId: 'email' },
+        content: 'Do not restart after reset',
+        mentions: ['opus'],
+        origin: 'connector',
+        timestamp: Date.now(),
+        threadId: 'thread-1',
+        deliveryStatus: 'queued',
+      }),
+    );
+    const localProcessor = new QueueProcessor({
+      queue,
+      invocationTracker: trackerMock.tracker,
+      invocationRecordStore: recordMock.store,
+      router: routerMock.router,
+      socketManager: socketMock.manager,
+      messageStore,
+      log: noopLog(),
+    });
+    localProcessor.suppressAutoResume('thread-1', 'opus', ['cancelled-invocation']);
+    const trigger = new ConnectorInvokeTrigger({
+      router: routerMock.router,
       socketManager: socketMock.manager,
       invocationRecordStore: recordMock.store,
       invocationTracker: trackerMock.tracker,
       invocationQueue: queue,
+      queueProcessor: localProcessor,
+      messageStore,
       log: noopLog(),
     });
 
-    trigger.trigger('thread-1', /** @type {any} */ ('opus'), 'user-1', 'Review content', 'msg-conn-abort');
-    await settle(300);
+    await trigger.trigger('thread-1', /** @type {any} */ ('opus'), 'user-1', sourceMessage.content, sourceMessage.id);
+    await settle();
 
-    // ackCollectedCursors should NOT be called
-    assert.strictEqual(ackCalls.length, 0, 'should NOT ack cursors for aborted connector invocation');
-
-    // invocationRecordStore should have 'canceled', NOT 'succeeded'
-    const succeededUpdate = recordMock.updates.find((u) => u.data.status === 'succeeded');
-    assert.ok(!succeededUpdate, 'should NOT mark connector invocation as succeeded when aborted');
-
-    const canceledUpdate = recordMock.updates.find((u) => u.data.status === 'canceled');
-    assert.ok(canceledUpdate, 'should mark connector invocation as canceled when aborted');
+    assert.equal(routerMock.calls.length, 0, 'a late connector wake must not bypass the reset owner');
+    assert.equal(queue.findEntryWithMessageId('thread-1', sourceMessage.id)?.status, 'queued');
+    assert.equal(localProcessor.isAutoResumeSuppressed('thread-1', 'opus'), true);
   });
 
-  // ── F122B bugfix: autoExecute retry on completion ──
+  // ── RFC #1356: no-lost-wakeup drain on completion ──
 
   it('bugfix: autoExecute entry orphaned when target cat busy at enqueue → recovered on completion', async () => {
     // Scenario: gpt52 is executing via messages.ts path (tracked by invocationTracker).
-    // An autoExecute entry for gpt52 is enqueued. tryAutoExecute skips it because
+    // An entry for gpt52 is enqueued. requestDrain stops at it because
     // invocationTracker.has(thread, 'gpt52') = true.
     // Later, gpt52's messages.ts execution completes and calls onInvocationComplete.
     // The completion chain (tryExecuteNextAcrossUsers) should pick up the orphaned entry.
@@ -515,20 +594,24 @@ describe('Queue Integration (E2E scenarios)', () => {
     trackerMock.setActive('thread-1');
 
     // 2. autoExecute entry for gpt52 is enqueued
-    const enqResult = queue.enqueue({
-      ownerAuthProvenance: 'unknown',
-      threadId: 'thread-1',
-      userId: 'agent-user',
-      content: 'P1 修完，请 review',
-      source: 'agent',
-      targetCats: ['gpt52'],
-      intent: 'execute',
-      autoExecute: true,
-    });
+    const enqResult = await queue.enqueueDurable(
+      canonicalTestQueueInput({
+        ownerAuthProvenance: 'unknown',
+        threadId: 'thread-1',
+        userId: 'agent-user',
+        kind: 'private_input',
+        sourceId: 'integration-orphan-review',
+        content: 'P1 修完，请 review',
+        source: 'agent',
+        targetCats: ['gpt52'],
+        intent: 'execute',
+        autoExecute: true,
+      }),
+    );
     assert.strictEqual(enqResult.outcome, 'enqueued');
 
-    // 3. tryAutoExecute is called (as enqueueA2ATargets does after enqueue)
-    await processor.tryAutoExecute('thread-1');
+    // 3. The enqueue signal requests the per-thread drain.
+    await processor.requestDrain('thread-1');
 
     // 4. Entry should still be queued (not picked up because gpt52 slot busy)
     const entries = queue.list('thread-1', 'agent-user');
@@ -546,11 +629,10 @@ describe('Queue Integration (E2E scenarios)', () => {
     assert.deepStrictEqual(routerMock.calls[0].targetCats, ['gpt52']);
   });
 
-  it('bugfix: multi-cat autoExecute — tryExecuteNextAcrossUsers only picks one, re-scan picks the rest', async () => {
+  it('one completion drain starts every consecutively unblocked strict head', async () => {
     // When gpt52 completes, tryExecuteNextAcrossUsers picks the oldest entry.
     // If that entry is for a DIFFERENT free cat (codex), it starts codex's entry.
-    // But a SECOND free cat's entry (opus) would only be started via tryAutoExecute re-scan,
-    // since tryExecuteNextAcrossUsers returns after starting one entry.
+    // The dirty-bit drain keeps owning the thread and starts the next strict head too.
 
     const activeSlots = new Set();
     /** @type {any} */
@@ -592,28 +674,36 @@ describe('Queue Integration (E2E scenarios)', () => {
     activeSlots.add('thread-1:codex');
     activeSlots.add('thread-1:opus');
 
-    queue.enqueue({
-      ownerAuthProvenance: 'unknown',
-      threadId: 'thread-1',
-      userId: 'agent-user',
-      content: 'review request for codex',
-      source: 'agent',
-      targetCats: ['codex'],
-      intent: 'execute',
-      autoExecute: true,
-    });
-    queue.enqueue({
-      ownerAuthProvenance: 'unknown',
-      threadId: 'thread-1',
-      userId: 'agent-user',
-      content: 'review request for opus',
-      source: 'agent',
-      targetCats: ['opus'],
-      intent: 'execute',
-      autoExecute: true,
-    });
+    await queue.enqueueDurable(
+      canonicalTestQueueInput({
+        ownerAuthProvenance: 'unknown',
+        threadId: 'thread-1',
+        userId: 'agent-user',
+        kind: 'private_input',
+        sourceId: 'integration-codex-review',
+        content: 'review request for codex',
+        source: 'agent',
+        targetCats: ['codex'],
+        intent: 'execute',
+        autoExecute: true,
+      }),
+    );
+    await queue.enqueueDurable(
+      canonicalTestQueueInput({
+        ownerAuthProvenance: 'unknown',
+        threadId: 'thread-1',
+        userId: 'agent-user',
+        kind: 'private_input',
+        sourceId: 'integration-opus-review',
+        content: 'review request for opus',
+        source: 'agent',
+        targetCats: ['opus'],
+        intent: 'execute',
+        autoExecute: true,
+      }),
+    );
 
-    await localProcessor.tryAutoExecute('thread-1');
+    await localProcessor.requestDrain('thread-1');
     assert.strictEqual(routerMock.calls.length, 0, 'All entries skipped — all cats busy');
 
     // All three cats complete at once
@@ -629,34 +719,5 @@ describe('Queue Integration (E2E scenarios)', () => {
 
     const startedFromCompletion = routerMock.calls.length - beforeCount;
     assert.strictEqual(startedFromCompletion, 2, 'Both entries should execute from the same onInvocationComplete call');
-  });
-
-  it('bugfix: clearPause + succeeded new invocation → auto-dequeue resumes', async () => {
-    // 1. Active invocation + queued message
-    trackerMock.setActive('thread-1');
-    queue.enqueue({
-      ownerAuthProvenance: 'unknown',
-      threadId: 'thread-1',
-      userId: 'user-1',
-      content: 'Queued msg',
-      source: 'user',
-      targetCats: ['opus'],
-      intent: 'execute',
-    });
-
-    // 2. Force cancel
-    trackerMock.clearActive('thread-1');
-    processor.clearPause('thread-1');
-
-    // 3. Old cleanup pauses (race)
-    await processor.onInvocationComplete('thread-1', 'opus', 'canceled');
-
-    // 4. New force-send invocation succeeds → should auto-dequeue
-    await processor.onInvocationComplete('thread-1', 'opus', 'succeeded');
-    await settle();
-
-    // The queued message should have been auto-dequeued and executed
-    assert.strictEqual(routerMock.calls.length, 1, 'Should auto-dequeue after force-send succeeds');
-    assert.strictEqual(routerMock.calls[0].message, 'Queued msg');
   });
 });

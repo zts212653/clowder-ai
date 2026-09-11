@@ -5,6 +5,7 @@ import { describe, it } from 'node:test';
 import { CloudAssistantReturnIngestService } from '../dist/domains/cats/services/cloud-bridge/cloud-assistant-return-ingest.js';
 import { MemoryCloudReturnGrantStore } from '../dist/domains/cats/services/cloud-bridge/cloud-return-grant.js';
 import { MessageStore } from '../dist/domains/cats/services/stores/ports/MessageStore.js';
+import { canonicalTestMessageInput } from './helpers/message-from-fixtures.js';
 
 function idempotencyKey(scope) {
   const digest = createHash('sha256')
@@ -15,14 +16,17 @@ function idempotencyKey(scope) {
 
 function fixture() {
   const store = new MessageStore();
-  const source = store.append({
-    userId: 'alice',
-    catId: 'codex-sol',
-    threadId: 'thread-f247-browser-return',
-    content: '@gpt-pro answer this exact source',
-    mentions: ['gpt-pro'],
-    timestamp: 1_000,
-  });
+  // F117: append requires MessageFrom sender identity
+  const source = store.append(
+    canonicalTestMessageInput({
+      userId: 'alice',
+      catId: 'codex-sol',
+      threadId: 'thread-f247-browser-return',
+      content: '@gpt-pro answer this exact source',
+      mentions: ['gpt-pro'],
+      timestamp: 1_000,
+    }),
+  );
   const grantStore = new MemoryCloudReturnGrantStore();
   const broadcasts = [];
   const service = new CloudAssistantReturnIngestService({
@@ -78,18 +82,21 @@ describe('F247 browser-captured assistant return ingest', () => {
       sourceMessageId: source.id,
       targetCatId: 'gpt-pro',
     };
-    const mcpWinner = store.append({
-      userId: source.userId,
-      catId: 'gpt-pro',
-      threadId: source.threadId,
-      content: 'MCP won the exact source race',
-      mentions: [],
-      origin: 'callback',
-      timestamp: 1_100,
-      extra: { isExplicitPost: true },
-      replyTo: source.id,
-      idempotencyKey: idempotencyKey(scope),
-    });
+    // F117: append requires MessageFrom sender identity
+    const mcpWinner = store.append(
+      canonicalTestMessageInput({
+        userId: source.userId,
+        catId: 'gpt-pro',
+        threadId: source.threadId,
+        content: 'MCP won the exact source race',
+        mentions: [],
+        origin: 'callback',
+        timestamp: 1_100,
+        extra: { isExplicitPost: true },
+        replyTo: source.id,
+        idempotencyKey: idempotencyKey(scope),
+      }),
+    );
     await grantStore.issue({ ...scope, dispatchInvocationId: 'dispatch-browser-return-2' });
 
     const outcome = await service.ingest({
@@ -109,16 +116,19 @@ describe('F247 browser-captured assistant return ingest', () => {
       reason: 'grant_not_found',
     });
 
-    const whisper = store.append({
-      userId: source.userId,
-      catId: 'codex-sol',
-      threadId: source.threadId,
-      content: 'private source must not be projected into a public browser return',
-      mentions: ['gpt-pro'],
-      visibility: 'whisper',
-      whisperTo: ['gpt-pro'],
-      timestamp: 1_200,
-    });
+    // F117: append requires MessageFrom sender identity
+    const whisper = store.append(
+      canonicalTestMessageInput({
+        userId: source.userId,
+        catId: 'codex-sol',
+        threadId: source.threadId,
+        content: 'private source must not be projected into a public browser return',
+        mentions: ['gpt-pro'],
+        visibility: 'whisper',
+        whisperTo: ['gpt-pro'],
+        timestamp: 1_200,
+      }),
+    );
     await grantStore.issue({
       threadId: whisper.threadId,
       userId: whisper.userId,

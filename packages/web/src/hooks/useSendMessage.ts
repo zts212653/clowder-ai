@@ -1,51 +1,73 @@
 'use client';
 
-import type { ContextAttachment, MessageContent, MessageWorkDisposition } from '@cat-cafe/shared';
+import type { ContextAttachment, MessageWorkDisposition } from '@cat-cafe/shared';
 import { useCallback, useState } from 'react';
-import { useShallow } from 'zustand/react/shallow';
-import { useAgentMessages } from '@/hooks/useAgentMessages';
 import { useChatCommands } from '@/hooks/useChatCommands';
-import type { DeliveryMode } from '@/stores/chat-types';
 import { type ChatMessage as ChatMessageData, useChatStore } from '@/stores/chatStore';
 import { apiFetch } from '@/utils/api-client';
 
 export type UploadStatus = 'idle' | 'uploading' | 'failed';
 
-/** F35: Whisper options for private messages */
 export interface WhisperOptions {
   visibility: 'whisper';
   whisperTo: string[];
 }
 
+export interface PostAdmissionTargetAction {
+  targetId: string;
+  strategy: 'guide_reply' | 'interrupt_reply';
+}
+
+export interface PostAdmissionAction {
+  kind: 'steer';
+  targets: readonly PostAdmissionTargetAction[];
+}
+
+interface MessageAdmissionResponse {
+  status?: string;
+  entryId?: string;
+  entries?: Array<{ entryId: string; targetCatId: string }>;
+  gameThreadId?: string;
+}
+
+async function applyOnePostAdmissionAction(
+  threadId: string,
+  entryId: string | undefined,
+  target: PostAdmissionTargetAction,
+): Promise<string | null> {
+  if (!entryId) return `${target.targetId}: 缺少精确队列工单`;
+  try {
+    const route = target.strategy === 'guide_reply' ? 'continue' : 'steer';
+    const response = await apiFetch(`/api/threads/${threadId}/queue/${entryId}/${route}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ targetCatId: target.targetId }),
+    });
+    if (response.ok || response.status === 404) return null;
+    const body = await response.json().catch(() => null);
+    // Admission already committed and immediately requested Queue drain. If
+    // that drain won, the user's immediate-send outcome is converging rather
+    // than failing and must not create a second system error bubble.
+    if (body?.code === 'ENTRY_PROCESSING' || body?.code === 'ENTRY_NOT_FOUND') return null;
+    return `${target.targetId}: ${body?.error ?? `Server error: ${response.status}`}`;
+  } catch (error) {
+    return `${target.targetId}: ${error instanceof Error ? error.message : 'Unknown error'}`;
+  }
+}
+
 /**
- * Hook for sending messages (text + optional images + optional whisper).
- * Handles both JSON and multipart form data modes.
+ * Submit one durable Queue input. History and active-invocation UI are projected
+ * exclusively from lifecycle events after server admission; this hook never creates
+ * an optimistic History bubble or a client-owned invocation.
  */
 export function useSendMessage(activeThreadId?: string) {
-  const {
-    addMessageToThread,
-    removeThreadMessage,
-    replaceThreadMessageId,
-    setThreadLoading,
-    setThreadHasActiveInvocation,
-  } = useChatStore(
-    useShallow((s) => ({
-      addMessageToThread: s.addMessageToThread,
-      removeThreadMessage: s.removeThreadMessage,
-      replaceThreadMessageId: s.replaceThreadMessageId,
-      setThreadLoading: s.setThreadLoading,
-      setThreadHasActiveInvocation: s.setThreadHasActiveInvocation,
-    })),
-  );
-  const { resetRefs } = useAgentMessages();
+  const addMessageToThread = useChatStore((state) => state.addMessageToThread);
   const { processCommand } = useChatCommands();
   const [uploadStatus, setUploadStatus] = useState<UploadStatus>('idle');
   const [uploadError, setUploadError] = useState<string | null>(null);
 
   const createClientId = useCallback((): string => {
-    if (globalThis.crypto?.randomUUID) {
-      return globalThis.crypto.randomUUID();
-    }
+    if (globalThis.crypto?.randomUUID) return globalThis.crypto.randomUUID();
 
     const randomHex = (length: number) =>
       Array.from({ length }, () => Math.floor(Math.random() * 16).toString(16)).join('');
@@ -59,153 +81,83 @@ export function useSendMessage(activeThreadId?: string) {
     ].join('-');
   }, []);
 
+  const publishError = useCallback(
+    (threadId: string, content: string) => {
+      const message: ChatMessageData = {
+        id: `err-${Date.now()}`,
+        type: 'system',
+        variant: 'error',
+        content,
+        timestamp: Date.now(),
+      };
+      addMessageToThread(threadId, message);
+    },
+    [addMessageToThread],
+  );
+
+  const applyPostAdmissionActions = useCallback(
+    async (
+      threadId: string,
+      entries: readonly { entryId: string; targetCatId: string }[],
+      action: PostAdmissionAction,
+    ): Promise<void> => {
+      const entryByTarget = new Map(entries.map((entry) => [entry.targetCatId, entry.entryId]));
+      const outcomes = await Promise.all(
+        action.targets.map((target) =>
+          applyOnePostAdmissionAction(threadId, entryByTarget.get(target.targetId), target),
+        ),
+      );
+      const failures = outcomes.filter((outcome): outcome is string => outcome !== null);
+      if (failures.length > 0) {
+        publishError(threadId, `消息已进入队列，但部分 Steer 未执行：${failures.join('；')}`);
+      }
+    },
+    [publishError],
+  );
+
   const handleSend = useCallback(
     async (
       content: string,
       images?: File[],
       overrideThreadId?: string,
       whisper?: WhisperOptions,
-      deliveryMode?: DeliveryMode,
+      postAdmissionAction?: PostAdmissionAction,
       replyToId?: string,
       messageDisposition?: MessageWorkDisposition,
       contextAttachments?: ContextAttachment[],
+      explicitTargetCats?: string[],
     ) => {
       const threadId = overrideThreadId ?? activeThreadId ?? useChatStore.getState().currentThreadId;
-      const hasImages = Boolean(images && images.length > 0);
-      const isQueueSend = deliveryMode === 'queue';
-      const hasContextAttachments = Boolean(contextAttachments?.length);
-
-      // Queue sends don't reset refs — cat is still streaming
-      if (!isQueueSend) resetRefs();
+      const hasImages = Boolean(images?.length);
       setUploadError(null);
       setUploadStatus(hasImages ? 'uploading' : 'idle');
-
-      // #699: Capture replyToMessage BEFORE any await — ChatInput calls clearReplyTo()
-      // immediately after onSend, so the store will be cleared by the time processCommand yields.
-      const capturedReplyTarget = replyToId ? useChatStore.getState().replyToMessage : undefined;
 
       const wasCommand = await processCommand(content, threadId);
       if (wasCommand) return false;
 
       const clientMessageId = createClientId();
-      const optimisticMessageId = `user-${clientMessageId}`;
-
-      // #699: Build optimistic replyPreview from captured data (not store — already cleared)
-      let replyPreview: ChatMessageData['replyPreview'] | undefined;
-      if (replyToId && capturedReplyTarget) {
-        const PREVIEW_MAX = 80;
-        replyPreview = {
-          senderCatId: capturedReplyTarget.senderCatId,
-          content:
-            capturedReplyTarget.content.length > PREVIEW_MAX
-              ? capturedReplyTarget.content.slice(0, PREVIEW_MAX)
-              : capturedReplyTarget.content,
-        };
-      }
-
-      // Create user message
-      const userMsg: ChatMessageData = {
-        id: optimisticMessageId,
-        type: 'user',
-        content,
-        timestamp: Date.now(),
-        ...(whisper ? { visibility: whisper.visibility, whisperTo: whisper.whisperTo } : {}),
-        ...(replyToId ? { replyTo: replyToId, ...(replyPreview ? { replyPreview } : {}) } : {}),
-      };
-      if (hasImages || hasContextAttachments) {
-        const contentBlocks: MessageContent[] = [
-          ...(content ? [{ type: 'text' as const, text: content }] : []),
-          ...(contextAttachments ?? []).map((attachment) => ({
-            type: 'context_attachment' as const,
-            attachment,
-          })),
-          ...(images ?? []).map((file): MessageContent => {
-            if (file.type.startsWith('image/')) {
-              return { type: 'image', url: URL.createObjectURL(file) };
-            }
-            return {
-              type: 'file',
-              url: URL.createObjectURL(file),
-              fileName: file.name,
-              mimeType: file.type || 'application/octet-stream',
-              fileSize: file.size,
-            };
-          }),
-        ];
-        userMsg.contentBlocks = contentBlocks;
-      }
-      // Explicit queue sends wait for the durable server id before publication;
-      // normal sends remain optimistic even when the server smart-queues them.
-      if (!isQueueSend) {
-        addMessageToThread(threadId, userMsg);
-      }
-
-      // F39: Queue sends don't flip loading/invocation flags — cat is already running,
-      // and queue_updated WS event will surface the entry in QueuePanel.
-      if (!isQueueSend) {
-        setThreadLoading(threadId, true);
-        setThreadHasActiveInvocation(threadId, true);
-      }
-
-      const reconcileSuccessfulResponse = (
-        body: { status?: string; userMessageId?: string; gameThreadId?: string } | null,
-      ) => {
-        // Game started in independent thread — remove optimistic message from source
-        // and clear loading/invocation flags (game runs in its own thread, source is idle).
-        // Always use thread-scoped APIs here: by the time the HTTP response arrives,
-        // the user may have navigated to the game thread (via game:thread_created),
-        // so the source thread may no longer be active. Thread-scoped APIs check
-        // currentThreadId at call-time, correctly targeting flat or background state.
-        if (body?.status === 'game_started' && body.gameThreadId) {
-          removeThreadMessage(threadId, optimisticMessageId);
-          setThreadLoading(threadId, false);
-          setThreadHasActiveInvocation(threadId, false);
-          return;
-        }
-        if (!body?.userMessageId) return;
-        if (isQueueSend) {
-          const durableUserMessage = { ...userMsg, id: body.userMessageId };
-          addMessageToThread(threadId, durableUserMessage);
-        } else {
-          replaceThreadMessageId(threadId, optimisticMessageId, body.userMessageId);
-        }
-      };
 
       try {
-        const deliveryModePayload = deliveryMode ? { deliveryMode } : {};
-
-        if (images && images.length > 0) {
+        let response: Response;
+        if (hasImages) {
           const formData = new FormData();
           formData.append('content', content);
           formData.append('threadId', threadId);
           formData.append('idempotencyKey', clientMessageId);
-          if (deliveryMode) formData.append('deliveryMode', deliveryMode);
           if (messageDisposition) formData.append('messageDisposition', messageDisposition);
+          for (const catId of explicitTargetCats ?? []) formData.append('mentions', catId);
           if (whisper) {
             formData.append('visibility', whisper.visibility);
-            for (const catId of whisper.whisperTo) {
-              formData.append('whisperTo', catId);
-            }
+            for (const catId of whisper.whisperTo) formData.append('whisperTo', catId);
           }
           if (replyToId) formData.append('replyTo', replyToId);
           if (contextAttachments?.length) {
             formData.append('contextAttachments', JSON.stringify(contextAttachments));
           }
-          for (const img of images) {
-            formData.append('images', img);
-          }
-          const res = await apiFetch('/api/messages', {
-            method: 'POST',
-            body: formData,
-          });
-          if (!res.ok) {
-            const body = await res.json().catch(() => null);
-            throw new Error(body?.detail ?? `Server error: ${res.status}`);
-          }
-          const body = await res.json().catch(() => null);
-          reconcileSuccessfulResponse(body);
+          for (const image of images ?? []) formData.append('images', image);
+          response = await apiFetch('/api/messages', { method: 'POST', body: formData });
         } else {
-          const res = await apiFetch('/api/messages', {
+          response = await apiFetch('/api/messages', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -213,63 +165,46 @@ export function useSendMessage(activeThreadId?: string) {
               threadId,
               idempotencyKey: clientMessageId,
               ...(whisper ? { visibility: whisper.visibility, whisperTo: whisper.whisperTo } : {}),
-              ...deliveryModePayload,
               ...(replyToId ? { replyTo: replyToId } : {}),
               ...(messageDisposition ? { messageDisposition } : {}),
+              ...(explicitTargetCats?.length ? { mentions: explicitTargetCats } : {}),
               ...(contextAttachments?.length ? { contextAttachments } : {}),
             }),
           });
-          if (!res.ok) {
-            const body = await res.json().catch(() => null);
-            throw new Error(body?.detail ?? `Server error: ${res.status}`);
-          }
-          const body = await res.json().catch(() => null);
-          reconcileSuccessfulResponse(body);
         }
+
+        if (!response.ok) {
+          const body = await response.json().catch(() => null);
+          throw new Error(body?.detail ?? body?.error ?? `Server error: ${response.status}`);
+        }
+
+        const admission = (await response.json().catch(() => null)) as MessageAdmissionResponse | null;
+        if (admission?.status !== 'game_started' && admission?.status !== 'queued') {
+          throw new Error('Server did not return a canonical Queue admission');
+        }
+        if (postAdmissionAction?.kind === 'steer') {
+          const entries = admission.entries ?? [];
+          if (entries.length === 0) throw new Error('Steer admission did not return its canonical Queue entry');
+          await applyPostAdmissionActions(threadId, entries, postAdmissionAction);
+        }
+
         setUploadStatus('idle');
         setUploadError(null);
-        // Guide engine: signal that message was sent (advance confirm steps on chat.input)
         window.dispatchEvent(new CustomEvent('guide:confirm', { detail: { target: 'chat.input' } }));
         return true;
-      } catch (err) {
-        // F39: Only clear invocation flags for normal (non-queue, non-force) sends.
-        // Queue sends never set them. Force sends target a thread where a cat is
-        // already running — if the force request fails (network/server error), the
-        // original invocation is still active; clearing flags would hide stop/queue UI.
-        const shouldClearFlags = !isQueueSend && deliveryMode !== 'force';
-        if (shouldClearFlags) {
-          setThreadLoading(threadId, false);
-          setThreadHasActiveInvocation(threadId, false);
-        }
-        const errorMessage = err instanceof Error ? err.message : 'Unknown';
+      } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : 'Unknown error';
         if (hasImages) {
           setUploadStatus('failed');
           setUploadError(errorMessage);
         } else {
           setUploadStatus('idle');
         }
-        const errorMessagePayload: ChatMessageData = {
-          id: `err-${Date.now()}`,
-          type: 'system',
-          variant: 'error',
-          content: `Failed to send message: ${errorMessage}`,
-          timestamp: Date.now(),
-        };
-        addMessageToThread(threadId, errorMessagePayload);
+        publishError(threadId, `Failed to send message: ${errorMessage}`);
         return false;
       }
     },
-    [
-      resetRefs,
-      processCommand,
-      addMessageToThread,
-      removeThreadMessage,
-      replaceThreadMessageId,
-      setThreadLoading,
-      setThreadHasActiveInvocation,
-      activeThreadId,
-      createClientId,
-    ],
+    [activeThreadId, applyPostAdmissionActions, createClientId, processCommand, publishError],
   );
 
   return { handleSend, uploadStatus, uploadError };

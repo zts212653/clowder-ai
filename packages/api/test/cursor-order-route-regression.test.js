@@ -19,6 +19,7 @@
 import assert from 'node:assert/strict';
 import { afterEach, beforeEach, describe, it } from 'node:test';
 import Fastify from 'fastify';
+import { canonicalTestMessageInput } from './helpers/message-from-fixtures.js';
 
 /**
  * Cross-format-aware in-memory read state store.
@@ -95,53 +96,33 @@ function createCrossFormatAwareStore() {
 }
 
 function appendTerminalManagedHold(messageStore, threadId, { ownerUserId, hiddenTrigger = false, suffix }) {
-  const custody = {
-    version: 1,
-    entryId: `entry-${suffix}`,
-    revision: 1,
-    ownerUserId,
-    intent: 'managed command wake',
-    status: 'queued',
-    allTargetCats: ['opus5'],
-    pendingTargetCats: ['opus5'],
-    notifiedByCatIds: [],
-    seenByCatIds: [],
-    seenInvocationIdByCatId: {},
-    failedByCatIds: [],
-    handledByCatIds: [],
-    priority: 'normal',
-    createdAt: 2000,
-    updatedAt: 2000,
-  };
-  const message = messageStore.append({
-    userId: 'scheduler',
-    catId: null,
-    content: `managed command ${suffix}`,
-    mentions: [],
-    timestamp: 2000,
-    threadId,
-    deliveryStatus: 'queued',
-    queueCustody: custody,
-    ...(hiddenTrigger ? { extra: { scheduler: { hiddenTrigger: true } } } : {}),
-    source: {
-      connector: 'hold-ball',
-      label: '持球结果',
-      icon: '🏓',
-      meta: { taskId: `task-${suffix}`, threadId, catId: 'opus5', wakeWhen: true },
-    },
-  });
-  messageStore.transitionQueueCustody(message.id, {
-    expectedRevision: 1,
-    next: {
-      ...custody,
-      revision: 2,
-      status: 'terminal',
-      pendingTargetCats: [],
-      failedByCatIds: ['opus5'],
-      updatedAt: 2100,
-    },
-    deliveredAt: 2100,
-  });
+  const message = messageStore.append(
+    canonicalTestMessageInput({
+      userId: ownerUserId ?? 'scheduler',
+      from: { kind: 'system', service: 'hold-ball' },
+      catId: null,
+      content: `managed command ${suffix}`,
+      mentions: [],
+      timestamp: 2000,
+      threadId,
+      deliveryStatus: 'queued',
+      ...(hiddenTrigger ? { extra: { scheduler: { hiddenTrigger: true } } } : {}),
+      source: {
+        connector: 'hold-ball',
+        label: '持球结果',
+        icon: '🏓',
+        meta: {
+          managedHold: true,
+          phase: 'wake',
+          taskId: `task-${suffix}`,
+          threadId,
+          catId: 'opus5',
+          wakeWhen: true,
+        },
+      },
+    }),
+  );
+  messageStore.markDelivered(message.id, 2100);
   return message;
 }
 
@@ -179,22 +160,26 @@ describe('#1200 R14 route: POST /read/latest cross-format', () => {
     process.env.VISIBILITY_CURSOR_V2 = 'on';
     const thread = threadStore.create('alice', 'Thread A');
 
-    const msgA = messageStore.append({
-      userId: 'alice',
-      catId: 'opus',
-      content: 'early message',
-      mentions: [],
-      timestamp: Date.now() - 2000,
-      threadId: thread.id,
-    });
-    const msgC = messageStore.append({
-      userId: 'alice',
-      catId: 'opus',
-      content: 'latest message',
-      mentions: [],
-      timestamp: Date.now(),
-      threadId: thread.id,
-    });
+    const msgA = messageStore.append(
+      canonicalTestMessageInput({
+        userId: 'alice',
+        catId: 'opus',
+        content: 'early message',
+        mentions: [],
+        timestamp: Date.now() - 2000,
+        threadId: thread.id,
+      }),
+    );
+    const msgC = messageStore.append(
+      canonicalTestMessageInput({
+        userId: 'alice',
+        catId: 'opus',
+        content: 'latest message',
+        mentions: [],
+        timestamp: Date.now(),
+        threadId: thread.id,
+      }),
+    );
 
     // Seed stored cursor at msgA's raw ID (v1)
     readStateStore._seed('alice', thread.id, msgA.id);
@@ -259,22 +244,26 @@ describe('#1200 R14 route: POST /read/latest cross-format', () => {
   it('stored v1 B, B tombstoned, latest=A (earlier) → no regression', async () => {
     const thread = threadStore.create('alice', 'Thread B');
 
-    const msgA = messageStore.append({
-      userId: 'alice',
-      catId: 'opus',
-      content: 'message A (earlier, live)',
-      mentions: [],
-      timestamp: Date.now() - 2000,
-      threadId: thread.id,
-    });
-    const msgB = messageStore.append({
-      userId: 'alice',
-      catId: 'opus',
-      content: 'message B (later, will be tombstoned)',
-      mentions: [],
-      timestamp: Date.now(),
-      threadId: thread.id,
-    });
+    const msgA = messageStore.append(
+      canonicalTestMessageInput({
+        userId: 'alice',
+        catId: 'opus',
+        content: 'message A (earlier, live)',
+        mentions: [],
+        timestamp: Date.now() - 2000,
+        threadId: thread.id,
+      }),
+    );
+    const msgB = messageStore.append(
+      canonicalTestMessageInput({
+        userId: 'alice',
+        catId: 'opus',
+        content: 'message B (later, will be tombstoned)',
+        mentions: [],
+        timestamp: Date.now(),
+        threadId: thread.id,
+      }),
+    );
 
     // Seed stored cursor at B's raw ID (v1)
     readStateStore._seed('alice', thread.id, msgB.id);
@@ -302,22 +291,26 @@ describe('#1200 R14 route: POST /read/latest cross-format', () => {
     process.env.VISIBILITY_CURSOR_V2 = 'on';
     try {
       const thread = threadStore.create('alice', 'Thread canonical monotonicity');
-      const msgA = messageStore.append({
-        userId: 'alice',
-        catId: 'opus',
-        content: 'message A (earlier, live)',
-        mentions: [],
-        timestamp: Date.now() - 2000,
-        threadId: thread.id,
-      });
-      const msgB = messageStore.append({
-        userId: 'alice',
-        catId: 'opus',
-        content: 'message B (later, will be tombstoned)',
-        mentions: [],
-        timestamp: Date.now(),
-        threadId: thread.id,
-      });
+      const msgA = messageStore.append(
+        canonicalTestMessageInput({
+          userId: 'alice',
+          catId: 'opus',
+          content: 'message A (earlier, live)',
+          mentions: [],
+          timestamp: Date.now() - 2000,
+          threadId: thread.id,
+        }),
+      );
+      const msgB = messageStore.append(
+        canonicalTestMessageInput({
+          userId: 'alice',
+          catId: 'opus',
+          content: 'message B (later, will be tombstoned)',
+          mentions: [],
+          timestamp: Date.now(),
+          threadId: thread.id,
+        }),
+      );
       const cursorB = messageStore.canonicalizeCursor(msgB.id, thread.id);
       readStateStore._seed('alice', thread.id, cursorB, cursorB);
       messageStore.softDelete(msgB.id, 'admin');
@@ -375,22 +368,26 @@ describe('#1200 R14 route: POST /read/mark-all cross-format', () => {
     process.env.VISIBILITY_CURSOR_V2 = 'on';
     const thread = threadStore.create('alice', 'Thread X');
 
-    const msgA = messageStore.append({
-      userId: 'alice',
-      catId: 'opus',
-      content: 'early msg',
-      mentions: [],
-      timestamp: Date.now() - 2000,
-      threadId: thread.id,
-    });
-    messageStore.append({
-      userId: 'alice',
-      catId: 'opus',
-      content: 'latest msg',
-      mentions: [],
-      timestamp: Date.now(),
-      threadId: thread.id,
-    });
+    const msgA = messageStore.append(
+      canonicalTestMessageInput({
+        userId: 'alice',
+        catId: 'opus',
+        content: 'early msg',
+        mentions: [],
+        timestamp: Date.now() - 2000,
+        threadId: thread.id,
+      }),
+    );
+    messageStore.append(
+      canonicalTestMessageInput({
+        userId: 'alice',
+        catId: 'opus',
+        content: 'latest msg',
+        mentions: [],
+        timestamp: Date.now(),
+        threadId: thread.id,
+      }),
+    );
 
     // Seed stored cursor at A's raw ID (v1)
     readStateStore._seed('alice', thread.id, msgA.id);
@@ -448,22 +445,26 @@ describe('#1200 R14 route: POST /read/mark-all cross-format', () => {
   it('stored v1 B, B tombstoned, latest=A (earlier) → no regression', async () => {
     const thread = threadStore.create('alice', 'Thread Y');
 
-    messageStore.append({
-      userId: 'alice',
-      catId: 'opus',
-      content: 'message A (earlier)',
-      mentions: [],
-      timestamp: Date.now() - 2000,
-      threadId: thread.id,
-    });
-    const msgB = messageStore.append({
-      userId: 'alice',
-      catId: 'opus',
-      content: 'message B (later, tombstoned)',
-      mentions: [],
-      timestamp: Date.now(),
-      threadId: thread.id,
-    });
+    messageStore.append(
+      canonicalTestMessageInput({
+        userId: 'alice',
+        catId: 'opus',
+        content: 'message A (earlier)',
+        mentions: [],
+        timestamp: Date.now() - 2000,
+        threadId: thread.id,
+      }),
+    );
+    const msgB = messageStore.append(
+      canonicalTestMessageInput({
+        userId: 'alice',
+        catId: 'opus',
+        content: 'message B (later, tombstoned)',
+        mentions: [],
+        timestamp: Date.now(),
+        threadId: thread.id,
+      }),
+    );
 
     readStateStore._seed('alice', thread.id, msgB.id);
     messageStore.softDelete(msgB.id, 'admin');
@@ -510,22 +511,26 @@ describe('#1200 R14 route: PATCH /read cross-format', () => {
   it('pre-reconcile upgrades v1 → v2, then advances to incoming v2', async () => {
     const thread = threadStore.create('alice', 'Thread P');
 
-    const msgA = messageStore.append({
-      userId: 'alice',
-      catId: 'opus',
-      content: 'early',
-      mentions: [],
-      timestamp: Date.now() - 2000,
-      threadId: thread.id,
-    });
-    const msgC = messageStore.append({
-      userId: 'alice',
-      catId: 'opus',
-      content: 'later',
-      mentions: [],
-      timestamp: Date.now(),
-      threadId: thread.id,
-    });
+    const msgA = messageStore.append(
+      canonicalTestMessageInput({
+        userId: 'alice',
+        catId: 'opus',
+        content: 'early',
+        mentions: [],
+        timestamp: Date.now() - 2000,
+        threadId: thread.id,
+      }),
+    );
+    const msgC = messageStore.append(
+      canonicalTestMessageInput({
+        userId: 'alice',
+        catId: 'opus',
+        content: 'later',
+        mentions: [],
+        timestamp: Date.now(),
+        threadId: thread.id,
+      }),
+    );
 
     // Seed stored cursor at A's raw ID (v1)
     readStateStore._seed('alice', thread.id, msgA.id);
@@ -645,16 +650,18 @@ describe('#1200 R14 route: PATCH /read cross-format', () => {
 
   it('does not ACK a mutable stream until the same message is finally delivered', async () => {
     const thread = threadStore.create('alice', 'Mutable stream PATCH boundary');
-    const stream = messageStore.append({
-      userId: 'alice',
-      catId: 'codex-sol',
-      content: 'partial stream',
-      mentions: [],
-      timestamp: Date.now(),
-      threadId: thread.id,
-      origin: 'stream',
-      deliveryStatus: 'queued',
-    });
+    const stream = messageStore.append(
+      canonicalTestMessageInput({
+        userId: 'alice',
+        catId: 'codex-sol',
+        content: 'partial stream',
+        mentions: [],
+        timestamp: Date.now(),
+        threadId: thread.id,
+        origin: 'stream',
+        deliveryStatus: 'queued',
+      }),
+    );
 
     const beforeFinal = await app.inject({
       method: 'PATCH',
@@ -759,14 +766,16 @@ describe('#1200 R14 route: PATCH /read cross-format', () => {
   it('stored v1 for pruned message → explicit read evidence repairs the slot', async () => {
     const thread = threadStore.create('alice', 'Thread Q');
 
-    const msgLive = messageStore.append({
-      userId: 'alice',
-      catId: 'opus',
-      content: 'live message',
-      mentions: [],
-      timestamp: Date.now(),
-      threadId: thread.id,
-    });
+    const msgLive = messageStore.append(
+      canonicalTestMessageInput({
+        userId: 'alice',
+        catId: 'opus',
+        content: 'live message',
+        mentions: [],
+        timestamp: Date.now(),
+        threadId: thread.id,
+      }),
+    );
 
     // Seed with a v1 cursor for a message that doesn't exist in the store.
     // canonicalizeCursor returns the raw ID unchanged, proving that the old
@@ -795,22 +804,26 @@ describe('#1200 R14 route: PATCH /read cross-format', () => {
     process.env.VISIBILITY_CURSOR_V2 = 'on';
     try {
       const thread = threadStore.create('alice', 'Anchored monotonic read');
-      const msgA = messageStore.append({
-        userId: 'alice',
-        catId: 'opus',
-        content: 'earlier visible message',
-        mentions: [],
-        timestamp: Date.now() - 2000,
-        threadId: thread.id,
-      });
-      const msgB = messageStore.append({
-        userId: 'alice',
-        catId: 'opus',
-        content: 'later read position',
-        mentions: [],
-        timestamp: Date.now(),
-        threadId: thread.id,
-      });
+      const msgA = messageStore.append(
+        canonicalTestMessageInput({
+          userId: 'alice',
+          catId: 'opus',
+          content: 'earlier visible message',
+          mentions: [],
+          timestamp: Date.now() - 2000,
+          threadId: thread.id,
+        }),
+      );
+      const msgB = messageStore.append(
+        canonicalTestMessageInput({
+          userId: 'alice',
+          catId: 'opus',
+          content: 'later read position',
+          mentions: [],
+          timestamp: Date.now(),
+          threadId: thread.id,
+        }),
+      );
       const cursorB = messageStore.canonicalizeCursor(msgB.id, thread.id);
       const stalePrimary = '0000000000000001-pruned-primary';
       readStateStore._seed('alice', thread.id, stalePrimary, cursorB);
@@ -871,30 +884,36 @@ describe('#1269 route: PATCH /read OFF→ON→OFF activation lifecycle', () => {
   it('OFF→ON→OFF: untouched v1, advance to v2, rollback preserves v2', async () => {
     const thread = threadStore.create('alice', 'Gate lifecycle thread');
 
-    const msgA = messageStore.append({
-      userId: 'alice',
-      catId: 'opus',
-      content: 'msg A',
-      mentions: [],
-      timestamp: Date.now() - 3000,
-      threadId: thread.id,
-    });
-    const msgB = messageStore.append({
-      userId: 'alice',
-      catId: 'opus',
-      content: 'msg B',
-      mentions: [],
-      timestamp: Date.now() - 2000,
-      threadId: thread.id,
-    });
-    const msgC = messageStore.append({
-      userId: 'alice',
-      catId: 'opus',
-      content: 'msg C',
-      mentions: [],
-      timestamp: Date.now(),
-      threadId: thread.id,
-    });
+    const msgA = messageStore.append(
+      canonicalTestMessageInput({
+        userId: 'alice',
+        catId: 'opus',
+        content: 'msg A',
+        mentions: [],
+        timestamp: Date.now() - 3000,
+        threadId: thread.id,
+      }),
+    );
+    const msgB = messageStore.append(
+      canonicalTestMessageInput({
+        userId: 'alice',
+        catId: 'opus',
+        content: 'msg B',
+        mentions: [],
+        timestamp: Date.now() - 2000,
+        threadId: thread.id,
+      }),
+    );
+    const msgC = messageStore.append(
+      canonicalTestMessageInput({
+        userId: 'alice',
+        catId: 'opus',
+        content: 'msg C',
+        mentions: [],
+        timestamp: Date.now(),
+        threadId: thread.id,
+      }),
+    );
 
     // Phase 1: OFF — untouched slot, ack with msgA → stored as v1
     delete process.env.VISIBILITY_CURSOR_V2;
@@ -969,7 +988,7 @@ describe('#1200 R14: sentinel production lifecycle (checker → service → reso
         getByThreadAfter: async () => [],
       },
       queueChecker: {
-        getQueuedForThread: () => [{ source: 'user', content: 'queued msg from user', callerCatId: undefined }],
+        getQueuedForThread: () => [{ from: { kind: 'user', userId }, content: 'queued msg from user' }],
       },
     });
 

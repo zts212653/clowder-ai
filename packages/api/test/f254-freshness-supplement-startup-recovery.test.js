@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, it, mock } from 'node:test';
+import { canonicalTestMessageInput } from './helpers/message-from-fixtures.js';
 
 const { MessageStore } = await import('../dist/domains/cats/services/stores/ports/MessageStore.js');
 const { InMemoryFreshnessClosureStore } = await import(
@@ -69,24 +70,26 @@ describe('F254 ADR-042 supplement startup reconciliation', () => {
     const pending = await createPending(closureStore);
     const running = await closureStore.claimSupplement(pending.id, { invocationId: 'inv-crashed', now: 200 });
     const messageStore = new MessageStore();
-    const published = await messageStore.appendAndObservePriorFrontier({
-      userId: running.userId,
-      threadId: running.threadId,
-      catId: running.catId,
-      content: 'durable supplement body',
-      mentions: [],
-      timestamp: 250,
-      replyTo: running.originalMessageId,
-      idempotencyKey: running.id,
-      extra: {
-        supplement: {
-          lineageId: running.lineageId,
-          supplementId: running.id,
-          seq: running.seq,
-          originalMessageId: running.originalMessageId,
+    const published = await messageStore.appendAndObservePriorFrontier(
+      canonicalTestMessageInput({
+        userId: running.userId,
+        threadId: running.threadId,
+        catId: running.catId,
+        content: 'durable supplement body',
+        mentions: [],
+        timestamp: 250,
+        replyTo: running.originalMessageId,
+        idempotencyKey: running.id,
+        extra: {
+          supplement: {
+            lineageId: running.lineageId,
+            supplementId: running.id,
+            seq: running.seq,
+            originalMessageId: running.originalMessageId,
+          },
         },
-      },
-    });
+      }),
+    );
     const projections = [];
 
     const result = await reconcileFreshnessSupplementsAtStartup({

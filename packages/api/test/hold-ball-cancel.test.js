@@ -189,7 +189,7 @@ describe('F167 Phase J AC-J4~J6: cancelPendingHoldsForThread', () => {
 
     const cancelled = cancelPendingHoldsForThread('thread-completion-pending', deps);
 
-    assert.deepEqual(cancelled, [], 'ordinary prose is not an invocation-bound disposition');
+    assert.deepEqual(cancelled, [], 'ordinary prose is not an explicit hold cancellation');
     assert.deepEqual(deps._unregistered, []);
     assert.deepEqual(deps._removed, []);
     assert.equal(completed.enabled, true);
@@ -231,7 +231,7 @@ describe('F167 Phase J AC-J4~J6: cancelPendingHoldsForThread', () => {
   });
 
   for (const dispatchedState of ['condition_met', 'message_written', 'enqueued', 'dispatched']) {
-    test(`does not retire an accepted ${dispatchedState} wake before its invocation-bound disposition`, () => {
+    test(`does not retire an accepted ${dispatchedState} wake before its canonical response terminal`, () => {
       const accepted = makeTask({
         id: `hold-ball-accepted-${dispatchedState}`,
         deliveryThreadId: 'thread-accepted-wake',

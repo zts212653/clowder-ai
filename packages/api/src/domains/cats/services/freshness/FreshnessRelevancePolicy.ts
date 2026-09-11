@@ -1,3 +1,4 @@
+import { messageFrom } from '../stores/message-from.js';
 import type { FreshnessReadableMessage } from './checkFreshnessForPostMessage.js';
 
 export type FreshnessRelevanceReason =
@@ -54,7 +55,7 @@ export function decideFreshnessRelevance(
     return { relevant: false, reason: 'same_user_wave_sibling_reply' };
   }
 
-  if (message.catId === null) {
+  if (messageFrom(message as unknown as Parameters<typeof messageFrom>[0]).kind !== 'agent') {
     if (explicitTargets.size > 0 && !explicitTargets.has(context.catId)) {
       return { relevant: false, reason: 'directed_to_other_cat' };
     }

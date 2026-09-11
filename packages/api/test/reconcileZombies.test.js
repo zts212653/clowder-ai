@@ -10,6 +10,7 @@
 
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
+import { canonicalTestQueueInput } from './helpers/message-from-fixtures.js';
 
 const { reconcileZombies } = await import('../dist/domains/cats/services/agents/invocation/reconcileZombies.js');
 const { InvocationRecordStore } = await import('../dist/domains/cats/services/stores/ports/InvocationRecordStore.js');
@@ -511,30 +512,36 @@ describe('F194 reconcileZombies — cleanup pathway', () => {
     store.update(parent.invocationId, { status: 'running', userMessageId: 'msg-parent' });
 
     // 2) Its queue entry is claimed -> `processing`. This is the entry that goes stale.
-    queue.enqueue({
-      ownerAuthProvenance: 'unknown',
-      threadId: 't1',
-      userId: 'u1',
-      content: '@codex go',
-      source: 'agent',
-      targetCats: ['opus'],
-      intent: 'execute',
-      messageId: 'msg-parent',
-    });
-    const claimed = queue.markProcessing('t1', 'u1');
-    assert.equal(claimed?.messageId, 'msg-parent', 'precondition: parent entry is processing');
+    const parentAdmission = queue.enqueueDurableNow(
+      canonicalTestQueueInput({
+        kind: 'message_wake',
+        ownerAuthProvenance: 'unknown',
+        threadId: 't1',
+        userId: 'u1',
+        content: '@codex go',
+        source: 'agent',
+        targetCats: ['opus'],
+        intent: 'execute',
+        messageId: 'msg-parent',
+      }),
+    );
+    const claimed = await queue.markProcessingByIdDurable('t1', parentAdmission.entry.id, 'opus');
+    assert.equal(claimed?.payload.messageId, 'msg-parent', 'precondition: parent entry is claimed');
 
     // 3) A later USER `@codex` message queues BEHIND the processing entry.
-    queue.enqueue({
-      ownerAuthProvenance: 'unknown',
-      threadId: 't1',
-      userId: 'u1',
-      content: '@codex please',
-      source: 'user',
-      targetCats: ['codex'],
-      intent: 'execute',
-      messageId: 'msg-user',
-    });
+    queue.enqueueDurableNow(
+      canonicalTestQueueInput({
+        kind: 'conversation_input',
+        ownerAuthProvenance: 'unknown',
+        threadId: 't1',
+        userId: 'u1',
+        content: '@codex please',
+        source: 'user',
+        targetCats: ['codex'],
+        intent: 'execute',
+        messageId: 'msg-user',
+      }),
+    );
 
     // 4) Parent is judged a zombie and swept.
     const terminalEvents = [];
@@ -554,7 +561,7 @@ describe('F194 reconcileZombies — cleanup pathway', () => {
     // #972: the stale `processing` entry must be converged, not left blocking the head.
     const remaining = queue.list('t1', 'u1');
     assert.equal(
-      remaining.some((e) => e.messageId === 'msg-parent'),
+      remaining.some((e) => e.payload.messageId === 'msg-parent'),
       false,
       '#972: stale processing entry must be removed when its invocation is zombie-reaped',
     );
@@ -569,7 +576,7 @@ describe('F194 reconcileZombies — cleanup pathway', () => {
 
     // The actual user-facing symptom: the later user @codex work is now promotable.
     assert.equal(
-      queue.peekNextQueued('t1', 'u1')?.messageId,
+      queue.peekNextQueued('t1', 'u1')?.payload.messageId,
       'msg-user',
       '#972: later user @codex must unblock after the dead parent is swept',
     );
@@ -587,26 +594,29 @@ describe('F194 reconcileZombies — cleanup pathway', () => {
       actionLeaseCarrier: { kind: 'none' },
     });
     store.update(parent.invocationId, { status: 'running', userMessageId: 'msg-parent' });
-    queue.enqueue({
-      ownerAuthProvenance: 'unknown',
-      threadId: 't-race',
-      userId: 'u1',
-      content: '@codex go',
-      source: 'agent',
-      targetCats: ['opus'],
-      intent: 'execute',
-      messageId: 'msg-parent',
-    });
-    const claimed = queue.markProcessing('t-race', 'u1');
+    const parentAdmission = queue.enqueueDurableNow(
+      canonicalTestQueueInput({
+        kind: 'message_wake',
+        ownerAuthProvenance: 'unknown',
+        threadId: 't-race',
+        userId: 'u1',
+        content: '@codex go',
+        source: 'agent',
+        targetCats: ['opus'],
+        intent: 'execute',
+        messageId: 'msg-parent',
+      }),
+    );
+    const claimed = await queue.markProcessingByIdDurable('t-race', parentAdmission.entry.id, 'opus');
     assert.ok(claimed);
 
     const queueEvents = [];
     let terminalRecoveryCalls = 0;
     const racingQueue = {
       list: (threadId, userId) => queue.list(threadId, userId),
-      removeProcessed: (threadId, userId, entryId) => {
-        queue.removeProcessed(threadId, userId, entryId); // replacement path wins the race
-        return queue.removeProcessed(threadId, userId, entryId); // sweep exact-id retry loses safely
+      removeProcessedAcrossUsersDurable: async (threadId, entryId) => {
+        await queue.removeProcessedAcrossUsersDurable(threadId, entryId); // replacement path wins the race
+        return queue.removeProcessedAcrossUsersDurable(threadId, entryId); // sweep exact-id retry loses safely
       },
     };
 
@@ -638,17 +648,20 @@ describe('F194 reconcileZombies — cleanup pathway', () => {
     });
     store.update(parent.invocationId, { status: 'running', userMessageId: 'msg-parent' });
     store.update(parent.invocationId, { status: 'failed', error: 'concurrent-zombie-detected' });
-    queue.enqueue({
-      ownerAuthProvenance: 'unknown',
-      threadId: 't-terminal',
-      userId: 'u1',
-      content: '@codex go',
-      source: 'agent',
-      targetCats: ['opus'],
-      intent: 'execute',
-      messageId: 'msg-parent',
-    });
-    const claimed = queue.markProcessing('t-terminal', 'u1');
+    const parentAdmission = queue.enqueueDurableNow(
+      canonicalTestQueueInput({
+        kind: 'message_wake',
+        ownerAuthProvenance: 'unknown',
+        threadId: 't-terminal',
+        userId: 'u1',
+        content: '@codex go',
+        source: 'agent',
+        targetCats: ['opus'],
+        intent: 'execute',
+        messageId: 'msg-parent',
+      }),
+    );
+    const claimed = await queue.markProcessingByIdDurable('t-terminal', parentAdmission.entry.id, 'opus');
     assert.ok(claimed);
 
     const queueEvents = [];

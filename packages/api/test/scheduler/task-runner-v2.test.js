@@ -373,7 +373,7 @@ describe('TaskRunnerV2', () => {
       ledger,
       deliver: async ({ content }) => settleAfterTimeout(`msg:${content}`),
       invokeTrigger: {
-        trigger: async () => settleAfterTimeout('dispatched'),
+        trigger: async () => settleAfterTimeout('enqueued'),
       },
     });
     runner.setManagedCommandWakeRecovery(async () => settleAfterTimeout('recovered'));
@@ -439,17 +439,51 @@ describe('TaskRunnerV2', () => {
 
     assert.deepEqual(completed, [
       'msg:deliver',
-      'dispatched',
+      'enqueued',
       'recovered',
-      'msg:chain:dispatched',
+      'msg:chain:enqueued',
       'unbound-trigger-blocked',
-      'detached:dispatched',
+      'detached:enqueued',
     ]);
     assert.equal(
       ledger.query('completed-effect-timeout-test', 10).filter((row) => row.outcome === 'RUN_FAILED').length,
       6,
       'timeout remains terminal truth even when the completed effect returns normally',
     );
+  });
+
+  it('passes queued-delivery cancellation through the scheduler execution boundary', async () => {
+    const { TaskRunnerV2 } = await import('../../dist/infrastructure/scheduler/TaskRunnerV2.js');
+    const canceled = [];
+    runner = new TaskRunnerV2({
+      logger: silentLogger,
+      ledger,
+      cancelQueuedDelivery: async (messageId) => {
+        canceled.push(messageId);
+        return true;
+      },
+    });
+    runner.register({
+      id: 'cancel-queued-delivery-test',
+      profile: 'awareness',
+      trigger: { type: 'interval', ms: 999999 },
+      admission: {
+        gate: async () => ({ run: true, workItems: [{ signal: 'wake', subjectKey: 'thread-1' }] }),
+      },
+      run: {
+        overlap: 'skip',
+        timeoutMs: 5_000,
+        execute: async (_signal, _subjectKey, ctx) => {
+          assert.equal(await ctx.cancelQueuedDelivery('wake-message-1'), true);
+        },
+      },
+      state: { runLedger: 'sqlite' },
+      outcome: { whenNoSignal: 'drop' },
+      enabled: () => true,
+    });
+
+    await runner.triggerNow('cancel-queued-delivery-test');
+    assert.deepEqual(canceled, ['wake-message-1']);
   });
 
   it('restart after timeout does not leave a zombie execution beside the new runner', async () => {
@@ -1683,17 +1717,16 @@ describe('TaskRunnerV2 — once trigger (#415)', () => {
     runner.stop();
   });
 
-  it('hydrated missed hold-ball once task records ball.hold_expired before retiring', async () => {
+  it('hydrated missed hold-ball once task persists shared lifecycle status before retiring', async () => {
     const { TaskRunnerV2 } = await import('../../dist/infrastructure/scheduler/TaskRunnerV2.js');
-    const events = [];
+    const deliveries = [];
     const runner = new TaskRunnerV2({
       logger: silentLogger,
       ledger,
       dynamicTaskStore,
-      ballCustody: {
-        async record(event) {
-          events.push(event);
-        },
+      deliver: async (input) => {
+        deliveries.push(input);
+        return 'message-hold-missed';
       },
     });
 
@@ -1711,13 +1744,20 @@ describe('TaskRunnerV2 — once trigger (#415)', () => {
     });
 
     runner.hydrateDynamic(dynamicTaskStore, { get: () => null });
+    await new Promise((resolve) => setImmediate(resolve));
 
     assert.equal(dynamicTaskStore.getById('hold-ball-missed-1'), null, 'missed hold-ball task should be retired');
-    assert.equal(events.length, 1, 'missed hold-ball task should emit one expiry event');
-    assert.equal(events[0].kind, 'ball.hold_expired');
-    assert.equal(events[0].sourceEventId, `holdexp:thread-hold-missed:codex:${pastFireAt}`);
-    assert.equal(events[0].subjectKey, 'ball:thread:thread-hold-missed');
-    assert.deepEqual(events[0].payload, { catId: 'codex', fireAt: pastFireAt });
+    assert.equal(deliveries.length, 1, 'missed hold-ball task should persist one lifecycle status');
+    assert.equal(deliveries[0].threadId, 'thread-hold-missed');
+    assert.equal(deliveries[0].userId, 'user-42');
+    assert.equal(deliveries[0].idempotencyKey, 'hold-ball-missed:hold-ball-missed-1');
+    assert.deepEqual(deliveries[0].source.meta, {
+      managedHold: true,
+      phase: 'status',
+      taskId: 'hold-ball-missed-1',
+      threadId: 'thread-hold-missed',
+      catId: 'codex',
+    });
     runner.stop();
   });
 

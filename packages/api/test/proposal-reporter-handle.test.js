@@ -41,7 +41,11 @@ describe('F128 parallel reporter handle resolution', () => {
     const invocationQueue = new InvocationQueue();
     const router = {
       async resolveTargetsAndIntent() {
-        return { targetCats: ['kimi', 'gemini', 'codex'], intent: { intent: 'ideate' }, hasMentions: true };
+        return {
+          targetCats: ['kimi', 'gemini', 'codex'],
+          intent: { intent: 'ideate' },
+          hasMentions: true,
+        };
       },
     };
     const queueProcessor = {
@@ -74,10 +78,14 @@ describe('F128 parallel reporter handle resolution', () => {
     const body = JSON.parse(res.body);
     const entries = invocationQueue.list(body.threadId, 'alice');
     assert.equal(entries.length, 1);
-    const enqueued = entries[0].content;
+    const enqueued = entries[0].payload.content;
 
-    assert.deepEqual(entries[0].targetCats, ['kimi', 'gemini', 'codex'], 'wake all router-resolved targets');
-    assert.equal(entries[0].intent, 'ideate');
+    assert.deepEqual(
+      new Set(entries.flatMap((entry) => entry.targets)),
+      new Set(['kimi', 'gemini', 'codex']),
+      'wake all router-resolved targets',
+    );
+    assert.equal(entries[0].execution.intent, 'ideate');
     assert.ok(!enqueued.includes('最后一棒猫'), 'parallel mode must NOT inherit serial rule');
     assert.ok(enqueued.includes('report-back owner'), 'must inject parallel reporter');
     const ownerLineMatch = enqueued.match(/report-back owner[^\n]*/);
@@ -97,7 +105,11 @@ describe('F128 parallel reporter handle resolution', () => {
     const router = {
       async resolveTargetsAndIntent() {
         // Router resolves Chinese alias `@砚砚` → catId `codex` per cat-template.json.
-        return { targetCats: ['codex', 'opus'], intent: { intent: 'ideate' }, hasMentions: true };
+        return {
+          targetCats: ['codex', 'opus'],
+          intent: { intent: 'ideate' },
+          hasMentions: true,
+        };
       },
     };
     const queueProcessor = {
@@ -126,7 +138,7 @@ describe('F128 parallel reporter handle resolution', () => {
     const body = JSON.parse(res.body);
     const entries = invocationQueue.list(body.threadId, 'alice');
     assert.equal(entries.length, 1);
-    const enqueued = entries[0].content;
+    const enqueued = entries[0].payload.content;
 
     assert.ok(!enqueued.includes('最后一棒猫'), 'CJK alias path must NOT inherit serial rule');
     assert.ok(enqueued.includes('report-back owner'), 'must inject parallel reporter');
@@ -146,7 +158,11 @@ describe('F128 parallel reporter handle resolution', () => {
     const invocationQueue = new InvocationQueue();
     const router = {
       async resolveTargetsAndIntent() {
-        return { targetCats: ['gpt-5.2', 'gpt-5.4'], intent: { intent: 'ideate' }, hasMentions: true };
+        return {
+          targetCats: ['gpt-5.2', 'gpt-5.4'],
+          intent: { intent: 'ideate' },
+          hasMentions: true,
+        };
       },
     };
     const queueProcessor = {
@@ -179,7 +195,7 @@ describe('F128 parallel reporter handle resolution', () => {
     const body = JSON.parse(res.body);
     const entries = invocationQueue.list(body.threadId, 'alice');
     assert.equal(entries.length, 1);
-    const enqueued = entries[0].content;
+    const enqueued = entries[0].payload.content;
 
     assert.ok(!enqueued.includes('最后一棒猫'), 'dotted handle path must NOT inherit serial rule');
     assert.ok(enqueued.includes('report-back owner'), 'must inject parallel reporter');

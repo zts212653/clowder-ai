@@ -17,6 +17,7 @@ const {
   getDefaultCatId,
   buildCatIdToBreedIndex,
   getCatEffort,
+  resolveCatCarrier,
   getAcpConfig,
   getCatFamily,
   bootstrapDefaultCatCatalog,
@@ -93,22 +94,65 @@ describe('cat-config-loader', () => {
       }
     });
 
-    it('rejects cli.carrier on non-openai variants but keeps it for openai', () => {
-      const bad = validConfig();
-      bad.breeds[0].variants[0].cli = { command: 'claude', outputFormat: 'stream-json', carrier: 'app_server' };
-      assert.throws(() => loadCatConfig(writeTempConfig(bad)), /codex-only/i);
+    it('resolves the canonical member carrier at the config boundary only', () => {
+      assert.equal(resolveCatCarrier({ carrier: 'sdk', transport: 'acp' }), 'sdk');
+      assert.equal(resolveCatCarrier({ transport: 'acp' }), 'acp');
+      assert.equal(resolveCatCarrier({ cli: { carrier: 'app_server' } }), 'cli');
+      assert.equal(resolveCatCarrier({ acp: { command: 'opencode', startupArgs: ['acp'] } }), 'cli');
+      assert.equal(resolveCatCarrier({}), 'cli');
 
-      const good = validConfig();
-      good.breeds[0].variants[0].clientId = 'openai';
-      good.breeds[0].variants[0].defaultModel = 'gpt-5.6-sol';
-      good.breeds[0].variants[0].cli = { command: 'codex', outputFormat: 'json', carrier: 'app_server' };
-      const loaded = loadCatConfig(writeTempConfig(good));
-      assert.equal(loaded.breeds[0].variants[0].cli.carrier, 'app_server');
+      const config = validConfig();
+      config.breeds[0].variants[0].carrier = 'sdk';
+      config.breeds[0].variants[0].transport = 'acp';
+      const loaded = loadCatConfig(writeTempConfig(config));
+      const resolved = toAllCatConfigs(loaded).opus;
+      assert.equal(resolved.carrier, 'sdk');
+      assert.equal(resolved.cli.carrier, undefined, 'provider CLI config must not retain carrier selection');
     });
 
-    it('loads default project config when no path/env provided', () => {
+    it('rejects the retired OpenCode server carrier instead of migrating it', () => {
+      const config = validConfig();
+      config.breeds[0].variants[0].clientId = 'opencode';
+      config.breeds[0].variants[0].defaultModel = 'anthropic/claude-test';
+      config.breeds[0].variants[0].carrier = 'server';
+
+      assert.throws(() => loadCatConfig(writeTempConfig(config)), /Invalid cat config/);
+    });
+
+    it('identifies the invalid carrier path in a version 2 startup config', () => {
+      const config = validConfig();
+      config.version = 2;
+      config.roster = {
+        opus: {
+          family: 'ragdoll',
+          roles: ['assistant'],
+          lead: true,
+          available: true,
+          evaluation: 'test member',
+        },
+      };
+      config.reviewPolicy = {
+        requireDifferentFamily: true,
+        preferActiveInThread: true,
+        preferLead: true,
+        excludeUnavailable: true,
+      };
+      config.breeds[0].variants[0].clientId = 'opencode';
+      config.breeds[0].variants[0].defaultModel = 'anthropic/claude-test';
+      config.breeds[0].variants[0].carrier = 'server';
+
+      assert.throws(
+        () => loadCatConfig(writeTempConfig(config)),
+        /breeds\.0\.variants\.0\.carrier: .*received 'server'/,
+      );
+    });
+
+    it('loads resolved project config when no explicit file path is provided', () => {
+      const projectDir = mkdtempSync(join(tmpdir(), 'cat-default-project-'));
+      const templatePath = join(projectDir, 'cat-template.json');
+      writeFileSync(templatePath, JSON.stringify(validConfig()));
       const saved = process.env.CAT_TEMPLATE_PATH;
-      delete process.env.CAT_TEMPLATE_PATH;
+      process.env.CAT_TEMPLATE_PATH = templatePath;
       try {
         const config = loadCatConfig();
         // F032: version can be 1 or 2 now
@@ -344,10 +388,17 @@ describe('cat-config-loader', () => {
       assert.throws(() => loadCatConfig(path), /Invalid cat config/);
     });
 
-    it('rejects wrong version', () => {
+    it('rejects incomplete version 2 config', () => {
       const bad = { ...validConfig(), version: 2 };
       const path = writeTempConfig(bad);
       assert.throws(() => loadCatConfig(path), /Invalid cat config/);
+    });
+
+    it('rejects missing and unsupported versions at the discriminator path', () => {
+      const missing = validConfig();
+      delete missing.version;
+      assert.throws(() => loadCatConfig(writeTempConfig(missing)), /version: Invalid input/);
+      assert.throws(() => loadCatConfig(writeTempConfig({ ...validConfig(), version: 3 })), /version: Invalid input/);
     });
 
     it('throws clear error when file not found', () => {

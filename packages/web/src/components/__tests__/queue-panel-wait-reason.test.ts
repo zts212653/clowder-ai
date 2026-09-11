@@ -34,7 +34,7 @@ const QUEUED_ENTRY: QueueEntry = {
   content: 'queued message',
   messageId: 'm1',
   mergedMessageIds: [],
-  source: 'user',
+  from: { kind: 'user', userId: 'test-user' },
   targetCats: ['opus'],
   intent: 'execute',
   status: 'queued',
@@ -155,7 +155,6 @@ describe('QueuePanel wait-reason render', () => {
     useChatStore.setState({
       messages: [],
       queue: [],
-      queuePaused: false,
       currentThreadId: 'thread-1',
       activeInvocations: {},
     });
@@ -167,7 +166,7 @@ describe('QueuePanel wait-reason render', () => {
     vi.clearAllMocks();
   });
 
-  it('shows "等待 {cat} 当前回合（已运行 …）" when an invocation is active and entries are queued', () => {
+  it('does not repeat the active execution summary above queued entries', () => {
     useChatStore.setState({
       queue: [QUEUED_ENTRY],
       activeInvocations: { inv1: { catId: 'opus', mode: 'execute', startedAt: NOW - 90_000 } },
@@ -175,12 +174,9 @@ describe('QueuePanel wait-reason render', () => {
     act(() => {
       root.render(React.createElement(QueuePanel, { threadId: 'thread-1' }));
     });
-    const html = container.innerHTML;
-    expect(html).toContain('等待');
-    expect(html).toContain('布偶猫（Fable）');
-    expect(html).not.toContain('等待 <span class="font-medium text-cafe-secondary">opus</span>');
-    expect(html).toContain('当前回合');
-    expect(html).toContain('已运行');
+    expect(container.textContent).not.toContain('等待 布偶猫（Fable） 当前回合');
+    expect(container.textContent).not.toContain('已运行');
+    expect(container.textContent).toContain('待处理');
   });
 
   it('shows an idle explicit target as waiting for dispatch, not a current turn', () => {
@@ -190,12 +186,10 @@ describe('QueuePanel wait-reason render', () => {
     });
     expect(container.textContent).toContain('等待 布偶猫（Fable） 调度');
     expect(container.innerHTML).not.toContain('当前回合');
-    expect(container.querySelector('[data-testid="queue-recover"]')?.textContent).toBe('恢复');
+    expect(container.querySelector('[data-testid="queue-recover"]')).toBeNull();
   });
 
-  // 砚砚 P1 end-to-end: queued entry targets opus; codex is active LONGER but is not the target.
-  // The panel must attribute the wait to opus (the target), not codex.
-  it('shows the TARGET cat (opus), not an older unrelated active cat (codex)', () => {
+  it('does not repeat either target or unrelated active execution inside the queue panel', () => {
     useChatStore.setState({
       queue: [QUEUED_ENTRY], // targetCats: ['opus']
       activeInvocations: {
@@ -207,9 +201,10 @@ describe('QueuePanel wait-reason render', () => {
       root.render(React.createElement(QueuePanel, { threadId: 'thread-1' }));
     });
     const html = container.innerHTML;
-    expect(html).toContain('当前回合');
-    expect(html).toContain('布偶猫（Fable）');
+    expect(html).not.toContain('当前回合');
+    expect(html).not.toContain('布偶猫（Fable）');
     expect(html).not.toContain('缅因猫（sol）');
+    expect(html).toContain('待处理');
   });
 
   it('never says a Sol-targeted entry is waiting for an unrelated active GPT-5.5 turn', () => {

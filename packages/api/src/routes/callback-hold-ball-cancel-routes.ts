@@ -321,8 +321,8 @@ export function registerHoldBallCancelRoutes(app: FastifyInstance, deps: HoldBal
       try {
         const cancelMessage = cancellationVisibilityMessage(catId, cancellationState);
         const stored = await messageStore.append({
+          from: { kind: 'system', service: 'hold-ball' },
           userId: 'system',
-          catId: null,
           content: cancelMessage,
           mentions: [],
           timestamp: Date.now(),

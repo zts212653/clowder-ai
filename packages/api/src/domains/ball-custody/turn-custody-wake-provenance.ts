@@ -1,5 +1,5 @@
-import type { WaitContinuationCarrierV1 } from '@cat-cafe/shared';
-import type { QueueEntry } from '../cats/services/agents/invocation/InvocationQueue.js';
+import { isManagedHoldConnectorSource, type WaitContinuationCarrierV1 } from '@cat-cafe/shared';
+import { type QueueEntry, queueEntryCallerCatId } from '../cats/services/agents/invocation/InvocationQueue.js';
 import { hydrateCrossThreadReplyHint, type IMessageStore } from '../cats/services/stores/ports/MessageStore.js';
 import { handedEventSourceId } from './ball-custody-events.js';
 import type { TurnCustodyWakeProvenance } from './TurnCustodyProjectionService.js';
@@ -8,18 +8,11 @@ import {
   waitContinuationCarriersMatch,
 } from './wait-continuation-carrier.js';
 
-type WakeQueueEntry = Pick<
-  QueueEntry,
-  | 'actionSuccessorFence'
-  | 'a2aTriggerMessageId'
-  | 'callerCatId'
-  | 'messageId'
-  | 'source'
-  | 'sourceCategory'
-  | 'targetCats'
-  | 'threadId'
-  | 'waitContinuationCarrier'
->;
+type WakeQueueEntry = Pick<QueueEntry, 'execution' | 'from' | 'payload' | 'sourceCategory' | 'targets' | 'threadId'>;
+
+function exactTargetCatId(entry: WakeQueueEntry): string | undefined {
+  return entry.targets.length === 1 ? entry.targets[0] : undefined;
+}
 
 export function buildCrossThreadNoObligationWake(input: unknown): TurnCustodyWakeProvenance | undefined {
   if (!input || typeof input !== 'object' || Array.isArray(input)) return undefined;
@@ -89,27 +82,22 @@ async function resolveScheduledWake(
   messageStore: IMessageStore,
 ): Promise<TurnCustodyWakeProvenance> {
   try {
-    const sourceMessage = entry.messageId ? await messageStore.getById(entry.messageId) : null;
-    if (sourceMessage?.source?.connector === 'hold-ball') {
+    const messageId = entry.payload.messageId;
+    const sourceMessage = messageId ? await messageStore.getById(messageId) : null;
+    if (isManagedHoldConnectorSource(sourceMessage?.source) && sourceMessage?.source?.meta?.phase === 'wake') {
       const meta = sourceMessage.source.meta;
       const taskId = typeof meta?.taskId === 'string' ? meta.taskId : undefined;
       const sourceThreadId = typeof meta?.threadId === 'string' ? meta.threadId : undefined;
       const sourceCatId = typeof meta?.catId === 'string' ? meta.catId : undefined;
-      if (
-        !entry.messageId ||
-        !taskId ||
-        meta?.wakeWhen !== true ||
-        sourceThreadId !== entry.threadId ||
-        sourceCatId !== entry.targetCats[0]
-      ) {
+      if (!messageId || !taskId || sourceThreadId !== entry.threadId || sourceCatId !== exactTargetCatId(entry)) {
         return { kind: 'legacy', reason: 'carrier_missing', sourceCategory: 'scheduled' };
       }
       return {
         kind: 'structured',
         protocol: 'hold',
         subjectKey: `ball:thread:${entry.threadId}`,
-        holderCatId: entry.targetCats[0] ?? 'unknown',
-        sourceMessageId: entry.messageId,
+        holderCatId: exactTargetCatId(entry) ?? 'unknown',
+        sourceMessageId: messageId,
         taskId,
       };
     }
@@ -120,29 +108,21 @@ async function resolveScheduledWake(
 }
 
 async function resolveA2AWake(entry: WakeQueueEntry, messageStore: IMessageStore): Promise<TurnCustodyWakeProvenance> {
-  const messageId = entry.a2aTriggerMessageId ?? entry.messageId;
-  let fromCatId = entry.callerCatId;
+  const messageId = entry.execution.a2aTriggerMessageId ?? entry.payload.messageId;
+  const fromCatId = queueEntryCallerCatId(entry);
   if (messageId) {
     try {
       const replyHint = await hydrateCrossThreadReplyHint(messageStore, messageId);
       const noObligationWake = buildCrossThreadNoObligationWake(replyHint);
       if (noObligationWake) return noObligationWake;
-      fromCatId ??= replyHint?.senderCatId;
     } catch {
       // Optional lifecycle classification failed. The exact dispatch carrier
       // below remains fail-closed and must not be weakened by that lookup.
     }
   }
-  if (!fromCatId && messageId) {
-    try {
-      fromCatId = (await messageStore.getById(messageId))?.catId ?? undefined;
-    } catch {
-      return { kind: 'legacy', reason: 'query_failed', sourceCategory: 'a2a' };
-    }
-  }
   return buildA2ADispatchTurnCustodyWake({
     threadId: entry.threadId,
-    targetCatId: entry.targetCats[0],
+    targetCatId: exactTargetCatId(entry),
     messageId,
     fromCatId,
   });
@@ -160,15 +140,16 @@ async function resolveWaitContinuationWake(
   entry: WakeQueueEntry,
   messageStore: IMessageStore,
 ): Promise<TurnCustodyWakeProvenance | null> {
-  const queueCarrier = entry.waitContinuationCarrier;
+  const queueCarrier = entry.execution.waitContinuationCarrier;
   if (!queueCarrier) return null;
-  if (entry.source !== 'connector' || !entry.messageId || entry.actionSuccessorFence) {
+  const messageId = entry.payload.messageId;
+  if (!messageId || entry.execution.actionSuccessorFence) {
     return missingQueueCarrier(entry);
   }
 
   let storedCarrier: WaitContinuationCarrierV1 | undefined;
   try {
-    storedCarrier = waitContinuationCarrierFromStoredMessage(await messageStore.getById(entry.messageId));
+    storedCarrier = waitContinuationCarrierFromStoredMessage(await messageStore.getById(messageId));
   } catch {
     return missingQueueCarrier(entry);
   }
@@ -178,7 +159,7 @@ async function resolveWaitContinuationWake(
     kind: 'structured',
     protocol: 'event_wait',
     subjectKey: `ball:thread:${entry.threadId}`,
-    holderCatId: entry.targetCats[0] ?? 'unknown',
+    holderCatId: exactTargetCatId(entry) ?? 'unknown',
     waitContinuationCarrier: queueCarrier,
   };
 }
@@ -190,21 +171,21 @@ export async function resolveQueueTurnCustodyWake(
 ): Promise<TurnCustodyWakeProvenance> {
   const waitWake = await resolveWaitContinuationWake(entry, messageStore);
   if (waitWake) return waitWake;
-  if (entry.actionSuccessorFence) {
+  if (entry.execution.actionSuccessorFence) {
     return {
       kind: 'action_successor',
-      leaseId: entry.actionSuccessorFence.leaseId,
-      generation: entry.actionSuccessorFence.generation,
-      holderCatId: entry.targetCats[0] ?? 'unknown',
+      leaseId: entry.execution.actionSuccessorFence.leaseId,
+      generation: entry.execution.actionSuccessorFence.generation,
+      holderCatId: exactTargetCatId(entry) ?? 'unknown',
     };
   }
-  if (entry.source === 'user') return { kind: 'unstructured', source: 'user_chat' };
+  if (entry.from.kind === 'user') return { kind: 'unstructured', source: 'user_chat' };
   if (entry.sourceCategory === 'scheduled') return resolveScheduledWake(entry, messageStore);
   if (entry.sourceCategory === 'freshness') return { kind: 'unstructured', source: 'protocol_decline' };
   if (entry.sourceCategory === 'a2a') return resolveA2AWake(entry, messageStore);
   return {
     kind: 'legacy',
-    reason: entry.messageId ? 'carrier_missing' : 'source_missing',
+    reason: entry.payload.messageId ? 'carrier_missing' : 'source_missing',
     ...(entry.sourceCategory ? { sourceCategory: entry.sourceCategory } : {}),
   };
 }

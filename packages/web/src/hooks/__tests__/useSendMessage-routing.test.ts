@@ -138,6 +138,8 @@ describe('SplitPaneView input routing (P1-1)', () => {
       undefined,
       undefined,
       undefined,
+      undefined,
+      undefined,
     );
   });
 });

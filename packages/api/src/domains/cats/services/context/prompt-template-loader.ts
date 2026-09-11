@@ -214,7 +214,7 @@ const TEMPLATE_FILES: Record<string, { base: string; local: string }> = {
   D7_serial: { base: 'd7-mode-serial.md', local: '' },
   D7_parallel: { base: 'd7-mode-parallel.md', local: '' },
   D7_solo: { base: 'd7-mode-solo.md', local: '' },
-  D12: { base: 'd12-active-participant.md', local: '' },
+  D12: { base: 'd12-recent-speaker.md', local: '' },
   D13: { base: 'd13-routing-policy.md', local: '' },
   D15: { base: 'd15-voice-off.md', local: '' },
   D15_on: { base: 'd15-voice-on.md', local: '' },

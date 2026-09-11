@@ -36,7 +36,7 @@ describe('F296 B4c Alpha UAT runner child and session guards', () => {
       if (path === '/ready') return Response.json({ status: 'ready' });
       if (path === '/api/cats') {
         return Response.json({
-          cats: [{ id: 'codex', clientId: 'openai', codexCarrier: { effective: 'app_server' } }],
+          cats: [{ id: 'codex', clientId: 'openai', carrier: 'app_server' }],
         });
       }
       if (path === '/api/telemetry/metrics') {

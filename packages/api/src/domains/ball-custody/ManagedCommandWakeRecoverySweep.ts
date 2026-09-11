@@ -29,13 +29,13 @@ import { publishManagedCommandWakeMessage } from './managed-command-wake-message
 import {
   isDispatchableManagedCommandWakeState,
   recordManagedCommandWakeSlaBreach,
-  recoverManagedCommandMissingDisposition,
 } from './managed-command-wake-recovery-policy.js';
 import {
   persistManagedCommandFallbackDue,
   recordCancelledManagedCommandCompletion,
 } from './managed-command-wake-recovery-transitions.js';
 import {
+  type ManagedCommandWakeLostReason,
   parseRetiredManagedCommandWakeTask,
   readManagedCommandWakeProjection,
 } from './managed-command-wake-task-projection.js';
@@ -95,6 +95,29 @@ export class ManagedCommandWakeRecoverySweep {
     if (result === 'pending') managedCommandCompletionUnconsumedTotal.add(1);
     return result;
   }
+  async recordLost(
+    taskId: string,
+    lostReason: ManagedCommandWakeLostReason,
+    lostDetail?: string,
+  ): Promise<ManagedCommandWakeRecoveryResult> {
+    const parsed = parseWakeTask(this.deps.dynamicTaskStore.getById(taskId));
+    if (!parsed) return 'missing';
+    if (parsed.command.state === 'lost') return this.recoverTask(taskId);
+    if (parsed.command.state === 'consumed') return 'recovered';
+    if (parsed.command.state !== 'command_running') return 'pending';
+    if (
+      !this.updateCommand(parsed, {
+        ...parsed.command,
+        state: 'lost',
+        lostAt: this.now(),
+        lostReason,
+        ...(lostDetail ? { lostDetail: lostDetail.slice(0, 500) } : {}),
+      })
+    ) {
+      return 'pending';
+    }
+    return this.recoverTask(taskId);
+  }
   private async reconcileDurableGateJobs(tasks: DynamicTaskDef[]): Promise<ManagedCommandWakeRecoveryStats> {
     let recovered = 0;
     let pending = 0;
@@ -152,11 +175,15 @@ export class ManagedCommandWakeRecoverySweep {
     for (const { task, parsed, admissionFact } of undelivered) {
       const idempotencyKey = buildAdmissionFactIdempotencyKey(task.id);
       try {
-        const existing = await this.deps.messageStore.getByIdempotencyKey('system', parsed.threadId, idempotencyKey);
+        const existing = await this.deps.messageStore.getByIdempotencyKey(
+          parsed.userId,
+          parsed.threadId,
+          idempotencyKey,
+        );
         if (!existing) {
           const stored = await this.deps.messageStore.append({
-            userId: 'system',
-            catId: null,
+            from: { kind: 'system', service: 'hold-ball' },
+            userId: parsed.userId,
             content: admissionFact,
             mentions: [],
             timestamp: this.now(),
@@ -166,7 +193,15 @@ export class ManagedCommandWakeRecoverySweep {
               connector: 'hold-ball',
               label: '持球通知',
               icon: '🏓',
-              meta: { wakeWhen: true, taskId: task.id, recoverySource: 'startup_sweep' },
+              meta: {
+                managedHold: true,
+                phase: 'status',
+                taskId: task.id,
+                threadId: parsed.threadId,
+                catId: parsed.catId,
+                wakeWhen: true,
+                recoverySource: 'startup_sweep',
+              },
             },
           });
           this.deps.socketManager.broadcastToRoom(`thread:${parsed.threadId}`, 'connector_message', {
@@ -197,13 +232,37 @@ export class ManagedCommandWakeRecoverySweep {
     }
     return { scanned: undelivered.length, recovered, pending };
   }
+  private async recoverLostNonDurableCommands(tasks: DynamicTaskDef[]): Promise<ManagedCommandWakeRecoveryStats> {
+    const isRunnerActive = this.deps.isCommandRunnerActive;
+    if (!isRunnerActive) return { scanned: 0, recovered: 0, pending: 0 };
+    let recovered = 0;
+    let pending = 0;
+    const lostCandidates = tasks.flatMap((task) => {
+      const parsed = parseWakeTask(task);
+      return parsed &&
+        parsed.command.state === 'command_running' &&
+        !parsed.command.durableJob &&
+        !isRunnerActive(task.id)
+        ? [parsed]
+        : [];
+    });
+    for (const parsed of lostCandidates) {
+      const result = await this.recordLost(parsed.task.id, 'runtime_restart');
+      if (result === 'recovered') recovered += 1;
+      else pending += 1;
+    }
+    return { scanned: lostCandidates.length, recovered, pending };
+  }
   async runOnce(): Promise<ManagedCommandWakeRecoveryStats> {
     const tasks = this.deps.dynamicTaskStore.getAll();
     const admission = await this.recoverAdmissionFacts(tasks);
     const durable = await this.reconcileDurableGateJobs(tasks);
+    const lost = await this.recoverLostNonDurableCommands(tasks);
     let { recovered, pending } = admission;
     recovered += durable.recovered;
     pending += durable.pending;
+    recovered += lost.recovered;
+    pending += lost.pending;
 
     // F261: API restart loses the in-memory ManagedRunner, not the authorized
     // action-plane job. Reconcile durable full-gate process/receipt truth before
@@ -233,7 +292,7 @@ export class ManagedCommandWakeRecoverySweep {
     }
 
     return {
-      scanned: candidates.length + retiredTaskIds.length + admission.scanned + durable.scanned,
+      scanned: candidates.length + retiredTaskIds.length + admission.scanned + durable.scanned + lost.scanned,
       recovered,
       pending,
     };
@@ -279,6 +338,7 @@ export class ManagedCommandWakeRecoverySweep {
     let parsed = parseWakeTask(this.deps.dynamicTaskStore.getById(taskId));
     if (!parsed) return 'missing';
     parsed = recordManagedCommandWakeSlaBreach(this.deps, parsed, this.now, this.wakeSlaMs);
+    if (parsed.command.state === 'lost') return this.persistLostCommandStatus(parsed);
     if (parsed.command.state === 'condition_met') {
       const published = await this.publishCompletion(parsed);
       if (!published) return 'pending';
@@ -299,9 +359,7 @@ export class ManagedCommandWakeRecoverySweep {
         return this.consume(parsed, undefined, eventCarrier.reason);
       }
       if (eventCarrier?.state === 'failed') {
-        return eventCarrier.errorCode === 'managed_hold_disposition_missing'
-          ? recoverManagedCommandMissingDisposition(this.deps, parsed, eventCarrier, this.now)
-          : 'pending';
+        return this.consume(parsed, eventCarrier.invocationId, 'failed');
       }
       if (eventCarrier?.state === 'pending') return 'pending';
       // An orphaned receipt proves durable responsibility while also proving
@@ -325,6 +383,70 @@ export class ManagedCommandWakeRecoverySweep {
 
   private async publishCompletion(parsed: ParsedManagedCommandWakeTask): Promise<boolean> {
     return publishManagedCommandWakeMessage(this.deps, parsed, this.now);
+  }
+
+  private async persistLostCommandStatus(
+    parsed: ParsedManagedCommandWakeTask,
+  ): Promise<ManagedCommandWakeRecoveryResult> {
+    const idempotencyKey = `hold-ball-lost:${parsed.task.id}`;
+    try {
+      const existing = await this.deps.messageStore.getByIdempotencyKey(parsed.userId, parsed.threadId, idempotencyKey);
+      if (!existing) {
+        const detail = parsed.command.lostDetail ? `（${parsed.command.lostDetail}）` : '';
+        const content =
+          parsed.command.lostReason === 'spawn_failed'
+            ? `等待失败：命令「${parsed.command.command}」未启动${detail}。`
+            : parsed.command.lostReason === 'runner_failed'
+              ? `等待已结束：命令「${parsed.command.command}」执行进程异常终止${detail}。`
+              : `等待已结束：服务重启导致命令「${parsed.command.command}」的本地执行进程丢失。`;
+        const recoverySource =
+          parsed.command.lostReason === 'spawn_failed'
+            ? 'spawn_admission'
+            : parsed.command.lostReason === 'runner_failed'
+              ? 'command_runner'
+              : 'startup_sweep';
+        const stored = await this.deps.messageStore.append({
+          from: { kind: 'system', service: 'hold-ball' },
+          userId: parsed.userId,
+          content,
+          mentions: [],
+          timestamp: this.now(),
+          threadId: parsed.threadId,
+          idempotencyKey,
+          source: {
+            connector: 'hold-ball',
+            label: '持球状态',
+            icon: '🏓',
+            meta: {
+              managedHold: true,
+              phase: 'status',
+              taskId: parsed.task.id,
+              threadId: parsed.threadId,
+              catId: parsed.catId,
+              recoverySource,
+            },
+          },
+        });
+        this.deps.socketManager.broadcastToRoom(`thread:${parsed.threadId}`, 'connector_message', {
+          threadId: parsed.threadId,
+          message: {
+            id: stored.id,
+            type: 'connector',
+            content: stored.content,
+            source: stored.source,
+            timestamp: stored.timestamp,
+          },
+        });
+      }
+      const latest = parseWakeTask(this.deps.dynamicTaskStore.getById(parsed.task.id));
+      return latest?.command.state === 'lost' ? this.consume(latest, undefined, 'failed') : 'pending';
+    } catch (err) {
+      log.warn(
+        { err, taskId: parsed.task.id, threadId: parsed.threadId },
+        'lost managed-command terminal status persistence failed — will retry',
+      );
+      return 'pending';
+    }
   }
 
   private async dispatch(parsed: ParsedManagedCommandWakeTask): Promise<ManagedCommandWakeRecoveryResult> {
@@ -361,7 +483,7 @@ export class ManagedCommandWakeRecoverySweep {
         `[定时任务] ${wakeContent}`,
         messageId,
         undefined,
-        { sourceCategory: 'scheduled', forceQueue: true },
+        { sourceCategory: 'scheduled', priority: 'urgent' },
       );
     } catch (err) {
       if (err instanceof ManagedCommandWakeActionLeaseAdmissionError) {
@@ -421,6 +543,12 @@ export class ManagedCommandWakeRecoverySweep {
 
   private async findInvocationCarrier(parsed: ParsedManagedCommandWakeTask): Promise<InvocationRecord | null> {
     if (!parsed.command.messageId) return null;
+    const targetScoped = await this.deps.invocationRecordStore.getByIdempotencyKey(
+      parsed.threadId,
+      parsed.userId,
+      `connector-${parsed.command.messageId}:${parsed.catId}`,
+    );
+    if (targetScoped) return targetScoped;
     return this.deps.invocationRecordStore.getByIdempotencyKey(
       parsed.threadId,
       parsed.userId,

@@ -20,13 +20,65 @@ import type { CatId } from '@cat-cafe/shared';
 import type { IBallCustodyIngest } from '../../../../ball-custody/BallCustodyIngest.js';
 import { buildInvocationDiedEvent } from '../../../../ball-custody/ball-custody-events.js';
 import type { IInvocationRecordStore } from '../../stores/ports/InvocationRecordStore.js';
-import {
-  convergeZombieQueueEntry,
-  type QueueConvergedHandler,
-  type ZombieQueueConverger,
-} from './convergeZombieQueue.js';
 import type { ZombieRecord } from './getThreadLiveInvocations.js';
+import type { QueueEntry } from './InvocationQueue.js';
 import type { TaskProgressStore } from './TaskProgressStore.js';
+
+interface ZombieQueueConverger {
+  list(threadId: string, userId: string): QueueEntry[];
+  removeProcessedAcrossUsersDurable(
+    threadId: string,
+    entryId: string,
+    terminalOutcome: 'interrupted',
+    failureReason: 'runtime_restart',
+  ): Promise<QueueEntry | null>;
+}
+
+type QueueConvergedHandler = (info: { threadId: string; userId: string; removedEntryIds: string[] }) => void;
+
+async function convergeZombieQueueEntry(
+  queue: ZombieQueueConverger | undefined,
+  record: { threadId: string; userId: string; userMessageId?: string | null },
+  zombie: Pick<ZombieRecord, 'invocationId' | 'reason'>,
+  log: NonNullable<ReconcileZombieDeps['log']>,
+  onQueueConverged: QueueConvergedHandler | undefined,
+): Promise<{ converged: number; errors: number }> {
+  if (!queue || !record.userMessageId) return { converged: 0, errors: 0 };
+  const messageId = record.userMessageId;
+  try {
+    const removedEntryIds: string[] = [];
+    const stale = queue
+      .list(record.threadId, record.userId)
+      .filter(
+        (entry) =>
+          (entry.status === 'claimed' || entry.status === 'processing') && entry.payload.messageId === messageId,
+      );
+    for (const entry of stale) {
+      const removed = await queue.removeProcessedAcrossUsersDurable(
+        record.threadId,
+        entry.id,
+        'interrupted',
+        'runtime_restart',
+      );
+      if (!removed) continue;
+      removedEntryIds.push(entry.id);
+      log.info(
+        { invocationId: zombie.invocationId, entryId: entry.id, messageId, reason: zombie.reason },
+        '[reconcile-zombies] terminalized stale processing queue entry',
+      );
+    }
+    if (removedEntryIds.length > 0) {
+      onQueueConverged?.({ threadId: record.threadId, userId: record.userId, removedEntryIds });
+    }
+    return { converged: removedEntryIds.length, errors: 0 };
+  } catch (err) {
+    log.warn(
+      { invocationId: zombie.invocationId, err: err instanceof Error ? err.message : String(err) },
+      '[reconcile-zombies] failed to terminalize queue entry',
+    );
+    return { converged: 0, errors: 1 };
+  }
+}
 
 export interface ReconcileZombieDeps {
   invocationRecordStore: IInvocationRecordStore;
@@ -181,7 +233,7 @@ async function processZombie(
         // reconcile may have flipped the record terminal but died before converging the
         // queue, and future sweeps only enumerate *running* records, so this entry would
         // pin the head forever. removeProcessed is idempotent, so retrying is safe.
-        const qc = convergeZombieQueueEntry(deps.invocationQueue, current, zombie, log, deps.onQueueConverged);
+        const qc = await convergeZombieQueueEntry(deps.invocationQueue, current, zombie, log, deps.onQueueConverged);
         log.info(
           { invocationId: zombie.invocationId, currentStatus: current.status, reason: zombie.reason },
           '[reconcile-zombies] skipped (already terminal); re-attempted TaskProgress cleanup',
@@ -242,7 +294,7 @@ async function processZombie(
     );
     // #972: the record is now terminal, so its `processing` queue entry is a corpse
     // pinning the queue head. Converge it or later user work never runs.
-    const qc = convergeZombieQueueEntry(deps.invocationQueue, updated, zombie, log, deps.onQueueConverged);
+    const qc = await convergeZombieQueueEntry(deps.invocationQueue, updated, zombie, log, deps.onQueueConverged);
     let terminalRecoveryErrors = 0;
     if (deps.onReconciledZombie) {
       try {

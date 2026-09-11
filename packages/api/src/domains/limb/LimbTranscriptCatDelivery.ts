@@ -1,21 +1,22 @@
-import type { CatId, ConnectorSource } from '@cat-cafe/shared';
+import type { CatId, ConnectorSource, MessageFrom } from '@cat-cafe/shared';
 
 import type { LimbTranscriptDelivery } from './LimbObservationRouter.js';
 
-type TriggerOutcome = 'dispatched' | 'enqueued' | 'full';
+type TriggerOutcome = 'enqueued' | 'full';
 
 export interface LimbTranscriptCatDeliveryOptions {
   readonly isKnownCat: (catId: string) => boolean;
   readonly messageStore: {
     append(input: {
+      readonly from: MessageFrom;
       readonly threadId: string;
       readonly userId: string;
-      readonly catId: null;
       readonly content: string;
       readonly source: ConnectorSource;
       readonly mentions: readonly CatId[];
       readonly timestamp: number;
       readonly idempotencyKey: string;
+      readonly deliveryStatus: 'queued';
     }): Promise<{ readonly id: string }> | { readonly id: string };
   };
   readonly invokeTriggerProvider: {
@@ -30,9 +31,6 @@ export interface LimbTranscriptCatDeliveryOptions {
           ): Promise<TriggerOutcome>;
         }
       | undefined;
-  };
-  readonly socketManager?: {
-    broadcastToRoom(room: string, event: string, data: unknown): void;
   };
 }
 
@@ -71,25 +69,15 @@ export class LimbTranscriptCatDelivery implements LimbTranscriptDelivery {
       },
     };
     const stored = await this.options.messageStore.append({
+      from: { kind: 'external', connectorId: STACKCHAN_SOURCE.connector },
       threadId: input.binding.threadId,
       userId: input.binding.userId,
-      catId: null,
       content: input.observation.payload.text,
       source,
       mentions: [catId],
       timestamp,
       idempotencyKey: `limb:${input.observation.nodeId}:${input.observation.observationId}`,
-    });
-
-    this.options.socketManager?.broadcastToRoom(`thread:${input.binding.threadId}`, 'connector_message', {
-      threadId: input.binding.threadId,
-      message: {
-        id: stored.id,
-        type: 'connector',
-        content: input.observation.payload.text,
-        source,
-        timestamp,
-      },
+      deliveryStatus: 'queued',
     });
 
     const outcome = await trigger.trigger(

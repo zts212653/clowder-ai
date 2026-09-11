@@ -4,6 +4,7 @@ related_features: [F167, F153, F117, F064, F081, F232, F192, F055, F052, F193, F
 topics: [observability, a2a, ball-custody, cvo-experience, harness-engineering]
 doc_kind: spec
 created: 2026-06-12
+updated: 2026-09-10
 tips_exempt: harness-internal observability — ball custody events/projections are backend plumbing, no user-facing tip needed
 user_journey_exempt: harness-internal observability — ball custody events/projections/admin panel have no user-perceivable UX changes for operator
 ---
@@ -15,6 +16,11 @@ user_journey_exempt: harness-internal observability — ball custody events/proj
 > **Phase B 收口**（2026-06-18）：PR #2364（B1 骨架）+ #2374（cross-post alias）+ #2380（PR4 ProbeScheduler/WakeSender + 简报切源，AC-B1/B2/B3 端到端）+ #2378（callback-routing state contract，consumer×cell matrix 终止 LL-072 saga）全 merge。13/13 event wired + 状态机 INV-10 全覆盖。opus-47 整体收口愿景守护 PASS。**Follow-up status**（2026-06-18 同日）：LL-082 hard-layer dirty-diff ledger ✅ merged 经 cloud R1→R5 + 5 真 P 修复（PR [#2392](https://github.com/zts212653/clowder-ai/pull/2392), merge commit `58b6cdbe3`，opus-48 → opus-47 handoff，merge-gate dirty-diff ledger 硬层落地 + sentinel never-silent-clean）。B1 redis 测试并发 race ✅ merged（PR [#2390](https://github.com/zts212653/clowder-ai/pull/2390), merge commit `447cc20b5`，cloud-clean + `pnpm gate` on latest main）。
 Architecture cell: `ball-custody`
 Map delta: new cell required — Phase B 新增 append-only event log + projector + projection store；Phase A rich block surface 仍属既有 hub-action-surface。
+
+> **2026-09-10 lifecycle cutover**：F233 Ball event log继续保留历史审计与真正独立责任对象，
+> 但不再承接 ordinary A2A 或 managed-hold message completion。新写入由 F117 Phase G 的
+> `source → Queue admission → response terminal` 唯一表达；等待中/唤醒/终局对 operator 与所有成员共用
+> History 投影。旧 `ball.handed` / dispatch/hold disposition events 只读兼容，不参与新执行裁决。
 
 ## Why
 

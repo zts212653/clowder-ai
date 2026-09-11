@@ -84,6 +84,34 @@ describe('F299 message invocation anchor', () => {
     ).toBe('error');
   });
 
+  it('uses the response lifecycle when an empty canceled response has no reconciliation text evidence', () => {
+    const canceled: ChatMessage = {
+      id: 'response-canceled',
+      type: 'assistant',
+      catId: 'codex-sol',
+      content: '',
+      timestamp: 1,
+      extra: { stream: { turnInvocationId: 'turn-canceled' } },
+      lifecycle: {
+        kind: 'response',
+        orderKey: '1:turn-canceled',
+        invocationId: 'turn-canceled',
+        targetId: 'codex-sol',
+        inputEntryIds: ['entry-1'],
+        inputMessageIds: ['source-1'],
+        startedAt: 1,
+        status: 'canceled',
+        completedAt: 2,
+        reason: 'user_cancel',
+      },
+    };
+
+    expect(describeMessageInvocationTrajectory(canceled)).toEqual({
+      invocationId: 'turn-canceled',
+      status: 'cancelled',
+    });
+  });
+
   it('keeps done quiet but abnormal anchors persistent and both keyboard buttons', () => {
     const open = vi.fn();
     act(() => {

@@ -7,9 +7,12 @@
 import type {
   AsrPersonMemoryDynamicSceneEntryV1,
   CatId,
+  CatRoutingError,
   ConnectorSource,
   CrossThreadCoordination,
+  LifecycleStoredMessageMetadata,
   MessageContent,
+  MessageFrom,
   RichMessageExtra,
   WriteOpportunityPresentationRetryCarrierV1,
   WriteOpportunityReentryCarrierV1,
@@ -18,8 +21,12 @@ import {
   acceptedRevisionSchema,
   acceptedSourceRefSchema,
   asrPersonMemoryDynamicSceneEntryV1Schema,
+  CatRoutingErrorSchema,
   catOwnedSeedCueCarrierV1Schema,
   deliveryDecisionCueCarrierV1Schema,
+  isCloudBridgeRetryV1,
+  isLifecycleStoredMessageMetadata,
+  isMessageFrom,
   isProviderSemanticEvent,
   isValidAcceptedSource,
   isValidReviewSubjectRef,
@@ -31,15 +38,19 @@ import {
 } from '@cat-cafe/shared';
 import { parsePluginMessageExtra } from '../../../../messaging/envelope.js';
 import type { MessageMetadata } from '../../types.js';
-import type {
-  MessageRecallMarker,
-  StoredMessage,
-  StoredPluginMessage,
-  StoredToolEvent,
-} from '../ports/MessageStore.js';
-import { parseQueueCustodyAdmissionIntent, parseQueuedMessageCustody } from '../ports/queued-message-custody.js';
+import { MessageRecallMarker, StoredMessage, StoredPluginMessage, StoredToolEvent } from '../ports/MessageStore.js';
 import type { TurnExecutionMessageProjection } from '../ports/TurnExecutionStore.js';
 import { parseRecoveryMarker } from './redis-message-recovery-parser.js';
+
+export function safeParseMessageFrom(raw: string | undefined | null): MessageFrom | undefined {
+  if (raw === undefined || raw === null) return undefined;
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    return isMessageFrom(parsed) ? parsed : undefined;
+  } catch {
+    return undefined;
+  }
+}
 
 function parsePluginMessage(value: unknown): StoredPluginMessage | undefined {
   return (parsePluginMessageExtra(value) as StoredPluginMessage | null) ?? undefined;
@@ -85,8 +96,53 @@ export function safeParseContentBlocks(raw: string | undefined): readonly Messag
   }
 }
 
-export const safeParseQueueCustody = parseQueuedMessageCustody;
-export const safeParseQueueCustodyAdmission = parseQueueCustodyAdmissionIntent;
+export function safeParseLifecycleMetadata(raw: string | undefined): LifecycleStoredMessageMetadata | undefined {
+  if (!raw) return undefined;
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+      const lifecycle = parsed as Record<string, unknown>;
+      if (Array.isArray(lifecycle.dispatchRefs)) {
+        // v1 wrote routing intent as `assigned`; that was never proof of
+        // delivery. Drop it while preserving actual dispatched/settled refs.
+        lifecycle.dispatchRefs = lifecycle.dispatchRefs.flatMap((value) => {
+          if (!value || typeof value !== 'object' || Array.isArray(value)) return [value];
+          const ref = value as Record<string, unknown>;
+          if (ref.phase === 'assigned') return [];
+          if (
+            (ref.phase === 'dispatched' || ref.phase === 'settled') &&
+            typeof ref.targetId === 'string' &&
+            typeof ref.statusMessageId === 'string'
+          ) {
+            const canonical = { ...ref };
+            if (typeof canonical.dispatchedAt !== 'number' || !Number.isFinite(canonical.dispatchedAt)) {
+              delete canonical.dispatchedAt;
+            }
+            return [canonical];
+          }
+          return [value];
+        });
+      }
+    }
+    if (!isLifecycleStoredMessageMetadata(parsed)) return undefined;
+    const { from: _legacyFrom, ...canonical } = parsed as LifecycleStoredMessageMetadata & { from?: unknown };
+    void _legacyFrom;
+    return canonical as LifecycleStoredMessageMetadata;
+  } catch {
+    return undefined;
+  }
+}
+
+/** Lift the pre-realignment lifecycle identity into StoredMessage.from once. */
+export function safeParseLegacyLifecycleMessageFrom(raw: string | undefined): MessageFrom | undefined {
+  if (!raw) return undefined;
+  try {
+    const parsed = JSON.parse(raw) as { from?: unknown };
+    return isMessageFrom(parsed.from) ? parsed.from : undefined;
+  } catch {
+    return undefined;
+  }
+}
 
 export function safeParseMessageRecall(raw: string | undefined): MessageRecallMarker | undefined {
   if (!raw) return undefined;
@@ -207,9 +263,10 @@ type ExtraCarrierPersistence = ExtraCarrierPersistenceClassification<{
   tracing: 'parsed';
   systemKind: 'parsed';
   a2aRouting: 'parsed';
-  queueReceipt: 'derived';
-  pluginMessage: 'parsed';
   custodyOfferV1: 'derived';
+  pluginMessage: 'parsed';
+  routingWarnings: 'parsed';
+  cloudBridgeRetry: 'parsed';
 }>;
 
 function isNonEmptyString(value: unknown): value is string {
@@ -353,6 +410,11 @@ export function safeParseExtra(raw: string | undefined): StoredMessage['extra'] 
       hasField = true;
     }
 
+    if (isCloudBridgeRetryV1(parsed.cloudBridgeRetry)) {
+      result.cloudBridgeRetry = parsed.cloudBridgeRetry;
+      hasField = true;
+    }
+
     const proactive = parseProactiveCarrier(parsed.proactive);
     if (proactive) {
       result.proactive = proactive;
@@ -363,6 +425,23 @@ export function safeParseExtra(raw: string | undefined): StoredMessage['extra'] 
     if (meetingArtifact) {
       result.meetingArtifact = meetingArtifact;
       hasField = true;
+    }
+
+    if (Array.isArray(parsed.routingWarnings) && parsed.routingWarnings.length > 0) {
+      const routingWarnings: CatRoutingError[] = [];
+      let valid = true;
+      for (const candidate of parsed.routingWarnings as unknown[]) {
+        const warning = CatRoutingErrorSchema.safeParse(candidate);
+        if (!warning.success) {
+          valid = false;
+          break;
+        }
+        routingWarnings.push(warning.data);
+      }
+      if (valid) {
+        result.routingWarnings = routingWarnings;
+        hasField = true;
+      }
     }
 
     if (Array.isArray(parsed.dynamicSceneEntries)) {

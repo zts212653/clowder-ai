@@ -23,12 +23,15 @@ vi.mock('@/hooks/useChatCommands', () => ({
 
 vi.mock('@/stores/chatStore', () => ({
   useChatStore: Object.assign(
-    () => ({
-      addMessageToThread: mockAddMessageToThread,
-      setThreadLoading: mockSetThreadLoading,
-      setThreadHasActiveInvocation: mockSetThreadHasActiveInvocation,
-      currentThreadId: 'thread-stale',
-    }),
+    (selector?: (state: Record<string, unknown>) => unknown) => {
+      const state = {
+        addMessageToThread: mockAddMessageToThread,
+        setThreadLoading: mockSetThreadLoading,
+        setThreadHasActiveInvocation: mockSetThreadHasActiveInvocation,
+        currentThreadId: 'thread-stale',
+      };
+      return selector ? selector(state) : state;
+    },
     {
       getState: () => ({ currentThreadId: 'thread-stale' }),
     },
@@ -60,7 +63,7 @@ function SendWithImageRunner({
     if (called.current) return;
     called.current = true;
     const file = new File([new Uint8Array([1, 2, 3])], 'cat.png', { type: 'image/png' });
-    handleSend('@布偶 看图', [file], undefined, undefined, 'queue', undefined, 'continue_current').then(onDone);
+    handleSend('@布偶 看图', [file], undefined, undefined, undefined, undefined, 'continue_current').then(onDone);
   }, [handleSend, onDone]);
 
   return null;
@@ -161,7 +164,7 @@ describe('useSendMessage upload status', () => {
   });
 
   it('sends the typed author disposition in multipart admission', async () => {
-    mockApiFetch.mockResolvedValue({ ok: true, json: async () => ({ userMessageId: 'message-1' }) });
+    mockApiFetch.mockResolvedValue({ ok: true, json: async () => ({ status: 'queued', entryId: 'entry-1' }) });
 
     await act(async () => {
       root.render(

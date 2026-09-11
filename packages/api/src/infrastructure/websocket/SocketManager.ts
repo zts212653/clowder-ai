@@ -24,7 +24,6 @@ const log = createModuleLogger('ws');
 
 interface QueueProcessorLike {
   canReleaseSlotForUser(threadId: string, catId: string, userId: string): boolean;
-  clearPause(threadId: string, catId?: string): void;
   releaseSlot(threadId: string, catId: string): void;
   suppressAutoResume(threadId: string, catId: string, executionIds?: readonly string[]): void;
 }
@@ -52,19 +51,12 @@ function validateRoomJoin(roomInput: unknown, userId: string): RoomJoinAck {
 export function buildCancelMessages(result: CancelResult): AgentMessage[] {
   if (!result.cancelled) return [];
   const catIds = result.catIds.length > 0 ? result.catIds : ['opus'];
-  const primaryCatId = catIds[0] ?? 'opus';
   const now = Date.now();
   const messages: AgentMessage[] = [];
 
-  // Single system_info to avoid "cancel chorus"
-  messages.push({
-    type: 'system_info',
-    catId: createCatId(primaryCatId),
-    content: '⏹ 已取消',
-    timestamp: now,
-  });
-
-  // Per-cat done to ensure each cat's loading state is cleared
+  // The durable response message owns the visible canceled terminal. This
+  // broadcast is transport cleanup only, so a second centered system row would
+  // duplicate the same fact in History.
   for (const catId of catIds) {
     messages.push({
       type: 'done',
@@ -329,7 +321,6 @@ export class SocketManager {
               for (const msg of buildCancelMessages(scopedResult)) {
                 this.broadcastAgentMessage(msg, data.threadId);
               }
-              this.queueProcessor?.clearPause(data.threadId, data.catId);
               this.queueProcessor?.releaseSlot(data.threadId, data.catId);
             }
             // F108 + F086: Also abort multi-mention dispatches for this specific cat
@@ -364,7 +355,6 @@ export class SocketManager {
                 this.broadcastAgentMessage(msg, data.threadId);
               }
               for (const catId of terminalCatIds) {
-                this.queueProcessor?.clearPause(data.threadId, catId);
                 this.queueProcessor?.releaseSlot(data.threadId, catId);
                 // Suppress auto-resume for BOTH paths:
                 // - Queued invocations: executeEntry also sets suppress (belt-and-suspenders)

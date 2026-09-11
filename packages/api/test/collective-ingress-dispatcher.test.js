@@ -63,6 +63,15 @@ function harness(events, options = {}) {
     if (thread) thread.createdBy = 'another_owner';
   }
   let queueFullRemaining = options.queueFullOnce ? 1 : 0;
+  const persistMessage = (input) => {
+    const threadId = input.threadId ?? 'default';
+    const key = `${input.userId}:${threadId}:${input.idempotencyKey}`;
+    const existing = messages.get(key);
+    if (existing) return { message: existing, idempotent: true };
+    const stored = { ...input, id: `msg_${++messageNumber}`, threadId };
+    messages.set(key, stored);
+    return { message: stored, idempotent: false };
+  };
   const connector = {
     getProjection: async () => ({
       connectionId: 'con_1',
@@ -105,42 +114,36 @@ function harness(events, options = {}) {
     connector,
     threadStore: { get: async (threadId) => threads.get(threadId) ?? null },
     messageStore: {
-      appendIdempotent: async (input) => {
-        const key = `${input.userId}:${input.threadId}:${input.idempotencyKey}`;
-        const existing = messages.get(key);
-        if (existing) return { message: existing, idempotent: true };
-        const stored = { ...input, id: `msg_${++messageNumber}`, threadId: input.threadId };
-        messages.set(key, stored);
-        return { message: stored, idempotent: false };
-      },
+      getByIdempotencyKey: async (userId, threadId, idempotencyKey) =>
+        messages.get(`${userId}:${threadId}:${idempotencyKey}`) ?? null,
+      append: async (input) => persistMessage(input).message,
     },
     invocationQueue: {
-      enqueue: (input) => {
+      appendAndEnqueueDurable: async (_messageStore, messageInput, input) => {
         if (queueFullRemaining > 0) {
           queueFullRemaining -= 1;
           return { outcome: 'full' };
         }
         const existing = queue.find((entry) => entry.idempotencyKey === input.idempotencyKey);
-        if (existing) return { outcome: 'enqueued', entry: existing, deduped: true };
+        if (existing) {
+          return {
+            outcome: 'enqueued',
+            message: persistMessage(messageInput).message,
+            entry: existing,
+            entries: [existing],
+            deduped: true,
+          };
+        }
+        const message = persistMessage(messageInput).message;
         const entry = {
           ...input,
           id: `queue_${queue.length + 1}`,
-          messageId: null,
-          mergedMessageIds: [],
+          messageId: message.id,
           status: 'queued',
-          createdAt: Date.now(),
-          autoExecute: true,
-          priority: 'normal',
+          enqueuedAt: Date.now(),
         };
         queue.push(entry);
-        return { outcome: 'enqueued', entry, deduped: false };
-      },
-      backfillMessageId: (_threadId, _ownerId, entryId, messageId) => {
-        queue.find((entry) => entry.id === entryId).messageId = messageId;
-      },
-      rollbackEnqueue: (_threadId, _ownerId, entryId) => {
-        const index = queue.findIndex((entry) => entry.id === entryId);
-        if (index >= 0) queue.splice(index, 1);
+        return { outcome: 'enqueued', message, entry, entries: [entry], deduped: false };
       },
     },
     queueProcessor: { processNext: async (threadId, ownerId) => processed.push({ threadId, ownerId }) },

@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
 import Fastify from 'fastify';
 import '../helpers/setup-cat-registry.js';
+import { canonicalTestMessageInput } from '../helpers/message-from-fixtures.js';
 
 const { InvocationRegistry } = await import('../../dist/domains/cats/services/agents/invocation/InvocationRegistry.js');
 const { MessageStore, deriveGrowingSourceMessageRevision } = await import(
@@ -45,14 +46,17 @@ function admissionCommand(overrides = {}) {
 }
 
 function appendUserMessage(messageStore, { content, threadId = 'thread-f310', timestamp = now }) {
-  return messageStore.append({
-    userId: 'owner-1',
-    catId: null,
-    content,
-    mentions: ['codex-sol'],
-    timestamp,
-    threadId,
-  });
+  // F117: append requires MessageFrom sender identity
+  return messageStore.append(
+    canonicalTestMessageInput({
+      userId: 'owner-1',
+      catId: null,
+      content,
+      mentions: ['codex-sol'],
+      timestamp,
+      threadId,
+    }),
+  );
 }
 
 function admissionPayload(admission, overrides = {}) {

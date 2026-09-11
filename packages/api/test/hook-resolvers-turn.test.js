@@ -254,7 +254,7 @@ describe('Turn resolvers D11-D21, R1-R2, N1', () => {
     assert.equal(result.vars.SKILL_NAME, 'tdd');
   });
 
-  it('D12 fires with qualifying active participant', () => {
+  it('D12 fires with a qualifying recent speaker', () => {
     const input = makeInput({
       activeParticipants: [
         { catId: 'codex', label: '缅因猫(codex)', lastMessageAt: 1000 },
@@ -263,7 +263,7 @@ describe('Turn resolvers D11-D21, R1-R2, N1', () => {
     });
     const result = new mod.D12Resolver().resolve(input);
     assert.equal(result.status, 'fired');
-    assert.equal(result.vars.ACTIVE_LABEL, '缅因猫(codex)');
+    assert.equal(result.vars.RECENT_SPEAKER_LABEL, '缅因猫(codex)');
   });
 
   it('D12 skips when only self is active', () => {

@@ -2,6 +2,7 @@ import { getCoCreatorConfig } from '../../../../../config/cat-config-loader.js';
 import { getSenderName } from '../../context/ContextAssembler.js';
 import { renderSegment } from '../../context/prompt-template-loader.js';
 import { formatPromptTime } from '../../format-time.js';
+import type { ThreadExecutionSituation } from '../invocation/thread-execution-situation.js';
 import { formatThreadContextDrill } from './thread-drill-pointer.js';
 
 export interface BatonContext {
@@ -98,8 +99,10 @@ export interface TruthSourceInfo {
 
 export interface NavigationContext {
   threadId?: string;
+  currentCatId?: string;
   baton: BatonContext | null;
   tasks: TaskSummary[];
+  executionSituation?: ThreadExecutionSituation;
   artifacts?: NavigationArtifact[];
   truthSource?: TruthSourceInfo | null;
   bestNextSource?: string;
@@ -107,6 +110,21 @@ export interface NavigationContext {
 
 export interface NavigationFormatOptions {
   nowMs?: number;
+}
+
+function situationSourceLabel(from: import('@cat-cafe/shared').MessageFrom): string {
+  switch (from.kind) {
+    case 'user':
+      return 'co-creator';
+    case 'agent':
+      return getSenderName(from.catId);
+    case 'external':
+      return `external:${from.connectorId}`;
+    case 'plugin':
+      return `plugin:${from.instanceId}`;
+    case 'system':
+      return `system:${from.service}`;
+  }
 }
 
 /**
@@ -140,6 +158,25 @@ function buildNavigationInner(ctx: NavigationContext, options?: NavigationFormat
     for (const t of ctx.tasks) {
       const owner = t.ownerCatId ? `@${t.ownerCatId}` : '未分配';
       lines.push(`  - [${t.status}] ${t.title} (${owner})`);
+    }
+  }
+
+  if (ctx.executionSituation) {
+    const visibleRuns = ctx.executionSituation.activeRuns.filter((run) => run.targetId !== ctx.currentCatId);
+    if (!ctx.executionSituation.complete) {
+      lines.push('成员运行态: 当前无法完整验证（不按最近发言推断）');
+    } else if (visibleRuns.length === 0) {
+      lines.push('成员运行态: 当前无其他成员执行');
+    } else {
+      lines.push('成员运行态（生命周期真相）:');
+      for (const run of visibleRuns) {
+        const sources = run.sources
+          .map((source) => `${source.messageId} ← ${situationSourceLabel(source.from)}`)
+          .join(', ');
+        lines.push(
+          `  - [processing] ${getSenderName(run.targetId)} (${run.targetId}) · 来源 ${sources} · response=${run.responseMessageId} · invocation=${run.invocationId}`,
+        );
+      }
     }
   }
 

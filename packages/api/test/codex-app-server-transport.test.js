@@ -137,6 +137,9 @@ class ProtocolWire {
       case 'turn/interrupt':
         this.inbox.push({ id: message.id, result: {} });
         break;
+      case 'turn/steer':
+        this.inbox.push({ id: message.id, result: { turnId: message.params.expectedTurnId } });
+        break;
     }
   }
 
@@ -151,10 +154,77 @@ class ProtocolWire {
   }
 }
 
-test('F306 preserves every native approvalsReviewer route literal without a Clowder AI reviewer taxonomy', () => {
-  for (const approvalsReviewer of ['user', 'auto_review', 'guardian_subagent']) {
-    assert.equal(buildCodexAppServerThreadParams({ approvalsReviewer }).approvalsReviewer, approvalsReviewer);
-  }
+test('app-server registers one exact active-run dispatcher and fences it at turn terminal', async () => {
+  const wire = new ProtocolWire();
+  let dispatcher;
+  let releaseCount = 0;
+  const client = new CodexAppServerClient({ wire });
+  const outputPromise = collect(
+    client.run({
+      prompt: frozenPrompt('initial work'),
+      thread: { kind: 'start' },
+      activeRunDispatch: {
+        invocationId: 'turn-invocation-1',
+        register: (candidate) => {
+          dispatcher = candidate;
+          return () => {
+            releaseCount++;
+          };
+        },
+      },
+    }),
+  );
+
+  await waitFor(() => dispatcher !== undefined);
+  assert.deepEqual(dispatcher.capabilities, { append: true, steer: true });
+  assert.deepEqual(dispatcher.handle, {
+    provider: 'openai_codex',
+    carrier: 'codex_app_server',
+    threadId: 'thread-1',
+    turnId: 'turn-1',
+  });
+
+  const accepted = await dispatcher.dispatch(
+    {
+      text: 'follow-up while still working',
+      imagePaths: ['/tmp/follow-up.png'],
+      messageIds: ['message-2'],
+    },
+    { force: false, expectedInvocationId: 'turn-invocation-1' },
+  );
+  assert.deepEqual(accepted, {
+    accepted: true,
+    handle: dispatcher.handle,
+  });
+  const steer = wire.writes.find(
+    (message) => message.method === 'turn/steer' && message.params.input?.[0]?.text === 'follow-up while still working',
+  );
+  assert.deepEqual(steer.params, {
+    threadId: 'thread-1',
+    expectedTurnId: 'turn-1',
+    input: [
+      { type: 'text', text: 'follow-up while still working' },
+      { type: 'localImage', path: '/tmp/follow-up.png' },
+    ],
+  });
+
+  const mismatched = await dispatcher.dispatch(
+    { text: 'stale', messageIds: ['message-3'] },
+    { force: false, expectedInvocationId: 'turn-invocation-stale' },
+  );
+  assert.deepEqual(mismatched, { accepted: false, reason: 'active_run_mismatch' });
+
+  wire.inbox.push({
+    method: 'turn/completed',
+    params: { threadId: 'thread-1', turn: { id: 'turn-1', status: 'completed' } },
+  });
+  await outputPromise;
+  assert.equal(releaseCount, 1);
+  const terminal = await dispatcher.dispatch(
+    { text: 'too late', messageIds: ['message-4'] },
+    { force: false, expectedInvocationId: 'turn-invocation-1' },
+  );
+  assert.deepEqual(terminal, { accepted: false, reason: 'active_run_closed' });
 });
 
 test('F306 keeps sticky controls single-writer while mapping approved native parameters', async () => {
@@ -291,7 +361,6 @@ test('F306 preserves typed upstream rejection for outputSchema at turn/start', a
   assert.equal(outcome.error?.code, -32602);
   assert.equal(outcome.error?.message, 'outputSchema is not supported by the selected model');
 });
-
 test('F299 app-server awaits durable request evidence before turn/start', async () => {
   const wire = new ProtocolWire();
   let recorded;
@@ -774,7 +843,7 @@ test('exact active-writer resume failure backs off once and preserves the native
   assert.equal(first.writes.filter((message) => message.method === 'thread/read').length, 1);
 });
 
-test('active-writer diagnostics classify a reused healthy affinity host as a local live lease', async () => {
+test('active-writer diagnostics do not mistake a reused warm affinity host for a local live lease', async () => {
   const first = new ProtocolWire();
   first.reusedSessionHost = true;
   const firstWrite = first.write.bind(first);
@@ -823,9 +892,9 @@ test('active-writer diagnostics classify a reused healthy affinity host as a loc
   });
   const output = await run;
   const diagnostics = output.find((event) => event.type === 'app_server.recovery').activeWriter.diagnostics;
-  assert.equal(diagnostics.classification, 'local_live_lease');
-  assert.equal(diagnostics.confidence, 'high');
-  assert.deepEqual(diagnostics.localHostLease, { state: 'live', source: 'carrier_affinity' });
+  assert.equal(diagnostics.classification, 'native_active_turn_without_local_lease');
+  assert.equal(diagnostics.confidence, 'medium');
+  assert.deepEqual(diagnostics.localHostLease, { state: 'not_observed', source: 'carrier_affinity' });
 });
 
 test('active-writer diagnostics remain external-or-unknown when thread/read has no active-turn evidence', async () => {

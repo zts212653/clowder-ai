@@ -107,13 +107,15 @@ describe('F167 L2: routeParallel mention suppression', () => {
 
     // Every persisted agent message in parallel mode must carry mentions=[].
     // Otherwise MessageStore.getMentionsFor / getRecentMentionsFor will surface parallel @ messages.
-    const agentAppends = appendCalls.filter((c) => c.catId && c.origin === 'stream');
+    // F117: persisted identity is the MessageFrom contract — agent sender lives in
+    // `from: { kind: 'agent', catId }` (route-parallel.ts stream append), not a top-level catId.
+    const agentAppends = appendCalls.filter((c) => c.from?.kind === 'agent' && c.origin === 'stream');
     assert.ok(agentAppends.length >= 2, 'expected at least two agent append calls');
     for (const call of agentAppends) {
       assert.deepStrictEqual(
         call.mentions,
         [],
-        `parallel-mode agent message must persist mentions=[], got ${JSON.stringify(call.mentions)} for catId=${call.catId}`,
+        `parallel-mode agent message must persist mentions=[], got ${JSON.stringify(call.mentions)} for catId=${call.from?.catId}`,
       );
     }
   });

@@ -159,7 +159,7 @@ function sanitizeEvent(input: DebugEventInput): StoredDebugEvent {
       continue;
     }
 
-    if ((key === 'isFinal' || key === 'queuePaused' || key === 'hasActiveInvocation') && typeof value === 'boolean') {
+    if ((key === 'isFinal' || key === 'hasActiveInvocation') && typeof value === 'boolean') {
       out[key] = value;
     }
   }

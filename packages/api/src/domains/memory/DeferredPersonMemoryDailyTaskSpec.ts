@@ -193,7 +193,7 @@ export function createDeferredPersonMemoryDailyTaskSpec(
           const messageId = await context.deliver({
             threadId: processingThreadId,
             content,
-            userId: 'scheduler',
+            userId: deps.ownerUserId,
             extra: {
               scheduler: { hiddenTrigger: true },
               ...(writeOpportunityReentries.length > 0 ? { writeOpportunityReentries } : {}),

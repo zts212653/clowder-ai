@@ -79,6 +79,14 @@ export interface CloudBridgeRecoveryV1 {
   readonly dispatchInvocationId: string;
 }
 
+/** Durable refs-only provenance for the fresh user source created by Retry. */
+export interface CloudBridgeRetryV1 {
+  readonly v: 1;
+  readonly sourceMessageId: string;
+  readonly targetCatId: string;
+  readonly priorDispatchInvocationId: string;
+}
+
 const RECOVERY_FIELDS = new Set(['v', 'kind', 'sourceMessageId', 'targetCatId', 'dispatchInvocationId']);
 
 export function isCloudBridgeRecoveryV1(value: unknown): value is CloudBridgeRecoveryV1 {
@@ -91,6 +99,20 @@ export function isCloudBridgeRecoveryV1(value: unknown): value is CloudBridgeRec
     isBoundedReceiptRef(recovery.sourceMessageId) &&
     isBoundedReceiptRef(recovery.targetCatId) &&
     isBoundedReceiptRef(recovery.dispatchInvocationId)
+  );
+}
+
+const RETRY_FIELDS = new Set(['v', 'sourceMessageId', 'targetCatId', 'priorDispatchInvocationId']);
+
+export function isCloudBridgeRetryV1(value: unknown): value is CloudBridgeRetryV1 {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return false;
+  const retry = value as Record<string, unknown>;
+  return (
+    Object.keys(retry).every((field) => RETRY_FIELDS.has(field)) &&
+    retry.v === 1 &&
+    isBoundedReceiptRef(retry.sourceMessageId) &&
+    isBoundedReceiptRef(retry.targetCatId) &&
+    isBoundedReceiptRef(retry.priorDispatchInvocationId)
   );
 }
 

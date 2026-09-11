@@ -1,5 +1,6 @@
 'use client';
 
+import type { LifecycleActiveRun } from '@cat-cafe/shared';
 import { useEffect, useMemo, useState } from 'react';
 import { useCatData } from '@/hooks/useCatData';
 import { useChatHistory } from '@/hooks/useChatHistory';
@@ -7,18 +8,17 @@ import { useThreadLiveness, useThreadMessages } from '@/hooks/useThreadScopedSel
 import { computeCliDiagnosticsDedup } from '@/utils/cli-diagnostics-dedup';
 import { ChatMessage } from '../ChatMessage';
 import { loadExportThreadTitle, selectMessagesForExport } from '../message-export-selection';
-import { collectExactLiveInvocationIds } from '../queue-receipt-projection';
 
 export function ThreadChatExport({ threadId, messageIds }: { threadId: string; messageIds: string[] }) {
   const messages = useThreadMessages(threadId);
   const { isLoadingHistory } = useChatHistory(threadId);
-  const { activeInvocations, catInvocations } = useThreadLiveness(threadId);
+  const { catInvocations } = useThreadLiveness(threadId);
   const { getCatById, isLoading } = useCatData();
   const [threadTitle, setThreadTitle] = useState<string | null | undefined>(undefined);
   const cliDedupMap = useMemo(() => computeCliDiagnosticsDedup(messages), [messages]);
-  const activeInvocationIds = useMemo(
-    () => collectExactLiveInvocationIds(activeInvocations, catInvocations),
-    [activeInvocations, catInvocations],
+  const lifecycleActiveRuns = useMemo<readonly LifecycleActiveRun[]>(
+    () => Object.values(catInvocations).flatMap((invocation) => (invocation.activeRun ? [invocation.activeRun] : [])),
+    [catInvocations],
   );
 
   useEffect(() => {
@@ -58,7 +58,8 @@ export function ThreadChatExport({ threadId, messageIds }: { threadId: string; m
               key={message.id}
               message={message}
               threadId={threadId}
-              activeInvocationIds={activeInvocationIds}
+              timelineMessages={messages}
+              activeRuns={lifecycleActiveRuns}
               getCatById={getCatById}
               hideDiagnosticsPanel={dedupInfo?.hideDiagnosticsPanel}
               dedupCount={dedupInfo?.dedupCount}

@@ -20,6 +20,22 @@ function hasTimeoutEvidence(message: ChatMessage): boolean {
   return typeof reasonCode === 'string' && reasonCode.toLowerCase().includes('timeout');
 }
 
+function responseLifecycleTrajectoryStatus(message: ChatMessage): InvocationTrajectoryStatus | undefined {
+  const lifecycle = message.lifecycle;
+  if (lifecycle?.kind !== 'response') return undefined;
+  switch (lifecycle.status) {
+    case 'processing':
+      return 'running';
+    case 'completed':
+      return 'done';
+    case 'failed':
+      return hasTimeoutEvidence(message) ? 'timeout' : 'error';
+    case 'canceled':
+    case 'interrupted':
+      return 'cancelled';
+  }
+}
+
 export function describeMessageInvocationTrajectory(
   message: ChatMessage,
 ): MessageInvocationTrajectoryDescriptor | undefined {
@@ -28,9 +44,11 @@ export function describeMessageInvocationTrajectory(
     message.extra?.timeoutDiagnostics?.invocationId ??
     message.extra?.cliDiagnostics?.debugRef.invocationId;
   if (!invocationId || !message.catId) return undefined;
+  const responseLifecycleStatus = responseLifecycleTrajectoryStatus(message);
   const phase = message.extra?.invocationReconciliation?.phase;
   let status: InvocationTrajectoryStatus;
-  if (phase === 'failed') status = hasTimeoutEvidence(message) ? 'timeout' : 'error';
+  if (responseLifecycleStatus) status = responseLifecycleStatus;
+  else if (phase === 'failed') status = hasTimeoutEvidence(message) ? 'timeout' : 'error';
   else if (phase === 'canceled') status = 'cancelled';
   else if (phase === 'running' || phase === 'unknown_running' || message.isStreaming) status = 'running';
   else if (hasTimeoutEvidence(message)) status = 'timeout';

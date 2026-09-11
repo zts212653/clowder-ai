@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
+import { canonicalTestMessageInput } from '../helpers/message-from-fixtures.js';
 
 const HEAD_SHA = 'a'.repeat(40);
 
@@ -308,21 +309,24 @@ test('persisted proposal receipt is revalidated idempotently after lease deliver
 });
 
 test('stable approved-carrier retry produces one fenced queue dispatch', async () => {
-  const [{ InvocationQueue }, { enqueueA2ATargets }] = await Promise.all([
+  const [{ InvocationQueue }, { MessageStore }, { enqueueA2ATargets }] = await Promise.all([
     import('../../dist/domains/cats/services/agents/invocation/InvocationQueue.js'),
+    import('../../dist/domains/cats/services/stores/ports/MessageStore.js'),
     import('../../dist/routes/callback-a2a-trigger.js'),
   ]);
   const invocationQueue = new InvocationQueue();
-  const triggerMessage = {
-    id: 'msg-action-1',
-    threadId: 'thread-target',
-    userId: 'user-1',
-    catId: 'codex-sol',
-    content: 'Review exact HEAD.',
-    mentions: ['codex-terra'],
-    origin: 'callback',
-    timestamp: 2_000,
-  };
+  const messageStore = new MessageStore();
+  const triggerMessage = messageStore.append(
+    canonicalTestMessageInput({
+      threadId: 'thread-target',
+      userId: 'user-1',
+      catId: 'codex-sol',
+      content: 'Review exact HEAD.',
+      mentions: ['codex-terra'],
+      origin: 'callback',
+      timestamp: 2_000,
+    }),
+  );
   const fence = {
     leaseId: lease.leaseId,
     generation: lease.generation,
@@ -338,9 +342,9 @@ test('stable approved-carrier retry produces one fenced queue dispatch', async (
       broadcastToRoom() {},
       emitToUser() {},
     },
-    queueProcessor: { async tryAutoExecute() {} },
+    queueProcessor: { async requestDrain() {} },
     invocationQueue,
-    messageStore: {},
+    messageStore,
     log: { info() {}, warn() {}, error() {} },
   };
   const input = {
@@ -358,12 +362,12 @@ test('stable approved-carrier retry produces one fenced queue dispatch', async (
   const retry = await enqueueA2ATargets(deps, input);
 
   assert.deepEqual(first.enqueued, ['codex-terra']);
-  assert.deepEqual(retry.enqueued, ['codex-terra']);
+  assert.deepEqual(retry.enqueued, []);
+  assert.deepEqual(retry.coalesced, ['codex-terra']);
   const queued = invocationQueue.list('thread-target', 'user-1');
   assert.equal(queued.length, 1);
-  assert.equal(queued[0].idempotencyKey, `action:${lease.leaseId}:${lease.generation}:codex-terra`);
-  assert.equal(queued[0].ownerAuthProvenance, 'unknown');
-  assert.deepEqual(queued[0].actionSuccessorFence, fence);
+  assert.equal(queued[0].execution.ownerAuthProvenance, 'unknown');
+  assert.deepEqual(queued[0].execution.actionSuccessorFence, fence);
 });
 
 test('recovery adopts the exact legacy-visible carrier as one queued custody source without user-message rescue', async () => {
@@ -374,24 +378,26 @@ test('recovery adopts the exact legacy-visible carrier as one queued custody sou
   ]);
   const invocationQueue = new InvocationQueue();
   const messageStore = new MessageStore();
-  const triggerMessage = messageStore.append({
-    idempotencyKey: `dispatch-action:${proposal.proposalId}:message`,
-    threadId: proposal.targetThreadId,
-    userId: proposal.ownerUserId,
-    catId: proposal.senderCatId,
-    content: proposal.content,
-    mentions: proposal.targetCats,
-    origin: 'callback',
-    timestamp: 2_000,
-    extra: {
-      isExplicitPost: true,
-      crossPost: {
-        sourceThreadId: proposal.sourceThreadId,
-        effectClass: 'assign_work',
+  const triggerMessage = messageStore.append(
+    canonicalTestMessageInput({
+      idempotencyKey: `dispatch-action:${proposal.proposalId}:message`,
+      threadId: proposal.targetThreadId,
+      userId: proposal.ownerUserId,
+      catId: proposal.senderCatId,
+      content: proposal.content,
+      mentions: proposal.targetCats,
+      origin: 'callback',
+      timestamp: 2_000,
+      extra: {
+        isExplicitPost: true,
+        crossPost: {
+          sourceThreadId: proposal.sourceThreadId,
+          effectClass: 'assign_work',
+        },
+        targetCats: proposal.targetCats,
       },
-      targetCats: proposal.targetCats,
-    },
-  });
+    }),
+  );
   assert.equal(triggerMessage.deliveryStatus, undefined, 'reproduce the persisted visible half-carrier');
 
   let autoExecuteCalls = 0;
@@ -405,7 +411,7 @@ test('recovery adopts the exact legacy-visible carrier as one queued custody sou
         emitToUser() {},
       },
       queueProcessor: {
-        async tryAutoExecute() {
+        async requestDrain() {
           autoExecuteCalls += 1;
         },
       },
@@ -435,38 +441,50 @@ test('recovery adopts the exact legacy-visible carrier as one queued custody sou
   const queued = invocationQueue.list(proposal.targetThreadId, proposal.ownerUserId);
   assert.equal(queued.length, 1);
   const recovered = messageStore.getById(triggerMessage.id);
-  assert.equal(recovered.deliveryStatus, 'queued');
-  assert.equal(recovered.queueCustody.status, 'queued');
-  assert.equal(recovered.queueCustody.receiptScope, 'cross_thread_delivery');
-  assert.equal(recovered.queueCustody.carrierByTargetCatId['codex-terra'].entryId, queued[0].id);
+  assert.equal(recovered.deliveryStatus, undefined, 'public Agent speech stays published while custody is queued');
+  assert.equal(recovered.lifecycle.kind, 'input', 'existing-source admission initializes History lifecycle identity');
+  assert.deepEqual(recovered.lifecycle.dispatchRefs, []);
+  assert.equal(recovered.queueCustody, undefined, 'History must not mirror Queue ledger state');
+  assert.equal(queued[0].payload.messageId, recovered.id);
+  assert.deepEqual(queued[0].execution.actionSuccessorFence, {
+    leaseId: lease.leaseId,
+    generation: lease.generation,
+    dispatchId: lease.dispatchId,
+    terminalPredicateDigest: lease.terminalPredicate.digest,
+    invocationLineageRef: `dispatch:${lease.dispatchId}`,
+  });
   assert.equal(autoExecuteCalls, 1);
 });
 
 test('identical recovery races and a process restart converge on the same durable Queue carrier', async () => {
-  const [{ InvocationQueue }, { MessageStore }, { enqueueA2ATargets }] = await Promise.all([
-    import('../../dist/domains/cats/services/agents/invocation/InvocationQueue.js'),
-    import('../../dist/domains/cats/services/stores/ports/MessageStore.js'),
-    import('../../dist/routes/callback-a2a-trigger.js'),
-  ]);
+  const [{ InvocationQueue }, { InMemoryQueueLedgerStore }, { MessageStore }, { enqueueA2ATargets }] =
+    await Promise.all([
+      import('../../dist/domains/cats/services/agents/invocation/InvocationQueue.js'),
+      import('../../dist/domains/cats/services/agents/invocation/queue-ledger/InMemoryQueueLedgerStore.js'),
+      import('../../dist/domains/cats/services/stores/ports/MessageStore.js'),
+      import('../../dist/routes/callback-a2a-trigger.js'),
+    ]);
   const messageStore = new MessageStore();
-  const triggerMessage = messageStore.append({
-    idempotencyKey: `dispatch-action:${proposal.proposalId}:message`,
-    threadId: proposal.targetThreadId,
-    userId: proposal.ownerUserId,
-    catId: proposal.senderCatId,
-    content: proposal.content,
-    mentions: proposal.targetCats,
-    origin: 'callback',
-    timestamp: 2_000,
-    extra: {
-      isExplicitPost: true,
-      crossPost: {
-        sourceThreadId: proposal.sourceThreadId,
-        effectClass: 'assign_work',
+  const triggerMessage = messageStore.append(
+    canonicalTestMessageInput({
+      idempotencyKey: `dispatch-action:${proposal.proposalId}:message`,
+      threadId: proposal.targetThreadId,
+      userId: proposal.ownerUserId,
+      catId: proposal.senderCatId,
+      content: proposal.content,
+      mentions: proposal.targetCats,
+      origin: 'callback',
+      timestamp: 2_000,
+      extra: {
+        isExplicitPost: true,
+        crossPost: {
+          sourceThreadId: proposal.sourceThreadId,
+          effectClass: 'assign_work',
+        },
+        targetCats: proposal.targetCats,
       },
-      targetCats: proposal.targetCats,
-    },
-  });
+    }),
+  );
   const fence = {
     leaseId: lease.leaseId,
     generation: lease.generation,
@@ -492,35 +510,36 @@ test('identical recovery races and a process restart converge on the same durabl
       broadcastToRoom() {},
       emitToUser() {},
     },
-    queueProcessor: { async tryAutoExecute() {} },
+    queueProcessor: { async requestDrain() {} },
     invocationQueue,
     messageStore,
     log: { info() {}, warn() {}, error() {} },
   });
 
-  const firstProcessQueue = new InvocationQueue();
+  const ledger = new InMemoryQueueLedgerStore();
+  const firstProcessQueue = new InvocationQueue(ledger);
   const raced = await Promise.all([
     enqueueA2ATargets(depsFor(firstProcessQueue), input),
     enqueueA2ATargets(depsFor(firstProcessQueue), input),
   ]);
   assert.deepEqual(
-    raced.map((result) => result.enqueued),
-    [['codex-terra'], ['codex-terra']],
+    raced.flatMap((result) => [...result.enqueued, ...(result.coalesced ?? [])]),
+    ['codex-terra', 'codex-terra'],
   );
   const firstEntries = firstProcessQueue.list(proposal.targetThreadId, proposal.ownerUserId);
   assert.equal(firstEntries.length, 1, 'recovery race must not create a second Queue entry');
 
-  const admitted = messageStore.getById(triggerMessage.id);
-  const durableEntryId = admitted.queueCustody.carrierByTargetCatId['codex-terra'].entryId;
+  const durableEntryId = firstEntries[0].id;
   assert.equal(durableEntryId, firstEntries[0].id);
 
-  const restartedQueue = new InvocationQueue();
+  const restartedQueue = new InvocationQueue(ledger);
+  await restartedQueue.hydrateFromLedger(messageStore);
   const restarted = await enqueueA2ATargets(depsFor(restartedQueue), input);
-  assert.deepEqual(restarted.enqueued, ['codex-terra']);
+  assert.deepEqual(restarted.coalesced, ['codex-terra']);
   const restoredEntries = restartedQueue.list(proposal.targetThreadId, proposal.ownerUserId);
   assert.equal(restoredEntries.length, 1, 'restart must restore, not mint, the durable Queue carrier');
   assert.equal(restoredEntries[0].id, durableEntryId);
-  assert.equal(restoredEntries[0].idempotencyKey, `action:${lease.leaseId}:${lease.generation}:codex-terra`);
+  assert.deepEqual(restoredEntries[0].execution.actionSuccessorFence, fence);
 
   await enqueueA2ATargets(depsFor(restartedQueue), input);
   assert.equal(
@@ -530,7 +549,7 @@ test('identical recovery races and a process restart converge on the same durabl
   );
 });
 
-test('approved carrier classification fails closed on conflicting source or custody identity', async () => {
+test('approved carrier classification fails closed on conflicting source or ledger identity', async () => {
   const { classifyApprovedActionCarrier } = await import(
     '../../dist/domains/ball-custody/ActionSuccessorRecoverySweep.js'
   );
@@ -538,7 +557,7 @@ test('approved carrier classification fails closed on conflicting source or cust
     id: 'msg-action-classification',
     threadId: proposal.targetThreadId,
     userId: proposal.ownerUserId,
-    catId: proposal.senderCatId,
+    from: { kind: 'agent', catId: proposal.senderCatId },
     content: proposal.content,
     mentions: proposal.targetCats,
     origin: 'callback',
@@ -553,47 +572,48 @@ test('approved carrier classification fails closed on conflicting source or cust
     },
   };
 
-  assert.deepEqual(classifyApprovedActionCarrier(proposal, carrier), { outcome: 'repairable' });
-  assert.deepEqual(classifyApprovedActionCarrier(proposal, { ...carrier, content: 'conflicting replay' }), {
+  const fence = {
+    leaseId: lease.leaseId,
+    generation: lease.generation,
+    dispatchId: lease.dispatchId,
+    terminalPredicateDigest: lease.terminalPredicate.digest,
+    invocationLineageRef: `dispatch:${lease.dispatchId}`,
+  };
+  assert.deepEqual(classifyApprovedActionCarrier(proposal, carrier, [], fence), { outcome: 'repairable' });
+  assert.deepEqual(classifyApprovedActionCarrier(proposal, { ...carrier, content: 'conflicting replay' }, [], fence), {
     outcome: 'conflict',
     reason: 'carrier_source_conflict',
   });
 
-  const admitted = {
-    ...carrier,
-    deliveryStatus: 'queued',
-    queueCustody: {
-      entryId: `cross-thread:${carrier.id}`,
+  const entry = {
+    version: 2,
+    id: 'queue-entry-terra',
+    threadId: proposal.targetThreadId,
+    owner: { kind: 'user', userId: proposal.ownerUserId },
+    kind: 'message_wake',
+    from: { kind: 'agent', catId: proposal.senderCatId },
+    targets: ['codex-terra'],
+    payload: { sourceRecordId: carrier.id, messageId: carrier.id, content: proposal.content },
+    execution: {
       intent: 'execute',
-      ownerUserId: proposal.ownerUserId,
-      receiptScope: 'cross_thread_delivery',
-      allTargetCats: proposal.targetCats,
-      carrierByTargetCatId: {
-        'codex-terra': {
-          entryId: 'queue-entry-terra',
-          source: 'agent',
-          sourceCategory: 'a2a',
-          callerCatId: proposal.senderCatId,
-          a2aTriggerMessageId: carrier.id,
-          autoExecute: true,
-        },
-      },
+      ownerAuthProvenance: 'strict',
+      autoExecute: true,
+      actionSuccessorFence: fence,
     },
+    delivery: {},
+    status: 'queued',
+    enqueuedAt: 2_000,
+    priority: 'normal',
+    sourceCategory: 'a2a',
   };
-  assert.deepEqual(classifyApprovedActionCarrier(proposal, admitted), { outcome: 'admitted' });
+  assert.deepEqual(classifyApprovedActionCarrier(proposal, carrier, [entry], fence), { outcome: 'admitted' });
   assert.deepEqual(
-    classifyApprovedActionCarrier(proposal, {
-      ...admitted,
-      queueCustody: {
-        ...admitted.queueCustody,
-        carrierByTargetCatId: {
-          'codex-terra': {
-            ...admitted.queueCustody.carrierByTargetCatId['codex-terra'],
-            a2aTriggerMessageId: 'another-source',
-          },
-        },
-      },
-    }),
+    classifyApprovedActionCarrier(
+      proposal,
+      carrier,
+      [{ ...entry, payload: { ...entry.payload, sourceRecordId: 'another-source' } }],
+      fence,
+    ),
     { outcome: 'conflict', reason: 'carrier_receipt_conflict' },
   );
 });

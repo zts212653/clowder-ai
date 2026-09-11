@@ -129,7 +129,18 @@ export function formatThreadAsText(thread: Thread, messages: StoredMessage[]): s
 }
 
 function selectionSender(item: ResolvedMessageSelectionItem): string {
-  return item.author.kind === 'user' ? 'co-creator' : getSenderName(item.author.catId);
+  switch (item.from.kind) {
+    case 'user':
+      return 'co-creator';
+    case 'agent':
+      return getSenderName(item.from.catId);
+    case 'external':
+      return item.from.sender?.name ?? item.from.sender?.id ?? item.from.connectorId;
+    case 'plugin':
+      return item.from.instanceId;
+    case 'system':
+      return item.from.service;
+  }
 }
 
 export function formatSelectionAsMarkdown(

@@ -22,7 +22,7 @@ export interface BallCustodyWakeSender {
 }
 
 export type BallCustodyWakeAdmissionReceipt =
-  | { readonly kind: 'admitted'; readonly messageId: string; readonly outcome: 'dispatched' | 'enqueued' }
+  | { readonly kind: 'admitted'; readonly messageId: string; readonly outcome: 'enqueued' }
   | {
       readonly kind: 'not_admitted';
       readonly messageId: string;

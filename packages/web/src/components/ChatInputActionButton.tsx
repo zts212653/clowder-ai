@@ -1,5 +1,6 @@
 'use client';
 
+import type { MessageWorkDisposition } from '@cat-cafe/shared';
 import { useEffect, useRef, useState } from 'react';
 import { useVoiceInput } from '@/hooks/useVoiceInput';
 import { ExpandableProse } from './content-overflow';
@@ -7,15 +8,22 @@ import { LoadingIcon } from './icons/LoadingIcon';
 import { MicIcon } from './icons/MicIcon';
 import { SendIcon } from './icons/SendIcon';
 import { StopRecordingIcon } from './icons/StopRecordingIcon';
-import { SteerQueuedEntryModal } from './SteerQueuedEntryModal';
+import { SteerQueuedEntryModal, type SteerTargetAction, type SteerTargetOption } from './SteerQueuedEntryModal';
 
 interface ChatInputActionButtonProps {
   onTranscript: (text: string) => void;
   onSend: () => void;
   /** F39: Queue-mode send (content will be queued behind running invocation) */
   onQueueSend?: () => void;
-  /** F39: Force-mode send (cancel running + execute immediately) */
-  onForceSend?: () => void;
+  /** Author's effective delivery timing while another reply is running. */
+  activeDeliveryDisposition?: MessageWorkDisposition;
+  /** Refresh exact thread/fallback truth before exposing any Steer choice. */
+  onSteerOpen?: () => Promise<boolean>;
+  /** Admit the draft to Queue, then Steer that exact entry. */
+  onSteerSend?: (actions: readonly SteerTargetAction[]) => void;
+  /** Deduplicated thread/routing/fallback members available in the draft Steer chooser. */
+  steerTargets?: readonly SteerTargetOption[];
+  steerInitialTargetIds?: readonly string[];
   onStop?: () => void;
   stopState?: 'available' | 'pending' | 'unavailable' | 'hidden';
   disabled?: boolean;
@@ -51,7 +59,11 @@ export function ChatInputActionButton({
   onTranscript,
   onSend,
   onQueueSend,
-  onForceSend,
+  activeDeliveryDisposition = 'next_work',
+  onSteerOpen,
+  onSteerSend,
+  steerTargets = [],
+  steerInitialTargetIds,
   onStop,
   stopState,
   disabled,
@@ -62,6 +74,8 @@ export function ChatInputActionButton({
 }: ChatInputActionButtonProps) {
   const voice = useVoiceInput();
   const [confirmSteer, setConfirmSteer] = useState(false);
+  const [steerContextState, setSteerContextState] = useState<'loading' | 'ready' | 'unavailable'>('ready');
+  const steerOpenSequenceRef = useRef(0);
   // Captures the execution identity when the steer modal opens.
   // If the active execution set changes (A ends → B starts), the key
   // will differ and we dismiss/reject the stale confirmation.
@@ -72,6 +86,7 @@ export function ChatInputActionButton({
   // Fail closed: undefined key = unverifiable identity → dismiss.
   useEffect(() => {
     if (!hasActiveInvocation) {
+      steerOpenSequenceRef.current += 1;
       setConfirmSteer(false);
       return;
     }
@@ -79,11 +94,13 @@ export function ChatInputActionButton({
       // Bound key is undefined (legacy/unhydrated path) — we cannot verify
       // identity, so dismiss the modal rather than risk a stale confirm.
       if (steerBoundKeyRef.current === undefined) {
+        steerOpenSequenceRef.current += 1;
         setConfirmSteer(false);
         return;
       }
       // Same-render A→B: hasActiveInvocation stays true but the key changes.
       if (activeExecutionKey !== steerBoundKeyRef.current) {
+        steerOpenSequenceRef.current += 1;
         setConfirmSteer(false);
       }
     }
@@ -204,22 +221,43 @@ export function ChatInputActionButton({
             onClick={onQueueSend}
             disabled={isSendDisabled}
             className="p-3 rounded-xl bg-[var(--color-cocreator-primary)] text-[var(--cafe-surface)] hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
-            aria-label="排队发送"
-            title="排队发送 — 猫猫忙完后处理"
+            aria-label={activeDeliveryDisposition === 'continue_current' ? '立即发送，引导回复' : '排队等待'}
+            title={
+              activeDeliveryDisposition === 'continue_current'
+                ? '立即发送，引导正在进行的回复'
+                : '排队等待 — 猫猫忙完后处理'
+            }
           >
-            <QueueSendIcon className="w-5 h-5" />
+            {activeDeliveryDisposition === 'continue_current' ? (
+              <SendIcon className="w-5 h-5" />
+            ) : (
+              <QueueSendIcon className="w-5 h-5" />
+            )}
           </button>
-          {onForceSend && activeExecutionKey !== undefined && (
+          {onSteerSend && steerTargets.length > 0 && activeExecutionKey !== undefined && (
             <button
               type="button"
               onClick={() => {
+                const sequence = ++steerOpenSequenceRef.current;
                 steerBoundKeyRef.current = activeExecutionKey;
+                setSteerContextState(onSteerOpen ? 'loading' : 'ready');
                 setConfirmSteer(true);
+                if (onSteerOpen) {
+                  void onSteerOpen()
+                    .then((available) => {
+                      if (steerOpenSequenceRef.current === sequence) {
+                        setSteerContextState(available ? 'ready' : 'unavailable');
+                      }
+                    })
+                    .catch(() => {
+                      if (steerOpenSequenceRef.current === sequence) setSteerContextState('unavailable');
+                    });
+                }
               }}
               disabled={isSendDisabled}
               className="p-2 rounded-lg text-xs text-conn-red-text hover:bg-conn-red-bg disabled:opacity-40 transition-colors"
-              aria-label="强制停止并发送此消息"
-              title="强制停止并发送此消息"
+              aria-label="Steer 发送选项"
+              title="选择立即发送并引导回复，或中断回复后发送"
             >
               <svg className="w-4 h-4" viewBox="0 0 20 20" fill="currentColor">
                 <path
@@ -254,15 +292,27 @@ export function ChatInputActionButton({
       )}
       {confirmSteer && (
         <SteerQueuedEntryModal
-          source="draft"
-          onCancel={() => setConfirmSteer(false)}
-          onConfirm={() => {
+          targets={steerContextState === 'ready' ? steerTargets : []}
+          initialTargetIds={steerInitialTargetIds}
+          contextState={steerContextState}
+          onCancel={() => {
+            steerOpenSequenceRef.current += 1;
             setConfirmSteer(false);
-            // Guard: only force-send if the execution identity that prompted
+          }}
+          onConfirm={(submission) => {
+            steerOpenSequenceRef.current += 1;
+            setConfirmSteer(false);
+            // Guard: only Steer if the execution identity that prompted
             // confirmation is still current. Catches same-render A→B where
             // hasActiveInvocation stays true but the execution set changed.
             const keyMatch = activeExecutionKey !== undefined && activeExecutionKey === steerBoundKeyRef.current;
-            if (hasActiveInvocation && keyMatch) onForceSend?.();
+            const currentTargetIds = new Set(
+              steerTargets.filter((target) => !target.delivered).map((target) => target.id),
+            );
+            const targetsStillAvailable =
+              submission.actions.length > 0 &&
+              submission.actions.every((action) => currentTargetIds.has(action.targetId));
+            if (hasActiveInvocation && keyMatch && targetsStillAvailable) onSteerSend?.(submission.actions);
           }}
         />
       )}

@@ -32,6 +32,8 @@ export function isTerminalDispositionEvent(event: TerminalDispositionEvent): boo
 
 export class PerCatTerminalDispositionCollector {
   private readonly disqualifiedCatIds = new Set<string>();
+  private readonly failedCatIds = new Set<string>();
+  private readonly canceledCatIds = new Set<string>();
   private readonly successfulCatIds = new Set<string>();
   private readonly targetCatIds: Set<string>;
   private readonly isCanceled: (catId: string) => boolean;
@@ -49,6 +51,7 @@ export class PerCatTerminalDispositionCollector {
     if (event.type === 'error') {
       if (event.errorDisposition === 'transient') return;
       this.primaryTerminalError ??= this.readTerminalError(event.error, event.errorCode, catId);
+      this.failedCatIds.add(catId);
       this.disqualify(catId);
       return;
     }
@@ -58,6 +61,9 @@ export class PerCatTerminalDispositionCollector {
     if (event.errorCode !== undefined || this.isCanceled(catId)) {
       if (event.errorCode !== undefined) {
         this.primaryTerminalError ??= this.readTerminalError(undefined, event.errorCode, catId);
+        this.failedCatIds.add(catId);
+      } else {
+        this.canceledCatIds.add(catId);
       }
       this.disqualify(catId);
       return;
@@ -74,6 +80,13 @@ export class PerCatTerminalDispositionCollector {
 
   getPrimaryTerminalError(): string | undefined {
     return this.primaryTerminalError;
+  }
+
+  getTerminalStatus(catId: string): 'succeeded' | 'failed' | 'canceled' | undefined {
+    if (this.successfulCatIds.has(catId)) return 'succeeded';
+    if (this.failedCatIds.has(catId)) return 'failed';
+    if (this.canceledCatIds.has(catId)) return 'canceled';
+    return undefined;
   }
 
   private readTerminalError(error: unknown, errorCode: unknown, catId: string): string {

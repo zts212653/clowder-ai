@@ -49,7 +49,6 @@ import { ProjectSetupCard } from './ProjectSetupCard';
 import { RightStatusPanel } from './RightStatusPanel';
 import { RuntimeUpdateRequiredDialog } from './RuntimeUpdateRequiredDialog';
 import { SplitPaneChatView } from './SplitPaneView';
-import { ThinkingIndicator } from './ThinkingIndicator';
 import { ThreadSidebar } from './ThreadSidebar';
 import { assignDocumentRoute, pushThreadRouteWithHistory } from './ThreadSidebar/thread-navigation';
 import { ThreadChatExport, ThreadChatSurface, useThreadChatRuntime } from './thread-chat';
@@ -864,8 +863,6 @@ function InteractiveChatContainer({ threadId }: ChatContainerProps) {
         />
 
         {intentMode === 'ideate' && <ParallelStatusBar threadId={threadId} />}
-        <ThinkingIndicator threadId={threadId} />
-
         <ThreadChatSurface
           threadId={threadId}
           density="full"

@@ -105,6 +105,14 @@ function compileAliasMatcher(aliasNorm: string): ((textNorm: string) => boolean)
   return (textNorm) => pattern.test(textNorm);
 }
 
+function isNearVerbatimThreadTitle(row: DocAliasRow, aliasNorm: string, textNorm: string): boolean {
+  if (!row.source_path?.startsWith('threads/')) return false;
+  // Thread titles are searchable documents, but a long title that occupies
+  // most of the current input is conversational replay rather than an entity.
+  // Short, intentionally named threads remain eligible for nudges.
+  return aliasNorm.length >= 24 && aliasNorm.length * 2 >= textNorm.length;
+}
+
 // ── Internal row types ──────────────────────────────────────────────────
 
 interface EntityAliasRow {
@@ -307,6 +315,7 @@ export class InputEntityDetector {
       const aliasNorm = normalizeEntityAlias(row.alias_norm || row.alias);
       const matcher = compileAliasMatcher(aliasNorm);
       if (!matcher?.(textNorm)) continue;
+      if (isNearVerbatimThreadTitle(row, aliasNorm, textNorm)) continue;
       if (contextAnchors.has(row.doc_anchor)) continue;
 
       seen.add(row.doc_anchor);

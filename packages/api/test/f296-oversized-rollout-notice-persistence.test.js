@@ -28,8 +28,8 @@ async function persistedLifecycleMessages(store, contents) {
   );
 }
 
-describe('F296 oversized native rollover durable notices', () => {
-  it('persists each lifecycle stage exactly once with no native-session payload leakage', async () => {
+describe('F296 oversized native rollover response-owned diagnostics', () => {
+  it('keeps lifecycle stages out of History because the response bubble owns execution status', async () => {
     const store = new MessageStore();
     const pending = lifecycle('pending');
     const succeeded = lifecycle('succeeded');
@@ -37,21 +37,10 @@ describe('F296 oversized native rollover durable notices', () => {
     assert.equal(isUserFacingSystemInfoContent(pending), true);
     const messages = await persistedLifecycleMessages(store, [pending, pending, succeeded, succeeded]);
 
-    assert.equal(messages.length, 2);
-    assert.deepEqual(
-      messages.map((message) => message.source.meta.sessionRollover.status),
-      ['pending', 'succeeded'],
-    );
-    assert.deepEqual(
-      messages.map((message) => message.source.meta.noticeTone),
-      ['info', 'info'],
-    );
-    for (const message of messages) {
-      assert.doesNotMatch(message.content, /native-oversized|rollout|prompt|inv-oversized-1/i);
-    }
+    assert.equal(messages.length, 0);
   });
 
-  it('persists an honest failed stage and rejects malformed lifecycle payloads', async () => {
+  it('does not append a second system row for a failed response-owned rollover', async () => {
     const store = new MessageStore();
     const failed = lifecycle('failed', { failureStage: 'seal_finalize' });
     const messages = await persistedLifecycleMessages(store, [
@@ -63,11 +52,30 @@ describe('F296 oversized native rollover durable notices', () => {
       failed,
     ]);
 
-    assert.equal(messages.length, 1);
-    assert.equal(messages[0].source.meta.noticeTone, 'warning');
-    assert.equal(messages[0].source.meta.sessionRollover.status, 'failed');
-    assert.equal(messages[0].source.meta.sessionRollover.failureStage, 'seal_finalize');
-    assert.match(messages[0].content, /失败/);
-    assert.match(messages[0].content, /发送新 prompt 前停止/);
+    assert.equal(messages.length, 0);
+  });
+
+  it('does not duplicate an exact provider failure already owned by the response body', async () => {
+    const store = new MessageStore();
+    const failureText = 'Codex CLI: CLI 异常退出 (code=1)';
+
+    await persistUserFacingSystemInfoNotices({
+      messageStore: store,
+      threadId: 'thread-owner',
+      catId: 'codex-sol',
+      terminalFailureText: failureText,
+      contents: [
+        JSON.stringify({ type: 'warning', message: failureText }),
+        JSON.stringify({ type: 'warning', message: '另一条独立警告' }),
+      ],
+    });
+
+    const warnings = (await store.getByThread('thread-owner')).filter(
+      (message) => message.source?.connector === 'system-warning',
+    );
+    assert.deepEqual(
+      warnings.map((message) => message.content),
+      ['⚠️ 另一条独立警告'],
+    );
   });
 });

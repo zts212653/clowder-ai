@@ -663,6 +663,41 @@ test('F306 omits a collaboration override for a fresh execute provider thread', 
   await run;
 });
 
+test('custom app-server provider inherits its configured model without a duplicate thread model lookup', async () => {
+  const wire = new InteractionWire();
+  let sessionOptions;
+  const service = new CodexAgentService({
+    carrierMode: 'app_server',
+    cliCommand: process.execPath,
+    l0CompilerFn: fakeL0Compiler,
+    model: 'deepseek-chat',
+  });
+  const run = collect(
+    service.invoke('use the custom provider model', {
+      callbackEnv: {
+        OPENAI_BASE_URL: 'https://api.deepseek.com',
+        OPENAI_API_KEY: 'test-key',
+        CODEX_AUTH_MODE: 'api_key',
+      },
+      agentCarrierSessionFactory: async (options) => {
+        sessionOptions = options;
+        return wire;
+      },
+    }),
+  );
+
+  await waitFor(() => wire.writes.some((message) => message.method === 'turn/start'));
+  assert.ok(sessionOptions.args.includes('model="deepseek-chat"'));
+  const threadStart = wire.writes.find((message) => message.method === 'thread/start');
+  assert.equal(Object.hasOwn(threadStart.params, 'model'), false);
+
+  wire.inbox.push({
+    method: 'turn/completed',
+    params: { threadId: 'provider-thread', turn: { id: 'provider-turn', status: 'completed' } },
+  });
+  await run;
+});
+
 test('F306 explicitly restores Default when execute resumes a provider thread after ideate', async () => {
   const wire = new InteractionWire();
   const service = new CodexAgentService({

@@ -10,12 +10,22 @@ import assert from 'node:assert/strict';
 import { afterEach, beforeEach, describe, test } from 'node:test';
 import './helpers/setup-cat-registry.js';
 import Fastify from 'fastify';
-import { InvocationQueue } from '../dist/domains/cats/services/agents/invocation/InvocationQueue.js';
+import {
+  InvocationQueue,
+  queueEntryTargetCats,
+} from '../dist/domains/cats/services/agents/invocation/InvocationQueue.js';
+import { MessageStore } from '../dist/domains/cats/services/stores/ports/MessageStore.js';
 import { registerCallbackAuthHook } from '../dist/routes/callback-auth-prehandler.js';
 import {
   getMultiMentionOrchestrator,
   resetMultiMentionOrchestrator,
 } from '../dist/routes/callback-multi-mention-routes.js';
+import {
+  adaptInvocationQueue,
+  adaptMessageStore,
+  appendTestLifecycleResponseSource,
+  canonicalTestQueueInput,
+} from './helpers/message-from-fixtures.js';
 
 // ── Mocks ──────────────────────────────────────────────────────────────
 
@@ -57,22 +67,23 @@ function createMockSocketManager() {
     broadcastToRoom(room, event, data) {
       roomEvents.push({ room, event, data });
     },
+    emitToUser() {},
     getMessages: () => messages,
     getRoomEvents: () => roomEvents,
   };
 }
 
 function createMockMessageStore() {
+  const store = adaptMessageStore(new MessageStore());
   const messages = [];
-  return {
-    append(msg) {
-      const stored = { id: `msg-${messages.length}`, ...msg };
-      messages.push(stored);
-      return stored;
-    },
-    getById: (id) => messages.find((m) => m.id === id) ?? null,
-    getMessages: () => messages,
+  const append = store.append.bind(store);
+  store.append = (msg) => {
+    const stored = append(msg);
+    messages.push(stored);
+    return stored;
   };
+  store.getMessages = () => messages;
+  return store;
 }
 
 function createMockInvocationRecordStore() {
@@ -120,23 +131,27 @@ function createMockQueueProcessor() {
   const hooks = new Map();
   const autoExecuteCalls = [];
   return {
-    registerEntryCompleteHook(entryId, hook) {
-      hooks.set(entryId, hook);
+    registerEntryCompleteHook(entryId, hook, targetCatId) {
+      const hookId = targetCatId ? `${entryId}:${targetCatId}` : entryId;
+      hooks.set(hookId, { entryId, hook, targetCatId });
     },
     unregisterEntryCompleteHook(entryId) {
-      hooks.delete(entryId);
+      if (hooks.delete(entryId)) return;
+      for (const [hookId, registration] of hooks) {
+        if (registration.entryId === entryId) hooks.delete(hookId);
+      }
     },
-    tryAutoExecute(threadId) {
+    requestDrain(threadId) {
       autoExecuteCalls.push(threadId);
       return Promise.resolve();
     },
     getHooks: () => hooks,
     getAutoExecuteCalls: () => autoExecuteCalls,
-    simulateComplete(entryId, status, responseText) {
-      const hook = hooks.get(entryId);
-      if (hook) {
-        hook(entryId, status, responseText);
-        hooks.delete(entryId);
+    simulateComplete(hookId, status, responseText) {
+      const registration = hooks.get(hookId);
+      if (registration) {
+        registration.hook(registration.entryId, status, responseText);
+        hooks.delete(hookId);
       }
     },
   };
@@ -161,7 +176,7 @@ describe('B6: multi_mention queue dispatch', () => {
     mockInvocationRecordStore = createMockInvocationRecordStore();
     mockInvocationTracker = createMockInvocationTracker();
     mockRouter = createMockRouter();
-    invocationQueue = new InvocationQueue();
+    invocationQueue = adaptInvocationQueue(new InvocationQueue());
     mockQueueProcessor = createMockQueueProcessor();
     actionAdmissionCalls = [];
     actionUnavailableCalls = [];
@@ -185,6 +200,7 @@ describe('B6: multi_mention queue dispatch', () => {
       },
     };
     creds = mockRegistry.register('opus', 'thread-1', 'user-1');
+    appendTestLifecycleResponseSource(mockMessageStore, creds);
 
     app = Fastify({ logger: false });
     registerCallbackAuthHook(app, mockRegistry);
@@ -219,14 +235,14 @@ describe('B6: multi_mention queue dispatch', () => {
       },
     });
 
-    assert.equal(res.statusCode, 200);
+    assert.equal(res.statusCode, 200, res.body);
     const body = res.json();
     assert.ok(body.requestId);
 
     // Router should NOT have been called directly (queue path used)
     assert.equal(mockRouter.getExecutions().length, 0);
 
-    // tryAutoExecute should have been called
+    // The thread drain should have been signaled.
     assert.ok(mockQueueProcessor.getAutoExecuteCalls().length > 0);
 
     // Completion hook should have been registered for the enqueued entry
@@ -234,7 +250,7 @@ describe('B6: multi_mention queue dispatch', () => {
     assert.equal(actionAdmissionCalls.length, 0, 'legacy unscoped request must remain backward compatible');
   });
 
-  test('preserves exact cloud source provenance and per-target lineage in every Queue carrier', async () => {
+  test('preserves exact cloud source provenance and target lineage in the source Queue carrier', async () => {
     const source = mockMessageStore.append({
       userId: 'user-1',
       catId: null,
@@ -242,11 +258,14 @@ describe('B6: multi_mention queue dispatch', () => {
       mentions: [],
       timestamp: 100,
       threadId: 'thread-1',
-      deliveryStatus: 'delivered',
+      // F117: append() delivery metadata is transition-owned; only 'queued' may be
+      // initialized at append time (MessageStore.assertValidAppendDeliveryMetadata).
+      // This fixture only needs the source message identity, so omit deliveryStatus.
     });
     creds = mockRegistry.register('opus', 'thread-1', 'user-1', {
       originTriggerMessageId: source.id,
     });
+    const callerResponse = appendTestLifecycleResponseSource(mockMessageStore, creds);
 
     const res = await app.inject({
       method: 'POST',
@@ -260,45 +279,27 @@ describe('B6: multi_mention queue dispatch', () => {
       },
     });
 
-    assert.equal(res.statusCode, 200);
-    const { requestId } = res.json();
+    assert.equal(res.statusCode, 200, res.body);
     const entries = invocationQueue.list('thread-1', 'user-1');
-    assert.equal(entries.length, 2);
-    assert.deepEqual(
-      entries.map((entry) => ({
-        targetCatId: entry.targetCats[0],
-        parentInvocationId: entry.a2aParentInvocationId,
-        idempotencyKey: entry.idempotencyKey,
-        requiresExactProvenance: entry.requiresExactCloudDispatchProvenance,
-        provenance: entry.cloudDispatchProvenance,
-      })),
-      [
-        {
-          targetCatId: 'codex',
-          parentInvocationId: creds.invocationId,
-          idempotencyKey: `multi-mention:${requestId}:codex`,
-          requiresExactProvenance: true,
-          provenance: {
-            sourceMessageId: source.id,
-            sourceSender: { kind: 'user', id: 'user-1' },
-            calledByCatId: 'opus',
-            intent: 'Review the exact source\n\n---\n\nPreserve this original context',
-          },
-        },
-        {
-          targetCatId: 'gpt-pro',
-          parentInvocationId: creds.invocationId,
-          idempotencyKey: `multi-mention:${requestId}:gpt-pro`,
-          requiresExactProvenance: true,
-          provenance: {
-            sourceMessageId: source.id,
-            sourceSender: { kind: 'user', id: 'user-1' },
-            calledByCatId: 'opus',
-            intent: 'Review the exact source\n\n---\n\nPreserve this original context',
-          },
-        },
-      ],
+    assert.equal(entries.length, 1);
+    const [entry] = entries;
+    assert.deepEqual(queueEntryTargetCats(entry), ['codex', 'gpt-pro']);
+    assert.equal(entry.execution.a2aParentInvocationId, creds.invocationId);
+    const dispatchSource = mockMessageStore.getById(entry.payload.sourceRecordId);
+    assert.ok(dispatchSource, 'Queue sourceRecordId must resolve to the public multi-mention source');
+    assert.equal(dispatchSource.replyTo, callerResponse.id);
+    assert.equal(dispatchSource.extra?.causal?.triggerMessageId, callerResponse.id);
+    assert.equal(
+      dispatchSource.content,
+      '[Multi-Mention from opus]\n\nReview the exact source\n\n---\n\nPreserve this original context',
     );
+    assert.equal(entry.execution.requiresExactCloudDispatchProvenance, true);
+    assert.deepEqual(entry.execution.cloudDispatchProvenance, {
+      sourceMessageId: source.id,
+      sourceSender: { kind: 'user', id: 'user-1' },
+      calledByCatId: 'opus',
+      intent: 'Review the exact source\n\n---\n\nPreserve this original context',
+    });
   });
 
   test('rejects caller-visible but cloud-ineligible Queue provenance while local sibling stays independent', async () => {
@@ -309,13 +310,17 @@ describe('B6: multi_mention queue dispatch', () => {
       mentions: [],
       timestamp: 101,
       threadId: 'thread-1',
-      deliveryStatus: 'delivered',
+      // F117: delivery metadata is transition-owned (see sibling fixture above);
+      // append() rejects any non-'queued' initialization, so omit deliveryStatus.
       visibility: 'whisper',
       whisperTo: ['opus'],
     });
     creds = mockRegistry.register('opus', 'thread-1', 'user-1', {
       originTriggerMessageId: source.id,
     });
+    // F117: seed the lifecycle response source for the re-registered invocation id
+    // (same contract as the sibling test above).
+    appendTestLifecycleResponseSource(mockMessageStore, creds);
 
     const res = await app.inject({
       method: 'POST',
@@ -328,20 +333,24 @@ describe('B6: multi_mention queue dispatch', () => {
       },
     });
 
-    assert.equal(res.statusCode, 200);
+    assert.equal(res.statusCode, 200, res.body);
     const { requestId } = res.json();
     const entries = invocationQueue.list('thread-1', 'user-1');
-    const localEntry = entries.find((entry) => entry.targetCats[0] === 'codex');
-    const cloudEntry = entries.find((entry) => entry.targetCats[0] === 'gpt-pro');
-    assert.ok(localEntry);
-    assert.ok(cloudEntry);
-    assert.equal(cloudEntry.requiresExactCloudDispatchProvenance, true);
-    assert.equal(cloudEntry.cloudDispatchProvenance, undefined);
+    assert.equal(entries.length, 1);
+    const [entry] = entries;
+    assert.deepEqual(queueEntryTargetCats(entry), ['codex', 'gpt-pro']);
+    assert.equal(entry.execution.requiresExactCloudDispatchProvenance, true);
+    assert.equal(entry.execution.cloudDispatchProvenance, undefined);
+    assert.equal(entry.execution.a2aParentInvocationId, creds.invocationId);
 
     const orch = getMultiMentionOrchestrator();
-    mockQueueProcessor.simulateComplete(cloudEntry.id, 'succeeded', '未发送给 @gpt-pro：精确来源不满足公开回程资格。');
+    mockQueueProcessor.simulateComplete(
+      `${entry.id}:gpt-pro`,
+      'succeeded',
+      '未发送给 @gpt-pro：精确来源不满足公开回程资格。',
+    );
     assert.equal(orch.getStatus(requestId), 'partial');
-    mockQueueProcessor.simulateComplete(localEntry.id, 'succeeded', 'Local sibling completed');
+    mockQueueProcessor.simulateComplete(`${entry.id}:codex`, 'succeeded', 'Local sibling completed');
 
     assert.equal(orch.getStatus(requestId), 'done');
     const flushMsg = mockMessageStore.getMessages().find((message) => message.content?.includes('Multi-Mention'));
@@ -379,8 +388,8 @@ describe('B6: multi_mention queue dispatch', () => {
       outcome: 'claimed',
     });
     const [entry] = invocationQueue.list('thread-1', 'user-1');
-    assert.deepEqual(entry.actionSuccessorFence, actionAdmissionResult.fence);
-    assert.equal(entry.idempotencyKey, 'action:lease-action-1:1:codex');
+    assert.deepEqual(entry.execution.actionSuccessorFence, actionAdmissionResult.fence);
+    assert.equal(entry.payload.sourceRecordId, entry.payload.messageId);
   });
 
   test('confirms a returned generation only after its predecessor is enqueued', async () => {
@@ -691,6 +700,7 @@ describe('B6: multi_mention queue dispatch', () => {
 
     // After completion, orchestrator should be done (all 1 target responded)
     assert.equal(orch.getStatus(requestId), 'done');
+    await new Promise((resolve) => setImmediate(resolve));
 
     // Result message should have been flushed to message store
     const stored = mockMessageStore.getMessages();
@@ -729,6 +739,7 @@ describe('B6: multi_mention queue dispatch', () => {
     // Complete second target
     mockQueueProcessor.simulateComplete(entryIds[1], 'succeeded', 'Gemini response');
     assert.equal(orch.getStatus(requestId), 'done');
+    await new Promise((resolve) => setImmediate(resolve));
 
     // Both responses should be in the flush message
     const stored = mockMessageStore.getMessages();
@@ -788,7 +799,7 @@ describe('B6: multi_mention queue dispatch', () => {
     assert.ok(result.responses[0].content.includes('[dispatch error]'));
   });
 
-  test('enqueued entries have source=agent and autoExecute=true', async () => {
+  test('enqueued entries have canonical agent From and autoExecute=true', async () => {
     await app.inject({
       method: 'POST',
       url: '/api/callbacks/multi-mention',
@@ -804,26 +815,29 @@ describe('B6: multi_mention queue dispatch', () => {
     const entries = invocationQueue.listAutoExecute('thread-1');
     assert.ok(entries.length > 0);
     const entry = entries[0];
-    assert.equal(entry.source, 'agent');
-    assert.equal(entry.autoExecute, true);
-    assert.equal(entry.ownerAuthProvenance, 'strict');
-    assert.deepEqual(entry.targetCats, ['codex']);
-    assert.ok(entry.content.includes('[Multi-Mention from opus]'));
-    assert.ok(entry.content.includes('Test queue entry fields'));
+    assert.deepEqual(entry.from, { kind: 'agent', catId: 'opus' });
+    assert.equal(entry.execution.autoExecute, true);
+    assert.equal(entry.execution.ownerAuthProvenance, 'strict');
+    assert.deepEqual(entry.targets, ['codex']);
+    assert.ok(entry.payload.content.includes('[Multi-Mention from opus]'));
+    assert.ok(entry.payload.content.includes('Test queue entry fields'));
   });
 
   test('depth limit prevents excessive enqueue', async () => {
     // Fill the queue with 10 agent entries (MAX_MM_DEPTH)
     for (let i = 0; i < 10; i++) {
-      invocationQueue.enqueue({
-        ownerAuthProvenance: 'unknown',
-        threadId: 'thread-1',
-        userId: 'user-1',
-        content: `fill-${i}`,
-        source: 'agent',
-        targetCats: [`cat-${i}`],
-        intent: 'execute',
-      });
+      invocationQueue.enqueue(
+        canonicalTestQueueInput({
+          ownerAuthProvenance: 'unknown',
+          threadId: 'thread-1',
+          userId: 'user-1',
+          kind: 'private_input',
+          content: `fill-${i}`,
+          source: 'agent',
+          targetCats: [`cat-${i}`],
+          intent: 'execute',
+        }),
+      );
     }
 
     const res = await app.inject({
@@ -844,15 +858,18 @@ describe('B6: multi_mention queue dispatch', () => {
 
   test('action lease becomes replaceable when queue depth prevents dispatch', async () => {
     for (let i = 0; i < 10; i++) {
-      invocationQueue.enqueue({
-        ownerAuthProvenance: 'unknown',
-        threadId: 'thread-1',
-        userId: 'user-1',
-        content: `fill-${i}`,
-        source: 'agent',
-        targetCats: [`cat-${i}`],
-        intent: 'execute',
-      });
+      invocationQueue.enqueue(
+        canonicalTestQueueInput({
+          ownerAuthProvenance: 'unknown',
+          threadId: 'thread-1',
+          userId: 'user-1',
+          kind: 'private_input',
+          content: `fill-${i}`,
+          source: 'agent',
+          targetCats: [`cat-${i}`],
+          intent: 'execute',
+        }),
+      );
     }
 
     const res = await app.inject({
@@ -886,15 +903,18 @@ describe('B6: multi_mention queue dispatch', () => {
 
   test('keeps a failed return delivery pending for recovery instead of changing custody', async () => {
     for (let i = 0; i < 10; i++) {
-      invocationQueue.enqueue({
-        ownerAuthProvenance: 'unknown',
-        threadId: 'thread-1',
-        userId: 'user-1',
-        content: `fill-return-${i}`,
-        source: 'agent',
-        targetCats: [`cat-return-${i}`],
-        intent: 'execute',
-      });
+      invocationQueue.enqueue(
+        canonicalTestQueueInput({
+          ownerAuthProvenance: 'unknown',
+          threadId: 'thread-1',
+          userId: 'user-1',
+          kind: 'private_input',
+          content: `fill-return-${i}`,
+          source: 'agent',
+          targetCats: [`cat-return-${i}`],
+          intent: 'execute',
+        }),
+      );
     }
     actionAdmissionResult = {
       admit: true,
@@ -934,15 +954,18 @@ describe('B6: multi_mention queue dispatch', () => {
 
   test('keeps a failed replayed return pending for recovery instead of changing custody', async () => {
     for (let i = 0; i < 10; i++) {
-      invocationQueue.enqueue({
-        ownerAuthProvenance: 'unknown',
-        threadId: 'thread-1',
-        userId: 'user-1',
-        content: `fill-return-replay-${i}`,
-        source: 'agent',
-        targetCats: [`cat-return-replay-${i}`],
-        intent: 'execute',
-      });
+      invocationQueue.enqueue(
+        canonicalTestQueueInput({
+          ownerAuthProvenance: 'unknown',
+          threadId: 'thread-1',
+          userId: 'user-1',
+          kind: 'private_input',
+          content: `fill-return-replay-${i}`,
+          source: 'agent',
+          targetCats: [`cat-return-replay-${i}`],
+          intent: 'execute',
+        }),
+      );
     }
     actionAdmissionResult = {
       admit: false,
@@ -980,15 +1003,18 @@ describe('B6: multi_mention queue dispatch', () => {
   });
 
   test('action-scoped dispatch queues behind unrelated work for the same cat', async () => {
-    invocationQueue.enqueue({
-      ownerAuthProvenance: 'unknown',
-      threadId: 'thread-1',
-      userId: 'user-1',
-      content: 'existing unrelated work',
-      source: 'agent',
-      targetCats: ['codex'],
-      intent: 'execute',
-    });
+    invocationQueue.enqueue(
+      canonicalTestQueueInput({
+        ownerAuthProvenance: 'unknown',
+        threadId: 'thread-1',
+        userId: 'user-1',
+        kind: 'private_input',
+        content: 'existing unrelated work',
+        source: 'agent',
+        targetCats: ['codex'],
+        intent: 'execute',
+      }),
+    );
 
     const res = await app.inject({
       method: 'POST',
@@ -1019,8 +1045,8 @@ describe('B6: multi_mention queue dispatch', () => {
     const realSetTimeout = globalThis.setTimeout;
     const realClearTimeout = globalThis.clearTimeout;
     let fireTimeout;
-    globalThis.setTimeout = (callback) => {
-      fireTimeout = callback;
+    globalThis.setTimeout = (callback, delay) => {
+      if (delay >= 3 * 60_000) fireTimeout = callback;
       return { unref() {} };
     };
     globalThis.clearTimeout = () => {};
@@ -1050,6 +1076,7 @@ describe('B6: multi_mention queue dispatch', () => {
       fireTimeout();
       await Promise.resolve();
       await Promise.resolve();
+      await new Promise((resolve) => setImmediate(resolve));
 
       assert.equal(actionUnavailableCalls.length, 1);
       assert.deepEqual(actionUnavailableCalls[0], {
@@ -1119,15 +1146,18 @@ describe('B6: multi_mention queue dispatch', () => {
 
   test('duplicate cat detection skips already-queued cats', async () => {
     // Pre-enqueue codex as agent
-    invocationQueue.enqueue({
-      ownerAuthProvenance: 'unknown',
-      threadId: 'thread-1',
-      userId: 'user-1',
-      content: 'existing',
-      source: 'agent',
-      targetCats: ['codex'],
-      intent: 'execute',
-    });
+    invocationQueue.enqueue(
+      canonicalTestQueueInput({
+        ownerAuthProvenance: 'unknown',
+        threadId: 'thread-1',
+        userId: 'user-1',
+        kind: 'private_input',
+        content: 'existing',
+        source: 'agent',
+        targetCats: ['codex'],
+        intent: 'execute',
+      }),
+    );
 
     const res = await app.inject({
       method: 'POST',
@@ -1145,209 +1175,43 @@ describe('B6: multi_mention queue dispatch', () => {
     assert.equal(mockQueueProcessor.getHooks().size, 0);
   });
 
-  test('falls back to direct dispatch when queue deps are absent', async () => {
-    // Create a new app WITHOUT queue deps
-    const fallbackApp = Fastify({ logger: false });
-    registerCallbackAuthHook(fallbackApp, mockRegistry);
+  test('fails closed when canonical Queue deps are absent', async () => {
+    const incompleteApp = Fastify({ logger: false });
+    registerCallbackAuthHook(incompleteApp, mockRegistry);
     resetMultiMentionOrchestrator();
-    const fallbackRouter = createMockRouter();
+    const incompleteRouter = createMockRouter();
     const { registerMultiMentionRoutes } = await import('../dist/routes/callback-multi-mention-routes.js');
-    const source = mockMessageStore.append({
-      userId: 'user-2',
-      catId: null,
-      content: 'Exact direct source',
-      mentions: [],
-      timestamp: 200,
-      threadId: 'thread-2',
-      deliveryStatus: 'delivered',
-    });
-    const fallbackCreds = mockRegistry.register('opus', 'thread-2', 'user-2', {
-      originTriggerMessageId: source.id,
-    });
+    const incompleteCreds = mockRegistry.register('opus', 'thread-2', 'user-2');
 
-    registerMultiMentionRoutes(fallbackApp, {
+    registerMultiMentionRoutes(incompleteApp, {
       registry: mockRegistry,
       messageStore: mockMessageStore,
       socketManager: mockSocket,
-      router: fallbackRouter,
+      router: incompleteRouter,
       invocationRecordStore: mockInvocationRecordStore,
       invocationTracker: mockInvocationTracker,
-      // No invocationQueue or queueProcessor
     });
-    await fallbackApp.ready();
+    await incompleteApp.ready();
 
-    const res = await fallbackApp.inject({
+    const res = await incompleteApp.inject({
       method: 'POST',
       url: '/api/callbacks/multi-mention',
-      headers: { 'x-invocation-id': fallbackCreds.invocationId, 'x-callback-token': fallbackCreds.callbackToken },
+      headers: {
+        'x-invocation-id': incompleteCreds.invocationId,
+        'x-callback-token': incompleteCreds.callbackToken,
+      },
       payload: {
         targets: ['codex'],
-        question: 'Fallback test',
+        question: 'Canonical Queue required',
         callbackTo: 'opus',
       },
     });
 
-    assert.equal(res.statusCode, 200);
+    assert.equal(res.statusCode, 503);
+    assert.match(res.json().error, /InvocationQueue and QueueProcessor/);
+    assert.equal(incompleteRouter.getExecutions().length, 0);
 
-    // Wait for async dispatch to complete
-    await new Promise((r) => setTimeout(r, 100));
-
-    // Direct dispatch should have been used (router called)
-    assert.ok(fallbackRouter.getExecutions().length > 0);
-    const [execution] = fallbackRouter.getExecutions();
-    assert.equal(execution.userMessageId, source.id);
-    assert.equal(execution.options.requiresExactCloudDispatchProvenance, true);
-    assert.deepEqual(execution.options.cloudDispatchProvenance, {
-      sourceMessageId: source.id,
-      sourceSender: { kind: 'user', id: 'user-2' },
-      calledByCatId: 'opus',
-      intent: 'Fallback test',
-    });
-
-    await fallbackApp.close();
-  });
-
-  test('keeps a typed direct cloud provenance failure visible instead of recording empty success', async () => {
-    const fallbackApp = Fastify({ logger: false });
-    registerCallbackAuthHook(fallbackApp, mockRegistry);
-    resetMultiMentionOrchestrator();
-    const { registerMultiMentionRoutes } = await import('../dist/routes/callback-multi-mention-routes.js');
-    const routeCalls = [];
-    const fallbackRouter = {
-      async *routeExecution(_userId, _message, _threadId, _sourceMessageId, targetCats, _intent, options) {
-        routeCalls.push(options);
-        yield {
-          type: 'system_info',
-          catId: targetCats[0],
-          content: JSON.stringify({
-            type: 'cloud_bridge_status',
-            status: 'unavailable',
-            reason: 'incomplete-dispatch-provenance',
-            message: '未发送给 @gpt-pro：投递来源或回程绑定不完整。',
-          }),
-          timestamp: Date.now(),
-        };
-        yield { type: 'done', catId: targetCats[0], isFinal: true, timestamp: Date.now() };
-      },
-    };
-    const fallbackCreds = mockRegistry.register('opus', 'thread-2', 'user-2');
-
-    registerMultiMentionRoutes(fallbackApp, {
-      registry: mockRegistry,
-      messageStore: mockMessageStore,
-      socketManager: mockSocket,
-      router: fallbackRouter,
-      invocationRecordStore: mockInvocationRecordStore,
-      invocationTracker: mockInvocationTracker,
-    });
-    await fallbackApp.ready();
-
-    const res = await fallbackApp.inject({
-      method: 'POST',
-      url: '/api/callbacks/multi-mention',
-      headers: { 'x-invocation-id': fallbackCreds.invocationId, 'x-callback-token': fallbackCreds.callbackToken },
-      payload: {
-        targets: ['gpt-pro'],
-        question: 'Fail visibly',
-        callbackTo: 'opus',
-      },
-    });
-
-    assert.equal(res.statusCode, 200);
-    const { requestId } = res.json();
-    await new Promise((resolve) => setTimeout(resolve, 100));
-    const result = getMultiMentionOrchestrator().getResult(requestId);
-    assert.equal(routeCalls[0].requiresExactCloudDispatchProvenance, true);
-    assert.equal(routeCalls[0].cloudDispatchProvenance, undefined);
-    assert.equal(result.responses[0].status, 'received');
-    assert.match(result.responses[0].content, /未发送给 @gpt-pro/);
-
-    await fallbackApp.close();
-  });
-
-  test('does not direct-dispatch a caller-visible source that is ineligible for the cloud return boundary', async () => {
-    const fallbackApp = Fastify({ logger: false });
-    registerCallbackAuthHook(fallbackApp, mockRegistry);
-    resetMultiMentionOrchestrator();
-    const { registerMultiMentionRoutes } = await import('../dist/routes/callback-multi-mention-routes.js');
-    const routeCalls = [];
-    let bridgeDispatches = 0;
-    const fallbackRouter = {
-      async *routeExecution(_userId, _message, _threadId, _sourceMessageId, targetCats, _intent, options) {
-        const targetCatId = targetCats[0];
-        routeCalls.push({ targetCatId, options });
-        if (targetCatId === 'gpt-pro') {
-          if (options.cloudDispatchProvenance) {
-            bridgeDispatches += 1;
-            yield { type: 'text', catId: targetCatId, content: 'Cloud bridge dispatched', timestamp: Date.now() };
-          } else {
-            yield {
-              type: 'system_info',
-              catId: targetCatId,
-              content: JSON.stringify({
-                type: 'cloud_bridge_status',
-                status: 'unavailable',
-                reason: 'missing-source-message-id',
-                message: '未发送给 @gpt-pro：精确来源不满足公开回程资格。',
-              }),
-              timestamp: Date.now(),
-            };
-          }
-        } else {
-          yield { type: 'text', catId: targetCatId, content: 'Local sibling completed', timestamp: Date.now() };
-        }
-        yield { type: 'done', catId: targetCatId, isFinal: true, timestamp: Date.now() };
-      },
-    };
-    const source = mockMessageStore.append({
-      userId: 'user-2',
-      catId: null,
-      content: 'Private source for opus only',
-      mentions: [],
-      timestamp: 201,
-      threadId: 'thread-2',
-      deliveryStatus: 'delivered',
-      visibility: 'whisper',
-      whisperTo: ['opus'],
-    });
-    const fallbackCreds = mockRegistry.register('opus', 'thread-2', 'user-2', {
-      originTriggerMessageId: source.id,
-    });
-
-    registerMultiMentionRoutes(fallbackApp, {
-      registry: mockRegistry,
-      messageStore: mockMessageStore,
-      socketManager: mockSocket,
-      router: fallbackRouter,
-      invocationRecordStore: mockInvocationRecordStore,
-      invocationTracker: mockInvocationTracker,
-    });
-    await fallbackApp.ready();
-
-    const res = await fallbackApp.inject({
-      method: 'POST',
-      url: '/api/callbacks/multi-mention',
-      headers: { 'x-invocation-id': fallbackCreds.invocationId, 'x-callback-token': fallbackCreds.callbackToken },
-      payload: {
-        targets: ['codex', 'gpt-pro'],
-        question: 'Do not leak the private source',
-        callbackTo: 'opus',
-      },
-    });
-
-    assert.equal(res.statusCode, 200);
-    const { requestId } = res.json();
-    await new Promise((resolve) => setTimeout(resolve, 100));
-    const cloudCall = routeCalls.find((call) => call.targetCatId === 'gpt-pro');
-    assert.equal(bridgeDispatches, 0);
-    assert.equal(cloudCall.options.requiresExactCloudDispatchProvenance, true);
-    assert.equal(cloudCall.options.cloudDispatchProvenance, undefined);
-    const result = getMultiMentionOrchestrator().getResult(requestId);
-    assert.equal(result.request.status, 'done');
-    assert.match(result.responses.find((response) => response.catId === 'codex').content, /Local sibling completed/);
-    assert.match(result.responses.find((response) => response.catId === 'gpt-pro').content, /未发送给 @gpt-pro/);
-
-    await fallbackApp.close();
+    await incompleteApp.close();
   });
 });
 
@@ -1356,7 +1220,7 @@ describe('B6: QueueProcessor entryCompleteHook integration', () => {
     const { InvocationQueue: IQ } = await import('../dist/domains/cats/services/agents/invocation/InvocationQueue.js');
     const { QueueProcessor: QP } = await import('../dist/domains/cats/services/agents/invocation/QueueProcessor.js');
 
-    const queue = new IQ();
+    const queue = adaptInvocationQueue(new IQ());
     let hookResult = null;
 
     const stubDeps = {
@@ -1374,6 +1238,8 @@ describe('B6: QueueProcessor entryCompleteHook integration', () => {
         update: () => {},
       },
       router: {
+        resolveExplicitTargets: async (requestedCatIds) => [...requestedCatIds],
+        resolveConversationTargetsAtAdmission: async (requestedCatIds) => [...requestedCatIds],
         async *routeExecution(_u, _c, _t, _m, targetCats) {
           yield { type: 'text', catId: targetCats[0], content: 'Hello from hook', timestamp: Date.now() };
           yield { type: 'done', catId: targetCats[0], isFinal: true, timestamp: Date.now() };
@@ -1394,23 +1260,25 @@ describe('B6: QueueProcessor entryCompleteHook integration', () => {
 
     const qp = new QP(stubDeps);
 
-    const result = queue.enqueue({
-      ownerAuthProvenance: 'unknown',
-      threadId: 'thread-1',
-      userId: 'user-1',
-      content: 'test',
-      source: 'agent',
-      targetCats: ['codex'],
-      intent: 'execute',
-      autoExecute: true,
-    });
+    const result = queue.enqueue(
+      canonicalTestQueueInput({
+        ownerAuthProvenance: 'unknown',
+        threadId: 'thread-1',
+        userId: 'user-1',
+        kind: 'private_input',
+        content: 'test',
+        source: 'agent',
+        targetCats: ['codex'],
+        intent: 'execute',
+        autoExecute: true,
+      }),
+    );
 
     qp.registerEntryCompleteHook(result.entry.id, (entryId, status, responseText) => {
       hookResult = { entryId, status, responseText };
     });
 
-    // Trigger execution via tryAutoExecute
-    await qp.tryAutoExecute('thread-1');
+    await qp.requestDrain('thread-1');
 
     // Wait for async execution to complete
     await new Promise((r) => setTimeout(r, 200));
@@ -1420,11 +1288,94 @@ describe('B6: QueueProcessor entryCompleteHook integration', () => {
     assert.equal(hookResult.responseText, 'Hello from hook');
   });
 
-  test('dispatches one exact cloud child on Queue replay and returns its typed failure notice', async () => {
+  test('executeEntry partitions one source row into target-specific completion hooks', async () => {
     const { InvocationQueue: IQ } = await import('../dist/domains/cats/services/agents/invocation/InvocationQueue.js');
     const { QueueProcessor: QP } = await import('../dist/domains/cats/services/agents/invocation/QueueProcessor.js');
 
-    const queue = new IQ();
+    const queue = adaptInvocationQueue(new IQ());
+    const hookResults = new Map();
+    const invocationKeys = [];
+    const stubDeps = {
+      queue,
+      invocationTracker: {
+        start: () => new AbortController(),
+        startAll: () => new AbortController(),
+        tryStartThreadAll: () => new AbortController(),
+        complete: () => {},
+        completeAll: () => {},
+        has: () => false,
+      },
+      invocationRecordStore: {
+        create: (input) => {
+          invocationKeys.push(input.idempotencyKey);
+          return { outcome: 'created', invocationId: `inv-${input.targetCats[0]}` };
+        },
+        update: () => {},
+      },
+      router: {
+        resolveExplicitTargets: async (requestedCatIds) => [...requestedCatIds],
+        resolveConversationTargetsAtAdmission: async (requestedCatIds) => [...requestedCatIds],
+        async *routeExecution(_userId, _content, _threadId, _messageId, targetCats) {
+          const [catId] = targetCats;
+          yield { type: 'text', catId, content: `${catId} completed`, timestamp: Date.now() };
+          yield { type: 'done', catId, isFinal: true, timestamp: Date.now() };
+        },
+        ackCollectedCursors: () => Promise.resolve(),
+      },
+      socketManager: {
+        broadcastAgentMessage: () => {},
+        broadcastToRoom: () => {},
+        emitToUser: () => {},
+      },
+      messageStore: {
+        markDelivered: () => null,
+        getById: () => null,
+      },
+      log: { info: () => {}, warn: () => {}, error: () => {} },
+    };
+    const qp = new QP(stubDeps);
+    const result = queue.enqueue(
+      canonicalTestQueueInput({
+        ownerAuthProvenance: 'unknown',
+        threadId: 'thread-1',
+        userId: 'user-1',
+        kind: 'private_input',
+        content: 'test both targets',
+        source: 'agent',
+        targetCats: ['codex', 'gemini'],
+        intent: 'execute',
+        autoExecute: true,
+      }),
+    );
+
+    for (const catId of ['codex', 'gemini']) {
+      qp.registerEntryCompleteHook(
+        result.entry.id,
+        (_entryId, status, responseText) => hookResults.set(catId, { status, responseText }),
+        catId,
+      );
+    }
+
+    await qp.requestDrain('thread-1');
+    await new Promise((resolve) => setTimeout(resolve, 500));
+
+    assert.deepEqual(hookResults.get('codex'), { status: 'succeeded', responseText: 'codex completed' });
+    assert.deepEqual(hookResults.get('gemini'), { status: 'succeeded', responseText: 'gemini completed' });
+    assert.deepEqual(invocationKeys, [`queue-${result.entry.id}:codex`, `queue-${result.entry.id}:gemini`]);
+  });
+
+  test('dispatches one exact cloud child, returns its typed failure notice, and retires the Queue carrier', async () => {
+    const { InvocationQueue: IQ } = await import('../dist/domains/cats/services/agents/invocation/InvocationQueue.js');
+    const { QueueProcessor: QP } = await import('../dist/domains/cats/services/agents/invocation/QueueProcessor.js');
+
+    // F117: InvocationQueue dropped the legacy in-memory `enqueue`; use the
+    // fixture adapter (canonical MessageFrom + durable ledger admission) like the
+    // sibling tests below.
+    const queue = adaptInvocationQueue(new IQ());
+    // F117: message_wake rows must reference a real persisted History message —
+    // production admits message+queue atomically (appendAndEnqueueDurable), and
+    // the QueueProcessor fails a wake closed when the referenced message is absent.
+    const messageStore = adaptMessageStore(new MessageStore());
     const recordsByIdempotencyKey = new Map();
     const recordsById = new Map();
     let invocationCounter = 0;
@@ -1459,6 +1410,8 @@ describe('B6: QueueProcessor entryCompleteHook integration', () => {
         },
       },
       router: {
+        resolveExplicitTargets: async (requestedCatIds) => [...requestedCatIds],
+        resolveConversationTargetsAtAdmission: async (requestedCatIds) => [...requestedCatIds],
         async *routeExecution(userId, message, threadId, sourceMessageId, targetCats, intent, options) {
           routeCalls.push({ userId, message, threadId, sourceMessageId, targetCats, intent, options });
           yield {
@@ -1481,22 +1434,31 @@ describe('B6: QueueProcessor entryCompleteHook integration', () => {
         broadcastToRoom: () => {},
         emitToUser: () => {},
       },
-      messageStore: {
-        markDelivered: () => null,
-        getById: () => null,
-      },
+      messageStore,
       log: { info: () => {}, warn: () => {}, error: () => {} },
     };
 
     const qp = new QP(stubDeps);
+    // Persist the exact source message the wake references (atomic-admission contract).
+    const sourceMessage = messageStore.append({
+      userId: 'user-1',
+      catId: null,
+      content: 'Original raw intent',
+      mentions: [],
+      timestamp: 100,
+      threadId: 'thread-1',
+    });
     const carrier = {
-      sourceMessageId: 'msg-exact-source',
+      sourceMessageId: sourceMessage.id,
       sourceSender: { kind: 'user', id: 'user-1' },
       calledByCatId: 'opus',
       intent: 'Original raw intent',
     };
     const enqueue = () =>
       queue.enqueue({
+        // F117: durable Queue admission requires an explicit ledger kind
+        // (same contract as production A2A fan-out: message_wake).
+        kind: 'message_wake',
         ownerAuthProvenance: 'strict',
         threadId: 'thread-1',
         userId: 'user-1',
@@ -1507,6 +1469,10 @@ describe('B6: QueueProcessor entryCompleteHook integration', () => {
         autoExecute: true,
         callerCatId: 'opus',
         a2aParentInvocationId: 'inv-parent',
+        // F117: message_wake admission requires a durable History message reference;
+        // production A2A fan-out threads the source message id as payload.messageId.
+        messageId: carrier.sourceMessageId,
+        a2aTriggerMessageId: carrier.sourceMessageId,
         idempotencyKey: 'multi-mention:req-1:gpt-pro',
         cloudDispatchProvenance: carrier,
         requiresExactCloudDispatchProvenance: true,
@@ -1516,7 +1482,7 @@ describe('B6: QueueProcessor entryCompleteHook integration', () => {
     qp.registerEntryCompleteHook(first.entry.id, (_entryId, status, responseText) => {
       hookResults.push({ status, responseText });
     });
-    await qp.tryAutoExecute('thread-1');
+    await qp.requestDrain('thread-1');
     await new Promise((resolve) => setTimeout(resolve, 200));
 
     assert.equal(routeCalls.length, 1);
@@ -1530,23 +1496,14 @@ describe('B6: QueueProcessor entryCompleteHook integration', () => {
       },
     ]);
 
-    const replay = enqueue();
-    qp.registerEntryCompleteHook(replay.entry.id, (_entryId, status, responseText) => {
-      hookResults.push({ status, responseText });
-    });
-    await qp.tryAutoExecute('thread-1');
-    await new Promise((resolve) => setTimeout(resolve, 200));
-
-    assert.equal(routeCalls.length, 1, 'stable replay must not dispatch the exact child twice');
-    assert.equal(hookResults.length, 2);
-    assert.equal(hookResults[1].status, 'succeeded');
+    assert.deepEqual(queue.list('thread-1', 'user-1'), [], 'delivered work must leave no Queue tombstone');
   });
 
   test('hook is auto-removed after firing (one-shot)', async () => {
     const { InvocationQueue: IQ } = await import('../dist/domains/cats/services/agents/invocation/InvocationQueue.js');
     const { QueueProcessor: QP } = await import('../dist/domains/cats/services/agents/invocation/QueueProcessor.js');
 
-    const queue = new IQ();
+    const queue = adaptInvocationQueue(new IQ());
     let hookCallCount = 0;
 
     const stubDeps = {
@@ -1564,6 +1521,8 @@ describe('B6: QueueProcessor entryCompleteHook integration', () => {
         update: () => {},
       },
       router: {
+        resolveExplicitTargets: async (requestedCatIds) => [...requestedCatIds],
+        resolveConversationTargetsAtAdmission: async (requestedCatIds) => [...requestedCatIds],
         async *routeExecution(_u, _c, _t, _m, targetCats) {
           yield { type: 'done', catId: targetCats[0], isFinal: true, timestamp: Date.now() };
         },
@@ -1583,22 +1542,25 @@ describe('B6: QueueProcessor entryCompleteHook integration', () => {
 
     const qp = new QP(stubDeps);
 
-    const result = queue.enqueue({
-      ownerAuthProvenance: 'unknown',
-      threadId: 'thread-1',
-      userId: 'user-1',
-      content: 'test',
-      source: 'agent',
-      targetCats: ['codex'],
-      intent: 'execute',
-      autoExecute: true,
-    });
+    const result = queue.enqueue(
+      canonicalTestQueueInput({
+        ownerAuthProvenance: 'unknown',
+        threadId: 'thread-1',
+        userId: 'user-1',
+        kind: 'private_input',
+        content: 'test',
+        source: 'agent',
+        targetCats: ['codex'],
+        intent: 'execute',
+        autoExecute: true,
+      }),
+    );
 
     qp.registerEntryCompleteHook(result.entry.id, () => {
       hookCallCount++;
     });
 
-    await qp.tryAutoExecute('thread-1');
+    await qp.requestDrain('thread-1');
     await new Promise((r) => setTimeout(r, 200));
 
     assert.equal(hookCallCount, 1, 'Hook should fire exactly once');
@@ -1608,7 +1570,7 @@ describe('B6: QueueProcessor entryCompleteHook integration', () => {
     const { InvocationQueue: IQ } = await import('../dist/domains/cats/services/agents/invocation/InvocationQueue.js');
     const { QueueProcessor: QP } = await import('../dist/domains/cats/services/agents/invocation/QueueProcessor.js');
 
-    const queue = new IQ();
+    const queue = adaptInvocationQueue(new IQ());
     let hookResult = null;
     const abortController = new AbortController();
 
@@ -1627,6 +1589,8 @@ describe('B6: QueueProcessor entryCompleteHook integration', () => {
         update: () => {},
       },
       router: {
+        resolveExplicitTargets: async (requestedCatIds) => [...requestedCatIds],
+        resolveConversationTargetsAtAdmission: async (requestedCatIds) => [...requestedCatIds],
         async *routeExecution(_u, _c, _t, _m, targetCats) {
           yield { type: 'text', catId: targetCats[0], content: 'partial', timestamp: Date.now() };
           abortController.abort();
@@ -1648,22 +1612,25 @@ describe('B6: QueueProcessor entryCompleteHook integration', () => {
 
     const qp = new QP(stubDeps);
 
-    const result = queue.enqueue({
-      ownerAuthProvenance: 'unknown',
-      threadId: 'thread-1',
-      userId: 'user-1',
-      content: 'test',
-      source: 'agent',
-      targetCats: ['codex'],
-      intent: 'execute',
-      autoExecute: true,
-    });
+    const result = queue.enqueue(
+      canonicalTestQueueInput({
+        ownerAuthProvenance: 'unknown',
+        threadId: 'thread-1',
+        userId: 'user-1',
+        kind: 'private_input',
+        content: 'test',
+        source: 'agent',
+        targetCats: ['codex'],
+        intent: 'execute',
+        autoExecute: true,
+      }),
+    );
 
     qp.registerEntryCompleteHook(result.entry.id, (entryId, status, responseText) => {
       hookResult = { entryId, status, responseText };
     });
 
-    await qp.tryAutoExecute('thread-1');
+    await qp.requestDrain('thread-1');
     await new Promise((r) => setTimeout(r, 200));
 
     assert.ok(hookResult, 'Hook should have been called');
@@ -1674,7 +1641,7 @@ describe('B6: QueueProcessor entryCompleteHook integration', () => {
     const { InvocationQueue: IQ } = await import('../dist/domains/cats/services/agents/invocation/InvocationQueue.js');
     const { QueueProcessor: QP } = await import('../dist/domains/cats/services/agents/invocation/QueueProcessor.js');
 
-    const queue = new IQ();
+    const queue = adaptInvocationQueue(new IQ());
     let hookResult = null;
 
     const stubDeps = {
@@ -1692,6 +1659,8 @@ describe('B6: QueueProcessor entryCompleteHook integration', () => {
         update: () => {},
       },
       router: {
+        resolveExplicitTargets: async (requestedCatIds) => [...requestedCatIds],
+        resolveConversationTargetsAtAdmission: async (requestedCatIds) => [...requestedCatIds],
         async *routeExecution() {
           throw new Error('Should not be called for duplicate');
         },
@@ -1711,22 +1680,25 @@ describe('B6: QueueProcessor entryCompleteHook integration', () => {
 
     const qp = new QP(stubDeps);
 
-    const result = queue.enqueue({
-      ownerAuthProvenance: 'unknown',
-      threadId: 'thread-1',
-      userId: 'user-1',
-      content: 'test-dup',
-      source: 'agent',
-      targetCats: ['codex'],
-      intent: 'execute',
-      autoExecute: true,
-    });
+    const result = queue.enqueue(
+      canonicalTestQueueInput({
+        ownerAuthProvenance: 'unknown',
+        threadId: 'thread-1',
+        userId: 'user-1',
+        kind: 'private_input',
+        content: 'test-dup',
+        source: 'agent',
+        targetCats: ['codex'],
+        intent: 'execute',
+        autoExecute: true,
+      }),
+    );
 
     qp.registerEntryCompleteHook(result.entry.id, (entryId, status, responseText) => {
       hookResult = { entryId, status, responseText };
     });
 
-    await qp.tryAutoExecute('thread-1');
+    await qp.requestDrain('thread-1');
     await new Promise((r) => setTimeout(r, 200));
 
     assert.ok(hookResult, 'Hook should have been called for duplicate');
@@ -1749,9 +1721,10 @@ describe('B6: canceled hook skips recordResponse in dispatchViaQueue', () => {
     mockInvocationRecordStore = createMockInvocationRecordStore();
     mockInvocationTracker = createMockInvocationTracker();
     mockRouter = createMockRouter();
-    invocationQueue = new InvocationQueue();
+    invocationQueue = adaptInvocationQueue(new InvocationQueue());
     mockQueueProcessor = createMockQueueProcessor();
     creds = mockRegistry.register('opus', 'thread-1', 'user-1');
+    appendTestLifecycleResponseSource(mockMessageStore, creds);
 
     app = Fastify({ logger: false });
     registerCallbackAuthHook(app, mockRegistry);

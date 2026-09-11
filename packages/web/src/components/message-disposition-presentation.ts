@@ -62,17 +62,17 @@ export function carrierCapabilityLabel(capability: FreshnessCarrierCapability | 
 export function authorIntentLabel(intent: QueueAuthorIntentReceipt | undefined): string | undefined {
   if (!intent) return undefined;
   if (intent.requested === 'continue_current' && intent.effective === 'continue_current') {
-    return '接着当前工作 · 等待本轮读取';
+    return '立即发送，引导回复 · 等待当前回复读取';
   }
   if (intent.requested === 'continue_current') {
-    return '接着当前工作 · 未在本轮读取，已转下一件工作';
+    return '立即发送，引导回复 · 未能引导，已转排队等待';
   }
-  return '下一件工作 · 本轮不可见';
+  return '排队等待 · 当前回复不可见';
 }
 
 export function unsupportedCarrierCopy(support: FreshnessCarrierSupport, noun = '读取'): string | undefined {
   if (support === 'exact') return undefined;
-  return support === 'undeclared' ? `能力未声明 · 按下一件工作处理` : `当前接入不支持本轮${noun}`;
+  return support === 'undeclared' ? '能力未声明 · 按排队等待处理' : `当前接入不支持回复中途${noun}`;
 }
 
 export type IntentChipTone = 'accent' | 'neutral' | 'amber';
@@ -91,14 +91,14 @@ const FALLBACK_REASON_LABEL: Record<QueueAuthorIntentFallbackReason, string> = {
 };
 
 export function intentChip(intent: QueueAuthorIntentReceipt | undefined): IntentChipResult {
-  if (!intent) return { text: '下一件工作', tone: 'neutral' };
+  if (!intent) return { text: '排队等待', tone: 'neutral' };
   if (intent.requested === 'continue_current' && intent.effective === 'continue_current') {
-    return { text: '接着当前工作', tone: 'accent' };
+    return { text: '立即发送，引导回复', tone: 'accent' };
   }
   if (intent.requested === 'continue_current' && intent.effective === 'next_work') {
-    return { text: '已转下一件工作', tone: 'amber' };
+    return { text: '已转排队等待', tone: 'amber' };
   }
-  return { text: '下一件工作', tone: 'neutral' };
+  return { text: '排队等待', tone: 'neutral' };
 }
 
 export function secondaryTruth(
@@ -107,25 +107,25 @@ export function secondaryTruth(
 ): string | undefined {
   if (intent && intent.requested === 'continue_current' && intent.effective === 'next_work') {
     const reason = intent.fallbackReason ? FALLBACK_REASON_LABEL[intent.fallbackReason] : undefined;
-    return reason ? `本轮未读到 · ${reason}` : '本轮未读到';
+    return reason ? `当前回复未读到 · ${reason}` : '当前回复未读到';
   }
 
-  if (support === 'undeclared') return '能力未声明，按下一件工作处理';
-  if (support === 'unsupported') return '当前接入不支持本轮读取/提醒';
+  if (support === 'undeclared') return '能力未声明，按排队等待处理';
+  if (support === 'unsupported') return '当前接入不支持引导回复/提醒';
 
   if (!intent) return undefined;
 
   if (intent.requested === 'continue_current' && intent.effective === 'continue_current') {
-    return '等待本轮读取';
+    return '等待当前回复读取';
   }
-  return '本轮不可见';
+  return '当前回复不可见';
 }
 
 export function humanCarrierLabel(capability: FreshnessCarrierCapability | undefined): string {
   if (!capability || capability.deliverySemantics === 'undeclared') return '能力未声明';
-  if (capability.deliverySemantics === 'exact_active_turn') return '支持本轮读取';
-  if (capability.deliverySemantics === 'unsupported') return '当前接入不支持本轮读取';
+  if (capability.deliverySemantics === 'exact_active_turn') return '支持引导当前回复';
+  if (capability.deliverySemantics === 'unsupported') return '当前接入不支持引导当前回复';
   if (capability.deliverySemantics === 'queued_internal_turn') return '排队内部轮次（非精确读取）';
   if (capability.deliverySemantics === 'mcp_result_piggyback') return 'MCP 结果搭载（非精确读取）';
-  return '当前接入不支持本轮读取';
+  return '当前接入不支持引导当前回复';
 }

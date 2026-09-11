@@ -1158,11 +1158,6 @@ export interface InvocationDeps {
     import('../../cloud-bridge/cloud-return-grant.js').CloudReturnGrantStore,
     'issue'
   >;
-  /** Server-owned exact A2A terminal producer used by the cloud transport. */
-  readonly a2aDispatchDispositionService?: Pick<
-    import('../../../../ball-custody/A2ADispatchDispositionService.js').A2ADispatchDispositionService,
-    'complete'
-  >;
   /**
    * F254 Phase B3/B4: Optional freshness re-invoke callback.
    * Called after invocation terminal event to decide if a re-invoke is needed
@@ -1312,9 +1307,25 @@ export interface InvocationParams {
     invocationId: string;
     messageIds: readonly string[];
     seenAt: number;
-  }) => Promise<
-    readonly import('../../../../ball-custody/TurnCustodyProjectionService.js').TurnCustodyWakeProvenance[] | void
-  >;
+  }) => Promise<void>;
+  /** Create the exact child's durable processing response before provider startup. */
+  readonly onLifecycleInvocationStarted?: (input: {
+    threadId: string;
+    userId: string;
+    catId: CatId;
+    invocationId: string;
+    parentInvocationId: string;
+    startedAt: number;
+  }) => Promise<{
+    responseMessageId: string;
+    priorFrontierMessageId: string | null;
+    activeRun: import('@cat-cafe/shared').LifecycleActiveRun;
+  }>;
+  /** Bind the exact live provider adapter after provider turn acceptance. */
+  readonly onAgentClientActiveRunReady?: (input: {
+    catId: CatId;
+    dispatcher: import('../../types.js').AgentClientActiveRunDispatcher;
+  }) => (() => void) | undefined;
   /** Scope-free seeds are bound only after this child invocation id exists. */
   readonly memoryCueOpportunitySeeds?: readonly MemoryCueOpportunitySeed[];
   /** F276 trial: source-only ASR scenes bound to their exact owner trigger message. */
@@ -2000,6 +2011,17 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
       ownsTurnExecution = true;
     }
 
+    const lifecycleAdmission = params.onLifecycleInvocationStarted
+      ? await params.onLifecycleInvocationStarted({
+          threadId,
+          userId,
+          catId,
+          invocationId,
+          parentInvocationId: executionParentInvocationId,
+          startedAt: executionStartedAt,
+        })
+      : undefined;
+
     // F22 R2 P1-1 + durable child truth: expose the exact child identity only
     // after its running record exists. Keeping this yield inside the outer try
     // guarantees iterator.return() reaches the lifecycle terminalizer.
@@ -2008,6 +2030,9 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
       catId,
       turnInvocationId: invocationId,
       turnExecutionStartedAt: executionStartedAt,
+      ...(lifecycleAdmission ? { lifecycleResponseMessageId: lifecycleAdmission.responseMessageId } : {}),
+      ...(lifecycleAdmission ? { activeRun: lifecycleAdmission.activeRun } : {}),
+      ...(lifecycleAdmission ? { lifecyclePriorFrontierMessageId: lifecycleAdmission.priorFrontierMessageId } : {}),
       extra: {
         turnExecution: {
           invocationId,
@@ -2133,22 +2158,6 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
             hasMentioningCatId: Boolean(cloudCalledBy),
           },
           'F247 cloud transport unavailable before dispatch',
-        );
-      }
-
-      if (params.a2aTriggerMessageId) {
-        if (!deps.a2aDispatchDispositionService) {
-          throw new Error('a2a_dispatch_disposition_service_unavailable');
-        }
-        await deps.a2aDispatchDispositionService.complete(
-          {
-            invocationId,
-            catId,
-            threadId,
-            a2aTriggerMessageId: params.a2aTriggerMessageId,
-            originTriggerMessageId: sourceMessageId,
-          },
-          'completed',
         );
       }
 
@@ -3719,6 +3728,14 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
                 ownerUserId: userId,
                 ownerCatId: catId,
               }),
+          }
+        : {}),
+      ...(params.onAgentClientActiveRunReady
+        ? {
+            activeRunDispatch: {
+              invocationId,
+              register: (dispatcher) => params.onAgentClientActiveRunReady!({ catId, dispatcher }),
+            },
           }
         : {}),
       invocationId,

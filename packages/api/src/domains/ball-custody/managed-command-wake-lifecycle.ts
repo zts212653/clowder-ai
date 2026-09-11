@@ -1,4 +1,3 @@
-import type { CatId } from '@cat-cafe/shared';
 import type { DynamicTaskDef } from '../../infrastructure/scheduler/DynamicTaskStore.js';
 import type { InvocationRecord } from '../cats/services/stores/ports/InvocationRecordStore.js';
 import type { IMessageStore, StoredMessage } from '../cats/services/stores/ports/MessageStore.js';
@@ -39,7 +38,7 @@ export interface ManagedCommandWakeRecoveryStats {
   readonly pending: number;
 }
 
-export type ManagedCommandWakeTriggerOutcome = 'dispatched' | 'enqueued' | 'full';
+export type ManagedCommandWakeTriggerOutcome = 'enqueued' | 'full';
 
 export type ManagedCommandWakeEventCarrier =
   | { state: 'missing' | 'pending' | 'orphaned' }
@@ -55,43 +54,62 @@ export type ManagedCommandWakeEventCarrier =
 
 export function resolveManagedCommandWakeEventCarrier(
   message: StoredMessage | null | undefined,
-  expected: { threadId: string; catId: string; activeQueueEntryId?: string | null },
+  response: StoredMessage | null | undefined,
+  pendingTarget: boolean,
+  expected: { threadId: string; userId: string; catId: string },
 ): ManagedCommandWakeEventCarrier {
-  if (!message || message.threadId !== expected.threadId) {
+  if (!message || message.threadId !== expected.threadId || message.userId !== expected.userId) {
     return { state: 'missing' };
   }
   if (message.deliveryStatus === 'canceled') return { state: 'terminal', reason: 'canceled' };
-  const custody = message.queueCustody;
-  if (!custody) return { state: 'missing' };
-  const outcome = custody.targetOutcomeByCatId?.[expected.catId];
-  if (custody.handledByCatIds.includes(expected.catId as CatId) && outcome) {
-    return { state: 'handled', invocationId: outcome.invocationId };
+  const refs = message.lifecycle && 'dispatchRefs' in message.lifecycle ? (message.lifecycle.dispatchRefs ?? []) : [];
+  const matchingRefs = refs.filter((ref) => ref.targetId === expected.catId);
+  if (matchingRefs.length === 0) {
+    return message.deliveryStatus === 'queued' && pendingTarget ? { state: 'pending' } : { state: 'orphaned' };
   }
-  if (custody.withdrawnByCatIds?.includes(expected.catId as CatId)) {
-    return { state: 'terminal', reason: 'withdrawn' };
+  if (matchingRefs.length !== 1 || message.deliveryStatus !== 'delivered') return { state: 'orphaned' };
+  const ref = matchingRefs[0]!;
+  if (
+    !response ||
+    response.id !== ref.statusMessageId ||
+    response.threadId !== expected.threadId ||
+    response.userId !== expected.userId
+  ) {
+    return { state: 'orphaned' };
   }
-  if (custody.status === 'terminal') return { state: 'terminal', reason: 'terminal' };
-  if (custody.pendingTargetCats.includes(expected.catId as CatId)) {
-    if ('activeQueueEntryId' in expected && expected.activeQueueEntryId !== custody.entryId) {
+  const lifecycle = response.lifecycle;
+  if (lifecycle?.kind === 'delivery_failure') {
+    if (lifecycle.inputMessageId !== message.id || !lifecycle.requestedTargets.includes(expected.catId)) {
       return { state: 'orphaned' };
     }
-    if (custody.failedByCatIds.includes(expected.catId as CatId)) {
-      const failedAttempt = (custody.targetAttempts ?? [])
-        .filter((attempt) => attempt.targetCatId === expected.catId && attempt.state === 'failed')
-        .sort((left, right) => left.sequence - right.sequence)
-        .at(-1);
-      if (failedAttempt) {
-        return {
-          state: 'failed',
-          attemptId: failedAttempt.id,
-          attemptSequence: failedAttempt.sequence,
-          ...(failedAttempt.invocationId ? { invocationId: failedAttempt.invocationId } : {}),
-        };
-      }
-    }
-    return { state: 'pending' };
+    return {
+      state: 'failed',
+      attemptId: `${message.id}:${expected.catId}:${response.id}`,
+      attemptSequence: 1,
+      errorCode: lifecycle.reason,
+    };
   }
-  return { state: 'missing' };
+  if (
+    lifecycle?.kind !== 'response' ||
+    lifecycle.targetId !== expected.catId ||
+    !lifecycle.inputMessageIds.includes(message.id)
+  ) {
+    return { state: 'orphaned' };
+  }
+  if (lifecycle.status === 'processing') return { state: 'pending' };
+  if (lifecycle.status === 'completed') return { state: 'handled', invocationId: lifecycle.invocationId };
+  if (lifecycle.status === 'failed') {
+    return {
+      state: 'failed',
+      attemptId: `${message.id}:${expected.catId}:${lifecycle.invocationId}`,
+      attemptSequence: 1,
+      invocationId: lifecycle.invocationId,
+    };
+  }
+  return {
+    state: 'terminal',
+    reason: lifecycle.status === 'canceled' ? 'canceled' : 'terminal',
+  };
 }
 
 export interface ManagedCommandWakeTrigger {
@@ -102,7 +120,7 @@ export interface ManagedCommandWakeTrigger {
     message: string,
     messageId: string,
     contentBlocks?: undefined,
-    policy?: { sourceCategory?: string; forceQueue?: boolean },
+    policy?: { sourceCategory?: string; priority?: 'urgent' | 'normal' },
   ): Promise<ManagedCommandWakeTriggerOutcome>;
 }
 
@@ -127,25 +145,18 @@ export interface ManagedCommandWakeRecoveryDeps {
     ): InvocationRecord | null | Promise<InvocationRecord | null>;
   };
   readonly getInvokeTrigger: () => ManagedCommandWakeTrigger | undefined;
-  /** F167×F254: current Queue/F264 carrier truth for force-queued event wakes. */
+  /** F167×F254: current Queue/F264 carrier truth for event wakes. */
   readonly getEventCarrier?: (input: {
     threadId: string;
     userId: string;
     catId: string;
     messageId: string;
   }) => ManagedCommandWakeEventCarrier | Promise<ManagedCommandWakeEventCarrier>;
-  /** Retry one exact failed Queue target; the implementation must append a durable attempt fence before execution. */
-  readonly retryEventCarrier?: (input: {
-    taskId: string;
-    threadId: string;
-    userId: string;
-    catId: string;
-    messageId: string;
-    attemptId: string;
-  }) => 'retried' | 'not_retryable' | 'unavailable' | Promise<'retried' | 'not_retryable' | 'unavailable'>;
   readonly now?: () => number;
   readonly dispatchedCarrierGraceMs?: number;
   readonly wakeSlaMs?: number;
+  /** Process-local liveness fence: present in production, omitted by isolated consumers. */
+  readonly isCommandRunnerActive?: (taskId: string) => boolean;
 }
 
 export interface RecordManagedCommandCompletionInput {

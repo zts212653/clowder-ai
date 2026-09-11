@@ -1,5 +1,10 @@
-import { parseWaitContinuationCarrier, type WaitContinuationCarrierV1 } from '@cat-cafe/shared';
+import {
+  createWaitContinuationCarrier,
+  parseWaitContinuationCarrier,
+  type WaitContinuationCarrierV1,
+} from '@cat-cafe/shared';
 import type { IMessageStore, StoredMessage } from '../cats/services/stores/ports/MessageStore.js';
+import type { ITaskStore } from '../cats/services/stores/ports/TaskStore.js';
 
 export class WaitContinuationCarrierError extends Error {
   readonly code = 'INVALID_WAIT_CONTINUATION_CARRIER';
@@ -34,4 +39,36 @@ export function waitContinuationCarriersMatch(
     left.ownerFence.kind === 'containing_task' ||
     (right.ownerFence.kind === 'action_successor' && left.ownerFence.leaseId === right.ownerFence.leaseId)
   );
+}
+
+/**
+ * Fail closed unless a frozen github-wait carrier still names the exact
+ * canonical task outcome that is pending delivery to this owner.
+ *
+ * The connector Message is immutable transport evidence; the Task remains the
+ * authority for whether that wait generation is current and deliverable.
+ */
+export async function assertCurrentWaitContinuationCarrier(
+  taskStore: Pick<ITaskStore, 'get'> | undefined,
+  carrier: WaitContinuationCarrierV1,
+  scope: { threadId: string; userId: string; catId: string },
+): Promise<void> {
+  if (!taskStore) {
+    throw new WaitContinuationCarrierError('github-wait admission requires the canonical task store');
+  }
+  const task = await taskStore.get(carrier.waitId);
+  const outcome = task?.automationState?.waitOutcome;
+  const currentCarrier = outcome ? createWaitContinuationCarrier(carrier.waitId, outcome) : undefined;
+  if (
+    !task ||
+    (task.kind !== 'pr_tracking' && task.kind !== 'issue_tracking') ||
+    task.threadId !== scope.threadId ||
+    task.userId !== scope.userId ||
+    task.ownerCatId !== scope.catId ||
+    outcome?.delivery !== 'pending' ||
+    outcome.generation !== carrier.ownerFence.generation ||
+    !waitContinuationCarriersMatch(carrier, currentCarrier)
+  ) {
+    throw new WaitContinuationCarrierError('github-wait continuation is stale or outside its owner scope');
+  }
 }

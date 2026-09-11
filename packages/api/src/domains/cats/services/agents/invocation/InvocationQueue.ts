@@ -1,17 +1,27 @@
 /**
  * InvocationQueue
- * Per-thread, per-user FIFO 队列，用于猫猫在跑时排队用户/connector 消息。
+ * Per-thread durable work ledger for user/connector/agent/system dispatch.
  *
  * 与 InvocationTracker（互斥锁，跟踪活跃调用）互补：
  * - InvocationTracker: "谁在跑"
  * - InvocationQueue: "谁在等"
  *
- * scopeKey = `${threadId}:${userId}` — 存储层天然用户隔离。
- * 系统级出队（invocation 完成后）通过 *AcrossUsers 方法跨用户 FIFO。
+ * The in-memory maps below are a process-local projection only. QueueLedgerStore
+ * owns canonical persistence and recovery; every mutation crosses that boundary
+ * before the cache is updated.
  */
 
-import { randomUUID } from 'node:crypto';
-import type { QueueAuthorIntent, QueueTargetAttemptTerminalReason, WaitContinuationCarrierV1 } from '@cat-cafe/shared';
+import { createHash, randomUUID } from 'node:crypto';
+import type {
+  CatRoutingError,
+  MessageFrom,
+  QueueAuthorIntent,
+  QueueAuthorIntentFallbackReason,
+  QueueReminderAttempt,
+  QueueTargetAttemptTerminalReason,
+  WaitContinuationCarrierV1,
+} from '@cat-cafe/shared';
+import { isMessageFrom } from '@cat-cafe/shared';
 import { createModuleLogger } from '../../../../../infrastructure/logger.js';
 import type { CallerTraceContext } from '../../../../../infrastructure/telemetry/genai-semconv.js';
 import {
@@ -19,132 +29,76 @@ import {
   actionSuccessorFencesMatch,
 } from '../../../../ball-custody/ActionSuccessorAdmissionContract.js';
 import type { CloudDispatchProvenance } from '../../cloud-bridge/types.js';
-import type { QueueBodyExposure, QueuePrestartRetirementIntent } from '../../stores/ports/queued-message-custody.js';
+import type {
+  AppendMessageInput,
+  IMessageStore,
+  LifecycleResponseTerminalPatch,
+  StoredMessage,
+} from '../../stores/ports/MessageStore.js';
 import type { ToolExecutionPolicy } from '../../types.js';
+import { compareLifecycleQueueEntries } from './message-lifecycle-queue-order.js';
 import type { OwnerAuthProvenance } from './owner-auth-provenance.js';
+import { InMemoryQueueLedgerStore } from './queue-ledger/InMemoryQueueLedgerStore.js';
+import {
+  type QueueLedgerEntry,
+  type QueueLedgerStore,
+  type QueueOwner,
+  queueEntryId,
+  queueOwner,
+} from './queue-ledger/QueueLedger.js';
+import { createQueueLedgerAdmission } from './queue-ledger/QueueLedgerAdmission.js';
 
-export interface QueueEntry {
-  id: string;
+export type QueueEntry = QueueLedgerEntry;
+
+type QueueAttemptSettlementOutcome = 'handled' | 'failed' | 'interrupted' | 'cancelled';
+
+interface AdmittedAttemptEvidence {
+  awakenedInvocationId?: string;
+  awakenedAt?: number;
+  seenInvocationId?: string;
+  seenAt?: number;
+}
+
+export interface QueueEnqueueInput {
   threadId: string;
   userId: string;
-  /** Internal-only owner authentication provenance; presentation projections must redact it. */
+  owner?: QueueOwner;
+  sourceId?: string;
+  kind: QueueLedgerEntry['kind'];
   ownerAuthProvenance: OwnerAuthProvenance;
-  /** Optional request-level idempotency key for API replay dedup. */
   idempotencyKey?: string;
   content: string;
-  messageId: string | null;
-  mergedMessageIds: string[];
-  source: 'user' | 'connector' | 'agent';
+  messageId?: string | null;
+  from: MessageFrom;
   targetCats: string[];
-  /** Stable target identity for glass-box projection after individual targets are handled. */
-  allTargetCats?: string[];
-  /** F264: per-target human author intent. Missing user records use legacy next_work compatibility. */
+  routingWarnings?: CatRoutingError[];
   authorIntentByCatId?: Record<string, QueueAuthorIntent>;
-  /** Notice reached a safe boundary, but the queued body has not been read yet. */
-  queuedNotifiedByCatIds?: string[];
-  /** Exact child invocation created for this target before prompt-body exposure. */
-  queuedAwakenedInvocationIdByCatId?: Record<string, string>;
-  /** Immutable child-creation time paired with queuedAwakenedInvocationIdByCatId. */
-  queuedAwakenedAtByCatId?: Record<string, number>;
-  /** F254 D1.2a: per-cat read marker for queued body exposure. Seen suppresses freshness nag, not work. */
-  queuedSeenByCatIds?: string[];
-  /**
-   * F254 D1.2b: per-cat invocation that read the queued body.
-   * Used only as handled evidence; queuedSeenByCatIds remains the nag-suppression marker.
-   */
-  queuedSeenInvocationIdByCatId?: Record<string, string>;
-  /** Exact, append-only child invocation body exposures for durable receipt projection. */
-  queuedBodyExposures?: QueueBodyExposure[];
-  /** The reading invocation failed/canceled; responsibility remains queued. */
-  queuedFailedByCatIds?: string[];
-  /** Exact terminal fact for the currently active target attempt. */
-  queuedFailureAtByCatId?: Record<string, number>;
-  queuedFailureReasonByCatId?: Record<string, QueueTargetAttemptTerminalReason>;
-  /** Gate 5: restart-stable identity of the latest durable retry attempt per target. */
-  queuedAttemptIdByCatId?: Record<string, string>;
-  /** Historical target closure retained while sibling targets remain queued. */
-  queuedHandledByCatIds?: string[];
-  /** F264: accepted Steer awaiting replacement invocation identity. */
-  steerRequestedByCatIds?: string[];
-  /** F264: exact replacement invocation after provider-start read binding. */
-  steeredInvocationIdByCatId?: Record<string, string>;
-  /**
-   * #1291 Gate 6: process-local exact Batch Steer reservation.
-   *
-   * This is deliberately not a second durable ledger. Durable per-message Queue
-   * custody remains authoritative; this marker only fences dequeue so F175 cannot
-   * absorb an unselected adjacent entry between reservation and replacement start.
-   */
-  exactSteerBatch?: ExactSteerBatchReservation;
-  /** Restart-stable exact group fence while pre-start supersession terminalizes durable carriers. */
-  prestartRetirement?: QueuePrestartRetirementIntent;
   intent: string;
-  status: 'queued' | 'processing';
-  createdAt: number;
-  /** Set when entry transitions to 'processing'. Used for stale-processing TTL. */
-  processingStartedAt?: number;
-  /** F122B: auto-execute without waiting for steer/manual trigger */
-  autoExecute: boolean;
-  /**
-   * Process-local fence while one persisted A2A trigger is binding its complete
-   * fan-out custody. Ordinary selectors must not publish any carrier from this
-   * admission before the canonical MessageStore CAS commits the whole group.
-   *
-   * The fence itself is process-local. MessageStore persists the corresponding
-   * QueueCustodyAdmissionIntent after policy decisions but before these carriers
-   * are staged, so startup reconstructs only the accepted subset and converges
-   * rejected targets directly into full-custody failure state.
-   */
-  queueCustodyAdmissionId?: string;
-  /** F122B: which cat initiated this entry (for A2A/multi_mention display) */
-  callerCatId?: string;
-  /** Source invocation lineage. Parallel invocations of one cat must not coalesce with each other. */
-  a2aParentInvocationId?: string;
-  /** Exact cloud child provenance; never reconstructed from Queue display content. */
-  cloudDispatchProvenance?: CloudDispatchProvenance;
-  /** Multi-mention child must fail visibly if its exact cloud provenance is unavailable. */
-  requiresExactCloudDispatchProvenance?: boolean;
-  /** F134: sender identity for connector group chat messages (used for UI display) */
-  senderMeta?: { id: string; name?: string };
-  /** F175: queue-internal priority — urgent entries sort before normal in dequeue */
-  priority: 'urgent' | 'normal';
-  /** F175: origin category for visual grouping */
-  sourceCategory?: 'ci' | 'review' | 'conflict' | 'scheduled' | 'a2a' | 'continuation' | 'issue' | 'freshness';
-  /** Queue-internal dedup key for agent control-flow work. */
+  autoExecute?: boolean;
+  priority?: QueueLedgerEntry['priority'];
+  sourceCategory?: QueueLedgerEntry['sourceCategory'];
   continuationKey?: string;
-  /** F254 Phase E: typed custody carrier for one persistent catch closure. */
+  a2aParentInvocationId?: string;
   freshnessClosureId?: string;
-  freshnessRequiredFrontierMessageId?: string;
-  /** ADR-042 distinct supplement carrier; never aliases freshnessClosureId. */
   freshnessSupplementId?: string;
   freshnessSupplementLineageId?: string;
   freshnessSupplementSeq?: 1 | 2;
   readOnlyToolPolicy?: ToolExecutionPolicy;
-  /** F167 Phase S: persistent action lease generation fence across queue/start/commit. */
   actionSuccessorFence?: ActionSuccessorFence;
-  /** #1291 Gate 4: immutable projection of the canonical wait owner fence. */
   waitContinuationCarrier?: WaitContinuationCarrierV1;
-  /** F175: user drag-reorder position — explicit values override priority in dequeue */
   position?: number;
-  /** F175: skill hint for connector triggers — flows through as promptTags on execution */
   suggestedSkill?: string;
   callerTraceContext?: CallerTraceContext;
-  /** Explicit A2A trigger message for stream reply threading. */
   a2aTriggerMessageId?: string;
+  cloudDispatchProvenance?: CloudDispatchProvenance;
+  requiresExactCloudDispatchProvenance?: boolean;
+  dedupeProcessing?: boolean;
 }
 
-/**
- * The replacement fence must cover the original A2A trigger and every still
- * durable body in the carrier. After settlement, the primary body may differ
- * from the original trigger, so neither field is a safe stand-in for the
- * other.
- */
-export function exactA2ASourceMessageIds(
-  entry: Pick<QueueEntry, 'a2aTriggerMessageId' | 'messageId' | 'mergedMessageIds'>,
-): string[] {
+export function exactA2ASourceMessageIds(entry: Pick<QueueEntry, 'execution' | 'payload'>): string[] {
   return [
     ...new Set(
-      [entry.a2aTriggerMessageId, entry.messageId, ...entry.mergedMessageIds].filter(
+      [entry.execution.a2aTriggerMessageId, entry.payload.messageId].filter(
         (messageId): messageId is string => typeof messageId === 'string' && messageId.length > 0,
       ),
     ),
@@ -159,42 +113,27 @@ export interface EnqueueResult {
   deduped?: boolean;
 }
 
-export interface ExactSteerBatchReservation {
-  reservationId: string;
-  primaryEntryId: string;
-  entryIds: string[];
-  targetCatId: string;
-}
-
-export type ExactUserBatchReservationResult =
-  | ({ outcome: 'reserved' } & ExactSteerBatchReservation)
+export type EnqueueMessageResult =
+  | { outcome: 'full' }
   | {
-      outcome: 'rejected';
-      reason: 'invalid_entry_ids' | 'entry_not_found' | 'entry_ineligible' | 'entries_incompatible';
+      outcome: 'enqueued';
+      message: StoredMessage;
+      entry?: QueueEntry;
+      entries: QueueEntry[];
+      queuePosition?: number;
+      deduped: boolean;
     };
 
-export type ExactUserEntryReservationResult =
-  | ({ outcome: 'reserved' } & ExactSteerBatchReservation)
-  | { outcome: 'rejected'; reason: 'state_changed' };
+export type DurableSteerClaimResult =
+  | { outcome: 'claimed'; entries: QueueEntry[]; targetCatId: string }
+  | {
+      outcome: 'rejected';
+      reason: 'entry_not_found' | 'entry_processing' | 'entry_ineligible';
+    };
 
-export interface ActivatedExactSteerReservation {
-  reservationId: string;
-  entry: QueueEntry;
-}
-
-export interface QueuedHandledResult {
-  entryId: string;
-  threadId: string;
-  userId: string;
-  catId: string;
-  messageIds: string[];
-  remainingTargetCats: string[];
-  fullyConsumed: boolean;
-  /** F254 D1.2b: rollback payload used when delivery persistence fails after tentative consume. */
-  entrySnapshot?: QueueEntry;
-  queueIndex?: number;
-  originalContent?: string;
-}
+export type DurableMessageClaimResult =
+  | { outcome: 'claimed'; entries: QueueEntry[] }
+  | { outcome: 'not_found' | 'processing' };
 
 export interface ActionSuccessorQueueRetirement {
   entryId: string;
@@ -208,16 +147,44 @@ const MAX_QUEUE_DEPTH = 5;
 /**
  * Stable InvocationRecord identity for an ActionSuccessor carrier.
  *
- * Queue entry ids are process-local UUIDs. An ActionSuccessor retry must instead
- * bind durable admission to the lease/generation idempotency key that survives a
- * restart, otherwise a lost in-memory queue can execute the same carrier twice.
+ * Queue row ids are derived from a durable producer identity. ActionSuccessor
+ * supplies the lease/generation identity so retries converge on the same row.
  */
 export function actionSuccessorInvocationIdempotencyKey(queueIdempotencyKey: string): string {
   return `action-successor:${queueIdempotencyKey}`;
 }
 
-export function isSystemPinnedQueueEntry(entry: Pick<QueueEntry, 'source' | 'sourceCategory'>): boolean {
-  return entry.source === 'agent' && entry.sourceCategory === 'continuation';
+export function queueEntrySource(entry: Pick<QueueEntry, 'from'>): 'user' | 'connector' | 'agent' | 'system' {
+  if (entry.from.kind === 'user') return 'user';
+  if (entry.from.kind === 'agent') return 'agent';
+  if (entry.from.kind === 'system') return 'system';
+  return 'connector';
+}
+
+export function queueEntryCallerCatId(entry: Pick<QueueEntry, 'from'>): string | undefined {
+  return entry.from.kind === 'agent' ? entry.from.catId : undefined;
+}
+
+export function queueEntrySenderMeta(
+  entry: Pick<QueueEntry, 'from'>,
+): { readonly id: string; readonly name?: string } | undefined {
+  return entry.from.kind === 'external' ? entry.from.sender : undefined;
+}
+
+export function queueEntryTargetCats(entry: Pick<QueueEntry, 'targets'>): string[] {
+  return [...entry.targets];
+}
+
+export function queueEntryOwnerId(entry: Pick<QueueEntry, 'owner'>): string {
+  return entry.owner.kind === 'user' ? entry.owner.userId : `system:${entry.owner.service}`;
+}
+
+export function queueEntryMessageIds(entry: Pick<QueueEntry, 'payload'>): string[] {
+  return entry.payload.messageId ? [entry.payload.messageId] : [];
+}
+
+export function isSystemPinnedQueueEntry(entry: Pick<QueueEntry, 'from' | 'sourceCategory'>): boolean {
+  return entry.from.kind === 'agent' && entry.sourceCategory === 'continuation';
 }
 
 /**
@@ -225,37 +192,35 @@ export function isSystemPinnedQueueEntry(entry: Pick<QueueEntry, 'source' | 'sou
  * attempt is terminal-failed. The entry itself may still carry eligible siblings
  * or remain visible to lifecycle/recovery code.
  */
-export function isOrdinaryQueueTargetEligible(
-  entry: Pick<QueueEntry, 'targetCats' | 'queuedFailedByCatIds' | 'queueCustodyAdmissionId'>,
-  catId: string,
-): boolean {
-  return !entry.queueCustodyAdmissionId && isQueueTargetPending(entry, catId);
+export function isOrdinaryQueueTargetEligible(entry: Pick<QueueEntry, 'status' | 'targets'>, catId: string): boolean {
+  return (
+    (entry.status === 'queued' || entry.status === 'claimed') &&
+    (entry.targets.length === 0 || entry.targets.includes(catId))
+  );
 }
 
-/** Pending ownership includes a carrier fenced behind an in-flight custody CAS. */
-function isQueueTargetPending(entry: Pick<QueueEntry, 'targetCats' | 'queuedFailedByCatIds'>, catId: string): boolean {
-  return entry.targetCats.includes(catId) && !entry.queuedFailedByCatIds?.includes(catId);
+function isQueueTargetPending(entry: Pick<QueueEntry, 'status' | 'targets'>, catId: string): boolean {
+  return entry.status !== 'terminal' && entry.targets.includes(catId);
 }
 
 export class InvocationQueue {
+  static readonly STALE_PROCESSING_THRESHOLD_MS = 600_000;
+
   private readonly log = createModuleLogger('invocation-queue');
   private queues = new Map<string, QueueEntry[]>();
+  /**
+   * Process-local handoff snapshots after Queue has removed the dispatched
+   * target. These are not Queue truth and are never hydrated or persisted;
+   * ActiveRun + History own execution and terminal lifecycle.
+   */
+  private readonly admittedEntries = new Map<string, QueueEntry[]>();
+  /** Runtime-only prompt evidence keyed by admitted snapshots. It is never serialized into Queue rows. */
+  private readonly admittedAttemptEvidence = new WeakMap<QueueEntry, AdmittedAttemptEvidence>();
+  private lastEnqueuedAt = 0;
+  /** Claimed rows remain reversible until tracker admission owns execution. */
+  private readonly ledgerClaimIds = new Map<string, string>();
 
-  /** Original content per entryId at enqueue time, for rollbackEnqueue */
-  private originalContents = new Map<string, string>();
-
-  /** Rollback snapshots for the short reservation→preempt→dequeue window. */
-  private exactSteerReservations = new Map<
-    string,
-    {
-      threadId: string;
-      userId: string;
-      primaryEntryId: string;
-      targetCatId: string;
-      entries: Map<string, QueueEntry>;
-      phase: 'reserved' | 'preempting' | 'activated';
-    }
-  >();
+  constructor(private readonly ledgerStore: QueueLedgerStore = new InMemoryQueueLedgerStore()) {}
 
   private scopeKey(threadId: string, userId: string): string {
     return `${threadId}:${userId}`;
@@ -274,79 +239,55 @@ export class InvocationQueue {
     return q;
   }
 
-  private static readonly PRIORITY_RANK: Record<string, number> = { urgent: 0, normal: 1 };
-
-  private static normalizedPriority(input: {
-    source: QueueEntry['source'];
-    sourceCategory?: QueueEntry['sourceCategory'];
-    priority?: QueueEntry['priority'];
-  }): QueueEntry['priority'] {
-    return input.source === 'agent' && input.sourceCategory !== 'continuation'
-      ? 'normal'
-      : (input.priority ?? 'normal');
+  private static persistentSourceId(input: QueueEnqueueInput): string {
+    const sourceId =
+      input.sourceId ??
+      input.messageId ??
+      input.idempotencyKey ??
+      input.continuationKey ??
+      input.freshnessSupplementId ??
+      input.freshnessClosureId;
+    if (!sourceId) throw new Error('durable Queue admission requires a persistent producer identity');
+    return sourceId;
   }
 
-  /** F175: multi-dimensional entry comparator for dequeue ordering.
-   *  Position is scoped to same-user entries to prevent cross-user queue-jumping in shared threads. */
-  private static compareEntries(a: QueueEntry, b: QueueEntry): number {
-    const aPinned = isSystemPinnedQueueEntry(a);
-    const bPinned = isSystemPinnedQueueEntry(b);
-    if (aPinned && !bPinned) return -1;
-    if (!aPinned && bPinned) return 1;
-
-    if (a.userId === b.userId) {
-      const aHasPos = a.position !== undefined;
-      const bHasPos = b.position !== undefined;
-      if (aHasPos && !bHasPos) return -1;
-      if (!aHasPos && bHasPos) return 1;
-      if (aHasPos && bHasPos) return a.position! - b.position!;
+  /** Enforce the canonical Queue admission contract on both live and restart paths. */
+  private static requireAdmissionContract(input: {
+    kind: unknown;
+    from: unknown;
+    userId?: unknown;
+    targetCats: unknown;
+    messageId?: unknown;
+    a2aTriggerMessageId?: unknown;
+    ownerAuthProvenance: unknown;
+  }): { kind: QueueEntry['kind']; ownerAuthProvenance: OwnerAuthProvenance } {
+    const kind = input.kind;
+    if (kind !== 'conversation_input' && kind !== 'message_wake' && kind !== 'private_input') {
+      throw new Error('kind must be explicit on every Queue producer');
     }
-    const pDiff = (InvocationQueue.PRIORITY_RANK[a.priority] ?? 1) - (InvocationQueue.PRIORITY_RANK[b.priority] ?? 1);
-    if (pDiff !== 0) return pDiff;
-    return a.createdAt - b.createdAt;
-  }
-
-  /** F175: set explicit dequeue position for drag-reorder. */
-  setPosition(threadId: string, userId: string, entryId: string, position: number): boolean {
-    const e = this.findEntry(threadId, userId, entryId);
-    if (!e || e.status !== 'queued') return false;
-    if (e.exactSteerBatch) return false;
-    if (isSystemPinnedQueueEntry(e)) return false;
-    e.position = position;
-    return true;
-  }
-
-  /**
-   * 预留队列位。容量检查在此完成。
-   * 同源同目标的连续消息自动合并。
-   */
-  enqueue(
-    input: Omit<
-      QueueEntry,
-      | 'id'
-      | 'status'
-      | 'createdAt'
-      | 'mergedMessageIds'
-      | 'messageId'
-      | 'autoExecute'
-      | 'callerCatId'
-      | 'priority'
-      | 'position'
-      | 'suggestedSkill'
-      | 'ownerAuthProvenance'
-      | 'exactSteerBatch'
-    > & {
-      ownerAuthProvenance: OwnerAuthProvenance;
-      autoExecute?: boolean;
-      callerCatId?: string;
-      priority?: 'urgent' | 'normal';
-      suggestedSkill?: string;
-      messageId?: string | null;
-      /** Defaults true for request replay dedupe; connector coalescing can opt out for in-flight entries. */
-      dedupeProcessing?: boolean;
-    },
-  ): EnqueueResult {
-    const ownerAuthProvenance: unknown = input.ownerAuthProvenance;
+    if (
+      !Array.isArray(input.targetCats) ||
+      input.targetCats.some((catId) => typeof catId !== 'string' || catId.length === 0) ||
+      new Set(input.targetCats).size !== input.targetCats.length
+    ) {
+      throw new Error('targetCats must contain unique non-empty target ids');
+    }
+    if (kind !== 'conversation_input' && input.targetCats.length === 0) {
+      throw new Error(`${kind} must have an exact target`);
+    }
+    if (!isMessageFrom(input.from)) {
+      throw new Error('from must be explicit on every Queue producer');
+    }
+    if (input.from.kind === 'user' && input.from.userId !== input.userId) {
+      throw new Error('Queue user sender must match the owner userId');
+    }
+    if (kind === 'private_input' && input.messageId != null) {
+      throw new Error('private_input cannot reference a public History message');
+    }
+    if (kind === 'message_wake' && !input.messageId && !input.a2aTriggerMessageId) {
+      throw new Error('message_wake must reference an existing History message');
+    }
+    const ownerAuthProvenance = input.ownerAuthProvenance;
     if (
       ownerAuthProvenance !== 'strict' &&
       ownerAuthProvenance !== 'compatibility_fallback' &&
@@ -354,81 +295,48 @@ export class InvocationQueue {
     ) {
       throw new Error('ownerAuthProvenance must be explicit on every Queue producer');
     }
-    const key = this.scopeKey(input.threadId, input.userId);
-    const q = this.getOrCreate(key);
-    const priority = InvocationQueue.normalizedPriority(input);
-    const dedupeProcessing = input.dedupeProcessing ?? true;
+    return { kind, ownerAuthProvenance };
+  }
 
-    // Request replay dedupe: if an active entry already exists for this key in this scope,
-    // return it instead of creating a second queue row.
-    if (input.idempotencyKey) {
-      const existing = q.find(
-        (entry) =>
-          entry.idempotencyKey === input.idempotencyKey &&
-          (entry.status === 'queued' || (dedupeProcessing && entry.status === 'processing')),
-      );
-      if (existing) {
-        if (existing.status === 'queued') {
-          const upgradedPriority =
-            (InvocationQueue.PRIORITY_RANK[priority] ?? 1) < (InvocationQueue.PRIORITY_RANK[existing.priority] ?? 1);
-          if (upgradedPriority) {
-            existing.priority = priority;
-          }
-          if (input.suggestedSkill && (upgradedPriority || !existing.suggestedSkill)) {
-            existing.suggestedSkill = input.suggestedSkill;
-          }
-          if (input.sourceCategory && !existing.sourceCategory) {
-            existing.sourceCategory = input.sourceCategory;
-          }
-        }
-        const position = q.findIndex((entry) => entry.id === existing.id);
-        return {
-          outcome: 'enqueued',
-          entry: { ...existing },
-          queuePosition: position >= 0 ? position + 1 : undefined,
-          deduped: true,
-        };
-      }
-    }
+  private nextEnqueuedAt(): number {
+    const now = Date.now();
+    this.lastEnqueuedAt = Math.max(now, this.lastEnqueuedAt + 1);
+    return this.lastEnqueuedAt;
+  }
 
-    // F175: capacity check — only user messages are depth-limited
-    if (input.source === 'user') {
-      const userQueuedCount = q.filter((e) => e.status === 'queued' && e.source === 'user').length;
-      if (userQueuedCount >= MAX_QUEUE_DEPTH) {
-        return { outcome: 'full' };
-      }
-    }
+  /** RFC #1356's only Queue comparator: position → priority → FIFO → stable id. */
+  private static compareEntries(a: QueueEntry, b: QueueEntry): number {
+    return compareLifecycleQueueEntries(
+      { id: a.id, priority: a.priority, enqueuedAt: a.enqueuedAt, position: a.position },
+      { id: b.id, priority: b.priority, enqueuedAt: b.enqueuedAt, position: b.position },
+    );
+  }
 
-    const entry: QueueEntry = {
-      id: randomUUID(),
+  private createLedgerRows(
+    input: QueueEnqueueInput,
+    sourceId: string,
+    enqueuedAt: number,
+    messageId?: string,
+  ): QueueLedgerEntry[] {
+    InvocationQueue.requireAdmissionContract({ ...input, messageId: messageId ?? input.messageId });
+    return createQueueLedgerAdmission({
+      sourceId,
       threadId: input.threadId,
-      userId: input.userId,
-      ownerAuthProvenance,
-      idempotencyKey: input.idempotencyKey,
+      owner: queueOwner(input),
+      kind: input.kind,
+      from: input.from,
+      targetCatIds: input.targetCats,
       content: input.content,
-      messageId: input.messageId ?? null,
-      mergedMessageIds: [],
-      source: input.source,
-      targetCats: [...input.targetCats],
-      allTargetCats: [...input.targetCats],
-      ...(input.authorIntentByCatId ? { authorIntentByCatId: structuredClone(input.authorIntentByCatId) } : {}),
+      ...(messageId ? { messageId } : {}),
+      ...(input.routingWarnings ? { routingWarnings: input.routingWarnings } : {}),
+      ...(input.authorIntentByCatId ? { authorIntentByCatId: input.authorIntentByCatId } : {}),
       intent: input.intent,
-      status: 'queued',
-      createdAt: Date.now(),
-      autoExecute: input.autoExecute ?? false,
-      queueCustodyAdmissionId: input.queueCustodyAdmissionId,
-      callerCatId: input.callerCatId,
-      a2aParentInvocationId: input.a2aParentInvocationId,
-      cloudDispatchProvenance: input.cloudDispatchProvenance
-        ? structuredClone(input.cloudDispatchProvenance)
-        : undefined,
-      requiresExactCloudDispatchProvenance: input.requiresExactCloudDispatchProvenance,
-      senderMeta: input.senderMeta,
-      priority,
+      ownerAuthProvenance: input.ownerAuthProvenance,
+      autoExecute: input.autoExecute,
+      priority: input.priority,
       sourceCategory: input.sourceCategory,
-      continuationKey: input.continuationKey,
+      a2aParentInvocationId: input.a2aParentInvocationId,
       freshnessClosureId: input.freshnessClosureId,
-      freshnessRequiredFrontierMessageId: input.freshnessRequiredFrontierMessageId,
       freshnessSupplementId: input.freshnessSupplementId,
       freshnessSupplementLineageId: input.freshnessSupplementLineageId,
       freshnessSupplementSeq: input.freshnessSupplementSeq,
@@ -437,12 +345,1034 @@ export class InvocationQueue {
       waitContinuationCarrier: input.waitContinuationCarrier,
       suggestedSkill: input.suggestedSkill,
       callerTraceContext: input.callerTraceContext,
-      a2aTriggerMessageId: input.a2aTriggerMessageId,
-      position: undefined,
+      a2aTriggerMessageId: input.a2aTriggerMessageId ?? (input.kind === 'message_wake' ? messageId : undefined),
+      cloudDispatchProvenance: input.cloudDispatchProvenance,
+      requiresExactCloudDispatchProvenance: input.requiresExactCloudDispatchProvenance,
+      enqueuedAt,
+    });
+  }
+
+  private static projectLedgerEntry(entry: QueueLedgerEntry): QueueEntry {
+    return structuredClone(entry);
+  }
+
+  private cacheLedgerEntries(entries: readonly QueueLedgerEntry[]): QueueEntry[] {
+    const projected: QueueEntry[] = [];
+    for (const row of entries) {
+      if (row.status === 'terminal') {
+        this.removeCachedEntry(row.threadId, row.id);
+        continue;
+      }
+      const entry = InvocationQueue.projectLedgerEntry(row);
+      const queue = this.getOrCreate(this.scopeKey(entry.threadId, queueEntryOwnerId(entry)));
+      const index = queue.findIndex((candidate) => candidate.id === entry.id);
+      if (index >= 0) queue[index] = entry;
+      else queue.push(entry);
+      projected.push(structuredClone(entry));
+    }
+    return projected;
+  }
+
+  async hydrateFromLedger(messageStore?: Pick<IMessageStore, 'getById'>): Promise<number> {
+    this.queues.clear();
+    this.admittedEntries.clear();
+    this.ledgerClaimIds.clear();
+    let count = 0;
+    for (const threadId of await this.ledgerStore.listThreadIds()) {
+      const rows: QueueLedgerEntry[] = [];
+      for (const row of await this.ledgerStore.list(threadId)) {
+        if (row.status !== 'claimed' || !row.claimId) {
+          rows.push(row);
+          continue;
+        }
+        const source = row.payload.messageId ? await messageStore?.getById(row.payload.messageId) : null;
+        if (source?.recall || (source?.deliveryStatus && source.deliveryStatus !== 'queued')) {
+          const terminal = await this.ledgerStore.commit(threadId, row.id, row.claimId, 'withdrawn', Date.now());
+          if (terminal.outcome === 'updated') rows.push(terminal.entry);
+          continue;
+        }
+        const restored = await this.ledgerStore.restore(
+          threadId,
+          row.id,
+          row.claimId,
+          row.id === queueEntryId(row.payload.sourceRecordId),
+        );
+        if (restored.outcome === 'updated') rows.push(restored.entry);
+      }
+      count += this.cacheLedgerEntries(rows).length;
+    }
+    return count;
+  }
+
+  async enqueueDurable(input: QueueEnqueueInput): Promise<EnqueueResult & { entries?: QueueEntry[] }> {
+    const sourceId = InvocationQueue.persistentSourceId(input);
+    const enqueuedAt = this.nextEnqueuedAt();
+    const rows = this.createLedgerRows(input, sourceId, enqueuedAt, input.messageId ?? undefined);
+    const result = await this.ledgerStore.enqueue(rows, input.from.kind === 'user' ? MAX_QUEUE_DEPTH : undefined);
+    if (result.outcome === 'full') return { outcome: 'full' };
+    if (result.outcome === 'conflict') throw new Error(`Queue admission identity conflict: ${sourceId}`);
+    const entries = this.cacheLedgerEntries(result.entries);
+    const primary = entries[0];
+    return {
+      outcome: 'enqueued',
+      ...(primary ? { entry: primary } : {}),
+      entries,
+      queuePosition: primary
+        ? this.list(primary.threadId, queueEntryOwnerId(primary)).findIndex((entry) => entry.id === primary.id) + 1
+        : undefined,
+      deduped: result.outcome === 'replayed',
     };
-    q.push(entry);
-    this.originalContents.set(entry.id, input.content);
-    return { outcome: 'enqueued', entry: { ...entry }, queuePosition: q.length };
+  }
+
+  /** Synchronous durable admission for the in-memory store used by local/test hosts. */
+  enqueueDurableNow(input: QueueEnqueueInput): EnqueueResult & { entries?: QueueEntry[] } {
+    if (!(this.ledgerStore instanceof InMemoryQueueLedgerStore)) {
+      throw new Error('synchronous durable Queue admission requires the in-memory ledger');
+    }
+    const sourceId = InvocationQueue.persistentSourceId(input);
+    const rows = this.createLedgerRows(input, sourceId, this.nextEnqueuedAt(), input.messageId ?? undefined);
+    const result = this.ledgerStore.enqueueNow(rows, input.from.kind === 'user' ? MAX_QUEUE_DEPTH : undefined);
+    if (result.outcome === 'full') return { outcome: 'full' };
+    if (result.outcome === 'conflict') throw new Error(`Queue admission identity conflict: ${sourceId}`);
+    const entries = this.cacheLedgerEntries(result.entries);
+    const primary = entries[0];
+    return {
+      outcome: 'enqueued',
+      ...(primary ? { entry: primary } : {}),
+      entries,
+      queuePosition: primary
+        ? this.list(primary.threadId, queueEntryOwnerId(primary)).findIndex((entry) => entry.id === primary.id) + 1
+        : undefined,
+      deduped: result.outcome === 'replayed',
+    };
+  }
+
+  /** One storage transaction for a queued Message and its complete Queue fan-out. */
+  async appendAndEnqueueDurable(
+    messageStore: IMessageStore,
+    message: AppendMessageInput,
+    input: QueueEnqueueInput,
+  ): Promise<EnqueueMessageResult> {
+    if (
+      (message.threadId ?? 'default') !== input.threadId ||
+      message.userId !== input.userId ||
+      message.content !== input.content ||
+      JSON.stringify(message.from) !== JSON.stringify(input.from) ||
+      (message.deliveryStatus !== 'queued' && !(message.from.kind === 'agent' && message.deliveryStatus === undefined))
+    ) {
+      throw new Error('atomic Queue admission message does not match its execution work item');
+    }
+    const enqueuedAt = this.nextEnqueuedAt();
+    const result = await messageStore.appendWithQueueLedgerAdmission(
+      message,
+      (messageId) => this.createLedgerRows(input, messageId, enqueuedAt, messageId),
+      this.ledgerStore,
+      input.from.kind === 'user' ? MAX_QUEUE_DEPTH : undefined,
+    );
+    if (result.outcome === 'full') return { outcome: 'full' };
+
+    const projected = this.cacheLedgerEntries(result.entries);
+    const expected = this.createLedgerRows(input, result.message.id, enqueuedAt, result.message.id);
+    const primary =
+      projected[0] ??
+      (() => {
+        const first = expected[0];
+        if (!first) return undefined;
+        const owner = queueOwner(input);
+        const ownerUserId = owner.kind === 'user' ? owner.userId : `system:${owner.service}`;
+        return this.findEntry(input.threadId, ownerUserId, first.id);
+      })();
+    return {
+      outcome: 'enqueued',
+      message: result.message,
+      ...(primary ? { entry: { ...primary } } : {}),
+      entries: projected,
+      queuePosition: primary
+        ? this.list(primary.threadId, queueEntryOwnerId(primary)).findIndex((entry) => entry.id === primary.id) + 1
+        : undefined,
+      deduped: result.deduped,
+    };
+  }
+
+  /** One storage transaction for a terminal response bubble and its outbound A2A fan-out. */
+  async terminalizeResponseAndEnqueueDurable(
+    messageStore: IMessageStore,
+    responseMessageId: string,
+    terminalPatch: LifecycleResponseTerminalPatch,
+    input: QueueEnqueueInput,
+  ): Promise<EnqueueMessageResult> {
+    const source = await messageStore.getById(responseMessageId);
+    if (
+      !source ||
+      source.threadId !== input.threadId ||
+      source.userId !== input.userId ||
+      source.content === undefined ||
+      JSON.stringify(source.from) !== JSON.stringify(input.from)
+    ) {
+      throw new Error('lifecycle Queue source does not match its execution work item');
+    }
+    const canonicalInput: QueueEnqueueInput = {
+      ...input,
+      sourceId: responseMessageId,
+      messageId: responseMessageId,
+    };
+    const rows = this.createLedgerRows(canonicalInput, responseMessageId, source.timestamp, responseMessageId);
+    const result = await messageStore.commitLifecycleResponseTerminalWithQueueLedgerAdmission(
+      responseMessageId,
+      terminalPatch,
+      rows,
+      this.ledgerStore,
+      input.from.kind === 'user' ? MAX_QUEUE_DEPTH : undefined,
+    );
+    if (result.kind === 'full') return { outcome: 'full' };
+    if (result.kind !== 'applied' && result.kind !== 'replayed') {
+      throw new Error(
+        `lifecycle response terminal Queue admission conflict: ${result.kind}:${'reason' in result ? result.reason : 'missing'}`,
+      );
+    }
+    const projected = this.cacheLedgerEntries(result.entries);
+    const primary = projected[0];
+    return {
+      outcome: 'enqueued',
+      message: result.message,
+      ...(primary ? { entry: primary } : {}),
+      entries: projected,
+      queuePosition: primary
+        ? this.list(primary.threadId, queueEntryOwnerId(primary)).findIndex((entry) => entry.id === primary.id) + 1
+        : undefined,
+      deduped: result.ledgerReplayed,
+    };
+  }
+
+  /** Atomically adopt one already-persisted connector message into the ledger. */
+  async enqueueExistingMessageDurable(
+    messageStore: IMessageStore,
+    messageId: string,
+    input: QueueEnqueueInput,
+  ): Promise<EnqueueMessageResult> {
+    const source = await messageStore.getById(messageId);
+    if (
+      !source ||
+      source.threadId !== input.threadId ||
+      source.userId !== input.userId ||
+      source.content !== input.content ||
+      JSON.stringify(source.from) !== JSON.stringify(input.from)
+    ) {
+      throw new Error('existing Queue source does not match its execution work item');
+    }
+    const enqueuedAt = this.nextEnqueuedAt();
+    const rows = this.createLedgerRows(input, messageId, enqueuedAt, messageId);
+    const result = await messageStore.enqueueExistingMessageWithQueueLedgerAdmission(
+      messageId,
+      rows,
+      this.ledgerStore,
+      input.from.kind === 'user' ? MAX_QUEUE_DEPTH : undefined,
+    );
+    if (result.outcome === 'full') return { outcome: 'full' };
+    const projected = this.cacheLedgerEntries(result.entries);
+    const primary = projected[0];
+    return {
+      outcome: 'enqueued',
+      message: result.message,
+      ...(primary ? { entry: primary } : {}),
+      entries: projected,
+      queuePosition: primary
+        ? this.list(primary.threadId, queueEntryOwnerId(primary)).findIndex((entry) => entry.id === primary.id) + 1
+        : undefined,
+      deduped: result.deduped,
+    };
+  }
+
+  /**
+   * Atomically verify the selected source entry, bind an optional
+   * targetless anchor, and add missing siblings. A terminal race therefore
+   * rejects the whole Steer mapping instead of leaving a partial fan-out.
+   */
+  async mapQueuedMessageTargetsDurable(
+    messageStore: Pick<IMessageStore, 'getById'>,
+    messageId: string,
+    entryId: string,
+    bindTargetCatId: string,
+    expectedQueuedEntryIds: readonly string[],
+    input: QueueEnqueueInput,
+  ) {
+    const source = await messageStore.getById(messageId);
+    if (
+      !source ||
+      source.threadId !== input.threadId ||
+      source.userId !== input.userId ||
+      source.content !== input.content ||
+      JSON.stringify(source.from) !== JSON.stringify(input.from) ||
+      (source.deliveryStatus !== 'queued' && source.deliveryStatus !== 'delivered')
+    ) {
+      throw new Error('queued Message does not match its target fan-out expansion');
+    }
+    const anchor = await this.ledgerStore.get(input.threadId, entryId);
+    if (!anchor) return { outcome: 'not_found' as const, entries: [] };
+    const siblingInput: QueueEnqueueInput = { ...input, sourceId: messageId, messageId };
+    const siblingRows =
+      siblingInput.targetCats.length > 0
+        ? this.createLedgerRows(siblingInput, messageId, anchor.enqueuedAt, messageId).map((row) => ({
+            ...row,
+            ...(anchor.position !== undefined ? { position: anchor.position } : {}),
+          }))
+        : [];
+    const result = await this.ledgerStore.expandTargets(
+      input.threadId,
+      entryId,
+      bindTargetCatId,
+      expectedQueuedEntryIds,
+      siblingRows,
+    );
+    if (result.outcome === 'expanded' || result.outcome === 'replayed') {
+      return { ...result, entries: this.cacheLedgerEntries(result.entries) };
+    }
+    return result;
+  }
+
+  /**
+   * Apply the user's explicit Steer delta to the current pending target set.
+   * Targets delivered while the modal was open are absent from Queue already;
+   * this method therefore never reconstructs them from a stale browser list.
+   */
+  async reconcileQueuedMessageTargetsDurable(
+    threadId: string,
+    userId: string,
+    entryId: string,
+    addTargetIds: readonly string[],
+    removeTargetIds: readonly string[],
+    authorIntentByTarget: Readonly<Record<string, QueueAuthorIntent>>,
+  ) {
+    const current = await this.ledgerStore.get(threadId, entryId);
+    if (current && queueEntryOwnerId(current) !== userId) {
+      throw new Error('Queue target reconciliation owner mismatch');
+    }
+    const result = await this.ledgerStore.reconcileTargets(
+      threadId,
+      entryId,
+      addTargetIds,
+      removeTargetIds,
+      authorIntentByTarget,
+    );
+    if (result.outcome === 'updated' || result.outcome === 'replayed') {
+      this.removeCachedEntry(threadId, entryId);
+      if (result.entry) this.cacheLedgerEntries([result.entry]);
+    }
+    return result;
+  }
+
+  private findEntryAcrossUsers(threadId: string, entryId: string): QueueEntry | undefined {
+    for (const queue of this.queues.values()) {
+      if (!this.queueMatchesThread(queue, threadId)) continue;
+      const entry = queue.find((candidate) => candidate.id === entryId);
+      if (entry) return entry;
+    }
+    return undefined;
+  }
+
+  private async claimLedgerEntry(entry: QueueEntry, selectedTargetCatId?: string): Promise<QueueEntry | null> {
+    const claimId = randomUUID();
+    const claimedAt = Date.now();
+    // The selected target has two jobs in the store: bind a targetless row on
+    // first dispatch, or claim only that target from an existing target set.
+    // Omitting it for targeted rows accidentally claimed every sibling.
+    const claimed = await this.ledgerStore.claim(entry.threadId, entry.id, claimId, claimedAt, selectedTargetCatId);
+    if (claimed.outcome !== 'claimed') return null;
+    const [projected] = this.cacheLedgerEntries(claimed.entries);
+    if (!projected) return null;
+    this.ledgerClaimIds.set(projected.id, claimId);
+    return structuredClone(projected);
+  }
+
+  private rememberAdmittedEntry(entry: QueueEntry): void {
+    const entries = this.admittedEntries.get(entry.id) ?? [];
+    const admitted = structuredClone(entry);
+    entries.push(admitted);
+    this.admittedAttemptEvidence.set(admitted, {});
+    this.admittedEntries.set(entry.id, entries);
+  }
+
+  private findAdmittedEntry(
+    threadId: string,
+    entryId: string,
+    targetCatId?: string,
+    userId?: string,
+  ): QueueEntry | undefined {
+    return this.admittedEntries
+      .get(entryId)
+      ?.find(
+        (entry) =>
+          entry.threadId === threadId &&
+          (userId === undefined || queueEntryOwnerId(entry) === userId) &&
+          (targetCatId === undefined || entry.targets.includes(targetCatId)),
+      );
+  }
+
+  /**
+   * Read process-local provider attempts carrying any of the exact source
+   * messages. Admitted attempts are deliberately absent from the durable
+   * pending Queue, so execution evidence must never rediscover them through
+   * the ledger.
+   */
+  findAdmittedEntriesForMessages(
+    threadId: string,
+    messageIds: readonly string[],
+    userId?: string,
+    targetCatId?: string,
+  ): QueueEntry[] {
+    const wanted = new Set(messageIds);
+    if (wanted.size === 0) return [];
+    return [...this.admittedEntries.values()]
+      .flat()
+      .filter(
+        (entry) =>
+          entry.threadId === threadId &&
+          (userId === undefined || queueEntryOwnerId(entry) === userId) &&
+          (targetCatId === undefined || entry.targets.includes(targetCatId)) &&
+          queueEntryMessageIds(entry).some((messageId) => wanted.has(messageId)),
+      )
+      .map((entry) => structuredClone(entry));
+  }
+
+  /** Process-local prompt transport evidence for one admitted attempt; never persisted on Queue state. */
+  getAdmittedAttemptEvidence(
+    threadId: string,
+    entryId: string,
+    targetCatId: string,
+    userId?: string,
+  ): Readonly<AdmittedAttemptEvidence> | null {
+    const admitted = this.findAdmittedEntry(threadId, entryId, targetCatId, userId);
+    if (!admitted) return null;
+    const evidence = this.admittedAttemptEvidence.get(admitted);
+    return evidence ? { ...evidence } : null;
+  }
+
+  private forgetAdmittedEntry(threadId: string, entryId: string, targetCatId?: string): QueueEntry | null {
+    const entries = this.admittedEntries.get(entryId);
+    if (!entries) return null;
+    const index = entries.findIndex(
+      (entry) => entry.threadId === threadId && (targetCatId === undefined || entry.targets.includes(targetCatId)),
+    );
+    if (index < 0) return null;
+    const [removed] = entries.splice(index, 1);
+    if (entries.length === 0) this.admittedEntries.delete(entryId);
+    return removed ? structuredClone(removed) : null;
+  }
+
+  private cacheLedgerClaim(entries: readonly QueueLedgerEntry[], claimId: string): QueueEntry[] {
+    const projected = this.cacheLedgerEntries(entries);
+    for (const entry of projected) {
+      const cached = this.findEntry(entry.threadId, queueEntryOwnerId(entry), entry.id);
+      if (!cached) continue;
+      if (projected.length > 1) {
+        cached.retiringGroupId = claimId;
+        entry.retiringGroupId = claimId;
+      }
+      this.ledgerClaimIds.set(cached.id, claimId);
+    }
+    return projected.map((entry) => this.getEntrySnapshot(entry.threadId, queueEntryOwnerId(entry), entry.id) ?? entry);
+  }
+
+  async claimExactSteerEntryDurable(
+    threadId: string,
+    userId: string,
+    entryId: string,
+    targetCatId: string,
+    claimedAt = Date.now(),
+  ): Promise<DurableSteerClaimResult> {
+    const entry = this.findEntry(threadId, userId, entryId);
+    if (!entry) return { outcome: 'rejected', reason: 'entry_not_found' };
+    if (entry.status !== 'queued') return { outcome: 'rejected', reason: 'entry_processing' };
+    const assignsTargetlessConversation = entry.kind === 'conversation_input' && entry.targets.length === 0;
+    if (
+      isSystemPinnedQueueEntry(entry) ||
+      (!assignsTargetlessConversation && !isOrdinaryQueueTargetEligible(entry, targetCatId))
+    ) {
+      return { outcome: 'rejected', reason: 'entry_ineligible' };
+    }
+    const claimId = randomUUID();
+    const claimed = await this.ledgerStore.claim(threadId, entryId, claimId, claimedAt, targetCatId, claimedAt);
+    if (claimed.outcome !== 'claimed') {
+      return {
+        outcome: 'rejected',
+        reason: claimed.outcome === 'not_found' ? 'entry_not_found' : 'entry_processing',
+      };
+    }
+    return { outcome: 'claimed', entries: this.cacheLedgerClaim(claimed.entries, claimId), targetCatId };
+  }
+
+  /**
+   * Bind one public human message to the selected member and persist the
+   * author's non-interrupting delivery intent. This is the Queue-panel
+   * counterpart of composer admission: the same row either appends to the
+   * exact current run or remains ordinary next work without canceling it.
+   */
+  async bindContinueCurrentIntentDurable(
+    threadId: string,
+    userId: string,
+    entryId: string,
+    targetCatId: string,
+    authorIntent: QueueAuthorIntent,
+    at = Date.now(),
+  ): Promise<QueueEntry | null> {
+    const entry = this.findEntry(threadId, userId, entryId);
+    if (
+      !entry ||
+      entry.status !== 'queued' ||
+      entry.kind !== 'conversation_input' ||
+      entry.from.kind !== 'user' ||
+      isSystemPinnedQueueEntry(entry)
+    ) {
+      return null;
+    }
+    const assignsTargetlessConversation = entry.targets.length === 0;
+    if (!assignsTargetlessConversation && !isOrdinaryQueueTargetEligible(entry, targetCatId)) return null;
+
+    const claimId = randomUUID();
+    const claimed = await this.ledgerStore.claim(
+      threadId,
+      entryId,
+      claimId,
+      at,
+      assignsTargetlessConversation ? targetCatId : undefined,
+    );
+    if (claimed.outcome !== 'claimed' || !claimed.entries[0]) return null;
+    const replacement = structuredClone(claimed.entries[0]);
+    replacement.delivery.authorIntentByTarget = {
+      ...(replacement.delivery.authorIntentByTarget ?? {}),
+      [targetCatId]: structuredClone(authorIntent),
+    };
+    const committed = await this.ledgerStore.commit(threadId, entryId, claimId, 'queued', at, replacement);
+    if (committed.outcome !== 'updated') {
+      await this.ledgerStore.restore(threadId, entryId, claimId, assignsTargetlessConversation);
+      return null;
+    }
+    const [bound] = this.cacheLedgerEntries([committed.entry]);
+    return bound ? structuredClone(bound) : null;
+  }
+
+  /** Record the truthful next-work fallback after an exact Append race. */
+  async fallbackQueuedAuthorIntentDurable(
+    threadId: string,
+    userId: string,
+    entryId: string,
+    targetCatId: string,
+    reason: QueueAuthorIntentFallbackReason,
+    at = Date.now(),
+  ): Promise<boolean> {
+    const result = await this.mutateQueuedLedgerEntry(threadId, userId, entryId, (row) => {
+      const intent = row.delivery.authorIntentByTarget?.[targetCatId];
+      if (!intent || intent.requested !== 'continue_current' || intent.fallbackAt !== undefined) return false;
+      row.delivery.authorIntentByTarget = {
+        ...(row.delivery.authorIntentByTarget ?? {}),
+        [targetCatId]: { ...intent, fallbackAt: at, fallbackReason: reason },
+      };
+      return true;
+    });
+    return result?.changed ?? false;
+  }
+
+  async restoreClaimedEntries(threadId: string, entryIds: readonly string[]): Promise<boolean> {
+    let restoredAll = true;
+    for (const entryId of entryIds) {
+      const claimId = this.ledgerClaimIds.get(entryId);
+      if (!claimId) {
+        restoredAll = false;
+        continue;
+      }
+      // The durable claim records whether this action bound a formerly
+      // targetless entry. Never infer that from the v2 source-derived id: every
+      // v2 row has that identity, including already-targeted rows.
+      const restored = await this.ledgerStore.restore(threadId, entryId, claimId);
+      if (restored.outcome !== 'updated') {
+        restoredAll = false;
+        continue;
+      }
+      this.ledgerClaimIds.delete(entryId);
+      this.cacheLedgerEntries([restored.entry]);
+    }
+    return restoredAll;
+  }
+
+  /** Claim one queued row before an external withdrawal side effect. */
+  async claimQueuedEntryForWithdrawal(threadId: string, userId: string, entryId: string): Promise<QueueEntry | null> {
+    const entry = this.findEntry(threadId, userId, entryId);
+    if (!entry || entry.status !== 'queued') return null;
+    return this.claimLedgerEntry(entry);
+  }
+
+  /** Freeze the source entry for one message before its withdrawal side effect. */
+  async claimMessageEntriesForWithdrawal(
+    threadId: string,
+    userId: string,
+    messageId: string,
+    claimedAt = Date.now(),
+  ): Promise<DurableMessageClaimResult> {
+    const matches = [...this.queues.values()]
+      .flat()
+      .filter((entry) => entry.threadId === threadId && entry.payload.messageId === messageId);
+    if (matches.length === 0 || matches.some((entry) => queueEntryOwnerId(entry) !== userId)) {
+      return { outcome: 'not_found' };
+    }
+    if (matches.some((entry) => entry.status !== 'queued')) return { outcome: 'processing' };
+    const claimId = randomUUID();
+    const claimed = await this.ledgerStore.claimPrefix(
+      threadId,
+      matches.map((entry) => entry.id),
+      claimId,
+      claimedAt,
+    );
+    if (claimed.outcome !== 'claimed') {
+      return { outcome: claimed.outcome === 'not_found' ? 'not_found' : 'processing' };
+    }
+    return { outcome: 'claimed', entries: this.cacheLedgerClaim(claimed.entries, claimId) };
+  }
+
+  /** Withdraw every source entry frozen by claimMessageEntriesForWithdrawal. */
+  async commitClaimedMessageWithdrawal(threadId: string, entryIds: readonly string[]): Promise<boolean> {
+    let committedAll = true;
+    for (const entryId of entryIds) {
+      if (!(await this.commitClaimedWithdrawal(threadId, entryId))) committedAll = false;
+    }
+    return committedAll;
+  }
+
+  /** Remove a withdrawal claim after its source-message terminal write succeeds. */
+  async commitClaimedWithdrawal(threadId: string, entryId: string): Promise<QueueEntry | null> {
+    const claimId = this.ledgerClaimIds.get(entryId);
+    if (!claimId) return null;
+    const committed = await this.ledgerStore.commit(threadId, entryId, claimId, 'withdrawn', Date.now());
+    if (committed.outcome !== 'updated') return null;
+    this.ledgerClaimIds.delete(entryId);
+    return this.removeCachedEntry(threadId, entryId);
+  }
+
+  /** Persist explicit ordering through the same claim/commit CAS as dequeue. */
+  async setPositionDurable(threadId: string, userId: string, entryId: string, position: number): Promise<boolean> {
+    const entry = this.findEntry(threadId, userId, entryId);
+    if (
+      !entry ||
+      entry.status !== 'queued' ||
+      entry.kind === 'private_input' ||
+      isSystemPinnedQueueEntry(entry) ||
+      !Number.isInteger(position) ||
+      position < 0
+    ) {
+      return false;
+    }
+    const claimId = randomUUID();
+    const claimedAt = Date.now();
+    const claimed = await this.ledgerStore.claim(threadId, entryId, claimId, claimedAt);
+    if (claimed.outcome !== 'claimed' || !claimed.entries[0]) return false;
+    const replacement = structuredClone(claimed.entries[0]);
+    replacement.position = position;
+    const committed = await this.ledgerStore.commit(threadId, entryId, claimId, 'queued', claimedAt, replacement);
+    if (committed.outcome !== 'updated') {
+      await this.ledgerStore.restore(threadId, entryId, claimId);
+      return false;
+    }
+    this.cacheLedgerEntries([committed.entry]);
+    return true;
+  }
+
+  /**
+   * Apply a queued-row metadata mutation through the existing ledger claim/commit
+   * CAS. This deliberately reuses the five ADR-043 primitives instead of adding
+   * a side-channel persistence API for receipts.
+   */
+  private async mutateQueuedLedgerEntry(
+    threadId: string,
+    userId: string,
+    entryId: string,
+    mutate: (entry: QueueLedgerEntry) => boolean,
+  ): Promise<{ changed: boolean; entry: QueueEntry } | null> {
+    const cached = this.findEntry(threadId, userId, entryId);
+    if (!cached || cached.status !== 'queued') return null;
+    const claimId = randomUUID();
+    const claimedAt = Date.now();
+    const claimed = await this.ledgerStore.claim(threadId, entryId, claimId, claimedAt);
+    if (claimed.outcome !== 'claimed' || !claimed.entries[0]) return null;
+    const replacement = structuredClone(claimed.entries[0]);
+    let changed: boolean;
+    try {
+      changed = mutate(replacement);
+    } catch (error) {
+      await this.ledgerStore.restore(threadId, entryId, claimId);
+      throw error;
+    }
+    const committed = await this.ledgerStore.commit(threadId, entryId, claimId, 'queued', claimedAt, replacement);
+    if (committed.outcome !== 'updated') {
+      await this.ledgerStore.restore(threadId, entryId, claimId);
+      return null;
+    }
+    const [entry] = this.cacheLedgerEntries([committed.entry]);
+    return entry ? { changed, entry } : null;
+  }
+
+  async requestReminderDurable(
+    threadId: string,
+    userId: string,
+    entryId: string,
+    targetCatId: string,
+    invocationId: string,
+    reminderId: string,
+    requestedAt = Date.now(),
+  ): Promise<{ attempt: QueueReminderAttempt; idempotent: boolean } | null> {
+    let attempt: QueueReminderAttempt | undefined;
+    let idempotent = false;
+    const result = await this.mutateQueuedLedgerEntry(threadId, userId, entryId, (row) => {
+      if (!row.targets.includes(targetCatId)) return false;
+      const existing = row.delivery.reminderAttempts?.find(
+        (candidate) => candidate.targetCatId === targetCatId && candidate.invocationId === invocationId,
+      );
+      if (existing) {
+        attempt = structuredClone(existing);
+        idempotent = true;
+        return false;
+      }
+      attempt = {
+        id: reminderId,
+        targetCatId,
+        invocationId,
+        state: 'requested',
+        requestedAt,
+      };
+      row.delivery.reminderAttempts = [...(row.delivery.reminderAttempts ?? []), attempt];
+      return true;
+    });
+    return result && attempt ? { attempt, idempotent } : null;
+  }
+
+  async markProcessingAwakened(
+    threadId: string,
+    userId: string,
+    entryId: string,
+    targetCatId: string,
+    invocationId: string,
+    awakenedAt = Date.now(),
+  ): Promise<boolean> {
+    const admitted = this.findAdmittedEntry(threadId, entryId, targetCatId, userId);
+    if (!admitted) return false;
+    const evidence = this.admittedAttemptEvidence.get(admitted) ?? {};
+    if (evidence.awakenedInvocationId && evidence.awakenedInvocationId !== invocationId) return false;
+    evidence.awakenedInvocationId ??= invocationId;
+    evidence.awakenedAt ??= awakenedAt;
+    this.admittedAttemptEvidence.set(admitted, evidence);
+    return true;
+  }
+
+  async markProcessingSeen(
+    threadId: string,
+    userId: string,
+    entryId: string,
+    targetCatId: string,
+    invocationId: string,
+    seenAt = Date.now(),
+  ): Promise<{ changed: boolean; newlySeen: boolean }> {
+    const admitted = this.findAdmittedEntry(threadId, entryId, targetCatId, userId);
+    if (!admitted) return { changed: false, newlySeen: false };
+    const evidence = this.admittedAttemptEvidence.get(admitted) ?? {};
+    const newlySeen = evidence.seenAt === undefined;
+    const changed = newlySeen || evidence.seenInvocationId !== invocationId;
+    evidence.seenAt ??= seenAt;
+    evidence.seenInvocationId = invocationId;
+    this.admittedAttemptEvidence.set(admitted, evidence);
+    return { changed, newlySeen };
+  }
+
+  /** Claim one exact pending target on its source entry before binding a full-body read to the active child. */
+  async claimExactExposureDurable(
+    threadId: string,
+    userId: string,
+    entryId: string,
+    targetCatId: string,
+    messageId: string,
+  ): Promise<QueueEntry | null> {
+    const entry = this.findEntry(threadId, userId, entryId);
+    if (
+      !entry ||
+      entry.status !== 'queued' ||
+      !entry.targets.includes(targetCatId) ||
+      entry.payload.messageId !== messageId
+    ) {
+      return null;
+    }
+    return this.claimLedgerEntry(entry, targetCatId);
+  }
+
+  /**
+   * Remove the adopted target from durable Queue and retain only process-local
+   * attempt evidence. History already owns the exact source→target dispatch.
+   */
+  async commitClaimedAdoptionDurable(
+    threadId: string,
+    userId: string,
+    entryId: string,
+    targetCatId: string,
+    invocationId: string,
+    seenAt: number,
+  ): Promise<{ entry: QueueEntry; newlySeen: boolean } | null> {
+    const snapshot = this.getEntrySnapshot(threadId, userId, entryId);
+    const claimId = this.ledgerClaimIds.get(entryId);
+    if (!snapshot || snapshot.status !== 'claimed' || !claimId) return null;
+    const durable = await this.ledgerStore.get(threadId, entryId);
+    if (!durable || !durable.targets.includes(targetCatId)) return null;
+    const admitted = await this.ledgerStore.commit(threadId, entryId, claimId, 'processing', seenAt, durable);
+    if (admitted.outcome !== 'updated') return null;
+    this.ledgerClaimIds.delete(entryId);
+    this.removeCachedEntry(threadId, entryId);
+    const remaining = await this.ledgerStore.get(threadId, entryId);
+    if (remaining) this.cacheLedgerEntries([remaining]);
+    return { entry: admitted.entry, newlySeen: true };
+  }
+
+  async claimPreAdmissionFailureAcrossUsersDurable(threadId: string, entryId: string): Promise<QueueEntry | null> {
+    const best = this.peekOldestAcrossUsers(threadId);
+    if (!best || best.id !== entryId) return null;
+    return this.claimLedgerEntry(best);
+  }
+
+  /** Durable counterpart of markProcessingAcrossUsers. */
+  async markProcessingDurable(
+    threadId: string,
+    userId: string,
+    resolvedHead: { readonly entryId: string; readonly targetCats: readonly string[] },
+  ): Promise<QueueEntry | null> {
+    const best = this.peekNextQueued(threadId, userId);
+    if (
+      !best ||
+      best.id !== resolvedHead.entryId ||
+      resolvedHead.targetCats.length === 0 ||
+      resolvedHead.targetCats.some((catId) => typeof catId !== 'string' || !catId) ||
+      new Set(resolvedHead.targetCats).size !== resolvedHead.targetCats.length
+    ) {
+      return null;
+    }
+    const selectedTargetCatId = resolvedHead.targetCats[0]!;
+    if (best.targets.length > 0 && !best.targets.includes(selectedTargetCatId)) return null;
+    return this.claimLedgerEntry(best, selectedTargetCatId);
+  }
+
+  /** Durable counterpart of markProcessingAcrossUsers. */
+  async markProcessingAcrossUsersDurable(
+    threadId: string,
+    resolvedHead: { readonly entryId: string; readonly targetCats: readonly string[] },
+  ): Promise<QueueEntry | null> {
+    const best = this.peekOldestAcrossUsers(threadId);
+    if (
+      !best ||
+      best.id !== resolvedHead.entryId ||
+      resolvedHead.targetCats.length === 0 ||
+      resolvedHead.targetCats.some((catId) => typeof catId !== 'string' || !catId) ||
+      new Set(resolvedHead.targetCats).size !== resolvedHead.targetCats.length
+    ) {
+      return null;
+    }
+    const selectedTargetCatId = resolvedHead.targetCats[0]!;
+    if (best.targets.length > 0 && !best.targets.includes(selectedTargetCatId)) return null;
+    return this.claimLedgerEntry(best, selectedTargetCatId);
+  }
+
+  async markProcessingGroupAcrossUsersDurable(
+    threadId: string,
+    resolvedHead: { readonly entryId: string; readonly targetCats: readonly string[] },
+    entryIds: readonly string[],
+  ): Promise<{ entry: QueueEntry; members: QueueEntry[] } | null> {
+    const best = this.peekOldestAcrossUsers(threadId);
+    if (
+      !best ||
+      best.id !== resolvedHead.entryId ||
+      entryIds[0] !== best.id ||
+      entryIds.length === 0 ||
+      new Set(entryIds).size !== entryIds.length ||
+      resolvedHead.targetCats.length !== 1
+    ) {
+      return null;
+    }
+    const selectedTargetCatId = resolvedHead.targetCats[0]!;
+    const selected = entryIds.map((entryId) => this.findEntryAcrossUsers(threadId, entryId));
+    if (
+      selected.some(
+        (entry) =>
+          !entry ||
+          entry.status !== 'queued' ||
+          queueEntryOwnerId(entry) !== queueEntryOwnerId(best) ||
+          (entry.targets.length > 0 && !entry.targets.includes(selectedTargetCatId)),
+      )
+    ) {
+      return null;
+    }
+    const claimId = randomUUID();
+    const claimedAt = Date.now();
+    const claimed = await this.ledgerStore.claimPrefix(threadId, entryIds, claimId, claimedAt, selectedTargetCatId);
+    if (claimed.outcome !== 'claimed') return null;
+    const projected = this.cacheLedgerClaim(claimed.entries, claimId);
+    const byId = new Map(projected.map((entry) => [entry.id, entry]));
+    const primary = byId.get(best.id);
+    if (!primary) return null;
+    return {
+      entry: primary,
+      members: entryIds
+        .slice(1)
+        .map((entryId) => byId.get(entryId))
+        .filter((entry): entry is QueueEntry => !!entry),
+    };
+  }
+
+  async markProcessingGroupDurable(
+    threadId: string,
+    userId: string,
+    resolvedHead: { readonly entryId: string; readonly targetCats: readonly string[] },
+    entryIds: readonly string[],
+  ): Promise<{ entry: QueueEntry; members: QueueEntry[] } | null> {
+    const best = this.peekNextQueued(threadId, userId);
+    if (
+      !best ||
+      best.id !== resolvedHead.entryId ||
+      entryIds[0] !== best.id ||
+      entryIds.length === 0 ||
+      new Set(entryIds).size !== entryIds.length ||
+      resolvedHead.targetCats.length !== 1
+    ) {
+      return null;
+    }
+    const selectedTargetCatId = resolvedHead.targetCats[0]!;
+    const selected = entryIds.map((entryId) => this.findEntry(threadId, userId, entryId));
+    if (
+      selected.some(
+        (entry) =>
+          !entry ||
+          entry.status !== 'queued' ||
+          (entry.targets.length > 0 && !entry.targets.includes(selectedTargetCatId)),
+      )
+    ) {
+      return null;
+    }
+    const claimId = randomUUID();
+    const claimedAt = Date.now();
+    const claimed = await this.ledgerStore.claimPrefix(threadId, entryIds, claimId, claimedAt, selectedTargetCatId);
+    if (claimed.outcome !== 'claimed') return null;
+    const projected = this.cacheLedgerClaim(claimed.entries, claimId);
+    const byId = new Map(projected.map((entry) => [entry.id, entry]));
+    const primary = byId.get(best.id);
+    if (!primary) return null;
+    return {
+      entry: primary,
+      members: entryIds
+        .slice(1)
+        .map((entryId) => byId.get(entryId))
+        .filter((entry): entry is QueueEntry => !!entry),
+    };
+  }
+
+  async markProcessingByIdDurable(threadId: string, entryId: string, targetCatId: string): Promise<QueueEntry | null> {
+    const entry = this.findEntryAcrossUsers(threadId, entryId);
+    if (!entry || entry.status !== 'queued') return null;
+    if (entry.targets.length > 0 && !entry.targets.includes(targetCatId)) return null;
+    return this.claimLedgerEntry(entry, targetCatId);
+  }
+
+  async commitClaimedProcessing(threadId: string, entryIds: readonly string[], at = Date.now()): Promise<boolean> {
+    for (const entryId of entryIds) {
+      const claimId = this.ledgerClaimIds.get(entryId);
+      if (!claimId) continue;
+      const cached = this.findEntryAcrossUsers(threadId, entryId);
+      const committed = await this.ledgerStore.commit(threadId, entryId, claimId, 'processing', at, cached);
+      if (committed.outcome !== 'updated') return false;
+      this.ledgerClaimIds.delete(entryId);
+      this.removeCachedEntry(threadId, entryId);
+      const remaining = await this.ledgerStore.get(threadId, entryId);
+      if (remaining) this.cacheLedgerEntries([remaining]);
+      this.rememberAdmittedEntry(committed.entry);
+    }
+    return true;
+  }
+
+  async rollbackProcessingDurable(threadId: string, entryId: string): Promise<boolean> {
+    const claimId = this.ledgerClaimIds.get(entryId);
+    if (!claimId) return false;
+    const restored = await this.ledgerStore.restore(threadId, entryId, claimId);
+    if (restored.outcome !== 'updated') return false;
+    this.ledgerClaimIds.delete(entryId);
+    this.cacheLedgerEntries([restored.entry]);
+    return true;
+  }
+
+  private removeCachedEntry(threadId: string, entryId: string): QueueEntry | null {
+    for (const queue of this.queues.values()) {
+      if (!this.queueMatchesThread(queue, threadId)) continue;
+      const index = queue.findIndex((entry) => entry.id === entryId);
+      if (index < 0) continue;
+      return queue.splice(index, 1)[0] ?? null;
+    }
+    return null;
+  }
+
+  async removeProcessedAcrossUsersDurable(
+    threadId: string,
+    entryId: string,
+    terminalOutcome: QueueAttemptSettlementOutcome = 'handled',
+    failureReason?: QueueTargetAttemptTerminalReason,
+    terminalAt = Date.now(),
+  ): Promise<QueueEntry | null> {
+    const admitted = this.forgetAdmittedEntry(threadId, entryId);
+    if (admitted) return admitted;
+    const snapshot = this.findEntryAcrossUsers(threadId, entryId);
+    if (!snapshot || snapshot.status !== 'claimed') return null;
+    const claimId = this.ledgerClaimIds.get(entryId);
+    if (!claimId) return null;
+    const committed = await this.ledgerStore.commit(threadId, entryId, claimId, 'withdrawn', terminalAt);
+    if (committed.outcome !== 'updated') return null;
+    this.ledgerClaimIds.delete(entryId);
+    return this.removeCachedEntry(threadId, entryId);
+  }
+
+  async removeProcessedDurable(threadId: string, userId: string, entryId: string): Promise<QueueEntry | null> {
+    const snapshot =
+      this.getEntrySnapshot(threadId, userId, entryId) ?? this.findAdmittedEntry(threadId, entryId, undefined, userId);
+    if (!snapshot) return null;
+    return this.removeProcessedAcrossUsersDurable(threadId, entryId);
+  }
+
+  /** Terminalize one exact row without manufacturing a rollback path. */
+  async terminalizeEntryDurable(
+    threadId: string,
+    userId: string,
+    entryId: string,
+    terminalOutcome: QueueAttemptSettlementOutcome = 'handled',
+    failureReason?: QueueTargetAttemptTerminalReason,
+  ): Promise<QueueEntry | null> {
+    const snapshot = this.getEntrySnapshot(threadId, userId, entryId);
+    if (!snapshot) return null;
+    if (snapshot.status === 'queued') {
+      const claimed = await this.claimQueuedEntryForWithdrawal(threadId, userId, entryId);
+      if (!claimed) return null;
+      if (!(await this.commitClaimedProcessing(threadId, [entryId]))) {
+        await this.restoreClaimedEntries(threadId, [entryId]);
+        return null;
+      }
+      return this.removeProcessedAcrossUsersDurable(threadId, entryId, terminalOutcome, failureReason);
+    }
+    // A reversible claim is projected as processing for legacy readers. Do not
+    // steal another action's in-flight authority.
+    if (this.ledgerClaimIds.has(entryId)) return null;
+    return this.removeProcessedAcrossUsersDurable(threadId, entryId, terminalOutcome, failureReason);
+  }
+
+  async getDurableEntry(threadId: string, entryId: string): Promise<QueueLedgerEntry | null> {
+    return this.ledgerStore.get(threadId, entryId);
+  }
+
+  async getDurableEntriesForMessages(
+    threadId: string,
+    messageIds: readonly string[],
+  ): Promise<Map<string, QueueLedgerEntry[]>> {
+    return this.ledgerStore.getByMessageIds(threadId, messageIds);
+  }
+
+  /** Read every durable pending entry for recovery classification. */
+  async listAllDurable(threadId: string): Promise<QueueLedgerEntry[]> {
+    return this.ledgerStore.list(threadId);
   }
 
   /** Check if any entry in the thread already carries this messageId (connector retry dedup). */
@@ -454,109 +1384,28 @@ export class InvocationQueue {
   findEntryWithMessageId(threadId: string, messageId: string): QueueEntry | null {
     for (const q of this.queues.values()) {
       if (!this.queueMatchesThread(q, threadId)) continue;
-      const entry = q.find((e) => e.messageId === messageId || e.mergedMessageIds?.includes(messageId));
-      if (entry) return { ...entry };
+      const entry = q.find((e) => e.payload.messageId === messageId);
+      if (entry) return structuredClone(entry);
     }
     return null;
   }
 
   /** Backfill messageId on a new entry (null → value). */
-  backfillMessageId(threadId: string, userId: string, entryId: string, messageId: string): void {
-    const e = this.findEntry(threadId, userId, entryId);
-    if (!e) return;
-    if (!e.messageId) {
-      e.messageId = messageId;
-      return;
-    }
-    if (e.messageId !== messageId && !e.mergedMessageIds.includes(messageId)) {
-      e.mergedMessageIds.push(messageId);
-    }
-  }
-
-  /** Rollback an enqueued entry — remove entirely. */
-  rollbackEnqueue(threadId: string, userId: string, entryId: string): void {
-    this.remove(threadId, userId, entryId);
-    this.originalContents.delete(entryId);
-  }
-
-  /**
-   * Publish every carrier in one custody admission after its full durable CAS.
-   * Validation is complete before the first mutation, so ordinary selectors see
-   * either the fenced group or the committed group, never a partially released set.
-   * A duplicate recovery may observe the whole group already committed; that exact
-   * all-unfenced state is an idempotent success, while mixed/foreign fences fail.
-   */
-  commitQueueCustodyAdmission(
-    threadId: string,
-    userId: string,
-    admissionId: string,
-    entryIds: readonly string[],
-  ): boolean {
-    const distinctEntryIds = [...new Set(entryIds)];
-    if (!admissionId || distinctEntryIds.length !== entryIds.length) return false;
-    const q = this.queues.get(this.scopeKey(threadId, userId));
-    if (!q) return false;
-    const byId = new Map(q.map((entry) => [entry.id, entry]));
-    const entries = distinctEntryIds.map((entryId) => byId.get(entryId));
-    if (entries.some((entry) => !entry || entry.status !== 'queued')) {
-      return false;
-    }
-    const alreadyCommitted = entries.every((entry) => entry?.queueCustodyAdmissionId === undefined);
-    const ownsAdmission = entries.every((entry) => entry?.queueCustodyAdmissionId === admissionId);
-    if (!alreadyCommitted && !ownsAdmission) return false;
-    for (const entry of entries as QueueEntry[]) delete entry.queueCustodyAdmissionId;
-    return true;
-  }
-
-  /** Remove and return the first entry (FIFO). */
-  dequeue(threadId: string, userId: string): QueueEntry | null {
-    const q = this.queues.get(this.scopeKey(threadId, userId));
-    if (!q || q.length === 0) return null;
-    return q.shift()!;
-  }
-
-  /** Look at the first entry without removing. */
-  peek(threadId: string, userId: string): QueueEntry | null {
-    const q = this.queues.get(this.scopeKey(threadId, userId));
-    return q?.[0] ?? null;
-  }
-
-  /** Remove a specific entry by id. Returns null if not found. */
-  remove(threadId: string, userId: string, entryId: string): QueueEntry | null {
-    let q = this.queues.get(this.scopeKey(threadId, userId));
-    if (!q) return null;
-    let idx = q.findIndex((e) => e.id === entryId);
-    if (idx === -1) return null;
-    const batch = q[idx]?.exactSteerBatch;
-    if (batch) {
-      this.releaseExactUserBatch(threadId, userId, batch.reservationId);
-      q = this.queues.get(this.scopeKey(threadId, userId));
-      if (!q) return null;
-      idx = q.findIndex((entry) => entry.id === entryId);
-      if (idx === -1) return null;
-    }
-    this.originalContents.delete(entryId);
-
-    return q.splice(idx, 1)[0] ?? null;
-  }
-
-  /** Retire every process-local carrier for one persisted action fence. */
-  retireActionSuccessorFence(fence: ActionSuccessorFence): ActionSuccessorQueueRetirement[] {
+  async retireActionSuccessorFenceDurable(fence: ActionSuccessorFence): Promise<ActionSuccessorQueueRetirement[]> {
     const retired: ActionSuccessorQueueRetirement[] = [];
-    for (const [scope, queue] of this.queues) {
-      for (let index = queue.length - 1; index >= 0; index -= 1) {
-        const entry = queue[index];
-        if (!entry || !actionSuccessorFencesMatch(entry.actionSuccessorFence, fence)) continue;
-        queue.splice(index, 1);
-        this.originalContents.delete(entry.id);
+    const matches = [...this.queues.values()]
+      .flat()
+      .filter((entry) => actionSuccessorFencesMatch(entry.execution.actionSuccessorFence, fence));
+    for (const entry of matches) {
+      const ownerId = queueEntryOwnerId(entry);
+      if (await this.terminalizeEntryDurable(entry.threadId, ownerId, entry.id)) {
         retired.push({
           entryId: entry.id,
           threadId: entry.threadId,
-          userId: entry.userId,
+          userId: ownerId,
           messageIds: exactA2ASourceMessageIds(entry),
         });
       }
-      if (queue.length === 0) this.queues.delete(scope);
     }
     return retired;
   }
@@ -566,11 +1415,11 @@ export class InvocationQueue {
     const matches: ActionSuccessorQueueRetirement[] = [];
     for (const queue of this.queues.values()) {
       for (const entry of queue) {
-        if (!actionSuccessorFencesMatch(entry.actionSuccessorFence, fence)) continue;
+        if (!actionSuccessorFencesMatch(entry.execution.actionSuccessorFence, fence)) continue;
         matches.push({
           entryId: entry.id,
           threadId: entry.threadId,
-          userId: entry.userId,
+          userId: queueEntryOwnerId(entry),
           messageIds: exactA2ASourceMessageIds(entry),
         });
       }
@@ -582,79 +1431,64 @@ export class InvocationQueue {
   list(threadId: string, userId: string): QueueEntry[] {
     const q = this.queues.get(this.scopeKey(threadId, userId));
     if (!q) return [];
-    return [...q].sort(InvocationQueue.compareEntries);
+    return [...q].sort(InvocationQueue.compareEntries).map((entry) => structuredClone(entry));
   }
 
-  /** Stable deep snapshot for persistence/rollback boundaries. */
-  getEntrySnapshot(threadId: string, userId: string, entryId: string): QueueEntry | null {
-    const entry = this.findEntry(threadId, userId, entryId);
-    return entry ? InvocationQueue.cloneEntry(entry) : null;
-  }
-
-  /** Resolve a durable carrier by its globally unique entry id without trusting a source-thread projection. */
-  getEntrySnapshotForUserById(userId: string, entryId: string): QueueEntry | null {
-    for (const q of this.queues.values()) {
-      const entry = q.find((candidate) => candidate.id === entryId && candidate.userId === userId);
-      if (entry) return InvocationQueue.cloneEntry(entry);
+  /** Canonical hydrated scopes used to resume pending ledger work after startup. */
+  listScopes(): Array<{ threadId: string; userId: string }> {
+    const scopes: Array<{ threadId: string; userId: string }> = [];
+    for (const queue of this.queues.values()) {
+      const first = queue[0];
+      if (first) scopes.push({ threadId: first.threadId, userId: queueEntryOwnerId(first) });
     }
-    return null;
+    return scopes;
+  }
+
+  /** Exact process-local Queue snapshot fence used by explicit row actions. */
+  snapshotRevision(threadId: string, userId: string): string {
+    return createHash('sha256')
+      .update(JSON.stringify(this.list(threadId, userId)))
+      .digest('base64url');
   }
 
   /**
-   * Restore a pre-mutation snapshot only while the exact post-mutation state is
-   * still current. This CAS boundary prevents a failed durable side effect from
-   * rolling back a later concurrent Queue update.
+   * Claim one selected public row without borrowing ordinary head-dequeue
+   * semantics. Revision and the complete target set are checked in the same
+   * synchronous mutation that crosses queued -> processing.
    */
-  restoreEntrySnapshotIfUnchanged(expectedCurrent: QueueEntry, replacement: QueueEntry): boolean {
+  async claimExactAppend(
+    threadId: string,
+    userId: string,
+    entryId: string,
+    expectedQueueRevision: string,
+    expectedTargetIds: readonly string[],
+  ): Promise<QueueEntry | null> {
+    if (this.snapshotRevision(threadId, userId) !== expectedQueueRevision) return null;
+    const entry = this.findEntry(threadId, userId, entryId);
     if (
-      expectedCurrent.id !== replacement.id ||
-      expectedCurrent.threadId !== replacement.threadId ||
-      expectedCurrent.userId !== replacement.userId
+      !entry ||
+      entry.status !== 'queued' ||
+      entry.kind === 'private_input' ||
+      isSystemPinnedQueueEntry(entry) ||
+      expectedTargetIds.length === 0 ||
+      expectedTargetIds.length !== queueEntryTargetCats(entry).length ||
+      expectedTargetIds.some((targetId, index) => targetId !== queueEntryTargetCats(entry)[index]) ||
+      expectedTargetIds.some((targetId) => !isOrdinaryQueueTargetEligible(entry, targetId))
     ) {
-      throw new Error('Queue snapshot restore identity mismatch');
+      return null;
     }
-    const q = this.queues.get(this.scopeKey(expectedCurrent.threadId, expectedCurrent.userId));
-    const index = q?.findIndex((entry) => entry.id === expectedCurrent.id) ?? -1;
-    if (!q || index < 0) return false;
-    const current = q[index];
-    if (JSON.stringify(current) !== JSON.stringify(expectedCurrent)) return false;
-    q[index] = InvocationQueue.cloneEntry(replacement);
-    return true;
+    return this.claimLedgerEntry(entry);
   }
 
-  /** Remove one exact Queue snapshot while it is still current. */
-  removeEntrySnapshotIfUnchanged(expectedCurrent: QueueEntry): boolean {
-    const q = this.queues.get(this.scopeKey(expectedCurrent.threadId, expectedCurrent.userId));
-    const index = q?.findIndex((entry) => entry.id === expectedCurrent.id) ?? -1;
-    if (!q || index < 0) return false;
-    const current = q[index];
-    if (JSON.stringify(current) !== JSON.stringify(expectedCurrent)) return false;
-    q.splice(index, 1);
-    this.originalContents.delete(expectedCurrent.id);
-    return true;
+  /** Persist the exact Active Run body exposure before the Queue row is detached. */
+  getEntrySnapshot(threadId: string, userId: string, entryId: string): QueueEntry | null {
+    const entry = this.findEntry(threadId, userId, entryId);
+    return entry ? structuredClone(entry) : null;
   }
+
+  /** Resolve a durable carrier by its globally unique entry id without trusting a source-thread projection. */
 
   /** Restore one exact TTL-0 Queue owner after process restart or failed persistence. Idempotent by entryId. */
-  restoreDurableEntry(entry: QueueEntry, options?: { beforeEntryId?: string }): 'restored' | 'existing' {
-    for (const q of this.queues.values()) {
-      const existing = q.find((candidate) => candidate.id === entry.id);
-      if (!existing) continue;
-      if (existing.threadId !== entry.threadId || existing.userId !== entry.userId) {
-        throw new Error(`durable Queue entry identity collision: ${entry.id}`);
-      }
-      return 'existing';
-    }
-    const restored = InvocationQueue.cloneEntry(entry);
-    const queue = this.getOrCreate(this.scopeKey(entry.threadId, entry.userId));
-    const beforeIndex = options?.beforeEntryId
-      ? queue.findIndex((candidate) => candidate.id === options.beforeEntryId)
-      : -1;
-    queue.splice(beforeIndex >= 0 ? beforeIndex : queue.length, 0, restored);
-    this.originalContents.set(entry.id, entry.content);
-    return 'restored';
-  }
-
-  /** F254 D1.1: queued freshness input scoped to the cat that would process it. */
   getQueuedFreshnessMessagesForCat(
     threadId: string,
     userId: string,
@@ -662,30 +1496,25 @@ export class InvocationQueue {
     opts?: { excludeEntryId?: string; parentInvocationId?: string },
   ): Array<{
     entryId: string;
-    source: string;
+    from: MessageFrom;
     content: string;
-    callerCatId?: string;
     messageId?: string | null;
-    mergedMessageIds?: string[];
     sourceCategory?: QueueEntry['sourceCategory'];
   }> {
     return this.list(threadId, userId)
       .filter((entry) => entry.id !== opts?.excludeEntryId)
-      .filter((entry) => entry.status === 'queued' && entry.targetCats.includes(catId))
+      .filter((entry) => entry.status === 'queued' && isOrdinaryQueueTargetEligible(entry, catId))
       .filter((entry) => InvocationQueue.canExposeToCurrentParent(entry, catId, opts?.parentInvocationId))
-      .filter((entry) => !entry.queuedSeenByCatIds?.includes(catId))
       .map((entry) => ({
         entryId: entry.id,
-        source: entry.source,
-        content: entry.content,
-        ...(entry.callerCatId ? { callerCatId: entry.callerCatId } : {}),
-        ...(entry.messageId !== undefined ? { messageId: entry.messageId } : {}),
-        ...(entry.mergedMessageIds.length > 0 ? { mergedMessageIds: [...entry.mergedMessageIds] } : {}),
+        from: structuredClone(entry.from),
+        content: entry.payload.content,
+        ...(entry.payload.messageId !== undefined ? { messageId: entry.payload.messageId } : {}),
         ...(entry.sourceCategory ? { sourceCategory: entry.sourceCategory } : {}),
       }));
   }
 
-  /** F254 D1.2a: queued bodies readable by a target cat. Seen suppresses nags, not body access. */
+  /** Queued bodies readable by a target cat until one exact active child adopts them. */
   getQueuedBodyMessagesForCat(
     threadId: string,
     userId: string,
@@ -693,35 +1522,38 @@ export class InvocationQueue {
     parentInvocationId?: string,
   ): Array<{
     entryId: string;
-    source: string;
+    from: MessageFrom;
     content: string;
-    callerCatId?: string;
     messageId?: string | null;
-    mergedMessageIds?: string[];
+    alreadyExposed: boolean;
+    readDisposition: 'adopt' | 'seen_only';
   }> {
     return this.list(threadId, userId)
-      .filter((entry) => entry.status === 'queued' && entry.targetCats.includes(catId))
+      .filter((entry) => entry.status === 'queued' && isOrdinaryQueueTargetEligible(entry, catId))
       .filter((entry) => InvocationQueue.canExposeToCurrentParent(entry, catId, parentInvocationId))
       .map((entry) => ({
         entryId: entry.id,
-        source: entry.source,
-        content: entry.content,
-        ...(entry.callerCatId ? { callerCatId: entry.callerCatId } : {}),
-        ...(entry.messageId !== undefined ? { messageId: entry.messageId } : {}),
-        ...(entry.mergedMessageIds.length > 0 ? { mergedMessageIds: [...entry.mergedMessageIds] } : {}),
+        from: structuredClone(entry.from),
+        content: entry.payload.content,
+        alreadyExposed: false,
+        // A full-body read is actual delivery. Structured successor/hold truth
+        // moves to its own store after adoption; Queue must not retain the
+        // target merely to mirror that later lifecycle.
+        readDisposition: entry.payload.messageId !== undefined ? 'adopt' : 'seen_only',
+        ...(entry.payload.messageId !== undefined ? { messageId: entry.payload.messageId } : {}),
       }));
   }
 
   private static canExposeToCurrentParent(
-    entry: Pick<QueueEntry, 'source' | 'authorIntentByCatId'>,
+    entry: Pick<QueueEntry, 'from' | 'delivery'>,
     catId: string,
     parentInvocationId: string | undefined,
   ): boolean {
     // Author disposition belongs only to human-authored work. Agent and connector
     // carriers retain their typed custody/continuation path and may be read at a
     // current safe boundary without manufacturing a human queue preference.
-    if (entry.source !== 'user') return true;
-    const authorIntent = entry.authorIntentByCatId?.[catId];
+    if (entry.from.kind !== 'user') return true;
+    const authorIntent = entry.delivery.authorIntentByTarget?.[catId];
     return Boolean(
       parentInvocationId &&
         authorIntent?.requested === 'continue_current' &&
@@ -730,1095 +1562,32 @@ export class InvocationQueue {
     );
   }
 
-  /**
-   * Close every still-pending exposure window bound to one terminal parent.
-   * The immutable request/fence remain; only an append-only fallback fact is added.
-   */
-  fallbackAuthorIntentsForParentAcrossUsers(
-    threadId: string,
-    catId: string,
-    parentInvocationId: string,
-    fallbackAt = Date.now(),
-  ): Array<{ entryId: string; userId: string }> {
-    const changed: Array<{ entryId: string; userId: string }> = [];
-    for (const q of this.queues.values()) {
-      if (!this.queueMatchesThread(q, threadId)) continue;
-      for (const entry of q) {
-        if (entry.status !== 'queued' || !entry.targetCats.includes(catId)) continue;
-        const authorIntent = entry.authorIntentByCatId?.[catId];
-        if (
-          authorIntent?.requested !== 'continue_current' ||
-          authorIntent.boundParentInvocationId !== parentInvocationId ||
-          authorIntent.fallbackAt !== undefined
-        ) {
-          continue;
-        }
-        const hadExposure = (entry.queuedBodyExposures ?? []).some((exposure) => exposure.targetCatId === catId);
-        entry.authorIntentByCatId = {
-          ...(entry.authorIntentByCatId ?? {}),
-          [catId]: {
-            ...authorIntent,
-            fallbackAt,
-            fallbackReason: hadExposure ? 'parent_non_success_after_exposure' : 'parent_terminal_before_exposure',
-          },
-        };
-        changed.push({ entryId: entry.id, userId: entry.userId });
-      }
-    }
-    return changed;
-  }
-
-  /** Record that a best-effort freshness notice reached this target's current invocation. */
-  markQueuedNotified(threadId: string, userId: string, entryId: string, catId: string): boolean {
-    const entry = this.findEntry(threadId, userId, entryId);
-    if (!entry || entry.status !== 'queued' || !isOrdinaryQueueTargetEligible(entry, catId)) return false;
-    if (entry.queuedSeenByCatIds?.includes(catId)) return false;
-    const notified = new Set(entry.queuedNotifiedByCatIds ?? []);
-    const alreadyNotified = notified.has(catId);
-    notified.add(catId);
-    entry.queuedNotifiedByCatIds = [...notified];
-    return !alreadyNotified;
-  }
-
-  markSteering(threadId: string, userId: string, entryId: string, catId: string): boolean {
-    const entry = this.findEntry(threadId, userId, entryId);
-    if (!entry || entry.status !== 'queued' || !isOrdinaryQueueTargetEligible(entry, catId)) return false;
-    const requested = new Set(entry.steerRequestedByCatIds ?? []);
-    const changed = !requested.has(catId);
-    requested.add(catId);
-    entry.steerRequestedByCatIds = [...requested];
-    return changed;
-  }
-
-  clearSteering(threadId: string, userId: string, entryId: string, catId: string): boolean {
-    const entry = this.findEntry(threadId, userId, entryId);
-    if (!entry) return false;
-    const hadRequested = entry.steerRequestedByCatIds?.includes(catId) ?? false;
-    const hadInvocation = !!entry.steeredInvocationIdByCatId?.[catId];
-    entry.steerRequestedByCatIds = entry.steerRequestedByCatIds?.filter((candidate) => candidate !== catId);
-    if (entry.steerRequestedByCatIds?.length === 0) entry.steerRequestedByCatIds = undefined;
-    if (entry.steeredInvocationIdByCatId) {
-      delete entry.steeredInvocationIdByCatId[catId];
-      if (Object.keys(entry.steeredInvocationIdByCatId).length === 0) {
-        entry.steeredInvocationIdByCatId = undefined;
-      }
-    }
-    return hadRequested || hadInvocation;
-  }
-
-  /**
-   * Bind the exact provider child as soon as it exists, before the queued body
-   * is exposed. This preserves "woke" independently from "read".
-   */
-  markQueuedAwakened(
-    threadId: string,
-    userId: string,
-    entryId: string,
-    catId: string,
-    invocationId: string,
-    awakenedAt = Date.now(),
-  ): boolean {
-    const entry = this.findEntry(threadId, userId, entryId);
-    if (!entry || !isOrdinaryQueueTargetEligible(entry, catId)) return false;
-    const existingInvocationId = entry.queuedAwakenedInvocationIdByCatId?.[catId];
-    const existingAwakenedAt = entry.queuedAwakenedAtByCatId?.[catId];
-    if (existingInvocationId === invocationId) {
-      if (existingAwakenedAt !== undefined && existingAwakenedAt !== awakenedAt) {
-        throw new Error('queued awakened timestamp is immutable');
-      }
-      return false;
-    }
-    entry.queuedAwakenedInvocationIdByCatId = {
-      ...(entry.queuedAwakenedInvocationIdByCatId ?? {}),
-      [catId]: invocationId,
-    };
-    entry.queuedAwakenedAtByCatId = {
-      ...(entry.queuedAwakenedAtByCatId ?? {}),
-      [catId]: awakenedAt,
-    };
-    entry.queuedNotifiedByCatIds = entry.queuedNotifiedByCatIds?.filter((candidate) => candidate !== catId);
-    if (entry.queuedNotifiedByCatIds?.length === 0) entry.queuedNotifiedByCatIds = undefined;
-    return true;
-  }
-
-  /**
-   * F254 D1.2a: mark a queued entry as seen by one target cat.
-   * Does not consume or deliver the entry.
-   *
-   * Returns whether this call created the first queued_seen state transition for
-   * this cat. Invocation evidence is still refreshed on repeat reads so retry
-   * attempts can close handled evidence without double-counting queued_seen.
-   */
-  markQueuedSeen(
-    threadId: string,
-    userId: string,
-    entryId: string,
-    catId: string,
-    invocationId?: string,
-    seenAt = Date.now(),
-  ): boolean {
-    const entry = this.findEntry(threadId, userId, entryId);
-    if (!entry || entry.status !== 'queued' || !isOrdinaryQueueTargetEligible(entry, catId)) return false;
-    const seen = new Set(entry.queuedSeenByCatIds ?? []);
-    const alreadySeen = seen.has(catId);
-    seen.add(catId);
-    entry.queuedSeenByCatIds = [...seen];
-    entry.queuedNotifiedByCatIds = entry.queuedNotifiedByCatIds?.filter((candidate) => candidate !== catId);
-    if (entry.queuedNotifiedByCatIds?.length === 0) entry.queuedNotifiedByCatIds = undefined;
-    if (invocationId) {
-      entry.queuedSeenInvocationIdByCatId = { ...(entry.queuedSeenInvocationIdByCatId ?? {}), [catId]: invocationId };
-      if (
-        !(entry.queuedBodyExposures ?? []).some(
-          (exposure) => exposure.targetCatId === catId && exposure.invocationId === invocationId,
-        )
-      ) {
-        entry.queuedBodyExposures = [
-          ...(entry.queuedBodyExposures ?? []),
-          { targetCatId: catId, invocationId, seenAt },
-        ];
-      }
-    }
-    return !alreadySeen;
-  }
-
-  /**
-   * Record the exact Queue bodies supplied as the current invocation prompt.
-   * Processing entries are no longer discoverable through get_thread_context,
-   * so their read evidence must be bound at the provider launch boundary.
-   */
-  markProcessingSeen(
-    threadId: string,
-    userId: string,
-    entryId: string,
-    catIds: readonly string[],
-    invocationId: string,
-    seenAt = Date.now(),
-  ): string[] {
-    const entry = this.findEntry(threadId, userId, entryId);
-    if (!entry || entry.status !== 'processing') return [];
-    const seen = new Set(entry.queuedSeenByCatIds ?? []);
-    const notified = new Set(entry.queuedNotifiedByCatIds ?? []);
-    const failed = new Set(entry.queuedFailedByCatIds ?? []);
-    const marked: string[] = [];
-    for (const catId of catIds) {
-      if (!isOrdinaryQueueTargetEligible(entry, catId)) continue;
-      seen.add(catId);
-      notified.delete(catId);
-      entry.queuedSeenInvocationIdByCatId = {
-        ...(entry.queuedSeenInvocationIdByCatId ?? {}),
-        [catId]: invocationId,
-      };
-      if (
-        !(entry.queuedBodyExposures ?? []).some(
-          (exposure) => exposure.targetCatId === catId && exposure.invocationId === invocationId,
-        )
-      ) {
-        entry.queuedBodyExposures = [
-          ...(entry.queuedBodyExposures ?? []),
-          { targetCatId: catId, invocationId, seenAt },
-        ];
-      }
-      if (entry.steerRequestedByCatIds?.includes(catId)) {
-        entry.steerRequestedByCatIds = entry.steerRequestedByCatIds.filter((candidate) => candidate !== catId);
-        if (entry.steerRequestedByCatIds.length === 0) entry.steerRequestedByCatIds = undefined;
-        entry.steeredInvocationIdByCatId = {
-          ...(entry.steeredInvocationIdByCatId ?? {}),
-          [catId]: invocationId,
-        };
-      }
-      marked.push(catId);
-    }
-    if (marked.length === 0) return [];
-    entry.queuedSeenByCatIds = [...seen];
-    entry.queuedNotifiedByCatIds = notified.size > 0 ? [...notified] : undefined;
-    entry.queuedFailedByCatIds = failed.size > 0 ? [...failed] : undefined;
-    return marked;
-  }
-
-  /** Mark exact read evidence as failed and return the responsibility to queued state. */
-  markQueuedFailedForCatAcrossUsers(
-    threadId: string,
-    catId: string,
-    invocationId: string,
-    attemptedEntryIds: ReadonlySet<string> = new Set(),
-    terminalReason: QueueTargetAttemptTerminalReason = 'invocation_failed',
-    failedAt = Date.now(),
-  ): Array<{ entryId: string; userId: string }> {
-    const failed: Array<{ entryId: string; userId: string }> = [];
-    for (const q of this.queues.values()) {
-      if (!this.queueMatchesThread(q, threadId)) continue;
-      for (const entry of q) {
-        if (
-          entry.status !== 'queued' ||
-          !entry.targetCats.includes(catId) ||
-          (entry.queuedSeenInvocationIdByCatId?.[catId] !== invocationId && !attemptedEntryIds.has(entry.id))
-        ) {
-          continue;
-        }
-        const failedCats = new Set(entry.queuedFailedByCatIds ?? []);
-        failedCats.add(catId);
-        entry.queuedFailedByCatIds = [...failedCats];
-        entry.queuedFailureAtByCatId = { ...(entry.queuedFailureAtByCatId ?? {}), [catId]: failedAt };
-        entry.queuedFailureReasonByCatId = {
-          ...(entry.queuedFailureReasonByCatId ?? {}),
-          [catId]: terminalReason,
-        };
-        if (entry.queuedSeenInvocationIdByCatId?.[catId] === invocationId) {
-          delete entry.queuedSeenInvocationIdByCatId[catId];
-          if (Object.keys(entry.queuedSeenInvocationIdByCatId).length === 0) {
-            entry.queuedSeenInvocationIdByCatId = undefined;
-          }
-        }
-        this.clearSteering(entry.threadId, entry.userId, entry.id, catId);
-        failed.push({ entryId: entry.id, userId: entry.userId });
-      }
-    }
-    return failed;
-  }
-
-  /**
-   * Re-open exactly one failed target of an existing Queue entry. The message,
-   * entry id, and other target state remain unchanged; custody records the new
-   * attempt before any execution is started.
-   */
-  retryFailedTarget(
-    threadId: string,
-    userId: string,
-    entryId: string,
-    catId: string,
-    attemptId?: string,
-  ): { before: QueueEntry; after: QueueEntry } | null {
-    const entry = this.findEntry(threadId, userId, entryId);
-    if (
-      !entry ||
-      entry.status !== 'queued' ||
-      !entry.targetCats.includes(catId) ||
-      !entry.queuedFailedByCatIds?.includes(catId)
-    ) {
-      return null;
-    }
-    const before = InvocationQueue.cloneEntry(entry);
-    entry.queuedFailedByCatIds = entry.queuedFailedByCatIds.filter((candidate) => candidate !== catId);
-    if (entry.queuedFailedByCatIds.length === 0) entry.queuedFailedByCatIds = undefined;
-    this.clearQueuedFailure(entry, catId);
-    if (entry.queuedSeenInvocationIdByCatId?.[catId]) {
-      delete entry.queuedSeenInvocationIdByCatId[catId];
-      if (Object.keys(entry.queuedSeenInvocationIdByCatId).length === 0)
-        entry.queuedSeenInvocationIdByCatId = undefined;
-    }
-    if (entry.queuedAwakenedInvocationIdByCatId?.[catId]) {
-      delete entry.queuedAwakenedInvocationIdByCatId[catId];
-      delete entry.queuedAwakenedAtByCatId?.[catId];
-      if (Object.keys(entry.queuedAwakenedInvocationIdByCatId).length === 0) {
-        entry.queuedAwakenedInvocationIdByCatId = undefined;
-        entry.queuedAwakenedAtByCatId = undefined;
-      }
-    }
-    if (attemptId) {
-      entry.queuedAttemptIdByCatId = { ...(entry.queuedAttemptIdByCatId ?? {}), [catId]: attemptId };
-    }
-    return { before, after: InvocationQueue.cloneEntry(entry) };
-  }
-
-  /** Bind the custody-CAS winner before its exact retry target can start. */
-  bindRetryAttemptId(
-    threadId: string,
-    userId: string,
-    entryId: string,
-    catId: string,
-    attemptId: string,
-  ): QueueEntry | null {
-    const entry = this.findEntry(threadId, userId, entryId);
-    if (!entry || entry.status !== 'queued' || !entry.targetCats.includes(catId) || !attemptId) return null;
-    entry.queuedAttemptIdByCatId = { ...(entry.queuedAttemptIdByCatId ?? {}), [catId]: attemptId };
-    return InvocationQueue.cloneEntry(entry);
-  }
-
-  /**
-   * F254 D1.2b: retry reuses an InvocationRecord id, so clear stale handled-evidence tokens
-   * before the retry attempt starts. The read marker remains: seen still suppresses nags.
-   */
-  clearQueuedSeenInvocationForCats(threadId: string, catIds: readonly string[], invocationId: string): number {
-    const targetCats = new Set(catIds);
-    let cleared = 0;
-    for (const q of this.queues.values()) {
-      if (!this.queueMatchesThread(q, threadId)) continue;
-      for (const entry of q) {
-        if (
-          !entry ||
-          entry.status !== 'queued' ||
-          (!entry.queuedSeenInvocationIdByCatId && !entry.queuedAwakenedInvocationIdByCatId)
-        ) {
-          continue;
-        }
-        for (const catId of targetCats) {
-          const hadSeen = entry.queuedSeenInvocationIdByCatId?.[catId] === invocationId;
-          const hadAwakened = entry.queuedAwakenedInvocationIdByCatId?.[catId] === invocationId;
-          if (!hadSeen && !hadAwakened) continue;
-          if (hadSeen && entry.queuedSeenInvocationIdByCatId) {
-            delete entry.queuedSeenInvocationIdByCatId[catId];
-          }
-          if (hadAwakened && entry.queuedAwakenedInvocationIdByCatId) {
-            delete entry.queuedAwakenedInvocationIdByCatId[catId];
-            delete entry.queuedAwakenedAtByCatId?.[catId];
-          }
-          if (entry.steeredInvocationIdByCatId?.[catId] === invocationId) {
-            delete entry.steeredInvocationIdByCatId[catId];
-          }
-          cleared += 1;
-        }
-        if (entry.queuedSeenInvocationIdByCatId && Object.keys(entry.queuedSeenInvocationIdByCatId).length === 0) {
-          entry.queuedSeenInvocationIdByCatId = undefined;
-        }
-        if (
-          entry.queuedAwakenedInvocationIdByCatId &&
-          Object.keys(entry.queuedAwakenedInvocationIdByCatId).length === 0
-        ) {
-          entry.queuedAwakenedInvocationIdByCatId = undefined;
-          entry.queuedAwakenedAtByCatId = undefined;
-        }
-        if (entry.steeredInvocationIdByCatId && Object.keys(entry.steeredInvocationIdByCatId).length === 0) {
-          entry.steeredInvocationIdByCatId = undefined;
-        }
-      }
-    }
-    return cleared;
-  }
-
-  /** F254 D1.2b: consume only this cat's target for queued entries it already saw. */
-  markQueuedHandledForCatAcrossUsers(threadId: string, catId: string, invocationId?: string): QueuedHandledResult[] {
-    const handled: QueuedHandledResult[] = [];
-    if (!invocationId) return handled;
-    for (const q of this.queues.values()) {
-      if (!this.queueMatchesThread(q, threadId)) continue;
-      for (let i = 0; i < q.length; i++) {
-        const entry = q[i];
-        if (!entry || !InvocationQueue.isQueuedHandledCandidate(entry, catId, invocationId)) continue;
-
-        const result = InvocationQueue.markQueuedHandledEntry(entry, catId, i, this.originalContents.get(entry.id));
-        handled.push(result);
-
-        if (result.fullyConsumed) {
-          this.originalContents.delete(entry.id);
-          q.splice(i, 1);
-          i--;
-        }
-      }
-    }
-    return handled;
-  }
-
-  /**
-   * Detect an attempted target that remained Queue-owned after a nominally
-   * successful execution. This is the fail-closed guard for a child that
-   * reached `done` without ever binding the exact prompt-body exposure.
-   */
-  hasAttemptedQueuedTargetAcrossUsers(
-    threadId: string,
-    catId: string,
-    attemptedEntryIds: ReadonlySet<string>,
-  ): boolean {
-    if (attemptedEntryIds.size === 0) return false;
-    for (const q of this.queues.values()) {
-      if (!this.queueMatchesThread(q, threadId)) continue;
-      if (
-        q.some(
-          (entry) => entry.status === 'queued' && attemptedEntryIds.has(entry.id) && entry.targetCats.includes(catId),
-        )
-      ) {
-        return true;
-      }
-    }
-    return false;
-  }
-
-  private static isQueuedHandledCandidate(entry: QueueEntry, catId: string, invocationId: string): boolean {
-    return (
-      entry.status === 'queued' &&
-      entry.targetCats.includes(catId) &&
-      entry.queuedSeenInvocationIdByCatId?.[catId] === invocationId
-    );
-  }
-
-  restoreQueuedHandledResult(result: QueuedHandledResult): boolean {
-    if (!result.entrySnapshot) return false;
-    const key = this.scopeKey(result.threadId, result.userId);
-    const q = this.getOrCreate(key);
-    const restored = InvocationQueue.cloneEntry(result.entrySnapshot);
-    const existingIndex = q.findIndex((entry) => entry.id === result.entryId);
-    if (existingIndex >= 0) {
-      q[existingIndex] = restored;
-    } else {
-      const index = Math.max(0, Math.min(result.queueIndex ?? q.length, q.length));
-      q.splice(index, 0, restored);
-    }
-    this.originalContents.set(restored.id, result.originalContent ?? restored.content);
-    return true;
-  }
-
-  private static markQueuedHandledEntry(
-    entry: QueueEntry,
-    catId: string,
-    queueIndex: number,
-    originalContent?: string,
-  ): QueuedHandledResult {
-    const entrySnapshot = InvocationQueue.cloneEntry(entry);
-    const remainingTargetCats = entry.targetCats.filter((targetCat) => targetCat !== catId);
-    entry.targetCats = remainingTargetCats;
-    const handledCats = new Set(entry.queuedHandledByCatIds ?? []);
-    handledCats.add(catId);
-    entry.queuedHandledByCatIds = [...handledCats];
-    entry.queuedFailedByCatIds = entry.queuedFailedByCatIds?.filter((candidate) => candidate !== catId);
-    if (entry.queuedFailureAtByCatId) {
-      delete entry.queuedFailureAtByCatId[catId];
-      if (Object.keys(entry.queuedFailureAtByCatId).length === 0) entry.queuedFailureAtByCatId = undefined;
-    }
-    if (entry.queuedFailureReasonByCatId) {
-      delete entry.queuedFailureReasonByCatId[catId];
-      if (Object.keys(entry.queuedFailureReasonByCatId).length === 0) entry.queuedFailureReasonByCatId = undefined;
-    }
-    entry.queuedNotifiedByCatIds = entry.queuedNotifiedByCatIds?.filter((candidate) => candidate !== catId);
-    entry.steerRequestedByCatIds = entry.steerRequestedByCatIds?.filter((candidate) => candidate !== catId);
-    if (entry.steerRequestedByCatIds?.length === 0) entry.steerRequestedByCatIds = undefined;
-    if (entry.steeredInvocationIdByCatId) {
-      delete entry.steeredInvocationIdByCatId[catId];
-      if (Object.keys(entry.steeredInvocationIdByCatId).length === 0) entry.steeredInvocationIdByCatId = undefined;
-    }
-    if (entry.queuedSeenInvocationIdByCatId) {
-      delete entry.queuedSeenInvocationIdByCatId[catId];
-      if (Object.keys(entry.queuedSeenInvocationIdByCatId).length === 0) {
-        entry.queuedSeenInvocationIdByCatId = undefined;
-      }
-    }
-    if (entry.queuedAwakenedInvocationIdByCatId) {
-      delete entry.queuedAwakenedInvocationIdByCatId[catId];
-      delete entry.queuedAwakenedAtByCatId?.[catId];
-      if (Object.keys(entry.queuedAwakenedInvocationIdByCatId).length === 0) {
-        entry.queuedAwakenedInvocationIdByCatId = undefined;
-        entry.queuedAwakenedAtByCatId = undefined;
-      }
-    }
-    const messageIds = [entry.messageId ?? '', ...entry.mergedMessageIds].filter(Boolean);
-    return {
-      entryId: entry.id,
-      threadId: entry.threadId,
-      userId: entry.userId,
-      catId,
-      messageIds,
-      remainingTargetCats: [...remainingTargetCats],
-      fullyConsumed: remainingTargetCats.length === 0,
-      entrySnapshot,
-      queueIndex,
-      originalContent,
-    };
-  }
-
-  private static cloneEntry(entry: QueueEntry): QueueEntry {
-    return {
-      ...entry,
-      targetCats: [...entry.targetCats],
-      ...(entry.allTargetCats ? { allTargetCats: [...entry.allTargetCats] } : {}),
-      ...(entry.authorIntentByCatId ? { authorIntentByCatId: structuredClone(entry.authorIntentByCatId) } : {}),
-      ...(entry.cloudDispatchProvenance
-        ? { cloudDispatchProvenance: structuredClone(entry.cloudDispatchProvenance) }
-        : {}),
-      ...(entry.queuedNotifiedByCatIds ? { queuedNotifiedByCatIds: [...entry.queuedNotifiedByCatIds] } : {}),
-      ...(entry.queuedAwakenedInvocationIdByCatId
-        ? { queuedAwakenedInvocationIdByCatId: { ...entry.queuedAwakenedInvocationIdByCatId } }
-        : {}),
-      ...(entry.queuedAwakenedAtByCatId ? { queuedAwakenedAtByCatId: { ...entry.queuedAwakenedAtByCatId } } : {}),
-      mergedMessageIds: [...entry.mergedMessageIds],
-      ...(entry.queuedSeenByCatIds ? { queuedSeenByCatIds: [...entry.queuedSeenByCatIds] } : {}),
-      ...(entry.queuedSeenInvocationIdByCatId
-        ? { queuedSeenInvocationIdByCatId: { ...entry.queuedSeenInvocationIdByCatId } }
-        : {}),
-      ...(entry.queuedBodyExposures
-        ? { queuedBodyExposures: entry.queuedBodyExposures.map((exposure) => ({ ...exposure })) }
-        : {}),
-      ...(entry.queuedFailedByCatIds ? { queuedFailedByCatIds: [...entry.queuedFailedByCatIds] } : {}),
-      ...(entry.queuedFailureAtByCatId ? { queuedFailureAtByCatId: { ...entry.queuedFailureAtByCatId } } : {}),
-      ...(entry.queuedFailureReasonByCatId
-        ? { queuedFailureReasonByCatId: { ...entry.queuedFailureReasonByCatId } }
-        : {}),
-      ...(entry.queuedAttemptIdByCatId ? { queuedAttemptIdByCatId: { ...entry.queuedAttemptIdByCatId } } : {}),
-      ...(entry.queuedHandledByCatIds ? { queuedHandledByCatIds: [...entry.queuedHandledByCatIds] } : {}),
-      ...(entry.steerRequestedByCatIds ? { steerRequestedByCatIds: [...entry.steerRequestedByCatIds] } : {}),
-      ...(entry.steeredInvocationIdByCatId
-        ? { steeredInvocationIdByCatId: { ...entry.steeredInvocationIdByCatId } }
-        : {}),
-      ...(entry.exactSteerBatch
-        ? {
-            exactSteerBatch: {
-              ...entry.exactSteerBatch,
-              entryIds: [...entry.exactSteerBatch.entryIds],
-            },
-          }
-        : {}),
-      ...(entry.prestartRetirement
-        ? {
-            prestartRetirement: {
-              ...entry.prestartRetirement,
-              entryIds: [...entry.prestartRetirement.entryIds],
-            },
-          }
-        : {}),
-      ...(entry.senderMeta ? { senderMeta: { ...entry.senderMeta } } : {}),
-      ...(entry.callerTraceContext ? { callerTraceContext: { ...entry.callerTraceContext } } : {}),
-    };
-  }
-
-  private clearQueuedFailure(entry: QueueEntry, catId: string): void {
-    if (entry.queuedFailureAtByCatId?.[catId] !== undefined) {
-      delete entry.queuedFailureAtByCatId[catId];
-      if (Object.keys(entry.queuedFailureAtByCatId).length === 0) entry.queuedFailureAtByCatId = undefined;
-    }
-    if (entry.queuedFailureReasonByCatId?.[catId] !== undefined) {
-      delete entry.queuedFailureReasonByCatId[catId];
-      if (Object.keys(entry.queuedFailureReasonByCatId).length === 0) entry.queuedFailureReasonByCatId = undefined;
-    }
-  }
-
-  /** Count of queued (not processing) entries. */
   size(threadId: string, userId: string): number {
     const q = this.queues.get(this.scopeKey(threadId, userId));
     if (!q) return 0;
     return q.filter((e) => e.status === 'queued').length;
   }
 
-  /** Clear all entries for this user. Returns removed entries. */
-  clear(threadId: string, userId: string): QueueEntry[] {
-    const key = this.scopeKey(threadId, userId);
-    const q = this.queues.get(key);
-    if (!q) return [];
-    for (const e of q) {
-      this.originalContents.delete(e.id);
-      if (e.exactSteerBatch) this.exactSteerReservations.delete(e.exactSteerBatch.reservationId);
-    }
-    this.queues.delete(key);
-    return q;
-  }
-
   /**
    * Move entry up or down in comparator order by swapping positions with its neighbor.
    * Returns false if entry is processing or not found.
    */
-  move(threadId: string, userId: string, entryId: string, direction: 'up' | 'down'): boolean {
-    const q = this.queues.get(this.scopeKey(threadId, userId));
-    if (!q) return false;
-    const target = q.find((e) => e.id === entryId);
-    if (!target || target.status === 'processing') return false;
-    if (target.exactSteerBatch) return false;
-    if (isSystemPinnedQueueEntry(target)) return false;
-
-    const queued = q.filter((e) => e.status === 'queued');
-    queued.sort(InvocationQueue.compareEntries);
-    const sortedIdx = queued.findIndex((e) => e.id === entryId);
-    const neighborIdx = direction === 'up' ? sortedIdx - 1 : sortedIdx + 1;
-    if (neighborIdx < 0 || neighborIdx >= queued.length) return true;
-
-    for (let i = 0; i < queued.length; i++) {
-      queued[i]!.position = i;
-    }
-    const a = queued[sortedIdx]!;
-    const b = queued[neighborIdx]!;
-    const tmp = a.position!;
-    a.position = b.position!;
-    b.position = tmp;
-    return true;
-  }
-
-  /**
-   * Promote a queued entry to first in comparator order by setting its position
-   * below all existing positions.
-   * Returns false if not found or entry is processing.
-   */
-  promote(threadId: string, userId: string, entryId: string): boolean {
-    const q = this.queues.get(this.scopeKey(threadId, userId));
-    if (!q) return false;
-    const entry = q.find((e) => e.id === entryId);
-    if (!entry || entry.status === 'processing') return false;
-    if (entry.exactSteerBatch) return false;
-    if (isSystemPinnedQueueEntry(entry)) return false;
-
-    const minPos = q.reduce((min, e) => {
-      if (e.status === 'queued' && e.position !== undefined && e.position < min) return e.position;
-      return min;
-    }, 0);
-    entry.position = minPos - 1;
-    return true;
-  }
-
-  /**
-   * Atomically reserve an explicit ordinary-user allowlist before Steer preempts
-   * the current invocation. Every validation happens before the first mutation.
-   */
-  reserveExactUserBatch(
-    threadId: string,
-    userId: string,
-    entryIds: readonly string[],
-  ): ExactUserBatchReservationResult {
-    const distinctIds = [...new Set(entryIds)];
-    if (distinctIds.length < 2 || distinctIds.length !== entryIds.length || distinctIds.length > MAX_QUEUE_DEPTH) {
-      return { outcome: 'rejected', reason: 'invalid_entry_ids' };
-    }
-
-    const q = this.queues.get(this.scopeKey(threadId, userId));
-    if (!q) return { outcome: 'rejected', reason: 'entry_not_found' };
-    const byId = new Map(q.map((entry) => [entry.id, entry]));
-    const selected = distinctIds.map((entryId) => byId.get(entryId));
-    if (selected.some((entry) => !entry)) return { outcome: 'rejected', reason: 'entry_not_found' };
-    const entries = selected as QueueEntry[];
-
-    if (entries.some((entry) => !InvocationQueue.isExactUserBatchEligible(entry))) {
-      return { outcome: 'rejected', reason: 'entry_ineligible' };
-    }
-
-    const primary = entries[0];
-    const targetCatId = primary?.targetCats[0];
-    if (!primary || !targetCatId) return { outcome: 'rejected', reason: 'entry_ineligible' };
-    if (
-      entries.some(
-        (entry) =>
-          entry.intent !== primary.intent ||
-          entry.ownerAuthProvenance !== primary.ownerAuthProvenance ||
-          entry.targetCats[0] !== targetCatId,
-      )
-    ) {
-      return { outcome: 'rejected', reason: 'entries_incompatible' };
-    }
-
-    return { outcome: 'reserved', ...this.commitExactSteerReservation(threadId, userId, entries, targetCatId) };
-  }
-
-  /**
-   * Reserve one exact queued entry before single-message Steer crosses an await.
-   * The durable steer marker records intent; this process-local identity is the
-   * exclusive dequeue fence and cannot be claimed through ordinary queue APIs.
-   */
-  reserveExactUserEntry(
-    threadId: string,
-    userId: string,
-    entryId: string,
-    targetCatId: string,
-  ): ExactUserEntryReservationResult {
-    const entry = this.findEntry(threadId, userId, entryId);
-    if (
-      !entry ||
-      entry.status !== 'queued' ||
-      !isOrdinaryQueueTargetEligible(entry, targetCatId) ||
-      entry.exactSteerBatch ||
-      entry.steerRequestedByCatIds?.includes(targetCatId) ||
-      isSystemPinnedQueueEntry(entry)
-    ) {
-      return { outcome: 'rejected', reason: 'state_changed' };
-    }
-    return {
-      outcome: 'reserved',
-      ...this.commitExactSteerReservation(threadId, userId, [entry], targetCatId),
-    };
-  }
-
-  private commitExactSteerReservation(
-    threadId: string,
-    userId: string,
-    entries: readonly QueueEntry[],
-    targetCatId: string,
-  ): ExactSteerBatchReservation {
-    const primary = entries[0]!;
-    const entryIds = entries.map((entry) => entry.id);
-
-    const reservation: ExactSteerBatchReservation = {
-      reservationId: randomUUID(),
-      primaryEntryId: primary.id,
-      entryIds,
-      targetCatId,
-    };
-    const snapshots = new Map(entries.map((entry) => [entry.id, InvocationQueue.cloneEntry(entry)]));
-
-    const q = this.queues.get(this.scopeKey(threadId, userId))!;
-
-    const minPos = q.reduce((min, entry) => {
-      if (entry.status === 'queued' && entry.position !== undefined && entry.position < min) return entry.position;
-      return min;
-    }, 0);
-    for (const entry of entries) {
-      entry.exactSteerBatch = { ...reservation, entryIds: [...reservation.entryIds] };
-      const requested = new Set(entry.steerRequestedByCatIds ?? []);
-      requested.add(targetCatId);
-      entry.steerRequestedByCatIds = [...requested];
-    }
-    primary.position = minPos - 1;
-    this.exactSteerReservations.set(reservation.reservationId, {
-      threadId,
-      userId,
-      primaryEntryId: primary.id,
-      targetCatId,
-      entries: snapshots,
-      phase: 'reserved',
-    });
-    return reservation;
-  }
-
-  /** Cross the durable boundary immediately before preemption gains side effects. */
-  beginExactSteerPreemption(threadId: string, userId: string, reservationId: string): boolean {
-    const reservation = this.exactSteerReservations.get(reservationId);
-    if (
-      !reservation ||
-      reservation.phase !== 'reserved' ||
-      reservation.threadId !== threadId ||
-      reservation.userId !== userId
-    ) {
-      return false;
-    }
-    const q = this.queues.get(this.scopeKey(threadId, userId));
-    if (
-      !q ||
-      [...reservation.entries.keys()].some((entryId) => {
-        const entry = q.find((candidate) => candidate.id === entryId);
-        return entry?.status !== 'queued' || entry.exactSteerBatch?.reservationId !== reservationId;
-      })
-    ) {
-      return false;
-    }
-    reservation.phase = 'preempting';
-    return true;
-  }
-
-  /** Make one successfully preempted reservation eligible for its exact owner claim. */
-  activateExactSteerReservation(threadId: string, userId: string, reservationId: string): boolean {
-    const reservation = this.exactSteerReservations.get(reservationId);
-    if (
-      !reservation ||
-      reservation.phase !== 'preempting' ||
-      reservation.threadId !== threadId ||
-      reservation.userId !== userId
-    ) {
-      return false;
-    }
-    const q = this.queues.get(this.scopeKey(threadId, userId));
-    if (
-      !q ||
-      [...reservation.entries.keys()].some((entryId) => {
-        const entry = q.find((candidate) => candidate.id === entryId);
-        return entry?.status !== 'queued' || entry.exactSteerBatch?.reservationId !== reservationId;
-      })
-    ) {
-      return false;
-    }
-    reservation.phase = 'activated';
-    return true;
-  }
-
-  /** A reserved/preempting entry still has an in-flight route and cannot be withdrawn safely. */
-  hasUnsettledExactSteerReservation(threadId: string, userId: string, entryId?: string): boolean {
-    return [...this.exactSteerReservations.values()].some(
-      (reservation) =>
-        reservation.threadId === threadId &&
-        reservation.userId === userId &&
-        reservation.phase !== 'activated' &&
-        (entryId === undefined || reservation.entries.has(entryId)),
-    );
-  }
-
-  /** Peek a preempted exact reservation without granting ordinary dequeue its identity. */
-  peekActivatedExactSteerReservation(
-    threadId: string,
-    userId?: string,
-    skipCatIds: ReadonlySet<string> = new Set(),
-    onlyTargetCat?: string,
-    excludeAgent = false,
-  ): ActivatedExactSteerReservation | null {
-    let best: ActivatedExactSteerReservation | null = null;
-    for (const [reservationId, reservation] of this.exactSteerReservations) {
-      if (reservation.phase !== 'activated' || reservation.threadId !== threadId) continue;
-      if (userId !== undefined && reservation.userId !== userId) continue;
-      if (skipCatIds.has(reservation.targetCatId)) continue;
-      if (onlyTargetCat !== undefined && reservation.targetCatId !== onlyTargetCat) continue;
-      const queue = this.queues.get(this.scopeKey(threadId, reservation.userId));
-      if (
-        !queue ||
-        [...reservation.entries.keys()].some((entryId) => {
-          const entry = queue.find((candidate) => candidate.id === entryId);
-          return entry?.status !== 'queued' || entry.exactSteerBatch?.reservationId !== reservationId;
-        })
-      ) {
-        continue;
-      }
-      const current = queue.find((entry) => entry.id === reservation.primaryEntryId);
-      if (!current || current.exactSteerBatch?.primaryEntryId !== current.id) {
-        continue;
-      }
-      if (excludeAgent && current.source === 'agent') continue;
-      if (!best || InvocationQueue.compareEntries(current, best.entry) < 0) {
-        best = { reservationId, entry: InvocationQueue.cloneEntry(current) };
-      }
-    }
-    return best;
-  }
-
-  /** Atomically claim only the exact entry set owned by this activated identity. */
-  claimExactSteerReservation(
-    threadId: string,
-    userId: string,
-    entryId: string,
-    reservationId: string,
-  ): QueueEntry | null {
-    const reservation = this.exactSteerReservations.get(reservationId);
-    if (reservation?.phase !== 'activated' || reservation.threadId !== threadId || reservation.userId !== userId) {
-      return null;
-    }
-    const entry = this.findEntry(threadId, userId, entryId);
-    if (
-      !entry ||
-      entry.exactSteerBatch?.reservationId !== reservationId ||
-      entry.exactSteerBatch.primaryEntryId !== entryId
-    ) {
-      return null;
-    }
-    return this.markEntryProcessing(entry, reservationId);
-  }
-
-  /** Release an unstarted reservation and restore every selected entry snapshot. */
-  releaseExactUserBatch(threadId: string, userId: string, reservationId: string): QueueEntry[] {
-    const reservation = this.exactSteerReservations.get(reservationId);
-    if (!reservation || reservation.threadId !== threadId || reservation.userId !== userId) return [];
-    const q = this.queues.get(this.scopeKey(threadId, userId));
-    if (!q) {
-      this.exactSteerReservations.delete(reservationId);
-      return [];
-    }
-
-    const restored: QueueEntry[] = [];
-    for (const [entryId, snapshot] of reservation.entries) {
-      const index = q.findIndex(
-        (entry) =>
-          entry.id === entryId && entry.status === 'queued' && entry.exactSteerBatch?.reservationId === reservationId,
-      );
-      if (index === -1) continue;
-      const restoredEntry = InvocationQueue.cloneEntry(snapshot);
-      q[index] = restoredEntry;
-      restored.push(InvocationQueue.cloneEntry(restoredEntry));
-    }
-    this.exactSteerReservations.delete(reservationId);
-    return restored;
-  }
-
-  /** Cancel every still-queued Batch Steer reservation in one user scope. */
-  releaseAllExactUserBatches(threadId: string, userId: string): QueueEntry[] {
-    const reservationIds = new Set(
-      this.list(threadId, userId).flatMap((entry) =>
-        entry.exactSteerBatch ? [entry.exactSteerBatch.reservationId] : [],
-      ),
-    );
-    return [...reservationIds].flatMap((reservationId) => this.releaseExactUserBatch(threadId, userId, reservationId));
-  }
-
-  /** Release a consumed Steer target without restoring already-settled sibling snapshots. */
-  pruneExactUserBatchReservation(reservationId: string): boolean {
-    const referenced = [...this.queues.values()].flatMap((q) =>
-      q.filter((entry) => entry.exactSteerBatch?.reservationId === reservationId),
-    );
-    const reservation = this.exactSteerReservations.get(reservationId);
-    if (referenced.length > 0) {
-      if (
-        !reservation ||
-        reservation.phase !== 'activated' ||
-        referenced.some((entry) => entry.status !== 'queued' || entry.targetCats.includes(reservation.targetCatId))
-      )
-        return false;
-      for (const entry of referenced) {
-        entry.exactSteerBatch = undefined;
-        entry.position = reservation.entries.get(entry.id)?.position;
-      }
-    }
-    return this.exactSteerReservations.delete(reservationId);
-  }
-
-  /** Exact already-processing members, in the caller-frozen order, excluding the primary. */
-  collectExactSteerBatchMembers(entry: QueueEntry): QueueEntry[] | null {
-    const batch = entry.exactSteerBatch;
-    if (!batch || batch.primaryEntryId !== entry.id) return null;
-    const reservation = this.exactSteerReservations.get(batch.reservationId);
-    if (!reservation || reservation.threadId !== entry.threadId || reservation.userId !== entry.userId) return null;
-    const q = this.queues.get(this.scopeKey(entry.threadId, entry.userId));
-    if (!q) return null;
-    const byId = new Map(q.map((candidate) => [candidate.id, candidate]));
-    const members: QueueEntry[] = [];
-    for (const entryId of batch.entryIds) {
-      const current = byId.get(entryId);
-      if (
-        !current ||
-        current.status !== 'processing' ||
-        current.exactSteerBatch?.reservationId !== batch.reservationId
-      ) {
-        return null;
-      }
-      if (entryId !== batch.primaryEntryId) members.push(InvocationQueue.cloneEntry(current));
-    }
-    return members;
-  }
-
-  /** Restore every member after a start-reservation persistence failure. */
-  rollbackExactSteerBatchProcessing(threadId: string, reservationId: string): QueueEntry[] {
-    const reservation = this.exactSteerReservations.get(reservationId);
-    if (!reservation || reservation.threadId !== threadId) return [];
-    const q = this.queues.get(this.scopeKey(reservation.threadId, reservation.userId));
-    if (!q) return [];
-    const rolledBack: QueueEntry[] = [];
-    for (const entryId of reservation.entries.keys()) {
-      const entry = q.find(
-        (candidate) =>
-          candidate.id === entryId &&
-          candidate.status === 'processing' &&
-          candidate.exactSteerBatch?.reservationId === reservationId,
-      );
-      if (!entry) continue;
-      entry.status = 'queued';
-      delete entry.processingStartedAt;
-      rolledBack.push(InvocationQueue.cloneEntry(entry));
-    }
-    return rolledBack;
-  }
-
-  private static isExactUserBatchEligible(entry: QueueEntry): boolean {
-    const targetCatId = entry.targetCats[0];
-    return (
-      entry.status === 'queued' &&
-      entry.source === 'user' &&
-      entry.ownerAuthProvenance !== 'unknown' &&
-      entry.targetCats.length === 1 &&
-      !!targetCatId &&
-      !entry.autoExecute &&
-      !entry.sourceCategory &&
-      !entry.actionSuccessorFence &&
-      !entry.waitContinuationCarrier &&
-      !entry.freshnessClosureId &&
-      !entry.freshnessSupplementId &&
-      !entry.continuationKey &&
-      !entry.callerCatId &&
-      !entry.a2aParentInvocationId &&
-      !entry.a2aTriggerMessageId &&
-      !entry.exactSteerBatch &&
-      isOrdinaryQueueTargetEligible(entry, targetCatId) &&
-      entry.authorIntentByCatId?.[targetCatId]?.requested !== 'continue_current'
-    );
-  }
-
-  /** Mark a primary plus its frozen exact allowlist in one synchronous mutation. */
-  private markEntryProcessing(
-    entry: QueueEntry,
-    exactReservationId?: string,
-    selectedTargetCatId?: string,
-  ): QueueEntry | null {
-    const batch = entry.exactSteerBatch;
-    const targetCatId =
-      selectedTargetCatId ??
-      batch?.targetCatId ??
-      entry.targetCats.find((catId) => isOrdinaryQueueTargetEligible(entry, catId));
-    if (!targetCatId || !isOrdinaryQueueTargetEligible(entry, targetCatId)) return null;
-    if (!batch) {
-      entry.status = 'processing';
-      entry.processingStartedAt = Date.now();
-      return InvocationQueue.cloneEntry(entry);
-    }
-    if (exactReservationId !== batch.reservationId) return null;
-    if (batch.primaryEntryId !== entry.id) return null;
-    const reservation = this.exactSteerReservations.get(batch.reservationId);
-    if (
-      reservation?.phase !== 'activated' ||
-      reservation.threadId !== entry.threadId ||
-      reservation.userId !== entry.userId
-    ) {
-      return null;
-    }
-    const q = this.queues.get(this.scopeKey(entry.threadId, entry.userId));
-    if (!q) return null;
-    const byId = new Map(q.map((candidate) => [candidate.id, candidate]));
-    const selected = batch.entryIds.map((entryId) => byId.get(entryId));
-    if (
-      selected.some(
-        (candidate) =>
-          !candidate ||
-          candidate.status !== 'queued' ||
-          candidate.exactSteerBatch?.reservationId !== batch.reservationId,
-      )
-    ) {
-      return null;
-    }
-    const processingStartedAt = Date.now();
-    for (const candidate of selected as QueueEntry[]) {
-      candidate.status = 'processing';
-      candidate.processingStartedAt = processingStartedAt;
-    }
-    return InvocationQueue.cloneEntry(entry);
-  }
-
-  /** F175: Mark the highest-priority queued entry as processing (stays in array). */
-  markProcessing(threadId: string, userId: string): QueueEntry | null {
-    const q = this.queues.get(this.scopeKey(threadId, userId));
-    if (!q) return null;
-    const queued = q.filter(
-      (e) =>
-        e.status === 'queued' &&
-        !e.exactSteerBatch &&
-        e.targetCats.some((catId) => isOrdinaryQueueTargetEligible(e, catId)),
-    );
-    if (queued.length === 0) return null;
-    queued.sort(InvocationQueue.compareEntries);
-    const best = queued[0]!;
-    return this.markEntryProcessing(best);
-  }
-
-  /** F175: Peek at the highest-priority queued entry without mutating state. */
   peekNextQueued(threadId: string, userId: string): QueueEntry | null {
     const q = this.queues.get(this.scopeKey(threadId, userId));
     if (!q) return null;
-    const queued = q.filter(
-      (e) =>
-        e.status === 'queued' &&
-        !e.exactSteerBatch &&
-        e.targetCats.some((catId) => isOrdinaryQueueTargetEligible(e, catId)),
-    );
+    const queued = q.filter((entry) => entry.status === 'queued');
     if (queued.length === 0) return null;
     queued.sort(InvocationQueue.compareEntries);
-    return { ...queued[0]! };
+    return structuredClone(queued[0]!);
   }
 
   /** Rollback a processing entry back to queued (undo markProcessing/markProcessingAcrossUsers). */
-  rollbackProcessing(threadId: string, entryId: string): boolean {
-    for (const q of this.queues.values()) {
-      if (!this.queueMatchesThread(q, threadId)) continue;
-      const entry = q.find((e) => e.id === entryId && e.status === 'processing');
-      if (entry) {
-        entry.status = 'queued';
-        delete entry.processingStartedAt;
-        return true;
-      }
-    }
-    return false;
-  }
-
-  /** Remove a processing entry for this user by entryId. */
-  removeProcessed(threadId: string, userId: string, entryId: string): QueueEntry | null {
-    const q = this.queues.get(this.scopeKey(threadId, userId));
-    if (!q) return null;
-    const idx = q.findIndex((e) => e.status === 'processing' && e.id === entryId);
-    if (idx === -1) return null;
-    this.originalContents.delete(entryId);
-
-    return q.splice(idx, 1)[0] ?? null;
-  }
-
-  // ── Cross-user methods (system-level only) ──
-
-  /** F175: Find the highest-priority queued entry across all users for a thread. */
   peekOldestAcrossUsers(threadId: string): QueueEntry | null {
     let best: QueueEntry | null = null;
     for (const q of this.queues.values()) {
       if (!this.queueMatchesThread(q, threadId)) continue;
       for (const e of q) {
-        if (e.status !== 'queued' || e.exactSteerBatch) continue;
-        if (!e.targetCats.some((catId) => isOrdinaryQueueTargetEligible(e, catId))) continue;
+        if (e.status !== 'queued') continue;
         if (!best || InvocationQueue.compareEntries(e, best) < 0) {
           best = e;
         }
@@ -1827,127 +1596,20 @@ export class InvocationQueue {
     return best ? { ...best } : null;
   }
 
-  /** F175: Mark the highest-priority queued entry across users as processing.
-   *  skipCatIds: skip entries whose primary target cat is in this set (slot busy).
-   *  onlyCatId: restrict recovery to the exact slot whose pause elapsed. */
-  markProcessingAcrossUsers(
-    threadId: string,
-    skipCatIds?: Set<string>,
-    onlyCatId?: string,
-    excludeAgent = false,
-  ): QueueEntry | null {
-    let best: QueueEntry | null = null;
-    let bestTargetCatId: string | undefined;
-    for (const q of this.queues.values()) {
-      if (!this.queueMatchesThread(q, threadId)) continue;
-      for (const e of q) {
-        if (e.status !== 'queued' || e.exactSteerBatch) continue;
-        if (excludeAgent && e.source === 'agent') continue;
-        const targetCatId =
-          onlyCatId !== undefined
-            ? isOrdinaryQueueTargetEligible(e, onlyCatId)
-              ? onlyCatId
-              : undefined
-            : e.targetCats.find((catId) => isOrdinaryQueueTargetEligible(e, catId) && !skipCatIds?.has(catId));
-        if (!targetCatId || skipCatIds?.has(targetCatId)) continue;
-        if (!best || InvocationQueue.compareEntries(e, best) < 0) {
-          best = e;
-          bestTargetCatId = targetCatId;
-        }
-      }
-    }
-    if (!best) return null;
-    return this.markEntryProcessing(best, undefined, bestTargetCatId);
-  }
-
-  /** Remove a processing entry across all users for a thread by entryId. */
-  removeProcessedAcrossUsers(threadId: string, entryId: string): QueueEntry | null {
-    for (const q of this.queues.values()) {
-      if (!this.queueMatchesThread(q, threadId)) continue;
-      const idx = q.findIndex((e) => e.status === 'processing' && e.id === entryId);
-      if (idx !== -1) {
-        this.originalContents.delete(entryId);
-
-        return q.splice(idx, 1)[0] ?? null;
-      }
-    }
-    return null;
-  }
-
-  private resolveProcessingGroupAcrossUsers(
-    threadId: string,
-    entryId: string,
-  ): { queue: QueueEntry[]; members: Array<{ candidate: QueueEntry; index: number }>; reservationId?: string } | null {
-    for (const queue of this.queues.values()) {
-      if (!this.queueMatchesThread(queue, threadId)) continue;
-      const entry = queue.find((candidate) => candidate.status === 'processing' && candidate.id === entryId);
-      if (!entry) continue;
-      const batch = entry.exactSteerBatch;
-      if (!batch && entry.prestartRetirement) {
-        const intent = entry.prestartRetirement;
-        const members = queue
-          .map((candidate, index) => ({ candidate, index }))
-          .filter(
-            ({ candidate }) =>
-              candidate.status === 'processing' &&
-              candidate.prestartRetirement?.id === intent.id &&
-              intent.entryIds.includes(candidate.id),
-          );
-        if (members.length === 0) return null;
-        if (
-          members.some(
-            ({ candidate }) =>
-              candidate.threadId !== entry.threadId ||
-              candidate.userId !== entry.userId ||
-              JSON.stringify(candidate.prestartRetirement) !== JSON.stringify(intent),
-          )
-        ) {
-          return null;
-        }
-        return { queue, members };
-      }
-      if (!batch) return { queue, members: [{ candidate: entry, index: queue.indexOf(entry) }] };
-
-      const reservation = this.exactSteerReservations.get(batch.reservationId);
-      if (
-        !reservation ||
-        reservation.threadId !== threadId ||
-        reservation.userId !== entry.userId ||
-        reservation.primaryEntryId !== batch.primaryEntryId ||
-        reservation.entries.size !== batch.entryIds.length ||
-        batch.entryIds.some((memberId) => !reservation.entries.has(memberId))
-      ) {
-        return null;
-      }
-
-      const byId = new Map(queue.map((candidate, index) => [candidate.id, { candidate, index }]));
-      const members: Array<{ candidate: QueueEntry; index: number }> = [];
-      for (const memberId of batch.entryIds) {
-        const member = byId.get(memberId);
-        if (
-          !member ||
-          member.candidate.status !== 'processing' ||
-          member.candidate.exactSteerBatch?.reservationId !== batch.reservationId
-        ) {
-          return null;
-        }
-        members.push(member);
-      }
-      return { queue, members, reservationId: batch.reservationId };
-    }
-    return null;
-  }
-
-  /** Fail-closed preflight for synchronous external replacement of a processing group. */
-  canRemoveProcessingGroupAcrossUsers(threadId: string, entryId: string): boolean {
-    return this.resolveProcessingGroupAcrossUsers(threadId, entryId) !== null;
-  }
-
-  /** Snapshot a complete processing group without making it invisible. */
+  /** Mark the strict comparator head across users as processing. */
   getProcessingGroupAcrossUsers(threadId: string, entryId: string): QueueEntry[] | null {
-    const group = this.resolveProcessingGroupAcrossUsers(threadId, entryId);
-    if (!group) return null;
-    return group.members.map((member) => InvocationQueue.cloneEntry(member.candidate));
+    const selected = this.findAdmittedEntry(threadId, entryId) ?? this.findEntryAcrossUsers(threadId, entryId);
+    if (!selected || (selected.status !== 'claimed' && selected.status !== 'processing')) return null;
+    if (!selected.retiringGroupId) return [structuredClone(selected)];
+    const group = [...this.queues.values(), ...this.admittedEntries.values()]
+      .flatMap((entries) => entries)
+      .filter(
+        (entry) =>
+          entry.threadId === threadId &&
+          (entry.status === 'claimed' || entry.status === 'processing') &&
+          entry.retiringGroupId === selected.retiringGroupId,
+      );
+    return group.length > 0 ? group.map((entry) => structuredClone(entry)) : null;
   }
 
   /**
@@ -1956,30 +1618,14 @@ export class InvocationQueue {
    * primary row as the whole reservation. Ordinary attempt settlement remains
    * per-entry and must keep using removeProcessedAcrossUsers.
    */
-  removeProcessingGroupAcrossUsers(threadId: string, entryId: string): QueueEntry[] | null {
-    const group = this.resolveProcessingGroupAcrossUsers(threadId, entryId);
-    if (!group) return null;
-    const removed = group.members.map((member) => member.candidate);
-    for (const member of [...group.members].sort((left, right) => right.index - left.index)) {
-      const removedEntry = group.queue.splice(member.index, 1)[0];
-      if (removedEntry) this.originalContents.delete(removedEntry.id);
-    }
-    if (group.reservationId) this.exactSteerReservations.delete(group.reservationId);
-    return removed;
-  }
-
-  /**
-   * Find the in-flight (processing) entry occupying a cat's per-cat slot in a thread, across all
-   * users. 2026-06-02 (Steer 无法抢占): steer-immediate uses this to locate the entry whose
-   * executeEntry holds the slot, so it can tombstone it (removeProcessedAcrossUsers) instead of
-   * force-releasing the slot — the tombstone makes executeEntry self-abort at its post-startAll
-   * guard, which is race-safe through the pre-start (create-await) window. Returns null if none.
-   */
-  findProcessingByCat(threadId: string, catId: string): QueueEntry | null {
-    for (const q of this.queues.values()) {
+  findProcessingByCat(threadId: string, catId: string, excludeEntryId?: string): QueueEntry | null {
+    for (const q of [...this.queues.values(), ...this.admittedEntries.values()]) {
       if (!this.queueMatchesThread(q, threadId)) continue;
-      const entry = q.find((e) => e.status === 'processing' && (e.targetCats[0] ?? 'unknown') === catId);
-      if (entry) return entry;
+      const entry = q.find(
+        (e) =>
+          (e.status === 'claimed' || e.status === 'processing') && e.id !== excludeEntryId && e.targets.includes(catId),
+      );
+      if (entry) return structuredClone(entry);
     }
     return null;
   }
@@ -1989,7 +1635,7 @@ export class InvocationQueue {
     const users: string[] = [];
     for (const q of this.queues.values()) {
       if (!this.queueMatchesThread(q, threadId) || q.length === 0) continue;
-      users.push(q[0]!.userId);
+      users.push(queueEntryOwnerId(q[0]!));
     }
     return users;
   }
@@ -2002,11 +1648,11 @@ export class InvocationQueue {
       for (const e of q) {
         if (
           e.status !== 'queued' ||
-          !e.autoExecute ||
-          !e.targetCats.some((catId) => isOrdinaryQueueTargetEligible(e, catId))
+          !e.execution.autoExecute ||
+          (e.targets.length > 0 && e.targets.every((catId) => !isOrdinaryQueueTargetEligible(e, catId)))
         )
           continue;
-        result.push({ ...e });
+        result.push(structuredClone(e));
       }
     }
     return result;
@@ -2020,9 +1666,12 @@ export class InvocationQueue {
     for (const q of this.queues.values()) {
       if (!this.queueMatchesThread(q, threadId)) continue;
       for (const e of q) {
-        if (e.source !== 'agent' || !e.targetCats.some((catId) => isQueueTargetPending(e, catId))) continue;
+        if (e.from.kind !== 'agent' || e.targets.length === 0) continue;
         count++;
       }
+    }
+    for (const entries of this.admittedEntries.values()) {
+      count += entries.filter((entry) => entry.threadId === threadId && entry.from.kind === 'agent').length;
     }
     return count;
   }
@@ -2035,7 +1684,7 @@ export class InvocationQueue {
     for (const q of this.queues.values()) {
       if (!this.queueMatchesThread(q, threadId)) continue;
       for (const e of q) {
-        if (e.source === 'agent' && e.status === 'queued' && isQueueTargetPending(e, catId)) {
+        if (e.from.kind === 'agent' && e.status === 'queued' && isQueueTargetPending(e, catId)) {
           return true;
         }
       }
@@ -2043,158 +1692,21 @@ export class InvocationQueue {
     return false;
   }
 
-  /**
-   * F-coalesce: find the best in-flight agent entry to coalesce a same-turn handoff into.
-   *
-   * Used by callback-a2a-trigger to merge a caller's repeated same-turn handoffs to the same target
-   * instead of dispatching duplicate invocations. Resolution PREFERS a mergeable 'queued' entry over
-   * a 'processing' one: a queued entry can be merged in place (coalesceContentIntoQueuedAgent),
-   * whereas a processing entry is already running and can only be superseded (abort+restart, deferred
-   * to F216). So when a cat has BOTH a running entry and a queued follow-up, a third handoff must
-   * merge into the queued follow-up — not spawn yet another entry. Hence the two-pass scan.
-   *
-   * Stale processing entries (zombie invocations past STALE_PROCESSING_THRESHOLD_MS) are ignored so
-   * a hung invocation never permanently swallows new handoffs. Returns a copy (never a live ref).
-   */
-  findInFlightAgentEntry(
-    threadId: string,
-    catId: string,
-    callerCatId?: string,
-    a2aParentInvocationId?: string,
-    ownerAuthProvenance?: OwnerAuthProvenance,
-  ): QueueEntry | null {
-    // 云端 codex R4 P1: scope to sourceCategory 'a2a'. `source: 'agent'` alone also matches
-    // self-continuation entries (QueueProcessor.enqueueContinuation → source:'agent',
-    // sourceCategory:'continuation'). Without this filter an A2A handoff to a cat that has a queued
-    // continuation would merge INTO the continuation prompt — mixing unrelated control-flow content
-    // with another cat's handoff AND suppressing the real A2A route. Only same-category 'a2a' entries
-    // are the caller's repeated same-turn handoffs and thus semantically mergeable. (Mirrors the
-    // existing sourceCategory discrimination in isSystemPinnedQueueEntry / normalizedPriority.)
-    //
-    // F216 c0 (砚砚 GPT-5.5 review P1): ALSO scope by callerCatId. Only the SAME caller's repeated
-    // same-turn handoffs are mergeable — without this, cat A's queued handoff to a target gets
-    // coalesced/superseded by cat B's later handoff to the same target (cross-caller串味).
-    //
-    // Parallel invocations of one cat still share callerCatId, so callback callers additionally
-    // pass a2aParentInvocationId. Both supplied scopes use strict matching: a missing field never
-    // adopts a scoped lookup. Omitted scopes preserve compatibility for legacy/non-invocation
-    // callers, preferring a fresh entry whenever the lineage is known but does not match.
-    const matches = (e: QueueEntry): boolean => {
-      if (!(e.source === 'agent' && e.sourceCategory === 'a2a' && isOrdinaryQueueTargetEligible(e, catId))) {
-        return false;
-      }
-      if (callerCatId !== undefined && !(e.callerCatId !== undefined && e.callerCatId === callerCatId)) return false;
-      if (
-        a2aParentInvocationId !== undefined &&
-        !(e.a2aParentInvocationId !== undefined && e.a2aParentInvocationId === a2aParentInvocationId)
-      ) {
-        return false;
-      }
-      if (ownerAuthProvenance !== undefined && e.ownerAuthProvenance !== ownerAuthProvenance) return false;
-      return true;
-    };
-    // Pass 1: prefer a mergeable queued entry (in-place coalesce, no abort needed).
-    for (const q of this.queues.values()) {
-      if (!this.queueMatchesThread(q, threadId)) continue;
-      for (const e of q) {
-        if (matches(e) && e.status === 'queued') return { ...e };
-      }
-    }
-    // Pass 2: fall back to a fresh (non-stale) processing entry — caller defers supersede to F216.
-    const now = Date.now();
-    for (const q of this.queues.values()) {
-      if (!this.queueMatchesThread(q, threadId)) continue;
-      for (const e of q) {
-        if (!matches(e) || e.status !== 'processing') continue;
-        const age = now - (e.processingStartedAt ?? e.createdAt);
-        if (age < InvocationQueue.STALE_PROCESSING_THRESHOLD_MS) return { ...e };
-      }
-    }
-    return null;
-  }
-
-  /**
-   * F-coalesce: merge new content + messageId into an existing QUEUED agent entry.
-   *
-   * Only succeeds while the entry is still 'queued' (not yet dispatched) — returns false if it has
-   * already started processing (the caller must supersede via abort+restart instead, see F216).
-   * Content is appended with a blank-line separator so the target cat sees both handoffs as one
-   * coherent message (parity with collectUserBatch's user-message coalescing). The new messageId is
-   * tracked in mergedMessageIds so delivery/ack covers both trigger messages.
-   */
-  coalesceContentIntoQueuedAgent(
-    threadId: string,
-    userId: string,
-    entryId: string,
-    content: string,
-    messageId?: string,
-    callerCatId?: string,
-    a2aParentInvocationId?: string,
-    ownerAuthProvenance?: OwnerAuthProvenance,
-    targetCatId?: string,
-    queueCustodyAdmissionId?: string,
-  ): boolean {
-    const e = this.findEntry(threadId, userId, entryId);
-    if (!e || e.status !== 'queued') return false;
-    // 云端 codex R4 P1 (defense-in-depth): only A2A entries are mergeable. findInFlightAgentEntry
-    // already scopes to sourceCategory 'a2a', but guard here too so a future caller passing a
-    // continuation/other entryId can never splice a handoff into unrelated control-flow content.
-    if (!(e.source === 'agent' && e.sourceCategory === 'a2a')) return false;
-    const intendedTargetCatId = targetCatId ?? e.targetCats[0];
-    if (!intendedTargetCatId || !isOrdinaryQueueTargetEligible(e, intendedTargetCatId)) return false;
-    // Defense-in-depth source scope: a stale/wrong entryId from another caller or parallel
-    // invocation can never splice content. Supplied scopes require a defined exact match; omitted
-    // scopes stay off for legacy/non-invocation callers.
-    if (callerCatId !== undefined && !(e.callerCatId !== undefined && e.callerCatId === callerCatId)) return false;
-    if (
-      a2aParentInvocationId !== undefined &&
-      !(e.a2aParentInvocationId !== undefined && e.a2aParentInvocationId === a2aParentInvocationId)
-    ) {
-      return false;
-    }
-    if (ownerAuthProvenance !== undefined && e.ownerAuthProvenance !== ownerAuthProvenance) return false;
-    if (e.queueCustodyAdmissionId) return false;
-    e.content = `${e.content}\n\n${content}`;
-    if (messageId && e.messageId !== messageId && !e.mergedMessageIds.includes(messageId)) {
-      e.mergedMessageIds.push(messageId);
-    }
-    // New queued content invalidates previous read markers; the target has not seen the appended body.
-    e.queuedNotifiedByCatIds = undefined;
-    e.queuedSeenByCatIds = undefined;
-    e.queuedSeenInvocationIdByCatId = undefined;
-    e.queueCustodyAdmissionId = queueCustodyAdmissionId;
-    return true;
-  }
-
-  /**
-   * Cross-path dedup: checks processing + fresh queued agent entries.
-   * Used by route-serial to prevent text-scan @mention when callback already dispatched.
-   *
-   * 'processing' entries block only if fresh (< STALE_PROCESSING_THRESHOLD_MS).
-   * Zombie processing entries (invocation hung without cleanup) are ignored to
-   * prevent permanent A2A routing deadlock.
-   *
-   * 'queued' entries always block: they are legitimate pending dispatches and
-   * listAutoExecute/markProcessingAcrossUsers will still pick them up after a long wait.
-   */
-  /** @deprecated queued agent entries are no longer expired by age; retained for old migration tests. */
-  static readonly STALE_QUEUED_THRESHOLD_MS = 60_000;
-  static readonly STALE_PROCESSING_THRESHOLD_MS = 600_000; // 10 minutes
-
+  /** Cross-path dedup guard for queued or live agent work targeting one cat. */
   hasActiveOrQueuedAgentForCat(threadId: string, catId: string, opts?: { excludeEntryId?: string }): boolean {
     const now = Date.now();
     for (const q of this.queues.values()) {
       if (!this.queueMatchesThread(q, threadId)) continue;
       for (const e of q) {
         if (opts?.excludeEntryId && e.id === opts.excludeEntryId) continue;
-        if (e.source !== 'agent' || !isQueueTargetPending(e, catId)) continue;
+        if (e.from.kind !== 'agent' || !isQueueTargetPending(e, catId)) continue;
 
-        if (e.status === 'processing') {
+        if (e.status === 'claimed' || e.status === 'processing') {
           // Use processingStartedAt (when the entry actually began processing),
           // NOT createdAt (when it was enqueued). An entry may sit queued for a
           // long time before being picked up — using createdAt would falsely
           // expire it the moment it starts processing. (P1 fix per codex review)
-          const processingAge = now - (e.processingStartedAt ?? e.createdAt);
+          const processingAge = now - (e.processingStartedAt ?? e.claimedAt ?? e.enqueuedAt);
           if (processingAge < InvocationQueue.STALE_PROCESSING_THRESHOLD_MS) {
             this.log?.info(
               {
@@ -2204,7 +1716,7 @@ export class InvocationQueue {
                   entryId: e.id,
                   status: e.status,
                   processingAgeMs: processingAge,
-                  userId: e.userId,
+                  owner: e.owner,
                 },
               },
               '[DIAG] hasActiveOrQueuedAgentForCat hit',
@@ -2220,7 +1732,7 @@ export class InvocationQueue {
                 entryId: e.id,
                 status: e.status,
                 processingAgeMs: processingAge,
-                userId: e.userId,
+                owner: e.owner,
               },
             },
             '[DIAG] hasActiveOrQueuedAgentForCat: ignoring stale processing entry (zombie defense)',
@@ -2236,14 +1748,27 @@ export class InvocationQueue {
               matchedEntry: {
                 entryId: e.id,
                 status: e.status,
-                queuedAgeMs: now - e.createdAt,
-                userId: e.userId,
+                queuedAgeMs: now - e.enqueuedAt,
+                owner: e.owner,
               },
             },
             '[DIAG] hasActiveOrQueuedAgentForCat hit',
           );
           return true;
         }
+      }
+    }
+    for (const entries of this.admittedEntries.values()) {
+      if (
+        entries.some(
+          (entry) =>
+            entry.threadId === threadId &&
+            entry.id !== opts?.excludeEntryId &&
+            entry.from.kind === 'agent' &&
+            entry.targets.includes(catId),
+        )
+      ) {
+        return true;
       }
     }
     return false;
@@ -2256,7 +1781,7 @@ export class InvocationQueue {
     opts?: {
       excludeEntryId?: string;
       userId?: string;
-      sources?: QueueEntry['source'][];
+      sources?: Array<ReturnType<typeof queueEntrySource>>;
       sourceCategories?: NonNullable<QueueEntry['sourceCategory']>[];
       continuationKey?: string;
     },
@@ -2266,20 +1791,20 @@ export class InvocationQueue {
       if (!this.queueMatchesThread(q, threadId)) continue;
       for (const e of q) {
         if (opts?.excludeEntryId && e.id === opts.excludeEntryId) continue;
-        if (opts?.userId && e.userId !== opts.userId) continue;
+        if (opts?.userId && queueEntryOwnerId(e) !== opts.userId) continue;
         if (!isQueueTargetPending(e, catId)) continue;
-        if (opts?.sources && !opts.sources.includes(e.source)) continue;
+        if (opts?.sources && !opts.sources.includes(queueEntrySource(e))) continue;
         if (opts?.sourceCategories) {
           if (!e.sourceCategory || !opts.sourceCategories.includes(e.sourceCategory)) continue;
         }
-        if (opts?.continuationKey !== undefined && e.continuationKey !== opts.continuationKey) continue;
+        if (opts?.continuationKey !== undefined && e.payload.sourceRecordId !== opts.continuationKey) continue;
 
         if (e.status === 'queued') {
           return true;
         }
 
-        if (e.status === 'processing') {
-          const processingAge = now - (e.processingStartedAt ?? e.createdAt);
+        if (e.status === 'claimed' || e.status === 'processing') {
+          const processingAge = now - (e.processingStartedAt ?? e.claimedAt ?? e.enqueuedAt);
           if (processingAge >= InvocationQueue.STALE_PROCESSING_THRESHOLD_MS) {
             this.log?.warn(
               {
@@ -2289,7 +1814,7 @@ export class InvocationQueue {
                   entryId: e.id,
                   status: e.status,
                   processingAgeMs: processingAge,
-                  userId: e.userId,
+                  owner: e.owner,
                 },
               },
               '[DIAG] hasPendingForCat: ignoring stale processing entry (zombie defense)',
@@ -2300,57 +1825,73 @@ export class InvocationQueue {
         }
       }
     }
-    return false;
-  }
-
-  /** F122B: Mark a specific entry as processing by ID (cross-user). */
-  markProcessingById(threadId: string, entryId: string, targetCatId?: string): boolean {
-    for (const q of this.queues.values()) {
-      if (!this.queueMatchesThread(q, threadId)) continue;
-      const entry = q.find((e) => e.id === entryId && e.status === 'queued' && !e.exactSteerBatch);
-      if (entry) {
-        const selectedTargetCatId =
-          targetCatId ?? entry.targetCats.find((catId) => isOrdinaryQueueTargetEligible(entry, catId));
-        if (!selectedTargetCatId || !isOrdinaryQueueTargetEligible(entry, selectedTargetCatId)) return false;
-        return this.markEntryProcessing(entry, undefined, selectedTargetCatId) !== null;
+    for (const entries of this.admittedEntries.values()) {
+      for (const entry of entries) {
+        if (entry.threadId !== threadId || !entry.targets.includes(catId)) continue;
+        if (opts?.excludeEntryId && entry.id === opts.excludeEntryId) continue;
+        if (opts?.userId && queueEntryOwnerId(entry) !== opts.userId) continue;
+        if (opts?.sources && !opts.sources.includes(queueEntrySource(entry))) continue;
+        if (
+          opts?.sourceCategories &&
+          (!entry.sourceCategory || !opts.sourceCategories.includes(entry.sourceCategory))
+        ) {
+          continue;
+        }
+        if (opts?.continuationKey !== undefined && entry.payload.sourceRecordId !== opts.continuationKey) continue;
+        return true;
       }
     }
     return false;
   }
 
-  /**
-   * F175: Collect a batch of adjacent user entries for unified execution.
-   * Non-user sources always return a single-entry batch.
-   * User entries batch while: same source, same intent, same targetCats (set equality),
-   * and the exact same server-derived owner authentication provenance.
-   * Returns copies — caller is responsible for marking processing.
-   */
-  collectUserBatch(threadId: string, userId: string): QueueEntry[] {
-    const key = this.scopeKey(threadId, userId);
-    const q = this.queues.get(key);
-    if (!q) return [];
+  /** F122B: Mark a specific entry as processing by ID (cross-user). */
+  collectCompatibleConversationPrefix(
+    head: QueueEntry | null | undefined,
+    resolution?: {
+      readonly routingClass: 'explicit' | 'targetless';
+      readonly requestedTargets: readonly string[];
+      readonly resolvedTargets: readonly string[];
+    },
+  ): QueueEntry[] {
+    if (
+      !head ||
+      head.kind !== 'conversation_input' ||
+      (resolution?.resolvedTargets ?? queueEntryTargetCats(head)).length === 0 ||
+      head.position !== undefined ||
+      head.delivery.steerRequestedAt !== undefined
+    ) {
+      return [];
+    }
 
-    const queued = q.filter((e) => e.status === 'queued');
-    if (queued.length === 0) return [];
+    const queued: QueueEntry[] = [];
+    for (const q of this.queues.values()) {
+      if (!this.queueMatchesThread(q, head.threadId)) continue;
+      queued.push(...q.filter((entry) => entry.status === 'queued' && entry.id !== head.id));
+    }
     queued.sort(InvocationQueue.compareEntries);
 
-    const first = queued[0]!;
-    if (first.source !== 'user') return [{ ...first }];
-
-    const batch: QueueEntry[] = [{ ...first }];
-    const firstTargetsSorted = sorted(first.targetCats);
-    for (let i = 1; i < queued.length; i++) {
-      const e = queued[i]!;
+    const headTargets = sorted([...(resolution?.requestedTargets ?? queueEntryTargetCats(head))]);
+    const routingClass = resolution?.routingClass ?? 'explicit';
+    const prefix: QueueEntry[] = [];
+    for (const candidate of queued) {
       if (
-        e.source !== 'user' ||
-        e.intent !== first.intent ||
-        e.ownerAuthProvenance !== first.ownerAuthProvenance ||
-        !arraysEqual(sorted(e.targetCats), firstTargetsSorted)
-      )
+        candidate.kind !== 'conversation_input' ||
+        queueEntryOwnerId(candidate) !== queueEntryOwnerId(head) ||
+        candidate.execution.intent !== head.execution.intent ||
+        candidate.execution.ownerAuthProvenance !== head.execution.ownerAuthProvenance ||
+        candidate.position !== undefined ||
+        candidate.delivery.steerRequestedAt !== undefined ||
+        (routingClass === 'targetless'
+          ? candidate.targets.length !== 0
+          : !arraysEqual(sorted(queueEntryTargetCats(candidate)), headTargets)) ||
+        (routingClass === 'explicit' &&
+          queueEntryTargetCats(candidate).some((catId) => !isOrdinaryQueueTargetEligible(candidate, catId)))
+      ) {
         break;
-      batch.push({ ...e });
+      }
+      prefix.push(structuredClone(candidate));
     }
-    return batch;
+    return prefix;
   }
 
   /** #555: Whether a specific cat has any queued or processing entries in this thread (any source).
@@ -2365,45 +1906,36 @@ export class InvocationQueue {
         if (e.status === 'queued') {
           return true;
         }
-        if (e.status === 'processing') {
-          const age = now - (e.processingStartedAt ?? e.createdAt);
+        if (e.status === 'claimed' || e.status === 'processing') {
+          const age = now - (e.processingStartedAt ?? e.claimedAt ?? e.enqueuedAt);
           if (age < InvocationQueue.STALE_PROCESSING_THRESHOLD_MS) return true;
         }
       }
     }
-    return false;
-  }
-
-  /** Whether any scope has fresh queued entries for this thread.
-   *  Agent-sourced entries are dispatchable pending work regardless of age;
-   *  user/connector entries keep the stale guard so old interactive messages
-   *  do not permanently force thread-wide queue/busy mode.
-   */
-  hasQueuedForThread(threadId: string): boolean {
-    const now = Date.now();
-    for (const q of this.queues.values()) {
-      if (!this.queueMatchesThread(q, threadId)) continue;
-      if (
-        q.some((e) => {
-          if (e.status !== 'queued') return false;
-          if (e.source === 'agent') return true;
-          return now - e.createdAt < InvocationQueue.STALE_QUEUED_THRESHOLD_MS;
-        })
-      ) {
-        return true;
-      }
+    for (const entries of this.admittedEntries.values()) {
+      if (entries.some((entry) => entry.threadId === threadId && entry.targets.includes(catId))) return true;
     }
     return false;
   }
 
-  /** Whether ordinary scheduling has at least one nonfailed target to select. */
+  /** Durable work remains thread-visible until an explicit admission or terminal transition removes it. */
+  hasQueuedForThread(threadId: string): boolean {
+    for (const q of this.queues.values()) {
+      if (!this.queueMatchesThread(q, threadId)) continue;
+      if (q.some((entry) => entry.status === 'queued')) return true;
+    }
+    return false;
+  }
+
+  /** Whether ordinary scheduling has at least one queued row to select. */
   hasOrdinaryEligibleQueuedForThread(threadId: string): boolean {
     for (const q of this.queues.values()) {
       if (!this.queueMatchesThread(q, threadId)) continue;
       if (
         q.some(
           (entry) =>
-            entry.status === 'queued' && entry.targetCats.some((catId) => isOrdinaryQueueTargetEligible(entry, catId)),
+            entry.status === 'queued' &&
+            (entry.targets.length === 0 || entry.targets.some((catId) => isOrdinaryQueueTargetEligible(entry, catId))),
         )
       ) {
         return true;
@@ -2412,11 +1944,7 @@ export class InvocationQueue {
     return false;
   }
 
-  /**
-   * Whether Queue still owns work for this thread, including failed targets
-   * awaiting explicit retry. Actual dispatch selectors apply per-target
-   * eligibility separately.
-   */
+  /** Whether Queue still owns queued work for this thread. */
   hasDispatchableQueuedForThread(threadId: string): boolean {
     for (const q of this.queues.values()) {
       if (!this.queueMatchesThread(q, threadId)) continue;
@@ -2425,70 +1953,13 @@ export class InvocationQueue {
     return false;
   }
 
-  /** F185 AC-6: Whether any non-agent entry (user or connector) is queued for this thread. */
-  hasQueuedNonAgentForThread(threadId: string): boolean {
+  /** Whether a public conversation input is waiting; private/wake rows do not drive text-scan fairness. */
+  hasQueuedConversationInputsForThread(threadId: string): boolean {
     for (const q of this.queues.values()) {
       if (!this.queueMatchesThread(q, threadId)) continue;
-      if (q.some((e) => e.status === 'queued' && e.source !== 'agent')) return true;
+      if (q.some((entry) => entry.status === 'queued' && entry.kind === 'conversation_input')) return true;
     }
     return false;
-  }
-
-  /**
-   * Whether any user-sourced message is queued for this thread (user-only filter).
-   * F185 Phase B: text-scan fairness gate now uses hasQueuedNonAgentForThread instead.
-   * Retained for backward compatibility but no longer used by fairness gates.
-   */
-  hasQueuedUserMessagesForThread(threadId: string): boolean {
-    for (const q of this.queues.values()) {
-      if (!this.queueMatchesThread(q, threadId)) continue;
-      if (q.some((e) => e.status === 'queued' && e.source === 'user')) return true;
-    }
-    return false;
-  }
-
-  /**
-   * #815: Find queued A2A trigger entries whose target cats are all active.
-   * Scoped to a single userId — prompt context assembly is per-user, so
-   * consuming another user's A2A entry would silently lose their trigger.
-   * Returns candidates without removing them — caller performs async
-   * delivery-status filtering, then calls `consumeEntriesById` to remove.
-   */
-  findSubsumedA2ACandidates(threadId: string, userId: string, activeCatSet: Set<string>): QueueEntry[] {
-    const q = this.queues.get(this.scopeKey(threadId, userId));
-    if (!q) return [];
-    const candidates: QueueEntry[] = [];
-    for (const e of q) {
-      if (e.status !== 'queued') continue;
-      if (e.sourceCategory !== 'a2a') continue;
-      if (!e.targetCats.every((cat) => activeCatSet.has(cat))) continue;
-      if (!e.targetCats.every((cat) => isOrdinaryQueueTargetEligible(e, cat))) continue;
-      candidates.push(e);
-    }
-    return candidates;
-  }
-
-  /**
-   * #815: Remove specific entries by ID. Returns removed entries.
-   * Used after async filtering of A2A candidates by delivery status.
-   */
-  consumeEntriesById(entryIds: Set<string>): QueueEntry[] {
-    const consumed: QueueEntry[] = [];
-    for (const q of this.queues.values()) {
-      for (let i = q.length - 1; i >= 0; i--) {
-        if (entryIds.has(q[i]!.id)) {
-          this.originalContents.delete(q[i]!.id);
-          consumed.push(q.splice(i, 1)[0]!);
-        }
-      }
-    }
-    if (consumed.length > 0) {
-      this.log.info(
-        { count: consumed.length, entryIds: consumed.map((e) => e.id) },
-        '#815: consumed A2A entries by ID',
-      );
-    }
-    return consumed;
   }
 
   // ── Internal helpers ──
