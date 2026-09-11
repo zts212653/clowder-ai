@@ -56,3 +56,48 @@ jobs:
           packages/api/test/managed-runner-windows.test.js
       - name: Desktop config behavioral tests (PowerShell)
         run: node --test desktop/generate-desktop-config-behavior.test.js
+      # Platform-independent decision logic behind the macOS bundle arch guard.
+      # It refuses to ship a DMG whose native modules target the build host
+      # instead of the requested arch (measured on run 34461497456).
+      - name: Desktop macOS bundle arch-guard tests
+        run: node --test desktop/scripts/lib/mac-native-arch.test.mjs
+      # The Windows installer bundles a portable Node runtime. Guessing its
+      # version produced installers whose API could not load native modules.
+      - name: Desktop build Node-version guard tests
+        run: node --test desktop/scripts/lib/resolve-build-node.test.js
+      # runtime-manifest.json is the single source for the desktop runtime
+      # versions. This guard fails when package.json, the CI workflows, the
+      # build scripts or the README drift away from it.
+      - name: Desktop runtime-manifest consistency guard
+        run: node --test desktop/scripts/lib/runtime-manifest.test.mjs
+      # Decides whether an INSTALLED tree is usable. The real check runs against
+      # a freshly installed app (see ci/desktop-install-smoke); these cases keep
+      # the decision logic honest without needing an installer.
+      - name: Desktop installed-layout checks
+        run: node --test desktop/scripts/lib/installed-layout.test.mjs
+      # The runtime smoke starts from an installed tree (see ci/desktop-install-smoke);
+      # these cases cover the decisions it makes about what to probe.
+      - name: Desktop runtime-smoke helper tests
+        run: node --test desktop/scripts/smoke-runtime.test.js
+      # The Web build wrapper spawned node_modules/.bin tools without a shell,
+      # which is ENOENT on Windows — this is what made the Windows installer
+      # impossible to build. Windows-only in effect; harmless elsewhere.
+      - name: Web build signal-exit wrapper tests
+        run: node --test scripts/run-preserving-signal-exit.test.mjs
+      # Platform-agnostic desktop tests, wired here because this workflow is the
+      # one that reliably runs on PRs (the public test lane is currently red on
+      # main before it reaches desktop/*.test.js).
+      - name: Desktop runtime tests (Redis ownership, loopback, warnings, shutdown)
+        run: >-
+          node --test
+          desktop/redis-ownership.test.js
+          desktop/desktop-instance.test.js
+          desktop/service-manager-redis-ownership.test.js
+          desktop/service-manager-loopback.test.js
+          desktop/service-manager-shutdown.test.js
+          desktop/service-manager-ports.test.js
+          desktop/service-manager.test.js
+          desktop/port-pair.test.js
+          desktop/routes-manifest.test.js
+          desktop/shutdown-plan.test.js
+          desktop/startup-warning.test.js

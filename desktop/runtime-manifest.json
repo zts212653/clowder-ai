@@ -1,0 +1,36 @@
+{
+  "schemaVersion": 1,
+  "description": "Single source of truth for the runtime the desktop installers ship. Build scripts read their versions from here instead of repeating literals, and runtime-manifest.test.mjs fails if any of them drift apart.",
+  "node": {
+    "minMajor": 24,
+    "distribution": "https://nodejs.org/dist",
+    "note": "The bundled portable Node must match the Node that compiled the native modules (better-sqlite3, node-pty, sharp, sqlite-vec), so build scripts download the version of the build host rather than a pin. This major is the floor that host must clear; root package.json engines.node carries the same requirement and the guard keeps the two in sync."
+  },
+  "targets": [
+    { "platform": "win32", "arch": "x64" },
+    { "platform": "darwin", "arch": "arm64" },
+    { "platform": "darwin", "arch": "x64" }
+  ],
+  "redis": {
+    "darwin": {
+      "version": "7.4.1",
+      "distribution": "https://download.redis.io/releases",
+      "note": "No official prebuilt macOS binary exists, so build-mac.sh compiles this version from source per architecture."
+    },
+    "win32": {
+      "version": "8.10.1",
+      "distribution": "https://github.com/redis-windows/redis-windows/releases",
+      "assetNameTemplate": "Redis-{version}-Windows-x64-msys2.zip",
+      "note": "Previously resolved via the repository's releases/latest, which silently changed the bundled Redis between builds. Pinned to the version latest pointed at when this manifest was written, so the behaviour is frozen rather than changed."
+    }
+  },
+  "knownDivergence": [
+    {
+      "id": "redis-version-across-platforms",
+      "detail": "darwin ships Redis 7.4.1 while win32 ships Redis 8.10.1.",
+      "why": "win32 used a moving `releases/latest` target and had already advanced to the 8.x line while darwin stayed on 7.4.1. Both are now pinned, but not to the same value.",
+      "decision": "Accepted: each platform stays pinned where it is. Unifying them would change the on-disk format that existing users already have, and a downgrade can make Redis refuse to load an existing data directory; that is a product/data-compatibility decision, and the owner chose to keep the divergence rather than resolve it inside a build script.",
+      "decidedIn": "PR #11 review"
+    }
+  ]
+}

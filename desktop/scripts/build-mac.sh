@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # build-mac.sh — Produces macOS DMG installers for Clowder AI.
 #
-# Mirrors desktop/scripts/build-desktop.ps1 for macOS. Outputs two DMGs
-# (arm64 + x64) under dist/:
+# Mirrors desktop/scripts/build-desktop.ps1 for macOS. Produces a DMG per
+# requested arch under dist/ (default: the build host's arch):
 #   ClowderAI-0.10.1-arm64.dmg
 #   ClowderAI-0.10.1-x64.dmg
 #
@@ -12,12 +12,26 @@
 #   - For x64 Redis on Apple Silicon: Rosetta 2 (softwareupdate --install-rosetta)
 #
 # Usage:
-#   ./desktop/scripts/build-mac.sh                 # full pipeline
+#   ./desktop/scripts/build-mac.sh                 # host arch only (default)
+#   ./desktop/scripts/build-mac.sh --arch both     # arm64 + x64 (see warning)
+#   ./desktop/scripts/build-mac.sh --arch arm64    # explicit single arch
 #   ./desktop/scripts/build-mac.sh --skip-web      # reuse packages/web/.next
 #   ./desktop/scripts/build-mac.sh --skip-deploy   # reuse bundled/deploy/
 #   ./desktop/scripts/build-mac.sh --skip-redis    # reuse bundled/redis-darwin-*
 #   ./desktop/scripts/build-mac.sh --skip-node     # reuse bundled/node-darwin-*
-#   ./desktop/scripts/build-mac.sh --arch arm64    # build single arch only
+#
+# ⚠️ Architecture correctness
+# Steps 1–2 run a SINGLE `pnpm install` / `pnpm deploy` on this host, so native
+# modules (better-sqlite3, sqlite-vec, sharp) are installed for the HOST arch
+# only. Packaging a foreign arch on this host therefore embeds host-arch
+# binaries and yields a bundle whose API crashes on load. Measured on an arm64
+# host (run 34461497456): the x64 .app shipped an arm64 better_sqlite3.node and
+# an arm64 sqlite-vec vec0.dylib.
+#
+# The default is therefore host-arch-only, and every built bundle is verified
+# fail-closed before a DMG is produced. `--arch both` still works, but only
+# when the dependency tree genuinely carries both archs; use one runner per arch
+# (as .github/workflows/build-mac-dmg.yml does) for real dual-arch releases.
 #
 # Signing: electron-builder signing is disabled (identity=null in
 # desktop/package.json) to avoid EMFILE with large bundles. Ad-hoc signing
@@ -32,14 +46,15 @@ SKIP_WEB=0
 SKIP_DEPLOY=0
 SKIP_REDIS=0
 SKIP_NODE=0
-ARCHS=("arm64" "x64")
+# Resolved to the host arch below, once die() is available.
+ARCH_FLAG=""
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --skip-web)    SKIP_WEB=1; shift ;;
     --skip-deploy) SKIP_DEPLOY=1; shift ;;
     --skip-redis)  SKIP_REDIS=1; shift ;;
     --skip-node)   SKIP_NODE=1; shift ;;
-    --arch)        ARCHS=("$2"); shift 2 ;;
+    --arch)        ARCH_FLAG="$2"; shift 2 ;;
     *) echo "Unknown flag: $1" >&2; exit 2 ;;
   esac
 done
@@ -60,6 +75,34 @@ err()   { printf "  \033[0;31m[ERR]\033[0m %s\n" "$*" >&2; }
 die()   { err "$*"; exit 1; }
 
 [[ "$(uname -s)" == "Darwin" ]] || die "build-mac.sh must run on macOS (detected: $(uname -s))"
+
+# ─── Architecture selection ─────────────────────────────────────────────
+# One `pnpm install` per run means only the HOST arch's native modules are
+# present, so packaging a foreign arch here would embed the wrong binaries.
+# Default to the host arch; see the header warning for the measurements.
+case "$(uname -m)" in
+  arm64)  HOST_ARCH="arm64" ;;
+  x86_64) HOST_ARCH="x64" ;;
+  *)      die "Unsupported build host architecture: $(uname -m) (expected arm64 or x86_64)" ;;
+esac
+
+case "$ARCH_FLAG" in
+  "")        ARCHS=("$HOST_ARCH") ;;
+  both)      ARCHS=("arm64" "x64") ;;
+  arm64|x64) ARCHS=("$ARCH_FLAG") ;;
+  *)         die "Unsupported --arch value: ${ARCH_FLAG} (expected arm64, x64, or both)" ;;
+esac
+
+ok "Building for: ${ARCHS[*]} (host: ${HOST_ARCH})"
+
+# Packaged bundle directory for an arch, as produced by electron-builder.
+app_dir_for_arch() {
+  case "$1" in
+    arm64) printf '%s' "${DESKTOP_DIR}/dist/mac-arm64" ;;
+    x64)   printf '%s' "${DESKTOP_DIR}/dist/mac" ;;
+    *)     die "Unsupported macOS arch: $1 (expected arm64 or x64)" ;;
+  esac
+}
 
 # ─── Step 1: Build web app ──────────────────────────────────────────────
 bold "Step 1/6 — Build web application"
@@ -153,7 +196,9 @@ bold "Step 4/6 — Build Redis portable from source"
 # No official pre-compiled macOS binary exists for Redis. We compile from
 # source (~30s per arch on modern Mac). For the non-native arch we use
 # `arch -x86_64` (requires Rosetta 2 on Apple Silicon hosts).
-REDIS_VERSION="7.4.1"
+# Version has exactly one home: desktop/runtime-manifest.json.
+REDIS_VERSION="$(node "${SCRIPT_DIR}/lib/read-runtime-manifest.mjs" redis.darwin.version)" \
+  || die "Could not read redis.darwin.version from desktop/runtime-manifest.json (see the error above)"
 REDIS_URL="https://download.redis.io/releases/redis-${REDIS_VERSION}.tar.gz"
 
 build_redis() {
@@ -167,13 +212,13 @@ build_redis() {
     ok "redis-darwin-${arch} already present (${REDIS_VERSION})"
     return
   fi
-  local host_arch; host_arch="$(uname -m)"  # arm64 | x86_64
   local need_rosetta=0
-  if [[ "$arch" == "x64" && "$host_arch" == "arm64" ]]; then
+  if [[ "$arch" == "x64" && "$HOST_ARCH" == "arm64" ]]; then
     need_rosetta=1
     if ! arch -x86_64 /usr/bin/true 2>/dev/null; then
-      warn "Rosetta 2 not installed; skipping x64 Redis. Run: softwareupdate --install-rosetta"
-      return
+      # Fail-closed: silently skipping leaves the x64 DMG without Redis, which
+      # the app papers over by falling back to a non-persistent memory store.
+      die "Cannot build x64 Redis on this arm64 host: Rosetta 2 is not installed. Why: the x64 DMG would ship without a Redis binary and the app would silently lose session persistence. Fix: run 'softwareupdate --install-rosetta --agree-to-license', or build the x64 package on an Intel runner."
     fi
   fi
   mkdir -p "$out"
@@ -253,11 +298,7 @@ npx electron-builder "${EB_ARGS[@]}" || die "electron-builder failed"
 # Ad-hoc signing changes "damaged" → "unidentified developer" on macOS
 # Gatekeeper — users right-click → Open on first launch.
 for arch in "${ARCHS[@]}"; do
-  case "$arch" in
-    arm64) app_dir="${DESKTOP_DIR}/dist/mac-arm64" ;;
-    x64) app_dir="${DESKTOP_DIR}/dist/mac" ;;
-    *) continue ;;
-  esac
+  app_dir="$(app_dir_for_arch "$arch")"
   app_bundle="${app_dir}/Clowder AI.app"
   if [[ -d "$app_bundle" ]]; then
     echo "  Ad-hoc signing ${arch} bundle ..."
@@ -267,6 +308,22 @@ for arch in "${ARCHS[@]}"; do
     codesign --verify --deep "$app_bundle" || die "codesign verify ${arch} failed"
     ok "Ad-hoc signed and verified ${arch}"
   fi
+done
+
+# ─── Architecture verification (fail-closed) ────────────────────────────
+# Steps 1–2 installed native modules for the HOST arch only, so packaging a
+# foreign arch embeds binaries that machine cannot load. The bundle builds and
+# signs cleanly and only fails once the API touches SQLite — far too late to
+# notice. Verify every bundle now, before spending minutes on DMG assembly.
+bold "Verifying native module architecture"
+for arch in "${ARCHS[@]}"; do
+  app_dir="$(app_dir_for_arch "$arch")"
+  app_bundle="${app_dir}/Clowder AI.app"
+  [[ -d "$app_bundle" ]] || die "Bundle missing for ${arch}: ${app_bundle} (electron-builder did not produce the expected layout)"
+  echo "  Checking ${arch} ..."
+  node "${SCRIPT_DIR}/verify-mac-bundle-arch.mjs" --app "$app_bundle" --arch "$arch" \
+    || die "Native architecture verification failed for ${arch} — refusing to package a DMG that would crash on the target Mac"
+  ok "${arch} bundle architecture verified"
 done
 
 # Create DMGs from .app bundles using hdiutil (handles large bundles reliably).
@@ -381,11 +438,7 @@ APPLESCRIPT
 }
 
 for arch in "${ARCHS[@]}"; do
-  case "$arch" in
-    arm64) app_dir="${DESKTOP_DIR}/dist/mac-arm64" ;;
-    x64) app_dir="${DESKTOP_DIR}/dist/mac" ;;
-    *) die "Unsupported macOS arch: ${arch}" ;;
-  esac
+  app_dir="$(app_dir_for_arch "$arch")"
   dmg_name="ClowderAI-${VERSION}-${arch}.dmg"
   dmg_out="${DIST_DIR}/${dmg_name}"
   if [[ ! -d "$app_dir" ]]; then

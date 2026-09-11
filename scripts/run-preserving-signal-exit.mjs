@@ -14,6 +14,12 @@ let forwardedSignal = null;
 const child = spawn(command, args, {
   env: process.env,
   stdio: 'inherit',
+  // Windows cannot execute the `.cmd` shims that pnpm installs into
+  // node_modules/.bin without a shell, so `next build` failed with
+  // "spawn next ENOENT" and the Web build — and therefore the desktop
+  // installer — could not run there at all. POSIX keeps shell:false so the
+  // arguments are passed literally.
+  shell: process.platform === 'win32',
 });
 
 for (const signal of Object.keys(signalExitCodes)) {
