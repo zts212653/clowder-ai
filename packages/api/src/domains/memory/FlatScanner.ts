@@ -1,6 +1,6 @@
 // F186 Phase B: Level 0 scanner — indexes any markdown directory without structure assumptions
 
-import { lstatSync, readdirSync, readFileSync } from 'node:fs';
+import { existsSync, lstatSync, readdirSync, readFileSync } from 'node:fs';
 import { basename, join, relative } from 'node:path';
 import type { RepoScanner, ScannedEvidence } from './interfaces.js';
 
@@ -21,6 +21,7 @@ const SKIP_DIRS = new Set([
   '.claude',
   '.obsidian',
   '.worktrees',
+  'worktrees',
   '.vscode',
   '.idea',
   'coverage',
@@ -70,6 +71,9 @@ export class FlatScanner implements RepoScanner {
         if (stat.isDirectory()) {
           if (SKIP_DIRS.has(entry)) continue;
           if (this.isExcluded(relative(root, fullPath))) continue;
+          // A nested repository (`.git` directory, or worktree-style `.git` file) owns its own
+          // collection; descending into it would duplicate its documents into this one.
+          if (existsSync(join(fullPath, '.git'))) continue;
           this.walkDir(fullPath, root, results, depth + 1);
         } else if (stat.isFile() && entry.endsWith('.md')) {
           if (this.isExcluded(relative(root, fullPath))) continue;

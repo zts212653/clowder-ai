@@ -93,6 +93,37 @@ describe('FlatScanner', () => {
     assert.equal(scanner.discover(tmpDir).length, 1);
   });
 
+  it('skips worktrees/ directories (container-project duplicate regression)', () => {
+    writeFileSync(join(tmpDir, 'doc.md'), '# Doc');
+    mkdirSync(join(tmpDir, 'worktrees', 'feat-x', 'docs'), { recursive: true });
+    writeFileSync(join(tmpDir, 'worktrees', 'feat-x', 'docs', 'dup.md'), '# Dup');
+
+    const scanner = new FlatScanner('test:docs');
+    const results = scanner.discover(tmpDir);
+
+    assert.equal(results.length, 1, 'worktrees/ must not be scanned');
+    assert.equal(results[0].item.anchor, 'test:docs:doc/doc');
+  });
+
+  it('does not descend into nested git repositories', () => {
+    writeFileSync(join(tmpDir, 'doc.md'), '# Doc');
+
+    // Nested repo: .git is a directory
+    mkdirSync(join(tmpDir, 'nested', '.git'), { recursive: true });
+    writeFileSync(join(tmpDir, 'nested', 'inner.md'), '# Inner');
+
+    // Nested worktree: .git is a file pointing at the parent repo
+    mkdirSync(join(tmpDir, 'linked', 'docs'), { recursive: true });
+    writeFileSync(join(tmpDir, 'linked', '.git'), 'gitdir: ../.git/worktrees/linked');
+    writeFileSync(join(tmpDir, 'linked', 'docs', 'inner.md'), '# Inner');
+
+    const scanner = new FlatScanner('test:docs');
+    const results = scanner.discover(tmpDir);
+
+    assert.equal(results.length, 1, 'only the root document should be discovered');
+    assert.equal(results[0].item.anchor, 'test:docs:doc/doc');
+  });
+
   it('respects depth limit of 10', () => {
     let dir = tmpDir;
     for (let i = 0; i < 12; i++) {

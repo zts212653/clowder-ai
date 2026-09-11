@@ -38,6 +38,40 @@ describe('SecretScanner', () => {
     assert.equal(findings[0].type, 'high-entropy-secret');
   });
 
+  // Regression: the container project `clowder-ai` was blocked + purged because prose in
+  // docs/features/F236-anchor-first-context-entry.md ("…correlation key = messageId/taskId/
+  // sourceTool/previewEventId…") matched the high-entropy fallback. Documentation describing
+  // a key name is not an assignment.
+  it('does not flag prose that mentions a key mid-sentence (F236 regression)', () => {
+    const content =
+      'per-tool open-rate 需要 **preview-event ↔ drill-event 可 join 的事件模型**（correlation key = messageId/taskId/sourceTool/previewEventId）；**高基数 id 不能做 metric label**。\n';
+    assert.equal(SecretScanner.scan(content, 'F236.md').length, 0);
+  });
+
+  it('does not flag identifier enumerations even in key position (F236 regression)', () => {
+    const content = '- key = messageId/taskId/sourceTool/previewEventId\n';
+    assert.equal(SecretScanner.scan(content, 'notes.md').length, 0);
+  });
+
+  it('does not flag path-like enumerations in key position', () => {
+    const content = 'auth = docs/harness-feedback/eval-domains/publish\n';
+    assert.equal(SecretScanner.scan(content, 'notes.md').length, 0);
+  });
+
+  it('still flags assignment-style high-entropy secrets containing separators', () => {
+    const content = 'token = "Kj8sLq/2mNp9Rt/4vWx7YzAbCdEfGhIjKlMn"\n';
+    const findings = SecretScanner.scan(content, 'env.md');
+    assert.equal(findings.length, 1);
+    assert.equal(findings[0].type, 'high-entropy-secret');
+  });
+
+  it('still flags namespaced assignment keys', () => {
+    const content = 'cfg.apiKey = "a8f3b2c1d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9"\n';
+    const findings = SecretScanner.scan(content, 'code.md');
+    assert.equal(findings.length, 1);
+    assert.equal(findings[0].type, 'high-entropy-secret');
+  });
+
   it('returns empty for safe content', () => {
     const content = '# Design Notes\n\nThis is a safe document about architecture.\n';
     const findings = SecretScanner.scan(content, 'design.md');

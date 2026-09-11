@@ -22,7 +22,23 @@ const PATTERNS: Pattern[] = [
 
 const CODE_FENCE_RE = /^\s{0,3}[`~]{3,}/;
 const PLACEHOLDER_RE = /EXAMPLE|PLACEHOLDER|YOUR[_-]|REPLACE|CHANGEME|xxx/i;
-const KEY_CONTEXT_RE = /(?:key|token|secret|password|credential|auth)\s*[:=]/i;
+
+/**
+ * The entropy fallback only applies to a real assignment shape: the credential-ish key must sit in
+ * key position — line start behind an optional list bullet, quote, `export`/`const`-style keyword,
+ * or a dotted/namespaced prefix (`cfg.apiKey =`). Prose that merely *mentions* a key
+ * (e.g. "（correlation key = messageId/taskId/…）") is documentation, not an assignment.
+ */
+const ASSIGNMENT_KEY_RE =
+  /^[\s>*\-•]*(?:(?:export|const|let|var|set)\s+)?(?:[\w$]+(?:\.[\w$]+|\[[^\]]*\])*\.)?["'`]?[\w.-]*(?:key|token|secret|password|credential|auth)[\w.-]*["'`]?\*{0,2}\s*[:=]/i;
+
+/** `/`, `.`, `-` or `_`-joined runs of identifier/path segments (`messageId/taskId/sourceTool`, `docs/eval-domains/publish`) are enumerations, not secrets. */
+const IDENTIFIER_CHAIN_RE = /^[A-Za-z][A-Za-z0-9_-]*(?:[/.][A-Za-z][A-Za-z0-9_-]*)+$/;
+
+function isIdentifierEnumeration(value: string): boolean {
+  // Only digit-free chains qualify: real high-entropy secrets almost always carry digits.
+  return IDENTIFIER_CHAIN_RE.test(value) && !/\d/.test(value);
+}
 
 export class SecretScanner {
   static scan(content: string, filePath: string): SecretFinding[] {
@@ -53,9 +69,14 @@ export class SecretScanner {
         }
       }
 
-      if (!found && KEY_CONTEXT_RE.test(line)) {
+      if (!found && ASSIGNMENT_KEY_RE.test(line)) {
         const valueMatch = line.match(/[:=]\s*["']?([A-Za-z0-9_\-/.+=]{32,})["']?/);
-        if (valueMatch && !PLACEHOLDER_RE.test(valueMatch[1]) && shannonEntropy(valueMatch[1]) > 3.5) {
+        if (
+          valueMatch &&
+          !PLACEHOLDER_RE.test(valueMatch[1]) &&
+          !isIdentifierEnumeration(valueMatch[1]) &&
+          shannonEntropy(valueMatch[1]) > 3.5
+        ) {
           findings.push({
             type: 'high-entropy-secret',
             file: filePath,
