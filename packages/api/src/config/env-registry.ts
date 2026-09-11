@@ -856,6 +856,65 @@ export const ENV_VARS: EnvDefinition[] = [
 
   // --- cli ---
   {
+    name: 'CAT_PROVIDER_VERSION_PROBE',
+    defaultValue: '(未设置)',
+    description:
+      '设为 1 时，CLI 可用性检测额外探测版本号（会启动 CLI 进程）。默认关闭：部分 agent CLI 的版本子命令会拉起完整进程并留下孤儿（LL-055）',
+    category: 'cli',
+    sensitive: false,
+    restartRequired: true,
+  },
+  {
+    name: 'CAT_PROVIDER_DISCOVERY_INTERVAL_MS',
+    defaultValue: '300000',
+    description: 'CLI 可用性周期复检间隔（毫秒）；0 = 只在进程启动时检测一次',
+    category: 'cli',
+    sensitive: false,
+    runtimeEditable: false,
+    restartRequired: true,
+  },
+  {
+    name: 'CAT_ANTHROPIC_PATH',
+    defaultValue: '(未设置)',
+    description:
+      '把 Claude CLI 固定到指定二进制路径，覆盖 PATH 探测。路径无效时报错而不回退到 PATH，避免启动到非预期二进制',
+    category: 'cli',
+    sensitive: false,
+    restartRequired: true,
+  },
+  {
+    name: 'CAT_OPENAI_PATH',
+    defaultValue: '(未设置)',
+    description: '把 Codex CLI 固定到指定二进制路径，覆盖 PATH 探测（行为同 CAT_ANTHROPIC_PATH）',
+    category: 'cli',
+    sensitive: false,
+    restartRequired: true,
+  },
+  {
+    name: 'CAT_GOOGLE_PATH',
+    defaultValue: '(未设置)',
+    description: '把 Gemini / Antigravity CLI（agy）固定到指定二进制路径，覆盖 PATH 探测',
+    category: 'cli',
+    sensitive: false,
+    restartRequired: true,
+  },
+  {
+    name: 'CAT_KIMI_PATH',
+    defaultValue: '(未设置)',
+    description: '把 Kimi CLI 固定到指定二进制路径，覆盖 PATH 探测',
+    category: 'cli',
+    sensitive: false,
+    restartRequired: true,
+  },
+  {
+    name: 'CAT_OPENCODE_PATH',
+    defaultValue: '(未设置)',
+    description: '把 OpenCode CLI 固定到指定二进制路径，覆盖 PATH 探测',
+    category: 'cli',
+    sensitive: false,
+    restartRequired: true,
+  },
+  {
     name: 'CLI_TIMEOUT_MS',
     defaultValue: DEFAULT_CLI_TIMEOUT_LABEL,
     description: 'CLI 自动终止超时（0 = 关闭，仅人工取消）',

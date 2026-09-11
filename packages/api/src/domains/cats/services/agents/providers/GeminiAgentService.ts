@@ -37,7 +37,11 @@ import { type AgyProfileConfig, type CatId, type CliDiagnostics, createCatId } f
 import { normalizeAgyGeminiModelSelector } from '../../../../../config/agy-gemini-models.js';
 import { getCatModel } from '../../../../../config/cat-models.js';
 import { createModuleLogger } from '../../../../../infrastructure/logger.js';
-import { buildCliDiagnostics, buildSilentCompletionDiagnostic } from '../../../../../utils/cli-diagnostics.js';
+import {
+  buildCliDiagnostics,
+  buildCliNotFoundDiagnostic,
+  buildSilentCompletionDiagnostic,
+} from '../../../../../utils/cli-diagnostics.js';
 import { formatCliExitError } from '../../../../../utils/cli-format.js';
 import { formatCliNotFoundError, resolveCliCommand } from '../../../../../utils/cli-resolve.js';
 import {
@@ -652,7 +656,7 @@ export class GeminiAgentService implements AgentService {
           type: 'error' as const,
           catId: this.catId,
           error: formatCliNotFoundError('gemini'),
-          metadata,
+          metadata: { ...metadata, cliDiagnostics: buildCliNotFoundDiagnostic('gemini') },
           timestamp: Date.now(),
         };
         yield { type: 'done' as const, catId: this.catId, metadata, timestamp: Date.now() };
@@ -1011,7 +1015,7 @@ export class GeminiAgentService implements AgentService {
           type: 'error' as const,
           catId: this.catId,
           error: formatCliNotFoundError('agy'),
-          metadata,
+          metadata: { ...metadata, cliDiagnostics: buildCliNotFoundDiagnostic('agy') },
           timestamp: Date.now(),
         };
         yield { type: 'done' as const, catId: this.catId, metadata, timestamp: Date.now() };

@@ -8,118 +8,99 @@
  * SIGTERM on `exec` timeout, and macOS lacks PR_SET_PDEATHSIG so the
  * orphaned child burns CPU forever (PPID=1, ~67% CPU per leak observed
  * 2026-05-08). PATH probes can't spawn anything we have to babysit.
+ *
+ * This module is now a *projection* of the canonical detector
+ * (`agents/providers/provider-detection.ts`). It used to carry its own five-entry CLI table,
+ * which had drifted from the catalog: it probed `gemini` while four members in
+ * cat-template.json actually run `agy`, so the wizard under-reported what was installed.
+ * The ClientId → binary mapping now lives only in the shared descriptor registry.
  */
 
-import { execFile } from 'node:child_process';
-import { promisify } from 'node:util';
-import { resolveCliCommand } from '../../../../utils/cli-resolve.js';
-
-const execFileAsync = promisify(execFile);
+import { CLIENT_DESCRIPTORS, type ClientId, type ClientToolId } from '@cat-cafe/shared';
+import {
+  detectProviderAvailability,
+  type ProviderAvailability,
+  type ProviderDetectionDeps,
+} from '../agents/providers/provider-detection.js';
 
 export interface DetectedClient {
-  /** Client ID — the CLI tool identity (claude, codex, gemini, opencode, kimi) */
-  client: 'claude' | 'codex' | 'gemini' | 'opencode' | 'kimi';
+  /** Client ID — the CLI tool identity (claude, codex, agy, opencode, kimi) */
+  client: ClientToolId;
   /** Provider key matching ClientValue in hub-cat-editor (anthropic, openai, etc.) */
-  provider: 'anthropic' | 'openai' | 'google' | 'opencode' | 'kimi';
+  provider: ClientId;
   /** Human-readable label */
   label: string;
-  /** CLI binary name */
+  /** Binary name that resolved, or the first candidate when nothing resolved */
   cli: string;
   /** Whether the CLI binary is found in PATH */
   installed: boolean;
   /**
-   * Reserved field — historically held the CLI's `--version` output but that probe
-   * was removed (see LL-055 src extension). Always undefined now; kept for frontend
-   * type compat (ClientStep renders `{c.version && <span>v{version}</span>}` so
-   * undefined naturally hides the line).
+   * Only populated when `CAT_PROVIDER_VERSION_PROBE=1`. Version probing is opt-in because it
+   * spawns the CLI; see the module header.
    */
   version?: string;
   /** Whether an API key env var is set for this provider */
   hasApiKey: boolean;
+  /** Copy-pasteable install command, so the wizard can show the fix instead of a static hint */
+  installHint: string;
+  /** Actionable reason when the CLI is not installed */
+  reason?: string;
 }
 
 interface CliSpec {
-  client: DetectedClient['client'];
-  provider: DetectedClient['provider'];
+  client: ClientToolId;
+  provider: ClientId;
   label: string;
+  /** Every candidate binary name, highest priority first. */
+  commands: readonly string[];
   cli: string;
   envKey: string;
 }
 
-const CLI_SPECS: CliSpec[] = [
-  { client: 'claude', provider: 'anthropic', label: 'Claude', cli: 'claude', envKey: 'ANTHROPIC_API_KEY' },
-  { client: 'codex', provider: 'openai', label: 'Codex', cli: 'codex', envKey: 'OPENAI_API_KEY' },
-  { client: 'opencode', provider: 'opencode', label: 'OpenCode', cli: 'opencode', envKey: 'ANTHROPIC_API_KEY' },
-  { client: 'gemini', provider: 'google', label: 'Gemini', cli: 'gemini', envKey: 'GOOGLE_API_KEY' },
-  { client: 'kimi', provider: 'kimi', label: 'Kimi', cli: 'kimi', envKey: 'MOONSHOT_API_KEY' },
-];
+/** Descriptor-backed detection specs, highest-priority binary first. */
+const CLI_SPECS: CliSpec[] = CLIENT_DESCRIPTORS.flatMap((descriptor) => {
+  const command = descriptor.commands[0];
+  if (!descriptor.localCli || descriptor.toolId === null || command === undefined) return [];
+  return [
+    {
+      client: descriptor.toolId,
+      provider: descriptor.clientId,
+      label: descriptor.label,
+      commands: descriptor.commands,
+      cli: command,
+      envKey: descriptor.probe.apiKeyEnv ?? '',
+    },
+  ];
+});
 
-/**
- * Returns true iff the binary exists on PATH. Uses `command -v` via `execFile`
- * (no shell, no agent spawn). Windows falls back to `where`. 1s timeout is
- * orders of magnitude over what a PATH lookup needs but tolerates a slow disk.
- *
- * Exposed as a parameter so tests can substitute a deterministic stub —
- * `detectAvailableClients({ existsOnPath })` in the test boundary.
- */
-export type ExistsOnPath = (cli: string) => Promise<boolean>;
-
-const defaultExistsOnPath: ExistsOnPath = async (cli) => {
-  // `command -v` is POSIX, returns 0 + path on stdout if found, 1 otherwise.
-  // execFile (no shell) prevents argument injection; cli value comes from a
-  // closed enum so it's already trusted, but we keep the safe primitive.
-  const probeCmd = process.platform === 'win32' ? 'where' : 'command';
-  const probeArgs = process.platform === 'win32' ? [cli] : ['-v', cli];
-  try {
-    if (process.platform === 'win32') {
-      await execFileAsync(probeCmd, probeArgs, { timeout: 1000 });
-    } else {
-      // `command -v` is a shell builtin on POSIX — execFile can't run it directly.
-      // Use `/bin/sh -c "command -v <cli>"` with cli passed as positional arg
-      // (sh sets $0/$1 from positional args, no interpolation).
-      await execFileAsync('/bin/sh', ['-c', 'command -v "$1"', '_probe', cli], { timeout: 1000 });
-    }
-    return true;
-  } catch {
-    // PATH probe failed — fall back to well-known directory search (macOS GUI
-    // apps / Electron don't inherit the user's shell PATH).
-    // #894: skipPathProbe since we already probed PATH above; only scan fallback dirs.
-    return resolveCliCommand(cli, { skipPathProbe: true }) !== null;
-  }
-};
-
-async function checkCli(spec: CliSpec, existsOnPath: ExistsOnPath): Promise<DetectedClient> {
-  // A throwing probe must NOT propagate — one bad CLI shouldn't tank the
-  // whole detection. Treat any error as "not installed" (same observable
-  // result as a probe that resolved false).
-  let installed = false;
-  try {
-    installed = await existsOnPath(spec.cli);
-  } catch {
-    installed = false;
-  }
+/** Project one canonical availability record into the wizard's client shape. */
+function toDetectedClient(provider: ProviderAvailability): DetectedClient | null {
+  // The wizard only offers clients that a member could actually bind to a local CLI.
+  if (!provider.localCli || provider.toolId === null) return null;
   return {
-    client: spec.client,
-    provider: spec.provider,
-    label: spec.label,
-    cli: spec.cli,
-    installed,
-    hasApiKey: spec.envKey ? Boolean(process.env[spec.envKey]) : false,
+    client: provider.toolId,
+    provider: provider.clientId,
+    label: provider.label,
+    cli: provider.command,
+    installed: provider.installed,
+    ...(provider.version ? { version: provider.version } : {}),
+    hasApiKey: provider.hasApiKey,
+    installHint: provider.installHint,
+    ...(provider.reason ? { reason: provider.reason } : {}),
   };
 }
 
 /**
  * Detect all available CLI clients in parallel.
- * Pass a stub `existsOnPath` from tests to avoid touching the real filesystem.
+ * Pass detection deps from tests to avoid touching the real filesystem.
  */
-export async function detectAvailableClients(deps?: { existsOnPath?: ExistsOnPath }): Promise<DetectedClient[]> {
-  const probe = deps?.existsOnPath ?? defaultExistsOnPath;
-  const results = await Promise.all(CLI_SPECS.map((spec) => checkCli(spec, probe)));
-  return results;
+export async function detectAvailableClients(deps?: ProviderDetectionDeps): Promise<DetectedClient[]> {
+  const report = await detectProviderAvailability(deps);
+  return report.providers.map(toDetectedClient).filter((client): client is DetectedClient => client !== null);
 }
 
 /** Return only clients that are installed. */
-export async function getInstalledClients(deps?: { existsOnPath?: ExistsOnPath }): Promise<DetectedClient[]> {
+export async function getInstalledClients(deps?: ProviderDetectionDeps): Promise<DetectedClient[]> {
   const all = await detectAvailableClients(deps);
   return all.filter((c) => c.installed);
 }

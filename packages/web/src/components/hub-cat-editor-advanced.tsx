@@ -15,6 +15,7 @@ import {
 } from './hub-cat-editor.model';
 import { SectionCard, SelectField, TextField } from './hub-cat-editor-fields';
 import { TagEditor } from './hub-tag-editor';
+import { ProviderCliStatus } from './ProviderCliStatus';
 
 type FormPatch = Partial<HubCatEditorFormState>;
 
@@ -66,6 +67,7 @@ export function AdvancedRuntimeSection({
       tone="success"
     >
       <div className="space-y-2">
+        <ProviderCliStatus clientId={form.clientId} />
         <TextField
           label="Context Window"
           value={form.contextWindow}

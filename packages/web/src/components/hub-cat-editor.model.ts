@@ -1,7 +1,9 @@
 import {
   builtinAccountFamilyForClient,
   type CliEffortPreset,
+  CREATABLE_CLIENT_IDS,
   getCliEffortOptionsForProvider,
+  getClientDescriptor,
   builtinAccountIdForClient as sharedBuiltinAccountIdForClient,
 } from '@cat-cafe/shared';
 import type { CatData } from '@/hooks/useCatData';
@@ -11,7 +13,13 @@ import { defaultAcpCommandForClient, defaultAcpStartupArgsForClient } from './hu
 import { defaultMcpSupportForClient } from './hub-cat-editor.protocols';
 import type { CatStrategyEntry, StrategyType } from './hub-strategy-types';
 
-export type ClientId = 'anthropic' | 'openai' | 'google' | 'kimi' | 'opencode' | 'antigravity' | 'catagent' | 'acp';
+/**
+ * Clients the member editor can create, derived from the shared descriptor registry so this
+ * union can no longer drift from the server's write schema (it is the seventh place the
+ * clientId whitelist used to be duplicated). `a2a` is excluded — a remote peer needs
+ * `CAT_<ID>_A2A_URL` before it can be routed.
+ */
+export type ClientId = (typeof CREATABLE_CLIENT_IDS)[number];
 /** @deprecated Use ClientId instead. */
 export type ClientValue = ClientId;
 export type SessionChainValue = 'true' | 'false';
@@ -90,16 +98,11 @@ export interface StrategyFormState {
   executionStatus: NonNullable<CatStrategyEntry['executionStatus']>;
 }
 
-export const CLIENT_OPTIONS: Array<{ value: ClientId; label: string }> = [
-  { value: 'anthropic', label: 'Claude' },
-  { value: 'openai', label: 'Codex' },
-  { value: 'google', label: 'Gemini' },
-  { value: 'kimi', label: 'Kimi' },
-  { value: 'opencode', label: 'OpenCode' },
-  { value: 'antigravity', label: 'Antigravity' },
-  { value: 'catagent', label: 'CatAgent' },
-  { value: 'acp', label: 'ACP Client' },
-];
+/** Member-editor picker options, driven by the shared descriptor registry. */
+export const CLIENT_OPTIONS: Array<{ value: ClientId; label: string }> = CREATABLE_CLIENT_IDS.map((value) => ({
+  value,
+  label: getClientDescriptor(value)?.label ?? value,
+}));
 
 export const SESSION_CHAIN_OPTIONS: Array<{ value: SessionChainValue; label: string }> = [
   { value: 'true', label: 'true' },

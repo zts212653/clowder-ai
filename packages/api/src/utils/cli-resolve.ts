@@ -7,6 +7,7 @@
 import { execSync } from 'node:child_process';
 import { existsSync, readdirSync } from 'node:fs';
 import { resolve, win32 } from 'node:path';
+import { installHintForCommand } from '@cat-cafe/shared';
 
 const IS_WINDOWS = process.platform === 'win32';
 
@@ -210,22 +211,12 @@ export function resolveCliCommandOrBare(command: string): string {
 
 /**
  * Format a user-friendly install hint for a missing CLI.
+ *
+ * Hints come from the shared descriptor registry — the single source of truth for the
+ * ClientId → binary mapping — so adding a CLI teaches every caller its install command at
+ * once. An unknown command keeps the generic fallback.
  */
 export function formatCliNotFoundError(command: string, platform: NodeJS.Platform = process.platform): string {
-  const installHints: Record<string, string> = {
-    claude: 'npm install -g @anthropic-ai/claude-code',
-    codex: 'npm install -g @openai/codex',
-    gemini: 'npm install -g @google/gemini-cli',
-    agy:
-      platform === 'win32'
-        ? 'curl.exe -fsSL https://antigravity.google/cli/install.cmd -o install.cmd && install.cmd && del install.cmd'
-        : 'curl -fsSL https://antigravity.google/cli/install.sh | bash',
-    kimi:
-      platform === 'win32'
-        ? 'irm https://code.kimi.com/kimi-code/install.ps1 | iex'
-        : 'curl -fsSL https://code.kimi.com/kimi-code/install.sh | bash',
-    opencode: 'npm install -g opencode-ai',
-  };
-  const hint = installHints[command] ?? `install the "${command}" CLI`;
+  const hint = installHintForCommand(command, platform) ?? `install the "${command}" CLI`;
   return `${command} CLI 未找到。请先运行 \`${hint}\` 安装，再重试。`;
 }

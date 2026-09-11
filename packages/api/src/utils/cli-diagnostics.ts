@@ -13,6 +13,7 @@
  */
 
 import type { CliActiveWriterRecoveryState, CliDiagnostics, CliErrorReasonCode } from '@cat-cafe/shared';
+import { installHintForCommand } from '@cat-cafe/shared';
 import { CLASSIFIER_PATTERNS } from './cli-error-patterns.js';
 import { sanitizeCliStderr } from './sanitize-cli-stderr.js';
 
@@ -156,7 +157,38 @@ const REASON_TEXT: Record<CliErrorReasonCode, { summary: string; hint: string }>
     summary: '上游 provider policy 拒绝',
     hint: 'CLI 上游 provider 的 policy 引擎拒绝了这次请求（例如判断为敏感内容）。这不是 Clowder AI bug — 是 provider 侧决策。建议：换个表达方式重试 prompt（provider 通常给了 "try rephrasing" 提示）；换一只不同 provider 的猫；反复触发去查你用的 provider policy 文档（Anthropic / OpenAI / DeepSeek 各有 acceptable use policy）。展开下方"详细诊断"看具体 policy 消息。',
   },
+  cli_not_found: {
+    summary: 'CLI 未安装',
+    hint: '这台机器上没有找到该 CLI，所以还没有启动任何进程——不是你的额度或配置问题。按下面的安装命令装好后重试；也可以设置 CAT_<CLIENT>_PATH 环境变量把它固定到指定二进制路径。',
+  },
 };
+
+/**
+ * Diagnostics for "the binary is not installed".
+ *
+ * This failure has no exit code and no stderr, so it cannot go through
+ * {@link buildCliDiagnostics}. Emitting it in the same shape is what makes the frontend's
+ * folded diagnostics panel render for it: before this, a missing CLI produced a bare red
+ * bubble with no reasonCode and no repair command (the install hint existed, but only inside
+ * the plain error string).
+ *
+ * `reasonCode: 'cli_not_found'` is intentionally outside FrustrationDetector's
+ * TRIGGERING_REASON_CODES — see the shared type's comment.
+ */
+export function buildCliNotFoundDiagnostic(
+  command: string,
+  platform: NodeJS.Platform = process.platform,
+): CliDiagnostics {
+  const text = REASON_TEXT.cli_not_found;
+  const hint = installHintForCommand(command, platform);
+  return {
+    reasonCode: 'cli_not_found',
+    publicSummary: `${command} CLI 未找到`,
+    // Plain text only — the panel renders publicHint verbatim in a <span> (no markdown).
+    publicHint: hint ? `${text.hint}安装命令：${hint}` : text.hint,
+    debugRef: { command, signal: null },
+  };
+}
 
 export function buildActiveWriterRecoveryDiagnostic(input: {
   state: CliActiveWriterRecoveryState;

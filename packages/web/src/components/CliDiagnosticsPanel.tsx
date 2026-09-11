@@ -123,6 +123,11 @@ const REASON_PALETTE: Record<CliErrorReasonCode, Palette> = {
   // credentials is wrong, so painting it as user-fixable would contradict the hint, which
   // says exactly the opposite. Wrench = broken machinery on our side, awaiting a harness fix.
   incompatible_cli_arguments: { ...PALETTE_SYSTEM, Icon: WrenchIcon },
+  // The provider CLI is not installed on this machine. System tier (slate) rather than
+  // PALETTE_USER_FIX even though the user runs the install command: nothing in their config or
+  // credentials is wrong, and the panel's hint already carries the exact command. PackageX
+  // matches the "missing artifact" family used by model_not_found.
+  cli_not_found: { ...PALETTE_SYSTEM, Icon: PackageXIcon },
 };
 
 const UNKNOWN_PALETTE: Palette = { ...PALETTE_SYSTEM, Icon: UnknownReasonIcon };

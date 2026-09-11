@@ -251,6 +251,8 @@ describe('F212 CliDiagnosticsPanel (AC-B2/B3/B4)', () => {
       // F212 Phase H (Sol runtime forensics 2026-07-09, archive 97449e4b): upstream
       // provider policy engine (Codex 0.98+ cyber-safety flag) rejected the prompt.
       'upstream_policy_reject',
+      // Provider CLI detection: the binary is not installed, so nothing was ever spawned.
+      'cli_not_found',
     ];
 
     for (const reasonCode of reasonCodes) {

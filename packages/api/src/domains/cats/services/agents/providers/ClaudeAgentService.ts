@@ -33,7 +33,11 @@ import { isRetiredGithubMcpConfigEntry } from '../../../../../config/capabilitie
 import { getCatEffort } from '../../../../../config/cat-config-loader.js';
 import { getCatModel } from '../../../../../config/cat-models.js';
 import { createModuleLogger } from '../../../../../infrastructure/logger.js';
-import { buildCliDiagnostics, buildSilentCompletionDiagnostic } from '../../../../../utils/cli-diagnostics.js';
+import {
+  buildCliDiagnostics,
+  buildCliNotFoundDiagnostic,
+  buildSilentCompletionDiagnostic,
+} from '../../../../../utils/cli-diagnostics.js';
 import { formatCliExitError } from '../../../../../utils/cli-format.js';
 import { formatCliNotFoundError, resolveCliCommand } from '../../../../../utils/cli-resolve.js';
 import { isCliError, isCliTimeout, isLivenessWarning, spawnCli } from '../../../../../utils/cli-spawn.js';
@@ -647,7 +651,9 @@ export class ClaudeAgentService implements AgentService {
           type: 'error' as const,
           catId: this.catId,
           error: formatCliNotFoundError('claude'),
-          metadata,
+          // Structured diagnostics so the folded panel renders the install command and a
+          // reasonCode instead of a bare red bubble (#provider-cli-detection).
+          metadata: { ...metadata, cliDiagnostics: buildCliNotFoundDiagnostic('claude') },
           timestamp: Date.now(),
         };
         yield { type: 'done' as const, catId: this.catId, metadata, timestamp: Date.now() };
