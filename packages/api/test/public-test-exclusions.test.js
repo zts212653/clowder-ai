@@ -13,7 +13,6 @@ const RECONCILED_EXCLUSIONS = [
   'redis-',
   'session-strategy-phase3',
   'workflow-sop-store',
-  'codex-agent-service',
   'kimi-agent-service',
   'test/memory/',
   'thread-wiring\\.test',
@@ -129,6 +128,40 @@ test('resolver excludes source-only cc anchor hook coverage from the public gate
   const resolved = await resolvePublicTestFiles({ packageRoot, configPath: registryPath });
   assert.ok(resolved.excludedFiles.includes('test/f236-cc-anchor-hook.test.js'));
   assert.ok(!resolved.selectedFiles.includes('test/f236-cc-anchor-hook.test.js'));
+});
+
+test('resource-only SOP coverage stays excluded while portable Codex contracts are re-admitted', async () => {
+  const { resolvePublicTestFiles } = await import(resolverModuleUrl);
+  const resolved = await resolvePublicTestFiles({ packageRoot, configPath: registryPath });
+  const workflowEntry = resolved.registry.entries.find((entry) => entry.id === 'workflow-sop-store');
+
+  assert.ok(workflowEntry, 'workflow SOP resource contract must retain an audited exclusion');
+  assert.equal(workflowEntry.audit.status, 'resource_contract');
+  assert.equal(workflowEntry.publicAudit?.status, 'resource_contract');
+  assert.equal(
+    workflowEntry.expiresOn,
+    '2027-12-31',
+    'the stable isolated-Redis resource contract must not require rolling short renewals',
+  );
+  assert.ok(resolved.excludedFiles.includes('test/workflow-sop-store.test.js'));
+  assert.ok(!resolved.selectedFiles.includes('test/workflow-sop-store.test.js'));
+
+  for (const portableContract of ['test/codex-agent-service.test.js', 'test/codex-agent-service-l0.test.js']) {
+    assert.ok(resolved.selectedFiles.includes(portableContract), `${portableContract} must stay re-admitted`);
+    assert.ok(!resolved.excludedFiles.includes(portableContract), `${portableContract} must not be source-only`);
+  }
+});
+
+test('memory exclusion audit binds the current source-managed candidate', async () => {
+  const { loadPublicTestExclusions } = await import(resolverModuleUrl);
+  const registry = await loadPublicTestExclusions({ configPath: registryPath });
+  const memoryEntry = registry.entries.find((entry) => entry.id === 'memory-tests');
+
+  assert.ok(memoryEntry, 'memory exclusion must remain audited');
+  assert.equal(memoryEntry.audit.sourceHead, '6bffad45ecb50e6cbe1f11ae897358a54ef5ff39');
+  assert.equal(memoryEntry.audit.publicHead, '6b6fbbaa863ced704081f0ddc718d797b619f8c2');
+  assert.equal(memoryEntry.audit.matchedFileCount, 257);
+  assert.equal(memoryEntry.publicAudit, undefined, 'the stale public-main snapshot is not an exported-candidate audit');
 });
 
 test('resolver excludes source-only Claude hook bytes but keeps public F296 composition coverage', async () => {
