@@ -33,11 +33,11 @@
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import http from 'node:http';
-import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import { registerCollabToolset, registerMemoryToolset } from './server-toolsets.js';
+import { isDirectExecution } from './utils/is-direct-execution.js';
 import { initCatCafeDir } from './utils/path-validator.js';
 
 const HOST = '127.0.0.1' as const;
@@ -443,7 +443,7 @@ async function main(): Promise<void> {
   process.on('SIGTERM', shutdown);
 }
 
-const isEntryPoint = process.argv[1] && resolve(fileURLToPath(import.meta.url)) === resolve(process.argv[1]);
+const isEntryPoint = isDirectExecution(import.meta.url);
 if (isEntryPoint) {
   main().catch((err) => {
     console.error('[cat-cafe-b1a] fatal:', err);
