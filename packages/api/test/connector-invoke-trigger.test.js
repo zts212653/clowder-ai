@@ -3041,9 +3041,10 @@ describe('ConnectorInvokeTrigger', () => {
       assert.strictEqual(queue.list('thread-1', 'user-1').length, 1, 'late wake remains recoverable in Queue');
     });
 
-    it('AC-1: enqueues when queueProcessor.isThreadBusy returns true', async () => {
+    it('AC-1 (amended #17): enqueues when the thread has an active execution', async () => {
       const mockQueueProcessor = /** @type {any} */ ({
         isThreadBusy: () => true,
+        hasActiveExecution: () => true,
         isCatBusy: () => false,
         async onInvocationComplete() {},
       });
@@ -3051,16 +3052,117 @@ describe('ConnectorInvokeTrigger', () => {
       const outcome = await trigger.trigger('thread-1', /** @type {any} */ ('opus'), 'user-1', 'Review msg', 'msg-1');
       await waitForTrigger();
 
-      assert.strictEqual(outcome, 'enqueued', 'should enqueue when thread is busy');
+      assert.strictEqual(outcome, 'enqueued', 'should enqueue when an execution is actually running');
       assert.strictEqual(routerMock.calls.length, 0, 'should NOT dispatch');
       assert.strictEqual(queue.list('thread-1', 'user-1').length, 1);
+    });
+
+    it('#17 acceptance: idle thread with queued leftovers still admits the connector wake directly', async () => {
+      // Regression for the PR-wait deadlock: a queued-but-idle thread counted
+      // as busy, so wait wakes parked in Queue and nothing ever drained them.
+      const autoExecuteCalls = [];
+      const mockQueueProcessor = /** @type {any} */ ({
+        // Old semantics: any queued entry makes the thread "busy".
+        isThreadBusy: () => true,
+        hasActiveExecution: () => false,
+        isCatBusy: () => false,
+        async onInvocationComplete() {},
+        async tryAutoExecute(threadId, opts) {
+          autoExecuteCalls.push({ threadId, opts });
+        },
+      });
+      // Seed a dirty queued entry that is not auto-executable.
+      queue.enqueue({
+        threadId: 'thread-1',
+        userId: 'user-1',
+        content: 'stale a2a entry',
+        messageId: 'msg-stale-seed',
+        ownerAuthProvenance: 'unknown',
+        source: 'a2a',
+        targetCats: [/** @type {any} */ ('codex')],
+        intent: 'execute',
+      });
+      const acquiredController = new AbortController();
+      trackerMock.tracker.tryStartThread = () => acquiredController;
+      const trigger = createTrigger({ queueProcessor: mockQueueProcessor });
+      const outcome = await trigger.trigger(
+        'thread-1',
+        /** @type {any} */ ('opus'),
+        'user-1',
+        'CI failed',
+        'msg-ci-16',
+      );
+
+      assert.strictEqual(outcome, 'dispatched', 'queued leftovers alone must not block direct admission');
+      assert.strictEqual(routerMock.calls.length, 1, 'wait wake must reach routeExecution without a user message');
+    });
+
+    it('#17: tryStartThread race loss still drains the entry when the thread stays idle', async () => {
+      const autoExecuteCalls = [];
+      const mockQueueProcessor = /** @type {any} */ ({
+        hasActiveExecution: () => false,
+        isThreadBusy: () => true,
+        isCatBusy: () => false,
+        async onInvocationComplete() {},
+        async tryAutoExecute(threadId, opts) {
+          autoExecuteCalls.push({ threadId, opts });
+        },
+      });
+      trackerMock.tracker.tryStartThread = () => null;
+      const trigger = createTrigger({ queueProcessor: mockQueueProcessor });
+      const outcome = await trigger.trigger(
+        'thread-1',
+        /** @type {any} */ ('opus'),
+        'user-1',
+        'CI failed',
+        'msg-race-16',
+      );
+      await waitForTrigger();
+
+      assert.strictEqual(outcome, 'enqueued');
+      assert.strictEqual(autoExecuteCalls.length, 1, 'idle thread must attempt a queue drain after race loss');
+      assert.strictEqual(
+        autoExecuteCalls[0].opts?.onlyEntryId,
+        queue.findEntryWithMessageId('thread-1', 'msg-race-16')?.id,
+      );
+    });
+
+    it('#17: queue log records the specific admission-refusal reason', async () => {
+      const infoLines = [];
+      const capturingLog = /** @type {any} */ ({
+        info: (fields, msg) => infoLines.push({ fields, msg }),
+        warn: () => {},
+        error: () => {},
+        debug: () => {},
+      });
+      const mockQueueProcessor = /** @type {any} */ ({
+        hasActiveExecution: () => true,
+        isThreadBusy: () => true,
+        isCatBusy: () => false,
+        async onInvocationComplete() {},
+      });
+      const trigger = createTrigger({ queueProcessor: mockQueueProcessor, log: capturingLog });
+      await trigger.trigger('thread-1', /** @type {any} */ ('opus'), 'user-1', 'CI failed', 'msg-reason-16');
+      await waitForTrigger();
+
+      const queuedLine = infoLines.find((l) => l.msg.includes('Queued'));
+      assert.ok(queuedLine, 'enqueue must log');
+      assert.strictEqual(
+        queuedLine.fields.reason,
+        'busy_active_execution',
+        'reason must distinguish the refusing branch',
+      );
     });
 
     it('AC-2: enqueues when tryStartThread returns null (thread busy in tracker)', async () => {
       const mockQueueProcessor = /** @type {any} */ ({
         isThreadBusy: () => false,
+        // Must be false: with true, admission short-circuits at
+        // busy_active_execution and the tryStartThread path below is never reached.
+        hasActiveExecution: () => false,
         isCatBusy: () => false,
         async onInvocationComplete() {},
+        async tryAutoExecute() {},
       });
       // Mock tryStartThread returning null (thread already has active invocation)
       trackerMock.tracker.tryStartThread = (_threadId, _catId) => null;

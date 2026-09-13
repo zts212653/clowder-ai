@@ -42,7 +42,11 @@ describe('global accounts (clowder-ai#340)', () => {
     const { readCatalogAccounts, resetMigrationState } = await import('../dist/config/catalog-accounts.js');
     resetMigrationState();
     const result = readCatalogAccounts(projectRoot);
-    assert.deepEqual(result, {});
+    // R19 P1: ref-keyed stores have a NULL prototype, so a ref named toString
+    // or __proto__ is data rather than an inherited member. deepEqual compares
+    // prototypes, so assert emptiness on a copy and pin the contract explicitly.
+    assert.deepEqual({ ...result }, {});
+    assert.equal(Object.getPrototypeOf(result), null, 'a ref-keyed store must not inherit');
   });
 
   it('writeCatalogAccount creates global accounts.json', async () => {
@@ -312,6 +316,47 @@ describe('global accounts (clowder-ai#340)', () => {
     assert.equal(result.shared.displayName, 'Global Shared');
   });
 
+  /**
+   * R20: the v1 branch merges its per-client secret maps with
+   * Object.assign(profileSecrets, clientSecrets). Object.assign copies with
+   * [[Set]] semantics, so a legacy profile whose id is `__proto__` invoked the
+   * prototype setter on a plain {} target — the entry vanished, Object.entries()
+   * never saw it, and that profile's credential was silently not migrated while
+   * everything else reported success. Written as raw JSON: a JS object literal
+   * could not express the fixture.
+   */
+  it('a v1 legacy profile id of __proto__ still migrates its credential (R20)', async () => {
+    const { resetMigrationState } = await import('../dist/config/catalog-accounts.js');
+    resetMigrationState();
+
+    await writeFile(
+      join(projectRoot, '.cat-cafe', 'provider-profiles.json'),
+      '{"version":1,"providers":{"anthropic":{"profiles":[' +
+        '{"id":"__proto__","displayName":"Proto Profile","authType":"api_key"},' +
+        '{"id":"normal-profile","displayName":"Normal","authType":"api_key"}]}}}',
+      'utf-8',
+    );
+    await writeFile(
+      join(projectRoot, '.cat-cafe', 'provider-profiles.secrets.local.json'),
+      '{"version":1,"providers":{"anthropic":{' +
+        '"__proto__":{"apiKey":"sk-proto-secret"},' +
+        '"normal-profile":{"apiKey":"sk-normal-secret"}}}}',
+      'utf-8',
+    );
+
+    // Upstream contract: migration is explicit (startup / migrateCatalogAccounts), not a read side-effect.
+    const result = migrateAndReadAccounts(projectRoot);
+    assert.ok(Object.hasOwn(result, '__proto__'), 'the __proto__ account must be migrated');
+    assert.equal(result['__proto__'].displayName, 'Proto Profile');
+
+    const creds = JSON.parse(await readFile(join(globalRoot, '.cat-cafe', 'credentials.json'), 'utf-8'));
+    assert.ok(Object.hasOwn(creds, '__proto__'), 'its credential must be migrated, not silently dropped');
+    assert.equal(creds['__proto__'].apiKey, 'sk-proto-secret');
+    // The sibling proves the migration reported success either way — which is
+    // exactly why the drop was silent.
+    assert.equal(creds['normal-profile'].apiKey, 'sk-normal-secret');
+  });
+
   it('migrates v1 nested providers.<client>.profiles[] into flat accounts', async () => {
     const { resetMigrationState } = await import('../dist/config/catalog-accounts.js');
     resetMigrationState();
@@ -359,7 +404,8 @@ describe('global accounts (clowder-ai#340)', () => {
     assert.equal(result['my-proxy'].authType, 'api_key');
     assert.equal(result['my-proxy'].displayName, 'My Proxy');
     assert.equal(result['my-proxy'].baseUrl, 'https://proxy.example/v1');
-    assert.deepEqual(result['my-proxy'].modelAliases, { 'kimi-code/k3': 'kimi-k3' });
+    // null-prototype maps are intentional (R19); compare own entries, not [[Prototype]].
+    assert.deepEqual({ ...result['my-proxy'].modelAliases }, { 'kimi-code/k3': 'kimi-k3' });
     assert.ok(result['team-key'], 'team-key account should exist');
     assert.equal(result['team-key'].authType, 'api_key');
     // Must NOT create an "anthropic" shell account from the parent key
@@ -470,12 +516,77 @@ describe('global accounts (clowder-ai#340)', () => {
     );
 
     const result = migrateAndReadAccounts(projectRoot);
-    assert.deepEqual(result.shared.modelAliases, { 'kimi-code/k3': 'kimi-k3' });
+    assert.deepEqual({ ...result.shared.modelAliases }, { 'kimi-code/k3': 'kimi-k3' });
     const credentialPath = join(globalRoot, '.cat-cafe', 'credentials.json');
     if (existsSync(credentialPath)) {
       const credentials = JSON.parse(await readFile(credentialPath, 'utf-8'));
       assert.equal(credentials.shared, undefined);
     }
+  });
+
+  /**
+   * The other half of the alias contract, and the one the upstream integration
+   * could silently break.
+   *
+   * canonicalizeAccount() carries unknown persisted fields through a rest-spread
+   * so no future field can quietly sit outside the equivalence check. Left in
+   * that rest-spread, modelAliases would be compared RAW — and a legacy source
+   * that spells the same mapping with padding or a different key order would
+   * read as a genuine conflict, so its credential would be skipped. Naming
+   * modelAliases explicitly is what keeps upstream's normalisation in force.
+   */
+  it('treats a padding/key-order-only alias difference as equivalent, not a conflict', async () => {
+    const { readCatalogAccounts, resetMigrationState, writeCatalogAccount } = await import(
+      '../dist/config/catalog-accounts.js'
+    );
+    resetMigrationState();
+
+    // The PADDING lives on the stored side on purpose. writeCatalogAccount() and
+    // the accounts route both persist modelAliases verbatim, while the legacy
+    // parser already runs normalizeModelAliases() on its own input — so the only
+    // side that can still carry un-normalised aliases into the comparison is the
+    // one already in the store.
+    writeCatalogAccount(projectRoot, 'shared', {
+      authType: 'api_key',
+      baseUrl: 'https://proxy.example/v1',
+      models: ['a/x', 'b/y'],
+      modelAliases: { 'b/y': ' up-y ', 'a/x': ' up-x ' },
+    });
+    resetMigrationState();
+
+    // Same mapping, different spelling: reversed key order and padded values.
+    await writeFile(
+      join(projectRoot, '.cat-cafe', 'provider-profiles.json'),
+      JSON.stringify({
+        version: 2,
+        providers: [
+          {
+            id: 'shared',
+            authType: 'api_key',
+            baseUrl: 'https://proxy.example/v1',
+            models: ['a/x', 'b/y'],
+            modelAliases: { 'a/x': 'up-x', 'b/y': 'up-y' },
+          },
+        ],
+      }),
+      'utf-8',
+    );
+    await writeFile(
+      join(projectRoot, '.cat-cafe', 'provider-profiles.secrets.local.json'),
+      JSON.stringify({ profiles: { shared: { apiKey: 'sk-equivalent-source' } } }),
+      'utf-8',
+    );
+
+    // Upstream contract: migration is explicit (startup / migrateCatalogAccounts), not a read side-effect.
+    const result = migrateAndReadAccounts(projectRoot);
+    // Equivalence is decided on the NORMALISED view; the stored value itself is
+    // returned verbatim, because global still wins on a merge.
+    assert.deepEqual({ ...result.shared.modelAliases }, { 'b/y': ' up-y ', 'a/x': ' up-x ' });
+    // Not a conflict, so the legacy source's secret is imported. That import is
+    // the observable proof — a conflict would skip it, as the sibling test above
+    // asserts for a genuinely different alias.
+    const credentials = JSON.parse(await readFile(join(globalRoot, '.cat-cafe', 'credentials.json'), 'utf-8'));
+    assert.ok(credentials.shared, 'a padding-only alias difference must not be treated as a conflict');
   });
 
   it('skips legacy secret when colliding with pre-existing global OAuth account', async () => {

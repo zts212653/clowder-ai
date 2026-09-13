@@ -173,8 +173,33 @@ for (const [name, live, expected] of [
 }
 
 async function runChecker(args) {
+  // The CLI is a production diagnostic, not a nested `node --test`. Inherit the
+  // parent NODE_TEST_CONTEXT / CAT_CAFE_TEST_SANDBOX and the fixture roots are
+  // snapshotted as "inherited from the launching process" at module load, so
+  // the read guard refuses the very tmpdirs this suite owns (P1-8 false positive).
+  // Mirror account-store-read-boundary's childEnv: delete test markers, keep the
+  // explicit fixture roots the CLI is meant to inspect.
+  const env = {
+    ...process.env,
+    CAT_CAFE_RUNTIME_ROOT: runtime,
+    CAT_CAFE_WORKSPACE_ROOT: workspace,
+    // cat-config-loader pulls infrastructure/logger, which redirects console.* to
+    // pino JSON on stdout. Suppress process warnings so --json stays one line.
+    NODE_NO_WARNINGS: '1',
+  };
+  for (const key of [
+    'NODE_TEST_CONTEXT',
+    'CAT_CAFE_TEST_SANDBOX',
+    'CAT_CAFE_TEST_REAL_HOME',
+    'CAT_CAFE_TEST_SANDBOX_ROOT',
+    'CAT_CAFE_TEST_SANDBOX_ALLOW_UNSAFE_ROOT',
+    'CAT_CAFE_GLOBAL_CONFIG_ROOT',
+    'FORCE_COLOR',
+  ]) {
+    delete env[key];
+  }
   const child = spawn(process.execPath, [resolve('dist/scripts/runtime-account-preflight/cli.js'), ...args], {
-    env: { ...process.env, CAT_CAFE_RUNTIME_ROOT: runtime, CAT_CAFE_WORKSPACE_ROOT: workspace },
+    env,
   });
   let stdout = '',
     stderr = '';
@@ -189,6 +214,23 @@ async function runChecker(args) {
     child.on('close', done);
   });
   return { status, stdout, stderr };
+}
+
+/** Prefer the preflight report line if logger noise still lands on stdout. */
+function parseCheckerReport(stdout) {
+  const lines = stdout
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+  for (let i = lines.length - 1; i >= 0; i -= 1) {
+    try {
+      const value = JSON.parse(lines[i]);
+      if (value && typeof value === 'object' && 'checkedBindings' in value) return value;
+    } catch {
+      // keep scanning
+    }
+  }
+  throw new Error(`no preflight JSON report in stdout:\n${stdout}`);
 }
 
 for (const [name, body, expected] of [
@@ -208,7 +250,7 @@ for (const [name, body, expected] of [
     try {
       const result = await runChecker(['--api-port', String(server.address().port), '--json']);
       assert.equal(result.status, expected, result.stderr);
-      const report = JSON.parse(result.stdout);
+      const report = parseCheckerReport(result.stdout);
       assert.equal(report.rejectedBindings.length, 1);
     } finally {
       await new Promise((done) => server.close(done));
@@ -229,7 +271,7 @@ test('explicit regression acceptance changes only the exit decision, retaining t
       '--json',
     ]);
     assert.equal(result.status, 0, result.stderr);
-    const report = JSON.parse(result.stdout);
+    const report = parseCheckerReport(result.stdout);
     assert.equal(report.allowRegression, true);
     assert.equal(report.blocked, false);
     assert.deepEqual(

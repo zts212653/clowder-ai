@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { execFileSync, spawn, spawnSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, readFileSync, realpathSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, statSync, writeFileSync } from 'node:fs';
 import { rm } from 'node:fs/promises';
 import { createConnection, createServer } from 'node:net';
 import { tmpdir } from 'node:os';
@@ -363,7 +363,7 @@ server.listen(3010,'127.0.0.1',()=>setInterval(()=>{},1000));`,
     assert.doesNotMatch(result.stderr, /API port appears active/);
   });
 
-  it('seeds missing runtime auth config from the launcher project during init', () => {
+  it('seeds the runtime catalog without copying workspace auth config during init', () => {
     const projectDir = createTempProject('runtime-auth-config-seed');
     const runtimeDir = mkdtempSync(join(tmpdir(), 'runtime-auth-config-worktree-'));
     const remoteDir = mkdtempSync(join(tmpdir(), 'runtime-auth-config-remote-'));
@@ -379,6 +379,11 @@ server.listen(3010,'127.0.0.1',()=>setInterval(()=>{},1000));`,
     execFileSync('git', ['push', '-u', 'origin', 'main'], { cwd: projectDir, stdio: 'ignore' });
 
     mkdirSync(join(projectDir, '.cat-cafe'), { recursive: true });
+    writeFileSync(
+      join(projectDir, '.cat-cafe', 'cat-catalog.json'),
+      `${JSON.stringify({ version: 1, cats: [] }, null, 2)}\n`,
+      'utf8',
+    );
     writeFileSync(
       join(projectDir, '.cat-cafe', 'accounts.json'),
       `${JSON.stringify({ codex: { authType: 'oauth', models: ['gpt-5.4'] } }, null, 2)}\n`,
@@ -401,12 +406,12 @@ server.listen(3010,'127.0.0.1',()=>setInterval(()=>{},1000));`,
 
     assert.equal(result.status, 0, `exit=${result.status}\nstdout:\n${result.stdout}\nstderr:\n${result.stderr}`);
     const normalizedRuntimeDir = realpathSync(runtimeDir);
-    assert.deepEqual(JSON.parse(readFileSync(join(normalizedRuntimeDir, '.cat-cafe', 'accounts.json'), 'utf8')), {
-      codex: { authType: 'oauth', models: ['gpt-5.4'] },
+    assert.deepEqual(JSON.parse(readFileSync(join(normalizedRuntimeDir, '.cat-cafe', 'cat-catalog.json'), 'utf8')), {
+      version: 1,
+      cats: [],
     });
-    assert.deepEqual(JSON.parse(readFileSync(join(normalizedRuntimeDir, '.cat-cafe', 'credentials.json'), 'utf8')), {
-      'installer-openai': { apiKey: 'sk-runtime' },
-    });
+    assert.equal(existsSync(join(normalizedRuntimeDir, '.cat-cafe', 'accounts.json')), false);
+    assert.equal(existsSync(join(normalizedRuntimeDir, '.cat-cafe', 'credentials.json')), false);
   });
 
   it('fails fast when project is a git repo but the configured remote is missing', () => {

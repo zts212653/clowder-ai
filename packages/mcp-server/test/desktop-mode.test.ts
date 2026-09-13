@@ -86,8 +86,8 @@ describe('applyReadonlyFilter — env modes', () => {
     }
   });
 
-  it('readonly=true + hasAgentKey=true → READONLY ∪ AGENT_KEY', () => {
-    const env: ToolsetEnv = { readonly: true, hasAgentKey: true };
+  it('readonly=true + hasAgentKey=true + agentKeyUnion=true → READONLY ∪ AGENT_KEY (explicit opt-in)', () => {
+    const env: ToolsetEnv = { readonly: true, hasAgentKey: true, agentKeyUnion: true };
     const out = applyReadonlyFilter(ALL_FAKE_TOOLS, env);
     const outNames = new Set(out.map((t) => t.name));
     for (const name of ALL_FAKE_NAMES) {
@@ -96,8 +96,18 @@ describe('applyReadonlyFilter — env modes', () => {
     }
   });
 
-  it('readonly=true + hasAgentKey=true exposes AGY-safe coordination and scheduler tools', () => {
-    const out = buildCollabTools({ readonly: true, hasAgentKey: true });
+  it('F317 P1: readonly=true + leaked agent-key env WITHOUT opt-in → strict READONLY only', () => {
+    const env: ToolsetEnv = { readonly: true, hasAgentKey: true };
+    const out = applyReadonlyFilter(ALL_FAKE_TOOLS, env);
+    const outNames = new Set(out.map((t) => t.name));
+    for (const name of ALL_FAKE_NAMES) {
+      const expected = READONLY_ALLOWED_TOOLS.has(name);
+      assert.equal(outNames.has(name), expected, `tool ${name}: expected ${expected}`);
+    }
+  });
+
+  it('readonly=true + hasAgentKey=true + agentKeyUnion=true exposes AGY-safe coordination and scheduler tools', () => {
+    const out = buildCollabTools({ readonly: true, hasAgentKey: true, agentKeyUnion: true });
     const outNames = new Set(out.map((t) => t.name));
 
     const expectedPresent = [
@@ -256,6 +266,24 @@ describe('parseToolsetEnv — env shape', () => {
     assert.equal(parseToolsetEnv({ CAT_CAFE_AGENT_KEY_FILES: '{}' } as NodeJS.ProcessEnv).hasAgentKey, true);
   });
 
+  it('F317 P1: agentKeyUnion only via explicit CAT_CAFE_READONLY_AGENT_KEY_UNION=true', () => {
+    assert.equal(parseToolsetEnv({} as NodeJS.ProcessEnv).agentKeyUnion, false);
+    assert.equal(
+      parseToolsetEnv({ CAT_CAFE_AGENT_KEY_FILE: '/p' } as NodeJS.ProcessEnv).agentKeyUnion,
+      false,
+      'agent-key vars alone must not opt into the union',
+    );
+    assert.equal(
+      parseToolsetEnv({ CAT_CAFE_READONLY_AGENT_KEY_UNION: 'true' } as NodeJS.ProcessEnv).agentKeyUnion,
+      true,
+    );
+    assert.equal(
+      parseToolsetEnv({ CAT_CAFE_READONLY_AGENT_KEY_UNION: '1' } as NodeJS.ProcessEnv).agentKeyUnion,
+      false,
+      'strict string match like CAT_CAFE_READONLY',
+    );
+  });
+
   it('trims desktopMode + treats empty/whitespace as undefined', () => {
     assert.equal(parseToolsetEnv({} as NodeJS.ProcessEnv).desktopMode, undefined);
     assert.equal(parseToolsetEnv({ CAT_CAFE_DESKTOP_MODE: '   ' } as NodeJS.ProcessEnv).desktopMode, undefined);
@@ -353,8 +381,8 @@ describe('buildCollabTools / buildMemoryTools — real toolset assertions (codex
     assert.equal(outNames.has('cat_cafe_post_message'), false);
   });
 
-  it('legacy READONLY=true + AGENT_KEY: existing collab behavior unchanged (no regression)', () => {
-    const env: ToolsetEnv = { readonly: true, hasAgentKey: true };
+  it('legacy READONLY=true + AGENT_KEY + agentKeyUnion: existing collab behavior unchanged (no regression)', () => {
+    const env: ToolsetEnv = { readonly: true, hasAgentKey: true, agentKeyUnion: true };
     const out = buildCollabTools(env);
     const outNames = new Set(out.map((t) => t.name));
     // AGENT_KEY tools allowed
@@ -362,6 +390,15 @@ describe('buildCollabTools / buildMemoryTools — real toolset assertions (codex
     assert.equal(outNames.has('cat_cafe_publish_verdict'), true);
     // READONLY tools allowed
     assert.equal(outNames.has('cat_cafe_shell_exec'), true);
+  });
+
+  it('F317 P1: legacy READONLY=true + AGENT_KEY WITHOUT union opt-in → strict (writes blocked)', () => {
+    const env: ToolsetEnv = { readonly: true, hasAgentKey: true };
+    const out = buildCollabTools(env);
+    const outNames = new Set(out.map((t) => t.name));
+    assert.equal(outNames.has('cat_cafe_post_message'), false, 'agent-key write must not leak without opt-in');
+    assert.equal(outNames.has('cat_cafe_publish_verdict'), false, 'agent-key write must not leak without opt-in');
+    assert.equal(outNames.has('cat_cafe_shell_exec'), true, 'readonly tool still allowed');
   });
 
   it('default (no env) collab/memory build pass-through full source', () => {

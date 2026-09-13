@@ -8,7 +8,8 @@
  *
  * Auto mode uses a carrier report when one is available, otherwise the model
  * catalog. Unknown bindings remain unresolved instead of receiving a guessed
- * provider-wide default.
+ * provider-wide default — except glm/deepseek/minimax, which keep origin's
+ * 400k empty-UI floor so Auto does not fall through to the 100k prompt guard.
  */
 
 import { type CatConfig, catRegistry } from '@cat-cafe/shared';
@@ -18,6 +19,16 @@ import { getContextWindowFallback, resolveContextWindow } from './context-window
 const log = createModuleLogger('context-capacity');
 const DEFAULT_OUTPUT_RESERVE = 16_000;
 const UNRESOLVED_PROMPT_INPUT_CEILING = 100_000;
+
+/**
+ * Origin helper-cat empty-UI floor (2/5 of the 1M-class window).
+ * Applied only after Auto catalog/carrier/manual miss, keyed by catId.
+ */
+const HELPER_CAT_EMPTY_UI_WINDOW_TOKENS: Record<string, number> = {
+  glm: 400_000,
+  deepseek: 400_000,
+  minimax: 400_000,
+};
 
 export type ContextCapacitySource = 'reported' | 'manual' | 'catalog' | 'unresolved';
 
@@ -116,6 +127,15 @@ export function resolveContextCapacity(options: ResolveCapacityOptions): Resolve
       windowTokens = catalogWindow;
       source = 'catalog';
       provenance = `Model catalog (${model}) → ${catalogWindow.toLocaleString()} tokens`;
+    }
+  }
+
+  if (source === 'unresolved') {
+    const helperWindow = HELPER_CAT_EMPTY_UI_WINDOW_TOKENS[catId];
+    if (helperWindow) {
+      windowTokens = helperWindow;
+      source = 'catalog';
+      provenance = `Helper-cat empty-UI default → ${helperWindow.toLocaleString()} tokens`;
     }
   }
 

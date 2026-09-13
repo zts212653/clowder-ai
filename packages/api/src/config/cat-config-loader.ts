@@ -109,12 +109,16 @@ const catVariantSchema = z
     agyProfile: agyProfileSchema,
     commandArgs: z.array(z.string().min(1)).optional(), // F127: explicit bridge args (e.g. Antigravity)
     cliConfigArgs: z.array(z.string().min(1)).optional(), // F127: extra CLI args per member
-    /** clowder-ai#340 P5: Model provider name (renamed from ocProviderName). */
+    /** clowder-ai#340 P5: Model provider name (renamed from ocProviderName).
+     *  F161: `null` is an explicit clear tombstone — generic ACP saves record it so
+     *  a template-seeded provider (e.g. provider:zcode) cannot resurrect through the
+     *  template+catalog resolved merge (same pattern as caution's R1 null fix). */
     provider: z
       .string()
       .trim()
       .min(1, 'provider must not be blank')
       .refine((v) => !v.includes('/'), 'provider must not contain "/"')
+      .nullable()
       .optional(),
     roleDescription: z.string().min(1).optional(), // F127 review fix: allow variant-scoped roleDescription override
     sessionChain: z.boolean().optional(), // F127 review fix: allow variant-scoped sessionChain override

@@ -1872,7 +1872,196 @@ describe('cats routes runtime CRUD', { concurrency: false }, () => {
     });
     assert.equal(patchRes.statusCode, 400);
     const patchBody = JSON.parse(patchRes.body);
-    assert.match(patchBody.error, /provider "claude-oauth" not found/i);
+    // INV-11: unresolved account bindings report account, not provider.
+    assert.match(patchBody.error, /account "claude-oauth" not found/i);
+  });
+
+  it('AC-1 (split-root): account created via POST /api/accounts binds via PATCH /api/cats/:id and resolves at invocation', async () => {
+    // Real split-root: RUNTIME checkout (disposable, holds the live cat catalog)
+    // vs WORKSPACE store (persistent, holds account metadata + credentials).
+    // GLOBAL_CONFIG_ROOT stays unset so the store redirect (runtime→workspace)
+    // is exercised end-to-end — not the single-root test shortcut.
+    const runtimeRoot = mkdtempSync(join(tmpdir(), 'cats-route-crud-split-runtime-'));
+    const workspaceRoot = mkdtempSync(join(tmpdir(), 'cats-route-crud-split-workspace-'));
+    tempDirs.push(runtimeRoot, workspaceRoot);
+
+    const saved = {
+      runtimeRoot: process.env.CAT_CAFE_RUNTIME_ROOT,
+      workspaceRoot: process.env.CAT_CAFE_WORKSPACE_ROOT,
+      globalRoot: process.env.CAT_CAFE_GLOBAL_CONFIG_ROOT,
+      templatePath: process.env.CAT_TEMPLATE_PATH,
+      home: process.env.HOME,
+      cwd: process.cwd(),
+    };
+    const { resetMigrationState } = await import('../dist/config/catalog-accounts.js');
+    resetMigrationState();
+    process.env.CAT_CAFE_RUNTIME_ROOT = runtimeRoot;
+    process.env.CAT_CAFE_WORKSPACE_ROOT = workspaceRoot;
+    delete process.env.CAT_CAFE_GLOBAL_CONFIG_ROOT;
+    process.env.HOME = workspaceRoot;
+    writeFileSync(join(runtimeRoot, 'cat-template.json'), JSON.stringify(makeTemplate(), null, 2));
+    seedCatalogFromTemplate(runtimeRoot);
+    process.env.CAT_TEMPLATE_PATH = join(runtimeRoot, 'cat-template.json');
+    process.chdir(runtimeRoot);
+
+    const Fastify = (await import('fastify')).default;
+    const { catsRoutes } = await import('../dist/routes/cats.js');
+    const { accountsRoutes } = await import('../dist/routes/accounts.js');
+
+    const app = Fastify();
+    await app.register(catsRoutes);
+    await app.register(accountsRoutes);
+    await app.ready();
+
+    try {
+      // Left side: account created through the API lands in the WORKSPACE store
+      // even though the caller passes the runtime checkout path.
+      const createAccountRes = await app.inject({
+        method: 'POST',
+        url: '/api/accounts',
+        headers: {
+          'content-type': 'application/json',
+          'x-cat-cafe-user': 'codex',
+        },
+        body: JSON.stringify({
+          displayName: 'AC1 Split Key',
+          clientId: 'anthropic',
+          authType: 'api_key',
+          baseUrl: 'https://api.anthropic.com',
+          apiKey: 'sk-ac1-split',
+          projectPath: runtimeRoot,
+        }),
+      });
+      assert.equal(createAccountRes.statusCode, 200, `account create failed: ${createAccountRes.body}`);
+      const accountBody = JSON.parse(createAccountRes.body);
+      const accountRef = accountBody.profile.id;
+      assert.ok(
+        existsSync(join(workspaceRoot, '.cat-cafe', 'accounts.json')),
+        'account metadata must persist in the workspace store, not the runtime checkout',
+      );
+      const wsAccounts = JSON.parse(readFileSync(join(workspaceRoot, '.cat-cafe', 'accounts.json'), 'utf-8'));
+      assert.ok(accountRef in wsAccounts, 'created account must be visible in the workspace store');
+
+      // Right side: cat created against the RUNTIME catalog bound to that account.
+      const createCatRes = await app.inject({
+        method: 'POST',
+        url: '/api/cats',
+        headers: {
+          'content-type': 'application/json',
+          'x-cat-cafe-user': 'codex',
+        },
+        body: JSON.stringify({
+          catId: 'runtime-ac1-split',
+          name: 'AC1 Split 猫',
+          displayName: 'AC1 Split 猫',
+          avatar: '/avatars/ac1.png',
+          color: { primary: '#6366f1', secondary: '#c7d2fe' },
+          mentionPatterns: ['@runtime-ac1-split'],
+          roleDescription: '链路验证',
+          clientId: 'anthropic',
+          accountRef,
+          defaultModel: 'claude-opus-4-6',
+        }),
+      });
+      assert.equal(createCatRes.statusCode, 201, `cat create failed: ${createCatRes.body}`);
+
+      // Re-bind the same accountRef via PATCH (AC-1 chain stays live).
+      const patchRes = await app.inject({
+        method: 'PATCH',
+        url: `/api/cats/runtime-ac1-split`,
+        headers: {
+          'content-type': 'application/json',
+          'x-cat-cafe-user': 'codex',
+        },
+        body: JSON.stringify({ accountRef }),
+      });
+      assert.equal(patchRes.statusCode, 200, `bind failed: ${patchRes.body}`);
+
+      // R5 P2-3: drive the REAL invokeSingleCat, not a replay of the helpers it
+      // calls. Replaying resolveBoundAccountRefForCat/resolveForClient by hand
+      // still passes when invoke-single-cat.ts's own wiring is deleted, so it
+      // could never justify the "resolves at invocation" claim. Here the only
+      // inputs are catId + a stub service: everything else — the coordinate
+      // (resolveActiveProjectRoot(process.cwd())), the binding lookup, the
+      // account resolution and the credential→env mapping — must come from
+      // production code, and the credential has to arrive in the stub's
+      // callbackEnv for the assertions below to hold.
+      const { invokeSingleCat } = await import('../dist/domains/cats/services/agents/invocation/invoke-single-cat.js');
+
+      const optionsSeen = [];
+      const service = {
+        l0CompilerFn: async ({ catId }) => `# Dummy L0 for ${catId}\nTest-only stub.`,
+        async *invoke(_prompt, options) {
+          optionsSeen.push(options ?? {});
+          yield { type: 'done', catId: 'runtime-ac1-split', timestamp: Date.now() };
+        },
+      };
+      let depsCounter = 0;
+      const deps = {
+        registry: {
+          create: () => ({ invocationId: `inv-${++depsCounter}`, callbackToken: `tok-${depsCounter}` }),
+          verify: async () => ({ ok: false, reason: 'unknown_invocation' }),
+        },
+        sessionManager: {
+          get: async () => undefined,
+          getOrCreate: async () => ({}),
+          store: async () => {},
+          delete: async () => {},
+          resolveWorkingDirectory: () => runtimeRoot,
+        },
+        threadStore: null,
+        // Never dialled (the service is a stub) and deliberately not Clowder AI's
+        // reserved 3004.
+        apiUrl: 'http://127.0.0.1:65500',
+      };
+
+      const savedProxyEnabled = process.env.ANTHROPIC_PROXY_ENABLED;
+      process.env.ANTHROPIC_PROXY_ENABLED = '0'; // no tcpProbe against a live port
+      try {
+        const messages = [];
+        for await (const msg of invokeSingleCat(deps, {
+          catId: 'runtime-ac1-split',
+          service,
+          prompt: 'AC-1 split-root invocation',
+          userId: 'user-ac1-split',
+          threadId: 'thread-ac1-split',
+          isLastCat: true,
+        })) {
+          messages.push(msg);
+        }
+        const errors = messages.filter((m) => m.type === 'error').map((m) => String(m.error));
+        assert.deepEqual(errors, [], `invocation must not error: ${errors.join(' | ')}`);
+        assert.equal(optionsSeen.length, 1, 'stub service must be invoked exactly once');
+      } finally {
+        if (savedProxyEnabled === undefined) delete process.env.ANTHROPIC_PROXY_ENABLED;
+        else process.env.ANTHROPIC_PROXY_ENABLED = savedProxyEnabled;
+      }
+
+      // The credential written to the WORKSPACE store by POST /api/accounts must
+      // reach the service through the binding written by PATCH — end to end.
+      const callbackEnv = optionsSeen[0]?.callbackEnv ?? {};
+      assert.equal(
+        callbackEnv.CAT_CAFE_ANTHROPIC_API_KEY,
+        'sk-ac1-split',
+        'bound account credential must reach the invoked service',
+      );
+      assert.equal(callbackEnv.CAT_CAFE_ANTHROPIC_PROFILE_MODE, 'api_key');
+      assert.equal(callbackEnv.ANTHROPIC_API_KEY, 'sk-ac1-split');
+    } finally {
+      if (saved.runtimeRoot === undefined) delete process.env.CAT_CAFE_RUNTIME_ROOT;
+      else process.env.CAT_CAFE_RUNTIME_ROOT = saved.runtimeRoot;
+      if (saved.workspaceRoot === undefined) delete process.env.CAT_CAFE_WORKSPACE_ROOT;
+      else process.env.CAT_CAFE_WORKSPACE_ROOT = saved.workspaceRoot;
+      if (saved.globalRoot === undefined) delete process.env.CAT_CAFE_GLOBAL_CONFIG_ROOT;
+      else process.env.CAT_CAFE_GLOBAL_CONFIG_ROOT = saved.globalRoot;
+      if (saved.templatePath === undefined) delete process.env.CAT_TEMPLATE_PATH;
+      else process.env.CAT_TEMPLATE_PATH = saved.templatePath;
+      if (saved.home === undefined) delete process.env.HOME;
+      else process.env.HOME = saved.home;
+      process.chdir(saved.cwd);
+      resetMigrationState();
+      await app.close();
+    }
   });
 
   it('POST /api/cats allows api_key bindings with different protocol than client default', async () => {

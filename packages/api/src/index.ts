@@ -2007,6 +2007,21 @@ async function main(): Promise<void> {
     const registeredCatIds = Object.keys(configs).filter((id) => agentRegistry.has(id));
     await warmL0Cache(registeredCatIds, app.log);
   };
+
+  // clowder-ai#340: Account startup BEFORE first ACP/agent registry sync.
+  // Fail-fast (LL-043 / migration conflict / corrupt credentials) must run
+  // before createAcpServiceForConfig so rejected bindings skip registration
+  // against a known store, and so boot aborts before agents warm.
+  // Errors propagate to main().catch → process.exit(1).
+  {
+    const { accountStartupHook } = await import('./config/account-startup.js');
+    const startupResult = accountStartupHook(findMonorepoRoot(process.cwd()));
+    app.log.info(`[api] clowder-ai#340 accounts: ${startupResult.accountCount} account(s) loaded`);
+    for (const diagnostic of startupResult.unavailableAccounts) {
+      app.log.warn({ ...diagnostic }, '[api] account unavailable; other accounts remain usable');
+    }
+  }
+
   await syncAgentRegistry(catRegistry.getAllConfigs());
 
   const runtimeSessionSealReaper = new RuntimeSessionSealReaper({
@@ -6178,17 +6193,6 @@ async function main(): Promise<void> {
     }
   } catch (err) {
     app.log.warn(`[api] CLI config regeneration failed (best-effort): ${String(err)}`);
-  }
-
-  // clowder-ai#340: Account startup — fail-fast (LL-043 / migration conflict / corrupt credentials).
-  // Errors propagate to main().catch → process.exit(1).
-  {
-    const { accountStartupHook } = await import('./config/account-startup.js');
-    const startupResult = accountStartupHook(findMonorepoRoot(process.cwd()));
-    app.log.info(`[api] clowder-ai#340 accounts: ${startupResult.accountCount} account(s) loaded`);
-    for (const diagnostic of startupResult.unavailableAccounts) {
-      app.log.warn({ ...diagnostic }, '[api] account unavailable; other accounts remain usable');
-    }
   }
 
   // F101 Phase G: Recover auto-play loops for active games after restart.

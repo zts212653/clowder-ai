@@ -5,10 +5,21 @@ import { z } from 'zod';
  * F311 ref primitives, extracted so both the Program state machine and the Phase 3 diagnosis
  * snapshot can share one definition without an import cycle. Owner state refs are deliberately
  * `kind:id` shaped: a ref can address owner truth, but it can never smuggle owner payload.
+ *
+ * Pattern note: use an allowlist for the id segment — not a denylist with `[]` inside a character
+ * class. The older form `[^\s{}[\]"']` is valid ECMAScript, but when Zod→JSON Schema advertises it
+ * as MCP `pattern`, DeepSeek ACP rejects it with `is not a "regex"` and aborts the whole turn
+ * before any tool call (observed on dsh-v41-flash / `@点点 hi`). Escaping `\]` also trips Biome
+ * `noUselessEscapeInRegex`, so allowlist is the interoperable shape.
  */
 export const bounded = (max: number) => z.string().trim().min(1).max(max);
 export const timestampSchema = z.string().datetime({ offset: true });
-const ownerStateRefSchema = bounded(500).regex(/^[a-z][a-z0-9-]*:[^\s{}[\]"']+$/, 'owner state refs must use non-payload kind:id syntax');
+/** Portable `kind:id` pattern — safe for Node Zod, Biome, and DeepSeek ACP JSON Schema `pattern`. */
+export const OWNER_STATE_REF_PATTERN = /^[a-z][a-z0-9-]*:[a-zA-Z0-9._/:+@#-]+$/;
+const ownerStateRefSchema = bounded(500).regex(
+  OWNER_STATE_REF_PATTERN,
+  'owner state refs must use non-payload kind:id syntax',
+);
 export const refShape = {
   ownerFeatureId: bounded(120),
   ownerStateRef: ownerStateRefSchema,

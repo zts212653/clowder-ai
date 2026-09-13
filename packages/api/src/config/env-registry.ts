@@ -367,6 +367,16 @@ export const ENV_VARS: EnvDefinition[] = [
     runtimeEditable: false,
   },
   {
+    name: 'CAT_CAFE_READONLY_AGENT_KEY_UNION',
+    defaultValue: '(空)',
+    description:
+      'F317 P1 — readonly+agent-key 并集的显式开关：仅由合法的 agent-key 启动方（Antigravity executor / desktop writer）在确有密钥时置 "true"。' +
+      'CAT_CAFE_READONLY=true 默认严格只读，继承环境里残留的 CAT_CAFE_AGENT_KEY_* 不再扩大工具面。',
+    category: 'server',
+    sensitive: false,
+    runtimeEditable: false,
+  },
+  {
     name: 'CAT_CAFE_AGENT_KEY_BOUND_CAT_ID',
     defaultValue: '(空)',
     description:
@@ -490,6 +500,15 @@ export const ENV_VARS: EnvDefinition[] = [
     name: 'CAT_CAFE_TEST_SANDBOX_ALLOW_UNSAFE_ROOT',
     defaultValue: '(未设置)',
     description: '测试沙盒临时允许写入非隔离根目录（仅测试调试使用）',
+    category: 'server',
+    sensitive: false,
+    hubVisible: false,
+    runtimeEditable: false,
+  },
+  {
+    name: 'CAT_CAFE_TEST_SANDBOX_ROOT',
+    defaultValue: '(未设置)',
+    description: '测试自报的沙盒根目录；standalone installer 只写这里，未声明则拒写（仅测试使用）',
     category: 'server',
     sensitive: false,
     hubVisible: false,
@@ -996,6 +1015,24 @@ export const ENV_VARS: EnvDefinition[] = [
     description: 'MCP Server 路径',
     category: 'cli',
     sensitive: false,
+  },
+  {
+    name: 'Z_AI_API_KEY',
+    defaultValue: '(未设置)',
+    description: '智谱 MCP 套件共享密钥（zai-mcp-server / zread / web-reader / web-search-prime）',
+    category: 'cli',
+    sensitive: true,
+    runtimeEditable: false,
+    exampleRecommended: true,
+  },
+  {
+    name: 'ZHIPUAI_CODING_API_KEY',
+    defaultValue: '(未设置)',
+    description: '智谱编码订阅的 OpenCode provider 密钥（与 Z_AI_API_KEY 分离）',
+    category: 'cli',
+    sensitive: true,
+    runtimeEditable: false,
+    exampleRecommended: true,
   },
   {
     name: 'AUDIT_LOG_DIR',

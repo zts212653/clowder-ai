@@ -21,6 +21,10 @@ import {
   SENSITIVE_KEY_PATTERNS,
 } from '../../../../../../config/capabilities/capability-orchestrator.js';
 import {
+  renderMcpServerEnvReferenceValues,
+  resolveMcpServerEnvReferences,
+} from '../../../../../../config/capabilities/mcp-env-reference.js';
+import {
   isRetiredGithubMcpCapability,
   isRetiredGithubMcpConfigEntry,
 } from '../../../../../../config/capabilities/retired-github-mcp.js';
@@ -109,22 +113,29 @@ function capabilityEntryToAcpMcpServer(
   name: string,
   mcpServer: NonNullable<CapabilityEntry['mcpServer']>,
   projectRoot: string,
+  env: Readonly<Record<string, string | undefined>>,
+  envReferenceValueRenderer?: (value: string) => string,
 ): AcpMcpServer | null {
-  if (mcpServer.transport === 'streamableHttp' && mcpServer.url) {
+  const resolvedServer = envReferenceValueRenderer
+    ? renderMcpServerEnvReferenceValues(mcpServer, envReferenceValueRenderer, env, name)
+    : resolveMcpServerEnvReferences(mcpServer, env, name);
+  if (resolvedServer.transport === 'streamableHttp' && resolvedServer.url) {
     return {
       type: 'http' as const,
       name,
-      url: mcpServer.url,
-      headers: mcpServer.headers ? Object.entries(mcpServer.headers).map(([k, v]) => ({ name: k, value: v })) : [],
+      url: resolvedServer.url,
+      headers: resolvedServer.headers
+        ? Object.entries(resolvedServer.headers).map(([k, v]) => ({ name: k, value: v }))
+        : [],
     };
   }
-  if (mcpServer.command) {
-    const workingDir = resolveAcpMcpWorkingDir(mcpServer.workingDir, projectRoot);
+  if (resolvedServer.command) {
+    const workingDir = resolveAcpMcpWorkingDir(resolvedServer.workingDir, projectRoot);
     return {
       name,
-      command: resolveAcpMcpCommand(mcpServer.command, workingDir, projectRoot),
-      args: (mcpServer.args ?? []).map((arg) => resolveAcpMcpArg(arg, workingDir, projectRoot)),
-      env: mcpServer.env ? Object.entries(mcpServer.env).map(([k, v]) => ({ name: k, value: v })) : [],
+      command: resolveAcpMcpCommand(resolvedServer.command, workingDir, projectRoot),
+      args: (resolvedServer.args ?? []).map((arg) => resolveAcpMcpArg(arg, workingDir, projectRoot)),
+      env: resolvedServer.env ? Object.entries(resolvedServer.env).map(([k, v]) => ({ name: k, value: v })) : [],
     };
   }
   log.warn({ name }, 'Capability entry has no usable transport — skipping');
@@ -143,32 +154,41 @@ interface McpJsonEntry {
 }
 
 /** Convert a .mcp.json entry to the correct AcpMcpServer variant, or null if invalid. */
-function toAcpMcpServer(name: string, entry: McpJsonEntry): AcpMcpServer | null {
-  const isHttp = entry.type === 'http' || entry.type === 'streamableHttp';
-  const isSse = entry.type === 'sse';
+function toAcpMcpServer(
+  name: string,
+  entry: McpJsonEntry,
+  env: Readonly<Record<string, string | undefined>>,
+): AcpMcpServer | null {
+  const resolvedEntry = resolveMcpServerEnvReferences(entry, env, name);
+  const isHttp = resolvedEntry.type === 'http' || resolvedEntry.type === 'streamableHttp';
+  const isSse = resolvedEntry.type === 'sse';
 
-  if (isHttp && entry.url) {
+  if (isHttp && resolvedEntry.url) {
     return {
       type: 'http' as const,
       name,
-      url: entry.url,
-      headers: entry.headers ? Object.entries(entry.headers).map(([k, v]) => ({ name: k, value: v })) : [],
+      url: resolvedEntry.url,
+      headers: resolvedEntry.headers
+        ? Object.entries(resolvedEntry.headers).map(([k, v]) => ({ name: k, value: v }))
+        : [],
     };
   }
-  if (isSse && entry.url) {
+  if (isSse && resolvedEntry.url) {
     return {
       type: 'sse' as const,
       name,
-      url: entry.url,
-      headers: entry.headers ? Object.entries(entry.headers).map(([k, v]) => ({ name: k, value: v })) : [],
+      url: resolvedEntry.url,
+      headers: resolvedEntry.headers
+        ? Object.entries(resolvedEntry.headers).map(([k, v]) => ({ name: k, value: v }))
+        : [],
     };
   }
-  if (entry.command) {
+  if (resolvedEntry.command) {
     return {
       name,
-      command: entry.command,
-      args: entry.args ?? [],
-      env: entry.env ? Object.entries(entry.env).map(([k, v]) => ({ name: k, value: v })) : [],
+      command: resolvedEntry.command,
+      args: resolvedEntry.args ?? [],
+      env: resolvedEntry.env ? Object.entries(resolvedEntry.env).map(([k, v]) => ({ name: k, value: v })) : [],
     };
   }
   // No valid transport — skip
@@ -250,6 +270,15 @@ export async function resolveAcpMcpServers(
      * (MCP dist is under the runtime root).
      */
     configSourceRoot?: string;
+    /** Environment used to resolve `${VAR}` references at invocation time. */
+    env?: Readonly<Record<string, string | undefined>>;
+    /**
+     * Rewrite each `${VAR}`-carrying env/header value instead of resolving it
+     * to a secret. Rendered output keeps references (validated against `env`,
+     * fail-closed on missing) so callers can persist configs that interpolate
+     * at process boot — the DSH Cordis overlay uses this with `!!js` values.
+     */
+    envReferenceValueRenderer?: (value: string) => string;
   },
 ): Promise<AcpMcpServer[]> {
   // F161: when mcpSupport is explicitly disabled, skip ALL MCP servers
@@ -352,7 +381,13 @@ export async function resolveAcpMcpServers(
           }
           continue;
         }
-        const server = capabilityEntryToAcpMcpServer(name, cap.mcpServer, externalRoot);
+        const server = capabilityEntryToAcpMcpServer(
+          name,
+          cap.mcpServer,
+          externalRoot,
+          opts?.env ?? process.env,
+          opts?.envReferenceValueRenderer,
+        );
         if (server) servers.push(server);
         else missing.push(name);
       }
@@ -393,7 +428,7 @@ export async function resolveAcpMcpServers(
         log.debug({ name }, 'User project server shadowed by higher-priority server');
         continue;
       }
-      const server = toAcpMcpServer(name, entry);
+      const server = toAcpMcpServer(name, entry, opts?.env ?? process.env);
       if (server) servers.push(server);
     }
   }
@@ -449,7 +484,11 @@ export function resolveDisabledServerIds(
  *
  * Returns [] if .mcp.json is missing or has no mcpServers key.
  */
-export function resolveUserProjectMcpServers(userProjectRoot: string, exclude: ReadonlySet<string>): AcpMcpServer[] {
+export function resolveUserProjectMcpServers(
+  userProjectRoot: string,
+  exclude: ReadonlySet<string>,
+  env: Readonly<Record<string, string | undefined>> = process.env,
+): AcpMcpServer[] {
   const mcpJsonPath = join(userProjectRoot, '.mcp.json');
   const entries = readMcpJson(mcpJsonPath);
   const servers: AcpMcpServer[] = [];
@@ -460,7 +499,7 @@ export function resolveUserProjectMcpServers(userProjectRoot: string, exclude: R
       log.debug({ name, userProjectRoot }, 'User project server shadowed by base server');
       continue;
     }
-    const server = toAcpMcpServer(name, entry);
+    const server = toAcpMcpServer(name, entry, env);
     if (server) servers.push(server);
   }
 

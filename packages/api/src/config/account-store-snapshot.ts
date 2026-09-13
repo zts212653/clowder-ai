@@ -14,13 +14,16 @@ import {
   parseStoredCredential,
 } from './account-store-format.js';
 import { resolveAccountStoreTopology } from './account-store-topology.js';
+import { assertSafeTestConfigRead } from './test-config-write-guard.js';
 
 function readMap(path: string): Record<string, unknown> {
   let content: string;
   try {
     content = readFileSync(path, 'utf8');
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return {};
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+      return Object.create(null) as Record<string, unknown>;
+    }
     return malformedAccountStore(path);
   }
   try {
@@ -37,6 +40,9 @@ interface StoreSnapshot {
 }
 
 function readStore(root: string): StoreSnapshot {
+  // P1-8: guard every physical topology root before the first open — primary and
+  // legacy alike. A readable credential/account from an inherited store is the leak.
+  assertSafeTestConfigRead(root, 'account-store-snapshot.readStore');
   const path = (name: string) => resolve(root, '.cat-cafe', name);
   const catalog = readMap(path('cat-catalog.json'));
   return {
@@ -178,7 +184,18 @@ export function inspectAccountCatalog(projectRoot: string) {
 }
 
 export function readAccountCatalogSnapshot(projectRoot: string): Record<string, AccountConfig> {
-  return Object.fromEntries(
-    Object.entries(inspectAccountCatalog(projectRoot).entries).map(([ref, entry]) => [ref, entry.account]),
-  );
+  // Null-prototype map: Object.fromEntries([['__proto__', ...]]) corrupts [[Prototype]]
+  // and breaks R19/R20 ref-keyed store contracts (toString / __proto__ as data).
+  const accounts = Object.create(null) as Record<string, AccountConfig>;
+  for (const [ref, entry] of Object.entries(inspectAccountCatalog(projectRoot).entries)) {
+    if (entry.account) {
+      Object.defineProperty(accounts, ref, {
+        value: entry.account,
+        enumerable: true,
+        configurable: true,
+        writable: true,
+      });
+    }
+  }
+  return accounts;
 }

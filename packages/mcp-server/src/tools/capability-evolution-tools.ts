@@ -3,6 +3,9 @@ import { defineMcpCanonicalFactory } from '../tool-governance-migration.js';
 import { callbackGet, callbackPost } from './callback-tools.js';
 import type { ToolResult } from './file-tools.js';
 
+/** Keep identical to packages/shared OWNER_STATE_REF_PATTERN (DSH-portable allowlist). */
+const OWNER_STATE_REF_PATTERN = /^[a-z][a-z0-9-]*:[a-zA-Z0-9._/:+@#-]+$/;
+
 const defineTool = defineMcpCanonicalFactory('capability-evolution-tools.ts', undefined, {
   resourceFamily: 'evolution-program',
   authority: 'callback-owner',
@@ -24,7 +27,7 @@ const bounded = (max: number) => z.string().trim().min(1).max(max);
 const ownerRef = z
   .object({
     ownerFeatureId: bounded(120),
-    ownerStateRef: bounded(500).regex(/^[a-z][a-z0-9-]*:[^\s{}[\]"']+$/),
+    ownerStateRef: bounded(500).regex(OWNER_STATE_REF_PATTERN),
     version: bounded(240).optional(),
   })
   .strict();
@@ -108,7 +111,7 @@ const ownerSurfaceBinding = z
   .object({
     sourceKind: bounded(120).regex(/^[a-z0-9][a-z0-9-]*$/),
     ownerSurfaceRef: ownerRef,
-    joinKey: bounded(500).regex(/^(?:thread|message|subject):[^\s{}[\]"']+$/),
+    joinKey: bounded(500).regex(/^(?:thread|message|subject):[a-zA-Z0-9._/:+@#-]+$/),
     namedConsumerRef: ownerRef,
     instrumentationRef: ownerRef,
   })

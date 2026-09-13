@@ -2,8 +2,8 @@ import assert from 'node:assert/strict';
 import { afterEach, beforeEach, describe, test } from 'node:test';
 import Fastify from 'fastify';
 import { AutoDreamStore } from '../dist/domains/auto-dream/AutoDreamStore.js';
-import { PresentLoopService } from '../dist/domains/auto-dream/PresentLoopService.js';
-import { ProactiveRelationshipService } from '../dist/domains/auto-dream/ProactiveRelationshipService.js';
+import { PresentLoopService } from '../dist/domains/auto-dream/proactive/PresentLoopService.js';
+import { ProactiveRelationshipService } from '../dist/domains/auto-dream/proactive/ProactiveRelationshipService.js';
 import { MessageStore } from '../dist/domains/cats/services/stores/ports/MessageStore.js';
 import { callbackAutoDreamRoutes } from '../dist/routes/callback-auto-dream-routes.js';
 

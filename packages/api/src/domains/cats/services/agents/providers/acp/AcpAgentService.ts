@@ -40,6 +40,7 @@ import {
   bindSessionCredentialFile,
   type PreparedCredentialEnv,
   prepareSessionCredentialFile,
+  refreshFrozenCredentialFile,
   resolveSessionCredentialFile,
   writeSessionCredentialFile,
 } from './acp-credential-file.js';
@@ -137,6 +138,11 @@ export interface AcpAgentServiceConfig {
   /** When false, disables ALL MCP servers (base + per-project) for this member. */
   mcpSupport?: boolean;
   /**
+   * When true, still resolve/log family MCP servers but send session/new an empty
+   * list. Used for harnesses (DeepSeek ACP) whose protocol rejects non-empty mcpServers.
+   */
+  omitSessionMcpServers?: boolean;
+  /**
    * #1186: Configured ACP Idle TTL from member's pool config (ms).
    * Used as the authoritative idle stall threshold for all "no events" termination
    * paths in promptStream (both tool and non-tool idle). Previously, hardcoded
@@ -169,6 +175,7 @@ export class AcpAgentService implements AgentService {
   private readonly sessionModel?: string;
   private readonly appliedContextBinding?: import('../../../types.js').AgentContextBinding;
   private readonly mcpSupportEnabled: boolean;
+  private readonly omitSessionMcpServers: boolean;
   /**
    * #1186: Resolved ACP idle TTL — authoritative threshold for all no-event termination.
    * Always concrete: defaults to DEFAULT_ACP_IDLE_TTL_MS (30m) when config omits it,
@@ -192,6 +199,7 @@ export class AcpAgentService implements AgentService {
     this.sessionModel = config.sessionModel?.trim() || undefined;
     this.appliedContextBinding = config.contextBinding;
     this.mcpSupportEnabled = config.mcpSupport !== false;
+    this.omitSessionMcpServers = config.omitSessionMcpServers === true;
     this.idleTtlMs = config.idleTtlMs ?? DEFAULT_ACP_IDLE_TTL_MS;
     this.agentBusyRetryDelaysMs = config.agentBusyRetryDelaysMs ?? DEFAULT_AGENT_BUSY_RETRY_DELAYS_MS;
   }
@@ -439,10 +447,21 @@ export class AcpAgentService implements AgentService {
       // is decided before session/new (MCP subprocess env freezes at session creation),
       // and resume rewrites the same file with fresh creds. A superseded process keeps
       // its own file, which stops updating — its late callbacks fail registry.isLatest().
+      const prepareInvokeCredentials = (resumeSessionId?: string): PreparedCredentialEnv | null => {
+        const processCredFile = this.omitSessionMcpServers ? lease.client.mcpCredentialFile?.trim() : undefined;
+        if (processCredFile) {
+          return refreshFrozenCredentialFile(options?.callbackEnv, processCredFile);
+        }
+        return resumeSessionId
+          ? resolveSessionCredentialFile(options?.callbackEnv, resumeSessionId)
+          : prepareSessionCredentialFile(options?.callbackEnv);
+      };
+
       const buildSessionConfig = (preparedCreds: PreparedCredentialEnv | null) => {
         const sessionCallbackEnv = preparedCreds?.env ?? options?.callbackEnv;
+        const materialized = materializeSessionMcpServers(invokeServers, sessionCallbackEnv);
         return {
-          mcpServers: materializeSessionMcpServers(invokeServers, sessionCallbackEnv),
+          mcpServers: this.omitSessionMcpServers ? [] : materialized,
           envDiag: callbackEnvDiagnostic(sessionCallbackEnv),
         };
       };
@@ -465,7 +484,7 @@ export class AcpAgentService implements AgentService {
       }
 
       if (resumeSessionId) {
-        const resumeCreds = resolveSessionCredentialFile(options?.callbackEnv, resumeSessionId);
+        const resumeCreds = prepareInvokeCredentials(resumeSessionId);
         const resumeConfig = buildSessionConfig(resumeCreds);
         try {
           log.info(
@@ -503,7 +522,7 @@ export class AcpAgentService implements AgentService {
       }
 
       if (resumeDisposition !== 'resumed') {
-        const freshCreds = prepareSessionCredentialFile(options?.callbackEnv);
+        const freshCreds = prepareInvokeCredentials();
         const freshConfig = buildSessionConfig(freshCreds);
         sessionMcpServers = freshConfig.mcpServers;
         envDiag = freshConfig.envDiag;
@@ -724,7 +743,7 @@ export class AcpAgentService implements AgentService {
         // Create fresh session and retry promptStream once (not recursive — single retry)
         promptPhase = 'not_started';
         try {
-          const retryCreds = prepareSessionCredentialFile(options?.callbackEnv);
+          const retryCreds = prepareInvokeCredentials();
           const retryConfig = buildSessionConfig(retryCreds);
           const freshSession = await client.newSession(cwd, retryConfig.mcpServers);
           const freshSessionId = freshSession.sessionId;

@@ -48,6 +48,18 @@ const TEMPLATE_BREED_BACKFILL_ALLOWLIST = new Set([
     breedId: 'dragon-li',
     catId: 'glm52',
   }),
+  templateBreedKey({
+    breedId: 'grok-build',
+    catId: 'grok-build',
+  }),
+  templateBreedKey({
+    breedId: 'dsh',
+    catId: 'dsh',
+  }),
+  templateBreedKey({
+    breedId: 'zcode',
+    catId: 'zcode',
+  }),
 ]);
 
 export function isTemplateVariantBackfillAllowed(

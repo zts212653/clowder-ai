@@ -1,6 +1,6 @@
-import type { ScheduleRunTiming } from '../../infrastructure/scheduler/types.js';
+import type { ScheduleRunTiming } from '../../../infrastructure/scheduler/types.js';
+import type { SleepPostureRecord } from '../store-types.js';
 import type { ProactiveWakeContext } from './ProactiveRelationshipService.js';
-import type { SleepPostureRecord } from './store-types.js';
 
 export interface PresentLoopPromptInput {
   runId: string;

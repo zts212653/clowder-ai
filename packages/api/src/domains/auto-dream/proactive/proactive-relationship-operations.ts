@@ -1,7 +1,16 @@
 import type { ProactiveIntent } from '@cat-cafe/shared';
-import { getCatLifeConfig } from './cat-life-operations.js';
-import type { OwnedSeedRecord, PrivateSeedDecisionResult } from './private-seed-contract.js';
-import { decidePrivateSeed } from './private-seed-operations.js';
+import { getCatLifeConfig } from '../cat-life-operations.js';
+import type { OwnedSeedRecord, PrivateSeedDecisionResult } from '../private-seed-contract.js';
+import { decidePrivateSeed } from '../private-seed-operations.js';
+import type { AutoDreamStoreContext } from '../store-context.js';
+import { insertAutoDreamEvent } from '../store-context.js';
+import { rowToOwnedSeed, rowToProactiveIntent, rowToProactiveVisit } from '../store-rows.js';
+import {
+  AutoDreamStoreError,
+  type CatLifeConfigRecord,
+  type InvocationPrincipal,
+  type SettlePresentLoopValue,
+} from '../store-types.js';
 import type {
   ProactiveIntentRecord,
   ProactiveSettlementState,
@@ -9,15 +18,6 @@ import type {
   ProactiveVisitRecord,
 } from './proactive-relationship-contract.js';
 import { householdLocalDateAt, quietHoursActiveAt } from './proactive-time.js';
-import type { AutoDreamStoreContext } from './store-context.js';
-import { insertAutoDreamEvent } from './store-context.js';
-import { rowToOwnedSeed, rowToProactiveIntent, rowToProactiveVisit } from './store-rows.js';
-import {
-  AutoDreamStoreError,
-  type CatLifeConfigRecord,
-  type InvocationPrincipal,
-  type SettlePresentLoopValue,
-} from './store-types.js';
 
 type DbRow = Record<string, unknown>;
 

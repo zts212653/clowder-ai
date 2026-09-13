@@ -11,6 +11,7 @@ import type { StdioServerParameters } from '@modelcontextprotocol/sdk/client/std
 import { getDefaultEnvironment, StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import { resolvePencilCommand } from '../config/capabilities/capability-orchestrator.js';
+import { resolveMcpServerEnvReferences } from '../config/capabilities/mcp-env-reference.js';
 
 export interface McpProbeResult {
   connectionStatus: 'connected' | 'disconnected' | 'unknown';
@@ -48,18 +49,6 @@ function sanitizeEnv(env: Record<string, string> | undefined): Record<string, st
     if (typeof value === 'string') safe[key] = value;
   }
   return safe;
-}
-
-/**
- * Resolve `${ENV_VAR}` references in header values from process.env.
- * Supports bare `${VAR}` as well as embedded `Bearer ${VAR}` patterns.
- */
-function resolveEnvVarsInRecord(record: Record<string, string>): Record<string, string> {
-  const resolved: Record<string, string> = {};
-  for (const [key, value] of Object.entries(record)) {
-    resolved[key] = value.replace(/\$\{([^}]+)\}/g, (_, name) => process.env[name] ?? '');
-  }
-  return resolved;
 }
 
 function remainingTimeout(deadlineMs: number): number {
@@ -116,6 +105,7 @@ export async function probeMcpCapability(
   options: {
     projectRoot: string;
     timeoutMs?: number;
+    env?: Readonly<Record<string, string | undefined>>;
   },
 ): Promise<McpProbeResult> {
   if (capability.type !== 'mcp') return { connectionStatus: 'unknown' };
@@ -126,9 +116,20 @@ export async function probeMcpCapability(
   return probeStdioMcp(capability, options);
 }
 
-async function probeHttpMcp(capability: CapabilityEntry, options: { timeoutMs?: number }): Promise<McpProbeResult> {
-  const url = capability.mcpServer?.url;
+async function probeHttpMcp(
+  capability: CapabilityEntry,
+  options: { timeoutMs?: number; env?: Readonly<Record<string, string | undefined>> },
+): Promise<McpProbeResult> {
+  const mcp = capability.mcpServer;
+  if (!mcp) return { connectionStatus: 'unknown' };
+  const url = mcp.url;
   if (!url) return { connectionStatus: 'unknown' };
+  let resolvedMcp: NonNullable<CapabilityEntry['mcpServer']>;
+  try {
+    resolvedMcp = resolveMcpServerEnvReferences(mcp, options.env ?? process.env, capability.id);
+  } catch (err) {
+    return { connectionStatus: 'disconnected', tools: [], error: (err as Error).message };
+  }
 
   // #712 review P1-10: validate URL scheme to prevent SSRF via file:// / gopher:// etc.
   let parsed: URL;
@@ -144,8 +145,8 @@ async function probeHttpMcp(capability: CapabilityEntry, options: { timeoutMs?: 
   const timeoutMs = options.timeoutMs ?? DEFAULT_HTTP_PROBE_TIMEOUT_MS;
   const deadlineMs = Date.now() + timeoutMs;
   const requestInit: RequestInit = {};
-  if (capability.mcpServer?.headers && Object.keys(capability.mcpServer.headers).length > 0) {
-    requestInit.headers = resolveEnvVarsInRecord(capability.mcpServer.headers);
+  if (resolvedMcp.headers && Object.keys(resolvedMcp.headers).length > 0) {
+    requestInit.headers = resolvedMcp.headers;
   }
 
   const transport = new StreamableHTTPClientTransport(parsed, { requestInit });
@@ -167,10 +168,19 @@ async function probeHttpMcp(capability: CapabilityEntry, options: { timeoutMs?: 
 
 async function probeStdioMcp(
   capability: CapabilityEntry,
-  options: { projectRoot: string; timeoutMs?: number },
+  options: {
+    projectRoot: string;
+    timeoutMs?: number;
+    env?: Readonly<Record<string, string | undefined>>;
+  },
 ): Promise<McpProbeResult> {
-  const mcp = capability.mcpServer;
+  let mcp = capability.mcpServer;
   if (!mcp) return { connectionStatus: 'unknown' };
+  try {
+    mcp = resolveMcpServerEnvReferences(mcp, options.env ?? process.env, capability.id);
+  } catch (err) {
+    return { connectionStatus: 'disconnected', tools: [], error: (err as Error).message };
+  }
   let command = mcp.command;
   let args = mcp.args;
   if ((!command || command.trim().length === 0) && mcp.resolver === 'pencil') {

@@ -66,7 +66,18 @@ describe('test config write sandbox', () => {
     }
   });
 
-  it('allows repo-root reads when sandboxed code does not need to write', async () => {
+  /**
+   * P1-8 reverses this case on purpose.
+   *
+   * It used to assert that repo-root READS stay open because "sandboxed code
+   * that does not write cannot do harm". That is only true if durability is the
+   * thing being protected. The store holds credentials, so the boundary is a
+   * DATA boundary: a test that can read {repo}/.cat-cafe/credentials.json has
+   * already got the secret, and no later write guard can take it back. The
+   * boundary is about which store a test may resolve at all, not about whether
+   * it goes on to modify it.
+   */
+  it('blocks repo-root reads too — the store holds credentials, not just state', async () => {
     previousSandbox = process.env.CAT_CAFE_TEST_SANDBOX;
     previousGlobalRoot = process.env.CAT_CAFE_GLOBAL_CONFIG_ROOT;
     previousHome = process.env.HOME;
@@ -77,8 +88,24 @@ describe('test config write sandbox', () => {
     const { readCatalogAccounts, resetMigrationState } = await import('../dist/config/catalog-accounts.js');
     resetMigrationState();
 
+    assert.throws(() => readCatalogAccounts(REPO_ROOT), /test sandbox|repo root|unsafe/i);
+  });
+
+  /** Control: the refusal above is about WHICH root, not about reads in general. */
+  it('allows reads from a fixture root the test owns', async () => {
+    previousSandbox = process.env.CAT_CAFE_TEST_SANDBOX;
+    previousGlobalRoot = process.env.CAT_CAFE_GLOBAL_CONFIG_ROOT;
+    previousHome = process.env.HOME;
+    process.env.CAT_CAFE_TEST_SANDBOX = '1';
+    delete process.env.CAT_CAFE_GLOBAL_CONFIG_ROOT;
+    process.env.HOME = mkdtempSync(join(tmpdir(), 'cat-config-read-home-'));
+    const fixtureRoot = mkdtempSync(join(tmpdir(), 'cat-config-read-fixture-'));
+
+    const { readCatalogAccounts, resetMigrationState } = await import('../dist/config/catalog-accounts.js');
+    resetMigrationState();
+
     assert.doesNotThrow(() => {
-      const accounts = readCatalogAccounts(REPO_ROOT);
+      const accounts = readCatalogAccounts(fixtureRoot);
       assert.equal(typeof accounts, 'object');
       assert.ok(accounts && !Array.isArray(accounts));
     });

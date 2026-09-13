@@ -484,7 +484,9 @@ describe('F061 READONLY_ALLOWED_TOOLS whitelist', () => {
 
   test('readonly + agent-key exposes only readonly, principal-capable, or non-callback-safe collab tools', async () => {
     const { buildCollabTools } = await import('../dist/server-toolsets.js');
-    const agentKeyNames = new Set(buildCollabTools({ readonly: true, hasAgentKey: true }).map((tool) => tool.name));
+    const agentKeyNames = new Set(
+      buildCollabTools({ readonly: true, hasAgentKey: true, agentKeyUnion: true }).map((tool) => tool.name),
+    );
     const expected = CANONICAL_TOOL_REGISTRY.filter(
       (definition) =>
         definition.serverFamily === 'collab' &&
@@ -498,10 +500,56 @@ describe('F061 READONLY_ALLOWED_TOOLS whitelist', () => {
     assert.deepEqual([...agentKeyNames].filter((name) => name.startsWith('cat_cafe_')).sort(), expected);
   });
 
-  test('readonly mode exposes agent-key tools when only CAT_CAFE_AGENT_KEY_FILES is configured', () => {
+  test('F317 P1: readonly mode with only CAT_CAFE_AGENT_KEY_FILES configured is STRICT (no write leak)', () => {
     const distIndexUrl = new URL('../dist/index.js', import.meta.url).href;
     const script = `
       process.env.CAT_CAFE_READONLY = 'true';
+      delete process.env.CAT_CAFE_AGENT_KEY_SECRET;
+      delete process.env.CAT_CAFE_AGENT_KEY_FILE;
+      process.env.CAT_CAFE_AGENT_KEY_FILES = JSON.stringify({
+        antigravity: '/tmp/antigravity.secret',
+        'antig-opus': '/tmp/antig-opus.secret',
+      });
+      const { createServer } = await import(${JSON.stringify(distIndexUrl)});
+      const server = createServer();
+      const names = Object.keys(server._registeredTools);
+      if (
+        // agent-key write tools must not leak into a strict readonly mount
+        names.includes('cat_cafe_post_message') ||
+        names.includes('cat_cafe_cross_post_message') ||
+        names.includes('cat_cafe_workspace_navigate') ||
+        names.includes('cat_cafe_preview_open') ||
+        names.includes('cat_cafe_teleport') ||
+        names.includes('cat_cafe_register_scheduled_task') ||
+        names.includes('cat_cafe_remove_scheduled_task') ||
+        names.includes('cat_cafe_publish_verdict') ||
+        names.includes('cat_cafe_backfill_events') ||
+        // agent-key-only read tools are also outside the strict readonly allowlist
+        names.includes('cat_cafe_get_thread_context') ||
+        names.includes('cat_cafe_list_schedule_templates') ||
+        names.includes('cat_cafe_preview_scheduled_task') ||
+        // strict readonly core must remain
+        !names.includes('cat_cafe_get_rich_block_rules') ||
+        !names.includes('cat_cafe_search_evidence') ||
+        !names.includes('cat_cafe_shell_exec') ||
+        !names.includes('cat_cafe_graph_resolve')
+      ) {
+        console.error(JSON.stringify(names.sort()));
+        process.exit(1);
+      }
+    `;
+    const result = spawnSync(process.execPath, ['--input-type=module', '-e', script], {
+      cwd: process.cwd(),
+      encoding: 'utf-8',
+    });
+    assert.equal(result.status, 0, result.stderr || result.stdout);
+  });
+
+  test('readonly mode exposes agent-key tools with explicit CAT_CAFE_READONLY_AGENT_KEY_UNION opt-in', () => {
+    const distIndexUrl = new URL('../dist/index.js', import.meta.url).href;
+    const script = `
+      process.env.CAT_CAFE_READONLY = 'true';
+      process.env.CAT_CAFE_READONLY_AGENT_KEY_UNION = 'true';
       delete process.env.CAT_CAFE_AGENT_KEY_SECRET;
       delete process.env.CAT_CAFE_AGENT_KEY_FILE;
       process.env.CAT_CAFE_AGENT_KEY_FILES = JSON.stringify({

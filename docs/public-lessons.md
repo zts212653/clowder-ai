@@ -841,43 +841,55 @@ created: 2026-02-26
 
 ### LL-045: Runtime worktree 反复被猫污染——三次误删 + 进程表爆炸导致系统重启
 - 状态：draft
-- 更新时间：2026-03-31
+- 更新时间：2026-09-09
+- 变更原因：补 2026-09-09 `checkout -b` 占用启动树变体（家内 PR #14/#15）。同一根因，不新开 LL-101。
 
 - 坑：2026-03-29 ～ 2026-03-31 期间，runtime worktree（`cat-cafe-runtime`）被多个Ragdoll session 反复弄脏，导致 `pnpm start` 无法启动。发现三批污染：
   1. **WeixinAdapter voice_item A/B test**（`WEIXIN_VOICE_ITEM_MODE` env 切换 `minimal` vs `metadata`）——调试微信语音问题，直接在 runtime 编辑
   2. **invoke-single-cat.ts account resolution 调试**——插入 `appendFileSync('/tmp/cat-cafe-account-debug.log')` 文件日志 + 多个 `let→const` 误改（会导致运行时崩溃）+ proxy fallback if/else 逻辑被重构坏
   3. **`process-liveness-probe.test.js` 进程泄漏**——同一测试文件被多实例并发运行（疑似 watch 模式反复触发），每个实例 spawn 子进程不回收，进程数飙至 10472，Load Average 199，系统进入 `EAGAIN`（fork failed: resource temporarily unavailable），最终只能重启 macOS
   - 另有 Knowledge Feed markers（`docs/markers/*.yaml`）和开源同步残留（`LICENSE`、`ROADMAP.md`、`.sync-provenance.json`）出现在 runtime
+  4. **2026-09-09 启动树被功能分支占用**（工作区可以保持干净）：谱谱在 `/Users/yuhan/cat-cafe/cat-cafe-runtime` 里 `git checkout -b feat/acp-zai-mcp-whitelist`（13:54）和 `fix/acp-catalog-whitelist-migration`（16:48）；16:57 交审后没有切回 `runtime/main-sync`。砚砚从同一 cwd `git push` + `gh pr create` 开家内 PR #14/#15，把占用窗口延长到 18:01。`pnpm start` 被 `ensure_runtime_branch` 拒绝。同类先例：2026-08-25 `fix/zcode-acp-32031-runtime-model-recovery`。
 
 - 根因：
   1. **P0 铁律执行失败**：`feedback_no_touch_runtime.md` 已明确"禁止直接操作 runtime worktree"，但多个 session 的Ragdoll仍然在 runtime 里直接编辑代码/运行测试/运行脚本
   2. **runtime 无写保护**：除了 `pnpm start` 时的脏检查（`git status -uno`），runtime worktree 没有任何机制阻止猫直接写入
   3. **测试进程无上限**：`process-liveness-probe.test.js` 涉及 spawn 子进程，但无 maxprocs / ulimit 保护，watch 模式下可指数膨胀
   4. **清理时二次伤害**：发现污染后，当前 session 的Ragdoll三次不检查内容就执行 `git checkout --` / `git clean -fd`，导致调试进度（invoke-single-cat.ts）和 Knowledge Feed markers 不可逆丢失
+  5. **2026-09-09 变体**：猫把“不提交到 `runtime/main-sync` / 工作区干净”误当成安全，于是在启动树里 `checkout -b`。ADR-039、merge-gate 7.5c、`ensure_runtime_branch` 已写明 runtime 只跟 `origin/main`，但守卫只在启动/同步时爆，挡不住先把树切走；交球检查点也没有“树还在谁手上”。
 
 - 触发条件：
   - 猫在 runtime worktree 目录下执行编辑/测试/脚本（而非 feature worktree）
   - 测试涉及 process spawn 且在 watch 模式下运行
   - 发现脏文件后不检查内容直接清理
+  - 猫在 `cat-cafe-runtime` 里 `git checkout -b` / `switch` / `push` / `gh pr create`，交审后不把 HEAD 还回 `runtime/main-sync`
 
 - 修复：
   - 第 1 批：stash 保留（`runtime-rescue: WeixinAdapter voice_item A/B test`），记录到 F137 changelog
   - 第 2 批：被误清理（`git checkout -- .`），diff 内容保存到 GitHub Issue #862
   - 第 3 批（进程爆炸）：`killall -9 node` + 系统重启
+  - 第 4 批（2026-09-09）：18:01 把 runtime 切回 `runtime/main-sync` 并 fast-forward 到 `0d22c2d5d`（PR #15 merge）。代码已在 main，启动失败是占用不是回退。
 
 - 防护：
   1. **runtime worktree 写保护**：考虑用 `chflags uchg` 或 git hook 阻止非 `runtime-worktree.sh` 的写入
   2. **测试进程上限**：`process-liveness-probe.test.js` 需加 spawn 计数器 + `ulimit -u` 防护
   3. **清理前必须检查**：见 `feedback_never_clean_without_checking.md`——`git checkout/clean/rm` 前先 `ls`/`cat`/`git diff` 看内容，stash 优先于 checkout
   4. **脏检查应区分 tracked 和 untracked**：当前 `ensure_runtime_clean` 用 `-uno` 忽略 untracked 文件，markers/sync 残留不会阻止启动但会持续积累
+  5. **动 HEAD 前先问**：任何会改变 `cat-cafe-runtime` HEAD 的 git 操作前，先确认“这是不是 hub 启动树”。是 → 停，改走独立 worktree。
+  6. **终态做法**：猫要改 runtime 代码，一律 `git worktree add` 出独立工作树；禁止在启动树 `checkout -b`。
+  7. **交球检查点**：交审 / 交 merge / 交启动前，确认 runtime HEAD 已回到 `runtime/main-sync`。
+  8. **机械防护（未落地）**：后续应阻止 runtime worktree 接受 checkout/switch/开发命令；只靠 `ensure_runtime_branch` 事后 fail-closed 不够。
 
 - 来源锚点：
   - GitHub Issue: #862
   - F137 changelog 2026-03-29 条目
   - `feedback_never_clean_without_checking.md`
-  - `scripts/runtime-worktree.sh` ensure_runtime_clean 函数
+  - `scripts/runtime-worktree.sh` `ensure_runtime_clean` / `ensure_runtime_branch`
+  - `docs/decisions/039-runtime-passive-freeze.md`（ADR-039）
+  - `cat-cafe-skills/merge-gate/SKILL.md` Step 7.5c
+  - thread `thread_mtohr9px91h02vp8`：谱谱 `0001788950788703` / `0001788951026048`；砚砚 `0001788950788728`；runtime reflog 2026-09-09；家内 PR #14/#15
 
-- 关联：F137（WeixinAdapter voice）| F118（invoke-single-cat audit）| #862 | feedback_no_touch_runtime.md
+- 关联：F137（WeixinAdapter voice）| F118（invoke-single-cat audit）| #862 | feedback_no_touch_runtime.md | ADR-039 | LL-078
 
 ---
 

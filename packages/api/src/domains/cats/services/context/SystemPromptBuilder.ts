@@ -14,10 +14,9 @@ import type {
   WorldContextEnvelope,
 } from '@cat-cafe/shared';
 import { catRegistry } from '@cat-cafe/shared';
-import { getDossierL0Pronouns, getDossierRosterSummary, hasDossierEntry } from '@cat-cafe/shared/dossier';
+import { getDossierL0Pronouns, getDossierL0RoutingNote } from '@cat-cafe/shared/dossier';
 import {
   catHasRole,
-  getCoCreatorConfig,
   getReviewPolicy,
   getRoster,
   isCatAvailable,
@@ -415,34 +414,23 @@ export function buildTeammateRoster(currentCatId: CatId): string | null {
     }
     resolvedModel = compactRosterModel(resolvedModel);
     const mentionCell = resolvedModel ? `${mention} · ${resolvedModel}` : mention;
-    // F208 KD-12: dossier l0RosterSummary → legacy teamStrengths → roleDescription
-    const dossierSummary = getDossierRosterSummary(id, projectRoot);
-    // KD-9: warn only for tracked cats (have dossier entry) missing l0RosterSummary.
-    // Runtime/custom cats with no dossier entry silently use config fallback.
-    if (!dossierSummary && hasDossierEntry(id, projectRoot)) {
-      console.warn(
-        `[F208 KD-9] cat "${id}" has dossier entry but missing l0RosterSummary — falling back to config.teamStrengths`,
-      );
-    }
-    const strengths = compactRosterCell(dossierSummary ?? config.teamStrengths ?? config.roleDescription, 52);
     // F167 Phase E (KD-20): surface hard restrictions alongside caution — data-driven
     // replacement for the retired L3 role-gate. Sender sees e.g. "禁止写代码" so they
     // self-regulate which cat to @ for which task; no harness-side regex.
     const restrictionsNote =
       config.restrictions && config.restrictions.length > 0 ? `**硬限制**：${config.restrictions.join('、')}` : null;
-    const cautionCell = compactRosterCell(
-      [config.caution ?? null, restrictionsNote].filter(Boolean).join('；') || '—',
-      72,
+    // Keep the always-on roster routing-focused and bounded as the catalog grows.
+    // This mirrors compile-system-prompt-l0: dossier route note first, then the
+    // catalog's caution. Capability prose stays out of the always-on surface.
+    const routingNote = getDossierL0RoutingNote(id, projectRoot) ?? config.caution;
+    const routingCell = compactRosterCell(
+      [routingNote ?? null, restrictionsNote].filter(Boolean).join('；') || '—',
+      52,
     );
-    rows.push(`| ${rosterLabel} | ${mentionCell} | ${strengths} | ${cautionCell} |`);
+    rows.push(`|${rosterLabel}|${mentionCell}|${routingCell}|`);
   }
 
-  return [
-    '## 队友名册',
-    '| 猫猫 | @mention · 当前模型 | 擅长 | 注意 |',
-    '|------|---------|------|------|',
-    ...rows,
-  ].join('\n');
+  return ['## 队友名册', '|猫猫|@mention · 当前模型|路由边界|', '|---|---|---|', ...rows].join('\n');
 }
 
 /**

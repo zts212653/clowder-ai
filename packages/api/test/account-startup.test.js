@@ -4,6 +4,10 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, it } from 'node:test';
 
+// Freeze ambient store roots before beforeEach points CAT_CAFE_GLOBAL_CONFIG_ROOT
+// at a temp fixture (same contract as credentials-store / test-config-write-guard).
+await import('../dist/config/test-config-write-guard.js');
+
 describe('accountStartupHook (clowder-ai#340 fail-fast)', () => {
   let globalRoot;
   let projectRoot;

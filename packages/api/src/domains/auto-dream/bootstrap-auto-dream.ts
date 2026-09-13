@@ -15,11 +15,11 @@ import type { IEvidenceStore } from '../memory/interfaces.js';
 import type { LibraryCatalog } from '../memory/LibraryCatalog.js';
 import { type AutoDreamServices, createAutoDreamServices } from './AutoDreamServices.js';
 import { CatLifeSettingsService } from './CatLifeSettingsService.js';
-import { PresentLoopService } from './PresentLoopService.js';
+import { PresentLoopService } from './proactive/PresentLoopService.js';
 import {
   type ProactiveCanonicalMessageBroadcaster,
   ProactiveRelationshipService,
-} from './ProactiveRelationshipService.js';
+} from './proactive/ProactiveRelationshipService.js';
 import { DEFAULT_AWAKENED_LEASE_MS } from './store-config.js';
 
 interface TemplateRegistrar {

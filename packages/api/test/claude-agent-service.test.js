@@ -1287,6 +1287,60 @@ test('#712: Claude reads capabilities from runtime root while cwd is user projec
   }
 });
 
+test('Claude keeps MCP environment references native instead of placing secrets in argv', async () => {
+  const runtimeRoot = mkdtempSync(join(tmpdir(), 'cat-cafe-claude-env-ref-'));
+  const mcpDistDir = join(runtimeRoot, 'packages', 'mcp-server', 'dist');
+  const projectDir = mkdtempSync(join(tmpdir(), 'cat-cafe-claude-env-ref-project-'));
+  const envKey = 'TEST_CLAUDE_MCP_TOKEN';
+  const previousToken = process.env[envKey];
+  process.env[envKey] = 'claude-secret-must-not-enter-argv';
+  mkdirSync(mcpDistDir, { recursive: true });
+  writeFileSync(join(mcpDistDir, 'index.js'), '// stub', 'utf8');
+  writeCapabilitiesConfig(runtimeRoot, [
+    {
+      id: 'env-backed-remote',
+      type: 'mcp',
+      globalEnabled: true,
+      source: 'external',
+      mcpServer: {
+        transport: 'streamableHttp',
+        url: 'https://mcp.example.test',
+        headers: { Authorization: `Bearer \${${envKey}}` },
+      },
+    },
+  ]);
+
+  const proc = createMockProcess();
+  const spawnFn = createMockSpawnFn(proc);
+  const service = createClaudeAgentService({
+    spawnFn,
+    model: 'claude-test-model',
+    mcpServerPath: join(mcpDistDir, 'index.js'),
+  });
+
+  try {
+    const promise = collect(
+      service.invoke('hello', {
+        workingDirectory: projectDir,
+        callbackEnv: { CAT_CAFE_CAT_ID: 'opus' },
+      }),
+    );
+    emitClaudeEvents(proc, [{ type: 'result', subtype: 'success' }]);
+    await promise;
+
+    const args = spawnFn.mock.calls[0].arguments[1];
+    const serializedConfig = args[args.indexOf('--mcp-config') + 1];
+    const parsed = JSON.parse(serializedConfig);
+    assert.equal(parsed.mcpServers['env-backed-remote'].headers.Authorization, `Bearer \${${envKey}}`);
+    assert.doesNotMatch(args.join('\n'), /claude-secret-must-not-enter-argv/);
+  } finally {
+    if (previousToken === undefined) delete process.env[envKey];
+    else process.env[envKey] = previousToken;
+    rmSync(runtimeRoot, { recursive: true, force: true });
+    rmSync(projectDir, { recursive: true, force: true });
+  }
+});
+
 test('Claude MCP config resolves Pencil with the current editor host identifier', async () => {
   const runtimeRoot = mkdtempSync(join(tmpdir(), 'cat-cafe-claude-pencil-runtime-'));
   const mcpDistDir = join(runtimeRoot, 'packages', 'mcp-server', 'dist');
@@ -1347,6 +1401,58 @@ test('Claude MCP config resolves Pencil with the current editor host identifier'
     else process.env.PENCIL_MCP_BIN = previousPencilBin;
     if (previousPencilApp === undefined) delete process.env.PENCIL_MCP_APP;
     else process.env.PENCIL_MCP_APP = previousPencilApp;
+    rmSync(runtimeRoot, { recursive: true, force: true });
+    rmSync(projectDir, { recursive: true, force: true });
+  }
+});
+
+test('Claude fails closed before spawn when an MCP environment reference is missing', async () => {
+  const runtimeRoot = mkdtempSync(join(tmpdir(), 'cat-cafe-claude-missing-env-'));
+  const mcpDistDir = join(runtimeRoot, 'packages', 'mcp-server', 'dist');
+  const projectDir = mkdtempSync(join(tmpdir(), 'cat-cafe-claude-missing-env-project-'));
+  const envKey = 'TEST_CLAUDE_MISSING_MCP_TOKEN';
+  const previousToken = process.env[envKey];
+  delete process.env[envKey];
+  mkdirSync(mcpDistDir, { recursive: true });
+  writeFileSync(join(mcpDistDir, 'index.js'), '// stub', 'utf8');
+  writeCapabilitiesConfig(runtimeRoot, [
+    {
+      id: 'env-backed-remote',
+      type: 'mcp',
+      globalEnabled: true,
+      source: 'external',
+      mcpServer: {
+        transport: 'streamableHttp',
+        url: 'https://mcp.example.test',
+        headers: { Authorization: `Bearer \${${envKey}}` },
+      },
+    },
+  ]);
+
+  const proc = createMockProcess();
+  const spawnFn = createMockSpawnFn(proc);
+  const service = createClaudeAgentService({
+    spawnFn,
+    model: 'claude-test-model',
+    mcpServerPath: join(mcpDistDir, 'index.js'),
+  });
+
+  try {
+    await assert.rejects(
+      () =>
+        collect(
+          service.invoke('hello', {
+            workingDirectory: projectDir,
+            callbackEnv: { CAT_CAFE_CAT_ID: 'opus' },
+          }),
+        ),
+      new RegExp(`env-backed-remote.*${envKey}`),
+    );
+
+    assert.equal(spawnFn.mock.calls.length, 0);
+  } finally {
+    if (previousToken === undefined) delete process.env[envKey];
+    else process.env[envKey] = previousToken;
     rmSync(runtimeRoot, { recursive: true, force: true });
     rmSync(projectDir, { recursive: true, force: true });
   }

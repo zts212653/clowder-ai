@@ -45,6 +45,48 @@ describe('resolveProbeTimeoutMs', () => {
 });
 
 describe('probeMcpCapability', () => {
+  it('fails closed before starting a stdio server when a required environment variable is missing', async () => {
+    const result = await probeMcpCapability(
+      {
+        id: 'env-backed-stdio',
+        type: 'mcp',
+        enabled: true,
+        source: 'external',
+        mcpServer: {
+          command: 'this-command-must-not-run',
+          args: [],
+          env: { TOKEN: '${MISSING_MCP_PROBE_TOKEN}' },
+        },
+      },
+      { projectRoot: process.cwd(), env: {} },
+    );
+
+    assert.equal(result.connectionStatus, 'disconnected');
+    assert.deepEqual(result.tools, []);
+    assert.match(result.error, /env-backed-stdio.*MISSING_MCP_PROBE_TOKEN/);
+  });
+
+  it('fails closed before connecting to HTTP when a required environment variable is missing', async () => {
+    const result = await probeMcpCapability(
+      {
+        id: 'env-backed-http',
+        type: 'mcp',
+        enabled: true,
+        source: 'external',
+        mcpServer: {
+          transport: 'streamableHttp',
+          url: 'https://example.invalid/mcp',
+          headers: { Authorization: 'Bearer ${MISSING_MCP_PROBE_TOKEN}' },
+        },
+      },
+      { projectRoot: process.cwd(), env: {} },
+    );
+
+    assert.equal(result.connectionStatus, 'disconnected');
+    assert.deepEqual(result.tools, []);
+    assert.match(result.error, /env-backed-http.*MISSING_MCP_PROBE_TOKEN/);
+  });
+
   it('returns unknown when pencil resolver-backed capability cannot resolve a local binary', async () => {
     const originalBin = process.env.PENCIL_MCP_BIN;
     const originalApp = process.env.PENCIL_MCP_APP;

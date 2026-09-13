@@ -383,10 +383,16 @@ for (const field of ['clientId', 'envVars', 'apiKey', 'baseUrl']) {
   });
 }
 
-test('canonical equality includes legacy auth normalization and unordered metadata', () => {
+test('canonical equality includes legacy auth normalization and padding, not model reorder', () => {
+  // models[0] is observable — ['a','b'] vs ['b','a'] must NOT collapse to both-equal.
   pair(workspace, { authType: 'oauth', displayName: 'Fixture', models: ['a', 'b'], clientId: 'openai' });
-  pair(runtime, { authType: 'subscription', displayName: ' Fixture ', models: ['b', 'a', 'a'], clientId: 'openai' });
+  pair(runtime, { authType: 'subscription', displayName: ' Fixture ', models: ['a', 'b', 'a'], clientId: 'openai' });
   assert.equal(resolveByAccountRef(runtime, 'fixture')?.authType, 'oauth');
+  assert.deepEqual(resolveByAccountRef(runtime, 'fixture')?.models, ['a', 'b']);
+
+  pair(workspace, { authType: 'oauth', displayName: 'Fixture', models: ['a', 'b'], clientId: 'openai' });
+  pair(runtime, { authType: 'oauth', displayName: 'Fixture', models: ['b', 'a'], clientId: 'openai' });
+  assert.throws(() => resolveByAccountRef(runtime, 'fixture'), /divergent/);
 });
 
 for (const bad of [

@@ -79,7 +79,7 @@ test('carrier profile projection exposes receipts only to full invocation MCP', 
   for (const name of receiptNames) assert.equal(projected({ readonly: false }).has(name), true);
   for (const env of [
     { readonly: true },
-    { readonly: true, hasAgentKey: true },
+    { readonly: true, hasAgentKey: true, agentKeyUnion: true },
     { desktopMode: 'fable-phase0' },
     { desktopMode: 'cloud-pro-phase0' },
   ]) {

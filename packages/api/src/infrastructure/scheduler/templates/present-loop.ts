@@ -1,5 +1,5 @@
 import { type CatOwnedSeedCueCarrierV1, SCHEDULER_TRIGGER_PREFIX } from '@cat-cafe/shared';
-import type { PresentLoopService } from '../../../domains/auto-dream/PresentLoopService.js';
+import type { PresentLoopService } from '../../../domains/auto-dream/proactive/PresentLoopService.js';
 import type { ExecuteContext, ScheduleRunTiming, TriggerSpec } from '../types.js';
 import type { DynamicTaskParams, TaskTemplate } from './types.js';
 

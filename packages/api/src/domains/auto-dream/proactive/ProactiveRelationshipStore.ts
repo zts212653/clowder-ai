@@ -1,3 +1,4 @@
+import type { AutoDreamStoreContext } from '../store-context.js';
 import {
   attachCanonicalMessage,
   getProactiveVisit,
@@ -24,7 +25,6 @@ import {
   markProactiveVisitProjected,
   recordProactiveEcho,
 } from './proactive-visit-operations.js';
-import type { AutoDreamStoreContext } from './store-context.js';
 
 export class ProactiveRelationshipStore {
   constructor(private readonly getContext: () => AutoDreamStoreContext) {}

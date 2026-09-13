@@ -34,6 +34,7 @@ const ALLOWLIST = new Map([
   ['PROGRAMFILES', 'Windows OS variable (ImageExporter.ts Chrome detection)'],
   ['PATHEXT', 'Windows OS variable (capability-orchestrator.ts executable extension lookup)'],
   ['NODE_ENV', 'Node.js standard'],
+  ['NODE_TEST_CONTEXT', 'Node.js test runner metadata; not user-configurable'],
   ['https_proxy', 'Standard proxy convention (lowercase variant of HTTPS_PROXY)'],
   ['http_proxy', 'Standard proxy convention (lowercase variant of HTTP_PROXY)'],
   ['all_proxy', 'Standard proxy convention (lowercase variant of ALL_PROXY)'],

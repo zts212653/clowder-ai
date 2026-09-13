@@ -613,7 +613,13 @@ export class AcpHttpStreamClient {
     return this.cwdIdentityTracker.isIntact;
   }
   get isSafeForSingleFlightReuse(): boolean {
+    if (this.config.retireAfterLease === true) return false;
     return this.unquiescedSessionIds.size === 0;
+  }
+
+  get mcpCredentialFile(): string | undefined {
+    const path = this.config.env?.CAT_CAFE_CREDENTIAL_FILE?.trim();
+    return path || undefined;
   }
   isSessionSafeForReuse(sessionId: string): boolean {
     return !this.unquiescedSessionIds.has(sessionId);

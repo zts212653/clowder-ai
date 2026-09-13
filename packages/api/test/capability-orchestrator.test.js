@@ -239,6 +239,7 @@ describe('writeCapabilitiesConfig', () => {
     const parsed = JSON.parse(raw);
     assert.equal(parsed.version, 1);
     assert.equal(parsed.capabilities.length, 1);
+    assert.equal((await stat(join(dir, '.cat-cafe', 'capabilities.json'))).mode & 0o777, 0o600);
   });
 
   it('round-trips correctly', async () => {

@@ -21,7 +21,7 @@ import { after, describe, it } from 'node:test';
 const credsDir = mkdtempSync(join(tmpdir(), 'cat-cafe-acp-creds-'));
 process.env.CAT_CAFE_MCP_CREDS_DIR = credsDir;
 
-const { prepareSessionCredentialFile, bindSessionCredentialFile } = await import(
+const { prepareSessionCredentialFile, bindSessionCredentialFile, refreshFrozenCredentialFile } = await import(
   '../../dist/domains/cats/services/agents/providers/acp/acp-credential-file.js'
 );
 const { AcpAgentService } = await import('../../dist/domains/cats/services/agents/providers/acp/AcpAgentService.js');
@@ -111,6 +111,38 @@ describe('prepareSessionCredentialFile (unit)', () => {
       'inv-old',
       "superseded session's file must NOT receive the newer invocation's credentials",
     );
+  });
+
+  it('refreshFrozenCredentialFile rewrites the spawn-frozen overlay path', () => {
+    const frozenPath = join(credsDir, 'dsh-dsh.json');
+    const first = refreshFrozenCredentialFile(
+      makeCallbackEnv({ threadId: 'th-dsh', catId: 'dsh', invocationId: 'inv-1', callbackToken: 'tok-1' }),
+      frozenPath,
+    );
+    assert.ok(first);
+    assert.equal(first.path, frozenPath);
+    const second = refreshFrozenCredentialFile(
+      makeCallbackEnv({ threadId: 'th-dsh', catId: 'dsh', invocationId: 'inv-2', callbackToken: 'tok-2' }),
+      frozenPath,
+    );
+    assert.equal(second.path, frozenPath);
+    assert.equal(readCreds(frozenPath).invocationId, 'inv-2');
+    assert.equal(readCreds(frozenPath).callbackToken, 'tok-2');
+  });
+
+  it('two nonce credential files stay isolated after a later invocation', () => {
+    const olderPath = join(credsDir, 'dsh-old-nonce.json');
+    const newerPath = join(credsDir, 'dsh-new-nonce.json');
+    refreshFrozenCredentialFile(
+      makeCallbackEnv({ threadId: 'th-bg', catId: 'dsh', invocationId: 'inv-old', callbackToken: 'tok-old' }),
+      olderPath,
+    );
+    refreshFrozenCredentialFile(
+      makeCallbackEnv({ threadId: 'th-bg', catId: 'dsh', invocationId: 'inv-new', callbackToken: 'tok-new' }),
+      newerPath,
+    );
+    assert.equal(readCreds(olderPath).callbackToken, 'tok-old');
+    assert.equal(readCreds(newerPath).callbackToken, 'tok-new');
   });
 });
 

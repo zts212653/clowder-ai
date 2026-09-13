@@ -1,5 +1,5 @@
 import type Database from 'better-sqlite3';
-import { PROACTIVE_RELATIONSHIP_SCHEMA } from './proactive-schema.js';
+import { PROACTIVE_RELATIONSHIP_SCHEMA } from './proactive/proactive-schema.js';
 
 export const AUTO_DREAM_SCHEMA_VERSION = 4;
 

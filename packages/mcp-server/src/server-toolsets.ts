@@ -31,6 +31,14 @@ export interface ToolsetEnv {
   readonly?: boolean;
   hasAgentKey?: boolean;
   desktopMode?: string;
+  /**
+   * F317 P1: explicit opt-in for the readonly+agent-key union
+   * (CAT_CAFE_READONLY_AGENT_KEY_UNION=true). A read-only mount must stay
+   * strictly read-only unless the launcher explicitly grants the union;
+   * CAT_CAFE_AGENT_KEY_* vars inherited from a parent environment no longer
+   * widen the surface on their own.
+   */
+  agentKeyUnion?: boolean;
 }
 
 /**
@@ -43,6 +51,7 @@ export function parseToolsetEnv(env: NodeJS.ProcessEnv = process.env): ToolsetEn
     readonly: env.CAT_CAFE_READONLY === 'true',
     hasAgentKey: !!(env.CAT_CAFE_AGENT_KEY_SECRET || env.CAT_CAFE_AGENT_KEY_FILE || env.CAT_CAFE_AGENT_KEY_FILES),
     desktopMode: desktopMode || undefined,
+    agentKeyUnion: env.CAT_CAFE_READONLY_AGENT_KEY_UNION === 'true',
   };
 }
 
@@ -53,7 +62,10 @@ export function parseToolsetEnv(env: NodeJS.ProcessEnv = process.env): ToolsetEn
  *   1. desktopMode highest — NOT union with READONLY/AGENT_KEY whitelists.
  *      Unknown value → throw (fail-fast on server startup).
  *   2. !readonly → return all tools unchanged.
- *   3. readonly → READONLY_ALLOWED_TOOLS ∪ (hasAgentKey ? AGENT_KEY_TOOLS : ∅).
+ *   3. readonly → READONLY_ALLOWED_TOOLS, plus AGENT_KEY_TOOLS only when the
+ *      launcher explicitly opted in (agentKeyUnion) AND agent-key credentials
+ *      are present (hasAgentKey). Incidental CAT_CAFE_AGENT_KEY_* vars no
+ *      longer widen a read-only mount (F317 P1 — qodercn/cat-cafe-memory 实挂).
  */
 export function applyReadonlyFilter<T extends { name: string }>(
   tools: readonly T[],
@@ -74,7 +86,10 @@ export function applyReadonlyFilter<T extends { name: string }>(
     }
   }
   if (!env.readonly) return tools;
-  return tools.filter((t) => READONLY_ALLOWED_TOOLS.has(t.name) || (!!env.hasAgentKey && AGENT_KEY_TOOLS.has(t.name)));
+  return tools.filter(
+    (t) =>
+      READONLY_ALLOWED_TOOLS.has(t.name) || (!!env.agentKeyUnion && !!env.hasAgentKey && AGENT_KEY_TOOLS.has(t.name)),
+  );
 }
 
 function buildFamilyTools(serverFamily: McpServerFamily, env?: ToolsetEnv): readonly ToolDef[] {
@@ -247,17 +262,17 @@ function registerTools(server: McpServer, tools: readonly ToolDef[], env: Toolse
   }
 }
 
-export function registerCollabToolset(server: McpServer): void {
-  const env = parseToolsetEnv();
-  registerTools(server, buildCollabTools(env), env);
+export function registerCollabToolset(server: McpServer, env?: ToolsetEnv): void {
+  const e = env ?? parseToolsetEnv();
+  registerTools(server, buildCollabTools(e), e);
 }
 
-export function registerMemoryToolset(server: McpServer): void {
-  registerTools(server, buildMemoryTools());
+export function registerMemoryToolset(server: McpServer, env?: ToolsetEnv): void {
+  registerTools(server, buildMemoryTools(env));
 }
 
-export function registerSignalToolset(server: McpServer): void {
-  registerTools(server, buildSignalTools());
+export function registerSignalToolset(server: McpServer, env?: ToolsetEnv): void {
+  registerTools(server, buildSignalTools(env));
 }
 
 // F061: limbTools 默认不走 readonly filter（Antigravity 设计要求 — 让 antigravity
@@ -282,23 +297,29 @@ export function buildLimbTools(env?: ToolsetEnv): readonly ToolDef[] {
   return CANONICAL_TOOL_REGISTRY.filter((definition) => definition.serverFamily === 'limb');
 }
 
-export function registerLimbToolset(server: McpServer): void {
-  registerTools(server, buildLimbTools());
+export function registerLimbToolset(server: McpServer, env?: ToolsetEnv): void {
+  registerTools(server, buildLimbTools(env));
 }
 
-export function registerAudioToolset(server: McpServer): void {
-  registerTools(server, buildAudioTools());
+export function registerAudioToolset(server: McpServer, env?: ToolsetEnv): void {
+  registerTools(server, buildAudioTools(env));
 }
 
-export function registerFinanceToolset(server: McpServer): void {
-  registerTools(server, buildFinanceTools());
+export function registerFinanceToolset(server: McpServer, env?: ToolsetEnv): void {
+  registerTools(server, buildFinanceTools(env));
 }
 
-export function registerFullToolset(server: McpServer): void {
-  registerCollabToolset(server);
-  registerMemoryToolset(server);
-  registerSignalToolset(server);
-  registerLimbToolset(server);
-  registerAudioToolset(server);
-  registerFinanceToolset(server);
+export function registerFullToolset(server: McpServer, env?: ToolsetEnv): void {
+  // F317 P1: parse the env ONCE and thread it explicitly so a single,
+  // injectable ToolsetEnv governs every family. Under CAT_CAFE_READONLY=true
+  // the surface is strict (READONLY_ALLOWED_TOOLS only) unless the launcher
+  // explicitly opts into the agent-key union. Tests inject fixtures here
+  // instead of racing on process.env.
+  const e = env ?? parseToolsetEnv();
+  registerCollabToolset(server, e);
+  registerMemoryToolset(server, e);
+  registerSignalToolset(server, e);
+  registerLimbToolset(server, e);
+  registerAudioToolset(server, e);
+  registerFinanceToolset(server, e);
 }

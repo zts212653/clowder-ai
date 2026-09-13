@@ -6,7 +6,7 @@ import {
   type ProactiveIntentRecord,
   type ProactiveVisitRecord,
   proactiveSurfaceSchema,
-} from './proactive-relationship-contract.js';
+} from './proactive/proactive-relationship-contract.js';
 import {
   AutoDreamStoreError,
   type DiaryCitationRecord,

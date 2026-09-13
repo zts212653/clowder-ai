@@ -176,7 +176,9 @@ describe('Schedule tools in registration', () => {
 
   test('readonly + agent-key collab surface exposes schedule setup and governed removal proposals', async () => {
     const { buildCollabTools } = await import('../dist/server-toolsets.js');
-    const registered = buildCollabTools({ readonly: true, hasAgentKey: true }).map((tool) => tool.name);
+    const registered = buildCollabTools({ readonly: true, hasAgentKey: true, agentKeyUnion: true }).map(
+      (tool) => tool.name,
+    );
 
     assert.ok(
       registered.includes('cat_cafe_list_schedule_templates'),

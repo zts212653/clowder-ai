@@ -1,13 +1,13 @@
+import type { AutoDreamStoreContext } from '../store-context.js';
+import { insertAutoDreamEvent } from '../store-context.js';
+import { rowToProactiveEcho } from '../store-rows.js';
+import { AutoDreamStoreError } from '../store-types.js';
 import {
   type NaturalProactiveEchoInput,
   naturalProactiveEchoInputSchema,
   type ProactiveEchoRecord,
 } from './proactive-relationship-contract.js';
 import { requireProactiveVisit } from './proactive-relationship-operations.js';
-import type { AutoDreamStoreContext } from './store-context.js';
-import { insertAutoDreamEvent } from './store-context.js';
-import { rowToProactiveEcho } from './store-rows.js';
-import { AutoDreamStoreError } from './store-types.js';
 
 type DbRow = Record<string, unknown>;
 

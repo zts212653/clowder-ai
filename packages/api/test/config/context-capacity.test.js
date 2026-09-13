@@ -159,6 +159,31 @@ describe('context-capacity resolver', () => {
       assert.equal(result.windowTokens, 0);
     });
 
+    it('helper-cat Auto floor: deepseek/deepseek-v4-pro is 400k catalog, not unresolved 100k', () => {
+      const result = mod.resolveContextCapacity({
+        catId: 'deepseek',
+        model: 'deepseek/deepseek-v4-pro',
+      });
+      assert.equal(result.source, 'catalog');
+      assert.equal(result.windowTokens, 400_000);
+      assert.equal(result.actionable, false);
+      assert.equal(mod.resolvePromptInputCeilingTokens(result), result.inputCeilingTokens);
+      assert.notEqual(mod.resolvePromptInputCeilingTokens(result), 100_000);
+    });
+
+    it('helper-cat Auto catalog still wins for glm-5.2 and MiniMax-M3', () => {
+      const glm = mod.resolveContextCapacity({ catId: 'glm', model: 'zai-coding-plan/glm-5.2' });
+      assert.equal(glm.source, 'catalog');
+      assert.equal(glm.windowTokens, 1_000_000);
+
+      const minimax = mod.resolveContextCapacity({
+        catId: 'minimax',
+        model: 'minimax-cn-coding-plan/MiniMax-M3',
+      });
+      assert.equal(minimax.source, 'catalog');
+      assert.equal(minimax.windowTokens, 1_000_000);
+    });
+
     it('manual value is authoritative even when the catalog has a different value', () => {
       catRegistry.register(
         TEST_CAT_ID,

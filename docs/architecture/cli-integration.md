@@ -9,7 +9,7 @@ tips_exempt: Automatic CLI process-ownership repair with no new user action or d
 # CLI 集成架构：Claude Code / Codex / Google CLI
 
 > Clowder AI 项目如何对接三个不同厂商的 AI CLI / adapter 工具
-> 作者：Ragdoll | 最后更新：2026-07-13
+> 作者：Ragdoll / Maine Coon | 最后更新：2026-07-28
 
 ## 概述
 
@@ -69,6 +69,41 @@ Clowder AI 需要调用三个不同厂商的 AI Agent：
 ---
 
 ## 通用基础设施
+
+### 0. Env-backed CLI 认证与独立启动
+
+Agent CLI 的持久配置只保存环境变量引用，密钥值只保存在部署根目录的
+`.env.local`。不要把密钥写进 CLI 配置、shell profile、命令行或聊天消息。
+
+Cat Cafe 由 `scripts/start-dev.sh` 启动时会读取 `.env.local`；已经运行的
+API 进程不会感知后来新增或修改的变量，必须按运行时 SOP 重启后才能让
+新子进程继承。迁移认证配置时应遵循以下顺序：
+
+1. 先写入并验证唯一的 `.env.local`；
+2. 再把 CLI 配置改成变量引用；
+3. 启动隔离 CLI 进程完成真实认证测试；
+4. 经 operator 授权后重启长期运行的 API，并做猫调用与 MCP E2E 验收。
+
+OpenCode 的自定义 Provider 使用 `{env:VARIABLE_NAME}`。`/connect` 会把输入
+的凭据保存到 `~/.local/share/opencode/auth.json`，因此 env-backed Provider
+不应通过重复 `/connect` 来修复“未认证”；先检查启动 OpenCode 的进程是否
+真的拥有对应变量。
+
+独立运行 OpenCode 时，`.env.local` 不会因为位于另一个项目目录而自动进入
+当前 shell。不要在 `.zshrc` 全局 `export` 密钥；可以只定义一个专用函数，
+在子 shell 中加载部署环境：
+
+```zsh
+opencode-cat-cafe() (
+  set -a
+  source "${CAT_CAFE_RUNTIME_ROOT:?set CAT_CAFE_RUNTIME_ROOT}/.env.local"
+  set +a
+  command opencode "$@"
+)
+```
+
+`.zshrc` 中只保存函数和非敏感的 runtime 路径，不保存密钥值。每次函数调用
+都会读取 `.env.local` 的最新值，且变量不会留在当前交互 shell 中。
 
 ### 1. NDJSON 流解析器 (`ndjson-parser.ts`)
 

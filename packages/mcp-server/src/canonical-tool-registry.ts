@@ -7,6 +7,8 @@ export type CanonicalToolsetEnv = {
   readonly?: boolean;
   hasAgentKey?: boolean;
   desktopMode?: string;
+  /** F317 P1: explicit opt-in for the readonly+agent-key union. */
+  agentKeyUnion?: boolean;
 };
 
 const DESKTOP_PROFILES = {
@@ -66,10 +68,14 @@ export function projectCanonicalToolRegistry(
   if (!env.readonly) {
     return registry.filter((definition) => definition.policy.runtimeProfiles.includes('full'));
   }
+  // F317 P1: readonly is strict unless the launcher explicitly opted into the
+  // agent-key union (agentKeyUnion) AND agent-key credentials are present.
+  // Incidental CAT_CAFE_AGENT_KEY_* vars inherited from a parent environment
+  // no longer widen a read-only mount.
   return registry.filter(
     (definition) =>
       definition.policy.runtimeProfiles.includes('readonly') ||
-      (!!env.hasAgentKey && definition.policy.runtimeProfiles.includes('agent-key')),
+      (!!env.agentKeyUnion && !!env.hasAgentKey && definition.policy.runtimeProfiles.includes('agent-key')),
   );
 }
 

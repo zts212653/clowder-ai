@@ -726,7 +726,27 @@ operator experience："简直了你和Maine Coon是没头脑（Maine Coon听不�
 | 纠正轮次 | 1（operator 问“这是我的问题吗”并指出星空会自动唤起宇宙级航行后，fable-5 完成深空化；codex-sol 再校准唤醒码与变轨并收敛）。 |
 | 元心智哪条没执行 | Q3 坐标变换——验证了每条映射，却没把所有元素放回听众会自动加载的同一个物理坐标系做整体预测。 |
 
-### Case E8: 把 runtime 激活授权扩张成内部 PR 合入授权（2026-08-12，codex-sol）
+### Case E8: 把本地文件路径误包装成浏览器 URL（2026-08-03，Maine Coon）
+
+| 维度 | 内容 |
+|------|------|
+| 我以为 | Markdown 中的绝对本地路径链接会被 Hub 识别为 Workspace 文件入口，并保留行号定位能力 |
+| 实际要求 | 本地文件应通过 `workspace-navigator` 的 typed MCP，以相对路径和行号在 Workspace 面板打开；工具不可用时应明确说明，不能给出会被重写成 `localhost:3003/...` 的伪可点击链接 |
+| 偏差根因 | 上下文盲视 + 通道混淆——机械套用通用 Markdown 文件链接格式，没有验证 Hub renderer 的实际重写行为，也没有把“文件导航”和“浏览器 URL”分成两条能力路径 |
+| 纠正轮次 | 1（operator 展示实际被重写的 URL，并追问该地址是否可能打开） |
+| 元心智哪条没执行 | Q2 信息验证（未验证渲染后的目标）+ Q3 坐标变换（没有从网页链接坐标系切换到 Workspace 导航坐标系） |
+
+### Case E9: Review 只验证算术与排版，漏掉数字可推导性（2026-08-05，Maine Coon）
+
+| 维度 | 内容 |
+|------|------|
+| 我以为 | HSTU 激活内存双轨图已列出 `33d = 4d+6d+3d+20d`、`14d = 4d+4d+4d+2d`，并标清最大节省来自扩张 FFN，因此教学解释已经闭环，可以 APPROVE。 |
+| 实际要求 | operator 问的是“33d 怎么变成 14d”；每个分项还必须能从 dtype、张量形状和数量自行推导，例如一个 `[N,d]` bf16 激活为何记作 `2d`、Q/K/V 为何合计 `6d`、FFN 为何是 `20d`。只给分组总数仍是在报答案。 |
+| 偏差根因 | **验收锚定偏差**：review 聚焦算术正确、视觉层次和证据边界，没有用读者视角回放“我能否从基本单位独立算出每个数”，把“数字正确”误当成“解释完整”。 |
+| 纠正轮次 | 1（operator 指出“没有说每一个 xxd 怎么计算”后撤回放行，补出单位定义与逐项推导要求并退回作者）。 |
+| 元心智哪条没执行 | Q1 角色确认不完整（这是教学内容 review，不只是事实校验）+ Q3 坐标变换缺失（没有从 reviewer 的正确性坐标切到学习者的可推导性坐标）。 |
+
+### Case E10: 把 runtime 激活授权扩张成内部 PR 合入授权（2026-08-12，codex-sol）
 
 | 维度 | 内容 |
 |------|------|
@@ -736,7 +756,7 @@ operator experience："简直了你和Maine Coon是没头脑（Maine Coon听不�
 | 纠正轮次 | 本次 1 次（operator：`0001786543204352-000306-879d3a6a`，“合入不需要问我吧”）；与 Case E3 跨任务同型，因此按重复理解偏差记录。纠正后 PR #3604 已 squash merge 为 `4f59356f0`，runtime 保持未激活。 |
 | 元心智哪条没执行 | Q1 角色确认：当时是证据闭合后的 merge owner，不是权限申请者；Q3 坐标变换：没有把一个“交付动作”拆成 merge 与 activation 两个独立 effect 分别判权。 |
 
-### Case E9: 把“随原动作 hover”替换成“迁移到 thread 头部”（2026-08-18，codex-sol）
+### Case E11: 把“随原动作 hover”替换成“迁移到 thread 头部”（2026-08-18，codex-sol）
 
 | 维度 | 内容 |
 |------|------|
@@ -746,7 +766,7 @@ operator experience："简直了你和Maine Coon是没头脑（Maine Coon听不�
 | 纠正轮次 | 同一任务 2 次（`0001787047894247-000105-cfa68d95`、`0001787047966930-000108-4ffc8e66`）才完全拉回。纠正后 PR #3774 已 squash merge 为 `cae99d8e3`；真实 Chromium 契约锁定静止零占位、hover/focus 完整动作组与触屏可达。 |
 | 元心智哪条没执行 | Q2 信息验证：没有先用截图和现有 DOM 行为确认代词 referent；Q3 坐标变换：把“同一控件的显隐状态”错误换成了“控件所属层级”的产品架构问题。 |
 
-### Case E10: 把 inbound PR review 截断成对话内报告（2026-08-19，codex-sol）
+### Case E12: 把 inbound PR review 截断成对话内报告（2026-08-19，codex-sol）
 
 | 维度 | 内容 |
 |------|------|
@@ -756,7 +776,7 @@ operator experience："简直了你和Maine Coon是没头脑（Maine Coon听不�
 | 纠正轮次 | 同一任务 2 次：先由 `0001787132038846-000199-6cf85575` 纠正“要回复 PR”，再由 `0001787137460561-000007-616c60ff` 纠正“要以 reviewer 身份挂 PR tracking”。纠正后 finding 已落到 clowder-ai-plugins#37，tracking task `0001787137554353-000011-63814576` 已绑定新 HEAD / 新 review result。 |
 | 元心智哪条没执行 | Q1 角色确认：当前是有 finding delivery custody 的 maintainer advisory reviewer，不是纯分析者；Q3 坐标变换：没有把 review verdict 转换成公开交付与事件等待两个后续 action family。 |
 
-### Case E11: 把外部 AgentReflex 谱系并入 Clowder AI 自进化主线（2026-08-21，codex-sol）
+### Case E13: 把外部 AgentReflex 谱系并入 Clowder AI 自进化主线（2026-08-21，codex-sol）
 
 | 维度 | 内容 |
 |------|------|
@@ -765,14 +785,14 @@ operator experience："简直了你和Maine Coon是没头脑（Maine Coon听不�
 | 纠正轮次 | 本次 1 次（`0001787296571695-000113-91447bb4`）；跨任务已有 LL-092 同型证据，因此记录。当前任务已先把 AgentReflex 剥离，再从 Clowder AI canonical 文档、真实事故和原始 thread 重建自进化困难谱系。 |
 | 元心智哪条没执行 | Q2 信息验证：未先读已知 canonical 谱系边界；Q3 坐标变换：没有把共享术语投影回“谁提出、解决什么问题、证据属于谁”三维坐标。 |
 
-### Case E12: 把“自进化的总体愿景”替换成 Clowder AI 产品愿景（2026-08-21，codex-sol）
+### Case E14: 把“自进化的总体愿景”替换成 Clowder AI 产品愿景（2026-08-21，codex-sol）
 
 | 维度 | 内容 |
 |------|------|
 | 我以为 | operator要求在自进化研究稿中补“我们的总体愿景”，是要补 Clowder AI 的全局产品愿景；因此读取 `docs/VISION.md`，写入“领养长期共生 AI 团队、把想法变成产品”的产品终态。 |
 | 实际要求 | 当前对象是自进化研究稿，“我们的 vision”指 Clowder AI 对自进化本身的理想终态：系统如何发现能力边界、选择更新层、取得独立证据、分级自治，并让改变可追溯、可回滚、可退役。产品愿景不是本节要回答的坐标。 |
-| 偏差根因 | **局部 referent 丢失 + 上位真相源锚定 + 任务替换**：看到“总体愿景”后直接解析到仓库全局 `docs/VISION.md`，没有先用当前文档主题“自进化”限定 referent；与 Case E9 把消息级局部显隐要求替换成 thread 级入口重设计同型。 |
-| 纠正轮次 | 本次 1 次（`0001787299710431-000183-7421a9ae`）；跨任务已有 Case E9 同型证据，因此记录。纠正后已整段撤掉产品愿景和 `docs/VISION.md` 引用，换成自进化终态、自治分级、双证举证链与条件性 CEW 路线，提交 `195aaaf4e` 已推送 main。 |
+| 偏差根因 | **局部 referent 丢失 + 上位真相源锚定 + 任务替换**：看到“总体愿景”后直接解析到仓库全局 `docs/VISION.md`，没有先用当前文档主题“自进化”限定 referent；与 Case E11 把消息级局部显隐要求替换成 thread 级入口重设计同型。 |
+| 纠正轮次 | 本次 1 次（`0001787299710431-000183-7421a9ae`）；跨任务已有 Case E11 同型证据，因此记录。纠正后已整段撤掉产品愿景和 `docs/VISION.md` 引用，换成自进化终态、自治分级、双证举证链与条件性 CEW 路线，提交 `195aaaf4e` 已推送 main。 |
 | 元心智哪条没执行 | Q2 信息验证：虽读取了真实 canonical 文档，却选错了 resolver；Q3 坐标变换：把“当前研究对象的 vision”错误升格成“整个产品的 VISION”。 |
 
 ### Case E13: 把独立产物与双 Episode 压成一条旧故事流水线（2026-08-24，codex-sol）

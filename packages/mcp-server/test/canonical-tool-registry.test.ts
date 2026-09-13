@@ -113,10 +113,17 @@ describe('F286 canonical MCP registry projections', () => {
       ['cat_cafe_read', 'limb_control'],
     );
     assert.deepEqual(
-      projectCanonicalToolRegistry(canonical, { readonly: true, hasAgentKey: true }).map(
+      projectCanonicalToolRegistry(canonical, { readonly: true, hasAgentKey: true, agentKeyUnion: true }).map(
         (definition) => definition.name,
       ),
       ['cat_cafe_agent', 'cat_cafe_read', 'limb_control'],
+    );
+    assert.deepEqual(
+      projectCanonicalToolRegistry(canonical, { readonly: true, hasAgentKey: true }).map(
+        (definition) => definition.name,
+      ),
+      ['cat_cafe_read', 'limb_control'],
+      'F317 P1: agent-key union requires explicit opt-in',
     );
     assert.deepEqual(
       projectCanonicalToolRegistry(canonical, { desktopMode: 'fable-phase0' }).map((definition) => definition.name),
@@ -165,7 +172,7 @@ describe('F286 canonical MCP registry projections', () => {
     const profiles = [
       ['full', {}],
       ['readonly', { readonly: true }],
-      ['agent-key', { readonly: true, hasAgentKey: true }],
+      ['agent-key', { readonly: true, hasAgentKey: true, agentKeyUnion: true }],
       ['desktop:fable-phase0', { desktopMode: 'fable-phase0' }],
       ['desktop:cloud-pro-phase0', { desktopMode: 'cloud-pro-phase0' }],
     ] as const;

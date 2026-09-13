@@ -151,16 +151,35 @@ describe('resolveAcpMcpServers', () => {
         'remote-api': {
           transport: 'streamableHttp',
           url: 'https://api.example.com/mcp',
-          headers: { Authorization: 'Bearer tok' },
+          headers: { Authorization: 'Bearer ${TEST_ACP_MCP_TOKEN}' },
         },
       }),
     });
 
-    const result = await resolveAcpMcpServers(root, ['remote-api']);
+    const result = await resolveAcpMcpServers(root, ['remote-api'], undefined, {
+      env: { TEST_ACP_MCP_TOKEN: 'resolved-acp-token' },
+    });
     assert.equal(result.length, 1);
     assert.equal(result[0].type, 'http');
     assert.equal(result[0].url, 'https://api.example.com/mcp');
-    assert.deepStrictEqual(result[0].headers, [{ name: 'Authorization', value: 'Bearer tok' }]);
+    assert.deepStrictEqual(result[0].headers, [{ name: 'Authorization', value: 'Bearer resolved-acp-token' }]);
+  });
+
+  it('fails closed when an MCP environment reference is missing', async () => {
+    const root = makeTempRoot({
+      capabilities: toCapabilities({
+        'remote-api': {
+          transport: 'streamableHttp',
+          url: 'https://api.example.com/mcp',
+          headers: { Authorization: 'Bearer ${MISSING_MCP_TOKEN}' },
+        },
+      }),
+    });
+
+    await assert.rejects(
+      () => resolveAcpMcpServers(root, ['remote-api'], undefined, { env: {} }),
+      /remote-api.*MISSING_MCP_TOKEN/,
+    );
   });
 
   it('filters retired GitHub MCP from raw capabilities before topology heal', async () => {

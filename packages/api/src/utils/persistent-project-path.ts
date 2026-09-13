@@ -135,6 +135,34 @@ async function mapRuntimeTarget(
   return { ok: true, path: mapped.path, remappedFrom: targetPath };
 }
 
+/**
+ * Synchronous lexical redirect for store-root resolution (no IO, no realpath).
+ *
+ * Account/credential stores resolve their root via a synchronous path function
+ * (`resolveGlobalRoot` in catalog-accounts/credentials), so they cannot reuse the
+ * async `resolvePersistentProjectPathDetailed`. This mirrors the async remap for the
+ * subset of cases that matter to store lookup: a path lexically under
+ * CAT_CAFE_RUNTIME_ROOT maps to the same relative path under CAT_CAFE_WORKSPACE_ROOT.
+ *
+ * Returns the input unchanged when either env root is missing, the path is outside
+ * the runtime root, or runtime == workspace.
+ */
+export function redirectRuntimePathLexical(rawPath: string, env: NodeJS.ProcessEnv = process.env): string {
+  const runtimeRootRaw = env.CAT_CAFE_RUNTIME_ROOT;
+  const workspaceRootRaw = env.CAT_CAFE_WORKSPACE_ROOT;
+  if (!runtimeRootRaw || !workspaceRootRaw) return rawPath;
+
+  const resolved = resolve(rawPath);
+  const runtimeRoot = resolve(runtimeRootRaw);
+  if (!isPathUnderRoots(resolved, [runtimeRoot])) return rawPath;
+
+  const workspaceRoot = resolve(workspaceRootRaw);
+  if (pathsEqual(runtimeRoot, workspaceRoot)) return rawPath;
+
+  const rel = relative(runtimeRoot, resolved);
+  return resolve(workspaceRoot, rel);
+}
+
 export async function resolvePersistentProjectPath(rawPath: string): Promise<string | null> {
   const result = await resolvePersistentProjectPathDetailed(rawPath);
   return result.ok ? result.path : null;

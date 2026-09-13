@@ -17,6 +17,10 @@ import {
   resolveServersForCat,
   summarizeMcpInjection,
 } from '../../../../../config/capabilities/capability-orchestrator.js';
+import {
+  MissingMcpEnvironmentVariableError,
+  resolveMcpServerEnvReferences,
+} from '../../../../../config/capabilities/mcp-env-reference.js';
 import { isRetiredGithubMcpConfigEntry } from '../../../../../config/capabilities/retired-github-mcp.js';
 import { createModuleLogger } from '../../../../../infrastructure/logger.js';
 
@@ -301,7 +305,7 @@ export async function writeMcpConfigFile(
       if (parsed?.version === 1 || parsed?.version === 2) capConfig = parsed;
     }
     if (capConfig && catId) {
-      for (const s of resolveServersForCat(capConfig, catId, { accessScope }) as Array<{
+      for (const unresolvedServer of resolveServersForCat(capConfig, catId, { accessScope }) as Array<{
         name: string;
         enabled: boolean;
         command: string;
@@ -314,8 +318,9 @@ export async function writeMcpConfigFile(
         workingDir?: string;
         source: string;
       }>) {
-        managedMcpServerNames.add(s.name);
-        if (!s.enabled) continue;
+        managedMcpServerNames.add(unresolvedServer.name);
+        if (!unresolvedServer.enabled) continue;
+        const s = resolveMcpServerEnvReferences(unresolvedServer, process.env);
         if (s.source === 'cat-cafe' && CAT_CAFE_SPLIT_ENTRYPOINTS.has(s.name)) {
           const ep = CAT_CAFE_SPLIT_ENTRYPOINTS.get(s.name)!;
           const epPath = join(distDir, ep);
@@ -342,7 +347,8 @@ export async function writeMcpConfigFile(
       }
       resolved = true;
     }
-  } catch {
+  } catch (error) {
+    if (error instanceof MissingMcpEnvironmentVariableError) throw error;
     // best-effort fallback below
   }
 

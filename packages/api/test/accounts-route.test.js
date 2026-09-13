@@ -1,7 +1,7 @@
 // @ts-check
 import './helpers/setup-cat-registry.js';
 import assert from 'node:assert/strict';
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, symlinkSync, writeFileSync } from 'node:fs';
 import { mkdtemp, realpath, rm, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
@@ -100,6 +100,146 @@ describe('accounts routes', () => {
     assert.equal(res.statusCode, 401);
 
     await app.close();
+  });
+
+  /**
+   * R19/R20 P1, HTTP surface. PATCH and DELETE take :profileId straight off the
+   * URL and index the account store with it. While that store was a plain `{}`,
+   * `accounts['toString']` resolved to Object.prototype.toString — truthy — so
+   * PATCH /api/accounts/toString found a "existing account" that was really a
+   * function and went on to write one, instead of answering 404.
+   */
+  for (const profileId of ['toString', 'constructor', 'valueOf', 'hasOwnProperty']) {
+    it(`PATCH /api/accounts/${profileId} is 404, not an inherited member`, async () => {
+      const Fastify = (await import('fastify')).default;
+      const { accountsRoutes } = await import('../dist/routes/accounts.js');
+      const app = Fastify();
+      await app.register(accountsRoutes);
+      await app.ready();
+
+      const projectDir = await makeTmpDir('proto-ref');
+      setGlobalRoot(projectDir);
+      try {
+        const res = await app.inject({
+          method: 'PATCH',
+          url: `/api/accounts/${profileId}`,
+          headers: { ...AUTH_HEADERS, 'content-type': 'application/json' },
+          payload: JSON.stringify({ projectPath: projectDir, displayName: 'hijacked' }),
+        });
+        assert.equal(res.statusCode, 404, `${profileId} names no account, so PATCH must 404`);
+        assert.match(res.json().error, /not found/);
+      } finally {
+        restoreGlobalRoot();
+        await app.close();
+      }
+    });
+  }
+
+  /**
+   * R20, display layer. accountToView() indexes BUILTIN_CLIENT_FOR_ID with the
+   * account's own id, which is user data, so as an object literal it answered
+   * every Object.prototype member — an oauth account named "toString" took
+   * Object.prototype.toString as its client identity. Converted to a Map.
+   *
+   * Measured honesty: that variant is NOT independently killable here. A
+   * function-valued clientId is erased by JSON.stringify, and accountToView's
+   * output only ever becomes an HTTP response, so the prototype hit and the
+   * correct `undefined` serialise identically. The fix is kept as hygiene — one
+   * refactor away from being observable — but it is not counted as covered.
+   *
+   * What this test does pin is the half that IS discriminating: the Map
+   * conversion must not have broken real builtin lookups.
+   */
+  it('builtin client identity survives the Map conversion, and a prototype-named id gets none (R20)', async () => {
+    const Fastify = (await import('fastify')).default;
+    const { accountsRoutes } = await import('../dist/routes/accounts.js');
+    const { writeCatalogAccount } = await import('../dist/config/catalog-accounts.js');
+    const app = Fastify();
+    await app.register(accountsRoutes);
+    await app.ready();
+
+    const projectDir = await makeTmpDir('proto-view');
+    setGlobalRoot(projectDir);
+    try {
+      writeCatalogAccount(projectDir, 'claude', { authType: 'oauth' });
+      writeCatalogAccount(projectDir, 'toString', { authType: 'oauth' });
+      const res = await app.inject({
+        method: 'GET',
+        url: `/api/accounts?projectPath=${encodeURIComponent(projectDir)}`,
+        headers: AUTH_HEADERS,
+      });
+      assert.equal(res.statusCode, 200);
+      const byId = Object.fromEntries(res.json().providers.map((p) => [p.id, p]));
+
+      assert.equal(byId.claude?.clientId, 'anthropic', 'a real builtin id must still resolve its client');
+      assert.ok(byId.toString, 'an account named toString must still be listed');
+      assert.equal(byId.toString.clientId, undefined, 'and must carry no client identity');
+    } finally {
+      restoreGlobalRoot();
+      await app.close();
+    }
+  });
+
+  /**
+   * R20, write path — pins where an env var named `__proto__` actually dies.
+   *
+   * Reading the code alone suggests our CAT_CAFE_ filter is the culprit:
+   * envKeySchema accepts `__proto__` (it starts with `_`), and the filter built
+   * its result with `filtered[k] = v`, which invokes the prototype setter for
+   * that key. Measured, it never gets that far — there are two guards in front:
+   *
+   *   1. fastify's JSON body parser (secure-json-parse) rejects the request
+   *      outright: 400 "Object contains forbidden prototype property".
+   *   2. zod's record parser drops the key as a pollution guard, had it passed.
+   *
+   * So the filter hazard is unreachable over HTTP and the change to
+   * Object.fromEntries is defence in depth for non-HTTP callers, NOT a live
+   * defect fix. This test pins the reachable contract — the 400 — and that a
+   * normal envVars POST is unaffected by the guard.
+   */
+  it('a request body carrying __proto__ is rejected at the HTTP boundary (R20)', async () => {
+    const Fastify = (await import('fastify')).default;
+    const { accountsRoutes } = await import('../dist/routes/accounts.js');
+    const { readCatalogAccounts } = await import('../dist/config/catalog-accounts.js');
+    const app = Fastify();
+    await app.register(accountsRoutes);
+    await app.ready();
+
+    const projectDir = await makeTmpDir('proto-envvars');
+    setGlobalRoot(projectDir);
+    try {
+      // Raw JSON text: `{ __proto__: 'kept' }` as a literal sets the prototype
+      // instead of creating the key, so the payload would not have carried the
+      // field under test at all.
+      const rejected = await app.inject({
+        method: 'POST',
+        url: '/api/accounts',
+        headers: { ...AUTH_HEADERS, 'content-type': 'application/json' },
+        payload:
+          `{"projectPath":${JSON.stringify(projectDir)},"name":"proto-env","authType":"api_key",` +
+          '"envVars":{"__proto__":"kept","MY_VAR":"ok"}}',
+      });
+      assert.equal(rejected.statusCode, 400, 'a __proto__ key anywhere in the body must be refused');
+      assert.match(rejected.json().message, /forbidden prototype property/);
+
+      // The guard must not be a blanket envVars refusal. api_key accounts
+      // require clientId (same contract as the create+list flow below).
+      const accepted = await app.inject({
+        method: 'POST',
+        url: '/api/accounts',
+        headers: { ...AUTH_HEADERS, 'content-type': 'application/json' },
+        payload:
+          `{"projectPath":${JSON.stringify(projectDir)},"name":"plain-env","authType":"api_key",` +
+          '"clientId":"anthropic","envVars":{"MY_VAR":"ok","CAT_CAFE_RESERVED":"stripped"}}',
+      });
+      assert.equal(accepted.statusCode, 200);
+      const stored = readCatalogAccounts(projectDir)[accepted.json().profile.id];
+      assert.equal(stored.envVars.MY_VAR, 'ok');
+      assert.equal(Object.hasOwn(stored.envVars, 'CAT_CAFE_RESERVED'), false, 'reserved keys are still stripped');
+    } finally {
+      restoreGlobalRoot();
+      await app.close();
+    }
   });
 
   it('create + list profile flow', async () => {
@@ -793,6 +933,297 @@ describe('accounts routes', () => {
         restoreGlobalRoot();
         await rm(globalRoot, { recursive: true, force: true });
         await rm(projectDir, { recursive: true, force: true });
+        await app.close();
+      }
+    },
+  );
+
+  it(
+    'DELETE /api/accounts audits the runtime catalog, not the workspace store root (AC-4/INV-3)',
+    { skip: skipRoots ? 'PROJECT_ALLOWED_ROOTS restricts temp dir access' : false },
+    async () => {
+      const { resetMigrationState, writeCatalogAccount } = await import('../dist/config/catalog-accounts.js');
+      const Fastify = (await import('fastify')).default;
+      const { accountsRoutes } = await import('../dist/routes/accounts.js');
+      const app = Fastify();
+      await app.register(accountsRoutes);
+      await app.ready();
+
+      const runtimeRoot = await makeTmpDir('audit-runtime');
+      const workspaceRoot = await makeTmpDir('audit-workspace');
+      const saved = {
+        runtimeRoot: process.env.CAT_CAFE_RUNTIME_ROOT,
+        workspaceRoot: process.env.CAT_CAFE_WORKSPACE_ROOT,
+        templatePath: process.env.CAT_TEMPLATE_PATH,
+        globalRoot: process.env.CAT_CAFE_GLOBAL_CONFIG_ROOT,
+        home: process.env.HOME,
+      };
+      // Split-root: account store lives in the workspace, bindings live in the runtime catalog.
+      process.env.CAT_CAFE_RUNTIME_ROOT = runtimeRoot;
+      process.env.CAT_CAFE_WORKSPACE_ROOT = workspaceRoot;
+      delete process.env.CAT_CAFE_GLOBAL_CONFIG_ROOT;
+      // Route default projectPath resolves via resolveActiveProjectRoot → runtime root.
+      mkdirSync(join(runtimeRoot, '.cat-cafe'), { recursive: true });
+      writeFileSync(join(runtimeRoot, 'cat-template.json'), JSON.stringify({ breeds: [] }));
+      process.env.CAT_TEMPLATE_PATH = join(runtimeRoot, 'cat-template.json');
+      process.env.HOME = workspaceRoot;
+      resetMigrationState();
+      try {
+        // Account metadata is durable-workspace state...
+        writeCatalogAccount(workspaceRoot, 'audit-bound', {
+          authType: 'api_key',
+          displayName: 'Audit Bound',
+        });
+        resetMigrationState();
+        // ...but a cat in the RUNTIME catalog binds it.
+        writeBoundCatalog(runtimeRoot, 'audit-bound');
+
+        const res = await app.inject({
+          method: 'DELETE',
+          url: '/api/accounts/audit-bound',
+          headers: { ...AUTH_HEADERS, 'content-type': 'application/json' },
+          payload: JSON.stringify({}),
+        });
+        assert.equal(res.statusCode, 409, 'bound account must be protected even though binding is in runtime catalog');
+        assert.match(res.json().error, /audit-bound/);
+        assert.ok(
+          readFileSync(join(workspaceRoot, '.cat-cafe', 'accounts.json')).includes('audit-bound'),
+          'account must remain',
+        );
+      } finally {
+        if (saved.runtimeRoot === undefined) delete process.env.CAT_CAFE_RUNTIME_ROOT;
+        else process.env.CAT_CAFE_RUNTIME_ROOT = saved.runtimeRoot;
+        if (saved.workspaceRoot === undefined) delete process.env.CAT_CAFE_WORKSPACE_ROOT;
+        else process.env.CAT_CAFE_WORKSPACE_ROOT = saved.workspaceRoot;
+        if (saved.templatePath === undefined) delete process.env.CAT_TEMPLATE_PATH;
+        else process.env.CAT_TEMPLATE_PATH = saved.templatePath;
+        if (saved.globalRoot === undefined) delete process.env.CAT_CAFE_GLOBAL_CONFIG_ROOT;
+        else process.env.CAT_CAFE_GLOBAL_CONFIG_ROOT = saved.globalRoot;
+        if (saved.home === undefined) delete process.env.HOME;
+        else process.env.HOME = saved.home;
+        resetMigrationState();
+        await rm(runtimeRoot, { recursive: true, force: true });
+        await rm(workspaceRoot, { recursive: true, force: true });
+        await app.close();
+      }
+    },
+  );
+
+  it(
+    'DELETE /api/accounts with explicit workspace projectPath audits the runtime catalog (P1)',
+    { skip: skipRoots ? 'PROJECT_ALLOWED_ROOTS restricts temp dir access' : false },
+    async () => {
+      const { resetMigrationState, writeCatalogAccount } = await import('../dist/config/catalog-accounts.js');
+      const Fastify = (await import('fastify')).default;
+      const { accountsRoutes } = await import('../dist/routes/accounts.js');
+      const app = Fastify();
+      await app.register(accountsRoutes);
+      await app.ready();
+
+      const runtimeRoot = await makeTmpDir('audit-explicit-runtime');
+      const workspaceRoot = await makeTmpDir('audit-explicit-workspace');
+      const saved = {
+        runtimeRoot: process.env.CAT_CAFE_RUNTIME_ROOT,
+        workspaceRoot: process.env.CAT_CAFE_WORKSPACE_ROOT,
+        templatePath: process.env.CAT_TEMPLATE_PATH,
+        globalRoot: process.env.CAT_CAFE_GLOBAL_CONFIG_ROOT,
+        home: process.env.HOME,
+      };
+      // Split-root: account lives in the workspace store, binding lives in the runtime catalog.
+      process.env.CAT_CAFE_RUNTIME_ROOT = runtimeRoot;
+      process.env.CAT_CAFE_WORKSPACE_ROOT = workspaceRoot;
+      delete process.env.CAT_CAFE_GLOBAL_CONFIG_ROOT;
+      mkdirSync(join(runtimeRoot, '.cat-cafe'), { recursive: true });
+      writeFileSync(join(runtimeRoot, 'cat-template.json'), JSON.stringify({ breeds: [] }));
+      process.env.CAT_TEMPLATE_PATH = join(runtimeRoot, 'cat-template.json');
+      process.env.HOME = workspaceRoot;
+      resetMigrationState();
+      try {
+        writeCatalogAccount(workspaceRoot, 'audit-bound-explicit', {
+          authType: 'api_key',
+          displayName: 'Audit Bound Explicit',
+        });
+        resetMigrationState();
+        writeBoundCatalog(runtimeRoot, 'audit-bound-explicit');
+
+        const res = await app.inject({
+          method: 'DELETE',
+          url: '/api/accounts/audit-bound-explicit',
+          headers: { ...AUTH_HEADERS, 'content-type': 'application/json' },
+          // Explicit workspace projectPath: the catalog coordinate must still
+          // map back to the runtime checkout where live bindings live.
+          payload: JSON.stringify({ projectPath: workspaceRoot }),
+        });
+        assert.equal(res.statusCode, 409, 'explicit workspace projectPath must still find the runtime-catalog binding');
+        assert.match(res.json().error, /audit-bound-explicit/);
+        assert.ok(
+          readFileSync(join(workspaceRoot, '.cat-cafe', 'accounts.json')).includes('audit-bound-explicit'),
+          'account must remain',
+        );
+      } finally {
+        if (saved.runtimeRoot === undefined) delete process.env.CAT_CAFE_RUNTIME_ROOT;
+        else process.env.CAT_CAFE_RUNTIME_ROOT = saved.runtimeRoot;
+        if (saved.workspaceRoot === undefined) delete process.env.CAT_CAFE_WORKSPACE_ROOT;
+        else process.env.CAT_CAFE_WORKSPACE_ROOT = saved.workspaceRoot;
+        if (saved.templatePath === undefined) delete process.env.CAT_TEMPLATE_PATH;
+        else process.env.CAT_TEMPLATE_PATH = saved.templatePath;
+        if (saved.globalRoot === undefined) delete process.env.CAT_CAFE_GLOBAL_CONFIG_ROOT;
+        else process.env.CAT_CAFE_GLOBAL_CONFIG_ROOT = saved.globalRoot;
+        if (saved.home === undefined) delete process.env.HOME;
+        else process.env.HOME = saved.home;
+        resetMigrationState();
+        await rm(runtimeRoot, { recursive: true, force: true });
+        await rm(workspaceRoot, { recursive: true, force: true });
+        await app.close();
+      }
+    },
+  );
+
+  it(
+    'DELETE with symlink-spelled env workspace root still audits the runtime catalog (P1 canonicalization)',
+    { skip: skipRoots ? 'PROJECT_ALLOWED_ROOTS restricts temp dir access' : false },
+    async () => {
+      const { resetMigrationState, writeCatalogAccount } = await import('../dist/config/catalog-accounts.js');
+      const Fastify = (await import('fastify')).default;
+      const { accountsRoutes } = await import('../dist/routes/accounts.js');
+      const app = Fastify();
+      await app.register(accountsRoutes);
+      await app.ready();
+
+      const runtimeRoot = await makeTmpDir('audit-symlink-runtime');
+      const workspaceReal = await makeTmpDir('audit-symlink-workspace');
+      // runtime-worktree.sh derives env roots from bash logical pwd, which keeps
+      // symlink components (e.g. /tmp vs /private/tmp), while resolveProjectRoot
+      // realpaths the request path — the audit mapping must match across both
+      // spellings of the same directory.
+      const workspaceLink = `${workspaceReal}-link`;
+      symlinkSync(workspaceReal, workspaceLink);
+      const saved = {
+        runtimeRoot: process.env.CAT_CAFE_RUNTIME_ROOT,
+        workspaceRoot: process.env.CAT_CAFE_WORKSPACE_ROOT,
+        templatePath: process.env.CAT_TEMPLATE_PATH,
+        globalRoot: process.env.CAT_CAFE_GLOBAL_CONFIG_ROOT,
+        home: process.env.HOME,
+      };
+      process.env.CAT_CAFE_RUNTIME_ROOT = runtimeRoot;
+      process.env.CAT_CAFE_WORKSPACE_ROOT = workspaceLink;
+      delete process.env.CAT_CAFE_GLOBAL_CONFIG_ROOT;
+      mkdirSync(join(runtimeRoot, '.cat-cafe'), { recursive: true });
+      writeFileSync(join(runtimeRoot, 'cat-template.json'), JSON.stringify({ breeds: [] }));
+      process.env.CAT_TEMPLATE_PATH = join(runtimeRoot, 'cat-template.json');
+      process.env.HOME = workspaceReal;
+      resetMigrationState();
+      try {
+        writeCatalogAccount(workspaceReal, 'audit-symlink-bound', {
+          authType: 'api_key',
+          displayName: 'Audit Symlink Bound',
+        });
+        resetMigrationState();
+        await writeBoundCatalog(runtimeRoot, 'audit-symlink-bound');
+
+        const res = await app.inject({
+          method: 'DELETE',
+          url: '/api/accounts/audit-symlink-bound',
+          headers: { ...AUTH_HEADERS, 'content-type': 'application/json' },
+          payload: JSON.stringify({ projectPath: workspaceLink }),
+        });
+        assert.equal(
+          res.statusCode,
+          409,
+          'symlink-spelled workspace root must still map to the runtime-catalog binding',
+        );
+        assert.match(res.json().error, /audit-symlink-bound/);
+        assert.ok(
+          readFileSync(join(workspaceReal, '.cat-cafe', 'accounts.json')).includes('audit-symlink-bound'),
+          'account must remain',
+        );
+      } finally {
+        if (saved.runtimeRoot === undefined) delete process.env.CAT_CAFE_RUNTIME_ROOT;
+        else process.env.CAT_CAFE_RUNTIME_ROOT = saved.runtimeRoot;
+        if (saved.workspaceRoot === undefined) delete process.env.CAT_CAFE_WORKSPACE_ROOT;
+        else process.env.CAT_CAFE_WORKSPACE_ROOT = saved.workspaceRoot;
+        if (saved.templatePath === undefined) delete process.env.CAT_TEMPLATE_PATH;
+        else process.env.CAT_TEMPLATE_PATH = saved.templatePath;
+        if (saved.globalRoot === undefined) delete process.env.CAT_CAFE_GLOBAL_CONFIG_ROOT;
+        else process.env.CAT_CAFE_GLOBAL_CONFIG_ROOT = saved.globalRoot;
+        if (saved.home === undefined) delete process.env.HOME;
+        else process.env.HOME = saved.home;
+        resetMigrationState();
+        await rm(workspaceLink, { force: true });
+        await rm(runtimeRoot, { recursive: true, force: true });
+        await rm(workspaceReal, { recursive: true, force: true });
+        await app.close();
+      }
+    },
+  );
+
+  it(
+    'DELETE with an external projectPath keeps its own catalog root (no runtime remap)',
+    { skip: skipRoots ? 'PROJECT_ALLOWED_ROOTS restricts temp dir access' : false },
+    async () => {
+      const { resetMigrationState, writeCatalogAccount } = await import('../dist/config/catalog-accounts.js');
+      const Fastify = (await import('fastify')).default;
+      const { accountsRoutes } = await import('../dist/routes/accounts.js');
+      const app = Fastify();
+      await app.register(accountsRoutes);
+      await app.ready();
+
+      const runtimeRoot = await makeTmpDir('audit-ext-runtime');
+      const workspaceRoot = await makeTmpDir('audit-ext-workspace');
+      const externalRoot = await makeTmpDir('audit-ext-project');
+      const saved = {
+        runtimeRoot: process.env.CAT_CAFE_RUNTIME_ROOT,
+        workspaceRoot: process.env.CAT_CAFE_WORKSPACE_ROOT,
+        templatePath: process.env.CAT_TEMPLATE_PATH,
+        globalRoot: process.env.CAT_CAFE_GLOBAL_CONFIG_ROOT,
+        home: process.env.HOME,
+      };
+      process.env.CAT_CAFE_RUNTIME_ROOT = runtimeRoot;
+      process.env.CAT_CAFE_WORKSPACE_ROOT = workspaceRoot;
+      delete process.env.CAT_CAFE_GLOBAL_CONFIG_ROOT;
+      mkdirSync(join(runtimeRoot, '.cat-cafe'), { recursive: true });
+      writeFileSync(join(runtimeRoot, 'cat-template.json'), JSON.stringify({ breeds: [] }));
+      process.env.CAT_TEMPLATE_PATH = join(runtimeRoot, 'cat-template.json');
+      process.env.HOME = workspaceRoot;
+      resetMigrationState();
+      try {
+        // A genuinely external project keeps both its account store and its
+        // catalog: the delete audit must scan the external catalog, not be
+        // remapped to the runtime checkout (which has no such binding).
+        writeCatalogAccount(externalRoot, 'audit-external-bound', {
+          authType: 'api_key',
+          displayName: 'Audit External Bound',
+        });
+        resetMigrationState();
+        await writeBoundCatalog(externalRoot, 'audit-external-bound');
+
+        const res = await app.inject({
+          method: 'DELETE',
+          url: '/api/accounts/audit-external-bound',
+          headers: { ...AUTH_HEADERS, 'content-type': 'application/json' },
+          payload: JSON.stringify({ projectPath: externalRoot }),
+        });
+        assert.equal(res.statusCode, 409, 'external project must audit its own catalog root, not the runtime checkout');
+        assert.match(res.json().error, /audit-external-bound/);
+        assert.ok(
+          readFileSync(join(externalRoot, '.cat-cafe', 'accounts.json')).includes('audit-external-bound'),
+          'account must remain',
+        );
+      } finally {
+        if (saved.runtimeRoot === undefined) delete process.env.CAT_CAFE_RUNTIME_ROOT;
+        else process.env.CAT_CAFE_RUNTIME_ROOT = saved.runtimeRoot;
+        if (saved.workspaceRoot === undefined) delete process.env.CAT_CAFE_WORKSPACE_ROOT;
+        else process.env.CAT_CAFE_WORKSPACE_ROOT = saved.workspaceRoot;
+        if (saved.templatePath === undefined) delete process.env.CAT_TEMPLATE_PATH;
+        else process.env.CAT_TEMPLATE_PATH = saved.templatePath;
+        if (saved.globalRoot === undefined) delete process.env.CAT_CAFE_GLOBAL_CONFIG_ROOT;
+        else process.env.CAT_CAFE_GLOBAL_CONFIG_ROOT = saved.globalRoot;
+        if (saved.home === undefined) delete process.env.HOME;
+        else process.env.HOME = saved.home;
+        resetMigrationState();
+        await rm(runtimeRoot, { recursive: true, force: true });
+        await rm(workspaceRoot, { recursive: true, force: true });
+        await rm(externalRoot, { recursive: true, force: true });
         await app.close();
       }
     },

@@ -35,3 +35,12 @@ export function prepareSessionCredentialFile(
 export function bindSessionCredentialFile(sessionId: string | undefined, path: string): void {
   bindProviderSessionCredentialFile(ACP_CREDENTIAL_NAMESPACE, sessionId, path);
 }
+
+/** Rewrite a spawn-frozen MCP credential file (DSH overlay). Does not mint a nonce. */
+export function refreshFrozenCredentialFile(
+  callbackEnv: Record<string, string> | undefined,
+  frozenPath: string,
+): PreparedCredentialEnv | null {
+  if (!writeSessionCredentialFile(callbackEnv, frozenPath)) return null;
+  return { env: { ...(callbackEnv ?? {}), CAT_CAFE_CREDENTIAL_FILE: frozenPath }, path: frozenPath };
+}

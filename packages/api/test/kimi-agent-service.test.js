@@ -14,6 +14,7 @@ writeFileSync(join(stubBinDir, 'kimi-cli'), '#!/bin/sh\nexit 1\n', { mode: 0o755
 process.env.PATH = `${stubBinDir}:${process.env.PATH}`;
 
 const { KimiAgentService } = await import('../dist/domains/cats/services/agents/providers/KimiAgentService.js');
+const { writeMcpConfigFile } = await import('../dist/domains/cats/services/agents/providers/kimi-config.js');
 const { invalidateCliCommand } = await import('../dist/utils/cli-resolve.js');
 
 function writeCapabilitiesConfig(projectRoot, capabilities) {
@@ -555,6 +556,47 @@ test('Kimi MCP config reads capabilities from runtime root while cwd is user pro
     rmSync(shareDir, { recursive: true, force: true });
     rmSync(projectDir, { recursive: true, force: true });
     rmSync(runtimeRoot, { recursive: true, force: true });
+  }
+});
+
+test('Kimi MCP config fails closed when an environment reference is missing', async () => {
+  const runtimeRoot = mkdtempSync(join(tmpdir(), 'kimi-mcp-missing-env-runtime-'));
+  const projectDir = mkdtempSync(join(tmpdir(), 'kimi-mcp-missing-env-project-'));
+  const mcpDistDir = join(runtimeRoot, 'packages', 'mcp-server', 'dist');
+  const envKey = 'TEST_KIMI_MISSING_MCP_TOKEN';
+  const previousToken = process.env[envKey];
+  delete process.env[envKey];
+
+  try {
+    mkdirSync(mcpDistDir, { recursive: true });
+    writeFileSync(join(mcpDistDir, 'index.js'), '// stub', 'utf8');
+    writeCapabilitiesConfig(runtimeRoot, [
+      {
+        id: 'env-backed-local',
+        type: 'mcp',
+        enabled: true,
+        source: 'external',
+        mcpServer: {
+          command: 'echo',
+          args: [],
+          env: { TOKEN: `\${${envKey}}` },
+        },
+      },
+    ]);
+
+    await assert.rejects(
+      () =>
+        writeMcpConfigFile(projectDir, join(mcpDistDir, 'index.js'), {
+          CAT_CAFE_CAT_ID: 'kimi',
+          KIMI_SHARE_DIR: projectDir,
+        }),
+      /env-backed-local.*TEST_KIMI_MISSING_MCP_TOKEN/,
+    );
+  } finally {
+    if (previousToken === undefined) delete process.env[envKey];
+    else process.env[envKey] = previousToken;
+    rmSync(runtimeRoot, { recursive: true, force: true });
+    rmSync(projectDir, { recursive: true, force: true });
   }
 });
 

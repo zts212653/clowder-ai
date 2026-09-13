@@ -72,11 +72,12 @@ export function AdvancedRuntimeSection({
           onChange={(value) => onChange({ contextWindow: value })}
           inputMode="numeric"
           tone="success"
-          placeholder="留空或 0 = Auto；正整数 = Manual"
+          placeholder="留空或 0 = Auto（由 CLI / 模型目录自动探测；helper-cat 空值走 400k 家族默认）"
           ariaDescribedBy="context-window-compat-notice"
         />
         <p className="text-xs leading-5 text-[var(--console-runtime-hint)]">
-          填写正整数 = Manual 模式，作为该成员的上下文窗口大小。留空或填 0 = Auto，由运行时自动探测。
+          填写正整数 = Manual 模式，作为该成员的上下文窗口大小。留空或填 0 = Auto，由运行时自动探测。glm / deepseek /
+          minimax 在 Auto 无法解析时回落到 400k 家族默认，而不是 100k fallback。
         </p>
         <ContextWindowCompatibilityNotice cat={cat} form={form} />
         {cliExtensionsAvailable && cliEffortOptions ? (

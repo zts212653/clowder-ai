@@ -11,7 +11,7 @@ import type {
   PresentLoopOutcome as SharedPresentLoopOutcome,
   SleepPostureDraft,
 } from '@cat-cafe/shared';
-import type { ProactiveSettlementState } from './proactive-relationship-contract.js';
+import type { ProactiveSettlementState } from './proactive/proactive-relationship-contract.js';
 
 export type { PresentLoopRunState } from '@cat-cafe/shared';
 export type PresentLoopOutcome = SharedPresentLoopOutcome;

@@ -1,14 +1,94 @@
 // @ts-check
 
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, it } from 'node:test';
 
-const { createAcpServiceForConfig } = await import(
+const { createAcpServiceForConfig, resolveEffectiveAcpSupportsMultiplexing } = await import(
   '../../dist/domains/cats/services/agents/providers/acp/AcpServiceFactory.js'
 );
+const { AcpProcessPool } = await import('../../dist/domains/cats/services/agents/providers/acp/AcpProcessPool.js');
+const { mintDshCredentialFile } = await import(
+  '../../dist/domains/cats/services/agents/providers/acp/dsh-acp-bootstrap.js'
+);
+
+function catConfig(id) {
+  return {
+    id,
+    name: id,
+    displayName: id,
+    color: { primary: '#111827', secondary: '#e5e7eb' },
+    avatar: '/avatars/default.png',
+    mentionPatterns: [`@${id}`],
+    roleDescription: 'ACP test member',
+    clientId: 'acp',
+    defaultModel: 'test-model',
+    mcpSupport: false,
+  };
+}
+
+function writeDshFixture() {
+  const root = mkdtempSync(join(tmpdir(), 'dsh-factory-'));
+  const binDir = join(root, 'packages', 'examples', 'acp-demo', 'lib');
+  mkdirSync(binDir, { recursive: true });
+  writeFileSync(join(binDir, 'bin.js'), '#!/usr/bin/env node\n');
+  const mcpClientLib = join(root, 'packages', 'mcp', 'mcp-client', 'lib');
+  mkdirSync(mcpClientLib, { recursive: true });
+  writeFileSync(
+    join(root, 'packages', 'mcp', 'mcp-client', 'package.json'),
+    JSON.stringify({ name: '@deepseek-ai/dsh-mcp-client', type: 'module', main: 'lib/index.js' }),
+  );
+  writeFileSync(join(mcpClientLib, 'index.js'), 'export default {}\n');
+  const configDir = join(root, 'examples', 'acp-agent');
+  mkdirSync(configDir, { recursive: true });
+  writeFileSync(join(configDir, 'cordis.yml'), "- id: acp-agent\n  name: '@deepseek-ai/dsh-acp-demo'\n");
+  return root;
+}
+
+function withDshRoot(root, fn) {
+  const prevRoot = process.env.CAT_CAFE_DSH_ROOT;
+  const prevConfig = process.env.CAT_CAFE_DSH_ACP_CONFIG;
+  process.env.CAT_CAFE_DSH_ROOT = root;
+  delete process.env.CAT_CAFE_DSH_ACP_CONFIG;
+  return fn().finally(() => {
+    if (prevRoot === undefined) delete process.env.CAT_CAFE_DSH_ROOT;
+    else process.env.CAT_CAFE_DSH_ROOT = prevRoot;
+    if (prevConfig === undefined) delete process.env.CAT_CAFE_DSH_ACP_CONFIG;
+    else process.env.CAT_CAFE_DSH_ACP_CONFIG = prevConfig;
+  });
+}
+
+function createDshLikeClient(projectRoot) {
+  const credFile = mintDshCredentialFile(projectRoot, 'dsh');
+  let alive = false;
+  let closed = false;
+  return {
+    get isAlive() {
+      return alive && !closed;
+    },
+    get isCwdIntact() {
+      return true;
+    },
+    get isSafeForSingleFlightReuse() {
+      return false;
+    },
+    get mcpCredentialFile() {
+      return credFile;
+    },
+    async initialize() {
+      alive = true;
+    },
+    async close() {
+      closed = true;
+      alive = false;
+    },
+    _isClosed() {
+      return closed;
+    },
+  };
+}
 
 describe('AcpServiceFactory', () => {
   it('uses one effective model for ACP bootstrap, context policy, and the concrete service binding', async () => {
@@ -161,6 +241,63 @@ describe('AcpServiceFactory', () => {
     }
   });
 
+  it('keeps DSH bootstrap then skips when upstream rejects a torn account binding', async () => {
+    const dshRoot = writeDshFixture();
+    const projectRoot = mkdtempSync(join(tmpdir(), 'acp-dsh-rejected-account-'));
+    const globalRoot = mkdtempSync(join(tmpdir(), 'acp-dsh-rejected-global-'));
+    const previousGlobal = process.env.CAT_CAFE_GLOBAL_CONFIG_ROOT;
+    const warnings = [];
+    mkdirSync(join(globalRoot, '.cat-cafe'), { recursive: true });
+    // Credential without account metadata → AccountStoreVerdictError (upstream isolation).
+    writeFileSync(
+      join(globalRoot, '.cat-cafe', 'credentials.json'),
+      JSON.stringify({ 'torn-dsh-account': { apiKey: 'sk-torn' } }),
+    );
+
+    try {
+      process.env.CAT_CAFE_GLOBAL_CONFIG_ROOT = globalRoot;
+      await withDshRoot(dshRoot, async () => {
+        const service = await createAcpServiceForConfig({
+          projectRoot,
+          profileId: 'dsh-torn',
+          effectiveModel: 'deepseek-chat',
+          config: {
+            ...catConfig('dsh-torn'),
+            clientId: 'anthropic',
+            provider: 'anthropic',
+            accountRef: 'torn-dsh-account',
+            defaultModel: 'deepseek-chat',
+          },
+          acpConfig: { command: 'dsh', startupArgs: ['--acp'], mcpWhitelist: [] },
+          poolRegistry: new Map(),
+          log: {
+            info() {},
+            warn(obj, msg) {
+              warnings.push({ obj, msg });
+            },
+          },
+        });
+
+        assert.equal(service, null, 'rejected account must skip ACP registration after DSH prep');
+        assert.ok(
+          warnings.some(
+            (entry) =>
+              entry.obj?.reason === 'rejected-account-binding' ||
+              String(entry.msg ?? '').includes('could not be adjudicated') ||
+              String(entry.obj?.err?.message ?? '').includes('torn credential'),
+          ),
+          `expected rejected-account-binding warning, got ${JSON.stringify(warnings)}`,
+        );
+      });
+    } finally {
+      if (previousGlobal === undefined) delete process.env.CAT_CAFE_GLOBAL_CONFIG_ROOT;
+      else process.env.CAT_CAFE_GLOBAL_CONFIG_ROOT = previousGlobal;
+      rmSync(projectRoot, { recursive: true, force: true });
+      rmSync(globalRoot, { recursive: true, force: true });
+      rmSync(dshRoot, { recursive: true, force: true });
+    }
+  });
+
   it('skips registration and closes existing pools when bound accountRef is missing', async () => {
     const projectRoot = mkdtempSync(join(tmpdir(), 'acp-service-missing-account-'));
     let closed = 0;
@@ -204,6 +341,115 @@ describe('AcpServiceFactory', () => {
       assert.equal(poolRegistry.has('missing-account-acp'), false, 'stale pool should be removed from registry');
     } finally {
       await Promise.all([...poolRegistry.values()].map((pool) => pool.closeAll?.()));
+      rmSync(projectRoot, { recursive: true, force: true });
+    }
+  });
+
+  it('DSH cannot opt into multiplexing via catalog config', () => {
+    assert.equal(resolveEffectiveAcpSupportsMultiplexing({ command: 'dsh', supportsMultiplexing: true }), false);
+    assert.equal(
+      resolveEffectiveAcpSupportsMultiplexing({ command: 'dsh-acp-demo', supportsMultiplexing: true }),
+      false,
+    );
+    assert.equal(
+      resolveEffectiveAcpSupportsMultiplexing({ command: '/opt/dsh-acp-demo', supportsMultiplexing: true }),
+      false,
+    );
+    assert.equal(resolveEffectiveAcpSupportsMultiplexing({ command: 'grok', supportsMultiplexing: true }), true);
+    assert.equal(resolveEffectiveAcpSupportsMultiplexing({ command: 'mock-acp' }), false);
+  });
+
+  it('leaves non-DSH multiplexing config intact in spawn signature and pool', async () => {
+    const projectRoot = mkdtempSync(join(tmpdir(), 'acp-service-mux-'));
+    const poolRegistry = new Map();
+    try {
+      const service = await createAcpServiceForConfig({
+        projectRoot,
+        profileId: 'mux-acp',
+        config: catConfig('mux-acp'),
+        effectiveModel: 'test-model',
+        acpConfig: { command: 'mock-acp', startupArgs: ['--acp'], supportsMultiplexing: true },
+        poolRegistry,
+        log: { info() {}, warn() {} },
+      });
+      assert.ok(service);
+      assert.equal(JSON.parse(service.pool.spawnSignature).supportsMultiplexing, true);
+      assert.equal(service.pool.supportsMultiplexing, true);
+    } finally {
+      await Promise.all([...poolRegistry.values()].map((pool) => pool.closeAll?.()));
+      rmSync(projectRoot, { recursive: true, force: true });
+    }
+  });
+
+  it('forces DSH spawn signature and pool to single-flight even when config enables multiplexing', async () => {
+    const projectRoot = mkdtempSync(join(tmpdir(), 'acp-service-dsh-mux-'));
+    const dshRoot = writeDshFixture();
+    const poolRegistry = new Map();
+    await withDshRoot(dshRoot, async () => {
+      try {
+        const service = await createAcpServiceForConfig({
+          projectRoot,
+          profileId: 'dsh',
+          config: catConfig('dsh'),
+          effectiveModel: 'test-model',
+          acpConfig: {
+            command: 'dsh',
+            startupArgs: [],
+            supportsMultiplexing: true,
+            pool: { maxLiveProcesses: 1 },
+          },
+          poolRegistry,
+          log: { info() {}, warn() {} },
+        });
+        assert.ok(service, 'DSH ACP demo fixture must register');
+        assert.equal(JSON.parse(service.pool.spawnSignature).supportsMultiplexing, false);
+        assert.equal(service.pool.supportsMultiplexing, false);
+      } finally {
+        await Promise.all([...poolRegistry.values()].map((pool) => pool.closeAll?.()));
+        rmSync(projectRoot, { recursive: true, force: true });
+        rmSync(dshRoot, { recursive: true, force: true });
+      }
+    });
+  });
+
+  it('DSH invocations with supportsMultiplexing:true do not share client or credential path', async () => {
+    const projectRoot = mkdtempSync(join(tmpdir(), 'dsh-mux-isolation-'));
+    const acpConfig = {
+      command: 'dsh',
+      startupArgs: [],
+      supportsMultiplexing: true,
+      pool: { maxLiveProcesses: 1 },
+    };
+    const supportsMultiplexing = resolveEffectiveAcpSupportsMultiplexing(acpConfig);
+    const pool = new AcpProcessPool(
+      { maxLiveProcesses: 1, idleTtlMs: 60_000, healthCheckIntervalMs: 999_999 },
+      { ...acpConfig, supportsMultiplexing },
+      () => createDshLikeClient(projectRoot),
+    );
+    const key = { projectPath: projectRoot, providerProfile: 'dsh' };
+    try {
+      const leaseA = await pool.acquire(key);
+      const clientA = leaseA.client;
+      const pathA = clientA.mcpCredentialFile;
+      await assert.rejects(
+        () => pool.acquire(key),
+        /Pool at capacity/,
+        'maxLiveProcesses:1 must not multiplex a second live DSH lease onto the same credential path',
+      );
+      leaseA.release();
+      assert.equal(clientA._isClosed(), true, 'release must retire the DSH process');
+      assert.equal(clientA.isAlive, false);
+
+      const leaseB = await pool.acquire(key);
+      assert.notStrictEqual(leaseB.client, clientA, 'next invocation must not share the retired client');
+      assert.notEqual(
+        leaseB.client.mcpCredentialFile,
+        pathA,
+        'next invocation must not share the spawn-frozen credential path',
+      );
+      leaseB.release();
+    } finally {
+      await pool.closeAll();
       rmSync(projectRoot, { recursive: true, force: true });
     }
   });

@@ -17,14 +17,10 @@ function trimText(value: unknown): string {
 }
 
 function usesOpenCodeProvider(form: HubCatEditorFormState): boolean {
-  // F161: the `provider` field is an OpenCode-only concept — it selects the env-map template
-  // (BUILTIN_ENV_MAPS[provider]) for OpenCode's multi-provider backend routing. Generic ACP
-  // carriers (clientId='acp') are NOT provider carriers: the field renders only for opencode
-  // (there is no UI to set it for acp), BUILTIN_ENV_MAPS has no 'acp' entry, and env
-  // customization flows through the account's envVars templates (env-map priority 1). A stale
-  // provider on a generic ACP member (e.g. migrated from clientId='opencode') is therefore
-  // cleared on save by the !providerCarrier branch below — not preserved. For OpenCode
-  // provider management, use clientId='opencode' (cli or acp transport).
+  // F161: `provider` selects BUILTIN_ENV_MAPS for OpenCode only. Generic ACP is a
+  // transport: this field is cleared on save and must not keep catalog leftovers
+  // such as provider:zcode. Harness env-maps (zcode/grok/dsh) are chosen from
+  // acp.command at spawn. For OpenCode provider management, use clientId='opencode'.
   return form.clientId === 'opencode';
 }
 
@@ -94,10 +90,11 @@ function buildAcpTransportConfig(form: HubCatEditorFormState, cat?: CatData | nu
   const transport = form.acpTransport ?? 'stdio';
   const command = trimText(form.acpCommand) || defaultAcpCommandForClient(form.clientId);
   if (!command) throw new Error('ACP Command 不能为空');
+  // Empty is valid: API schema allows [], and command-only ACP (DSH/ZCode) uses it.
+  // Client defaults still apply when the field is blank (OpenCode/Gemini/Kimi).
   const startupArgs = splitCommandArgs(
     trimText(form.acpStartupArgs) || defaultAcpStartupArgsForClient(form.clientId, transport),
   );
-  if (startupArgs.length === 0) throw new Error('ACP Startup Args 不能为空');
   const maxLiveProcesses = optionalPositiveInteger(form.acpMaxLiveProcesses, 'ACP Max Processes');
   const idleTtlMinutes = optionalPositiveInteger(form.acpIdleTtlMinutes, 'ACP Idle TTL');
   const pool =

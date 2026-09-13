@@ -77,6 +77,8 @@ export interface AcpClientConfig {
   cwd: string;
   /** Extra env vars to pass to the process */
   env?: Record<string, string>;
+  /** When true, pool retires the process on lease release (no warm reuse). */
+  retireAfterLease?: boolean;
   /** Inject spawn function for testing */
   spawnFn?: typeof nodeSpawn;
   /** Custom permission request handler. Defaults to auto-approve (allow_once). */
@@ -834,7 +836,13 @@ export class AcpClient {
   }
 
   get isSafeForSingleFlightReuse(): boolean {
+    if (this.config.retireAfterLease === true) return false;
     return this.unquiescedSessionIds.size === 0;
+  }
+
+  get mcpCredentialFile(): string | undefined {
+    const path = this.config.env?.CAT_CAFE_CREDENTIAL_FILE?.trim();
+    return path || undefined;
   }
 
   isSessionSafeForReuse(sessionId: string): boolean {

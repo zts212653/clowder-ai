@@ -41,6 +41,11 @@ import {
   MCP_SESSION_ENV_KEYS,
   resolveCatCafeNodeCommand,
 } from '../../../../../config/capabilities/mcp-constants.js';
+import {
+  MissingMcpEnvironmentVariableError,
+  readExactMcpEnvironmentReference,
+  resolveMcpServerEnvReferences,
+} from '../../../../../config/capabilities/mcp-env-reference.js';
 import { deriveAutoCompactTokenLimit, getCatEffort } from '../../../../../config/cat-config-loader.js';
 import { getCatModel } from '../../../../../config/cat-models.js';
 import {
@@ -768,7 +773,7 @@ async function buildCatCafeMcpArgs(
       configSourceRoot = capabilitiesProjectRoot;
     }
     if (capConfig && catId) {
-      for (const s of resolveServersForCat(capConfig, catId, { accessScope }) as Array<{
+      for (const unresolvedServer of resolveServersForCat(capConfig, catId, { accessScope }) as Array<{
         name: string;
         enabled: boolean;
         command: string;
@@ -781,6 +786,7 @@ async function buildCatCafeMcpArgs(
         source: string;
         workingDir?: string;
       }>) {
+        const s = unresolvedServer;
         // Suppress disabled servers with a complete dummy shape so any stale
         // .codex/config.toml entries cannot revive. Bare `enabled=false` fails
         // Codex ≥0.142 schema validation (requires transport fields); including
@@ -864,11 +870,20 @@ async function buildCatCafeMcpArgs(
             ? Object.entries(s.headers).find(([k]) => k.toLowerCase() === 'authorization')?.[1]
             : undefined;
           if (rawAuthHeader) {
-            // Resolve ${ENV_VAR} placeholders before extraction — same semantics as
-            // mcp-probe.ts resolveEnvVarsInRecord (supports `Bearer ${TOKEN}` patterns).
-            const authHeader = rawAuthHeader.replace(/\$\{([^}]+)\}/g, (_, name) => process.env[name] ?? '');
-            const bearerMatch = /^Bearer\s+(.+)$/i.exec(authHeader);
-            if (bearerMatch) {
+            const referencedBearer = /^Bearer\s+\$\{([A-Za-z_][A-Za-z0-9_]*)\}$/i.exec(rawAuthHeader)?.[1];
+            if (referencedBearer) {
+              // Native Codex contract: point at the existing variable name.
+              // Validation fails closed, but the token never enters argv or a
+              // generated wrapper file.
+              resolveMcpServerEnvReferences(s, process.env);
+              args.push('--config', `mcp_servers.${tomlName}.bearer_token_env_var=${toTomlString(referencedBearer)}`);
+            } else {
+              const resolvedServer = resolveMcpServerEnvReferences(s, process.env);
+              const authHeader = resolvedServer.headers
+                ? Object.entries(resolvedServer.headers).find(([k]) => k.toLowerCase() === 'authorization')?.[1]
+                : undefined;
+              const bearerMatch = authHeader ? /^Bearer\s+(.+)$/i.exec(authHeader) : null;
+              if (!bearerMatch) continue;
               // Env var name must be collision-proof: distinct MCP names that differ
               // only by punctuation (e.g. `foo-bar` vs `foo_bar`) would otherwise
               // map to the same env var, routing one server's token to another.
@@ -886,6 +901,7 @@ async function buildCatCafeMcpArgs(
         let cmd: string | undefined;
         let cmdArgs: string[] | undefined;
         let envEntries: Record<string, string> | undefined;
+        const forwardedEnvVars: string[] = [];
         // Managed split: source='cat-cafe' + name in entrypoint map.
         // Same-repo external migration shapes (F193): source='external' but
         // binary suffix matches our own split entrypoint — these arise from
@@ -912,7 +928,21 @@ async function buildCatCafeMcpArgs(
         } else if (s.command) {
           cmd = resolveCodexMcpCommand(s.command, workingDir, configSourceRoot);
           cmdArgs = resolveCodexMcpArgs(s.args, workingDir, configSourceRoot);
-          if (s.env && Object.keys(s.env).length > 0) envEntries = s.env;
+          if (s.env && Object.keys(s.env).length > 0) {
+            const resolvedServer = resolveMcpServerEnvReferences(s, process.env);
+            envEntries = {};
+            for (const [key, rawValue] of Object.entries(s.env)) {
+              const referencedName = readExactMcpEnvironmentReference(rawValue);
+              if (referencedName === key) {
+                // Codex forwards allowlisted variables by name. Prefer this
+                // native path so the value stays out of argv and wrapper JSON.
+                forwardedEnvVars.push(referencedName);
+              } else {
+                envEntries[key] = resolvedServer.env?.[key] ?? rawValue;
+              }
+            }
+            if (Object.keys(envEntries).length === 0) envEntries = undefined;
+          }
         }
         if (!cmd) continue;
         if (envEntries) {
@@ -936,6 +966,9 @@ async function buildCatCafeMcpArgs(
           '--config',
           `mcp_servers.${tomlName}.enabled=true`,
         );
+        if (forwardedEnvVars.length > 0) {
+          args.push('--config', `mcp_servers.${tomlName}.env_vars=[${forwardedEnvVars.map(toTomlString).join(', ')}]`);
+        }
         if (isCatCafe) {
           args.push('--config', `mcp_servers.${tomlName}.default_tools_approval_mode="approve"`);
           args.push(
@@ -950,7 +983,8 @@ async function buildCatCafeMcpArgs(
       }
       resolved = true;
     }
-  } catch {
+  } catch (error) {
+    if (error instanceof MissingMcpEnvironmentVariableError) throw error;
     // best-effort fallback below
   }
 

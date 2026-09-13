@@ -78,6 +78,71 @@
       "roleDescription": "开源多模型编码 agent，自带多专家编排 + LSP + 主题生态",
       "personality": "沉稳可靠，什么 provider 都能接，什么任务都能扛",
       "teamStrengths": "多专家内部编排、LSP 集成、开源生态、provider-agnostic"
+    },
+    {
+      "id": "ju-mao",
+      "name": "橘猫",
+      "nickname": "谱谱",
+      "avatar": "/avatars/glm.png",
+      "color": {
+        "primary": "#E8A33D",
+        "secondary": "#F8E6C8"
+      },
+      "roleDescription": "实现量产主力，落 lead 设计、中文/通用文字后备",
+      "personality": "踏实肯干，话不多但活儿最多，能扛事的大橘",
+      "teamStrengths": "海量配额走量、中文、自跑长循环"
+    },
+    {
+      "id": "xuan-mao",
+      "name": "玄猫",
+      "nickname": "渊渊",
+      "avatar": "/avatars/deepseek.png",
+      "color": {
+        "primary": "#2C2C34",
+        "secondary": "#C9C9D4"
+      },
+      "roleDescription": "深推理与算法验证副手，砚砚队，跨家挑逻辑漏洞",
+      "personality": "沉静深邃，话少但每句带推导，像深潭里的玄猫",
+      "teamStrengths": "数学/竞赛算法(Codeforces级)、CoT透明、便宜可batch"
+    },
+    {
+      "id": "san-hua",
+      "name": "三花猫",
+      "nickname": "灵灵",
+      "avatar": "/avatars/minimax.png",
+      "color": {
+        "primary": "#E06C9F",
+        "secondary": "#F8DCE8"
+      },
+      "roleDescription": "极速产出副手，文案/翻译/批量，烁烁队走量出稿",
+      "personality": "灵动活泼，手快嘴快，像三色斑斓的三花猫",
+      "teamStrengths": "全队最快、1M大上下文、原生视频图输入、批量出稿"
+    },
+    {
+      "id": "grok-build",
+      "name": "Grok Build",
+      "nickname": "戈戈",
+      "avatar": "/avatars/default.png",
+      "color": {
+        "primary": "#111111",
+        "secondary": "#E8E8E8"
+      },
+      "roleDescription": "xAI Grok Build 本地 harness，Hub 经 ACP stdio 派发",
+      "personality": "直球、爱抬杠，先把机制说清楚再动手",
+      "teamStrengths": "本地 coding agent、ACP 嵌入、工具调用"
+    },
+    {
+      "id": "dsh",
+      "name": "DeepSeek Harness",
+      "nickname": "衡衡",
+      "avatar": "/avatars/default.png",
+      "color": {
+        "primary": "#4D6BFE",
+        "secondary": "#D6DFFF"
+      },
+      "roleDescription": "官方 DeepSeek Harness（dsh）ACP 自动化入口，与 OpenCode 渊渊分路",
+      "personality": "插件化、组合优先，把 harness 本身当工件",
+      "teamStrengths": "DeepSeek 官方 harness、headless/ACP 自动化"
     }
   ],
   "clientDefaults": {
@@ -199,6 +264,48 @@
       "lead": false,
       "available": true,
       "evaluation": "claude-fable-5 新布偶猫，Opus x2 猫粮，能力画像待校准"
+    },
+    "glm": {
+      "family": "ju-mao",
+      "roles": ["coder"],
+      "lead": false,
+      "available": true,
+      "evaluation": "实现量产主力，海量配额走量，中文强，非编码最强(DeepSeek/fable更强)"
+    },
+    "deepseek": {
+      "family": "xuan-mao",
+      "roles": ["peer-reviewer", "thinker"],
+      "lead": false,
+      "available": true,
+      "evaluation": "深推理/算法验证副手，Codeforces级算法，便宜可batch，跨家挑逻辑漏洞"
+    },
+    "minimax": {
+      "family": "san-hua",
+      "roles": ["writer"],
+      "lead": false,
+      "available": true,
+      "evaluation": "极速文案/批量产出，1M+多模态，烁烁队走量出稿"
+    },
+    "grok-build": {
+      "family": "grok-build",
+      "roles": ["coder"],
+      "lead": false,
+      "available": true,
+      "evaluation": "Grok Build 本地 harness，经 grok agent stdio ACP 派发，不是套壳别的 CLI"
+    },
+    "dsh": {
+      "family": "dsh",
+      "roles": ["coder"],
+      "lead": false,
+      "available": true,
+      "evaluation": "官方 DeepSeek Harness ACP 自动化入口；渊渊仍走 OpenCode，互不替换"
+    },
+    "zcode": {
+      "family": "zcode",
+      "roles": ["coder"],
+      "lead": false,
+      "available": true,
+      "evaluation": "智谱 ZCode ADE；官方无 ACP，Hub 经 in-repo adapter 转 app-server。橘猫 @glm 仍走 OpenCode"
     }
   },
   "reviewPolicy": {
@@ -221,8 +328,8 @@
       },
       "mentionPatterns": ["@opus", "@布偶猫", "@布偶", "@ragdoll", "@宪宪"],
       "roleDescription": "主架构师和核心开发者，擅长深度思考和系统设计",
-      "teamStrengths": "架构设计、写代码一把好手",
-      "caution": null,
+      "teamStrengths": "架构设计 + 核心编码主力，复杂系统拆解最强",
+      "caution": "bug 定位是弱项，定不出交砚砚；周配额稀缺，琐碎量产活别接、分给金渐层",
       "defaultVariantId": "opus-default",
       "variants": [
         {
@@ -366,7 +473,8 @@
       },
       "mentionPatterns": ["@codex", "@缅因猫", "@缅因", "@maine", "@砚砚"],
       "roleDescription": "代码审查专家，擅长安全分析、测试覆盖和代码质量把控",
-      "teamStrengths": "Review、找 bug、coding 落地",
+      "teamStrengths": "代码审查 + 安全分析主力，找 bug、终端 agentic 强",
+      "caution": "审查易顺 PR 描述走(确认偏误)需独立复核；反应快偶尔抢结论",
       "features": {
         "missionHub": {
           "selfClaimScope": "disabled"
@@ -535,9 +643,9 @@
         "secondary": "#D6E9F8"
       },
       "mentionPatterns": ["@gemini", "@暹罗猫", "@暹罗", "@siamese", "@暄罗猫", "@暄罗", "@烁烁"],
-      "roleDescription": "视觉设计师和创意顾问，擅长 UI/UX 设计和视觉表达",
-      "teamStrengths": "审美、前端设计风格、打破常规",
-      "caution": "禁止写代码！幻觉多，不遵守 SOP",
+      "roleDescription": "视觉设计 + 表达主力，擅长 UI/UX、创意表达、整库大上下文阅读",
+      "teamStrengths": "审美、前端设计、表达力全队最强、1M 大上下文通读",
+      "caution": "禁止写代码！开放生成爱编事实(引用/数据/API)需复核，不遵守 SOP",
       "restrictions": ["禁止写代码"],
       "features": {
         "sessionChain": true
@@ -928,6 +1036,262 @@
             "temperature": 0.3
           },
           "accountRef": "claude"
+        }
+      ]
+    },
+    {
+      "id": "ju-mao",
+      "catId": "glm",
+      "name": "橘猫",
+      "displayName": "橘猫",
+      "nickname": "谱谱",
+      "avatar": "/avatars/glm.png",
+      "color": {
+        "primary": "#E8A33D",
+        "secondary": "#F8E6C8"
+      },
+      "mentionPatterns": ["@glm", "@橘猫", "@谱谱", "@智谱"],
+      "roleDescription": "实现量产主力，落 lead 设计、中文/通用文字后备",
+      "teamStrengths": "海量配额走量、中文、自跑长循环",
+      "caution": "非编码最强(DeepSeek/fable更强)；不做架构决策(交宪宪)、不自审(交砚砚)",
+      "defaultVariantId": "glm-default",
+      "variants": [
+        {
+          "id": "glm-default",
+          "clientId": "opencode",
+          "defaultModel": "zai-coding-plan/glm-5.2",
+          "mcpSupport": true,
+          "cli": {
+            "command": "opencode",
+            "outputFormat": "ndjson",
+            "defaultArgs": ["run", "--format", "json"]
+          },
+          "personality": "踏实肯干，话不多但活儿最多，能扛事的大橘",
+          "strengths": ["coding", "chinese", "high-volume"],
+          "contextBudget": {
+            "maxPromptTokens": 400000,
+            "maxContextTokens": 360000,
+            "maxMessages": 200,
+            "maxContentLengthPerMsg": 100000
+          }
+        }
+      ]
+    },
+    {
+      "id": "xuan-mao",
+      "catId": "deepseek",
+      "name": "玄猫",
+      "displayName": "玄猫",
+      "nickname": "渊渊",
+      "avatar": "/avatars/deepseek.png",
+      "color": {
+        "primary": "#2C2C34",
+        "secondary": "#C9C9D4"
+      },
+      "mentionPatterns": ["@deepseek", "@玄猫", "@渊渊", "@深度求索"],
+      "roleDescription": "深推理与算法验证副手，砚砚队，跨家挑逻辑漏洞",
+      "teamStrengths": "数学/竞赛算法(Codeforces级)、CoT透明、便宜可batch",
+      "caution": "不碰UI/前端(交烁烁/灵灵)；按量计费，结论须带推导链",
+      "defaultVariantId": "deepseek-default",
+      "variants": [
+        {
+          "id": "deepseek-default",
+          "clientId": "opencode",
+          "defaultModel": "deepseek/deepseek-v4-pro",
+          "mcpSupport": true,
+          "cli": {
+            "command": "opencode",
+            "outputFormat": "ndjson",
+            "defaultArgs": ["run", "--format", "json"]
+          },
+          "personality": "沉静深邃，话少但每句带推导，像深潭里的玄猫",
+          "strengths": ["reasoning", "math", "algorithm", "verification"],
+          "contextBudget": {
+            "maxPromptTokens": 400000,
+            "maxContextTokens": 360000,
+            "maxMessages": 200,
+            "maxContentLengthPerMsg": 100000
+          }
+        }
+      ]
+    },
+    {
+      "id": "san-hua",
+      "catId": "minimax",
+      "name": "三花猫",
+      "displayName": "三花猫",
+      "nickname": "灵灵",
+      "avatar": "/avatars/minimax.png",
+      "color": {
+        "primary": "#E06C9F",
+        "secondary": "#F8DCE8"
+      },
+      "mentionPatterns": ["@minimax", "@三花猫", "@灵灵", "@海螺"],
+      "roleDescription": "极速产出副手，文案/翻译/批量，烁烁队走量出稿",
+      "teamStrengths": "全队最快、1M大上下文、原生视频图输入、批量出稿",
+      "caution": "不写核心代码/不做架构；超长文档(>200K)会降智需切片",
+      "defaultVariantId": "minimax-default",
+      "variants": [
+        {
+          "id": "minimax-default",
+          "clientId": "opencode",
+          "defaultModel": "minimax-cn-coding-plan/MiniMax-M3",
+          "mcpSupport": true,
+          "cli": {
+            "command": "opencode",
+            "outputFormat": "ndjson",
+            "defaultArgs": ["run", "--format", "json"]
+          },
+          "personality": "灵动活泼，手快嘴快，像三色斑斓的三花猫",
+          "strengths": ["speed", "writing", "translation", "multimodal"],
+          "contextBudget": {
+            "maxPromptTokens": 400000,
+            "maxContextTokens": 360000,
+            "maxMessages": 300,
+            "maxContentLengthPerMsg": 100000
+          }
+        }
+      ]
+    },
+    {
+      "id": "grok-build",
+      "catId": "grok-build",
+      "name": "Grok Build",
+      "displayName": "Grok Build",
+      "nickname": "戈戈",
+      "avatar": "/avatars/default.png",
+      "color": {
+        "primary": "#111111",
+        "secondary": "#E8E8E8"
+      },
+      "mentionPatterns": ["@grok", "@grok-build", "@戈戈"],
+      "roleDescription": "xAI Grok Build 本地 harness，Hub 经 ACP stdio 派发",
+      "teamStrengths": "本地 coding agent、ACP 嵌入、工具调用",
+      "caution": "走 grok agent stdio，不是 grok TUI / Dashboard；MCP 用 session/new 瘦白名单",
+      "defaultVariantId": "grok-build-default",
+      "variants": [
+        {
+          "id": "grok-build-default",
+          "catId": "grok-build",
+          "clientId": "acp",
+          "defaultModel": "grok-build",
+          "mcpSupport": true,
+          "personality": "直球、爱抬杠，先把机制说清楚再动手",
+          "strengths": ["coding", "review", "tool-use"],
+          "acp": {
+            "command": "grok",
+            "startupArgs": ["--no-auto-update", "agent", "--always-approve", "stdio"],
+            "mcpWhitelist": [
+              "cat-cafe-memory",
+              "cat-cafe-collab",
+              "cat-cafe-signals",
+              "zai-mcp-server",
+              "zread",
+              "web-search-prime",
+              "web-reader"
+            ]
+          },
+          "contextBudget": {
+            "maxPromptTokens": 180000,
+            "maxContextTokens": 160000,
+            "maxMessages": 200,
+            "maxContentLengthPerMsg": 100000
+          }
+        }
+      ]
+    },
+    {
+      "id": "dsh",
+      "catId": "dsh",
+      "name": "DeepSeek Harness",
+      "displayName": "DeepSeek Harness",
+      "nickname": "衡衡",
+      "avatar": "/avatars/default.png",
+      "color": {
+        "primary": "#4D6BFE",
+        "secondary": "#D6DFFF"
+      },
+      "mentionPatterns": ["@dsh", "@deepseek-harness", "@衡衡"],
+      "roleDescription": "官方 DeepSeek Harness ACP 自动化入口；与 OpenCode 渊渊分路，不替换 deepseek",
+      "teamStrengths": "DeepSeek 官方 harness、ACP 自动化、插件化工具",
+      "caution": "官方 ACP demo 拒非空 session/new.mcpServers。Hub 在 examples/acp-agent 写 overlay；MCP 凭据走 CAT_CAFE_CREDENTIAL_FILE。不要 @deepseek（那是渊渊）",
+      "defaultVariantId": "dsh-default",
+      "variants": [
+        {
+          "id": "dsh-default",
+          "catId": "dsh",
+          "clientId": "acp",
+          "defaultModel": "deepseek-v4-pro",
+          "mcpSupport": true,
+          "personality": "插件化、组合优先，把 harness 本身当工件",
+          "strengths": ["coding", "reasoning", "harness"],
+          "cli": {
+            "command": "dsh",
+            "outputFormat": "plain",
+            "defaultArgs": ["--profile", "headless"]
+          },
+          "acp": {
+            "command": "dsh",
+            "startupArgs": [],
+            "mcpWhitelist": [
+              "cat-cafe-memory",
+              "cat-cafe-collab",
+              "cat-cafe-signals",
+              "zai-mcp-server",
+              "zread",
+              "web-search-prime",
+              "web-reader"
+            ],
+            "pool": { "maxLiveProcesses": 2 }
+          },
+          "contextBudget": {
+            "maxPromptTokens": 400000,
+            "maxContextTokens": 360000,
+            "maxMessages": 200,
+            "maxContentLengthPerMsg": 100000
+          }
+        }
+      ]
+    },
+    {
+      "id": "zcode",
+      "catId": "zcode",
+      "name": "ZCode",
+      "displayName": "ZCode",
+      "nickname": "ZCode",
+      "avatar": "/avatars/default.png",
+      "color": {
+        "primary": "#3859FF",
+        "secondary": "#D9E1FF"
+      },
+      "mentionPatterns": ["@zcode"],
+      "roleDescription": "智谱 ZCode 本地 ADE harness，Hub 经 ACP adapter 派发 app-server",
+      "teamStrengths": "Z.AI/GLM 官方 agent、app-server 长会话、本地凭证",
+      "caution": "走 zcode app-server，不是 ZCode TUI/Desktop。官方没有 ACP stdio。@glm/@谱谱 仍是 OpenCode 橘猫，不要改绑。需要 Hub API-key 账号或启动前 ANTHROPIC_API_KEY；ZCODE_MODEL 来自 catalog。不读用户 ~/.zcode，不写用户配置。本轮不接家庭 MCP。",
+      "defaultVariantId": "zcode-default",
+      "variants": [
+        {
+          "id": "zcode-default",
+          "catId": "zcode",
+          "clientId": "acp",
+          "defaultModel": "GLM-5.2",
+          "mcpSupport": false,
+          "personality": "桌面 ADE 的无头入口，官方工具面和 OAuth 跟 ZCode 走",
+          "strengths": ["coding", "review", "tool-use"],
+          "acp": {
+            "command": "zcode",
+            "startupArgs": [],
+            "mcpWhitelist": [],
+            "pool": {
+              "maxLiveProcesses": 1
+            }
+          },
+          "contextBudget": {
+            "maxPromptTokens": 400000,
+            "maxContextTokens": 360000,
+            "maxMessages": 200,
+            "maxContentLengthPerMsg": 100000
+          }
         }
       ]
     }

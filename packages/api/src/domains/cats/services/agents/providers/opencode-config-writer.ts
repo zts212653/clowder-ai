@@ -7,7 +7,7 @@
  * - writeOpenCodeInstructionsOnlyConfig: instructions-only config (F203 Phase I)
  */
 
-import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import {
   expandManagedMcpNamesForUserMerge,
@@ -50,7 +50,8 @@ export function writeOpenCodeInstructionsOnlyConfig(
   const safeCatId = sanitizePathSegment(catId);
   const safeInvocationId = sanitizePathSegment(invocationId);
   const configDir = join(projectRoot, '.cat-cafe', `oc-config-${safeCatId}-${safeInvocationId}`);
-  mkdirSync(configDir, { recursive: true });
+  mkdirSync(configDir, { recursive: true, mode: 0o700 });
+  chmodSync(configDir, 0o700);
   const configPath = join(configDir, 'opencode.json');
   const tempPath = `${configPath}.tmp-${process.pid}`;
   const config: {
@@ -65,8 +66,9 @@ export function writeOpenCodeInstructionsOnlyConfig(
   if (externalDirectoryPermissions) {
     config.permission = { external_directory: externalDirectoryPermissions };
   }
-  writeFileSync(tempPath, JSON.stringify(config, null, 2), 'utf-8');
+  writeFileSync(tempPath, JSON.stringify(config, null, 2), { encoding: 'utf-8', mode: 0o600 });
   renameSync(tempPath, configPath);
+  chmodSync(configPath, 0o600);
   return configPath;
 }
 
@@ -86,7 +88,8 @@ export async function writeOpenCodeRuntimeConfig(
   const safeCatId = sanitizePathSegment(catId);
   const safeInvocationId = sanitizePathSegment(invocationId);
   const configDir = join(projectRoot, '.cat-cafe', `oc-config-${safeCatId}-${safeInvocationId}`);
-  mkdirSync(configDir, { recursive: true });
+  mkdirSync(configDir, { recursive: true, mode: 0o700 });
+  chmodSync(configDir, 0o700);
   const configPath = join(configDir, 'opencode.json');
   const tempPath = `${configPath}.tmp-${process.pid}`;
   const capabilitiesProjectRoot =
@@ -174,7 +177,8 @@ export async function writeOpenCodeRuntimeConfig(
     }
   }
 
-  writeFileSync(tempPath, JSON.stringify(config, null, 2), 'utf-8');
+  writeFileSync(tempPath, JSON.stringify(config, null, 2), { encoding: 'utf-8', mode: 0o600 });
   renameSync(tempPath, configPath);
+  chmodSync(configPath, 0o600);
   return configPath;
 }

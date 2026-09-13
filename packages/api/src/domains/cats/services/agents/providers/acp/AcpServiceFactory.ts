@@ -22,8 +22,27 @@ import { resolveAcpBootstrapArgs, resolveAcpBootstrapCommand, resolveAcpBootstra
 // for invoke-time resolution (#712 P1-1).
 import { createAcpPoolSpawnSignature } from './acp-pool-signature.js';
 import { tryPrepareAcpProcessEnv } from './acp-spawn-env.js';
+import {
+  dshOmitsAcpSessionMcp,
+  isDshHarnessCommand,
+  mintDshCredentialFile,
+  prepareDshAcpSpawnForProject,
+} from './dsh-acp-bootstrap.js';
+import { applyZcodeHarnessSpawn, zcodeOmitsAcpSessionMcp, zcodeUnreadyMessage } from './zcode-acp-bootstrap.js';
 
 export type AcpPoolRegistry = Map<string, AcpProcessPool>;
+
+/**
+ * DSH continuable background turns outlive a Hub lease. Multiplexing would
+ * reuse the spawn-frozen credential file across invocations. Catalog config
+ * cannot opt DSH back into multiplexing.
+ */
+export function resolveEffectiveAcpSupportsMultiplexing(
+  acpConfig: Pick<AcpVariantConfig, 'command' | 'supportsMultiplexing'>,
+): boolean {
+  if (isDshHarnessCommand(acpConfig.command)) return false;
+  return acpConfig.supportsMultiplexing === true;
+}
 
 export interface CreateAcpServiceForConfigInput {
   projectRoot: string;
@@ -43,6 +62,7 @@ interface AcpBootstrapContext {
   cwd: string;
   model?: string;
   poolKey: PoolKey;
+  extraEnv?: Record<string, string>;
 }
 
 interface AcpAccountContext {
@@ -152,6 +172,7 @@ async function prepareAcpSpawnContext(
   const acpEnvResult = tryPrepareAcpProcessEnv({
     clientId: config.clientId,
     provider: config.provider,
+    command: input.acpConfig.command,
     baseModel: bootstrap.model,
     account: accountContext.account,
   });
@@ -163,7 +184,11 @@ async function prepareAcpSpawnContext(
       'ACP registry sync skipped member due to invalid spawn env',
     );
   }
-  let acpSpawnEnv: Record<string, string> | undefined = acpEnvResult.env;
+  let acpSpawnEnv: Record<string, string> | undefined = {
+    ...(bootstrap.extraEnv ?? {}),
+    ...(acpEnvResult.env ?? {}),
+  };
+  if (Object.keys(acpSpawnEnv).length === 0) acpSpawnEnv = undefined;
 
   let openCodeAcpSpawnConfig: Awaited<ReturnType<typeof prepareOpenCodeAcpSpawnConfig>>;
   const contextPolicy = resolveAcpContextPolicy(config, input.effectiveModel);
@@ -224,6 +249,7 @@ async function ensureAcpPool(
   spawn: AcpSpawnContext,
 ): Promise<AcpProcessPool> {
   const { profileId, acpConfig, poolRegistry } = input;
+  const supportsMultiplexing = resolveEffectiveAcpSupportsMultiplexing(acpConfig);
   const spawnSignature = createAcpPoolSpawnSignature({
     command: bootstrap.command,
     args: bootstrap.args,
@@ -234,7 +260,7 @@ async function ensureAcpPool(
     maxLiveProcesses: acpConfig.pool?.maxLiveProcesses ?? 3,
     idleTtlMs: acpConfig.pool?.idleTtlMs ?? DEFAULT_ACP_IDLE_TTL_MS,
     transport: acpConfig.transport ?? 'stdio',
-    supportsMultiplexing: acpConfig.supportsMultiplexing,
+    supportsMultiplexing,
   });
 
   const existingPool = poolRegistry.get(profileId);
@@ -252,13 +278,19 @@ async function ensureAcpPool(
       idleTtlMs: acpConfig.pool?.idleTtlMs ?? DEFAULT_ACP_IDLE_TTL_MS,
       healthCheckIntervalMs: 30_000,
     },
-    acpConfig,
+    { ...acpConfig, supportsMultiplexing },
     () => {
+      const retireAfterLease = isDshHarnessCommand(acpConfig.command);
+      const env = { ...(spawn.env ?? {}) };
+      if (retireAfterLease) {
+        env.CAT_CAFE_CREDENTIAL_FILE = mintDshCredentialFile(input.projectRoot, input.config.id);
+      }
       const clientCfg = {
         command: bootstrap.command,
         args: bootstrap.args,
         cwd: bootstrap.cwd,
-        ...(spawn.env ? { env: spawn.env } : {}),
+        ...(Object.keys(env).length > 0 ? { env } : {}),
+        retireAfterLease,
       };
       return acpConfig.transport === 'httpstream' ? new AcpHttpStreamClient(clientCfg) : new AcpClient(clientCfg);
     },
@@ -288,7 +320,44 @@ export async function createAcpServiceForConfig(
     );
   }
 
-  const bootstrap = resolveAcpBootstrap(projectRoot, profileId, acpConfig, effectiveModel);
+  let bootstrap = resolveAcpBootstrap(projectRoot, profileId, acpConfig, effectiveModel);
+  if (isDshHarnessCommand(acpConfig.command)) {
+    const dshPrepared = await prepareDshAcpSpawnForProject({
+      command: acpConfig.command,
+      args: acpConfig.startupArgs,
+      projectRoot: bootstrap.projectRoot,
+      bootstrapCwd: bootstrap.cwd,
+      mcpWhitelist: acpConfig.mcpWhitelist ?? [],
+      mcpSupport: config.mcpSupport !== false,
+      catId,
+    });
+    if (!dshPrepared.ok) {
+      return skipAcpProfile(
+        input,
+        'dsh-acp-unavailable',
+        { err: dshPrepared.error, catId, profileId },
+        dshPrepared.error.message,
+      );
+    }
+    bootstrap = {
+      ...bootstrap,
+      command: dshPrepared.command,
+      args: dshPrepared.args,
+      extraEnv: dshPrepared.env,
+      // Overlay + official plugins resolve from the composition dir, not ACP tmp cwd.
+      cwd: dshPrepared.cwd,
+    };
+  }
+  const zcodePrepared = applyZcodeHarnessSpawn(bootstrap, acpConfig.command);
+  if (!zcodePrepared.ok) {
+    return skipAcpProfile(
+      input,
+      'zcode-acp-unavailable',
+      { err: zcodePrepared.error, catId, profileId },
+      zcodePrepared.error.message,
+    );
+  }
+  bootstrap = zcodePrepared.bootstrap;
   let accountContext: AcpAccountContext;
   try {
     accountContext = resolveAcpAccount(bootstrap.projectRoot, config);
@@ -322,6 +391,15 @@ export async function createAcpServiceForConfig(
   }
   const spawn = await prepareAcpSpawnContext(effectiveInput, bootstrap, accountContext);
   if (!spawn) return null;
+  const zcodeUnready = zcodeUnreadyMessage(acpConfig.command, { ...process.env, ...spawn.env });
+  if (zcodeUnready) {
+    return skipAcpProfile(
+      input,
+      'zcode-provider-unready',
+      { catId, profileId, accountRef: accountContext.accountRef },
+      zcodeUnready,
+    );
+  }
   const pool = await ensureAcpPool(effectiveInput, bootstrap, spawn);
 
   // #712 P1-1: pass whitelist — MCP resolution happens at invoke time in
@@ -343,6 +421,7 @@ export async function createAcpServiceForConfig(
       source: 'service_spawn',
     },
     mcpSupport: config.mcpSupport,
+    omitSessionMcpServers: dshOmitsAcpSessionMcp(acpConfig.command) || zcodeOmitsAcpSessionMcp(acpConfig.command),
     // #1186: Thread the member's configured idle TTL to AcpAgentService so
     // promptStream uses it as the authoritative no-event termination threshold.
     idleTtlMs: acpConfig.pool?.idleTtlMs ?? DEFAULT_ACP_IDLE_TTL_MS,

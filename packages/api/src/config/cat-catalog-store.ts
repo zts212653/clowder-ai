@@ -75,6 +75,42 @@ function isAgyPlainTextCliConfig(value: unknown): boolean {
   return isRecord(value) && value.command === 'agy' && value.outputFormat === 'plainText';
 }
 
+/**
+ * clowder-ai#14: shipped mcpWhitelist defaults for the harness members.
+ * `acp` merges atomically (cat-config-loader ATOMIC_OBJECT_KEYS), so a catalog
+ * persisted before the zai MCP expansion keeps pinning the old slim default
+ * over the template's newer one — restart alone never picks the change up.
+ * Upgrade only exact old-default pins on grok-build/dsh; a list that differs
+ * in any way is a user customization and stays untouched. Idempotent: the
+ * upgraded list no longer equals the legacy pin. Retire both constants once
+ * every home catalog has crossed the expansion (#340 drop-window pattern).
+ */
+const LEGACY_DEFAULT_MCP_WHITELIST: readonly string[] = ['cat-cafe-memory', 'cat-cafe-collab', 'cat-cafe-signals'];
+const CURRENT_DEFAULT_MCP_WHITELIST: readonly string[] = [
+  ...LEGACY_DEFAULT_MCP_WHITELIST,
+  'zai-mcp-server',
+  'zread',
+  'web-search-prime',
+  'web-reader',
+];
+const MCP_WHITELIST_DEFAULT_BREEDS = new Set(['grok-build', 'dsh']);
+
+function isLegacyDefaultMcpWhitelist(value: unknown): value is string[] {
+  return (
+    Array.isArray(value) &&
+    value.length === LEGACY_DEFAULT_MCP_WHITELIST.length &&
+    value.every((entry, index) => entry === LEGACY_DEFAULT_MCP_WHITELIST[index])
+  );
+}
+
+function migratePinnedMcpWhitelist(breed: Record<string, unknown>, variant: Record<string, unknown>): boolean {
+  if (typeof breed.id !== 'string' || !MCP_WHITELIST_DEFAULT_BREEDS.has(breed.id)) return false;
+  const acp = variant.acp;
+  if (!isRecord(acp) || !isLegacyDefaultMcpWhitelist(acp.mcpWhitelist)) return false;
+  acp.mcpWhitelist = [...CURRENT_DEFAULT_MCP_WHITELIST];
+  return true;
+}
+
 function migrateLegacyGeminiConsumerCarrier(
   variant: Record<string, unknown>,
   breedDefaultCatId: string | undefined,
@@ -166,6 +202,10 @@ function migrateCatalogVariants(
       }
 
       if (migrateLegacyGeminiConsumerCarrier(variant, typeof breed.catId === 'string' ? breed.catId : undefined)) {
+        dirty = true;
+      }
+
+      if (migratePinnedMcpWhitelist(breed, variant)) {
         dirty = true;
       }
 

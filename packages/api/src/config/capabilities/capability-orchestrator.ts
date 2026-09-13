@@ -11,7 +11,16 @@
 
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { randomUUID } from 'node:crypto';
-import { existsSync, mkdirSync, readFileSync, renameSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  renameSync,
+  statSync,
+  unlinkSync,
+  writeFileSync,
+} from 'node:fs';
 import { chmod, lstat, mkdir, readdir, readFile, rename, rm, stat as statPath, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { delimiter, dirname, extname, join, relative, resolve, sep } from 'node:path';
@@ -675,8 +684,9 @@ export async function writeCapabilitiesConfig(projectRoot: string, config: Capab
   // Use PID + UUID to ensure uniqueness across concurrent async writes within the same process.
   // PID-only caused ENOENT when multiple @mentions triggered parallel capability writes (#1049).
   const tmpPath = `${filePath}.${process.pid}.${randomUUID().slice(0, 8)}.tmp`;
-  await writeFile(tmpPath, `${JSON.stringify(config, null, 2)}\n`, 'utf-8');
+  await writeFile(tmpPath, `${JSON.stringify(config, null, 2)}\n`, { encoding: 'utf-8', mode: 0o600 });
   await rename(tmpPath, filePath);
+  await chmod(filePath, 0o600);
 }
 
 function writeCapabilitiesConfigSync(projectRoot: string, config: CapabilitiesConfig): void {
@@ -684,9 +694,10 @@ function writeCapabilitiesConfigSync(projectRoot: string, config: CapabilitiesCo
   mkdirSync(dir, { recursive: true });
   const filePath = safePath(projectRoot, CONFIG_SUBDIR, CAPABILITIES_FILENAME);
   const tmpPath = `${filePath}.${process.pid}.tmp`;
-  writeFileSync(tmpPath, `${JSON.stringify(config, null, 2)}\n`, 'utf-8');
+  writeFileSync(tmpPath, `${JSON.stringify(config, null, 2)}\n`, { encoding: 'utf-8', mode: 0o600 });
   try {
     renameSync(tmpPath, filePath);
+    chmodSync(filePath, 0o600);
   } catch (err) {
     try {
       unlinkSync(tmpPath);

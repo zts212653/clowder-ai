@@ -3,6 +3,9 @@ import { defineMcpCanonicalFactory } from '../tool-governance-migration.js';
 import { callbackPost } from './callback-tools.js';
 import type { ToolResult } from './file-tools.js';
 
+/** Keep identical to packages/shared OWNER_STATE_REF_PATTERN (DSH-portable allowlist). */
+const OWNER_STATE_REF_PATTERN = /^[a-z][a-z0-9-]*:[a-zA-Z0-9._/:+@#-]+$/;
+
 /**
  * The cat-facing half of the Phase 3 journey.
  *
@@ -32,7 +35,7 @@ const bounded = (max: number) => z.string().trim().min(1).max(max);
 const ownerRef = z
   .object({
     ownerFeatureId: bounded(120),
-    ownerStateRef: bounded(500).regex(/^[a-z][a-z0-9-]*:[^\s{}[\]"']+$/),
+    ownerStateRef: bounded(500).regex(OWNER_STATE_REF_PATTERN),
     version: bounded(240).optional(),
   })
   .strict();

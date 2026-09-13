@@ -458,7 +458,8 @@ async function validateAccountBindingOrThrow(
   if (!trimmedAccountRef) return;
   const runtimeProfile = resolveByAccountRef(projectRoot, trimmedAccountRef);
   if (!runtimeProfile) {
-    throw new Error(`provider "${trimmedAccountRef}" not found`);
+    // INV-11: unresolved account bindings name the account, not the provider.
+    throw new Error(`account "${trimmedAccountRef}" not found`);
   }
   // api_key accounts require an explicit model; OAuth/subscription CLIs have defaults
   if (runtimeProfile.authType === 'api_key' && !defaultModel?.trim()) {

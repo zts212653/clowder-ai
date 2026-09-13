@@ -35,11 +35,20 @@ export {
   writeFileSync,
 };
 
-export function runSourceOnlySnippet(snippet) {
+/**
+ * Snippets may call install.sh's `run_install_auth_config`, which spawns the
+ * standalone installer. That child inherits NODE_TEST_CONTEXT and so is subject
+ * to the installer's fail-closed boundary (P1-6), which needs a declared
+ * sandbox root. Every fixture in these suites lives under mkdtemp(tmpdir()),
+ * and install.sh deliberately writes to two roots per call (project + runtime
+ * worktree), so tmpdir() is the smallest root that covers a snippet without
+ * enumerating both. Callers with a tighter fixture may pass sandboxRoot.
+ */
+export function runSourceOnlySnippet(snippet, { sandboxRoot = tmpdir() } = {}) {
   const result = spawnSync(
     'bash',
     ['-lc', `set -e\nsource "${installScript}" --source-only >/dev/null 2>&1\n${snippet}`],
-    { encoding: 'utf8' },
+    { encoding: 'utf8', env: { ...process.env, CAT_CAFE_TEST_SANDBOX_ROOT: sandboxRoot } },
   );
 
   assert.equal(

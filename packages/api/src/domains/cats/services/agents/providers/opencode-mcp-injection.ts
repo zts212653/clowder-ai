@@ -20,6 +20,10 @@ import {
   toOpenCodeMcpEntry,
   toOpenCodeRemoteMcpEntry,
 } from '../../../../../config/capabilities/mcp-config-adapters.js';
+import {
+  MissingMcpEnvironmentVariableError,
+  renderMcpServerEnvReferences,
+} from '../../../../../config/capabilities/mcp-env-reference.js';
 
 /** MCP entry type derived from toOpenCodeMcpEntry return type. */
 type OpenCodeMcpEntry = ReturnType<typeof toOpenCodeMcpEntry> | ReturnType<typeof toOpenCodeRemoteMcpEntry>;
@@ -72,7 +76,7 @@ export function buildOpenCodeMcpSync(
       if (parsed?.version === 1 || parsed?.version === 2) capConfig = parsed;
     }
     if (capConfig && catId) {
-      for (const s of resolveServersForCat(capConfig, catId, { accessScope }) as Array<{
+      for (const unresolvedServer of resolveServersForCat(capConfig, catId, { accessScope }) as Array<{
         name: string;
         enabled: boolean;
         command: string;
@@ -84,7 +88,11 @@ export function buildOpenCodeMcpSync(
         env?: Record<string, string>;
         source: string;
       }>) {
-        if (!s.enabled) continue;
+        if (!unresolvedServer.enabled) continue;
+        // OpenCode expands `{env:VAR}` in MCP env/header values. Capabilities
+        // use provider-neutral `${VAR}`, so validate then translate syntax
+        // without writing the resolved secret to OPENCODE_CONFIG.
+        const s = renderMcpServerEnvReferences(unresolvedServer, (name) => `{env:${name}}`, process.env);
         if (s.transport === 'streamableHttp') {
           if (s.url) mcp[s.name] = toOpenCodeRemoteMcpEntry({ url: s.url, headers: s.headers });
           continue;
@@ -107,7 +115,8 @@ export function buildOpenCodeMcpSync(
       }
       resolved = true;
     }
-  } catch {
+  } catch (error) {
+    if (error instanceof MissingMcpEnvironmentVariableError) throw error;
     // best-effort fallback below
   }
 

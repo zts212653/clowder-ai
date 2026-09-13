@@ -3,7 +3,7 @@ import { ownerTruthRefV1Schema } from './capability-evolution-refs.js';
 
 const bounded = (max: number) => z.string().trim().min(1).max(max);
 const canonicalJoinKeySchema = bounded(500).regex(
-  /^(?:thread|message|subject):[^\s{}[\]"']+$/,
+  /^(?:thread|message|subject):[a-zA-Z0-9._/:+@#-]+$/,
   'join keys must use a canonical thread/message/subject coordinate',
 );
 

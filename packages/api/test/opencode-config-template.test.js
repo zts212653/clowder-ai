@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, test } from 'node:test';
@@ -959,6 +959,8 @@ describe('writeOpenCodeRuntimeConfig', () => {
     const runtimeRoot = mkdtempSync(join(tmpdir(), 'oc-runtime-remote-binary-'));
     const projectDir = mkdtempSync(join(tmpdir(), 'oc-runtime-remote-project-'));
     const mcpDistDir = join(runtimeRoot, 'packages', 'mcp-server', 'dist');
+    const previousToken = process.env.TEST_OPENCODE_MCP_TOKEN;
+    process.env.TEST_OPENCODE_MCP_TOKEN = 'resolved-opencode-token';
     try {
       mkdirSync(mcpDistDir, { recursive: true });
       writeFileSync(join(mcpDistDir, 'index.js'), '// stub', 'utf8');
@@ -971,7 +973,7 @@ describe('writeOpenCodeRuntimeConfig', () => {
           mcpServer: {
             transport: 'streamableHttp',
             url: 'https://mcp.context7.example/mcp',
-            headers: { Authorization: 'Bearer test-token' },
+            headers: { Authorization: 'Bearer ${TEST_OPENCODE_MCP_TOKEN}' },
           },
         },
       ]);
@@ -995,9 +997,66 @@ describe('writeOpenCodeRuntimeConfig', () => {
         type: 'remote',
         url: 'https://mcp.context7.example/mcp',
         enabled: true,
-        headers: { Authorization: 'Bearer test-token' },
+        headers: { Authorization: 'Bearer {env:TEST_OPENCODE_MCP_TOKEN}' },
       });
+      assert.doesNotMatch(readFileSync(configPath, 'utf8'), /resolved-opencode-token/);
+      assert.equal(statSync(configPath).mode & 0o777, 0o600);
     } finally {
+      if (previousToken === undefined) delete process.env.TEST_OPENCODE_MCP_TOKEN;
+      else process.env.TEST_OPENCODE_MCP_TOKEN = previousToken;
+      rmSync(configRoot, { recursive: true, force: true });
+      rmSync(runtimeRoot, { recursive: true, force: true });
+      rmSync(projectDir, { recursive: true, force: true });
+      teardown();
+    }
+  });
+
+  test('fails closed before writing runtime config when an MCP environment reference is missing', async () => {
+    const teardown = ensureCatRegistered('opencode', 'opencode');
+    const configRoot = mkdtempSync(join(tmpdir(), 'oc-runtime-missing-env-config-'));
+    const runtimeRoot = mkdtempSync(join(tmpdir(), 'oc-runtime-missing-env-binary-'));
+    const projectDir = mkdtempSync(join(tmpdir(), 'oc-runtime-missing-env-project-'));
+    const mcpDistDir = join(runtimeRoot, 'packages', 'mcp-server', 'dist');
+    const envKey = 'TEST_OPENCODE_MISSING_MCP_TOKEN';
+    const previousToken = process.env[envKey];
+    delete process.env[envKey];
+    try {
+      mkdirSync(mcpDistDir, { recursive: true });
+      writeFileSync(join(mcpDistDir, 'index.js'), '// stub', 'utf8');
+      writeCapabilitiesConfig(runtimeRoot, [
+        {
+          id: 'env-backed-remote',
+          type: 'mcp',
+          enabled: true,
+          source: 'external',
+          mcpServer: {
+            transport: 'streamableHttp',
+            url: 'https://mcp.example.test',
+            headers: { Authorization: `Bearer \${${envKey}}` },
+          },
+        },
+      ]);
+
+      await assert.rejects(
+        () =>
+          writeOpenCodeRuntimeConfig(
+            configRoot,
+            'opencode',
+            'inv-missing-env',
+            {
+              providerName: 'anthropic',
+              models: ['anthropic/claude-opus-4-6'],
+              defaultModel: 'anthropic/claude-opus-4-6',
+              apiType: 'anthropic',
+              mcpServerPath: join(mcpDistDir, 'index.js'),
+            },
+            projectDir,
+          ),
+        /env-backed-remote.*TEST_OPENCODE_MISSING_MCP_TOKEN/,
+      );
+    } finally {
+      if (previousToken === undefined) delete process.env[envKey];
+      else process.env[envKey] = previousToken;
       rmSync(configRoot, { recursive: true, force: true });
       rmSync(runtimeRoot, { recursive: true, force: true });
       rmSync(projectDir, { recursive: true, force: true });

@@ -1,4 +1,6 @@
 import { extractUserEnvTemplates, hasSupportedEnvTemplate, resolveEnvMap } from '../env-map.js';
+import { isDshHarnessCommand } from './dsh-acp-bootstrap.js';
+import { isZcodeHarnessCommand } from './zcode-acp-bootstrap.js';
 
 export interface AcpProcessEnvAccount {
   id: string;
@@ -11,6 +13,8 @@ export interface AcpProcessEnvAccount {
 export interface PrepareAcpProcessEnvOptions {
   clientId: string;
   provider?: string | null;
+  /** Original ACP command (`acp.command`), not the rewritten spawn argv. */
+  command?: string | null;
   baseModel?: string;
   account?: AcpProcessEnvAccount | null;
 }
@@ -31,10 +35,11 @@ export function prepareAcpProcessEnv(options: PrepareAcpProcessEnvOptions): Reco
       );
     }
     const userEnvTemplates = account.envVars ? extractUserEnvTemplates(account.envVars) : undefined;
-    // F161 AC-A5 / KD-1: generic ACP (clientId='acp') is a transport, not a provider identity.
-    // It never selects a BUILTIN_ENV_MAPS[provider] template — env comes only from the account's
-    // envVars templates. Ignore any provider on generic ACP (stale / pack-catalog / direct-API).
-    const envMapProvider = options.clientId === 'acp' ? undefined : (options.provider ?? undefined);
+    // F161 AC-A5 / KD-1: generic ACP is a transport. Catalog `provider` is stripped on
+    // save, so harness env-maps must come from the ACP command identity (zcode/grok/dsh),
+    // never from a leftover provider field. Ordinary ACP commands stay envVars-only.
+    const envMapProvider =
+      options.clientId === 'acp' ? resolveAcpHarnessEnvMap(options.command) : (options.provider ?? undefined);
     Object.assign(
       resolved,
       resolveEnvMap(
@@ -56,6 +61,22 @@ export function prepareAcpProcessEnv(options: PrepareAcpProcessEnvOptions): Reco
   }
 
   return Object.keys(resolved).length > 0 ? resolved : undefined;
+}
+
+export function resolveAcpHarnessEnvMap(command: string | null | undefined): string | undefined {
+  const trimmed = command?.trim();
+  if (!trimmed) return undefined;
+  if (isZcodeHarnessCommand(trimmed)) return 'zcode';
+  if (isDshHarnessCommand(trimmed)) return 'deepseek';
+  if (isGrokHarnessCommand(trimmed)) return 'xai';
+  return undefined;
+}
+
+function isGrokHarnessCommand(command: string): boolean {
+  const trimmed = command.trim();
+  const slash = Math.max(trimmed.lastIndexOf('/'), trimmed.lastIndexOf('\\'));
+  const base = (slash >= 0 ? trimmed.slice(slash + 1) : trimmed).replace(/\.(cjs|js|mjs|exe|cmd|bat)$/i, '');
+  return base === 'grok';
 }
 
 export function tryPrepareAcpProcessEnv(options: PrepareAcpProcessEnvOptions): TryPrepareAcpProcessEnvResult {

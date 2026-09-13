@@ -237,6 +237,22 @@ describe('AcpProcessPool', () => {
       lease2.release();
     });
 
+    test('non-multiplexed idle process marked unsafe is not warm-reused', async () => {
+      const { AcpProcessPool } = await import(
+        '../../dist/domains/cats/services/agents/providers/acp/AcpProcessPool.js'
+      );
+      pool = new AcpProcessPool(defaultPoolConfig, nonMultiplexedVariantConfig, createMockClient);
+
+      const lease1 = await pool.acquire(key1);
+      const idleClient = lease1.client;
+      lease1.release();
+      idleClient._markUnsafeForSingleFlightReuse();
+
+      const lease2 = await pool.acquire(key1);
+      assert.notStrictEqual(lease2.client, idleClient, 'unsafe idle carrier must not be warm-reused');
+      lease2.release();
+    });
+
     test('multiplexed carrier keeps unrelated session affinity after another session is cancelled', async () => {
       const { AcpProcessPool } = await import(
         '../../dist/domains/cats/services/agents/providers/acp/AcpProcessPool.js'

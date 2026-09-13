@@ -5,16 +5,15 @@
 
 import './helpers/setup-cat-registry.js';
 import assert from 'node:assert/strict';
-import { existsSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { describe, mock, test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { catRegistry } from '@cat-cafe/shared';
 
-const REPO_ROOT_TEMPLATE = resolve(dirname(fileURLToPath(import.meta.url)), '../../..', 'cat-template.json');
+const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '../../..');
+const REPO_ROOT_TEMPLATE = resolve(REPO_ROOT, 'cat-template.json');
 const CAT_TEMPLATE_PATH = REPO_ROOT_TEMPLATE;
-const CAT_DOSSIER_PATH = resolve(dirname(fileURLToPath(import.meta.url)), '../../../docs/team/cat-dossier.md');
-const FULL_RUNTIME_PROMPT_CHAR_BUDGET = 7050; // 6500→6700→7050: gemini35 + gpt-pro roster growth
+const FULL_RUNTIME_PROMPT_CHAR_BUDGET = 7200; // 6500→6700→7050→7200: gemini35 + gpt-pro + zcode/dsh roster growth
 
 function assertWithinFullRuntimePromptBudget(prompt) {
   assert.ok(
@@ -637,11 +636,11 @@ describe('SystemPromptBuilder', () => {
 
   // --- F-Ground-3: Teammate roster tests ---
 
-  test('buildStaticIdentity includes teammate roster with strengths', async () => {
+  test('buildStaticIdentity includes teammate roster with routing boundaries', async () => {
     const { buildStaticIdentity } = await import('../dist/domains/cats/services/context/SystemPromptBuilder.js');
     const identity = buildStaticIdentity('opus');
     assert.ok(identity.includes('## 队友名册'), 'Should have roster section');
-    assert.ok(identity.includes('擅长'), 'Should have strengths column header');
+    assert.ok(identity.includes('路由边界'), 'Should have routing boundary column header');
     assert.ok(identity.includes('@缅因猫') || identity.includes('@codex'), 'Should list codex mention');
     assert.ok(identity.includes('@暹罗猫') || identity.includes('@gemini'), 'Should list gemini mention');
   });
@@ -722,15 +721,17 @@ describe('SystemPromptBuilder', () => {
         .find((line) => line.includes('claude-fable-5'));
 
       assert.ok(fableRow, 'codex roster should include Fable');
-      if (existsSync(CAT_DOSSIER_PATH)) {
-        assert.match(fableRow, /宪宪（他）/, 'home roster must hydrate Fable pronouns from the dossier');
+      const { getDossierL0Pronouns } = await import('@cat-cafe/shared/dossier');
+      const fablePronouns = getDossierL0Pronouns('fable-5', REPO_ROOT)?.split('/')[0]?.trim();
+      if (fablePronouns) {
+        assert.ok(fableRow.includes(`宪宪（${fablePronouns}）`), 'roster must hydrate opted-in Fable pronouns');
       } else {
-        assert.match(fableRow, /新猫，待校准/, 'public roster must keep the generic config fallback without a dossier');
+        assert.match(fableRow, /新猫.*待校准/, 'public roster must keep the generic config fallback without a dossier');
       }
     });
   });
 
-  test('buildStaticIdentity roster uses teamStrengths from config', async () => {
+  test('buildStaticIdentity roster uses caution as the routing-boundary fallback', async () => {
     const { buildStaticIdentity } = await import('../dist/domains/cats/services/context/SystemPromptBuilder.js');
     const { loadCatConfig, toAllCatConfigs } = await import('../dist/config/cat-config-loader.js');
 
@@ -743,9 +744,12 @@ describe('SystemPromptBuilder', () => {
       }
 
       const identity = buildStaticIdentity('opus');
-      // gpt52 keeps teamStrengths and has no explicit caution override in current config.
-      assert.ok(identity.includes('架构思考'), 'Should include gpt52 teamStrengths');
-      assert.ok(identity.includes('| 缅因猫/砚砚（GPT-5.4） |') || identity.includes('| 缅因猫/砚砚 |'));
+      const gpt52Row = identity
+        .split('## 队友名册')[1]
+        ?.split('\n')
+        .find((line) => line.includes('@gpt52'));
+      assert.ok(gpt52Row, 'Should include the GPT-5.4 member');
+      assert.ok(gpt52Row.endsWith('|—|'), 'A member without a routing caution should use the compact empty marker');
       // gemini has caution about no coding
       assert.ok(identity.includes('禁止写代码'), 'Should include gemini caution');
     } finally {
@@ -1850,8 +1854,11 @@ describe('SystemPromptBuilder', () => {
         featureId: 'F073',
       },
     });
-    // 6200→6500→6700→6800→7050: decision funnel §17 + roster growth + F208 dossier l0RosterSummary
-    assert.ok(prompt.length < 7050, `Prompt with SOP hint is ${prompt.length} chars, expected < 7050`);
+    // 6200→6500→6700→6800→7050→7200: decision funnel §17 + roster growth + F208 dossier l0RosterSummary
+    assert.ok(
+      prompt.length < FULL_RUNTIME_PROMPT_CHAR_BUDGET,
+      `Prompt with SOP hint is ${prompt.length} chars, expected < ${FULL_RUNTIME_PROMPT_CHAR_BUDGET}`,
+    );
   });
 
   // --- F092: Voice Mode prompt injection ---
@@ -1898,8 +1905,11 @@ describe('SystemPromptBuilder', () => {
       },
       voiceMode: true,
     });
-    // 6200→6500→6700→6800→7050: decision funnel §17 + roster growth + F208 dossier l0RosterSummary
-    assert.ok(prompt.length < 7050, `Prompt with voice mode + SOP hint is ${prompt.length} chars, expected < 7050`);
+    // 6200→6500→6700→6800→7050→7200: decision funnel §17 + roster growth + F208 dossier l0RosterSummary
+    assert.ok(
+      prompt.length < FULL_RUNTIME_PROMPT_CHAR_BUDGET,
+      `Prompt with voice mode + SOP hint is ${prompt.length} chars, expected < ${FULL_RUNTIME_PROMPT_CHAR_BUDGET}`,
+    );
   });
 
   test('buildInvocationContext injects bootcamp mode when bootcampState provided', async () => {

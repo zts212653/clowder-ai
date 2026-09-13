@@ -156,6 +156,14 @@ function buildAntigravityCatCafeEnvBaseline(): Readonly<Record<string, string>> 
   if (agentKeyFile) env.CAT_CAFE_AGENT_KEY_FILE = agentKeyFile;
   const agentKeyFiles = process.env.CAT_CAFE_AGENT_KEY_FILES?.trim();
   if (agentKeyFiles) env.CAT_CAFE_AGENT_KEY_FILES = agentKeyFiles;
+  // F317 P1: the readonly+agent-key union is now explicit opt-in. Antigravity
+  // is the legit consumer (its enforced CAT_CAFE_READONLY=true mount needs the
+  // AGENT_KEY write tools), so grant the union only when agent-key files are
+  // actually being handed to this mount. Third-party cat-cafe-* mounts never
+  // get this flag and stay strict-readonly even if the parent env leaks
+  // CAT_CAFE_AGENT_KEY_* vars. (Baseline = lowest priority; a descriptor may
+  // still set the flag to "false" to force strict readonly.)
+  if (agentKeyFile || agentKeyFiles) env.CAT_CAFE_READONLY_AGENT_KEY_UNION = 'true';
   return env;
 }
 

@@ -1,7 +1,10 @@
 import type Database from 'better-sqlite3';
 import { consumeContinuityLease, replacePendingPosture } from './continuity-operations.js';
 import { expireAwakenedRuns } from './lease-operations.js';
-import { loadProactiveSettlementState, settleProactiveRelationship } from './proactive-relationship-operations.js';
+import {
+  loadProactiveSettlementState,
+  settleProactiveRelationship,
+} from './proactive/proactive-relationship-operations.js';
 import type { SettlementIds } from './store-config.js';
 import { type AutoDreamStoreContext, insertAutoDreamEvent } from './store-context.js';
 import { type DbRow, hashValue, rowToRun, runNotFound, stringOrUndefined, validateSettlement } from './store-rows.js';

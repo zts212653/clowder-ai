@@ -1,7 +1,7 @@
 import type { CatId } from '@cat-cafe/shared';
-import type { IMessageStore, StoredMessage } from '../cats/services/stores/ports/MessageStore.js';
-import type { AutoDreamStore } from './AutoDreamStore.js';
-import { ownedSeedSourceRevision } from './private-seed-contract.js';
+import type { IMessageStore, StoredMessage } from '../../cats/services/stores/ports/MessageStore.js';
+import type { AutoDreamStore } from '../AutoDreamStore.js';
+import { ownedSeedSourceRevision } from '../private-seed-contract.js';
 import type { ProactiveVisitRecord } from './proactive-relationship-contract.js';
 
 export type ProactiveDeliveryFaultStage = 'before_message_append' | 'after_message_append' | 'after_message_attach';

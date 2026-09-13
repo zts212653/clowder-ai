@@ -1,4 +1,8 @@
 import { proactiveEchoInputSchema } from '@cat-cafe/shared';
+import type { AutoDreamStoreContext } from '../store-context.js';
+import { insertAutoDreamEvent } from '../store-context.js';
+import { rowToProactiveEcho, rowToProactiveIntent, rowToProactiveVisit, stringValue } from '../store-rows.js';
+import { AutoDreamStoreError } from '../store-types.js';
 import {
   type ProactiveEchoRecord,
   type ProactiveIntentRecord,
@@ -8,10 +12,6 @@ import {
   proactiveSurfaceSchema,
 } from './proactive-relationship-contract.js';
 import { requireProactiveVisit } from './proactive-relationship-operations.js';
-import type { AutoDreamStoreContext } from './store-context.js';
-import { insertAutoDreamEvent } from './store-context.js';
-import { rowToProactiveEcho, rowToProactiveIntent, rowToProactiveVisit, stringValue } from './store-rows.js';
-import { AutoDreamStoreError } from './store-types.js';
 
 type DbRow = Record<string, unknown>;
 

@@ -24,7 +24,6 @@ import {
   recordDiaryEngagement as recordDiaryEngagementOperation,
 } from './engagement-operations.js';
 import { expireAwakenedRuns as expireAwakenedRunsOperation } from './lease-operations.js';
-import { ProactiveRelationshipStore } from './ProactiveRelationshipStore.js';
 import {
   getSleepPosture as getSleepPostureOperation,
   listPendingPostures as listPendingPosturesOperation,
@@ -48,7 +47,8 @@ import {
   listOwnedSeeds as listOwnedSeedsOperation,
   listPrivateCues as listPrivateCuesOperation,
 } from './private-seed-operations.js';
-import { loadProactiveSettlementState } from './proactive-relationship-operations.js';
+import { ProactiveRelationshipStore } from './proactive/ProactiveRelationshipStore.js';
+import { loadProactiveSettlementState } from './proactive/proactive-relationship-operations.js';
 import {
   listProjectionCandidates as listProjectionCandidatesOperation,
   markDiaryProjected as markDiaryProjectedOperation,
@@ -307,7 +307,6 @@ export class AutoDreamStore implements F255PendingCueSink {
   }
 }
 export type { AutoDreamAuditEventRecord } from './audit-operations.js';
-export { ProactiveRelationshipStore } from './ProactiveRelationshipStore.js';
 export type {
   F255PendingCueInput,
   F255PendingCueReceipt,
@@ -322,6 +321,7 @@ export type {
   PrivateSeedDecisionInput,
   PrivateSeedDecisionResult,
 } from './private-seed-contract.js';
+export { ProactiveRelationshipStore } from './proactive/ProactiveRelationshipStore.js';
 export type { AutoDreamStoreOptions } from './store-config.js';
 export { DEFAULT_AWAKENED_LEASE_MS, DEFAULT_FOREGROUND_VISIT_BUDGET } from './store-config.js';
 export type {

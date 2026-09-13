@@ -752,6 +752,11 @@ describe('writeAntigravityMcpConfig', () => {
         undefined,
         'long-lived agent-key secret must not be written directly into mcp_config.json',
       );
+      assert.equal(
+        raw.mcpServers['cat-cafe-collab'].env.CAT_CAFE_READONLY_AGENT_KEY_UNION,
+        'true',
+        'F317 P1: antigravity mount with agent-key files must opt into the readonly+agent-key union explicitly',
+      );
     } finally {
       if (originalKeyFile === undefined) delete process.env.CAT_CAFE_AGENT_KEY_FILE;
       else process.env.CAT_CAFE_AGENT_KEY_FILE = originalKeyFile;

@@ -123,8 +123,11 @@ test('API binds to 127.0.0.1 by default', async (t) => {
 
   const childEnv = {
     ...process.env,
+    HOME: tempRoot,
+    USERPROFILE: tempRoot,
     CAT_TEMPLATE_PATH: templateForServer,
     CAT_CAFE_GLOBAL_CONFIG_ROOT: tempRoot,
+    CAT_CAFE_WORKSPACE_ROOT: tempRoot,
     API_SERVER_PORT: '0',
     MEMORY_STORE: '1',
     CAT_CAFE_INVOCATION_REGISTRY: 'memory',
@@ -136,6 +139,14 @@ test('API binds to 127.0.0.1 by default', async (t) => {
   delete childEnv.API_SERVER_HOST;
   delete childEnv.REDIS_URL;
   delete childEnv.CAT_CAFE_REDIS_TEST_ISOLATED;
+  // This is a production-style API child, not another node:test worker. Keeping
+  // the parent's test-runner markers makes the config guard classify the
+  // child's explicitly isolated temp root as an ambient operator store and
+  // terminate immediately after listen(), which surfaces as ECONNRESET below.
+  delete childEnv.NODE_TEST_CONTEXT;
+  delete childEnv.CAT_CAFE_TEST_SANDBOX;
+  delete childEnv.CAT_CAFE_TEST_REAL_HOME;
+  delete childEnv.CAT_CAFE_TEST_SANDBOX_ALLOW_UNSAFE_ROOT;
 
   const child = spawn(process.execPath, ['dist/index.js'], {
     cwd: apiDir,

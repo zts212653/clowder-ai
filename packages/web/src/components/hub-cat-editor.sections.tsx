@@ -599,11 +599,10 @@ export function AccountSection({
                   label="ACP Startup Args"
                   value={form.acpStartupArgs}
                   onChange={(value) => onChange({ acpStartupArgs: value })}
-                  required
-                  placeholder={defaultAcpStartupArgsForClient(form.clientId) || '--acp'}
+                  placeholder={defaultAcpStartupArgsForClient(form.clientId) || '可留空'}
                 />
                 <p className="-mt-1 text-micro leading-4 text-cafe-muted">
-                  空格分隔，如 <code className="text-cafe-secondary">acp --pure</code> 或{' '}
+                  可留空。非空时按空格分隔，如 <code className="text-cafe-secondary">acp --pure</code> 或{' '}
                   <code className="text-cafe-secondary">--acp --mode agent</code>。带空格的值用引号包裹。
                 </p>
                 <TextField

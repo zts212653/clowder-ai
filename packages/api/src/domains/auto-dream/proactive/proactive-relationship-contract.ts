@@ -1,6 +1,6 @@
 import type { ProactiveEchoInput, ProactiveIntent } from '@cat-cafe/shared';
 import { z } from 'zod';
-import type { OwnedSeedRecord } from './private-seed-contract.js';
+import type { OwnedSeedRecord } from '../private-seed-contract.js';
 
 export type ProactiveIntentStatus = 'settled_silent' | 'ready' | 'visit_reserved' | 'projected' | 'echoed' | 'settled';
 export type ProactiveVisitStatus = 'reserved' | 'projected' | 'echoed' | 'settled' | 'cancelled_unseen';

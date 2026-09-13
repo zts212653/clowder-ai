@@ -47,6 +47,70 @@ describe('prepareAcpProcessEnv', () => {
     assert.equal(env.ANTHROPIC_BASE_URL, undefined, 'stale provider must NOT inject anthropic base url');
   });
 
+  it('injects harness API keys on generic ACP from command identity, not catalog provider', () => {
+    const account = {
+      id: 'zcode-key',
+      authType: 'api_key',
+      apiKey: 'sk-zcode-live',
+      baseUrl: 'https://open.bigmodel.cn/api/anthropic',
+    };
+
+    const zcodeEnv = prepareAcpProcessEnv({
+      clientId: 'acp',
+      command: 'zcode',
+      baseModel: 'GLM-5.2',
+      account,
+    });
+    assert.equal(zcodeEnv?.ANTHROPIC_API_KEY, 'sk-zcode-live');
+    assert.equal(zcodeEnv?.ZCODE_API_KEY, 'sk-zcode-live');
+    assert.equal(zcodeEnv?.ANTHROPIC_BASE_URL, 'https://open.bigmodel.cn/api/anthropic');
+    assert.equal(zcodeEnv?.ZCODE_BASE_URL, undefined, 'account baseUrl must not become ZCode control-plane origin');
+
+    const grokEnv = prepareAcpProcessEnv({
+      clientId: 'acp',
+      command: 'grok',
+      baseModel: 'grok-build',
+      account: { id: 'xai-key', authType: 'api_key', apiKey: 'xai-live' },
+    });
+    assert.equal(grokEnv?.XAI_API_KEY, 'xai-live');
+
+    const dshEnv = prepareAcpProcessEnv({
+      clientId: 'acp',
+      command: 'dsh',
+      baseModel: 'deepseek-v4-pro',
+      account: { id: 'deepseek-key', authType: 'api_key', apiKey: 'sk-ds-live' },
+    });
+    assert.equal(dshEnv?.DEEPSEEK_API_KEY, 'sk-ds-live');
+  });
+
+  it('does not let a leftover provider select the ZCode map on ordinary generic ACP', () => {
+    const account = {
+      id: 'plain-key',
+      authType: 'api_key',
+      apiKey: 'sk-plain',
+      baseUrl: 'https://open.bigmodel.cn/api/anthropic',
+    };
+    const leftover = prepareAcpProcessEnv({
+      clientId: 'acp',
+      provider: 'zcode',
+      command: 'mock-acp',
+      baseModel: 'GLM-5.2',
+      account,
+    });
+    assert.equal(leftover?.ANTHROPIC_API_KEY, undefined);
+    assert.equal(leftover?.ZCODE_API_KEY, undefined);
+    assert.equal(leftover?.ANTHROPIC_BASE_URL, undefined);
+
+    const providerOnly = prepareAcpProcessEnv({
+      clientId: 'acp',
+      provider: 'zcode',
+      baseModel: 'GLM-5.2',
+      account,
+    });
+    assert.equal(providerOnly?.ANTHROPIC_API_KEY, undefined);
+    assert.equal(providerOnly?.ZCODE_API_KEY, undefined);
+  });
+
   it('still honors provider for opencode over ACP transport (clientId=opencode is a real carrier)', () => {
     // Guard the other side of the invariant: opencode IS a provider carrier (multi-provider
     // routing), even when running over the ACP transport. Narrowing must not break it.

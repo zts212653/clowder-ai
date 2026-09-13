@@ -71,6 +71,8 @@ export interface AcpPoolClient {
   readonly isSafeForSingleFlightReuse?: boolean;
   /** Session-scoped counterpart used to seal only the cancelled logical session on multiplexed carriers. */
   isSessionSafeForReuse?(sessionId: string): boolean;
+  /** Spawn-frozen MCP credential file for harnesses that omit session MCP. */
+  readonly mcpCredentialFile?: string;
   initialize(): Promise<unknown>;
   close(): Promise<void>;
 }
@@ -114,7 +116,7 @@ function resolveSupportsMultiplexing(variantConfig: unknown): boolean {
 export class AcpProcessPool {
   readonly spawnSignature?: string;
   private readonly config: AcpPoolConfig;
-  private readonly supportsMultiplexing: boolean;
+  readonly supportsMultiplexing: boolean;
   private readonly entries = new Map<string, PoolEntry[]>();
   private readonly sessionOwners = new Map<string, PoolEntry>();
   /** Persisted session ids that must never be loaded again after unacknowledged local termination. */
@@ -216,7 +218,10 @@ export class AcpProcessPool {
 
     // 1. Try warm reuse. Single-flight carriers may reuse only idle processes.
     const warm = entries.find(
-      (e) => e.state === 'ready' && e.client.isAlive && (this.supportsMultiplexing || e.leaseCount === 0),
+      (e) =>
+        e.state === 'ready' &&
+        e.client.isAlive &&
+        (this.supportsMultiplexing || (e.leaseCount === 0 && e.client.isSafeForSingleFlightReuse !== false)),
     );
     if (warm) {
       return this.leaseReadyEntry(warm, poolKey, canResumeRequestedSession);

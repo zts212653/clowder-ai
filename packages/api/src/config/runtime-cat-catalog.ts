@@ -515,7 +515,10 @@ export function updateRuntimeCat(projectRoot: string, catId: string, patch: Runt
     if (patch.provider) {
       variant.provider = patch.provider;
     } else {
-      delete variant.provider;
+      // F161: null tombstone — the overlay must explicitly record the clear, otherwise
+      // a template-seeded provider (e.g. catalog bootstrap copying provider:zcode)
+      // resurrects in the resolved template+catalog merge (same pattern as caution R1).
+      variant.provider = null;
     }
   }
   // F161: ACP transport config — null removes it (revert to CLI transport).

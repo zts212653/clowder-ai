@@ -4,6 +4,11 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, it } from 'node:test';
 
+// Load the read/write guard BEFORE beforeEach points CAT_CAFE_GLOBAL_CONFIG_ROOT
+// at a temp fixture. The guard freezes ambient roots at module load; importing
+// after beforeEach would treat the test's own root as an inherited store.
+await import('../dist/config/test-config-write-guard.js');
+
 describe('credentials store', () => {
   let globalRoot;
   let previousGlobalRoot;
@@ -29,7 +34,11 @@ describe('credentials store', () => {
   it('readCredentials returns empty object when file does not exist', async () => {
     const { readCredentials } = await loadModule();
     const creds = readCredentials();
-    assert.deepEqual(creds, {});
+    // R19 P1: ref-keyed stores have a NULL prototype, so a ref named toString
+    // or __proto__ is data rather than an inherited member. deepEqual compares
+    // prototypes, so assert emptiness on a copy and pin the contract explicitly.
+    assert.deepEqual({ ...creds }, {});
+    assert.equal(Object.getPrototypeOf(creds), null, 'a ref-keyed store must not inherit');
   });
 
   it('writeCredential creates file with 0o600 permissions', async () => {
@@ -94,7 +103,7 @@ describe('credentials store', () => {
     const { deleteCredential, readCredentials } = await loadModule();
     // Should not throw
     deleteCredential('nonexistent');
-    assert.deepEqual(readCredentials(), {});
+    assert.deepEqual({ ...readCredentials() }, {});
   });
 
   it('hasCredential returns correct boolean', async () => {
@@ -103,6 +112,35 @@ describe('credentials store', () => {
     writeCredential('x', { apiKey: 'key-x' });
     assert.equal(hasCredential('x'), true);
   });
+
+  /**
+   * R19 P1: credential refs are persisted JSON keys, so the store must not hand
+   * out Object.prototype's members. With a plain `{}` backing it,
+   * readCredential('toString') returned a FUNCTION and hasCredential('toString')
+   * was true on a store that had never held such a ref — which is the same
+   * defect as the account layer, on the credential-resolution path.
+   */
+  for (const ref of ['toString', 'constructor', 'valueOf', '__proto__', 'hasOwnProperty']) {
+    it(`a prototype-named credential ref "${ref}" is absent until written (R19 P1)`, async () => {
+      const { writeCredential, readCredential, hasCredential } = await loadModule();
+      writeCredential('real', { apiKey: 'key-real' });
+
+      assert.equal(readCredential(ref), undefined, `${ref} names no credential, so it must read as undefined`);
+      assert.equal(hasCredential(ref), false, `${ref} must not be reported present via the prototype chain`);
+    });
+
+    it(`a credential written under the prototype-named ref "${ref}" round-trips (R19 P1)`, async () => {
+      const { writeCredential, readCredential, hasCredential, resolveCredentialsPath } = await loadModule();
+      writeCredential(ref, { apiKey: `key-${ref}` });
+
+      assert.equal(hasCredential(ref), true);
+      assert.deepEqual(readCredential(ref), { apiKey: `key-${ref}` });
+      // And it must be an OWN property of the file on disk — for __proto__, a
+      // plain assignment would have hit the prototype setter and written nothing.
+      const onDisk = JSON.parse(await readFile(resolveCredentialsPath(), 'utf-8'));
+      assert.ok(Object.hasOwn(onDisk, ref), `${ref} must land as an own property of credentials.json`);
+    });
+  }
 
   it('readCredential returns single entry or undefined', async () => {
     const { writeCredential, readCredential } = await loadModule();
@@ -129,6 +167,6 @@ describe('credentials store', () => {
     await writeFile(credPath, 'NOT VALID JSON{{{', 'utf-8');
 
     const creds = readCredentials();
-    assert.deepEqual(creds, {});
+    assert.deepEqual({ ...creds }, {});
   });
 });

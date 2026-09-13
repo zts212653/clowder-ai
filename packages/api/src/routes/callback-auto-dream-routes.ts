@@ -4,7 +4,7 @@ import { z } from 'zod';
 import type { AutoDreamStore } from '../domains/auto-dream/AutoDreamStore.js';
 import { AutoDreamStoreError } from '../domains/auto-dream/AutoDreamStore.js';
 import type { CatLifeSettingsService } from '../domains/auto-dream/CatLifeSettingsService.js';
-import type { PresentLoopService } from '../domains/auto-dream/PresentLoopService.js';
+import type { PresentLoopService } from '../domains/auto-dream/proactive/PresentLoopService.js';
 import {
   type AgentKeyAuthRegistry,
   type CallbackAuthRegistry,

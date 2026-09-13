@@ -14,6 +14,11 @@ cleanup() {
 trap cleanup EXIT
 
 export HOME="$test_home"
+# P1-13: os.homedir() resolves from USERPROFILE on Windows and from HOME
+# elsewhere, so isolating one coordinate and inheriting the other leaves the
+# operator's real profile reachable on the platform this wrapper does not run
+# on. Two names for "where home is" must point at the same owned directory.
+export USERPROFILE="$test_home"
 export CAT_CAFE_TEST_SANDBOX="${CAT_CAFE_TEST_SANDBOX:-1}"
 export CAT_CAFE_TEST_REAL_HOME="${CAT_CAFE_TEST_REAL_HOME:-$real_home}"
 # Test entrypoints must not inherit a production NODE_ENV from the outer shell.
@@ -35,11 +40,25 @@ unset CAT_CAFE_RUNTIME_ROOT
 unset CAT_CAFE_MCP_SERVER_PATH
 unset CAT_CAFE_WORKSPACE_ROOT
 
+# CAT_CAFE_GLOBAL_CONFIG_ROOT is the same kind of persistence coordinate as the
+# two roots above (P2-9). Leaving it inherited made a suite READ the operator's
+# real accounts/credentials when launched from a cat's shell and the fixture's
+# when launched from a clean one — the write guard can refuse a write, but it
+# cannot make a read reproducible. Tests that need a global root set it
+# themselves; inheriting one is never what they meant.
+unset CAT_CAFE_GLOBAL_CONFIG_ROOT
+
 # Runtime shells may select persistent transports for live agent invocations.
 # Tests rely on each provider's default carrier so spawn seams remain the only
 # process boundary; inheriting these overrides could launch a real provider CLI.
 unset CAT_CAFE_CODEX_CARRIER
 unset CAT_CAFE_CLAUDE_CARRIER
+
+# An API child may prepare DSH during registry bootstrap, before any invocation.
+# Never let a test write its temporary project's MCP paths into the live DSH
+# installation/composition inherited from the parent runtime.
+unset CAT_CAFE_DSH_ROOT
+unset CAT_CAFE_DSH_ACP_CONFIG
 
 # API_SERVER_HOST is a runtime binding choice. LAN/dev invocations commonly set
 # it to 0.0.0.0, but capability write tests expect localhost-only defaults unless

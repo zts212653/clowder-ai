@@ -138,6 +138,13 @@ function buildMcpEnv(env: NodeJS.ProcessEnv): Record<string, string> {
     ...stringEnv(env),
   };
   merged.CAT_CAFE_READONLY = 'true';
+  // F317 P1: the readonly+agent-key union is explicit opt-in now. The
+  // antigravity in-hub executor is a legit consumer — grant the union only
+  // when this mount actually carries agent-key credentials. Everywhere else
+  // CAT_CAFE_READONLY=true stays strict even if agent-key vars leak in.
+  if (merged.CAT_CAFE_AGENT_KEY_SECRET || merged.CAT_CAFE_AGENT_KEY_FILE || merged.CAT_CAFE_AGENT_KEY_FILES) {
+    merged.CAT_CAFE_READONLY_AGENT_KEY_UNION = 'true';
+  }
   if (!merged.CAT_CAFE_API_URL) {
     const port = merged.API_SERVER_PORT?.trim() || merged.PORT?.trim() || '3002';
     merged.CAT_CAFE_API_URL = `http://127.0.0.1:${port}`;

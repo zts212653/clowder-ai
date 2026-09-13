@@ -1237,10 +1237,7 @@ describe('CodexAgentService Tests (CLI mode)', { concurrency: false }, () => {
     }
   });
 
-  test('Bearer auth resolves ${ENV_VAR} placeholders in Authorization header', async () => {
-    // Regression: mcp-probe.ts resolves ${ENV} in headers before connecting.
-    // Codex invoke must do the same — otherwise probe succeeds but Codex sends
-    // the literal placeholder string as the bearer token.
+  test('Bearer auth maps ${ENV_VAR} directly to Codex bearer_token_env_var', async () => {
     const runtimeRoot = makeTempDir('.tmp-codex-bearer-envref-');
     const projectDir = makeTempDir('.tmp-codex-bearer-envref-project-');
     const savedConfigs = catRegistry.getAllConfigs();
@@ -1317,15 +1314,21 @@ describe('CodexAgentService Tests (CLI mode)', { concurrency: false }, () => {
 
           const bearerArg = args.find((a) => a.includes('bearer_token_env_var'));
           assert.ok(bearerArg, 'env-backed header must still map to bearer_token_env_var');
-
-          const envVarMatch = bearerArg.match(/CAT_CAFE_MCP_BEARER_[A-Za-z0-9_]+/);
-          assert.ok(envVarMatch, 'env var name must be extractable');
-
-          // The child env var must contain the RESOLVED token, not the placeholder
-          assert.strictEqual(
-            spawnOpts.env[envVarMatch[0]],
-            'resolved-secret-token-456',
-            'bearer token must be the resolved value, not the ${} placeholder',
+          assert.match(bearerArg, new RegExp(`${envKey}["']?$`));
+          assert.doesNotMatch(args.join('\n'), /resolved-secret-token-456/);
+          assert.equal(spawnOpts.env[envKey], 'resolved-secret-token-456');
+          // Prefix is CAT_CAFE_MCP_BEARER_, which is what the merged source mints:
+          // main named it CLOWDER_MCP_BEARER_, but that is the single CLOWDER_*
+          // identifier against 92 CAT_CAFE_* ones, and upstream's #1074 uses
+          // CAT_CAFE_. Left as CLOWDER_ this assertion matches nothing and passes
+          // vacuously.
+          assert.equal(
+            Object.entries(spawnOpts.env).some(
+              ([key, value]) =>
+                key !== envKey && key.startsWith('CAT_CAFE_MCP_BEARER_') && value === process.env[envKey],
+            ),
+            false,
+            'native environment reference should not duplicate this token into a generated variable',
           );
         });
       });
@@ -1336,6 +1339,86 @@ describe('CodexAgentService Tests (CLI mode)', { concurrency: false }, () => {
       } else {
         process.env[envKey] = originalEnv;
       }
+      if (!hadCodex) {
+        catRegistry.reset();
+        for (const [id, config] of Object.entries(savedConfigs)) {
+          catRegistry.register(id, config);
+        }
+      }
+      rmSync(runtimeRoot, { recursive: true, force: true });
+      rmSync(projectDir, { recursive: true, force: true });
+    }
+  });
+
+  test('Codex fails closed before spawn when an MCP environment reference is missing', async () => {
+    const runtimeRoot = makeTempDir('.tmp-codex-missing-envref-');
+    const projectDir = makeTempDir('.tmp-codex-missing-envref-project-');
+    const savedConfigs = catRegistry.getAllConfigs();
+    const hadCodex = catRegistry.has('codex');
+    if (!hadCodex) {
+      catRegistry.register('codex', {
+        id: 'codex',
+        name: 'codex',
+        displayName: 'Codex',
+        avatar: '',
+        color: 'blue',
+        mentionPatterns: ['@codex'],
+        clientId: 'openai',
+        defaultModel: 'gpt-5.3-codex',
+        mcpSupport: true,
+        roleDescription: 'test',
+        personality: 'test',
+      });
+    }
+    const proc = createMockProcess();
+    const spawnFn = createMockSpawnFn(proc);
+    const service = new CodexAgentService({ l0CompilerFn: fakeL0Compiler, spawnFn, model: 'gpt-5.3-codex' });
+    const envKey = 'TEST_CODEX_MISSING_MCP_TOKEN';
+    const originalEnv = process.env[envKey];
+    delete process.env[envKey];
+
+    try {
+      writeMcpDistStubs(runtimeRoot, [
+        'index.js',
+        'collab.js',
+        'memory.js',
+        'signals.js',
+        'limb.js',
+        'audio.js',
+        'finance.js',
+      ]);
+      writeCapabilitiesConfig(runtimeRoot, [
+        {
+          id: 'env-backed-remote',
+          type: 'mcp',
+          globalEnabled: true,
+          source: 'external',
+          mcpServer: {
+            transport: 'streamableHttp',
+            url: 'https://mcp.example.test',
+            command: '',
+            args: [],
+            headers: { Authorization: `Bearer \${${envKey}}` },
+          },
+        },
+      ]);
+
+      await withRuntimeRootEnv(runtimeRoot, async () => {
+        await assert.rejects(
+          () =>
+            collect(
+              service.invoke('test missing env-backed bearer', {
+                workingDirectory: projectDir,
+                callbackEnv: { CAT_CAFE_CAT_ID: 'codex' },
+              }),
+            ),
+          new RegExp(`env-backed-remote.*${envKey}`),
+        );
+        assert.equal(spawnFn.mock.calls.length, 0);
+      });
+    } finally {
+      if (originalEnv === undefined) delete process.env[envKey];
+      else process.env[envKey] = originalEnv;
       if (!hadCodex) {
         catRegistry.reset();
         for (const [id, config] of Object.entries(savedConfigs)) {

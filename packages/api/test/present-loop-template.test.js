@@ -1,9 +1,9 @@
 import assert from 'node:assert/strict';
 import { afterEach, beforeEach, describe, test } from 'node:test';
 import { AutoDreamStore } from '../dist/domains/auto-dream/AutoDreamStore.js';
-import { PresentLoopService } from '../dist/domains/auto-dream/PresentLoopService.js';
-import { ProactiveRelationshipService } from '../dist/domains/auto-dream/ProactiveRelationshipService.js';
-import { renderPresentLoopPrompt } from '../dist/domains/auto-dream/present-loop-contract.js';
+import { PresentLoopService } from '../dist/domains/auto-dream/proactive/PresentLoopService.js';
+import { ProactiveRelationshipService } from '../dist/domains/auto-dream/proactive/ProactiveRelationshipService.js';
+import { renderPresentLoopPrompt } from '../dist/domains/auto-dream/proactive/present-loop-contract.js';
 import { MessageStore } from '../dist/domains/cats/services/stores/ports/MessageStore.js';
 import { createPresentLoopTemplate } from '../dist/infrastructure/scheduler/templates/present-loop.js';
 

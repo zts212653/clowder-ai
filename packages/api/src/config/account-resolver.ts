@@ -127,6 +127,7 @@ export function resolveAnthropicRuntimeProfile(
 
 // Known builtin OAuth account refs — both legacy names and new naming convention.
 // clowder-ai#340: protocol is derived from client identity, no longer stored on accounts.
+// Prototype-safe lookup lives in shared builtinAccountFamilyForRef / legacyAccountFamilyForRef.
 function isOfficialGoogleHostname(hostname: string): boolean {
   return officialProviderFamily(hostname) === 'google';
 }

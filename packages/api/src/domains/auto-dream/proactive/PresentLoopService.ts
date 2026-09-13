@@ -1,14 +1,14 @@
-import type { ScheduleRunTiming } from '../../infrastructure/scheduler/types.js';
-import { type AutoDreamStore, AutoDreamStoreError } from './AutoDreamStore.js';
-import type { ProactiveRelationshipService, ProactiveWakeContext } from './ProactiveRelationshipService.js';
-import { renderPersistedPresentLoopTrigger, renderPresentLoopPrompt } from './present-loop-contract.js';
+import type { ScheduleRunTiming } from '../../../infrastructure/scheduler/types.js';
+import { type AutoDreamStore, AutoDreamStoreError } from '../AutoDreamStore.js';
 import type {
   BeginPresentLoopRunResult,
   InvocationPrincipal,
   PresentLoopRunRecord,
   PresentLoopSettlementResult,
   SettlePresentLoopValue,
-} from './store-types.js';
+} from '../store-types.js';
+import type { ProactiveRelationshipService, ProactiveWakeContext } from './ProactiveRelationshipService.js';
+import { renderPersistedPresentLoopTrigger, renderPresentLoopPrompt } from './present-loop-contract.js';
 
 export interface DiaryProjectionReconciler {
   reconcile(ownerUserId: string): Promise<{ projected: number; removed: number; failed: number }>;

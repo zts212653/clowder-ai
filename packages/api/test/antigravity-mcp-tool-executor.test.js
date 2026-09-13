@@ -140,6 +140,25 @@ describe('CallMcpToolExecutor', () => {
     assert.equal(explicit.CAT_CAFE_API_URL, 'http://127.0.0.1:4999');
   });
 
+  test('F317 P1: buildMcpEnv grants readonly+agent-key union only when agent-key creds are present', () => {
+    const strict = buildMcpEnvForTest({});
+    assert.equal(strict.CAT_CAFE_READONLY, 'true');
+    assert.equal(strict.CAT_CAFE_READONLY_AGENT_KEY_UNION, undefined, 'no agent-key creds → no union opt-in');
+
+    const withKeyFile = buildMcpEnvForTest({ CAT_CAFE_AGENT_KEY_FILE: '/tmp/antigravity.secret' });
+    assert.equal(
+      withKeyFile.CAT_CAFE_READONLY_AGENT_KEY_UNION,
+      'true',
+      'antigravity mount with agent-key creds keeps the union',
+    );
+
+    const withKeyFiles = buildMcpEnvForTest({ CAT_CAFE_AGENT_KEY_FILES: '{"antigravity":"/tmp/x.secret"}' });
+    assert.equal(withKeyFiles.CAT_CAFE_READONLY_AGENT_KEY_UNION, 'true');
+
+    const withSecret = buildMcpEnvForTest({ CAT_CAFE_AGENT_KEY_SECRET: 's' });
+    assert.equal(withSecret.CAT_CAFE_READONLY_AGENT_KEY_UNION, 'true');
+  });
+
   test('resolveMcpEntrypointForTest resolves from invocation workspace cwd when runtime root is unset', () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'antigravity-mcp-root-'));
     const processRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'antigravity-mcp-process-root-'));
