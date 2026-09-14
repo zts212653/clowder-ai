@@ -3,9 +3,9 @@ name: writing-plans
 tips_exempt: internal plan-authoring command-provenance guard; no new end-user capability or discovery surface
 description: >
   将 spec/需求拆分为可执行的分步实施计划。
-  Use when: 有 spec 或需求，准备动手前需要拆分步骤。
-  Not for: trivial 改动（≤5 行）、已有详细计划。
-  Output: 分步实施计划（含 TDD 步骤和检查点）。
+  Use when: 跨组件、状态对象或实施顺序需要明确，且已有需求但缺少可执行计划。
+  Not for: 已有可执行计划、已知根因的简单修复、无行为变化的机械改动。
+  Output: 目标、关键设计、风险与验证方式明确的实施计划。
 triggers:
   - "写计划"
   - "implementation plan"
@@ -16,11 +16,11 @@ triggers:
 
 ## Overview
 
-将 spec/需求拆分为分步实施计划。写清楚每步改哪些文件、代码、测试、怎么验证。DRY. YAGNI. TDD. Frequent commits.
+将已明确的需求变成可执行的设计与验证安排。写清关键改动面、依赖、风险与结果检查；实现细节随工作展开。已有计划足够执行时直接复用。
 
 **Announce at start:** "I'm using the writing-plans skill to create the implementation plan."
 
-**Context:** Write the plan on main before opening a feature worktree. After the plan is committed, continue to `worktree` and then `tdd`.
+**Context:** Use the current authorized scope and risk route. A plan can be prepared in an isolated feature checkout; completing it does not automatically activate worktree, TDD, or review. Shared state files still follow their own ownership rules.
 
 **开工前 Recall（F102 记忆系统）🔴**：写计划前先搜相关历史——`search_evidence("{feature}")` 找相关 spec/ADR/讨论，避免重复造轮子。
 
@@ -38,7 +38,7 @@ triggers:
    - If we remove this step, what specific cost does it add to reaching B? (can't articulate = detour)
 4. **Pure exploration = explicit Spike** (time-boxed + output is a decision/conclusion, not a deliverable)
 
-**Steps are internal implementation rhythm, NOT delivery batches.** The deliverable to the user is a complete feat matching the full spec — not a step's output. Do not expose intermediate steps as "验收点" to the user.
+**Plan scope follows the user-authorized deliverable.** A full feature request requires the full agreed outcome; an explicitly requested repair or candidate is planned at that scope. Do not silently shrink the requested outcome or call an intermediate step complete delivery.
 
 ## Stateful Object Gate（F229 PR-A1 20 轮教训）🔴
 
@@ -59,77 +59,22 @@ Plan 涉及**有生命周期的状态对象**（thread 标记 / carrier / sessio
 
 ## Bite-Sized Task Granularity
 
-**Each step is one action (2-5 minutes):**
-- "Write the failing test" - step
-- "Run it to make sure it fails" - step
-- "Implement the minimal code to make the test pass" - step
-- "Run the tests and make sure they pass" - step
-- "Commit" - step
+按依赖与可验证结果拆步骤。每步说明目标、受影响面、关键设计和验证；只有顺序本身影响正确性时才写细操作。
 
-## Plan Document Header
+已有精准失败检查可直接作为 RED；无行为变化的机械工作复用对应 checker。提交按完整且可回滚的变更组织，不按固定分钟数或工具调用数切分。
 
-**Every plan MUST start with this header:**
+## Plan 内容
 
-```markdown
-# [Feature Name] Implementation Plan
+计划包含以下信息，已有 spec 或任务记录可直接引用：
 
-**Feature:** F0xx — `docs/features/F0xx-xxx.md`
-**Goal:** [One sentence — must match feat doc 的 goal]
-**Acceptance Criteria:** [从 feat doc 逐条抄过来，plan 必须覆盖全部 AC]
-**Architecture cell:** [ownership cell id from docs/architecture/ownership/README.md]
-**Map delta:** none | update required | new cell required
-**Map delta why:** [一句话说明为什么不改 map / 改哪个 cell / 为什么需要新 cell]
-**Architecture:** [2-3 sentences about approach]
-**Tech Stack:** [Key technologies/libraries]
-**前端验证:** [涉及前端？标注 Yes — reviewer 必须用 Playwright/Chrome 实测]
+- **来源与目标**：原始需求、issue 或已存在的 feature spec；不自行分配 F 编号。
+- **验收**：覆盖本次授权交付单元的结果与边界；完整 feature 请求仍覆盖全部 AC。
+- **关键设计**：受影响文件/接口、依赖与重要取舍；涉及状态对象时完成上面的状态/不变量分析。
+- **Architecture cell / Map delta / Why**：按结构与 ownership 变化填写；普通增量可为 none。
+- **验证**：行为风险对应 RED 与回归检查，已有精准 checker 可复用；相关 UI 改动记录实际交互验证路径。
+- **实施顺序**：按依赖与可验证结果组织，每步说明完成后能检查什么。
 
----
-```
-
-**F191 约束**：普通增量写 `Map delta: none`，不得重新画架构图。`update required` 或 `new cell required` 代表 Phase 0 还包含 ownership map 更新，必须在 implementation steps 里列出来。
-
-## Task Structure
-
-```markdown
-### Task N: [Component Name]
-
-**Files:**
-- Create: `exact/path/to/file.py`
-- Modify: `exact/path/to/existing.py:123-145`
-- Test: `tests/exact/path/to/test.py`
-
-**Step 1: Write the failing test**
-
-```python
-def test_specific_behavior():
-    result = function(input)
-    assert result == expected
-```
-
-**Step 2: Run test to verify it fails**
-
-Run: `pytest tests/path/test.py::test_name -v`
-Expected: FAIL with "function not defined"
-
-**Step 3: Write minimal implementation**
-
-```python
-def function(input):
-    return expected
-```
-
-**Step 4: Run test to verify it passes**
-
-Run: `pytest tests/path/test.py::test_name -v`
-Expected: PASS
-
-**Step 5: Commit**
-
-```bash
-git add tests/path/test.py src/path/file.py
-git commit -m "feat: add specific feature"
-```
-```
+无需把整段实现代码先复制进计划。只有代码片段能消除接口或设计歧义时才加入；完整代码与其测试在实现阶段保持一个真相源。验证命令须从当前仓库确认，模板不预置某语言/框架的教程。
 
 ## Open Questions in Plans
 
@@ -151,10 +96,10 @@ git commit -m "feat: add specific feature"
 
 ## Remember
 - Exact file paths always
-- Complete code in plan (not "add validation")
+- Specify the behavior, interface, constraints, and checks; include code only when it resolves a design ambiguity
 - Exact commands with expected output
 - DRY, YAGNI, TDD, frequent commits
 
 ## 下一步
 
-计划写完并提交 → `worktree`（隔离开发环境）→ `tdd`（实现）。
+计划形成后按实际风险进入实现：需要隔离才用 `worktree`；行为或回归风险用 `tdd`；已有精准 RED 则直接复用。计划本身需要持久交接时提交。

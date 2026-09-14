@@ -1,5 +1,5 @@
 #!/bin/bash
-# Session Start Hook — 开工前自动提醒
+# Session Start Hook — read-only workspace observations
 # 用户级 hook：所有项目都生效，出征也带着走
 # 归属：F050 系统提示词同步 + 猫猫行为规范
 
@@ -14,90 +14,26 @@ git rev-parse --git-dir >/dev/null 2>&1 || exit 0
 
 WARNINGS=""
 
-refresh_upstream_ref() {
-  local upstream_ref="$1"
-  local remote="${upstream_ref%%/*}"
-  local upstream_branch="${upstream_ref#*/}"
-  local timeout_seconds="${CAT_CAFE_HOOK_FETCH_TIMEOUT_SECONDS:-5}"
-  local fetch_pid
-  local elapsed=0
-
-  if [ -z "$remote" ]; then
-    return 1
-  fi
-  if [ "$remote" = "$upstream_ref" ]; then
-    return 1
-  fi
-  if [ "$remote" = "." ]; then
-    return 0
-  fi
-  case "$timeout_seconds" in
-    ''|*[!0-9]*) timeout_seconds=5 ;;
-  esac
-  if [ "$timeout_seconds" -le 0 ]; then
-    return 1
-  fi
-
-  (
-    export GIT_TERMINAL_PROMPT=0
-    if [ -z "${GIT_SSH_COMMAND:-}" ]; then
-      export GIT_SSH_COMMAND="ssh -o BatchMode=yes -o ConnectTimeout=2"
-    fi
-    git fetch --quiet --no-tags --prune --recurse-submodules=no \
-      "$remote" "+refs/heads/${upstream_branch}:refs/remotes/${remote}/${upstream_branch}"
-  ) &
-  fetch_pid=$!
-
-  while kill -0 "$fetch_pid" 2>/dev/null; do
-    if [ "$elapsed" -ge "$timeout_seconds" ]; then
-      kill "$fetch_pid" 2>/dev/null
-      wait "$fetch_pid" 2>/dev/null
-      return 1
-    fi
-    sleep 1
-    elapsed=$((elapsed + 1))
-  done
-
-  wait "$fetch_pid"
-}
-
 # 1. 检查未提交的共享文档改动
 DIRTY_DOCS=$(git diff --name-only -- docs/ cat-cafe-skills/ assets/system-prompts/ 2>/dev/null | head -10)
 if [ -n "$DIRTY_DOCS" ]; then
   WARNINGS="${WARNINGS}
-⚠️ 发现未提交的共享文档改动（可能是你或其他猫改的）：
+共享文档有未提交改动（归属待核实）：
 ${DIRTY_DOCS}
-→ 如果是你改的，记得 commit push（家规：共享文档改完立刻提交）
+仅处理归属本次任务的改动，遵守对应共享状态提交规则。
 "
 fi
 
-# 2. 检查未推送的 commit
-UNPUSHED=$(git log --oneline @{u}..HEAD 2>/dev/null | head -5)
-if [ -n "$UNPUSHED" ]; then
-  WARNINGS="${WARNINGS}
-⚠️ 有未 push 的 commit：
-${UNPUSHED}
-→ 确认是否需要 push
-"
-fi
-
-# 2b. 检查是否 behind origin（只在 upstream ref 刷新成功后告警）
-UPSTREAM_REF=$(git rev-parse --abbrev-ref --symbolic-full-name @{u} 2>/dev/null)
-BEHIND_CANDIDATE=""
+# Read the local upstream snapshot; startup does not fetch or claim remote freshness.
+UPSTREAM_REF=$(git rev-parse --abbrev-ref --symbolic-full-name '@{u}' 2>/dev/null)
 if [ -n "$UPSTREAM_REF" ]; then
-  BEHIND_CANDIDATE=$(git rev-list --count "HEAD..${UPSTREAM_REF}" 2>/dev/null)
-fi
-if [ -n "$BEHIND_CANDIDATE" ] && [ "$BEHIND_CANDIDATE" -gt 0 ]; then
-  HEAD_BEFORE_REFRESH=$(git rev-parse HEAD 2>/dev/null)
-  if refresh_upstream_ref "$UPSTREAM_REF"; then
-    HEAD_AFTER_REFRESH=$(git rev-parse HEAD 2>/dev/null)
-    BEHIND=$(git rev-list --count "HEAD..${UPSTREAM_REF}" 2>/dev/null)
-    if [ "$HEAD_BEFORE_REFRESH" = "$HEAD_AFTER_REFRESH" ] && [ -n "$BEHIND" ] && [ "$BEHIND" -gt 0 ]; then
-      WARNINGS="${WARNINGS}
-⚠️ 本地落后 origin ${BEHIND} 个 commit
-→ 建议先 git pull 再开工
+  COUNTS=$(git rev-list --left-right --count "HEAD...${UPSTREAM_REF}" 2>/dev/null)
+  AHEAD=$(echo "$COUNTS" | awk '{print $1}')
+  BEHIND=$(echo "$COUNTS" | awk '{print $2}')
+  if [ -n "$AHEAD" ] && [ -n "$BEHIND" ] && { [ "$AHEAD" -gt 0 ] || [ "$BEHIND" -gt 0 ]; }; then
+    WARNINGS="${WARNINGS}
+相对本地 upstream 快照 ${UPSTREAM_REF}：ahead=${AHEAD}，behind=${BEHIND}（未联网刷新）。
 "
-    fi
   fi
 fi
 
@@ -110,7 +46,7 @@ if [ "$BRANCH" != "main" ] && [ "$BRANCH" != "master" ]; then
   if [[ "$IS_WORKTREE" != *".git/worktrees/"* ]]; then
     WARNINGS="${WARNINGS}
 ⚠️ 当前在主仓库的 ${BRANCH} 分支（不是 worktree）
-→ 铁律：主仓库禁止 checkout 到非 main 分支，改代码必须开 worktree
+修改前核对任务归属与隔离要求，保全当前分支现场。
 "
   fi
 fi
@@ -119,41 +55,33 @@ fi
 UNTRACKED_DOCS=$(git ls-files --others --exclude-standard -- 'docs/*.md' 'docs/**/*.md' 2>/dev/null | head -10)
 if [ -n "$UNTRACKED_DOCS" ]; then
   WARNINGS="${WARNINGS}
-⚠️ docs/ 下有未跟踪的 .md 文件（某只猫生成了但忘记 commit push）：
+docs/ 下有未跟踪的 .md 文件（归属与归档状态待核实）：
 ${UNTRACKED_DOCS}
-→ 向co-creator汇报，商量处理方式（commit/移走/删除）
-"
-fi
-
-# 5. 检查根目录图片文件（用文件系统检查，不受 .gitignore 影响）
-ROOT_IMAGES=$(find . -maxdepth 1 -type f \( -name '*.png' -o -name '*.jpg' -o -name '*.jpeg' -o -name '*.gif' -o -name '*.webp' \) 2>/dev/null | sed 's|^\./||' | head -10)
-if [ -n "$ROOT_IMAGES" ]; then
-  WARNINGS="${WARNINGS}
-⚠️ 根目录有图片文件（截图应放 assets/screenshots/，设计稿放 designs/）：
-${ROOT_IMAGES}
-→ 首个发现者直接处置，不等 owner、不跨线程协调、不问 operator：截图 → mv assets/screenshots/（gitignored，本体不 commit）；明显设计稿 → designs/；未知文件不删。FYI 仅在零成本定位来源时事后发一行
+是否需要归档由本次任务与项目约定决定。
 "
 fi
 
 # 6. 检查根目录其他杂物（未跟踪且未 ignore 的文件）
-ROOT_CLUTTER=$(git ls-files --others --exclude-standard -- ':!.*' ':!packages/' ':!docs/' ':!assets/' ':!scripts/' ':!cat-cafe-skills/' ':!designs/' ':!desktop/' 2>/dev/null \
-  | grep -vE '^(package\.json|pnpm-workspace\.yaml|pnpm-lock\.yaml|tsconfig|biome|README|LICENSE|CLAUDE|AGENTS|GEMINI|KIMI|BACKLOG|\.npmrc|\.nvmrc|\.node-version|\.editorconfig|\.prettierrc|Makefile|Dockerfile|Procfile|turbo\.json|\.tool-versions)' \
+ROOT_CLUTTER=$(git ls-files --others --exclude-standard -- ':!.*' 2>/dev/null \
+  | awk 'index($0, "/") == 0' \
+  | grep -vE '^(package\.json|pnpm-workspace\.yaml|pnpm-lock\.yaml|tsconfig|biome|README|LICENSE|CLAUDE|AGENTS|GEMINI|KIMI|BACKLOG|lefthook\.yml|Makefile|Dockerfile|Procfile|turbo\.json)' \
   | head -10)
 if [ -n "$ROOT_CLUTTER" ]; then
   WARNINGS="${WARNINGS}
-⚠️ 根目录有不该在这里的文件：
+根目录有未跟踪文件（不据此判定为垃圾）：
 ${ROOT_CLUTTER}
-→ 向co-creator汇报，商量处理方式
+按任务归属和项目产物约定判断，不自动移动或删除。
 "
 fi
 
 # 输出提醒（只在有警告时才输出）
 if [ -n "$WARNINGS" ]; then
-  echo "🐾 开工自检：${WARNINGS}"
+  echo "🐾 工作区观察：${WARNINGS}
+仅处理影响当前任务的事项；保全其他工作的改动与工件。上述状态不要求先 pull/push、移走或删除文件，也不改变既有授权与共享状态提交规则。"
 fi
 
-# 通用提醒（F256 Phase A: hook 升级 + skill link）
-echo "📌 Recall 三入口（按场景选）：精确 anchor/看关系 → cat_cafe_graph_resolve | 零先验/扫最近 → cat_cafe_list_recent | 语义/模糊找 → cat_cafe_search_evidence（不确定→search_evidence mode=hybrid）。结果已融合消费加权排序（F200）。若 MCP 未暴露，先 tool_search 精确搜工具名。"
-echo "🔍 复杂搜索（coverage/source-map/absence/delta）→ 加载 memory-search-best-practices skill（8 种题型 recipe + 何时停判据）。搜索铁律：≥3 路命中无新 anchor 才停（布偶猫家族尤其注意——别搜一刀就停）。"
+# The skill owns task-specific stopping criteria; do not restate a global quota here.
+echo "📌 Recall：精确 anchor → cat_cafe_graph_resolve；零先验 → cat_cafe_list_recent；语义查询 → cat_cafe_search_evidence（不确定时 hybrid）。"
+echo "🔍 检索深度按题型选择：复杂 coverage/source-map/absence/delta 加载 memory-search-best-practices；停止条件以该 skill 的「何时停下来判据」为真相源。引用结论前读对应原文。"
 
 exit 0

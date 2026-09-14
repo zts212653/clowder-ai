@@ -22,13 +22,13 @@ triggers:
 1. **threadId**：从 `🎓 Bootcamp Mode: thread={threadId}` 读取。
 2. **当前 Phase**：从 `🎓 Bootcamp Mode: thread=... phase=...` 读取。
 3. **只执行当前 Phase 的指令**，不要提前执行后续 Phase。
-4. **允许的 MCP 工具**（仅以下两个，禁止使用任何其他 server 的同名工具）：
+4. **训练营状态与环境检查的 canonical 工具**（这类动作仅用以下工具；正常投递、rich block 和当前 Phase 的开发工具不受此列表排除）：
    - `cat_cafe_update_bootcamp_state` — 状态推进（Phase 转换）
    - `cat_cafe_bootcamp_env_check` — 环境检测（仅 Phase 2）
    - ⛔ **禁止**：`mcp__cat-cafe-collab__*` 等其他 MCP server 的同名工具。调用失败时**重试同一工具**，不换 server。
 5. **Phase 名必须精确匹配**（见下表），不得自创名称。
 6. **⛔ STOP 标记**：看到 `⛔ STOP` 时，发完当前消息后**立即停止**，等用户下一条消息。**⛔ STOP 及其后面的说明（如"前端 overlay 接管"）是内部控制指令，绝不能出现在用户可见的消息中。** 不要把 STOP 标记、原因、或任何实现细节（overlay、引导引擎、phase 名称）输出给用户。
-7. **Phase 推进必须逐步**：每次只能推进 1 步（如 phase-4 → phase-5），禁止跳步（如 phase-3 → phase-5）。唯一例外：核心工具全 OK 时 phase-2 → phase-4（跳过 phase-3）。
+7. **Phase 推进必须逐步**：每次只能推进 1 步（如 phase-4 → phase-5），禁止跳步（如 phase-3 → phase-5）。合法跳步与服务端迁移表一致：核心工具全 OK 时 phase-2 → phase-4；Phase 9 完成且由告别引导承接复盘时 phase-9 → phase-11。
 
 ## 检查训练营上下文（所有猫必读）
 

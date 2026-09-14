@@ -35,47 +35,14 @@ triggers:
 
 1. **真的需要浏览器吗？**
    如果只是读文档、抓纯文本、做搜索，不要默认上浏览器。
-2. **目标是 localhost 还是外部网站？**
-   `localhost` → `browser-preview`；外部网站才留在本 skill。
-3. **这只猫的客户端能力是什么？**
-   MCP 原生、CLI-only、是否有 `webfetch`、是否能跑 shell、是否有 VL。
-4. **这次任务的 session 属于谁？**
-   是匿名访问、猫自己的浏览器会话、还是接手人类已登录会话。
-
-## 什么时候用
-
-- 目标是**外部网站**，需要真实浏览器执行 JS、登录、点按钮、下载、截图
-- 猫没有 `webfetch`，或者 `webfetch` 不足以完成交互
-- 需要在 `agent-browser` / `Playwright MCP` / `Playwriter` / `PinchTab` 之间做路由
-- 需要明确“这类浏览器任务的默认打法是什么”
-
-## 不要用在这里
-
-- `localhost` 页面预览、HMR、给operator看效果
-  → 用 `browser-preview`
-- 本地 WebApp 的确定性测试、Console、截图、回归验证
-  → 用 `webapp-testing`
-- 简单网页抓取、官方文档阅读、搜索结果整理
-  → 优先用更轻量的搜索 / fetch 工具，不要先上浏览器
-- 已有领域专用浏览器 skill 的任务
-  → 专用 skill 优先
-
-## 默认路由顺序
-
-1. **先问：真的需要浏览器吗？**
-   如果只是读文档、抓纯文本、做搜索，不要默认上浏览器。
-2. **目标是 localhost 吗？**
-   是 → `browser-preview`
-3. **目标是本地 WebApp 验证吗？**
-   是 → `webapp-testing`
-4. **客户端已经有稳定可用的 Playwright MCP 吗？**
-   是 → `refs/playwright-mcp.md`（MCP ID: `playwright`）
-5. **需要接手人类已登录的 Chrome、复杂 iframe、多 tab 调试吗？**
-   是 → 用 `claude-in-chrome` MCP（工具前缀 `mcp__claude-in-chrome__*`），参考 `refs/playwriter.md`
-6. **这是 CLI 型猫，没 webfetch / 没 VL，但能跑命令吗？**
-   是 → `refs/agent-browser.md`（MCP ID: `agent-browser`，社区 wrapper，使用前先做本机验活）
-7. **需要长驻 daemon、持久 session、HTTP-first 服务吗？**
-   是 → `refs/pinchtab.md`（MCP ID: `pinchtab`，优先 native binary `pinchtab mcp`，不要默认相信 npm wrapper）
+2. **需要既有人类登录会话吗？**
+   是 → 在已有授权内选择该会话所属的浏览器后端，参考 `refs/playwriter.md`。
+3. **目标是本地验证吗？**
+   预览/展示 → `browser-preview`；确定性测试/回归 → `webapp-testing`。核对实际 worktree 与服务地址。
+4. **需要长驻 daemon / 持久 session 吗？**
+   是 → `refs/pinchtab.md`，保留网络、会话与权限边界。
+5. **其余常规网页自动化**
+   按当前可用能力选择 Playwright MCP（`refs/playwright-mcp.md`）；CLI 型工作可选 `refs/agent-browser.md`。后端可用不覆盖前面的任务/session 约束。
 
 ## 路由矩阵
 
@@ -86,7 +53,7 @@ triggers:
 | MCP 原生客户端的常规网页自动化 | `Playwright MCP` | `playwright` | ✅ 已接入 — `npx @playwright/mcp@latest` |
 | 已登录 Chrome、iframe-heavy、手工接管 | `claude-in-chrome` | `claude-in-chrome` | ✅ 已接入 — Chrome 扩展管理，无需手动启动 |
 | CLI 型猫、没 webfetch / 没 VL | `agent-browser` | — (CLI 工具) | ✅ 可用 — `npm i -g agent-browser`，通过 Bash tool 调 CLI |
-| 服务化浏览器、持久化 session、重复批任务 | `PinchTab` | `pinchtab` | ✅ 已接入 — native binary `pinchtab mcp`（外网 URL 用 eval 导航，见 ref） |
+| 服务化浏览器、持久化 session、重复批任务 | `PinchTab` | `pinchtab` | ✅ 已接入 — native binary `pinchtab mcp`（保留目标网络校验，见 ref） |
 
 ## 常用组合打法
 
@@ -131,7 +98,7 @@ triggers:
 | 把本地测试和外部网站操作混成一个动作 | 路由混乱，证据链不清楚 | `localhost` 和外部网站分开处理 |
 | 登录态责任不清楚就开干 | 容易误用人类 session | 先说清 session 属于谁，再动手 |
 | 做完只说”好了”不留证据 | 后续无法验收或复现 | 至少交付 URL/截图/文本/日志中的一种 |
-| PinchTab 外网用 `pinchtab_navigate` | Clash TUN 下 403（Go 层 DNS 预检拦截 `198.18.x.x`） | 用 `pinchtab_eval` + `window.location.href` 导航，详见 `refs/pinchtab.md` |
+| 将网络拒绝当普通工具故障绕过 | 可能越过 SSRF/内网边界 | 核对目标与授权，使用保留等效校验的配置；不得用 eval 绕过 |
 
 ## 和其他 skill 的区别
 

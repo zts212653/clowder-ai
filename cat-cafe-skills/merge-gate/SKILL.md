@@ -436,27 +436,16 @@ git checkout main && git pull origin main
 git worktree remove ../cat-cafe-{feature-name}
 git branch -d {branch-name} && git worktree prune
 
-# 8.5 回收 review 沙盒（review-target-id 与 request-review 约定一致）
-REVIEW_TARGET_ID="{review-target-id}"  # e.g. f113 or fix-redis-keyprefix
-REVIEW_BASE="/tmp/cat-cafe-review/${REVIEW_TARGET_ID}"
-if [ -d "$REVIEW_BASE" ]; then
-  for sandbox in "$REVIEW_BASE"/*/; do
-    [ ! -d "$sandbox" ] && continue
-    # no-force 铁律（LL-012）：有未保存改动 → 报阻塞，不硬删
-    if git worktree list 2>/dev/null | grep -q "$sandbox"; then
-      STATUS=$(cd "$sandbox" && git status --porcelain 2>/dev/null)
-      if [ -n "$STATUS" ]; then
-        echo "⚠️ Review 沙盒 $sandbox 有未保存改动，跳过"
-        continue
-      fi
-      git worktree remove "$sandbox"
-    else
-      rm -rf "$sandbox"
-    fi
-  done
-  rmdir "$REVIEW_BASE" 2>/dev/null
-  echo "✅ Review 沙盒已回收: $REVIEW_BASE"
+# 8.5 仅回收本次 review 已确认归属、且不再使用的注册 worktree。
+# REVIEW_SANDBOX 来自本次 review 记录；禁止遍历整个 review 根目录。
+REVIEW_SANDBOX="{本次已确认的 review worktree 绝对路径}"
+# git 自身检查注册关系与脏状态；不加 --force。
+if git worktree remove -- "$REVIEW_SANDBOX"; then
+  echo "Review worktree 已回收: $REVIEW_SANDBOX"
+else
+  echo "Review worktree 保留：请核对注册关系、归属或未保存改动。"
 fi
+# 失败时没有 rm -rf 降级路径；未注册目录也不能据此推定为可删除垃圾。
 git worktree prune  # 清理 dangling worktree references
 ```
 
@@ -510,9 +499,9 @@ gh api --paginate repos/{OWNER}/{REPO}/pulls/{PR_NUMBER}/comments \
 |------|------|
 | 0 P1/P2（review body + inline comments 都无） | 通过，执行 Step 7 |
 | P1/P2 有复现证据 | 在 feature branch 修 → push → **re-trigger review** → 等通过 |
-| P1/P2 无复现证据 | 降级 P3，留 comment，视为通过 |
-| 误报 | 留 comment 解释，视为通过 |
-| 架构/改法建议（非 P1/P2） | **过 VERIFY 三道门再决定改不改**（见 receive-review VERIFY）。云端没有运行环境，理论推理 < 本地实测。改坏能跑的功能 = P0 |
+| P1/P2 尚无可执行复现 | 核对静态失败路径、适用性与缺失证据；不能仅因未复现就降级，未解决项继续阻止放行 |
+| 已证伪的误报 | 提供反证与适用性说明，由当前独立 review source 确认处置后继续 |
+| 架构/改法建议（非 P1/P2） | **过 VERIFY 三道门再决定改不改**（见 receive-review VERIFY）。比较具体证据强度；本地少量通过样本不能证伪静态风险路径。改坏能跑的功能 = P0 |
 
 ### Feature Doc Truth 核对（Step 7.5）🔴
 

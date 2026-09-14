@@ -47,7 +47,7 @@ git worktree add ../cat-cafe-{feature-name} -b feat/{feature-name}
 - 🔴 **禁止在 `cat-cafe-runtime` 里执行 `pnpm start` / `pnpm runtime:start`**（会先 kill 旧 API，等于把在线 runtime 踢掉）
 - 🔴 **`localhost:3003/3004` 默认属于 `cat-cafe-runtime`**。如果你要验证当前 worktree 的未合入改动，浏览器 / Playwright / curl 不能直接打这两个端口，除非你明确是在做 runtime 验收而不是开发验证
 
-其他项目：先查 `CLAUDE.md / AGENTS.md` 有没有指定位置 → 有就用 → 没有再问用户。
+其他项目：优先遵守仓库指定位置；未指定时可选择不冲突的同级隔离目录。只有目录权限或真实约束不明确时才询问。
 
 ## 创建前：Main 同步检查（F073 门禁）
 
@@ -56,23 +56,20 @@ git worktree add ../cat-cafe-{feature-name} -b feat/{feature-name}
 ```bash
 # Step 1: 检查是否有未提交的文档变更
 git status --porcelain docs/ | head -5
-# 如果有输出 → 先 commit 再继续
+# 如果有输出 → 核对归属与本次范围；不得批量提交其他工作的改动
 
 # Step 2: 检查 main 与 remote 双向同步
 git fetch origin main --quiet
 AHEAD=$(git rev-list --count origin/main..main)
 BEHIND=$(git rev-list --count main..origin/main)
 echo "ahead=$AHEAD behind=$BEHIND"
-# ahead > 0 → 先 git push origin main
-# behind > 0 → 先 git pull origin main
+# ahead/behind 非零 → 查明待整合内容与归属，不自动发布或覆盖
 # 两者都 = 0 → 可以继续
 ```
 
-如果 main 与 remote 不同步：
-1. `git add docs/` + commit（如有未提交变更）
-2. `git pull origin main`（如果 behind > 0，先拉取其他猫的更新）
-3. `git push origin main`（如果 ahead > 0，推送本地更新）
-4. 确认 ahead=0 behind=0 后再创建 worktree
+如果 main 与 remote 不同步，先记录具体基线、差异与任务归属。同步或发布只处理已获授权、可追溯到本任务的变更；不得使用 `git add docs/` 将所有现有文档打包，也不得为通过同步检查推送来源未核对的 main commits。已有授权可复用，不重复询问。
+
+主仓存在其他工作的未完成现场时保全它。在 Rule 0 下选择冻结上游 commit 的独立 checkout，应记录为何主仓同步要求不适用、实际 base SHA 与隔离证据；现有机器判据未覆盖的例外不能宣称已由机器放行。同期的主仓整合由其明确责任人处理。
 
 ## 创建前：查在飞 PR（别和别的猫撞车）🔴
 
@@ -105,14 +102,12 @@ cd ../cat-cafe-{feature-name}
 # 2. 安装依赖（必须清除 NODE_ENV，否则跳过 devDeps 导致 build 失败！）
 env -u NODE_ENV pnpm install
 
-# 3. 创建 .env（Redis 隔离，必须！）
-cat > .env <<EOF
-REDIS_URL=redis://localhost:6398
-NEXT_PUBLIC_API_URL=http://localhost:3102
-EOF
+# 3. 仅需要运行服务时准备隔离环境
+# 读取当前环境与仓库 preflight 约定；配置变更遵守现有授权边界。
+# 纯 skill/文档/静态检查无需创建 .env 或启动 Redis。
 
-# 4. 验证 Redis 隔离
-echo $REDIS_URL   # 必须是 redis://localhost:6398，不能是 6399
+# 4. 验证运行时实际采用的隔离地址
+# 使用 start-dev 的 preflight / 进程运行信息证明；echo 未加载的变量不是证据。
 
 # 5. 验证与改动风险匹配的基线（示例；不要机械跑无关全仓测试）
 pnpm check:skills   # skill surface
@@ -250,7 +245,7 @@ Thread-Context: threadId=[thread-id] invocationId=0001780508313338 catId=codex
 - [ ] **Main 文档双向同步**（`git status --porcelain docs/` 无输出 + ahead=0 + behind=0，F073 门禁）
 - [ ] 目录放在 relay-station/ 同级（不在项目内部）
 - [ ] 不是 `*-runtime` 命名
-- [ ] `.env` 包含 `REDIS_URL=redis://localhost:6398`
+- [ ] 若要运行服务，已通过实际 preflight 核对隔离地址/offset，未指向生产数据；纯静态工作不要求 `.env`
 - [ ] 风险匹配的 baseline 通过（targeted 默认；高风险 / 跨包不确定才全量）
 - [ ] 当前会话不是 `cat-cafe-runtime` 的运行态验收会话（验收会话默认只读，不做重启命令）
 - [ ] 验证目标 URL 已明确；若是 `3003/3004`，你知道自己在打 runtime，而不是当前 worktree 的本地改动
