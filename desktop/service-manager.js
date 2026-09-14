@@ -419,6 +419,9 @@ class ServiceManager {
   _buildApiEnv(userDataDir) {
     const salt = this._getOrCreateTelemetrySalt(userDataDir);
     return {
+      // Desktop owns this runtime, like managed `pnpm start`. Keep an explicit
+      // launcher opt-out while allowing saved IM credentials to survive reload.
+      CONNECTOR_GATEWAY_AUTOSTART: process.env.CONNECTOR_GATEWAY_AUTOSTART || '1',
       TELEMETRY_HMAC_SALT: salt,
       EVIDENCE_DB: path.join(userDataDir, 'evidence.sqlite'),
       TRANSCRIPT_DATA_DIR: path.join(userDataDir, 'data', 'transcripts'),
