@@ -10,10 +10,17 @@ interface ProfileCardProps {
   isExpanded: boolean;
   selectedModel: string;
   testing: boolean;
-  testResult: { ok: boolean; message?: string } | null;
+  /**
+   * `unverified` is its own state, not a flavour of failure: the probe could not run for this
+   * CLI, which is neither a pass nor a failure. Rendering it as a pass would gate the user
+   * through on nothing; rendering it as red would report a failure that never happened.
+   */
+  testResult: { ok: boolean; unverified?: boolean; acknowledged?: boolean; message?: string } | null;
   onSelect: () => void;
   onModelSelect: (model: string) => void;
   onTest: () => void;
+  /** Records the user's explicit "I confirmed this CLI in a terminal" for an unverifiable CLI. */
+  onAcknowledge?: () => void;
   onProfileRefresh: () => void;
   onEdit: () => void;
 }
@@ -34,6 +41,7 @@ export function ProfileCard({
   onSelect,
   onModelSelect,
   onTest,
+  onAcknowledge,
   onProfileRefresh,
   onEdit,
 }: ProfileCardProps) {
@@ -46,9 +54,11 @@ export function ProfileCard({
     ? 'border-[var(--console-border-soft)] hover:border-conn-amber-ring'
     : testResult?.ok
       ? 'border-[var(--semantic-success)] bg-conn-green-bg/40 shadow-sm'
-      : testResult && !testResult.ok
-        ? 'border-[var(--semantic-critical)] bg-conn-red-bg/30 shadow-sm'
-        : 'border-[var(--semantic-warning)] bg-conn-amber-bg/60 shadow-sm';
+      : testResult?.unverified
+        ? 'border-[var(--semantic-warning)] bg-conn-amber-bg/60 shadow-sm'
+        : testResult
+          ? 'border-[var(--semantic-critical)] bg-conn-red-bg/30 shadow-sm'
+          : 'border-[var(--semantic-warning)] bg-conn-amber-bg/60 shadow-sm';
 
   const [modelError, setModelError] = useState('');
 
@@ -227,12 +237,29 @@ export function ProfileCard({
                   <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z" />
                 </svg>
               )}
-              {testing ? '测试中' : testResult?.ok ? '已通过' : '测试连接'}
+              {testing ? '测试中' : testResult?.ok ? '已通过' : testResult?.unverified ? '未验证' : '测试连接'}
             </button>
             {testResult && (
-              <span className={`text-xs ${testResult.ok ? 'text-conn-green-text' : 'text-conn-red-text'}`}>
+              <span
+                className={`text-xs ${
+                  testResult.ok
+                    ? 'text-conn-green-text'
+                    : testResult.unverified
+                      ? 'text-conn-amber-text'
+                      : 'text-conn-red-text'
+                }`}
+              >
                 {testResult.message}
               </span>
+            )}
+            {testResult?.unverified && !testResult.acknowledged && onAcknowledge && (
+              <button
+                type="button"
+                onClick={onAcknowledge}
+                className="rounded border border-conn-amber-ring bg-conn-amber-bg px-2.5 py-1 text-xs font-medium text-conn-amber-text transition hover:bg-conn-amber-bg/70"
+              >
+                我已在终端确认可用，继续
+              </button>
             )}
           </div>
         </div>

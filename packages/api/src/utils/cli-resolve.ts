@@ -5,10 +5,60 @@
  */
 
 import { execSync } from 'node:child_process';
-import { existsSync, readdirSync } from 'node:fs';
+import { existsSync, readdirSync, statSync } from 'node:fs';
 import { resolve, win32 } from 'node:path';
+import { getClientDescriptorByCommand, installHintForCommand } from '@cat-cafe/shared';
 
 const IS_WINDOWS = process.platform === 'win32';
+
+/**
+ * Whether `path` names an existing regular file.
+ *
+ * Exported because the availability probe must apply the *same* usability test as the resolver:
+ * if the two disagree about whether an operator-pinned path is usable, the probe reports a
+ * verdict the launch path will not reproduce — the exact false positive this predicate prevents.
+ */
+export function isExecutableFileAt(path: string): boolean {
+  try {
+    return statSync(path).isFile();
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Absolute path pinned for this command by its `CAT_<CLIENT>_PATH` escape hatch, if set.
+ *
+ * Only the client's **canonical** command (`defaultCli.command`) can be pinned. A pin answers
+ * "which binary should this client run", never "does this other candidate exist" — two different
+ * questions in this codebase:
+ *
+ *  - kimi's service uses `resolveCliCommand('kimi-cli')` as a *legacy discriminator* (`isLegacy`,
+ *    `isKimiNativeL0ChannelAvailable`). Letting a pin answer for `kimi-cli` pinned the discriminator
+ *    to legacy forever, so pointing `CAT_KIMI_PATH` at the modern `kimi` made the service launch
+ *    that binary with the legacy argument set and drop the native `--agent-file` L0 channel.
+ *  - `commands[0]` is the wrong field to key on for the same reason: it is the *detection* candidate
+ *    order, and for kimi it is the legacy name.
+ *
+ * The env var name still comes from the descriptor registry, so there is no second name table here.
+ * Before this existed, only the availability probe read these variables, which made them a false
+ * guarantee: setting one turned the probe green (and silenced the missing-CLI guidance) while the
+ * launch path still resolved by PATH and failed.
+ */
+function pinnedPathFor(command: string): string | null {
+  const descriptor = getClientDescriptorByCommand(command);
+  if (!descriptor || command !== descriptor.defaultCli.command) return null;
+  const envVar = descriptor.pathEnvVar;
+  if (!envVar) return null;
+  const raw = process.env[envVar]?.trim();
+  return raw ? raw : null;
+}
+
+/**
+ * Commands whose cached resolution came from a pin. Needed so that removing the pin later lets
+ * the cache fall back to a PATH resolution instead of serving the pinned binary forever.
+ */
+const pinnedCommands = new Set<string>();
 
 /**
  * Common install directories for CLI tools (non-Windows, relative to $HOME).
@@ -105,6 +155,24 @@ export function invalidateCliCommand(commandOrPath: string): void {
  * spawn ENOENT in a loop until process restart.
  */
 export function resolveCliCommand(command: string, opts?: { skipPathProbe?: boolean }): string | null {
+  // An explicit `CAT_<CLIENT>_PATH` pin wins outright, and an unusable pin is a hard miss rather
+  // than a silent fall-through to a different binary than the operator named. The availability
+  // probe applies the same rule, which is what makes its "configured" verdict predictive of the
+  // launch path instead of a separate claim.
+  const pinned = pinnedPathFor(command);
+  if (pinned !== null) {
+    if (!isExecutableFileAt(pinned)) {
+      resolvedCache.delete(command);
+      pinnedCommands.delete(command);
+      return null;
+    }
+    resolvedCache.set(command, pinned);
+    pinnedCommands.add(command);
+    return pinned;
+  }
+  // The pin was removed since the last resolve: drop the value it wrote so PATH decides again.
+  if (pinnedCommands.delete(command)) resolvedCache.delete(command);
+
   const cached = resolvedCache.get(command);
   if (cached !== undefined) {
     if (existsSync(cached)) return cached;
@@ -210,22 +278,12 @@ export function resolveCliCommandOrBare(command: string): string {
 
 /**
  * Format a user-friendly install hint for a missing CLI.
+ *
+ * Hints come from the shared descriptor registry — the single source of truth for the
+ * ClientId → binary mapping — so adding a CLI teaches every caller its install command at
+ * once. An unknown command keeps the generic fallback.
  */
 export function formatCliNotFoundError(command: string, platform: NodeJS.Platform = process.platform): string {
-  const installHints: Record<string, string> = {
-    claude: 'npm install -g @anthropic-ai/claude-code',
-    codex: 'npm install -g @openai/codex',
-    gemini: 'npm install -g @google/gemini-cli',
-    agy:
-      platform === 'win32'
-        ? 'curl.exe -fsSL https://antigravity.google/cli/install.cmd -o install.cmd && install.cmd && del install.cmd'
-        : 'curl -fsSL https://antigravity.google/cli/install.sh | bash',
-    kimi:
-      platform === 'win32'
-        ? 'irm https://code.kimi.com/kimi-code/install.ps1 | iex'
-        : 'curl -fsSL https://code.kimi.com/kimi-code/install.sh | bash',
-    opencode: 'npm install -g opencode-ai',
-  };
-  const hint = installHints[command] ?? `install the "${command}" CLI`;
+  const hint = installHintForCommand(command, platform) ?? `install the "${command}" CLI`;
   return `${command} CLI 未找到。请先运行 \`${hint}\` 安装，再重试。`;
 }

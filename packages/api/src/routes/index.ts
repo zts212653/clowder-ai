@@ -14,6 +14,7 @@ export { capabilitiesRoutes } from './capabilities.js';
 export { capabilityEvolutionProgramRoutes } from './capability-evolution-program-routes.js';
 export { catsRoutes } from './cats.js';
 export { claudeRescueRoutes } from './claude-rescue.js';
+export { clientsRoutes } from './clients.js';
 export { commandsRoutes } from './commands.js';
 export { communityIssueDraftRoutes } from './community-issue-draft-routes.js';
 export { communityIssueRoutes } from './community-issues.js';

@@ -19,7 +19,11 @@ import { readFileSync } from 'node:fs';
 import { type CatId, createCatId } from '@cat-cafe/shared';
 import { getCatModel } from '../../../../../config/cat-models.js';
 import { createModuleLogger } from '../../../../../infrastructure/logger.js';
-import { buildCliDiagnostics, buildSilentCompletionDiagnostic } from '../../../../../utils/cli-diagnostics.js';
+import {
+  buildCliDiagnostics,
+  buildCliNotFoundDiagnostic,
+  buildSilentCompletionDiagnostic,
+} from '../../../../../utils/cli-diagnostics.js';
 import { formatCliExitError } from '../../../../../utils/cli-format.js';
 import { formatCliNotFoundError, resolveCliCommand } from '../../../../../utils/cli-resolve.js';
 import { isCliError, isCliTimeout, isLivenessWarning, spawnCli } from '../../../../../utils/cli-spawn.js';
@@ -327,7 +331,7 @@ export class OpenCodeAgentService implements L0InjectableAgentService {
           type: 'error' as const,
           catId: this.catId,
           error: formatCliNotFoundError('opencode'),
-          metadata,
+          metadata: { ...metadata, cliDiagnostics: buildCliNotFoundDiagnostic('opencode') },
           timestamp: Date.now(),
         };
         yield { type: 'done' as const, catId: this.catId, metadata, timestamp: Date.now() };

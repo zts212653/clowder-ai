@@ -334,6 +334,7 @@ import {
   capabilityEvolutionProgramRoutes,
   catsRoutes,
   claudeRescueRoutes,
+  clientsRoutes,
   commandsRoutes,
   communityIssueDraftRoutes,
   communityIssueRoutes,
@@ -3660,6 +3661,30 @@ async function main(): Promise<void> {
   await app.register(leaderboardEventsRoutes, { gameStore, achievementStore });
   await app.register(bootcampRoutes, { threadStore });
   await app.register(firstRunQuestRoutes, { threadStore });
+
+  // Provider (agent CLI) availability. Seeded from the persisted snapshot so the first paint
+  // has something to show, then kept current by the periodic loop. Neither the seed nor the
+  // first round is awaited: detection must never delay the listener, and the snapshot is
+  // derived state that is simply rewritten on the next round.
+  const { ProviderAvailabilityRegistry } = await import(
+    './domains/cats/services/agents/providers/ProviderAvailabilityRegistry.js'
+  );
+  const { readProvidersSnapshot, writeProvidersSnapshot } = await import(
+    './domains/cats/services/agents/providers/provider-availability-store.js'
+  );
+  const providerAvailability = new ProviderAvailabilityRegistry({
+    onReport: (report) => {
+      try {
+        writeProvidersSnapshot(report);
+      } catch (error) {
+        app.log.warn({ error: String(error) }, '[api] provider availability snapshot not written');
+      }
+    },
+  });
+  const persistedProviderSnapshot = readProvidersSnapshot();
+  if (persistedProviderSnapshot) providerAvailability.seed(persistedProviderSnapshot.report);
+  providerAvailability.start();
+  await app.register(clientsRoutes, { registry: providerAvailability });
 
   // F229: Concierge routes — reuse the shared conciergeConfigStoreShared created before AgentRouter.
   // conciergeThreadServiceShared is also passed to threadsRoutes so includeConcierge=true works

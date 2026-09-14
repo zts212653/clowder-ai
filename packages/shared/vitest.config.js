@@ -24,6 +24,7 @@ export default defineConfig({
       'src/__tests__/lesson-learning-closure.test.ts',
       'src/__tests__/subject-key.test.ts',
       'src/__tests__/cli-effort.test.ts',
+      'src/__tests__/client-descriptor.test.ts',
       'src/__tests__/codex-speed.test.ts',
       'src/__tests__/dispatch-proposal-types.test.ts',
       'src/__tests__/approval-hub-types.test.ts',

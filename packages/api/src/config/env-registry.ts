@@ -856,6 +856,58 @@ export const ENV_VARS: EnvDefinition[] = [
 
   // --- cli ---
   {
+    name: 'CAT_PROVIDER_DISCOVERY_INTERVAL_MS',
+    defaultValue: '300000',
+    description: 'CLI 可用性周期复检间隔（毫秒）；0 = 只在进程启动时检测一次',
+    category: 'cli',
+    sensitive: false,
+    runtimeEditable: false,
+    restartRequired: true,
+  },
+  {
+    name: 'CAT_ANTHROPIC_PATH',
+    defaultValue: '(未设置)',
+    description:
+      '把 Claude CLI 固定到指定二进制路径。可用性探测与标准 CLI 启动路径都读取它；路径无效时视为"未找到"而不回退到 PATH。注意：ACP 与 Claude 后台 carrier 在解析失败时会退回按裸命令名尝试，这两条路径仍可能走 PATH',
+    category: 'cli',
+    sensitive: false,
+    restartRequired: true,
+  },
+  {
+    name: 'CAT_OPENAI_PATH',
+    defaultValue: '(未设置)',
+    description: '把 Codex CLI 固定到指定二进制路径（行为同 CAT_ANTHROPIC_PATH）',
+    category: 'cli',
+    sensitive: false,
+    restartRequired: true,
+  },
+  {
+    name: 'CAT_GOOGLE_PATH',
+    defaultValue: '(未设置)',
+    description:
+      '把 Antigravity CLI 固定到指定二进制路径。只对规范命令 agy 生效；候选名 gemini 不被覆盖——GEMINI_ADAPTER=gemini-cli 时执行侧按 PATH 解析 gemini，不读此变量（此时可用性探测仍会显示"已配置"）。其余行为同 CAT_ANTHROPIC_PATH',
+    category: 'cli',
+    sensitive: false,
+    restartRequired: true,
+  },
+  {
+    name: 'CAT_KIMI_PATH',
+    defaultValue: '(未设置)',
+    description:
+      '把 Kimi CLI 固定到指定二进制路径。只对规范命令 kimi 生效：服务在 PATH 上找到 legacy kimi-cli 时会优先执行它且不读此变量（因此路径填错也可能仍能启动）。其余行为同 CAT_ANTHROPIC_PATH',
+    category: 'cli',
+    sensitive: false,
+    restartRequired: true,
+  },
+  {
+    name: 'CAT_OPENCODE_PATH',
+    defaultValue: '(未设置)',
+    description: '把 OpenCode CLI 固定到指定二进制路径（行为同 CAT_ANTHROPIC_PATH）',
+    category: 'cli',
+    sensitive: false,
+    restartRequired: true,
+  },
+  {
     name: 'CLI_TIMEOUT_MS',
     defaultValue: DEFAULT_CLI_TIMEOUT_LABEL,
     description: 'CLI 自动终止超时（0 = 关闭，仅人工取消）',

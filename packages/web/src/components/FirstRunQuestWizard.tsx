@@ -202,6 +202,20 @@ export function FirstRunQuestWizard({ open, onClose, onCreated }: FirstRunQuestW
           {step === 'client' && <ClientStep onSelect={handleClientSelect} />}
           {step === 'config' && selectedClient && (
             <ConfigStep
+              // Send the descriptor's canonical command name for this client — NOT the binary
+              // detection resolved. Both alternatives are wrong, and the reasons are verified:
+              //
+              //  - the probe spec table is keyed by canonical CLI name, so a resolved absolute
+              //    path (any CAT_<CLIENT>_PATH pin) always misses and silently degrades to
+              //    "unverified" — precisely the deployment that most wants verifying;
+              //  - the resolved name is not necessarily what this member will run. For google,
+              //    detection accepts either `agy` or `gemini`, while the runtime binary is chosen
+              //    by GeminiAgentService's adapter (GEMINI_ADAPTER, default antigravity-cli →
+              //    `agy`) and never by the member's `cli.command`. Forwarding a resolved `gemini`
+              //    therefore produced a green pass on a binary the member will not spawn.
+              //
+              // The underlying mismatch (probe target vs. executing binary) is an open question
+              // tracked with the umbrella issue, not something to paper over here.
               client={selectedClient.client}
               clientId={selectedClient.provider}
               onComplete={handleConfigComplete}

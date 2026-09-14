@@ -12,6 +12,12 @@ const {
   selectWindowsPathEntry,
 } = await import('../dist/utils/cli-resolve.js');
 
+// The kimi native-L0 discriminator: it reads `resolveCliCommand('kimi-cli')` as an existence
+// predicate, which is why a pin must not answer for that command name.
+const { isKimiNativeL0ChannelAvailable } = await import(
+  '../dist/domains/cats/services/agents/providers/kimi-l0-agent-file.js'
+);
+
 // --- formatCliNotFoundError ---
 
 test('formatCliNotFoundError returns install hint for known CLI', () => {
@@ -527,3 +533,147 @@ test(
     }
   },
 );
+
+// --- CAT_<CLIENT>_PATH pin ---
+//
+// The pin only ever reached the availability probe before this, so setting one turned the probe
+// green while the launch path still resolved by PATH. These assert the launch path honours it, so
+// that a "configured" verdict is predictive of what will actually be spawned.
+
+function withPinnedEnv(envVar, value, command, assertion) {
+  const previous = process.env[envVar];
+  try {
+    if (value === undefined) delete process.env[envVar];
+    else process.env[envVar] = value;
+    invalidateCliCommand(command);
+    assertion();
+  } finally {
+    if (previous === undefined) delete process.env[envVar];
+    else process.env[envVar] = previous;
+    invalidateCliCommand(command);
+  }
+}
+
+test('a pinned CAT_<CLIENT>_PATH wins over PATH on the launch path', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'cli-pin-'));
+  const pinned = join(dir, 'claude');
+  writeFileSync(pinned, '#!/bin/sh\n');
+  try {
+    withPinnedEnv('CAT_ANTHROPIC_PATH', pinned, 'claude', () => {
+      assert.equal(resolveCliCommand('claude'), pinned);
+    });
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('a pin answers only for the client canonical command, never for its other candidates', () => {
+  // `CAT_KIMI_PATH` pins `kimi` — the command this client runs. It must NOT answer for `kimi-cli`:
+  // that name is a legacy discriminator in the kimi service (`resolveCliCommand('kimi-cli') !==
+  // null`), so a pin answering for it reported "legacy" forever and made the service launch the
+  // pinned binary with the legacy argument set, dropping the native --agent-file L0 channel.
+  const dir = mkdtempSync(join(tmpdir(), 'cli-pin-kimi-'));
+  const pinned = join(dir, 'kimi');
+  writeFileSync(pinned, '#!/bin/sh\n');
+  try {
+    withPinnedEnv('CAT_KIMI_PATH', pinned, 'kimi', () => {
+      assert.equal(resolveCliCommand('kimi'), pinned);
+      invalidateCliCommand('kimi-cli');
+      assert.notEqual(
+        resolveCliCommand('kimi-cli'),
+        pinned,
+        'the legacy discriminator must not be answered by the pin',
+      );
+      invalidateCliCommand('kimi-cli');
+    });
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('CAT_GOOGLE_PATH pins agy (the canonical command), not the legacy gemini alias', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'cli-pin-google-'));
+  const pinned = join(dir, 'agy');
+  writeFileSync(pinned, '#!/bin/sh\n');
+  try {
+    withPinnedEnv('CAT_GOOGLE_PATH', pinned, 'agy', () => {
+      assert.equal(resolveCliCommand('agy'), pinned);
+      invalidateCliCommand('gemini');
+      assert.notEqual(resolveCliCommand('gemini'), pinned);
+      invalidateCliCommand('gemini');
+    });
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('a pinned CAT_KIMI_PATH keeps the native L0 channel available', () => {
+  // The regression the pin scope exists to prevent: with the pin set, the legacy discriminator must
+  // still answer "no legacy kimi-cli here", so the modern binary keeps its native channel.
+  const dir = mkdtempSync(join(tmpdir(), 'cli-pin-l0-'));
+  const emptyPath = mkdtempSync(join(tmpdir(), 'cli-pin-empty-'));
+  const pinned = join(dir, 'kimi');
+  writeFileSync(pinned, '#!/bin/sh\n');
+  const previous = {
+    home: process.env.HOME,
+    path: process.env.PATH,
+    pin: process.env.CAT_KIMI_PATH,
+  };
+  try {
+    process.env.CAT_KIMI_PATH = pinned;
+    // Neutralise PATH *and* HOME: the resolver also probes known per-user directories, so an empty
+    // PATH alone would not prove the discriminator is clean.
+    process.env.PATH = emptyPath;
+    process.env.HOME = emptyPath;
+    invalidateCliCommand('kimi');
+    invalidateCliCommand('kimi-cli');
+
+    assert.equal(isKimiNativeL0ChannelAvailable(), true);
+  } finally {
+    for (const [key, value] of [
+      ['HOME', previous.home],
+      ['PATH', previous.path],
+      ['CAT_KIMI_PATH', previous.pin],
+    ]) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+    invalidateCliCommand('kimi');
+    invalidateCliCommand('kimi-cli');
+    rmSync(dir, { recursive: true, force: true });
+    rmSync(emptyPath, { recursive: true, force: true });
+  }
+});
+
+test('an unusable pin is a hard miss, never a silent fall-through to a different binary', () => {
+  // Missing path…
+  withPinnedEnv('CAT_ANTHROPIC_PATH', join(tmpdir(), 'definitely-not-installed-claude'), 'claude', () => {
+    assert.equal(resolveCliCommand('claude'), null);
+  });
+  // …and a path that exists but is a directory: the probe applies the same isFile test, so the
+  // resolver must not accept it either.
+  const dir = mkdtempSync(join(tmpdir(), 'cli-pin-dir-'));
+  try {
+    withPinnedEnv('CAT_ANTHROPIC_PATH', dir, 'claude', () => {
+      assert.equal(resolveCliCommand('claude'), null);
+    });
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('removing the pin lets PATH decide again instead of serving the pinned binary', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'cli-pin-drop-'));
+  const pinned = join(dir, 'claude');
+  writeFileSync(pinned, '#!/bin/sh\n');
+  try {
+    withPinnedEnv('CAT_ANTHROPIC_PATH', pinned, 'claude', () => {
+      assert.equal(resolveCliCommand('claude'), pinned);
+    });
+    // The helper restored the previous env (unset) and invalidated, so a fresh resolve must not
+    // hand back the pinned path from the cache.
+    assert.notEqual(resolveCliCommand('claude'), pinned);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});

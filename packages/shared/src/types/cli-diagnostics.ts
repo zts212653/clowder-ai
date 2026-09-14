@@ -50,7 +50,19 @@ export type CliErrorReasonCode =
    *  the same argv is rejected identically every time, so this reasonCode also switches
    *  OFF the transient-exit retry in invoke-helpers.isTransientCliExitCode1. Distinct from
    *  invalid_config (a config *file* is malformed) and spawn_failed (binary missing). */
-  | 'incompatible_cli_arguments';
+  | 'incompatible_cli_arguments'
+  /**
+   * The provider's CLI binary is not installed on this machine — resolution failed before any
+   * process was started, so there is no exit code and no stderr to classify.
+   *
+   * Distinct from `spawn_failed` on purpose. `spawn_failed` means a process was attempted and
+   * died starting, and it is a member of FrustrationDetector's TRIGGERING_REASON_CODES: an
+   * auto-filed issue is the right response to a defect in our spawn path. A user who has not
+   * installed Claude Code yet is not a defect in our code, so this code is deliberately
+   * excluded from that allowlist — otherwise every fresh install would file an issue against
+   * the project. The repair is an install command, which `publicHint` carries.
+   */
+  | 'cli_not_found';
 
 export type CliActiveWriterRecoveryState = 'owner_busy' | 'retiring' | 'external_or_unknown';
 

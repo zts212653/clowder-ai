@@ -48,6 +48,12 @@ const EXCLUDED_REASON_CODES = new Set([
   // and operator fatigue. F212 cliDiagnostics already surfaces the rephrase hint
   // to the user, and the underlying decision is upstream policy (not our layer).
   'upstream_policy_reject',
+  // The provider CLI is simply not installed on this machine. Listed here to make the
+  // intent explicit: unlike spawn_failed (a process we tried to start and lost), a missing
+  // binary is user-environment state with a documented install command, not a defect in our
+  // code — auto-filing would put one issue on the project per fresh install. The final gate
+  // is TRIGGERING_REASON_CODES above, so keep this code out of it.
+  'cli_not_found',
 ]);
 
 /** Minimum permission denials in CANCEL_WINDOW_MS to trigger cancel_burst. */

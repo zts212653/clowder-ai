@@ -1,7 +1,10 @@
 import {
   builtinAccountFamilyForClient,
   type CliEffortPreset,
+  CREATABLE_CLIENT_IDS,
   getCliEffortOptionsForProvider,
+  getClientDescriptor,
+  isCloudOnlyProviderMarker,
   builtinAccountIdForClient as sharedBuiltinAccountIdForClient,
 } from '@cat-cafe/shared';
 import type { CatData } from '@/hooks/useCatData';
@@ -11,7 +14,13 @@ import { defaultAcpCommandForClient, defaultAcpStartupArgsForClient } from './hu
 import { defaultMcpSupportForClient } from './hub-cat-editor.protocols';
 import type { CatStrategyEntry, StrategyType } from './hub-strategy-types';
 
-export type ClientId = 'anthropic' | 'openai' | 'google' | 'kimi' | 'opencode' | 'antigravity' | 'catagent' | 'acp';
+/**
+ * Clients the member editor can create, derived from the shared descriptor registry so this
+ * union can no longer drift from the server's write schema (it is the seventh place the
+ * clientId whitelist used to be duplicated). `a2a` is excluded — a remote peer needs
+ * `CAT_<ID>_A2A_URL` before it can be routed.
+ */
+export type ClientId = (typeof CREATABLE_CLIENT_IDS)[number];
 /** @deprecated Use ClientId instead. */
 export type ClientValue = ClientId;
 export type SessionChainValue = 'true' | 'false';
@@ -90,16 +99,11 @@ export interface StrategyFormState {
   executionStatus: NonNullable<CatStrategyEntry['executionStatus']>;
 }
 
-export const CLIENT_OPTIONS: Array<{ value: ClientId; label: string }> = [
-  { value: 'anthropic', label: 'Claude' },
-  { value: 'openai', label: 'Codex' },
-  { value: 'google', label: 'Gemini' },
-  { value: 'kimi', label: 'Kimi' },
-  { value: 'opencode', label: 'OpenCode' },
-  { value: 'antigravity', label: 'Antigravity' },
-  { value: 'catagent', label: 'CatAgent' },
-  { value: 'acp', label: 'ACP Client' },
-];
+/** Member-editor picker options, driven by the shared descriptor registry. */
+export const CLIENT_OPTIONS: Array<{ value: ClientId; label: string }> = CREATABLE_CLIENT_IDS.map((value) => ({
+  value,
+  label: getClientDescriptor(value)?.label ?? value,
+}));
 
 export const SESSION_CHAIN_OPTIONS: Array<{ value: SessionChainValue; label: string }> = [
   { value: 'true', label: 'true' },
@@ -153,6 +157,42 @@ export function usesCliTransport(form: Pick<HubCatEditorFormState, 'clientId' | 
       form.clientId === 'kimi' ||
       form.clientId === 'opencode')
   );
+}
+
+/** How the member being edited reaches a runtime. */
+export type MemberCliDispatch =
+  | { kind: 'cli' }
+  | { kind: 'acp'; command: string }
+  | { kind: 'cloud'; provider: string }
+  | { kind: 'none' };
+
+/**
+ * Whether — and through what — this member dispatches to a local runtime.
+ *
+ * Availability is probed per clientId, but the *need* is per member, and the two diverge in both
+ * directions:
+ *
+ *  - a cloud-only marker (`provider: 'openai-chatgpt-pro'`) means no local CLI is ever spawned,
+ *    so a clientId-level "未安装" would be a false alarm pointing at a pointless install;
+ *  - an ACP member spawns a user-configured command (`variant.acp.command`, resolved through
+ *    `resolveCliCommandOrBare`) that the probe never inspects, so "无需本机 CLI" would hide
+ *    exactly the failure this card exists to surface;
+ *  - bridge/remote clients (antigravity / catagent / a2a) genuinely have no local binary.
+ *
+ * Only `kind: 'cli'` may be answered by the clientId-level probe.
+ */
+export function resolveMemberCliDispatch(
+  form: Pick<HubCatEditorFormState, 'clientId' | 'provider' | 'acpEnabled' | 'acpCommand'>,
+): MemberCliDispatch {
+  if (isCloudOnlyProviderMarker(form.provider)) {
+    return { kind: 'cloud', provider: form.provider };
+  }
+  if (form.acpEnabled) {
+    const command = form.acpCommand.trim();
+    return { kind: 'acp', command: command.length > 0 ? command : '(未配置命令)' };
+  }
+  if (usesCliTransport(form)) return { kind: 'cli' };
+  return { kind: 'none' };
 }
 
 export function splitMentionPatterns(raw: string): string[] {

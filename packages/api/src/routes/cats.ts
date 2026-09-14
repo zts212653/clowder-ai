@@ -10,7 +10,9 @@ import {
   type CatId,
   type CliConfig,
   type ClientId,
+  CREATABLE_CLIENT_IDS,
   catRegistry,
+  defaultCliForClient,
   getCliEffortOptionsForProvider,
   getDefaultCliEffortForProvider,
   normalizeCliEffortForProvider,
@@ -69,7 +71,12 @@ const cliSchema = z.object({
   carrier: z.enum(['exec_json', 'app_server']).nullable().optional(),
 });
 
-const clientSchema = z.enum(['anthropic', 'openai', 'google', 'kimi', 'antigravity', 'opencode', 'catagent', 'acp']);
+/**
+ * Write-side clientId whitelist, derived from the shared descriptor registry so this route
+ * can no longer disagree with the loader, the catalog store or the detection specs about
+ * which clients exist. `a2a` is deliberately excluded — see `ClientDescriptor.creatable`.
+ */
+const clientSchema = z.enum(CREATABLE_CLIENT_IDS);
 
 /** F161: ACP transport config schema — matches AcpVariantConfig from cat-config-loader. */
 const acpConfigSchema = z
@@ -253,27 +260,6 @@ function buildCatResponseMetadataResolver(projectRoot: string) {
   }
 
   return (catId: string): CatResponseMetadata => ({ roster: roster[catId] ?? null });
-}
-
-function defaultCliForClient(client: ClientId): { command: string; outputFormat: string } {
-  switch (client) {
-    case 'anthropic':
-      return { command: 'claude', outputFormat: 'stream-json' };
-    case 'openai':
-      return { command: 'codex', outputFormat: 'json' };
-    case 'google':
-      return { command: 'agy', outputFormat: 'plainText' };
-    case 'kimi':
-      return { command: 'kimi', outputFormat: 'stream-json' };
-    case 'opencode':
-      return { command: 'opencode', outputFormat: 'json' };
-    case 'antigravity':
-      return { command: 'antigravity', outputFormat: 'json' };
-    case 'a2a':
-      return { command: 'a2a', outputFormat: 'json' };
-    default:
-      return { command: client, outputFormat: 'json' };
-  }
 }
 
 type CliPatch = z.infer<typeof cliSchema>;

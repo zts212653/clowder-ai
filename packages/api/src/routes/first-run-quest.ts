@@ -8,7 +8,7 @@
 
 import { type ChildProcess, exec, execFile, spawn } from 'node:child_process';
 import { promisify } from 'node:util';
-import { builtinAccountIdForClient, type ClientId, protocolForClient } from '@cat-cafe/shared';
+import { builtinAccountIdForClient, type ClientId, getClientDescriptor, protocolForClient } from '@cat-cafe/shared';
 import type { FastifyPluginAsync } from 'fastify';
 import { z } from 'zod';
 import { resolveByAccountRef } from '../config/account-resolver.js';
@@ -402,8 +402,8 @@ export const firstRunQuestRoutes: FastifyPluginAsync<FirstRunQuestRoutesOptions>
       return { ok: false, error: '未找到该账号配置，请刷新后重试' };
     }
 
-    /* Resolve CLI tool name: explicit `client` field > derived from clientId */
-    const cliName = clientName ?? builtinAccountIdForClient(clientId as ClientId);
+    /* Resolve which CLI binary to probe: explicit `client` field > descriptor > account table */
+    const cliName = resolveProbeCliName(clientName, clientId);
     if (!cliName) {
       return { ok: false, error: `未知的 client: ${clientId}` };
     }
@@ -428,6 +428,28 @@ export const firstRunQuestRoutes: FastifyPluginAsync<FirstRunQuestRoutesOptions>
 
 /** @internal Exported for testing only. */
 export { buildProbeEnv };
+
+/**
+ * Resolve which CLI binary the connectivity probe should run.
+ *
+ * The descriptor registry is the source of truth for "which binary backs this clientId"; the
+ * builtin account table is not — even though it carries a `cliName`, it is an identity table that
+ * also maps `family` and `builtin_<family>` refs (changing its `google` entry would break account
+ * binding), and its value there is the *account* id `gemini`, which is not what a google member
+ * executes: that binary comes from GeminiAgentService's adapter. Using it here probed `gemini` for
+ * google whenever a caller omitted `client`, reproducing on the server exactly the
+ * "probe target ≠ executing binary" gap that the web side was fixed for.
+ *
+ * `defaultCli.command` rather than `commands[0]`: the latter is the *detection* candidate order,
+ * whose first element for kimi is the legacy `kimi-cli` — a name the probe spec table does not
+ * key on, so kimi would have stopped being probeable.
+ *
+ * @internal Exported for testing only.
+ */
+export function resolveProbeCliName(clientName: string | undefined, clientId: string): string | null {
+  if (clientName) return clientName;
+  return getClientDescriptor(clientId)?.defaultCli.command ?? builtinAccountIdForClient(clientId as ClientId);
+}
 
 /**
  * Build env vars that mirror production credential injection for each provider.

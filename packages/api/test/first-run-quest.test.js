@@ -606,4 +606,60 @@ describe('tryCliProbe (unit)', () => {
     assert.ok(args.includes('--print'), 'should use --print flag');
     assert.ok(args.includes('--prompt'), 'should use --prompt flag');
   });
+
+  test('agy: unprobeable, and must not be spawned to find that out', async () => {
+    // `agy` (Antigravity CLI) is what google members actually run, but CLI_PROBE_SPECS has no
+    // entry for it. Returning null is what makes the route answer `{ok: true, skipped: true}`,
+    // and the wizard is now responsible for reading that as UNVERIFIED rather than as a pass.
+    //
+    // This test fails the moment an agy spec is added, which is deliberate: adding one changes
+    // what the wizard reports for every agy machine, so it must be a thought-through change
+    // rather than a silent one.
+    const { tryCliProbe } = await import('../dist/routes/first-run-quest.js');
+    const result = await tryCliProbe('agy', {
+      spawnFn: () => {
+        throw new Error('agy must not be spawned while it has no probe spec');
+      },
+    });
+    assert.equal(result, null, 'agy is currently unprobeable');
+  });
+
+  test('gemini: has a probe spec — but that does not prove a google member will run', async () => {
+    // Kept as a fact about the probe table, NOT as evidence that a google member is verified.
+    // GeminiAgentService picks its binary from `GEMINI_ADAPTER` (default `antigravity-cli` →
+    // `agy`) and never reads the member's `cli.command`, so on a machine carrying only `gemini`
+    // a green probe here would certify a binary the member does not spawn. The wizard therefore
+    // sends google's canonical command (`agy`), which has no spec, and the connectivity step
+    // reports "unverified" rather than a pass.
+    const { tryCliProbe } = await import('../dist/routes/first-run-quest.js');
+    const result = await tryCliProbe('gemini', { spawnFn: createMockSpawn({ stdout: 'pong' }) });
+    assert.ok(result, 'gemini must have a probe spec');
+    assert.equal(result.ok, true);
+  });
+
+  test('resolveProbeCliName: the descriptor decides, not the builtin account table', async () => {
+    // The account table's `google` entry is the ACCOUNT id `gemini`; the canonical binary is
+    // `agy`. Reading the account table as a CLI name is what made an omitted `client` field probe
+    // `gemini` for google — the same probe-target/executing-binary gap the web side was fixed for.
+    const { resolveProbeCliName } = await import('../dist/routes/first-run-quest.js');
+
+    assert.equal(resolveProbeCliName(undefined, 'google'), 'agy');
+    assert.equal(resolveProbeCliName(undefined, 'anthropic'), 'claude');
+    assert.equal(resolveProbeCliName(undefined, 'openai'), 'codex');
+    assert.equal(resolveProbeCliName(undefined, 'opencode'), 'opencode');
+    // kimi must be the canonical `kimi`, not `kimi-cli`: that is the detection candidate order,
+    // and `CLI_PROBE_SPECS` does not key on it.
+    assert.equal(resolveProbeCliName(undefined, 'kimi'), 'kimi');
+
+    // An explicit caller value still wins — the route must not second-guess the wizard.
+    assert.equal(resolveProbeCliName('gemini', 'google'), 'gemini');
+
+    // A known clientId with no probe spec no longer reads as "未知的 client"; it reaches the
+    // route's skipped/unverified answer, which is the honest outcome (the client is known, only
+    // its probe is missing).
+    assert.equal(resolveProbeCliName(undefined, 'acp'), 'acp');
+
+    // Unknown clientId keeps the previous contract.
+    assert.equal(resolveProbeCliName(undefined, 'not-a-client'), null);
+  });
 });

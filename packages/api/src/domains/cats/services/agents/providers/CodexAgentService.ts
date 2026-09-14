@@ -52,7 +52,11 @@ import {
 } from '../../../../../config/codex-cli.js';
 import { estimateCostFromTokens } from '../../../../../config/model-pricing.js';
 import { createModuleLogger } from '../../../../../infrastructure/logger.js';
-import { buildActiveWriterRecoveryDiagnostic, buildCliDiagnostics } from '../../../../../utils/cli-diagnostics.js';
+import {
+  buildActiveWriterRecoveryDiagnostic,
+  buildCliDiagnostics,
+  buildCliNotFoundDiagnostic,
+} from '../../../../../utils/cli-diagnostics.js';
 import { formatCliExitError } from '../../../../../utils/cli-format.js';
 import { CLI_EXECUTION_ID_ENV, CLI_EXECUTION_OWNER_BINDING_ENV } from '../../../../../utils/cli-process-ownership.js';
 import { formatCliNotFoundError, resolveCliCommand } from '../../../../../utils/cli-resolve.js';
@@ -1729,7 +1733,7 @@ export class CodexAgentService implements AgentService {
           type: 'error' as const,
           catId: this.catId,
           error: formatCliNotFoundError(this.cliCommand),
-          metadata,
+          metadata: { ...metadata, cliDiagnostics: buildCliNotFoundDiagnostic(this.cliCommand) },
           timestamp: Date.now(),
         };
         yield { type: 'done' as const, catId: this.catId, metadata, timestamp: Date.now() };

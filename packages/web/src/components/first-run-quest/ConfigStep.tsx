@@ -25,6 +25,19 @@ function humanizeError(msg: string): string {
   return msg;
 }
 
+type ConnectivityTestResult = {
+  ok: boolean;
+  /**
+   * The probe could not run for this CLI. Kept apart from `ok` on purpose: the server answers
+   * `{ok: true, skipped: true}` when it has no probe spec, and treating that as a pass lets the
+   * user through the connectivity gate having verified nothing.
+   */
+  unverified?: boolean;
+  /** The user confirmed the CLI by hand, which is the only way past an unverifiable probe. */
+  acknowledged?: boolean;
+  message?: string;
+};
+
 export function ConfigStep({ client, clientId, onComplete }: ConfigStepProps) {
   const [profiles, setProfiles] = useState<ProfileItem[]>([]);
   const [loading, setLoading] = useState(true);
@@ -32,11 +45,11 @@ export function ConfigStep({ client, clientId, onComplete }: ConfigStepProps) {
   const [expandedId, setExpandedId] = useState('');
   const [selectedModel, setSelectedModel] = useState('');
   const [testing, setTesting] = useState(false);
-  const [testResult, setTestResult] = useState<{ ok: boolean; message?: string } | null>(null);
+  const [testResult, setTestResult] = useState<ConnectivityTestResult | null>(null);
   const [showModal, setShowModal] = useState(false);
   const [editProfile, setEditProfile] = useState<UnifiedAuthEditData | undefined>();
   const testSigRef = useRef('');
-  const testCacheRef = useRef<Map<string, { ok: boolean; message?: string }>>(new Map());
+  const testCacheRef = useRef<Map<string, ConnectivityTestResult>>(new Map());
 
   const fetchProfiles = useCallback(async () => {
     const res = await apiFetch('/api/accounts');
@@ -105,10 +118,18 @@ export function ConfigStep({ client, clientId, onComplete }: ConfigStepProps) {
         }),
       });
       if (testSigRef.current !== sig) return;
-      const body = (await res.json()) as { ok: boolean; message?: string; error?: string };
-      const result = {
-        ok: body.ok,
-        message: body.ok ? (body.message ?? '连接成功！') : humanizeError(body.error ?? body.message ?? '连接失败'),
+      const body = (await res.json()) as { ok: boolean; skipped?: boolean; message?: string; error?: string };
+      // `skipped` means the server has no probe spec for this CLI, so nothing was verified. It
+      // must not be cached as a pass nor satisfy the gate below.
+      const unverified = body.skipped === true;
+      const result: ConnectivityTestResult = {
+        ok: body.ok && !unverified,
+        ...(unverified ? { unverified: true } : {}),
+        message: unverified
+          ? (body.message ?? `${client} 暂不支持自动连通性探测，请在终端确认可用`)
+          : body.ok
+            ? (body.message ?? '连接成功！')
+            : humanizeError(body.error ?? body.message ?? '连接失败'),
       };
       if (result.ok) testCacheRef.current.set(sig, result);
       setTestResult(result);
@@ -154,7 +175,7 @@ export function ConfigStep({ client, clientId, onComplete }: ConfigStepProps) {
     return <p className="py-8 text-center text-sm text-cafe-muted">加载认证配置...</p>;
   }
 
-  const canProceed = selectedProfileId && selectedModel && testResult?.ok;
+  const canProceed = Boolean(selectedProfileId && selectedModel && (testResult?.ok || testResult?.acknowledged));
 
   return (
     <div>
@@ -179,6 +200,7 @@ export function ConfigStep({ client, clientId, onComplete }: ConfigStepProps) {
             onSelect={() => handleSelectProfile(p.id)}
             onModelSelect={handleModelSelect}
             onTest={handleTest}
+            onAcknowledge={() => setTestResult((current) => (current ? { ...current, acknowledged: true } : current))}
             onProfileRefresh={handleProfileRefresh}
             onEdit={() => {
               setEditProfile({

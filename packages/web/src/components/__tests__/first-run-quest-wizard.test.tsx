@@ -128,8 +128,9 @@ describe('FirstRunQuestWizard', () => {
     expect(document.body.textContent).toContain('暂无可用角色模板');
   });
 
-  it('sends clientId (not client) in POST /api/cats payload', async () => {
+  it('sends clientId (not client) in POST /api/cats, and the canonical CLI name to the probe', async () => {
     let catsPayload: Record<string, unknown> | null = null;
+    let connectivityPayload: Record<string, unknown> | null = null;
 
     mockApiFetch.mockImplementation(async (url: string, init?: RequestInit) => {
       if (url.includes('/api/cat-templates')) {
@@ -154,7 +155,11 @@ describe('FirstRunQuestWizard', () => {
               client: 'claude',
               provider: 'anthropic',
               label: 'Claude',
-              cli: 'claude',
+              // Deliberately a resolved absolute path (what a CAT_<CLIENT>_PATH pin produces) so
+              // the assertion below proves the wizard forwards the canonical command name rather
+              // than whatever detection resolved: the probe spec table is keyed by canonical name,
+              // and a path would always miss it.
+              cli: '/opt/pinned/claude',
               installed: true,
               hasApiKey: false,
             },
@@ -180,6 +185,7 @@ describe('FirstRunQuestWizard', () => {
         });
       }
       if (url.includes('/api/first-run/connectivity-test')) {
+        connectivityPayload = JSON.parse(String(init?.body)) as Record<string, unknown>;
         return jsonResponse({ ok: true, message: '连接成功' });
       }
       if (url === '/api/cats' && init?.method === 'POST') {
@@ -244,5 +250,11 @@ describe('FirstRunQuestWizard', () => {
     expect(catsPayload).not.toBeNull();
     expect(catsPayload!.clientId).toBe('anthropic');
     expect(catsPayload!.client).toBeUndefined();
+
+    // Assert: the connectivity probe must be addressed by canonical CLI name. The fixture's
+    // `cli` is an absolute path (a CAT_<CLIENT>_PATH pin); forwarding that would miss the probe
+    // spec table and degrade a pinned deployment to "unverified".
+    expect(connectivityPayload).not.toBeNull();
+    expect(connectivityPayload!.client).toBe('claude');
   });
 });

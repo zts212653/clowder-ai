@@ -1,6 +1,6 @@
 import { existsSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from 'node:fs';
 import { dirname, relative, resolve, sep } from 'node:path';
-import type { CatCafeConfig, ClientId, RosterEntry } from '@cat-cafe/shared';
+import { type CatCafeConfig, CLIENT_IDS, type ClientId, type RosterEntry } from '@cat-cafe/shared';
 import { resolveBuiltinClientForProvider } from './account-resolver.js';
 import {
   GEMINI35_CAT_ID,
@@ -51,8 +51,12 @@ function writeFileAtomic(filePath: string, content: string): void {
   }
 }
 
-/** clowder-ai#340 P5: ClientId values — used to detect old `provider` field holding a clientId. */
-const CLIENT_ID_VALUES = new Set(['anthropic', 'openai', 'google', 'kimi', 'antigravity', 'opencode', 'a2a']);
+/**
+ * clowder-ai#340 P5: ClientId values — used to detect a legacy `provider` field that actually
+ * holds a clientId. Derived from the descriptor registry so this read heuristic cannot fall
+ * behind the set of clients the system knows about (it previously omitted `catagent`/`acp`).
+ */
+const CLIENT_ID_VALUES: ReadonlySet<string> = new Set<string>(CLIENT_IDS);
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
