@@ -87,6 +87,29 @@ The standard web test wrapper fails before starting Vitest because its
 same unit tests (no browser processes); it is not a claim that the wrapper or
 full gate passed. This patch does not alter the unrelated resource-admission code.
 
+### Full-gate attempt (2026-09-14)
+
+Candidate `60c5d4029` on public base `c0cf29f` was tested with
+`pnpm gate --no-rebase --risk security`. Recursive build and all-package
+`tsc --noEmit` passed. The public test stage exited 1: 23,359 tests reported,
+22,560 passed, 650 failed, 29 cancelled, 120 skipped. Later lint/check stages
+were not reached; this is **not** a green gate.
+
+The first install used `--ignore-scripts`, leaving the local `better-sqlite3`
+native binding unbuilt; the gate's subsequent frozen install did not repair it.
+That is a local preparation error, not evidence of a SQLite implementation defect.
+`pnpm --filter @cat-cafe/api rebuild better-sqlite3` subsequently succeeded, as
+did an in-memory SQL probe. A bounded rerun of `world/world-store`,
+`callback-hold-ball-wakewhen`, and `collective-connector-routes` reported 55/56
+passing. The remaining Collective route test returns `ROUTE_THREAD_UNAVAILABLE`:
+its unchanged fixture defaults `createdBy` to `owner_1`, while the imported
+request headers default to `owner-user` when no owner environment override exists.
+Those fixture/route files are identical to the public base and are not changed here.
+
+The original failed gate is retained; the 55/56 diagnosis is not a full rerun or
+a replacement verdict. Together with the missing web-wrapper dependency and
+native acceptance below, this keeps the contribution a **Draft**, not merge-ready.
+
 ## Native acceptance still required
 
 In a separately authorized isolated native Computer Use host, record the exact
