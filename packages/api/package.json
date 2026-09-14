@@ -46,7 +46,7 @@
     "test:integration": "bash ./scripts/with-test-home.sh node --test test/integration/*.test.js",
     "test:pty": "pnpm run build && node --import $(pwd)/test/helpers/setup-cat-registry.js --test --test-timeout=120000 test/f230-pty-driver.test.js",
     "test:cli": "node --import tsx --test test/cli/*.test.ts",
-    "test:runtime-interaction": "CAT_CAFE_DISABLE_SHARED_STATE_PREFLIGHT=1 bash ./scripts/with-test-home.sh node --import tsx --test --test-timeout=60000 test/runtime-interaction-service.test.ts test/runtime-interaction-routes.test.ts test/runtime-interaction-composition.test.ts test/runtime-interaction-card-publisher.test.ts test/codex-runtime-interaction-adapter.test.ts test/codex-runtime-interaction-wire-edge.test.ts test/approval-hub/f306-approval-adapter.test.ts test/codex-app-server-protocol-resilience.test.mjs",
+    "test:runtime-interaction": "CAT_CAFE_DISABLE_SHARED_STATE_PREFLIGHT=1 bash ./scripts/with-test-home.sh node --import tsx --test --test-timeout=60000 test/runtime-interaction-service.test.ts test/runtime-interaction-routes.test.ts test/runtime-interaction-composition.test.ts test/runtime-interaction-card-publisher.test.ts test/codex-runtime-interaction-adapter.test.ts test/codex-computer-use-approval.test.ts test/codex-runtime-interaction-wire-edge.test.ts test/approval-hub/f306-approval-adapter.test.ts test/codex-app-server-protocol-resilience.test.mjs",
     "persist-dormant-cursors": "pnpm run build && node scripts/persist-dormant-cursors.mjs",
     "lint": "tsc --noEmit",
     "clean": "rm -rf dist"

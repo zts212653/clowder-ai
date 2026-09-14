@@ -64,6 +64,27 @@ export const mcpUrlParamsSchema = z
   .object({ ...mcpBase, mode: z.literal('url'), elicitationId: nonBlank, url: z.string().url() })
   .passthrough();
 
+const computerUseAppApprovalSchema = z
+  .object({
+    codex_approval_kind: z.literal('mcp_tool_call'),
+    connector_id: z.literal('computer-use'),
+    tool_name: nonBlank,
+    tool_params: z.object({ app: nonBlank }).passthrough(),
+    persist: z.array(z.enum(['session', 'always'])),
+  })
+  .passthrough();
+
+/** Native options are proposals for the user, never an authorization by themselves. */
+export function computerUseAppApprovalPersistence(
+  serverName: string,
+  metadata: unknown,
+): readonly ('session' | 'always')[] {
+  if (serverName !== 'cua_repl') return [];
+  const parsed = computerUseAppApprovalSchema.safeParse(metadata);
+  if (!parsed.success) return [];
+  return [...new Set(parsed.data.persist)];
+}
+
 export function normalizeCodexMcpFormSchema(input: unknown): RuntimeInteractionObjectSchema {
   const schema = z
     .object({

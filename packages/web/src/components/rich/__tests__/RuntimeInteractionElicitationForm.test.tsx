@@ -128,6 +128,38 @@ describe('RuntimeInteractionElicitationForm', () => {
       }),
     );
   });
+
+  it.each([
+    ['acceptForSession', '本次会话允许此应用'],
+    ['acceptAlways', '始终允许此应用'],
+  ])('submits the explicit Computer Use choice %s with empty form content', async (decisionId, label) => {
+    const request: RuntimeInteractionRequest = {
+      ...formRequest([]),
+      message: 'Allow Computer Use to use "Google Chrome"?',
+      requestedSchema: { type: 'object', properties: {}, additionalProperties: false },
+      decisions: [
+        { id: 'accept', label: '提交', outcome: 'accept' },
+        { id: decisionId, label, outcome: 'accept' },
+        { id: 'decline', label: '拒绝', outcome: 'decline' },
+        { id: 'cancel', label: '取消', outcome: 'cancel' },
+      ],
+    };
+    vi.mocked(apiFetch).mockResolvedValue(okJson({ interaction: record(request) }));
+    await render(root);
+    expect(apiFetch).toHaveBeenCalledTimes(1); // Reading the card must not approve it.
+    const button = [...container.querySelectorAll('button')].find((item) => item.textContent === label);
+    expect(button).toBeDefined();
+    expect(button?.disabled).toBe(false);
+    await act(async () => {
+      button?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    expect(apiFetch).toHaveBeenLastCalledWith(
+      '/api/runtime-interactions/interaction-ui/respond',
+      expect.objectContaining({
+        body: JSON.stringify({ cardRef, response: { kind: 'decision', decisionId, content: {} } }),
+      }),
+    );
+  });
 });
 
 async function render(root: Root): Promise<void> {

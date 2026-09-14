@@ -11,6 +11,7 @@ import type { RuntimeInteractionPort } from '../../../../runtime-interaction/por
 import { isCodexMcpApprovalCompatibilityRequest } from './CodexAppServerEventMapper.js';
 import {
   commandParamsSchema,
+  computerUseAppApprovalPersistence,
   fileParamsSchema,
   mcpFormParamsSchema,
   mcpUrlParamsSchema,
@@ -168,6 +169,7 @@ function buildBinding(
   const form = mcpFormParamsSchema.safeParse(params);
   if (form.success) {
     const provider = providerRef(requestId, method, form.data);
+    const persistence = computerUseAppApprovalPersistence(form.data.serverName, form.data._meta);
     return {
       request: {
         ...baseRequest(interactionId, context.owner, provider, now, `${form.data.serverName} 需要补充信息`),
@@ -175,9 +177,9 @@ function buildBinding(
         mode: 'form',
         message: form.data.message,
         requestedSchema: normalizeCodexMcpFormSchema(form.data.requestedSchema),
-        decisions: elicitationDecisions(),
+        decisions: elicitationDecisions(persistence),
       },
-      toProviderResponse: (response) => elicitationResponse(response),
+      toProviderResponse: (response) => elicitationResponse(response, persistence),
     };
   }
   const url = mcpUrlParamsSchema.parse(params);
@@ -251,9 +253,11 @@ function fixedApprovalDecisions(): RuntimeInteractionDecision[] {
   ];
 }
 
-function elicitationDecisions(): RuntimeInteractionDecision[] {
+function elicitationDecisions(persistence: readonly ('session' | 'always')[] = []): RuntimeInteractionDecision[] {
   return [
     decision('accept', '提交', 'accept'),
+    ...(persistence.includes('session') ? [decision('acceptForSession', '本次会话允许此应用', 'accept')] : []),
+    ...(persistence.includes('always') ? [decision('acceptAlways', '始终允许此应用', 'accept')] : []),
     decision('decline', '拒绝', 'decline'),
     decision('cancel', '取消', 'cancel'),
   ];
@@ -279,13 +283,26 @@ function answerResponse(response: RuntimeInteractionResponse): Array<[string, st
   return Object.entries(response.answers);
 }
 
-function elicitationResponse(response: RuntimeInteractionResponse): JsonObject {
-  if (response.kind !== 'decision' || !['accept', 'decline', 'cancel'].includes(response.decisionId)) {
-    throw new Error('invalid elicitation response');
-  }
+function elicitationResponse(
+  response: RuntimeInteractionResponse,
+  persistence: readonly ('session' | 'always')[] = [],
+): JsonObject {
+  if (response.kind !== 'decision') throw new Error('invalid elicitation response');
+  const nativePersistence: Record<string, 'session' | 'always'> = {
+    acceptForSession: 'session',
+    acceptAlways: 'always',
+  };
+  const persist = Object.hasOwn(nativePersistence, response.decisionId)
+    ? nativePersistence[response.decisionId]
+    : undefined;
+  if (persist !== undefined && !persistence.includes(persist))
+    throw new Error('elicitation persistence was not offered');
+  const action = persist === undefined ? response.decisionId : 'accept';
+  if (!['accept', 'decline', 'cancel'].includes(action)) throw new Error('invalid elicitation response');
   return {
-    action: response.decisionId,
-    ...(response.decisionId === 'accept' && response.content ? { content: response.content } : {}),
+    action,
+    ...(action === 'accept' && response.content ? { content: response.content } : {}),
+    ...(persist === undefined ? {} : { _meta: { persist } }),
   };
 }
 
