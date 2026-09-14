@@ -690,6 +690,7 @@ export const catsRoutes: FastifyPluginAsync<CatsRoutesOptions> = async (app, opt
           roleDescription: string;
           personality: string;
           teamStrengths?: string;
+          defaultClient?: string;
         }[];
         clientDefaults?: Record<string, { defaultModel: string; models: string[] }>;
       };
