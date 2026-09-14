@@ -133,7 +133,12 @@ import {
   encodeMemoryCueSourceRef,
 } from '../../session/request-generation-source-policy.js';
 import { resolveDefaultClaudeMcpServerPath } from '../providers/ClaudeAgentService.js';
-import { extractUserEnvTemplates, hasSupportedEnvTemplate, resolveEnvMap } from '../providers/env-map.js';
+import {
+  extractUserEnvTemplates,
+  hasSupportedEnvTemplate,
+  isAtlasCloudBaseUrl,
+  resolveEnvMap,
+} from '../providers/env-map.js';
 import { compileL0ViaSubprocess } from '../providers/l0-compiler.js';
 import { OC_INSTRUCTIONS_ONLY_ENV } from '../providers/OpenCodeAgentService.js';
 import {
@@ -2840,7 +2845,9 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
       // Protocol-level mapping (anthropic → ANTHROPIC_API_KEY, openai → OPENAI_API_KEY, google → GEMINI_API_KEY, etc.)
       if (effectiveProtocol) {
         const protocolKey = effectiveProtocol === 'openai-responses' ? 'openai' : effectiveProtocol;
-        const envFromMap = resolveEnvMap(protocolKey, undefined, credentialAccount, userEnvTemplates);
+        const providerKey =
+          protocolKey === 'openai' && isAtlasCloudBaseUrl(resolvedAccount.baseUrl) ? 'atlascloud' : undefined;
+        const envFromMap = resolveEnvMap(protocolKey, providerKey, credentialAccount, userEnvTemplates);
         Object.assign(callbackEnv, envFromMap);
       }
     }
