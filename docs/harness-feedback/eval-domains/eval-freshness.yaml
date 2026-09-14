@@ -53,10 +53,13 @@ metricGlossary:
     component: F254-AC-E9
     source: derived:freshness-closure-replay
 systemThreadId: thread_eval_freshness
+# evalCat: was gpt52 (GPT-5.4, retired) → codex (notRoutable, R1 review catch) → gpt55.
+# gpt55 ≠ handoffTarget ownerCatId (codex) below, so evalCat/handoff independence restored.
+# Migration: 2026-08-29, fix/eval-domain-gpt52-to-codex.
 evalCat:
-  catId: gpt52
-  handle: "@gpt52"
-  model: gpt-5.4
+  catId: gpt55
+  handle: "@gpt55"
+  model: gpt-5.5
 frequency: weekly
 triggerPolicy:
   mode: time_only
