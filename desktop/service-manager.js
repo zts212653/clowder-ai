@@ -9,9 +9,28 @@ const fs = require('node:fs');
 const os = require('node:os');
 const crypto = require('node:crypto');
 
+const {
+  INSTANCE_MARKER_KEY,
+  encodeCommand,
+  evaluateRedisOwnership,
+  formatOwnershipRefusal,
+  parseReply,
+} = require('./redis-ownership');
+const { instanceFilePath, loadOrCreateInstance, saveInstance } = require('./desktop-instance');
+const { formatShutdownPlan, orderShutdownTargets, remainingBudget, stageTimeoutMs } = require('./shutdown-plan');
+const { DEFAULT_FRONTEND_PORT, normalizeRememberedPair, portPairCandidates } = require('./port-pair');
+const { describeRewrites, hasApiRewrites, retargetManifest, serializeManifest } = require('./routes-manifest');
+
 const POLL_INTERVAL_MS = 500;
 const MAX_WAIT_MS = 120_000;
 const REDIS_FALLBACK_PORT_CHECK_MS = 5_000;
+// Default Redis port for a desktop instance. Never assumed to be ours: an
+// existing listener has to prove ownership via INSTANCE_MARKER_KEY first.
+const DEFAULT_REDIS_PORT = 6399;
+// The desktop UI and API are loopback-only. `next start` binds 0.0.0.0 unless
+// told otherwise, which would publish the UI — and, through its same-origin
+// /api rewrite, the API — to the local network.
+const LOOPBACK_HOST = '127.0.0.1';
 
 const IS_WIN = process.platform === 'win32';
 const IS_MAC = process.platform === 'darwin';
@@ -35,6 +54,15 @@ function resolveUserDataDir() {
     ? path.join(process.env.HOME || os.homedir(), 'Library', 'Application Support')
     : process.env.LOCALAPPDATA || path.join(process.env.USERPROFILE || '', 'AppData', 'Local');
   return path.join(base, brandName);
+}
+
+// Recorded in the instance file for diagnostics only (never used for logic).
+function resolveAppVersion() {
+  try {
+    return require('./package.json').version || null;
+  } catch {
+    return null;
+  }
 }
 
 // Desktop log alongside API logs in the user data directory.
@@ -98,6 +126,78 @@ class ServiceManager {
     this.onStatus = onStatus || (() => {});
     this.procs = {};
     this.memoryMode = false;
+    // Instance identity + the Redis port this instance actually uses. Resolved
+    // in startAll() before any service is spawned.
+    this.instance = null;
+    this.redisPort = DEFAULT_REDIS_PORT;
+    // Set when an existing Redis was refused; drives the user-facing warning.
+    this.redisRefusal = null;
+    // Set once prepareRuntime() has loaded the instance and resolved the ports.
+    this.prepared = false;
+    // Recorded by prepareRuntime() and re-thrown by startAll() (single error path).
+    this.prepareError = null;
+  }
+
+  /**
+   * Runtime facts the shell needs in order to warn about a degraded start.
+   * Returns a copy so callers cannot mutate internal state.
+   */
+  getRuntimeStatus() {
+    return {
+      memoryMode: this.memoryMode,
+      redisPort: this.redisPort,
+      redisRefusal: this.redisRefusal ? { ...this.redisRefusal } : null,
+      frontendPort: this.frontendPort,
+      apiPort: this.apiPort,
+    };
+  }
+
+  /**
+   * Load the instance identity and pick the Web/API ports.
+   *
+   * Idempotent: the shell calls it before it needs the renderer and updater
+   * origins, and startAll() calls it again, so either order works.
+   */
+  async prepareRuntime() {
+    if (this.prepared) return this.getRuntimeStatus();
+
+    const userDataDir = this._getUserDataDir();
+    this._ensureUserDataDir(userDataDir);
+
+    const instanceFile = instanceFilePath(userDataDir);
+    const {
+      record: instance,
+      created,
+      replacedCorrupt,
+    } = loadOrCreateInstance({ filePath: instanceFile, appVersion: resolveAppVersion() });
+    this.instance = instance;
+
+    if (created) {
+      saveInstance({ filePath: instanceFile, record: instance });
+      log(
+        `Desktop instance ${replacedCorrupt ? 'record replaced (missing/corrupt)' : 'created'}: ${instance.instanceId}`,
+      );
+    } else {
+      log(`Desktop instance loaded: ${instance.instanceId} (redisPort=${instance.redisPort ?? 'unset'})`);
+    }
+
+    await this._resolvePortsDeferred(instanceFile);
+
+    this.prepared = true;
+    return this.getRuntimeStatus();
+  }
+
+  // Port resolution can fail (every candidate pair is taken). The shell calls
+  // prepareRuntime() before it can show a startup error, so the failure is
+  // recorded here and re-thrown by startAll(), keeping a single startup-error
+  // path in the shell. The origins computed in between are moot: startup fails.
+  async _resolvePortsDeferred(instanceFile) {
+    try {
+      await this._resolvePorts(instanceFile);
+    } catch (err) {
+      this.prepareError = err;
+      log(`Port resolution failed: ${err.message}`);
+    }
   }
 
   async startAll() {
@@ -133,10 +233,16 @@ class ServiceManager {
     // NOTE: workspace junction repair must happen at install time (admin).
     // Runtime repair in Program Files fails with EPERM for non-admin users.
 
+    // ---- Instance identity + Web/API ports ----
+    // Also callable from the shell before startAll(), because the renderer and
+    // updater origins depend on the ports. Idempotent.
+    await this.prepareRuntime();
+    if (this.prepareError) throw this.prepareError;
+
     // ---- Redis ----
     this.onStatus('Starting Redis...');
     await this._startRedis(userDataDir);
-    log(`Redis phase complete. memoryMode=${this.memoryMode}`);
+    log(`Redis phase complete. memoryMode=${this.memoryMode}, redisPort=${this.redisPort}`);
 
     // ---- API ----
     this.onStatus('Starting API server...');
@@ -431,6 +537,52 @@ class ServiceManager {
     };
   }
 
+  /**
+   * Decide which Redis port this instance may use.
+   *
+   * A responding Redis is NOT proof of ownership: it may belong to a Clowder
+   * server, a system service, or another desktop instance. Only a matching
+   * instance marker is accepted; otherwise that database is left untouched and
+   * this instance starts its own Redis on a free port.
+   *
+   * @returns {Promise<{action: 'adopt'|'start'|'memory', port?: number}>}
+   */
+  async _resolveRedisPort(preferredPort) {
+    if (!(await this._isPortOpen(preferredPort))) return { action: 'start', port: preferredPort };
+
+    const probe = await this._redisCommand(preferredPort, ['GET', INSTANCE_MARKER_KEY]);
+    if (probe.kind === 'unreachable') {
+      log(`Port ${preferredPort} occupied by a non-Redis listener — using memory store`);
+      return { action: 'memory' };
+    }
+
+    const instanceId = this.instance?.instanceId;
+    const ownership = evaluateRedisOwnership({ instanceId, markerValue: probe.value });
+    if (ownership.canAdopt) {
+      log(`Adopting existing Redis on ${preferredPort}: ${ownership.reason}`);
+      return { action: 'adopt', port: preferredPort };
+    }
+
+    log(
+      formatOwnershipRefusal({
+        port: preferredPort,
+        instanceId,
+        verdict: ownership.verdict,
+        reason: ownership.reason,
+      }),
+    );
+    this.redisRefusal = { port: preferredPort, verdict: ownership.verdict, reason: ownership.reason };
+    this.onStatus(`Port ${preferredPort} belongs to another Redis — starting a private one`);
+
+    const alternative = await this._findFreePort();
+    if (!alternative) {
+      log('No free port available for a private Redis — using memory store');
+      return { action: 'memory' };
+    }
+    log(`Private Redis port: ${alternative} (${preferredPort} is taken by another instance)`);
+    return { action: 'start', port: alternative };
+  }
+
   async _startRedis(userDataDir) {
     // Windows:   .cat-cafe/redis/windows/redis-server.exe
     // macOS:     .cat-cafe/redis/darwin-{arm64|x64}/redis-server
@@ -439,39 +591,61 @@ class ServiceManager {
     const redisDir = path.join(this.root, '.cat-cafe', 'redis', platformSeg);
     const portableRedis = path.join(redisDir, `redis-server${EXE_SUFFIX}`);
 
-    // Already running — verify it is actually Redis
-    if (await this._isPortOpen(6399)) {
-      const isRedis = await this._verifyRedisPing(6399);
-      if (isRedis) {
-        this.onStatus('Redis already running on 6399');
-        return;
-      }
-      log('Port 6399 occupied by non-Redis — using memory store');
+    // ---- Ownership check on the remembered/default port ----
+    const preferredPort = this.instance?.redisPort || DEFAULT_REDIS_PORT;
+    const decision = await this._resolveRedisPort(preferredPort);
+
+    if (decision.action === 'memory') {
       this.memoryMode = true;
       return;
     }
 
-    const hasPortable = fs.existsSync(portableRedis);
-    const hasSystem = await this._commandExists('redis-server');
+    this.redisPort = decision.port;
+    if (decision.action === 'adopt') {
+      this.onStatus(`Redis already running on ${this.redisPort} (owned by this instance)`);
+      return;
+    }
 
-    if (!hasPortable && !hasSystem) {
-      log('Redis not found — using memory store');
+    const launch = await this._resolveRedisCommand(portableRedis, redisDir);
+    if (!launch) {
       this.memoryMode = true;
       return;
     }
 
-    // Persist data to writable user directory so sessions survive app restart.
-    const redisDataDir = path.join(userDataDir, 'data', 'redis');
-    let redisCmd = 'redis-server';
-    // Cap maxclients to a conservative desktop value so Redis does not emit a
-    // scary "Server can't set maximum open files" warning on low-ulimit systems
-    // (e.g. packaged Windows installs where the default 10000 exceeds the
-    // process file descriptor limit).  512 is far above local desktop needs.
-    const redisArgs = [
+    this._startProcess('redis', launch.cmd, this._redisArgs(userDataDir), { cwd: launch.cwd });
+    const redisReady = await this._waitForPortWithFallback(this.redisPort, 'Redis', 'redis');
+    if (!redisReady) {
+      this._abandonRedis();
+      return;
+    }
+
+    await this._claimRedis(userDataDir);
+  }
+
+  // Resolve which redis-server to launch: the packaged portable build wins,
+  // otherwise fall back to a system install. The specific reason is logged on
+  // failure so the memory-store fallback is never silent.
+  async _resolveRedisCommand(portableRedis, redisDir) {
+    if (fs.existsSync(portableRedis)) {
+      if (this._testRedisBinary(portableRedis, redisDir)) return { cmd: portableRedis, cwd: redisDir };
+      log('Redis binary test failed — using memory store');
+      return null;
+    }
+    if (await this._commandExists('redis-server')) return { cmd: 'redis-server', cwd: this.root };
+    log('Redis not found — using memory store');
+    return null;
+  }
+
+  // Data lives in the writable user directory so sessions survive a restart.
+  // maxclients is capped to a conservative desktop value so Redis does not emit
+  // a "can't set maximum open files" warning on low-ulimit systems (e.g. the
+  // packaged Windows build, whose default 10000 exceeds the fd limit).
+  _redisArgs(userDataDir) {
+    return [
       '--port',
-      '6399',
+      String(this.redisPort),
       '--dir',
-      redisDataDir,
+      path.join(userDataDir, 'data', 'redis'),
       '--save',
       '60 1',
       '--appendonly',
@@ -479,31 +653,82 @@ class ServiceManager {
       '--maxclients',
       '512',
     ];
-    let redisCwd = this.root;
+  }
 
-    if (hasPortable) {
-      redisCmd = portableRedis;
-      redisCwd = redisDir;
-      const canRun = this._testRedisBinary(portableRedis, redisDir);
-      if (!canRun) {
-        log('Redis binary test failed — using memory store');
-        this.memoryMode = true;
-        return;
-      }
+  _abandonRedis() {
+    log('Redis failed to start — using memory store');
+    this.memoryMode = true;
+    if (this.procs.redis && !this.procs.redis.killed) {
+      try {
+        this.procs.redis.kill();
+      } catch {}
+    }
+    delete this.procs.redis;
+  }
+
+  // Claim a freshly started Redis so a later run can prove ownership, and
+  // remember the port so a crashed run is re-adopted instead of spawning a
+  // second Redis against the same data directory.
+  async _claimRedis(userDataDir) {
+    const instanceId = this.instance?.instanceId;
+    if (!instanceId) return;
+
+    const reply = await this._redisCommand(this.redisPort, ['SET', INSTANCE_MARKER_KEY, instanceId]);
+    if (reply.kind === 'unreachable' || reply.kind === 'error') {
+      log(
+        `WARNING: could not write ${INSTANCE_MARKER_KEY} on port ${this.redisPort}; the next run will refuse to adopt this Redis`,
+      );
+      return;
     }
 
-    this._startProcess('redis', redisCmd, redisArgs, { cwd: redisCwd });
-    const redisReady = await this._waitForPortWithFallback(6399, 'Redis', 'redis');
-    if (!redisReady) {
-      log('Redis failed to start — using memory store');
-      this.memoryMode = true;
-      if (this.procs.redis && !this.procs.redis.killed) {
+    try {
+      this.instance = { ...this.instance, redisPort: this.redisPort };
+      saveInstance({ filePath: instanceFilePath(userDataDir), record: this.instance });
+    } catch (err) {
+      log(`Could not persist the Redis port for this instance: ${err.message}`);
+    }
+  }
+
+  // Ask the OS for a free loopback port for a private Redis instance.
+  _findFreePort() {
+    return new Promise((resolve) => {
+      const srv = net.createServer();
+      srv.once('error', () => resolve(null));
+      srv.listen(0, '127.0.0.1', () => {
+        const { port } = srv.address();
+        srv.close(() => resolve(port));
+      });
+    });
+  }
+
+  // Send one Redis command over a raw socket and parse the reply.
+  // Returns { kind: 'unreachable' } when the listener is not a usable Redis.
+  _redisCommand(port, args) {
+    return new Promise((resolve) => {
+      const sock = new net.Socket();
+      sock.setTimeout(1500);
+      let buffer = '';
+      let settled = false;
+      const finish = (result) => {
+        if (settled) return;
+        settled = true;
         try {
-          this.procs.redis.kill();
+          sock.destroy();
         } catch {}
-      }
-      delete this.procs.redis;
-    }
+        resolve(result);
+      };
+
+      sock.once('connect', () => sock.write(encodeCommand(args)));
+      sock.on('data', (data) => {
+        buffer += data.toString();
+        const reply = parseReply(buffer);
+        if (reply.complete) finish(reply);
+      });
+      sock.once('error', () => finish({ kind: 'unreachable' }));
+      sock.once('timeout', () => finish({ kind: 'unreachable' }));
+      sock.once('close', () => finish({ kind: 'unreachable' }));
+      sock.connect(port, '127.0.0.1');
+    });
   }
 
   _testRedisBinary(exe, cwd) {
@@ -531,7 +756,109 @@ class ServiceManager {
     });
   }
 
+  // Pick the first candidate port pair whose BOTH members are free, and remember
+  // it so the next launch lands on the same pair.
+  async _resolvePorts(instanceFile) {
+    const remembered = normalizeRememberedPair(this.instance);
+    const candidates = remembered ? [remembered, ...portPairCandidates()] : portPairCandidates();
+    const seen = new Set();
+
+    for (const pair of candidates) {
+      if (seen.has(pair.frontend)) continue;
+      seen.add(pair.frontend);
+
+      const busy = (await Promise.all([this._isPortOpen(pair.frontend), this._isPortOpen(pair.api)])).some(Boolean);
+      if (busy) {
+        log(`Port pair ${pair.frontend}/${pair.api} is in use — trying the next candidate`);
+        continue;
+      }
+
+      this.frontendPort = pair.frontend;
+      this.apiPort = pair.api;
+      log(`Using Web port ${pair.frontend} and API port ${pair.api}`);
+      if (!remembered || remembered.frontend !== pair.frontend) this._rememberPorts(instanceFile);
+      return;
+    }
+
+    throw new Error(
+      `No free Web/API port pair found among ${seen.size} candidates starting at ${DEFAULT_FRONTEND_PORT}.\n` +
+        '  why: the desktop needs two adjacent free ports, because the renderer derives the API port as frontend + 1.\n' +
+        `  fix: stop whatever holds ports ${DEFAULT_FRONTEND_PORT}-${DEFAULT_FRONTEND_PORT + seen.size}, then restart Clowder AI.`,
+    );
+  }
+
+  _rememberPorts(instanceFile) {
+    try {
+      this.instance = { ...this.instance, frontendPort: this.frontendPort, apiPort: this.apiPort };
+      saveInstance({ filePath: instanceFile, record: this.instance });
+    } catch (err) {
+      log(`Could not persist the Web/API ports: ${err.message}`);
+    }
+  }
+
+  /**
+   * Point the built Next.js rewrites at the API port this run is using.
+   *
+   * Next resolves `rewrites()` at build time into .next/routes-manifest.json, and
+   * `next start` routes from that file — re-evaluating next.config.js at start
+   * has no effect (measured). So a non-default API port can only be applied by
+   * rewriting the manifest before the server starts.
+   *
+   * The manifest lives in the install directory, which is read-only for a
+   * per-machine install. When the port has moved and the file cannot be written
+   * this fails loudly on purpose: starting the Web server anyway would serve a UI
+   * whose server-side /api, /socket.io and /uploads routes point elsewhere, which
+   * looks like "the app opened but nothing works".
+   */
+  _retargetRoutesManifest() {
+    const manifestPath = path.join(this.root, 'packages', 'web', '.next', 'routes-manifest.json');
+    const apiOrigin = `http://127.0.0.1:${this.apiPort}`;
+
+    if (!fs.existsSync(manifestPath)) {
+      log(`No routes-manifest.json at ${manifestPath} — skipping retarget (the Web server will not route /api)`);
+      return;
+    }
+
+    let manifest;
+    try {
+      manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
+    } catch (err) {
+      throw new Error(
+        `Could not parse ${manifestPath}: ${err.message}\n` +
+          '  why: the API origin baked into the build cannot be verified or retargeted.\n' +
+          '  fix: reinstall Clowder AI, or rebuild the Web package.',
+      );
+    }
+
+    if (!hasApiRewrites(manifest)) {
+      log('routes-manifest.json has no absolute API rewrites — leaving it untouched');
+      return;
+    }
+
+    const patched = retargetManifest(manifest, { apiOrigin });
+    if (serializeManifest(patched) === serializeManifest(manifest)) {
+      log(`routes-manifest.json already targets ${apiOrigin}`);
+      return;
+    }
+
+    try {
+      fs.writeFileSync(manifestPath, serializeManifest(patched), 'utf8');
+    } catch (err) {
+      throw new Error(
+        `Could not retarget ${manifestPath} to ${apiOrigin}: ${err.message}\n` +
+          '  why: the install directory is read-only, so the API origin baked in at build time cannot follow a moved port.\n' +
+          '  fix: free the default ports 3003/3004, or install Clowder AI per-user so its files stay writable.',
+      );
+    }
+
+    for (const line of describeRewrites(patched)) log(`  retargeted ${line}`);
+  }
+
   _startNextJs() {
+    // Rewrites are read from the build output, not from next.config.js, so the
+    // manifest has to be correct before the server starts.
+    this._retargetRoutesManifest();
+
     const webDir = path.join(this.root, 'packages', 'web');
     const nodeExe = resolveNode(this.root) || 'node';
 
@@ -564,11 +891,11 @@ class ServiceManager {
     let cmd, args;
     if (nextJs) {
       cmd = nodeExe;
-      args = [nextJs, 'start', '--port', String(this.frontendPort)];
+      args = [nextJs, ...this._nextStartArgs(this.frontendPort)];
     } else if (IS_WIN) {
       cmd = 'cmd.exe';
       const localNext = path.join(webDir, 'node_modules', '.bin', 'next.cmd');
-      args = ['/c', fs.existsSync(localNext) ? localNext : 'next.cmd', 'start', '--port', String(this.frontendPort)];
+      args = ['/c', fs.existsSync(localNext) ? localNext : 'next.cmd', ...this._nextStartArgs(this.frontendPort)];
     } else {
       // macOS/Linux fallback: spawn node against any next binary on PATH.
       // In practice 'deployed' above is always found after pnpm deploy, so
@@ -579,6 +906,14 @@ class ServiceManager {
 
     log(`Starting Next.js: ${cmd} ${args.join(' ')}`);
     this._startProcess('web', cmd, args, { cwd: webDir });
+  }
+
+  // `next start` binds 0.0.0.0 unless --hostname says otherwise, which would
+  // expose the desktop UI (and its /api, /socket.io and /uploads rewrites) to
+  // the local network. The API already defaults to 127.0.0.1, so the Web UI is
+  // pinned to loopback to match.
+  _nextStartArgs(frontendPort) {
+    return ['start', '--port', String(frontendPort), '--hostname', LOOPBACK_HOST];
   }
 
   _startProcess(name, cmd, args, opts = {}) {
@@ -625,7 +960,9 @@ class ServiceManager {
       env.MEMORY_STORE = '1';
       delete env.REDIS_URL;
     } else {
-      env.REDIS_URL = 'redis://localhost:6399';
+      // Use the port this instance actually started/owns, which may differ from
+      // DEFAULT_REDIS_PORT when another Redis already held the default.
+      env.REDIS_URL = `redis://127.0.0.1:${this.redisPort}`;
     }
 
     // Apply API-specific env overrides (writable paths, telemetry salt, etc.)
@@ -699,30 +1036,6 @@ class ServiceManager {
     });
   }
 
-  _verifyRedisPing(port) {
-    return new Promise((resolve) => {
-      const sock = new net.Socket();
-      sock.setTimeout(1000);
-      let buffer = '';
-      sock.once('connect', () => {
-        sock.write('PING\r\n');
-      });
-      sock.on('data', (data) => {
-        buffer += data.toString();
-        if (buffer.includes('+PONG')) {
-          sock.destroy();
-          resolve(true);
-        }
-      });
-      sock.once('error', () => resolve(false));
-      sock.once('timeout', () => {
-        sock.destroy();
-        resolve(false);
-      });
-      sock.connect(port, '127.0.0.1');
-    });
-  }
-
   async _waitForPort(port, label) {
     const deadline = Date.now() + MAX_WAIT_MS;
     while (Date.now() < deadline) {
@@ -787,24 +1100,48 @@ class ServiceManager {
   }
 
   async stopAll() {
-    const KILL_TIMEOUT_MS = 5000;
-    const killPromises = [];
+    const targets = orderShutdownTargets(Object.keys(this.procs));
+    if (targets.length === 0) return;
 
-    for (const [name, proc] of Object.entries(this.procs)) {
-      if (!proc || proc.killed) continue;
+    const startedAt = Date.now();
+    log(`[desktop] ordered shutdown: ${formatShutdownPlan(targets)}`);
+
+    // Sequential on purpose. Killing everything at once loses the guarantee
+    // that Redis outlives the API's final writes; each stage waits for the
+    // previous one to actually exit before the next begins. The whole teardown
+    // stays inside TOTAL_SHUTDOWN_BUDGET_MS so the Windows installer's bounded
+    // coordinated-quit window is never overrun.
+    for (const target of targets) {
+      const proc = this.procs[target.name];
+      if (!proc) continue;
       // Skip children that already exited on their own — their PID may have
       // been reused by Windows, so taskkill could hit an unrelated process.
       if (proc.exitCode !== null || proc.signalCode !== null) {
-        log(`[desktop] ${name} already exited (code=${proc.exitCode}), skipping`);
+        log(`[desktop] ${target.name} already exited (code=${proc.exitCode}), skipping`);
         continue;
       }
-      log(`[desktop] stopping ${name} (pid=${proc.pid})...`);
-
-      killPromises.push(this._killProcessTree(name, proc, KILL_TIMEOUT_MS));
+      const timeoutMs = stageTimeoutMs(target, remainingBudget(startedAt));
+      log(`[desktop] stopping ${target.name} (pid=${proc.pid}) — ${target.reason}`);
+      await this._killProcessTree(target.name, proc, timeoutMs);
     }
 
-    await Promise.allSettled(killPromises);
     this.procs = {};
+  }
+
+  // Resolve once the child has exited, or false after the bound elapses.
+  // Used to make shutdown ordering real rather than nominal.
+  _waitForExit(proc, timeoutMs) {
+    return new Promise((resolve) => {
+      if (proc.exitCode !== null || proc.signalCode !== null) {
+        resolve(true);
+        return;
+      }
+      const timer = setTimeout(() => resolve(false), timeoutMs);
+      proc.once('exit', () => {
+        clearTimeout(timer);
+        resolve(true);
+      });
+    });
   }
 
   async _killProcessTree(name, proc, timeoutMs) {
@@ -817,7 +1154,8 @@ class ServiceManager {
       // On Windows, proc.kill('SIGTERM') only kills the direct child process.
       // Child processes spawned by it (e.g., cmd.exe → node, or node → workers)
       // become orphans. Use taskkill /T (tree) /F (force) to kill the entire
-      // process tree rooted at the PID.
+      // process tree rooted at the PID. taskkill without /F is a no-op for
+      // console children, so there is no graceful window worth waiting for.
       try {
         execSync(`taskkill /PID ${proc.pid} /T /F`, {
           timeout: timeoutMs,
@@ -829,27 +1167,21 @@ class ServiceManager {
         // taskkill exits non-zero if the process is already gone — that's fine
         log(`[${name}] taskkill: ${err.message}`);
       }
+      // Confirm the exit so the next stage starts from a settled state.
+      await this._waitForExit(proc, 2000);
       return;
     }
 
-    // macOS/Linux: SIGTERM first, then SIGKILL after timeout
+    // macOS/Linux: SIGTERM first, then SIGKILL after the grace period.
     proc.kill('SIGTERM');
 
-    const exited = await new Promise((resolve) => {
-      if (proc.exitCode !== null) return resolve(true);
-      const timer = setTimeout(() => resolve(false), timeoutMs);
-      proc.once('exit', () => {
-        clearTimeout(timer);
-        resolve(true);
-      });
-    });
+    if (await this._waitForExit(proc, timeoutMs)) return;
 
-    if (!exited) {
-      log(`[${name}] did not exit after SIGTERM, sending SIGKILL`);
-      try {
-        proc.kill('SIGKILL');
-      } catch {}
-    }
+    log(`[${name}] did not exit after SIGTERM, sending SIGKILL`);
+    try {
+      proc.kill('SIGKILL');
+    } catch {}
+    await this._waitForExit(proc, 2000);
   }
 }
 
