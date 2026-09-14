@@ -18,6 +18,8 @@ import { parseDocument } from 'yaml';
 export interface DossierProfileDiagnostic {
   catId: string;
   reason: 'invalid_yaml' | 'unclosed_block' | 'invalid_identity' | 'duplicate_profile';
+  /** One-based line of the structured-profile marker. */
+  line: number;
 }
 
 export interface DossierEngagementPolicy {
@@ -65,28 +67,32 @@ export function parseDossierProfilesWithDiagnostics(markdownContent: string): {
   const profiles = new Map<string, DossierProfile>();
   const diagnostics: DossierProfileDiagnostic[] = [];
 
-  // Extract fenced yaml blocks: ```yaml ... ```
-  const yamlBlockPattern = /```yaml\r?\n([\s\S]*?)(?:```|$)/g;
+  // Only a fence line at the opening indentation closes a block; inline backticks are YAML data.
+  const yamlBlockPattern = /^([ \t]*)```yaml\r?\n([\s\S]*?)(^\1```[ \t]*\r?$|(?![\s\S]))/gm;
   for (const match of markdownContent.matchAll(yamlBlockPattern)) {
-    const blockContent = match[1].trim();
+    const blockContent = match[2].trim();
     // Check for structured-profile marker
     const markerMatch = blockContent.match(/^# structured-profile:\s*cat:(.+)$/m);
     if (!markerMatch) continue;
 
     const catId = markerMatch[1].trim();
-    if (!match[0].endsWith('```')) {
-      diagnostics.push({ catId, reason: 'unclosed_block' });
+    const markerOffset = match.index + match[0].indexOf(markerMatch[0]);
+    const line = markdownContent.slice(0, markerOffset).split('\n').length;
+    if (!match[3]) {
+      diagnostics.push({ catId, reason: 'unclosed_block', line });
       continue;
     }
     if (parseDocument(blockContent).errors.length > 0) {
-      diagnostics.push({ catId, reason: 'invalid_yaml' });
+      diagnostics.push({ catId, reason: 'invalid_yaml', line });
     }
     const profile = parseYamlBlock(blockContent);
-    if (!profile || profile.entityId !== `cat:${catId}`) {
-      diagnostics.push({ catId, reason: 'invalid_identity' });
+    // Routing requires a matching direct identity even when the roster projection recovers nested fields.
+    const directIdentity = extractDirectStringField(blockContent, 'entityId');
+    if (!profile || profile.entityId !== `cat:${catId}` || directIdentity !== `cat:${catId}`) {
+      diagnostics.push({ catId, reason: 'invalid_identity', line });
     }
     if (profile) {
-      if (profiles.has(catId)) diagnostics.push({ catId, reason: 'duplicate_profile' });
+      if (profiles.has(catId)) diagnostics.push({ catId, reason: 'duplicate_profile', line });
       profiles.set(catId, profile);
     }
   }
@@ -229,7 +235,7 @@ function extractObjectBlock(content: string, field: string): string | undefined 
 function directChildIndent(content: string): number | undefined {
   const indents = content
     .split('\n')
-    .filter((line) => line.trim())
+    .filter((line) => line.trim() && !line.trimStart().startsWith('#'))
     .map((line) => line.length - line.trimStart().length);
   return indents.length > 0 ? Math.min(...indents) : undefined;
 }

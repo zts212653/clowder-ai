@@ -4,6 +4,7 @@ import {
   type RoutingReasonV1,
   routingPreflightDecisionV1Schema,
 } from '@cat-cafe/shared';
+import { CAPABILITY_PROFILE_INVALID_REASON } from './CapabilityProfileRevisionSource.js';
 import type {
   ResolveRoutingContextInput,
   RoutingContextResolution,
@@ -269,7 +270,8 @@ export class RoutingPreflightService {
       const disposition =
         candidate.availability === 'unavailable'
           ? ('rejected' as const)
-          : candidate.availability === 'available'
+          : candidate.availability === 'available' &&
+              !candidate.reasons.some((reason) => reason.code === CAPABILITY_PROFILE_INVALID_REASON)
             ? ('allowed' as const)
             : ('warned' as const);
       return {
