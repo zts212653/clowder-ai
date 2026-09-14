@@ -31,6 +31,7 @@ export async function deliverConnectorMessage(
   input: ConnectorDeliveryInput,
 ): Promise<ConnectorDeliveryResult> {
   const stored = await deps.messageStore.append({
+    provenance: { author: 'external_user', routed: false, observation: 'original' },
     threadId: input.threadId,
     userId: input.userId,
     catId: null,

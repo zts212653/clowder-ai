@@ -96,6 +96,10 @@ fi
     hooks: {
       Stop: [hookEntry(scriptPath)],
       PostToolUse: postToolUseHooks,
+      // LI-005: capture tool execution failures for durable trigger classification.
+      // PostToolUseFailure fires when a tool call fails; HookSidechannelConsumer bridges
+      // it as tool_result(error) so failed hold_ball doesn't suppress void_ack hint.
+      PostToolUseFailure: [hookEntry(scriptPath)],
     },
   };
   writeFileSync(settingsPath, JSON.stringify(settings, null, 2), 'utf8');

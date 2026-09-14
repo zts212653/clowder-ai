@@ -228,6 +228,7 @@ describe('P2-5: Tombstone store parity — getByThreadAfter keeps tombstones', (
     const threadId = `tombstone-mem-${Date.now()}`;
 
     const _m1 = store.append({
+      provenance: { author: 'user', routed: false, observation: 'original' },
       userId: 'u1',
       catId: null,
       content: 'keep',
@@ -236,6 +237,7 @@ describe('P2-5: Tombstone store parity — getByThreadAfter keeps tombstones', (
       threadId,
     });
     const m2 = store.append({
+      provenance: { author: 'user', routed: false, observation: 'original' },
       userId: 'u1',
       catId: null,
       content: 'delete-me',
@@ -244,6 +246,7 @@ describe('P2-5: Tombstone store parity — getByThreadAfter keeps tombstones', (
       threadId,
     });
     const _m3 = store.append({
+      provenance: { author: 'user', routed: false, observation: 'original' },
       userId: 'u1',
       catId: null,
       content: 'also-keep',
@@ -269,6 +272,7 @@ describe('P2-5: Tombstone store parity — getByThreadAfter keeps tombstones', (
     const threadId = `tombstone-redis-${Date.now()}`;
 
     const m1 = await store.append({
+      provenance: { author: 'user', routed: false, observation: 'original' },
       userId: 'u1',
       catId: null,
       content: 'keep-redis',
@@ -277,6 +281,7 @@ describe('P2-5: Tombstone store parity — getByThreadAfter keeps tombstones', (
       threadId,
     });
     const m2 = await store.append({
+      provenance: { author: 'user', routed: false, observation: 'original' },
       userId: 'u1',
       catId: null,
       content: 'delete-me-redis',
@@ -285,6 +290,7 @@ describe('P2-5: Tombstone store parity — getByThreadAfter keeps tombstones', (
       threadId,
     });
     const m3 = await store.append({
+      provenance: { author: 'user', routed: false, observation: 'original' },
       userId: 'u1',
       catId: null,
       content: 'also-keep-redis',
@@ -313,6 +319,7 @@ describe('P2-6: append return value must include visibilitySeq', () => {
     const threadId = `append-ret-mem-${Date.now()}`;
 
     const msg = store.append({
+      provenance: { author: 'user', routed: false, observation: 'original' },
       userId: 'u1',
       catId: null,
       content: 'direct',
@@ -335,6 +342,7 @@ describe('P2-6: append return value must include visibilitySeq', () => {
     // Timeline-published cat speech (catId: 'opus') gets visibilitySeq at append;
     // hidden queued scheduler/system work does not.
     const msg = store.append({
+      provenance: { author: 'user', routed: false, observation: 'original' },
       userId: 'u1',
       catId: null,
       content: 'queued',
@@ -356,6 +364,7 @@ describe('P2-6: append return value must include visibilitySeq', () => {
     const threadId = `append-ret-redis-${Date.now()}`;
 
     const msg = await store.append({
+      provenance: { author: 'user', routed: false, observation: 'original' },
       userId: 'u1',
       catId: null,
       content: 'direct-redis',
@@ -506,6 +515,7 @@ describe('Lua hwm guard: NaN and fractional rejection', () => {
       // THEN poison the hwm — this ensures the guard is hit on the NEXT append,
       // not overwritten by the migration logic.
       await store.append({
+        provenance: { author: 'user', routed: false, observation: 'original' },
         userId: 'u1',
         catId: null,
         content: 'trigger-migration',
@@ -522,6 +532,7 @@ describe('Lua hwm guard: NaN and fractional rejection', () => {
       await assert.rejects(
         () =>
           store.append({
+            provenance: { author: 'user', routed: false, observation: 'original' },
             userId: 'u1',
             catId: null,
             content: 'test',
@@ -558,6 +569,7 @@ describe('Lua hwm guard: NaN and fractional rejection', () => {
 
       // Trigger migration first, then poison
       await store.append({
+        provenance: { author: 'user', routed: false, observation: 'original' },
         userId: 'u1',
         catId: null,
         content: 'trigger-migration',
@@ -572,6 +584,7 @@ describe('Lua hwm guard: NaN and fractional rejection', () => {
       await assert.rejects(
         () =>
           store.append({
+            provenance: { author: 'user', routed: false, observation: 'original' },
             userId: 'u1',
             catId: null,
             content: 'test',
@@ -611,6 +624,7 @@ describe('Lua hwm guard: NaN and fractional rejection', () => {
       // to ensureVisibilityMigrated re-runs migration and overwrites the
       // poisoned hwm (Sol R4 P2-5: queued append may not set the flag).
       await store.append({
+        provenance: { author: 'user', routed: false, observation: 'original' },
         userId: 'u1',
         catId: null,
         content: 'trigger-migration',
@@ -623,6 +637,7 @@ describe('Lua hwm guard: NaN and fractional rejection', () => {
       // so markDelivered enters the HWM allocation path. Timeline-published cat
       // speech (catId: 'opus') already has visibilitySeq and would skip HWM.
       const msg = await store.append({
+        provenance: { author: 'system', routed: false, observation: 'original' },
         userId: 'scheduler',
         catId: null,
         content: 'queued-msg',
@@ -1093,6 +1108,7 @@ describe('Sol R5: HWM reject zero-mutation (comprehensive)', () => {
     try {
       // Trigger migration flag
       await store.append({
+        provenance: { author: 'user', routed: false, observation: 'original' },
         userId: 'u1',
         catId: null,
         content: 'trigger',
@@ -1104,6 +1120,7 @@ describe('Sol R5: HWM reject zero-mutation (comprehensive)', () => {
       // Hidden queued work (non-cat-speech) — no visibilitySeq at append,
       // so markDelivered enters the HWM allocation path.
       const msg = await store.append({
+        provenance: { author: 'system', routed: false, observation: 'original' },
         userId: 'scheduler',
         catId: null,
         content: 'queued-msg',
@@ -1156,6 +1173,7 @@ describe('Sol R5: HWM reject zero-mutation (comprehensive)', () => {
     try {
       // Trigger migration
       const seed = await store.append({
+        provenance: { author: 'user', routed: false, observation: 'original' },
         userId: 'u1',
         catId: null,
         content: 'seed',
@@ -1176,6 +1194,7 @@ describe('Sol R5: HWM reject zero-mutation (comprehensive)', () => {
       await assert.rejects(
         () =>
           store.append({
+            provenance: { author: 'user', routed: false, observation: 'original' },
             userId: 'u1',
             catId: null,
             content: 'rejected',
@@ -1346,6 +1365,7 @@ describe('Sol R6 P2-1: Redis hydrateMessages includes visibilitySeq', () => {
 
     // Append a message that mentions a cat (so getRecentMentionsFor picks it up)
     const msg = await store.append({
+      provenance: { author: 'user', routed: false, observation: 'original' },
       userId: 'u1',
       catId: null,
       content: `Hey @${catId} check this`,
@@ -1570,6 +1590,7 @@ describe('Codex R9 P1: getLatestVisibleCursor skips soft-deleted (tombstoned) me
     const threadId = `tombstone-mem-latest-${Date.now()}`;
 
     const _msgA = memStore.append({
+      provenance: { author: 'user', routed: false, observation: 'original' },
       userId: 'u1',
       catId: null,
       content: 'message A (live)',
@@ -1578,6 +1599,7 @@ describe('Codex R9 P1: getLatestVisibleCursor skips soft-deleted (tombstoned) me
       threadId,
     });
     const msgB = memStore.append({
+      provenance: { author: 'user', routed: false, observation: 'original' },
       userId: 'u1',
       catId: null,
       content: 'message B (live)',
@@ -1586,6 +1608,7 @@ describe('Codex R9 P1: getLatestVisibleCursor skips soft-deleted (tombstoned) me
       threadId,
     });
     const msgC = memStore.append({
+      provenance: { author: 'user', routed: false, observation: 'original' },
       userId: 'u1',
       catId: null,
       content: 'message C (will be tombstoned)',
@@ -1612,6 +1635,7 @@ describe('Codex R9 P1: getLatestVisibleCursor skips soft-deleted (tombstoned) me
     const threadId = `tombstone-mem-all-del-${Date.now()}`;
 
     const msgOnly = memStore.append({
+      provenance: { author: 'user', routed: false, observation: 'original' },
       userId: 'u1',
       catId: null,
       content: 'sole message',
@@ -1658,6 +1682,7 @@ describe('Codex R9 P1: getLatestVisibleCursor skips soft-deleted (tombstoned) me
     const threadId = `tombstone-redis-latest-${Date.now()}`;
 
     const _msgA = await redisStore.append({
+      provenance: { author: 'user', routed: false, observation: 'original' },
       userId: 'u1',
       catId: null,
       content: 'message A (live)',
@@ -1666,6 +1691,7 @@ describe('Codex R9 P1: getLatestVisibleCursor skips soft-deleted (tombstoned) me
       threadId,
     });
     const msgB = await redisStore.append({
+      provenance: { author: 'user', routed: false, observation: 'original' },
       userId: 'u1',
       catId: null,
       content: 'message B (live)',
@@ -1674,6 +1700,7 @@ describe('Codex R9 P1: getLatestVisibleCursor skips soft-deleted (tombstoned) me
       threadId,
     });
     const msgC = await redisStore.append({
+      provenance: { author: 'user', routed: false, observation: 'original' },
       userId: 'u1',
       catId: null,
       content: 'message C (will be tombstoned)',
@@ -1700,6 +1727,7 @@ describe('Codex R9 P1: getLatestVisibleCursor skips soft-deleted (tombstoned) me
     const threadId = `tombstone-redis-all-del-${Date.now()}`;
 
     const msgOnly = await redisStore.append({
+      provenance: { author: 'user', routed: false, observation: 'original' },
       userId: 'u1',
       catId: null,
       content: 'sole message',

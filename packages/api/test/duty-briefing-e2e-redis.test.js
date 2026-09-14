@@ -90,6 +90,7 @@ describe(
 
       for (let i = 0; i < 55; i += 1) {
         await messageStore.append({
+          provenance: { author: 'user', routed: false, observation: 'original' },
           threadId,
           userId: 'default-user',
           catId: null,

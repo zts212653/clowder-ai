@@ -134,7 +134,6 @@ import {
 } from '../../session/request-generation-source-policy.js';
 import { resolveDefaultClaudeMcpServerPath } from '../providers/ClaudeAgentService.js';
 import { extractUserEnvTemplates, hasSupportedEnvTemplate, resolveEnvMap } from '../providers/env-map.js';
-import { compileL0ViaSubprocess } from '../providers/l0-compiler.js';
 import { OC_INSTRUCTIONS_ONLY_ENV } from '../providers/OpenCodeAgentService.js';
 import {
   deriveOpenCodeApiType,
@@ -588,7 +587,6 @@ import type {
   ProviderRequestGenerationCommitV1,
   RouteTopology,
 } from '../../types.js';
-import { hasL0CompilerSeam } from '../../types.js';
 import type { InvocationRegistry } from '../invocation/InvocationRegistry.js';
 import { agentSessionMutex } from './AgentSessionMutex.js';
 import {
@@ -1286,6 +1284,8 @@ export interface InvocationParams {
   readonly isLastCat: boolean;
   /** Static identity prompt — prepended to prompt on new sessions (gated by F-BLOAT logic) */
   readonly systemPrompt?: string;
+  /** Exact HookPipeline session-init output delivered through a native carrier. */
+  readonly nativeSessionPrompt?: string;
   /** F108 fix: InvocationRecordStore's parent invocation ID for worklist key alignment */
   readonly parentInvocationId?: string;
   /** F121: The A2A trigger message ID for auto-replyTo */
@@ -2973,49 +2973,49 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
       ? resolve(process.cwd(), configuredMcpServerPath)
       : resolveDefaultClaudeMcpServerPath();
 
-    // F203 Phase I: compile L0 for OpenCode BEFORE the runtime config condition.
-    // OpenCodeAgentService.injectsL0Natively() = true, so the route layer does
-    // pack-only. We MUST ensure every OpenCode invocation path gets compiled L0
-    // in the runtime config's instructions array — otherwise the cat loses its
-    // identity/governance/roster post-compaction (砚砚 P1 guard).
+    // F257: OpenCode receives the exact route-owned session prompt through its
+    // native instructions channel. The route has already run the shared hook
+    // pipeline; the carrier only transports those bytes.
     //
-    // The L0 file is written into the per-invocation config dir (P2: no separate
-    // dir leak — cleaned up together with the runtime config in finally).
-    let openCodeL0InstructionPaths: string[] | undefined;
+    // The route-owned prompt is written into the per-invocation config dir (P2:
+    // no separate dir leak — cleaned up together with the runtime config).
+    let openCodeSessionInstructionPaths: string[] | undefined;
     if (provider === 'opencode') {
       try {
-        // Use service's injectable l0CompilerFn if available (test seam, like Claude/Codex),
-        // otherwise fall back to the subprocess compiler (production path).
-        // l0CompilerFn via typed guard (no `any` — L0InjectableAgentService in types.ts).
-        // hasL0CompilerSeam guarantees l0CompilerFn is a function (type guard checks typeof),
-        // but TS narrows to `L0CompilerFn | undefined`. Use `?? compileL0ViaSubprocess` as
-        // the undefined branch is unreachable post-guard — avoids biome noNonNullAssertion.
-        const compilerFn = (hasL0CompilerSeam(service) && service.l0CompilerFn) || compileL0ViaSubprocess;
-
-        const l0Content = await compilerFn({ catId: catId as string, userId });
-        // Write compiled L0 into the runtime config dir (created below or reused).
+        const sessionPrompt = params.nativeSessionPrompt;
+        if (!sessionPrompt?.trim()) {
+          throw new Error(`missing route-owned native session prompt for ${catId as string}`);
+        }
+        // Write the session prompt into the per-invocation config dir (created
+        // below or reused), so cleanup remains tied to the invocation.
         const safeCatId = (catId as string).replace(/[^a-zA-Z0-9._-]+/g, '-');
         const safeInvocationId = invocationId.replace(/[^a-zA-Z0-9._-]+/g, '-');
         const configDir = join(projectRoot, '.cat-cafe', `oc-config-${safeCatId}-${safeInvocationId}`);
         mkdirSync(configDir, { recursive: true });
-        const l0Path = join(configDir, 'system-prompt-l0.md');
-        writeFileSync(l0Path, l0Content, 'utf8');
+        const sessionPromptPath = join(configDir, 'system-prompt.md');
+        writeFileSync(sessionPromptPath, sessionPrompt, 'utf8');
         // Resolve OPENCODE.md from project root (OpenCode-specific addendum: question deny, interaction channel).
         const opencodeInstructionsPath = resolve(projectRoot, 'OPENCODE.md');
-        openCodeL0InstructionPaths = [l0Path, opencodeInstructionsPath];
+        openCodeSessionInstructionPaths = [sessionPromptPath, opencodeInstructionsPath];
         log.debug(
-          { catId, invocationId, l0Path, opencodeInstructionsPath, l0Bytes: l0Content.length },
-          'Compiled L0 for OpenCode (F203 Phase I)',
+          {
+            catId,
+            invocationId,
+            sessionPromptPath,
+            opencodeInstructionsPath,
+            sessionPromptBytes: sessionPrompt.length,
+          },
+          'Prepared route-owned session prompt for OpenCode',
         );
       } catch (err) {
-        // Fail-closed: L0 compilation failure = cat invocation without identity is dangerous.
-        // Log and throw — do not proceed with a naked invocation.
+        // Fail closed: a native invocation without the route-owned session
+        // prompt would silently lose identity and governance instructions.
         log.error(
           { catId, invocationId, err: err instanceof Error ? err.message : String(err) },
-          'F203 Phase I: L0 compilation failed for OpenCode — fail-closed, aborting invocation',
+          'Native session prompt missing for OpenCode — fail-closed, aborting invocation',
         );
         throw new Error(
-          `F203 fail-closed: cannot compile L0 for OpenCode cat ${catId as string}: ${err instanceof Error ? err.message : String(err)}`,
+          `F257 fail-closed: cannot prepare native session prompt for OpenCode cat ${catId as string}: ${err instanceof Error ? err.message : String(err)}`,
         );
       }
     }
@@ -3072,8 +3072,8 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
         omitProviderAuth: !isApiKey,
         mcpServerPath,
         ...(openCodeAllowedWorkspaceDirs ? { allowedWorkspaceDirs: openCodeAllowedWorkspaceDirs } : {}),
-        // F203 Phase I: inject compiled L0 + OPENCODE.md into instructions.
-        instructions: openCodeL0InstructionPaths,
+        // F257: inject the shared hook-pipeline output + OPENCODE.md.
+        instructions: openCodeSessionInstructionPaths,
         // #935: External directory permissions for Windows/cross-project access.
         ...(openCodeExternalDirs.length > 0 ? { externalDirectories: openCodeExternalDirs } : {}),
         // OAuth: MCP-only config — no custom provider entry, so OpenCode uses its
@@ -3128,26 +3128,21 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
         },
         'Prepared OpenCode runtime config',
       );
-    } else if (provider === 'opencode' && openCodeL0InstructionPaths) {
-      // F203 Phase I safety net (砚砚 P1 three-path guard): when the full runtime
-      // config condition is NOT met (e.g. subscription mode, no resolvedAccount,
-      // known legacy model without MCP), we STILL need instructions in a config
-      // so the cat doesn't lose its L0 identity.
-      //
-      // P1-1 fix: use instructions-only config (no provider block) + signal
-      // OC_INSTRUCTIONS_ONLY_ENV so buildEnv does NOT clear native auth.
+    } else if (provider === 'opencode' && openCodeSessionInstructionPaths) {
+      // Subscription/native-auth paths still need the same route-owned prompt;
+      // use an instructions-only config without synthesizing another source.
       openCodeRuntimeConfigPath = writeOpenCodeInstructionsOnlyConfig(
         projectRoot,
         catId as string,
         invocationId,
-        openCodeL0InstructionPaths,
+        openCodeSessionInstructionPaths,
         openCodeExternalDirs,
       );
       callbackEnv.OPENCODE_CONFIG = openCodeRuntimeConfigPath;
       callbackEnv[OC_INSTRUCTIONS_ONLY_ENV] = '1';
       log.info(
         { catId, invocationId, openCodeConfigPath: openCodeRuntimeConfigPath },
-        'F203 Phase I: wrote instructions-only OpenCode config (fallback path, auth preserved)',
+        'Wrote instructions-only OpenCode config with route-owned session prompt',
       );
     }
 
@@ -3726,6 +3721,7 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
       ...(isResume && !injectSystemPrompt && params.systemPrompt
         ? { resumeFallbackSystemPrompt: params.systemPrompt }
         : {}),
+      ...(params.nativeSessionPrompt ? { nativeSessionPrompt: params.nativeSessionPrompt } : {}),
       // F118: Keep liveness warnings visible, but leave termination to explicit user cancel.
       livenessProbe: { stallAutoKill: false, stallWarningMs: CAT_INVOCATION_STALL_WARNING_MS },
       ...(catConfig?.cliConfigArgs?.length ? { cliConfigArgs: catConfig.cliConfigArgs } : {}),

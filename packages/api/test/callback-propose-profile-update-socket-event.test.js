@@ -30,6 +30,7 @@ describe('F246 v2: proposal_created socket event for F231', () => {
     let origin = key ? originByRequest.get(key) : undefined;
     if (!origin) {
       origin = messageStore.append({
+        provenance: { author: 'user', routed: false, observation: 'original' },
         userId,
         catId: null,
         content: 'Please update the profile',

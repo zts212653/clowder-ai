@@ -188,7 +188,8 @@ export type VerdictSourceRefs =
   | QcMetricsSelector
   | FreshnessReplaySelector
   | DesignGateEpisodeSourceSelector
-  | TrajectoryInspectorWindowSelector;
+  | TrajectoryInspectorWindowSelector
+  | PromptSegmentsSourceSelector;
 
 /**
  * Resolved evidence source paths (a2a only — for backward-compat helpers in validation.ts).
@@ -249,8 +250,14 @@ export type VerdictGenerator = (
 export interface GeneratorDeps {
   /** ISOLATED worktree's docs/harness-feedback — where generator writes verdict.md + bundle. */
   harnessFeedbackRoot: string;
-  /** LIVE checkout's docs/harness-feedback — a2a needs this to read raw snapshot/attribution YAML
-   *  that are gitignored from origin/main (砚砚 R17 P1 cloud). cw doesn't use it. */
+  /**
+   * LIVE checkout's docs/harness-feedback. Two distinct reads depend on it:
+   * a2a reads raw snapshot/attribution YAML that are gitignored from origin/main
+   * (砚砚 R17 P1 cloud), and EVERY domain-aware generator resolves the eval-domain
+   * registry here — the isolated staging tree has no eval-domains/ at all, so
+   * loadDomains(harnessFeedbackRoot) yields an empty Map and throws unknown_domain
+   * for every publication (砚砚 review, PR #1462).
+   */
   liveHarnessFeedbackRoot: string;
   /** Server-owned clock sampled once per publish request and shared with timestamp validation. */
   publicationTime: string;
@@ -323,4 +330,13 @@ export interface HandlerError {
   status: number;
   error: string;
   detail?: string;
+}
+
+/** F257 Harness Ledger snapshot selector. */
+export interface PromptSegmentsSourceSelector {
+  kind: 'prompt-segments';
+  windowStartMs: number;
+  windowEndMs: number;
+  evalRunId: string;
+  guardId?: string;
 }

@@ -18,7 +18,6 @@ describe('profile-update decision routes (approve / reject)', () => {
   let app;
   let store;
   let socketEvents;
-  let clearedL0;
   let repository;
 
   const seedPrimer = (content, relationshipKey = 'maine-coon') => {
@@ -95,7 +94,6 @@ describe('profile-update decision routes (approve / reject)', () => {
 
     store = new StoreMod.InMemoryProfileUpdateProposalStore();
     socketEvents = [];
-    clearedL0 = [];
     const socketManager = {
       emitToUser(userId, event, data) {
         socketEvents.push({ userId, event, data });
@@ -107,7 +105,6 @@ describe('profile-update decision routes (approve / reject)', () => {
       lock: new MutexMod.SessionMutex(),
       repository,
       socketManager,
-      clearL0Cache: (catId, userId) => clearedL0.push({ catId, userId }),
     });
     await app.ready();
   });
@@ -126,7 +123,6 @@ describe('profile-update decision routes (approve / reject)', () => {
     assert.equal(body.status, 'approved');
     assert.equal(readFileSync(join(profileDir, 'relationship/maine-coon-primer.md'), 'utf8'), 'NEW');
     assert.ok(socketEvents.some((e) => e.event === 'proposal_updated' && e.data.status === 'approved'));
-    assert.deepEqual(clearedL0, [{ catId: 'codex', userId: 'alice' }]);
   });
 
   it('GET returns current proposal status for owned profile-update cards', async () => {
@@ -200,18 +196,16 @@ describe('profile-update decision routes (approve / reject)', () => {
     assert.equal(store.get(y.proposalId).status, 'pending'); // rolled back
   });
 
-  it('P2: clears L0 cache when a partial primer commit later fails', async () => {
+  it('reports a partial primer commit failure without an obsolete prompt cache side effect', async () => {
     seedPrimer('OLD');
     const p = makeProposal();
     await app.close();
     app = Fastify();
-    clearedL0 = [];
     routeMod.registerProfileUpdateDecisionRoutes(app, {
       store,
       lock: new MutexMod.SessionMutex(),
       repository,
       socketManager: { emitToUser() {} },
-      clearL0Cache: (catId, userId) => clearedL0.push({ catId, userId }),
       approveProfileUpdate: async () => ({
         ok: false,
         reason: 'write_failed',
@@ -228,7 +222,6 @@ describe('profile-update decision routes (approve / reject)', () => {
     const res = await approve('alice', p.proposalId);
 
     assert.equal(res.statusCode, 500);
-    assert.deepEqual(clearedL0, [{ catId: 'codex', userId: 'alice' }]);
   });
 
   it('reject happy path → 200 rejected, primer untouched', async () => {

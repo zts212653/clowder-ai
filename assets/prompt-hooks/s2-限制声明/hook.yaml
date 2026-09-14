@@ -13,11 +13,16 @@ resolver: S2RestrictionsResolver
 inputs:
   - restrictions
 
+# Variable metadata (canonical source for Console editor)
+variables:
+  - name: RESTRICTIONS_TEXT
+    description: 限制说明文本
+    placeholder: ""
 # Override constraints
 disableable: false
 
 # Classification (Phase 1 3-axis)
-safetyTier: readonly
+safetyTier: editable
 transparencyTier: visible-by-default
 governanceTier: immutable
 

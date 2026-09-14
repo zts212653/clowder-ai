@@ -156,6 +156,21 @@ export const APPROVAL_PRODUCER_CATALOG = {
     history: true,
     humanDispositionReasonCodes: null,
   },
+  F257: {
+    lifecycleVersion: 1,
+    label: '治理',
+    badgeLabel: 'Harness',
+    colorToken: 'var(--semantic-danger, #ef4444)',
+    decisionEndpointBase: '/api/harness-governance-candidates',
+    decisionSurface: 'approval_hub',
+    sourcePolicy: 'message-or-event',
+    // Candidate provenance is a committed objective judgment + immutable trace
+    // corpus, not a caller-supplied message coordinate. F257 currently projects
+    // this system event directly in the Hub and does not call ApprovalIngress.
+    systemOriginExemption: 'forbidden',
+    history: true,
+    humanDispositionReasonCodes: null,
+  },
   F260: {
     lifecycleVersion: 1,
     label: '实体',
@@ -236,6 +251,7 @@ export const APPROVAL_PRODUCER_IDS = Object.freeze([
   'F225',
   'F193',
   'F231',
+  'F257',
   'F260',
   'F266',
   'F221',

@@ -9,6 +9,7 @@ describe('Approval Hub feature registry', () => {
       'F225',
       'F193',
       'F231',
+      'F257',
       'F260',
       'F266',
       'F221',

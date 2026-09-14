@@ -40,6 +40,7 @@ co-creation docs → co-creation-docs → direct push | merge-gate(docs PR)
 | `deep-research` | 多源深度调研 | — |
 | `source-audit` | 外部数字/benchmark/因果/趋势等高风险 claim 的信源审计与 provenance | — |
 | `eval-design` | E0 资格门 + 指标出生证契约 + 纵向运行拓扑 + 七公理设计自检 + 五病体检尺（划水/污染/归因停滞/干预失证/摸鱼） | — |
+| `harness-self-report` | 当前 invocation 发现明确 Harness 信号时，自标到既有 Objective/Metric；仅作评估唤醒与优先线索 | — |
 | `ttfund-skills` | 天天基金官方 Skills 网关：基金搜索/净值/持仓/经理/指数/黄金/债市/活期宝事实数据 | — |
 | `convention-graph-discovery` | 进入陌生 repo / F242 约定图工作：定义 domain、extractor、gap/freshness/provenance 报告 | — |
 | `knowledge-engineering` | 外部项目文档重构/冷启动知识注入 | — |

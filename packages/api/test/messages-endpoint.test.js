@@ -76,6 +76,25 @@ describe('GET /api/messages', () => {
     assert.equal(body.messages[1].content, 'hi there');
   });
 
+  it('exposes extra.signatureLint through GET /api/messages cold hydration', async () => {
+    messageStore.append({
+      provenance: { author: 'cat', routed: false, observation: 'original' },
+      userId: 'default-user',
+      catId: 'opus',
+      content: 'unsigned final answer',
+      mentions: [],
+      timestamp: 2100,
+      threadId: 'thread-siglint',
+      extra: { signatureLint: { signed: false } },
+    });
+
+    const res = await app.inject({ method: 'GET', url: '/api/messages?threadId=thread-siglint' });
+    const body = JSON.parse(res.body);
+
+    assert.equal(body.messages.length, 1);
+    assert.deepEqual(body.messages[0].extra?.signatureLint, { signed: false });
+  });
+
   it('F306 hydrates the durable semantic event used by the shared projector', async () => {
     const semanticEvent = {
       v: 1,

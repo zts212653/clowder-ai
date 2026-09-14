@@ -49,6 +49,7 @@ describe('F231 approval origin authentication', () => {
 
   async function appendUserMessage(content) {
     return messageStore.append({
+      provenance: { author: 'user', routed: false, observation: 'original' },
       userId: 'alice',
       catId: null,
       content,

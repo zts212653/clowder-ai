@@ -85,7 +85,7 @@ describe('F246 approval provenance links', () => {
     expect(container.querySelector('[data-testid="approval-event-origin"]')?.textContent).toContain('每日治理扫描');
   });
 
-  it('marks legacy records as non-exact and only offers an honest thread fallback', async () => {
+  it('offers the honest thread fallback without repeating its non-exact limitation', async () => {
     const navigation: ApprovalNavigation = {
       state: 'legacy_unanchored',
       legacyThreadId: 'thread-legacy',
@@ -93,7 +93,7 @@ describe('F246 approval provenance links', () => {
     };
     await act(async () => root.render(<ApprovalProvenanceLinks navigation={navigation} />));
 
-    expect(container.querySelector('[data-testid="approval-legacy-warning"]')?.textContent).toContain('无法精确跳转');
+    expect(container.querySelector('[data-testid="approval-legacy-warning"]')).toBeNull();
     expect(container.querySelector('[data-testid="approval-card-link"]')).toBeNull();
     expect(container.querySelector('[data-testid="approval-origin-link"]')).toBeNull();
 

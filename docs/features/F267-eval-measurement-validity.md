@@ -2,7 +2,7 @@
 feature_ids: [F267]
 related_features: [F192, F245, F263, F266, F268, F275, F311]
 topics: [eval, measurement-validity, calibration, uncertainty, repeatability, friction, work-eligibility]
-tips_exempt: "Renewed 2026-09-02: capability-evolution issuance is a cat-only eval workflow; the operator entry remains F311's Evolution Program tip, while this owner action is discovered through its typed MCP contract."
+tips_exempt: "Renewed 2026-09-14: KD-11 records that metric versioning is contracted but never exercised — a knowledge row eval authors read, not a new operator surface. Capability-evolution issuance stays a cat-only eval workflow; the operator entry remains F311's Evolution Program tip, while this owner action is discovered through its typed MCP contract."
 doc_kind: spec
 created: 2026-07-18
 updated: 2026-09-02
@@ -232,6 +232,7 @@ metric_birth_certificate:
 | KD-8 | 归属采用 managed/unattributed/not-applicable 三桶 | 二值归属会把范围外错记成失败，或把失败静默排除 | 2026-07-25 |
 | KD-9 | unmanaged 抽样先测桶污染率，不直接声称全局 SOP 漏开率 | 没有抽样权重与总体规模时，局部比例不等于 admission recall | 2026-07-25 |
 | KD-10 | historical `artifactRevision` 必须是 canonical `origin/main` 的祖先，full SHA 格式本身不代表 durable | feature/pre-squash commit 即使当前可解析，也可能在分支删除与 Git GC 后消失，不能作为 sealed evidence 的长期 locator | 2026-07-27 |
+| KD-11 | **指标版本化的契约在纸上、机制一次未行使（2026-09-11 实测）**：本 Feature 已给出出生证 + judge 版本 + version-set hash + 同版本重放 +「需求漂移只能进入新版本 cohort」，F257 KD-22 又把它约束进 PatchTrial 的 before/after；但实机 `docs/harness-feedback/objectives/registry.yaml` 中 **24/24 个 Objective 全部 `ruleVersion: v1`，一次都没升过版**。更要紧的是段有版本生命线、指标没有：同一条版本链上的周期可能跨越两套口径，而这在 UI 上完全不可见——与 F257 的版本链截断是同一失效模式（被过滤/被切分的差异被渲染成不存在）。 | 「契约存在」不等于「机制被行使过」；这条正是「系统边界一变、旧评价是否失效/误归因」这个窄问题在本系统内可复现的实例，不记下就只活在聊天里 | 2026-09-11 |
 
 ## Phase A Implementation Evidence (merged; live acceptance captured)
 

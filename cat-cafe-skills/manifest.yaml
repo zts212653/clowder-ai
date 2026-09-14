@@ -14,6 +14,25 @@
 
 skills:
 
+  harness-self-report:
+    category: "评估与反馈"
+    description: >
+      在当前 invocation 的正常执行中发现明确成功、违例或值得复核的 Harness 信号时，自标到现有 Objective/Metric。
+      Use when: 当前执行现场出现了可指向既有 Objective/Metric 的行为证据。
+      Not for: 评价别的猫或历史 invocation、替代周期评估、每 turn 例行打点、猜测不存在的坐标。
+      Output: 绑定当前 invocation 的 pending marker，terminal 后解析为评估优先线索。
+    triggers:
+      - "self-report harness signal"
+      - "上报 harness 反例"
+      - "标记当前执行"
+    not_for:
+      - "评价别的 invocation"
+      - "替代周期评估"
+      - "每 turn 例行打点"
+    output: "Current-invocation pending marker"
+    next: ["eval-design"]
+    sop_step: null
+
   # ── 功能生命周期 ──
   feat-lifecycle:
     category: "开发流程"

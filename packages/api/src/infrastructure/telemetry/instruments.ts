@@ -636,6 +636,18 @@ export const c2VoidHoldChecked = lazy(() =>
   }),
 );
 
+export const c2AckLivenessChecked = lazy(() =>
+  meter().createCounter('cat_cafe.a2a.c2.ack_liveness_checked', {
+    description: 'C2 ack-liveness evaluations performed (denominator for ack_liveness_hint ratio)',
+  }),
+);
+
+export const c2AckLivenessHintEmitted = lazy(() =>
+  meter().createCounter('cat_cafe.a2a.c2.ack_liveness_hint_emitted', {
+    description: 'C2 ack-liveness hint emitted after an A2A turn ended without a routing exit or durable trigger',
+  }),
+);
+
 export const antigravityStreamErrorBuffered = lazy(() =>
   meter().createCounter('cat_cafe.antigravity.stream_error.buffered_total', {
     description: 'Buffered Antigravity stream_error after partial text while waiting for a recovery tail',
@@ -1312,6 +1324,8 @@ export function warmupCounters(): void {
   c2VerdictWithoutPassCount.add(0);
   c2ExitChecked.add(0);
   c2VoidHoldChecked.add(0);
+  c2AckLivenessChecked.add(0);
+  c2AckLivenessHintEmitted.add(0);
   // F231 AC-C3: profile update pipeline counters
   profileUpdateProposed.add(0);
   profileUpdateApproved.add(0);

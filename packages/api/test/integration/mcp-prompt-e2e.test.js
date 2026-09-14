@@ -91,6 +91,7 @@ describe('MCP Prompt Injection E2E', () => {
   test('injected thread-context endpoint succeeds with real credentials', async () => {
     // Pre-populate some messages
     messageStore.append({
+      provenance: { author: 'user', routed: false, observation: 'original' },
       userId: 'user-1',
       catId: null,
       content: '你好',
@@ -99,6 +100,7 @@ describe('MCP Prompt Injection E2E', () => {
       threadId: 'thread-e2e',
     });
     messageStore.append({
+      provenance: { author: 'cat', routed: false, observation: 'original' },
       userId: 'user-1',
       catId: 'opus',
       content: '你好co-creator',

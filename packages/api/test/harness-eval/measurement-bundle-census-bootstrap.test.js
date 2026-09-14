@@ -13,9 +13,6 @@ import {
   ensureMeasurementBundleCensusFile,
   refreshMeasurementBundleCensusFile,
 } from '../../dist/infrastructure/harness-eval/measurement/measurement-bundle-census-file.js';
-import { handlePublishVerdict } from '../../dist/infrastructure/harness-eval/publish-verdict/publish-verdict.js';
-import { setupHarnessFeedback } from './eval-manual-trigger-fixtures.js';
-import { buildPacket } from './publish-verdict-fixtures.js';
 
 const repoRoot = resolve(import.meta.dirname, '../../../..');
 const censusRef = 'docs/harness-feedback/registry/measurement-bundles.yaml';
@@ -163,42 +160,12 @@ describe('public measurement census bootstrap', () => {
     }
   });
 
-  it('publishes the first clean-clone verdict and stages the bootstrapped census', async () => {
-    const liveRoot = setupHarnessFeedback();
-    const isolatedRoot = seedPublicRepo();
-    let stageResult;
-    try {
-      const result = await handlePublishVerdict(
-        {
-          harnessFeedbackRoot: liveRoot,
-          gitPublisher: {
-            async publishOnIsolatedWorktree(options) {
-              stageResult = await options.stage(isolatedRoot);
-              return { commitSha: 'first-public-verdict-sha', prUrl: 'https://example.test/pr/1' };
-            },
-          },
-          generator: async (packet, _sourceRefs, deps) => {
-            const bundleDir = resolve(deps.harnessFeedbackRoot, 'bundles', packet.id);
-            const verdictPath = resolve(deps.harnessFeedbackRoot, 'verdicts', `${packet.id}.md`);
-            mkdirSync(bundleDir, { recursive: true });
-            writeFileSync(verdictPath, `---\ndomain_id: ${packet.domainId}\n---\n`);
-            return { bundleDir, verdictPath };
-          },
-        },
-        {
-          packet: buildPacket({ id: 'public-first-verdict', domainId: 'eval:a2a' }),
-          domain: 'eval:a2a',
-          catId: 'codex',
-          sourceRefs: { snapshotName: 'snap.yaml', attributionName: 'attr.yaml' },
-        },
-      );
-
-      assert.ok(!('error' in result), JSON.stringify(result));
-      assert.ok(stageResult.paths.includes(resolve(isolatedRoot, censusRef)));
-      assert.equal(loadCensus(isolatedRoot).committedVerdictArtifactCount, 1);
-    } finally {
-      rmSync(liveRoot, { recursive: true, force: true });
-      rmSync(isolatedRoot, { recursive: true, force: true });
-    }
-  });
+  // NOTE: the former "publishes the first clean-clone verdict and stages the bootstrapped
+  // census" test was removed with the F257 artifact-publisher reconciliation. It asserted the
+  // git-era behavior of staging + incrementing the census inside an isolated PR worktree
+  // (gitPublisher.publishOnIsolatedWorktree). In the fork's durable-artifact contract the
+  // census is a read-only product-repo input — publish never rewrites it — so that assertion
+  // describes a retired code path. The measurement-policy GATE (actionable verdict requires a
+  // valid census) is covered by publish-verdict-measurement-validity-gate.test.js, and the
+  // end-to-end artifact publish happy path by publish-verdict.test.js.
 });

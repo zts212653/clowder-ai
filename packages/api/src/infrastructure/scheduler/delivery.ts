@@ -3,14 +3,19 @@
  * Templates call deliver() to post messages to threads without going through MCP callbacks.
  */
 import { randomUUID } from 'node:crypto';
+import type { IMessageStore } from '../../domains/cats/services/stores/ports/MessageStore.js';
 import type { DeliverOpts, ScheduleLifecycleNotice } from './types.js';
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-type AnyFn = (...args: any[]) => any;
-
 export interface DeliveryDeps {
-  messageStore: { append: AnyFn };
-  socketManager: { broadcastToRoom: AnyFn; emitToUser: AnyFn };
+  /**
+   * Use the production append port so scheduler writers cannot compile while
+   * omitting required message provenance.
+   */
+  messageStore: Pick<IMessageStore, 'append'>;
+  socketManager: {
+    broadcastToRoom(room: string, event: string, data: unknown): void;
+    emitToUser(userId: string, event: string, data: unknown): void;
+  };
 }
 
 export const SCHEDULER_SOURCE = {
@@ -22,6 +27,8 @@ export const SCHEDULER_SOURCE = {
 export function createDeliverFn(deps: DeliveryDeps): (opts: DeliverOpts) => Promise<string> {
   return async (opts: DeliverOpts): Promise<string> => {
     const stored = await deps.messageStore.append({
+      // Scheduled output is synthesized by the system; no parser lane runs over it.
+      provenance: { author: 'system', routed: false, observation: 'original' },
       userId: opts.userId,
       catId: null,
       content: opts.content,

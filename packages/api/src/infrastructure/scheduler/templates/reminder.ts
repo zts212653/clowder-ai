@@ -46,6 +46,7 @@ export const reminderTemplate: TaskTemplate = {
     const targetCatId = (p.params.targetCatId as string) || null;
     const triggerUserId = (p.params.triggerUserId as string) || 'default-user';
     const threadId = p.deliveryThreadId;
+    const isHoldBallWake = instanceId.startsWith('hold-ball-');
     const managedCommandWake = instanceId.startsWith('hold-ball-') && isManagedCommandWake(p.params);
     // F167 Phase M (codex P1): pre-fire defer activation is hold_ball-specific.
     // Gate on the `hold-ball-` instanceId prefix — callback-hold-ball-routes mints those
@@ -54,11 +55,12 @@ export const reminderTemplate: TaskTemplate = {
     // Defer tuning (interval/maxDefers) is NOT read from public params — it uses
     // TaskRunnerV2 internal defaults — so a deferIntervalMs:0 + huge maxDefers churn
     // attack via /api/schedule/tasks is structurally impossible.
-    const deferWhileThreadBusy = p.params.deferWhileThreadBusy === true && instanceId.startsWith('hold-ball-');
+    const deferWhileThreadBusy = p.params.deferWhileThreadBusy === true && isHoldBallWake;
     return {
       id: instanceId,
       profile: 'awareness',
       trigger: p.trigger,
+      supportsOnceRetry: true,
       ...(deferWhileThreadBusy && threadId ? { firePolicy: { deferWhileThreadBusy: true, threadId } } : {}),
       admission: {
         async gate() {
@@ -80,18 +82,22 @@ export const reminderTemplate: TaskTemplate = {
           const catId = targetCatId ?? ctx.assignedCatId ?? 'opus';
           const content = `${SCHEDULER_TRIGGER_PREFIX} ${formatScheduleTiming(ctx.schedule)}${message}`;
 
-          if (instanceId.startsWith('hold-ball-') && p.trigger.type === 'once' && threadId) {
+          if (isHoldBallWake && p.trigger.type === 'once' && threadId) {
             ctx.ballCustody
               ?.record(buildHoldExpiredEvent({ threadId: tid, catId, fireAt: p.trigger.fireAt, at: Date.now() }))
               .catch(() => {});
           }
 
-          // Store trigger message first → real messageId for InvocationRecord + retry
+          // Store trigger message first → real messageId for InvocationRecord + retry.
+          // Once-triggers get a bounded RUN_FAILED retry in TaskRunnerV2 — the
+          // per-instance idempotency key makes a retried append return the
+          // original message instead of duplicating it.
           const messageId = await ctx.deliver({
             threadId: tid,
             content,
             userId: 'scheduler',
             ...(ctx.invokeTrigger ? { extra: { scheduler: { hiddenTrigger: true } } } : {}),
+            ...(p.trigger.type === 'once' ? { idempotencyKey: `reminder:${instanceId}` } : {}),
           });
 
           // Wake a cat to act on the trigger message
@@ -100,6 +106,7 @@ export const reminderTemplate: TaskTemplate = {
               void Promise.resolve(
                 ctx.invokeTrigger.trigger(tid, catId, triggerUserId, content, messageId, undefined, {
                   sourceCategory: 'scheduled',
+                  ...(isHoldBallWake ? { completionRequirement: 'action-or-routing-exit' as const } : {}),
                 }),
               ).catch(() => {});
             } catch {

@@ -13,11 +13,19 @@ resolver: D2DirectMsgResolver
 inputs:
   - directMessageSource
 
+# Variable metadata (canonical source for Console editor)
+variables:
+  - name: FROM_LABEL
+    description: 发送方标签
+    placeholder: ""
+  - name: FROM_MODEL
+    description: 消息发送方模型
+    placeholder: ""
 # Override constraints
 disableable: true
 
 # Classification (Phase 1 3-axis)
-safetyTier: readonly
+safetyTier: editable
 transparencyTier: visible-by-default
 governanceTier: human-gated
 

@@ -88,6 +88,59 @@ function makeRichInput(overrides = {}) {
   };
 }
 
+/**
+ * The hooks this repository ships. Frozen on purpose — see the subset assertion
+ * below: governance-authored units are unbounded, shipped ones may not vanish.
+ */
+const SHIPPED_HOOK_IDS = [
+  'B1',
+  'C1',
+  'D1',
+  'D2',
+  'D3',
+  'D4',
+  'D5',
+  'D6',
+  'D7',
+  'D8',
+  'D9',
+  'D10',
+  'D11',
+  'D12',
+  'D13',
+  'D14',
+  'D15',
+  'D16',
+  'D17',
+  'D18',
+  'D19',
+  'D20',
+  'D21',
+  'L1',
+  'L2',
+  'L3',
+  'L4',
+  'L5',
+  'L6',
+  'L7',
+  'N1',
+  'R1',
+  'R2',
+  'S1',
+  'S2',
+  'S3',
+  'S4',
+  'S5',
+  'S6',
+  'S7',
+  'S8',
+  'S9',
+  'S10',
+  'S11',
+  'S12',
+  'S13',
+];
+
 describe('Pipeline Integration (real registry + resolvers + templates)', () => {
   /** @type {typeof import('../dist/domains/prompt-hooks/HookPipeline.js')} */
   let pipelineMod;
@@ -114,7 +167,11 @@ describe('Pipeline Integration (real registry + resolvers + templates)', () => {
     const templatesDir = join(root, 'assets', 'prompt-templates');
     registry = new registryMod.HookRegistry(hooksDir, templatesDir);
     const manifests = registry.scan();
-    assert.equal(manifests.length, 46, `Expected 46 hooks, got ${manifests.length}`);
+    // Subset, not a count: governance may append hooks, so assert every shipped id
+    // is still registered rather than a total an addition could prop up.
+    const scanned = new Set(manifests.map((manifest) => manifest.id ?? manifest.hookId));
+    const missing = SHIPPED_HOOK_IDS.filter((hookId) => !scanned.has(hookId));
+    assert.deepEqual(missing, [], `shipped hooks missing from the registry: ${missing.join(', ')}`);
   });
 
   it('session-init stage fires L1-L7 + S1 + S8 + S9 + B1 + C1 (always-fire hooks)', () => {
@@ -157,8 +214,8 @@ describe('Pipeline Integration (real registry + resolvers + templates)', () => {
     const input = makeRichInput();
     const result = pipeline.executeStage('per-turn', input);
 
-    // 24 per-turn hooks should produce trace events
-    assert.equal(result.events.length, 24, `Expected 24 events, got ${result.events.length}`);
+    // 24 shipped per-turn hooks, plus any governance-authored per-turn unit.
+    assert.ok(result.events.length >= 24, `Expected at least 24 events, got ${result.events.length}`);
 
     const firedIds = result.events.filter((e) => e.status === 'fired').map((e) => e.hookId);
 

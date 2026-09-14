@@ -30,16 +30,266 @@ import {
   writeOpportunityReentryCarrierV1Schema,
 } from '@cat-cafe/shared';
 import { parsePluginMessageExtra } from '../../../../messaging/envelope.js';
+import { isValidRoutingAttemptBatch, type RoutingAttemptBatch } from '../../agents/routing/routing-attempt.js';
 import type { MessageMetadata } from '../../types.js';
-import type {
-  MessageRecallMarker,
-  StoredMessage,
-  StoredPluginMessage,
-  StoredToolEvent,
+import {
+  type MessageProvenance,
+  type MessageRecallMarker,
+  PROVENANCE_AUTHORS,
+  PROVENANCE_OBSERVATIONS,
+  type StoredMessage,
+  type StoredPluginMessage,
+  type StoredToolEvent,
 } from '../ports/MessageStore.js';
 import { parseQueueCustodyAdmissionIntent, parseQueuedMessageCustody } from '../ports/queued-message-custody.js';
 import type { TurnExecutionMessageProjection } from '../ports/TurnExecutionStore.js';
 import { parseRecoveryMarker } from './redis-message-recovery-parser.js';
+
+export type ProvenanceFieldParse =
+  | { state: 'absent' }
+  | { state: 'malformed' }
+  | { state: 'present'; provenance: MessageProvenance };
+
+export function parseProvenanceField(raw: string | undefined | null): ProvenanceFieldParse {
+  if (raw === undefined || raw === null) return { state: 'absent' };
+  try {
+    const parsed = JSON.parse(raw) as Record<string, unknown>;
+    if (!parsed || typeof parsed !== 'object') return { state: 'malformed' };
+    if (!(PROVENANCE_AUTHORS as readonly unknown[]).includes(parsed.author)) return { state: 'malformed' };
+    if (typeof parsed.routed !== 'boolean') return { state: 'malformed' };
+    if (!(PROVENANCE_OBSERVATIONS as readonly unknown[]).includes(parsed.observation)) {
+      return { state: 'malformed' };
+    }
+    if (
+      parsed.observation === 'derived' &&
+      (typeof parsed.sourceRef !== 'string' || parsed.sourceRef.trim().length === 0)
+    ) {
+      return { state: 'malformed' };
+    }
+    if (parsed.observation === 'original' && parsed.sourceRef !== undefined) return { state: 'malformed' };
+    return {
+      state: 'present',
+      provenance: {
+        author: parsed.author as MessageProvenance['author'],
+        routed: parsed.routed,
+        observation: parsed.observation as MessageProvenance['observation'],
+        ...(parsed.observation === 'derived' ? { sourceRef: parsed.sourceRef as string } : {}),
+      },
+    };
+  } catch {
+    return { state: 'malformed' };
+  }
+}
+
+export type PersistedMessageInvalidReason =
+  | 'required_field_missing'
+  | 'coordinate_mismatch'
+  | 'malformed_timestamp'
+  | 'malformed_delivered_at'
+  | 'malformed_deleted_at'
+  | 'malformed_tombstone'
+  | 'malformed_mentions'
+  | 'malformed_source'
+  | 'malformed_routing_fact'
+  | 'malformed_provenance'
+  | 'author_cat_id_conflict'
+  | 'author_source_conflict'
+  | 'routing_fact_missing'
+  | 'routing_fact_unexpected'
+  | 'tombstone_payload_present';
+
+export interface ParsedPersistedMessageRecord {
+  id: string;
+  threadId: string;
+  userId: string;
+  catId: CatId | null;
+  content: string;
+  mentions: readonly CatId[];
+  timestamp: number;
+  deliveredAt?: number;
+  effectiveOrderAt: number;
+  source?: ConnectorSource;
+  routingFact?: RoutingAttemptBatch;
+  deletedAt?: number;
+}
+
+export type PersistedMessageRecordParse =
+  | { state: 'missing' }
+  | { state: 'legacy'; record: ParsedPersistedMessageRecord }
+  | { state: 'deleted'; deletion: 'soft' | 'hard'; record: ParsedPersistedMessageRecord }
+  | { state: 'invalid'; reason: PersistedMessageInvalidReason }
+  | { state: 'present'; record: ParsedPersistedMessageRecord; provenance: MessageProvenance };
+
+export function safeParseRoutingFact(raw: string | undefined): RoutingAttemptBatch | undefined {
+  if (!raw) return undefined;
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    return isValidRoutingAttemptBatch(parsed) ? parsed : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+export function hydrateProvenance(raw: string | undefined | null): MessageProvenance | undefined {
+  const parsed = parseProvenanceField(raw);
+  return parsed.state === 'present' ? parsed.provenance : undefined;
+}
+
+export function parsePersistedMessageRecord(fields: {
+  expectedId: string;
+  expectedOwnerUserId: string;
+  expectedTimelineScore: string;
+  id: string | undefined | null;
+  threadId: string | undefined | null;
+  userId: string | undefined | null;
+  catId: string | undefined | null;
+  content: string | undefined | null;
+  mentions: string | undefined | null;
+  timestamp: string | undefined | null;
+  deliveredAt: string | undefined | null;
+  deletedAt: string | undefined | null;
+  deletedBy: string | undefined | null;
+  tombstone: string | undefined | null;
+  source: string | undefined | null;
+  routingFact: string | undefined | null;
+  provenance: string | undefined | null;
+}): PersistedMessageRecordParse {
+  const rawValues = [
+    fields.id,
+    fields.threadId,
+    fields.userId,
+    fields.catId,
+    fields.content,
+    fields.mentions,
+    fields.timestamp,
+    fields.deliveredAt,
+    fields.deletedAt,
+    fields.deletedBy,
+    fields.tombstone,
+    fields.source,
+    fields.routingFact,
+    fields.provenance,
+  ];
+  if (rawValues.every((value) => value === undefined || value === null)) return { state: 'missing' };
+  if (
+    typeof fields.id !== 'string' ||
+    fields.id.length === 0 ||
+    typeof fields.threadId !== 'string' ||
+    fields.threadId.length === 0 ||
+    typeof fields.userId !== 'string' ||
+    fields.userId.length === 0 ||
+    typeof fields.catId !== 'string' ||
+    typeof fields.content !== 'string' ||
+    typeof fields.mentions !== 'string' ||
+    typeof fields.timestamp !== 'string'
+  ) {
+    return { state: 'invalid', reason: 'required_field_missing' };
+  }
+  if (fields.id !== fields.expectedId || fields.userId !== fields.expectedOwnerUserId) {
+    return { state: 'invalid', reason: 'coordinate_mismatch' };
+  }
+  if (!/^(0|[1-9]\d*)$/.test(fields.timestamp)) return { state: 'invalid', reason: 'malformed_timestamp' };
+  const timestamp = Number(fields.timestamp);
+  const timelineScore = Number(fields.expectedTimelineScore);
+  if (!Number.isSafeInteger(timestamp) || timestamp < 0 || !Number.isFinite(timelineScore)) {
+    return { state: 'invalid', reason: 'malformed_timestamp' };
+  }
+  const deliveredAtPresent = fields.deliveredAt !== undefined && fields.deliveredAt !== null;
+  if (deliveredAtPresent && !/^(0|[1-9]\d*)$/.test(fields.deliveredAt ?? '')) {
+    return { state: 'invalid', reason: 'malformed_delivered_at' };
+  }
+  const deliveredAt = deliveredAtPresent ? Number(fields.deliveredAt) : undefined;
+  if (deliveredAt !== undefined && (!Number.isSafeInteger(deliveredAt) || deliveredAt < 0)) {
+    return { state: 'invalid', reason: 'malformed_delivered_at' };
+  }
+  const effectiveOrderAt = deliveredAt ?? timestamp;
+  if (effectiveOrderAt !== timelineScore) return { state: 'invalid', reason: 'coordinate_mismatch' };
+
+  const deletedAtPresent = fields.deletedAt !== undefined && fields.deletedAt !== null;
+  if (deletedAtPresent && !/^(0|[1-9]\d*)$/.test(fields.deletedAt ?? '')) {
+    return { state: 'invalid', reason: 'malformed_deleted_at' };
+  }
+  const deletedAt = deletedAtPresent ? Number(fields.deletedAt) : undefined;
+  if (deletedAt !== undefined && (!Number.isSafeInteger(deletedAt) || deletedAt < 0)) {
+    return { state: 'invalid', reason: 'malformed_deleted_at' };
+  }
+  const tombstonePresent = fields.tombstone !== undefined && fields.tombstone !== null;
+  const deletedByPresent = fields.deletedBy !== undefined && fields.deletedBy !== null;
+  if (tombstonePresent && fields.tombstone !== '1') return { state: 'invalid', reason: 'malformed_tombstone' };
+  if (
+    (deletedAtPresent && (typeof fields.deletedBy !== 'string' || fields.deletedBy.length === 0)) ||
+    (!deletedAtPresent && (deletedByPresent || tombstonePresent))
+  ) {
+    return { state: 'invalid', reason: tombstonePresent ? 'malformed_tombstone' : 'malformed_deleted_at' };
+  }
+
+  let mentions: readonly CatId[];
+  try {
+    const parsedMentions: unknown = JSON.parse(fields.mentions);
+    if (!Array.isArray(parsedMentions) || !parsedMentions.every((mention) => typeof mention === 'string')) {
+      return { state: 'invalid', reason: 'malformed_mentions' };
+    }
+    mentions = parsedMentions as unknown as readonly CatId[];
+  } catch {
+    return { state: 'invalid', reason: 'malformed_mentions' };
+  }
+  const sourcePresent = fields.source !== undefined && fields.source !== null;
+  const source = sourcePresent ? safeParseConnectorSource(fields.source ?? undefined) : undefined;
+  if (sourcePresent && !source) return { state: 'invalid', reason: 'malformed_source' };
+  const factPresent = fields.routingFact !== undefined && fields.routingFact !== null;
+  const routingFact = factPresent ? safeParseRoutingFact(fields.routingFact ?? undefined) : undefined;
+  if (factPresent && !routingFact) return { state: 'invalid', reason: 'malformed_routing_fact' };
+
+  const record: ParsedPersistedMessageRecord = {
+    id: fields.id,
+    threadId: fields.threadId,
+    userId: fields.userId,
+    catId: fields.catId ? (fields.catId as CatId) : null,
+    content: fields.content,
+    mentions,
+    timestamp,
+    ...(deliveredAt !== undefined ? { deliveredAt } : {}),
+    effectiveOrderAt,
+    ...(source ? { source } : {}),
+    ...(routingFact ? { routingFact } : {}),
+    ...(deletedAt !== undefined ? { deletedAt } : {}),
+  };
+  if (deletedAt !== undefined) {
+    if (tombstonePresent) {
+      if (
+        fields.content !== '' ||
+        mentions.length !== 0 ||
+        (fields.routingFact !== undefined && fields.routingFact !== null) ||
+        (fields.provenance !== undefined && fields.provenance !== null)
+      ) {
+        return { state: 'invalid', reason: 'tombstone_payload_present' };
+      }
+      return { state: 'deleted', deletion: 'hard', record };
+    }
+    return { state: 'deleted', deletion: 'soft', record };
+  }
+  const parsed = parseProvenanceField(fields.provenance);
+  if (parsed.state === 'absent') {
+    return factPresent ? { state: 'invalid', reason: 'routing_fact_unexpected' } : { state: 'legacy', record };
+  }
+  if (parsed.state === 'malformed') return { state: 'invalid', reason: 'malformed_provenance' };
+  const catIdPresent = fields.catId.length > 0;
+  if (
+    ((parsed.provenance.author === 'user' || parsed.provenance.author === 'external_user') && catIdPresent) ||
+    (parsed.provenance.author === 'cat' && !catIdPresent)
+  ) {
+    return { state: 'invalid', reason: 'author_cat_id_conflict' };
+  }
+  if (
+    (parsed.provenance.author === 'user' && sourcePresent) ||
+    (parsed.provenance.author === 'external_user' && !sourcePresent)
+  ) {
+    return { state: 'invalid', reason: 'author_source_conflict' };
+  }
+  if (parsed.provenance.routed && !factPresent) return { state: 'invalid', reason: 'routing_fact_missing' };
+  if (!parsed.provenance.routed && factPresent) return { state: 'invalid', reason: 'routing_fact_unexpected' };
+  return { state: 'present', record, provenance: parsed.provenance };
+}
 
 function parsePluginMessage(value: unknown): StoredPluginMessage | undefined {
   return (parsePluginMessageExtra(value) as StoredPluginMessage | null) ?? undefined;
@@ -183,6 +433,7 @@ type ExtraCarrierPersistence = ExtraCarrierPersistenceClassification<{
   semanticEvent: 'parsed';
   rich: 'parsed';
   isExplicitPost: 'parsed';
+  signatureLint: 'parsed';
   stream: 'parsed';
   causal: 'parsed';
   proactive: 'parsed';
@@ -551,6 +802,15 @@ export function safeParseExtra(raw: string | undefined): StoredMessage['extra'] 
 
     if (parsed.isExplicitPost === true) {
       result.isExplicitPost = true;
+      hasField = true;
+    }
+
+    if (
+      parsed.signatureLint &&
+      typeof parsed.signatureLint === 'object' &&
+      typeof parsed.signatureLint.signed === 'boolean'
+    ) {
+      result.signatureLint = { signed: parsed.signatureLint.signed };
       hasField = true;
     }
 

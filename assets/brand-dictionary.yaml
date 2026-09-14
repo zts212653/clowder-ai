@@ -200,23 +200,17 @@ terms:
     note: "Allowed in internal docs; public phrasing should be product/team language unless explicitly branded."
 
 path_policies:
-  - pattern: "assets/system-prompts/**"
-    outbound: sanitize
-    inbound: manual-port
-    risk: P0
-    reason: "Native L0 and governance prompt truth source."
-
   - pattern: "assets/prompt-templates/**"
     outbound: sanitize
     inbound: manual-port
     risk: P0
     reason: "F237 prompt extraction target; prompt semantics must preserve home invariants."
 
-  - pattern: "scripts/compile-system-prompt-l0.mjs"
+  - pattern: "assets/prompt-hooks/**"
     outbound: sanitize
     inbound: manual-port
-    risk: P1
-    reason: "L0 compiler can carry role, route, and governance strings."
+    risk: P0
+    reason: "Session hook manifests and prompt content are runtime truth sources."
 
   - pattern: "packages/web/public/manifest.json"
     outbound: sanitize

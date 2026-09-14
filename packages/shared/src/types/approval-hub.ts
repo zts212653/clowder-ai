@@ -17,6 +17,7 @@ export type ApprovalProducerId =
   | 'F221'
   | 'F225'
   | 'F231'
+  | 'F257'
   | 'F260'
   | 'F266'
   | 'F276'
@@ -77,7 +78,7 @@ export type ApprovalNavigation =
 export type ApprovalItemStatus = 'pending' | 'stale';
 
 /** Canonical renderer affordance. Legacy recovery modes stop at the API registry boundary. */
-export type ApprovalDecisionMode = 'approve-reject' | 'claim-select' | 'meeting-intake';
+export type ApprovalDecisionMode = 'approve-reject' | 'approve-skip-reject' | 'claim-select' | 'meeting-intake';
 export type LegacyApprovalDecisionMode = ApprovalDecisionMode | 'resume-only';
 
 /** Unified DTO that all producer adapters return. */
@@ -107,7 +108,7 @@ export interface ApprovalHubItem
 }
 
 /** Legacy adapter vocabulary; canonical renderers consume SettledApprovalHubItem. */
-export type SettledStatus = 'approved' | 'rejected' | 'withdrawn' | 'superseded';
+export type SettledStatus = 'approved' | 'skipped' | 'rejected' | 'withdrawn' | 'superseded';
 
 export interface SettledApprovalItem extends Omit<ApprovalItem, 'status' | 'expiresAt' | 'inlineApprovable'> {
   status: SettledStatus;

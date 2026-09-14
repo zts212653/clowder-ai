@@ -227,7 +227,7 @@ function clusterMemberIdsByChannel(
 }
 
 function emptyChannelIds(): Record<FrictionChannel, string[]> {
-  return { 'paw-feel': [], cancel: [], 'user-feedback': [], 'eval-domain': [] };
+  return { 'paw-feel': [], cancel: [], 'user-feedback': [], 'eval-domain': [], 'guard-anomaly': [] };
 }
 
 function sortedUnique(ids: readonly string[]): string[] {

@@ -13,13 +13,14 @@ import {
 import { HUMAN_DISPOSITION_REASON_CODES } from '../types/human-disposition-feedback.js';
 
 describe('F246 Approval producer catalog', () => {
-  it('contains the existing producers plus the F306 runtime projection', () => {
+  it('contains every registered operator-approval producer', () => {
     assert.deepEqual(APPROVAL_PRODUCER_IDS, [
       'F128',
       'F139',
       'F225',
       'F193',
       'F231',
+      'F257',
       'F260',
       'F266',
       'F221',
@@ -38,6 +39,7 @@ describe('F246 Approval producer catalog', () => {
     assert.equal(approvalProducerMeta('F225').decisionEndpointBase, '/api/session-handoff');
     assert.equal(approvalProducerMeta('F193').decisionEndpointBase, '/api/dispatch-proposals');
     assert.equal(approvalProducerMeta('F231').sourcePolicy, 'message-required');
+    assert.equal(approvalProducerMeta('F257').decisionEndpointBase, '/api/harness-governance-candidates');
     assert.equal(approvalProducerMeta('F260').sourcePolicy, 'message-or-event');
     assert.equal(approvalProducerMeta('F276').decisionEndpointBase, '/api/person-memory-proposals');
     assert.equal(approvalProducerMeta('F276').sourcePolicy, 'message-required');

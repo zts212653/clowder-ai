@@ -193,7 +193,15 @@ test('collectAllThreadMessages paginates a REAL store with no overlap (oldest→
   const base = Date.now();
   // 250 > THREAD_SCAN_PAGE(200) → 强制多页
   for (let i = 0; i < 250; i++) {
-    store.append({ userId: 'u', catId: 'opus-48', content: `m${i}`, mentions: [], timestamp: base + i, threadId: 'T' });
+    store.append({
+      provenance: { author: 'cat', routed: false, observation: 'original' },
+      userId: 'u',
+      catId: 'opus-48',
+      content: `m${i}`,
+      mentions: [],
+      timestamp: base + i,
+      threadId: 'T',
+    });
   }
   const all = await collectAllThreadMessages(store, 'T');
   const uniqueIds = new Set(all.map((m) => m.id));
@@ -287,8 +295,17 @@ test('getByThreadBefore (in-memory) uses queued-work delivery time without re-in
   const { MessageStore } = await import('../dist/domains/cats/services/stores/ports/MessageStore.js');
   const store = new MessageStore();
   const base = Date.now();
-  store.append({ userId: 'u', catId: null, content: 'older', mentions: [], timestamp: base + 50, threadId: 'T' });
+  store.append({
+    provenance: { author: 'user', routed: false, observation: 'original' },
+    userId: 'u',
+    catId: null,
+    content: 'older',
+    mentions: [],
+    timestamp: base + 50,
+    threadId: 'T',
+  });
   const queued = store.append({
+    provenance: { author: 'user', routed: false, observation: 'original' },
     userId: 'u',
     catId: null,
     content: 'queued',

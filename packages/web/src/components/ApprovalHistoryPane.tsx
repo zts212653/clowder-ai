@@ -7,7 +7,7 @@ import { useApprovalHubStore } from '@/stores/approvalHubStore';
 import { ApprovalFeatureFilter } from './ApprovalFeatureFilter';
 import { ApprovalHistoryList } from './ApprovalHistoryList';
 
-export type ApprovalHistoryOutcomeFilter = 'all' | 'accepted' | 'rejected' | 'closed_without_decision';
+export type ApprovalHistoryOutcomeFilter = 'all' | 'accepted' | 'skipped' | 'rejected' | 'closed_without_decision';
 
 interface ApprovalHistoryPaneProps {
   featureFilters: ReadonlySet<ApprovalFeatureId>;
@@ -55,9 +55,21 @@ export function ApprovalHistoryPane({
           status="accepted"
         />
         <OutcomeButton
+          active={outcomeFilter === 'skipped'}
+          onClick={() => onOutcomeFilterChange(outcomeFilter === 'skipped' ? 'all' : 'skipped')}
+          status="skipped"
+        />
+        <OutcomeButton
           active={outcomeFilter === 'rejected'}
           onClick={() => onOutcomeFilterChange(outcomeFilter === 'rejected' ? 'all' : 'rejected')}
           status="rejected"
+        />
+        <OutcomeButton
+          active={outcomeFilter === 'closed_without_decision'}
+          onClick={() =>
+            onOutcomeFilterChange(outcomeFilter === 'closed_without_decision' ? 'all' : 'closed_without_decision')
+          }
+          status="closed_without_decision"
         />
         {hasActiveFilters && (
           <button
@@ -100,21 +112,30 @@ function OutcomeButton({
 }: {
   active: boolean;
   onClick: () => void;
-  status: 'accepted' | 'rejected';
+  status: 'accepted' | 'skipped' | 'rejected' | 'closed_without_decision';
 }) {
-  const accepted = status === 'accepted';
+  const activeTone =
+    status === 'accepted'
+      ? 'text-[var(--semantic-success)]'
+      : status === 'skipped'
+        ? 'text-[var(--semantic-warning)]'
+        : status === 'rejected'
+          ? 'text-[var(--semantic-critical)]'
+          : 'text-cafe-interactive/60';
+  const label =
+    status === 'accepted' ? '接受' : status === 'skipped' ? '跳过' : status === 'rejected' ? '拒绝' : '未决定关闭';
   return (
     <button
       type="button"
       onClick={onClick}
       className={`rounded-full px-2 py-0.5 text-micro font-medium transition-all ${
         active
-          ? `border border-cafe-subtle/60 bg-cafe-surface ${accepted ? 'text-[var(--semantic-success)]' : 'text-[var(--semantic-critical)]'}`
+          ? `border border-cafe-subtle/60 bg-cafe-surface ${activeTone}`
           : 'text-cafe-interactive/40 hover:text-cafe-interactive/60'
       }`}
       data-testid={`approval-history-filter-${status}`}
     >
-      {accepted ? '接受' : '拒绝'}
+      {label}
     </button>
   );
 }

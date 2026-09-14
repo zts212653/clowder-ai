@@ -23,6 +23,13 @@ function buildDeps() {
     },
     router: {
       resolveTargetsAndIntent: mock.fn(async () => ({
+        attemptBatch: {
+          parserMode: 'user',
+          spanBasis: 'lowercased_message',
+          attempts: [],
+          truncated: false,
+          metricEligible: true,
+        },
         targetCats: ['opus'],
         intent: { intent: 'execute' },
       })),

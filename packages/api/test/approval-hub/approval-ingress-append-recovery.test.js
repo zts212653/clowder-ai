@@ -32,6 +32,7 @@ class FakePublicationStore {
 function makeHarness() {
   const messageStore = new MessageStore();
   const origin = messageStore.append({
+    provenance: { author: 'user', routed: false, observation: 'original' },
     userId: ownerUserId,
     catId: null,
     content: 'origin',

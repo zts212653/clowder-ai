@@ -72,6 +72,7 @@ describe('Redis delivery transition contracts (PR #1193)', { skip: redisIsolatio
   // ── Helper: create a queued message for testing ──
   const createQueued = (userId, threadId, ts) =>
     store.append({
+      provenance: { author: 'user', routed: false, observation: 'original' },
       userId,
       catId: null,
       content: `queued-msg-${ts}`,
@@ -107,6 +108,7 @@ describe('Redis delivery transition contracts (PR #1193)', { skip: redisIsolatio
     const threadId = 'thread-dlv-imm-9';
     // Create a message WITHOUT deliveryStatus (= immediate/legacy)
     const msg = await store.append({
+      provenance: { author: 'user', routed: false, observation: 'original' },
       userId: 'userA',
       catId: null,
       content: 'immediate msg',
@@ -201,6 +203,7 @@ describe('Redis delivery transition contracts (PR #1193)', { skip: redisIsolatio
     // Create a store WITH ttlSeconds to exercise the EXPIRE branch
     const ttlStore = new RedisMessageStore(redis, { ttlSeconds: 60 });
     const msg = await ttlStore.append({
+      provenance: { author: 'user', routed: false, observation: 'original' },
       userId: 'userA',
       catId: null,
       content: 'ttl-test-msg',
@@ -235,6 +238,7 @@ describe('Redis delivery transition contracts (PR #1193)', { skip: redisIsolatio
       updatedAt: base,
     });
     const msg = await store.append({
+      provenance: { author: 'user', routed: false, observation: 'original' },
       userId: 'userA',
       catId: null,
       content: 'terminal custody is publishable',

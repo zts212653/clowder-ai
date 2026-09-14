@@ -50,6 +50,8 @@ describe('MCP Server Tool Registration', () => {
     for (const name of EXPECTED_TOOLS) {
       assert.ok(registeredNames.includes(name), `Tool "${name}" is NOT registered on the MCP server`);
     }
+    assert.ok(registeredNames.includes('cat_cafe_list_objectives'));
+    assert.ok(registeredNames.includes('cat_cafe_report_harness_signal'));
   });
 
   test('no unexpected tools are registered', async () => {

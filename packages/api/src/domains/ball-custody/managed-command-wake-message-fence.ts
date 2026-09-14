@@ -135,6 +135,7 @@ export async function publishManagedCommandWakeMessage(
     const stored =
       existing ??
       (await deps.messageStore.append({
+        provenance: { author: 'system', routed: false, observation: 'original' },
         userId: 'scheduler',
         catId: null,
         content: triggerContent,

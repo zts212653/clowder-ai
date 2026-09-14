@@ -16,6 +16,11 @@ export interface LimbTranscriptCatDeliveryOptions {
       readonly mentions: readonly CatId[];
       readonly timestamp: number;
       readonly idempotencyKey: string;
+      readonly provenance: {
+        readonly author: 'external_user';
+        readonly routed: false;
+        readonly observation: 'original';
+      };
     }): Promise<{ readonly id: string }> | { readonly id: string };
   };
   readonly invokeTriggerProvider: {
@@ -71,6 +76,7 @@ export class LimbTranscriptCatDelivery implements LimbTranscriptDelivery {
       },
     };
     const stored = await this.options.messageStore.append({
+      provenance: { author: 'external_user', routed: false, observation: 'original' },
       threadId: input.binding.threadId,
       userId: input.binding.userId,
       catId: null,

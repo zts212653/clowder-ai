@@ -40,6 +40,7 @@ describe('Rollback evidence — additive plugin fields are inert under old-binar
    */
   function seedPluginMessage(overrides = {}) {
     return messageStore.append({
+      provenance: { author: 'user', routed: false, observation: 'original' },
       userId: 'user-1',
       catId: null,
       content: 'host-visible text content',
@@ -62,6 +63,7 @@ describe('Rollback evidence — additive plugin fields are inert under old-binar
   test('host pagination (getByThreadAfter) returns messages with additive plugin fields', () => {
     seedPluginMessage();
     messageStore.append({
+      provenance: { author: 'user', routed: false, observation: 'original' },
       userId: 'user-1',
       catId: null,
       content: 'normal host message',
@@ -78,6 +80,7 @@ describe('Rollback evidence — additive plugin fields are inert under old-binar
   test('getBefore pagination works with plugin-bearing messages', () => {
     seedPluginMessage({ timestamp: 1_800_000_000_000 });
     messageStore.append({
+      provenance: { author: 'user', routed: false, observation: 'original' },
       userId: 'user-1',
       catId: null,
       content: 'later message',
@@ -171,6 +174,7 @@ describe('No-plugin dormancy — K-1 services with zero plugin handles retain ho
     assert.ok(stream);
     // Host message operations remain unaffected.
     messageStore.append({
+      provenance: { author: 'user', routed: false, observation: 'original' },
       userId: 'user-1',
       catId: null,
       content: 'host message',
@@ -188,6 +192,7 @@ describe('No-plugin dormancy — K-1 services with zero plugin handles retain ho
     const events = new memory.MemoryEventLogStore();
     // Even with events in the plugin log, host pagination is unaffected.
     messageStore.append({
+      provenance: { author: 'cat', routed: false, observation: 'original' },
       userId: 'user-1',
       catId: 'opus',
       content: 'cat reply',
@@ -204,6 +209,7 @@ describe('No-plugin dormancy — K-1 services with zero plugin handles retain ho
 
   test('host projectEnvelope for user/cat messages is unaffected by K-1 code presence', () => {
     messageStore.append({
+      provenance: { author: 'user', routed: false, observation: 'original' },
       userId: 'user-1',
       catId: null,
       content: 'user says hi',
@@ -212,6 +218,7 @@ describe('No-plugin dormancy — K-1 services with zero plugin handles retain ho
       threadId: 'thread-1',
     });
     messageStore.append({
+      provenance: { author: 'cat', routed: false, observation: 'original' },
       userId: 'user-1',
       catId: 'opus',
       content: 'cat replies',

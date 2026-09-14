@@ -31,6 +31,7 @@ import {
   deriveHistoryContextTokenCeiling,
   resolvePromptInputCeilingTokens,
 } from '../../../../../config/context-capacity.js';
+import { ledgerIdForGuard } from '../../../../../infrastructure/harness-eval/guard-ledger-registry.js';
 import { createModuleLogger } from '../../../../../infrastructure/logger.js';
 import {
   AGENT_ID,
@@ -44,6 +45,8 @@ import {
 } from '../../../../../infrastructure/telemetry/genai-semconv.js';
 import {
   a2aDispatchCount,
+  c2AckLivenessChecked,
+  c2AckLivenessHintEmitted,
   c2ExitChecked,
   c2VerdictHintEmitted,
   c2VerdictWithoutPassCount,
@@ -100,6 +103,7 @@ import {
   buildHandedEvent,
   buildInvocationHeartbeatEvent,
   buildInvocationStartedEvent,
+  buildVoidAckEvent,
   buildVoidPassEvent,
 } from '../../../../ball-custody/ball-custody-events.js';
 import { turnCustodyAdoptionRegistry } from '../../../../ball-custody/TurnCustodyAdoptionRegistry.js';
@@ -139,7 +143,8 @@ import type { PushRecallPresentation } from '../../../../memory/f200-types.js';
 import type { PreparedProactiveMemoryNudge } from '../../../../memory/ProactiveMemoryNudgeService.js';
 import { mergePushRecallPresentations, triggerRecallCorrelation } from '../../../../memory/recall-correlation-hook.js';
 import { drainCapturedTraces } from '../../../../prompt-hooks/PipelinePromptBuilder.js';
-import { getTraceStore } from '../../../../prompt-hooks/trace-bootstrap.js';
+import { finalizeTraceEpisode, getTraceStore } from '../../../../prompt-hooks/trace-bootstrap.js';
+import { persistPipelineTraceArtifacts } from '../../../../prompt-hooks/trace-bridge.js';
 // F237: Injection trace (v0 — fire-and-forget observability)
 import { buildTraceDetail, buildTraceSummary, collectTrace } from '../../../../prompt-hooks/trace-collector.js';
 import {
@@ -204,6 +209,11 @@ import {
   updateStreakOnPush,
 } from '../routing/WorklistRegistry.js';
 import { accumulateTextAggregate } from '../text-aggregation.js';
+import {
+  classifyDurableTriggerResult,
+  classifyTerminalDispositionResult,
+  evaluateAckLiveness,
+} from './a2a-ack-liveness.js';
 import { formatA2AHandoffContent, formatSerialMultiTargetNotice } from './a2a-handoff-label.js';
 import {
   buildCallbackFinalReplacementMetadataPatch,
@@ -213,6 +223,7 @@ import {
   parseCallbackPostResult,
   readCallbackStreamDisposition,
 } from './callback-final-replacement.js';
+import { signatureLintExtra } from './cat-signature-lint.js';
 import { extractContextEvalSignals } from './context-eval.js';
 import { validateRoutingSyntax } from './final-routing-slot.js';
 import { buildBriefingMessage } from './format-briefing.js';
@@ -283,6 +294,15 @@ function buildSerialMultiTargetNoticePayload(
   });
 }
 
+/**
+ * D22 lists every custody exit as a generic turn checklist. When the route has
+ * already emitted an exact F167 protocol contract for this turn, that contract
+ * is the only valid one — and D22 would put the excluded exits (notably
+ * returnToPredecessor, which a managed-hold wake cannot use) back in front of
+ * the cat. The exact contract shadows the generic checklist for that turn only.
+ */
+const TURN_CUSTODY_GENERIC_CHECKPOINT_HOOK_ID = 'D22';
+
 export function buildTurnCustodyStopGateRemedialPrompt(wake: TurnCustodyWakeProvenance): string {
   if (wake.kind === 'structured' && wake.protocol === 'hold') {
     return (
@@ -340,6 +360,83 @@ function emitBallVoidPass(
   ballCustody
     .record(buildVoidPassEvent({ threadId, messageId, matchedPattern: matchedPattern ?? undefined, at: Date.now() }))
     .catch((err) => log.warn({ threadId, err }, 'ball.void_pass ingest failed'));
+}
+
+/** LI-005: record an A2A turn that ended without a durable continuation. */
+function emitBallVoidAck(
+  ballCustody: IBallCustodyIngest | undefined,
+  threadId: string,
+  messageId: string | undefined,
+  a2aTriggerMessageId: string | undefined,
+): void {
+  if (!ballCustody || !messageId) return;
+  ballCustody
+    .record(buildVoidAckEvent({ threadId, messageId, a2aTriggerMessageId, at: Date.now() }))
+    .catch((err) => log.warn({ threadId, err }, 'ball.void_ack ingest failed'));
+}
+
+function emitRouteDecisionSkip(
+  deps: RouteStrategyDeps,
+  input: {
+    threadId: string;
+    userId: string;
+    fromCatId: CatId;
+    targetCatId: CatId;
+    reason: string;
+  },
+): void {
+  void deps.guardRejectionLog
+    ?.append({
+      eventId: crypto.randomUUID(),
+      ledgerId: ledgerIdForGuard('a2a_route_decision_skip'),
+      kind: 'route_decision_skip',
+      threadId: input.threadId,
+      catId: input.fromCatId,
+      guardId: 'a2a_route_decision_skip',
+      ownerUserId: input.userId,
+      invocationId: 'unknown',
+      sourceTool: 'a2a_mention',
+      normalizedReason: input.reason,
+      layer: 'generator',
+      timestamp: Date.now(),
+      correlationConfidence: 'window',
+      fromCatId: input.fromCatId,
+      targetCatId: input.targetCatId,
+      skipReason: input.reason,
+    })
+    .catch(() => {});
+}
+
+function emitRouteDecisionBlock(
+  deps: RouteStrategyDeps,
+  input: {
+    threadId: string;
+    userId: string;
+    fromCatId: CatId;
+    targetCatId: CatId;
+    streakCount: number;
+  },
+): void {
+  void deps.guardRejectionLog
+    ?.append({
+      eventId: crypto.randomUUID(),
+      ledgerId: ledgerIdForGuard('a2a_block_pingpong'),
+      kind: 'route_decision_block',
+      threadId: input.threadId,
+      catId: input.fromCatId,
+      guardId: 'a2a_block_pingpong',
+      ownerUserId: input.userId,
+      invocationId: 'unknown',
+      sourceTool: 'a2a_mention',
+      normalizedReason: 'pingpong_streak',
+      layer: 'generator',
+      timestamp: Date.now(),
+      correlationConfidence: 'window',
+      fromCatId: input.fromCatId,
+      targetCatId: input.targetCatId,
+      streakCount: input.streakCount,
+    })
+    .catch(() => {});
 }
 
 function emitBallHandedCvo(
@@ -1027,6 +1124,13 @@ export async function* routeSerial(
   try {
     while (index < worklist.length) {
       const catId = worklist[index]!;
+      // F257: traceTurnId declared here (top of while-loop body) so both the
+      // injection trace persist block and finalizeTraceEpisode at the completion
+      // boundary reference the same ID.
+      const traceTurnId = crypto.randomUUID();
+      // R1 P1-2: retained so finalizeTraceEpisode chains after persist (happens-before).
+      // R2 P1-1: carries success state — only finalize when durable summary exists.
+      let tracePersistPromise: Promise<boolean> | null = null;
       let stopGateRemedialAttempted = false;
       let structuredDispositionMissingCode: string | undefined;
       let routingDispatchPreflightDecision: RoutingPreflightDecisionV1 | undefined;
@@ -1289,12 +1393,14 @@ export async function* routeSerial(
         }
       };
       const hasNativeL0 = service.injectsL0Natively?.() ?? false;
+      const nativeSessionPrompt = hasNativeL0 ? buildStaticIdentity(catId, { mcpAvailable }) : undefined;
       const staticIdentity = hasNativeL0
         ? buildStaticIdentityPackOnly(catId, { packBlocks })
         : buildStaticIdentity(catId, { mcpAvailable, packBlocks });
       // F237: drain session trace synchronously — before any await between
       // buildStaticIdentity and buildInvocationContext (race-safety for parallel reuse).
-      drainCapturedTraces();
+      // F257: save session pipeline trace for full 46-segment persistence (S+L+B+C).
+      const { session: pipelineSessionTrace } = drainCapturedTraces();
       // L0-budget-defense PR-B-impl (ADR-038 件套 ④): staging is NOT prepended
       // to staticIdentity here. Cloud R2 P1 #2237 L1099: folding staging into
       // staticIdentity breaks ADR-038 "每轮注入生效" contract on resumed
@@ -1387,6 +1493,12 @@ export async function* routeSerial(
         : '';
       const invocationContext = [
         buildInvocationContext({
+          ...(structuredDispositionPrompt !== undefined
+            ? {
+                suppressedHookIds: [TURN_CUSTODY_GENERIC_CHECKPOINT_HOOK_ID],
+                hookSuppressionReason: 'shadowed_by_exact_turn_custody_protocol',
+              }
+            : {}),
           catId,
           mode: invocationMode,
           chainIndex: index + 1,
@@ -1417,7 +1529,8 @@ export async function* routeSerial(
         .filter(Boolean)
         .join('\n\n');
       // F237: drain turn trace synchronously — no yield between build and drain.
-      drainCapturedTraces();
+      // F257: save turn pipeline trace for full 47-segment persistence (D+R+N).
+      const { turn: pipelineTurnTrace } = drainCapturedTraces();
       const continuityCapsule = buildCapsuleFromRouteState({
         threadId,
         catId: catId as string,
@@ -1493,34 +1606,45 @@ export async function* routeSerial(
         }
       }
 
-      // F237: fire-and-forget injection trace persist (v0 — observability only)
-      // Placed after bootstrapContext so per-turn trace covers ALL route-level
-      // injected system/control content (invocation + mode prompt + bootstrap + MCP).
+      // F257: injection trace persist — pipeline path (all 46 segments).
+      // F237 v0 legacy path kept as fallback when pipeline traces are unavailable.
+      // R1 P1-2: retain persist promise so finalizeTraceEpisode chains after it.
       try {
         const traceStore = getTraceStore();
         if (traceStore) {
-          const traceTurnId = crypto.randomUUID();
-          const traceModePrompt = modeSystemPromptByCat?.[catId as string] ?? modeSystemPrompt ?? '';
-          const traceTurnContent = [invocationContext, traceModePrompt, bootstrapContext, mcpInstructions]
-            .filter(Boolean)
-            .join('\n\n---\n\n');
-          const trace = collectTrace(catId as string, staticIdentity, traceTurnContent, hasNativeL0, {
-            mcpAvailable,
-            packBlocks,
-          });
-          const traceMeta = { turnId: traceTurnId, threadId, catId: catId as string };
-          const summary = buildTraceSummary(trace, traceMeta);
-          const detail = buildTraceDetail(trace, traceMeta);
-          traceStore.persist(summary, detail).catch((err) => {
-            log.warn({ err, threadId, catId }, '[F237] injection trace persist failed (fire-and-forget)');
-          });
+          if (pipelineSessionTrace || pipelineTurnTrace) {
+            tracePersistPromise = persistPipelineTraceArtifacts({
+              traceStore,
+              messageStore: deps.messageStore,
+              ownerUserId: userId,
+              messageAnchorId: turnTriggerMessageId ?? null,
+              sessionResult: pipelineSessionTrace ?? null,
+              turnResult: pipelineTurnTrace ?? null,
+              meta: {
+                turnId: traceTurnId,
+                threadId,
+                catId: catId as string,
+                hasNativeL0,
+                sessionViaNativeCarrier: hasNativeL0,
+              },
+            })
+              .then((result) => {
+                if (result && !result.replayPersisted) {
+                  log.warn(
+                    { err: result.replayError, threadId, catId, replaySnapshotCount: result.replaySnapshotCount },
+                    '[F257] replay snapshot persist failed (degraded)',
+                  );
+                }
+                return result?.summaryPersisted ?? false;
+              })
+              .catch((err) => {
+                log.warn({ err, threadId, catId }, '[F257] pipeline trace persist failed (degraded)');
+                return false as const;
+              });
+          }
         }
-        // v0 collectTrace → buildStaticIdentity(annotateSegments: true) re-populates
-        // the module-global capturedSessionTrace without draining. Clear it so the next
-        // invocation (especially native-L0 pack-only) doesn't persist stale session traces.
-        if (deps.injectionTraceStore) drainCapturedTraces();
       } catch {
-        /* F237: trace collection must never break invocation */
+        /* F237/F257: trace collection must never break invocation */
       }
 
       let deliveryBoundaryId: string | undefined;
@@ -1831,6 +1955,11 @@ export async function* routeSerial(
       const collectedToolEvents: StoredToolEvent[] = [];
       // F148 OQ-2: Collect tool names for context eval signals
       const collectedToolNames: string[] = [];
+      // LI-005: raw tool_use intent is insufficient. Only successful results
+      // can prove a durable trigger, structured pass, or terminal disposition.
+      const confirmedCallbackToolNames: string[] = [];
+      const confirmedStructuredTargetCats = new Set<string>();
+      let confirmedTerminalDisposition = false;
       const pendingToolResults: PendingToolResult[] = [];
       const recordPersistedOutputMessageId = (messageId: string): void => {
         sameRouteOutputMessageIds.add(messageId);
@@ -2221,6 +2350,7 @@ export async function* routeSerial(
         ...(targetUploadDir ? { uploadDir: targetUploadDir } : {}),
         ...(catSignal ? { signal: catSignal } : {}),
         ...(staticIdentity ? { systemPrompt: staticIdentity } : {}),
+        ...(nativeSessionPrompt ? { nativeSessionPrompt } : {}),
         ...(options.parentInvocationId ? { parentInvocationId: options.parentInvocationId } : {}),
         continuityCapsule,
         ...(memoryCueOpportunitySeeds.length > 0 ? { memoryCueOpportunitySeeds } : {}),
@@ -2446,6 +2576,25 @@ export async function* routeSerial(
             }
             if (completedToolName) {
               const settledExit = settleCallbackRoutingExit(completedToolName, callbackResult.confirmed);
+              const resultStatus = (
+                effectiveMsg as {
+                  toolResultStatus?: 'ok' | 'error' | 'unknown';
+                }
+              ).toolResultStatus;
+              if (
+                classifyDurableTriggerResult(completedToolName.toolName, effectiveMsg.content, resultStatus) ||
+                callbackResult.confirmed
+              ) {
+                confirmedCallbackToolNames.push(completedToolName.toolName);
+              }
+              if (classifyTerminalDispositionResult(completedToolName.toolName, effectiveMsg.content, resultStatus)) {
+                confirmedTerminalDisposition = true;
+              }
+              if (callbackResult.confirmed && settledExit) {
+                for (const targetCatId of settledExit.targetCatIds) {
+                  confirmedStructuredTargetCats.add(targetCatId);
+                }
+              }
               emitConfirmedCallbackBallHandedCvo(
                 callbackResult.confirmed,
                 settledExit,
@@ -3040,6 +3189,9 @@ export async function* routeSerial(
         const originalDeferredVoiceInvocationIdBeforeRemedial = deferredVoiceInvocationId;
         const originalDeferredVoiceTextChunksBeforeRemedial = [...deferredVoiceTextChunks];
         const originalToolNamesBeforeRemedial = [...collectedToolNames];
+        const originalConfirmedCallbackToolNamesBeforeRemedial = [...confirmedCallbackToolNames];
+        const originalConfirmedStructuredTargetCatsBeforeRemedial = [...confirmedStructuredTargetCats];
+        const originalConfirmedTerminalDispositionBeforeRemedial = confirmedTerminalDisposition;
         resetDeferredVoice();
 
         if (deps.draftStore && ownInvocationId) {
@@ -3052,6 +3204,9 @@ export async function* routeSerial(
         doneMsg = undefined;
         collectedToolEvents.splice(0, collectedToolEvents.length);
         collectedToolNames.splice(0, collectedToolNames.length);
+        confirmedCallbackToolNames.splice(0, confirmedCallbackToolNames.length);
+        confirmedStructuredTargetCats.clear();
+        confirmedTerminalDisposition = false;
         structuredTargetCats.clear();
         streamRichBlocks.splice(0, streamRichBlocks.length);
         pendingToolResults.splice(0, pendingToolResults.length);
@@ -3147,6 +3302,7 @@ export async function* routeSerial(
           routeTopology: 'serial',
           ...(catSignal ? { signal: catSignal } : {}),
           ...(staticIdentity ? { systemPrompt: staticIdentity } : {}),
+          ...(nativeSessionPrompt ? { nativeSessionPrompt } : {}),
           ...(options.parentInvocationId ? { parentInvocationId: options.parentInvocationId } : {}),
           continuityCapsule,
           ...(streamReplyTo ? { a2aTriggerMessageId: streamReplyTo } : {}),
@@ -3285,6 +3441,25 @@ export async function* routeSerial(
               }
               if (completedToolName) {
                 const settledExit = settleCallbackRoutingExit(completedToolName, callbackResult.confirmed);
+                const resultStatus = (
+                  effectiveMsg as {
+                    toolResultStatus?: 'ok' | 'error' | 'unknown';
+                  }
+                ).toolResultStatus;
+                if (
+                  classifyDurableTriggerResult(completedToolName.toolName, effectiveMsg.content, resultStatus) ||
+                  callbackResult.confirmed
+                ) {
+                  confirmedCallbackToolNames.push(completedToolName.toolName);
+                }
+                if (classifyTerminalDispositionResult(completedToolName.toolName, effectiveMsg.content, resultStatus)) {
+                  confirmedTerminalDisposition = true;
+                }
+                if (callbackResult.confirmed && settledExit) {
+                  for (const targetCatId of settledExit.targetCatIds) {
+                    confirmedStructuredTargetCats.add(targetCatId);
+                  }
+                }
                 emitConfirmedCallbackBallHandedCvo(
                   callbackResult.confirmed,
                   settledExit,
@@ -3363,6 +3538,24 @@ export async function* routeSerial(
         // hidden remedial prose (e.g. "好的，我来传球") is never spoken. Then restore
         // original voice chunks if the first pass had any text to speak.
         if (preservesOriginalVisibleContent) {
+          const remedialConfirmedCallbackToolNames = [...confirmedCallbackToolNames];
+          const remedialConfirmedStructuredTargetCats = [...confirmedStructuredTargetCats];
+          const remedialConfirmedTerminalDisposition = confirmedTerminalDisposition;
+          confirmedCallbackToolNames.splice(
+            0,
+            confirmedCallbackToolNames.length,
+            ...originalConfirmedCallbackToolNamesBeforeRemedial,
+            ...remedialConfirmedCallbackToolNames,
+          );
+          confirmedStructuredTargetCats.clear();
+          for (const targetCatId of [
+            ...originalConfirmedStructuredTargetCatsBeforeRemedial,
+            ...remedialConfirmedStructuredTargetCats,
+          ]) {
+            confirmedStructuredTargetCats.add(targetCatId);
+          }
+          confirmedTerminalDisposition =
+            originalConfirmedTerminalDispositionBeforeRemedial || remedialConfirmedTerminalDisposition;
           resetDeferredVoice();
           if (originalDeferredVoiceTextChunksBeforeRemedial.length > 0) {
             deferredVoiceInvocationId = originalDeferredVoiceInvocationIdBeforeRemedial;
@@ -3544,6 +3737,12 @@ export async function* routeSerial(
       };
 
       if (!actionOutputCommitAllowed && textContent) await scheduleTurnCustodyStopGate(false);
+
+      // LI-005: queueTriggerReplyTo is the queue-dispatched A2A signal;
+      // directMessageFrom covers inline serial A2A. Keep this outside the
+      // text/no-text split so tool-only turns are checked too.
+      const isA2AInvocation = Boolean(directMessageFrom) || Boolean(queueTriggerReplyTo);
+      let pendingAckLivenessHint = false;
 
       if (!actionOutputCommitAllowed) {
         catProducedOutput = Boolean(textContent || bufferedBlocks.length > 0 || collectedToolEvents.length > 0);
@@ -3780,6 +3979,56 @@ export async function* routeSerial(
           [AGENT_ID]: catId as string,
           [THREAD_SYSTEM_KIND]: routeThread?.systemKind ?? 'product',
         };
+        if (isA2AInvocation && !isFreshnessSupplement) {
+          c2AckLivenessChecked.add(1, c2BaseAttr);
+          const ackLivenessEval = evaluateAckLiveness({
+            isA2AInvocation,
+            toolNames: confirmedCallbackToolNames,
+            lineStartMentions: routingExitLineStartMentions,
+            structuredTargetCats: [...confirmedStructuredTargetCats],
+            hasCoCreatorLineStartMention: routingExitHasCoCreatorLineStartMention,
+            hasTerminalDisposition: confirmedTerminalDisposition,
+          });
+          if (ackLivenessEval.shouldEmit) {
+            pendingAckLivenessHint = true;
+            try {
+              const hintSource = {
+                connector: 'ack-liveness-hint',
+                label: '接球提醒',
+                icon: '🏓',
+                meta: { presentation: 'system_notice', noticeTone: 'warning' },
+              };
+              const ackStored = await deps.messageStore.append({
+                provenance: { author: 'system', routed: false, observation: 'original' },
+                userId: 'system',
+                catId: null,
+                threadId,
+                content:
+                  '[接球提醒]: A2A 接球后 invocation 结束，但未绑定任何持久触发器' +
+                  '（hold_ball / register_scheduled_task 等）也未传球给下一只猫 — ' +
+                  '球将静默死亡。请调用 `cat_cafe_hold_ball` 持球或行首 `@句柄` 传球。',
+                mentions: [],
+                timestamp: Date.now(),
+                source: hintSource,
+              });
+              c2AckLivenessHintEmitted.add(1, c2BaseAttr);
+              if (deps.socketManager) {
+                deps.socketManager.broadcastToRoom(`thread:${threadId}`, 'connector_message', {
+                  threadId,
+                  message: {
+                    id: ackStored.id,
+                    type: 'connector',
+                    content: ackStored.content,
+                    source: hintSource,
+                    timestamp: ackStored.timestamp,
+                  },
+                });
+              }
+            } catch {
+              /* non-blocking hint */
+            }
+          }
+        }
         if (!phaseHHit) {
           c2ExitChecked.add(1, c2BaseAttr);
         }
@@ -4092,6 +4341,7 @@ export async function* routeSerial(
               ...(streamReplyTo ? { replyTo: streamReplyTo } : {}),
               extra: {
                 ...(allRichBlocks.length > 0 ? { rich: { v: 1 as const, blocks: allRichBlocks } } : {}),
+                ...signatureLintExtra(storedContent),
                 // F194 Phase Z3: dual id — invocationId=parent (legacy SoT for liveness/queue/cancel),
                 // turnInvocationId=own (Z3 new SoT for frontend bubble identity stable key, prevents
                 // same-parent multi-turn-same-cat bubble merge).
@@ -4295,6 +4545,9 @@ export async function* routeSerial(
               emitBallVoidPass(deps.ballCustody, threadId, storedMsgId, pendingC2VoidHoldSampleTrigger);
             }
           }
+          if (pendingAckLivenessHint && storedMsgId && !isFreshnessSupplement) {
+            emitBallVoidAck(deps.ballCustody, threadId, storedMsgId, streamReplyTo);
+          }
         } catch (err) {
           log.error({ catId: catId as string, err }, 'messageStore.append failed, degrading');
           if (options.persistenceContext) {
@@ -4388,6 +4641,13 @@ export async function* routeSerial(
                   'A2A text-scan dedup: cat actively processing in InvocationQueue, skipping',
                 );
               }
+              emitRouteDecisionSkip(deps, {
+                threadId,
+                userId,
+                fromCatId: catId,
+                targetCatId: nextCat,
+                reason: decision.reason,
+              });
               continue;
             }
             if (decision.action === 'mark_replyto') {
@@ -4410,6 +4670,13 @@ export async function* routeSerial(
                 { threadId, catId: nextCat, fromCat: catId, count: streak.count },
                 'F167 L1: A2A ping-pong terminated (streak >= 4)',
               );
+              emitRouteDecisionBlock(deps, {
+                threadId,
+                userId,
+                fromCatId: catId,
+                targetCatId: nextCat,
+                streakCount: streak.count,
+              });
               yield {
                 type: 'system_info' as AgentMessageType,
                 catId,
@@ -4584,6 +4851,13 @@ export async function* routeSerial(
                   'A2A text-scan dedup (deferred): cat actively processing, skipping',
                 );
               }
+              emitRouteDecisionSkip(deps, {
+                threadId,
+                userId,
+                fromCatId: catId,
+                targetCatId: nextCat,
+                reason: decision.reason,
+              });
               continue;
             }
             if (decision.action === 'mark_replyto') {
@@ -4603,6 +4877,13 @@ export async function* routeSerial(
                 { threadId, catId: nextCat, fromCat: catId, count: streakDeferred.count },
                 'F167 L1: A2A ping-pong terminated in deferred path (streak >= 4)',
               );
+              emitRouteDecisionBlock(deps, {
+                threadId,
+                userId,
+                fromCatId: catId,
+                targetCatId: nextCat,
+                streakCount: streakDeferred.count,
+              });
               yield {
                 type: 'system_info' as AgentMessageType,
                 catId,
@@ -5123,6 +5404,64 @@ export async function* routeSerial(
         ...(options.persistenceContext ? { persistenceContext: options.persistenceContext } : {}),
       });
 
+      // Tool-only/silent or output-rejected A2A turns have no committed cat
+      // message to anchor the event, so use the persisted hint itself.
+      if ((!textContent || !actionOutputCommitAllowed) && isA2AInvocation && !isFreshnessSupplement) {
+        const noTextC2Attr: Record<string, string> = {
+          [AGENT_ID]: catId as string,
+          [THREAD_SYSTEM_KIND]: routeThread?.systemKind ?? 'product',
+        };
+        c2AckLivenessChecked.add(1, noTextC2Attr);
+        const noTextAckEval = evaluateAckLiveness({
+          isA2AInvocation,
+          toolNames: confirmedCallbackToolNames,
+          lineStartMentions: getRoutingExitLineStartMentions([]),
+          structuredTargetCats: [...confirmedStructuredTargetCats],
+          hasCoCreatorLineStartMention: confirmedCallbackRoutingGuardHasCoCreatorLineStartMention,
+          hasTerminalDisposition: confirmedTerminalDisposition,
+        });
+        if (noTextAckEval.shouldEmit) {
+          pendingAckLivenessHint = true;
+          try {
+            const hintSource = {
+              connector: 'ack-liveness-hint',
+              label: '接球提醒',
+              icon: '🏓',
+              meta: { presentation: 'system_notice', noticeTone: 'warning' },
+            };
+            const ackStored = await deps.messageStore.append({
+              provenance: { author: 'system', routed: false, observation: 'original' },
+              userId: 'system',
+              catId: null,
+              threadId,
+              content:
+                '[接球提醒]: A2A 接球后 invocation 结束，但未绑定任何持久触发器' +
+                '（hold_ball / register_scheduled_task 等）也未传球给下一只猫 — ' +
+                '球将静默死亡。请调用 `cat_cafe_hold_ball` 持球或行首 `@句柄` 传球。',
+              mentions: [],
+              timestamp: Date.now(),
+              source: hintSource,
+            });
+            c2AckLivenessHintEmitted.add(1, noTextC2Attr);
+            if (deps.socketManager) {
+              deps.socketManager.broadcastToRoom(`thread:${threadId}`, 'connector_message', {
+                threadId,
+                message: {
+                  id: ackStored.id,
+                  type: 'connector',
+                  content: ackStored.content,
+                  source: hintSource,
+                  timestamp: ackStored.timestamp,
+                },
+              });
+            }
+            emitBallVoidAck(deps.ballCustody, threadId, ackStored.id, streamReplyTo);
+          } catch {
+            /* non-blocking hint */
+          }
+        }
+      }
+
       a2aMentions = getLocalRoutingLineStartMentions(a2aMentions);
 
       // F27: Emit a2a_handoff for ALL new A2A targets (both response-text and callback-pushed).
@@ -5440,6 +5779,46 @@ export async function* routeSerial(
         await flushTurnCustodyShadowCloses(index === worklist.length - 1 ? 'route_settled' : 'next_turn_boundary');
       }
       await releaseTurnCustodyAdoption();
+
+      // R1 P1-3: schedule trace finalization BEFORE the done yield so consumer
+      // abort/break at the terminal yield cannot bypass episode closure.
+      // R1 P1-2: chain after tracePersistPromise — never index terminal without durable summary.
+      if (ownInvocationId) {
+        const inputMsgId = currentUserMessageId ?? a2aTriggerMessageId ?? null;
+        // Evaluate terminalKind inside closure — signal?.aborted may change between
+        // schedule and execution when the persist promise resolves after consumer abort.
+        const doFinalize = () => {
+          const terminalKind = hadError ? 'failed' : signal?.aborted ? 'cancelled' : 'completed';
+          return finalizeTraceEpisode({
+            traceTurnId,
+            invocationId: ownInvocationId!,
+            ownerUserId: userId,
+            threadId,
+            catId: catId as string,
+            inputMessageId: inputMsgId ?? null,
+            outputMessageId: turnStoredMessageId ?? null,
+            terminalKind,
+            toolEvents: collectedToolEvents,
+          }).catch((err) => {
+            log.warn({ err, threadId, catId, invocationId: ownInvocationId }, '[F257] finalizeTraceEpisode failed');
+          });
+        };
+        if (tracePersistPromise) {
+          // R2 P1-1: only finalize when durable summary exists — never create an
+          // evaluable terminal without its authority trace.
+          tracePersistPromise.then((persisted) => {
+            if (persisted) {
+              doFinalize();
+            } else {
+              log.warn(
+                { threadId, catId, invocationId: ownInvocationId },
+                '[F257] trace persist failed — skipping episode closure (no evaluable terminal without durable summary)',
+              );
+            }
+          });
+        }
+      }
+
       if (doneMsg) {
         const isFinal = index === worklist.length - 1;
         const ownStampedDone =

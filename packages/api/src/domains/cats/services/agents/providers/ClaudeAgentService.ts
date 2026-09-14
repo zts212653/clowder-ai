@@ -56,12 +56,12 @@ import { extractImagePaths } from '../providers/image-paths.js';
 import { findGitBashPath } from './claude-agent-win.js';
 import { ClaudeNativeToolBoundaryClassifier } from './claude-native-tool-boundary.js';
 import { extractClaudeUsage, isResultErrorEvent, transformClaudeEvent } from './claude-ndjson-parser.js';
-import { compileL0ViaSubprocess } from './l0-compiler.js';
 import {
   createMcpSchemaDeliveryLaunchConfig,
   resolveMcpSchemaDeliveryDiscoverySurface,
   resolveMcpSchemaDeliveryForProviderLaunch,
 } from './mcp-schema-delivery-capability.js';
+import { type NativeSessionPromptTestFactory, resolveNativeSessionPrompt } from './native-session-prompt.js';
 
 const log = createModuleLogger('claude-agent');
 
@@ -172,13 +172,13 @@ function stripReservedSystemPromptArgs(args: string[], catId: string): string[] 
   return out;
 }
 
-function removeL0TempDir(l0Path: string | undefined): void {
-  if (!l0Path) return;
-  const l0Dir = dirname(l0Path);
+function removeSessionPromptTempDir(promptPath: string | undefined): void {
+  if (!promptPath) return;
+  const promptDir = dirname(promptPath);
   try {
-    rmSync(l0Dir, { recursive: true, force: true });
+    rmSync(promptDir, { recursive: true, force: true });
   } catch (err) {
-    log.warn({ err, l0Dir }, 'Failed to remove Claude L0 temp directory');
+    log.warn({ err, promptDir }, 'Failed to remove Claude session prompt temp directory');
   }
 }
 
@@ -293,8 +293,8 @@ interface ClaudeAgentServiceOptions {
   model?: string;
   /** Absolute path to MCP server entry (dist/index.js) for --mcp-config */
   mcpServerPath?: string;
-  /** Test seam — replaces the real L0 compiler subprocess. */
-  l0CompilerFn?: typeof compileL0ViaSubprocess;
+  /** Legacy-named test seam; production receives route-owned pipeline bytes. */
+  l0CompilerFn?: NativeSessionPromptTestFactory;
   /** #780: Raw NDJSON archive sink (default: CliRawArchive to disk) */
   rawArchive?: RawArchiveSink;
 }
@@ -328,8 +328,7 @@ export class ClaudeAgentService implements AgentService {
   private readonly spawnFn: SpawnFn | undefined;
   private readonly model: string;
   private readonly mcpServerPath: string | undefined;
-  /** F203: compiles per-cat L0 → file for --system-prompt-file. */
-  private readonly l0CompilerFn: typeof compileL0ViaSubprocess;
+  private readonly sessionPromptTestFactory: NativeSessionPromptTestFactory | undefined;
   /** Windows: cached MCP config file path (created once per instance, reused across invocations) */
   private mcpConfigFilePath: string | undefined;
   /** #780: Raw NDJSON archive for post-mortem diagnostics */
@@ -339,7 +338,7 @@ export class ClaudeAgentService implements AgentService {
     this.catId = options?.catId ?? createCatId('opus');
     this.spawnFn = options?.spawnFn;
     this.rawArchive = options?.rawArchive ?? new CliRawArchive();
-    this.l0CompilerFn = options?.l0CompilerFn ?? compileL0ViaSubprocess;
+    this.sessionPromptTestFactory = options?.l0CompilerFn;
     // F32-b: model from options > env (getCatModel) > default
     this.model = options?.model ?? getCatModel(this.catId as string);
     const configuredPath = options?.mcpServerPath ?? process.env.CAT_CAFE_MCP_SERVER_PATH;
@@ -376,16 +375,16 @@ export class ClaudeAgentService implements AgentService {
     };
   }
 
-  private async compileL0ToTempFile(userId?: string): Promise<string> {
-    const l0Dir = mkdtempSync(join(tmpdir(), 'cat-cafe-l0-'));
-    const l0Path = join(l0Dir, 'system-prompt-l0.md');
+  private async writeSessionPromptToTempFile(options?: AgentServiceOptions): Promise<string> {
+    const promptDir = mkdtempSync(join(tmpdir(), 'cat-cafe-session-prompt-'));
+    const promptPath = join(promptDir, 'system-prompt.md');
     try {
-      await this.l0CompilerFn({ catId: this.catId as string, userId, outPath: l0Path });
+      await resolveNativeSessionPrompt(options, this.catId as string, this.sessionPromptTestFactory, promptPath);
     } catch (err) {
-      removeL0TempDir(l0Path);
-      throw new Error(`L0 compile failed for ${this.catId as string}: ${(err as Error).message}`);
+      removeSessionPromptTempDir(promptPath);
+      throw err;
     }
-    return l0Path;
+    return promptPath;
   }
 
   async *invoke(prompt: string, options?: AgentServiceOptions): AsyncIterable<AgentMessage> {
@@ -601,11 +600,11 @@ export class ClaudeAgentService implements AgentService {
       thinkingBuffer: '' as string,
     };
 
-    let l0Path: string | undefined;
+    let sessionPromptPath: string | undefined;
     let appendPromptPath: string | undefined;
     try {
-      l0Path = await this.compileL0ToTempFile(options?.callbackEnv?.CAT_CAFE_USER_ID);
-      args.push('--system-prompt-file', l0Path);
+      sessionPromptPath = await this.writeSessionPromptToTempFile(options);
+      args.push('--system-prompt-file', sessionPromptPath);
       // Route layer passes pack-only systemPrompt for native-L0 providers.
       // Keep it as an append layer, but never use it as the carrier's L0 source.
       // #840: route through file carrier (not inline argv) to avoid ENAMETOOLONG
@@ -701,8 +700,8 @@ export class ClaudeAgentService implements AgentService {
 
       const nativeInstructions: PreparedProviderRequestV1['nativeInstructions'] = [
         {
-          body: readFileSync(l0Path, 'utf8'),
-          injectionDecision: 'native_l0_compiled',
+          body: readFileSync(sessionPromptPath, 'utf8'),
+          injectionDecision: 'native_session_pipeline',
         },
         ...(options?.systemPrompt
           ? [
@@ -1095,7 +1094,7 @@ export class ClaudeAgentService implements AgentService {
       // Guarantee done after error so invoke-single-cat can set isFinal correctly
       yield { type: 'done', catId: this.catId, metadata, timestamp: Date.now() };
     } finally {
-      removeL0TempDir(l0Path);
+      removeSessionPromptTempDir(sessionPromptPath);
       removeAppendPromptTempDir(appendPromptPath);
     }
   }

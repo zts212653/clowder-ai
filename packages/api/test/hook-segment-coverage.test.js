@@ -18,6 +18,38 @@
 import assert from 'node:assert/strict';
 import { after, before, describe, it } from 'node:test';
 
+/**
+ * The per-turn hooks this repository ships. Frozen on purpose: governance may
+ * append units at runtime, so the contract is "every shipped id still fires",
+ * never "the trace has exactly N events" — a count lets an addition mask a loss.
+ */
+const SHIPPED_PER_TURN_HOOK_IDS = [
+  'D1',
+  'D2',
+  'D3',
+  'D4',
+  'D5',
+  'D6',
+  'D7',
+  'D8',
+  'D9',
+  'D10',
+  'D11',
+  'D12',
+  'D13',
+  'D14',
+  'D15',
+  'D16',
+  'D17',
+  'D18',
+  'D19',
+  'D20',
+  'D21',
+  'N1',
+  'R1',
+  'R2',
+];
+
 describe('Hook segment coverage (AC-P2-14)', () => {
   /** @type {typeof import('../dist/domains/prompt-hooks/PipelinePromptBuilder.js')} */
   let ppb;
@@ -283,7 +315,7 @@ describe('Hook segment coverage (AC-P2-14)', () => {
     }
   });
 
-  it('per-turn trace produces exactly 24 per-turn events', () => {
+  it('per-turn trace covers every shipped per-turn hook', () => {
     const { trace } = ppb.buildInvocationContextViaHookPipelineWithTrace({
       catId: 'opus',
       mode: 'serial',
@@ -293,7 +325,11 @@ describe('Hook segment coverage (AC-P2-14)', () => {
       mcpAvailable: true,
       a2aEnabled: true,
     });
-    assert.equal(trace.events.length, 24, `Expected 24 per-turn events, got ${trace.events.length}`);
+    // Subset, not a count: a governance-authored per-turn unit (D22) would otherwise
+    // let any shipped hook disappear while the total still matched.
+    const fired = new Set(trace.events.map((event) => event.hookId ?? event.id));
+    const missing = SHIPPED_PER_TURN_HOOK_IDS.filter((hookId) => !fired.has(hookId));
+    assert.deepEqual(missing, [], `shipped per-turn hooks missing from the trace: ${missing.join(', ')}`);
   });
 
   // -- Trace capture (AC-P2-8) -----------------------------------------------
@@ -304,10 +340,14 @@ describe('Hook segment coverage (AC-P2-14)', () => {
     const first = ppb.drainCapturedTraces();
     assert.ok(first.session, 'Session trace should be captured');
     assert.ok(first.session.events.length > 0, 'Session events captured');
-    // All captured events should be S-prefix (scope filtering)
-    for (const ev of first.session.events) {
-      assert.ok(/^S\d/.test(ev.hookId), `Captured session event ${ev.hookId} should be S-prefix`);
-    }
+    // #839: captured trace now includes ALL session-init hooks (L+S+B+C),
+    // not just S-prefix — full pipeline observability for the harness.
+    // (#107 follow-up: this twin of dual-path-strict-equality.test.js kept the
+    // stale S-only assertion; prompt *output* scope filtering is still covered
+    // by the S-prefix / D-prefix output tests above.)
+    const prefixes = new Set(first.session.events.map((ev) => ev.hookId[0]));
+    assert.ok(prefixes.has('S'), 'Session trace should include S-prefix hooks');
+    assert.ok(prefixes.has('L'), 'Session trace should include L-prefix hooks (full pipeline)');
     // Second drain returns null (buffer cleared)
     const second = ppb.drainCapturedTraces();
     assert.equal(second.session, null, 'Buffer cleared after drain');

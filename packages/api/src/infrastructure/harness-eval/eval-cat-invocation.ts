@@ -16,6 +16,7 @@ export interface EvalCatInvocationInput {
   trendRefs: string[];
   verdictRefs: string[];
   legacyCleanup: LegacyCleanupStatus;
+  precomputedEvidence?: string;
 }
 
 export interface EvalCatInvocationPacket {
@@ -32,6 +33,7 @@ export interface EvalCatInvocationPacket {
     legacyCleanup: LegacyCleanupStatus;
     sla: EvalDomainRegistryEntry['sla'];
   };
+  precomputedEvidence?: string;
 }
 
 const DOMAIN_INSTRUCTIONS: Partial<Record<string, string>> = {
@@ -51,6 +53,8 @@ const DOMAIN_INSTRUCTIONS: Partial<Record<string, string>> = {
     'Enter the eval:freshness domain thread. Review F254 freshness telemetry across the gate/notice/reinvoke/queued-read lifecycle. Track cat_cafe.freshness.queued_seen as full contiguous get_thread_context reads of same-target queued bodies, and cat_cafe.freshness.queued_handled as queued_seen entries closed by same-invocation cat-level success evidence. The v1 inference is succeeded=handled only when seen and succeeded are anchored to the same outer InvocationRecord id for the same cat; treat any widening of the read-to-handled gap as a possible false inference, crash/cancel preservation issue, or user-visible duplicate wake. Compare queued_seen, queued_handled, gate_held, notice_attached, notice_acked, reinvoke_triggered, and reinvoke_skipped trends. For D2, inspect providerNativeCoverage by provider, carrier, delivery semantics, and tool surface; opportunity, delivered, seen, handled, and missed are distinct. MCP-only cells are partial evidence and must never be reported as all-tool coverage. Replay all eight AC-E9 classes when validating structure. No-data is a telemetry gap with healthy=false, never proof the system is healthy. Publish support is available only when this runtime advertises the wired freshness-closure-replay selector.',
   'eval:qc':
     'Enter the eval:qc domain thread. Analyze the weekly QC pipeline metrics rollup: finding yield (average actionable findings per review), false positive rate (findings rejected by author / total), reviewer delta (formal reviewer new findings vs fresh-context pre-review coverage), and post-merge bug rate (hotfixes within 14-day window per merged PR). Phase C bootstrap provides zero-baseline data — produce a keep_observe verdict noting the zero-data state. As live telemetry sources are wired (future phases), compare week-over-week trends and produce fix/build/keep_observe/delete_sunset verdicts based on whether the QC loop is improving review quality.',
+  'eval:harness-ledger':
+    'Enter the eval:harness-ledger domain thread. Treat invocation tracing as immutable evidence, never as a precomputed verdict. Read the frozen Objective cycle through its bounded trace-pool tool; segment status is episode context, not an evidence admission gate. Do not invent invocation ids, Objective ids, Metric ids, unit refs, denominators, or rates. Counterexample metrics count distinct high-confidence incidents and may trigger by count threshold without a denominator. Guard rejection events remain supplementary structured evidence, not the packet verdict. Produce a verdict handoff packet only after persisted MetricResult evidence supports fix/build/keep_observe/delete_sunset.',
   'eval:anchor-first':
     'Enter the eval:anchor-first domain thread. Analyze the anchor-first preview↔drill open-rate telemetry rollup: per-tool preview response counts, previewed items, drilled unique items, open-rate (drilledUniqueItems / previewedItems), charsSaved (originalChars - returnedChars), drillChars, and double-sided netBenefit (charsSaved - drillChars). Each rollup covers the LATEST 24h in-memory snapshot (event buffer has 24h retention; the weekly firing frequency is how often the eval cat runs, NOT the data window). Compare per-tool stats across the 4 preview tools (pending-mentions, thread-context, list-tasks, get-message) and 2 drill tools (get-message, list-tasks). Also review Adoption Detail / activationCounts adoption_* fields: explicitAnchorCalls, explicitFullCalls, defaultAnchorCalls, defaultFullCalls, legacyEquivalentAnchorCalls, and uniqueCatsExplicitAnchor answer whether cats are actively choosing anchor or only hitting defaults / old equivalent controls. orphanDrills indicates drills whose itemId matched no preview in the window (stale drill pointers, drills outside window, items surfaced before the event log started, or drills that arrived before any preview of that item — temporal causality enforced). Track-1 aggregate snapshot is cross-referenced for volume sanity checks. SUNSET SIGNAL CRITERIA (AC-E3, 双信号 — both required for delete_sunset): The attribution bundle includes pre-computed sunsetSignals per tool and a sunsetAssessment summary. Signal 1 (anchor tax): sunsetSignals.anchorTax=true when openRateByItem > 80% AND netBenefit < 0 — cats drill almost everything, anchor saves nothing; frictionSignal.severity is escalated to high, proposedAction is fix (not sunset — generator cannot confirm Signal 2 blindness; only eval cat escalates to delete_sunset after cross-referencing task-outcome). Signal 2 (blindness — MORE dangerous, token account INVISIBLE): reference-read the latest eval:task-outcome verdict/trend — if task-outcome quality (corrected_success / needs_investigation rates) worsened after anchor deployment and correlates with anchor tool usage, this is the insidious signal that preview is causing judgment errors. F236 does NOT write to eval:task-outcome; cross-reference only. VERDICT MAPPING: Both signals (tax + blindness evidence) → delete_sunset with governance.cvoAcceptRequired=true; ownerAsk.requestedAction MUST specify WHICH tool(s) to sunset. Signal 1 only (tax, no blindness evidence) → fix (investigate whether preview quality can improve to reduce drill rate). Signal 2 only (blindness, no clear tax) → fix (urgent: preview may be causing judgment errors, investigate). Neither signal + healthy data → keep_observe (log as Phase C expansion data basis). Insufficient data (low confidence / few preview events) → keep_observe with note on sample size. For delete_sunset verdicts: specify per-tool sunset in ownerAsk (e.g. "sunset anchor on thread-context, keep anchor on pending-mentions").',
   'eval:design-gate':
@@ -259,6 +263,23 @@ The MCP tool creates branch \`verdict/auto/{domainSlug}/{verdictId}\` + commits 
 **DO NOT** run \`git add\`, \`git commit\`, \`git push\`, or write verdict files directly. Use the MCP tool.
 `;
 
+const PUBLISH_VERDICT_INSTRUCTIONS_HARNESS_LEDGER = `${PUBLISH_VERDICT_PACKET_INSTRUCTIONS}
+You must also supply \`sourceRefs\` (NOT part of packet, separate input field) as a replayable prompt-segments selector.
+
+**Copy the exact sourceRefs JSON from the "Pre-computed Guard Rejection Snapshot" section in your invocation message.** The snapshot section includes a fenced JSON block with the exact \`kind\`, \`windowStartMs\`, \`windowEndMs\`, and \`evalRunId\` values. Copy them verbatim — do NOT convert, round, or re-derive any values.
+
+Fields:
+- \`kind\` — REQUIRED literal \`"prompt-segments"\`
+- \`windowStartMs\` / \`windowEndMs\` — REQUIRED exact epoch-ms values from the snapshot section. The generator verifies these match the stored snapshot's window exactly — any difference (even 1ms) is rejected.
+- \`evalRunId\` — REQUIRED string from the snapshot section. The generator reads the stored snapshot by this ID (single-read, fail-closed on missing). Must match format \`hlr-<timestamp>-<hex8>\`.
+
+**Snapshot-first (KD-17)**: Your invocation message includes a pre-computed guard rejection snapshot with event counts, guard distributions, and the complete sourceRefs. Use this data for your verdict analysis — it IS the evidence. The generator reuses the same stored snapshot at publish time (no re-query). Decision and published bundle share one data source.
+
+The MCP tool creates branch \`verdict/auto/{domainSlug}/{verdictId}\` + commits + opens PR. Returns commit SHA + PR URL.
+
+**DO NOT** run \`git add\`, \`git commit\`, \`git push\`, or write verdict files directly. Use the MCP tool.
+`;
+
 const PUBLISH_VERDICT_INSTRUCTIONS_FRESHNESS = `${PUBLISH_VERDICT_PACKET_INSTRUCTIONS}${FRESHNESS_PUBLISH_SELECTOR_INSTRUCTIONS}`;
 
 const PUBLISH_VERDICT_INSTRUCTIONS_DESIGN_GATE = `${PUBLISH_VERDICT_PACKET_INSTRUCTIONS}
@@ -279,6 +300,7 @@ const PUBLISH_VERDICT_INSTRUCTIONS_BY_DOMAIN: Partial<Record<string, string>> = 
   'eval:friction': PUBLISH_VERDICT_INSTRUCTIONS_FRICTION,
   'eval:anchor-first': PUBLISH_VERDICT_INSTRUCTIONS_ANCHOR_FIRST,
   'eval:qc': PUBLISH_VERDICT_INSTRUCTIONS_QC,
+  'eval:harness-ledger': PUBLISH_VERDICT_INSTRUCTIONS_HARNESS_LEDGER,
   'eval:freshness': PUBLISH_VERDICT_INSTRUCTIONS_FRESHNESS,
   'eval:design-gate': PUBLISH_VERDICT_INSTRUCTIONS_DESIGN_GATE,
   'eval:trajectory-inspector': PUBLISH_VERDICT_INSTRUCTIONS_TRAJECTORY_INSPECTOR,
@@ -334,5 +356,6 @@ export function buildEvalCatInvocation(
       legacyCleanup: input.legacyCleanup,
       sla: domain.sla,
     },
+    ...(input.precomputedEvidence ? { precomputedEvidence: input.precomputedEvidence } : {}),
   };
 }

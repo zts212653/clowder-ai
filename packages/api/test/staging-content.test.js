@@ -1,5 +1,5 @@
 /**
- * L0-budget-defense PR-B-impl tests (ADR-038 件套 ④)
+ * Session-hook/staging boundary tests (ADR-038 件套 ④)
  *
  * Verifies:
  *   - Staging manifest parses + items present
@@ -7,7 +7,7 @@
  *   - Soft margin warn: sum + soft_margin ≤ hard_cap_tokens (贴线预警)
  *   - buildStagingPrepend returns wipers content for all cats (shared item)
  *   - Wired into buildSystemPrompt output (user-message systemPrompt path)
- *   - Wiper content NOT compiled into native L0 (decoupled from 6000-cap)
+ *   - Wiper content remains turn-scoped and is not in session-init hooks
  */
 
 import assert from 'node:assert/strict';
@@ -28,7 +28,6 @@ const sourceOnlyTest = hasSourceStagingContent ? test : test.skip;
 const publicExportOnlyTest = hasSourceStagingContent ? test.skip : test;
 
 // Bootstrap cat-config so SystemPromptBuilder's getConfig() resolves opus-47 et al.
-// Pattern mirrors scripts/compile-system-prompt-l0.mjs bootstrapCatRegistry.
 before(() => {
   const loaded = loadCatConfig();
   const all = toAllCatConfigs(loaded);
@@ -250,22 +249,21 @@ describe('L0 Staging Protocol PR-B-impl (ADR-038)', () => {
       assert.match(out, /禁止猜投/, 'the contract must forbid choosing a nearby thread by guess');
     });
 
-    sourceOnlyTest('header indicates ADR-038 + outside L0 cap', () => {
+    sourceOnlyTest('header indicates ADR-038 + outside session-init cap', () => {
       const out = buildStagingPrepend('opus-47');
       assert.ok(out.includes('ADR-038'));
       assert.match(out, /outside L0\s+\d+-cap/);
     });
 
-    sourceOnlyTest('PR-C R2 (cloud L33 #2239): F218 source-audit NOT in staging (kept in L0)', () => {
-      // Cloud R2 L33 P1: F218 source-audit is security-class — must stay in
-      // L0 (system-role) to keep authority against user "skip provenance"
-      // override. Verify staging body does NOT carry source-audit content,
-      // and compile-system-prompt-l0.test.mjs has the inverse assertion that
-      // L0 retains it.
+    sourceOnlyTest('PR-C R2 (cloud L33 #2239): F218 source-audit stays in session-init hooks', () => {
+      // Cloud R2 L33 P1: F218 source-audit is security-class and must stay in
+      // session-init system-role content to retain authority against a user
+      // "skip provenance" override. The HookPipeline tests cover its presence;
+      // this assertion keeps it out of turn staging.
       const out = buildStagingPrepend('opus-47');
       assert.ok(
         !out.includes('搜索结果只是候选线索'),
-        'F218 trigger phrase must NOT be in staging — see compile-system-prompt-l0.test.mjs for L0 presence',
+        'F218 trigger phrase must NOT be in staging — HookPipeline owns session-init presence',
       );
       assert.ok(!out.includes('source-audit'), 'F218 source-audit reflex must NOT be in staging body');
     });
@@ -372,24 +370,22 @@ describe('L0 Staging Protocol PR-B-impl (ADR-038)', () => {
     });
   });
 
-  describe('Decoupling from native L0 (砚砚 R1 P2: staging NOT in 6000 L0 cap)', () => {
-    test('staging tokens are bounded by staging cap, not L0 cap', () => {
+  describe('Decoupling from session-init hooks', () => {
+    test('staging tokens are bounded by their own cap', () => {
       const m = loadStagingManifest();
-      // staging hard cap ≤ 2000; L0 hard cap = 6000; separately bounded.
       assert.equal(m.hard_cap_tokens, 2000, 'staging cap should be 2000 per ADR-038 v1');
-      // Verify they are independent: changing staging items doesn't affect L0 cap.
-      // (L0 cap enforced by scripts/compile-system-prompt-l0.test.mjs, untouched here.)
     });
 
-    test('wipers content NOT present in compile-system-prompt-l0 output (compiled L0)', async () => {
-      // This is the critical proof of the砚砚 P2 boundary: staging is NOT in native L0.
-      const { compileL0 } = await import('../../../scripts/compile-system-prompt-l0.mjs');
-      const l0 = await compileL0({ catId: 'opus-47' });
-      // L0 contains "摩擦检测反射" (existing) but must NOT contain "摩擦上报反射 (雨刮器条款)"
-      // (which lives in staging body) — check the staging body marker text.
+    test('wipers content is absent from the session-init HookPipeline output', () => {
+      const sessionPrompt = buildSystemPrompt({
+        catId: 'opus-47',
+        mode: 'independent',
+        teammates: [],
+        mcpAvailable: false,
+      });
       assert.ok(
-        !l0.includes('[爪感差: 工具+现象]'),
-        'staging wipers core format must NOT appear in compiled native L0',
+        !sessionPrompt.includes('[爪感差: 工具+现象]'),
+        'turn-scoped staging must not be duplicated into session-init hooks',
       );
     });
 

@@ -13,14 +13,15 @@
  */
 
 // ---------------------------------------------------------------------------
-// Event kinds（全 19 种，每种在 state-machine 转移表必有一行——INV-10 穷举钉死）
-// Phase B 13 种 + Phase C 3 安乐死 + Phase P 1 wakeWhen + F167 2 invocation-bound dispositions
+// Event kinds（全 20 种，每种在 state-machine 转移表必有一行——INV-10 穷举钉死）
+// Baseline 19 kinds + LI-005 void_ack.
 // ---------------------------------------------------------------------------
 
 export type BallEventKind =
   | 'ball.handed' // 行首 @ 路由投递给某猫（payload: { fromCatId?, toCatId }）
   | 'ball.handed_cvo' // @co-creator（payload: { fromCatId?, intent: BallIntent }）
   | 'ball.void_pass' // F167 forced-pass guard / 路由守卫：说传了但无系统动作
+  | 'ball.void_ack' // LI-005: A2A 接球但无持久触发器绑定（球静默死亡）
   | 'ball.held' // hold_ball 设（payload: { catId, fireAt }）
   | 'ball.hold_expired' // hold fireAt 已过
   | 'invocation.started' // 持有者起 invocation

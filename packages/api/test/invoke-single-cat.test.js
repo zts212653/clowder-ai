@@ -249,7 +249,10 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
             service,
             sessionChainStore: deps.sessionChainStore,
           }));
-        yield* invokeSingleCatRaw(deps, { ...params, service, capacitySnapshot });
+        const nativeSessionPrompt = Object.hasOwn(params, 'nativeSessionPrompt')
+          ? params.nativeSessionPrompt
+          : '# Test HookPipeline session prompt\nRoute-owned test fixture.';
+        yield* invokeSingleCatRaw(deps, { ...params, service, capacitySnapshot, nativeSessionPrompt });
       })();
   });
 
@@ -264,9 +267,8 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
     else process.env.CAT_CAFE_GLOBAL_CONFIG_ROOT = _savedGlobalRoot;
   }
 
-  // F203 Phase I: mock L0 compiler for OpenCode tests.
-  // Real subprocess compiler can't see in-process catRegistry registrations,
-  // so test services must use this instead of compileL0ViaSubprocess.
+  // Legacy provider factory seam retained by provider-focused fixtures. Route
+  // tests above always supply the route-owned HookPipeline prompt explicitly.
   const dummyL0CompilerFn = async ({ catId }) => `# Dummy L0 for ${catId}\nTest-only stub.`;
 
   function makeDeps() {
@@ -8431,8 +8433,7 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
     },
   );
 
-  // F203 Phase I AC-I4: subscription/unresolved OpenCode path gets instructions-only L0 config
-  it('F203-I: OpenCode subscription path → full runtime config (MCP + L0) + no API key injection', async () => {
+  it('F203-I: OpenCode subscription path → runtime config (MCP + session hooks) + no API key injection', async () => {
     const { createProviderProfile } = await import('./helpers/create-test-account.js');
     const root = await mkdtemp(join(tmpdir(), 'f203-subscription-oc-'));
     const apiDir = join(root, 'packages', 'api');
@@ -8502,9 +8503,9 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
       );
 
       const callbackEnv = optionsSeen[0]?.callbackEnv ?? {};
-      // Non-api_key auth gets full runtime config (MCP + L0 + model routing)
+      // Non-api_key auth gets full runtime config (MCP + session hooks + model routing)
       // but signals instructions-only so buildEnv preserves native auth
-      assert.ok(callbackEnv.OPENCODE_CONFIG, 'subscription path must get OPENCODE_CONFIG with MCP + L0');
+      assert.ok(callbackEnv.OPENCODE_CONFIG, 'subscription path must get OPENCODE_CONFIG with MCP + session hooks');
       assert.strictEqual(
         callbackEnv.CAT_CAFE_OC_INSTRUCTIONS_ONLY,
         '1',
@@ -8679,8 +8680,7 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
     }
   });
 
-  // F203 Phase I: compile fail-closed — throwing l0CompilerFn aborts invocation
-  it('F203-I: OpenCode compile failure → fail-closed, service.invoke never called', async () => {
+  it('F257: missing OpenCode route prompt → fail-closed, service.invoke never called', async () => {
     const { createProviderProfile } = await import('./helpers/create-test-account.js');
     const root = await mkdtemp(join(tmpdir(), 'f203-fail-closed-'));
     const apiDir = join(root, 'packages', 'api');
@@ -8714,10 +8714,6 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
 
     let invokedService = false;
     const service = {
-      // Throwing l0CompilerFn — simulates compile failure
-      l0CompilerFn: async () => {
-        throw new Error('deliberate L0 compile failure');
-      },
       async *invoke() {
         invokedService = true;
         yield { type: 'done', catId: 'opencode', timestamp: Date.now() };
@@ -8738,9 +8734,10 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
           userId: 'user-f203-fail-closed',
           threadId: 'thread-f203-fail-closed',
           isLastCat: true,
+          nativeSessionPrompt: ' ',
         }),
       );
-      // Verify error event contains F203 fail-closed message
+      // Verify the carrier refuses to start without the route-owned prompt.
       const errorMsgs = msgs.filter(
         (m) =>
           m.type === 'error' ||
@@ -8748,11 +8745,11 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
       );
       const allContent = msgs.map((m) => m.error || m.content || '').join('\n');
       assert.ok(
-        allContent.includes('F203 fail-closed') || allContent.includes('deliberate L0 compile failure'),
-        `must contain F203 fail-closed or compile error in events, got: ${msgs.map((m) => m.type).join(',')}`,
+        allContent.includes('F257 fail-closed') || allContent.includes('missing route-owned native session prompt'),
+        `must contain the F257 fail-closed error, got: ${msgs.map((m) => m.type).join(',')}`,
       );
       // service.invoke() must NOT have been called — no naked invocation
-      assert.strictEqual(invokedService, false, 'service.invoke must not run when L0 compile fails');
+      assert.strictEqual(invokedService, false, 'service.invoke must not run without the route-owned prompt');
     } finally {
       process.chdir(previousCwd);
       catRegistry.reset();

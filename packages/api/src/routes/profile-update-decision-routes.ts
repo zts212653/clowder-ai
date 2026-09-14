@@ -16,11 +16,7 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import { requireAnchoredPublication } from '../domains/approval-hub/requireAnchoredPublication.js';
 import type { SessionMutex } from '../domains/cats/services/agents/invocation/SessionMutex.js';
-import { clearL0Cache as defaultClearL0Cache } from '../domains/cats/services/agents/providers/l0-compiler.js';
-import {
-  type ApproveProfileUpdateResult,
-  approveProfileUpdate as defaultApproveProfileUpdate,
-} from '../domains/cats/services/profile/approveProfileUpdate.js';
+import { approveProfileUpdate as defaultApproveProfileUpdate } from '../domains/cats/services/profile/approveProfileUpdate.js';
 import type { FileProfileRepository } from '../domains/cats/services/profile/ProfileRepository.js';
 import type { IProfileUpdateProposalStore } from '../domains/cats/services/stores/ports/ProfileUpdateProposalStore.js';
 import { profileUpdateApproved, profileUpdateRejected } from '../infrastructure/telemetry/instruments.js';
@@ -35,7 +31,6 @@ export interface ProfileUpdateDecisionDeps {
   lock: SessionMutex;
   repository: FileProfileRepository;
   socketManager: Pick<SocketManager, 'emitToUser'>;
-  clearL0Cache?: (catId?: string, userId?: string) => void;
   approveProfileUpdate?: typeof defaultApproveProfileUpdate;
 }
 
@@ -75,20 +70,7 @@ async function resolveOwnedProfileUpdate(
 }
 
 export function registerProfileUpdateDecisionRoutes(app: FastifyInstance, deps: ProfileUpdateDecisionDeps): void {
-  const {
-    store,
-    lock,
-    repository,
-    socketManager,
-    clearL0Cache = defaultClearL0Cache,
-    approveProfileUpdate = defaultApproveProfileUpdate,
-  } = deps;
-
-  const clearCommittedPrimerCache = (result: ApproveProfileUpdateResult): void => {
-    if (result.proposal?.writtenPath) {
-      clearL0Cache(result.proposal.sourceCatId, result.proposal.createdBy);
-    }
-  };
+  const { store, lock, repository, socketManager, approveProfileUpdate = defaultApproveProfileUpdate } = deps;
 
   app.get('/api/profile-updates/:proposalId', async (request, reply) => {
     const proposalId = resolveProfileUpdateId(request, reply);
@@ -108,7 +90,6 @@ export function registerProfileUpdateDecisionRoutes(app: FastifyInstance, deps: 
     await requireAnchoredPublication(store, proposal.proposalId);
 
     const result = await approveProfileUpdate(proposal.proposalId, userId, { store, lock, repository });
-    clearCommittedPrimerCache(result);
     if (result.ok) {
       // F231 AC-C3 eval counter (KD-10)
       profileUpdateApproved.add(1, { 'agent.id': result.proposal.sourceCatId });

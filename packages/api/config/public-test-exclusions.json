@@ -18,12 +18,12 @@
         "matchedFilesHash": "613776cced1400d311fd529f4b000a0c76c0306cd7e55fc9061b4115d8435a57"
       },
       "publicAudit": {
-        "reviewedOn": "2026-09-05",
+        "reviewedOn": "2026-09-14",
         "sourceHead": "c5633cf643447e040af125d361d2156e38fdb081",
-        "publicHead": "f3dba7a1abb9474a88764f21283297cbe9935e2b",
+        "publicHead": "c0cf29f0a2a828654202cb662f18c55058f2a1fb",
         "status": "resource_contract",
-        "matchedFileCount": 64,
-        "matchedFilesHash": "5e21c0b349928349fbe2de8cb929538c801b354db1f1eedb07420658fbd508c6"
+        "matchedFileCount": 65,
+        "matchedFilesHash": "c680b07a4278a4b8623fd1f731cde055b64c1b87794772a6afbb47751d515776"
       }
     },
     {
@@ -94,12 +94,12 @@
       "introducedBy": "78f3bc57c",
       "expiresOn": "2026-10-01",
       "audit": {
-        "reviewedOn": "2026-09-09",
+        "reviewedOn": "2026-09-14",
         "sourceHead": "6bffad45ecb50e6cbe1f11ae897358a54ef5ff39",
-        "publicHead": "6b6fbbaa863ced704081f0ddc718d797b619f8c2",
+        "publicHead": "c0cf29f0a2a828654202cb662f18c55058f2a1fb",
         "status": "source_dependency_failure",
-        "matchedFileCount": 257,
-        "matchedFilesHash": "44c17c6a5c91da002e0ca89cfdf8b3a68455552fd50768c9b78816d0a9830357"
+        "matchedFileCount": 258,
+        "matchedFilesHash": "b24f75924524ca0a12b3ca5a9a42ba21a27618e060cf174b754a591ccd139764"
       }
     },
     {
@@ -493,12 +493,12 @@
       "introducedBy": "bfa9e2c8f",
       "expiresOn": "2026-10-01",
       "audit": {
-        "reviewedOn": "2026-09-01",
+        "reviewedOn": "2026-09-14",
         "sourceHead": "b741f42fdbbb4484a54cde7eadca08b3b11652e3",
-        "publicHead": "182d8ec9abc87ff7905441dca0575aab9787ee8f",
+        "publicHead": "c0cf29f0a2a828654202cb662f18c55058f2a1fb",
         "status": "private_fixture_failure",
-        "matchedFileCount": 9,
-        "matchedFilesHash": "0c0d80f3d4f94431a26b151478f8beed27527783d335186604a61627b7a9f4de"
+        "matchedFileCount": 8,
+        "matchedFilesHash": "7226a5b41e8a3d702b60100b735b2514b9ff23cffd45af5bb7562610d319c45b"
       }
     },
     {

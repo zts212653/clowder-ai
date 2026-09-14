@@ -58,6 +58,7 @@ function queueEntry(entryId, messages, overrides = {}) {
 
 function appendQueued(messageStore, entryId, content, overrides = {}) {
   return messageStore.append({
+    provenance: { author: 'user', routed: false, observation: 'original' },
     threadId: THREAD_ID,
     userId: OWNER_ID,
     catId: null,

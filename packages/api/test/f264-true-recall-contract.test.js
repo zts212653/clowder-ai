@@ -26,6 +26,7 @@ function custody(overrides = {}) {
 
 function appendQueued(store, queueCustody = custody()) {
   return store.append({
+    provenance: { author: 'user', routed: false, observation: 'original' },
     threadId: 'thread-f264-gap-f',
     userId: 'owner-1',
     catId: null,
@@ -72,6 +73,7 @@ describe('F264 Gap F true recall contract (memory store)', () => {
   it('refuses a queued body without durable Queue custody', () => {
     const store = new MessageStore();
     const message = store.append({
+      provenance: { author: 'user', routed: false, observation: 'original' },
       threadId: 'thread-f264-gap-f',
       userId: 'owner-1',
       catId: null,

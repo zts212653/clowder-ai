@@ -14,7 +14,9 @@ import { catRegistry } from '@cat-cafe/shared';
 const REPO_ROOT_TEMPLATE = resolve(dirname(fileURLToPath(import.meta.url)), '../../..', 'cat-template.json');
 const CAT_TEMPLATE_PATH = REPO_ROOT_TEMPLATE;
 const CAT_DOSSIER_PATH = resolve(dirname(fileURLToPath(import.meta.url)), '../../../docs/team/cat-dossier.md');
-const FULL_RUNTIME_PROMPT_CHAR_BUDGET = 7050; // 6500→6700→7050: gemini35 + gpt-pro roster growth
+// F257 S5 combines the former split session sources (L1-L7 + S/B/C) into one
+// HookPipeline result. 18k chars remains below the historical 6k-token bound.
+const FULL_RUNTIME_PROMPT_CHAR_BUDGET = 18_000;
 
 function assertWithinFullRuntimePromptBudget(prompt) {
   assert.ok(
@@ -192,23 +194,19 @@ describe('SystemPromptBuilder', () => {
       teammates: [],
       mcpAvailable: true,
     });
-    const proposeSection = prompt.match(/cat_cafe_propose_thread[\s\S]*?(?=\n- cat_cafe_|$)/);
-    assert.ok(proposeSection, 'propose_thread description must be present');
-    const desc = proposeSection[0];
-
     assert.match(
-      desc,
+      prompt,
       /GitHub[\s\S]*opensource-ops/,
       'propose_thread must tell child threads to load opensource-ops skill for GitHub PR/issue work',
     );
     assert.match(
-      desc,
+      prompt,
       /服务端不再自动注入五问|不写 PR metadata/,
       'propose_thread must state that server no longer auto-injects maintainer questions or writes PR metadata',
     );
-    assert.match(desc, /自行 grounding/, 'propose_thread must instruct child workspace to perform its own grounding');
+    assert.match(prompt, /自行 grounding/, 'propose_thread must instruct child workspace to perform its own grounding');
     assert.match(
-      desc,
+      prompt,
       /projectPath[\s\S]*项目归属/,
       'propose_thread must still document projectPath as the child thread ownership',
     );
@@ -226,21 +224,19 @@ describe('SystemPromptBuilder', () => {
       teammates: [],
       mcpAvailable: true,
     });
-    const proposeSection = prompt.match(/cat_cafe_propose_thread[\s\S]*?(?=\n- cat_cafe_|$)/);
-    assert.ok(proposeSection, 'propose_thread description must be present');
-    const desc = proposeSection[0];
-    // final-only must be listed as default
+    // The concise L5 index mentions the triage override first; S13 remains the
+    // canonical detailed tool contract and must name the general default.
     assert.ok(
-      desc.includes('reportingMode=final-only（默认'),
-      `propose_thread must document reportingMode=final-only as 默认; got: ${desc.slice(0, 200)}`,
+      prompt.includes('reportingMode=final-only（默认'),
+      'propose_thread must document reportingMode=final-only as the general default',
     );
     assert.doesNotMatch(
-      desc,
+      prompt,
       /(^|[^A-Za-z])mode=final-only/,
       'propose_thread must use the callback schema field reportingMode, not bare mode',
     );
     // none must NOT be labeled as default
-    assert.ok(!desc.includes('none（默认'), 'propose_thread must NOT label none as 默认 (Phase AA superseded)');
+    assert.ok(!prompt.includes('none（默认'), 'propose_thread must NOT label none as 默认 (Phase AA superseded)');
   });
 
   test('F128: requester withdrawal is discoverable without conflating user reject', async () => {
@@ -296,7 +292,7 @@ describe('SystemPromptBuilder', () => {
     );
   });
 
-  test('omits MCP tools when mcpAvailable is false', async () => {
+  test('omits the dynamic MCP catalog when mcpAvailable is false', async () => {
     const build = await getBuilder();
     const prompt = build({
       catId: 'codex',
@@ -304,7 +300,7 @@ describe('SystemPromptBuilder', () => {
       teammates: [],
       mcpAvailable: false,
     });
-    assert.ok(!prompt.includes('cat_cafe_post_message'));
+    assert.ok(!prompt.includes('MCP 工具（异步汇报；token 有效期有限）'));
   });
 
   test('contains anti-impersonation rule', async () => {
@@ -334,9 +330,7 @@ describe('SystemPromptBuilder', () => {
     assert.equal(a, b);
   });
 
-  // 改 governance content（Magic Words / shared-rules）时两个 test 都要跑：
-  //   - 本文件：char budget（runtime prompt）
-  //   - scripts/compile-system-prompt-l0.test.mjs：token budget（L0 compiled markdown）
+  // 改 governance content（Magic Words / shared-rules）时跑此组合 session prompt budget。
   test('output size stays under full runtime prompt budget after Magic Words + runtime prompt growth', async () => {
     await withFreshRuntimeRegistry(async () => {
       const build = await getBuilder();
@@ -785,7 +779,7 @@ describe('SystemPromptBuilder', () => {
     }
   });
 
-  test('buildStaticIdentity roster size with full runtime config stays under 4700 chars after Magic Words growth', async () => {
+  test('combined session prompt with full runtime roster stays within budget', async () => {
     await withFreshRuntimeRegistry(async () => {
       const { buildSystemPrompt } = await import('../dist/domains/cats/services/context/SystemPromptBuilder.js');
       const prompt = buildSystemPrompt({
@@ -1271,20 +1265,19 @@ describe('SystemPromptBuilder', () => {
     assert.ok(identity.includes('cat_cafe_get_thread_context'), 'Should contain thread context tool');
   });
 
-  test('buildStaticIdentity omits MCP tools when mcpAvailable is false', async () => {
+  test('buildStaticIdentity omits the dynamic MCP catalog when mcpAvailable is false', async () => {
     const { buildStaticIdentity } = await import('../dist/domains/cats/services/context/SystemPromptBuilder.js');
     const identity = buildStaticIdentity('opus');
-    assert.ok(!identity.includes('cat_cafe_post_message'), 'Should not contain MCP tools without mcpAvailable');
+    assert.ok(
+      !identity.includes('MCP 工具（异步汇报；token 有效期有限）'),
+      'S13 dynamic tool catalog should be absent without MCP',
+    );
   });
 
-  test('buildStaticIdentity does NOT include mcpCallbackInstructions (non-Claude stays per-message)', async () => {
+  test('buildStaticIdentity carries C1 through the same pipeline for every provider', async () => {
     const { buildStaticIdentity } = await import('../dist/domains/cats/services/context/SystemPromptBuilder.js');
-    // Non-Claude cats use per-message injection for HTTP callback instructions
-    // because their systemPrompt lives in session history and may be lost on compression.
-    // Only Claude's MCP_TOOLS_SECTION goes in staticIdentity (survives compression via --append-system-prompt).
     const identity = buildStaticIdentity('codex');
-    assert.ok(!identity.includes('cat_cafe_post_message'), 'Codex should not have MCP tools in static identity');
-    assert.ok(!identity.includes('HTTP 回调'), 'Codex should not have callback instructions in static identity');
+    assert.ok(identity.includes('HTTP 回调'), 'C1 callback instructions must come from the session hook pipeline');
   });
 
   test('buildStaticIdentity includes co-creator reference', async () => {
@@ -1833,7 +1826,7 @@ describe('SystemPromptBuilder', () => {
     assert.ok(ctx.includes('F080'), 'Should contain feature ID');
   });
 
-  test('buildSystemPrompt size stays under 3900 chars with SOP hint after Magic Words + runtime prompt growth', async () => {
+  test('combined session prompt stays within budget with SOP hint', async () => {
     const build = await getBuilder();
     const prompt = build({
       catId: 'opus',
@@ -1850,8 +1843,7 @@ describe('SystemPromptBuilder', () => {
         featureId: 'F073',
       },
     });
-    // 6200→6500→6700→6800→7050: decision funnel §17 + roster growth + F208 dossier l0RosterSummary
-    assert.ok(prompt.length < 7050, `Prompt with SOP hint is ${prompt.length} chars, expected < 7050`);
+    assertWithinFullRuntimePromptBudget(prompt);
   });
 
   // --- F092: Voice Mode prompt injection ---
@@ -1880,7 +1872,7 @@ describe('SystemPromptBuilder', () => {
     assert.ok(!ctx.includes('Voice Mode ON'), 'Should not include voice mode header');
   });
 
-  test('buildSystemPrompt size stays under 5200 chars with voice mode + SOP hint after Magic Words growth', async () => {
+  test('combined session prompt stays within budget with voice mode and SOP hint', async () => {
     const build = await getBuilder();
     const prompt = build({
       catId: 'opus',
@@ -1898,8 +1890,7 @@ describe('SystemPromptBuilder', () => {
       },
       voiceMode: true,
     });
-    // 6200→6500→6700→6800→7050: decision funnel §17 + roster growth + F208 dossier l0RosterSummary
-    assert.ok(prompt.length < 7050, `Prompt with voice mode + SOP hint is ${prompt.length} chars, expected < 7050`);
+    assertWithinFullRuntimePromptBudget(prompt);
   });
 
   test('buildInvocationContext injects bootcamp mode when bootcampState provided', async () => {
@@ -2069,10 +2060,8 @@ describe('SystemPromptBuilder', () => {
     const withNull = buildStaticIdentity('opus', { packBlocks: null });
     const withUndef = buildStaticIdentity('opus', {});
 
-    assert.ok(!withNull.includes('角色叠加'), 'null packBlocks should not inject masks');
-    assert.ok(!withNull.includes('硬约束'), 'null packBlocks should not inject guardrails');
-    assert.ok(!withUndef.includes('角色叠加'), 'undefined packBlocks should not inject masks');
-    assert.ok(!withUndef.includes('硬约束'), 'undefined packBlocks should not inject guardrails');
+    assert.ok(!withNull.includes('[Pack:'), 'null packBlocks should not inject pack sections');
+    assert.ok(!withUndef.includes('[Pack:'), 'undefined packBlocks should not inject pack sections');
   });
 
   test('F129: partial packBlocks only inject present fields', async () => {

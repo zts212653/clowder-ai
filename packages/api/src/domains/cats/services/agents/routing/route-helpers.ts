@@ -142,6 +142,8 @@ export interface RouteStrategyDeps {
   freshnessEventLog?: import('../../freshness/FreshnessAttentionEventLog.js').FreshnessAttentionEventLog;
   /** F254 Phase E: single output-commit boundary backed by a persistent catch closure. */
   freshnessOutputCommitCoordinator?: import('../../freshness/glass-box/FreshnessOutputCommitCoordinator.js').FreshnessOutputCommitCoordinator;
+  /** F257: fail-open observation sink for generator-layer guard outcomes. */
+  guardRejectionLog?: import('../../../../../infrastructure/harness-eval/GuardRejectionEventLog.js').GuardRejectionEventLog;
   /** F276: owner-scoped live proposal state injected before every model invocation. */
   personMemoryProposalStatusContextResolver?: import('../../../../memory/people/PersonMemoryProposalStatusContextResolver.js').PersonMemoryProposalStatusContextResolver;
 }

@@ -2,7 +2,7 @@ import { z } from 'zod';
 
 export const APPROVAL_LIFECYCLE_VERSION = 1 as const;
 
-export const approvalResolutionSchema = z.enum(['open', 'accepted', 'rejected', 'closed_without_decision']);
+export const approvalResolutionSchema = z.enum(['open', 'accepted', 'skipped', 'rejected', 'closed_without_decision']);
 export type ApprovalResolution = z.infer<typeof approvalResolutionSchema>;
 
 export const approvalMaterializationSchema = z.discriminatedUnion('state', [
@@ -43,6 +43,7 @@ export type LegacyApprovalStatus =
   | 'applying'
   | 'approved'
   | 'accepted'
+  | 'skipped'
   | 'rejected'
   | 'withdrawn'
   | 'superseded'
@@ -79,6 +80,9 @@ export function normalizeApprovalLifecycleProjection(input: LegacyApprovalLifecy
       break;
     case 'rejected':
       projection = { resolution: 'rejected', materialization: { state: 'not_started' } };
+      break;
+    case 'skipped':
+      projection = { resolution: 'skipped', materialization: { state: 'not_started' } };
       break;
     case 'withdrawn':
     case 'superseded':

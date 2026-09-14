@@ -294,6 +294,8 @@ export interface AgentMessage {
     auxiliaryTurnExecutions?: TurnExecutionMessageProjection[];
     /** #814: True when message originated from an explicit post_message callback (not stream duplicate) */
     isExplicitPost?: boolean;
+    /** F257: observe-only trailing cat-signature contract result. */
+    signatureLint?: { signed: boolean };
     /** F272: durable proactive visit that owns this canonical home message. */
     proactive?: { visitId: string; intentId: string; source: 'private_time' };
   };
@@ -747,6 +749,11 @@ export interface AgentServiceOptions {
   recoveryAnchor?: InvocationRecoveryAnchor;
   /** Static identity prompt (Claude: --append-system-prompt, others: prepend to prompt) */
   systemPrompt?: string;
+  /**
+   * Exact session-init HookPipeline output for a provider-native system/developer
+   * carrier. The provider may transport these bytes, but must not rebuild them.
+   */
+  nativeSessionPrompt?: string;
   /** Static identity prompt used only if a resumed carrier creates a fresh fallback session. */
   resumeFallbackSystemPrompt?: string;
   /** F089: Override spawnCli with tmux-based spawner (set per-invocation) */
@@ -958,29 +965,4 @@ export interface AgentService {
    * cliSessionId path unchanged.
    */
   usesChainKeyResume?(): boolean;
-}
-
-/**
- * F203 Phase I — L0 compiler function signature.
- * Same as `compileL0ViaSubprocess` but injectable for testing.
- */
-export type L0CompilerFn = (options: {
-  catId: string;
-  userId?: string;
-  dataDir?: string;
-  outPath?: string;
-}) => Promise<string>;
-
-/**
- * F203 Phase I — AgentService that carries an injectable L0 compiler seam.
- * OpenCodeAgentService implements this; Claude/Codex services keep their own
- * private l0CompilerFn (different lifecycle — they compile L0 internally).
- */
-export interface L0InjectableAgentService extends AgentService {
-  readonly l0CompilerFn?: L0CompilerFn;
-}
-
-/** Type guard: does this service expose an injectable L0 compiler? */
-export function hasL0CompilerSeam(service: AgentService): service is L0InjectableAgentService {
-  return 'l0CompilerFn' in service && typeof (service as L0InjectableAgentService).l0CompilerFn === 'function';
 }

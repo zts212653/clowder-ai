@@ -335,6 +335,7 @@ export class GameOrchestrator {
     const userId = runtime.config.observerUserId ?? 'system';
     Promise.resolve(
       this.messageStore.append({
+        provenance: { author: 'cat', routed: false, observation: 'original' }, // sol R3 P1-1
         userId,
         catId: catId as import('@cat-cafe/shared').CatId,
         content,

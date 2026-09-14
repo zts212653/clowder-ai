@@ -328,6 +328,8 @@ export interface ChatMessage {
     messageBundle?: MessageBundleCarrierV1;
     /** #814: True when message originated from an explicit post_message callback (not stream duplicate) */
     isExplicitPost?: boolean;
+    /** F257 #4: persisted message-signature lint verdict. */
+    signatureLint?: { signed: boolean };
     /** Scheduler presentation metadata (hidden trigger / ephemeral lifecycle toast) */
     scheduler?: SchedulerMessageExtra['scheduler'];
     /** F118 AC-C3: Timeout diagnostics for enhanced error display */
@@ -1057,3 +1059,10 @@ export const DEFAULT_THREAD_STATE: ThreadState = {
   rightPanelMode: 'status',
   rightPanelOpen: false,
 };
+
+/** Preserve F257 signature-lint metadata across divergent message hydration paths. */
+export function pickSignatureLint(extra: { signatureLint?: { signed: boolean } } | null | undefined): {
+  signatureLint?: { signed: boolean };
+} {
+  return extra?.signatureLint ? { signatureLint: extra.signatureLint } : {};
+}

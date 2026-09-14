@@ -22,6 +22,7 @@ import {
 } from './helpers/redis-test-helpers.js';
 
 const REDIS_URL = process.env.REDIS_URL;
+const USER_PROVENANCE = { author: 'user', routed: false, observation: 'original' };
 
 /** Per-file unique keyPrefix isolates this suite from concurrent redis-message-store / f232 tests. */
 const TEST_KEY_PREFIX = 'cat-cafe-dlv-atomicity:';
@@ -71,6 +72,7 @@ describe('delivery-order transition atomicity (PR #1193)', { skip: redisIsolatio
   // ── Helper: create a queued message for testing ──
   const createQueued = (userId, threadId, ts) =>
     store.append({
+      provenance: USER_PROVENANCE,
       userId,
       catId: null,
       content: `queued-msg-${ts}`,

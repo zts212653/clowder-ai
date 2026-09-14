@@ -159,8 +159,8 @@ test('memory exclusion audit binds the current source-managed candidate', async 
 
   assert.ok(memoryEntry, 'memory exclusion must remain audited');
   assert.equal(memoryEntry.audit.sourceHead, '6bffad45ecb50e6cbe1f11ae897358a54ef5ff39');
-  assert.equal(memoryEntry.audit.publicHead, '6b6fbbaa863ced704081f0ddc718d797b619f8c2');
-  assert.equal(memoryEntry.audit.matchedFileCount, 257);
+  assert.equal(memoryEntry.audit.publicHead, 'c0cf29f0a2a828654202cb662f18c55058f2a1fb');
+  assert.equal(memoryEntry.audit.matchedFileCount, 258);
   assert.equal(memoryEntry.publicAudit, undefined, 'the stale public-main snapshot is not an exported-candidate audit');
 });
 

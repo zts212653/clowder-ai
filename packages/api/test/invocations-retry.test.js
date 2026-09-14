@@ -28,6 +28,13 @@ function createMockRouter(options = {}) {
       yield { type: 'done', catId: 'opus', timestamp: Date.now() };
     },
     resolveTargetsAndIntent: async () => ({
+      attemptBatch: {
+        parserMode: 'user',
+        spanBasis: 'lowercased_message',
+        attempts: [],
+        truncated: false,
+        metricEligible: true,
+      },
       targetCats: ['opus'],
       intent: { intent: 'execute', explicit: false, promptTags: [] },
     }),
@@ -64,6 +71,7 @@ async function setupRetryScenario(routerOverride, trackerOverride, queueProcesso
 
   // Pre-populate: store a user message and create a failed invocation record
   const storedMsg = messageStore.append({
+    provenance: { author: 'user', routed: false, observation: 'original' },
     userId: 'user-1',
     catId: null,
     content: '@布偶猫 hello retry',
@@ -376,6 +384,7 @@ describe('POST /api/invocations/:id/retry (ADR-008 S2)', () => {
     const invocationTracker = new InvocationTracker();
 
     const storedMsg = messageStore.append({
+      provenance: { author: 'user', routed: false, observation: 'original' },
       userId: 'user-1',
       catId: null,
       content: '@布偶猫 queued msg',
@@ -432,6 +441,13 @@ describe('POST /api/invocations/:id/retry (ADR-008 S2)', () => {
         yield { type: 'done', catId: 'opus', timestamp: Date.now() };
       },
       resolveTargetsAndIntent: async () => ({
+        attemptBatch: {
+          parserMode: 'user',
+          spanBasis: 'lowercased_message',
+          attempts: [],
+          truncated: false,
+          metricEligible: true,
+        },
         targetCats: ['opus'],
         intent: { intent: 'execute', explicit: false, promptTags: [] },
       }),
@@ -439,6 +455,7 @@ describe('POST /api/invocations/:id/retry (ADR-008 S2)', () => {
     };
 
     const storedMsg = messageStore.append({
+      provenance: { author: 'user', routed: false, observation: 'original' },
       userId: 'user-1',
       catId: null,
       content: '@布偶猫 retry race',
@@ -572,6 +589,13 @@ describe('POST /api/invocations/:id/retry (ADR-008 S2)', () => {
         yield { type: 'done', catId: 'opus', timestamp: Date.now() };
       },
       resolveTargetsAndIntent: async () => ({
+        attemptBatch: {
+          parserMode: 'user',
+          spanBasis: 'lowercased_message',
+          attempts: [],
+          truncated: false,
+          metricEligible: true,
+        },
         targetCats: ['opus'],
         intent: { intent: 'execute', explicit: false, promptTags: [] },
       }),
@@ -696,6 +720,7 @@ describe('MessageStore.getById()', () => {
   it('returns message when found', async () => {
     const store = new MessageStore();
     const msg = store.append({
+      provenance: { author: 'user', routed: false, observation: 'original' },
       userId: 'user-1',
       catId: null,
       content: 'test message',

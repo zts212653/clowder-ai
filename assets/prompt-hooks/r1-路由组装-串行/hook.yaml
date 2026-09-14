@@ -17,7 +17,7 @@ inputs:
 disableable: false
 
 # Classification (Phase 1 3-axis)
-safetyTier: readonly
+safetyTier: editable
 transparencyTier: opt-in-view
 governanceTier: immutable
 

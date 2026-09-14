@@ -16,6 +16,7 @@ export async function appendGameSystemMessage(params: {
   const stored = params.messageStore
     ? await Promise.resolve(
         params.messageStore.append({
+          provenance: { author: 'system', routed: false, observation: 'original' }, // sol R3 P1-1
           userId: 'system',
           catId: 'system' as CatId,
           content: params.content,

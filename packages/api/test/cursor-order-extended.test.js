@@ -27,6 +27,7 @@ describe('Cursor Order — Extended RED tests (§8.8)', () => {
 
     // Append 3 messages — timestamps don't matter, seq must be strictly monotonic
     const m1 = store.append({
+      provenance: { author: 'user', routed: false, observation: 'original' },
       userId: 'u1',
       catId: null,
       content: 'a',
@@ -35,6 +36,7 @@ describe('Cursor Order — Extended RED tests (§8.8)', () => {
       threadId,
     });
     const m2 = store.append({
+      provenance: { author: 'user', routed: false, observation: 'original' },
       userId: 'u1',
       catId: null,
       content: 'b',
@@ -43,6 +45,7 @@ describe('Cursor Order — Extended RED tests (§8.8)', () => {
       threadId,
     });
     const m3 = store.append({
+      provenance: { author: 'user', routed: false, observation: 'original' },
       userId: 'u1',
       catId: null,
       content: 'c',
@@ -71,6 +74,7 @@ describe('Cursor Order — Extended RED tests (§8.8)', () => {
     const threadId = `red12-${Date.now()}`;
 
     store.append({
+      provenance: { author: 'user', routed: false, observation: 'original' },
       userId: 'u1',
       catId: null,
       content: 'stable',
@@ -100,6 +104,7 @@ describe('Cursor Order — Extended RED tests (§8.8)', () => {
     const threadId = `red15-${Date.now()}`;
 
     const direct = store.append({
+      provenance: { author: 'user', routed: false, observation: 'original' },
       userId: 'u1',
       catId: null,
       content: 'direct',
@@ -110,6 +115,7 @@ describe('Cursor Order — Extended RED tests (§8.8)', () => {
 
     // Hidden queued work (system/scheduler) — NOT timeline-published
     const queued = store.append({
+      provenance: { author: 'system', routed: false, observation: 'original' },
       userId: 'scheduler',
       catId: 'system',
       content: 'hidden-queued',
@@ -158,6 +164,7 @@ describe('Cursor Order — Extended RED tests (§8.8)', () => {
     const baseTs = Date.now() - 10000;
 
     const c = store.append({
+      provenance: { author: 'user', routed: false, observation: 'original' },
       userId: 'u1',
       catId: null,
       content: 'C-direct',
@@ -166,6 +173,7 @@ describe('Cursor Order — Extended RED tests (§8.8)', () => {
       threadId,
     });
     const q = store.append({
+      provenance: { author: 'cat', routed: false, observation: 'original' },
       userId: 'u1',
       catId: 'opus',
       content: 'Q-queued',
@@ -196,6 +204,7 @@ describe('Cursor Order — Extended RED tests (§8.8)', () => {
     const threadId = `red23b-${Date.now()}`;
 
     store.append({
+      provenance: { author: 'user', routed: false, observation: 'original' },
       userId: 'u1',
       catId: null,
       content: 'msg',
@@ -218,6 +227,7 @@ describe('Cursor Order — Extended RED tests (§8.8)', () => {
     const threadId = `red23c-${Date.now()}`;
 
     const c = store.append({
+      provenance: { author: 'user', routed: false, observation: 'original' },
       userId: 'u1',
       catId: null,
       content: 'C',
@@ -226,6 +236,7 @@ describe('Cursor Order — Extended RED tests (§8.8)', () => {
       threadId,
     });
     const q = store.append({
+      provenance: { author: 'cat', routed: false, observation: 'original' },
       userId: 'u1',
       catId: 'opus',
       content: 'Q',
@@ -256,6 +267,7 @@ describe('Cursor Order — Extended RED tests (§8.8)', () => {
     const threadId = `red13-${Date.now()}`;
 
     const direct = store.append({
+      provenance: { author: 'user', routed: false, observation: 'original' },
       userId: 'u1',
       catId: null,
       content: 'visible',
@@ -264,6 +276,7 @@ describe('Cursor Order — Extended RED tests (§8.8)', () => {
       threadId,
     });
     const q = store.append({
+      provenance: { author: 'cat', routed: false, observation: 'original' },
       userId: 'u1',
       catId: 'opus',
       content: 'will-cancel',
@@ -288,6 +301,7 @@ describe('Cursor Order — Extended RED tests (§8.8)', () => {
     const threadId = `red19-${Date.now()}`;
 
     const q = store.append({
+      provenance: { author: 'cat', routed: false, observation: 'original' },
       userId: 'u1',
       catId: 'opus',
       content: 'queued-msg',
@@ -325,6 +339,7 @@ describe('Cursor Order — Extended RED tests (§8.8)', () => {
     const threadId = `deliver-preserve-${Date.now()}`;
 
     const q = store.append({
+      provenance: { author: 'cat', routed: false, observation: 'original' },
       userId: 'u1',
       catId: 'codex-sol',
       content: 'timeline-published cat speech',
@@ -341,6 +356,7 @@ describe('Cursor Order — Extended RED tests (§8.8)', () => {
 
     // Append later ordinary B — gets a higher seq
     const b = store.append({
+      provenance: { author: 'user', routed: false, observation: 'original' },
       userId: 'u1',
       catId: null,
       content: 'ordinary B',
@@ -376,6 +392,7 @@ describe('Cursor Order — Extended RED tests (§8.8)', () => {
     const threadId = `hidden-queued-${Date.now()}`;
 
     const hidden = store.append({
+      provenance: { author: 'system', routed: false, observation: 'original' },
       userId: 'scheduler',
       catId: 'system',
       content: 'hidden system queued work',
@@ -407,9 +424,33 @@ describe('Cursor Order — Extended RED tests (§8.8)', () => {
     const threadId = `pruned-v1-${Date.now()}`;
 
     // Create 3 messages
-    store.append({ userId: 'u1', catId: null, content: 'M1', mentions: [], timestamp: Date.now() - 2000, threadId });
-    store.append({ userId: 'u1', catId: null, content: 'M2', mentions: [], timestamp: Date.now() - 1000, threadId });
-    store.append({ userId: 'u1', catId: null, content: 'M3', mentions: [], timestamp: Date.now(), threadId });
+    store.append({
+      provenance: { author: 'user', routed: false, observation: 'original' },
+      userId: 'u1',
+      catId: null,
+      content: 'M1',
+      mentions: [],
+      timestamp: Date.now() - 2000,
+      threadId,
+    });
+    store.append({
+      provenance: { author: 'user', routed: false, observation: 'original' },
+      userId: 'u1',
+      catId: null,
+      content: 'M2',
+      mentions: [],
+      timestamp: Date.now() - 1000,
+      threadId,
+    });
+    store.append({
+      provenance: { author: 'user', routed: false, observation: 'original' },
+      userId: 'u1',
+      catId: null,
+      content: 'M3',
+      mentions: [],
+      timestamp: Date.now(),
+      threadId,
+    });
 
     // Use a fake cursor ID that doesn't exist (simulates pruned message)
     const fakeCursor = 'zzz-pruned-cursor-id';

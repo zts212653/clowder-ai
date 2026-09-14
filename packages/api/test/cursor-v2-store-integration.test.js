@@ -21,6 +21,7 @@ describe('#1200 v2 cursor in getByThreadAfter (§8.7 graded issuance)', () => {
     const threadId = `cursor-v2-test-${Date.now()}`;
 
     store.append({
+      provenance: { author: 'user', routed: false, observation: 'original' },
       userId: 'u1',
       catId: null,
       content: 'hello',
@@ -44,6 +45,7 @@ describe('#1200 v2 cursor in getByThreadAfter (§8.7 graded issuance)', () => {
     const threadId = `cursor-v2-roundtrip-${Date.now()}`;
 
     store.append({
+      provenance: { author: 'user', routed: false, observation: 'original' },
       userId: 'u1',
       catId: null,
       content: 'msg1',
@@ -52,6 +54,7 @@ describe('#1200 v2 cursor in getByThreadAfter (§8.7 graded issuance)', () => {
       threadId,
     });
     store.append({
+      provenance: { author: 'user', routed: false, observation: 'original' },
       userId: 'u1',
       catId: null,
       content: 'msg2',
@@ -77,6 +80,7 @@ describe('#1200 v2 cursor in getByThreadAfter (§8.7 graded issuance)', () => {
     const threadId = `cursor-v1-compat-${Date.now()}`;
 
     const msg1 = store.append({
+      provenance: { author: 'user', routed: false, observation: 'original' },
       userId: 'u1',
       catId: null,
       content: 'first',
@@ -85,6 +89,7 @@ describe('#1200 v2 cursor in getByThreadAfter (§8.7 graded issuance)', () => {
       threadId,
     });
     store.append({
+      provenance: { author: 'user', routed: false, observation: 'original' },
       userId: 'u1',
       catId: null,
       content: 'second',
@@ -106,8 +111,17 @@ describe('#1200 getLatestVisibleCursor (§8.7 read-state)', () => {
     const store = new MessageStore();
     const threadId = `latest-vis-cursor-${Date.now()}`;
 
-    store.append({ userId: 'u1', catId: null, content: 'first', mentions: [], timestamp: Date.now() - 2000, threadId });
     store.append({
+      provenance: { author: 'user', routed: false, observation: 'original' },
+      userId: 'u1',
+      catId: null,
+      content: 'first',
+      mentions: [],
+      timestamp: Date.now() - 2000,
+      threadId,
+    });
+    store.append({
+      provenance: { author: 'user', routed: false, observation: 'original' },
       userId: 'u1',
       catId: null,
       content: 'second',
@@ -115,7 +129,15 @@ describe('#1200 getLatestVisibleCursor (§8.7 read-state)', () => {
       timestamp: Date.now() - 1000,
       threadId,
     });
-    store.append({ userId: 'u1', catId: null, content: 'third', mentions: [], timestamp: Date.now(), threadId });
+    store.append({
+      provenance: { author: 'user', routed: false, observation: 'original' },
+      userId: 'u1',
+      catId: null,
+      content: 'third',
+      mentions: [],
+      timestamp: Date.now(),
+      threadId,
+    });
 
     const result = store.getLatestVisibleCursor(threadId);
     assert.ok(result, 'Should return a cursor');
@@ -133,6 +155,7 @@ describe('#1200 getLatestVisibleCursor (§8.7 read-state)', () => {
     const threadId = `latest-skip-queued-${Date.now()}`;
 
     store.append({
+      provenance: { author: 'user', routed: false, observation: 'original' },
       userId: 'u1',
       catId: null,
       content: 'direct',
@@ -144,6 +167,7 @@ describe('#1200 getLatestVisibleCursor (§8.7 read-state)', () => {
     // so it has no visibilitySeq and is not returned by getLatestVisibleCursor.
     // Timeline-published cat speech (catId: 'opus') WOULD be visible at append.
     store.append({
+      provenance: { author: 'system', routed: false, observation: 'original' },
       userId: 'scheduler',
       catId: 'system',
       content: 'queued-hidden',
@@ -175,6 +199,7 @@ describe('#1200 getLatestVisibleCursor (§8.7 read-state)', () => {
     const baseTs = Date.now() - 10000;
 
     const c = store.append({
+      provenance: { author: 'user', routed: false, observation: 'original' },
       userId: 'u1',
       catId: null,
       content: 'C-direct',
@@ -183,6 +208,7 @@ describe('#1200 getLatestVisibleCursor (§8.7 read-state)', () => {
       threadId,
     });
     const q = store.append({
+      provenance: { author: 'cat', routed: false, observation: 'original' },
       userId: 'u1',
       catId: 'opus',
       content: 'Q-queued',
@@ -208,6 +234,7 @@ describe('#1200 canonicalizeCursor (§8.7 CAS ingress)', () => {
     const threadId = `canon-delivered-${Date.now()}`;
 
     const m = store.append({
+      provenance: { author: 'user', routed: false, observation: 'original' },
       userId: 'u1',
       catId: null,
       content: 'direct',
@@ -233,6 +260,7 @@ describe('#1200 canonicalizeCursor (§8.7 CAS ingress)', () => {
     // #1269: hidden queued work (non-cat-speech) has no visibilitySeq → raw ID fallback.
     // Timeline-published cat speech (catId: 'opus') would get v2 at append.
     const q = store.append({
+      provenance: { author: 'system', routed: false, observation: 'original' },
       userId: 'scheduler',
       catId: 'system',
       content: 'queued-hidden',
@@ -253,6 +281,7 @@ describe('#1200 canonicalizeCursor (§8.7 CAS ingress)', () => {
     const threadId = `canon-late-${Date.now()}`;
 
     const q = store.append({
+      provenance: { author: 'cat', routed: false, observation: 'original' },
       userId: 'u1',
       catId: 'opus',
       content: 'late-Q',
@@ -283,6 +312,7 @@ describe('#1200 canonicalizeCursor (§8.7 CAS ingress)', () => {
     const threadB = `canon-xthread-b-${Date.now()}`;
 
     const m = store.append({
+      provenance: { author: 'user', routed: false, observation: 'original' },
       userId: 'u1',
       catId: null,
       content: 'in-thread-A',
@@ -306,6 +336,7 @@ describe('#1200 canonicalizeCursor (§8.7 CAS ingress)', () => {
     const threadId = `canon-lex-${Date.now()}`;
 
     const m = store.append({
+      provenance: { author: 'user', routed: false, observation: 'original' },
       userId: 'u1',
       catId: null,
       content: 'test',

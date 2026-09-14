@@ -265,10 +265,12 @@ test('AC-G10: PromptCapture with native L0 fields persists + reads back', async 
   assert.equal(result.totalTokenEstimate, 1246);
 });
 
-test('AC-G10: capture bridge stamps nativeSystemPrompt when nativeL0Provider=true (test fetcher)', async () => {
+test('F257: capture bridge stamps the exact route-owned native session prompt', async () => {
   // Force PROMPT_CAPTURE on for this test
   const prevEnv = process.env.PROMPT_CAPTURE;
+  const prevCats = process.env.PROMPT_CAPTURE_CATS;
   process.env.PROMPT_CAPTURE = 'on';
+  delete process.env.PROMPT_CAPTURE_CATS;
   try {
     const { capturePromptIfEnabled, getPromptCaptureStore } = await import(
       '../dist/infrastructure/debug/prompt-capture-bridge.js'
@@ -285,12 +287,7 @@ test('AC-G10: capture bridge stamps nativeSystemPrompt when nativeL0Provider=tru
       userPrompt: 'hi',
       effectivePrompt: 'pack-system\n\n---\n\nhi',
       injectionDecision: { isResume: false, canSkipOnResume: true, forceReinjection: false, injected: true },
-      nativeL0Provider: true,
-      nativeL0Fetcher: async (catId, userId) => {
-        assert.equal(catId, 'opus');
-        assert.equal(userId, 'g10-user', 'native L0 capture must not fall back to another user profile');
-        return 'TEST-COMPILED-L0';
-      },
+      nativeSessionPrompt: '  TEST-ROUTE-OWNED-PROMPT\n',
     });
     // Capture is fire-and-forget async; poll the listByInvocation index.
     let captures = [];
@@ -301,19 +298,23 @@ test('AC-G10: capture bridge stamps nativeSystemPrompt when nativeL0Provider=tru
     assert.equal(captures.length, 1, 'capture must be persisted within poll window');
     const detail = _store.read(captures[0].captureId);
     assert.ok(detail);
-    assert.equal(detail.nativeSystemPrompt, 'TEST-COMPILED-L0');
+    assert.equal(detail.nativeSystemPrompt, '  TEST-ROUTE-OWNED-PROMPT\n');
     assert.equal(detail.nativeSystemPromptSource, 'f203-l0');
     assert.ok((detail.nativeSystemTokenEstimate ?? 0) > 0);
     assert.equal(detail.totalTokenEstimate, detail.tokenEstimate + (detail.nativeSystemTokenEstimate ?? 0));
     assert.equal(detail.captureDiagnostics, undefined, 'clean path must not record diagnostics');
   } finally {
     process.env.PROMPT_CAPTURE = prevEnv ?? '';
+    if (prevCats === undefined) delete process.env.PROMPT_CAPTURE_CATS;
+    else process.env.PROMPT_CAPTURE_CATS = prevCats;
   }
 });
 
-test('AC-G10: capture bridge records captureDiagnostics when native L0 fetcher rejects (fail-safe)', async () => {
+test('F257: capture bridge persists without native fields when the route has no native prompt', async () => {
   const prevEnv = process.env.PROMPT_CAPTURE;
+  const prevCats = process.env.PROMPT_CAPTURE_CATS;
   process.env.PROMPT_CAPTURE = 'on';
+  delete process.env.PROMPT_CAPTURE_CATS;
   try {
     const { capturePromptIfEnabled, getPromptCaptureStore } = await import(
       '../dist/infrastructure/debug/prompt-capture-bridge.js'
@@ -330,32 +331,29 @@ test('AC-G10: capture bridge records captureDiagnostics when native L0 fetcher r
       userPrompt: 'hi',
       effectivePrompt: 'pack-system\n\n---\n\nhi',
       injectionDecision: { isResume: false, canSkipOnResume: true, forceReinjection: false, injected: true },
-      nativeL0Provider: true,
-      // Fetcher fails — bridge must still write capture, just without native fields.
-      nativeL0Fetcher: async () => {
-        throw new Error('L0 compile blew up in test');
-      },
     });
     let captures = [];
     for (let i = 0; i < 50 && captures.length === 0; i++) {
       await new Promise((r) => setTimeout(r, 20));
       captures = _store.listByInvocation(invocationId);
     }
-    assert.equal(captures.length, 1, 'capture must be persisted even when native fetch fails');
+    assert.equal(captures.length, 1, 'capture must be persisted without a native transport');
     const detail = _store.read(captures[0].captureId);
     assert.ok(detail);
-    assert.equal(detail.nativeSystemPrompt, undefined, 'native fetch failure must not invent prompt');
-    assert.ok(detail.captureDiagnostics);
-    assert.equal(detail.captureDiagnostics.length, 1);
-    assert.match(detail.captureDiagnostics[0], /native-l0-fetch-failed.*L0 compile blew up/);
+    assert.equal(detail.nativeSystemPrompt, undefined, 'missing native transport must not invent prompt');
+    assert.equal(detail.captureDiagnostics, undefined);
   } finally {
     process.env.PROMPT_CAPTURE = prevEnv ?? '';
+    if (prevCats === undefined) delete process.env.PROMPT_CAPTURE_CATS;
+    else process.env.PROMPT_CAPTURE_CATS = prevCats;
   }
 });
 
 test('AC-G10: nativeL0Provider=false (non-F203 provider) — native fields stay absent', async () => {
   const prevEnv = process.env.PROMPT_CAPTURE;
+  const prevCats = process.env.PROMPT_CAPTURE_CATS;
   process.env.PROMPT_CAPTURE = 'on';
+  delete process.env.PROMPT_CAPTURE_CATS;
   try {
     const { capturePromptIfEnabled, getPromptCaptureStore } = await import(
       '../dist/infrastructure/debug/prompt-capture-bridge.js'
@@ -390,6 +388,8 @@ test('AC-G10: nativeL0Provider=false (non-F203 provider) — native fields stay 
     assert.equal(detail.captureDiagnostics, undefined);
   } finally {
     process.env.PROMPT_CAPTURE = prevEnv ?? '';
+    if (prevCats === undefined) delete process.env.PROMPT_CAPTURE_CATS;
+    else process.env.PROMPT_CAPTURE_CATS = prevCats;
   }
 });
 

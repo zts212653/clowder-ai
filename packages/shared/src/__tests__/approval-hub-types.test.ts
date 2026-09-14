@@ -132,9 +132,22 @@ describe('F246 Phase I approval provenance contract', () => {
     );
   });
 
-  it('keeps the admitted producer union exhaustive through F276 and excludes F028', () => {
-    const ids: ApprovalProducerId[] = ['F128', 'F139', 'F193', 'F221', 'F225', 'F231', 'F260', 'F266', 'F276', 'F292'];
-    assert.equal(ids.length, 10);
+  it('keeps the admitted producer union exhaustive and excludes F028', () => {
+    const ids: ApprovalProducerId[] = [
+      'F128',
+      'F139',
+      'F193',
+      'F221',
+      'F225',
+      'F231',
+      'F257',
+      'F260',
+      'F266',
+      'F276',
+      'F292',
+      'F306',
+    ];
+    assert.equal(ids.length, 12);
     assert.equal(ids.includes('F028' as ApprovalProducerId), false);
   });
 

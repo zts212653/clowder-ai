@@ -14,6 +14,8 @@ export interface DynamicTaskDef {
   enabled: boolean;
   createdBy: string;
   createdAt: string;
+  /** F257: number of RUN_FAILED retries already attempted for once-tasks (durable across restarts) */
+  retryAttempts?: number;
 }
 
 /** CRUD store for dynamic task definitions (Phase 3A AC-G3) */
@@ -23,8 +25,8 @@ export class DynamicTaskStore {
   insert(def: DynamicTaskDef): void {
     this.db
       .prepare(
-        `INSERT INTO dynamic_task_defs (id, template_id, trigger_json, params_json, entrusted_work_reevaluation_json, display_json, delivery_thread_id, enabled, created_by, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO dynamic_task_defs (id, template_id, trigger_json, params_json, entrusted_work_reevaluation_json, display_json, delivery_thread_id, enabled, created_by, created_at, retry_attempts)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         def.id,
@@ -37,6 +39,7 @@ export class DynamicTaskStore {
         def.enabled ? 1 : 0,
         def.createdBy,
         def.createdAt,
+        def.retryAttempts ?? 0,
       );
   }
 
@@ -121,6 +124,18 @@ export class DynamicTaskStore {
       .run(JSON.stringify(next), id, JSON.stringify(current));
     return result.changes > 0;
   }
+
+  /**
+   * F257: atomically persist the retry due trigger and the retry counter for a
+   * once-task. A single UPDATE avoids a crash between two writes leaving the row
+   * in an inconsistent state (e.g. future fireAt with retryAttempts=0).
+   */
+  updateRetryState(id: string, trigger: TriggerSpec, attempts: number): boolean {
+    const result = this.db
+      .prepare('UPDATE dynamic_task_defs SET trigger_json = ?, retry_attempts = ? WHERE id = ?')
+      .run(JSON.stringify(trigger), attempts, id);
+    return result.changes > 0;
+  }
 }
 
 interface RawRow {
@@ -134,6 +149,7 @@ interface RawRow {
   enabled: number;
   created_by: string;
   created_at: string;
+  retry_attempts: number;
 }
 
 function todef(row: RawRow): DynamicTaskDef {
@@ -154,5 +170,6 @@ function todef(row: RawRow): DynamicTaskDef {
     enabled: row.enabled === 1,
     createdBy: row.created_by,
     createdAt: row.created_at,
+    retryAttempts: row.retry_attempts ?? 0,
   };
 }

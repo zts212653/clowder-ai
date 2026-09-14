@@ -2,6 +2,7 @@
 // Phase C adds: embedding_meta (V2) + evidence_vectors (vec0, decoupled)
 
 import type Database from 'better-sqlite3';
+import { reconcileLadderColumns } from './schema-column-reconcile.js';
 
 export const EVIDENCE_FTS_SCHEMA = `
 CREATE VIRTUAL TABLE IF NOT EXISTS evidence_fts USING fts5(
@@ -1417,6 +1418,10 @@ export function applyMigrations(db: Database.Database): void {
       })();
     }
   }
+  // Column presence, not the version stamp, is the truth for ALTER-added columns:
+  // one counter is shared by the upstream and fork lineages, so a DB already stamped
+  // at N silently skips the other lineage's block N after a sync.
+  reconcileLadderColumns(db);
 }
 
 /**

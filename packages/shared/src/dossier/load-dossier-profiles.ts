@@ -4,9 +4,7 @@
  * Provides `getDossierRosterSummary(catId)` for the fallback chain:
  *   dossier.l0RosterSummary ?? config.teamStrengths ?? config.roleDescription
  *
- * Consumers:
- * - compile-system-prompt-l0.mjs:buildRosterRow (line 243)
- * - SystemPromptBuilder.ts:buildTeammateRoster (line 453)
+ * Consumer: the session HookPipeline's SystemPromptBuilder inputs.
  *
  * Both must switch simultaneously (KD-12).
  *

@@ -42,7 +42,18 @@ describe('F128 explicit intent override (round-5)', () => {
     const invocationQueue = new InvocationQueue();
     const router = {
       async resolveTargetsAndIntent() {
-        return { targetCats: [], intent: { intent: 'ideate' }, hasMentions: false };
+        return {
+          attemptBatch: {
+            parserMode: 'user',
+            spanBasis: 'lowercased_message',
+            attempts: [],
+            truncated: false,
+            metricEligible: true,
+          },
+          targetCats: [],
+          intent: { intent: 'ideate' },
+          hasMentions: false,
+        };
       },
     };
     const queueProcessor = {
@@ -141,7 +152,18 @@ describe('F128 explicit intent override (round-5)', () => {
       async resolveTargetsAndIntent() {
         // Simulate real router: raw `#execute @kimi @gemini @codex` →
         // resolved.targetCats = [kimi, gemini, codex].
-        return { targetCats: ['kimi', 'gemini', 'codex'], intent: { intent: 'execute' }, hasMentions: true };
+        return {
+          attemptBatch: {
+            parserMode: 'user',
+            spanBasis: 'lowercased_message',
+            attempts: [],
+            truncated: false,
+            metricEligible: true,
+          },
+          targetCats: ['kimi', 'gemini', 'codex'],
+          intent: { intent: 'execute' },
+          hasMentions: true,
+        };
       },
     };
     const queueProcessor = {

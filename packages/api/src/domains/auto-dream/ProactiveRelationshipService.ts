@@ -219,6 +219,7 @@ function buildCanonicalMessage(
   timestamp: number,
 ) {
   return {
+    provenance: { author: 'cat' as const, routed: false, observation: 'original' as const },
     threadId: visit.homeThreadId,
     userId: visit.ownerUserId,
     catId: visit.catId as CatId,

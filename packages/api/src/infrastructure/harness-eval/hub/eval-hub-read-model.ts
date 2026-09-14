@@ -32,16 +32,32 @@ import type {
 } from './eval-hub-read-model-types.js';
 import { resolveEvalHubRepoWorktreeId } from './eval-hub-repo-worktree-id.js';
 
+type VerdictEntry = {
+  verdict: ParsedVerdictMarkdown;
+  bundleDir: string;
+};
+
 export function loadEvalHubSummary(input: LoadEvalHubSummaryInput): EvalHubSummary {
   const verdictsDir = join(input.harnessFeedbackRoot, 'verdicts');
   const repoRoot = dirname(dirname(input.harnessFeedbackRoot));
   const domains = loadDomains(input.harnessFeedbackRoot);
   const now = input.now ?? new Date();
-  const items = readdirSync(verdictsDir, { withFileTypes: true })
-    .filter((entry) => entry.isFile() && entry.name.endsWith('.md'))
-    .map((entry) => parseVerdictMarkdown(join(verdictsDir, entry.name)))
-    .filter((verdict) => verdict.frontmatter.feedback_type === 'live-verdict')
-    .map((verdict) => buildEvalHubItem(input.harnessFeedbackRoot, verdict, domains, now))
+  const legacyEntries: VerdictEntry[] = existsSync(verdictsDir)
+    ? readdirSync(verdictsDir, { withFileTypes: true })
+        .filter((entry) => entry.isFile() && entry.name.endsWith('.md'))
+        .map((entry) => {
+          const verdict = parseVerdictMarkdown(join(verdictsDir, entry.name));
+          return { verdict, bundleDir: join(input.harnessFeedbackRoot, 'bundles', verdict.id) };
+        })
+    : [];
+  const artifactEntries =
+    input.artifactStoreRoot && existsSync(input.artifactStoreRoot)
+      ? loadArtifactStoreVerdicts(input.artifactStoreRoot)
+      : [];
+  const artifactIds = new Set(artifactEntries.map((entry) => entry.verdict.id));
+  const items = [...artifactEntries, ...legacyEntries.filter((entry) => !artifactIds.has(entry.verdict.id))]
+    .filter((entry) => entry.verdict.frontmatter.feedback_type === 'live-verdict')
+    .map((entry) => buildEvalHubItem(entry.verdict, entry.bundleDir, domains, now, repoRoot))
     .sort((a, b) => b.trend.generatedAt.localeCompare(a.trend.generatedAt));
 
   // F192 P2 — supersede gating (PR 791 review).
@@ -116,15 +132,40 @@ export function loadEvalHubSummary(input: LoadEvalHubSummaryInput): EvalHubSumma
   };
 }
 
+function loadArtifactStoreVerdicts(artifactStoreRoot: string): VerdictEntry[] {
+  const entries: VerdictEntry[] = [];
+  for (const domainEntry of readdirSync(artifactStoreRoot, { withFileTypes: true })) {
+    if (!domainEntry.isDirectory()) continue;
+    const domainDir = join(artifactStoreRoot, domainEntry.name);
+    for (const artifactEntry of readdirSync(domainDir, { withFileTypes: true })) {
+      if (!artifactEntry.isDirectory()) continue;
+      const artifactDir = join(domainDir, artifactEntry.name);
+      const artifactId = artifactEntry.name;
+      let verdictPath = join(artifactDir, 'verdict.md');
+      let bundleDir = join(artifactDir, 'bundle');
+      const nativeVerdictPath = join(artifactDir, 'docs', 'harness-feedback', 'verdicts', `${artifactId}.md`);
+      const nativeBundleDir = join(artifactDir, 'docs', 'harness-feedback', 'bundles', artifactId);
+      if (!existsSync(verdictPath) && existsSync(nativeVerdictPath)) {
+        verdictPath = nativeVerdictPath;
+        bundleDir = nativeBundleDir;
+      }
+      if (!existsSync(verdictPath)) continue;
+      const verdict = parseVerdictMarkdown(verdictPath);
+      verdict.id = artifactId;
+      entries.push({ verdict, bundleDir });
+    }
+  }
+  return entries;
+}
+
 function buildEvalHubItem(
-  harnessFeedbackRoot: string,
   verdict: ParsedVerdictMarkdown,
+  bundleDir: string,
   domains: Map<EvalDomainRegistryEntry['domainId'], EvalDomainRegistryEntry>,
   now: Date,
+  repoRoot: string,
 ): EvalHubItem {
   const verdictId = verdict.id;
-  const bundleDir = join(harnessFeedbackRoot, 'bundles', verdictId);
-  const repoRoot = dirname(dirname(harnessFeedbackRoot));
   let resolved: ReturnType<typeof resolveA2aEvidenceBundle>;
   try {
     resolved = resolveA2aEvidenceBundle({ bundleDir, verdictId });

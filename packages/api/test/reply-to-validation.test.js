@@ -57,6 +57,13 @@ describe('POST /api/messages — replyTo validation', () => {
       },
       router: {
         resolveTargetsAndIntent: mock.fn(async () => ({
+          attemptBatch: {
+            parserMode: 'user',
+            spanBasis: 'lowercased_message',
+            attempts: [],
+            truncated: false,
+            metricEligible: true,
+          },
           targetCats: ['opus'],
           intent: { intent: 'execute' },
         })),
@@ -139,6 +146,7 @@ describe('POST /api/messages — replyTo validation', () => {
   test('silently drops replyTo referencing system message', async () => {
     const thread = await createThread();
     const sysMsg = messageStore.append({
+      provenance: { author: 'system', routed: false, observation: 'original' },
       userId: 'system',
       catId: null,
       content: 'SYSTEM BADGE — internal',
@@ -160,6 +168,7 @@ describe('POST /api/messages — replyTo validation', () => {
   test('silently drops replyTo referencing briefing message', async () => {
     const thread = await createThread();
     const briefingMsg = messageStore.append({
+      provenance: { author: 'system', routed: false, observation: 'original' },
       userId: 'default-user',
       catId: null,
       content: 'TOP SECRET BRIEFING',
@@ -184,6 +193,7 @@ describe('POST /api/messages — replyTo validation', () => {
     const thread2 = await createThread('Thread 2');
 
     const otherThreadMsg = messageStore.append({
+      provenance: { author: 'user', routed: false, observation: 'original' },
       userId: 'default-user',
       catId: null,
       content: 'message in thread 2',
@@ -213,6 +223,7 @@ describe('POST /api/messages — replyTo validation', () => {
     const thread = await createThread();
 
     const deleted = messageStore.append({
+      provenance: { author: 'user', routed: false, observation: 'original' },
       userId: 'default-user',
       catId: null,
       content: 'will be deleted',
@@ -243,6 +254,7 @@ describe('POST /api/messages — replyTo validation', () => {
     const thread = await createThread();
 
     const queued = messageStore.append({
+      provenance: { author: 'user', routed: false, observation: 'original' },
       userId: 'default-user',
       catId: null,
       content: 'queued message',
@@ -272,6 +284,7 @@ describe('POST /api/messages — replyTo validation', () => {
   test('preserves replyTo referencing queued cat speech already published to the timeline', async () => {
     const thread = await createThread();
     const published = messageStore.append({
+      provenance: { author: 'cat', routed: false, observation: 'original' },
       userId: 'default-user',
       catId: 'codex',
       content: 'published source-cat seed',
@@ -303,6 +316,7 @@ describe('POST /api/messages — replyTo validation', () => {
     const thread = await createThread();
 
     const canceled = messageStore.append({
+      provenance: { author: 'user', routed: false, observation: 'original' },
       userId: 'default-user',
       catId: null,
       content: 'canceled message',
@@ -334,6 +348,7 @@ describe('POST /api/messages — replyTo validation', () => {
     const thread = await createThread();
 
     const target = messageStore.append({
+      provenance: { author: 'user', routed: false, observation: 'original' },
       userId: 'default-user',
       catId: null,
       content: 'original message',
@@ -365,6 +380,7 @@ describe('POST /api/messages — replyTo validation', () => {
     const thread = await createThread();
 
     const whisperMsg = messageStore.append({
+      provenance: { author: 'cat', routed: false, observation: 'original' },
       userId: 'default-user',
       catId: 'opus',
       content: 'secret whisper content',
@@ -397,6 +413,7 @@ describe('POST /api/messages — replyTo validation', () => {
 
     // Parent whispered only to codex
     const whisperMsg = messageStore.append({
+      provenance: { author: 'cat', routed: false, observation: 'original' },
       userId: 'default-user',
       catId: 'opus',
       content: 'private to codex only',
@@ -431,6 +448,7 @@ describe('POST /api/messages — replyTo validation', () => {
     const thread = await createThread();
 
     const whisperMsg = messageStore.append({
+      provenance: { author: 'cat', routed: false, observation: 'original' },
       userId: 'default-user',
       catId: 'opus',
       content: 'whisper to codex',

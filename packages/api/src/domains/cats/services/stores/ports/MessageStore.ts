@@ -22,6 +22,7 @@ import type {
 } from '@cat-cafe/shared';
 import { custodyOfferV1Schema, isCrossThreadProvenance } from '@cat-cafe/shared';
 import { normalizeJsonUnicode } from '../../../../../utils/json-unicode.js';
+import type { RoutingAttemptBatch } from '../../agents/routing/routing-attempt.js';
 import type { MessageMetadata } from '../../types.js';
 import { cursorFor, parseCursor } from '../cursor.js';
 import {
@@ -247,6 +248,8 @@ export interface StoredMessage {
     rich?: RichMessageExtra;
     /** #814/F224: explicit post_message callback bubble; history hydration must not merge it into stream output. */
     isExplicitPost?: boolean;
+    /** F257: observe-only trailing cat-signature contract result; absence means not evaluated. */
+    signatureLint?: { signed: boolean };
     /** F081 + F194 Phase Z3 dual id:
      *    - `invocationId` = parent/chain invocation (legacy field, liveness/queue/cancel SoT)
      *    - `turnInvocationId` = per-cat-turn invocation (Z3 new — bubble identity SoT for frontend
@@ -440,6 +443,91 @@ export interface StoredMessage {
    * Not written back to legacy hashes — runtime field only.
    */
   visibilitySeq?: number;
+  /** F257 parser authority record, persisted atomically with its message. */
+  routingFact?: RoutingAttemptBatch;
+  /** Writer-declared authorship, routing, and observation lineage. */
+  provenance?: MessageProvenance;
+}
+
+/**
+ * Cross-store deletion boundary. Hooks run before message mutation so a
+ * failed privacy scrub aborts the destructive operation.
+ */
+export interface MessageDeletionHooks {
+  onBeforeHardDelete?: (msg: Pick<StoredMessage, 'id' | 'threadId' | 'userId'>) => void;
+  onBeforeDeleteByThread?: (threadId: string) => void;
+}
+
+export interface MessageProvenance {
+  author: 'user' | 'external_user' | 'cat' | 'system' | 'unknown';
+  routed: boolean;
+  observation: 'original' | 'derived';
+  sourceRef?: string;
+}
+
+export const PROVENANCE_AUTHORS = ['user', 'external_user', 'cat', 'system', 'unknown'] as const;
+export const PROVENANCE_OBSERVATIONS = ['original', 'derived'] as const;
+
+export function routedProvenance(
+  author: 'user' | 'cat',
+  batch: RoutingAttemptBatch,
+): Pick<AppendMessageInput, 'provenance' | 'routingFact'> {
+  if (!batch) {
+    throw new Error('routedProvenance requires the parser attempt batch');
+  }
+  return { routingFact: batch, provenance: { author, routed: true, observation: 'original' } };
+}
+
+export function assertProvenanceConsistent(
+  msg: Pick<AppendMessageInput, 'provenance' | 'catId' | 'routingFact' | 'source'>,
+): void {
+  const p: unknown = msg.provenance;
+  if (!p || typeof p !== 'object') {
+    throw new Error('append requires provenance: every writer must declare { author, routed, observation } explicitly');
+  }
+  const { author, routed, observation, sourceRef } = p as {
+    author?: unknown;
+    routed?: unknown;
+    observation?: unknown;
+    sourceRef?: unknown;
+  };
+  if (!(PROVENANCE_AUTHORS as readonly unknown[]).includes(author)) {
+    throw new Error(`provenance.author must be one of ${PROVENANCE_AUTHORS.join('|')}, got ${String(author)}`);
+  }
+  if (typeof routed !== 'boolean') {
+    throw new Error(`provenance.routed must be a boolean, got ${String(routed)}`);
+  }
+  if (!(PROVENANCE_OBSERVATIONS as readonly unknown[]).includes(observation)) {
+    throw new Error(`provenance.observation must be one of ${PROVENANCE_OBSERVATIONS.join('|')}`);
+  }
+  if (observation === 'derived' && (typeof sourceRef !== 'string' || sourceRef.trim().length === 0)) {
+    throw new Error('derived provenance requires a non-empty sourceRef');
+  }
+  if (observation === 'original' && sourceRef !== undefined) {
+    throw new Error('original provenance must not carry sourceRef');
+  }
+  if (author === 'user' && msg.catId != null) throw new Error('provenance.author=user requires catId null');
+  if (author === 'user' && msg.source !== undefined) {
+    throw new Error('authenticated operator provenance.author=user must not carry connector source');
+  }
+  if (author === 'external_user' && msg.catId != null) {
+    throw new Error('provenance.author=external_user requires catId null');
+  }
+  if (author === 'external_user' && msg.source === undefined) {
+    throw new Error('provenance.author=external_user requires connector source');
+  }
+  if (author === 'cat' && !msg.catId) throw new Error('provenance.author=cat requires a catId');
+  if (routed && !msg.routingFact) throw new Error('provenance.routed requires a routingFact');
+  if (!routed && msg.routingFact) throw new Error('routingFact requires provenance.routed');
+}
+
+export function isAuthenticatedOperatorMessage(msg: Pick<StoredMessage, 'provenance' | 'catId' | 'source'>): boolean {
+  return (
+    msg.provenance?.author === 'user' &&
+    msg.provenance.observation === 'original' &&
+    msg.catId === null &&
+    msg.source === undefined
+  );
 }
 
 export type MessageAppendListener = (message: StoredMessage) => void;
@@ -795,6 +883,8 @@ export interface IMessageStore {
   ): ThreadObservedAppendResult | Promise<ThreadObservedAppendResult>;
   /** Get a single message by its ID. Returns null if not found. */
   getById(id: string): StoredMessage | null | Promise<StoredMessage | null>;
+  /** Get multiple messages by ID in one storage round. Missing IDs are omitted. */
+  getByIds(ids: readonly string[]): StoredMessage[] | Promise<StoredMessage[]>;
   /** Read the persistent owner+thread composer draft. Missing means revision 0. */
   getOwnerComposerDraft(
     ownerUserId: string,
@@ -1115,13 +1205,17 @@ export class MessageStore {
   private readonly visibilitySeq = new Map<string, number>();
   /** F264 Gap F: persistent-by-contract in-memory mirror (no TTL or eviction). */
   private readonly ownerComposerDrafts = new Map<string, OwnerComposerDraft>();
+  private readonly deletionHooks: MessageDeletionHooks;
 
-  constructor(options?: {
-    maxMessages?: number;
-    onAppend?: MessageAppendListener;
-  }) {
+  constructor(
+    options?: {
+      maxMessages?: number;
+      onAppend?: MessageAppendListener;
+    } & MessageDeletionHooks,
+  ) {
     this.maxMessages = options?.maxMessages ?? MAX_MESSAGES;
     this.onAppend = options?.onAppend;
+    this.deletionHooks = options ?? {};
   }
 
   private buildIdempotencyIndexKey(userId: string, threadId: string, idempotencyKey?: string): string | null {
@@ -1142,6 +1236,7 @@ export class MessageStore {
   /**
    * Append a message to the store. Returns the stored message with generated id.
    */
+  // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: pre-existing complexity from upstream; refactoring deferred
   append(msg: AppendMessageInput): StoredMessage {
     const normalizedMessage = normalizeJsonUnicode(msg);
     assertValidAppendMessageInput(normalizedMessage);
@@ -1231,7 +1326,8 @@ export class MessageStore {
 
   getLatestThreadMessageIdIncludingQueued(threadId: string): string | null {
     for (let index = this.messages.length - 1; index >= 0; index -= 1) {
-      const message = this.messages[index]!;
+      const message = this.messages[index];
+      if (!message) continue;
       if (message.threadId === threadId) return message.id;
     }
     return null;
@@ -1292,6 +1388,11 @@ export class MessageStore {
    */
   getById(id: string): StoredMessage | null {
     return this.messages.find((m) => m.id === id) ?? null;
+  }
+
+  getByIds(ids: readonly string[]): StoredMessage[] {
+    const requested = new Set(ids);
+    return this.messages.filter((message) => requested.has(message.id));
   }
 
   private ownerComposerDraftKey(ownerUserId: string, threadId: string): string {
@@ -1403,7 +1504,8 @@ export class MessageStore {
     const n = limit ?? DEFAULT_LIMIT;
     const matches: StoredMessage[] = [];
     for (let i = this.messages.length - 1; i >= 0 && matches.length < n; i--) {
-      const msg = this.messages[i]!;
+      const msg = this.messages[i];
+      if (!msg) continue;
       if (msg.deletedAt) continue;
       if (userId && msg.userId !== userId) continue;
       matches.push(msg);
@@ -1433,6 +1535,7 @@ export class MessageStore {
    * #1200 §8.7 migration: scans visibility ordering, match-counted (collects
    * `limit` MENTION matches, not limit total messages). Accepts v1 + v2 cursors.
    */
+  // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: pre-existing complexity from upstream
   getMentionsFor(
     catId: CatId,
     limit?: number,
@@ -1471,7 +1574,10 @@ export class MessageStore {
     }
 
     if (afterSeq === null) return visible.slice(0, n).map((v) => v.msg); // pruned → full scan
-    const startIdx = visible.findIndex((v) => v.seq > afterSeq! || (v.seq === afterSeq! && v.msg.id > cursor.id));
+    const resolvedAfterSeq = afterSeq;
+    const startIdx = visible.findIndex(
+      (v) => v.seq > resolvedAfterSeq || (v.seq === resolvedAfterSeq && v.msg.id > cursor.id),
+    );
     if (startIdx === -1) return [];
     return visible.slice(startIdx, startIdx + n).map((v) => v.msg);
   }
@@ -1480,12 +1586,14 @@ export class MessageStore {
    * Get mentions for a specific cat, taking the most recent N matches.
    * Returns ascending order (oldest→newest) within the returned window.
    */
+  // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: pre-existing complexity from upstream
   getRecentMentionsFor(catId: CatId, limit?: number, userId?: string, threadId?: string): StoredMessage[] {
     const n = limit ?? DEFAULT_LIMIT;
     const matches: StoredMessage[] = [];
 
     for (let i = this.messages.length - 1; i >= 0 && matches.length < n; i--) {
-      const msg = this.messages[i]!;
+      const msg = this.messages[i];
+      if (!msg) continue;
       if (msg.deletedAt) continue;
       // #1269: isTimelinePublished — parity with getMentionsFor.
       if (!isTimelinePublishedFn(msg)) continue;
@@ -1507,13 +1615,15 @@ export class MessageStore {
    * with id >= beforeId (composite cursor to handle same-millisecond messages).
    * Returns messages in chronological order (oldest first).
    */
+  // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: pre-existing complexity from upstream
   getBefore(timestamp: number, limit?: number, userId?: string, beforeId?: string): StoredMessage[] {
     const n = limit ?? DEFAULT_LIMIT;
     const matches: StoredMessage[] = [];
 
     // Walk backwards from most recent, collecting messages before the cursor
     for (let i = this.messages.length - 1; i >= 0 && matches.length < n; i--) {
-      const msg = this.messages[i]!;
+      const msg = this.messages[i];
+      if (!msg) continue;
       if (msg.deletedAt) continue;
       if (!isDelivered(msg)) continue; // F117: exclude queued/canceled
       if (msg.timestamp > timestamp) continue;
@@ -1538,7 +1648,8 @@ export class MessageStore {
     const isVisible = resolveThreadMessageVisibility(options, userId);
 
     for (let i = this.messages.length - 1; i >= 0 && matches.length < n; i--) {
-      const msg = this.messages[i]!;
+      const msg = this.messages[i];
+      if (!msg) continue;
       if (msg.threadId !== threadId) continue;
       if (msg.deletedAt) continue;
       if (!isVisible(msg)) continue;
@@ -1548,12 +1659,14 @@ export class MessageStore {
     return matches.reverse();
   }
 
+  // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: pre-existing complexity from upstream
   getByThreadIncludingQueued(threadId: string, limit?: number, userId?: string): StoredMessage[] {
     const n = limit ?? DEFAULT_LIMIT;
     const matches: StoredMessage[] = [];
 
     for (let i = this.messages.length - 1; i >= 0 && matches.length < n; i--) {
-      const msg = this.messages[i]!;
+      const msg = this.messages[i];
+      if (!msg) continue;
       if (msg.threadId !== threadId) continue;
       if (msg.deletedAt) continue;
       if (msg.deliveryStatus === 'canceled') continue;
@@ -1578,6 +1691,7 @@ export class MessageStore {
    * Accepts both v1 (raw ID) and v2 (`v2:<seq16>:<id>`) cursor tokens.
    * Returned messages carry visibilitySeq for `cursorFor()` graded issuance.
    */
+  // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: pre-existing complexity from upstream
   getByThreadAfter(
     threadId: string,
     afterId?: string,
@@ -1734,7 +1848,8 @@ export class MessageStore {
       return a.id < b.id ? 1 : a.id > b.id ? -1 : 0;
     });
 
-    const latest = visible[0]!;
+    const latest = visible[0];
+    if (!latest) return null;
     return {
       cursor: cursorFor({ id: latest.id, visibilitySeq: latest.seq }),
       messageId: latest.id,
@@ -1757,6 +1872,7 @@ export class MessageStore {
   /**
    * Get messages in a thread before a given cursor (cursor-based pagination).
    */
+  // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: pre-existing complexity from upstream
   getByThreadBefore(
     threadId: string,
     timestamp: number,
@@ -1770,7 +1886,8 @@ export class MessageStore {
     const isVisible = resolveThreadMessageVisibility(options, userId);
 
     for (let i = this.messages.length - 1; i >= 0 && matches.length < n; i--) {
-      const msg = this.messages[i]!;
+      const msg = this.messages[i];
+      if (!msg) continue;
       if (msg.threadId !== threadId) continue;
       if (msg.deletedAt) continue;
       if (!isVisible(msg)) continue;
@@ -1834,6 +1951,7 @@ export class MessageStore {
    * Delete all messages in a thread. Returns count of deleted messages.
    */
   deleteByThread(threadId: string): number {
+    this.deletionHooks.onBeforeDeleteByThread?.(threadId);
     const removed = this.messages.filter((m) => m.threadId === threadId);
     const before = this.messages.length;
     this.messages = this.messages.filter((m) => m.threadId !== threadId);
@@ -1865,6 +1983,7 @@ export class MessageStore {
   hardDelete(id: string, deletedBy: string): StoredMessage | null {
     const msg = this.messages.find((m) => m.id === id);
     if (!msg) return null;
+    this.deletionHooks.onBeforeHardDelete?.(msg);
     msg.content = '';
     msg.mentions = [];
     delete msg.contentBlocks;
@@ -1872,6 +1991,8 @@ export class MessageStore {
     delete msg.metadata;
     delete msg.extra;
     delete msg.thinking;
+    delete msg.routingFact;
+    delete msg.provenance;
     msg.deletedAt = Date.now();
     msg.deletedBy = deletedBy;
     msg._tombstone = true;
@@ -2191,7 +2312,7 @@ export async function hydrateCrossThreadReplyHint(
   if (!hasCrossThreadProvenance && !coordination) return null;
   if (!trigger.catId) return null; // user-authored messages have no catId — not a cross-thread relay
   return {
-    sourceThreadId: hasCrossThreadProvenance ? crossPost!.sourceThreadId : trigger.threadId,
+    sourceThreadId: hasCrossThreadProvenance && crossPost?.sourceThreadId ? crossPost.sourceThreadId : trigger.threadId,
     senderCatId: trigger.catId,
     ...(hasCrossThreadProvenance && crossPost?.effectClass ? { effectClass: crossPost.effectClass } : {}),
     ...(coordination ? { coordination } : {}),

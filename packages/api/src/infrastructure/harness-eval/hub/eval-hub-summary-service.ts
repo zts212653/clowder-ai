@@ -9,6 +9,7 @@ import { ensureEvalDomainThreads } from './eval-hub-thread-ensure.js';
 
 export interface LoadEnrichedEvalHubSummaryOptions {
   harnessFeedbackRoot: string;
+  artifactStoreRoot?: string;
   userId: string;
   redis?: Redis;
   threadStore?: IThreadStore;
@@ -45,7 +46,10 @@ async function ensureEvalThreadsBestEffort(summary: EvalHubSummary, options: Loa
 }
 
 export async function loadEnrichedEvalHubSummary(options: LoadEnrichedEvalHubSummaryOptions): Promise<EvalHubSummary> {
-  const summary = loadEvalHubSummary({ harnessFeedbackRoot: options.harnessFeedbackRoot });
+  const summary = loadEvalHubSummary({
+    harnessFeedbackRoot: options.harnessFeedbackRoot,
+    artifactStoreRoot: options.artifactStoreRoot,
+  });
   await applyEvalCatOverrides(summary, options.redis);
   await ensureEvalThreadsBestEffort(summary, options);
   return enrichEvalHubLifecycle(summary, {

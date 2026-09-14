@@ -191,6 +191,74 @@ describe('EventMemoryStore (F227 PR-1)', () => {
     });
   });
 
+  describe('delete lifecycle', () => {
+    it('deletes all owner-scoped events at a message coordinate', () => {
+      store.markEvent(baseRecord({ threadId: 'thread_delete', messageId: 'msg_delete', type: '绕路了' }), 'owner-A');
+      store.markEvent(baseRecord({ threadId: 'thread_delete', messageId: 'msg_delete', type: '脚手架' }), 'owner-B');
+      store.markEvent(baseRecord({ threadId: 'thread_delete', messageId: 'keep', type: '第一性原理' }), 'owner-A');
+      store.appendDeadLetter(
+        baseRecord({ threadId: 'thread_delete', messageId: 'msg_delete', summary: 'dead-letter excerpt' }),
+        'owner-A',
+        'simulated failure',
+      );
+      store.appendDeadLetter(
+        baseRecord({ threadId: 'thread_delete', messageId: 'keep', summary: 'keep excerpt' }),
+        'owner-A',
+        'simulated failure',
+      );
+
+      assert.equal(store.deleteByCoord('thread_delete', 'msg_delete'), 3);
+      assert.deepEqual(store.getByCoord('thread_delete', 'msg_delete'), []);
+      assert.equal(store.getByCoord('thread_delete', 'keep').length, 1);
+      assert.deepEqual(
+        store.listDeadLetter().map((entry) => entry.record.messageId),
+        ['keep'],
+      );
+      assert.throws(
+        () => store.markEvent(baseRecord({ threadId: 'thread_delete', messageId: 'msg_delete' }), OWNER),
+        /deleted coordinate/i,
+      );
+      assert.throws(
+        () =>
+          store.appendDeadLetter(
+            baseRecord({ threadId: 'thread_delete', messageId: 'msg_delete', summary: 'stale excerpt' }),
+            OWNER,
+            'late writer',
+          ),
+        /deleted coordinate/i,
+      );
+    });
+
+    it('deletes all event excerpts for a physically deleted thread', () => {
+      store.markEvent(baseRecord({ threadId: 'thread_delete', messageId: 'm1', type: '绕路了' }), OWNER);
+      store.markEvent(baseRecord({ threadId: 'thread_delete', messageId: 'm2', type: '脚手架' }), OWNER);
+      store.markEvent(baseRecord({ threadId: 'thread_keep', messageId: 'm3', type: '第一性原理' }), OWNER);
+      store.appendDeadLetter(
+        baseRecord({ threadId: 'thread_delete', messageId: 'm4', summary: 'dead-letter excerpt' }),
+        OWNER,
+        'simulated failure',
+      );
+
+      assert.equal(store.deleteByThread('thread_delete'), 3);
+      assert.deepEqual(store.listEvents({ threadId: 'thread_delete' }), []);
+      assert.equal(store.listEvents({ threadId: 'thread_keep' }).length, 1);
+      assert.deepEqual(store.listDeadLetter(), []);
+      assert.throws(
+        () => store.markEvent(baseRecord({ threadId: 'thread_delete', messageId: 'late' }), OWNER),
+        /deleted thread/i,
+      );
+      assert.throws(
+        () =>
+          store.appendDeadLetter(
+            baseRecord({ threadId: 'thread_delete', messageId: 'late', summary: 'stale thread excerpt' }),
+            OWNER,
+            'late writer',
+          ),
+        /deleted thread/i,
+      );
+    });
+  });
+
   describe('health', () => {
     it('reports healthy after initialize', () => {
       assert.equal(store.health(), true);

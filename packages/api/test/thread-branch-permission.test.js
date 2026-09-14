@@ -66,6 +66,7 @@ describe('F109: Branch from system-created thread', () => {
 
     // Seed a system-created thread with a message
     const msg = messageStore.append({
+      provenance: { author: 'user', routed: false, observation: 'original' },
       userId: 'user-1',
       catId: null,
       content: 'hello from system thread',
@@ -111,6 +112,7 @@ describe('F109: Branch from system-created thread', () => {
     const socketManager = createMockSocketManager();
 
     const msg = messageStore.append({
+      provenance: { author: 'user', routed: false, observation: 'original' },
       userId: 'user-1',
       catId: null,
       content: 'message',

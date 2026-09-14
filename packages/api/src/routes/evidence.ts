@@ -33,6 +33,7 @@ import type {
 } from '../domains/memory/interfaces.js';
 import type { LibraryCatalog } from '../domains/memory/LibraryCatalog.js';
 import type { RebuildJobTracker } from '../domains/memory/RebuildJobTracker.js';
+import { SessionHookConventionGraphAdapter } from '../domains/memory/SessionHookConventionGraphAdapter.js';
 import { resolveDirectLocalAuthorizationUserId } from '../utils/request-identity.js';
 import { buildThreadCrossPostSuggestion, extractThreadIdFromEvidenceResult } from './cross-thread-affordance.js';
 import {
@@ -190,15 +191,12 @@ export const evidenceRoutes: FastifyPluginAsync<EvidenceRoutesOptions> = async (
       include_expansion: rawIncludeExpansion,
     } = parseResult.data;
 
-    // F256 Phase C: Lazy-init L0 convention graph adapter (shared by coverage + topk).
-    // Created once per request if needed; reads the L0 compiler file from repo root.
-    let _l0Adapter: import('../domains/memory/L0ConventionGraphAdapter.js').L0ConventionGraphAdapter | undefined;
-    async function getL0Adapter() {
-      if (_l0Adapter !== undefined) return _l0Adapter;
+    let _sessionHookAdapter: SessionHookConventionGraphAdapter | undefined;
+    async function getSessionHookAdapter() {
+      if (_sessionHookAdapter !== undefined) return _sessionHookAdapter;
       try {
-        const { L0ConventionGraphAdapter } = await import('../domains/memory/L0ConventionGraphAdapter.js');
-        _l0Adapter = new L0ConventionGraphAdapter(opts.repoRoot ?? process.cwd());
-        return _l0Adapter;
+        _sessionHookAdapter = new SessionHookConventionGraphAdapter(opts.repoRoot ?? process.cwd());
+        return _sessionHookAdapter;
       } catch {
         return null;
       }
@@ -217,8 +215,8 @@ export const evidenceRoutes: FastifyPluginAsync<EvidenceRoutesOptions> = async (
       request.raw.once('aborted', abortOnDisconnect);
       try {
         const { CoverageSearchService } = await import('../domains/memory/CoverageSearchService.js');
-        const l0Adapter = await getL0Adapter();
-        const coverageService = new CoverageSearchService(opts.evidenceStore, l0Adapter, {
+        const sessionHookAdapter = await getSessionHookAdapter();
+        const coverageService = new CoverageSearchService(opts.evidenceStore, sessionHookAdapter, {
           signal: coverageAbort.signal,
           onCoverageStageEvent: (event) => {
             request.log.info(
@@ -349,8 +347,8 @@ export const evidenceRoutes: FastifyPluginAsync<EvidenceRoutesOptions> = async (
       } else {
         try {
           const { TopkExpansionService } = await import('../domains/memory/TopkExpansionService.js');
-          const l0Adapter = await getL0Adapter();
-          const expansionService = new TopkExpansionService(opts.evidenceStore, l0Adapter);
+          const sessionHookAdapter = await getSessionHookAdapter();
+          const expansionService = new TopkExpansionService(opts.evidenceStore, sessionHookAdapter);
           const expandResult = await expansionService.expandWithMeta(items, q);
           expansionHints = expandResult.hints;
           expansionMeta = successfulExpansionHealth(expandResult.funnel, expandResult.hints);

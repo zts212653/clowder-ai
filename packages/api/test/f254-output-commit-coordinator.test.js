@@ -16,6 +16,7 @@ const scope = { userId: 'user-1', threadId: 'thread-1', catId: 'codex-sol' };
 
 function draft(content = 'draft') {
   return {
+    provenance: { author: 'cat', routed: false, observation: 'original' },
     userId: scope.userId,
     catId: scope.catId,
     content,
@@ -57,6 +58,7 @@ describe('F254 ADR-042 — glass-box output commit', () => {
   it('publishes a known-stale original, annotates its exact boundary, and offers seq 1', async () => {
     const messageStore = new MessageStore();
     const unseen = await messageStore.append({
+      provenance: { author: 'user', routed: false, observation: 'original' },
       userId: scope.userId,
       catId: null,
       content: 'late correction',
@@ -99,6 +101,7 @@ describe('F254 ADR-042 — glass-box output commit', () => {
   it('publishes the completed original but leaves ordinary queued work solely owned by Queue', async () => {
     const messageStore = new MessageStore();
     const queued = await messageStore.append({
+      provenance: { author: 'user', routed: false, observation: 'original' },
       userId: scope.userId,
       catId: null,
       content: 'queued update',
@@ -239,6 +242,7 @@ describe('F254 ADR-042 — glass-box output commit', () => {
   it('does not claim published_with_unseen when the successful offer annotation cannot persist', async () => {
     const messageStore = new MessageStore();
     const unseen = await messageStore.append({
+      provenance: { author: 'user', routed: false, observation: 'original' },
       userId: scope.userId,
       catId: null,
       content: 'late correction',
@@ -275,6 +279,7 @@ describe('F254 ADR-042 — glass-box output commit', () => {
   it('marks the published original when supplement responsibility cannot be persisted', async () => {
     const messageStore = new MessageStore();
     const unseen = await messageStore.append({
+      provenance: { author: 'user', routed: false, observation: 'original' },
       userId: scope.userId,
       catId: null,
       content: 'late correction',
@@ -314,6 +319,7 @@ describe('F254 ADR-042 — glass-box output commit', () => {
   it('keeps the atomic pre-append frontier when another message arrives during the scan', async () => {
     const messageStore = new MessageStore();
     const trigger = await messageStore.append({
+      provenance: { author: 'user', routed: false, observation: 'original' },
       userId: scope.userId,
       catId: null,
       content: 'question',
@@ -331,6 +337,7 @@ describe('F254 ADR-042 — glass-box output commit', () => {
       evaluateFreshness: async (priorFrontierMessageId) => {
         assert.equal(priorFrontierMessageId, trigger.id);
         await messageStore.append({
+          provenance: { author: 'user', routed: false, observation: 'original' },
           userId: scope.userId,
           catId: null,
           content: 'arrived after publication',
@@ -353,6 +360,7 @@ describe('F254 ADR-042 — glass-box output commit', () => {
   it('idempotent retry reuses the published message and original observation boundary', async () => {
     const messageStore = new MessageStore();
     const frontier = await messageStore.append({
+      provenance: { author: 'user', routed: false, observation: 'original' },
       userId: scope.userId,
       catId: null,
       content: 'question',
@@ -387,6 +395,7 @@ describe('F254 ADR-042 — glass-box output commit', () => {
   it('persists checked_no_supplement_needed without creating an empty bubble', async () => {
     const messageStore = new MessageStore();
     const unseen = await messageStore.append({
+      provenance: { author: 'user', routed: false, observation: 'original' },
       userId: scope.userId,
       catId: null,
       content: 'late correction',
@@ -433,6 +442,7 @@ describe('F254 ADR-042 — glass-box output commit', () => {
     resetFreshnessGlassBoxTelemetryForTest();
     const messageStore = new MessageStore();
     const unseen = await messageStore.append({
+      provenance: { author: 'user', routed: false, observation: 'original' },
       userId: scope.userId,
       catId: null,
       content: 'late correction',
@@ -479,6 +489,7 @@ describe('F254 ADR-042 — glass-box output commit', () => {
   it('commits a supplement as a current-timestamp reply linked to the original', async () => {
     const messageStore = new MessageStore();
     const unseen = await messageStore.append({
+      provenance: { author: 'user', routed: false, observation: 'original' },
       userId: scope.userId,
       catId: null,
       content: 'late correction',
@@ -531,6 +542,7 @@ describe('F254 ADR-042 — glass-box output commit', () => {
   it('retries the supplement state transition after the reply body is already durable', async () => {
     const messageStore = new MessageStore();
     const unseen = await messageStore.append({
+      provenance: { author: 'user', routed: false, observation: 'original' },
       userId: scope.userId,
       catId: null,
       content: 'late correction',
@@ -584,6 +596,7 @@ describe('F254 ADR-042 — glass-box output commit', () => {
   it('returns a deliverable degraded decision if supplement state persistence remains unavailable', async () => {
     const messageStore = new MessageStore();
     const unseen = await messageStore.append({
+      provenance: { author: 'user', routed: false, observation: 'original' },
       userId: scope.userId,
       catId: null,
       content: 'late correction',

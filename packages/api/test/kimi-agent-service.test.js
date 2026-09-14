@@ -1304,7 +1304,7 @@ test('native L0: passes --agent-file with compiled L0 + pack, v2 env flag, no pr
   }
 });
 
-test('native L0: compile failure is fail-closed (error + done, no spawn, no temp leak)', async () => {
+test('native session prompt: preparation failure is fail-closed (error + done, no spawn, no temp leak)', async () => {
   const restore = enterNonLegacyKimiPath();
   const tempShareDir = mkdtempSync(join(tmpdir(), 'kimi-native-l0-fail-share-'));
   try {
@@ -1327,10 +1327,10 @@ test('native L0: compile failure is fail-closed (error + done, no spawn, no temp
     );
 
     const err = msgs.find((m) => m.type === 'error');
-    assert.ok(err, 'expected error event on L0 compile failure');
-    assert.match(err.error, /L0/);
+    assert.ok(err, 'expected error event on session prompt preparation failure');
+    assert.match(err.error, /boom/);
     assert.equal(msgs.at(-1)?.type, 'done');
-    assert.equal(spawnFn.mock.calls.length, 0, 'CLI must not be spawned without L0');
+    assert.equal(spawnFn.mock.calls.length, 0, 'CLI must not be spawned without the session prompt');
 
     // tempMcpConfig dir (if created) must be cleaned up on the fail-closed path
     const { readdirSync } = await import('node:fs');

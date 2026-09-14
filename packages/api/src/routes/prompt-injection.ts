@@ -1,35 +1,35 @@
 /**
  * Prompt Injection Template Overlay API (F237 Checkpoint C)
  *
- * Endpoints for reading, editing, previewing, and resetting
- * prompt injection template overlays (.local files).
+ * Read/preview surface for prompt injection templates. Legacy `.local`
+ * mutations remain registered only to fail closed and direct callers to the
+ * cycle-aware version lifecycle.
  *
  * GET  /api/prompt-injection/segment/:id/content — current effective content
  * POST /api/prompt-injection/segment/:id/preview — compile preview with vars
- * PUT  /api/prompt-injection/segment/:id/override — save .local overlay
- * DELETE /api/prompt-injection/segment/:id/override — reset to default
+ * PUT/DELETE /api/prompt-injection/segment/:id/override — retired (409)
  */
 
-import { copyFileSync, existsSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from 'node:fs';
-import { dirname } from 'node:path';
+import { existsSync } from 'node:fs';
+import type { HookVariableDef, SafetyTier, SegmentEnablementMatrix } from '@cat-cafe/shared';
+import { resolveSegmentEnablementMatrix } from '@cat-cafe/shared';
 import type { FastifyPluginAsync } from 'fastify';
 import YAML from 'yaml';
 import {
   requireCapabilityWriteOwner,
   requireLocalCapabilityWriteRequest,
 } from '../config/capabilities/capability-write-guards.js';
-import { clearL0Cache } from '../domains/cats/services/agents/providers/l0-compiler.js';
 import {
   getOverrideStatus,
   getTemplateFileInfo,
   getTemplateOverlayPath,
-  getTemplateRawContent,
   renderTemplate,
   stripComments,
 } from '../domains/cats/services/context/prompt-template-loader.js';
 import { RICH_BLOCK_SHORT } from '../domains/cats/services/context/rich-block-rules.js';
+import type { HookOverrideStore } from '../domains/prompt-hooks/HookOverrideStore.js';
 import { resolveUserId } from '../utils/request-identity.js';
-import { resolveHookContent } from './prompt-injection-hooks.js';
+import { getHookManifest, getHookVariableDefs, readSegmentSource } from './prompt-injection-hooks.js';
 
 /**
  * Session-only auth for write operations — reads sessionUserId directly
@@ -67,69 +67,68 @@ function requireOverlayWriteAuth(request: import('fastify').FastifyRequest): Ove
   return { ok: true, userId };
 }
 
+const VERSIONED_EDITOR_REQUIRED = {
+  code: 'versioned_editor_required',
+  error: '段内容编辑已迁移到版本生命周期，请使用产生并应用新版本',
+} as const;
+
 /**
  * Validate that YAML content parses to a mapping of string values.
  * Returns an error message or null if valid.
  * Used by both save and restore-backup paths (P2 audit: same gate on all write paths).
  */
-function validateYamlStringMapping(content: string): string | null {
-  let parsed: unknown;
-  try {
-    parsed = YAML.parse(content);
-  } catch (e) {
-    return `Invalid YAML: ${e instanceof Error ? e.message : String(e)}`;
+type RouteError = { status: number; error: string };
+
+function isRouteError(result: unknown): result is RouteError {
+  return typeof result === 'object' && result !== null && 'error' in result;
+}
+
+function renderPreview(
+  id: string,
+  content: string,
+  meta: SegmentMeta,
+): { status: number; rendered: string } | RouteError {
+  if (typeof content !== 'string') {
+    return { status: 400, error: 'Missing content field' };
   }
-  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
-    return 'YAML must be a mapping (object), not a scalar or list';
-  }
-  for (const [key, val] of Object.entries(parsed)) {
-    if (typeof val !== 'string') {
-      return `Value for key "${key}" must be a string, got ${typeof val}`;
+
+  if (meta.ext === 'yaml') {
+    try {
+      const parsed: unknown = YAML.parse(content);
+      if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+        return { status: 400, error: 'YAML must be a mapping (object), not a scalar or list' };
+      }
+      const entries: Record<string, string> = {};
+      for (const [k, v] of Object.entries(parsed)) {
+        entries[k] = typeof v === 'string' ? v.trimEnd() : String(v);
+      }
+      return { status: 200, rendered: JSON.stringify(entries, null, 2) };
+    } catch (e) {
+      return { status: 400, error: `Invalid YAML: ${e instanceof Error ? e.message : String(e)}` };
     }
   }
-  return null;
+
+  const vars = resolveVars(id);
+  return { status: 200, rendered: renderTemplate(stripComments(content), vars) };
 }
 
-function removeIfExists(path: string): void {
-  if (existsSync(path)) unlinkSync(path);
+// ── Route options ────────────────────────────────────────────
+
+export interface PromptInjectionRoutesOptions {
+  /** Runtime override store. When absent, matrix uses default override state. */
+  overrideStore?: HookOverrideStore;
 }
 
-function tmpPathFor(path: string): string {
-  return `${path}.${process.pid}.${process.hrtime.bigint()}.tmp`;
-}
-
-function atomicWriteFileSync(path: string, content: string): void {
-  const tmpPath = tmpPathFor(path);
-  try {
-    writeFileSync(tmpPath, content, 'utf-8');
-    renameSync(tmpPath, path);
-  } finally {
-    removeIfExists(tmpPath);
-  }
-}
-
-function atomicCopyFileSync(sourcePath: string, targetPath: string): void {
-  const tmpPath = tmpPathFor(targetPath);
-  try {
-    copyFileSync(sourcePath, tmpPath);
-    renameSync(tmpPath, targetPath);
-  } finally {
-    removeIfExists(tmpPath);
-  }
-}
-
-function invalidateNativeL0CacheForSegment(segmentId: string): void {
-  if (segmentId === 'S6') {
-    clearL0Cache();
-  }
-}
-
-// ── Dynamic segment metadata (derived from TEMPLATE_FILES registry) ──
+// ── Segment metadata (TEMPLATE_FILES entries + hook-registry segments) ──
 
 interface SegmentMeta {
   allowLocalOverride: boolean;
   ext: 'yaml' | 'md';
+  templateRef: string;
   vars: string[];
+  variableDefs: HookVariableDef[];
+  safetyTier: SafetyTier;
+  disableable: boolean;
 }
 
 /** Known runtime values for template variable preview rendering */
@@ -138,19 +137,39 @@ const KNOWN_PREVIEW_VARS: Record<string, string> = {
   CC_MENTION: '@co-creator',
 };
 
-/** Derive segment meta dynamically from TEMPLATE_FILES registry (all 49 segments) */
+/**
+ * Derive segment meta for a Console segment. TEMPLATE_FILES entries keep their
+ * overlay semantics; a segment known only to the shared hook registry (a
+ * governance-added unit) derives everything from its manifest and template, so
+ * content / preview / version validation work without a restart.
+ */
 function resolveSegmentMeta(id: string): SegmentMeta | null {
   const fileInfo = getTemplateFileInfo(id);
-  if (!fileInfo) return null;
-  const ext: 'yaml' | 'md' = fileInfo.base.endsWith('.yaml') ? 'yaml' : 'md';
-  const raw = getTemplateRawContent(id, false);
+  // F257 Console 判据⑥: safety constraints come from the hook manifest so the
+  // enablement matrix is authoritative; the registry is the reload-aware one.
+  const manifest = getHookManifest(id);
+  if (!fileInfo && !manifest) return null;
+  const templateRef = fileInfo?.base ?? manifest?.template ?? '';
+  const ext: 'yaml' | 'md' = templateRef.endsWith('.yaml') ? 'yaml' : 'md';
+  const raw = readSegmentSource(id, false);
   const vars: string[] = [];
   if (raw) {
     for (const m of raw.matchAll(/\{\{(\w+)\}\}/g)) {
       if (!vars.includes(m[1])) vars.push(m[1]);
     }
   }
-  return { allowLocalOverride: !!fileInfo.local, ext, vars };
+  // Canonical variable definitions come from the hook manifest first, then
+  // fall back to the TEMPLATE_FILES registry for non-hook template-backed segments.
+  const variableDefs = getHookVariableDefs(id) ?? (fileInfo?.variables || []);
+  return {
+    allowLocalOverride: !!fileInfo?.local,
+    ext,
+    templateRef,
+    vars,
+    variableDefs,
+    safetyTier: manifest?.safetyTier ?? 'readonly',
+    disableable: manifest?.disableable ?? false,
+  };
 }
 
 function resolveVars(segmentId: string): Record<string, string> {
@@ -163,9 +182,54 @@ function resolveVars(segmentId: string): Record<string, string> {
   return result;
 }
 
+async function buildContentEnablementMatrix(
+  segmentId: string,
+  meta: SegmentMeta,
+  hasLocalOverlay: boolean,
+  hasBackup: boolean,
+  overrideStore: HookOverrideStore | undefined,
+): Promise<SegmentEnablementMatrix> {
+  let enabled = true;
+  let hasOverride = false;
+  let hasContentOverride = false;
+  let hasVersionSnapshot = false;
+  const availableEpochVersions: number[] = [];
+
+  if (overrideStore) {
+    const override = await overrideStore.getOverride(segmentId);
+    if (override) {
+      enabled = override.enabled !== false;
+      hasOverride = true;
+      hasContentOverride = typeof override.contentOverride === 'string' && override.contentOverride.length > 0;
+    }
+    if (typeof overrideStore.listVersions === 'function') {
+      const versions = await overrideStore.listVersions(segmentId);
+      if (versions.length > 0) {
+        hasVersionSnapshot = true;
+        for (const v of versions) availableEpochVersions.push(v.version);
+      }
+    }
+  }
+
+  return resolveSegmentEnablementMatrix({
+    segmentId,
+    safetyTier: meta.safetyTier,
+    allowLocalOverride: meta.allowLocalOverride,
+    disableable: meta.disableable,
+    localOverlay: { hasOverlay: hasLocalOverlay, hasBackup },
+    runtimeOverride: {
+      enabled,
+      hasOverride,
+      hasContentOverride,
+      hasVersionSnapshot,
+      availableEpochVersions,
+    },
+  });
+}
+
 // ── Route plugin ─────────────────────────────────────────────
 
-export const promptInjectionRoutes: FastifyPluginAsync = async (app) => {
+export const promptInjectionRoutes: FastifyPluginAsync<PromptInjectionRoutesOptions> = async (app, opts) => {
   /**
    * GET /api/prompt-injection/segment/:id/content
    * Returns raw template content (base or override) + override status.
@@ -177,20 +241,25 @@ export const promptInjectionRoutes: FastifyPluginAsync = async (app) => {
     }
     const { id } = request.params;
     const meta = resolveSegmentMeta(id);
-
-    // Hook segments (H1-H3): read source script file directly
     if (!meta) {
-      const hookResult = await resolveHookContent(id);
-      if (hookResult) return hookResult;
       reply.status(404);
       return { error: `Segment ${id} is not template-backed` };
     }
 
     const status = getOverrideStatus(id);
-    const content = getTemplateRawContent(id, true);
-    const baseContent = status?.hasOverride ? getTemplateRawContent(id, false) : content;
+    const hasLocalOverlay = status?.hasOverride ?? false;
+    const content = readSegmentSource(id, true);
+    const baseContent = hasLocalOverlay ? readSegmentSource(id, false) : content;
     const overlayPath = getTemplateOverlayPath(id);
     const hasBackup = overlayPath ? existsSync(`${overlayPath}.bak`) : false;
+
+    const enablementMatrix = await buildContentEnablementMatrix(
+      id,
+      meta,
+      hasLocalOverlay,
+      hasBackup,
+      opts.overrideStore,
+    );
 
     return {
       segmentId: id,
@@ -199,7 +268,10 @@ export const promptInjectionRoutes: FastifyPluginAsync = async (app) => {
       hasBackup,
       content: content ?? '',
       baseContent: baseContent ?? '',
+      templateRef: meta.templateRef,
       vars: meta.vars,
+      variableDefs: meta.variableDefs,
+      enablementMatrix,
     };
   });
 
@@ -223,43 +295,13 @@ export const promptInjectionRoutes: FastifyPluginAsync = async (app) => {
       }
 
       const { content } = request.body ?? {};
-      if (typeof content !== 'string') {
-        reply.status(400);
-        return { error: 'Missing content field' };
-      }
-
-      const vars = resolveVars(id);
-      let rendered: string;
-      if (meta.ext === 'yaml') {
-        // YAML preview: parse and show per-key values
-        try {
-          const parsed: unknown = YAML.parse(content);
-          if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
-            reply.status(400);
-            return { error: 'YAML must be a mapping (object), not a scalar or list' };
-          }
-          const entries: Record<string, string> = {};
-          for (const [k, v] of Object.entries(parsed)) {
-            entries[k] = typeof v === 'string' ? v.trimEnd() : String(v);
-          }
-          rendered = JSON.stringify(entries, null, 2);
-        } catch (e) {
-          reply.status(400);
-          return { error: `Invalid YAML: ${e instanceof Error ? e.message : String(e)}` };
-        }
-      } else {
-        rendered = renderTemplate(stripComments(content), vars);
-      }
-      return { segmentId: id, rendered };
+      const preview = renderPreview(id, content, meta);
+      reply.status(preview.status);
+      return isRouteError(preview) ? { error: preview.error } : { segmentId: id, rendered: preview.rendered };
     },
   );
 
-  /**
-   * PUT /api/prompt-injection/segment/:id/override
-   * Save .local overlay file. Only allowed for allowLocalOverride: true segments.
-   * Body: { content: string }
-   * Backs up existing .local to .local.bak before overwriting.
-   */
+  /** Legacy mutation route retained as an authenticated fail-closed boundary. */
   app.put<{ Params: { id: string }; Body: { content: string } }>(
     '/api/prompt-injection/segment/:id/override',
     async (request, reply) => {
@@ -268,144 +310,30 @@ export const promptInjectionRoutes: FastifyPluginAsync = async (app) => {
         reply.status(auth.status);
         return { error: auth.error };
       }
-      const { id } = request.params;
-      const meta = resolveSegmentMeta(id);
-      if (!meta) {
-        reply.status(404);
-        return { error: `Segment ${id} is not template-backed` };
-      }
-      if (!meta.allowLocalOverride) {
-        reply.status(403);
-        return { error: `Segment ${id} is readonly — override not allowed` };
-      }
-
-      const { content } = request.body ?? {};
-      if (typeof content !== 'string' || content.trim().length === 0) {
-        reply.status(400);
-        return { error: 'Missing or empty content field' };
-      }
-
-      // Validate YAML segments parse to a string-valued mapping
-      if (meta.ext === 'yaml') {
-        const yamlErr = validateYamlStringMapping(content);
-        if (yamlErr) {
-          reply.status(400);
-          return { error: yamlErr };
-        }
-      }
-
-      const fileInfo = getTemplateFileInfo(id);
-      if (!fileInfo) {
-        reply.status(500);
-        return { error: 'Template file info not found' };
-      }
-
-      const localPath = getTemplateOverlayPath(id);
-      if (!localPath) {
-        reply.status(500);
-        return { error: 'Template overlay path not found' };
-      }
-      mkdirSync(dirname(localPath), { recursive: true });
-
-      // Backup existing .local to .local.bak
-      if (existsSync(localPath)) {
-        const bakPath = `${localPath}.bak`;
-        atomicCopyFileSync(localPath, bakPath);
-      }
-
-      atomicWriteFileSync(localPath, content);
-      invalidateNativeL0CacheForSegment(id);
-
-      return { segmentId: id, saved: true, path: fileInfo.local };
+      reply.status(409);
+      return VERSIONED_EDITOR_REQUIRED;
     },
   );
 
-  /**
-   * DELETE /api/prompt-injection/segment/:id/override
-   * Remove .local overlay, reverting to default template.
-   */
+  /** Legacy reset cannot bypass the version/cycle transition. */
   app.delete<{ Params: { id: string } }>('/api/prompt-injection/segment/:id/override', async (request, reply) => {
     const auth = requireOverlayWriteAuth(request);
     if (!auth.ok) {
       reply.status(auth.status);
       return { error: auth.error };
     }
-    const { id } = request.params;
-    const meta = resolveSegmentMeta(id);
-    if (!meta) {
-      reply.status(404);
-      return { error: `Segment ${id} is not template-backed` };
-    }
-    if (!meta.allowLocalOverride) {
-      reply.status(403);
-      return { error: `Segment ${id} is readonly` };
-    }
-
-    const fileInfo = getTemplateFileInfo(id);
-    if (!fileInfo?.local) {
-      return { segmentId: id, deleted: false, reason: 'No overlay path defined' };
-    }
-
-    const localPath = getTemplateOverlayPath(id);
-    if (!localPath) {
-      return { segmentId: id, deleted: false, reason: 'No overlay path defined' };
-    }
-    if (existsSync(localPath)) {
-      unlinkSync(localPath);
-      invalidateNativeL0CacheForSegment(id);
-      return { segmentId: id, deleted: true };
-    }
-    return { segmentId: id, deleted: false, reason: 'No override file exists' };
+    reply.status(409);
+    return VERSIONED_EDITOR_REQUIRED;
   });
 
-  /**
-   * POST /api/prompt-injection/segment/:id/restore-backup
-   * Restore .local from .local.bak (one-click rollback to previous version).
-   */
+  /** Legacy backup restore cannot bypass the version/cycle transition. */
   app.post<{ Params: { id: string } }>('/api/prompt-injection/segment/:id/restore-backup', async (request, reply) => {
     const auth = requireOverlayWriteAuth(request);
     if (!auth.ok) {
       reply.status(auth.status);
       return { error: auth.error };
     }
-    const { id } = request.params;
-    const meta = resolveSegmentMeta(id);
-    if (!meta) {
-      reply.status(404);
-      return { error: `Segment ${id} is not template-backed` };
-    }
-    if (!meta.allowLocalOverride) {
-      reply.status(403);
-      return { error: `Segment ${id} is readonly` };
-    }
-    const fileInfo = getTemplateFileInfo(id);
-    if (!fileInfo?.local) {
-      reply.status(500);
-      return { error: 'Template file info not found' };
-    }
-    const localPath = getTemplateOverlayPath(id);
-    if (!localPath) {
-      reply.status(500);
-      return { error: 'Template overlay path not found' };
-    }
-    const bakPath = `${localPath}.bak`;
-    if (!existsSync(bakPath)) {
-      reply.status(404);
-      return { error: 'No backup file exists' };
-    }
-
-    // Validate backup content before restoring (P2-7: same gate as save path)
-    if (meta.ext === 'yaml') {
-      const bakContent = readFileSync(bakPath, 'utf-8');
-      const yamlErr = validateYamlStringMapping(bakContent);
-      if (yamlErr) {
-        reply.status(400);
-        return { error: `Backup file is invalid — ${yamlErr}` };
-      }
-    }
-
-    atomicCopyFileSync(bakPath, localPath);
-    invalidateNativeL0CacheForSegment(id);
-    return { segmentId: id, restored: true };
+    reply.status(409);
+    return VERSIONED_EDITOR_REQUIRED;
   });
 };

@@ -318,6 +318,15 @@ export const ENV_VARS: EnvDefinition[] = [
     runtimeEditable: false,
   },
   {
+    name: 'CAT_CAFE_PROMPT_HOOKS_DIR',
+    defaultValue: '<repo>/assets/prompt-hooks',
+    description:
+      'F257 段装配扫描的 prompt hook 目录。用于隔离验收栈与不得触碰仓库资产的回归测试；未设置时读仓内 assets/prompt-hooks',
+    category: 'server',
+    sensitive: false,
+    runtimeEditable: false,
+  },
+  {
     name: 'CAT_CAFE_REPO_ROOT',
     defaultValue: '(进程 CWD)',
     description: 'F233 Phase C feat trajectory collector 所读 cat-cafe 仓根目录（含 .git）。未设置时用 process.cwd()',

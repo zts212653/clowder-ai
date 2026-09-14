@@ -48,6 +48,7 @@ import type { IThreadStore } from '../domains/cats/services/stores/ports/ThreadS
 import { extractHoldBallClaims } from '../infrastructure/grounding/claim-extractors.js';
 import { checkGrounding } from '../infrastructure/grounding/grounding-checker.js';
 import { groundingSampleStore } from '../infrastructure/grounding/grounding-sample-singleton.js';
+import { ledgerIdForGuard } from '../infrastructure/harness-eval/guard-ledger-registry.js';
 import { createModuleLogger } from '../infrastructure/logger.js';
 import { KILL_GRACE_MS, ManagedRunner, type WakeWhenResult } from '../infrastructure/managed-runner.js';
 import type { DynamicTaskStore } from '../infrastructure/scheduler/DynamicTaskStore.js';
@@ -355,6 +356,8 @@ export interface HoldBallRouteDeps {
    */
   taskStore?: CrossStoreTaskStore;
   invocationRecordStore: IInvocationRecordStore;
+  /** F257: shared guard ledger used by server-side hold guards and MCP-local rejection ingest. */
+  guardRejectionLog?: import('../infrastructure/harness-eval/GuardRejectionEventLog.js').GuardRejectionEventLog;
   managedCommandWakeRecovery?: Pick<ManagedCommandWakeRecoverySweep, 'recordCompletion'> &
     Partial<Pick<ManagedCommandWakeRecoverySweep, 'recordCancelledCompletion' | 'recordRetiredCompletion'>>;
   /**
@@ -645,8 +648,33 @@ export function registerCallbackHoldBallRoutes(app: FastifyInstance, deps: HoldB
 
     const parsed = holdBallSchema.safeParse(request.body);
     if (!parsed.success) {
+      const ungroundedTimer = rawBody?.wakeAfterMs != null && rawBody?.waitSourceRef == null;
+      if (ungroundedTimer && deps.guardRejectionLog) {
+        const { randomUUID } = await import('node:crypto');
+        void deps.guardRejectionLog
+          .append({
+            eventId: randomUUID(),
+            ledgerId: ledgerIdForGuard('hold_ball_wait_source_ref'),
+            kind: 'http_schema_reject',
+            threadId: actor.threadId,
+            catId: actor.catId as string,
+            guardId: 'hold_ball_wait_source_ref',
+            ownerUserId: actor.userId,
+            invocationId: record.invocationId ?? 'unknown',
+            sourceTool: 'hold_ball',
+            normalizedReason: 'missing_wait_source_ref',
+            layer: 'api-route',
+            timestamp: Date.now(),
+            correlationConfidence: record.invocationId ? 'exact' : 'window',
+          })
+          .catch(() => {});
+      }
       reply.status(400);
-      return { error: 'Invalid request body', details: parsed.error.issues };
+      return {
+        error: 'Invalid request body',
+        details: parsed.error.issues,
+        ...(ungroundedTimer ? { ledgerId: ledgerIdForGuard('hold_ball_wait_source_ref') } : {}),
+      };
     }
 
     const { reason, nextStep, wakeWhen } = parsed.data;
@@ -697,8 +725,28 @@ export function registerCallbackHoldBallRoutes(app: FastifyInstance, deps: HoldB
       policyContext: { wakeAfterMs, hasEventCallback: false, hasWaitSourceRef: !!parsed.data.waitSourceRef },
     });
     if (guardResult.outcome === 'blocked' && guardResult.blockedResponse) {
+      if (deps.guardRejectionLog) {
+        const { randomUUID } = await import('node:crypto');
+        void deps.guardRejectionLog
+          .append({
+            eventId: randomUUID(),
+            ledgerId: ledgerIdForGuard('gate_keeping_thread_default'),
+            kind: 'http_policy_reject',
+            threadId: actor.threadId,
+            catId: catIdStr,
+            guardId: 'gate_keeping_thread_default',
+            ownerUserId: userId,
+            invocationId: record.invocationId ?? 'unknown',
+            sourceTool: 'hold_ball',
+            normalizedReason: 'gate_keeping_thread_default_blocked',
+            layer: 'api-route',
+            timestamp: Date.now(),
+            correlationConfidence: record.invocationId ? 'exact' : 'window',
+          })
+          .catch(() => {});
+      }
       reply.status(400);
-      return guardResult.blockedResponse;
+      return { ...guardResult.blockedResponse, ledgerId: ledgerIdForGuard('gate_keeping_thread_default') };
     }
 
     const currentCount = getHoldCount(threadId, catIdStr);
@@ -708,6 +756,30 @@ export function registerCallbackHoldBallRoutes(app: FastifyInstance, deps: HoldB
         'F167 C1: hold_ball rejected — maxHoldsPerWindow reached',
       );
       reply.status(429);
+      const rateLimitLedgerId = ledgerIdForGuard('hold_ball_rate_limit');
+      if (deps.guardRejectionLog) {
+        const { randomUUID } = await import('node:crypto');
+        void deps.guardRejectionLog
+          .append({
+            eventId: randomUUID(),
+            ledgerId: rateLimitLedgerId,
+            kind: 'http_rate_limit',
+            threadId,
+            catId: catIdStr,
+            guardId: 'hold_ball_rate_limit',
+            ownerUserId: userId,
+            invocationId: record.invocationId ?? 'unknown',
+            sourceTool: 'hold_ball',
+            normalizedReason: 'rate_limited',
+            layer: 'api-route',
+            currentCount,
+            maxAllowed: MAX_HOLDS_PER_WINDOW,
+            windowMs: HOLD_WINDOW_MS,
+            timestamp: Date.now(),
+            correlationConfidence: record.invocationId ? 'exact' : 'window',
+          })
+          .catch(() => {});
+      }
       return {
         error:
           `maxHoldsPerWindow (${MAX_HOLDS_PER_WINDOW} per ~1h window) reached. ` +
@@ -715,6 +787,7 @@ export function registerCallbackHoldBallRoutes(app: FastifyInstance, deps: HoldB
         holdsInWindow: currentCount,
         maxHoldsPerWindow: MAX_HOLDS_PER_WINDOW,
         windowMs: HOLD_WINDOW_MS,
+        ledgerId: rateLimitLedgerId,
       };
     }
 

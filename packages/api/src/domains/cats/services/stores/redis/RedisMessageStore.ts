@@ -603,6 +603,11 @@ function parseCustodyOfferCasReceipt(result: unknown): CustodyOfferCasReceipt {
   };
 }
 
+/** F257 V1: asynchronous projection of embedded routing-decision facts. */
+export interface RoutingFactProjector {
+  project(msg: Pick<StoredMessage, 'id' | 'userId' | 'timestamp' | 'routingFact'>): Promise<void>;
+}
+
 export class RedisMessageStore {
   private readonly redis: RedisClient;
   /** null means no expiration/pruning (persistent retention). */
@@ -829,6 +834,21 @@ export class RedisMessageStore {
   async getById(id: string): Promise<StoredMessage | null> {
     const data = await this.redis.hgetall(MessageKeys.detail(id));
     return this.hydrateHash(data);
+  }
+
+  async getByIds(ids: readonly string[]): Promise<StoredMessage[]> {
+    if (ids.length === 0) return [];
+    const pipeline = this.redis.pipeline();
+    for (const id of ids) pipeline.hgetall(MessageKeys.detail(id));
+    const results = await pipeline.exec();
+    if (!results) return [];
+    const messages: StoredMessage[] = [];
+    for (const [error, value] of results) {
+      if (error || !value || typeof value !== 'object') continue;
+      const hydrated = this.hydrateHash(value as Record<string, string>);
+      if (hydrated) messages.push(hydrated);
+    }
+    return messages;
   }
 
   private hydrateOwnerComposerDraft(data: Record<string, string>): OwnerComposerDraft | null {

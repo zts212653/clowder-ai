@@ -182,8 +182,8 @@ describe('Dual-path validation: AssembleBridge + HookPipeline', () => {
       assert.ok(firedIds.includes(id), `${id} should fire`);
     }
 
-    // 24 per-turn hooks → 24 events
-    assert.equal(result.events.length, 24, `Expected 24 per-turn events, got ${result.events.length}`);
+    // 25 per-turn hooks → 25 events (D22 custody-closure checkpoint ships on this branch)
+    assert.equal(result.events.length, 25, `Expected 25 per-turn events, got ${result.events.length}`);
   });
 
   it('combined pipeline output is substantial (AC-P2-14)', () => {

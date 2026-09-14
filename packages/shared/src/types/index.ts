@@ -463,6 +463,16 @@ export type {
   CrossThreadCoordinationInputPhase,
 } from './cross-thread-coordination.js';
 export { isCrossThreadProvenance } from './cross-thread-coordination.js';
+export type {
+  CycleCoverageAssessment,
+  CycleCoverageFinding,
+  CycleEvaluationAssignment,
+  CycleEvaluationSubmission,
+  CycleMetricConclusion,
+  CycleMetricEvaluation,
+  CycleTracePage,
+  HarnessUnitDescription,
+} from './cycle-evaluation.js';
 // Deliberate types (4-E 两轮制 - 类型预埋)
 export type {
   DeliberateEvent,
@@ -704,6 +714,57 @@ export {
   custodyOpportunityEpisodeInputV1Schema,
   custodyOpportunityEpisodeV1Schema,
 } from './growing-opportunity.js';
+export type {
+  CycleEvaluationStatus,
+  CycleRecord,
+  CycleTriggerPolicy,
+  CycleTriggerPolicyChange,
+  CycleTriggerRoute,
+  CycleWindow,
+  EvaluationSnapshot,
+  EvaluationUnitRef,
+  MetricComparisonMeasurement,
+  MetricDefinition,
+  MetricKind,
+  MetricResult,
+  MetricResultValue,
+  MetricTrigger,
+  MetricVerdictDecision,
+  MetricVerdictDecisionStatus,
+  MetricVerdictRule,
+  ObjectiveJudgment,
+  ObjectiveLifecycle,
+  ObjectiveVerdictDecision,
+  PendingTraceMarker,
+  SegmentCycleSummary,
+  SegmentEvaluationResponse,
+  SegmentMetricEvaluationView,
+  SegmentObjectiveEvaluationView,
+  SegmentTracingEvaluationView,
+  TraceAnnotation,
+  TraceAnnotationPolarity,
+  TraceAnnotationSource,
+} from './harness-evaluation.js';
+// F257 governance ring: Objective-cycle decision and human-gated proposal.
+export type {
+  CycleGovernanceAssignment,
+  CycleGovernanceDecision,
+  CycleGovernanceHistorySummary,
+  CycleGovernanceSubmission,
+  HarnessGovernanceChangeDraft,
+  HarnessGovernanceProposal,
+  HarnessGovernanceProposalChange,
+  HarnessGovernanceProposalStatus,
+  HarnessUnitAddDraft,
+} from './harness-governance.js';
+export type {
+  HookCondition,
+  HookOverride,
+  HookOverrideSnapshot,
+  HookOverrideSource,
+  OverrideAction,
+  OverrideChangeEvent,
+} from './hook-override.js';
 // F281 Phase A: server-bound human disposition feedback and exact-subject eligibility contract
 export {
   buildHumanDispositionEnvelope,
@@ -777,6 +838,10 @@ export type {
   InjectionTraceSummary,
   ObservedSegment,
   StageDeliveryDecision,
+  TraceEpisode,
+  TraceEpisodeRef,
+  TraceTerminalExtension,
+  TraceToolCall,
 } from './injection-trace.js';
 // Intent Card + Need Audit types (F076 需求翻译官)
 export type {
@@ -1245,6 +1310,7 @@ export type {
   HookManifest,
   HookResolver,
   HookStage,
+  HookVariableDef,
   PingPongInput,
   PromptPatch,
   RegisteredHook,
@@ -1377,6 +1443,33 @@ export {
   type SchedulerWaitPredicateKind,
   type SchedulerWaitSubjectRef,
 } from './scheduler-wait.js';
+export type {
+  ActionableInfo,
+  ActiveStage,
+  EvalStageSummary,
+  GovernanceStageSummary,
+  GuardMetric,
+  LifecycleEvalSource,
+  LifecycleEvent,
+  LifecycleEventKind,
+  LifecycleJudgmentProjection,
+  LifecycleObjectiveEvalSummary,
+  ProvenanceGapKind,
+  ReplayGuardEvent,
+  ReplayProvenanceGap,
+  ReplaySnapshot,
+  ReplaySurroundingMessage,
+  SegmentContentSourceKind,
+  SegmentLifecycleResponse,
+  SegmentReplayResponse,
+  SegmentVerdict,
+  TracingStageSummary,
+  VersionActivation,
+  VersionEpoch,
+  VersionEpochStatus,
+  VersionOrigin,
+} from './segment-lifecycle.js';
+export { SEGMENT_VERDICTS } from './segment-lifecycle.js';
 // Session chain types (F24 Session Chain + Context Health)
 export type {
   ContextHealth,

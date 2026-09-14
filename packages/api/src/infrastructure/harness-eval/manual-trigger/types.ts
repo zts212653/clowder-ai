@@ -1,6 +1,7 @@
 import type { Redis } from 'ioredis';
 import type { IMessageStore } from '../../../domains/cats/services/stores/ports/MessageStore.js';
 import type { IThreadStore } from '../../../domains/cats/services/stores/ports/ThreadStore.js';
+import type { GuardRejectionEventLog } from '../GuardRejectionEventLog.js';
 
 /**
  * F192 OQ-21 — Shared types for manual eval trigger handlers.
@@ -50,6 +51,7 @@ export interface ManualTriggerDeps {
    * legacy default (all known-wireable domains get publish instructions).
    */
   wiredPublishDomains?: ReadonlySet<string>;
+  guardRejectionLog?: GuardRejectionEventLog;
 }
 
 export interface HandlerError {

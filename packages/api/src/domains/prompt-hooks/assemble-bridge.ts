@@ -165,6 +165,8 @@ export function assembleForTurn(context: InvocationContext): AssemblerInput {
   return {
     catId: context.catId as string,
     ...session,
+    ...(context.suppressedHookIds?.length ? { suppressedHookIds: context.suppressedHookIds } : {}),
+    ...(context.hookSuppressionReason ? { hookSuppressionReason: context.hookSuppressionReason } : {}),
     mode: context.mode,
     chainIndex: context.chainIndex ?? null,
     chainTotal: context.chainTotal ?? null,

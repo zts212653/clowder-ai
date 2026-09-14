@@ -6,13 +6,13 @@
 
 ## 为什么需要这个 SOP
 
-F203 把 L0 切到 native system role（`--system-prompt-file` / Codex
+F257 把 session-init HookPipeline 输出投到 native system role（`--system-prompt-file` / Codex
 `-c developer_instructions`）= **替换式**：会替换掉 Claude Code / Codex CLI
 自带的系统提示词。其中"客观性/功能性"段（工具发现、并行调用、destructive
 safety、压缩感知、simple_system_prompt 机制、agent 模式）必须在
-`assets/system-prompts/system-prompt-l0.md` §2 **carry-over**，否则猫丢能力。
+对应的 `assets/prompt-hooks/` session-init 段中 **carry-over**，否则猫丢能力。
 
-CLI 每次版本升级可能**新增功能性指令**——不重拆 = L0 §2 漏 carry-over =
+CLI 每次版本升级可能**新增功能性指令**——不重拆 = session-init hooks 漏 carry-over =
 猫静默退化。本 SOP = 把"重拆"工具化 + 流程化。
 
 ## 触发时机（谁命中谁负责）
@@ -23,7 +23,7 @@ CLI 每次版本升级可能**新增功能性指令**——不重拆 = L0 §2 �
 | Phase E cron（weekly `--check`）报 `drift=true` | 命中的猫跑本 SOP |
 | patch 升级（x.y.**Z**） | 可选；cron drift 会提示，按 diff 大小判断 |
 
-命中升级的猫 = 负责猫（不甩锅、不攒着）。改 L0 走正常 SOP（跨族 review）。
+命中升级的猫 = 负责猫（不甩锅、不攒着）。改 session-init hook 走正常 SOP（跨族 review）。
 
 ## 步骤
 
@@ -40,13 +40,13 @@ node scripts/audit-claude-code-system-prompt.mjs --cli codex \
 ```
 
 2. **看 added functional anchor**：每个新 functional anchor 是"CLI 新增的
-   客观性/能力指令"。逐条判断它是否已被 L0 §2 carry-over 覆盖：
-   - 已覆盖（同义表述）→ 仅更新归档 doc，注明"已在 L0 §2"
+   客观性/能力指令"。逐条判断它是否已被 session-init hooks 覆盖：
+   - 已覆盖（同义表述）→ 仅更新归档 doc，注明对应 hook ID
    - 未覆盖 → step 3
-3. **提案 L0 §2 carry-over 更新**：在 worktree 改
-   `assets/system-prompts/system-prompt-l0.md` §2，把新功能性指令的**语义**
-   补进去（不是逐字抄 CC 原文——L0 是重写版；抓"删了猫会丢什么能力"）。
-   跑 `compile-system-prompt-l0.test.mjs` 守护 → quality-gate →
+3. **提案 session-init hook 更新**：在 worktree 改对应的
+   `assets/prompt-hooks/<segment>/` 正文，把新功能性指令的**语义**补进去
+   （不是逐字抄 CC 原文；抓"删了猫会丢什么能力"）。跑 HookPipeline / native
+   transport 等价测试 → quality-gate →
    request-review（跨族）→ merge-gate。
 4. **归档新版本**（每次升级必做，无论有无 diff——留漂移痕迹）：
    ```bash
@@ -87,5 +87,5 @@ carry-over 是猫/operator 决策，不自动化）。task 管理见 `schedule-t
 
 ## 一句话
 
-CLI 升级 → `--diff` → 新 functional anchor 就补 L0 §2（走 SOP）→ `--emit`
+CLI 升级 → `--diff` → 新 functional anchor 就补 session-init hook（走 SOP）→ `--emit`
 归档新版本。不重拆 = 静默丢能力。
