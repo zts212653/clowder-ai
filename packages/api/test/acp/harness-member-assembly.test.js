@@ -58,7 +58,10 @@ function writeDshFixture() {
   writeFileSync(join(mcpClientLib, 'index.js'), 'export default {}\n');
   const configDir = join(root, 'examples', 'acp-agent');
   mkdirSync(configDir, { recursive: true });
-  writeFileSync(join(configDir, 'cordis.yml'), "- id: acp-agent\n  name: '@deepseek-ai/dsh-acp-demo'\n");
+  writeFileSync(
+    join(configDir, 'cordis.yml'),
+    "- id: acp-agent\n  name: '@deepseek-ai/dsh-acp-demo'\n  config:\n    provider: deepseek-official\n    model: deepseek-v4-pro\n",
+  );
   return { root, bin, configDir };
 }
 
@@ -201,6 +204,11 @@ describe('Grok Build and DeepSeek Harness member assembly', () => {
           'Hub argv must be the sibling overlay, not official-only cordis.yml',
         );
         const overlayYaml = readFileSync(overlayPath, 'utf-8');
+        assert.match(
+          overlayYaml,
+          new RegExp(`id: acp-agent[\\s\\S]*model: '${dsh.defaultModel}'`),
+          'DSH overlay must bind the assembled member model',
+        );
         assert.match(overlayYaml, /serverName: 'cat-cafe-memory'/);
         assert.match(overlayYaml, /serverName: 'cat-cafe-collab'/);
         assert.match(overlayYaml, /serverName: 'cat-cafe-signals'/);

@@ -34,7 +34,10 @@ function writeDshFixture(root) {
   const configDir = join(root, 'examples', 'acp-agent');
   mkdirSync(configDir, { recursive: true });
   const config = join(configDir, 'cordis.yml');
-  writeFileSync(config, "- id: acp-agent\n  name: '@deepseek-ai/dsh-acp-demo'\n");
+  writeFileSync(
+    config,
+    "- id: acp-agent\n  name: '@deepseek-ai/dsh-acp-demo'\n  config:\n    provider: deepseek-official\n    model: deepseek-v4-pro\n",
+  );
   return { bin: join(binDir, 'bin.js'), config, overlay: join(configDir, 'cat-cafe-dsh-acp.cordis.yml') };
 }
 
@@ -83,6 +86,7 @@ describe('dsh ACP bootstrap', () => {
     const { config } = writeDshFixture(root);
     const outputPath = writeDshAcpOverlayConfig({
       baseConfigPath: config,
+      model: 'deepseek-flash',
       servers: [
         {
           name: 'cat-cafe-memory',
@@ -104,6 +108,88 @@ describe('dsh ACP bootstrap', () => {
     assert.match(yaml, /CAT_CAFE_API_URL: 'http:\/\/127\.0\.0\.1:9'/);
   });
 
+  it('binds the requested member model into the DSH ACP deployment entry', () => {
+    const root = mkdtempSync(join(tmpdir(), 'dsh-model-overlay-'));
+    const config = join(root, 'cordis.yml');
+    writeFileSync(
+      config,
+      [
+        '- id: llm-deepseek',
+        "  name: '@deepseek-ai/dsh-llm-deepseek'",
+        '  config:',
+        '    models:',
+        '      - id: deepseek-v4-flash',
+        '      - id: deepseek-v4-pro',
+        '- id: acp-agent',
+        "  name: '@deepseek-ai/dsh-acp-demo'",
+        '  config:',
+        '    provider: deepseek-official',
+        '    model: deepseek-v4-pro',
+        '',
+      ].join('\n'),
+    );
+
+    const outputPath = writeDshAcpOverlayConfig({
+      baseConfigPath: config,
+      model: 'deepseek-flash',
+      servers: [],
+      outputDir: root,
+    });
+    const yaml = readFileSync(outputPath, 'utf-8');
+    assert.match(yaml, /id: acp-agent[\s\S]*model: 'deepseek-flash'/);
+    assert.doesNotMatch(yaml, /id: acp-agent[\s\S]*model: deepseek-v4-pro/);
+    assert.match(yaml, /- id: deepseek-v4-pro/, 'the adapter model catalog must remain untouched');
+
+    const proPath = writeDshAcpOverlayConfig({
+      baseConfigPath: config,
+      model: 'deepseek-v4-pro',
+      servers: [],
+      outputDir: root,
+    });
+    assert.notEqual(outputPath, proPath, 'model identity must participate in the content-addressed spawn config');
+  });
+
+  it('fails closed when the DSH ACP deployment model cannot be bound unambiguously', () => {
+    const root = mkdtempSync(join(tmpdir(), 'dsh-model-invalid-'));
+    const cases = [
+      {
+        name: 'missing deployment entry',
+        yaml: "- id: other\n  name: '@deepseek-ai/dsh-acp-demo'\n  config:\n    model: deepseek-v4-pro\n",
+        error: /exactly one acp-agent entry; found 0/,
+      },
+      {
+        name: 'duplicate deployment entry',
+        yaml: [
+          "- id: acp-agent\n  name: '@deepseek-ai/dsh-acp-demo'\n  config:\n    model: deepseek-v4-pro",
+          "- id: acp-agent\n  name: '@deepseek-ai/dsh-acp-demo'\n  config:\n    model: deepseek-v4-pro",
+          '',
+        ].join('\n'),
+        error: /exactly one acp-agent entry; found 2/,
+      },
+      {
+        name: 'missing deployment model',
+        yaml: "- id: acp-agent\n  name: '@deepseek-ai/dsh-acp-demo'\n  config:\n    provider: deepseek-official\n",
+        error: /exactly one model field; found 0/,
+      },
+    ];
+
+    for (const fixture of cases) {
+      const config = join(root, `${fixture.name.replaceAll(' ', '-')}.yml`);
+      writeFileSync(config, fixture.yaml);
+      assert.throws(
+        () =>
+          writeDshAcpOverlayConfig({
+            baseConfigPath: config,
+            model: 'deepseek-flash',
+            servers: [],
+            outputDir: root,
+          }),
+        fixture.error,
+        fixture.name,
+      );
+    }
+  });
+
   it('prepareDshAcpSpawnForProject writes a sibling overlay with relative mcp-client + family MCP', async () => {
     const root = mkdtempSync(join(tmpdir(), 'dsh-prepare-'));
     const { bin, config } = writeDshFixture(root);
@@ -112,6 +198,7 @@ describe('dsh ACP bootstrap', () => {
     const prepared = await prepareDshAcpSpawnForProject({
       command: 'dsh',
       args: [],
+      model: 'deepseek-flash',
       projectRoot,
       bootstrapCwd,
       mcpWhitelist: ['cat-cafe-memory'],
@@ -135,6 +222,7 @@ describe('dsh ACP bootstrap', () => {
     assert.notEqual(prepared.args[configIdx + 1], config, 'Hub must not spawn official-only cordis.yml');
     const yaml = readFileSync(prepared.overlayPath, 'utf-8');
     assert.match(yaml, /id: acp-agent/);
+    assert.match(yaml, /id: acp-agent[\s\S]*model: 'deepseek-flash'/);
     assert.match(yaml, /serverName: 'cat-cafe-memory'/);
     assert.match(yaml, /transport: stdio/);
     assert.match(yaml, /CAT_CAFE_API_URL: 'http:\/\/127\.0\.0\.1:9'/);
@@ -163,6 +251,7 @@ describe('dsh ACP bootstrap', () => {
     const prepared = await prepareDshAcpSpawnForProject({
       command: 'dsh',
       args: [],
+      model: 'deepseek-flash',
       projectRoot: mkdtempSync(join(tmpdir(), 'dsh-project-agentkey-')),
       bootstrapCwd: join(root, 'boot'),
       mcpWhitelist: ['cat-cafe-memory'],
@@ -229,6 +318,7 @@ describe('dsh ACP bootstrap', () => {
     const prepared = await prepareDshAcpSpawnForProject({
       command: 'dsh',
       args: [],
+      model: 'deepseek-flash',
       projectRoot,
       bootstrapCwd: join(root, 'boot'),
       mcpWhitelist: [
@@ -314,6 +404,7 @@ describe('dsh ACP bootstrap', () => {
     const prepared = await prepareDshAcpSpawnForProject({
       command: 'dsh',
       args: [],
+      model: 'deepseek-flash',
       projectRoot,
       bootstrapCwd: join(root, 'boot'),
       mcpWhitelist: ['cat-cafe-memory', 'zai-mcp-server', 'zread'],
@@ -342,6 +433,8 @@ describe('dsh ACP bootstrap', () => {
     );
     const entries = jsYaml.load(yaml, { schema });
     assert.ok(Array.isArray(entries));
+    const acpAgent = entries.find((entry) => entry?.id === 'acp-agent');
+    assert.equal(acpAgent?.config?.model, 'deepseek-flash');
     const zread = entries.find((entry) => entry?.config?.serverName === 'zread');
     assert.ok(zread, 'zread entry must survive schema parsing');
     const authExpr = zread.config.headers.Authorization;
@@ -388,6 +481,7 @@ describe('dsh ACP bootstrap', () => {
       prepareDshAcpSpawnForProject({
         command: 'dsh',
         args: [],
+        model: 'deepseek-flash',
         projectRoot,
         bootstrapCwd: join(root, 'boot'),
         mcpWhitelist: ['zread'],
@@ -409,6 +503,7 @@ describe('dsh ACP bootstrap', () => {
       prepareDshAcpSpawnForProject({
         command: 'dsh',
         args: [],
+        model: 'deepseek-flash',
         projectRoot,
         bootstrapCwd: join(projectRoot, 'boot'),
         mcpWhitelist,
@@ -438,7 +533,10 @@ describe('dsh ACP bootstrap', () => {
     assert.equal(same.ok, true);
     if (same.ok)
       assert.equal(same.overlayPath, first.overlayPath, 'unchanged config must keep the pool spawn signature stable');
-    writeFileSync(config, "- id: changed-base\n  name: '@deepseek-ai/dsh-acp-demo'\n");
+    writeFileSync(
+      config,
+      "# changed base\n- id: acp-agent\n  name: '@deepseek-ai/dsh-acp-demo'\n  config:\n    provider: deepseek-official\n    model: deepseek-v4-pro\n",
+    );
     const changedBase = await prepare(projectA);
     assert.equal(changedBase.ok, true);
     if (changedBase.ok) assert.notEqual(changedBase.overlayPath, first.overlayPath);
@@ -456,6 +554,7 @@ describe('dsh ACP bootstrap', () => {
     const prepared = await prepareDshAcpSpawnForProject({
       command: 'dsh',
       args: [],
+      model: 'deepseek-flash',
       projectRoot: mkdtempSync(join(tmpdir(), 'dsh-project-nomcp-')),
       bootstrapCwd: join(root, 'boot'),
       mcpWhitelist: ['cat-cafe-memory'],
@@ -514,6 +613,7 @@ describe('dsh ACP bootstrap', () => {
     const prepared = await prepareDshAcpSpawnForProject({
       command: 'dsh',
       args: [],
+      model: 'deepseek-flash',
       projectRoot,
       bootstrapCwd: join(root, 'boot'),
       mcpWhitelist: ['cat-cafe-memory', 'cat-cafe-collab', 'cat-cafe-signals'],
@@ -538,6 +638,7 @@ describe('dsh ACP bootstrap', () => {
       const prepared = await prepareDshAcpSpawnForProject({
         command: 'dsh',
         args: [],
+        model: 'deepseek-flash',
         projectRoot: mkdtempSync(join(tmpdir(), 'dsh-project-ro-')),
         bootstrapCwd: join(root, 'boot'),
         mcpWhitelist: ['cat-cafe-memory'],

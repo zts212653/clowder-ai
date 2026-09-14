@@ -325,6 +325,7 @@ export async function createAcpServiceForConfig(
     const dshPrepared = await prepareDshAcpSpawnForProject({
       command: acpConfig.command,
       args: acpConfig.startupArgs,
+      model: effectiveModel,
       projectRoot: bootstrap.projectRoot,
       bootstrapCwd: bootstrap.cwd,
       mcpWhitelist: acpConfig.mcpWhitelist ?? [],

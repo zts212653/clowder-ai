@@ -55,6 +55,7 @@ export type DshAcpStdioSpawnResult =
 export interface PrepareDshAcpSpawnInput {
   command: string;
   args: readonly string[];
+  model: string;
   projectRoot: string;
   bootstrapCwd: string;
   mcpWhitelist: string[];
@@ -84,6 +85,7 @@ export async function prepareDshAcpSpawnForProject(input: PrepareDshAcpSpawnInpu
   try {
     overlayPath = writeDshAcpOverlayConfig({
       baseConfigPath: binary.baseConfigPath,
+      model: input.model,
       servers,
       outputDir: compositionDir,
       pluginName: pluginName ?? BARE_DSH_MCP_CLIENT,

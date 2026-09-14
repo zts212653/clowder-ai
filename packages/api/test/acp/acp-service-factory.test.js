@@ -1,7 +1,7 @@
 // @ts-check
 
 import assert from 'node:assert/strict';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, it } from 'node:test';
@@ -43,7 +43,10 @@ function writeDshFixture() {
   writeFileSync(join(mcpClientLib, 'index.js'), 'export default {}\n');
   const configDir = join(root, 'examples', 'acp-agent');
   mkdirSync(configDir, { recursive: true });
-  writeFileSync(join(configDir, 'cordis.yml'), "- id: acp-agent\n  name: '@deepseek-ai/dsh-acp-demo'\n");
+  writeFileSync(
+    join(configDir, 'cordis.yml'),
+    "- id: acp-agent\n  name: '@deepseek-ai/dsh-acp-demo'\n  config:\n    provider: deepseek-official\n    model: deepseek-v4-pro\n",
+  );
   return root;
 }
 
@@ -402,7 +405,15 @@ describe('AcpServiceFactory', () => {
           log: { info() {}, warn() {} },
         });
         assert.ok(service, 'DSH ACP demo fixture must register');
-        assert.equal(JSON.parse(service.pool.spawnSignature).supportsMultiplexing, false);
+        const spawn = JSON.parse(service.pool.spawnSignature);
+        assert.equal(spawn.supportsMultiplexing, false);
+        const configIndex = spawn.args.indexOf('--config');
+        assert.ok(configIndex >= 0, `DSH spawn must pass --config, got ${JSON.stringify(spawn.args)}`);
+        assert.match(
+          readFileSync(spawn.args[configIndex + 1], 'utf-8'),
+          /id: acp-agent[\s\S]*model: 'test-model'/,
+          'factory must bind the effective member model into the spawned DSH overlay',
+        );
         assert.equal(service.pool.supportsMultiplexing, false);
       } finally {
         await Promise.all([...poolRegistry.values()].map((pool) => pool.closeAll?.()));

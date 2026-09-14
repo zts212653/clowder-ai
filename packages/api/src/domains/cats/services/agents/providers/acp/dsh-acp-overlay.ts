@@ -16,11 +16,12 @@ export const DSH_ACP_CREDENTIAL_ENV_JS = '!!js process.env.CAT_CAFE_CREDENTIAL_F
 
 export function writeDshAcpOverlayConfig(input: {
   baseConfigPath: string;
+  model: string;
   servers: readonly AcpMcpServer[];
   outputDir: string;
   pluginName?: string;
 }): string {
-  const base = readFileSync(input.baseConfigPath, 'utf-8');
+  const base = bindDshAcpModel(readFileSync(input.baseConfigPath, 'utf-8'), input.model);
   const plugins = buildDshMcpClientPlugins(input.servers, input.pluginName);
   const merged = plugins ? `${base.replace(/\s*$/, '')}\n\n# cat-cafe family MCP via dsh-mcp-client\n${plugins}` : base;
   const content = merged.endsWith('\n') ? merged : `${merged}\n`;
@@ -31,6 +32,56 @@ export function writeDshAcpOverlayConfig(input: {
   writeFileSync(tempPath, content, { encoding: 'utf-8', mode: 0o600, flag: 'wx' });
   renameSync(tempPath, outputPath);
   return outputPath;
+}
+
+/**
+ * Bind one member's exact model into the deployment-owned ACP entry. DSH's
+ * automation transport exposes no model config option, so leaving the base
+ * value intact would silently route every member through the shared default.
+ */
+function bindDshAcpModel(source: string, requestedModel: string): string {
+  const model = requestedModel.trim();
+  if (!model || /[\0\r\n]/.test(model)) {
+    throw new Error('DSH ACP member model must be a non-empty single-line value');
+  }
+
+  const newline = source.includes('\r\n') ? '\r\n' : '\n';
+  const lines = source.split(/\r?\n/);
+  const entryStarts = lines.flatMap((line, index) =>
+    /^- id:\s*(?:acp-agent|'acp-agent'|"acp-agent")\s*(?:#.*)?$/.test(line) ? [index] : [],
+  );
+  const entryStart = entryStarts[0];
+  if (entryStarts.length !== 1 || entryStart === undefined) {
+    throw new Error(`DSH ACP base config must contain exactly one acp-agent entry; found ${entryStarts.length}`);
+  }
+
+  const nextEntry = lines.findIndex((line, index) => index > entryStart && /^- id:\s*/.test(line));
+  const entryEnd = nextEntry === -1 ? lines.length : nextEntry;
+  const entryLines = lines.slice(entryStart, entryEnd);
+  const expectedPlugin =
+    /^  name:\s*(?:@deepseek-ai\/dsh-acp-demo|'@deepseek-ai\/dsh-acp-demo'|"@deepseek-ai\/dsh-acp-demo")\s*(?:#.*)?$/;
+  if (!entryLines.some((line) => expectedPlugin.test(line))) {
+    throw new Error('DSH ACP acp-agent entry must use @deepseek-ai/dsh-acp-demo');
+  }
+
+  const configOffsets = entryLines.flatMap((line, index) => (/^  config:\s*(?:#.*)?$/.test(line) ? [index] : []));
+  const configOffset = configOffsets[0];
+  if (configOffsets.length !== 1 || configOffset === undefined) {
+    throw new Error(`DSH ACP acp-agent entry must contain exactly one config block; found ${configOffsets.length}`);
+  }
+  const configStart = entryStart + configOffset;
+  const nextField = lines.findIndex((line, index) => index > configStart && index < entryEnd && /^  \S/.test(line));
+  const configEnd = nextField === -1 ? entryEnd : nextField;
+  const modelLines = lines.flatMap((line, index) =>
+    index > configStart && index < configEnd && /^    model:\s*/.test(line) ? [index] : [],
+  );
+  const modelLine = modelLines[0];
+  if (modelLines.length !== 1 || modelLine === undefined) {
+    throw new Error(`DSH ACP acp-agent config must contain exactly one model field; found ${modelLines.length}`);
+  }
+
+  lines[modelLine] = `    model: ${yamlQuote(model)}`;
+  return lines.join(newline);
 }
 
 export function buildDshMcpClientPlugins(servers: readonly AcpMcpServer[], pluginName?: string): string {
