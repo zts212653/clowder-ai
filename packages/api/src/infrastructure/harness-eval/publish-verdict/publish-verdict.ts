@@ -1,5 +1,5 @@
-import { existsSync, readFileSync } from 'node:fs';
-import { resolve } from 'node:path';
+import { existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { join, resolve } from 'node:path';
 import { parse as parseYaml } from 'yaml';
 import { getEvalCatOverride } from '../domain/eval-domain-override.js';
 import { loadDomains } from '../hub/eval-hub-read-model.js';
@@ -298,6 +298,24 @@ export async function handlePublishVerdict(
           ...(analysisFindings ? { analysisFindings } : {}),
         });
         childArtifacts = writeGeneratedLifecycleArtifacts(generatedArtifact, packet, isolatedHarnessFeedback);
+
+        // Stamp invocation-authenticated sourceThreadId into provenance.json.
+        // Centralized here (not in 10+ generators) so: (a) new generators get it
+        // for free, (b) client can never forge it — it comes from CallbackPrincipal.
+        // agent_key principals have no threadId, so the field is omitted gracefully.
+        if (input.sourceThreadId) {
+          const provenancePath = join(generatedArtifact.bundleDir, 'provenance.json');
+          if (existsSync(provenancePath)) {
+            const prov = JSON.parse(readFileSync(provenancePath, 'utf8'));
+            prov.sourceThreadId = input.sourceThreadId;
+            writeFileSync(provenancePath, `${JSON.stringify(prov, null, 2)}\n`);
+          } else {
+            console.warn(
+              `[publish-verdict] provenance.json not found at ${provenancePath}, sourceThreadId not stamped — generator may have failed to produce it`,
+            );
+          }
+        }
+
         const refreshedCensusPath = refreshMeasurementBundleCensusFile(
           worktreeRoot,
           packet.createdAt,
@@ -330,7 +348,7 @@ export async function handlePublishVerdict(
           paths: [...generatedArtifactStagePaths(generatedArtifact), refreshedCensusPath],
           commitMessage: `verdict(${packet.domainId}): ${packet.id} — ${packet.verdict}\n\n${packet.phenomenon}\n\n[published via cat_cafe_publish_verdict MCP]`,
           prTitle: `verdict(${packet.domainId}): ${packet.id}`,
-          prBody: `Verdict published via cat_cafe_publish_verdict MCP tool.\n\nVerdict: ${packet.verdict}\nDomain: ${packet.domainId}\nPhenomenon: ${packet.phenomenon}\n\nReviewed by: ${packet.ownerAsk.targetOwnerCatId}\nAction: ${packet.ownerAsk.requestedAction}${policyFooter}`,
+          prBody: `Verdict published via cat_cafe_publish_verdict MCP tool.\n\nVerdict: ${packet.verdict}\nDomain: ${packet.domainId}\nPhenomenon: ${packet.phenomenon}\n\nReviewed by: ${packet.ownerAsk.targetOwnerCatId}\nAction: ${packet.ownerAsk.requestedAction}${input.sourceThreadId ? `\nSource thread: ${input.sourceThreadId}` : ''}${policyFooter}`,
           labels: policy.labels,
           statusChecks: verdictEvidenceContractSuccessStatuses(),
           afterPublish: generatedArtifact.afterPublish,

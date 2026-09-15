@@ -76,6 +76,7 @@ export const entrustedWorkUpdateActionV1Schema = z
   .object({
     taskId: boundedRef,
     expectedRevision: z.number().int().positive(),
+    status: z.enum(['todo', 'doing', 'blocked']).optional(),
     time: z
       .object({
         businessDeadline: entrustedWorkTimeFactV1Schema.nullable().optional(),

@@ -86,7 +86,7 @@ receipt；F246 只通过既有 catalog/registry/adapter/Hub projection 读取这
   `approval_route_unavailable`，v3 root 继续零 proposal/card/Task/lease。
 
 Contract sources：Approval seal
-`[thread-id]#0001788327680802-000466-ba7a600b`；owner-backed authorization
+`[thread-id]#private-source-id`；owner-backed authorization
 `docs/features/F311-capability-evolution-workspace.md@396a379d7b` hard constraint 13 / Phase 4 / KD-17。
 
 ## User Journey
@@ -106,7 +106,7 @@ Contract sources：Approval seal
 
 | ID | 需求点（operator experience/转述） | AC 编号 | 验证方式 | 状态 |
 |----|---------------------------|---------|----------|------|
-| R1 | 三个 Feat 独立执行，中心只守愿景与跨 Feat 契约（msg `0001784375669179-000320-8ecbe5e1`） | AC-C4 | thread/workflow truth + phase checkpoint | [x] |
+| R1 | 三个 Feat 独立执行，中心只守愿景与跨 Feat 契约（msg `private-source-id`） | AC-C4 | thread/workflow truth + phase checkpoint | [x] |
 | R2 | verdict 报警后必须看得见谁接、怎么修、何时复评、是否超时 | AC-B1 / AC-B2 / AC-C1 | lifecycle replay + Hub journey | [x] |
 | R3 | capability-wakeup 四天掉球案要变成第一条真实验收样本 | AC-B4 | production artifact/source-ref 对账 | [x] |
 | R4 | 过程自治，只有愿景/战略/跨 Feat 契约/不可逆红灯升级中心 | AC-C4 | operating-contract audit | [x] |
@@ -162,7 +162,7 @@ Contract sources：Approval seal
 
 ## Program Operating Contract
 
-- **operator authorization**: `0001784376506778-000328-2a877146`（Fable OK 后由 Sol 直接开 Feat）；Fable OK: `0001784376508012-000331-f2b9dad1`。
+- **operator authorization**: `private-source-id`（Fable OK 后由 Sol 直接开 Feat）；Fable OK: `private-source-id`。
 - **Execution**: 独立 thread、owner、reviewer、worktree、PR；技术 OQ 自决。
 - **Checkpoint delegation**: 3+ Phase 的默认 operator 碰头委托 Program guardians Sol/Fable 异步完成；feature close 仍按非作者/非 reviewer 愿景守护执行。
 - **Red-light escalation only**: Why/scope/terminal predicate 改变、跨 Feat contract 漂移、隐私/数据保留/新外部依赖/不可逆动作、两轮技术僵局，才升级中心或 You。

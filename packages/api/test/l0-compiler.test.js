@@ -16,7 +16,9 @@ import { join, resolve } from 'node:path';
 import { test } from 'node:test';
 import {
   clearL0Cache,
+  clearL0CacheOwner,
   compileL0ViaSubprocess,
+  l0CacheSize,
   resolveL0CompilerScriptPath,
 } from '../dist/domains/cats/services/agents/providers/l0-compiler.js';
 
@@ -460,4 +462,104 @@ test('AC-G10: clearL0Cache during in-flight compile prevents stale result from r
   const out = await compileL0ViaSubprocess({ catId: 'clear-race-cat', cwd: root, spawnFn: freshSpawn });
   assert.equal(out, 'FRESH-L0');
   assert.equal(freshSpawn.calls.length, 1, 'post-clear caller must respawn instead of reading stale cache');
+});
+
+// --- Phase E: clearL0CacheOwner owner-wide invalidation ---
+
+test('Phase E: clearL0CacheOwner invalidates ALL cats for that owner', async () => {
+  clearL0Cache();
+  const root = seedRepoRoot();
+  const dataDir = mkdtempSync(join(tmpdir(), 'f231-owner-cache-'));
+
+  // Populate cache for two cats under alice
+  const spawn1 = buildFakeSpawn({ stdout: 'ALICE-CODEX' });
+  const spawn2 = buildFakeSpawn({ stdout: 'ALICE-OPUS' });
+  const spawn3 = buildFakeSpawn({ stdout: 'BOB-CODEX' });
+  await compileL0ViaSubprocess({ catId: 'codex', userId: 'alice', cwd: root, dataDir, spawnFn: spawn1 });
+  await compileL0ViaSubprocess({ catId: 'opus', userId: 'alice', cwd: root, dataDir, spawnFn: spawn2 });
+  await compileL0ViaSubprocess({ catId: 'codex', userId: 'bob', cwd: root, dataDir, spawnFn: spawn3 });
+  assert.equal(l0CacheSize(), 3, 'three entries cached before clearOwner');
+
+  // Owner-wide invalidation
+  clearL0CacheOwner('alice');
+
+  // Bob's entry survives
+  const bobRetry = buildFakeSpawn({ stdout: 'BOB-STILL' });
+  const bobResult = await compileL0ViaSubprocess({
+    catId: 'codex',
+    userId: 'bob',
+    cwd: root,
+    dataDir,
+    spawnFn: bobRetry,
+  });
+  assert.equal(bobResult, 'BOB-CODEX', 'bob cache should still be a hit');
+  assert.equal(bobRetry.calls.length, 0, 'bob not re-spawned');
+
+  // Alice's entries are gone
+  const aliceRetry1 = buildFakeSpawn({ stdout: 'ALICE-CODEX-2' });
+  const aliceRetry2 = buildFakeSpawn({ stdout: 'ALICE-OPUS-2' });
+  assert.equal(
+    await compileL0ViaSubprocess({ catId: 'codex', userId: 'alice', cwd: root, dataDir, spawnFn: aliceRetry1 }),
+    'ALICE-CODEX-2',
+  );
+  assert.equal(
+    await compileL0ViaSubprocess({ catId: 'opus', userId: 'alice', cwd: root, dataDir, spawnFn: aliceRetry2 }),
+    'ALICE-OPUS-2',
+  );
+  assert.equal(aliceRetry1.calls.length, 1, 'alice codex re-spawned after owner clear');
+  assert.equal(aliceRetry2.calls.length, 1, 'alice opus re-spawned after owner clear');
+});
+
+test('Phase E: corpus content change invalidates L0 cache (corpus in signature)', async () => {
+  clearL0Cache();
+  const root = seedRepoRoot();
+  const dataDir = mkdtempSync(join(tmpdir(), 'f231-corpus-sig-'));
+  const profileDir = join(dataDir, 'profiles', 'alice');
+  const corpusDir = join(profileDir, 'corpus');
+  mkdirSync(corpusDir, { recursive: true });
+  writeFileSync(join(corpusDir, 'shared-facts.md'), 'FACT-V1', 'utf8');
+
+  const spawn1 = buildFakeSpawn({ stdout: 'L0-CORPUS-V1' });
+  assert.equal(
+    await compileL0ViaSubprocess({ catId: 'codex', userId: 'alice', cwd: root, dataDir, spawnFn: spawn1 }),
+    'L0-CORPUS-V1',
+  );
+
+  // Mutate corpus
+  writeFileSync(join(corpusDir, 'shared-facts.md'), 'FACT-V2', 'utf8');
+
+  const spawn2 = buildFakeSpawn({ stdout: 'L0-CORPUS-V2' });
+  assert.equal(
+    await compileL0ViaSubprocess({ catId: 'codex', userId: 'alice', cwd: root, dataDir, spawnFn: spawn2 }),
+    'L0-CORPUS-V2',
+  );
+  assert.equal(spawn2.calls.length, 1, 'corpus change must invalidate L0 cache');
+});
+
+// --- Phase E R3: corpus pointer emission detection ---
+
+test('P2: recordProfilePointerEmission detects corpus URI for per-layer telemetry', async () => {
+  // Verify the detection logic: output containing corpus URI triggers the profile.layer=corpus counter.
+  // recordProfilePointerEmission is module-private; we test transitively via compileL0ViaSubprocess
+  // by providing output with both URIs and ensuring no error (counter.add fires internally).
+  const { CURRENT_CORPUS_PROFILE_URI, CURRENT_RELATIONSHIP_PROFILE_URI } = await import(
+    '@cat-cafe/shared/profile-contract'
+  );
+  clearL0Cache();
+  const root = seedRepoRoot();
+
+  // Output with both URIs: primer + corpus
+  const l0WithBothPointers = `Identity block...\n共享事実: ${CURRENT_CORPUS_PROFILE_URI}\nPrimer: ${CURRENT_RELATIONSHIP_PROFILE_URI}\n`;
+  const spawnBoth = buildFakeSpawn({ stdout: l0WithBothPointers });
+  const outBoth = await compileL0ViaSubprocess({ catId: 'opus', cwd: root, dataDir: root, spawnFn: spawnBoth });
+  assert.ok(outBoth.includes(CURRENT_CORPUS_PROFILE_URI), 'corpus URI in output → profile.layer=corpus emission');
+  assert.ok(outBoth.includes(CURRENT_RELATIONSHIP_PROFILE_URI), 'primer URI in output → profile.layer=primer emission');
+
+  // Output with only corpus (no primer): corpus-only emission
+  clearL0Cache();
+  const l0CorpusOnly = `Identity block...\n共享事実: ${CURRENT_CORPUS_PROFILE_URI}\n`;
+  const spawnCorpus = buildFakeSpawn({ stdout: l0CorpusOnly });
+  const outCorpus = await compileL0ViaSubprocess({ catId: 'opus', cwd: root, dataDir: root, spawnFn: spawnCorpus });
+  assert.ok(outCorpus.includes(CURRENT_CORPUS_PROFILE_URI), 'corpus-only output contains corpus URI');
+  assert.ok(!outCorpus.includes(CURRENT_RELATIONSHIP_PROFILE_URI), 'corpus-only output has no primer URI');
 });

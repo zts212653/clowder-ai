@@ -1,8 +1,8 @@
 #!/bin/bash
-# scripts/pre-merge-check.sh — Latest-main 全量门禁
+# scripts/pre-merge-check.sh — Latest-main 风险匹配门禁
 #
 # merge-gate 的硬门禁脚本。在 squash merge 前，先冻结一次 origin/main
-# 再跑全量 build + test + lint/check；长门禁期间不追逐继续移动的 main。
+# 再分类 targeted / reusable green / full；长门禁期间不追逐继续移动的 main。
 #
 # Usage:
 #   pnpm gate          # 在 feature worktree 里执行
@@ -58,14 +58,14 @@ Usage: scripts/pre-merge-check.sh [--no-rebase] [--skip-install] [--auto-fix] [-
 Default behavior:
   1. Fail if the worktree is dirty
   2. Fetch origin/main and rebase current branch onto it
-  3. Refresh dependencies with pnpm install --frozen-lockfile
-  4. Run build / tsc --noEmit / test / lint / check
+  3. Classify coverage from the frozen diff and existing evidence
+  4. Only for full: refresh dependencies, then build / tsc / test / lint / check
 
 Flags:
-  --no-rebase    Skip fetch + rebase (local verification only)
+  --no-rebase    Skip fetch + rebase, retain coverage classification (local verification only)
   --skip-install Skip dependency refresh after rebase
   --auto-fix     Run allowlisted auto-fix (biome format) before gate, auto-commit changes as [qc-bot]
-  --risk <axis>  Elevate a machine-targeted route to full for behavior/data/security/contract/irreversible risk
+  --risk <axis>  Declare behavior/data/security/contract/irreversible assurance; coverage is classified independently
   --             pnpm passthrough separator (consumed; subsequent flags still parsed)
 EOF
 }
@@ -479,8 +479,9 @@ echo -e "${GREEN}✓ Gate baseline frozen: ${GATE_BASE_SHA:0:8}${NC}"
 echo ""
 
 # Route from repository and receipt truth after the integration cut is frozen.
-# Public exports and --no-rebase probes retain the historical full contract.
-if [ "$NO_REBASE" = "false" ] && [ "$PUBLIC_EXPORT" = "false" ] && [ "$TEST_MODE" = "full" ]; then
+# Local --no-rebase probes use the same classifier, but cannot publish merge
+# evidence. Public exports retain their historical full contract.
+if [ "$PUBLIC_EXPORT" = "false" ] && [ "$TEST_MODE" = "full" ]; then
   GATE_CONTROL_REVISION="$(git rev-parse HEAD)"
   GATE_CONTROL_PLANE_DIR="$(mktemp -d "${TMPDIR:-/tmp}/cat-cafe-gate-control.XXXXXX")"
   node "$REPO_ROOT/scripts/snapshot-gate-control-plane.mjs" \
@@ -507,13 +508,15 @@ if [ "$NO_REBASE" = "false" ] && [ "$PUBLIC_EXPORT" = "false" ] && [ "$TEST_MODE
   GATE_ROUTE_JSON="$(node "$GATE_ROUTE_CLASSIFIER_SCRIPT" "${GATE_ROUTE_ARGS[@]}")"
   GATE_ROUTE="$(node -e 'process.stdout.write(JSON.parse(process.argv[1]).route)' "$GATE_ROUTE_JSON")"
   GATE_ROUTE_HEAD_SHA="$(node -e 'process.stdout.write(JSON.parse(process.argv[1]).headSha)' "$GATE_ROUTE_JSON")"
-  GATE_ROUTE_FINGERPRINT="$(node -e 'process.stdout.write(JSON.parse(process.argv[1]).fingerprint)' "$GATE_ROUTE_JSON")"
+  GATE_ROUTE_FINGERPRINT="$(node -e 'process.stdout.write(JSON.parse(process.argv[1]).fingerprint ?? "")' "$GATE_ROUTE_JSON")"
   if [ "$GATE_ROUTE_HEAD_SHA" != "$GATE_CONTROL_REVISION" ]; then
     echo -e "${RED}❌ Gate route tree no longer matches its control-plane snapshot${NC}" >&2
     exit 1
   fi
   GATE_ROUTE_REASONS="$(node -e 'process.stdout.write(JSON.parse(process.argv[1]).reasons.join("; "))' "$GATE_ROUTE_JSON")"
   echo -e "${GREEN}✓ Gate route=${GATE_ROUTE}: ${GATE_ROUTE_REASONS}${NC}"
+  GATE_ASSURANCE="$(node -e 'process.stdout.write(JSON.parse(process.argv[1]).assuranceLevel ?? "standard")' "$GATE_ROUTE_JSON")"
+  echo -e "${GREEN}✓ Assurance=${GATE_ASSURANCE}; required review and authorization remain separate from test coverage${NC}"
   echo ""
   case "$GATE_ROUTE" in
     targeted)
@@ -522,7 +525,9 @@ if [ "$NO_REBASE" = "false" ] && [ "$PUBLIC_EXPORT" = "false" ] && [ "$TEST_MODE
       ;;
     reuse)
       echo -e "${GREEN}✓ Reused canonical exact-tree terminal-green evidence${NC}"
-      bash "$(dirname "$0")/write-gate-last-run.sh" "$REPO_ROOT"
+      if [ "$NO_REBASE" = "false" ]; then
+        bash "$(dirname "$0")/write-gate-last-run.sh" "$REPO_ROOT"
+      fi
       exit 0
       ;;
     full)
@@ -757,9 +762,15 @@ fi
 echo "── LL-082 dirty-worktree ledger（merge 前确认所有 worktree 的 dirty diff 都有 PR/task/comment 归属）──"
 node "$(dirname "$0")/check-worktree-dirty-ledger.mjs" || true
 echo ""
-echo "可以安全执行 merge-gate 的后续步骤了。"
+if [ "$NO_REBASE" = "true" ]; then
+  echo "本地验证完成；--no-rebase 不发布 latest-main 合入证据。"
+else
+  echo "可以安全执行 merge-gate 的后续步骤了。"
+fi
 
 # F253 Phase C (AC-C1): Write gate-last-run sentinel for pre-push Layer 4
 # This timestamp lets check-gate-freshness.sh know gate passed recently.
-bash "$(dirname "$0")/write-gate-last-run.sh" "$REPO_ROOT"
+if [ "$NO_REBASE" = "false" ]; then
+  bash "$(dirname "$0")/write-gate-last-run.sh" "$REPO_ROOT"
+fi
 settle_gate_receipt green

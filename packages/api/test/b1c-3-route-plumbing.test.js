@@ -17,6 +17,7 @@ import { describe, it } from 'node:test';
 
 // Minimal AgentRouter construction — exercises the getStrategyDeps path
 const { AgentRouter } = await import('../dist/domains/cats/services/agents/routing/AgentRouter.js');
+const { AgentRegistry } = await import('../dist/domains/cats/services/agents/registry/AgentRegistry.js');
 
 function makeMockBridge() {
   const dispatches = [];
@@ -31,15 +32,7 @@ function makeMockBridge() {
 function makeMinimalAgentRouter(opts = {}) {
   // Minimal deps to construct an AgentRouter
   return new AgentRouter({
-    agentRegistry: {
-      listAll: () => [],
-      getAllEntries: () => [],
-      isAvailable: () => false,
-      getConfig: () => null,
-      onUpdate: () => () => {},
-      get: () => null,
-      tryGet: () => null,
-    },
+    agentRegistry: new AgentRegistry(),
     registry: {
       create: () => ({}),
       get: () => null,

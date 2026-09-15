@@ -6,7 +6,7 @@ import {
   type ProgramEvaluationDependencies,
   type ProgramMeasurementLinkInput,
 } from './program-evaluation-contract.js';
-import type { EvolutionProgramProjectionV1 } from './program-projection.js';
+import type { EvolutionProgramProjectionV1 } from './read-model/program-projection.js';
 
 /**
  * Everything the ingress must obtain from the owner, or refuse.

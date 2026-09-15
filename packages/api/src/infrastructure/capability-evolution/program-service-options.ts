@@ -4,7 +4,7 @@ import type { EvaluationOwnerResolver } from './program-evaluation-contract.js';
 import type { IEvolutionProgramEventLog } from './program-event-log.js';
 import type { ProgramJoinValidator } from './program-join-validator.js';
 import type { EvolutionTriggerDispatch } from './program-lifecycle-linker.js';
-import type { EvolutionTriggerRegistrationProjection } from './program-observation-projection.js';
+import type { EvolutionTriggerRegistrationProjection } from './read-model/program-observation-projection.js';
 
 /**
  * What the Program service is allowed to depend on.

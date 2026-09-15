@@ -66,11 +66,16 @@ import {
 } from '../domains/ball-custody/reconcile-action-successor-enqueue.js';
 import { turnCustodyAdoptionRegistry } from '../domains/ball-custody/TurnCustodyAdoptionRegistry.js';
 import type { TurnCustodyWakeProvenance } from '../domains/ball-custody/TurnCustodyProjectionService.js';
+import { createTypedWaitRegistration } from '../domains/ball-custody/TypedWaitRegistration.js';
 import { transitionWaitState } from '../domains/ball-custody/wait-state-machine.js';
 import type { InvocationQueue } from '../domains/cats/services/agents/invocation/InvocationQueue.js';
 import type { InvocationRegistry } from '../domains/cats/services/agents/invocation/InvocationRegistry.js';
 import type { InvocationTracker } from '../domains/cats/services/agents/invocation/InvocationTracker.js';
 import { MessageDeliveryService } from '../domains/cats/services/agents/invocation/MessageDeliveryService.js';
+import {
+  queueSourceTargetState,
+  readQueueCarrierMessages,
+} from '../domains/cats/services/agents/invocation/QueueCarrierSourceProjection.js';
 import type { QueuedMessageCustodyCoordinator } from '../domains/cats/services/agents/invocation/QueuedMessageCustodyCoordinator.js';
 import { getRichBlockBuffer } from '../domains/cats/services/agents/invocation/RichBlockBuffer.js';
 import { stampVisibleTurn } from '../domains/cats/services/agents/invocation/visible-turn.js';
@@ -128,6 +133,7 @@ import {
   isDurablyReadableByCat,
   isInternalNonQuotableParent,
   isSystemUserMessage,
+  passesManagedHoldViewerBoundary,
   resolveVisibleReplyParent,
   type Viewer,
 } from '../domains/cats/services/stores/visibility.js';
@@ -181,6 +187,7 @@ import {
 import { CallbackAuthSystemMessageNotifier } from './callback-auth-system-message.js';
 import { recordCallbackAuthFailure } from './callback-auth-telemetry.js';
 import { registerCallbackBootcampRoutes } from './callback-bootcamp-routes.js';
+import { type NamedCatContentHolder, registerCallbackContentEditorRoutes } from './callback-content-editor-routes.js';
 import { registerCallbackDeferPersonMemoryRoutes } from './callback-defer-person-memory-routes.js';
 import { registerCallbackDocumentRoutes } from './callback-document-routes.js';
 import { registerCallbackExternalReviewRecoveryRoutes } from './callback-external-review-recovery-route.js';
@@ -210,6 +217,10 @@ import { registerCallbackProposeThreadRoutes } from './callback-propose-thread-r
 import { registerCallbackQuestRoutes } from './callback-quest-routes.js';
 import { registerCallbackReadProfileRoutes } from './callback-read-profile-routes.js';
 import { registerCallbackRecordProactiveMemoryAbstentionRoutes } from './callback-record-proactive-memory-abstention-routes.js';
+import {
+  type CallbackRequestReviewOwnerDeps,
+  registerCallbackRequestReviewOwnerRoutes,
+} from './callback-request-review-owner-routes.js';
 import { registerCallbackRuntimeSessionRoutes } from './callback-runtime-session-routes.js';
 import {
   deriveCallbackActor,
@@ -225,6 +236,7 @@ import {
 } from './callback-skill-consumption-routes.js';
 import { registerCallbackTaskRoutes } from './callback-task-routes.js';
 import { registerCallbackThreadCatsRoutes } from './callback-thread-cats-routes.js';
+import { captureTypedWaitSource } from './callback-typed-wait-source.js';
 import { registerCallbackWeComActionRoutes } from './callback-wecom-action-routes.js';
 import { registerCallbackWithdrawThreadProposalRoutes } from './callback-withdraw-thread-proposal-routes.js';
 import { registerCallbackWorkflowSopRoutes } from './callback-workflow-sop-routes.js';
@@ -850,10 +862,13 @@ export interface CallbackRoutesOptions {
   workspacePersonResolver?: import('../domains/memory/people/WorkspacePersonResolver.js').WorkspacePersonResolver;
   /** F292: late-bound, source-authoritative, version-fenced meeting artifact reader. */
   meetingArtifactReaderHolder?: MeetingArtifactReaderHolder;
+  namedCatContentHolder?: NamedCatContentHolder;
   /** F287 Phase C: owner-scoped opaque cue drill and content-free outcome callbacks. */
   memoryCueDeps?: CallbackMemoryCueDeps;
   /** Revision-bound applied/dismissed receipts for declared skill consumers. */
   skillConsumptionDeps?: CallbackSkillConsumptionDeps;
+  /** F100 owner facts linked to the canonical F266 outcome lifecycle. */
+  requestReviewOwnerDeps?: CallbackRequestReviewOwnerDeps;
   /** F246 Phase I: canonical runtime ingress for all approval producers. */
   approvalIngress?: ApprovalIngress;
   /** F231 KD-19: canonical user/persona profile repository. */
@@ -925,13 +940,7 @@ export interface CallbackRoutesOptions {
   holdBallDeps?: HoldBallRouteDeps;
   /** Queue auto-dequeue on A2A invocation completion */
   queueProcessor?: {
-    onInvocationComplete(
-      threadId: string,
-      catId: string,
-      status: 'succeeded' | 'failed' | 'canceled' | 'canceled_by_user',
-      invocationId: string | undefined,
-      completedCatIds: readonly string[],
-    ): Promise<void>;
+    onInvocationComplete: import('../domains/cats/services/agents/invocation/QueueProcessor.js').QueueProcessor['onInvocationComplete'];
     tryAutoExecute(threadId: string): Promise<void>;
     registerEntryCompleteHook(
       entryId: string,
@@ -942,6 +951,7 @@ export interface CallbackRoutesOptions {
       ) => void,
     ): void;
     unregisterEntryCompleteHook(entryId: string): void;
+    markPromptMessagesSeen?: import('../domains/cats/services/agents/invocation/QueueProcessor.js').QueueProcessor['markPromptMessagesSeen'];
     resolvePromptMessageCustodyWakes?(input: {
       threadId: string;
       catId: string;
@@ -1292,6 +1302,11 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
       ...(threadStore ? { threadStore } : {}),
     });
   }
+  if (opts.namedCatContentHolder)
+    registerCallbackContentEditorRoutes(app, {
+      holder: opts.namedCatContentHolder,
+      ...(threadStore ? { threadStore } : {}),
+    });
   if (threadStore && opts.sessionChainStore && opts.runtimeSessionStore) {
     registerCallbackRuntimeSessionRoutes(app, {
       threadStore,
@@ -4698,6 +4713,7 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
     ) {
       try {
         await new FreshnessAttentionEventLog(opts.redis).markProviderNoticesSeen({
+          ownerUserId: principalUserId,
           invocationId: principal.parentInvocationId ?? principal.invocationId,
           catId: principalCatId as CatId,
           exactMessageIds: fullyReturnedFiltered.map((message) => message.id),
@@ -4764,6 +4780,7 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
         ]);
         try {
           await new FreshnessAttentionEventLog(opts.redis).markProviderNoticesSeen({
+            ownerUserId: principalUserId,
             invocationId: queuedSeenInvocationId,
             catId: principalCatId as CatId,
             exactMessageIds: exactQueuedMessageIds,
@@ -4807,6 +4824,18 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
           reply.status(409);
           return { error: 'Turn custody adoption unavailable', code: 'TURN_CUSTODY_ADOPTION_UNAVAILABLE' };
         }
+        if (
+          adoptedWakes.length > 0 &&
+          opts.holdBallDeps?.managedHoldDispositionService?.describe &&
+          request.callbackAuth
+        ) {
+          // Visibility principals omit the primary trigger. Guidance must use
+          // the same authenticated source identity as completion.
+          const managedHoldDisposition = await opts.holdBallDeps.managedHoldDispositionService.describe(
+            request.callbackAuth,
+          );
+          return { ...payload, managedHoldDisposition };
+        }
       }
     }
 
@@ -4832,6 +4861,7 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
     }
 
     const { messageId, contextCount } = parsed.data;
+    const isFullDrill = (parsed.data.mode ?? 'preview') === 'full';
     const message = await messageStore.getById(messageId);
     if (!message || message.deletedAt) {
       reply.status(404);
@@ -4845,8 +4875,9 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
       return { error: 'Message not found' };
     }
 
-    // #699 P1-1: Enforce visibility — userId scope, publication status, whisper filtering
-    if (!isDurablyReadableByCat(message, principal.catId)) {
+    // Exact reads must preserve the owner-bound managed-hold boundary before the
+    // generic scheduler/system exemption below. Scheduler provenance is never authority.
+    if (!passesManagedHoldViewerBoundary(message, principal.userId)) {
       reply.status(404);
       return { error: 'Message not found' };
     }
@@ -4865,21 +4896,215 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
       reply.status(404);
       return { error: 'Message not found' };
     }
+
+    // F236 post-close regression: a full thread-context page may honestly anchor
+    // an oversized queued delivery body. The exact full drill is the first point
+    // where those bytes actually cross the callback boundary, so bind the current
+    // child exposure here — never when merely returning the anchor.
+    const expectedParentInvocationId =
+      principal.kind === 'invocation' ? (principal.parentInvocationId ?? principal.invocationId) : undefined;
+    const queuedDrillEntry =
+      isFullDrill &&
+      principal.kind === 'invocation' &&
+      message.threadId !== undefined &&
+      message.threadId === principal.threadId &&
+      opts.invocationQueue
+        ? opts.invocationQueue
+            .getQueuedBodyMessagesForCat(
+              message.threadId,
+              principal.userId,
+              principal.catId,
+              expectedParentInvocationId,
+            )
+            .find((entry) => entry.messageId === message.id)
+        : undefined;
+
+    if (!isDurablyReadableByCat(message, principal.catId) && !queuedDrillEntry) {
+      reply.status(404);
+      return { error: 'Message not found' };
+    }
+
+    let managedHoldDisposition: unknown;
+    let queuedDrillContentBlocks: typeof message.contentBlocks;
+    if (queuedDrillEntry && principal.kind === 'invocation') {
+      if (!opts.turnExecutionStore || !queueProcessor?.markPromptMessagesSeen) {
+        reply.status(503);
+        return { error: 'Queued body drill unavailable', code: 'QUEUED_BODY_DRILL_UNAVAILABLE' };
+      }
+
+      let exposureExecution: TurnExecutionRecord | null;
+      try {
+        exposureExecution = await opts.turnExecutionStore.get(principal.invocationId);
+      } catch (err) {
+        app.log.error(
+          { err, invocationId: principal.invocationId, threadId: message.threadId, catId: principal.catId },
+          '[F236] queued drill turn-execution read failed',
+        );
+        reply.status(503);
+        return { error: 'Turn execution ledger unavailable', code: 'TURN_EXECUTION_LEDGER_UNAVAILABLE' };
+      }
+      if (!exposureExecution) {
+        reply.status(409);
+        return { error: 'Turn execution not found', code: 'TURN_EXECUTION_NOT_FOUND' };
+      }
+      if (
+        exposureExecution.status !== 'running' ||
+        exposureExecution.parentInvocationId !== expectedParentInvocationId ||
+        exposureExecution.threadId !== message.threadId ||
+        exposureExecution.userId !== principal.userId ||
+        exposureExecution.catId !== principal.catId
+      ) {
+        app.log.error(
+          {
+            invocationId: principal.invocationId,
+            expectedParentInvocationId,
+            messageId: message.id,
+            exposureExecution,
+          },
+          '[F236] queued drill turn-execution scope/status mismatch',
+        );
+        reply.status(409);
+        return { error: 'Turn execution scope mismatch', code: 'TURN_EXECUTION_SCOPE_MISMATCH' };
+      }
+
+      const exactQueuedMessageIds = [
+        ...(queuedDrillEntry.messageId ? [queuedDrillEntry.messageId] : []),
+        ...(queuedDrillEntry.mergedMessageIds ?? []),
+      ];
+      try {
+        const sourceMessages = await readQueueCarrierMessages(
+          {
+            id: queuedDrillEntry.entryId,
+            threadId: message.threadId,
+            userId: principal.userId,
+            messageId: queuedDrillEntry.messageId ?? null,
+            mergedMessageIds: queuedDrillEntry.mergedMessageIds ?? [],
+          },
+          messageStore,
+        );
+        if (
+          sourceMessages.some(
+            (sourceMessage) =>
+              queueSourceTargetState(sourceMessage, queuedDrillEntry.entryId, principal.catId) !== 'pending',
+          )
+        ) {
+          reply.status(409);
+          return { error: 'Queued body source changed', code: 'QUEUED_BODY_SOURCE_CHANGED' };
+        }
+        const contentBlocks = sourceMessages.flatMap((sourceMessage) => sourceMessage.contentBlocks ?? []);
+        queuedDrillContentBlocks = contentBlocks.length > 0 ? contentBlocks : undefined;
+      } catch (err) {
+        app.log.error(
+          { err, invocationId: principal.invocationId, threadId: message.threadId, messageId: message.id },
+          '[F236] queued drill source projection failed',
+        );
+        reply.status(503);
+        return { error: 'Queued body source unavailable', code: 'QUEUED_BODY_SOURCE_UNAVAILABLE' };
+      }
+
+      let adoptedWakes: readonly TurnCustodyWakeProvenance[];
+      let adoptionOwnerUnavailable = false;
+      let adoptionPreparationFailed = false;
+      try {
+        adoptedWakes = await queueProcessor.markPromptMessagesSeen(
+          {
+            threadId: message.threadId,
+            userId: principal.userId,
+            catId: principal.catId,
+            invocationId: principal.invocationId,
+            messageIds: exactQueuedMessageIds,
+            seenAt: Date.now(),
+          },
+          {
+            prepareAdoption: async (wakes) => {
+              try {
+                const reservation = await turnCustodyAdoptionRegistry.prepare(principal.invocationId, wakes);
+                adoptionOwnerUnavailable = reservation === null;
+                return reservation;
+              } catch (error) {
+                adoptionPreparationFailed = true;
+                throw error;
+              }
+            },
+          },
+        );
+      } catch (err) {
+        app.log.error(
+          { err, invocationId: principal.invocationId, threadId: message.threadId, messageId: message.id },
+          adoptionOwnerUnavailable
+            ? '[F236] active queued drill has no turn custody adoption handler'
+            : '[F236] queued drill adoption preparation or exposure persistence failed',
+        );
+        reply.status(adoptionOwnerUnavailable ? 409 : 503);
+        return adoptionOwnerUnavailable || adoptionPreparationFailed
+          ? { error: 'Turn custody adoption unavailable', code: 'TURN_CUSTODY_ADOPTION_UNAVAILABLE' }
+          : { error: 'Queued body exposure unavailable', code: 'QUEUED_BODY_EXPOSURE_UNAVAILABLE' };
+      }
+
+      if (
+        adoptedWakes.length > 0 &&
+        opts.holdBallDeps?.managedHoldDispositionService?.describe &&
+        request.callbackAuth
+      ) {
+        try {
+          managedHoldDisposition = await opts.holdBallDeps.managedHoldDispositionService.describe(request.callbackAuth);
+        } catch (err) {
+          // The body and its adoption are already truthful. Guidance is optional
+          // projection data; withholding the body here would manufacture a false
+          // non-response witness in the append-only exposure ledger.
+          app.log.warn(
+            { err, invocationId: principal.invocationId, threadId: message.threadId, messageId: message.id },
+            '[F236] queued drill disposition guidance unavailable after adoption',
+          );
+        }
+      }
+      if (opts.redis) {
+        try {
+          await new FreshnessAttentionEventLog(opts.redis).markProviderNoticesSeen({
+            ownerUserId: principal.userId,
+            invocationId: principal.invocationId,
+            catId: principal.catId as CatId,
+            exactMessageIds: exactQueuedMessageIds,
+            evidenceKind: 'queue_exact_read',
+          });
+        } catch (err) {
+          app.log.warn(
+            { err, invocationId: principal.invocationId, threadId: message.threadId },
+            '[F254-D2] provider notice seen projection failed for queued message drill',
+          );
+        }
+      }
+    }
+
     const uploadDir = getDefaultUploadDir(process.env.UPLOAD_DIR);
     // F236 AC-B1: bounded drill terminal. Default preview truncates content (keeps the `content`
     // field name for consumer continuity + adds contentLength/truncated); mode=full returns the
     // complete content + contentBlocks. Image hints stay in both modes.
-    const isFullDrill = (parsed.data.mode ?? 'preview') === 'full';
-    const projectMsg = (m: typeof message) => {
-      const imagePaths = extractImagePaths(m.contentBlocks, uploadDir);
-      const imageUrls = extractImageUrls(m.contentBlocks);
-      const { preview, truncated } = isFullDrill ? { preview: m.content, truncated: false } : truncateHead(m.content);
+    const projectMsg = (
+      m: typeof message,
+      queuedEntry?: typeof queuedDrillEntry,
+      queuedContentBlocks?: typeof message.contentBlocks,
+    ) => {
+      const projectedContent = queuedEntry?.content ?? m.content;
+      const projectedContentBlocks = queuedEntry ? queuedContentBlocks : m.contentBlocks;
+      const imagePaths = extractImagePaths(projectedContentBlocks, uploadDir);
+      const imageUrls = extractImageUrls(projectedContentBlocks);
+      const { preview, truncated } = isFullDrill
+        ? { preview: projectedContent, truncated: false }
+        : truncateHead(projectedContent);
+      const projectedSpeaker = queuedEntry
+        ? queuedEntry.source === 'user'
+          ? getSenderName(null)
+          : queuedEntry.callerCatId
+            ? getSenderName(queuedEntry.callerCatId)
+            : queuedEntry.source
+        : getSenderName(m.catId);
       return {
         id: m.id,
         userId: m.userId,
         catId: m.catId,
         content: preview,
-        contentLength: m.content.length,
+        contentLength: projectedContent.length,
         truncated,
         // F236 R1 / 云端 Codex P2: preview-mode truncation carries a one-hop drill pointer to the
         // full content (consistent with thread-context/pending anchors — caller never left guessing).
@@ -4896,18 +5121,30 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
               },
             }
           : {}),
-        ...(isFullDrill && m.contentBlocks ? { contentBlocks: m.contentBlocks } : {}),
+        ...(isFullDrill && projectedContentBlocks ? { contentBlocks: projectedContentBlocks } : {}),
         ...(imagePaths.length > 0 ? { imagePaths } : {}),
         ...(imageUrls.length > 0 ? { imageUrls } : {}),
         ...(m.replyTo ? { replyTo: m.replyTo } : {}),
-        speaker: getSenderName(m.catId),
+        ...(queuedEntry
+          ? {
+              deliveryStatus: 'queued' as const,
+              queueEntryId: queuedEntry.entryId,
+              ...(queuedEntry.mergedMessageIds?.length ? { mergedMessageIds: [...queuedEntry.mergedMessageIds] } : {}),
+            }
+          : {}),
+        speaker: projectedSpeaker,
         timestamp: m.timestamp,
         threadId: m.threadId,
       };
     };
 
-    const result: { message: ReturnType<typeof projectMsg>; context?: ReturnType<typeof projectMsg>[] } = {
-      message: projectMsg(message),
+    const result: {
+      message: ReturnType<typeof projectMsg>;
+      context?: ReturnType<typeof projectMsg>[];
+      managedHoldDisposition?: unknown;
+    } = {
+      message: projectMsg(message, queuedDrillEntry, queuedDrillContentBlocks),
+      ...(managedHoldDisposition === undefined ? {} : { managedHoldDisposition }),
     };
 
     const effectiveContextCount = contextCount ?? 0;
@@ -4939,13 +5176,14 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
           if (m.deletedAt) return false;
           // #699 P1 (gpt52 intake review): exclude internal/non-routable (system/briefing) from context too
           if (isInternalNonQuotableParent(m)) return false;
+          if (!passesManagedHoldViewerBoundary(m, principalUserId)) return false;
           if (!isDurablyReadableByCat(m, principal.catId)) return false;
           if (m.userId !== principalUserId && !isSystemUserMessage(m)) return false;
           if (!canViewMessage(m, viewer)) return false;
           return true;
         })
         .sort((a, b) => a.timestamp - b.timestamp || a.id.localeCompare(b.id));
-      result.context = contextMsgs.map(projectMsg);
+      result.context = contextMsgs.map((contextMessage) => projectMsg(contextMessage));
     }
 
     const contextMessages = Array.isArray(result.context) ? result.context : [];
@@ -4969,9 +5207,9 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
       recordAnchorDrillEvent({ tool: 'get-message', itemId: message.id, fullDrillChars });
       recordAnchorPreviewEvent({
         tool: 'get-message',
-        itemIds: [message.id, ...contextMessages.map((m) => m.id)],
+        itemIds: [message.id, ...(queuedDrillEntry?.mergedMessageIds ?? []), ...contextMessages.map((m) => m.id)],
         returnedChars: result.message.content.length + contextMessages.reduce((sum, m) => sum + m.content.length, 0),
-        originalChars: message.content.length + contextMessages.reduce((sum, m) => sum + m.contentLength, 0),
+        originalChars: result.message.contentLength + contextMessages.reduce((sum, m) => sum + m.contentLength, 0),
         modeResolved: 'full',
         modeSource: 'legacy_equivalent',
         catId: principal.catId,
@@ -4981,7 +5219,7 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
         tool: 'get-message',
         itemIds: [message.id, ...contextMessages.map((m) => m.id)],
         returnedChars: result.message.content.length + contextMessages.reduce((sum, m) => sum + m.content.length, 0),
-        originalChars: message.content.length + contextMessages.reduce((sum, m) => sum + m.contentLength, 0),
+        originalChars: result.message.contentLength + contextMessages.reduce((sum, m) => sum + m.contentLength, 0),
         modeResolved: 'anchor',
         modeSource: 'legacy_equivalent',
         catId: principal.catId,
@@ -5377,6 +5615,12 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
 
     const record = requireCallbackAuth(request, reply);
     if (!record) return;
+    const waitSourcePromise = captureTypedWaitSource(record, {
+      messageStore,
+      ...(opts.holdBallDeps?.managedHoldDispositionService
+        ? { managedHoldDispositionService: opts.holdBallDeps.managedHoldDispositionService }
+        : {}),
+    });
 
     const deletedThreadGuard = await getDeletedCallbackThreadGuard(threadStore, record.threadId);
     if (deletedThreadGuard) {
@@ -5553,10 +5797,24 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
         await: awaitState,
         ...(supersededOutcome ? { waitOutcome: supersededOutcome } : {}),
       };
+      const waitSource = await waitSourcePromise;
+      if (!(await registry.isLatest(record.invocationId))) {
+        reply.status(409);
+        return { error: 'Wait registration invocation is no longer current' };
+      }
+      const waitRegistration = waitSource
+        ? createTypedWaitRegistration({
+            task,
+            active: awaitState,
+            invocationId: record.invocationId,
+            source: waitSource,
+          })
+        : null;
       const installed = await taskStore.replaceAutomationStateIfGeneration(task.id, {
         expectedGeneration: previousGeneration === 0 ? null : previousGeneration,
         expectedUpdatedAt: task.updatedAt,
         automationState: replacement,
+        ...(waitRegistration ? { waitRegistration } : {}),
       });
       if (!installed) {
         reply.status(409);
@@ -5613,6 +5871,12 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
 
     const record = requireCallbackAuth(request, reply);
     if (!record) return;
+    const waitSourcePromise = captureTypedWaitSource(record, {
+      messageStore,
+      ...(opts.holdBallDeps?.managedHoldDispositionService
+        ? { managedHoldDispositionService: opts.holdBallDeps.managedHoldDispositionService }
+        : {}),
+    });
 
     const deletedThreadGuard = await getDeletedCallbackThreadGuard(threadStore, record.threadId);
     if (deletedThreadGuard) {
@@ -5763,10 +6027,24 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
         await: awaitState,
         ...(supersededOutcome ? { waitOutcome: supersededOutcome } : {}),
       };
+      const waitSource = await waitSourcePromise;
+      if (!(await registry.isLatest(record.invocationId))) {
+        reply.status(409);
+        return { error: 'Wait registration invocation is no longer current' };
+      }
+      const waitRegistration = waitSource
+        ? createTypedWaitRegistration({
+            task,
+            active: awaitState,
+            invocationId: record.invocationId,
+            source: waitSource,
+          })
+        : null;
       const installed = await taskStore.replaceAutomationStateIfGeneration(task.id, {
         expectedGeneration: previousGeneration === 0 ? null : previousGeneration,
         expectedUpdatedAt: task.updatedAt,
         automationState: replacement,
+        ...(waitRegistration ? { waitRegistration } : {}),
       });
       if (!installed) {
         reply.status(409);
@@ -6321,6 +6599,10 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
     registerCallbackSkillConsumptionRoutes(app, opts.skillConsumptionDeps);
   }
 
+  if (opts.requestReviewOwnerDeps) {
+    registerCallbackRequestReviewOwnerRoutes(app, opts.requestReviewOwnerDeps);
+  }
+
   if (opts.profileRepository) {
     registerCallbackReadProfileRoutes(app, { repository: opts.profileRepository });
   }
@@ -6559,6 +6841,7 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
         : undefined;
 
       const reminder = await service.checkHoldBallReminder({
+        ownerUserId: principal.userId,
         invocationId: principal.invocationId,
         threadId: principal.threadId,
         catId: principal.catId,

@@ -1,11 +1,9 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useState } from 'react';
+import { useWorkspaceSurfaceVisibility } from '@/components/workbench/WorkspaceSurfaceVisibility';
 import { useChatStore } from '@/stores/chatStore';
-import { apiFetch } from '@/utils/api-client';
 import { CompactLabel, CriticalText, ExpandableProse } from '../content-overflow';
-
-import type { GlobalControlState, RunLedgerRow, ScheduleTask } from './schedule-helpers';
 import {
   CATEGORY_LABELS,
   CATEGORY_STYLES,
@@ -17,6 +15,7 @@ import {
   outcomeLabel,
   timeAgo,
 } from './schedule-helpers';
+import { useSchedulePanelData } from './useSchedulePanelData';
 
 /* ── Component ───────────────────────────────── */
 
@@ -27,141 +26,26 @@ type ScopeFilter = 'all' | 'current-thread';
  * UX V2: flat list + colored type tags + scope filter + NL CTA
  */
 export function SchedulePanel() {
-  const [tasks, setTasks] = useState<ScheduleTask[]>([]);
-  const [loading, setLoading] = useState(true);
   const [scope, setScope] = useState<ScopeFilter>('all');
-  const [expandedId, setExpandedId] = useState<string | null>(null);
-  const [runHistory, setRunHistory] = useState<RunLedgerRow[]>([]);
-  const [globalControl, setGlobalControl] = useState<GlobalControlState | null>(null);
   const currentThreadId = useChatStore((s) => s.currentThreadId);
-
-  const fetchTasks = useCallback(async () => {
-    try {
-      // #320: When scope is "current-thread", pass threadId to server for unified filtering
-      const params =
-        scope === 'current-thread' && currentThreadId ? `?threadId=${encodeURIComponent(currentThreadId)}` : '';
-      const res = await apiFetch(`/api/schedule/tasks${params}`);
-      if (res.ok) {
-        const json = await res.json();
-        setTasks(json.tasks ?? []);
-      }
-    } catch {
-      // fail-open
-    } finally {
-      setLoading(false);
-    }
-  }, [scope, currentThreadId]);
-
-  const fetchControl = useCallback(async () => {
-    try {
-      const res = await apiFetch('/api/schedule/control');
-      if (res.ok) {
-        const json = await res.json();
-        setGlobalControl(json.global ?? null);
-      }
-    } catch {
-      // fail-open — governance not configured
-    }
-  }, []);
-
-  useEffect(() => {
-    fetchTasks();
-    fetchControl();
-    const timer = setInterval(() => {
-      fetchTasks();
-      fetchControl();
-    }, 30000);
-    return () => clearInterval(timer);
-  }, [fetchTasks, fetchControl]);
-
-  const handleGlobalToggle = useCallback(async () => {
-    if (!globalControl) return;
-    const next = !globalControl.enabled;
-    try {
-      await apiFetch('/api/schedule/control', {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ enabled: next, reason: next ? null : 'Paused from panel', updatedBy: 'user' }),
-      });
-      fetchControl();
-    } catch {
-      /* fail-open */
-    }
-  }, [globalControl, fetchControl]);
-
-  // #320: Server-side filtering via ?threadId= — no client-side extractThreadId needed
-  const filteredTasks = tasks;
-
-  const handleToggleExpand = useCallback(
-    async (taskId: string) => {
-      if (expandedId === taskId) {
-        setExpandedId(null);
-        setRunHistory([]);
-        return;
-      }
-      setExpandedId(taskId);
-      try {
-        const params =
-          scope === 'current-thread' && currentThreadId ? `&threadId=${encodeURIComponent(currentThreadId)}` : '';
-        const res = await apiFetch(`/api/schedule/tasks/${encodeURIComponent(taskId)}/runs?limit=5${params}`);
-        if (res.ok) {
-          const json = await res.json();
-          setRunHistory(json.runs ?? []);
-        }
-      } catch {
-        setRunHistory([]);
-      }
-    },
-    [currentThreadId, expandedId, scope],
-  );
-
-  /** AC-H4: toggle pause/resume for any task — routes to correct API by source */
-  const handleToggleTask = useCallback(
-    async (task: ScheduleTask) => {
-      const isActive = task.effectiveEnabled ?? task.enabled;
-      try {
-        if (task.source === 'dynamic' && task.dynamicTaskId) {
-          await apiFetch(`/api/schedule/tasks/${encodeURIComponent(task.dynamicTaskId)}`, {
-            method: 'PATCH',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ enabled: !isActive }),
-          });
-        } else {
-          await apiFetch(`/api/schedule/control/tasks/${encodeURIComponent(task.id)}`, {
-            method: 'PUT',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ enabled: !isActive, updatedBy: 'user' }),
-          });
-        }
-        fetchTasks();
-        fetchControl();
-      } catch {
-        /* fail-open */
-      }
-    },
-    [fetchTasks, fetchControl],
-  );
-
-  const handleDeleteDynamic = useCallback(
-    async (taskId: string) => {
-      try {
-        const res = await apiFetch(`/api/schedule/tasks/${encodeURIComponent(taskId)}`, { method: 'DELETE' });
-        if (res.ok) fetchTasks();
-      } catch {
-        /* fail-open */
-      }
-    },
-    [fetchTasks],
-  );
+  const surfaceVisible = useWorkspaceSurfaceVisibility();
+  const {
+    tasks,
+    loading,
+    tasksError,
+    globalControl,
+    expandedId,
+    runHistory,
+    handleGlobalToggle,
+    handleToggleTask,
+    handleDeleteDynamic,
+    handleToggleExpand,
+  } = useSchedulePanelData(scope === 'all' ? undefined : currentThreadId || null, surfaceVisible);
 
   const activeCount = tasks.filter((t) => t.effectiveEnabled ?? t.enabled).length;
   const pausedCount = tasks.length - activeCount;
   // Health: check if ANY task's most recent run failed (not cumulative total)
   const hasAttention = tasks.some((t) => t.lastRun?.outcome === 'RUN_FAILED');
-
-  if (loading) {
-    return <div className="flex-1 flex items-center justify-center text-sm text-cafe-muted">Loading schedule...</div>;
-  }
 
   return (
     <div className="flex flex-col h-full bg-cafe-surface">
@@ -190,7 +74,11 @@ export function SchedulePanel() {
           Current Thread
         </button>
         <span className="ml-auto text-micro text-cafe-muted">
-          {tasks.length} tasks · {activeCount} active{pausedCount > 0 ? ` · ${pausedCount} paused` : ''}
+          {loading
+            ? 'Loading schedule...'
+            : tasksError
+              ? 'Status unverified'
+              : `${tasks.length} tasks · ${activeCount} active${pausedCount > 0 ? ` · ${pausedCount} paused` : ''}`}
         </span>
       </div>
 
@@ -238,11 +126,16 @@ export function SchedulePanel() {
 
       {/* Task list */}
       <div className="flex-1 overflow-y-auto">
-        {filteredTasks.length === 0 ? (
-          <div className="flex items-center justify-center h-32 text-sm text-cafe-muted">No scheduled tasks</div>
+        {tasksError && <output className="block px-4 py-2 text-sm text-cafe-muted">{tasksError}</output>}
+        {loading ? (
+          <div className="flex items-center justify-center h-32 text-sm text-cafe-muted">Loading schedule...</div>
+        ) : tasks.length === 0 ? (
+          !tasksError && (
+            <div className="flex items-center justify-center h-32 text-sm text-cafe-muted">No scheduled tasks</div>
+          )
         ) : (
           <div className="space-y-0.5">
-            {filteredTasks.map((task) => {
+            {tasks.map((task) => {
               const category = task.display?.category ?? fallbackCategory(task.id);
               const label = task.display?.label ?? humanizeId(task.id);
               const preview = task.subjectPreview ?? task.display?.description ?? null;
@@ -406,14 +299,16 @@ export function SchedulePanel() {
       </div>
 
       {/* Footer: health summary (AC-F1) */}
-      <div className="px-4 py-1.5 border-t border-cafe-subtle text-micro text-cafe-muted flex items-center">
-        <span>
-          {tasks.length} tasks · {activeCount} active{pausedCount > 0 ? ` · ${pausedCount} paused` : ''}
-        </span>
-        <span className={`ml-auto font-medium ${hasAttention ? 'text-conn-red-text' : 'text-conn-emerald-text'}`}>
-          {hasAttention ? 'Attention needed' : 'All healthy'}
-        </span>
-      </div>
+      {!loading && !tasksError && (
+        <div className="px-4 py-1.5 border-t border-cafe-subtle text-micro text-cafe-muted flex items-center">
+          <span>
+            {tasks.length} tasks · {activeCount} active{pausedCount > 0 ? ` · ${pausedCount} paused` : ''}
+          </span>
+          <span className={`ml-auto font-medium ${hasAttention ? 'text-conn-red-text' : 'text-conn-emerald-text'}`}>
+            {tasksError ? 'Status unverified' : hasAttention ? 'Attention needed' : 'All healthy'}
+          </span>
+        </div>
+      )}
 
       {/* Conversational CTA (AC-G5: replaces NL input — W1 vision) */}
       <div className="px-4 py-2.5 bg-cafe-surface-elevated border-t border-cafe-subtle">

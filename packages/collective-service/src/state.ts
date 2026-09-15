@@ -1,7 +1,12 @@
-import { type CollectiveEventEnvelope, collectiveEventEnvelopeSchema } from '@cat-cafe/shared';
+import {
+  type CollectiveEventEnvelope,
+  collectiveEventEnvelopeSchema,
+  collectiveParticipationDeclarationSchema,
+} from '@cat-cafe/shared';
 import { z } from 'zod';
 
 import { CollectiveServiceError } from './errors.js';
+import { provenEventLocation } from './event-location.js';
 import { humanAuthAttemptSchema, humanAuthBindingSchema, humanAuthCompletionSchema } from './human-auth-state.js';
 
 export type { HumanAuthIntent } from './human-auth-state.js';
@@ -140,6 +145,12 @@ const serviceStateV2Schema = z
     pairingIntents: z.record(z.string(), pairingIntentSchema),
     connections: z.record(z.string(), connectionSchema),
     events: z.record(z.string(), z.array(collectiveEventEnvelopeSchema)),
+    participations: z
+      .record(
+        z.string(),
+        collectiveParticipationDeclarationSchema.innerType().extend({ publishedAt: z.string().datetime() }),
+      )
+      .default({}),
     legacyEvents: z.record(z.string(), z.array(z.unknown())),
     clientEventIndex: z.record(z.string(), z.string()),
   })
@@ -185,7 +196,7 @@ export function parseServiceState(value: unknown): ServiceState {
 
 export function migrateServiceState(value: unknown): { readonly state: ServiceState; readonly migrated: boolean } {
   const version = readSchemaVersion(value);
-  if (version === 2) return { state: parseServiceState(value), migrated: false };
+  if (version === 2) return migrateProvenLocations(parseServiceState(value));
   const legacy = serviceStateV1Schema.parse(value);
   const migratedEvents: Record<string, CollectiveEventEnvelope[]> = {};
   for (const [collectiveId, events] of Object.entries(legacy.events)) {
@@ -231,10 +242,35 @@ export function migrateServiceState(value: unknown): { readonly state: ServiceSt
       ]),
     ),
     events: migratedEvents,
+    participations: {},
     legacyEvents: {},
     clientEventIndex: rebuildClientEventIndex(migratedEvents),
   };
-  return { state: parseServiceState(migrated), migrated: true };
+  return { state: migrateProvenLocations(parseServiceState(migrated)).state, migrated: true };
+}
+
+function migrateProvenLocations(state: ServiceState): { state: ServiceState; migrated: boolean } {
+  let migrated = false;
+  const events = Object.fromEntries(
+    Object.entries(state.events).map(([collectiveId, history]) => [
+      collectiveId,
+      history.map((event) => {
+        const location = event.location ?? provenEventLocation(history, event);
+        if (!location) return event;
+        const recipient =
+          event.recipient ??
+          (event.target.kind === 'human'
+            ? event.target
+            : event.target.kind === 'channel' || event.target.kind === 'message'
+              ? { kind: 'channel' as const }
+              : undefined);
+        if (event.location && (event.recipient || !recipient)) return event;
+        migrated = true;
+        return { ...event, location, ...(recipient ? { recipient } : {}) };
+      }),
+    ]),
+  );
+  return { state: { ...state, events }, migrated };
 }
 
 export function membershipKey(collectiveId: string, humanId: string): string {

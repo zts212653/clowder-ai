@@ -17,6 +17,7 @@ import {
 
 export interface RoutingPreflightInput extends ResolveRoutingContextInput {
   targetCatIds: readonly string[];
+  ownerRequestedAttempt?: boolean;
 }
 
 export interface RoutingPreflightAuditEvent {
@@ -81,6 +82,7 @@ function alternativesFor(snapshot: RoutingContextSnapshotV1, targetCatId: string
         candidate.effect === 'eligible' &&
         candidate.profile.state === 'applied',
     )
+    .slice(0, 32)
     .map((candidate) => ({
       catId: candidate.binding.catId,
       reasonRefs: reasonRefsForAlternative(snapshot, candidate.binding.catId),
@@ -266,8 +268,13 @@ export class RoutingPreflightService {
           alternatives: alternativesFor(resolution.snapshot, targetCatId),
         };
       }
-      const disposition =
-        candidate.availability === 'unavailable'
+      const ownerAttempt =
+        input.ownerRequestedAttempt === true &&
+        candidate.availability === 'unavailable' &&
+        candidate.dispatch?.ownerAttemptAllowed === true;
+      const disposition = ownerAttempt
+        ? ('warned' as const)
+        : candidate.availability === 'unavailable'
           ? ('rejected' as const)
           : candidate.availability === 'available'
             ? ('allowed' as const)
@@ -275,6 +282,10 @@ export class RoutingPreflightService {
       return {
         targetCatId,
         disposition,
+        ...(ownerAttempt ? { ownerAttempt: true as const } : {}),
+        ...(candidate.dispatch?.automaticRetryAt !== undefined
+          ? { automaticRetryAt: candidate.dispatch.automaticRetryAt }
+          : {}),
         reasons: candidate.reasons,
         alternatives: disposition === 'allowed' ? [] : alternativesFor(resolution.snapshot, targetCatId),
       };

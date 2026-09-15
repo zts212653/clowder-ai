@@ -9,6 +9,9 @@ import {
   type CollectiveConnectorBuiltinRuntimeOptions,
 } from './builtin-runtime/collective-connector-runtime.js';
 import { HybridPluginRuntimeSupervisor } from './builtin-runtime/hybrid-supervisor.js';
+import { staticEditorContributions } from './content-editor-runtime/admission.js';
+import { ContentEditorPluginRuntime } from './content-editor-runtime/runtime.js';
+import { ContentMaterializerPluginRuntime } from './content-materializer-runtime/runtime.js';
 import { ExternalPluginLifecycleService } from './external-plugin-lifecycle.js';
 import { FilesystemVerifiedPluginPackageLocator } from './external-runtime/filesystem-package-locator.js';
 import { ExternalPluginRuntimeSupervisor } from './external-runtime/supervisor.js';
@@ -36,6 +39,7 @@ export interface DormantPluginRuntimeCompositionOptions {
   readonly processes?: ExternalPluginProcessAdapter;
   readonly packages?: VerifiedPluginPackageLocator;
   readonly now?: () => number;
+  readonly editorParentOrigin?: string;
   readonly collectiveConnector?: Omit<CollectiveConnectorBuiltinRuntimeOptions, 'dataDirectory'> & {
     readonly dataDirectory?: string;
   };
@@ -55,6 +59,8 @@ export interface DormantPluginRuntimeComposition {
   readonly broker: HostBrokerControlPlane;
   readonly supervisor: HybridPluginRuntimeSupervisor;
   readonly collectiveConnectorRuntime?: CollectiveConnectorBuiltinRuntime;
+  readonly contentEditors?: ContentEditorPluginRuntime;
+  readonly contentMaterializers?: ContentMaterializerPluginRuntime;
   readonly messaging: MessagingService;
   readonly lifecycle: ExternalPluginLifecycleService;
   readonly packages: VerifiedPluginPackageLocator;
@@ -133,12 +139,30 @@ export function createDormantPluginRuntimeComposition(
           resolve(options.projectRoot, '.cat-cafe', 'collective-connector'),
       })
     : undefined;
+  let contentMaterializers: ContentMaterializerPluginRuntime | undefined;
+  const contentEditors =
+    options.editorParentOrigin === undefined
+      ? undefined
+      : new ContentEditorPluginRuntime({
+          inventory: inventoryStore,
+          brokerStore,
+          broker,
+          packages,
+          parentOrigin: options.editorParentOrigin,
+          onRevoke: async (id) => {
+            await contentMaterializers?.abortAndWait(id);
+          },
+          ...(options.now === undefined ? {} : { now: options.now }),
+        });
+  if (contentEditors)
+    contentMaterializers = new ContentMaterializerPluginRuntime({ editors: contentEditors, packages });
   const supervisor = new HybridPluginRuntimeSupervisor({
     inventory: inventoryStore,
     external: externalSupervisor,
     builtinRuntimes: new Map(
       collectiveConnectorRuntime ? [['official.collective-connector', collectiveConnectorRuntime] as const] : [],
     ),
+    resolveBuiltinRuntime: (pkg) => (staticEditorContributions(pkg.manifest).length > 0 ? contentEditors : undefined),
     ...(options.now === undefined ? {} : { now: options.now }),
   });
   const lifecycle = new ExternalPluginLifecycleService({
@@ -155,6 +179,8 @@ export function createDormantPluginRuntimeComposition(
     broker,
     supervisor,
     ...(collectiveConnectorRuntime === undefined ? {} : { collectiveConnectorRuntime }),
+    ...(contentEditors === undefined ? {} : { contentEditors }),
+    ...(contentMaterializers === undefined ? {} : { contentMaterializers }),
     messaging,
     lifecycle,
     packages,

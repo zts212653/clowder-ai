@@ -15,6 +15,11 @@ import type {
   UpdateTaskInput,
 } from '@cat-cafe/shared';
 import { isTrackingKind } from '@cat-cafe/shared';
+import {
+  assertTypedWaitRegistrationInstallation,
+  type TypedWaitRegistration,
+  type TypedWaitRegistrationSnapshot,
+} from '../../../../ball-custody/TypedWaitRegistration.js';
 import { automationGeneration, mergeTaskAutomationState } from './TaskAutomationState.js';
 import { TaskEntrustedWorkMutationStore } from './TaskEntrustedWorkMutationStore.js';
 import { createEntrustedTaskItem, createGenericTaskItem } from './TaskItemFactory.js';
@@ -55,6 +60,7 @@ const MAX_TASKS = 500;
  */
 export class TaskStore implements ITaskStore {
   private tasks: Map<string, TaskItem> = new Map();
+  private readonly waitRegistrations = new Map<string, TypedWaitRegistration>();
   /** subject_key → taskId reverse index */
   private subjectIndex: Map<string, string> = new Map();
   private readonly managedWorkRegistration: TaskManagedWorkRegistrationStore;
@@ -97,6 +103,11 @@ export class TaskStore implements ITaskStore {
 
   get(taskId: string): TaskItem | null {
     return this.tasks.get(taskId) ?? null;
+  }
+
+  getWaitRegistration(taskId: string): TypedWaitRegistrationSnapshot | null {
+    const task = this.tasks.get(taskId);
+    return task ? structuredClone({ task, receipt: this.waitRegistrations.get(taskId) ?? null }) : null;
   }
 
   getBySubject(subjectKey: string): TaskItem | null {
@@ -228,6 +239,12 @@ export class TaskStore implements ITaskStore {
       ...(input.status !== undefined ? { status: input.status } : {}),
       updatedAt: Date.now(),
     };
+    if (input.waitRegistration) {
+      assertTypedWaitRegistrationInstallation(updated, input.waitRegistration);
+      this.waitRegistrations.set(taskId, structuredClone(input.waitRegistration));
+    } else if (automationGeneration(existing.automationState) !== automationGeneration(updated.automationState)) {
+      this.waitRegistrations.delete(taskId);
+    }
     this.tasks.set(taskId, updated);
     return updated;
   }
@@ -312,6 +329,7 @@ export class TaskStore implements ITaskStore {
   private deleteTask(taskId: string, task?: TaskItem): void {
     if (task?.subjectKey) this.subjectIndex.delete(task.subjectKey);
     this.managedWorkRegistration.delete(taskId);
+    this.waitRegistrations.delete(taskId);
     this.tasks.delete(taskId);
   }
 

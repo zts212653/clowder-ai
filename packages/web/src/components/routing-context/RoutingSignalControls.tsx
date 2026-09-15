@@ -16,7 +16,7 @@ export function RoutingSignalControls({
   subjectRef: RoutingSubjectRefV1;
   affectedCatIds: readonly string[];
   signalEvents: readonly RoutingSignalEventV1[];
-  onChanged: () => Promise<void>;
+  onChanged: () => Promise<boolean>;
 }) {
   const [state, setState] = useState<'scarce' | 'degraded' | 'unavailable'>('scarce');
   const [reasonCode, setReasonCode] = useState('owner-constraint');

@@ -706,7 +706,11 @@ describe('MessageReceiptDock', () => {
     act(() => {
       root.render(
         <MessageReceiptDock
-          receipt={{ ...receipt, scope: 'primary_trigger' }}
+          receipt={{
+            ...receipt,
+            targets: receipt.targets.filter((target) => target.state === 'handled'),
+            scope: 'primary_trigger',
+          }}
           messages={[]}
           getCatLabel={(catId) => catId}
         />,
@@ -715,6 +719,35 @@ describe('MessageReceiptDock', () => {
 
     expect(container.querySelector('[data-testid="message-receipt-dock"]')).toBeNull();
     expect(container.textContent).toBe('');
+  });
+
+  it('shows an explicit retry for a rejected queued primary trigger without replaying healthy siblings', async () => {
+    const failedAttempt = {
+      id: 'entry-1:sonnet:1',
+      targetCatId: 'sonnet',
+      sequence: 1,
+      state: 'failed' as const,
+      createdAt: 100,
+      updatedAt: 200,
+      terminalReason: 'invocation_failed' as const,
+    };
+    await act(async () => {
+      root.render(
+        <MessageReceiptDock
+          messageId="original-queued"
+          receipt={{
+            ...receipt,
+            scope: 'primary_trigger',
+            targets: [receipt.targets[0]!, { catId: 'sonnet', state: 'failed', attempts: [failedAttempt] }],
+          }}
+          messages={[]}
+          getCatLabel={(id) => id}
+        />,
+      );
+    });
+    expect(container.querySelector('[data-retry-target="opus"]')).toBeNull();
+    expect(container.querySelector('[data-retry-target="sonnet"]')).not.toBeNull();
+    expect(mockApiFetch.mock.calls.every((call) => call[1]?.method !== 'POST')).toBe(true);
   });
 });
 

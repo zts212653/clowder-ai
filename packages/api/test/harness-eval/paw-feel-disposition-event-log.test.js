@@ -10,8 +10,12 @@ import { assertRedisIsolationOrThrow, redisIsolationSkipReason } from '../helper
 const REDIS_URL = process.env.REDIS_URL;
 const DIGEST = 'a'.repeat(64);
 const SIGNAL_ID = `message-1:${DIGEST}:0`;
+const WILDCARD_SIGNAL_ID = `message-*:${DIGEST}:0`;
+const OTHER_SIGNAL_ID = `message-other:${DIGEST}:0`;
 const TEST_KEYS = [
   PawFeelDispositionKeys.eventLog(SIGNAL_ID),
+  PawFeelDispositionKeys.eventLog(WILDCARD_SIGNAL_ID),
+  PawFeelDispositionKeys.eventLog(OTHER_SIGNAL_ID),
   PawFeelDispositionKeys.eventsSeen,
   PawFeelDispositionKeys.signals,
 ];
@@ -82,6 +86,8 @@ describe('RedisPawFeelDispositionEventLog', { skip: redisIsolationSkipReason(RED
     assert.deepEqual(await log.append(seen('event-seen'), 1), { outcome: 'appended', sequence: 1 });
     assert.deepEqual(await log.read(SIGNAL_ID), [discovered(), seen('event-seen')]);
     assert.deepEqual(await log.listSignalIds(), [SIGNAL_ID]);
+    assert.deepEqual(await log.listSignalIdsBySourceMessageId('message-1'), [SIGNAL_ID]);
+    assert.deepEqual(await log.listSignalIdsBySourceMessageId('message-other'), []);
     assert.equal(await redis.ttl(PawFeelDispositionKeys.eventLog(SIGNAL_ID)), -1);
     assert.equal(await redis.ttl(PawFeelDispositionKeys.signals), -1);
   });
@@ -108,5 +114,52 @@ describe('RedisPawFeelDispositionEventLog', { skip: redisIsolationSkipReason(RED
     const result = await log.readMany([SIGNAL_ID]);
 
     assert.deepEqual(result.get(SIGNAL_ID), [discovered(), seen('event-seen')]);
+  });
+
+  it('treats source-message glob characters as literal identity', async () => {
+    await log.append(
+      discovered({
+        eventId: 'event-wildcard',
+        signalId: WILDCARD_SIGNAL_ID,
+        source: {
+          ...discovered().source,
+          sourceMessageId: 'message-*',
+        },
+      }),
+      0,
+    );
+    await log.append(
+      discovered({
+        eventId: 'event-other',
+        signalId: OTHER_SIGNAL_ID,
+        source: {
+          ...discovered().source,
+          sourceMessageId: 'message-other',
+        },
+      }),
+      0,
+    );
+
+    assert.deepEqual(await log.listSignalIdsBySourceMessageId('message-*'), [WILDCARD_SIGNAL_ID]);
+  });
+
+  it('traverses 500 ids through bounded scan pages and bounded overflow state', async () => {
+    const ids = Array.from({ length: 500 }, (_, index) => `scan-${String(index).padStart(3, '0')}`);
+    await redis.sadd(PawFeelDispositionKeys.signals, ...ids);
+    const seen = new Set();
+    let cursor;
+    let pages = 0;
+    do {
+      const page = await log.scanSignalIds(cursor, 50);
+      pages += 1;
+      assert.ok(page.signalIds.length <= 50);
+      assert.ok(page.scanCalls <= 8);
+      assert.ok((page.nextCursor?.pendingSignalIds.length ?? 0) <= 50);
+      for (const signalId of page.signalIds) seen.add(signalId);
+      cursor = page.nextCursor;
+      assert.ok(pages < 100, 'stable 500-row set must converge');
+    } while (cursor);
+
+    assert.deepEqual([...seen].sort(), ids);
   });
 });

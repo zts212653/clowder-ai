@@ -12,6 +12,7 @@ import {
   PersonalChromeConversationAuthorizationError,
   readPersonalChromeConversationAuthorizations,
 } from './conversation-binding.mjs';
+import { createConversationTitleExchange } from './conversation-title-exchange.mjs';
 import { encodeNativeMessage, NativeMessageDecoder } from './native-framing.mjs';
 import { hasCapacityForEntry, ledgerKey, loadLedger, textDigest, writeAtomicLedger } from './native-ledger.mjs';
 import {
@@ -246,6 +247,11 @@ export async function createNativeHostBridge(options) {
   const writeLedger = options.writeLedger ?? writeAtomicLedger;
   const authorizeConversation = options.authorizeConversation ?? authorizePersonalChromeConversation;
   const now = options.now ?? (() => new Date());
+  const acceptConversationTitles = createConversationTitleExchange({
+    authorizationPath: options.conversationBindingPath,
+    sendNative: options.sendNative,
+    now,
+  });
 
   const ledger = await loadLedger(options.ledgerPath);
   let ledgerDirty = false;
@@ -437,6 +443,19 @@ export async function createNativeHostBridge(options) {
   }
 
   async function handleEnvelope(socket, rawEnvelope) {
+    if (rawEnvelope?.request?.kind === 'refresh_conversation_titles') {
+      const result = secretsMatch(options.pairingSecret, rawEnvelope?.pairingSecret)
+        ? await acceptConversationTitles.refreshRequest(rawEnvelope.request, options.helperArtifactRevision)
+        : {
+            v: 1,
+            kind: 'conversation_titles_refreshed',
+            requestId: 'invalid-request',
+            status: 'unavailable',
+            errorCode: 'PAIRING_REJECTED',
+          };
+      sendSocketResult(socket, result);
+      return;
+    }
     if (await handleHealthEnvelope(socket, rawEnvelope)) return;
     if (await handleAssistantReturnEnvelope(socket, rawEnvelope)) return;
     await handleAppendEnvelope(socket, rawEnvelope);
@@ -667,6 +686,7 @@ export async function createNativeHostBridge(options) {
     socketPath: options.socketPath,
     ledgerPath: options.ledgerPath,
     async acceptNativeMessage(message) {
+      if (await acceptConversationTitles(message)) return;
       if (acceptHealthResult(message)) return;
       if (await acceptBindingRequest(message)) return;
       if (await acceptBindingQuery(message)) return;
@@ -681,6 +701,7 @@ export async function createNativeHostBridge(options) {
     async stop() {
       if (stopped) return;
       stopped = true;
+      acceptConversationTitles.stop();
       try {
         for (const [key, pending] of pendingByKey) {
           const entry = ledger.get(key);

@@ -83,6 +83,7 @@ describe('CloudBindingRecoveryCard', () => {
   it('preselects one authorized conversation and binds before retrying the exact source attempt', async () => {
     const conversationId = '6a928d55-ed7c-83ee-adbf-56bef0ffe336';
     mockApiFetch.mockImplementation(async (path, init) => {
+      if (path.endsWith('/retry-authority')) return jsonResponse({ attemptId: 'attempt-one' });
       if (path === '/api/plugins/personal-chrome') {
         return jsonResponse(pluginState([{ conversationId, displayTitle: '太阳爪会话' }]));
       }
@@ -100,10 +101,10 @@ describe('CloudBindingRecoveryCard', () => {
 
     await renderCard();
 
-    expect(container.textContent).toContain('砚砚 Pro 尚未绑定到这个 Thread');
+    expect(container.textContent).toContain('选择砚砚 Pro 要继续的对话');
     expect(container.textContent).toContain('这条消息还没有发送');
     expect(container.textContent).toContain('太阳爪会话');
-    expect(container.textContent).toContain('6a928d55…');
+    expect(container.textContent).toContain(conversationId);
 
     await act(async () => {
       container.querySelector<HTMLButtonElement>('button[data-recovery-primary]')?.click();
@@ -122,11 +123,12 @@ describe('CloudBindingRecoveryCard', () => {
       body: JSON.stringify({ attemptId: 'attempt-one' }),
     });
     expect(mockApiFetch.mock.calls.some(([path]) => path === '/api/messages')).toBe(false);
-    expect(container.textContent).toContain('已绑定，正在发送');
+    expect(container.textContent).toContain('消息已进入发送流程');
   });
 
   it('requires an explicit inline choice when multiple conversations are authorized', async () => {
     mockApiFetch.mockImplementation(async (path) => {
+      if (path.endsWith('/retry-authority')) return jsonResponse({ attemptId: 'attempt-one' });
       if (path === '/api/plugins/personal-chrome') {
         return jsonResponse(
           pluginState([
@@ -140,7 +142,7 @@ describe('CloudBindingRecoveryCard', () => {
 
     await renderCard();
 
-    expect(container.textContent).toContain('选择要绑定的 ChatGPT 会话');
+    expect(container.textContent).toContain('选择 ChatGPT 会话');
     expect(container.querySelectorAll('input[name="cloud-recovery-conversation"]')).toHaveLength(2);
     expect(container.querySelector<HTMLButtonElement>('button[data-recovery-primary]')?.disabled).toBe(true);
 
@@ -197,7 +199,7 @@ describe('CloudBindingRecoveryCard', () => {
 
     const choices = [...container.querySelectorAll<HTMLInputElement>('input[name="cloud-recovery-conversation"]')];
     expect(choices.map((choice) => choice.value)).toEqual([newerId, olderId]);
-    expect(container.textContent).toContain('最近授权');
+    expect(container.textContent).toContain('名称尚未同步');
     expect(container.textContent).toContain('授权于');
     const inspectLinks = [...container.querySelectorAll<HTMLAnchorElement>('a[data-recovery-inspect-conversation]')];
     expect(inspectLinks.map((link) => link.href)).toEqual([
@@ -240,13 +242,14 @@ describe('CloudBindingRecoveryCard', () => {
 
     await renderCard();
 
-    expect(container.textContent).toContain('仅 Thread owner 可以绑定并发送');
+    expect(container.textContent).toContain('仅对话所有者可以连接会话');
     expect(container.querySelector('a')).toBeNull();
     expect(container.querySelector('button[data-recovery-primary]')).toBeNull();
   });
 
   it('ignores malformed conversation candidates instead of making them actionable', async () => {
     mockApiFetch.mockImplementation(async (path) => {
+      if (path.endsWith('/retry-authority')) return jsonResponse({ attemptId: 'attempt-one' });
       if (path === '/api/plugins/personal-chrome') {
         return jsonResponse(
           pluginState([
@@ -268,6 +271,7 @@ describe('CloudBindingRecoveryCard', () => {
   it('continues an already persisted exact route without writing it again', async () => {
     const conversationId = 'conversation-bound';
     mockApiFetch.mockImplementation(async (path, init) => {
+      if (path.endsWith('/retry-authority')) return jsonResponse({ attemptId: 'attempt-one' });
       if (path === '/api/plugins/personal-chrome') return jsonResponse(pluginState([{ conversationId }]));
       if (path === '/api/threads/thread-one/cloud-bindings') {
         return jsonResponse({ bindings: { 'gpt-pro': `https://chatgpt.com/c/${conversationId}` } });
@@ -279,7 +283,7 @@ describe('CloudBindingRecoveryCard', () => {
     });
 
     await renderCard();
-    expect(container.textContent).toContain('当前 Thread 已绑定');
+    expect(container.textContent).toContain('已连接到这个对话');
     expect(container.textContent).toContain('继续发送');
 
     await act(async () => {
@@ -298,12 +302,22 @@ describe('CloudBindingRecoveryCard', () => {
 
   it('keeps a successful route and offers exact retry again when queue admission fails', async () => {
     const conversationId = 'conversation-route-kept';
-    mockApiFetch
-      .mockResolvedValueOnce(jsonResponse(pluginState([{ conversationId }])))
-      .mockResolvedValueOnce(jsonResponse({ bindings: {} }))
-      .mockResolvedValueOnce(jsonResponse({ bindings: { 'gpt-pro': `https://chatgpt.com/c/${conversationId}` } }))
-      .mockResolvedValueOnce(jsonResponse({ error: 'temporarily unavailable', code: 'QUEUE_RETRY_UNAVAILABLE' }, 503))
-      .mockResolvedValueOnce(jsonResponse({ status: 'retry_queued' }, 202));
+    let retries = 0;
+    mockApiFetch.mockImplementation(async (path, init) => {
+      if (path.endsWith('/retry-authority')) return jsonResponse({ attemptId: 'attempt-one' });
+      if (path === '/api/plugins/personal-chrome') return jsonResponse(pluginState([{ conversationId }]));
+      if (path.endsWith('/cloud-bindings'))
+        return jsonResponse({
+          bindings: init?.method === 'PATCH' ? { 'gpt-pro': `https://chatgpt.com/c/${conversationId}` } : {},
+        });
+      if (path.endsWith('/retry') && init?.method === 'POST') {
+        retries += 1;
+        return retries === 1
+          ? jsonResponse({ error: 'temporarily unavailable', code: 'QUEUE_RETRY_UNAVAILABLE' }, 503)
+          : jsonResponse({ status: 'retry_queued' }, 202);
+      }
+      throw new Error(`unexpected ${String(path)}`);
+    });
 
     await renderCard();
     await act(async () => {

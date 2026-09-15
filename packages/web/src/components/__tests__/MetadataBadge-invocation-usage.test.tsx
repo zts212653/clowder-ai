@@ -25,6 +25,7 @@ describe('MetadataBadge invocation usage', () => {
     expect(html).toContain('126.6k');
     expect(html).toContain('2.0k');
     expect(html).toContain('cached 99%');
+    expect(html).not.toContain('$');
     expect(html).not.toContain('invocation_usage');
   });
 });

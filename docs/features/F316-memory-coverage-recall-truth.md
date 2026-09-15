@@ -3,7 +3,7 @@ feature_ids: [F316]
 related_features: [F200, F209, F221, F231, F260, F276, F282, F287, F296, F312]
 topics: [memory, recall, coverage, profile, entity, person, taste, runtime-acceptance]
 doc_kind: spec
-tips_exempt: "Phase C 2026-09-04 renewal: F316 adds a task-bounded internal Taste cue/drill path, not a new user-invokable action or teaching surface."
+tips_exempt: "Renewed 2026-09-09 for the accepted vision-guard checkbox/source-receipt reconciliation; no new memory behavior or user-invokable action is introduced by this documentation update."
 created: 2026-09-04
 description: "让每类记忆都能说明自己记住了什么、何时该出现、能否精确读回，以及真实任务中是否确实帮助了猫。"
 description_source: human
@@ -208,11 +208,11 @@ applied/dismissed 与 invalidation negative。最后重新生成 21-surface cove
 
 | ID | 需求点（operator experience/转述） | AC 编号 | 验证方式 | 状态 |
 |----|---------------------------|---------|----------|------|
-| R1 | “排查一下每个记忆系统的部分吧，也不止有 Taste” | AC-A1, AC-A2, AC-E1 | 21-surface exact-revision audit + independent acceptance | [ ] |
+| R1 | “排查一下每个记忆系统的部分吧，也不止有 Taste” | AC-A1, AC-A2, AC-E1 | 21-surface exact-revision audit + independent acceptance | [x] |
 | R2 | “比如我们的关系” | AC-B1, AC-B4 | Profile cold/resumed drill + revision/invalidation evidence | [ ] |
 | R3 | “那些的 Entity？Person？” | AC-B2, AC-B3, AC-B4 | known/unknown/ambiguous + private Person lifecycle | [ ] |
 | R4 | “Taste 里能找到我所有对 UI/UX 的品味吗？” | AC-C1, AC-C2, AC-C3 | set-equality guard + real UI task + bounded outcome | [x] |
-| R5 | 不把所有记忆硬塞进每轮 query | AC-E2 | match/non-match prompt-shape traces | [ ] |
+| R5 | 不把所有记忆硬塞进每轮 query | AC-E2 | match/non-match prompt-shape traces | [x] |
 | R6 | owner 猫自己驱动闭环，不让operator做人肉路由器 | AC-A3, AC-D1, AC-E4 | owner receipts + durable task + terminal packet | [ ] |
 
 ### 覆盖检查
@@ -254,7 +254,7 @@ applied/dismissed 与 invalidation negative。最后重新生成 21-surface cove
   历史 receipt、不写新 Person truth。
 - [x] AC-B4: 非作者复核 Profile、Entity、Person 的 authority/store/privacy 未被合并或越权。Terra 在 exact
   HEAD `ee8c9915656e214f2ba57cb5f6cd327235288002` 独立重放并批准；typed verdict：
-  `[thread-id]#0001788555692984-001546-dfb3b77c`。
+  `[thread-id]#private-source-id`。
 
 ### Phase C（Taste Closed-World Coverage）
 
@@ -280,13 +280,18 @@ applied/dismissed 与 invalidation negative。最后重新生成 21-surface cove
 
 ### Phase E（Independent Runtime Acceptance & Vision Guard）
 
-- [ ] AC-E1: merged-main Alpha 独立复验至少 Relationship、Taste、时效型、项目/决策型四种 authority，
+**验收回写（2026-09-07）**：以下四项沿用 2026-09-05 非作者 Vision Guard 的 accepted 结论，
+来源 `[thread-id]#private-source-id`，持久回执 `bacbf1b1d6`；
+本次仅同步此前遗漏的 checkbox 与 R1/R5，不新增 runtime 验收。AC-B1/B3、整体 `in-progress` 与
+parent task `doing` 不变，E4 通过不单独授权关闭 F316。
+
+- [x] AC-E1: merged-main Alpha 独立复验至少 Relationship、Taste、时效型、项目/决策型四种 authority，
   逐条保留 candidate/no-candidate、receipt、outcome 与 invalidation 的真实 ceiling。
-- [ ] AC-E2: runtime traces 证明 non-match lane payload=0，match 只送 bounded source refs，prompt 大小不随
+- [x] AC-E2: runtime traces 证明 non-match lane payload=0，match 只送 bounded source refs，prompt 大小不随
   21 surfaces 或 canonical item 总量线性增长。
-- [ ] AC-E3: 确定合同与 runtime health 分别由 guards/tests 与 traces/metrics 验收；utility eval 只有在明确
+- [x] AC-E3: 确定合同与 runtime health 分别由 guards/tests 与 traces/metrics 验收；utility eval 只有在明确
   named consumer、keep/tune/sunset 决策与 metric birth certificate 同时存在时才出生。
-- [ ] AC-E4: durable task、feature truth、owner receipts 与 terminal packet 全部同步；非作者 Vision Guard
+- [x] AC-E4: durable task、feature truth、owner receipts 与 terminal packet 全部同步；非作者 Vision Guard
   明确确认无中央 authority、无伪 receipt、无隐私越权、无 prompt dump 后才可关闭 F316。
 
 ## Dependencies

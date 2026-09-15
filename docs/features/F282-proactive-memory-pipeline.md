@@ -192,5 +192,5 @@ Architecture cell: `memory`
 - Phase B 证据契约: 跨个体 review + F276 域对齐
 - Phase D Design Gate: 狸花猫 @glm52 审阅最终 plan hash `de2dc67e8e741fe3caf29e22c4a1c025919d64f624f9d6c2393c9c1c3a1ee03d`
 - Phase D implementation: 狸花猫 @glm52 `APPROVED exact HEAD 08b960089abcd31bffa60b9afb8df98d0d5284bf`
-- Vision guardian: Ragdoll @fable5 `VISION APPROVED F282`（message `0001785455991548-000724-68d7c60d`）
-- operator close authorization: `0001785469962796-000042-ef543202`（“把281 和 282 闭环一下的？ 不要过度sop 就行”）
+- Vision guardian: Ragdoll @fable5 `VISION APPROVED F282`（message `private-source-id`）
+- operator close authorization: `private-source-id`（“把281 和 282 闭环一下的？ 不要过度sop 就行”）

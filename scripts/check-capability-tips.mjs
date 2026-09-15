@@ -228,7 +228,7 @@ function loadInventory(repoRoot, inventoryPath) {
   return { tips: raw, errors: [] };
 }
 
-function isContributionRelevantFile(filePath) {
+export function isContributionRelevantFile(filePath) {
   return (
     /^docs\/features\/F\d{3,4}-.+\.md$/.test(filePath) ||
     /^guides\/(?:registry|flows\/.+)\.ya?ml$/.test(filePath) ||

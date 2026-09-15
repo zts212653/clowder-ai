@@ -8,7 +8,7 @@ description: "把现有 F083、ADR-043 与 F056 接成一条可执行的 UI Desi
 description_source: human
 description_author: codex-sol
 description_updated_at: 2026-08-22T15:01:32Z
-cvo_signoff: "2026-08-22 — sourceMessageId 0001787410376908-000078-52aceda2：由Maine Coon负责闭环当前问题，并给出未来可一句话触发的纠偏入口。"
+cvo_signoff: "2026-08-22 — sourceMessageId private-source-id：由Maine Coon负责闭环当前问题，并给出未来可一句话触发的纠偏入口。"
 tips_exempt: "Renewed 2026-09-05 for the F056 KD-37 succession note: it records which parity guard replaces an historical design contract and adds no user-facing action or learning step."
 ---
 
@@ -163,7 +163,7 @@ F056 AC-A3 下先形成一个窄 pattern，不启动全 Workspace 组件扫荡�
 - [x] **AC-B2**：F292 真实壳首屏只突出一个当前决定、系统建议和必要上下文；建议齐全时编辑表单默认折叠，主操作先于表单，工程细节默认折叠。
 - [x] **AC-B3**：F292 体验稿和正式页面使用可信用户场景与用户任务语言；产品主体不以 Feature/ADR/Gate/状态机/架构或评审术语解释设计，开发控制可隐藏且位于主体之外。
 - [x] **AC-B4**：审批入口、卡片与移动面板经同一 `ApprovalItemCard` 入口消费共享结构；`Meeting`、`Needs Me`、`rev`、原始 URI、完整项目路径和 `Thread` 不再出现在首屏标题、说明或 badge。
-- [x] **AC-B5**：operator 已确认方向并只要求长内容可折叠（source `0001787536138714-000010-369c1070`，已由 AC-B7 落实）；Phase 4 真实壳证据已落盘（`project-evidence/alpha-desktop-default.png` / `alpha-narrow-default.png` / `alpha-journey-15s.webm`，采自 landed Alpha `8b689ab6c`），愿景守护逐帧核验 default/repair/宽窄四态。
+- [x] **AC-B5**：operator 已确认方向并只要求长内容可折叠（source `private-source-id`，已由 AC-B7 落实）；Phase 4 真实壳证据已落盘（`project-evidence/alpha-desktop-default.png` / `alpha-narrow-default.png` / `alpha-journey-15s.webm`，采自 landed Alpha `8b689ab6c`），愿景守护逐帧核验 default/repair/宽窄四态。
 - [x] **AC-B6**：Kimi 以同一 checklist 放行 exact HEAD `dcd132ed0b138528ad6f635770353a4945543774`；独立复跑 component/route/TypeScript guards 全绿，无 P1/P2。
 - [x] **AC-B7**：共享卡的字符串摘要默认限制为三行，仅在真实测量溢出时显示“展开全文”，展开后可“收起”；critical evidence 继续走 F269 的显式恢复入口，不被静默裁切。
 

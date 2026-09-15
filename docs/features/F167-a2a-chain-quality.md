@@ -4,8 +4,8 @@ related_features: [F064, F027, F055, F122, F168, F246, F280]
 topics: [a2a, collaboration, harness-engineering, agent-readiness]
 doc_kind: spec
 created: 2026-04-17
-updated: 2026-09-04
-tips_exempt: "Renewed 2026-09-04 for the Phase R terminal-lineage conflict repair: it makes the existing post_message and cross_post_message coordination surface fail loud instead of closing the wrong chain, without adding a user-invokable action or discovery workflow."
+updated: 2026-09-09
+tips_exempt: "Renewed 2026-09-07: terminal-lineage conflicts and adopted managed-hold completion repair existing protocol paths, without a new user-invokable capability. Failed notifications reuse the existing Queue receipt/actions; explicit completion guidance belongs in the MCP response and tool description."
 user_journey_exempt: protocol behavior has no direct UI surface; end-to-end custody is dogfooded through the real MCP/task path
 mcp_admission_status: accepted
 mcp_admission_ref: "file:docs/features/F167-a2a-chain-quality.md"
@@ -23,6 +23,11 @@ mcp_admission_claims:
   - ref: "file:docs/features/F167-a2a-chain-quality.md"
     toolName: cat_cafe_recover_external_review_verdict
     resourceFamily: tracking-review
+    boundaryKind: authority-boundary
+    decision: accepted
+  - ref: "file:docs/features/F167-a2a-chain-quality.md"
+    toolName: cat_cafe_get_hold_status
+    resourceFamily: task-workflow
     boundaryKind: authority-boundary
     decision: accepted
 ---
@@ -66,7 +71,7 @@ operator experience：
 
 Architecture cell: `ball-custody` + `dispatch` + `mcp-surface-governance`
 
-operator decision `[thread-id]#0001786347630932-000025-ab3cdda3` accepts narrow terminal producers for structured wakes already exposed to the current invocation. `cat_cafe_complete_managed_hold` closes an exact managed hold using callback-authenticated invocation identity plus server-derived source message/task/thread/holder coordinates. The live regression in `[thread-id]` extends the same accepted F167 boundary to ordinary A2A dispatch: `cat_cafe_complete_a2a_dispatch` derives source message, previous cat, thread, holder, and invocation from the current callback record and exact `ball.handed` event. The caller selects only `handled | completed`; stale, replaced, cross-thread, cross-holder, cross-source, or cross-task attempts fail closed. Read, command exit, tests, merge truth, ACK, unrelated task completion, and another coordination terminal remain non-terminal.
+operator decision `[thread-id]#private-source-id` accepts narrow terminal producers for structured wakes already exposed to the current invocation. `cat_cafe_complete_managed_hold` closes an exact managed hold using callback-authenticated invocation identity plus server-derived source message/task/thread/holder coordinates. The live regression in `[thread-id]` extends the same accepted F167 boundary to ordinary A2A dispatch: `cat_cafe_complete_a2a_dispatch` derives source message, previous cat, thread, holder, and invocation from the current callback record and exact `ball.handed` event. The caller selects only `handled | completed`; stale, replaced, cross-thread, cross-holder, cross-source, or cross-task attempts fail closed. Read, command exit, tests, merge truth, ACK, unrelated task completion, and another coordination terminal remain non-terminal.
 
 2026-08-14 same-cat clarification: `catId` identifies a persona, not one invocation. A same-cat
 cross-thread carrier may disposition only when the stored trigger has canonical distinct-thread
@@ -90,7 +95,7 @@ replacement verdict or reopen a stale provider invocation.
 
 This is a bounded F167/F254/F264 repair, not a new Feature or lifecycle owner. Managed holds write the existing F264 target receipt and both wake kinds write the F167 BallCustody event log. The repair does not add another Queue, receipt ledger, projection, or state machine.
 
-The same repair boundary also owns two dispatch invariants exposed by the post-merge A→B→A dogfood (`[thread-id]#0001786350407910-000095-8739ed4a`): a successful same-thread `post_message` callback is the one carrier for that source/target and must be suppressed from the later route-serial line-start scan; releasing the invocation slot must have a bounded path to `notifyQueueCompletion` even if F194/F224 terminal bookkeeping stalls. The normal ordering remains terminal truth and continuation commit before queue drain; a 5-second idempotent watchdog is only the liveness fallback. Ordinary inline dispatches now receive their completion producer on the first child and fail typed without spawning a stale `routing_guard` child when the producer is omitted.
+The same repair boundary also owns two dispatch invariants exposed by the post-merge A→B→A dogfood (`[thread-id]#private-source-id`): a successful same-thread `post_message` callback is the one carrier for that source/target and must be suppressed from the later route-serial line-start scan; releasing the invocation slot must have a bounded path to `notifyQueueCompletion` even if F194/F224 terminal bookkeeping stalls. The normal ordering remains terminal truth and continuation commit before queue drain; a 5-second idempotent watchdog is only the liveness fallback. Ordinary inline dispatches now receive their completion producer on the first child and fail typed without spawning a stale `routing_guard` child when the producer is omitted.
 3. **Backward compatible**：不退化 4.6 等已正常工作模型的体验。
 4. **极简**：只加运行时刹车（压制坏直觉）和认知路径工程（对齐好直觉），不加认知脚手架（替模型思考）。
 
@@ -115,7 +120,7 @@ The same repair boundary also owns two dispatch invariants exposed by the post-m
 
 - **L1 false-positive 误杀**：正常 review 循环 A→B→A→B (streak=3) 被误杀 → reset 条件（第三只猫 / user 消息）必须正确触发；覆盖见 `pingpong-reset.test.js`
 - **C2 over-fire**：纯信息查询无后续动作的输出被强制要求 @（边界场景：信息回答 vs 协作传球的判定漂移）
-- **C1 hold_ball 滥用**：`maxHoldsPerWindow` 超限（默认 3 / ~1h rolling）→ cat 在用 hold 替代正常传球
+- **C1 hold_ball 滥用**：`maxHoldsPerWindow` 超限（默认 3 / ~1h sliding window）→ cat 在用 hold 替代正常传球
 - **C1 stale hold wake**：等待对象已被结构化事件满足（review / CI / issue / user message / managed command）后，旧 `hold_ball` timer 仍唤醒猫 → 目标为 0；若发生，必须能追到 `waitSourceRef` / `subjectKey` / `expectedSignalKey` / `resolvedBy`
 - **Routing 旁路**：invocation 文本响应有 @ 但 MCP `targetCats` 为空（或反之）→ `routing-syntax-hint`（route-serial 行首 @ 语法检测）或 `verdict-no-pass-hint`（verdict 无 @ 出口检测）触发
 
@@ -235,7 +240,7 @@ cat_cafe_hold_ball({
 > 球仍在你手上。现在执行：{nextStep}
 > 若条件仍未满足：再持一次或升级；禁止无限持球。
 
-**Guard**：`maxHoldsPerWindow`（默认 3，~1h rolling 窗口，per thread×cat），超限强制接/退/升 + 审计日志。
+**Guard**：`maxHoldsPerWindow`（默认 3，~1h sliding window，per thread×cat），超限强制接/退/升 + 审计日志。
 *实现注记*（gpt52 review on PR #1289 P1/P2）：语义是"窗口内累计"而非"真·连续"；状态进程内 in-memory，best-effort，重启会重置。要做硬约束得把计数下沉到与 reminder scheduler 同源的持久化存储，当前不做。
 
 **并发语义**（Phase G / KD-23 补充）：
@@ -485,7 +490,7 @@ operator experience：
   - 查 `dynamicTaskStore` 同 `(threadId, catId)` 的 pending hold task（via `id.startsWith('hold-ball-')` + `templateId='reminder'` + `createdBy: hold-ball:{catId}` + `deliveryThreadId`；id 前缀是不可伪造主键——panel `/api/schedule/tasks` 生成 `dyn-*`，路由层独占 `hold-ball-*`）
   - `deregister` + `delete` 它（cancel 旧 scheduled fire）
   - 原子序（cloud Codex P1 修正）：先 insert + register 新 task；register 失败则 rollback insert、prior hold 不动；只有新 task 完全 commit 后才 cancel prior
-- [x] AC-G4: `holdCount` rolling window 逻辑保持不变（这是防滥用 guard，与单-槽语义正交；cat 被连续覆盖 3 次还是算 3 次 hold）
+- [x] AC-G4: `holdCount` sliding window 逻辑保持不变（这是防滥用 guard，与单-槽语义正交；cat 被连续覆盖 3 次还是算 3 次 hold）
 
 #### G3 — 测试锁 KD-23
 
@@ -733,7 +738,7 @@ operator experience："简直了你和Maine Coon是没头脑（Maine Coon听不�
 | 我以为 | F279 剩余真实 UAT 依赖 runtime 重启，而重启需要 operator 明确授权，因此应把 PR #3604 的 merge 与 runtime activation 捆成一个 Decision Packet，先问operator再合入。 |
 | 实际要求 | 内部 PR 的 review、gate、CI 与 exact-HEAD provenance 闭合后，merge owner 应直接 squash merge；只有 merge 后的 runtime sync/build/restart 需要单独授权。正确状态是先 `main=landed`，未授权时诚实保持 `live=dormant`。 |
 | 偏差根因 | **授权范围混同 + 安全默认过度升级**：没有按 effect 拆开“可自决 merge”与“需授权 restart”，把后一步的权限边界倒灌到前一步；复刻了 Case E3 中“下一状态迁移交回operator”的同型错误。 |
-| 纠正轮次 | 本次 1 次（operator：`0001786543204352-000306-879d3a6a`，“合入不需要问我吧”）；与 Case E3 跨任务同型，因此按重复理解偏差记录。纠正后 PR #3604 已 squash merge 为 `4f59356f0`，runtime 保持未激活。 |
+| 纠正轮次 | 本次 1 次（operator：`private-source-id`，“合入不需要问我吧”）；与 Case E3 跨任务同型，因此按重复理解偏差记录。纠正后 PR #3604 已 squash merge 为 `4f59356f0`，runtime 保持未激活。 |
 | 元心智哪条没执行 | Q1 角色确认：当时是证据闭合后的 merge owner，不是权限申请者；Q3 坐标变换：没有把一个“交付动作”拆成 merge 与 activation 两个独立 effect 分别判权。 |
 
 ### Case E9: 把“随原动作 hover”替换成“迁移到 thread 头部”（2026-08-18，codex-sol）
@@ -743,7 +748,7 @@ operator experience："简直了你和Maine Coon是没头脑（Maine Coon听不�
 | 我以为 | operator说 F294 每条消息静止时孤立的“多选消息”入口应该隐藏，是要移除消息级入口，再提供一个默认可见的 thread 级入口兼顾可发现性。 |
 | 实际要求 | 新增的“多选消息”应留在原消息操作组里，与回复、删除、更多完全共用既有交互：桌面静止时整组隐藏且不占位，hover/focus 时整组出现；触屏仍保持可达。 |
 | 偏差根因 | **锚定偏差 + 任务替换**：锚定在既有 KD-10“默认可发现”抽象约束上，没有先按截图中的具体 referent 核对“这里这个”指的是原消息动作组，擅自把局部显隐调整替换成了入口层级重设计。 |
-| 纠正轮次 | 同一任务 2 次（`0001787047894247-000105-cfa68d95`、`0001787047966930-000108-4ffc8e66`）才完全拉回。纠正后 PR #3774 已 squash merge 为 `cae99d8e3`；真实 Chromium 契约锁定静止零占位、hover/focus 完整动作组与触屏可达。 |
+| 纠正轮次 | 同一任务 2 次（`private-source-id`、`private-source-id`）才完全拉回。纠正后 PR #3774 已 squash merge 为 `cae99d8e3`；真实 Chromium 契约锁定静止零占位、hover/focus 完整动作组与触屏可达。 |
 | 元心智哪条没执行 | Q2 信息验证：没有先用截图和现有 DOM 行为确认代词 referent；Q3 坐标变换：把“同一控件的显隐状态”错误换成了“控件所属层级”的产品架构问题。 |
 
 ### Case E10: 把 inbound PR review 截断成对话内报告（2026-08-19，codex-sol）
@@ -753,7 +758,7 @@ operator experience："简直了你和Maine Coon是没头脑（Maine Coon听不�
 | 我以为 | operator说“看看这个插件的 PR”只授权只读审查；由于 PR 作者与当前 invocation 属于同一 `codex-sol` runtime identity、不能充当独立 reviewer，我应把 findings 报回当前对话后停止。 |
 | 实际要求 | Inbound PR review 的终态不止是得出 verdict：明确 finding 要回到 GitHub 原对象；修复球交给作者后，当前 reviewer custody 还要注册 event-backed PR tracking，等待新 HEAD 或新的 review result，不能停在聊天汇报。身份边界只禁止冒充独立批准，不禁止留下 maintainer advisory finding 或承担后续复审等待。 |
 | 偏差根因 | **身份边界过度泛化 + 状态机截断**：把“不能独立 APPROVE”扩大成“不能执行 reviewer 交付动作”，又把“分析完成”误当成任务终态，漏掉 `finding delivery → author custody → typed wait` 两次状态迁移。 |
-| 纠正轮次 | 同一任务 2 次：先由 `0001787132038846-000199-6cf85575` 纠正“要回复 PR”，再由 `0001787137460561-000007-616c60ff` 纠正“要以 reviewer 身份挂 PR tracking”。纠正后 finding 已落到 clowder-ai-plugins#37，tracking task `0001787137554353-000011-63814576` 已绑定新 HEAD / 新 review result。 |
+| 纠正轮次 | 同一任务 2 次：先由 `private-source-id` 纠正“要回复 PR”，再由 `private-source-id` 纠正“要以 reviewer 身份挂 PR tracking”。纠正后 finding 已落到 clowder-ai-plugins#37，tracking task `private-source-id` 已绑定新 HEAD / 新 review result。 |
 | 元心智哪条没执行 | Q1 角色确认：当前是有 finding delivery custody 的 maintainer advisory reviewer，不是纯分析者；Q3 坐标变换：没有把 review verdict 转换成公开交付与事件等待两个后续 action family。 |
 
 ### Case E11: 把外部 AgentReflex 谱系并入 Clowder AI 自进化主线（2026-08-21，codex-sol）
@@ -762,7 +767,7 @@ operator experience："简直了你和Maine Coon是没头脑（Maine Coon听不�
 |------|------|
 | 我以为 | 高校合作讨论里出现的“元认知、自进化、Multi-Agent”可以作为同一组 Clowder AI 候选课题收束，因此上一轮把伙伴提出的 AgentReflex 元认知进化与家内自进化问题并列后，又用“同时接住”把它们合成一个研究切口。 |
 | 实际要求 | 郭良的 AgentReflex 是伙伴自己的另一条谱系，关注 Gene / Capsule / Lineage、赫胥黎与哥德尔机式元认知进化；Clowder AI 先独立梳理半年真实运行中多 Agent 协同、记忆与自进化遇到的困难。两者以后可以找接口，但不能先合并问题定义或贡献归属。 |
-| 纠正轮次 | 本次 1 次（`0001787296571695-000113-91447bb4`）；跨任务已有 LL-092 同型证据，因此记录。当前任务已先把 AgentReflex 剥离，再从 Clowder AI canonical 文档、真实事故和原始 thread 重建自进化困难谱系。 |
+| 纠正轮次 | 本次 1 次（`private-source-id`）；跨任务已有 LL-092 同型证据，因此记录。当前任务已先把 AgentReflex 剥离，再从 Clowder AI canonical 文档、真实事故和原始 thread 重建自进化困难谱系。 |
 | 元心智哪条没执行 | Q2 信息验证：未先读已知 canonical 谱系边界；Q3 坐标变换：没有把共享术语投影回“谁提出、解决什么问题、证据属于谁”三维坐标。 |
 
 ### Case E12: 把“自进化的总体愿景”替换成 Clowder AI 产品愿景（2026-08-21，codex-sol）
@@ -772,7 +777,7 @@ operator experience："简直了你和Maine Coon是没头脑（Maine Coon听不�
 | 我以为 | operator要求在自进化研究稿中补“我们的总体愿景”，是要补 Clowder AI 的全局产品愿景；因此读取 `docs/VISION.md`，写入“领养长期共生 AI 团队、把想法变成产品”的产品终态。 |
 | 实际要求 | 当前对象是自进化研究稿，“我们的 vision”指 Clowder AI 对自进化本身的理想终态：系统如何发现能力边界、选择更新层、取得独立证据、分级自治，并让改变可追溯、可回滚、可退役。产品愿景不是本节要回答的坐标。 |
 | 偏差根因 | **局部 referent 丢失 + 上位真相源锚定 + 任务替换**：看到“总体愿景”后直接解析到仓库全局 `docs/VISION.md`，没有先用当前文档主题“自进化”限定 referent；与 Case E9 把消息级局部显隐要求替换成 thread 级入口重设计同型。 |
-| 纠正轮次 | 本次 1 次（`0001787299710431-000183-7421a9ae`）；跨任务已有 Case E9 同型证据，因此记录。纠正后已整段撤掉产品愿景和 `docs/VISION.md` 引用，换成自进化终态、自治分级、双证举证链与条件性 CEW 路线，提交 `195aaaf4e` 已推送 main。 |
+| 纠正轮次 | 本次 1 次（`private-source-id`）；跨任务已有 Case E9 同型证据，因此记录。纠正后已整段撤掉产品愿景和 `docs/VISION.md` 引用，换成自进化终态、自治分级、双证举证链与条件性 CEW 路线，提交 `195aaaf4e` 已推送 main。 |
 | 元心智哪条没执行 | Q2 信息验证：虽读取了真实 canonical 文档，却选错了 resolver；Q3 坐标变换：把“当前研究对象的 vision”错误升格成“整个产品的 VISION”。 |
 
 ### Case E13: 把独立产物与双 Episode 压成一条旧故事流水线（2026-08-24，codex-sol）
@@ -782,7 +787,7 @@ operator experience："简直了你和Maine Coon是没头脑（Maine Coon听不�
 | 我以为 | 为了让 HC 技术范式与 Demo 互相证明，Demo 应逐步映射架构模块；被纠正后，我又从旧稿召回“退款期 7 → 14 天”，把它放进第一 Episode，并把已经确认的欧盟空调政策挪成第二 Episode。 |
 | 实际要求 | 架构图与 Demo 是分别成立、只在关键 claim 上弱连接的两份产物。Demo 自身确实需要两个时间 Episode，但第一 Episode 已明确是欧盟空调政策变化；第二 Episode 要另选不同类型的世界变化，检验第一次长出的防护能否迁移，不能为了凑双幕复活已被淘汰的退款例子。 |
 | 偏差根因 | **过早线性化 + 历史故事锚定 + 时间槽位覆盖**：面对有关联但正交的对象，先压成一条易讲的流水线；需要补第二幕时，又把检索到的旧叙事当成现行约束，用“完整故事”覆盖了用户刚确认的当前起点。 |
-| 纠正轮次 | 同一任务连续 3 次：`0001787584460995-000143-e6ac4670` 拆开架构与 Demo；`0001787584701647-000150-43e45444` 恢复双 Episode 与“下一次不再救火”；`0001787584802908-000151-7db9c48e` 纠正 Episode 1 必须是欧盟空调政策、退款例子必须删除。当前稿把 Episode 2 降为待拍板工作假设，不再把推导冒充确认。 |
+| 纠正轮次 | 同一任务连续 3 次：`private-source-id` 拆开架构与 Demo；`private-source-id` 恢复双 Episode 与“下一次不再救火”；`private-source-id` 纠正 Episode 1 必须是欧盟空调政策、退款例子必须删除。当前稿把 Episode 2 降为待拍板工作假设，不再把推导冒充确认。 |
 | 元心智哪条没执行 | Q2 信息验证：回读了旧叙事，却没有用最新的人类确认覆盖历史版本；Q3 坐标变换：没有同时保留“产物轴（架构 / Demo）”与“时间轴（学习发生 / 迁移验证）”，反而把两轴挤成一条序列。 |
 
 ### Case E14: 把「执行拆出去」的角色拓扑约束替换成 deictic 局部 referent（2026-08-25，codex-sol）
@@ -792,7 +797,7 @@ operator experience："简直了你和Maine Coon是没头脑（Maine Coon听不�
 | 我以为 | operator 说 F306 当前 thread 是指挥 + Vision Guard、"执行拆出去"，需要另起一个 Command Thread 承接指挥职责，因此在 F306 内新建 proposal 让自己负责创建那个 command thread。 |
 | 实际要求 | F306 当前 thread 已经是唯一指挥塔；"执行拆出去"是把 Phase A 执行工作分派给另一只猫（Opus 5），本 thread 保持 command + Vision Guard 双职；proposal 应该是 execution proposal 派给执行者，不是新建自己负责的 command thread。 |
 | 偏差根因 | **局部 referent 锚定 + 角色拓扑反校验缺失**：把 operator 一句话里的"这个 thread"局部解析成"待创建 proposal 的 subject thread"，没有先用同句里"执行拆出去"这个谓词反查当前 thread 已经承担的角色。**分界判据**：一句话同时携带 deictic referent（"这个"/代词）与角色/拓扑约束（"指挥"/"执行"）时，**角色约束优先用于消歧**，deictic 先按角色反查再落到具体对象。与 Case E9/E12 同型（局部 referent 丢失 + 上位真相源锚定 + 任务替换）。 |
-| 纠正轮次 | 同一任务 2 次（`0001787715648448-000187-88875ef3` operator 首次纠正、`0001787716300810-000201-4d23c6c9` operator 第二次纠正"你才是指挥，提议应该让别人执行"）；跨任务已有 Case E9/E12 同型证据，因此按重复理解偏差记录。纠正后错误 proposal 已撤；Phase A execution proposal `proposal_mt9k6k3bsapth6gq` 改派 Opus 5；F306 当前 thread 的唯一指挥塔真相已提交 main `d9713cd6e`（docs(F306): bind command thread and delegate Phase A）。 |
+| 纠正轮次 | 同一任务 2 次（`private-source-id` operator 首次纠正、`private-source-id` operator 第二次纠正"你才是指挥，提议应该让别人执行"）；跨任务已有 Case E9/E12 同型证据，因此按重复理解偏差记录。纠正后错误 proposal 已撤；Phase A execution proposal `proposal_mt9k6k3bsapth6gq` 改派 Opus 5；F306 当前 thread 的唯一指挥塔真相已提交 main `d9713cd6e`（docs(F306): bind command thread and delegate Phase A）。 |
 | 元心智哪条没执行 | Q2 信息验证：没有先把当前 thread 已承担的角色/拓扑约束当作 resolver 核对 referent；Q3 坐标变换：没有把"这个 thread"从"待创建对象"坐标系变换到"已承担指挥角色"坐标系。 |
 
 ### Case E15: 把一次性 generation 推导成一次性 tracking（2026-08-26，codex-sol）
@@ -802,7 +807,7 @@ operator experience："简直了你和Maine Coon是没头脑（Maine Coon听不�
 | 我以为 | F280 的 “all effects visible and one-shot” 应直接落到用户操作：每次 tracking 唤醒都消费注册，owner 处理完事件后必须显式再次调用工具；透明 prefill / reply-and-wait 足以抵消这项负担。 |
 | 实际要求 | 用户表达的是持续的 tracking intent：注册一次后默认跟到 subject terminal、owner fence 失效、显式取消或可选绝对 deadline。每次事件仍可在内部消费一个 generation，并以 fresh baseline 原子安装下一代；用户只看见“tracking continues”，不承担重新调用工具。精确单次责任才显式选择 one-shot。 |
 | 偏差根因 | **抽象边界倒置 + 局部安全不变量泄漏到用户旅程**：把内部用于幂等、审计和 stale-action 防护的 generation 生命周期，误当成用户可见 tracking 生命周期；局部看每次 effect 都显式，整体却把 re-registration 责任分散到每个 agent / skill / workflow，制造了更难审计的漏挂面。与 Case E7 的“逐项机制正确掩盖整体体验冲突”同型。**分界判据**：内部状态单元的一次性，不能推导出用户意图的一次性；先按用户旅程定义外部生命周期，再用 generation 承载内部交付。 |
-| 纠正轮次 | 同一 issue 方向任务 2 次：`0001787713386682-000092-e89e6359` 要求同时从 maintainer / 社区伙伴出发并避免冲突概念；`0001787797857153-000002-465d8fde` 直接指出显式重新注册会很难用。纠正后已在 clowder-ai#1392 评论 `5433637783` 接受 continuous-by-default tracking，移除 `needs-maintainer-decision`，并注册 clowder-ai#1394 新 HEAD wait `0001787798159931-000005-654c3718`。 |
+| 纠正轮次 | 同一 issue 方向任务 2 次：`private-source-id` 要求同时从 maintainer / 社区伙伴出发并避免冲突概念；`private-source-id` 直接指出显式重新注册会很难用。纠正后已在 clowder-ai#1392 评论 `5433637783` 接受 continuous-by-default tracking，移除 `needs-maintainer-decision`，并注册 clowder-ai#1394 新 HEAD wait `private-source-id`。 |
 | 元心智哪条没执行 | Q3 坐标变换：没有先从“用户要持续关注 PR”定义终态，再把 one-shot generation 放回实现坐标；反而从内部契约形状反推用户必须执行的动作。 |
 
 ### Case E16: 把“共同工作台”降成 Workspace 里的独立功能，并在设计对齐前开工（2026-08-26，codex-sol）
@@ -812,7 +817,7 @@ operator experience："简直了你和Maine Coon是没头脑（Maine Coon听不�
 | 我以为 | F307 是在现有三栏 shell 旁边增加一套可组合工作台；operator 说 F290 半成品“得删一下”时，我又把这句设计反馈直接当成当轮实施授权，先进入删除与门禁。 |
 | 实际要求 | 现有右侧 Workspace 本体就是共同工作台；F307 是把它从单槽升级成用户拥有的 working set，不是在里面注册“共同工作集”卡片或另造页面。此轮先共同冻结要做什么，等 operator 明确“该删的删掉”后才执行 F290 乌龙清理；F307 新布局仍停在 Design Gate。 |
 | 偏差根因 | **产品坐标层级混同 + 行动偏好覆盖 speech-act 校验**：没有先区分 application container 与 feature-owned child surface，也没有先判断人类是在共创概念还是授权修改，就把“听懂方向”替换成“开始实现”。这与 Case E1 的任务替换同型；而已合入的 #3966 / #3974 又证明“把共同工作台做成独立入口 / mode”不是一次性误写。**分界判据**：先用现有真实 shell 确认对象处在哪一层，再分别确认“设计命题是否冻结”与“本轮是否授权产生副作用”；二者不能互相推导。 |
-| 纠正轮次 | 本次先由 `0001787752296857-000614-5db2a57c` 纠正“只是在讲想法，不应直接干活”，再由 `0001787798861085-000028-f5e4622f` 冻结“Workspace 本体就是共同工作台”并明确授权删除乌龙。纠正后未继续实现 F307 UI，只清理 #3974 留下的独立 F290 surface / mode / persistence，并加入窄边界 guard。 |
+| 纠正轮次 | 本次先由 `private-source-id` 纠正“只是在讲想法，不应直接干活”，再由 `private-source-id` 冻结“Workspace 本体就是共同工作台”并明确授权删除乌龙。纠正后未继续实现 F307 UI，只清理 #3974 留下的独立 F290 surface / mode / persistence，并加入窄边界 guard。 |
 | 元心智哪条没执行 | Q1 角色与授权确认：当时应是共同定义产品的讨论伙伴，不是已经接到实现球的 author；Q3 坐标变换：没有把“共同工作台”放回现有三栏 shell 的 application-level 坐标，误当成 Workspace 内的 child feature。 |
 
 ### Case E17: 把生产控制面建设压成预制 MVP 纵切片（2026-08-28，codex-sol）
@@ -822,7 +827,7 @@ operator experience："简直了你和Maine Coon是没头脑（Maine Coon听不�
 | 我以为 | F311 先选一个 Harness v1→v2 纵切片，搭出完整 Evolution Program 后再泛化，是最快的产品验证方式；现有 F192/F266/F278 故障可以作为首条真实 Program 的施工材料。 |
 | 实际要求 | 不造两个月后拆掉的玩具闭环。确定契约/运行闭环 bug 由 canonical owner 立即修；F311 与其并行建设最终会保留的生产控制面并接回 owner truth。首个 Evolution Program 还必须是有真实用户目标、明确 consumer 和 keep/tune/sunset 决策的**不确定效用** claim，不能把普通 bug 重新包装成“自进化”。 |
 | 偏差根因 | **惯例化 MVP 顺序覆盖终态架构 + 机制选择坍缩**：虽然 Owner Matrix 已写“引用不是所有权”，执行顺序仍沿用“先造容器、跑示范、再泛化”的产品模板；被第一次纠正后又差点把 F266 确定性 bug 填进 Program 槽，说明没有先按 claim 判断 test/telemetry/eval。与 Case E16 同型：把共同系统建设降成独立 child demo。**分界判据**：集成型控制面先问“现有 owner 的真修与永久 join 如何并行”，再问演示；确定契约/运行健康永不因“真实”自动升级为 Evolution Program。 |
-| 纠正轮次 | 本次由 `0001787933034346-000451-44d5c067` 现场纠正；与 Case E16 跨任务同型，因此按重复理解偏差记录。F311 spec v4 已在 `9066fe040` 改为 dependency repair 与 production build 并行、E0 合格目标触发首个 Program，并把 F266/F278 source refs 投回各自 owner thread。 |
+| 纠正轮次 | 本次由 `private-source-id` 现场纠正；与 Case E16 跨任务同型，因此按重复理解偏差记录。F311 spec v4 已在 `9066fe040` 改为 dependency repair 与 production build 并行、E0 合格目标触发首个 Program，并把 F266/F278 source refs 投回各自 owner thread。 |
 | 元心智哪条没执行 | Q3 坐标变换：没有先从“最终生产架构不能丢什么”倒推施工顺序；机制选择反射：没有逐 claim 区分确定契约、运行健康与不确定效用。 |
 
 ### Case E18: 把 active review lease 当成 reviewer 已被唤醒（2026-08-28，codex-sol）
@@ -830,9 +835,9 @@ operator experience："简直了你和Maine Coon是没头脑（Maine Coon听不�
 | 维度 | 内容 |
 |------|------|
 | 我以为 | PR #4058 的复审重入返回 `safe_wait` / active lease，且 review packet 已持久化，因此球已经在 Opus 5 手里并正在执行；我可以停下来等 verdict。 |
-| 实际要求 | ActionSuccessorLease 只证明同一 subject 的 single-flight custody，`safe_wait` 按合同不创建新消息或 Queue entry；它不证明 reviewer 有可消费 carrier，更不证明 execution 已启动。runtime 重启后，packet `0001787974960984-000867-6412f99f` 没有 `deliveryStatus/queueEntryId`，当时也没有 Opus 5 execution。只有补发普通行首路由 `0001787976029900-000027-5d784657` 并得到 queued receipt 后，才出现 Opus 5 execution `99190b1c-5d07-4b8e-99f4-e70b947a475b`。 |
+| 实际要求 | ActionSuccessorLease 只证明同一 subject 的 single-flight custody，`safe_wait` 按合同不创建新消息或 Queue entry；它不证明 reviewer 有可消费 carrier，更不证明 execution 已启动。runtime 重启后，packet `private-source-id` 没有 `deliveryStatus/queueEntryId`，当时也没有 Opus 5 execution。只有补发普通行首路由 `private-source-id` 并得到 queued receipt 后，才出现 Opus 5 execution `99190b1c-5d07-4b8e-99f4-e70b947a475b`。 |
 | 偏差根因 | **证据坐标坍缩 + 状态说明代替动作**：把 custody（谁有资格做）、carrier（是否有可消费投递）和 liveness（是否已启动执行）压成一个“lease active”；又把“已确认 lease”写成“已传球”，没有要求 transport receipt 或 execution truth。旧文本出口 guard 在 Phase T cutover 后已被结构化 custody stop-gate 取代，而现有 `safe_wait` / skill 合同没有联结 carrier liveness，使我的错误推断没有被机器拦下。**分界判据**：lease existence 只能证明互斥责任；宣称“已传球”至少要有 per-target queued carrier，宣称“正在跑”还要有 awakened/execution truth。 |
-| 纠正轮次 | 同一任务 2 次：`0001787975991774-000025-faad7555` 纠正“和operator说不会唤醒 Opus 5，必须实际传球”；`0001787976199344-000031-cfbcdee2` 进一步纠正“active lease 不等于 Opus 5 正在跑”。纠正后已补发真实路由，并把 recurrence 以 source refs 投到 F167 owner thread（`0001787976468626-000040-6845a667`）。 |
+| 纠正轮次 | 同一任务 2 次：`private-source-id` 纠正“和operator说不会唤醒 Opus 5，必须实际传球”；`private-source-id` 进一步纠正“active lease 不等于 Opus 5 正在跑”。纠正后已补发真实路由，并把 recurrence 以 source refs 投到 F167 owner thread（`private-source-id`）。 |
 | 元心智哪条没执行 | Q2 信息验证：没有用 Queue receipt / active execution 验证 downstream liveness；Q3 坐标变换：没有把“协议球在谁名下”拆成 custody、delivery、execution 三个独立状态。 |
 
 ### Case E19: 把平行 invocation 的责任并入当前 thread 进度（2026-09-01，codex-sol）
@@ -842,7 +847,7 @@ operator experience："简直了你和Maine Coon是没头脑（Maine Coon听不�
 | 我以为 | operator在 F311 Phase 3 thread 问“咱们现在什么情况、你继续推进”时，同一 `catId` 的 Phase 2 invocation 也属于“我”的当前责任，因此应把 Phase 2 worktree、额度中断与续跑安排作为主要进度，并进一步声称“我现在该推进 Phase 2”。 |
 | 实际要求 | 当前 thread 的 Sol 只持有 Phase 3 的本地角色与责任：本 thread 负责 PR #4175，Opus 5 是 author、Sol 是非作者 reviewer。Phase 2 虽由平行世界的 `codex-sol` 负责，但它不与当前 invocation 共享上下文、球权或责任；当前状态回答必须先锚定 Phase 3，跨 thread 依赖只能作为阻塞边界说明。 |
 | 偏差根因 | **identity 覆盖 thread 坐标 + 跨 thread 证据污染当前 scope**：把“同一个 `catId`”误当成“同一个行动主体”，没有先用当前 thread 导航、任务原文与 PR tracking 确认本地 subject；随后又用 Phase 2 的实现进展替代 Phase 3 状态。与 Case E14 的角色拓扑反校验缺失同型。**分界判据**：回答“你/咱们现在做什么”时，先解析当前 `threadId → subject → local role`；其他 thread 的同 `catId` 一律视为外部依赖方，除非用户明确询问跨 thread 总览。 |
-| 纠正轮次 | 同一任务 2 次：`0001788249160856-000079-1d9c845f` 首次指出当前问题是 Phase 3；`0001788249711685-000095-2a2491dc` 再次明确 Phase 2 是平行世界、当前 thread 只问 Phase 3。纠正后状态已重新锚定 PR #4175 exact HEAD `9d3556b59c05f619f63003164bb95d2050447906`，不再把 Phase 2 的球权或工作进度并入当前 thread。 |
+| 纠正轮次 | 同一任务 2 次：`private-source-id` 首次指出当前问题是 Phase 3；`private-source-id` 再次明确 Phase 2 是平行世界、当前 thread 只问 Phase 3。纠正后状态已重新锚定 PR #4175 exact HEAD `9d3556b59c05f619f63003164bb95d2050447906`，不再把 Phase 2 的球权或工作进度并入当前 thread。 |
 | 元心智哪条没执行 | Q1 角色确认：没有先确认“本 thread 的 Sol”是 Phase 3 reviewer；Q2 信息验证：虽读取了真实 Phase 2 数据，却选错了当前问题的 resolver；Q3 坐标变换：没有把同一 catId 拆成多个不共享状态的 thread-bound invocation。 |
 
 ### Case E20: 把 Theseus 的外部卖点重报成 F311 的学习项（2026-09-04，codex-sol）
@@ -852,7 +857,7 @@ operator experience："简直了你和Maine Coon是没头脑（Maine Coon听不�
 | 我以为 | 把 Theseus 与 Clowder AI 从“竞争”改画为“互补”后，可以把环境进化、多文件项目评测、纵向能力账、难例生长与前后案例表达列为“咱们向 Theseus 学”的五项，再用“Theseus 进化引擎 + Clowder AI 价值治理控制面”拼成完整闭环。 |
 | 实际要求 | [F311](./F311-capability-evolution-workspace.md) 已经定义从 Program 建制、开眼取证、评估归因到受治理写回、复验、资产代谢和二阶机制进化的完整联邦闭环，也显式覆盖 workspace、外部 Harness 与 owner 原地 mutation。外部伙伴比较必须先以 F311 canonical capability 为基线，把每项 claim 分成“家里已有的产品/宪法”“对方可能更深的 owner 实现”“真正缺口”；Theseus 更合理的合作位置是可接入 F311 的 environment/data/eval/model owner，而不是补上咱们缺失的半条进化链。 |
 | 偏差根因 | **外部叙事锚定 + 已读真相源未进入判定函数 + 能力层与实现层坍缩**：虽然读取了 F311，却继续沿 Theseus BP 的分类组织结论，把双方共有的目标层主张误写成单向学习项，也把 F311 的薄联邦控制面缩成单一治理层。与 Case E11/E12 的“读到 canonical source 却选错比较坐标”及 Case E17 的 F311 产品层级坍缩同型。**分界判据**：回答“咱们向外部项目学什么”前，先逐 claim 做 `canonical baseline → overlap → implementation delta → evidence ceiling`；只有 implementation delta 或真实未覆盖能力可称为学习项。 |
-| 纠正轮次 | 同一任务 2 次：`0001788512204305-000666-1cae5ac8` 首次纠正“不是竞争关系，而是可能合作关系”；`0001788512591644-000677-7b9d8477` 再次指出五条学习项忽略 F311。纠正后已发布 V2 更正图 `0001788513082011-000684-d53781e1`，撤回四项为“F311 已有”，将案例表达降为视频未取得、待补证，并把真实增量收敛到环境算法、数据工艺、参数级能力与 benchmark 生产。 |
+| 纠正轮次 | 同一任务 2 次：`private-source-id` 首次纠正“不是竞争关系，而是可能合作关系”；`private-source-id` 再次指出五条学习项忽略 F311。纠正后已发布 V2 更正图 `private-source-id`，撤回四项为“F311 已有”，将案例表达降为视频未取得、待补证，并把真实增量收敛到环境算法、数据工艺、参数级能力与 benchmark 生产。 |
 | 元心智哪条没执行 | Q2 信息验证：虽然读了 F311，却没有逐项用原文否证“这是咱们没有的”；Q3 坐标变换：从竞争改成合作只换了关系语气，没有把比较原点从 Theseus BP 移回 F311 canonical capability。 |
 
 ### Case E21: 把“去黑话”钟摆式改写成口语 slogan（2026-09-04，codex-sol × fable-5）
@@ -862,8 +867,52 @@ operator experience："简直了你和Maine Coon是没头脑（Maine Coon听不�
 | 我以为 | operator指出“判断与信任递归演进”等表达拧巴、黑话过重，意味着应把 Growing slogan 降到最口语、最容易立即理解的表达，因此收敛为“一起做过一次，下一次就不用从头来”。 |
 | 实际要求 | 目标语体是技术路演和正式文档可用的现代书面中文：术语有定义、主谓清楚、修辞克制；既不堆叠内部黑话，也不把概念降成宣传口语。正确方向是“让共同经历沉淀为持续演进的能力”一类正式、自然且概念边界清楚的表达。 |
 | 偏差根因 | **把两个维度压成一根轴，导致钟摆式过度纠正**：将“术语透明度”与“语体正式度”错误合并为“学术黑话 ↔ 大白话”，收到去黑话反馈后直接滑到口语端，漏掉“透明且正式”的目标象限。与 Case E7 的语域整体预测缺失同型。**分界判据**：改写正式表达时分别检查（1）术语是否可解释，（2）句法是否自然，（3）语体是否匹配场合；去掉黑话不等于降低正式度。 |
-| 纠正轮次 | 同一任务 2 次：`0001788539041626-001301-d8b1f4fa` 首次指出标题和图中文字仍有奇怪黑话；`0001788543273574-001378-6801c11d` 再次指出“大白话”不是目标。 |
+| 纠正轮次 | 同一任务 2 次：`private-source-id` 首次指出标题和图中文字仍有奇怪黑话；`private-source-id` 再次指出“大白话”不是目标。 |
 | 元心智哪条没执行 | Q3 坐标变换——没有把“可理解性”和“正式度”拆成正交维度，也没有在技术领导路演这一真实使用场景里朗读检查整句。 |
+
+### Case E22: 把无关主线失败倒灌成 F311 的整项停止条件（2026-09-06，codex-astra）
+
+| 维度 | 内容 |
+|------|------|
+| 我以为 | F311 full gate 被 eval-hub 固定日期列表断言打断，即使已在 main 与作者树复现同一失败且没有相关作者改动，也应把 F311 任务标 blocked，等待原 owner 修好才发布和审阅。 |
+| 实际要求 | operator 需要尽快演示可读的 Workspace；已证实无关失败须保留原回执，按 operator 对该红项的明确非阻塞处置继续本 PR 的相关验证、独立审阅、合入与 Alpha 验收。F311 自身缺陷和真实授权边界仍然有效。 |
+| 偏差根因 | **局部健康事实扩大为全局交付依赖**：把“存在一个红项”与“该红项应阻止当前交付”合并成同一判断，未按 claim、归属和已有授权区分停止条件。与 Case E8 将后一步边界倒灌到已可执行 merge 的模式相同；不是要把所有主线失败默认为可忽略。 |
+| 纠正轮次 | 同一任务中 operator 于 `[thread-id]#private-source-id` 追问阻塞者，`private-source-id` 明确无关红项不阻塞合入，`private-source-id` 再指出演示等待不合适。纠正后相关131项检查与 Opus5 完整独立审通过，PR #4377 合入 `4cd692ea1c`；同 build Alpha 实测往返2/2和来源/1440/390/320通过。 |
+
+### Case E23: 把已共同使用的持续输入链路退回可行性实验（2026-09-09，codex-astra）
+
+| 维度 | 内容 |
+|------|------|
+| 我以为 | GPT-Live 音频与原生任务交接 spike 之后，还应把“大猫分析期间追加条件或画面，回答能否随之改变”列为下一项基础可行性实验。 |
+| 实际要求 | operator 在 `[thread-id]#private-source-id` 指出：咱们已经多次在大猫思考时追加 PPT 截图、输入伴随会议的 ASR 转写并继续交谈。产品定义应直接消费这条已有使用基线；新增工作是自动取得现场、全双工快端与深思端的持续配合、屏幕指点及桌面体验。 |
+| 偏差根因 | **新实验锚定 + 既有使用证据未进入基线**：把本轮单个 spike 的验证范围当成全家的能力上限，虽然读过 coactive 愿景和伴随会议材料，仍从接口文档重新提出已实践的问题。与 Case E20“已读家内能力没有进入增量判断”同型。判据是先区分已有真实使用、仍需人工搬运的输入和真正未实现的体验，再决定新实验要回答什么。 |
+| 纠正轮次 | 本次由上述 operator 消息纠正 1 次；跨任务已有 Case E20 同型证据。当前范围已同步修正“下一项实验”“待验证基础”和“完整猫的组成”三处表述：保留快端与具名深思端共同组成完整猫的定义，不再重复验证已使用的持续追加能力。 |
+
+### Case E24: 把作品交互参照压成按钮清单（2026-09-10，codex-astra）
+
+| 维度 | 内容 |
+|------|------|
+| 我以为 | 作品审阅已有标注/评论模式、F056 token 和功能回归，就足以把旧表单骨架交给 operator 做体验确认。 |
+| 实际要求 | 沿 operator 提供的 ChatGPT 参考保留作品、就地操作与表达意见的同屏关系；用家里的颜色和图标适配。用户不应滚到作品下方寻找主要输入和提交。 |
+| 偏差根因 | **任务关系被功能清单替换**：技术审查覆盖了动作正确性，却没有让实际空间关系进入交付判断；又把整张参考 UI 当作品，令图内假工具条污染了体验对照。不是缺少设计规则，而是没有在真实任务中消费已经明确的参照。 |
+| 纠正轮次 | 同一任务两次明确纠正：`[thread-id]#private-source-id` 指出灰按钮与设计表达，`private-source-id` 指出向下翻找操作；后者再次送达仍是同一来源，不重复计数。 |
+
+### Case E25: 采样长文盖过已写好的裁决稿（2026-09-10，codex-astra）
+
+| 维度 | 内容 |
+|------|------|
+| 我以为 | 把 F311 压力情景跑完、保存完整回答、继续检查和发布 PR，足以让 operator 知道裁决在推进。 |
+| 实际要求 | operator 等的是 Astra 对 Fable 首稿的明确裁决和可读成稿；实验记录是判断附件，不能要求人从虚构情景中找出真实工作进度。 |
+| 纠正轮次 | 同一任务两次：`[thread-id]#private-source-id` 指出答非所问，`private-source-id` 追问裁决稿；Fable 283 指明注意力成本，290 确认原文归档和主回复收准。 |
+
+### Case E26: 桌宠去掉外框，交流仍是配置面板（2026-09-15，codex-astra）
+
+| 维度 | 内容 |
+|------|------|
+| 我以为 | F317 先把安装、共享、连接、深思与保存状态做成可操作面板；收到桌宠外形反馈后，改成透明猫、点击展开原面板，就接住了纠正。 |
+| 实际要求 | operator 点“聊聊”要直接与猫交流、继续当前事情；第二次附 GPT-Live 紧凑语音条参照，明确否定配置式大面板的交互方向。 |
+| 偏差根因 | **能力检查清单替代了人的主动作**：第一轮只修驻留外形，没重审点击后的交流路径。与 Case E24 的“任务关系被功能清单替换”同型；已有设计规则与参照未进入判断，局部行为检查无法替代体验判断。 |
+| 元心智哪条没执行 | Q1 没有从“此刻只是想和猫说话”判断必要操作；Q3 没分开运行状态必须真实与所有状态必须同时变成前台控件。 |
 
 ## Review Gate
 

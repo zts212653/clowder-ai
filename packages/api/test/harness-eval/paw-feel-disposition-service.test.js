@@ -112,7 +112,7 @@ describe('PawFeelDispositionService', () => {
     );
     const fixResult = await service.execute(
       { kind: 'cat', id: 'opus' },
-      command('mark_fix', fix.signalId, 1, { leaseId: 'lease-active' }),
+      command('mark_fix', fix.signalId, 1, { leaseId: 'lease-active', actionRef: 'fixture-action' }),
     );
 
     assert.equal(duplicateResult.projection.state, 'duplicate');
@@ -137,7 +137,10 @@ describe('PawFeelDispositionService', () => {
     await assert.rejects(
       service.execute(
         { kind: 'cat', id: 'opus' },
-        command('mark_fix', source.signalId, 1, { leaseId: 'transport-receipt-only' }),
+        command('mark_fix', source.signalId, 1, {
+          leaseId: 'transport-receipt-only',
+          actionRef: 'fixture-action',
+        }),
       ),
       /active lease/i,
     );
@@ -218,6 +221,13 @@ describe('PawFeelDispositionService', () => {
       ),
       /collision/i,
     );
+
+    const terminal = command('mark_no_action', source.signalId, 2, {
+      eventId: 'stable-terminal-event',
+      reasonCode: 'not_actionable',
+    });
+    assert.equal((await service.execute({ kind: 'cat', id: 'opus' }, terminal)).outcome, 'appended');
+    assert.equal((await service.execute({ kind: 'cat', id: 'opus' }, terminal)).outcome, 'duplicate');
   });
 
   it('bulk execution writes an independent cat-signed event per signal', async () => {

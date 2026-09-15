@@ -19,7 +19,7 @@ describe('createTmuxSpawnOverride', () => {
     await gateway.destroyServer(WORKTREE);
   });
 
-  it('override yields events and registers pane in AgentPaneRegistry', async () => {
+  it('override yields events and registers pane in AgentPaneRegistry', async (t) => {
     const invocationId = 'override-inv-1';
     const override = createTmuxSpawnOverride(WORKTREE, invocationId, 'test-user', gateway, registry);
 
@@ -27,6 +27,7 @@ describe('createTmuxSpawnOverride', () => {
     for await (const event of override({
       command: process.execPath,
       args: ['-e', 'console.log(JSON.stringify({type:"hello",cliContext:process.env.CAT_CAFE_CLI_PROCESS_CONTEXT}))'],
+      signal: t.signal,
     })) {
       events.push(event);
     }
@@ -41,13 +42,14 @@ describe('createTmuxSpawnOverride', () => {
     assert.equal(events.find((event) => event.type === 'hello')?.cliContext, 'cat');
   });
 
-  it('override works without AgentPaneRegistry', async () => {
+  it('override works without AgentPaneRegistry', async (t) => {
     const override = createTmuxSpawnOverride(WORKTREE, 'override-inv-2', 'test-user', gateway);
 
     const events = [];
     for await (const event of override({
       command: '/bin/sh',
       args: ['-c', 'echo \'{"type":"ok"}\''],
+      signal: t.signal,
     })) {
       events.push(event);
     }

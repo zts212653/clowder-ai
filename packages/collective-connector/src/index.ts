@@ -7,6 +7,7 @@ export type { ConnectorProjection } from './projection.js';
 export type {
   AgentHostRoute,
   ConnectorInboxItem,
+  ConnectorOutboxItem,
   ConnectorRouteFailure,
   ConnectorRouteReceipt,
   HostRouteConfig,

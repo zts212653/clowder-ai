@@ -1,7 +1,13 @@
 import {
   type CollectiveEventEnvelope,
+  type CollectiveLocation,
+  type CollectiveSourceIdentity,
+  type CollectiveStandingWork,
   type CollectiveTarget,
   collectiveEventEnvelopeSchema,
+  collectiveLocationSchema,
+  collectiveSourceIdentitySchema,
+  collectiveStandingWorkSchema,
   collectiveTargetSchema,
 } from '@cat-cafe/shared';
 import { z } from 'zod';
@@ -19,11 +25,24 @@ const outboxItemSchema = z
   .object({
     outboxId: z.string(),
     clientEventId: z.string(),
-    agent: verifiedAgentSchema,
+    agent: verifiedAgentSchema.optional(),
     target: collectiveTargetSchema,
+    location: collectiveLocationSchema.optional(),
+    replySource: collectiveSourceIdentitySchema.optional(),
+    operationKey: z.string().max(1000).optional(),
+    sourceRef: z.string().max(300).optional(),
+    workPurpose: z
+      .object({
+        taskRef: z.string().startsWith('task:work:'),
+        admittedRevision: z.number().int().positive(),
+        resultRevision: z.literal(1),
+      })
+      .strict()
+      .optional(),
     replyToEventId: z.string().optional(),
     body: z.string(),
-    status: z.enum(['queued', 'sending', 'accepted']),
+    status: z.enum(['prepared', 'queued', 'sending', 'accepted', 'blocked']),
+    failureCode: z.string().optional(),
     acceptedEventId: z.string().optional(),
     createdAt: z.string().datetime(),
   })
@@ -82,6 +101,14 @@ const agentHostRouteSchema = z
   .object({
     catId: z.string().trim().min(1).max(120),
     threadId: z.string().trim().min(1).max(240),
+    standingWork: collectiveStandingWorkSchema.optional(),
+    participation: z
+      .object({
+        displayName: z.string().trim().min(1).max(120),
+        channelIds: z.array(z.string().trim().min(1).max(160)).min(1).max(100),
+      })
+      .strict()
+      .optional(),
   })
   .strict();
 
@@ -192,11 +219,17 @@ export type VerifiedAgent = z.infer<typeof verifiedAgentSchema>;
 export interface ConnectorOutboxItem {
   readonly outboxId: string;
   readonly clientEventId: string;
-  readonly agent: VerifiedAgent;
+  readonly agent?: VerifiedAgent;
   readonly target: CollectiveTarget;
+  readonly location?: CollectiveLocation;
+  readonly replySource?: CollectiveSourceIdentity;
+  readonly operationKey?: string;
+  readonly sourceRef?: string;
+  readonly workPurpose?: { readonly taskRef: string; readonly admittedRevision: number; readonly resultRevision: 1 };
   readonly replyToEventId?: string;
   readonly body: string;
-  readonly status: 'queued' | 'sending' | 'accepted';
+  readonly status: 'prepared' | 'queued' | 'sending' | 'accepted' | 'blocked';
+  readonly failureCode?: string;
   readonly acceptedEventId?: string;
   readonly createdAt: string;
 }
@@ -230,6 +263,8 @@ export interface ConnectorRouteFailure {
 export interface AgentHostRoute {
   readonly catId: string;
   readonly threadId: string;
+  readonly standingWork?: CollectiveStandingWork;
+  readonly participation?: { readonly displayName: string; readonly channelIds: readonly string[] };
 }
 
 export interface HostRouteConfig {

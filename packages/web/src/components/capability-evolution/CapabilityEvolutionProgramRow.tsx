@@ -1,17 +1,18 @@
 import {
   type EvolutionProgramPresentationProjection,
-  humanizeEvolutionTarget,
+  evolutionProgramPresentation,
   productStatus,
 } from './capability-evolution-presentation';
 
-function CapabilityGlyph({ ownerStateRef }: { ownerStateRef: string }) {
-  const kind = ownerStateRef.includes('microduck')
-    ? 'robot'
-    : ownerStateRef.includes('roadshow')
-      ? 'presentation'
-      : ownerStateRef.includes('development-process')
-        ? 'process'
-        : 'evolution';
+function CapabilityGlyph({ ownerFeatureId, ownerStateRef }: { ownerFeatureId: string; ownerStateRef: string }) {
+  const kind =
+    ownerFeatureId === 'microduck-owner' || ownerStateRef.includes('microduck')
+      ? 'robot'
+      : ownerStateRef.includes('roadshow')
+        ? 'presentation'
+        : ownerStateRef.includes('development-process')
+          ? 'process'
+          : 'evolution';
   return (
     <svg
       aria-hidden="true"
@@ -55,7 +56,7 @@ export function CapabilityEvolutionProgramRow({
   selected: boolean;
   onSelect: () => void;
 }) {
-  const target = humanizeEvolutionTarget(projection.program.objectRef);
+  const target = evolutionProgramPresentation(projection.program, projection.origin);
   const status = productStatus(projection);
   return (
     <button
@@ -63,16 +64,24 @@ export function CapabilityEvolutionProgramRow({
       onClick={onSelect}
       data-testid={`capability-evolution-program-${projection.program.programId}`}
       aria-pressed={selected}
-      className="group grid w-full grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-3 rounded-xl border border-cafe-subtle/75 bg-[var(--console-card-bg)] px-4 py-3.5 text-left transition-colors hover:border-cafe-accent/35 hover:bg-cafe-surface aria-pressed:border-cafe-accent/45 aria-pressed:bg-cafe-accent/5"
+      className="evolution-project-row group grid w-full grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-3 rounded-xl border border-cafe-subtle/75 bg-[var(--console-card-bg)] px-4 py-3.5 text-left transition-colors hover:border-cafe-accent/35 hover:bg-cafe-surface aria-pressed:border-cafe-accent/45 aria-pressed:bg-cafe-accent/5"
     >
       <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-cafe-surface-sunken text-cafe-accent">
-        <CapabilityGlyph ownerStateRef={projection.program.objectRef.ownerStateRef} />
+        <CapabilityGlyph
+          ownerFeatureId={projection.program.objectRef.ownerFeatureId}
+          ownerStateRef={projection.program.objectRef.ownerStateRef}
+        />
       </span>
       <span className="min-w-0">
-        <span className="block truncate text-sm font-semibold text-cafe-black">{target.title}</span>
-        <span className="mt-1 block truncate text-xs text-cafe-muted">{status.description}</span>
+        <span className="block break-words text-sm font-semibold leading-6 text-cafe-black">{target.title}</span>
+        {!projection.program.displayName && (
+          <span className="block text-xs text-cafe-muted">
+            {projection.origin ? '尚未命名 · 发起对话' : '尚未保存目标名称'}
+          </span>
+        )}
+        <span className="mt-1 block text-xs leading-5 text-cafe-secondary">{status.description}</span>
       </span>
-      <span className="text-right">
+      <span className="evolution-project-status text-right">
         <span className="block rounded-full bg-cafe-surface-sunken px-2.5 py-1 text-micro font-semibold text-cafe-secondary">
           {status.label}
         </span>

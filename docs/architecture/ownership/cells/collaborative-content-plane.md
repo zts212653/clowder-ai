@@ -8,11 +8,21 @@ description_author: codex-sol
 description_generated_by: codex-sol@gpt-5.6-sol
 description_generated_at: 2026-08-28T01:32:24Z
 description_confirmed_by: codex-sol
-description_updated_at: 2026-08-28T05:29:14Z
+description_updated_at: 2026-09-13T20:42:00Z
 doc_kind: architecture
 created: 2026-08-27
 canonical_features: [F309]
-code_anchors: []
+code_anchors:
+  - packages/api/src/domains/collaborative-content/runtime-composition.ts
+  - packages/api/src/domains/collaborative-content/workspace-editor-service.ts
+  - packages/api/src/domains/collaborative-content/editor-session-service.ts
+  - packages/api/src/domains/collaborative-content/patch-service.ts
+  - packages/api/src/domains/collaborative-content/semantic-operation-store.ts
+  - packages/api/src/domains/collaborative-content/named-cat-content-service.ts
+  - packages/api/src/routes/callback-content-editor-routes.ts
+  - packages/api/src/domains/video-studio/content-owner/service.ts
+  - packages/mcp-server/src/tools/content-editor-tools.ts
+  - packages/web/src/components/workbench/content-editor/ContentEditorOwnerSurface.tsx
 doc_anchors:
   - docs/features/F309-collaborative-content-plane.md
   - project-research/2026-08-27-f309-collaborative-content-plane/README.md
@@ -23,6 +33,8 @@ doc_anchors:
 static_scan_hints: [SelectionAnchor, AuthorizationDecisionRef, AnnotationThread, PatchProposal, Disposition, ContentChangeReceipt, receiptId, causal checkpoint, replay, PresenceProjection, change awareness, proposal state CAS, applyReceipt, coordinate space, timebase, table range, reanchor, orphaned, content adapter]
 cited_by:
   - {feature: F309, date: 2026-08-27, delta: new cell — extract cross-media collaboration mechanics from F290 and keep F307/content-owner boundaries explicit}
+  - {feature: F309, date: 2026-09-06, delta: DOCX owner session and independent authenticated cat operation vertical; materialization stays F202-owned and canonical bytes/receipts stay F138-owned}
+  - {feature: F309, date: 2026-09-13, delta: record the missing two-Human canonical Markdown slice for F290 W4 and keep bytes/auth in the content owner, lifecycle in F309, and mount in F307}
 ---
 
 # Collaborative Content Plane
@@ -50,6 +62,14 @@ or verifiable F290 domain context fails closed; neither side can override the ot
 attention/runtime decides whether an authorized bounded change notice enters model context; F309 does not own
 invocation. F063/F138 and future Office, image, canvas and table owners
 implement the authorization/content adapter ports.
+
+This boundary also governs F290 W4 shared Markdown. F290 authenticates Collective Humans and supplies fresh
+membership/visibility context, but does not store Markdown bytes. A canonical Markdown content owner holds the
+same `contentRef`, bytes, opaque owner version, mutation/undo receipts and final action authorization. F309 owns
+the read/annotation/proposal/disposition/version lifecycle around that owner; F307 only mounts the owner surface.
+No currently shipped path satisfies this full boundary: the existing Workspace editor and named-cat service are
+DOCX-only and fenced to one Host `ownerUserId`; F063 Markdown is owner-local worktree SHA CAS, not cross-Human
+content authority.
 
 ## Use This When
 
@@ -83,6 +103,9 @@ implement the authorization/content adapter ports.
 - Fail closed as `ambiguous` or `orphaned`; never silently select a low-confidence fallback candidate.
 - Let the content owner validate/apply/invert and return exact new-version receipts before settling a patch.
 - Keep annotation/patch/disposition records durable by default; deletion/retention is explicit user policy.
+- For a shared Markdown consumer, reuse the same `contentRef`, owner authorization decision, version-bound
+  proposal, disposition CAS and owner receipt. F290 contributes current domain context/Artifact lineage only;
+  revoke or expiry invalidates subsequent reads, projections and mutations without deleting allowed audit evidence.
 
 ## Do NOT Unify With
 
@@ -101,10 +124,43 @@ implement the authorization/content adapter ports.
 - Do not invent a universal diff IR. The public plane owns proposal lifecycle and receipts; adapter payloads
   stay typed by their content owner.
 - Do not claim image bbox, video time range, Office round-trip or stable SDK support from README adjacency.
+- Do not use F063's owner-local Markdown edit token, F232's read projection, or a browser localStorage fixture as
+  proof that two authenticated Humans share one canonical Markdown owner. Do not place a second Markdown copy in
+  F290 Collective Service.
 
-## Phase A Boundary
+## DOCX Implementation Boundary
 
-This cell intentionally has no code anchors while F309 is in Research + Design Gate. Phase B remains closed
-until typed coordinate invariants, owner-auth/revocation/redaction, receipt authentication/replay/order, patch
-settlement/undo CAS, storage boundary, open-source integration posture and the two-media vertical slice pass
-non-author review and operator disposition.
+The first implemented vertical is the owner-backed DOCX journey. Human bridge saves and independent,
+callback-authenticated named-cat tracked changes/comments converge on F138's content owner CAS. F309 sessions
+bind the owner-authorized actor/content/provider/package/grant/runtime lease, revalidate before settlement,
+and never accept an actor or human bearer from a cat tool body. The two MCP entries consume canonical callback
+auth and return bounded, explicitly untrusted document anchors or exact owner receipts.
+
+The immutable semantic-intent store contains only an operation fingerprint and a stable timestamp with TTL=0.
+Replay retrieves F138's original receipt; no second candidate/document/version/receipt store is introduced.
+The GenOffice engine owns OOXML anchors and edits inside F202's independently contained materializer. F309
+neither executes arbitrary package code nor borrows a human editor page. F307 detach remains a surface concern;
+authority loss preserves the local unsaved frame, and reopening the saved version requires explicit discard.
+
+These concrete DOCX anchors do not claim the remaining cross-media coordinate, annotation-disposition, undo,
+change-awareness or two-media acceptance work is complete. Those broader contracts still require their
+matching owner adapters, verification and operator disposition.
+
+## Shared Markdown Consumer Boundary
+
+F290 W4 is a consumer slice of this existing contract, not a new owner or collaboration concept. Its delivery
+sequence is:
+
+1. F290 resolves two authenticated Human principals and supplies fresh Collective/Channel/Artifact context.
+2. The Markdown content owner authorizes and returns canonical `text/markdown` bytes plus its current opaque
+   owner version for one `contentRef`.
+3. F309 resolves text-range anchors and records annotation plus a version-bound patch proposal; it does not copy
+   the Markdown body into its ledger.
+4. An authorized Human disposition wins proposal-state/revision CAS, then the owner applies against the expected
+   owner version and emits the only valid new-version receipt.
+5. F307 mounts `contentRef + sessionRef`; F290 associates the returned version with the original Artifact lineage.
+6. Revocation or expiry invalidates existing sessions and every later read/projection/mutation. Cached content is
+   not served; only owner-permitted content-free audit evidence remains.
+
+Acceptance requires two distinct Human identities, restart readback, and a real revoke replay. A successful
+single-owner DOCX session, local worktree Markdown CAS, read-only projection, or fixture cannot satisfy it.

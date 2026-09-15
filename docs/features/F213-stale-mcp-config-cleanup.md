@@ -252,7 +252,7 @@ trace 所有 mcp config writer：
 | B | B1..B5 | ✅ met | PR #1903 merged commit `487b27f0d` (Phase B delivered: shared cleanup helper + 4 harness extension Claude/Gemini/Antigravity/Kimi + 72/72 mcp-config-adapters tests) |
 | C | C1 | ✅ met | ADR-036 amended 2026-05-26 (commit `c2eeb6382` + `d42ea892b` doc-tail cleanup) |
 | C | C2 | ✅ delete(why) | F193 spec related_features 反向链已建（commit `c2eeb6382`），不需独立 follow-up 节 |
-| D | D1 | ✅ cvo_signoff | operator 2026-05-26 01:58 message `0001779785882771-000536-f145a458`：「现在暂时不能 a 因为有个 PR 在外部合入了但是还没 intake 回家... 我们本来之后就要全量同步一次了」— defer 到外部 PR intake 后全量同步 |
+| D | D1 | ✅ cvo_signoff | operator 2026-05-26 01:58 message `private-source-id`：「现在暂时不能 a 因为有个 PR 在外部合入了但是还没 intake 回家... 我们本来之后就要全量同步一次了」— defer 到外部 PR intake 后全量同步 |
 | D | D2 | ✅ cvo_signoff | `feedback_no_touch_runtime` P0 铁律：runtime sync 由 operator 自主决定时机，47 不擅自触碰 |
 | E | E1..E4 | ✅ met | 跨族愿景守护 antig-opus APPROVE / CloseGateReport (本节) / 反思胶囊 / PR #1894 close + 4-line toml workaround in close comment `#4541459254` |
 

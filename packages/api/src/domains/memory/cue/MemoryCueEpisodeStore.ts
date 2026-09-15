@@ -206,6 +206,13 @@ export class MemoryCueEpisodeStore {
     ).map(fromRow);
   }
 
+  getByEventId(eventId: string): MemoryCueEvent | null {
+    const row = this.db.prepare('SELECT * FROM memory_cue_events WHERE event_id = ?').get(eventId) as
+      | MemoryCueEventRow
+      | undefined;
+    return row ? fromRow(row) : null;
+  }
+
   hasConsumptionOutcome(
     scope: RecallScopeV1,
     cueId: string,

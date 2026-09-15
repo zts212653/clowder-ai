@@ -27,14 +27,14 @@ description_updated_at: 2026-08-28T16:24:00Z
 
 operator 要的不是“采到过”，而是每条爪感差都有人负责看、能追到处置，并且现场可见：
 
-- `0001785055205203-000023-c79c98f3`：授权把“爪感差已采集”升级为“每条都被看见、审阅并有处置”。
-- `0001785070497266-000579-b2934c25`：“这个必须做”“让系统 thread 的猫直接收了看了”“在 Workspace 实时看到你们都上报了什么”。
-- `0001785414248058-000159-bd739ce3`：追问值班猫在哪里配置、多久看一次、看完怎样处理，以及人猫完整旅程是否真的规定。
-- `0001785414536911-000162-4a459989`：指出同一 thread、同一 invocation 会产生多条相关 signal，按逐条平铺会反复阅读同一上下文。
-- `0001785418998194-000191-a53bd6bd`：授权更新 F278 spec、补全 gap；代码完成后再由 operator 重启并配置值班猫。
-- `0001786235537994-000350-dcdfd3c3`：真实 inbox 诊断显示 208 bundles / 262 active / 179 overdue，全部非终态仍被 UI 当作 “new”，且 `112876b3` 连续 `bundle_invalid`。
-- `0001786236680561-000372-aff77c69`：授权把真实 friction signal 推进到可验证责任状态，并要求每班留下逐 bundle rich receipt；本轮不启动 runtime、不碰 Redis 6399、不做 production activation。
-- `0001787933034346-000451-44d5c067`：要求 F311 连接既有能力时，由 F278 owner 修复并验收真实 responsibility inbox；禁止在 F311 复制第二套 inbox、duty ledger 或 disposition workflow。
+- `private-source-id`：授权把“爪感差已采集”升级为“每条都被看见、审阅并有处置”。
+- `private-source-id`：“这个必须做”“让系统 thread 的猫直接收了看了”“在 Workspace 实时看到你们都上报了什么”。
+- `private-source-id`：追问值班猫在哪里配置、多久看一次、看完怎样处理，以及人猫完整旅程是否真的规定。
+- `private-source-id`：指出同一 thread、同一 invocation 会产生多条相关 signal，按逐条平铺会反复阅读同一上下文。
+- `private-source-id`：授权更新 F278 spec、补全 gap；代码完成后再由 operator 重启并配置值班猫。
+- `private-source-id`：真实 inbox 诊断显示 208 bundles / 262 active / 179 overdue，全部非终态仍被 UI 当作 “new”，且 `112876b3` 连续 `bundle_invalid`。
+- `private-source-id`：授权把真实 friction signal 推进到可验证责任状态，并要求每班留下逐 bundle rich receipt；本轮不启动 runtime、不碰 Redis 6399、不做 production activation。
+- `private-source-id`：要求 F311 连接既有能力时，由 F278 owner 修复并验收真实 responsibility inbox；禁止在 F311 复制第二套 inbox、duty ledger 或 disposition workflow。
 
 当前 F245 会回扫、聚类并产生周期 verdict，但 Top-N 之外的原始 signal 没有逐条责任状态。结果是“分析系统知道存在”不等于“某只猫必须看完”。F278 补的是责任控制面，不是 embedding 阈值。
 
@@ -310,8 +310,8 @@ semantic suggestion 只是在 bundle 之上的候选合并层；未命中或 deg
 
 2026-07-27 的 live 使用暴露了“数据确实在，但现场很难看懂”的同源问题。operator 原始反馈：
 
-- `0001785188124054-000066-b920c355`：为什么都显示“已等待 12 小时”、为什么看不到刚刚上报的消息、能否倒序、多久收集一次、语义聚类由谁看。
-- `0001785189086903-000100-1dc3ae41`：先把问题写入 feature 真相源并直接提交，再开 worktree 修复。
+- `private-source-id`：为什么都显示“已等待 12 小时”、为什么看不到刚刚上报的消息、能否倒序、多久收集一次、语义聚类由谁看。
+- `private-source-id`：先把问题写入 feature 真相源并直接提交，再开 worktree 修复。
 
 | ID | Live evidence / root cause | Correction contract |
 |---|---|---|
@@ -401,15 +401,15 @@ semantic suggestion 只是在 bundle 之上的候选合并层；未命中或 deg
 - [x] AC-E5: 本阶段不接 semantic suggestion；UI 明确问题族数量不可可靠计算。未来若启用，只比较 bundle 并显示 provenance/health；degraded 不影响 deterministic bundle / raw visibility。
 - [x] AC-E6: Workspace 默认 bundle-first 且 duty-unconfigured fail-loud；Settings 只保留 duty config + compact audit/deep link，不重复完整 history；原消息只显示一个可展开的聚合状态框。
 - [x] AC-E7: transport receipt / 任意字符串不能完成 `routed`；只有 resolver-verified F167 active custody 可签 `fix`。task-backed implement 必须由真实 task 的 named owner 在 task thread 建立 `implement/task_done` lease；owner ACK 不替代 custody。
-- [x] AC-E8: operator 已从 main 激活 runtime 并配置不同的 Primary/Backup；真实 duty cohort 已完成 Primary 审阅、独立 signer CAS 与 durable 44/44 receipt（`0001787934303842-000491-4dd25ef6`）。
+- [x] AC-E8: operator 已从 main 激活 runtime 并配置不同的 Primary/Backup；真实 duty cohort 已完成 Primary 审阅、独立 signer CAS 与 durable 44/44 receipt（`private-source-id`）。
 
 ### F — Business Responsibility & Duty Receipt
 
 - [x] AC-F1: 公共 list→confirm 使用 server-authenticated exact membership snapshot；confirm 期间 source hydration 变化不会让旧列表漂移，late members 不被追溯签署。
-- [x] AC-F2: 每个 bundle 派生五态 responsibility 与 `validExit`；transport-only `routed` 与失效 repair binding 均保持 `unreviewed`，只有 active exact binding 计入 `bound_in_repair`；UI、counts、filters 与原消息 bubble 使用同一投影。2026-08-28 production 全量 `fix` 成员复验为 754 raw / 516 context bundles，零 invalid exit；全局五态分母按未过滤 aggregate bundle 独立报告（`0001787934303842-000491-4dd25ef6`）。
-- [x] AC-F3: actionable bundle 只有 terminal、权威 store 复验仍有效的 owner/task/active lease、当前仍 pending 的 proposal 或 explicit blocker 才能完成本班责任；过期绑定保留历史 evidence 但重新进入 duty，可重绑或显式阻塞；recoverable signature request 保持 active，直到独立 signer 完成 exact candidate 或记录 explicit blocker。真实 cohort 经 Terra 独立签署 26 bundles / 35 signals 后 `signature_waiting=0`（`0001787919538372-000072-fcfb3069`）。
+- [x] AC-F2: 每个 bundle 派生五态 responsibility 与 `validExit`；transport-only `routed` 与失效 repair binding 均保持 `unreviewed`，只有 active exact binding 计入 `bound_in_repair`；UI、counts、filters 与原消息 bubble 使用同一投影。2026-08-28 production 全量 `fix` 成员复验为 754 raw / 516 context bundles，零 invalid exit；全局五态分母按未过滤 aggregate bundle 独立报告（`private-source-id`）。
+- [x] AC-F3: actionable bundle 只有 terminal、权威 store 复验仍有效的 owner/task/active lease、当前仍 pending 的 proposal 或 explicit blocker 才能完成本班责任；过期绑定保留历史 evidence 但重新进入 duty，可重绑或显式阻塞；recoverable signature request 保持 active，直到独立 signer 完成 exact candidate 或记录 explicit blocker。真实 cohort 经 Terra 独立签署 26 bundles / 35 signals 后 `signature_waiting=0`（`private-source-id`）。
 - [x] AC-F4: source cat 可作为 verified repair owner，但不能 terminal-sign 自己的 signal；持久化 exact candidate 与 signer exclusion，preferred signer / Backup 中断后可由其他合法 signer 恢复。
-- [x] AC-F5: duty delivery/wake 不完成 watermark；complete 与 incomplete 都更新同一 durable notice 的逐 bundle rich checklist，只有全部 checked 才 complete；scheduler-owned reconcile 在 duty invocation 失败时仍能留下 danger receipt，未完成 batch 不被新 watermark 覆盖。Production notice `0001787140800835-000075-cad455f5` 在同一消息上持久更新为 44/44 success receipt，逐 bundle checklist 全 checked。
+- [x] AC-F5: duty delivery/wake 不完成 watermark；complete 与 incomplete 都更新同一 durable notice 的逐 bundle rich checklist，只有全部 checked 才 complete；scheduler-owned reconcile 在 duty invocation 失败时仍能留下 danger receipt，未完成 batch 不被新 watermark 覆盖。Production notice `private-source-id` 在同一消息上持久更新为 44/44 success receipt，逐 bundle checklist 全 checked。
 - [x] AC-F6: 真实 `112876b3` failure mode 有 RED→GREEN 回归；focused API/MCP、shared contract、Web 全量与 isolated Redis 6398 DB 15 均有 fresh green evidence。
 - [x] AC-F7: operator 已显式重启 production runtime 并激活真实 duty；2026-08-10 首班 production 验收发现 Phase G blocker，证明 activation gate 已执行但 feature 尚未完成。
 
@@ -435,18 +435,18 @@ semantic suggestion 只是在 bundle 之上的候选合并层；未命中或 deg
 
 ## Review Gate
 
-- 初轮非作者架构审视：Fable 5，HOLD（`0001785056199848-000099-17b86217`）。
-- B1–B5 补齐后 spot-check：PASS（`0001785056890878-000123-bd34b08b`）。
+- 初轮非作者架构审视：Fable 5，HOLD（`private-source-id`）。
+- B1–B5 补齐后 spot-check：PASS（`private-source-id`）。
 - 本次新增“系统 thread 持责 + Workspace 实时 surface”是产品 delta，须由非作者复核后进入实现。
-- 实现 exact-HEAD review：GPT-5.4 在 `056a217f0` 提出并复验两项 P1，最终 APPROVE（`0001785118226652-000421-046a0fb6`）。
+- 实现 exact-HEAD review：GPT-5.4 在 `056a217f0` 提出并复验两项 P1，最终 APPROVE（`private-source-id`）。
 - latest-main rebase continuity：14 个作者 commit patch-equivalent，独立 F152 composition-root 增量无 F278 symbol/hunk 交集，`pnpm gate` 在 `99b31c62` 全绿。
-- 完成愿景守护：Terra 对 Workspace live、系统 thread duty、Settings history 与原消息状态逐项验收，PASS（`0001785122495627-000472-dc54cc2a`）。
-- post-close correction exact-HEAD review：GPT-5.4 对 `e87cbbfd8aca6b0ff7d965850a74b83388023e08` APPROVE，无 finding（`0001785195165254-000335-df9b0bbf`）。
-- post-close correction 愿景守护：Opus 4.7 对 AC-D1..D6 与真实容量主旅程逐项验收，PASS（`0001785196231738-000344-f6ea2450`）。
-- contextual bundle / duty activation 设计复核：Fable 5 认可 read-side bundle、unconfigured fail-loud、F167 custody evidence 与“bundle 先行再点火值班”的收敛方向（`0001785418302678-000173-0b5b8bd2`）。
-- Phase E docs content review：Fable 5 对 bundle 纯读投影、O(1)+exceptions、duty fail-loud、F167 authority 与无第三 ledger/eval 域逐项 PASS（`0001785419651028-000210-65a308b8`）。
-- Phase E implementation exact-HEAD review：Kimi 对 PR #3303 `229f339982c5646b8ccd45a436f3abec2e3f2514` APPROVE；reconciliation、strict parser、bundle fan-out、duty/F167/UI 均无阻塞 finding（`0001785429107743-000571-ce98a056`）。
-- Phase E post-merge vision guard：Opus 4.7 对 AC-E1..E7 PASS；AC-E8 明确保留为 operator activation gate（`0001785429890132-000581-1dbbd163`）。
+- 完成愿景守护：Terra 对 Workspace live、系统 thread duty、Settings history 与原消息状态逐项验收，PASS（`private-source-id`）。
+- post-close correction exact-HEAD review：GPT-5.4 对 `e87cbbfd8aca6b0ff7d965850a74b83388023e08` APPROVE，无 finding（`private-source-id`）。
+- post-close correction 愿景守护：Opus 4.7 对 AC-D1..D6 与真实容量主旅程逐项验收，PASS（`private-source-id`）。
+- contextual bundle / duty activation 设计复核：Fable 5 认可 read-side bundle、unconfigured fail-loud、F167 custody evidence 与“bundle 先行再点火值班”的收敛方向（`private-source-id`）。
+- Phase E docs content review：Fable 5 对 bundle 纯读投影、O(1)+exceptions、duty fail-loud、F167 authority 与无第三 ledger/eval 域逐项 PASS（`private-source-id`）。
+- Phase E implementation exact-HEAD review：Kimi 对 PR #3303 `229f339982c5646b8ccd45a436f3abec2e3f2514` APPROVE；reconciliation、strict parser、bundle fan-out、duty/F167/UI 均无阻塞 finding（`private-source-id`）。
+- Phase E post-merge vision guard：Opus 4.7 对 AC-E1..E7 PASS；AC-E8 明确保留为 operator activation gate（`private-source-id`）。
 - Phase F 独立 review gate：唯一 reviewer 为 Opus 5；必须 exact-HEAD APPROVE 后才能进入 merge-gate，不追加第二轮 cloud AI review。合入不等于 runtime activation。
-- Phase G production acceptance correction：Opus 5 对 PR #3529 final HEAD `806f85afe7d51b29df8666f14a12a58bf3602978` delta review APPROVE（`0001786326305638-000115-f6743904`）；squash merge `2e2f4455049f267375f8d72fbd62edd284b62fa4`。
-- Phase G production acceptance：live duty receipt 44/44、独立 signer 26 bundles / 35 signals、`signature_waiting=0`，F278 owner 证据包 `0001787934303842-000491-4dd25ef6`。
+- Phase G production acceptance correction：Opus 5 对 PR #3529 final HEAD `806f85afe7d51b29df8666f14a12a58bf3602978` delta review APPROVE（`private-source-id`）；squash merge `2e2f4455049f267375f8d72fbd62edd284b62fa4`。
+- Phase G production acceptance：live duty receipt 44/44、独立 signer 26 bundles / 35 signals、`signature_waiting=0`，F278 owner 证据包 `private-source-id`。

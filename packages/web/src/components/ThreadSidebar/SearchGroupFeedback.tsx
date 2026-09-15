@@ -51,11 +51,13 @@ export function SearchGroupTip({ onDismiss }: { onDismiss: () => void }) {
 export function SearchGroupAction({
   count,
   loadState,
+  errorMessage,
   onOpen,
   onRetry,
 }: {
   count: number;
   loadState: 'loading' | 'ready' | 'error';
+  errorMessage?: string | null;
   onOpen: () => void;
   onRetry: () => void;
 }) {
@@ -67,7 +69,11 @@ export function SearchGroupAction({
       onClick={loadState === 'error' ? onRetry : onOpen}
       className="mx-2 min-w-0 rounded-lg border border-cafe-accent/40 px-2 py-1 text-micro font-medium text-cafe-accent disabled:opacity-40"
     >
-      {loadState === 'error' ? '读取 Group 失败 · 重试' : `整理全部 ${count} 条`}
+      {loadState === 'loading'
+        ? '正在读取 Group…'
+        : loadState === 'error'
+          ? (errorMessage ?? '读取 Group 失败 · 重试')
+          : `整理全部 ${count} 条`}
     </button>
   );
 }

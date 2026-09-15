@@ -1,8 +1,8 @@
 ---
 feature_ids: [F313]
 related_features: [F128, F167, F192, F245, F246, F266, F267, F278, F281, F311, F312]
-topics: [analysis, approval, repair, outcome, paw-feel, eval, closure, orchestration, runtime-acceptance]
-tips_exempt: "Renewed 2026-09-02 for the Phase D owner-integration fix-forward: it adds internal callback wiring and an Alpha preflight only; production remains epoch-fenced and no user-invokable journey exists yet."
+topics: [analysis, approval, repair, outcome, paw-feel, eval, closure, orchestration, runtime-acceptance, responsibility-continuation]
+tips_exempt: "Renewed 2026-09-12 for the F307 mobile carrier correction: this edit only replaces a retired MobileApprovalSheet reference with the already-discoverable canonical F307 Approval surface; it adds no F313 action, capability, or user workflow. The earlier D8/D9 exemption remains unchanged in substance."
 doc_kind: spec
 created: 2026-08-29
 description: "把分析结论经正式审批、真实修复与新鲜复验闭成一条由单一 Feature 持续负责的交付责任田，同时保留各 canonical owner 的单写边界。"
@@ -17,18 +17,39 @@ mcp_admission_claims:
     resourceFamily: eval-feedback
     boundaryKind: resource-entry
     decision: accepted
+  - ref: "file:docs/features/F313-analysis-to-outcome-closure-command.md"
+    toolName: cat_cafe_link_paw_feel_repair_outcome
+    resourceFamily: eval-feedback
+    boundaryKind: authority-boundary
+    decision: accepted
+  - ref: "file:docs/features/F313-analysis-to-outcome-closure-command.md"
+    toolName: cat_cafe_census_legacy_paw_feel_blockers
+    resourceFamily: eval-feedback
+    boundaryKind: authority-boundary
+    decision: accepted
+  - ref: "file:docs/features/F313-analysis-to-outcome-closure-command.md"
+    toolName: cat_cafe_list_tasks
+    resourceFamily: task-workflow
+    boundaryKind: authority-boundary
+    decision: accepted
 ---
 
 # F313: Analysis-to-Outcome Closure Command｜分析结论到真实变化闭环总控
 
 > **Status**: in-progress | **Owner**: 小太阳·Maine Coon（@codex-sol, GPT-5.6 Sol）+ F313 指挥线程责任猫 | **Priority**: P0
 >
-> **operator architecture correction**: `[thread-id]#0001788010645041-000684-cb618f8e`：
+> **operator architecture correction**: `[thread-id]#private-source-id`：
 > “想要把这件事情闭环的话，最好直接一个 Feature 来闭环，然后 link 其他的这些 Feat；不然这个东西永远写不完。”
 >
-> **operator operating correction**: `[thread-id]#0001788011821216-000734-46ece593`：
+> **operator operating correction**: `[thread-id]#private-source-id`：
 > 复用“指挥与理论 thread → 各 Phase 执行 thread → runtime 重启后验收 Phase”；当前 thread 负责验收后的
 > vision 守护与继续驱动，参与其中的猫共同承担不让链路掉地的责任。
+
+Architecture cell: harness-eval + memory + managed-work
+
+Map delta: update existing `harness-eval` and `memory` cells for D7 wiring, plus `harness-eval` and `managed-work`
+anchors for D8's source-exact provider, shared bounded task-feature contract, and tenant-bound canonical TaskStore query
+seam; D9 extends ratified ADR-039. No new cell or business-state owner.
 
 ## Why
 
@@ -75,15 +96,36 @@ Approval lifecycle → safe dispatch**，且仍为零 open case/proposal/card/ta
 | 字段 | 当前真相 |
 |---|---|
 | Canonical command/theory thread | `[thread-id]`（本 thread） |
-| Current phase | Phase D owner receipt、fresh outcome 与 F311 ref-only owner port 已经 PR #4247 合入 `main@6ec0cbbc37de`；owner-integration fix-forward 已接入真实 F311 E0 provider、F311 consumer 与 outcome callback consumer，但 production 仍受独立 epoch fence 保持 dormant，Phase E 尚未开始 |
-| Durable task | `0001788011552734-000721-5bace058` · `doing` · owner `codex-sol` |
+| Current phase | Phase D continuing-responsibility fix-forward 的 D7 工程接线已由 PR #4472 合入并在 merged-main Alpha 验证；D8 工程与 merged-main Alpha provider/filter journey 已完成；D9 exact-load fence 已由 PR #4494 合入 `main@772c72a08c` 并在 merged-main Alpha `92c42c034e` 验收；生产 pre-E reconciliation 尚未完成，Phase E production acceptance 尚未开始 |
+| Durable task | `private-source-id` · `doing` · owner `codex-sol` |
+| Production pre-E task | `private-source-id` · `blocked`；Alpha 26-signal/0-legacy receipt 只证明 Alpha 数据环境，不能关闭生产 cohort |
+| Second real-source task | `private-source-id` · Phase D8；PR #4486 已合入 `main@9993fe42f0df`，Alpha `111ba5dbbf0c` 已验证真实 MCP→API feature filter、canonical query ref、provider registration 与 outcome 边界；原 production source 仍只能由后续 loaded-runtime outcome 关闭 |
+| Exact-load fencing task | `private-source-id` · Phase D9 done；PR #4494 已合入 `main@772c72a08c`，canonical runtime entry 在执行新代码前证明实际 Git HEAD、tracked content 与 API/MCP/Web build revision 等于获批 full SHA，漂移则零加载；merged-main Alpha `92c42c034e` 的 checkout/stamps/page revision 与 13/13 fence journey 已验证 |
+| Runtime interaction correction | operator source `[thread-id]#private-source-id` supersedes caller-supplied SHA and environment-variable intent as user-facing authorization proxies while preserving D9's exact-version invariant and completed historical status；start-if-down、named relaunch 与 idempotent halt 只作用于 identity-verified managed state，foreign/unknown process ownership 继续 fail closed |
 | Thread convention | 复用 F312 的 command / phase execution / runtime acceptance 三类线程；不新增 role/store/status |
-| Implementation authorization | `[thread-id]#0001788052080007-000526-a81101af` |
-| Phase C design seal | `[thread-id]#0001788327680802-000466-ba7a600b`（APPROVED） |
+| Implementation authorization | `[thread-id]#private-source-id` |
+| Phase C design seal | `[thread-id]#private-source-id`（APPROVED） |
 | Owner-backed authorization source | `docs/features/F311-capability-evolution-workspace.md@396a379d7b` · hard constraint 13 / Phase 4 / KD-17 |
 | Phase C implementation baseline | reviewed base `origin/main@ff17a8cd50610a411cf13cba7abf5b8cc4cf1d11`；landed onto `main@e0e36943254fac0e46d788ab4b56f13cb11f0e32` |
 | Phase B terminal | PR #4136 · reviewed HEAD `9f2f26346a89eba34f9e9b64a59a44cf9fabde50` · merged `91e6fc401f0dadbaf4212c8a4c8eb2f54b9bd23` · Terra APPROVED · full gate PASS |
-| Next gate | command 核验 Phase D terminal 后，另行发车 Phase E runtime restart acceptance；本次 merge 不等于 loaded/live |
+| Production evidence ceiling | `2026-09-10T01:36Z` 两条原始 source 均仍为 `blocked / issue.open / legacy_blocker_unbound`；production API PID 98207 运行 `05cf4c867f5f`，不含 D7 merge `51f131d6833e` |
+| Next gate | 冻结一个披露全部 cumulative main delta 的 exact runtime target并取得该 target 的 load/restart 授权；获批版本加载后，猫沿 canonical authenticated refs-only 入口自主完成生产有界只读 census，不新增 operator read gate；非空 manifest mutation 与 F266 epoch 各自另需准确授权/receipt，最后才进入非作者 Phase E |
+
+### 2026-09-07 operator Input — Cat Tool Autonomy & Continuing Responsibility
+
+operator 在 `[thread-id]#private-source-id` 明确：给猫使用的内部工具及其
+MCP/API 接口、使用体验由猫自主判断与修复，不能仅因“涉及 API”逐项升级人类审批。实际权限、生产数据、
+外部依赖、显著成本与生产激活仍分别消费对应授权；本轮没有授予 F266 production epoch migration 或重启。
+
+完整来源、调查截面、人猫旅程与待整合项见
+其中新暴露的 `blocked → validExit → 退出值班/停止计龄`、按动作消费决策漏斗、确定性缺陷与效用统计分流、
+以及原消息上的无需催促验收，现已进入本 spec、implementation plan 与 durable task。
+
+owner 对账结论是：现有 `validExit` 只回答“本班是否可以交账”，不得继续兼任“问题是否已经结束”。F278
+保持原 signal/event log 单写，并新增一个从 F278 task/duplicate refs 与 F266 case/outcome refs**读时派生**的 continuation
+projection；不复制业务 payload、不增加 Store/Queue/状态机。普通已授权内部工具修复继续走 F278 既有 fix/task
+入口且零 Approval；需要新权限、生产数据、显著成本、外部承诺或 scope 变化的动作才进入 F246。Phase E 仍未获
+production 授权，不能因这次内部工程续工而提前激活。
 
 ## Architecture Admission
 
@@ -91,12 +133,17 @@ Approval lifecycle → safe dispatch**，且仍为零 open case/proposal/card/ta
 - **Map delta**: update existing cells only；不新增 cell。F313 是薄 integration/acceptance owner，不新增 store、
   queue、approval state machine、case ledger 或 outcome ledger；Phase B–D 只把新代码 anchors 补进
   `harness-eval` / `approval-index` 既有 cell，运行时 state 继续由下列 canonical owner 单写。
-- **Canonical sources**: F278 signal event log；F245/F267 immutable finding/measurement artifact；
+- **Canonical sources**: F278 signal event log 与 Task/F167 current truth；F245/F267 immutable finding/measurement artifact；
   F266 case event stream；F246 ApprovalIngress + producer adapter/decision route；真实资产 owner mutation receipt。
 - **Completion truth**: 本 Feature 的 AC、phase ledger 与端到端 acceptance packet；它只证明各 owner refs 已经
   按同一 journey 接通，不复制其 payload/state。
-- **Claim guards**: finding/root schema tests、Approval admission/decision contract tests、dispatch exactly-once tests、
-  owner-drift supersession tests、cold-start action scenarios、真实 merged+loaded runtime acceptance。
+- **Claim guards**: review-exit/continuation orthogonality tests、duplicate/source-link projection tests、finding/root schema tests、
+  Approval admission/decision contract tests、dispatch exactly-once tests、owner-drift supersession tests、cold-start action
+  scenarios、真实 merged+loaded runtime acceptance。
+- **MCP authority boundary**: `cat_cafe_link_paw_feel_repair_outcome` 独立于 duty bundle triage；前者只能由 prior
+  binding 指定的 repair owner 在 Task/F167 terminal 后调用，后者由值班/独立签署猫完成 review action。把两者塞进
+  一个 bundle snapshot 会错误合并 actor、时点与恢复语义，因此 F286 admission 以本 spec 的
+  `authority-boundary` claim 为出生证。
 
 ### Single-Feature ownership boundary
 
@@ -129,7 +176,7 @@ Approval lifecycle → safe dispatch**，且仍为零 open case/proposal/card/ta
 ### Phase C: Approval-Gated Action + Safe Dispatch｜审批接线与安全派工原子 cutover
 
 **Entry gate（2026-09-02）**：统一设计已由
-`[thread-id]#0001788327680802-000466-ba7a600b` seal 为 APPROVED；Phase C 同时消费
+`[thread-id]#private-source-id` seal 为 APPROVED；Phase C 同时消费
 `docs/features/F311-capability-evolution-workspace.md@396a379d7b` 的 hard constraint 13 / Phase 4 / KD-17。
 唯一业务代数是 `Resolution(open|accepted|rejected|closed_without_decision) × Materialization`；旧 producer
 词汇只允许在 registry adapter boundary 归一。`ApprovalPublication` 继续承担同一 proposal 的
@@ -164,7 +211,7 @@ card/provenance commit，不是业务 lifecycle，也没有新 store/queue/state
   canonical owner adapter 或 epoch migration receipt，composition 必须整体 inactive、route 返回
   `approval_route_unavailable`；这属于本 Phase 的安全落地状态，不得伪装成已迁移或 live。
 
-### Phase D: Mutation + Outcome Join｜真实变化、有意不变与新鲜复验
+### Phase D: Mutation + Outcome Join + Continuing Responsibility｜真实变化、有意不变、新鲜复验与持续责任
 
 - 真实 feature/asset owner 执行 mutation；F266 只消费 canonical owner receipt，校验 exact case/proposal/
   Approval/authorization/target/intervention refs，并在既有 event log 追加 immutable event，不替 owner 改资产；
@@ -186,13 +233,50 @@ card/provenance commit，不是业务 lifecycle，也没有新 store/queue/state
   `insufficient + keep_observe + ownerObjects=[]`，owner authorization、lineage 与 receipt catalogs 都为空，因此
   即使 Alpha 测试 epoch 激活，业务命令仍 typed fail-closed；production 没有另行授权的 `v1_active` epoch，故继续
   全包 dormant。`merge != live`、Alpha reachability != Phase E acceptance、分析完成 != 能力进化。
+- 同一 Phase D execution lane 追加 continuing-responsibility fix-forward：保留 `validExit` 作为 duty-review receipt，
+  另从 canonical refs 派生 `open/resolved + continuation`。`blocked`、active repair、waiting Approval、observe 与
+  duplicate-linked report 都保持 open，只有 verified outcome 或有理由的 terminal no-action 才 resolved；该投影
+  同时供 Workspace 与原消息读取，不持久化第二份责任状态。
+- F278 直接修复 lane 把 owner/task/F167 binding 只当 executable custody，不当动作授权。`mark_fix` 先按当前
+  `signalId` 服务端重读 MessageStore 并用 digest + same-digest ordinal 验证 source，再从 source tool/domain 派生 route，
+  从只读 registration snapshot 选择唯一非重叠 owner provider；zero/overlap/unreadable/source mismatch 均零 fix event。
+  opaque `actionRef` 只能交给已经由 source 选中的 provider，不能反向选择 provider；provider 必须证明 actionRef 与
+  同一 source/action scope 的关系并返回 exact `actionScopeRef + ownerAuthorizationRef + targetVersionRef + ownerCatId +
+  outcomeVerifierRef`。F278 从 canonical source、provider ID/version/route 与该 tuple 服务端派生 v1
+  `sourceSignalRef + bindingRef`，且 task owner、lease holder、action owner 完全一致。只有 owner 明确
+  证明该具体 action scope 已在既有授权内时才追加 ref-only fix binding、零 F246 Approval；缺失、不可读、漂移、
+  不匹配或 route version 漂移时不写 fix event并保持 typed open。
+- provider 验证具体 action 需要新增权限时，F278 不把 source/action ref 当 proposal input；read-only fallback resolver
+  只从 exact `sourceSignalRef` 联结 F245/F267 immutable finding、v3 root 与 F266 projection。唯一 current repair cycle
+  返回既有 active `caseActionRef` 后才能进入 F266→F246；0 个 finding 为 `analysis_required`，多个 active 为
+  `analysis_ambiguous`，仅旧/superseded/digest-invalid match 为 `analysis_stale`，均保持 open、零 proposal/card/task/lease。
+- ref-only `repair_outcome_linked` 只接收 prior binding 与 owner outcome ref；服务端同时验证 actor、exact Task/F167
+  terminal，并由该 binding 指定的 owner verifier 解析同一 source/action/authorization/target 的 changed/no-change
+  与 verification refs。Task done、lease terminal、merge 或 caller payload 单独都不能使 source resolved。
+- 新的 explicit blocker 必须携带可恢复条件（canonical task/event ref 或 bounded `recheckAt`）。服务端在 blocked
+  append 时冻结 v1 `conditionId + blockedVersion`，在条件变化/到期时从 resolver snapshot 派生 `resumeVersion`
+  与 `blocker_reopened` event id，并对当前 blocked sequence 做 CAS；稳定条件零写入，同一 race/restart/replay 只产生
+  一次 reopen。无恢复条件只可作为 legacy debt 显示，不得称问题已完成。历史 debt 的 bounded reopen mutation
+  属于 Phase D：从 read-only manifest 与显式生产授权执行；Phase E 只核验 receipt，不扫描或追加事件。
+- `sourceSignalRefs` 是 F245/F267 finding 到 F278 signal 的唯一 join；F278 read model 只解析 refs 并读取 F266
+  projection；只接受 exact `source-message:<messageId>#<markerIndex>` 与 F278 source identity 相符的引用。重复报告
+  沿 canonical signal/case 跟随结果；不得复制 marker body、Approval state 或 outcome payload。
 
 ### Phase E: Runtime Acceptance + F311 Consumption｜重启后真实闭环与关账
 
-- 选择一条真实 paw-feel，从原消息走到 finding、必要的 F246 Approval、真实 owner change/no-change 与 fresh outcome；
+- 选择一条真实猫用工具确定性缺陷，从原消息走到 F278 named task/F167、真实 owner change/no-change 与验证结果，
+  证明既有授权内零 Approval；
+- 选择一条确需新权限的真实 paw-feel，从原消息走到 finding、F246 Approval、真实 owner change/no-change 与 fresh outcome；
 - 另跑一条普通 `observe/insufficient`，证明系统自动复查且不制造 Approval 卡；
-- 负例覆盖未批准派工、origin 伪造、owner unresolved、target drift、旧批准复用、重复 replay 与 route unavailable；
+- 负例覆盖中断后恢复、拒绝、未批准派工、origin 伪造、owner unresolved、target drift、旧批准复用、重复 replay/
+  callback、修复失败、merge-not-loaded、source digest mismatch、provider zero/overlap/route drift、finding 0/multiple/
+  stale 与 route unavailable；
+- 两个 2026-09-07 真实 sourceMessageId 样本必须从原消息看到 review receipt、当前 continuation、task/Approval、
+  merged/loaded 与最终验证的变化；operator 完成必要决策后无需继续催促；
 - F311 只消费完整 lineage refs，不新增审批/修复/outcome state；
+- Phase E 开始前必须已有 Phase D production legacy-blocker reconciliation terminal（cohort 为空也要有同一生产
+  数据环境的完整 census receipt）；Alpha、fixture 或其他 deployment 的空结果不能替代；
+  acceptance 只验证 receipt 与抽样 projection，不执行 blocker mutation；
 - 非作者在 runtime restart 后按 source refs 复核整条旅程，command thread 再做 vision guard，F313 才能 close。
   任一 owner action 只完成局部时，F313 保持 open。
 
@@ -313,11 +397,13 @@ human_disposition_feedback:
 - **Entry**: F278 已登记并完成责任处置的一条真实 paw-feel signal
 - **Flow**:
   1. F245/F267 形成逐 finding 结论、证据强度与真实 repair target；
-  2. F266 投影唯一合法 action；普通观察自动复查，需要改变时才生成 proposal；
-  3. proposal 进入 F246，operator 在现有 Approval surface 看见建议、证据、不确定性、owner、成本与撤回条件；
-  4. 批准后 F266 才派给 canonical owner；拒绝/撤回/漂移均不派工；
-  5. owner 返回真实 change/no-change receipt，系统在 merged+loaded 后用新鲜证据复验；
-  6. 原 paw-feel、finding、approval、change 与 outcome 可沿 refs 回看；只有 verified keep 才称能力进化。
+  2. F278 duty receipt 只结束本班审阅；continuation 仍沿真实 task、case、Approval 或恢复条件前进；
+  3. 确定性猫用工具缺陷且已有 owner 授权时直接绑定 task/F167、零 Approval；需要新权限时才由 F266 投影 proposal；
+  4. proposal 进入 F246，operator 在现有 Approval surface 看见建议、证据、不确定性、owner、成本与撤回条件；
+  5. 批准后 F266 才派给 canonical owner；拒绝/撤回/漂移均不派工但保留可恢复责任；
+  6. owner 返回真实 change/no-change receipt，系统在 merged+loaded 后用新鲜证据复验；
+  7. 原消息持续显示 review 与 resolution 两轴；只有 verified outcome 或有理由的 terminal no-action 才称结束，
+     只有 verified keep 才称能力进化。
 - **Success evidence**: 真实 sourceMessageId → findingKey/caseId → proposalId/ApprovalEnvelope → task/lease →
   mutation/no-change receipt → fresh resultRef 的可重放 acceptance packet
 - **Non-goals**: 新建中央 proposal/outcome store；为每条 observe 打扰用户；F311/F278 接管 repair；
@@ -331,6 +417,8 @@ human_disposition_feedback:
 | S2 | owner drift | F266/F246 | 旧 target invalidated → old approval audit-only → linked new cycle → fresh approval | supersession + exactly-one task/lease test |
 | S3 | cold-start action | 猫猫 | case-ready projection → ref-only action / typed blocker | 五场景 contract fixtures |
 | S4 | F311 lineage | CEW consumer | 消费 owner refs → 展示 verified status，不复制 payload | refs-only projection test |
+| S5 | cat-tool direct fix | repair owner | verified source → unique source-routed provider → exact existing authority + F278 task/F167 → owner outcome | zero Approval + route/binding/task/outcome refs |
+| S6 | blocked/duplicate continuation | 系统 | review receipt complete；等待条件到期/事件变化或 canonical target 结果 → 原消息更新 | no-repeat wait + resume/linked-result test |
 
 ## Acceptance Criteria
 
@@ -384,6 +472,27 @@ human_disposition_feedback:
   与 F311 ref-only port，并只向各自注册的真实 consumer seam 接出；完整 concrete producer/consumer bindings
   可达，任一 binding/provider/consumer/epoch 缺失时所有 effects 为 false，不新增业务 store/state machine，
   也不在 Phase D 激活 runtime。
+- [x] AC-D4: F278 `validExit` 只表示 duty review 可交账；同一 read model 另派生 resolution/continuation，blocked、
+  waiting Approval、active/done-unverified repair、observe 与 duplicate-linked report 均不被误报为 resolved，且问题年龄
+  不因 review exit 停止。
+- [x] AC-D5: continuation 只消费 F278 task/duplicate refs、F245 `sourceSignalRefs` 与 F266 case/outcome refs；direct fix
+  必须先重读/digest-verify source，以 source-derived tool route 从只读 non-overlapping registration snapshot 选择唯一
+  provider；`actionRef` 不得选 provider，provider/route version 进入 exact action-scope/existing-authority/target binding
+  并由同一 owner verifier 校验 outcome。Task/F167 只证明 custody；route/source/provider 任一 zero/overlap/unreadable/
+  mismatch/drift 均零 fix event。authority-required 只经 read-only `sourceSignalRef → unique active caseActionRef` 进入
+  F266→F246；0/multiple/stale finding 分别投影 typed open continuation，source ref 绝不冒充 proposal input。Workspace
+  和原消息同源展示 task/Approval/main/loaded/verification 进度，duplicate 跟随 canonical target，零 payload/state copy。
+  首个 production provider 仅覆盖 F287 `cat_cafe_record_memory_cue_outcome`，named actionRef 为
+  `f287:memory-cue-outcome-lifecycle`；它重读 `private-source-id` 的 user/thread/content digest、
+  F287 owner、loaded Git baseline 与 append-only outcome event，并要求 repair delta 同时 loaded 且属于 current main。
+- [ ] AC-D6: 新 blocker 必须有 canonical event/task ref 或 bounded recheck；服务端冻结 versioned condition identity，
+  并从 condition change/due snapshot 派生 CAS-safe reopen id，保证条件不变零写入、race/restart/replay exactly-once。
+  猫中断、task 失败或 done-but-unverified 可恢复；历史 blocker bounded mutation 由 Phase D 按 manifest + 显式生产授权
+  完成并出 terminal receipt，Phase E 只验证。typed condition poller 每 tick 只读/判一个 ≤50 signal page；
+  `cat_cafe_census_legacy_paw_feel_blockers` 每次同样最多读 50 logs，partial 只有 signed cursor，完整遍历才返回
+  digest-bound manifest。上述工程合同与 Alpha 行为已验证，但生产 runtime 尚未加载 D7，且两条原始记录仍为
+  `legacy_blocker_unbound`；只有同一生产数据环境的完整 census + 空 cohort receipt，或非空 exact manifest 的
+  受权恢复 receipt，才能勾选本 AC。确定性猫用工具修复在 exact 既有授权内零 F246，新权限仍只能进 F246。
 
 ### Phase E（Runtime Acceptance + Close）
 
@@ -395,6 +504,9 @@ human_disposition_feedback:
 - [ ] AC-E4: 所有 Phase AC、owner terminal、main/live ceiling、负例与 Close Gate 对照表齐全后才可关闭 F313；
   command thread 在 acceptance terminal 后完成 vision guard；任一 linked Feature 的局部完成、open PR、测试计划、
   Approval 卡或 acceptance verdict 本身都不能冒充 F313 完成。
+- [ ] AC-E5: 两条 2026-09-07 真实 sourceMessageId 覆盖 authority-bound direct-fix zero-card、required-Approval 与
+  observe-zero-card；中断、拒绝、重复 callback/replay、blocker 到期、修复失败及 merge-not-loaded 均留下准确下一步，
+  Phase E 只验证 Phase D blocker-reconciliation receipt，且 operator 无需重复催促。
 
 ## 需求点 Checklist
 
@@ -407,13 +519,17 @@ human_disposition_feedback:
 | R5 | 用户不是标注员，“分析过”不能冒充“能力已进化” | AC-C2, AC-D2, AC-E2 | zero-card observe + fresh outcome | [ ] |
 | R6 | “指挥与理论 thread 负责验收后的 vision 守护 + 驱动干活，thread 里的猫是责任猫” | AC-A4, AC-E4 | command terminal→vision guard→next/close transitions | [ ] |
 | R7 | “各 Phase 执行 thread；runtime 重启之后的验收 Phase” | AC-A2, AC-A4, AC-E1 | Phase B–D terminal packets + Phase E deployment receipt | [ ] |
+| R8 | “收件箱收了、唤醒看了，然后呢？”——审阅回执不能吞掉未解决责任 | AC-D4–AC-D6, AC-E5 | dual-axis projection + resume/interrupt/failure journeys | [ ] |
+| R9 | 猫用内部工具/API 由猫自主修，不因 API 字样逐项找 You | AC-D6, AC-E5 | deterministic direct-fix zero-Approval journey | [ ] |
+| R10 | “我不继续催，事情也会走到结果并回到原处” | AC-D5, AC-E1, AC-E5 | original-message task/load/outcome replay | [ ] |
 
 ### 覆盖检查
 
 - [x] 每个需求点都映射到至少一个 AC。
 - [x] 每个 AC 都有 test、source map、runtime receipt 或非作者 acceptance 等可复核证据。
 - [x] Approval 卡的真实产品壳主旅程、默认/负向状态与窄屏呈现已在 implementation plan §4 冻结到现有
-  `ApprovalPendingPane` / `ApprovalItemCard` / `ApprovalHistoryPane` / `MobileApprovalSheet` 与真实组件测试；
+  `ApprovalPendingPane` / `ApprovalItemCard` / `ApprovalHistoryPane` 与 F307 canonical `workspace:mode:approval`
+  surface 的真实组件/浏览器测试；
   不建 F313 专用页面或 schema-only demo。
 
 ## Dependencies
@@ -439,6 +555,8 @@ human_disposition_feedback:
 | finding/root 或 Approval producer 已加载但 dispatch guard 尚未加载 | Phase B case activation 延后，原 C/D 合并为一个 Phase C runtime cutover；任一组件缺失或版本不一致时 repair route 全关闭、零 open case/proposal/card/task/lease |
 | Phase C 沿用旧 Approval publication 状态，随后再迁统一 contract | 在 Phase C 入口冻结代码；先完成全家 canonical Approval contract，再让 F266 作为同一 producer extension point 的消费者，禁止双状态机/过渡 producer |
 | Approval 卡过量 | 只有请求改变/采纳/继续投入才出生 proposal；observe/insufficient 自动复查 |
+| `validExit` 同时冒充 duty 与 resolution | 正交派生 review receipt 与 open/resolved continuation；不新增组合状态机 |
+| blocker 永久静默或周期刷屏 | 新 blocker 必须有 event/task/bounded recheck；只在条件变化或到期时重新进入 attention |
 | owner 漂移复用旧批准 | target version + explicit supersession + fresh Approval + dispatch-time resolver guard |
 | “main 绿了”冒充真实进化 | Phase E 必须 merged+loaded real paw-feel + fresh outcome + 非作者复核 |
 
@@ -455,11 +573,14 @@ human_disposition_feedback:
 | KD-7 | 责任猫是 collective no-drop obligation，每个 bounded action 的 active custody 仍单点 | 保留共同愿景责任，同时不破坏 @ 路由、Task/F167 lease、显式 parallel 与 canonical single-writer | 2026-08-29 |
 | KD-8 | Phase B root 保持 non-actionable，原 Approval Admission 与 Safe Dispatch 合并为一个 Phase C 原子 cutover | finding/case、ingress、action、guard 任一单独上线都会制造未批准直派或孤儿审批的危险半态 | 2026-08-29 |
 | KD-9 | Phase C 不沿用 legacy `ApprovalPublication` 生命周期；先等统一 Approval contract canonical landing 后再实现 | 新增 F266 legacy producer 会立刻制造待迁移的第二套语义；F313 应消费唯一 Approval contract，而不是为时间表复制状态机 | 2026-08-31 |
+| KD-10 | `validExit` 保留 duty-review 语义；问题 closure 用正交 read projection，不扩成状态枚举乘积 | “本班看过”与“问题结束”是两个独立命题；拆轴比继续新增 blocked-reviewing 等组合状态更简单 | 2026-09-07 |
+| KD-11 | 权限按具体动作判断：F278 只在 source 选中唯一 owner provider 且其 exact binding 证明已有授权时 direct；新增权限只凭 source→唯一 active `caseActionRef` 走 F266→F246 | 机制选择回答怎么验证，Approval 回答谁能批准；caller action/source ref 不能充当 route 或 proposal authority | 2026-09-07 |
 
 ## Review Gate
 
 - Phase A: 非作者审“单 Feature 是否真持完成责任、三类 thread 是否复用而非造规则、责任/球权是否冲突、是否复制 canonical authority”。
-- Phase B–D: 每个 bounded owner action 遵循 TDD 与 exact-HEAD 非作者 review；Phase thread 汇总全部 action terminal 并写 F313 AC delta。
+- Phase B–D: 每个 bounded owner action 遵循 TDD 与 exact-HEAD 非作者 review；2026-09-07 correction 复用原 Phase D
+  execution lane，不新开 Feature/阶段体系；Phase thread 汇总全部 action terminal 并写 F313 AC delta。
 - Phase E: 非实现作者在独立 acceptance thread、merged+loaded runtime 走真实 paw-feel 与 observe 两条旅程；command thread 随后做愿景对照/Close Gate。
 
 ## Tips Contribution（F244）

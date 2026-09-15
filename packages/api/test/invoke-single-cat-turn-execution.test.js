@@ -96,7 +96,9 @@ describe('invokeSingleCat durable child execution lifecycle', () => {
           freshnessSupplementId: 'supplement-1',
         },
         promptMessageIds: ['msg-queued'],
-        onPromptMessagesExposed: async (input) => exposureCalls.push(input),
+        onPromptMessagesExposed: async (input) => {
+          exposureCalls.push(input);
+        },
         isLastCat: true,
       }),
     );

@@ -40,6 +40,19 @@ function buildItem(
       captureAssessment: 'confirmed',
     },
     responsibility,
+    issue:
+      state === 'no_action'
+        ? {
+            resolution: 'resolved',
+            continuation: { kind: 'no_action', evidenceRefs: [] },
+            ageMs: 3_600_000,
+            resolvedAt: '2026-07-20T01:00:00.000Z',
+          }
+        : {
+            resolution: 'open',
+            continuation: { kind: 'review_required', evidenceRefs: [] },
+            ageMs: 3_600_000,
+          },
     source: {
       availability: 'available',
       preview: `原消息预览 ${signalId}`,
@@ -71,6 +84,7 @@ function buildPage(overrides: Partial<PawFeelInboxPage> = {}): PawFeelInboxPage 
         rawSignalCount: 1,
         stateCounts: { [item.disposition.state]: 1 },
         responsibility: item.responsibility,
+        issue: item.issue,
       })),
     bundleCounts: overrides.bundleCounts ?? {
       total: overrides.counts?.total ?? items.length,
@@ -105,6 +119,11 @@ function buildPage(overrides: Partial<PawFeelInboxPage> = {}): PawFeelInboxPage 
       signature_waiting: 0,
       blocked: 0,
       terminal: overrides.counts?.disposed ?? 0,
+    },
+    issueCounts: overrides.issueCounts ?? {
+      open: items.filter((item) => item.issue.resolution === 'open').length,
+      resolved: items.filter((item) => item.issue.resolution === 'resolved').length,
+      overdue: items.filter((item) => item.issue.resolution === 'open' && item.issue.ageMs >= 72 * 3_600_000).length,
     },
     degraded: false,
     coverage: {
@@ -205,9 +224,7 @@ describe('PawFeelInboxSection', () => {
     });
     await act(async () => {});
 
-    expect(mocks.apiFetch).toHaveBeenCalledWith(
-      '/api/paw-feel/inbox?limit=50&sort=newest&states=new%2Cseen%2Croute_pending%2Crouted%2Cfix%2Csignature_waiting%2Cblocked',
-    );
+    expect(mocks.apiFetch).toHaveBeenCalledWith('/api/paw-feel/inbox?limit=50&sort=newest&resolution=open');
 
     const filterTrigger = container.querySelector<HTMLButtonElement>('[data-testid="paw-feel-filter-trigger"]');
     await act(async () => {
@@ -235,7 +252,7 @@ describe('PawFeelInboxSection', () => {
     });
     await act(async () => {});
     expect(mocks.apiFetch).toHaveBeenCalledWith(
-      '/api/paw-feel/inbox?limit=50&sort=newest&states=new%2Cseen%2Croute_pending%2Crouted%2Cfix%2Csignature_waiting%2Cblocked&overdueOnly=true',
+      '/api/paw-feel/inbox?limit=50&sort=newest&resolution=open&issueOverdueOnly=true',
     );
   });
 
@@ -259,6 +276,7 @@ describe('PawFeelInboxSection', () => {
         disposed: 197,
         overdue: 3,
       },
+      issueCounts: { open: 417, resolved: 197, overdue: 3 },
       bundleCounts: {
         total: 442,
         byBasis: { message: 300, turn_invocation: 100, legacy_invocation: 40, single_signal: 2 },
@@ -274,11 +292,13 @@ describe('PawFeelInboxSection', () => {
     const summary = container.querySelector('[data-testid="paw-feel-primary-summary"]');
     expect(summary).toBeTruthy();
     const summaryMetrics = summary?.querySelectorAll('[data-testid="paw-feel-summary-metric"]');
-    expect(summaryMetrics).toHaveLength(6);
+    expect(summaryMetrics).toHaveLength(8);
     for (const metric of summaryMetrics ?? []) expect(metric.classList.contains('whitespace-nowrap')).toBe(true);
     expect(summary?.textContent).toContain('unreviewed417');
     expect(summary?.textContent).toContain('terminal197');
-    expect(summary?.textContent).toContain('72h+3');
+    expect(summary?.textContent).toContain('issue-open417');
+    expect(summary?.textContent).toContain('issue-resolved197');
+    expect(summary?.textContent).toContain('issue 72h+3');
 
     const filterTrigger = container.querySelector<HTMLButtonElement>('[data-testid="paw-feel-filter-trigger"]');
     const sortTrigger = container.querySelector<HTMLButtonElement>('[data-testid="paw-feel-sort-trigger"]');
@@ -347,7 +367,7 @@ describe('PawFeelInboxSection', () => {
     await act(async () => {});
 
     expect(mocks.apiFetch).toHaveBeenCalledWith(
-      '/api/paw-feel/inbox?limit=50&sort=newest&states=new%2Cseen%2Croute_pending%2Crouted%2Cfix%2Csignature_waiting%2Cblocked&cursor=cursor-2',
+      '/api/paw-feel/inbox?limit=50&sort=newest&resolution=open&cursor=cursor-2',
     );
     expect(container.querySelectorAll('[data-testid="paw-feel-inbox-bundle"]')).toHaveLength(2);
     expect(container.textContent?.match(/原消息预览 one/g)).toHaveLength(1);
@@ -499,6 +519,7 @@ describe('PawFeelInboxSection', () => {
           rawSignalCount: 2,
           stateCounts: { new: 2 },
           responsibility: first.responsibility,
+          issue: first.issue,
         },
       ],
       bundleCounts: {
@@ -593,9 +614,7 @@ describe('PawFeelInboxSection', () => {
     });
     await act(async () => {});
 
-    expect(mocks.apiFetch).toHaveBeenCalledWith(
-      '/api/paw-feel/inbox?limit=50&sort=oldest&states=new%2Cseen%2Croute_pending%2Crouted%2Cfix%2Csignature_waiting%2Cblocked',
-    );
+    expect(mocks.apiFetch).toHaveBeenCalledWith('/api/paw-feel/inbox?limit=50&sort=oldest&resolution=open');
   });
 
   it('announces newly arrived reports during polling and jumps back to newest', async () => {

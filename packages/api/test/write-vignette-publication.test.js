@@ -1,124 +1,35 @@
 // @ts-check
 import assert from 'node:assert/strict';
-import { execFileSync } from 'node:child_process';
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { chmodSync, existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { afterEach, beforeEach, describe, it } from 'node:test';
+import { afterEach, beforeEach, describe, it, test } from 'node:test';
 import { SessionMutex } from '../dist/domains/cats/services/agents/invocation/SessionMutex.js';
 import { approveTasteProposal } from '../dist/domains/taste/services/approveTasteProposal.js';
 import { createVignetteWriter, deriveSlug } from '../dist/domains/taste/services/writeVignette.js';
 import { InMemoryTasteProposalStore } from '../dist/domains/taste/stores/InMemoryTasteProposalStore.js';
-import { anchorApproval } from './approval-hub/helpers.js';
-
-function git(cwd, args) {
-  return execFileSync('git', args, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
-}
-
-function configureIdentity(cwd) {
-  git(cwd, ['config', 'user.email', 'test@cat-cafe.local']);
-  git(cwd, ['config', 'user.name', 'Taste Publication Test']);
-}
-
-function makeProposal(overrides = {}) {
-  return {
-    id: 'proposal_publication_abc123',
-    userId: 'user-1',
-    catId: 'codex-sol',
-    threadId: 'thread-1',
-    scene: 'operator approved a reusable editing judgment',
-    quote: '节奏要服务叙事，不要只是堆转场',
-    tags: ['视频剪辑', '叙事节奏'],
-    dimension: 'creative-craft',
-    privacy: 'public',
-    status: 'approving',
-    createdAt: 1787620000000,
-    ...overrides,
-  };
-}
-
-function createRemoteFixture() {
-  const root = mkdtempSync(join(tmpdir(), 'f221-publication-'));
-  const origin = join(root, 'origin.git');
-  const primary = join(root, 'primary');
-  const runtime = join(root, 'runtime');
-  const hookLog = join(root, 'pre-push.log');
-  git(root, ['init', '--bare', '--initial-branch=main', origin]);
-  git(root, ['clone', origin, primary]);
-  configureIdentity(primary);
-  mkdirSync(join(primary, 'docs/taste'), { recursive: true });
-  writeFileSync(join(primary, 'README.md'), 'fixture\n');
-  writeFileSync(join(primary, 'docs/taste/index.md'), '# Taste Index\n\n### 创作手法\n', 'utf8');
-  git(primary, ['add', 'README.md', 'docs/taste/index.md']);
-  git(primary, ['commit', '-m', 'seed taste repository']);
-  git(primary, ['push', '-u', 'origin', 'main']);
-  const hooksDir = join(primary, '.githooks');
-  mkdirSync(hooksDir);
-  writeFileSync(join(hooksDir, 'pre-push'), `#!/bin/sh\nprintf 'called\\n' >> '${hookLog}'\n`);
-  chmodSync(join(hooksDir, 'pre-push'), 0o755);
-  git(primary, ['config', 'core.hooksPath', hooksDir]);
-  git(primary, ['worktree', 'add', '-b', 'runtime/main-sync', runtime]);
-  return { root, origin, primary, runtime, hookLog };
-}
-
-function advanceRemote(fixture, filename = 'remote-only.md') {
-  const remoteWriter = join(fixture.root, `remote-writer-${Date.now()}-${Math.random()}`);
-  git(fixture.root, ['clone', fixture.origin, remoteWriter]);
-  configureIdentity(remoteWriter);
-  writeFileSync(join(remoteWriter, filename), `${filename}\n`);
-  git(remoteWriter, ['add', filename]);
-  git(remoteWriter, ['commit', '-m', `advance remote with ${filename}`]);
-  git(remoteWriter, ['push', 'origin', 'main']);
-  return git(remoteWriter, ['rev-parse', 'HEAD']);
-}
-
-function divergeAndStagePrimary(fixture) {
-  writeFileSync(join(fixture.primary, 'local-only.md'), 'local ahead commit\n');
-  git(fixture.primary, ['add', 'local-only.md']);
-  git(fixture.primary, ['commit', '-m', 'local operator commit']);
-  advanceRemote(fixture);
-  writeFileSync(join(fixture.primary, 'concurrent-wip.md'), 'staged human work\n');
-  git(fixture.primary, ['add', 'concurrent-wip.md']);
-}
-
-function remoteFile(fixture, path) {
-  return git(fixture.root, ['--git-dir', fixture.origin, 'show', `main:${path}`]);
-}
-
-function remoteHead(fixture) {
-  return git(fixture.root, ['--git-dir', fixture.origin, 'rev-parse', 'main']);
-}
-
-async function createStoredProposal(store) {
-  const proposal = store.create({
-    userId: 'user-1',
-    catId: 'codex-sol',
-    threadId: 'thread-1',
-    scene: 'operator approved a reusable editing judgment',
-    quote: '节奏要服务叙事，不要只是堆转场',
-    tags: ['视频剪辑'],
-    dimension: 'creative-craft',
-    privacy: 'public',
-  });
-  await anchorApproval(store, {
-    proposalId: proposal.id,
-    sourceFeatureId: 'F221',
-    ownerUserId: proposal.userId,
-    requesterCatId: proposal.catId,
-    threadId: proposal.threadId,
-    createdAt: proposal.createdAt,
-  });
-  return proposal;
-}
+import {
+  advanceRemote,
+  createRemoteFixture,
+  createStoredProposal,
+  divergeAndStagePrimary,
+  git,
+  makeProposal,
+  remoteFile,
+  remoteHead,
+} from './taste-publication-fixtures.js';
 
 describe('F221 public Taste publication terminal', () => {
   let fixture;
+  /** Track timers scheduled by tests so afterEach can clear leaked ones. */
+  const pendingTimers = [];
 
   beforeEach(() => {
     fixture = createRemoteFixture();
   });
 
   afterEach(() => {
+    for (const t of pendingTimers) clearTimeout(t);
+    pendingTimers.length = 0;
     rmSync(fixture.root, { recursive: true, force: true });
   });
 
@@ -224,10 +135,12 @@ describe('F221 public Taste publication terminal', () => {
             'origin',
             `${commitSha}:refs/heads/delayed-timeout`,
           ]);
-          setTimeout(() => {
-            git(fixture.root, ['--git-dir', fixture.origin, 'update-ref', 'refs/heads/main', commitSha, baseSha]);
-            git(fixture.root, ['--git-dir', fixture.origin, 'update-ref', '-d', 'refs/heads/delayed-timeout']);
-          }, 500);
+          pendingTimers.push(
+            setTimeout(() => {
+              git(fixture.root, ['--git-dir', fixture.origin, 'update-ref', 'refs/heads/main', commitSha, baseSha]);
+              git(fixture.root, ['--git-dir', fixture.origin, 'update-ref', '-d', 'refs/heads/delayed-timeout']);
+            }, 500),
+          );
         },
       }),
     };
@@ -338,4 +251,45 @@ describe('F221 public Taste publication terminal', () => {
     assert.equal(publicationFinished, false, 'slow remote publication must not freeze the API event loop');
     await publication;
   });
+});
+
+/**
+ * Regression test: process-group-aware git() must kill hook children on timeout.
+ *
+ * Proves that after git() times out, no orphan hook child can continue
+ * writing. Without process-group cleanup (detached + kill -PGID), the
+ * hook child survives the parent timeout and writes a marker file. With
+ * it, the entire group is reaped and the marker never appears.
+ */
+test('fixture git() kills hook children on timeout — no orphan writes after teardown', async () => {
+  const fixture = createRemoteFixture();
+  const orphanMarker = join(fixture.root, 'orphan-hook-wrote');
+
+  try {
+    // Install a pre-push hook that sleeps then writes a marker file.
+    // If the hook child survives timeout, the marker appears.
+    const hookScript = ['#!/bin/sh', `sleep 1 && printf "orphan" > '${orphanMarker}'`].join('\n');
+    writeFileSync(join(fixture.primary, '.githooks/pre-push'), hookScript);
+    chmodSync(join(fixture.primary, '.githooks/pre-push'), 0o755);
+
+    // Stage a commit to push
+    writeFileSync(join(fixture.primary, 'regression.md'), 'regression\n');
+    git(fixture.primary, ['add', 'regression.md']);
+    git(fixture.primary, ['commit', '-m', 'regression commit']);
+
+    // Push with a short timeout — the hook sleeps 1s, so 200ms times out
+    // before the hook can write the marker.
+    assert.throws(() => git(fixture.primary, ['push', 'origin', 'main'], { timeout: 200 }), /ETIMEDOUT|timed out/i);
+
+    // Wait long enough for the hook child to have written if it survived.
+    await new Promise((resolve) => setTimeout(resolve, 2000));
+
+    assert.equal(
+      existsSync(orphanMarker),
+      false,
+      'hook child must be killed by process-group cleanup — marker file should not exist',
+    );
+  } finally {
+    rmSync(fixture.root, { recursive: true, force: true });
+  }
 });

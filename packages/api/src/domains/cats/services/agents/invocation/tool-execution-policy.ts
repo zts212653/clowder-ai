@@ -35,7 +35,8 @@ export function normalizeToolExecutionName(rawName: string): string {
 }
 
 export function normalizeToolExecutionPolicy(policy: ToolExecutionPolicy): ToolExecutionPolicy {
-  if (policy.mode !== 'read_only') throw new Error(`unsupported tool execution policy: ${String(policy.mode)}`);
+  if (policy.mode === 'collective_participation') return { mode: 'collective_participation' };
+  if (policy.mode !== 'read_only') throw new Error('unsupported tool execution policy');
   return {
     mode: 'read_only',
     replayDeniedToolNames: [...new Set(policy.replayDeniedToolNames.map(normalizeToolExecutionName))]
@@ -46,6 +47,7 @@ export function normalizeToolExecutionPolicy(policy: ToolExecutionPolicy): ToolE
 
 export function parseToolExecutionPolicy(raw: string): ToolExecutionPolicy {
   const parsed = JSON.parse(raw) as Partial<ToolExecutionPolicy>;
+  if (parsed.mode === 'collective_participation') return { mode: 'collective_participation' };
   if (parsed.mode !== 'read_only' || !Array.isArray(parsed.replayDeniedToolNames)) {
     throw new Error('invalid persisted tool execution policy');
   }
@@ -65,13 +67,27 @@ export function assertToolExecutionPolicySupported(service: AgentService, policy
 export function toolExecutionPolicyDenial(
   policy: ToolExecutionPolicy | undefined,
   rawToolName: string,
-): { reason: 'replay_denied_tool' | 'read_only_tool_policy'; toolName: string } | null {
+): {
+  reason: 'replay_denied_tool' | 'read_only_tool_policy' | 'collective_participation_tool_policy';
+  toolName: string;
+} | null {
   if (!policy) return null;
   const toolName = normalizeToolExecutionName(rawToolName);
   const normalized = normalizeToolExecutionPolicy(policy);
+  if (normalized.mode === 'collective_participation') {
+    return COLLECTIVE_PARTICIPATION_TOOLS.has(toolName)
+      ? null
+      : { reason: 'collective_participation_tool_policy', toolName };
+  }
   // read_only denies every tool. replayDeniedToolNames only preserves the stronger audit reason
   // for tools whose prior execution makes replay specifically unsafe.
   return normalized.replayDeniedToolNames.includes(toolName)
     ? { reason: 'replay_denied_tool', toolName }
     : { reason: 'read_only_tool_policy', toolName };
 }
+
+const COLLECTIVE_PARTICIPATION_TOOLS = new Set([
+  'cat_cafe_collective_current_context',
+  'cat_cafe_collective_read_context',
+  'cat_cafe_collective_reply',
+]);

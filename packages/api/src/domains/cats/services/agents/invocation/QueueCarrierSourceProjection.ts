@@ -1,4 +1,5 @@
 import type { IMessageStore, StoredMessage } from '../../stores/ports/MessageStore.js';
+import { isOwnerVisibleManagedHoldConnector } from '../../stores/visibility.js';
 import type { QueueEntry } from './InvocationQueue.js';
 import { carrierEntryId, isQueuedCarrierTarget } from './QueuedMessageCustodyCarrierProjection.js';
 
@@ -32,13 +33,17 @@ export function queueCarrierMessageIds(entry: Pick<QueueEntry, 'messageId' | 'me
 }
 
 export async function readQueueCarrierMessages(
-  entry: QueueEntry,
+  entry: Pick<QueueEntry, 'id' | 'threadId' | 'userId' | 'messageId' | 'mergedMessageIds'>,
   store: Pick<IMessageStore, 'getById'>,
 ): Promise<StoredMessage[]> {
   return Promise.all(
     queueCarrierMessageIds(entry).map(async (id) => {
       const message = await store.getById(id);
-      if (!message || message.userId !== entry.userId || message.threadId !== entry.threadId) {
+      if (
+        !message ||
+        message.threadId !== entry.threadId ||
+        (message.userId !== entry.userId && !isOwnerVisibleManagedHoldConnector(message, entry.userId))
+      ) {
         throw new Error(`Queue source unavailable or out of scope: ${entry.id}/${id}`);
       }
       return message;

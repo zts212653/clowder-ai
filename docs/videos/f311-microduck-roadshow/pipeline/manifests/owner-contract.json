@@ -1,0 +1,208 @@
+{
+  "schemaVersion": 1,
+  "ownerFeatureId": "microduck-owner",
+  "targetRef": "microduck-owner:simulator:walking",
+  "examplesAreEvidence": false,
+  "policyManifestPath": "docs/videos/f311-microduck-roadshow/pipeline/manifests/policies.json",
+  "evaluationReceiptSchemaPath": "docs/videos/f311-microduck-roadshow/pipeline/schemas/evaluation-receipt.schema.json",
+  "controlExperimentManifestPath": "docs/videos/f311-microduck-roadshow/pipeline/manifests/control-experiment.json",
+  "controlEvaluationReceiptSchemaPath": "docs/videos/f311-microduck-roadshow/pipeline/schemas/control-evaluation-receipt.schema.json",
+  "controlPublicEvaluatorPath": "docs/videos/f311-microduck-roadshow/pipeline/bin/evaluate-control-public.mjs",
+  "controlFullEvaluatorPath": "docs/videos/f311-microduck-roadshow/pipeline/bin/evaluate-control-full.mjs",
+  "controlFullEvaluationReceiptPath": "docs/videos/f311-microduck-roadshow/pipeline/evidence/control-full-evaluation.json",
+  "controlLoadedTaskRequestSchemaPath": "docs/videos/f311-microduck-roadshow/pipeline/schemas/control-loaded-task-request.schema.json",
+  "controlLoadedOutcomeReceiptSchemaPath": "docs/videos/f311-microduck-roadshow/pipeline/schemas/control-loaded-outcome-receipt.schema.json",
+  "controlLoadedOutcomeEvaluatorPath": "docs/videos/f311-microduck-roadshow/pipeline/bin/evaluate-control-loaded.mjs",
+  "evaluationContract": {
+    "subjectOrder": ["baseline", "control", "push-range", "spawn-tilt", "upright-weight"],
+    "requiredMetricKeys": ["meanAbsVelocityErrorMps", "meanForwardDistanceM", "survivalRate"],
+    "minSeedCount": 8,
+    "standardErrorEstimator": "sample_standard_deviation_divided_by_sqrt_n",
+    "standardErrorMultiplier": 2,
+    "primaryMetric": {
+      "key": "meanForwardDistanceM",
+      "direction": "higher_is_better",
+      "rule": "candidate_control_delta_gt_k_times_combined_standard_error"
+    },
+    "guardrailMetric": {
+      "key": "survivalRate",
+      "direction": "higher_is_better",
+      "nonInferiorityMargin": 0,
+      "rule": "candidate_control_delta_gte_negative_non_inferiority_margin"
+    },
+    "reportingMetric": {
+      "key": "meanAbsVelocityErrorMps",
+      "direction": "lower_is_better"
+    },
+    "candidateSelectionSource": "public_only",
+    "holdoutRole": "confirm_or_reject_preselected_candidate",
+    "allCandidatesRunHoldout": true,
+    "otherwise": "no_measured_improvement"
+  },
+  "controlEvaluationContract": {
+    "interventionKind": "control_config",
+    "subjectOrder": ["baseline", "control", "action-scale-090", "action-scale-105", "action-scale-110"],
+    "fixedPolicy": true,
+    "candidateArtifactKind": "control-package",
+    "requiredCandidateRefs": ["artifactRef", "configRef", "policyRef", "runnerRef", "evaluationEnvRef"],
+    "forbiddenCandidateRefs": ["jobRef", "checkpointRef", "onnxArtifactRef"],
+    "incompleteReceiptNamespace": "evaluation-attempt:sha256:<receiptSha256>",
+    "publicReceiptNamespace": "public-evaluation:sha256:<receiptSha256>",
+    "fullReceiptNamespace": "evaluation:sha256:<receiptSha256>",
+    "allCandidatesRunHoldout": true
+  },
+  "controlLoadedOutcomeContract": {
+    "requiredSourceReceiptNamespace": "evaluation:sha256:<receiptSha256>",
+    "postWritebackSubjects": ["control", "selected_candidate"],
+    "postRollbackSubjects": ["baseline"],
+    "minSeedCount": 8,
+    "freshSeedMustDifferFrom": ["public", "holdout"],
+    "rawSeedAndCaptureBoundary": "outside_pipeline_repository",
+    "completeFreshOutcomeNamespace": "fresh-outcome:sha256:<receiptSha256>",
+    "incompleteFreshOutcomeNamespace": "fresh-outcome-attempt:sha256:<receiptSha256>",
+    "completeRestoreOutcomeNamespace": "restore-outcome:sha256:<receiptSha256>",
+    "measuredRestoreMismatchNamespace": "restore-outcome-attempt:sha256:<receiptSha256>",
+    "refusedRestoreExecutionNamespace": "restore-execution-attempt:sha256:<receiptSha256>"
+  },
+  "metricBirthCertificate": {
+    "utilityClaim": "A walking-robustness candidate is eligible only when its public-set forward-distance gain over the matched control exceeds two combined standard errors and its survival-rate point estimate does not decline under the frozen evaluation environment.",
+    "estimator": {
+      "pointEstimate": "arithmetic_mean_across_seed_runs",
+      "standardError": "sample_standard_deviation_divided_by_sqrt_n"
+    },
+    "validityBounds": [
+      "The primary-metric threshold is a pre-registered screening rule, not a formal p-value.",
+      "The survival guardrail is absolute point-estimate non-degradation with a zero margin; uncertainty cannot excuse an observed survival decline.",
+      "Each estimate and standard error must come from at least eight runs bound to one exact seed-set ref and one subject-independent evaluation environment.",
+      "Public results may select a candidate; sealed holdout results may only confirm or reject that preselected candidate.",
+      "All candidates still run sealed holdout, including candidates that fail the public screen."
+    ],
+    "roles": {
+      "observer": "Microduck owner-boundary evaluator",
+      "domainOwner": "T1 Microduck intervention and evaluation owner",
+      "consumer": "T2 F311 program adapter and the roadshow stage",
+      "calibrator": "Independent holdout sealer plus Opus 5 contract reviewer"
+    },
+    "roleOverlapJustification": "The evaluator owner also observes runs because only the owner boundary may resolve hidden seeds and credentials; calibration and sealed-set custody remain independent.",
+    "calibrationPlan": "Before outcome collection, validate the estimator and binding refusal paths on deterministic fixtures; report the frozen public rule and use sealed holdout only to confirm or reject the already selected candidate decision.",
+    "repeatabilityContract": "Recompute each point estimate and standard error from at least eight runs under the immutable seed-set, evaluation-environment, and artifact refs; each admitted evaluation exposes that sample count while seed descriptors remain ref/hash-only, and identical aggregate inputs must produce an identical canonical receipt hash."
+  },
+  "ownerStateRefs": {
+    "baselinePolicy": {
+      "pattern": "^hf-space:[A-Za-z0-9._-]+/[A-Za-z0-9._-]+@[0-9a-f]{40}#[^\\s]+\\.onnx$",
+      "example": "hf-space:pollen-robotics/microduck-simulator@183f99a40bd7308da3e848de961ed32bb02624a5#app/public/policies/BEST_alpha_walking.onnx"
+    },
+    "candidatePolicy": {
+      "pattern": "^hf-model:[A-Za-z0-9._-]+/[A-Za-z0-9._-]+@[0-9a-f]{40}#[^\\s]+\\.onnx$",
+      "example": "hf-model:owner/f311-push-range@1111111111111111111111111111111111111111#exported/policy.onnx"
+    },
+    "controlPolicy": {
+      "pattern": "^hf-model:[A-Za-z0-9._-]+/[A-Za-z0-9._-]+@[0-9a-f]{40}#[^\\s]+\\.onnx$",
+      "example": "hf-model:owner/f311-control@1111111111111111111111111111111111111111#exported/policy.onnx"
+    },
+    "controlConfig": {
+      "pattern": "^control-config:sha256:[0-9a-f]{64}$",
+      "example": "control-config:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    "controlPackage": {
+      "pattern": "^control-package:sha256:[0-9a-f]{64}$",
+      "example": "control-package:sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+    },
+    "controlExperiment": {
+      "pattern": "^control-experiment:sha256:[0-9a-f]{64}$",
+      "example": "control-experiment:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+    },
+    "runner": {
+      "pattern": "^runner:sha256:[0-9a-f]{64}$",
+      "example": "runner:sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+    },
+    "job": {
+      "pattern": "^hf-job:[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$",
+      "example": "hf-job:owner/0123456789abcdef"
+    },
+    "checkpoint": {
+      "pattern": "^hf-model:[A-Za-z0-9._-]+/[A-Za-z0-9._-]+@[0-9a-f]{40}#[^\\s]+\\.pt$",
+      "example": "hf-model:owner/f311-push-range@1111111111111111111111111111111111111111#model_1500.pt"
+    },
+    "onnx": {
+      "pattern": "^hf-model:[A-Za-z0-9._-]+/[A-Za-z0-9._-]+@[0-9a-f]{40}#[^\\s]+\\.onnx$",
+      "example": "hf-model:owner/f311-push-range@1111111111111111111111111111111111111111#exported/policy.onnx"
+    },
+    "evaluation": {
+      "pattern": "^evaluation:sha256:[0-9a-f]{64}$",
+      "example": "evaluation:sha256:2222222222222222222222222222222222222222222222222222222222222222"
+    },
+    "verification": {
+      "pattern": "^verification:sha256:[0-9a-f]{64}$",
+      "example": "verification:sha256:1212121212121212121212121212121212121212121212121212121212121212"
+    },
+    "evaluationAttempt": {
+      "pattern": "^evaluation-attempt:sha256:[0-9a-f]{64}$",
+      "example": "evaluation-attempt:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+    },
+    "publicEvaluation": {
+      "pattern": "^public-evaluation:sha256:[0-9a-f]{64}$",
+      "example": "public-evaluation:sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+    },
+    "evaluationEnvironment": {
+      "pattern": "^evaluation-env:sha256:[0-9a-f]{64}$",
+      "example": "evaluation-env:sha256:8888888888888888888888888888888888888888888888888888888888888888"
+    },
+    "seedSet": {
+      "pattern": "^seed-set:sha256:[0-9a-f]{64}$",
+      "example": "seed-set:sha256:9999999999999999999999999999999999999999999999999999999999999999"
+    },
+    "deploy": {
+      "pattern": "^deploy:sha256:[0-9a-f]{64}$",
+      "example": "deploy:sha256:3333333333333333333333333333333333333333333333333333333333333333"
+    },
+    "freshOutcome": {
+      "pattern": "^fresh-outcome:sha256:[0-9a-f]{64}$",
+      "example": "fresh-outcome:sha256:4444444444444444444444444444444444444444444444444444444444444444"
+    },
+    "freshOutcomeAttempt": {
+      "pattern": "^fresh-outcome-attempt:sha256:[0-9a-f]{64}$",
+      "example": "fresh-outcome-attempt:sha256:1313131313131313131313131313131313131313131313131313131313131313"
+    },
+    "loadedRuntime": {
+      "pattern": "^loaded-runtime:sha256:[0-9a-f]{64}$",
+      "example": "loaded-runtime:sha256:1414141414141414141414141414141414141414141414141414141414141414"
+    },
+    "freshnessProof": {
+      "pattern": "^freshness-proof:sha256:[0-9a-f]{64}$",
+      "example": "freshness-proof:sha256:1515151515151515151515151515151515151515151515151515151515151515"
+    },
+    "rollbackReceipt": {
+      "pattern": "^rollback-receipt:sha256:[0-9a-f]{64}$",
+      "example": "rollback-receipt:sha256:1616161616161616161616161616161616161616161616161616161616161616"
+    },
+    "restoreOutcome": {
+      "pattern": "^restore-outcome:sha256:[0-9a-f]{64}$",
+      "example": "restore-outcome:sha256:1717171717171717171717171717171717171717171717171717171717171717"
+    },
+    "restoreOutcomeAttempt": {
+      "pattern": "^restore-outcome-attempt:sha256:[0-9a-f]{64}$",
+      "example": "restore-outcome-attempt:sha256:1818181818181818181818181818181818181818181818181818181818181818"
+    },
+    "restoreExecutionAttempt": {
+      "pattern": "^restore-execution-attempt:sha256:[0-9a-f]{64}$",
+      "example": "restore-execution-attempt:sha256:1919191919191919191919191919191919191919191919191919191919191919"
+    },
+    "rollback": {
+      "pattern": "^hf-space:[A-Za-z0-9._-]+/[A-Za-z0-9._-]+@[0-9a-f]{40}#[^\\s]+\\.onnx$",
+      "example": "hf-space:pollen-robotics/microduck-simulator@183f99a40bd7308da3e848de961ed32bb02624a5#app/public/policies/BEST_alpha_walking.onnx"
+    },
+    "capture": {
+      "pattern": "^capture:sha256:[0-9a-f]{64}$",
+      "example": "capture:sha256:5555555555555555555555555555555555555555555555555555555555555555"
+    },
+    "holdoutSealedProof": {
+      "pattern": "^evaluation-proof:sha256:[0-9a-f]{64}$",
+      "example": "evaluation-proof:sha256:6666666666666666666666666666666666666666666666666666666666666666"
+    },
+    "optimizerExposureProof": {
+      "pattern": "^exposure-proof:sha256:[0-9a-f]{64}$",
+      "example": "exposure-proof:sha256:7777777777777777777777777777777777777777777777777777777777777777"
+    }
+  }
+}

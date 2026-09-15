@@ -12,7 +12,7 @@ import assert from 'node:assert/strict';
 
 const { EvolutionProgramService } = await import('../dist/infrastructure/capability-evolution/program-service.js');
 const { projectEvolutionAttribution } = await import(
-  '../dist/infrastructure/capability-evolution/program-attribution-projection.js'
+  '../dist/infrastructure/capability-evolution/read-model/program-attribution-projection.js'
 );
 
 export { EvolutionProgramService, projectEvolutionAttribution };

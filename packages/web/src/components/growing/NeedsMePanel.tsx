@@ -1,11 +1,14 @@
 'use client';
 
-import type { GlobalArtifactDTO } from '@cat-cafe/shared';
+import type { ArtifactReviewView, GlobalArtifactDTO } from '@cat-cafe/shared';
 import { useEffect, useMemo, useRef } from 'react';
+import { ReviewArtifactButton } from '@/components/content-review/ReviewArtifactButton';
+import { reviewSurfaceFromPreparedRef } from '@/components/workbench/artifact-review-surface';
 import { useEntrustedWorkProjection } from '@/hooks/useEntrustedWorkProjection';
 import { EntrustedWorkBrief } from './EntrustedWorkBrief';
 import { type EligibleNeedsMeReceipt, selectNeedsMeItems } from './needs-me-items';
 import { type PreparedArtifactCoordinate, PreparedArtifactPreview } from './PreparedArtifactPreview';
+import { resolvePreparedArtifact } from './resolve-prepared-artifact';
 
 export { needsMeItemRef } from './needs-me-items';
 
@@ -17,14 +20,18 @@ function whyNow(receipt: EligibleNeedsMeReceipt): string {
 
 export function NeedsMePanel({
   artifacts,
+  artifactsLoading = false,
   selectedItemRef,
   onOpenArtifact,
   onOpenAction,
+  onOpenReview,
 }: {
   artifacts: GlobalArtifactDTO[];
+  artifactsLoading?: boolean;
   selectedItemRef?: string | null;
   onOpenArtifact?: (artifact: PreparedArtifactCoordinate, itemRef: string) => void;
   onOpenAction?: (actionRef: string, itemRef: string) => void;
+  onOpenReview?: (review: ArtifactReviewView, itemRef: string) => void;
 }) {
   const projection = useEntrustedWorkProjection('needs-me');
   const selectedRef = useRef<HTMLElement | null>(null);
@@ -70,7 +77,7 @@ export function NeedsMePanel({
         {items.map(({ ownerRead, receipt, itemRef }) => {
           const coordinate = ownerRead.preparedArtifact;
           if (!coordinate) return null;
-          const artifact = artifacts.find((candidate) => (candidate.ref ?? candidate.url) === coordinate.artifactRef);
+          const artifact = resolvePreparedArtifact(artifacts, coordinate);
           const selected = selectedItemRef === itemRef;
           return (
             <article
@@ -109,7 +116,16 @@ export function NeedsMePanel({
                 <PreparedArtifactPreview
                   coordinate={coordinate}
                   artifact={artifact}
+                  loading={artifactsLoading && !reviewSurfaceFromPreparedRef(coordinate.openInWorkspaceRef)}
                   onOpen={() => onOpenArtifact?.(coordinate, itemRef)}
+                  reviewAction={
+                    onOpenReview ? (
+                      <ReviewArtifactButton
+                        ownerRead={ownerRead}
+                        onPrepared={(review) => onOpenReview(review, itemRef)}
+                      />
+                    ) : undefined
+                  }
                 />
               </div>
             </article>

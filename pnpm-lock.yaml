@@ -51,11 +51,11 @@ importers:
         specifier: 0.1.0-alpha.9
         version: 0.1.0-alpha.9
       '@clowder-ai/plugin-contract':
-        specifier: 0.1.0-beta.12
-        version: 0.1.0-beta.12
+        specifier: 0.1.0-beta.15
+        version: 0.1.0-beta.15
       '@clowder-ai/plugin-sdk':
-        specifier: 0.1.0-beta.8
-        version: 0.1.0-beta.8
+        specifier: 0.1.0-beta.10
+        version: 0.1.0-beta.10
       '@fastify/cookie':
         specifier: '9'
         version: 9.4.0
@@ -1161,12 +1161,16 @@ packages:
       - require-from-string
       - sisteransi
 
-  '@clowder-ai/plugin-contract@0.1.0-beta.12':
-    resolution: {integrity: sha512-gMmtfTXSTE69617usXoAkO5fs9+WIZSHEQ4iHdSmCEn7FPDt7Aj71uFPYuPDrqVWABW9xXv5XdcNGHx6+AxOcQ==}
+  '@clowder-ai/plugin-contract@0.1.0-beta.14':
+    resolution: {integrity: sha512-LvgAAlwlqTaQjhmbTP/b/IoDIwovGuGvROnXqbv2qoKhrQzvLWNpxIXpmsCARvj2HiB9a2Ko4L4OkmBGTtKBLw==}
     engines: {node: '>=20.0.0'}
 
-  '@clowder-ai/plugin-sdk@0.1.0-beta.8':
-    resolution: {integrity: sha512-zOeOccUCeQBskmyjGrGCONJwv351BQQecLfzLeK2elNz5hjn1+eXqnXJqhm3V9VRMVAlMIFL3rq/ufVozyLDLQ==}
+  '@clowder-ai/plugin-contract@0.1.0-beta.15':
+    resolution: {integrity: sha512-i6M6d6bEhL97gVsop2V5hG0lGMrmOVc2/0+7PAHxLhFCg2zIZ0LCd8HDJRYrD3E7QpcezgRzUiWbzRTMnTGdYA==}
+    engines: {node: '>=20.0.0'}
+
+  '@clowder-ai/plugin-sdk@0.1.0-beta.10':
+    resolution: {integrity: sha512-FAdAAbFRgHInUmIw1fm343KyCgltcnBa0cT12nU+npEw5QLrnyNidcHfqPtrWmUaruv8Q+J24VVYa5cU9fTy1w==}
     engines: {node: '>=20.0.0'}
 
   '@codemirror/autocomplete@6.20.1':
@@ -7604,14 +7608,19 @@ snapshots:
 
   '@clowder-ai/feishu-meeting-intake@0.1.0-alpha.9': {}
 
-  '@clowder-ai/plugin-contract@0.1.0-beta.12':
+  '@clowder-ai/plugin-contract@0.1.0-beta.14':
     dependencies:
       ajv: 8.17.1
       ajv-formats: 3.0.1(ajv@8.17.1)
 
-  '@clowder-ai/plugin-sdk@0.1.0-beta.8':
+  '@clowder-ai/plugin-contract@0.1.0-beta.15':
     dependencies:
-      '@clowder-ai/plugin-contract': 0.1.0-beta.12
+      ajv: 8.17.1
+      ajv-formats: 3.0.1(ajv@8.17.1)
+
+  '@clowder-ai/plugin-sdk@0.1.0-beta.10':
+    dependencies:
+      '@clowder-ai/plugin-contract': 0.1.0-beta.14
 
   '@codemirror/autocomplete@6.20.1':
     dependencies:

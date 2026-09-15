@@ -20,9 +20,11 @@ import {
   type ApprovalEnvelope,
   COLLECTION_SIGNAL_KINDS,
   generateProposalId,
+  PROFILE_UPDATE_TARGET_LAYERS,
   type ProfileUpdateProposal,
 } from '@cat-cafe/shared';
 import {
+  profileCorpusRelativePath,
   relationshipKeyFromPrimerRelativePath,
   relationshipPrimerRelativePath,
 } from '@cat-cafe/shared/profile-contract';
@@ -44,8 +46,8 @@ const proposeSchema = z.object({
   rationale: z.string().trim().min(1).max(1000),
   signalKind: z.enum(COLLECTION_SIGNAL_KINDS),
   sourceMessageId: z.string().min(1).optional(),
-  // INV-6: AC-C1 writes the current persona primer only. `capsule` is not in the union → 400.
-  targetLayer: z.literal('primer').optional(),
+  // Phase E: 'primer' (per-persona) or 'corpus' (owner-wide). 'capsule' is not in the union → 400 (INV-6).
+  targetLayer: z.enum(PROFILE_UPDATE_TARGET_LAYERS).default('primer'),
   clientRequestId: z.string().min(1).max(200).optional(),
 });
 
@@ -68,10 +70,16 @@ export function registerCallbackProposeProfileUpdateRoutes(app: FastifyInstance,
 
     const parsed = proposeSchema.safeParse(request.body);
     if (!parsed.success) {
+      // Phase E: surface typed error for invalid targetLayer specifically (Design Gate §5).
+      const layerIssue = parsed.error.issues.find((i) => i.path.includes('targetLayer'));
+      if (layerIssue) {
+        reply.status(400);
+        return { error: 'invalid_target_layer', detail: layerIssue.message };
+      }
       reply.status(400);
       return { error: 'Invalid request body', details: parsed.error.issues };
     }
-    const { afterContent, rationale, signalKind, sourceMessageId, clientRequestId } = parsed.data;
+    const { afterContent, rationale, signalKind, sourceMessageId, clientRequestId, targetLayer } = parsed.data;
     const invocationId = record.invocationId;
 
     if (!(await registry.isLatest(invocationId))) {
@@ -88,24 +96,39 @@ export function registerCallbackProposeProfileUpdateRoutes(app: FastifyInstance,
       return { error: 'sourceMessageId must match the authenticated invocation origin' };
     }
 
-    // Target identity is derived from the authenticated cat's stable persona — never user-supplied.
-    let scope: ReturnType<FileProfileRepository['scope']>;
-    try {
-      scope = repository.scope(record.userId, record.catId);
-    } catch (err) {
-      reply.status(400);
-      return { error: err instanceof Error ? err.message : 'invalid profile persona' };
-    }
-    const targetPath = relationshipPrimerRelativePath(scope.relationshipKey);
-
+    // Dedup check BEFORE target read: a retry with a known clientRequestId must return
+    // the cached proposal even when the repository is temporarily unavailable (cloud P1).
     if (clientRequestId) {
       const cached = await proposalStore.getDedupProposalId(record.userId, clientRequestId);
       if (cached) {
         return visibleDedupResponse(approvalIngress, proposalStore, originMessageId, cached, reply);
       }
     }
-    // Pin the current primer state as the optimistic-lock base (P1-2).
-    const beforeContent = repository.readPrimer(scope)?.content ?? '';
+
+    // Phase E: derive target identity by layer.
+    let targetPath: string;
+    let beforeContent: string;
+    let scope: ReturnType<FileProfileRepository['scope']> | undefined;
+
+    if (targetLayer === 'corpus') {
+      try {
+        targetPath = profileCorpusRelativePath();
+        beforeContent = repository.readCorpus(record.userId)?.content ?? '';
+      } catch {
+        reply.status(503);
+        return { error: 'corpus_target_unavailable', detail: 'Corpus repository is currently unavailable' };
+      }
+    } else {
+      // Target identity is derived from the authenticated cat's stable persona — never user-supplied.
+      try {
+        scope = repository.scope(record.userId, record.catId);
+      } catch (err) {
+        reply.status(400);
+        return { error: err instanceof Error ? err.message : 'invalid profile persona' };
+      }
+      targetPath = relationshipPrimerRelativePath(scope.relationshipKey);
+      beforeContent = repository.readPrimer(scope)?.content ?? '';
+    }
     const baseContentHash = hashContent(beforeContent);
 
     // Reserve dedup BEFORE create so a concurrent retry's loser creates nothing.
@@ -126,7 +149,7 @@ export function registerCallbackProposeProfileUpdateRoutes(app: FastifyInstance,
         sourceThreadId: record.threadId,
         sourceInvocationId: invocationId,
         sourceCatId: record.catId,
-        targetLayer: 'primer',
+        targetLayer,
         targetPath,
         beforeContent,
         baseContentHash,
@@ -166,7 +189,7 @@ export function registerCallbackProposeProfileUpdateRoutes(app: FastifyInstance,
     socketManager.emitToUser(record.userId, 'profile_update_proposal_created', proposal);
 
     // F231 AC-C3 eval counter (KD-10)
-    profileUpdateProposed.add(1, { 'agent.id': record.catId, 'signal.kind': signalKind });
+    profileUpdateProposed.add(1, { 'agent.id': record.catId, 'signal.kind': signalKind, 'target.layer': targetLayer });
 
     // F221 AC-B9: taste routing advisory (non-blocking — proposal already created)
     const { detectTasteSignal } = await import('../domains/taste/services/taste-routing-guard.js');
@@ -245,7 +268,13 @@ function publishProfileUpdateApproval(
   fallbackOriginMessageId: string,
 ) {
   const sourceMessageId = proposal.signalProvenance.sourceMessageId ?? fallbackOriginMessageId;
-  const relationshipKey = relationshipKeyFromPrimerRelativePath(proposal.targetPath);
+  let cardContent: string;
+  if (proposal.targetLayer === 'corpus') {
+    cardContent = '提议更新共享事实档案（corpus）';
+  } else {
+    const relationshipKey = relationshipKeyFromPrimerRelativePath(proposal.targetPath);
+    cardContent = `提议更新 ${relationshipKey} persona 的关系档案（primer）`;
+  }
   return ingress.publish(
     {
       producerId: 'F231',
@@ -254,7 +283,7 @@ function publishProfileUpdateApproval(
       requesterCatId: proposal.sourceCatId,
       originRef: { kind: 'message', threadId: proposal.signalProvenance.sourceThreadId, messageId: sourceMessageId },
       cardThreadId: proposal.sourceThreadId,
-      cardContent: `提议更新 ${relationshipKey} persona 的关系档案（primer）`,
+      cardContent,
       cardBlock: buildProfileUpdateCardBlock(proposal),
       createdAt: proposal.createdAt,
     },

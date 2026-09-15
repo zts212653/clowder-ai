@@ -17,13 +17,13 @@ description_updated_at: 2026-08-23T01:37:00-07:00
 > **Priority**: P1
 > **Created**: 2026-07-28
 > **operator source**:
-> `0001785253452969-000151-f93c9786` — “我们这能力得做在我们的workspace里能点才行”；
-> `0001785254502978-000008-67e5f9fd` — 确认可以采用 7 天清理，并询问是否应按完整 Feature 设计；
-> `0001785313307088-000072-a543a12d` — “我觉得对于design gate 我感觉ok了”；
-> `0001786603237557-000040-5b8645f4` — 反馈边听边缓存卡顿、暂停会让缓存停止，并提出一键缓存能力；
-> `0001786765382711-000136-e263f5dc` — 再次反馈逐句听读“一卡一卡”；
-> `0001787371703269-000188-2063f5a8` — 要求以第一性原理和数学之美复核 Phase D，避免制造冲突规则与概念；
-> `0001787474277593-000070-9989c234` — 同意服务重启后保留进度但不自动恢复，并授权更新 feature truth 后继续实施。
+> `private-source-id` — “我们这能力得做在我们的workspace里能点才行”；
+> `private-source-id` — 确认可以采用 7 天清理，并询问是否应按完整 Feature 设计；
+> `private-source-id` — “我觉得对于design gate 我感觉ok了”；
+> `private-source-id` — 反馈边听边缓存卡顿、暂停会让缓存停止，并提出一键缓存能力；
+> `private-source-id` — 再次反馈逐句听读“一卡一卡”；
+> `private-source-id` — 要求以第一性原理和数学之美复核 Phase D，避免制造冲突规则与概念；
+> `private-source-id` — 同意服务重启后保留进度但不自动恢复，并授权更新 feature truth 后继续实施。
 > **Owner verdict**: 是；这是一条跨 Workspace、播放与缓存生命周期的独立用户旅程，正式立项为 F279。
 
 Architecture cell: `hub-action-surface`
@@ -165,10 +165,10 @@ TTS、缓存或生产 Workspace 集成已经实现。
   `007ebe3de33eaea853cda27da77dc314e75eff42`
   (`feat/f279-listen-mode-design-gate`)。
 - 非作者 reviewer `@opus5` 在
-  `0001785312458649-000070-0ea5ef9e` 对该 exact HEAD 给出 terminal
+  `private-source-id` 对该 exact HEAD 给出 terminal
   `APPROVE`；浏览器实测覆盖真实长段落、跨行句高亮、窄屏、跨 thread
   续播、被抑制语音的手动点播、缓存浮层与可访问性。
-- operator 在 `0001785313307088-000072-a543a12d` 签字：
+- operator 在 `private-source-id` 签字：
   “我觉得对于design gate 我感觉ok了”。
 
 ### Phase B — Document Audio Domain
@@ -238,7 +238,7 @@ TTS、缓存或生产 Workspace 集成已经实现。
 - [ ] **AC-D5**: 边缓存边听时，播放 miss 在句子边界优先，后台任务不会破坏顺序、重复播放或误报播放器失败。
 - [ ] **AC-D6**: 取消保留已完成资产；active run 下清理先同步取消再按引用语义回收。集成竞态测试 hold synthesis → clear/cancel → release result，证明晚到结果不能复活 link/progress；reload 只显示真实部分进度，不自动恢复。
 - [ ] **AC-D7**: 文档编辑/voice fingerprint 变化不会把旧 run 结果误连或误计入新 manifest；集成竞态测试 hold synthesis → 更新 digest → release result，证明旧结果被 fence；两个 user 使用相同 path/digest 时 run/status/link 完全隔离。未变化且指纹一致的资产仍可内容寻址复用。
-- [x] **AC-D8**: operator 基于真实 Workspace 工具栏检查与在地文字原型确认入口、文案、状态及窄屏退化，并签署瘦身版 Design Gate（`0001787474277593-000070-9989c234`）。
+- [x] **AC-D8**: operator 基于真实 Workspace 工具栏检查与在地文字原型确认入口、文案、状态及窄屏退化，并签署瘦身版 Design Gate（`private-source-id`）。
 
 ## Mechanism Selection
 
@@ -330,12 +330,12 @@ TTS、缓存或生产 Workspace 集成已经实现。
   `007ebe3de33eaea853cda27da77dc314e75eff42`。
 - Phase B/C 生产实现修复后 exact HEAD 为
   `fe15c18dd1464e9d758d2adff3d08aa6b05f1a02`；Web 修复聚焦 22/22、API 修复聚焦 15/15 与完整 gate 均通过。非作者 reviewer `@opus5` 在
-  `0001786350373337-000090-38a5b65d` 对该 exact HEAD 给出 terminal
+  `private-source-id` 对该 exact HEAD 给出 terminal
   `APPROVE`；其浏览器实测与 focused test 复核覆盖全部六项 review delta。
 - 分支后续 observability delta `81052ff94` 只增加 WAV 时长推导与回归测试；RED 为 `durationSec === undefined`，GREEN 为 provider 27/27，真实 sidecar response 返回 `durationSec: 4.24` / `synthesisMs: 8576`。它不冒充吞吐修复，也不继承前一 exact HEAD 的 review verdict。
-- F279 于 2026-08-11 从 paused F289 stack 脱离并 clean rebase 到 current main；PR #3577 exact HEAD `9451a680f` 的完整门禁通过，非作者 reviewer 的 terminal APPROVE 由 patch-equivalent rebase continuity 桥接。operator 在 `0001786493877050-000271-e3f08035` 授权合入后，GitHub squash merge 为 `e0119fd88`；按同一指令未启动 runtime。真实 TTS UAT 已证明热缓存/恢复/清理链路，但冷合成 p50/p95 与连续播放仍未达到 AC-C4/C5，AC-C3 的“首个可听”也还缺浏览器音频起播证据。
-- 稳定音频根目录 PR #3589 由非作者 reviewer `@opus5` 在 source `0001786500824471-000357-e2ffee7e` 对 exact HEAD `8a89a0419` 给出 terminal APPROVE；最终 rebase HEAD `89a280998` 的两笔 patch-id 与已审版本相同，且在 `origin/main@3ce86ca19` 上重新通过完整 `pnpm gate` 与 GitHub CI。GitHub squash merge 为 `162111510`；runtime 仍未启动，AC-B4b 保持等待跨 checkout cache-hit UAT。
+- F279 于 2026-08-11 从 paused F289 stack 脱离并 clean rebase 到 current main；PR #3577 exact HEAD `9451a680f` 的完整门禁通过，非作者 reviewer 的 terminal APPROVE 由 patch-equivalent rebase continuity 桥接。operator 在 `private-source-id` 授权合入后，GitHub squash merge 为 `e0119fd88`；按同一指令未启动 runtime。真实 TTS UAT 已证明热缓存/恢复/清理链路，但冷合成 p50/p95 与连续播放仍未达到 AC-C4/C5，AC-C3 的“首个可听”也还缺浏览器音频起播证据。
+- 稳定音频根目录 PR #3589 由非作者 reviewer `@opus5` 在 source `private-source-id` 对 exact HEAD `8a89a0419` 给出 terminal APPROVE；最终 rebase HEAD `89a280998` 的两笔 patch-id 与已审版本相同，且在 `origin/main@3ce86ca19` 上重新通过完整 `pnpm gate` 与 GitHub CI。GitHub squash merge 为 `162111510`；runtime 仍未启动，AC-B4b 保持等待跨 checkout cache-hit UAT。
 - 行为改动需非作者独立验证，并覆盖最终 HEAD。
 - 路径安全、共享资产回收、持久状态和 PlaybackManager 互斥是阻塞项。
-- Phase D lean Design Gate 由 operator 在 `0001787474277593-000070-9989c234` 签署；当前 thread 的 `@codex-sol` 负责实现后的独立 coding review，不参与 child thread 代码作者身份。
+- Phase D lean Design Gate 由 operator 在 `private-source-id` 签署；当前 thread 的 `@codex-sol` 负责实现后的独立 coding review，不参与 child thread 代码作者身份。
 - 完成只在 AC 有测试、指标或真实 Workspace UAT 证据后声明。

@@ -179,11 +179,26 @@ describe('F311 canonical F267 evidence proof adapter', () => {
     );
   });
 
-  it('rejects proof consumption attributed to any consumer other than F311', async () => {
+  it('accepts proof consumption attributed to a certificate-named non-F311 consumer', async () => {
     const proof = verifiedProof({
       consumerConsumption: {
         ...verifiedProof().consumerConsumption,
-        consumerFeatureId: 'F310',
+        consumerFeatureId: 'F100',
+        receipt: ownerRef('F100', 'consumption:receipt-1', SHA_B),
+      },
+    });
+
+    const result = await resolveWith(resolverReturning({ status: 'resolved', proof }));
+
+    assert.equal(result.status, 'verified');
+    assert.equal(result.proofRefs.consumptionProofRef.ownerFeatureId, 'F100');
+  });
+
+  it('rejects a consumption receipt owned by a feature other than the named consumer', async () => {
+    const proof = verifiedProof({
+      consumerConsumption: {
+        ...verifiedProof().consumerConsumption,
+        consumerFeatureId: 'F100',
         receipt: ownerRef('F310', 'consumption:receipt-1', SHA_B),
       },
     });

@@ -1,5 +1,6 @@
 import { apiFetch } from '@/utils/api-client';
 import { parseChatGptConversationUrl } from '@/utils/chatgpt-chat-url';
+import { projectPersonalChromeRecoveryStatus } from './cloud-binding-recovery-status';
 
 export interface AuthorizedConversationCandidate {
   conversationId: string;
@@ -19,19 +20,27 @@ export type RecoveryLoadState =
       boundConversationId: string | null;
       hydratedAttemptId?: string;
       retryStateError?: string;
+      retryState?: 'ready' | 'pending' | 'unavailable';
+      connectionIssue?: string;
+      titleSyncMessage?: string;
     };
 
-export type RecoveryPhase = 'idle' | 'binding' | 'retrying' | 'queued';
+export type RecoveryPhase = 'idle' | 'binding' | 'retrying' | 'queued' | 'connected';
+export type RecoveryDeliveryStatus = 'sent' | 'sending' | 'failed' | 'unknown';
 
 export interface RecoveryIdentity {
   threadId: string;
   sourceMessageId: string;
   targetCatId: string;
   attemptId?: string;
+  deliveryStatus?: RecoveryDeliveryStatus;
 }
 
 interface PersonalChromeStateResponse {
   authorization?: { conversations?: unknown };
+  artifact?: { helper?: string };
+  live?: { status?: string };
+  titleSync?: { status?: string; errorCode?: string; updatedCount?: number; requestedCount?: number };
   error?: string;
 }
 
@@ -45,17 +54,23 @@ interface RetryAuthorityResponse {
   attemptId?: unknown;
   error?: string;
   code?: string;
+  targetState?: string;
 }
 
 function safeDisplayTitle(value: unknown): string | undefined {
-  if (typeof value !== 'string') return undefined;
-  const title = value.trim().replace(/\s+/g, ' ');
-  const hasControlCharacter = Array.from(title).some((character) => {
+  if (typeof value !== 'string' || value.length > 160) return undefined;
+  const invalid = Array.from(value).some((character) => {
     const codePoint = character.codePointAt(0) ?? 0;
-    return codePoint < 32 || codePoint === 127;
+    return (
+      codePoint < 32 ||
+      codePoint === 127 ||
+      (codePoint >= 0x202a && codePoint <= 0x202e) ||
+      (codePoint >= 0x2066 && codePoint <= 0x2069)
+    );
   });
-  if (title.length === 0 || title.length > 160 || hasControlCharacter) return undefined;
-  return title;
+  if (invalid) return undefined;
+  const title = value.trim().replace(/\s+/g, ' ');
+  return title && !/^(ChatGPT|New chat|新聊天)$/iu.test(title) ? title : undefined;
 }
 
 function canonicalTimestamp(value: unknown): string | undefined {
@@ -73,20 +88,22 @@ function deniesOwnerAccess(response: Response | null): boolean {
 }
 
 function projectRetryState(
-  explicitAttemptId: string | undefined,
   response: Response | null,
   body: RetryAuthorityResponse | undefined,
-): Pick<Extract<RecoveryLoadState, { kind: 'ready' }>, 'hydratedAttemptId' | 'retryStateError'> {
-  const hydratedAttemptId = explicitAttemptId ?? safeAttemptId(body?.attemptId);
-  if (hydratedAttemptId) return { hydratedAttemptId };
+): Pick<Extract<RecoveryLoadState, { kind: 'ready' }>, 'hydratedAttemptId' | 'retryStateError' | 'retryState'> {
+  const hydratedAttemptId = response?.ok ? safeAttemptId(body?.attemptId) : undefined;
+  if (hydratedAttemptId) return { hydratedAttemptId, retryState: 'ready' };
+  if (response?.status === 409 && ['queued', 'starting', 'appended'].includes(body?.targetState ?? '')) {
+    return { retryState: 'pending' };
+  }
   if (!response?.ok) {
     const retryStateError =
       response?.status === 409 || response?.status === 404
-        ? '这条消息的发送状态已经变化，请查看最新状态。'
+        ? '无法确认这条旧消息的发送状态。连接会话不会重发它。'
         : (body?.error ?? `可重试状态读取失败 (${response?.status ?? 'unknown'})`);
-    return { retryStateError };
+    return { retryStateError, retryState: 'unavailable' };
   }
-  return {};
+  return { retryState: 'unavailable', retryStateError: '暂时无法确认发送状态。连接会话不会重发原消息。' };
 }
 
 function authorizedCandidates(value: unknown): AuthorizedConversationCandidate[] {
@@ -112,15 +129,16 @@ function authorizedCandidates(value: unknown): AuthorizedConversationCandidate[]
 export async function readRecoveryState(
   identity: RecoveryIdentity,
   signal: AbortSignal,
+  syncTitles = false,
 ): Promise<RecoveryLoadState | null> {
-  const retryAuthorityRequest = identity.attemptId
-    ? Promise.resolve(null)
-    : apiFetch(
-        `/api/messages/${encodeURIComponent(identity.sourceMessageId)}/queue-targets/${encodeURIComponent(identity.targetCatId)}/retry-authority`,
-        { signal },
-      );
+  const retryAuthorityRequest = apiFetch(
+    `/api/messages/${encodeURIComponent(identity.sourceMessageId)}/queue-targets/${encodeURIComponent(identity.targetCatId)}/retry-authority`,
+    { signal },
+  );
   const [pluginResponse, bindingResponse, retryAuthorityResponse] = await Promise.all([
-    apiFetch('/api/plugins/personal-chrome', { signal }),
+    syncTitles
+      ? apiFetch('/api/plugins/personal-chrome/refresh-titles', { method: 'POST', signal })
+      : apiFetch('/api/plugins/personal-chrome', { signal }),
     apiFetch(`/api/threads/${encodeURIComponent(identity.threadId)}/cloud-bindings`, { signal }),
     retryAuthorityRequest,
   ]);
@@ -145,7 +163,7 @@ export async function readRecoveryState(
   const candidates = authorizedCandidates(pluginBody.authorization?.conversations);
   const rawBinding = bindingBody.bindings?.['gpt-pro'];
   const binding = rawBinding === undefined ? null : parseChatGptConversationUrl(rawBinding);
-  const retryState = projectRetryState(identity.attemptId, retryAuthorityResponse, retryAuthorityBody);
+  const retryState = projectRetryState(retryAuthorityResponse, retryAuthorityBody);
   return {
     kind: 'ready',
     candidates,
@@ -154,6 +172,7 @@ export async function readRecoveryState(
         ? binding.conversationId
         : null,
     ...retryState,
+    ...projectPersonalChromeRecoveryStatus(pluginBody),
   };
 }
 
@@ -200,8 +219,11 @@ async function retryExactSource(args: {
   const stale =
     response.status === 409 &&
     (body.code === 'QUEUE_RETRY_AUTHORITY_STALE' || body.code === 'QUEUE_TARGET_NOT_RETRYABLE');
-  throw new Error(stale ? '这条消息的发送状态已经变化，请查看最新状态。' : (body.error ?? '重新发送未成功'));
+  if (stale) throw new RecoveryReconciliationRequired();
+  throw new Error(body.error ?? '重新发送未成功');
 }
+
+class RecoveryReconciliationRequired extends Error {}
 
 function selectReadyCandidate(
   loadState: RecoveryLoadState,
@@ -222,7 +244,7 @@ function recoveryFailureMessage(routeIsBound: boolean, cause: unknown): string {
 
 export interface PreparedRecoveryOperation {
   selected: AuthorizedConversationCandidate;
-  attemptId: string;
+  attemptId?: string;
   routeIsBound: boolean;
 }
 
@@ -233,7 +255,9 @@ export function prepareRecoveryOperation(args: {
   busy: boolean;
 }): PreparedRecoveryOperation | undefined {
   const selected = selectReadyCandidate(args.loadState, args.selectedConversationId);
-  if (args.busy || !selected || !args.attemptId || args.loadState.kind !== 'ready') return undefined;
+  if (args.busy || !selected || args.loadState.kind !== 'ready' || args.loadState.retryState === 'pending')
+    return undefined;
+  if (args.attemptId && args.loadState.connectionIssue) return undefined;
   return {
     selected,
     attemptId: args.attemptId,
@@ -241,7 +265,12 @@ export function prepareRecoveryOperation(args: {
   };
 }
 
-export type RecoveryOperationOutcome = { kind: 'queued' } | { kind: 'stale' } | { kind: 'error'; message: string };
+export type RecoveryOperationOutcome =
+  | { kind: 'queued' }
+  | { kind: 'connected' }
+  | { kind: 'reconcile' }
+  | { kind: 'stale' }
+  | { kind: 'error'; message: string };
 
 export async function executeRecoveryOperation(args: {
   identity: RecoveryIdentity;
@@ -261,6 +290,7 @@ export async function executeRecoveryOperation(args: {
       onBound: args.onBound,
     });
     if (!routeIsBound || !args.isCurrent()) return { kind: 'stale' };
+    if (!args.prepared.attemptId) return { kind: 'connected' };
     args.setPhase('retrying');
     const queued = await retryExactSource({
       identity: { ...args.identity, attemptId: args.prepared.attemptId },
@@ -268,6 +298,7 @@ export async function executeRecoveryOperation(args: {
     });
     return queued && args.isCurrent() ? { kind: 'queued' } : { kind: 'stale' };
   } catch (cause) {
+    if (cause instanceof RecoveryReconciliationRequired && args.isCurrent()) return { kind: 'reconcile' };
     return args.isCurrent()
       ? { kind: 'error', message: recoveryFailureMessage(routeIsBound, cause) }
       : { kind: 'stale' };

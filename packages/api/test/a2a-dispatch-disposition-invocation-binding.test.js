@@ -5,6 +5,7 @@ import './helpers/setup-cat-registry.js';
 
 import { createCatId } from '@cat-cafe/shared';
 import { createRedisClient } from '@cat-cafe/shared/utils';
+import { buildInvocationHeartbeatEvent } from '../dist/domains/ball-custody/ball-custody-events.js';
 import { InvocationRegistry } from '../dist/domains/cats/services/agents/invocation/InvocationRegistry.js';
 import { invokeSingleCat } from '../dist/domains/cats/services/agents/invocation/invoke-single-cat.js';
 import { RedisAuthInvocationBackend } from '../dist/domains/cats/services/agents/invocation/RedisAuthInvocationBackend.js';
@@ -108,28 +109,52 @@ test('normal create and continuation bind the server-derived exact A2A source', 
   assert.equal((await h.service.complete(continuation, 'completed')).outcome, 'replayed');
 });
 
-test('the callback route completes from invocation-bound source without caller source input', async () => {
+test('the real callback completes and replays its bound source despite a heartbeat race', async (t) => {
   const registry = new InvocationRegistry();
-  const h = await harness({ registry });
-  const record = await createInvocation(registry, h.source);
-  const app = await createCallbackApp(registry, h.service);
-  const response = await app.inject({
-    method: 'POST',
-    url: '/api/callbacks/complete-a2a-dispatch',
-    headers: {
-      'x-invocation-id': record.invocationId,
-      'x-callback-token': record.callbackToken,
+  let record;
+  let attempts = 0;
+  const h = await harness({
+    registry,
+    beforeDispositionRecord: async ({ ingest }) => {
+      attempts += 1;
+      if (attempts === 1) {
+        await ingest.record(
+          buildInvocationHeartbeatEvent({
+            threadId: 'thread-1',
+            invocationId: record.invocationId,
+            catId: 'codex-sol',
+            draftUpdatedAt: Date.now(),
+          }),
+        );
+      }
     },
-    payload: { disposition: 'completed' },
   });
+  record = await createInvocation(registry, h.source);
+  const app = await createCallbackApp(registry, h.service);
+  t.after(() => app.close());
+  const origin = await app.listen({ host: '127.0.0.1', port: 0 });
+  const complete = () =>
+    fetch(`${origin}/api/callbacks/complete-a2a-dispatch`, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        'x-invocation-id': record.invocationId,
+        'x-callback-token': record.callbackToken,
+      },
+      body: JSON.stringify({ disposition: 'completed' }),
+    });
+  const response = await complete();
 
-  assert.equal(response.statusCode, 200);
-  const body = JSON.parse(response.body);
+  assert.equal(response.status, 200);
+  const body = await response.json();
   assert.equal(body.outcome, 'applied');
   assert.equal(body.disposition, 'completed');
   assert.equal(body.invocationId, record.invocationId);
   assert.equal(body.sourceMessageId, h.source.id);
-  await app.close();
+  const replay = await complete();
+  assert.equal(replay.status, 200);
+  assert.equal((await replay.json()).outcome, 'replayed');
+  assert.equal(attempts, 2, 'two HTTP calls commit one terminal after a single internal retry');
 });
 
 const redisUrl = process.env.REDIS_URL;

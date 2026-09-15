@@ -1,0 +1,132 @@
+{
+  "comparisonContract": {
+    "allCandidatesRunHoldout": true,
+    "candidateSelectionSource": "public_only",
+    "guardrailMetric": {
+      "direction": "higher_is_better",
+      "key": "survivalRate",
+      "nonInferiorityMargin": 0,
+      "rule": "candidate_control_delta_gte_negative_non_inferiority_margin"
+    },
+    "holdoutRole": "confirm_or_reject_preselected_candidate",
+    "matchedControlSubjectId": "control",
+    "minSeedCount": 8,
+    "otherwise": "no_measured_improvement",
+    "primaryMetric": {
+      "direction": "higher_is_better",
+      "key": "meanForwardDistanceM",
+      "rule": "candidate_control_delta_gt_k_times_combined_standard_error"
+    },
+    "reportingMetric": {
+      "direction": "lower_is_better",
+      "key": "meanAbsVelocityErrorMps"
+    },
+    "requiredMetricKeys": [
+      "meanAbsVelocityErrorMps",
+      "meanForwardDistanceM",
+      "survivalRate"
+    ],
+    "selectionRule": "eligible_candidate_with_largest_primary_delta_then_subject_order",
+    "standardErrorEstimator": "sample_standard_deviation_divided_by_sqrt_n",
+    "standardErrorMultiplier": 2
+  },
+  "evaluationEnvPath": "control-configs/evaluation-environment-v1.json",
+  "evaluationEnvRef": "evaluation-env:sha256:5d69ca1b976f7b58cc6df2da1da0bddc9913e4c7dd769d2fe07d4446b6267bf1",
+  "evaluationEnvSha256": "5d69ca1b976f7b58cc6df2da1da0bddc9913e4c7dd769d2fe07d4446b6267bf1",
+  "experimentId": "f311-microduck-fixed-model-action-scale-v1",
+  "interventionKind": "control_config",
+  "outcomesObservedBeforePreregistration": false,
+  "policyRef": "hf-space:pollen-robotics/microduck-simulator@183f99a40bd7308da3e848de961ed32bb02624a5#app/public/policies/BEST_alpha_walking.onnx",
+  "policySha256": "e36332d383997d51401897734cd3e79cf5038406feddb18b4d57ecfb141daa6c",
+  "preregisteredAt": "2026-09-07T03:25:21Z",
+  "publicSeedSet": {
+    "count": 8,
+    "path": "control-configs/public-seeds-v1.json",
+    "ref": "seed-set:sha256:c04e0b31be7118ed991990050ccca6b70d02cb0b50cb3b0f926210189b5b8cc0",
+    "sha256": "c04e0b31be7118ed991990050ccca6b70d02cb0b50cb3b0f926210189b5b8cc0"
+  },
+  "runnerPath": "bin/microduck_control_runner.py",
+  "runnerRef": "runner:sha256:aa82ce999e9d88eff247e3cc637c82148a771a4f2a5584f0fd2a7138e068fe1b",
+  "runnerSha256": "aa82ce999e9d88eff247e3cc637c82148a771a4f2a5584f0fd2a7138e068fe1b",
+  "schemaVersion": 1,
+  "status": "preregistered",
+  "subjectOrder": [
+    "baseline",
+    "control",
+    "action-scale-090",
+    "action-scale-105",
+    "action-scale-110"
+  ],
+  "subjects": [
+    {
+      "actionScale": 1,
+      "artifactRef": "control-package:sha256:3081eec958ac1ff61773ac7a07a625a102e2738f0bb1052d2b59ee632d541eb3",
+      "artifactVersion": "3081eec958ac1ff61773ac7a07a625a102e2738f0bb1052d2b59ee632d541eb3",
+      "configPath": "control-configs/action-scale-100.json",
+      "configRef": "control-config:sha256:4d2cb82a2bc841dea2acad63b984b5f8c2d3623f641f961fa8506a83c93c2f94",
+      "configSha256": "4d2cb82a2bc841dea2acad63b984b5f8c2d3623f641f961fa8506a83c93c2f94",
+      "evaluationEnvRef": "evaluation-env:sha256:5d69ca1b976f7b58cc6df2da1da0bddc9913e4c7dd769d2fe07d4446b6267bf1",
+      "id": "baseline",
+      "policyRef": "hf-space:pollen-robotics/microduck-simulator@183f99a40bd7308da3e848de961ed32bb02624a5#app/public/policies/BEST_alpha_walking.onnx",
+      "policySha256": "e36332d383997d51401897734cd3e79cf5038406feddb18b4d57ecfb141daa6c",
+      "role": "deployed_reference",
+      "runnerRef": "runner:sha256:aa82ce999e9d88eff247e3cc637c82148a771a4f2a5584f0fd2a7138e068fe1b"
+    },
+    {
+      "actionScale": 1,
+      "artifactRef": "control-package:sha256:3081eec958ac1ff61773ac7a07a625a102e2738f0bb1052d2b59ee632d541eb3",
+      "artifactVersion": "3081eec958ac1ff61773ac7a07a625a102e2738f0bb1052d2b59ee632d541eb3",
+      "configPath": "control-configs/action-scale-100.json",
+      "configRef": "control-config:sha256:4d2cb82a2bc841dea2acad63b984b5f8c2d3623f641f961fa8506a83c93c2f94",
+      "configSha256": "4d2cb82a2bc841dea2acad63b984b5f8c2d3623f641f961fa8506a83c93c2f94",
+      "evaluationEnvRef": "evaluation-env:sha256:5d69ca1b976f7b58cc6df2da1da0bddc9913e4c7dd769d2fe07d4446b6267bf1",
+      "id": "control",
+      "policyRef": "hf-space:pollen-robotics/microduck-simulator@183f99a40bd7308da3e848de961ed32bb02624a5#app/public/policies/BEST_alpha_walking.onnx",
+      "policySha256": "e36332d383997d51401897734cd3e79cf5038406feddb18b4d57ecfb141daa6c",
+      "role": "matched_control",
+      "runnerRef": "runner:sha256:aa82ce999e9d88eff247e3cc637c82148a771a4f2a5584f0fd2a7138e068fe1b"
+    },
+    {
+      "actionScale": 0.9,
+      "artifactRef": "control-package:sha256:1b1fae1ffed14dc7dc0bdb3b6479bd74d74f52f3c5ed7a221835aa06b989c0ed",
+      "artifactVersion": "1b1fae1ffed14dc7dc0bdb3b6479bd74d74f52f3c5ed7a221835aa06b989c0ed",
+      "configPath": "control-configs/action-scale-090.json",
+      "configRef": "control-config:sha256:93a83b62722a9635f7e00f42bd6e059f930977b0510222bf88061e49239f7832",
+      "configSha256": "93a83b62722a9635f7e00f42bd6e059f930977b0510222bf88061e49239f7832",
+      "evaluationEnvRef": "evaluation-env:sha256:5d69ca1b976f7b58cc6df2da1da0bddc9913e4c7dd769d2fe07d4446b6267bf1",
+      "id": "action-scale-090",
+      "policyRef": "hf-space:pollen-robotics/microduck-simulator@183f99a40bd7308da3e848de961ed32bb02624a5#app/public/policies/BEST_alpha_walking.onnx",
+      "policySha256": "e36332d383997d51401897734cd3e79cf5038406feddb18b4d57ecfb141daa6c",
+      "role": "candidate",
+      "runnerRef": "runner:sha256:aa82ce999e9d88eff247e3cc637c82148a771a4f2a5584f0fd2a7138e068fe1b"
+    },
+    {
+      "actionScale": 1.05,
+      "artifactRef": "control-package:sha256:b380e3246841b6e2088771a7bbabd612584f294716f850b5397a858ecd3a6307",
+      "artifactVersion": "b380e3246841b6e2088771a7bbabd612584f294716f850b5397a858ecd3a6307",
+      "configPath": "control-configs/action-scale-105.json",
+      "configRef": "control-config:sha256:b4032690a6262e1ee6bbf2fb05fa1580d4640ef6f2372384f49b2c4735019e1c",
+      "configSha256": "b4032690a6262e1ee6bbf2fb05fa1580d4640ef6f2372384f49b2c4735019e1c",
+      "evaluationEnvRef": "evaluation-env:sha256:5d69ca1b976f7b58cc6df2da1da0bddc9913e4c7dd769d2fe07d4446b6267bf1",
+      "id": "action-scale-105",
+      "policyRef": "hf-space:pollen-robotics/microduck-simulator@183f99a40bd7308da3e848de961ed32bb02624a5#app/public/policies/BEST_alpha_walking.onnx",
+      "policySha256": "e36332d383997d51401897734cd3e79cf5038406feddb18b4d57ecfb141daa6c",
+      "role": "candidate",
+      "runnerRef": "runner:sha256:aa82ce999e9d88eff247e3cc637c82148a771a4f2a5584f0fd2a7138e068fe1b"
+    },
+    {
+      "actionScale": 1.1,
+      "artifactRef": "control-package:sha256:6a50120d7c9486e29bf2febae43ec3182c33bf091766ec6e890b5cd6b4f2f57e",
+      "artifactVersion": "6a50120d7c9486e29bf2febae43ec3182c33bf091766ec6e890b5cd6b4f2f57e",
+      "configPath": "control-configs/action-scale-110.json",
+      "configRef": "control-config:sha256:2e14c85ecb030e488dd7094fd29c999dbf190aabf0d9fcdd4c334184dc8f4fda",
+      "configSha256": "2e14c85ecb030e488dd7094fd29c999dbf190aabf0d9fcdd4c334184dc8f4fda",
+      "evaluationEnvRef": "evaluation-env:sha256:5d69ca1b976f7b58cc6df2da1da0bddc9913e4c7dd769d2fe07d4446b6267bf1",
+      "id": "action-scale-110",
+      "policyRef": "hf-space:pollen-robotics/microduck-simulator@183f99a40bd7308da3e848de961ed32bb02624a5#app/public/policies/BEST_alpha_walking.onnx",
+      "policySha256": "e36332d383997d51401897734cd3e79cf5038406feddb18b4d57ecfb141daa6c",
+      "role": "candidate",
+      "runnerRef": "runner:sha256:aa82ce999e9d88eff247e3cc637c82148a771a4f2a5584f0fd2a7138e068fe1b"
+    }
+  ]
+}

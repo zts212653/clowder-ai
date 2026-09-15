@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { afterEach, beforeEach, describe, it } from 'node:test';
-import type { RuntimeInteractionRequest } from '@cat-cafe/shared';
+import type { RuntimeInteractionCardRef, RuntimeInteractionRequest } from '@cat-cafe/shared';
 import Fastify from 'fastify';
 import { RuntimeInteractionService } from '../src/domains/runtime-interaction/RuntimeInteractionService.js';
 import { InMemoryRuntimeInteractionStore } from '../src/domains/runtime-interaction/stores/InMemoryRuntimeInteractionStore.js';
@@ -44,7 +44,7 @@ describe('runtime interaction routes', () => {
       store: new InMemoryRuntimeInteractionStore(),
       hostEpoch: 'route-host',
       now: () => 2000,
-      cardPublisher: { publish: async () => cardRef, isLive: async () => true },
+      cardPublisher: { prepare: async () => cardRef, publish: async () => {}, isLive: async () => true },
     });
     await app.register(runtimeInteractionRoutes, { service });
     pendingResponse = service.request(request);
@@ -142,5 +142,54 @@ describe('runtime interaction routes', () => {
     });
     assert.equal(wrongThread.statusCode, 404);
     assert.equal((await service.getForOwner(request.interactionId, 'user-1'))?.status, 'pending');
+  });
+
+  it('lets the owner reject a question once and returns user_rejected to the same waiter', async () => {
+    await service.invalidateInvocation(request.owner.invocationId, 'provider_cancelled');
+    const question: RuntimeInteractionRequest = {
+      version: 1,
+      interactionId: 'route-question',
+      kind: 'question',
+      owner: request.owner,
+      provider: { ...request.provider, method: 'cat_cafe_request_user_input', requestId: 'rpc-question' },
+      createdAt: request.createdAt,
+      title: 'Choose an outcome',
+      questions: [{ id: 'q1', header: 'Choice', question: 'Choose one?', options: [{ label: 'A' }] }],
+    };
+    const questionResponse = service.request(question);
+    void questionResponse.catch(() => {});
+    let questionCardRef: RuntimeInteractionCardRef | undefined;
+    for (let index = 0; index < 20; index += 1) {
+      const current = await service.getForOwner(question.interactionId, 'user-1');
+      if (current?.status === 'pending' && current.cardRef) {
+        questionCardRef = current.cardRef;
+        break;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    }
+    assert.ok(questionCardRef);
+
+    const rejected = await app.inject({
+      method: 'POST',
+      url: '/api/runtime-interactions/route-question/reject',
+      headers: { 'x-cat-cafe-user': 'user-1' },
+      payload: { cardRef: questionCardRef },
+    });
+
+    assert.equal(rejected.statusCode, 200);
+    assert.equal(rejected.json().interaction.status, 'declined');
+    assert.equal(rejected.json().interaction.terminal.reasonCode, 'user_rejected');
+    await assert.rejects(
+      questionResponse,
+      (error: unknown) => error instanceof Error && error.message === 'user_rejected',
+    );
+
+    const replay = await app.inject({
+      method: 'POST',
+      url: '/api/runtime-interactions/route-question/reject',
+      headers: { 'x-cat-cafe-user': 'user-1' },
+      payload: { cardRef: questionCardRef },
+    });
+    assert.equal(replay.statusCode, 409);
   });
 });

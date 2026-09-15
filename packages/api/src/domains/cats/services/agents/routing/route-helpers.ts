@@ -4,7 +4,7 @@
  */
 
 import type { CatId, MessageContent, RichBlock, RichBlockBase } from '@cat-cafe/shared';
-import { isCrossThreadProvenance } from '@cat-cafe/shared';
+import { catRegistry, isCrossThreadProvenance } from '@cat-cafe/shared';
 import { resolveUnboundHistoryContextTokenCeiling } from '../../../../../config/context-capacity.js';
 import { DEFAULT_HIERARCHICAL_CONTEXT } from '../../../../../config/hierarchical-context-config.js';
 import { createModuleLogger } from '../../../../../infrastructure/logger.js';
@@ -14,6 +14,10 @@ import {
   type CanonicalVisibilityCursor,
   compareCursors,
 } from '../../stores/cursor.js';
+import {
+  type AgentRegistrationFailure,
+  AgentServiceUnavailableError,
+} from '../registry/AgentServiceUnavailableError.js';
 
 const log = createModuleLogger('context-transport');
 const PROMPT_MESSAGE_SAFETY_CHAR_LIMIT = 100_000;
@@ -61,6 +65,7 @@ import {
   selectAnchors,
   stripStructuralEnvelope,
 } from './context-transport.js';
+import { legacyBatonHasSucceededReply, recoverableDeliveryBoundary } from './delivery-boundary-recovery.js';
 import type { HumanDispositionInvocationOrigin } from './human-disposition-invocation-origin.js';
 import { extractBatonContext, formatNavigationHeader, summarizeActiveTasks } from './navigation-context.js';
 import { projectRankedSource, rankArtifactSources, selectDirectiveSources } from './source-ranking.js';
@@ -101,6 +106,7 @@ export interface RouteBroadcaster {
 /** Dependencies shared across route strategies */
 export interface RouteStrategyDeps {
   services: Record<string, AgentService>;
+  unavailableServices?: ReadonlyMap<string, AgentRegistrationFailure>;
   invocationDeps: InvocationDeps;
   /** F293: fresh advisory/rejection decision at each actual child boundary. */
   routingDispatchPreflight?: import('../../../../routing-context/RoutingDispatchPreflightPort.js').RoutingDispatchPreflightPort;
@@ -243,6 +249,8 @@ export interface RouteOptions {
   ownerAuthProvenance?: OwnerAuthProvenance;
   /** F281 Phase C: explicit first-party ingress provenance; omitted legacy callers fail closed. */
   humanDispositionInvocationOrigin?: HumanDispositionInvocationOrigin;
+  /** F293: server-owned durable queue source; queue replay alone does not prove a human request. */
+  routingQueueSource?: import('../invocation/InvocationQueue.js').QueueEntry['source'];
   /** F167 Phase T: exact protocol wake carrier for this route, never inferred from response prose. */
   turnCustodyWake?: import('../../../../ball-custody/TurnCustodyProjectionService.js').TurnCustodyWakeProvenance;
   /** Per-cat carrier resolver for multi-holder routes. Takes precedence over turnCustodyWake. */
@@ -369,6 +377,7 @@ export interface RouteOptions {
   freshnessSupplementRequiredMessageIds?: readonly string[] | undefined;
   /** ADR-042 provider/callback hard boundary for an automatic supplement. */
   toolExecutionPolicy?: ToolExecutionPolicy | undefined;
+  executionScope?: 'collective-participation' | 'collective-work' | undefined;
   /** Parent invocation controller used to keep A2A worklist slots tied to the same cancel signal. */
   invocationController?: AbortController | undefined;
   /**
@@ -872,10 +881,22 @@ export function upsertMaxBoundary(cursorBoundaries: Map<string, string>, catId: 
 }
 
 /** Get the agent service for a given cat ID */
-export function getService(services: Record<string, AgentService>, catId: CatId): AgentService {
-  const service = services[catId];
-  if (!service) throw new Error(`Unknown cat ID: ${catId as string}`);
-  return service;
+export function getService(
+  services: Record<string, AgentService>,
+  catId: CatId,
+  unavailableServices?: ReadonlyMap<string, AgentRegistrationFailure>,
+): AgentService {
+  const service = Object.hasOwn(services, catId) ? services[catId] : undefined;
+  if (service) return service;
+  const reason = unavailableServices?.get(catId);
+  if (reason) throw new AgentServiceUnavailableError(catId, reason);
+  if (catRegistry.has(catId)) {
+    throw new AgentServiceUnavailableError(catId, {
+      code: 'not-registered',
+      message: 'This member is configured but its service is not registered; check runtime registration diagnostics.',
+    });
+  }
+  throw new Error(`Unknown cat ID: ${catId as string}`);
 }
 
 export function getThreadBootcampMemberCount(thread: Thread | null | undefined): number | undefined {
@@ -1731,7 +1752,23 @@ async function assembleIncrementalContextInternal(
       }
     }
   }
-  const unseen = await fetchAfterCursor(deps.messageStore, threadId, cursor, userId);
+  const loadedUnseen = await fetchAfterCursor(deps.messageStore, threadId, cursor, userId);
+  const deliveryRecovery = recoverableDeliveryBoundary(loadedUnseen, { userId, threadId, catId });
+  let unseen = loadedUnseen;
+  if (deliveryRecovery.cursor && (!cursor || compareCursors(deliveryRecovery.cursor, cursor) > 0)) {
+    try {
+      await deps.deliveryCursorStore.ackCursor(userId, catId, threadId, deliveryRecovery.cursor);
+      // ackCursor owns concurrent monotonicity; this proven prefix is safe even
+      // when another reader has already advanced the durable slot further.
+      cursor = deliveryRecovery.cursor;
+      const recoveredCursor = cursor;
+      unseen = loadedUnseen.filter(
+        (message) => message.visibilitySeq === undefined || compareCursors(cursorFor(message), recoveredCursor) > 0,
+      );
+    } catch (err) {
+      log.warn({ err, catId, threadId }, 'Delivery boundary recovery failed; retaining unread context');
+    }
+  }
 
   // Debug mode: cats see all whispers (full transparency). Play mode: cats only see their own whispers.
   const playMode = thinkingMode !== 'debug';
@@ -1813,10 +1850,26 @@ async function assembleIncrementalContextInternal(
 
   // F148 Phase F (KD-7): Navigation context — injected on ALL paths (cold + warm)
   // P1 fix: extract baton from unseen (pre-stream-filter) so cat→cat @ mentions via stream are visible
-  const batonCandidates = unseen.filter(
-    (m) => (m.userId !== 'system' || m.catId !== null) && m.origin !== 'briefing' && canViewMessage(m, viewer),
+  const unseenIds = new Set(unseen.map((message) => message.id));
+  const batonCandidates = loadedUnseen.filter(
+    (m) =>
+      (m.id === currentUserMessageId || (unseenIds.has(m.id) && !deliveryRecovery.answeredSourceIds.has(m.id))) &&
+      (m.userId !== 'system' || m.catId !== null) &&
+      m.origin !== 'briefing' &&
+      canViewMessage(m, viewer),
   );
-  const baton = extractBatonContext(batonCandidates, catId);
+  let baton = extractBatonContext(batonCandidates, catId);
+  if (
+    baton &&
+    (await legacyBatonHasSucceededReply({
+      messages: loadedUnseen,
+      sourceMessageId: baton.fromMessageId,
+      explicitSourceMessageId: currentUserMessageId,
+      target: { userId, threadId, catId },
+      turnExecutionStore: deps.invocationDeps.turnExecutionStore,
+    }))
+  )
+    baton = null;
   let activeTasks: import('./navigation-context.js').TaskSummary[] = [];
   let allThreadTasks: import('./artifact-tracking.js').ArtifactExtractionInput['prTasks'] = [];
   if (deps.taskStore) {

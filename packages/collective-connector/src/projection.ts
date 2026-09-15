@@ -53,7 +53,7 @@ export function projectConnection(connection: ConnectorConnectionState, route?: 
     liveStatus: connection.liveStatus,
     lastAckedSequence: connection.lastAckedSequence,
     outbox: {
-      queued: connection.outbox.filter((item) => item.status !== 'accepted').length,
+      queued: connection.outbox.filter((item) => item.status === 'queued' || item.status === 'sending').length,
       accepted: connection.outbox.filter((item) => item.status === 'accepted').length,
     },
     route: {

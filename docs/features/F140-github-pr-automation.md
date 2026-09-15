@@ -9,7 +9,7 @@ tips_exempt: "Renewed 2026-09-04 for the current F308 public-link projection onl
 
 # F140: GitHub PR Signals — 冲突检测 + Review Feedback 全来源感知
 
-> ## ⛔ 契约冻结（2026-07-29，operator signoff msg `0001785311364054-000054-656d056c`）
+> ## ⛔ 契约冻结（2026-07-29，operator signoff msg `private-source-id`）
 >
 > **本 Feature 的 wake 契约已移交 F280 Unified Wait Contract。**
 > F140 从此不再接受新的 post-completion 补丁——下面那串从 2026-05-07 到 2026-07-20 的

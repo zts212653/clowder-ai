@@ -1,5 +1,6 @@
 import type { CatId } from '@cat-cafe/shared';
 import type { DynamicTaskDef } from '../../infrastructure/scheduler/DynamicTaskStore.js';
+import type { OwnerAuthProvenance } from '../cats/services/owner-auth-provenance.js';
 import type { InvocationRecord } from '../cats/services/stores/ports/InvocationRecordStore.js';
 import type { IMessageStore, StoredMessage } from '../cats/services/stores/ports/MessageStore.js';
 import {
@@ -102,13 +103,15 @@ export interface ManagedCommandWakeTrigger {
     message: string,
     messageId: string,
     contentBlocks?: undefined,
-    policy?: { sourceCategory?: string; forceQueue?: boolean },
+    policy?: { sourceCategory?: string; forceQueue?: boolean; ownerAuthProvenance?: OwnerAuthProvenance },
   ): Promise<ManagedCommandWakeTriggerOutcome>;
 }
 
 export interface ManagedCommandWakeDynamicTaskStore {
   getAll(): DynamicTaskDef[];
   getById(id: string): DynamicTaskDef | null;
+  /** Production stores must expose the private carrier; runtime legacy shapes still normalize to unknown. */
+  getPrivateOwnerAuthProvenance(id: string): OwnerAuthProvenance;
   updateParamsIfCurrent(id: string, current: Record<string, unknown>, next: Record<string, unknown>): boolean;
   setEnabled(id: string, enabled: boolean): boolean;
 }

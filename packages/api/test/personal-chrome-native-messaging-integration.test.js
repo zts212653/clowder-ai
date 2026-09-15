@@ -216,7 +216,7 @@ describe('Personal Chrome Native Messaging full seam', () => {
       text: 'TEXT_IS_ONLY_PRESENT_IN_THE_PROTOCOL_REQUEST',
       expectedRevisions: {
         helper: helperArtifactRevision,
-        extension: '0.2.10',
+        extension: '0.2.11',
         pageAdapter: '2026-09-02.1',
       },
     });
@@ -392,14 +392,14 @@ describe('Personal Chrome Native Messaging full seam', () => {
         conversationId: 'conversation-7',
         expectedRevisions: {
           helper: helperArtifactRevision,
-          extension: '0.2.10',
+          extension: '0.2.11',
           pageAdapter: '2026-09-02.1',
         },
       });
       assert.equal(revisionHealth.status, 'ready');
       assert.deepEqual(revisionHealth.observedRevisions, {
         helper: helperArtifactRevision,
-        extension: '0.2.10',
+        extension: '0.2.11',
         pageAdapter: '2026-09-02.1',
       });
 

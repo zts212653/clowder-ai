@@ -162,7 +162,7 @@ close_gate_report:
   guardian:
     cat: "Opus 4.7"
     verdict: approve
-    message_id: "0001780244113547-000301-8caf1faa"
+    message_id: "private-source-id"
     blocker_count: 0
 
   user_visibility_disclosure:
