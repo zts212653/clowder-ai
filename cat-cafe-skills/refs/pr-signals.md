@@ -32,8 +32,12 @@ live baseline + typed predicate + nextStep + expiresAt(可选) + autoRenew(默�
 | `pr_review_thread_changed` + `reviewThreadIds` | 等指定 review thread 变化 |
 | `pr_ci_terminal` | 等 CI 从非终态进入 pass/fail |
 | `pr_became_conflicting` | 等 PR 首次变为 conflicting |
+| `pr_conversation_comment_added` + `authorLogins` | 等指定作者的 PR 顶层评论 |
+| `pr_inline_comment_added` + `authorLogins` | 等指定作者的代码行内 review 评论 |
 
-Actor 类型、仓库归属、`authorAssociation` 都不是 predicate。Bot CI 可以满足显式 CI wait；普通人类评论也不会凭“是人”自动叫醒。
+两个评论面各有独立游标，行内与顶层评论的 id 不可互相比较。`authorLogins` 是注册时冻结的正向受众，大小写不敏感，**必填**：没有"不写就是任何人"的形式，因为那等于一个谁都没选过的开放受众。空名单同样会被拒绝——它匹配不到任何人，只会变成一个永不触发的死等待。你自己的评论已在采集时过滤。
+
+Actor 类型、仓库归属、`authorAssociation` 都不是 predicate。Bot CI 可以满足显式 CI wait；评论是否叫醒只取决于是否注册了评论 predicate 以及作者是否在受众内，不凭“是人”判断。
 
 ## 注册示例
 
@@ -87,6 +91,7 @@ comment/review body、CI 原始 description、legacy caller instructions 和未�
 - `pr_review_result_available` / review predicate：加载 `receive-review`，逐项验证并处理。
 - `pr_ci_terminal`：查真实 checks；pass 继续 merge-gate，fail 读日志并修复。
 - `pr_became_conflicting`：在对应 worktree rebase；复杂冲突再升级。
+- `pr_conversation_comment_added` / `pr_inline_comment_added`：读对应评论（行内评论带文件与行号），按 `receive-review` 回应或修改。投递里只有评论 id 与作者，正文需自己去读，不会被复制进消息。
 - `subject_terminal`：以 GitHub merged/closed truth 收口，不再续 tracker。
 
 同一 wait generation 最多产生一次 owner wake。需要等待另一个条件时显式 re-register；新 generation 原子替换旧 generation，不叠加第二个 tracker 或 timed hold。

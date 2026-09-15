@@ -7,6 +7,8 @@ export const GITHUB_WAIT_PREDICATE_KINDS = [
   'pr_review_thread_changed',
   'pr_ci_terminal',
   'pr_became_conflicting',
+  'pr_conversation_comment_added',
+  'pr_inline_comment_added',
   'issue_comment_added',
   'issue_author_commented',
 ] as const;
@@ -20,7 +22,19 @@ export type GitHubWaitPredicate =
   | { readonly kind: 'pr_review_thread_changed'; readonly reviewThreadIds: readonly string[] }
   | { readonly kind: 'pr_ci_terminal' }
   | { readonly kind: 'pr_became_conflicting' }
-  | { readonly kind: 'issue_comment_added' }
+  /**
+   * #1392 AC-3 / AC-6: a new PR review comment on one surface. The two surfaces keep separate
+   * frontiers — inline and conversation comment ids are not comparable. `authorLogins` is a
+   * required, non-empty positive audience, frozen at registration and compared
+   * case-insensitively. There is no omitted-means-anyone form.
+   */
+  | { readonly kind: 'pr_conversation_comment_added'; readonly authorLogins: readonly string[] }
+  | { readonly kind: 'pr_inline_comment_added'; readonly authorLogins: readonly string[] }
+  /**
+   * #1392 AC-3: optional positive audience, frozen at registration, compared case-insensitively.
+   * Omitted keeps main's any-comment issue wait.
+   */
+  | { readonly kind: 'issue_comment_added'; readonly authorLogins?: readonly string[] }
   | { readonly kind: 'issue_author_commented' };
 
 export type GitHubPrWaitPredicate = Extract<GitHubWaitPredicate, { readonly kind: `pr_${string}` }>;

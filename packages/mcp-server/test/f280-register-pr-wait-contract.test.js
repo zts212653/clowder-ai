@@ -97,4 +97,30 @@ describe('F280 register_pr_tracking public contract', () => {
     const { registerPrTrackingInputSchema } = await import('../dist/tools/callback-tools.js');
     assert.equal(registerPrTrackingInputSchema.autoRenew.isOptional(), true);
   });
+
+  /*
+   * #1392 AC-3: a PR comment predicate names its audience. The tool must refuse the same shapes the
+   * server refuses — an omitted audience is not "any author", and an empty one matches nobody.
+   */
+  it('requires a named audience on both PR comment predicates', async () => {
+    const { registerPrTrackingInputSchema } = await import('../dist/tools/callback-tools.js');
+    for (const kind of ['pr_conversation_comment_added', 'pr_inline_comment_added']) {
+      assert.equal(registerPrTrackingInputSchema.when.safeParse([{ kind }]).success, false, `${kind}: omitted`);
+      assert.equal(
+        registerPrTrackingInputSchema.when.safeParse([{ kind, authorLogins: [] }]).success,
+        false,
+        `${kind}: empty`,
+      );
+      assert.equal(
+        registerPrTrackingInputSchema.when.safeParse([{ kind, authorLogins: [' '] }]).success,
+        false,
+        `${kind}: blank login`,
+      );
+      assert.equal(
+        registerPrTrackingInputSchema.when.safeParse([{ kind, authorLogins: ['pr-author'] }]).success,
+        true,
+        `${kind}: named`,
+      );
+    }
+  });
 });
