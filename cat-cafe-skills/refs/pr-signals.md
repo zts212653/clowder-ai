@@ -4,15 +4,19 @@
 
 ## 一条模型
 
-PR tracker 不是“订阅所有 GitHub 事件”，而是一次性等待点：
+PR tracker 不是“订阅所有 GitHub 事件”：注册一次，由一串一次性的 generation 持续跟进（#1392 AC-1）。
 
 ```text
-live baseline + typed predicate + nextStep + expiresAt(可选)
+live baseline + typed predicate + nextStep + expiresAt(可选) + autoRenew(默认 true)
   → 不匹配：只推进事实台账
-  → 匹配：消费本 generation，投递一条 compact diff
-  → merged/closed：终止并投递 subject terminal
-  → expiry/owner change/user cancel：静默终止
+  → 匹配：消费本 generation，投递一条 compact diff，并在同一次转移里装上下一代
+         （从本次观察结束处开始，不回放、不吞事件）；autoRenew:false 则到此结束
+  → merged/closed：终止并投递 subject terminal，不再续代
+  → expiry：终止并投递明确的到期通知，续代不会延长截止时间
+  → owner change/user cancel：静默终止
 ```
+
+每条投递都会写明追踪是继续、已结束，还是「事件已投递但未能重新武装」。
 
 注册前历史永远由 live baseline 吸收。comment/review cursor 只负责采集幂等，不决定猫会看到什么。
 

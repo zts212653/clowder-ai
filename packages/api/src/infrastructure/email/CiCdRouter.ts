@@ -169,7 +169,7 @@ function routeFromLifecycle(
     };
   }
   return {
-    kind: result.kind === 'deduped' ? 'deduped' : 'skipped',
+    kind: result.kind === 'deduped' || result.kind === 'unrecorded' ? 'deduped' : 'skipped',
     reason: result.reason,
   };
 }
@@ -216,7 +216,8 @@ export class CiCdRouter {
 
     if (terminal) {
       await this.recoverTerminalSideEffects(observedPoll, task.id, sk);
-      if (lifecycle.kind !== 'notified') {
+      // An unrecorded close changed nothing; marking the task done would strand its live wait.
+      if (lifecycle.kind !== 'notified' && lifecycle.kind !== 'unrecorded') {
         await this.opts.taskStore.update(task.id, { status: 'done' });
       }
     }

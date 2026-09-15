@@ -52,7 +52,7 @@ export class ConflictRouter {
     });
     if (result.kind !== 'notified') {
       return {
-        kind: result.kind === 'deduped' ? 'deduped' : 'skipped',
+        kind: result.kind === 'deduped' || result.kind === 'unrecorded' ? 'deduped' : 'skipped',
         reason: result.reason,
       };
     }

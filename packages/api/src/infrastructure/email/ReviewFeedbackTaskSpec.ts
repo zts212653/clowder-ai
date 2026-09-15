@@ -6,7 +6,7 @@
  * KD-10: Cursor commits only after delivery success; trigger is best-effort.
  *
  * Gate: list pr_tracking tasks → fetch comments + reviews → filter by cursor → workItems.
- * Execute: ReviewFeedbackRouter → ConnectorInvokeTrigger → commitCursor.
+ * Execute: ReviewFeedbackRouter → commitCursor (only once the observation is recorded) → ConnectorInvokeTrigger.
  */
 import type { CatId, CommunityEvent, GitHubReviewThreadBaseline, TaskItem } from '@cat-cafe/shared';
 import { parsePrSubjectKey } from '@cat-cafe/shared';
@@ -507,40 +507,11 @@ export function createReviewFeedbackTaskSpec(opts: ReviewFeedbackTaskSpecOptions
             if (!trackingSubjectKey) continue;
 
             const prMetadata = opts.fetchPrMetadata ? await opts.fetchPrMetadata(repoFullName, prNumber) : null;
-            if (prMetadata?.prState === 'merged' || prMetadata?.prState === 'closed') {
-              opts.log.info(`[review-feedback] PR ${prKey} ${prMetadata.prState} — routing typed terminal lifecycle`);
-              await projectReviewFeedbackTerminalEffects({
-                opts,
-                task: trackingTask,
-                subjectKey: trackingSubjectKey,
-                repoFullName,
-                prNumber,
-                terminalState: prMetadata.prState,
-                prTitle: prMetadata.prTitle,
-              });
-              const reviewState = trackingTask.automationState?.review;
-              const legacyCommentCursor = reviewState?.lastCommentCursor ?? 0;
-              workItems.push({
-                signal: {
-                  repairedTask: trackingTask,
-                  repoFullName,
-                  prNumber,
-                  routingAudit: repairResult.routingAudit,
-                  newComments: [],
-                  newDecisions: [],
-                  headSha: prMetadata.headSha,
-                  inlineCommentCursor: reviewState?.lastInlineCommentCursor ?? legacyCommentCursor,
-                  conversationCommentCursor: reviewState?.lastConversationCommentCursor ?? legacyCommentCursor,
-                  decisionCursor: reviewState?.lastDecisionCursor ?? 0,
-                  subjectState: prMetadata.prState,
-                  validateRoutingRepairFresh: repairResult.validateRoutingRepairFresh,
-                  commitRoutingRepair: repairResult.commitRoutingRepair,
-                  commitCursor: async () => {},
-                },
-                subjectKey: trackingSubjectKey,
-              });
-              continue;
-            }
+            // #1392 AC-2: a merged/closed PR is still collected. Its terminal outcome marks the task
+            // done, so this is the last poll — feedback posted alongside the merge or close would
+            // otherwise never be fetched. The terminal state rides on this poll's work item.
+            const terminalState =
+              prMetadata?.prState === 'merged' || prMetadata?.prState === 'closed' ? prMetadata.prState : undefined;
 
             // Schema v2: each comments endpoint owns its cursor. A task with only the
             // legacy combined cursor replays each source from zero. That backfill is
@@ -820,7 +791,8 @@ export function createReviewFeedbackTaskSpec(opts: ReviewFeedbackTaskSpecOptions
             const activeAwait = trackingTask.automationState?.await;
             const activePrBaseline =
               activeAwait && 'headSha' in activeAwait.baseline ? activeAwait.baseline : undefined;
-            if (!activeAwait && !repairResult.routingAudit) {
+            // A terminal PR always reaches the lifecycle, with or without a wait: that is what ends the task.
+            if (!activeAwait && !repairResult.routingAudit && !terminalState) {
               if (hadNewItems || commentCursorMigrationActive) {
                 await advanceCursor(
                   trackingTask.id,
@@ -842,13 +814,16 @@ export function createReviewFeedbackTaskSpec(opts: ReviewFeedbackTaskSpecOptions
               continue;
             }
 
-            const reviewLoopBrake = await resolveReviewLoopBrake({
-              opts,
-              repoFullName,
-              prNumber,
-              prAuthorLogin: prMetadata?.authorLogin,
-              newDecisions,
-            });
+            // The brake paces re-review wakes on a live PR; it never withholds the terminal wake.
+            const reviewLoopBrake = terminalState
+              ? undefined
+              : await resolveReviewLoopBrake({
+                  opts,
+                  repoFullName,
+                  prNumber,
+                  prAuthorLogin: prMetadata?.authorLogin,
+                  newDecisions,
+                });
 
             const requestedThreadIds =
               activeAwait?.continuation.when.flatMap((predicate) =>
@@ -859,6 +834,20 @@ export function createReviewFeedbackTaskSpec(opts: ReviewFeedbackTaskSpecOptions
                 ? await opts.fetchReviewThreads(repoFullName, prNumber, requestedThreadIds)
                 : undefined;
             const waitResult = cloudResolution.waitResult;
+
+            if (terminalState) {
+              opts.log.info(`[review-feedback] PR ${prKey} ${terminalState} — routing typed terminal lifecycle`);
+              // After collection succeeded, so a failed fetch retries next poll without projecting twice.
+              await projectReviewFeedbackTerminalEffects({
+                opts,
+                task: trackingTask,
+                subjectKey: trackingSubjectKey,
+                repoFullName,
+                prNumber,
+                terminalState,
+                prTitle: prMetadata?.prTitle,
+              });
+            }
 
             workItems.push({
               signal: {
@@ -885,6 +874,7 @@ export function createReviewFeedbackTaskSpec(opts: ReviewFeedbackTaskSpecOptions
                     }
                   : {}),
                 ...(reviewLoopBrake ? { reviewLoopBrake } : {}),
+                ...(terminalState ? { subjectState: terminalState } : {}),
                 validateRoutingRepairFresh: repairResult.validateRoutingRepairFresh,
                 commitRoutingRepair: repairResult.commitRoutingRepair,
                 commitCursor: () =>
@@ -938,10 +928,10 @@ export function createReviewFeedbackTaskSpec(opts: ReviewFeedbackTaskSpecOptions
         const repairCommitted = await signal.commitRoutingRepair?.();
         if (repairCommitted === false) return;
         ctx.signal?.throwIfAborted();
-        // Once the persist-first cursor advances, routing and durable wake admission
-        // are obligations of that cursor. Do not insert cancellation points until
-        // those effects settle or the feedback can be lost permanently.
-        await signal.commitCursor();
+        // The wait lifecycle records this observation's cursors together with what it matched. The
+        // cursor is committed only after that: moved past an observation the lifecycle never recorded,
+        // it loses that observation for good. Do not insert cancellation points until the cursor and
+        // the wake settle.
         const routeResult = await opts.reviewFeedbackRouter.route(
           {
             repoFullName: signal.repoFullName,
@@ -966,6 +956,11 @@ export function createReviewFeedbackTaskSpec(opts: ReviewFeedbackTaskSpecOptions
           },
           { taskId: repairedTask.id },
         );
+        if (routeResult.recorded === false) {
+          opts.log.warn(`[review-feedback] ${subjectKey}: observation not recorded; cursor held for the next poll`);
+        } else {
+          await signal.commitCursor();
+        }
         if (routeResult.kind !== 'notified') return;
 
         if (signal.reviewLoopBrake?.kind === 'pause_once') return;

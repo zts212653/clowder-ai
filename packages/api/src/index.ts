@@ -6394,6 +6394,24 @@ async function main(): Promise<void> {
       deliveryDeps,
       eventLog: waitEventLog,
       log: app.log,
+      // #1392 AC-1: a message flushed from the delivery outbox is one whose own generation never got
+      // it out, so nothing else will start its owner for it. The collector whose poll happened to
+      // flush it must not: that message is not its poll's result.
+      wakeOwner: async ({ task, outcome, content, messageId }) => {
+        await invokeTrigger.trigger(
+          task.threadId,
+          (task.ownerCatId ?? '') as CatId,
+          task.userId ?? '',
+          content,
+          messageId,
+          undefined,
+          {
+            priority: 'normal',
+            reason: 'github_wait_satisfied',
+            coalesceKey: `${outcome.subjectRef}:wait:${task.ownerCatId ?? 'unassigned'}`,
+          },
+        );
+      },
     });
     waitLifecycleHolder.current = waitLifecycle;
     const [{ PrWaitMigrationService }, { IssueWaitMigrationService }, { WaitLifecycleRecoverySweep }] =

@@ -52,7 +52,7 @@ function options(taskStore, router, overrides = {}) {
 }
 
 describe('review scheduler F280 adapter', () => {
-  test('finishes routing after a persisted cursor even when cancellation arrives at the commit boundary', async () => {
+  test('commits the cursor once routing recorded the observation, even when cancellation arrives while routing', async () => {
     const taskStore = new TaskStore();
     const task = await createTracked(taskStore);
     const controller = new AbortController();
@@ -61,6 +61,7 @@ describe('review scheduler F280 adapter', () => {
       options(taskStore, {
         route: async () => {
           events.push('routed');
+          controller.abort(new Error('scheduler timeout'));
           return { kind: 'skipped', reason: 'test' };
         },
       }),
@@ -80,7 +81,6 @@ describe('review scheduler F280 adapter', () => {
           decisionCursor: 31,
           commitCursor: async () => {
             events.push('cursor-persisted');
-            controller.abort(new Error('scheduler timeout'));
           },
         },
         task.subjectKey,
@@ -88,7 +88,7 @@ describe('review scheduler F280 adapter', () => {
       )
       .catch(() => {});
 
-    assert.deepEqual(events, ['cursor-persisted', 'routed']);
+    assert.deepEqual(events, ['routed', 'cursor-persisted']);
   });
 
   test('current facts are evaluated even when no raw source body is deliverable', async () => {
@@ -204,6 +204,39 @@ describe('review scheduler F280 adapter', () => {
     assert.equal(routerCalls.length, 1);
     assert.equal(triggerCalls.length, 1);
     assert.equal(triggerCalls[0][6].reason, 'github_pr_merged');
+  });
+
+  test('a comment posted in the poll where the PR merges is collected with the terminal truth', async () => {
+    const taskStore = new TaskStore();
+    await createTracked(taskStore);
+    const spec = createReviewFeedbackTaskSpec(
+      options(
+        taskStore,
+        { route: async () => ({ kind: 'skipped', reason: 'test' }) },
+        {
+          fetchPrMetadata: async () => ({ headSha: 'aaa', prState: 'merged' }),
+          fetchComments: async () => [
+            {
+              id: 21,
+              author: 'maintainer',
+              body: 'thanks, merging',
+              createdAt: '2026-09-15T00:00:00Z',
+              commentType: 'conversation',
+            },
+          ],
+        },
+      ),
+    );
+
+    const gate = await spec.admission.gate();
+    assert.equal(gate.workItems.length, 1);
+    const { signal } = gate.workItems[0];
+    assert.equal(signal.subjectState, 'merged');
+    assert.deepEqual(
+      signal.newComments.map((comment) => comment.id),
+      [21],
+      'a terminal PR is the last poll — skipping its comments loses them for good',
+    );
   });
 
   test('the fourth formal changes-requested review pauses one automatic owner wake, while the fifth continues', async () => {

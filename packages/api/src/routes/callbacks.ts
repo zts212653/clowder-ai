@@ -5360,6 +5360,8 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
       nextStep: z.string().trim().min(1).max(500),
       /** #1392 AC-2: optional. Omitted = no time-based termination; supplied = a real, visible deadline. */
       expiresAt: z.number().int().positive().optional(),
+      /** #1392 AC-1: renewal is the default; `false` is the explicit single-fire opt-in. */
+      autoRenew: z.boolean().optional(),
     })
     .strict();
 
@@ -5385,7 +5387,7 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
       return deletedThreadGuard.body;
     }
 
-    const { repoFullName, prNumber, when, nextStep, expiresAt } = parsed.data;
+    const { repoFullName, prNumber, when, nextStep, expiresAt, autoRenew } = parsed.data;
     if (expiresAt !== undefined && expiresAt <= Date.now()) {
       reply.status(400);
       return { error: 'expiresAt must be in the future' };
@@ -5534,6 +5536,7 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
           then: nextStep,
         },
         ...(expiresAt !== undefined ? { expiresAt } : {}),
+        ...(autoRenew !== undefined ? { autoRenew } : {}),
         createdAt: Date.now(),
         provenance: 'explicit_registration',
       };
@@ -5598,6 +5601,8 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
       nextStep: z.string().min(1).max(500),
       /** #1392 AC-2: optional. Omitted = no time-based termination; supplied = a real, visible deadline. */
       expiresAt: z.number().int().positive().optional(),
+      /** #1392 AC-1: renewal is the default; `false` is the explicit single-fire opt-in. */
+      autoRenew: z.boolean().optional(),
     })
     .strict();
 
@@ -5622,7 +5627,7 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
       return deletedThreadGuard.body;
     }
 
-    const { repoFullName, issueNumber, when, nextStep, expiresAt } = parsed.data;
+    const { repoFullName, issueNumber, when, nextStep, expiresAt, autoRenew } = parsed.data;
     if (expiresAt !== undefined && expiresAt <= Date.now()) {
       reply.status(400);
       return { error: 'expiresAt must be in the future' };
@@ -5748,6 +5753,7 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
           then: nextStep,
         },
         ...(expiresAt !== undefined ? { expiresAt } : {}),
+        ...(autoRenew !== undefined ? { autoRenew } : {}),
         createdAt: Date.now(),
         provenance: 'explicit_registration',
       };

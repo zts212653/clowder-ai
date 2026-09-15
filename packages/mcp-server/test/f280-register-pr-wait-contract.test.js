@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
-const EXPECTED_PUBLIC_KEYS = ['expiresAt', 'nextStep', 'prNumber', 'repoFullName', 'when'];
+const EXPECTED_PUBLIC_KEYS = ['autoRenew', 'expiresAt', 'nextStep', 'prNumber', 'repoFullName', 'when'];
 
 describe('F280 register_pr_tracking public contract', () => {
   it('exposes only the typed wait inputs', async () => {
@@ -92,5 +92,9 @@ describe('F280 register_pr_tracking public contract', () => {
       }
       Object.assign(process.env, originalEnv);
     }
+  });
+  it('offers autoRenew as an optional single-fire opt-out', async () => {
+    const { registerPrTrackingInputSchema } = await import('../dist/tools/callback-tools.js');
+    assert.equal(registerPrTrackingInputSchema.autoRenew.isOptional(), true);
   });
 });

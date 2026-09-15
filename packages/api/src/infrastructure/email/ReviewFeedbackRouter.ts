@@ -1,6 +1,9 @@
 import type { GitHubReviewThreadBaseline } from '@cat-cafe/shared';
 import type { FastifyBaseLogger } from 'fastify';
-import type { GitHubWaitLifecycleService } from '../../domains/github-signals/GitHubWaitLifecycleService.js';
+import type {
+  GitHubWaitLifecycleResult,
+  GitHubWaitLifecycleService,
+} from '../../domains/github-signals/GitHubWaitLifecycleService.js';
 import type { GitHubReviewLoopBrake } from '../../domains/github-signals/github-wait-renderer.js';
 import type { ConnectorDeliveryDeps } from './deliver-connector-message.js';
 
@@ -55,7 +58,7 @@ export interface ReviewFeedbackSignal {
   readonly reviewLoopBrake?: GitHubReviewLoopBrake;
 }
 
-export type ReviewFeedbackRouteResult =
+export type ReviewFeedbackRouteResult = (
   | {
       readonly kind: 'notified';
       readonly threadId: string;
@@ -63,12 +66,32 @@ export type ReviewFeedbackRouteResult =
       readonly messageId: string;
       readonly content: string;
     }
-  | { readonly kind: 'skipped'; readonly reason: string };
+  | { readonly kind: 'skipped'; readonly reason: string }
+) & {
+  /**
+   * `false`: the wait lifecycle recorded nothing of this observation — every write lost its race — so
+   * the collector must not move its cursor past it.
+   */
+  readonly recorded?: false;
+};
 
 export interface ReviewFeedbackRouterOptions {
   readonly deliveryDeps: ConnectorDeliveryDeps;
   readonly waitLifecycle: GitHubWaitLifecycleService;
   readonly log: FastifyBaseLogger;
+}
+
+/** One wait outcome, projected for the collector: what to wake, and whether it may move its cursor. */
+function routeResultOf(result: GitHubWaitLifecycleResult): ReviewFeedbackRouteResult {
+  if (result.kind === 'unrecorded') return { kind: 'skipped', reason: result.reason, recorded: false };
+  if (result.kind !== 'notified') return { kind: 'skipped', reason: result.reason };
+  return {
+    kind: 'notified',
+    threadId: result.task.threadId,
+    catId: result.task.ownerCatId ?? '',
+    messageId: result.messageId,
+    content: result.content,
+  };
 }
 
 export class ReviewFeedbackRouter {
@@ -84,6 +107,8 @@ export class ReviewFeedbackRouter {
         headSha: signal.headSha,
         review: {
           decisionCursor: signal.decisionCursor,
+          // The collector keeps reviews of an older commit out of `newDecisions`.
+          ...(latestDecision ? { headDecisionCursor: latestDecision.id } : {}),
           ...(resultDecision ? { decision: resultDecision } : {}),
           ...(resultReviewer ? { reviewer: resultReviewer } : {}),
           ...(signal.reviewThreads ? { threads: signal.reviewThreads } : {}),
@@ -106,14 +131,7 @@ export class ReviewFeedbackRouter {
       ...(signal.subjectState ? { subjectState: signal.subjectState } : {}),
       ...(signal.reviewLoopBrake ? { reviewLoopBrake: signal.reviewLoopBrake } : {}),
     });
-    if (result.kind !== 'notified') return { kind: 'skipped', reason: result.reason };
-    return {
-      kind: 'notified',
-      threadId: result.task.threadId,
-      catId: result.task.ownerCatId ?? '',
-      messageId: result.messageId,
-      content: result.content,
-    };
+    return routeResultOf(result);
   }
 }
 

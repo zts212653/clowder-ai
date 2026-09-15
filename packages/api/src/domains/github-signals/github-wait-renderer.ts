@@ -28,14 +28,25 @@ export function classifyGitHubReviewLoopBrake(
 export function renderGitHubWaitOutcome(outcome: WaitOutcomeV1): string {
   const isIssue = outcome.subjectRef.startsWith('issue:');
   const subject = outcome.subjectRef.slice(isIssue ? 'issue:'.length : 'pr:'.length);
-  const lines = [`🔔 **${isIssue ? 'Issue' : 'PR'} wait satisfied** — ${subject}`, ''];
+  const kind = isIssue ? 'Issue' : 'PR';
+  const lines =
+    outcome.reason === 'expired'
+      ? [`⏰ **${kind} tracking expired** — ${subject}`, '']
+      : [`🔔 **${kind} wait satisfied** — ${subject}`, ''];
 
-  if (outcome.reason === 'subject_terminal') {
-    lines.push(`- ${isIssue ? 'Issue' : 'PR'} state: ${outcome.terminalSubjectState ?? 'closed'}`);
-  } else {
-    for (const match of outcome.matched ?? []) {
-      lines.push(`- ${match.delta}`);
-    }
+  // A terminal outcome — a final state or a deadline — first lists what its last poll observed.
+  for (const match of outcome.matched ?? []) {
+    lines.push(`- ${match.delta}`);
+  }
+  if (outcome.reason === 'subject_terminal' || outcome.terminalSubjectState) {
+    lines.push(`- ${kind} state: ${outcome.terminalSubjectState ?? 'closed'}`);
+  }
+  if (outcome.reason === 'expired') {
+    lines.push(
+      outcome.matched?.length
+        ? '- The explicit deadline passed.'
+        : '- The explicit deadline passed before anything matched.',
+    );
   }
 
   lines.push('', `Matched reason: \`${outcome.reason}\``);
@@ -50,5 +61,20 @@ export function renderGitHubWaitOutcome(outcome: WaitOutcomeV1): string {
   } else if (outcome.nextStep) {
     lines.push(`Next: ${outcome.nextStep}`);
   }
+  lines.push('', trackingStatusLine(outcome));
   return lines.join('\n');
+}
+
+/**
+ * #1392: every delivery says what happens to the tracking itself. The failures the issue opened
+ * with — an expired deadline, a consumed one-shot wait, a notification chain nobody re-armed —
+ * were all silent about exactly this. A failed rearm is stated as a failure and never phrased so
+ * that it could be read as "still watching".
+ */
+function trackingStatusLine(outcome: WaitOutcomeV1): string {
+  if (outcome.renewal === 'rearmed') return '_Tracking continues — watching for the next event._';
+  if (outcome.renewal === 'rearm_failed') {
+    return '⚠ **Event delivered; tracking not rearmed.** Nothing is watching this subject now — register again to keep tracking.';
+  }
+  return `_Tracking ended (\`${outcome.reason}\`)._`;
 }
