@@ -2,6 +2,7 @@ import { act } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Thread } from '@/stores/chat-types';
 import { useLabelStore } from '@/stores/label-store';
+import { useSidebarProjectionStore } from '@/stores/sidebarProjectionStore';
 import { SIDEBAR_TAB_STORAGE_KEY } from '../sidebar-tab-state';
 import {
   createThreadSidebarHarness,
@@ -124,6 +125,37 @@ describe('F277 production Sidebar attention clusters', () => {
     expect(harness.container.querySelector('[data-thread-id="root-a"]')).not.toBeNull();
     expect(harness.container.querySelector('[data-thread-id="child-a"]')).not.toBeNull();
     expect(mockApiFetch.mock.calls.some(([path]) => path === '/api/threads/relations')).toBe(false);
+  });
+
+  it('keeps working, unread and mention signals visible together on a collapsed Group and updates them from row truth', async () => {
+    await harness.render();
+    await harness.flush();
+    const projection = useSidebarProjectionStore.getState();
+    const rows = projection.rows.map((row) =>
+      row.id === 'root-b'
+        ? { ...row, unreadCount: 3, hasUserMention: true, presence: { status: 'working' as const } }
+        : row.id === 'child-b'
+          ? { ...row, unreadCount: 2, presence: { status: 'done' as const } }
+          : row,
+    );
+    await act(async () => projection.applySidebarSnapshot(rows, projection.appliedGeneration + 1));
+    const header = harness.container.querySelector<HTMLElement>('[data-attention-cluster="group:attention_b"]');
+    expect(header?.dataset.expanded).toBe('false');
+    expect(header?.textContent).toContain('进行中 1');
+    expect(header?.textContent).toContain('未读 5');
+    expect(header?.textContent).toContain('@你 1');
+
+    const next = useSidebarProjectionStore.getState();
+    await act(async () =>
+      next.applySidebarSnapshot(
+        rows.map((row) => ({ ...row, unreadCount: 0, hasUserMention: false })),
+        next.appliedGeneration + 1,
+      ),
+    );
+    expect(header?.textContent).toContain('进行中 1');
+    expect(header?.textContent).not.toContain('未读');
+    expect(header?.textContent).not.toContain('@你');
+    expect(header?.dataset.expanded).toBe('false');
   });
 
   it('keeps an expanded cluster visually continuous instead of falling back to separate thread cards', async () => {

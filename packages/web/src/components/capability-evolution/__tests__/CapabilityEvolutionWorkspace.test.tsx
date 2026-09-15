@@ -2,6 +2,7 @@ import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { CapabilityEvolutionWorkspace } from '../CapabilityEvolutionWorkspace';
+import { useEvolutionReading } from '../evolution-reading-state';
 
 const { apiFetchMock, setPendingChatInsert, onOpenProgram, chatStoreState } = vi.hoisted(() => ({
   apiFetchMock: vi.fn(),
@@ -16,7 +17,13 @@ const { apiFetchMock, setPendingChatInsert, onOpenProgram, chatStoreState } = vi
   },
 }));
 
-vi.mock('@/utils/api-client', () => ({ apiFetch: (...args: unknown[]) => apiFetchMock(...args) }));
+vi.mock('@/utils/api-client', () => ({
+  apiFetch: async (...args: unknown[]) => {
+    if (String(args[0]).includes('/asset-review')) return new Response('{}', { status: 404 });
+    const response = await apiFetchMock(...args);
+    return response instanceof Response ? response.clone() : response;
+  },
+}));
 vi.mock('@/stores/chatStore', () => ({
   useChatStore: (selector: (state: Record<string, unknown>) => unknown) =>
     selector({
@@ -30,6 +37,7 @@ const projection = {
     schemaVersion: 1,
     programId: 'evolution-program:bcc336788a7df9d6075b1efb4c0a7e68',
     workspaceId: 'user:default-user',
+    displayName: '投资人路演效果',
     objectRef: { ownerFeatureId: 'F311', ownerStateRef: 'capability:f311-investor-roadshow-expression' },
     claimRef: {
       ownerFeatureId: 'F311',
@@ -80,6 +88,7 @@ describe('F311 Capability Evolution Workspace', () => {
   beforeEach(() => {
     (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
     apiFetchMock.mockReset();
+    useEvolutionReading.setState({ programs: {}, workspaceProgramIds: {} });
     setPendingChatInsert.mockReset();
     onOpenProgram.mockReset();
     container = document.createElement('div');
@@ -99,14 +108,30 @@ describe('F311 Capability Evolution Workspace', () => {
     );
   }
 
+  it('does not regress owner state when an older list response arrives after a newer state', async () => {
+    const newer = { ...projection, program: { ...projection.program, sequence: 9, lifecycle: 'paused' } };
+    apiFetchMock
+      .mockResolvedValueOnce(new Response(JSON.stringify({ programs: [newer] })))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ programs: [projection] })));
+    await renderWorkspace();
+    expect(container.textContent).toContain('已暂停');
+    await act(async () => {
+      [...container.querySelectorAll('button')].find((button) => button.textContent === '刷新')?.click();
+    });
+    expect(container.textContent).toContain('已暂停');
+    expect(container.textContent).not.toContain('准备目标');
+  });
+
   it('shows a product status first and keeps setup mechanics below the selected capability', async () => {
-    apiFetchMock.mockResolvedValue(new Response(JSON.stringify({ programs: [projection] }), { status: 200 }));
+    apiFetchMock
+      .mockResolvedValueOnce(new Response(JSON.stringify({ programs: [projection] }), { status: 200 }))
+      .mockResolvedValue(new Response(JSON.stringify(projection), { status: 200 }));
     await renderWorkspace();
 
     expect(container.textContent).toContain('能力进化');
     expect(container.textContent).toContain('投资人路演效果');
-    expect(container.textContent).toContain('配置中');
-    expect(container.textContent).toContain('1 项评估条件待完成');
+    expect(container.textContent).toContain('准备目标');
+    expect(container.textContent).toContain('还需要：约定怎样判断改进有效。');
     expect(container.textContent).not.toContain('F311');
     expect(container.textContent).not.toContain('Measurement certificate');
     expect(container.textContent).not.toContain('capability:f311-investor-roadshow-expression');
@@ -122,9 +147,9 @@ describe('F311 Capability Evolution Workspace', () => {
     });
 
     const setup = container.querySelector('[data-testid="capability-evolution-setup"]');
-    expect(setup?.textContent).toContain('评估配置');
+    expect(setup?.textContent).toContain('先确定目标与评估方式');
     expect(setup?.textContent).toContain('1 项待完成');
-    expect(setup?.textContent).toContain('接好评估方式');
+    expect(setup?.textContent).toContain('约定怎样判断改进有效');
     expect(setup?.textContent).toContain('评估体系');
     expect(setup?.textContent).not.toContain('F267');
     expect(setup?.textContent).not.toContain('Measurement certificate');
@@ -176,33 +201,27 @@ describe('F311 Capability Evolution Workspace', () => {
       blockers: [],
     },
   ])('keeps lifecycle $lifecycle in product language without inventing an action', async (scenario) => {
-    apiFetchMock.mockResolvedValue(
-      new Response(
-        JSON.stringify({
-          programs: [
-            {
-              ...projection,
-              program: {
-                ...projection.program,
-                lifecycle: scenario.lifecycle,
-                ...(scenario.lifecycle === 'terminal' ? { terminalDisposition: 'no_change' } : {}),
-              },
-              cycles:
-                scenario.lifecycle === 'terminal'
-                  ? projection.cycles.map((cycle) => ({
-                      ...cycle,
-                      closedAt: '2026-09-01T08:30:53.931Z',
-                      decision: 'no_change',
-                    }))
-                  : projection.cycles,
-              blockers: scenario.blockers,
-              nextAction: scenario.nextAction,
-            },
-          ],
-        }),
-        { status: 200 },
-      ),
-    );
+    const selected = {
+      ...projection,
+      program: {
+        ...projection.program,
+        lifecycle: scenario.lifecycle,
+        ...(scenario.lifecycle === 'terminal' ? { terminalDisposition: 'no_change' } : {}),
+      },
+      cycles:
+        scenario.lifecycle === 'terminal'
+          ? projection.cycles.map((cycle) => ({
+              ...cycle,
+              closedAt: '2026-09-01T08:30:53.931Z',
+              decision: 'no_change',
+            }))
+          : projection.cycles,
+      blockers: scenario.blockers,
+      nextAction: scenario.nextAction,
+    };
+    apiFetchMock
+      .mockResolvedValueOnce(new Response(JSON.stringify({ programs: [selected] }), { status: 200 }))
+      .mockResolvedValue(new Response(JSON.stringify(selected), { status: 200 }));
     await renderWorkspace();
 
     await act(async () => {
@@ -228,7 +247,13 @@ describe('F311 Capability Evolution Workspace', () => {
 
   it('renders the three real capabilities as independent rows with their own state', async () => {
     const ownerRef = (ownerStateRef: string) => ({ ownerFeatureId: 'F311', ownerStateRef });
-    const program = (id: string, ownerStateRef: string, stage: string, blockers: typeof projection.blockers) => {
+    const program = (
+      id: string,
+      displayName: string,
+      ownerStateRef: string,
+      stage: string,
+      blockers: typeof projection.blockers,
+    ) => {
       const readyRefs =
         stage === 'constituting'
           ? {}
@@ -251,6 +276,7 @@ describe('F311 Capability Evolution Workspace', () => {
         program: {
           ...projection.program,
           programId: id,
+          displayName,
           objectRef: { ownerFeatureId: 'F311', ownerStateRef },
           stage,
           ...readyRefs,
@@ -265,18 +291,21 @@ describe('F311 Capability Evolution Workspace', () => {
           programs: [
             program(
               'evolution-program:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+              '研发协作改进',
               'capability:development-process-harness-effectiveness',
               'instrumenting',
               [projection.blockers[0], { ...projection.blockers[0], code: 'promotion_holdout_missing' }],
             ),
             program(
               'evolution-program:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
+              'Microduck 行走稳定性',
               'capability:microduck-walking-stability',
               'constituting',
               [projection.blockers[0]],
             ),
             program(
               'evolution-program:cccccccccccccccccccccccccccccccc',
+              '投资人路演效果',
               'capability:f311-investor-roadshow-expression',
               'observing',
               [],
@@ -292,9 +321,9 @@ describe('F311 Capability Evolution Workspace', () => {
     const rows = [...container.querySelectorAll('[data-testid^="capability-evolution-program-"]')];
     expect(rows).toHaveLength(3);
     expect(rows[0]?.textContent).toContain('研发协作改进');
-    expect(rows[0]?.textContent).toContain('2 项评估条件待完成');
+    expect(rows[0]?.textContent).toContain('还需要：约定怎样判断改进有效、留出未参与选择的验证场景。');
     expect(rows[1]?.textContent).toContain('Microduck 行走稳定性');
-    expect(rows[1]?.textContent).toContain('1 项评估条件待完成');
+    expect(rows[1]?.textContent).toContain('还需要：约定怎样判断改进有效。');
     expect(rows[2]?.textContent).toContain('投资人路演效果');
     expect(rows[2]?.textContent).toContain('正在收集本轮证据');
     expect(container.textContent).not.toContain('三个阶段');
@@ -397,7 +426,9 @@ describe('F311 Capability Evolution Workspace', () => {
     expect(container.querySelectorAll('[data-testid^="capability-evolution-program-"]')).toHaveLength(0);
   });
   it('keeps lifecycle controls reachable from Program detail', async () => {
-    apiFetchMock.mockResolvedValue(new Response(JSON.stringify({ programs: [projection] }), { status: 200 }));
+    apiFetchMock
+      .mockResolvedValueOnce(new Response(JSON.stringify({ programs: [projection] }), { status: 200 }))
+      .mockResolvedValue(new Response(JSON.stringify(projection), { status: 200 }));
     await renderWorkspace();
 
     await act(async () => {
@@ -407,11 +438,11 @@ describe('F311 Capability Evolution Workspace', () => {
         )
         ?.click();
     });
-    const manage = [...container.querySelectorAll('button')].find((button) => button.textContent === '管理');
+    const manage = [...container.querySelectorAll('button')].find((button) => button.textContent === '展开阅读 →');
     if (!manage) throw new Error('lifecycle entry missing from Program detail');
     act(() => manage.click());
 
-    expect(onOpenProgram).toHaveBeenCalledWith('evolution-program:bcc336788a7df9d6075b1efb4c0a7e68');
+    expect(onOpenProgram.mock.calls[0]?.[0]).toBe('evolution-program:bcc336788a7df9d6075b1efb4c0a7e68');
   });
 
   it('does not describe rejected canonical projections as an empty workspace', async () => {

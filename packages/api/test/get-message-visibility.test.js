@@ -359,6 +359,83 @@ describe('GET /api/callbacks/get-message visibility', () => {
     assert.equal(unexposed.statusCode, 404, "another target must not inherit the first cat's exposure");
   });
 
+  test('managed-hold exact reads preserve owner and hidden-trigger boundaries after exposure', async () => {
+    const app = await createApp();
+    const owner = await registry.create('user-1', 'opus', 'thread-managed-owner');
+    const visible = messageStore.append({
+      userId: 'scheduler',
+      catId: null,
+      content: 'owner-visible managed wake',
+      mentions: ['opus'],
+      timestamp: 1300,
+      threadId: 'thread-managed-owner',
+      deliveryStatus: 'queued',
+      source: {
+        connector: 'hold-ball',
+        label: '持球通知',
+        meta: { taskId: 'task-owner-visible', threadId: 'thread-managed-owner', catId: 'opus', wakeWhen: true },
+      },
+      queueCustody: makeQueuedMessageCustody({
+        entryId: 'entry-owner-visible',
+        ownerUserId: 'user-1',
+        allTargetCats: ['opus'],
+        pendingTargetCats: ['opus'],
+        seenByCatIds: ['opus'],
+        seenInvocationIdByCatId: { opus: 'sealed-owner-child' },
+        bodyExposures: [{ targetCatId: 'opus', invocationId: 'sealed-owner-child', seenAt: 1350 }],
+      }),
+    });
+    const hidden = messageStore.append({
+      userId: 'scheduler',
+      catId: null,
+      content: 'hidden managed trigger',
+      mentions: ['opus'],
+      timestamp: 1400,
+      threadId: 'thread-managed-owner',
+      deliveryStatus: 'queued',
+      extra: { scheduler: { hiddenTrigger: true } },
+      source: {
+        connector: 'hold-ball',
+        label: '持球通知',
+        meta: { taskId: 'task-hidden', threadId: 'thread-managed-owner', catId: 'opus', wakeWhen: true },
+      },
+      queueCustody: makeQueuedMessageCustody({
+        entryId: 'entry-hidden',
+        ownerUserId: 'user-1',
+        allTargetCats: ['opus'],
+        pendingTargetCats: ['opus'],
+        seenByCatIds: ['opus'],
+        seenInvocationIdByCatId: { opus: 'sealed-owner-child' },
+        bodyExposures: [{ targetCatId: 'opus', invocationId: 'sealed-owner-child', seenAt: 1450 }],
+      }),
+    });
+
+    const ownerRead = await app.inject({
+      method: 'GET',
+      url: `/api/callbacks/get-message?messageId=${visible.id}&mode=full`,
+      headers: { 'x-invocation-id': owner.invocationId, 'x-callback-token': owner.callbackToken },
+    });
+    assert.equal(ownerRead.statusCode, 200, ownerRead.body);
+
+    const hiddenRead = await app.inject({
+      method: 'GET',
+      url: `/api/callbacks/get-message?messageId=${hidden.id}&mode=full`,
+      headers: { 'x-invocation-id': owner.invocationId, 'x-callback-token': owner.callbackToken },
+    });
+    assert.equal(hiddenRead.statusCode, 404, 'hidden managed triggers stay unreadable after an exposure witness');
+
+    const foreignOwner = await registry.create('user-2', 'opus', 'thread-managed-owner');
+    const foreignRead = await app.inject({
+      method: 'GET',
+      url: `/api/callbacks/get-message?messageId=${visible.id}&mode=full`,
+      headers: {
+        'x-invocation-id': foreignOwner.invocationId,
+        'x-callback-token': foreignOwner.callbackToken,
+      },
+    });
+    assert.equal(foreignRead.statusCode, 404, 'scheduler provenance must not bypass the durable owner boundary');
+  });
+
   test('get-message defaults to preview (bounded); mode=full returns complete content (F236 AC-B1/B2)', async () => {
     const app = await createApp();
     const { invocationId, callbackToken } = await registry.create('user-1', 'opus');

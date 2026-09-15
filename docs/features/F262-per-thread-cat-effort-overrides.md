@@ -180,7 +180,7 @@ Thread ⋮
 - [x] AC-B3: 每行选项来自共享 provider/model capability，展示 `继承（effective value）`；GPT-5.6、旧 OpenAI、Anthropic 与 unsupported provider 都有 UI 回归测试。
 - [x] AC-B4: 写入成功、失败回滚、清除继承、stale incompatible 四种状态有即时反馈；文案明确“仅影响本对话；下次回复生效”。
 - [x] AC-B5: popover 在窄宽度下保持 viewport 内并内部滚动，不遮断删除等现有菜单操作；复用现有 Cafe design tokens。
-- [x] AC-B6: Alpha 按 Primary Journey 完成 3 张主截图与需求→证据表，证明 thread 隔离、非首选猫显式 @、全猫 capability 三项愿景均可用；约 15 秒录屏证物由 operator 在真实使用功能后明确豁免（message `0001783774509117-000005-21d95175`：“不需要录屏那些 我已经用上了！ （人肉确认”）。
+- [x] AC-B6: Alpha 按 Primary Journey 完成 3 张主截图与需求→证据表，证明 thread 隔离、非首选猫显式 @、全猫 capability 三项愿景均可用；约 15 秒录屏证物由 operator 在真实使用功能后明确豁免（message `private-source-id`：“不需要录屏那些 我已经用上了！ （人肉确认”）。
 - [x] AC-B7: F244 新增一条真实可投放 tip，复用现有 `thinking / concierge_open` context 与 `open_concierge_draft` action，正文明确 `⋮ → 思考档位`，sourceRef 指向本 spec 的 User Journey；不为 F262 扩张 F244 context/action 协议。
 
 ## 需求点 Checklist
@@ -273,6 +273,6 @@ Why: F127 已把猫猫默认 effort 归入 identity-agent config；F262 在同�
 ## Review Gate
 
 - Kickoff: feature truth checker + docs diff 自检。
-- Backend Design Gate: ✅ Ragdoll/Ragdoll（Claude Opus 4.6）已审查 store/API/invocation 契约并关闭 OQ-1（thread message `0001783699020824-000155-deea2b39`）。
+- Backend Design Gate: ✅ Ragdoll/Ragdoll（Claude Opus 4.6）已审查 store/API/invocation 契约并关闭 OQ-1（thread message `private-source-id`）。
 - Phase A: 跨个体 peer review，重点审查 access、effective-model fail-closed、routing orthogonality。
 - Phase B: operator 在 Alpha 按 Primary Journey 验收；作者之外的愿景守护猫核对原话→截图→argv 证据。

@@ -1,0 +1,15 @@
+{
+  "derivation": "uint32(first_8_hex(sha256('f311-microduck-public-v1:' + zero_based_index)))",
+  "kind": "public",
+  "schemaVersion": 1,
+  "seeds": [
+    3534139063,
+    250462044,
+    2836677339,
+    1502854766,
+    2470307952,
+    3005575298,
+    1192784046,
+    3419712706
+  ]
+}

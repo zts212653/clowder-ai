@@ -2,7 +2,18 @@ import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
 
 describe('F246 proposedAction tools/list contract', () => {
-  test('publishes the two executable approval variants inline', async () => {
+  test('publishes the two executable approval variants inline for invocation auth', async (t) => {
+    const keys = ['CAT_CAFE_INVOCATION_ID', 'CAT_CAFE_CALLBACK_TOKEN', 'CAT_CAFE_CREDENTIAL_FILE'];
+    const original = new Map(keys.map((key) => [key, process.env[key]]));
+    t.after(() => {
+      for (const [key, value] of original) {
+        if (value === undefined) delete process.env[key];
+        else process.env[key] = value;
+      }
+    });
+    delete process.env.CAT_CAFE_CREDENTIAL_FILE;
+    process.env.CAT_CAFE_INVOCATION_ID = 'inv-proposed-action-schema';
+    process.env.CAT_CAFE_CALLBACK_TOKEN = 'token-proposed-action-schema';
     const [{ createServer }, { Client }, { InMemoryTransport }] = await Promise.all([
       import('../dist/index.js'),
       import('@modelcontextprotocol/sdk/client/index.js'),

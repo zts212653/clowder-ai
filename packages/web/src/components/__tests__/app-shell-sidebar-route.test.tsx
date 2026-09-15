@@ -1,5 +1,6 @@
 import React from 'react';
-import { createRoot, type Root } from 'react-dom/client';
+import { createRoot, hydrateRoot, type Root } from 'react-dom/client';
+import { renderToString } from 'react-dom/server';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const navState = vi.hoisted(() => ({
@@ -10,10 +11,6 @@ const navState = vi.hoisted(() => ({
 vi.mock('next/navigation', () => ({
   usePathname: () => navState.pathname,
   useSearchParams: () => new URLSearchParams(navState.search),
-}));
-
-vi.mock('@/hooks/useIsDesktop', () => ({
-  useIsDesktop: () => true,
 }));
 
 vi.mock('@/hooks/useWorkspaceNavigate', () => ({
@@ -55,6 +52,14 @@ vi.mock('@/components/concierge/ConciergeHost', () => ({
   ConciergeHost: () => null,
 }));
 
+vi.mock('@/components/thread-chat', () => ({
+  ThreadChatRuntimeProvider: ({ children }: { children: React.ReactNode }) => children,
+}));
+vi.mock('@/components/listen-mode/ListenModePlayer', () => ({ ListenModePlayer: () => null }));
+vi.mock('@/components/story-player/TheaterReplayHost', () => ({ TheaterReplayHost: () => null }));
+vi.mock('@/components/DesktopUpdatePrompt', () => ({ DesktopUpdatePrompt: () => null }));
+vi.mock('@/services/playbackRuntime', () => ({ getPlaybackManager: vi.fn(), destroyPlaybackRuntime: vi.fn() }));
+
 import { AppShell } from '@/components/AppShell';
 
 describe('AppShell sidebar route ownership', () => {
@@ -65,6 +70,11 @@ describe('AppShell sidebar route ownership', () => {
     (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
     navState.pathname = '/thread/thread-a';
     navState.search = '';
+    vi.stubGlobal('matchMedia', () => ({
+      matches: true,
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+    }));
     window.history.replaceState(null, '', '/thread/thread-a');
     container = document.createElement('div');
     document.body.appendChild(container);
@@ -76,6 +86,7 @@ describe('AppShell sidebar route ownership', () => {
     container.remove();
     window.history.replaceState(null, '', '/');
     delete (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT;
+    vi.unstubAllGlobals();
   });
 
   function renderShell(content: string) {
@@ -100,5 +111,34 @@ describe('AppShell sidebar route ownership', () => {
 
     expect(container.textContent).toContain('settings content');
     expect(container.querySelector('[data-testid="thread-sidebar"]')).toBeNull();
+  });
+
+  it('hydrates a desktop shell without replacing its existing thread content', async () => {
+    React.act(() => root.unmount());
+    const content = (
+      <AppShell>
+        <main>
+          <input defaultValue="server draft" />
+        </main>
+      </AppShell>
+    );
+    const browserWindow = window;
+    try {
+      vi.stubGlobal('window', undefined);
+      container.innerHTML = renderToString(content);
+    } finally {
+      vi.stubGlobal('window', browserWindow);
+    }
+    const originalInput = container.querySelector('input');
+    if (!originalInput) throw new Error('SSR thread content is missing');
+    originalInput.value = 'draft entered before hydration';
+    const errors: unknown[] = [];
+    await React.act(async () => {
+      root = hydrateRoot(container, content, { onRecoverableError: (error) => errors.push(error) });
+    });
+    expect(errors).toEqual([]);
+    expect(container.querySelector('input')).toBe(originalInput);
+    expect(originalInput.value).toBe('draft entered before hydration');
+    expect(container.querySelector('[data-testid="thread-sidebar"]')).not.toBeNull();
   });
 });

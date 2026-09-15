@@ -122,6 +122,19 @@ async function waitFor(predicate, timeoutMs = 5000, intervalMs = 10) {
 }
 
 describe('QueueProcessor', () => {
+  it('F293 preserves the durable queue source separately from replay provenance', async () => {
+    for (const source of ['user', 'connector', 'agent']) {
+      const deps = stubDeps();
+      const processor = new QueueProcessor(deps);
+      enqueueEntry(deps.queue, { source, ownerAuthProvenance: 'strict' });
+      await processor.processNext('t1', 'u1');
+      await waitFor(() => deps.router.routeExecution.mock.calls.length > 0);
+      const options = deps.router.routeExecution.mock.calls[0].arguments[6];
+      assert.equal(options.humanDispositionInvocationOrigin, 'queue_replay');
+      assert.equal(options.routingQueueSource, source);
+    }
+  });
+
   let deps;
   let processor;
 

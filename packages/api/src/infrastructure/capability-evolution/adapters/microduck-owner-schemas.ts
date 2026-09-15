@@ -2,14 +2,25 @@ import { exactAssetVersionRefV1Schema, ownerTruthRefV1Schema } from '@cat-cafe/s
 import { z } from 'zod';
 import {
   MICRODUCK_BLOCK_CODES,
+  MICRODUCK_CONTROL_SHOW_CANDIDATE_SUBJECTS,
   MICRODUCK_SHOW_CANDIDATE_SUBJECTS,
   MICRODUCK_SHOW_REJECTION_KINDS,
+  type MicroduckShowState,
 } from './microduck-owner-contract.js';
 import { MICRODUCK_SHOW_MEDIA_CONTENT_TYPES } from './microduck-show-media-contract.js';
 
 const timestamp = z.string().datetime({ offset: true });
 const sha256 = z.string().regex(/^[a-f0-9]{64}$/i);
 const lowercaseSha256 = z.string().regex(/^[a-f0-9]{64}$/u);
+
+const showMediaDescriptorSchema = z
+  .object({
+    sceneIndex: z.number().int().min(0).max(7),
+    source: z.enum(['real_capture', 'faithful_replay']),
+    captureRef: ownerTruthRefV1Schema,
+    kind: z.enum(['image', 'video']),
+  })
+  .strict();
 
 export const microduckBlockedSchema = z
   .object({
@@ -26,6 +37,8 @@ export const microduckObservationSchema = z
     targetVersionRef: exactAssetVersionRefV1Schema,
     baselineVersionRef: exactAssetVersionRefV1Schema,
     observationRefs: z.array(ownerTruthRefV1Schema).max(64),
+    baselineArtifactSha256: lowercaseSha256.optional(),
+    sceneMedia: z.array(showMediaDescriptorSchema).max(8).optional(),
   })
   .strict();
 
@@ -89,10 +102,22 @@ export const microduckRollbackSchema = z
     status: z.literal('rolled_back'),
     rollbackReceiptRef: ownerTruthRefV1Schema,
     restoredVersionRef: exactAssetVersionRefV1Schema,
+    restoreOutcomeRef: ownerTruthRefV1Schema.optional(),
   })
   .strict();
 
-const showCandidateSchema = z
+export const microduckRestoreOutcomeSchema = z
+  .object({
+    status: z.literal('restore_verified'),
+    outcomeReceiptRef: ownerTruthRefV1Schema,
+    freshnessProofRef: ownerTruthRefV1Schema,
+    restoredVersionRef: exactAssetVersionRefV1Schema,
+    restoredArtifactSha256: sha256,
+    measuredAt: timestamp,
+  })
+  .strict();
+
+const trainingShowCandidateSchema = z
   .object({
     subjectId: z.enum(MICRODUCK_SHOW_CANDIDATE_SUBJECTS),
     policyRevision: exactAssetVersionRefV1Schema,
@@ -104,18 +129,46 @@ const showCandidateSchema = z
   })
   .strict();
 
-const showMediaDescriptorSchema = z
+const controlShowCandidateSchema = z
   .object({
-    sceneIndex: z.number().int().min(1).max(7),
-    source: z.enum(['real_capture', 'faithful_replay']),
-    captureRef: ownerTruthRefV1Schema,
-    kind: z.enum(['image', 'video']),
+    subjectId: z.enum(MICRODUCK_CONTROL_SHOW_CANDIDATE_SUBJECTS),
+    policyRevision: exactAssetVersionRefV1Schema,
+    artifactRevision: exactAssetVersionRefV1Schema,
+    configRef: ownerTruthRefV1Schema,
+    runnerRef: ownerTruthRefV1Schema,
+    evaluationEnvRef: ownerTruthRefV1Schema,
+    evaluationRef: ownerTruthRefV1Schema,
   })
   .strict();
 
-const microduckShowEvidenceSchema = z
+const showEvidenceCommon = {
+  status: z.literal('resolved'),
+  holdoutProof: z
+    .object({
+      sealedProofRef: ownerTruthRefV1Schema,
+      optimizerExposureProofRef: ownerTruthRefV1Schema,
+      optimizerExposed: z.literal(false),
+    })
+    .strict(),
+  candidateRevision: exactAssetVersionRefV1Schema,
+  targetRevision: exactAssetVersionRefV1Schema,
+  rollbackRevision: exactAssetVersionRefV1Schema,
+  approvalProposalRef: ownerTruthRefV1Schema,
+  interventionRef: ownerTruthRefV1Schema,
+  rejection: z
+    .object({
+      kind: z.enum(MICRODUCK_SHOW_REJECTION_KINDS),
+      ownerRef: ownerTruthRefV1Schema,
+    })
+    .strict(),
+  evaluatedArtifactSha256: sha256,
+  sceneMedia: z.array(showMediaDescriptorSchema).max(8).optional(),
+};
+
+const trainingShowEvidenceSchema = z
   .object({
-    status: z.literal('resolved'),
+    ...showEvidenceCommon,
+    interventionKind: z.literal('training'),
     baseline: z
       .object({
         policyRevision: exactAssetVersionRefV1Schema,
@@ -123,52 +176,56 @@ const microduckShowEvidenceSchema = z
         evaluationRef: ownerTruthRefV1Schema,
       })
       .strict(),
-    holdoutProof: z
-      .object({
-        sealedProofRef: ownerTruthRefV1Schema,
-        optimizerExposureProofRef: ownerTruthRefV1Schema,
-        optimizerExposed: z.literal(false),
-      })
-      .strict(),
-    candidates: z.array(showCandidateSchema).length(3),
-    candidateRevision: exactAssetVersionRefV1Schema,
-    targetRevision: exactAssetVersionRefV1Schema,
-    rollbackRevision: exactAssetVersionRefV1Schema,
-    approvalProposalRef: ownerTruthRefV1Schema,
-    interventionRef: ownerTruthRefV1Schema,
-    rejection: z
-      .object({
-        kind: z.enum(MICRODUCK_SHOW_REJECTION_KINDS),
-        ownerRef: ownerTruthRefV1Schema,
-      })
-      .strict(),
-    evaluatedArtifactSha256: sha256,
-    sceneMedia: z.array(showMediaDescriptorSchema).max(7).optional(),
+    candidates: z.array(trainingShowCandidateSchema).length(3),
   })
   .strict();
 
-const deployingShowStateSchema = microduckShowEvidenceSchema.extend({
-  approvalRef: ownerTruthRefV1Schema,
-  deployedRevision: exactAssetVersionRefV1Schema,
-  deployedArtifactSha256: sha256,
-});
+const controlShowEvidenceSchema = z
+  .object({
+    ...showEvidenceCommon,
+    interventionKind: z.literal('control_config'),
+    baseline: z
+      .object({
+        policyRevision: exactAssetVersionRefV1Schema,
+        artifactRevision: exactAssetVersionRefV1Schema,
+        configRef: ownerTruthRefV1Schema,
+        runnerRef: ownerTruthRefV1Schema,
+        evaluationEnvRef: ownerTruthRefV1Schema,
+        captureRef: ownerTruthRefV1Schema,
+        evaluationRef: ownerTruthRefV1Schema,
+      })
+      .strict(),
+    candidates: z.array(controlShowCandidateSchema).length(3),
+  })
+  .strict();
 
-export const microduckShowStateSchema = z.discriminatedUnion('phase', [
-  microduckShowEvidenceSchema.extend({ phase: z.literal('approval_ready') }),
-  microduckShowEvidenceSchema.extend({
-    phase: z.literal('applying'),
+function showStateSchemaFor<
+  Evidence extends typeof trainingShowEvidenceSchema | typeof controlShowEvidenceSchema,
+  RolledBackFields extends z.ZodRawShape,
+>(evidence: Evidence, rolledBackFields: RolledBackFields) {
+  const deploying = evidence.extend({
     approvalRef: ownerTruthRefV1Schema,
-  }),
-  deployingShowStateSchema.extend({ phase: z.literal('verifying') }),
-  deployingShowStateSchema.extend({
-    phase: z.literal('kept'),
-    freshOutcomeRef: ownerTruthRefV1Schema,
-  }),
-  deployingShowStateSchema.extend({
+    deployedRevision: exactAssetVersionRefV1Schema,
+    deployedArtifactSha256: sha256,
+  });
+  const rolledBack = deploying.extend({
     phase: z.literal('rolled_back'),
     rollbackReceiptRef: ownerTruthRefV1Schema,
-  }),
-]);
+    ...rolledBackFields,
+  });
+  return z.discriminatedUnion('phase', [
+    evidence.extend({ phase: z.literal('approval_ready') }),
+    evidence.extend({ phase: z.literal('applying'), approvalRef: ownerTruthRefV1Schema }),
+    deploying.extend({ phase: z.literal('verifying') }),
+    deploying.extend({ phase: z.literal('kept'), freshOutcomeRef: ownerTruthRefV1Schema }),
+    rolledBack,
+  ]);
+}
+
+export const microduckShowStateSchema = z.union([
+  showStateSchemaFor(trainingShowEvidenceSchema, {}),
+  showStateSchemaFor(controlShowEvidenceSchema, { restoreOutcomeRef: ownerTruthRefV1Schema }),
+]) as z.ZodType<MicroduckShowState>;
 
 export const microduckApprovalSchema = z
   .object({

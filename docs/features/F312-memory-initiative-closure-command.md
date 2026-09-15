@@ -22,13 +22,13 @@ description_updated_at: 2026-09-03T16:00:00Z
 却仍需要operator反复追问“下一步谁驱动、runtime 重启后谁验收、验收失败回到哪里”。结果是局部能力可以
 合入，但整条 `写入 → cue → 送达 → 采用 → 结果 → 失效` 没有一个持续持球到闭环的责任田。
 
-operator 在 source message `0001787997519472-000359-da96b72a` 冻结了新的执行方法：
+operator 在 source message `private-source-id` 冻结了新的执行方法：
 
 1. **指挥与理论线程**负责愿景守护、发车、消费终态证据和继续驱动；线程里的责任猫不能只给建议后离场；
 2. **各 Phase 执行线程**各自持有一个有边界的 owner carrier；
 3. **runtime 重启后的验收 Phase**用真实旅程验收，不能拿 main、fixture 或审批卡冒充 live closure。
 4. 自 Phase C 起，**一个 Phase 只使用一个 execution thread 和一个 PR**；Phase 内的 lane 纵切以多个语义 commit
-   收口，不再按 lane 拆成一堆 PR。Source：`0001788319716879-000253-31b1a457`。
+   收口，不再按 lane 拆成一堆 PR。Source：`private-source-id`。
 
 F312 把这套方法变成可执行 Feature，让operator可以放心不盯，而不是继续当人肉调度器。
 
@@ -74,16 +74,16 @@ Architecture cell: memory
 | 字段 | 当前真相 |
 |---|---|
 | Current release | ✅ Phase G terminal：独立验收 thread `[thread-id]` 已复核 21=21 / RED=0、两条异权完整 episode、prompt-shape、no-eval 与 meta-method 边界，并给出 `Vision Guard PASS`。 |
-| Durable task | `0001787998012562-000377-a8cfce90` · `done` · owner `codex-sol`；关闭理由绑定 Phase G exact evidence 与 CloseGateReport |
+| Durable task | `private-source-id` · `done` · owner `codex-sol`；关闭理由绑定 Phase G exact evidence 与 CloseGateReport |
 | Workflow projection | 本 thread 从未有可回读的 canonical WorkflowSop：reader=404，owner invocation 更新=403 `strict_owner_auth_required`。早期“Mission Hub workflow vN”只是错误文档声明，已从 AC 删除；责任连续性实际由 durable task、F312 spec 与 generated catalog 承担。该独立 harness 缺口已以 source ref 投给 F275 owner thread，不阻塞 F312 产品价值关账。 |
 | Phase A exit | ✅ spec/BACKLOG/Atlas/roadmap 已在 `main@25f9f0046`；direct-docs 与 catalog/architecture 门禁通过 |
-| Phase B · Person | ✅ F296 continuity/presentation substrate 已终态：PR #4040/#4149/#4162 均 merged，merged-main Alpha 与 production 已加载 exact revision `80e3b50a11ac17e2922d728caf21fe6bc54b5057`。在后续独立 owner query `[thread-id]#0001788330028612-000493-e99ad30d` 中，runtime 呈现吴浪 `subject_seen` cue；消费猫 drill 到 F276 canonical Person revision `sha256:7b7bd7a4c96a0ae8bd9c49393aa465c7e9565a43d453744abf6165e27636599b`，据此给出仅回答 Growing 贡献的 bounded response，并正式记录 `applied`。同一 invocation 在五分钟后重放原 opaque handle 得到 `410 expired`，形成 expiry invalidation negative；没有修改 Person truth，也未借用 correction/forget authority。 |
+| Phase B · Person | ✅ F296 continuity/presentation substrate 已终态：PR #4040/#4149/#4162 均 merged，merged-main Alpha 与 production 已加载 exact revision `80e3b50a11ac17e2922d728caf21fe6bc54b5057`。在后续独立 owner query `[thread-id]#private-source-id` 中，runtime 呈现吴浪 `subject_seen` cue；消费猫 drill 到 F276 canonical Person revision `sha256:7b7bd7a4c96a0ae8bd9c49393aa465c7e9565a43d453744abf6165e27636599b`，据此给出仅回答 Growing 贡献的 bounded response，并正式记录 `applied`。同一 invocation 在五分钟后重放原 opaque handle 得到 `410 expired`，形成 expiry invalidation negative；没有修改 Person truth，也未借用 correction/forget authority。 |
 | Phase B · F152 | ✅ PR #4077 / `main@cddb57dda8` 已关闭 `global-distillation-f152` surface；writeCapture 按 producer 实证纠正为 implemented，其余 consumer/delivery/invalidation 维度写 sunset；`search_evidence`、`graph_resolve` 与 `list_recent` 停止送达 `distilled:` anchors，producer、retained artifacts 与显式 forensic/admin browse 保留。catalog 49→43、missing surfaces 12→11 |
 | Phase C exit | ✅ Profile + Event terminal：PR #4222 merged `21196f0c73`；Alpha 实测暴露的 Event prompt-budget RED 由 PR #4237 merged `6f0d6b5f3a` 修复；merged-main Alpha `c72b89139c` 已完成真实 Event `presented → drilled → applied → source_forgotten` 旅程。Profile 诚实停在 loaded/no-candidate。 |
 | Phase D exit | ✅ 唯一 Phase implementation PR #4252 squash-merge 为 `24b0093f016be31ab65d25e4a917050830a7ceed`，Terra 审阅 exact HEAD `03b8cd0a8ebac6b8b503ecaf1da38d249fe224d6`，P1/P2=0。两条仅在前序 merge 后的 Alpha 才可观察的独立 production RED 分别由窄 follow-up #4264（merge `89d9722b3ce378db63d1b37c8cc5c53cf342916b`，reviewed patch `4480b299bd47017a97ace1f9e4b6aa29d1cb7bda`）与 #4267（merge `b3256dac8490e34efe18498ed82bf3841b5c820a`，reviewed `33776c2b7ae294733e13309ecba4254cd4f9d4d2`）修复。Merged-main Alpha 已完成 Decision `ADR-020` 与 Project Knowledge `F312` 的真实 `presented → drilled → applied`；Method E0=`exempt`。catalog 21=21、RED 36→27、missing 9→6。总控独立 vision guard PASS。 |
 | Phase E exit | ✅ Terra 对 substantive HEAD `89600a32f2364068a97a3a69af7d55455c2d4812` APPROVED，并对 docs-only final HEAD `84025a22df0f4ec43a8d80b68d505f66a2470dcd` 给出 continuity APPROVED；唯一主 PR #4277 merge `ee6d72d5e653f8601f50f235a7a24bfd899ac2e8`。Merged-main Alpha 加载该 exact merge、`/ready` 全绿、F255 Present Loop ready 且 V43 `consumer_cat_id` 存在；真实 `codex-sol` owned Seed candidate 存在，但 03:00 自然 wake 已错过，正式 schedule API 按 F255 治理拒绝通用 manual trigger，因此 ceiling 为 `loaded/candidate-present/no-eligible-trigger`，`cat_owned_seed` receipt 保持 0，不造 presentation/outcome。无 Alpha-only production RED、无 follow-up PR。Generated catalog 21=21、RED 27→11、missing 6→2。 |
 | Phase F exit | ✅ 唯一主 PR #4281 的 authored HEAD `e28f1f514e4d4d50948b8edb89c8234f4e791bc3` 经 Opus 4.7 非作者架构 review APPROVED，`pnpm gate --risk contract` full gate 通过，squash-merge=`e83ae64b822ace1415a0ba119374586bf4161b47`。Library 保留 F186 collection/catalog/source-revision/ACL authority，主动 cue/receipt/outcome 因无 named consumer 合法 `exempt`；七个 provider carrier 各自保留 provider-native authority/correction/delete/retirement，Standing Reflex 聚合面同样 `exempt`，无内容复制或中央 store/cue engine。Merged-main Alpha exact merge 上 API `/ready`、3011、closure gate 与 catalog 16/16 全绿；因两条 lane 均无 active pair，ceiling=`loaded/no-candidate/no-receipt/no-outcome`，无 Alpha-only production RED。Generated catalog 21=21、active 10 / exempt 10 / sunset 1 / missing 0，exact RED 11→0。 |
-| Phase G exit | ✅ 非作者 Terra 的 exact evidence cross-post `[thread-id]#0001788487647377-000084-9a701316` 独立记录 catalog 16/16 与 strict closure gate。Event 与 Decision 两条 canonical authority 均完成 `presented → drilled → applied → source_forgotten`；non-match 为 0 lane payload，match 各只有一条 457/456-byte bounded cue，resume 为 0/`no_reservation`。G1/G2 分别归确定合同与 runtime traces，缺 utility consumer/出生证故明确 no-eval。Vision Guard PASS。 |
+| Phase G exit | ✅ 非作者 Terra 的 exact evidence cross-post `[thread-id]#private-source-id` 独立记录 catalog 16/16 与 strict closure gate。Event 与 Decision 两条 canonical authority 均完成 `presented → drilled → applied → source_forgotten`；non-match 为 0 lane payload，match 各只有一条 457/456-byte bounded cue，resume 为 0/`no_reservation`。G1/G2 分别归确定合同与 runtime traces，缺 utility consumer/出生证故明确 no-eval。Vision Guard PASS。 |
 | F312 production RED · Entity Nudge | ✅ PR #4097（reviewed HEAD `91b31752530811191c8d3d1b569a2cc2f35e7f73`，merge `4a3b90adc856b2114952e52725ab6f51588432c4`）已在 Alpha `main@124c9ae4c565bd01911e54bdda882ccf8b4f3204` 验收：同一 source 的 `codex-sol` 与 `opus` 各有一份 exact prompt 和一条三坐标完整的 delivered ledger；各自重放后才各自进入 cooldown。原始 家属喵/未婚喵 与 fable-5 不在该 Alpha 数据/配置中，故这是实际 direct-entity path 的 UAT，不冒充原 subject-pair replay。 |
 | Next release | 无。F312 已 terminal；未来只有某个 exempt/sunset surface 出现新的 named consumer + immutable revision + authorized drill 时，才由该 lane owner 单独重跑 E0，不重启全局迁移。 |
 

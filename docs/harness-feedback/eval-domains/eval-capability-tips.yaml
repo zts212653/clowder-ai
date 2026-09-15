@@ -20,7 +20,7 @@
 #   - Different handoff target: tips → F244, wakeup → F203
 #
 # Phase C ownership:
-#   - operator message 0001785105866266-000010-8f3261db assigns the active run to
+#   - operator message private-source-id assigns the active run to
 #     Sol with Terra as the independent calibrator while the Ragdoll seats are
 #     unavailable.
 #   - Terra is a review role, not a second runtime evalCat field; final Phase C

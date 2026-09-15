@@ -169,9 +169,13 @@ export function registerCustodyOfferRoutes(app: FastifyInstance, options: Custod
   });
   const now = options.now ?? Date.now;
   const lifecycle = new EntrustedWorkLifecycleService(options.taskStore, { now });
-  const service = new CustodyOfferService(options.messageStore, {
-    admitOrResumeAcceptedOffer: async (command) => admitAcceptedOffer(options, lifecycle, command),
-  });
+  const service = new CustodyOfferService(
+    options.messageStore,
+    {
+      admitOrResumeAcceptedOffer: async (command) => admitAcceptedOffer(options, lifecycle, command),
+    },
+    { now },
+  );
 
   async function loadWebSource(request: { params: unknown }, reply: FastifyReply) {
     const userId = resolveStrictUserId(request as never);

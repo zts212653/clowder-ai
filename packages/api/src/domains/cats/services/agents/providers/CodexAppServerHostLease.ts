@@ -8,6 +8,7 @@ export interface HostEntry {
   socketDirectory: string;
   state: 'ready' | 'closing';
   lease: CodexAppServerHostLease | null;
+  attachmentCount: number;
   warm: boolean;
   lastUsedAt: number;
   idleTimer: ReturnType<typeof setTimeout> | null;
@@ -47,9 +48,52 @@ export function resolveHostEntry(
   if (owner.lease?.sessionId === sessionId) {
     throw new Error(`Codex session ${sessionId} already has an active host lease`);
   }
-  if (owner.signature !== signature) return retirement(owner, 'launch_signature_mismatch');
-  if (owner.state !== 'ready' || !owner.host.isAlive) return retirement(owner, 'owner_unavailable');
+  if (owner.signature !== signature) {
+    if (owner.attachmentCount > 0) {
+      throw new Error(`Codex session ${sessionId} active host attachment launch contract mismatch`);
+    }
+    return retirement(owner, 'launch_signature_mismatch');
+  }
+  if (owner.state !== 'ready' || !owner.host.isAlive) {
+    if (owner.attachmentCount > 0) {
+      throw new Error(`Codex session ${sessionId} active host attachment is unavailable`);
+    }
+    return retirement(owner, 'owner_unavailable');
+  }
   if (owner.lease || hasOtherSessionOwner(sessionOwners, owner, sessionId)) {
+    if (owner.attachmentCount > 0) {
+      throw new Error(`Codex session ${sessionId} active host attachment has conflicting affinity`);
+    }
+    return retirement(owner, 'legacy_multi_affinity');
+  }
+  return { entry: owner, reusedSessionHost: true };
+}
+
+/** Resolve the one host allowed to carry an attached control stream for a session. */
+export function resolveHostAttachmentEntry(
+  entries: ReadonlySet<HostEntry>,
+  sessionOwners: Map<string, HostEntry>,
+  signature: string,
+  sessionId: string,
+): HostResolution {
+  const owner = sessionOwners.get(sessionId);
+  if (!owner) return findIdleHost(entries, sessionOwners, signature);
+  if (owner.attachmentCount > 0) {
+    throw new Error(`Codex session ${sessionId} already has an active host attachment`);
+  }
+  if (owner.signature !== signature) {
+    if (owner.lease?.sessionId === sessionId) {
+      throw new Error(`Codex session ${sessionId} active writer launch contract mismatch`);
+    }
+    return retirement(owner, 'launch_signature_mismatch');
+  }
+  if (owner.state !== 'ready' || !owner.host.isAlive) {
+    if (owner.lease?.sessionId === sessionId) {
+      throw new Error(`Codex session ${sessionId} active writer host is unavailable`);
+    }
+    return retirement(owner, 'owner_unavailable');
+  }
+  if ((owner.lease && owner.lease.sessionId !== sessionId) || hasOtherSessionOwner(sessionOwners, owner, sessionId)) {
     return retirement(owner, 'legacy_multi_affinity');
   }
   return { entry: owner, reusedSessionHost: true };
@@ -82,6 +126,7 @@ function findIdleHost(
         entry.signature === signature &&
         entry.state === 'ready' &&
         !entry.lease &&
+        entry.attachmentCount === 0 &&
         entry.host.isAlive &&
         !ownedEntries.has(entry),
     ),

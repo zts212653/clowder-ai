@@ -6,8 +6,8 @@ import type {
 } from '@cat-cafe/shared';
 import type { EvolutionProgramServiceResult } from './program-command-contract.js';
 import type { ProgramJoinValidator, ProgramObservationBlocker } from './program-join-validator.js';
-import type { EvolutionTriggerRegistrationProjection } from './program-observation-projection.js';
-import type { EvolutionProgramProjectionV1 } from './program-projection.js';
+import type { EvolutionTriggerRegistrationProjection } from './read-model/program-observation-projection.js';
+import type { EvolutionProgramProjectionV1 } from './read-model/program-projection.js';
 
 export interface ProgramObservationLinkInput {
   programId: string;

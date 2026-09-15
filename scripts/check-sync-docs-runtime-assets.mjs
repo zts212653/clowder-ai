@@ -76,6 +76,13 @@ const COMMENT_LINE_RE = /^\s*(?:\/\/|\*|\/\*)/;
 //      sometimes without a trailing slash)
 export const IGNORE_PATHS = [
   {
+    exact: 'docs/videos/f311-microduck-roadshow/pipeline/football',
+    reason:
+      'F311 optional installation-owned demonstration archive, excluded by the file-scoped public boundary in PR #4429. ' +
+      'Its absence retains healthy owner versions with an explicit source blocker. This exact root is not a prefix exemption: ' +
+      'the required preparation/publication materials and selected media remain individually covered by the runtime allowlist.',
+  },
+  {
     pathOrPrefix: 'docs/markers',
     reason:
       'MarkerQueue user runtime state (YAML files generated per-install by MarkerQueue). ' +

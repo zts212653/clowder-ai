@@ -1,20 +1,29 @@
 import type {
-  PawFeelDispositionEvent,
   PawFeelDispositionProjection,
   PawFeelDispositionState,
   PawFeelInboxItem,
   PawFeelInboxPage,
   PawFeelInboxSort,
+  PawFeelIssueResolution,
   PawFeelReconciliationCoverage,
   PawFeelResponsibilityProjection,
 } from '@cat-cafe/shared';
-import type { IMessageStore, StoredMessage } from '../../../domains/cats/services/stores/ports/MessageStore.js';
-import { inspectPawFeelMessage } from '../friction/paw-feel-source.js';
 import { PawFeelBundleSnapshotSigner } from './bundle-snapshot.js';
 import type { PawFeelFixResolver } from './command-context.js';
+import { PawFeelContinuingResponsibilityResolver } from './continuation/follow-up-resolver.js';
 import type { IPawFeelReconciliationCoverageStore } from './coverage-store.js';
 import type { PawFeelDutySignalSummary } from './duty-notice.js';
 import type { IPawFeelDispositionEventLog } from './event-log.js';
+import { loadPawFeelEventMap } from './projection/read-model-events.js';
+import { countPawFeelIssues, emptyPawFeelIssueCounts } from './projection/read-model-issue.js';
+import { buildPawFeelInboxItem } from './projection/read-model-item.js';
+import { loadPawFeelSourceReadScope, type PawFeelReadScope } from './projection/read-model-source-scope.js';
+import {
+  loadPawFeelReadSourceSnapshots,
+  type PawFeelReadSourceSnapshot,
+  type PawFeelSourceMessageStore,
+  pawFeelSourceIdentityMap,
+} from './projection/read-model-source-snapshot.js';
 import { projectPawFeelDisposition } from './projector.js';
 import {
   derivePawFeelBundles,
@@ -31,19 +40,16 @@ import {
   PAW_FEEL_OVERDUE_MS,
   paginatePawFeelBundles,
 } from './read-model-pagination.js';
-import {
-  availablePawFeelSourceHref,
-  clampPawFeelPreview,
-  pawFeelResponsibilityAge,
-  unavailablePawFeelItem,
-} from './read-model-source.js';
 import { derivePawFeelCoverageHealth } from './reconciler.js';
 
 export interface PawFeelInboxQuery {
   states?: readonly PawFeelDispositionState[];
   sourceCatId?: string;
+  /** Exact identity lookup. Returned aggregates are scoped to this source before applying the other filters. */
   sourceMessageId?: string;
   overdueOnly?: boolean;
+  resolution?: PawFeelIssueResolution;
+  issueOverdueOnly?: boolean;
   limit?: number;
   cursor?: string;
   sort?: PawFeelInboxSort;
@@ -51,40 +57,27 @@ export interface PawFeelInboxQuery {
 
 export interface PawFeelDispositionReadModelOptions {
   eventLog: IPawFeelDispositionEventLog;
-  messageStore: Pick<IMessageStore, 'getById'>;
+  messageStore: PawFeelSourceMessageStore;
   coverageStore?: Pick<IPawFeelReconciliationCoverageStore, 'read'>;
   proposalStatusResolver?: { isPending(proposalId: string): Promise<boolean> };
   repairBindingResolver?: PawFeelFixResolver;
   bundleSnapshotSigner?: PawFeelBundleSnapshotSigner;
   semanticDegraded?: () => boolean | Promise<boolean>;
+  followUpResolver?: Pick<PawFeelContinuingResponsibilityResolver, 'resolve'> &
+    Partial<Pick<PawFeelContinuingResponsibilityResolver, 'snapshot'>>;
   now?: () => string;
-}
-
-async function loadEventMap(
-  eventLog: IPawFeelDispositionEventLog,
-  signalIds: readonly string[],
-): Promise<Map<string, PawFeelDispositionEvent[]>> {
-  if (eventLog.readMany) return eventLog.readMany(signalIds);
-  const result = new Map<string, PawFeelDispositionEvent[]>();
-  for (let offset = 0; offset < signalIds.length; offset += 50) {
-    const batch = signalIds.slice(offset, offset + 50);
-    const events = await Promise.all(batch.map((signalId) => eventLog.read(signalId)));
-    for (let index = 0; index < batch.length; index += 1) {
-      const signalId = batch[index];
-      const signalEvents = events[index];
-      if (signalId && signalEvents) result.set(signalId, signalEvents);
-    }
-  }
-  return result;
 }
 
 export class PawFeelDispositionReadModel {
   private readonly now: () => string;
   private readonly bundleSnapshotSigner: PawFeelBundleSnapshotSigner;
+  private readonly followUpResolver: Pick<PawFeelContinuingResponsibilityResolver, 'resolve'> &
+    Partial<Pick<PawFeelContinuingResponsibilityResolver, 'snapshot'>>;
 
   constructor(private readonly options: PawFeelDispositionReadModelOptions) {
     this.now = options.now ?? (() => new Date().toISOString());
     this.bundleSnapshotSigner = options.bundleSnapshotSigner ?? new PawFeelBundleSnapshotSigner();
+    this.followUpResolver = options.followUpResolver ?? new PawFeelContinuingResponsibilityResolver();
   }
 
   async list(query: PawFeelInboxQuery = {}): Promise<PawFeelInboxPage> {
@@ -96,12 +89,30 @@ export class PawFeelDispositionReadModel {
     try {
       const storedCoverage = await this.options.coverageStore?.read();
       if (storedCoverage) coverage = derivePawFeelCoverageHealth(storedCoverage, nowMs);
-      const projections = await this.loadProjections();
-      const resolvedItems = await Promise.all(projections.map((projection) => this.resolveItem(projection, nowMs)));
+      const readScope = query.sourceMessageId
+        ? await loadPawFeelSourceReadScope(this.options.eventLog, this.options.messageStore, query.sourceMessageId)
+        : await this.loadGlobalReadScope();
+      const { projections, contextProjections, sourceSnapshots } = readScope;
+      const projectionsBySignalId = new Map(contextProjections.map((projection) => [projection.signalId, projection]));
+      const sourceIdentitiesBySignalId = pawFeelSourceIdentityMap(sourceSnapshots);
+      const followUpResolver = this.followUpResolver.snapshot?.() ?? this.followUpResolver;
+      const resolvedItems = await Promise.all(
+        projections.map((projection) =>
+          this.resolveItem(
+            projection,
+            projectionsBySignalId,
+            sourceIdentitiesBySignalId,
+            sourceSnapshots.get(projection.signalId),
+            nowMs,
+            followUpResolver,
+          ),
+        ),
+      );
       const counts = {
         ...countPawFeelProjections(projections, nowMs),
         overdue: resolvedItems.filter((item) => item.overdue).length,
       };
+      const issueCounts = countPawFeelIssues(resolvedItems);
       const allBundleProjection = derivePawFeelBundles(resolvedItems);
       const responsibilityCounts = emptyResponsibilityCounts();
       for (const bundle of allBundleProjection.bundles) responsibilityCounts[bundle.responsibility.state] += 1;
@@ -125,6 +136,7 @@ export class PawFeelDispositionReadModel {
         denominator,
         counts,
         responsibilityCounts,
+        issueCounts,
         ...(nextCursor ? { nextCursor } : {}),
         degraded,
         ...(coverage ? { coverage } : {}),
@@ -139,6 +151,7 @@ export class PawFeelDispositionReadModel {
         denominator: emptyDenominator(),
         counts: emptyPawFeelInboxCounts(),
         responsibilityCounts: emptyResponsibilityCounts(),
+        issueCounts: emptyPawFeelIssueCounts(),
         degraded,
         ...(coverage ? { coverage } : {}),
         unavailableReason: error instanceof Error ? error.message : String(error),
@@ -149,7 +162,22 @@ export class PawFeelDispositionReadModel {
   async listUndispositioned(): Promise<PawFeelDutySignalSummary[]> {
     const nowMs = Date.parse(this.now());
     const projections = await this.loadProjections();
-    const items = await Promise.all(projections.map((projection) => this.resolveItem(projection, nowMs)));
+    const projectionsBySignalId = new Map(projections.map((projection) => [projection.signalId, projection]));
+    const sourceSnapshots = await loadPawFeelReadSourceSnapshots(this.options.messageStore, projections);
+    const sourceIdentitiesBySignalId = pawFeelSourceIdentityMap(sourceSnapshots);
+    const followUpResolver = this.followUpResolver.snapshot?.() ?? this.followUpResolver;
+    const items = await Promise.all(
+      projections.map((projection) =>
+        this.resolveItem(
+          projection,
+          projectionsBySignalId,
+          sourceIdentitiesBySignalId,
+          sourceSnapshots.get(projection.signalId),
+          nowMs,
+          followUpResolver,
+        ),
+      ),
+    );
     const bundleKeyBySignal = new Map<string, string>();
     for (const bundle of derivePawFeelBundles(items).bundles) {
       for (const member of bundle.members) {
@@ -197,12 +225,21 @@ export class PawFeelDispositionReadModel {
 
   private async loadProjections(): Promise<PawFeelDispositionProjection[]> {
     const signalIds = await this.options.eventLog.listSignalIds();
-    const eventMap = await loadEventMap(this.options.eventLog, signalIds);
+    const eventMap = await loadPawFeelEventMap(this.options.eventLog, signalIds);
     return signalIds.map((signalId) => {
       const events = eventMap.get(signalId);
       if (!events || events.length === 0) throw new Error(`signal ${signalId} has no durable events`);
       return projectPawFeelDisposition(events);
     });
+  }
+
+  private async loadGlobalReadScope(): Promise<PawFeelReadScope> {
+    const projections = await this.loadProjections();
+    return {
+      projections,
+      contextProjections: projections,
+      sourceSnapshots: await loadPawFeelReadSourceSnapshots(this.options.messageStore, projections),
+    };
   }
 
   async assertBundleSnapshot(
@@ -230,58 +267,28 @@ export class PawFeelDispositionReadModel {
       (!stateFilter || stateFilter.has(projection.state)) &&
       (!query.sourceCatId || projection.sourceCatId === query.sourceCatId) &&
       (!query.sourceMessageId || projection.sourceMessageId === query.sourceMessageId) &&
-      (!query.overdueOnly || (!item.responsibility.validExit && item.ageMs >= PAW_FEEL_OVERDUE_MS))
+      (!query.overdueOnly || (!item.responsibility.validExit && item.ageMs >= PAW_FEEL_OVERDUE_MS)) &&
+      (!query.resolution || item.issue.resolution === query.resolution) &&
+      (!query.issueOverdueOnly || (item.issue.resolution === 'open' && item.issue.ageMs >= PAW_FEEL_OVERDUE_MS))
     );
   }
 
-  private async resolveItem(projection: PawFeelDispositionProjection, nowMs: number): Promise<PawFeelInboxItem> {
+  private async resolveItem(
+    projection: PawFeelDispositionProjection,
+    projectionsBySignalId: ReadonlyMap<string, PawFeelDispositionProjection>,
+    sourceIdentitiesBySignalId: ReturnType<typeof pawFeelSourceIdentityMap>,
+    sourceSnapshot: PawFeelReadSourceSnapshot | undefined,
+    nowMs: number,
+    followUpResolver: Pick<PawFeelContinuingResponsibilityResolver, 'resolve'>,
+  ): Promise<PawFeelInboxItem> {
     const responsibility = await this.resolveResponsibility(projection);
-    let message: StoredMessage | null;
-    try {
-      message = await this.options.messageStore.getById(projection.sourceMessageId);
-    } catch {
-      return unavailablePawFeelItem(projection, responsibility, nowMs, 'source read failed');
-    }
-    if (!message) {
-      return unavailablePawFeelItem(projection, responsibility, nowMs, 'source message unavailable');
-    }
-    const inspection = inspectPawFeelMessage(message);
-    const sourceMarkerCount = inspection.kind === 'canonical' ? inspection.candidates.length : 0;
-    const candidate =
-      inspection.kind === 'canonical'
-        ? inspection.candidates.find((entry) => entry.signalId === projection.signalId)
-        : undefined;
-    if (!candidate || candidate.markerDigest !== projection.markerDigest) {
-      return unavailablePawFeelItem(projection, responsibility, nowMs, 'source digest mismatch');
-    }
-    const preview = clampPawFeelPreview(
-      candidate.marker.tool ? `${candidate.marker.tool} · ${candidate.marker.symptom}` : candidate.marker.symptom,
-    );
-    const deterministicGroupKey = candidate.marker.tool
-      ? `tool:${candidate.marker.tool.trim().toLowerCase()}`
-      : undefined;
-    const ageMs = pawFeelResponsibilityAge(projection, responsibility, nowMs);
-    return {
-      disposition: projection,
-      responsibility,
-      source: {
-        availability: 'available',
-        preview,
-        sourceHref: availablePawFeelSourceHref(projection),
-        digestVerified: true,
-      },
-      sourceOccurredAt: candidate.occurredAt,
-      ageMs,
-      overdue: !responsibility.validExit && ageMs >= PAW_FEEL_OVERDUE_MS,
-      reviewContext: {
-        sourceMarkerCount,
-        ...(message.extra?.stream?.turnInvocationId ? { turnInvocationId: message.extra.stream.turnInvocationId } : {}),
-        ...(!message.extra?.stream?.turnInvocationId && message.extra?.stream?.invocationId
-          ? { legacyInvocationId: message.extra.stream.invocationId }
-          : {}),
-      },
-      ...(deterministicGroupKey ? { deterministicGroupKey } : {}),
-    };
+    const issue = await followUpResolver.resolve({
+      projection,
+      projectionsBySignalId,
+      sourceIdentitiesBySignalId,
+      nowMs,
+    });
+    return buildPawFeelInboxItem({ projection, responsibility, issue, sourceSnapshot, nowMs });
   }
 
   private async resolveResponsibility(

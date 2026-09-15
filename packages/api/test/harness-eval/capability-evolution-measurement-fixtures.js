@@ -6,6 +6,16 @@ import { parse, stringify } from 'yaml';
 
 export const PROGRAM_ID = 'evolution-program:bcc336788a7df9d6075b1efb4c0a7e68';
 const SOURCE_ID = 'evolution-program-bcc336788a7df9d6075b1efb4c0a7e68';
+export const MICRODUCK_PROGRAM_ID = 'evolution-program:5073988075254b6eac9a0de0e3a27125';
+export const MICRODUCK_OWNER_FEATURE_ID = 'microduck-owner';
+export const MICRODUCK_OWNER_STATE_REF = 'simulator:walking';
+const DEFAULT_SOURCE_OPTIONS = Object.freeze({
+  programId: PROGRAM_ID,
+  ownerFeatureId: 'F311',
+  ownerStateRef: 'capability:f311-investor-roadshow-expression',
+  domainOwnerStateRef: 'capability-owner:investor-roadshow-expression',
+  sequence: 1,
+});
 const SOURCE_REVISION = '7ee1440c30770c7a0e4bd9e226349b65264904b3';
 export const MANIFEST_REVISION = 'a3d4141d93015b21749e180656bfa23548b82049';
 export const SOURCE_REF = `docs/harness-feedback/measurement-sources/capability-evolution/${SOURCE_ID}.yaml`;
@@ -73,17 +83,19 @@ export function keepProofInsufficient(manifest) {
   manifest.ownerObjects = [];
 }
 
-export function program() {
+export function program(options = {}) {
+  const { programId, ownerFeatureId, ownerStateRef, sequence } = { ...DEFAULT_SOURCE_OPTIONS, ...options };
   return {
     program: {
-      programId: PROGRAM_ID,
+      programId,
       workspaceId: 'user:operator',
       lifecycle: 'active',
       stage: 'constituting',
-      sequence: 1,
+      sequence,
       cycle: 1,
-      objectRef: { ownerFeatureId: 'F311', ownerStateRef: 'capability:f311-investor-roadshow-expression' },
-      claimRef: { ownerFeatureId: 'F311', ownerStateRef: `evolution-claim:${PROGRAM_ID}` },
+      objectRef: { ownerFeatureId, ownerStateRef },
+      claimRef: { ownerFeatureId: 'F311', ownerStateRef: `evolution-claim:${programId}` },
+      valueOwnerRef: { ownerFeatureId: 'F311', ownerStateRef: 'user:operator' },
     },
   };
 }
@@ -99,7 +111,7 @@ function ownerObject(objectType, ownerFeatureId, payload) {
   };
 }
 
-export async function validSourceManifest() {
+export async function validSourceManifest(options = {}) {
   const certificate = parse(
     await readFile(join(sourceRepoRoot, 'docs/harness-feedback/certificates/f267-memory-search-quality.yaml'), 'utf8'),
   );
@@ -112,10 +124,21 @@ export async function validSourceManifest() {
       'utf8',
     ),
   );
+  return sourceManifestFromEvidence(certificate, result, options);
+}
+
+// Pure assembly lets portable contracts use synthetic evidence while home integration
+// suites keep reading the real owner artifacts through validSourceManifest.
+export function sourceManifestFromEvidence(certificate, result, options = {}) {
+  const sourceOptions = { ...DEFAULT_SOURCE_OPTIONS, ...options };
+  const projection = program(sourceOptions).program;
+  const ownerFeatureId = projection.objectRef.ownerFeatureId;
+  const sourceId = projection.programId.replace(':', '-');
+  const { domainOwnerStateRef } = sourceOptions;
   certificate.certificateId = 'f267-capability-evolution-roadshow-e0-v1';
   certificate.bundleId = 'f267-capability-evolution-roadshow-e0-v1';
   certificate.domainId = 'eval:capability-evolution';
-  certificate.measurementTarget.id = 'F311/capability:f311-investor-roadshow-expression';
+  certificate.measurementTarget.id = `${ownerFeatureId}/${projection.objectRef.ownerStateRef}`;
   certificate.decision = {
     consumerFeatureId: 'F311',
     consumerOwnerCatId: 'codex-sol',
@@ -157,24 +180,24 @@ export async function validSourceManifest() {
   );
   const window = { startMs: 300, endMs: 400 };
   const objects = {
-    'evidence-role': ownerObject('evidence_role', 'F311', {
+    'evidence-role': ownerObject('evidence_role', ownerFeatureId, {
       cohortRef: result.cohort.ref,
       cohortSha256: result.cohort.sha256,
       roles: ['discovery', 'attribution', 'validation'],
     }),
-    'consumer-receipt': ownerObject('consumer_consumption', 'F311', {
+    'consumer-receipt': ownerObject('consumer_consumption', certificate.decision.consumerFeatureId, {
       consumerFeatureId: 'F311',
       consumerOwnerCatId: 'codex-sol',
       resultId: result.resultId,
       consumedAt: '2026-09-02T16:05:00.000Z',
     }),
-    'optimizer-exposure': ownerObject('optimizer_exposure', 'F311', {
+    'optimizer-exposure': ownerObject('optimizer_exposure', ownerFeatureId, {
       cohortRef: result.cohort.ref,
       cohortSha256: result.cohort.sha256,
       candidateSelection: 'exposed',
       rubricSelection: 'not_exposed',
     }),
-    'holdout-cohort': ownerObject('promotion_holdout_cohort', 'F311', {
+    'holdout-cohort': ownerObject('promotion_holdout_cohort', ownerFeatureId, {
       cohortRef: refs['holdout-cohort'],
       window,
     }),
@@ -183,15 +206,15 @@ export async function validSourceManifest() {
     Object.entries(objects).map(([name, value]) => [name, Buffer.from(stringify(value))]),
   );
   const cohortSha256 = sha256(objectBytes['holdout-cohort']);
-  objects['holdout-seal'] = ownerObject('promotion_holdout_seal', 'F311', {
+  objects['holdout-seal'] = ownerObject('promotion_holdout_seal', ownerFeatureId, {
     cohortRef: refs['holdout-cohort'],
     cohortSha256,
     sealedAtMs: 200,
     optimizerSelectionCutoffMs: 250,
   });
   objectBytes['holdout-seal'] = Buffer.from(stringify(objects['holdout-seal']));
-  const seal = { ownerFeatureId: 'F311', ref: refs['holdout-seal'], sha256: sha256(objectBytes['holdout-seal']) };
-  objects['holdout-proof'] = ownerObject('promotion_holdout', 'F311', {
+  const seal = { ownerFeatureId, ref: refs['holdout-seal'], sha256: sha256(objectBytes['holdout-seal']) };
+  objects['holdout-proof'] = ownerObject('promotion_holdout', ownerFeatureId, {
     cohortRef: refs['holdout-cohort'],
     cohortSha256,
     window,
@@ -200,7 +223,11 @@ export async function validSourceManifest() {
   });
   objectBytes['holdout-proof'] = Buffer.from(stringify(objects['holdout-proof']));
   const ownerObjects = Object.entries(objects).map(([name, artifact]) => ({ ref: refs[name], artifact }));
-  const objectRef = (name) => ({ ownerFeatureId: 'F311', ref: refs[name], sha256: sha256(objectBytes[name]) });
+  const objectRef = (name) => ({
+    ownerFeatureId: name === 'consumer-receipt' ? certificate.decision.consumerFeatureId : ownerFeatureId,
+    ref: refs[name],
+    sha256: sha256(objectBytes[name]),
+  });
 
   const decisionProof = {
     kind: 'f267-measurement-decision-proof-candidate',
@@ -249,21 +276,21 @@ export async function validSourceManifest() {
   return {
     kind: 'f267-capability-evolution-measurement-source',
     schemaVersion: 1,
-    sourceId: SOURCE_ID,
+    sourceId,
     ownerUserId: 'operator',
-    ownerFeatureId: 'F311',
+    ownerFeatureId,
     generatedAt: '2026-09-02T16:00:00.000Z',
     sourceRevision: SOURCE_REVISION,
-    sourceArtifacts: [{ ownerFeatureId: 'F311', ref: result.cohort.ref, sha256: result.cohort.sha256 }],
+    sourceArtifacts: [{ ownerFeatureId, ref: result.cohort.ref, sha256: result.cohort.sha256 }],
     program: {
-      programId: PROGRAM_ID,
-      expectedSequence: 1,
-      targetRef: program().program.objectRef,
-      claimRef: program().program.claimRef,
+      programId: projection.programId,
+      expectedSequence: projection.sequence,
+      targetRef: projection.objectRef,
+      claimRef: projection.claimRef,
     },
     roles: {
       observer: { ownerFeatureId: 'F267', ownerStateRef: 'cat:codex-sol' },
-      domainOwner: { ownerFeatureId: 'F311', ownerStateRef: 'capability-owner:investor-roadshow-expression' },
+      domainOwner: { ownerFeatureId, ownerStateRef: domainOwnerStateRef },
       consumer: { ownerFeatureId: 'F311', ownerStateRef: 'user:operator' },
       calibrator: { ownerFeatureId: 'F267', ownerStateRef: 'cat:codex-terra' },
     },

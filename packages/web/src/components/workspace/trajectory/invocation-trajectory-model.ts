@@ -1,4 +1,8 @@
-import type { InvocationTrajectoryStatus } from '@cat-cafe/shared';
+import {
+  type InvocationTrajectoryStatus,
+  isProviderSemanticEvent,
+  type ProviderSubexecutionSemanticEvent,
+} from '@cat-cafe/shared';
 import { boundTimelineRows } from './invocation-trajectory-bounds';
 
 export { reconcileInvocationSummary } from './invocation-trajectory-summary';
@@ -45,6 +49,7 @@ export type InvocationTimelineRow =
   | (TimelineRowBase & { kind: 'terminal'; content: string })
   | (TimelineRowBase & { kind: 'session'; content: string })
   | (TimelineRowBase & { kind: 'system'; content: string })
+  | (TimelineRowBase & { kind: 'subexecution'; event: ProviderSubexecutionSemanticEvent })
   | (TimelineRowBase & { kind: 'overflow'; count: number; types: Record<string, number> });
 
 export interface InvocationTimelineProjection {
@@ -65,6 +70,7 @@ interface TimelineBuildState {
 }
 
 const FOLDED_TELEMETRY_TYPES = new Set(['status', 'agent_loop', 'provider_signal', 'liveness_signal']);
+const PROVIDER_SEMANTIC_EVENT_CARRIERS = new Set(['provider_signal', 'system_info']);
 const MESSAGE_TYPES = new Set(['text', 'assistant', 'user', 'system', 'context']);
 const DEFAULT_MAX_VISIBLE_ROWS = 15;
 
@@ -267,6 +273,18 @@ function appendMessageEvent(state: TimelineBuildState, envelope: RawTranscriptEv
 
 function appendEnvelope(state: TimelineBuildState, envelope: RawTranscriptEvent): void {
   const type = eventType(envelope);
+  if (PROVIDER_SEMANTIC_EVENT_CARRIERS.has(type) && isProviderSemanticEvent(envelope.event.semanticEvent)) {
+    const semanticEvent = envelope.event.semanticEvent;
+    if (semanticEvent.kind === 'subexecution') {
+      state.rows.push({
+        id: `subexecution-${envelope.eventNo}-${semanticEvent.id}`,
+        kind: 'subexecution',
+        timestamp: envelope.t,
+        event: semanticEvent,
+      });
+      return;
+    }
+  }
   if (FOLDED_TELEMETRY_TYPES.has(type)) {
     state.foldedTimestamp ??= envelope.t;
     state.foldedTypes[type] = (state.foldedTypes[type] ?? 0) + 1;

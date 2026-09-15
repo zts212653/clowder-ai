@@ -21,7 +21,7 @@ Why: F244 继续拥有 waiting-state tips 投影与事件语义，F223 继续拥
 
 ## Why
 
-F244 已经让用户在等待态看到 tips，也定义了 privacy-minimal usage event，但事件停在浏览器 localStorage；API rollup/source adapter 未接，`eval:capability-tips` 因没有真实使用数据保持 disabled。我们因此不知道提示有没有被看见、action 是否可达、dismiss 是否说明打扰，更不知道点击之后是否真的帮助猫或用户完成任务。operator 已明确拍板“当然是需要管道啊！！”（msg `0001784347935457-000058-4788b357`）。本 Feature 要把信号接通，但拒绝把点击率冒充能力提升。
+F244 已经让用户在等待态看到 tips，也定义了 privacy-minimal usage event，但事件停在浏览器 localStorage；API rollup/source adapter 未接，`eval:capability-tips` 因没有真实使用数据保持 disabled。我们因此不知道提示有没有被看见、action 是否可达、dismiss 是否说明打扰，更不知道点击之后是否真的帮助猫或用户完成任务。operator 已明确拍板“当然是需要管道啊！！”（msg `private-source-id`）。本 Feature 要把信号接通，但拒绝把点击率冒充能力提升。
 
 ## Current State / 现状基线
 
@@ -121,7 +121,7 @@ F244 已经让用户在等待态看到 tips，也定义了 privacy-minimal usage
 
 ## Program Operating Contract
 
-- **operator authorization**: tips pipeline 直接拍板 `0001784347935457-000058-4788b357`；三 Feat 开工授权 `0001784376506778-000328-2a877146`；Fable OK `0001784376508012-000331-f2b9dad1`。
+- **operator authorization**: tips pipeline 直接拍板 `private-source-id`；三 Feat 开工授权 `private-source-id`；Fable OK `private-source-id`。
 - **Execution**: 独立 thread/worktree/PR；F244 保持 done，本 Feature 是 successor。
 - **Checkpoint delegation**: Phase checkpoint 委托 Sol/Fable；日常实现/review 不打扰中心。
 - **Red-light escalation only**: 采集内容/identity/retention 扩张、改变 F244 UX、跨 Feat contract、外部依赖或不可逆迁移时升级。

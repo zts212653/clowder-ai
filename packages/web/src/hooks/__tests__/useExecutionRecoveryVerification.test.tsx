@@ -29,7 +29,7 @@ function setLegacyActive() {
 }
 
 function hydrateWith(kind: 'live_invocation' | 'managed_command') {
-  const request = useActiveExecutionStore.getState().beginHydration('thread-a');
+  const request = useActiveExecutionStore.getState().beginHydration('thread-a', '/project/cafe');
   useActiveExecutionStore.getState().applySnapshot('thread-a', request, {
     projectPath: '/project/cafe',
     executions: [

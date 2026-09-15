@@ -1,16 +1,18 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import type { ThreadAttentionMemberSort } from '@cat-cafe/shared';
+import { useCallback, useMemo, useRef, useState } from 'react';
 import type { SidebarSnapshotRow } from '@/stores/sidebarProjectionStore';
 import { apiFetch } from '@/utils/api-client';
-import { type AttentionCluster, buildAttentionClusters, resolveAttentionClusterOpen } from './attention-clusters';
-
+import { type AttentionCluster, buildAttentionClusters } from './attention-clusters';
 import type {
   GroupMutationResult,
   GroupSnapshot,
   GroupUndoReceipt,
   ThreadAttentionPreferences,
 } from './search-group-types';
+import { useGroupOpenInteraction } from './use-group-open-interaction';
+import { useGroupPreferenceLoading } from './use-group-preference-loading';
 
 const OPEN_PREFERENCE_KEY = 'cat-cafe:f277:cluster-open:v1';
 
@@ -38,20 +40,11 @@ function readOpenPreferences(): Record<string, boolean> {
   }
 }
 
-async function fetchThreadAttentionPreferences(): Promise<ThreadAttentionPreferences | null> {
-  try {
-    const response = await apiFetch('/api/config/thread-attention');
-    if (!response.ok) return null;
-    return (await response.json()) as ThreadAttentionPreferences;
-  } catch {
-    return null;
-  }
-}
-
 async function persistThreadAttentionPreference(input: {
   anchor: string;
   alias?: string | null;
   open?: boolean | null;
+  memberSort?: ThreadAttentionMemberSort;
 }): Promise<ThreadAttentionPreferences> {
   const response = await apiFetch('/api/config/thread-attention', {
     method: 'PUT',
@@ -89,69 +82,70 @@ export function useAttentionClusters(
 ) {
   const [openPreferences, setOpenPreferences] = useState<Record<string, boolean>>(readOpenPreferences);
   const [aliases, setAliases] = useState<Record<string, string>>({});
+  const [memberSort, setMemberSort] = useState<Record<string, ThreadAttentionMemberSort>>({});
+  const [pendingSort, setPendingSort] = useState<ReadonlySet<string>>(new Set());
   const [savedGroups, setSavedGroups] = useState<ThreadAttentionPreferences['groups']>([]);
-  const [groupLoadState, setGroupLoadState] = useState<'loading' | 'ready' | 'error'>('loading');
   const [preferenceError, setPreferenceError] = useState<string | null>(null);
   const mutationQueue = useRef<Promise<void>>(Promise.resolve());
 
-  const applyPreferences = useCallback((preferences: ThreadAttentionPreferences) => {
+  const receivePreferences = useCallback((preferences: ThreadAttentionPreferences) => {
     setAliases(preferences.aliases ?? {});
+    setMemberSort(preferences.memberSort ?? {});
     setOpenPreferences(preferences.open ?? {});
     setSavedGroups(preferences.groups ?? []);
     cacheOpenPreferences(preferences.open ?? {});
-    setGroupLoadState('ready');
   }, []);
-  const reloadGroups = useCallback(async () => {
-    await mutationQueue.current;
-    setGroupLoadState('loading');
-    const preferences = await fetchThreadAttentionPreferences();
-    if (preferences) applyPreferences(preferences);
-    else setGroupLoadState('error');
-    return preferences;
-  }, [applyPreferences]);
-
-  useEffect(() => {
-    let cancelled = false;
-    void fetchThreadAttentionPreferences().then((preferences) => {
-      if (cancelled) return;
-      if (preferences) applyPreferences(preferences);
-      else setGroupLoadState('error');
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [applyPreferences]);
+  const {
+    groupLoadState,
+    groupLoadError,
+    reloadGroups,
+    accept: applyPreferences,
+  } = useGroupPreferenceLoading(receivePreferences, mutationQueue);
 
   const clusters = useMemo(() => buildAttentionClusters(rows, savedGroups), [rows, savedGroups]);
-  const isOpen = useCallback(
-    (cluster: AttentionCluster) => resolveAttentionClusterOpen(cluster, openPreferences, currentThreadId, searchQuery),
-    [currentThreadId, openPreferences, searchQuery],
-  );
+  const {
+    isOpen,
+    begin: beginOpen,
+    settle: settleOpen,
+  } = useGroupOpenInteraction(openPreferences, currentThreadId, searchQuery);
   const enqueuePreferenceMutation = useCallback(
-    (input: { anchor: string; alias?: string | null; open?: boolean | null }) => {
+    (input: {
+      anchor: string;
+      alias?: string | null;
+      open?: boolean | null;
+      memberSort?: ThreadAttentionMemberSort;
+    }) => {
+      const intent = typeof input.open === 'boolean' ? beginOpen(input.anchor, input.open) : null;
+      if (input.memberSort) setPendingSort((current) => new Set([...current, input.anchor]));
       const mutation = mutationQueue.current.then(async () => {
         setPreferenceError(null);
         const preferences = await persistThreadAttentionPreference(input);
-        const nextAliases = preferences.aliases ?? {};
-        const nextOpen = preferences.open ?? {};
-        setAliases(nextAliases);
-        setOpenPreferences(nextOpen);
-        setSavedGroups(preferences.groups ?? []);
-        cacheOpenPreferences(nextOpen);
+        applyPreferences(preferences);
+        if (intent) settleOpen(intent, true);
       });
-      mutationQueue.current = mutation.catch(() => {
-        setPreferenceError('未能保存这个整理方式，请重试');
-      });
+      mutationQueue.current = mutation
+        .catch(() => {
+          if (intent) settleOpen(intent, false);
+          setPreferenceError('未能保存这个整理方式，请重试');
+        })
+        .finally(() => {
+          if (input.memberSort)
+            setPendingSort((current) => {
+              const next = new Set(current);
+              next.delete(input.anchor);
+              return next;
+            });
+        });
       return mutationQueue.current;
     },
-    [],
+    [beginOpen, settleOpen, applyPreferences],
   );
   const toggle = useCallback(
     (cluster: AttentionCluster) => {
-      const nextOpen = !resolveAttentionClusterOpen(cluster, openPreferences, currentThreadId, searchQuery);
+      const nextOpen = !isOpen(cluster);
       void enqueuePreferenceMutation({ anchor: cluster.anchor, open: nextOpen });
     },
-    [currentThreadId, enqueuePreferenceMutation, openPreferences, searchQuery],
+    [enqueuePreferenceMutation, isOpen],
   );
 
   const enqueueGroupMutation = useCallback(
@@ -187,7 +181,12 @@ export function useAttentionClusters(
   return {
     clusters,
     savedGroups,
+    memberSort,
+    pendingSort,
+    changeMemberSort: (cluster: AttentionCluster, mode: ThreadAttentionMemberSort) =>
+      enqueuePreferenceMutation({ anchor: cluster.anchor, memberSort: mode }),
     groupLoadState,
+    groupLoadError,
     reloadGroups,
     openGroup: (groupId: string) => enqueuePreferenceMutation({ anchor: `group:${groupId}`, open: true }),
     isOpen,

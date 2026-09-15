@@ -26,12 +26,14 @@
  */
 
 import type { ProfileUpdateProposal } from '@cat-cafe/shared';
+import { profileRevisionOf } from '@cat-cafe/shared/profile-revision';
 import type { SessionMutex } from '../agents/invocation/SessionMutex.js';
 import type { IProfileUpdateProposalStore } from '../stores/ports/ProfileUpdateProposalStore.js';
 import type { FileProfileRepository } from './ProfileRepository.js';
 import {
   writeProfilePrimer as defaultWritePrimer,
   writeProfileProvenance as defaultWriteProvenance,
+  writeProfileTarget as defaultWriteTarget,
   StaleProfileUpdateError,
   type WritableProfileUpdate,
   type WriteProfilePrimerOptions,
@@ -40,7 +42,7 @@ import {
 export type ApproveFailureReason = 'not_found' | 'rejected' | 'claim_lost' | 'stale_hash' | 'write_failed';
 
 export type ApproveProfileUpdateResult =
-  | { ok: true; proposal: ProfileUpdateProposal; recovered: boolean }
+  | { ok: true; proposal: ProfileUpdateProposal; recovered: boolean; revision: string; targetLayer: string }
   | { ok: false; reason: ApproveFailureReason; error?: string; proposal?: ProfileUpdateProposal };
 
 export interface ApproveProfileUpdateDeps {
@@ -54,6 +56,11 @@ export interface ApproveProfileUpdateDeps {
     relationshipKey: string,
     options?: WriteProfilePrimerOptions,
   ) => { writtenPath: string };
+  writeTarget?: (
+    proposal: WritableProfileUpdate,
+    absolutePath: string,
+    options?: WriteProfilePrimerOptions,
+  ) => { writtenPath: string };
   writeProvenance?: (proposal: WritableProfileUpdate, profileDir: string) => { provenancePath: string };
 }
 
@@ -65,29 +72,54 @@ export async function approveProfileUpdate(
 ): Promise<ApproveProfileUpdateResult> {
   const { store, lock, repository } = deps;
   const writePrimer = deps.writePrimer ?? defaultWritePrimer;
+  const writeTarget = deps.writeTarget ?? defaultWriteTarget;
   const writeProvenance = deps.writeProvenance ?? defaultWriteProvenance;
 
   // Peek to resolve the lock key (targetPath) and fast-fail terminal states before contending.
   const peek = await store.get(proposalId);
   if (!peek) return { ok: false, reason: 'not_found' };
-  if (peek.status === 'approved') return { ok: true, proposal: peek, recovered: false };
+  if (peek.status === 'approved') {
+    return {
+      ok: true,
+      proposal: peek,
+      recovered: false,
+      revision: profileRevisionOf(peek.afterContent),
+      targetLayer: peek.targetLayer,
+    };
+  }
   if (peek.status === 'rejected') return { ok: false, reason: 'rejected', proposal: peek };
 
+  // Phase E: dispatch by targetLayer — primer uses relationship scope, corpus uses userId-only.
   let scope;
   let lockKey: string;
+  let absoluteTargetPath: string;
+  const isCorpus = peek.targetLayer === 'corpus';
   try {
-    scope = repository.scopeForPinnedPrimerTarget(peek.createdBy, peek.sourceCatId as string, peek.targetPath);
-    lockKey = repository.resolvePrimerTarget(scope, peek.targetPath);
+    if (isCorpus) {
+      lockKey = repository.resolveCorpusTarget(peek.createdBy, peek.targetPath);
+      absoluteTargetPath = lockKey;
+    } else {
+      scope = repository.scopeForPinnedPrimerTarget(peek.createdBy, peek.sourceCatId as string, peek.targetPath);
+      lockKey = repository.resolvePrimerTarget(scope, peek.targetPath);
+    }
   } catch (err) {
     return { ok: false, reason: 'write_failed', error: errMessage(err), proposal: peek };
   }
-  const profileDir = repository.profileDir(scope.userId);
+  const profileDir = isCorpus ? repository.profileDir(peek.createdBy) : repository.profileDir(scope!.userId);
   const release = await lock.acquire(lockKey, signal);
   try {
     // Re-read inside the lock — another holder may have settled it while we waited.
     let proposal = await store.get(proposalId);
     if (!proposal) return { ok: false, reason: 'not_found' };
-    if (proposal.status === 'approved') return { ok: true, proposal, recovered: false };
+    if (proposal.status === 'approved') {
+      return {
+        ok: true,
+        proposal,
+        recovered: false,
+        revision: profileRevisionOf(proposal.afterContent),
+        targetLayer: proposal.targetLayer,
+      };
+    }
     if (proposal.status === 'rejected') return { ok: false, reason: 'rejected', proposal };
 
     // Normal path: pending → approving (CAS). If already `approving`, it's crash recovery —
@@ -105,9 +137,13 @@ export async function approveProfileUpdate(
     if (!proposal.writtenPath) {
       let writtenPath: string;
       try {
-        ({ writtenPath } = writePrimer(proposal, profileDir, scope.relationshipKey, {
-          allowAlreadyApplied: recovered,
-        }));
+        if (isCorpus) {
+          ({ writtenPath } = writeTarget(proposal, absoluteTargetPath!, { allowAlreadyApplied: recovered }));
+        } else {
+          ({ writtenPath } = writePrimer(proposal, profileDir, scope!.relationshipKey, {
+            allowAlreadyApplied: recovered,
+          }));
+        }
       } catch (err) {
         // Primer not committed → safe to roll back to pending (ADV-3 / INV-8 stale).
         await store.rollbackClaim(proposalId);
@@ -148,7 +184,13 @@ export async function approveProfileUpdate(
       return { ok: false, reason: 'write_failed', error: errMessage(err), proposal };
     }
     if (!finalized) return { ok: false, reason: 'claim_lost', proposal };
-    return { ok: true, proposal: finalized, recovered };
+    return {
+      ok: true,
+      proposal: finalized,
+      recovered,
+      revision: profileRevisionOf(finalized.afterContent),
+      targetLayer: finalized.targetLayer,
+    };
   } finally {
     release();
   }

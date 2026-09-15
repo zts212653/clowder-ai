@@ -80,6 +80,58 @@ describe('outbound sync runtime closure', { skip: !isHomeRepo && 'sync manifest 
     return [...managedRoots].some((root) => repoPath === root || repoPath.startsWith(`${root}/`));
   }
 
+  it('owns the revision template and its Git archive attributes in the source-only manifest', () => {
+    for (const path of ['.cat-cafe-runtime-revision', '.gitattributes']) {
+      assert.ok(managedFiles.has(path), `${path} must be exported`);
+      assert.ok(!excluded.has(path), `${path} must not be excluded`);
+    }
+  });
+
+  it('preserves templates during repository sync so a public archive binds its own commit', () => {
+    const fixture = mkdtempSync(join(tmpdir(), 'sync-archive-identity-'));
+    const revisionPath = '.cat-cafe-runtime-revision';
+    const git = (cwd, ...args) =>
+      execFileSync('git', args, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
+    const commitFixture = (directory, name) => {
+      git(directory, 'init', '-b', 'main');
+      git(directory, 'config', 'user.name', 'Archive Identity Test');
+      git(directory, 'config', 'user.email', 'archive-identity@test.invalid');
+      git(directory, 'add', '.');
+      git(directory, 'commit', '-m', name);
+      return git(directory, 'rev-parse', 'HEAD');
+    };
+    try {
+      const source = join(fixture, 'source');
+      const exported = join(fixture, 'exported');
+      mkdirSync(source);
+      mkdirSync(exported);
+      for (const path of [revisionPath, '.gitattributes']) {
+        writeFileSync(join(source, path), readFileSync(join(ROOT, path)));
+      }
+      const sourceHead = commitFixture(source, 'source archive identity');
+      // Execute the real writer; assertions describe the two-repository identity contract.
+      const command = readFileSync(SYNC_SCRIPT_PATH, 'utf8').match(
+        /^ {2}git -C "\$SOURCE_SYNC_DIR" archive [^\n]+/m,
+      )?.[0];
+      assert.ok(command, 'canonical writer must provide the clean-tree export command');
+      execFileSync('bash', ['-euo', 'pipefail', '-c', command], {
+        env: { ...process.env, SOURCE_SYNC_DIR: source, STAGING_DIR: exported },
+        stdio: 'pipe',
+      });
+      assert.equal(
+        readFileSync(join(exported, revisionPath), 'utf8'),
+        readFileSync(join(source, revisionPath), 'utf8'),
+      );
+      const publicHead = commitFixture(exported, 'public archive identity');
+      assert.notEqual(publicHead, sourceHead, 'fixture must distinguish the two repositories');
+      const archive = execFileSync('git', ['archive', '--format=tar', 'HEAD'], { cwd: exported });
+      const revision = execFileSync('tar', ['-xOf', '-', revisionPath], { input: archive, encoding: 'utf8' }).trim();
+      assert.equal(revision, publicHead, 'public distribution identity must come from its own Git commit');
+    } finally {
+      rmSync(fixture, { recursive: true, force: true });
+    }
+  });
+
   it('claims ownership of the public release notes template', () => {
     // Regression guard for clowder-ai#1370: this template existed in both source and
     // clowder-ai main, but was absent from every manifest list — neither exported nor
@@ -268,10 +320,42 @@ describe('outbound sync runtime closure', { skip: !isHomeRepo && 'sync manifest 
       preMergeTest,
       /skip:\s*[\s\S]*?!existsSync\(GATE_TERMINAL_RECEIPT_SCRIPT\)[\s\S]*?home-only route and terminal-receipt control plane is absent from public export/u,
     );
+
+    const sourceFile = ts.createSourceFile(
+      'pre-merge-check.test.mjs',
+      preMergeTest,
+      ts.ScriptTarget.Latest,
+      true,
+      ts.ScriptKind.JS,
+    );
+    const optionReferences = [];
+    const boundTestReferences = [];
+    const declarationReferences = [];
+
+    function visit(node) {
+      if (ts.isIdentifier(node) && node.text === 'SOURCE_GATE_CONTROL_TEST_OPTIONS') {
+        optionReferences.push(node);
+        if (ts.isVariableDeclaration(node.parent) && node.parent.name === node) {
+          declarationReferences.push(node);
+        } else if (
+          ts.isCallExpression(node.parent) &&
+          ts.isIdentifier(node.parent.expression) &&
+          node.parent.expression.text === 'it' &&
+          node.parent.arguments[1] === node
+        ) {
+          boundTestReferences.push(node);
+        }
+      }
+      ts.forEachChild(node, visit);
+    }
+
+    visit(sourceFile);
+    assert.equal(declarationReferences.length, 1, 'the public-skip options must have one declaration');
+    assert.ok(boundTestReferences.length > 0, 'at least one source-only gate-control test must use the options');
     assert.equal(
-      [...preMergeTest.matchAll(/SOURCE_GATE_CONTROL_TEST_OPTIONS/g)].length,
-      4,
-      'the option declaration and all three source-only gate-control tests must stay bound together',
+      optionReferences.length,
+      declarationReferences.length + boundTestReferences.length,
+      'every public-skip options reference must be either its declaration or an it() options argument',
     );
   });
 
@@ -350,6 +434,12 @@ describe('outbound sync runtime closure', { skip: !isHomeRepo && 'sync manifest 
       'docs/configuration/environment.md',
       'docs/configuration/startup.md',
       'docs/faq.md',
+      'docs/architecture/a2a-protocol.zh-CN.md',
+      'docs/architecture/overview.zh-CN.md',
+      'docs/architecture/plugin-architecture.zh-CN.md',
+      'docs/configuration/environment.zh-CN.md',
+      'docs/configuration/startup.zh-CN.md',
+      'docs/faq.zh-CN.md',
     ];
 
     for (const [kind, path, ownerSet] of sourceOwned) {

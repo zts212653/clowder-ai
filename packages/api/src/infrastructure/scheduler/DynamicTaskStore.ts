@@ -1,5 +1,10 @@
 import { type ProducerAttentionReevaluationLinkV1, producerAttentionReevaluationLinkV1Schema } from '@cat-cafe/shared';
 import type Database from 'better-sqlite3';
+import {
+  normalizeOwnerAuthProvenance,
+  type OwnerAuthProvenance,
+  requireOwnerAuthProvenance,
+} from '../../domains/cats/services/owner-auth-provenance.js';
 import type { TaskDisplayMeta, TriggerSpec } from './types.js';
 
 /** Persisted dynamic task definition — user config stored in SQLite */
@@ -20,11 +25,13 @@ export interface DynamicTaskDef {
 export class DynamicTaskStore {
   constructor(private db: Database.Database) {}
 
-  insert(def: DynamicTaskDef): void {
+  insert(def: DynamicTaskDef, privateOwnerAuthProvenance?: OwnerAuthProvenance): void {
+    const ownerAuthProvenance =
+      privateOwnerAuthProvenance === undefined ? null : requireOwnerAuthProvenance(privateOwnerAuthProvenance);
     this.db
       .prepare(
-        `INSERT INTO dynamic_task_defs (id, template_id, trigger_json, params_json, entrusted_work_reevaluation_json, display_json, delivery_thread_id, enabled, created_by, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO dynamic_task_defs (id, template_id, trigger_json, params_json, entrusted_work_reevaluation_json, display_json, delivery_thread_id, enabled, created_by, created_at, owner_auth_provenance)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         def.id,
@@ -37,6 +44,7 @@ export class DynamicTaskStore {
         def.enabled ? 1 : 0,
         def.createdBy,
         def.createdAt,
+        ownerAuthProvenance,
       );
   }
 
@@ -81,6 +89,32 @@ export class DynamicTaskStore {
   getById(id: string): DynamicTaskDef | null {
     const row = this.db.prepare('SELECT * FROM dynamic_task_defs WHERE id = ?').get(id) as RawRow | undefined;
     return row ? todef(row) : null;
+  }
+
+  /**
+   * F167 #1449 Slice 1: query by delivery thread + created_by.
+   * Enables task-ID-independent hold observability — callers can find
+   * the current hold for a (threadId, catId) pair without knowing the task ID.
+   */
+  findByDeliveryThreadAndCreatedBy(threadId: string, createdBy: string): DynamicTaskDef[] {
+    const rows = this.db
+      .prepare(
+        'SELECT * FROM dynamic_task_defs WHERE delivery_thread_id = ? AND created_by = ? ORDER BY created_at DESC',
+      )
+      .all(threadId, createdBy) as RawRow[];
+    return rows.map(todef);
+  }
+
+  /**
+   * F275: server-private immutable owner proof for managed-command wake recovery.
+   * It is deliberately excluded from DynamicTaskDef so schedule REST, approval
+   * snapshots, notifications, and sockets cannot project it by object spread.
+   */
+  getPrivateOwnerAuthProvenance(id: string): OwnerAuthProvenance {
+    const row = this.db.prepare('SELECT owner_auth_provenance FROM dynamic_task_defs WHERE id = ?').get(id) as
+      | { owner_auth_provenance: unknown }
+      | undefined;
+    return normalizeOwnerAuthProvenance(row?.owner_auth_provenance);
   }
 
   remove(id: string): boolean {

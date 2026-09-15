@@ -57,7 +57,7 @@ describe('V37 memory cue event ledger migration', () => {
     const db = new Database(':memory:');
     applyMigrations(db);
 
-    assert.equal(CURRENT_SCHEMA_VERSION, 43);
+    assert.ok(CURRENT_SCHEMA_VERSION >= 43);
     assert.deepEqual(
       db
         .prepare('PRAGMA table_info(memory_cue_events)')

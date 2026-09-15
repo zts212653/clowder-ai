@@ -1,0 +1,46 @@
+.evolution-content[data-exploration-focus="true"] {
+  padding: 18px 28px;
+}
+.evolution-content[data-exploration-focus="true"] > header {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 4px 24px;
+}
+.evolution-content[data-exploration-focus="true"] > header > :is(p, h1, details) {
+  grid-column: 1;
+  margin-top: 0;
+}
+.evolution-content[data-exploration-focus="true"] > header > .mb-6 {
+  grid-column: 1 / -1;
+  margin-bottom: 8px;
+}
+.evolution-content[data-exploration-focus="true"] .evolution-journey {
+  grid-column: 2;
+  grid-row: 2 / span 4;
+  align-self: center;
+  margin: 0;
+}
+.evolution-content[data-exploration-focus="true"] .evolution-journey-steps button {
+  padding: 6px 8px;
+}
+.evolution-content[data-exploration-focus="true"] .evolution-journey-progress {
+  margin-top: 6px;
+}
+.evolution-content[data-exploration-focus="true"] .evolution-progress-compact {
+  padding: 10px 0 0;
+}
+.evolution-content[data-exploration-focus="true"] .evolution-tabs {
+  margin-block: 12px;
+}
+@container evolution (max-width: 900px) {
+  .evolution-content[data-exploration-focus="true"] > header {
+    display: block;
+  }
+  .evolution-content[data-exploration-focus="true"] > header > :is(p, h1, details) {
+    margin-top: 6px;
+  }
+  .evolution-content[data-exploration-focus="true"] .evolution-journey {
+    margin-top: 12px;
+  }
+}

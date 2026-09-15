@@ -15,11 +15,11 @@ description_updated_at: 2026-07-31T09:30:00Z
 > **Status**: frozen / research hypothesis (Experience Design Gate not authorized) | **Owner**: 小太阳·Maine Coon
 > (@codex-sol, GPT-5.6 Sol) | **Priority**: P1
 >
-> **operator signoff**: `0001785489147032-000207-931331e7` — “好像得立项了，F277
+> **operator signoff**: `private-source-id` — “好像得立项了，F277
 > 和新的动态 UX 应该不是一个 feat 才行”。本签字授权立项与体验原型，不授权生产 UI
 > 实现；真实页面实现必须先过 operator Experience Design Gate。
 >
-> **Freeze source**: `0001785494350337-000269-73941a81` — 通用动态 UX 重构冻结；先把 F277 与轻度 UI 整治解耦。
+> **Freeze source**: `private-source-id` — 通用动态 UX 重构冻结；先把 F277 与轻度 UI 整治解耦。
 
 ## Architecture Ownership
 

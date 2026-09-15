@@ -439,7 +439,67 @@ describe('F167 C1: /api/callbacks/hold-ball scheduling + errors', () => {
     assert.equal(body.maxHoldsPerWindow, 3);
     assert.equal(body.holdsInWindow, 3);
     assert.equal(body.windowMs, 3_600_000);
+    // retryAt boundary: must point to first admit moment (lastAt + HOLD_WINDOW_MS + 1)
+    assert.ok(body.retryAt, '429 response must include retryAt ISO timestamp');
+    assert.ok(!Number.isNaN(new Date(body.retryAt).getTime()), 'retryAt must be a valid ISO timestamp');
+    assert.equal(typeof body.retryAfterMs, 'number', 'retryAfterMs must be a number');
+    assert.ok(body.retryAfterMs > 0, 'retryAfterMs should be positive when window is active');
+    assert.ok(body.retryAfterMs <= 3_600_001, 'retryAfterMs should not exceed windowMs + 1');
     assert.equal(deps._insertedTasks.length, 3, 'blocked hold must NOT schedule a new task');
+  });
+
+  test('retryAt boundary regression: off-by-one guard (3-instance friction fix)', async () => {
+    // Pre-load the counter via exported function with a CONTROLLED lastAt,
+    // then hit the route. This makes retryAt deterministic: if the +1ms fix
+    // is reverted, the assertion fails with delta = -1.
+    const { incrementHoldCount, HOLD_WINDOW_MS } = await import('../dist/routes/callback-hold-ball-routes.js');
+
+    const deps = makeStubDeps();
+    const app = await createApp(deps);
+    const thread = await threadStore.create('user-hb-boundary', 'hb-boundary');
+    const { invocationId, callbackToken } = await registry.create('user-hb-boundary', 'codex', thread.id);
+    const headers = { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken };
+
+    // Pre-load 3 holds with a known lastAt. The counter key is `${threadId}:codex`.
+    const controlledLastAt = Date.now();
+    incrementHoldCount(thread.id, 'codex', controlledLastAt - 2000);
+    incrementHoldCount(thread.id, 'codex', controlledLastAt - 1000);
+    incrementHoldCount(thread.id, 'codex', controlledLastAt); // hold 3 → lastAt = controlledLastAt
+
+    // 4th call via route → 429. Route reads holdEntry.lastAt (= controlledLastAt)
+    // and computes retryAt = lastAt + HOLD_WINDOW_MS + 1.
+    const r = await app.inject({
+      method: 'POST',
+      url: '/api/callbacks/hold-ball',
+      headers,
+      payload: {
+        reason: 'boundary-test',
+        nextStep: 'verify',
+        wakeAfterMs: 10_000,
+        waitSourceRef: VALID_WAIT_SOURCE_REF,
+      },
+    });
+
+    assert.equal(r.statusCode, 429);
+    const body = JSON.parse(r.body);
+    const retryAtMs = new Date(body.retryAt).getTime();
+    const expectedRetryAtMs = controlledLastAt + HOLD_WINDOW_MS + 1;
+
+    // THE regression assertion: retryAt must equal lastAt + HOLD_WINDOW_MS + 1.
+    // Without the +1 fix, retryAtMs = lastAt + HOLD_WINDOW_MS → delta = -1 → FAIL.
+    assert.equal(
+      retryAtMs,
+      expectedRetryAtMs,
+      `retryAt must be lastAt + HOLD_WINDOW_MS + 1 = ${expectedRetryAtMs}; ` +
+        `got ${retryAtMs} (delta = ${retryAtMs - expectedRetryAtMs}, off-by-one regression if -1)`,
+    );
+
+    // retryAfterMs consistency: retryAt - rejectNow, both within a few ms of controlledLastAt
+    assert.ok(body.retryAfterMs > 0, 'retryAfterMs must be positive');
+    assert.ok(body.retryAfterMs <= HOLD_WINDOW_MS + 1, 'retryAfterMs must not exceed HOLD_WINDOW_MS + 1');
+
+    // Rejection must NOT advance the window (counter stays at 3, no new task)
+    assert.equal(body.holdsInWindow, 3);
   });
 
   test('500 when reminder template is missing', async () => {

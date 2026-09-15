@@ -151,6 +151,52 @@ describe('reminderTemplate', () => {
     assert.equal(triggerMock.trigger.mock.calls[0].arguments[1], 'sonnet');
   });
 
+  it('preserves private owner authentication provenance when a hold timer wakes its cat', async () => {
+    const deliverMock = mock.fn(async () => 'msg-timer-owner');
+    const triggerMock = { trigger: mock.fn(async () => 'enqueued') };
+    const spec = reminderTemplate.createSpec('hold-ball-timer-owner', {
+      trigger: { type: 'once', fireAt: Date.now() + 60_000 },
+      params: {
+        message: 'resume owner work',
+        targetCatId: 'codex-sol',
+        holdLifecycle: { mode: 'timer', status: 'active' },
+      },
+      deliveryThreadId: 'thread-owner',
+      ownerAuthProvenance: 'strict',
+    });
+
+    await spec.run.execute('resume owner work', 'thread-thread-owner', {
+      assignedCatId: null,
+      deliver: deliverMock,
+      invokeTrigger: triggerMock,
+    });
+
+    assert.deepEqual(triggerMock.trigger.mock.calls[0].arguments[6], {
+      sourceCategory: 'scheduled',
+      ownerAuthProvenance: 'strict',
+    });
+  });
+
+  it('does not grant a private owner provenance carrier to an ordinary reminder', async () => {
+    const triggerMock = { trigger: mock.fn(async () => 'enqueued') };
+    const spec = reminderTemplate.createSpec('reminder-user-visible', {
+      trigger: { type: 'once', fireAt: Date.now() + 60_000 },
+      params: { message: 'ordinary reminder', targetCatId: 'codex-sol' },
+      deliveryThreadId: 'thread-owner',
+      ownerAuthProvenance: 'strict',
+    });
+
+    await spec.run.execute('ordinary reminder', 'thread-thread-owner', {
+      assignedCatId: null,
+      deliver: async () => 'message-ordinary',
+      invokeTrigger: triggerMock,
+    });
+
+    assert.deepEqual(triggerMock.trigger.mock.calls[0].arguments[6], {
+      sourceCategory: 'scheduled',
+    });
+  });
+
   it('uses default message when param is empty', async () => {
     const deliverMock = mock.fn(async () => 'msg-3');
     const spec = reminderTemplate.createSpec('rem-6', {

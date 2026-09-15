@@ -1,7 +1,9 @@
 'use client';
 
-import type { EntrustedWorkOwnerReadV1 } from '@cat-cafe/shared';
+import type { ArtifactReviewView, EntrustedWorkOwnerReadV1 } from '@cat-cafe/shared';
 import { useEffect, useMemo, useRef } from 'react';
+import { ReviewArtifactButton } from '@/components/content-review/ReviewArtifactButton';
+import { reviewSurfaceFromPreparedRef } from '@/components/workbench/artifact-review-surface';
 import { useEntrustedWorkProjection } from '@/hooks/useEntrustedWorkProjection';
 import { EntrustedWorkBrief } from './EntrustedWorkBrief';
 
@@ -36,10 +38,14 @@ function formatBusinessTime(value: number, currentTime: number): string {
 
 export function ProductSchedulePanel({
   onOpenArtifact,
+  artifactsLoading = false,
+  onOpenReview,
   selectedItemRef,
   now = Date.now,
 }: {
   onOpenArtifact?: (artifact: PreparedArtifactCoordinate, itemRef: string) => void;
+  artifactsLoading?: boolean;
+  onOpenReview?: (review: ArtifactReviewView, itemRef: string) => void;
   selectedItemRef?: string | null;
   now?: () => number;
 }) {
@@ -100,6 +106,8 @@ export function ProductSchedulePanel({
           const time = primaryTime(ownerRead);
           if (!time) return null;
           const artifact = ownerRead.preparedArtifact;
+          const artifactLoading =
+            artifactsLoading && Boolean(artifact && !reviewSurfaceFromPreparedRef(artifact.openInWorkspaceRef));
           const actionable = ownerRead.brief.needsMe.state === 'needed';
           const itemRef = scheduleItemRef(ownerRead);
           const selected = selectedItemRef === itemRef;
@@ -118,7 +126,7 @@ export function ProductSchedulePanel({
               data-owner-revision={ownerRead.envelope.revision}
             >
               <div className="flex min-w-0 flex-wrap items-start justify-between gap-3">
-                <div className="min-w-0 flex-1">
+                <div className="min-w-0 flex-[1_1_16rem]">
                   <div className="flex min-w-0 flex-wrap items-center gap-2">
                     <h3 className="min-w-0 break-words text-sm font-semibold text-cafe-black">托付工作</h3>
                     <span className="rounded-full bg-cafe-accent/10 px-2 py-0.5 text-micro font-medium text-cafe-accent">
@@ -131,15 +139,25 @@ export function ProductSchedulePanel({
                   <EntrustedWorkBrief ownerRead={ownerRead} />
                 </div>
                 {artifact ? (
-                  <button
-                    type="button"
-                    data-testid="product-schedule-open-artifact"
-                    data-open-ref={artifact.openInWorkspaceRef}
-                    className="shrink-0 rounded-lg bg-cafe-accent px-3 py-2 text-xs font-semibold text-[var(--cafe-accent-foreground)] hover:bg-cafe-accent-hover"
-                    onClick={() => onOpenArtifact?.(artifact, itemRef)}
-                  >
-                    在 Workspace 打开
-                  </button>
+                  <div className="flex flex-wrap gap-2">
+                    {onOpenReview ? (
+                      <ReviewArtifactButton
+                        ownerRead={ownerRead}
+                        onPrepared={(review) => onOpenReview(review, itemRef)}
+                      />
+                    ) : null}
+                    <button
+                      type="button"
+                      data-testid="product-schedule-open-artifact"
+                      data-open-ref={artifact.openInWorkspaceRef}
+                      disabled={artifactLoading}
+                      aria-busy={artifactLoading}
+                      className="shrink-0 rounded-lg bg-cafe-accent px-3 py-2 text-xs font-semibold text-[var(--cafe-accent-foreground)] hover:bg-cafe-accent-hover disabled:cursor-wait disabled:opacity-60"
+                      onClick={() => onOpenArtifact?.(artifact, itemRef)}
+                    >
+                      {artifactLoading ? '正在加载产物…' : '在 Workspace 打开'}
+                    </button>
+                  </div>
                 ) : null}
               </div>
             </article>

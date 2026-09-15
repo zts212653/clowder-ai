@@ -19,7 +19,8 @@ describe('F254 AC-B5: createFreshnessReinvokeCheck implicit-ack telemetry', () =
   function createRedisStub() {
     const store = {};
     const lists = {};
-    return {
+    const zsets = {};
+    const redis = {
       get: async (key) => store[key] ?? null,
       incr: async (key) => {
         store[key] = (Number(store[key]) || 0) + 1;
@@ -32,6 +33,11 @@ describe('F254 AC-B5: createFreshnessReinvokeCheck implicit-ack telemetry', () =
         if (!lists[key]) lists[key] = [];
         lists[key].push(value);
       },
+      zadd: async (key, _score, value) => {
+        if (!zsets[key]) zsets[key] = [];
+        zsets[key].push(value);
+      },
+      zremrangebyscore: async () => 0,
       hgetall: async (key) => store[`__hash:${key}`] ?? {},
       hset: async (key, field, value) => {
         if (!store[`__hash:${key}`]) store[`__hash:${key}`] = {};
@@ -45,7 +51,32 @@ describe('F254 AC-B5: createFreshnessReinvokeCheck implicit-ack telemetry', () =
       },
       _store: store,
       _lists: lists,
+      _zsets: zsets,
     };
+    redis.multi = () => {
+      const operations = [];
+      const pipeline = {
+        rpush: (...args) => {
+          operations.push(() => redis.rpush(...args));
+          return pipeline;
+        },
+        expire: (...args) => {
+          operations.push(() => redis.expire(...args));
+          return pipeline;
+        },
+        zadd: (...args) => {
+          operations.push(() => redis.zadd(...args));
+          return pipeline;
+        },
+        zremrangebyscore: (...args) => {
+          operations.push(() => redis.zremrangebyscore(...args));
+          return pipeline;
+        },
+        exec: async () => Promise.all(operations.map(async (operation) => [null, await operation()])),
+      };
+      return pipeline;
+    };
+    return redis;
   }
 
   it('increments freshnessNoticeAcked when notices pre-filtered by cursor (no_unresolved_notices path)', async () => {
@@ -98,6 +129,10 @@ describe('F254 AC-B5: createFreshnessReinvokeCheck implicit-ack telemetry', () =
     assert.ok(result);
     assert.equal(result.shouldReinvoke, false);
     assert.equal(result.skipReason, 'no_unresolved_notices');
+    assert.equal(JSON.parse(redis._lists['freshness:events:inv:inv-ack-test'][1]).kind, 'notice_implicit_acked');
+    const indexed = JSON.parse(redis._zsets['freshness:events:window:v2'][0]);
+    assert.equal(indexed.ownerUserId, 'user1');
+    assert.deepEqual(indexed.event.noticeIds, ['notice-ack-1']);
 
     // P1 fix: freshnessNoticeAcked should have fired (notices were implicitly acked)
     // Verify the code path runs without throwing — actual counter value verification

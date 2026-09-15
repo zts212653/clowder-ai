@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { chmod, lstat, mkdir, open, readFile, rename, unlink } from 'node:fs/promises';
 import { dirname, isAbsolute, resolve } from 'node:path';
-
+import { writeConversationTitles } from './conversation-titles.mjs';
 import { acquireProcessLease } from './native-socket-lease.mjs';
 
 const COLLECTION_FIELDS = new Set(['schemaVersion', 'provider', 'conversations', 'updatedAt']);
@@ -238,7 +238,7 @@ async function acquireAuthorizationMutationLease(path) {
   throw new Error('conversation authorization mutation lease attempts were not executed');
 }
 
-async function withAuthorizationMutation(path, operation) {
+export async function withAuthorizationMutation(path, operation) {
   const normalizedPath = resolve(requireAbsolutePath(path, 'conversationAuthorizationPath'));
   return serializeProcessLocalMutation(normalizedPath, async () => {
     const parent = dirname(normalizedPath);
@@ -327,6 +327,7 @@ export async function revokePersonalChromeConversation(path, conversationId, tim
       updatedAt: latestTimestamp(snapshot.collection.updatedAt, updatedAt),
     };
     await writePersonalChromeConversationAuthorizationsAtomic(normalizedPath, collection);
+    await writeConversationTitles(normalizedPath, conversations).catch(() => undefined);
     return { collection, revoked: true };
   });
 }
@@ -336,5 +337,6 @@ export async function removePersonalChromeConversationAuthorizations(path) {
     await unlink(normalizedPath).catch((error) => {
       if (error?.code !== 'ENOENT') throw error;
     });
+    await writeConversationTitles(normalizedPath, []);
   });
 }

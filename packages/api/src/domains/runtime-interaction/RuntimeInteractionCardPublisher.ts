@@ -14,7 +14,7 @@ export interface MessageRuntimeInteractionCardPublisherDeps {
 export class MessageRuntimeInteractionCardPublisher implements RuntimeInteractionCardPublisher {
   constructor(private readonly deps: MessageRuntimeInteractionCardPublisherDeps) {}
 
-  async publish(request: RuntimeInteractionRequest): Promise<RuntimeInteractionCardRef> {
+  async prepare(request: RuntimeInteractionRequest): Promise<RuntimeInteractionCardRef> {
     const block = buildRuntimeInteractionCard(request);
     const idempotencyKey = `runtime-interaction:${request.interactionId}`;
     let stored = await this.deps.messageStore.getByIdempotencyKey(
@@ -44,8 +44,17 @@ export class MessageRuntimeInteractionCardPublisher implements RuntimeInteractio
       }
     }
     assertLiveCanonicalCard(stored, request, block.id);
-    this.broadcast(request, stored);
     return { threadId: request.owner.threadId, messageId: stored.id, blockId: block.id };
+  }
+
+  async publish(request: RuntimeInteractionRequest, cardRef: RuntimeInteractionCardRef): Promise<void> {
+    if (cardRef.threadId !== request.owner.threadId) {
+      throw new Error('runtime interaction card does not match canonical thread');
+    }
+    const stored = await this.deps.messageStore.getById(cardRef.messageId);
+    if (!stored) throw new Error('runtime interaction card is unavailable');
+    assertLiveCanonicalCard(stored, request, cardRef.blockId);
+    this.broadcast(request, stored);
   }
 
   async isLive(request: RuntimeInteractionRequest, cardRef: RuntimeInteractionCardRef): Promise<boolean> {

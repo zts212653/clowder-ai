@@ -1,10 +1,17 @@
-import type { ActiveExecutionProjection, GlobalArtifactDTO, ThreadArtifactDTO } from '@cat-cafe/shared';
+import {
+  type ActiveExecutionProjection,
+  type EvolutionProgramOriginV1,
+  evolutionProgramTitle,
+  type GlobalArtifactDTO,
+  type ThreadArtifactDTO,
+} from '@cat-cafe/shared';
 import { decodeTeamWorkspaceSubject, encodeTeamWorkspaceSubject } from '@/components/routing-context/team-navigation';
 import type { WorkspaceSurfaceDescriptor } from '@/components/workbench/workbench-contract';
 import type { TrajectoryTarget } from '@/components/workspace/trajectory/trajectory-navigation';
 import type { WorkspaceLauncherDestination } from '@/components/workspace/WorkspaceLauncher';
 import { WORKSPACE_MODE_META, type WorkspaceMode } from '@/lib/workspace-modes';
 import type { TeamWorkspaceSubject } from '@/stores/chat-types';
+import { resolveArtifactReviewTarget } from './artifact-review-surface';
 
 export const REAL_SURFACE_OWNERS = {
   agentRun: 'f299-invocation-trajectory',
@@ -12,6 +19,7 @@ export const REAL_SURFACE_OWNERS = {
   artifact: 'f232-thread-artifacts',
   browser: 'f120-browser-preview',
   changes: 'f063-workspace-diff',
+  contentEditor: 'f309-collaborative-content',
   evolutionProgram: 'f311-capability-evolution-control',
   file: 'f063-workspace-file',
   files: 'f063-workspace-tree',
@@ -33,11 +41,6 @@ export const SURFACE_CAPABILITIES: WorkspaceSurfaceDescriptor['capabilities'] = 
   restorePolicy: 'descriptor',
 };
 
-const EVOLUTION_PROGRAM_CAPABILITIES: WorkspaceSurfaceDescriptor['capabilities'] = {
-  ...SURFACE_CAPABILITIES,
-  mainAreaAttention: true,
-};
-
 function encodedId(value: unknown): string {
   return encodeURIComponent(JSON.stringify(value));
 }
@@ -53,6 +56,7 @@ function isCodePath(path: string): boolean {
 }
 
 export function isRealSurfaceOwnerAvailable(surface: WorkspaceSurfaceDescriptor): boolean {
+  if (resolveArtifactReviewTarget(surface)) return true;
   return REAL_OWNER_IDS.has(surface.ownerStateRef.owner) || LEGACY_OWNER_IDS.has(surface.ownerStateRef.owner);
 }
 
@@ -103,6 +107,59 @@ export function createBrowserSurface(input: {
   };
 }
 
+export interface ContentEditorTarget {
+  readonly contentRef: string;
+  readonly sessionRef: string;
+}
+
+export function createContentEditorSurface(input: ContentEditorTarget): WorkspaceSurfaceDescriptor {
+  validateContentEditorToken(input.contentRef, 'contentRef');
+  if (!/^editor-session:[0-9a-f]{64}$/.test(input.sessionRef)) {
+    throw new TypeError('sessionRef is invalid');
+  }
+  const fileName = input.contentRef.split('/').filter(Boolean).at(-1) ?? 'Document';
+  return {
+    id: `content-editor:${input.sessionRef}`,
+    type: 'content-editor',
+    renderer: 'content-editor',
+    title: fileName,
+    context: 'DOCX · owner-backed collaborative content',
+    objectRef: { kind: 'content-editor-session', id: input.sessionRef },
+    ownerStateRef: { owner: REAL_SURFACE_OWNERS.contentEditor, key: input.contentRef },
+    resultTargetRef: {
+      owner: REAL_SURFACE_OWNERS.contentEditor,
+      key: encodedId([input.contentRef, input.sessionRef]),
+    },
+    capabilities: SURFACE_CAPABILITIES,
+  };
+}
+
+export function resolveContentEditorTarget(surface: WorkspaceSurfaceDescriptor): ContentEditorTarget | null {
+  if (
+    surface.type !== 'content-editor' ||
+    surface.renderer !== 'content-editor' ||
+    surface.objectRef.kind !== 'content-editor-session' ||
+    surface.ownerStateRef.owner !== REAL_SURFACE_OWNERS.contentEditor ||
+    surface.resultTargetRef?.owner !== REAL_SURFACE_OWNERS.contentEditor ||
+    surface.id !== `content-editor:${surface.objectRef.id}` ||
+    !/^editor-session:[0-9a-f]{64}$/.test(surface.objectRef.id)
+  ) {
+    return null;
+  }
+  const target = decodeStringPair(surface.resultTargetRef.key);
+  if (!target || target[0] !== surface.ownerStateRef.key || target[1] !== surface.objectRef.id) return null;
+  if (!isValidContentEditorToken(target[0])) return null;
+  return { contentRef: target[0], sessionRef: target[1] };
+}
+
+function validateContentEditorToken(value: string, field: string): void {
+  if (!isValidContentEditorToken(value)) throw new TypeError(`${field} is invalid`);
+}
+
+function isValidContentEditorToken(value: string): boolean {
+  return value.length > 0 && value.length <= 512 && value.trim() === value && !value.includes('\0');
+}
+
 export function createTerminalSurface(input: { worktreeId: string }): WorkspaceSurfaceDescriptor {
   return {
     id: `terminal-owner:${input.worktreeId}`,
@@ -117,17 +174,21 @@ export function createTerminalSurface(input: { worktreeId: string }): WorkspaceS
   };
 }
 
-export function createEvolutionProgramSurface(programId: string): WorkspaceSurfaceDescriptor {
+export function createEvolutionProgramSurface(
+  programId: string,
+  displayName?: string,
+  origin?: EvolutionProgramOriginV1,
+): WorkspaceSurfaceDescriptor {
   return {
     id: `evolution-program:${programId}`,
     type: 'evolution-program',
     renderer: 'evolution-program',
-    title: 'Evolution Program',
-    context: 'Capability Evolution · canonical lifecycle',
+    title: evolutionProgramTitle({ programId, displayName }, origin),
+    context: '能力进化 · 项目判断与更改历史',
     objectRef: { kind: 'evolution-program', id: programId },
     ownerStateRef: { owner: REAL_SURFACE_OWNERS.evolutionProgram, key: programId },
     resultTargetRef: { owner: REAL_SURFACE_OWNERS.evolutionProgram, key: programId },
-    capabilities: EVOLUTION_PROGRAM_CAPABILITIES,
+    capabilities: SURFACE_CAPABILITIES,
   };
 }
 
@@ -185,7 +246,7 @@ export function createArtifactSurface(input: {
 
 type AgentRunAdapterInput =
   | {
-      execution: Pick<ActiveExecutionProjection, 'catId' | 'executionId' | 'threadId' | 'threadTitle'>;
+      execution: Pick<ActiveExecutionProjection, 'catId' | 'turnInvocationId' | 'threadId' | 'threadTitle'>;
       sourceMessageId?: string;
     }
   | {
@@ -196,8 +257,13 @@ type AgentRunAdapterInput =
       sourceMessageId?: string;
     };
 
-export function createAgentRunSurface(input: AgentRunAdapterInput): WorkspaceSurfaceDescriptor {
-  const invocationId = 'execution' in input ? input.execution.executionId : input.invocationId;
+export function createAgentRunSurface(
+  input: Extract<AgentRunAdapterInput, { invocationId: string }>,
+): WorkspaceSurfaceDescriptor;
+export function createAgentRunSurface(input: AgentRunAdapterInput): WorkspaceSurfaceDescriptor | null;
+export function createAgentRunSurface(input: AgentRunAdapterInput): WorkspaceSurfaceDescriptor | null {
+  const invocationId = 'execution' in input ? input.execution.turnInvocationId : input.invocationId;
+  if (!invocationId) return null;
   const threadId = 'execution' in input ? input.execution.threadId : input.threadId;
   const title =
     'execution' in input
@@ -405,6 +471,25 @@ export function createProductScheduleReturnSurface(
     'mode:product-schedule',
     REAL_SURFACE_OWNERS.productSchedule,
   );
+}
+
+export function createEntrustedReturnFromRef(
+  ref: WorkspaceSurfaceDescriptor['returnTargetRef'],
+): WorkspaceSurfaceDescriptor | null {
+  if (!ref) return null;
+  const mode =
+    ref.owner === REAL_SURFACE_OWNERS.needsMe
+      ? 'needs-me'
+      : ref.owner === REAL_SURFACE_OWNERS.productSchedule
+        ? 'product-schedule'
+        : null;
+  const pair = decodeStringPair(ref.key);
+  if (!mode || !pair) return null;
+  const surface = createWorkspaceDestinationSurface(
+    { kind: 'mode', id: mode, ...WORKSPACE_MODE_META[mode] },
+    pair[0] === 'global' ? undefined : pair[0],
+  );
+  return surface ? { ...surface, resultTargetRef: { ...ref } } : null;
 }
 
 function createEntrustedWorkReturnSurface(

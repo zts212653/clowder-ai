@@ -147,7 +147,7 @@ while IFS= read -r f; do
   # 白名单 — 合法根文件。dotfile 用 enumerate known-safe（不用 .* catch-all，否则
   # 会放行任意 secret dotfile 如 .env）。
   case "$f" in
-    *.md|*.mdx|*.json|*.jsonc|*.yaml|*.yml|*.cjs|*.mjs|*.ts|*.js|*.toml|*.lock|*.example|LICENSE*|CODEOWNERS|requirements.txt|Dockerfile*|Makefile|.gitignore|.gitattributes|.npmrc|.editorconfig|.nvmrc|.node-version|.prettierrc*|.eslintrc*|.dependency-cruiser.cjs|.dir-exceptions.json) ;;
+    *.md|*.mdx|*.json|*.jsonc|*.yaml|*.yml|*.cjs|*.mjs|*.ts|*.js|*.toml|*.lock|*.example|LICENSE*|CODEOWNERS|requirements.txt|Dockerfile*|Makefile|.gitignore|.gitattributes|.cat-cafe-runtime-revision|.npmrc|.editorconfig|.nvmrc|.node-version|.prettierrc*|.eslintrc*|.dependency-cruiser.cjs|.dir-exceptions.json) ;;
     *) hygiene_unknown+=("$f") ;;
   esac
 done <<< "$ROOT_ADDED"

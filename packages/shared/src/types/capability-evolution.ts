@@ -5,10 +5,18 @@ import {
   measurementLinkedEventV1Schema,
   observeOrInsufficientEventV1Schema,
 } from './capability-evolution-diagnosis.js';
+import { evolutionProgramDisplayNameSchema } from './capability-evolution-name.js';
 import { evolutionObservationSetupV1Schema } from './capability-evolution-observation.js';
+import {
+  evolutionPreparationActivityRefV1Schema,
+  evolutionPreparationSectionSchema,
+  evolutionPreparationSubmissionRefCoordinates,
+  evolutionPreparationSubmissionRefV1Schema,
+} from './capability-evolution-preparation.js';
 import { assetOwnerIdentity, assetVersionRefV1Schema, bounded, exactAssetVersionRefV1Schema, ownerTruthRefV1Schema, strictEvent, timestampSchema } from './capability-evolution-refs.js';
 
 export * from './capability-evolution-diagnosis.js';
+export * from './capability-evolution-preparation.js';
 export * from './capability-evolution-refs.js';
 
 const certificatesSchema = z
@@ -73,6 +81,7 @@ export const evolutionProgramV1Schema = z
     schemaVersion: z.literal(1),
     programId: bounded(240),
     workspaceId: bounded(240),
+    displayName: evolutionProgramDisplayNameSchema.optional(),
     objectRef: ownerTruthRefV1Schema,
     claimRef: ownerTruthRefV1Schema,
     certificates: certificatesSchema,
@@ -148,7 +157,22 @@ export const evolutionProgramStateV1Schema = z
 
 // biome-ignore format: Keeping the closed event vocabulary together makes payload auditing tractable.
 const evolutionProgramEventV1Union = z.discriminatedUnion('type', [
-  strictEvent({ type: z.literal('program_created'), workspaceId: bounded(240), objectRef: ownerTruthRefV1Schema, claimRef: ownerTruthRefV1Schema }),
+  strictEvent({ type: z.literal('program_created'), workspaceId: bounded(240), objectRef: ownerTruthRefV1Schema, claimRef: ownerTruthRefV1Schema, displayName: evolutionProgramDisplayNameSchema.optional() }),
+  strictEvent({ type: z.literal('program_named'), displayName: evolutionProgramDisplayNameSchema }),
+  strictEvent({
+    type: z.literal('preparation_work_registered'),
+    section: evolutionPreparationSectionSchema,
+    itemId: bounded(120).regex(/^[a-z0-9][a-z0-9._-]*$/).optional(),
+    focus: bounded(2_000),
+    activityRef: evolutionPreparationActivityRefV1Schema,
+    baseSubmissionRef: evolutionPreparationSubmissionRefV1Schema.optional(),
+  }),
+  strictEvent({
+    type: z.literal('preparation_submission_committed'),
+    section: evolutionPreparationSectionSchema,
+    submissionRef: evolutionPreparationSubmissionRefV1Schema,
+    dependencies: z.array(evolutionPreparationSubmissionRefV1Schema).max(3),
+  }),
   strictEvent({ type: z.literal('certificates_linked'), certificates: completeCertificatesSchema, valueOwnerRef: ownerTruthRefV1Schema, measurementRoleRefs: completeMeasurementRoleRefsSchema }),
   strictEvent({ type: z.literal('sources_and_triggers_linked'), sourceRefs: z.array(ownerTruthRefV1Schema).min(1).max(128), triggerRef: ownerTruthRefV1Schema, namedConsumerRef: ownerTruthRefV1Schema }),
   strictEvent({ type: z.literal('observation_setup_linked'), setup: evolutionObservationSetupV1Schema }),
@@ -210,6 +234,22 @@ function validateDecisionEvent(
 export const evolutionProgramEventV1Schema = evolutionProgramEventV1Union.superRefine((event, ctx) => {
   if (event.type === 'intervention_receipt_linked') validateInterventionReceipt(event, ctx);
   if (event.type === 'decision_recorded') validateDecisionEvent(event, ctx);
+  if (event.type === 'preparation_work_registered' && event.baseSubmissionRef) {
+    const base = evolutionPreparationSubmissionRefCoordinates(event.baseSubmissionRef);
+    if (base?.section !== event.section) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'preparation work base must match its section' });
+    }
+  }
+  if (event.type === 'preparation_submission_committed') {
+    const submission = evolutionPreparationSubmissionRefCoordinates(event.submissionRef);
+    if (submission?.section !== event.section) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'preparation submission ref must match its section' });
+    }
+    const sections = event.dependencies.map((dependency) => evolutionPreparationSubmissionRefCoordinates(dependency)?.section);
+    if (sections.includes(event.section) || new Set(sections).size !== sections.length) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'preparation dependencies must be unique other sections' });
+    }
+  }
 });
 
 export const evolutionProgramEventEnvelopeV1Schema = z
@@ -226,7 +266,21 @@ export const evolutionProgramEventEnvelopeV1Schema = z
      */
     commandDigest: bounded(120).optional(),
   })
-  .strict();
+  .strict()
+  .superRefine((envelope, ctx) => {
+    const event = envelope.event;
+    const refs =
+      event.type === 'preparation_work_registered'
+        ? event.baseSubmissionRef
+          ? [event.baseSubmissionRef]
+          : []
+        : event.type === 'preparation_submission_committed'
+          ? [event.submissionRef, ...event.dependencies]
+          : [];
+    if (refs.some((ref) => evolutionPreparationSubmissionRefCoordinates(ref)?.programId !== envelope.programId)) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'preparation refs must belong to the event Program' });
+    }
+  });
 
 export type EvolutionProgramLifecycle = (typeof EVOLUTION_PROGRAM_LIFECYCLES)[number];
 export type EvolutionProgramStage = (typeof EVOLUTION_PROGRAM_STAGES)[number];

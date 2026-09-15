@@ -6,7 +6,7 @@ import {
   selectCanonicalOwnerTime,
   validateOwnerTimeCoordinates,
 } from './entrusted-work-owner-read-evidence.js';
-import { PHASE_B_NEEDS_ME_PRODUCER_IDS, producerAttentionReceiptV1Schema } from './growing.js';
+import { NEEDS_ME_PRODUCER_IDS, producerAttentionReceiptV1Schema } from './growing.js';
 
 const boundedRef = z.string().trim().min(1).max(1_000);
 const boundedText = z.string().trim().min(1).max(4_000);
@@ -75,12 +75,12 @@ const entrustedWorkTimeRefV1Schema = z
 
 const producerEvidenceV1Schema = z
   .object({
-    producerId: z.enum(PHASE_B_NEEDS_ME_PRODUCER_IDS),
+    producerId: z.enum(NEEDS_ME_PRODUCER_IDS),
     ownerRef: boundedRef,
     revision: revisionSchema,
   })
   .strict();
-const producerEvidenceListV1Schema = z.array(producerEvidenceV1Schema).min(1).max(PHASE_B_NEEDS_ME_PRODUCER_IDS.length);
+const producerEvidenceListV1Schema = z.array(producerEvidenceV1Schema).min(1).max(NEEDS_ME_PRODUCER_IDS.length);
 
 /** Disposable, source-backed summary for a single admitted entrusted-work item. */
 export const entrustedWorkBriefV1Schema = z
@@ -146,7 +146,7 @@ export const entrustedWorkOwnerReadV1Schema = z
     brief: entrustedWorkBriefV1Schema,
     preparedArtifact: preparedArtifactReadV1Schema.optional(),
     timeRefs: z.array(entrustedWorkTimeRefV1Schema).max(64),
-    attentionReceipts: z.array(producerAttentionReceiptV1Schema).max(PHASE_B_NEEDS_ME_PRODUCER_IDS.length),
+    attentionReceipts: z.array(producerAttentionReceiptV1Schema).max(NEEDS_ME_PRODUCER_IDS.length),
   })
   .strict()
   .superRefine((ownerRead, context) => {

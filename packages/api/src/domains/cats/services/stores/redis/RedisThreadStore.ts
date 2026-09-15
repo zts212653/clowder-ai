@@ -222,6 +222,7 @@ function parseThreadMemoryJson(raw: string): ThreadMemoryV1 | null {
 
 export class RedisThreadStore implements IThreadStore {
   private static readonly LIST_REPAIR_COOLDOWN_MS = 5 * 60 * 1000;
+  private static readonly LIST_READ_BATCH_SIZE = 128;
   private readonly redis: RedisClient;
   /** null means no expiration. */
   private readonly ttlSeconds: number | null;
@@ -374,11 +375,38 @@ export class RedisThreadStore implements IThreadStore {
     if (!hasDefault) ids.push(DEFAULT_THREAD_ID);
 
     const threads: Thread[] = [];
-    for (const id of ids) {
+    // Share one bounded round-trip across hash/set reads instead of awaiting
+    // two Redis responses per thread on every navigation and background scan.
+    for (let offset = 0; offset < ids.length; offset += RedisThreadStore.LIST_READ_BATCH_SIZE) {
       throwIfStoreReadAborted(options);
-      const thread = await this.get(id, options);
-      if (thread?.externalRuntimeAnchorState) continue;
-      if (thread && !thread.deletedAt) threads.push(thread);
+      const batchIds = ids.slice(offset, offset + RedisThreadStore.LIST_READ_BATCH_SIZE);
+      const pipeline = this.redis.multi();
+      for (const id of batchIds) {
+        pipeline.hgetall(ThreadKeys.detail(id));
+        pipeline.smembers(ThreadKeys.participants(id));
+      }
+      const results = await awaitStoreRead(pipeline.exec(), options);
+      throwIfStoreReadAborted(options);
+      // Validate every queued reply before recovery can create/repair a hash.
+      // A missing detail does not make its paired participants reply optional.
+      const snapshots = batchIds.map((id, index) => ({
+        id,
+        data: readAuthoritativeHash(results?.[index * 2], `thread list ${id}`),
+        members: readAuthoritativeMembers(results?.[index * 2 + 1], `thread list ${id}`),
+      }));
+      for (const { id, data, members } of snapshots) {
+        throwIfStoreReadAborted(options);
+        let thread: Thread | null;
+        if (!data?.id) {
+          // Preserve default creation and tombstone-aware recovery in their
+          // existing owner. Failed batch reads must never enter this path.
+          thread = await this.get(id, options);
+        } else {
+          thread = this.hydrateThread(data);
+          thread.participants = members as CatId[];
+        }
+        if (thread && !thread.deletedAt && !thread.externalRuntimeAnchorState) threads.push(thread);
+      }
     }
 
     throwIfStoreReadAborted(options);

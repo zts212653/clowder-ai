@@ -8,7 +8,12 @@ export interface RoutingContextQueryState {
   data: RoutingContextReadModelV1 | null;
   loading: boolean;
   error: string | null;
-  refresh: () => Promise<void>;
+  /**
+   * Resolves to false when the read failed. Callers that just mutated routing truth
+   * need this: keeping the previous snapshot on screen is fine, silently presenting
+   * it as the post-write state is not.
+   */
+  refresh: () => Promise<boolean>;
 }
 
 export function useRoutingContext(): RoutingContextQueryState {
@@ -23,8 +28,10 @@ export function useRoutingContext(): RoutingContextQueryState {
     try {
       const next = await fetchRoutingContext();
       if (mounted.current) setData(next);
+      return true;
     } catch (cause) {
       if (mounted.current) setError(cause instanceof Error ? cause.message : 'Routing context 暂时无法读取');
+      return false;
     } finally {
       if (mounted.current) setLoading(false);
     }

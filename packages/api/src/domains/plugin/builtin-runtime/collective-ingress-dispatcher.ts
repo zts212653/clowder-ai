@@ -5,12 +5,17 @@ import type {
   ConnectorRouteReceipt,
   HostRouteConfig,
 } from '@cat-cafe/collective-connector';
-import type { CatId, CollectiveEventEnvelope, ConnectorSource } from '@cat-cafe/shared';
+import {
+  type CatId,
+  type CollectiveEventEnvelope,
+  type ConnectorSource,
+  collectiveEventSourceIdentity,
+} from '@cat-cafe/shared';
 
 import type { InvocationQueue } from '../../cats/services/agents/invocation/InvocationQueue.js';
 import { createInitialQueuedMessageCustody } from '../../cats/services/agents/invocation/QueuedMessageCustodyCoordinator.js';
 import type { QueueProcessor } from '../../cats/services/agents/invocation/QueueProcessor.js';
-import type { IMessageStore } from '../../cats/services/stores/ports/MessageStore.js';
+import type { IMessageStore, StoredMessage } from '../../cats/services/stores/ports/MessageStore.js';
 
 interface CollectiveIngressConnectorPort
   extends Pick<
@@ -21,6 +26,7 @@ interface CollectiveIngressConnectorPort
     | 'beginInboxRouting'
     | 'completeInboxRouting'
     | 'failInboxRouting'
+    | 'readParticipationContext'
   > {}
 
 interface CollectiveIngressThread {
@@ -31,6 +37,7 @@ interface CollectiveIngressThread {
 }
 
 export interface CollectiveIngressDispatcherOptions {
+  readonly admitStandingWork?: (source: StoredMessage, catId: CatId) => Promise<void>;
   readonly connector: CollectiveIngressConnectorPort;
   readonly threadStore: {
     get(threadId: string): CollectiveIngressThread | null | Promise<CollectiveIngressThread | null>;
@@ -122,6 +129,16 @@ export class CollectiveIngressDispatcher {
       }
       const agentRoute = route.agentRoutes[agentRouteKey(event.target.humanId, event.target.agentId)];
       if (!agentRoute) throw ingressError('ROUTE_AGENT_UNCONFIGURED', 'Agent target has no Host route');
+      const source = collectiveEventSourceIdentity(event);
+      if (source && source.connectionId !== connection.connectionId) return { kind: 'not_local' };
+      if (
+        !source ||
+        source.participationRevision !== route.revision ||
+        agentRoute.catId !== source.catId ||
+        !agentRoute.participation?.channelIds.includes(source.location.channelId)
+      ) {
+        throw ingressError('PARTICIPATION_REVOKED', 'Exact public participation is unavailable for this event');
+      }
       if (!this.options.isCatAvailable(agentRoute.catId)) {
         throw ingressError('ROUTE_CAT_UNAVAILABLE', 'Configured Cat is unavailable');
       }
@@ -129,6 +146,7 @@ export class CollectiveIngressDispatcher {
       if (!thread.participants?.includes(agentRoute.catId)) {
         throw ingressError('ROUTE_CAT_NOT_IN_THREAD', 'Configured Cat is not a participant in the destination Thread');
       }
+      await this.options.connector.readParticipationContext(source, 0, 1);
       return this.persistAgentEvent(route, event, agentRoute.threadId, agentRoute.catId);
     }
     return this.persistVisibleEvent(route, event, route.defaultIngressThreadId);
@@ -166,13 +184,15 @@ export class CollectiveIngressDispatcher {
     const enqueue = this.options.invocationQueue.enqueue({
       threadId,
       userId: route.localOwnerUserId,
-      ownerAuthProvenance: 'strict',
+      ownerAuthProvenance: 'unknown',
+      executionScope: 'collective-participation',
       idempotencyKey,
       content: event.body,
       source: 'connector',
       targetCats: [catId],
       intent: 'execute',
       senderMeta: collectiveSender(event),
+      suggestedSkill: 'collective-participation',
     });
     if (enqueue.outcome === 'full' || !enqueue.entry) {
       throw ingressError('ROUTE_QUEUE_FULL', 'Configured Cat queue is full');
@@ -198,6 +218,7 @@ export class CollectiveIngressDispatcher {
         enqueue.entry.id,
         stored.message.id,
       );
+      if (event.workRequest === 'entrust') await this.options.admitStandingWork?.(stored.message, catId as CatId);
       if (!stored.idempotent) {
         this.options.socketManager.emitToUser?.(route.localOwnerUserId, 'messages_queued', {
           threadId,
@@ -256,6 +277,11 @@ function collectiveSource(event: CollectiveEventEnvelope): ConnectorSource {
       eventId: event.eventId,
       sequence: event.sequence,
       target: event.target,
+      ...(event.location ? { location: event.location } : {}),
+      ...(event.recipient ? { recipient: event.recipient } : {}),
+      actor: event.actor,
+      ...(event.workRequest ? { workRequest: event.workRequest } : {}),
+      ...(collectiveEventSourceIdentity(event) ? { participation: collectiveEventSourceIdentity(event) } : {}),
     },
   };
 }

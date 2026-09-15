@@ -29,6 +29,7 @@ describe('F306 provider-neutral semantic event contract', () => {
       'capability',
       'goal',
       'review',
+      'subexecution',
     ]);
   });
 
@@ -66,6 +67,37 @@ describe('F306 provider-neutral semantic event contract', () => {
       expect(isProviderSemanticEvent({ ...base, status })).toBe(true);
     }
     expect(isProviderSemanticEvent({ ...base, status: 'mystery' })).toBe(false);
+  });
+
+  it('keeps child identity provider-neutral and rejects raw or incomplete coordinates', () => {
+    const child = {
+      v: 1,
+      id: 'subexecution:child-1:message-1',
+      kind: 'subexecution',
+      occurredAt: 1_788_000_000_000,
+      stage: 'message',
+      subexecutionId: 'child-1',
+      rootExecutionId: 'root-1',
+      parentExecutionId: 'root-1',
+      rootTurnId: 'root-turn-1',
+      parentTurnId: 'root-turn-1',
+      turnId: 'child-turn-1',
+      agentPath: '/root/reviewer',
+      nickname: 'Bohr',
+      depth: 1,
+      content: 'Independent result',
+      messagePhase: 'final_answer',
+      provenance: { provider: 'codex', carrier: 'app_server', nativeType: 'subAgentActivity' },
+    } as const;
+
+    expect(isProviderSemanticEvent(child)).toBe(true);
+    expect(isProviderSemanticEvent({ ...child, parentTurnId: '' })).toBe(false);
+    expect(isProviderSemanticEvent({ ...child, subexecutionId: ' child-1 ' })).toBe(false);
+    expect(isProviderSemanticEvent({ ...child, rootTurnId: 'x'.repeat(513) })).toBe(false);
+    expect(isProviderSemanticEvent({ ...child, nickname: ' Bohr ' })).toBe(false);
+    expect(isProviderSemanticEvent({ ...child, depth: -1 })).toBe(false);
+    expect(isProviderSemanticEvent({ ...child, rawEnvelope: { method: 'turn/completed' } })).toBe(false);
+    expect(isProviderSemanticEvent({ ...child, stage: 'completed', content: 'stale child text' })).toBe(false);
   });
 
   it('keeps native review target and delivery provider-neutral', () => {

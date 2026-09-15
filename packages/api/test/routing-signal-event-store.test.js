@@ -110,6 +110,19 @@ describe('RedisRoutingSignalEventStore', { skip: redisIsolationSkipReason(REDIS_
     for (const key of keys) assert.equal(await redis.ttl(key), -1, `${key} must be durable`);
   });
 
+  it('persists an atomic success window before a late failure, survives restart and replays once', async () => {
+    const { routingSignalClosures } = await import('@cat-cafe/shared');
+    const probe = closeEvent('recovered', 'probe:1', [], { source: 'dispatch_success', probeStartedAt: 1_500 });
+    await store.append(probe);
+    await store.append(asserted('late:1', { source: 'provider_error', observedAt: 1_100 }));
+    const restarted = new RedisRoutingSignalEventStore(redis);
+    assert.equal((await restarted.append(probe)).outcome, 'replayed');
+    assert.equal(await restarted.getOwnerRevision('owner-1'), 2);
+    const history = await restarted.listByOwner('owner-1');
+    assert.equal(routingSignalClosures(history).get('late:1')?.eventId, 'probe:1');
+    assert.equal(await redis.ttl(RoutingSignalEventKeys.detail('owner-1', 'probe:1')), -1);
+  });
+
   it('replays the exact command but rejects changed payload or event-id collisions', async () => {
     const signal = asserted('signal:replay');
     assert.equal((await store.append(signal)).outcome, 'appended');

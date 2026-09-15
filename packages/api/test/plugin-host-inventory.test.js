@@ -59,10 +59,24 @@ function harness() {
 }
 
 describe('K-2A contract-native inventory', () => {
-  it('pins the API and runtime boundary to plugin-contract beta.12', () => {
-    assert.equal(packageJson.dependencies['@clowder-ai/plugin-contract'], '0.1.0-beta.12');
-    assert.equal(PLUGIN_CONTRACT_PACKAGE_VERSION, '0.1.0-beta.12');
+  it('pins the API and runtime boundary to plugin-contract beta.15', () => {
+    assert.equal(packageJson.dependencies['@clowder-ai/plugin-contract'], '0.1.0-beta.15');
+    assert.equal(PLUGIN_CONTRACT_PACKAGE_VERSION, '0.1.0-beta.15');
     assert.equal(PLUGIN_CONTRACT_VERSION, '0.1.0');
+  });
+
+  it('rejects a traversal entrypoint before admitting any package, instance, or grant', async () => {
+    const { store, controlPlane } = harness();
+    await assert.rejects(
+      controlPlane.installPackage(
+        candidate({ manifest: manifest({ runtime: { transport: 'stdio', entrypoint: '../outside.js' } }) }),
+      ),
+      { code: 'INVALID_MANIFEST' },
+    );
+    const snapshot = await store.snapshot();
+    assert.deepEqual(snapshot.packages, []);
+    assert.deepEqual(snapshot.instances, []);
+    assert.deepEqual(snapshot.grants, []);
   });
 
   it('installs package, instance, and grants atomically with orthogonal initial state', async () => {

@@ -5,12 +5,16 @@ topics: [observability, telemetry, metrics, health-check, infrastructure]
 doc_kind: spec
 created: 2026-04-09
 community_issue: "zts212653/clowder-ai#388"
-tips_exempt: "Renewed 2026-09-04 for the current F308 public-link projection only; no observability capability or user action changed."
+tips_exempt: "Renewed 2026-09-09 for the observability ownership-cell registration and public-link projection; telemetry remains the existing owner and no new user action is introduced."
 ---
 
 # F153: Observability Infrastructure — 运行时可观测基础设施
 
 > **Status**: done | **Owner**: Community + Ragdoll | **Priority**: P2
+
+Architecture cell: observability
+Map delta: new cell landed 2026-09-07（架构归一裁决卡 1）——F153 是 raw telemetry / redaction / health 的 canonical owner；F299 是唯一人形 invocation 面；两者只以 `inv:<invocationId>` / traceId join，不复制事件。见 `docs/architecture/ownership/cells/observability.md`。
+Why: 此前 F153 被 `harness-eval` / `capability-evolution-control` 引用为 telemetry owner 却没有自己的 cell（30 cells 无 observability），归属关系只存在于别的 cell 的引用里。
 
 ## Why
 

@@ -632,11 +632,19 @@ describe('ConnectorInvokeTrigger', () => {
     ]);
   });
 
-  it('passes an authoritative A2A slot claim and durable deferral into connector execution', async () => {
+  it('passes an authoritative A2A slot claim and preserves owner auth in its durable successor', async () => {
     trackerMock.tracker.trackExternalSlot = () => false;
     const trigger = createTrigger();
 
-    trigger.trigger('thread-a2a-admission', /** @type {any} */ ('opus'), 'user-1', 'Review msg', 'msg-review');
+    trigger.trigger(
+      'thread-a2a-admission',
+      /** @type {any} */ ('opus'),
+      'user-1',
+      'Managed command follow-up',
+      'msg-review',
+      undefined,
+      { sourceCategory: 'scheduled', ownerAuthProvenance: 'strict' },
+    );
     await waitForTrigger();
 
     const options = /** @type {any} */ (routerMock.calls[0].options);
@@ -666,6 +674,7 @@ describe('ConnectorInvokeTrigger', () => {
     });
     assert.equal(enqueue.outcome, 'enqueued');
     assert.equal(queue.list('thread-a2a-admission', 'user-1')[0].messageId, 'msg-review');
+    assert.equal(queue.list('thread-a2a-admission', 'user-1')[0].ownerAuthProvenance, 'strict');
   });
 
   it('releases a terminal dynamic A2A child with the connector route controller', async () => {
@@ -712,10 +721,11 @@ describe('ConnectorInvokeTrigger', () => {
       'Managed command completed.',
       'msg-hold-complete',
       undefined,
-      { sourceCategory: 'scheduled' },
+      { sourceCategory: 'scheduled', ownerAuthProvenance: 'strict' },
     );
     await waitForTrigger();
 
+    assert.equal(routerMock.calls[0].options?.ownerAuthProvenance, 'strict');
     assert.deepStrictEqual(routerMock.calls[0].options?.turnCustodyWake, {
       kind: 'structured',
       protocol: 'hold',
@@ -2985,7 +2995,7 @@ describe('ConnectorInvokeTrigger', () => {
         source.content,
         source.id,
         undefined,
-        { sourceCategory: 'scheduled', forceQueue: true },
+        { sourceCategory: 'scheduled', forceQueue: true, ownerAuthProvenance: 'strict' },
       ];
 
       assert.deepEqual(await Promise.all([trigger.trigger(...args), trigger.trigger(...args)]), [
@@ -2997,6 +3007,7 @@ describe('ConnectorInvokeTrigger', () => {
       assert.equal(entries.length, 1, 'concurrent replay must reuse the exact action generation carrier');
       assert.equal(entries[0].messageId, source.id);
       assert.equal(entries[0].sourceCategory, 'scheduled');
+      assert.equal(entries[0].ownerAuthProvenance, 'strict');
       assert.equal(entries[0].idempotencyKey, 'action:lease-review-1:3:opus');
       assert.deepEqual(entries[0].actionSuccessorFence, {
         leaseId: 'lease-review-1',
@@ -3006,9 +3017,71 @@ describe('ConnectorInvokeTrigger', () => {
         invocationLineageRef: 'dispatch:dispatch-review-1',
       });
       assert.equal(messageStore.getById(source.id).queueCustody.entryId, entries[0].id);
+      assert.equal(messageStore.getById(source.id).queueCustody.ownerAuthProvenance, 'strict');
       assert.equal(routerMock.calls.length, 0, 'forceQueue never forks into direct admission');
       assert.equal(recordMock.creates.length, 0);
       assert.deepEqual(autoExecuteCalls, ['thread-managed-event', 'thread-managed-event']);
+    });
+
+    it('never upgrades a legacy source custody from unknown to strict', async () => {
+      const legacySource = {
+        id: 'msg-managed-legacy-custody',
+        userId: 'scheduler',
+        catId: null,
+        content: '[定时任务] legacy managed command completed',
+        mentions: [],
+        timestamp: 2_200,
+        threadId: 'thread-managed-legacy',
+        deliveryStatus: 'queued',
+        source: {
+          connector: 'hold-ball',
+          label: '持球通知',
+          meta: {
+            taskId: 'task-managed-legacy',
+            threadId: 'thread-managed-legacy',
+            catId: 'opus',
+            wakeWhen: true,
+          },
+        },
+        queueCustody: {
+          version: 1,
+          entryId: 'legacy-entry',
+          revision: 1,
+          ownerUserId: 'user-1',
+          intent: 'execute',
+          status: 'queued',
+          allTargetCats: ['opus'],
+          pendingTargetCats: ['opus'],
+          notifiedByCatIds: [],
+          failedByCatIds: [],
+          handledByCatIds: [],
+          seenByCatIds: [],
+          seenInvocationIdByCatId: {},
+          createdAt: 2_200,
+          updatedAt: 2_200,
+        },
+      };
+      const trigger = createTrigger({
+        messageStore: {
+          getById: async (messageId) => (messageId === legacySource.id ? legacySource : null),
+        },
+        queueCustodyCoordinator: {
+          async transferEntryCustody() {},
+        },
+      });
+
+      await trigger.trigger(
+        legacySource.threadId,
+        /** @type {any} */ ('opus'),
+        'user-1',
+        legacySource.content,
+        legacySource.id,
+        undefined,
+        { sourceCategory: 'scheduled', forceQueue: true, ownerAuthProvenance: 'strict' },
+      );
+
+      const [entry] = queue.list(legacySource.threadId, 'user-1');
+      assert.equal(entry.ownerAuthProvenance, 'unknown');
     });
 
     it('force-reset suppression queues a late connector wake before direct admission', async () => {

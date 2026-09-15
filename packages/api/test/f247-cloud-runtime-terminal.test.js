@@ -174,7 +174,9 @@ describe('F247 cloud runtime terminal contract', () => {
         },
         {
           ...baseParams,
-          onPromptMessagesExposed: async (input) => exposed.push(input),
+          onPromptMessagesExposed: async (input) => {
+            exposed.push(input);
+          },
         },
       ),
     ).then((messages) => {

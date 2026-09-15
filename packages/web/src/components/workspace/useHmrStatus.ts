@@ -3,15 +3,19 @@ import { useEffect, useState } from 'react';
 
 export type HmrStatus = 'idle' | 'connected' | 'disconnected';
 
-export function useHmrStatus(gatewayPort: number, targetPort: number): HmrStatus {
+export function useHmrStatus(gatewayPort: number, targetPort: number, enabled = true): HmrStatus {
   const [status, setStatus] = useState<HmrStatus>('idle');
 
   useEffect(() => {
-    if (!gatewayPort || !targetPort) return;
+    if (!enabled || !gatewayPort || !targetPort) {
+      setStatus('idle');
+      return;
+    }
     setStatus('idle');
 
     const wsUrl = `ws://${buildPreviewGatewayHostname(targetPort)}:${gatewayPort}/`;
     let ws: WebSocket | null = null;
+    let retryTimer: ReturnType<typeof setTimeout> | null = null;
     let closed = false;
     let hasEverConnected = false;
 
@@ -24,12 +28,13 @@ export function useHmrStatus(gatewayPort: number, targetPort: number): HmrStatus
           setStatus('connected');
         };
         ws.onclose = () => {
+          if (closed) return;
           // Only show "disconnected" if we previously had a connection.
           // Static servers (python http.server, npx serve, etc.) never
           // have a WebSocket endpoint — no point showing HMR status for them.
           if (hasEverConnected) {
             setStatus('disconnected');
-            if (!closed) setTimeout(connect, 3000);
+            retryTimer = setTimeout(connect, 3000);
           }
           // else: stay 'idle' — server doesn't support HMR
         };
@@ -42,9 +47,10 @@ export function useHmrStatus(gatewayPort: number, targetPort: number): HmrStatus
 
     return () => {
       closed = true;
+      if (retryTimer) clearTimeout(retryTimer);
       ws?.close();
     };
-  }, [gatewayPort, targetPort]);
+  }, [enabled, gatewayPort, targetPort]);
 
   return status;
 }

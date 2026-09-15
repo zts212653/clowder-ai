@@ -17,6 +17,7 @@ export interface HybridPluginRuntimeSupervisorOptions {
     'start' | 'stop' | 'stopAll' | 'recoverAfterRestart' | 'deliver' | 'handshakeTimeoutMs'
   >;
   readonly builtinRuntimes: ReadonlyMap<string, BuiltinPluginRuntime>;
+  readonly resolveBuiltinRuntime?: (packageRecord: PluginPackageRecord) => BuiltinPluginRuntime | undefined;
   readonly now?: () => number;
 }
 
@@ -54,7 +55,9 @@ export class HybridPluginRuntimeSupervisor {
         `${pluginInstanceId} already has a builtin runtime owner`,
       );
     }
-    const runtime = this.options.builtinRuntimes.get(authority.instance.pluginId);
+    const runtime =
+      this.options.builtinRuntimes.get(authority.instance.pluginId) ??
+      this.options.resolveBuiltinRuntime?.(authority.packageRecord);
     if (!runtime) {
       throw new ExternalPluginRuntimeError(
         'UNSUPPORTED_TRANSPORT',
@@ -69,12 +72,18 @@ export class HybridPluginRuntimeSupervisor {
     try {
       await this.setBuiltinRuntimeState(authority, 'starting');
       await runtime.start(pluginInstanceId);
+      if (this.#active.get(pluginInstanceId)?.closed !== closed) {
+        throw new ExternalPluginRuntimeError('INSTANCE_NOT_RUNNABLE', 'builtin startup was cancelled');
+      }
       await this.setBuiltinRuntimeState(authority, 'healthy');
       return { pluginInstanceId, closed };
     } catch (error) {
-      this.#active.delete(pluginInstanceId);
+      if (this.#active.get(pluginInstanceId)?.closed === closed) {
+        await runtime.stop(pluginInstanceId, 'start_failed').catch(() => undefined);
+        await this.setBuiltinRuntimeState(authority, 'stopped').catch(() => undefined);
+        if (this.#active.get(pluginInstanceId)?.closed === closed) this.#active.delete(pluginInstanceId);
+      }
       resolveClosed();
-      await this.setBuiltinRuntimeState(authority, 'stopped').catch(() => undefined);
       throw error;
     }
   }
@@ -88,10 +97,15 @@ export class HybridPluginRuntimeSupervisor {
     const active = this.#active.get(pluginInstanceId);
     if (active) {
       await active.runtime.stop(pluginInstanceId, reason);
-      this.#active.delete(pluginInstanceId);
-      active.resolveClosed();
+      try {
+        await this.setBuiltinRuntimeState(authority, 'stopped');
+      } finally {
+        if (this.#active.get(pluginInstanceId) === active) this.#active.delete(pluginInstanceId);
+        active.resolveClosed();
+      }
+    } else {
+      await this.setBuiltinRuntimeState(authority, 'stopped');
     }
-    await this.setBuiltinRuntimeState(authority, 'stopped');
   }
 
   async stopAll(reason = 'host_shutdown'): Promise<void> {
@@ -159,7 +173,9 @@ export class HybridPluginRuntimeSupervisor {
       if (
         !current ||
         current.lifecycleState !== 'installed' ||
-        current.packageDigest !== authority.instance.packageDigest
+        current.packageDigest !== authority.instance.packageDigest ||
+        current.lifecycleRevision !== authority.instance.lifecycleRevision ||
+        (runtimeState !== 'stopped' && current.activationState !== 'enabled')
       ) {
         throw new ExternalPluginRuntimeError(
           'INSTANCE_NOT_RUNNABLE',

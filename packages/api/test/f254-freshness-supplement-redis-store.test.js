@@ -169,6 +169,7 @@ describe('Redis F254 supplement lifecycle', { skip: redisIsolationSkipReason(RED
     await store.failSupplement(terminal.id, { reason: 'infrastructure', now: 130 });
 
     const recoverable = await store.listRecoverableSupplements();
+    const all = await store.listAllSupplements();
 
     assert.deepEqual(
       recoverable.map((supplement) => [supplement.id, supplement.status]),
@@ -177,6 +178,11 @@ describe('Redis F254 supplement lifecycle', { skip: redisIsolationSkipReason(RED
         [running.id, 'running'],
       ],
     );
+    assert.deepEqual(Object.fromEntries(all.map((supplement) => [supplement.id, supplement.status])), {
+      [pending.id]: 'pending',
+      [running.id]: 'running',
+      [terminal.id]: 'failed',
+    });
   });
 
   it('cascades thread deletion through supplement detail, lineage, thread, and lease indexes', async () => {

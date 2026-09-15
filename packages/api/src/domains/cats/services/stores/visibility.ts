@@ -6,6 +6,15 @@
 import { type CatId, isSelectableManagedHoldConnectorSource } from '@cat-cafe/shared';
 import type { IMessageStore, StoredMessage, ThreadMessageReadOptions } from './ports/MessageStore.js';
 
+/** Fields required to reproduce a persisted message's timeline order without hydrating its history payload. */
+type TimelineOrderMessage = Pick<
+  StoredMessage,
+  'userId' | 'catId' | 'timestamp' | 'deliveredAt' | 'timelineOrderAt' | 'deliveryStatus' | 'origin'
+> & {
+  source?: unknown;
+  queueCustody?: unknown;
+};
+
 /**
  * System-level userIds whose messages are visible to ALL thread participants
  * regardless of the per-user filter (scheduler, system, etc.).
@@ -151,7 +160,7 @@ export function resolveDeliveryTimelineScore(message: StoredMessage, deliveredAt
 }
 
 /** Match the Redis timeline score when constructing pagination cursors in memory. */
-export function getTimelineOrderTime(message: StoredMessage): number {
+export function getTimelineOrderTime(message: TimelineOrderMessage): number {
   if (message.timelineOrderAt !== undefined) return message.timelineOrderAt;
   if (
     isQueuedCatTimelineMessage(message) ||
@@ -166,7 +175,7 @@ function isDeliveredMessage(message: StoredMessage): boolean {
   return !message.deliveryStatus || message.deliveryStatus === 'delivered';
 }
 
-function isRealCatSpeech(message: StoredMessage): boolean {
+function isRealCatSpeech(message: TimelineOrderMessage): boolean {
   return (
     message.catId !== null &&
     message.catId !== 'system' &&
@@ -176,7 +185,7 @@ function isRealCatSpeech(message: StoredMessage): boolean {
   );
 }
 
-function isQueuedCatTimelineMessage(message: StoredMessage): boolean {
+function isQueuedCatTimelineMessage(message: TimelineOrderMessage): boolean {
   return message.deliveryStatus === 'queued' && isRealCatSpeech(message);
 }
 
@@ -185,7 +194,7 @@ function isQueuedCatTimelineMessage(message: StoredMessage): boolean {
  * separate from `isTimelinePublished`: callback/context/prompt readers must not
  * learn an undelivered body merely because the browser can render its receipt.
  */
-function isQueuedUserTimelineMessage(message: StoredMessage): boolean {
+function isQueuedUserTimelineMessage(message: TimelineOrderMessage): boolean {
   if (
     message.deliveryStatus !== 'queued' ||
     message.catId !== null ||
@@ -206,7 +215,7 @@ function isQueuedUserTimelineMessage(message: StoredMessage): boolean {
  * the owner must see the source bubble before the target cat starts replying.
  * System/scheduler connectors remain behind their dedicated visibility gates.
  */
-function isQueuedOwnerConnectorTimelineMessage(message: StoredMessage): boolean {
+function isQueuedOwnerConnectorTimelineMessage(message: TimelineOrderMessage): boolean {
   return (
     message.deliveryStatus === 'queued' &&
     message.catId === null &&

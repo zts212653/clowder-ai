@@ -1,6 +1,6 @@
 ---
 name: pencil-design
-tips_exempt: 2026-09-05 correct existing Pencil IDE host identifiers; no new user-visible capability
+tips_exempt: "2026-09-15 interaction-narrative handoff: clarifies when an unresolved journey needs concept design before existing Pencil work; no new design tool or product surface."
 description: >
   使用 Pencil MCP 创建/编辑 .pen 设计文件，或导出为 React 代码。
   Use when: 设计 UI、编辑 .pen 文件、从设计稿生成代码。
@@ -34,6 +34,8 @@ pencil-design 在 **spec 确认后、写代码前**。先把 UX 做对，再动�
 **可观测性 / 状态 / 失败相关 UI 必读**：动手画之前先过 Design Gate 的 **现场可感知性自检**（`../.cat-cafe-shared-refs/in-context-observability-checklist.md`）。Clowder AI 的可观测性哲学是"明厨亮灶"——in-context 富块 + entity 自带状态点优先于 dashboard。否则容易画成上个世纪的 stats card 被打回（F174 D2b 教训）。
 
 ## 🔴 风格一致性门禁（Style Consistency Gate）
+
+用户任务、信息先后或跨界面交接尚未明确时，先按[交互叙事](../.cat-cafe-shared-refs/interaction-narrative.md)厘清，需可点验证则交 concept-demo-design。已确认的设计或纯样式工作直接进入本技能，不追加叙事/黄金路径重做。
 
 **这是最重要的规则。** 在创建任何新设计之前，必须完成以下步骤：
 

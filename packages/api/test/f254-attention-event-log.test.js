@@ -139,6 +139,148 @@ describe('F254 FreshnessAttentionEventLog', { skip: redisIsolationSkipReason(RED
     assert.equal(inv2[0].kind, 'forward_decision');
   });
 
+  it('proves a half-open owner-scoped replay window and rejects coverage gaps', async () => {
+    const now = 1700000065000;
+    const settledWindowEnd = 1700000005000;
+    const windowLog = new FreshnessAttentionEventLog(redis, () => now);
+    await windowLog.initializeWindowedReplayCoverage(1700000000000);
+    await windowLog.append(
+      {
+        ...baseEvent,
+        kind: 'held_decision',
+        toolName: 'post_message',
+        unseenCount: 1,
+        reason: 'unseen_available',
+        timestamp: 1700000001000,
+      },
+      { ownerUserId: 'owner-1' },
+    );
+    await windowLog.append(
+      {
+        ...baseEvent,
+        invocationId: 'inv-owner-2',
+        kind: 'forward_decision',
+        toolName: 'post_message',
+        reason: 'no_unseen',
+        timestamp: 1700000002000,
+      },
+      { ownerUserId: 'owner-2' },
+    );
+
+    const complete = await windowLog.queryWindowBetween(1700000000000, settledWindowEnd, 'owner-1');
+    assert.equal(complete.coverage.status, 'complete');
+    assert.deepEqual(
+      complete.events.map((event) => event.kind),
+      ['held_decision'],
+    );
+
+    const beforeCoverage = await windowLog.queryWindowBetween(1699999999999, settledWindowEnd, 'owner-1');
+    assert.equal(beforeCoverage.coverage.status, 'incomplete');
+    assert.equal(beforeCoverage.coverage.reason, 'window_starts_before_coverage');
+
+    const unsettledTail = await windowLog.queryWindowBetween(1700000000000, settledWindowEnd + 1, 'owner-1');
+    assert.equal(unsettledTail.coverage.status, 'incomplete');
+    assert.equal(unsettledTail.coverage.reason, 'window_ends_after_observed_through');
+
+    const restartedAt = 1700000003000;
+    assert.equal(await windowLog.initializeWindowedReplayCoverage(restartedAt), restartedAt);
+    const spanningRestart = await windowLog.queryWindowBetween(1700000000000, settledWindowEnd, 'owner-1');
+    assert.equal(spanningRestart.coverage.status, 'incomplete');
+    assert.equal(spanningRestart.coverage.reason, 'window_starts_before_coverage');
+  });
+
+  it('invalidates later publication when a fail-open event append leaves a process-local gap', async () => {
+    const transaction = {
+      rpush() {
+        return transaction;
+      },
+      expire() {
+        return transaction;
+      },
+      zadd() {
+        return transaction;
+      },
+      zremrangebyscore() {
+        return transaction;
+      },
+      async exec() {
+        throw new Error('simulated append failure');
+      },
+    };
+    const gapLog = new FreshnessAttentionEventLog(
+      {
+        multi: () => transaction,
+        get: async () => '0',
+        zrangebyscore: async () => [],
+      },
+      () => 100_000,
+    );
+    await assert.rejects(
+      gapLog.append(
+        {
+          ...baseEvent,
+          kind: 'forward_decision',
+          toolName: 'post_message',
+          reason: 'no_unseen',
+          timestamp: 100_000,
+        },
+        { ownerUserId: 'owner-1' },
+      ),
+      /simulated append failure/,
+    );
+
+    const result = await gapLog.queryWindowBetween(0, 10_000, 'owner-1');
+    assert.equal(result.coverage.status, 'incomplete');
+    assert.equal(result.coverage.reason, 'event_append_gap');
+    assert.equal(result.coverage.completeFromMs, 100_001);
+  });
+
+  it('invalidates later publication when startup cannot advance the durable coverage fence', async () => {
+    let now = 200_000;
+    const gapLog = new FreshnessAttentionEventLog(
+      {
+        eval: async () => {
+          throw new Error('simulated startup Redis outage');
+        },
+        get: async () => '0',
+        zrangebyscore: async () => [],
+      },
+      () => now,
+    );
+    await assert.rejects(gapLog.initializeWindowedReplayCoverage(), /simulated startup Redis outage/);
+
+    now = 300_000;
+    const result = await gapLog.queryWindowBetween(0, 100_000, 'owner-1');
+    assert.equal(result.coverage.status, 'incomplete');
+    assert.equal(result.coverage.reason, 'event_append_gap');
+    assert.equal(result.coverage.completeFromMs, 200_001);
+  });
+
+  it('fails owner-scoped replay closed when an event lacks owner provenance', async () => {
+    const now = 1700000065000;
+    const settledWindowEnd = 1700000005000;
+    const windowLog = new FreshnessAttentionEventLog(redis, () => now);
+    await windowLog.initializeWindowedReplayCoverage(1700000000000);
+    await windowLog.append({
+      ...baseEvent,
+      kind: 'forward_decision',
+      toolName: 'post_message',
+      reason: 'no_unseen',
+      timestamp: 1700000001000,
+    });
+
+    const result = await windowLog.queryWindowBetween(1700000000000, settledWindowEnd, 'owner-1');
+    assert.equal(result.coverage.status, 'incomplete');
+    assert.equal(result.coverage.reason, 'unscoped_events_present');
+    assert.deepEqual(result.events, []);
+
+    const unrelatedThread = await windowLog.queryWindowBetween(1700000000000, settledWindowEnd, 'owner-1', {
+      threadIds: ['thread-without-unscoped-event'],
+    });
+    assert.equal(unrelatedThread.coverage.status, 'complete');
+    assert.deepEqual(unrelatedThread.events, []);
+  });
+
   // --- held_decision event ---
 
   it('records held_decision events from Phase A gate', async () => {

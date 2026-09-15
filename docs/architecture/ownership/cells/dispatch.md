@@ -13,6 +13,8 @@ code_anchors:
   - packages/api/src/domains/cats/services/agents/invocation/InvocationQueue.ts
   - packages/api/src/domains/cats/services/agents/invocation/QueueProcessor.ts
   - packages/api/src/domains/cats/services/agents/invocation/QueueCarrierSourceProjection.ts
+  - packages/api/src/domains/cats/services/agents/invocation/PerCatTerminalDispositionCollector.ts
+  - packages/api/src/domains/cats/services/agents/invocation/queue-terminal-consumption.ts
   - packages/api/src/domains/cats/services/stores/ports/InvocationRecordStore.ts
   - packages/api/src/domains/cats/services/stores/redis/RedisInvocationRecordStore.ts
   - packages/api/src/domains/cats/services/agents/invocation/queue-entry-settlement.ts
@@ -47,6 +49,7 @@ code_anchors:
   - packages/api/src/routes/callback-multi-mention-routes.ts
   - packages/api/src/routes/callbacks.ts
 doc_anchors:
+  - feature-specs/2026-09-06-issue1371-direct-witness.md
   - docs/features/F295-cancelable-execution-projection.md
   - docs/features/F177-harness-update.md
   - docs/features/F167-a2a-chain-quality.md
@@ -69,6 +72,7 @@ doc_anchors:
   - feature-specs/2026-08-12-1291-gate5-retry-revalidation.md
 static_scan_hints: [TurnExecutionRecord, TurnExecutionStore, RedisTurnExecutionStore, TurnExecutionStartupReconciler, executionKind, auxiliaryTurnExecutions, InvocationQueue, QueueProcessor, InvocationRecordStore, RedisInvocationRecordStore, WaitContinuationCarrierV1, waitContinuationCarrier, queuedAttemptIdByCatId, QueueTargetAttempt, targetAttempts, resolveQueueEntrySettlement, QueueCustodyReplacementProof, CollaborationContinuityCapsule, dispatch_handled_continuation, QueuedMessageCustody, QueueBodyExposure, QueueMessageReceipt, QueueMessageReceiptProjection, messageReceipts, QueueReceiptTarget, QueueReminderAttempt, QueuedMessageCustodyCoordinator, QueuedMessageCustodyStartupReconciler, projectQueueReceipt, transitionQueueCustody, restoreDurableEntry, InvocationTracker, ConnectorInvokeTrigger, resolveThreadAccess, actionSuccessorFence, actionLeaseId, actionGeneration, freshnessClosureId, freshnessRequiredFrontierMessageId, freshnessSupplementId, readOnlyToolPolicy, busy, priority, autoExecute]
 cited_by:
+  - {feature: issue-1371-direct-witness, date: 2026-09-06, delta: direct route consumers forward exact child and adopted wake witnesses through the shared terminal collector to existing Queue custody CAS; source projection reuses canonical managed-hold owner visibility}
   - {feature: F295-post-close-thread-admission, date: 2026-08-22, delta: active-execution read and exact-cancel reuse canonical owner/default/user-index/external-anchor thread admission before liveness lookup while retaining masked shared occupancy and execution-principal control fences}
   - {feature: F295, date: 2026-08-13, delta: one project-scoped read projection joins canonical live invocation truth with existing managed-command receipts; every displayed execution carries thread, kind, exact identity and an identity-fenced cancel target or an explicit non-cancelable reason}
   - {feature: issue-1291-gate6-batch-steer, date: 2026-08-13, delta: Batch Steer accepts only an exact allowlist of compatible ordinary-user entries for one cat; Queue reserves the complete set before one preempt and QueueProcessor creates one replacement invocation without F175 absorbing unselected neighbors}

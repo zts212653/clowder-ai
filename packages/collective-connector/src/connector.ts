@@ -1,7 +1,13 @@
-import { type CollectivePairingIntent, collectivePairingIntentSchema } from '@cat-cafe/shared';
+import { isDeepStrictEqual } from 'node:util';
+import {
+  type CollectivePairingIntent,
+  type CollectiveSourceIdentity,
+  collectivePairingIntentSchema,
+} from '@cat-cafe/shared';
 
 import { type ConnectorSyncHooks, ConnectorSynchronization } from './connector-synchronization.js';
-import { queueVerifiedAgentMessage } from './outbox-custody.js';
+import { prepareReplyOperation, queueVerifiedAgentMessage, submitReplyOperation } from './outbox-custody.js';
+import { participationDeclaration, requireParticipation } from './participation-custody.js';
 import { ConnectorPersistence } from './persistence.js';
 import { type ConnectorProjection, projectConnection } from './projection.js';
 import {
@@ -34,6 +40,7 @@ export type { ConnectorSyncHooks } from './connector-synchronization.js';
 
 export class CollectiveConnector {
   private readonly synchronization: ConnectorSynchronization;
+  private readonly authorityTails = new Map<string, Promise<void>>();
 
   private constructor(
     private readonly persistence: ConnectorPersistence,
@@ -102,11 +109,11 @@ export class CollectiveConnector {
   }
 
   sync(connectionId: string, hooks: ConnectorSyncHooks = {}): Promise<ConnectorProjection> {
-    return this.synchronization.sync(connectionId, hooks);
+    return this.withAuthority(connectionId, () => this.synchronization.sync(connectionId, hooks));
   }
 
   async revoke(connectionId: string): Promise<ConnectorProjection> {
-    return this.synchronization.revoke(connectionId);
+    return this.withAuthority(connectionId, () => this.synchronization.revoke(connectionId));
   }
 
   async getProjection(connectionId: string): Promise<ConnectorProjection> {
@@ -126,8 +133,126 @@ export class CollectiveConnector {
     return structuredClone(connection.inbox);
   }
 
-  async setHostRoute(connectionId: string, unsafeInput: SetHostRouteInput): Promise<HostRouteConfig> {
-    return setHostRoute({ persistence: this.persistence, now: this.now, connectionId, unsafeInput });
+  async setHostRoute(
+    connectionId: string,
+    unsafeInput: SetHostRouteInput,
+    expectedRevision?: number,
+  ): Promise<HostRouteConfig> {
+    return this.withAuthority(connectionId, () =>
+      setHostRoute({
+        persistence: this.persistence,
+        now: this.now,
+        connectionId,
+        unsafeInput,
+        ...(expectedRevision !== undefined ? { expectedRevision } : {}),
+      }),
+    );
+  }
+
+  async publishParticipation(connectionId: string): Promise<void> {
+    return this.withAuthority(connectionId, async () => {
+      const state = this.persistence.snapshot();
+      const connection = requireConnection(state.connections[connectionId]);
+      const route = state.hostRoutes[connectionId];
+      if (!route || connection.authorityStatus !== 'connected' || !connection.endpointCredential)
+        throw new Error('Participation is not configured');
+      await this.service.publishParticipation(
+        connection.serviceUrl,
+        connection.endpointCredential,
+        participationDeclaration(connection, route),
+      );
+    });
+  }
+
+  /** Linearizes accepted public effects with local binding changes and endpoint revocation. */
+  private async withAuthority<T>(connectionId: string, operation: () => Promise<T>): Promise<T> {
+    const previous = this.authorityTails.get(connectionId);
+    let release!: () => void;
+    const current = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    this.authorityTails.set(connectionId, current);
+    await previous;
+    try {
+      return await operation();
+    } finally {
+      release();
+      if (this.authorityTails.get(connectionId) === current) this.authorityTails.delete(connectionId);
+    }
+  }
+
+  async isParticipationPublished(connectionId: string): Promise<boolean> {
+    const state = this.persistence.snapshot();
+    const connection = requireConnection(state.connections[connectionId]);
+    const route = state.hostRoutes[connectionId];
+    if (!route || connection.authorityStatus !== 'connected' || !connection.endpointCredential) return false;
+    const declaration = await this.service.readParticipationDeclaration(
+      connection.serviceUrl,
+      connection.endpointCredential,
+      {
+        serviceInstanceId: connection.serviceInstanceId,
+        collectiveId: connection.collectiveId,
+        connectionId,
+      },
+    );
+    return (
+      isDeepStrictEqual(declaration, participationDeclaration(connection, route)) &&
+      this.persistence.snapshot().hostRoutes[connectionId]?.revision === route.revision
+    );
+  }
+
+  async readParticipationContext(source: CollectiveSourceIdentity, afterSequence = 0, limit = 30) {
+    const { connection, credential } = requireParticipation(this.persistence.snapshot(), source);
+    const context = await this.service.readParticipationContext(
+      connection.serviceUrl,
+      credential,
+      source,
+      afterSequence,
+      limit,
+    );
+    requireParticipation(this.persistence.snapshot(), source);
+    if (
+      context.source.eventId !== source.eventId ||
+      context.source.serviceInstanceId !== source.serviceInstanceId ||
+      context.source.collectiveId !== source.collectiveId ||
+      !isDeepStrictEqual(context.source.location, source.location) ||
+      !isDeepStrictEqual(context.source.actor, source.actor)
+    )
+      throw new Error('Collective source identity changed');
+    return context;
+  }
+
+  prepareReply(source: CollectiveSourceIdentity, sourceRef: string, resultKey: string, workRevision?: number) {
+    return prepareReplyOperation({
+      persistence: this.persistence,
+      now: this.now,
+      source,
+      sourceRef,
+      resultKey,
+      ...(workRevision ? { workRevision } : {}),
+    });
+  }
+
+  async submitReply(
+    source: CollectiveSourceIdentity,
+    sourceRef: string,
+    resultKey: string,
+    operationId: string,
+    body: string,
+    agent: VerifiedAgent,
+  ) {
+    await this.readParticipationContext(source, 0, 1);
+    return submitReplyOperation({
+      persistence: this.persistence,
+      now: this.now,
+      source,
+      sourceRef,
+      resultKey,
+      operationId,
+      body,
+      agent,
+      verifyAgent: this.verifyAgent,
+    });
   }
 
   async getHostRoute(connectionId: string): Promise<HostRouteConfig | undefined> {

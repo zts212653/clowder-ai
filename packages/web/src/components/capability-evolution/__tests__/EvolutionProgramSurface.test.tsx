@@ -1,21 +1,40 @@
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { WorkspaceSurfaceVisibilityProvider } from '@/components/workbench/WorkspaceSurfaceVisibility';
 import { EvolutionProgramList, EvolutionProgramSurface } from '../EvolutionProgramSurface';
+import { useEvolutionReading } from '../evolution-reading-state';
+import { programFixture } from './evolution-fixtures';
 
 const apiFetchMock = vi.fn();
+const assetFetchMock = vi.fn();
 const navigationMocks = vi.hoisted(() => ({ openInvocationTrajectory: vi.fn() }));
-vi.mock('@/utils/api-client', () => ({ apiFetch: (...args: unknown[]) => apiFetchMock(...args) }));
+vi.mock('@/utils/api-client', () => ({
+  apiFetch: async (...args: unknown[]) => {
+    if (String(args[0]).includes('/asset-review')) {
+      assetFetchMock(...args);
+      return new Response('{}', { status: 404 });
+    }
+    const response = await apiFetchMock(...args);
+    return response instanceof Response ? response.clone() : response;
+  },
+}));
 vi.mock('@/components/workspace/trajectory/trajectory-navigation', () => ({
   openInvocationTrajectory: navigationMocks.openInvocationTrajectory,
 }));
 
 const projection = {
+  ...programFixture(),
   program: {
-    programId: 'evolution-program:abc',
+    ...programFixture().program,
+    programId: 'evolution-program:bcc336788a7df9d6075b1efb4c0a7e68',
     workspaceId: 'user:operator',
+    displayName: 'Video Forge',
     objectRef: { ownerFeatureId: 'F202', ownerStateRef: 'skill:video-forge', version: 'v1' },
-    claimRef: { ownerFeatureId: 'F311', ownerStateRef: 'evolution-claim:evolution-program:abc' },
+    claimRef: {
+      ownerFeatureId: 'F311',
+      ownerStateRef: 'evolution-claim:evolution-program:bcc336788a7df9d6075b1efb4c0a7e68',
+    },
     lifecycle: 'active',
     stage: 'constituting',
     sequence: 1,
@@ -23,12 +42,27 @@ const projection = {
     updatedAt: '2026-08-31T22:00:00.000Z',
   },
   drafts: {
-    goal: { ownerFeatureId: 'F311', ownerStateRef: 'evolution-goal-draft:evolution-program:abc' },
-    measurement: { ownerFeatureId: 'F267', ownerStateRef: 'evolution-measurement-draft:evolution-program:abc' },
-    economic: { ownerFeatureId: 'F311', ownerStateRef: 'evolution-economic-draft:evolution-program:abc' },
+    goal: {
+      ownerFeatureId: 'F311',
+      ownerStateRef: 'evolution-goal-draft:evolution-program:bcc336788a7df9d6075b1efb4c0a7e68',
+    },
+    measurement: {
+      ownerFeatureId: 'F267',
+      ownerStateRef: 'evolution-measurement-draft:evolution-program:bcc336788a7df9d6075b1efb4c0a7e68',
+    },
+    economic: {
+      ownerFeatureId: 'F311',
+      ownerStateRef: 'evolution-economic-draft:evolution-program:bcc336788a7df9d6075b1efb4c0a7e68',
+    },
     roles: {
-      observer: { ownerFeatureId: 'F267', ownerStateRef: 'evolution-role-draft:evolution-program:abc:observer' },
-      calibrator: { ownerFeatureId: 'F267', ownerStateRef: 'evolution-role-draft:evolution-program:abc:calibrator' },
+      observer: {
+        ownerFeatureId: 'F267',
+        ownerStateRef: 'evolution-role-draft:evolution-program:bcc336788a7df9d6075b1efb4c0a7e68:observer',
+      },
+      calibrator: {
+        ownerFeatureId: 'F267',
+        ownerStateRef: 'evolution-role-draft:evolution-program:bcc336788a7df9d6075b1efb4c0a7e68:calibrator',
+      },
     },
   },
   blockers: [
@@ -91,6 +125,8 @@ describe('F311 Evolution Program Workbench surface', () => {
   beforeEach(() => {
     (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
     apiFetchMock.mockReset();
+    assetFetchMock.mockReset();
+    useEvolutionReading.setState({ programs: {}, workspaceProgramIds: {} });
     container = document.createElement('div');
     document.body.appendChild(container);
     root = createRoot(container);
@@ -108,18 +144,20 @@ describe('F311 Evolution Program Workbench surface', () => {
 
   it('reads the canonical projection and shows lifecycle, refs, blocker, and next action', async () => {
     apiFetchMock.mockResolvedValue(new Response(JSON.stringify(projection), { status: 200 }));
-    await renderView(<EvolutionProgramSurface programId="evolution-program:abc" />);
+    await renderView(<EvolutionProgramSurface programId="evolution-program:bcc336788a7df9d6075b1efb4c0a7e68" />);
 
     expect(container.textContent).toContain('active');
     expect(container.textContent).toContain('constituting');
     expect(container.textContent).toContain('skill:video-forge');
     expect(container.textContent).toContain('measurement_certificate_missing');
-    expect(container.textContent).toContain('继续自动建制');
+    expect([...container.querySelectorAll('button')].some((button) => button.textContent === '继续自动建制')).toBe(
+      false,
+    );
   });
 
   it('shows real connected eyes, gaps, F192 timing, and owner drilldowns without copying payloads', async () => {
     apiFetchMock.mockResolvedValue(new Response(JSON.stringify(projection), { status: 200 }));
-    await renderView(<EvolutionProgramSurface programId="evolution-program:abc" />);
+    await renderView(<EvolutionProgramSurface programId="evolution-program:bcc336788a7df9d6075b1efb4c0a7e68" />);
 
     expect(container.textContent).toContain('已接眼睛');
     expect(container.textContent).toContain('paw-feel-disposition');
@@ -172,7 +210,7 @@ describe('F311 Evolution Program Workbench surface', () => {
       },
     };
     apiFetchMock.mockResolvedValue(new Response(JSON.stringify({ ...projection, attribution }), { status: 200 }));
-    await renderView(<EvolutionProgramSurface programId="evolution-program:abc" />);
+    await renderView(<EvolutionProgramSurface programId="evolution-program:bcc336788a7df9d6075b1efb4c0a7e68" />);
 
     expect(container.querySelector('[data-testid="evolution-attribution-panel"]')).not.toBeNull();
     expect(container.textContent).toContain('证据还不能确诊是哪一层出的问题。');
@@ -183,16 +221,16 @@ describe('F311 Evolution Program Workbench surface', () => {
 
   it('says the round has no evaluation yet instead of hiding the panel', async () => {
     apiFetchMock.mockResolvedValue(new Response(JSON.stringify({ ...projection, attribution: null }), { status: 200 }));
-    await renderView(<EvolutionProgramSurface programId="evolution-program:abc" />);
+    await renderView(<EvolutionProgramSurface programId="evolution-program:bcc336788a7df9d6075b1efb4c0a7e68" />);
 
     expect(container.textContent).toContain('这一轮还没有评估结果');
   });
 
   it('fails closed when an older API projection lacks the observation contract', async () => {
     apiFetchMock.mockResolvedValue(new Response(JSON.stringify({ ...projection, observation: {} }), { status: 200 }));
-    await renderView(<EvolutionProgramSurface programId="evolution-program:abc" />);
+    await renderView(<EvolutionProgramSurface programId="evolution-program:bcc336788a7df9d6075b1efb4c0a7e68" />);
 
-    expect(container.textContent).toContain('Program projection is invalid');
+    expect(container.textContent).toContain('这项进化记录暂时无法读取');
     expect(container.textContent).not.toContain('已接眼睛');
   });
 
@@ -206,17 +244,19 @@ describe('F311 Evolution Program Workbench surface', () => {
         { status: 200 },
       ),
     );
-    await renderView(<EvolutionProgramSurface programId="evolution-program:abc" />);
-    const pause = [...container.querySelectorAll('button')].find((button) => button.textContent === '暂停 Program');
+    await renderView(<EvolutionProgramSurface programId="evolution-program:bcc336788a7df9d6075b1efb4c0a7e68" />);
+    const pause = [...container.querySelectorAll('button')].find((button) => button.textContent === '暂停项目');
     if (!pause) throw new Error('pause action missing');
     await act(async () => pause.click());
 
     expect(apiFetchMock).toHaveBeenCalledTimes(2);
     const [path, init] = apiFetchMock.mock.calls[1] as [string, RequestInit];
-    expect(path).toBe('/api/capability-evolution/programs/evolution-program%3Aabc/commands');
+    expect(path).toBe(
+      '/api/capability-evolution/programs/evolution-program%3Abcc336788a7df9d6075b1efb4c0a7e68/commands',
+    );
     const body = JSON.parse(String(init.body));
     expect(body.action.type).toBe('pause');
-    expect(body.clientMessageId).toBe('workbench:pause:evolution-program:abc:sequence:1');
+    expect(body.clientMessageId).toBe('workbench:pause:evolution-program:bcc336788a7df9d6075b1efb4c0a7e68:sequence:1');
     expect(body).not.toHaveProperty('actorRef');
     expect(body).not.toHaveProperty('workspaceId');
     expect(body).not.toHaveProperty('stage');
@@ -233,39 +273,42 @@ describe('F311 Evolution Program Workbench surface', () => {
         new Response(JSON.stringify({ outcome: 'conflict', actualSequence: 2, projection: latest }), { status: 409 }),
       );
 
-    await renderView(<EvolutionProgramSurface programId="evolution-program:abc" />);
-    const pause = [...container.querySelectorAll('button')].find((button) => button.textContent === '暂停 Program');
+    await renderView(<EvolutionProgramSurface programId="evolution-program:bcc336788a7df9d6075b1efb4c0a7e68" />);
+    const pause = [...container.querySelectorAll('button')].find((button) => button.textContent === '暂停项目');
     if (!pause) throw new Error('pause action missing');
     await act(async () => pause.click());
 
     expect(container.textContent).toContain('paused');
     expect(container.textContent).toContain('sequence 2');
-    expect(container.textContent).toContain('已被其他操作者更新，已同步到最新状态');
+    expect(container.textContent).toContain('已被其他操作更新，已同步到最新状态');
     expect(container.querySelector('[data-notice-code="program_state_synchronized"]')).not.toBeNull();
-    expect([...container.querySelectorAll('button')].some((button) => button.textContent === '恢复 Program')).toBe(
-      true,
-    );
+    expect([...container.querySelectorAll('button')].some((button) => button.textContent === '恢复项目')).toBe(true);
     expect(container.textContent).not.toContain('Program command failed (409)');
   });
 
   it('makes every canonical Program immediately discoverable on Workbench Home', async () => {
-    apiFetchMock.mockResolvedValue(new Response(JSON.stringify({ programs: [projection] }), { status: 200 }));
+    apiFetchMock
+      .mockResolvedValueOnce(new Response(JSON.stringify({ programs: [projection] }), { status: 200 }))
+      .mockResolvedValue(new Response(JSON.stringify(projection), { status: 200 }));
     const onOpenProgram = vi.fn();
     await renderView(<EvolutionProgramList onOpenProgram={onOpenProgram} />);
 
     const program = [...container.querySelectorAll('button')].find((button) =>
-      button.textContent?.includes('video-forge'),
+      button.textContent?.includes('Video Forge'),
     );
     if (!program) throw new Error('Program list item missing');
-    act(() => program.click());
-    expect(onOpenProgram).toHaveBeenCalledWith('evolution-program:abc');
+    await act(async () => program.click());
+    const inspect = [...container.querySelectorAll('button')].find((button) => button.textContent === '展开阅读 →');
+    if (!inspect) throw new Error('Program detail review entry missing');
+    act(() => inspect.click());
+    expect(onOpenProgram.mock.calls[0]?.[0]).toBe('evolution-program:bcc336788a7df9d6075b1efb4c0a7e68');
   });
 
   it('distinguishes the initial canonical read from a genuinely empty workspace', async () => {
     apiFetchMock.mockReturnValue(new Promise(() => undefined));
     await renderView(<EvolutionProgramList onOpenProgram={() => undefined} />);
 
-    expect(container.textContent).toContain('正在读取 canonical Programs');
+    expect(container.textContent).toContain('正在读取能力进化记录');
     expect(container.textContent).not.toContain('说“我们来进化 X”');
   });
 
@@ -290,11 +333,52 @@ describe('F311 Evolution Program Workbench surface', () => {
     }
   });
 
+  it('does zero retained-surface reads while hidden and catches up without rebuilding on return', async () => {
+    vi.useFakeTimers();
+    Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'visible' });
+    apiFetchMock.mockResolvedValue(new Response(JSON.stringify(projection), { status: 200 }));
+    const programId = 'evolution-program:bcc336788a7df9d6075b1efb4c0a7e68';
+    const render = (visible: boolean) =>
+      renderView(
+        <WorkspaceSurfaceVisibilityProvider visible={visible}>
+          <EvolutionProgramSurface programId={programId} />
+        </WorkspaceSurfaceVisibilityProvider>,
+      );
+    try {
+      await render(false);
+      await act(async () => vi.advanceTimersByTimeAsync(60_000));
+      expect(apiFetchMock).not.toHaveBeenCalled();
+      expect(assetFetchMock).not.toHaveBeenCalled();
+
+      await render(true);
+      expect(apiFetchMock).toHaveBeenCalledTimes(1);
+      expect(assetFetchMock).toHaveBeenCalledTimes(1);
+      const owner = container.querySelector('[data-testid="evolution-program-surface"]');
+
+      await act(async () => vi.advanceTimersByTimeAsync(60_000));
+      expect(apiFetchMock).toHaveBeenCalledTimes(31);
+      expect(assetFetchMock).toHaveBeenCalledTimes(61);
+
+      await render(false);
+      await act(async () => vi.advanceTimersByTimeAsync(60_000));
+      expect(apiFetchMock).toHaveBeenCalledTimes(31);
+      expect(assetFetchMock).toHaveBeenCalledTimes(61);
+      expect(container.querySelector('[data-testid="evolution-program-surface"]')).toBe(owner);
+
+      await render(true);
+      expect(apiFetchMock).toHaveBeenCalledTimes(32);
+      expect(assetFetchMock).toHaveBeenCalledTimes(62);
+      expect(container.querySelector('[data-testid="evolution-program-surface"]')).toBe(owner);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('shows a bounded owner-unavailable state without inventing a local Program', async () => {
     apiFetchMock.mockResolvedValue(new Response(JSON.stringify({ error: 'unavailable' }), { status: 503 }));
     await renderView(<EvolutionProgramList onOpenProgram={() => undefined} />);
 
-    expect(container.textContent).toContain('Program owner 暂时不可用');
-    expect(container.querySelectorAll('button')).toHaveLength(0);
+    expect(container.textContent).toContain('暂时无法读取进化记录');
+    expect(container.querySelectorAll('[data-testid^="capability-evolution-program-"]')).toHaveLength(0);
   });
 });

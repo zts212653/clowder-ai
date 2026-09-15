@@ -134,7 +134,7 @@ export function createCapabilityEvolutionProgramAdapterHandlers(options: Adapter
     if (!options.service) return options.unavailable(reply);
     try {
       const params = z
-        .object({ programId: programIdSchema, sceneIndex: z.coerce.number().int().min(1).max(7) })
+        .object({ programId: programIdSchema, sceneIndex: z.coerce.number().int().min(0).max(7) })
         .strict()
         .parse(request.params);
       const current = await options.service.get(params.programId);

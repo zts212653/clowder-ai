@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { CURRENT_RELATIONSHIP_PROFILE_URI } from '../profile-contract.js';
+import { CURRENT_CORPUS_PROFILE_URI, CURRENT_RELATIONSHIP_PROFILE_URI } from '../profile-contract.js';
 
 export const RECALL_OPPORTUNITY_CATALOG_VERSION = 5 as const;
 
@@ -184,7 +184,7 @@ export const profileRevisionAvailableOpportunityV1Schema = z
     producer: z.literal('profile_repository'),
     payload: z
       .object({
-        profileUri: z.literal(CURRENT_RELATIONSHIP_PROFILE_URI),
+        profileUri: z.union([z.literal(CURRENT_RELATIONSHIP_PROFILE_URI), z.literal(CURRENT_CORPUS_PROFILE_URI)]),
         sourceRevision: boundedIdentifier(200),
       })
       .strict(),

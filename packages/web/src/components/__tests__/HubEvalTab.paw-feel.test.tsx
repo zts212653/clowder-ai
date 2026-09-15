@@ -77,6 +77,11 @@ const historyPage: PawFeelInboxPage = {
         exitKind: 'terminal_disposition',
         evidenceRefs: ['commit:abc'],
       },
+      issue: {
+        resolution: 'open',
+        continuation: { kind: 'legacy_blocker_unbound', evidenceRefs: ['commit:abc'] },
+        ageMs: 7 * 24 * 3_600_000,
+      },
       source: {
         availability: 'available',
         preview: '工具卡住后没有返回清晰错误',
@@ -118,6 +123,7 @@ const historyPage: PawFeelInboxPage = {
     blocked: 0,
     terminal: 1,
   },
+  issueCounts: { open: 1, resolved: 0, overdue: 1 },
   degraded: false,
 };
 

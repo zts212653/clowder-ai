@@ -314,6 +314,32 @@ test('persists an owner-only Host route and maps an exact Collective Agent targe
   }
 });
 
+test('Collective participation and private Work cannot bypass the exact return operation through legacy owner send', async () => {
+  for (const override of [
+    { executionGrant: { kind: 'collective-participation' } },
+    { collectiveWorkBinding: { taskId: 'work' } },
+  ]) {
+    const { app, calls } = await harness(true, override);
+    try {
+      const response = await app.inject({
+        method: 'POST',
+        url: '/api/callbacks/collective-connector/con_12345678/send',
+        headers: { 'x-invocation-id': 'inv_1', 'x-callback-token': 'callback-secret' },
+        payload: {
+          clientEventId: 'new-event',
+          target: { kind: 'channel', channelId: 'elsewhere' },
+          body: 'Wrong target',
+        },
+      });
+      assert.equal(response.statusCode, 403, response.payload);
+      assert.equal(response.json().code, 'EXACT_COLLECTIVE_RETURN_REQUIRED');
+      assert.equal(calls.filter((call) => call[0] === 'send').length, 0);
+    } finally {
+      await app.close();
+    }
+  }
+});
+
 test('queues Agent signals only from callback authority and derives provenance from the authenticated invocation', async () => {
   const { app, calls } = await harness();
   try {
