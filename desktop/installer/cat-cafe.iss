@@ -117,8 +117,8 @@ Source: "..\..\packages\api\src\plugins\*";        DestDir: "{app}\plugins"; \
 Source: "..\scripts\post-install-offline.ps1";   DestDir: "{app}\scripts"
 Source: "..\scripts\generate-desktop-config.ps1"; DestDir: "{app}\scripts"
 Source: "..\scripts\sync-agent-hooks-offline.mjs"; DestDir: "{app}\scripts"
-; User-level Agent CLI hook truth source used by F180 health/sync.
-Source: "..\..\.claude\hooks\user-level\*";      DestDir: "{app}\.claude\hooks\user-level"; \
+; Project compaction carrier and user-level Agent CLI hooks.
+Source: "..\..\.claude\hooks\*";      DestDir: "{app}\.claude\hooks"; \
   Flags: recursesubdirs createallsubdirs
 ; (Electron app is shipped as electron.tar.gz in bulk archives above)
 ; Desktop assets (icon used by uninstaller entry)

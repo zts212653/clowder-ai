@@ -1,6 +1,12 @@
 import assert from 'node:assert/strict';
+import { spawn } from 'node:child_process';
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { describe, test } from 'node:test';
+import { fileURLToPath } from 'node:url';
 import Fastify from 'fastify';
+import { installClaudeCompactionHooks } from '../../../scripts/install-claude-compaction-hooks.mjs';
 
 const { ContextEpochOwner, contextEpochScopeKey } = await import(
   '../dist/domains/cats/services/session/ContextEpochOwner.js'
@@ -64,6 +70,81 @@ function printCapability() {
 }
 
 describe('F296 B3b-3: authenticated PreCompact → epoch → post-compact packet', () => {
+  test('installed portable commands reach the real route and preserve one authenticated epoch', async () => {
+    const projectRoot = mkdtempSync(join(tmpdir(), 'clowder hook command 测试-'));
+    const app = Fastify();
+    try {
+      installClaudeCompactionHooks({
+        sourceRoot: fileURLToPath(new URL('../../../', import.meta.url)),
+        projectRoot,
+        apply: true,
+      });
+      const settings = JSON.parse(readFileSync(join(projectRoot, '.claude/settings.json'), 'utf8'));
+      const sessionChainStore = new SessionChainStore();
+      const record = sessionChainStore.create({ ...SCOPE, cliSessionId: 'portable-runtime', compressionCount: 0 });
+      sessionChainStore.applyPolicySnapshot(record.id, {
+        config: {
+          strategy: 'handoff',
+          thresholds: { warn: 0.75, action: 0.85 },
+          turnBudget: 12000,
+          safetyMargin: 4000,
+        },
+        source: 'runtime_override',
+        revision: 'portable:1',
+        changedAt: 0,
+        execution: { status: 'unavailable', missingCapabilities: ['authoritative_usage'] },
+      });
+      const contextEpochOwner = new ContextEpochOwner(new InMemoryContextEpochStore());
+      await app.register(sessionHooksRoutes, {
+        sessionChainStore,
+        sessionSealer: new SessionSealer(sessionChainStore),
+        transcriptReader: { readDigest: async () => null, readEvents: async () => ({ events: [], hasMore: false }) },
+        contextEpochOwner,
+        resolveContextCapability: printCapability,
+        callbackRegistry: callbackRegistry(),
+        postCompactContextProjector: async () => ({ contextPacket: 'PORTABLE-TRUSTED-COLD' }),
+      });
+      await app.listen({ host: '127.0.0.1', port: 0 });
+      const run = (command) =>
+        new Promise((resolve, reject) => {
+          const child = spawn(command, {
+            shell: true,
+            cwd: projectRoot,
+            env: {
+              ...process.env,
+              PATH: '',
+              Path: '',
+              API_SERVER_PORT: String(app.server.address().port),
+              CAT_CAFE_INVOCATION_ID: CALLBACK_AUTH.invocationId,
+              CAT_CAFE_CALLBACK_TOKEN: CALLBACK_AUTH.callbackToken,
+            },
+          });
+          let stdout = '',
+            stderr = '';
+          child.stdout.on('data', (data) => {
+            stdout += data;
+          });
+          child.stderr.on('data', (data) => {
+            stderr += data;
+          });
+          child.on('error', reject);
+          child.on('close', (code) => resolve({ code, stdout, stderr }));
+          child.stdin.end(JSON.stringify({ session_id: record.cliSessionId, trigger: 'auto' }));
+        });
+      const pre = await run(settings.hooks.PreCompact[0].hooks[0].command);
+      assert.equal(pre.code, 0, pre.stderr);
+      const observed = sessionChainStore.get(record.id);
+      assert.equal(observed.compressionCount, 1);
+      assert.equal(observed.compressionObservation.invocationId, CALLBACK_AUTH.invocationId);
+      const post = await run(settings.hooks.SessionStart[0].hooks[0].command);
+      assert.equal(post.code, 0, post.stderr);
+      assert.match(JSON.parse(post.stdout).hookSpecificOutput.additionalContext, /PORTABLE-TRUSTED-COLD/);
+      assert.equal(sessionChainStore.get(record.id).compressionCount, 1, 'post hook must replay the observation');
+    } finally {
+      await app.close();
+      rmSync(projectRoot, { recursive: true, force: true });
+    }
+  });
   test('a legacy unknown lifetime total still advances once without fabricating historical telemetry', async () => {
     const epochStore = new InMemoryContextEpochStore();
     const contextEpochOwner = new ContextEpochOwner(epochStore);
