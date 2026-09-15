@@ -117,6 +117,17 @@ export class ReviewFeedbackRouter {
           ...(signal.resultConversationCommentCursor
             ? { resultConversationCommentCursor: signal.resultConversationCommentCursor }
             : {}),
+          // #1392 AC-6: these were only ever used to advance cursors below, so no predicate could
+          // see them — "data collected, no notification". They are facts now.
+          ...(signal.newComments.length > 0
+            ? {
+                comments: signal.newComments.map((comment) => ({
+                  id: comment.id,
+                  author: comment.author,
+                  commentType: comment.commentType,
+                })),
+              }
+            : {}),
         },
       },
       collectorPatch: {

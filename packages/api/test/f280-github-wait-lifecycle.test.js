@@ -448,6 +448,46 @@ describe('F280 GitHub wait lifecycle integration', () => {
     });
   }
 
+  /*
+   * #1392 AC-6 end to end: the last comment before a merge is exactly the one an owner must not
+   * miss, and after this delivery the task is done — nothing will ever report it later.
+   */
+  it('a merged PR still reports the awaited comment that arrived in the same poll', async () => {
+    const { lifecycle, messageStore, taskStore, task } = await harness([
+      { kind: 'pr_conversation_comment_added', authorLogins: ['maintainer'] },
+    ]);
+    const log = { info() {}, warn() {}, error() {} };
+    const router = new ReviewFeedbackRouter({ deliveryDeps: { messageStore }, waitLifecycle: lifecycle, log });
+
+    const result = await router.route(
+      {
+        repoFullName: 'owner/repo',
+        prNumber: 7,
+        headSha: 'aaaa1111',
+        newComments: [
+          {
+            id: 31,
+            author: 'maintainer',
+            body: 'merging',
+            createdAt: '2026-09-15T00:00:00Z',
+            commentType: 'conversation',
+          },
+        ],
+        newDecisions: [],
+        inlineCommentCursor: 20,
+        conversationCommentCursor: 31,
+        decisionCursor: 40,
+        subjectState: 'merged',
+      },
+      { taskId: task.id },
+    );
+
+    assert.equal(result.kind, 'notified');
+    assert.match(result.content, /conversation comment #31 by maintainer/, 'the final comment is not dropped');
+    assert.match(result.content, /merged/);
+    assert.equal((await taskStore.get(task.id)).status, 'done', 'and tracking still ends');
+  });
+
   it('keeps CI failure and mindfn COMMENTED state-only, then wakes once for the awaited new HEAD', async () => {
     const { lifecycle, messageStore, taskStore, task } = await harness([{ kind: 'pr_head_changed' }]);
     const log = { info() {}, warn() {}, error() {} };

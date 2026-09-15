@@ -91,4 +91,57 @@ describe('F280 register_issue_tracking public contract', () => {
     const { registerIssueTrackingInputSchema } = await import('../dist/tools/callback-tools.js');
     assert.equal(registerIssueTrackingInputSchema.autoRenew.isOptional(), true);
   });
+
+  /*
+   * #1392 AC-3: `issue_comment_added` accepts an optional `authorLogins`. The server honoured it,
+   * but this tool's strict schema refused the key — so the audience existed only for raw HTTP
+   * callers, and no cat could use it.
+   */
+  it('accepts an optional issue comment audience and forwards it unchanged', async () => {
+    const { registerIssueTrackingInputSchema, handleRegisterIssueTracking } = await import(
+      '../dist/tools/callback-tools.js'
+    );
+    const named = [{ kind: 'issue_comment_added', authorLogins: ['maintainer'] }];
+    assert.equal(registerIssueTrackingInputSchema.when.safeParse(named).success, true, 'named audience');
+    assert.equal(
+      registerIssueTrackingInputSchema.when.safeParse([{ kind: 'issue_comment_added' }]).success,
+      true,
+      'omitted audience stays valid for issues',
+    );
+    assert.equal(
+      registerIssueTrackingInputSchema.when.safeParse([{ kind: 'issue_comment_added', authorLogins: [] }]).success,
+      false,
+      'an empty audience matches nobody',
+    );
+    assert.equal(
+      registerIssueTrackingInputSchema.when.safeParse([{ kind: 'issue_comment_added', authorLogins: [' '] }]).success,
+      false,
+      'a blank login matches nobody either',
+    );
+
+    const originalFetch = globalThis.fetch;
+    const originalEnv = { ...process.env };
+    let requestBody;
+    process.env.CAT_CAFE_API_URL = 'http://127.0.0.1:1';
+    process.env.CAT_CAFE_INVOCATION_ID = 'f280-issue-audience-invocation';
+    process.env.CAT_CAFE_CALLBACK_TOKEN = 'f280-issue-audience-token';
+    process.env.CAT_CAFE_CALLBACK_RETRY_DELAYS_MS = '0,0,0';
+    globalThis.fetch = async (_url, options) => {
+      requestBody = JSON.parse(options.body);
+      return { ok: true, json: async () => ({ status: 'ok' }) };
+    };
+    try {
+      await handleRegisterIssueTracking({
+        repoFullName: 'zts212653/cat-cafe',
+        issueNumber: 1392,
+        when: named,
+        nextStep: 'Read the maintainer reply.',
+      });
+      assert.deepEqual(requestBody.when, named);
+    } finally {
+      globalThis.fetch = originalFetch;
+      for (const key of Object.keys(process.env)) if (!(key in originalEnv)) delete process.env[key];
+      Object.assign(process.env, originalEnv);
+    }
+  });
 });

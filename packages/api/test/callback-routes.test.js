@@ -5571,6 +5571,47 @@ describe('Callback Routes', () => {
     assert.equal(Object.hasOwn(JSON.parse(response.body).await, 'autoRenew'), false);
   });
 
+  /*
+   * #1392 AC-3: a PR comment wait names who it is waiting on. An omitted audience is refused at the
+   * real entry rather than stored as an open audience nobody chose; a named one is frozen and comes
+   * back in the response, so the caller can see exactly whose comments will wake it.
+   */
+  test('POST register-pr-tracking refuses a PR comment wait without an audience and stores nothing', async () => {
+    const app = await createApp();
+    const { invocationId, callbackToken } = await registry.create('user-1', 'opus', 'thread-pr');
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/callbacks/register-pr-tracking',
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
+      payload: prWaitPayload({ when: [{ kind: 'pr_conversation_comment_added' }] }),
+    });
+
+    assert.equal(response.statusCode, 400, response.body);
+    assert.equal(taskStore.getBySubject('pr:zts212653/cat-cafe#99'), null, 'a rejected registration stores nothing');
+  });
+
+  test('POST register-pr-tracking freezes a named PR comment audience and returns it', async () => {
+    const app = await createApp();
+    const { invocationId, callbackToken } = await registry.create('user-1', 'opus', 'thread-pr');
+    const when = [
+      { kind: 'pr_conversation_comment_added', authorLogins: ['pr-author'] },
+      { kind: 'pr_inline_comment_added', authorLogins: ['pr-author'] },
+    ];
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/callbacks/register-pr-tracking',
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
+      payload: prWaitPayload({ when }),
+    });
+
+    assert.equal(response.statusCode, 200, response.body);
+    assert.deepEqual(JSON.parse(response.body).await.continuation.when, when);
+    const stored = taskStore.getBySubject('pr:zts212653/cat-cafe#99');
+    assert.deepEqual(stored.automationState.await.continuation.when, when);
+  });
+
   test('POST register-pr-tracking maps a confirmed GitHub 404 to 422', async () => {
     const { resolveGitHubObjectLookup } = await import('../dist/infrastructure/github/github-object-validator.js');
     const notFound = Object.assign(new Error('gh: Not Found (HTTP 404)'), {

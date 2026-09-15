@@ -65,6 +65,10 @@ export async function readGitHubWaitBaseline(
     'pr_review_result_available',
     'pr_review_decision_changed',
     'pr_review_thread_changed',
+    // #1392 AC-6: without these the comment frontiers were never captured at registration, so
+    // every pre-registration comment would have looked new.
+    'pr_conversation_comment_added',
+    'pr_inline_comment_added',
   );
   const needsCi = hasPredicate(input.when, 'pr_ci_terminal');
   const needsConflict = hasPredicate(input.when, 'pr_became_conflicting');
