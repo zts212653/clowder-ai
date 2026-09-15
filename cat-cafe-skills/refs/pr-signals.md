@@ -7,7 +7,7 @@
 PR tracker 不是“订阅所有 GitHub 事件”，而是一次性等待点：
 
 ```text
-live baseline + typed predicate + nextStep + expiresAt
+live baseline + typed predicate + nextStep + expiresAt(可选)
   → 不匹配：只推进事实台账
   → 匹配：消费本 generation，投递一条 compact diff
   → merged/closed：终止并投递 subject terminal
@@ -40,7 +40,7 @@ cat_cafe_register_pr_tracking(
   prNumber=42,
   when=[{ kind: "pr_head_changed" }],
   nextStep="Re-lock the exact HEAD and review the delta.",
-  expiresAt=<future unix ms>
+  expiresAt=<future unix ms>  # 可选；省略则没有时间到期
 )
 
 # 等 CI 到终态
@@ -49,7 +49,7 @@ cat_cafe_register_pr_tracking(
   prNumber=42,
   when=[{ kind: "pr_ci_terminal" }, { kind: "pr_became_conflicting" }],
   nextStep="Re-check mergeability and continue merge-gate.",
-  expiresAt=<future unix ms>
+  expiresAt=<future unix ms>  # 可选；省略则没有时间到期
 )
 
 # Codex connector 已对 exact trigger 留下 EYES 后，等该结果
@@ -58,7 +58,7 @@ cat_cafe_register_pr_tracking(
   prNumber=42,
   when=[{ kind: "pr_review_result_available", triggerCommentId: 123456789 }],
   nextStep="Consume the exact-HEAD cloud review verdict.",
-  expiresAt=<future unix ms>
+  expiresAt=<future unix ms>  # 可选；省略则没有时间到期
 )
 ```
 

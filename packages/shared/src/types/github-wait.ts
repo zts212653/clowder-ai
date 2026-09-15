@@ -99,7 +99,12 @@ export interface UnifiedAwaitStateV1<SubjectRef extends string, Baseline, Predic
     readonly when: readonly Predicate[];
     readonly then: string;
   };
-  readonly expiresAt: number;
+  /**
+   * #1392 AC-2: optional absolute deadline. Omitted means no time-based termination. When
+   * supplied it is a loud terminal outcome and is not extended by renewal. Read it only through
+   * `isAwaitExpired` — see that function for why direct comparison is unsafe.
+   */
+  readonly expiresAt?: number;
   readonly createdAt: number;
 }
 

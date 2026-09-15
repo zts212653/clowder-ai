@@ -190,7 +190,7 @@ cat_cafe_register_pr_tracking(
   prNumber,
   when=[{ kind: "pr_head_changed" }],
   nextStep="Re-lock exact HEAD and review the delta.",
-  expiresAt=<future unix ms>
+  expiresAt=<future unix ms>  # 可选；省略则没有时间到期
 )
 ```
 
@@ -200,7 +200,7 @@ cat_cafe_register_pr_tracking(
 | `prNumber` | 通知 `source.meta.number` |
 | `when` | 当前真正改变下一步的 typed condition |
 | `nextStep` | 条件满足后 owner 要做的动作 |
-| `expiresAt` | 当前责任失效时间 |
+| `expiresAt` | 可选：当前责任失效时间；省略则没有时间到期 |
 
 > **owner / baseline 由服务端解析**：API 从当前 task/custody 和 GitHub live truth 生成，不接受 payload 覆盖。注册历史不会被回灌为 wake。
 

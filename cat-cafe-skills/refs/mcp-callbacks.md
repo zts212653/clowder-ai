@@ -40,7 +40,12 @@ PR tracking 是显式、一次性的 typed wait，不是事件订阅器。调用
 
 - `when`：1–4 个 flat any-of predicate；只允许 F280 catalog 中的 typed 条件。
 - `nextStep`：条件满足后要做什么；只显示、不解析为 policy。
-- `expiresAt`：责任失效时间。baseline 与 owner fence 均由 server 从实时真相生成，调用方不能提交。
+
+可选：
+
+- `expiresAt`：责任失效时间（Unix ms）。**省略则没有时间到期**；写了必须在未来，并会在注册返回中可见。
+
+baseline 与 owner fence 均由 server 从实时真相生成，调用方不能提交。
 
 不匹配的 GitHub 事实只推进 collector 台账；匹配时每个 generation 最多投递一次 compact delta。merged/closed 会投递 terminal outcome；expiry、owner change、user cancel 静默终止。re-register 原子替换上一 generation。
 

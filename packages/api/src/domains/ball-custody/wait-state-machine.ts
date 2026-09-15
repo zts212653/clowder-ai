@@ -85,13 +85,27 @@ function terminalize(
   };
 }
 
+/**
+ * #1392 AC-2: whether an await has passed its deadline. `expiresAt` is optional, and omitted
+ * means no time-based termination at all.
+ *
+ * Every caller must ask this one function. Comparing against `active.expiresAt` directly is
+ * wrong in both directions once the field can be absent: `at >= undefined` and
+ * `at < undefined` are BOTH false, so one call site silently reads "not expired" while another
+ * silently reads "expired-or-matched" — and the second skipped the collector patch on every quiet
+ * poll with nothing woken to reveal it.
+ */
+export function isAwaitExpired(active: { readonly expiresAt?: number }, at: number): boolean {
+  return active.expiresAt !== undefined && at >= active.expiresAt;
+}
+
 export function transitionWaitState(current: WaitRuntimeState, event: WaitTransitionEvent): WaitTransitionResult {
   const active = current.await;
   if (!active || active.generation !== event.generation) {
     return { applied: false, reason: 'generation_inactive', state: current };
   }
 
-  if (event.at >= active.expiresAt) {
+  if (isAwaitExpired(active, event.at)) {
     return terminalize(current, active, { reason: 'expired', at: event.at });
   }
 
