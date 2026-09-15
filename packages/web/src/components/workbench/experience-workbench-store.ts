@@ -23,8 +23,7 @@ const DEFAULT_LAYOUT = createInitialWorkbenchState();
 
 function retainMainAreaAttention(layout: WorkbenchLayoutState, surfaceId: string | null): string | null {
   if (surfaceId === null || layout.activeSurfaceId !== surfaceId) return null;
-  const surface = layout.surfaces.find((candidate) => candidate.id === surfaceId);
-  return surface?.capabilities.mainAreaAttention === true ? surfaceId : null;
+  return layout.surfaces.some((surface) => surface.id === surfaceId) ? surfaceId : null;
 }
 
 function hostedSurfaceIds(layout: WorkbenchLayoutState): Set<string> {
@@ -80,9 +79,7 @@ export const useF307ExperienceWorkbenchStore = create<ExperienceWorkbenchStore>(
     set((current) => ({
       mainAreaAttentionSurfaceId:
         current.layout.activeSurfaceId === surfaceId &&
-        current.layout.surfaces.some(
-          (surface) => surface.id === surfaceId && surface.capabilities.mainAreaAttention === true,
-        )
+        current.layout.surfaces.some((surface) => surface.id === surfaceId)
           ? surfaceId
           : null,
     }));

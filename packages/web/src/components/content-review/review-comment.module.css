@@ -1,0 +1,106 @@
+.composer {
+  position: relative;
+  display: flex;
+  align-items: center;
+  width: min(440px, calc(100vw - 66px));
+  max-width: 100%;
+  gap: 8px;
+  padding: 7px 8px 7px 14px;
+  border: 1px solid var(--cafe-border-subtle);
+  border-radius: 24px;
+  background: var(--cafe-surface-canvas);
+  box-shadow: var(--shadow-elevation-2);
+  color: var(--cafe-accent);
+}
+.composer label {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  align-items: center;
+}
+.composer textarea {
+  width: 100%;
+  height: 38px;
+  min-height: 38px;
+  max-height: 110px;
+  resize: none;
+  padding: 10px 2px;
+  border: 0;
+  outline: none;
+  background: transparent;
+  color: var(--cafe-text);
+  font-size: var(--console-font-compact);
+  line-height: 18px;
+}
+.composer textarea::placeholder {
+  color: var(--cafe-text-muted);
+}
+.send {
+  display: grid;
+  flex-shrink: 0;
+  width: 36px;
+  height: 36px;
+  place-items: center;
+  border-radius: 50%;
+  background: var(--cafe-accent);
+  color: var(--cafe-accent-foreground);
+}
+.send:disabled {
+  background: var(--cafe-surface-sunken);
+  color: var(--cafe-text-muted);
+  cursor: not-allowed;
+}
+.send:focus-visible {
+  outline: 2px solid var(--cafe-accent);
+  outline-offset: 3px;
+}
+.composerCaption {
+  position: absolute;
+  top: calc(100% + 5px);
+  left: 10px;
+  color: var(--cafe-text-muted);
+  font-size: var(--console-font-micro);
+}
+.popover {
+  position: absolute;
+  left: var(--comment-left);
+  top: var(--comment-top);
+  z-index: 7;
+  width: min(320px, calc(100% - 24px));
+  padding: 12px;
+  border: 1px solid var(--cafe-border-subtle);
+  border-radius: 16px;
+  background: var(--cafe-surface-canvas);
+  box-shadow: var(--shadow-elevation-3);
+}
+.popover .composer {
+  width: 100%;
+  border: 0;
+  border-radius: 0;
+  padding: 8px 0 0;
+  box-shadow: none;
+}
+.popover .composer textarea {
+  min-height: 76px;
+  height: 76px;
+}
+.popover .composerCaption {
+  top: calc(100% + 1px);
+  left: 0;
+}
+.popoverHeading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  color: var(--cafe-text-secondary);
+  font-size: var(--console-font-xs);
+}
+.popoverHeading svg {
+  color: var(--cafe-accent);
+}
+@media (max-width: 600px) {
+  .popover {
+    left: 8px;
+    width: calc(100% - 16px);
+  }
+}

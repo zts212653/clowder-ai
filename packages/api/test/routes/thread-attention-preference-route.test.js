@@ -130,4 +130,53 @@ describe('GET/PUT /api/config/thread-attention (F277)', () => {
       groups: [],
     });
   });
+
+  it('persists and resets owner Group sorting without changing manual membership or other preferences', async () => {
+    const url = '/api/config/thread-attention';
+    const anchor = 'group:attention_sort';
+    await app.inject({ method: 'PUT', url, headers, payload: { anchor, alias: '发布', open: true } });
+    const response = await app.inject({
+      method: 'PUT',
+      url,
+      headers,
+      payload: { anchor, memberSort: 'running-first' },
+    });
+    assert.equal(response.statusCode, 200, response.payload);
+    const subsequent = await app.inject({
+      method: 'PUT',
+      url,
+      headers,
+      payload: { anchor, open: true, alias: '发布' },
+    });
+    assert.equal(subsequent.json().memberSort[anchor], 'running-first', 'other preference writes preserve the mode');
+    const persisted = JSON.parse(await readFile(join(projectRoot, '.cat-cafe', 'user-preferences.json'), 'utf-8'));
+    assert.equal(persisted.threadAttention.memberSort[anchor], 'running-first');
+    const snapshot = (await app.inject({ method: 'GET', url, headers })).json();
+    assert.equal(snapshot.memberSort[anchor], 'running-first');
+    assert.equal(snapshot.aliases[anchor], '发布');
+    assert.equal(snapshot.open[anchor], true);
+    assert.deepEqual(snapshot.groups, []);
+    for (const payload of [
+      { anchor, memberSort: 'unknown' },
+      { anchor: 'title:guess', memberSort: 'manual' },
+    ]) {
+      assert.equal((await app.inject({ method: 'PUT', url, headers, payload })).statusCode, 400);
+    }
+    assert.equal(
+      (
+        await app.inject({
+          method: 'PUT',
+          url,
+          headers: { 'x-cat-cafe-user': 'guest' },
+          payload: { anchor, memberSort: 'manual' },
+        })
+      ).statusCode,
+      403,
+    );
+    assert.deepEqual((await app.inject({ method: 'GET', url, headers })).json(), snapshot);
+    const reset = await app.inject({ method: 'PUT', url, headers, payload: { anchor, memberSort: null } });
+    assert.equal(reset.statusCode, 200);
+    assert.equal(reset.json().memberSort?.[anchor], undefined);
+    assert.equal(reset.json().open[anchor], true);
+  });
 });

@@ -74,6 +74,32 @@ describe('F254 queued message custody Redis CAS', { skip: redisIsolationSkipReas
 
     assert.deepEqual((await store.getById(message.id)).queueCustody, makeCustody());
     assert.equal(await redis.ttl(`msg:${message.id}`), -1);
+    const replayRecords = await store.listOwnerQueueCustodyLifecycles('user-1');
+    assert.deepEqual(replayRecords, [
+      {
+        messageId: message.id,
+        threadId: 'thread-redis',
+        userId: 'user-1',
+        custody: makeCustody(),
+      },
+    ]);
+    assert.equal('content' in replayRecords[0], false, 'replay source must remain content-free');
+
+    await store.append({
+      userId: 'user-1',
+      catId: null,
+      content: 'mismatched custody owner',
+      mentions: ['opus'],
+      timestamp: 1_001,
+      threadId: 'thread-redis',
+      deliveryStatus: 'queued',
+      queueCustody: makeCustody({ entryId: 'entry-other-owner', ownerUserId: 'user-2' }),
+    });
+    assert.deepEqual(
+      await store.listOwnerQueueCustodyLifecycles('user-1'),
+      replayRecords,
+      'owner-scoped replay must reject custody whose durable owner disagrees with the message owner',
+    );
 
     const left = makeCustody({ revision: 2, status: 'processing', processingStartedAt: 1_100, updatedAt: 1_100 });
     const right = makeCustody({ revision: 2, seenByCatIds: ['codex'], updatedAt: 1_101 });

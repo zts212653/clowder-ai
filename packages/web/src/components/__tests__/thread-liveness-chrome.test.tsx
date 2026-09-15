@@ -52,7 +52,7 @@ function resetStore() {
 }
 
 function seedThreadBExecution() {
-  const request = useActiveExecutionStore.getState().beginHydration('thread-a');
+  const request = useActiveExecutionStore.getState().beginHydration('thread-a', '/project/cafe');
   useActiveExecutionStore.getState().applySnapshot('thread-a', request, {
     projectPath: '/project/cafe',
     executions: [

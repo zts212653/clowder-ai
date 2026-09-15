@@ -5,6 +5,16 @@
  * these DTOs carry only source identity, irreversible digest and disposition facts.
  */
 
+import type { OwnerTruthRefV1 } from './capability-evolution-refs.js';
+import type {
+  PawFeelDirectRepairBindingV1,
+  PawFeelDirectRepairOutcomeV1,
+  PawFeelIssueCounts,
+  PawFeelIssueProjection,
+  PawFeelResumeConditionV1,
+} from './paw-feel-continuation.js';
+import type { PawFeelReconciliationCoverage } from './paw-feel-duty.js';
+
 export const PAW_FEEL_DISPOSITION_STATES = [
   'new',
   'seen',
@@ -65,6 +75,8 @@ export type PawFeelSignatureAction =
       leaseId: string;
       leaseGeneration: number;
       custodyEvidenceRef: string;
+      /** Required for new writes; optional only while replaying pre-D5 signature requests. */
+      directRepairBinding?: PawFeelDirectRepairBindingV1;
     };
 
 export interface PawFeelSignatureRequest {
@@ -78,6 +90,7 @@ export interface PawFeelSignatureRequest {
 export interface PawFeelResponsibilityBlocker {
   code: string;
   ref: string;
+  resumeCondition?: PawFeelResumeConditionV1;
 }
 
 export const PAW_FEEL_RESPONSIBILITY_STATES = [
@@ -172,6 +185,7 @@ export type PawFeelDispositionEvent =
       leaseId: string;
       leaseGeneration: number;
       custodyEvidenceRef: string;
+      directRepairBinding?: PawFeelDirectRepairBindingV1;
     })
   | (PawFeelEventBase & {
       type: 'signature_requested';
@@ -182,6 +196,29 @@ export type PawFeelDispositionEvent =
       type: 'blocked';
       blockerCode: string;
       blockerRef: string;
+      resumeCondition?: PawFeelResumeConditionV1;
+    })
+  | (PawFeelEventBase & {
+      type: 'blocker_reopened';
+      reopen:
+        | {
+            kind: 'condition';
+            conditionId: string;
+            blockedVersion: string;
+            resumeVersion: string;
+            reason: 'condition_changed' | 'bounded_time_due';
+            evidenceRefs: OwnerTruthRefV1[];
+          }
+        | {
+            kind: 'legacy_unbound';
+            blockingSequence: number;
+            blockerEventDigest: string;
+            manifestDigest: string;
+          };
+    })
+  | (PawFeelEventBase & {
+      type: 'repair_outcome_linked';
+      outcome: PawFeelDirectRepairOutcomeV1;
     });
 
 export interface PawFeelDispositionProjection extends PawFeelSourceRef {
@@ -200,6 +237,8 @@ export interface PawFeelDispositionProjection extends PawFeelSourceRef {
   taskId?: string;
   actionLeaseRef?: { leaseId: string; generation: number };
   custodyEvidenceRef?: string;
+  directRepairBinding?: PawFeelDirectRepairBindingV1;
+  repairOutcome?: PawFeelDirectRepairOutcomeV1;
   signatureRequest?: PawFeelSignatureRequest;
   blocker?: PawFeelResponsibilityBlocker;
   backfilled: boolean;
@@ -223,6 +262,8 @@ export type PawFeelSourceResolution =
 export interface PawFeelInboxItem {
   disposition: PawFeelDispositionProjection;
   responsibility: PawFeelResponsibilityProjection;
+  /** Issue lifecycle is orthogonal to the backwards-compatible duty receipt. */
+  issue: PawFeelIssueProjection;
   source: PawFeelSourceResolution;
   /** Original message timeline time, resolved live from MessageStore. */
   sourceOccurredAt?: string;
@@ -281,6 +322,7 @@ export interface PawFeelReviewBundle {
   rawSignalCount: number;
   stateCounts: Partial<Record<PawFeelDispositionState, number>>;
   responsibility: PawFeelResponsibilityProjection;
+  issue: PawFeelIssueProjection;
 }
 
 export interface PawFeelReviewBundleCounts {
@@ -298,36 +340,10 @@ export interface PawFeelInboxPage {
   counts: PawFeelInboxCounts;
   /** Bundle-level responsibility truth; raw-signal counts remain available in counts. */
   responsibilityCounts: PawFeelResponsibilityCounts;
+  /** Issue-lifecycle totals; legacy `counts` remains the duty/disposition axis. */
+  issueCounts: PawFeelIssueCounts;
   nextCursor?: string;
   degraded: boolean;
   coverage?: PawFeelReconciliationCoverage;
-  unavailableReason?: string;
-}
-
-export interface PawFeelDutyConfig {
-  systemThreadId: 'thread_eval_friction';
-  primaryCatId?: string;
-  backupCatId?: string;
-  version: number;
-  updatedAt: string;
-  updatedBy: string;
-}
-
-export function isCompletePawFeelDutyConfig(
-  config: PawFeelDutyConfig | null | undefined,
-): config is PawFeelDutyConfig & { primaryCatId: string; backupCatId: string } {
-  return Boolean(config?.primaryCatId && config.backupCatId && config.primaryCatId !== config.backupCatId);
-}
-
-export interface PawFeelReconciliationCoverage {
-  coverageStartAt: string;
-  /** Cutover boundary after which only typed capture may mint new rows. */
-  typedCaptureActivatedAt?: string;
-  lastFullScanStartedAt?: string;
-  lastFullScanCompletedAt?: string;
-  lastOverlapCompletedAt?: string;
-  lastSeenTimelineAt?: string;
-  status: 'uninitialized' | 'healthy' | 'lagging' | 'unavailable';
-  lagMs?: number;
   unavailableReason?: string;
 }

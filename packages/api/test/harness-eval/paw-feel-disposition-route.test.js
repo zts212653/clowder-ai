@@ -183,7 +183,7 @@ describe('F278 paw-feel disposition routes', () => {
     const denied = await fixture.app.inject({ method: 'GET', url: '/api/paw-feel/inbox' });
     const allowed = await fixture.app.inject({
       method: 'GET',
-      url: '/api/paw-feel/inbox?states=new,seen&limit=25&overdueOnly=true&sort=newest',
+      url: '/api/paw-feel/inbox?states=new,seen&limit=25&overdueOnly=true&resolution=open&issueOverdueOnly=true&sort=newest',
       headers: { 'x-session-user': 'user-1' },
     });
 
@@ -192,6 +192,8 @@ describe('F278 paw-feel disposition routes', () => {
     assert.deepEqual(fixture.readQueries[0], {
       states: ['new', 'seen'],
       overdueOnly: true,
+      resolution: 'open',
+      issueOverdueOnly: true,
       limit: 25,
       sort: 'newest',
     });
@@ -259,6 +261,40 @@ describe('F278 paw-feel disposition routes', () => {
     assert.equal(allowed.statusCode, 200);
     assert.deepEqual(fixture.triageCalls[0].principal, { kind: 'cat', id: 'opus' });
     assert.equal(fixture.triageCalls[0].commands.length, 1);
+  });
+
+  it('separates repair-owner outcome ingress from duty receipt reconciliation', async () => {
+    const fixture = await createApp();
+    apps.push(fixture.app);
+    const command = {
+      type: 'link_repair_outcome',
+      eventId: 'outcome-1',
+      signalId: 'signal-1',
+      expectedSequence: 2,
+      bindingRef: { ownerFeatureId: 'F278', ownerStateRef: 'paw-feel-direct-repair-binding:one' },
+      ownerOutcomeRef: { ownerFeatureId: 'F167', ownerStateRef: 'owner-outcome:one' },
+    };
+
+    const wrongIngress = await fixture.app.inject({
+      method: 'POST',
+      url: '/api/callbacks/paw-feel-triage',
+      headers: callbackHeaders(),
+      payload: { commands: [command] },
+    });
+    const response = await fixture.app.inject({
+      method: 'POST',
+      url: '/api/callbacks/paw-feel-repair-outcome',
+      headers: callbackHeaders(),
+      payload: command,
+    });
+
+    assert.equal(wrongIngress.statusCode, 400);
+    assert.equal(response.statusCode, 200);
+    assert.deepEqual(fixture.triageCalls[0], {
+      principal: { kind: 'cat', id: 'opus' },
+      commands: [command],
+    });
+    assert.deepEqual(fixture.receiptCalls, []);
   });
 
   it('captures a new report through authenticated sourceMessageId-only intake', async () => {
@@ -425,6 +461,7 @@ describe('F278 paw-feel disposition routes', () => {
           signalId: 'signal-3',
           expectedSequence: 1,
           leaseId: 'lease-active',
+          actionRef: 'fixture-action',
         },
       });
       const legacy = await fixture.app.inject({

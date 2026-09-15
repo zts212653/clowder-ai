@@ -1,6 +1,7 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useSearchParams } from 'next/navigation';
+import { Suspense, useCallback, useEffect, useState } from 'react';
 import { useChatStore } from '@/stores/chatStore';
 import { apiFetch } from '@/utils/api-client';
 import { parseChatGptConversationUrl } from '@/utils/chatgpt-chat-url';
@@ -9,24 +10,47 @@ import { PersonalChromeThreadRouteOptions } from './PersonalChromeThreadRouteOpt
 import { SettingsBadge } from './primitives/SettingsBadge';
 import { SettingsText } from './primitives/SettingsText';
 
-type BindingLoadState = 'loading' | 'ready' | 'unsupported' | 'error';
+type BindingLoadState = 'loading' | 'ready' | 'unsupported' | 'forbidden' | 'error';
 
 interface CloudBindingsResponse {
   bindings?: Record<string, string>;
   error?: string;
 }
 
-export function PersonalChromeThreadBinding({
-  conversations,
-  disabled,
-}: {
+interface PersonalChromeThreadBindingProps {
   conversations: readonly PersonalChromeAuthorizedConversation[];
   disabled: boolean;
-}) {
-  const currentThreadId = useChatStore((store) => store.currentThreadId);
-  const currentThreadTitle = useChatStore(
-    (store) => store.threads.find((thread) => thread.id === store.currentThreadId)?.title,
+}
+
+export function PersonalChromeThreadBinding(props: PersonalChromeThreadBindingProps) {
+  return (
+    <Suspense fallback={<SettingsText tone="muted">正在读取当前 thread 路由…</SettingsText>}>
+      <ThreadBindingTarget {...props} />
+    </Suspense>
   );
+}
+
+function ThreadBindingTarget(props: PersonalChromeThreadBindingProps) {
+  const searchParams = useSearchParams();
+  const activeThreadId = useChatStore((store) => store.currentThreadId);
+  const explicitThreadIds = searchParams?.getAll('threadId') ?? [];
+  const threadId =
+    explicitThreadIds.length === 0 ? activeThreadId : explicitThreadIds.length === 1 ? explicitThreadIds[0] : '';
+  const threadTitle = useChatStore((store) => store.threads.find((thread) => thread.id === threadId)?.title);
+
+  // A target change owns fresh pending/read/save state; prior responses cannot repaint it.
+  return <ThreadBindingState key={threadId} {...props} threadId={threadId} threadTitle={threadTitle ?? undefined} />;
+}
+
+function ThreadBindingState({
+  conversations,
+  disabled,
+  threadId: currentThreadId,
+  threadTitle: currentThreadTitle,
+}: PersonalChromeThreadBindingProps & {
+  threadId: string;
+  threadTitle?: string;
+}) {
   const [loadState, setLoadState] = useState<BindingLoadState>('loading');
   const [bindingUrl, setBindingUrl] = useState<string | null>(null);
   const [busyConversationId, setBusyConversationId] = useState<string | null>(null);
@@ -36,15 +60,18 @@ export function PersonalChromeThreadBinding({
     async (signal?: AbortSignal) => {
       setLoadState('loading');
       setError(null);
+      if (!currentThreadId.trim()) throw new Error('未指定有效的 thread，请从原对话重新打开“更换绑定”。');
       const response = await apiFetch(`/api/threads/${encodeURIComponent(currentThreadId)}/cloud-bindings`, {
         signal,
       });
+      if (signal?.aborted) return;
       if (response.status === 403) {
         setBindingUrl(null);
-        setLoadState('unsupported');
+        setLoadState(currentThreadId === 'default' ? 'unsupported' : 'forbidden');
         return;
       }
       const body = (await response.json().catch(() => ({}))) as CloudBindingsResponse;
+      if (signal?.aborted) return;
       if (!response.ok) {
         throw new Error(body.error ?? `当前 thread 路由读取失败 (${response.status})`);
       }
@@ -102,8 +129,8 @@ export function PersonalChromeThreadBinding({
           当前 thread 路由
         </SettingsText>
         {loadState === 'ready' && (
-          <SettingsBadge tone={bindingUrl && bindingIsAuthorized ? 'emerald' : 'amber'}>
-            {bindingUrl && bindingIsAuthorized ? '已完成' : '还差一步'}
+          <SettingsBadge tone={bindingIsAuthorized ? 'emerald' : 'amber'}>
+            {bindingIsAuthorized ? '已完成' : '还差一步'}
           </SettingsBadge>
         )}
       </div>
@@ -124,9 +151,9 @@ export function PersonalChromeThreadBinding({
           当前是系统 thread，不支持个人云端猫路由。请先切换到你创建的 thread。
         </SettingsText>
       )}
-      {loadState === 'error' && error && (
-        <SettingsText as="p" tone="red" className="mt-2">
-          {error}
+      {loadState === 'forbidden' && (
+        <SettingsText as="p" tone="amber" className="mt-2">
+          无权修改这个 thread 的云端会话绑定。请从你拥有的对话重新打开设置。
         </SettingsText>
       )}
       {loadState === 'ready' && bindingUrl && (
@@ -147,7 +174,7 @@ export function PersonalChromeThreadBinding({
           onSelect={(conversationId) => void updateBinding(conversationId)}
         />
       )}
-      {error && loadState === 'ready' && (
+      {error && (
         <SettingsText as="p" tone="red" className="mt-2">
           {error}
         </SettingsText>

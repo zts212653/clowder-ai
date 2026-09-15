@@ -13,6 +13,7 @@ const owner = {
 function harness(
   respond: (request: RuntimeInteractionRequest) => RuntimeInteractionResponse | Promise<RuntimeInteractionResponse>,
   entrustedWorkTaskRef?: EntrustedWorkTaskRefV1,
+  declaredMcpServerNames?: readonly string[],
 ) {
   const requests: RuntimeInteractionRequest[] = [];
   return {
@@ -21,6 +22,7 @@ function harness(
       owner,
       createInteractionId: () => `interaction-${requests.length + 1}`,
       ...(entrustedWorkTaskRef ? { resolveEntrustedWorkTaskRef: async () => entrustedWorkTaskRef } : {}),
+      ...(declaredMcpServerNames ? { declaredMcpServerNames } : {}),
       port: {
         request: async (request: RuntimeInteractionRequest) => {
           requests.push(request);
@@ -236,6 +238,143 @@ describe('Codex runtime interaction adapter', () => {
       urlHarness.context,
     );
     assert.deepEqual(urlResponse, { id: 45, result: { action: 'decline' } });
+  });
+
+  it('resolves a typed Computer Use Pencil capability from existing MCP lifecycle truth without a human card', async () => {
+    const capability = harness(
+      () => {
+        throw new Error('typed capability consent must not publish a RuntimeInteraction');
+      },
+      undefined,
+      ['cat-cafe-collab', 'pencil'],
+    );
+
+    const response = await respondToCodexRuntimeInteraction(
+      {
+        id: 46,
+        method: 'mcpServer/elicitation/request',
+        params: {
+          serverName: 'cua_repl',
+          threadId: 'provider-thread',
+          turnId: 'provider-turn',
+          mode: 'form',
+          message: 'Allow Computer Use to use "Pencil"?',
+          requestedSchema: { type: 'object', properties: {}, additionalProperties: false },
+          _meta: {
+            codex_approval_kind: 'mcp_tool_call',
+            connector_id: 'computer-use',
+            connector_name: 'Computer Use',
+            persist: ['session', 'always'],
+            riskLevel: 'low',
+            tool_name: 'snapshot',
+            tool_params: { app: 'dev.pencil.desktop' },
+            tool_params_display: [{ name: 'app', display_name: 'App', value: 'Pencil' }],
+          },
+        },
+      },
+      capability.context,
+    );
+
+    assert.equal(capability.requests.length, 0);
+    assert.deepEqual(response, {
+      id: 46,
+      result: {
+        action: 'accept',
+        content: { source: 'computer-use-persisted-state', scope: 'session' },
+        _meta: {
+          source: 'cat-cafe-capability-lifecycle',
+          persist: 'session',
+          capabilityId: 'pencil',
+        },
+      },
+    });
+  });
+
+  it('declines typed capability consent without publishing when canonical grant truth is absent or malformed', async () => {
+    for (const sample of [
+      {
+        serverName: 'cua_repl',
+        declaredMcpServerNames: undefined,
+        meta: {
+          codex_approval_kind: 'mcp_tool_call',
+          connector_id: 'computer-use',
+          tool_name: 'snapshot',
+          tool_params: { app: 'dev.pencil.desktop' },
+        },
+      },
+      {
+        serverName: 'cua_repl',
+        declaredMcpServerNames: undefined,
+        meta: {
+          codex_approval_kind: 'mcp_tool_call',
+          connector_id: 'computer-use',
+        },
+      },
+      {
+        serverName: 'untrusted-mcp',
+        declaredMcpServerNames: ['pencil'],
+        meta: {
+          codex_approval_kind: 'mcp_tool_call',
+          connector_id: 'computer-use',
+          tool_name: 'snapshot',
+          tool_params: { app: 'dev.pencil.desktop' },
+        },
+      },
+    ] as const) {
+      const unavailable = harness(
+        () => {
+          throw new Error('typed capability consent must fail closed before publication');
+        },
+        undefined,
+        sample.declaredMcpServerNames,
+      );
+      const response = await respondToCodexRuntimeInteraction(
+        {
+          id: 47,
+          method: 'mcpServer/elicitation/request',
+          params: {
+            serverName: sample.serverName,
+            threadId: 'provider-thread',
+            turnId: 'provider-turn',
+            mode: 'form',
+            message: 'presentation text is not authority',
+            requestedSchema: { type: 'object', properties: {}, additionalProperties: false },
+            _meta: sample.meta,
+          },
+        },
+        unavailable.context,
+      );
+
+      assert.equal(unavailable.requests.length, 0);
+      assert.equal((response?.result as { action?: unknown })?.action, 'decline');
+      assert.match(
+        String((response?.result as { _meta?: { reasonCode?: unknown } })?._meta?.reasonCode),
+        /^capability_/,
+      );
+    }
+  });
+
+  it('keeps an empty MCP data form on the human elicitation path without typed capability provenance', async () => {
+    const form = harness(() => ({ kind: 'decision', decisionId: 'accept', content: {} }));
+    const response = await respondToCodexRuntimeInteraction(
+      {
+        id: 48,
+        method: 'mcpServer/elicitation/request',
+        params: {
+          serverName: 'empty-data-form',
+          threadId: 'provider-thread',
+          turnId: 'provider-turn',
+          mode: 'form',
+          message: 'Confirm the provider data form',
+          requestedSchema: { type: 'object', properties: {}, additionalProperties: false },
+        },
+      },
+      form.context,
+    );
+
+    assert.equal(form.requests.length, 1);
+    assert.equal(form.requests[0]?.kind, 'elicitation');
+    assert.deepEqual(response, { id: 48, result: { action: 'accept', content: {} } });
   });
 
   it('rejects provider requests missing exact thread, turn, or item coordinates before publication', async () => {

@@ -2,6 +2,7 @@ import type {
   InstallPlan,
   MarketplaceAdapter,
   MarketplaceEcosystem,
+  MarketplaceSearchPage,
   MarketplaceSearchQuery,
   MarketplaceSearchResult,
 } from '@cat-cafe/shared';
@@ -18,16 +19,34 @@ export class AdapterRegistry {
   }
 
   async search(query: MarketplaceSearchQuery): Promise<MarketplaceSearchResult[]> {
+    return (await this.searchDetailed(query)).results;
+  }
+
+  async searchDetailed(query: MarketplaceSearchQuery): Promise<MarketplaceSearchPage> {
     const targetAdapters = query.ecosystems
       ? [...this.adapters.values()].filter((a) => query.ecosystems!.includes(a.ecosystem))
       : [...this.adapters.values()];
 
-    const settled = await Promise.allSettled(targetAdapters.map((a) => a.search(query)));
+    const settled = await Promise.allSettled(
+      targetAdapters.map(async (adapter) => {
+        if (adapter.searchWithStatus) return adapter.searchWithStatus(query);
+        return {
+          results: await adapter.search(query),
+          status: {
+            ecosystem: adapter.ecosystem,
+            sourceKind: 'catalog' as const,
+            availability: 'live' as const,
+          },
+        };
+      }),
+    );
 
     let results: MarketplaceSearchResult[] = [];
+    const sources: MarketplaceSearchPage['sources'] = [];
     for (const result of settled) {
       if (result.status === 'fulfilled') {
-        results.push(...result.value);
+        results.push(...result.value.results);
+        sources.push(result.value.status);
       }
     }
 
@@ -41,7 +60,7 @@ export class AdapterRegistry {
       results = results.slice(0, query.limit);
     }
 
-    return results;
+    return { results, sources };
   }
 
   async buildInstallPlan(ecosystem: string, artifactId: string): Promise<InstallPlan> {

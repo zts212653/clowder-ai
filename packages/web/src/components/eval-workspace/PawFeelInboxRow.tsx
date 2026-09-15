@@ -1,6 +1,8 @@
 'use client';
 
 import type { PawFeelInboxItem } from '@cat-cafe/shared';
+import { pawFeelDutyDetail } from '../paw-feel/paw-feel-duty-presentation';
+import { pawFeelIssueDetail, pawFeelIssueStatus } from '../paw-feel/paw-feel-issue-presentation';
 
 const RESPONSIBILITY_LABELS: Record<PawFeelInboxItem['responsibility']['state'], string> = {
   unreviewed: 'unreviewed · 尚无业务出口',
@@ -33,49 +35,19 @@ function formatTimestamp(value: string): string {
   }).format(timestamp);
 }
 
-function dispositionDetail(item: PawFeelInboxItem): string | undefined {
-  const { disposition } = item;
-  const { responsibility } = item;
-  if (responsibility.exitKind === 'pending_proposal') {
-    return `等待 durable proposal ${responsibility.proposalId ?? 'unavailable'} 获批`;
+function rowTone(item: PawFeelInboxItem, issueOverdue: boolean): string {
+  if (item.overdue || issueOverdue) return 'border-conn-red-ring bg-conn-red-bg text-conn-red-text';
+  if (!item.responsibility.validExit || item.issue.resolution === 'open') {
+    return 'border-conn-amber-ring bg-conn-amber-bg text-conn-amber-text';
   }
-  if (responsibility.exitKind === 'explicit_blocker') {
-    return `阻塞 ${responsibility.blocker?.code ?? 'unknown'} · ${responsibility.blocker?.ref ?? 'unavailable'}`;
-  }
-  if (responsibility.exitKind === 'signature_request') {
-    return `排除报告猫 @${responsibility.signerExclusionCatId ?? 'unknown'} 自签${
-      responsibility.preferredSignerCatId ? ` · 首选 @${responsibility.preferredSignerCatId}` : ''
-    }；其他独立签署猫可从此请求恢复`;
-  }
-  if (disposition.state === 'routed') {
-    const target = disposition.targetThreadId ?? disposition.proposalId ?? '目标责任面';
-    return `已移交至 ${target}，不代表已经修复`;
-  }
-  if (disposition.state === 'route_pending') {
-    return disposition.targetThreadId
-      ? `等待 ${disposition.targetThreadId} 接单`
-      : `F128 proposal ${disposition.proposalId ?? 'unavailable'} 当前不是 pending，需重新路由或显式阻塞`;
-  }
-  if (disposition.state === 'duplicate' && disposition.duplicateOf) {
-    return `重复于 ${disposition.duplicateOf}`;
-  }
-  if (disposition.state === 'fix') {
-    const binding = `由 @${disposition.ownerCatId ?? 'unknown'} 负责 · 任务 ${
-      disposition.taskId ?? 'unavailable'
-    } · F167 lease ${disposition.actionLeaseRef?.leaseId ?? 'unavailable'}`;
-    return item.responsibility.validExit ? binding : `${binding} · 当前 active lease 复验失败`;
-  }
-  if (disposition.reasonCode) return `理由：${disposition.reasonCode}`;
-  return undefined;
+  return 'border-cafe bg-cafe-surface text-cafe-secondary';
 }
 
 export function PawFeelInboxRow({ item }: { item: PawFeelInboxItem }) {
-  const detail = dispositionDetail(item);
-  const stateTone = item.overdue
-    ? 'border-conn-red-ring bg-conn-red-bg text-conn-red-text'
-    : !item.responsibility.validExit
-      ? 'border-conn-amber-ring bg-conn-amber-bg text-conn-amber-text'
-      : 'border-cafe bg-cafe-surface text-cafe-secondary';
+  const detail = pawFeelDutyDetail(item);
+  const issueDetail = pawFeelIssueDetail(item);
+  const issueOverdue = item.issue.resolution === 'open' && item.issue.ageMs >= 72 * 3_600_000;
+  const stateTone = rowTone(item, issueOverdue);
 
   return (
     <article
@@ -84,16 +56,21 @@ export function PawFeelInboxRow({ item }: { item: PawFeelInboxItem }) {
       data-state={item.responsibility.state}
       data-valid-exit={item.responsibility.validExit ? 'true' : 'false'}
       data-disposition-state={item.disposition.state}
+      data-resolution={item.issue.resolution}
+      data-continuation={item.issue.continuation.kind}
     >
       <div className="flex flex-wrap items-start justify-between gap-2">
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-2 text-micro font-semibold">
-            <span>{responsibilityLabel(item)}</span>
+            <span>值班回执 · {responsibilityLabel(item)}</span>
             {item.disposition.backfilled ? (
               <span className="rounded-full border border-current px-1.5 py-0.5">历史回填</span>
             ) : null}
-            {item.overdue ? <span className="rounded-full border border-current px-1.5 py-0.5">72h+</span> : null}
+            {item.overdue || issueOverdue ? (
+              <span className="rounded-full border border-current px-1.5 py-0.5">72h+</span>
+            ) : null}
           </div>
+          <div className="mt-1 text-xs font-semibold">{pawFeelIssueStatus(item)}</div>
           <div className="mt-1 text-xs opacity-75">
             报告猫 @{item.disposition.sourceCatId}
             {item.disposition.lastActorCatId ? ` · 审阅猫 @${item.disposition.lastActorCatId}` : ''}
@@ -102,6 +79,11 @@ export function PawFeelInboxRow({ item }: { item: PawFeelInboxItem }) {
             原消息时间 {item.sourceOccurredAt ? formatTimestamp(item.sourceOccurredAt) : '暂不可读'} · 入箱 / SLA{' '}
             {formatTimestamp(item.disposition.discoveredAt)} ·
             {item.responsibility.validExit ? ` 处置耗时 ${formatAge(item.ageMs)}` : ` 已运行 ${formatAge(item.ageMs)}`}
+          </div>
+          <div className="mt-1 text-micro opacity-70">
+            {item.issue.resolution === 'resolved'
+              ? `问题闭环耗时 ${formatAge(item.issue.ageMs)}`
+              : `问题已持续 ${formatAge(item.issue.ageMs)}`}
           </div>
         </div>
         <span className="max-w-full truncate font-mono text-micro opacity-70" title={item.disposition.signalId}>
@@ -117,12 +99,13 @@ export function PawFeelInboxRow({ item }: { item: PawFeelInboxItem }) {
           {item.source.preview}
         </a>
       ) : (
-        <div className="mt-2 rounded-md border border-current/30 px-2 py-1.5 text-xs" role="status">
+        <output className="mt-2 block rounded-md border border-current/30 px-2 py-1.5 text-xs">
           原始证据暂不可读：{item.source.reason}
-        </div>
+        </output>
       )}
 
       {detail ? <p className="mt-2 text-xs leading-relaxed opacity-80">{detail}</p> : null}
+      {issueDetail ? <p className="mt-2 text-xs leading-relaxed opacity-80">{issueDetail}</p> : null}
       {item.deterministicGroupKey ? (
         <div className="mt-2 text-micro opacity-60">确定性分组：{item.deterministicGroupKey}</div>
       ) : null}

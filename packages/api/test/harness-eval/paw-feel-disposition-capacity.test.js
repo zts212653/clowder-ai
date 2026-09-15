@@ -1,10 +1,13 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
+import Fastify from 'fastify';
 import { MessageStore } from '../../dist/domains/cats/services/stores/ports/MessageStore.js';
 import { createPawFeelDutyTaskSpec } from '../../dist/infrastructure/harness-eval/paw-feel-disposition/duty-task-spec.js';
+import { derivePawFeelIssue } from '../../dist/infrastructure/harness-eval/paw-feel-disposition/projection/read-model-issue.js';
 import { PawFeelDispositionReadModel } from '../../dist/infrastructure/harness-eval/paw-feel-disposition/read-model.js';
 import { PawFeelDispositionReconciler } from '../../dist/infrastructure/harness-eval/paw-feel-disposition/reconciler.js';
 import { PawFeelDispositionService } from '../../dist/infrastructure/harness-eval/paw-feel-disposition/service.js';
+import { pawFeelDispositionRoutes } from '../../dist/routes/paw-feel-disposition.js';
 
 const DAY = 86_400_000;
 const MINUTE = 60_000;
@@ -16,6 +19,9 @@ const PAGE_SIZE = 50;
 class MemoryEventLog {
   events = new Map();
   eventOwners = new Map();
+  listSignalIdsCalls = 0;
+  listSourceMessageIds = [];
+  readManySignalIds = [];
 
   async append(event, expectedSequence) {
     const owner = this.eventOwners.get(event.eventId);
@@ -34,11 +40,18 @@ class MemoryEventLog {
   }
 
   async readMany(signalIds) {
+    this.readManySignalIds.push([...signalIds]);
     return new Map(signalIds.map((signalId) => [signalId, this.events.get(signalId) ?? []]));
   }
 
   async listSignalIds() {
+    this.listSignalIdsCalls += 1;
     return [...this.events.keys()].sort();
+  }
+
+  async listSignalIdsBySourceMessageId(sourceMessageId) {
+    this.listSourceMessageIds.push(sourceMessageId);
+    return [...this.events.keys()].filter((signalId) => signalId.startsWith(`${sourceMessageId}:`));
   }
 }
 
@@ -118,17 +131,21 @@ class MemoryWatermarkStore {
 
 function appendSevenDayCorpus(messageStore) {
   const span = 7 * DAY - 6 * MINUTE;
+  const messages = [];
   for (let index = SIGNAL_COUNT - 1; index >= 0; index -= 1) {
     const ageMs = 5 * MINUTE + Math.floor((index * span) / (SIGNAL_COUNT - 1));
-    messageStore.append({
-      userId: 'user-1',
-      catId: 'codex-sol',
-      threadId: `thread-${index % 8}`,
-      content: `[爪感差: tool-${index % 12}+capacity-signal-${index}]`,
-      mentions: [],
-      timestamp: NOW_MS - ageMs,
-    });
+    messages.push(
+      messageStore.append({
+        userId: 'user-1',
+        catId: 'codex-sol',
+        threadId: `thread-${index % 8}`,
+        content: `[爪感差: tool-${index % 12}+capacity-signal-${index}]`,
+        mentions: [],
+        timestamp: NOW_MS - ageMs,
+      }),
+    );
   }
+  return messages;
 }
 
 function command(type, signalId, expectedSequence, index, extra = {}) {
@@ -142,6 +159,84 @@ function command(type, signalId, expectedSequence, index, extra = {}) {
 }
 
 describe('F278 seven-day capacity contract', () => {
+  it('bounds an exact-source projection by that message instead of the corpus', async () => {
+    const messageStore = new MessageStore({ maxMessages: 1_000 });
+    const eventLog = new MemoryEventLog();
+    const coverageStore = new MemoryCoverageStore();
+    const service = new PawFeelDispositionService({ eventLog, now: () => NOW });
+    const reconciler = new PawFeelDispositionReconciler({
+      messageStore,
+      coverageStore,
+      dispositionService: service,
+      now: () => NOW,
+      initialBackfillMs: 7 * DAY,
+      overlapWindowMs: 15 * MINUTE,
+      fullScanIntervalMs: DAY,
+      pageSize: 73,
+    });
+    const corpus = appendSevenDayCorpus(messageStore);
+    await reconciler.run();
+    const target = corpus[Math.floor(corpus.length / 2)];
+    assert.ok(target);
+
+    const messageReads = [];
+    let followUpResolveCalls = 0;
+    eventLog.listSignalIdsCalls = 0;
+    eventLog.listSourceMessageIds = [];
+    eventLog.readManySignalIds = [];
+    const readModel = new PawFeelDispositionReadModel({
+      eventLog,
+      messageStore: {
+        async getById(messageId) {
+          messageReads.push(messageId);
+          return messageStore.getById(messageId);
+        },
+      },
+      coverageStore,
+      followUpResolver: {
+        async resolve({ projection, nowMs }) {
+          followUpResolveCalls += 1;
+          return derivePawFeelIssue(projection, nowMs);
+        },
+      },
+      now: () => NOW,
+    });
+
+    const app = Fastify();
+    app.decorateRequest('sessionUserId', undefined);
+    app.addHook('preHandler', async (request) => {
+      const userId = request.headers['x-session-user'];
+      if (typeof userId === 'string') request.sessionUserId = userId;
+    });
+    await app.register(pawFeelDispositionRoutes, { readModel });
+    await app.ready();
+    const response = await app.inject({
+      method: 'GET',
+      url: `/api/paw-feel/source/${encodeURIComponent(target.id)}`,
+      headers: { 'x-session-user': 'user-1' },
+    });
+    await app.close();
+    const page = response.json();
+
+    assert.equal(response.statusCode, 200);
+    assert.equal(page.projectionStatus, 'available');
+    assert.equal(page.items.length, 1);
+    assert.equal(page.items[0].disposition.sourceMessageId, target.id);
+    assert.equal(messageReads.length, 1, 'one source must not hydrate every message in the corpus');
+    assert.equal(messageReads[0], target.id);
+    assert.equal(eventLog.listSignalIdsCalls, 0, 'exact-source lookup must not load the global signal set');
+    assert.deepEqual(eventLog.listSourceMessageIds, [target.id]);
+    assert.deepEqual(eventLog.readManySignalIds, [[page.items[0].disposition.signalId]]);
+    assert.equal(followUpResolveCalls, 1, 'one source must not resolve every issue in the corpus');
+    assert.equal(page.counts.total, 1);
+    assert.equal(page.denominator.reportOccurrences, 1);
+    assert.equal(page.denominator.uniqueSourceMessages, 1);
+    assert.equal(page.denominator.reviewBundles, 1);
+    assert.equal(page.bundleCounts.total, 1);
+    assert.equal(page.issueCounts.open, 1);
+    assert.equal(page.responsibilityCounts.unreviewed, 1);
+  });
+
   it('keeps 624 identities visible through replay, paging, bulk signatures, filtering, and notice dedupe', async () => {
     const messageStore = new MessageStore({ maxMessages: 1_000 });
     const eventLog = new MemoryEventLog();

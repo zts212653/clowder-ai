@@ -1,10 +1,10 @@
 import assert from 'node:assert/strict';
 import { before, describe, it } from 'node:test';
 
-let loadClaudeCatalog, loadCodexCatalog, loadOpenClawCatalog, loadAntigravityCatalog;
+let loadClaudeCatalog, loadOpenClawCatalog, loadAntigravityCatalog;
 
 before(async () => {
-  ({ loadClaudeCatalog, loadCodexCatalog, loadOpenClawCatalog, loadAntigravityCatalog } = await import(
+  ({ loadClaudeCatalog, loadOpenClawCatalog, loadAntigravityCatalog } = await import(
     '../../dist/marketplace/catalog-loaders.js'
   ));
 });
@@ -46,18 +46,6 @@ describe('catalog-loaders', () => {
     });
   });
 
-  describe('loadCodexCatalog', () => {
-    it('returns non-empty array of valid entries', async () => {
-      const entries = await loadCodexCatalog();
-      assert.ok(entries.length > 0, 'Codex catalog must not be empty');
-      for (const e of entries) {
-        assert.ok(e.id, 'entry must have id');
-        assert.ok(e.name, 'entry must have name');
-        assert.ok(['official', 'verified', 'community'].includes(e.trustLevel));
-      }
-    });
-  });
-
   describe('loadOpenClawCatalog', () => {
     it('returns non-empty array of valid entries', async () => {
       const entries = await loadOpenClawCatalog();
@@ -83,13 +71,12 @@ describe('catalog-loaders', () => {
 
   describe('cross-ecosystem search scenario', () => {
     it('does not expose the retired GitHub MCP in any install catalog', async () => {
-      const [claude, codex, openclaw, antigravity] = await Promise.all([
+      const [claude, openclaw, antigravity] = await Promise.all([
         loadClaudeCatalog(),
-        loadCodexCatalog(),
         loadOpenClawCatalog(),
         loadAntigravityCatalog(),
       ]);
-      const retired = [...claude, ...codex, ...openclaw, ...antigravity].filter((entry) => {
+      const retired = [...claude, ...openclaw, ...antigravity].filter((entry) => {
         const args = Array.isArray(entry.args) ? entry.args : [];
         return (
           ['claude-github', 'codex-github', 'github-mcp', 'github-mcp-server'].includes(entry.id) ||
@@ -100,13 +87,12 @@ describe('catalog-loaders', () => {
     });
 
     it('figma appears in at least one catalog', async () => {
-      const [claude, codex, openclaw, antigravity] = await Promise.all([
+      const [claude, openclaw, antigravity] = await Promise.all([
         loadClaudeCatalog(),
-        loadCodexCatalog(),
         loadOpenClawCatalog(),
         loadAntigravityCatalog(),
       ]);
-      const all = [...claude, ...codex, ...openclaw, ...antigravity];
+      const all = [...claude, ...openclaw, ...antigravity];
       const figmaHits = all.filter(
         (e) =>
           e.name.toLowerCase().includes('figma') ||
@@ -116,15 +102,10 @@ describe('catalog-loaders', () => {
       assert.ok(figmaHits.length > 0, 'searching "figma" should return at least one result across all catalogs');
     });
 
-    it('filesystem appears in multiple ecosystems', async () => {
-      const [claude, codex, openclaw] = await Promise.all([
-        loadClaudeCatalog(),
-        loadCodexCatalog(),
-        loadOpenClawCatalog(),
-      ]);
+    it('filesystem appears in multiple static ecosystems without using a Codex shadow catalog', async () => {
+      const [claude, openclaw] = await Promise.all([loadClaudeCatalog(), loadOpenClawCatalog()]);
       const ecosystemsWithFs = [
         claude.some((e) => e.id.includes('filesystem') || e.name.toLowerCase().includes('filesystem')),
-        codex.some((e) => e.id.includes('filesystem') || e.name.toLowerCase().includes('filesystem')),
         openclaw.some((e) => e.id.includes('filesystem') || e.name.toLowerCase().includes('filesystem')),
       ].filter(Boolean);
       assert.ok(ecosystemsWithFs.length >= 2, 'filesystem server should appear in at least 2 ecosystems');

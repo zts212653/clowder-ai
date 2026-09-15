@@ -63,4 +63,49 @@ describe('PerCatTerminalDispositionCollector', () => {
 
     assert.deepEqual(collector.getSuccessfulCatIds(), ['opus']);
   });
+
+  it('retains all adopted sources under their exact children across repeated done frames', () => {
+    const collector = new PerCatTerminalDispositionCollector({ targetCatIds: ['codex'] });
+    const first = {
+      kind: 'managed_hold_continued',
+      sourceMessageId: 'source-1',
+      taskId: 'task-1',
+      transition: 'reheld',
+    };
+    const second = { ...first, sourceMessageId: 'source-2', taskId: 'task-2' };
+    const next = { ...first, sourceMessageId: 'source-3', taskId: 'task-3' };
+    collector.observe({ type: 'done', catId: 'codex', invocationId: 'child-1', turnCustodyTerminalWitness: first });
+    collector.observe({
+      type: 'done',
+      catId: 'codex',
+      invocationId: 'child-1',
+      turnCustodyTerminalWitness: first,
+      turnCustodyTerminalWitnesses: [first, second],
+    });
+    collector.observe({ type: 'done', catId: 'codex', invocationId: 'child-2', turnCustodyTerminalWitnesses: [next] });
+    assert.deepEqual(collector.getTerminalConsumptionByInvocationId(), {
+      'child-1': [first, second],
+      'child-2': [next],
+    });
+    assert.deepEqual(collector.getTerminalInvocationIdByCatId(), { codex: 'child-2' });
+  });
+
+  it('does not turn malformed, unbound or nonterminal event payloads into custody evidence', () => {
+    const collector = new PerCatTerminalDispositionCollector({ targetCatIds: ['codex'] });
+    const witness = { kind: 'managed_hold_continued', sourceMessageId: 'source', taskId: 'task', transition: 'reheld' };
+    collector.observe({ type: 'text', catId: 'codex', invocationId: 'child', turnCustodyTerminalWitness: witness });
+    collector.observe({ type: 'done', catId: 'codex', turnCustodyTerminalWitness: witness });
+    collector.observe({ type: 'done', catId: 'codex', invocationId: 42, turnCustodyTerminalWitness: witness });
+    collector.observe({
+      type: 'done',
+      catId: 'codex',
+      invocationId: 'child',
+      turnCustodyTerminalWitnesses: [
+        { ...witness, sourceMessageId: '' },
+        { ...witness, taskId: '' },
+        { ...witness, transition: 'guessed' },
+      ],
+    });
+    assert.deepEqual(collector.getTerminalConsumptionByInvocationId(), {});
+  });
 });

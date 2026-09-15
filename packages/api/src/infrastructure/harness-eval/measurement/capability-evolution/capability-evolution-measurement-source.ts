@@ -6,7 +6,7 @@ import { MeasurementDecisionProofOwnerObjectSchema } from '../measurement-decisi
 import { MeasurementDecisionProofCandidateSchema } from '../measurement-decision-proof-schema.js';
 
 const nonEmpty = z.string().trim().min(1);
-const featureId = z.string().regex(/^F\d{3}$/);
+const ownerFeatureId = ownerTruthRefV1Schema.shape.ownerFeatureId;
 const fullRevision = z.string().regex(/^[a-f0-9]{40}$/);
 const sha256 = z.string().regex(/^[a-f0-9]{64}$/, 'must be a lowercase SHA-256');
 const safeId = z.string().regex(/^[a-z0-9][a-z0-9-]{0,127}$/);
@@ -24,14 +24,14 @@ export const CapabilityEvolutionMeasurementSourceSchema = z
     schemaVersion: z.literal(1),
     sourceId: safeId,
     ownerUserId: nonEmpty,
-    ownerFeatureId: featureId,
+    ownerFeatureId,
     generatedAt: z.string().datetime(),
     sourceRevision: fullRevision,
     sourceArtifacts: z
       .array(
         z
           .object({
-            ownerFeatureId: featureId,
+            ownerFeatureId,
             ref: nonEmpty,
             sha256,
           })
@@ -75,7 +75,7 @@ export const CapabilityEvolutionMeasurementRoleBindingSchema = z
     generatedAt: z.string().datetime(),
     source: z
       .object({
-        ownerFeatureId: featureId,
+        ownerFeatureId,
         ownerStateRef: nonEmpty,
         artifactRef: nonEmpty,
         sha256: z.string().regex(/^[a-f0-9]{64}$/),

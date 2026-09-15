@@ -1,7 +1,9 @@
+import { ownerTruthRefV1Schema } from '@cat-cafe/shared';
 import { z } from 'zod';
 
 const nonEmpty = z.string().trim().min(1);
 const featureId = z.string().regex(/^F\d{3}$/);
+const ownerFeatureId = ownerTruthRefV1Schema.shape.ownerFeatureId;
 const sha256 = z.string().regex(/^[a-f0-9]{64}$/, 'must be a lowercase SHA-256');
 const exposureState = z.enum(['exposed', 'not_exposed']);
 
@@ -15,7 +17,7 @@ const exposureState = z.enum(['exposed', 'not_exposed']);
 
 export const OwnerEvidenceRefSchema = z
   .object({
-    ownerFeatureId: featureId,
+    ownerFeatureId,
     ref: nonEmpty,
     sha256,
   })

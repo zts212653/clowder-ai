@@ -67,6 +67,7 @@ export async function createA2ADispositionHarness({
   deliveryStatus,
   registry,
   sourceExtra,
+  log,
 } = {}) {
   const eventLog = new MemoryEventLog();
   const projectionStore = new MemoryProjectionStore();
@@ -125,6 +126,7 @@ export async function createA2ADispositionHarness({
     ballCustodyEventLog: eventLog,
     ballCustodyProjectionStore: projectionStore,
     ballCustody: fencedIngest,
+    ...(log ? { log } : {}),
     repairProjection: (subjectKey) => projector.rebuild(subjectKey),
     now: () => 2_000,
   });

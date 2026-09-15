@@ -1,6 +1,6 @@
 ---
 name: cross-thread-sync
-tips_exempt: harness-internal coordination convention; no distinct user-facing capability surface
+tips_exempt: "This revision only aligns the cross-cat handoff reference with optional templates; cross-thread tools and user actions are unchanged."
 description: "跨 thread 协同：通知、归属核验、争用与责任处置。Use when: 平行 session 通知或共享文件争用。Not for: 跨猫交接或新建 thread。Output: routed cross-post + disposition。GOTCHA: ACTION/BLOCKING 不转移球权。"
 triggers:
   - "通知另一个 session"
@@ -232,7 +232,7 @@ Phase J 完成后，`assign_work` 派活将要求通过 ActionEnvelope 结构化
 | Skill | 何时用 | 核心区别 |
 |-------|--------|---------|
 | **cross-thread-sync** | 平行 session 之间的持续协同 | 3+2 件套、争用协议、FYI/ACTION/BLOCKING |
-| `cross-cat-handoff` | 不同猫之间的一次性工作交接 | 完整五件套、知识转移、角色切换 |
+| `cross-cat-handoff` | 不同猫之间的一次性工作交接 | 必要上下文与责任路径；五项提示作为可选参考 |
 
 ## 下一步
 

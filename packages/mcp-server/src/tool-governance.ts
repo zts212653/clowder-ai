@@ -37,10 +37,11 @@ export { validateToolGovernance } from './tool-governance-validation.js';
 export function bindMcpImplementation(
   ref: McpImplementationBinding['ref'],
   run: McpImplementationBinding['run'],
+  runWithExtra?: NonNullable<McpImplementationBinding['runWithExtra']>,
 ): McpImplementationBinding {
   const match = /^module:(.+)#([^#]+)$/.exec(ref);
   if (!match) throw new Error(`Invalid MCP implementation binding: ${ref}`);
-  return { ref, run, [implementationBindingBrand]: true };
+  return { ref, run, ...(runWithExtra ? { runWithExtra } : {}), [implementationBindingBrand]: true };
 }
 
 function operationActions(operation: McpOperationContract): readonly string[] {

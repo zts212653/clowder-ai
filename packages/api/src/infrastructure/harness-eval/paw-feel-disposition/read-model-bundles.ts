@@ -9,6 +9,7 @@ import type {
   PawFeelReviewBundleBasis,
   PawFeelReviewBundleCounts,
 } from '@cat-cafe/shared';
+import { deriveBundleIssue } from './projection/read-model-issue.js';
 import { aggregatePawFeelResponsibility } from './responsibility-aggregation.js';
 
 export function emptyResponsibilityCounts(): PawFeelResponsibilityCounts {
@@ -171,6 +172,7 @@ export function filterPawFeelBundles(
         rawSignalCount: members.length,
         stateCounts,
         responsibility: deriveBundleResponsibility(members),
+        issue: deriveBundleIssue(members),
       },
     ];
   });
@@ -214,6 +216,7 @@ export function derivePawFeelBundles(items: readonly PawFeelInboxItem[]): {
       rawSignalCount: group.members.length,
       stateCounts,
       responsibility: deriveBundleResponsibility(group.members),
+      issue: deriveBundleIssue(group.members),
     };
   });
   return { bundles, counts };

@@ -25,6 +25,7 @@ vi.mock('../BrowserToolbar', () => ({
   BrowserToolbar: () => React.createElement('div', { 'data-testid': 'browser-toolbar' }),
 }));
 
+import { WorkspaceSurfaceVisibilityProvider } from '@/components/workbench/WorkspaceSurfaceVisibility';
 import { useChatStore } from '@/stores/chatStore';
 import { BrowserPanel } from '../BrowserPanel';
 
@@ -116,14 +117,22 @@ describe('BrowserPanel unavailable target', () => {
     reachable = true;
     useChatStore.setState({ rightPanelOpen: true, rightPanelMode: 'workspace', workspaceSurface: 'browser' });
     await act(async () => {
-      root.render(<BrowserPanel initialPort={5173} />);
+      root.render(
+        <WorkspaceSurfaceVisibilityProvider visible>
+          <BrowserPanel initialPort={5173} />
+        </WorkspaceSurfaceVisibilityProvider>,
+      );
     });
     expect(container.querySelector('iframe')).not.toBeNull();
 
     // Fold the panel (F284 keeps BrowserPanel mounted), then the target dies
     reachable = false;
     await act(async () => {
-      useChatStore.setState({ rightPanelOpen: false });
+      root.render(
+        <WorkspaceSurfaceVisibilityProvider visible={false}>
+          <BrowserPanel initialPort={5173} />
+        </WorkspaceSurfaceVisibilityProvider>,
+      );
     });
     const probesBefore = mocks.apiFetch.mock.calls.filter(([url]) =>
       String(url).startsWith('/api/preview/target-health'),
@@ -131,7 +140,11 @@ describe('BrowserPanel unavailable target', () => {
 
     // Reopen — must re-probe even though targetPort never changed
     await act(async () => {
-      useChatStore.setState({ rightPanelOpen: true });
+      root.render(
+        <WorkspaceSurfaceVisibilityProvider visible>
+          <BrowserPanel initialPort={5173} />
+        </WorkspaceSurfaceVisibilityProvider>,
+      );
     });
     const probesAfter = mocks.apiFetch.mock.calls.filter(([url]) =>
       String(url).startsWith('/api/preview/target-health'),

@@ -12,6 +12,25 @@ const collective = {
 };
 
 describe('Collective product shell', () => {
+  it('marks an experience candidate explicitly so responsive styling cannot alter the default Client', () => {
+    const html = renderToStaticMarkup(
+      <ProductShell
+        embedded={false}
+        collective={collective}
+        connection="online"
+        canSteward={false}
+        canPair={false}
+        experienceGate="f290-assembly"
+        onInvite={() => undefined}
+        onPair={() => undefined}
+      >
+        <p>体验候选</p>
+      </ProductShell>,
+    );
+
+    expect(html).toContain('data-experience-gate="f290-assembly"');
+  });
+
   it('uses the frozen direct-Web spatial grammar and resident language', () => {
     const html = renderToStaticMarkup(
       <ProductShell

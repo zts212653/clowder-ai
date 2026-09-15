@@ -52,34 +52,42 @@ export function RuntimeInteractionCard({ block, messageId }: { block: RichCardBl
     return () => window.removeEventListener('cat-cafe:runtime-interaction-updated', handler);
   }, [hydrate, interactionId]);
 
-  const submit = async (runtimeResponse: RuntimeInteractionResponse): Promise<void> => {
+  const submitMutation = async (suffix: 'respond' | 'reject', payload: Record<string, unknown>): Promise<void> => {
     if (!record?.cardRef || submittingRef.current) return;
     submittingRef.current = true;
     fetchGeneration.current += 1;
     setSubmitting(true);
     setError(null);
     try {
-      const response = await apiFetch(`/api/runtime-interactions/${encodeURIComponent(interactionId)}/respond`, {
+      const response = await apiFetch(`/api/runtime-interactions/${encodeURIComponent(interactionId)}/${suffix}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ cardRef: record.cardRef, response: runtimeResponse }),
+        body: JSON.stringify(payload),
       });
-      const body = await readSubmitBody(response);
+      const responseBody = await readSubmitBody(response);
       if (response.status === 409) {
         submittingRef.current = false;
         setSubmitting(false);
         await hydrate();
         return;
       }
-      if (!response.ok || !body.interaction) throw new Error(body.error ?? '提交失败');
+      if (!response.ok || !responseBody.interaction) throw new Error(responseBody.error ?? '提交失败');
       fetchGeneration.current += 1;
-      setRecord(body.interaction);
+      setRecord(responseBody.interaction);
     } catch (caught) {
       setError(errorMessage(caught));
     } finally {
       submittingRef.current = false;
       setSubmitting(false);
     }
+  };
+  const submit = async (runtimeResponse: RuntimeInteractionResponse): Promise<void> => {
+    if (!record?.cardRef) return;
+    await submitMutation('respond', { cardRef: record.cardRef, response: runtimeResponse });
+  };
+  const reject = async (): Promise<void> => {
+    if (!record?.cardRef) return;
+    await submitMutation('reject', { cardRef: record.cardRef });
   };
 
   const canonical = Boolean(
@@ -112,7 +120,12 @@ export function RuntimeInteractionCard({ block, messageId }: { block: RichCardBl
         <TerminalState record={record} />
       ) : null}
       {record && canonical && record.status === 'pending' ? (
-        <PendingSurface record={record} disabled={submitting} onSubmit={(response) => void submit(response)} />
+        <PendingSurface
+          record={record}
+          disabled={submitting}
+          onSubmit={(response) => void submit(response)}
+          onReject={() => void reject()}
+        />
       ) : null}
     </section>
   );
@@ -122,14 +135,18 @@ function PendingSurface({
   record,
   disabled,
   onSubmit,
+  onReject,
 }: {
   record: RuntimeInteractionRecord;
   disabled: boolean;
   onSubmit: (response: RuntimeInteractionResponse) => void;
+  onReject: () => void;
 }) {
   const request = record.request;
   if (request.kind === 'question') {
-    return <RuntimeInteractionQuestionForm request={request} disabled={disabled} onSubmit={onSubmit} />;
+    return (
+      <RuntimeInteractionQuestionForm request={request} disabled={disabled} onSubmit={onSubmit} onReject={onReject} />
+    );
   }
   if (request.kind === 'elicitation') {
     return <RuntimeInteractionElicitationForm request={request} disabled={disabled} onSubmit={onSubmit} />;

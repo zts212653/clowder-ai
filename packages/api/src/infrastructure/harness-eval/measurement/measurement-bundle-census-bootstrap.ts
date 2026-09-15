@@ -115,21 +115,26 @@ export function reconcilePublicMeasurementBundleCensus(
   generatedAt: string,
 ): MeasurementBundleCensus {
   const current = MeasurementBundleCensusSchema.parse(input);
-  const registryIds = new Set(loadMeasurementBundleRegistry(repoRoot).map((domain) => domain.domainId));
+  const registry = loadMeasurementBundleRegistry(repoRoot);
+  const registryIds = new Set(registry.map((domain) => domain.domainId));
   const removed = current.entries.map((entry) => entry.domainId).filter((domainId) => !registryIds.has(domainId));
   if (removed.length > 0) {
     throw new Error(`measurement bundle census domain removal requires explicit migration: ${removed.join(', ')}`);
   }
 
-  const defaults = createPublicMeasurementBundleCensus(repoRoot, generatedAt);
+  const corpus = scanMeasurementVerdictCorpus(repoRoot);
   const currentByDomain = new Map(current.entries.map((entry) => [entry.domainId, entry]));
   let nextRiskRank = Math.max(
     0,
     ...current.entries.map((entry) => entry.validityMigration.riskRank).filter((rank): rank is number => rank !== null),
   );
   const reconciled: MeasurementBundleCensus = {
-    ...defaults,
-    entries: defaults.entries.map((entry) => {
+    ...current,
+    generatedAt,
+    verdictCorpusHash: corpus.hash,
+    committedVerdictArtifactCount: corpus.total,
+    entries: registry.map((domain) => {
+      const entry = buildEntry(domain, corpus.counts.get(domain.domainId) ?? 0, null);
       const existing = currentByDomain.get(entry.domainId);
       if (existing) {
         return {

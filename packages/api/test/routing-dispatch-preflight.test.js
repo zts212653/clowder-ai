@@ -67,6 +67,87 @@ function routeDeps(services, routingDispatchPreflight, invocationExtras = {}) {
 }
 
 describe('F293 actual-send routing preflight', () => {
+  test('serial and parallel classify human attempts from strict ingress, preserving queued origin', async () => {
+    const { routeSerial } = await import('../dist/domains/cats/services/agents/routing/route-serial.js');
+    const { routeParallel } = await import('../dist/domains/cats/services/agents/routing/route-parallel.js');
+    for (const route of [routeSerial, routeParallel]) {
+      for (const [origin, queueSource, auth, expected] of [
+        ['direct_owner', undefined, 'strict', true],
+        ['queue_replay', 'user', 'strict', true],
+        ['queue_replay', 'agent', 'strict', false],
+        ['queue_replay', 'connector', 'strict', false],
+        ['callback', 'user', 'strict', false],
+        ['direct_owner', undefined, 'unknown', false],
+      ]) {
+        const seen = [];
+        const deps = routeDeps(
+          {},
+          {
+            preflight: async (input) => {
+              seen.push(input);
+              return decision(input, { opus: 'rejected' });
+            },
+          },
+        );
+        for await (const _event of route(deps, ['opus'], 'request', 'owner-1', 'origin-thread', {
+          ownerAuthProvenance: auth,
+          humanDispositionInvocationOrigin: origin,
+          routingQueueSource: queueSource,
+        })) {
+          /* drain real route */
+        }
+        assert.equal(
+          seen[0].ownerRequestedAttempt === true,
+          expected,
+          `${route.name}: ${origin}/${queueSource}/${auth}`,
+        );
+      }
+    }
+  });
+
+  test('all rejected targets produce truthful failed dispositions without any child invocation', async () => {
+    const { routeSerial } = await import('../dist/domains/cats/services/agents/routing/route-serial.js');
+    const { routeParallel } = await import('../dist/domains/cats/services/agents/routing/route-parallel.js');
+    const { PerCatTerminalDispositionCollector } = await import(
+      '../dist/domains/cats/services/agents/invocation/PerCatTerminalDispositionCollector.js'
+    );
+    for (const route of [routeSerial, routeParallel]) {
+      const calls = [];
+      const collector = new PerCatTerminalDispositionCollector({ targetCatIds: ['opus', 'codex'] });
+      const deps = routeDeps(
+        { opus: service('opus', calls), codex: service('codex', calls) },
+        { preflight: async (input) => decision(input, { opus: 'rejected', codex: 'rejected' }) },
+      );
+      for await (const event of route(deps, ['opus', 'codex'], 'request', 'owner-1', 'rejected-thread'))
+        collector.observe(event);
+      assert.deepEqual(calls, []);
+      assert.deepEqual(collector.getSuccessfulCatIds(), []);
+      assert.ok(collector.getPrimaryTerminalError(), `${route.name} must expose a retryable failure`);
+    }
+  });
+
+  test('a rejected original request persists its exact retry source for refresh and thread switching', async () => {
+    const { routeSerial } = await import('../dist/domains/cats/services/agents/routing/route-serial.js');
+    const stored = [];
+    const deps = routeDeps({}, { preflight: async (input) => decision(input, { opus: 'rejected' }) });
+    deps.messageStore.append = async (input) => {
+      const message = { ...input, id: `notice-${stored.length}` };
+      stored.push(message);
+      return message;
+    };
+    const emitted = [];
+    for await (const event of routeSerial(deps, ['opus'], 'original', 'owner-1', 'thread-1', {
+      parentInvocationId: 'parent-1',
+      currentUserMessageId: 'message-1',
+    }))
+      emitted.push(event);
+    const notice = stored.find((message) => message.extra?.systemInfo?.payload.type === 'routing_preflight');
+    assert.ok(notice, 'the notice must survive hydration');
+    assert.equal(notice.extra.systemInfo.payload.retryInvocationId, 'parent-1');
+    assert.equal(notice.extra.systemInfo.payload.sourceMessageId, 'message-1');
+    assert.equal(emitted.find((event) => event.type === 'system_info')?.messageId, notice.id);
+  });
+
   test('last-resort degradation deduplicates targets and stays total for an empty target set', async () => {
     const { preflightRoutingDispatch } = await import(
       '../dist/domains/routing-context/RoutingDispatchPreflightPort.js'

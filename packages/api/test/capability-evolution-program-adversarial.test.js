@@ -25,7 +25,9 @@ describe('F311 Evolution Program adversarial persistence', { skip: redisIsolatio
       '../dist/infrastructure/capability-evolution/program-event-log.js'
     ));
     ({ EvolutionProgramService } = await import('../dist/infrastructure/capability-evolution/program-service.js'));
-    ({ projectEvolutionProgram } = await import('../dist/infrastructure/capability-evolution/program-projection.js'));
+    ({ projectEvolutionProgram } = await import(
+      '../dist/infrastructure/capability-evolution/read-model/program-projection.js'
+    ));
     const { createRedisClient } = await import('@cat-cafe/shared/utils');
     redis = createRedisClient({ url: REDIS_URL, keyPrefix: TEST_KEY_PREFIX });
     await redis.ping();

@@ -45,6 +45,26 @@ describe('buildProfileUpdateCardBlock', () => {
     assert.ok(/cat-declared/.test(provField.value));
   });
 
+  // --- T8: Phase E layer-aware labels ---
+
+  it('primer proposal → title mentions cat + primer', async () => {
+    const mod = await import('../dist/routes/profile-update-card-block.js');
+    const card = mod.buildProfileUpdateCardBlock(proposal);
+    assert.match(card.title, /primer/);
+    assert.match(card.title, /codex/);
+  });
+
+  it('corpus proposal → title mentions corpus, not cat persona', async () => {
+    const mod = await import('../dist/routes/profile-update-card-block.js');
+    const card = mod.buildProfileUpdateCardBlock({
+      ...proposal,
+      targetLayer: 'corpus',
+      targetPath: 'corpus/shared-facts.md',
+    });
+    assert.match(card.title, /corpus/);
+    assert.doesNotMatch(card.title, /codex/);
+  });
+
   it('P2: lengthens Markdown fences when primer content contains backticks', async () => {
     const mod = await import('../dist/routes/profile-update-card-block.js');
     const card = mod.buildProfileUpdateCardBlock({

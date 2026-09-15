@@ -2,8 +2,9 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useChatStore } from '@/stores/chatStore';
-import { API_URL, apiFetch } from '@/utils/api-client';
+import { apiFetch } from '@/utils/api-client';
 import { buildWorktreeAliasMap, resolveListedWorktreeId, type WorktreeAliasMap } from '@/utils/worktree-id-alias';
+import { useWorkspaceFileChange } from './useWorkspaceFileChange';
 import { useWorkspaceSearch } from './useWorkspaceSearch';
 
 export type { SearchResult } from './useWorkspaceSearch';
@@ -79,7 +80,7 @@ function reconcileDiscoveredWorktree(
   if (discoveredId !== currentId) setWorktreeId(discoveredId);
 }
 
-export function useWorkspace() {
+export function useWorkspace({ loadContent = true }: { loadContent?: boolean } = {}) {
   const worktreeId = useChatStore((s) => s.workspaceWorktreeId);
   const openFilePath = useChatStore((s) => s.workspaceOpenFilePath);
   const setWorktreeId = useChatStore((s) => s.setWorkspaceWorktreeId);
@@ -163,8 +164,8 @@ export function useWorkspace() {
   );
 
   useEffect(() => {
-    if (worktreeId) fetchTree();
-  }, [worktreeId, fetchTree]);
+    if (loadContent && worktreeId) fetchTree();
+  }, [loadContent, worktreeId, fetchTree]);
 
   // Lazy-load subtree for a directory at max depth (children === undefined)
   const fetchSubtree = useCallback(
@@ -212,86 +213,23 @@ export function useWorkspace() {
 
   // Load file when openFilePath changes
   useEffect(() => {
-    if (openFilePath) fetchFile(openFilePath);
+    if (!loadContent) return;
+    if (openFilePath) void fetchFile(openFilePath);
     else setFile(null);
-  }, [openFilePath, fetchFile]);
+  }, [loadContent, openFilePath, fetchFile]);
 
-  // File-change watcher: auto-reload when file is modified externally
-  const [pendingExternalSha, setPendingExternalSha] = useState<string | null>(null);
-  const editDirtyRef = useRef(false);
-  const fileShaRef = useRef<string | null>(null);
-
-  useEffect(() => {
-    fileShaRef.current = file?.sha256 ?? null;
-  }, [file?.sha256]);
-
-  const setEditDirty = useCallback(
-    (dirty: boolean) => {
-      editDirtyRef.current = dirty;
-      if (!dirty && pendingExternalSha) {
-        setPendingExternalSha(null);
-        if (openFilePath) fetchFile(openFilePath);
-      }
-    },
-    [pendingExternalSha, openFilePath, fetchFile],
-  );
-
-  const applyExternalChange = useCallback(() => {
-    setPendingExternalSha(null);
-    if (openFilePath) fetchFile(openFilePath);
-  }, [openFilePath, fetchFile]);
-
-  const dismissExternalChange = useCallback(() => {
-    setPendingExternalSha(null);
-  }, []);
-
-  // biome-ignore lint/correctness/useExhaustiveDependencies: intentional reset on file switch
-  useEffect(() => {
-    setPendingExternalSha(null);
-  }, [openFilePath]);
-
-  useEffect(() => {
-    if (!worktreeId || !openFilePath) return;
-    let cancelled = false;
-    let cleanup: (() => void) | null = null;
-
-    import('socket.io-client').then(({ io }) => {
-      if (cancelled) return;
-      const apiUrl = new URL(API_URL);
-      const socket = io(`${apiUrl.protocol}//${apiUrl.host}`, {
-        transports: ['websocket'],
-        forceNew: true,
-      });
-
-      socket.on('connect', () => {
-        socket.emit('workspace:watch-file', {
-          worktreeId,
-          path: openFilePath,
-          sha256: fileShaRef.current,
-        });
-      });
-
-      socket.on('workspace:file-changed', (data: { worktreeId: string; path: string; sha256: string }) => {
-        if (data.path !== openFilePath || data.worktreeId !== worktreeId) return;
-        if (data.sha256 === fileShaRef.current) return;
-        if (editDirtyRef.current) {
-          setPendingExternalSha(data.sha256);
-        } else {
-          fetchFile(openFilePath);
-        }
-      });
-
-      cleanup = () => {
-        socket.emit('workspace:unwatch-file');
-        socket.disconnect();
-      };
-    });
-
-    return () => {
-      cancelled = true;
-      cleanup?.();
-    };
-  }, [worktreeId, openFilePath, fetchFile]);
+  const {
+    pendingExternalSha,
+    onDirtyChange: setEditDirty,
+    applyExternalChange,
+    dismissExternalChange,
+  } = useWorkspaceFileChange({
+    enabled: loadContent,
+    worktreeId,
+    path: openFilePath,
+    currentSha: file?.sha256 ?? null,
+    onReload: fetchFile,
+  });
 
   // Reveal file in system file manager (Finder/Explorer)
   const revealInFinder = useCallback(

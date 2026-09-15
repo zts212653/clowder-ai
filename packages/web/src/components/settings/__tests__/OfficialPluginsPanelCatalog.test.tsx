@@ -179,7 +179,9 @@ describe('OfficialPluginsPanel catalog refresh', () => {
     await act(async () => findButton(container, '更新到 0.1.0-alpha.3')?.click());
     await flushEffects();
 
-    expect(confirm).toHaveBeenCalledWith('确认更新到 0.1.0-alpha.3？接收服务会短暂重连，并保持已启用状态。');
+    expect(confirm).toHaveBeenCalledWith(
+      '确认更新到 0.1.0-alpha.3？请先保存正在进行的工作；插件会短暂重启，并保持已启用状态。',
+    );
     expect(container.textContent).toContain('运行中');
   });
 

@@ -22,7 +22,7 @@ const { createFreshnessReinvokeCheck } = await import(
 function createRedisStub(data = {}) {
   const store = { ...data };
   const lists = {};
-  return {
+  const redis = {
     get: async (key) => store[key] ?? null,
     incr: async (key) => {
       store[key] = (Number(store[key]) || 0) + 1;
@@ -48,10 +48,40 @@ function createRedisStub(data = {}) {
         store[`__hash:${key}`][field] = value;
       }
     },
+    multi: () => {
+      const operations = [];
+      const transaction = {
+        rpush(key, value) {
+          operations.push(() => redis.rpush(key, value));
+          return transaction;
+        },
+        expire(key, seconds) {
+          operations.push(() => redis.expire(key, seconds));
+          return transaction;
+        },
+        zadd() {
+          operations.push(async () => 1);
+          return transaction;
+        },
+        zremrangebyscore() {
+          operations.push(async () => 0);
+          return transaction;
+        },
+        async exec() {
+          const results = [];
+          for (const operation of operations) {
+            results.push([null, await operation()]);
+          }
+          return results;
+        },
+      };
+      return transaction;
+    },
     // Expose internals for assertion
     _store: store,
     _lists: lists,
   };
+  return redis;
 }
 
 function createMessageStoreStub(messages = []) {

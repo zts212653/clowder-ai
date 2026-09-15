@@ -140,6 +140,20 @@ export const OFFICIAL_PLUGIN_POLICIES = [
     effectiveGrants: [],
     hostSignalRoutes: [],
   },
+  {
+    catalogId: 'genoffice-docx',
+    packageName: '@clowder-ai/genoffice-docx',
+    pluginId: 'dev.clowder.genoffice-docx',
+    distribution: 'registry',
+    releaseTag: 'next',
+    bootstrapRelease: {
+      version: '0.1.0-alpha.1',
+      archiveUrl: 'https://registry.npmjs.org/@clowder-ai/genoffice-docx/-/genoffice-docx-0.1.0-alpha.1.tgz',
+      packageDigest: 'sha512-MT893A4JY0zi8WWgI3xxNqE2ENoX8032rdRiJRvUIQxq7A0uvB8gbiapj1cuHBLCuRxgBNg5wBRnwGX69sPxrQ==',
+    },
+    effectiveGrants: [],
+    hostSignalRoutes: [],
+  },
 ] as const satisfies readonly OfficialPluginCatalogPolicy[];
 
 export const OFFICIAL_PLUGIN_CATALOG = OFFICIAL_PLUGIN_POLICIES.map((policy) => officialPluginCatalogEntry(policy));

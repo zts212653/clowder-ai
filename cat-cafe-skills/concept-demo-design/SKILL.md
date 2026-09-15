@@ -192,7 +192,7 @@ Contract 必须记录：
 只有 Demo 声称自己在验证 **Workspace、产品主壳、多对象协作或多 Agent 工作台** 时，才触发这组证据；普通设置页、单对象详情页和一次性流程不需要为了“完整”补 tab。
 
 1. **先声明层级**：写清当前画面是一个 feature surface、一个对象详情，还是承载多个 surface 的 product shell。把一个做得很完整的资产页叫“Workspace”不算成立。
-2. **证明接在真实宿主里**：若 claim 是“已进入现有产品 / Collective”，Contract 必须写出**真实产品宿主**的用户入口、目标宿主组件路径与**宿主挂载证据**。单独 `/dev` route、自造导航或 **独立复制壳**可以验证组件，但不得充当产品接入证据。
+2. **证明接在真实宿主里**：若 claim 是“已进入现有产品 / Collective”，Contract 必须写出**真实产品宿主**的用户入口、目标宿主组件路径与**宿主挂载证据**。单独 `/dev` route、自造导航或 **独立复制壳**可以验证组件，但不得充当产品接入证据。**默认入口即门**：每个 `claims.productIntegration` 一律要带 `defaultEntryJourney`（`testPath` / `journeyId` / `surfaceTestId`）——一条用 `registerDefaultEntryJourney` 注册在 `packages/web/test/browser/` 下、由 `test:browser` 执行的真实浏览器旅程：从不带任何查询参数的默认入口 `enter`，做用户动作，`arrive` 时断言最终 surface 唯一的 `data-testid` 可见。`?experienceGate=f290-assembly` 这种只能手输 URL 的候选页写不出这条旅程，只能登记为 opt-in 候选。checker 核静态绑定形状（文件在 canonical runner 里、旅程体不用 `setContent` / `goto` / `evaluate` 注入 DOM 或 URL、final surface 位于 `packages/web/src` 或 `packages/collective-client/src`，且 testid 跨两处产品源码唯一）；runtime harness 在进程收尾时逐条对账绑定当前 `testPath` 的 claim，要求 exact `journeyId` 真实注册并完成，藏在未执行分支或只让文件退出都不能通过。可达性由 full gate 实跑旅程证明，不做静态推断（2026-09-10 起，静态 prover 已被 runtime journey 取代）。claim 或旅程文件一改，gate 强制 full。
 3. **工作集由用户组成**：用户能从真实入口把 fixture 中未预开的对象加入工作集，形成新的 typed tab / pane；预先摆好几个场景按钮或只替换同一块 DOM 不算。
 4. **异质 surface 共存**：至少两个职责不同的 surface（例如 Channel + Artifact、Chat + Review、File + Browser）能同时保持或快速切回，而不是把所有能力压成同一张卡或同一个右栏模板。
 5. **主工作面与 sidecar 分工**：inspector / sidecar 只承载临时上下文、短动作或快速窥视；需要持续阅读、编辑、对比或独立导航的对象可以晋升为 tab / split pane。右栏不是所有对象的终身监狱。

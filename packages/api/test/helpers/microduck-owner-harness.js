@@ -41,6 +41,33 @@ export const deployedVersionRef = {
   ...targetVersionRef,
   version: deployedRevision,
 };
+export const controlTargetVersionRef = {
+  ...objectRef,
+  assetKind: 'simulator-control-slot',
+  assetId: 'walking',
+};
+export const controlBaselineVersionRef = {
+  ownerFeatureId: 'microduck-owner',
+  ownerStateRef: `control-package:sha256:${'6'.repeat(64)}`,
+  version: '6'.repeat(64),
+  assetKind: 'control-package',
+  assetId: 'baseline',
+};
+export const controlCandidateVersionRef = {
+  ownerFeatureId: 'microduck-owner',
+  ownerStateRef: `control-package:sha256:${'9'.repeat(64)}`,
+  version: '9'.repeat(64),
+  assetKind: 'control-package',
+  assetId: 'action-scale-110',
+};
+export const controlDeployedVersionRef = {
+  ...controlTargetVersionRef,
+  version: controlCandidateVersionRef.version,
+};
+export const controlRestoreOutcomeRef = {
+  ownerFeatureId: 'microduck-owner',
+  ownerStateRef: `restore-outcome:sha256:${'e'.repeat(64)}`,
+};
 export const permissionRef = { ownerFeatureId: 'F202', ownerStateRef: 'permission:microduck-walking-v1', version: '1' };
 export const approvalRef = {
   ownerFeatureId: 'F246',
@@ -61,6 +88,10 @@ export const interventionRef = {
   ownerFeatureId: 'microduck-owner',
   ownerStateRef: `config-diff:sha256:${'c'.repeat(64)}`,
 };
+export const controlInterventionRef = {
+  ownerFeatureId: 'microduck-owner',
+  ownerStateRef: `control-experiment:sha256:${'d'.repeat(64)}`,
+};
 
 export function exactBase() {
   return { programRef, cycleRef, objectRef };
@@ -76,6 +107,7 @@ export function showState(overrides = {}) {
   const common = {
     status: 'resolved',
     phase,
+    interventionKind: 'training',
     baseline: {
       policyRevision: rollbackVersionRef,
       captureRef: { ownerFeatureId: 'microduck-owner', ownerStateRef: `capture:sha256:${'4'.repeat(64)}` },
@@ -156,14 +188,126 @@ export function showState(overrides = {}) {
   };
 }
 
+export function controlShowState(overrides = {}) {
+  const phase = overrides.phase ?? 'kept';
+  const aggregateEvaluationRef = {
+    ownerFeatureId: 'microduck-owner',
+    ownerStateRef: `evaluation:sha256:${'5'.repeat(64)}`,
+  };
+  const runnerRef = {
+    ownerFeatureId: 'microduck-owner',
+    ownerStateRef: `runner:sha256:${'a'.repeat(64)}`,
+  };
+  const evaluationEnvRef = {
+    ownerFeatureId: 'microduck-owner',
+    ownerStateRef: `evaluation-env:sha256:${'b'.repeat(64)}`,
+  };
+  const packageHashes = ['7'.repeat(64), '8'.repeat(64), '9'.repeat(64)];
+  const candidateSubjects = ['action-scale-090', 'action-scale-105', 'action-scale-110'];
+  const common = {
+    status: 'resolved',
+    phase,
+    interventionKind: 'control_config',
+    baseline: {
+      policyRevision: rollbackVersionRef,
+      artifactRevision: controlBaselineVersionRef,
+      configRef: {
+        ownerFeatureId: 'microduck-owner',
+        ownerStateRef: `control-config:sha256:${'c'.repeat(64)}`,
+      },
+      runnerRef,
+      evaluationEnvRef,
+      captureRef: { ownerFeatureId: 'microduck-owner', ownerStateRef: `capture:sha256:${'4'.repeat(64)}` },
+      evaluationRef: aggregateEvaluationRef,
+    },
+    holdoutProof: {
+      sealedProofRef: {
+        ownerFeatureId: 'microduck-owner',
+        ownerStateRef: `evaluation-proof:sha256:${shaA}`,
+      },
+      optimizerExposureProofRef: {
+        ownerFeatureId: 'microduck-owner',
+        ownerStateRef: `exposure-proof:sha256:${shaB}`,
+      },
+      optimizerExposed: false,
+    },
+    candidates: candidateSubjects.map((subjectId, index) => ({
+      subjectId,
+      policyRevision: rollbackVersionRef,
+      artifactRevision: {
+        ownerFeatureId: 'microduck-owner',
+        ownerStateRef: `control-package:sha256:${packageHashes[index]}`,
+        version: packageHashes[index],
+        assetKind: 'control-package',
+        assetId: subjectId,
+      },
+      configRef: {
+        ownerFeatureId: 'microduck-owner',
+        ownerStateRef: `control-config:sha256:${String(index + 1).repeat(64)}`,
+      },
+      runnerRef,
+      evaluationEnvRef,
+      evaluationRef: aggregateEvaluationRef,
+    })),
+    candidateRevision: controlCandidateVersionRef,
+    targetRevision: controlTargetVersionRef,
+    rollbackRevision: controlBaselineVersionRef,
+    approvalProposalRef: {
+      ownerFeatureId: 'F266',
+      ownerStateRef: 'eval-repair-proposal:microduck-control-adopt-v1',
+    },
+    interventionRef: controlInterventionRef,
+    rejection: {
+      kind: 'not_reproducible',
+      ownerRef: { ownerFeatureId: 'microduck-owner', ownerStateRef: `evaluation:sha256:${shaB}` },
+    },
+    evaluatedArtifactSha256: controlCandidateVersionRef.version,
+  };
+  if (phase === 'approval_ready') return { ...common, ...overrides };
+  if (phase === 'applying') return { ...common, approvalRef, ...overrides };
+  const deployed = {
+    ...common,
+    approvalRef,
+    deployedRevision: controlDeployedVersionRef,
+    deployedArtifactSha256: controlCandidateVersionRef.version,
+  };
+  if (phase === 'verifying') return { ...deployed, ...overrides };
+  if (phase === 'rolled_back') {
+    return {
+      ...deployed,
+      rollbackReceiptRef: {
+        ownerFeatureId: 'microduck-owner',
+        ownerStateRef: `rollback-receipt:sha256:${shaA}`,
+      },
+      restoreOutcomeRef: controlRestoreOutcomeRef,
+      ...overrides,
+    };
+  }
+  return {
+    ...deployed,
+    phase: 'kept',
+    freshOutcomeRef: { ownerFeatureId: 'microduck-owner', ownerStateRef: `fresh-outcome:sha256:${shaA}` },
+    ...overrides,
+  };
+}
+
 export function makeHarness(overrides = {}) {
   const calls = { authorize: 0, launchMutation: 0, writeback: 0, rollback: 0, collectFreshOutcome: 0 };
+  const profile = overrides.profile ?? {
+    targetVersionRef,
+    candidateVersionRef,
+    rollbackVersionRef,
+    deployedVersionRef,
+    interventionRef,
+    showState,
+    artifactSha256: shaA,
+  };
   const owner = {
     async observe() {
       return {
         status: 'observed',
-        targetVersionRef,
-        baselineVersionRef: rollbackVersionRef,
+        targetVersionRef: profile.targetVersionRef,
+        baselineVersionRef: profile.rollbackVersionRef,
         observationRefs: [{ ownerFeatureId: 'microduck-owner', ownerStateRef: `capture:sha256:${shaA}` }],
       };
     },
@@ -172,7 +316,7 @@ export function makeHarness(overrides = {}) {
       return {
         status: 'accepted',
         mutationReceiptRef: { ownerFeatureId: 'microduck-owner', ownerStateRef: 'hf-job:owner/job-1' },
-        candidateVersionRef,
+        candidateVersionRef: profile.candidateVersionRef,
       };
     },
     async resolveVerification() {
@@ -180,8 +324,8 @@ export function makeHarness(overrides = {}) {
         status: 'verified',
         evaluationReceiptRef,
         verificationReceiptRef,
-        candidateVersionRef,
-        evaluatedArtifactSha256: shaA,
+        candidateVersionRef: profile.candidateVersionRef,
+        evaluatedArtifactSha256: profile.artifactSha256,
         publicEvaluationComplete: true,
         holdoutEvaluationComplete: true,
         holdoutSealed: true,
@@ -202,9 +346,9 @@ export function makeHarness(overrides = {}) {
       return {
         status: 'deployed',
         writebackReceiptRef: { ownerFeatureId: 'microduck-owner', ownerStateRef: `deploy:sha256:${shaA}` },
-        deployedVersionRef,
-        rollbackVersionRef,
-        deployedArtifactSha256: shaA,
+        deployedVersionRef: profile.deployedVersionRef,
+        rollbackVersionRef: profile.rollbackVersionRef,
+        deployedArtifactSha256: profile.artifactSha256,
         deployedAt: '2026-09-04T01:00:00.000Z',
       };
     },
@@ -214,8 +358,8 @@ export function makeHarness(overrides = {}) {
         status: 'fresh',
         outcomeReceiptRef: { ownerFeatureId: 'microduck-owner', ownerStateRef: `fresh-outcome:sha256:${shaA}` },
         freshnessProofRef: { ownerFeatureId: 'microduck-owner', ownerStateRef: `freshness-proof:sha256:${shaB}` },
-        deployedVersionRef,
-        deployedArtifactSha256: shaA,
+        deployedVersionRef: profile.deployedVersionRef,
+        deployedArtifactSha256: profile.artifactSha256,
         measuredAt: '2026-09-04T01:05:00.000Z',
       };
     },
@@ -224,18 +368,19 @@ export function makeHarness(overrides = {}) {
       return {
         status: 'rolled_back',
         rollbackReceiptRef: { ownerFeatureId: 'microduck-owner', ownerStateRef: `rollback-receipt:sha256:${shaA}` },
-        restoredVersionRef: rollbackVersionRef,
+        restoredVersionRef: profile.rollbackVersionRef,
+        ...(profile.restoreOutcomeRef ? { restoreOutcomeRef: profile.restoreOutcomeRef } : {}),
       };
     },
     async resolveShowState() {
-      return showState();
+      return profile.showState();
     },
     ...overrides.owner,
   };
   const credentialBoundary = {
-    async authorize() {
+    async authorize(input) {
       calls.authorize += 1;
-      return { status: 'authorized', permissionRef, targetVersionRef };
+      return { status: 'authorized', permissionRef, targetVersionRef: input.targetVersionRef };
     },
     ...overrides.credentialBoundary,
   };
@@ -244,11 +389,11 @@ export function makeHarness(overrides = {}) {
       return {
         status: 'approved',
         approvalRef,
-        proposalRef: showState().approvalProposalRef,
+        proposalRef: profile.showState().approvalProposalRef,
         programRef,
         cycleRef,
-        interventionRef,
-        targetVersionRef,
+        interventionRef: profile.interventionRef,
+        targetVersionRef: profile.targetVersionRef,
       };
     },
     ...overrides.approvalResolver,
@@ -257,11 +402,11 @@ export function makeHarness(overrides = {}) {
     async resolve() {
       return {
         status: 'pending',
-        proposalRef: showState({ phase: 'approval_ready' }).approvalProposalRef,
+        proposalRef: profile.showState({ phase: 'approval_ready' }).approvalProposalRef,
         programRef,
         cycleRef,
-        interventionRef,
-        targetVersionRef,
+        interventionRef: profile.interventionRef,
+        targetVersionRef: profile.targetVersionRef,
       };
     },
     ...overrides.proposalResolver,
@@ -276,4 +421,20 @@ export function makeHarness(overrides = {}) {
     }),
     calls,
   };
+}
+
+export function makeControlHarness(overrides = {}) {
+  return makeHarness({
+    ...overrides,
+    profile: {
+      targetVersionRef: controlTargetVersionRef,
+      candidateVersionRef: controlCandidateVersionRef,
+      rollbackVersionRef: controlBaselineVersionRef,
+      deployedVersionRef: controlDeployedVersionRef,
+      interventionRef: controlInterventionRef,
+      showState: controlShowState,
+      artifactSha256: controlCandidateVersionRef.version,
+      restoreOutcomeRef: controlRestoreOutcomeRef,
+    },
+  });
 }

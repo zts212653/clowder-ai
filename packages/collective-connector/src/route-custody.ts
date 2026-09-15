@@ -17,15 +17,21 @@ export async function setHostRoute(input: {
   now: () => number;
   connectionId: string;
   unsafeInput: SetHostRouteInput;
+  expectedRevision?: number;
 }): Promise<HostRouteConfig> {
   const routeInput = setHostRouteInputSchema.parse(input.unsafeInput);
   return input.persistence.transaction((state) => {
     requireConnection(state.connections[input.connectionId]);
     const existing = state.hostRoutes[input.connectionId];
+    if (input.expectedRevision !== undefined && (existing?.revision ?? 0) !== input.expectedRevision) {
+      throw Object.assign(new Error('Collective Host route configuration changed'), {
+        code: 'PARTICIPATION_REVISION_CONFLICT',
+      });
+    }
     if (existing && existing.localOwnerUserId !== routeInput.localOwnerUserId) {
       throw new Error('Collective Host route belongs to another local owner');
     }
-    const route: HostRouteConfig = {
+    const route = {
       connectionId: input.connectionId,
       localOwnerUserId: routeInput.localOwnerUserId,
       defaultIngressThreadId: routeInput.defaultIngressThreadId,

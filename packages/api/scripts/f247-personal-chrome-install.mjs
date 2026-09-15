@@ -1,20 +1,23 @@
 #!/usr/bin/env node
-
 import { lstat, readFile } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-
 import {
   PERSONAL_CHROME_AUTHORIZATION_LIMIT,
   readPersonalChromeConversationAuthorizations,
   revokePersonalChromeConversation,
 } from '../src/plugins/cloud-cat-personal-host/native-host/conversation-binding.mjs';
 import {
+  projectConversationTitles,
+  readConversationTitles,
+} from '../src/plugins/cloud-cat-personal-host/native-host/conversation-titles.mjs';
+import {
   inspectNativeHostInstallation,
   installNativeHost,
   uninstallNativeHost,
 } from '../src/plugins/cloud-cat-personal-host/native-host/install-host.mjs';
 import { resolvePersonalChromeHostPaths } from '../src/plugins/cloud-cat-personal-host/native-host/pairing-record.mjs';
+import { resolveChromeWebStoreDistribution } from './f247-personal-chrome-distribution.mjs';
 import { probeNativeHostHealth } from './f247-personal-chrome-health-probe.mjs';
 import {
   assertPersonalChromeConversationOption,
@@ -22,23 +25,26 @@ import {
 } from './f247-personal-chrome-install-cli-options.mjs';
 import { extensionIdFromManifestKey } from './f247-personal-chrome-live-contract.mjs';
 import { projectPersonalChromeLiveState } from './f247-personal-chrome-state-health.mjs';
+import {
+  refreshNativeConversationTitles,
+  refreshPersonalChromeConversationTitles,
+} from './f247-personal-chrome-title-refresh.mjs';
+
+export { resolveChromeWebStoreDistribution };
 
 const scriptDirectory = dirname(fileURLToPath(import.meta.url));
 const apiRoot = resolve(scriptDirectory, '..');
 const monorepoRoot = resolve(apiRoot, '../..');
 const extensionRoot = join(apiRoot, 'src/plugins/cloud-cat-personal-host/extension');
 const CHROME_EXTENSION_ID = /^[a-p]{32}$/;
-
 function errorCode(error) {
   return typeof error === 'object' && error !== null && typeof error.code === 'string' ? error.code : undefined;
 }
-
 function typedOperationError(code, message) {
   const error = new Error(message);
   error.code = code;
   return error;
 }
-
 async function resolveExtensionId(explicitExtensionId) {
   if (explicitExtensionId !== undefined) {
     if (typeof explicitExtensionId !== 'string' || !CHROME_EXTENSION_ID.test(explicitExtensionId)) {
@@ -57,50 +63,6 @@ async function recordedInstallationExists(pairingRecordPath) {
   } catch (error) {
     if (error?.code === 'ENOENT') return false;
     throw error;
-  }
-}
-
-export function resolveChromeWebStoreDistribution(webStoreListingUrl, extensionId) {
-  if (webStoreListingUrl === undefined || webStoreListingUrl === '') {
-    return {
-      channel: 'chrome_web_store',
-      integration: 'ready',
-      publication: 'unavailable',
-      blockerCode: 'CHROME_WEB_STORE_LISTING_NOT_CONFIGURED',
-    };
-  }
-  try {
-    if (typeof webStoreListingUrl !== 'string' || webStoreListingUrl.trim() !== webStoreListingUrl) {
-      throw new Error('listing URL must be exact');
-    }
-    const url = new URL(webStoreListingUrl);
-    const segments = url.pathname.split('/').filter(Boolean);
-    if (
-      url.protocol !== 'https:' ||
-      url.hostname !== 'chromewebstore.google.com' ||
-      url.username ||
-      url.password ||
-      url.search ||
-      url.hash ||
-      segments[0] !== 'detail' ||
-      segments.length < 2 ||
-      segments.at(-1) !== extensionId
-    ) {
-      throw new Error('listing URL is not the expected Chrome Web Store listing');
-    }
-    return {
-      channel: 'chrome_web_store',
-      integration: 'ready',
-      publication: 'published',
-      listingUrl: url.href,
-    };
-  } catch {
-    return {
-      channel: 'chrome_web_store',
-      integration: 'ready',
-      publication: 'invalid',
-      blockerCode: 'CHROME_WEB_STORE_LISTING_INVALID',
-    };
   }
 }
 
@@ -154,7 +116,8 @@ async function projectInstallationState({ state, platform, projectRoot, inspectI
       state.config.status = 'ready';
       return error.installation;
     }
-    if (errorCode(error) !== 'ENOENT') {
+    const paths = resolvePersonalChromeHostPaths(projectRoot, { platform });
+    if (errorCode(error) !== 'ENOENT' || (await recordedInstallationExists(paths.pairingRecordPath))) {
       state.artifact.helper = 'invalid';
       state.config.status = 'invalid';
       state.live.status = 'degraded';
@@ -204,6 +167,10 @@ export async function inspectPersonalChromePluginState({
     inspectInstallation,
   });
   await projectAuthorizationState({ state, path: paths.conversationBindingPath, readAuthorizations });
+  state.authorization.conversations = projectConversationTitles(
+    state.authorization.conversations,
+    await readConversationTitles(paths.conversationBindingPath),
+  );
   if (
     conversationId !== undefined &&
     !state.authorization.conversations.some((entry) => entry.conversationId === conversationId)
@@ -233,6 +200,7 @@ export function createPersonalChromePluginPort({
   revokeAuthorization = revokePersonalChromeConversation,
   probeLive = probeNativeHostHealth,
   hasRecordedInstallation = recordedInstallationExists,
+  refreshTitlesFromHost = refreshNativeConversationTitles,
   now = () => new Date(),
 } = {}) {
   const resolvedProjectRoot = projectRoot ?? process.env.CAT_CAFE_CONFIG_ROOT?.trim() ?? monorepoRoot;
@@ -265,6 +233,12 @@ export function createPersonalChromePluginPort({
     await installHost({ platform, projectRoot: resolvedProjectRoot, extensionId: resolvedExtensionId });
     return inspect();
   };
+  const refreshTitles = () =>
+    refreshPersonalChromeConversationTitles({
+      inspect,
+      pairingRecordPath: resolvePersonalChromeHostPaths(resolvedProjectRoot, { platform }).pairingRecordPath,
+      refreshTitlesFromHost,
+    });
   const repair = async () => {
     requireSupported();
     const resolvedExtensionId = await resolveExtensionId(extensionId);
@@ -309,6 +283,7 @@ export function createPersonalChromePluginPort({
   };
   return {
     inspect,
+    refreshTitles,
     install,
     repair,
     revoke,

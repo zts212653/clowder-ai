@@ -1,0 +1,22 @@
+{
+  "id": "existing-coverage-without-closure",
+  "scenario": "existing_coverage_without_closure",
+  "threadId": "thread_fixture_f254_existing_coverage",
+  "catIds": ["codex-sol"],
+  "evidenceRefs": ["fixture:F254/AC-E9/existing-coverage-without-closure@v1"],
+  "facts": {
+    "responsibilityCount": 0,
+    "custodyCount": 0,
+    "formalFinalCount": 1,
+    "formalFinalLimit": 1,
+    "knownStaleFinalCount": 0,
+    "targetCount": 1,
+    "accountedTargetCount": 1,
+    "sameBatchSiblingWakeCount": 0,
+    "automaticAttemptCount": 0,
+    "automaticAttemptLimit": 5,
+    "commitRecheckCount": 0,
+    "commitRecheckLimit": 10,
+    "terminalEvidenceComplete": true
+  }
+}

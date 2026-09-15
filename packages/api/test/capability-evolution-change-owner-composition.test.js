@@ -4,7 +4,7 @@ import { describe, it } from 'node:test';
 
 describe('F311 Phase 4 production owner composition', () => {
   it('registers the late-bound F311 consumer before F313 resolves owner bindings', async () => {
-    const [source, registrationSource] = await Promise.all([
+    const [source, registrationSource, microduckRegistrationSource] = await Promise.all([
       readFile(new URL('../src/index.ts', import.meta.url), 'utf8'),
       readFile(
         new URL(
@@ -13,12 +13,28 @@ describe('F311 Phase 4 production owner composition', () => {
         ),
         'utf8',
       ),
+      readFile(
+        new URL(
+          '../src/infrastructure/capability-evolution/change/microduck-eval-repair-owner-runtime-registration.ts',
+          import.meta.url,
+        ),
+        'utf8',
+      ),
     ]);
     const ownerHolder = source.indexOf('let evolutionChangeOwner: EvolutionChangeOwnerPort | undefined;');
+    const microduckProviderRegistration = source.indexOf('registerMicroduckEvalRepairOwnerRuntime({');
     const consumerRegistration = source.indexOf('registerF311E0EvalRepairOwnerRuntime({');
     const ownerRuntimeCreation = source.indexOf('await createEvalRepairOwnerRuntime({');
 
     assert.ok(ownerHolder >= 0, 'production bootstrap must retain a refs-only late-bound owner holder');
+    assert.ok(
+      microduckProviderRegistration > ownerHolder,
+      'the Microduck owner provider must register after the late-bound Program owner exists',
+    );
+    assert.ok(
+      consumerRegistration > microduckProviderRegistration,
+      'the Microduck provider must join the same runtime before the existing E0 consumer closes registration',
+    );
     assert.ok(consumerRegistration > ownerHolder, 'F311 must register only after its late-bound holder exists');
     assert.ok(
       ownerRuntimeCreation > consumerRegistration,
@@ -33,5 +49,11 @@ describe('F311 Phase 4 production owner composition', () => {
       1,
       'production bootstrap must expose exactly one F311 owner consumer',
     );
+    assert.equal(
+      microduckRegistrationSource.match(/registration\.registerBindingProvider\(/g)?.length,
+      1,
+      'Microduck must contribute exactly one provider without registering a shadow consumer',
+    );
+    assert.doesNotMatch(microduckRegistrationSource, /registerEvolutionOwnerConsumer|registerOutcomeServiceConsumer/);
   });
 });

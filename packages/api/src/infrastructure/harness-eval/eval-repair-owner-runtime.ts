@@ -1,3 +1,4 @@
+import type { OwnerTruthRefV1 } from '@cat-cafe/shared';
 import type { EvalReleaseTruthResolver } from './eval-release-truth-resolver.js';
 import type { EvalRepairApprovalService } from './eval-repair-approval.js';
 import {
@@ -12,6 +13,7 @@ import {
 } from './eval-repair-evolution-owner-port.js';
 import { EvalRepairOutcomeService } from './eval-repair-outcome.js';
 import type { EvalRepairOutcomeServiceOptions } from './eval-repair-outcome-contracts.js';
+import { composeEvalRepairOwnerBindings } from './eval-repair-owner-runtime-federation.js';
 
 const DORMANT_EFFECTS = Object.freeze({
   openCase: false,
@@ -36,11 +38,32 @@ export interface EvalRepairOwnerRuntimeBindings {
   decisionOwner: NonNullable<EvalRepairEvolutionOwnerPortOptions['decisionOwner']>;
 }
 
+export interface EvalRepairOwnerRuntimeRouteRefV1 {
+  ownerFeatureId: string;
+  ownerStateRef: string;
+  match: 'exact' | 'prefix';
+}
+
+/**
+ * Process-local dispatch metadata only. It identifies which canonical owner binding may answer an
+ * operation; it stores no Program lifecycle, Approval, mutation, receipt, or outcome truth.
+ */
+export interface EvalRepairOwnerRuntimeRouteV1 {
+  schemaVersion: 1;
+  providerId: string;
+  programRefs: readonly OwnerTruthRefV1[];
+  repairTargetRefs: readonly EvalRepairOwnerRuntimeRouteRefV1[];
+  assetVersionRefs: readonly EvalRepairOwnerRuntimeRouteRefV1[];
+  interventionReceiptRefs: readonly EvalRepairOwnerRuntimeRouteRefV1[];
+  freshOutcomeReceiptRefs: readonly EvalRepairOwnerRuntimeRouteRefV1[];
+}
+
 /**
  * Canonical asset owners implement this provider outside F266. Resolution is a read-only bootstrap
  * snapshot: it must not contact an owner, create custody, mutate an asset, or append an outcome.
  */
 export interface EvalRepairOwnerRuntimeBindingProvider {
+  route: EvalRepairOwnerRuntimeRouteV1;
   resolve(): Promise<EvalRepairOwnerRuntimeBindings | undefined>;
 }
 
@@ -53,7 +76,7 @@ export interface EvalRepairOutcomeServiceConsumer {
 }
 
 interface EvalRepairOwnerRuntimeRegistrationSnapshot {
-  bindingProvider?: EvalRepairOwnerRuntimeBindingProvider;
+  bindingProviders: readonly EvalRepairOwnerRuntimeBindingProvider[];
   evolutionOwnerConsumer?: EvalRepairEvolutionOwnerConsumer;
   outcomeServiceConsumer?: EvalRepairOutcomeServiceConsumer;
 }
@@ -63,13 +86,12 @@ interface EvalRepairOwnerRuntimeRegistrationSnapshot {
  * F311 consumer retains refs only; this registration stores neither lifecycle nor decision state.
  */
 export class EvalRepairOwnerRuntimeRegistration {
-  private bindingProvider?: EvalRepairOwnerRuntimeBindingProvider;
+  private readonly bindingProviders: EvalRepairOwnerRuntimeBindingProvider[] = [];
   private evolutionOwnerConsumer?: EvalRepairEvolutionOwnerConsumer;
   private outcomeServiceConsumer?: EvalRepairOutcomeServiceConsumer;
 
   registerBindingProvider(provider: EvalRepairOwnerRuntimeBindingProvider): void {
-    if (this.bindingProvider) throw new Error('eval repair owner binding provider already registered');
-    this.bindingProvider = provider;
+    this.bindingProviders.push(provider);
   }
 
   registerEvolutionOwnerConsumer(consumer: EvalRepairEvolutionOwnerConsumer): void {
@@ -84,7 +106,7 @@ export class EvalRepairOwnerRuntimeRegistration {
 
   snapshot(): EvalRepairOwnerRuntimeRegistrationSnapshot {
     return {
-      ...(this.bindingProvider ? { bindingProvider: this.bindingProvider } : {}),
+      bindingProviders: [...this.bindingProviders],
       ...(this.evolutionOwnerConsumer ? { evolutionOwnerConsumer: this.evolutionOwnerConsumer } : {}),
       ...(this.outcomeServiceConsumer ? { outcomeServiceConsumer: this.outcomeServiceConsumer } : {}),
     };
@@ -164,22 +186,37 @@ export async function createEvalRepairOwnerRuntime(
 
   const registration = options.registration?.snapshot();
   const registrationMissing = [
-    ...(registration?.bindingProvider ? [] : ['ownerBindingProvider']),
+    ...(registration && registration.bindingProviders.length > 0 ? [] : ['ownerBindingProvider']),
     ...(registration?.evolutionOwnerConsumer ? [] : ['evolutionOwnerConsumer']),
     ...(registration?.outcomeServiceConsumer ? [] : ['outcomeServiceConsumer']),
   ];
   if (registrationMissing.length > 0) return dormant(registrationMissing);
-
-  let bindings: EvalRepairOwnerRuntimeBindings | undefined;
-  try {
-    bindings = await registration?.bindingProvider?.resolve();
-  } catch {
-    return dormant(['ownerBindings:unreadable']);
+  if (registration?.bindingProviders.some((provider) => !provider.route)) {
+    return dormant(['ownerBindings:route_invalid']);
   }
-  const ownerMissing = missingOwnerBindings(bindings);
-  if (ownerMissing.length > 0) return dormant(ownerMissing);
+
+  const providerSnapshots = await Promise.all(
+    (registration?.bindingProviders ?? []).map(async (provider) => {
+      try {
+        const bindings = await provider.resolve();
+        const missing = missingOwnerBindings(bindings);
+        return {
+          route: provider.route,
+          bindings: missing.length === 0 ? bindings : undefined,
+          missing,
+        };
+      } catch {
+        return { route: provider.route, bindings: undefined, missing: ['ownerBindings:unreadable'] };
+      }
+    }),
+  );
+  if (providerSnapshots.length === 1 && !providerSnapshots[0].bindings) {
+    return dormant(providerSnapshots[0].missing);
+  }
+  const composed = composeEvalRepairOwnerBindings(providerSnapshots);
+  if (composed.status === 'blocked') return dormant(composed.missing);
+  const bindings = composed.bindings;
   if (
-    !bindings ||
     !registration?.evolutionOwnerConsumer ||
     !registration.outcomeServiceConsumer ||
     !options.eventLog ||

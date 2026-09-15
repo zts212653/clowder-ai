@@ -3008,6 +3008,157 @@ describe('#58: preferredCats candidate scope (not dispatch list)', () => {
     assert.equal(targetCats.length, 1, 'without #ideate, should still route to single cat');
   });
 
+  for (const strategy of ['serial', 'parallel']) {
+    test(`${strategy} reports a known unavailable member's cause and clears it after registry recovery`, async () => {
+      const { AgentRouter } = await import('../dist/domains/cats/services/agents/routing/AgentRouter.js');
+      const { AgentRegistry } = await import('../dist/domains/cats/services/agents/registry/AgentRegistry.js');
+      const registry = new AgentRegistry();
+      const healthyService = createMockAgentService('codex');
+      registry.register('codex', healthyService);
+      registry.markUnavailable('opus', {
+        code: 'rejected-account-binding',
+        message: 'account "fixture" has a torn credential without account metadata; reconcile before use',
+      });
+      const messageStore = createMockMessageStore();
+      const router = new AgentRouter({
+        agentRegistry: registry,
+        registry: createMockRegistry(),
+        messageStore,
+        threadStore: createMockThreadStore(),
+      });
+      const message = `${strategy === 'parallel' ? '#ideate' : '#execute'} @opus @codex hello`;
+      const failures = [];
+      const done = [];
+      for await (const event of router.route('user-1', message, 'unavailable-test')) {
+        if (event.type === 'error') {
+          assert.equal(event.catId, 'opus');
+          failures.push(event.error ?? event.content);
+        }
+        if (event.type === 'done') done.push(event);
+      }
+      assert.match(failures.join('\n'), /opus.*rejected-account-binding.*torn credential without account metadata/);
+      assert.doesNotMatch(failures.join('\n'), /Unknown cat ID/);
+      assert.equal(registry.has('opus'), false, 'a diagnostic must not make a member routable');
+      assert.equal(healthyService.invoke.mock.callCount(), 1, 'unavailable members must not block healthy siblings');
+      assert.ok(
+        done.some((event) => event.catId === 'opus'),
+        'unavailable member must settle its stream',
+      );
+      assert.ok(
+        done.some((event) => event.isFinal),
+        'the batch must settle',
+      );
+      assert.ok(
+        messageStore
+          .getByThread('unavailable-test')
+          .some((row) => row.userId === 'system' && /rejected-account-binding.*torn credential/.test(row.content)),
+        'the cause must survive a page reload',
+      );
+
+      const fenceCalls = [];
+      const persistenceContext = { errors: [] };
+      const source = messageStore.append({
+        userId: 'user-1',
+        catId: null,
+        threadId: 'unavailable-fenced',
+        content: message,
+        mentions: ['opus', 'codex'],
+        timestamp: Date.now(),
+      });
+      const { targetCats, intent } = await router.resolveTargetsAndIntent(message, 'unavailable-fenced');
+      for await (const _event of router.routeExecution(
+        'user-1',
+        message,
+        'unavailable-fenced',
+        source.id,
+        targetCats,
+        intent,
+        {
+          ownerAuthProvenance: 'unknown',
+          humanDispositionInvocationOrigin: 'unknown',
+          onPromptMessagesExposed: async () => undefined,
+          persistenceContext,
+          beforeOutputCommit: async (catId) => {
+            fenceCalls.push(catId);
+            return catId !== 'opus';
+          },
+        },
+      )) {
+      }
+      assert.equal(fenceCalls.filter((catId) => catId === 'opus').length, 1);
+      assert.equal(persistenceContext.actionOutputCommitRejected, true);
+      assert.equal(healthyService.invoke.mock.callCount(), 2, 'rejected output fence must not block a healthy sibling');
+      assert.equal(
+        messageStore
+          .getByThread('unavailable-fenced')
+          .some((row) => row.userId === 'system' && /rejected-account-binding/.test(row.content)),
+        false,
+        'a retired generation must not persist its diagnostic',
+      );
+
+      registry.reset();
+      const recovered = createMockAgentService('opus');
+      registry.register('opus', recovered);
+      registry.register('codex', healthyService);
+      router.refreshFromRegistry(registry);
+      for await (const event of router.route('user-1', '@opus hello', 'unavailable-recovered')) {
+        assert.notEqual(event.type, 'error', 'recovery must clear the old registration diagnosis');
+      }
+      assert.equal(recovered.invoke.mock.callCount(), 1);
+    });
+
+    test(`${strategy} preserves ordinary provider errors when the output fence rejects`, async () => {
+      const { AgentRouter } = await import('../dist/domains/cats/services/agents/routing/AgentRouter.js');
+      const { AgentRegistry } = await import('../dist/domains/cats/services/agents/registry/AgentRegistry.js');
+      const registry = new AgentRegistry();
+      const healthyService = createMockAgentService('codex');
+      registry.register('codex', healthyService);
+      registry.register('opus', {
+        invoke: mock.fn(async function* () {
+          yield { type: 'error', catId: 'opus', error: 'fixture provider failure', timestamp: Date.now() };
+          yield { type: 'done', catId: 'opus', timestamp: Date.now() };
+        }),
+      });
+      const messageStore = createMockMessageStore();
+      const router = new AgentRouter({
+        agentRegistry: registry,
+        registry: createMockRegistry(),
+        messageStore,
+        threadStore: createMockThreadStore(),
+      });
+      const threadId = 'provider-error-fenced';
+      const message = `${strategy === 'parallel' ? '#ideate' : '#execute'} @opus @codex hello`;
+      const source = messageStore.append({
+        userId: 'user-1',
+        catId: null,
+        threadId,
+        content: message,
+        mentions: ['opus', 'codex'],
+        timestamp: Date.now(),
+      });
+      const { targetCats, intent } = await router.resolveTargetsAndIntent(message, threadId);
+      const fenceCalls = [];
+      for await (const _event of router.routeExecution('user-1', message, threadId, source.id, targetCats, intent, {
+        ownerAuthProvenance: 'unknown',
+        humanDispositionInvocationOrigin: 'unknown',
+        onPromptMessagesExposed: async () => undefined,
+        beforeOutputCommit: async (catId) => {
+          fenceCalls.push(catId);
+          return catId !== 'opus';
+        },
+      })) {
+      }
+      assert.equal(fenceCalls.filter((catId) => catId === 'opus').length, 1);
+      assert.equal(healthyService.invoke.mock.callCount(), 1);
+      assert.ok(
+        messageStore
+          .getByThread(threadId)
+          .some((row) => row.userId === 'system' && row.content === 'Error: fixture provider failure'),
+        'registration diagnostics must not change ordinary provider error persistence',
+      );
+    });
+  }
+
   test('refreshFromRegistry updates routable service set after runtime catalog changes', async () => {
     const { AgentRouter } = await import('../dist/domains/cats/services/agents/routing/AgentRouter.js');
     const { AgentRegistry } = await import('../dist/domains/cats/services/agents/registry/AgentRegistry.js');

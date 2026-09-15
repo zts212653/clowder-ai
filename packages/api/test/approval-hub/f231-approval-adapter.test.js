@@ -111,6 +111,27 @@ describe('F231ApprovalAdapter', () => {
     });
   });
 
+  // --- T8: Phase E layer-aware summary prefix ---
+
+  it('corpus proposal → summary prefix "Corpus update"', () => {
+    const store = new InMemoryProfileUpdateProposalStore();
+    createProposal(store, {
+      targetLayer: 'corpus',
+      targetPath: 'corpus/shared-facts.md',
+    });
+    const adapter = new F231ApprovalAdapter(store);
+    const [item] = adapter.listPending('user-1');
+    assert.match(item.summary, /^Corpus update/);
+  });
+
+  it('primer proposal → summary prefix "Profile update"', () => {
+    const store = new InMemoryProfileUpdateProposalStore();
+    createProposal(store);
+    const adapter = new F231ApprovalAdapter(store);
+    const [item] = adapter.listPending('user-1');
+    assert.match(item.summary, /^Profile update/);
+  });
+
   it('includes signal provenance kind in detail', () => {
     const store = new InMemoryProfileUpdateProposalStore();
     createProposal(store, {

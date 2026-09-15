@@ -247,13 +247,25 @@ function createPublicSyncFixture(baseDir) {
   return fakeRoot;
 }
 
+function createSourceFixture(baseDir) {
+  const root = path.join(baseDir, 'source-repo');
+  mkdirSync(path.join(root, '.claude'), { recursive: true });
+  writeFileSync(path.join(root, '.claude', 'settings.json'), '{}');
+  symlinkSync(path.join(repoRoot, 'scripts'), path.join(root, 'scripts'), 'dir');
+  return root;
+}
+
 function runGate(bash, args = [], extraEnv = {}, options = {}) {
   const tempDir = mkdtempSync(path.join(os.tmpdir(), 'pre-merge-check-test-'));
   const binDir = path.join(tempDir, 'bin');
   const logPath = path.join(tempDir, 'commands.log');
   const pressurePath = path.join(tempDir, 'normal-pressure.json');
 
-  const effectiveRoot = options.publicSyncFixture ? createPublicSyncFixture(tempDir) : repoRoot;
+  const effectiveRoot = options.publicSyncFixture
+    ? createPublicSyncFixture(tempDir)
+    : options.sourceFixture
+      ? createSourceFixture(tempDir)
+      : repoRoot;
 
   try {
     writeFileSync(logPath, '', 'utf8');
@@ -289,7 +301,7 @@ function runGate(bash, args = [], extraEnv = {}, options = {}) {
     });
 
     const logLines = readFileSync(logPath, 'utf8').trim().split('\n').filter(Boolean);
-    return { ...result, logLines };
+    return { ...result, logLines, sentinelWritten: existsSync(path.join(effectiveRoot, '.gate-last-run')) };
   } finally {
     rmSync(tempDir, { recursive: true, force: true });
   }
@@ -313,6 +325,49 @@ describe('pre-merge-check dependency refresh order', () => {
       assert.ok(!result.logLines.some((line) => line.startsWith('pnpm ')));
     },
   );
+
+  it(
+    'classifies a --no-rebase targeted probe before resources without publishing merge evidence',
+    SOURCE_GATE_CONTROL_TEST_OPTIONS,
+    (t) => {
+      const result = runGate(requireBash(t), ['--no-rebase'], {
+        CAT_CAFE_PROCESS_OWNER_ID: 'cat-owned-process',
+        STUB_GATE_ROUTE: 'targeted',
+      });
+      assert.equal(result.status, 0, result.stderr);
+      assert.match(result.stdout, /route=targeted/);
+      assert.ok(result.logLines.some((line) => line.includes('classify-gate-route.mjs')));
+      assert.ok(
+        !result.logLines.some((line) =>
+          /git (fetch|rebase)|pre-merge-gate-guard.mjs acquire|gate-terminal-receipt.mjs begin|write-gate-last-run.sh/.test(
+            line,
+          ),
+        ),
+      );
+      assert.ok(!result.logLines.some((line) => line.startsWith('pnpm ')));
+    },
+  );
+
+  it(
+    'does not publish a canonical sentinel when --no-rebase finds reusable evidence',
+    SOURCE_GATE_CONTROL_TEST_OPTIONS,
+    (t) => {
+      const result = runGate(requireBash(t), ['--no-rebase'], { STUB_GATE_ROUTE: 'reuse' }, { sourceFixture: true });
+      assert.equal(result.status, 0, result.stderr);
+      assert.equal(result.sentinelWritten, false);
+      assert.ok(result.logLines.some((line) => line.includes('classify-gate-route.mjs')));
+      assert.ok(!result.logLines.some((line) => /write-gate-last-run.sh|gate-terminal-receipt.mjs begin/.test(line)));
+      assert.ok(!result.logLines.some((line) => line.startsWith('pnpm ')));
+    },
+  );
+
+  it('keeps a completed --no-rebase full probe noncanonical', SOURCE_GATE_CONTROL_TEST_OPTIONS, (t) => {
+    const result = runGate(requireBash(t), ['--no-rebase'], { STUB_GATE_ROUTE: 'full' }, { sourceFixture: true });
+    assert.equal(result.status, 0, result.stderr);
+    assert.match(result.stdout, /route=full/);
+    assert.equal(result.sentinelWritten, false);
+    assert.ok(!result.logLines.some((line) => line.includes('gate-terminal-receipt.mjs begin')));
+  });
 
   it('rejects a full gate launched directly from a cat CLI process', (t) => {
     const bash = requireBash(t);

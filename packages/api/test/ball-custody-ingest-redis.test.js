@@ -98,4 +98,155 @@ describe('BallCustodyIngest (Redis end-to-end)', { skip: redisIsolationSkipReaso
     await projector.rebuild(subjectKey);
     assert.deepStrictEqual(await store.get(subjectKey), before);
   });
+
+  it('#1371 completes and replays one dispatch across a real Redis heartbeat CAS conflict', async () => {
+    const { A2ADispatchDispositionService } = await import(
+      '../dist/domains/ball-custody/A2ADispatchDispositionService.js'
+    );
+    const { MessageStore } = await import('../dist/domains/cats/services/stores/ports/MessageStore.js');
+    const { buildInvocationHeartbeatEvent } = await import('../dist/domains/ball-custody/ball-custody-events.js');
+    const threadId = nextThread();
+    const invocationId = `${threadId}/invocation`;
+    const subjectKey = `ball:thread:${threadId}`;
+    const { eventLog, store, projector, ingest } = makeStack();
+    const messageStore = new MessageStore();
+    const source = messageStore.append({
+      userId: 'user-1',
+      catId: 'opus',
+      content: '@codex-sol review complete',
+      mentions: ['codex-sol'],
+      timestamp: 1_000,
+      threadId,
+    });
+    await ingest.record(
+      buildHandedEvent({ fromCatId: 'opus', toCatId: 'codex-sol', threadId, messageId: source.id, at: 1_000 }),
+    );
+    let attempts = 0;
+    const warnings = [];
+    const service = new A2ADispatchDispositionService({
+      registry: { isLatest: async (candidate) => candidate === invocationId },
+      messageStore,
+      ballCustodyEventLog: eventLog,
+      ballCustodyProjectionStore: store,
+      log: { warn: (fields) => warnings.push(fields) },
+      repairProjection: (key) => projector.rebuild(key),
+      now: () => 2_000,
+      ballCustody: {
+        record: (event) => ingest.record(event),
+        async recordFenced(event, expectedSequence) {
+          attempts += 1;
+          if (attempts === 1)
+            await ingest.record(
+              buildInvocationHeartbeatEvent({ threadId, invocationId, catId: 'codex-sol', draftUpdatedAt: 1_500 }),
+            );
+          return ingest.recordFenced(event, expectedSequence);
+        },
+      },
+    });
+    const auth = {
+      invocationId,
+      catId: 'codex-sol',
+      threadId,
+      a2aTriggerMessageId: source.id,
+      originTriggerMessageId: source.id,
+    };
+
+    assert.equal((await service.complete(auth, 'handled')).outcome, 'applied');
+    assert.equal(attempts, 2);
+    assert.equal(warnings[0].expectedSequence, 1);
+    assert.equal(warnings[0].actualSequence, 2);
+    assert.equal((await new RedisBallCustodyProjectionStore(redis).get(subjectKey)).state, 'resolved');
+    assert.equal((await service.complete(auth, 'handled')).outcome, 'replayed');
+    const persisted = await new RedisBallCustodyEventLog(redis).read(subjectKey);
+    assert.equal(persisted.length, 3);
+    assert.equal(persisted.filter((event) => event.kind === 'ball.dispatch_dispositioned').length, 1);
+    assert.equal(attempts, 2, 'replay reuses the committed event without another append');
+  });
+  it('#1371 managed completion revalidates a heartbeat conflict through real Redis CAS', async () => {
+    const { ManagedHoldDispositionService } = await import(
+      '../dist/domains/ball-custody/ManagedHoldDispositionService.js'
+    );
+    const { MessageStore } = await import('../dist/domains/cats/services/stores/ports/MessageStore.js');
+    const { buildHeldEvent, buildWakeConditionMetEvent, buildInvocationHeartbeatEvent } = await import(
+      '../dist/domains/ball-custody/ball-custody-events.js'
+    );
+    const threadId = nextThread();
+    const taskId = `${threadId}/task`;
+    const invocationId = `${threadId}/invocation`;
+    const subjectKey = `ball:thread:${threadId}`;
+    const { eventLog, store, projector, ingest } = makeStack();
+    const messageStore = new MessageStore();
+    const source = messageStore.append({
+      userId: 'scheduler',
+      catId: null,
+      threadId,
+      content: 'command completed',
+      mentions: [],
+      timestamp: 1_150,
+      deliveryStatus: 'queued',
+      source: { connector: 'hold-ball', label: 'hold', meta: { taskId, threadId, catId: 'codex-sol', wakeWhen: true } },
+    });
+    await ingest.record(buildHeldEvent({ threadId, catId: 'codex-sol', fireAt: 5_000, at: 1_000 }));
+    await ingest.record(
+      buildWakeConditionMetEvent({
+        threadId,
+        catId: 'codex-sol',
+        taskId,
+        command: 'test',
+        exitCode: 0,
+        timedOut: false,
+        durationMs: 100,
+        at: 1_100,
+      }),
+    );
+    await ingest.record(buildHandedEvent({ threadId, toCatId: 'codex-sol', messageId: source.id, at: 1_200 }));
+    let attempts = 0;
+    const receipts = [];
+    const service = new ManagedHoldDispositionService({
+      registry: { isLatest: async (id) => id === invocationId },
+      dynamicTaskStore: { getById: () => null }, // late callback: the exact server-minted source remains authoritative
+      messageStore,
+      ballCustodyEventLog: eventLog,
+      ballCustodyProjectionStore: store,
+      repairProjection: (key) => projector.rebuild(key),
+      now: () => 2_000,
+      receiptService: {
+        complete: async (receipt) => {
+          const events = await new RedisBallCustodyEventLog(redis).read(subjectKey);
+          assert.equal(
+            events.filter((event) => event.kind === 'ball.hold_dispositioned').length,
+            1,
+            'receipt is never reached before the real Redis terminal append',
+          );
+          receipts.push(receipt);
+        },
+      },
+      ballCustody: {
+        record: (event) => ingest.record(event),
+        recordFenced: async (event, expectedSequence) => {
+          if (++attempts === 1)
+            await ingest.record(
+              buildInvocationHeartbeatEvent({
+                threadId,
+                invocationId,
+                catId: 'codex-sol',
+                draftUpdatedAt: 1_300,
+              }),
+            );
+          return ingest.recordFenced(event, expectedSequence);
+        },
+      },
+    });
+    const auth = { invocationId, userId: 'user-1', catId: 'codex-sol', threadId, originTriggerMessageId: source.id };
+    assert.equal((await service.complete(auth, 'handled')).outcome, 'applied');
+    assert.equal(attempts, 2);
+    assert.equal((await new RedisBallCustodyProjectionStore(redis).get(subjectKey)).state, 'resolved');
+    assert.equal((await service.complete(auth, 'handled')).outcome, 'replayed');
+    assert.equal(attempts, 2);
+    assert.equal(receipts.length, 2);
+    assert.ok(receipts.every((receipt) => receipt.sourceMessageId === source.id && receipt.taskId === taskId));
+    const events = await new RedisBallCustodyEventLog(redis).read(subjectKey);
+    assert.equal(events.length, 5);
+    assert.equal(events.filter((event) => event.kind === 'ball.hold_dispositioned').length, 1);
+  });
 });

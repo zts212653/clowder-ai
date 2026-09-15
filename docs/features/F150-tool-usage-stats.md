@@ -3,12 +3,17 @@ feature_ids: [F150]
 related_features: [F051, F009, F075, F286]
 topics: [observability, analytics, hub, redis]
 doc_kind: spec
+tips_exempt: "2026-09-09 sync audit: the September 7 change only records the existing tool-stat counter/event-log ownership; no statistics feature, navigation, or user action changes."
 created: 2026-04-01
 ---
 
 # F150: Tool/Skill/MCP Usage Statistics — 工具使用可观测看板
 
 > **Status**: done | **Owner**: Community (bouillipx) + Ragdoll | **Priority**: P2
+
+Architecture cell: observability
+Map delta: none for this feature（2026-09-07 observability cell 登记 F150 的归属关系；F150 保留自己的 Redis `tool-stats:*` counter（`ToolUsageCounter.recordToolUse()`，由 `route-serial.ts` / `route-parallel.ts` 在 `tool_use` 上直接写入）与 F188 `ToolEventLog`——不是 F153 telemetry 的派生投影，store / retention / redaction 不转移）。
+Why: 归属写明是为了让观测面只能按已有关联键 join、不能复制或改写 F150 的存储；不能让人以为这些事实可以只从 F153 追溯。
 
 ## Why
 

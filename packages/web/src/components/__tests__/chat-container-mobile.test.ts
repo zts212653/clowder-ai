@@ -3,6 +3,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ChatContainer } from '@/components/ChatContainer';
 import { ThreadChatRuntimeProvider } from '@/components/thread-chat';
+import { createArtifactReviewSurface } from '@/components/workbench/artifact-review-surface';
 import { useF307ExperienceWorkbenchStore } from '@/components/workbench/experience-workbench-store';
 import { createEvolutionProgramSurface } from '@/components/workbench/real-surface-adapters';
 import { createInitialWorkbenchState } from '@/components/workbench/workbench-model';
@@ -38,6 +39,7 @@ const mockCloseRightPanel = vi.fn();
 const mockSetRightPanelMode = vi.fn();
 const mockSetRightPanelOpen = vi.fn();
 const PROGRAM_SURFACE = createEvolutionProgramSurface(`evolution-program:${'c'.repeat(32)}`);
+const REVIEW_SURFACE = createArtifactReviewSurface(`review-${'d'.repeat(64)}`, 'thread-source');
 
 const mockStoreState = () => ({
   currentThreadId: 'test-thread',
@@ -165,12 +167,12 @@ vi.mock('../RightStatusPanel', () => ({
   RightStatusPanel: () => React.createElement('div', { 'data-testid': 'right-status-panel' }),
 }));
 vi.mock('../WorkspacePanel', () => ({
-  WorkspacePanel: (props: { statusSurface?: React.ReactNode }) => {
+  WorkspacePanel: (props: { statusSurface?: React.ReactNode; visible?: boolean }) => {
     const [statusOpen, setStatusOpen] = React.useState(false);
     const [programFace, setProgramFace] = React.useState<'judgment' | 'history'>('judgment');
     return React.createElement(
       'div',
-      { 'data-testid': 'workspace-panel' },
+      { 'data-testid': 'workspace-panel', 'data-workspace-visible': String(props.visible) },
       React.createElement('button', {
         type: 'button',
         'data-testid': 'workspace-launcher-status',
@@ -222,15 +224,6 @@ vi.mock('../workspace/ContextualWorkspaceChrome', () => ({
     ),
 }));
 vi.mock('../workspace/TranscriptPanel', () => ({ TranscriptPanel: () => null }));
-vi.mock('../MobileApprovalSheet', () => ({
-  MobileApprovalSheet: (props: { open: boolean; onClose: () => void }) =>
-    React.createElement('button', {
-      type: 'button',
-      'data-testid': 'mobile-approval',
-      'data-open': String(props.open),
-      onClick: props.onClose,
-    }),
-}));
 vi.mock('../ParallelStatusBar', () => ({ ParallelStatusBar: () => null }));
 vi.mock('../ThinkingIndicator', () => ({ ThinkingIndicator: () => null }));
 vi.mock('../MessageNavigator', () => ({ MessageNavigator: () => null }));
@@ -557,20 +550,25 @@ describe('ChatContainer mobile interactions', () => {
     expect(container.querySelector('[data-testid="workspace-panel"]')).toBeTruthy();
   });
 
-  it('renders the approval workspace as a closable mobile sheet', () => {
+  it('keeps the canonical F307 surface visible when legacy approval mode survives on mobile', () => {
     mockRightPanelOpen = true;
     mockRightPanelMode = 'workspace';
     mockWorkspaceMode = 'approval';
+    useF307ExperienceWorkbenchStore.setState({
+      layout: createInitialWorkbenchState([REVIEW_SURFACE]),
+      hydrated: true,
+      mainAreaAttentionSurfaceId: null,
+    });
     act(() => {
       root.render(renderChatContainer('test-thread'));
     });
 
-    const approvalSheet = container.querySelector('[data-testid="mobile-approval"]') as HTMLButtonElement;
-    expect(approvalSheet).toBeTruthy();
-    expect(approvalSheet.getAttribute('data-open')).toBe('true');
-
-    act(() => approvalSheet.click());
-    expect(mockCloseRightPanel).toHaveBeenCalledOnce();
+    const host = container.querySelector<HTMLElement>('[data-testid="contextual-workspace-host"]');
+    const workspace = container.querySelector<HTMLElement>('[data-testid="workspace-panel"]');
+    expect(useF307ExperienceWorkbenchStore.getState().layout.activeSurfaceId).toBe(REVIEW_SURFACE.id);
+    expect(host?.classList.contains('hidden')).toBe(false);
+    expect(workspace?.dataset.workspaceVisible).toBe('true');
+    expect(container.querySelector('[data-testid="mobile-approval-sheet"]')).toBeNull();
   });
 
   it('renders the Workspace shell below the desktop breakpoint', async () => {
@@ -621,16 +619,34 @@ describe('ChatContainer mobile interactions', () => {
     await act(async () => {
       root.render(renderChatContainer('test-thread'));
     });
-    expect(container.querySelector('[data-testid="workspace-panel"]')).toBeTruthy();
+    const workspace = container.querySelector<HTMLElement>('[data-testid="workspace-panel"]');
+    expect(workspace).toBeTruthy();
+    expect(workspace?.dataset.workspaceVisible).toBe('true');
     const toggle = container.querySelector('[data-testid="workspace-toggle"]') as HTMLButtonElement;
     await act(async () => toggle.click());
-    expect(container.querySelector('[data-testid="workspace-panel"]')).toBeTruthy();
+    expect(container.querySelector('[data-testid="workspace-panel"]')).toBe(workspace);
     mockRightPanelMode = 'status';
     await act(async () => {
       root.render(renderChatContainer('test-thread'));
     });
 
-    expect(container.querySelector('[data-testid="workspace-panel"]')).toBeTruthy();
+    expect(container.querySelector('[data-testid="workspace-panel"]')).toBe(workspace);
+    expect(workspace?.dataset.workspaceVisible).toBe('false');
+
+    mockRightPanelMode = 'workspace';
+    await act(async () => {
+      root.render(renderChatContainer('test-thread'));
+    });
+    expect(container.querySelector('[data-testid="workspace-panel"]')).toBe(workspace);
+    expect(workspace?.dataset.workspaceVisible).toBe('true');
+
+    const documentVisibility = vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('hidden');
+    await act(async () => document.dispatchEvent(new Event('visibilitychange')));
+    expect(workspace?.dataset.workspaceVisible).toBe('false');
+    documentVisibility.mockReturnValue('visible');
+    await act(async () => document.dispatchEvent(new Event('visibilitychange')));
+    expect(workspace?.dataset.workspaceVisible).toBe('true');
+    documentVisibility.mockRestore();
   });
 
   it('moves the same Workspace instance over the main area and returns without losing owner state', async () => {

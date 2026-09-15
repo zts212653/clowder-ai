@@ -1,13 +1,22 @@
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import { describe, it } from 'node:test';
 import { MICRODUCK_OWNER_FEATURE_ID } from '../dist/infrastructure/capability-evolution/adapters/microduck-owner-adapter.js';
 import {
   approvalRef,
   candidateVersionRef,
+  controlBaselineVersionRef,
+  controlCandidateVersionRef,
+  controlDeployedVersionRef,
+  controlInterventionRef,
+  controlRestoreOutcomeRef,
+  controlShowState,
+  controlTargetVersionRef,
   deployedVersionRef,
   evaluationReceiptRef,
   exactBase,
   interventionRef,
+  makeControlHarness,
   makeHarness,
   permissionRef,
   rollbackVersionRef,
@@ -32,7 +41,122 @@ function writebackInput(clientMessageId) {
   };
 }
 
+function controlWritebackInput(clientMessageId) {
+  return {
+    ...exactBase(),
+    targetVersionRef: controlTargetVersionRef,
+    candidateVersionRef: controlCandidateVersionRef,
+    proposalRef: controlShowState().approvalProposalRef,
+    interventionRef: controlInterventionRef,
+    permissionRef,
+    verificationReceiptRef,
+    approvalRef,
+    clientMessageId,
+  };
+}
+
 describe('F311 Microduck external owner adapter', () => {
+  it('verifies an exact control package without requiring a training job or checkpoint', async () => {
+    const { adapter } = makeControlHarness();
+
+    const result = await adapter.verify({
+      ...exactBase(),
+      candidateVersionRef: controlCandidateVersionRef,
+      evaluationReceiptRef,
+      artifactSha256: controlCandidateVersionRef.version,
+    });
+
+    assert.equal(result.status, 'verified');
+    assert.equal(result.candidateVersionRef.ownerStateRef, controlCandidateVersionRef.ownerStateRef);
+    assert.equal(result.evaluatedArtifactSha256, controlCandidateVersionRef.version);
+  });
+
+  it('loads, freshly verifies, and restores the same owner-managed control package representation', async () => {
+    const { adapter, calls } = makeControlHarness();
+
+    const deployed = await adapter.writeback(controlWritebackInput('control-writeback'));
+    assert.equal(deployed.status, 'deployed');
+    assert.equal(deployed.deployedVersionRef.version, controlCandidateVersionRef.version);
+    assert.deepEqual(deployed.rollbackVersionRef, controlBaselineVersionRef);
+
+    const fresh = await adapter.freshOutcome({
+      ...exactBase(),
+      deployedVersionRef: controlDeployedVersionRef,
+      writebackReceiptRef: deployed.writebackReceiptRef,
+      expectedArtifactSha256: controlCandidateVersionRef.version,
+    });
+    assert.equal(fresh.status, 'fresh');
+    assert.equal(fresh.deployedArtifactSha256, controlCandidateVersionRef.version);
+
+    const restored = await adapter.rollback({
+      ...exactBase(),
+      targetVersionRef: controlDeployedVersionRef,
+      deployedVersionRef: controlDeployedVersionRef,
+      rollbackVersionRef: controlBaselineVersionRef,
+      permissionRef,
+      writebackReceiptRef: deployed.writebackReceiptRef,
+      clientMessageId: 'control-rollback',
+    });
+    assert.equal(restored.status, 'rolled_back');
+    assert.deepEqual(restored.restoredVersionRef, controlBaselineVersionRef);
+    assert.deepEqual(restored.restoreOutcomeRef, controlRestoreOutcomeRef);
+    assert.deepEqual(calls, { authorize: 2, launchMutation: 0, writeback: 1, rollback: 1, collectFreshOutcome: 1 });
+  });
+
+  it('does not promote a control rollback without physical restore evidence', async () => {
+    const { adapter } = makeControlHarness({
+      owner: {
+        async rollback() {
+          return {
+            status: 'rolled_back',
+            rollbackReceiptRef: {
+              ownerFeatureId: MICRODUCK_OWNER_FEATURE_ID,
+              ownerStateRef: `rollback-receipt:sha256:${shaA}`,
+            },
+            restoredVersionRef: controlBaselineVersionRef,
+          };
+        },
+      },
+    });
+
+    const result = await adapter.rollback({
+      ...exactBase(),
+      targetVersionRef: controlDeployedVersionRef,
+      deployedVersionRef: controlDeployedVersionRef,
+      rollbackVersionRef: controlBaselineVersionRef,
+      permissionRef,
+      clientMessageId: 'control-rollback-without-restore-proof',
+    });
+
+    assert.deepEqual(result, { status: 'blocked', code: 'rollback_failed' });
+  });
+
+  it('rejects a control deployment whose loaded slot version differs from the evaluated package', async () => {
+    const { adapter, calls } = makeControlHarness({
+      owner: {
+        async writeback() {
+          calls.writeback += 1;
+          return {
+            status: 'deployed',
+            writebackReceiptRef: {
+              ownerFeatureId: MICRODUCK_OWNER_FEATURE_ID,
+              ownerStateRef: `deploy:sha256:${shaA}`,
+            },
+            deployedVersionRef: { ...controlDeployedVersionRef, version: 'e'.repeat(64) },
+            rollbackVersionRef: controlBaselineVersionRef,
+            deployedArtifactSha256: controlCandidateVersionRef.version,
+            deployedAt: '2026-09-04T01:00:00.000Z',
+          };
+        },
+      },
+    });
+
+    const result = await adapter.writeback(controlWritebackInput('control-wrong-loaded-version'));
+    assert.equal(result.status, 'blocked');
+    assert.equal(result.code, 'target_drift');
+    assert.equal(calls.rollback, 1);
+  });
+
   it('fails closed on target drift before permission or mutation side effects', async () => {
     const drifted = { ...targetVersionRef, version: 'space-revision-2' };
     const { adapter, calls } = makeHarness({
@@ -133,6 +257,83 @@ describe('F311 Microduck external owner adapter', () => {
       artifactSha256: shaA,
     });
     assert.deepEqual(verification, { status: 'blocked', code: 'verification_missing' });
+  });
+
+  it('rejects owner observation fields outside the frozen Microduck contract', async () => {
+    const captureRef = {
+      ownerFeatureId: MICRODUCK_OWNER_FEATURE_ID,
+      ownerStateRef: `capture:sha256:${shaA}`,
+    };
+    const { adapter } = makeHarness({
+      owner: {
+        async observe() {
+          return {
+            status: 'observed',
+            targetVersionRef,
+            baselineVersionRef: rollbackVersionRef,
+            observationRefs: [captureRef],
+            baselineArtifactSha256: shaA,
+            inferenceReceiptRef: {
+              ownerFeatureId: MICRODUCK_OWNER_FEATURE_ID,
+              ownerStateRef: `onnx-smoke:sha256:${shaB}`,
+            },
+            sceneMedia: [{ sceneIndex: 0, source: 'real_capture', captureRef, kind: 'image' }],
+          };
+        },
+      },
+    });
+
+    assert.deepEqual(await adapter.observe(exactBase()), {
+      status: 'blocked',
+      code: 'owner_route_unavailable',
+    });
+  });
+
+  it('blocks Tier B media that is not part of the current owner observation evidence', async () => {
+    const observedBytes = new Uint8Array([1, 2, 3]);
+    const unrelatedBytes = new Uint8Array([4, 5, 6]);
+    const observedRef = {
+      ownerFeatureId: MICRODUCK_OWNER_FEATURE_ID,
+      ownerStateRef: `capture:sha256:${createHash('sha256').update(observedBytes).digest('hex')}`,
+    };
+    const unrelatedRef = {
+      ownerFeatureId: MICRODUCK_OWNER_FEATURE_ID,
+      ownerStateRef: `capture:sha256:${createHash('sha256').update(unrelatedBytes).digest('hex')}`,
+    };
+    const { adapter } = makeHarness({
+      owner: {
+        async observe() {
+          return {
+            status: 'observed',
+            targetVersionRef,
+            baselineVersionRef: rollbackVersionRef,
+            observationRefs: [observedRef],
+            sceneMedia: [{ sceneIndex: 0, source: 'real_capture', captureRef: unrelatedRef, kind: 'image' }],
+          };
+        },
+        async resolveShowState() {
+          return { status: 'blocked', code: 'show_truth_incomplete' };
+        },
+        async resolveShowMedia() {
+          return {
+            status: 'resolved',
+            captureRef: unrelatedRef,
+            kind: 'image',
+            contentType: 'image/png',
+            bytes: unrelatedBytes,
+          };
+        },
+      },
+    });
+
+    assert.deepEqual(await adapter.observe(exactBase()), {
+      status: 'blocked',
+      code: 'owner_route_unavailable',
+    });
+    assert.deepEqual(await adapter.media({ ...exactBase(), programSequence: 1, sceneIndex: 0 }), {
+      status: 'blocked',
+      code: 'show_truth_incomplete',
+    });
   });
 
   it('rejects incomplete, leaked or artifact-mismatched holdout receipts', async () => {

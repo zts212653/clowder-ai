@@ -1,4 +1,11 @@
-import { evolutionOwnerSurfaceBindingV1Schema, ownerTruthRefV1Schema } from '@cat-cafe/shared';
+import {
+  evolutionOwnerSurfaceBindingV1Schema,
+  evolutionPreparationBodyV1Schema,
+  evolutionPreparationSectionSchema,
+  evolutionPreparationSubmissionRefV1Schema,
+  evolutionProgramDisplayNameSchema,
+  ownerTruthRefV1Schema,
+} from '@cat-cafe/shared';
 import { z } from 'zod';
 
 /**
@@ -34,9 +41,40 @@ export const sourceMessageIdSchema = z
   .refine((value) => !/[\r\n]/.test(value), { message: 'source message id must be a single line' });
 export const programIdSchema = z.string().regex(/^evolution-program:[0-9a-f]{32}$/);
 export const ownerRef = ownerTruthRefV1Schema;
-export const createProgramSchema = z.object({ targetRef: ownerRef, clientMessageId: clientMessageIdSchema }).strict();
+const expectedPreparationRefSchema = evolutionPreparationSubmissionRefV1Schema.nullable();
+export const preparationWorkSchema = z
+  .object({
+    expectedSequence: z.number().int().nonnegative(),
+    clientMessageId: clientMessageIdSchema,
+    section: evolutionPreparationSectionSchema,
+    itemId: bounded(120)
+      .regex(/^[a-z0-9][a-z0-9._-]*$/)
+      .optional(),
+    focus: bounded(2_000),
+    expectedCurrentSubmissionRef: expectedPreparationRefSchema,
+  })
+  .strict();
+export const preparationSubmissionSchema = z
+  .object({
+    expectedSequence: z.number().int().nonnegative(),
+    clientMessageId: clientMessageIdSchema,
+    section: evolutionPreparationSectionSchema,
+    title: bounded(240),
+    expectedCurrentSubmissionRef: expectedPreparationRefSchema,
+    dependsOn: z.array(evolutionPreparationSubmissionRefV1Schema).max(3),
+    body: evolutionPreparationBodyV1Schema,
+  })
+  .strict();
+export const createProgramSchema = z
+  .object({
+    targetRef: ownerRef,
+    displayName: evolutionProgramDisplayNameSchema.optional(),
+    clientMessageId: clientMessageIdSchema,
+  })
+  .strict();
 export const measurementIssuanceSchema = z.object({ clientMessageId: sourceMessageIdSchema }).strict();
 export const commandActionSchema = z.union([
+  z.object({ type: z.literal('name'), displayName: evolutionProgramDisplayNameSchema }).strict(),
   z.object({ type: z.literal('pause'), reasonRef: ownerRef }).strict(),
   z.object({ type: z.literal('resume'), resumeRef: ownerRef }).strict(),
   z

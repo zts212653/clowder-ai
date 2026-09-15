@@ -69,29 +69,34 @@ describe('Marketplace Integration: search → installPlan → McpInstallRequest'
     assert.deepStrictEqual(req.headers, { Authorization: 'Bearer tok' });
   });
 
-  it('Codex: env_vars normalized to env in McpInstallRequest', async () => {
+  it('Codex: provider inventory stays observational and routes mutations to the existing lifecycle', async () => {
     const registry = createAdapterRegistry({
       codex: {
-        catalogLoader: async () => [
-          {
-            id: 'codex-tool',
-            name: 'Codex Tool',
-            description: 'A Codex MCP server',
-            command: 'npx',
-            args: ['codex-mcp'],
-            env_vars: { API_KEY: 'xxx' },
-            type: 'mcp_server',
-            trustLevel: 'official',
-            publisher: 'openai',
-          },
-        ],
+        sourceLoader: async () => ({
+          providerVersion: 'codex-cli 0.153.0',
+          availability: 'live',
+          observedAt: '2026-09-02T17:00:00.000Z',
+          issues: [],
+          artifacts: [
+            {
+              id: 'mcp:codex-tool',
+              kind: 'mcp_server',
+              name: 'Codex Tool',
+              description: 'A provider-owned Codex MCP server',
+              sourceLocator: 'codex://mcp/codex-tool',
+              trustLevel: 'official',
+              publisher: 'openai',
+              lifecycle: { installed: true, enabled: true, runtimeStatus: 'connected' },
+            },
+          ],
+        }),
       },
     });
 
-    const plan = await registry.buildInstallPlan('codex', 'codex-tool');
-    assert.strictEqual(plan.mode, 'direct_mcp');
-    const req = toMcpInstallRequest(plan);
-    assert.deepStrictEqual(req.env, { API_KEY: 'xxx' });
+    const plan = await registry.buildInstallPlan('codex', 'mcp:codex-tool');
+    assert.strictEqual(plan.mode, 'manual_ui');
+    assert.match(plan.manualSteps.join(' '), /Clowder AI.*插件设置/);
+    assert.throws(() => toMcpInstallRequest(plan), /only supports direct_mcp/);
   });
 
   it('Antigravity: read-only → manual_ui plan (not bridgeable to McpInstallRequest)', async () => {

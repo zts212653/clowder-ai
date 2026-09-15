@@ -127,7 +127,17 @@ describe('F316 Taste task-bundle application evidence', () => {
         payload: outcomePayload,
       });
       assert.equal(applied.statusCode, 200);
-      assert.deepEqual(applied.json(), { status: 'recorded', outcome: 'applied' });
+      const appliedEvent = episodeStore.listByCue(SCOPE.ownerUserId, input.cueId).at(-1);
+      const appliedBody = {
+        status: 'recorded',
+        outcome: 'applied',
+        outcomeRef: {
+          ownerFeatureId: 'F287',
+          ownerStateRef: `memory-cue-consumption:${appliedEvent.eventId}`,
+          version: appliedEvent.createdAt,
+        },
+      };
+      assert.deepEqual(applied.json(), appliedBody);
 
       correctedAnchors.add(input.anchor);
       const readsBeforeRetry = sourceReads.length;
@@ -137,6 +147,7 @@ describe('F316 Taste task-bundle application evidence', () => {
         payload: outcomePayload,
       });
       assert.equal(exactRetry.statusCode, 200);
+      assert.deepEqual(exactRetry.json(), appliedBody, 'an exact retry must return the same owner truth ref');
       assert.equal(sourceReads.length, readsBeforeRetry, 'exact committed retry must not re-read current source');
     } finally {
       await app.close();

@@ -2,8 +2,8 @@
 
 import { buildPreviewGatewayUrl } from '@cat-cafe/shared';
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
+import { useWorkspaceSurfaceVisibility } from '@/components/workbench/WorkspaceSurfaceVisibility';
 import { previewVisiblePageAdmissionController } from '@/lib/preview-visible-page-admission-controller';
-import { useChatStore } from '@/stores/chatStore';
 import { apiFetch } from '@/utils/api-client';
 import { BrowserTabBar } from './BrowserTabBar';
 import { BrowserToolbar } from './BrowserToolbar';
@@ -57,7 +57,9 @@ export function BrowserPanel({ initialPort, initialPath, previewOnly, onNavigate
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const [loadedGatewayUrl, setLoadedGatewayUrl] = useState<string | null>(null);
   const tabIdCounter = useRef(0);
-  const hmrStatus = useHmrStatus(gatewayPort, targetPort);
+  const gatewayReadStarted = useRef(false);
+  const surfaceVisible = useWorkspaceSurfaceVisibility();
+  const hmrStatus = useHmrStatus(gatewayPort, targetPort, surfaceVisible);
   const pendingVisiblePageAdmission = useSyncExternalStore(
     previewVisiblePageAdmissionController.subscribe,
     previewVisiblePageAdmissionController.getSnapshot,
@@ -88,9 +90,10 @@ export function BrowserPanel({ initialPort, initialPath, previewOnly, onNavigate
   // Dead dev server → stopped/unavailable UI with a retry action; reachable →
   // the iframe loads through the gateway as before.
   const probeSeq = useRef(0);
-  const probeTarget = useCallback((port: number) => {
+  const lastProbedPort = useRef(0);
+  const probeTarget = useCallback((port: number, preserveExisting = false) => {
     const seq = ++probeSeq.current;
-    setTargetHealth('checking');
+    if (!preserveExisting) setTargetHealth('checking');
     apiFetch(`/api/preview/target-health?port=${port}`)
       .then((res) => res.json() as Promise<{ reachable?: boolean }>)
       .then((data) => {
@@ -110,22 +113,11 @@ export function BrowserPanel({ initialPort, initialPath, previewOnly, onNavigate
       setTargetHealth(null);
       return;
     }
-    probeTarget(targetPort);
-  }, [targetPort, probeTarget]);
-
-  // F120 × F284 review P1: the panel stays mounted across folds (F284), so a
-  // port-change effect alone never re-probes on reactivation — a target that
-  // died while folded would reopen as a stale iframe. Re-probe whenever the
-  // browser surface becomes visible again.
-  const browserSurfaceVisible = useChatStore(
-    (s) => s.rightPanelOpen && s.rightPanelMode === 'workspace' && s.workspaceSurface === 'browser',
-  );
-  const wasVisibleRef = useRef(browserSurfaceVisible);
-  useEffect(() => {
-    const becameVisible = browserSurfaceVisible && !wasVisibleRef.current;
-    wasVisibleRef.current = browserSurfaceVisible;
-    if (becameVisible && targetPort) probeTarget(targetPort);
-  }, [browserSurfaceVisible, targetPort, probeTarget]);
+    if (!surfaceVisible) return;
+    const preserveExisting = lastProbedPort.current === targetPort;
+    lastProbedPort.current = targetPort;
+    probeTarget(targetPort, preserveExisting);
+  }, [targetPort, probeTarget, surfaceVisible]);
 
   const handleRetryProbe = useCallback(() => {
     if (targetPort) probeTarget(targetPort);
@@ -133,13 +125,18 @@ export function BrowserPanel({ initialPort, initialPath, previewOnly, onNavigate
 
   // Fetch gateway port on mount
   useEffect(() => {
+    if (!surfaceVisible || gatewayReadStarted.current) return;
+    gatewayReadStarted.current = true;
     apiFetch('/api/preview/status')
       .then((res) => res.json() as Promise<PreviewStatus>)
       .then((data) => {
         if (data.available) setGatewayPort(data.gatewayPort);
       })
-      .catch(() => setError('Preview gateway not available'));
-  }, []);
+      .catch(() => {
+        gatewayReadStarted.current = false;
+        setError('Preview gateway not available');
+      });
+  }, [surfaceVisible]);
 
   useEffect(() => {
     if (!initialPort) return;
@@ -170,6 +167,7 @@ export function BrowserPanel({ initialPort, initialPath, previewOnly, onNavigate
 
   const requestPendingVisiblePageAdmission = useCallback(() => {
     if (
+      !surfaceVisible ||
       !pendingVisiblePageAdmission ||
       pendingVisiblePageAdmission.port !== targetPort ||
       pendingVisiblePageAdmission.path !== targetPath ||
@@ -183,6 +181,7 @@ export function BrowserPanel({ initialPort, initialPath, previewOnly, onNavigate
     loadedGatewayUrl,
     pendingVisiblePageAdmission,
     requestVisiblePageAttestation,
+    surfaceVisible,
     targetPath,
     targetPort,
   ]);
@@ -195,13 +194,14 @@ export function BrowserPanel({ initialPort, initialPath, previewOnly, onNavigate
 
   useEffect(() => {
     if (
+      surfaceVisible &&
       targetHealth === 'unreachable' &&
       pendingVisiblePageAdmission?.port === targetPort &&
       pendingVisiblePageAdmission.path === targetPath
     ) {
       previewVisiblePageAdmissionController.fail(pendingVisiblePageAdmission.eventId, 'visible_page_unavailable');
     }
-  }, [pendingVisiblePageAdmission, targetHealth, targetPath, targetPort]);
+  }, [pendingVisiblePageAdmission, surfaceVisible, targetHealth, targetPath, targetPort]);
 
   const handleNavigate = useCallback(() => {
     setError(null);

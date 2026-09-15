@@ -108,7 +108,7 @@ export function F307WorkbenchControlRail({
         +
       </button>
 
-      {isDesktop && !homeFocused && activeSurface?.capabilities.mainAreaAttention === true && (
+      {isDesktop && !homeFocused && activeSurface !== null && (
         <button
           type="button"
           onClick={() => {

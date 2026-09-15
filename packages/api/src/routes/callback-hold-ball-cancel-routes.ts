@@ -20,11 +20,14 @@ import type { DynamicTaskDef, DynamicTaskStore } from '../infrastructure/schedul
 import type { TaskRunnerV2 } from '../infrastructure/scheduler/TaskRunnerV2.js';
 import type { SocketManager } from '../infrastructure/websocket/index.js';
 import { resolveDirectLocalAuthorizationUserId } from '../utils/request-identity.js';
+import { requireCallbackPrincipal } from './callback-auth-prehandler.js';
 import { cancelManagedWakeIfTaskMatches } from './callback-hold-ball-routes.js';
 import {
   findCancelableHoldBallTask,
   findHoldBallTask,
   isCancelableHoldBallTask,
+  isHoldBallTask,
+  isPendingHoldBallTask,
   readHoldLifecycle,
 } from './hold-ball-cancel.js';
 import { HOLD_BALL_SOURCE } from './hold-ball-source.js';
@@ -235,6 +238,72 @@ function cancellationVisibilityMessage(catId: string, state: DurableHoldCancella
 
 export function registerHoldBallCancelRoutes(app: FastifyInstance, deps: HoldBallCancelRouteDeps): void {
   const { dynamicTaskStore, taskRunner, messageStore, socketManager } = deps;
+
+  /**
+   * F167 #1449 Slice 1 — Task-ID-independent hold observability.
+   *
+   * An MCP caller can query "do I have an active hold?" without knowing the
+   * internal task ID. This closes the gap reported by mindfn: managed commands
+   * that held the ball had no read surface to check hold status, leading to
+   * operators killing healthy processes because they looked "stuck".
+   *
+   * Auth: invocation callback token (x-invocation-id + x-callback-token).
+   * The principal's threadId + catId are extracted, so no query params needed.
+   */
+  app.get('/api/callbacks/hold-ball/current', async (request, reply) => {
+    const principal = requireCallbackPrincipal(request, reply);
+    if (!principal) return;
+
+    // agent_key principals don't carry threadId — require invocation auth
+    if (principal.kind !== 'invocation') {
+      reply.status(403);
+      return { error: 'Hold status requires invocation-scoped auth (not agent_key)' };
+    }
+
+    const { threadId, catId } = principal;
+    const createdBy = `hold-ball:${catId}`;
+
+    // Query by (threadId, catId) — no task ID required
+    const candidates = dynamicTaskStore.findByDeliveryThreadAndCreatedBy(threadId, createdBy);
+    const holdTasks = candidates.filter((t) => isHoldBallTask(t));
+
+    // Observable hold = pending OR retired-with-running-managed-command.
+    // The latter is a disabled carrier whose managed command is still running —
+    // still cancelable and must be discoverable without a task ID (#1449 AC).
+    const observableHold =
+      holdTasks.find((t) => isPendingHoldBallTask(t)) ?? holdTasks.find((t) => isCancelableHoldBallTask(t)) ?? null;
+
+    if (!observableHold) {
+      return {
+        hasActiveHold: false,
+        taskId: null,
+        catId,
+        threadId,
+        lifecycle: null,
+      };
+    }
+
+    // P1 fix: enforce hold-access policy — same gate as GET /:taskId/status
+    const authorization = await authorizeHoldAccess(deps, request, observableHold, reply);
+    if (!authorization) {
+      return { error: 'Not authorized to read holds in this thread' };
+    }
+
+    const lifecycle = readHoldLifecycle(observableHold);
+    return {
+      hasActiveHold: isPendingHoldBallTask(observableHold),
+      taskId: observableHold.id,
+      catId,
+      threadId,
+      cancelable: isCancelableHoldBallTask(observableHold),
+      lifecycle: projectLifecycle(lifecycle, authorization.access),
+      owner: projectHoldOwner(authorization.access.owner, authorization.access.lifecycleVisibility),
+      access: {
+        role: authorization.access.actor.role,
+        lifecycleVisibility: authorization.access.lifecycleVisibility,
+      },
+    };
+  });
 
   app.get<{ Params: { taskId: string } }>('/api/callbacks/hold-ball/:taskId/status', async (request, reply) => {
     const { taskId } = request.params;

@@ -127,6 +127,69 @@ test('app-server plan is semantic while private reasoning stays in the thinking 
   assert.equal(reasoning?.semanticEvent, undefined);
 });
 
+test('app-server subexecution stays typed instead of becoming root text', () => {
+  const msg = transformCodexEvent(
+    {
+      type: 'app_server.subexecution',
+      event_id: 'subexecution:codex:child-1:message:msg-1',
+      occurred_at: 123,
+      stage: 'message',
+      subexecution_id: 'child-1',
+      root_execution_id: 'root-1',
+      parent_execution_id: 'root-1',
+      root_turn_id: 'root-turn-1',
+      parent_turn_id: 'root-turn-1',
+      turn_id: 'child-turn-1',
+      agent_path: '/root/reviewer',
+      nickname: 'Bohr',
+      depth: 1,
+      content: 'Approve from the child only',
+      message_phase: 'final_answer',
+    },
+    CAT,
+  );
+
+  assert.equal(msg?.type, 'provider_signal');
+  assert.deepEqual(msg?.semanticEvent, {
+    v: 1,
+    id: 'subexecution:codex:child-1:message:msg-1',
+    kind: 'subexecution',
+    occurredAt: 123,
+    stage: 'message',
+    subexecutionId: 'child-1',
+    rootExecutionId: 'root-1',
+    parentExecutionId: 'root-1',
+    rootTurnId: 'root-turn-1',
+    parentTurnId: 'root-turn-1',
+    turnId: 'child-turn-1',
+    agentPath: '/root/reviewer',
+    nickname: 'Bohr',
+    depth: 1,
+    content: 'Approve from the child only',
+    messagePhase: 'final_answer',
+    provenance: { provider: 'codex', carrier: 'app_server', nativeType: 'subAgentActivity' },
+  });
+});
+
+test('app-server mapper preserves envelope identity for downstream scope fences', () => {
+  assert.deepEqual(
+    mapCodexAppServerNotification({
+      method: 'item/completed',
+      params: {
+        threadId: 'child-1',
+        turnId: 'child-turn-1',
+        item: { id: 'msg-1', type: 'agentMessage', text: 'child result' },
+      },
+    }),
+    {
+      type: 'item.completed',
+      thread_id: 'child-1',
+      turn_id: 'child-turn-1',
+      item: { id: 'msg-1', type: 'agent_message', text: 'child result' },
+    },
+  );
+});
+
 test('Codex app-server ends goal notification wire types at the adapter boundary', () => {
   const mappedUpdate = mapCodexAppServerNotification({
     method: 'thread/goal/updated',

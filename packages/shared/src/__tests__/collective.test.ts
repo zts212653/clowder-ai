@@ -5,6 +5,8 @@ import {
   collectiveAckRequestSchema,
   collectiveClientAnchorSchema,
   collectiveEventEnvelopeSchema,
+  collectiveF290ExperienceHostMessageSchema,
+  collectiveF290ExperienceWorks,
   collectivePairingBridgeMessageSchema,
   collectivePairingIntentSchema,
   collectivePairingMessageSchema,
@@ -158,6 +160,57 @@ describe('Collective protocol', () => {
         code: 'unknown_failure',
       }),
     ).toThrow();
+  });
+
+  it('keeps the F290 experience Host seam reference-only and strict', () => {
+    expect(
+      collectiveF290ExperienceHostMessageSchema.parse({
+        type: 'collective:f290-experience-open-work',
+        workRef: 'work_demo_product-brief',
+      }),
+    ).toEqual({
+      type: 'collective:f290-experience-open-work',
+      workRef: 'work_demo_product-brief',
+    });
+    expect(() =>
+      collectiveF290ExperienceHostMessageSchema.parse({
+        type: 'collective:f290-experience-open-work',
+        workRef: 'work_demo_product-brief',
+        privateThreadId: 'thread_private_should_not_cross',
+      }),
+    ).toThrow();
+    expect(() =>
+      collectiveF290ExperienceHostMessageSchema.parse({
+        type: 'collective:f290-experience-result-ready',
+        workRef: 'work_demo_product-brief',
+        privateBody: 'do not leak a private message',
+      }),
+    ).toThrow();
+    expect(
+      collectiveF290ExperienceHostMessageSchema.parse({
+        type: 'collective:f290-experience-result-rejected',
+        workRef: 'work_demo_product-brief',
+        reason: 'participation_revoked',
+      }),
+    ).toEqual({
+      type: 'collective:f290-experience-result-rejected',
+      workRef: 'work_demo_product-brief',
+      reason: 'participation_revoked',
+    });
+    expect(() =>
+      collectiveF290ExperienceHostMessageSchema.parse({
+        type: 'collective:f290-experience-result-rejected',
+        workRef: 'work_demo_product-brief',
+        reason: 'private_thread_missing',
+      }),
+    ).toThrow();
+  });
+
+  it('shares one F290 experience Work catalog across the Client and Host candidates', () => {
+    expect(collectiveF290ExperienceWorks).toEqual([
+      { ref: 'work_demo_product-brief', title: '共同空间首页', cat: '砚砚', channelId: 'product-direction' },
+      { ref: 'work_demo_architecture-check', title: '接收端装配查漏', cat: '宪宪', channelId: 'product-direction' },
+    ]);
   });
 
   it('exposes one stable canonical-client anchor for a future F307 host adapter', () => {

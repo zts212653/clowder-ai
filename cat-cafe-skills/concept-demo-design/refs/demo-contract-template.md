@@ -173,7 +173,7 @@
 
 ### Workspace / Product Shell Claim Evidence（仅声称 Workspace / 主壳时）
 
-- **提交式机器证据**：`docs/design-gate-claims/<id>.json`（`claims.productIntegration.userEntry + mountChain`；逐跳列出 `path + export`，由 checker 核验真实 import / mount）：
+- **提交式机器证据**：`docs/design-gate-claims/<id>.json`（`claims.productIntegration.userEntry + mountChain`；逐跳列出 `path + export`，由 checker 核验真实 import / mount；每个 productIntegration 再绑 `defaultEntryJourney`：`testPath / journeyId / surfaceTestId` 指向一条 `registerDefaultEntryJourney` 注册的默认入口浏览器旅程，checker 核静态绑定，runtime harness 对账 exact journey 已真实注册并完成，full gate 实跑）：
 
 - **当前层级**：feature surface / object detail / product shell
 - **working-set owner**：谁可以新增、关闭、排序、分屏和恢复工作上下文？
@@ -182,6 +182,7 @@
 - **真实产品宿主**：真实用户入口 + 目标宿主组件路径：
 - **宿主挂载证据**：哪个 existing-product owner 实际 mount / import 了本 surface：
 - **独立复制壳排除**：为什么这不是单独 `/dev` route、自造导航或复制产品 chrome：
+- **默认入口即门**：`defaultEntryJourney` 的 journeyId、旅程从哪个不带查询参数的入口 `enter`、做了哪些用户动作、`arrive` 断言哪个 `surfaceTestId`；final surface 必须位于 `packages/web/src` 或 `packages/collective-client/src`，testid 跨两处产品源码唯一；只靠 URL 查询参数 opt-in（如 `?experienceGate=…`）才出现的候选页写不出这条旅程，只能标为 opt-in 候选：
 
 | 真实入口 | fixture 外新对象 | 新 typed tab / pane | 与哪个异质 surface 共存 | 切换后保留的草稿 / 选择 / 滚动 | 跨刷新恢复（仅有 claim） | 多 Agent 继续运行与 exact result return（仅有 claim） | 可重放命令 |
 |---|---|---|---|---|---|---|---|
@@ -235,7 +236,7 @@
 - [ ] `journey_validation` 的 step / handoff / recovery / terminal state 均可确定重放
 - [ ] 每条真实交互 claim 都有语义控件、陌生 sentinel 产生的新状态，以及可重放浏览器旅程；恢复 claim 另有刷新证据
 - [ ] 每条 Workspace / product-shell claim 都证明用户能从真实入口创建异质工作上下文；若声称多 Agent，再证明离开 surface 后继续运行并 exact 回写
-- [ ] 声称已接入产品时，有真实产品宿主与宿主挂载证据，且不是独立复制壳；声称成熟文档编辑时，有成熟编辑器引擎与五项编辑器适配契约，不用 `textarea` 冒充
+- [ ] 声称已接入产品时，有真实产品宿主与宿主挂载证据，且不是独立复制壳，并绑定一条 full gate 实跑且由 runtime harness 对账 exact journey 已完成的默认入口旅程 `defaultEntryJourney`（默认入口即门，不依赖 opt-in 查询参数）；声称成熟文档编辑时，有成熟编辑器引擎与五项编辑器适配契约，不用 `textarea` 冒充
 - [ ] product/editor claim 已提交 `docs/design-gate-claims/<id>.json`，且 `pnpm check:design-gate-real-interaction` 对真实文件树核验通过；没有拿本模板文字或共享 fixture 代替证据
 
 ### 视觉与讲述

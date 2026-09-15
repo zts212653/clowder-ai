@@ -7,6 +7,10 @@ import {
   pawFeelReconciliationScannedMessages,
   pawFeelReconciliationUnavailable,
 } from '../../telemetry/instruments.js';
+import {
+  type PawFeelBlockerReconciler,
+  PawFeelBlockerReconciliationPageError,
+} from './blocker-recovery/blocker-reconciler.js';
 import type { PawFeelDispositionReconciler, PawFeelReconciliationResult } from './reconciler.js';
 
 interface PawFeelReconciliationSignal {
@@ -33,9 +37,72 @@ const defaultMetrics: PawFeelReconciliationMetrics = {
 
 export interface PawFeelReconciliationTaskSpecOptions {
   reconciler: Pick<PawFeelDispositionReconciler, 'run'>;
+  blockerReconciler?: Pick<PawFeelBlockerReconciler, 'reconcile'>;
   log: { info(...args: unknown[]): void; warn(...args: unknown[]): void };
   metrics?: PawFeelReconciliationMetrics;
   intervalMs?: number;
+}
+
+interface ReconciliationFailure {
+  error: unknown;
+}
+
+async function runCoverageReconciliation(
+  options: PawFeelReconciliationTaskSpecOptions,
+  metrics: PawFeelReconciliationMetrics,
+): Promise<ReconciliationFailure | undefined> {
+  try {
+    const result = await options.reconciler.run();
+    metrics.record(result);
+    options.log.info(
+      {
+        mode: result.mode,
+        durationMs: result.durationMs,
+        scannedMessages: result.scannedMessages,
+        canonicalSignals: result.canonicalSignals,
+        discoveredSignals: result.discoveredSignals,
+        duplicateSignals: result.duplicateSignals,
+        lagMs: result.lagMs,
+      },
+      '[paw-feel-disposition] reconciliation complete',
+    );
+    return undefined;
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error);
+    metrics.recordUnavailable(reason);
+    options.log.warn({ reason }, '[paw-feel-disposition] reconciliation unavailable');
+    return { error };
+  }
+}
+
+async function runBlockerReconciliation(
+  options: PawFeelReconciliationTaskSpecOptions,
+): Promise<ReconciliationFailure | undefined> {
+  if (!options.blockerReconciler) return undefined;
+  try {
+    const result = await options.blockerReconciler.reconcile();
+    options.log.info(
+      { ...result.counts, scanCalls: result.scanCalls, cycleComplete: result.cycleComplete },
+      '[paw-feel-disposition] blocker reconciliation page complete',
+    );
+    return undefined;
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error);
+    options.log.warn(
+      {
+        reason,
+        ...(error instanceof PawFeelBlockerReconciliationPageError
+          ? {
+              ...error.result.counts,
+              scanCalls: error.result.scanCalls,
+              cycleComplete: error.result.cycleComplete,
+            }
+          : {}),
+      },
+      '[paw-feel-disposition] blocker reconciliation unavailable',
+    );
+    return { error };
+  }
 }
 
 export function createPawFeelReconciliationTaskSpec(
@@ -63,27 +130,15 @@ export function createPawFeelReconciliationTaskSpec(
       overlap: 'skip',
       timeoutMs: 120_000,
       async execute() {
-        try {
-          const result = await options.reconciler.run();
-          metrics.record(result);
-          options.log.info(
-            {
-              mode: result.mode,
-              durationMs: result.durationMs,
-              scannedMessages: result.scannedMessages,
-              canonicalSignals: result.canonicalSignals,
-              discoveredSignals: result.discoveredSignals,
-              duplicateSignals: result.duplicateSignals,
-              lagMs: result.lagMs,
-            },
-            '[paw-feel-disposition] reconciliation complete',
-          );
-        } catch (error) {
-          const reason = error instanceof Error ? error.message : String(error);
+        const blockerFailure = await runBlockerReconciliation(options);
+        const coverageFailure = await runCoverageReconciliation(options, metrics);
+        if (blockerFailure && !coverageFailure) {
+          const reason =
+            blockerFailure.error instanceof Error ? blockerFailure.error.message : String(blockerFailure.error);
           metrics.recordUnavailable(reason);
-          options.log.warn({ reason }, '[paw-feel-disposition] reconciliation unavailable');
-          throw error;
         }
+        const failure = coverageFailure ?? blockerFailure;
+        if (failure) throw failure.error;
       },
     },
     state: { runLedger: 'sqlite' },

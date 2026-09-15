@@ -192,6 +192,34 @@ after(() => {
   rmSync(credsDir, { recursive: true, force: true });
 });
 
+test('capability source deadline covers host acquisition before native RPC starts', async () => {
+  let acquisitionSignal;
+  const appServerHostPool = {
+    createSession: async (options) => {
+      acquisitionSignal = options.signal;
+      return new Promise((_resolve, reject) => {
+        options.signal?.addEventListener('abort', () => reject(new Error('acquisition aborted')), { once: true });
+      });
+    },
+  };
+  const service = new CodexAgentService({
+    carrierMode: 'app_server',
+    appServerHostPool,
+    model: 'gpt-5.6-sol',
+    l0CompilerFn: fakeL0Compiler,
+  });
+
+  await assert.rejects(
+    service.requestNativeCapabilitySource({
+      invocationId: 'marketplace-deadline',
+      timeoutMs: 10,
+      cwd: '/workspace',
+    }),
+    /authoritative_native_capability_source_timeout/,
+  );
+  assert.equal(acquisitionSignal?.aborted, true);
+});
+
 function callbackEnv(invocationId, callbackToken) {
   return {
     CAT_CAFE_API_URL: 'http://127.0.0.1:3004',

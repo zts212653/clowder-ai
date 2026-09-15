@@ -25,7 +25,7 @@ vi.mock('@/stores/toastStore', () => ({
 }));
 
 function setActive(catId: string, status: CatStatusType) {
-  const request = useActiveExecutionStore.getState().beginHydration('thread-a');
+  const request = useActiveExecutionStore.getState().beginHydration('thread-a', '/project/cafe');
   useActiveExecutionStore.getState().applySnapshot('thread-a', request, {
     projectPath: '/project/cafe',
     executions: [

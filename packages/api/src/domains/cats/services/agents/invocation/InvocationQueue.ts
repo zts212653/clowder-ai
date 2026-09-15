@@ -29,6 +29,7 @@ export interface QueueEntry {
   userId: string;
   /** Internal-only owner authentication provenance; presentation projections must redact it. */
   ownerAuthProvenance: OwnerAuthProvenance;
+  executionScope?: 'collective-participation' | 'collective-work';
   /** Optional request-level idempotency key for API replay dedup. */
   idempotencyKey?: string;
   content: string;
@@ -348,6 +349,16 @@ export class InvocationQueue {
   ): EnqueueResult {
     const ownerAuthProvenance: unknown = input.ownerAuthProvenance;
     if (
+      input.executionScope &&
+      (input.source !== 'connector' ||
+        input.targetCats.length !== 1 ||
+        (input.executionScope === 'collective-participation'
+          ? ownerAuthProvenance !== 'unknown'
+          : input.executionScope !== 'collective-work' || ownerAuthProvenance !== 'strict'))
+    ) {
+      throw new Error('Collective execution scope requires one exact cat and its matching owner provenance');
+    }
+    if (
       ownerAuthProvenance !== 'strict' &&
       ownerAuthProvenance !== 'compatibility_fallback' &&
       ownerAuthProvenance !== 'unknown'
@@ -368,6 +379,14 @@ export class InvocationQueue {
           (entry.status === 'queued' || (dedupeProcessing && entry.status === 'processing')),
       );
       if (existing) {
+        if (
+          (input.executionScope || existing.executionScope) &&
+          (input.executionScope !== existing.executionScope ||
+            input.ownerAuthProvenance !== existing.ownerAuthProvenance ||
+            input.content !== existing.content ||
+            input.targetCats[0] !== existing.targetCats[0])
+        )
+          throw new Error('Queue execution scope conflicts with existing request');
         if (existing.status === 'queued') {
           const upgradedPriority =
             (InvocationQueue.PRIORITY_RANK[priority] ?? 1) < (InvocationQueue.PRIORITY_RANK[existing.priority] ?? 1);
@@ -404,6 +423,7 @@ export class InvocationQueue {
       threadId: input.threadId,
       userId: input.userId,
       ownerAuthProvenance,
+      ...(input.executionScope ? { executionScope: input.executionScope } : {}),
       idempotencyKey: input.idempotencyKey,
       content: input.content,
       messageId: input.messageId ?? null,

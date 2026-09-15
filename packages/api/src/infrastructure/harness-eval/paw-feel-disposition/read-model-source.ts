@@ -1,6 +1,7 @@
 import type {
   PawFeelDispositionProjection,
   PawFeelInboxItem,
+  PawFeelIssueProjection,
   PawFeelResponsibilityProjection,
   PawFeelSourceResolution,
 } from '@cat-cafe/shared';
@@ -34,6 +35,7 @@ export function pawFeelResponsibilityAge(
 export function unavailablePawFeelItem(
   projection: PawFeelDispositionProjection,
   responsibility: PawFeelResponsibilityProjection,
+  issue: PawFeelIssueProjection,
   nowMs: number,
   reason: string,
 ): PawFeelInboxItem {
@@ -41,6 +43,7 @@ export function unavailablePawFeelItem(
   return {
     disposition: projection,
     responsibility,
+    issue,
     source: unavailableSource(projection, reason),
     ageMs,
     overdue: !responsibility.validExit && ageMs >= PAW_FEEL_OVERDUE_MS,

@@ -84,6 +84,12 @@ const registry = {
       `Codex 原生 Review · ${event.summary}\n\n${NATIVE_REVIEW_DISCLAIMER}`,
       event.stage === 'failed' ? 'error' : (event.severity ?? 'info'),
     ),
+  subexecution: (event) =>
+    workspaceProjection(
+      'suppress',
+      event.content ?? `${event.nickname ?? event.agentPath} · ${event.stage}`,
+      event.stage === 'failed' ? 'error' : 'info',
+    ),
 } satisfies ProjectorRegistry;
 
 export function projectProviderSemanticEvent(
