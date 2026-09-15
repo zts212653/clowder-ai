@@ -6095,6 +6095,40 @@ describe('Callback Routes', () => {
     assert.equal(JSON.parse(response.body).await.expiresAt, deadline);
   });
 
+  /*
+   * #1392 AC-1: renewal is the default; `autoRenew: false` is the explicit single-fire opt-in.
+   * Omitted must not be stored as an explicit `true` — the absence IS the default.
+   */
+  test('POST register-pr-tracking stores autoRenew false as the explicit single-fire opt-in', async () => {
+    const app = await createApp();
+    const { invocationId, callbackToken } = await registry.create('user-1', 'opus', 'thread-pr');
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/callbacks/register-pr-tracking',
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
+      payload: prWaitPayload({ autoRenew: false }),
+    });
+
+    assert.equal(response.statusCode, 200, response.body);
+    assert.equal(JSON.parse(response.body).await.autoRenew, false);
+  });
+
+  test('POST register-pr-tracking leaves autoRenew unset when omitted, which means renew', async () => {
+    const app = await createApp();
+    const { invocationId, callbackToken } = await registry.create('user-1', 'opus', 'thread-pr');
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/callbacks/register-pr-tracking',
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
+      payload: prWaitPayload(),
+    });
+
+    assert.equal(response.statusCode, 200, response.body);
+    assert.equal(Object.hasOwn(JSON.parse(response.body).await, 'autoRenew'), false);
+  });
+
   test('POST register-pr-tracking maps a confirmed GitHub 404 to 422', async () => {
     const { resolveGitHubObjectLookup } = await import('../dist/infrastructure/github/github-object-validator.js');
     const notFound = Object.assign(new Error('gh: Not Found (HTTP 404)'), {

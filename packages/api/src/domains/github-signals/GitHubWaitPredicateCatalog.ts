@@ -79,6 +79,12 @@ export interface GitHubWaitFacts {
   readonly headSha?: string;
   readonly review?: {
     readonly decisionCursor: number;
+    /**
+     * #1392 AC-1: the highest id among this observation's reviews OF `headSha`. `decisionCursor`
+     * also moves past late reviews of an older commit, so only this says a review of the current
+     * HEAD arrived — the one fact that stays reportable when the HEAD changed in the same poll.
+     */
+    readonly headDecisionCursor?: number;
     readonly decision?: string;
     readonly reviewer?: string;
     readonly resultTriggerCommentId?: number;
@@ -172,7 +178,10 @@ export function matchGitHubWaitPredicates(
         if (!('headSha' in baseline) || !current.headSha) break;
         const before = baseline.review;
         const after = current.review;
-        if (before && after && current.headSha === baseline.headSha && after.decisionCursor > before.decisionCursor) {
+        // After a push only a review of the pushed HEAD is news; a late review of the old one is
+        // not its approval. N must report it here, because N+1 starts past this poll's review ids.
+        const frontier = current.headSha === baseline.headSha ? after?.decisionCursor : after?.headDecisionCursor;
+        if (before && after && frontier !== undefined && frontier > before.decisionCursor) {
           const verdict = after.decision ?? 'RESULT_AVAILABLE';
           matches.push({
             kind: predicate.kind,

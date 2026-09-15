@@ -1996,6 +1996,13 @@ export const registerPrTrackingInputSchema = {
         'If supplied it must be in the future, it is returned in the registration response, and reaching it ' +
         'ends tracking with an explicit terminal outcome. History is never deleted.',
     ),
+  autoRenew: z
+    .boolean()
+    .optional()
+    .describe(
+      'Default true: after a match, tracking re-arms automatically with a fresh baseline, so you do not ' +
+        'register again. Set false for a single-fire wait that ends after its first match.',
+    ),
 };
 
 export async function handleRegisterPrTracking(input: {
@@ -2011,6 +2018,7 @@ export async function handleRegisterPrTracking(input: {
   >;
   nextStep: string;
   expiresAt?: number;
+  autoRenew?: boolean;
   agentKeyCatId?: string | undefined;
 }): Promise<ToolResult> {
   // F174 Phase E (AC-E2/E5): explicit kind:'none'. PR tracking is one-shot
@@ -2026,6 +2034,7 @@ export async function handleRegisterPrTracking(input: {
           when: input.when,
           nextStep: input.nextStep,
           ...(input.expiresAt !== undefined ? { expiresAt: input.expiresAt } : {}),
+          ...(input.autoRenew !== undefined ? { autoRenew: input.autoRenew } : {}),
         },
         agentKeyOptions(input),
       ),
@@ -2058,6 +2067,10 @@ export const registerIssueTrackingInputSchema = {
     .positive()
     .optional()
     .describe('Optional absolute deadline, Unix ms. Omit it and tracking has no time-based termination.'),
+  autoRenew: z
+    .boolean()
+    .optional()
+    .describe('Default true: tracking re-arms after each match. Set false for a single-fire wait.'),
 };
 
 export async function handleRegisterIssueTracking(input: {
@@ -2066,6 +2079,7 @@ export async function handleRegisterIssueTracking(input: {
   when: Array<{ kind: 'issue_comment_added' } | { kind: 'issue_author_commented' }>;
   nextStep: string;
   expiresAt?: number;
+  autoRenew?: boolean;
   agentKeyCatId?: string | undefined;
 }): Promise<ToolResult> {
   return withDegradation({
@@ -2079,6 +2093,7 @@ export async function handleRegisterIssueTracking(input: {
           when: input.when,
           nextStep: input.nextStep,
           ...(input.expiresAt !== undefined ? { expiresAt: input.expiresAt } : {}),
+          ...(input.autoRenew !== undefined ? { autoRenew: input.autoRenew } : {}),
         },
         agentKeyOptions(input),
       ),

@@ -105,6 +105,11 @@ export interface UnifiedAwaitStateV1<SubjectRef extends string, Baseline, Predic
    * `isAwaitExpired` — see that function for why direct comparison is unsafe.
    */
   readonly expiresAt?: number;
+  /**
+   * #1392 AC-1: default true — after a match, this generation is consumed and the next one is
+   * installed in the same transition. `false` is the explicit single-fire opt-in.
+   */
+  readonly autoRenew?: boolean;
   readonly createdAt: number;
 }
 
@@ -150,6 +155,12 @@ export interface WaitOutcomeV1 {
   readonly nextStep?: string;
   readonly terminalSubjectState?: 'merged' | 'closed';
   readonly actor?: WaitTerminationActor;
+  /**
+   * #1392 AC-1: whether tracking continues after this outcome. `rearmed` means the next
+   * generation was installed in the same transition; `rearm_failed` means the event is still
+   * delivered but nothing is armed, and the owner must be told so. Absent means the wait ended.
+   */
+  readonly renewal?: 'rearmed' | 'rearm_failed';
 }
 
 function hasExactKeys(value: Record<string, unknown>, expected: readonly string[]): boolean {
