@@ -16,7 +16,8 @@ description_updated_at: 2026-08-18T13:05:00Z
 
 - **operator signoff**: 2026-08-16/17 [thread-id]（`0001786845058052`「我感觉我们可以立项了……新建feat」+ `0001786950943499`「新结构：两个 feat，一条愿景，在"猫的视野快照"处交汇」）
 - **Reviewer**: spec 细节由 @codex-sol 补齐；@fable5 已对 exact `c22defbd0` 完成唯一一次最终架构审核并 `APPROVE`
-Architecture cell: identity-session, bubble-pipeline, hub-action-surface
+Architecture cell: identity-session, bubble-pipeline, hub-action-surface, observability
+Map delta (2026-09-07): `observability` cell landed（架构归一裁决卡 1）——F299 登记为该 cell 唯一人形 invocation 面，F153 保留 raw telemetry / health；join 只走 `inv:<invocationId>` / traceId。见 `docs/architecture/ownership/cells/observability.md`。
 
 Map delta: none（2026-09-02，Phase A–D 已完成；Phase E control plane、bounded source adapter 与第一份可信 calibration lineage 已进入 production，真实效用 keep/tune/sunset closure 仍待后续有效窗口）——Phase B.2 已把 `thread-access-policy` authority subcell 登记到 `identity-session`；B.1–D 只扩展既有 transcript / projection / read policy，Phase E 复用 `harness-eval` cell 的 registry、trigger、verdict 与 re-eval closure，不新建 Store / Queue / authority
 

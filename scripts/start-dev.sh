@@ -2,7 +2,7 @@
 
 # Clowder AI 启动脚本（底层实现）
 # 用户入口:
-#   pnpm start                        — runtime worktree 稳定启动（由 runtime-worktree.sh 注入 --prod-web）
+#   pnpm start                         — runtime worktree 稳定启动（由 runtime-worktree.sh 注入 --prod-web）
 #   pnpm start:direct                 — 当前目录稳定启动（package.json 注入 --prod-web + --profile=opensource + 非 watch API + 优先当前 .env 端口）
 #   pnpm dev:direct                   — 当前目录开发模式 (next dev + 热重载，package.json 注入 --profile=opensource)
 #
@@ -785,17 +785,11 @@ guard_port_kill_ownership() {
 
     [ "${#foreign[@]}" -eq 0 ] && return 0
 
-    if [ "${CAT_CAFE_RUNTIME_RESTART_OK:-0}" = "1" ]; then
-        echo -e "${YELLOW}  ⚠ 端口 $port ($name) 存在跨 worktree 占用；CAT_CAFE_RUNTIME_RESTART_OK=1，继续强制释放。${NC}"
-        return 0
-    fi
-
     echo -e "${RED}  ✗ 端口 $port ($name) 被跨 worktree 进程占用，已拒绝终止：${NC}"
     for entry in "${foreign[@]}"; do
         echo "    - $entry"
     done
-    echo "  为避免误杀 runtime/alpha，请改用隔离端口（例如 3201/3202）或显式授权："
-    echo "    CAT_CAFE_RUNTIME_RESTART_OK=1 pnpm dev:direct"
+    echo "  为避免误杀 runtime/alpha，请改用隔离端口（例如 3201/3202）或先停止其真实 owner。"
     return 1
 }
 
@@ -867,6 +861,12 @@ kill_port() {
     local pids
     pids=$(port_listen_pids "$port" || true)
     if [ -n "$pids" ]; then
+        if [ "$DAEMON_DEPLOYMENT_ID" = "runtime" ]; then
+            echo -e "${RED}  ✗ 端口 $port ($name) 已被进程占用；runtime 入口没有该进程的受管归属，已拒绝终止：${NC}"
+            echo "$pids" | sed 's/^/    - pid /'
+            echo "  请先确认占用来源；受管实例请使用 pnpm runtime:restart。"
+            return 1
+        fi
         guard_port_kill_ownership "$port" "$name" "$pids" || return 1
         echo -e "${YELLOW}  端口 $port ($name) 被占用，正在终止进程...${NC}"
         echo "$pids" | xargs kill 2>/dev/null || true
@@ -1470,7 +1470,7 @@ guard_main_branch_start() {
         echo "    2) pnpm runtime:start -- --quick"
         echo ""
         echo "  临时绕过（不推荐）："
-        echo "    CAT_CAFE_ALLOW_MAIN_DEV=1 pnpm start"
+        echo "    CAT_CAFE_ALLOW_MAIN_DEV=1 pnpm start:direct"
         exit 1
     fi
 }

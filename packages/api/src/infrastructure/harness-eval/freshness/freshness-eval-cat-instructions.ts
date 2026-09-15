@@ -12,10 +12,10 @@ You must also supply \`sourceRefs\` (NOT part of packet, separate input field) a
 Fields:
 - \`kind\` — REQUIRED literal \`"freshness-closure-replay"\`
 - \`windowStartMs\` / \`windowEndMs\` — REQUIRED finite epoch ms, ordered, maximum 31 days
-- \`threadIds\` — OPTIONAL live-closure narrowing; omit for all threads in the window
+- \`threadIds\` — OPTIONAL narrowing applied consistently to legacy closure, Queue, Supplement, and attention/provider planes; omit for all owner threads in the window
 - all eight AC-E9 fixtures are server-owned and replayed automatically; callers cannot select a subset
 
-The tool resolves durable closure aggregates and the named first-party fixtures on the server, normalizes each sample, derives invariant metrics, and writes raw replay events plus snapshot/attribution/provenance artifacts. You cannot supply counts or verdict metrics. Zero eligible samples is explicit \`no_data\` with \`healthy=false\`; never describe an empty window as healthy.
+The tool resolves the authenticated owner's TTL-0 Queue custody and FreshnessSupplement lifecycles, the owner-scoped windowed attention/provider event index, legacy closure compatibility records, and the named first-party fixtures. It derives every count on the server and writes raw replay events plus snapshot/attribution/provenance artifacts; you cannot supply counts or verdict metrics. Publication is refused before any verdict commit when a required source cannot prove complete coverage for the selected half-open window. Process-cumulative OTel counters are diagnostic only and are never a weekly denominator. Zero live legacy closure samples keeps the structural verdict at explicit \`no_data\` with \`healthy=false\`, but windowed activity must still be reported and must never be paraphrased as "no live activity."
 
 The MCP tool creates branch \`verdict/auto/{domainSlug}/{verdictId}\` + commits + opens PR. Returns commit SHA + PR URL.
 

@@ -22,7 +22,35 @@ export async function runCodexAppServerNativeRpc<T>(input: {
   readonly wire: AgentCarrierSession;
   readonly threadId: string;
   readonly timeoutMs: number;
+  readonly capabilities?: CodexAppServerJsonObject;
   readonly run: (client: CodexAppServerNativeRpcClient, resumed: unknown) => Promise<T>;
+  readonly onNotification?: (message: CodexAppServerJsonObject) => void | Promise<void>;
+}): Promise<T> {
+  return runCodexAppServerInitializedRpc({
+    wire: input.wire,
+    timeoutMs: input.timeoutMs,
+    ...(input.capabilities ? { capabilities: input.capabilities } : {}),
+    ...(input.onNotification ? { onNotification: input.onNotification } : {}),
+    run: async (client) => {
+      const resumed = await client.request('thread/resume', { threadId: input.threadId });
+      assertRejoinedThread(resumed, input.threadId);
+      return input.run(client, resumed);
+    },
+  });
+}
+
+/**
+ * Bounded initialize-only RPC seam for provider-owned read surfaces.
+ *
+ * This deliberately has no thread id: callers cannot mutate or infer Clowder AI
+ * thread state while discovering provider capabilities.
+ */
+export async function runCodexAppServerInitializedRpc<T>(input: {
+  readonly wire: AgentCarrierSession;
+  readonly timeoutMs: number;
+  readonly capabilities?: CodexAppServerJsonObject;
+  readonly signal?: AbortSignal;
+  readonly run: (client: CodexAppServerNativeRpcClient, initialized: unknown) => Promise<T>;
   readonly onNotification?: (message: CodexAppServerJsonObject) => void | Promise<void>;
 }): Promise<T> {
   const pending = new Map<number, PendingRequest>();
@@ -58,25 +86,37 @@ export async function runCodexAppServerNativeRpc<T>(input: {
     timer = setTimeout(() => reject(new Error('authoritative_native_rpc_timeout')), Math.max(1, input.timeoutMs));
     timer.unref?.();
   });
-  const bounded = <V>(operation: Promise<V>): Promise<V> => Promise.race([operation, deadline, streamFailure]);
+  let rejectAbort!: (error: Error) => void;
+  const aborted = new Promise<never>((_, reject) => {
+    rejectAbort = reject;
+  });
+  void aborted.catch(() => {});
+  const onAbort = (): void => rejectAbort(abortSignalError(input.signal));
+  if (input.signal?.aborted) onAbort();
+  else input.signal?.addEventListener('abort', onAbort, { once: true });
+  const bounded = <V>(operation: Promise<V>): Promise<V> => Promise.race([operation, deadline, streamFailure, aborted]);
 
   try {
-    await bounded(
+    const initialized = await bounded(
       request('initialize', {
         clientInfo: { name: 'cat-cafe', title: 'Clowder AI native thread controls', version: '1' },
-        capabilities: {},
+        capabilities: input.capabilities ?? {},
       }),
     );
     await write({ method: 'initialized' });
-    const resumed = await bounded(request('thread/resume', { threadId: input.threadId }));
-    assertRejoinedThread(resumed, input.threadId);
-    return await bounded(input.run({ request: (method, params) => bounded(request(method, params)) }, resumed));
+    return await bounded(input.run({ request: (method, params) => bounded(request(method, params)) }, initialized));
   } finally {
     if (timer) clearTimeout(timer);
+    input.signal?.removeEventListener('abort', onAbort);
     await input.wire.close().catch(async () => input.wire.terminate?.());
     await pump.catch(() => {});
     rejectPending(pending, new Error('authoritative_native_rpc_closed'));
   }
+}
+
+function abortSignalError(signal: AbortSignal | undefined): Error {
+  const reason = signal?.reason;
+  return reason instanceof Error ? reason : new Error(typeof reason === 'string' ? reason : 'native_rpc_aborted');
 }
 
 function assertRejoinedThread(result: unknown, expectedThreadId: string): void {

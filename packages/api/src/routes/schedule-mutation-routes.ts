@@ -138,6 +138,7 @@ export const scheduleMutationRoutes: FastifyPluginAsync<ScheduleMutationRoutesOp
           ? { entrustedWorkReevaluation: defBeforeUpdate.entrustedWorkReevaluation }
           : {}),
         deliveryThreadId: defBeforeUpdate.deliveryThreadId,
+        ownerAuthProvenance: dynamicTaskStore.getPrivateOwnerAuthProvenance(defBeforeUpdate.id),
       });
       resumeSpec.display = defBeforeUpdate.display;
     }

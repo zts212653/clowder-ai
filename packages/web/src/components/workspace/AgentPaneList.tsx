@@ -1,6 +1,7 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { useWorkspaceSurfaceVisibility } from '@/components/workbench/WorkspaceSurfaceVisibility';
 import typographyTokens from '@/styles/typography-tokens.json';
 import { apiFetch } from '@/utils/api-client';
 
@@ -18,22 +19,49 @@ interface AgentPaneListProps {
 }
 
 export function AgentPaneList({ worktreeId, onSelectPane, selectedPaneId }: AgentPaneListProps) {
-  const [panes, setPanes] = useState<AgentPane[]>([]);
+  const [snapshot, setSnapshot] = useState<{ worktreeId: string; panes: AgentPane[] }>({ worktreeId, panes: [] });
+  const surfaceVisible = useWorkspaceSurfaceVisibility();
+  const requestEpoch = useRef(0);
+  const currentVisibility = useRef(surfaceVisible);
+  const currentWorktreeId = useRef(worktreeId);
+
+  useLayoutEffect(() => {
+    if (currentVisibility.current === surfaceVisible) return;
+    currentVisibility.current = surfaceVisible;
+    ++requestEpoch.current;
+  }, [surfaceVisible]);
+
+  useLayoutEffect(() => {
+    if (currentWorktreeId.current === worktreeId) return;
+    currentWorktreeId.current = worktreeId;
+    ++requestEpoch.current;
+  }, [worktreeId]);
 
   const refresh = useCallback(async () => {
+    const request = ++requestEpoch.current;
     try {
       const res = await apiFetch(`/api/terminal/agent-panes?worktreeId=${encodeURIComponent(worktreeId)}`);
-      if (res.ok) setPanes((await res.json()) as AgentPane[]);
+      if (!res.ok) return;
+      const nextPanes = (await res.json()) as AgentPane[];
+      const ownsCurrentRead =
+        request === requestEpoch.current && currentVisibility.current && currentWorktreeId.current === worktreeId;
+      if (ownsCurrentRead) setSnapshot({ worktreeId, panes: nextPanes });
     } catch {
       /* ignore fetch errors */
     }
   }, [worktreeId]);
 
   useEffect(() => {
-    refresh();
+    if (!surfaceVisible) return;
+    void refresh();
     const interval = setInterval(refresh, 5000);
-    return () => clearInterval(interval);
-  }, [refresh]);
+    return () => {
+      clearInterval(interval);
+      ++requestEpoch.current;
+    };
+  }, [refresh, surfaceVisible]);
+
+  const panes = snapshot.worktreeId === worktreeId ? snapshot.panes : [];
 
   if (panes.length === 0) return null;
 

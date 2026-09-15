@@ -104,7 +104,7 @@ describe('PersonalChromeHostAdapter', () => {
         hostMessageId: 'chatgpt-user-message-stale',
         observedRevisions: {
           helper: `sha512:${'a'.repeat(128)}`,
-          extension: '0.2.10',
+          extension: '0.2.11',
           pageAdapter: '2026-08-22.1',
         },
       };
@@ -123,7 +123,7 @@ describe('PersonalChromeHostAdapter', () => {
       );
       assert.deepEqual((server.calls[0].request as Record<string, unknown>).expectedRevisions, {
         helper: `sha512:${'a'.repeat(128)}`,
-        extension: '0.2.10',
+        extension: '0.2.11',
         pageAdapter: '2026-09-02.1',
       });
     } finally {
@@ -289,7 +289,7 @@ describe('PersonalChromeHostAdapter', () => {
             idempotencyKey: 'source-message-9',
             expectedRevisions: {
               helper: helperArtifactRevision,
-              extension: '0.2.10',
+              extension: '0.2.11',
               pageAdapter: '2026-09-02.1',
             },
           },

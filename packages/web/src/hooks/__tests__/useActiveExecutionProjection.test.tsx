@@ -85,6 +85,33 @@ describe('F295 canonical execution hydration', () => {
     vi.useRealTimers();
   });
 
+  it('preserves verified project work during navigation and hides it while scope is unresolved', async () => {
+    const execution = liveExecution();
+    mocks.apiFetch.mockResolvedValueOnce(Response.json({ projectPath: '/project/cafe', executions: [execution] }));
+    await act(async () => {
+      root.render(<Harness threadId="thread-a" connected={false} />);
+    });
+    useActiveExecutionStore.getState().beginCancellation(execution);
+    mocks.apiFetch.mockImplementation(() => new Promise<Response>(() => {}));
+    await act(async () => {
+      root.render(<Harness threadId="thread-b" connected={false} />);
+    });
+    expect(useActiveExecutionStore.getState()).toMatchObject({
+      hydration: 'ready',
+      projectPath: '/project/cafe',
+      executionsByKey: { [activeExecutionKey(execution)]: execution },
+      cancelPendingByKey: { [activeExecutionKey(execution)]: true },
+    });
+    await act(async () => {
+      root.render(<Harness threadId="thread-missing" connected={false} />);
+    });
+    expect(useActiveExecutionStore.getState()).toMatchObject({
+      hydration: 'loading',
+      projectPath: null,
+      executionsByKey: {},
+    });
+  });
+
   it('hydrates on first mount, reconnect, navigation, and bounded cold-discovery polling', async () => {
     await act(async () => {
       root.render(<Harness threadId="thread-a" connected={false} />);
@@ -211,7 +238,7 @@ describe('F295 canonical execution hydration', () => {
 
   it('treats an exact 409 retry as terminal convergence and refreshes the projection', async () => {
     const execution = liveExecution();
-    const request = useActiveExecutionStore.getState().beginHydration('thread-a');
+    const request = useActiveExecutionStore.getState().beginHydration('thread-a', '/project/cafe');
     useActiveExecutionStore.getState().applySnapshot('thread-a', request, {
       projectPath: '/project/cafe',
       executions: [execution],
@@ -245,7 +272,7 @@ describe('F295 canonical execution hydration', () => {
       }),
     );
     const store = useActiveExecutionStore.getState();
-    store.applySnapshot('thread-a', store.beginHydration('thread-a'), {
+    store.applySnapshot('thread-a', store.beginHydration('thread-a', '/project/cafe'), {
       projectPath: '/project/cafe',
       executions,
     });

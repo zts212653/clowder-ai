@@ -2,9 +2,18 @@
 
 import { isAbsolute } from 'node:path';
 import { pathToFileURL } from 'node:url';
-
+import { isSelfOrDescendantOf } from './lib/process-tree.mjs';
+import { readSelfHostFacet } from './lib/self-host-facet.mjs';
+import { assessSideEffect } from './lib/self-host-guard.mjs';
+import {
+  explicitSingleFileCopyTarget,
+  isConstrainedLocalMediaObservation,
+  isLocalMediaObservationCommand,
+} from './native-effect-media-classifier.mjs';
 import {
   classifyShellSegment,
+  constrainedGhPullRequestOperation,
+  explicitTemporaryWorktreeTarget,
   isDataDrivenPipelineConsumer,
   SHELL_EFFECT_PRIORITY,
   splitPipelineSegments,
@@ -19,16 +28,29 @@ const EFFECTS = new Set([
   'delete',
   'process_control',
   'repository_rewrite',
+  'remote_mutation',
   'service_mutation',
   'unknown',
 ]);
-const TARGETS = new Set(['ordinary', 'runtime_sanctuary', 'redis_sanctuary', 'broad_root', 'protected_branch']);
+const TARGETS = new Set([
+  'ordinary',
+  'runtime_sanctuary',
+  'redis_sanctuary',
+  'broad_root',
+  'protected_branch',
+  'remote_repository',
+]);
 
 /** Pure provider-neutral policy. Filesystem capability remains outside this guard. */
 export function decideNativeEffect(candidate) {
   if (!isCandidate(candidate)) return deny(candidate, 'invalid_candidate');
   if (candidate.effect === 'read') return allow(candidate, 'read_only');
   if (candidate.effect === 'repository_refresh') return allow(candidate, 'remote_tracking_refresh');
+  if (candidate.effect === 'remote_mutation') {
+    return candidate.target.kind === 'remote_repository'
+      ? allow(candidate, 'remote_repository_policy_deferred')
+      : deny(candidate, 'remote_mutation_target_unresolved');
+  }
   const protectedDecision = PROTECTED_POLICIES[candidate.target.kind]?.(candidate);
   if (protectedDecision) return protectedDecision;
   return allow(candidate, candidate.target.kind === 'ordinary' ? 'ordinary_policy_deferred' : 'reversible_effect');
@@ -49,10 +71,59 @@ const PROTECTED_POLICIES = {
     ['delete', 'repository_rewrite', 'unknown'].includes(candidate.effect)
       ? deny(candidate, candidate.effect === 'unknown' ? 'protected_target_unparsed' : 'protected_branch_force_rewrite')
       : null,
+  remote_repository: (candidate) =>
+    deny(candidate, candidate.effect === 'unknown' ? 'protected_target_unparsed' : 'remote_target_effect_mismatch'),
 };
 
+/**
+ * F300: the policy above is static -- it knows which targets are protected, but
+ * not which of them is *us*. That answer changes per invocation, so it arrives
+ * as an injected fact rather than a constant.
+ *
+ * "I cannot tell who hosts me" and "nothing hosts me" are different answers.
+ * Only the second one is a reason to stand aside: if a deployment is named and
+ * its record is missing or ambiguous, a stop that might land on it fails closed.
+ */
+function applySelfHostPolicy(decision, raw, cwd, resolveSelfHost) {
+  if (decision.decision !== 'allow') return decision;
+  const { confidence, facet } = resolveSelfHost();
+  // `none` means nothing claims to host this process, so there is no self to
+  // protect. `unreadable` and `ambiguous` mean a deployment is named and we
+  // could not pin it down -- absence of evidence, which is not permission.
+  if (confidence === 'none' || !facet) return decision;
+
+  const assessment = assessSideEffect(raw, cwd, facet, { isHostDescendant: isSelfOrDescendantOf });
+  // Sanctuary was already settled authoritatively above -- we only reach here on
+  // `allow`. Re-deciding it from the raw text would throw away the target
+  // attribution the policy just did (temporary worktrees, remote repositories),
+  // so this layer answers one question only: is the target us?
+  if (assessment.verdict !== 'self_host' && assessment.verdict !== 'unknown') return decision;
+
+  const reasonCode = assessment.verdict === 'unknown' ? 'self_host_unresolved' : 'self_host_stop';
+  return {
+    ...decision,
+    decision: 'deny',
+    reasonCode,
+    detail: assessment.reason,
+    matchedTargets: assessment.matchedTargets,
+  };
+}
+
 /** Adapt Claude/Codex hook wire data, stopping provider-specific names here. */
-export function decideNativeHookPayload(payload) {
+export function decideNativeHookPayload(payload, options = {}) {
+  const resolveSelfHost = options.selfHost ?? readSelfHostFacet;
+  const decision = decideNativeHookPayloadWithoutSelfHost(payload);
+  const cwd = isRecord(payload) && typeof payload.cwd === 'string' ? payload.cwd : undefined;
+  const raw = isRecord(payload)
+    ? hookTargetText(
+        typeof payload.tool_name === 'string' ? payload.tool_name : '',
+        normalizeHookToolInput(payload.tool_input),
+      )
+    : '';
+  return applySelfHostPolicy(decision, raw, cwd, resolveSelfHost);
+}
+
+function decideNativeHookPayloadWithoutSelfHost(payload) {
   if (!isRecord(payload)) return deny(invalidCandidate(), 'unparseable_hook_payload');
   const toolName = typeof payload.tool_name === 'string' ? payload.tool_name : '';
   const toolInput = normalizeHookToolInput(payload.tool_input);
@@ -88,9 +159,29 @@ function decideShellHookPayload(raw, cwd, source) {
     if (decision.decision === 'deny') return decision;
   }
   const segments = splitShellExecutionSegments(raw);
+  const mediaObservation = segments.find(isLocalMediaObservationCommand);
+  if (mediaObservation && (segments.length !== 1 || !isConstrainedLocalMediaObservation(mediaObservation))) {
+    const candidate = { effect: 'unknown', target: classifyTarget(raw, cwd, 'unknown'), source };
+    if (decideNativeEffect(candidate).decision === 'deny') {
+      return deny(candidate, 'unbounded_local_media_observation');
+    }
+  }
   const candidates = (segments.length > 0 ? segments : ['']).map((segment) => {
     const effect = classifyShellSegment(segment);
-    return { effect, target: classifyTarget(segment, cwd, effect), source };
+    const remoteOperation = constrainedGhPullRequestOperation(segment);
+    const explicitTarget = explicitTemporaryWorktreeTarget(segment) ?? explicitSingleFileCopyTarget(segment);
+    return {
+      effect,
+      target: remoteOperation
+        ? { kind: 'remote_repository', value: remoteOperation.target }
+        : classifyTarget(
+            explicitTarget ?? segment,
+            explicitTarget ? undefined : cwd,
+            effect,
+            explicitTarget ?? undefined,
+          ),
+      source,
+    };
   });
   const decisions = candidates.map(decideNativeEffect);
   const denied = decisions.find((decision) => decision.decision === 'deny');
@@ -106,9 +197,10 @@ function decideShellHookPayload(raw, cwd, source) {
     null,
   );
   const aggregateEffect = (representative ?? candidates[0]).effect;
+  const aggregateTarget = candidates.length === 1 ? candidates[0].target : classifyTarget(raw, cwd, aggregateEffect);
   return decideNativeEffect({
     effect: aggregateEffect,
-    target: classifyTarget(raw, cwd, aggregateEffect),
+    target: aggregateTarget,
     source,
   });
 }
@@ -206,7 +298,7 @@ async function runHookCli() {
       hookSpecificOutput: {
         hookEventName: 'PreToolUse',
         permissionDecision: 'deny',
-        permissionDecisionReason: `Clowder AI native guard: ${verdict.reasonCode} (${verdict.effect} → ${verdict.target.kind})`,
+        permissionDecisionReason: `Clowder AI native guard: ${verdict.reasonCode} (${verdict.effect} → ${verdict.target.kind})${verdict.detail ? ` — ${verdict.detail}` : ''}`,
       },
     })}\n`,
   );

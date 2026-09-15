@@ -1,16 +1,14 @@
 import { execFile, execFileSync } from 'node:child_process';
 import { accessSync, constants, statSync } from 'node:fs';
 import { promisify } from 'node:util';
+import { type AgentPaneLaunchOptions, createPaneLease } from './tmux-agent-pane.js';
+import { releasePaneCreation } from './tmux-pane-creation-record.js';
+import { mutatePaneLease, type PaneLease } from './tmux-pane-lease.js';
+import { tmuxServerEnvironment } from './tmux-server-environment.js';
 import type { CreatePaneOpts, PaneInfo } from './types.js';
 
 const exec = promisify(execFile);
 const RUNTIME_ONLY_ENV_KEYS = ['CONNECTOR_GATEWAY_AUTOSTART', 'CAT_CAFE_PROVISION_GLOBAL_SIDECAR'] as const;
-
-function isolatedTmuxServerEnv(): NodeJS.ProcessEnv {
-  const env = { ...process.env };
-  for (const key of RUNTIME_ONLY_ENV_KEYS) delete env[key];
-  return env;
-}
 
 function isolatedPaneEnvArgs(): string[] {
   return RUNTIME_ONLY_ENV_KEYS.flatMap((key) => ['-e', `${key}=0`]);
@@ -67,6 +65,7 @@ export class TmuxGateway {
   /** Absolute path to the tmux binary, resolved once at construction */
   readonly tmuxBin: string;
   private activeServers = new Set<string>();
+  private agentPaneLeases = new Set<PaneLease>();
 
   constructor() {
     this.tmuxBin = resolveTmuxBin();
@@ -102,7 +101,7 @@ export class TmuxGateway {
     try {
       // The first tmux client becomes the server process. Strip API-only lifecycle
       // authority at that process boundary so every pane inherits a safe baseline.
-      await exec(this.tmuxBin, newSessionArgs, { env: isolatedTmuxServerEnv() });
+      await exec(this.tmuxBin, newSessionArgs, { env: tmuxServerEnvironment() });
     } catch (error) {
       if (!isNoServerRunningError(error)) throw error;
       try {
@@ -110,7 +109,7 @@ export class TmuxGateway {
       } catch {
         // Stale socket / dead server is already gone — keep going.
       }
-      await exec(this.tmuxBin, newSessionArgs, { env: isolatedTmuxServerEnv() });
+      await exec(this.tmuxBin, newSessionArgs, { env: tmuxServerEnvironment() });
     }
   }
 
@@ -219,6 +218,29 @@ export class TmuxGateway {
     return paneId;
   }
 
+  /** Automated agents retain this creation lease for every later pane mutation. */
+  async createAgentPaneLease(worktreeId: string, opts: AgentPaneLaunchOptions): Promise<PaneLease> {
+    const lease = await createPaneLease(this.tmuxBin, this.socketName(worktreeId), worktreeId, opts);
+    this.agentPaneLeases.add(lease);
+    this.activeServers.add(worktreeId);
+    return lease;
+  }
+
+  interruptAgentPane(lease: PaneLease): boolean {
+    return mutatePaneLease(this.tmuxBin, this.socketName(lease.worktreeId), lease, 'interrupt');
+  }
+
+  killAgentPane(lease: PaneLease): boolean {
+    const killed = mutatePaneLease(this.tmuxBin, this.socketName(lease.worktreeId), lease, 'terminate');
+    releasePaneCreation(lease);
+    this.agentPaneLeases.delete(lease);
+    return killed;
+  }
+
+  setAgentPaneReadOnly(lease: PaneLease): boolean {
+    return mutatePaneLease(this.tmuxBin, this.socketName(lease.worktreeId), lease, 'readOnly');
+  }
+
   /** Execute a command in a pane via send-keys (fire-and-forget) */
   async execInPane(worktreeId: string, paneId: string, command: string): Promise<void> {
     const sock = this.socketName(worktreeId);
@@ -252,5 +274,10 @@ export class TmuxGateway {
       // Already dead
     }
     this.activeServers.delete(worktreeId);
+    for (const lease of this.agentPaneLeases) {
+      if (lease.worktreeId !== worktreeId) continue;
+      releasePaneCreation(lease);
+      this.agentPaneLeases.delete(lease);
+    }
   }
 }

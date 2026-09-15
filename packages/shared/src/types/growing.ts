@@ -52,6 +52,8 @@ const custodyOfferBase = {
   sourceMessageRevision: growingSourceMessageRevisionV1Schema,
   policyVersion: boundedRef,
   reasonCode: boundedRef,
+  /** Message-owner witness of candidate recognition; absent only on legacy offers. */
+  recognizedAt: timestampSchema.optional(),
 };
 
 const refusedOffer = (disposition: 'declined' | 'dismissed') =>
@@ -174,10 +176,11 @@ export const entrustedWorkV1Schema = z
   .strict();
 
 export const PHASE_B_NEEDS_ME_PRODUCER_IDS = ['f246.approval', 'f292.repair', 'f306.runtime_interaction'] as const;
+export const NEEDS_ME_PRODUCER_IDS = [...PHASE_B_NEEDS_ME_PRODUCER_IDS, 'f309.content_review'] as const;
 
 const producerCoordinateSchema = z
   .object({
-    producerId: z.enum(PHASE_B_NEEDS_ME_PRODUCER_IDS),
+    producerId: z.enum(NEEDS_ME_PRODUCER_IDS),
     ownerRef: boundedRef,
     subjectRef: boundedRef,
     revision: revisionSchema,
@@ -199,7 +202,7 @@ export const producerAttentionReevaluationLinkV1Schema = z
     taskRef: entrustedWorkTaskRefV1Schema,
     producer: z
       .object({
-        producerId: z.enum(PHASE_B_NEEDS_ME_PRODUCER_IDS),
+        producerId: z.enum(NEEDS_ME_PRODUCER_IDS),
         subjectRef: boundedRef,
         observedRevision: revisionSchema,
       })
@@ -264,5 +267,6 @@ export type CustodyOfferV1 = z.infer<typeof custodyOfferV1Schema>;
 export type EntrustedWorkV1 = z.infer<typeof entrustedWorkV1Schema>;
 export type EntrustedWorkTaskRefV1 = z.infer<typeof entrustedWorkTaskRefV1Schema>;
 export type PhaseBNeedsMeProducerId = (typeof PHASE_B_NEEDS_ME_PRODUCER_IDS)[number];
+export type NeedsMeProducerId = (typeof NEEDS_ME_PRODUCER_IDS)[number];
 export type ProducerAttentionReevaluationLinkV1 = z.infer<typeof producerAttentionReevaluationLinkV1Schema>;
 export type ProducerAttentionReceiptV1 = z.infer<typeof producerAttentionReceiptV1Schema>;

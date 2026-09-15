@@ -1,3 +1,5 @@
+import { resolveArtifactReviewTarget } from './artifact-review-surface';
+import { createEntrustedReturnFromRef } from './real-surface-adapters';
 import type {
   RestoreWorkbenchOptions,
   WorkbenchLayoutState,
@@ -23,6 +25,7 @@ const RENDERER_BY_TYPE: Record<WorkbenchSurfaceType, WorkbenchRenderer> = {
   artifact: 'artifact-view',
   browser: 'browser-preview',
   code: 'code-editor',
+  'content-editor': 'content-editor',
   'evolution-program': 'evolution-program',
   file: 'file-preview',
   review: 'review-summary',
@@ -35,6 +38,7 @@ const OBJECT_KIND_BY_TYPE: Record<WorkbenchSurfaceType, WorkspaceSurfaceDescript
   artifact: 'artifact',
   browser: 'preview-session',
   code: 'file',
+  'content-editor': 'content-editor-session',
   'evolution-program': 'evolution-program',
   file: 'file',
   review: 'review',
@@ -79,9 +83,16 @@ function parseSurface(value: unknown, legacySchema: boolean): WorkspaceSurfaceDe
     if (candidate === null || !isNonEmptyString(candidate.owner) || !isNonEmptyString(candidate.key)) return null;
     resultTargetRef = { owner: candidate.owner, key: candidate.key };
   }
+  let returnTargetRef: WorkspaceSurfaceDescriptor['returnTargetRef'];
+  if (surface.returnTargetRef !== undefined) {
+    const candidate = asRecord(surface.returnTargetRef);
+    if (!candidate || !isNonEmptyString(candidate.owner) || !isNonEmptyString(candidate.key)) return null;
+    returnTargetRef = { owner: candidate.owner, key: candidate.key };
+    if (!createEntrustedReturnFromRef(returnTargetRef)) return null;
+  }
   if (!legacySchema && (capabilities.sidecar !== true || capabilities.pin !== true)) return null;
   if (capabilities.mainAreaAttention !== undefined && capabilities.mainAreaAttention !== true) return null;
-  return {
+  const parsed: WorkspaceSurfaceDescriptor = {
     id: surface.id,
     type,
     renderer,
@@ -90,6 +101,7 @@ function parseSurface(value: unknown, legacySchema: boolean): WorkspaceSurfaceDe
     objectRef: { kind: objectKind, id: objectRef.id },
     ownerStateRef: { owner: ownerStateRef.owner, key: ownerStateRef.key },
     ...(resultTargetRef === undefined ? {} : { resultTargetRef }),
+    ...(returnTargetRef === undefined ? {} : { returnTargetRef }),
     capabilities: {
       split: true,
       sidecar: legacySchema ? true : capabilities.sidecar === true,
@@ -99,6 +111,8 @@ function parseSurface(value: unknown, legacySchema: boolean): WorkspaceSurfaceDe
       restorePolicy: 'descriptor',
     },
   };
+  if (returnTargetRef && type !== 'artifact' && resolveArtifactReviewTarget(parsed) === null) return null;
+  return parsed;
 }
 
 function objectIdentity(surface: WorkspaceSurfaceDescriptor): string {

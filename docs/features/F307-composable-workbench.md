@@ -1,13 +1,13 @@
 ---
 feature_ids: [F307]
 related_features: [F063, F120, F131, F138, F223, F284, F290, F299, F306, F309, F311]
-topics: [workspace, workbench, working-set, tabs, split, sidecar, restore, multi-agent, continuity]
+topics: [workspace, workbench, working-set, tabs, split, sidecar, restore, multi-agent, subagent, continuity]
 doc_kind: spec
 created: 2026-08-26
 description: "把现有 Chat 右侧的 Workspace 升级为用户拥有的持续工作台，让 File、Artifact、Browser、Review 与 Agent Run 共存、组合与恢复，不被页面切换或后台行动静默覆盖。"
 description_source: human
 description_author: codex-sol
-description_updated_at: 2026-08-31T03:20:00Z
+description_updated_at: 2026-09-14T00:00:00Z
 design_gate_claim_contracts: [docs/design-gate-claims/f307-phase-a-real-shell.json]
 ---
 
@@ -25,9 +25,9 @@ Map delta: `none through Phase C` — `hub-action-surface` already records F307 
 working-set/layout owner; the personal adapters connect existing F063/F120/F232/F299 owners without creating
 a parallel Store, Queue, Router, or ownership cell.
 
-Post-activation delta: `hub-action-surface` additionally owns temporary main-area attention for opted-in
-Workspace surfaces. Domain owners advertise eligibility on their existing descriptor; they do not create a
-second layout shell, portal, modal, or feature-owned full-screen state.
+Post-activation delta: `hub-action-surface` additionally owns temporary main-area attention for every mounted
+Workspace tab. Eligibility derives from being the active tab, not from a domain opt-in; domain owners do not
+create a second layout shell, portal, modal, or feature-owned full-screen state.
 
 Why: 当前 cell 已登记 Workspace 导航、Preview、rich block 与 F284 右侧上下文 Workspace，却把全局
 typed working set 的 ownership 错挂在 F284/F290 关系上。F307 将 application-level Workbench 的
@@ -75,26 +75,31 @@ Workbench owner 挂载；无需启动变量、编译许可位或 query。Alpha �
 
 Architecture cell: `hub-action-surface`
 
-当领域 surface 需要比日常 Workspace 右栏更大的持续阅读空间时，它现有的
-`WorkspaceSurfaceDescriptor.capabilities` 可以声明 `mainAreaAttention: true`。这只是 eligibility，
-不是 layout 指令：只有 F307 能进入或退出主区 attention，而且只接纳当前 active、仍在 working set
-中的 surface。
+桌面端每个已挂载、当前 active 的 Workspace tab 都拥有同一个主区展开/返回动作。eligibility 由
+F307 从“它是 active tab”这个宿主事实直接推导，不再要求 File、Browser、Terminal、Agent Run、
+Program 等领域 owner 各自声明 capability。schema v2 中既有的 `mainAreaAttention: true` 仍可读取，
+但只作为兼容字段，不再决定按钮是否出现或 action 是否获准。
 
 - `enterMainAreaAttention(surfaceId)` / `exitMainAreaAttention()` 是 canonical host actions。所选 surface
   ID 只是瞬态 presentation state，绝不写入 persisted working-set topology。
 - 真实 `ChatContainer` 消费 F307 状态，把同一个 `ContextualWorkspaceChrome` host 投影到主内容区；
   不 portal、不重挂 owner surface，原 Chat DOM tree 在 attention 期间保持 mounted，只停止可见交互。
+- attention 只投影 exact active surface；原 split 与 sidecar topology 不改写，其他 owner 继续 mounted
+  但暂时不可见。返回后按原 topology 恢复，不把“展开”偷换成 collapse split 或关闭其他页面。
 - 固定 Workbench control rail 提供进入/返回。在 attention surface 上，tab `×` 表示返回 Workspace
   右栏而不是 detach；返回后保留同一 descriptor、owner component instance、选择与滚动。普通右栏
   中的 tab close 继续保持 detach-only 语义。
 - 折叠 Workspace、离开 Workspace mode、切换 Chat split view、失去 desktop eligibility、激活或
   detach 另一 surface，都会 fail-closed 结束瞬态 attention。
-- F311 继续拥有 Evolution Program 内容、数据、lifecycle 与 surface 内部的判断/历史导航；它只让现有
-  `evolution-program` descriptor opt in，不拥有 Chat/Workspace geometry。
+- F311 继续拥有 Evolution Program 内容、数据、lifecycle 与 surface 内部的判断/历史导航；File、
+  Browser、Terminal、Agent Run 等 owner 同样只拥有各自内容与生命周期，均不拥有 Chat/Workspace
+  geometry。
+- canonical Home 不是 tab，因此不显示展开入口；390px Workspace 本身已经占满主视口，也不重复显示
+  一个没有空间差异的“展开”按钮。二者都不是某类 surface 被拒绝。
 
-验收必须走真实 Thread shell，而不是只断言 width：Program 从窄栏出发，进入真实主内容 rectangle，
-保持 Chat 与 Program DOM identity 及 Program scroll，再从 tab `×` 返回，active surface 与 working set
-均不改变。
+验收必须走真实 Thread shell，而不是只断言 width：File、Browser、Terminal、Agent Run 与 Program
+分别从窄栏进入真实主内容 rectangle，保持 Chat 与 owner DOM identity、领域内状态及滚动；split 中
+只展开 exact active surface，再从 tab `×` 返回，active surface、working set 与保存的 split 均不改变。
 
 ## Product Thesis — Workbench，不是 Tabification
 
@@ -199,6 +204,7 @@ Scope unit: **一个用户跨 Thread / Café / Collective 持有的右侧 applic
 | R5 | 旧 Workspace 状态可迁移，坏 payload 与悬挂 objectRef fail closed | AC-B3 | [x] |
 | R6 | 单人多 Agent 使用同一 Workbench；F290 未来 Collective adapter 作为下游 owner consumer 接入，不阻塞 generic host 交付 | AC-C1, AC-C2 | [x] |
 | R7 | 桌面与窄屏共享 truth，响应式变化不终止 owner lifecycle | AC-B2, AC-D1 | [x] |
+| R8 | 主 agent 与 linked 子 agent 使用 typed identity 分层呈现；子 final 不冒充主 final，刷新与 Agent Run 恢复同一身份 | AC-D3 | [x] |
 
 ## Acceptance Criteria
 
@@ -240,6 +246,22 @@ Scope unit: **一个用户跨 Thread / Café / Collective 持有的右侧 applic
   默认态、密度、恢复与关闭语义给 KEEP / TUNE / SUNSET；直接 KEEP 可进入普通 Workspace activation
   PR。连续一周的自然使用仍可记录少了多少重找现场、误覆盖和结果迷路，但改为 activation 后的非阻塞
   观察，不把 `cohort=0/1` 当交付状态，也不要求 You 为激活先做七日测试。稳定前不激活 capability tip。
+- [x] **AC-D2**：桌面端每个真实 Workspace tab 共享同一主区展开/返回入口；File、Browser、Terminal、
+  Agent Run 与 Evolution Program 的同一 owner DOM 和领域内状态跨往返保持。split 中只投影 exact active
+  surface，返回后 working set / split 不变；普通右栏 close 仍仅 detach host，390px 不出现冗余展开入口。
+- [x] **AC-D3**：F306 的 linked subexecution contract 在 merged-main Alpha 的新会话中产生真实 child；Chat
+  将普通回复明确标为主 agent，并以 exact child path / nickname / depth 分层呈现过程与最终回报；F5 后主
+  final 与 child identity 均保留。Agent Run 读取同一 typed event ID，且没有从 `Approve`、task name、path
+  或 nickname 猜 author/reviewer 角色。#4546（merge `67a7e126d4`）落地 Chat/F5/F299 投影；真实 Alpha 随后
+  暴露 canonical trajectory 以 `system_info` 承载 semantic event、Agent Run 却只识别 `provider_signal` 的缺口，
+  #4547（merge `e64f2a97bc`）按共享 validator 收正。fresh merged-main Alpha `e64f2a97bc` 重开真实 provider
+  session 后，Chat 在桌面与 390px 显示 `主 agent` 及 `子 agent · Kuhn · depth 1 · /root/bohr_probe`；F5
+  保留 root final 且 root body 不含 child token；Agent Run 从同一 transcript 投影 4/4 个 child lifecycle
+  event。精确坐标：thread `[thread-id]`、message
+  `0001789401450533-000001-8bf054e5`、invocation `627c5ae9-555f-4e82-8189-b52c315cc1eb`、child
+  `01a0a0a3-76ed-79a1-b2e6-65c285f14d30`；浏览器 observation / 截图位于
+  `/tmp/cat-cafe-evidence/f307-root-child-alpha-20260914-postfix/`。验收后 3011/3012/4111 已停止，
+  production runtime 3003/3004 与 Redis 6399 未触碰。
 
 ## Phases
 
@@ -284,4 +306,7 @@ Artifact 与多 Café 信任闭环；需要进入 Workbench 的对象通过 adap
 | KD-17 | canonical Workspace Home 本身不渲染 `+`：它已经是新增 surface 的目的地。只有 working set 至少包含一个具体 surface 时才显示 `[tabs][+]`；点击 `+` 只把焦点切回同一个完整 Home，不创建新 Workspace、Home tab、popover 或 topology 节点 | `[thread-id]#0001788108855969-000311-aa6431d2`, `[thread-id]#0001788139542841-000491-3224c2e7` |
 | KD-18 | Phase D operator KEEP 后，F307 是普通 Workspace 的默认 owner；删除启动变量、编译许可位与 URL query 三重候选开关。F290 Collective adapter 是 F290-owned downstream consumer，不再阻塞 generic Workbench activation/closure | `[thread-id]#0001788145510558-000063-394b8bdd` |
 | KD-19 | Runtime 真实使用下，tab 内容区可以滚动，但 Home / `+`、working-set 管理与 split 退出必须位于不滚动的常驻控制轨；active tab 自动进入可视区。批量收束只显式 detach 其他未固定 host，保留 active 与 pinned，不设静默上限、不自动驱逐、不停止或删除 owner object。390px full-screen Workspace 另有触摸可发现的退出，并保证折叠后的全局召回入口可点击 | `[thread-id]#0001788486535272-000059-830580ca`, `[thread-id]` independent vision review |
-| KD-20 | 领域 surface 只能用 typed `mainAreaAttention` capability 申请主区注意力，F307 仍是唯一 layout owner。晋升投影同一 Workspace/owner 实例并保持 Chat DOM 连续；attention 中 tab `×` 只返回右栏，不能 detach 对象。attention 是瞬态宿主状态，不持久化、不由 F311 自建 modal/portal/full-screen shell | operator `[thread-id]#0001788616059447-000158-f6ffe25e`; F311 source `[thread-id]#0001788616915473-000196-6144e483` |
+| KD-20 | 初版将主区注意力限制为领域 descriptor 的 typed `mainAreaAttention` opt-in；F307 仍是唯一 layout owner、同一 DOM 与瞬态返回纪律继续成立。领域 opt-in 的 eligibility 已被 KD-21 supersede | operator `[thread-id]#0001788616059447-000158-f6ffe25e`; F311 source `[thread-id]#0001788616915473-000196-6144e483` |
+| KD-21 | operator 认可现有展开图标，并要求它成为 F307 / Workspace 全部 Tab 的共享宿主能力。桌面 eligibility 只由 active mounted tab 推导；主区只投影 exact active surface，不改 split/sidecar topology，不重挂 owner 或 Chat，不接管领域生命周期。Home 不是 tab，390px 已是 full-screen，二者不显示冗余入口 | `[thread-id]#0001788746606639-000019-5dbd607a` |
+| KD-22 | 窄屏宿主只投影 F307 的 canonical working-set truth；legacy `workspaceMode` 不得隐藏 active surface、另挂 Approval sheet，或让相邻 Listen Mode 误判 Workspace 未显示。全局 Approval 入口在桌面与 390px 都打开同一个 `workspace:mode:approval` owner surface | Alpha counterexample `[thread-id]#0001789216963198-000306-979c3440`; Task `0001789217245631-000310-71938724` |
+| KD-23 | F306 保留 root/child 生命周期与 provider-neutral identity；F307 只消费 typed subexecution 做 Chat 与 Agent Run 分层投影，不保存第二份 child truth。主 reply 是普通猫消息，child final 是嵌套回报；没有 typed role 就不猜 author/reviewer | operator `[thread-id]#0001789370422670-000288-42186813`; F306 PR #4544; F307 Task `0001789371539065-000294-c8e11a2a` |

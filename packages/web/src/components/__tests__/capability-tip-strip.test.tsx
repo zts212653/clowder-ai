@@ -40,6 +40,7 @@ describe('F244 CapabilityTipStrip', () => {
 
   beforeEach(() => {
     vi.useFakeTimers();
+    localStorage.clear();
     container = document.createElement('div');
     document.body.appendChild(container);
     root = createRoot(container);
@@ -255,6 +256,25 @@ describe('F244 CapabilityTipStrip', () => {
   });
 
   it('clicking learn more opens concierge bubble with a draft and does not send', async () => {
+    const parsedInventory = validateCapabilityTipInventory(rawTips);
+    if (!parsedInventory.success) throw new Error('Inventory is invalid');
+    const parsedTips = parsedInventory.tips ?? [];
+    const draftTip = parsedTips.find(
+      (tip) => tip.contexts.includes('thinking') && tip.action?.type === 'open_concierge_draft',
+    );
+    if (!draftTip) throw new Error('Thinking inventory has no concierge draft tip');
+
+    // Leave only a draft action unseen; daily shuffling may otherwise select a surface link.
+    const scope = computeExposureScope('assistant_stream_bubble', undefined, ['thinking']);
+    localStorage.setItem(
+      `cat-cafe:tip-exposure:${scope}`,
+      JSON.stringify({
+        exposed: parsedTips.filter((tip) => tip.id !== draftTip.id).map((tip) => tip.id),
+        firstSeen: {},
+        fingerprint: computeInventoryFingerprint(parsedTips.map((tip) => tip.id)),
+      }),
+    );
+
     await render(
       <CapabilityTipStrip
         surface="assistant_stream_bubble"
@@ -267,10 +287,8 @@ describe('F244 CapabilityTipStrip', () => {
       vi.advanceTimersByTime(0);
     });
 
-    // Read which tip was actually selected — inventory order may change as tips are added.
     const strip = container.querySelector('[data-testid="capability-tip-strip"]');
-    const selectedTipId = strip?.getAttribute('data-tip-id');
-    expect(selectedTipId).toBeTruthy();
+    expect(strip?.getAttribute('data-tip-id')).toBe(draftTip.id);
 
     const button = container.querySelector('[data-testid="capability-tip-learn-more"]') as HTMLButtonElement | null;
     expect(button).not.toBeNull();
@@ -283,13 +301,6 @@ describe('F244 CapabilityTipStrip', () => {
     const state = useConciergeStore.getState();
     expect(state.surfaceState).toBe('bubble');
 
-    // Assert the draft matches buildConciergeDraftPrompt for the actual selected tip.
-    // Covers both custom draftPrompt and fallback paths without locking into inventory order.
-    const parsedInventory = validateCapabilityTipInventory(rawTips);
-    if (!parsedInventory.success) throw new Error('Inventory is invalid');
-    const parsedTips = parsedInventory.tips ?? [];
-    const selectedTip = parsedTips.find((t) => t.id === selectedTipId);
-    if (!selectedTip) throw new Error(`Selected tip not found: ${selectedTipId}`);
-    expect(state.pendingPrompt).toBe(buildConciergeDraftPrompt(selectedTip));
+    expect(state.pendingPrompt).toBe(buildConciergeDraftPrompt(draftTip));
   });
 });

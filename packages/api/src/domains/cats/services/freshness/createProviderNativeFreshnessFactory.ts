@@ -47,18 +47,21 @@ export function createProviderNativeFreshnessFactory(
       ...(queueChecker ? { queueChecker } : {}),
     });
     const eventLog = new FreshnessAttentionEventLog(deps.redis);
-    await eventLog.append({
-      kind: 'provider_carrier_capability_declared',
-      invocationId,
-      threadId,
-      catId: catId as CatId,
-      timestamp: Date.now(),
-      ...capability,
-    });
+    await eventLog.append(
+      {
+        kind: 'provider_carrier_capability_declared',
+        invocationId,
+        threadId,
+        catId: catId as CatId,
+        timestamp: Date.now(),
+        ...capability,
+      },
+      { ownerUserId: userId },
+    );
     const broker = new FreshnessNoticeBroker({
       context: { invocationId, threadId, catId: catId as CatId },
       checkUnseen: () => unseenChecker.checkUnseen({ threadId, catId }),
-      appendEvent: (event) => eventLog.append(event),
+      appendEvent: (event) => eventLog.append(event, { ownerUserId: userId }),
     });
     return bindFreshnessNoticeBroker(broker, capability);
   };

@@ -47,7 +47,16 @@ describe('canonical Channel projection', () => {
           },
         },
       }),
-    ).toBe('You 的工作空间 · Agent');
+    ).toBe('You · You 的工作空间 (345678) · 猫');
+  });
+
+  it('projects nested replies by the canonical location root, including directed requests', () => {
+    const root = { ...humanEvent(1), location: { channelId: 'a' } };
+    const first = { ...humanEvent(2, root.eventId), location: { channelId: 'a', rootEventId: root.eventId } };
+    const nested = { ...humanEvent(3, first.eventId), location: first.location };
+    expect(groupChannelThreads([root, first, nested])).toEqual([{ root, replies: [first, nested] }]);
+    // An unprovable/missing root remains visible; it never silently becomes another topic.
+    expect(groupChannelThreads([nested])).toEqual([{ root: nested, replies: [] }]);
   });
 
   it('mentions an Agent under the exact Human identity that authorizes it', () => {

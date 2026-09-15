@@ -55,9 +55,13 @@ describe('F293 Phase B ownership guard', () => {
 
   it('keeps Team single-column through 420/508px panels and enables two columns only at 780px', () => {
     const layout = source('src/components/routing-context/TeamWorkspacePanel.module.css');
+    expect(layout).toContain('container-name: team');
     expect(layout).toContain('grid-template-columns: minmax(0, 1fr)');
-    expect(layout).toContain('@container (min-width: 48.75rem)');
+    expect(layout).toContain('@container team (min-width: 48.75rem)');
     expect(layout).toContain('grid-template-columns: repeat(2, minmax(0, 1fr))');
+    // F293 AC-UX6: a 360px workbench column must not need horizontal scrolling.
+    expect(layout).toContain('@container team (max-width: 26rem)');
+    expect(layout).not.toMatch(/@media/);
   });
 
   it('keeps resolver/store construction out of routes and actual-send consumers', () => {

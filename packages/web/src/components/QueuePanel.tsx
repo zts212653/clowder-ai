@@ -176,7 +176,10 @@ export function QueuePanel({ threadId }: QueuePanelProps) {
     () =>
       queue
         .filter((entry) => {
-          if (entry.source === 'connector' && entry.content.startsWith(SCHEDULER_TRIGGER_PREFIX)) return false;
+          if (entry.source === 'connector' && entry.content.startsWith(SCHEDULER_TRIGGER_PREFIX)) {
+            const hasFailedTarget = queueTargetStateEntries(entry).some(([, state]) => state === 'failed');
+            if (!hasFailedTarget || !entry.recoveryActions?.length) return false;
+          }
           if (entry.status === 'queued') return true;
           const hasProjectedReset = entry.recoveryActions?.some((action) => action.kind === 'force_reset') ?? false;
           const hasActiveTarget =

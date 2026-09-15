@@ -1,4 +1,4 @@
-import { type CatId, normalizeThreadGoalObjective } from '@cat-cafe/shared';
+import { type CatId, isProviderSemanticEvent, normalizeThreadGoalObjective } from '@cat-cafe/shared';
 import { isCodexSessionReplacementProvenance } from '../../runtime-session/CodexSessionReplacementProvenance.js';
 import type { AgentMessage } from '../../types.js';
 
@@ -239,6 +239,35 @@ export function transformCodexEvent(
 ): AgentMessage | AgentMessage[] | null {
   if (typeof event !== 'object' || event === null) return null;
   const e = event as Record<string, unknown>;
+
+  if (e.type === 'app_server.subexecution') {
+    const semanticEvent = {
+      v: 1,
+      id: e.event_id,
+      kind: 'subexecution',
+      occurredAt: e.occurred_at,
+      stage: e.stage,
+      subexecutionId: e.subexecution_id,
+      rootExecutionId: e.root_execution_id,
+      parentExecutionId: e.parent_execution_id,
+      rootTurnId: e.root_turn_id,
+      parentTurnId: e.parent_turn_id,
+      ...(typeof e.turn_id === 'string' ? { turnId: e.turn_id } : {}),
+      agentPath: e.agent_path,
+      ...(typeof e.nickname === 'string' ? { nickname: e.nickname } : {}),
+      depth: e.depth,
+      ...(typeof e.content === 'string' ? { content: e.content } : {}),
+      ...(typeof e.message_phase === 'string' ? { messagePhase: e.message_phase } : {}),
+      provenance: { provider: 'codex', carrier: 'app_server', nativeType: 'subAgentActivity' },
+    };
+    if (!isProviderSemanticEvent(semanticEvent) || semanticEvent.kind !== 'subexecution') return null;
+    return {
+      type: 'provider_signal',
+      catId,
+      semanticEvent,
+      timestamp: semanticEvent.occurredAt,
+    };
+  }
 
   if (state) {
     if (e.type === 'turn.completed') {

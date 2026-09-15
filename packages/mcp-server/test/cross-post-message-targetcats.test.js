@@ -17,6 +17,7 @@
 
 import assert from 'node:assert/strict';
 import { afterEach, beforeEach, describe, test } from 'node:test';
+import { useInvocationAuth } from './helpers/invocation-auth.js';
 
 describe('F193 AC-A1: cross_post_message schema exposes targetCats', () => {
   test('schema includes targetCats as optional array of strings', async () => {
@@ -50,7 +51,8 @@ describe('F193 AC-A1: cross_post_message schema exposes targetCats', () => {
     );
   });
 
-  test('tool description exposes paw-feel single-source recovery path', async () => {
+  test('invocation tool description exposes paw-feel single-source recovery path', async (t) => {
+    useInvocationAuth(t);
     const { createServer } = await import('../dist/index.js');
     const crossTool = createServer()._registeredTools.cat_cafe_cross_post_message;
     assert.match(crossTool.description, /sourceMessageId/);
@@ -71,7 +73,8 @@ describe('F193 AC-A1: cross_post_message schema exposes targetCats', () => {
     );
   });
 
-  test('schema exposes structured active/terminal coordination lifecycle', async () => {
+  test('invocation schema exposes structured active/terminal coordination lifecycle', async (t) => {
+    useInvocationAuth(t);
     const { createServer } = await import('../dist/index.js');
     const server = createServer();
     const crossTool = server._registeredTools.cat_cafe_cross_post_message;

@@ -115,6 +115,20 @@ Group 只由用户的明确动作出生：长按/菜单进入整理模式，把�
 安全的轻微抖动提示；桌面可以直接拖；键盘/读屏及拖拽失败时从每条 thread 的“更多操作”进入
 “整理 Group”。“抖动”只是可用性反馈，不参与状态 truth，也不能阻塞正常滚动与点开 thread。
 
+### Group 排序与阅读位置
+
+组头提供“手动顺序 / 运行优先”；存量 Group 默认手动，用户的显式选择通过既有 owner preference
+writer 持久化，TTL=0，不改写 `metadata.attentionGroup.order`。选择运行优先后，展开时将当前运行中的
+成员稳定移到前面，其他成员保留手动相对顺序；进入拖动整理模式时仍展示保存的手动顺序。
+
+Group 展开期间，未读变已读、运行开始或结束只更新最新状态，不搬动成员行及当前列表中整组的位置。
+收起后重新展开、主动改排序或切换导航范围时重新计算；成员增删仍按当前 membership 生效。
+阅读快照只保留显示 ID 顺序，每次渲染都重新关联最新 `SidebarSnapshotRow`，不得冻结或复制状态事实。
+普通、项目和虚拟列表复用同一顺序投影与固定行高，避免徽标变化造成鼠标下的行位移。
+
+本增量授权：`[thread-id]#0001788747380563-000038-3982c915`；设计原文
+`0001788747188812-000035-71296a7f`。仅改变用户明确选择的显示方式，Group membership 与手动顺序仍由用户拥有。
+
 ## Group Display Name Boundary（名字不是成员关系）
 
 Group 的**成员关系**与**显示名称**是两个正交变量。F277 先从 explicit metadata 得到 membership，
@@ -465,17 +479,20 @@ pin、label、project、title 与出生关系不变，新对话不自动吸收�
   滚动不被长按计时器劫持。鼠标、touch/pointer、键盘/读屏菜单路径在真实生产 `ThreadItem` 壳中
   产生相同 canonical group command；dev preview 不维护平行视觉实现。
 
-#### 当前实现证据（2026-09-05）
+#### 当前实现证据（2026-09-07）
 
 - [x] AC-C16: 任意 Sidebar 分类的搜索均提供完整普通对话匹配的批量入口；置顶下可收进未置顶匹配，系统/Hub 不入组，完整 F 号不误配更长编号。
 - [x] AC-C17: 原地多选、默认名、加入已有 Group、跨组来源提示与一次确认；取消不写入，失败保留选择/名称并可重试。
 - [x] AC-C18: 批量写入复用 owner-scoped metadata writer；保留 Group/pin 的独立真相，刷新后成员及别名恢复。
 - [x] AC-C19: 成功反馈提供前置条件保护的撤销；源组完整恢复，后续 membership 改动或成员消失时诚实拒绝覆盖。
 - [x] AC-C20: 搜索现场提示可关闭且持久记住；capability tip 教会同一真实操作，具有非作者 review 与真实浏览器证据。
+- [x] AC-C21: Group 支持持久化的“手动顺序 / 运行优先”；缺省手动，展开时按实时运行状态稳定分区，既有 alias/open 写入不丢排序偏好，metadata 手动顺序不变。
+- [x] AC-C22: 展开期间读/运行状态更新不改变成员及整组的显示位置；重新展开或主动改变导航/排序时重算，所有状态继续来自当前 F297 row，普通/项目/虚拟列表共用显示顺序。
 
 | 已闭合 AC | 证据 |
 |-----------|------|
 | C16–C20 | PR #4355，merge `9d410dde42028e08072294c59f83d9aac82d47b2`；API 34/34、生产 Sidebar 188/188、跨包类型检查与真实 Chromium 1/1。Terra R3 typed approval `0001788631632960-000655-779128e4`；四个作者提交 rebase 后 patch-equivalent，operator `0001788635490984-000737-6552439b` 明确授权手动相关检查后直接合入。旧 full gate 取消，未计为 PASS。 |
+| C21–C22 | PR #4400，merge `89b11dba1d9affe4da10d7331bbb6a2093f0b400`；Terra exact-HEAD approval `0001788750224091-000133-a956c0a0`。API 39/39、Sidebar/preview 218/218、双端 TypeScript、F297 boundary guard 与实际 Chromium 1/1；置顶页与 320px 旅程验证偏好恢复、重新展开排序及读/运行变化前后逐行像素坐标不变。采用受影响检查，未声称 full gate PASS。 |
 | A4-L1 / A7 / A9 | operator source `0001787499735819-000062-789a686e`；真实 `ThreadItem` 集成测试 `thread-sidebar-attention-clusters.test.tsx` |
 | B1 / B4 | `proposal-flow.test.js`、`proposal-enrich-header.test.js`、`propose-thread-work-mode.test.js`、`thread-relation-projection.test.js` |
 | B2 | `thread-branch.test.js` + `thread-relation-projection.test.js` |

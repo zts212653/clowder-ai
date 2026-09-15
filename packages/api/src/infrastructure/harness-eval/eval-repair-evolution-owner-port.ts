@@ -79,6 +79,7 @@ export interface EvalRepairEvolutionOwnerPortOptions {
   requestAuthorityVerifier?: {
     verify(
       authority: EvalRepairAuthenticatedPrincipal,
+      lineage?: EvalRepairOwnerLineage,
     ): Promise<
       { status: 'verified'; principal: EvalRepairAuthenticatedPrincipal } | { status: 'blocked'; reason: string }
     >;
@@ -205,10 +206,10 @@ export class EvalRepairEvolutionOwnerPort implements EvalRepairApprovalRequestPo
   }
 
   async requestApproval(input: EvalRepairApprovalRequest): Promise<EvalRepairApprovalRequestResult> {
-    const authority = await this.options.requestAuthorityVerifier.verify(input.requestAuthority);
-    if (authority.status === 'blocked') return { status: 'blocked' as const, reason: authority.reason };
     const lineage = parseLineage(input);
     if (!lineage) return { status: 'blocked' as const, reason: 'lineage_missing' };
+    const authority = await this.options.requestAuthorityVerifier.verify(input.requestAuthority, lineage);
+    if (authority.status === 'blocked') return { status: 'blocked' as const, reason: authority.reason };
     const resolved = await this.options.lineageResolver.resolve(lineage);
     if (resolved.status === 'blocked') return resolved;
     const proposed = await this.options.approvalService.propose({

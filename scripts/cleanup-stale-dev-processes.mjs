@@ -1,5 +1,7 @@
 #!/usr/bin/env node
 import { execFileSync } from 'node:child_process';
+import { isStalePencilProbe, PENCIL_PROBE_RULE, pencilOwnedDescendants } from './lib/pencil-codex-probe-policy.mjs';
+import { enrichPencilProbes, revalidatePencilFinding } from './lib/pencil-codex-probes.mjs';
 import { isCatCafeCommand, STALE_DEV_PROCESS_RULES } from './lib/stale-dev-process-rules.mjs';
 
 export {
@@ -56,17 +58,29 @@ export function parsePsOutput(psOutput) {
     .filter(Boolean);
 }
 
-export function findStaleDevProcesses(processes, { ownPid = process.pid } = {}) {
+export function findStaleDevProcesses(
+  processes,
+  { ownPid = process.pid, nowMs = Date.now(), pencilOnly = false } = {},
+) {
   const findings = [];
+  const protectedPencilHelpers = pencilOwnedDescendants(processes);
   for (const proc of processes) {
-    if (proc.pid === ownPid) continue;
+    if (proc.pid === ownPid || protectedPencilHelpers.has(proc.pid)) continue;
     if (proc.elapsedSeconds === undefined) continue;
-    for (const rule of STALE_DEV_PROCESS_RULES) {
-      if (proc.elapsedSeconds < rule.minAgeSeconds) continue;
-      if (!rule.match(proc)) continue;
-      findings.push({ ...proc, ruleId: rule.id, reason: rule.reason });
-      break;
+    if (isStalePencilProbe(proc, processes, nowMs)) {
+      findings.push({
+        ...proc,
+        ruleId: PENCIL_PROBE_RULE,
+        reason: 'Pencil SDK login probe has no progress for over one hour',
+      });
+      continue;
     }
+    const rule =
+      !pencilOnly &&
+      STALE_DEV_PROCESS_RULES.find(
+        (candidate) => proc.elapsedSeconds >= candidate.minAgeSeconds && candidate.match(proc),
+      );
+    if (rule) findings.push({ ...proc, ruleId: rule.id, reason: rule.reason });
   }
   return findings;
 }
@@ -153,26 +167,33 @@ function sendSignal(item, signal, killFn) {
   }
 }
 
+function recordSignalOutcome(result, outcome, signal) {
+  if (outcome.status === 'sent') result[signal === 'SIGTERM' ? 'sigtermSent' : 'sigkillSent']++;
+  else if (outcome.status === 'gone') result.alreadyGone++;
+  else result.failed.push(outcome.failure);
+}
+
 export async function terminateFindings(
   findings,
-  { killFn = process.kill.bind(process), existsFn = processExists, sleepFn = sleep, graceMs = KILL_GRACE_MS } = {},
+  {
+    killFn = process.kill.bind(process),
+    existsFn = processExists,
+    sleepFn = sleep,
+    graceMs = KILL_GRACE_MS,
+    revalidatePencilFn = revalidatePencilFinding,
+  } = {},
 ) {
-  let sigtermSent = 0;
-  let sigkillSent = 0;
-  let alreadyGone = 0;
-  const failed = [];
+  const result = { sigtermSent: 0, sigkillSent: 0, alreadyGone: 0, skippedChanged: 0, failed: [] };
   const pending = [];
 
   for (const item of findings) {
-    const outcome = sendSignal(item, 'SIGTERM', killFn);
-    if (outcome.status === 'sent') {
-      sigtermSent++;
-      pending.push(item);
-    } else if (outcome.status === 'gone') {
-      alreadyGone++;
-    } else {
-      failed.push(outcome.failure);
+    if (item.ruleId === PENCIL_PROBE_RULE && !revalidatePencilFn(item)) {
+      result.skippedChanged++;
+      continue;
     }
+    const outcome = sendSignal(item, 'SIGTERM', killFn);
+    recordSignalOutcome(result, outcome, 'SIGTERM');
+    if (outcome.status === 'sent') pending.push(item);
   }
 
   if (pending.length > 0) {
@@ -181,26 +202,24 @@ export async function terminateFindings(
 
   for (const item of pending) {
     if (!existsFn(item.pid)) {
-      alreadyGone++;
+      result.alreadyGone++;
+      continue;
+    }
+    if (item.ruleId === PENCIL_PROBE_RULE) {
+      result.failed.push({ pid: item.pid, signal: 'SIGTERM', err: 'probe remains alive; no force-kill escalation' });
       continue;
     }
     const outcome = sendSignal(item, 'SIGKILL', killFn);
-    if (outcome.status === 'sent') {
-      sigkillSent++;
-    } else if (outcome.status === 'gone') {
-      alreadyGone++;
-    } else {
-      failed.push(outcome.failure);
-    }
+    recordSignalOutcome(result, outcome, 'SIGKILL');
   }
 
-  return { sigtermSent, sigkillSent, alreadyGone, failed };
+  return result;
 }
 
 async function killFindings(findings) {
   const result = await terminateFindings(findings);
   console.log(
-    `[stale-dev-processes] sigterm=${result.sigtermSent} sigkill=${result.sigkillSent} gone=${result.alreadyGone} failed=${result.failed.length}`,
+    `[stale-dev-processes] sigterm=${result.sigtermSent} sigkill=${result.sigkillSent} gone=${result.alreadyGone} skippedChanged=${result.skippedChanged} failed=${result.failed.length}`,
   );
   if (result.failed.length > 0) {
     process.exitCode = 1;
@@ -212,10 +231,11 @@ async function killFindings(findings) {
 
 export async function main(argv = process.argv.slice(2)) {
   const run = argv.includes('--run');
+  const pencilOnly = argv.includes('--pencil-only');
   const psOutput = listProcesses();
-  const processes = parsePsOutput(psOutput);
-  const findings = findStaleDevProcesses(processes);
-  const advisories = findLongLivedDevProcesses(processes);
+  const processes = enrichPencilProbes(parsePsOutput(psOutput));
+  const findings = findStaleDevProcesses(processes, { pencilOnly });
+  const advisories = pencilOnly ? [] : findLongLivedDevProcesses(processes);
   printFindings(findings, advisories);
   if (run) await killFindings(findings);
 }

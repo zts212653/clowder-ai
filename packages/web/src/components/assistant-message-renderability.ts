@@ -60,6 +60,7 @@ export function doesAssistantMessageRenderBubble(
       message.extra?.freshnessSupplement ||
       message.extra?.turnExecution ||
       message.extra?.auxiliaryTurnExecutions?.length ||
+      message.metadata?.subexecutionEvents?.length ||
       message.thinking,
   );
 }

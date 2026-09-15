@@ -1,9 +1,11 @@
 import type { OwnerTruthRefV1 } from '@cat-cafe/shared';
 import { proposalIdFromRef } from '../../harness-eval/eval-repair-evolution-owner-projection.js';
 import {
+  MICRODUCK_CONTROL_SHOW_CANDIDATE_SUBJECTS,
   MICRODUCK_SHOW_CANDIDATE_SUBJECTS,
   type MicroduckApprovalResolver,
   type MicroduckBlocked,
+  type MicroduckObservation,
   type MicroduckOwnerPort,
   type MicroduckProgramScope,
   type MicroduckProposalResolver,
@@ -20,6 +22,7 @@ import {
   blocked,
   exactRef,
   isMicroduckArtifactRef,
+  isMicroduckControlPackageRef,
   isMicroduckHashRef,
   isMicroduckJobRef,
   isMicroduckPolicyRef,
@@ -35,6 +38,7 @@ import {
 
 interface ShowManifestProjectorOptions {
   owner: Pick<MicroduckOwnerPort, 'resolveShowState'>;
+  observe: (input: MicroduckProgramScope) => Promise<MicroduckObservation | MicroduckBlocked>;
   approvalResolver: MicroduckApprovalResolver;
   proposalResolver: MicroduckProposalResolver;
   now: () => string;
@@ -44,6 +48,7 @@ function blockedManifest(
   input: MicroduckProgramScope & { programSequence: number },
   issue: MicroduckBlocked,
   now: () => string,
+  sceneMedia: MicroduckShowMediaDescriptor[] = [],
 ): MicroduckShowManifestV1 {
   return {
     manifestVersion: 'f311-microduck-show-v1',
@@ -59,12 +64,50 @@ function blockedManifest(
         ...(issue.blockerRef ? { ownerRef: ownerRef(issue.blockerRef) } : {}),
       },
     ],
+    ...(sceneMedia.length === 0
+      ? {}
+      : {
+          sceneMedia: sceneMedia.map((media) => ({
+            ...media,
+            assetUrl: microduckSceneMediaUrl(input.programRef, media.sceneIndex),
+          })),
+        }),
     generatedAt: now(),
   };
 }
 
+export function validMicroduckObservationMedia(observation: MicroduckObservation): MicroduckShowMediaDescriptor[] {
+  if (!observation.sceneMedia || observation.sceneMedia.length === 0) return [];
+  const scenes = new Set<number>();
+  for (const media of observation.sceneMedia) {
+    if (
+      scenes.has(media.sceneIndex) ||
+      !isMicroduckHashRef(media.captureRef, 'capture') ||
+      !observation.observationRefs.some((ref) => sameRef(ref, media.captureRef))
+    ) {
+      return [];
+    }
+    scenes.add(media.sceneIndex);
+  }
+  return observation.sceneMedia.map((media) => ({ ...media, captureRef: ownerRef(media.captureRef) }));
+}
+
+async function observedBlockedManifest(
+  options: ShowManifestProjectorOptions,
+  input: MicroduckProgramScope & { programSequence: number },
+  issue: MicroduckBlocked,
+): Promise<MicroduckShowManifestV1> {
+  const observation = await options.observe(input);
+  return blockedManifest(
+    input,
+    issue,
+    options.now,
+    observation.status === 'observed' ? validMicroduckObservationMedia(observation) : [],
+  );
+}
+
 export function exactOwnerEvidence(state: MicroduckShowState, input: MicroduckProgramScope): boolean {
-  return (
+  const commonEvidence =
     state.candidates.length === 3 &&
     validSha256(state.evaluatedArtifactSha256) &&
     sameAddress(state.targetRevision, input.objectRef) &&
@@ -76,22 +119,53 @@ export function exactOwnerEvidence(state: MicroduckShowState, input: MicroduckPr
     isMicroduckHashRef(state.holdoutProof.optimizerExposureProofRef, 'exposure-proof') &&
     state.holdoutProof.optimizerExposed === false &&
     isMicroduckTargetRef(state.targetRevision) &&
-    isMicroduckPolicyRef(state.rollbackRevision, 'space') &&
-    sameRef(state.rollbackRevision, state.baseline.policyRevision) &&
-    state.candidates.some((candidate) => sameRef(candidate.policyRevision, state.candidateRevision)) &&
+    proposalIdFromRef(state.approvalProposalRef) !== undefined;
+  if (!commonEvidence) return false;
+
+  if (state.interventionKind === 'training') {
+    return (
+      state.targetRevision.assetKind === 'simulator-policy-slot' &&
+      isMicroduckPolicyRef(state.rollbackRevision, 'space') &&
+      sameRef(state.rollbackRevision, state.baseline.policyRevision) &&
+      state.candidates.some((candidate) => sameRef(candidate.policyRevision, state.candidateRevision)) &&
+      state.candidates.every(
+        (candidate, index) =>
+          candidate.subjectId === MICRODUCK_SHOW_CANDIDATE_SUBJECTS[index] &&
+          isMicroduckPolicyRef(candidate.policyRevision, 'model') &&
+          isMicroduckHashRef(candidate.evaluationRef, 'evaluation') &&
+          sameRef(candidate.evaluationRef, state.baseline.evaluationRef) &&
+          /^[a-f0-9]{64}$/u.test(candidate.recipeSha256) &&
+          isMicroduckJobRef(candidate.jobRef) &&
+          isMicroduckArtifactRef(candidate.checkpointRef, 'pt', 'model') &&
+          isMicroduckArtifactRef(candidate.onnxArtifactRef, 'onnx', 'model') &&
+          sameAddress(candidate.policyRevision, candidate.onnxArtifactRef),
+      )
+    );
+  }
+
+  return (
+    state.targetRevision.assetKind === 'simulator-control-slot' &&
+    isMicroduckControlPackageRef(state.baseline.artifactRevision, 'baseline') &&
+    isMicroduckHashRef(state.baseline.configRef, 'control-config') &&
+    isMicroduckHashRef(state.baseline.runnerRef, 'runner') &&
+    isMicroduckHashRef(state.baseline.evaluationEnvRef, 'evaluation-env') &&
+    isMicroduckControlPackageRef(state.rollbackRevision, 'baseline') &&
+    sameRef(state.rollbackRevision, state.baseline.artifactRevision) &&
+    state.candidates.some((candidate) => sameRef(candidate.artifactRevision, state.candidateRevision)) &&
     state.candidates.every(
       (candidate, index) =>
-        candidate.subjectId === MICRODUCK_SHOW_CANDIDATE_SUBJECTS[index] &&
-        isMicroduckPolicyRef(candidate.policyRevision, 'model') &&
+        candidate.subjectId === MICRODUCK_CONTROL_SHOW_CANDIDATE_SUBJECTS[index] &&
+        sameRef(candidate.policyRevision, state.baseline.policyRevision) &&
+        isMicroduckControlPackageRef(candidate.artifactRevision, candidate.subjectId) &&
+        isMicroduckHashRef(candidate.configRef, 'control-config') &&
+        isMicroduckHashRef(candidate.runnerRef, 'runner') &&
+        sameRef(candidate.runnerRef, state.baseline.runnerRef) &&
+        isMicroduckHashRef(candidate.evaluationEnvRef, 'evaluation-env') &&
+        sameRef(candidate.evaluationEnvRef, state.baseline.evaluationEnvRef) &&
         isMicroduckHashRef(candidate.evaluationRef, 'evaluation') &&
-        sameRef(candidate.evaluationRef, state.baseline.evaluationRef) &&
-        /^[a-f0-9]{64}$/u.test(candidate.recipeSha256) &&
-        isMicroduckJobRef(candidate.jobRef) &&
-        isMicroduckArtifactRef(candidate.checkpointRef, 'pt', 'model') &&
-        isMicroduckArtifactRef(candidate.onnxArtifactRef, 'onnx', 'model') &&
-        sameAddress(candidate.policyRevision, candidate.onnxArtifactRef),
+        sameRef(candidate.evaluationRef, state.baseline.evaluationRef),
     ) &&
-    proposalIdFromRef(state.approvalProposalRef) !== undefined
+    state.evaluatedArtifactSha256 === state.candidateRevision.version
   );
 }
 
@@ -115,10 +189,16 @@ function deployedEvidenceMatches(state: MicroduckShowState): boolean {
     validSha256(state.deployedArtifactSha256) &&
     state.evaluatedArtifactSha256 === state.deployedArtifactSha256 &&
     isMicroduckTargetRef(state.deployedRevision) &&
-    sameAssetSurface(state.deployedRevision, state.targetRevision);
+    sameAssetSurface(state.deployedRevision, state.targetRevision) &&
+    (state.interventionKind === 'training' || state.deployedRevision.version === state.candidateRevision.version);
   if (!deploymentMatches) return false;
   if (state.phase === 'kept') return isMicroduckHashRef(state.freshOutcomeRef, 'fresh-outcome');
-  if (state.phase === 'rolled_back') return isMicroduckHashRef(state.rollbackReceiptRef, 'rollback-receipt');
+  if (state.phase === 'rolled_back') {
+    return (
+      isMicroduckHashRef(state.rollbackReceiptRef, 'rollback-receipt') &&
+      (state.interventionKind === 'training' || isMicroduckHashRef(state.restoreOutcomeRef, 'restore-outcome'))
+    );
+  }
   return true;
 }
 
@@ -193,7 +273,11 @@ function completedPhaseFields(state: MicroduckShowState): Partial<MicroduckShowM
   };
   if (state.phase === 'kept') return { ...deployed, freshOutcomeRef: ownerRef(state.freshOutcomeRef) };
   if (state.phase === 'rolled_back') {
-    return { ...deployed, rollbackReceiptRef: ownerRef(state.rollbackReceiptRef) };
+    return {
+      ...deployed,
+      rollbackReceiptRef: ownerRef(state.rollbackReceiptRef),
+      ...(state.interventionKind === 'control_config' ? { restoreOutcomeRef: ownerRef(state.restoreOutcomeRef) } : {}),
+    };
   }
   return deployed;
 }
@@ -208,30 +292,53 @@ function projectResolvedManifest(
   const sceneMedia = validMicroduckSceneMedia(state);
   return {
     manifestVersion: 'f311-microduck-show-v1',
+    interventionKind: state.interventionKind,
     tier: 'A',
     phase: state.phase,
     actionState: state.phase === 'approval_ready' ? 'enabled' : 'disabled',
     programRef: ownerRef(input.programRef),
     programSequence: input.programSequence,
-    baseline: {
-      policyRevision: exactRef(state.baseline.policyRevision),
-      captureRef: ownerRef(state.baseline.captureRef),
-      evaluationRef: ownerRef(state.baseline.evaluationRef),
-    },
+    baseline:
+      state.interventionKind === 'training'
+        ? {
+            policyRevision: exactRef(state.baseline.policyRevision),
+            captureRef: ownerRef(state.baseline.captureRef),
+            evaluationRef: ownerRef(state.baseline.evaluationRef),
+          }
+        : {
+            policyRevision: exactRef(state.baseline.policyRevision),
+            artifactRevision: exactRef(state.baseline.artifactRevision),
+            configRef: ownerRef(state.baseline.configRef),
+            runnerRef: ownerRef(state.baseline.runnerRef),
+            evaluationEnvRef: ownerRef(state.baseline.evaluationEnvRef),
+            captureRef: ownerRef(state.baseline.captureRef),
+            evaluationRef: ownerRef(state.baseline.evaluationRef),
+          },
     holdoutProof: {
       sealedProofRef: ownerRef(state.holdoutProof.sealedProofRef),
       optimizerExposureProofRef: ownerRef(state.holdoutProof.optimizerExposureProofRef),
       optimizerExposed: false,
     },
-    candidates: state.candidates.map((candidate) => ({
-      subjectId: candidate.subjectId,
-      policyRevision: exactRef(candidate.policyRevision),
-      evaluationRef: ownerRef(candidate.evaluationRef),
-      recipeSha256: candidate.recipeSha256,
-      jobRef: ownerRef(candidate.jobRef),
-      checkpointRef: ownerRef(candidate.checkpointRef),
-      onnxArtifactRef: ownerRef(candidate.onnxArtifactRef),
-    })),
+    candidates:
+      state.interventionKind === 'training'
+        ? state.candidates.map((candidate) => ({
+            subjectId: candidate.subjectId,
+            policyRevision: exactRef(candidate.policyRevision),
+            evaluationRef: ownerRef(candidate.evaluationRef),
+            recipeSha256: candidate.recipeSha256,
+            jobRef: ownerRef(candidate.jobRef),
+            checkpointRef: ownerRef(candidate.checkpointRef),
+            onnxArtifactRef: ownerRef(candidate.onnxArtifactRef),
+          }))
+        : state.candidates.map((candidate) => ({
+            subjectId: candidate.subjectId,
+            policyRevision: exactRef(candidate.policyRevision),
+            artifactRevision: exactRef(candidate.artifactRevision),
+            configRef: ownerRef(candidate.configRef),
+            runnerRef: ownerRef(candidate.runnerRef),
+            evaluationEnvRef: ownerRef(candidate.evaluationEnvRef),
+            evaluationRef: ownerRef(candidate.evaluationRef),
+          })),
     candidateRevision: exactRef(state.candidateRevision),
     targetRevision: exactRef(state.targetRevision),
     rollbackRevision: exactRef(state.rollbackRevision),
@@ -279,7 +386,7 @@ export async function projectMicroduckShowManifest(
     await options.owner.resolveShowState(input),
     'show_truth_incomplete',
   );
-  if (state.status === 'blocked') return blockedManifest(input, state, options.now);
+  if (state.status === 'blocked') return observedBlockedManifest(options, input, state);
   if (!(await canonicalMicroduckShowTruthMatches(state, input, options))) {
     return blockedManifest(input, blocked('show_truth_incomplete'), options.now);
   }

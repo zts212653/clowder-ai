@@ -111,6 +111,42 @@ describe('F212 Phase B — cold hydration restores cliDiagnostics (云端 codex 
     expect(messages[0].extra?.cliDiagnostics).toEqual(STORED_DIAGNOSTICS);
   });
 
+  it('F293 restores the exact durable routing receipt and retry source on cold history hydration', async () => {
+    const systemInfo = {
+      v: 1,
+      fallbackCatId: 'codex-astra',
+      payload: {
+        type: 'routing_preflight',
+        v: 1,
+        ownerId: 'owner',
+        observedAt: 100,
+        resolverState: 'fresh',
+        snapshotRef: 'snapshot:1',
+        sourceMessageId: 'original-1',
+        retryInvocationId: 'parent-1',
+        target: { targetCatId: 'codex-astra', disposition: 'rejected', reasons: [], alternatives: [] },
+      },
+    };
+    apiFetchMock.mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        messages: [
+          {
+            id: 'receipt-1',
+            type: 'system',
+            content: JSON.stringify(systemInfo.payload),
+            extra: { systemInfo },
+            timestamp: 100,
+          },
+        ],
+        tasks: [],
+        hasMore: false,
+      }),
+    } as Response);
+    await act(async () => root.render(React.createElement(HookHost, { threadId: 'thread-cli-diag' })));
+    expect(useChatStore.getState().messages[0]).toMatchObject({ id: 'receipt-1', extra: { systemInfo } });
+  });
+
   it('prefers extra.cliDiagnostics when both extra and metadata carry diagnostics', async () => {
     const extraVersion = { ...STORED_DIAGNOSTICS, publicSummary: 'extra-path summary' };
     const metadataVersion = { ...STORED_DIAGNOSTICS, publicSummary: 'metadata-path summary' };

@@ -6,12 +6,18 @@
  * formatMessage() 也被 export route 复用 (聊天记录导出)。
  */
 
-import { catRegistry, isCrossThreadProvenance } from '@cat-cafe/shared';
+import {
+  type CollectiveEventEnvelope,
+  type CollectiveExecutionGrant,
+  catRegistry,
+  isCrossThreadProvenance,
+} from '@cat-cafe/shared';
 import { estimateTokens } from '../../../../utils/token-counter.js';
 import { formatPromptTime } from '../format-time.js';
 import { isDelivered, type StoredMessage } from '../stores/ports/MessageStore.js';
 
 export interface ContextAssemblerOptions {
+  executionGrant?: CollectiveExecutionGrant;
   /** Invocation-owned token ceiling for the already-selected history. */
   maxTotalTokens?: number;
 }
@@ -178,6 +184,7 @@ export function assembleContext(messages: StoredMessage[], options?: ContextAsse
   // in practice, since stream_idle_stall means zero text was produced before the error).
   const deliveredMessages = messages.filter(
     (m) =>
+      (!options?.executionGrant || collectiveMessageInScope(m, options.executionGrant)) &&
       isDelivered(m) &&
       m.userId !== 'system' &&
       m.origin !== 'briefing' &&
@@ -221,4 +228,49 @@ export function assembleContext(messages: StoredMessage[], options?: ContextAsse
   const contextText = `${header}\n${included.join('\n')}\n[/对话历史]`;
 
   return { contextText, messageCount: included.length, estimatedTokens: totalTokens };
+}
+
+function collectiveMessageInScope(message: StoredMessage, grant: CollectiveExecutionGrant): boolean {
+  if (message.source?.connector !== 'collective' || message.deletedAt || message.recall) return false;
+  const meta = message.source.meta;
+  if (
+    !meta ||
+    meta.serviceInstanceId !== grant.source.serviceInstanceId ||
+    meta.collectiveId !== grant.source.collectiveId
+  )
+    return false;
+  const location = meta.location as { channelId?: unknown; rootEventId?: unknown } | undefined;
+  return (
+    location?.channelId === grant.source.location.channelId &&
+    (!grant.source.location.rootEventId ||
+      meta.eventId === grant.source.location.rootEventId ||
+      location.rootEventId === grant.source.location.rootEventId)
+  );
+}
+
+/** The public lane accepts Service event envelopes, never a private prompt/history/summary. */
+export function assembleCollectiveContext(
+  events: readonly CollectiveEventEnvelope[],
+  grant: CollectiveExecutionGrant,
+): string {
+  const source = grant.source;
+  const permitted = events.filter(
+    (event) =>
+      event.serviceInstanceId === source.serviceInstanceId &&
+      event.collectiveId === source.collectiveId &&
+      event.location?.channelId === source.location.channelId &&
+      (!source.location.rootEventId ||
+        event.eventId === source.location.rootEventId ||
+        event.location.rootEventId === source.location.rootEventId),
+  );
+  return JSON.stringify(
+    permitted.map(({ eventId, sequence, actor, body, location, replyToEventId }) => ({
+      eventId,
+      sequence,
+      actor,
+      body,
+      location,
+      replyToEventId,
+    })),
+  );
 }

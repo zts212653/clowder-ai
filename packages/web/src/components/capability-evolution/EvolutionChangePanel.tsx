@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import { apiFetch } from '@/utils/api-client';
+import { evolutionApprovalId, openEvolutionApproval } from './evolution-approval-navigation';
 import {
   type EvolutionChangeLineage,
   type EvolutionProgramProjection,
@@ -21,11 +22,11 @@ type ChangeResponseBody = {
 };
 
 const decisionLabels: Record<MetabolismDecision, string> = {
-  keep: 'Keep',
-  tune: 'Tune',
-  rollback: 'Rollback',
-  sunset: 'Sunset',
-  no_change: 'No change',
+  keep: '采纳这次改进',
+  tune: '继续调整',
+  rollback: '回退版本',
+  sunset: '停止这项进化',
+  no_change: '保持现状',
 };
 
 function actionIdentity(action: ChangeAction): string {
@@ -40,9 +41,9 @@ function blockedNotice(body: ChangeResponseBody): string {
   if (body.blockerRef !== undefined && !isOwnerRef(body.blockerRef)) {
     throw new Error('Change owner returned an invalid blocker reference');
   }
-  if (isOwnerRef(body.blockerRef)) return `Owner 拒绝执行：${body.blockerRef.ownerStateRef}`;
+  if (isOwnerRef(body.blockerRef)) return `执行方暂未完成这次操作。来源：${body.blockerRef.ownerStateRef}`;
   const reason = typeof body.blockerReason === 'string' ? body.blockerReason.trim() : '';
-  return `Owner 拒绝执行：${reason || 'owner_blocked'}`;
+  return `执行方暂未完成这次操作。原因：${reason || 'owner_blocked'}`;
 }
 
 async function readChangeResponse(response: Response): Promise<{
@@ -58,15 +59,15 @@ async function readChangeResponse(response: Response): Promise<{
     return { projection: body.projection, notice: blockedNotice(body) };
   }
   if (isConflict) {
-    return { projection: body.projection, notice: 'Program 已同步到最新 sequence，请按当前状态继续。' };
+    return { projection: body.projection, notice: '项目已同步到最新状态，请按当前状态继续。' };
   }
   if (body.outcome === 'waiting') {
     return {
       projection: body.projection,
-      notice: 'Owner 仍在处理；没有创建 Approval、Task 或 mutation 的本地副本。',
+      notice: '执行方仍在处理，尚未收到完成回执。',
     };
   }
-  return { projection: body.projection, notice: 'Canonical change lineage 已更新。' };
+  return { projection: body.projection, notice: '已同步这次改动的来源记录。' };
 }
 
 function RefValue({ label, value }: { label: string; value?: OwnerRef }) {
@@ -114,8 +115,8 @@ function canDecideChange(projection: EvolutionProgramProjection, current?: Evolu
 }
 
 function changeSyncLabel(stage: string): string {
-  if (stage === 'writing_back') return '刷新 owner 写回';
-  if (stage === 'revalidating') return '刷新 fresh outcome';
+  if (stage === 'writing_back') return '刷新执行结果';
+  if (stage === 'revalidating') return '刷新复验结果';
   return '刷新批准状态';
 }
 
@@ -128,7 +129,7 @@ export function EvolutionChangePanel({
 }) {
   const [pending, setPending] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
-  const current = projection.lineage.current;
+  const current = projection.lineage?.current;
 
   const run = async (action: ChangeAction) => {
     if (pending) return;
@@ -149,6 +150,11 @@ export function EvolutionChangePanel({
         },
       );
       const result = await readChangeResponse(response);
+      if (
+        result.projection.program.programId !== projection.program.programId ||
+        result.projection.program.workspaceId !== projection.program.workspaceId
+      )
+        throw new Error('返回的记录与当前项目不一致，请刷新。');
       onProjection(result.projection);
       setNotice(result.notice);
     } catch (cause) {
@@ -174,29 +180,47 @@ export function EvolutionChangePanel({
       projection.program.stage === 'revalidating');
   const canDecide = canDecideChange(projection, current);
   const syncLabel = changeSyncLabel(projection.program.stage);
+  const approvalId = evolutionApprovalId(current?.approvalRef) ?? evolutionApprovalId(current?.proposalRef);
 
   return (
     <section className="rounded-xl border border-cafe-subtle bg-cafe-surface p-4" data-testid="evolution-change-panel">
       <div className="flex flex-wrap items-baseline justify-between gap-2">
-        <h3 className="text-sm font-semibold text-cafe">Change &amp; Learn</h3>
-        <span className="text-xs text-cafe-muted">F246 / F266 / owner canonical refs</span>
+        <h3 className="text-sm font-semibold text-cafe">批准、执行与复验</h3>
       </div>
 
       {current ? (
         <div className="mt-3 rounded-lg bg-cafe-hover p-3">
           <div className="flex items-center justify-between gap-3">
-            <p className="text-xs font-medium text-cafe">当前 change cycle</p>
-            <span className="font-mono text-xs text-cafe-secondary">{current.status}</span>
+            <p className="text-xs font-medium text-cafe">本次改动</p>
+            <span className="text-xs text-cafe-secondary">
+              {current.status === 'pending'
+                ? '等待批准'
+                : current.status === 'approved'
+                  ? '已批准，等待执行'
+                  : current.status === 'changed'
+                    ? '已执行，等待复验'
+                    : current.status === 'outcome'
+                      ? '复验记录已返回'
+                      : current.status === 'rejected'
+                        ? '已拒绝'
+                        : current.status === 'no_change'
+                          ? '执行方确认未改动'
+                          : '需要重新确认'}
+            </span>
           </div>
-          <ChangeRefs change={current} />
+          {current.status === 'pending' && (
+            <p className="mt-2 text-xs leading-5 text-cafe-muted">批准后还需等待执行确认与新的复验结果。</p>
+          )}
+          <details className="mt-3">
+            <summary className="cursor-pointer text-xs text-cafe-muted">批准、执行与复验来源</summary>
+            <ChangeRefs change={current} />
+          </details>
         </div>
       ) : (
-        <p className="mt-3 text-xs leading-5 text-cafe-muted">
-          当前 Cycle 尚未绑定 change proposal；observe / insufficient 会留在自动复查车道。
-        </p>
+        <p className="mt-3 text-xs leading-5 text-cafe-muted">还没有可执行的改动。证据不足时，会继续保留观察记录。</p>
       )}
 
-      {projection.lineage.cycles.some((cycle) => cycle.decision !== undefined) && (
+      {projection.lineage?.cycles.some((cycle) => cycle.decision !== undefined) && (
         <ol className="mt-3 space-y-2" aria-label="Change cycle history">
           {projection.lineage.cycles.map((cycle) => (
             <li key={cycle.cycle} className="rounded-lg border border-cafe-subtle px-3 py-2 text-xs">
@@ -220,12 +244,16 @@ export function EvolutionChangePanel({
 
       {awaitsProposal && (
         <p className="mt-3 text-xs leading-5 text-cafe-muted">
-          认证猫会从 owner-backed intervention 发起{current ? ' fresh proposal' : '受治理变更'}；Workbench 不构造
-          Approval、owner 身份或来源。
+          负责这项资产的来源提交候选后，会进入批准流程。批准后还需等待执行确认与新的复验结果。
         </p>
       )}
 
       <div className="mt-3 flex flex-wrap gap-2">
+        {current?.status === 'pending' && approvalId && (
+          <button type="button" className="evolution-primary" onClick={() => openEvolutionApproval(approvalId)}>
+            审阅并批准这次操作
+          </button>
+        )}
         {canSync && (
           <button
             type="button"

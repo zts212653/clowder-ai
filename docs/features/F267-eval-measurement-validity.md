@@ -2,10 +2,10 @@
 feature_ids: [F267]
 related_features: [F192, F245, F263, F266, F268, F275, F311]
 topics: [eval, measurement-validity, calibration, uncertainty, repeatability, friction, work-eligibility]
-tips_exempt: "Renewed 2026-09-02: capability-evolution issuance is a cat-only eval workflow; the operator entry remains F311's Evolution Program tip, while this owner action is discovered through its typed MCP contract."
+tips_exempt: "Renewed 2026-09-09 for opaque target-owner grammar alignment in the existing cat-only measurement issuance contract; operator discovery remains the F311 Evolution Program entry, with no new command or user action."
 doc_kind: spec
 created: 2026-07-18
-updated: 2026-09-02
+updated: 2026-09-06
 description: "为决策型 eval bundle 建立目标、边界、不确定性与重裁契约，并以 friction 通道召回为首个实证迁移。"
 description_source: human
 description_author: codex-sol
@@ -63,7 +63,8 @@ eval 能稳定产出数字，不等于数字真的代表我们在乎的东西。
 #### Capability Evolution owner issuer
 
 - 生产入口是 callback-only `POST /api/callbacks/evolution-programs/:programId/measurement-issuance`，MCP 投影为 `cat_cafe_issue_capability_evolution_measurement`。调用方只能提交 exact Program id 与 source message id；owner user、workspace 与 eval cat 均来自认证 principal。
-- target owner 必须先在 `docs/harness-feedback/measurement-sources/capability-evolution/evolution-program-<id>.yaml` 提交 canonical source manifest。该 manifest 绑定 Program sequence/target/claim、完整 certificate/result、observer/domain owner/consumer/calibrator，以及 cohort/baseline 的 target-owner source artifact refs；consumer occupant 必须等于 Program 已绑定的 value-owner ref，尚未绑定 value owner 时则等于 owner workspace 的 opaque user ref（例如 `user:operator`），不得拿签发猫冒充真实 consumer；角色重叠必须有显式理由。
+- target-owner identity 复用 F311 `OwnerTruthRefV1` 的 opaque owner grammar（`ownerFeatureId` 为 bounded owner id，`ownerStateRef` 为 `kind:id`），不额外限制为内部 `F###`。manifest、source artifact 与 target-owner proof objects 必须逐项等于 Program `objectRef` 的 owner；named consumer receipt 仍单独绑定 certificate 的 `consumerFeatureId`，不得被 target owner 吞并。
+- target owner 必须先在 `docs/harness-feedback/measurement-sources/capability-evolution/evolution-program-<id>.yaml` 提交 canonical source manifest。该 manifest 绑定 Program sequence/target/claim、完整 certificate/result、observer/domain owner/consumer/calibrator，以及 cohort/baseline 的 target-owner source artifact refs。Program value owner 必须独立等于认证 workspace 的 opaque user ref（例如 `F311/user:operator`）；measurement consumer 可以是该 value-owner seat，也可以是 certificate 逐字段点名的 `{consumerFeatureId, cat:consumerOwnerCatId}`，但不能是第三种自报身份。两者分开时，日常 measurement 消费不会取得 value verdict / metabolism authority；角色重叠仍须有显式理由。
 - `sourceRevision` 指向包含这些 source artifacts 的既有 owner commit，必须严格早于承载 manifest 的 `origin/main` commit。F267 从 Git object database 读取 manifest 与 source bytes，验证 ancestry、regular-file mode 和 SHA-256，再以该 exact manifest commit 创建隔离发布 worktree；它不要求 manifest 写入包含自身的 commit SHA。
 - F267 写入不可覆盖的 certificate/result/role/proof artifacts；proof record 以 source manifest 的 path、bytes hash 与 exact `origin/main` commit 反向 attests target-owner source，resolver 每次消费都重验 manifest commit、prior source revision 与 source artifact hashes。任一路径、owner、hash、Program binding、角色或已声明 proof object 漂移都 fail closed。未声明 consumer/exposure/holdout proof 不阻断出生证发布，而由 resolver 签发 typed `insufficient` 与 withdrawal conditions；只有实际声明的 proof objects 才必须物理存在、hash-bound 且语义相符。
 - issuer 不写 F311 Program、不造 source data、不签 auto-promotion。source manifest 缺失时只返回 `source_owner_manifest_missing` 与七项 typed blockers；source/schema/revision 无效分别返回 typed invalid。artifact PR 可诚实携带 `measurement=insufficient` / `proof=insufficient`，measurement decision 的 `usable|insufficient` 与 proof 的 `verified|insufficient` 继续正交。

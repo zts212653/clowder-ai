@@ -29,8 +29,8 @@
 1. 明确这次验收的需求点（来自 discussion/spec）。
 2. **Runtime Guard（若在 `cat-cafe-runtime`）**：
    - 先探活：`curl -sf http://localhost:3004/health`
-   - 服务在线就直接复用，禁止为截图执行 `pnpm start` / `pnpm runtime:start` / `./scripts/start-dev.sh`
-   - 确实要重启时，先拿到operator明确授权，再执行 `CAT_CAFE_RUNTIME_RESTART_OK=1 pnpm start`
+   - 服务在线就直接复用，禁止为截图执行 `pnpm start` / `pnpm runtime:start` / `pnpm runtime:restart` / `pnpm runtime:stop` / `./scripts/start-dev.sh`
+   - 确实要重启时，先拿到operator明确授权，再执行 `pnpm runtime:restart`；不要把 shell 开关当授权凭据
 3. 进入目标页面，覆盖关键状态（初始态 / 成功态 / 错误态）。
 4. 先截静态图，再录 1 段 15s 内关键流程；临时文件默认写到 `${TMPDIR}/cat-cafe-evidence/...`，且每次工具调用都显式给出输出路径。
 5. 需要入库时，再显式归档到 `project-evidence/` 或对应 `assets/` 目录。

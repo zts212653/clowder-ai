@@ -1,6 +1,6 @@
 ---
 name: anime-forge
-tips_exempt: delivery error row only — no new user-facing capability; continuity commit will reference video-forge SOT
+tips_exempt: "2026-09-15 narrative-method update: improves causal storyboarding within existing animation production and keeps static comics on their existing image path; no new rendering capability."
 description: >
   AI 生成动画短片生产线：图（关键帧锁确定性）→ 视频（i2v 给活气）→ 后期（剪辑做节奏）。
   Use when: 做动画短剧/角色 IP 短片、猫咖日记系列新集、图生视频管线、剧情类 AI 视频。
@@ -48,6 +48,8 @@ description: >
 | 字幕/字卡/注解 | 本地 Chrome 渲染 + ffmpeg overlay | 中文完美、零成本、绕开无 libass |
 
 ## 剧本结构（导演层 checklist）
+
+解释真实机制或给陌生读者讲清因果时，先用[叙事清晰度](../.cat-cafe-shared-refs/narrative-clarity.md)确定动作与可见变化，再做分镜/animatic。普通虚构喜剧保留创作自由，不补真实经历账本；单页漫画仍走 image-generation/ppt-forge，不因“漫画”升级为本视频生产线。
 
 - **喜剧 = 预期 vs 现实，预期端必须拍**（任务多小/时间多久）——EP01 初剪"观众看不懂"就是只拍了现实端
 - **动机闭环**：种子（S00 宣布）→ 潜意识曝光（用自己的头像）→ OS 自白 → 定罪 → true end（爱）

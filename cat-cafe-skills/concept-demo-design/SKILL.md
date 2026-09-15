@@ -5,7 +5,9 @@ triggers:
   - 可证伪技术剖面
   - 证伪实验台
   - 技术架构 demo
-description: "把抽象理念、家内 UI/UX 可点稿或端到端用户旅程变成可讲解、可验证的交互 Demo。Use: 做个 demo 让人 get 到、做 F284 式体验 Gate、验证完整用户旅程。Not: 已签字的正式产品前端、已有素材剪辑、PPT、纯视觉探索。Output: 双轴 Demo Contract（判题类型 × 交付车道）+ 确定性交互原型 + 验证记录。"
+  - 参考产品设计怎么借鉴
+  - 产品引导的叙事节奏
+description: "拆解参考产品的交互叙事，或把理念与用户旅程变成可判断的 Demo。Use when: 参考产品设计怎么借鉴、产品引导的叙事节奏、做个 demo 让人 get 到、比较家内交互或验证完整旅程。Not for: 已签字的正式产品前端、已有素材剪辑、PPT、纯视觉探索、用户实际操作引导。Output: 只读借鉴稿或交互叙事分镜；授权制作时交付双轴 Demo Contract、交互原型与验证记录。"
 ---
 
 # Concept Demo Design — 让理念先被看见
@@ -16,6 +18,8 @@ Demo 的工作，是把尚未适合直接产品化的问题变成可以亲眼判
 
 | 当前任务 | 去向 |
 |---|---|
+| “看看参考产品，这样的设计怎么学”，尚未要求制作 | 本 skill 的参考拆解入口，只交借鉴判断和候选路径 |
+| 要设计首启/交接的叙事节奏，尚未要求可点稿 | 共用交互叙事方法，交付分镜与关键交接，不自动写代码/YAML |
 | 理念还停在文字里，需要让人看见因果变化 | 本 skill，`demo_kind=concept_story` |
 | 技术名词很多，但观众仍无法判断主张是否站得住 | 本 skill 的条件式“可证伪技术剖面” |
 | 正式实现前，需要在家里比较布局、交互、折叠与恢复行为 | 本 skill，`demo_kind=product_experience_gate` |
@@ -24,10 +28,20 @@ Demo 的工作，是把尚未适合直接产品化的问题变成可以亲眼判
 | 已有录屏，需要配音、剪辑、导出 | `video-forge` |
 | 需要台上讲述的 slide | `ppt-forge` |
 | 已经签字、准备进入正式产品 UI 与真实用户契约 | `console-dev` |
+| 为已有功能把明确旅程编成正式引导 | `guide-authoring` |
+| 用户正在问“怎么配置/怎么操作” | `guide-interaction` |
 
 不要用正式产品工程代偿概念没想清。也不要拿一段剧本文字冒充可录屏的 Demo。
 
+### 参考拆解与交互叙事入口
+
+使用[交互叙事：从看懂到亲手参与](../.cat-cafe-shared-refs/interaction-narrative.md)，把“可见设计 → 用户问题 → 作用机制 → 本产品对应 → 最小验证”写清。只读拆解交到这里即可，不强制填 Demo Contract、选择 demo_kind 或启动制作；叙事设计交付关键分镜与交接。下面的三种 demo_kind 只用于已授权的 Demo 任务，不新增第四种类型。
+
+首启与跨界面旅程重点看示范到真实使用、操作到结果、中断到续接。复用已有分镜或 Journey ledger 补关键交接，不同时维护多套状态表。已定路径只改样式/文案时不重做分析。角色动作说明身份与协作价值，跳转落到用户能继续处理的对象；具体检查与反例见[迁移场景](refs/interaction-narrative-cases.md)。
+
 ## 1. 先锁定唯一的判题
+
+需要让非技术观众理解理念或机制时，用[叙事清晰度](../.cat-cafe-shared-refs/narrative-clarity.md)组织任务、行动与变化；只有用户要求交互 Demo 才进入下方双轴制作契约。单页漫画/PPT由相应制作技能承接，不能因题材技术性而强制做可证伪实验台。
 
 先选择 `demo_kind`，再写一句这个 Demo 必须回答的问题：
 
@@ -192,7 +206,7 @@ Contract 必须记录：
 只有 Demo 声称自己在验证 **Workspace、产品主壳、多对象协作或多 Agent 工作台** 时，才触发这组证据；普通设置页、单对象详情页和一次性流程不需要为了“完整”补 tab。
 
 1. **先声明层级**：写清当前画面是一个 feature surface、一个对象详情，还是承载多个 surface 的 product shell。把一个做得很完整的资产页叫“Workspace”不算成立。
-2. **证明接在真实宿主里**：若 claim 是“已进入现有产品 / Collective”，Contract 必须写出**真实产品宿主**的用户入口、目标宿主组件路径与**宿主挂载证据**。单独 `/dev` route、自造导航或 **独立复制壳**可以验证组件，但不得充当产品接入证据。
+2. **证明接在真实宿主里**：若 claim 是“已进入现有产品 / Collective”，Contract 必须写出**真实产品宿主**的用户入口、目标宿主组件路径与**宿主挂载证据**。单独 `/dev` route、自造导航或 **独立复制壳**可以验证组件，但不得充当产品接入证据。**默认入口即门**：每个 `claims.productIntegration` 一律要带 `defaultEntryJourney`（`testPath` / `journeyId` / `surfaceTestId`）——一条用 `registerDefaultEntryJourney` 注册在 `packages/web/test/browser/` 下、由 `test:browser` 执行的真实浏览器旅程：从不带任何查询参数的默认入口 `enter`，做用户动作，`arrive` 时断言最终 surface 唯一的 `data-testid` 可见。`?experienceGate=f290-assembly` 这种只能手输 URL 的候选页写不出这条旅程，只能登记为 opt-in 候选。checker 核静态绑定形状（文件在 canonical runner 里、旅程体不用 `setContent` / `goto` / `evaluate` 注入 DOM 或 URL、final surface 位于 `packages/web/src` 或 `packages/collective-client/src`，且 testid 跨两处产品源码唯一）；runtime harness 在进程收尾时逐条对账绑定当前 `testPath` 的 claim，要求 exact `journeyId` 真实注册并完成，藏在未执行分支或只让文件退出都不能通过。可达性由 full gate 实跑旅程证明，不做静态推断（2026-09-10 起，静态 prover 已被 runtime journey 取代）。claim 或旅程文件一改，gate 强制 full。
 3. **工作集由用户组成**：用户能从真实入口把 fixture 中未预开的对象加入工作集，形成新的 typed tab / pane；预先摆好几个场景按钮或只替换同一块 DOM 不算。
 4. **异质 surface 共存**：至少两个职责不同的 surface（例如 Channel + Artifact、Chat + Review、File + Browser）能同时保持或快速切回，而不是把所有能力压成同一张卡或同一个右栏模板。
 5. **主工作面与 sidecar 分工**：inspector / sidecar 只承载临时上下文、短动作或快速窥视；需要持续阅读、编辑、对比或独立导航的对象可以晋升为 tab / split pane。右栏不是所有对象的终身监狱。
@@ -240,6 +254,8 @@ tab chrome 本身不是证据。证据是陌生用户真的创造了一个新工
 
 ## 交付契约
 
+以下清单适用于已授权制作 Demo；参考拆解只交取舍与候选路径，交互叙事设计只交分镜与关键交接，不把草稿冒充可运行 Demo。
+
 - `Demo Contract`：判题类型、交付车道、观众、视觉真相源、视角、信号路径、灵魂帧、诚实边界、类型专属证据表。
 - 可录屏交互前端：确定性播放、讲者控场、新手导览、原生视觉语言。
 - 验证记录：自动检查、逐幕视觉检查、试讲或目标观众复述结果。
@@ -271,7 +287,7 @@ tab chrome 本身不是证据。证据是陌生用户真的创造了一个新工
 
 ## Pressure Test
 
-冻结 Contract 前逐题过一遍；只看关键词、不看实际交付对象就算失败：
+参考拆解与交互叙事按[迁移场景](refs/interaction-narrative-cases.md)检查；已授权 Demo 在冻结 Contract 前按下表选择对应项。只看关键词、不看实际交付对象就算失败：
 
 | 请求 | `demo_kind` | `delivery_lane` | 必须出现的证据 | 失败信号 |
 |---|---|---|---|---|

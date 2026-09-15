@@ -14,7 +14,7 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } 
 import { QueuePanel } from '@/components/QueuePanel';
 import type { QueueEntry } from '@/stores/chat-types';
 import { useChatStore } from '@/stores/chatStore';
-import { type SocketCallbacks, useSocket } from '../useSocket';
+import { reconcileThreadWithServer, type SocketCallbacks, useSocket } from '../useSocket';
 
 const mockSocket = new EventEmitter() as EventEmitter & {
   connected: boolean;
@@ -122,6 +122,12 @@ describe('useSocket Queue exact-live bridge', () => {
       messages: [],
       queue: [],
       queuePaused: false,
+      queuePauseReason: undefined,
+      hasActiveInvocation: false,
+      isLoading: false,
+      intentMode: null,
+      targetCats: [],
+      catStatuses: {},
       activeInvocations: {},
       catInvocations: {},
       currentThreadId: THREAD_ID,
@@ -132,6 +138,7 @@ describe('useSocket Queue exact-live bridge', () => {
   afterEach(() => {
     act(() => root.unmount());
     container.remove();
+    vi.useRealTimers();
   });
 
   it('queue-first: hides recovery after one queued_seen event and canonical exact-liveness reconciliation', async () => {
@@ -156,5 +163,133 @@ describe('useSocket Queue exact-live bridge', () => {
     });
     expect(container.querySelector('[data-testid="queue-recover"]')).toBeNull();
     expect(container.querySelector('[data-testid="steer-q-exact-live"]')).toBeNull();
+  });
+
+  it.each([
+    THREAD_ID,
+    'thread-queue-background',
+  ])('reconciles missed completion and pause truth for %s without another execution', async (threadId) => {
+    const oldQueue = [1, 2, 3].map((index) => ({
+      ...QUEUED_SEEN_ENTRY,
+      threadId,
+      id: `old-${index}`,
+    }));
+    useChatStore.getState().setQueue(threadId, oldQueue);
+    useChatStore.getState().setQueuePaused(threadId, true, 'failed');
+    apiFetchMock.mockResolvedValueOnce(
+      new Response(JSON.stringify({ queue: [], paused: false, activeInvocations: [] })),
+    );
+    await act(async () => {
+      root.render(<Host />);
+      await reconcileThreadWithServer(threadId, () => false, 'Reconnect');
+    });
+
+    const state = useChatStore.getState().getThreadState(threadId);
+    expect(state.queue).toEqual([]);
+    expect(state.queuePaused).toBe(false);
+    expect(state.queuePauseReason).toBeUndefined();
+    expect(container.querySelector('[data-testid="queue-recover"]')).toBeNull();
+    expect(apiFetchMock.mock.calls.every(([, options]) => !options?.method || options.method === 'GET')).toBe(true);
+  });
+
+  it('retains real pending work and the server pause reason', async () => {
+    apiFetchMock.mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({ queue: [QUEUED_SEEN_ENTRY], paused: true, pauseReason: 'canceled', activeInvocations: [] }),
+      ),
+    );
+    await reconcileThreadWithServer(THREAD_ID, () => false, 'StaleWatchdog');
+    expect(useChatStore.getState().queue).toEqual([QUEUED_SEEN_ENTRY]);
+    expect(useChatStore.getState().queuePaused).toBe(true);
+    expect(useChatStore.getState().queuePauseReason).toBe('canceled');
+  });
+
+  it.each([
+    'queued',
+    'queued_handled',
+    'queue_paused',
+    'queue_full_warning',
+  ])('a delayed reconciliation cannot replace newer %s truth', async (action) => {
+    await act(async () => root.render(<Host />));
+    let resolveResponse!: (response: Response) => void;
+    apiFetchMock.mockReturnValueOnce(
+      new Promise<Response>((resolve) => {
+        resolveResponse = resolve;
+      }),
+    );
+    const pending = reconcileThreadWithServer(THREAD_ID, () => false, 'Reconnect');
+    const liveQueue = action === 'queued_handled' ? [] : [QUEUED_SEEN_ENTRY];
+    await act(async () => {
+      emitServerEvent(action.startsWith('queue_') ? action : 'queue_updated', {
+        threadId: THREAD_ID,
+        queue: liveQueue,
+        action,
+        reason: 'failed',
+        source: 'connector',
+      });
+      resolveResponse(
+        new Response(
+          JSON.stringify({
+            queue: [{ ...QUEUED_SEEN_ENTRY, id: 'stale-response' }],
+            paused: false,
+            activeInvocations: [{ catId: 'codex', executionId: 'old-parent', turnInvocationId: 'old-child' }],
+          }),
+        ),
+      );
+      await pending;
+    });
+    expect(useChatStore.getState().queue).toEqual(liveQueue);
+    expect(useChatStore.getState().activeInvocations).not.toHaveProperty('old-parent');
+    if (action === 'queue_paused') expect(useChatStore.getState().queuePaused).toBe(true);
+  });
+
+  it('the latest reconciliation wins even when an older request finishes last', async () => {
+    let resolveOld!: (response: Response) => void;
+    apiFetchMock.mockReturnValueOnce(
+      new Promise<Response>((resolve) => {
+        resolveOld = resolve;
+      }),
+    );
+    const oldRead = reconcileThreadWithServer(THREAD_ID, () => false, 'Reconnect');
+    apiFetchMock.mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          queue: [],
+          paused: false,
+          activeInvocations: [{ catId: 'codex-sol', executionId: 'new-parent', turnInvocationId: 'new-child' }],
+        }),
+      ),
+    );
+    await reconcileThreadWithServer(THREAD_ID, () => false, 'QueueProcessing');
+    resolveOld(new Response(JSON.stringify({ queue: [QUEUED_SEEN_ENTRY], paused: true, activeInvocations: [] })));
+    await oldRead;
+    expect(useChatStore.getState().queue).toEqual([]);
+    expect(useChatStore.getState().queuePaused).toBe(false);
+    expect(useChatStore.getState().activeInvocations).toHaveProperty('new-parent');
+  });
+
+  it.each([
+    THREAD_ID,
+    'thread-idle-background',
+  ])('automatically checks an ended receipt in idle %s without reconnect or a user message', async (threadId) => {
+    vi.useFakeTimers();
+    useChatStore.getState().setQueue(threadId, [{ ...QUEUED_SEEN_ENTRY, threadId }]);
+    useChatStore.getState().setQueuePaused(threadId, true, 'failed');
+    apiFetchMock.mockImplementation(
+      async () =>
+        new Response(
+          JSON.stringify({
+            queue: [],
+            paused: false,
+            activeInvocations: [],
+          }),
+        ),
+    );
+    await act(async () => root.render(<Host />));
+    await act(async () => vi.advanceTimersByTimeAsync(31_000));
+    expect(apiFetchMock).toHaveBeenCalledWith(`/api/threads/${threadId}/queue`);
+    expect(useChatStore.getState().getThreadState(threadId).queue).toEqual([]);
+    expect(useChatStore.getState().getThreadState(threadId).queuePaused).toBe(false);
+    expect(container.querySelector('[data-testid="queue-recover"]')).toBeNull();
   });
 });

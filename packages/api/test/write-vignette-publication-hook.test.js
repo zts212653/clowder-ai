@@ -1,23 +1,14 @@
 // @ts-check
 import assert from 'node:assert/strict';
-import { execFileSync } from 'node:child_process';
 import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { createVignetteWriter } from '../dist/domains/taste/services/writeVignette.js';
+import { configureIdentity, git } from './taste-publication-fixtures.js';
 
 const TRACKED_POST_CHECKOUT_HOOK = fileURLToPath(new URL('../../../.githooks/post-checkout', import.meta.url));
-
-function git(cwd, args) {
-  return execFileSync('git', args, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
-}
-
-function configureIdentity(cwd) {
-  git(cwd, ['config', 'user.email', 'test@cat-cafe.local']);
-  git(cwd, ['config', 'user.name', 'Taste Hook Test']);
-}
 
 test('tracked post-checkout blocks primary branching but permits disposable Taste publication', async () => {
   const root = mkdtempSync(join(tmpdir(), 'f221-publication-hook-'));

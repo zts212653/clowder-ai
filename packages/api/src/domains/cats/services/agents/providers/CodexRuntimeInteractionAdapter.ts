@@ -9,6 +9,8 @@ import type {
 } from '@cat-cafe/shared';
 import type { RuntimeInteractionPort } from '../../../../runtime-interaction/ports/RuntimeInteractionPort.js';
 import { isCodexMcpApprovalCompatibilityRequest } from './CodexAppServerEventMapper.js';
+import type { CodexMcpCapabilityApprovalEvidence } from './CodexMcpCapabilityCorrelation.js';
+import { resolveCodexMcpCapabilityResponse } from './CodexMcpCapabilityPolicy.js';
 import {
   commandParamsSchema,
   fileParamsSchema,
@@ -34,16 +36,31 @@ export interface CodexRuntimeInteractionContext {
   createInteractionId?: () => string;
   now?: () => number;
   resolveEntrustedWorkTaskRef?: () => Promise<EntrustedWorkTaskRefV1 | undefined>;
+  /** MCP servers actually enabled and resolved for this provider invocation. */
+  declaredMcpServerNames?: readonly string[];
 }
 
 export async function respondToCodexRuntimeInteraction(
   envelope: JsonObject,
   context: CodexRuntimeInteractionContext,
+  approvalEvidence?: CodexMcpCapabilityApprovalEvidence,
 ): Promise<JsonObject | null> {
   const method = envelope.method;
   if (!isCodexRuntimeInteractionMethod(method) || isCodexMcpApprovalCompatibilityRequest(envelope)) return null;
   if (typeof envelope.id !== 'number' || !Number.isInteger(envelope.id)) return null;
   try {
+    if (method === 'mcpServer/elicitation/request') {
+      const form = mcpFormParamsSchema.safeParse(envelope.params);
+      if (form.success) {
+        const capabilityResponse = resolveCodexMcpCapabilityResponse(
+          form.data,
+          context.declaredMcpServerNames,
+          approvalEvidence,
+          envelope.params,
+        );
+        if (capabilityResponse) return { id: envelope.id, result: capabilityResponse };
+      }
+    }
     const entrustedWorkTaskRef =
       method === 'item/tool/requestUserInput'
         ? await resolveEntrustedWorkTaskRef(context.resolveEntrustedWorkTaskRef)

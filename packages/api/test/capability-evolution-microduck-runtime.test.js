@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import { describe, it } from 'node:test';
 import Fastify from 'fastify';
 import {
@@ -107,7 +108,7 @@ describe('F311 Microduck runtime federation', () => {
     });
     assert.equal((await intruder.inject({ method: 'GET', url })).statusCode, 404);
     assert.equal(
-      (await intruder.inject({ method: 'GET', url: url.replace(/adapter-manifest$/u, 'adapter-media/1') })).statusCode,
+      (await intruder.inject({ method: 'GET', url: url.replace(/adapter-manifest$/u, 'adapter-media/0') })).statusCode,
       404,
     );
     await intruder.close();
@@ -115,7 +116,11 @@ describe('F311 Microduck runtime federation', () => {
   });
 
   it('streams only owner-resolved image/video bytes from the canonical authenticated media route', async () => {
-    const captureRef = showState().baseline.captureRef;
+    let mediaBytes = new Uint8Array([137, 80, 78, 71]);
+    const captureRef = {
+      ownerFeatureId: 'microduck-owner',
+      ownerStateRef: `capture:sha256:${createHash('sha256').update(mediaBytes).digest('hex')}`,
+    };
     let contentType = 'image/png';
     let exactEvidence = true;
     let canonicalApproval = true;
@@ -125,7 +130,11 @@ describe('F311 Microduck runtime federation', () => {
       owner: {
         async resolveShowState() {
           const state = showState({
-            sceneMedia: [{ sceneIndex: 1, source: 'real_capture', captureRef, kind: 'image' }],
+            baseline: {
+              ...showState().baseline,
+              captureRef,
+            },
+            sceneMedia: [{ sceneIndex: 0, source: 'real_capture', captureRef, kind: 'image' }],
             ...(deploymentMatches ? {} : { deployedArtifactSha256: 'b'.repeat(64) }),
           });
           return exactEvidence
@@ -148,7 +157,7 @@ describe('F311 Microduck runtime federation', () => {
             captureRef,
             kind: 'image',
             contentType,
-            bytes: new Uint8Array([137, 80, 78, 71]),
+            bytes: mediaBytes,
           };
         },
       },
@@ -192,13 +201,13 @@ describe('F311 Microduck runtime federation', () => {
       service: mediaService,
     });
 
-    const url = `/api/capability-evolution/programs/${encodeURIComponent(programRef.ownerStateRef)}/adapter-media/1`;
+    const url = `/api/capability-evolution/programs/${encodeURIComponent(programRef.ownerStateRef)}/adapter-media/0`;
     const read = await app.inject({ method: 'GET', url });
     assert.equal(read.statusCode, 200);
     assert.equal(read.headers['content-type'], 'image/png');
     assert.deepEqual([...read.rawPayload], [137, 80, 78, 71]);
     assert.equal(mediaResolutions, 1);
-    assert.equal((await app.inject({ method: 'GET', url: url.replace(/\/1$/u, '/2') })).statusCode, 422);
+    assert.equal((await app.inject({ method: 'GET', url: url.replace(/\/0$/u, '/2') })).statusCode, 422);
     exactEvidence = false;
     assert.equal((await app.inject({ method: 'GET', url })).statusCode, 422);
     assert.equal(mediaResolutions, 1);
@@ -211,6 +220,9 @@ describe('F311 Microduck runtime federation', () => {
     assert.equal((await app.inject({ method: 'GET', url })).statusCode, 422);
     assert.equal(mediaResolutions, 1);
     deploymentMatches = true;
+    mediaBytes = new Uint8Array([1, 2, 3]);
+    assert.equal((await app.inject({ method: 'GET', url })).statusCode, 422);
+    mediaBytes = new Uint8Array([137, 80, 78, 71]);
     contentType = 'image/svg+xml';
     assert.equal((await app.inject({ method: 'GET', url })).statusCode, 422);
     assert.equal((await app.inject({ method: 'POST', url })).statusCode, 404);

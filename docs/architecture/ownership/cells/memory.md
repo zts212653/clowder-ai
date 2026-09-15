@@ -1,7 +1,7 @@
 ---
 cell_id: memory
 title: Memory / Evidence
-summary: Evidence indexing、retrieval、scanner selection、bootstrap、library memory 与 execution-time cue orchestration。
+summary: Evidence indexing、retrieval、scanner selection、bootstrap、library memory，以及带 append-only content-free owner outcome refs 的 execution-time cue orchestration。
 canonical_features: [F102, F152, F209, F255, F260, F263, F271, F276, F282, F287]
 code_anchors:
   - packages/api/src/domains/memory/interfaces.ts
@@ -111,6 +111,8 @@ cited_by:
   - {feature: F287, date: 2026-08-01, delta: "execution-time memory cue ownership: closed typed opportunities, lane-specific resolvers, bounded cue projection, content-free consumption episodes, and canonical-source invalidation without a second MemoryStore"}
   - {feature: F287, date: 2026-08-02, delta: "Phase E closes the v1 catalog with owner-authenticated Person, operational-precedent, and Taste journeys; exact source coordinates, drill revalidation, content-free lifecycle evidence, per-family keep decisions, and explicit main/Alpha/production truth remain separated"}
   - {feature: F287, date: 2026-08-27, delta: "catalog v2 adds one closed direct-owner ELI5 opportunity bound to the exact approved F221 vignette; applied truth requires current-source drill plus same-invocation html_widget evidence, without adding a search lane or content store"}
+  - {feature: F313, date: 2026-09-09, delta: "D7 makes a successful F287 applied/dismissed callback return a content-free OwnerTruthRefV1 to its existing append-only event; F278 may verify that ref but cannot copy cue payload or own memory lifecycle truth"}
+  - {feature: F231, date: 2026-09-07, delta: "Phase E corpus anchor — ProfileMemoryCueSource adds profile:cat-cafe-profile://corpus/current opportunity with readCorpusSnapshot; memory-cue profileUri union widened to include corpus URI; corpus file falls inside existing domain:user-profile collection root (INV-9, owner-auth search_evidence reachable)"}
 ---
 
 # Memory / Evidence
@@ -125,6 +127,11 @@ episodes remain content-free. Person, Entity, Taste, Profile, operational eviden
 knowledge keep their existing canonical owners; F287 may revalidate and project them but cannot
 copy, correct, forget or restore their truth. The full source/consumer/lifecycle census is
 `docs/architecture/memory-cue-source-map.md`.
+
+F313 D7 adds no memory state. `MemoryCueEpisodeStore` remains the only append-only outcome truth and now supports an
+exact primary-key read. A successful authenticated applied/dismissed callback returns only
+`F287/memory-cue-consumption:<eventId>@<createdAt>`; the F287 Paw Feel owner adapter may reread and verify that event,
+owner and time, but F278 stores only the ref and never receives the cue body or rationale.
 
 F152 extends that architecture by adding scanner strategies and bootstrap orchestration for non-Cat-Cafe repositories. New sources should extend the scanner/indexing contract instead of creating parallel stores.
 

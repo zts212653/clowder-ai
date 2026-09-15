@@ -1,16 +1,14 @@
+import { createMicroduckObservationResolver } from './microduck-observation.js';
+import type { MicroduckOwnerAdapterOptions } from './microduck-owner-adapter-options.js';
 import {
   MICRODUCK_OWNER_FEATURE_ID,
-  type MicroduckApprovalResolver,
   type MicroduckBlocked,
   type MicroduckCredentialBoundary,
   type MicroduckFreshOutcome,
   type MicroduckFreshOutcomeInput,
   type MicroduckMutationInput,
-  type MicroduckObservation,
-  type MicroduckOwnerPort,
   type MicroduckPermission,
   type MicroduckProgramScope,
-  type MicroduckProposalResolver,
   type MicroduckRollbackInput,
   type MicroduckRollbackReceipt,
   type MicroduckVerification,
@@ -22,7 +20,6 @@ import {
   microduckApprovalSchema,
   microduckFreshOutcomeSchema,
   microduckMutationSchema,
-  microduckObservationSchema,
   microduckPermissionSchema,
   microduckRollbackSchema,
   microduckVerificationSchema,
@@ -31,17 +28,20 @@ import {
 import {
   blocked,
   exactRef,
+  isMicroduckControlPackageRef,
+  isMicroduckDeployableRef,
   isMicroduckHashRef,
   isMicroduckJobRef,
   isMicroduckPolicyRef,
   isMicroduckTargetRef,
+  microduckDeployedTargetDrifted,
   microduckScope,
   ownerBlock,
   ownerRef,
   parsedOwnerResponse,
   sameAddress,
-  sameAssetSurface,
   sameRef,
+  validMicroduckWritebackReceipt,
   validSha256,
   verificationGate,
 } from './microduck-owner-validation.js';
@@ -66,55 +66,17 @@ const descriptor: ProgramAdapterDescriptorV1 = {
 
 type ApprovedWriteback = { status: 'approved' };
 
-export interface MicroduckOwnerAdapterOptions {
-  owner: MicroduckOwnerPort;
-  credentialBoundary: MicroduckCredentialBoundary;
-  approvalResolver: MicroduckApprovalResolver;
-  proposalResolver: MicroduckProposalResolver;
-  now?: () => string;
-}
+export type { MicroduckOwnerAdapterOptions } from './microduck-owner-adapter-options.js';
 
 export function createMicroduckOwnerAdapter(options: MicroduckOwnerAdapterOptions) {
   const now = options.now ?? (() => new Date().toISOString());
-
-  const observe = async (input: MicroduckProgramScope): Promise<MicroduckObservation | MicroduckBlocked> => {
-    if (!microduckScope(input)) return blocked('owner_route_unavailable');
-    const result = parsedOwnerResponse(
-      microduckObservationSchema,
-      await options.owner.observe(input),
-      'owner_route_unavailable',
-    );
-    if (result.status === 'blocked') return ownerBlock(result, 'owner_route_unavailable');
-    if (
-      !sameAddress(result.targetVersionRef, input.objectRef) ||
-      result.targetVersionRef.version !== input.objectRef.version
-    ) {
-      return blocked('target_drift');
-    }
-    if (
-      !isMicroduckTargetRef(result.targetVersionRef) ||
-      !isMicroduckPolicyRef(result.baselineVersionRef) ||
-      result.observationRefs.some((ref) => !isMicroduckHashRef(ref, 'capture'))
-    ) {
-      return blocked('owner_route_unavailable');
-    }
-    return {
-      status: 'observed',
-      targetVersionRef: exactRef(result.targetVersionRef),
-      baselineVersionRef: exactRef(result.baselineVersionRef),
-      observationRefs: result.observationRefs.map(ownerRef),
-    };
-  };
+  const observe = createMicroduckObservationResolver(options.owner);
 
   const permission = async (
     input: Parameters<MicroduckCredentialBoundary['authorize']>[0],
   ): Promise<MicroduckPermission | MicroduckBlocked> => {
     if (!microduckScope(input)) return blocked('owner_route_unavailable');
-    if (
-      !sameAddress(input.targetVersionRef, input.objectRef) ||
-      input.targetVersionRef.version !== input.objectRef.version ||
-      !isMicroduckTargetRef(input.targetVersionRef)
-    ) {
+    if (!sameAddress(input.targetVersionRef, input.objectRef) || !isMicroduckTargetRef(input.targetVersionRef)) {
       return blocked('target_drift');
     }
     const result = parsedOwnerResponse(
@@ -157,7 +119,7 @@ export function createMicroduckOwnerAdapter(options: MicroduckOwnerAdapterOption
 
   const verify = async (input: MicroduckVerificationInput) => {
     if (!microduckScope(input)) return blocked('owner_route_unavailable');
-    if (!isMicroduckPolicyRef(input.candidateVersionRef)) return blocked('target_drift');
+    if (!isMicroduckDeployableRef(input.candidateVersionRef)) return blocked('target_drift');
     const result = parsedOwnerResponse(
       microduckVerificationSchema,
       await options.owner.resolveVerification(input),
@@ -188,8 +150,7 @@ export function createMicroduckOwnerAdapter(options: MicroduckOwnerAdapterOption
       sameRef(approval.cycleRef, input.cycleRef) &&
       sameRef(approval.interventionRef, input.interventionRef) &&
       sameRef(approval.targetVersionRef, input.targetVersionRef) &&
-      sameAddress(approval.targetVersionRef, input.objectRef) &&
-      approval.targetVersionRef.version === input.objectRef.version;
+      sameAddress(approval.targetVersionRef, input.objectRef);
     return exactApproval ? { status: 'approved' } : blocked('approval_missing');
   };
 
@@ -231,7 +192,7 @@ export function createMicroduckOwnerAdapter(options: MicroduckOwnerAdapterOption
     if (
       recovery.status === 'rolled_back' &&
       (!isMicroduckHashRef(recovery.rollbackReceiptRef, 'rollback-receipt') ||
-        !isMicroduckPolicyRef(recovery.restoredVersionRef))
+        !isMicroduckDeployableRef(recovery.restoredVersionRef))
     ) {
       return blocked(code, { blockerRef: ownerRef(deployed.writebackReceiptRef) });
     }
@@ -240,6 +201,7 @@ export function createMicroduckOwnerAdapter(options: MicroduckOwnerAdapterOption
       : blocked(code, {
           blockerRef:
             recovery.blockerRef === undefined ? ownerRef(deployed.writebackReceiptRef) : ownerRef(recovery.blockerRef),
+          ...(recovery.recoveryRef ? { recoveryRef: ownerRef(recovery.recoveryRef) } : {}),
         });
   };
 
@@ -255,14 +217,8 @@ export function createMicroduckOwnerAdapter(options: MicroduckOwnerAdapterOption
     );
     if (result.status === 'blocked') return ownerBlock(result, 'writeback_failed');
     const deployed = result as MicroduckWritebackReceipt;
-    if (
-      !isMicroduckHashRef(deployed.writebackReceiptRef, 'deploy') ||
-      !isMicroduckTargetRef(deployed.deployedVersionRef) ||
-      !isMicroduckPolicyRef(deployed.rollbackVersionRef)
-    ) {
-      return blocked('writeback_failed');
-    }
-    if (!sameAssetSurface(deployed.deployedVersionRef, input.targetVersionRef)) {
+    if (!validMicroduckWritebackReceipt(deployed)) return blocked('writeback_failed');
+    if (microduckDeployedTargetDrifted(input, deployed)) {
       return compensateMismatchedDeployment(input, deployed, 'target_drift');
     }
     if (
@@ -315,8 +271,10 @@ export function createMicroduckOwnerAdapter(options: MicroduckOwnerAdapterOption
     if (result.status === 'blocked') return ownerBlock(result, 'rollback_failed');
     if (
       !isMicroduckHashRef(result.rollbackReceiptRef, 'rollback-receipt') ||
-      !isMicroduckPolicyRef(result.restoredVersionRef) ||
-      !sameRef(result.restoredVersionRef, input.rollbackVersionRef)
+      !isMicroduckDeployableRef(result.restoredVersionRef) ||
+      !sameRef(result.restoredVersionRef, input.rollbackVersionRef) ||
+      (result.restoreOutcomeRef !== undefined && !isMicroduckHashRef(result.restoreOutcomeRef, 'restore-outcome')) ||
+      (isMicroduckControlPackageRef(input.rollbackVersionRef) && result.restoreOutcomeRef === undefined)
     ) {
       return blocked('rollback_failed');
     }
@@ -324,6 +282,7 @@ export function createMicroduckOwnerAdapter(options: MicroduckOwnerAdapterOption
       status: 'rolled_back',
       rollbackReceiptRef: ownerRef(result.rollbackReceiptRef),
       restoredVersionRef: exactRef(result.restoredVersionRef),
+      ...(result.restoreOutcomeRef ? { restoreOutcomeRef: ownerRef(result.restoreOutcomeRef) } : {}),
     };
   };
 
@@ -331,6 +290,7 @@ export function createMicroduckOwnerAdapter(options: MicroduckOwnerAdapterOption
     projectMicroduckShowManifest(
       {
         owner: options.owner,
+        observe,
         approvalResolver: options.approvalResolver,
         proposalResolver: options.proposalResolver,
         now,
@@ -342,13 +302,30 @@ export function createMicroduckOwnerAdapter(options: MicroduckOwnerAdapterOption
     resolveMicroduckShowMedia(
       {
         owner: options.owner,
+        observe,
         approvalResolver: options.approvalResolver,
         proposalResolver: options.proposalResolver,
       },
       input,
     );
 
-  return { descriptor, observe, permission, mutate, verify, writeback, freshOutcome, rollback, manifest, media };
+  return {
+    descriptor,
+    observe,
+    permission,
+    mutate,
+    verify,
+    writeback,
+    freshOutcome,
+    rollback,
+    manifest,
+    media,
+    ...(options.versionReview ? { versionReview: options.versionReview } : {}),
+    ...(options.preparationReview ? { preparationReview: options.preparationReview } : {}),
+    ...(options.preparationMedia ? { preparationMedia: options.preparationMedia } : {}),
+    ...(options.explorationReview ? { explorationReview: options.explorationReview } : {}),
+    ...(options.explorationMedia ? { explorationMedia: options.explorationMedia } : {}),
+  };
 }
 
 export type MicroduckOwnerAdapter = ReturnType<typeof createMicroduckOwnerAdapter>;

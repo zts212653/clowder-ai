@@ -1,9 +1,11 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import {
+  controlShowState,
   cycleRef,
   exactBase,
   interventionRef,
+  makeControlHarness,
   makeHarness,
   programRef,
   shaA,
@@ -12,6 +14,78 @@ import {
 } from './helpers/microduck-owner-harness.js';
 
 describe('F311 Microduck generated show manifest', () => {
+  it('projects a fixed-ONNX control-config winner without invented training provenance', async () => {
+    const state = controlShowState({ phase: 'approval_ready' });
+    const { adapter } = makeControlHarness({
+      owner: {
+        async resolveShowState() {
+          return state;
+        },
+      },
+    });
+
+    const manifest = await adapter.manifest({ ...exactBase(), programSequence: 13 });
+
+    assert.equal(manifest.tier, 'A');
+    assert.equal(manifest.interventionKind, 'control_config');
+    assert.equal(manifest.actionState, 'enabled');
+    assert.equal(manifest.baseline.artifactRevision.assetId, 'baseline');
+    assert.deepEqual(
+      manifest.candidates.map((candidate) => candidate.subjectId),
+      ['action-scale-090', 'action-scale-105', 'action-scale-110'],
+    );
+    assert.equal(
+      manifest.candidates.every((candidate) => candidate.policyRevision === undefined),
+      false,
+    );
+    assert.equal(
+      manifest.candidates.every((candidate) =>
+        ['recipeSha256', 'jobRef', 'checkpointRef', 'onnxArtifactRef'].every((key) => !(key in candidate)),
+      ),
+      true,
+    );
+    assert.equal(manifest.candidateRevision.version, manifest.evaluatedArtifactHash);
+    assert.equal(manifest.targetRevision.assetKind, 'simulator-control-slot');
+  });
+
+  it('fails closed when fixed-model control evidence is spliceable or carries training fields', async () => {
+    const corruptions = [
+      (state) => {
+        state.candidates[0].policyRevision = { ...state.candidates[0].policyRevision, version: 'e'.repeat(40) };
+      },
+      (state) => {
+        state.candidates[1].runnerRef = {
+          ownerFeatureId: 'microduck-owner',
+          ownerStateRef: `runner:sha256:${'e'.repeat(64)}`,
+        };
+      },
+      (state) => {
+        state.candidates[2].artifactRevision.version = 'e'.repeat(64);
+      },
+      (state) => {
+        state.candidates[0].jobRef = { ownerFeatureId: 'microduck-owner', ownerStateRef: 'hf-job:owner/fake' };
+      },
+      (state) => {
+        state.evaluatedArtifactSha256 = 'e'.repeat(64);
+      },
+    ];
+
+    for (const corrupt of corruptions) {
+      const state = controlShowState({ phase: 'approval_ready' });
+      corrupt(state);
+      const { adapter } = makeControlHarness({
+        owner: {
+          async resolveShowState() {
+            return state;
+          },
+        },
+      });
+      const manifest = await adapter.manifest({ ...exactBase(), programSequence: 13 });
+      assert.equal(manifest.tier, 'B');
+      assert.equal(manifest.actionState, 'disabled');
+    }
+  });
+
   it('accepts the atomic T1 evaluation receipt shape without invented split or config refs', async () => {
     const state = showState({ phase: 'approval_ready' });
     const evaluationRef = state.baseline.evaluationRef;
@@ -201,7 +275,7 @@ describe('F311 Microduck generated show manifest', () => {
       owner: {
         async resolveShowState() {
           return showState({
-            sceneMedia: [{ sceneIndex: 1, source: 'real_capture', captureRef, kind: 'image' }],
+            sceneMedia: [{ sceneIndex: 0, source: 'real_capture', captureRef, kind: 'image' }],
           });
         },
       },
@@ -210,11 +284,11 @@ describe('F311 Microduck generated show manifest', () => {
 
     assert.deepEqual(manifest.sceneMedia, [
       {
-        sceneIndex: 1,
+        sceneIndex: 0,
         source: 'real_capture',
         captureRef,
         kind: 'image',
-        assetUrl: `/api/capability-evolution/programs/${encodeURIComponent(programRef.ownerStateRef)}/adapter-media/1`,
+        assetUrl: `/api/capability-evolution/programs/${encodeURIComponent(programRef.ownerStateRef)}/adapter-media/0`,
       },
     ]);
   });
@@ -251,6 +325,27 @@ describe('F311 Microduck generated show manifest', () => {
       assert.equal(manifest.actionState, 'disabled');
       assert.equal('action' in manifest, false);
     }
+  });
+
+  it('projects control rollback only with an exact physical restore outcome', async () => {
+    const state = controlShowState({ phase: 'rolled_back' });
+    const { adapter } = makeControlHarness({
+      owner: {
+        async resolveShowState() {
+          return state;
+        },
+      },
+    });
+
+    const manifest = await adapter.manifest({ ...exactBase(), programSequence: 13 });
+    assert.equal(manifest.tier, 'A');
+    assert.equal(manifest.phase, 'rolled_back');
+    assert.deepEqual(manifest.restoreOutcomeRef, state.restoreOutcomeRef);
+
+    delete state.restoreOutcomeRef;
+    const blocked = await adapter.manifest({ ...exactBase(), programSequence: 13 });
+    assert.equal(blocked.tier, 'B');
+    assert.equal(blocked.phase, 'blocked');
   });
 
   it('refuses a completed phase when canonical F246 resolves a different exact target', async () => {

@@ -4,9 +4,9 @@ related_features: [F160, F167, F192, F233, F246, F267]
 topics: [managed-work, work-admission, identity, sop, task-outcome, provenance]
 doc_kind: spec
 created: 2026-07-25
-updated: 2026-08-02
+updated: 2026-09-09
 community_issue: "clowder-ai#1213"
-tips_exempt: "Internal work-identity and provenance contract; workId is deliberately absent from user-facing surfaces"
+tips_exempt: "Internal work-identity and private provenance propagation contract; workId and owner auth grades are deliberately absent from user-facing surfaces"
 user_journey_exempt: "Internal execution identity substrate; TaskItem remains the only optional user-visible work projection"
 description: "SOP 受理时铸造的内部工作身份，贯穿执行、产物与 outcome provenance，同时保持闲聊和开放探索不进入任务分母。"
 description_source: human

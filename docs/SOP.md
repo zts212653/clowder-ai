@@ -3,7 +3,7 @@ feature_ids: [F042, F083, F303]
 topics: [sop]
 doc_kind: note
 created: 2026-02-26
-updated: 2026-08-23
+updated: 2026-09-05
 ---
 
 # Clowder AI 开发 SOP
@@ -22,23 +22,11 @@ Clowder AI 的开发是**愿景驱动**的。和operator确认了 feature 的愿
 - **没达成愿景 = 没完成**，不交半成品，不半路问"要不要继续"（决策漏斗见 shared-rules §17）
 - 停下来的正当理由：解决不了的阻塞（技术限制/外部依赖）→ 升级operator；方向存疑（坐标系警报、scope 该砍）→ 停手重估。判断力允许停，惰性不允许
 
-### 大 Feature 碰头机制（3+ Phase）
+### 阶段进度与方向校准
 
-大 scope feature 不能等最后才对齐愿景。**每个 Phase merge 后**，主动和operator碰头：
+阶段成果、用户实际得到的变化、剩余差距和下一步要可见；按实际 truth delta 同步。已确认方向内自主推进，发现愿景、范围或体验解释分叉时及时校准，不等整项实现完才展示，也不在每次 Phase merge 后重复索要确认。
 
-```
-Phase N merge → 碰头（不是"要不要继续"，是"方向对不对"）→ 继续 Phase N+1
-```
-
-**碰头格式**（轻量，不是报告会）：
-1. **成果展示**：这个 Phase 做了什么（截图 / 关键改动 / demo）
-2. **愿景进度**：离最终愿景还差什么（哪些 AC 打了勾，哪些还没）
-3. **下个 Phase 方向**：下一步计划做什么，有没有发现新问题
-4. **方向确认**："方向对吗？有没有要调整的？"
-
-**注意区别**：
-- 碰头 = **愿景方向确认**（宏观层，operator需要介入）✅
-- "要我继续吗？" = **SOP 流程推进**（细节层，不要问）❌
+具体做法以 `feat-lifecycle` 的 Design Gate /「Phase 进度与方向校准」为准：先完成猫能自决的准备，拿具体稿、推荐和明确待判断点请operator共创；既有确认在仍覆盖的范围内复用。需要 operator 拍板的愿景、权限与不可逆边界照常遵守。
 
 **小 Feature（1-2 Phase）**：不需要碰头，直接做到底 → 愿景守护 → close。
 
@@ -74,12 +62,14 @@ Phase N merge → 碰头（不是"要不要继续"，是"方向对不对"）→ 
 | 风险轴 | 命中信号 | 最低动作 |
 |---|---|---|
 | 行为面 | 用户可见行为、runtime 逻辑、bug 回归 | 可观察 RED + targeted 验证；方向未定才进 Design Gate |
-| 数据 | 生产数据、迁移、持久化语义 | full gate + 独立高风险 review；生产操作另走授权边界 |
-| 安全 | auth、权限、secret、注入、DoS / 资源边界 | full gate + cloud/context-blind 安全扫描；需要家里语义时再叠 local |
-| 契约 | API / MCP schema / 事件格式 / 外部依赖 | 契约测试 + full gate + 对应独立 review |
+| 数据 | 生产数据、迁移、持久化语义 | 持久化 / 迁移验证 + 独立高风险 review；生产操作另走授权边界 |
+| 安全 | auth、权限、secret、注入、DoS / 资源边界 | 相关安全边界测试 + cloud/context-blind 安全扫描；需要家里语义时再叠 local |
+| 契约 | API / MCP schema / 事件格式 / 外部依赖 | 契约及受影响 consumer 测试 + 对应独立 review |
 | 不可逆 | 删除、force push、合第三方 PR、close feat、圣域 | 先拿 operator 授权；机器门禁仍照常 |
 
 **元风险强制升档**：diff 触碰 `merge-gate`、风险 classifier、门禁脚本或 Harness Diet 公约自身时，直接进入 high-assurance，由非作者跨族 reviewer 覆盖最终实质内容（exact HEAD 或 continuityProof）。松绑机制不得静默松绑自己；在这条语义边界机器化前，如实标为 manual 守卫，不能由改门者自判 light。
+
+**审查强度与测试范围分开选择**：`assuranceLevel` 决定独立审查与授权要求，`route` 决定验证范围。高风险窄改可以是 high-assurance + targeted，须说明受影响边界、consumer 与对应测试；风险标签本身不要求全仓测试。纯文档走文档校验（治理文档保留独立治理 review）。共享契约、门禁执行链、相关或无法判定的代码合流 / 旧失败仍由 classifier 要求 full；targeted 无法覆盖跨包风险时必须补全量。每个 full gate 必须说明 targeted 缺少哪项覆盖，不能只写“安全 / 契约 / 高风险”。
 
 ### Architecture / contract delta admission（F303）
 
@@ -195,7 +185,7 @@ pnpm classify:co-creation-docs -- \
 - `docs/ROADMAP.md` 是 main-only 共享状态，不是治理 PR 触发器：与安全 feature docs 同改仍走 direct main；若同批其他文件确需 PR，先把 BACKLOG 的机械登记单独落 main，禁止把它塞进 worktree/PR。
 - 普通 `docs/features/*.md` 内容更新不因目录名自动升级；无重叠且单 commit 可逆时 direct push，真实冲突或高/未知可逆性仍按 classifier 升到 PR。
 - `cat-cafe-skills/**`、`sop-definitions/**`、scripts、CLI、tests、packages 或其他第一方执行面 → regular development，即使文件扩展名是 `.md`。
-- 普通代码 / test 不因文件类型自动 cloud；行为面用 targeted tests + 合适独立源。安全、数据、外部契约或不可逆风险才升 full / cloud。
+- 普通代码 / test 不因文件类型自动 cloud；行为面用 targeted tests + 合适独立源。安全、数据、外部契约或不可逆风险加强对应独立审查 / 授权；full 另按实际影响范围选择。
 
 direct-push 只做：轻量增量校验 → 判断是否出现**需要第二只猫判断的新内容** → targeted commit（Why + 模型签名）→ push `origin main`。机械登记、拼写、operator 已逐字共创或有可回链旧 verdict 的内容可 `skip/reuse`，不为“有 diff”新叫 reviewer。普通文档校验不安装依赖、不构建共享包、不跑 docs-discovery 实现套件；feature 文档只追加 dependency-free feature truth。不建 worktree/PR，不生成 review 归档来证明自己 review 过。
 

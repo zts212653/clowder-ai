@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 import { existsSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { access, readdir, readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { z } from 'zod';
 import { FindingBindingV1Schema, ResolvedRepairTargetV1Schema } from '../friction/friction-finding-artifact.js';
@@ -158,6 +159,13 @@ export function readLifecycleRootArtifact(bundleDir: string): LifecycleRootArtif
   return LifecycleRootArtifactSchema.parse(JSON.parse(readFileSync(path, 'utf8')));
 }
 
+function checkBundleDirectory(root: LifecycleRootArtifact, directoryName: string): LifecycleRootArtifact {
+  if (root.verdictId !== directoryName) {
+    throw new Error(`lifecycle root verdictId ${root.verdictId} does not match bundle directory ${directoryName}`);
+  }
+  return root;
+}
+
 export function scanLifecycleRootArtifacts(harnessFeedbackRoot: string): LifecycleRootArtifact[] {
   const bundlesDir = join(harnessFeedbackRoot, 'bundles');
   if (!existsSync(bundlesDir)) return [];
@@ -169,11 +177,39 @@ export function scanLifecycleRootArtifacts(harnessFeedbackRoot: string): Lifecyc
     if (!entry.isDirectory()) continue;
     const bundleDir = join(bundlesDir, entry.name);
     if (!existsSync(join(bundleDir, LIFECYCLE_ROOT_FILENAME))) continue;
-    const root = readLifecycleRootArtifact(bundleDir);
-    if (root.verdictId !== entry.name) {
-      throw new Error(`lifecycle root verdictId ${root.verdictId} does not match bundle directory ${entry.name}`);
-    }
-    roots.push(root);
+    roots.push(checkBundleDirectory(readLifecycleRootArtifact(bundleDir), entry.name));
+  }
+  return roots;
+}
+
+async function existsAsync(path: string): Promise<boolean> {
+  try {
+    await access(path);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** Same validated, ordered roots as the CLI scan, with bounded nonblocking IO for request readers. */
+export async function scanLifecycleRootArtifactsAsync(harnessFeedbackRoot: string): Promise<LifecycleRootArtifact[]> {
+  const bundlesDir = join(harnessFeedbackRoot, 'bundles');
+  if (!(await existsAsync(bundlesDir))) return [];
+  const entries = (await readdir(bundlesDir, { withFileTypes: true }))
+    .filter((entry) => entry.isDirectory())
+    .sort((left, right) => left.name.localeCompare(right.name));
+  const roots: LifecycleRootArtifact[] = [];
+  const batchSize = 16;
+  for (let start = 0; start < entries.length; start += batchSize) {
+    const batch = await Promise.all(
+      entries.slice(start, start + batchSize).map(async (entry) => {
+        const path = join(bundlesDir, entry.name, LIFECYCLE_ROOT_FILENAME);
+        if (!(await existsAsync(path))) return undefined;
+        const root = LifecycleRootArtifactSchema.parse(JSON.parse(await readFile(path, 'utf8')));
+        return checkBundleDirectory(root, entry.name);
+      }),
+    );
+    for (const root of batch) if (root) roots.push(root);
   }
   return roots;
 }

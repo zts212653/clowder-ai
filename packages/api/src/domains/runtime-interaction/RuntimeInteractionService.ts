@@ -33,7 +33,8 @@ export class RuntimeInteractionError extends Error {
 }
 
 export interface RuntimeInteractionCardPublisher {
-  publish(request: RuntimeInteractionRequest): Promise<RuntimeInteractionCardRef>;
+  prepare(request: RuntimeInteractionRequest): Promise<RuntimeInteractionCardRef>;
+  publish(request: RuntimeInteractionRequest, cardRef: RuntimeInteractionCardRef): Promise<void>;
   isLive(request: RuntimeInteractionRequest, cardRef: RuntimeInteractionCardRef): Promise<boolean>;
 }
 
@@ -52,10 +53,18 @@ export interface RuntimeInteractionRespondInput {
   response: unknown;
 }
 
+export type RuntimeInteractionRejectInput = Omit<RuntimeInteractionRespondInput, 'response'>;
+
 interface ActiveWaiter {
   resolve(response: RuntimeInteractionResponse): void;
   reject(error: Error): void;
   cleanup(): void;
+}
+
+interface Deferred<Value> {
+  promise: Promise<Value>;
+  resolve(value: Value): void;
+  reject(error: Error): void;
 }
 
 export class RuntimeInteractionService {
@@ -81,40 +90,41 @@ export class RuntimeInteractionService {
       throw new RuntimeInteractionError('duplicate', errorMessage(error));
     }
 
+    const { responsePromise, waiter } = this.registerWaiter(request.interactionId, options?.signal);
+
     let cardRef: RuntimeInteractionCardRef;
     let pending: RuntimeInteractionRecord;
     try {
-      cardRef = await this.deps.cardPublisher.publish(request);
+      if (options?.signal?.aborted) throw new Error(runtimeInteractionAbortReason(options.signal));
+      cardRef = await this.deps.cardPublisher.prepare(request);
       if (options?.signal?.aborted) throw new Error(runtimeInteractionAbortReason(options.signal));
       const anchored = await this.store.anchor(request.interactionId, this.hostEpoch, cardRef, this.now());
       if (!anchored || anchored.status !== 'pending') throw new Error('runtime interaction could not be anchored');
       pending = anchored;
+      if (options?.signal?.aborted) throw new Error(runtimeInteractionAbortReason(options.signal));
+      await this.deps.cardPublisher.publish(request, cardRef);
+      if (options?.signal?.aborted) throw new Error(runtimeInteractionAbortReason(options.signal));
     } catch (error) {
       const failureReason = errorMessage(error);
       const invalidationReason =
         failureReason === 'provider_cancelled' || failureReason === 'transport_lost'
           ? failureReason
           : 'surface_publication_failed';
+      this.discardWaiter(request.interactionId, waiter);
       const invalidated = await this.store.invalidate({
         interactionId: request.interactionId,
         reasonCode: invalidationReason,
         now: this.now(),
       });
       if (invalidated) this.emit(invalidated);
-      const terminalReason = invalidated?.terminal?.reasonCode ?? 'surface_publication_failed';
+      const terminalReason =
+        invalidated?.terminal?.reasonCode ??
+        (options?.signal?.aborted ? runtimeInteractionAbortReason(options.signal) : 'surface_publication_failed');
       throw new RuntimeInteractionError('unavailable', terminalReason, terminalReason);
     }
 
-    return new Promise<RuntimeInteractionResponse>((resolve, reject) => {
-      const abort = (): void => {
-        void this.invalidateOne(request.interactionId, runtimeInteractionAbortReason(options?.signal));
-      };
-      options?.signal?.addEventListener('abort', abort, { once: true });
-      const cleanup = (): void => options?.signal?.removeEventListener('abort', abort);
-      this.waiters.set(request.interactionId, { resolve, reject, cleanup });
-      this.emit(pending);
-      if (options?.signal?.aborted) abort();
-    });
+    if (this.waiters.get(request.interactionId) === waiter) this.emit(pending);
+    return responsePromise;
   }
 
   async respond(input: RuntimeInteractionRespondInput): Promise<RuntimeInteractionRecord> {
@@ -169,6 +179,54 @@ export class RuntimeInteractionService {
     return settled;
   }
 
+  async reject(input: RuntimeInteractionRejectInput): Promise<RuntimeInteractionRecord> {
+    const record = await this.store.get(input.interactionId);
+    if (!record) throw new RuntimeInteractionError('not_found', 'runtime interaction not found');
+    if (record.request.owner.userId !== input.ownerUserId || !sameCard(record.cardRef, input.cardRef)) {
+      throw new RuntimeInteractionError('unauthorized', 'runtime interaction is not owned by this surface');
+    }
+    if (record.status !== 'pending') throw new RuntimeInteractionError('stale', 'runtime interaction is not pending');
+    if (record.request.kind !== 'question') {
+      throw new RuntimeInteractionError('invalid_response', 'only question interactions can use explicit rejection');
+    }
+
+    const waiter = this.waiters.get(input.interactionId);
+    if (!waiter) {
+      await this.invalidateOne(input.interactionId, 'transport_lost');
+      throw new RuntimeInteractionError('stale', 'runtime interaction has no active provider waiter', 'transport_lost');
+    }
+
+    let canonicalCardIsLive: boolean;
+    try {
+      canonicalCardIsLive = await this.deps.cardPublisher.isLive(record.request, input.cardRef);
+    } catch {
+      throw new RuntimeInteractionError('unavailable', 'runtime interaction confirmation check unavailable; retry');
+    }
+    if (!canonicalCardIsLive) {
+      await this.invalidateOne(input.interactionId, 'confirmation_unavailable');
+      throw new RuntimeInteractionError(
+        'stale',
+        'runtime interaction canonical card is no longer available',
+        'confirmation_unavailable',
+      );
+    }
+
+    const settledAt = this.now();
+    const settled = await this.store.settle({
+      interactionId: input.interactionId,
+      hostEpoch: this.hostEpoch,
+      terminal: { status: 'declined', reasonCode: 'user_rejected', settledAt },
+      now: settledAt,
+    });
+    if (!settled) throw new RuntimeInteractionError('stale', 'runtime interaction was already settled');
+
+    this.waiters.delete(input.interactionId);
+    waiter.cleanup();
+    this.emit(settled);
+    waiter.reject(new RuntimeInteractionError('stale', 'user_rejected', 'user_rejected'));
+    return settled;
+  }
+
   async invalidateInvocation(
     invocationId: string,
     reasonCode: RuntimeInteractionTerminalReasonCode,
@@ -198,6 +256,31 @@ export class RuntimeInteractionService {
     return record;
   }
 
+  private registerWaiter(
+    interactionId: string,
+    signal?: AbortSignal,
+  ): { responsePromise: Promise<RuntimeInteractionResponse>; waiter: ActiveWaiter } {
+    const response = deferred<RuntimeInteractionResponse>();
+    void response.promise.catch(() => {});
+    const abort = (): void => {
+      void this.invalidateOne(interactionId, runtimeInteractionAbortReason(signal));
+    };
+    const waiter: ActiveWaiter = {
+      resolve: response.resolve,
+      reject: response.reject,
+      cleanup: () => signal?.removeEventListener('abort', abort),
+    };
+    this.waiters.set(interactionId, waiter);
+    signal?.addEventListener('abort', abort, { once: true });
+    return { responsePromise: response.promise, waiter };
+  }
+
+  private discardWaiter(interactionId: string, waiter: ActiveWaiter): void {
+    if (this.waiters.get(interactionId) !== waiter) return;
+    this.waiters.delete(interactionId);
+    waiter.cleanup();
+  }
+
   private finishInvalidated(record: RuntimeInteractionRecord): void {
     const waiter = this.waiters.get(record.request.interactionId);
     if (waiter) {
@@ -212,6 +295,16 @@ export class RuntimeInteractionService {
   private emit(record: RuntimeInteractionRecord): void {
     this.deps.onRecordUpdated?.(record);
   }
+}
+
+function deferred<Value>(): Deferred<Value> {
+  let resolve!: (value: Value) => void;
+  let reject!: (error: Error) => void;
+  const promise = new Promise<Value>((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise;
+    reject = rejectPromise;
+  });
+  return { promise, resolve, reject };
 }
 
 function terminalFrom(

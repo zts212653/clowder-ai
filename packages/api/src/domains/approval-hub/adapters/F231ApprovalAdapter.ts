@@ -47,7 +47,7 @@ function toItem(p: ProfileUpdateProposal): ApprovalItem | null {
     requesterCatId: p.sourceCatId,
     ownerUserId: p.createdBy,
     status: 'pending' as const,
-    summary: `Profile update: ${p.rationale.slice(0, 80)}`,
+    summary: `${p.targetLayer === 'corpus' ? 'Corpus' : 'Profile'} update: ${p.rationale.slice(0, 80)}`,
     detail: {
       rationale: p.rationale,
       targetLayer: p.targetLayer,
@@ -76,7 +76,7 @@ function toSettledItem(p: ProfileUpdateProposal): SettledApprovalItem | null {
     requesterCatId: p.sourceCatId,
     ownerUserId: p.createdBy,
     status: p.status,
-    summary: `Profile update: ${p.rationale.slice(0, 80)}`,
+    summary: `${p.targetLayer === 'corpus' ? 'Corpus' : 'Profile'} update: ${p.rationale.slice(0, 80)}`,
     detail: {
       rationale: p.rationale,
       targetLayer: p.targetLayer,

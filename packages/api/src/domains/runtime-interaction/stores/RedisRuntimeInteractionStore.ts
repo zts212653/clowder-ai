@@ -22,6 +22,7 @@ export const RuntimeInteractionKeys = {
 
 const CREATE_STAGED_LUA = `
 if redis.call('EXISTS', KEYS[1]) == 1 then return 0 end
+if redis.call('SCARD', KEYS[3]) > 0 then return -1 end
 redis.call('HSET', KEYS[1],
   'request', ARGV[1],
   'status', 'staged',
@@ -83,6 +84,9 @@ export class RedisRuntimeInteractionStore implements RuntimeInteractionStore {
       String(record.updatedAt),
       input.request.interactionId,
     );
+    if (Number(created) === -1) {
+      throw new Error(`active interaction already exists for invocation: ${input.request.owner.invocationId}`);
+    }
     if (Number(created) !== 1) {
       throw new Error(`runtime interaction already exists: ${input.request.interactionId}`);
     }

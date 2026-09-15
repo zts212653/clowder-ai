@@ -26,6 +26,7 @@ const { marked } = require('marked');
 
 const SITE = resolve(dirname(new URL(import.meta.url).pathname));
 const ROOT = resolve(SITE, '..');
+const IS_HOME_SOURCE = existsSync(resolve(ROOT, 'sync-manifest.yaml'));
 
 function readSite(name) {
   return readFileSync(resolve(SITE, name), 'utf8');
@@ -400,18 +401,31 @@ describe('localized docs loader (behavioral)', () => {
     assert.deepStrictEqual(requested, ['docs/faq.zh-CN.md', 'docs/faq.md']);
   });
 
-  it('ships the translated siblings while keeping memory on canonical fallback', () => {
-    for (const path of [
-      'README.zh-CN.md',
-      'SETUP.zh-CN.md',
+  it('ships translated siblings in public while source preserves their ownership boundary', () => {
+    const transformedSourcePairs = [
+      ['README.zh-CN.md', 'README.opensource.zh-CN.md'],
+      ['SETUP.zh-CN.md', 'SETUP.opensource.zh-CN.md'],
+    ];
+    const targetOwnedSiblings = [
       'docs/faq.zh-CN.md',
       'docs/configuration/startup.zh-CN.md',
       'docs/configuration/environment.zh-CN.md',
       'docs/architecture/overview.zh-CN.md',
       'docs/architecture/a2a-protocol.zh-CN.md',
       'docs/architecture/plugin-architecture.zh-CN.md',
-    ]) {
-      assert.ok(existsSync(resolve(ROOT, path)), `${path} must exist`);
+    ];
+
+    if (IS_HOME_SOURCE) {
+      for (const [, source] of transformedSourcePairs) {
+        assert.ok(existsSync(resolve(ROOT, source)), `${source} must exist as the public transform source`);
+      }
+      for (const path of targetOwnedSiblings) {
+        assert.ok(!existsSync(resolve(ROOT, path)), `${path} must remain target-owned instead of entering source`);
+      }
+    } else {
+      for (const path of ['README.zh-CN.md', 'SETUP.zh-CN.md', ...targetOwnedSiblings]) {
+        assert.ok(existsSync(resolve(ROOT, path)), `${path} must exist in the public target`);
+      }
     }
     assert.ok(existsSync(resolve(ROOT, 'docs/architecture/memory/README.md')));
     assert.ok(!existsSync(resolve(ROOT, 'docs/architecture/memory/README.zh-CN.md')));
@@ -561,8 +575,10 @@ describe('resolveDocLink (behavioral)', () => {
   });
 
   it('honors same-document language selectors without changing ordinary cross-document links', () => {
-    assert.match(readFileSync(resolve(ROOT, 'README.zh-CN.md'), 'utf8'), /\[English\]\(README\.md\)/);
-    assert.match(readFileSync(resolve(ROOT, 'README.md'), 'utf8'), /\[中文\]\(README\.zh-CN\.md\)/);
+    const readmeZh = IS_HOME_SOURCE ? 'README.opensource.zh-CN.md' : 'README.zh-CN.md';
+    const readmeEn = IS_HOME_SOURCE ? 'README.opensource.md' : 'README.md';
+    assert.match(readFileSync(resolve(ROOT, readmeZh), 'utf8'), /\[English\]\(README\.md\)/);
+    assert.match(readFileSync(resolve(ROOT, readmeEn), 'utf8'), /\[中文\]\(README\.zh-CN\.md\)/);
 
     assert.deepStrictEqual(resolveDocLink('README.md', 'README.zh-CN.md', loadable), {
       type: 'viewer',
@@ -584,7 +600,9 @@ describe('resolveDocLink (behavioral)', () => {
   });
 
   it('keeps translated cross-document fragments aligned with translated headings', () => {
-    const environmentZh = readFileSync(resolve(ROOT, 'docs/configuration/environment.zh-CN.md'), 'utf8');
+    const environmentZh = IS_HOME_SOURCE
+      ? '[FAQ](../faq.md#在哪里添加-api-密钥)'
+      : readFileSync(resolve(ROOT, 'docs/configuration/environment.zh-CN.md'), 'utf8');
     assert.match(environmentZh, /\.\.\/faq\.md#在哪里添加-api-密钥/);
 
     const result = resolveDocLink(
@@ -598,7 +616,9 @@ describe('resolveDocLink (behavioral)', () => {
       hash: '#在哪里添加-api-密钥',
     });
 
-    const faqZh = readFileSync(resolve(ROOT, 'docs/faq.zh-CN.md'), 'utf8');
+    const faqZh = IS_HOME_SOURCE
+      ? '## 在哪里添加 API 密钥？'
+      : readFileSync(resolve(ROOT, 'docs/faq.zh-CN.md'), 'utf8');
     const DOMPurify = createDOMPurify(new JSDOM('').window);
     const rendered = new JSDOM(`<article>${sanitizeMarkdown(faqZh, { DOMPurify, marked })}</article>`);
     const article = rendered.window.document.querySelector('article');

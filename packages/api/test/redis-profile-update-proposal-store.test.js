@@ -123,6 +123,37 @@ describe('RedisProfileUpdateProposalStore', { skip: redisIsolationSkipReason(RED
     assert.equal(await store.claimForApproval(p.proposalId, 'operator'), null, 'cannot claim rejected');
   });
 
+  // ──── Phase E: corpus targetLayer ────
+
+  it('corpus targetLayer round-trips through Redis serialize/hydrate', async () => {
+    const p = await store.create(
+      baseInput({
+        targetLayer: 'corpus',
+        targetPath: 'corpus/shared-facts.md',
+        afterContent: 'Owner birthday: Jan 1',
+      }),
+    );
+    const got = await store.get(p.proposalId);
+    assert.equal(got.targetLayer, 'corpus');
+    assert.equal(got.targetPath, 'corpus/shared-facts.md');
+    assert.equal(got.afterContent, 'Owner birthday: Jan 1');
+  });
+
+  it('concurrent corpus proposals: CAS claim still ensures exactly-one-wins', async () => {
+    const p = await store.create(
+      baseInput({
+        targetLayer: 'corpus',
+        targetPath: 'corpus/shared-facts.md',
+      }),
+    );
+    const [a, b] = await Promise.all([
+      store.claimForApproval(p.proposalId, 'operator'),
+      store.claimForApproval(p.proposalId, 'operator'),
+    ]);
+    const winners = [a, b].filter(Boolean);
+    assert.equal(winners.length, 1, 'exactly one corpus claim wins');
+  });
+
   it('rollbackClaim returns to pending + re-adds to pending index; dedup reserve idempotent', async () => {
     const p = await store.create(baseInput());
     await store.claimForApproval(p.proposalId, 'operator');

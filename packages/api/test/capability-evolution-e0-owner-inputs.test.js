@@ -7,7 +7,7 @@ import { describe, it } from 'node:test';
 import { promisify } from 'node:util';
 
 import { parse } from 'yaml';
-
+import { loadRequestReviewEvalRepairOwnerBinding } from '../dist/infrastructure/capability-evolution/change/request-review-eval-repair-owner-binding.js';
 import { stableId } from '../dist/infrastructure/capability-evolution/program-service-options.js';
 
 const PROGRAM_ID = 'evolution-program:bcc336788a7df9d6075b1efb4c0a7e68';
@@ -38,6 +38,10 @@ async function readInput(suffix) {
 }
 
 describe('F311 real E0 owner inputs', () => {
+  it('keeps the production request-review Cycle 1 binding empty until a natural F267/F266 lineage exists', async () => {
+    assert.deepEqual(await loadRequestReviewEvalRepairOwnerBinding(ROOT), { lineageBindings: [] });
+  });
+
   it('replays the production Program identity from the exact operator source message', () => {
     assert.equal(stableId('evolution-program', 'user:default-user', SOURCE_MESSAGE_ID), PROGRAM_ID);
   });

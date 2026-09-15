@@ -113,10 +113,10 @@ Step 3: VERIFY — 逐项检查
 
 Step 4: RUNTIME GUARD — 前端证据采集前先做运行态保护
   - 若会话在 `cat-cafe-runtime`，先探活：`curl -sf http://localhost:3004/health`
-  - 服务已在线时直接复用，禁止在该会话执行 `pnpm start` / `pnpm runtime:start` / `./scripts/start-dev.sh`
+  - 服务已在线时直接复用，禁止在该会话执行 `pnpm start` / `pnpm runtime:start` / `pnpm runtime:restart` / `pnpm runtime:stop` / `./scripts/start-dev.sh`
   - `localhost:3003/3004` 默认按 runtime 处理；如果你要验证未合入改动，不能把这两个端口的页面/接口响应当成当前分支的证据
   - 证明“这是我当前 worktree 的验证证据”时，必须同时说清：`worktree/cwd` + 目标 URL。两者对不上 = 证据无效
-  - 确需重启时，先获operator明确授权，再用 `CAT_CAFE_RUNTIME_RESTART_OK=1` 执行
+  - 确需重启时，先获operator明确授权，再执行 `pnpm runtime:restart`；shell 参数与环境变量都不是授权证明
   - **Alpha 优先**：验证已合入 main 的改动时，优先用 `pnpm alpha:start`（3011/3012/4111/6398）取证，而非 runtime。Alpha 环境每次启动自动同步 origin/main
 
 Step 4.5: DOGFOOD-YOUR-SLICE — 用一次自己刚做的功能（F209 教训 2026-05-23）🔴
@@ -163,7 +163,7 @@ Step 6: RUN — 运行风险匹配的验证命令（必须这次真实运行）
   ① 先列五轴风险与受影响面；命令逐条对应 claim，不按“写了代码”机械全跑
   ② 默认：受影响 package / schema / generator / docs checker + git diff --check
   ③ 新行为 / bug：相关行为或回归测试；现有精确检查红可以直接作 RED
-  ④ 安全、鉴权、生产数据、迁移、外部契约、不可逆，或 targeted 无法覆盖跨包合流风险：pnpm gate
+  ④ 共享契约、门禁执行链或 targeted 无法覆盖跨包合流风险：pnpm gate；安全 / 数据 / 契约标签加强独立审查，不自动扩大测试范围
   ⑤ Redis 相关改动额外跑：pnpm --filter @cat-cafe/api test:redis（只连 6398）
   ⑥ 任一实际选择的检查红都先修；不得挑绿灯报告、隐去红灯
 
@@ -200,7 +200,7 @@ Step 8: REPORT — 输出合规报告 + 证据
 |-------|------|--------|
 | 测试通过 | 这次运行输出：0 failures | "上次跑过"、"应该通过" |
 | targeted checks 通过 | 与改动面对应的本轮命令 + exit 0 | 只挑一盏绿灯、隐去相关红灯 |
-| full gate 通过 | high 风险触发时本轮 `pnpm gate` exit 0 | 低风险为了报告完整机械全跑，或高风险只跑局部 |
+| full gate 通过 | 影响范围要求 full 时本轮 `pnpm gate` exit 0 | 凭风险标签机械全跑，或局部证据冒充 full |
 | Bug 修了 | 原症状测试：通过 | 代码改了，以为修了 |
 | 需求满足 | spec + Discussion 逐项打勾 | 测试通过就完事 |
 | Feature 完成/未完成 | git log + PR 状态 + spec 逐项 | 只看 spec checkbox 就下结论 |
@@ -247,7 +247,7 @@ Scope verdict: ✅ 必做 / 🆗 可豁免（理由）
 风险: behavior=<...> data=<...> security=<...> contract=<...> irreversible=<...>
 <targeted command 1> → exit 0 ✅（覆盖 claim: ...）
 <targeted command 2> → exit 0 ✅（覆盖 claim: ...）
-pnpm gate → exit 0 ✅（仅 high 风险实际触发时填写）
+pnpm gate → exit 0 ✅（仅影响范围要求 full 时填写）
 ```
 
 ## Common Mistakes

@@ -48,6 +48,7 @@ import {
   normalizeRichBlock,
   reviewSubjectRefSchema,
   SOP_DEFINITION_IDS,
+  taskFeatureIdSchema,
 } from '@cat-cafe/shared';
 import { z } from 'zod';
 import { sendCallbackRequest } from './callback-outbox.js';
@@ -746,6 +747,9 @@ export const updateEntrustedWorkInputSchema = {
   expectedRevision: entrustedWorkUpdateActionV1Schema.shape.expectedRevision.describe(
     'Current entrusted-work revision used for compare-and-set update',
   ),
+  status: entrustedWorkUpdateActionV1Schema.shape.status.describe(
+    'Optional Task progress: todo, doing, or blocked; completion requires close_entrusted_work',
+  ),
   time: entrustedWorkUpdateActionV1Schema.shape.time.describe(
     'Optional businessDeadline/reviewBy patch; null clears one exact Task-owned time fact',
   ),
@@ -894,6 +898,9 @@ export const listTasksInputSchema = {
     .enum(['work', 'pr_tracking'])
     .optional()
     .describe('Optional task kind filter (work = manual tasks, pr_tracking = PR automation)'),
+  featureId: taskFeatureIdSchema
+    .optional()
+    .describe('Exact bounded feature ID filter matched against canonical TaskItem.relatedFeatureId (for example F313)'),
   taskId: z
     .string()
     .min(1)
@@ -1456,6 +1463,7 @@ export async function handleUpdateEntrustedWork(
         {
           taskId: input.taskId,
           expectedRevision: input.expectedRevision,
+          ...(input.status !== undefined ? { status: input.status } : {}),
           ...(input.time !== undefined ? { time: input.time } : {}),
           ...(input.artifactRefs !== undefined ? { artifactRefs: input.artifactRefs } : {}),
         },
@@ -1772,6 +1780,7 @@ export async function handleListTasks(input: {
   catId?: string | undefined;
   status?: 'todo' | 'doing' | 'blocked' | 'done' | undefined;
   kind?: 'work' | 'pr_tracking' | undefined;
+  featureId?: string | undefined;
   taskId?: string | undefined;
   agentKeyCatId?: string | undefined;
 }): Promise<ToolResult> {
@@ -1782,6 +1791,7 @@ export async function handleListTasks(input: {
       ...(input.catId ? { catId: input.catId } : {}),
       ...(input.status ? { status: input.status } : {}),
       ...(input.kind ? { kind: input.kind } : {}),
+      ...(input.featureId ? { featureId: input.featureId } : {}),
       ...(input.taskId ? { taskId: input.taskId } : {}),
     },
     agentKeyOptions(input),
@@ -2751,10 +2761,25 @@ export async function handleProposeSessionHandoff(input: {
 
 export const readProfileInputSchema = {
   agentKeyCatId: agentKeyCatIdSchema,
+  layer: z
+    .enum(['primer', 'corpus'])
+    .optional()
+    .describe(
+      "Which profile layer to read. 'primer' (default) = this persona's relationship primer; 'corpus' = owner-wide shared facts (all personas see the same content). Omit for the default primer.",
+    ),
 };
 
-export async function handleReadProfile(input: { agentKeyCatId?: string | undefined }): Promise<ToolResult> {
-  return callbackGet('/api/callbacks/profile', undefined, agentKeyOptions(input));
+export async function handleReadProfile(input: {
+  layer?: 'primer' | 'corpus' | undefined;
+  agentKeyCatId?: string | undefined;
+}): Promise<ToolResult> {
+  const params: Record<string, string> = {};
+  if (input.layer) params.layer = input.layer;
+  return callbackGet(
+    '/api/callbacks/profile',
+    Object.keys(params).length > 0 ? params : undefined,
+    agentKeyOptions(input),
+  );
 }
 
 export const proposeProfileUpdateInputSchema = {
@@ -2763,7 +2788,7 @@ export const proposeProfileUpdateInputSchema = {
     .min(1)
     .max(20000)
     .describe(
-      'The COMPLETE new persona primer content (whole-file replacement, NOT a diff/patch). On approval the server derives your authenticated relationshipKey and writes this verbatim into relationship/{relationshipKey}-primer.md. Include everything you want kept — anything you omit is dropped.',
+      'The COMPLETE new content (whole-file replacement, NOT a diff/patch). For primer: writes to relationship/{relationshipKey}-primer.md; for corpus: writes to corpus/shared-facts.md. Include everything you want kept — anything you omit is dropped.',
     ),
   rationale: z
     .string()
@@ -2776,6 +2801,12 @@ export const proposeProfileUpdateInputSchema = {
     .enum(['cat-declared', 'cvo-instructed'])
     .describe(
       "Where the relationship signal came from (provenance). 'cat-declared' = you observed/inferred it from the interaction; 'cvo-instructed' = the operator explicitly asked you to remember it. AC-C1 is manual-entry only (no auto-classifier).",
+    ),
+  targetLayer: z
+    .enum(['primer', 'corpus'])
+    .optional()
+    .describe(
+      "Which profile layer to target. 'primer' (default) = this persona's relationship primer (per-cat); 'corpus' = owner-wide shared facts (all personas see the same content, one file). Use corpus for personal facts that are independent of persona relationship (birthday, preferences, background). Omit for the default primer.",
     ),
   sourceMessageId: z
     .string()
@@ -2796,6 +2827,7 @@ export async function handleProposeProfileUpdate(input: {
   afterContent: string;
   rationale: string;
   signalKind: 'cat-declared' | 'cvo-instructed';
+  targetLayer?: 'primer' | 'corpus' | undefined;
   sourceMessageId?: string | undefined;
   clientRequestId?: string | undefined;
   agentKeyCatId?: string | undefined;
@@ -2806,6 +2838,7 @@ export async function handleProposeProfileUpdate(input: {
     afterContent: input.afterContent,
     rationale: input.rationale,
     signalKind: input.signalKind,
+    ...(input.targetLayer ? { targetLayer: input.targetLayer } : {}),
     ...(input.sourceMessageId ? { sourceMessageId: input.sourceMessageId } : {}),
     clientRequestId: input.clientRequestId ?? randomUUID(),
   };
@@ -3027,10 +3060,25 @@ export async function handleProposeTaste(input: {
 
 // ============ Thread Cats Discovery ============
 
-export const getThreadCatsInputSchema = {};
+export const getThreadCatsInputSchema = {
+  threadId: z
+    .string()
+    .trim()
+    .min(1)
+    .max(200)
+    .optional()
+    .describe(
+      'Thread to inspect. Invocation callers may omit for their current thread; agent-key callers must provide it.',
+    ),
+  agentKeyCatId: agentKeyCatIdSchema,
+};
 
-export async function handleGetThreadCats(input: AgentKeySelectable = {}): Promise<ToolResult> {
-  return callbackGet('/api/callbacks/thread-cats', undefined, agentKeyOptions(input));
+export async function handleGetThreadCats(input: AgentKeySelectable & { threadId?: string } = {}): Promise<ToolResult> {
+  return callbackGet(
+    '/api/callbacks/thread-cats',
+    input.threadId ? { threadId: input.threadId } : undefined,
+    agentKeyOptions(input),
+  );
 }
 
 // F155: Guide Engine
@@ -3159,6 +3207,14 @@ export async function handleHoldBall(input: {
   }
 
   return result;
+}
+
+/**
+ * F167 #1449 Slice 1 — Task-ID-independent hold observability.
+ * No input required; threadId + catId come from invocation auth.
+ */
+export async function handleGetHoldStatus(): Promise<ToolResult> {
+  return callbackGet('/api/callbacks/hold-ball/current');
 }
 
 export async function handleCompleteManagedHold(input: { disposition: 'handled' | 'completed' }): Promise<ToolResult> {
@@ -3437,12 +3493,13 @@ export const callbackTools = [
       runtimeProfiles: ['full', 'agent-key', 'desktop:fable-phase0', 'desktop:cloud-pro-phase0'],
     },
   }),
-  defineTool({
+  defineCanonicalTool({
     name: 'cat_cafe_get_thread_cats',
     description:
-      'Discover which cats are in the current thread: participants (with activity stats), routable cats, and availability. ' +
-      'Use BEFORE multi_mention / start_vote / @mentions to find valid catIds — do NOT guess catIds from memory. ' +
-      'Returns: participants (catId, displayName, lastMessageAt, messageCount), routableNow, routableNotJoined, notRoutable.',
+      'Discover recipient catIds in an authorized thread. Use before choosing targetCats or starting a root collaboration. ' +
+      'Output: historical participants, routableNow (joined), routableNotJoined, and notRoutable from the shared registered-service and roster projection. ' +
+      'NOT an online/idle/quota probe or a delivery guarantee; dispatch revalidates availability. ' +
+      'Agent-key callers must supply threadId. Do not infer targets from private session chains or automatically target yourself.',
     inputSchema: getThreadCatsInputSchema,
     handler: handleGetThreadCats,
     governance: {
@@ -3451,7 +3508,7 @@ export const callbackTools = [
       action: 'read',
       authority: 'callback-thread',
       risk: { level: 'read', openWorld: false },
-      runtimeProfiles: ['full'],
+      runtimeProfiles: ['full', 'agent-key', 'desktop:cloud-pro-phase0'],
     },
   }),
   defineTool({
@@ -3538,12 +3595,14 @@ export const callbackTools = [
       runtimeProfiles: ['full', 'agent-key', 'desktop:fable-phase0', 'desktop:cloud-pro-phase0'],
     },
   }),
-  defineTool({
+  defineCanonicalTool({
     name: 'cat_cafe_list_tasks',
     description:
-      'List tasks with optional threadId/catId/status filters for global task discovery. ' +
-      'Use when you need to see what tasks exist, who owns them, or what is blocked. ' +
-      'TIP: Filter by status="blocked" to find tasks that need attention.',
+      'Read a bounded list of durable tasks with optional threadId/catId/status/kind filters, or exact featureId matching canonical TaskItem.relatedFeatureId. ' +
+      'Use when: you need to see what tasks exist, who owns them, what is blocked, or which work belongs to one feature. ' +
+      'NOT for: creating or changing tasks (use cat_cafe_create_task or cat_cafe_update_task). ' +
+      'Output: up to 50 tasks plus totalMatched/truncated; feature-filtered reads also return a content-free queryRef for owner verification. ' +
+      'GOTCHA: overview why fields can be anchored; pass taskId to retrieve one task with its full untruncated why.',
     inputSchema: listTasksInputSchema,
     handler: handleListTasks,
     governance: {
@@ -3553,6 +3612,11 @@ export const callbackTools = [
       authority: 'callback-owner',
       risk: { level: 'read', openWorld: false },
       runtimeProfiles: ['full'],
+      standaloneReason: {
+        disposition: 'accepted-boundary',
+        kind: 'authority-boundary',
+        admissionRef: 'file:docs/features/F313-analysis-to-outcome-closure-command.md',
+      },
     },
   }),
   defineCanonicalTool({
@@ -3628,7 +3692,7 @@ export const callbackTools = [
     name: 'cat_cafe_update_entrusted_work',
     description:
       'Update the current open entrusted-work Task using its exact revision. ' +
-      'Use this after canonical business time or Artifact ownership becomes known; the same Task remains the owner and its revision advances once. ' +
+      'Use this when work starts, blocks, resumes, or canonical business time or Artifact ownership becomes known; the same Task remains the owner and its revision advances once. ' +
       'Artifact refs replace the canonical set and are deduplicated/sorted; null clears one time fact. ' +
       'No-op, stale, foreign-owner, and terminal updates fail closed; generic update_task remains forbidden.',
     inputSchema: updateEntrustedWorkInputSchema,
@@ -4047,14 +4111,15 @@ export const callbackTools = [
       runtimeProfiles: ['full'],
     },
   }),
-  // F231 Phase C: Cat-initiated profile-update proposal (operator approves before the primer is written)
-  defineTool({
+  // F231 Phase E: Promoted to canonical — corpus layer widens input schema (targetLayer + layer)
+  defineCanonicalTool({
     name: 'cat_cafe_read_profile',
     description:
-      'Read YOUR CURRENT authenticated relationship persona primer through the stable cat-cafe-profile://relationship/current URI. ' +
-      'Use when: L0 shows that URI, you are starting a session and need relationship context, or you need to verify the currently effective primer before proposing an update. ' +
+      'Read YOUR CURRENT authenticated profile layer through the stable cat-cafe-profile:// URI. ' +
+      'Supports two layers: primer (default, per-persona relationship) and corpus (owner-wide shared facts, all personas see the same content). ' +
+      'Use when: L0 shows the profile URI, you are starting a session and need relationship or owner context, or you need to verify the currently effective content before proposing an update. ' +
       'NOT for: searching project knowledge or old threads (use search_evidence), reading arbitrary workspace files (use read_file_slice), or reading another user/cat/persona. ' +
-      'Output: the current persona relationshipKey and complete primer content; this is read-only and does not change profile state. ' +
+      'Output: the current content + revision (sha256 hash); this is read-only and does not change profile state. ' +
       'GOTCHA: identity is derived from callback/agent-key authentication. There is intentionally no userId, catId, path, or relationshipKey input, so do not try to target another profile.',
     inputSchema: readProfileInputSchema,
     handler: handleReadProfile,
@@ -4067,17 +4132,18 @@ export const callbackTools = [
       runtimeProfiles: ['full', 'agent-key', 'desktop:fable-phase0', 'desktop:cloud-pro-phase0'],
     },
   }),
-  defineTool({
+  defineCanonicalTool({
     name: 'cat_cafe_propose_profile_update',
     description:
-      'Propose an update to YOUR CURRENT authenticated relationship-persona primer — the "养熟循环" digest entry point (F231 KD-12/KD-18). ' +
-      'Output: returns a proposalId, NOT a written file; the primer is only written after operator approval (reject/expire = nothing changes). ' +
+      'Propose an update to a profile layer — the "养熟循环" digest entry point (F231 KD-12/KD-18). ' +
+      'Supports two layers: primer (default, per-persona relationship primer) and corpus (owner-wide shared facts visible to all personas). ' +
+      'Output: returns a proposalId, NOT a written file; the content is only written after operator approval (reject/expire = nothing changes). ' +
       'Use when: the content is a durable fact about the authenticated person or this persona-operator relationship — personal context, preferred address, or a relationship-specific communication boundary. ' +
+      'Use targetLayer:corpus for owner-wide personal facts independent of persona relationship (birthday, background, preferences that all cats should know). ' +
       'NOT for reusable judgments about what makes output, design, expression, architecture, or systems good (use cat_cafe_propose_taste), repeated operational/tool/process rules (use code-as-harness), or one-off context. ' +
       'A correction, praise, or Magic Word does not choose the lane; semantic content does. ' +
-      'afterContent is the COMPLETE new primer (whole-file replacement, not a diff) — include everything you want kept. ' +
-      'The target is ALWAYS relationship/{relationshipKey}-primer.md, derived server-side from your authenticated cat/persona — you cannot target another user/persona or the shared capsule. ' +
-      'Use cat_cafe_read_profile first when preserving existing content matters. GOTCHA: models sharing one persona also share this primer, so afterContent must preserve relevant family continuity. signalKind records provenance: cat-declared vs cvo-instructed.',
+      'afterContent is the COMPLETE new content (whole-file replacement, not a diff) — include everything you want kept. ' +
+      'Use cat_cafe_read_profile first when preserving existing content matters. GOTCHA: models sharing one persona also share the primer, so afterContent must preserve relevant family continuity. signalKind records provenance: cat-declared vs cvo-instructed.',
     inputSchema: proposeProfileUpdateInputSchema,
     handler: handleProposeProfileUpdate,
     governance: {
@@ -4242,11 +4308,11 @@ export const callbackTools = [
       '"let me think" / "I\'ll hold for now" → hesitation not hold, pick 接/退/升; ' +
       'review/analysis done → MUST @ author, conclusion ≠ endpoint; status updates → use post_message. ' +
       'Output: system schedules a one-shot wake-up after wakeAfterMs; you get re-invoked with reason + nextStep as trigger context. ' +
-      'GOTCHA: max 3 holds per (thread, cat) within a rolling ~1h window — 4th call returns 429, you MUST pass (@ another cat or @co-creator). ' +
+      'GOTCHA: max 3 holds per (thread, cat) within a sliding ~1h window (anchored to last successful hold) — 4th call returns 429 with retryAt/retryAfterMs, you MUST pass (@ another cat or @co-creator). ' +
       'GOTCHA: the counter is process-local best-effort (in-memory on the API node); API restart or multi-instance deploys may reset it, so do not treat the 429 as a hard security boundary — treat it as a self-discipline guardrail. ' +
       'GOTCHA: hold is an EXCEPTION state, not a default exit. Most turns should end with @ someone, not hold. ' +
       'GOTCHA (F167 Phase M): only hold for harness-INVISIBLE waits — external conditions nothing will call you back about (cloud review verdict, remote CI, external webhook). Background work the harness already tracks (a background Bash command, a spawned task) AUTO-RE-INVOKES you on completion; holding for that just stacks a redundant wake on top. Ask "will something call me back already?" — if yes, do NOT hold. A co-creator or another cat sending a message into this thread IS such a callback (it re-invokes you), so "waiting for co-creator to answer" must be @co-creator, never a hold. ' +
-      'GOTCHA: SINGLE-SLOT per (thread, cat) — calling hold_ball again while a previous hold is pending REPLACES the prior wake (prior taskId cancelled). This is intentional (KD-23): hold = "持一个球" exception, not a queue. If you need to track multiple waiting conditions, merge them into one nextStep (e.g. "等 CI + @co-creator 确认" 合并成一句). Rolling-window counter still ticks per call. ' +
+      'GOTCHA: SINGLE-SLOT per (thread, cat) — calling hold_ball again while a previous hold is pending REPLACES the prior wake (prior taskId cancelled). This is intentional (KD-23): hold = "持一个球" exception, not a queue. If you need to track multiple waiting conditions, merge them into one nextStep (e.g. "等 CI + @co-creator 确认" 合并成一句). Sliding-window counter ticks on each successful hold; rejected 429 calls do not advance the window. ' +
       'NEW (F167 Phase Q): event-backed retirement only works when waitSourceRef.expectedSignal is one of these exact structured keys: assignment, review_posted, ci_complete, comment_posted, managed_command_complete, user_message. Free-text values like "CI pass" remain valid narrative context but will NOT retire a timer by event, by design. ' +
       'NEW (F167 Phase P): wakeWhen — instead of a timed delay, specify a shell command to run. The server spawns it, captures output, and wakes you when it completes (or times out). Use for: pnpm gate, pnpm test, build commands — anything you would run_in_background and poll. wakeWhen is for LOCAL COMMANDS ONLY — it does not turn hold_ball into a universal "smart wait": waiting on a person is still @co-creator / @ that cat, waiting on a cloud event (PR / CI / issue) is still register_pr_tracking / register_issue_tracking. wakeWhen and wakeAfterMs are MUTUALLY EXCLUSIVE — provide exactly one.',
     inputSchema: {
@@ -4322,15 +4388,44 @@ export const callbackTools = [
     },
   }),
   defineCanonicalTool({
+    name: 'cat_cafe_get_hold_status',
+    description:
+      'Check whether you currently have an active or observable hold_ball in this thread. ' +
+      'Returns the hold status, task ID, lifecycle mode/status, cancelability, and access-projected owner — ' +
+      'all without needing to know the internal task ID. ' +
+      'Covers: pending holds, retired carriers with running managed commands. ' +
+      'Use when: you need to check if a prior hold is still pending before deciding whether to hold again, ' +
+      'or to observe your own hold state for diagnostic/reporting purposes. ' +
+      'No input required — threadId and catId are derived from your invocation auth. ' +
+      'Auth: enforces hold-access policy (same gate as GET /:taskId/status); ' +
+      'lifecycle visibility is projected per access role.',
+    inputSchema: {},
+    handler: handleGetHoldStatus,
+    governance: {
+      implementationExport: 'handleGetHoldStatus',
+      resourceFamily: 'task-workflow',
+      action: 'read',
+      authority: 'callback-owner',
+      risk: { level: 'read', openWorld: false },
+      runtimeProfiles: ['full'],
+      targetExposure: 'lazy-discoverable',
+      standaloneReason: {
+        disposition: 'accepted-boundary',
+        kind: 'authority-boundary',
+        admissionRef: 'file:docs/features/F167-a2a-chain-quality.md',
+      },
+    },
+  }),
+  defineCanonicalTool({
     name: 'cat_cafe_complete_managed_hold',
     description:
       'Terminally dispose the exact managed hold wake bound to this invocation. ' +
-      'Use when: the current turn was triggered by a managed hold wake and its requested work is actually handled/completed. ' +
+      'Use when: the current turn was triggered by a managed hold wake, or a full-body read adopted one into this same invocation, and its work is actually handled/completed. ' +
       'NOT for: ordinary holds, unfinished work, re-hold, a structured event wait, transfer, or unrelated task completion. ' +
       'Output: marks the exact F264 target receipt handled and terminalizes the original F167 hold ball; ' +
       'the server derives and fences threadId, holderCatId, invocationId, sourceMessageId, and taskId. ' +
       'GOTCHA: full read, command exit, tests, merge truth, or ACK never substitute for this producer, ' +
-      'and the caller cannot select or close another subject.',
+      'and the caller cannot select or close another subject. Full-read managedHoldDisposition guidance reports a unique pending source, ambiguity, or no obligation; never guess through ambiguity.',
     inputSchema: {
       disposition: z
         .enum(['handled', 'completed'])

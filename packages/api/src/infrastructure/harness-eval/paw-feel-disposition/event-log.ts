@@ -1,8 +1,12 @@
 import type { PawFeelDispositionEvent } from '@cat-cafe/shared';
 import type { RedisClient } from '@cat-cafe/shared/utils';
 import { parsePawFeelDispositionEvent } from './schema.js';
+import { type PawFeelSignalScanCursorV1, type PawFeelSignalScanPage, scanPawFeelSignalIds } from './signal-scan.js';
+
+export type { PawFeelSignalScanCursorV1, PawFeelSignalScanPage } from './signal-scan.js';
 
 const KEYSPACE = 'paw-feel:disposition';
+const SOURCE_SCAN_COUNT = 1_000;
 
 export const PawFeelDispositionKeys = {
   eventLog: (signalId: string): string => `${KEYSPACE}:log:${signalId}`,
@@ -19,7 +23,9 @@ export interface IPawFeelDispositionEventLog {
   append(event: PawFeelDispositionEvent, expectedSequence: number): Promise<PawFeelDispositionAppendResult>;
   read(signalId: string, fromSequence?: number): Promise<PawFeelDispositionEvent[]>;
   readMany?(signalIds: readonly string[]): Promise<Map<string, PawFeelDispositionEvent[]>>;
+  scanSignalIds(cursor: PawFeelSignalScanCursorV1 | undefined, limit: number): Promise<PawFeelSignalScanPage>;
   listSignalIds(): Promise<string[]>;
+  listSignalIdsBySourceMessageId(sourceMessageId: string): Promise<string[]>;
 }
 
 const APPEND_LUA = `
@@ -43,6 +49,15 @@ function requireSequence(value: number, name: string): void {
   if (!Number.isSafeInteger(value) || value < 0) {
     throw new RangeError(`${name} must be a non-negative safe integer`);
   }
+}
+
+function escapeRedisGlob(value: string): string {
+  return value
+    .replaceAll('\\', '\\\\')
+    .replaceAll('*', '\\*')
+    .replaceAll('?', '\\?')
+    .replaceAll('[', '\\[')
+    .replaceAll(']', '\\]');
 }
 
 export class RedisPawFeelDispositionEventLog implements IPawFeelDispositionEventLog {
@@ -74,8 +89,31 @@ export class RedisPawFeelDispositionEventLog implements IPawFeelDispositionEvent
     return encoded.map((value) => parsePawFeelDispositionEvent(JSON.parse(value)));
   }
 
+  async scanSignalIds(rawCursor: PawFeelSignalScanCursorV1 | undefined, limit: number): Promise<PawFeelSignalScanPage> {
+    return scanPawFeelSignalIds(this.redis, PawFeelDispositionKeys.signals, rawCursor, limit);
+  }
+
   async listSignalIds(): Promise<string[]> {
     return (await this.redis.smembers(PawFeelDispositionKeys.signals)).sort();
+  }
+
+  async listSignalIdsBySourceMessageId(sourceMessageId: string): Promise<string[]> {
+    const signalIds = new Set<string>();
+    const pattern = `${escapeRedisGlob(sourceMessageId)}:*`;
+    let cursor = '0';
+    do {
+      const [nextCursor, matches] = await this.redis.sscan(
+        PawFeelDispositionKeys.signals,
+        cursor,
+        'MATCH',
+        pattern,
+        'COUNT',
+        SOURCE_SCAN_COUNT,
+      );
+      for (const signalId of matches) signalIds.add(signalId);
+      cursor = nextCursor;
+    } while (cursor !== '0');
+    return [...signalIds].sort();
   }
 
   async readMany(signalIds: readonly string[]): Promise<Map<string, PawFeelDispositionEvent[]>> {

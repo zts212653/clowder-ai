@@ -1,0 +1,321 @@
+.evolution-preparation {
+  display: grid;
+  gap: 18px;
+}
+.evolution-preparation-heading {
+  display: grid;
+  gap: 8px;
+  padding-bottom: 2px;
+}
+.evolution-preparation-heading h2 {
+  margin-top: 3px;
+  color: var(--cafe-text);
+  font-family: var(--evolution-title-font);
+  font-size: var(--console-font-xl);
+  font-weight: 600;
+}
+.evolution-preparation-heading p,
+.evolution-preparation-summary {
+  max-width: 74ch;
+  color: var(--cafe-text-secondary);
+  font-size: var(--console-font-compact);
+  line-height: 1.75;
+}
+.evolution-preparation-kicker {
+  color: var(--cafe-text-muted);
+  font-size: var(--console-font-label);
+  font-weight: 600;
+  letter-spacing: 0.06em;
+}
+.evolution-preparation-tabs {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+.evolution-preparation-tabs button {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+  min-height: 68px;
+  padding: 11px 12px;
+  border: 1px solid var(--cafe-border);
+  border-radius: 11px;
+  background: var(--console-card-bg);
+  color: var(--cafe-text-secondary);
+  text-align: left;
+}
+.evolution-preparation-tabs button:hover {
+  background: var(--cafe-surface-sunken);
+}
+.evolution-preparation-tabs button:focus-visible,
+.evolution-preparation-item summary:focus-visible,
+.evolution-preparation-rubric summary:focus-visible,
+.evolution-preparation-gt-source:focus-visible {
+  outline: 2px solid var(--evolution-focus);
+  outline-offset: 2px;
+}
+.evolution-preparation-tabs button[aria-selected="true"] {
+  border-color: var(--evolution-focus);
+  background: var(--evolution-focus-soft);
+  color: var(--evolution-focus-text);
+}
+.evolution-preparation-tabs button > span {
+  overflow-wrap: anywhere;
+  font-size: var(--console-font-compact);
+  font-weight: 600;
+}
+.evolution-preparation-tabs small {
+  color: var(--cafe-text-muted);
+  font-size: var(--console-font-label);
+}
+.evolution-preparation-tabs small[data-preparation-section-state="working"] {
+  color: var(--evolution-focus-text);
+}
+.evolution-preparation-panel {
+  min-width: 0;
+}
+.evolution-preparation-section,
+.evolution-preparation-body {
+  display: grid;
+  gap: 16px;
+  min-width: 0;
+}
+.evolution-preparation-submission {
+  display: grid;
+  gap: 16px;
+  padding: 18px;
+  border: 1px solid var(--cafe-border);
+  border-radius: 14px;
+  background: var(--console-card-bg);
+}
+.evolution-preparation-submission-header,
+.evolution-preparation-gt-source > header,
+.evolution-preparation-fact-card > header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+.evolution-preparation-submission-header h3,
+.evolution-preparation-empty h3,
+.evolution-preparation-gt-source h4,
+.evolution-preparation-fact-card h5,
+.evolution-preparation-explanations h5 {
+  margin-top: 3px;
+  color: var(--cafe-text);
+  font-size: var(--console-font-base);
+  font-weight: 600;
+  line-height: 1.5;
+}
+.evolution-preparation-source-status,
+.evolution-preparation-domain,
+.evolution-preparation-dual-status span,
+.evolution-preparation-fact-card header span {
+  flex: none;
+  padding: 3px 7px;
+  border-radius: 5px;
+  background: var(--cafe-surface-sunken);
+  color: var(--cafe-text-secondary);
+  font-size: var(--console-font-label);
+}
+.evolution-preparation-source-status[data-source-status="submitted"],
+.evolution-preparation-dual-status span[data-validity-state="bounded"] {
+  background: var(--evolution-focus-soft);
+  color: var(--evolution-focus-text);
+}
+.evolution-preparation-alert,
+.evolution-preparation-empty,
+.evolution-preparation-section-activity {
+  display: block;
+  padding: 13px 14px;
+  border-left: 2px solid var(--evolution-focus);
+  border-radius: 0 9px 9px 0;
+  background: var(--cafe-surface-sunken);
+  color: var(--cafe-text-secondary);
+  font-size: var(--console-font-compact);
+  line-height: 1.7;
+}
+.evolution-preparation-section-activity {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+[data-preparation-spinner="true"] {
+  display: inline-block;
+  width: 11px;
+  height: 11px;
+  margin-right: 5px;
+  border: 2px solid var(--cafe-border);
+  border-top-color: var(--evolution-focus);
+  border-radius: 50%;
+  animation: evolution-preparation-spin 0.9s linear infinite;
+}
+@keyframes evolution-preparation-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+.evolution-preparation-goal {
+  padding: 13px 15px;
+  border-left: 3px solid var(--evolution-focus);
+  background: var(--evolution-focus-soft);
+  color: var(--cafe-text);
+  font-size: var(--console-font-base);
+  line-height: 1.7;
+}
+.evolution-preparation-items,
+.evolution-preparation-rubrics,
+.evolution-preparation-gt-sources,
+.evolution-preparation-fact-cards,
+.evolution-preparation-explanations {
+  display: grid;
+  gap: 10px;
+}
+.evolution-preparation-item,
+.evolution-preparation-rubric,
+.evolution-preparation-gt-source,
+.evolution-preparation-fact-card,
+.evolution-preparation-explanations > article,
+.evolution-preparation-history-entry {
+  min-width: 0;
+  border: 1px solid var(--cafe-border);
+  border-radius: 11px;
+  background: var(--console-card-bg);
+}
+.evolution-preparation-item > summary,
+.evolution-preparation-rubric > summary,
+.evolution-preparation-history-entry > summary {
+  cursor: pointer;
+  list-style: none;
+}
+.evolution-preparation-item > summary::-webkit-details-marker,
+.evolution-preparation-rubric > summary::-webkit-details-marker,
+.evolution-preparation-history-entry > summary::-webkit-details-marker {
+  display: none;
+}
+.evolution-preparation-item > summary {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(210px, auto);
+  align-items: center;
+  gap: 12px;
+  padding: 13px 14px;
+}
+.evolution-preparation-item-title {
+  color: var(--cafe-text);
+  font-size: var(--console-font-compact);
+  font-weight: 600;
+}
+.evolution-preparation-item-states {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(96px, 1fr));
+  gap: 8px;
+}
+.evolution-preparation-state-column {
+  display: grid;
+  gap: 2px;
+}
+.evolution-preparation-state-label {
+  color: var(--cafe-text-muted);
+  font-size: var(--console-font-label);
+}
+.evolution-preparation-state-value {
+  color: var(--cafe-text-secondary);
+  font-size: var(--console-font-xs);
+  font-weight: 600;
+}
+.evolution-preparation-state-note {
+  overflow-wrap: anywhere;
+  color: var(--cafe-text-muted);
+  font-size: var(--console-font-label);
+}
+.evolution-preparation-item-body,
+.evolution-preparation-rubric-body {
+  display: grid;
+  gap: 13px;
+  padding: 0 14px 14px;
+}
+.evolution-preparation-facts {
+  display: grid;
+  gap: 9px;
+}
+.evolution-preparation-facts > div {
+  display: grid;
+  gap: 2px;
+}
+.evolution-preparation-facts dt {
+  color: var(--cafe-text-muted);
+  font-size: var(--console-font-label);
+  font-weight: 600;
+}
+.evolution-preparation-facts dd,
+.evolution-preparation-rubric-body > p,
+.evolution-preparation-fact-card > p,
+.evolution-preparation-explanations p {
+  overflow-wrap: anywhere;
+  color: var(--cafe-text-secondary);
+  font-size: var(--console-font-compact);
+  line-height: 1.65;
+}
+.evolution-preparation-rubric > summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 13px 14px;
+  color: var(--cafe-text);
+  font-size: var(--console-font-compact);
+  font-weight: 600;
+}
+.evolution-preparation-bounds,
+.evolution-preparation-unknowns {
+  padding: 11px 13px;
+  border-radius: 9px;
+  background: var(--cafe-surface-sunken);
+  color: var(--cafe-text-secondary);
+  font-size: var(--console-font-xs);
+  line-height: 1.65;
+}
+.evolution-preparation-bounds ul,
+.evolution-preparation-unknowns ul {
+  margin-top: 5px;
+  padding-left: 18px;
+  list-style: disc;
+}
+.evolution-preparation-gt-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 14px;
+}
+.evolution-preparation-next {
+  color: var(--evolution-focus-text);
+  font-size: var(--console-font-compact);
+  font-weight: 600;
+  line-height: 1.65;
+}
+.evolution-preparation-subheading {
+  margin-top: 3px;
+  color: var(--cafe-text);
+  font-size: var(--console-font-compact);
+  font-weight: 600;
+}
+.evolution-preparation-gt-source,
+.evolution-preparation-fact-card,
+.evolution-preparation-explanations > article {
+  display: grid;
+  gap: 12px;
+  padding: 14px;
+}
+.evolution-preparation-gt-source[data-focused="true"] {
+  border-color: var(--evolution-focus);
+  box-shadow: 0 0 0 2px var(--evolution-focus-soft);
+}
+.evolution-preparation-dual-status {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 5px;
+}
+.evolution-preparation-comparison {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}

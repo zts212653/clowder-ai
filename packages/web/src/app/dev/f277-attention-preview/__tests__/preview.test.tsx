@@ -74,7 +74,8 @@ describe('F277 real-shell attention preview', () => {
     expect(f296?.dataset.expanded).toBe('false');
     expect(f296?.querySelectorAll('[data-thread-id]')).toHaveLength(0);
     expect(f296?.textContent).toContain('7 个对话');
-    expect(f296?.textContent).toContain('1 个 @你');
+    const mentionBadge = f296?.querySelector('[title$="个对话中猫猫 @ 了你"]');
+    expect(mentionBadge?.textContent).toBe('@你 1');
   });
 
   it('uses production ThreadItem rows and keeps Group anchors status-free', async () => {

@@ -1,0 +1,22 @@
+{
+  "id": "continuous-new-messages",
+  "scenario": "continuous_new_messages",
+  "threadId": "thread_fixture_f254_continuous",
+  "catIds": ["codex-sol"],
+  "evidenceRefs": ["fixture:F254/AC-E9/continuous-new-messages@v1"],
+  "facts": {
+    "responsibilityCount": 1,
+    "custodyCount": 1,
+    "formalFinalCount": 1,
+    "formalFinalLimit": 1,
+    "knownStaleFinalCount": 0,
+    "targetCount": 1,
+    "accountedTargetCount": 1,
+    "sameBatchSiblingWakeCount": 0,
+    "automaticAttemptCount": 3,
+    "automaticAttemptLimit": 5,
+    "commitRecheckCount": 3,
+    "commitRecheckLimit": 10,
+    "terminalEvidenceComplete": true
+  }
+}

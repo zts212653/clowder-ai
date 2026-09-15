@@ -209,6 +209,32 @@ describe('F231 profile migration', () => {
     assert.equal(second.backupDir, first.backupDir);
   });
 
+  // ──── Phase E: INV-10 corpus zero-touch ────
+
+  it('dry-run/apply/rollback ignores corpus/ subdirectory (INV-10)', () => {
+    // A pre-existing corpus/shared-facts.md inside the canonical profile dir
+    // must survive migration unchanged — migration operates only on relationship/ files.
+    const canonicalProfileDir = join(dataDir, 'profiles', 'operator');
+    mkdirSync(join(canonicalProfileDir, 'corpus'), { recursive: true });
+    mkdirSync(join(canonicalProfileDir, 'relationship'), { recursive: true });
+    writeFileSync(join(canonicalProfileDir, 'corpus', 'shared-facts.md'), 'OWNER_FACT');
+    writeFileSync(join(sourceRoot, 'relationship', 'opus-primer.md'), 'PRIMER');
+
+    // dry-run: corpus untouched
+    mod.runProfileMigration(options());
+    assert.equal(readFileSync(join(canonicalProfileDir, 'corpus', 'shared-facts.md'), 'utf8'), 'OWNER_FACT');
+
+    // apply: corpus still untouched
+    const applied = mod.runProfileMigration(options({ apply: true }));
+    assert.equal(applied.status, 'applied');
+    assert.equal(readFileSync(join(canonicalProfileDir, 'corpus', 'shared-facts.md'), 'utf8'), 'OWNER_FACT');
+
+    // rollback: corpus still untouched
+    const rolledBack = mod.rollbackProfileMigration(applied.backupDir);
+    assert.equal(rolledBack.status, 'rolled-back');
+    assert.equal(readFileSync(join(canonicalProfileDir, 'corpus', 'shared-facts.md'), 'utf8'), 'OWNER_FACT');
+  });
+
   it('rollback restores pre-existing canonical bytes and refuses to overwrite later edits', () => {
     writeFileSync(join(sourceRoot, 'relationship', 'opus-primer.md'), 'MIGRATED');
     const canonical = join(dataDir, 'profiles', 'operator', 'relationship', 'ragdoll-primer.md');

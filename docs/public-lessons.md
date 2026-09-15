@@ -984,9 +984,10 @@ created: 2026-02-26
   2. `CAT_CAFE_RUNTIME_RESTART_OK=1` 显式授权才放行
   3. 新增 `scripts/review-start.sh`（`pnpm review:start`）：review 验证统一入口，自动分配 3201/3202 端口、内存 Redis、review 沙盒路径
   4. review 模板新增"沙盒路径 + 启动命令 + 实际端口"必填字段
+- 2026-09-10 纠正：第 2 条环境变量放行被证明不能表达授权——任意调用者都能设置它，反而让跨 worktree 归属检查失效。该 bypass 已移除；变量取值为 0 或 1 都不能放行 foreign/unknown PID。runtime 的显式生命周期动作只作用于 daemon state 验证出的同一部署，版本一致性检查与行动授权也明确分离。
 - 防护：
   1. `start-dev.sh` 端口归属 guard（基于进程 cwd，不硬编码端口号）——任何端口冲突都能防
-  2. 回归测试覆盖"默认拒绝跨 worktree kill"和"显式授权放行"两条路径
+  2. 回归测试覆盖环境变量未设置、0、1 时都拒绝跨 worktree/unknown PID
   3. `pnpm review:start` 统一入口消除"在哪启动、用什么端口"的歧义
   4. request-review 模板强制证据字段（reviewer 必须填沙盒路径和端口）
 - 来源锚点：
@@ -1960,3 +1961,16 @@ created: 2026-02-26
 - 原理：**把车造得更坚固不会让它自动开向正确目的地。** 方向靠 accepted-source 追溯，确定风险靠 guard，运行健康靠 observability，不确定效用才靠 eval；机制的数量不是质量，能否更早发现偏航且不增加人类协调税才是质量。
 
 - 关联：ADR-031 v3.5 candidate | LL-071（A2A scope 误读放大）| LL-072/083（review 无不动点与开放纠缠）| LL-095（机制工具箱不是清单）| LL-101（长门禁先收敛）| F100 Process Evolution | F303 Design Gate Integrity | F311 Capability Evolution Workspace
+
+### LL-103: 测试替身要封住最外层副作用——内层 stub 会在实现改委托后失效
+
+- 状态：validated
+- 更新时间：2026-09-10
+
+- 坑：运行 `scripts/test-start-dev.sh` 时，旧测试以为 mock `python3 -m venv` 就能隔离 `install_sidecar_venvs`。该生产函数后来把 ASR 安装改为委托统一 shell installer，测试却仍直接执行整段函数；而且 `HOME` 只在函数调用时覆盖，统一 installer 已沿加载期冻结的 `CAT_CAFE_HOME` 指向真实 `~/.cat-cafe`。结果测试短暂执行真实 pip，在用户级 `whisper-venv` 重写了 `pip`、`faster-whisper`、`av`、`ctranslate2`、`flatbuffers`、`onnxruntime` 六个 distribution。
+- 止损与影响：发现后确认测试及 pip 进程均已结束；未启动/重启 runtime，未写 Redis。当前 venv `pip check` 为 green，`faster_whisper` / `av` / `ctranslate2` / `onnxruntime` import 为 green；旧 distribution 版本没有 canonical 账本，故不猜测降级或删除。
+- 根因：测试替身绑定了旧实现细节，而非真实副作用边界；用户级路径在 source-time 决定，却只在 call-time 伪隔离；该 legacy shell test 又长期不在常规 gate 内，已删除的 sidecar helper 断言与真实 installer 逃逸同时腐烂。
+- 修复：删除已无生产函数的 sidecar 断言；在 test 中 mock 统一 installer 的最外层 `bash` delegate，剩余 venv 全落临时 `HOME`，并验证 ASR delegate 与 TTS/LLM/embed 临时路径。shared rules 固化“source 前隔离路径 + mock 最外层 effect boundary + 无账本不盲回滚”。
+- 原理：**测试隔离要对“什么能改变外部世界”负责，不要对“当前实现恰好调用了哪个内层函数”负责。** 委托层一变，内层 stub 就可能静默失效；只有从最外层 effect sink 关门，fixture-only 才是真的 fixture-only。
+
+- 关联：`scripts/test-start-dev.sh` | `scripts/setup.sh::install_sidecar_venvs` | `scripts/services/whisper-install.sh` | shared-rules §14d

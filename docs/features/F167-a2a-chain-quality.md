@@ -4,8 +4,8 @@ related_features: [F064, F027, F055, F122, F168, F246, F280]
 topics: [a2a, collaboration, harness-engineering, agent-readiness]
 doc_kind: spec
 created: 2026-04-17
-updated: 2026-09-04
-tips_exempt: "Renewed 2026-09-04 for the Phase R terminal-lineage conflict repair: it makes the existing post_message and cross_post_message coordination surface fail loud instead of closing the wrong chain, without adding a user-invokable action or discovery workflow."
+updated: 2026-09-09
+tips_exempt: "Renewed 2026-09-07: terminal-lineage conflicts and adopted managed-hold completion repair existing protocol paths, without a new user-invokable capability. Failed notifications reuse the existing Queue receipt/actions; explicit completion guidance belongs in the MCP response and tool description."
 user_journey_exempt: protocol behavior has no direct UI surface; end-to-end custody is dogfooded through the real MCP/task path
 mcp_admission_status: accepted
 mcp_admission_ref: "file:docs/features/F167-a2a-chain-quality.md"
@@ -23,6 +23,11 @@ mcp_admission_claims:
   - ref: "file:docs/features/F167-a2a-chain-quality.md"
     toolName: cat_cafe_recover_external_review_verdict
     resourceFamily: tracking-review
+    boundaryKind: authority-boundary
+    decision: accepted
+  - ref: "file:docs/features/F167-a2a-chain-quality.md"
+    toolName: cat_cafe_get_hold_status
+    resourceFamily: task-workflow
     boundaryKind: authority-boundary
     decision: accepted
 ---
@@ -115,7 +120,7 @@ The same repair boundary also owns two dispatch invariants exposed by the post-m
 
 - **L1 false-positive 误杀**：正常 review 循环 A→B→A→B (streak=3) 被误杀 → reset 条件（第三只猫 / user 消息）必须正确触发；覆盖见 `pingpong-reset.test.js`
 - **C2 over-fire**：纯信息查询无后续动作的输出被强制要求 @（边界场景：信息回答 vs 协作传球的判定漂移）
-- **C1 hold_ball 滥用**：`maxHoldsPerWindow` 超限（默认 3 / ~1h rolling）→ cat 在用 hold 替代正常传球
+- **C1 hold_ball 滥用**：`maxHoldsPerWindow` 超限（默认 3 / ~1h sliding window）→ cat 在用 hold 替代正常传球
 - **C1 stale hold wake**：等待对象已被结构化事件满足（review / CI / issue / user message / managed command）后，旧 `hold_ball` timer 仍唤醒猫 → 目标为 0；若发生，必须能追到 `waitSourceRef` / `subjectKey` / `expectedSignalKey` / `resolvedBy`
 - **Routing 旁路**：invocation 文本响应有 @ 但 MCP `targetCats` 为空（或反之）→ `routing-syntax-hint`（route-serial 行首 @ 语法检测）或 `verdict-no-pass-hint`（verdict 无 @ 出口检测）触发
 
@@ -235,7 +240,7 @@ cat_cafe_hold_ball({
 > 球仍在你手上。现在执行：{nextStep}
 > 若条件仍未满足：再持一次或升级；禁止无限持球。
 
-**Guard**：`maxHoldsPerWindow`（默认 3，~1h rolling 窗口，per thread×cat），超限强制接/退/升 + 审计日志。
+**Guard**：`maxHoldsPerWindow`（默认 3，~1h sliding window，per thread×cat），超限强制接/退/升 + 审计日志。
 *实现注记*（gpt52 review on PR #1289 P1/P2）：语义是"窗口内累计"而非"真·连续"；状态进程内 in-memory，best-effort，重启会重置。要做硬约束得把计数下沉到与 reminder scheduler 同源的持久化存储，当前不做。
 
 **并发语义**（Phase G / KD-23 补充）：
@@ -485,7 +490,7 @@ operator experience：
   - 查 `dynamicTaskStore` 同 `(threadId, catId)` 的 pending hold task（via `id.startsWith('hold-ball-')` + `templateId='reminder'` + `createdBy: hold-ball:{catId}` + `deliveryThreadId`；id 前缀是不可伪造主键——panel `/api/schedule/tasks` 生成 `dyn-*`，路由层独占 `hold-ball-*`）
   - `deregister` + `delete` 它（cancel 旧 scheduled fire）
   - 原子序（cloud Codex P1 修正）：先 insert + register 新 task；register 失败则 rollback insert、prior hold 不动；只有新 task 完全 commit 后才 cancel prior
-- [x] AC-G4: `holdCount` rolling window 逻辑保持不变（这是防滥用 guard，与单-槽语义正交；cat 被连续覆盖 3 次还是算 3 次 hold）
+- [x] AC-G4: `holdCount` sliding window 逻辑保持不变（这是防滥用 guard，与单-槽语义正交；cat 被连续覆盖 3 次还是算 3 次 hold）
 
 #### G3 — 测试锁 KD-23
 
@@ -864,6 +869,50 @@ operator experience："简直了你和Maine Coon是没头脑（Maine Coon听不�
 | 偏差根因 | **把两个维度压成一根轴，导致钟摆式过度纠正**：将“术语透明度”与“语体正式度”错误合并为“学术黑话 ↔ 大白话”，收到去黑话反馈后直接滑到口语端，漏掉“透明且正式”的目标象限。与 Case E7 的语域整体预测缺失同型。**分界判据**：改写正式表达时分别检查（1）术语是否可解释，（2）句法是否自然，（3）语体是否匹配场合；去掉黑话不等于降低正式度。 |
 | 纠正轮次 | 同一任务 2 次：`0001788539041626-001301-d8b1f4fa` 首次指出标题和图中文字仍有奇怪黑话；`0001788543273574-001378-6801c11d` 再次指出“大白话”不是目标。 |
 | 元心智哪条没执行 | Q3 坐标变换——没有把“可理解性”和“正式度”拆成正交维度，也没有在技术领导路演这一真实使用场景里朗读检查整句。 |
+
+### Case E22: 把无关主线失败倒灌成 F311 的整项停止条件（2026-09-06，codex-astra）
+
+| 维度 | 内容 |
+|------|------|
+| 我以为 | F311 full gate 被 eval-hub 固定日期列表断言打断，即使已在 main 与作者树复现同一失败且没有相关作者改动，也应把 F311 任务标 blocked，等待原 owner 修好才发布和审阅。 |
+| 实际要求 | operator 需要尽快演示可读的 Workspace；已证实无关失败须保留原回执，按 operator 对该红项的明确非阻塞处置继续本 PR 的相关验证、独立审阅、合入与 Alpha 验收。F311 自身缺陷和真实授权边界仍然有效。 |
+| 偏差根因 | **局部健康事实扩大为全局交付依赖**：把“存在一个红项”与“该红项应阻止当前交付”合并成同一判断，未按 claim、归属和已有授权区分停止条件。与 Case E8 将后一步边界倒灌到已可执行 merge 的模式相同；不是要把所有主线失败默认为可忽略。 |
+| 纠正轮次 | 同一任务中 operator 于 `[thread-id]#0001788683059706-000078-f1618cb0` 追问阻塞者，`0001788683429450-000089-0ac1508d` 明确无关红项不阻塞合入，`0001788683469399-000090-14c6c791` 再指出演示等待不合适。纠正后相关131项检查与 Opus5 完整独立审通过，PR #4377 合入 `4cd692ea1c`；同 build Alpha 实测往返2/2和来源/1440/390/320通过。 |
+
+### Case E23: 把已共同使用的持续输入链路退回可行性实验（2026-09-09，codex-astra）
+
+| 维度 | 内容 |
+|------|------|
+| 我以为 | GPT-Live 音频与原生任务交接 spike 之后，还应把“大猫分析期间追加条件或画面，回答能否随之改变”列为下一项基础可行性实验。 |
+| 实际要求 | operator 在 `[thread-id]#0001788943906076-000095-910de54f` 指出：咱们已经多次在大猫思考时追加 PPT 截图、输入伴随会议的 ASR 转写并继续交谈。产品定义应直接消费这条已有使用基线；新增工作是自动取得现场、全双工快端与深思端的持续配合、屏幕指点及桌面体验。 |
+| 偏差根因 | **新实验锚定 + 既有使用证据未进入基线**：把本轮单个 spike 的验证范围当成全家的能力上限，虽然读过 coactive 愿景和伴随会议材料，仍从接口文档重新提出已实践的问题。与 Case E20“已读家内能力没有进入增量判断”同型。判据是先区分已有真实使用、仍需人工搬运的输入和真正未实现的体验，再决定新实验要回答什么。 |
+| 纠正轮次 | 本次由上述 operator 消息纠正 1 次；跨任务已有 Case E20 同型证据。当前范围已同步修正“下一项实验”“待验证基础”和“完整猫的组成”三处表述：保留快端与具名深思端共同组成完整猫的定义，不再重复验证已使用的持续追加能力。 |
+
+### Case E24: 把作品交互参照压成按钮清单（2026-09-10，codex-astra）
+
+| 维度 | 内容 |
+|------|------|
+| 我以为 | 作品审阅已有标注/评论模式、F056 token 和功能回归，就足以把旧表单骨架交给 operator 做体验确认。 |
+| 实际要求 | 沿 operator 提供的 ChatGPT 参考保留作品、就地操作与表达意见的同屏关系；用家里的颜色和图标适配。用户不应滚到作品下方寻找主要输入和提交。 |
+| 偏差根因 | **任务关系被功能清单替换**：技术审查覆盖了动作正确性，却没有让实际空间关系进入交付判断；又把整张参考 UI 当作品，令图内假工具条污染了体验对照。不是缺少设计规则，而是没有在真实任务中消费已经明确的参照。 |
+| 纠正轮次 | 同一任务两次明确纠正：`[thread-id]#0001789005531886-000743-c9f18602` 指出灰按钮与设计表达，`0001789005601730-000749-c064ea50` 指出向下翻找操作；后者再次送达仍是同一来源，不重复计数。 |
+
+### Case E25: 采样长文盖过已写好的裁决稿（2026-09-10，codex-astra）
+
+| 维度 | 内容 |
+|------|------|
+| 我以为 | 把 F311 压力情景跑完、保存完整回答、继续检查和发布 PR，足以让 operator 知道裁决在推进。 |
+| 实际要求 | operator 等的是 Astra 对 Fable 首稿的明确裁决和可读成稿；实验记录是判断附件，不能要求人从虚构情景中找出真实工作进度。 |
+| 纠正轮次 | 同一任务两次：`[thread-id]#0001789031674608-000279-cbadb94f` 指出答非所问，`0001789031888889-000286-9cf3ff7f` 追问裁决稿；Fable 283 指明注意力成本，290 确认原文归档和主回复收准。 |
+
+### Case E26: 桌宠去掉外框，交流仍是配置面板（2026-09-15，codex-astra）
+
+| 维度 | 内容 |
+|------|------|
+| 我以为 | F317 先把安装、共享、连接、深思与保存状态做成可操作面板；收到桌宠外形反馈后，改成透明猫、点击展开原面板，就接住了纠正。 |
+| 实际要求 | operator 点“聊聊”要直接与猫交流、继续当前事情；第二次附 GPT-Live 紧凑语音条参照，明确否定配置式大面板的交互方向。 |
+| 偏差根因 | **能力检查清单替代了人的主动作**：第一轮只修驻留外形，没重审点击后的交流路径。与 Case E24 的“任务关系被功能清单替换”同型；已有设计规则与参照未进入判断，局部行为检查无法替代体验判断。 |
+| 元心智哪条没执行 | Q1 没有从“此刻只是想和猫说话”判断必要操作；Q3 没分开运行状态必须真实与所有状态必须同时变成前台控件。 |
 
 ## Review Gate
 

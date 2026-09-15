@@ -13,6 +13,10 @@ code_anchors:
   - packages/api/src/domains/plugin/host-broker/index.ts
   - packages/api/src/domains/plugin/host-broker/events-publish-handler.ts
   - packages/api/src/domains/plugin/external-runtime/index.ts
+  - packages/api/src/domains/plugin/content-editor-runtime/runtime.ts
+  - packages/api/src/domains/plugin/host-broker/static-feature-authority.ts
+  - packages/api/src/domains/plugin/content-materializer-runtime/runtime.ts
+  - packages/api/src/domains/plugin/content-materializer-runtime/browser-runner.ts
   - packages/api/src/domains/plugin/runtime-composition.ts
   - packages/api/src/domains/plugin/builtin-runtime/hybrid-supervisor.ts
   - packages/api/src/domains/plugin/official-catalog.ts
@@ -44,6 +48,7 @@ cited_by:
   - {feature: F202, date: 2026-08-11, delta: K-2D supervised stdio runtime and dormant production composition}
   - {feature: F292, date: 2026-08-15, delta: Host-policy-pinned hot official release discovery with explicit release-fenced update}
   - {feature: F290, date: 2026-08-28, delta: bundled official Connector distribution and hybrid builtin/external lifecycle seam; Collective Service truth stays in collective-runtime}
+  - {feature: F309, date: 2026-09-06, delta: archive-bound static editor admission and a separately declared private semantic worker reuse the same inventory and Broker feature authority}
 ---
 
 # Plugin Framework
@@ -70,6 +75,20 @@ domain's canonical settlement before it can redispatch. Builtin loopback and a
 supervised child-process stdio bridge exercise the same state machine. Production
 composition constructs and restart-recovers these boundaries, but exposes no
 activation route and starts no package, so live runtime remains dormant.
+
+F309's DOCX consumer adds a zero-effect static editor class: an exact public archive and
+contribution are admitted by the official installer, explicitly enabled by the owner, and
+connected through the existing Broker hello/ready/runtime lease. Static feature authority
+stores its lease in the Broker ledger. It does not import package code into the Host.
+The optional public `semanticMaterializer` declares a separate closed browser worker. F202
+owns its verified private package snapshot, bundle SRI, sandboxed process, no-egress request
+boundary, input/output/resource limits, cancellation and disposal. It receives only bounded
+document bytes and typed operations; it cannot access a Host credential, owner-write API,
+configuration, state API, raw lease or human browser. F202 revalidates installation/grant/
+runtime/package authority before and after computation, and joins cancellation on disable.
+F309 owns authenticated editor sessions and semantic intent identity; F138 retains the final
+content CAS and receipts. Production composition stays dormant until explicit installation
+and enablement; the public worker declaration does not authorize activation.
 
 F292 keeps official-plugin policy and release metadata on opposite sides of the
 trust boundary. Clowder AI statically owns catalog identity, package name, plugin

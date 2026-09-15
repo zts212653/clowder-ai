@@ -8,12 +8,15 @@ import path from 'node:path';
 import { after, before, test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { chromium } from '../../../ppt-forge/node_modules/playwright/index.mjs';
+import { trajectoryFixture } from './f295-trajectory-fixture.mjs';
+import { runWorkGroupsJourney } from './f295-work-groups.journey.mjs';
 import { ensureWorkspaceOpen } from './f307-workspace-open.mjs';
 
 const WEB_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const NEXT_BIN = path.resolve(WEB_ROOT, '../../node_modules/next/dist/bin/next');
 const PRODUCTION_BUILD_ID_PATH = path.join(WEB_ROOT, '.next', 'BUILD_ID');
 const THREAD_ID = 'thread-f295-parallel';
+const HOST_THREAD_ID = 'thread-f295-host';
 
 async function findFreePort() {
   const socket = createServer();
@@ -84,8 +87,12 @@ const FIXED_API_FIXTURES = new Map([
   ['/api/messages', { messages: [], hasMore: false }],
   ['/api/tasks', { tasks: [] }],
   ['/api/bootcamp/threads', { threads: [] }],
-  ['/api/threads', { threads: [{ id: THREAD_ID, title: 'Parallel sampling', projectPath: '/project/cat-cafe' }] }],
+  [
+    '/api/threads',
+    { threads: [THREAD_ID, HOST_THREAD_ID].map((id) => ({ id, title: id, projectPath: '/project/cat-cafe' })) },
+  ],
   [`/api/threads/${THREAD_ID}`, { id: THREAD_ID, title: 'Parallel sampling', projectPath: '/project/cat-cafe' }],
+  [`/api/threads/${HOST_THREAD_ID}`, { id: HOST_THREAD_ID, title: 'Host chat', projectPath: '/project/cat-cafe' }],
 ]);
 
 function fixtureForApi(url) {
@@ -173,6 +180,7 @@ after(async () => {
 const parallelExecutions = ['codex-astra', 'fable5'].map((catId) => ({
   kind: 'live_invocation',
   executionId: 'shared-parent',
+  turnInvocationId: `turn-${catId}`,
   threadId: THREAD_ID,
   threadTitle: 'Parallel sampling',
   catId,
@@ -183,68 +191,110 @@ const parallelExecutions = ['codex-astra', 'fable5'].map((catId) => ({
   },
 }));
 
-test(
-  'parallel cats remain visible and independently cancelable in the real Workspace',
-  { timeout: 90_000 },
-  async () => {
-    const context = await browser.newContext({ viewport: { width: 1600, height: 1000 } });
-    const page = await context.newPage();
-    const pageErrors = [];
-    page.on('pageerror', (error) => pageErrors.push(error.message));
-    const cancelTargets = [];
-    let executions = [...parallelExecutions];
-    await page.route('**/api/**', async (route) => {
-      const url = new URL(route.request().url());
-      if (url.pathname === '/api/debug/callback-auth') return json(route, { error: 'forbidden' }, 403);
-      if (url.pathname === '/api/executions/active') {
-        return json(route, { projectPath: '/project/cat-cafe', executions });
-      }
-      if (url.pathname.endsWith('/executions/live/shared-parent/cancel')) {
-        const { catId } = route.request().postDataJSON();
-        cancelTargets.push({ pathname: url.pathname, catId });
-        executions = executions.filter((execution) => execution.catId !== catId);
-        return json(route, { ok: true, cancelled: true });
-      }
-      return json(route, fixtureForApi(url));
-    });
-    try {
-      await page.goto(baseUrl, { waitUntil: 'domcontentloaded' });
-      await page.getByRole('navigation', { name: '主导航' }).waitFor({ timeout: 20_000 });
-      await page.locator('[data-chat-container]').waitFor();
-      await ensureWorkspaceOpen(page);
-      const surface = page.getByTestId('workspace-developing');
-      await surface.waitFor();
-      await surface.getByRole('heading', { name: '2 件工作正在进行' }).waitFor();
-      const rows = surface.getByTestId('workspace-running-object');
-      assert.equal(await rows.count(), 2);
-      assert.match(await rows.nth(0).innerText(), /codex-astra/);
-      assert.match(await rows.nth(1).innerText(), /fable5/);
-      console.log(`F295 browser: ${baseUrl} shows both parallel cats`);
-      if (process.env.F295_SCREENSHOT_PATH) await surface.screenshot({ path: process.env.F295_SCREENSHOT_PATH });
-      await surface
-        .getByRole('button', { name: 'Stop codex-astra live_invocation shared-parent', exact: true })
-        .click();
-      await surface.getByRole('heading', { name: '一件工作正在进行' }).waitFor();
-      assert.equal(await rows.count(), 1);
-      assert.match(await rows.first().innerText(), /fable5/);
-      assert.equal(
+for (const viewport of [
+  { width: 1600, height: 1000 },
+  { width: 390, height: 844 },
+])
+  test(`live and background activities share one work row (${viewport.width}px)`, { timeout: 90_000 }, () =>
+    runWorkGroupsJourney({
+      browser,
+      baseUrl,
+      viewport,
+      threadId: THREAD_ID,
+      liveExecutions: parallelExecutions,
+      fixtureForApi,
+    }),
+  );
+
+for (const viewport of [
+  { width: 1600, height: 1000 },
+  { width: 390, height: 844 },
+])
+  test(
+    `parallel cats open exact details, navigate to Chat and cancel independently (${viewport.width}px)`,
+    { timeout: 90_000 },
+    async () => {
+      const context = await browser.newContext({ viewport });
+      const page = await context.newPage();
+      const pageErrors = [];
+      page.on('pageerror', (error) => pageErrors.push(error.message));
+      const cancelTargets = [];
+      const requestedInvocations = [];
+      let executions = [...parallelExecutions];
+      await page.route('**/api/**', async (route) => {
+        const url = new URL(route.request().url());
+        const trajectory = trajectoryFixture(url, THREAD_ID, requestedInvocations);
+        if (trajectory) return json(route, trajectory.body, trajectory.status);
+        if (url.pathname === '/api/debug/callback-auth') return json(route, { error: 'forbidden' }, 403);
+        if (url.pathname === '/api/executions/active') {
+          return json(route, { projectPath: '/project/cat-cafe', executions });
+        }
+        if (url.pathname.endsWith('/executions/live/shared-parent/cancel')) {
+          const { catId } = route.request().postDataJSON();
+          cancelTargets.push({ pathname: url.pathname, catId });
+          executions = executions.filter((execution) => execution.catId !== catId);
+          return json(route, { ok: true, cancelled: true });
+        }
+        return json(route, fixtureForApi(url));
+      });
+      try {
+        await page.goto(baseUrl.replace(THREAD_ID, HOST_THREAD_ID), { waitUntil: 'domcontentloaded' });
+        await page.getByRole('navigation', { name: '主导航' }).waitFor({ timeout: 20_000 });
+        await page.locator('[data-chat-container]').waitFor();
+        await ensureWorkspaceOpen(page);
+        const surface = page.getByTestId('workspace-developing');
+        await surface.waitFor();
+        await surface.getByRole('heading', { name: '2 件工作正在进行' }).waitFor();
+        const rows = surface.getByTestId('workspace-running-object');
+        assert.equal(await rows.count(), 2);
+        await rows.first().getByRole('link', { name: 'Chat', exact: true }).click();
+        await page.waitForURL(`**/thread/${THREAD_ID}`);
+        await page.getByTestId('f307-experience-workbench').waitFor({ state: 'hidden' });
+        await ensureWorkspaceOpen(page);
+        for (const catId of ['codex-astra', 'fable5']) {
+          await rows.filter({ hasText: catId }).getByTestId('workspace-open-running-object').click();
+          const detail = page.locator('[data-testid="invocation-trajectory-detail"]:visible');
+          await detail.waitFor();
+          await detail.locator('header').getByText(`turn-${catId}`, { exact: true }).waitFor();
+          await page.getByRole('link', { name: 'Chat', exact: true }).click();
+          await page.waitForURL(`**/thread/${THREAD_ID}`);
+          await page.getByTestId('f307-experience-workbench').waitFor({ state: 'hidden' });
+          await ensureWorkspaceOpen(page);
+          await page.getByTestId('f307-add-surface').click();
+          await surface.getByRole('heading', { name: '2 件工作正在进行' }).waitFor();
+        }
+        assert.equal(await page.getByTestId('f307-tab-kind-agent-run').count(), 2);
+        assert.deepEqual([...new Set(requestedInvocations)].sort(), ['turn-codex-astra', 'turn-fable5']);
+        await page.screenshot({ path: `/tmp/f295-running-navigation-${viewport.width}.png` });
+        assert.match(await rows.nth(0).innerText(), /codex-astra/);
+        assert.match(await rows.nth(1).innerText(), /fable5/);
+        console.log(`F295 browser: ${baseUrl} shows both parallel cats`);
+        if (process.env.F295_SCREENSHOT_PATH) await surface.screenshot({ path: process.env.F295_SCREENSHOT_PATH });
         await surface
-          .getByRole('button', { name: 'Stop fable5 live_invocation shared-parent', exact: true })
-          .isEnabled(),
-        true,
-      );
-      assert.deepEqual(cancelTargets, [
-        { pathname: `/api/threads/${THREAD_ID}/executions/live/shared-parent/cancel`, catId: 'codex-astra' },
-      ]);
-      await page.reload({ waitUntil: 'domcontentloaded' });
-      await ensureWorkspaceOpen(page);
-      await surface.getByRole('heading', { name: '一件工作正在进行' }).waitFor();
-      assert.equal(await rows.count(), 1);
-      assert.match(await rows.first().innerText(), /fable5/);
-      assert.deepEqual(pageErrors, []);
-      console.log('F295 browser: stopping Astra leaves Fable visible and cancelable; reload preserves Fable');
-    } finally {
-      await context.close();
-    }
-  },
-);
+          .getByRole('button', { name: 'Stop codex-astra live_invocation shared-parent', exact: true })
+          .click();
+        await surface.getByRole('heading', { name: '一件工作正在进行' }).waitFor();
+        assert.equal(await rows.count(), 1);
+        assert.match(await rows.first().innerText(), /fable5/);
+        assert.equal(
+          await surface
+            .getByRole('button', { name: 'Stop fable5 live_invocation shared-parent', exact: true })
+            .isEnabled(),
+          true,
+        );
+        assert.deepEqual(cancelTargets, [
+          { pathname: `/api/threads/${THREAD_ID}/executions/live/shared-parent/cancel`, catId: 'codex-astra' },
+        ]);
+        await page.reload({ waitUntil: 'domcontentloaded' });
+        await ensureWorkspaceOpen(page);
+        await page.getByTestId('f307-add-surface').click();
+        await surface.getByRole('heading', { name: '一件工作正在进行' }).waitFor();
+        assert.equal(await rows.count(), 1);
+        assert.match(await rows.first().innerText(), /fable5/);
+        assert.deepEqual(pageErrors, []);
+        console.log('F295 browser: stopping Astra leaves Fable visible and cancelable; reload preserves Fable');
+      } finally {
+        await context.close();
+      }
+    },
+  );
