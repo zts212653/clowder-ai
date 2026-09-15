@@ -83,6 +83,50 @@ describe('F280 wait state machine', () => {
     assert.equal(result.state.waitOutcome?.delivery, 'not_applicable');
   });
 
+  /*
+   * #1392 AC-2: `expiresAt` is optional, and omitted means no time-based termination at all.
+   * An absent deadline must not be read as "already expired" (NaN/undefined comparisons are
+   * false in one direction and silently true in another), and it must not be read as "never
+   * matched" either — both would change the lifecycle without anyone asking for a deadline.
+   */
+  it('an await with no expiresAt is never expired by time, however late', async () => {
+    const { transitionWaitState } = await import(MODULE_URL.href);
+    const { expiresAt: _omitted, ...noDeadline } = activeAwait();
+    const result = transitionWaitState(
+      { await: noDeadline },
+      {
+        type: 'predicates_matched',
+        generation: 4,
+        at: Number.MAX_SAFE_INTEGER,
+        matched: [{ kind: 'pr_ci_terminal', delta: 'CI pending → pass' }],
+      },
+    );
+
+    assert.equal(result.applied, true);
+    assert.equal(result.state.waitOutcome?.reason, 'matched', 'an omitted deadline is not an expired one');
+  });
+
+  it('an await with no expiresAt and nothing matched stays active', async () => {
+    const { transitionWaitState } = await import(MODULE_URL.href);
+    const { expiresAt: _omitted, ...noDeadline } = activeAwait();
+    const result = transitionWaitState(
+      { await: noDeadline },
+      { type: 'predicates_matched', generation: 4, at: Number.MAX_SAFE_INTEGER, matched: [] },
+    );
+
+    assert.equal(result.applied, false);
+    assert.equal(result.reason, 'empty_match');
+  });
+
+  it('isAwaitExpired answers the deadline question the same way for every caller', async () => {
+    const { isAwaitExpired } = await import(MODULE_URL.href);
+    const { expiresAt: _omitted, ...noDeadline } = activeAwait();
+
+    assert.equal(isAwaitExpired(noDeadline, Number.MAX_SAFE_INTEGER), false, 'no deadline never expires');
+    assert.equal(isAwaitExpired(activeAwait({ expiresAt: 500 }), 499), false);
+    assert.equal(isAwaitExpired(activeAwait({ expiresAt: 500 }), 500), true, 'the deadline itself is expired');
+  });
+
   it('owner change terminalizes the old generation silently', async () => {
     const { transitionWaitState } = await import(MODULE_URL.href);
     const result = transitionWaitState({ await: activeAwait() }, { type: 'owner_changed', generation: 4, at: 600 });

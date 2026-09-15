@@ -166,7 +166,7 @@ triggers:
 - **不要为每个 PR/issue 自动注册 tracking**。只有以下两类情况才注册显式 typed predicate：
   1. 工作真实阻塞在外部条件（等作者回复、等 CI、等 maintainer review）。
   2. 计划做 formal external review 时，需要先用 `cat_cafe_register_pr_tracking` seed projection，才能在终端态记录 `cat_cafe_record_external_review_verdict`。
-- 注册时必须写明 `when`、阻塞解除后的 `nextStep` 和 `expiresAt`。
+- 注册时必须写明 `when` 和阻塞解除后的 `nextStep`；`expiresAt` 可选——省略则没有时间到期，写了就是一个真实、可见的截止时间。
 - Advisory / triage / 纯审计不需要注册 tracking。
 
 ### Merge / closure

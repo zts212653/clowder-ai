@@ -15,6 +15,7 @@ import type {
 import { deliverConnectorMessage } from '../../infrastructure/email/deliver-connector-message.js';
 import type { IWaitLifecycleEventLog } from '../ball-custody/WaitLifecycleEventLog.js';
 import {
+  isAwaitExpired,
   markWaitOutcomeDelivered,
   markWaitOutcomeLegacyUnfenced,
   transitionWaitState,
@@ -185,7 +186,7 @@ export class GitHubWaitLifecycleService {
         };
       } else {
         const matched = matchGitHubWaitPredicates(active.continuation.when, active.baseline, input.facts);
-        if (matched.length === 0 && at < active.expiresAt) {
+        if (matched.length === 0 && !isAwaitExpired(active, at)) {
           if (input.collectorPatch) {
             await this.opts.taskStore.patchAutomationState(task.id, input.collectorPatch as Partial<AutomationState>);
           }

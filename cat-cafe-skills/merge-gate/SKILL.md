@@ -266,7 +266,7 @@ EOF
 #      repoFullName, prNumber,
 #      when=[1–4 个 typed predicate],
 #      nextStep="条件满足后的具体动作",
-#      expiresAt=<future unix ms>
+#      expiresAt=<future unix ms>   # 可选；省略则没有时间到期
 #    )
 # 例：当前下一步是“CI 到终态后继续 merge-gate”：
 #    when=[{kind:'pr_ci_terminal'}, {kind:'pr_became_conflicting'}]

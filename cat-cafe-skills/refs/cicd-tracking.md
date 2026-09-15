@@ -29,7 +29,7 @@ cat_cafe_register_pr_tracking(
     { kind: "pr_became_conflicting" }
   ],
   nextStep="Re-check checks and mergeability, then continue merge-gate.",
-  expiresAt=<future unix ms>
+  expiresAt=<future unix ms>  # 可选；省略则没有时间到期
 )
 ```
 

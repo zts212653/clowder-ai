@@ -91,6 +91,35 @@ describe('F280 GitHub wait lifecycle integration', () => {
     assert.equal((await taskStore.get(task.id)).automationState.review.lastDecisionCursor, 99);
   });
 
+  /*
+   * The trap in making `expiresAt` optional: the unmatched branch used `at < active.expiresAt`.
+   * With no deadline that is `at < undefined`, which is false, so an ordinary quiet poll fell
+   * through to a transition, came back as `empty_match`, and was reported `deduped` — skipping
+   * the collector patch. Nothing woke anyone, which is why it would have stayed invisible.
+   */
+  it('a wait with no expiresAt keeps a quiet poll state-only and still records collector progress', async () => {
+    const { lifecycle, messageStore, taskStore, task } = await harness([{ kind: 'pr_head_changed' }]);
+    const current = (await taskStore.get(task.id)).automationState;
+    const { expiresAt: _omitted, ...noDeadline } = current.await;
+    await taskStore.replaceAutomationStateIfGeneration(task.id, {
+      expectedGeneration: current.await.generation,
+      expectedUpdatedAt: (await taskStore.get(task.id)).updatedAt,
+      automationState: { ...current, await: noDeadline },
+    });
+
+    const result = await lifecycle.observe({
+      taskId: task.id,
+      facts: { headSha: 'aaaa1111', review: { decisionCursor: 99 } },
+      collectorPatch: { review: { lastDecisionCursor: 99 } },
+    });
+
+    assert.equal(result.kind, 'state_only', 'a quiet poll is not a dedup, deadline or no deadline');
+    assert.equal(messageStore.getByThread('thread_1').length, 0);
+    const after = (await taskStore.get(task.id)).automationState;
+    assert.equal(after.await.generation, 3, 'still the same live generation');
+    assert.equal(after.review.lastDecisionCursor, 99, 'the collector patch must still land');
+  });
+
   it('keeps CI failure and mindfn COMMENTED state-only, then wakes once for the awaited new HEAD', async () => {
     const { lifecycle, messageStore, taskStore, task } = await harness([{ kind: 'pr_head_changed' }]);
     const log = { info() {}, warn() {}, error() {} };
