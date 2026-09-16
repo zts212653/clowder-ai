@@ -1,0 +1,21 @@
+{
+  "verdictId": "2026-08-15-eval-friction-c1-mixed-actionable-singletons",
+  "domainId": "eval:friction",
+  "createdAt": "2026-08-15T03:04:49Z",
+  "verdict": "fix",
+  "harnessUnderEval": {
+    "featureId": "F245",
+    "componentId": "friction-rollup",
+    "name": "friction rollup (Top-N + sensorForm)"
+  },
+  "ownerAsk": {
+    "targetFeatureId": "F245",
+    "targetOwnerCatId": "opus-47",
+    "requestedAction": "Triage both current actionable singleton clusters at the F245 rollup layer: keep the F156/session-recovery repair open because the direct-channel '还是不行' complaint recurred, and inspect the new high-severity a2a_timeout: opus singleton to decide whether it is transient environment drift or a separately owned repair thread."
+  },
+  "acceptanceReevalPlan": {
+    "nextEvalAt": "2026-08-18T03:00:00.000Z",
+    "closureCondition": "Close this finding only after a subsequent every-3d window returns zero actionableCandidates, or the recurring direct-channel complaint is eliminated and the Opus timeout singleton is shown to be transient and non-recurring."
+  },
+  "schemaVersion": 1
+}
