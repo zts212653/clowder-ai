@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
-const EXPECTED_PUBLIC_KEYS = ['expiresAt', 'issueNumber', 'nextStep', 'repoFullName', 'when'];
+const EXPECTED_PUBLIC_KEYS = ['autoRenew', 'expiresAt', 'issueNumber', 'nextStep', 'repoFullName', 'when'];
 
 describe('F280 register_issue_tracking public contract', () => {
   it('exposes only typed issue wait inputs', async () => {
@@ -42,6 +42,102 @@ describe('F280 register_issue_tracking public contract', () => {
       for (const forbidden of ['wakePolicy', 'instructions', 'trackingInstructions', 'baseline']) {
         assert.equal(Object.hasOwn(requestBody, forbidden), false, `${forbidden} must not cross the public boundary`);
       }
+    } finally {
+      globalThis.fetch = originalFetch;
+      for (const key of Object.keys(process.env)) if (!(key in originalEnv)) delete process.env[key];
+      Object.assign(process.env, originalEnv);
+    }
+  });
+  /*
+   * #1392 AC-2: `expiresAt` is optional. The key stays in the public contract (a caller who wants
+   * a deadline must be able to state it), but omitting it must mean "no time-based termination"
+   * and must not reach the server as an explicit null or a zero.
+   */
+  it('makes expiresAt optional without removing it from the contract', async () => {
+    const { registerIssueTrackingInputSchema } = await import('../dist/tools/callback-tools.js');
+    assert.equal(registerIssueTrackingInputSchema.expiresAt.isOptional(), true);
+  });
+
+  it('does not serialize an omitted expiresAt', async () => {
+    const originalFetch = globalThis.fetch;
+    const originalEnv = { ...process.env };
+    let requestBody;
+    process.env.CAT_CAFE_API_URL = 'http://127.0.0.1:1';
+    process.env.CAT_CAFE_INVOCATION_ID = 'f280-no-deadline-invocation';
+    process.env.CAT_CAFE_CALLBACK_TOKEN = 'f280-no-deadline-token';
+    process.env.CAT_CAFE_CALLBACK_RETRY_DELAYS_MS = '0,0,0';
+    globalThis.fetch = async (_url, options) => {
+      requestBody = JSON.parse(options.body);
+      return { ok: true, json: async () => ({ status: 'ok' }) };
+    };
+    try {
+      const { handleRegisterIssueTracking } = await import('../dist/tools/callback-tools.js');
+      await handleRegisterIssueTracking({
+        repoFullName: 'zts212653/cat-cafe',
+        issueNumber: 861,
+        when: [{ kind: 'issue_comment_added' }],
+        nextStep: 'Continue.',
+      });
+      assert.equal(Object.hasOwn(requestBody, 'expiresAt'), false, 'issue: no deadline was asked for');
+    } finally {
+      globalThis.fetch = originalFetch;
+      for (const key of Object.keys(process.env)) {
+        if (!(key in originalEnv)) delete process.env[key];
+      }
+      Object.assign(process.env, originalEnv);
+    }
+  });
+  it('offers autoRenew as an optional single-fire opt-out', async () => {
+    const { registerIssueTrackingInputSchema } = await import('../dist/tools/callback-tools.js');
+    assert.equal(registerIssueTrackingInputSchema.autoRenew.isOptional(), true);
+  });
+
+  /*
+   * #1392 AC-3: `issue_comment_added` accepts an optional `authorLogins`. The server honoured it,
+   * but this tool's strict schema refused the key — so the audience existed only for raw HTTP
+   * callers, and no cat could use it.
+   */
+  it('accepts an optional issue comment audience and forwards it unchanged', async () => {
+    const { registerIssueTrackingInputSchema, handleRegisterIssueTracking } = await import(
+      '../dist/tools/callback-tools.js'
+    );
+    const named = [{ kind: 'issue_comment_added', authorLogins: ['maintainer'] }];
+    assert.equal(registerIssueTrackingInputSchema.when.safeParse(named).success, true, 'named audience');
+    assert.equal(
+      registerIssueTrackingInputSchema.when.safeParse([{ kind: 'issue_comment_added' }]).success,
+      true,
+      'omitted audience stays valid for issues',
+    );
+    assert.equal(
+      registerIssueTrackingInputSchema.when.safeParse([{ kind: 'issue_comment_added', authorLogins: [] }]).success,
+      false,
+      'an empty audience matches nobody',
+    );
+    assert.equal(
+      registerIssueTrackingInputSchema.when.safeParse([{ kind: 'issue_comment_added', authorLogins: [' '] }]).success,
+      false,
+      'a blank login matches nobody either',
+    );
+
+    const originalFetch = globalThis.fetch;
+    const originalEnv = { ...process.env };
+    let requestBody;
+    process.env.CAT_CAFE_API_URL = 'http://127.0.0.1:1';
+    process.env.CAT_CAFE_INVOCATION_ID = 'f280-issue-audience-invocation';
+    process.env.CAT_CAFE_CALLBACK_TOKEN = 'f280-issue-audience-token';
+    process.env.CAT_CAFE_CALLBACK_RETRY_DELAYS_MS = '0,0,0';
+    globalThis.fetch = async (_url, options) => {
+      requestBody = JSON.parse(options.body);
+      return { ok: true, json: async () => ({ status: 'ok' }) };
+    };
+    try {
+      await handleRegisterIssueTracking({
+        repoFullName: 'zts212653/cat-cafe',
+        issueNumber: 1392,
+        when: named,
+        nextStep: 'Read the maintainer reply.',
+      });
+      assert.deepEqual(requestBody.when, named);
     } finally {
       globalThis.fetch = originalFetch;
       for (const key of Object.keys(process.env)) if (!(key in originalEnv)) delete process.env[key];

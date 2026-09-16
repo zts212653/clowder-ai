@@ -40,9 +40,12 @@ export interface GitHubFeedbackFilter {
 export function createGitHubFeedbackFilter(opts: GitHubFeedbackFilterOptions): GitHubFeedbackFilter {
   const getSelfGitHubLogin = (): string | undefined =>
     opts.getSelfGitHubLogin ? opts.getSelfGitHubLogin() : opts.selfGitHubLogin;
+  // #1392: GitHub logins are case-insensitive. An exact comparison was harmless only
+  // while comments never reached a predicate; once they do, a configured login whose case differs
+  // from GitHub's would wake the owner with their own comments.
   const isSelfAuthored = (author: string): boolean => {
     const selfGitHubLogin = getSelfGitHubLogin();
-    return selfGitHubLogin != null && author === selfGitHubLogin;
+    return selfGitHubLogin != null && author.toLowerCase() === selfGitHubLogin.toLowerCase();
   };
 
   return {
