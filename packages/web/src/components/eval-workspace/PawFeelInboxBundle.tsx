@@ -2,6 +2,7 @@
 
 import type { PawFeelReviewBundle } from '@cat-cafe/shared';
 import { useMemo, useState } from 'react';
+import { pawFeelContinuationLabel } from '../paw-feel/paw-feel-issue-presentation';
 import { PawFeelInboxRow } from './PawFeelInboxRow';
 
 const BASIS_LABELS: Record<PawFeelReviewBundle['basis'], string> = {
@@ -49,6 +50,7 @@ export function PawFeelInboxBundle({ bundle }: { bundle: PawFeelReviewBundle }) 
       data-testid="paw-feel-inbox-bundle"
       data-basis={bundle.basis}
       data-responsibility={bundle.responsibility.state}
+      data-resolution={bundle.issue.resolution}
     >
       <div className="flex min-w-0 flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
         <div className="min-w-0">
@@ -62,6 +64,10 @@ export function PawFeelInboxBundle({ bundle }: { bundle: PawFeelReviewBundle }) 
             >
               {RESPONSIBILITY_LABELS[bundle.responsibility.state]}
               {!bundle.responsibility.validExit ? ' · 尚未形成有效出口' : ''}
+            </span>
+            <span className="rounded-full border border-current px-1.5 py-0.5 text-micro text-cafe-secondary">
+              {bundle.issue.resolution === 'resolved' ? '问题已解决' : '问题仍开放'} ·{' '}
+              {pawFeelContinuationLabel(bundle.issue.continuation.kind)}
             </span>
           </div>
           <div className="mt-1 truncate text-micro text-cafe-muted" title={stateSummary}>

@@ -23,7 +23,10 @@ describe('F278 responsibility transitions', () => {
 
     const result = await service.execute(
       { kind: 'cat', id: 'opus' },
-      command('mark_fix', source.signalId, 1, { leaseId: 'lease-source-owner' }),
+      command('mark_fix', source.signalId, 1, {
+        leaseId: 'lease-source-owner',
+        actionRef: 'fixture-action-source-owner',
+      }),
     );
 
     assert.equal(result.outcome, 'appended');
@@ -60,11 +63,19 @@ describe('F278 responsibility transitions', () => {
     await service.discover(reboundSource, { backfilled: false });
     await service.execute(
       { kind: 'cat', id: 'opus' },
-      command('mark_fix', reboundSource.signalId, 1, { eventId: 'repair-old', leaseId: 'lease-old' }),
+      command('mark_fix', reboundSource.signalId, 1, {
+        eventId: 'repair-old',
+        leaseId: 'lease-old',
+        actionRef: 'fixture-action-old',
+      }),
     );
     const rebound = await service.execute(
       { kind: 'cat', id: 'fable-5' },
-      command('mark_fix', reboundSource.signalId, 2, { eventId: 'repair-new', leaseId: 'lease-new' }),
+      command('mark_fix', reboundSource.signalId, 2, {
+        eventId: 'repair-new',
+        leaseId: 'lease-new',
+        actionRef: 'fixture-action-new',
+      }),
     );
     assert.equal(rebound.projection.ownerCatId, 'fable-5');
     assert.equal(rebound.projection.taskId, 'task-new');
@@ -73,7 +84,11 @@ describe('F278 responsibility transitions', () => {
     await service.discover(blockedSource, { backfilled: false });
     await service.execute(
       { kind: 'cat', id: 'opus' },
-      command('mark_fix', blockedSource.signalId, 1, { eventId: 'repair-before-block', leaseId: 'lease-old' }),
+      command('mark_fix', blockedSource.signalId, 1, {
+        eventId: 'repair-before-block',
+        leaseId: 'lease-old',
+        actionRef: 'fixture-action-old',
+      }),
     );
     const blocked = await service.execute(
       { kind: 'cat', id: 'opus' },
@@ -81,6 +96,7 @@ describe('F278 responsibility transitions', () => {
         eventId: 'repair-expired-blocker',
         blockerCode: 'lease_expired',
         blockerRef: 'lease:lease-old:expired',
+        resume: { kind: 'bounded_time', recheckAt: '2026-07-27T00:00:00.000Z' },
       }),
     );
     assert.equal(blocked.projection.state, 'blocked');
@@ -204,14 +220,14 @@ describe('F278 responsibility transitions', () => {
         eventId: 'signature-blocked',
         blockerCode: 'independent_signer_unavailable',
         blockerRef: 'thread:thread_eval_friction:signature-request-before-blocker',
+        resume: { kind: 'bounded_time', recheckAt: '2026-07-27T00:00:00.000Z' },
       }),
     );
     assert.equal(blocked.projection.state, 'blocked');
     assert.equal(blocked.projection.signatureRequest, undefined);
-    assert.deepEqual(blocked.projection.blocker, {
-      code: 'independent_signer_unavailable',
-      ref: 'thread:thread_eval_friction:signature-request-before-blocker',
-    });
+    assert.equal(blocked.projection.blocker.code, 'independent_signer_unavailable');
+    assert.equal(blocked.projection.blocker.ref, 'thread:thread_eval_friction:signature-request-before-blocker');
+    assert.equal(blocked.projection.blocker.resumeCondition.selector.kind, 'bounded_time');
   });
 
   it('rejects forged bundle membership before writing any member', async () => {

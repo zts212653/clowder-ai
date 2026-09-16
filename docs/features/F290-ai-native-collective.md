@@ -4,19 +4,41 @@ related_features: [F044, F077, F128, F168, F195, F202, F232, F246, F254, F276, F
 topics: [ai-native-collaboration, multi-human, multi-agent, collective, cafe, channel, topic, asset, annotation, rich-message, task, vote, team-memory]
 doc_kind: spec
 created: 2026-08-08
+updated: 2026-09-07
 description: "让多个独立 Café 在同一个 Collective 中围绕对话、资产、工作与关系持续协同；私人空间不被吞并，承诺、来源与团队记忆也不会掉线。"
 description_source: human
 description_author: codex-sol
 description_updated_at: 2026-08-29T18:45:00-07:00
-design_gate_claim_contracts: []
+design_gate_claim_contracts:
+  - docs/design-gate-claims/f290-canonical-client-assembly.json
+  - docs/design-gate-claims/f290-host-assembly.json
+mcp_admission_status: accepted
+mcp_admission_ref: "file:docs/features/F290-ai-native-collective.md"
+mcp_admission_claims:
+  - ref: "file:docs/features/F290-ai-native-collective.md"
+    toolName: cat_cafe_collective_current_context
+    resourceFamily: collective-participation
+    boundaryKind: resource-entry
+    decision: accepted
+  - ref: "file:docs/features/F290-ai-native-collective.md"
+    toolName: cat_cafe_collective_read_context
+    resourceFamily: collective-participation
+    boundaryKind: resource-entry
+    decision: accepted
+  - ref: "file:docs/features/F290-ai-native-collective.md"
+    toolName: cat_cafe_collective_reply
+    resourceFamily: collective-participation
+    boundaryKind: resource-entry
+    decision: accepted
 ---
 
 # F290: AI-native Collective — 多人·多 Agent 共同世界
 
-> **Status**: implementation / provider onboarding landed in PR #4296; local activation awaits real GitHub UAT
-> **Owner**: 小太阳·Maine Coon (@codex-sol, GPT-5.6 Sol)
+> **Status**: implementation / first-cat participation landed; 2026-09-18 usable-release candidate work active; real GitHub UAT and full Collective experience remain open
+> **Owner**: 小星星·Maine Coon (@codex-astra, GPT-6 Astra；operator 2026-09-06 交接)
+> **Design / implementation provenance**: Sol + Fable 共创原设计；Sol 负责既有 runtime/provider 纵切片
 > **Priority**: P1
-> **operator kickoff**: `[thread-id]` / `0001786242747248-000502-77c148cd`
+> **operator kickoff**: `[thread-id]` / `private-source-id`
 
 Architecture cell: collective-runtime, plugin
 
@@ -25,6 +47,13 @@ Map delta: `new collective-runtime cell + plugin cell anchor update`
 Why: `collective-runtime` 拥有独立 Service、canonical Client、成员/连接/事件顺序与 endpoint
 协议真相；`plugin` 继续只拥有 Clowder AI Host 的官方安装、生命周期和 builtin runtime seam。
 Workbench、内容协作、Cat Agent runtime 与工具权限仍由 F307/F309/既有 runtime owner 持有。
+
+首猫 MCP admission 索引只登记已冻结计划的 current-context/read/reply 三个资源入口，归正式
+collab server 的 `collective-participation` family；读取与发送仍分别校验当前 invocation、授权来源
+和 opaque refs，回复 operation 由现有 outbox owner 分配/恢复。依据为 operator 授权
+`private-source-id`、Sol 文档批准 `private-source-id`，以及
+这里没有批准新增私人执行权限，也不代替实施 thread `[thread-id]` 的代码 review、
+真实双 Human UAT 或完整 F290 验收。
 
 ## Why
 
@@ -150,7 +179,7 @@ Workbench。
 
 1. **Server provider 真实 UAT**：本轮实现候选已把“部署新 Service / 连接已有 Service”、独立进程托管、
    GitHub App Manifest provider setup、mode-`0600` 凭据、一次性 bootstrap、状态诚实与原实例恢复接进同一
-   产品入口；fake-provider 与真实进程测试均已通过。它仍须在 exact-HEAD review 后，用真实 GitHub 账号从
+   产品入口；PR #4296 已完成 review 与合入。它仍须用真实 GitHub 账号从
    干净 Alpha 完成首次创建、授权、登录与当前 Café pairing，才能勾选 AC-L1 或打开本机激活门。
 2. **真实 Collective 入口 / world switch**：生产 Clowder AI 尚未把 5102 baseline 的 global rail、
    Collective destination 与返回个人 Café 的完整旅程做实。
@@ -163,8 +192,59 @@ Workbench。
    public projection 仍未实现。
 6. **真实团队 dogfood**：还没有用 You + 吴浪 / 社区协作者完成从共同讨论到各 Café 执行再回流
    的端到端工作。
-7. **Workbench 尚未对齐**：当前 shell 仍不是 Composable Workbench；这是 F307 的开放项，不作为
-   F290 完成标准，也不阻塞 F290 沿现有壳继续验证 Collective 核心旅程。
+7. **Collective 的宿主 adapter 尚未补齐**：F307 的通用 Workbench 已有 landed/live 证据；F290 仍须
+   把自己的领域对象、权限投影与返回位置接入该宿主。不能把这项缺口继续登记成“等待 F307”，也不能复制布局状态。
+8. **首猫真实参与尚待 UAT**：选猫、参与范围、稳定具名身份、正式 Collective MCP / skill、受限
+   公共调用与独立 owner admission 后的私人 Work 回流已随 PR #4396 合入。隔离的浏览器、原生猫
+   工具与持久化测试已通过；runtime 尚未加载，仍须用两个不同的真实 GitHub Human 走通 J0、
+   refresh/restart/revoke 与 AC-A8/AC-C3，不能以“Café 连接在线”或 synthetic fixture 替代。
+
+### 2026-09-06 Takeover — 从连接在线到首猫真实参与
+
+operator 在 `private-source-id` 将 F290 推进交给 Astra，并要求接齐原设计、F309/F310
+
+- **设计 anchor 仍在**：`feat/collective-experience-gate`；最后 UI `4c479dd6e53cacad4eb1cd274a14afbf63176ac3`，
+  分支 audit HEAD `a981211f1bcc5bd2b432e457be5f31deeabc667e`。复用产品语法，不复制 fixture 或旧外壳。
+- **本机观察不等于完整激活验收**：operator 已在本机 canonical Client 发过 Human 消息与 Topic 回复；
+  2026-09-06 只读核验发现 Service 与两个 endpoint connection 在线，但它们绑定同一 Human/Collective。
+  这不是两个真实 Human 的 AC-L2，也未证明干净首次配置、重启恢复或 Agent 发言。L1–L3 保持未勾选。
+- **下一条完整用户旅程**：从既有部署/登录/pairing 继续，让人带第一只具名猫进入共同现场，猫经
+  正式工具读到被授权的公共上下文、回复原消息；有明确委托时再进入私人执行并回传可公开结果。
+  先证明真实人与猫能协作，再扩展产物协同与其余目的地；不以配置按钮可点或 callback 存在交付。
+- **依赖事实**：F309 GenOffice DOCX 的准入实现仍在隔离分支，未完成发布、宿主装配和真实编辑验收；
+  它是后续共同产物的内容协作依赖，不阻塞首猫 Channel 旅程。F310 继续拥有全局 Needs Me 与委托闭环。
+  F290 只提供自己的来源、公共对象和权限裁剪后的回流；既有 F307/F309/F310 ownership 不变。
+
+### 2026-09-06 First Cat Implementation — landed，真实验收继续开放
+
+[PR #4396](https://github.com/zts212653/clowder-ai/pull/4396) 已合入 main，merge SHA
+`a267881e72067c1fdd3940ef618983a19dc25600`。公开请求先进入限域 participation grant，正式挂载
+current-context/read/reply 三个工具；持续私人执行独立核验本地 owner admission，并复用 canonical
+Task。当前来源与持久回复 operation 在重启、丢响应和撤权时维持原位置、原署名与不重复发送。
+首版公共执行只启用经过装机隔离探针验证的 Codex provider；其他 provider 明确不可用。
+
+Terra 完整 INV-1～8 审查与实际合流差异审查、Opus 4.7 独立 full PR 审查均批准，无 open P0/P1/P2。
+后者按 merge-gate 接替已实核额度耗尽的云端来源；typed verdict
+`[thread-id]#private-source-id` 覆盖 exact `d8bf1bace31c`。
+完整安全门禁 run `f8b58613-98cd-4461-ad3e-1bc9dd9fb563`、当前合流点定向验证、Redis 174/174、
+实际 direct/embedded 浏览器旅程与 native Codex policy 均通过，完整证据和 continuity 见 PR。
+
+`main=landed:a267881e72`；`live=dormant`：合入后只读核验 runtime HEAD 仍为 `510e3d53ee`，
+未加载目标提交。浏览器身份仍是 synthetic；AC-L1/L2/L3、AC-A8、AC-C3、双 Human 真实 GitHub
+UAT 与完整 F290 acceptance 保持开放。这里只完成实施/review/合入子任务，不关闭主 thread 的整体责任。
+
+### 2026-09-11 Usable Release Handoff — 自动带入 Café，而不是逐猫配置
+
+operator 在 `private-source-id` 明确纠正“带猫加入”的默认旅程：Host 应自动发现
+自家已配置且具备公共参与资格的伙伴、默认带入，用户只处理显式排除和必要的频道例外；打开
+「我的 Café」先看到当前现场相关的工作、伙伴活动、待人判断与返回入口，参与管理退到次级入口。
+随后 `private-source-id` 要求在 2026-09-14–20 交付完整可用版本，并把实施交给
+Sol。Astra 保留总体计划/架构责任，Sol 是当前唯一实施与集成接手人。可执行范围、日期、风险和
+
+自动接入保持三份真相：Host 的 desired policy（默认纳入、显式排除、频道 override）、运行时观测到的
+eligibility，以及实际物化的 Café×Channel cat associations。资格暂失或恢复不改写用户偏好；reconcile
+只物化策略允许且当前有资格的交集；排除/撤回优先于默认值和旧 connection。接入仍不等于唤醒、
+私人委托或 owner authority。该计划不缩减 J0–J7 / R1–R22，也不构成生产激活或 Feature 关闭授权。
 
 ### 2026-09-03 Server Provider Closure — 身份提供方不是手工前置条件
 
@@ -215,6 +295,22 @@ Collective / Channel / Thread / Living Projection 是稳定产品对象，“长
 只属于可变体验语言。
 
 ## Product Boundary
+
+### Channel 接收端与多 Thread 关系（2026-09-07 原设计查漏）
+
+沿用 vision §5.1–5.3：每 Café×Channel 有一个 Host 侧逻辑接收端（还须校验 Service / Collective
+范围），保存持久游标、standing interest、上下文胶囊与多猫参与关系。接收端不是某次 LLM
+session，也不是“一只猫一条跨频道公共 Thread”；同一猫参加多个频道时，频道上下文分开。
+系统管理接收 Thread，用户只需理解成员/范围，不逐条手填 Thread ID 或照搬 F247 的网页会话绑定。
+
+无 @ 消息仍到达端点，按各家已声明的关注和值守关系安排有界注意力；表达允许安静，提问/
+邀请须显示尚未接住或已回应，不能落库即等同于有人处理。显式具名 @ 优先且保持直接寻址。
+一个端点可以关联多项 Work 与私人 Thread；续接必须有精确来源、工作关系与有效家内准入，
+不能让公共引用自己授予 owner 权限，或以最近 Thread / 固定映射兜底。
+
+当前代码已自动建接收 Thread，但仍以 connection 内 human:cat 为单位；无 @ 只落默认 ingress，
+来源：operator `private-source-id`、`private-source-id`、
+`private-source-id`；Fable 查漏 `private-source-id`。
 
 ### F290 包含
 
@@ -508,6 +604,27 @@ Channel 回复和资产批注都是协同，但不合并成两套聊天真相：
 
 ## User Journey
 
+### J0 — 人带第一只猫入场，并完成一次真实协作
+
+**Scope unit**：每 Café×Channel 的接收端及其具名猫、公共来源与多个获准私人 Work / Thread 的关系；
+首猫只定义体验起点，不限制端点只能一猫或一项工作。
+从成员/「我的 Café」接引、Channel 输入框 @、按相关 Work 回家与原处回流；同一 Client 的
+direct/embedded 装配先过体验确认，再进行整页接入。2026-09-07 查漏补入无 @ 参与路径，
+端点单位与期待状态已明确，可开隔离体验实现 thread；该候选不改变以下权限契约，也未取得本轮 operator 体验签字。
+
+人从 Café 进入已登录的 Collective → Host 自动发现自家已有且具备公共参与资格的伙伴并默认带入，
+用户只确认允许参与的公共范围、显式排除与频道例外 → Host 配置可解释、可撤回的接收上下文，
+公共成员卡显示具名猫、所属 Café 与 accountable human →
+人在 Channel 向它发出明确请求 → 猫以正式工具读取本次允许的上下文、以自身身份回复同一消息。
+所属 Café 的显示名与稳定 endpoint/connection provenance 分开；改名不改变身份或 authority。
+公共位置与收件猫独立记录，当前请求与返回引用由 invocation 自动解析；公共参与执行默认只具有
+获准范围的上下文读取与精确回复权限，自动 prompt 历史也按该范围裁剪，不继承本地 owner 权限。
+需要持续工作且委托成立时，执行仍在 Café 的有边界私人 Thread，结果、必要判断与产物引用回到
+原 Channel/Topic/Work。Task 只链接 source owner 的持久来源引用；跨 invocation/重启后重新校验
+授权并签发临时返回凭据，发送操作由服务端持久化和恢复，丢响应不产生第二条消息。撤权或来源
+不可用时明确返回失败，不改投别处。普通表达可以沉默，不自动创建 Task。撤回参与后停止新投递与公开发言，
+历史署名与已承诺工作的处置仍可追溯。用户不需要填写 Thread ID、复制凭据或扮演猫发言。
+
 ### J1 — 私人灵感变成公共生命
 
 You 在私人 Thread 与猫把想法聊清楚 → 猫主动邀请发布 → You 确认表达 → Living
@@ -576,6 +693,9 @@ Markdown，而不伪造成当时就在资产页发生的批注 → 后续参与�
 | R17 | Server provider 不开终端、不手抄 secret 即可部署或接入独立 Service，完成 GitHub provider setup、bootstrap、当前 Café pairing 与 ready check | AC-L1 | [ ] |
 | R18 | 两个真实 Human 经邀请进入同一 Channel、双向发信，并在刷新与 Service restart 后恢复 | AC-L2 | [ ] |
 | R19 | Connector / Service / Human / Endpoint 状态分层且诚实；本机与公网激活条件不可互相冒充 | AC-L1, AC-L3 | [ ] |
+| R20 | 首猫有自动发现、默认带入且可显式排除的入场旅程、正式 MCP/skill、授权上下文和精确回流；连接在线不冒充接住请求 | AC-A8, AC-C3 | [ ] |
+| R21 | 每 Café×Channel 逻辑端点支持多猫、独立频道上下文与多个 Work / 私人 Thread；desired policy、runtime eligibility 与实际关联分离，接引不要求逐猫逐频道保存或手配 Thread | AC-B1, AC-C1, AC-C3 | [ ] |
+| R22 | 无 @ 也有有界注意力与可解释期待状态；显式 @ 优先，普通表达不制造全员唤醒/回执，承诺形成后可追溯 | AC-A8, AC-C1, AC-D1 | [ ] |
 
 ### Coverage check
 
@@ -628,6 +748,11 @@ Markdown，而不伪造成当时就在资产页发生的批注 → 后续参与�
   必要状态、判断请求、产物与证据，完成结果回到 exact Channel / Work / Artifact，并能追到 trigger、
   actor、authority 与 source version。私人原文与猫的内部施工过程不得被宿主或共享层默认读取。
 
+- [ ] **AC-A8**：在同一 canonical Client 的真实入口，人无需 ID/secret/终端或逐猫保存即可自动识别
+  自家已有且当前具备公共参与资格的伙伴、默认带入并只处理显式排除/频道例外；「我的 Café」默认先显示
+  当前现场相关的工作与伙伴活动。人能确认公共参与范围、看到真实具名成员卡并发出请求；未接收、已送达、已唤醒、已接手与失败有各自
+  证据，不以“在线”或 ACK 冒充。Direct 与 Café 内嵌入口消费同一状态；退出/撤回有可解释结果。
+
 ### Phase B — Stable object and trust contracts
 
 - [ ] **AC-B1**：Café、Collective、Membership / Join、Channel、Topic、Living Projection、Work、
@@ -643,6 +768,14 @@ Markdown，而不伪造成当时就在资产页发生的批注 → 后续参与�
   可区分，私人 Thread / 记忆不被共享层读取。
 - [ ] **AC-C2**：Collective memory 对事件、关系、决定与前瞻事项的确认、纠错、放下与 subject
   权利有 owner、来源和可验证读写边界。
+- [ ] **AC-C3**：猫通过正式 MCP/skill 发现被授权的 Collective 上下文，读取和回复真实 Channel
+  请求；具名身份、当前来源与精确返回目标由 authenticated invocation 在服务端解析，跨断线/
+  重试/切世界保持。非 owner 的公共执行 grant 同时约束工具与自动 prompt/context，不能继承
+  私人文件、记忆或 owner-only 能力；持续委托经独立可证明的本地 owner admission 后形成责任。
+  Task 通过 admission.sourceRefs 链接 F290/Message owner 的持久来源；后续 invocation 从该来源与
+  当前 Task revision/admission 重验并重签临时返回凭据，撤权/来源不可用有 typed 失败且零错投。
+  服务端保存回复操作身份，accepted 后丢响应可查询/恢复，不依赖模型记 UUID、不重复生成事件。
+  退出、错误路由、同名猫及不同 Human/connection 不会越界。Service 的 accepted/ACK 不等于猫已接手或工作完成。
 
 ### Phase D — Real dogfood
 
@@ -670,30 +803,30 @@ Markdown，而不伪造成当时就在资产页发生的批注 → 后续参与�
 
 | ID | 决定 | 来源 |
 |---|---|---|
-| KD-1 | 面向终态；不做可丢弃 MVP | `0001785845227770-001545-725b7878` |
+| KD-1 | 面向终态；不做可丢弃 MVP | `private-source-id` |
 | KD-2 | 一人多猫不变，Café 加入 Collective | vision §3.1 / §4.1 |
-| KD-3 | Global rail 切个人 Café / Collective；这是 F290 产品入口，不等于右侧 Workspace 或 F307 Workbench | `0001786237916354-000401-4213d9ff`, `0001786238550068-000422-ef1afc12`, `0001787725879344-000406-1920e263` |
-| KD-4 | Channel 是重要共同现场；Topic 必须锚定根消息、复用同一消息与 lineage，具体宿主形态由 F307 决定 | `0001786241554272-000488-e68a5284` |
-| KD-5 | Channel 与私人 Thread 共用富消息底座；人猫能力同权、Composer 渐进展开 | `0001786241554272-000488-e68a5284`, `0001786242747248-000502-77c148cd` |
-| KD-6 | Message → Task 由猫生成 linked card，不弹表单；无 authority 不静默造承诺 | `0001786242747248-000502-77c148cd` |
-| KD-7 | Vote 必须低摩擦；poll 与 binding judgment 分开 | `0001786242747248-000502-77c148cd` |
-| KD-8 | 私人 Thread 永远留在家里；公开的是 Living Projection | `0001785863643428-000096-194038a5` |
-| KD-9 | Work owner 可以是具名猫；现实后果的责任链必须解析到 accountable human，而不是把猫降为执行注脚或让人甩掉责任 | `0001786151246058-000103-30f5168c`, vision §19.12 |
-| KD-10 | `clowder-ai` 是伞牌，Café + Bond 是世界观核心；Collective / Channel / Thread / Living Projection 是稳定对象，空间隐喻留在体验层 | `0001786161775831-000144-aa0fa126`, `0001786162432854-000155-b7e2d51e`, `0001786162631496-000157-1d48831a` |
+| KD-3 | Global rail 切个人 Café / Collective；这是 F290 产品入口，不等于右侧 Workspace 或 F307 Workbench | `private-source-id`, `private-source-id`, `private-source-id` |
+| KD-4 | Channel 是重要共同现场；Topic 必须锚定根消息、复用同一消息与 lineage，具体宿主形态由 F307 决定 | `private-source-id` |
+| KD-5 | Channel 与私人 Thread 共用富消息底座；人猫能力同权、Composer 渐进展开 | `private-source-id`, `private-source-id` |
+| KD-6 | Message → Task 由猫生成 linked card，不弹表单；无 authority 不静默造承诺 | `private-source-id` |
+| KD-7 | Vote 必须低摩擦；poll 与 binding judgment 分开 | `private-source-id` |
+| KD-8 | 私人 Thread 永远留在家里；公开的是 Living Projection | `private-source-id` |
+| KD-9 | Work owner 可以是具名猫；现实后果的责任链必须解析到 accountable human，而不是把猫降为执行注脚或让人甩掉责任 | `private-source-id`, vision §19.12 |
+| KD-10 | `clowder-ai` 是伞牌，Café + Bond 是世界观核心；Collective / Channel / Thread / Living Projection 是稳定对象，空间隐喻留在体验层 | `private-source-id`, `private-source-id`, `private-source-id` |
 | KD-11 | 表达允许沉默；请求不能假装被接住；承诺不允许失踪 | vision §19.17 |
-| KD-12 | Café 与 Collective 通过双向望窗互相可见：说话自由、窗看摘要、签字类动作进入所属现场完成 | `0001786180420333-000365-bf6bdb75`, `0001786237918673-000404-85ef0313` |
-| KD-13 | Collective 的工作协同围绕资产代谢展开，同时保留不被资产化的社会环；资产是内部统一信封，不是强迫用户学习的 UI 总称 | `0001786346949390-000016-6d774788`, `0001786351158315-000093-88552f5b` |
-| KD-14 | Channel 回复与资产批注是两种协同入口、一条 lineage；外部反馈挂回资产时保留真实发生位置，不伪造历史 | `0001786351789923-000108-89bf3d37`, `0001786353602673-000148-fb73f15f` |
-| KD-15 | **Superseded by KD-19**：曾把可组合 working set 继续挂在 F284/F290；保留为错误演进记录，不再定义 F290 scope | `0001787656851950-000282-3a67e615`, `0001787657108819-000293-94960547` |
-| KD-16 | F290 自建资产树、lineage 与协作 adapter 契约，不自研编辑器 / Action Space runtime；一次成功只可形成 candidate skill，不能自动晋升通用能力 | `0001787640549164-000152-5d32cce8`, `0001787641251329-000002-7824bc80`, `0001787641731843-000019-279a4bae` |
-| KD-17 | PR #3966 的独立 `/dev` 页面只保留为组件实验；operator 否决其 Product Shell / F290 交付身份，后端闭环不得从该页继续 | `0001787673013284-000546-555d5b0c`, `0001787673135955-000549-b871dcef`, `0001787673288904-000550-e236be6f` |
-| KD-19 | F290 回到多人、多 Café、多 Agent Collective；全局 working set/tab/split/restore 独立为 F307，#3981 只作 F307 原型证据 | `0001787725213195-000402-837bd5c8`, `0001787725879344-000406-1920e263`, `0001787726647893-000424-abdf8a06` |
-| KD-20 | F290 不等待完整 F307；先补真实 world switch、Roadmap、共同产物系统、多 Café 后端与团队 dogfood | `0001787726647893-000424-abdf8a06` |
+| KD-12 | Café 与 Collective 通过双向望窗互相可见：说话自由、窗看摘要、签字类动作进入所属现场完成 | `private-source-id`, `private-source-id` |
+| KD-13 | Collective 的工作协同围绕资产代谢展开，同时保留不被资产化的社会环；资产是内部统一信封，不是强迫用户学习的 UI 总称 | `private-source-id`, `private-source-id` |
+| KD-14 | Channel 回复与资产批注是两种协同入口、一条 lineage；外部反馈挂回资产时保留真实发生位置，不伪造历史 | `private-source-id`, `private-source-id` |
+| KD-15 | **Superseded by KD-19**：曾把可组合 working set 继续挂在 F284/F290；保留为错误演进记录，不再定义 F290 scope | `private-source-id`, `private-source-id` |
+| KD-16 | F290 自建资产树、lineage 与协作 adapter 契约，不自研编辑器 / Action Space runtime；一次成功只可形成 candidate skill，不能自动晋升通用能力 | `private-source-id`, `private-source-id`, `private-source-id` |
+| KD-17 | PR #3966 的独立 `/dev` 页面只保留为组件实验；operator 否决其 Product Shell / F290 交付身份，后端闭环不得从该页继续 | `private-source-id`, `private-source-id`, `private-source-id` |
+| KD-19 | F290 回到多人、多 Café、多 Agent Collective；全局 working set/tab/split/restore 独立为 F307，#3981 只作 F307 原型证据 | `private-source-id`, `private-source-id`, `private-source-id` |
+| KD-20 | F290 不等待完整 F307；先补真实 world switch、Roadmap、共同产物系统、多 Café 后端与团队 dogfood | `private-source-id` |
 | KD-21 | 通用跨媒介 SelectionAnchor、human-edit awareness、annotation、Agent patch/disposition、remap/orphan 与协作 metadata ledger 抽离为 F309；F290 只提供 Artifact lineage/permissions/result target、决定 Collective attention 并消费它 | [F309](F309-collaborative-content-plane.md) |
-| KD-22 | 全局 Needs Me 与 Growing 端到端旅程归 F310；F290 只是一类 Collective producer/consumer | `0001787894090810-000905-66831d3b` + `[thread-id]#0001788009450946-000637-d21150d1` |
+| KD-22 | 全局 Needs Me 与 Growing 端到端旅程归 F310；F290 只是一类 Collective producer/consumer | `private-source-id` + `[thread-id]#private-source-id` |
 | KD-23 | Human 通过 provider binding 登录；Agent 没有独立 login/token，而是 Human 下的结构化扩展；endpoint credential 只证明机器连接。Channel 默认进入 Host ingress Thread，显式 Human/Agent target 由 Host 映射，Service 不接管本地 Agent runtime/tool authority | [clowder-ai#1401](https://github.com/zts212653/clowder-ai/issues/1401)（`mindfn` 收敛） |
-| KD-24 | self-host 的 GitHub identity provider 通过 GitHub App Manifest 由 Server provider 一次确认创建；凭据直接回到 Service 的受限 store。Manifest、Human login、endpoint pairing 保持三条独立状态机；真实 GitHub dogfood 是激活证据，官方文档对照不是 | `0001788490999525-000153-a7108fb9`, `0001788491195574-000165-90a35c7f` + GitHub 官方 Manifest/user-token 文档 |
-| KD-25 | 激活拆成 Local self-host 与 Public multi-Café 两档；第一档让本机真实可用，第二档再要求 TLS/公网、跨机 pairing 与多 Café dogfood，避免“必须先激活才能 dogfood、又必须先 dogfood 才激活”的循环 | `0001788488274636-000091-dd039465`, `0001788491195574-000165-90a35c7f` |
+| KD-24 | self-host 的 GitHub identity provider 通过 GitHub App Manifest 由 Server provider 一次确认创建；凭据直接回到 Service 的受限 store。Manifest、Human login、endpoint pairing 保持三条独立状态机；真实 GitHub dogfood 是激活证据，官方文档对照不是 | `private-source-id`, `private-source-id` + GitHub 官方 Manifest/user-token 文档 |
+| KD-25 | 激活拆成 Local self-host 与 Public multi-Café 两档；第一档让本机真实可用，第二档再要求 TLS/公网、跨机 pairing 与多 Café dogfood，避免“必须先激活才能 dogfood、又必须先 dogfood 才激活”的循环 | `private-source-id`, `private-source-id` |
 
 ## Open Questions / Design Gate
 
@@ -792,28 +925,28 @@ action 后再贡献 capability tip；在此之前，不能让生产 tips invento
 
 | 来源 | 作用 |
 |---|---|
-| `[thread-id]` / `0001785844229794-001512-46d0da7d` | 三个月方向图将方向 5 交给本专属 thread |
+| `[thread-id]` / `private-source-id` | 三个月方向图将方向 5 交给本专属 thread |
 | `[thread-id]` | F290 产品收敛与 Experience Design Gate 主 thread |
 | `[thread-id]` | 家庭联邦 / Channel 的早期脑洞，作为演进证据而非冻结 spec |
 | `[thread-id]` | GenTeam / Channel 产品学习与人话拆解 |
-| `0001786179982566-000345-09f4f8cd` | 第一支纯前端 Gate 被 operator 明确判定偏离 |
-| `0001786180416001-000351-9484a5ab` | 左/中/右与 Channel ↔ 私人 Thread 的关键追问 |
-| `0001786237916354-000401-4213d9ff` | 当前产品实际为四栏；Needs Me 与右栏语义 |
-| `0001786241060409-000472-e26ba613` | Slack-like Topic / reaction / avatar / emoji 是 Channel 刚需 |
-| `0001786241554272-000488-e68a5284` | Topic 留右栏；Channel 必须继承 Thread 富内容能力 |
-| `0001786242747248-000502-77c148cd` | 人猫富消息同权、无弹窗 Task、低摩擦 Vote 与正式立项要求 |
-| `0001786346182279-000000-fc6491e5` | 首个外部企业用户一手需求（You 同事对真 demo 的反馈）："对话是过程、信息资产是结果、两个不同的空间"；对齐=核心场景；结论性信息同步空间 + 批注留言 + 资料库；"Agent 时代的 Google Docs 怎么设计"之问——验证现场/对象空间两类目的地的分离，新增 OQ12–14 |
-| `0001787629463635-000225-08df1d25` | operator 指出预设状态、假输入与不可操作控件不是前端，要求真实输入产生新状态 |
-| `0001787640549164-000152-5d32cce8` | Floatboat 对 living artifact、精确 SelectionAnchor、Action Space 与 result-return 的产品输入 |
-| `0001787641251329-000002-7824bc80` | operator 收束：资产树 / lineage 是核心，正文编辑优先集成成熟编辑器，不自研内核 |
-| `0001787656851950-000282-3a67e615` | 资产页再次被误交付成“最新 F290”，暴露 feature surface 冒充 product shell |
-| `0001787657108819-000293-94960547` | operator 将 Codex / Floatboat 工作区与单槽 Workspace 对照，要求总结 Agent 产品的可组合工作区哲学 |
-| `0001787657572683-000305-0bbce35c` | operator 授权把学习沉淀进前端 Skill 与 F290 优化真相 |
-| `0001787710909760-000035-84ec26d9` | operator 追问个人 Café 与 Collective 是否共用 Workbench，暴露产品层级混淆 |
-| `0001787710989547-000037-10c84ac6` | operator 指出文件与代码/整个 Workspace 才应承载 tab 化，不应由 F290 单独造壳 |
-| `0001787725213195-000402-837bd5c8` | operator 明确 F290 是多人多 Agent Collective，右侧 Workspace 重构是单人多 Agent 的另一个问题 |
-| `0001787725879344-000406-1920e263` | operator 确认 5102 Collective Experience Gate 才是 F290 baseline，并要求独立立项 Workbench |
-| `0001787726647893-000424-abdf8a06` | operator 授权完成 F307 立项与 F290 scope reset，并要求记录 F290 当前未完成项 |
+| `private-source-id` | 第一支纯前端 Gate 被 operator 明确判定偏离 |
+| `private-source-id` | 左/中/右与 Channel ↔ 私人 Thread 的关键追问 |
+| `private-source-id` | 当前产品实际为四栏；Needs Me 与右栏语义 |
+| `private-source-id` | Slack-like Topic / reaction / avatar / emoji 是 Channel 刚需 |
+| `private-source-id` | Topic 留右栏；Channel 必须继承 Thread 富内容能力 |
+| `private-source-id` | 人猫富消息同权、无弹窗 Task、低摩擦 Vote 与正式立项要求 |
+| `private-source-id` | 首个外部企业用户一手需求（You 同事对真 demo 的反馈）："对话是过程、信息资产是结果、两个不同的空间"；对齐=核心场景；结论性信息同步空间 + 批注留言 + 资料库；"Agent 时代的 Google Docs 怎么设计"之问——验证现场/对象空间两类目的地的分离，新增 OQ12–14 |
+| `private-source-id` | operator 指出预设状态、假输入与不可操作控件不是前端，要求真实输入产生新状态 |
+| `private-source-id` | Floatboat 对 living artifact、精确 SelectionAnchor、Action Space 与 result-return 的产品输入 |
+| `private-source-id` | operator 收束：资产树 / lineage 是核心，正文编辑优先集成成熟编辑器，不自研内核 |
+| `private-source-id` | 资产页再次被误交付成“最新 F290”，暴露 feature surface 冒充 product shell |
+| `private-source-id` | operator 将 Codex / Floatboat 工作区与单槽 Workspace 对照，要求总结 Agent 产品的可组合工作区哲学 |
+| `private-source-id` | operator 授权把学习沉淀进前端 Skill 与 F290 优化真相 |
+| `private-source-id` | operator 追问个人 Café 与 Collective 是否共用 Workbench，暴露产品层级混淆 |
+| `private-source-id` | operator 指出文件与代码/整个 Workspace 才应承载 tab 化，不应由 F290 单独造壳 |
+| `private-source-id` | operator 明确 F290 是多人多 Agent Collective，右侧 Workspace 重构是单人多 Agent 的另一个问题 |
+| `private-source-id` | operator 确认 5102 Collective Experience Gate 才是 F290 baseline，并要求独立立项 Workbench |
+| `private-source-id` | operator 授权完成 F307 立项与 F290 scope reset，并要求记录 F290 当前未完成项 |
 
 ### Documents
 

@@ -37,6 +37,12 @@ export function useCloudBindingRecovery(identity: RecoveryIdentity) {
   const currentIdentityRef = useRef(identityKey);
   const operationGenerationRef = useRef(0);
   const busyRef = useRef(false);
+  const selectionRef = useRef<{ identityKey: string; conversationId: string | null }>({
+    identityKey,
+    conversationId: null,
+  });
+  const pollStartedAt = useRef(0);
+  const titleSyncRequestedRef = useRef<string | null>(null);
   const [refreshGeneration, setRefreshGeneration] = useState(0);
   const recoveryReadKey = `${identityKey}\u0000${refreshGeneration}`;
   const currentReadKeyRef = useRef(recoveryReadKey);
@@ -46,6 +52,8 @@ export function useCloudBindingRecovery(identity: RecoveryIdentity) {
 
   currentIdentityRef.current = identityKey;
   currentReadKeyRef.current = recoveryReadKey;
+  if (stateIsCurrent && state.loadState.kind === 'ready')
+    selectionRef.current = { identityKey, conversationId: state.selectedConversationId };
 
   useEffect(() => {
     const controller = new AbortController();
@@ -54,7 +62,11 @@ export function useCloudBindingRecovery(identity: RecoveryIdentity) {
     busyRef.current = false;
     setState(loadingState(recoveryReadKey));
 
-    void readRecoveryState({ threadId, sourceMessageId, targetCatId, attemptId }, controller.signal)
+    if (identity.deliveryStatus === 'sent') return () => controller.abort();
+
+    const syncTitles = titleSyncRequestedRef.current === identityKey;
+    titleSyncRequestedRef.current = null;
+    void readRecoveryState({ threadId, sourceMessageId, targetCatId, attemptId }, controller.signal, syncTitles)
       .then((nextState) => {
         if (
           !nextState ||
@@ -67,6 +79,10 @@ export function useCloudBindingRecovery(identity: RecoveryIdentity) {
         const selected =
           nextState.kind === 'ready'
             ? (nextState.boundConversationId ??
+              (selectionRef.current.identityKey === identityKey &&
+              nextState.candidates.some((candidate) => candidate.conversationId === selectionRef.current.conversationId)
+                ? selectionRef.current.conversationId
+                : null) ??
               (nextState.candidates.length === 1 ? nextState.candidates[0]?.conversationId : null) ??
               null)
             : null;
@@ -97,9 +113,28 @@ export function useCloudBindingRecovery(identity: RecoveryIdentity) {
       operationGenerationRef.current += 1;
       busyRef.current = false;
     };
-  }, [threadId, sourceMessageId, targetCatId, attemptId, recoveryReadKey]);
+  }, [threadId, sourceMessageId, targetCatId, attemptId, recoveryReadKey, identityKey, identity.deliveryStatus]);
 
   const refresh = useCallback(() => setRefreshGeneration((current) => current + 1), []);
+  const refreshTitles = useCallback(() => {
+    if (busyRef.current || projectedState.loadState.kind === 'loading') return;
+    busyRef.current = true;
+    titleSyncRequestedRef.current = identityKey;
+    refresh();
+  }, [identityKey, projectedState.loadState.kind, refresh]);
+  const pendingDelivery =
+    projectedState.phase === 'queued' ||
+    (projectedState.loadState.kind === 'ready' && projectedState.loadState.retryState === 'pending');
+  useEffect(() => {
+    pollStartedAt.current = 0;
+  }, [identityKey]);
+  useEffect(() => {
+    if (!pendingDelivery || identity.deliveryStatus === 'sent') return;
+    if (!pollStartedAt.current) pollStartedAt.current = Date.now();
+    if (Date.now() - pollStartedAt.current >= 30_000) return;
+    const timer = setTimeout(refresh, 1500);
+    return () => clearTimeout(timer);
+  }, [pendingDelivery, identity.deliveryStatus, refresh, refreshGeneration]);
   const selectConversation = useCallback(
     (conversationId: string) => {
       setState((current) =>
@@ -113,8 +148,7 @@ export function useCloudBindingRecovery(identity: RecoveryIdentity) {
 
   const bindAndRetry = useCallback(async () => {
     if (state.readKey !== recoveryReadKey) return;
-    const attemptId =
-      identity.attemptId ?? (state.loadState.kind === 'ready' ? state.loadState.hydratedAttemptId : undefined);
+    const attemptId = state.loadState.kind === 'ready' ? state.loadState.hydratedAttemptId : undefined;
     const prepared = prepareRecoveryOperation({
       loadState: state.loadState,
       selectedConversationId: state.selectedConversationId,
@@ -127,6 +161,7 @@ export function useCloudBindingRecovery(identity: RecoveryIdentity) {
     operationGenerationRef.current = generation;
     const isCurrent = () => operationGenerationRef.current === generation && currentIdentityRef.current === identityKey;
     busyRef.current = true;
+    pollStartedAt.current = Date.now();
     setState((current) => (current.readKey === recoveryReadKey ? { ...current, operationError: null } : current));
     const outcome = await executeRecoveryOperation({
       identity,
@@ -146,15 +181,16 @@ export function useCloudBindingRecovery(identity: RecoveryIdentity) {
     });
     if (!isCurrent()) return;
     busyRef.current = false;
-    if (outcome.kind === 'queued') {
-      setState((current) => (current.readKey === recoveryReadKey ? { ...current, phase: 'queued' } : current));
+    if (outcome.kind === 'queued' || outcome.kind === 'connected') {
+      setState((current) => (current.readKey === recoveryReadKey ? { ...current, phase: outcome.kind } : current));
     }
+    if (outcome.kind === 'reconcile') refresh();
     if (outcome.kind === 'error') {
       setState((current) =>
         current.readKey === recoveryReadKey ? { ...current, phase: 'idle', operationError: outcome.message } : current,
       );
     }
-  }, [identity, identityKey, recoveryReadKey, state]);
+  }, [identity, identityKey, recoveryReadKey, state, refresh]);
 
   return {
     loadState: projectedState.loadState,
@@ -163,10 +199,12 @@ export function useCloudBindingRecovery(identity: RecoveryIdentity) {
     phase: projectedState.phase,
     operationError: projectedState.operationError,
     attemptId: stateIsCurrent
-      ? (identity.attemptId ??
-        (projectedState.loadState.kind === 'ready' ? projectedState.loadState.hydratedAttemptId : undefined))
+      ? projectedState.loadState.kind === 'ready'
+        ? projectedState.loadState.hydratedAttemptId
+        : undefined
       : undefined,
     refresh,
+    refreshTitles,
     selectConversation,
     toggleChoices: () =>
       setState((current) =>

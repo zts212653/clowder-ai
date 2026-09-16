@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import type { EvolutionProgramEventEnvelopeV1, EvolutionProgramEventV1 } from '@cat-cafe/shared';
 import type { EvolutionProgramServiceResult } from './program-command-contract.js';
 import type { ProgramEvaluationDependencies, ProgramEvaluationLinkBase } from './program-evaluation-contract.js';
-import type { EvolutionProgramProjectionV1 } from './program-projection.js';
+import type { EvolutionProgramProjectionV1 } from './read-model/program-projection.js';
 
 /**
  * One append path for every Program command that derives its event from state.

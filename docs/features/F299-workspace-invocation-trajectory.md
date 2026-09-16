@@ -16,7 +16,8 @@ description_updated_at: 2026-08-18T13:05:00Z
 
 - **operator signoff**: 2026-08-16/17 [thread-id]（`0001786845058052`「我感觉我们可以立项了……新建feat」+ `0001786950943499`「新结构：两个 feat，一条愿景，在"猫的视野快照"处交汇」）
 - **Reviewer**: spec 细节由 @codex-sol 补齐；@fable5 已对 exact `c22defbd0` 完成唯一一次最终架构审核并 `APPROVE`
-Architecture cell: identity-session, bubble-pipeline, hub-action-surface
+Architecture cell: identity-session, bubble-pipeline, hub-action-surface, observability
+Map delta (2026-09-07): `observability` cell landed（架构归一裁决卡 1）——F299 登记为该 cell 唯一人形 invocation 面，F153 保留 raw telemetry / health；join 只走 `inv:<invocationId>` / traceId。见 `docs/architecture/ownership/cells/observability.md`。
 
 Map delta: none（2026-09-02，Phase A–D 已完成；Phase E control plane、bounded source adapter 与第一份可信 calibration lineage 已进入 production，真实效用 keep/tune/sunset closure 仍待后续有效窗口）——Phase B.2 已把 `thread-access-policy` authority subcell 登记到 `identity-session`；B.1–D 只扩展既有 transcript / projection / read policy，Phase E 复用 `harness-eval` cell 的 registry、trigger、verdict 与 re-eval closure，不新建 Store / Queue / authority
 
@@ -75,7 +76,7 @@ Phase C 不建设 evidence manifest、通用 evidence-ref 协议或新的跨域 
 
 持久化 Clowder AI 自己组装的模型可见输入：effective system prompt / runtime context snapshot / L0 版本与 injection decision / skills 与 memory 注入 / provider+model config / tool schema hash / compaction 与 retry/error 边界；**含 F300 视野快照（交汇点）**。retention 从出生遵循 ADR-045 推论 1/2（内存只作 cache、TTL 只做 GC 不做注销），不进 F298 存量家族表（2026-08-17 跨 session 裁定）。
 
-Gate 0 经 operator 与 @fable5 以奥卡姆剃刀收敛（`0001787500223746-000067-a890cf02`、`0001787500358068-000071-bd47674c`、`0001787503434011-000116-f8a9a068`）：**request envelope 是 Session transcript 的组成部分，不是拥有独立隐私/访问/删除规则的新实体。**唯一规则是：
+Gate 0 经 operator 与 @fable5 以奥卡姆剃刀收敛（`private-source-id`、`private-source-id`、`private-source-id`）：**request envelope 是 Session transcript 的组成部分，不是拥有独立隐私/访问/删除规则的新实体。**唯一规则是：
 
 > 证据默认持久；You 界面默认摘要、按需展开；猫不被自动灌入完整输入，而是沿现有 user/thread 与各 source owner 的读取规则顺藤摸瓜；源数据被 hard-delete/forget 时，transcript 内的 exact 副本同步失去可读正文。soft-delete 仍继承现有可恢复语义。
 

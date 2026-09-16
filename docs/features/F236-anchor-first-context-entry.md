@@ -4,8 +4,8 @@ related_features: [F148, F209, F192]
 topics: [context-engineering, token-budget, mcp, harness]
 doc_kind: spec
 created: 2026-06-15
-updated: 2026-08-25
-tips_exempt: Bounded full-thread pagination and workflow-SOP drills preserve the existing responseMode contract while adding no new user-operable capability
+updated: 2026-09-10
+tips_exempt: "2026-09-10: the oversized queued-anchor repair makes the existing full-drill promise truthful but adds no new tool, action, discovery timing, or user-operable capability"
 user_journey_exempt: "Harness/internal tool-return contract for cats and eval telemetry — no end-user journey surface"
 mcp_admission_status: accepted
 mcp_admission_ref: "file:docs/features/F236-anchor-first-context-entry.md"
@@ -49,6 +49,31 @@ Architecture cell: mcp-surface-governance
 Related existing cell: `dispatch`（queued/freshness custody semantics）
 Map delta: none
 Why: the repair promotes the existing tool's changed schema/description through the canonical MCP surface and preserves Dispatch's existing Queue/seen ownership; it introduces no new Store/Queue/Router/Adapter/Dispatcher/Binding.
+
+### 2026-09-10 oversized queued drill repair
+
+Architecture cell: `thread-chat-surface` + `ball-custody`
+Map delta: none
+Why: `get_message(mode=full)` becomes a consumer of the existing exact Queue exposure writer only when it
+resolves a live oversized queued anchor. `InvocationQueue`, `QueueProcessor`, and MessageStore custody CAS retain
+their existing ownership; the in-process turn-custody registry reserves its route owner across exposure commit.
+No store, queue, authority, or user-visible lifecycle is added.
+
+Canonical source: `packages/api/src/domains/cats/services/agents/invocation/QueueProcessor.ts#markPromptMessagesSeen`
+
+Consumer evidence: `rg -n "cat_cafe_get_message|handleGetMessage|/api/callbacks/get-message" packages/mcp-server/src packages/api/src`
+finds the MCP definition/handler, callback route, and anchor producer. The fresh F242 MCP graph currently returns
+zero targets for this registered legacy `defineTool`, so that extractor result is recorded as a gap rather than
+used as absence evidence.
+
+Claim guard: "an oversized persisted queued anchor is fully drillable only by its exact current invocation scope;
+every fallible custody adoption dependency is prepared before exposure, then published synchronously after the
+append-only witness commits" → callback tests `F236 regression: an oversized persisted queued anchor drills the
+exact body and binds the current child` plus `F236 queued drill rejects wrong turn scope, foreign cats, foreign
+threads, and unbound queued rows` → RED was a 404 for the advertised drill, a 200 for a hidden managed-hold exact
+read, a durable witness left by failed adoption, and missing rich blocks on live Queue reads; GREEN requires the
+complete primary + merged text/content blocks/image hints, no witness on adoption-preparation failure, a teardown-
+safe reservation, idempotent current-child exposure/adoption, and the existing owner/hidden/scope denials.
 
 ## Why
 

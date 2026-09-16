@@ -53,7 +53,7 @@ describe('F118 ThinkingIndicator liveness states', () => {
 
   function seedExecution(catId: string) {
     useActiveExecutionStore.getState().reset();
-    const request = useActiveExecutionStore.getState().beginHydration('thread-1');
+    const request = useActiveExecutionStore.getState().beginHydration('thread-1', '/project/cafe');
     useActiveExecutionStore.getState().applySnapshot('thread-1', request, {
       projectPath: '/project/cafe',
       executions: [

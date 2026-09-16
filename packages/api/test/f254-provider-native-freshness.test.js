@@ -114,6 +114,29 @@ class FakeRedis {
       .sort((left, right) => left.score - right.score)
       .map((entry) => entry.member);
   }
+  multi() {
+    const operations = [];
+    const pipeline = {
+      rpush: (...args) => {
+        operations.push(() => this.rpush(...args));
+        return pipeline;
+      },
+      expire: (...args) => {
+        operations.push(() => this.expire(...args));
+        return pipeline;
+      },
+      zadd: (...args) => {
+        operations.push(() => this.zadd(...args));
+        return pipeline;
+      },
+      zremrangebyscore: (...args) => {
+        operations.push(() => this.zremrangebyscore(...args));
+        return pipeline;
+      },
+      exec: async () => Promise.all(operations.map(async (operation) => [null, await operation()])),
+    };
+    return pipeline;
+  }
 }
 
 describe('F254 D2 provider-native freshness truth', () => {
@@ -1082,7 +1105,7 @@ describe('F254 D2 provider-native freshness truth', () => {
       '/tmp/exit-code',
     );
     assert.match(command, /< '\/tmp\/in\.fifo'/);
-    assert.match(command, /tee '\/tmp\/out\.fifo'/);
+    assert.match(command, /\/tee' '\/tmp\/out\.fifo'/);
     assert.doesNotMatch(command, /turn\/steer|expectedTurnId|freshness notice/);
   });
 

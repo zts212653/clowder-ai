@@ -11,6 +11,8 @@ import {
   type MicroduckBlocked,
   type MicroduckProgramScope,
   type MicroduckVerification,
+  type MicroduckWritebackInput,
+  type MicroduckWritebackReceipt,
 } from './microduck-owner-contract.js';
 import { microduckBlockedSchema } from './microduck-owner-schemas.js';
 
@@ -57,6 +59,38 @@ export const isMicroduckPolicyRef = (
   return matched?.[1] === value.version;
 };
 
+export const isMicroduckControlPackageRef = (value: ExactAssetVersionRefV1, subjectId?: string): boolean => {
+  if (value.ownerFeatureId !== MICRODUCK_OWNER_FEATURE_ID) return false;
+  const matched = /^control-package:sha256:([a-f0-9]{64})$/u.exec(value.ownerStateRef);
+  return (
+    matched?.[1] === value.version &&
+    value.assetKind === 'control-package' &&
+    (subjectId === undefined || value.assetId === subjectId)
+  );
+};
+
+export const isMicroduckDeployableRef = (value: ExactAssetVersionRefV1): boolean =>
+  isMicroduckPolicyRef(value) || isMicroduckControlPackageRef(value);
+
+export function validMicroduckWritebackReceipt(deployed: MicroduckWritebackReceipt): boolean {
+  return (
+    isMicroduckHashRef(deployed.writebackReceiptRef, 'deploy') &&
+    isMicroduckTargetRef(deployed.deployedVersionRef) &&
+    isMicroduckDeployableRef(deployed.rollbackVersionRef)
+  );
+}
+
+export function microduckDeployedTargetDrifted(
+  input: MicroduckWritebackInput,
+  deployed: MicroduckWritebackReceipt,
+): boolean {
+  return (
+    !sameAssetSurface(deployed.deployedVersionRef, input.targetVersionRef) ||
+    (isMicroduckControlPackageRef(input.candidateVersionRef) &&
+      deployed.deployedVersionRef.version !== input.candidateVersionRef.version)
+  );
+}
+
 export const isMicroduckArtifactRef = (
   value: OwnerTruthRefV1,
   extension: 'onnx' | 'pt',
@@ -68,10 +102,13 @@ export const isMicroduckArtifactRef = (
     'u',
   ).test(value.ownerStateRef);
 
-export const isMicroduckTargetRef = (value: ExactAssetVersionRefV1): boolean =>
-  value.ownerFeatureId === MICRODUCK_OWNER_FEATURE_ID &&
-  value.ownerStateRef.startsWith('simulator:') &&
-  /^[a-f0-9]{40}$/u.test(value.version);
+export const isMicroduckTargetRef = (value: ExactAssetVersionRefV1): boolean => {
+  if (value.ownerFeatureId !== MICRODUCK_OWNER_FEATURE_ID || !value.ownerStateRef.startsWith('simulator:')) {
+    return false;
+  }
+  if (value.assetKind === 'simulator-policy-slot') return /^[a-f0-9]{40}$/u.test(value.version);
+  return value.assetKind === 'simulator-control-slot' && /^(?:[a-f0-9]{40}|[a-f0-9]{64})$/u.test(value.version);
+};
 
 export const isMicroduckJobRef = (value: OwnerTruthRefV1): boolean =>
   value.ownerFeatureId === MICRODUCK_OWNER_FEATURE_ID &&
@@ -100,7 +137,8 @@ export function verificationGate(
   expectedArtifactSha256?: string,
 ): MicroduckVerification | MicroduckBlocked {
   if (!sameRef(exactRef(receipt.candidateVersionRef), exactRef(candidateVersionRef))) return blocked('target_drift');
-  if (!isMicroduckPolicyRef(receipt.candidateVersionRef)) return blocked('target_drift');
+  const candidate = exactRef(receipt.candidateVersionRef);
+  if (!isMicroduckDeployableRef(candidate)) return blocked('target_drift');
   if (
     !isMicroduckHashRef(receipt.evaluationReceiptRef, 'evaluation') ||
     !isMicroduckHashRef(receipt.verificationReceiptRef, 'verification')
@@ -119,6 +157,7 @@ export function verificationGate(
   if (!receipt.singleVariable) return blocked('multiple_variables');
   if (
     !validSha256(receipt.evaluatedArtifactSha256) ||
+    (isMicroduckControlPackageRef(candidate) && receipt.evaluatedArtifactSha256 !== candidate.version) ||
     (expectedArtifactSha256 !== undefined && receipt.evaluatedArtifactSha256 !== expectedArtifactSha256)
   ) {
     return blocked('artifact_hash_mismatch');

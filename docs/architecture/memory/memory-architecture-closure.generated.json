@@ -746,7 +746,7 @@
         "evidenceRefs": [
           "packages/api/src/domains/memory/distillation-service.ts",
           "packages/api/src/domains/memory/GlobalIndexBuilder.ts",
-          "thread_msheiy8wz5r7qsn4#0001787998930408-000417-fcacb8c2"
+          "private-thread-id#private-source-id"
         ]
       },
       "typedCuePredicate": {
@@ -755,7 +755,7 @@
         "evidenceLevel": "live",
         "evidenceRefs": [
           "packages/api/src/domains/memory/KnowledgeResolver.ts",
-          "thread_msheiy8wz5r7qsn4#0001788003376461-000497-78799bf8"
+          "private-thread-id#private-source-id"
         ]
       },
       "presentationDrill": {
@@ -780,7 +780,7 @@
         "evidenceLevel": "live",
         "evidenceRefs": [
           "docs/features/F152-expedition-memory.md",
-          "thread_msheiy8wz5r7qsn4#0001788003376461-000497-78799bf8"
+          "private-thread-id#private-source-id"
         ]
       },
       "consumptionReceipt": {
@@ -789,7 +789,7 @@
         "evidenceLevel": "live",
         "evidenceRefs": [
           "docs/features/F200-memory-recall-eval.md",
-          "thread_msheiy8wz5r7qsn4#0001788003376461-000497-78799bf8"
+          "private-thread-id#private-source-id"
         ]
       },
       "outcome": {
@@ -798,7 +798,7 @@
         "evidenceLevel": "live",
         "evidenceRefs": [
           "docs/features/F152-expedition-memory.md",
-          "thread_msheiy8wz5r7qsn4#0001788003376461-000497-78799bf8"
+          "private-thread-id#private-source-id"
         ]
       },
       "invalidation": {
@@ -823,8 +823,8 @@
           "packages/api/src/domains/memory/GraphQueryResolver.ts",
           "packages/api/src/domains/memory/GraphResolver.ts",
           "packages/api/src/domains/memory/RecentBrowseResolver.ts",
-          "thread_msheiy8wz5r7qsn4#0001787998930408-000417-fcacb8c2",
-          "thread_msheiy8wz5r7qsn4#0001788003376461-000497-78799bf8"
+          "private-thread-id#private-source-id",
+          "private-thread-id#private-source-id"
         ],
         "limitations": "Only the global-distillation-f152 consumer surface is sunset. F152 expedition/bootstrap and producer code remain. Durable files and index rows are retained without a utility claim; 36 observed artifacts contain only three repeated test titles. Explicit forensic/admin artifact browsing remains available, while search_evidence, graph_resolve, and list_recent delivery are ineligible."
       }

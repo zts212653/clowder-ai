@@ -128,6 +128,8 @@ export interface FreshnessClosureStore {
   getSupplement(supplementId: string): Promise<FreshnessSupplementAggregate | null>;
   listSupplementsByLineage(lineageId: string): Promise<FreshnessSupplementAggregate[]>;
   listSupplementsByThread(threadId: string): Promise<FreshnessSupplementAggregate[]>;
+  /** TTL=0 replay source. Callers must apply owner/thread/window scope before projection. */
+  listAllSupplements(): Promise<FreshnessSupplementAggregate[]>;
   listRecoverableSupplements(): Promise<FreshnessSupplementAggregate[]>;
   offerSupplement(input: FreshnessSupplementOfferInput): Promise<OfferFreshnessSupplementResult>;
   claimSupplement(

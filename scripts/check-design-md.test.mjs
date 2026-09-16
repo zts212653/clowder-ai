@@ -152,6 +152,43 @@ test('every prose-allowed non-text semantic/focus pair in DESIGN.md is >= 3:1', 
   assert.deepEqual(failures, []);
 });
 
+test('content-category roles stay distinct from actions and status while remaining visible on every surface', () => {
+  const { colors } = readFrontMatter(DESIGN_MD);
+  const lightCategories = ['category-object', 'category-rubric', 'category-measurement', 'category-diagnosis'];
+  const darkCategories = lightCategories.map((name) => `dark-${name}`);
+  const lightSurfaces = ['canvas', 'surface-1', 'surface-2', 'surface-3'];
+  const darkSurfaces = ['dark-canvas', 'dark-surface-1', 'dark-surface-2', 'dark-surface-3'];
+  const reservedLight = ['primary', 'primary-active', 'success', 'warning', 'critical', 'info'];
+  const reservedDark = ['dark-success', 'dark-warning', 'dark-critical', 'dark-info'];
+
+  for (const name of [...lightCategories, ...darkCategories]) assert.ok(colors[name], `missing color token ${name}`);
+  assert.equal(new Set(lightCategories.map((name) => colors[name])).size, lightCategories.length);
+  assert.equal(new Set(darkCategories.map((name) => colors[name])).size, darkCategories.length);
+  assert.deepEqual(
+    lightCategories.filter((name) => reservedLight.some((reserved) => colors[name] === colors[reserved])),
+    [],
+  );
+  assert.deepEqual(
+    darkCategories.filter((name) => reservedDark.some((reserved) => colors[name] === colors[reserved])),
+    [],
+  );
+
+  const failures = [];
+  for (const name of lightCategories) {
+    for (const surface of lightSurfaces) {
+      const ratio = contrastRatio(colors[name], colors[surface]);
+      if (ratio < 3) failures.push(`${name} on ${surface} = ${ratio.toFixed(2)}:1`);
+    }
+  }
+  for (const name of darkCategories) {
+    for (const surface of darkSurfaces) {
+      const ratio = contrastRatio(colors[name], colors[surface]);
+      if (ratio < 3) failures.push(`${name} on ${surface} = ${ratio.toFixed(2)}:1`);
+    }
+  }
+  assert.deepEqual(failures, []);
+});
+
 test('the gate never resolves a package bin (cross-platform: no design.md/designmd spawn)', () => {
   const source = readFileSync(join(ROOT, 'scripts', 'check-design-md.mjs'), 'utf8');
   assert.doesNotMatch(source, /child_process/, 'gate must import the linter, not spawn a bin');

@@ -1,6 +1,6 @@
 ---
 name: receive-review
-tips_exempt: F167/F314 keep local review handback and accepted-source provenance internal to the harness; no distinct end-user-invocable capability surface
+tips_exempt: "This revision clarifies evidence-based feedback handling and optional templates within the existing review workflow; no new user-facing operation or configuration is added."
 description: "处理 reviewer 反馈：Red→Green 修复 + 按 engagement mode 收口。Use when: 收到 review 结果或 P1/P2。Not for: 发 review 请求、自检。Output: 按 iterative / one-shot 契约闭环。"
 triggers:
   - "review 结果"
@@ -15,7 +15,17 @@ triggers:
 
 # Receive Review
 
-处理 reviewer 反馈的完整流程。核心原则：**技术正确性 > 社交舒适，验证后再实现，禁止表演性同意。**
+处理反馈要形成有依据的判断、修复与真实闭环。历史教训是顺从照改、点修不查同类，以及把修完误当已通过审查。
+
+## 必须做到
+
+- 完整理解反馈，核对原始需求、相关实现与证据；接受或反驳都有依据。意见全部成立时可以全部接受，不制造分歧。
+- 成立的 P1/P2 当轮解决；不成立的说明证据；尚未核清的如实保留，不能冒充已修复。真正改变愿景/范围的取舍按决策漏斗处理。
+- 修复有适用的 RED → GREEN 与回归验证；已有精准失败检查可复用，纯命名/文档反馈使用对应检查，不为形式造测试。
+- 同类缺陷重复出现时，审视本次改动中的同型位置与共同机制，避免逐点补锅。具体检索和记录形式可选择。
+- 按本轮 feedback source 与 engagement 闭环，保留审查目标、证据、合法回执和未决项；不得自称通过未满足的合入门禁。
+
+后文的处理顺序、表格和确认信是可选参考，可以直接使用、改造或替换；实际 source/typed 字段与授权契约仍按适用路径满足。发起 review 用 `request-review`，自己的交付自检用 `quality-gate`。
 
 ## 触发入口
 
@@ -46,9 +56,9 @@ triggers:
 | 类型 | 特征 | 处理 |
 |------|------|------|
 | **代码级** | bug / edge case / 性能 / 命名 | Red→Green 修复流程 |
-| **愿景级** | "这不是operator要的" / "缺了多项目管理" / "UI 不可用" | STOP → 回读原始需求 → 升级operator |
+| **愿景级** | "这不是operator要的" / "缺了多项目管理" / "UI 不可用" | 回读原始需求；明确的实现偏差直接修，新的价值取舍才升级 operator |
 
-> **愿景级反馈不能用代码 patch 修补设计问题。** 先对照operator experience验证 reviewer 说得对吗；如确实偏离，升级operator确认偏差范围，再重新设计。
+> 先对照operator experience判断偏差。实现遗漏与设计取舍分开处理，不把“愿景级”标签当成重复索要既有授权的理由。
 
 ### Reviewer Delta Annotation（F253 AC-B2）
 
@@ -74,15 +84,9 @@ P3-1: 建议重新考虑整体架构方向 [FC:N/A]
 - Delta 数据自然累积在 review 记录中，Phase C `eval:qc` 聚合分析
 - 标注不影响 finding 的 severity 判定或处理流程
 
-### 禁止的响应（表演性同意）
+### 回应靠判断与证据
 
-```
-❌ "You're absolutely right!"    ❌ "Great point!"
-❌ "Excellent feedback!"         ❌ "Thanks for catching that!"
-❌ "让我现在就改"（验证之前）
-```
-
-行动说明一切——直接修复，代码本身证明你听到了反馈。
+先核实反馈，再说明实际处置。正常礼貌不影响技术判断；赞同、反对或措辞本身都不能证明 review 有效。
 
 ### Push Back 标准
 
@@ -106,41 +110,41 @@ Review 代码时，自动执行 `node scripts/check-fallback-layers.mjs` 检测 
 
 review 报告中必须包含 fallback 层数分析结果。
 
-**Review 有零分歧 = 走过场**（反顺从规则）。真正的 review 需要技术争论。
+核验后没有分歧是合法结果。需要指出的是有依据的问题，不能为了表示独立制造争论。
 
-## 流程
+## 可选参考：处理顺序
 
 ```
 WHEN 收到 review 反馈:
 
 1. READ  — 完整读完，不要边读边反应。**R2+ 时额外动作**：回看上轮 finding 列表，标注每个 finding 的 failure-mode 类型，用于 AUDIT 步骤的同型判别
 2. CLASSIFY — 区分愿景级 vs 代码级；按 P1/P2/P3 分优先级
-3. CLARIFY — 有不清晰的问题先全部问清，再动手
-4. VERIFY — reviewer 说的问题真的存在吗？（见下方三道门）
+3. CLARIFY — 补查不清楚的问题；只暂停依赖该疑点的修改，独立明确项可以推进
+4. VERIFY — reviewer 说的问题真的存在吗？（见下方三个判断方面）
 5. AUDIT — failure-mode sweep（见下方 §16e 判别）
 6. FIX — 通过验证的问题 + audit 发现的同类问题 Red→Green 修复
 7. CLOSE — 按 engagement mode 收口：iterative 回原 source；one-shot 用测试闭环，必要时转日常 reviewer
 ```
 
-### VERIFY 三道门（少一道不准照改）
+### VERIFY：判断需要覆盖的三个方面
 
-对每条 review 意见，改代码之前必须过三道门：
+核验应覆盖需求一致性、真实失败机制和用户路径。下面是一种组织方式，不要求逐项填表或采用固定顺序：
 
 1. **Spec Gate** — 这条意见和现有 AC/需求冲突吗？
    - 冲突 → pushback，附 AC 原文
    - 不冲突 → 进下一道
 2. **Mechanism Gate** — reviewer 说"这不行"的证据是什么？
-   - 有失败用例 / 真实平台限制 → 进下一道
+   - 有失败用例 / 可复核的静态失败路径 / 真实平台限制 → 继续核实
    - 只是"不优雅"/"理论上不安全"但拿不出失败路径 → 当假设处理，pushback 要求证据
 3. **Feature Gate** — 按建议改完后，核心用户路径还活着吗？
    - 改完跑一遍最关键的用户路径（不是只跑测试）
    - 功能死了 → 回滚，review 建议作废，不管它理论上多优雅
 
-**特别注意**：remote reviewer（Codex cloud）没有运行环境，判断基于静态分析和理论推理。你有本地环境 → **你的实测证据 > 他的理论推理**。
+**证据边界**：实测可以反驳具体假设，但“没有复现”不能单独否定可证明的静态失败路径。按问题本身的证据裁决，不按 reviewer 的来源默认接受或驳回。
 
 **修复顺序**：P1（blocking）→ P2（必须修）→ P3（讨论后当场修或放下，不记 BACKLOG）
 
-**澄清原则**：有任何问题不清晰，先 STOP，全部问清再动手。部分理解 = 错误实现。
+**澄清原则**：不清楚的前提先查证；依赖它的修改暂停，相互独立且已核实的工作继续。
 
 ### AUDIT — Failure-Mode Sweep（shared-rules §16e）
 
@@ -157,32 +161,16 @@ VERIFY 完所有 findings 之后、动手修之前，做一次 failure-mode 判�
 
 **R2+ 额外检查**：如果本轮的 finding 和上轮是**同型**——不管数量多少，**强制 audit**。同型第二次出现 = author 上轮没泛化，这次必须补上。
 
-**≥3 轮升级规则（F229 PR-A1 20 轮教训）🔴**：同一状态对象的 finding 连续 **≥3 轮**出现（哪怕每轮都"修好了"）= 不是你修得不对，是 **plan/spec 层欠状态机的边**——代码层 audit 扫不出"spec 没定义 restore boundary"这种上游缺失。停手，@ plan/spec 作者按 writing-plans「Stateful Object Gate」补状态转移表 + 不变量，补完再继续修。**别一个人打到 R20**（PR #2202：实现猫每轮诚实修好当轮 finding，但缺这个升级出口，20 轮才合入）。
+**反复同型 finding（F229 PR-A1 教训）**：同一状态对象连续多轮出现问题时，停下重查共同机制、修复是否落地与状态契约。次数是调查信号，不是 plan 缺边的证明；确实发现生命周期或不变量缺失时，回 `writing-plans` 的 Stateful Object Gate 补清契约，以合适的图、表或精确描述表达，避免继续逐边打补丁。
 
 > **为什么在 FIX 之前**：先 audit 再修 = 一次修完所有同类；先修再 audit = 改了一个又发现三个，反复 rebase。
 
-## Red→Green 修复流程
+## 修复与验证
 
-对每个 P1/P2 问题：
-
-**Step 0: 创建修复任务**（F160 Phase C — 在动手修之前）
-调用 `cat_cafe_create_task` 为每个 P1/P2 创建独立跟踪任务：
-- title: `[P{N}] {问题摘要}`（如 `[P2] TaskComposer HTTP 错误时丢失输入`）
-- why: reviewer 的原始描述（≤120 字）
-- 修复完成后 `cat_cafe_update_task` 状态改为 `done`
-
-**Gotcha**: 不要为 P3 创建任务——P3 当场修或放下，不记 BACKLOG 也不记毛线球。
-
-```
-1. 理解问题
-2. 写失败测试（Red）
-3. 运行测试，确认红灯
-4. 修复代码
-5. 运行测试，确认绿灯（Green）
-6. 运行完整测试套件，确认无 regression
-```
-
-**例外**：如果无法稳定自动化复现，提供最小手工复现步骤 + 说明原因，但不能跳过验证结论。
+- 先看已有检查能否准确复现已核实的问题：有则运行并保存 RED；没有且存在行为/回归风险，则先补回归测试。命名、文档等反馈按实际影响使用类型、引用或文档检查。
+- 修复后复验同一信号与受影响路径，按一组实际改动安排回归；targeted 无法覆盖合流影响时才 full，不为每条 finding 重跑整个套件。
+- 无法稳定自动化复现时，提供可复核的手工步骤、结果和限制，不跳过验证结论。
+- issue、PR finding 或现有任务已经能追溯时直接复用。需要独立分派、跨会话恢复或单独终态时才用 `cat_cafe_create_task` 新建任务，完成后更新为 `done`。P3 当场修或放下，不新增跟踪债务。
 
 ## 修复后确认（按 engagement mode）
 
@@ -211,7 +199,7 @@ VERIFY 完所有 findings 之后、动手修之前，做一次 failure-mode 判�
 ✅ 正确：cloud P2 修复 → re-trigger cloud review → 等 PR truth source；local peer 只在非 cloud 行为 delta / scope 扩大时介入
 ```
 
-确认信格式（简要，详细版见 `refs/` 如有需要）：
+可选确认信格式（已有载体足够时直接更新，不另造文档）：
 
 ```markdown
 ## 修复确认请求
@@ -229,10 +217,10 @@ Fresh-Context Delta: {N} FC:covered, {M} FC:new, {K} FC:N/A <!-- 仅 review requ
 ```
 
 修复完成后（F160 Phase C）：
-- 每个 P1/P2 修复任务 → `cat_cafe_update_task` 状态改为 `done`
+- 本轮实际创建/持有的修复任务 → `cat_cafe_update_task` 状态改为 `done`
 - 按上述 Engagement 闭环；只有 `iterative` 本地 review 回 direct review carrier
 
-**remote review 修了 P1/P2 → 必须 re-trigger remote review，不能自判通过直接合入，也不能把 cloud gate 投射成本地旧 reviewer。**
+**云端 finding 修复后的证据归 cloud 路径消费；若已命中 `merge-gate` 的封板条件，按既有封板出口处理。** 不能自判通过直接合入，也不能把每次 cloud 修复投射成本地旧 reviewer。
 
 ## Reviewer 验证 UX/前端改动（硬规则）
 
@@ -265,15 +253,15 @@ Reviewer 在 review 过程中发现 author 触发以下任一条件，可直接�
 | 错误 | 正确做法 |
 |------|----------|
 | 边读边改，没读完 | 读完整反馈，分类后再动手 |
-| 有不清晰的问题但先改清晰的 | 全部澄清后再统一动手 |
-| 没写 Red 测试直接改代码 | 先写失败测试，确认红灯，再修 |
-| 修完自判"对了"直接合入 | 必须回给 reviewer 确认 |
-| 全盘接受，零 push back | 有技术理由必须说出来 |
-| 愿景级问题用代码 patch | STOP，升级operator，不要硬修 |
-| 云端 P1 修完不 re-trigger | 必须重新触发remote review |
+| 不清楚的前提直接猜着改 | 暂停依赖该前提的修改；独立、已核实的部分可以继续 |
+| 没有可信失败证据就宣称修复 | 新测试或已有精准检查提供 RED，再验证 GREEN |
+| 修完自判"对了"直接合入 | 按 engagement 与 active source 满足审查覆盖，机械 continuity 可复用 |
+| 未核实就全盘接受或为了争论而反对 | 以证据形成判断，核实后零分歧合法 |
+| 用点 patch 掩盖设计/需求偏差 | 回读原意，明确遗漏直接修；新的价值取舍才升级 operator |
+| cloud 修复不核对对应来源 | 沿 cloud 路径闭环；命中封板条件则走既有终局出口 |
 | 前端改动只看代码不开浏览器 | 涉及 UX 必须打开浏览器实操验证 |
 | 只修 reviewer 指的那一个点（补锅匠） | 先判 failure mode 是否同类，是则 audit 本 PR diff 全扫再修 |
-| 同型 finding 打到 R5+ 还在逐轮修 | **第 3 轮就停**，升级 plan/spec 作者补状态机（≥3 轮升级规则）——代码层修不掉 spec 层的洞 |
+| 同型 finding 多轮出现仍只做点修 | 查共同机制与修复是否落地；契约缺口回 plan 层补清 |
 
 ## 和其他 skill 的区别
 

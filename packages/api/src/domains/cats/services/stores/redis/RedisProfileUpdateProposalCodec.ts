@@ -3,8 +3,9 @@ import type {
   ProfileUpdateProposal,
   ProfileUpdateProposalStatus,
   ProfileUpdateSignalProvenance,
+  ProfileUpdateTargetLayer,
 } from '@cat-cafe/shared';
-import { isAllowedCollectionSignal } from '@cat-cafe/shared';
+import { isAllowedCollectionSignal, PROFILE_UPDATE_TARGET_LAYERS } from '@cat-cafe/shared';
 import { hydrateApprovalPublication, serializeApprovalPublication } from './RedisApprovalPublication.js';
 
 export function serializeProfileUpdateProposal(proposal: ProfileUpdateProposal): string[] {
@@ -50,7 +51,7 @@ export function hydrateProfileUpdateProposal(data: Record<string, string>): Prof
     sourceThreadId: requiredField(data, 'sourceThreadId'),
     sourceInvocationId: requiredField(data, 'sourceInvocationId'),
     sourceCatId: requiredField(data, 'sourceCatId') as ProfileUpdateProposal['sourceCatId'],
-    targetLayer: 'primer',
+    targetLayer: validatedTargetLayer(data.targetLayer),
     targetPath: requiredField(data, 'targetPath'),
     beforeContent: data.beforeContent ?? '',
     baseContentHash: data.baseContentHash ?? '',
@@ -77,6 +78,16 @@ export function hydrateProfileUpdateProposal(data: Record<string, string>): Prof
 function approvalPublicationField(encoded: string | undefined): { publication?: ApprovalPublication } {
   const publication = hydrateApprovalPublication(encoded);
   return publication ? { publication } : {};
+}
+
+const TARGET_LAYER_SET = new Set<string>(PROFILE_UPDATE_TARGET_LAYERS);
+
+function validatedTargetLayer(raw: string | undefined): ProfileUpdateTargetLayer {
+  // Backward compat: proposals stored before Phase E have no targetLayer field → default primer.
+  if (!raw) return 'primer';
+  if (TARGET_LAYER_SET.has(raw)) return raw as ProfileUpdateTargetLayer;
+  // Fail-closed: unknown layer values reject loudly rather than silently degrading to primer.
+  throw new Error(`Malformed profile update proposal: unknown targetLayer "${raw}"`);
 }
 
 function requiredField(data: Record<string, string>, field: string): string {

@@ -3,6 +3,29 @@ import { describe, test } from 'node:test';
 import { z } from 'zod';
 
 describe('F310 entrusted-work MCP owner actions', () => {
+  test('typed progress reaches the callback transport without being dropped by the MCP handler', async (t) => {
+    const originalFetch = globalThis.fetch;
+    const keys = ['CAT_CAFE_API_URL', 'CAT_CAFE_INVOCATION_ID', 'CAT_CAFE_CALLBACK_TOKEN'];
+    const originalEnv = Object.fromEntries(keys.map((key) => [key, process.env[key]]));
+    t.after(() => {
+      globalThis.fetch = originalFetch;
+      for (const key of keys) {
+        if (originalEnv[key] === undefined) delete process.env[key];
+        else process.env[key] = originalEnv[key];
+      }
+    });
+    process.env.CAT_CAFE_API_URL = 'http://localhost:3102';
+    process.env.CAT_CAFE_INVOCATION_ID = 'fixture-invocation';
+    process.env.CAT_CAFE_CALLBACK_TOKEN = 'fixture-callback';
+    let forwarded;
+    globalThis.fetch = async (_url, options) => {
+      forwarded = JSON.parse(options.body);
+      return new Response(JSON.stringify({ status: 'updated' }), { status: 200 });
+    };
+    const { handleUpdateEntrustedWork } = await import('../dist/tools/callback-tools.js');
+    await handleUpdateEntrustedWork({ taskId: 'task-1', expectedRevision: 3, status: 'blocked' });
+    assert.deepEqual(forwarded, { taskId: 'task-1', expectedRevision: 3, status: 'blocked' });
+  });
   test('registers typed admission and closure tools over the shared contract', async () => {
     const {
       admitEntrustedWorkInputSchema,
@@ -72,8 +95,20 @@ describe('F310 entrusted-work MCP owner actions', () => {
     });
     assert.equal(update.success, true);
 
+    for (const status of ['todo', 'doing', 'blocked']) {
+      const parsed = z.object(updateEntrustedWorkInputSchema).strict().parse({
+        taskId: 'task-1',
+        expectedRevision: 1,
+        status,
+      });
+      assert.equal(parsed.status, status);
+    }
+
     const { entrustedWorkUpdateActionV1Schema } = await import('@cat-cafe/shared');
     for (const candidate of [
+      { taskId: 'task-1', expectedRevision: 1, status: 'doing' },
+      { taskId: 'task-1', expectedRevision: 1, status: 'done' },
+      { taskId: 'task-1', expectedRevision: 1, status: 'blocked', ownerCatId: 'opus' },
       { taskId: 'task-1', expectedRevision: 1, artifactRefs: ['artifact:ppt:final'] },
       { taskId: 'task-1', expectedRevision: 1, time: { reviewBy: null } },
       { taskId: 'task-1', expectedRevision: 0, artifactRefs: [] },

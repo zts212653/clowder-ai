@@ -42,6 +42,7 @@ describe('F284 Workspace entry', () => {
     expect(button?.className).toContain('z-40');
     expect(button?.className).toContain('bg-transparent');
     expect(button?.className).not.toContain('border');
+    expect(button?.dataset.clientInteractive).toBe('true');
   });
 
   it('keeps one Workspace recall control instead of a second status entry in the header', async () => {

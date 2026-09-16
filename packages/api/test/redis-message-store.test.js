@@ -59,6 +59,176 @@ describe('RedisMessageStore message JSON Unicode boundary', () => {
   });
 });
 
+describe('RedisMessageStore paw-feel source projections', () => {
+  it('reads bounded source-only HMGET batches without hydrating tool event payloads', async () => {
+    const { RedisMessageStore } = await import('../dist/domains/cats/services/stores/redis/RedisMessageStore.js');
+    const ids = Array.from({ length: 101 }, (_, index) => `source-${String(index).padStart(3, '0')}`);
+    const hashes = new Map(
+      ids.map((id, index) => [
+        id,
+        {
+          id,
+          threadId: 'thread-source',
+          userId: 'user-source',
+          catId: 'codex-sol',
+          content: `[爪感差: hmget+source-${index}]`,
+          timestamp: String(1_700_000_000_000 + index),
+          deliveredAt: String(1_700_000_050_000 + index),
+          timelineOrderAt: String(1_700_000_100_000 + index),
+          deliveryStatus: 'delivered',
+          extra: JSON.stringify({
+            stream: { turnInvocationId: `turn-${index}` },
+            ...(index === 0 ? { crossPost: { sourceThreadId: 'thread-origin' } } : {}),
+            rich: { v: 1, blocks: [{ type: 'text', text: 'unused rich carrier'.repeat(10_000) }] },
+          }),
+          toolEvents: JSON.stringify([{ type: 'tool_result', detail: 'x'.repeat(50_000) }]),
+          contentBlocks: JSON.stringify([{ type: 'text', text: 'unused rich payload' }]),
+        },
+      ]),
+    );
+    const batches = [];
+    const redis = {
+      options: {},
+      hgetall: async () => {
+        throw new Error('source projection must not use HGETALL');
+      },
+      pipeline() {
+        const calls = [];
+        return {
+          hmget(key, ...fields) {
+            calls.push({ key, fields });
+            return this;
+          },
+          async exec() {
+            batches.push(calls);
+            return calls.map(({ key, fields }) => {
+              const id = key.slice(key.lastIndexOf(':') + 1);
+              const hash = hashes.get(id);
+              return [null, hash ? fields.map((field) => hash[field] ?? null) : []];
+            });
+          },
+        };
+      },
+    };
+    const store = new RedisMessageStore(redis);
+
+    const reads = await store.getPawFeelSourceProjections(ids);
+    const first = reads.get(ids[0]);
+
+    assert.equal(batches.length, 2, '101 source IDs must be split into bounded batches');
+    assert.ok(batches.every((batch) => batch.length <= 100));
+    assert.ok(
+      batches.flat().every(({ fields }) => !fields.includes('toolEvents') && !fields.includes('contentBlocks')),
+    );
+    assert.equal(first?.kind, 'available');
+    assert.deepEqual(first?.message, {
+      id: ids[0],
+      threadId: 'thread-source',
+      userId: 'user-source',
+      catId: 'codex-sol',
+      content: '[爪感差: hmget+source-0]',
+      timestamp: 1_700_000_000_000,
+      deliveredAt: 1_700_000_050_000,
+      timelineOrderAt: 1_700_000_100_000,
+      deliveryStatus: 'delivered',
+      extra: {
+        stream: { turnInvocationId: 'turn-0' },
+        crossPost: { sourceThreadId: 'thread-origin' },
+      },
+    });
+  });
+
+  it('keeps every requested source visible as a failed read when one HMGET batch rejects', async () => {
+    const { RedisMessageStore } = await import('../dist/domains/cats/services/stores/redis/RedisMessageStore.js');
+    let hgetallCalls = 0;
+    const redis = {
+      options: {},
+      hgetall: async () => {
+        hgetallCalls += 1;
+        throw new Error('source projection must not fall back to HGETALL');
+      },
+      pipeline() {
+        return {
+          hmget() {
+            return this;
+          },
+          async exec() {
+            throw new Error('redis unavailable');
+          },
+        };
+      },
+    };
+    const store = new RedisMessageStore(redis);
+
+    const reads = await store.getPawFeelSourceProjections(['source-a', 'source-b']);
+
+    assert.equal(hgetallCalls, 0);
+    assert.deepEqual(
+      [...reads],
+      [
+        ['source-a', { kind: 'unavailable', reason: 'read_failed' }],
+        ['source-b', { kind: 'unavailable', reason: 'read_failed' }],
+      ],
+    );
+  });
+
+  it('isolates malformed queue custody to one source without poisoning healthy rows or later batches', async () => {
+    const { RedisMessageStore } = await import('../dist/domains/cats/services/stores/redis/RedisMessageStore.js');
+    const ids = [
+      'source-good',
+      'source-bad',
+      ...Array.from({ length: 98 }, (_, index) => `missing-${index}`),
+      'source-later',
+    ];
+    const sourceHash = (id) => ({
+      id,
+      threadId: 'thread-source',
+      userId: 'user-source',
+      catId: 'codex-sol',
+      content: '[爪感差: source+projection]',
+      timestamp: '1700000000000',
+    });
+    const hashes = new Map([
+      ['source-good', sourceHash('source-good')],
+      ['source-bad', { ...sourceHash('source-bad'), queueCustody: '{' }],
+      ['source-later', sourceHash('source-later')],
+    ]);
+    const batches = [];
+    const redis = {
+      options: {},
+      hgetall: async () => {
+        throw new Error('source projection must not fall back to HGETALL');
+      },
+      pipeline() {
+        const calls = [];
+        return {
+          hmget(key, ...fields) {
+            calls.push({ key, fields });
+            return this;
+          },
+          async exec() {
+            batches.push(calls);
+            return calls.map(({ key, fields }) => {
+              const id = key.slice(key.lastIndexOf(':') + 1);
+              const hash = hashes.get(id);
+              return [null, hash ? fields.map((field) => hash[field] ?? null) : []];
+            });
+          },
+        };
+      },
+    };
+    const store = new RedisMessageStore(redis);
+
+    const reads = await store.getPawFeelSourceProjections(ids);
+
+    assert.equal(batches.length, 2);
+    assert.equal(reads.size, ids.length, 'every requested ID receives an outcome');
+    assert.equal(reads.get('source-good')?.kind, 'available');
+    assert.deepEqual(reads.get('source-bad'), { kind: 'unavailable', reason: 'read_failed' });
+    assert.equal(reads.get('source-later')?.kind, 'available');
+  });
+});
+
 describe('RedisMessageStore.markDelivered atomic transition', () => {
   it('uses Redis-side compare-and-set instead of read-check-write pipeline', async () => {
     const { RedisMessageStore } = await import('../dist/domains/cats/services/stores/redis/RedisMessageStore.js');
@@ -553,6 +723,13 @@ describe('RedisMessageStore', { skip: redisIsolationSkipReason(REDIS_URL) }, () 
     await append({ content: 'after', timestamp: base + 82 });
 
     const firstRead = await store.listOwnerMessagesInWindow('owner-window', base, base + 81);
+    const bounded = await store.listOwnerMessageWindowSlice('owner-window', base, base + 81, 3);
+    assert.equal(bounded.hasMore, true, 'filtered queued rows must not conceal truncation');
+    assert.ok(bounded.messages.length <= 3);
+    const complete = await store.listOwnerMessageWindowSlice('owner-window', base, base + 81, 500);
+    assert.equal(complete.hasMore, false);
+    assert.deepEqual(complete.messages, firstRead);
+    await assert.rejects(store.listOwnerMessageWindowSlice('owner-window', base, base + 81, 0), /limit/);
     assert.deepEqual(
       firstRead.map((message) => message.id),
       [lower.id, delivered.id, ...middle.map((message) => message.id), upper.id],

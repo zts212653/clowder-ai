@@ -7,6 +7,7 @@
  * kind=pr_tracking: automated PR monitoring tasks (merged from PrTrackingStore)
  */
 
+import { z } from 'zod';
 import type { BallResolveMode } from './ball-custody.js';
 import type { DispatchGateState } from './cross-thread-affordance.js';
 import type { GitHubIssueAwaitStateV1, GitHubPrAwaitStateV1, WaitOutcomeV1 } from './github-wait.js';
@@ -22,6 +23,17 @@ export type {
 export { extractFeatureIds } from './cross-thread-affordance.js';
 
 export type TaskStatus = 'todo' | 'doing' | 'blocked' | 'done';
+
+/**
+ * Canonical task-query Feature ID contract shared by the API, MCP, and query seam.
+ * The 120-character ceiling matches ownerFeatureId refs and keeps derived owner-state
+ * references comfortably inside their independent 500-character bound.
+ */
+export const TASK_FEATURE_ID_MAX_LENGTH = 120;
+export const taskFeatureIdSchema = z
+  .string()
+  .max(TASK_FEATURE_ID_MAX_LENGTH)
+  .regex(/^F\d+$/, 'task feature ID must be uppercase F followed by digits');
 
 /**
  * Task kind discriminator (#320, F202-2D).

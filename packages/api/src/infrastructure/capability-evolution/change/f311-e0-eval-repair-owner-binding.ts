@@ -91,7 +91,21 @@ const roleAssignmentSchema = z
     schemaVersion: z.literal(1),
     programId: z.literal(PROGRAM_ID),
     targetRef: targetSchema,
-    roles: z.object({ domainOwner: ownerTruthRefV1Schema }).passthrough(),
+    roles: z
+      .object({
+        consumer: ownerTruthRefV1Schema,
+        domainOwner: ownerTruthRefV1Schema,
+      })
+      .passthrough(),
+    certificateDecision: z
+      .object({
+        consumerFeatureId: z
+          .string()
+          .regex(/^F\d{3}$/u)
+          .optional(),
+        consumerOwnerCatId: z.string().trim().min(1),
+      })
+      .passthrough(),
   })
   .passthrough();
 
@@ -104,6 +118,16 @@ const measurementSourceSchema = z
     sourceArtifacts: z.array(z.object({ ref: z.string().trim().min(1) }).passthrough()).min(1),
     program: z.object({ targetRef: targetSchema }).passthrough(),
     roles: z.object({ consumer: ownerTruthRefV1Schema, domainOwner: ownerTruthRefV1Schema }).passthrough(),
+    certificate: z
+      .object({
+        decision: z
+          .object({
+            consumerFeatureId: z.string().regex(/^F\d{3}$/u),
+            consumerOwnerCatId: z.string().trim().min(1),
+          })
+          .passthrough(),
+      })
+      .passthrough(),
     result: z
       .object({
         decision: z.object({ status: z.literal('insufficient') }).passthrough(),
@@ -122,6 +146,21 @@ function sameRef(left: OwnerTruthRefV1, right: OwnerTruthRefV1): boolean {
 
 function sameOwnerAddress(left: OwnerTruthRefV1, right: OwnerTruthRefV1): boolean {
   return left.ownerFeatureId === right.ownerFeatureId && left.ownerStateRef === right.ownerStateRef;
+}
+
+function namedConsumerRef(decision: { consumerFeatureId: string; consumerOwnerCatId: string }): OwnerTruthRefV1 {
+  return {
+    ownerFeatureId: decision.consumerFeatureId,
+    ownerStateRef: `cat:${decision.consumerOwnerCatId}`,
+  };
+}
+
+function consumerMatchesCanonicalSeat(
+  consumerRef: OwnerTruthRefV1,
+  valueOwnerRef: OwnerTruthRefV1,
+  decision: { consumerFeatureId: string; consumerOwnerCatId: string },
+): boolean {
+  return sameRef(consumerRef, valueOwnerRef) || sameRef(consumerRef, namedConsumerRef(decision));
 }
 
 async function readYaml(repoRoot: string, relativePath: string): Promise<unknown> {
@@ -154,7 +193,16 @@ export async function loadF311E0EvalRepairOwnerBinding(repoRoot: string): Promis
     !sameRef(binding.targetRef, measurement.program.targetRef) ||
     !sameRef(binding.valueOwnerRef, charter.valueOwnerRef) ||
     !sameRef(binding.valueOwnerRef, economic.valueOwnerRef) ||
-    !sameRef(binding.valueOwnerRef, measurement.roles.consumer) ||
+    !sameRef(roles.roles.consumer, measurement.roles.consumer) ||
+    !consumerMatchesCanonicalSeat(
+      measurement.roles.consumer,
+      binding.valueOwnerRef,
+      measurement.certificate.decision,
+    ) ||
+    measurement.certificate.decision.consumerFeatureId !== measurement.roles.consumer.ownerFeatureId ||
+    roles.certificateDecision.consumerOwnerCatId !== measurement.certificate.decision.consumerOwnerCatId ||
+    (roles.certificateDecision.consumerFeatureId !== undefined &&
+      roles.certificateDecision.consumerFeatureId !== measurement.certificate.decision.consumerFeatureId) ||
     !sameRef(binding.domainOwnerRef, roles.roles.domainOwner) ||
     !sameRef(binding.domainOwnerRef, measurement.roles.domainOwner) ||
     !sameRef(binding.ownerAuthorization.blockerRef, charter.economicCertificateRef) ||

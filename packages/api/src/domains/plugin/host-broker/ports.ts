@@ -1,3 +1,4 @@
+import type { StaticFeatureLedger } from './static-feature-ledger.js';
 import type { BrokerCallRecord, BrokerRuntimeLeaseRecord, BrokerSessionRecord, HostBrokerSnapshot } from './types.js';
 
 export interface BrokerSessionStore {
@@ -23,6 +24,10 @@ export interface HostBrokerTransaction {
   readonly sessions: BrokerSessionStore;
   readonly runtimeLeases: BrokerRuntimeLeaseStore;
   readonly calls: BrokerCallStore;
+  readonly staticFeatures: {
+    get(): StaticFeatureLedger;
+    put(ledger: StaticFeatureLedger): void;
+  };
 }
 
 export interface HostBrokerStore {

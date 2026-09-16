@@ -104,6 +104,7 @@ describe('applyReadonlyFilter — env modes', () => {
       'cat_cafe_post_message',
       'cat_cafe_cross_post_message',
       'cat_cafe_get_thread_context',
+      'cat_cafe_get_thread_cats',
       'cat_cafe_get_workflow_sop',
       'cat_cafe_get_message',
       'cat_cafe_list_threads',
@@ -118,7 +119,6 @@ describe('applyReadonlyFilter — env modes', () => {
     }
 
     const expectedAbsent = [
-      'cat_cafe_get_thread_cats',
       'cat_cafe_list_tasks',
       'cat_cafe_multi_mention',
       'cat_cafe_hold_ball',
@@ -385,22 +385,22 @@ describe('buildCollabTools / buildMemoryTools — real toolset assertions (codex
 // =====================================================================
 
 describe('F238 cloud-pro-phase0 mode — Phase B1a security boundary', () => {
-  it('DESKTOP_CLOUD_PRO_PHASE0_ALLOWED_TOOLS contains exactly 12 tools', () => {
+  it('DESKTOP_CLOUD_PRO_PHASE0_ALLOWED_TOOLS contains exactly 13 tools', () => {
     assert.equal(
       DESKTOP_CLOUD_PRO_PHASE0_ALLOWED_TOOLS.size,
-      12,
-      'cloud-pro-phase0 includes the F236 drill and otherwise matches fable-phase0',
+      13,
+      'cloud-pro-phase0 includes scoped thread-cat discovery',
     );
   });
 
-  it('contains the same 12 tools as fable-phase0 through independent profile projections', () => {
+  it('adds only scoped thread-cat discovery to the fable-phase0 surface', () => {
     assert.deepEqual(
       [...DESKTOP_CLOUD_PRO_PHASE0_ALLOWED_TOOLS].sort(),
-      [...DESKTOP_FABLE_PHASE0_ALLOWED_TOOLS].sort(),
+      [...DESKTOP_FABLE_PHASE0_ALLOWED_TOOLS, 'cat_cafe_get_thread_cats'].sort(),
     );
   });
 
-  it('applyReadonlyFilter(cloud-pro-phase0) → only 12 whitelist tools', () => {
+  it('applyReadonlyFilter(cloud-pro-phase0) → only 13 whitelist tools', () => {
     const env: ToolsetEnv = { desktopMode: 'cloud-pro-phase0' };
     const out = applyReadonlyFilter(ALL_FAKE_TOOLS, env);
     const outNames = new Set(out.map((t) => t.name));

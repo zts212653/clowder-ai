@@ -2,10 +2,23 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import type { WorkbenchLayoutState, WorkspaceSurfaceDescriptor } from '@/components/workbench/workbench-contract';
 import { createInitialWorkbenchState } from '@/components/workbench/workbench-model';
 import { useF307ExperienceWorkbenchStore } from '../experience-workbench-store';
-import { createEvolutionProgramSurface, createFileSurface } from '../real-surface-adapters';
+import {
+  createAgentRunSurface,
+  createBrowserSurface,
+  createEvolutionProgramSurface,
+  createFileSurface,
+  createTerminalSurface,
+} from '../real-surface-adapters';
 
 const PROGRAM_SURFACE = createEvolutionProgramSurface(`evolution-program:${'b'.repeat(32)}`);
 const FILE_SURFACE = createFileSurface({ worktreeId: 'worktree-main', path: 'README.md' });
+const BROWSER_SURFACE = createBrowserSurface({ ownerKey: 'preview-main', port: 4173, path: '/docs' });
+const TERMINAL_SURFACE = createTerminalSurface({ worktreeId: 'worktree-main' });
+const AGENT_RUN_SURFACE = createAgentRunSurface({
+  invocationId: 'invocation-f307',
+  threadId: 'thread-f307',
+  title: 'F307 verification',
+});
 const ARTIFACT_SURFACE: WorkspaceSurfaceDescriptor = {
   ...FILE_SURFACE,
   id: 'artifact:thread-review:result',
@@ -39,19 +52,27 @@ describe('F307 temporary main-area attention contract', () => {
     });
   });
 
-  it('admits only the active surface that explicitly supports main-area attention', () => {
-    const store = useF307ExperienceWorkbenchStore.getState();
+  it('admits every active mounted Workspace tab without a domain-specific opt-in', () => {
+    for (const surface of [FILE_SURFACE, BROWSER_SURFACE, TERMINAL_SURFACE, AGENT_RUN_SURFACE, PROGRAM_SURFACE]) {
+      useF307ExperienceWorkbenchStore.setState({
+        layout: createInitialWorkbenchState([surface]),
+        hydrated: true,
+        mainAreaAttentionSurfaceId: null,
+      });
 
-    store.enterMainAreaAttention(FILE_SURFACE.id);
-    expect(useF307ExperienceWorkbenchStore.getState().mainAreaAttentionSurfaceId).toBeNull();
+      useF307ExperienceWorkbenchStore.getState().enterMainAreaAttention(surface.id);
 
-    store.dispatch({
-      type: 'activate-surface',
-      surfaceId: PROGRAM_SURFACE.id,
-      entitlement: { kind: 'user', reason: 'surface-tab' },
+      expect(useF307ExperienceWorkbenchStore.getState().mainAreaAttentionSurfaceId).toBe(surface.id);
+      useF307ExperienceWorkbenchStore.getState().exitMainAreaAttention();
+    }
+
+    useF307ExperienceWorkbenchStore.setState({
+      layout: createInitialWorkbenchState([FILE_SURFACE, PROGRAM_SURFACE]),
+      hydrated: true,
+      mainAreaAttentionSurfaceId: null,
     });
-    store.enterMainAreaAttention(PROGRAM_SURFACE.id);
-    expect(useF307ExperienceWorkbenchStore.getState().mainAreaAttentionSurfaceId).toBe(PROGRAM_SURFACE.id);
+    useF307ExperienceWorkbenchStore.getState().enterMainAreaAttention(PROGRAM_SURFACE.id);
+    expect(useF307ExperienceWorkbenchStore.getState().mainAreaAttentionSurfaceId).toBeNull();
   });
 
   it('returns automatically when focus leaves or the attention surface is detached', () => {

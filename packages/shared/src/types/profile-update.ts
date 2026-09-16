@@ -20,8 +20,14 @@
 import type { ApprovalPublication } from './approval-hub.js';
 import type { CatId } from './ids.js';
 
-/** AC-C1 only writes the current persona primer (low-cost). `'capsule'` (high-cost, shared) is C2. */
-export type ProfileUpdateTargetLayer = 'primer';
+/**
+ * Phase E: target layer enum — the canonical source of truth for where a profile update lands.
+ * 'primer' = per-persona relationship file (AC-C1, existing).
+ * 'corpus' = owner-wide shared facts (AC-E1, Phase E).
+ * No 'capsule': the ≤300-char identity anchor is operator hand-maintained only (KD-7/KD-17).
+ */
+export const PROFILE_UPDATE_TARGET_LAYERS = ['primer', 'corpus'] as const;
+export type ProfileUpdateTargetLayer = (typeof PROFILE_UPDATE_TARGET_LAYERS)[number];
 
 export type ProfileUpdateProposalStatus = 'pending' | 'approving' | 'approved' | 'rejected';
 

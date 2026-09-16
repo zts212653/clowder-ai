@@ -6,7 +6,11 @@ import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { removePersonalChromeConversationAuthorizations } from './conversation-binding.mjs';
-import { digestNativeHostArtifactDirectory, publishNativeHostArtifact } from './native-host-artifact.mjs';
+import {
+  digestInstalledNativeHostArtifactDirectory,
+  digestNativeHostArtifactDirectory,
+  publishNativeHostArtifact,
+} from './native-host-artifact.mjs';
 import {
   assertInstallMutationSupported,
   assertNodeRuntimeExecutable,
@@ -52,7 +56,7 @@ export async function inspectNativeHostInstallation({
   const record = await readPersonalChromePairingRecord(paths.pairingRecordPath);
   const artifactDirectory = join(paths.artifactsDirectory, record.artifactDigest.slice('sha512:'.length));
   const artifactEntrypoint = join(artifactDirectory, 'native-host-cli.mjs');
-  if ((await digestNativeHostArtifactDirectory(artifactDirectory)) !== record.artifactDigest) {
+  if ((await digestInstalledNativeHostArtifactDirectory(artifactDirectory)) !== record.artifactDigest) {
     throw new Error('installed native host artifact digest mismatch');
   }
   const plan = buildNativeHostInstallPlan({

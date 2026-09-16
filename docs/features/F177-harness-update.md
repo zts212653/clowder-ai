@@ -278,7 +278,7 @@ GitHub issue: TBD（kickoff 后开）
 
 ### Phase I: Organic Friction Closure — 可执行命令契约 + shared-state 意图守卫
 
-> **Reopened 2026-07-10（operator signoff）**：operator在本 thread 明确要求“先把 spec 写清楚 commit push，之后把这三个收了”（message `0001783688087982-000895-5c79e677`）。本 Phase 只收 organic dogfood 已复现的 harness 摩擦，不把 F177 扩成通用维护桶。
+> **Reopened 2026-07-10（operator signoff）**：operator在本 thread 明确要求“先把 spec 写清楚 commit push，之后把这三个收了”（message `private-source-id`）。本 Phase 只收 organic dogfood 已复现的 harness 摩擦，不把 F177 扩成通用维护桶。
 
 #### Why now
 
@@ -291,9 +291,9 @@ GitHub issue: TBD（kickoff 后开）
 | feature branch 吸收 `origin/main` 时，main-side shared state 被 pre-commit 当作作者改动拦截 | index/worktree 内容与 `origin/main` byte-identical；一次有记录的 `--no-verify` 才完成 merge | guard 必须区分 feature delta 与纯上游 carry-in，同时保持 fail-closed |
 
 Source messages:
-- command drift: `0001783626982347-000254-f29397e7` / `0001783664777138-000320-f7e0e112`
-- formatting correction: `0001783628501886-000304-133bfc91` / `0001783628587838-000307-da926ace`
-- shared-state false positive: `0001783671183906-000501-16400455`
+- command drift: `private-source-id` / `private-source-id`
+- formatting correction: `private-source-id` / `private-source-id`
+- shared-state false positive: `private-source-id`
 
 #### Scope
 
@@ -339,7 +339,7 @@ Architecture cell: `dispatch` + `bubble-pipeline`
 Map delta: completed — `dispatch` 登记 durable child lifecycle owner，`bubble-pipeline` 登记 typed routing-guard identity 与无正文 auxiliary execution 投影。
 
 > **Reopened 2026-07-16（operator 授权）**：实弹
-> `incident:[thread-id]/0001784219578304-000230-3dd8e178`
+> `incident:[thread-id]/private-source-id`
 > 中，同一 parent 实际运行 ordinary、routing guard、freshness supplement 三个 child；父
 > `InvocationRecord` 只能表达 aggregate，而 `InvocationRegistry` 是 TTL=2h 的 callback auth，结束后
 > child API 已 404。F177 的成本守卫仍然有效，但系统无法在 F5/history 中证明补路由到底有没有执行、何时结束、
@@ -566,7 +566,7 @@ Why: Phase I 复用 F245/F192 friction ingestion 与 verdict contract，其他�
 - [x] Maine Coon review Phase A + Phase F 结构化判据设计 — Maine Coon主审 Phase A (PR #1453) + Phase F (PR #1466)，close gate schema / quality-gate search→Read chain / search affordance 均经Maine Coon review 放行
 - [x] operator拍板 OQ-1 + OQ-F1~F3 — OQ-1 已决（自然语言表态，2026-04-28），OQ-F1/F3 由实现决策收敛（operator授权 Phase 并行后设计决策在实现中确定）
 - [x] 元审美自检：F177 是坐标变换 — 旧坐标系："信任猫自觉遵守文本规则"；新坐标系："结构化信号检测（close-tail scan / fallback counter / search→Read chain / hotfix pattern / routing guard）+ 自动化 gate + 跨猫 review"。8 个 Phase 各用不同检测工具解决不同坏直觉，但底层范式统一：从 trust-based 到 evidence-based
-- [x] Phase I operator scope：三条 organic friction 归 F177，不另开 F 号；先写清 spec，再按 AC-I0~I6 闭环（message `0001783688087982-000895-5c79e677`）
+- [x] Phase I operator scope：三条 organic friction 归 F177，不另开 F 号；先写清 spec，再按 AC-I0~I6 闭环（message `private-source-id`）
 - [x] Phase I 架构审视：main-first 保留 J/K truth；execution-surface audit 不把 carrier existence 当 gate coverage；最终 rebased HEAD 必复验
 - [x] Phase I 独立 review + merge gate：Fable 5 跨族 APPROVE，纯 rebase continuity、E1–E5、CI 与 squash merge #3001 均闭合
 

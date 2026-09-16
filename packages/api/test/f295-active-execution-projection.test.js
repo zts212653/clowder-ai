@@ -454,6 +454,7 @@ describe('F295 active execution projection', () => {
     });
     const occupied = projection.json().executions.find((execution) => execution.catId === 'opus5');
     assert.match(occupied.executionId, /^occupied:/);
+    assert.equal(occupied.turnInvocationId, undefined, 'foreign occupancy must not expose a child handle');
     assert.deepEqual(occupied.cancelability, { state: 'not_cancelable', reason: 'foreign_principal' });
 
     const cancel = await app.inject({
@@ -509,6 +510,8 @@ describe('F295 active execution projection', () => {
     });
     const merged = projection.json().executions.filter((execution) => execution.executionId === 'inv-a');
     assert.equal(merged.length, 1);
+    assert.equal(merged[0].turnInvocationId, 'turn-process-owner-a', 'detail navigation uses the child invocation');
+    assert.equal(merged[0].cancelability.target.executionId, 'inv-a', 'Stop retains the parent control identity');
     assert.equal(merged[0].startedAt, 100, 'tracker age remains canonical when both sources describe one execution');
 
     const cancel = await app.inject({

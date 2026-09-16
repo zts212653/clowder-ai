@@ -310,7 +310,7 @@ F294 不新造一套“选中文字”浮层，也不把转发塞进 Composer �
 ### Phase B（同 Café 富文本合并转发）
 
 > **operator Alpha UAT accepted (2026-08-19):** operator确认此前多轮真实 Alpha dogfood、反馈与修正即为
-> Phase B 验收（`0001787099180174-000132-187f47eb`）。已合入实现的 automated contract/browser
+> Phase B 验收（`private-source-id`）。已合入实现的 automated contract/browser
 > evidence 覆盖安全与负向路径；以下 AC-B1–B11 随该明确验收勾选完成。
 
 - [x] AC-B1: TTL=0 Message Bundle 持久化源 Thread、按序 exact refs、可选整包留言、创建者与创建时间；

@@ -11,6 +11,7 @@
 
 .channel-scene {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   grid-template-rows: auto minmax(0, 1fr) auto;
   min-width: 0;
   height: 100%;
@@ -96,4 +97,43 @@
   color: var(--cafe-text-muted);
   font-size: 13px;
   line-height: 1.7;
+}
+.participant-picker,
+.entrust-choice,
+.channel-selector,
+.world-selector {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  color: var(--cafe-text-secondary);
+  font-size: 12px;
+  margin: 8px 0;
+}
+.participant-picker select,
+.channel-selector select,
+.world-selector select {
+  max-width: 100%;
+  min-width: 0;
+  border: 1px solid var(--cafe-border);
+  background: var(--cafe-surface);
+  color: var(--cafe-text);
+  padding: 7px 9px;
+  border-radius: 8px;
+  font: inherit;
+}
+.participant-picker select {
+  flex: 1;
+}
+.entrust-choice small {
+  flex-basis: 100%;
+  color: var(--cafe-text-muted);
+}
+.request-kind {
+  color: var(--cafe-accent-ink);
+  font-size: 11px;
+}
+.legacy-history {
+  padding: 12px;
+  color: var(--cafe-text-muted);
 }

@@ -1,6 +1,10 @@
 import { createHash } from 'node:crypto';
 import { isCrossThreadProvenance, type PawFeelSignalId } from '@cat-cafe/shared';
-import type { IMessageStore, StoredMessage } from '../../../domains/cats/services/stores/ports/MessageStore.js';
+import type {
+  IMessageStore,
+  PawFeelSourceMessageProjection,
+  StoredMessage,
+} from '../../../domains/cats/services/stores/ports/MessageStore.js';
 import { getTimelineOrderTime } from '../../../domains/cats/services/stores/visibility.js';
 import { extractPawFeelMarkers, isStandalonePawFeelMarker, type PawFeelMarker } from './paw-feel-marker.js';
 
@@ -46,16 +50,16 @@ export function buildPawFeelSignalId(
   return `${sourceMessageId}:${markerDigest}:${sameDigestOrdinal}`;
 }
 
-export function inspectPawFeelMessage(message: StoredMessage): PawFeelMessageInspection {
+export function inspectPawFeelMessage(message: PawFeelSourceMessageProjection): PawFeelMessageInspection {
   return inspectPawFeelMessageWithMode(message, 'legacy');
 }
 
-export function inspectDeclaredPawFeelMessage(message: StoredMessage): PawFeelMessageInspection {
+export function inspectDeclaredPawFeelMessage(message: PawFeelSourceMessageProjection): PawFeelMessageInspection {
   return inspectPawFeelMessageWithMode(message, 'typed_intent');
 }
 
 function inspectPawFeelMessageWithMode(
-  message: StoredMessage,
+  message: PawFeelSourceMessageProjection,
   mode: 'legacy' | 'typed_intent',
 ): PawFeelMessageInspection {
   const sourceCatId = message.catId;

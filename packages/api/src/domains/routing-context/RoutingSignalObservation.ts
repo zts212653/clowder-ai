@@ -91,6 +91,7 @@ const dispatchTerminalObservationV1Schema = z
     failureClass: z
       .enum(['quota_exhausted', 'authentication_rejected', 'provider_unreachable', 'provider_timeout'])
       .optional(),
+    failureObservedAt: epochMsSchema.optional(),
     preflightDecision: routingPreflightDecisionV1Schema,
   })
   .strict()
@@ -173,11 +174,32 @@ export const automaticRoutingSignalRecoveryInputSchema = z
     source: automaticRecoverySourcesSchema,
     observedAt: epochMsSchema,
     evidenceRef: referenceSchema,
-    closesSignalIds: z.array(identifierSchema).min(1).max(64),
+    closesSignalIds: z.array(identifierSchema).max(64),
+    probeStartedAt: epochMsSchema.optional(),
     recoverableSources: z.array(automaticAssertionSourcesSchema).min(1).max(3),
   })
   .strict()
   .superRefine((input, ctx) => {
+    if (input.probeStartedAt !== undefined) {
+      if (
+        input.source !== 'dispatch_success' ||
+        input.subjectRef.type !== 'cat' ||
+        input.probeStartedAt > input.observedAt ||
+        input.recoverableSources.some((source) => source !== 'provider_error' && source !== 'health_probe')
+      ) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['probeStartedAt'],
+          message: 'a dispatch probe requires exact-cat success and a valid causal interval',
+        });
+      }
+    } else if (input.closesSignalIds.length === 0) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['closesSignalIds'],
+        message: 'recovery without a probe requires exact assertions',
+      });
+    }
     for (const [field, values] of [
       ['closesSignalIds', input.closesSignalIds],
       ['recoverableSources', input.recoverableSources],

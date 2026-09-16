@@ -1,38 +1,25 @@
 'use client';
 
-import type { PawFeelDispositionState, PawFeelInboxPage, PawFeelInboxSort } from '@cat-cafe/shared';
+import type { PawFeelInboxPage, PawFeelInboxSort, PawFeelIssueResolution } from '@cat-cafe/shared';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { apiFetch } from '@/utils/api-client';
+import { isPawFeelInboxPage } from '../paw-feel/paw-feel-page-guard';
 import { PawFeelDutyBanner, PawFeelInboxBody, PawFeelInboxHeader, PawFeelInboxNotices } from './PawFeelInboxChrome';
 import { type PawFeelFilter, PawFeelInboxToolbar } from './PawFeelInboxToolbar';
 import { usePawFeelDuty } from './usePawFeelDuty';
 
-const FILTER_STATES: Record<PawFeelFilter, PawFeelDispositionState[] | undefined> = {
-  active: ['new', 'seen', 'route_pending', 'routed', 'fix', 'signature_waiting', 'blocked'],
+const FILTER_RESOLUTION: Record<PawFeelFilter, PawFeelIssueResolution | undefined> = {
+  active: 'open',
   all: undefined,
-  overdue: ['new', 'seen', 'route_pending', 'routed', 'fix', 'signature_waiting', 'blocked'],
-  disposed: ['closed', 'duplicate', 'no_action'],
+  overdue: 'open',
+  disposed: 'resolved',
 };
-
-function isInboxPage(value: unknown): value is PawFeelInboxPage {
-  if (!value || typeof value !== 'object') return false;
-  const candidate = value as Partial<PawFeelInboxPage>;
-  return (
-    (candidate.projectionStatus === 'available' || candidate.projectionStatus === 'unavailable') &&
-    Array.isArray(candidate.items) &&
-    Array.isArray(candidate.bundles) &&
-    typeof candidate.bundleCounts === 'object' &&
-    typeof candidate.denominator === 'object' &&
-    typeof candidate.counts === 'object' &&
-    typeof candidate.degraded === 'boolean'
-  );
-}
 
 function queryFor(filter: PawFeelFilter, sort: PawFeelInboxSort, cursor?: string): string {
   const query = new URLSearchParams({ limit: '50', sort });
-  const states = FILTER_STATES[filter];
-  if (states) query.set('states', states.join(','));
-  if (filter === 'overdue') query.set('overdueOnly', 'true');
+  const resolution = FILTER_RESOLUTION[filter];
+  if (resolution) query.set('resolution', resolution);
+  if (filter === 'overdue') query.set('issueOverdueOnly', 'true');
   if (cursor) query.set('cursor', cursor);
   return query.toString();
 }
@@ -45,7 +32,7 @@ async function requestInboxPage(
   const response = await apiFetch(`/api/paw-feel/inbox?${queryFor(filter, sort, cursor)}`);
   if (!response.ok) throw new Error(`爪感差收件箱请求失败 (${response.status})`);
   const payload: unknown = await response.json();
-  if (!isInboxPage(payload)) throw new Error('爪感差收件箱返回了无效数据');
+  if (!isPawFeelInboxPage(payload, true)) throw new Error('爪感差收件箱返回了无效数据');
   return payload;
 }
 

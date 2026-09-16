@@ -6,7 +6,7 @@ topics: [freshness, glass-box, supplement, inbox-notice, runtime-descriptor, sid
 doc_kind: spec
 created: 2026-06-27
 updated: 2026-09-05
-tips_exempt: Remote-compaction capacity recovery continues the already-authorized task automatically; it adds no user action, setting, or capability to discover.
+tips_exempt: F254's automatic freshness runtime and eval-measurement correctness surfaces add no user action, setting, or discoverable capability.
 ---
 
 # F254: Side-Effect Freshness Gate — 副作用出口 freshness 拦截
@@ -796,7 +796,7 @@ Phase E 不再增加另一层“提醒猫去读”的 fallback。它改变输出
     恢复阶段的原生 resume 拒绝或 identity mismatch 必须停止，不能携带空恢复输入换到新 thread。早到的容量 error notice
     不单独授权重试；它由权威终态归并，成功恢复后不发布。中间重试留在 status channel；`blocked_inflight_tool` / `checkpoint_incomplete` / `budget_exhausted` 各保留
     一张用户可见断点卡。AC-D14e 对人工 interrupt / timeout 继续成立，本条只处理 provider 已给出的 failed 终态。
-    按 operator source `0001788622146733-000382-aea9fce5` 收正可选计划、提前通知与 exact-resume 边界。
+    按 operator source `private-source-id` 收正可选计划、提前通知与 exact-resume 边界。
 
 > **AC-D14 lifecycle projection stateful-object gate**：canonical read 保留 parent execution owner 与 child turn
 > identity 两套坐标；tracker 只能在其 `getUserId(threadId, catId)` 等于本次 request user 时提供 lifecycle owner。
@@ -862,7 +862,7 @@ piggyback 推断 native coverage。
 - [x] AC-E6: 连续新消息采用单调 frontier + bounded supersede；每条 lineage 具备 one-running + one-pending 去重，scope 另有 one-running-successor lease，但允许多个 pending/blocked lineage 共存；per-retry-epoch automatic successor attempt 与 per-output conditional-append recheck 均有上界。预算耗尽只 block 当前 lineage 并保留显式 retry/disposition，绝不发布 stale、静默吞 unresolved message 或阻断独立新 work
 - [x] AC-E7: multi-target 继续 per-target 隔离：一只猫的 consume/handled/commit 不推进其他 target；parallel route 创建稳定 `parallelBatchId`，同批 sibling outputs 不进入彼此 relevant frontier，其他新消息仍推进每猫 closure；independent fan-out cutoff 仍归 F108
 - [x] AC-E8: thread 现场展示低噪音 catch 状态，fresh final 后自动收敛；dashboard 仅作深挖，重复 supersede 必须 dedup；blocked 在 Hub 与 connector 都必须成为明确终态/重试指引，不能永远显示 catching-up
-- [x] AC-E9: `eval:freshness` 接入 replayable source + verdict generator，覆盖原始双消息 dogfood、existing-coverage-without-closure、crash/cancel、连续新消息、multi-target、parallel same-batch、attempt/recheck budget、connector blocked 八类结构性 fixture；每次 publish 必跑八类 server-owned fixture，caller 不可挑选证据；fixture-only 明确为 `no_data` 且绝不 healthy，live facts 与 aggregate snapshot 从同一 durable closure 集合推导。`2936df429` 的真空绿缺陷由 formal review 揭示，修复在 latest-main-equivalent `d93dda62e` 以每个 violation predicate 的 RED、mandatory coverage、subset rejection 与 live duplicate/stale custody 证明转绿；待 exact-head gate/re-review 与 PR/cloud/CI。
+- [x] AC-E9: `eval:freshness` 接入 replayable source + verdict generator，覆盖原始双消息 dogfood、existing-coverage-without-closure、crash/cancel、连续新消息、multi-target、parallel same-batch、attempt/recheck budget、connector blocked 八类结构性 fixture；每次 publish 必跑八类 server-owned fixture，caller 不可挑选证据；fixture-only 明确为 `no_data` 且绝不 healthy，live facts 与 aggregate snapshot 从同一 durable closure 集合推导。`2936df429` 的真空绿缺陷由 formal review 揭示，修复在 latest-main-equivalent `d93dda62e` 以每个 violation predicate 的 RED、mandatory coverage、subset rejection 与 live duplicate/stale custody 证明转绿。**2026-09-05 measurement amendment**：本条 closure replay 只保留为结构不变量与 legacy compatibility plane；不得再把 closure-only `no_data` 解释成无 live activity，发布有效性由 AC-E34~E37 的完整 windowed source maturity gate 决定。
 - [x] AC-E10: 约定面接线纳入 convention graph / wiring guard；intake 整文件覆盖若切断 commit gate、closure event 或 eval adapter，`pnpm gate` 必须失败
 - [x] AC-E11: **restart recovery fence**：process startup 不是新的用户意图。启动时发现的 `pending` closure 必须持久化为 `blocked:startup_recovery_requires_explicit_retry`，不得自动召猫；仅仍处于 `running` 且未超过 invocation liveness horizon 的崩溃 attempt 可 recover-forward。blocked projection 必须可由 F5/reconnect hydration 重建，显式 retry 继续复用同一 closure/retry epoch；queued body 读取继续按 target cat 隔离。
 - [x] AC-E12: **lineage custody / poison-pill removal**：scope active truth 从单 pointer 改为 lineage set + one running lease；只有 exact `freshnessClosureId` carrier 可影响该 lineage。旧 pending/blocked ticket 不得吞独立新回答；新 stale turn 必须开自己的 lineage。所有 route exit 在删除 DraftStore 前必须收到 typed draft custody，且每轮有 exact `turnInvocationId` + formal outcome。
@@ -886,7 +886,7 @@ piggyback 推断 native coverage。
 Architecture cell: `ball-custody` + `dispatch` + `bubble-pipeline`
 Map delta: completed — `ball-custody` 登记 typed causal relevance，`dispatch` 登记 shared child ledger，`bubble-pipeline` 登记三类 child 的 live/F5 projection。
 
-现场 anchor：`incident:[thread-id]/0001784219578304-000230-3dd8e178`。
+现场 anchor：`incident:[thread-id]/private-source-id`。
 M1 只路由 Fable；M2 的“你也看看”让 Sol 本轮 prompt 正常覆盖 M1。Fable 对 M1 的后到 sibling reply
 属于同一用户波次的已覆盖因果结果，却被旧 relevance policy 当成 Sol 新工作，再创建一个 supplement；同一
 parent 下的 ordinary、routing guard、freshness supplement 又只能在短 TTL auth registry 中暂时看见，无法作为
@@ -918,6 +918,19 @@ Map delta why: 本轮只修正现有 Web closure projection / hydration 的时�
 - [x] AC-E31: `originTriggerMessageId=null` 的 legacy closure 明示为历史责任并展示自己的月日/时分；不得使用会被理解成“刚发生”的当前责任文案
 - [x] AC-E32: legacy closure 不暴露 one-click retry，只指向 AC-E23 迁移核销；current attributable blocked closure 的显式 retry 契约保持不变
 - [x] AC-E33: background legacy hydration 不制造 unread 或推进 `lastActivity`；active/background/F5 投影共用相同 lineage/time 规则并按 closure ID 幂等
+
+### Phase E-E（Measurement-valid Replay，2026-09-05 runtime 反证重开）
+
+Architecture cell: harness-eval + ball-custody + dispatch
+
+Map delta: none — `eval:freshness` 在既有 harness-eval、ball-custody 与 dispatch owner 上增加同一 owner、同一半开窗口的多源 replay；不新增 lifecycle 或 storage owner。
+
+现场反证：deployed runtime 的 `queued_seen/queued_handled`、gate、notice、reinvoke 与 glass-box counters 均有活动，closure-only replay 却返回 `no_data`。这些 OTel counters 自进程启动累计，既不能构成 weekly 分母，也不能证明所选窗口完整。根因与 RED 见
+
+- [x] AC-E34: 一个 publish selector 必须从相同 owner 与 `[windowStartMs, windowEndMs)` 同时解析四个 server-owned plane：legacy closure compatibility、TTL-0 Queue custody lifecycle、TTL-0 FreshnessSupplement lifecycle、retention-bounded attention/provider event index；`threadIds` narrowing 对四个 plane 一致生效
+- [x] AC-E35: Queue replay 以 current revision 的 target-local terminal truth 计数，同时保留 exact body exposure/attempt history；Supplement 持久 `claimedAt/terminalAt`。窗口相交的 legacy lifecycle 若缺少无法还原的 transition time，source 必须标 incomplete，不得猜时间或归零
+- [x] AC-E36: attention/provider event 的 invocation-local diagnostic log 与 owner-scoped window index 在一个 Redis transaction 中提交；window index 保留至少最大 31-day selector 加调度余量，并把仍可能有并发 append 的最近 60 秒排除在 settled-through watermark 外。每次 API startup 单调推进 coverage 起点，阻断跨 crash/rollback/off-mode 的假连续窗口；同进程 append 失败也推进 process gap。无 coverage watermark、窗口/上述 gap 越界、owner provenance 缺失或任一 source query 失败时，measurement maturity 必须 blocked，且在创建 verdict commit/PR 前拒绝发布
+- [x] AC-E37: 八类 AC-E9 fixture 每次仍由 server 强制注入，legacy closure 仍可 replay；Queue/Supplement/attention 有活动而 legacy closure 为零时，结构 verdict 可保持 `no_data/healthy=false`，但 bundle 必须如实输出 windowed activity，不能写成“无 live activity”。RED 必须证明 source 不完整时即使有这些活动也拒绝发布
 
 <!-- F254_MANUAL_REMINDER_SCOPE: optional-nonblocking -->
 

@@ -253,6 +253,10 @@ export class RedisFreshnessClosureStore implements FreshnessClosureStore {
     return this.supplementOperations.listByThread(threadId);
   }
 
+  listAllSupplements(): Promise<FreshnessSupplementAggregate[]> {
+    return this.supplementOperations.listAll();
+  }
+
   listRecoverableSupplements(): Promise<FreshnessSupplementAggregate[]> {
     return this.supplementOperations.listRecoverable();
   }

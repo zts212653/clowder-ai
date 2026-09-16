@@ -1,6 +1,14 @@
-import type { FreshnessClosureAggregate } from '@cat-cafe/shared';
+import type { FreshnessClosureAggregate, FreshnessSupplementAggregate } from '@cat-cafe/shared';
 import type { FreshnessClosureStore } from '../../../domains/cats/services/freshness/closure/FreshnessClosureStore.js';
-import type { FreshnessAttentionEventLog } from '../../../domains/cats/services/freshness/FreshnessAttentionEventLog.js';
+import type {
+  FreshnessAttentionEvent,
+  FreshnessAttentionEventLog,
+  FreshnessEventWindowCoverage,
+} from '../../../domains/cats/services/freshness/FreshnessAttentionEventLog.js';
+import type {
+  IMessageStore,
+  QueueCustodyLifecycleRecord,
+} from '../../../domains/cats/services/stores/ports/MessageStore.js';
 import { buildFreshnessReplayReport, deriveFreshnessClosureEvalSnapshot } from './freshness-closure-eval-adapter.js';
 import { FRESHNESS_AC_E9_FIXTURE_IDS, loadFreshnessReplayFixture } from './freshness-replay-fixtures.js';
 import type {
@@ -8,13 +16,15 @@ import type {
   FreshnessReplaySample,
   FreshnessReplayScenario,
   FreshnessReplaySelector,
+  FreshnessReplaySourceStatus,
 } from './freshness-replay-types.js';
+import { buildFreshnessWindowedSignals } from './freshness-windowed-signal-report.js';
 import { buildProviderNativeFreshnessCoverage } from './provider-native-freshness-coverage.js';
 
 const DEFAULT_AUTOMATIC_ATTEMPT_LIMIT = 5;
 
 export interface FreshnessReplayProvider {
-  resolve(selector: FreshnessReplaySelector): Promise<FreshnessReplayBundle>;
+  resolve(selector: FreshnessReplaySelector, context?: { ownerUserId?: string }): Promise<FreshnessReplayBundle>;
 }
 
 export class FreshnessReplayProviderImpl implements FreshnessReplayProvider {
@@ -22,11 +32,15 @@ export class FreshnessReplayProviderImpl implements FreshnessReplayProvider {
     private readonly deps: {
       store: FreshnessClosureStore;
       fixtureRoot: string;
-      providerNativeEventLog?: Pick<FreshnessAttentionEventLog, 'queryProviderNativeBetween'>;
+      queueLifecycleSource?: Pick<IMessageStore, 'listOwnerQueueCustodyLifecycles'>;
+      attentionEventLog?: Pick<FreshnessAttentionEventLog, 'queryWindowBetween'>;
     },
   ) {}
 
-  async resolve(selector: FreshnessReplaySelector): Promise<FreshnessReplayBundle> {
+  async resolve(
+    selector: FreshnessReplaySelector,
+    context: { ownerUserId?: string } = {},
+  ): Promise<FreshnessReplayBundle> {
     const fixtures = FRESHNESS_AC_E9_FIXTURE_IDS.map((fixtureId) =>
       loadFreshnessReplayFixture({
         fixtureRoot: this.deps.fixtureRoot,
@@ -35,15 +49,77 @@ export class FreshnessReplayProviderImpl implements FreshnessReplayProvider {
       }),
     );
     const threadFilter = selector.threadIds ? new Set(selector.threadIds) : null;
-    const liveClosures = await this.deps.store.listUpdatedBetween(selector.windowStartMs, selector.windowEndMs);
-    const eligibleLiveClosures = liveClosures.filter((closure) => !threadFilter || threadFilter.has(closure.threadId));
+    const ownerUserId = context.ownerUserId;
+    const [closureResult, supplementResult, queueResult, attentionResult] = await Promise.allSettled([
+      this.deps.store.listUpdatedBetween(selector.windowStartMs, selector.windowEndMs),
+      typeof this.deps.store.listAllSupplements === 'function'
+        ? this.deps.store.listAllSupplements()
+        : Promise.reject(new Error('supplement_source_unavailable')),
+      ownerUserId && this.deps.queueLifecycleSource?.listOwnerQueueCustodyLifecycles
+        ? this.deps.queueLifecycleSource.listOwnerQueueCustodyLifecycles(ownerUserId)
+        : Promise.reject(new Error('owner_scoped_queue_source_unavailable')),
+      ownerUserId && this.deps.attentionEventLog
+        ? this.deps.attentionEventLog.queryWindowBetween(selector.windowStartMs, selector.windowEndMs, ownerUserId, {
+            ...(selector.threadIds ? { threadIds: selector.threadIds } : {}),
+          })
+        : Promise.reject(new Error('owner_scoped_attention_source_unavailable')),
+    ]);
+    const liveClosures = fulfilledValue<FreshnessClosureAggregate[]>(closureResult, []);
+    const eligibleLiveClosures = liveClosures.filter(
+      (closure) =>
+        (!ownerUserId || closure.userId === ownerUserId) && (!threadFilter || threadFilter.has(closure.threadId)),
+    );
+    const supplements = fulfilledValue<FreshnessSupplementAggregate[]>(supplementResult, []).filter(
+      (supplement) =>
+        (!ownerUserId || supplement.userId === ownerUserId) && (!threadFilter || threadFilter.has(supplement.threadId)),
+    );
+    const queueRecords = fulfilledValue<QueueCustodyLifecycleRecord[]>(queueResult, []).filter(
+      (record) =>
+        (!ownerUserId || record.userId === ownerUserId) && (!threadFilter || threadFilter.has(record.threadId)),
+    );
+    const attentionWindow =
+      attentionResult.status === 'fulfilled'
+        ? attentionResult.value
+        : {
+            events: [] as FreshnessAttentionEvent[],
+            coverage: {
+              status: 'unavailable' as const,
+              observedThroughMs: Date.now(),
+              reason: 'query_failed' as const,
+            },
+          };
+    const attentionEvents = attentionWindow.events.filter((event) => !threadFilter || threadFilter.has(event.threadId));
     const liveSamples = eligibleLiveClosures
       .sort((left, right) => left.id.localeCompare(right.id))
       .map(normalizeLiveClosure);
     const samples = [...fixtures, ...liveSamples];
-    const providerNativeEvents = this.deps.providerNativeEventLog
-      ? await this.deps.providerNativeEventLog.queryProviderNativeBetween(selector.windowStartMs, selector.windowEndMs)
-      : [];
+    const windowedSignals = buildFreshnessWindowedSignals({
+      window: { startMs: selector.windowStartMs, endMs: selector.windowEndMs },
+      queueRecords,
+      supplements,
+      attentionEvents,
+    });
+    const sources = {
+      legacy_closures: resultStatus(closureResult),
+      queue_custody: resultStatus(queueResult),
+      freshness_supplements: resultStatus(supplementResult),
+      attention_events: coverageStatus(attentionWindow.coverage),
+    };
+    if (windowedSignals.queue.legacyUntimedCount > 0) {
+      sources.queue_custody = {
+        status: 'incomplete',
+        reason: `legacy_untimed_lifecycles=${windowedSignals.queue.legacyUntimedCount}`,
+      };
+    }
+    if (windowedSignals.supplements.legacyUntimedCount > 0) {
+      sources.freshness_supplements = {
+        status: 'incomplete',
+        reason: `legacy_untimed_lifecycles=${windowedSignals.supplements.legacyUntimedCount}`,
+      };
+    }
+    const reasons = Object.entries(sources)
+      .filter(([, source]) => source.status !== 'complete')
+      .map(([name, source]) => `${name}:${'reason' in source ? source.reason : source.status}`);
     return {
       selector: structuredClone(selector),
       samples,
@@ -52,11 +128,35 @@ export class FreshnessReplayProviderImpl implements FreshnessReplayProvider {
         toExclusive: selector.windowEndMs,
       }),
       report: buildFreshnessReplayReport(selector, samples),
-      providerNativeCoverage: buildProviderNativeFreshnessCoverage(
-        providerNativeEvents.filter((event) => !threadFilter || threadFilter.has(event.threadId)),
-      ),
+      providerNativeCoverage: buildProviderNativeFreshnessCoverage(attentionEvents),
+      windowedSignals,
+      measurementMaturity: {
+        status: reasons.length === 0 ? 'ready' : 'blocked',
+        sources,
+        reasons,
+      },
     };
   }
+}
+
+function fulfilledValue<T>(result: PromiseSettledResult<T>, fallback: T): T {
+  return result.status === 'fulfilled' ? result.value : fallback;
+}
+
+function resultStatus(result: PromiseSettledResult<unknown>): FreshnessReplaySourceStatus {
+  return result.status === 'fulfilled' ? { status: 'complete' } : { status: 'unavailable', reason: 'query_failed' };
+}
+
+function coverageStatus(
+  coverage: FreshnessEventWindowCoverage | { status: 'unavailable'; reason: 'query_failed'; observedThroughMs: number },
+): FreshnessReplaySourceStatus {
+  if (coverage.status === 'complete') return { status: 'complete' };
+  return {
+    status: coverage.status,
+    reason: coverage.reason,
+    ...('completeFromMs' in coverage ? { completeFromMs: coverage.completeFromMs } : {}),
+    ...('observedThroughMs' in coverage ? { observedThroughMs: coverage.observedThroughMs } : {}),
+  };
 }
 
 function normalizeLiveClosure(closure: FreshnessClosureAggregate): FreshnessReplaySample {

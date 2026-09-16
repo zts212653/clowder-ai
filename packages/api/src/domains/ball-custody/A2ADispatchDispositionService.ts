@@ -69,6 +69,22 @@ export class A2ADispatchDispositionService {
     auth: A2ADispatchDispositionAuth,
     disposition: A2ADispatchDisposition,
   ): Promise<A2ADispatchDispositionResult> {
+    try {
+      return await this.completeLatestInvocation(auth, disposition);
+    } catch (error) {
+      if (!(error instanceof A2ADispatchDispositionError) || error.code !== 'a2a_dispatch_disposition_fence_conflict') {
+        throw error;
+      }
+      // Heartbeats share the subject log. Retry once from fresh authority and
+      // lineage, never by appending the previously inspected disposition.
+      return this.completeLatestInvocation(auth, disposition);
+    }
+  }
+
+  private async completeLatestInvocation(
+    auth: A2ADispatchDispositionAuth,
+    disposition: A2ADispatchDisposition,
+  ): Promise<A2ADispatchDispositionResult> {
     await this.assertLatestInvocation(auth.invocationId);
     const source = await this.resolveSource(auth);
     return this.completeResolved(auth, source, disposition);
@@ -310,6 +326,7 @@ export class A2ADispatchDispositionService {
     expectedSequence: number,
     retired: boolean,
   ): Promise<void> {
+    let conflictSequence: number | undefined;
     try {
       const result = await this.deps.ballCustody.recordFenced(
         buildDispatchDispositionEvent({
@@ -325,12 +342,28 @@ export class A2ADispatchDispositionService {
         expectedSequence,
       );
       if (result.outcome === 'conflict') {
+        conflictSequence = result.actualSequence;
         throw new A2ADispatchDispositionError('a2a_dispatch_disposition_fence_conflict');
       }
     } catch (error) {
-      const appended = (await this.deps.ballCustodyEventLog.read(subjectKey)).find(
-        (event) => event.sourceEventId === eventSourceId,
-      );
+      const events = await this.deps.ballCustodyEventLog.read(subjectKey);
+      if (conflictSequence !== undefined) {
+        this.deps.log?.warn(
+          {
+            threadId: auth.threadId,
+            invocationId: auth.invocationId,
+            sourceMessageId: source.sourceMessageId,
+            expectedSequence,
+            actualSequence: conflictSequence,
+            interveningEvents: events
+              .slice(expectedSequence, Math.min(conflictSequence, expectedSequence + 8))
+              .map(({ sourceEventId, kind, at }) => ({ sourceEventId, kind, at })),
+            omittedEventCount: Math.max(0, conflictSequence - expectedSequence - 8),
+          },
+          '[F167] A2A dispatch disposition CAS conflict',
+        );
+      }
+      const appended = events.find((event) => event.sourceEventId === eventSourceId);
       if (!appended || !this.deps.repairProjection) throw error;
       await this.deps.repairProjection(subjectKey);
     }

@@ -23,6 +23,12 @@ import type {
 } from '@cat-cafe/shared';
 import { isTrackingKind } from '@cat-cafe/shared';
 import type { RedisClient } from '@cat-cafe/shared/utils';
+import {
+  assertTypedWaitRegistrationInstallation,
+  parseTypedWaitRegistration,
+  TYPED_WAIT_REGISTRATION_FIELD,
+  type TypedWaitRegistrationSnapshot,
+} from '../../../../ball-custody/TypedWaitRegistration.js';
 import { automationGeneration, mergeTaskAutomationState } from '../ports/TaskAutomationState.js';
 import { createEntrustedTaskItem, createGenericTaskItem } from '../ports/TaskItemFactory.js';
 import { assertSubjectUpdateOwnership, type ITaskStore } from '../ports/TaskStore.js';
@@ -65,6 +71,12 @@ const MAX_ANCHOR_LIFETIME_RECONCILIATION_RETRIES = 5;
 const MAX_UNIQUE_SUBJECT_CREATE_RETRIES = 8;
 
 export class RedisTaskStore implements ITaskStore {
+  async getWaitRegistration(taskId: string): Promise<TypedWaitRegistrationSnapshot | null> {
+    const raw = await this.redis.hgetall(TaskKeys.detail(taskId));
+    return raw.id
+      ? { task: hydrateTask(raw), receipt: parseTypedWaitRegistration(raw[TYPED_WAIT_REGISTRATION_FIELD]) }
+      : null;
+  }
   private readonly redis: RedisClient;
   private readonly ttlSeconds: number | null;
   private readonly managedWorkBindings: RedisTaskManagedWorkBindingStore;
@@ -354,8 +366,14 @@ export class RedisTaskStore implements ITaskStore {
             return null;
           }
           const updated = this.buildAutomationReplacement(existing, input);
+          if (input.waitRegistration) assertTypedWaitRegistrationInstallation(updated, input.waitRegistration);
           const pipeline = session.multi();
           pipeline.hset(key, serializeTask(updated));
+          if (input.waitRegistration)
+            pipeline.hset(key, TYPED_WAIT_REGISTRATION_FIELD, JSON.stringify(input.waitRegistration));
+          else if (automationGeneration(existing.automationState) !== automationGeneration(updated.automationState)) {
+            pipeline.hdel(key, TYPED_WAIT_REGISTRATION_FIELD);
+          }
           const result = await pipeline.exec();
           return result ? updated : undefined;
         },

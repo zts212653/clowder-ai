@@ -306,11 +306,24 @@ test('rechecks the staged tree after runtime-state projection and performs zero 
 });
 
 test('rejects traversal and symlink entrypoints before spawn', async (t) => {
-  await t.test('traversal', async () => {
+  await t.test('traversal supplied by the inventory port', async () => {
     const manifest = externalManifest({ transport: 'stdio', entrypoint: '../outside.js' });
-    const harness = await startHarness({ manifest });
+    const harness = await startHarness({ locatedManifest: manifest });
+    // Admission and persisted snapshots reject this path; isolate the runtime's own path fence.
+    const snapshot = await harness.inventory.snapshot();
+    snapshot.packages[0].manifest = manifest;
+    const supervisor = new ExternalPluginRuntimeSupervisor({
+      inventory: {
+        snapshot: async () => structuredClone(snapshot),
+        transaction: async () => assert.fail('traversal must reject before runtime state changes'),
+      },
+      broker: harness.broker,
+      packages: harness.packages,
+      processes: harness.processes,
+    });
     await writeFile(join(dirname(harness.rootDir), 'outside.js'), '// outside\n', 'utf8');
-    await assert.rejects(harness.supervisor.start(EXTERNAL_INSTANCE_ID), isRuntimeError('INVALID_ENTRYPOINT'));
+    await assert.rejects(supervisor.start(EXTERNAL_INSTANCE_ID), isRuntimeError('INVALID_ENTRYPOINT'));
+    assert.deepEqual(harness.packages.calls, [EXTERNAL_PACKAGE_DIGEST]);
     assert.equal(harness.processes.specs.length, 0);
   });
 

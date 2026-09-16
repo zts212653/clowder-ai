@@ -4,6 +4,7 @@ import {
   managedCommandCompletionUnconsumedTotal,
   managedCommandDispatchRetryTotal,
 } from '../../infrastructure/telemetry/instruments.js';
+import { normalizeOwnerAuthProvenance } from '../cats/services/owner-auth-provenance.js';
 import type { InvocationRecord } from '../cats/services/stores/ports/InvocationRecordStore.js';
 import { classifyInvocationRecoveryStatus } from '../cats/services/stores/ports/invocation-state-machine.js';
 import {
@@ -354,6 +355,9 @@ export class ManagedCommandWakeRecoverySweep {
 
     let outcome: ManagedCommandWakeTriggerOutcome;
     try {
+      const ownerAuthProvenance = normalizeOwnerAuthProvenance(
+        this.deps.dynamicTaskStore.getPrivateOwnerAuthProvenance?.(parsed.task.id),
+      );
       outcome = await trigger.trigger(
         parsed.threadId,
         parsed.catId,
@@ -361,7 +365,7 @@ export class ManagedCommandWakeRecoverySweep {
         `[定时任务] ${wakeContent}`,
         messageId,
         undefined,
-        { sourceCategory: 'scheduled', forceQueue: true },
+        { sourceCategory: 'scheduled', forceQueue: true, ownerAuthProvenance },
       );
     } catch (err) {
       if (err instanceof ManagedCommandWakeActionLeaseAdmissionError) {

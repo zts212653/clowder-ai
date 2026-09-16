@@ -1,14 +1,12 @@
 import type { OwnerTruthRefV1 } from '@cat-cafe/shared';
 import type { ExactAssetVersionRefV1 } from '../change/program-lineage.js';
-import type { MicroduckShowMediaAsset, MicroduckShowMediaDescriptor } from './microduck-show-media-contract.js';
-
-export type {
+import type {
   MicroduckShowMediaAsset,
-  MicroduckShowMediaContentType,
   MicroduckShowMediaDescriptor,
-  MicroduckShowMediaKind,
-  MicroduckShowMediaSource,
-} from './microduck-show-media-contract.js';
+  MicroduckShowState,
+} from './microduck-show-contract.js';
+
+export * from './microduck-show-contract.js';
 
 export const MICRODUCK_OWNER_FEATURE_ID = 'microduck-owner';
 
@@ -19,6 +17,7 @@ export const MICRODUCK_BLOCK_CODES = [
   'job_failed',
   'verification_missing',
   'holdout_incomplete',
+  'holdout_failed',
   'holdout_leakage',
   'multiple_variables',
   'artifact_hash_mismatch',
@@ -27,6 +26,7 @@ export const MICRODUCK_BLOCK_CODES = [
   'fresh_outcome_missing',
   'rollback_failed',
   'show_truth_incomplete',
+  'preparation_media_unavailable',
 ] as const;
 
 export type MicroduckBlockCode = (typeof MICRODUCK_BLOCK_CODES)[number];
@@ -80,6 +80,7 @@ export type MicroduckRollbackInput = MicroduckProgramScope & {
   rollbackVersionRef: ExactAssetVersionRefV1;
   permissionRef: OwnerTruthRefV1;
   writebackReceiptRef?: OwnerTruthRefV1;
+  referenceFreshOutcomeRef?: OwnerTruthRefV1;
   clientMessageId: string;
 };
 
@@ -88,6 +89,8 @@ export interface MicroduckObservation {
   targetVersionRef: ExactAssetVersionRefV1;
   baselineVersionRef: ExactAssetVersionRefV1;
   observationRefs: OwnerTruthRefV1[];
+  baselineArtifactSha256?: string;
+  sceneMedia?: MicroduckShowMediaDescriptor[];
 }
 
 export interface MicroduckPermission {
@@ -139,78 +142,17 @@ export interface MicroduckRollbackReceipt {
   status: 'rolled_back';
   rollbackReceiptRef: OwnerTruthRefV1;
   restoredVersionRef: ExactAssetVersionRefV1;
+  restoreOutcomeRef?: OwnerTruthRefV1;
 }
 
-export const MICRODUCK_SHOW_CANDIDATE_SUBJECTS = ['push-range', 'spawn-tilt', 'upright-weight'] as const;
-
-export interface MicroduckShowCandidate {
-  subjectId: (typeof MICRODUCK_SHOW_CANDIDATE_SUBJECTS)[number];
-  policyRevision: ExactAssetVersionRefV1;
-  evaluationRef: OwnerTruthRefV1;
-  recipeSha256: string;
-  jobRef: OwnerTruthRefV1;
-  checkpointRef: OwnerTruthRefV1;
-  onnxArtifactRef: OwnerTruthRefV1;
+export interface MicroduckRestoreOutcome {
+  status: 'restore_verified';
+  outcomeReceiptRef: OwnerTruthRefV1;
+  freshnessProofRef: OwnerTruthRefV1;
+  restoredVersionRef: ExactAssetVersionRefV1;
+  restoredArtifactSha256: string;
+  measuredAt: string;
 }
-
-export const MICRODUCK_SHOW_REJECTION_KINDS = [
-  'holdout_failed',
-  'holdout_leakage',
-  'multiple_variables',
-  'artifact_hash_mismatch',
-  'target_drift',
-  'permission_missing',
-  'not_reproducible',
-] as const;
-
-export type MicroduckShowRejectionKind = (typeof MICRODUCK_SHOW_REJECTION_KINDS)[number];
-
-interface MicroduckShowEvidence {
-  status: 'resolved';
-  baseline: {
-    policyRevision: ExactAssetVersionRefV1;
-    captureRef: OwnerTruthRefV1;
-    evaluationRef: OwnerTruthRefV1;
-  };
-  holdoutProof: {
-    sealedProofRef: OwnerTruthRefV1;
-    optimizerExposureProofRef: OwnerTruthRefV1;
-    optimizerExposed: false;
-  };
-  candidates: MicroduckShowCandidate[];
-  candidateRevision: ExactAssetVersionRefV1;
-  targetRevision: ExactAssetVersionRefV1;
-  rollbackRevision: ExactAssetVersionRefV1;
-  approvalProposalRef: OwnerTruthRefV1;
-  interventionRef: OwnerTruthRefV1;
-  rejection: { kind: MicroduckShowRejectionKind; ownerRef: OwnerTruthRefV1 };
-  evaluatedArtifactSha256: string;
-  sceneMedia?: MicroduckShowMediaDescriptor[];
-}
-
-export type MicroduckShowState =
-  | (MicroduckShowEvidence & { phase: 'approval_ready' })
-  | (MicroduckShowEvidence & { phase: 'applying'; approvalRef: OwnerTruthRefV1 })
-  | (MicroduckShowEvidence & {
-      phase: 'verifying';
-      approvalRef: OwnerTruthRefV1;
-      deployedRevision: ExactAssetVersionRefV1;
-      deployedArtifactSha256: string;
-    })
-  | (MicroduckShowEvidence & {
-      phase: 'kept';
-      approvalRef: OwnerTruthRefV1;
-      deployedRevision: ExactAssetVersionRefV1;
-      deployedArtifactSha256: string;
-      freshOutcomeRef: OwnerTruthRefV1;
-    })
-  | (MicroduckShowEvidence & {
-      phase: 'rolled_back';
-      approvalRef: OwnerTruthRefV1;
-      deployedRevision: ExactAssetVersionRefV1;
-      deployedArtifactSha256: string;
-      rollbackReceiptRef: OwnerTruthRefV1;
-    });
 
 /** Secret-bearing clients live behind these implementations; neither result admits a credential. */
 export interface MicroduckCredentialBoundary {
@@ -294,6 +236,7 @@ export interface MicroduckOwnerPort {
       rollbackVersionRef: ExactAssetVersionRefV1;
       permissionRef: OwnerTruthRefV1;
       writebackReceiptRef?: OwnerTruthRefV1;
+      referenceFreshOutcomeRef?: OwnerTruthRefV1;
       clientMessageId: string;
     },
   ): Promise<MicroduckRollbackReceipt | MicroduckBlocked>;
@@ -307,41 +250,4 @@ export interface MicroduckOwnerPort {
       captureRef: OwnerTruthRefV1;
     },
   ): Promise<MicroduckShowMediaAsset | MicroduckBlocked>;
-}
-
-export interface MicroduckShowManifestV1 {
-  manifestVersion: 'f311-microduck-show-v1';
-  tier: 'A' | 'B';
-  phase: MicroduckShowState['phase'] | 'blocked';
-  actionState: 'enabled' | 'disabled';
-  programRef: OwnerTruthRefV1;
-  programSequence: number;
-  baseline?: MicroduckShowEvidence['baseline'];
-  holdoutProof?: MicroduckShowEvidence['holdoutProof'];
-  candidates: MicroduckShowCandidate[];
-  candidateRevision?: ExactAssetVersionRefV1;
-  targetRevision?: ExactAssetVersionRefV1;
-  rollbackRevision?: ExactAssetVersionRefV1;
-  approvalProposalRef?: OwnerTruthRefV1;
-  approvalRef?: OwnerTruthRefV1;
-  rejection?: MicroduckShowEvidence['rejection'];
-  interventionRef?: OwnerTruthRefV1;
-  sceneMedia?: Array<
-    MicroduckShowMediaDescriptor & {
-      assetUrl: string;
-    }
-  >;
-  deployedRevision?: ExactAssetVersionRefV1;
-  evaluatedArtifactHash?: string;
-  deployedArtifactHash?: string;
-  freshOutcomeRef?: OwnerTruthRefV1;
-  rollbackReceiptRef?: OwnerTruthRefV1;
-  blockers?: Array<{ code: MicroduckBlockCode; ownerRef?: OwnerTruthRefV1 }>;
-  action?: {
-    kind: 'f246-approval';
-    method: 'POST';
-    approvalUrl: string;
-    body: { reasonCode: 'accepted_as_proposed' };
-  };
-  generatedAt: string;
 }

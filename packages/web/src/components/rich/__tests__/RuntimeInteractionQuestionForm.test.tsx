@@ -147,4 +147,52 @@ describe('RuntimeInteractionQuestionForm', () => {
       }),
     );
   });
+
+  it('rejects the question through the canonical card without manufacturing an answer', async () => {
+    const request: RuntimeInteractionRequest = {
+      version: 1,
+      interactionId: 'interaction-ui',
+      kind: 'question',
+      owner,
+      provider: { ...provider, method: 'cat_cafe_request_user_input' },
+      createdAt: 1000,
+      title: 'Outcome choice',
+      questions: [
+        {
+          id: 'outcome',
+          header: 'Outcome',
+          question: 'Which outcome should the entrusted work use?',
+          options: [{ label: 'A' }, { label: 'B' }],
+        },
+      ],
+    };
+    vi.mocked(apiFetch)
+      .mockResolvedValueOnce(okJson({ interaction: record(request) }))
+      .mockResolvedValueOnce(
+        okJson({
+          interaction: record(request, 'declined', {
+            status: 'declined',
+            reasonCode: 'user_rejected',
+            settledAt: 3000,
+          }),
+        }),
+      );
+
+    await act(async () => {
+      root.render(<RichBlocks blocks={[block]} messageId={messageId} />);
+      await Promise.resolve();
+    });
+    const reject = [...container.querySelectorAll('button')].find((button) => button.textContent === '不回答');
+    await act(async () => {
+      reject?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      await Promise.resolve();
+    });
+
+    expect(apiFetch).toHaveBeenLastCalledWith(
+      '/api/runtime-interactions/interaction-ui/reject',
+      expect.objectContaining({ method: 'POST', body: JSON.stringify({ cardRef }) }),
+    );
+    expect(container.textContent).toContain('你已拒绝这次请求');
+    expect(container.textContent).not.toContain('提交回答');
+  });
 });

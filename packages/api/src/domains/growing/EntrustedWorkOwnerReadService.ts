@@ -36,6 +36,7 @@ export interface PreparedArtifactReadInput {
   readonly taskOwnerRef: string;
   readonly taskRevision: number;
   readonly ownerUserId: string;
+  readonly viewer?: EntrustedWorkOwnerReadInput['viewer'];
 }
 
 export interface PreparedArtifactReader {
@@ -50,7 +51,6 @@ export type EntrustedWorkOwnerReadErrorCode =
   | 'OWNER_READ_CONTRACT_MISSING'
   | 'OWNER_READ_TERMINAL'
   | 'OWNER_READ_FUTURE_REVISION'
-  | 'OWNER_READ_ARTIFACT_AMBIGUOUS'
   | 'OWNER_READ_CONTRACT_INVALID';
 
 export class EntrustedWorkOwnerReadError extends Error {
@@ -78,6 +78,7 @@ export class EntrustedWorkOwnerReadService {
     const input = ownerReadInputSchema.parse(rawInput);
     const task = await this.deps.tasks.get(input.taskId);
     if (!task) throw new EntrustedWorkOwnerReadError('OWNER_READ_NOT_FOUND', 'Entrusted-work Task not found');
+    this.assertViewer(task, input.viewer);
     const receipts = await this.deps.producerCatalog.listCurrentReceipts(input.viewer.userId);
     return this.compose(task, input, receipts);
   }
@@ -165,12 +166,7 @@ export class EntrustedWorkOwnerReadService {
     input: z.output<typeof ownerReadInputSchema>,
     producerReceipts: readonly ProducerAttentionReceiptV1[],
   ): Promise<EntrustedWorkOwnerReadV1> {
-    if (task.userId !== input.viewer.userId) {
-      throw new EntrustedWorkOwnerReadError('OWNER_READ_FORBIDDEN', 'Entrusted-work Task belongs to another user');
-    }
-    if (input.viewer.surface === 'cat' && task.threadId !== input.viewer.threadId) {
-      throw new EntrustedWorkOwnerReadError('OWNER_READ_FORBIDDEN', 'Entrusted-work Task belongs to another thread');
-    }
+    this.assertViewer(task, input.viewer);
     const entrusted = task.entrustedWork;
     if (!entrusted) {
       throw new EntrustedWorkOwnerReadError('OWNER_READ_CONTRACT_MISSING', 'Task has no entrusted-work contract');
@@ -195,6 +191,7 @@ export class EntrustedWorkOwnerReadService {
       revision: entrusted.revision,
       subjectRef,
       threadId: task.threadId,
+      viewer: input.viewer,
     });
     const attentionReceipts = isCurrent
       ? producerReceipts.filter(
@@ -247,14 +244,11 @@ export class EntrustedWorkOwnerReadService {
     revision: number;
     ownerUserId: string;
     threadId: string;
+    viewer: EntrustedWorkOwnerReadInput['viewer'];
   }): Promise<EntrustedWorkOwnerReadV1['preparedArtifact']> {
-    if (input.artifactRefs.length === 0 || !this.deps.artifactReader) return undefined;
-    if (input.artifactRefs.length > 1) {
-      throw new EntrustedWorkOwnerReadError(
-        'OWNER_READ_ARTIFACT_AMBIGUOUS',
-        'Entrusted work has multiple Artifact refs but no canonical primary Artifact coordinate',
-      );
-    }
+    // Task accepts multiple evidence refs, but this projection requires one exact
+    // prepared Artifact. An unknown primary must not make the canonical work unreadable.
+    if (input.artifactRefs.length !== 1 || !this.deps.artifactReader) return undefined;
     const artifactRef = input.artifactRefs[0];
     if (!artifactRef) return undefined;
     const artifact = await this.deps.artifactReader.readPreparedArtifact({
@@ -264,6 +258,7 @@ export class EntrustedWorkOwnerReadService {
       taskOwnerRef: input.ownerRef,
       taskRevision: input.revision,
       ownerUserId: input.ownerUserId,
+      viewer: input.viewer,
     });
     if (artifact && artifact.artifactRef !== artifactRef) {
       throw new EntrustedWorkOwnerReadError(
@@ -272,6 +267,15 @@ export class EntrustedWorkOwnerReadService {
       );
     }
     return artifact ?? undefined;
+  }
+
+  private assertViewer(task: TaskItem, viewer: z.output<typeof ownerReadInputSchema>['viewer']): void {
+    if (task.userId !== viewer.userId) {
+      throw new EntrustedWorkOwnerReadError('OWNER_READ_FORBIDDEN', 'Entrusted-work Task belongs to another user');
+    }
+    if (viewer.surface === 'cat' && task.threadId !== viewer.threadId) {
+      throw new EntrustedWorkOwnerReadError('OWNER_READ_FORBIDDEN', 'Entrusted-work Task belongs to another thread');
+    }
   }
 
   private projectTaskTimeRefs(

@@ -66,6 +66,8 @@ export class RedisAuthInvocationBackend implements IAuthInvocationBackend {
     if (input.a2aTriggerMessageId) fields.push('a2aTriggerMessageId', input.a2aTriggerMessageId);
     if (input.originTriggerMessageId) fields.push('originTriggerMessageId', input.originTriggerMessageId);
     if (input.toolExecutionPolicy) fields.push('toolExecutionPolicy', JSON.stringify(input.toolExecutionPolicy));
+    if (input.executionGrant) fields.push('executionGrant', JSON.stringify(input.executionGrant));
+    if (input.collectiveWorkBinding) fields.push('collectiveWorkBinding', JSON.stringify(input.collectiveWorkBinding));
 
     const latestKey = KEY_LATEST(input.threadId, input.catId as string);
     for (let attempt = 0; attempt < 8; attempt += 1) {

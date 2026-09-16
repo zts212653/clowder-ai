@@ -1,5 +1,6 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
+import { projectAgentKeyCollaborationContract } from './agent-key-collaboration-contract.js';
 import { CANONICAL_TOOL_REGISTRY } from './canonical-server-tools.js';
 import { derivedProfileSet, projectServerFamily } from './canonical-tool-registry.js';
 import { jsonSchemaToZod } from './json-schema-to-zod.js';
@@ -28,6 +29,7 @@ export const DESKTOP_CLOUD_PRO_PHASE0_ALLOWED_TOOLS = derivedProfileSet(
 const KNOWN_DESKTOP_MODES = new Set(['fable-phase0', 'cloud-pro-phase0']);
 
 export interface ToolsetEnv {
+  participation?: boolean;
   readonly?: boolean;
   hasAgentKey?: boolean;
   desktopMode?: string;
@@ -38,8 +40,11 @@ export interface ToolsetEnv {
  * tests may pass a fixture env to avoid module-cache games.
  */
 export function parseToolsetEnv(env: NodeJS.ProcessEnv = process.env): ToolsetEnv {
+  if (env.CAT_CAFE_MCP_PROFILE && env.CAT_CAFE_MCP_PROFILE !== 'collective-participation')
+    throw new Error('Unknown CAT_CAFE_MCP_PROFILE');
   const desktopMode = env.CAT_CAFE_DESKTOP_MODE?.trim();
   return {
+    participation: env.CAT_CAFE_MCP_PROFILE === 'collective-participation',
     readonly: env.CAT_CAFE_READONLY === 'true',
     hasAgentKey: !!(env.CAT_CAFE_AGENT_KEY_SECRET || env.CAT_CAFE_AGENT_KEY_FILE || env.CAT_CAFE_AGENT_KEY_FILES),
     desktopMode: desktopMode || undefined,
@@ -59,6 +64,10 @@ export function applyReadonlyFilter<T extends { name: string }>(
   tools: readonly T[],
   env: ToolsetEnv = parseToolsetEnv(),
 ): readonly T[] {
+  if (env.participation) {
+    const allowed = derivedProfileSet(CANONICAL_TOOL_REGISTRY, 'collective-participation');
+    return tools.filter((tool) => allowed.has(tool.name));
+  }
   if (env.desktopMode) {
     if (!KNOWN_DESKTOP_MODES.has(env.desktopMode)) {
       throw new Error(
@@ -69,7 +78,7 @@ export function applyReadonlyFilter<T extends { name: string }>(
       return tools.filter((t) => DESKTOP_FABLE_PHASE0_ALLOWED_TOOLS.has(t.name));
     }
     if (env.desktopMode === 'cloud-pro-phase0') {
-      // F238 Phase B1a + F231: cloud-pro-phase0 复用 fable-phase0 同 11 工具白名单
+      // Cloud profile derives its own bounded read/message surface from the registry.
       return tools.filter((t) => DESKTOP_CLOUD_PRO_PHASE0_ALLOWED_TOOLS.has(t.name));
     }
   }
@@ -106,7 +115,10 @@ export const EXPLICIT_TOOL_ANNOTATIONS: Readonly<Record<string, ToolDef['annotat
   CANONICAL_TOOL_REGISTRY.map((definition) => [definition.name, definition.annotations]),
 );
 
-type RegisteredToolHandler = (args: never) => Promise<{
+type RegisteredToolHandler = (
+  args: never,
+  extra: { signal: AbortSignal },
+) => Promise<{
   content: Array<{ type: 'text'; text: string }>;
   isError?: boolean;
   [key: string]: unknown;
@@ -186,6 +198,26 @@ function resolvePostMessageRegistrationPrincipal(env: ToolsetEnv): PostMessageRe
   return 'unconfigured';
 }
 
+function projectRegistrationContract(tool: ToolDef, principal: PostMessageRegistrationPrincipal) {
+  const isPostMessage = tool.name === 'cat_cafe_post_message';
+  const canonicalSchema = isPostMessage ? projectPostMessageInputSchema(principal) : tool.inputSchema;
+  const agentContract =
+    principal === 'agent-key'
+      ? projectAgentKeyCollaborationContract(tool.name, canonicalSchema, tool.description)
+      : undefined;
+  const schema = agentContract?.inputSchema ?? canonicalSchema;
+  // Callback tools use Zod raw shapes; limb tools use plain JSON Schema.
+  let inputSchema =
+    typeof schema.type === 'string' && typeof schema.properties === 'object' && schema.properties !== null
+      ? jsonSchemaToZod(schema)
+      : z.object(schema as z.ZodRawShape);
+  if ((isPostMessage && principal === 'invocation') || agentContract) {
+    // Reject unsupported fields before default Zod stripping erases their evidence.
+    inputSchema = (inputSchema as z.ZodObject<z.ZodRawShape>).strict();
+  }
+  return { description: agentContract?.description ?? tool.description, inputSchema };
+}
+
 function registerTools(server: McpServer, tools: readonly ToolDef[], env: ToolsetEnv = parseToolsetEnv()): void {
   // Use server.registerTool(name, config, cb) — the explicit config-object API.
   // server.tool()'s overload parser uses isZodRawShapeCompat to detect whether
@@ -197,34 +229,21 @@ function registerTools(server: McpServer, tools: readonly ToolDef[], env: Toolse
     config: RegisterToolConfig,
     cb: RegisteredToolHandler,
   ) => void;
+  const principal = resolvePostMessageRegistrationPrincipal(env);
   for (const tool of tools) {
     const annotations = tool.annotations;
     const deliveryMeta = projectSchemaDeliveryMeta(tool);
-    const postMessagePrincipal =
-      tool.name === 'cat_cafe_post_message' ? resolvePostMessageRegistrationPrincipal(env) : null;
-    // Distinguish Zod raw shape (callback tools) from plain JSON Schema (limb tools).
-    // Zod raw shapes have Zod instances as values; JSON Schema has type/properties keys.
-    const schema = postMessagePrincipal ? projectPostMessageInputSchema(postMessagePrincipal) : tool.inputSchema;
-    let zodSchema =
-      typeof schema.type === 'string' && typeof schema.properties === 'object' && schema.properties !== null
-        ? jsonSchemaToZod(schema)
-        : z.object(schema as z.ZodRawShape);
-    if (postMessagePrincipal === 'invocation') {
-      // Omitting threadId from tools/list is not enough: a default Zod object
-      // strips unknown keys, which would erase the evidence before the handler's
-      // fail-closed KD-1 check. Reject it explicitly at the public boundary.
-      zodSchema = (zodSchema as z.ZodObject<z.ZodRawShape>).strict();
-    }
     registerExplicit(
       tool.name,
       {
-        description: tool.description,
-        inputSchema: zodSchema,
+        ...projectRegistrationContract(tool, principal),
         annotations,
         ...(deliveryMeta ? { _meta: deliveryMeta } : {}),
       },
-      async (args: never) => {
-        const result = await tool.handler(args);
+      async (args: never, extra: { signal: AbortSignal }) => {
+        const result = tool.implementation.runWithExtra
+          ? await tool.implementation.runWithExtra(args, { signal: extra.signal })
+          : await tool.handler(args);
         const typed = {
           ...(result as Record<string, unknown>),
         } as {
@@ -276,7 +295,7 @@ export function buildLimbTools(env?: ToolsetEnv): readonly ToolDef[] {
   // full limb surface in standalone limb.ts entry. Antigravity / default
   // (no desktopMode set) keeps the F061 contract: limb fully exposed,
   // not filtered by readonly.
-  if (e.desktopMode) {
+  if (e.desktopMode || e.participation) {
     return buildFamilyTools('limb', e);
   }
   return CANONICAL_TOOL_REGISTRY.filter((definition) => definition.serverFamily === 'limb');

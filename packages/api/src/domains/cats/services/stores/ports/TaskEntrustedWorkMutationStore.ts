@@ -41,7 +41,12 @@ export class TaskEntrustedWorkMutationStore {
     const prepared = prepareEntrustedWorkUpdate(existing ?? null, input);
     if (prepared.kind !== 'ready') return prepared;
     if (!existing) return { kind: 'not_found' };
-    const updated: TaskItem = { ...existing, entrustedWork: prepared.entrustedWork, updatedAt: Date.now() };
+    const updated: TaskItem = {
+      ...existing,
+      status: prepared.status,
+      entrustedWork: prepared.entrustedWork,
+      updatedAt: Date.now(),
+    };
     this.tasks.set(taskId, updated);
     return { kind: 'updated', task: updated };
   }

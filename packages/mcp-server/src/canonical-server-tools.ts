@@ -1,13 +1,17 @@
 import { buildCanonicalToolRegistry, type CanonicalToolSources } from './canonical-tool-registry.js';
 import {
+  artifactReviewTools,
   audioTools,
   autoDreamTools,
   callbackMemoryTools,
   callbackTools,
   capabilityEvolutionChangeTools,
+  capabilityEvolutionPreparationTools,
   capabilityEvolutionRoundTools,
   capabilityEvolutionTools,
+  collectiveParticipationTools,
   communityRouteAcceptanceTools,
+  contentEditorTools,
   distillationTools,
   entrustedWorkReadTools,
   evalLifecycleTools,
@@ -20,6 +24,7 @@ import {
   financeTools,
   gameActionTools,
   graphTools,
+  homeStateTools,
   hubActionTools,
   libraryLifecycleTools,
   limbTools,
@@ -27,8 +32,10 @@ import {
   pawFeelDispositionTools,
   perspectiveTools,
   publishVerdictTools,
+  realtimeCompanionTools,
   recentTools,
   richBlockRulesTools,
+  runtimeInteractionTools,
   scheduleTools,
   sessionChainTools,
   shellTools,
@@ -39,12 +46,16 @@ import {
 
 export const CANONICAL_TOOL_SOURCES = {
   collab: [
+    ...collectiveParticipationTools,
     ...callbackTools,
     ...capabilityEvolutionTools,
+    ...capabilityEvolutionPreparationTools,
     ...capabilityEvolutionRoundTools,
     ...capabilityEvolutionChangeTools,
     ...autoDreamTools,
     ...communityRouteAcceptanceTools,
+    ...contentEditorTools,
+    ...artifactReviewTools,
     ...externalReviewVerdictTools,
     ...externalRuntimeSessionCallbackTools,
     ...hubActionTools,
@@ -55,8 +66,10 @@ export const CANONICAL_TOOL_SOURCES = {
     ...evalLifecycleTools,
     ...pawFeelDispositionTools,
     ...richBlockRulesTools,
+    ...runtimeInteractionTools,
     ...gameActionTools,
     ...scheduleTools,
+    ...homeStateTools,
     ...shellTools,
   ],
   memory: [
@@ -74,7 +87,7 @@ export const CANONICAL_TOOL_SOURCES = {
   ],
   signals: [...signalsTools, ...signalStudyTools],
   limb: [...limbTools],
-  audio: [...audioTools],
+  audio: [...audioTools, ...realtimeCompanionTools],
   finance: [...financeTools],
 } as const satisfies CanonicalToolSources;
 

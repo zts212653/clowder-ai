@@ -1,10 +1,13 @@
 #!/usr/bin/env node
 
-import { execFileSync, spawnSync } from 'node:child_process';
+import { execFileSync } from 'node:child_process';
 import { realpathSync } from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { isCoCreationDocPath, isGovernanceDocPath } from './co-creation-docs-lane.mjs';
+import { designGateJourneyReason, listDefaultEntryJourneyPaths } from './design-gate/claim-journey-paths.mjs';
 import { computeGateFingerprint, GATE_EXECUTION_PATHS, listGateRuns } from './lib/gate-terminal-receipt.mjs';
+import { stablePatchId } from './lib/git-patch-id.mjs';
 
 const LEGACY_RISK_LANES = new Set(['targeted', 'full', 'unknown']);
 const RISK_AXES = new Set(['behavior', 'data', 'security', 'contract', 'irreversible']);
@@ -82,6 +85,7 @@ export function createGateTerminalResult({ routeEvidence, status, failedStage = 
   const failed = status !== 'green';
   return {
     route: routeEvidence.route,
+    assuranceLevel: routeEvidence.assuranceLevel,
     baseSha: routeEvidence.baseSha,
     headSha: routeEvidence.headSha,
     treeSha: routeEvidence.treeSha,
@@ -145,12 +149,14 @@ function collectFullReasons(input, baseRelation) {
   const reasons = [];
   if (input.riskLane === 'full') reasons.push('the five-axis risk route requires full gate');
   if (input.riskLane === 'unknown') reasons.push('the five-axis risk route is unknown and fails closed');
-  if (input.riskAxis !== null && input.riskAxis !== undefined) {
-    reasons.push(`the ${input.riskAxis} risk axis requires full gate`);
-  }
   if ((normalizePaths(input.prPaths) ?? []).some(isGateExecutionPath)) {
     reasons.push('the patch changes the canonical gate classifier or gate execution path');
   }
+  const journeyReason = designGateJourneyReason(
+    normalizePaths(input.prPaths) ?? [],
+    normalizePaths(input.journeyEvidencePaths) ?? [],
+  );
+  if (journeyReason) reasons.push(journeyReason);
   if (input.authoredPatch === 'unknown') reasons.push('authored patch continuity is unknown');
   if (baseRelation === 'related') reasons.push('the upstream base delta intersects the authored patch');
   if (baseRelation === 'unknown') {
@@ -179,7 +185,7 @@ function targetedReason(input) {
     : 'no reusable full-green receipt exists';
 }
 
-export function classifyGateRoute(input) {
+function classifyCoverageRoute(input) {
   const baseRelation = assessBaseRelation(input);
   const invalid = [
     ...legacyInvalid(input),
@@ -189,6 +195,19 @@ export function classifyGateRoute(input) {
     invalidValue('authoredPatch', input.authoredPatch, PATCH_RELATIONS),
   ].filter(Boolean);
   if (invalid.length > 0) return fullResult(baseRelation, invalid);
+
+  const paths = normalizePaths(input.prPaths);
+  if (paths?.length && paths.every(isCoCreationDocPath) && !['full', 'unknown'].includes(input.riskLane)) {
+    return {
+      route: 'targeted',
+      baseRelation,
+      mergeReady: false,
+      reusesFullGreen: false,
+      requiredChecks: ['docs-validation'],
+      resumeStages: [],
+      reasons: ['docs-only changes require documentation validation; review assurance is independent'],
+    };
+  }
 
   if (canReuseFullGreen(input)) {
     return {
@@ -217,15 +236,11 @@ export function classifyGateRoute(input) {
   };
 }
 
-function stablePatchId(repoRoot, baseSha) {
-  const patch = execFileSync('git', ['diff', '--binary', `${baseSha}...HEAD`], {
-    cwd: repoRoot,
-    maxBuffer: 64 * 1024 * 1024,
-  });
-  if (patch.length === 0) return null;
-  const result = spawnSync('git', ['patch-id', '--stable'], { cwd: repoRoot, input: patch, encoding: 'utf8' });
-  if (result.status !== 0) throw new Error(result.stderr || 'git patch-id failed');
-  return result.stdout.trim().split(/\s+/)[0] || null;
+export function classifyGateRoute(input) {
+  const highAssurance =
+    (input.riskAxis != null && input.riskAxis !== 'behavior') ||
+    (normalizePaths(input.prPaths) ?? []).some((file) => isGateExecutionPath(file) || isGovernanceDocPath(file));
+  return { ...classifyCoverageRoute(input), assuranceLevel: highAssurance ? 'high' : 'standard' };
 }
 
 function previousEvidence(runs, fingerprint, patchId, repoRoot, baseSha, diffPaths) {
@@ -260,13 +275,21 @@ function previousEvidence(runs, fingerprint, patchId, repoRoot, baseSha, diffPat
 export function deriveGateRoute({ repoRoot, baseSha, databasePath, riskAxis = null, invocationArgs = [] }) {
   const headSha = git(repoRoot, ['rev-parse', 'HEAD']);
   const treeSha = git(repoRoot, ['rev-parse', 'HEAD^{tree}']);
-  const diffPaths = pathsFromGit(repoRoot, ['diff', '--name-only', `${baseSha}...HEAD`]);
-  const patchId = stablePatchId(repoRoot, baseSha);
-  const { fingerprint } = computeGateFingerprint(repoRoot, invocationArgs);
-  const runs = listGateRuns(databasePath);
+  const dirtyProbe = invocationArgs.includes('--no-rebase') && Boolean(git(repoRoot, ['status', '--porcelain']));
+  const diffPaths = [
+    ...new Set([
+      ...pathsFromGit(repoRoot, ['diff', '--name-only', `${baseSha}...HEAD`]),
+      ...(dirtyProbe ? pathsFromGit(repoRoot, ['diff', '--name-only', 'HEAD']) : []),
+      ...(dirtyProbe ? pathsFromGit(repoRoot, ['ls-files', '--others', '--exclude-standard']) : []),
+    ]),
+  ].sort();
+  const patchId = dirtyProbe ? null : stablePatchId(repoRoot, baseSha);
+  const fingerprint = dirtyProbe ? null : computeGateFingerprint(repoRoot, invocationArgs).fingerprint;
+  const runs = dirtyProbe ? [] : listGateRuns(databasePath);
   const evidence = previousEvidence(runs, fingerprint, patchId, repoRoot, baseSha, diffPaths);
   const classified = classifyGateRoute({
     riskAxis,
+    journeyEvidencePaths: listDefaultEntryJourneyPaths(repoRoot),
     previousStatus: evidence.previousStatus,
     previousFailureRelevance: evidence.previousFailureRelevance,
     authoredPatch: evidence.authoredPatch,
@@ -277,6 +300,7 @@ export function deriveGateRoute({ repoRoot, baseSha, databasePath, riskAxis = nu
   });
   return {
     ...classified,
+    dirtyProbe,
     baseSha,
     headSha,
     treeSha,

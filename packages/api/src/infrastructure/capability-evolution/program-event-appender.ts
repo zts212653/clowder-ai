@@ -10,7 +10,7 @@ import {
   evolutionEventIdentityDigest,
   type IEvolutionProgramEventLog,
 } from './program-event-log.js';
-import type { EvolutionProgramProjectionV1 } from './program-projection.js';
+import type { EvolutionProgramProjectionV1 } from './read-model/program-projection.js';
 
 export class EvolutionProgramEventAppender {
   constructor(

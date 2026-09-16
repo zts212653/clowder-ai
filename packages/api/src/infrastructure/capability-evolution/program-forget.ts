@@ -12,7 +12,7 @@ import {
   requirePositiveTtl,
 } from './program-command-contract.js';
 import { type EvolutionProgramAppendResult, evolutionEventIdentityDigest } from './program-event-log.js';
-import type { EvolutionProgramProjectionV1 } from './program-projection.js';
+import type { EvolutionProgramProjectionV1 } from './read-model/program-projection.js';
 
 /**
  * "Forget an active Program" is the one operation that must withdraw and set retention atomically:

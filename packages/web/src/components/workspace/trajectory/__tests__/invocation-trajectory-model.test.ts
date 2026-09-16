@@ -140,6 +140,66 @@ describe('F299 invocation trajectory primary projection', () => {
     );
   });
 
+  it('projects typed child activity instead of folding it into provider telemetry', () => {
+    const childEvent = {
+      v: 1 as const,
+      id: 'subexecution:child-bohr:final',
+      kind: 'subexecution' as const,
+      occurredAt: 12,
+      stage: 'message' as const,
+      subexecutionId: 'child-bohr',
+      rootExecutionId: 'root-provider-thread',
+      parentExecutionId: 'root-provider-thread',
+      rootTurnId: 'root-provider-turn',
+      parentTurnId: 'root-provider-turn',
+      turnId: 'child-provider-turn',
+      agentPath: '/root/review_knowledge_delta',
+      nickname: 'Bohr',
+      depth: 1,
+      content: 'Approve：内容与 ASR 一致。',
+      messagePhase: 'final_answer' as const,
+    };
+    const projection = buildInvocationTimelineRows([
+      rawEvent(0, { type: 'provider_signal', semanticEvent: childEvent }),
+    ]);
+
+    expect(projection.allRows).toEqual([
+      expect.objectContaining({
+        kind: 'subexecution',
+        event: childEvent,
+      }),
+    ]);
+  });
+
+  it('projects typed child activity from the canonical system_info transcript carrier', () => {
+    const childEvent = {
+      v: 1 as const,
+      id: 'subexecution:child-kuhn:commentary',
+      kind: 'subexecution' as const,
+      occurredAt: 12,
+      stage: 'message' as const,
+      subexecutionId: 'child-kuhn',
+      rootExecutionId: 'root-provider-thread',
+      parentExecutionId: 'root-provider-thread',
+      rootTurnId: 'root-provider-turn',
+      parentTurnId: 'root-provider-turn',
+      turnId: 'child-provider-turn',
+      agentPath: '/root/bohr_probe',
+      nickname: 'Kuhn',
+      depth: 1,
+      content: 'I am checking the document heading.',
+      messagePhase: 'commentary' as const,
+    };
+    const projection = buildInvocationTimelineRows([rawEvent(0, { type: 'system_info', semanticEvent: childEvent })]);
+
+    expect(projection.allRows).toEqual([
+      expect.objectContaining({
+        kind: 'subexecution',
+        event: childEvent,
+      }),
+    ]);
+  });
+
   it('never merges assistant fragments across tool, error, or turn boundaries and leaves Raw untouched', () => {
     const events = [
       rawEvent(0, { type: 'text', content: 'before tool' }),

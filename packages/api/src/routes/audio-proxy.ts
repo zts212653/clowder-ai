@@ -11,7 +11,7 @@ import { getServiceConfig } from '../domains/services/service-config.js';
 import { getServiceManifest, resolveServiceEndpoint } from '../domains/services/service-manifest.js';
 import { resolveUserId } from '../utils/request-identity.js';
 
-function resolveAudioServiceUrl(): string {
+export function resolveAudioServiceUrl(): string {
   const service = getServiceManifest('audio-capture');
   if (!service) return process.env.AUDIO_SERVICE_URL ?? 'http://127.0.0.1:9881';
   return resolveServiceEndpoint(service, process.env, getServiceConfig('audio-capture')) ?? 'http://127.0.0.1:9881';

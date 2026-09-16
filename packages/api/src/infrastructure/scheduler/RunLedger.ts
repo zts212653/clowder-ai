@@ -59,17 +59,10 @@ export class RunLedger {
       .all(taskId, subjectKey, limit) as RunLedgerRow[];
   }
 
-  /** Phase 2: aggregate outcome stats for a task */
+  /** Read exact counters maintained in the same transaction as the canonical run. */
   stats(taskId: string): RunStats {
     const row = this.db
-      .prepare(
-        `SELECT
-           COUNT(*) as total,
-           SUM(CASE WHEN outcome = 'RUN_DELIVERED' THEN 1 ELSE 0 END) as delivered,
-           SUM(CASE WHEN outcome = 'RUN_FAILED' THEN 1 ELSE 0 END) as failed,
-           SUM(CASE WHEN outcome IN ('SKIP_NO_SIGNAL','SKIP_DISABLED','SKIP_OVERLAP') THEN 1 ELSE 0 END) as skipped
-         FROM task_run_ledger WHERE task_id = ?`,
-      )
+      .prepare('SELECT total, delivered, failed, skipped FROM task_run_stats WHERE task_id = ?')
       .get(taskId) as { total: number; delivered: number; failed: number; skipped: number } | undefined;
     return {
       total: row?.total ?? 0,

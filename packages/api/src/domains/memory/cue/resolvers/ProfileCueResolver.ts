@@ -9,7 +9,7 @@ import {
 export interface ProfileCueSource {
   resolve(input: {
     ownerUserId: string;
-    profileUri: 'cat-cafe-profile://relationship/current';
+    profileUri: 'cat-cafe-profile://relationship/current' | 'cat-cafe-profile://corpus/current';
     sourceRevision: string;
   }): Promise<MemoryCueSourceProjection | null>;
 }

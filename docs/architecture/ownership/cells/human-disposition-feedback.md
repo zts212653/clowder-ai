@@ -19,7 +19,6 @@ code_anchors:
   - packages/shared/src/__tests__/human-disposition-feedback.test.ts
   - packages/shared/vitest.config.js
   - packages/web/src/components/HumanDispositionFeedbackDialog.tsx
-  - packages/web/src/components/MobileApprovalSheet.tsx
   - packages/web/src/components/ApprovalItemCard.tsx
   - packages/web/src/components/ChatContainer.tsx
   - packages/web/src/stores/approvalHubStore.ts

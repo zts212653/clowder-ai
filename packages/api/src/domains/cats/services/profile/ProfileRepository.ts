@@ -4,11 +4,14 @@ import { resolve } from 'node:path';
 import { catRegistry } from '@cat-cafe/shared';
 import {
   assertProfilePathSegment,
+  CURRENT_CORPUS_PROFILE_URI,
   CURRENT_RELATIONSHIP_PROFILE_URI,
+  PROFILE_CORPUS_RELATIVE_PATH,
   profileUserRelativePath,
   relationshipKeyFromPrimerRelativePath,
   relationshipPrimerRelativePath,
 } from '@cat-cafe/shared/profile-contract';
+import { profileRevisionOf } from '@cat-cafe/shared/profile-revision';
 
 export interface ProfileScope {
   userId: string;
@@ -47,10 +50,11 @@ export class FileProfileRepository {
     return resolve(this.dataDir, ...profileUserRelativePath(userId).split('/'));
   }
 
-  readCapsule(userId: string): { content: string; path: string } | null {
+  readCapsule(userId: string): { content: string; path: string; revision: string } | null {
     const path = resolve(this.profileDir(userId), 'operator-capsule.md');
     if (!existsSync(path)) return null;
-    return { content: readFileSync(path, 'utf8'), path };
+    const content = readFileSync(path, 'utf8');
+    return { content, path, revision: profileRevisionOf(content) };
   }
 
   scope(userId: string, catId: string): ProfileScope {
@@ -99,13 +103,49 @@ export class FileProfileRepository {
     return this.primerPath(scope);
   }
 
-  readPrimer(scope: ProfileScope): { content: string; path: string } | null {
+  readPrimer(scope: ProfileScope): { content: string; path: string; revision: string } | null {
     const path = this.primerPath(scope);
     if (!existsSync(path)) return null;
-    return { content: readFileSync(path, 'utf8'), path };
+    const content = readFileSync(path, 'utf8');
+    return { content, path, revision: profileRevisionOf(content) };
+  }
+
+  /**
+   * Phase E: absolute path for the shared corpus file for a given user.
+   */
+  corpusPath(userId: string): string {
+    return resolve(this.profileDir(userId), ...PROFILE_CORPUS_RELATIVE_PATH.split('/'));
+  }
+
+  /**
+   * Phase E: read the owner-wide shared corpus. Returns null if not yet written.
+   * INV-4: revision uses the canonical profileRevisionOf function.
+   */
+  readCorpus(userId: string): { content: string; path: string; revision: string } | null {
+    const path = this.corpusPath(userId);
+    if (!existsSync(path)) return null;
+    const content = readFileSync(path, 'utf8');
+    return { content, path, revision: profileRevisionOf(content) };
+  }
+
+  /**
+   * Phase E: resolve and validate a corpus targetPath.
+   * INV-2: only PROFILE_CORPUS_RELATIVE_PATH is accepted; primer paths and traversals are rejected.
+   * A5: path traversal is rejected.
+   */
+  resolveCorpusTarget(userId: string, targetPath: string): string {
+    const normalized = targetPath.replaceAll('\\', '/');
+    if (normalized !== PROFILE_CORPUS_RELATIVE_PATH) {
+      throw new Error(`Invalid corpus target "${targetPath}"; expected ${PROFILE_CORPUS_RELATIVE_PATH}`);
+    }
+    return this.corpusPath(userId);
   }
 
   currentRelationshipUri(): typeof CURRENT_RELATIONSHIP_PROFILE_URI {
     return CURRENT_RELATIONSHIP_PROFILE_URI;
+  }
+
+  currentCorpusUri(): typeof CURRENT_CORPUS_PROFILE_URI {
+    return CURRENT_CORPUS_PROFILE_URI;
   }
 }

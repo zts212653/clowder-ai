@@ -1,6 +1,7 @@
 import type { PawFeelDispositionActor, PawFeelDispositionEvent, PawFeelDispositionProjection } from '@cat-cafe/shared';
 import type { CanonicalPawFeelCandidate } from '../friction/paw-feel-source.js';
 import { type PawFeelDispositionCommand, PawFeelDispositionCommandSchema, PawFeelPrincipalSchema } from './commands.js';
+import type { PawFeelDirectRepairErrorCode } from './direct-repair/direct-repair-errors.js';
 
 export type PawFeelTrustedPrincipal = Extract<PawFeelDispositionActor, { kind: 'cat' | 'cvo' }>;
 
@@ -16,6 +17,8 @@ export type PawFeelDispositionServiceErrorCode =
   | 'bundle_invalid'
   | 'named_owner_required'
   | 'fix_evidence_invalid'
+  | 'resume_condition_invalid'
+  | PawFeelDirectRepairErrorCode
   | 'legacy_action_disabled';
 
 export class PawFeelDispositionServiceError extends Error {

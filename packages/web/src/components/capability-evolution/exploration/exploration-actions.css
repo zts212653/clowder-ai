@@ -1,0 +1,82 @@
+.exploration-actions {
+  border-top: 1px solid var(--cafe-border);
+  padding-top: 20px;
+  margin-top: 26px;
+}
+.exploration-actions h3 > svg {
+  color: var(--evolution-focus);
+}
+.exploration-actions > p {
+  color: var(--cafe-text-secondary);
+  margin: 8px 0 16px;
+}
+.exploration-intent {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font-size: var(--console-font-xs);
+  margin-bottom: 10px;
+}
+.exploration-intent select {
+  width: auto;
+  max-width: 240px;
+  margin: 0;
+}
+.exploration-actions textarea {
+  width: 100%;
+  min-height: 96px;
+  padding: 12px;
+  background: var(--cafe-surface);
+  border: 1px solid var(--cafe-border);
+  border-radius: 8px;
+  resize: vertical;
+}
+.exploration-actions textarea::placeholder {
+  color: var(--cafe-text-muted);
+}
+.exploration-action-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin: 10px 0;
+}
+.exploration-action-footer > span {
+  font-size: var(--console-font-label);
+  color: var(--cafe-text-muted);
+}
+.exploration-request-history {
+  margin-top: 20px;
+  font-size: var(--console-font-xs);
+}
+.exploration-request-history article {
+  margin-top: 12px;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--cafe-border-subtle);
+}
+.exploration-request-history article p {
+  color: var(--cafe-text-secondary);
+  margin: 5px 0;
+}
+.exploration-request-history article button {
+  color: var(--evolution-focus-text);
+  text-decoration: underline;
+}
+.exploration-summary {
+  font-size: var(--console-font-compact);
+  min-width: 0;
+}
+.exploration-summary p {
+  margin: 10px 0;
+  color: var(--cafe-text-secondary);
+  overflow-wrap: anywhere;
+}
+.exploration-summary-warning {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+.exploration-summary-warning > svg {
+  color: var(--semantic-warning);
+}

@@ -127,11 +127,24 @@ describe('Eval Domain Registry v0', () => {
       true,
       'freshness eval is scheduled now that the replay selector and generator are wired',
     );
-    assert.equal(entry.metricGlossary?.['freshness.queued_seen']?.source, 'cat_cafe.freshness.queued_seen');
-    assert.equal(entry.metricGlossary?.['freshness.queued_handled']?.source, 'cat_cafe.freshness.queued_handled');
+    assert.equal(entry.metricGlossary?.['freshness.queued_seen']?.source, 'derived:freshness-windowed-replay.queue');
+    assert.equal(entry.metricGlossary?.['freshness.queued_handled']?.source, 'derived:freshness-windowed-replay.queue');
+    assert.equal(
+      entry.metricGlossary?.['freshness.supplement_terminal']?.source,
+      'derived:freshness-windowed-replay.supplement',
+    );
+    assert.equal(
+      entry.metricGlossary?.['freshness.notice_acked']?.source,
+      'derived:freshness-windowed-replay.attention',
+    );
+    assert.equal(
+      entry.metricGlossary?.['freshness.provider_notice_missed']?.source,
+      'derived:freshness-windowed-replay.provider',
+    );
     assert.equal(entry.metricGlossary?.['freshness.replay.failed_samples']?.source, 'derived:freshness-closure-replay');
     assert.equal(entry.fixtures.length, 8);
     assert.equal(entry.handoffTargetResolver.featureId, 'F254');
+    assert.equal(entry.handoffTargetResolver.ownerCatId, 'codex-sol');
   });
 
   it('rejects domain thread as the state source of truth', () => {

@@ -118,7 +118,7 @@ describe('F167 ordinary A2A dispatch disposition', () => {
     );
   });
 
-  test('a stale disposition cannot resolve a successor holder after the holder check', async () => {
+  test('a holder race retires only the exact dispatch after revalidation', async () => {
     const h = await harness({
       beforeDispositionRecord: async ({ ingest }) => {
         await ingest.record(
@@ -133,16 +133,18 @@ describe('F167 ordinary A2A dispatch disposition', () => {
       },
     });
 
-    await assert.rejects(
-      () => h.service.complete(auth(h), 'completed'),
-      /^A2ADispatchDispositionError: a2a_dispatch_disposition_fence_conflict$/,
-    );
+    // This handoff has no verified causal message. A fresh read may retire the
+    // old dispatch, but must not resolve the unrelated holder's active work.
+    const result = await h.service.complete(auth(h), 'completed');
+    assert.equal(result.retired, true);
     const projection = await h.projectionStore.get('ball:thread:thread-1');
     assert.equal(projection.state, 'active');
     assert.equal(projection.holder, 'opus');
     assert.equal(
-      (await h.eventLog.read('ball:thread:thread-1')).some((event) => event.kind === 'ball.dispatch_dispositioned'),
-      false,
+      (await h.eventLog.read('ball:thread:thread-1')).filter(
+        (event) => event.kind === 'ball.dispatch_dispositioned' && event.payload.retired === true,
+      ).length,
+      1,
     );
   });
 

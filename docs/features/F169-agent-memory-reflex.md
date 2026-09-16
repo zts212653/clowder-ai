@@ -267,7 +267,7 @@ close_gate_report:
       status: cvo_signed_off
       evidence:
         - kind: message
-          ref: "0001778553412203-000128-72a248a5"
+          ref: "private-source-id"
           description: "operator asks to run feat close flow and update F169 truth source as of 2026-05-11"
         - kind: doc
           ref: "docs/features/F169-agent-memory-reflex.md#open-questions"
@@ -276,8 +276,8 @@ close_gate_report:
         kind: cvo_signoff
         reason: "B+C fully cover the runtime memory reflex vision; persistent Compiled Wiki would create a second truth surface"
         cvo_signoff:
-          proposal_message_id: "0001777183100065-000035-5052ba99"
-          cvo_message_id: "0001778553412203-000128-72a248a5"
+          proposal_message_id: "private-source-id"
+          cvo_message_id: "private-source-id"
           cvo_quote: "那你好像要走一下feat close流程？...我们需要更新一下真相源了"
           accepted_scope: ["Phase-A-Compiled-Wiki"]
     - ac_id: BACKLOG-truth-sync

@@ -41,6 +41,7 @@ async function stableCaseReplay() {
   assert.ok(subject && 'caseRoot' in subject);
   return {
     caseId: subject.caseRoot.caseId,
+    expectedObservedVerdictIds: subject.caseRoot.cycles.map((cycle) => cycle.verdictId),
     events: planReevalClosureEvents(subject, '2026-08-09T02:00:00.000Z').map((planned) => planned.event),
   };
 }
@@ -73,13 +74,10 @@ describe('Eval Hub lifecycle summary route', () => {
       item.lifecycle.activeVerdictId,
       '2026-07-26-capability-wakeup-workspace-navigator-insufficient-fix-v2',
     );
-    assert.deepEqual(item.lifecycle.observedVerdictIds, [
-      '2026-07-12-capability-wakeup-workspace-navigator-cognitive-fix',
-      '2026-07-19-capability-wakeup-workspace-navigator-fix-recheck-v2',
-      '2026-07-26-capability-wakeup-workspace-navigator-insufficient-fix-v2',
-      '2026-08-16-capability-wakeup-workspace-navigator-no-data-observe',
-      '2026-08-23-capability-wakeup-workspace-navigator-no-data-observe',
-    ]);
+    // This route test consumes the live canonical corpus. Its contract is that
+    // replay projects every cycle selected for the case, not that the weekly
+    // corpus stops at a hard-coded date.
+    assert.deepEqual(item.lifecycle.observedVerdictIds, replay.expectedObservedVerdictIds);
     assert.equal(item.lifecycle.targetOwnerCatId, 'opus-47');
     await app.close();
   });

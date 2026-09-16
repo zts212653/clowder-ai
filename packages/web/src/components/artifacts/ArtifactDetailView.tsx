@@ -1,5 +1,5 @@
 import type { ThreadArtifactDTO } from '@cat-cafe/shared';
-import type { JSX } from 'react';
+import type { JSX, ReactNode } from 'react';
 import { useArtifactContent } from '@/hooks/useArtifactContent';
 import { API_URL } from '@/utils/api-client';
 import { CompactLabel } from '../content-overflow/CompactLabel';
@@ -155,11 +155,13 @@ export function ArtifactDetailView({
   worktreeId,
   onBack,
   onJump,
+  reviewAction,
 }: {
   artifact: ThreadArtifactDTO;
   worktreeId: string | null;
   onBack: () => void;
   onJump: (sourceMessageId: string) => void;
+  reviewAction?: ReactNode;
 }): JSX.Element {
   const view = classifyArtifactView(artifact);
   const url = resolveAssetUrl(artifact.url, API_URL);
@@ -180,6 +182,7 @@ export function ArtifactDetailView({
           value={artifact.name}
           className="min-w-0 flex-1 text-xs font-semibold text-cafe-secondary"
         />
+        {reviewAction}
       </div>
       <div className="flex flex-1 flex-col overflow-auto">
         {view === 'image' && url && (

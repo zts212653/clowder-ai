@@ -158,8 +158,11 @@ describe('F254 ADR-042 supplement store', () => {
 
     assert.equal(declined.status, 'declined');
     assert.equal(declined.declineReason, 'checked_no_supplement_needed');
+    assert.equal(declined.claimedAt, 110);
+    assert.equal(declined.terminalAt, 120);
     assert.equal(failed.status, 'failed');
     assert.equal(failed.failureReason, 'read_only_policy_unavailable');
+    assert.equal(failed.terminalAt, 120);
     assert.deepEqual(
       (await declinedStore.listSupplementsByLineage(base.lineageId)).map((item) => item.status),
       ['declined'],
@@ -167,6 +170,10 @@ describe('F254 ADR-042 supplement store', () => {
     assert.deepEqual(
       (await failedStore.listSupplementsByThread(base.threadId)).map((item) => item.status),
       ['failed'],
+    );
+    assert.deepEqual(
+      (await declinedStore.listAllSupplements()).map((item) => item.id),
+      [declined.id],
     );
   });
 

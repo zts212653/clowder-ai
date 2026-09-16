@@ -1,21 +1,11 @@
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
-import { dirname, extname, relative, resolve, sep } from 'node:path';
+import { relative, resolve, sep } from 'node:path';
 import { parse as parseYaml } from 'yaml';
+import { validateDefaultEntryJourney } from './design-gate/journey-evidence.mjs';
+import { importedAndMounted } from './design-gate/mount-chain.mjs';
+import { asStringList, escapeRegExp, insideRepo, isRecord, nonEmptyString } from './design-gate/shared.mjs';
 
 const REQUIRED_EDITOR_CONTRACTS = ['human_edit', 'selection_anchor', 'annotation', 'patch_review', 'version_undo'];
-
-function isRecord(value) {
-  return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
-}
-
-function nonEmptyString(value) {
-  return typeof value === 'string' && value.trim().length > 0;
-}
-
-function asStringList(value) {
-  if (Array.isArray(value)) return value.filter(nonEmptyString);
-  return nonEmptyString(value) ? [value] : [];
-}
 
 function parseFeatureDocFrontmatter({ featureSource, featureDocPath, errors }) {
   const match = featureSource.match(/^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/u);
@@ -36,113 +26,31 @@ function parseFeatureDocFrontmatter({ featureSource, featureDocPath, errors }) {
   }
 }
 
-function escapeRegExp(value) {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-}
-
-function normalizeIdentity(filePath) {
-  const withoutExtension = filePath.slice(0, filePath.length - extname(filePath).length);
-  return withoutExtension.endsWith(`${sep}index`) ? withoutExtension.slice(0, -`${sep}index`.length) : withoutExtension;
-}
-
-function insideRepo(repoRoot, relativePath) {
-  if (!nonEmptyString(relativePath)) return undefined;
-  const absolutePath = resolve(repoRoot, relativePath);
-  const fromRoot = relative(repoRoot, absolutePath);
-  if (fromRoot === '..' || fromRoot.startsWith(`..${sep}`)) return undefined;
-  return absolutePath;
-}
-
-function resolveImportTarget({ repoRoot, parentPath, specifier }) {
-  let basePath;
-  if (specifier.startsWith('.')) {
-    basePath = resolve(dirname(resolve(repoRoot, parentPath)), specifier);
-  } else if (specifier.startsWith('@/')) {
-    basePath = resolve(repoRoot, 'packages/web/src', specifier.slice(2));
-  } else {
-    return undefined;
-  }
-
-  const candidates = [
-    basePath,
-    `${basePath}.ts`,
-    `${basePath}.tsx`,
-    `${basePath}.js`,
-    `${basePath}.jsx`,
-    resolve(basePath, 'index.ts'),
-    resolve(basePath, 'index.tsx'),
-    resolve(basePath, 'index.js'),
-    resolve(basePath, 'index.jsx'),
-  ];
-  return candidates.find((candidate) => existsSync(candidate));
-}
-
-function importedAndMounted({ repoRoot, parent, child, errors, label }) {
-  const parentAbsolutePath = insideRepo(repoRoot, parent?.path);
-  const childAbsolutePath = insideRepo(repoRoot, child?.path);
-  if (!parentAbsolutePath || !existsSync(parentAbsolutePath)) {
-    errors.push(`${label}: parent path does not exist: ${parent?.path ?? '<missing>'}`);
-    return;
-  }
-  if (!childAbsolutePath || !existsSync(childAbsolutePath)) {
-    errors.push(`${label}: child path does not exist: ${child?.path ?? '<missing>'}`);
-    return;
-  }
-  if (!nonEmptyString(parent?.export) || !nonEmptyString(child?.export)) {
-    errors.push(`${label}: parent and child exports are required`);
-    return;
-  }
-
-  const parentSource = readFileSync(parentAbsolutePath, 'utf8');
-  const childIdentity = normalizeIdentity(childAbsolutePath);
-  const importPattern = /import\s+(?:type\s+)?([\s\S]*?)\s+from\s+['"]([^'"]+)['"]/gu;
-  let importsChild = false;
-  let importMatch = importPattern.exec(parentSource);
-  while (importMatch) {
-    const [, importClause, specifier] = importMatch;
-    const target = resolveImportTarget({ repoRoot, parentPath: parent.path, specifier });
-    if (
-      target &&
-      normalizeIdentity(target) === childIdentity &&
-      new RegExp(`\\b${escapeRegExp(child.export)}\\b`, 'u').test(importClause)
-    ) {
-      importsChild = true;
-      break;
-    }
-    importMatch = importPattern.exec(parentSource);
-  }
-
-  if (!importsChild) {
-    errors.push(`${label}: ${parent.export} must import ${child.export} from ${child.path}`);
-  }
-  if (!new RegExp(`<\\s*${escapeRegExp(child.export)}(?:\\s|/|>)`, 'u').test(parentSource)) {
-    errors.push(`${label}: ${parent.export} must mount <${child.export}>`);
-  }
-}
-
-function validateProductMountNode({ repoRoot, node, errors }) {
+function validateMountNode({ repoRoot, node, label, errors }) {
   if (!nonEmptyString(node?.path) || !nonEmptyString(node?.export)) {
-    errors.push('every productIntegration.mountChain node needs path and export');
+    errors.push(`every ${label} node needs path and export`);
     return;
   }
   if (/(?:^|\/)app\/dev(?:\/|$)/u.test(node.path) || /(?:^|\/)dev(?:\/|$)/u.test(node.path)) {
-    errors.push(`productIntegration mount chain cannot use a dev route: ${node.path}`);
+    errors.push(`${label} cannot use a dev route: ${node.path}`);
   }
   const absolutePath = insideRepo(repoRoot, node.path);
   if (!absolutePath || !existsSync(absolutePath)) {
-    errors.push(`productIntegration path does not exist: ${node.path}`);
+    errors.push(`${label} path does not exist: ${node.path}`);
   }
 }
 
-function validateProductMountChain({ repoRoot, mountChain, errors }) {
-  for (const node of mountChain) validateProductMountNode({ repoRoot, node, errors });
+// Structural disclosure only: each hop imports and mounts the next. Reachability
+// from the default entry is proven by the bound browser journey, never here.
+function validateMountChain({ repoRoot, mountChain, label, errors }) {
+  for (const node of mountChain) validateMountNode({ repoRoot, node, label, errors });
   for (let index = 0; index < mountChain.length - 1; index += 1) {
     importedAndMounted({
       repoRoot,
       parent: mountChain[index],
       child: mountChain[index + 1],
       errors,
-      label: `productIntegration mountChain[${index}]`,
+      label: `${label}[${index}]`,
     });
   }
 }
@@ -156,11 +64,39 @@ function validateProductIntegration({ repoRoot, claim, errors }) {
   if (/\/dev(?:\/|$)/u.test(claim.userEntry ?? '')) {
     errors.push('productIntegration.userEntry cannot be a /dev route');
   }
+  if (Object.hasOwn(claim, 'queryNavigation')) {
+    errors.push(
+      'productIntegration.queryNavigation is retired: query-gated entries are opt-in candidates, not product integration',
+    );
+  }
   if (!Array.isArray(claim.mountChain) || claim.mountChain.length < 2) {
     errors.push('productIntegration.mountChain must include the real entry and final surface');
     return;
   }
-  validateProductMountChain({ repoRoot, mountChain: claim.mountChain, errors });
+  validateMountChain({ repoRoot, mountChain: claim.mountChain, label: 'productIntegration.mountChain', errors });
+  validateDefaultEntryJourney({
+    repoRoot,
+    journey: claim.defaultEntryJourney,
+    finalSurface: claim.mountChain.at(-1),
+    errors,
+  });
+}
+
+// `entry` is disclosure for contracts that do not claim product integration
+// (opt-in candidates, hosted journeys). A disclosed mount chain must still be
+// structurally true, otherwise the disclosure is stale.
+function validateEntryDisclosure({ repoRoot, entry, errors }) {
+  if (entry === undefined) return;
+  if (!isRecord(entry)) {
+    errors.push('entry must be an object');
+    return;
+  }
+  if (entry.mountChain === undefined) return;
+  if (!Array.isArray(entry.mountChain) || entry.mountChain.length < 2) {
+    errors.push('entry.mountChain must list at least the entry and the final surface');
+    return;
+  }
+  validateMountChain({ repoRoot, mountChain: entry.mountChain, label: 'entry.mountChain', errors });
 }
 
 function validateEditorEngineMetadata(engine, errors) {
@@ -309,6 +245,7 @@ export function checkClaimContract({ repoRoot, contract, contractPath = '<memory
   if (!nonEmptyString(contract.classification)) errors.push('classification is required');
   if (!isRecord(contract.claims)) errors.push('claims must be an object');
   validateCommittedContractLink({ repoRoot, contract, contractPath, errors });
+  validateEntryDisclosure({ repoRoot, entry: contract.entry, errors });
 
   if (isRecord(contract.claims) && Object.hasOwn(contract.claims, 'productIntegration')) {
     validateProductIntegration({ repoRoot, claim: contract.claims.productIntegration, errors });

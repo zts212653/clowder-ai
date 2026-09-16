@@ -14,7 +14,13 @@ export function createFreshnessGeneratorAdapter(provider: FreshnessReplayProvide
     const selector = sourceRefs as FreshnessReplaySelector;
     const validationError = validateFreshnessReplaySelector(selector);
     if (validationError) throw new Error(`invalid_source_ref: ${validationError}`);
-    const replay = await provider.resolve(selector);
+    if (!deps.ownerUserId) {
+      throw new Error('owner_user_required: freshness replay publication requires ownerUserId');
+    }
+    const replay = await provider.resolve(selector, { ownerUserId: deps.ownerUserId });
+    if (replay.measurementMaturity.status !== 'ready') {
+      throw new Error(`measurement_validity_gate: ${replay.measurementMaturity.reasons.join(',')}`);
+    }
     const domain = loadDomains(deps.harnessFeedbackRoot).get(packet.domainId);
     if (!domain) throw new Error(`unknown_domain: ${packet.domainId} not in registry`);
     if (domain.domainId !== 'eval:freshness') {

@@ -87,6 +87,57 @@ describe('public package script closure', () => {
   });
 });
 
+describe('public provenance-only contribution coverage', () => {
+  const file = 'docs/features/F999-provenance.md';
+  const sourceId = '0001700000000000-000042-deadbeef';
+  function setup(exemption = '') {
+    const root = makeRoot();
+    write(root, 'package.json', JSON.stringify({ scripts: {} }));
+    write(root, 'packages/web/src/lib/capability-tips.seed.json', '[]');
+    const baseline = `---\nfeature_ids: [F999]\n${exemption}---\n# Existing capability\nSource: ${sourceId}\n`;
+    write(root, file, baseline);
+    commitAll(root, 'baseline provenance');
+    return { root, baseline };
+  }
+
+  it('does not ask for a new tip or renewed exemption for exact outbound redaction alone', () => {
+    for (const exemption of ['', 'tips_exempt: internal maintenance\n']) {
+      const { root, baseline } = setup(exemption);
+      write(root, file, baseline.replace(sourceId, 'private-source-id'));
+      const result = checkSyncPublicPreflight(root, { baseRef: 'HEAD', changedFiles: [file] });
+      assert.equal(result.ok, true, result.errors.join('\n'));
+      assert.deepEqual(result.provenanceOnlyChanges, [file]);
+    }
+  });
+
+  it('still requires coverage for a real contribution beside redaction or a newly added document', () => {
+    const { root, baseline } = setup('tips_exempt: internal maintenance\n');
+    write(root, file, baseline.replace(sourceId, 'private-source-id') + 'New user action: publish a report.\n');
+    let result = checkSyncPublicPreflight(root, { baseRef: 'HEAD', changedFiles: [file] });
+    assert.equal(result.ok, false);
+    assert.match(result.errors.join('\n'), /unchanged tips_exempt/);
+    assert.deepEqual(result.provenanceOnlyChanges, []);
+    const added = 'docs/features/F998-new.md';
+    write(root, added, '# New capability\nSource: private-source-id\n');
+    result = checkSyncPublicPreflight(root, { baseRef: 'HEAD', changedFiles: [added] });
+    assert.equal(result.ok, false);
+    assert.match(result.errors.join('\n'), /missing capability tip/);
+  });
+
+  it('does not exempt raw ID substitutions, unrelated formatting or unresolvable baselines', () => {
+    const { root, baseline } = setup('tips_exempt: internal maintenance\n');
+    for (const candidate of [
+      baseline.replace(sourceId, '0001700000000001-000043-cafebabe'),
+      baseline.replace(sourceId, 'private-source-id') + '\n',
+    ]) {
+      write(root, file, candidate);
+      assert.equal(checkSyncPublicPreflight(root, { baseRef: 'HEAD', changedFiles: [file] }).ok, false);
+    }
+    write(root, file, baseline.replace(sourceId, 'private-source-id'));
+    assert.equal(checkSyncPublicPreflight(root, { baseRef: 'missing-base', changedFiles: [file] }).ok, false);
+  });
+});
+
 describe('capability-tip export reference regressions', () => {
   it('uses the explicit aggregate baseRef for export coverage comparisons', () => {
     const root = makeRoot();

@@ -1,7 +1,8 @@
+import { ownerTruthRefV1Schema } from '@cat-cafe/shared';
 import { z } from 'zod';
 
 const nonEmpty = z.string().trim().min(1);
-const featureId = z.string().regex(/^F\d{3}$/);
+const ownerFeatureId = ownerTruthRefV1Schema.shape.ownerFeatureId;
 const sha256 = z.string().regex(/^[a-f0-9]{64}$/, 'must be a lowercase SHA-256');
 const fullGitRevision = z.string().regex(/^[a-f0-9]{40}$/, 'must be a full Git revision');
 
@@ -91,7 +92,7 @@ export const MeasurementDecisionProofRecordSchema = z
       .array(
         z
           .object({
-            ownerFeatureId: featureId,
+            ownerFeatureId,
             ownerStateRef: nonEmpty,
             artifactRef: nonEmpty,
             sha256,

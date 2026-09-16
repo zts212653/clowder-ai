@@ -49,7 +49,14 @@ type CodexAppServerNotificationMapper = (
 
 const mapCodexAppServerItemNotification: CodexAppServerNotificationMapper = (method, params) => {
   const item = mapItem(params?.item);
-  return item ? { type: method.replace('/', '.'), item } : null;
+  return item
+    ? {
+        type: method.replace('/', '.'),
+        item,
+        ...(typeof params?.threadId === 'string' ? { thread_id: params.threadId } : {}),
+        ...(typeof params?.turnId === 'string' ? { turn_id: params.turnId } : {}),
+      }
+    : null;
 };
 
 const CODEX_GOAL_STATUSES = new Set(['active', 'paused', 'blocked', 'usageLimited', 'budgetLimited', 'complete']);
@@ -89,7 +96,14 @@ const CODEX_APP_SERVER_NOTIFICATION_MAPPERS: Readonly<Record<string, CodexAppSer
   Object.assign(Object.create(null) as Record<string, CodexAppServerNotificationMapper>, {
     'item/started': mapCodexAppServerItemNotification,
     'item/completed': mapCodexAppServerItemNotification,
-    'turn/started': () => ({ type: 'turn.started' }),
+    'turn/started': (_method, params) => {
+      const turn = asCodexAppServerRecord(params?.turn);
+      return {
+        type: 'turn.started',
+        ...(typeof params?.threadId === 'string' ? { thread_id: params.threadId } : {}),
+        ...(typeof turn?.id === 'string' ? { turn_id: turn.id } : {}),
+      };
+    },
     'thread/goal/updated': mapCodexAppServerGoalUpdated,
     'thread/goal/cleared': mapCodexAppServerGoalCleared,
     'turn/plan/updated': (_method, params) => {
@@ -108,9 +122,16 @@ const CODEX_APP_SERVER_NOTIFICATION_MAPPERS: Readonly<Record<string, CodexAppSer
           type: 'turn.failed',
           status,
           error: { message: codexAppServerErrorMessage(asCodexAppServerRecord(turn?.error)) },
+          ...(typeof params?.threadId === 'string' ? { thread_id: params.threadId } : {}),
+          ...(typeof turn?.id === 'string' ? { turn_id: turn.id } : {}),
         };
       }
-      return { type: 'turn.completed', ...(typeof status === 'string' ? { status } : {}) };
+      return {
+        type: 'turn.completed',
+        ...(typeof status === 'string' ? { status } : {}),
+        ...(typeof params?.threadId === 'string' ? { thread_id: params.threadId } : {}),
+        ...(typeof turn?.id === 'string' ? { turn_id: turn.id } : {}),
+      };
     },
     error: (_method, params) => ({
       type: 'error',

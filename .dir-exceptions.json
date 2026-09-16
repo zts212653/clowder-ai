@@ -94,15 +94,8 @@
     {
       "path": "packages/api/src/domains/cats/services/session",
       "owner": "codex-sol",
-      "reason": "2026-08-22 full-sync census: 30 files. Session lifecycle now mixes transcript IO, compaction/presentation projection, trajectory resolution, and handoff management; F296/F299 own a boundary-led split.",
-      "expiresAt": "2026-09-15",
-      "ticket": "F296/F299"
-    },
-    {
-      "path": "packages/api/src/domains/cats/services/stores/redis-keys",
-      "owner": "codex-sol",
-      "reason": "2026-08-22 full-sync census: 25 files. Root Redis key families need session/presentation/registry grouping while preserving existing community and proposal subdomains; F296/F299 own the split.",
-      "expiresAt": "2026-09-15",
+      "reason": "2026-09-16 census: 33 files. First bounded renewal of the F296/F299 exception added in #3876. Transcript persistence, session lifecycle, context presentation, and invocation trajectory still require an ownership-led split; this renewal does not claim that split is delivered. Keep existing import and persistence contracts stable during the reviewed public sync; the F296/F299 owner retains the split debt. Retire the separate redis-keys exception: its 24 root files are below the hard threshold.",
+      "expiresAt": "2026-09-30",
       "ticket": "F296/F299"
     }
   ]

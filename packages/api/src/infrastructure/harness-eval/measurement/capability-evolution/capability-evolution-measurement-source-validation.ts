@@ -2,7 +2,7 @@ import { isDeepStrictEqual } from 'node:util';
 import type { OwnerTruthRefV1 } from '@cat-cafe/shared';
 import { stringify } from 'yaml';
 
-import type { EvolutionProgramProjectionV1 } from '../../../capability-evolution/program-projection.js';
+import type { EvolutionProgramProjectionV1 } from '../../../capability-evolution/read-model/program-projection.js';
 import { validateMeasurementBundleResult } from '../measurement-bundle-validation.js';
 import { assessMeasurementDecisionProofCandidate } from '../measurement-decision-proof.js';
 import { digest } from '../measurement-decision-proof-files.js';
@@ -63,6 +63,9 @@ function validateSourceIdentity(input: SourceValidationInput): void {
     throw new Error('source id mismatch');
   }
   if (manifest.ownerUserId !== input.ownerUserId) throw new Error('source owner user mismatch');
+  if (projection.program.workspaceId !== `user:${input.ownerUserId}`) {
+    throw new Error('Program value owner mismatch');
+  }
   if (manifest.ownerFeatureId !== projection.program.objectRef.ownerFeatureId) {
     throw new Error('source owner feature mismatch');
   }
@@ -77,6 +80,28 @@ function validateSourceIdentity(input: SourceValidationInput): void {
   }
 }
 
+function canonicalValueOwnerRef(input: SourceValidationInput): OwnerTruthRefV1 {
+  const expected = {
+    ownerFeatureId: 'F311',
+    ownerStateRef: `user:${input.ownerUserId}`,
+  } satisfies OwnerTruthRefV1;
+  const actual = input.projection.program.valueOwnerRef;
+  if (!actual) throw new Error('Program value owner missing');
+  if (!sameRef(actual, expected)) {
+    throw new Error('Program value owner mismatch');
+  }
+  return actual;
+}
+
+function certificateNamedConsumerRef(
+  certificate: CapabilityEvolutionMeasurementSource['certificate'],
+): OwnerTruthRefV1 {
+  return {
+    ownerFeatureId: certificate.decision.consumerFeatureId,
+    ownerStateRef: `cat:${certificate.decision.consumerOwnerCatId}`,
+  };
+}
+
 function validateCertificateAndRoles(input: SourceValidationInput): void {
   const { manifest, projection } = input;
   const { certificate, result } = manifest;
@@ -85,16 +110,14 @@ function validateCertificateAndRoles(input: SourceValidationInput): void {
   }
   if (certificate.provenance.sourceRevision !== manifest.sourceRevision)
     throw new Error('certificate revision mismatch');
-  if (certificate.decision.consumerFeatureId !== 'F311') throw new Error('certificate consumer mismatch');
+  if (certificate.decision.consumerFeatureId !== manifest.roles.consumer.ownerFeatureId) {
+    throw new Error('certificate consumer mismatch');
+  }
   const targetId = `${projection.program.objectRef.ownerFeatureId}/${projection.program.objectRef.ownerStateRef}`;
   if (certificate.measurementTarget.id !== targetId) throw new Error('certificate target mismatch');
-  const expectedConsumerRef =
-    projection.program.valueOwnerRef ??
-    ({
-      ownerFeatureId: certificate.decision.consumerFeatureId,
-      ownerStateRef: projection.program.workspaceId,
-    } satisfies OwnerTruthRefV1);
-  if (!sameRef(manifest.roles.consumer, expectedConsumerRef)) {
+  const valueOwnerRef = canonicalValueOwnerRef(input);
+  const namedConsumerRef = certificateNamedConsumerRef(certificate);
+  if (!sameRef(manifest.roles.consumer, valueOwnerRef) && !sameRef(manifest.roles.consumer, namedConsumerRef)) {
     throw new Error('named consumer role mismatch');
   }
   const roleIdentities = Object.entries(manifest.roles)
@@ -162,7 +185,9 @@ function validateOwnerObjectSet(input: SourceValidationInput): void {
     }
     ownerArtifacts.set(entry.ref, entry.artifact);
     if (entry.artifact.ownerUserId !== input.ownerUserId) throw new Error('owner object user mismatch');
-    if (entry.artifact.ownerFeatureId !== manifest.ownerFeatureId) {
+    const expectedOwnerFeatureId =
+      entry.artifact.objectType === 'consumer_consumption' ? entry.artifact.consumerFeatureId : manifest.ownerFeatureId;
+    if (entry.artifact.ownerFeatureId !== expectedOwnerFeatureId) {
       throw new Error('decision proof object must be owned by the source feature');
     }
   }

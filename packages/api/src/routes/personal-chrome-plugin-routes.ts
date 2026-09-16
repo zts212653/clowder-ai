@@ -19,9 +19,14 @@ export interface PersonalChromeAuthorizedConversation {
   readonly conversationId: string;
   readonly authorizedAt: string;
   readonly updatedAt: string;
+  readonly displayTitle?: string;
+  readonly titleObservedAt?: string;
 }
 
 export interface PersonalChromePluginState {
+  readonly titleSync?:
+    | { readonly status: 'synced'; readonly updatedCount: number; readonly requestedCount: number }
+    | { readonly status: 'unavailable'; readonly errorCode: string };
   readonly pluginId: 'personal-chrome-host';
   readonly channel: 'developer_preview';
   readonly platform: string;
@@ -67,6 +72,7 @@ export interface PersonalChromePluginState {
 
 export interface PersonalChromePluginPort {
   inspect(): Promise<PersonalChromePluginState>;
+  refreshTitles(): Promise<PersonalChromePluginState>;
   install(): Promise<PersonalChromePluginState>;
   repair(): Promise<PersonalChromePluginState>;
   revoke(conversationId: string): Promise<PersonalChromePluginState>;
@@ -77,7 +83,7 @@ interface PersonalChromePluginRouteOptions {
   readonly port: PersonalChromePluginPort;
 }
 
-type MutationAction = 'install' | 'repair' | 'uninstall';
+type MutationAction = 'install' | 'repair' | 'uninstall' | 'refreshTitles';
 
 function operationErrorCode(error: unknown): string | undefined {
   if (typeof error !== 'object' || error === null || !('code' in error)) return undefined;
@@ -145,6 +151,7 @@ export function registerPersonalChromePluginRoutes(
   app.post('/api/plugins/personal-chrome/install', mutate('install'));
   app.post('/api/plugins/personal-chrome/repair', mutate('repair'));
   app.post('/api/plugins/personal-chrome/uninstall', mutate('uninstall'));
+  app.post('/api/plugins/personal-chrome/refresh-titles', mutate('refreshTitles'));
 
   app.delete<{ Params: { conversationId: string } }>(
     '/api/plugins/personal-chrome/authorizations/:conversationId',

@@ -12,7 +12,10 @@ const PROGRAM_ID = 'evolution-program:ba0f4524e49cc879279164d5b272cf8c';
 const ROOT = resolve(import.meta.dirname, '../../..');
 const INPUT_ROOT = resolve(ROOT, 'docs/harness-feedback/measurement-sources/capability-evolution/owner-inputs');
 const PREFIX = 'evolution-program-ba0f4524e49cc879279164d5b272cf8c';
-const SOURCE_REF = resolve(ROOT, `docs/harness-feedback/measurement-sources/capability-evolution/${PREFIX}.yaml`);
+const SOURCE_ARTIFACT_REF = `docs/harness-feedback/measurement-sources/capability-evolution/${PREFIX}.yaml`;
+const SOURCE_REF = resolve(ROOT, SOURCE_ARTIFACT_REF);
+const LEGACY_MANIFEST_REVISION = 'faff26de30a5603be00ad4de1a0b07af365f1d8d';
+const CURRENT_SOURCE_REVISION = '44a0b9805cd3d2e059c5733a0bd020a3cd69df71';
 const exec = promisify(execFile);
 
 const TARGET_REF = {
@@ -20,6 +23,7 @@ const TARGET_REF = {
   ownerStateRef: 'capability:development-process-harness-effectiveness',
 };
 const CONSUMER_REF = { ownerFeatureId: 'F311', ownerStateRef: 'user:default-user' };
+const NAMED_CONSUMER_REF = { ownerFeatureId: 'F100', ownerStateRef: 'cat:opus' };
 const OBSERVER_REF = { ownerFeatureId: 'F267', ownerStateRef: 'cat:codex-sol' };
 const DOMAIN_OWNER_REF = {
   ownerFeatureId: 'F100',
@@ -168,7 +172,82 @@ describe('F314 capability-evolution owner inputs', () => {
     assert.equal(assignment.certificateDecision.consumerOwnerCatId, 'opus');
   });
 
-  it('binds the six owner inputs into a validated zero-sample F267 source manifest', async () => {
+  it('versions the named measurement consumer without rewriting the value-owner-backed v1 chain', async () => {
+    const [legacyProcedure, legacyAssignment, procedure, assignment] = await Promise.all([
+      readInput('measurement-procedure-v1'),
+      readInput('measurement-role-assignment-v1'),
+      readInput('measurement-procedure-v2'),
+      readInput('measurement-role-assignment-v2'),
+    ]);
+
+    assert.deepEqual(legacyProcedure.consumerRef, CONSUMER_REF);
+    assert.deepEqual(legacyAssignment.roles.consumer, CONSUMER_REF);
+    assert.deepEqual(procedure.consumerRef, NAMED_CONSUMER_REF);
+    assert.deepEqual(assignment.roles.consumer, NAMED_CONSUMER_REF);
+    assert.equal(assignment.certificateDecision.consumerFeatureId, 'F100');
+    assert.equal(assignment.certificateDecision.consumerOwnerCatId, 'opus');
+    assert.match(assignment.roleRationale.consumer, /value owner.*F311\/user:default-user/i);
+    assert.match(assignment.roleRationale.consumer, /named.*F100\/cat:opus/i);
+    assert.match(procedure.truthBoundary.join(' '), /value.*authority.*F311\/user:default-user/i);
+    assert.match(procedure.truthBoundary.join(' '), /named.*consumer.*F100\/cat:opus/i);
+  });
+
+  it('reopens the immutable v1 source and proof after the canonical source advances', async () => {
+    const { stdout } = await exec('git', ['-C', ROOT, 'show', `${LEGACY_MANIFEST_REVISION}:${SOURCE_ARTIFACT_REF}`]);
+    const legacyManifest = parse(stdout);
+    const [
+      { CapabilityEvolutionMeasurementSourceSchema },
+      { validateCapabilityEvolutionMeasurementSource },
+      { createFileMeasurementDecisionProofResolver },
+    ] = await Promise.all([
+      import(
+        '../dist/infrastructure/harness-eval/measurement/capability-evolution/capability-evolution-measurement-source.js'
+      ),
+      import(
+        '../dist/infrastructure/harness-eval/measurement/capability-evolution/capability-evolution-measurement-source-validation.js'
+      ),
+      import('../dist/infrastructure/harness-eval/measurement/measurement-decision-proof-resolver.js'),
+    ]);
+
+    CapabilityEvolutionMeasurementSourceSchema.parse(legacyManifest);
+    validateCapabilityEvolutionMeasurementSource({
+      manifest: legacyManifest,
+      ownerUserId: 'default-user',
+      projection: {
+        program: {
+          programId: PROGRAM_ID,
+          workspaceId: 'user:default-user',
+          lifecycle: 'active',
+          stage: 'constituting',
+          sequence: 1,
+          cycle: 1,
+          objectRef: TARGET_REF,
+          claimRef: {
+            ownerFeatureId: 'F311',
+            ownerStateRef: `evolution-claim:${PROGRAM_ID}`,
+          },
+          valueOwnerRef: CONSUMER_REF,
+        },
+      },
+    });
+    assert.deepEqual(legacyManifest.roles.consumer, CONSUMER_REF);
+    assert.equal(
+      legacyManifest.certificate.certificateId,
+      'f267-capability-evolution-development-episode-alignment-e0-v1',
+    );
+
+    const resolution = await createFileMeasurementDecisionProofResolver({ repoRoot: ROOT }).resolve({
+      ownerUserId: 'default-user',
+      evidenceProofRef: {
+        ownerFeatureId: 'F267',
+        ownerStateRef: 'measurement-proof:f267-capability-evolution-development-episode-alignment-e0-proof-v1',
+      },
+    });
+    assert.equal(resolution.status, 'resolved');
+    assert.equal(resolution.proof.status, 'insufficient');
+  });
+
+  it('binds the versioned named consumer into the current zero-sample F267 source manifest', async () => {
     const manifest = parse(await readFile(SOURCE_REF, 'utf8'));
     const [{ CapabilityEvolutionMeasurementSourceSchema }, { validateCapabilityEvolutionMeasurementSource }] =
       await Promise.all([
@@ -189,8 +268,8 @@ describe('F314 capability-evolution owner inputs', () => {
           programId: PROGRAM_ID,
           workspaceId: 'user:default-user',
           lifecycle: 'active',
-          stage: 'constituting',
-          sequence: 1,
+          stage: 'instrumenting',
+          sequence: 34,
           cycle: 1,
           objectRef: TARGET_REF,
           claimRef: {
@@ -202,6 +281,7 @@ describe('F314 capability-evolution owner inputs', () => {
       },
     });
 
+    assert.equal(manifest.sourceRevision, CURRENT_SOURCE_REVISION);
     assert.equal(manifest.sourceArtifacts.length, 6);
     for (const sourceArtifact of manifest.sourceArtifacts) {
       const { stdout } = await exec('git', ['-C', ROOT, 'show', `${manifest.sourceRevision}:${sourceArtifact.ref}`]);
@@ -210,9 +290,19 @@ describe('F314 capability-evolution owner inputs', () => {
     assert.deepEqual(manifest.roles, {
       observer: OBSERVER_REF,
       domainOwner: DOMAIN_OWNER_REF,
-      consumer: CONSUMER_REF,
+      consumer: NAMED_CONSUMER_REF,
       calibrator: CALIBRATOR_REF,
     });
+    assert.equal(manifest.program.expectedSequence, 34);
+    assert.equal(manifest.certificate.certificateId, 'f267-capability-evolution-development-episode-alignment-e0-v2');
+    assert.equal(manifest.certificate.decision.consumerFeatureId, 'F100');
+    assert.equal(manifest.certificate.decision.consumerOwnerCatId, 'opus');
+    assert.equal(manifest.result.resultId, 'f267-capability-evolution-development-episode-alignment-e0-result-v2');
+    assert.equal(manifest.decisionProof.proofId, 'f267-capability-evolution-development-episode-alignment-e0-proof-v2');
+    assert.ok(manifest.sourceArtifacts.some(({ ref }) => ref.endsWith('measurement-procedure-v2.yaml')));
+    assert.ok(manifest.sourceArtifacts.some(({ ref }) => ref.endsWith('measurement-role-assignment-v2.yaml')));
+    assert.ok(manifest.sourceArtifacts.every(({ ref }) => !ref.endsWith('measurement-procedure-v1.yaml')));
+    assert.ok(manifest.sourceArtifacts.every(({ ref }) => !ref.endsWith('measurement-role-assignment-v1.yaml')));
     assert.ok(manifest.result.metrics.every((metric) => metric.n === 0));
     assert.ok(manifest.result.metrics.every((metric) => metric.pointEstimate === null));
     assert.ok(manifest.result.metrics.every((metric) => metric.evidenceStatus === 'insufficient'));
