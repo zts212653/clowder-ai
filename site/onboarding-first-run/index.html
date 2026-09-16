@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Clowder AI — 首次启动旅程原型</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div class="truth-label" id="truthLabel">原型 · 演示数据</div>
+
+    <div class="app hidden" id="app">
+      <nav class="rail" id="rail" aria-label="主导航"></nav>
+      <aside class="sidebar">
+        <div class="sidebar-head"><b>对话</b><button class="btn-primary" type="button" style="font-size: 12px">+ 新对话</button></div>
+        <div class="sidebar-search">搜索对话、项目或 ID...</div>
+        <div class="thread-item active" id="threadTitle">示范对话</div>
+      </aside>
+      <main class="workspace">
+        <div class="ws-head"><h2>Clowder AI</h2><span class="ctx" id="ctx"></span></div>
+        <div class="messages" id="messages" aria-live="polite"></div>
+        <div class="hint-chip hidden" id="hint">
+          之后可以在左边「成员」「密钥」邀请伙伴、管理账号
+          <button class="btn-ghost" type="button" id="hintGo">带我看看</button>
+        </div>
+        <form class="composer" id="composer">
+          <textarea id="input" rows="1" placeholder="输入消息... (@ 召唤猫猫 · /thread 引用对话)" aria-label="输入消息"></textarea>
+          <button class="send" id="send" type="submit" aria-label="发送"></button>
+        </form>
+      </main>
+    </div>
+
+    <div class="stage" id="stage">
+      <div class="stage-copy" id="stageCopy">
+        <h1>Clowder AI</h1>
+        <p>和你一起成长的 AI 团队</p>
+        <button class="btn-primary" type="button" id="startBtn">开始</button>
+      </div>
+    </div>
+
+    <div class="cats" id="cats"></div>
+    <div class="caption" id="caption"></div>
+    <div class="scrim hidden" id="setup"><div class="dialog" id="setupDialog" role="dialog" aria-labelledby="setupTitle"></div></div>
+    <div class="handoff hidden" id="handoff"><div class="handoff-card" id="handoffCard"></div></div>
+    <div class="spot hidden" id="spot"></div>
+    <div class="spot-tip hidden" id="spotTip"></div>
+    <div class="dev" id="dev" aria-label="讲解控制（非产品界面）"></div>
+
+    <script src="journey-core.js"></script>
+    <script src="clock.js"></script>
+    <script src="cats.js"></script>
+    <script src="chat.js"></script>
+    <script src="demo.js"></script>
+    <script src="setup.js"></script>
+    <script src="firstchat.js"></script>
+    <script src="app.js"></script>
+  </body>
+</html>
