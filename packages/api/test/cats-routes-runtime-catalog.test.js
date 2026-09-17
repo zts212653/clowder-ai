@@ -221,6 +221,12 @@ describe('cats routes read runtime catalog', { concurrency: false }, () => {
     assert.equal(body.templates[0].name, '模板猫');
     // #768 P2: the breed's client binding is projected so the picker can recommend a client.
     assert.equal(body.templates[0].defaultClient, 'anthropic');
+    // #768 P2 (cloud codex): a legacy project has no `clientDefaults` either, so the
+    // client binding alone leaves `defaultModel` with no source -- a client whose accounts
+    // expose no model list then saves a model-less member. The breed's own model is its
+    // client's default.
+    assert.equal(body.clientDefaults.anthropic.defaultModel, 'claude-opus-4-6');
+    assert.deepEqual(body.clientDefaults.anthropic.models, ['claude-opus-4-6']);
 
     await app.close();
   });

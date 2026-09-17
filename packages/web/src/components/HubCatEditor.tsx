@@ -419,10 +419,10 @@ export function HubCatEditor({ cat, draft, existingCats, hasDossier, open, onClo
             currentModel: form.defaultModel,
             accountModels: modelOptions,
             templateDefaultModel,
-            // Picking a template rebinds the member's identity, so whatever sits in the
-            // field is no longer authoritative -- the same invalidation a scope change
-            // performs, which is what rule 3 of the resolver keys off.
-            scopeChanged: true,
+            // The scope is (client, account) and a template keeping the client moves
+            // neither, so this is not an invalidation: a model the user picked or typed
+            // survives, and the template default only fills an empty field.
+            scopeChanged: false,
           }) ?? form.defaultModel;
       }
       patch.clientId = recommendedClient;

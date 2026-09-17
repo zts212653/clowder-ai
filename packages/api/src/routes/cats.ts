@@ -702,6 +702,23 @@ export const catsRoutes: FastifyPluginAsync<CatsRoutesOptions> = async (app, opt
       const templateConfig = loadCatConfig(templatePath);
       const allCats = Object.values(toAllCatConfigs(templateConfig));
       const templateCats = allCats.filter((c) => c.isDefaultVariant);
+      // #768 P2: a legacy project has no `clientDefaults` either, so projecting the client
+      // binding alone leaves `defaultModel` with no source -- a client whose accounts expose
+      // no model list (Antigravity) then saves a model-less member. Each breed's own model is
+      // its client's default; breeds sharing a client add their models to the same entry,
+      // which is the per-client granularity `clientDefaults` already has in the normal path.
+      const legacyClientDefaults: Record<string, ClientDefaultsEntry> = {};
+      for (const cat of templateCats) {
+        const clientId = cat.clientId;
+        const model = cat.defaultModel;
+        if (!clientId || !model) continue;
+        const entry = legacyClientDefaults[clientId];
+        if (!entry) {
+          legacyClientDefaults[clientId] = { defaultModel: model, models: [model] };
+        } else if (!entry.models.includes(model)) {
+          legacyClientDefaults[clientId] = { defaultModel: entry.defaultModel, models: [...entry.models, model] };
+        }
+      }
       return {
         templates: templateCats.map((cat) => ({
           id: cat.breedId ?? cat.id,
@@ -716,7 +733,7 @@ export const catsRoutes: FastifyPluginAsync<CatsRoutesOptions> = async (app, opt
           // client binding — otherwise the picker cannot tell which client fits the role.
           defaultClient: cat.clientId,
         })),
-        clientDefaults: {},
+        clientDefaults: legacyClientDefaults,
       };
     } catch (err) {
       app.log.warn({ err }, 'Failed to load cat templates');

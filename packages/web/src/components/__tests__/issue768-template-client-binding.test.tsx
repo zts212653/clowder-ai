@@ -119,6 +119,16 @@ async function selectAccount(value: string) {
   await flushEffects();
 }
 
+async function typeModel(value: string) {
+  const input = queryField<HTMLInputElement>('input[aria-label="Model"]');
+  await act(async () => {
+    const nativeSetter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set;
+    nativeSetter?.call(input, value);
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+  });
+  await flushEffects();
+}
+
 async function selectTransport(value: string) {
   const select = queryField<HTMLSelectElement>('select[aria-label="Transport"]');
   await act(async () => {
@@ -281,6 +291,26 @@ describe('#768: template selection binds the recommended client', () => {
 
     expect(queryField<HTMLSelectElement>('select[aria-label="Client"]').value).toBe('anthropic');
     expect(queryField<HTMLInputElement>('input[aria-label="Model"]').value).toBe('claude-sonnet-4-6');
+  });
+
+  it('keeps a model the user chose when a same-client template does not move the scope', async () => {
+    // Cross-family review of 4ba1695da: that fix passed `scopeChanged: true` from this
+    // path, which forced re-resolution to accountModels[0] and silently replaced a model
+    // the user had picked. The scope is (client, account) -- a template that keeps the
+    // client moves neither of them, so picking one is not an invalidation.
+    mockTemplatesEndpoint([RAGDOLL], { anthropic: { defaultModel: 'claude-opus-4-7', models: ['claude-opus-4-7'] } }, [
+      { ...ANTHROPIC_ACCOUNT, models: ['claude-sonnet-4-6', 'claude-opus-4-6'] },
+    ]);
+    await openEditor();
+
+    await selectAccount('claude');
+    await typeModel('claude-opus-4-6');
+    expect(queryField<HTMLInputElement>('input[aria-label="Model"]').value).toBe('claude-opus-4-6');
+
+    await clickTemplate('宪宪');
+
+    expect(queryField<HTMLSelectElement>('select[aria-label="Client"]').value).toBe('anthropic');
+    expect(queryField<HTMLInputElement>('input[aria-label="Model"]').value).toBe('claude-opus-4-6');
   });
 
   it('applies the template default when the same-client account lists no models', async () => {
