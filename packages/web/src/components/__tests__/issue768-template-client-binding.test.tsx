@@ -17,6 +17,7 @@ vi.mock('@/components/useConfirm', () => ({
 }));
 
 import { ClientStep, type DetectedClient } from '@/components/first-run-quest/ClientStep';
+import { ConfigStep } from '@/components/first-run-quest/ConfigStep';
 import type { TemplateCard } from '@/components/first-run-quest/TemplateStep';
 import { HubCatEditor } from '@/components/HubCatEditor';
 
@@ -407,5 +408,133 @@ describe('#768: first-run client step surfaces the template recommendation', () 
     await renderClientStep(undefined, [detected('anthropic', 'Claude')]);
 
     expect(container.textContent).not.toContain('模板推荐');
+  });
+});
+
+describe('#768: first-run config step falls back to the template model', () => {
+  let container: HTMLDivElement;
+  let root: Root;
+
+  /** The builtin Claude account, which `builtinAccountIdForClient('anthropic')` auto-selects. */
+  const claudeAccount = (models: string[]) => ({
+    id: 'claude',
+    provider: 'anthropic',
+    displayName: 'Claude',
+    name: 'claude',
+    authType: 'oauth',
+    kind: 'builtin',
+    builtin: true,
+    mode: 'subscription',
+    clientId: 'anthropic',
+    models,
+    hasApiKey: false,
+    createdAt: '2026-01-01T00:00:00Z',
+    updatedAt: '2026-01-01T00:00:00Z',
+  });
+
+  beforeAll(() => {
+    (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+  });
+
+  afterAll(() => {
+    delete (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT;
+  });
+
+  beforeEach(() => {
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+    mockApiFetch.mockReset();
+  });
+
+  afterEach(() => {
+    act(() => root.unmount());
+    container.remove();
+    vi.clearAllMocks();
+  });
+
+  async function renderConfigStep(accountModels: string[], clientDefaults: Record<string, unknown> = {}) {
+    mockApiFetch.mockImplementation((path: string) => {
+      if (path === '/api/accounts') return Promise.resolve(jsonResponse({ providers: [claudeAccount(accountModels)] }));
+      if (path === '/api/cat-templates') return Promise.resolve(jsonResponse({ templates: [], clientDefaults }));
+      throw new Error(`Unexpected apiFetch path: ${path}`);
+    });
+    await act(async () => {
+      root.render(React.createElement(ConfigStep, { client: 'claude', clientId: 'anthropic', onComplete: vi.fn() }));
+    });
+    await flushEffects();
+    await flushEffects();
+  }
+
+  const testButton = () =>
+    Array.from(container.querySelectorAll('button')).find((b) => b.textContent?.includes('测试连接'));
+
+  it('unblocks an account with no model list using the template default', async () => {
+    // Without this the step dead-ends: "创建猫猫" waits on a connectivity test, the test
+    // waits on a model, and the only way out was inventing one and persisting it.
+    await renderConfigStep([], { anthropic: { defaultModel: 'claude-opus-4-7', models: ['claude-opus-4-7'] } });
+
+    expect(container.textContent).toContain('claude-opus-4-7');
+    expect(container.textContent).toContain('模板默认');
+    expect(testButton()?.disabled).toBe(false);
+  });
+
+  it('leaves an account catalog authoritative', async () => {
+    await renderConfigStep(['claude-sonnet-4-6'], {
+      anthropic: { defaultModel: 'claude-opus-4-7', models: ['claude-opus-4-7'] },
+    });
+
+    // Same precedence as the member editor: the account's own list wins outright, and the
+    // template menu is not even offered — it must never look like a second catalog.
+    expect(container.textContent).not.toContain('claude-opus-4-7');
+    expect(container.textContent).not.toContain('模板默认');
+    expect(testButton()?.disabled).toBe(false);
+  });
+
+  it('reads legacy product-name keys, like the member editor', async () => {
+    await renderConfigStep([], { claude: { defaultModel: 'claude-opus-4-7', models: ['claude-opus-4-7'] } });
+
+    expect(container.textContent).toContain('claude-opus-4-7');
+  });
+
+  it('still fills the field when the template menu lands after the account list', async () => {
+    // The accounts call selects the builtin account immediately; the templates call is a
+    // separate request, so the fallback has to survive arriving second.
+    let releaseTemplates: (() => void) | undefined;
+    const templatesLanded = new Promise<void>((r) => {
+      releaseTemplates = r;
+    });
+    mockApiFetch.mockImplementation((path: string) => {
+      if (path === '/api/accounts') return Promise.resolve(jsonResponse({ providers: [claudeAccount([])] }));
+      if (path === '/api/cat-templates') {
+        return templatesLanded.then(() =>
+          jsonResponse({
+            clientDefaults: { anthropic: { defaultModel: 'claude-opus-4-7', models: ['claude-opus-4-7'] } },
+          }),
+        );
+      }
+      throw new Error(`Unexpected apiFetch path: ${path}`);
+    });
+    await act(async () => {
+      root.render(React.createElement(ConfigStep, { client: 'claude', clientId: 'anthropic', onComplete: vi.fn() }));
+    });
+    await flushEffects();
+    expect(testButton()?.disabled).toBe(true);
+
+    await act(async () => {
+      releaseTemplates?.();
+      await templatesLanded;
+    });
+    await flushEffects();
+
+    expect(container.textContent).toContain('claude-opus-4-7');
+    expect(testButton()?.disabled).toBe(false);
+  });
+
+  it('keeps the original empty state when no template default exists', async () => {
+    await renderConfigStep([], {});
+
+    expect(container.textContent).toContain('暂无模型');
+    expect(testButton()?.disabled).toBe(true);
   });
 });

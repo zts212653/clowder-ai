@@ -1,8 +1,10 @@
 'use client';
 
+import { type ClientDefaultsEntry, type ClientId, resolveClientDefaults } from '@cat-cafe/shared';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { apiFetch } from '@/utils/api-client';
 import type { AccountsResponse, ProfileItem } from '../hub-accounts.types';
+import { resolveScopedDefaultModel } from '../hub-cat-editor.client-scope';
 import { builtinAccountIdForClient, type ClientValue, filterAccounts } from '../hub-cat-editor.model';
 import { type UnifiedAuthEditData, UnifiedAuthModal } from '../UnifiedAuthModal';
 import { ProfileCard } from './ProfileCard';
@@ -27,6 +29,16 @@ function humanizeError(msg: string): string {
 
 export function ConfigStep({ client, clientId, onComplete }: ConfigStepProps) {
   const [profiles, setProfiles] = useState<ProfileItem[]>([]);
+  /**
+   * #768: the per-client default menu from `cat-template.json`. An account that publishes
+   * no model list (an API-key profile without a catalog, a builtin whose catalog fetch
+   * failed) used to dead-end this step: "创建猫猫" waits on a connectivity test, the test
+   * waits on a model, and the only way out was inventing a model id and persisting it onto
+   * the account. The member editor already reads this same endpoint for the same reason —
+   * fetched here rather than threaded through the wizard because the menu is keyed by the
+   * client chosen in the previous step, not by the role template.
+   */
+  const [clientDefaults, setClientDefaults] = useState<Readonly<Record<string, ClientDefaultsEntry>>>({});
   const [loading, setLoading] = useState(true);
   const [selectedProfileId, setSelectedProfileId] = useState('');
   const [expandedId, setExpandedId] = useState('');
@@ -53,25 +65,70 @@ export function ConfigStep({ client, clientId, onComplete }: ConfigStepProps) {
       .finally(() => setLoading(false));
   }, [fetchProfiles]);
 
+  // #768: template defaults are an enhancement, never a gate — a failure here leaves the
+  // step exactly as it was, so `loading` stays tied to the accounts call alone.
+  useEffect(() => {
+    let cancelled = false;
+    apiFetch('/api/cat-templates')
+      .then(async (res) => {
+        if (!res.ok) return null;
+        return (await res.json()) as { clientDefaults?: Record<string, ClientDefaultsEntry> };
+      })
+      .then((body) => {
+        if (!cancelled && body) setClientDefaults(body.clientDefaults ?? {});
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   const available = useMemo(() => filterAccounts(clientId as ClientValue, profiles), [clientId, profiles]);
 
-  /** Pick first model from a profile */
-  const firstModel = (p?: ProfileItem) => p?.models?.filter(Boolean)?.[0] ?? '';
+  const templateDefaults = useMemo(
+    () => resolveClientDefaults(clientDefaults, clientId as ClientId),
+    [clientDefaults, clientId],
+  );
+  /** #768: only offered while the account itself lists nothing, so it never shadows a catalog. */
+  const suggestedModels = useMemo(() => templateDefaults?.models ?? [], [templateDefaults]);
+
+  /**
+   * #768: the model this account resolves to — the same precedence the member editor
+   * applies (`resolveScopedDefaultModel`), so the two creation surfaces cannot drift:
+   * the account's own list first, the template default only when it has none.
+   */
+  const resolveModel = useCallback(
+    (p?: ProfileItem) =>
+      resolveScopedDefaultModel({
+        currentModel: '',
+        accountModels: p?.models?.filter(Boolean) ?? [],
+        templateDefaultModel: templateDefaults?.defaultModel,
+        scopeChanged: true,
+      }) ?? '',
+    [templateDefaults],
+  );
 
   useEffect(() => {
     if (!selectedProfileId && available.length > 0) {
       const defaultId = builtinAccountIdForClient(clientId as ClientValue) ?? available[0]?.id ?? '';
       setSelectedProfileId(defaultId);
       setExpandedId(defaultId);
-      setSelectedModel(firstModel(available.find((p) => p.id === defaultId)));
+      setSelectedModel(resolveModel(available.find((p) => p.id === defaultId)));
     }
-  }, [available, clientId, selectedProfileId]);
+  }, [available, clientId, resolveModel, selectedProfileId]);
+
+  // #768: the two fetches race, so the account may be selected before the template menu
+  // lands. Fill only a still-empty field — whatever the user picked in between outranks it.
+  useEffect(() => {
+    if (!selectedProfileId) return;
+    setSelectedModel((prev) => prev || resolveModel(available.find((p) => p.id === selectedProfileId)));
+  }, [available, resolveModel, selectedProfileId]);
 
   const handleSelectProfile = (id: string) => {
     const collapse = expandedId === id && selectedProfileId === id;
     setSelectedProfileId(id);
     setExpandedId(collapse ? '' : id);
-    const model = firstModel(available.find((p) => p.id === id));
+    const model = resolveModel(available.find((p) => p.id === id));
     setSelectedModel(model);
     testSigRef.current = '';
     setTesting(false);
@@ -134,9 +191,9 @@ export function ConfigStep({ client, clientId, onComplete }: ConfigStepProps) {
       const updated = await fetchProfiles();
       setSelectedProfileId(newProfileId);
       setExpandedId(newProfileId);
-      setSelectedModel(firstModel(updated.find((p) => p.id === newProfileId)));
+      setSelectedModel(resolveModel(updated.find((p) => p.id === newProfileId)));
     },
-    [fetchProfiles, invalidateCacheForProfile],
+    [fetchProfiles, invalidateCacheForProfile, resolveModel],
   );
 
   const handleProfileRefresh = useCallback(async () => {
@@ -145,10 +202,13 @@ export function ConfigStep({ client, clientId, onComplete }: ConfigStepProps) {
     const updated = await fetchProfiles();
     const profile = updated.find((p) => p.id === selectedProfileId);
     const models = profile?.models?.filter(Boolean) ?? [];
-    if (selectedModel && !models.includes(selectedModel)) {
-      setSelectedModel(models[0] ?? '');
+    // #768: a template-supplied model stays valid exactly as long as the account keeps
+    // publishing no catalog of its own; once it does, that catalog decides again.
+    const stillValid = models.length > 0 ? models.includes(selectedModel) : suggestedModels.includes(selectedModel);
+    if (selectedModel && !stillValid) {
+      setSelectedModel(resolveModel(profile));
     }
-  }, [fetchProfiles, invalidateCacheForProfile, selectedProfileId, selectedModel]);
+  }, [fetchProfiles, invalidateCacheForProfile, resolveModel, selectedProfileId, selectedModel, suggestedModels]);
 
   if (loading) {
     return <p className="py-8 text-center text-sm text-cafe-muted">加载认证配置...</p>;
@@ -174,6 +234,7 @@ export function ConfigStep({ client, clientId, onComplete }: ConfigStepProps) {
             isSelected={selectedProfileId === p.id}
             isExpanded={expandedId === p.id && selectedProfileId === p.id}
             selectedModel={selectedProfileId === p.id ? selectedModel : ''}
+            suggestedModels={suggestedModels}
             testing={selectedProfileId === p.id && testing}
             testResult={selectedProfileId === p.id ? testResult : null}
             onSelect={() => handleSelectProfile(p.id)}
